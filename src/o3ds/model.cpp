@@ -336,21 +336,28 @@ namespace O3DS
 			t->scale >> scale;
 
 			for (const auto component : t->transformOrder) {
-				if (component == O3DS::TTranslation)
-				components.push_back(O3DS::Data::Component::Component_Translation);
+				if (component == O3DS::TTranslation) {
+					components.push_back(O3DS::Data::Component::Component_Translation);
+				}
 
-				if (component == O3DS::TRotation)
-				components.push_back(O3DS::Data::Component::Component_Rotation);
+				if (component == O3DS::TRotation) {
+					components.push_back(O3DS::Data::Component::Component_Rotation);
+				}
 
-				if (component == O3DS::TScale)
-				components.push_back(O3DS::Data::Component::Component_Scale);
+				if (component == O3DS::TScale) {
+					components.push_back(O3DS::Data::Component::Component_Scale);
+				}
 
 				if (component == O3DS::TMatrix) {
 					components.push_back(O3DS::Data::Component::Component_Matrix);
-					O3DS::Data::Matrix matrix;
-					t->matrices[matrixId++] >> matrix;
-					matrices.push_back(matrix);
 				}
+			}
+
+			for (auto& m : t->matrices) {
+				// Copy all matrices.  This allows embedding other data (offsets)
+				O3DS::Data::Matrix matrix;
+				t->matrices[matrixId++] >> matrix;
+				matrices.push_back(matrix);
 			}
 
 			auto oTransformName = builder.CreateString(t->mName);
@@ -445,7 +452,7 @@ namespace O3DS
 
 		finalize(builder, outbuf, 1);
 
-		return outbuf.size();
+		return static_cast<int>(outbuf.size());
 	}
 
 	int Subject::SerializeUpdate(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp)
@@ -468,7 +475,7 @@ namespace O3DS
 
 		finalize(builder, outbuf, 1);
 
-		return outbuf.size();
+		return static_cast<int>(outbuf.size());
 	}
 
 	int SubjectList::Serialize(std::vector<char> &outbuf, double timestamp)
@@ -493,7 +500,7 @@ namespace O3DS
 
 		finalize(builder, outbuf, 1);
 
-		return outbuf.size();
+		return static_cast<int>(outbuf.size());
 	}
 
 	void finalize(flatbuffers::FlatBufferBuilder& builder, std::vector<char>& outbuf, std::uint32_t flags)
@@ -545,10 +552,10 @@ namespace O3DS
 
 		finalize(builder, outbuf, 1);
 
-		return outbuf.size();
+		return static_cast<int>(outbuf.size());
 	}
 
-	bool SubjectList::Parse(const char *data, size_t len, TransformBuilder *builder)
+	bool SubjectList::Parse(const char *data, size_t len, TransformBuilder *builder, bool clearInactive)
 	{
 		std::uint32_t crc = CRCPP::CRC::Calculate(data + 8, len - 8, CRCPP::CRC::CRC_32());
 
@@ -578,6 +585,10 @@ namespace O3DS
 
 		if (subjects_data)
 		{
+			// Clear the list before populating
+			if (clearInactive) {
+				this->mItems.clear();
+			}
 			for (uint32_t i = 0; i < subjects_data->size(); i++)
 			{
 				// For each subject
@@ -604,7 +615,7 @@ namespace O3DS
 		return true;
 	}
 
-	void SubjectList::ParseSubject(const O3DS::Data::Subject *inSubject, TransformBuilder *builder)
+	void SubjectList::ParseSubject(const O3DS::Data::Subject *inSubject,  TransformBuilder *builder )
 	{
 		std::string subjectName = inSubject->name()->str();
 
@@ -624,7 +635,7 @@ namespace O3DS
 		// Get the nodes (transforms) for this subject
 		auto ovNodes = inSubject->nodes();
 			
-		// Clear the subject and add the transfoms
+		// Clear the subject and add the transforms
 		outSubject->clear();
 		for (int n = 0; n < (int)ovNodes->size(); n++)
 		{
@@ -661,11 +672,15 @@ namespace O3DS
 				}
 				if (componentId == O3DS::Data::Component::Component_Matrix)
 				{
-					auto transformMatrix = O3DS::TransformMatrix();
-					**inMatrixIter++ >> transformMatrix;
-					outTransform->matrices.push_back(transformMatrix);
 					outTransform->transformOrder.push_back(O3DS::TMatrix);
 				}
+			}
+
+			// Copy all matrices, allows adding other matrix data to be used as offsets
+			for (auto eachMatrix : *inMatrix) {
+				auto transformMatrix = O3DS::TransformMatrix();
+				*eachMatrix >> transformMatrix;
+				outTransform->matrices.push_back(transformMatrix);
 			}
 		}
 	}

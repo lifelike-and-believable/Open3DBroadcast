@@ -6,14 +6,15 @@ import json
 import re
 import subprocess
 import winreg
+import shutil
 
 """ creats a zip file release """
 
 def get_version():
-    exp = re.compile('project\s*\(.*VERSION\s+([0-9.]+)')
+    exp = re.compile('O3DS_VERSION_TAG\s+"([0-9.]+)"')
     with open('CMakeLists.txt') as fp:
         for line in fp:
-            ret = exp.match(line)
+            ret = exp.search(line)
             if ret:
                 return ret.group(1)
     return None
@@ -22,7 +23,7 @@ def get_version():
 
 def build_ue(plugin, ue_base, version, ue_install_path):
 
-    out = ue_base + "\\" + version + "\\PeelVCam"
+    out = ue_base + "\\" + version + "\\Open3dStream"
 
     exe = rf"{ue_install_path}\Engine\Build\BatchFiles\RunUAT.bat"
 
@@ -48,11 +49,19 @@ def build_ue(plugin, ue_base, version, ue_install_path):
         print(ex)
 
 
+def remove_directory(base):
+    if not os.path.isdir(base):
+        return 
+        
+    for d, _, f in os.walk(base):
+        for each_file in f:
+            print("RM " + os.path.join(d, each_file))
+
 version_input = get_version()
 if version_input is None:
     raise RuntimeError("Could not determine version")
     
-print("Packacging version: " + version_input)
+print("Packaging version: " + version_input)
 
 version  = "Open3DStream_" + version_input
 cwd      = os.path.abspath('')
@@ -60,7 +69,75 @@ out_root = "Open3DStream"
 outzip   = os.path.join(cwd, version + ".zip")
 out_dir  = os.path.abspath('usr')
 
+# Unreal    
+unreal_src_plugin = os.path.abspath("D:/P4_PD/o3ds/plugins/Open3DStream/Open3DStream.uplugin")
+unreal_dst_base = os.path.join(out_dir, "plugins", "unreal")
+unreal_stage_base = os.path.join(cwd, "unrealstage")
+
+ue_registry_prefix_path = r'SOFTWARE\EpicGames\Unreal Engine'
+ue_registry_prefix_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, ue_registry_prefix_path, 0, winreg.KEY_READ)
+ue_version_index = 0
+while True:
+    try:
+        ue_version = winreg.EnumKey(ue_registry_prefix_key, ue_version_index)
+    except OSError as e:
+        if "[WinError 259]" in str(e):
+            break
+        raise e
+       
+    print(ue_version)
+    if ue_version == "4.26":
+        ue_version_index = ue_version_index + 1
+        continue
+    ue_version_key = winreg.OpenKey(ue_registry_prefix_key, ue_version, 0, winreg.KEY_READ)
+    ue_path, _ = winreg.QueryValueEx(ue_version_key, "InstalledDirectory")
+    build_ue(unreal_src_plugin, unreal_stage_base, ue_version, ue_path)
+    
+    print(f"Unreal path: {ue_path}")
+
+    dst_plugin_dir = os.path.join(unreal_dst_base, ue_version, "Open3dStream")
+    remove_directory(dst_plugin_dir)
+    
+    ue_host_project_dir = os.path.join(unreal_stage_base, ue_version, "Open3DStream", "HostProject")
+    if os.path.isdir(ue_host_project_dir):
+        # Project was build as a "host project", copy it to the location
+        ue_built_plugin = os.path.join(ue_host_project_dir, "Plugins", "Open3DStream")
+    else:
+        ue_built_plugin = os.path.join(unreal_stage_base, ue_version, "Open3DStream")
+    
+    if not os.path.isfile(os.path.join(ue_built_plugin, "Open3DStream.uplugin")):
+        raise RuntimeError("Could not find plugin: " + ue_built_plugin)
+
+    shutil.copytree(ue_built_plugin, dst_plugin_dir)
+    
+    # libs
+    unreal_lib_dir = os.path.join(unreal_dst_base, ue_version, "Open3dStream" , "lib")
+    print(unreal_lib_dir)
+    if not os.path.isdir(unreal_lib_dir):
+        os.mkdir(unreal_lib_dir)
+                    
+    usr_lib_dir = os.path.join(out_dir, "lib")
+    for libfile in os.listdir(usr_lib_dir):
+        if libfile.endswith(".lib"):
+            name = libfile[:-4]            
+            if name.endswith("d"):
+                release_name = name[:-1] + ".lib"
+                if os.path.isfile(os.path.join(out_dir, "lib", release_name)):
+                    continue
+            print(libfile)
+            shutil.copyfile(os.path.join(out_dir, "lib", libfile), os.path.join(unreal_lib_dir, libfile))
+        
+    # includes
+    unreal_include_dir = os.path.join(unreal_dst_base, ue_version, "Open3dStream" , "lib", "include")               
+    usr_include_dir = os.path.join(out_dir, "include")
+    shutil.copytree(usr_include_dir, unreal_include_dir)
+            
+    ue_version_index = ue_version_index + 1
+            
+
+
 fp = zipfile.ZipFile(outzip, "w", zipfile.ZIP_DEFLATED)
+
 
 for d, _, f in os.walk(out_dir):
     base = d[len(out_dir)+1:]
@@ -70,25 +147,6 @@ for d, _, f in os.walk(out_dir):
         print(out)
         fp.write(src, out)
 fp.close()
-
-# Unreal    
-unreal_src_plugin = os.path.abspath("plugins/unreal/Open3DStream/Open3DStream.uplugin")
-unreal_dst_base = os.path.join(cwd, "plugins", "unreal")
-
-ue_registry_prefix_path = r'SOFTWARE\EpicGames\Unreal Engine'
-ue_registry_prefix_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, ue_registry_prefix_path, 0, winreg.KEY_READ)
-ue_version_index = 0
-while True:
-    try:
-        ue_version = winreg.EnumKey(ue_registry_prefix_key, ue_version_index)
-        ue_version_key = winreg.OpenKey(ue_registry_prefix_key, ue_version, 0, winreg.KEY_READ)
-        ue_path, _ = winreg.QueryValueEx(ue_version_key, "InstalledDirectory")
-        build_ue(unreal_src_plugin, unreal_dst_base, ue_version, ue_path)
-        ue_version_index = ue_version_index + 1
-    except OSError:
-        break
-
-raise RuntimeError("Here")
 
 #installer
 

@@ -4,8 +4,8 @@
 #include "Misc/MessageDialog.h"
 #include "Open3DStreamSourceSettings.h"
 #include "SOpen3DStreamFactory.h"
-
-class FOpen3DStreamSource;
+#include "Open3DStreamSource.h"
+//class FOpen3DStreamSource;
 
 #define LOCTEXT_NAMESPACE "Open3DStream"
 

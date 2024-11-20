@@ -95,10 +95,10 @@ add_dependencies(open3dstreamstatic protocol)
 list(JOIN pub_headers ";" pub_headers_str)
 set_target_properties(open3dstreamstatic PROPERTIES PUBLIC_HEADER "${pub_headers_str}")
 
-if(NOT DEFINED VERSION_TAG)
-	set(VERSION_TAG dev CACHE STRING "Version Tag")
+if(NOT DEFINED O3DS_VERSION_TAG)
+	message(FATAL "No version defined")
 endif()
-target_compile_definitions(open3dstreamstatic PUBLIC NNG_STATIC_LIB CRCPP_USE_NAMESPACE VERSION_TAG=${VERSION_TAG})
+target_compile_definitions(open3dstreamstatic PUBLIC NNG_STATIC_LIB CRCPP_USE_NAMESPACE O3DS_VERSION_TAG=${O3DS_VERSION_TAG})
 
 install(TARGETS open3dstreamstatic 
 	LIBRARY DESTINATION lib

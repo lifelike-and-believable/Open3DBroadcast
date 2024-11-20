@@ -67,7 +67,7 @@ public:
 	int              Frame;
 	bool             LogFlag;
 
-	FThreadSafeBool  bIsValid;
+	std::atomic<bool>  bIsValid;
 
 	O3DSServer server;
 
@@ -91,6 +91,12 @@ public:
 
 	virtual void Update() override;
 
+	// Track activity to remove subjects that are not active in a while
+	constexpr static float CheckInterval = 5.0f;
+	float TimeSinceLastCheck = 0.0f;
+	TMap<FName, double> SubjectLastUpdateTime;
+	constexpr static double InactivityThreshold = 5.0;
+	void RemoveInactiveSubjects();
 
 };
 

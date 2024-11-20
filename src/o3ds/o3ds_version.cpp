@@ -3,7 +3,7 @@
 #define QUOTE_(str) #str
 #define QUOTE(str) QUOTE_(str)
 
-std::string O3DS::getVersion()
+const char* O3DS::getVersion()
 {
-	return std::string(QUOTE(VERSION_TAG));
+	return QUOTE(O3DS_VERSION_TAG);
 }

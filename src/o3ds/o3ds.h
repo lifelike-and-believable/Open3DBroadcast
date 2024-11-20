@@ -21,17 +21,18 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-
+/*
 #ifndef O3DS_HEADER
 #define O3DS_HEADER
 
 namespace O3DS
 {
-	const extern char* version;
-	const extern int   version_major;
-	const extern int   version_minor;
-    const extern int   version_patch;
+//	const extern char* version;
+//	const extern int   version_major;
+//	const extern int   version_minor;
+//  const extern int   version_patch;
 	const char* getVersion();
 }
 
 #endif
+*/

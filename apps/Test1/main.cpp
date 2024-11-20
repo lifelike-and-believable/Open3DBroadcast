@@ -1,6 +1,7 @@
 #include "o3ds/async_publisher.h"
 #include "o3ds/model.h"
 #include "o3ds/o3ds.h"
+#include "o3ds/o3ds_version.h"
 #include <chrono>
 #include <iostream>
 #include <thread>
@@ -56,16 +57,16 @@ void verify(std::vector<char> buffer, double rotate, O3DS::SubjectList &subjectL
  
 int main(int arc, char** argv)
 {
+
+	std::cout << O3DS::getVersion();
 	O3DS::AsyncPublisher publisher;
 
+#if 0
 	FILE* fp = fopen("c:\\Users\\al\\Desktop\\data.86.dat", "rb");
-
 	char data[6192];
-	
 	fread(data, 1, 6193, fp);
-
 	fclose(fp);
-	
+#endif
 
 
 	if (publisher.start("INVALIDTEXT")) {
@@ -79,12 +80,12 @@ int main(int arc, char** argv)
 		return 1;
 	}
 
+
 	O3DS::SubjectList subjectList;
 
-	subjectList.Parse(data, 6192);
-
-	
-
+#if 0
+	subjectList.Parse(data, 6192);	
+#endif 
 	O3DS::SubjectList subjectListCopy;
 	
 

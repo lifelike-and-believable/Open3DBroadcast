@@ -4,6 +4,7 @@
 #include "SocketSubsystem.h"
 #include "Interfaces/IPv4/IPv4Address.h"
 #include "Common/UdpSocketBuilder.h"
+#include "HAL/PlatformTime.h"
 
 #define LOCTEXT_NAMESPACE "Open3DStream"
 

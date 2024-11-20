@@ -2,7 +2,8 @@
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SButton.h"
 
-#include "o3ds/o3ds.h"  // for version
+#include "Open3DStreamSource.h"
+#include "o3ds/o3ds_version.h"  // for version
 
 #define LOCTEXT_NAMESPACE "Open3DStream"
 
@@ -20,8 +21,6 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 	Options.Add(MakeShareable(new FString("NNG Server (to NNG Client)")));
 	Options.Add(MakeShareable(new FString("TCP Client")));
 	Options.Add(MakeShareable(new FString("UDP Server")));
-
-	const char* version = O3DS::getVersion();
 
 	if (SOpen3DStreamFactory::LastUrl.IsEmpty())
 	{

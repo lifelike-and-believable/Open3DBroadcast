@@ -1,6 +1,7 @@
 #include "Open3DStreamSource.h"
 #include "LiveLinkRoleTrait.h"
 
+#include "ILiveLinkClient.h"
 #include "Roles/LiveLinkAnimationTypes.h"
 #include "Roles/LiveLinkAnimationRole.h"
 #include "Common/UdpSocketBuilder.h"
@@ -34,9 +35,8 @@ FOpen3DStreamSource::FOpen3DStreamSource(const FOpen3DStreamSettings& Settings)
 	, Client(nullptr)
 	, ArrivalTimeOffset(0.0)
 	, Frame(0)
-	, bIsValid(true)
 	, LogFlag(false)
-
+	, bIsValid(true)
 	, mAddr(ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateInternetAddr())
 {
 	Url        = Settings.Url;
@@ -79,6 +79,14 @@ void FOpen3DStreamSource::ReceiveClient(ILiveLinkClient* InClient, FGuid InSourc
 	SourceGuid = InSourceGuid;
 	bIsValid = true;
 
+	const FRegexPattern pattern(TEXT("^[0-9:.]+$"));
+	FRegexMatcher matcher(pattern, Url.ToString());
+
+	if (matcher.FindNext())
+	{
+		Url = FText::Format(LOCTEXT("FormattedUrl", "tcp://{0}"), Url);
+	}
+
 	if (!server.start(Url, Protocol))
 	{
 		bIsValid = false;
@@ -88,12 +96,18 @@ void FOpen3DStreamSource::ReceiveClient(ILiveLinkClient* InClient, FGuid InSourc
 
 void FOpen3DStreamSource::Tick(float DeltaTime)
 {
+	TimeSinceLastCheck += DeltaTime;
+	if (TimeSinceLastCheck >= CheckInterval)
+	{
+		RemoveInactiveSubjects();
+		TimeSinceLastCheck = 0;
+	}
 	this->server.tick();
 }
 
 bool FOpen3DStreamSource::IsTickable() const
 {
-	return this->server.mTcp != nullptr;
+	return true; // this->server.mTcp != nullptr;
 }
 
 void operator >>(const O3DS::Matrixd& src, FMatrix& dst)
@@ -135,9 +149,6 @@ void operator >>(const O3DS::Matrixd& src, FMatrix& dst)
 
 	dst.Mirror(EAxis::X, EAxis::Y);  // - NEARLY
 }
-
-
-// #pragma optimize( "", off )
 
 void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
 {
@@ -251,7 +262,7 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
 			continue;
 		}
 
-		// Cjeck if skeleton has not been initialized yet
+		// Check if skeleton has not been initialized yet
 		if (InitializedSubjects.Find(SubjectName) == INDEX_NONE)
 		{
 			// Do we have a full packet or just an update)
@@ -273,10 +284,30 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
 		}
 
 		Client->PushSubjectFrameData_AnyThread(SubjectKey, MoveTemp(FrameDataStruct));
+
+		SubjectLastUpdateTime.FindOrAdd(SubjectName) = FPlatformTime::Seconds();
 	}
 }
 
-// #pragma optimize( "", on )
+void FOpen3DStreamSource::RemoveInactiveSubjects()
+{
+	const double CurrentTime = FPlatformTime::Seconds();
+
+	for (auto It = SubjectLastUpdateTime.CreateIterator(); It; ++It)
+	{
+		double LastUpdateTime = It.Value();
+		if (CurrentTime - LastUpdateTime > InactivityThreshold)
+		{
+			// Remove the subject from LiveLink
+			FName SubjectName = It.Key();
+			SubjectLastUpdateTime.Remove(SubjectName);
+			const FLiveLinkSubjectKey SubjectKey(SourceGuid, SubjectName);
+			Client->RemoveSubject_AnyThread(SubjectKey);
+			// It.RemoveCurrent();
+			InitializedSubjects.Remove(SubjectName);
+		}
+	}
+}
 
 bool FOpen3DStreamSource::RequestSourceShutdown()
 {

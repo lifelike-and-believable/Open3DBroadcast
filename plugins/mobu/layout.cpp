@@ -1,7 +1,7 @@
 #include "device.h"
 #include "layout.h"
 
-#include "o3ds/o3ds.h" // for version#
+#include "o3ds/o3ds_version.h" 
 #include <sstream>
 
 #define OPEN3D_DEVICE__LAYOUT	Open3D_Device_Layout

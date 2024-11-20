@@ -16,7 +16,7 @@ IF EXIST %~DP0usr GOTO USROK
 
 
 cd thirdparty
-build.bat
+CALL build.bat
 if %errorlevel% neq 0 exit /b %errorlevel%
 cd %~DP0
 
