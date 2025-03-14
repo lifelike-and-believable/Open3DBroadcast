@@ -52,7 +52,7 @@ int main(int argc, char *argv[])
         sz = O3DS::listener.read(&data, &bufsz);
         if (sz > 0)
         {
-//            printf("%ld\n", sz);
+            printf("%ld\n", sz);
             O3DS::broadcast.write(data, sz);
         }
     }

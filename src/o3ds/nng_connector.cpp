@@ -97,44 +97,50 @@ namespace O3DS
 		return msglen;
 	}
 
+
 	size_t BlockingNngConnector::read(char** data, size_t* len)
 	{
-		if (data == nullptr || len == nullptr)
-		{
-			Connector::setError("Invalid parameter");
-			return 0;
-		}
+	    if (data == nullptr || len == nullptr)
+	    {
+		Connector::setError("Invalid parameter");
+		return 0;
+	    }
 
-		int ret;
+	    int ret;
+	    nng_msg* msg = nullptr;
 
-		nng_msg* msg = nullptr;
+	    ret = nng_recvmsg(mSocket, &msg, 0);
+	    NNG_ERROR("Receiving message");
 
-		ret = nng_recvmsg(mSocket, &msg, 0);
-		NNG_ERROR("Receiving message");
+	    size_t msglen = nng_msg_len(msg);
+	    
+	    // Ensure data buffer is properly allocated
+	    if (*data == nullptr) {
+		*data = (char*)malloc(msglen);
+		if (!*data) return 0; // Memory allocation failure
+	    } else if (msglen > *len) {
+		char* buf = (char*)realloc(*data, msglen);
+		if (!buf) return 0; // Memory allocation failure
+		*data = buf;
+	    }
 
-		size_t msglen = nng_msg_len(msg);
-		if (msglen > *len)
-		{
-			char* buf = (char*)realloc(*data, msglen);
-			if (!buf) return 0;
-			*len = msglen;
-		}
+	    *len = msglen;  // Update length
 
-		void* msgBody = nng_msg_body(msg);
-		if (!msgBody)
-		{
-			Connector::setError("Invalid Message");
-			nng_msg_free(msg);
-			return false;
-		}
-
-		memcpy(*data, msgBody, msglen);
-
+	    void* msgBody = nng_msg_body(msg);
+	    if (!msgBody)
+	    {
+		Connector::setError("Invalid Message");
 		nng_msg_free(msg);
+		return 0;
+	    }
 
-		return msglen;
+	    memcpy(*data, msgBody, msglen);  // Safe memcpy after fixing allocation
 
+	    nng_msg_free(msg);
+
+	    return msglen;
 	}
+
 
 	/*  ASYNC */
 
