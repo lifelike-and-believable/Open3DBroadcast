@@ -263,19 +263,14 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
 		}
 
 		// Curves (morph targets)
-		// TODO: UE 5.6 changed the LiveLink curve API - needs investigation
-		// The old CurveNames/CurveValues API no longer exists
-		// Need to determine the correct API for setting curves in UE 5.6+
-		/*
-		FrameData.CurveNames.Empty();
-		FrameData.CurveValues.Empty();
+		// UE 5.6+ uses a property-based system in FLiveLinkBaseFrameData
+		// Curves are stored in PropertyValues array (values) which pairs with
+		// PropertyNames from the static data
 		for (size_t ci = 0; ci < subject->mCurveNames.size(); ++ci)
 		{
-			FName cname(subject->mCurveNames[ci].c_str());
-			FrameData.CurveNames.Add(cname);
-			FrameData.CurveValues.Add(subject->mCurveValues.size() > ci ? subject->mCurveValues[ci] : 0.0f);
+			float value = subject->mCurveValues.size() > ci ? subject->mCurveValues[ci] : 0.0f;
+			FrameData.PropertyValues.Add(value);
 		}
-		*/
 
 		// Check if skeleton has not been initialized yet
 		if (InitializedSubjects.Find(SubjectName) == INDEX_NONE)
@@ -291,6 +286,14 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
 
 			SkeletonDataPtr->SetBoneNames(BoneNames);
 			SkeletonDataPtr->SetBoneParents(BoneParents);
+
+			// Set up curve property names in static data (UE 5.6+ API)
+			TArray<FName> PropertyNames;
+			for (const auto& curveName : subject->mCurveNames)
+			{
+				PropertyNames.Add(FName(curveName.c_str()));
+			}
+			SkeletonDataPtr->PropertyNames = PropertyNames;
 
 			Client->RemoveSubject_AnyThread(SubjectKey);
 			Client->PushSubjectStaticData_AnyThread(SubjectKey, ULiveLinkAnimationRole::StaticClass(), MoveTemp(LiveLinkSkeletonStaticData));
