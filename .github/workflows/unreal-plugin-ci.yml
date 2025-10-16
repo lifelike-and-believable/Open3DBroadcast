@@ -81,27 +81,13 @@ jobs:
         with:
           path: |
             vsbuild
+            usr
             thirdparty/build
           key: o3ds-libs-${{ runner.os }}-${{ hashFiles('src/**', 'thirdparty/**', 'CMakeLists.txt') }}
           restore-keys: |
             o3ds-libs-${{ runner.os }}-
 
-      # Build Open3DStream C++ library
-      - name: Build Open3DStream C++ Library
-        if: steps.cache-libs.outputs.cache-hit != 'true'
-        shell: powershell
-        run: |
-          Write-Host "Building Open3DStream C++ library..."
-          
-          # Configure CMake
-          cmake -B vsbuild -S . -G "Visual Studio 17 2022" -A x64
-          
-          # Build RelWithDebInfo configuration
-          cmake --build vsbuild --config RelWithDebInfo --parallel
-          
-          Write-Host "[OK] Open3DStream library built successfully"
-
-      # Build third-party dependencies (nng, flatbuffers)
+      # Build third-party dependencies FIRST (nng, flatbuffers) - required by main library
       - name: Build Third-Party Dependencies
         if: steps.cache-libs.outputs.cache-hit != 'true'
         shell: powershell
@@ -116,8 +102,27 @@ jobs:
           # Build RelWithDebInfo configuration
           cmake --build build --config RelWithDebInfo --parallel
           
+          # Install to make packages available
+          cmake --install build --config RelWithDebInfo --prefix ../usr
+          
           cd ..
           Write-Host "[OK] Third-party dependencies built successfully"
+
+      # Build Open3DStream C++ library (depends on third-party libs)
+      - name: Build Open3DStream C++ Library
+        if: steps.cache-libs.outputs.cache-hit != 'true'
+        shell: powershell
+        run: |
+          Write-Host "Building Open3DStream C++ library..."
+          
+          # Configure CMake with prefix path to find third-party packages
+          cmake -B vsbuild -S . -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_PREFIX_PATH="$PWD/usr"
+          
+          # Build RelWithDebInfo configuration
+          cmake --build vsbuild --config RelWithDebInfo --parallel
+          
+          Write-Host "[OK] Open3DStream library built successfully"
 
       # Copy built libraries and headers to plugin directory
       - name: Copy libraries to plugin
