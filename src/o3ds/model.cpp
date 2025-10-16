@@ -373,10 +373,34 @@ namespace O3DS
 		}
 
 		auto transforms = builder.CreateVector(ovSkeleton);
-		return CreateSubject(builder, transforms, oSubjectName,
+			// Serialize curves if present
+				auto curves = SerializeCurves(builder);
+				return CreateSubject(builder, transforms, oSubjectName,
 						dir(this->mContext.mX), dir(this->mContext.mY),
-						dir(this->mContext.mZ), oFormat);
+						dir(this->mContext.mZ), oFormat, curves);
 	}
+
+
+flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<O3DS::Data::Curve>>> Subject::SerializeCurves(flatbuffers::FlatBufferBuilder& builder)
+{
+	std::vector<flatbuffers::Offset<O3DS::Data::Curve>> out;
+	for (size_t i = 0; i < mCurveNames.size(); ++i) {
+		auto name = builder.CreateString(mCurveNames[i]);
+		out.push_back(CreateCurve(builder, name, mCurveValues[i]));
+	}
+	return builder.CreateVector(out);
+}
+
+flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subject::SerializeCurveUpdates(flatbuffers::FlatBufferBuilder& builder, size_t &count)
+{
+	std::vector<O3DS::Data::CurveUpdate> out;
+	for (size_t i = 0; i < mCurveNames.size(); ++i) {
+		// Always send curves for now; delta optimization can be added later
+		out.push_back(O3DS::Data::CurveUpdate(mCurveValues[i], (int)i));
+		count++;
+	}
+	return builder.CreateVectorOfStructs(out);
+}
 
 	flatbuffers::Offset<O3DS::Data::SubjectUpdate> Subject::SerializeUpdate(flatbuffers::FlatBufferBuilder& builder, size_t &count, double deltaThreshold)
 	{
@@ -385,6 +409,7 @@ namespace O3DS
 		std::vector<O3DS::Data::TranslationUpdate> translations;
 		std::vector<O3DS::Data::RotationUpdate> rotations;
 		std::vector<O3DS::Data::ScaleUpdate> scales;
+		std::vector<flatbuffers::Offset<O3DS::Data::CurveUpdate>> curveUpdates;
 
 		int transformId = 0;
 
@@ -431,7 +456,8 @@ namespace O3DS
 		auto tr = builder.CreateVectorOfStructs(translations);
 		auto ro = builder.CreateVectorOfStructs(rotations);
 		auto sc = builder.CreateVectorOfStructs(scales);
-		return CreateSubjectUpdate(builder, oSubjectName, tr, ro, sc);
+		auto cu = SerializeCurveUpdates(builder, count);
+		return CreateSubjectUpdate(builder, oSubjectName, tr, ro, sc, cu);
 	}
 
 	int Subject::Serialize(std::vector<char> &outbuf, double timestamp)
@@ -632,6 +658,16 @@ namespace O3DS
 		outSubject->mContext.mZ = dir(inSubject->z_axis());
 		outSubject->mContext.mFormat = inSubject->format()->str();
 
+		// Parse curves if present
+		if (inSubject->curves()) {
+			outSubject->mCurveNames.clear();
+			outSubject->mCurveValues.clear();
+			for (auto each : *inSubject->curves()) {
+				outSubject->mCurveNames.push_back(each->name()->str());
+				outSubject->mCurveValues.push_back(each->value());
+			}
+		}
+
 		// Get the nodes (transforms) for this subject
 		auto ovNodes = inSubject->nodes();
 			
@@ -724,6 +760,18 @@ namespace O3DS
 				*inScale >> outSubject->mTransforms[id]->scale;
 			else
 				break;
+		}
+
+		// Curve updates
+		if (inUpdate->curves()) {
+			for (auto inCurve : *inUpdate->curves()) {
+				id = inCurve->i();
+				if (id < outSubject->mCurveValues.size()) {
+					outSubject->mCurveValues[id] = inCurve->value();
+				} else {
+					// ignore out-of-range
+				}
+			}
 		}
 	}
 

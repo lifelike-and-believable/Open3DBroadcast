@@ -262,6 +262,16 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
 			continue;
 		}
 
+		// Curves (morph targets)
+		FrameData.CurveNames.Empty();
+		FrameData.CurveValues.Empty();
+		for (size_t ci = 0; ci < subject->mCurveNames.size(); ++ci)
+		{
+			FName cname(subject->mCurveNames[ci].c_str());
+			FrameData.CurveNames.Add(cname);
+			FrameData.CurveValues.Add(subject->mCurveValues.size() > ci ? subject->mCurveValues[ci] : 0.0f);
+		}
+
 		// Check if skeleton has not been initialized yet
 		if (InitializedSubjects.Find(SubjectName) == INDEX_NONE)
 		{

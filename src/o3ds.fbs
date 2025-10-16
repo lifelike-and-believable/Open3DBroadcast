@@ -82,6 +82,7 @@ table Subject {
   y_axis:Direction;
   z_axis:Direction;
   format:string;
+  curves:[Curve];
 }
 
 table SubjectUpdate {
@@ -89,6 +90,7 @@ table SubjectUpdate {
   translations:[TranslationUpdate];
   rotation:[RotationUpdate];
   scale:[ScaleUpdate];
+  curves:[CurveUpdate];
 }
 
 table SubjectList {
@@ -99,3 +101,13 @@ table SubjectList {
 
 
 root_type SubjectList;
+
+table Curve {
+  name:string;
+  value:float;
+}
+
+struct CurveUpdate {
+  value:float;
+  i:int;
+}

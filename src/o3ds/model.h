@@ -151,6 +151,9 @@ namespace O3DS
 		std::string   mName;
 		std::vector<std::string> mJoints;
 
+		std::vector<std::string> mCurveNames;
+		std::vector<float>       mCurveValues;
+
 		TransformList mTransforms;
 		void*         mReference;
 		Context       mContext;
@@ -190,6 +193,10 @@ namespace O3DS
 		flatbuffers::Offset<O3DS::Data::Subject> Serialize(flatbuffers::FlatBufferBuilder& builder);
 
 		flatbuffers::Offset<O3DS::Data::SubjectUpdate> SerializeUpdate(flatbuffers::FlatBufferBuilder& builder, size_t& count, double deltaThreshold);
+
+		// Curves
+		flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<O3DS::Data::Curve>>> SerializeCurves(flatbuffers::FlatBufferBuilder& builder);
+		flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> SerializeCurveUpdates(flatbuffers::FlatBufferBuilder& builder, size_t &count);
 
 		int Serialize(std::vector<char>& outbuf, double timestamp);	
 
