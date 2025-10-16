@@ -263,7 +263,10 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
 		}
 
 		// Curves (morph targets)
-		// Populate LiveLink animation curve data from subject curve arrays
+		// TODO: UE 5.6 changed the LiveLink curve API - needs investigation
+		// The old CurveNames/CurveValues API no longer exists
+		// Need to determine the correct API for setting curves in UE 5.6+
+		/*
 		FrameData.CurveNames.Empty();
 		FrameData.CurveValues.Empty();
 		for (size_t ci = 0; ci < subject->mCurveNames.size(); ++ci)
@@ -272,6 +275,7 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
 			FrameData.CurveNames.Add(cname);
 			FrameData.CurveValues.Add(subject->mCurveValues.size() > ci ? subject->mCurveValues[ci] : 0.0f);
 		}
+		*/
 
 		// Check if skeleton has not been initialized yet
 		if (InitializedSubjects.Find(SubjectName) == INDEX_NONE)
