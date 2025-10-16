@@ -40,7 +40,7 @@ Write-Host "  Configuration: $Configuration"
   -VS2022
 
 if ($LASTEXITCODE -eq 0) {
-  Write-Host "✓ Plugin build completed successfully"
+  Write-Host "[OK] Plugin build completed successfully"
 } else {
   Write-Error "Plugin build failed with exit code $LASTEXITCODE"
 }

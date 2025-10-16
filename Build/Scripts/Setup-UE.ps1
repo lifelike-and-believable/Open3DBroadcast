@@ -15,5 +15,5 @@ if (!(Test-Path -LiteralPath $UAT)) {
 }
 
 $resolvedUE = (Resolve-Path -LiteralPath $UEPath).Path
-Write-Host "✓ UE setup OK: $resolvedUE"
-Write-Host "✓ RunUAT found: $UAT"
+Write-Host "[OK] UE setup OK: $resolvedUE"
+Write-Host "[OK] RunUAT found: $UAT"

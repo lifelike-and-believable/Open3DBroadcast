@@ -35,7 +35,7 @@ Write-Host "  NullRHI: $($NullRHI.IsPresent)"
   $extra
 
 if ($LASTEXITCODE -eq 0) {
-  Write-Host "✓ Gauntlet tests completed successfully"
+  Write-Host "[OK] Gauntlet tests completed successfully"
 } else {
   Write-Error "Gauntlet tests failed with exit code $LASTEXITCODE"
 }

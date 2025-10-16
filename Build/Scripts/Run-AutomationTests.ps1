@@ -39,9 +39,9 @@ $cmds = "Automation RunTests $TestFilter; Automation WriteResults $ResultsXml; Q
   "-ExecCmds=$cmds"
 
 if ($LASTEXITCODE -eq 0) {
-  Write-Host "✓ Tests completed successfully"
+  Write-Host "[OK] Tests completed successfully"
   if (Test-Path $ResultsXml) {
-    Write-Host "✓ Results written to: $ResultsXml"
+    Write-Host "[OK] Results written to: $ResultsXml"
   }
 } else {
   Write-Error "Tests failed with exit code $LASTEXITCODE"

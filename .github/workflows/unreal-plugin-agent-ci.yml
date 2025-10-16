@@ -95,7 +95,7 @@ jobs:
           "plugin_path=$upluginPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "plugin_dir=$pluginDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "plugin_name=$env:PLUGIN_NAME" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "✓ Using plugin: $upluginPath"
+          Write-Host "[OK] Using plugin: $upluginPath"
 
       - name: Build plugin (Win64)
         shell: powershell
