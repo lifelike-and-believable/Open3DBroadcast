@@ -175,6 +175,7 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
 	{
 		FLiveLinkFrameDataStruct FrameDataStruct(FLiveLinkAnimationFrameData::StaticStruct());
 		FLiveLinkAnimationFrameData& FrameData = *FrameDataStruct.Cast<FLiveLinkAnimationFrameData>();
+		FLiveLinkBaseFrameData& BaseFrameData = static_cast<FLiveLinkBaseFrameData&>(FrameData);
 
 		//ArrivalTimeOffset = FPlatformTime::Seconds() - mSubjects.mTime;
 		FrameData.WorldTime = FPlatformTime::Seconds();
@@ -269,7 +270,7 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
 		for (size_t ci = 0; ci < subject->mCurveNames.size(); ++ci)
 		{
 			float value = subject->mCurveValues.size() > ci ? subject->mCurveValues[ci] : 0.0f;
-			FrameData.PropertyValues.Add(value);
+			BaseFrameData.PropertyValues.Add(value);
 		}
 
 		// Check if skeleton has not been initialized yet
