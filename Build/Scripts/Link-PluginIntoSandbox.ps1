@@ -25,7 +25,7 @@ Write-Host "  To:   $dst"
 cmd /c "mklink /J ""$dst"" ""$PluginPath"""
 
 if (Test-Path $dst) {
-  Write-Host "✓ Successfully linked plugin into sandbox: $dst"
+  Write-Host "Successfully linked plugin into sandbox: $dst"
 } else {
   Write-Error "Failed to create junction"
   exit 1
