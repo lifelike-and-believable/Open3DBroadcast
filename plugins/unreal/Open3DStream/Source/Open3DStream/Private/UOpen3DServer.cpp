@@ -39,7 +39,7 @@ bool O3DSServer::start(FText Url, FText Protocol )
 	const char* surl = TCHAR_TO_ANSI(*Url.ToString());
 	const char* sprotocol = TCHAR_TO_ANSI(*Protocol.ToString());
 
-	FText::Format(LOCTEXT("ConnectingString", "Connecting {0}"), Protocol);
+	// Note: Connection status message formatting removed - was unused
 
 	// NNG
 	if (strncmp(sprotocol, "NNG Subscribe", 13) == 0)
