@@ -28,7 +28,7 @@ concurrency:
 env:
   # Configure these for your environment
   # For GitHub hosted runners or self-hosted, adjust accordingly
-  UE_ROOT: 'C:\Program Files\Epic Games\UE_5.4'
+  UE_ROOT: 'C:\Program Files\Epic Games\UE_5.6'
   PLUGIN_NAME: 'Open3DStream'
 
 jobs:
