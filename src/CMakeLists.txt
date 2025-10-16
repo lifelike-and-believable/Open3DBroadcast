@@ -5,6 +5,13 @@ project(Open3DStreamLib)
 find_package(Flatbuffers CONFIG REQUIRED flatbuffers flatc HINTS ${CMAKE_CURRENT_LIST_DIR}/../usr)
 find_package(nng CONFIG REQUIRED HINTS ${CMAKE_CURRENT_LIST_DIR}/../usr)
 
+# Optional WebRTC support
+option(O3DS_ENABLE_WEBRTC "Enable WebRTC support" OFF)
+if(O3DS_ENABLE_WEBRTC)
+    find_package(LibDataChannel REQUIRED)
+    add_compile_definitions(O3DS_ENABLE_WEBRTC)
+endif()
+
 add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/_generated/o3ds_generated.h
     COMMAND flatbuffers::flatc -o ${CMAKE_CURRENT_BINARY_DIR}/_generated --cpp ${CMAKE_CURRENT_LIST_DIR}/o3ds.fbs
@@ -41,7 +48,11 @@ set(pub_headers
 	o3ds/xsens_parser.h
 	o3ds/o3ds_version.h
 	o3ds/o3ds_version.h
-)	
+)
+
+if(O3DS_ENABLE_WEBRTC)
+    list(APPEND pub_headers o3ds/webrtc_connector.h)
+endif()	
 
 set(SOURCES 
 	o3ds/o3ds.cpp
@@ -71,6 +82,10 @@ set(SOURCES
 	o3ds/xsens_parser.cpp	
 	o3ds/o3ds_version.cpp	
 )
+
+if(O3DS_ENABLE_WEBRTC)
+    list(APPEND SOURCES o3ds/webrtc_connector.cpp)
+endif()
 	
 if(WIN32)
 set(xtralibs wsock32 ws2_32)
@@ -88,6 +103,10 @@ target_include_directories(open3dstreamstatic PUBLIC
 	${CMAKE_CURRENT_BINARY_DIR}/_generated ${CMAKE_CURRENT_LIST_DIR}
 	${FLATBUFFERS_INCLUDE_DIRS} 
 	${NNG_INCLUDE_DIRS}/..)
+
+if(O3DS_ENABLE_WEBRTC)
+    target_link_libraries(open3dstreamstatic PUBLIC LibDataChannel::LibDataChannel)
+endif()
 
 # target_link_libraries(open3dstreamstatic PRIVATE ${NNG_LIBRARIES} ${FLATBUFFERS_LIBRARIES} ${xtralibs})        
 add_dependencies(open3dstreamstatic protocol)
