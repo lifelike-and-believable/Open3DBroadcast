@@ -55,6 +55,18 @@ bool O3DSServer::start(FText Url, FText Protocol )
 		mServer = new O3DS::AsyncPairServer();
 	}
 
+#ifdef O3DS_ENABLE_WEBRTC
+	// WebRTC
+	if (strncmp(sprotocol, "WebRTC Client", 13) == 0)
+	{
+		mServer = new O3DS::WebRTCClient();
+	}
+	if (strncmp(sprotocol, "WebRTC Server", 13) == 0)
+	{
+		mServer = new O3DS::WebRTCServer();
+	}
+#endif
+
 	if (mServer)
 	{
 		mServer->setFunc(this, InDataFunc);

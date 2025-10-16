@@ -5,6 +5,11 @@
 #include "Common/UdpSocketReceiver.h"
 #include "o3ds/base_connector.h"
 #include "o3ds/udp_fragment.h"
+
+#ifdef O3DS_ENABLE_WEBRTC
+#include "o3ds/webrtc_connector.h"
+#endif
+
 #include "Sockets.h"
 
 
