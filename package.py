@@ -8,10 +8,22 @@ import subprocess
 import winreg
 import shutil
 
-""" creats a zip file release """
+"""
+Creates a zip file release for Open3DStream.
+
+The resulting zip is structured with Unreal Engine version folders at the top level:
+  UE_5.4/Plugins/Open3DStream/
+  UE_5.5/Plugins/Open3DStream/
+  lib/
+  include/
+
+This makes it easy to extract the appropriate version folder to a project root,
+and the Plugins/Open3DStream folder will automatically merge with the project's
+Plugins directory.
+"""
 
 def get_version():
-    exp = re.compile('O3DS_VERSION_TAG\s+"([0-9.]+)"')
+    exp = re.compile(r'O3DS_VERSION_TAG\s+"([0-9.]+)"')
     with open('CMakeLists.txt') as fp:
         for line in fp:
             ret = exp.search(line)
@@ -50,12 +62,14 @@ def build_ue(plugin, ue_base, version, ue_install_path):
 
 
 def remove_directory(base):
+    # Safely remove a directory tree if it exists
     if not os.path.isdir(base):
-        return 
-        
-    for d, _, f in os.walk(base):
-        for each_file in f:
-            print("RM " + os.path.join(d, each_file))
+        return
+    try:
+        shutil.rmtree(base)
+        print("Removed directory: " + base)
+    except Exception as e:
+        print(f"Failed to remove directory {base}: {e}")
 
 version_input = get_version()
 if version_input is None:
@@ -71,7 +85,8 @@ out_dir  = os.path.abspath('usr')
 
 # Unreal    
 unreal_src_plugin = os.path.abspath("D:/P4_PD/o3ds/plugins/Open3DStream/Open3DStream.uplugin")
-unreal_dst_base = os.path.join(out_dir, "plugins", "unreal")
+# Place Unreal plugin under UE_X.X/Plugins/Open3DStream in the zip
+unreal_dst_base = out_dir
 unreal_stage_base = os.path.join(cwd, "unrealstage")
 
 ue_registry_prefix_path = r'SOFTWARE\EpicGames\Unreal Engine'
@@ -95,7 +110,9 @@ while True:
     
     print(f"Unreal path: {ue_path}")
 
-    dst_plugin_dir = os.path.join(unreal_dst_base, ue_version, "Open3dStream")
+    # For packaging we want UE_X.X/Plugins/Open3DStream layout
+    version_folder = f"UE_{ue_version}"
+    dst_plugin_dir = os.path.join(unreal_dst_base, version_folder, "Plugins", "Open3DStream")
     remove_directory(dst_plugin_dir)
     
     ue_host_project_dir = os.path.join(unreal_stage_base, ue_version, "Open3DStream", "HostProject")
@@ -108,10 +125,11 @@ while True:
     if not os.path.isfile(os.path.join(ue_built_plugin, "Open3DStream.uplugin")):
         raise RuntimeError("Could not find plugin: " + ue_built_plugin)
 
+    # Copy the built plugin into UE_X.X/Plugins/Open3DStream/
     shutil.copytree(ue_built_plugin, dst_plugin_dir)
     
     # libs
-    unreal_lib_dir = os.path.join(unreal_dst_base, ue_version, "Open3dStream" , "lib")
+    unreal_lib_dir = os.path.join(dst_plugin_dir, "lib")
     print(unreal_lib_dir)
     if not os.path.isdir(unreal_lib_dir):
         os.mkdir(unreal_lib_dir)
@@ -128,7 +146,7 @@ while True:
             shutil.copyfile(os.path.join(out_dir, "lib", libfile), os.path.join(unreal_lib_dir, libfile))
         
     # includes
-    unreal_include_dir = os.path.join(unreal_dst_base, ue_version, "Open3dStream" , "lib", "include")               
+    unreal_include_dir = os.path.join(dst_plugin_dir, "lib", "include")               
     usr_include_dir = os.path.join(out_dir, "include")
     shutil.copytree(usr_include_dir, unreal_include_dir)
             

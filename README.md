@@ -48,14 +48,26 @@ make -j4
 
 ### Using in Unreal Engine
 
+**Installation from Release Package:**
+1. Download the latest release from [Releases](https://github.com/lifelike-and-believable/Open3DStream/releases)
+2. Extract the zip file
+3. Copy the appropriate `UE_X.X/Plugins/Open3DStream` folder to your project's `Plugins` directory
+   - Or extract the entire `UE_X.X` folder to your project root (it will merge with your project structure)
+4. Restart Unreal Editor
+5. Enable the plugin: **Edit → Plugins** → search "Open3DStream" → check the box
+
+**Installation from Source:**
 1. Copy the `plugins/unreal/Open3DStream` folder to your project's `Plugins` directory
-2. Enable the plugin in your project settings
-3. Open LiveLink window: **Window → Virtual Production → Live Link**
-4. Add source: **+ Source → Open3DStream Source**
-5. Configure connection:
+2. Build the native libraries (see Building the Library above)
+3. Enable the plugin in your project settings
+
+**Usage:**
+1. Open LiveLink window: **Window → Virtual Production → Live Link**
+2. Add source: **+ Source → Open3DStream Source**
+3. Configure connection:
    - **URL**: `tcp://localhost:5555` (or other protocol)
    - **Protocol**: TCP Client, UDP Server, WebRTC Client, etc.
-6. Click **Create**
+4. Click **Create**
 
 ## Recent Updates
 
@@ -133,6 +145,24 @@ subscriber = AsyncSubscriber()
 subscriber.set_callback(on_data)
 subscriber.start("tcp://localhost:5555")
 ```
+
+## Packaging for Release
+
+The project includes a `package.py` script that creates release packages with proper directory structure:
+
+```bash
+python package.py
+```
+
+This creates a zip file with the following structure:
+```
+UE_5.4/Plugins/Open3DStream/
+UE_5.5/Plugins/Open3DStream/
+lib/
+include/
+```
+
+Users can extract the entire version folder (e.g., `UE_5.5`) to their project root, and it will automatically merge with their project's `Plugins` directory.
 
 ## Building Plugins
 

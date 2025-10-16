@@ -227,14 +227,44 @@ jobs:
       #       -TargetPlatforms @("Linux") `
       #       -Configuration "Shipping"
 
-      - name: Create archive
+      - name: Restructure for archive
         shell: powershell
         run: |
           $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
+          $restructured = Join-Path $env:RUNNER_TEMP 'PluginArchive'
+          
+          # Determine UE version from UE_ROOT
+          $ueVersionMatch = [regex]::Match("$env:UE_ROOT", "UE_(\d+\.\d+)")
+          if ($ueVersionMatch.Success) {
+            $ueVersion = $ueVersionMatch.Groups[1].Value
+          } else {
+            # Fallback: try to extract from path differently
+            $ueVersion = "5.6"  # Default fallback
+          }
+          
+          $targetPath = Join-Path $restructured "UE_$ueVersion\Plugins\${{ steps.find.outputs.plugin_name }}"
+          
+          Write-Host "Restructuring plugin for archive..."
+          Write-Host "  Source: $pkg"
+          Write-Host "  Target: $targetPath"
+          Write-Host "  UE Version: $ueVersion"
+          
+          # Create target directory structure
+          New-Item -ItemType Directory -Force -Path $targetPath | Out-Null
+          
+          # Copy plugin contents to new structure
+          Copy-Item -Path "$pkg\*" -Destination $targetPath -Recurse -Force
+          
+          Write-Host "[OK] Plugin restructured to UE_$ueVersion/Plugins/${{ steps.find.outputs.plugin_name }}"
+
+      - name: Create archive
+        shell: powershell
+        run: |
+          $restructured = Join-Path $env:RUNNER_TEMP 'PluginArchive'
           $archiveName = "${{ steps.find.outputs.plugin_name }}-${{ steps.version.outputs.version_number }}-Win64.zip"
           $archivePath = Join-Path $env:RUNNER_TEMP $archiveName
           
-          Compress-Archive -Path "$pkg\*" -DestinationPath $archivePath -CompressionLevel Optimal
+          Compress-Archive -Path "$restructured\*" -DestinationPath $archivePath -CompressionLevel Optimal
           
           "archive_path=$archivePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "archive_name=$archiveName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -250,14 +280,19 @@ jobs:
 
           ### Installation
 
-          1. Download the plugin package
-          2. Extract to your project's `Plugins` directory
-          3. Restart Unreal Editor
-          4. Enable the plugin in the Plugins browser
+          This plugin is packaged for easy installation:
+
+          1. Download and extract the plugin package
+          2. Copy the `UE_X.X` folder that matches your Unreal Engine version to your project root
+             - The archive contains `UE_X.X/Plugins/Open3DStream/`
+             - This will create/merge with your project's `Plugins` directory
+          3. Alternatively, extract the inner `Plugins/Open3DStream` folder directly to your project's `Plugins` directory
+          4. Restart Unreal Editor
+          5. Enable the plugin in the Plugins browser (Edit → Plugins)
 
           ### Compatibility
 
-          - **Unreal Engine**: 5.4+ (built with 5.4)
+          - **Unreal Engine**: 5.4+ (built with 5.6)
           - **Platform**: Windows (Win64)
 
           ### Features
