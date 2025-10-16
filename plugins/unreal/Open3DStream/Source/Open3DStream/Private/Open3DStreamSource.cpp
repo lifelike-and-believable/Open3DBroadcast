@@ -4,7 +4,6 @@
 #include "ILiveLinkClient.h"
 #include "Roles/LiveLinkAnimationTypes.h"
 #include "Roles/LiveLinkAnimationRole.h"
-#include "LiveLinkTypes.h"
 #include "Common/UdpSocketBuilder.h"
 #include "Internationalization/Regex.h"
 
@@ -264,23 +263,7 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
 		}
 
 		// Curves (morph targets)
-		// NOTE: Unreal Engine changed the LiveLink curve API around UE 5.4.
-		// Older engines exposed FrameData.CurveNames and FrameData.CurveValues
-		// as separate arrays. Newer engines use FrameData.Curves which is an
-		// array of FLiveLinkCurveElement (Name/Value). We version-guard here
-		// so the plugin can compile against multiple engine versions.
-#if defined(ENGINE_MAJOR_VERSION) && ( (ENGINE_MAJOR_VERSION > 5) || (ENGINE_MAJOR_VERSION == 5 && defined(ENGINE_MINOR_VERSION) && ENGINE_MINOR_VERSION >= 4) )
-		FrameData.Curves.Empty();
-		for (size_t ci = 0; ci < subject->mCurveNames.size(); ++ci)
-		{
-			FName cname(subject->mCurveNames[ci].c_str());
-			float value = subject->mCurveValues.size() > ci ? subject->mCurveValues[ci] : 0.0f;
-			FLiveLinkCurveElement elem;
-			elem.Name = cname;
-			elem.Value = value;
-			FrameData.Curves.Add(elem);
-		}
-#else
+		// Populate LiveLink animation curve data from subject curve arrays
 		FrameData.CurveNames.Empty();
 		FrameData.CurveValues.Empty();
 		for (size_t ci = 0; ci < subject->mCurveNames.size(); ++ci)
@@ -289,7 +272,6 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
 			FrameData.CurveNames.Add(cname);
 			FrameData.CurveValues.Add(subject->mCurveValues.size() > ci ? subject->mCurveValues[ci] : 0.0f);
 		}
-#endif
 
 		// Check if skeleton has not been initialized yet
 		if (InitializedSubjects.Find(SubjectName) == INDEX_NONE)
