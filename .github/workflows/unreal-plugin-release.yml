@@ -134,6 +134,7 @@ jobs:
           
           # Copy Open3DStream header files
           Copy-Item "src\o3ds\*.h" "$pluginLib\include\o3ds\" -Force
+          Copy-Item "src\o3ds_generated.h" "$pluginLib\include\o3ds\" -Force
           
           # Copy third-party headers from source directories
           # NNG headers
