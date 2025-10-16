@@ -1,0 +1,23 @@
+# Build Artifacts
+Artifacts/
+
+# Unreal Generated Folders
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# Plugin symlink (created by Link script)
+Plugins/
+
+# Visual Studio
+*.sln
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Rider
+.idea/
+*.sln.iml

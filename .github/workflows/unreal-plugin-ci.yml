@@ -1,0 +1,156 @@
+name: Unreal Plugin CI
+
+on:
+  pull_request:
+    branches: [ develop, main ]
+    paths:
+      - 'plugins/unreal/**'
+      - 'src/**'
+      - '.github/workflows/unreal-plugin-ci.yml'
+    types: [ opened, synchronize, ready_for_review ]
+  push:
+    branches: [ develop, main ]
+    paths:
+      - 'plugins/unreal/**'
+      - 'src/**'
+      - '.github/workflows/unreal-plugin-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+concurrency:
+  group: unreal-plugin-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Configure these for your environment
+  # For GitHub hosted runners or self-hosted, adjust accordingly
+  UE_ROOT: 'C:\Program Files\Epic Games\UE_5.4'
+  PLUGIN_NAME: 'Open3DStream'
+
+jobs:
+  build-and-test:
+    # Only run on non-draft PRs for PR events, or always for push/manual triggers
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # Use self-hosted runners with UE5 installed, or configure GitHub-hosted runners
+    # Change to 'windows-latest' if you set up UE on GitHub-hosted runners
+    runs-on: [ self-hosted, ue5, windows ]
+    # Alternative: runs-on: windows-latest
+
+    steps:
+      - name: Checkout (full)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+          submodules: recursive
+
+      - name: Post build started comment
+        if: github.event_name == 'pull_request' && github.event.pull_request.number != null
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `🚀 **Unreal Plugin CI build started** for this PR!\n\n[View build logs →](${runUrl})`
+            });
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Link plugin into Sandbox
+        shell: powershell
+        run: |
+          & .\Build\Scripts\Link-PluginIntoSandbox.ps1
+
+      - name: Setup UE
+        shell: powershell
+        run: |
+          & .\Build\Scripts\Setup-UE.ps1 -UEPath "$env:UE_ROOT"
+
+      - name: Locate plugin (.uplugin)
+        id: find
+        shell: powershell
+        run: |
+          $pluginDir = Join-Path $PWD "plugins\unreal\$env:PLUGIN_NAME"
+          $upluginPath = Join-Path $pluginDir "$env:PLUGIN_NAME.uplugin"
+          
+          if (!(Test-Path -LiteralPath $upluginPath)) {
+            Write-Error "Plugin file not found at: $upluginPath"
+            exit 1
+          }
+          
+          "plugin_path=$upluginPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "plugin_dir=$pluginDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "plugin_name=$env:PLUGIN_NAME" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "✓ Using plugin: $upluginPath"
+
+      - name: Build plugin (Win64)
+        shell: powershell
+        run: |
+          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
+          & .\Build\Scripts\Build-Plugin.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -PluginUPluginPath "${{ steps.find.outputs.plugin_path }}" `
+            -OutDir "$pkg" `
+            -TargetPlatforms @("Win64")
+
+      - name: Package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.find.outputs.plugin_name }}-Win64-${{ github.sha }}
+          path: ${{ runner.temp }}/PluginPackage
+          retention-days: 30
+
+      # Optional: Run automation tests
+      # Uncomment to enable
+      
+      # - name: Run Automation Tests
+      #   shell: powershell
+      #   timeout-minutes: 60
+      #   run: |
+      #     & .\Build\Scripts\Run-AutomationTests.ps1 `
+      #       -UEPath "$env:UE_ROOT" `
+      #       -ProjectFile "$PWD\ProjectSandbox\ProjectSandbox.uproject" `
+      #       -TestFilter "${{ steps.find.outputs.plugin_name }}.*" `
+      #       -ResultsDir "$env:RUNNER_TEMP\TestResults"
+
+      # - name: Upload test reports
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: TestReports-${{ github.sha }}
+      #     path: ${{ runner.temp }}/TestResults
+      #     if-no-files-found: ignore
+      #     retention-days: 30
+
+      - name: Post build completed comment
+        if: github.event_name == 'pull_request' && github.event.pull_request.number != null && success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `✅ **Unreal Plugin CI build completed successfully!**\n\n[View build logs →](${runUrl})\n\n📦 Plugin artifact is available for download in the workflow run.`
+            });
+
+      - name: Post build failed comment
+        if: github.event_name == 'pull_request' && github.event.pull_request.number != null && failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `❌ **Unreal Plugin CI build failed.**\n\n[View build logs →](${runUrl})\n\nPlease check the logs for details.`
+            });

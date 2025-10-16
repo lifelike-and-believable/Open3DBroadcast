@@ -1,0 +1,16 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.4",
+	"Category": "",
+	"Description": "Test project for Open3DStream plugin",
+	"Modules": [],
+	"Plugins": [
+		{
+			"Name": "Open3DStream",
+			"Enabled": true
+		}
+	],
+	"TargetPlatforms": [
+		"Windows"
+	]
+}

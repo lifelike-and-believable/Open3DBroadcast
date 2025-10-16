@@ -1,0 +1,153 @@
+name: Unreal Plugin Agent CI
+
+on:
+  push:
+    branches:
+      - 'copilot/**'          # Copilot's working branches iterate here
+      - 'feature/**'          # Feature branches can also use this
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+# Keep perms tight; enough to publish checks & artifacts and post PR comments
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+# Prevent overlapping runs per branch during fast iterations
+concurrency:
+  group: unreal-plugin-agent-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Configure these for your environment
+  UE_ROOT: 'C:\Program Files\Epic Games\UE_5.4'
+  PLUGIN_NAME: 'Open3DStream'
+
+jobs:
+  build_and_test:
+    # Runs for pushes/workflow_dispatch, and also when a comment '/build' is created on a PR
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/build') && github.event.issue.pull_request != null)
+    # Use self-hosted runners with UE5 installed
+    runs-on: [self-hosted, windows, ue5]
+    # Alternative for GitHub-hosted: runs-on: windows-latest
+
+    steps:
+      - name: Checkout (full, with submodules)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          lfs: true
+
+      # Post a status comment when triggered by PR comment to let users know the build is running
+      - name: Post build started comment
+        if: github.event_name == 'issue_comment' && github.event.issue.pull_request != null
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `🚀 **Agent CI build started** for this PR!\n\n[View build logs →](${runUrl})`
+            });
+
+      # When triggered by an issue_comment on a PR, fetch and check out the PR head so
+      # the build runs against the contributor's changes.
+      - name: Fetch PR head (when triggered by comment)
+        if: github.event_name == 'issue_comment' && github.event.issue.pull_request != null
+        shell: powershell
+        run: |
+          Write-Host "Fetching PR #${{ github.event.issue.number }} head"
+          git fetch origin +refs/pull/${{ github.event.issue.number }}/head:pr-${{ github.event.issue.number }}
+          git checkout pr-${{ github.event.issue.number }}
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Link plugin into Sandbox
+        shell: powershell
+        run: |
+          & .\Build\Scripts\Link-PluginIntoSandbox.ps1
+
+      - name: Setup UE
+        shell: powershell
+        run: |
+          & .\Build\Scripts\Setup-UE.ps1 -UEPath "$env:UE_ROOT"
+
+      - name: Locate plugin (.uplugin)
+        id: find
+        shell: powershell
+        run: |
+          $pluginDir = Join-Path $PWD "plugins\unreal\$env:PLUGIN_NAME"
+          $upluginPath = Join-Path $pluginDir "$env:PLUGIN_NAME.uplugin"
+          
+          if (!(Test-Path -LiteralPath $upluginPath)) {
+            Write-Error "Plugin file not found at: $upluginPath"
+            exit 1
+          }
+          
+          "plugin_path=$upluginPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "plugin_dir=$pluginDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "plugin_name=$env:PLUGIN_NAME" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "✓ Using plugin: $upluginPath"
+
+      - name: Build plugin (Win64)
+        shell: powershell
+        run: |
+          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
+          & .\Build\Scripts\Build-Plugin.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -PluginUPluginPath "${{ steps.find.outputs.plugin_path }}" `
+            -OutDir "$pkg" `
+            -TargetPlatforms @("Win64")
+
+      - name: Package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.find.outputs.plugin_name }}-AgentCI-${{ github.sha }}
+          path: ${{ runner.temp }}/PluginPackage
+          retention-days: 7  # Shorter retention for agent builds
+
+      # OPTIONAL: run editor automation tests
+      # - name: Run Automation Tests
+      #   shell: powershell
+      #   timeout-minutes: 60
+      #   run: |
+      #     & .\Build\Scripts\Run-AutomationTests.ps1 `
+      #       -UEPath "$env:UE_ROOT" `
+      #       -ProjectFile "$PWD\ProjectSandbox\ProjectSandbox.uproject" `
+      #       -TestFilter "${{ steps.find.outputs.plugin_name }}.*" `
+      #       -ResultsDir "$env:RUNNER_TEMP\TestResults"
+
+      # - name: Upload test reports
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: TestReports-AgentCI-${{ github.sha }}
+      #     path: ${{ runner.temp }}/TestResults
+      #     if-no-files-found: ignore
+      #     retention-days: 7
+
+      - name: Post build result comment
+        if: github.event_name == 'issue_comment' && github.event.issue.pull_request != null
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const status = '${{ job.status }}';
+            const emoji = status === 'success' ? '✅' : '❌';
+            const message = status === 'success' 
+              ? '**Agent CI build completed successfully!**\n\n📦 Plugin artifact is available for download in the workflow run.'
+              : '**Agent CI build failed.**\n\nPlease check the logs for details.';
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `${emoji} ${message}\n\n[View build logs →](${runUrl})`
+            });

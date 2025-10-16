@@ -1,0 +1,19 @@
+{
+  "ProjectName": "ProjectSandbox",
+  "ProjectPath": "ProjectSandbox/ProjectSandbox.uproject",
+  "TestName": "Open3DStreamTests",
+  "Configuration": "Development",
+  "Platform": "Win64",
+  "Build": "Editor",
+  "RunTests": [
+    "Open3DStream.*"
+  ],
+  "ReportType": "Gauntlet.UnrealEngine",
+  "MaxDuration": 3600,
+  "Flags": [
+    "-unattended",
+    "-nullrhi",
+    "-nosplash",
+    "-nop4"
+  ]
+}
