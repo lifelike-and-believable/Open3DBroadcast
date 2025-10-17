@@ -54,6 +54,22 @@ cmake .. -DO3DS_DISABLE_WEBRTC=ON  # disable (preferred)
 - -DO3DS_DISABLE_WEBRTC=ON: Disable WebRTC support (overrides enable flag)
 - -DLibDataChannel_DIR=/path/to/lib: Only needed when using a custom libdatachannel build. By default, Open3DStream uses the bundled/prebuilt libs.
 
+### Using prebuilt libdatachannel (single path for core and plugin)
+
+If you have prebuilt libdatachannel artifacts (like those bundled in the Unreal plugin at `plugins/unreal/Open3DStream/lib/webrtc`), you can make the core library consume the same binaries:
+
+```bash
+cmake .. \
+    -DO3DS_ENABLE_WEBRTC=ON \
+    -DO3DS_LIBDATACHANNEL_ROOT="/absolute/path/to/plugins/unreal/Open3DStream/lib/webrtc" \
+    -DCMAKE_PREFIX_PATH="/absolute/path/to/usr"
+```
+
+Notes:
+
+- O3DS_LIBDATACHANNEL_ROOT should contain the static libraries and headers (or an `include/` directory) expected for your platform.
+- This avoids requiring a LibDataChannel CMake package install and unifies the WebRTC path across core and Unreal.
+
 ## Usage
 
 ### URL format
