@@ -5,11 +5,14 @@ project(Open3DStreamLib)
 find_package(Flatbuffers CONFIG REQUIRED flatbuffers flatc HINTS ${CMAKE_CURRENT_LIST_DIR}/../usr)
 find_package(nng CONFIG REQUIRED HINTS ${CMAKE_CURRENT_LIST_DIR}/../usr)
 
-# Optional WebRTC support
-option(O3DS_ENABLE_WEBRTC "Enable WebRTC support" OFF)
+# WebRTC support - Enabled by default
+option(O3DS_ENABLE_WEBRTC "Enable WebRTC support" ON)
 if(O3DS_ENABLE_WEBRTC)
-    find_package(LibDataChannel REQUIRED)
+    find_package(LibDataChannel REQUIRED HINTS ${CMAKE_CURRENT_LIST_DIR}/../usr)
     add_compile_definitions(O3DS_ENABLE_WEBRTC)
+    message(STATUS "WebRTC support enabled")
+else()
+    message(STATUS "WebRTC support disabled")
 endif()
 
 add_custom_command(
