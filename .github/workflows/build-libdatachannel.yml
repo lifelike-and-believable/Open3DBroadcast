@@ -81,8 +81,15 @@ jobs:
           cmake --build build --config Release
           Write-Host "Checking built libraries..."
           Get-ChildItem -Path "build" -Recurse -Filter "*.lib" | Select-Object FullName
+          Get-ChildItem -Path "build/deps" -Recurse -Filter "*.lib" -ErrorAction SilentlyContinue | Select-Object FullName
           Get-ChildItem -Path "build/Release" -ErrorAction SilentlyContinue | Select-Object Name
           cmake --install build --config Release
+          # Also copy dependency libraries (juice, usrsctp) from build/deps
+          Write-Host "Copying dependency libraries from build/deps..."
+          Get-ChildItem -Path "build/deps" -Recurse -Filter "*.lib" | ForEach-Object { 
+            Copy-Item $_.FullName "${{ github.workspace }}/install/lib/" -Force
+            Write-Host "  Copied $($_.Name)"
+          }
         shell: pwsh
 
       - name: Package artifacts
@@ -94,6 +101,7 @@ jobs:
           Copy-Item "${{ github.workspace }}/install/lib/datachannel.lib" artifacts/windows/lib/
           Copy-Item "${{ github.workspace }}/install/lib/usrsctp.lib" artifacts/windows/lib/ -ErrorAction SilentlyContinue
           Copy-Item "${{ github.workspace }}/install/lib/juice-static.lib" artifacts/windows/lib/ -ErrorAction SilentlyContinue
+          Copy-Item "${{ github.workspace }}/install/lib/juice.lib" artifacts/windows/lib/ -ErrorAction SilentlyContinue
           Copy-Item "${{ github.workspace }}/install/lib/mbedtls.lib" artifacts/windows/lib/
           Copy-Item "${{ github.workspace }}/install/lib/mbedx509.lib" artifacts/windows/lib/
           Copy-Item "${{ github.workspace }}/install/lib/mbedcrypto.lib" artifacts/windows/lib/
@@ -173,6 +181,9 @@ jobs:
           echo "Checking built libraries..."
           find build -name "*.a" -type f
           cmake --install build
+          # Also copy dependency libraries (juice, usrsctp) from build/deps
+          echo "Copying dependency libraries from build/deps..."
+          find build/deps -name "*.a" -type f -exec cp -v {} ${{ github.workspace }}/install/lib/ \;
 
       - name: Package artifacts
         run: |
@@ -183,6 +194,7 @@ jobs:
           cp ${{ github.workspace }}/install/lib/libdatachannel.a artifacts/linux/lib/
           cp ${{ github.workspace }}/install/lib/libusrsctp.a artifacts/linux/lib/ 2>/dev/null || true
           cp ${{ github.workspace }}/install/lib/libjuice-static.a artifacts/linux/lib/ 2>/dev/null || true
+          cp ${{ github.workspace }}/install/lib/libjuice.a artifacts/linux/lib/ 2>/dev/null || true
           cp ${{ github.workspace }}/install/lib/libmbedtls.a artifacts/linux/lib/
           cp ${{ github.workspace }}/install/lib/libmbedx509.a artifacts/linux/lib/
           cp ${{ github.workspace }}/install/lib/libmbedcrypto.a artifacts/linux/lib/
