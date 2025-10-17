@@ -187,6 +187,16 @@ target_include_directories(open3dstreamstatic PUBLIC
 
 if(O3DS_WITH_WEBRTC)
     target_link_libraries(open3dstreamstatic PUBLIC LibDataChannel::LibDataChannel)
+	# Ensure header-only nlohmann/json is available for webrtc connector
+	# Prefer vendored single-header from libdatachannel submodule; fall back to prebuilt include, if present
+	set(_JSON_SINGLE_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/../thirdparty/libdatachannel/deps/json/single_include")
+	if(EXISTS "${_JSON_SINGLE_INCLUDE}/nlohmann/json.hpp")
+		target_include_directories(open3dstreamstatic PUBLIC "${_JSON_SINGLE_INCLUDE}")
+	elseif(O3DS_LIBDATACHANNEL_ROOT AND EXISTS "${O3DS_LIBDATACHANNEL_ROOT}/include/nlohmann/json.hpp")
+		target_include_directories(open3dstreamstatic PUBLIC "${O3DS_LIBDATACHANNEL_ROOT}/include")
+	else()
+		message(WARNING "nlohmann/json.hpp not found; if build fails, ensure nlohmann/json single-header is available under thirdparty/libdatachannel/deps/json/single_include or provide it via O3DS_LIBDATACHANNEL_ROOT/include")
+	endif()
 endif()
 
 # target_link_libraries(open3dstreamstatic PRIVATE ${NNG_LIBRARIES} ${FLATBUFFERS_LIBRARIES} ${xtralibs})        
