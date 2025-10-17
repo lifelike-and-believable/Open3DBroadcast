@@ -338,7 +338,7 @@ FString FWebRTCSignalingClient::CreateIceCandidateMessage(const FString& Candida
 	JsonMessage->SetStringField(TEXT("type"), TEXT("ice"));
 	JsonMessage->SetStringField(TEXT("candidate"), Candidate);
 	JsonMessage->SetStringField(TEXT("sdpMid"), SdpMid);
-	JsonMessage->SetIntegerField(TEXT("sdpMLineIndex"), SdpMLineIndex);
+	JsonMessage->SetNumberField(TEXT("sdpMLineIndex"), SdpMLineIndex);
 
 	FString OutputString;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);

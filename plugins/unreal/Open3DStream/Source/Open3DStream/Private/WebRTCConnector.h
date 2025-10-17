@@ -110,7 +110,7 @@ private:
 	TFunction<void(const uint8*, int32)> DataReceivedCallback;
 
 	// Message queue (thread-safe for libdatachannel callbacks)
-	TQueue<TArray<uint8>, EQueueMode::MPSC> ReceivedDataQueue;
+	TQueue<TArray<uint8>, EQueueMode::Mpsc> ReceivedDataQueue;
 
 	// Static data channel label
 	static const char* DataChannelLabel;
