@@ -24,6 +24,7 @@ jobs:
 
     steps:
       - name: Build plugin core (composite)
+        id: core
         uses: ./.github/actions/build-plugin-core
         with:
           ue_root: ${{ env.UE_ROOT }}
@@ -38,7 +39,7 @@ jobs:
           $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
           & .\Build\Scripts\Build-Plugin.ps1 `
             -UEPath "$env:UE_ROOT" `
-            -PluginUPluginPath "${{ steps.build-plugin-core.outputs.uplugin_path }}" `
+            -PluginUPluginPath "${{ steps.core.outputs.uplugin_path }}" `
             -OutDir "$pkg" `
             -TargetPlatforms @("Win64")
 
