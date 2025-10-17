@@ -88,6 +88,7 @@ jobs:
             o3ds-libs-${{ runner.os }}-
 
       # Build third-party dependencies FIRST (nng, flatbuffers) - required by main library
+      # Note: WebRTC is disabled in CI - pre-built libraries are used instead (see Issue #10)
       - name: Build Third-Party Dependencies
         if: steps.cache-libs.outputs.cache-hit != 'true'
         shell: powershell
@@ -96,7 +97,7 @@ jobs:
           
           cd thirdparty
           
-          # Configure CMake (disable WebRTC due to OpenSSL dependency not available in CI)
+          # Configure CMake (WebRTC disabled in CI, using pre-built libraries)
           cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -DO3DS_BUILD_WEBRTC=OFF
           
           # Build RelWithDebInfo configuration
