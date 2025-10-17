@@ -39,9 +39,13 @@ public class Open3DStream : ModuleRules
             PublicAdditionalLibraries.Add(WebRTCDir + "mbedcrypto.lib");
             // Required Windows system libraries for threading, STL, and crypto
             PublicSystemLibraries.Add("bcrypt.lib");  // For BCryptGenRandom (mbedtls entropy)
-            PublicSystemLibraries.Add("synchronization.lib");  // For _Thrd_sleep_for, _Cnd_timedwait_for_unchecked
-            // MSVC STL intrinsics - must be explicitly linked
-            PublicAdditionalLibraries.Add("legacy_stdio_definitions.lib");  // For __std_* MSVC STL functions
+            PublicSystemLibraries.Add("synchronization.lib");  // For C11 threading (_Thrd_*, _Cnd_*)
+            // MSVC Universal CRT libraries for STL algorithm intrinsics and legacy symbols
+            PublicAdditionalLibraries.Add("legacy_stdio_definitions.lib");
+            // MSVC vectorized algorithm intrinsics (__std_mismatch_1, __std_search_1, __std_remove_4)
+            // These require explicit linkage when mixing MSVC toolchain versions
+            PublicSystemLibraries.Add("vcruntime.lib");
+            PublicSystemLibraries.Add("msvcrt.lib");
         }
         else if (Target.Platform == UnrealTargetPlatform.Linux)
         {
