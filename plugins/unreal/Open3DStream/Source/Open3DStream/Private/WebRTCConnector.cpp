@@ -494,7 +494,8 @@ bool FWebRTCConnector::SetupPeerConnection()
 					if (std::holds_alternative<rtc::binary>(Message))
 					{
 						const auto& Binary = std::get<rtc::binary>(Message);
-						OnDataChannelMessage(Binary);
+						std::vector<uint8> Buffer(Binary.begin(), Binary.end());
+						OnDataChannelMessage(Buffer);
 					}
 				});
 
@@ -525,7 +526,7 @@ bool FWebRTCConnector::CreateDataChannel()
 {
 	FScopeLock Lock(&PeerConnectionLock);
 
-	if (!PeerConnection)
+		if (!this->PeerConnection)
 	{
 		LastError = TEXT("PeerConnection not initialized");
 		return false;
@@ -535,33 +536,34 @@ bool FWebRTCConnector::CreateDataChannel()
 	{
 		// Create data channel
 		std::string Label(DataChannelLabel);
-		DataChannel = PeerConnection->createDataChannel(Label);
+			DataChannel = this->PeerConnection->createDataChannel(Label);
 
-		if (!DataChannel)
+			if (!DataChannel)
 		{
 			LastError = TEXT("Failed to create data channel");
 			return false;
 		}
 
 		// Bind data channel callbacks
-		auto LocalDataChannel = DataChannel;
+			auto LocalDataChannel = DataChannel;
 		LocalDataChannel->onOpen([this]()
 		{
 			OnDataChannelOpen();
 		});
 
-		LocalDataChannel->onMessage([this](const std::variant<rtc::binary, std::string>& Message)
+			LocalDataChannel->onMessage([this](const std::variant<rtc::binary, std::string>& Message)
 		{
 			if (std::holds_alternative<rtc::binary>(Message))
 			{
-				const auto& Binary = std::get<rtc::binary>(Message);
-				OnDataChannelMessage(Binary);
+					const auto& Binary = std::get<rtc::binary>(Message);
+					std::vector<uint8> Buffer(Binary.begin(), Binary.end());
+					OnDataChannelMessage(Buffer);
 			}
 		});
 
 		LocalDataChannel->onError([this](const std::string& Error)
 		{
-			OnDataChannelError(Error);
+				OnDataChannelError(Error);
 		});
 
 		LocalDataChannel->onClosed([this]()
@@ -584,32 +586,32 @@ void FWebRTCConnector::CleanupPeerConnection()
 {
 	FScopeLock PeerLock(&PeerConnectionLock);
 
-	if (DataChannel)
+	if (this->DataChannel)
 	{
 		try
 		{
-			DataChannel->close();
+			this->DataChannel->close();
 		}
 		catch (const std::exception&)
 		{
 			// Ignore
 		}
 
-		DataChannel.reset();
+		this->DataChannel.reset();
 	}
 
-	if (PeerConnection)
+	if (this->PeerConnection)
 	{
 		try
 		{
-			PeerConnection->close();
+			this->PeerConnection->close();
 		}
 		catch (const std::exception&)
 		{
 			// Ignore
 		}
 
-		PeerConnection.reset();
+		this->PeerConnection.reset();
 	}
 
 	RtcConfig.reset();
