@@ -18,12 +18,13 @@ if(O3DS_BUILD_WEBRTC)
     set(NO_TESTS ON CACHE BOOL "Disable libdatachannel tests")
     set(USE_NICE OFF CACHE BOOL "Disable libnice ICE support")
     
+    # Disable media support to avoid libsrtp dependency (which requires OpenSSL)
+    # This is sufficient for WebRTC signaling and data channels
+    set(NO_MEDIA ON CACHE BOOL "Disable media transport support in libdatachannel")
+    
     # Use system crypto instead of OpenSSL (Windows will use schannel, others will use platform defaults)
     set(USE_GNUTLS OFF CACHE BOOL "Don't use GnuTLS")
     set(USE_MBEDTLS OFF CACHE BOOL "Don't use mbedTLS for now - use system crypto")
-    
-    # Configure libsrtp (dependency) to not use OpenSSL
-    set(ENABLE_OPENSSL OFF CACHE BOOL "Disable OpenSSL in libsrtp")
     
     add_subdirectory(libdatachannel)
 else()
