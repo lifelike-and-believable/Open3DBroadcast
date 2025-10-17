@@ -87,11 +87,11 @@ private:
 	FDelegateHandle ConnectionStateHandle;
 
 	/** Handle data received from data channel */
-	void OnDataChannelMessage(FString PlayerId, uint8 MessageType, TArray<uint8> DataBuffer);
+	void OnDataChannelMessage(IPixelStreamingStreamer* Streamer);
 
 	/** Handle streamer connection */
-	void OnStreamerConnected();
+	void OnStreamerConnected(IPixelStreamingStreamer* Streamer);
 
 	/** Handle streamer disconnection */
-	void OnStreamerDisconnected();
+	void OnStreamerDisconnected(IPixelStreamingStreamer* Streamer);
 };
