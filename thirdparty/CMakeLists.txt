@@ -18,6 +18,10 @@ if(O3DS_BUILD_WEBRTC)
     set(NO_TESTS ON CACHE BOOL "Disable libdatachannel tests")
     set(USE_NICE OFF CACHE BOOL "Disable libnice ICE support")
     
+    # Use system crypto instead of OpenSSL (Windows will use schannel, others will use platform defaults)
+    set(USE_GNUTLS OFF CACHE BOOL "Don't use GnuTLS")
+    set(USE_MBEDTLS OFF CACHE BOOL "Don't use mbedTLS for now - use system crypto")
+    
     add_subdirectory(libdatachannel)
 else()
     message(STATUS "Skipping libdatachannel build (O3DS_BUILD_WEBRTC=OFF)")
