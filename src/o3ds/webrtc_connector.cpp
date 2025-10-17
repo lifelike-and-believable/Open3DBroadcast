@@ -152,7 +152,7 @@ bool WebRTCClient::connectSignaling(const std::string& server, int port)
             sendSignalingMessage(joinMsg.dump());
         });
         
-        mSignalingSocket->onMessage([this](auto data) {
+        mSignalingSocket->onMessage([this](rtc::message_variant data) {
             if (std::holds_alternative<std::string>(data)) {
                 onSignalingMessage(std::get<std::string>(data));
             }
