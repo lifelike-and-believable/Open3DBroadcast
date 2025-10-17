@@ -55,7 +55,7 @@ jobs:
 
       - name: Create MbedTLS 4.0 compatibility shims
         run: |
-          $headers = @('ctr_drbg', 'entropy', 'hmac_drbg')
+          $headers = @('ctr_drbg', 'entropy', 'hmac_drbg', 'ecdsa', 'rsa', 'sha256')
           foreach ($header in $headers) {
               $shimPath = "${{ github.workspace }}/install/include/mbedtls/$header.h"
               if (-not (Test-Path $shimPath)) {
@@ -145,7 +145,7 @@ jobs:
 
       - name: Create MbedTLS 4.0 compatibility shims
         run: |
-          for header in ctr_drbg entropy hmac_drbg; do
+          for header in ctr_drbg entropy hmac_drbg ecdsa rsa sha256; do
               shimPath="${{ github.workspace }}/install/include/mbedtls/${header}.h"
               if [ ! -f "$shimPath" ]; then
                   echo "#include \"mbedtls/private/${header}.h\"" > "$shimPath"
@@ -229,7 +229,7 @@ jobs:
 
       - name: Create MbedTLS 4.0 compatibility shims
         run: |
-          for header in ctr_drbg entropy hmac_drbg; do
+          for header in ctr_drbg entropy hmac_drbg ecdsa rsa sha256; do
               shimPath="${{ github.workspace }}/install/include/mbedtls/${header}.h"
               if [ ! -f "$shimPath" ]; then
                   echo "#include \"mbedtls/private/${header}.h\"" > "$shimPath"
