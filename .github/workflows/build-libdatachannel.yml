@@ -31,7 +31,7 @@ jobs:
           git checkout v3.6.5
           git submodule update --init --recursive
           git log --oneline -1
-        shell: pwsh
+        shell: powershell
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -48,7 +48,7 @@ jobs:
         working-directory: thirdparty/mbedtls
         run: |
           python scripts/config.py set MBEDTLS_SSL_DTLS_SRTP
-        shell: pwsh
+        shell: powershell
 
       - name: Build MbedTLS
         working-directory: thirdparty/mbedtls
@@ -63,7 +63,7 @@ jobs:
           cmake --install build --config Release
           Write-Host "Checking installed files..."
           Get-ChildItem -Path "${{ github.workspace }}/install/include/mbedtls" | Select-Object -First 10
-        shell: pwsh
+        shell: powershell
 
       - name: Build libdatachannel
         working-directory: thirdparty/libdatachannel
@@ -90,7 +90,7 @@ jobs:
             Copy-Item $_.FullName "${{ github.workspace }}/install/lib/" -Force
             Write-Host "  Copied $($_.Name)"
           }
-        shell: pwsh
+        shell: powershell
 
       - name: Package artifacts
         run: |
@@ -108,7 +108,7 @@ jobs:
           # List what was collected
           Write-Host "Collected libraries:"
           Get-ChildItem artifacts/windows/lib/*.lib | ForEach-Object { Write-Host "  $($_.Name) ($([math]::Round($_.Length/1MB, 1))MB)" }
-        shell: pwsh
+        shell: powershell
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
