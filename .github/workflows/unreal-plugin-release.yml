@@ -38,6 +38,11 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
+      - name: Setup Perl (required for MbedTLS GEN_FILES)
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.32'
+
       - name: Link plugin into Sandbox
         shell: powershell
         run: |
@@ -77,6 +82,7 @@ jobs:
             o3ds-libs-${{ runner.os }}-
 
       # Build third-party dependencies FIRST (nng, flatbuffers) - required by main library
+      # Note: WebRTC is disabled - pre-built libraries are used instead (see build-libdatachannel workflow)
       - name: Build Third-Party Dependencies
         if: steps.cache-libs.outputs.cache-hit != 'true'
         shell: powershell
@@ -85,8 +91,8 @@ jobs:
           
           cd thirdparty
           
-          # Configure CMake
-          cmake -B build -S . -G "Visual Studio 17 2022" -A x64
+          # Configure CMake (WebRTC disabled, using pre-built libraries)
+          cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -DO3DS_BUILD_WEBRTC=OFF
           
           # Build Release configuration for shipping builds
           cmake --build build --config Release --parallel
@@ -109,6 +115,7 @@ jobs:
           & ".\thirdparty\build\flatbuffers\Release\flatc.exe" --cpp -o src src\o3ds.fbs
           
           # Configure CMake with prefix path to find third-party packages
+          # Note: WebRTC is enabled, using pre-built libraries from plugins/unreal/Open3DStream/lib/webrtc/
           cmake -B vsbuild -S . -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_PREFIX_PATH="$PWD/usr"
           

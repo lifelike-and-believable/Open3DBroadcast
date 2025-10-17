@@ -120,10 +120,10 @@ jobs:
           Write-Host "Regenerating o3ds_generated.h with current FlatBuffers version..."
           & ".\thirdparty\build\flatbuffers\RelWithDebInfo\flatc.exe" --cpp -o src src\o3ds.fbs
           
-          # Configure CMake with prefix path to find third-party packages (disable WebRTC in CI)
+          # Configure CMake with prefix path to find third-party packages
+          # Note: WebRTC is enabled, using pre-built libraries from plugins/unreal/Open3DStream/lib/webrtc/
           cmake -B vsbuild -S . -G "Visual Studio 17 2022" -A x64 `
-            -DCMAKE_PREFIX_PATH="$PWD/usr" `
-            -DO3DS_ENABLE_WEBRTC=OFF
+            -DCMAKE_PREFIX_PATH="$PWD/usr"
           
           # Build RelWithDebInfo configuration
           cmake --build vsbuild --config RelWithDebInfo --parallel
