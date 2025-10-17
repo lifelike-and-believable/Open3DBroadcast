@@ -9,6 +9,9 @@ public class Open3DStream : ModuleRules
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 		
+		// Enable C++ exceptions for libdatachannel (which throws std::exception)
+		bEnableExceptions = true;
+		
 		PublicIncludePaths.AddRange( new string[] {} );
 		
 		string LibDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "../../lib/"));
