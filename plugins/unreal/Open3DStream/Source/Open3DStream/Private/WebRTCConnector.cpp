@@ -123,7 +123,13 @@ bool FWebRTCConnector::Send(const uint8* Data, int32 Size)
 	{
 		FScopeLock Lock(&DataChannelLock);
 		
-		rtc::binary Out(Data, Data + Size);
+		// Convert uint8 data to std::byte for rtc::binary
+		rtc::binary Out;
+		Out.reserve(Size);
+		for (int32 i = 0; i < Size; ++i)
+		{
+			Out.push_back(static_cast<std::byte>(Data[i]));
+		}
 		DataChannel->send(Out);
 		
 		return true;
@@ -497,7 +503,13 @@ bool FWebRTCConnector::SetupPeerConnection()
 					if (std::holds_alternative<rtc::binary>(Message))
 					{
 						const auto& Binary = std::get<rtc::binary>(Message);
-						std::vector<uint8> Buffer(Binary.begin(), Binary.end());
+						// Convert std::byte to uint8
+						std::vector<uint8> Buffer;
+						Buffer.reserve(Binary.size());
+						for (const auto& b : Binary)
+						{
+							Buffer.push_back(static_cast<uint8>(b));
+						}
 						OnDataChannelMessage(Buffer);
 					}
 				});
@@ -554,17 +566,21 @@ bool FWebRTCConnector::CreateDataChannel()
 			OnDataChannelOpen();
 		});
 
-			LocalDataChannel->onMessage([this](const std::variant<rtc::binary, std::string>& Message)
+		LocalDataChannel->onMessage([this](const std::variant<rtc::binary, std::string>& Message)
 		{
 			if (std::holds_alternative<rtc::binary>(Message))
 			{
-					const auto& Binary = std::get<rtc::binary>(Message);
-					std::vector<uint8> Buffer(Binary.begin(), Binary.end());
-					OnDataChannelMessage(Buffer);
+				const auto& Binary = std::get<rtc::binary>(Message);
+				// Convert std::byte to uint8
+				std::vector<uint8> Buffer;
+				Buffer.reserve(Binary.size());
+				for (const auto& b : Binary)
+				{
+					Buffer.push_back(static_cast<uint8>(b));
+				}
+				OnDataChannelMessage(Buffer);
 			}
-		});
-
-		LocalDataChannel->onError([this](const std::string& Error)
+		});		LocalDataChannel->onError([this](const std::string& Error)
 		{
 				OnDataChannelError(Error);
 		});
