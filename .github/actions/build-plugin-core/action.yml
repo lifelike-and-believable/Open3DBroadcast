@@ -1,0 +1,114 @@
+name: Build Plugin Core
+description: Checkout, cache, build third-party and core, copy headers/libs, and locate .uplugin
+inputs:
+  ue_root:
+    required: true
+    description: Path to Unreal Engine root (e.g., C:\\Program Files\\Epic Games\\UE_5.6)
+  plugin_name:
+    required: true
+    description: Plugin name (e.g., Open3DStream)
+  build_type:
+    required: true
+    description: CMake build type (e.g., RelWithDebInfo or Release)
+  enable_webrtc:
+    required: true
+    description: Enable WebRTC in core (true/false)
+  libdatachannel_root:
+    required: false
+    description: Optional root for prebuilt libdatachannel stack
+outputs:
+  plugin_dir:
+    description: Resolved plugin directory
+    value: ${{ steps.find.outputs.plugin_dir }}
+  uplugin_path:
+    description: Resolved .uplugin path
+    value: ${{ steps.find.outputs.plugin_path }}
+runs:
+  using: composite
+  steps:
+    - name: Checkout (full)
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        lfs: true
+        submodules: recursive
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Link plugin into Sandbox
+      shell: powershell
+      run: |
+        & .\Build\Scripts\Link-PluginIntoSandbox.ps1
+
+    - name: Setup UE
+      shell: powershell
+      run: |
+        & .\Build\Scripts\Setup-UE.ps1 -UEPath "${{ inputs.ue_root }}"
+
+    - name: Cache native libraries
+      uses: actions/cache@v4
+      id: cache-libs
+      with:
+        path: |
+          vsbuild
+          usr
+          thirdparty/build
+        key: o3ds-libs-${{ runner.os }}-${{ hashFiles('src/**/*.cpp', 'src/**/*.h', 'thirdparty/CMakeLists.txt', 'CMakeLists.txt', '.gitmodules') }}
+        restore-keys: |
+          o3ds-libs-${{ runner.os }}-
+
+    - name: Build Third-Party Dependencies
+      if: steps.cache-libs.outputs.cache-hit != 'true'
+      shell: powershell
+      run: |
+        cd thirdparty
+        cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -DO3DS_BUILD_WEBRTC=OFF
+        cmake --build build --config ${{ inputs.build_type }} --parallel
+        cmake --install build --config ${{ inputs.build_type }} --prefix ../usr
+
+    - name: Build Open3DStream C++ Library
+      if: steps.cache-libs.outputs.cache-hit != 'true'
+      shell: powershell
+      run: |
+        $flatcCfg = "${{ inputs.build_type }}"
+        $flatcPath = "thirdparty\build\flatbuffers\$flatcCfg\flatc.exe"
+        & "$flatcPath" --cpp -o src src\o3ds.fbs
+
+        $webrtcFlag = if ("${{ inputs.enable_webrtc }}" -eq "true") { "ON" } else { "OFF" }
+        $ldcRoot = "${{ inputs.libdatachannel_root }}"
+        $ldcParam = if ($ldcRoot -ne "") { "-DO3DS_LIBDATACHANNEL_ROOT=\`"$ldcRoot\`"" } else { "" }
+
+        cmake -B vsbuild -S . -G "Visual Studio 17 2022" -A x64 `
+          -DCMAKE_PREFIX_PATH="$PWD/usr" `
+          -DO3DS_ENABLE_WEBRTC=$webrtcFlag `
+          $ldcParam
+
+        cmake --build vsbuild --config ${{ inputs.build_type }} --parallel
+
+    - name: Copy libraries and headers to plugin
+      shell: powershell
+      run: |
+        $pluginLib = "plugins\unreal\${{ inputs.plugin_name }}\lib"
+        New-Item -ItemType Directory -Force -Path "$pluginLib\include\o3ds" | Out-Null
+        New-Item -ItemType Directory -Force -Path "$pluginLib\include\nng" | Out-Null
+        New-Item -ItemType Directory -Force -Path "$pluginLib\include\flatbuffers" | Out-Null
+
+        Copy-Item "vsbuild\src\${{ inputs.build_type }}\open3dstreamstatic.lib" "$pluginLib\"
+        Copy-Item "thirdparty\build\nng\${{ inputs.build_type }}\nng.lib" "$pluginLib\"
+        Copy-Item "thirdparty\build\flatbuffers\${{ inputs.build_type }}\flatbuffers.lib" "$pluginLib\"
+
+        Copy-Item "src\o3ds\*.h" "$pluginLib\include\o3ds\" -Force
+        Copy-Item "src\o3ds_generated.h" "$pluginLib\include\" -Force
+        if (Test-Path "usr\include\nng") { Copy-Item "usr\include\nng\*" "$pluginLib\include\nng\" -Recurse -Force }
+        if (Test-Path "usr\include\flatbuffers") { Copy-Item "usr\include\flatbuffers\*" "$pluginLib\include\flatbuffers\" -Recurse -Force }
+
+    - name: Locate plugin (.uplugin)
+      id: find
+      shell: powershell
+      run: |
+        $pluginDir = Join-Path $PWD "plugins\unreal\${{ inputs.plugin_name }}"
+        $upluginPath = Join-Path $pluginDir "${{ inputs.plugin_name }}.uplugin"
+        if (!(Test-Path -LiteralPath $upluginPath)) { Write-Error "Plugin file not found: $upluginPath"; exit 1 }
+        "plugin_path=$upluginPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        "plugin_dir=$pluginDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
