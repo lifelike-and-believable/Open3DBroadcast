@@ -152,7 +152,7 @@ bool WebRTCClient::connectSignaling(const std::string& server, int port)
             sendSignalingMessage(joinMsg.dump());
         });
         
-        mSignalingSocket->onMessage([this](auto data) {
+        mSignalingSocket->onMessage([this](rtc::message_variant data) {
             if (std::holds_alternative<std::string>(data)) {
                 onSignalingMessage(std::get<std::string>(data));
             }
@@ -247,9 +247,9 @@ void WebRTCClient::createDataChannel()
         onDataChannelClose();
     });
     
-    mDataChannel->onMessage([this](auto data) {
+    mDataChannel->onMessage([this](rtc::message_variant data) {
         if (std::holds_alternative<rtc::binary>(data)) {
-            auto bin = std::get<rtc::binary>(data);
+            const auto& bin = std::get<rtc::binary>(data);
             onDataChannelMessage(bin);
         }
     });
@@ -266,10 +266,11 @@ void WebRTCClient::onDataChannelClose()
     mIsDataChannelOpen = false;
 }
 
-void WebRTCClient::onDataChannelMessage(const std::vector<uint8_t>& data)
+void WebRTCClient::onDataChannelMessage(const std::vector<std::byte>& data)
 {
     // Call user callback if set
     if (mInDataFunc && mContext) {
+        // rtc::binary is std::vector<std::byte>; convert pointer type for callback
         mInDataFunc(mContext, (void*)data.data(), data.size());
     }
 }
@@ -323,7 +324,9 @@ bool WebRTCClient::write(const char* data, size_t len)
     }
     
     try {
-        rtc::binary bin(data, data + len);
+        // rtc::binary is std::vector<std::byte>; construct from uint8_t*
+        const std::byte* b = reinterpret_cast<const std::byte*>(data);
+        rtc::binary bin(b, b + len);
         mDataChannel->send(bin);
         return true;
     }
@@ -429,8 +432,10 @@ bool WebRTCServer::write(const char* data, size_t len)
     if (mPeers.empty()) {
         return false;
     }
-    
-    rtc::binary bin(data, data + len);
+
+    // rtc::binary is std::vector<std::byte>; construct from std::byte*
+    const std::byte* b = reinterpret_cast<const std::byte*>(data);
+    rtc::binary bin(b, b + len);
     bool sentToAny = false;
     
     for (auto& peer : mPeers) {

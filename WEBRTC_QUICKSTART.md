@@ -1,12 +1,6 @@
 # WebRTC Quick Start Guide
 
-> **📝 Note**: This guide covers WebRTC usage in **C++ command-line tools**. 
-> 
-> **For Unreal Engine users**: WebRTC support in the Unreal plugin is currently under development. 
-> The build infrastructure is complete, but the functionality is not yet implemented. 
-> See [Issue #15](https://github.com/lifelike-and-believable/Open3DStream/issues/15) for progress.
-> 
-> In the meantime, please use TCP, UDP, or NNG protocols for Unreal (all fully functional).
+> Note: This guide covers WebRTC usage in C++ command-line tools. For Unreal Engine, the plugin includes a functional WebRTC connector (beta) using libdatachannel with a simple WebSocket signaling server. See WEBRTC_UNREAL_IMPLEMENTATION.md and Issue #15 for details.
 
 ## 5-Minute Setup (C++ Tools)
 
@@ -39,7 +33,8 @@ node signaling-server.js
 ```
 
 Expected output:
-```
+
+```text
 Open3DStream WebRTC Signaling Server
 Listening on ws://localhost:8080/ws
 Health check: http://localhost:8080/health
@@ -61,7 +56,8 @@ Ready to accept WebRTC signaling connections
 ### Step 5: Verify Connection
 
 Check signaling server console for:
-```
+
+```text
 [2025-10-16T...] Client abc123def connected from ::ffff:127.0.0.1
 [2025-10-16T...] unnamed joined room "myroom" (1 peers)
 ```
@@ -69,31 +65,36 @@ Check signaling server console for:
 ## Common Commands
 
 ### Health Check
+
 ```bash
 curl http://localhost:8080/health
 ```
 
 ### Test WebSocket Connection
+
 ```bash
 npm install -g wscat
 wscat -c ws://localhost:8080/ws
 ```
 
 ### Build without WebRTC
+
 ```bash
-cmake .. -DO3DS_ENABLE_WEBRTC=OFF
+cmake .. -DO3DS_DISABLE_WEBRTC=ON
 make -j4
 ```
 
 ## Troubleshooting
 
 ### libdatachannel not found
+
 ```bash
 export CMAKE_PREFIX_PATH=/usr/local:$CMAKE_PREFIX_PATH
 cmake .. -DO3DS_ENABLE_WEBRTC=ON
 ```
 
 ### Signaling server won't start
+
 ```bash
 # Check if port 8080 is in use
 lsof -i :8080
@@ -102,38 +103,45 @@ node signaling-server.js 9000
 ```
 
 ### No WebRTC protocol in Unreal
-- Verify build completed with `-DO3DS_ENABLE_WEBRTC=ON`
+
+- Verify build completed with `-DO3DS_ENABLE_WEBRTC=ON` (default)
 - Check CMake output for LibDataChannel found
 - Rebuild Unreal plugin
 
 ## URL Examples
 
 ### Local Testing
-```
+
+```text
 webrtc://localhost:8080/test-room
 ```
 
 ### Network Testing
-```
+
+```text
 webrtc://192.168.1.100:8080/capture-01
 ```
 
 ### Remote Server
-```
+
+```text
 webrtc://signal.mycompany.com:8080/production-stream
 ```
 
 ## STUN/TURN Configuration
 
 ### Default (Google STUN)
+
 Already configured in code - no action needed.
 
 ### Custom STUN
+
 ```cpp
 client.setIceServers("stun:stun.myserver.com:3478");
 ```
 
 ### With TURN
+
 ```cpp
 client.setIceServers(
     "stun:stun.myserver.com:3478",

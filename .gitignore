@@ -11,6 +11,9 @@ vsbuild
 # Visual Studio 2015 user specific files
 .vs/
 
+# VS Code settings (do not commit local editor config)
+.vscode/
+
 # Compiled Object files
 *.slo
 *.lo
@@ -62,6 +65,10 @@ Plugins/*/Binaries/*
 # Builds (Both cases since not all OSes are case insensitive)
 Build/*
 build/
+
+# Local quick build directories (do not commit)
+build_quick/
+thirdparty/build_quick/
 
 # Whitelist PakBlacklist-<BuildConfiguration>.txt files
 !Build/*/

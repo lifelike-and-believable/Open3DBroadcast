@@ -214,7 +214,7 @@ cmake .. -DO3DS_BUILD_WEBRTC=OFF
 
 **Option 2: Disable at library level**
 ```bash
-cmake .. -DO3DS_ENABLE_WEBRTC=OFF
+cmake .. -DO3DS_DISABLE_WEBRTC=ON
 ```
 
 **Option 3: Disable in Unreal plugin**
