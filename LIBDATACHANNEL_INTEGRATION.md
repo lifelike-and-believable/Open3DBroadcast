@@ -10,9 +10,9 @@ Open3DStream uses libdatachannel for WebRTC support, providing real-time data ch
 
 libdatachannel is built as a **static library only** with the following configuration:
 
-- **TLS Backend**: MbedTLS (v4.0+ development branch) - used for all platforms
-  - **Important**: MbedTLS 3.x stable releases lack DTLS-SRTP APIs required by libdatachannel
-  - We use the `development` branch which has DTLS-SRTP support
+- **TLS Backend**: MbedTLS v3.6.5 (stable) with DTLS-SRTP enabled
+  - **Important**: DTLS-SRTP must be explicitly enabled via `python scripts/config.py set MBEDTLS_SSL_DTLS_SRTP`
+  - MbedTLS 4.0+ (development) is not compatible with libdatachannel 0.23.2
 - **No Media Support**: Built with `NO_MEDIA=ON` to avoid libsrtp and related dependencies
 - **No WebSocket Support**: Built with `NO_WEBSOCKET=ON` to minimize dependencies
 - **Static Linking**: Only static libraries are produced and consumed
@@ -33,6 +33,30 @@ We use MbedTLS instead of OpenSSL or GnuTLS for several reasons:
 - **Build Simplicity**: Reduces build time and complexity in CI environments
 
 ## CI/CD Workflow
+
+### Workflow Trigger Strategy
+
+The libdatachannel build workflow is configured for **manual trigger only** (`workflow_dispatch`). This approach treats libdatachannel as a **vendored dependency**:
+
+- ✅ **Pre-built libraries are committed** to `plugins/unreal/Open3DStream/lib/webrtc/`
+- ✅ **No automatic rebuilds** on push or pull requests
+- ✅ **Manual rebuild only** when updating libdatachannel or MbedTLS versions
+
+**When to manually trigger the workflow:**
+1. Updating to a new libdatachannel release
+2. Updating to a new MbedTLS version
+3. Changing build configuration flags (e.g., adding/removing features)
+4. Debugging build issues across platforms
+
+**How to manually trigger:**
+1. Go to GitHub repository → **Actions** tab
+2. Select **"Build libdatachannel"** workflow from the left sidebar
+3. Click **"Run workflow"** button
+4. Select the branch (usually `develop` or your feature branch)
+5. Click **"Run workflow"** to start
+6. Wait for builds to complete (~5-7 minutes)
+7. Download artifacts for each platform
+8. Extract and commit to `plugins/unreal/Open3DStream/lib/webrtc/`
 
 ### Build Pipeline
 
