@@ -109,8 +109,8 @@ namespace O3DS
         //! Handle data channel close event
         void onDataChannelClose();
 
-        //! Handle incoming data channel message
-        void onDataChannelMessage(const std::vector<uint8_t>& data);
+    //! Handle incoming data channel message
+    void onDataChannelMessage(const rtc::binary& data);
 
         //! Send message to signaling server
         bool sendSignalingMessage(const std::string& message);
