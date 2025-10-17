@@ -1,0 +1,258 @@
+name: Build libdatachannel
+
+# This workflow builds libdatachannel with MbedTLS for all platforms.
+# It is configured to run ONLY on manual trigger (workflow_dispatch).
+# The pre-built libraries are committed to the repo, so this workflow
+# only needs to run when updating libdatachannel or MbedTLS versions.
+#
+# To manually trigger:
+#   1. Go to Actions tab in GitHub
+#   2. Select "Build libdatachannel" workflow
+#   3. Click "Run workflow"
+#   4. Download artifacts and commit to plugins/unreal/Open3DStream/lib/webrtc/
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build libdatachannel (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Checkout MbedTLS stable version
+        working-directory: thirdparty/mbedtls
+        run: |
+          git fetch --tags
+          git checkout v3.6.5
+          git submodule update --init --recursive
+          git log --oneline -1
+        shell: pwsh
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      
+      - name: Install Python dependencies
+        run: pip install jsonschema jinja2
+
+      - name: Setup CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Enable DTLS-SRTP in MbedTLS
+        working-directory: thirdparty/mbedtls
+        run: |
+          python scripts/config.py set MBEDTLS_SSL_DTLS_SRTP
+        shell: pwsh
+
+      - name: Build MbedTLS
+        working-directory: thirdparty/mbedtls
+        run: |
+          cmake -S . -B build `
+            -DGEN_FILES=ON `
+            -DENABLE_TESTING=OFF `
+            -DENABLE_PROGRAMS=OFF `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install"
+          cmake --build build --config Release
+          cmake --install build --config Release
+          Write-Host "Checking installed files..."
+          Get-ChildItem -Path "${{ github.workspace }}/install/include/mbedtls" | Select-Object -First 10
+        shell: pwsh
+
+      - name: Build libdatachannel
+        working-directory: thirdparty/libdatachannel
+        run: |
+          cmake -S . -B build `
+            -DBUILD_SHARED_LIBS=OFF `
+            -DNO_MEDIA=ON `
+            -DNO_WEBSOCKET=ON `
+            -DUSE_MBEDTLS=ON `
+            -DNO_EXAMPLES=ON `
+            -DNO_TESTS=ON `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install" `
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install"
+          cmake --build build --config Release
+          Write-Host "Checking built libraries..."
+          Get-ChildItem -Path "build" -Recurse -Filter "*.lib" | Select-Object FullName
+          Get-ChildItem -Path "build/Release" -ErrorAction SilentlyContinue | Select-Object Name
+          cmake --install build --config Release
+        shell: pwsh
+
+      - name: Package artifacts
+        run: |
+          mkdir -p artifacts/windows/include
+          mkdir -p artifacts/windows/lib
+          Copy-Item -Recurse "${{ github.workspace }}/install/include/rtc" artifacts/windows/include/
+          Copy-Item "${{ github.workspace }}/install/lib/datachannel.lib" artifacts/windows/lib/
+        shell: pwsh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: libdatachannel-windows
+          path: artifacts/windows
+
+  build-linux:
+    name: Build libdatachannel (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Checkout MbedTLS stable version
+        working-directory: thirdparty/mbedtls
+        run: |
+          git fetch --tags
+          git checkout v3.6.5
+          git submodule update --init --recursive
+          git log --oneline -1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      
+      - name: Install Python dependencies
+        run: pip install jsonschema jinja2
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+
+      - name: Enable DTLS-SRTP in MbedTLS
+        working-directory: thirdparty/mbedtls
+        run: |
+          python3 scripts/config.py set MBEDTLS_SSL_DTLS_SRTP
+
+      - name: Build MbedTLS
+        working-directory: thirdparty/mbedtls
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DGEN_FILES=ON \
+            -DENABLE_TESTING=OFF \
+            -DENABLE_PROGRAMS=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install"
+          cmake --build build
+          cmake --install build
+          echo "Checking installed files..."
+          ls -la ${{ github.workspace }}/install/include/mbedtls/ | head -20
+
+      - name: Build libdatachannel
+        working-directory: thirdparty/libdatachannel
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DNO_MEDIA=ON \
+            -DNO_WEBSOCKET=ON \
+            -DUSE_MBEDTLS=ON \
+            -DNO_EXAMPLES=ON \
+            -DNO_TESTS=ON \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install" \
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install"
+          cmake --build build
+          echo "Checking built libraries..."
+          find build -name "*.a" -type f
+          cmake --install build
+
+      - name: Package artifacts
+        run: |
+          mkdir -p artifacts/linux/include
+          mkdir -p artifacts/linux/lib
+          cp -r ${{ github.workspace }}/install/include/rtc artifacts/linux/include/
+          cp ${{ github.workspace }}/install/lib/libdatachannel.a artifacts/linux/lib/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: libdatachannel-linux
+          path: artifacts/linux
+
+  build-macos:
+    name: Build libdatachannel (macOS)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Checkout MbedTLS stable version
+        working-directory: thirdparty/mbedtls
+        run: |
+          git fetch --tags
+          git checkout v3.6.5
+          git submodule update --init --recursive
+          git log --oneline -1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      
+      - name: Install Python dependencies
+        run: pip install jsonschema jinja2
+
+      - name: Setup CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Enable DTLS-SRTP in MbedTLS
+        working-directory: thirdparty/mbedtls
+        run: |
+          python3 scripts/config.py set MBEDTLS_SSL_DTLS_SRTP
+
+      - name: Build MbedTLS
+        working-directory: thirdparty/mbedtls
+        run: |
+          cmake -S . -B build \
+            -DGEN_FILES=ON \
+            -DENABLE_TESTING=OFF \
+            -DENABLE_PROGRAMS=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install"
+          cmake --build build
+          cmake --install build
+          echo "Checking installed files..."
+          ls -la ${{ github.workspace }}/install/include/mbedtls/ | head -20
+
+      - name: Build libdatachannel
+        working-directory: thirdparty/libdatachannel
+        run: |
+          cmake -S . -B build \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DNO_MEDIA=ON \
+            -DNO_WEBSOCKET=ON \
+            -DUSE_MBEDTLS=ON \
+            -DNO_EXAMPLES=ON \
+            -DNO_TESTS=ON \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install" \
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install"
+          cmake --build build
+          echo "Checking built libraries..."
+          find build -name "*.a" -type f
+          cmake --install build
+
+      - name: Package artifacts
+        run: |
+          mkdir -p artifacts/macos/include
+          mkdir -p artifacts/macos/lib
+          cp -r ${{ github.workspace }}/install/include/rtc artifacts/macos/include/
+          cp ${{ github.workspace }}/install/lib/libdatachannel.a artifacts/macos/lib/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: libdatachannel-macos
+          path: artifacts/macos

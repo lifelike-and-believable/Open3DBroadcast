@@ -1,0 +1,212 @@
+
+========================================================================
+Building libdatachannel for WebRTC Support
+========================================================================
+
+[1/7] Checking for OpenSSL...
+
+[✓] OpenSSL found: 3.0.13
+
+[2/7] Initializing libdatachannel submodules...
+    [✓] Submodules already initialized
+
+[3/7] Creating build directory...
+    Cleaning previous build...
+[✓] Build directory ready
+
+[4/7] Configuring CMake for libdatachannel...
+
+-- The CXX compiler identification is GNU 13.3.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE  
+-- The C compiler identification is GNU 13.3.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Looking for include file sys/queue.h
+-- Looking for include file sys/queue.h - found
+-- Looking for include files sys/socket.h, linux/if_addr.h
+-- Looking for include files sys/socket.h, linux/if_addr.h - found
+-- Looking for include files sys/socket.h, linux/rtnetlink.h
+-- Looking for include files sys/socket.h, linux/rtnetlink.h - found
+-- Looking for 4 include files sys/types.h, ..., netinet/ip_icmp.h
+-- Looking for 4 include files sys/types.h, ..., netinet/ip_icmp.h - found
+-- Looking for 3 include files sys/types.h, ..., net/route.h
+-- Looking for 3 include files sys/types.h, ..., net/route.h - found
+-- Looking for include file stdatomic.h
+-- Looking for include file stdatomic.h - found
+-- Looking for usrsctp.h
+-- Looking for usrsctp.h - found
+-- Performing Test have_sa_len
+-- Performing Test have_sa_len - Failed
+-- Performing Test have_sin_len
+-- Performing Test have_sin_len - Failed
+-- Performing Test have_sin6_len
+-- Performing Test have_sin6_len - Failed
+-- Performing Test have_sconn_len
+-- Performing Test have_sconn_len - Failed
+-- Performing Test has_wfloat_equal
+-- Performing Test has_wfloat_equal - Success
+-- Performing Test has_wshadow
+-- Performing Test has_wshadow - Success
+-- Performing Test has_wpointer_aritih
+-- Performing Test has_wpointer_aritih - Success
+-- Performing Test has_wunreachable_code
+-- Performing Test has_wunreachable_code - Success
+-- Performing Test has_winit_self
+-- Performing Test has_winit_self - Success
+-- Performing Test has_wno_unused_function
+-- Performing Test has_wno_unused_function - Success
+-- Performing Test has_wno_unused_parameter
+-- Performing Test has_wno_unused_parameter - Success
+-- Performing Test has_wno_unreachable_code
+-- Performing Test has_wno_unreachable_code - Success
+-- Performing Test has_wstrict_prototypes
+-- Performing Test has_wstrict_prototypes - Success
+-- Compiler flags (CMAKE_C_FLAGS):  -std=c99 -pedantic -Wall -Wextra -Wfloat-equal -Wshadow -Wpointer-arith -Wunreachable-code -Winit-self -Wno-unused-function -Wno-unused-parameter -Wno-unreachable-code -Wstrict-prototypes
+-- Performing Test has_wno_address_of_packed_member
+-- Performing Test has_wno_address_of_packed_member - Success
+-- Performing Test has_wno_deprecated_declarations
+-- Performing Test has_wno_deprecated_declarations - Success
+-- Found OpenSSL: /usr/lib/x86_64-linux-gnu/libcrypto.so (found version "3.0.13")  
+-- Configuring done (6.3s)
+-- Generating done (0.0s)
+-- Build files have been written to: /workspaces/Open3DStream/thirdparty/build_webrtc
+[✓] CMake configuration complete
+
+[5/7] Building libdatachannel (Debug)...
+[  1%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/addr.c.o
+[  1%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/agent.c.o
+[  3%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/crc32.c.o
+[  3%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/const_time.c.o
+[  5%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/conn.c.o
+[  5%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/conn_poll.c.o
+[  7%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/conn_thread.c.o
+[  7%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/conn_mux.c.o
+[  8%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/base64.c.o
+[  8%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/hash.c.o
+[ 10%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/hmac.c.o
+[ 10%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/ice.c.o
+[ 12%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/juice.c.o
+[ 12%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/log.c.o
+[ 14%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/random.c.o
+[ 14%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/server.c.o
+[ 15%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/stun.c.o
+[ 15%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/timestamp.c.o
+[ 17%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/turn.c.o
+[ 17%] Building C object deps/libjuice/CMakeFiles/juice-static.dir/src/udp.c.o
+[ 19%] Linking C static library libjuice-static.a
+[ 19%] Built target juice-static
+[ 21%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet/sctp_asconf.c.o
+[ 21%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet/sctp_auth.c.o
+[ 22%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet/sctp_bsd_addr.c.o
+[ 22%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet/sctp_callout.c.o
+[ 24%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet/sctp_cc_functions.c.o
+[ 24%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet/sctp_crc32.c.o
+[ 26%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet/sctp_indata.c.o
+[ 26%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet/sctp_input.c.o
+[ 28%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet/sctp_output.c.o
+[ 28%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet/sctp_pcb.c.o
+[ 29%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet/sctp_peeloff.c.o
+[ 29%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet/sctp_sha1.c.o
+[ 31%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet/sctp_ss_functions.c.o
+[ 31%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet/sctp_sysctl.c.o
+[ 33%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet/sctp_timer.c.o
+[ 33%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet/sctp_userspace.c.o
+[ 35%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet/sctp_usrreq.c.o
+[ 35%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet/sctputil.c.o
+[ 36%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/netinet6/sctp6_usrreq.c.o
+[ 36%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/user_environment.c.o
+[ 38%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/user_mbuf.c.o
+[ 38%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/user_recv_thread.c.o
+[ 40%] Building C object deps/usrsctp/usrsctplib/CMakeFiles/usrsctp.dir/user_socket.c.o
+[ 42%] Linking C static library libusrsctp.a
+[ 42%] Built target usrsctp
+[ 43%] Building CXX object CMakeFiles/datachannel-static.dir/src/candidate.cpp.o
+[ 43%] Building CXX object CMakeFiles/datachannel-static.dir/src/channel.cpp.o
+[ 45%] Building CXX object CMakeFiles/datachannel-static.dir/src/configuration.cpp.o
+[ 45%] Building CXX object CMakeFiles/datachannel-static.dir/src/datachannel.cpp.o
+[ 47%] Building CXX object CMakeFiles/datachannel-static.dir/src/dependencydescriptor.cpp.o
+[ 47%] Building CXX object CMakeFiles/datachannel-static.dir/src/description.cpp.o
+[ 49%] Building CXX object CMakeFiles/datachannel-static.dir/src/iceudpmuxlistener.cpp.o
+[ 49%] Building CXX object CMakeFiles/datachannel-static.dir/src/mediahandler.cpp.o
+[ 50%] Building CXX object CMakeFiles/datachannel-static.dir/src/global.cpp.o
+[ 52%] Building CXX object CMakeFiles/datachannel-static.dir/src/message.cpp.o
+[ 52%] Building CXX object CMakeFiles/datachannel-static.dir/src/peerconnection.cpp.o
+[ 54%] Building CXX object CMakeFiles/datachannel-static.dir/src/rtcpreceivingsession.cpp.o
+[ 54%] Building CXX object CMakeFiles/datachannel-static.dir/src/track.cpp.o
+[ 56%] Building CXX object CMakeFiles/datachannel-static.dir/src/websocket.cpp.o
+[ 56%] Building CXX object CMakeFiles/datachannel-static.dir/src/websocketserver.cpp.o
+[ 57%] Building CXX object CMakeFiles/datachannel-static.dir/src/rtppacketizationconfig.cpp.o
+[ 57%] Building CXX object CMakeFiles/datachannel-static.dir/src/rtcpsrreporter.cpp.o
+[ 59%] Building CXX object CMakeFiles/datachannel-static.dir/src/rtppacketizer.cpp.o
+[ 59%] Building CXX object CMakeFiles/datachannel-static.dir/src/rtpdepacketizer.cpp.o
+[ 61%] Building CXX object CMakeFiles/datachannel-static.dir/src/h264rtppacketizer.cpp.o
+[ 61%] Building CXX object CMakeFiles/datachannel-static.dir/src/h264rtpdepacketizer.cpp.o
+[ 63%] Building CXX object CMakeFiles/datachannel-static.dir/src/nalunit.cpp.o
+[ 63%] Building CXX object CMakeFiles/datachannel-static.dir/src/h265rtppacketizer.cpp.o
+[ 64%] Building CXX object CMakeFiles/datachannel-static.dir/src/h265rtpdepacketizer.cpp.o
+[ 64%] Building CXX object CMakeFiles/datachannel-static.dir/src/h265nalunit.cpp.o
+[ 66%] Building CXX object CMakeFiles/datachannel-static.dir/src/av1rtppacketizer.cpp.o
+[ 66%] Building CXX object CMakeFiles/datachannel-static.dir/src/rtcpnackresponder.cpp.o
+[ 68%] Building CXX object CMakeFiles/datachannel-static.dir/src/rtp.cpp.o
+[ 68%] Building CXX object CMakeFiles/datachannel-static.dir/src/capi.cpp.o
+[ 70%] Building CXX object CMakeFiles/datachannel-static.dir/src/plihandler.cpp.o
+[ 70%] Building CXX object CMakeFiles/datachannel-static.dir/src/pacinghandler.cpp.o
+[ 71%] Building CXX object CMakeFiles/datachannel-static.dir/src/rembhandler.cpp.o
+[ 73%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/certificate.cpp.o
+[ 73%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/channel.cpp.o
+[ 75%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/datachannel.cpp.o
+[ 75%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/dtlssrtptransport.cpp.o
+[ 77%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/dtlstransport.cpp.o
+[ 77%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/icetransport.cpp.o
+[ 78%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/iceudpmuxlistener.cpp.o
+[ 78%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/init.cpp.o
+[ 80%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/peerconnection.cpp.o
+[ 80%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/logcounter.cpp.o
+[ 82%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/sctptransport.cpp.o
+[ 82%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/threadpool.cpp.o
+[ 84%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/tls.cpp.o
+[ 84%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/track.cpp.o
+[ 85%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/utils.cpp.o
+[ 85%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/processor.cpp.o
+[ 87%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/sha.cpp.o
+[ 87%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/pollinterrupter.cpp.o
+[ 89%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/pollservice.cpp.o
+[ 89%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/http.cpp.o
+[ 91%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/httpproxytransport.cpp.o
+[ 91%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/tcpserver.cpp.o
+[ 92%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/tcptransport.cpp.o
+[ 92%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/tlstransport.cpp.o
+[ 94%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/transport.cpp.o
+[ 96%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/verifiedtlstransport.cpp.o
+[ 96%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/websocket.cpp.o
+[ 98%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/websocketserver.cpp.o
+[ 98%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/wstransport.cpp.o
+[100%] Building CXX object CMakeFiles/datachannel-static.dir/src/impl/wshandshake.cpp.o
+[100%] Linking CXX static library libdatachannel-static.a
+[100%] Built target datachannel-static
+[✓] Debug build complete
+
+[6/7] Building libdatachannel (RelWithDebInfo)...
+[ 19%] Built target juice-static
+[ 42%] Built target usrsctp
+[100%] Built target datachannel-static
+[✓] RelWithDebInfo build complete
+
+[7/7] Copying libraries to plugin directory...
+    [✓] Copied libdatachannel.a
+    Copying headers...
+    [✓] Copied headers
+[✓] Files copied to plugin directory
+
+[8/8] Creating build info file...
+./build_webrtc_lib.sh: line 180: syntax error near unexpected token `2'

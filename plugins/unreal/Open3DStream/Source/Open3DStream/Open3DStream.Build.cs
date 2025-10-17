@@ -12,63 +12,57 @@ public class Open3DStream : ModuleRules
 		PublicIncludePaths.AddRange( new string[] {} );
 		
 		string LibDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "../../lib/"));
+		string WebRTCDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "../../lib/webrtc/"));
 	
 		PrivateIncludePaths.AddRange( new string[] 
-        { LibDir + "include" } );
+        { 
+            LibDir + "include",
+            WebRTCDir + "include"
+        } );
 
 		PublicDependencyModuleNames.AddRange( new string[] { "Core" } );
 
+        // O3DS static libraries
         PublicAdditionalLibraries.Add(LibDir + "nng.lib");
         PublicAdditionalLibraries.Add(LibDir + "flatbuffers.lib");
         PublicAdditionalLibraries.Add(LibDir + "open3dstreamstatic.lib");
 
-        PublicDefinitions.Add("NNG_STATIC_LIB");
+        // libdatachannel static library for WebRTC support
+        if (Target.Platform == UnrealTargetPlatform.Win64)
+        {
+            PublicAdditionalLibraries.Add(WebRTCDir + "datachannel.lib");
+        }
+        else if (Target.Platform == UnrealTargetPlatform.Linux)
+        {
+            PublicAdditionalLibraries.Add(WebRTCDir + "libdatachannel.a");
+        }
+        else if (Target.Platform == UnrealTargetPlatform.Mac)
+        {
+            PublicAdditionalLibraries.Add(WebRTCDir + "libdatachannel.a");
+        }
 
-        // WebRTC Support - Enabled by default if datachannel.lib exists
-        // WebRTC options will appear in LiveLink Source dialog if:
-        // 1. The Open3DStream library was built with -DO3DS_ENABLE_WEBRTC=ON
-        // 2. WebRTC library files exist in the lib directory
-        string DataChannelLib = LibDir + "datachannel.lib";
-        if (File.Exists(DataChannelLib))
-        {
-            // Define O3DS_ENABLE_WEBRTC to enable WebRTC code paths
-            PublicDefinitions.Add("O3DS_ENABLE_WEBRTC");
-            
-            PublicAdditionalLibraries.Add(DataChannelLib);
-            
-            // Add Windows system libraries required by libdatachannel
-            if (Target.Platform == UnrealTargetPlatform.Win64)
-            {
-                PublicSystemLibraries.Add("ws2_32.lib");
-                PublicSystemLibraries.Add("bcrypt.lib");
-                PublicSystemLibraries.Add("secur32.lib");
-                PublicSystemLibraries.Add("iphlpapi.lib");
-                PublicSystemLibraries.Add("crypt32.lib");
-            }
-            
-            System.Console.WriteLine("Open3DStream: WebRTC support enabled (datachannel.lib found)");
-        }
-        else
-        {
-            System.Console.WriteLine("Open3DStream: WebRTC libraries not found - WebRTC options will be disabled");
-        }
+        PublicDefinitions.Add("NNG_STATIC_LIB");
+        PublicDefinitions.Add("RTC_STATIC=1"); // Define RTC_STATIC for static libdatachannel
 
         PrivateDependencyModuleNames.AddRange(
-			new string[]
-			{
-				"CoreUObject",
-				"Engine",
-				"Slate",
-				"SlateCore",
+            new string[]
+            {
+                "CoreUObject",
+                "Engine",
+                "Slate",
+                "SlateCore",
                 "LiveLinkInterface",
                 "Networking",
                 "Sockets",
                 "InputCore",
-                "Networking",
-                "Sockets",
-				// ... add private dependencies that you statically link with here ...	
-			}
-			);
+                "PixelStreaming",
+                "WebRTC",
+                "WebSockets",
+                "Json",
+                "JsonUtilities",
+                // ... add private dependencies that you statically link with here ...  
+            }
+            );
 				
 		DynamicallyLoadedModuleNames.AddRange( new string[] {} );
 	}

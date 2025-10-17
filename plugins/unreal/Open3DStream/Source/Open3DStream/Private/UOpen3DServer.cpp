@@ -1,9 +1,7 @@
 #include "UOpen3DServer.h"
 #include "o3ds/async_pair.h"
 #include "o3ds/async_subscriber.h"
-#ifdef O3DS_ENABLE_WEBRTC
-#include "o3ds/webrtc_connector.h"
-#endif
+#include "WebRTCConnector.h"
 #include "SocketSubsystem.h"
 #include "Interfaces/IPv4/IPv4Address.h"
 #include "Common/UdpSocketBuilder.h"
@@ -18,6 +16,7 @@ void InDataFunc(void* ptr, void* data, size_t msg)
 
 O3DSServer::O3DSServer()
 	: mServer(nullptr)
+	, mWebRTCConnector(nullptr)
 	, mTcp(nullptr)
 	, mUdp(nullptr)
 	, mUdpReceiver(nullptr)
@@ -58,17 +57,50 @@ bool O3DSServer::start(FText Url, FText Protocol )
 		mServer = new O3DS::AsyncPairServer();
 	}
 
-#ifdef O3DS_ENABLE_WEBRTC
-	// WebRTC
+	// WebRTC using Unreal's Pixel Streaming
 	if (strncmp(sprotocol, "WebRTC Client", 13) == 0)
 	{
-		mServer = new O3DS::WebRTCClient();
+		mWebRTCConnector = new FWebRTCConnector();
+		mWebRTCConnector->SetDataReceivedCallback([this](const uint8* Data, int32 Size)
+		{
+			this->inData(Data, Size);
+		});
+		
+		if (mWebRTCConnector->Start(Url.ToString(), false))
+		{
+			OnState.ExecuteIfBound(LOCTEXT("WebRTCClientStarted", "WebRTC Client started. Connect via Pixel Streaming."), false);
+			return true;
+		}
+		else
+		{
+			OnState.ExecuteIfBound(FText::FromString(mWebRTCConnector->GetLastError()), true);
+			delete mWebRTCConnector;
+			mWebRTCConnector = nullptr;
+			return false;
+		}
 	}
+	
 	if (strncmp(sprotocol, "WebRTC Server", 13) == 0)
 	{
-		mServer = new O3DS::WebRTCServer();
+		mWebRTCConnector = new FWebRTCConnector();
+		mWebRTCConnector->SetDataReceivedCallback([this](const uint8* Data, int32 Size)
+		{
+			this->inData(Data, Size);
+		});
+		
+		if (mWebRTCConnector->Start(Url.ToString(), true))
+		{
+			OnState.ExecuteIfBound(LOCTEXT("WebRTCServerStarted", "WebRTC Server started. Connect via Pixel Streaming."), false);
+			return true;
+		}
+		else
+		{
+			OnState.ExecuteIfBound(FText::FromString(mWebRTCConnector->GetLastError()), true);
+			delete mWebRTCConnector;
+			mWebRTCConnector = nullptr;
+			return false;
+		}
 	}
-#endif
 
 	if (mServer)
 	{
@@ -205,6 +237,13 @@ void O3DSServer::stop()
 		mServer = nullptr;
 	}
 
+	if (mWebRTCConnector)
+	{
+		mWebRTCConnector->Stop();
+		delete mWebRTCConnector;
+		mWebRTCConnector = nullptr;
+	}
+
 	if (mUdp)
 	{
 		mUdpReceiver->Stop();
@@ -226,6 +265,11 @@ void O3DSServer::stop()
 
 bool O3DSServer::write(const char *msg, size_t len)
 {
+	if (mWebRTCConnector)
+	{
+		return mWebRTCConnector->Send((const uint8*)msg, (int32)len);
+	}
+	
 	if (!mServer) return false;
 	return mServer->write(msg, len);
 }

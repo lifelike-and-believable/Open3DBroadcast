@@ -1,6 +1,14 @@
 # WebRTC Quick Start Guide
 
-## 5-Minute Setup
+> **📝 Note**: This guide covers WebRTC usage in **C++ command-line tools**. 
+> 
+> **For Unreal Engine users**: WebRTC support in the Unreal plugin is currently under development. 
+> The build infrastructure is complete, but the functionality is not yet implemented. 
+> See [Issue #15](https://github.com/lifelike-and-believable/Open3DStream/issues/15) for progress.
+> 
+> In the meantime, please use TCP, UDP, or NNG protocols for Unreal (all fully functional).
+
+## 5-Minute Setup (C++ Tools)
 
 ### Step 1: Install Dependencies
 

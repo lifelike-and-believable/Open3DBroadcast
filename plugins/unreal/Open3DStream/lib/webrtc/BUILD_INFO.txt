@@ -1,13 +1,26 @@
 libdatachannel Build Information
 =======================================
 
-Build Date: Fri Oct 17 04:09:01 UTC 2025
-Built by: codespace
-Build Host: codespaces-676daf
-libdatachannel Version: v0.23.2-14-gab100fe8
-OpenSSL: 3.0.13
-Configuration: RelWithDebInfo
-Platform: x86_64
+Build Date: 2025-10-17 14:05:53 UTC
+Built by: GitHub Actions
+Build Source: PR #14 (issue-13-libdatachannel-mbedtls branch)
+CI Run ID: 18595163259
+libdatachannel Version: v0.23.2
+TLS Backend: MbedTLS 3.6.5 (DTLS-SRTP enabled)
+Configuration: Release (Static linking)
+Build Flags: -DBUILD_SHARED_LIBS=OFF -DNO_MEDIA=ON -DNO_WEBSOCKET=ON -DUSE_MBEDTLS=ON
 
-Files:
-  - libdatachannel.a (86M)
+Platform-Specific Files:
+  - libdatachannel.a (Linux, 4.3M)
+  - libdatachannel.a (macOS, 2.7M) 
+  - datachannel.lib (Windows, 24M)
+
+Key Features:
+  ✅ Static linking only
+  ✅ MbedTLS 3.6.5 with DTLS-SRTP support
+  ✅ No OpenSSL dependencies
+  ✅ No media/WebSocket support (data channels only)
+  ✅ Cross-platform (Windows, Linux, macOS)
+
+Build Workflow: .github/workflows/build-libdatachannel.yml
+Documentation: LIBDATACHANNEL_INTEGRATION.md
