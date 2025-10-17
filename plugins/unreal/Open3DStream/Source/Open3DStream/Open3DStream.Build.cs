@@ -28,17 +28,38 @@ public class Open3DStream : ModuleRules
         PublicAdditionalLibraries.Add(LibDir + "open3dstreamstatic.lib");
 
         // libdatachannel static library for WebRTC support
+        // Note: datachannel depends on usrsctp, juice, and mbedtls libraries
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
             PublicAdditionalLibraries.Add(WebRTCDir + "datachannel.lib");
+            PublicAdditionalLibraries.Add(WebRTCDir + "usrsctp.lib");
+            PublicAdditionalLibraries.Add(WebRTCDir + "juice-static.lib");
+            PublicAdditionalLibraries.Add(WebRTCDir + "mbedtls.lib");
+            PublicAdditionalLibraries.Add(WebRTCDir + "mbedx509.lib");
+            PublicAdditionalLibraries.Add(WebRTCDir + "mbedcrypto.lib");
+            // Required Windows system libraries for threading and STL
+            PublicSystemLibraries.AddRange(new string[] {
+                "synchronization.lib",  // For _Thrd_sleep_for, _Cnd_timedwait_for_unchecked
+                "legacy_stdio_definitions.lib"  // For __std_* MSVC STL functions
+            });
         }
         else if (Target.Platform == UnrealTargetPlatform.Linux)
         {
             PublicAdditionalLibraries.Add(WebRTCDir + "libdatachannel.a");
+            PublicAdditionalLibraries.Add(WebRTCDir + "libusrsctp.a");
+            PublicAdditionalLibraries.Add(WebRTCDir + "libjuice-static.a");
+            PublicAdditionalLibraries.Add(WebRTCDir + "libmbedtls.a");
+            PublicAdditionalLibraries.Add(WebRTCDir + "libmbedx509.a");
+            PublicAdditionalLibraries.Add(WebRTCDir + "libmbedcrypto.a");
         }
         else if (Target.Platform == UnrealTargetPlatform.Mac)
         {
-            PublicAdditionalLibraries.Add(WebRTCDir + "libdatachannel.a");
+            PublicAdditionalLibraries.Add(WebRTCDir + "macos/libdatachannel.a");
+            PublicAdditionalLibraries.Add(WebRTCDir + "macos/libusrsctp.a");
+            PublicAdditionalLibraries.Add(WebRTCDir + "macos/libjuice-static.a");
+            PublicAdditionalLibraries.Add(WebRTCDir + "macos/libmbedtls.a");
+            PublicAdditionalLibraries.Add(WebRTCDir + "macos/libmbedx509.a");
+            PublicAdditionalLibraries.Add(WebRTCDir + "macos/libmbedcrypto.a");
         }
 
         PublicDefinitions.Add("NNG_STATIC_LIB");

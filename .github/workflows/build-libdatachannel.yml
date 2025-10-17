@@ -90,7 +90,16 @@ jobs:
           mkdir -p artifacts/windows/include
           mkdir -p artifacts/windows/lib
           Copy-Item -Recurse "${{ github.workspace }}/install/include/rtc" artifacts/windows/include/
+          # Copy all static libraries (datachannel and its dependencies)
           Copy-Item "${{ github.workspace }}/install/lib/datachannel.lib" artifacts/windows/lib/
+          Copy-Item "${{ github.workspace }}/install/lib/usrsctp.lib" artifacts/windows/lib/ -ErrorAction SilentlyContinue
+          Copy-Item "${{ github.workspace }}/install/lib/juice-static.lib" artifacts/windows/lib/ -ErrorAction SilentlyContinue
+          Copy-Item "${{ github.workspace }}/install/lib/mbedtls.lib" artifacts/windows/lib/
+          Copy-Item "${{ github.workspace }}/install/lib/mbedx509.lib" artifacts/windows/lib/
+          Copy-Item "${{ github.workspace }}/install/lib/mbedcrypto.lib" artifacts/windows/lib/
+          # List what was collected
+          Write-Host "Collected libraries:"
+          Get-ChildItem artifacts/windows/lib/*.lib | ForEach-Object { Write-Host "  $($_.Name) ($([math]::Round($_.Length/1MB, 1))MB)" }
         shell: pwsh
 
       - name: Upload artifacts
@@ -170,7 +179,16 @@ jobs:
           mkdir -p artifacts/linux/include
           mkdir -p artifacts/linux/lib
           cp -r ${{ github.workspace }}/install/include/rtc artifacts/linux/include/
+          # Copy all static libraries (datachannel and its dependencies)
           cp ${{ github.workspace }}/install/lib/libdatachannel.a artifacts/linux/lib/
+          cp ${{ github.workspace }}/install/lib/libusrsctp.a artifacts/linux/lib/ 2>/dev/null || true
+          cp ${{ github.workspace }}/install/lib/libjuice-static.a artifacts/linux/lib/ 2>/dev/null || true
+          cp ${{ github.workspace }}/install/lib/libmbedtls.a artifacts/linux/lib/
+          cp ${{ github.workspace }}/install/lib/libmbedx509.a artifacts/linux/lib/
+          cp ${{ github.workspace }}/install/lib/libmbedcrypto.a artifacts/linux/lib/
+          # List what was collected
+          echo "Collected libraries:"
+          ls -lh artifacts/linux/lib/*.a | awk '{print "  " $9 " (" $5 ")"}'
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -249,7 +267,16 @@ jobs:
           mkdir -p artifacts/macos/include
           mkdir -p artifacts/macos/lib
           cp -r ${{ github.workspace }}/install/include/rtc artifacts/macos/include/
+          # Copy all static libraries (datachannel and its dependencies)
           cp ${{ github.workspace }}/install/lib/libdatachannel.a artifacts/macos/lib/
+          cp ${{ github.workspace }}/install/lib/libusrsctp.a artifacts/macos/lib/ 2>/dev/null || true
+          cp ${{ github.workspace }}/install/lib/libjuice-static.a artifacts/macos/lib/ 2>/dev/null || true
+          cp ${{ github.workspace }}/install/lib/libmbedtls.a artifacts/macos/lib/
+          cp ${{ github.workspace }}/install/lib/libmbedx509.a artifacts/macos/lib/
+          cp ${{ github.workspace }}/install/lib/libmbedcrypto.a artifacts/macos/lib/
+          # List what was collected
+          echo "Collected libraries:"
+          ls -lh artifacts/macos/lib/*.a | awk '{print "  " $9 " (" $5 ")"}'
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
