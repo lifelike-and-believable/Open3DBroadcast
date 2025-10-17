@@ -66,21 +66,21 @@ void FWebRTCConnector::SetDataReceivedCallback(TFunction<void(const uint8*, int3
 	DataReceivedCallback = Callback;
 }
 
-void FWebRTCConnector::OnDataChannelMessage(IPixelStreamingStreamer* Streamer)
+void FWebRTCConnector::OnDataChannelMessage(IPixelStreamingStreamer* InStreamer)
 {
 	// TODO: Implement when Pixel Streaming API is properly understood
 	// The delegate signature and data channel API needs to be determined
 	// from the actual UE 5.6 Pixel Streaming source code
 }
 
-void FWebRTCConnector::OnStreamerConnected(IPixelStreamingStreamer* Streamer)
+void FWebRTCConnector::OnStreamerConnected(IPixelStreamingStreamer* InStreamer)
 {
 	// TODO: Implement connection handling
 	bIsConnected = true;
 	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Streamer connected"));
 }
 
-void FWebRTCConnector::OnStreamerDisconnected(IPixelStreamingStreamer* Streamer)
+void FWebRTCConnector::OnStreamerDisconnected(IPixelStreamingStreamer* InStreamer)
 {
 	// TODO: Implement disconnection handling
 	bIsConnected = false;

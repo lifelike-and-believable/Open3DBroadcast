@@ -87,11 +87,11 @@ private:
 	FDelegateHandle ConnectionStateHandle;
 
 	/** Handle data received from data channel */
-	void OnDataChannelMessage(IPixelStreamingStreamer* Streamer);
+	void OnDataChannelMessage(IPixelStreamingStreamer* InStreamer);
 
 	/** Handle streamer connection */
-	void OnStreamerConnected(IPixelStreamingStreamer* Streamer);
+	void OnStreamerConnected(IPixelStreamingStreamer* InStreamer);
 
 	/** Handle streamer disconnection */
-	void OnStreamerDisconnected(IPixelStreamingStreamer* Streamer);
+	void OnStreamerDisconnected(IPixelStreamingStreamer* InStreamer);
 };
