@@ -177,11 +177,10 @@ Platform: $(uname -m)
 Files:
 EOF
 
-for lib in "$PLUGIN_LIB_DIR"/*.a "$PLUGIN_LIB_DIR"/*.so 2>/dev/null; do
-    if [ -f "$lib" ]; then
-        SIZE=$(du -h "$lib" | cut -f1)
-        echo "  - $(basename "$lib") ($SIZE)" >> "$PLUGIN_LIB_DIR/BUILD_INFO.txt"
-    fi
+# List library files
+find "$PLUGIN_LIB_DIR" -maxdepth 1 -type f \( -name "*.a" -o -name "*.so" \) 2>/dev/null | while read -r lib; do
+    SIZE=$(du -h "$lib" | cut -f1)
+    echo "  - $(basename "$lib") ($SIZE)" >> "$PLUGIN_LIB_DIR/BUILD_INFO.txt"
 done
 
 echo "[✓] Build info created"
