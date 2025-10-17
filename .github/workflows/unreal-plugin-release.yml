@@ -136,6 +136,35 @@ jobs:
           Copy-Item "thirdparty\build\nng\Release\nng.lib" "$pluginLib\" -ErrorAction Stop
           Copy-Item "thirdparty\build\flatbuffers\Release\flatbuffers.lib" "$pluginLib\" -ErrorAction Stop
           
+          Write-Host "[OK] Core libraries copied"
+          
+          # WebRTC libraries should already exist in plugin lib (pre-built from build-libdatachannel workflow)
+          # Verify they exist
+          $webrtcLibs = @(
+            "$pluginLib\webrtc\datachannel.lib",
+            "$pluginLib\webrtc\juice.lib",
+            "$pluginLib\webrtc\usrsctp.lib",
+            "$pluginLib\webrtc\mbedtls.lib",
+            "$pluginLib\webrtc\mbedx509.lib",
+            "$pluginLib\webrtc\mbedcrypto.lib"
+          )
+          
+          $missing = @()
+          foreach ($lib in $webrtcLibs) {
+            if (!(Test-Path $lib)) {
+              $missing += $lib
+            }
+          }
+          
+          if ($missing.Count -gt 0) {
+            Write-Error "Missing WebRTC libraries (required for release build):"
+            $missing | ForEach-Object { Write-Error "  - $_" }
+            Write-Error "These libraries must be committed to the repository. Run build-libdatachannel workflow first."
+            exit 1
+          } else {
+            Write-Host "[OK] All WebRTC libraries present"
+          }
+          
           # Copy Open3DStream header files
           Copy-Item "src\o3ds\*.h" "$pluginLib\include\o3ds\" -Force
           # Copy FlatBuffers generated header to include root (referenced by model.h)
