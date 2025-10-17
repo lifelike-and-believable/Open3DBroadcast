@@ -18,11 +18,11 @@ jobs:
         with:
           submodules: 'recursive'
 
-      - name: Checkout MbedTLS development branch
+      - name: Checkout MbedTLS stable version
         working-directory: thirdparty/mbedtls
         run: |
-          git fetch origin development:development
-          git checkout development
+          git fetch --tags
+          git checkout v3.6.5
           git submodule update --init --recursive
           git log --oneline -1
         shell: pwsh
@@ -51,19 +51,6 @@ jobs:
           cmake --install build --config Release
           Write-Host "Checking installed files..."
           Get-ChildItem -Path "${{ github.workspace }}/install/include/mbedtls" | Select-Object -First 10
-        shell: pwsh
-
-      - name: Create MbedTLS 4.0 compatibility shims
-        run: |
-          $headers = @('ctr_drbg', 'entropy', 'hmac_drbg', 'ecdsa', 'rsa', 'sha256')
-          foreach ($header in $headers) {
-              $shimPath = "${{ github.workspace }}/install/include/mbedtls/$header.h"
-              if (-not (Test-Path $shimPath)) {
-                  $content = "#include `"mbedtls/private/$header.h`"`n"
-                  Set-Content -Path $shimPath -Value $content
-                  Write-Host "Created shim for $header.h"
-              }
-          }
         shell: pwsh
 
       - name: Build libdatachannel
@@ -110,11 +97,11 @@ jobs:
         with:
           submodules: 'recursive'
 
-      - name: Checkout MbedTLS development branch
+      - name: Checkout MbedTLS stable version
         working-directory: thirdparty/mbedtls
         run: |
-          git fetch origin development:development
-          git checkout development
+          git fetch --tags
+          git checkout v3.6.5
           git submodule update --init --recursive
           git log --oneline -1
 
@@ -142,16 +129,6 @@ jobs:
           cmake --install build
           echo "Checking installed files..."
           ls -la ${{ github.workspace }}/install/include/mbedtls/ | head -20
-
-      - name: Create MbedTLS 4.0 compatibility shims
-        run: |
-          for header in ctr_drbg entropy hmac_drbg ecdsa rsa sha256; do
-              shimPath="${{ github.workspace }}/install/include/mbedtls/${header}.h"
-              if [ ! -f "$shimPath" ]; then
-                  echo "#include \"mbedtls/private/${header}.h\"" > "$shimPath"
-                  echo "Created shim for ${header}.h"
-              fi
-          done
 
       - name: Build libdatachannel
         working-directory: thirdparty/libdatachannel
@@ -194,11 +171,11 @@ jobs:
         with:
           submodules: 'recursive'
 
-      - name: Checkout MbedTLS development branch
+      - name: Checkout MbedTLS stable version
         working-directory: thirdparty/mbedtls
         run: |
-          git fetch origin development:development
-          git checkout development
+          git fetch --tags
+          git checkout v3.6.5
           git submodule update --init --recursive
           git log --oneline -1
 
@@ -226,16 +203,6 @@ jobs:
           cmake --install build
           echo "Checking installed files..."
           ls -la ${{ github.workspace }}/install/include/mbedtls/ | head -20
-
-      - name: Create MbedTLS 4.0 compatibility shims
-        run: |
-          for header in ctr_drbg entropy hmac_drbg ecdsa rsa sha256; do
-              shimPath="${{ github.workspace }}/install/include/mbedtls/${header}.h"
-              if [ ! -f "$shimPath" ]; then
-                  echo "#include \"mbedtls/private/${header}.h\"" > "$shimPath"
-                  echo "Created shim for ${header}.h"
-              fi
-          done
 
       - name: Build libdatachannel
         working-directory: thirdparty/libdatachannel
