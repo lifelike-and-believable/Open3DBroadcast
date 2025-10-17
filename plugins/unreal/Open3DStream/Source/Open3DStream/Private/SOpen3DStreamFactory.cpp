@@ -22,10 +22,8 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 	Options.Add(MakeShareable(new FString("TCP Client")));
 	Options.Add(MakeShareable(new FString("UDP Server")));
 
-#ifdef O3DS_ENABLE_WEBRTC
 	Options.Add(MakeShareable(new FString("WebRTC Client")));
 	Options.Add(MakeShareable(new FString("WebRTC Server")));
-#endif
 
 	if (SOpen3DStreamFactory::LastUrl.IsEmpty())
 	{

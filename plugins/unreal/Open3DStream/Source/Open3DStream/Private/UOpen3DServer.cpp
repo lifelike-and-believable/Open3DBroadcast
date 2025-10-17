@@ -1,9 +1,7 @@
 #include "UOpen3DServer.h"
 #include "o3ds/async_pair.h"
 #include "o3ds/async_subscriber.h"
-#ifdef O3DS_ENABLE_WEBRTC
 #include "o3ds/webrtc_connector.h"
-#endif
 #include "SocketSubsystem.h"
 #include "Interfaces/IPv4/IPv4Address.h"
 #include "Common/UdpSocketBuilder.h"
@@ -58,7 +56,6 @@ bool O3DSServer::start(FText Url, FText Protocol )
 		mServer = new O3DS::AsyncPairServer();
 	}
 
-#ifdef O3DS_ENABLE_WEBRTC
 	// WebRTC
 	if (strncmp(sprotocol, "WebRTC Client", 13) == 0)
 	{
@@ -68,7 +65,6 @@ bool O3DSServer::start(FText Url, FText Protocol )
 	{
 		mServer = new O3DS::WebRTCServer();
 	}
-#endif
 
 	if (mServer)
 	{
