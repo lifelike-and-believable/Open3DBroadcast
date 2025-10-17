@@ -49,8 +49,9 @@ jobs:
 
       - name: Install Perl (required for MbedTLS GEN_FILES)
         run: |
-          choco install strawberryperl -y
-          refreshenv
+          choco install strawberryperl -y --no-progress
+          $env:Path = "C:\Strawberry\perl\bin;$env:Path"
+          [Environment]::SetEnvironmentVariable("Path", $env:Path, "Machine")
           perl --version
 
       - name: Enable DTLS-SRTP in MbedTLS
