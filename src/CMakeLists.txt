@@ -5,14 +5,24 @@ project(Open3DStreamLib)
 find_package(Flatbuffers CONFIG REQUIRED flatbuffers flatc HINTS ${CMAKE_CURRENT_LIST_DIR}/../usr)
 find_package(nng CONFIG REQUIRED HINTS ${CMAKE_CURRENT_LIST_DIR}/../usr)
 
-# WebRTC support - Enabled by default
+# WebRTC support
+# - O3DS_ENABLE_WEBRTC (default: ON) keeps backward compatibility with existing builds/docs
+# - O3DS_DISABLE_WEBRTC (default: OFF) is an explicit opt-out that overrides the enable flag
 option(O3DS_ENABLE_WEBRTC "Enable WebRTC support" ON)
-if(O3DS_ENABLE_WEBRTC)
-    find_package(LibDataChannel REQUIRED HINTS ${CMAKE_CURRENT_LIST_DIR}/../usr)
-    add_compile_definitions(O3DS_ENABLE_WEBRTC)
-    message(STATUS "WebRTC support enabled")
+option(O3DS_DISABLE_WEBRTC "Disable WebRTC support (overrides enable)" OFF)
+
+# Compute effective switch used by the build
+set(O3DS_WITH_WEBRTC ${O3DS_ENABLE_WEBRTC})
+if(O3DS_DISABLE_WEBRTC)
+	set(O3DS_WITH_WEBRTC OFF)
+endif()
+
+if(O3DS_WITH_WEBRTC)
+	find_package(LibDataChannel REQUIRED HINTS ${CMAKE_CURRENT_LIST_DIR}/../usr)
+	add_compile_definitions(O3DS_ENABLE_WEBRTC)
+	message(STATUS "WebRTC support enabled")
 else()
-    message(STATUS "WebRTC support disabled")
+	message(STATUS "WebRTC support disabled")
 endif()
 
 add_custom_command(
@@ -53,7 +63,7 @@ set(pub_headers
 	o3ds/o3ds_version.h
 )
 
-if(O3DS_ENABLE_WEBRTC)
+if(O3DS_WITH_WEBRTC)
     list(APPEND pub_headers o3ds/webrtc_connector.h)
 endif()	
 
@@ -86,7 +96,7 @@ set(SOURCES
 	o3ds/o3ds_version.cpp	
 )
 
-if(O3DS_ENABLE_WEBRTC)
+if(O3DS_WITH_WEBRTC)
     list(APPEND SOURCES o3ds/webrtc_connector.cpp)
 endif()
 	
@@ -107,7 +117,7 @@ target_include_directories(open3dstreamstatic PUBLIC
 	${FLATBUFFERS_INCLUDE_DIRS} 
 	${NNG_INCLUDE_DIRS}/..)
 
-if(O3DS_ENABLE_WEBRTC)
+if(O3DS_WITH_WEBRTC)
     target_link_libraries(open3dstreamstatic PUBLIC LibDataChannel::LibDataChannel)
 endif()
 
