@@ -38,11 +38,6 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Setup Perl (required for MbedTLS GEN_FILES)
-        uses: shogo82148/actions-setup-perl@v1
-        with:
-          perl-version: '5.32'
-
       - name: Link plugin into Sandbox
         shell: powershell
         run: |
@@ -167,7 +162,7 @@ jobs:
           if ($missing.Count -gt 0) {
             Write-Error "Missing WebRTC libraries (required for release build):"
             $missing | ForEach-Object { Write-Error "  - $_" }
-            Write-Error "These libraries must be committed to the repository. Run build-libdatachannel workflow first."
+            Write-Error "Provide these via the prebuilt artifact process or commit them under plugins/unreal/$env:PLUGIN_NAME/lib/webrtc. Run the build-libdatachannel helper if needed."
             exit 1
           } else {
             Write-Host "[OK] All WebRTC libraries present"
