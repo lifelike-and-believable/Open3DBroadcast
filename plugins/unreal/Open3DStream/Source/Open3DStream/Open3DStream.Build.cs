@@ -38,11 +38,10 @@ public class Open3DStream : ModuleRules
             PublicAdditionalLibraries.Add(WebRTCDir + "mbedx509.lib");
             PublicAdditionalLibraries.Add(WebRTCDir + "mbedcrypto.lib");
             // Required Windows system libraries for threading, STL, and crypto
-            PublicSystemLibraries.AddRange(new string[] {
-                "synchronization.lib",  // For _Thrd_sleep_for, _Cnd_timedwait_for_unchecked
-                "legacy_stdio_definitions.lib",  // For __std_* MSVC STL functions
-                "bcrypt.lib"  // For BCryptGenRandom (mbedtls entropy)
-            });
+            PublicSystemLibraries.Add("bcrypt");  // For BCryptGenRandom (mbedtls entropy)
+            PublicSystemLibraries.Add("synchronization");  // For _Thrd_sleep_for, _Cnd_timedwait_for_unchecked
+            // MSVC STL intrinsics - must be explicitly linked
+            PublicAdditionalLibraries.Add("legacy_stdio_definitions.lib");  // For __std_* MSVC STL functions
         }
         else if (Target.Platform == UnrealTargetPlatform.Linux)
         {
