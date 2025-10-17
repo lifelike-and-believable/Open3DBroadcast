@@ -22,6 +22,9 @@ if(O3DS_BUILD_WEBRTC)
     set(USE_GNUTLS OFF CACHE BOOL "Don't use GnuTLS")
     set(USE_MBEDTLS OFF CACHE BOOL "Don't use mbedTLS for now - use system crypto")
     
+    # Configure libsrtp (dependency) to not use OpenSSL
+    set(ENABLE_OPENSSL OFF CACHE BOOL "Disable OpenSSL in libsrtp")
+    
     add_subdirectory(libdatachannel)
 else()
     message(STATUS "Skipping libdatachannel build (O3DS_BUILD_WEBRTC=OFF)")
