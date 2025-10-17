@@ -432,8 +432,10 @@ bool WebRTCServer::write(const char* data, size_t len)
     if (mPeers.empty()) {
         return false;
     }
-    
-    rtc::binary bin(data, data + len);
+
+    // rtc::binary is std::vector<std::byte>; construct from std::byte*
+    const std::byte* b = reinterpret_cast<const std::byte*>(data);
+    rtc::binary bin(b, b + len);
     bool sentToAny = false;
     
     for (auto& peer : mPeers) {

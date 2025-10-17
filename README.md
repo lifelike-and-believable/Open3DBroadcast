@@ -80,18 +80,10 @@ make -j4
  
 Added support for animation curves to enable morph target-based facial animation:
 
-- Curve names and values transmitted alongside skeletal data
-- Integrated with LiveLink animation frames (UE 5.6+ PropertyValues)
-- Delta-optimized curve updates
-- See [CURVE_SUPPORT.md](CURVE_SUPPORT.md) for details
-
 ### WebRTC Status (October 2025)
 
 libdatachannel is integrated with MbedTLS and enabled by default across the codebase:
 
-- Pre-built libdatachannel static libraries for Windows, Linux, macOS
-- MbedTLS 3.6.5 with DTLS-SRTP enabled
-- Static linking configuration with no runtime dependencies
 - C++ command-line tools support WebRTC (ready) – see [WEBRTC_QUICKSTART.md](WEBRTC_QUICKSTART.md)
 - Unreal plugin includes a functional WebRTC connector (beta) using a lightweight WebSocket signaling server – see [WEBRTC_UNREAL_IMPLEMENTATION.md](WEBRTC_UNREAL_IMPLEMENTATION.md)
 
@@ -113,6 +105,17 @@ libdatachannel is integrated with MbedTLS and enabled by default across the code
 - [Unreal WebRTC implementation notes](WEBRTC_UNREAL_IMPLEMENTATION.md)
 - [libdatachannel Integration](LIBDATACHANNEL_INTEGRATION.md)
 - [Issue #15](https://github.com/lifelike-and-believable/Open3DStream/issues/15) - Implementation roadmap
+
+## Docs Refresh and Source of Truth
+
+When in doubt, the FlatBuffers schema is the source of truth for the protocol data model:
+
+- Schema: `src/o3ds.fbs`
+- Regenerate header after schema changes: `flatc --cpp src/o3ds.fbs`
+- Generated header (checked in for CI): `src/o3ds_generated.h`
+
+If you update the schema, rebuild the core library and the Unreal plugin.
+
 
 ## Protocol Comparison
 

@@ -35,10 +35,10 @@ Added WebRTC support to Open3DStream as a network transport protocol, enabling p
 
 #### 3. Build Configuration
 - **`src/CMakeLists.txt`**
-  - Added `O3DS_ENABLE_WEBRTC` option (default: OFF)
-  - Conditional libdatachannel dependency
-  - Conditional compilation of webrtc_connector files
-  - Build flag propagation
+  - `O3DS_ENABLE_WEBRTC` (default: ON) with explicit opt-out via `O3DS_DISABLE_WEBRTC=ON`
+  - Supports using prebuilt libdatachannel via `O3DS_LIBDATACHANNEL_ROOT` (unified with Unreal plugin prebuilt libs)
+  - Falls back to `find_package(LibDataChannel)` when prebuilt root isn’t provided
+  - Conditional compilation of `webrtc_connector` sources
 
 #### 4. Documentation
 - **`WEBRTC_SUPPORT.md`**: Comprehensive user documentation
@@ -66,7 +66,7 @@ Added WebRTC support to Open3DStream as a network transport protocol, enabling p
 
 ### Connection Flow
 
-```
+```text
 Client → Signaling Server ← Peer
    ↓           ↓              ↓
    └── ICE/SDP Exchange ──────┘
@@ -107,11 +107,13 @@ WebRTCClient
 ### Build-time
 - CMake 3.13+
 - C++17 compiler
-- libdatachannel development files
+- libdatachannel (via CMake package OR prebuilt binaries using `O3DS_LIBDATACHANNEL_ROOT`)
+- Header-only nlohmann/json (bundled under `thirdparty/libdatachannel/deps/json/single_include`)
 
 ## Features
 
 ### Implemented
+
 - ✅ WebRTC client connector
 - ✅ WebSocket signaling protocol
 - ✅ SDP offer/answer negotiation
@@ -125,6 +127,7 @@ WebRTCClient
 - ✅ Reference signaling server
 
 ### Future Enhancements
+
 - ⏳ WebRTC server (broadcast mode)
 - ⏳ Automatic ICE server discovery
 - ⏳ Connection quality metrics
@@ -135,6 +138,7 @@ WebRTCClient
 ## Usage Comparison
 
 ### TCP (Existing)
+
 ```cpp
 // URL: tcp://192.168.1.100:5555
 // Protocol: TCP Client
@@ -143,6 +147,7 @@ WebRTCClient
 ```
 
 ### WebRTC (New)
+
 ```cpp
 // URL: webrtc://signal.example.com:8080/myroom
 // Protocol: WebRTC Client
@@ -171,13 +176,22 @@ client.start("webrtc://localhost:8080/myroom");
 ### CMake Build
 
 ```bash
-cmake -DO3DS_ENABLE_WEBRTC=ON ..
+# WebRTC is ON by default; explicitly opt-out with:
+#   -DO3DS_DISABLE_WEBRTC=ON
+
+# Use prebuilt libdatachannel artifacts (recommended in CI and when using the plugin’s libs):
+cmake -DO3DS_LIBDATACHANNEL_ROOT="/path/to/plugins/unreal/Open3DStream/lib/webrtc" ..
+
+# Or rely on a LibDataChannel CMake package (installed into CMAKE_PREFIX_PATH)
+cmake ..
 ```
 
 ## Testing
 
 ### Manual Testing
+
 1. Start signaling server:
+
    ```bash
    node examples/signaling-server.js
    ```
@@ -191,6 +205,7 @@ cmake -DO3DS_ENABLE_WEBRTC=ON ..
 4. Verify connection in signaling server logs
 
 ### Unit Testing
+
 - State machine transitions
 - URL parsing
 - Error conditions
@@ -199,16 +214,19 @@ cmake -DO3DS_ENABLE_WEBRTC=ON ..
 ## Performance
 
 ### Latency
+
 - **Direct (same network)**: 10-50ms
 - **STUN (different networks)**: 50-100ms
 - **TURN (relay)**: 100-200ms
 
 ### Bandwidth
+
 - Typical O3DS stream: 100-500 KB/s
 - WebRTC overhead: ~5-10%
 - Encrypted by default (DTLS)
 
 ### Scalability
+
 - Signaling server: Thousands of rooms
 - Per-client connections: 10-50 peers typical
 - Data channel: Binary, low overhead
@@ -216,10 +234,12 @@ cmake -DO3DS_ENABLE_WEBRTC=ON ..
 ## Security
 
 ### Encryption
+
 - DTLS encryption on data channels (automatic)
 - Optional TLS on signaling (WSS)
 
 ### Authentication
+
 - Signaling server can enforce auth
 - Room-based access control
 - Optional TURN credentials
@@ -234,12 +254,14 @@ cmake -DO3DS_ENABLE_WEBRTC=ON ..
 ## Troubleshooting
 
 ### Connection Issues
+
 - Verify signaling server is running
 - Check firewall allows UDP traffic
 - Test with public STUN server first
 - Enable debug logging in libdatachannel
 
 ### Build Issues
+
 - Ensure libdatachannel is installed
 - Check CMake finds LibDataChannel package
 - Verify C++17 support in compiler
@@ -248,6 +270,7 @@ cmake -DO3DS_ENABLE_WEBRTC=ON ..
 ## Migration Guide
 
 ### From TCP
+
 ```cpp
 // Before:
 server.start("tcp://192.168.1.100:5555", "TCP Client");
@@ -257,6 +280,7 @@ server.start("webrtc://signal.example.com:8080/room", "WebRTC Client");
 ```
 
 ### From UDP
+
 ```cpp
 // Before:
 server.start("udp://0.0.0.0:5555", "UDP Server");
@@ -270,6 +294,7 @@ server.start("webrtc://localhost:8080/room", "WebRTC Client");
 ## Maintenance
 
 ### Updating libdatachannel
+
 ```bash
 cd libdatachannel
 git pull
@@ -279,6 +304,7 @@ sudo cmake --install build
 ```
 
 ### Adding New Features
+
 1. Update `webrtc_connector.h` interface
 2. Implement in `webrtc_connector.cpp`
 3. Add tests
@@ -296,5 +322,5 @@ sudo cmake --install build
 
 WebRTC integration provides Open3DStream with modern peer-to-peer capabilities, enabling use cases that were difficult or impossible with traditional client-server protocols. The implementation follows existing connector patterns for seamless integration while leveraging WebRTC's strengths for NAT traversal and low-latency streaming.
 
-**Status**: ✅ Core implementation complete, ready for testing and refinement.
+**Status**: ✅ Core implementation complete; Unreal plugin path is functional (Beta) and uses the same prebuilt libdatachannel stack.
 **Next Steps**: Deploy signaling server, test with real-world scenarios, gather feedback for improvements.
