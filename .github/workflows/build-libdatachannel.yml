@@ -17,6 +17,9 @@ jobs:
   build-windows:
     name: Build libdatachannel (Windows)
     runs-on: self-hosted  # Use same runner as Unreal plugin CI to ensure toolchain compatibility
+    defaults:
+      run:
+        shell: powershell
 
     steps:
       - name: Checkout code
