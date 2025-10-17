@@ -35,7 +35,6 @@ public class Open3DStream : ModuleRules
                 "Networking",
                 "Sockets",
                 "InputCore",
-                "PixelStreamingCore",
                 "PixelStreaming",
                 "WebRTC",
                 "WebSockets",
