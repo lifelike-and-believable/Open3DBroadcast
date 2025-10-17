@@ -87,8 +87,9 @@ jobs:
           restore-keys: |
             o3ds-libs-${{ runner.os }}-
 
-      # Build third-party dependencies FIRST (nng, flatbuffers) - required by main library
-      # Note: WebRTC is disabled in CI - pre-built libraries are used instead (see Issue #10)
+  # Build third-party dependencies FIRST (nng, flatbuffers) - required by main library
+  # Note: In CI we exclude the core library's WebRTC connector; the Unreal plugin links
+  # prebuilt libdatachannel-based WebRTC binaries instead (see Issue #10).
       - name: Build Third-Party Dependencies
         if: steps.cache-libs.outputs.cache-hit != 'true'
         shell: powershell
@@ -97,7 +98,7 @@ jobs:
           
           cd thirdparty
           
-          # Configure CMake (WebRTC disabled in CI, using pre-built libraries)
+          # Configure CMake (exclude core WebRTC connector in CI; plugin uses prebuilt WebRTC)
           cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -DO3DS_BUILD_WEBRTC=OFF
           
           # Build RelWithDebInfo configuration
@@ -121,9 +122,9 @@ jobs:
           & ".\thirdparty\build\flatbuffers\RelWithDebInfo\flatc.exe" --cpp -o src src\o3ds.fbs
           
           # Configure CMake with prefix path to find third-party packages
-          # Note: Disable WebRTC for the core library build in CI; the Unreal plugin links
-          # pre-built libdatachannel binaries directly. This avoids requiring a CMake
-          # package for LibDataChannel here.
+          # Note: Build the core C++ library without its internal WebRTC connector in CI;
+          # the Unreal plugin links prebuilt libdatachannel binaries directly. This avoids
+          # requiring a LibDataChannel CMake package at this stage.
           cmake -B vsbuild -S . -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_PREFIX_PATH="$PWD/usr" `
             -DO3DS_DISABLE_WEBRTC=ON
