@@ -21,9 +21,8 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 	Options.Add(MakeShareable(new FString("NNG Server (to NNG Client)")));
 	Options.Add(MakeShareable(new FString("TCP Client")));
 	Options.Add(MakeShareable(new FString("UDP Server")));
-
-	// Note: WebRTC options temporarily removed during migration to Pixel Streaming
-	// Will be re-enabled through Pixel Streaming's native WebRTC infrastructure
+	Options.Add(MakeShareable(new FString("WebRTC Client")));
+	Options.Add(MakeShareable(new FString("WebRTC Server")));
 
 	if (SOpen3DStreamFactory::LastUrl.IsEmpty())
 	{

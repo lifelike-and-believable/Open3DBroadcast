@@ -5,10 +5,10 @@
 #include "Common/UdpSocketReceiver.h"
 #include "o3ds/base_connector.h"
 #include "o3ds/udp_fragment.h"
-
-#include "o3ds/webrtc_connector.h"
-
 #include "Sockets.h"
+
+// Forward declaration for Unreal's WebRTC connector
+class FWebRTCConnector;
 
 
 DECLARE_DELEGATE_OneParam(FOnO3dsData, const TArray<uint8>&);
@@ -36,6 +36,7 @@ public:
 	void tick();
 
 	O3DS::AsyncConnector* mServer;
+	FWebRTCConnector* mWebRTCConnector;  // Unreal's Pixel Streaming WebRTC
 	FSocket* mTcp;
 	FSocket* mUdp;
 
