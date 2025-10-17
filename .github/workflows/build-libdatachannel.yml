@@ -1,10 +1,16 @@
 name: Build libdatachannel
 
+# This workflow builds libdatachannel with MbedTLS for all platforms.
+# It is configured to run ONLY on manual trigger (workflow_dispatch).
+# The pre-built libraries are committed to the repo, so this workflow
+# only needs to run when updating libdatachannel or MbedTLS versions.
+#
+# To manually trigger:
+#   1. Go to Actions tab in GitHub
+#   2. Select "Build libdatachannel" workflow
+#   3. Click "Run workflow"
+#   4. Download artifacts and commit to plugins/unreal/Open3DStream/lib/webrtc/
 on:
-  push:
-    branches: [ develop, main ]
-  pull_request:
-    branches: [ develop, main ]
   workflow_dispatch:
 
 jobs:
