@@ -28,12 +28,12 @@ public class Open3DStream : ModuleRules
         PublicAdditionalLibraries.Add(LibDir + "open3dstreamstatic.lib");
 
         // libdatachannel static library for WebRTC support
-        // Note: datachannel depends on usrsctp, juice, and mbedtls libraries
+        // Note: datachannel depends on usrsctp and mbedtls libraries
+        // (juice is statically linked into datachannel itself)
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
             PublicAdditionalLibraries.Add(WebRTCDir + "datachannel.lib");
             PublicAdditionalLibraries.Add(WebRTCDir + "usrsctp.lib");
-            PublicAdditionalLibraries.Add(WebRTCDir + "juice-static.lib");
             PublicAdditionalLibraries.Add(WebRTCDir + "mbedtls.lib");
             PublicAdditionalLibraries.Add(WebRTCDir + "mbedx509.lib");
             PublicAdditionalLibraries.Add(WebRTCDir + "mbedcrypto.lib");
@@ -47,7 +47,6 @@ public class Open3DStream : ModuleRules
         {
             PublicAdditionalLibraries.Add(WebRTCDir + "libdatachannel.a");
             PublicAdditionalLibraries.Add(WebRTCDir + "libusrsctp.a");
-            PublicAdditionalLibraries.Add(WebRTCDir + "libjuice-static.a");
             PublicAdditionalLibraries.Add(WebRTCDir + "libmbedtls.a");
             PublicAdditionalLibraries.Add(WebRTCDir + "libmbedx509.a");
             PublicAdditionalLibraries.Add(WebRTCDir + "libmbedcrypto.a");
@@ -56,7 +55,6 @@ public class Open3DStream : ModuleRules
         {
             PublicAdditionalLibraries.Add(WebRTCDir + "macos/libdatachannel.a");
             PublicAdditionalLibraries.Add(WebRTCDir + "macos/libusrsctp.a");
-            PublicAdditionalLibraries.Add(WebRTCDir + "macos/libjuice-static.a");
             PublicAdditionalLibraries.Add(WebRTCDir + "macos/libmbedtls.a");
             PublicAdditionalLibraries.Add(WebRTCDir + "macos/libmbedx509.a");
             PublicAdditionalLibraries.Add(WebRTCDir + "macos/libmbedcrypto.a");

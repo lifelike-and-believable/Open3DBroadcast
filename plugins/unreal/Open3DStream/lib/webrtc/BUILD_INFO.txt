@@ -1,19 +1,37 @@
 libdatachannel Build Information
 =======================================
 
-Build Date: 2025-10-17 14:05:53 UTC
+Build Date: 2025-10-17 17:17:00 UTC
 Built by: GitHub Actions
-Build Source: PR #14 (issue-13-libdatachannel-mbedtls branch)
-CI Run ID: 18595163259
+Build Source: issue-13-libdatachannel-mbedtls branch (manual trigger)
+CI Run ID: 18599681866
 libdatachannel Version: v0.23.2
 TLS Backend: MbedTLS 3.6.5 (DTLS-SRTP enabled)
 Configuration: Release (Static linking)
 Build Flags: -DBUILD_SHARED_LIBS=OFF -DNO_MEDIA=ON -DNO_WEBSOCKET=ON -DUSE_MBEDTLS=ON
 
 Platform-Specific Files:
-  - libdatachannel.a (Linux, 4.3M)
-  - libdatachannel.a (macOS, 2.7M) 
-  - datachannel.lib (Windows, 24M)
+
+Windows (28.5M total):
+  - datachannel.lib (24M) - Main WebRTC library
+  - usrsctp.lib (1.3M) - SCTP transport layer
+  - mbedtls.lib (1.2M) - TLS/DTLS core
+  - mbedcrypto.lib (1.9M) - Cryptography primitives
+  - mbedx509.lib (253K) - X.509 certificate handling
+
+Linux (6.7M total):
+  - libdatachannel.a (4.3M)
+  - libusrsctp.a (797K)
+  - libmbedtls.a (535K)
+  - libmbedcrypto.a (992K)
+  - libmbedx509.a (118K)
+
+macOS (4.5M total):
+  - libdatachannel.a (2.7M)
+  - libusrsctp.a (572K)
+  - libmbedtls.a (439K)
+  - libmbedcrypto.a (774K)
+  - libmbedx509.a (87K)
 
 Key Features:
   ✅ Static linking only
@@ -21,6 +39,16 @@ Key Features:
   ✅ No OpenSSL dependencies
   ✅ No media/WebSocket support (data channels only)
   ✅ Cross-platform (Windows, Linux, macOS)
+  ✅ All dependencies included (usrsctp, mbedtls)
+  ✅ libjuice statically linked into datachannel lib
+
+Linking Requirements:
+  Windows: Link datachannel.lib, usrsctp.lib, mbedtls.lib, mbedx509.lib, 
+           mbedcrypto.lib, synchronization.lib, legacy_stdio_definitions.lib
+  Linux:   Link libdatachannel.a, libusrsctp.a, libmbedtls.a, libmbedx509.a,
+           libmbedcrypto.a
+  macOS:   Link libdatachannel.a, libusrsctp.a, libmbedtls.a, libmbedx509.a,
+           libmbedcrypto.a
 
 Build Workflow: .github/workflows/build-libdatachannel.yml
 Documentation: LIBDATACHANNEL_INTEGRATION.md
