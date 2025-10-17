@@ -40,9 +40,12 @@ jobs:
             -DGEN_FILES=ON `
             -DENABLE_TESTING=OFF `
             -DENABLE_PROGRAMS=OFF `
+            -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install"
           cmake --build build --config Release
           cmake --install build --config Release
+          Write-Host "Checking installed files..."
+          Get-ChildItem -Path "${{ github.workspace }}/install/include/mbedtls" | Select-Object -First 10
         shell: pwsh
 
       - name: Build libdatachannel
@@ -55,10 +58,13 @@ jobs:
             -DUSE_MBEDTLS=ON `
             -DNO_EXAMPLES=ON `
             -DNO_TESTS=ON `
-            -DMbedTLS_DIR="${{ github.workspace }}/install/cmake" `
+            -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install" `
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install"
           cmake --build build --config Release
+          Write-Host "Checking built libraries..."
+          Get-ChildItem -Path "build" -Recurse -Filter "*.lib" | Select-Object FullName
+          Get-ChildItem -Path "build/Release" -ErrorAction SilentlyContinue | Select-Object Name
           cmake --install build --config Release
         shell: pwsh
 
@@ -112,6 +118,8 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install"
           cmake --build build
           cmake --install build
+          echo "Checking installed files..."
+          ls -la ${{ github.workspace }}/install/include/mbedtls/ | head -20
 
       - name: Build libdatachannel
         working-directory: thirdparty/libdatachannel
@@ -123,11 +131,12 @@ jobs:
             -DUSE_MBEDTLS=ON \
             -DNO_EXAMPLES=ON \
             -DNO_TESTS=ON \
-            -DMbedTLS_DIR="${{ github.workspace }}/install/cmake" \
-            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install" \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install" \
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install"
           cmake --build build
+          echo "Checking built libraries..."
+          find build -name "*.a" -type f
           cmake --install build
 
       - name: Package artifacts
@@ -179,6 +188,8 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install"
           cmake --build build
           cmake --install build
+          echo "Checking installed files..."
+          ls -la ${{ github.workspace }}/install/include/mbedtls/ | head -20
 
       - name: Build libdatachannel
         working-directory: thirdparty/libdatachannel
@@ -190,11 +201,12 @@ jobs:
             -DUSE_MBEDTLS=ON \
             -DNO_EXAMPLES=ON \
             -DNO_TESTS=ON \
-            -DMbedTLS_DIR="${{ github.workspace }}/install/cmake" \
-            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install" \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install" \
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install"
           cmake --build build
+          echo "Checking built libraries..."
+          find build -name "*.a" -type f
           cmake --install build
 
       - name: Package artifacts
