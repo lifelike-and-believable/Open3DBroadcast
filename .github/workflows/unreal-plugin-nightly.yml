@@ -89,8 +89,11 @@ jobs:
           & ".\thirdparty\build\flatbuffers\RelWithDebInfo\flatc.exe" --cpp -o src src\o3ds.fbs
           
           # Configure CMake with prefix path to find third-party packages
+          # Use the plugin's prebuilt WebRTC stack for the core library via O3DS_LIBDATACHANNEL_ROOT
           cmake -B vsbuild -S . -G "Visual Studio 17 2022" -A x64 `
-            -DCMAKE_PREFIX_PATH="$PWD/usr"
+            -DCMAKE_PREFIX_PATH="$PWD/usr" `
+            -DO3DS_ENABLE_WEBRTC=ON `
+            -DO3DS_LIBDATACHANNEL_ROOT="$PWD/plugins/unreal/$env:PLUGIN_NAME/lib/webrtc"
           
           # Build RelWithDebInfo configuration
           cmake --build vsbuild --config RelWithDebInfo --parallel
