@@ -12,7 +12,7 @@ The libraries in this directory are built automatically by GitHub Actions using 
 
 ### Build Configuration
 
-- **TLS Backend**: MbedTLS 4.0+ (no OpenSSL or GnuTLS)
+- **TLS Backend**: MbedTLS 3.6.5 (no OpenSSL or GnuTLS)
 - **Static Libraries Only**: No shared/dynamic libraries
 - **No Media Support**: Built with `NO_MEDIA=ON` (avoids libsrtp)
 - **No WebSocket Support**: Built with `NO_WEBSOCKET=ON`
@@ -118,7 +118,7 @@ These artifacts can be downloaded from GitHub Actions runs and extracted to this
 ## Version Information
 
 - **libdatachannel**: 0.23.2
-- **MbedTLS**: 4.0.0+
+- **MbedTLS**: 3.6.5 (with DTLS-SRTP)
 - **Build Type**: Static, Release
 - **CMake Version**: 3.13+
 
