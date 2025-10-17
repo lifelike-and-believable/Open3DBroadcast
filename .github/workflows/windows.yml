@@ -87,7 +87,7 @@ jobs:
         run: |
           cd out
           Compress-Archive -Path * -DestinationPath ../o3ds.zip
-        shell: pwsh
+        shell: powershell
         
       - name: Create Release
         id: create_release

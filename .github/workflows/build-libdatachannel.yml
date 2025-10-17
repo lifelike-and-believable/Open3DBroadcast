@@ -16,7 +16,10 @@ on:
 jobs:
   build-windows:
     name: Build libdatachannel (Windows)
-    runs-on: windows-latest
+    runs-on: self-hosted  # Use same runner as Unreal plugin CI to ensure toolchain compatibility
+    defaults:
+      run:
+        shell: powershell
 
     steps:
       - name: Checkout code
@@ -31,7 +34,7 @@ jobs:
           git checkout v3.6.5
           git submodule update --init --recursive
           git log --oneline -1
-        shell: pwsh
+        shell: powershell
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -44,11 +47,18 @@ jobs:
       - name: Setup CMake
         uses: lukka/get-cmake@latest
 
+      - name: Install Perl (required for MbedTLS GEN_FILES)
+        run: |
+          choco install strawberryperl -y --no-progress
+          $env:Path = "C:\Strawberry\perl\bin;$env:Path"
+          [Environment]::SetEnvironmentVariable("Path", $env:Path, "Machine")
+          perl --version
+
       - name: Enable DTLS-SRTP in MbedTLS
         working-directory: thirdparty/mbedtls
         run: |
           python scripts/config.py set MBEDTLS_SSL_DTLS_SRTP
-        shell: pwsh
+        shell: powershell
 
       - name: Build MbedTLS
         working-directory: thirdparty/mbedtls
@@ -63,7 +73,7 @@ jobs:
           cmake --install build --config Release
           Write-Host "Checking installed files..."
           Get-ChildItem -Path "${{ github.workspace }}/install/include/mbedtls" | Select-Object -First 10
-        shell: pwsh
+        shell: powershell
 
       - name: Build libdatachannel
         working-directory: thirdparty/libdatachannel
@@ -81,17 +91,34 @@ jobs:
           cmake --build build --config Release
           Write-Host "Checking built libraries..."
           Get-ChildItem -Path "build" -Recurse -Filter "*.lib" | Select-Object FullName
+          Get-ChildItem -Path "build/deps" -Recurse -Filter "*.lib" -ErrorAction SilentlyContinue | Select-Object FullName
           Get-ChildItem -Path "build/Release" -ErrorAction SilentlyContinue | Select-Object Name
           cmake --install build --config Release
-        shell: pwsh
+          # Also copy dependency libraries (juice, usrsctp) from build/deps
+          Write-Host "Copying dependency libraries from build/deps..."
+          Get-ChildItem -Path "build/deps" -Recurse -Filter "*.lib" | ForEach-Object { 
+            Copy-Item $_.FullName "${{ github.workspace }}/install/lib/" -Force
+            Write-Host "  Copied $($_.Name)"
+          }
+        shell: powershell
 
       - name: Package artifacts
         run: |
           mkdir -p artifacts/windows/include
           mkdir -p artifacts/windows/lib
           Copy-Item -Recurse "${{ github.workspace }}/install/include/rtc" artifacts/windows/include/
+          # Copy all static libraries (datachannel and its dependencies)
           Copy-Item "${{ github.workspace }}/install/lib/datachannel.lib" artifacts/windows/lib/
-        shell: pwsh
+          Copy-Item "${{ github.workspace }}/install/lib/usrsctp.lib" artifacts/windows/lib/ -ErrorAction SilentlyContinue
+          Copy-Item "${{ github.workspace }}/install/lib/juice-static.lib" artifacts/windows/lib/ -ErrorAction SilentlyContinue
+          Copy-Item "${{ github.workspace }}/install/lib/juice.lib" artifacts/windows/lib/ -ErrorAction SilentlyContinue
+          Copy-Item "${{ github.workspace }}/install/lib/mbedtls.lib" artifacts/windows/lib/
+          Copy-Item "${{ github.workspace }}/install/lib/mbedx509.lib" artifacts/windows/lib/
+          Copy-Item "${{ github.workspace }}/install/lib/mbedcrypto.lib" artifacts/windows/lib/
+          # List what was collected
+          Write-Host "Collected libraries:"
+          Get-ChildItem artifacts/windows/lib/*.lib | ForEach-Object { Write-Host "  $($_.Name) ($([math]::Round($_.Length/1MB, 1))MB)" }
+        shell: powershell
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -164,13 +191,26 @@ jobs:
           echo "Checking built libraries..."
           find build -name "*.a" -type f
           cmake --install build
+          # Also copy dependency libraries (juice, usrsctp) from build/deps
+          echo "Copying dependency libraries from build/deps..."
+          find build/deps -name "*.a" -type f -exec cp -v {} ${{ github.workspace }}/install/lib/ \;
 
       - name: Package artifacts
         run: |
           mkdir -p artifacts/linux/include
           mkdir -p artifacts/linux/lib
           cp -r ${{ github.workspace }}/install/include/rtc artifacts/linux/include/
+          # Copy all static libraries (datachannel and its dependencies)
           cp ${{ github.workspace }}/install/lib/libdatachannel.a artifacts/linux/lib/
+          cp ${{ github.workspace }}/install/lib/libusrsctp.a artifacts/linux/lib/ 2>/dev/null || true
+          cp ${{ github.workspace }}/install/lib/libjuice-static.a artifacts/linux/lib/ 2>/dev/null || true
+          cp ${{ github.workspace }}/install/lib/libjuice.a artifacts/linux/lib/ 2>/dev/null || true
+          cp ${{ github.workspace }}/install/lib/libmbedtls.a artifacts/linux/lib/
+          cp ${{ github.workspace }}/install/lib/libmbedx509.a artifacts/linux/lib/
+          cp ${{ github.workspace }}/install/lib/libmbedcrypto.a artifacts/linux/lib/
+          # List what was collected
+          echo "Collected libraries:"
+          ls -lh artifacts/linux/lib/*.a | awk '{print "  " $9 " (" $5 ")"}'
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -249,7 +289,16 @@ jobs:
           mkdir -p artifacts/macos/include
           mkdir -p artifacts/macos/lib
           cp -r ${{ github.workspace }}/install/include/rtc artifacts/macos/include/
+          # Copy all static libraries (datachannel and its dependencies)
           cp ${{ github.workspace }}/install/lib/libdatachannel.a artifacts/macos/lib/
+          cp ${{ github.workspace }}/install/lib/libusrsctp.a artifacts/macos/lib/ 2>/dev/null || true
+          cp ${{ github.workspace }}/install/lib/libjuice-static.a artifacts/macos/lib/ 2>/dev/null || true
+          cp ${{ github.workspace }}/install/lib/libmbedtls.a artifacts/macos/lib/
+          cp ${{ github.workspace }}/install/lib/libmbedx509.a artifacts/macos/lib/
+          cp ${{ github.workspace }}/install/lib/libmbedcrypto.a artifacts/macos/lib/
+          # List what was collected
+          echo "Collected libraries:"
+          ls -lh artifacts/macos/lib/*.a | awk '{print "  " $9 " (" $5 ")"}'
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

@@ -288,6 +288,12 @@ void O3DSServer::tick()
 
 	const unsigned char header[] = "\x00\xff\x03\xfeO3DS-START";
 
+	// Process WebRTC messages if connected
+	if (mWebRTCConnector)
+	{
+		mWebRTCConnector->Tick();
+	}
+
 	if (!mNoDataFlag && FPlatformTime::Seconds() - mGoodTime > 1)
 	{
 		OnState.ExecuteIfBound(LOCTEXT("NoData", "No Data"), true);
