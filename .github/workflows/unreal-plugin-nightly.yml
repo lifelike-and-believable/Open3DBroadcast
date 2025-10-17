@@ -52,7 +52,7 @@ jobs:
             vsbuild
             usr
             thirdparty/build
-          key: o3ds-libs-${{ runner.os }}-${{ hashFiles('src/**', 'thirdparty/**', 'CMakeLists.txt') }}
+          key: o3ds-libs-${{ runner.os }}-${{ hashFiles('src/**/*.cpp', 'src/**/*.h', 'thirdparty/CMakeLists.txt', 'CMakeLists.txt', '.gitmodules') }}
           restore-keys: |
             o3ds-libs-${{ runner.os }}-
 
