@@ -57,6 +57,7 @@ jobs:
             o3ds-libs-${{ runner.os }}-
 
       # Build third-party dependencies FIRST (nng, flatbuffers) - required by main library
+      # Note: WebRTC is disabled in nightly - pre-built libraries are used instead (see Issue #10)
       - name: Build Third-Party Dependencies
         if: steps.cache-libs.outputs.cache-hit != 'true'
         shell: powershell
@@ -65,8 +66,8 @@ jobs:
           
           cd thirdparty
           
-          # Configure CMake
-          cmake -B build -S . -G "Visual Studio 17 2022" -A x64
+          # Configure CMake (WebRTC disabled in nightly, using pre-built libraries)
+          cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -DO3DS_BUILD_WEBRTC=OFF
           
           # Build RelWithDebInfo configuration
           cmake --build build --config RelWithDebInfo --parallel
@@ -88,8 +89,7 @@ jobs:
           Write-Host "Regenerating o3ds_generated.h with current FlatBuffers version..."
           & ".\thirdparty\build\flatbuffers\RelWithDebInfo\flatc.exe" --cpp -o src src\o3ds.fbs
           
-          # Configure CMake with prefix path to find third-party packages
-          # Use the plugin's prebuilt WebRTC stack for the core library via O3DS_LIBDATACHANNEL_ROOT
+          # Configure CMake with prefix path; use the plugin's prebuilt WebRTC stack for the core library via O3DS_LIBDATACHANNEL_ROOT
           cmake -B vsbuild -S . -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_PREFIX_PATH="$PWD/usr" `
             -DO3DS_ENABLE_WEBRTC=ON `
