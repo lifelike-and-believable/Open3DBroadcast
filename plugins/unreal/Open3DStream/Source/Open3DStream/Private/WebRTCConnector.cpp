@@ -156,37 +156,37 @@ void FWebRTCConnector::Tick()
 
 void FWebRTCConnector::OnPeerConnectionStateChange(rtc::PeerConnection::State State)
 {
-	FScopeLock Lock(&PeerConnectionLock);
+	FScopeLock Lock(&this->PeerConnectionLock);
 
 	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: PeerConnection state change"));
 
 	switch (State)
 	{
 		case rtc::PeerConnection::State::Connecting:
-			ConnectionState = TEXT("CONNECTING");
+			this->ConnectionState = TEXT("CONNECTING");
 			break;
 		case rtc::PeerConnection::State::Connected:
-			ConnectionState = TEXT("CONNECTED");
-			bIsConnected = true;
+			this->ConnectionState = TEXT("CONNECTED");
+			this->bIsConnected = true;
 			break;
 		case rtc::PeerConnection::State::Disconnected:
-			ConnectionState = TEXT("DISCONNECTED");
-			bIsConnected = false;
+			this->ConnectionState = TEXT("DISCONNECTED");
+			this->bIsConnected = false;
 			break;
 		case rtc::PeerConnection::State::Failed:
-			ConnectionState = TEXT("FAILED");
-			bIsConnected = false;
-			LastError = TEXT("PeerConnection failed");
+			this->ConnectionState = TEXT("FAILED");
+			this->bIsConnected = false;
+			this->LastError = TEXT("PeerConnection failed");
 			break;
 		case rtc::PeerConnection::State::Closed:
-			ConnectionState = TEXT("CLOSED");
-			bIsConnected = false;
+			this->ConnectionState = TEXT("CLOSED");
+			this->bIsConnected = false;
 			break;
 		default:
-			ConnectionState = TEXT("UNKNOWN");
+			this->ConnectionState = TEXT("UNKNOWN");
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: PeerConnection state: %s"), *ConnectionState);
+	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: PeerConnection state: %s"), *this->ConnectionState);
 }
 
 void FWebRTCConnector::OnDataChannelOpen()
@@ -221,8 +221,8 @@ void FWebRTCConnector::OnIceCandidate(const rtc::Candidate& Candidate)
 		// Convert libdatachannel candidate to string
 		std::string CandidateStr = Candidate.candidate();
 		FString Candidate_FString(ANSI_TO_TCHAR(CandidateStr.c_str()));
-		FString SdpMid(ANSI_TO_TCHAR(Candidate.sdpMid().c_str()));
-		int32 SdpMLineIndex = Candidate.sdpMLineIndex();
+		FString SdpMid(ANSI_TO_TCHAR(Candidate.mid().c_str()));
+		int32 SdpMLineIndex = 0; // libdatachannel doesn't expose mLineIndex, use 0
 
 		SignalingClient->SendIceCandidate(Candidate_FString, SdpMid, SdpMLineIndex);
 	}
@@ -330,8 +330,8 @@ void FWebRTCConnector::OnIceCandidateReceived(const FString& Candidate, const FS
 	{
 		std::string CandidateStr(TCHAR_TO_ANSI(*Candidate));
 		std::string SdpMidStr(TCHAR_TO_ANSI(*SdpMid));
-		rtc::Candidate RtcCandidate(CandidateStr, SdpMidStr, SdpMLineIndex);
-		PeerConnection->addIceCandidate(RtcCandidate);
+		rtc::Candidate RtcCandidate(CandidateStr, SdpMidStr);
+		PeerConnection->addRemoteCandidate(RtcCandidate);
 	}
 	catch (const std::exception& e)
 	{
@@ -450,9 +450,7 @@ bool FWebRTCConnector::SetupPeerConnection()
 		RtcConfig = std::make_shared<rtc::Configuration>();
 
 		// Add STUN servers
-		rtc::IceServer StunServer;
-		StunServer.hostname = "stun.l.google.com";
-		StunServer.port = 19302;
+		rtc::IceServer StunServer("stun.l.google.com", 19302);
 		RtcConfig->iceServers.push_back(StunServer);
 
 		// Create PeerConnection
@@ -464,7 +462,7 @@ bool FWebRTCConnector::SetupPeerConnection()
 			OnPeerConnectionStateChange(State);
 		});
 
-		PeerConnection->onIceCandidate([this](rtc::Candidate Candidate)
+		PeerConnection->onLocalCandidate([this](rtc::Candidate Candidate)
 		{
 			OnIceCandidate(Candidate);
 		});
