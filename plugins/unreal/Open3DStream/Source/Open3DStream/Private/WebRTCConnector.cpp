@@ -478,16 +478,18 @@ bool FWebRTCConnector::SetupPeerConnection()
 			{
 				UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Incoming data channel from peer"));
 				
-				FScopeLock Lock(&DataChannelLock);
-				DataChannel = IncomingChannel;
+				{
+					FScopeLock Lock(&DataChannelLock);
+					DataChannel = IncomingChannel;
+				}
 
 				// Bind callbacks for incoming data channel
-				DataChannel->onOpen([this]()
+				IncomingChannel->onOpen([this]()
 				{
 					OnDataChannelOpen();
 				});
 
-				DataChannel->onMessage([this](const std::variant<rtc::binary, std::string>& Message)
+				IncomingChannel->onMessage([this](const std::variant<rtc::binary, std::string>& Message)
 				{
 					if (std::holds_alternative<rtc::binary>(Message))
 					{
@@ -496,12 +498,12 @@ bool FWebRTCConnector::SetupPeerConnection()
 					}
 				});
 
-				DataChannel->onError([this](const std::string& Error)
+				IncomingChannel->onError([this](const std::string& Error)
 				{
 					OnDataChannelError(Error);
 				});
 
-				DataChannel->onClosed([this]()
+				IncomingChannel->onClosed([this]()
 				{
 					OnDataChannelClosed();
 				});
@@ -532,7 +534,7 @@ bool FWebRTCConnector::CreateDataChannel()
 	try
 	{
 		// Create data channel
-		std::string Label(TCHAR_TO_ANSI(DataChannelLabel));
+		std::string Label(DataChannelLabel);
 		DataChannel = PeerConnection->createDataChannel(Label);
 
 		if (!DataChannel)
@@ -542,12 +544,13 @@ bool FWebRTCConnector::CreateDataChannel()
 		}
 
 		// Bind data channel callbacks
-		DataChannel->onOpen([this]()
+		auto LocalDataChannel = DataChannel;
+		LocalDataChannel->onOpen([this]()
 		{
 			OnDataChannelOpen();
 		});
 
-		DataChannel->onMessage([this](const std::variant<rtc::binary, std::string>& Message)
+		LocalDataChannel->onMessage([this](const std::variant<rtc::binary, std::string>& Message)
 		{
 			if (std::holds_alternative<rtc::binary>(Message))
 			{
@@ -556,12 +559,12 @@ bool FWebRTCConnector::CreateDataChannel()
 			}
 		});
 
-		DataChannel->onError([this](const std::string& Error)
+		LocalDataChannel->onError([this](const std::string& Error)
 		{
 			OnDataChannelError(Error);
 		});
 
-		DataChannel->onClosed([this]()
+		LocalDataChannel->onClosed([this]()
 		{
 			OnDataChannelClosed();
 		});
