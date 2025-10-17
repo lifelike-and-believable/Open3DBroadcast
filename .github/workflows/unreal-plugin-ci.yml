@@ -33,8 +33,7 @@ env:
 
 jobs:
   build-and-test:
-    # Only run on non-draft PRs for PR events, or always for push/manual triggers
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # Run for all PR events (including drafts), and for push/manual triggers
     # Use self-hosted runners with UE5 installed, or configure GitHub-hosted runners
     # Change to 'windows-latest' if you set up UE on GitHub-hosted runners
     runs-on: [ self-hosted, ue5, windows ]
