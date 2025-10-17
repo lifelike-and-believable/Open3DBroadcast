@@ -1,8 +1,8 @@
-# WebRTC Support for Open3DStream
+# WebRTC support for Open3DStream
 
 ## Overview
 
-Open3DStream now supports WebRTC as a network transport protocol, enabling low-latency, peer-to-peer streaming of animation data with built-in NAT traversal. This is particularly useful for:
+Open3DStream supports WebRTC as a network transport protocol, enabling low-latency, peer-to-peer streaming of animation data with built-in NAT traversal. This is particularly useful for:
 
 - Cloud-based motion capture streaming
 - Remote collaboration scenarios
@@ -12,7 +12,7 @@ Open3DStream now supports WebRTC as a network transport protocol, enabling low-l
 
 ## Architecture
 
-The WebRTC implementation uses **libdatachannel**, a lightweight C++ library that provides:
+The WebRTC implementation uses libdatachannel, a lightweight C++ library that provides:
 - WebRTC data channels for binary data transmission
 - STUN/TURN support for NAT traversal
 - WebSocket-based signaling
@@ -20,85 +20,71 @@ The WebRTC implementation uses **libdatachannel**, a lightweight C++ library tha
 
 ### Components
 
-1. **WebRTCClient**: Client-side connector that connects to a signaling server and establishes peer-to-peer data channels
-2. **WebRTCServer**: Server-side connector (future implementation for broadcast scenarios)
-3. **Signaling Server**: Separate component for WebRTC peer discovery and SDP/ICE exchange
+1. WebRTCClient: Client-side connector that connects to a signaling server and establishes peer-to-peer data channels.
+2. WebRTCServer: Not yet implemented (future broadcast scenarios). Use client mode today.
+3. Signaling server: A small WebSocket server used for peer discovery and SDP/ICE exchange.
 
-## Building with WebRTC Support
+## Building with WebRTC support
 
 ### Prerequisites
 
-1. **libdatachannel** library
-2. **nlohmann/json** for JSON parsing
-3. CMake 3.13 or higher
+1. CMake 3.13 or higher
+2. A C++17 compiler
+3. No external libdatachannel install required for typical builds: Open3DStream bundles and links against libdatachannel (and mbedtls) via its thirdparty configuration and prebuilt binaries.
 
 ### Installation
 
-#### Linux/macOS
+#### All platforms
+
 ```bash
-# Install libdatachannel
-git clone https://github.com/paullouisageneau/libdatachannel.git
-cd libdatachannel
-cmake -B build -DUSE_GNUTLS=0 -DUSE_NICE=0
-cmake --build build
-sudo cmake --install build
-
-# Build Open3DStream with WebRTC
-cd /path/to/Open3DStream
-mkdir build && cd build
-cmake .. -DO3DS_ENABLE_WEBRTC=ON
+# Build Open3DStream (WebRTC is enabled by default)
+mkdir -p build && cd build
+cmake ..
 make -j4
+
+# To explicitly toggle
+cmake .. -DO3DS_ENABLE_WEBRTC=ON   # enable (default)
+cmake .. -DO3DS_ENABLE_WEBRTC=OFF  # disable
 ```
 
-#### Windows
-```cmd
-REM Install libdatachannel via vcpkg
-vcpkg install libdatachannel
+### CMake options
 
-REM Build Open3DStream
-cd C:\path\to\Open3DStream
-mkdir build && cd build
-cmake .. -DO3DS_ENABLE_WEBRTC=ON -DCMAKE_TOOLCHAIN_FILE=C:/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake
-cmake --build . --config Release
-```
-
-### CMake Options
-
-- `-DO3DS_ENABLE_WEBRTC=ON`: Enable WebRTC support (default: OFF)
-- `-DLibDataChannel_DIR=/path/to/lib`: Specify libdatachannel installation path
+- -DO3DS_ENABLE_WEBRTC=ON: Enable WebRTC support (default: ON)
+- -DLibDataChannel_DIR=/path/to/lib: Only needed when using a custom libdatachannel build. By default, Open3DStream uses the bundled/prebuilt libs.
 
 ## Usage
 
-### URL Format
+### URL format
 
 ```
 webrtc://signaling-server:port/room-id
 ```
 
-**Examples:**
+Examples:
 - `webrtc://localhost:8080/myroom`
 - `webrtc://signal.example.com:9000/session123`
 - `webrtc://192.168.1.100:8080/capture-stream`
 
-### Unreal LiveLink Configuration
+### Unreal LiveLink configuration
 
 1. **Add LiveLink Source**
    - Open LiveLink window in Unreal
    - Click "+ Source"
    - Select "Open3DStream Source"
 
-2. **Configure Connection**
-   - **URL**: `webrtc://your-signaling-server:port/room-id`
-   - **Protocol**: Select "WebRTC Client"
-   - **Key**: (optional) Authentication key
+2. Configure connection
+    - URL: `webrtc://your-signaling-server:port/room-id`
+    - Protocol: Select "WebRTC Client"
+    - Note: Unreal’s WebRTC path is functional via libdatachannel and marked Beta. It uses a lightweight WebSocket signaling server.
 
 3. **Connect**
    - Click "Create"
    - Monitor status in LiveLink window
 
-### C++ API Usage
+### C++ API usage
 
 ```cpp
+// WebRTC API is compiled when O3DS_ENABLE_WEBRTC is ON
 #include "o3ds/webrtc_connector.h"
 
 // Create WebRTC client
@@ -134,7 +120,7 @@ client.write(animationData.data(), animationData.size());
 client.stop();
 ```
 
-## Signaling Server
+## Signaling server
 
 WebRTC requires a signaling server for peer discovery and connection negotiation. You can use any WebSocket-based signaling server that handles:
 
@@ -142,7 +128,7 @@ WebRTC requires a signaling server for peer discovery and connection negotiation
 - SDP offer/answer exchange
 - ICE candidate relay
 
-### Simple Node.js Signaling Server
+### Simple Node.js signaling server
 
 ```javascript
 const WebSocket = require('ws');
@@ -184,21 +170,21 @@ wss.on('connection', (ws) => {
 console.log('Signaling server running on ws://localhost:8080');
 ```
 
-Save as `signaling-server.js` and run:
+Save as `examples/signaling-server.js` (already in repo) and run:
 ```bash
 npm install ws
 node signaling-server.js
 ```
 
-## NAT Traversal Configuration
+## NAT traversal configuration
 
-### STUN Servers (Public)
+### STUN servers (public)
 Free STUN servers for testing:
 - `stun:stun.l.google.com:19302`
 - `stun:stun1.l.google.com:19302`
 - `stun:stun2.l.google.com:19302`
 
-### TURN Servers (For Restricted Networks)
+### TURN servers (for restricted networks)
 For production use behind strict firewalls, configure a TURN server:
 
 ```cpp
@@ -210,12 +196,12 @@ client.setIceServers(
 );
 ```
 
-**Popular TURN Server Options:**
+Popular TURN server options:
 - **coturn**: Open-source TURN server
 - **Twilio STUN/TURN**: Cloud-based service
 - **xirsys**: Managed TURN service
 
-## Performance Considerations
+## Performance considerations
 
 ### Bandwidth
 - WebRTC data channels support configurable bandwidth
@@ -227,48 +213,48 @@ client.setIceServers(
 - TURN relay adds 20-50ms
 - Optimized for real-time animation streaming
 
-### Connection Limits
+### Connection limits
 - Signaling server: Unlimited rooms
 - Peer connections: Typically 10-50 per client
 - Data channel: One per peer connection
 
 ## Troubleshooting
 
-### Connection Fails
+### Connection fails
 
-**Check signaling server:**
+Check signaling server:
 ```bash
 curl -i -N -H "Connection: Upgrade" -H "Upgrade: websocket" \
      -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: test" \
      http://localhost:8080/ws
 ```
 
-**Verify ICE candidates:**
+Verify ICE candidates:
 - Check firewall allows UDP traffic
 - Ensure STUN server is reachable
 - Configure TURN if behind symmetric NAT
 
-### No Data Received
+### No data received
 
-**Verify data channel state:**
+Verify data channel state:
 - Check `isOpen()` on data channel
 - Monitor connection state changes
 - Check for ICE connection failures
 
-**Enable verbose logging:**
+Enable verbose logging:
 ```cpp
 // In webrtc_connector.cpp, add logging
 rtc::InitLogger(rtc::LogLevel::Debug);
 ```
 
-### High Latency
+### High latency
 
 - Use STUN instead of TURN when possible
 - Choose geographically close STUN/TURN servers
 - Optimize network path (direct peer-to-peer is fastest)
 - Check for packet loss
 
-## Security Considerations
+## Security considerations
 
 ### Encryption
 - WebRTC data channels use DTLS encryption (enabled by default)
@@ -279,25 +265,24 @@ rtc::InitLogger(rtc::LogLevel::Debug);
 - Use room-based access control
 - Consider TURN server credentials
 
-### Network Security
+### Network security
 - WebRTC can bypass some firewall rules
 - Implement proper access controls on signaling server
 - Monitor and limit concurrent connections
 
-## Comparison with Other Protocols
+## Comparison with other protocols
 
-| Feature | WebRTC | TCP | UDP | WebSocket |
-|---------|--------|-----|-----|-----------|
-| NAT Traversal | ✓ Built-in | ✗ | ✗ | ✗ |
-| Encryption | ✓ DTLS | ✗ | ✗ | Optional TLS |
-| Latency | Low | Medium | Lowest | Medium |
-| Reliability | Configurable | High | Low | High |
-| Setup Complexity | High | Low | Low | Medium |
-| Browser Support | ✓ | ✗ | ✗ | ✓ |
+| Feature | WebRTC | TCP | UDP |
+|---------|--------|-----|-----|
+| NAT traversal | ✓ Built-in | ✗ | ✗ |
+| Encryption | ✓ DTLS | ✗ | ✗ |
+| Latency | Low | Medium | Lowest |
+| Reliability | Configurable | High | Low |
+| Setup complexity | Medium | Low | Low |
 
-## Future Enhancements
+## Future enhancements
 
-- [ ] WebRTC Server implementation for broadcast scenarios
+- [ ] WebRTC server implementation for broadcast scenarios
 - [ ] Automatic ICE server discovery
 - [ ] Connection quality monitoring
 - [ ] Adaptive bitrate based on network conditions
@@ -322,4 +307,4 @@ For WebRTC-specific issues:
 For Open3DStream integration:
 - Review existing protocol implementations (TCP, UDP)
 - Check base_connector interface compatibility
-- Verify callback setup in UOpen3DServer.cpp
+- Verify callback setup in `UOpen3DServer.cpp`

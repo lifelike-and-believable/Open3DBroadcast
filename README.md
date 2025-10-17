@@ -7,25 +7,27 @@ Open3DStream is a standardized protocol and library for real-time streaming of s
 ## Features
 
 ### Animation Data
-- ✅ Skeletal animation (transforms, rotations, scales)
-- ✅ **NEW**: Animation curves for morph targets (facial animation)
-- ✅ Delta-optimized updates for efficiency
-- ✅ Hierarchical transform chains
-- ✅ Multiple subjects per stream
+
+✅ Skeletal animation (transforms, rotations, scales)
+✅ Animation curves for morph targets (facial animation)
+✅ Delta-optimized updates for efficiency
+✅ Hierarchical transform chains
+✅ Multiple subjects per stream
 
 ### Network Protocols
-- ✅ TCP Client/Server
-- ✅ UDP Server
-- ✅ WebSocket (client/broadcast)
-- ✅ NNG (Subscribe, Pair, Publisher)
-- ✅ **NEW**: WebRTC peer-to-peer with NAT traversal
+
+✅ TCP Client/Server
+✅ UDP Server
+✅ NNG (Subscribe, Pair, Publisher)
+✅ WebRTC peer-to-peer with NAT traversal (libdatachannel)
 
 ### Platform Support
-- ✅ Unreal Engine (LiveLink plugin)
-- ✅ Maya (plugin)
-- ✅ MotionBuilder (plugin)
-- ✅ Python API
-- ✅ C++ library
+
+✅ Unreal Engine (LiveLink plugin)
+✅ Maya (plugin)
+✅ MotionBuilder (plugin)
+✅ Python examples
+✅ C++ library
 
 ## Quick Start
 
@@ -49,6 +51,7 @@ make -j4
 ### Using in Unreal Engine
 
 **Installation from Release Package:**
+ 
 1. Download the latest release from [Releases](https://github.com/lifelike-and-believable/Open3DStream/releases)
 2. Extract the zip file
 3. Copy the appropriate `UE_X.X/Plugins/Open3DStream` folder to your project's `Plugins` directory
@@ -57,11 +60,13 @@ make -j4
 5. Enable the plugin: **Edit → Plugins** → search "Open3DStream" → check the box
 
 **Installation from Source:**
+ 
 1. Copy the `plugins/unreal/Open3DStream` folder to your project's `Plugins` directory
 2. Build the native libraries (see Building the Library above)
 3. Enable the plugin in your project settings
 
 **Usage:**
+ 
 1. Open LiveLink window: **Window → Virtual Production → Live Link**
 2. Add source: **+ Source → Open3DStream Source**
 3. Configure connection:
@@ -72,34 +77,41 @@ make -j4
 ## Recent Updates
 
 ### Animation Curve Support (October 2025)
+ 
 Added support for animation curves to enable morph target-based facial animation:
+
 - Curve names and values transmitted alongside skeletal data
-- Integrated with LiveLink animation frames
+- Integrated with LiveLink animation frames (UE 5.6+ PropertyValues)
 - Delta-optimized curve updates
 - See [CURVE_SUPPORT.md](CURVE_SUPPORT.md) for details
 
-### WebRTC Build Infrastructure (October 2025)
-Integrated libdatachannel library with MbedTLS backend for future WebRTC support:
+### WebRTC Status (October 2025)
+
+libdatachannel is integrated with MbedTLS and enabled by default across the codebase:
+
 - Pre-built libdatachannel static libraries for Windows, Linux, macOS
 - MbedTLS 3.6.5 with DTLS-SRTP enabled
-- Automated CI workflow for building libraries
 - Static linking configuration with no runtime dependencies
-- **Note**: WebRTC functionality in Unreal plugin pending (see [Issue #15](https://github.com/lifelike-and-believable/Open3DStream/issues/15))
-- C++ command-line tools support WebRTC - see [WEBRTC_QUICKSTART.md](WEBRTC_QUICKSTART.md)
+- C++ command-line tools support WebRTC (ready) – see [WEBRTC_QUICKSTART.md](WEBRTC_QUICKSTART.md)
+- Unreal plugin includes a functional WebRTC connector (beta) using a lightweight WebSocket signaling server – see [WEBRTC_UNREAL_IMPLEMENTATION.md](WEBRTC_UNREAL_IMPLEMENTATION.md)
 
 ## Documentation
 
-### Features
+### Feature docs
+
 - [Animation Curve Support](CURVE_SUPPORT.md) - Morph target streaming
 - [Curve Implementation Summary](IMPLEMENTATION_SUMMARY.md) - Technical details
 
-### WebRTC (C++ Tools - Functional)
+### WebRTC (C++ tools)
+
 - [WebRTC Quick Start](WEBRTC_QUICKSTART.md) - 5-minute WebRTC setup for C++ tools
 - [WebRTC Full Documentation](WEBRTC_SUPPORT.md) - Complete WebRTC guide
 - [WebRTC Implementation](WEBRTC_IMPLEMENTATION_SUMMARY.md) - Architecture details
 
-### WebRTC (Unreal Plugin - In Development)
-- [libdatachannel Integration](LIBDATACHANNEL_INTEGRATION.md) - Build infrastructure (Issue #13 ✅)
+### WebRTC (Unreal plugin)
+
+- [Unreal WebRTC implementation notes](WEBRTC_UNREAL_IMPLEMENTATION.md)
+- [libdatachannel Integration](LIBDATACHANNEL_INTEGRATION.md)
 - [Issue #15](https://github.com/lifelike-and-believable/Open3DStream/issues/15) - Implementation roadmap
 
 ## Protocol Comparison
@@ -111,9 +123,9 @@ Integrated libdatachannel library with MbedTLS backend for future WebRTC support
 | TCP | ✅ Ready | Medium | Easy | ❌ | ❌ | Local networks |
 | UDP | ✅ Ready | Low | Easy | ❌ | ❌ | Low latency, lossy OK |
 | NNG | ✅ Ready | Low | Medium | ❌ | ❌ | Microservices |
-| WebRTC | 🚧 Coming | Low | Medium | ✅ | ✅ | Cloud, remote |
+| WebRTC | ✅ Ready (Beta) | Low | Medium | ✅ | ✅ | Cloud, remote |
 
-**WebRTC Status**: Build infrastructure complete ([Issue #13](https://github.com/lifelike-and-believable/Open3DStream/issues/13)). Implementation in progress ([Issue #15](https://github.com/lifelike-and-believable/Open3DStream/issues/15)).
+**WebRTC Status**: Unreal WebRTC path implemented with libdatachannel ([Issue #15](https://github.com/lifelike-and-believable/Open3DStream/issues/15)); uses a simple WebSocket signaling server. Marked Beta pending broader testing.
 
 ### C++ Command-Line Tools
 
@@ -129,6 +141,7 @@ For C++ WebRTC usage, see [WEBRTC_QUICKSTART.md](WEBRTC_QUICKSTART.md).
 ## Example Usage
 
 ### C++ Sender
+
 ```cpp
 #include "o3ds/model.h"
 #include "o3ds/tcp.h"
@@ -151,21 +164,25 @@ tcpSocket.Send(buffer);
 ```
 
 ### Python Receiver
+
 ```python
-from o3ds import SubjectList, AsyncSubscriber
+# Minimal example: receive TCP data and inspect FlatBuffers
+# Note: Python utilities are provided as examples; a full Python API is not bundled.
+import socket, struct
 
-def on_data(data):
-    subjects = SubjectList()
-    subjects.Parse(data)
-    
-    for subject in subjects:
-        print(f"Subject: {subject.name}")
-        print(f"Transforms: {len(subject.transforms)}")
-        print(f"Curves: {len(subject.curve_names)}")
-
-subscriber = AsyncSubscriber()
-subscriber.set_callback(on_data)
-subscriber.start("tcp://localhost:5555")
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+   s.connect(("127.0.0.1", 5555))
+   header = s.recv(18)
+   if header[:4] != b"\x00\xff\x03\xfe":
+      raise SystemExit("Invalid stream header")
+   size = struct.unpack("I", header[14:18])[0]
+   payload = b""
+   while len(payload) < size:
+      chunk = s.recv(size - len(payload))
+      if not chunk:
+         break
+      payload += chunk
+   print(f"Received {len(payload)} bytes of O3DS data")
 ```
 
 ## Packaging for Release
@@ -177,7 +194,8 @@ python package.py
 ```
 
 This creates a zip file with the following structure:
-```
+
+```text
 UE_5.4/Plugins/Open3DStream/
 UE_5.5/Plugins/Open3DStream/
 lib/
@@ -189,12 +207,14 @@ Users can extract the entire version folder (e.g., `UE_5.5`) to their project ro
 ## Building Plugins
 
 ### Unreal Engine
+
 ```bash
 # Plugin is ready to use - just copy to your project
 cp -r plugins/unreal/Open3DStream /path/to/YourProject/Plugins/
 ```
 
 ### Maya
+
 ```bash
 cd plugins/maya
 mkdir build && cd build
@@ -204,6 +224,7 @@ make
 ```
 
 ### MotionBuilder
+
 ```bash
 cd plugins/mobu
 mkdir build && cd build
@@ -215,19 +236,22 @@ make
 ## Requirements
 
 ### Core Library
+
 - CMake 3.13+
 - C++17 compiler
 - FlatBuffers
 - NNG (for NNG protocols)
 
 ### WebRTC (Optional)
-- libdatachannel
+
+- libdatachannel (enabled by default)
 - nlohmann/json
 - Node.js (for signaling server)
 
 ## Contributing
 
 We welcome contributions! Areas of interest:
+
 - New protocol implementations
 - Plugin improvements
 - Performance optimizations
@@ -236,7 +260,7 @@ We welcome contributions! Areas of interest:
 
 ## Community
 
-- **Discord**: https://discord.gg/UdEbyFM9wD
+- **Discord**: <https://discord.gg/UdEbyFM9wD>
 - **Issues**: [GitHub Issues](https://github.com/lifelike-and-believable/Open3DStream/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/lifelike-and-believable/Open3DStream/discussions)
 
@@ -246,13 +270,11 @@ MIT License - see [LICENSE](LICENSE) file for details
 
 ## Credits
 
-**Creator**: Alastair Macleod (http://mocap.ca/)
+**Creator**: Alastair Macleod (<http://mocap.ca/>)
 
 **Contributors**:
-- Darin Velarde (http://singularityhitech.com/)
 
 **Curve Support & WebRTC Implementation**: Added October 2025
 
----
 
 *For detailed technical documentation, build instructions, and troubleshooting, see the linked documentation files above.*
