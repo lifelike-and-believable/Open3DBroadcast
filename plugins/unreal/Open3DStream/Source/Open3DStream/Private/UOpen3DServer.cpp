@@ -1,7 +1,6 @@
 #include "UOpen3DServer.h"
 #include "o3ds/async_pair.h"
 #include "o3ds/async_subscriber.h"
-#include "o3ds/webrtc_connector.h"
 #include "SocketSubsystem.h"
 #include "Interfaces/IPv4/IPv4Address.h"
 #include "Common/UdpSocketBuilder.h"
@@ -56,15 +55,8 @@ bool O3DSServer::start(FText Url, FText Protocol )
 		mServer = new O3DS::AsyncPairServer();
 	}
 
-	// WebRTC
-	if (strncmp(sprotocol, "WebRTC Client", 13) == 0)
-	{
-		mServer = new O3DS::WebRTCClient();
-	}
-	if (strncmp(sprotocol, "WebRTC Server", 13) == 0)
-	{
-		mServer = new O3DS::WebRTCServer();
-	}
+	// Note: WebRTC options removed - Unreal plugin now uses Pixel Streaming's native WebRTC
+	// The WebRTC Client/Server options will be handled through Pixel Streaming infrastructure
 
 	if (mServer)
 	{
