@@ -53,10 +53,20 @@ bool FWebRTCConnector::Start(const FString& Url, bool bInIsServer)
 	}
 
 	RoomName = Room;
-	SignalingServerUrl = FString::Printf(TEXT("ws://%s:%d"), *Host, Port);
+	
+	// Use wss:// for remote hosts (HTTPS/secure), ws:// for localhost
+	FString Protocol = TEXT("ws");
+	if (!Host.Equals(TEXT("localhost"), ESearchCase::IgnoreCase) && 
+	    !Host.Equals(TEXT("127.0.0.1")) && 
+	    !Host.StartsWith(TEXT("192.168.")) &&
+	    !Host.StartsWith(TEXT("10.")))
+	{
+		Protocol = TEXT("wss");
+	}
+	SignalingServerUrl = FString::Printf(TEXT("%s://%s:%d"), *Protocol, *Host, Port);
 
-	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Parsed URL - Host: %s, Port: %d, Room: %s, Signaling: %s"),
-		*Host, Port, *Room, *SignalingServerUrl);
+	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Parsed URL - Host: %s, Port: %d, Room: %s, Protocol: %s, Signaling: %s"),
+		*Host, Port, *Room, *Protocol, *SignalingServerUrl);
 
 	// Setup WebRTC configuration
 	if (!SetupPeerConnection())
