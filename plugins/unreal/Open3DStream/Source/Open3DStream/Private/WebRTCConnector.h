@@ -94,3 +94,4 @@ private:
 
 	/** Handle streamer disconnection */
 	void OnStreamerDisconnected();
+};
