@@ -8,8 +8,12 @@ find_package(nng CONFIG REQUIRED HINTS ${CMAKE_CURRENT_LIST_DIR}/../usr)
 # WebRTC support
 # - O3DS_ENABLE_WEBRTC (default: ON) keeps backward compatibility with existing builds/docs
 # - O3DS_DISABLE_WEBRTC (default: OFF) is an explicit opt-out that overrides the enable flag
+# - O3DS_LIBDATACHANNEL_ROOT: Optional path to a directory containing prebuilt libdatachannel
+#   (and its dependencies) plus headers. When provided, an imported target
+#   LibDataChannel::LibDataChannel is created from these artifacts instead of using find_package.
 option(O3DS_ENABLE_WEBRTC "Enable WebRTC support" ON)
 option(O3DS_DISABLE_WEBRTC "Disable WebRTC support (overrides enable)" OFF)
+set(O3DS_LIBDATACHANNEL_ROOT "" CACHE PATH "Root folder with prebuilt libdatachannel libs and include")
 
 # Compute effective switch used by the build
 set(O3DS_WITH_WEBRTC ${O3DS_ENABLE_WEBRTC})
@@ -18,7 +22,71 @@ if(O3DS_DISABLE_WEBRTC)
 endif()
 
 if(O3DS_WITH_WEBRTC)
-	find_package(LibDataChannel REQUIRED HINTS ${CMAKE_CURRENT_LIST_DIR}/../usr)
+	# Prefer prebuilt artifacts when a root path is provided; otherwise use find_package
+	if(O3DS_LIBDATACHANNEL_ROOT)
+		# Expect headers under <root>/include (or <root> if include not present)
+		set(LDC_INCLUDE_DIR "${O3DS_LIBDATACHANNEL_ROOT}/include")
+		if(NOT EXISTS "${LDC_INCLUDE_DIR}")
+			set(LDC_INCLUDE_DIR "${O3DS_LIBDATACHANNEL_ROOT}")
+		endif()
+
+		# Library file list must be present directly in the provided root
+		if(WIN32)
+			set(LDC_LIB_FILES
+				"${O3DS_LIBDATACHANNEL_ROOT}/datachannel.lib"
+				"${O3DS_LIBDATACHANNEL_ROOT}/usrsctp.lib"
+				"${O3DS_LIBDATACHANNEL_ROOT}/juice.lib"
+				"${O3DS_LIBDATACHANNEL_ROOT}/mbedtls.lib"
+				"${O3DS_LIBDATACHANNEL_ROOT}/mbedx509.lib"
+				"${O3DS_LIBDATACHANNEL_ROOT}/mbedcrypto.lib"
+			)
+			set(LDC_SYSTEM_LIBS bcrypt synchronization)
+		elseif(APPLE)
+			set(LDC_LIB_FILES
+				"${O3DS_LIBDATACHANNEL_ROOT}/libdatachannel.a"
+				"${O3DS_LIBDATACHANNEL_ROOT}/libusrsctp.a"
+				"${O3DS_LIBDATACHANNEL_ROOT}/libjuice.a"
+				"${O3DS_LIBDATACHANNEL_ROOT}/libmbedtls.a"
+				"${O3DS_LIBDATACHANNEL_ROOT}/libmbedx509.a"
+				"${O3DS_LIBDATACHANNEL_ROOT}/libmbedcrypto.a"
+			)
+			set(LDC_SYSTEM_LIBS "")
+		else()
+			# Linux and other UNIX
+			set(LDC_LIB_FILES
+				"${O3DS_LIBDATACHANNEL_ROOT}/libdatachannel.a"
+				"${O3DS_LIBDATACHANNEL_ROOT}/libusrsctp.a"
+				"${O3DS_LIBDATACHANNEL_ROOT}/libjuice.a"
+				"${O3DS_LIBDATACHANNEL_ROOT}/libmbedtls.a"
+				"${O3DS_LIBDATACHANNEL_ROOT}/libmbedx509.a"
+				"${O3DS_LIBDATACHANNEL_ROOT}/libmbedcrypto.a"
+			)
+			set(LDC_SYSTEM_LIBS "")
+		endif()
+
+		# Validate presence of expected libraries
+		set(_missing_files "")
+		foreach(_f IN LISTS LDC_LIB_FILES)
+			if(NOT EXISTS "${_f}")
+				list(APPEND _missing_files "${_f}")
+			endif()
+		endforeach()
+		if(_missing_files)
+			message(FATAL_ERROR "O3DS_LIBDATACHANNEL_ROOT is set but required libraries not found:\n  ${_missing_files}\nProvide a root containing the library files listed above.")
+		endif()
+
+		add_library(LibDataChannel::LibDataChannel INTERFACE IMPORTED)
+		set_target_properties(LibDataChannel::LibDataChannel PROPERTIES
+			INTERFACE_INCLUDE_DIRECTORIES "${LDC_INCLUDE_DIR}")
+		# Link both third-party libs and any system libs required
+		set_property(TARGET LibDataChannel::LibDataChannel APPEND PROPERTY
+			INTERFACE_LINK_LIBRARIES ${LDC_LIB_FILES} ${LDC_SYSTEM_LIBS})
+		message(STATUS "WebRTC: using prebuilt libdatachannel from ${O3DS_LIBDATACHANNEL_ROOT}")
+	else()
+		find_package(LibDataChannel REQUIRED HINTS ${CMAKE_CURRENT_LIST_DIR}/../usr)
+		message(STATUS "WebRTC: using LibDataChannel CMake package")
+	endif()
+
 	add_compile_definitions(O3DS_ENABLE_WEBRTC)
 	message(STATUS "WebRTC support enabled")
 else()
