@@ -47,6 +47,12 @@ jobs:
       - name: Setup CMake
         uses: lukka/get-cmake@latest
 
+      - name: Install Perl (required for MbedTLS GEN_FILES)
+        run: |
+          choco install strawberryperl -y
+          refreshenv
+          perl --version
+
       - name: Enable DTLS-SRTP in MbedTLS
         working-directory: thirdparty/mbedtls
         run: |
