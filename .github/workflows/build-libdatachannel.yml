@@ -38,6 +38,12 @@ jobs:
       - name: Setup CMake
         uses: lukka/get-cmake@latest
 
+      - name: Enable DTLS-SRTP in MbedTLS
+        working-directory: thirdparty/mbedtls
+        run: |
+          python scripts/config.py set MBEDTLS_SSL_DTLS_SRTP
+        shell: pwsh
+
       - name: Build MbedTLS
         working-directory: thirdparty/mbedtls
         run: |
@@ -116,6 +122,11 @@ jobs:
       - name: Install build tools
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
 
+      - name: Enable DTLS-SRTP in MbedTLS
+        working-directory: thirdparty/mbedtls
+        run: |
+          python3 scripts/config.py set MBEDTLS_SSL_DTLS_SRTP
+
       - name: Build MbedTLS
         working-directory: thirdparty/mbedtls
         run: |
@@ -189,6 +200,11 @@ jobs:
 
       - name: Setup CMake
         uses: lukka/get-cmake@latest
+
+      - name: Enable DTLS-SRTP in MbedTLS
+        working-directory: thirdparty/mbedtls
+        run: |
+          python3 scripts/config.py set MBEDTLS_SSL_DTLS_SRTP
 
       - name: Build MbedTLS
         working-directory: thirdparty/mbedtls
