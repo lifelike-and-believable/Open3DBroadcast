@@ -2,6 +2,9 @@
 *.zip
 include
 lib
+
+# Exception: Allow pre-built WebRTC libraries for Unreal plugin
+!plugins/unreal/Open3DStream/lib/webrtc/**
 build_release
 vsbuild
 

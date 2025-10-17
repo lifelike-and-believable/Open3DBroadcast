@@ -1,0 +1,13 @@
+libdatachannel Build Information
+=======================================
+
+Build Date: Fri Oct 17 04:09:01 UTC 2025
+Built by: codespace
+Build Host: codespaces-676daf
+libdatachannel Version: v0.23.2-14-gab100fe8
+OpenSSL: 3.0.13
+Configuration: RelWithDebInfo
+Platform: x86_64
+
+Files:
+  - libdatachannel.a (86M)

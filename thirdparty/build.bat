@@ -4,6 +4,7 @@ CALL %~DP0..\build_env.bat
 if NOT EXIST flatbuffers\CMakeLists.txt git submodule init
 if NOT EXIST nng\CMakeLists.txt git submodule init
 if NOT EXIST websocketpp\CMakeLists.txt git submodule init
+if NOT EXIST libdatachannel\CMakeLists.txt git submodule init
 
 REM git submodule update --recursive
 
