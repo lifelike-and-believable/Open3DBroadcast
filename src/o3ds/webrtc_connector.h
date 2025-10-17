@@ -31,6 +31,7 @@ SOFTWARE.
 #include <mutex>
 #include <queue>
 #include <vector>
+#include <cstddef> // std::byte
 
 // Forward declarations for libdatachannel types
 namespace rtc {
@@ -110,7 +111,8 @@ namespace O3DS
         void onDataChannelClose();
 
     //! Handle incoming data channel message
-    void onDataChannelMessage(const rtc::binary& data);
+    // Use std::vector<std::byte> here to avoid requiring rtc headers in this header file
+    void onDataChannelMessage(const std::vector<std::byte>& data);
 
         //! Send message to signaling server
         bool sendSignalingMessage(const std::string& message);

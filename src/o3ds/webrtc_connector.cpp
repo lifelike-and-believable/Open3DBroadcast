@@ -266,7 +266,7 @@ void WebRTCClient::onDataChannelClose()
     mIsDataChannelOpen = false;
 }
 
-void WebRTCClient::onDataChannelMessage(const rtc::binary& data)
+void WebRTCClient::onDataChannelMessage(const std::vector<std::byte>& data)
 {
     // Call user callback if set
     if (mInDataFunc && mContext) {
