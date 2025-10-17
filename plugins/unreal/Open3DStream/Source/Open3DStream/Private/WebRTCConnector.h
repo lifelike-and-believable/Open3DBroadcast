@@ -4,6 +4,9 @@
 
 #include "CoreMinimal.h"
 #include "Containers/Queue.h"
+#include <memory>
+#include <vector>
+#include <string>
 
 // Forward declarations
 class FWebRTCSignalingClient;
@@ -13,6 +16,8 @@ namespace rtc
 	class PeerConnection;
 	class DataChannel;
 	struct Configuration;
+	class Candidate;
+	class Description;
 }
 
 /**

@@ -5,11 +5,14 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonReader.h"
 #include "IPAddress.h"
+#include "Misc/ScopeLock.h"
 
 // libdatachannel includes
 #include <rtc/rtc.hpp>
 #include <memory>
 #include <vector>
+#include <string>
+#include <variant>
 
 const char* FWebRTCConnector::DataChannelLabel = "Open3DStream";
 
@@ -120,8 +123,8 @@ bool FWebRTCConnector::Send(const uint8* Data, int32 Size)
 	{
 		FScopeLock Lock(&DataChannelLock);
 		
-		std::vector<uint8> Message(Data, Data + Size);
-		DataChannel->send(Message);
+		rtc::binary Out(Data, Data + Size);
+		DataChannel->send(Out);
 		
 		return true;
 	}
