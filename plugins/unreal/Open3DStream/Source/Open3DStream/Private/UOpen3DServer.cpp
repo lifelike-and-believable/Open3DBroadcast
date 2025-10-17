@@ -1,6 +1,9 @@
 #include "UOpen3DServer.h"
 #include "o3ds/async_pair.h"
 #include "o3ds/async_subscriber.h"
+#ifdef O3DS_ENABLE_WEBRTC
+#include "o3ds/webrtc_connector.h"
+#endif
 #include "SocketSubsystem.h"
 #include "Interfaces/IPv4/IPv4Address.h"
 #include "Common/UdpSocketBuilder.h"
