@@ -93,6 +93,7 @@ Implemented WebRTC as a network transport for peer-to-peer streaming:
 - [WebRTC Quick Start](WEBRTC_QUICKSTART.md) - 5-minute WebRTC setup
 - [WebRTC Full Documentation](WEBRTC_SUPPORT.md) - Complete WebRTC guide
 - [WebRTC Implementation](WEBRTC_IMPLEMENTATION_SUMMARY.md) - Architecture details
+- [libdatachannel Integration](LIBDATACHANNEL_INTEGRATION.md) - Build and CI configuration
 
 ## Protocol Comparison
 
