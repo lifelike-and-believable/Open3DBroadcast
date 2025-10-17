@@ -7,11 +7,16 @@ add_subdirectory(flatbuffers)
 add_subdirectory(nng)
 add_subdirectory(crccpp)
 
-# Build MbedTLS for libdatachannel
-# Note: Using development branch (4.0+) for DTLS-SRTP support
-# Stable 3.x releases lack the DTLS-SRTP APIs required by libdatachannel
-option(O3DS_BUILD_MBEDTLS "Build MbedTLS for libdatachannel" ON)
-if(O3DS_BUILD_MBEDTLS)
+# WebRTC Support - libdatachannel
+# Note: Pre-built libraries are available in plugins/unreal/Open3DStream/lib/webrtc/
+# Only build from source if explicitly needed (e.g., updating libdatachannel version)
+option(O3DS_BUILD_WEBRTC "Build libdatachannel for WebRTC support" ON)
+
+if(O3DS_BUILD_WEBRTC)
+    message(STATUS "Building libdatachannel for WebRTC support with MbedTLS")
+    
+    # Build MbedTLS first (required by libdatachannel)
+    # Note: Using v3.6.5 stable with DTLS-SRTP enabled
     message(STATUS "Building MbedTLS for libdatachannel")
     
     # Configure MbedTLS options
@@ -20,14 +25,6 @@ if(O3DS_BUILD_MBEDTLS)
     set(GEN_FILES ON CACHE BOOL "Enable file generation for MbedTLS")
     
     add_subdirectory(mbedtls)
-else()
-    message(STATUS "Skipping MbedTLS build (O3DS_BUILD_MBEDTLS=OFF)")
-endif()
-
-# WebRTC Support - libdatachannel
-option(O3DS_BUILD_WEBRTC "Build libdatachannel for WebRTC support" ON)
-if(O3DS_BUILD_WEBRTC)
-    message(STATUS "Building libdatachannel for WebRTC support with MbedTLS")
     
     # Configure libdatachannel options for CI compatibility
     # Build static libraries only
