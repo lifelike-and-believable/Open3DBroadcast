@@ -78,32 +78,53 @@ Added support for animation curves to enable morph target-based facial animation
 - Delta-optimized curve updates
 - See [CURVE_SUPPORT.md](CURVE_SUPPORT.md) for details
 
-### WebRTC Protocol (October 2025)
-Implemented WebRTC as a network transport for peer-to-peer streaming:
-- Low-latency peer-to-peer connections
-- Built-in NAT traversal (STUN/TURN)
-- DTLS encryption
-- Room-based peer grouping
-- See [WEBRTC_QUICKSTART.md](WEBRTC_QUICKSTART.md) for 5-minute setup
+### WebRTC Build Infrastructure (October 2025)
+Integrated libdatachannel library with MbedTLS backend for future WebRTC support:
+- Pre-built libdatachannel static libraries for Windows, Linux, macOS
+- MbedTLS 3.6.5 with DTLS-SRTP enabled
+- Automated CI workflow for building libraries
+- Static linking configuration with no runtime dependencies
+- **Note**: WebRTC functionality in Unreal plugin pending (see [Issue #15](https://github.com/lifelike-and-believable/Open3DStream/issues/15))
+- C++ command-line tools support WebRTC - see [WEBRTC_QUICKSTART.md](WEBRTC_QUICKSTART.md)
 
 ## Documentation
 
+### Features
 - [Animation Curve Support](CURVE_SUPPORT.md) - Morph target streaming
 - [Curve Implementation Summary](IMPLEMENTATION_SUMMARY.md) - Technical details
-- [WebRTC Quick Start](WEBRTC_QUICKSTART.md) - 5-minute WebRTC setup
+
+### WebRTC (C++ Tools - Functional)
+- [WebRTC Quick Start](WEBRTC_QUICKSTART.md) - 5-minute WebRTC setup for C++ tools
 - [WebRTC Full Documentation](WEBRTC_SUPPORT.md) - Complete WebRTC guide
 - [WebRTC Implementation](WEBRTC_IMPLEMENTATION_SUMMARY.md) - Architecture details
-- [libdatachannel Integration](LIBDATACHANNEL_INTEGRATION.md) - Build and CI configuration
+
+### WebRTC (Unreal Plugin - In Development)
+- [libdatachannel Integration](LIBDATACHANNEL_INTEGRATION.md) - Build infrastructure (Issue #13 ✅)
+- [Issue #15](https://github.com/lifelike-and-believable/Open3DStream/issues/15) - Implementation roadmap
 
 ## Protocol Comparison
 
-| Protocol | Latency | Setup | NAT Traversal | Encryption | Best For |
-|----------|---------|-------|---------------|------------|----------|
-| TCP | Medium | Easy | ❌ | ❌ | Local networks |
-| UDP | Low | Easy | ❌ | ❌ | Low latency, lossy OK |
-| WebSocket | Medium | Medium | ❌ | Optional | Web apps |
-| NNG | Low | Medium | ❌ | ❌ | Microservices |
-| **WebRTC** | **Low** | **Medium** | **✅** | **✅** | **Cloud, remote** |
+### Unreal Plugin (Current Release)
+
+| Protocol | Status | Latency | Setup | NAT Traversal | Encryption | Best For |
+|----------|--------|---------|-------|---------------|------------|----------|
+| TCP | ✅ Ready | Medium | Easy | ❌ | ❌ | Local networks |
+| UDP | ✅ Ready | Low | Easy | ❌ | ❌ | Low latency, lossy OK |
+| NNG | ✅ Ready | Low | Medium | ❌ | ❌ | Microservices |
+| WebRTC | 🚧 Coming | Low | Medium | ✅ | ✅ | Cloud, remote |
+
+**WebRTC Status**: Build infrastructure complete ([Issue #13](https://github.com/lifelike-and-believable/Open3DStream/issues/13)). Implementation in progress ([Issue #15](https://github.com/lifelike-and-believable/Open3DStream/issues/15)).
+
+### C++ Command-Line Tools
+
+| Protocol | Status | Best For |
+|----------|--------|----------|
+| TCP | ✅ Ready | Local networks |
+| UDP | ✅ Ready | Low latency |
+| NNG | ✅ Ready | Microservices |
+| **WebRTC** | **✅ Ready** | **Cloud, remote** |
+
+For C++ WebRTC usage, see [WEBRTC_QUICKSTART.md](WEBRTC_QUICKSTART.md).
 
 ## Example Usage
 
