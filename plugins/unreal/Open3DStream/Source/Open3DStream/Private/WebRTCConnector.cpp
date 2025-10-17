@@ -154,9 +154,11 @@ void FWebRTCConnector::Tick()
 	}
 }
 
-void FWebRTCConnector::OnPeerConnectionStateChange(rtc::PeerConnection::State State)
+void FWebRTCConnector::OnPeerConnectionStateChange(int StateInt)
 {
 	FScopeLock Lock(&this->PeerConnectionLock);
+
+	rtc::PeerConnection::State State = static_cast<rtc::PeerConnection::State>(StateInt);
 
 	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: PeerConnection state change"));
 
@@ -459,7 +461,7 @@ bool FWebRTCConnector::SetupPeerConnection()
 		// Bind callbacks
 		PeerConnection->onStateChange([this](rtc::PeerConnection::State State)
 		{
-			OnPeerConnectionStateChange(State);
+			OnPeerConnectionStateChange(static_cast<int>(State));
 		});
 
 		PeerConnection->onLocalCandidate([this](rtc::Candidate Candidate)

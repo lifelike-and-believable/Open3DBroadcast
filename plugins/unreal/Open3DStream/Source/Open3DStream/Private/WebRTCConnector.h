@@ -116,7 +116,7 @@ private:
 	static const char* DataChannelLabel;
 
 	// libdatachannel callback handlers (called from libdatachannel thread)
-	void OnPeerConnectionStateChange(rtc::PeerConnection::State State);
+	void OnPeerConnectionStateChange(int State);
 	void OnDataChannelOpen();
 	void OnDataChannelMessage(const std::vector<uint8>& Message);
 	void OnDataChannelError(const std::string& Error);
