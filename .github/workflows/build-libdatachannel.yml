@@ -21,7 +21,7 @@ jobs:
       - name: Checkout MbedTLS development branch
         working-directory: thirdparty/mbedtls
         run: |
-          git fetch origin development
+          git fetch origin development:development
           git checkout development
           git log --oneline -1
         shell: pwsh
@@ -99,7 +99,7 @@ jobs:
       - name: Checkout MbedTLS development branch
         working-directory: thirdparty/mbedtls
         run: |
-          git fetch origin development
+          git fetch origin development:development
           git checkout development
           git log --oneline -1
 
@@ -172,7 +172,7 @@ jobs:
       - name: Checkout MbedTLS development branch
         working-directory: thirdparty/mbedtls
         run: |
-          git fetch origin development
+          git fetch origin development:development
           git checkout development
           git log --oneline -1
 
