@@ -53,6 +53,19 @@ jobs:
           Get-ChildItem -Path "${{ github.workspace }}/install/include/mbedtls" | Select-Object -First 10
         shell: pwsh
 
+      - name: Create MbedTLS 4.0 compatibility shims
+        run: |
+          $headers = @('ctr_drbg', 'entropy', 'hmac_drbg')
+          foreach ($header in $headers) {
+              $shimPath = "${{ github.workspace }}/install/include/mbedtls/$header.h"
+              if (-not (Test-Path $shimPath)) {
+                  $content = "#include `"mbedtls/private/$header.h`"`n"
+                  Set-Content -Path $shimPath -Value $content
+                  Write-Host "Created shim for $header.h"
+              }
+          }
+        shell: pwsh
+
       - name: Build libdatachannel
         working-directory: thirdparty/libdatachannel
         run: |
@@ -130,6 +143,16 @@ jobs:
           echo "Checking installed files..."
           ls -la ${{ github.workspace }}/install/include/mbedtls/ | head -20
 
+      - name: Create MbedTLS 4.0 compatibility shims
+        run: |
+          for header in ctr_drbg entropy hmac_drbg; do
+              shimPath="${{ github.workspace }}/install/include/mbedtls/${header}.h"
+              if [ ! -f "$shimPath" ]; then
+                  echo "#include \"mbedtls/private/${header}.h\"" > "$shimPath"
+                  echo "Created shim for ${header}.h"
+              fi
+          done
+
       - name: Build libdatachannel
         working-directory: thirdparty/libdatachannel
         run: |
@@ -203,6 +226,16 @@ jobs:
           cmake --install build
           echo "Checking installed files..."
           ls -la ${{ github.workspace }}/install/include/mbedtls/ | head -20
+
+      - name: Create MbedTLS 4.0 compatibility shims
+        run: |
+          for header in ctr_drbg entropy hmac_drbg; do
+              shimPath="${{ github.workspace }}/install/include/mbedtls/${header}.h"
+              if [ ! -f "$shimPath" ]; then
+                  echo "#include \"mbedtls/private/${header}.h\"" > "$shimPath"
+                  echo "Created shim for ${header}.h"
+              fi
+          done
 
       - name: Build libdatachannel
         working-directory: thirdparty/libdatachannel
