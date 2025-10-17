@@ -55,12 +55,10 @@ public class Open3DStream : ModuleRules
                 "Networking",
                 "Sockets",
                 "InputCore",
-                "PixelStreaming",
-                "WebRTC",
                 "WebSockets",
                 "Json",
                 "JsonUtilities",
-                // ... add private dependencies that you statically link with here ...  
+                // Note: Removed PixelStreaming and WebRTC - using libdatachannel instead
             }
             );
 				

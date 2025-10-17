@@ -3,17 +3,27 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Containers/Queue.h"
 
-// Forward declarations for Pixel Streaming types
-class IPixelStreamingModule;
-class IPixelStreamingStreamer;
+// Forward declarations
+class FWebRTCSignalingClient;
+
+namespace rtc
+{
+	class PeerConnection;
+	class DataChannel;
+	struct Configuration;
+}
 
 /**
- * WebRTC connector using Unreal's Pixel Streaming infrastructure
- * Provides bidirectional data channel communication for Open3DStream
+ * WebRTC connector using libdatachannel
+ * Provides bidirectional binary data channel communication for Open3DStream
  * 
- * This uses Unreal's native WebRTC implementation (via Pixel Streaming)
- * instead of external libraries like libdatachannel.
+ * Implements:
+ * - WebSocket-based signaling (via FWebRTCSignalingClient)
+ * - libdatachannel PeerConnection management
+ * - Binary data channel for animation frames
+ * - Automatic ICE/STUN negotiation
  */
 class FWebRTCConnector
 {
@@ -23,7 +33,7 @@ public:
 
 	/**
 	 * Start the WebRTC connection as a client or server
-	 * @param Url The WebRTC signaling server URL (e.g., "ws://localhost:8888")
+	 * @param Url WebRTC URL format: webrtc://host:port/room?stun=...&turn=...
 	 * @param bIsServer Whether to act as server (true) or client (false)
 	 * @return True if started successfully
 	 */
@@ -58,40 +68,73 @@ public:
 	 */
 	bool IsConnected() const { return bIsConnected; }
 
+	/**
+	 * Check if data channel is open
+	 */
+	bool IsDataChannelOpen() const { return bDataChannelOpen; }
+
+	/**
+	 * Get connection state (for debugging)
+	 */
+	FString GetConnectionState() const { return ConnectionState; }
+
+	/**
+	 * Tick function to process queued messages (called from game thread)
+	 */
+	void Tick();
+
 private:
-	/** Pixel Streaming module reference */
-	IPixelStreamingModule* PixelStreamingModule;
+	// libdatachannel objects
+	std::shared_ptr<rtc::PeerConnection> PeerConnection;
+	std::shared_ptr<rtc::DataChannel> DataChannel;
+	std::shared_ptr<rtc::Configuration> RtcConfig;
 
-	/** Pixel Streaming streamer instance */
-	TSharedPtr<IPixelStreamingStreamer> Streamer;
+	// Signaling
+	TUniquePtr<FWebRTCSignalingClient> SignalingClient;
+	FString SignalingServerUrl;
+	FString RoomName;
 
-	/** Data channel label for Open3DStream */
-	static const FString DataChannelLabel;
-
-	/** Whether we're connected */
+	// State
 	bool bIsConnected;
-
-	/** Whether we're acting as server */
+	bool bDataChannelOpen;
 	bool bIsServer;
-
-	/** Last error message */
+	FString ConnectionState;
 	FString LastError;
 
-	/** Callback for received data */
+	// Data callbacks
 	TFunction<void(const uint8*, int32)> DataReceivedCallback;
 
-	/** Delegate handle for data channel messages */
-	FDelegateHandle DataChannelMessageHandle;
+	// Message queue (thread-safe for libdatachannel callbacks)
+	TQueue<TArray<uint8>, EQueueMode::MPSC> ReceivedDataQueue;
 
-	/** Delegate handle for connection state changes */
-	FDelegateHandle ConnectionStateHandle;
+	// Static data channel label
+	static const char* DataChannelLabel;
 
-	/** Handle data received from data channel */
-	void OnDataChannelMessage(IPixelStreamingStreamer* InStreamer);
+	// libdatachannel callback handlers (called from libdatachannel thread)
+	void OnPeerConnectionStateChange(rtc::PeerConnection::State State);
+	void OnDataChannelOpen();
+	void OnDataChannelMessage(const std::vector<uint8>& Message);
+	void OnDataChannelError(const std::string& Error);
+	void OnDataChannelClosed();
+	void OnIceCandidate(const rtc::Candidate& Candidate);
+	void OnLocalDescription(const rtc::Description& Description);
 
-	/** Handle streamer connection */
-	void OnStreamerConnected(IPixelStreamingStreamer* InStreamer);
+	// Signaling callbacks
+	void OnSignalingConnected();
+	void OnSignalingError(const FString& Error);
+	void OnSignalingDisconnected(const FString& Reason);
+	void OnOfferReceived(const FString& SDP);
+	void OnAnswerReceived(const FString& SDP);
+	void OnIceCandidateReceived(const FString& Candidate, const FString& SdpMid, int32 SdpMLineIndex);
+	void OnPeerJoined();
 
-	/** Handle streamer disconnection */
-	void OnStreamerDisconnected(IPixelStreamingStreamer* InStreamer);
+	// Helper functions
+	bool ParseWebRtcUrl(const FString& Url, FString& OutHost, uint16& OutPort, FString& OutRoom, TMap<FString, FString>& OutParams);
+	bool SetupPeerConnection();
+	bool CreateDataChannel();
+	void CleanupPeerConnection();
+
+	// Thread-safety
+	FCriticalSection PeerConnectionLock;
+	FCriticalSection DataChannelLock;
 };
