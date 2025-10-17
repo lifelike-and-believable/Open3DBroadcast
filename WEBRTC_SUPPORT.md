@@ -44,12 +44,14 @@ make -j4
 
 # To explicitly toggle
 cmake .. -DO3DS_ENABLE_WEBRTC=ON   # enable (default)
-cmake .. -DO3DS_ENABLE_WEBRTC=OFF  # disable
+cmake .. -DO3DS_DISABLE_WEBRTC=ON  # disable (preferred)
+## Legacy equivalent: -DO3DS_ENABLE_WEBRTC=OFF
 ```
 
 ### CMake options
 
 - -DO3DS_ENABLE_WEBRTC=ON: Enable WebRTC support (default: ON)
+- -DO3DS_DISABLE_WEBRTC=ON: Disable WebRTC support (overrides enable flag)
 - -DLibDataChannel_DIR=/path/to/lib: Only needed when using a custom libdatachannel build. By default, Open3DStream uses the bundled/prebuilt libs.
 
 ## Usage
@@ -61,6 +63,7 @@ webrtc://signaling-server:port/room-id
 ```
 
 Examples:
+
 - `webrtc://localhost:8080/myroom`
 - `webrtc://signal.example.com:9000/session123`
 - `webrtc://192.168.1.100:8080/capture-stream`
@@ -171,6 +174,7 @@ console.log('Signaling server running on ws://localhost:8080');
 ```
 
 Save as `examples/signaling-server.js` (already in repo) and run:
+
 ```bash
 npm install ws
 node signaling-server.js
@@ -179,12 +183,15 @@ node signaling-server.js
 ## NAT traversal configuration
 
 ### STUN servers (public)
+
 Free STUN servers for testing:
+
 - `stun:stun.l.google.com:19302`
 - `stun:stun1.l.google.com:19302`
 - `stun:stun2.l.google.com:19302`
 
 ### TURN servers (for restricted networks)
+
 For production use behind strict firewalls, configure a TURN server:
 
 ```cpp
@@ -197,6 +204,7 @@ client.setIceServers(
 ```
 
 Popular TURN server options:
+
 - **coturn**: Open-source TURN server
 - **Twilio STUN/TURN**: Cloud-based service
 - **xirsys**: Managed TURN service
@@ -204,16 +212,19 @@ Popular TURN server options:
 ## Performance considerations
 
 ### Bandwidth
+
 - WebRTC data channels support configurable bandwidth
 - Typical O3DS streaming: 100-500 KB/s
 - Curve data adds minimal overhead
 
 ### Latency
+
 - WebRTC provides <100ms latency in ideal conditions
 - TURN relay adds 20-50ms
 - Optimized for real-time animation streaming
 
 ### Connection limits
+
 - Signaling server: Unlimited rooms
 - Peer connections: Typically 10-50 per client
 - Data channel: One per peer connection
@@ -223,6 +234,7 @@ Popular TURN server options:
 ### Connection fails
 
 Check signaling server:
+
 ```bash
 curl -i -N -H "Connection: Upgrade" -H "Upgrade: websocket" \
      -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: test" \
@@ -230,6 +242,7 @@ curl -i -N -H "Connection: Upgrade" -H "Upgrade: websocket" \
 ```
 
 Verify ICE candidates:
+
 - Check firewall allows UDP traffic
 - Ensure STUN server is reachable
 - Configure TURN if behind symmetric NAT
@@ -242,6 +255,7 @@ Verify data channel state:
 - Check for ICE connection failures
 
 Enable verbose logging:
+
 ```cpp
 // In webrtc_connector.cpp, add logging
 rtc::InitLogger(rtc::LogLevel::Debug);
@@ -257,15 +271,18 @@ rtc::InitLogger(rtc::LogLevel::Debug);
 ## Security considerations
 
 ### Encryption
+
 - WebRTC data channels use DTLS encryption (enabled by default)
 - All data is encrypted end-to-end
 
 ### Authentication
+
 - Implement signaling server authentication
 - Use room-based access control
 - Consider TURN server credentials
 
 ### Network security
+
 - WebRTC can bypass some firewall rules
 - Implement proper access controls on signaling server
 - Monitor and limit concurrent connections
@@ -299,12 +316,14 @@ rtc::InitLogger(rtc::LogLevel::Debug);
 ## Support
 
 For WebRTC-specific issues:
+
 1. Check libdatachannel GitHub issues
 2. Verify signaling server is running
 3. Test with public STUN servers first
 4. Enable debug logging for detailed diagnostics
 
 For Open3DStream integration:
+
 - Review existing protocol implementations (TCP, UDP)
 - Check base_connector interface compatibility
 - Verify callback setup in `UOpen3DServer.cpp`

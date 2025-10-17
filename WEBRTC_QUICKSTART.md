@@ -80,7 +80,7 @@ wscat -c ws://localhost:8080/ws
 ### Build without WebRTC
 
 ```bash
-cmake .. -DO3DS_ENABLE_WEBRTC=OFF
+cmake .. -DO3DS_DISABLE_WEBRTC=ON
 make -j4
 ```
 
@@ -104,7 +104,7 @@ node signaling-server.js 9000
 
 ### No WebRTC protocol in Unreal
 
-- Verify build completed with `-DO3DS_ENABLE_WEBRTC=ON`
+- Verify build completed with `-DO3DS_ENABLE_WEBRTC=ON` (default)
 - Check CMake output for LibDataChannel found
 - Rebuild Unreal plugin
 
