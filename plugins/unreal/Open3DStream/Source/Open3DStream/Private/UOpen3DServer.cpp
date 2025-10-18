@@ -57,7 +57,6 @@ bool O3DSServer::start(FText Url, FText Protocol )
 		mServer = new O3DS::AsyncPairServer();
 	}
 
-	// WebRTC using Unreal's Pixel Streaming
 	if (strncmp(sprotocol, "WebRTC Client", 13) == 0)
 	{
 		mWebRTCConnector = new FWebRTCConnector();
