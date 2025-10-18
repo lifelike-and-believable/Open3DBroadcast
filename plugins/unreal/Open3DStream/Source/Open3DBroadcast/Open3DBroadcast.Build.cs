@@ -43,10 +43,7 @@ public class Open3DBroadcast : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
-				"LiveLinkInterface",
-				"Slate",
-				"SlateCore",
-				"UnrealEd"
+				"LiveLinkInterface"
 			}
 			);
 				

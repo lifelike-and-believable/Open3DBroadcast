@@ -29,5 +29,13 @@
 			"AdditionalDependencies": ["Open3DStream"],
 			"WhitelistPlatforms": ["Win64", "Linux", "Mac"]
 		}
+		,
+		{
+			"Name": "Open3DBroadcastEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": ["Open3DStream", "Open3DBroadcast"],
+			"WhitelistPlatforms": ["Win64", "Linux", "Mac"]
+		}
 	]
 }
