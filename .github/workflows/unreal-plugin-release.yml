@@ -123,35 +123,35 @@ jobs:
             -TargetPlatforms @("Win64") `
             -Configuration "Shipping"
 
-      - name: Copy Open3DStream build artifacts for dependency resolution
+      - name: Build Open3DBroadcast plugin (Win64, Shipping) via ProjectSandbox
         shell: powershell
         run: |
+          $UAT = Join-Path "$env:UE_ROOT" "Engine\Build\BatchFiles\RunUAT.bat"
+          $ProjectFile = Join-Path $PWD "ProjectSandbox\ProjectSandbox.uproject"
+          $BroadcastPlugin = Join-Path $PWD "plugins\unreal\Open3DBroadcast\Open3DBroadcast.uplugin"
           $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
-          $sourcePlugin = Join-Path $pkg "Open3DStream"
-          $targetPlugin = "plugins\unreal\Open3DStream"
           
-          # Copy Binaries and Intermediate folders back to source for dependency resolution
-          if (Test-Path "$sourcePlugin\Binaries") {
-            Copy-Item -Path "$sourcePlugin\Binaries" -Destination $targetPlugin -Recurse -Force
-            Write-Host "Copied Binaries to $targetPlugin"
+          Write-Host "Building Open3DBroadcast ${{ steps.version.outputs.version_number }} via ProjectSandbox project context..."
+          Write-Host "  Project: $ProjectFile"
+          Write-Host "  Plugin: $BroadcastPlugin"
+          Write-Host "  Output: $pkg"
+          
+          # Build using the project file to ensure plugin dependencies are resolved
+          & $UAT BuildPlugin `
+            "-Plugin=$BroadcastPlugin" `
+            "-Package=$pkg" `
+            "-Project=$ProjectFile" `
+            "-TargetPlatforms=Win64" `
+            "-Configuration=Shipping" `
+            -Rocket `
+            -VeryVerbose `
+            -VS2022
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Open3DBroadcast build failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
           }
-          if (Test-Path "$sourcePlugin\Intermediate") {
-            Copy-Item -Path "$sourcePlugin\Intermediate" -Destination $targetPlugin -Recurse -Force
-            Write-Host "Copied Intermediate to $targetPlugin"
-          }
-
-      - name: Build Open3DBroadcast plugin (Win64, Shipping)
-        shell: powershell
-        run: |
-          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
-          $broadcastUplugin = Join-Path $PWD "plugins\unreal\Open3DBroadcast\Open3DBroadcast.uplugin"
-          Write-Host "Building Open3DBroadcast ${{ steps.version.outputs.version_number }} for Win64 (Shipping)..."
-          & .\Build\Scripts\Build-Plugin.ps1 `
-            -UEPath "$env:UE_ROOT" `
-            -PluginUPluginPath "$broadcastUplugin" `
-            -OutDir "$pkg" `
-            -TargetPlatforms @("Win64") `
-            -Configuration "Shipping"
+          Write-Host "[OK] Open3DBroadcast build completed successfully"
 
       # Optional: Build for additional platforms
       # - name: Build plugin (Linux, Shipping)
