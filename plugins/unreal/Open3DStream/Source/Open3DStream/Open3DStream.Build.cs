@@ -12,6 +12,17 @@ public class Open3DStream : ModuleRules
 		// Enable C++ exceptions for libdatachannel (which throws std::exception)
 		bEnableExceptions = true;
 		
+		// Support for conditional compilation of broadcast features
+		// By default, broadcast features are enabled unless explicitly disabled
+		// To disable broadcast module, add -D O3DS_WITH_BROADCAST=0 to UBT command line
+		// or define O3DS_WITH_BROADCAST=0 in your project's Target.cs GlobalDefinitions
+		bool bWithBroadcast = true;
+		if (Target.GlobalDefinitions.Contains("O3DS_WITH_BROADCAST=0"))
+		{
+			bWithBroadcast = false;
+		}
+		PublicDefinitions.Add(bWithBroadcast ? "O3DS_WITH_BROADCAST=1" : "O3DS_WITH_BROADCAST=0");
+		
 		PublicIncludePaths.AddRange( new string[] {} );
 		
 		string LibDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "../../ThirdParty/"));

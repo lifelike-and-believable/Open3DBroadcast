@@ -2,27 +2,30 @@
 
 This document is for AI coding agents working on Open3DStream. It captures goals, architecture, conventions, and high‑signal entry points so changes align with the project’s direction.
 
-## Phase focus: O3DBroadcast (Unreal → Remote Clients)
+## Current Status: Unified Plugin with Receiver & Broadcast Modules
 
-We are now prioritizing O3DBroadcast: streaming final animation pose (bone transforms) and curve values (morphs/attributes) for multiple Skeletal Meshes from a single Unreal Engine instance to remote clients that use the Open3DStream LiveLink Source.
+**What exists today:**
+- **Open3DStream plugin**: Unified Unreal plugin with two modules:
+  - **Open3DStream module** (mature): LiveLink Source that receives animation data from external sources
+  - **Open3DBroadcast module** (framework): Module for broadcasting animation data FROM Unreal TO remote clients
+- **Core C++ library**: Full protocol implementation with TCP/UDP/WebRTC/NNG connectors in `src/o3ds/`
+- **Maya/MotionBuilder plugins**: Working receivers in `plugins/maya/` and `plugins/mobu/`
+- **WebRTC support**: libdatachannel integrated, functional in C++ tools, beta in Unreal
 
-High‑level outcomes:
-- UE acts as a sender for multiple SkeletalMeshComponents simultaneously.
-- Each Skeletal Mesh becomes one Open3DStream Subject with:
-  - Stable bone hierarchy and per‑frame final pose (component space or parent‑relative).
-  - Per‑frame curve values (morph targets and animation curves).
-- Transport‑agnostic output (TCP/UDP/WebRTC/NNG) via the connector layer.
-- Remote clients (e.g., Unreal with the Open3DStream LiveLink Source, Maya/Mobu) subscribe and receive synchronized frames.
-- Editor‑friendly configuration, live add/remove of meshes, robust connection lifecycle, and frame‑drop/backpressure handling.
+## Phase focus: Open3DBroadcast Module Implementation (Active)
 
-Deliverables (MVP):
-- An Unreal module that:
-  - Registers SkeletalMeshComponents to broadcast.
-  - Captures final evaluated animation pose and curve values each frame.
-  - Packages data into Open3DStream Subject messages.
-  - Sends them via a configured connector URL (supports webrtc://, tcp://, etc.).
-- Minimal editor UI/settings for selecting meshes and connection URL.
-- Example map/project settings and a smoke test guide with a second Unreal instance as a client using the existing Open3DStream LiveLink Source.
+**Goal**: Complete the Open3DBroadcast module within the Open3DStream plugin to stream skeletal animation and curves FROM Unreal Engine TO remote clients.
+
+**Current state**: Module framework exists at `plugins/unreal/Open3DStream/Source/Open3DBroadcast/` but needs core implementation:
+- Register multiple SkeletalMeshComponents for broadcast  
+- Capture final animation pose (transforms) and curve values each frame
+- Send via configured connector URL (tcp://, udp://, webrtc://, nng://)
+- Integrate with existing Open3DStream core library at `src/o3ds/`
+- Provide editor UI for configuration
+
+**Key deliverable**: A working sender module that complements the existing Open3DStream LiveLink Source (receiver module).
+
+**Build configuration**: The module can be optionally disabled via build flags (`O3DS_WITH_BROADCAST=0`) for minimal installations.
 
 ## Project goals and non‑goals
 
@@ -62,14 +65,19 @@ Connector URL patterns:
 - Configure ICE/STUN/TURN as needed; avoid hard‑coding credentials.
 - Transport is transparent to adapters; they consume decoded messages.
 
-## O3DBroadcast design (Unreal sender)
+## Open3DBroadcast Module Design (Unreal sender)
 
-Module shape (proposed, minimal surface):
-- Module: `O3DBroadcast` (under `plugins/unreal/Open3DStream/Source/O3DBroadcast/`).
-- Subsystem: `UO3DBroadcastSubsystem` to manage connection(s), registered SkeletalMeshComponents, and per‑frame capture.
-- Component: `UO3DBroadcastComponent` attachable to Actors or directly register `USkeletalMeshComponent*`.
-- Settings: `UO3DBroadcastSettings` for a default connector URL, subject naming policy, update rate, and transport options (e.g., WebRTC ICE).
-- Editor UI: Details customization to pick meshes and set a URL; optional toolbar toggle to start/stop streaming.
+**Module architecture** (within Open3DStream plugin):
+- **Module**: `Open3DBroadcast` at `plugins/unreal/Open3DStream/Source/Open3DBroadcast/`
+- **Dependencies**: Depends on `Open3DStream` module for core networking and serialization
+- **Build flags**: Supports conditional compilation via `O3DS_WITH_BROADCAST` flag
+- **Target scope**: Runtime module, available in Editor and packaged games
+
+**Proposed components**:
+- **Subsystem**: `UO3DBroadcastSubsystem` to manage connection(s), registered SkeletalMeshComponents, and per‑frame capture
+- **Component**: `UO3DBroadcastComponent` attachable to Actors or directly register `USkeletalMeshComponent*`
+- **Settings**: `UO3DBroadcastSettings` for default connector URL, subject naming policy, update rate, and transport options
+- **Editor UI**: Details customization to pick meshes and set URL; optional toolbar toggle to start/stop streaming
 
 Capture points (final pose + curves):
 - Preferred hooks:
@@ -152,12 +160,13 @@ Notes:
 
 ## Extending the system
 
-Add/modify O3DBroadcast components (Unreal):
+Add/modify Open3DBroadcast module components (Unreal):
 1) Implement capture and subject packaging for a SkeletalMeshComponent.
 2) Batch subjects into a `SubjectList` with timestamps.
-3) Send via the selected connector URL.
+3) Send via the selected connector URL using Open3DStream module's connectors.
 4) Provide editor settings and a simple start/stop control.
 5) Add end‑to‑end tests with two UE instances (sender/receiver).
+6) Ensure proper module dependency on Open3DStream for core functionality.
 
 Add a new connector (transport):
 1) Inherit `AsyncConnector` or `BlockingNngConnector`.
@@ -171,28 +180,34 @@ Add new message fields/types:
 2) Regenerate headers, update `src/o3ds/model.cpp` and all consumers.
 3) Bump `O3DS_VERSION_TAG` and document.
 
-## File plan (proposed additions)
+## Module structure (implemented)
 
-- `plugins/unreal/Open3DStream/Source/O3DBroadcast/O3DBroadcast.Build.cs`
-- `plugins/unreal/Open3DStream/Source/O3DBroadcast/Public/O3DBroadcastSubsystem.h`
-- `plugins/unreal/Open3DStream/Source/O3DBroadcast/Private/O3DBroadcastSubsystem.cpp`
-- `plugins/unreal/Open3DStream/Source/O3DBroadcast/Public/O3DBroadcastComponent.h`
-- `plugins/unreal/Open3DStream/Source/O3DBroadcast/Private/O3DBroadcastComponent.cpp`
-- `plugins/unreal/Open3DStream/Source/O3DBroadcast/Public/O3DBroadcastSettings.h`
-- `plugins/unreal/Open3DStream/Source/O3DBroadcast/Private/O3DBroadcastSettings.cpp`
-- optional editor module for UI:
-  - `plugins/unreal/Open3DStream/Source/O3DBroadcastEditor/*`
+**Open3DBroadcast module** (within Open3DStream plugin):
+- `plugins/unreal/Open3DStream/Source/Open3DBroadcast/Open3DBroadcast.Build.cs` ✅
+- `plugins/unreal/Open3DStream/Source/Open3DBroadcast/Public/Open3DBroadcast.h` ✅
+- `plugins/unreal/Open3DStream/Source/Open3DBroadcast/Private/Open3DBroadcast.cpp` ✅
 
-These should reuse the existing core library (connectors, model) located under `src/o3ds/*`.
+**Planned additions**:
+- `plugins/unreal/Open3DStream/Source/Open3DBroadcast/Public/O3DBroadcastSubsystem.h`
+- `plugins/unreal/Open3DStream/Source/Open3DBroadcast/Private/O3DBroadcastSubsystem.cpp`
+- `plugins/unreal/Open3DStream/Source/Open3DBroadcast/Public/O3DBroadcastComponent.h`
+- `plugins/unreal/Open3DStream/Source/Open3DBroadcast/Private/O3DBroadcastComponent.cpp`
+- `plugins/unreal/Open3DStream/Source/Open3DBroadcast/Public/O3DBroadcastSettings.h`
+- `plugins/unreal/Open3DStream/Source/Open3DBroadcast/Private/O3DBroadcastSettings.cpp`
+
+**Build configuration**:
+- `plugins/unreal/Open3DStream/BuildConfig.txt` - Documentation for build flags
+- Both modules share the same `.uplugin` file with proper dependencies
+- Core networking functionality reused from Open3DStream module
 
 ## Quick test flows
 
-- Two‑UE smoke test (O3DBroadcast → LiveLink Source over WebRTC):
+- Two‑UE smoke test (Open3DBroadcast → LiveLink Source over WebRTC):
   1) Start signaling: `node examples/signaling-server.js`
   2) Sender UE:
-     - Add O3DBroadcast component or register meshes in the subsystem.
+     - Add Open3DBroadcast component or register meshes in the subsystem.
      - Set URL: `webrtc://localhost:8080/room`
-     - Play in Editor; confirm “Connected” and streaming.
+     - Play in Editor; confirm "Connected" and streaming.
   3) Receiver UE (with Open3DStream LiveLink Source):
      - Create a new LiveLink source with the same URL.
      - Verify subjects appear; animate in Preview/PIE and confirm motion matches.
@@ -219,7 +234,7 @@ These should reuse the existing core library (connectors, model) located under `
 - Unreal LiveLink source (receiver reference): `plugins/unreal/Open3DStream/Source/Open3DStream/Private/Open3DStreamSource.cpp`
 - Packaging: `package.py`, `Build/` scripts
 
-## AI agent playbook (O3DBroadcast tasks)
+## AI agent playbook (Open3DBroadcast module tasks)
 
 - Implement per‑mesh capture:
   - Choose transform space (document choice).
@@ -243,7 +258,7 @@ Always:
 ## PR checklist
 
 - Schema changes (if any): regenerated headers, version bumped, consumers updated.
-- O3DBroadcast:
+- Open3DBroadcast:
   - Captures final pose and curves for multiple meshes.
   - Stable subject naming and lifecycle events.
   - Batched `SubjectList` per frame; backpressure handled.
@@ -252,4 +267,4 @@ Always:
 - Build/CI: flags and deps documented; CI green across targets.
 - Performance: no significant regressions; logs are concise.
 
-If you want, I can generate stubs for the O3DBroadcast Unreal module (headers, build.cs, and a minimal subsystem/component) and a quick guide map for testing.
+If you want, I can generate stubs for the Open3DBroadcast Unreal module (headers, build.cs, and a minimal subsystem/component) and a quick guide map for testing.

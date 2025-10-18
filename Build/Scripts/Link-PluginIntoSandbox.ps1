@@ -5,8 +5,8 @@ $SandboxPath = Join-Path $RepoRoot "ProjectSandbox"
 $dstParent = Join-Path $SandboxPath "Plugins"
 New-Item -ItemType Directory -Force -Path $dstParent | Out-Null
 
-# Link both Open3DStream and Open3DBroadcast plugins
-$plugins = @("Open3DStream", "Open3DBroadcast")
+# Link Open3DStream plugin (which now includes Open3DBroadcast as a module)
+$plugins = @("Open3DStream")
 
 foreach ($pluginName in $plugins) {
   $PluginPath = Join-Path $RepoRoot "plugins\unreal\$pluginName"
