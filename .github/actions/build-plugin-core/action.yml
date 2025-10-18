@@ -77,7 +77,8 @@ runs:
 
         $webrtcFlag = if ("${{ inputs.enable_webrtc }}" -eq "true") { "ON" } else { "OFF" }
         $ldcRoot = "${{ inputs.libdatachannel_root }}"
-        $ldcParam = if ($ldcRoot -ne "") { "-DO3DS_LIBDATACHANNEL_ROOT=\`"$ldcRoot\`"" } else { "" }
+        # Pass without embedded quotes to avoid literal quote characters in CMake variable
+        $ldcParam = if ($ldcRoot -ne "") { "-DO3DS_LIBDATACHANNEL_ROOT=$ldcRoot" } else { "" }
 
         cmake -B vsbuild -S . -G "Visual Studio 17 2022" -A x64 `
           -DCMAKE_PREFIX_PATH="$PWD/usr" `
