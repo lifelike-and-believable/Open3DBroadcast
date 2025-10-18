@@ -128,20 +128,17 @@ jobs:
         run: |
           $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
           $broadcastUplugin = Join-Path $PWD "plugins\unreal\Open3DBroadcast\Open3DBroadcast.uplugin"
-          $open3dStreamDir = Join-Path $PWD "plugins\unreal\Open3DStream"
           
-          Write-Host "Building Open3DBroadcast ${{ steps.version.outputs.version_number }} for Win64 (Shipping) with Open3DStream dependency..."
+          Write-Host "Building Open3DBroadcast ${{ steps.version.outputs.version_number }} for Win64 (Shipping)..."
           Write-Host "  Plugin: $broadcastUplugin"
           Write-Host "  Output: $pkg"
-          Write-Host "  Dependency: $open3dStreamDir"
           
           & .\Build\Scripts\Build-Plugin.ps1 `
             -UEPath "$env:UE_ROOT" `
             -PluginUPluginPath "$broadcastUplugin" `
             -OutDir "$pkg" `
             -TargetPlatforms @("Win64") `
-            -Configuration "Shipping" `
-            -AdditionalPluginDirectories @($open3dStreamDir)
+            -Configuration "Shipping"
 
       # Optional: Build for additional platforms
       # - name: Build plugin (Linux, Shipping)
