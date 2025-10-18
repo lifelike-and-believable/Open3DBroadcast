@@ -29,7 +29,7 @@ Verifies Unreal Engine installation.
 ### Plugin Linking
 
 #### `Link-PluginIntoSandbox.ps1` (Windows)
-Creates a junction link from the plugin to ProjectSandbox.
+Creates junction links from both plugins to ProjectSandbox.
 
 **Usage:**
 ```powershell
@@ -38,7 +38,8 @@ Creates a junction link from the plugin to ProjectSandbox.
 
 **What it does:**
 - Creates `ProjectSandbox/Plugins/Open3DStream` → `plugins/unreal/Open3DStream`
-- Removes existing link if present
+- Creates `ProjectSandbox/Plugins/Open3DBroadcast` → `plugins/unreal/Open3DBroadcast`
+- Removes existing links if present
 - Automatically determines repository paths
 
 #### `link_plugin_into_sandbox.sh` (Linux/Mac)
@@ -187,12 +188,14 @@ Runs Gauntlet integration tests.
 
 ## CI/CD Integration
 
-These scripts are used by the GitHub Actions workflows:
+These scripts are used by the GitHub Actions workflows to build both Open3DStream and Open3DBroadcast plugins:
 
-- **unreal-plugin-ci.yml** - Uses Build-Plugin.ps1 and optionally Run-AutomationTests.ps1
-- **unreal-plugin-agent-ci.yml** - Same as CI
-- **unreal-plugin-nightly.yml** - Adds Run-Gauntlet.ps1 for comprehensive testing
-- **unreal-plugin-release.yml** - Uses Build-Plugin.ps1 with Shipping configuration
+- **unreal-plugin-ci.yml** - Builds both plugins for CI validation
+- **unreal-plugin-agent-ci.yml** - Same as CI, triggered by agent workflows
+- **unreal-plugin-nightly.yml** - Nightly builds of both plugins
+- **unreal-plugin-release.yml** - Release builds of both plugins with Shipping configuration
+
+All workflows package both plugins together into a unified artifact for easy distribution.
 
 See `.github/workflows/` for workflow definitions.
 
