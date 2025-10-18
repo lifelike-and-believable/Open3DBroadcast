@@ -36,7 +36,7 @@ public:
 	void tick();
 
 	O3DS::AsyncConnector* mServer;
-	FWebRTCConnector* mWebRTCConnector; 
+	FWebRTCConnector* mWebRTCConnector;
 	FSocket* mTcp;
 	FSocket* mUdp;
 

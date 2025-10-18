@@ -15,10 +15,6 @@
 	"IsExperimentalVersion": false,
 	"Installed": false,
 	"Plugins": [
-		{
-			"Name": "PixelStreaming",
-			"Enabled": true
-		}
 	],
 	"Modules": [
 		{
