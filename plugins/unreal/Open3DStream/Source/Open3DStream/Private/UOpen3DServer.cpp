@@ -68,7 +68,7 @@ bool O3DSServer::start(FText Url, FText Protocol )
 		
 		if (mWebRTCConnector->Start(Url.ToString(), false))
 		{
-			OnState.ExecuteIfBound(LOCTEXT("WebRTCClientStarted", "WebRTC Client started. Connect via Pixel Streaming."), false);
+			OnState.ExecuteIfBound(LOCTEXT("WebRTCClientStarted", "WebRTC Client started."), false);
 			return true;
 		}
 		else
@@ -90,7 +90,7 @@ bool O3DSServer::start(FText Url, FText Protocol )
 		
 		if (mWebRTCConnector->Start(Url.ToString(), true))
 		{
-			OnState.ExecuteIfBound(LOCTEXT("WebRTCServerStarted", "WebRTC Server started. Connect via Pixel Streaming."), false);
+			OnState.ExecuteIfBound(LOCTEXT("WebRTCServerStarted", "WebRTC Server started."), false);
 			return true;
 		}
 		else
