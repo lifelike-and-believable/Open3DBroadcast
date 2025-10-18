@@ -37,7 +37,7 @@ We use MbedTLS instead of OpenSSL for several key reasons:
 ## File Structure
 
 ```
-plugins/unreal/Open3DStream/lib/webrtc/
+plugins/unreal/Open3DStream/ThirdParty/webrtc/
 ├── datachannel.lib           # Windows static library (from CI)
 ├── libdatachannel.a          # Linux/macOS static library (from CI)
 ├── include/                  # libdatachannel headers (from CI)

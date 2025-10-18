@@ -180,7 +180,7 @@ client.start("webrtc://localhost:8080/myroom");
 #   -DO3DS_DISABLE_WEBRTC=ON
 
 # Use prebuilt libdatachannel artifacts (recommended in CI and when using the plugin’s libs):
-cmake -DO3DS_LIBDATACHANNEL_ROOT="/path/to/plugins/unreal/Open3DStream/lib/webrtc" ..
+cmake -DO3DS_LIBDATACHANNEL_ROOT="/path/to/plugins/unreal/Open3DStream/ThirdParty/webrtc" ..
 
 # Or rely on a LibDataChannel CMake package (installed into CMAKE_PREFIX_PATH)
 cmake ..

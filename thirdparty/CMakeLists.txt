@@ -8,7 +8,7 @@ add_subdirectory(nng)
 add_subdirectory(crccpp)
 
 # WebRTC Support - libdatachannel
-# Note: Pre-built libraries are available in plugins/unreal/Open3DStream/lib/webrtc/
+# Note: Pre-built libraries are available in plugins/unreal/Open3DStream/ThirdParty/webrtc/
 # Only build from source if explicitly needed (e.g., updating libdatachannel version)
 option(O3DS_BUILD_WEBRTC "Build libdatachannel for WebRTC support" ON)
 

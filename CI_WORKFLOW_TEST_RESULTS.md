@@ -60,7 +60,7 @@ The Open3DStream Unreal plugin is **NOT** a standalone plugin. It requires:
    - `src/o3ds/*.h` - Native library headers
    - Third-party headers (nng, flatbuffers)
 
-These must be built and copied to `plugins/unreal/Open3DStream/lib/` **before** the Unreal plugin can be built.
+These must be built and copied to `plugins/unreal/Open3DStream/ThirdParty/` **before** the Unreal plugin can be built.
 
 ### Current Workflow Gap
 

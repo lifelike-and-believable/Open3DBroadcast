@@ -38,7 +38,7 @@ We use MbedTLS instead of OpenSSL or GnuTLS for several reasons:
 
 The libdatachannel build workflow is configured for **manual trigger only** (`workflow_dispatch`). This approach treats libdatachannel as a **vendored dependency**:
 
-- ✅ **Pre-built libraries are committed** to `plugins/unreal/Open3DStream/lib/webrtc/`
+- ✅ **Pre-built libraries are committed** to `plugins/unreal/Open3DStream/ThirdParty/webrtc/`
 - ✅ **No automatic rebuilds** on push or pull requests
 - ✅ **Manual rebuild only** when updating libdatachannel or MbedTLS versions
 
@@ -56,7 +56,7 @@ The libdatachannel build workflow is configured for **manual trigger only** (`wo
 5. Click **"Run workflow"** to start
 6. Wait for builds to complete (~5-7 minutes)
 7. Download artifacts for each platform
-8. Extract and commit to `plugins/unreal/Open3DStream/lib/webrtc/`
+8. Extract and commit to `plugins/unreal/Open3DStream/ThirdParty/webrtc/`
 
 ### Build Pipeline
 
@@ -95,7 +95,7 @@ The GitHub Actions workflow `.github/workflows/build-libdatachannel.yml` builds 
 
 Pre-built libdatachannel artifacts are stored in:
 ```
-plugins/unreal/Open3DStream/lib/webrtc/
+plugins/unreal/Open3DStream/ThirdParty/webrtc/
 ├── include/
 │   └── rtc/              # libdatachannel headers
 ├── datachannel.lib       # Windows static library
@@ -158,8 +158,8 @@ cmake --build build --config Release
 cmake --install build --config Release
 
 # Copy artifacts to Unreal plugin
-Copy-Item -Recurse ../../install/include/rtc ../../../plugins/unreal/Open3DStream/lib/webrtc/include/
-Copy-Item ../../install/lib/datachannel.lib ../../../plugins/unreal/Open3DStream/lib/webrtc/
+Copy-Item -Recurse ../../install/include/rtc ../../../plugins/unreal/Open3DStream/ThirdParty/webrtc/include/
+Copy-Item ../../install/lib/datachannel.lib ../../../plugins/unreal/Open3DStream/ThirdParty/webrtc/
 ```
 
 #### Linux/macOS
@@ -178,8 +178,8 @@ cmake --build build
 cmake --install build
 
 # Copy artifacts to Unreal plugin
-cp -r ../../install/include/rtc ../../../plugins/unreal/Open3DStream/lib/webrtc/include/
-cp ../../install/lib/libdatachannel.a ../../../plugins/unreal/Open3DStream/lib/webrtc/
+cp -r ../../install/include/rtc ../../../plugins/unreal/Open3DStream/ThirdParty/webrtc/include/
+cp ../../install/lib/libdatachannel.a ../../../plugins/unreal/Open3DStream/ThirdParty/webrtc/
 ```
 
 ## Important Notes

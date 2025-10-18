@@ -84,7 +84,7 @@ export OPENSSL_ROOT_DIR=/usr/local/opt/openssl
    - No examples/tests (faster build)
    - No media support (avoids libsrtp)
 4. **Builds Debug & Release** - Compiles both configurations
-5. **Copies to plugin** - Deploys to `plugins/unreal/Open3DStream/lib/webrtc/`
+5. **Copies to plugin** - Deploys to `plugins/unreal/Open3DStream/ThirdParty/webrtc/`
 6. **Generates build info** - Creates metadata file
 
 ## Output Files
@@ -92,7 +92,7 @@ export OPENSSL_ROOT_DIR=/usr/local/opt/openssl
 After successful build:
 
 ```
-plugins/unreal/Open3DStream/lib/webrtc/
+plugins/unreal/Open3DStream/ThirdParty/webrtc/
 ├── datachannel.lib           # Windows release library
 ├── datachanneld.lib          # Windows debug library (optional)
 ├── libdatachannel.a          # Linux/macOS library
@@ -157,7 +157,7 @@ The script builds libdatachannel with these settings:
 
 ### Library Not Copied
 
-- Check permissions on `plugins/unreal/Open3DStream/lib/webrtc/`
+- Check permissions on `plugins/unreal/Open3DStream/ThirdParty/webrtc/`
 - Verify build completed successfully (look for `.lib` or `.a` files in build directory)
 - Check disk space
 
@@ -188,7 +188,7 @@ git lfs track "*.a"
 git add .gitattributes
 
 # Add the libraries
-git add plugins/unreal/Open3DStream/lib/webrtc/
+git add plugins/unreal/Open3DStream/ThirdParty/webrtc/
 
 # Commit
 git commit -m "Add pre-built WebRTC libraries"
@@ -209,7 +209,7 @@ del /q plugins\unreal\Open3DStream\lib\webrtc\*.lib
 ```bash
 rm -rf thirdparty/build_webrtc
 rm -rf usr_webrtc
-rm -f plugins/unreal/Open3DStream/lib/webrtc/*.a
+rm -f plugins/unreal/Open3DStream/ThirdParty/webrtc/*.a
 ```
 
 Then run the build script again.
@@ -235,7 +235,7 @@ mkdir build_webrtc
 cd build_webrtc
 cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DNO_EXAMPLES=ON -DNO_TESTS=ON -DNO_MEDIA=ON ../libdatachannel
 cmake --build . --target datachannel-static
-cp libdatachannel-static.a ../../plugins/unreal/Open3DStream/lib/webrtc/libdatachannel.a
+cp libdatachannel-static.a ../../plugins/unreal/Open3DStream/ThirdParty/webrtc/libdatachannel.a
 ```
 
 ## Version Information
