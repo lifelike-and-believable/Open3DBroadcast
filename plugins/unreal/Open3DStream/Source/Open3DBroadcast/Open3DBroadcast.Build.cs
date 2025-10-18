@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 using UnrealBuildTool;
+using System.Linq; // For IEnumerable<T>.Contains extension
 
 public class Open3DBroadcast : ModuleRules
 {

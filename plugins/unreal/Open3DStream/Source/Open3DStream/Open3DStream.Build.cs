@@ -2,6 +2,7 @@
 
 using UnrealBuildTool;
 using System.IO;
+using System.Linq; // For IEnumerable<T>.Contains extension
 
 public class Open3DStream : ModuleRules
 {
