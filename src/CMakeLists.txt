@@ -24,6 +24,8 @@ endif()
 if(O3DS_WITH_WEBRTC)
 	# Prefer prebuilt artifacts when a root path is provided; otherwise use find_package
 	if(O3DS_LIBDATACHANNEL_ROOT)
+		# Sanitize potential surrounding quotes passed from CI/workflows
+		string(REGEX REPLACE "^\"(.*)\"$" "\\1" O3DS_LIBDATACHANNEL_ROOT "${O3DS_LIBDATACHANNEL_ROOT}")
 		# Expect headers under <root>/include (or <root> if include not present)
 		set(LDC_INCLUDE_DIR "${O3DS_LIBDATACHANNEL_ROOT}/include")
 		if(NOT EXISTS "${LDC_INCLUDE_DIR}")
