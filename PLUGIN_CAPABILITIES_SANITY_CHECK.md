@@ -120,7 +120,7 @@ bool FWebRTCConnector::Send(const uint8* Data, int32 Size)
 
 1. **CI Workflow**: Created `.github/workflows/build-libdatachannel.yml` for building libdatachannel with MbedTLS
 2. **Libraries Built**: Successfully built static libraries for all platforms (Windows, Linux, macOS)
-3. **Libraries Integrated**: Committed pre-built libraries to `plugins/unreal/Open3DStream/lib/webrtc/`
+3. **Libraries Integrated**: Committed pre-built libraries to `plugins/unreal/Open3DStream/ThirdParty/webrtc/`
 4. **Build Configuration**: Updated `Build.cs` to link libdatachannel statically with `RTC_STATIC=1`
 5. **Documentation**: Created comprehensive integration guides
 

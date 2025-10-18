@@ -17,7 +17,7 @@ REM Set paths
 SET SCRIPT_DIR=%~dp0
 SET THIRDPARTY_DIR=%SCRIPT_DIR%thirdparty
 SET BUILD_DIR=%THIRDPARTY_DIR%\build_webrtc
-SET PLUGIN_LIB_DIR=%SCRIPT_DIR%plugins\unreal\Open3DStream\lib\webrtc
+SET PLUGIN_LIB_DIR=%SCRIPT_DIR%plugins\unreal\Open3DStream\ThirdParty\webrtc
 SET INSTALL_DIR=%SCRIPT_DIR%usr_webrtc
 
 REM Check for Visual Studio 2022

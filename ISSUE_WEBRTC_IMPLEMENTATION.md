@@ -10,7 +10,7 @@ Implement functional WebRTC support in the Open3DStream Unreal plugin using the 
 - libdatachannel 0.23.2 static libraries built with MbedTLS 3.6.5
 - Libraries linked in all platforms: `datachannel.lib` (Windows), `libdatachannel.a` (Linux/macOS)
 - `RTC_STATIC=1` defined in Build.cs
-- Headers available in `plugins/unreal/Open3DStream/lib/webrtc/include/rtc/`
+- Headers available in `plugins/unreal/Open3DStream/ThirdParty/webrtc/include/rtc/`
 - CI workflow for rebuilding libraries when needed
 - UI shows "WebRTC Client" and "WebRTC Server" protocol options
 

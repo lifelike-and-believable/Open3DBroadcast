@@ -56,12 +56,12 @@ cmake .. -DO3DS_DISABLE_WEBRTC=ON  # disable (preferred)
 
 ### Using prebuilt libdatachannel (single path for core and plugin)
 
-If you have prebuilt libdatachannel artifacts (like those bundled in the Unreal plugin at `plugins/unreal/Open3DStream/lib/webrtc`), you can make the core library consume the same binaries:
+If you have prebuilt libdatachannel artifacts (like those bundled in the Unreal plugin at `plugins/unreal/Open3DStream/ThirdParty/webrtc`), you can make the core library consume the same binaries:
 
 ```bash
 cmake .. \
     -DO3DS_ENABLE_WEBRTC=ON \
-    -DO3DS_LIBDATACHANNEL_ROOT="/absolute/path/to/plugins/unreal/Open3DStream/lib/webrtc" \
+    -DO3DS_LIBDATACHANNEL_ROOT="/absolute/path/to/plugins/unreal/Open3DStream/ThirdParty/webrtc" \
     -DCMAKE_PREFIX_PATH="/absolute/path/to/usr"
 ```
 

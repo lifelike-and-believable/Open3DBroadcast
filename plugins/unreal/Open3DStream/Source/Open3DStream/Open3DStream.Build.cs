@@ -14,8 +14,8 @@ public class Open3DStream : ModuleRules
 		
 		PublicIncludePaths.AddRange( new string[] {} );
 		
-		string LibDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "../../lib/"));
-		string WebRTCDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "../../lib/webrtc/"));
+		string LibDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "../../ThirdParty/"));
+		string WebRTCDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "../../ThirdParty/webrtc/"));
 	
 		PrivateIncludePaths.AddRange( new string[] 
         { 

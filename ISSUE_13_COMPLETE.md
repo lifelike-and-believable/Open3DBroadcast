@@ -41,7 +41,7 @@ Created a complete GitHub Actions workflow that:
 - Windows build: 6m34s ✅
 
 ### 2. Library Integration
-**Location**: `plugins/unreal/Open3DStream/lib/webrtc/`
+**Location**: `plugins/unreal/Open3DStream/ThirdParty/webrtc/`
 
 Replaced the old OpenSSL-based libraries with MbedTLS versions:
 
@@ -68,7 +68,7 @@ Created comprehensive documentation:
 - Local development instructions
 - Troubleshooting guide
 
-**[plugins/unreal/Open3DStream/lib/webrtc/README.md](plugins/unreal/Open3DStream/lib/webrtc/README.md)**:
+**[plugins/unreal/Open3DStream/ThirdParty/webrtc/README.md](plugins/unreal/Open3DStream/ThirdParty/webrtc/README.md)**:
 - Library usage guide
 - File structure explanation
 - Platform-specific details
@@ -156,12 +156,12 @@ libdatachannel-windows/
 Replaced OpenSSL libraries with MbedTLS versions:
 ```bash
 # Backed up old library
-plugins/unreal/Open3DStream/lib/webrtc_backup/libdatachannel-openssl.a (86MB)
+plugins/unreal/Open3DStream/ThirdParty/webrtc_backup/libdatachannel-openssl.a (86MB)
 
 # New libraries
-plugins/unreal/Open3DStream/lib/webrtc/libdatachannel.a (4.3MB)
-plugins/unreal/Open3DStream/lib/webrtc/datachannel.lib (24MB)
-plugins/unreal/Open3DStream/lib/webrtc/macos/libdatachannel.a (2.7MB)
+plugins/unreal/Open3DStream/ThirdParty/webrtc/libdatachannel.a (4.3MB)
+plugins/unreal/Open3DStream/ThirdParty/webrtc/datachannel.lib (24MB)
+plugins/unreal/Open3DStream/ThirdParty/webrtc/macos/libdatachannel.a (2.7MB)
 ```
 
 ### ⏳ Unreal Plugin Build (Pending)
@@ -244,7 +244,7 @@ Total: 14 commits
 - **CI Workflow**: [.github/workflows/build-libdatachannel.yml](../.github/workflows/build-libdatachannel.yml)
 - **Integration Guide**: [LIBDATACHANNEL_INTEGRATION.md](LIBDATACHANNEL_INTEGRATION.md)
 - **Implementation Summary**: [ISSUE_13_IMPLEMENTATION.md](ISSUE_13_IMPLEMENTATION.md)
-- **Library README**: [plugins/unreal/Open3DStream/lib/webrtc/README.md](plugins/unreal/Open3DStream/lib/webrtc/README.md)
+- **Library README**: [plugins/unreal/Open3DStream/ThirdParty/webrtc/README.md](plugins/unreal/Open3DStream/ThirdParty/webrtc/README.md)
 
 ---
 

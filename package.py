@@ -129,7 +129,7 @@ while True:
     shutil.copytree(ue_built_plugin, dst_plugin_dir)
     
     # libs
-    unreal_lib_dir = os.path.join(dst_plugin_dir, "lib")
+    unreal_lib_dir = os.path.join(dst_plugin_dir, "ThirdParty")
     print(unreal_lib_dir)
     if not os.path.isdir(unreal_lib_dir):
         os.mkdir(unreal_lib_dir)
@@ -146,7 +146,7 @@ while True:
             shutil.copyfile(os.path.join(out_dir, "lib", libfile), os.path.join(unreal_lib_dir, libfile))
         
     # includes
-    unreal_include_dir = os.path.join(dst_plugin_dir, "lib", "include")               
+    unreal_include_dir = os.path.join(dst_plugin_dir, "ThirdParty", "include")               
     usr_include_dir = os.path.join(out_dir, "include")
     shutil.copytree(usr_include_dir, unreal_include_dir)
             

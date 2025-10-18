@@ -9,7 +9,7 @@ name: Build libdatachannel
 #   1. Go to Actions tab in GitHub
 #   2. Select "Build libdatachannel" workflow
 #   3. Click "Run workflow"
-#   4. Download artifacts and commit to plugins/unreal/Open3DStream/lib/webrtc/
+#   4. Download artifacts and commit to plugins/unreal/Open3DStream/ThirdParty/webrtc/
 on:
   workflow_dispatch:
 

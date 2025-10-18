@@ -51,7 +51,7 @@ Created a comprehensive CI workflow that:
   - Linux: `libdatachannel.a`
   - macOS: `libdatachannel.a`
 - Added `RTC_STATIC=1` definition for static library mode
-- Libraries expected in: `plugins/unreal/Open3DStream/lib/webrtc/`
+- Libraries expected in: `plugins/unreal/Open3DStream/ThirdParty/webrtc/`
 
 ### 4. Documentation
 
@@ -66,7 +66,7 @@ Created/Updated:
   
 - **`README.md`**: Added reference to libdatachannel integration docs
 
-- **`plugins/unreal/Open3DStream/lib/webrtc/README.md`**: Updated to reflect new CI-based approach with MbedTLS
+- **`plugins/unreal/Open3DStream/ThirdParty/webrtc/README.md`**: Updated to reflect new CI-based approach with MbedTLS
 
 ## Technical Details
 
@@ -161,7 +161,7 @@ Documentation/
 ### For CI/CD
 
 1. Run the `build-libdatachannel` workflow to generate artifacts
-2. Download artifacts and place in `plugins/unreal/Open3DStream/lib/webrtc/`
+2. Download artifacts and place in `plugins/unreal/Open3DStream/ThirdParty/webrtc/`
 3. Plugin builds will automatically link the static libraries
 
 ### Future Enhancements

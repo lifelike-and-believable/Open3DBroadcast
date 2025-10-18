@@ -17,7 +17,7 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 THIRDPARTY_DIR="${SCRIPT_DIR}/thirdparty"
 BUILD_DIR="${THIRDPARTY_DIR}/build_webrtc"
-PLUGIN_LIB_DIR="${SCRIPT_DIR}/plugins/unreal/Open3DStream/lib/webrtc"
+PLUGIN_LIB_DIR="${SCRIPT_DIR}/plugins/unreal/Open3DStream/ThirdParty/webrtc"
 INSTALL_DIR="${SCRIPT_DIR}/usr_webrtc"
 
 # Check for CMake

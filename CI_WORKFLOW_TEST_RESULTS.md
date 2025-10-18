@@ -60,7 +60,7 @@ The Open3DStream Unreal plugin is **NOT** a standalone plugin. It requires:
    - `src/o3ds/*.h` - Native library headers
    - Third-party headers (nng, flatbuffers)
 
-These must be built and copied to `plugins/unreal/Open3DStream/lib/` **before** the Unreal plugin can be built.
+These must be built and copied to `plugins/unreal/Open3DStream/ThirdParty/` **before** the Unreal plugin can be built.
 
 ### Current Workflow Gap
 
@@ -98,7 +98,7 @@ To make the CI workflows functional, we need to add these steps BEFORE the "Buil
 - name: Copy libraries to plugin
   shell: pwsh
   run: |
-    $pluginLib = "plugins\unreal\Open3DStream\lib"
+    $pluginLib = "plugins\unreal\Open3DStream\ThirdParty"
     
     # Create directories
     New-Item -ItemType Directory -Force -Path "$pluginLib"
