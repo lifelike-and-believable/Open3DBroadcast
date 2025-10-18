@@ -1,0 +1,30 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "Open3DBroadcast",
+	"Description": "Streams skeletal mesh pose and curve data using Open3DStream protocol",
+	"Category": "Other",
+	"CreatedBy": "Alastair Macleod",
+	"CreatedByURL": "https://peeldev.com/",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "https://open3dstream.com/",
+	"CanContainContent": true,
+	"IsBetaVersion": true,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Plugins": [
+		{
+			"Name": "Open3DStream",
+			"Enabled": true
+		}
+	],
+	"Modules": [
+		{
+			"Name": "Open3DBroadcast",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}
