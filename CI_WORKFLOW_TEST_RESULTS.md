@@ -98,7 +98,7 @@ To make the CI workflows functional, we need to add these steps BEFORE the "Buil
 - name: Copy libraries to plugin
   shell: pwsh
   run: |
-    $pluginLib = "plugins\unreal\Open3DStream\lib"
+    $pluginLib = "plugins\unreal\Open3DStream\ThirdParty"
     
     # Create directories
     New-Item -ItemType Directory -Force -Path "$pluginLib"

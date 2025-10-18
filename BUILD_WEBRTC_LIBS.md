@@ -202,7 +202,7 @@ To start fresh:
 ```bat
 rmdir /s /q thirdparty\build_webrtc
 rmdir /s /q usr_webrtc
-del /q plugins\unreal\Open3DStream\lib\webrtc\*.lib
+del /q plugins\unreal\Open3DStream\ThirdParty\webrtc\*.lib
 ```
 
 **Linux/macOS:**
@@ -225,7 +225,7 @@ mkdir build_webrtc
 cd build_webrtc
 cmake -G "Visual Studio 17 2022" -A x64 -DNO_EXAMPLES=ON -DNO_TESTS=ON -DNO_MEDIA=ON ../libdatachannel
 cmake --build . --config RelWithDebInfo --target datachannel-static
-copy RelWithDebInfo\datachannel-static.lib ..\..\plugins\unreal\Open3DStream\lib\webrtc\datachannel.lib
+copy RelWithDebInfo\datachannel-static.lib ..\..\plugins\unreal\Open3DStream\ThirdParty\webrtc\datachannel.lib
 ```
 
 **Linux/macOS:**

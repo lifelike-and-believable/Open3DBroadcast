@@ -90,7 +90,7 @@ runs:
     - name: Copy libraries and headers to plugin
       shell: powershell
       run: |
-        $pluginLib = "plugins\unreal\${{ inputs.plugin_name }}\lib"
+        $pluginLib = "plugins\unreal\${{ inputs.plugin_name }}\ThirdParty"
         New-Item -ItemType Directory -Force -Path "$pluginLib\include\o3ds" | Out-Null
         New-Item -ItemType Directory -Force -Path "$pluginLib\include\nng" | Out-Null
         New-Item -ItemType Directory -Force -Path "$pluginLib\include\flatbuffers" | Out-Null

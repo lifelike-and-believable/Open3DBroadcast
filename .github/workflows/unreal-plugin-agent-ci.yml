@@ -140,7 +140,7 @@ jobs:
         run: |
           Write-Host "Copying libraries to plugin directory..."
           
-          $pluginLib = "plugins\unreal\$env:PLUGIN_NAME\lib"
+          $pluginLib = "plugins\unreal\$env:PLUGIN_NAME\ThirdParty"
           
           # Create directories
           New-Item -ItemType Directory -Force -Path "$pluginLib" | Out-Null
@@ -181,7 +181,7 @@ jobs:
           }
           
           Write-Host "[OK] Libraries and headers copied successfully"
-          Write-Host "Plugin lib directory contents:"
+          Write-Host "Plugin ThirdParty directory contents:"
           Get-ChildItem "$pluginLib" -Recurse | Select-Object FullName
 
       - name: Locate plugin (.uplugin)

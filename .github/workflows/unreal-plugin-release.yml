@@ -36,7 +36,7 @@ jobs:
           plugin_name: ${{ env.PLUGIN_NAME }}
           build_type: Release
           enable_webrtc: true
-          libdatachannel_root: ${{ github.workspace }}\plugins\unreal\${{ env.PLUGIN_NAME }}\lib\webrtc
+          libdatachannel_root: ${{ github.workspace }}\plugins\unreal\${{ env.PLUGIN_NAME }}\ThirdParty\webrtc
 
       - name: Get version
         id: version
@@ -56,7 +56,7 @@ jobs:
       - name: Verify WebRTC libraries (prebuilt)
         shell: powershell
         run: |
-          $pluginLib = "plugins\unreal\$env:PLUGIN_NAME\lib"
+          $pluginLib = "plugins\unreal\$env:PLUGIN_NAME\ThirdParty"
           $webrtcLibs = @(
             "$pluginLib\webrtc\datachannel.lib",
             "$pluginLib\webrtc\juice.lib",
@@ -70,7 +70,7 @@ jobs:
           if ($missing.Count -gt 0) {
             Write-Error "Missing WebRTC libraries (required for release build):"
             $missing | ForEach-Object { Write-Error "  - $_" }
-            Write-Error "Provide these via the prebuilt artifact process or commit them under plugins/unreal/$env:PLUGIN_NAME/lib/webrtc. Run the build-libdatachannel helper if needed."
+            Write-Error "Provide these via the prebuilt artifact process or commit them under plugins/unreal/$env:PLUGIN_NAME/ThirdParty/webrtc. Run the build-libdatachannel helper if needed."
             exit 1
           } else { Write-Host "[OK] All WebRTC libraries present" }
 
