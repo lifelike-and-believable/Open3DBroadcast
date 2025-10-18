@@ -86,26 +86,32 @@ jobs:
           "plugin_name=$env:PLUGIN_NAME" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "[OK] Using plugin: $upluginPath"
 
-      - name: Update plugin version
+      - name: Update plugin versions
         shell: powershell
         run: |
-          $upluginPath = "${{ steps.find.outputs.plugin_path }}"
           $versionNumber = "${{ steps.version.outputs.version_number }}"
           
-          # Read and update the .uplugin file
+          # Update Open3DStream plugin version
+          $upluginPath = "${{ steps.find.outputs.plugin_path }}"
           $content = Get-Content -Path $upluginPath -Raw | ConvertFrom-Json
           $content.VersionName = $versionNumber
-          
-          # Increment Version (integer) if needed
           if ($content.Version) {
             $content.Version = [int]$content.Version + 1
           }
-          
-          # Save back
           $content | ConvertTo-Json -Depth 10 | Set-Content -Path $upluginPath -Encoding UTF8
-          Write-Host "[OK] Updated plugin version to $versionNumber"
+          Write-Host "[OK] Updated Open3DStream plugin version to $versionNumber"
+          
+          # Update Open3DBroadcast plugin version
+          $broadcastUplugin = Join-Path $PWD "plugins\unreal\Open3DBroadcast\Open3DBroadcast.uplugin"
+          $broadcastContent = Get-Content -Path $broadcastUplugin -Raw | ConvertFrom-Json
+          $broadcastContent.VersionName = $versionNumber
+          if ($broadcastContent.Version) {
+            $broadcastContent.Version = [int]$broadcastContent.Version + 1
+          }
+          $broadcastContent | ConvertTo-Json -Depth 10 | Set-Content -Path $broadcastUplugin -Encoding UTF8
+          Write-Host "[OK] Updated Open3DBroadcast plugin version to $versionNumber"
 
-      - name: Build plugin (Win64, Shipping)
+      - name: Build Open3DStream plugin (Win64, Shipping)
         shell: powershell
         run: |
           $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
@@ -113,6 +119,19 @@ jobs:
           & .\Build\Scripts\Build-Plugin.ps1 `
             -UEPath "$env:UE_ROOT" `
             -PluginUPluginPath "${{ steps.find.outputs.plugin_path }}" `
+            -OutDir "$pkg" `
+            -TargetPlatforms @("Win64") `
+            -Configuration "Shipping"
+
+      - name: Build Open3DBroadcast plugin (Win64, Shipping)
+        shell: powershell
+        run: |
+          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
+          $broadcastUplugin = Join-Path $PWD "plugins\unreal\Open3DBroadcast\Open3DBroadcast.uplugin"
+          Write-Host "Building Open3DBroadcast ${{ steps.version.outputs.version_number }} for Win64 (Shipping)..."
+          & .\Build\Scripts\Build-Plugin.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -PluginUPluginPath "$broadcastUplugin" `
             -OutDir "$pkg" `
             -TargetPlatforms @("Win64") `
             -Configuration "Shipping"
@@ -144,9 +163,9 @@ jobs:
             $ueVersion = "5.6"  # Default fallback
           }
           
-          $targetPath = Join-Path $restructured "UE_$ueVersion\Plugins\${{ steps.find.outputs.plugin_name }}"
+          $targetPath = Join-Path $restructured "UE_$ueVersion\Plugins"
           
-          Write-Host "Restructuring plugin for archive..."
+          Write-Host "Restructuring plugins for archive..."
           Write-Host "  Source: $pkg"
           Write-Host "  Target: $targetPath"
           Write-Host "  UE Version: $ueVersion"
@@ -154,16 +173,16 @@ jobs:
           # Create target directory structure
           New-Item -ItemType Directory -Force -Path $targetPath | Out-Null
           
-          # Copy plugin contents to new structure
+          # Copy both plugins to new structure
           Copy-Item -Path "$pkg\*" -Destination $targetPath -Recurse -Force
           
-          Write-Host "[OK] Plugin restructured to UE_$ueVersion/Plugins/${{ steps.find.outputs.plugin_name }}"
+          Write-Host "[OK] Plugins restructured to UE_$ueVersion/Plugins/"
 
       - name: Create archive
         shell: powershell
         run: |
           $restructured = Join-Path $env:RUNNER_TEMP 'PluginArchive'
-          $archiveName = "${{ steps.find.outputs.plugin_name }}-${{ steps.version.outputs.version_number }}-Win64.zip"
+          $archiveName = "Open3DStream-Plugins-${{ steps.version.outputs.version_number }}-Win64.zip"
           $archivePath = Join-Path $env:RUNNER_TEMP $archiveName
           
           Compress-Archive -Path "$restructured\*" -DestinationPath $archivePath -CompressionLevel Optimal
@@ -178,19 +197,19 @@ jobs:
         shell: powershell
         run: |
           $notes = @"
-          ## ${{ steps.find.outputs.plugin_name }} ${{ steps.version.outputs.version }}
+          ## Open3DStream Plugins ${{ steps.version.outputs.version }}
 
           ### Installation
 
-          This plugin is packaged for easy installation:
+          This package contains both Open3DStream and Open3DBroadcast plugins:
 
           1. Download and extract the plugin package
           2. Copy the `UE_X.X` folder that matches your Unreal Engine version to your project root
-             - The archive contains `UE_X.X/Plugins/Open3DStream/`
+             - The archive contains `UE_X.X/Plugins/Open3DStream/` and `UE_X.X/Plugins/Open3DBroadcast/`
              - This will create/merge with your project's `Plugins` directory
-          3. Alternatively, extract the inner `Plugins/Open3DStream` folder directly to your project's `Plugins` directory
+          3. Alternatively, extract the inner plugin folders directly to your project's `Plugins` directory
           4. Restart Unreal Editor
-          5. Enable the plugin in the Plugins browser (Edit → Plugins)
+          5. Enable the plugins in the Plugins browser (Edit → Plugins)
 
           ### Compatibility
 
@@ -199,7 +218,9 @@ jobs:
 
           ### Features
 
-          This release includes the Open3DStream Unreal LiveLink plugin for streaming animation data.
+          This release includes:
+          - **Open3DStream**: LiveLink plugin for streaming animation data
+          - **Open3DBroadcast**: Plugin for broadcasting skeletal mesh pose and curve data
 
           ### Changes
 
@@ -213,7 +234,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.version }}
-          name: ${{ steps.find.outputs.plugin_name }} ${{ steps.version.outputs.version }}
+          name: Open3DStream Plugins ${{ steps.version.outputs.version }}
           body_path: ${{ runner.temp }}/release_notes.md
           files: ${{ steps.archive.outputs.archive_path }}
           draft: false
@@ -225,6 +246,6 @@ jobs:
       - name: Upload plugin artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.find.outputs.plugin_name }}-Release-${{ steps.version.outputs.version_number }}
+          name: UnrealPlugins-Release-${{ steps.version.outputs.version_number }}
           path: ${{ runner.temp }}/PluginPackage
           retention-days: 90  # Keep releases longer

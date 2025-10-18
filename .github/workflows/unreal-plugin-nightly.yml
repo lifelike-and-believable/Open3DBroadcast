@@ -33,7 +33,7 @@ jobs:
           enable_webrtc: true
           libdatachannel_root: ${{ github.workspace }}\plugins\unreal\${{ env.PLUGIN_NAME }}\ThirdParty\webrtc
 
-      - name: Build plugin (Win64)
+      - name: Build Open3DStream plugin (Win64)
         shell: powershell
         run: |
           $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
@@ -43,10 +43,21 @@ jobs:
             -OutDir "$pkg" `
             -TargetPlatforms @("Win64")
 
+      - name: Build Open3DBroadcast plugin (Win64)
+        shell: powershell
+        run: |
+          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
+          $broadcastUplugin = Join-Path $PWD "plugins\unreal\Open3DBroadcast\Open3DBroadcast.uplugin"
+          & .\Build\Scripts\Build-Plugin.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -PluginUPluginPath "$broadcastUplugin" `
+            -OutDir "$pkg" `
+            -TargetPlatforms @("Win64")
+
       - name: Upload plugin package
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.PLUGIN_NAME }}-Nightly-Win64-${{ github.sha }}
+          name: UnrealPlugins-Nightly-Win64-${{ github.sha }}
           path: ${{ runner.temp }}/PluginPackage
           retention-days: 14  # Keep nightly builds for 2 weeks
 
