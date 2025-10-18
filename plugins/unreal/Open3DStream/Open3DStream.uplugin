@@ -3,7 +3,7 @@
 	"Version": 1,
 	"VersionName": "1.0",
 	"FriendlyName": "Open3DStream",
-	"Description": "Realtime Streaming",
+	"Description": "Realtime streaming with both receiver (LiveLink Source) and broadcaster capabilities",
 	"Category": "Other",
 	"CreatedBy": "Alastair Macleod",
 	"CreatedByURL": "https://peeldev.com/",
@@ -21,6 +21,21 @@
 			"Name": "Open3DStream",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "Open3DBroadcast",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": ["Open3DStream"],
+			"WhitelistPlatforms": ["Win64", "Linux", "Mac"]
+		}
+		,
+		{
+			"Name": "Open3DBroadcastEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": ["Open3DStream", "Open3DBroadcast"],
+			"WhitelistPlatforms": ["Win64", "Linux", "Mac"]
 		}
 	]
 }

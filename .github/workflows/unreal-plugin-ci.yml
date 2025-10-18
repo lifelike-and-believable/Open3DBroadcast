@@ -81,21 +81,8 @@ jobs:
             -OutDir "$pkg" `
             -TargetPlatforms @("Win64")
 
-      - name: Build Open3DBroadcast plugin (Win64)
-        shell: powershell
-        run: |
-          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
-          $broadcastUplugin = Join-Path $PWD "plugins\unreal\Open3DBroadcast\Open3DBroadcast.uplugin"
-          
-          Write-Host "Building Open3DBroadcast plugin..."
-          Write-Host "  Plugin: $broadcastUplugin"
-          Write-Host "  Output: $pkg"
-          
-          & .\Build\Scripts\Build-Plugin.ps1 `
-            -UEPath "$env:UE_ROOT" `
-            -PluginUPluginPath "$broadcastUplugin" `
-            -OutDir "$pkg" `
-            -TargetPlatforms @("Win64")
+      # Open3DBroadcast is now integrated as a module within Open3DStream plugin
+      # No separate build step needed - it's built as part of Open3DStream
 
       - name: Package artifact
         uses: actions/upload-artifact@v4
@@ -135,7 +122,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `✅ **Unreal Plugin CI build completed successfully!**\n\n[View build logs →](${runUrl})\n\n📦 Plugin artifacts (Open3DStream and Open3DBroadcast) are available for download in the workflow run.`
+              body: `✅ **Unreal Plugin CI build completed successfully!**\n\n[View build logs →](${runUrl})\n\n📦 Plugin artifacts (Open3DStream plugin) are available for download in the workflow run.`
             });
 
       - name: Post build failed comment

@@ -101,15 +101,8 @@ jobs:
           $content | ConvertTo-Json -Depth 10 | Set-Content -Path $upluginPath -Encoding UTF8
           Write-Host "[OK] Updated Open3DStream plugin version to $versionNumber"
           
-          # Update Open3DBroadcast plugin version
-          $broadcastUplugin = Join-Path $PWD "plugins\unreal\Open3DBroadcast\Open3DBroadcast.uplugin"
-          $broadcastContent = Get-Content -Path $broadcastUplugin -Raw | ConvertFrom-Json
-          $broadcastContent.VersionName = $versionNumber
-          if ($broadcastContent.Version) {
-            $broadcastContent.Version = [int]$broadcastContent.Version + 1
-          }
-          $broadcastContent | ConvertTo-Json -Depth 10 | Set-Content -Path $broadcastUplugin -Encoding UTF8
-          Write-Host "[OK] Updated Open3DBroadcast plugin version to $versionNumber"
+          # Open3DBroadcast is now integrated as a module within Open3DStream plugin
+          # Version is automatically updated with the main plugin
 
       - name: Build Open3DStream plugin (Win64, Shipping)
         shell: powershell
@@ -123,22 +116,8 @@ jobs:
             -TargetPlatforms @("Win64") `
             -Configuration "Shipping"
 
-      - name: Build Open3DBroadcast plugin (Win64, Shipping)
-        shell: powershell
-        run: |
-          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
-          $broadcastUplugin = Join-Path $PWD "plugins\unreal\Open3DBroadcast\Open3DBroadcast.uplugin"
-          
-          Write-Host "Building Open3DBroadcast ${{ steps.version.outputs.version_number }} for Win64 (Shipping)..."
-          Write-Host "  Plugin: $broadcastUplugin"
-          Write-Host "  Output: $pkg"
-          
-          & .\Build\Scripts\Build-Plugin.ps1 `
-            -UEPath "$env:UE_ROOT" `
-            -PluginUPluginPath "$broadcastUplugin" `
-            -OutDir "$pkg" `
-            -TargetPlatforms @("Win64") `
-            -Configuration "Shipping"
+      # Open3DBroadcast is now integrated as a module within Open3DStream plugin
+      # No separate build step needed - it's built as part of Open3DStream
 
       # Optional: Build for additional platforms
       # - name: Build plugin (Linux, Shipping)
@@ -205,15 +184,15 @@ jobs:
 
           ### Installation
 
-          This package contains both Open3DStream and Open3DBroadcast plugins:
+          This package contains the Open3DStream plugin with receiver and broadcasting capabilities:
 
           1. Download and extract the plugin package
           2. Copy the `UE_X.X` folder that matches your Unreal Engine version to your project root
-             - The archive contains `UE_X.X/Plugins/Open3DStream/` and `UE_X.X/Plugins/Open3DBroadcast/`
-             - This will create/merge with your project's `Plugins` directory
-          3. Alternatively, extract the inner plugin folders directly to your project's `Plugins` directory
+             - The archive contains `UE_X.X/Plugins/Open3DStream/` with all functionality included
+             - This will add to your project's `Plugins` directory
+          3. Alternatively, extract the inner plugin folder directly to your project's `Plugins` directory
           4. Restart Unreal Editor
-          5. Enable the plugins in the Plugins browser (Edit → Plugins)
+          5. Enable the plugin in the Plugins browser (Edit → Plugins → Search "Open3DStream")
 
           ### Compatibility
 
@@ -223,8 +202,9 @@ jobs:
           ### Features
 
           This release includes:
-          - **Open3DStream**: LiveLink plugin for streaming animation data
-          - **Open3DBroadcast**: Plugin for broadcasting skeletal mesh pose and curve data
+          - **Open3DStream Plugin**: Complete animation streaming solution
+            - **Receiver**: LiveLink source for receiving animation data from external sources
+            - **Broadcaster**: Send skeletal mesh pose and curve data to remote clients
 
           ### Changes
 
@@ -238,7 +218,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.version }}
-          name: Open3DStream Plugins ${{ steps.version.outputs.version }}
+          name: Open3DStream Plugin ${{ steps.version.outputs.version }}
           body_path: ${{ runner.temp }}/release_notes.md
           files: ${{ steps.archive.outputs.archive_path }}
           draft: false

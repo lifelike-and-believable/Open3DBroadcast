@@ -1,0 +1,12 @@
+# Open3DStream Build Configuration
+# 
+# This file allows you to configure which modules are built with the Open3DStream plugin.
+# To disable the broadcast module, uncomment the line below:
+#
+# O3DS_WITH_BROADCAST=0
+#
+# By default, all modules are built.
+
+# Broadcast module configuration
+# Set to 0 to disable the Open3DBroadcast module entirely
+# O3DS_WITH_BROADCAST=0
