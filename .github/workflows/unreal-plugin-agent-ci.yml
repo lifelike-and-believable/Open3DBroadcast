@@ -67,139 +67,15 @@ jobs:
           git fetch origin +refs/pull/${{ github.event.issue.number }}/head:pr-${{ github.event.issue.number }}
           git checkout pr-${{ github.event.issue.number }}
 
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
-
-      - name: Link plugin into Sandbox
-        shell: powershell
-        run: |
-          & .\Build\Scripts\Link-PluginIntoSandbox.ps1
-
-      - name: Setup UE
-        shell: powershell
-        run: |
-          & .\Build\Scripts\Setup-UE.ps1 -UEPath "$env:UE_ROOT"
-
-      # Cache native library builds to speed up workflow
-      - name: Cache native libraries
-        uses: actions/cache@v4
-        id: cache-libs
+      - name: Build plugin core (composite)
+        id: core
+        uses: ./.github/actions/build-plugin-core
         with:
-          path: |
-            vsbuild
-            usr
-            thirdparty/build
-          key: o3ds-libs-${{ runner.os }}-${{ hashFiles('src/**', 'thirdparty/**', 'CMakeLists.txt') }}
-          restore-keys: |
-            o3ds-libs-${{ runner.os }}-
-
-      # Build third-party dependencies FIRST (nng, flatbuffers) - required by main library
-      - name: Build Third-Party Dependencies
-        if: steps.cache-libs.outputs.cache-hit != 'true'
-        shell: powershell
-        run: |
-          Write-Host "Building third-party dependencies..."
-          
-          cd thirdparty
-          
-          # Configure CMake
-          cmake -B build -S . -G "Visual Studio 17 2022" -A x64
-          
-          # Build RelWithDebInfo configuration
-          cmake --build build --config RelWithDebInfo --parallel
-          
-          # Install to make packages available
-          cmake --install build --config RelWithDebInfo --prefix ../usr
-          
-          cd ..
-          Write-Host "[OK] Third-party dependencies built successfully"
-
-      # Build Open3DStream C++ library (depends on third-party libs)
-      - name: Build Open3DStream C++ Library
-        if: steps.cache-libs.outputs.cache-hit != 'true'
-        shell: powershell
-        run: |
-          Write-Host "Building Open3DStream C++ library..."
-          
-          # Regenerate FlatBuffers header with the version we just built
-          Write-Host "Regenerating o3ds_generated.h with current FlatBuffers version..."
-          & ".\thirdparty\build\flatbuffers\RelWithDebInfo\flatc.exe" --cpp -o src src\o3ds.fbs
-          
-          # Configure CMake with prefix path to find third-party packages
-          cmake -B vsbuild -S . -G "Visual Studio 17 2022" -A x64 `
-            -DCMAKE_PREFIX_PATH="$PWD/usr"
-          
-          # Build RelWithDebInfo configuration
-          cmake --build vsbuild --config RelWithDebInfo --parallel
-          
-          Write-Host "[OK] Open3DStream library built successfully"
-
-      # Copy built libraries and headers to plugin directory
-      - name: Copy libraries to plugin
-        shell: powershell
-        run: |
-          Write-Host "Copying libraries to plugin directory..."
-          
-          $pluginLib = "plugins\unreal\$env:PLUGIN_NAME\ThirdParty"
-          
-          # Create directories
-          New-Item -ItemType Directory -Force -Path "$pluginLib" | Out-Null
-          New-Item -ItemType Directory -Force -Path "$pluginLib\include\o3ds" | Out-Null
-          New-Item -ItemType Directory -Force -Path "$pluginLib\include\nng" | Out-Null
-          New-Item -ItemType Directory -Force -Path "$pluginLib\include\flatbuffers" | Out-Null
-          
-          # Copy library files
-          Copy-Item "vsbuild\src\RelWithDebInfo\open3dstreamstatic.lib" "$pluginLib\" -ErrorAction Stop
-          Copy-Item "thirdparty\build\nng\RelWithDebInfo\nng.lib" "$pluginLib\" -ErrorAction Stop
-          Copy-Item "thirdparty\build\flatbuffers\RelWithDebInfo\flatbuffers.lib" "$pluginLib\" -ErrorAction Stop
-          
-          # Copy Open3DStream header files
-          Copy-Item "src\o3ds\*.h" "$pluginLib\include\o3ds\" -Force
-          # Copy FlatBuffers generated header to include root (referenced by model.h)
-          Copy-Item "src\o3ds_generated.h" "$pluginLib\include\" -Force
-          
-          # Copy third-party headers from source directories
-          # NNG headers
-          if (Test-Path "thirdparty\nng\include") {
-            Copy-Item "thirdparty\nng\include\nng\*" "$pluginLib\include\nng\" -Recurse -Force
-          }
-          
-          # Flatbuffers headers
-          if (Test-Path "thirdparty\flatbuffers\include\flatbuffers") {
-            Copy-Item "thirdparty\flatbuffers\include\flatbuffers\*" "$pluginLib\include\flatbuffers\" -Recurse -Force
-          }
-          
-          # Also check usr/include if it exists (from install)
-          if (Test-Path "usr\include\nng") {
-            Copy-Item "usr\include\nng\*" "$pluginLib\include\nng\" -Recurse -Force
-          }
-          if (Test-Path "usr\include\flatbuffers") {
-            Copy-Item "usr\include\flatbuffers\*" "$pluginLib\include\flatbuffers\" -Recurse -Force
-          }
-          if (Test-Path "usr\include\*.h") {
-            Copy-Item "usr\include\*.h" "$pluginLib\include\" -Force
-          }
-          
-          Write-Host "[OK] Libraries and headers copied successfully"
-          Write-Host "Plugin ThirdParty directory contents:"
-          Get-ChildItem "$pluginLib" -Recurse | Select-Object FullName
-
-      - name: Locate plugin (.uplugin)
-        id: find
-        shell: powershell
-        run: |
-          $pluginDir = Join-Path $PWD "plugins\unreal\$env:PLUGIN_NAME"
-          $upluginPath = Join-Path $pluginDir "$env:PLUGIN_NAME.uplugin"
-          
-          if (!(Test-Path -LiteralPath $upluginPath)) {
-            Write-Error "Plugin file not found at: $upluginPath"
-            exit 1
-          }
-          
-          "plugin_path=$upluginPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "plugin_dir=$pluginDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "plugin_name=$env:PLUGIN_NAME" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "[OK] Using plugin: $upluginPath"
+          ue_root: ${{ env.UE_ROOT }}
+          plugin_name: ${{ env.PLUGIN_NAME }}
+          build_type: RelWithDebInfo
+          enable_webrtc: true
+          libdatachannel_root: ${{ github.workspace }}\plugins\unreal\${{ env.PLUGIN_NAME }}\ThirdParty\webrtc
 
       - name: Build plugin (Win64)
         shell: powershell
@@ -207,14 +83,14 @@ jobs:
           $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
           & .\Build\Scripts\Build-Plugin.ps1 `
             -UEPath "$env:UE_ROOT" `
-            -PluginUPluginPath "${{ steps.find.outputs.plugin_path }}" `
+            -PluginUPluginPath "${{ steps.core.outputs.uplugin_path }}" `
             -OutDir "$pkg" `
             -TargetPlatforms @("Win64")
 
       - name: Package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.find.outputs.plugin_name }}-AgentCI-${{ github.sha }}
+          name: ${{ env.PLUGIN_NAME }}-AgentCI-${{ github.sha }}
           path: ${{ runner.temp }}/PluginPackage
           retention-days: 7  # Shorter retention for agent builds
 
@@ -226,7 +102,7 @@ jobs:
       #     & .\Build\Scripts\Run-AutomationTests.ps1 `
       #       -UEPath "$env:UE_ROOT" `
       #       -ProjectFile "$PWD\ProjectSandbox\ProjectSandbox.uproject" `
-      #       -TestFilter "${{ steps.find.outputs.plugin_name }}.*" `
+      #       -TestFilter "${{ env.PLUGIN_NAME }}.*" `
       #       -ResultsDir "$env:RUNNER_TEMP\TestResults"
 
       # - name: Upload test reports
