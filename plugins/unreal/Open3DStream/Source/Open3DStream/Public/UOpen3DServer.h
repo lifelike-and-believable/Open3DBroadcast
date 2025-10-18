@@ -36,7 +36,7 @@ public:
 	void tick();
 
 	O3DS::AsyncConnector* mServer;
-	FWebRTCConnector* mWebRTCConnector;  // Unreal's Pixel Streaming WebRTC
+	FWebRTCConnector* mWebRTCConnector;
 	FSocket* mTcp;
 	FSocket* mUdp;
 
