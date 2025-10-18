@@ -43,50 +43,24 @@ jobs:
             -OutDir "$pkg" `
             -TargetPlatforms @("Win64")
 
-      - name: Copy Open3DStream binaries to source for dependency resolution
-        shell: powershell
-        run: |
-          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
-          $builtPlugin = Join-Path $pkg "Open3DStream"
-          $sourcePlugin = "plugins\unreal\Open3DStream"
-          
-          Write-Host "Copying Open3DStream binaries to source location for Open3DBroadcast dependency..."
-          
-          # Copy Binaries folder if it exists
-          if (Test-Path "$builtPlugin\Binaries") {
-            if (Test-Path "$sourcePlugin\Binaries") {
-              Remove-Item "$sourcePlugin\Binaries" -Recurse -Force
-            }
-            Copy-Item -Path "$builtPlugin\Binaries" -Destination "$sourcePlugin\" -Recurse -Force
-            Write-Host "  Copied Binaries"
-          }
-          
-          # Copy Intermediate folder if it exists
-          if (Test-Path "$builtPlugin\Intermediate") {
-            if (Test-Path "$sourcePlugin\Intermediate") {
-              Remove-Item "$sourcePlugin\Intermediate" -Recurse -Force
-            }
-            Copy-Item -Path "$builtPlugin\Intermediate" -Destination "$sourcePlugin\" -Recurse -Force
-            Write-Host "  Copied Intermediate"
-          }
-          
-          Write-Host "[OK] Open3DStream binaries ready for dependency resolution"
-
       - name: Build Open3DBroadcast plugin (Win64)
         shell: powershell
         run: |
           $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
           $broadcastUplugin = Join-Path $PWD "plugins\unreal\Open3DBroadcast\Open3DBroadcast.uplugin"
+          $open3dStreamDir = Join-Path $PWD "plugins\unreal\Open3DStream"
           
-          Write-Host "Building Open3DBroadcast plugin..."
+          Write-Host "Building Open3DBroadcast plugin with Open3DStream dependency..."
           Write-Host "  Plugin: $broadcastUplugin"
           Write-Host "  Output: $pkg"
+          Write-Host "  Dependency: $open3dStreamDir"
           
           & .\Build\Scripts\Build-Plugin.ps1 `
             -UEPath "$env:UE_ROOT" `
             -PluginUPluginPath "$broadcastUplugin" `
             -OutDir "$pkg" `
-            -TargetPlatforms @("Win64")
+            -TargetPlatforms @("Win64") `
+            -AdditionalPluginDirectories @($open3dStreamDir)
 
       - name: Upload plugin package
         uses: actions/upload-artifact@v4
