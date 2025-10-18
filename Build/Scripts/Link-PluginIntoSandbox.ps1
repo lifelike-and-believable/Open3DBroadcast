@@ -1,32 +1,37 @@
 $ScriptRoot = Split-Path -Parent $PSScriptRoot
 $RepoRoot = Split-Path -Parent $ScriptRoot
 
-$PluginPath = Join-Path $RepoRoot "plugins\unreal\Open3DStream"
 $SandboxPath = Join-Path $RepoRoot "ProjectSandbox"
-$dst = Join-Path $SandboxPath "Plugins\Open3DStream"
-
-if (!(Test-Path -LiteralPath $PluginPath)) {
-  Write-Error "Plugin not found at: $PluginPath"
-  exit 1
-}
-
-if (Test-Path $dst) { 
-  Write-Host "Removing existing link: $dst"
-  Remove-Item $dst -Recurse -Force 
-}
-
-$dstParent = Split-Path $dst
+$dstParent = Join-Path $SandboxPath "Plugins"
 New-Item -ItemType Directory -Force -Path $dstParent | Out-Null
 
-Write-Host "Creating junction..."
-Write-Host "  From: $PluginPath"
-Write-Host "  To:   $dst"
+# Link both Open3DStream and Open3DBroadcast plugins
+$plugins = @("Open3DStream", "Open3DBroadcast")
 
-cmd /c "mklink /J ""$dst"" ""$PluginPath"""
+foreach ($pluginName in $plugins) {
+  $PluginPath = Join-Path $RepoRoot "plugins\unreal\$pluginName"
+  $dst = Join-Path $SandboxPath "Plugins\$pluginName"
 
-if (Test-Path $dst) {
-  Write-Host "Successfully linked plugin into sandbox: $dst"
-} else {
-  Write-Error "Failed to create junction"
-  exit 1
+  if (!(Test-Path -LiteralPath $PluginPath)) {
+    Write-Warning "Plugin not found at: $PluginPath (skipping)"
+    continue
+  }
+
+  if (Test-Path $dst) { 
+    Write-Host "Removing existing link: $dst"
+    Remove-Item $dst -Recurse -Force 
+  }
+
+  Write-Host "Creating junction for $pluginName..."
+  Write-Host "  From: $PluginPath"
+  Write-Host "  To:   $dst"
+
+  cmd /c "mklink /J ""$dst"" ""$PluginPath"""
+
+  if (Test-Path $dst) {
+    Write-Host "Successfully linked $pluginName into sandbox: $dst"
+  } else {
+    Write-Error "Failed to create junction for $pluginName"
+    exit 1
+  }
 }

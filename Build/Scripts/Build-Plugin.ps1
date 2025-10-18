@@ -3,7 +3,8 @@ param(
   [string]$PluginUPluginPath,
   [string]$OutDir,
   [string[]]$TargetPlatforms = @("Win64"),
-  [string]$Configuration = "Development"
+  [string]$Configuration = "Development",
+  [string[]]$AdditionalPluginDirectories = @()
 )
 
 # Sanitize and normalize inputs
@@ -28,16 +29,30 @@ Write-Host "  Plugin: $PluginUPluginPath"
 Write-Host "  Output: $OutDir"
 Write-Host "  Platforms: $platforms"
 Write-Host "  Configuration: $Configuration"
+if ($AdditionalPluginDirectories -and $AdditionalPluginDirectories.Count -gt 0) {
+  Write-Host "  Additional Plugin Directories: $($AdditionalPluginDirectories -join '; ')"
+}
+
+# Build UAT arguments
+$uatArgs = @(
+  "BuildPlugin",
+  "-Plugin=$PluginUPluginPath",
+  "-Package=$OutDir",
+  "-TargetPlatforms=$platforms",
+  "-Configuration=$Configuration",
+  "-Rocket",
+  "-VeryVerbose",
+  "-VS2022"
+)
+
+# Add additional plugin directories if specified
+if ($AdditionalPluginDirectories -and $AdditionalPluginDirectories.Count -gt 0) {
+  $pluginDirs = $AdditionalPluginDirectories -join ";"
+  $uatArgs += "-AdditionalPluginDirectories=$pluginDirs"
+}
 
 # Pass each UAT option as a single token so PowerShell doesn't split values with spaces
-& $UAT BuildPlugin `
-  "-Plugin=$PluginUPluginPath" `
-  "-Package=$OutDir" `
-  "-TargetPlatforms=$platforms" `
-  "-Configuration=$Configuration" `
-  -Rocket `
-  -VeryVerbose `
-  -VS2022
+& $UAT $uatArgs
 
 if ($LASTEXITCODE -eq 0) {
   Write-Host "[OK] Plugin build completed successfully"

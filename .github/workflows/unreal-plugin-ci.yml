@@ -71,7 +71,7 @@ jobs:
           enable_webrtc: true
           libdatachannel_root: ${{ github.workspace }}\plugins\unreal\${{ env.PLUGIN_NAME }}\ThirdParty\webrtc
 
-      - name: Build plugin (Win64)
+      - name: Build Open3DStream plugin (Win64)
         shell: powershell
         run: |
           $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
@@ -81,10 +81,26 @@ jobs:
             -OutDir "$pkg" `
             -TargetPlatforms @("Win64")
 
+      - name: Build Open3DBroadcast plugin (Win64)
+        shell: powershell
+        run: |
+          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
+          $broadcastUplugin = Join-Path $PWD "plugins\unreal\Open3DBroadcast\Open3DBroadcast.uplugin"
+          
+          Write-Host "Building Open3DBroadcast plugin..."
+          Write-Host "  Plugin: $broadcastUplugin"
+          Write-Host "  Output: $pkg"
+          
+          & .\Build\Scripts\Build-Plugin.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -PluginUPluginPath "$broadcastUplugin" `
+            -OutDir "$pkg" `
+            -TargetPlatforms @("Win64")
+
       - name: Package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.PLUGIN_NAME }}-Win64-${{ github.sha }}
+          name: UnrealPlugins-Win64-${{ github.sha }}
           path: ${{ runner.temp }}/PluginPackage
           retention-days: 30
 
@@ -119,7 +135,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `✅ **Unreal Plugin CI build completed successfully!**\n\n[View build logs →](${runUrl})\n\n📦 Plugin artifact is available for download in the workflow run.`
+              body: `✅ **Unreal Plugin CI build completed successfully!**\n\n[View build logs →](${runUrl})\n\n📦 Plugin artifacts (Open3DStream and Open3DBroadcast) are available for download in the workflow run.`
             });
 
       - name: Post build failed comment
