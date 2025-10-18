@@ -80,7 +80,6 @@ public class Open3DStream : ModuleRules
                 "WebSockets",
                 "Json",
                 "JsonUtilities",
-                // Note: Removed PixelStreaming and WebRTC - using libdatachannel instead
             }
             );
 				
