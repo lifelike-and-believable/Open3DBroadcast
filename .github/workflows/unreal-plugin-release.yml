@@ -123,6 +123,23 @@ jobs:
             -TargetPlatforms @("Win64") `
             -Configuration "Shipping"
 
+      - name: Copy Open3DStream build artifacts for dependency resolution
+        shell: powershell
+        run: |
+          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
+          $sourcePlugin = Join-Path $pkg "Open3DStream"
+          $targetPlugin = "plugins\unreal\Open3DStream"
+          
+          # Copy Binaries and Intermediate folders back to source for dependency resolution
+          if (Test-Path "$sourcePlugin\Binaries") {
+            Copy-Item -Path "$sourcePlugin\Binaries" -Destination $targetPlugin -Recurse -Force
+            Write-Host "Copied Binaries to $targetPlugin"
+          }
+          if (Test-Path "$sourcePlugin\Intermediate") {
+            Copy-Item -Path "$sourcePlugin\Intermediate" -Destination $targetPlugin -Recurse -Force
+            Write-Host "Copied Intermediate to $targetPlugin"
+          }
+
       - name: Build Open3DBroadcast plugin (Win64, Shipping)
         shell: powershell
         run: |
