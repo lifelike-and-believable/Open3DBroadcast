@@ -49,6 +49,8 @@ private:
     void EnsureSkeletonCache(USkeletalMeshComponent* SkelComp);
     void RefreshSkeletonCache(USkeletalMeshComponent* SkelComp);
     FString BuildSubjectName(const USkeletalMeshComponent* SkelComp) const;
+    // Sanitize a subject name to policy: ASCII only, replace whitespace with '_', allow [-._A-Za-z0-9/]
+    FString SanitizeSubjectName(const FString& Raw) const;
 
     // Curves (Morph + Named Anim Curves)
     void EnsureCurveCache(USkeletalMeshComponent* SkelComp);

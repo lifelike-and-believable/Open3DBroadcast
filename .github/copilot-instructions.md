@@ -1,270 +1,202 @@
-# Open3DStream — Copilot Instructions
 
-This document is for AI coding agents working on Open3DStream. It captures goals, architecture, conventions, and high‑signal entry points so changes align with the project’s direction.
+# Copilot Coding Agent — Operating Instructions (Open3DStream / Unreal UE 5.6)
 
-## Current Status: Unified Plugin with Receiver & Broadcast Modules
+This file defines strict, testable rules so coding agents deliver high‑quality, deterministic work across the Open3DStream ecosystem (Unreal sender/receiver, DCC bridges, and utilities). Treat this as the single source of truth when planning work, writing code, and composing PRs.
 
-**What exists today:**
-- **Open3DStream plugin**: Unified Unreal plugin with two modules:
-  - **Open3DStream module** (mature): LiveLink Source that receives animation data from external sources
-  - **Open3DBroadcast module** (framework): Module for broadcasting animation data FROM Unreal TO remote clients
-- **Core C++ library**: Full protocol implementation with TCP/UDP/WebRTC/NNG connectors in `src/o3ds/`
-- **Maya/MotionBuilder plugins**: Working receivers in `plugins/maya/` and `plugins/mobu/`
-- **WebRTC support**: libdatachannel integrated, functional in C++ tools, beta in Unreal
+---
 
-## Phase focus: Open3DBroadcast Module Implementation (Active)
+## 0) Ground Rules (Read Me First)
 
-**Goal**: Complete the Open3DBroadcast module within the Open3DStream plugin to stream skeletal animation and curves FROM Unreal Engine TO remote clients.
+- **Source of truth:** This document. Any ambiguity must be resolved by updating this doc first, then implementing.
+- **UE API accuracy:** Verify all Unreal API signatures against **UE 5.6** documentation before use. Do not “best guess.”
+  - https://dev.epicgames.com/documentation/en-us/unreal-engine/API (direct URL)
+  - "Unreal Engine C++ API Reference" + class name(s) (web search). 
+- **Determinism first:** Prefer predictable behavior over opportunistic performance wins unless performance is a stated acceptance criterion.
+- **Small steps:** Break work into small, testable tasks. Each PR should do one thing well, with passing checks and updated docs.
 
-**Current state**: Module framework exists at `plugins/unreal/Open3DStream/Source/Open3DBroadcast/` but needs core implementation:
-- Register multiple SkeletalMeshComponents for broadcast  
-- Capture final animation pose (transforms) and curve values each frame
-- Send via configured connector URL (tcp://, udp://, webrtc://, nng://)
-- Integrate with existing Open3DStream core library at `src/o3ds/`
-- Provide editor UI for configuration
+---
 
-**Key deliverable**: A working sender module that complements the existing Open3DStream LiveLink Source (receiver module).
+## 1) Agent Playbook (How to Work)
 
-**Build configuration**: The module can be optionally disabled via build flags (`O3DS_WITH_BROADCAST=0`) for minimal installations.
+1. **Plan**  
+   - Read the related issue(s) and this document. Produce a short plan describing the change, risks, and tests.
+2. **Implement**  
+   - Keep changes minimal and well‑scoped. Respect prohibited items (see §14).
+3. **Verify locally**  
+   - Run all required unit/integration tests (see §10, §12), confirm the **Definition of Done** (see §13).
+4. **Open PR**  
+   - Use the PR template and checklists. Link the issue, include benchmarks/logs as required.
+5. **Respond to review**  
+   - Make focused changes; update docs/tests when requested.
 
-## Project goals and non‑goals
+### Agent Idioms (Shorthand)
+- `pr-issue #123` → Read #123, summarize intent, and open PR titled `o3ds: <short imperative>` linking #123.
+- `smoke-webrtc` → Run the two‑UE WebRTC smoke test; paste latency/jitter/drop metrics into PR.
+- `bench-tcp` → Run TCP throughput/backpressure bench; summarize queue behavior and any frame drops.
 
-Goals (what we optimize for):
-- Real‑time, low‑latency streaming of skeletal animation, morph curves, and transforms from MoCap/DCC tools and UE to engines.
-- Stable, schema‑driven protocol (FlatBuffers) with compatibility strategies.
-- Transport‑agnostic connectors (TCP/UDP/WebRTC/NNG) with a consistent async API and clear error reporting.
-- Engine adapters and tools that convert protocol messages into frame data (Unreal LiveLink, Maya/MotionBuilder).
-- Cross‑platform builds with reproducible packaging and minimal optional dependencies.
-- Clear extension points for new message types, connectors, and engine adapters.
-- WebRTC as a first‑class transport for NAT traversal and secure, low‑latency delivery.
+---
 
-Non‑goals (out of scope):
-- Offline authoring or long‑term storage.
-- Specialized lossy compression pipelines beyond lightweight per‑frame packing.
-- Proprietary formats as the protocol source of truth.
+## 2) General Programming Rules
 
-## Core architecture (mental model)
+- **Threading:** No blocking waits on the **game thread**. Network I/O and encoding run async.
+- **Capture timing:** Capture occurs **after animation evaluation** on the game thread; no sampling from worker threads.
+- **Error handling:** Prefer early returns and clear error types over silent fallthrough. Bubble actionable context.
+- **Logging:** Quiet hot paths. Only state transitions and errors are logged by default (see §9).
+- **Configs:** No hard‑coded credentials, ports, or absolute paths. Use project settings or env vars (see §8).
+- **Docs & examples:** Update code comments and the README/CHANGELOG when behavior or schema changes.
 
-- Data model: FlatBuffers schema (`src/o3ds.fbs`) produces `o3ds_generated.h`. Messages wrap a `SubjectList` with transforms and curves.
-- Serialization layer: `src/o3ds/model.h/.cpp` packs/unpacks between in‑memory structures and FlatBuffers.
-- Connector layer: URLs select a transport (see `src/o3ds/base_connector.h/.cpp`), exposing a uniform interface (`start(url)`, `read()`, `write()`, state, `getError()`).
-- Consumers/adapters: Engine/DCC plugins parse messages and feed per‑frame data (e.g., Unreal LiveLink).
-- Build system: CMake configures optional components (e.g., WebRTC via `O3DS_ENABLE_WEBRTC`) and platform builds.
+**Prohibited**
+- Calling Unreal APIs without verifying exact **UE 5.6** signatures in the official docs.
+- Blocking on the game thread.
+- Hard‑coding credentials/paths/ports in source control.
+- Reordering or deleting existing fields in a serialized schema (FlatBuffers/JSON/etc.).
 
-Connector URL patterns:
-- `tcp://host:port`
-- `udp://host:port`
-- `webrtc://host:port/room`
-- `nng+ipc://path`
-- `nng+tcp://host:port`
+---
 
-## WebRTC transport (integrated)
+## 3) Transform Space & Timestamps (Non‑Negotiable)
 
-- Enable via `-DO3DS_ENABLE_WEBRTC=ON` (requires libdatachannel + mbedtls).
-- Signaling: use the example signaling server under `examples/` and connect with `webrtc://host:port/room`.
-- Configure ICE/STUN/TURN as needed; avoid hard‑coding credentials.
-- Transport is transparent to adapters; they consume decoded messages.
+- **Transform space:** **Parent‑relative (local)** only. Do **not** mix spaces in a single stream.
+- **Timestamps (send both):**
+  1) `FQualifiedFrameTime` when available (engine time/frame rate exactness).  
+  2) A monotonic **double** seconds‑since‑start (high‑res clock) for cross‑process alignment.
 
-## Open3DBroadcast Module Design (Unreal sender)
+Receivers must be able to select either source. Send both to maximize compatibility.
 
-**Module architecture** (within Open3DStream plugin):
-- **Module**: `Open3DBroadcast` at `plugins/unreal/Open3DStream/Source/Open3DBroadcast/`
-- **Dependencies**: Depends on `Open3DStream` module for core networking and serialization
-- **Build flags**: Supports conditional compilation via `O3DS_WITH_BROADCAST` flag
-- **Target scope**: Runtime module, available in Editor and packaged games
+---
 
-**Proposed components**:
-- **Subsystem**: `UO3DBroadcastSubsystem` to manage connection(s), registered SkeletalMeshComponents, and per‑frame capture
-- **Component**: `UO3DBroadcastComponent` attachable to Actors or directly register `USkeletalMeshComponent*`
-- **Settings**: `UO3DBroadcastSettings` for default connector URL, subject naming policy, update rate, and transport options
-- **Editor UI**: Details customization to pick meshes and set URL; optional toolbar toggle to start/stop streaming
+## 4) Subject Identity & Ordering
 
-Capture points (final pose + curves):
-- Preferred hooks:
-  - Use Unreal’s “bone transforms finalized” signal on skinned components if available in your UE version (e.g., USkinnedMeshComponent/USkeletalMeshComponent callbacks) to get final evaluated transforms.
-  - Alternatively, schedule capture after animation evaluation on the game thread and read:
-    - Final pose: `USkeletalMeshComponent`’s evaluated transforms (component space or parent‑relative; choose one and document).
-    - Curves: evaluated animation/morph curves from the component/anim instance’s curve container.
-- Time stamping and sync:
-  - Include `FQualifiedFrameTime` (Timecode + SubFrame) when available.
-  - Also include a high‑resolution monotonic timestamp (e.g., cycles in seconds) for jitter analysis.
-- Multiple meshes:
-  - Each registered mesh is a separate Subject with a stable identifier:
-    - Default: `{WorldName}/{ActorName}/{ComponentName}`.
-    - Allow overrides per component.
-  - Send per‑frame Subject messages in one `SubjectList` envelope, batched by frame time.
-- Bone/curve mapping:
-  - Send the bone name array once per Subject when first seen (or when skeleton changes), then per‑frame transforms aligned by index.
-  - Curves: Send names once per Subject; per‑frame send only values aligned by index.
+- **Subject ID format:** `{WorldName}/{ActorName}/{ComponentName}` by default.
+- **Constraints:** ASCII only; `'/'` separated; no spaces. Replace whitespace with `_`. Strip any chars not in `[-._A-Za-z0-9/]`.
+- **Deterministic ordering:** Before first descriptor send, **stable‑sort** bone and curve arrays **lexicographically (case‑sensitive)**. Indices must be stable across runs on identical assets.
 
-Backpressure and rate control:
-- Do not queue unbounded frames. If the connector is busy, drop the oldest pending frame (latest‑wins).
-- Optional target FPS (e.g., 60) with frame skipping under load.
-- Coalesce multiple mesh subjects into one network write per frame for efficiency.
+---
 
-Error handling and resilience:
-- No exceptions; use `bool` results and `getError()` for diagnostics.
-- Auto‑reconnect on transient network failure with exponential backoff.
-- Expose connection state to the editor UI and log concise state transitions.
+## 5) Open3DBroadcast — Capture & Send
 
-Security:
-- WebRTC uses DTLS/SRTP. Keep deps current.
-- Do not hard‑code TURN credentials. Use project settings or environment variables.
+- **What to capture (minimum viable):**
+  - Skeletal pose (local space), curve values (face/body), blendshapes if applicable.
+  - Optional: camera transform/FOV and root motion when explicitly enabled.
+- **What not to do in v1:**
+  - No custom editor windows/toolbars. Keep UI minimal (see §11).
+  - No per‑frame logging unless compiled with a Verbose flag.
 
-## Wire format and schema usage
+---
 
-- Schema file: `src/o3ds.fbs` (FlatBuffers). Regenerate headers on change:
-  ```bash
-  flatc --cpp src/o3ds.fbs
-  ```
-- For each Subject (skeletal mesh):
-  - Names: bone names vector; curve names vector.
-  - Per‑frame: transforms array aligned to bone names; curve values aligned to curve names.
-  - Include timestamps/timecode fields where available in the message.
-- If you add fields for timecode or subject metadata, maintain backward compatibility:
-  - Use optional fields with sensible defaults.
-  - Bump `O3DS_VERSION_TAG` and update all consumers.
+## 6) Backpressure & Queuing Policy
 
-## Build and setup
+- **Queue capacity:** `2` frames. Overridable via env `O3DS_BROADCAST_MAX_QUEUE` (integer ≥ 1).
+- **Policy:** **Drop oldest** when the queue is full (latest‑wins).
+- **Test hooks:** Integration tests must simulate 2× load and confirm: queue never > capacity; oldest drop policy observed.
 
-Common commands:
-- Regenerate schema header after `.fbs` changes:
-  ```bash
-  flatc --cpp src/o3ds.fbs
-  ```
-- Configure and build (native):
-  ```bash
-  mkdir -p build && cd build
-  cmake ..          # add -DO3DS_ENABLE_WEBRTC=ON to include WebRTC
-  make -j
-  ```
-- Clone with submodules:
-  ```bash
-  git clone --recurse-submodules <repo>
-  # or, if already cloned:
-  git submodule update --init --recursive
-  ```
+---
 
-Notes:
-- Schema changes are breaking; rebuild core + affected plugins.
-- When enabling WebRTC, ensure third‑party versions match build type (debug/release) across the toolchain.
+## 7) Schema & Compatibility (FlatBuffers / JSON)
 
-## Conventions and constraints
+When modifying `.fbs` or any on‑wire schema:
 
-- Versioning: Single source in `CMakeLists.txt` via `set(O3DS_VERSION_TAG "...")`.
-- Error handling: No exceptions in connector code paths; return `bool`, inspect `getError()`.
-- Ownership: `TransformList` owns `Transform*`; do not manually free.
-- Curves: Per‑Subject arrays; `mCurveNames` and `mCurveValues` counts must match.
-- Threading: Connectors may be async; follow lifecycle (`start(url)` → steady state → `stop()`/destruct). Avoid engine‑thread blocking.
-- Logging: Keep hot‑path logs minimal; provide state‑change and error logs.
+- Only **add** optional fields with defaults; **never** reorder existing fields or remove them.
+- Regenerate code and update **all** consumers in the repo.
+- **Versioning:** Increment `O3DS_VERSION_TAG`.
+- **CHANGELOG:** Add a “Schema/Protocol” section describing changes and compatibility.
+- **CI impact:** Receivers (UE plugin, Maya, MotionBuilder, etc.) must build and pass smoke tests against the new schema.
 
-## Extending the system
+---
 
-Add/modify Open3DBroadcast module components (Unreal):
-1) Implement capture and subject packaging for a SkeletalMeshComponent.
-2) Batch subjects into a `SubjectList` with timestamps.
-3) Send via the selected connector URL using Open3DStream module's connectors.
-4) Provide editor settings and a simple start/stop control.
-5) Add end‑to‑end tests with two UE instances (sender/receiver).
-6) Ensure proper module dependency on Open3DStream for core functionality.
+## 8) Configuration, Secrets, and WebRTC
 
-Add a new connector (transport):
-1) Inherit `AsyncConnector` or `BlockingNngConnector`.
-2) Implement `start(url)`, `write()`, `read()`, state transitions, and `getError()`.
-3) Register scheme handling in `src/o3ds/base_connector.cpp`.
-4) Wire sources in `src/CMakeLists.txt`, add flags/options, update CI.
-5) Add tests and URL usage docs.
+- **TURN/STUN configuration sources (exact order):**
+  1) Project Settings → Open3DBroadcast (stored in `DefaultEngine.ini`)
+  2) Environment variables: `O3DS_TURN_URL`, `O3DS_TURN_USER`, `O3DS_TURN_PASS`
+- **Security:** No plaintext secrets in source or example code. Use env or secured config files.
+- **Defaults:** Provide safe, non‑public defaults; do not auto‑enable TURN without credentials.
 
-Add new message fields/types:
-1) Edit `src/o3ds.fbs`; prefer optional fields for compatibility.
-2) Regenerate headers, update `src/o3ds/model.cpp` and all consumers.
-3) Bump `O3DS_VERSION_TAG` and document.
+---
 
-## Module structure (implemented)
+## 9) Logging Contract
 
-**Open3DBroadcast module** (within Open3DStream plugin):
-- `plugins/unreal/Open3DStream/Source/Open3DBroadcast/Open3DBroadcast.Build.cs` ✅
-- `plugins/unreal/Open3DStream/Source/Open3DBroadcast/Public/Open3DBroadcast.h` ✅
-- `plugins/unreal/Open3DStream/Source/Open3DBroadcast/Private/Open3DBroadcast.cpp` ✅
+- **Categories:**
+  - `Open3DStream.Broadcast.State`  → `Info` for state transitions (Disconnected/Connecting/Connected/Error)
+  - `Open3DStream.Broadcast.Error`  → `Warning`/`Error` for failures
+- **Hot path:** No logs in the per‑frame send loop unless a build‑time Verbose flag is enabled.
+- **Crash triage:** Include minimally sufficient context (subject id, transport kind, last state).
 
-**Planned additions**:
-- `plugins/unreal/Open3DStream/Source/Open3DBroadcast/Public/O3DBroadcastSubsystem.h`
-- `plugins/unreal/Open3DStream/Source/Open3DBroadcast/Private/O3DBroadcastSubsystem.cpp`
-- `plugins/unreal/Open3DStream/Source/Open3DBroadcast/Public/O3DBroadcastComponent.h`
-- `plugins/unreal/Open3DStream/Source/Open3DBroadcast/Private/O3DBroadcastComponent.cpp`
-- `plugins/unreal/Open3DStream/Source/Open3DBroadcast/Public/O3DBroadcastSettings.h`
-- `plugins/unreal/Open3DStream/Source/Open3DBroadcast/Private/O3DBroadcastSettings.cpp`
+---
 
-**Build configuration**:
-- `plugins/unreal/Open3DStream/BuildConfig.txt` - Documentation for build flags
-- Both modules share the same `.uplugin` file with proper dependencies
-- Core networking functionality reused from Open3DStream module
+## 10) Build & CI Gates (Must Pass)
 
-## Quick test flows
+- **Unit tests:** Schema/packing/unpacking/ordering tests.
+- **Integration tests:**
+  - **TCP loopback** (sender→receiver on localhost) verifying backpressure and zero schema/subject mismatches across ≥ 300 frames.
+  - **Two‑UE WebRTC smoke test** reporting latency/jitter/drops.
+- **Lint/format:** `clang-format` and `.editorconfig` enforced.
+- **Size budget:** UE plugin binary delta ≤ **+1.0 MB** per PR unless justified. Explain exceptions in PR body.
 
-- Two‑UE smoke test (Open3DBroadcast → LiveLink Source over WebRTC):
-  1) Start signaling: `node examples/signaling-server.js`
-  2) Sender UE:
-     - Add Open3DBroadcast component or register meshes in the subsystem.
-     - Set URL: `webrtc://localhost:8080/room`
-     - Play in Editor; confirm "Connected" and streaming.
-  3) Receiver UE (with Open3DStream LiveLink Source):
-     - Create a new LiveLink source with the same URL.
-     - Verify subjects appear; animate in Preview/PIE and confirm motion matches.
-- TCP fallback:
-  - Use `tcp://localhost:5555` on both sides; verify frames arrive.
+---
 
-## Performance and reliability targets
+## 11) Editor UI Minimum Spec
 
-- Latency: aim for sub‑frame at 60 fps on localhost; keep jitter stable over networks.
-- Throughput: batch multiple Subjects into a single `SubjectList` per frame.
-- Backpressure: latest‑wins; no unbounded queues.
-- Configurable reliability for WebRTC data channels (ordered/unordered, reliable/semi‑reliable) as appropriate.
+- **Project Settings** page: remote URL(s), FPS cap, naming policy, transport enable flags.
+- **Actor Component**: Start/Stop buttons; per‑mesh include checkbox.
+- **Status Indicator**: `Disconnected / Connecting / Connected / Error` visible on the component.
+- **No additional** custom windows/toolbars in v1.
 
-## Security and networking
+---
 
-- Use DTLS/SRTP with current deps for WebRTC.
-- No plaintext TURN credentials in source; use settings/env.
-- Validate URL inputs; reject invalid schemes/parameters.
+## 12) Local Verification (Smoke Tests)
 
-## Files to read first
+When local verification is possible, do the following before opening a PR:
 
-- Protocol: `src/o3ds.fbs`, `o3ds_generated.h`, `src/o3ds/model.h/.cpp`
-- Connectors: `src/o3ds/base_connector.h/.cpp`, implementations in `src/o3ds/`
-- Unreal LiveLink source (receiver reference): `plugins/unreal/Open3DStream/Source/Open3DStream/Private/Open3DStreamSource.cpp`
-- Packaging: `package.py`, `Build/` scripts
+- **Two‑UE WebRTC smoke test** shows motion parity within **±1 frame** (±16.6 ms @ 60 fps).
+- **TCP fallback test** transmits **≥ 300** consecutive frames with **zero** schema/subject mismatches.
+- **Backpressure stress** at **2× load** exhibits **oldest‑drop** policy; queue ≤ capacity (see §6).
+- **Logs**: No hot‑path logs present in release builds; only state transitions + errors.
 
-## AI agent playbook (Open3DBroadcast module tasks)
+---
 
-- Implement per‑mesh capture:
-  - Choose transform space (document choice).
-  - Capture after final pose evaluation.
-  - Extract curve names once and values per frame.
-- Subject lifecycle:
-  - Stable subject naming; handle add/remove and skeleton changes.
-  - Send “descriptor” (names) when needed, then stream frames.
-- Connector usage:
-  - Single connection, batched writes per frame.
-  - Reconnect/backoff logic and concise state logging.
-- Editor UX:
-  - Settings for URL, FPS cap, and subject naming policy.
-  - Simple “Start/Stop Broadcast” toggle, and a per‑mesh include/exclude list.
+## 13) Definition of Done (PR Checklist)
 
-Always:
-- Add small, focused tests (e.g., validate bone count/order consistency and curve alignment).
-- Update this document if conventions or flows change.
-- Keep diffs minimal and well‑commented around hot paths.
+Include the following in the PR description (check each item):
 
-## PR checklist
+- [ ] Local tests passed (unit + integration), with pasted metrics from `smoke-webrtc` and `bench-tcp`.
+- [ ] Deterministic ordering verified: bone/curve arrays stable‑sorted before descriptor send.
+- [ ] Transform space is **local** only; both timestamp sources included.
+- [ ] Subject IDs conform to naming constraints; no spaces; path‑safe.
+- [ ] Backpressure queue set to capacity `2` (or env override stated) and oldest‑drop policy verified.
+- [ ] No hot‑path logging; logging categories limited to State/Error.
+- [ ] If schema changed: fields only added as optional; `O3DS_VERSION_TAG` bumped; CHANGELOG updated; receivers built.
+- [ ] Size budget respected or exception justified.
+- [ ] Docs updated where applicable (README/module docs).
 
-- Schema changes (if any): regenerated headers, version bumped, consumers updated.
-- Open3DBroadcast:
-  - Captures final pose and curves for multiple meshes.
-  - Stable subject naming and lifecycle events.
-  - Batched `SubjectList` per frame; backpressure handled.
-  - Connector URL configurable; WebRTC tested with signaling.
-  - Editor/UI minimal but functional; docs updated with test steps.
-- Build/CI: flags and deps documented; CI green across targets.
-- Performance: no significant regressions; logs are concise.
+---
 
-If you want, I can generate stubs for the Open3DBroadcast Unreal module (headers, build.cs, and a minimal subsystem/component) and a quick guide map for testing.
+## 14) Module Structure (Reference)
+
+- **Broadcast Module (UE sender)**
+  - Capture after anim evaluation (game thread).
+  - Async encode and transport (TCP/WebRTC) on worker threads.
+- **Receiver Modules**
+  - Map indexed bones/curves by the deterministically sorted descriptors.
+  - Expose selection of timestamp source (engine frame vs. monotonic).
+
+(Keep this section synchronized with the code tree and update paths as modules evolve.)
+
+---
+
+## 15) Versioning & Changelog
+
+- Update `O3DS_VERSION_TAG` on any protocol or user‑visible behavior change.
+- **CHANGELOG.md**: Add a “Schema/Protocol” subsection with: brief description, compatibility notes, and migration steps.
+- Tag releases with `o3ds-vX.Y.Z` and attach a short release note referencing CHANGELOG sections touched in the PR.
+
+---
+
+## 16) Contributor Notes
+
+- Prefer small, cohesive PRs over omnibus changes.
+- Document tradeoffs explicitly in PR descriptions.
+- Where choices exist (e.g., codec, transport), record rationale in comments to save future archeologists from guesswork.
+
+---
+
+*End of instructions. Keep this file authoritative; update it before you code.*
