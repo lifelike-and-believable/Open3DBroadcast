@@ -8,9 +8,11 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 ## 0) Ground Rules (Read Me First)
 
 - **Source of truth:** This document. Any ambiguity must be resolved by updating this doc first, then implementing.
-- **UE API accuracy:** Verify all Unreal API signatures against **UE 5.6** documentation before use. Do not “best guess.”
-  - https://dev.epicgames.com/documentation/en-us/unreal-engine/API (direct URL)
-  - "Unreal Engine C++ API Reference" + class name(s) (web search). 
+- **UE API accuracy:** Verify all Unreal API signatures against **UE 5.6** documentation before use. Do not “best guess.” 
+  - Reference Sources in order of preference:
+    - Unreal Engine 5.6 source code on GitHub: @lifelike-and-believable/UnrealEngine
+    - "Unreal Engine C++ API Reference" + class name(s) (web search). 
+    - https://dev.epicgames.com/documentation/en-us/unreal-engine/API (direct URL)
 - **Determinism first:** Prefer predictable behavior over opportunistic performance wins unless performance is a stated acceptance criterion.
 - **Small steps:** Break work into small, testable tasks. Each PR should do one thing well, with passing checks and updated docs.
 - **Protocol schema:** `src/o3ds.fbs` is the authoritative source for data structures. After changes, regenerate `src/o3ds_generated.h` with `flatc --cpp src/o3ds.fbs`.

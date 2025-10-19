@@ -272,13 +272,24 @@ void UO3DSBroadcastComponent::CaptureCurves(USkeletalMeshComponent* SkelComp)
     {
         CurveValues[i] = 0.0f;
     }
-    // Read named curves from AnimInstance (these include morph-driving curves when authored)
-    if (UAnimInstance* AnimInst = SkelComp->GetAnimInstance())
+    // Read named curves from the FINAL anim instance: prefer PostProcess instance if present
+    UAnimInstance* SourceAnim = nullptr;
+    if (USkeletalMeshComponent* SMC = SkelComp)
+    {
+        // UE 5.x: Post-process anim instance runs after the main graph
+        SourceAnim = SMC->GetPostProcessInstance();
+        if (!SourceAnim)
+        {
+            SourceAnim = SMC->GetAnimInstance();
+        }
+    }
+
+    if (SourceAnim)
     {
         for (int32 i = 0; i < CurveNames.Num(); ++i)
         {
             const FName& Name = CurveNames[i];
-            const float V = AnimInst->GetCurveValue(Name);
+            const float V = SourceAnim->GetCurveValue(Name);
             CurveValues[i] = V;
         }
     }
