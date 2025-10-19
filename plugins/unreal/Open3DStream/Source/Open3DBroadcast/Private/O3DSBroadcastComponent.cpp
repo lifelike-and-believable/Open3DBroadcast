@@ -9,6 +9,8 @@
 #include "Animation/Skeleton.h"
 #include "AnimationRuntime.h"
 #include "Components/SkinnedMeshComponent.h"
+#include "Components/SkinnedMeshComponent.h"
+#include "SkinnedMeshComponentDelegates.h"
 #include "HAL/IConsoleManager.h"
 
 // CVar to toggle verbose debug logging
@@ -74,21 +76,25 @@ void UO3DSBroadcastComponent::BindToTarget()
         UE_LOG(LogO3DSBroadcast, Warning, TEXT("No TargetMesh set for UO3DSBroadcastComponent on %s"), *GetNameSafe(GetOwner()));
         return;
     }
-
-    if (USkinnedMeshComponent* Skinned = Cast<USkinnedMeshComponent>(TargetMesh.Get()))
+    // Subscribe to the global post-evaluation delegate and filter in the handler
+    if (!BoneTransformsFinalizedHandle.IsValid())
     {
-        // Bind to post-evaluation callback
-    Skinned->OnBoneTransformsFinalized.AddUObject(this, &UO3DSBroadcastComponent::HandleBoneTransformsFinalized);
-        EnsureSkeletonCache(TargetMesh.Get());
-        UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture bound to %s"), *GetNameSafe(TargetMesh.Get()));
+        BoneTransformsFinalizedHandle = FSkinnedMeshComponentDelegates::OnBoneTransformsFinalized.AddUObject(
+            this, &UO3DSBroadcastComponent::HandleBoneTransformsFinalized);
     }
+    EnsureSkeletonCache(TargetMesh.Get());
+    UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture bound to %s"), *GetNameSafe(TargetMesh.Get()));
 }
 
 void UO3DSBroadcastComponent::UnbindFromTarget()
 {
+    if (BoneTransformsFinalizedHandle.IsValid())
+    {
+        FSkinnedMeshComponentDelegates::OnBoneTransformsFinalized.Remove(BoneTransformsFinalizedHandle);
+        BoneTransformsFinalizedHandle.Reset();
+    }
     if (USkinnedMeshComponent* Skinned = TargetMesh.Get())
     {
-        Skinned->OnBoneTransformsFinalized.RemoveAll(this);
         UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture unbound from %s"), *GetNameSafe(Skinned));
     }
 }
@@ -155,6 +161,12 @@ void UO3DSBroadcastComponent::HandleBoneTransformsFinalized(USkinnedMeshComponen
 
     USkeletalMeshComponent* SkelComp = Cast<USkeletalMeshComponent>(SkinnedMesh);
     if (!SkelComp)
+    {
+        return;
+    }
+
+    // Only process events from our target mesh
+    if (TargetMesh.Get() != SkelComp)
     {
         return;
     }

@@ -56,4 +56,7 @@ private:
     bool bIsCapturing = false;
     double LastCaptureTime = 0.0;
     uint64 FrameCounter = 0;
+
+    // Handle for static delegate subscription (UE 5.6+)
+    FDelegateHandle BoneTransformsFinalizedHandle;
 };
