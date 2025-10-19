@@ -227,17 +227,11 @@ void UO3DSBroadcastComponent::CaptureCurves(USkeletalMeshComponent* SkelComp)
 
     const bool bDebugCurves = (CVarO3DSBroadcastDebugCurves.GetValueOnAnyThread() != 0);
 
-    // Fill values for morph targets first
+    // Initialize to 0.0; on some UE versions there is no public API to read raw morph weights by name.
+    // We'll rely on AnimInstance curves (which include morph target curves when driven by animation).
     for (int32 i = 0; i < CurveNames.Num(); ++i)
     {
-        const FName& Name = CurveNames[i];
-        float Value = 0.0f;
-        if (MorphNameSet.Contains(Name))
-        {
-            Value = SkelComp->GetMorphTargetWeight(Name);
-            Value = FMath::Clamp(Value, 0.0f, 1.0f);
-        }
-        CurveValues[i] = Value;
+        CurveValues[i] = 0.0f;
     }
 
     // Overlay with AnimInstance named curves for the same names if available
