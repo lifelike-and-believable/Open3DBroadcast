@@ -68,6 +68,8 @@ References
 
 • ProjectSandbox/README.md
 
+• Unreal Engine API Documentation: https://dev.epicgames.com/documentation/en-us/unreal-engine/API
+
 • UE 5.4 API: USkinnedMeshComponent::OnBoneTransformsFinalized (post-evaluation hook)
 
 Dependencies
