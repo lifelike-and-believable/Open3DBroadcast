@@ -10,12 +10,21 @@
 #include "AnimationRuntime.h"
 #include "Components/SkinnedMeshComponent.h"
 #include "HAL/IConsoleManager.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/MorphTarget.h"
 
 // CVar to toggle verbose debug logging
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugPose(
     TEXT("o3ds.Broadcast.DebugPose"),
     0,
     TEXT("Enable per-frame pose debug logging for Open3DBroadcast (0/1)."),
+    ECVF_Default);
+
+// CVar to toggle curve debug logging
+static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugCurves(
+    TEXT("o3ds.Broadcast.DebugCurves"),
+    0,
+    TEXT("Enable per-frame curve debug logging for Open3DBroadcast (0/1)."),
     ECVF_Default);
 
 UO3DSBroadcastComponent::UO3DSBroadcastComponent()
@@ -101,6 +110,8 @@ void UO3DSBroadcastComponent::EnsureSkeletonCache(USkeletalMeshComponent* SkelCo
     if (CachedSkeletalMesh.Get() != Mesh || CachedSkeleton.Get() != Skeleton)
     {
         RefreshSkeletonCache(SkelComp);
+        // Also refresh curve caches on mesh/skeleton change
+        bCurveCacheInitialized = false;
     }
 }
 
@@ -140,6 +151,97 @@ FString UO3DSBroadcastComponent::BuildSubjectName(const USkeletalMeshComponent* 
     const FString ActorName = SkelComp && SkelComp->GetOwner() ? SkelComp->GetOwner()->GetName() : TEXT("Actor");
     const FString CompName = SkelComp ? SkelComp->GetName() : TEXT("SkeletalMeshComponent");
     return FString::Printf(TEXT("%s/%s/%s"), *WorldName, *ActorName, *CompName);
+}
+
+void UO3DSBroadcastComponent::EnsureCurveCache(USkeletalMeshComponent* SkelComp)
+{
+    if (!bCurveCacheInitialized)
+    {
+        RefreshCurveCache(SkelComp);
+    }
+}
+
+void UO3DSBroadcastComponent::RefreshCurveCache(USkeletalMeshComponent* SkelComp)
+{
+    CurveNames.Reset();
+    CurveValues.Reset();
+    MorphNameSet.Reset();
+
+    if (!SkelComp)
+    {
+        bCurveCacheInitialized = true;
+        return;
+    }
+
+    // 1) Morph targets from skeletal mesh
+    if (USkeletalMesh* SkelMesh = SkelComp->GetSkeletalMeshAsset())
+    {
+        const TArray<UMorphTarget*>& Morphs = SkelMesh->GetMorphTargets();
+        CurveNames.Reserve(CurveNames.Num() + Morphs.Num());
+        for (UMorphTarget* MT : Morphs)
+        {
+            if (!MT) continue;
+            const FName Name = MT->GetFName();
+            MorphNameSet.Add(Name);
+            CurveNames.Add(Name);
+        }
+    }
+
+    // 2) Named animation curves from AnimInstance via discovered name strategy (lazy augment later)
+    if (USkeleton* Skel = CachedSkeleton.Get())
+    {
+        // Note: We avoid hard dependency on SmartName mapping iteration here to keep this minimal M1
+        // Strategy: Defer enumeration; values are captured by asking AnimInstance for existing CurveNames we know
+        // Future: Populate KnownAnimCurveNames via skeleton mapping when needed
+    }
+
+    CurveValues.SetNumZeroed(CurveNames.Num());
+    bCurveCacheInitialized = true;
+}
+
+void UO3DSBroadcastComponent::CaptureCurves(USkeletalMeshComponent* SkelComp)
+{
+    EnsureCurveCache(SkelComp);
+    if (!SkelComp)
+    {
+        return;
+    }
+
+    const bool bDebugCurves = (CVarO3DSBroadcastDebugCurves.GetValueOnAnyThread() != 0);
+
+    // Fill values for morph targets first
+    for (int32 i = 0; i < CurveNames.Num(); ++i)
+    {
+        const FName& Name = CurveNames[i];
+        float Value = 0.0f;
+        if (MorphNameSet.Contains(Name))
+        {
+            Value = SkelComp->GetMorphTargetWeight(Name);
+            Value = FMath::Clamp(Value, 0.0f, 1.0f);
+        }
+        CurveValues[i] = Value;
+    }
+
+    // Overlay with AnimInstance named curves for the same names if available
+    if (UAnimInstance* AnimInst = SkelComp->GetAnimInstance())
+    {
+        for (int32 i = 0; i < CurveNames.Num(); ++i)
+        {
+            const FName& Name = CurveNames[i];
+            const float V = AnimInst->GetCurveValue(Name);
+            // Pass-through by default; could clamp based on settings later
+            CurveValues[i] = V;
+        }
+    }
+
+    if (bDebugCurves)
+    {
+        const int32 LogCount = FMath::Min(5, CurveNames.Num());
+        for (int32 i = 0; i < LogCount; ++i)
+        {
+            UE_LOG(LogO3DSBroadcast, Verbose, TEXT("  Curve[%d] %s = %.4f"), i, *CurveNames[i].ToString(), CurveValues[i]);
+        }
+    }
 }
 
 void UO3DSBroadcastComponent::HandleBoneTransformsFinalized(USkinnedMeshComponent* SkinnedMesh, bool /*bRequiredBonesOnly*/)
@@ -218,6 +320,9 @@ void UO3DSBroadcastComponent::HandleBoneTransformsFinalized(USkinnedMeshComponen
                 i, *BoneNames[i].ToString(), ParentIdx, T.X, T.Y, T.Z, Q.X, Q.Y, Q.Z, Q.W, S.X, S.Y, S.Z);
         }
     }
+
+    // Capture curves after pose
+    CaptureCurves(SkelComp);
 }
 
 void UO3DSBroadcastComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
