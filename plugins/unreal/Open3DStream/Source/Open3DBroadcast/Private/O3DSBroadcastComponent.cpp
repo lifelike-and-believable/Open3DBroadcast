@@ -291,21 +291,15 @@ void UO3DSBroadcastComponent::CaptureCurves(USkeletalMeshComponent* SkelComp)
     }
 }
 
-void UO3DSBroadcastComponent::HandleBoneTransformsFinalized(USkinnedMeshComponent* SkinnedMesh)
+void UO3DSBroadcastComponent::HandleBoneTransformsFinalized()
 {
     if (!bIsCapturing)
     {
         return;
     }
 
-    USkeletalMeshComponent* SkelComp = Cast<USkeletalMeshComponent>(SkinnedMesh);
+    USkeletalMeshComponent* SkelComp = TargetMesh.Get();
     if (!SkelComp)
-    {
-        return;
-    }
-
-    // Only process events from our target mesh
-    if (TargetMesh.Get() != SkelComp)
     {
         return;
     }
