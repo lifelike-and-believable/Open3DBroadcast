@@ -67,6 +67,11 @@ M0 — Protocol and role alignment
 - Acceptance
   - Architecture notes added under docs/ (this file can be the anchor, plus a short mapping doc if needed).
   - LiveLink pairing is unambiguous for all supported transports.
+- **Issues Created**:
+  - [ISSUE_M0_1_PROTOCOL_ALIGNMENT.md](https://github.com/lifelike-and-believable/Open3DStream/blob/develop/ISSUE_M0_1_PROTOCOL_ALIGNMENT.md) - Protocol message types and versioning confirmation
+  - [ISSUE_M0_2_CURVE_SEMANTICS.md](https://github.com/lifelike-and-believable/Open3DStream/blob/develop/ISSUE_M0_2_CURVE_SEMANTICS.md) - Curve semantics and filtering rules
+  - [ISSUE_M0_3_TRANSFORM_SPACE.md](https://github.com/lifelike-and-believable/Open3DStream/blob/develop/ISSUE_M0_3_TRANSFORM_SPACE.md) - Transform space, coordinate system, and timing decisions
+  - [ISSUE_M0_4_TRANSPORT_ROLES.md](https://github.com/lifelike-and-believable/Open3DStream/blob/develop/ISSUE_M0_4_TRANSPORT_ROLES.md) - Transport role pairing documentation
 
 M1 — Single-mesh capture (Unreal)
 - Tasks
@@ -161,23 +166,33 @@ Issue generation guide (for maintainers and coding agents)
 - Dependencies
   - Use cross-links and convert tasks to sub-issues when granular work benefits parallelization.
 - Suggested seed issues
-  - M0: Protocol & Transport Role Mapping
-  - M1: Single-Mesh Pose Capture Module
-  - M1: Single-Mesh Curve Capture (Morph + Named Curves)
-  - M2: Serializer Integration + Round-trip Tests
-  - M3: Transport Interface + TCP Server
-  - M3: UDP Client Sender + Fragmentation Handling
-  - M3: NNG Publisher + Client/Server Modes
-  - M4: Multi-Subject Multiplex + Naming Scheme
-  - M5: Timecode + Frame Number Integration
-  - M5: Rate Control + Quantization + Threading
-  - M6: Editor UI + Config Assets/Settings
-  - M7: Reconnection + Skeleton Resend
-  - M7: Logging + Metrics + On-screen Debug
-  - M8: Example Map + Automation Tests
-  - M8: Docs Refresh + Troubleshooting
-  - M9: WebRTC Option in Broadcast UI (Optional/Beta)
-  - M9: Blueprint API (Optional)
+  - **M0 (✅ CREATED):**
+    - [ISSUE_M0_1_PROTOCOL_ALIGNMENT.md](https://github.com/lifelike-and-believable/Open3DStream/blob/develop/ISSUE_M0_1_PROTOCOL_ALIGNMENT.md) - Protocol & Message Types
+    - [ISSUE_M0_2_CURVE_SEMANTICS.md](https://github.com/lifelike-and-believable/Open3DStream/blob/develop/ISSUE_M0_2_CURVE_SEMANTICS.md) - Curve Semantics & Filtering
+    - [ISSUE_M0_3_TRANSFORM_SPACE.md](https://github.com/lifelike-and-believable/Open3DStream/blob/develop/ISSUE_M0_3_TRANSFORM_SPACE.md) - Transform Space & Timing
+    - [ISSUE_M0_4_TRANSPORT_ROLES.md](https://github.com/lifelike-and-believable/Open3DStream/blob/develop/ISSUE_M0_4_TRANSPORT_ROLES.md) - Transport Role Mapping
+  - **M1 (TODO):**
+    - Single-Mesh Pose Capture Module
+    - Single-Mesh Curve Capture (Morph + Named Curves)
+  - **M2 (TODO):** Serializer Integration + Round-trip Tests
+  - **M3 (TODO):**
+    - Transport Interface + TCP Server
+    - UDP Client Sender + Fragmentation Handling
+    - NNG Publisher + Client/Server Modes
+  - **M4 (TODO):** Multi-Subject Multiplex + Naming Scheme
+  - **M5 (TODO):**
+    - Timecode + Frame Number Integration
+    - Rate Control + Quantization + Threading
+  - **M6 (TODO):** Editor UI + Config Assets/Settings
+  - **M7 (TODO):**
+    - Reconnection + Skeleton Resend
+    - Logging + Metrics + On-screen Debug
+  - **M8 (TODO):**
+    - Example Map + Automation Tests
+    - Docs Refresh + Troubleshooting
+  - **M9 (TODO - Optional):**
+    - WebRTC Option in Broadcast UI (Optional/Beta)
+    - Blueprint API (Optional)
 
 Acceptance evidence patterns
 - Log parity: Printed transforms/curves match Anim Previewer/AnimBP at capture time.
@@ -228,3 +243,4 @@ Appendix: Quick transport role recipes
 
 Change log for this plan
 - v0.1: Initial plan aligned to repository transports (TCP/UDP/NNG), schema reuse, and Unreal plugin integration; WebRTC marked optional/beta.
+- v0.2: Added M0 issue documentation - created four detailed issue files (ISSUE_M0_1 through ISSUE_M0_4) covering protocol alignment, curve semantics, transform space, and transport role pairing.
