@@ -7,6 +7,8 @@
 #include "O3DSBroadcastComponent.generated.h"
 
 class USkeletalMeshComponent;
+class USkeleton;
+class USkeletalMesh;
 
 UCLASS(ClassGroup=(Open3DStream), meta=(BlueprintSpawnableComponent))
 class OPEN3DBROADCAST_API UO3DSBroadcastComponent : public UActorComponent
