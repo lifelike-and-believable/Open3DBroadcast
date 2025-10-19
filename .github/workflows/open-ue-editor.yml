@@ -1,0 +1,147 @@
+name: dev-open-ue-editor
+
+on:
+  workflow_dispatch:
+    inputs:
+      ue_path:
+        description: "Absolute path to the local Unreal Engine root (e.g., C:\\Program Files\\Epic Games\\UE_5.6 or /opt/Unreal/UE_5.6)"
+        required: true
+        type: string
+      project:
+        description: "Path to .uproject to open (relative to repo or absolute)"
+        required: false
+        default: "ProjectSandbox/ProjectSandbox.uproject"
+        type: string
+      map:
+        description: "Optional map to load (e.g., /Game/Maps/Example)"
+        required: false
+        default: ""
+        type: string
+      extra_args:
+        description: "Optional extra args to pass to UnrealEditor (e.g., -log -fullscreen)"
+        required: false
+        default: "-log"
+        type: string
+      detach:
+        description: "Start editor detached (do not wait for it to exit)"
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  open-windows:
+    name: Open Unreal Editor (Windows self-hosted)
+    runs-on: [self-hosted, Windows]
+    if: ${{ runner.os == 'Windows' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate UE path
+        shell: pwsh
+        run: |
+          $ue = "${{ inputs.ue_path }}".Trim('"','\'')
+          if (-not (Test-Path -LiteralPath $ue)) {
+            throw "UE path not found: $ue"
+          }
+          $exe = Join-Path -Path $ue -ChildPath "Engine\\Binaries\\Win64\\UnrealEditor.exe"
+          if (-not (Test-Path -LiteralPath $exe)) {
+            throw "UnrealEditor.exe not found under: $exe"
+          }
+          Write-Host "UE root: $ue"
+          Write-Host "Editor:  $exe"
+          echo "UE_EXE=$exe" >> $Env:GITHUB_ENV
+
+      - name: Resolve project path
+        shell: pwsh
+        run: |
+          $projInput = "${{ inputs.project }}".Trim('"','\'')
+          if (Test-Path -LiteralPath $projInput) {
+            $proj = (Resolve-Path -LiteralPath $projInput).Path
+          } elseif (Test-Path -LiteralPath (Join-Path $Env:GITHUB_WORKSPACE $projInput)) {
+            $proj = (Resolve-Path -LiteralPath (Join-Path $Env:GITHUB_WORKSPACE $projInput)).Path
+          } else {
+            throw "Project not found: $projInput"
+          }
+          Write-Host "Project: $proj"
+          echo "UE_PROJECT=$proj" >> $Env:GITHUB_ENV
+
+      - name: Launch Unreal Editor (detached or blocking)
+        shell: pwsh
+        run: |
+          $exe = $Env:UE_EXE
+          $proj = $Env:UE_PROJECT
+          $map  = "${{ inputs.map }}".Trim()
+          $args = "${{ inputs.extra_args }}".Trim()
+          $argList = @()
+          if ($proj -ne "") { $argList += '"' + $proj + '"' }
+          if ($map  -ne "") { $argList += $map }
+          if ($args -ne "") { $argList += $args }
+
+          if ([System.Convert]::ToBoolean("${{ inputs.detach }}")) {
+            Write-Host "Starting Editor detached..."
+            Start-Process -FilePath $exe -ArgumentList $argList | Out-Null
+          } else {
+            Write-Host "Starting Editor and waiting for exit..."
+            & $exe @argList
+          }
+
+  open-linux:
+    name: Open Unreal Editor (Linux self-hosted)
+    runs-on: [self-hosted, Linux]
+    if: ${{ runner.os == 'Linux' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate UE path and editor
+        shell: bash
+        run: |
+          ue="${{ inputs.ue_path }}"
+          ue=${ue%\' }
+          ue=${ue%"}
+          if [ ! -d "$ue" ]; then
+            echo "UE path not found: $ue" >&2
+            exit 1
+          fi
+          exe="$ue/Engine/Binaries/Linux/UnrealEditor"
+          if [ ! -x "$exe" ]; then
+            echo "UnrealEditor not found or not executable: $exe" >&2
+            exit 1
+          fi
+          echo "UE_EXE=$exe" >> "$GITHUB_ENV"
+
+      - name: Resolve project path
+        shell: bash
+        run: |
+          proj_input="${{ inputs.project }}"
+          if [ -f "$proj_input" ]; then
+            proj=$(realpath "$proj_input")
+          elif [ -f "$GITHUB_WORKSPACE/$proj_input" ]; then
+            proj=$(realpath "$GITHUB_WORKSPACE/$proj_input")
+          else
+            echo "Project not found: $proj_input" >&2
+            exit 1
+          fi
+          echo "UE_PROJECT=$proj" >> "$GITHUB_ENV"
+
+      - name: Launch Unreal Editor (detached or blocking)
+        shell: bash
+        run: |
+          exe="$UE_EXE"
+          proj="$UE_PROJECT"
+          map="${{ inputs.map }}"
+          extra="${{ inputs.extra_args }}"
+          args=()
+          [ -n "$proj" ] && args+=("$proj")
+          [ -n "$map" ] && args+=("$map")
+          [ -n "$extra" ] && args+=($extra)
+
+          if [ "${{ inputs.detach }}" = "true" ]; then
+            echo "Starting Editor detached..."
+            nohup "$exe" "${args[@]}" >/dev/null 2>&1 &
+            disown || true
+          else
+            echo "Starting Editor and waiting for exit..."
+            "$exe" "${args[@]}"
+          fi
