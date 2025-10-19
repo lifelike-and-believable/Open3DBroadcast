@@ -65,6 +65,7 @@ private:
     TArray<FName> CurveNames;          // Stable order: Morphs then Anim Curves
     TArray<float> CurveValues;         // Same length as CurveNames
     TSet<FName> MorphNameSet;          // For quick lookup when filling values
+    TSet<FName> CurveNameSet;          // To avoid duplicates across sources
     bool bCurveCacheInitialized = false;
 
     bool bIsCapturing = false;

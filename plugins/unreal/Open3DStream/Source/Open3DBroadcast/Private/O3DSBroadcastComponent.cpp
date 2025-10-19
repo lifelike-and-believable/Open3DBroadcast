@@ -12,6 +12,7 @@
 #include "HAL/IConsoleManager.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/MorphTarget.h"
+#include "Animation/SmartName.h"
 
 // CVar to toggle verbose debug logging
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugPose(
@@ -182,17 +183,33 @@ void UO3DSBroadcastComponent::RefreshCurveCache(USkeletalMeshComponent* SkelComp
         {
             if (!MT) continue;
             const FName Name = MT->GetFName();
-            MorphNameSet.Add(Name);
-            CurveNames.Add(Name);
+            if (!CurveNameSet.Contains(Name))
+            {
+                MorphNameSet.Add(Name);
+                CurveNames.Add(Name);
+                CurveNameSet.Add(Name);
+            }
         }
     }
 
-    // 2) Named animation curves from AnimInstance via discovered name strategy (lazy augment later)
+    // 2) Named animation curves from skeleton SmartName mapping
     if (USkeleton* Skel = CachedSkeleton.Get())
     {
-        // Note: We avoid hard dependency on SmartName mapping iteration here to keep this minimal M1
-        // Strategy: Defer enumeration; values are captured by asking AnimInstance for existing CurveNames we know
-        // Future: Populate KnownAnimCurveNames via skeleton mapping when needed
+        const FSmartNameMapping* Mapping = Skel->GetSmartNameContainer(USkeleton::AnimCurveMappingName);
+        if (Mapping)
+        {
+            TArray<FName> Names;
+            Mapping->FillNameArray(Names);
+            CurveNames.Reserve(CurveNames.Num() + Names.Num());
+            for (const FName& N : Names)
+            {
+                if (!CurveNameSet.Contains(N))
+                {
+                    CurveNames.Add(N);
+                    CurveNameSet.Add(N);
+                }
+            }
+        }
     }
 
     CurveValues.SetNumZeroed(CurveNames.Num());
