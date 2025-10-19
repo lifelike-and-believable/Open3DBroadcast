@@ -267,6 +267,9 @@ Always:
 - Build/CI: flags and deps documented; CI green across targets.
 - Performance: no significant regressions; logs are concise.
 
+## External References
+- Unreal Engine 5.6 APIs https://dev.epicgames.com/documentation/en-us/unreal-engine/API
+  
 ## General Programming Rules
 - Always refer to actual Unreal Engine APIs when writing code that interfaces with Unreal modules.
   - NEVER infer names or signatures from error logs.
