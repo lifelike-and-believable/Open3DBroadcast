@@ -5,6 +5,16 @@ on:
     branches:
       - 'copilot/**'          # Copilot's working branches iterate here
       - 'feature/**'          # Feature branches can also use this
+    paths-ignore:
+      # Skip builds on documentation-only commits
+      - '**/*.md'
+      - '**/*.rst'
+      - '**/*.txt'
+      - '**/*.adoc'
+      - '**/*.mdx'
+      - 'docs/**'
+      - 'sphinx/**'
+      - 'plugins/unreal/**/docs/**'
   workflow_dispatch:
   issue_comment:
     types: [created]
