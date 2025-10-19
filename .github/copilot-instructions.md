@@ -267,4 +267,6 @@ Always:
 - Build/CI: flags and deps documented; CI green across targets.
 - Performance: no significant regressions; logs are concise.
 
-If you want, I can generate stubs for the Open3DBroadcast Unreal module (headers, build.cs, and a minimal subsystem/component) and a quick guide map for testing.
+## Agent Idioms, Shorthand & Vernacular
+- The following are shorthand requests and their intended meanings
+  - pr-issue $ISSUE# should be interpreted as "read issue $ISSUE#, summarize and open a PR for it"
