@@ -9,8 +9,6 @@
 #include "Animation/Skeleton.h"
 #include "AnimationRuntime.h"
 #include "Components/SkinnedMeshComponent.h"
-#include "Components/SkinnedMeshComponent.h"
-#include "SkinnedMeshComponentDelegates.h"
 #include "HAL/IConsoleManager.h"
 
 // CVar to toggle verbose debug logging
@@ -22,7 +20,8 @@ static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugPose(
 
 UO3DSBroadcastComponent::UO3DSBroadcastComponent()
 {
-    PrimaryComponentTick.bCanEverTick = false; // capture via post-eval callback
+    PrimaryComponentTick.bCanEverTick = true; // we'll manually enable when capturing
+    SetComponentTickEnabled(false);
 }
 
 void UO3DSBroadcastComponent::BeginPlay()
@@ -57,6 +56,7 @@ void UO3DSBroadcastComponent::StartCapture()
     bIsCapturing = TargetMesh.IsValid();
     LastCaptureTime = 0.0;
     FrameCounter = 0;
+    SetComponentTickEnabled(bIsCapturing);
 }
 
 void UO3DSBroadcastComponent::StopCapture()
@@ -67,6 +67,7 @@ void UO3DSBroadcastComponent::StopCapture()
     }
     UnbindFromTarget();
     bIsCapturing = false;
+    SetComponentTickEnabled(false);
 }
 
 void UO3DSBroadcastComponent::BindToTarget()
@@ -76,23 +77,12 @@ void UO3DSBroadcastComponent::BindToTarget()
         UE_LOG(LogO3DSBroadcast, Warning, TEXT("No TargetMesh set for UO3DSBroadcastComponent on %s"), *GetNameSafe(GetOwner()));
         return;
     }
-    // Subscribe to the global post-evaluation delegate and filter in the handler
-    if (!BoneTransformsFinalizedHandle.IsValid())
-    {
-        BoneTransformsFinalizedHandle = FSkinnedMeshComponentDelegates::OnBoneTransformsFinalized.AddUObject(
-            this, &UO3DSBroadcastComponent::HandleBoneTransformsFinalized);
-    }
     EnsureSkeletonCache(TargetMesh.Get());
     UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture bound to %s"), *GetNameSafe(TargetMesh.Get()));
 }
 
 void UO3DSBroadcastComponent::UnbindFromTarget()
 {
-    if (BoneTransformsFinalizedHandle.IsValid())
-    {
-        FSkinnedMeshComponentDelegates::OnBoneTransformsFinalized.Remove(BoneTransformsFinalizedHandle);
-        BoneTransformsFinalizedHandle.Reset();
-    }
     if (USkinnedMeshComponent* Skinned = TargetMesh.Get())
     {
         UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture unbound from %s"), *GetNameSafe(Skinned));
@@ -228,4 +218,17 @@ void UO3DSBroadcastComponent::HandleBoneTransformsFinalized(USkinnedMeshComponen
                 i, *BoneNames[i].ToString(), ParentIdx, T.X, T.Y, T.Z, Q.X, Q.Y, Q.Z, Q.W, S.X, S.Y, S.Z);
         }
     }
+}
+
+void UO3DSBroadcastComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    if (!bIsCapturing || !TargetMesh.IsValid())
+    {
+        return;
+    }
+
+    // We depend on animation being evaluated earlier in the frame; use current evaluated transforms
+    HandleBoneTransformsFinalized(TargetMesh.Get(), /*bRequiredBonesOnly*/ false);
 }

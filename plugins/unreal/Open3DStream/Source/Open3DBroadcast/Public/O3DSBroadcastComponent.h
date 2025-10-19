@@ -37,6 +37,7 @@ public:
 protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
     void BindToTarget();
@@ -57,6 +58,6 @@ private:
     double LastCaptureTime = 0.0;
     uint64 FrameCounter = 0;
 
-    // Handle for static delegate subscription (UE 5.6+)
+    // Reserved for future delegate-based capture when available
     FDelegateHandle BoneTransformsFinalizedHandle;
 };
