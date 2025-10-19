@@ -50,11 +50,23 @@ private:
     void RefreshSkeletonCache(USkeletalMeshComponent* SkelComp);
     FString BuildSubjectName(const USkeletalMeshComponent* SkelComp) const;
 
+    // Curves (Morph + Named Anim Curves)
+    void EnsureCurveCache(USkeletalMeshComponent* SkelComp);
+    void RefreshCurveCache(USkeletalMeshComponent* SkelComp);
+    void CaptureCurves(USkeletalMeshComponent* SkelComp);
+
     // Cache
     TArray<FName> BoneNames;
     TArray<int32> ParentIndices;
     TWeakObjectPtr<USkeleton> CachedSkeleton;
     TWeakObjectPtr<USkeletalMesh> CachedSkeletalMesh;
+
+    // Curve cache and working buffers
+    TArray<FName> CurveNames;          // Stable order: Morphs then Anim Curves
+    TArray<float> CurveValues;         // Same length as CurveNames
+    TSet<FName> MorphNameSet;          // For quick lookup when filling values
+    TSet<FName> CurveNameSet;          // To avoid duplicates across sources
+    bool bCurveCacheInitialized = false;
 
     bool bIsCapturing = false;
     double LastCaptureTime = 0.0;

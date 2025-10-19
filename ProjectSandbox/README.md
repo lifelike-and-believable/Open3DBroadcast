@@ -75,7 +75,17 @@ Run automation tests using the provided script:
 
 1. Open `ProjectSandbox.uproject` in Unreal Editor
 2. The Open3DStream plugin will be loaded
-3. Test plugin functionality interactively
+3. Attach `UO3DSBroadcastComponent` to an actor with a SkeletalMeshComponent (or add via Blueprints)
+4. In the component, set `TargetMesh` if not auto-discovered; call `StartCapture()` (via Blueprint or details button if exposed)
+5. For transform debug, enable: `o3ds.Broadcast.DebugPose 1`
+6. For curve debug, enable: `o3ds.Broadcast.DebugCurves 1`
+7. Play in Editor (PIE) with an AnimBP that drives a few morph targets and named animation curves
+8. Observe Output Log:
+
+- Pose lines for a few bones each frame
+- Curve lines like: `Curve[i] Name = Value`
+
+1. Compare curve values against the Anim Previewer/AnimBP at the same time to verify correctness
 
 ## CI/CD Usage
 
@@ -91,6 +101,9 @@ See `.github/workflows/` for workflow configurations.
 
 - **Minimal Content**: This project contains minimal content to keep repository size small
 - **Engine Version**: Configured for UE 5.4 (update in .uproject if needed)
+- **Debugging CVars**:
+  - `o3ds.Broadcast.DebugPose` (0/1) logs a few parent-relative bone transforms
+  - `o3ds.Broadcast.DebugCurves` (0/1) logs a few curve names and values per frame
 - **No Game Code**: This is a plugin-only project with no custom game modules
 - **Git Ignored**: The `Plugins/` directory is git-ignored since it's a symlink
 
@@ -99,6 +112,7 @@ See `.github/workflows/` for workflow configurations.
 ### Plugin Not Found
 
 If the plugin doesn't appear:
+
 1. Run the Link script again
 2. Verify the symlink exists: `ProjectSandbox/Plugins/Open3DStream`
 3. Check that it points to `plugins/unreal/Open3DStream`
@@ -106,6 +120,7 @@ If the plugin doesn't appear:
 ### Build Errors
 
 If you get build errors:
+
 1. Ensure the plugin source is up to date
 2. Delete `Saved/`, `Intermediate/`, and `Binaries/` directories
 3. Re-run the Link script
@@ -114,5 +129,6 @@ If you get build errors:
 ### Version Mismatch
 
 If UE complains about version:
+
 1. Update `EngineAssociation` in `ProjectSandbox.uproject`
 2. Match it to your installed UE version (e.g., "5.4", "5.5")
