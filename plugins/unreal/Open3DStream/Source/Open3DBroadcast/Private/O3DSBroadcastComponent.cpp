@@ -272,32 +272,13 @@ void UO3DSBroadcastComponent::CaptureCurves(USkeletalMeshComponent* SkelComp)
     {
         CurveValues[i] = 0.0f;
     }
-
-    // 1) Read morph target weights directly when possible and clamp to [0,1]
-    if (USkeletalMesh* SkelMesh = SkelComp->GetSkeletalMeshAsset())
-    {
-        const TArray<UMorphTarget*>& Morphs = SkelMesh->GetMorphTargets();
-        // Build a quick map from name to weight read via component API
-        for (int32 i = 0; i < CurveNames.Num(); ++i)
-        {
-            const FName& Name = CurveNames[i];
-            if (MorphNameSet.Contains(Name))
-            {
-                // UE 5.6 API verified: USkeletalMeshComponent::GetMorphTargetWeight(FName) const -> float
-                const float RawWeight = SkelComp->GetMorphTargetWeight(Name);
-                CurveValues[i] = FMath::Clamp(RawWeight, 0.0f, 1.0f);
-            }
-        }
-    }
-
-    // 2) Overlay with AnimInstance named curves for the same names if available (Anim curves may drive morphs)
+    // Read named curves from AnimInstance (these include morph-driving curves when authored)
     if (UAnimInstance* AnimInst = SkelComp->GetAnimInstance())
     {
         for (int32 i = 0; i < CurveNames.Num(); ++i)
         {
             const FName& Name = CurveNames[i];
             const float V = AnimInst->GetCurveValue(Name);
-            // Last-writer-wins: AnimInstance values override morph weight reads
             CurveValues[i] = V;
         }
     }
