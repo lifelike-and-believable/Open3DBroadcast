@@ -5,16 +5,6 @@ on:
     branches:
       - 'copilot/**'          # Copilot's working branches iterate here
       - 'feature/**'          # Feature branches can also use this
-    paths-ignore:
-      # Skip builds on documentation-only commits
-      - '**/*.md'
-      - '**/*.rst'
-      - '**/*.txt'
-      - '**/*.adoc'
-      - '**/*.mdx'
-      - 'docs/**'
-      - 'sphinx/**'
-      - 'plugins/unreal/**/docs/**'
   workflow_dispatch:
   issue_comment:
     types: [created]
@@ -36,11 +26,40 @@ env:
   PLUGIN_NAME: 'Open3DStream'
 
 jobs:
+  changes:
+    name: Detect non-doc changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Filter paths (docs vs code)
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          filters: |
+            code:
+              - 'src/**'
+              - 'plugins/unreal/**'
+              - '.github/workflows/unreal-plugin-agent-ci.yml'
+              - '!**/*.md'
+              - '!**/*.rst'
+              - '!**/*.txt'
+              - '!docs/**'
+              - '!sphinx/**'
+              - '!plugins/unreal/**/docs/**'
+
   build_and_test:
+    needs: changes
     # Runs for pushes/workflow_dispatch, and also when a comment '/build' is created on a PR
     if: >-
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/build') && github.event.issue.pull_request != null)
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/build') && github.event.issue.pull_request != null) ||
+      (github.event_name == 'push' && needs.changes.outputs.code == 'true')
     # Use self-hosted runners with UE5 installed
     runs-on: [self-hosted, windows, ue5]
     # Alternative for GitHub-hosted: runs-on: windows-latest

@@ -3,31 +3,9 @@ name: Unreal Plugin CI
 on:
   pull_request:
     branches: [ develop, main ]
-    paths:
-      - 'plugins/unreal/**'
-      - 'src/**'
-      - '.github/workflows/unreal-plugin-ci.yml'
     types: [ opened, synchronize, ready_for_review ]
-    paths-ignore:
-      - '**/*.md'
-      - '**/*.rst'
-      - '**/*.txt'
-      - 'docs/**'
-      - 'sphinx/**'
-      - 'plugins/unreal/**/docs/**'
   push:
     branches: [ develop, main ]
-    paths:
-      - 'plugins/unreal/**'
-      - 'src/**'
-      - '.github/workflows/unreal-plugin-ci.yml'
-    paths-ignore:
-      - '**/*.md'
-      - '**/*.rst'
-      - '**/*.txt'
-      - 'docs/**'
-      - 'sphinx/**'
-      - 'plugins/unreal/**/docs/**'
   workflow_dispatch:
 
 permissions:
@@ -44,8 +22,38 @@ env:
   PLUGIN_NAME: 'Open3DStream'
 
 jobs:
+  changes:
+    name: Detect non-doc changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Filter paths (docs vs code)
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          filters: |
+            code:
+              - 'src/**'
+              - 'plugins/unreal/**'
+              - '.github/workflows/unreal-plugin-ci.yml'
+              - '!**/*.md'
+              - '!**/*.rst'
+              - '!**/*.txt'
+              - '!docs/**'
+              - '!sphinx/**'
+              - '!plugins/unreal/**/docs/**'
+
   build-and-test:
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs: changes
+    if: >-
+      (github.event_name == 'workflow_dispatch') ||
+      (needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false))
     runs-on: [ self-hosted, ue5, windows ]
 
     steps:
