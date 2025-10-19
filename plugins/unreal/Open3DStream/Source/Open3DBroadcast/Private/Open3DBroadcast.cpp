@@ -4,6 +4,8 @@
 
 #define LOCTEXT_NAMESPACE "FOpen3DBroadcastModule"
 
+DEFINE_LOG_CATEGORY(LogO3DSBroadcast);
+
 void FOpen3DBroadcastModule::StartupModule()
 {
 #if O3DS_WITH_BROADCAST

@@ -5,6 +5,8 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 
+DECLARE_LOG_CATEGORY_EXTERN(LogO3DSBroadcast, Log, All);
+
 class FOpen3DBroadcastModule : public IModuleInterface
 {
 public:

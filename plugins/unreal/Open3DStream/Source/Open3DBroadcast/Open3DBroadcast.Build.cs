@@ -43,7 +43,8 @@ public class Open3DBroadcast : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
-				"LiveLinkInterface"
+				"LiveLinkInterface",
+				"AnimGraphRuntime"
 			}
 			);
 				
