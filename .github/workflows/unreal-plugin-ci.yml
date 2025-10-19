@@ -39,15 +39,18 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           filters: |
             code:
+              # Core C++ library and build system that affect the plugin
               - 'src/**'
-              - 'plugins/unreal/**'
+              - 'thirdparty/**'
+              - 'Build/**'
+              - 'CMakeLists.txt'
+              - 'package.py'
+              - 'o3ds.fbs'
+              - 'src/o3ds_generated.h'
+              # Unreal plugin actual source and uplugin descriptor
+              - 'plugins/unreal/Open3DStream/Source/**'
+              - 'plugins/unreal/Open3DStream/*.uplugin'
               - '.github/workflows/unreal-plugin-ci.yml'
-              - '!**/*.md'
-              - '!**/*.rst'
-              - '!**/*.txt'
-              - '!docs/**'
-              - '!sphinx/**'
-              - '!plugins/unreal/**/docs/**'
 
   build-and-test:
     needs: changes
