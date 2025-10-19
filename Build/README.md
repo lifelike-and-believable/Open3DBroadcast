@@ -198,6 +198,29 @@ All workflows package the Open3DStream plugin for easy distribution.
 
 See `.github/workflows/` for workflow definitions.
 
+### Launch Unreal Editor on a self-hosted runner
+
+We provide a convenience workflow to open the Unreal Editor on a self-hosted machine—useful for local validation runs.
+
+- Workflow: `dev-open-ue-editor` (`.github/workflows/open-ue-editor.yml`)
+- Trigger: Manual (workflow_dispatch)
+- Inputs:
+  - `ue_path` (required): Absolute UE root (e.g., `C:\\Program Files\\Epic Games\\UE_5.6` or `/opt/Unreal/UE_5.6`)
+  - `project` (optional): Path to `.uproject` (default: `ProjectSandbox/ProjectSandbox.uproject`)
+  - `map` (optional): Map to load (e.g., `/Game/Maps/Example`)
+  - `extra_args` (optional): Editor CLI args (default: `-log`)
+  - `detach` (optional): Start detached (default: `true`)
+
+Requirements:
+- A self-hosted runner on the target machine with Unreal installed and a user session capable of launching GUI apps.
+- Windows and Linux are supported; macOS can be added similarly.
+
+Usage:
+1. In GitHub → Actions → `dev-open-ue-editor`, click “Run workflow”.
+2. Fill in `ue_path` and optionally override `project`, `map`, `extra_args`, or `detach`.
+3. Select the appropriate self-hosted runner and run.
+
+
 ## Platform Support
 
 | Script | Windows | Linux/Mac |
