@@ -91,7 +91,7 @@ void UO3DSBroadcastComponent::BindToTarget()
     {
         if (!BoneTransformsFinalizedHandle.IsValid())
         {
-            BoneTransformsFinalizedHandle = Skinned->OnBoneTransformsFinalized.AddUObject(this, &UO3DSBroadcastComponent::HandleBoneTransformsFinalized);
+            BoneTransformsFinalizedHandle = Skinned->OnBoneTransformsFinalizedMultiCast.AddUObject(this, &UO3DSBroadcastComponent::HandleBoneTransformsFinalized);
         }
     }
     UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture bound to %s"), *GetNameSafe(TargetMesh.Get()));
@@ -103,7 +103,7 @@ void UO3DSBroadcastComponent::UnbindFromTarget()
     {
         if (BoneTransformsFinalizedHandle.IsValid())
         {
-            Skinned->OnBoneTransformsFinalized.Remove(BoneTransformsFinalizedHandle);
+            Skinned->OnBoneTransformsFinalizedMultiCast.Remove(BoneTransformsFinalizedHandle);
             BoneTransformsFinalizedHandle.Reset();
         }
         UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture unbound from %s"), *GetNameSafe(Skinned));
