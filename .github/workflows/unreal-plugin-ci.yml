@@ -8,12 +8,26 @@ on:
       - 'src/**'
       - '.github/workflows/unreal-plugin-ci.yml'
     types: [ opened, synchronize, ready_for_review ]
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.rst'
+      - '**/*.txt'
+      - 'docs/**'
+      - 'sphinx/**'
+      - 'plugins/unreal/**/docs/**'
   push:
     branches: [ develop, main ]
     paths:
       - 'plugins/unreal/**'
       - 'src/**'
       - '.github/workflows/unreal-plugin-ci.yml'
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.rst'
+      - '**/*.txt'
+      - 'docs/**'
+      - 'sphinx/**'
+      - 'plugins/unreal/**/docs/**'
   workflow_dispatch:
 
 permissions:
@@ -26,19 +40,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Configure these for your environment
-  # For GitHub hosted runners or self-hosted, adjust accordingly
-  UE_ROOT: 'C:\Program Files\Epic Games\UE_5.6'
+  UE_ROOT: 'C:\\Program Files\\Epic Games\\UE_5.6'
   PLUGIN_NAME: 'Open3DStream'
 
 jobs:
   build-and-test:
-    # Skip PR runs when the PR is a draft; still allow push/manual triggers
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    # Use self-hosted runners with UE5 installed, or configure GitHub-hosted runners
-    # Change to 'windows-latest' if you set up UE on GitHub-hosted runners
     runs-on: [ self-hosted, ue5, windows ]
-    # Alternative: runs-on: windows-latest
 
     steps:
       - name: Checkout (full)
@@ -90,27 +98,6 @@ jobs:
           name: UnrealPlugins-Win64-${{ github.sha }}
           path: ${{ runner.temp }}/PluginPackage
           retention-days: 30
-
-      # Optional: Run automation tests
-      # Uncomment to enable
-      
-      # - name: Run Automation Tests
-      #   shell: powershell
-      #   timeout-minutes: 60
-      #   run: |
-      #     & .\Build\Scripts\Run-AutomationTests.ps1 `
-      #       -UEPath "$env:UE_ROOT" `
-      #       -ProjectFile "$PWD\ProjectSandbox\ProjectSandbox.uproject" `
-      #       -TestFilter "${{ steps.find.outputs.plugin_name }}.*" `
-      #       -ResultsDir "$env:RUNNER_TEMP\TestResults"
-
-      # - name: Upload test reports
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: TestReports-${{ github.sha }}
-      #     path: ${{ runner.temp }}/TestResults
-      #     if-no-files-found: ignore
-      #     retention-days: 30
 
       - name: Post build completed comment
         if: github.event_name == 'pull_request' && github.event.pull_request.number != null && success()
