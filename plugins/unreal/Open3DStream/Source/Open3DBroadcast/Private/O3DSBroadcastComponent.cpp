@@ -1,14 +1,13 @@
 // Copyright (c) Open3DStream Contributors
 
 #include "O3DSBroadcastComponent.h"
+#include "Open3DBroadcast.h" // for LogO3DSBroadcast category declaration
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/Skeleton.h"
 #include "AnimationRuntime.h"
-#include "SkinnedMeshComponent.h"
-
-DEFINE_LOG_CATEGORY_STATIC(LogO3DSBroadcast, Log, All);
+#include "Components/SkinnedMeshComponent.h"
 
 // CVar to toggle verbose debug logging
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugPose(
