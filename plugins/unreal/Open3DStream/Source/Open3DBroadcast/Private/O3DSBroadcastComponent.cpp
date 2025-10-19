@@ -93,13 +93,7 @@ void UO3DSBroadcastComponent::BindToTarget()
     {
         if (!BoneTransformsFinalizedHandle.IsValid())
         {
-#if defined(ENGINE_MAJOR_VERSION) && defined(ENGINE_MINOR_VERSION) && ((ENGINE_MAJOR_VERSION > 5) || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6))
-            USkinnedMeshComponent::FOnBoneTransformsFinalized::FDelegate Delegate;
-            Delegate.BindUObject(this, &UO3DSBroadcastComponent::HandleBoneTransformsFinalized);
-            BoneTransformsFinalizedHandle = Skinned->RegisterOnBoneTransformsFinalizedDelegate(Delegate);
-#else
             BoneTransformsFinalizedHandle = Skinned->OnBoneTransformsFinalized.AddUObject(this, &UO3DSBroadcastComponent::HandleBoneTransformsFinalized);
-#endif
         }
     }
     UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture bound to %s"), *GetNameSafe(TargetMesh.Get()));
@@ -109,13 +103,9 @@ void UO3DSBroadcastComponent::UnbindFromTarget()
 {
     if (USkinnedMeshComponent* Skinned = TargetMesh.Get())
     {
-        if (BoneTransformsFinalizedHandle.IsValid())
-        {
-#if defined(ENGINE_MAJOR_VERSION) && defined(ENGINE_MINOR_VERSION) && ((ENGINE_MAJOR_VERSION > 5) || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6))
-            Skinned->UnregisterOnBoneTransformsFinalizedDelegate(BoneTransformsFinalizedHandle);
-#else
+    if (BoneTransformsFinalizedHandle.IsValid())
+    {
             Skinned->OnBoneTransformsFinalized.Remove(BoneTransformsFinalizedHandle);
-#endif
             BoneTransformsFinalizedHandle.Reset();
         }
         UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture unbound from %s"), *GetNameSafe(Skinned));
