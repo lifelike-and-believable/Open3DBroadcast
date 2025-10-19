@@ -93,9 +93,9 @@ void UO3DSBroadcastComponent::BindToTarget()
     {
         if (!BoneTransformsFinalizedHandle.IsValid())
         {
-            BoneTransformsFinalizedHandle = Skinned->RegisterOnBoneTransformsFinalizedDelegate(
-                USkinnedMeshComponent::FOnBoneTransformsFinalized::FDelegate::CreateUObject(
-                    this, &UO3DSBroadcastComponent::HandleBoneTransformsFinalized));
+            USkinnedMeshComponent::FOnBoneTransformsFinalized::FDelegate Delegate;
+            Delegate.BindUObject(this, &UO3DSBroadcastComponent::HandleBoneTransformsFinalized);
+            BoneTransformsFinalizedHandle = Skinned->RegisterOnBoneTransformsFinalizedDelegate(Delegate);
         }
     }
     UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture bound to %s"), *GetNameSafe(TargetMesh.Get()));
