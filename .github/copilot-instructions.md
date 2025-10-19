@@ -267,6 +267,11 @@ Always:
 - Build/CI: flags and deps documented; CI green across targets.
 - Performance: no significant regressions; logs are concise.
 
+## General Programming Rules
+- Always refer to actual Unreal Engine APIs when writing code that interfaces with Unreal modules.
+  - NEVER infer names or signatures from error logs.
+  - NEVER make assumptions about names or signatures based on usage.
+
 ## Agent Idioms, Shorthand & Vernacular
 - The following are shorthand requests and their intended meanings
   - pr-issue $ISSUE# should be interpreted as "read issue $ISSUE#, summarize and open a PR for it"
