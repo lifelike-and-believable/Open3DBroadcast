@@ -31,6 +31,7 @@ static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugCurves(
 UO3DSBroadcastComponent::UO3DSBroadcastComponent()
 {
     PrimaryComponentTick.bCanEverTick = true; // we'll manually enable when capturing
+    PrimaryComponentTick.TickGroup = TG_PostUpdateWork; // run after animation evaluation
     SetComponentTickEnabled(false);
 }
 
@@ -88,28 +89,13 @@ void UO3DSBroadcastComponent::BindToTarget()
         return;
     }
     EnsureSkeletonCache(TargetMesh.Get());
-    // Bind to post-evaluation delegate so we sample after the pose is finalized
-    if (USkinnedMeshComponent* Skinned = TargetMesh.Get())
-    {
-        if (!BoneTransformsFinalizedHandle.IsValid())
-        {
-            BoneTransformsFinalizedHandle = Skinned->OnBoneTransformsFinalized.AddUObject(this, &UO3DSBroadcastComponent::HandleBoneTransformsFinalized);
-        }
-    }
-    UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture bound to %s"), *GetNameSafe(TargetMesh.Get()));
+    // No delegate binding; we sample in Tick at TG_PostUpdateWork to ensure post-evaluation timing
+    UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture armed for %s (Tick-based post-eval)"), *GetNameSafe(TargetMesh.Get()));
 }
 
 void UO3DSBroadcastComponent::UnbindFromTarget()
 {
-    if (USkinnedMeshComponent* Skinned = TargetMesh.Get())
-    {
-    if (BoneTransformsFinalizedHandle.IsValid())
-    {
-            Skinned->OnBoneTransformsFinalized.Remove(BoneTransformsFinalizedHandle);
-            BoneTransformsFinalizedHandle.Reset();
-        }
-        UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture unbound from %s"), *GetNameSafe(Skinned));
-    }
+    UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture disarmed for %s"), *GetNameSafe(TargetMesh.Get()));
 }
 
 void UO3DSBroadcastComponent::EnsureSkeletonCache(USkeletalMeshComponent* SkelComp)
@@ -382,5 +368,71 @@ void UO3DSBroadcastComponent::TickComponent(float DeltaTime, ELevelTick TickType
     {
         return;
     }
-    // Delegate will call HandleBoneTransformsFinalized at the correct time.
+    // Sample after evaluation due to TickGroup = TG_PostUpdateWork
+    USkeletalMeshComponent* SkelComp = TargetMesh.Get();
+    if (!SkelComp)
+    {
+        return;
+    }
+
+    EnsureSkeletonCache(SkelComp);
+
+    // Optional rate limiting
+    if (CaptureRateHz > 0.0f)
+    {
+        const double Now = FPlatformTime::Seconds();
+        const double MinDelta = 1.0 / FMath::Max(1.0f, CaptureRateHz);
+        if ((Now - LastCaptureTime) < MinDelta)
+        {
+            return;
+        }
+        LastCaptureTime = Now;
+    }
+
+    const TArray<FTransform>& CompSpace = SkelComp->GetComponentSpaceTransforms();
+    const int32 Count = CompSpace.Num();
+
+    // Guard: ensure names/parents align length-wise; if mismatch, refresh cache and clamp
+    if (Count != BoneNames.Num())
+    {
+        RefreshSkeletonCache(SkelComp);
+    }
+
+    const int32 N = FMath::Min(Count, BoneNames.Num());
+    const FString Subject = BuildSubjectName(SkelComp);
+
+    const bool bDebug = (CVarO3DSBroadcastDebugPose.GetValueOnAnyThread() != 0);
+    if (bDebug)
+    {
+        UE_LOG(LogO3DSBroadcast, Log, TEXT("[O3DS] Pose #%llu Subject=%s Bones=%d"), (unsigned long long)++FrameCounter, *Subject, N);
+    }
+
+    // Log first few bones for verification (component-space parent-relative per M0.3)
+    const int32 LogCount = bDebug ? FMath::Min(5, N) : 0;
+    for (int32 i = 0; i < N; ++i)
+    {
+        const int32 ParentIdx = (i < ParentIndices.Num()) ? ParentIndices[i] : INDEX_NONE;
+        const FTransform& ThisCS = CompSpace[i];
+        FTransform Rel;
+        if (ParentIdx >= 0 && ParentIdx < CompSpace.Num())
+        {
+            Rel = ThisCS.GetRelativeTransform(CompSpace[ParentIdx]);
+        }
+        else
+        {
+            Rel = ThisCS; // root relative to component origin
+        }
+
+        if (i < LogCount)
+        {
+            const FVector T = Rel.GetTranslation();
+            const FQuat Q = Rel.GetRotation().GetNormalized();
+            const FVector S = Rel.GetScale3D();
+            UE_LOG(LogO3DSBroadcast, Verbose, TEXT("  [%d] %s p=%d T(%.2f,%.2f,%.2f) Q(%.3f,%.3f,%.3f,%.3f) S(%.2f,%.2f,%.2f)"),
+                i, *BoneNames[i].ToString(), ParentIdx, T.X, T.Y, T.Z, Q.X, Q.Y, Q.Z, Q.W, S.X, S.Y, S.Z);
+        }
+    }
+
+    // Capture curves after pose
+    CaptureCurves(SkelComp);
 }
