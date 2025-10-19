@@ -41,7 +41,7 @@ protected:
 private:
     void BindToTarget();
     void UnbindFromTarget();
-    void HandleBoneTransformsFinalized(USkinnedMeshComponent* SkinnedMesh);
+    void HandleBoneTransformsFinalized(USkinnedMeshComponent* SkinnedMesh, bool bRequiredBonesOnly);
 
     void EnsureSkeletonCache(USkeletalMeshComponent* SkelComp);
     void RefreshSkeletonCache(USkeletalMeshComponent* SkelComp);

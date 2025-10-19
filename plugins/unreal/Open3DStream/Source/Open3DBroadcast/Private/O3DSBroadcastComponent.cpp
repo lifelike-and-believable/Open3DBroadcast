@@ -5,9 +5,11 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
 #include "Animation/Skeleton.h"
 #include "AnimationRuntime.h"
 #include "Components/SkinnedMeshComponent.h"
+#include "HAL/IConsoleManager.h"
 
 // CVar to toggle verbose debug logging
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugPose(
@@ -76,7 +78,7 @@ void UO3DSBroadcastComponent::BindToTarget()
     if (USkinnedMeshComponent* Skinned = Cast<USkinnedMeshComponent>(TargetMesh.Get()))
     {
         // Bind to post-evaluation callback
-        Skinned->OnBoneTransformsFinalized.AddUObject(this, &UO3DSBroadcastComponent::HandleBoneTransformsFinalized);
+    Skinned->OnBoneTransformsFinalized.AddUObject(this, &UO3DSBroadcastComponent::HandleBoneTransformsFinalized);
         EnsureSkeletonCache(TargetMesh.Get());
         UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture bound to %s"), *GetNameSafe(TargetMesh.Get()));
     }
@@ -144,7 +146,7 @@ FString UO3DSBroadcastComponent::BuildSubjectName(const USkeletalMeshComponent* 
     return FString::Printf(TEXT("%s/%s/%s"), *WorldName, *ActorName, *CompName);
 }
 
-void UO3DSBroadcastComponent::HandleBoneTransformsFinalized(USkinnedMeshComponent* SkinnedMesh)
+void UO3DSBroadcastComponent::HandleBoneTransformsFinalized(USkinnedMeshComponent* SkinnedMesh, bool /*bRequiredBonesOnly*/)
 {
     if (!bIsCapturing)
     {
