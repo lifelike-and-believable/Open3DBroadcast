@@ -167,6 +167,7 @@ void UO3DSBroadcastComponent::RefreshCurveCache(USkeletalMeshComponent* SkelComp
     CurveNames.Reset();
     CurveValues.Reset();
     MorphNameSet.Reset();
+    CurveNameSet.Reset();
 
     if (!SkelComp)
     {
