@@ -274,6 +274,7 @@ Always:
 - Always refer to actual Unreal Engine APIs when writing code that interfaces with Unreal modules.
   - NEVER infer names or signatures from error logs.
   - NEVER make assumptions about names or signatures based on usage.
+- Always open a PR for an assigned issue before beginning work on it.
 
 ## Agent Idioms, Shorthand & Vernacular
 - The following are shorthand requests and their intended meanings
