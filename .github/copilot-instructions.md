@@ -9,6 +9,8 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 
 - **Source of truth:** This document. Any ambiguity must be resolved by updating this doc first, then implementing.
 - **UE API accuracy:** Verify all Unreal API signatures against **UE 5.6** documentation before use. Do not “best guess.”
+  - https://dev.epicgames.com/documentation/en-us/unreal-engine/API (direct URL)
+  - "Unreal Engine C++ API Reference" + class name(s) (web search). 
 - **Determinism first:** Prefer predictable behavior over opportunistic performance wins unless performance is a stated acceptance criterion.
 - **Small steps:** Break work into small, testable tasks. Each PR should do one thing well, with passing checks and updated docs.
 
@@ -143,7 +145,7 @@ When modifying `.fbs` or any on‑wire schema:
 
 ## 12) Local Verification (Smoke Tests)
 
-Before opening a PR, you must verify locally:
+When local verification is possible, do the following before opening a PR:
 
 - **Two‑UE WebRTC smoke test** shows motion parity within **±1 frame** (±16.6 ms @ 60 fps).
 - **TCP fallback test** transmits **≥ 300** consecutive frames with **zero** schema/subject mismatches.

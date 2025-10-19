@@ -88,6 +88,14 @@ void UO3DSBroadcastComponent::BindToTarget()
         return;
     }
     EnsureSkeletonCache(TargetMesh.Get());
+    // Bind to post-evaluation delegate so we sample after the pose is finalized
+    if (USkinnedMeshComponent* Skinned = TargetMesh.Get())
+    {
+        if (!BoneTransformsFinalizedHandle.IsValid())
+        {
+            BoneTransformsFinalizedHandle = Skinned->OnBoneTransformsFinalized.AddUObject(this, &UO3DSBroadcastComponent::HandleBoneTransformsFinalized);
+        }
+    }
     UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture bound to %s"), *GetNameSafe(TargetMesh.Get()));
 }
 
@@ -95,6 +103,11 @@ void UO3DSBroadcastComponent::UnbindFromTarget()
 {
     if (USkinnedMeshComponent* Skinned = TargetMesh.Get())
     {
+        if (BoneTransformsFinalizedHandle.IsValid())
+        {
+            Skinned->OnBoneTransformsFinalized.Remove(BoneTransformsFinalizedHandle);
+            BoneTransformsFinalizedHandle.Reset();
+        }
         UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture unbound from %s"), *GetNameSafe(Skinned));
     }
 }
@@ -151,7 +164,34 @@ FString UO3DSBroadcastComponent::BuildSubjectName(const USkeletalMeshComponent* 
     const FString WorldName = World ? World->GetName() : TEXT("World");
     const FString ActorName = SkelComp && SkelComp->GetOwner() ? SkelComp->GetOwner()->GetName() : TEXT("Actor");
     const FString CompName = SkelComp ? SkelComp->GetName() : TEXT("SkeletalMeshComponent");
-    return FString::Printf(TEXT("%s/%s/%s"), *WorldName, *ActorName, *CompName);
+    const FString Raw = FString::Printf(TEXT("%s/%s/%s"), *WorldName, *ActorName, *CompName);
+    return SanitizeSubjectName(Raw);
+}
+
+FString UO3DSBroadcastComponent::SanitizeSubjectName(const FString& Raw) const
+{
+    // Replace whitespace with underscore
+    FString Out = Raw;
+    Out = Out.Replace(TEXT(" "), TEXT("_"));
+
+    // Remove characters not in [-._A-Za-z0-9/]
+    // Build allowed set and remove others by iterating
+    FString Result;
+    Result.Reserve(Out.Len());
+    for (int32 i = 0; i < Out.Len(); ++i)
+    {
+        TCHAR C = Out[i];
+        bool bAllow = false;
+        if ((C >= 'A' && C <= 'Z') || (C >= 'a' && C <= 'z') || (C >= '0' && C <= '9'))
+            bAllow = true;
+        else if (C == '-' || C == '.' || C == '_' || C == '/')
+            bAllow = true;
+
+        if (bAllow)
+            Result.AppendChar(C);
+        // else drop
+    }
+    return Result;
 }
 
 void UO3DSBroadcastComponent::EnsureCurveCache(USkeletalMeshComponent* SkelComp)
@@ -227,21 +267,37 @@ void UO3DSBroadcastComponent::CaptureCurves(USkeletalMeshComponent* SkelComp)
 
     const bool bDebugCurves = (CVarO3DSBroadcastDebugCurves.GetValueOnAnyThread() != 0);
 
-    // Initialize to 0.0; on some UE versions there is no public API to read raw morph weights by name.
-    // We'll rely on AnimInstance curves (which include morph target curves when driven by animation).
+    // Initialize to 0.0
     for (int32 i = 0; i < CurveNames.Num(); ++i)
     {
         CurveValues[i] = 0.0f;
     }
 
-    // Overlay with AnimInstance named curves for the same names if available
+    // 1) Read morph target weights directly when possible and clamp to [0,1]
+    if (USkeletalMesh* SkelMesh = SkelComp->GetSkeletalMeshAsset())
+    {
+        const TArray<UMorphTarget*>& Morphs = SkelMesh->GetMorphTargets();
+        // Build a quick map from name to weight read via component API
+        for (int32 i = 0; i < CurveNames.Num(); ++i)
+        {
+            const FName& Name = CurveNames[i];
+            if (MorphNameSet.Contains(Name))
+            {
+                // UE 5.6 API verified: USkeletalMeshComponent::GetMorphTargetWeight(FName) const -> float
+                const float RawWeight = SkelComp->GetMorphTargetWeight(Name);
+                CurveValues[i] = FMath::Clamp(RawWeight, 0.0f, 1.0f);
+            }
+        }
+    }
+
+    // 2) Overlay with AnimInstance named curves for the same names if available (Anim curves may drive morphs)
     if (UAnimInstance* AnimInst = SkelComp->GetAnimInstance())
     {
         for (int32 i = 0; i < CurveNames.Num(); ++i)
         {
             const FName& Name = CurveNames[i];
             const float V = AnimInst->GetCurveValue(Name);
-            // Pass-through by default; could clamp based on settings later
+            // Last-writer-wins: AnimInstance values override morph weight reads
             CurveValues[i] = V;
         }
     }
@@ -345,7 +401,5 @@ void UO3DSBroadcastComponent::TickComponent(float DeltaTime, ELevelTick TickType
     {
         return;
     }
-
-    // We depend on animation being evaluated earlier in the frame; use current evaluated transforms
-    HandleBoneTransformsFinalized(TargetMesh.Get(), /*bRequiredBonesOnly*/ false);
+    // Delegate will call HandleBoneTransformsFinalized at the correct time.
 }
