@@ -56,6 +56,8 @@ References
 
 • ProjectSandbox/README.md
 
+• Unreal Engine API Documentation: https://dev.epicgames.com/documentation/en-us/unreal-engine/API
+
 Dependencies
 
 • ISSUE_M1_1_SINGLE_MESH_POSE_CAPTURE.md — share lifecycle and timing hook for synchronized capture.
