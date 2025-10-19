@@ -58,6 +58,8 @@ Architecture and rules of engagement
 Milestones, tasks, and acceptance criteria
 Each task is designed to be a standalone issue with clear deliverables.
 
+For a step-by-step M1 validation walkthrough, see: [M1_TEST_GUIDE.md](./M1_TEST_GUIDE.md)
+
 M0 — Protocol and role alignment
 - Tasks
   - Confirm message types and versioning from src/o3ds.fbs and model APIs for skeleton descriptions, transforms, curves.
