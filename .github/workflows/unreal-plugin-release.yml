@@ -125,7 +125,7 @@ jobs:
           $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
           $sourcePluginDir = "plugins\unreal\$env:PLUGIN_NAME"
           $sourceThirdParty = Join-Path $sourcePluginDir "ThirdParty"
-          $targetThirdParty = Join-Path $pkg "$env:PLUGIN_NAME\ThirdParty"
+          $targetThirdParty = Join-Path $pkg "ThirdParty"
           
           Write-Host "Copying ThirdParty folder to packaged plugin..."
           Write-Host "  Source: $sourceThirdParty"
