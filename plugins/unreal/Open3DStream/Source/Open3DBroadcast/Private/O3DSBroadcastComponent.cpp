@@ -14,6 +14,8 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimCurveTypes.h"
 #include "Animation/MorphTarget.h"
+#include "Animation/NamedValueArray.h"
+#include <limits>
 
 // CVar to toggle verbose debug logging
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugPose(
@@ -293,6 +295,8 @@ void UO3DSBroadcastComponent::RefreshCurveCache(USkeletalMeshComponent* SkelComp
 {
     CurveNames.Reset();
     CurveValues.Reset();
+    LastSentCurveValues.Reset();
+    LastSentHasValue.Reset();
     MorphNameSet.Reset();
     CurveNameSet.Reset();
 
@@ -302,8 +306,11 @@ void UO3DSBroadcastComponent::RefreshCurveCache(USkeletalMeshComponent* SkelComp
         return;
     }
 
-    // 1) Morph targets from skeletal mesh
-    if (USkeletalMesh* SkelMesh = SkelComp->GetSkeletalMeshAsset())
+    USkeletalMesh* SkelMesh = SkelComp->GetSkeletalMeshAsset();
+    USkeleton* Skeleton = SkelMesh ? SkelMesh->GetSkeleton() : nullptr;
+
+    // 1) Morph targets from skeletal mesh (also tracked for clamp-to-unit)
+    if (SkelMesh)
     {
         const TArray<UMorphTarget*>& Morphs = SkelMesh->GetMorphTargets();
         CurveNames.Reserve(CurveNames.Num() + Morphs.Num());
@@ -320,65 +327,41 @@ void UO3DSBroadcastComponent::RefreshCurveCache(USkeletalMeshComponent* SkelComp
         }
     }
 
-    // 2) Named animation curves — preferred, forward-compatible path: query from evaluated AnimInstance
-    if (SkelComp)
+    // 2) All named animation curves declared on the skeleton (attribute/material/morph metadata)
+    if (Skeleton)
     {
-        UAnimInstance* SourceAnim = SkelComp->GetPostProcessInstance();
-        if (!SourceAnim)
+        TArray<FName> SkeletonCurveNames;
+        Skeleton->GetCurveMetaDataNames(SkeletonCurveNames);
+
+        CurveNames.Reserve(CurveNames.Num() + SkeletonCurveNames.Num());
+        for (const FName& N : SkeletonCurveNames)
         {
-            SourceAnim = SkelComp->GetAnimInstance();
+            if (N != NAME_None && !CurveNameSet.Contains(N))
+            {
+                CurveNames.Add(N);
+                CurveNameSet.Add(N);
+            }
         }
+    }
 
-        if (SourceAnim)
+    // Optional: Apply include/exclude name patterns to the descriptor itself so index set is stable and predictable.
+    if (IncludeCurvePatterns.Num() > 0 || ExcludeCurvePatterns.Num() > 0)
+    {
+        TArray<FName> Filtered;
+        Filtered.Reserve(CurveNames.Num());
+        for (const FName& N : CurveNames)
         {
-            // Collect attribute/material/morph curve names known to this instance
-            TArray<FName> Names;
-
-            // Attribute curves
+            if (IsCurveAllowedByPatterns(N))
             {
-                TMap<FName, float> AttrCurves;
-                SourceAnim->AppendAnimationCurveList(EAnimCurveType::AttributeCurve, AttrCurves);
-                if (!AttrCurves.IsEmpty())
-                {
-                    TArray<FName> AttrKeys;
-                    AttrCurves.GetKeys(AttrKeys);
-                    Names.Append(AttrKeys);
-                }
+                Filtered.Add(N);
             }
-
-            // Material curves (if any)
-            {
-                TMap<FName, float> MaterialCurves;
-                SourceAnim->AppendAnimationCurveList(EAnimCurveType::MaterialCurve, MaterialCurves);
-                if (!MaterialCurves.IsEmpty())
-                {
-                    TArray<FName> MaterialKeys;
-                    MaterialCurves.GetKeys(MaterialKeys);
-                    Names.Append(MaterialKeys);
-                }
-            }
-
-            // Morph target curves (when authored as anim curves)
-            {
-                TMap<FName, float> MorphCurves;
-                SourceAnim->AppendAnimationCurveList(EAnimCurveType::MorphTargetCurve, MorphCurves);
-                if (!MorphCurves.IsEmpty())
-                {
-                    TArray<FName> MorphKeys;
-                    MorphCurves.GetKeys(MorphKeys);
-                    Names.Append(MorphKeys);
-                }
-            }
-
-            CurveNames.Reserve(CurveNames.Num() + Names.Num());
-            for (const FName& N : Names)
-            {
-                if (!CurveNameSet.Contains(N))
-                {
-                    CurveNames.Add(N);
-                    CurveNameSet.Add(N);
-                }
-            }
+        }
+        CurveNames = MoveTemp(Filtered);
+        // Rebuild set after filtering
+        CurveNameSet.Reset();
+        for (const FName& N : CurveNames)
+        {
+            CurveNameSet.Add(N);
         }
     }
 
@@ -389,6 +372,8 @@ void UO3DSBroadcastComponent::RefreshCurveCache(USkeletalMeshComponent* SkelComp
     });
 
     CurveValues.SetNumZeroed(CurveNames.Num());
+    LastSentCurveValues.SetNumZeroed(CurveNames.Num());
+    LastSentHasValue.SetNumZeroed(CurveNames.Num());
     bCurveCacheInitialized = true;
 }
 
@@ -407,26 +392,40 @@ void UO3DSBroadcastComponent::CaptureCurves(USkeletalMeshComponent* SkelComp)
     {
         CurveValues[i] = 0.0f;
     }
-    // Read named curves from the FINAL anim instance: prefer PostProcess instance if present
-    UAnimInstance* SourceAnim = nullptr;
-    if (USkeletalMeshComponent* SMC = SkelComp)
-    {
-        // UE 5.x: Post-process anim instance runs after the main graph
-        SourceAnim = SMC->GetPostProcessInstance();
-        if (!SourceAnim)
-        {
-            SourceAnim = SMC->GetAnimInstance();
-        }
-    }
 
-    if (SourceAnim)
+    // Snapshot of component-level morph overrides so we can detect if an override exists (even if its value is 0)
+    const TMap<FName, float>& MorphOverrides = SkelComp->GetMorphTargetCurves();
+
+    // Fill values strictly from the component (predictable, post-eval state). No AnimInstance fallback.
+    for (int32 i = 0; i < CurveNames.Num(); ++i)
     {
-        for (int32 i = 0; i < CurveNames.Num(); ++i)
+        const FName& Name = CurveNames[i];
+        float V = 0.0f;
+
+        // Prefer explicit morph overrides stored on the component
+        if (MorphNameSet.Contains(Name))
         {
-            const FName& Name = CurveNames[i];
-            const float V = SourceAnim->GetCurveValue(Name);
-            CurveValues[i] = V;
+            if (const float* Override = MorphOverrides.Find(Name))
+            {
+                V = *Override;
+                CurveValues[i] = V;
+                continue;
+            }
         }
+
+        // Component's final blended curves (valid after evaluation)
+        float OutVal = 0.0f;
+        if (SkelComp->GetCurveValue(Name, 0.0f, OutVal))
+        {
+            V = OutVal;
+        }
+        else if (MorphNameSet.Contains(Name))
+        {
+            // For morphs without an explicit override map entry, query current morph value as fallback on the component
+            V = SkelComp->GetMorphTarget(Name);
+        }
+
+        CurveValues[i] = V;
     }
 
     if (bDebugCurves)
@@ -435,6 +434,147 @@ void UO3DSBroadcastComponent::CaptureCurves(USkeletalMeshComponent* SkelComp)
         for (int32 i = 0; i < LogCount; ++i)
         {
             UE_LOG(LogO3DSBroadcast, Verbose, TEXT("  Curve[%d] %s = %.4f"), i, *CurveNames[i].ToString(), CurveValues[i]);
+        }
+    }
+}
+
+// Simple wildcard matching with '*' and '?' (case-sensitive)
+bool UO3DSBroadcastComponent::NameMatchesPattern(const FString& Text, const FString& Pattern) const
+{
+    auto Match = [](const TCHAR* str, const TCHAR* pat) -> bool
+    {
+        // iterative backtracking for '*'
+        const TCHAR* s = str;
+        const TCHAR* p = pat;
+        const TCHAR* star = nullptr;
+        const TCHAR* ss = nullptr;
+        while (*s)
+        {
+            if (*p == '?' || *p == *s)
+            {
+                ++s; ++p;
+            }
+            else if (*p == '*')
+            {
+                star = p++;
+                ss = s;
+            }
+            else if (star)
+            {
+                p = star + 1;
+                s = ++ss;
+            }
+            else
+            {
+                return false;
+            }
+        }
+        while (*p == '*') ++p;
+        return *p == 0;
+    };
+
+    return Match(*Text, *Pattern);
+}
+
+bool UO3DSBroadcastComponent::IsCurveAllowedByPatterns(const FName& Name) const
+{
+    const FString S = Name.ToString();
+    // Exclude has priority
+    for (const FString& P : ExcludeCurvePatterns)
+    {
+        if (!P.IsEmpty() && NameMatchesPattern(S, P))
+        {
+            return false;
+        }
+    }
+    if (IncludeCurvePatterns.Num() == 0)
+    {
+        return true; // no includes => allow by default
+    }
+    for (const FString& P : IncludeCurvePatterns)
+    {
+        if (!P.IsEmpty() && NameMatchesPattern(S, P))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void UO3DSBroadcastComponent::BuildFilteredCurves(TArray<FName>& OutNames, TArray<float>& OutValues)
+{
+    OutNames.Reset();
+    OutValues.Reset();
+
+    OutNames.Reserve(CurveNames.Num());
+    OutValues.Reserve(CurveNames.Num());
+
+    for (int32 i = 0; i < CurveNames.Num(); ++i)
+    {
+        const FName& N = CurveNames[i];
+        float V = CurveValues[i];
+
+        // Drop NaN/Inf if enabled
+        if (bDropNaNAndInfinity && !FMath::IsFinite(V))
+        {
+            if (bLogFilteredCurves)
+            {
+                UE_LOG(LogO3DSBroadcast, Verbose, TEXT("Dropped curve %s (NaN/Inf)"), *N.ToString());
+            }
+            continue;
+        }
+
+        // Clamp morphs
+        if (bClampMorphCurvesToUnit && MorphNameSet.Contains(N))
+        {
+            V = FMath::Clamp(V, 0.0f, 1.0f);
+        }
+
+        if (bEnableCurveFiltering)
+        {
+            // Include/Exclude patterns
+            if (!IsCurveAllowedByPatterns(N))
+            {
+                if (bLogFilteredCurves)
+                {
+                    UE_LOG(LogO3DSBroadcast, Verbose, TEXT("Filtered curve %s (pattern)"), *N.ToString());
+                }
+                continue;
+            }
+
+            // Epsilon threshold
+            if (FMath::Abs(V) < CurveEpsilon)
+            {
+                if (bLogFilteredCurves)
+                {
+                    UE_LOG(LogO3DSBroadcast, Verbose, TEXT("Filtered curve %s (epsilon %.6f) V=%.6f"), *N.ToString(), CurveEpsilon, V);
+                }
+                continue;
+            }
+
+            // Delta threshold
+            const bool bHasLast = LastSentHasValue.IsValidIndex(i) ? (LastSentHasValue[i] != 0) : false;
+            if (bHasLast)
+            {
+                const float Last = LastSentCurveValues[i];
+                if (FMath::Abs(V - Last) < CurveDeltaThreshold)
+                {
+                    if (bLogFilteredCurves)
+                    {
+                        UE_LOG(LogO3DSBroadcast, Verbose, TEXT("Filtered curve %s (delta %.6f < %.6f) V=%.6f Last=%.6f"), *N.ToString(), FMath::Abs(V-Last), CurveDeltaThreshold, V, Last);
+                    }
+                    continue;
+                }
+            }
+        }
+
+        // Include in output
+        OutNames.Add(N);
+        OutValues.Add(V);
+        if (LastSentCurveValues.IsValidIndex(i))
+        {
+            LastSentCurveValues[i] = V;
+            LastSentHasValue[i] = 1;
         }
     }
 }
@@ -469,11 +609,8 @@ void UO3DSBroadcastComponent::HandleBoneTransformsFinalized()
     const TArray<FTransform>& CompSpace = SkelComp->GetComponentSpaceTransforms();
     const int32 Count = CompSpace.Num();
 
-    // If skeleton size changed relative to comp space, refresh descriptor
-    if (Count != BoneNames.Num())
-    {
-        RefreshSkeletonCache(SkelComp);
-    }
+    // Do not rebuild descriptor based on CompSpace count; this varies with LOD/RequiredBones.
+    // Just clamp to the min to avoid out-of-bounds.
 
     const int32 N = FMath::Min(Count, BoneNames.Num());
     const FString Subject = BuildSubjectName(SkelComp);
@@ -481,6 +618,10 @@ void UO3DSBroadcastComponent::HandleBoneTransformsFinalized()
     const bool bDebug = (CVarO3DSBroadcastDebugPose.GetValueOnAnyThread() != 0);
     if (bDebug)
     {
+        if (Count != BoneNames.Num())
+        {
+            UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[O3DS] CompSpace count (%d) differs from RefSkeleton bones (%d); clamping."), Count, BoneNames.Num());
+        }
         UE_LOG(LogO3DSBroadcast, Log, TEXT("[O3DS] Pose #%llu Subject=%s Bones=%d"), (unsigned long long)(FrameCounter + 1ull), *Subject, N);
     }
 
@@ -552,8 +693,14 @@ void UO3DSBroadcastComponent::HandleBoneTransformsFinalized()
 
     // Capture curves after pose
     CaptureCurves(SkelComp);
-    Frame.CurveNames = CurveNames;
-    Frame.CurveValues = CurveValues;
+
+    // Build normalized + filtered curve lists
+    TArray<FName> FilteredCurveNames;
+    TArray<float> FilteredCurveValues;
+    BuildFilteredCurves(FilteredCurveNames, FilteredCurveValues);
+
+    Frame.CurveNames = MoveTemp(FilteredCurveNames);
+    Frame.CurveValues = MoveTemp(FilteredCurveValues);
 
     // If descriptor was marked dirty earlier (e.g., skeleton changed), emit it before first frame after change
     if (bDescriptorDirty && DescriptorCache.IsValid())

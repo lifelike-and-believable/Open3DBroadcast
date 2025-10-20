@@ -109,6 +109,36 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast")
     bool bAutoStartCapture = true;
 
+    // Curve normalization and filtering configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves")
+    bool bClampMorphCurvesToUnit = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves")
+    bool bDropNaNAndInfinity = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves|Filtering")
+    bool bEnableCurveFiltering = false;
+
+    // Drop very small values: |v| < Epsilon
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves|Filtering", meta=(EditCondition="bEnableCurveFiltering", ClampMin="0.0"))
+    float CurveEpsilon = 0.0005f;
+
+    // Send only if |v - lastSent| >= DeltaThreshold
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves|Filtering", meta=(EditCondition="bEnableCurveFiltering", ClampMin="0.0"))
+    float CurveDeltaThreshold = 0.001f;
+
+    // If non-empty, only curves matching at least one include pattern will be considered
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves|Filtering", meta=(EditCondition="bEnableCurveFiltering"))
+    TArray<FString> IncludeCurvePatterns;
+
+    // Curves matching any exclude pattern will be dropped
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves|Filtering", meta=(EditCondition="bEnableCurveFiltering"))
+    TArray<FString> ExcludeCurvePatterns;
+
+    // Log filtered/dropped curves for debugging
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves|Filtering")
+    bool bLogFilteredCurves = false;
+
     // Descriptor and Frame events
     FOnO3DSDescriptorReady OnDescriptorReady;
     FOnO3DSPoseFrameReady OnPoseFrameReady;
@@ -135,6 +165,11 @@ private:
     void RefreshCurveCache(USkeletalMeshComponent* SkelComp);
     void CaptureCurves(USkeletalMeshComponent* SkelComp);
 
+    // Filtering helpers
+    bool NameMatchesPattern(const FString& Text, const FString& Pattern) const;
+    bool IsCurveAllowedByPatterns(const FName& Name) const;
+    void BuildFilteredCurves(TArray<FName>& OutNames, TArray<float>& OutValues);
+
     // Hash helper for descriptor
     uint64 ComputeDescriptorHash(const TArray<FName>& InNames, const TArray<int32>& InParents) const;
 
@@ -149,7 +184,9 @@ private:
 
     // Curve cache and working buffers
     TArray<FName> CurveNames;          // Stable order: Morphs then Anim Curves
-    TArray<float> CurveValues;         // Same length as CurveNames
+    TArray<float> CurveValues;         // Same length as CurveNames, latest evaluated values
+    TArray<float> LastSentCurveValues; // Last sent values for delta filtering
+    TArray<uint8> LastSentHasValue;    // 0/1 per index indicating LastSentCurveValues set
     TSet<FName> MorphNameSet;          // For quick lookup when filling values
     TSet<FName> CurveNameSet;          // To avoid duplicates across sources
     bool bCurveCacheInitialized = false;
