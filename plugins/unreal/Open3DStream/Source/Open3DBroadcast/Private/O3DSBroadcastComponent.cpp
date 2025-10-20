@@ -11,6 +11,7 @@
 #include "Components/SkinnedMeshComponent.h"
 #include "HAL/IConsoleManager.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimCurveTypes.h"
 #include "Animation/MorphTarget.h"
 #include "Animation/SmartName.h"
 
@@ -233,14 +234,36 @@ void UO3DSBroadcastComponent::RefreshCurveCache(USkeletalMeshComponent* SkelComp
         }
     }
 
-    // 2) Named animation curves from skeleton SmartName mapping
-    if (USkeleton* Skel = CachedSkeleton.Get())
+    // 2) Named animation curves — preferred, forward-compatible path: query from evaluated AnimInstance
+    if (SkelComp)
     {
-        const FSmartNameMapping* Mapping = Skel->GetSmartNameContainer(USkeleton::AnimCurveMappingName);
-        if (Mapping)
+        UAnimInstance* SourceAnim = SkelComp->GetPostProcessInstance();
+        if (!SourceAnim)
         {
+            SourceAnim = SkelComp->GetAnimInstance();
+        }
+
+        if (SourceAnim)
+        {
+            // Collect attribute/material/morph curve names known to this instance
             TArray<FName> Names;
-            Mapping->FillNameArray(Names);
+            // Attribute curves
+            SourceAnim->GetAnimationCurveList(EAnimCurveType::AttributeCurve, Names);
+            // Material curves (if any)
+            TArray<FName> MaterialNames;
+            SourceAnim->GetAnimationCurveList(EAnimCurveType::MaterialCurve, MaterialNames);
+            if (MaterialNames.Num() > 0)
+            {
+                Names.Append(MaterialNames);
+            }
+            // Morph target curves (when authored as anim curves)
+            TArray<FName> MorphCurveNames;
+            SourceAnim->GetAnimationCurveList(EAnimCurveType::MorphTargetCurve, MorphCurveNames);
+            if (MorphCurveNames.Num() > 0)
+            {
+                Names.Append(MorphCurveNames);
+            }
+
             CurveNames.Reserve(CurveNames.Num() + Names.Num());
             for (const FName& N : Names)
             {
