@@ -74,6 +74,22 @@ jobs:
             exit 1
           } else { Write-Host "[OK] All WebRTC libraries present" }
 
+      - name: Verify O3DS core libraries (prebuilt)
+        shell: powershell
+        run: |
+          $pluginLib = "plugins\unreal\$env:PLUGIN_NAME\ThirdParty"
+          $o3dsLibs = @(
+            "$pluginLib\o3ds\lib\Win64\Release\o3ds.lib"
+          )
+          $missing = @()
+          foreach ($lib in $o3dsLibs) { if (!(Test-Path $lib)) { $missing += $lib } }
+          if ($missing.Count -gt 0) {
+            Write-Error "Missing O3DS core libraries (required for release build):"
+            $missing | ForEach-Object { Write-Error "  - $_" }
+            Write-Error "Provide these via the prebuilt artifact process. Run the build-o3ds-core workflow to generate them."
+            exit 1
+          } else { Write-Host "[OK] All O3DS core libraries present" }
+
       - name: Locate plugin (.uplugin)
         id: find
         shell: powershell
