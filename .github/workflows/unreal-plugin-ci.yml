@@ -7,6 +7,32 @@ on:
   push:
     branches: [ develop, main ]
   workflow_dispatch:
+    inputs:
+      open_editor:
+        description: "Open Unreal Editor after build (Windows self-hosted)"
+        required: false
+        type: boolean
+        default: false
+      editor_map:
+        description: "Optional map to load (e.g., /Game/Maps/Example)"
+        required: false
+        type: string
+        default: ""
+      editor_args:
+        description: "Extra args to pass to UnrealEditor (e.g., -log)"
+        required: false
+        type: string
+        default: "-log"
+      editor_detach:
+        description: "Detach editor (do not block workflow)"
+        required: false
+        type: boolean
+        default: true
+      editor_project:
+        description: "Project to open: 'host' (packaged HostProject) or 'sandbox' (ProjectSandbox in repo)"
+        required: false
+        type: string
+        default: "host"
 
 permissions:
   contents: read
@@ -109,6 +135,49 @@ jobs:
           name: UnrealPlugins-Win64-${{ github.sha }}
           path: ${{ runner.temp }}/PluginPackage
           retention-days: 30
+
+      - name: Optionally launch Unreal Editor (manual trigger only)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.open_editor == 'true' }}
+        shell: powershell
+        run: |
+          $editor = Join-Path $Env:UE_ROOT "Engine\Binaries\Win64\UnrealEditor.exe"
+          if (-not (Test-Path -LiteralPath $editor)) {
+            throw "UnrealEditor.exe not found: $editor"
+          }
+          $projectChoice = "${{ github.event.inputs.editor_project }}".Trim().ToLowerInvariant()
+
+          if ($projectChoice -eq "sandbox") {
+            Write-Host "Selected project: ProjectSandbox"
+            # Link the plugin into the sandbox so it loads when opening the project
+            & .\Build\Scripts\Link-PluginIntoSandbox.ps1
+            $uproject = Join-Path $Env:GITHUB_WORKSPACE 'ProjectSandbox\\ProjectSandbox.uproject'
+            if (-not (Test-Path -LiteralPath $uproject)) {
+              throw "Sandbox project not found: $uproject"
+            }
+          } else {
+            Write-Host "Selected project: HostProject (packaged by BuildPlugin)"
+            $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
+            $uproject = Join-Path $pkg 'HostProject\\HostProject.uproject'
+            if (-not (Test-Path -LiteralPath $uproject)) {
+              throw "Host project not found: $uproject"
+            }
+          }
+
+          $map   = "${{ github.event.inputs.editor_map }}".Trim()
+          $extra = "${{ github.event.inputs.editor_args }}".Trim()
+
+          $argList = @()
+          $argList += '"' + $uproject + '"'
+          if ($map  -ne "") { $argList += $map }
+          if ($extra -ne "") { $argList += $extra }
+
+          if ([System.Convert]::ToBoolean("${{ github.event.inputs.editor_detach }}")) {
+            Write-Host "Starting Unreal Editor detached..."
+            Start-Process -FilePath $editor -ArgumentList $argList | Out-Null
+          } else {
+            Write-Host "Starting Unreal Editor and waiting for exit..."
+            & $editor @argList
+          }
 
       - name: Post build completed comment
         if: github.event_name == 'pull_request' && github.event.pull_request.number != null && success()

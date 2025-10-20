@@ -79,23 +79,9 @@ This section outlines robust, version-tolerant patterns to read curves after ani
   - Schedule capture after animation evaluation for each registered `USkeletalMeshComponent` (e.g., in a subsystem tick or appropriate post-eval hook). Read the final evaluated values.
 
 - Morph targets (weights):
-  - Enumerate morph targets from the component’s skeletal mesh, then read the component-weight for each name.
-  - Pseudocode:
-
-    ```cpp
-    USkeletalMeshComponent* SkelComp = /* registered component */;
-    USkeletalMesh* SkelMesh = SkelComp ? SkelComp->GetSkeletalMeshAsset() : nullptr;
-    if (SkelMesh)
-    {
-        const TArray<UMorphTarget*>& Morphs = SkelMesh->GetMorphTargets();
-        for (UMorphTarget* MT : Morphs)
-        {
-            const FName Name = MT->GetFName();
-            const float Value = SkelComp->GetMorphTargetWeight(Name);
-            AddCurve(Name.ToString(), FMath::Clamp(Value, 0.0f, 1.0f));
-        }
-    }
-    ```
+  - Unreal does not expose a stable public API on `USkeletalMeshComponent` to query morph target weights by name across all versions.
+  - Recommended approach: use the `UAnimInstance` evaluated curve container for morph-driving curves. Ensure your curve discovery includes morph target names so `GetCurveValue(Name)` returns the current driving value.
+  - If direct per-target weights are required, consider engine-specific access patterns or custom animation notifies to surface values; keep this out of hot paths to avoid version fragility.
 
 - Animation curves (named curves):
   - Read evaluated curves from the active `UAnimInstance`.
@@ -105,7 +91,7 @@ This section outlines robust, version-tolerant patterns to read curves after ani
   - Pseudocode:
 
     ```cpp
-    UAnimInstance* AnimInst = SkelComp ? SkelComp->GetAnimInstance() : nullptr;
+  UAnimInstance* AnimInst = SkelComp ? SkelComp->GetAnimInstance() : nullptr;
     if (AnimInst)
     {
         // Strategy 1: known names (discovered earlier or configured)

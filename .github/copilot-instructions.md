@@ -8,11 +8,43 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 ## 0) Ground Rules (Read Me First)
 
 - **Source of truth:** This document. Any ambiguity must be resolved by updating this doc first, then implementing.
-- **UE API accuracy:** Verify all Unreal API signatures against **UE 5.6** documentation before use. Do not “best guess.”
-  - https://dev.epicgames.com/documentation/en-us/unreal-engine/API (direct URL)
-  - "Unreal Engine C++ API Reference" + class name(s) (web search). 
+- **UE API accuracy:** Verify all Unreal API signatures against **UE 5.6** documentation before use. Do not “best guess.” 
+  - Reference Sources in order of preference:
+    - Unreal Engine 5.6 source code on GitHub: @lifelike-and-believable/UnrealEngine
+    - "Unreal Engine C++ API Reference" + class name(s) (web search). 
+    - https://dev.epicgames.com/documentation/en-us/unreal-engine/API (direct URL)
 - **Determinism first:** Prefer predictable behavior over opportunistic performance wins unless performance is a stated acceptance criterion.
 - **Small steps:** Break work into small, testable tasks. Each PR should do one thing well, with passing checks and updated docs.
+- **Protocol schema:** `src/o3ds.fbs` is the authoritative source for data structures. After changes, regenerate `src/o3ds_generated.h` with `flatc --cpp src/o3ds.fbs`.
+
+---
+
+## 0.1) Architecture Overview (Cross-Cutting Concerns)
+
+### Core Library (`src/o3ds/`)
+- **Protocol:** FlatBuffers schema (`src/o3ds.fbs`) defines serialization format for skeletal animation + curves.
+- **Data model:** `O3DS::Subject` (skeletal hierarchy + curves) ↔ `O3DS::SubjectList` (multiple subjects + timestamp).
+- **Serialization:** `Subject::Serialize()` creates full descriptors; `Subject::SerializeUpdate()` generates delta updates with threshold-based compression.
+- **Connectors:** Inherit from `Connector` (blocking) or `AsyncConnector` (non-blocking). Implementations: TCP (`tcp.h`), UDP, NNG (pub/sub/pair), WebRTC (`webrtc_connector.h`).
+- **Namespace:** All core types live in `namespace O3DS`.
+
+### Unreal Plugin (`plugins/unreal/Open3DStream/`)
+- **Two modules:**
+  - `Open3DStream` (receiver): LiveLink source consuming animation streams. Mature, production-ready.
+  - `Open3DBroadcast` (sender): Streams UE animation to external clients. Framework implemented, core functionality in progress. Conditionally compiled via `O3DS_WITH_BROADCAST` flag.
+- **Receiver pattern:** `FOpen3DStreamSource` polls connectors, parses FlatBuffers, populates LiveLink subjects with skeletal pose + curves.
+- **Sender pattern (broadcast):** `UO3DBroadcastComponent` captures post-anim-eval skeletal data via `UAnimInstance::GetCurveValue()`, encodes to FlatBuffers, sends via async connectors on worker threads.
+- **Build system:** Uses PowerShell scripts in `Build/Scripts/` to build/test plugins with UAT (Unreal Automation Tool).
+
+### DCC Plugins (`plugins/maya/`, `plugins/mobu/`)
+- Maya and MotionBuilder plugins follow platform-specific APIs but share the `O3DS::Subject` data model for interop.
+- Build with CMake; link against core library from `src/`.
+
+### Development Workflows
+- **Local dev:** `Build/Scripts/link_plugin_into_sandbox.sh` symlinks plugin → `ProjectSandbox/Plugins/Open3DStream` for rapid iteration.
+- **Packaging:** `package.py` creates release ZIPs with `UE_X.X/Plugins/Open3DStream/` structure for easy project installation.
+- **Testing:** `Build/Scripts/Run-AutomationTests.ps1` and `Run-Gauntlet.ps1` for UE automation tests.
+- **C++ tests:** `test_curves.cpp` and `test_curve_comprehensive.cpp` validate FlatBuffers serialization round-trips.
 
 ---
 

@@ -11,8 +11,8 @@
 #include "Components/SkinnedMeshComponent.h"
 #include "HAL/IConsoleManager.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimCurveTypes.h"
 #include "Animation/MorphTarget.h"
-#include "Animation/SmartName.h"
 
 // CVar to toggle verbose debug logging
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugPose(
@@ -30,7 +30,7 @@ static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugCurves(
 
 UO3DSBroadcastComponent::UO3DSBroadcastComponent()
 {
-    PrimaryComponentTick.bCanEverTick = true; // we'll manually enable when capturing
+    PrimaryComponentTick.bCanEverTick = false; // delegate-driven capture, no tick needed
     SetComponentTickEnabled(false);
 }
 
@@ -66,7 +66,6 @@ void UO3DSBroadcastComponent::StartCapture()
     bIsCapturing = TargetMesh.IsValid();
     LastCaptureTime = 0.0;
     FrameCounter = 0;
-    SetComponentTickEnabled(bIsCapturing);
 }
 
 void UO3DSBroadcastComponent::StopCapture()
@@ -77,7 +76,6 @@ void UO3DSBroadcastComponent::StopCapture()
     }
     UnbindFromTarget();
     bIsCapturing = false;
-    SetComponentTickEnabled(false);
 }
 
 void UO3DSBroadcastComponent::BindToTarget()
@@ -93,7 +91,9 @@ void UO3DSBroadcastComponent::BindToTarget()
     {
         if (!BoneTransformsFinalizedHandle.IsValid())
         {
-            BoneTransformsFinalizedHandle = Skinned->OnBoneTransformsFinalized.AddUObject(this, &UO3DSBroadcastComponent::HandleBoneTransformsFinalized);
+            // Use virtual registration to be safe against base pointer (USkinnedMeshComponent) in UE 5.6
+            BoneTransformsFinalizedHandle = Skinned->RegisterOnBoneTransformsFinalizedDelegate(
+                FOnBoneTransformsFinalizedMultiCast::FDelegate::CreateUObject(this, &UO3DSBroadcastComponent::HandleBoneTransformsFinalized));
         }
     }
     UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture bound to %s"), *GetNameSafe(TargetMesh.Get()));
@@ -105,7 +105,7 @@ void UO3DSBroadcastComponent::UnbindFromTarget()
     {
         if (BoneTransformsFinalizedHandle.IsValid())
         {
-            Skinned->OnBoneTransformsFinalized.Remove(BoneTransformsFinalizedHandle);
+            Skinned->UnregisterOnBoneTransformsFinalizedDelegate(BoneTransformsFinalizedHandle);
             BoneTransformsFinalizedHandle.Reset();
         }
         UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture unbound from %s"), *GetNameSafe(Skinned));
@@ -233,14 +233,56 @@ void UO3DSBroadcastComponent::RefreshCurveCache(USkeletalMeshComponent* SkelComp
         }
     }
 
-    // 2) Named animation curves from skeleton SmartName mapping
-    if (USkeleton* Skel = CachedSkeleton.Get())
+    // 2) Named animation curves — preferred, forward-compatible path: query from evaluated AnimInstance
+    if (SkelComp)
     {
-        const FSmartNameMapping* Mapping = Skel->GetSmartNameContainer(USkeleton::AnimCurveMappingName);
-        if (Mapping)
+        UAnimInstance* SourceAnim = SkelComp->GetPostProcessInstance();
+        if (!SourceAnim)
         {
+            SourceAnim = SkelComp->GetAnimInstance();
+        }
+
+        if (SourceAnim)
+        {
+            // Collect attribute/material/morph curve names known to this instance
             TArray<FName> Names;
-            Mapping->FillNameArray(Names);
+
+            // Attribute curves
+            {
+                TMap<FName, float> AttrCurves;
+                SourceAnim->AppendAnimationCurveList(EAnimCurveType::AttributeCurve, AttrCurves);
+                if (!AttrCurves.IsEmpty())
+                {
+                    TArray<FName> AttrKeys;
+                    AttrCurves.GetKeys(AttrKeys);
+                    Names.Append(AttrKeys);
+                }
+            }
+
+            // Material curves (if any)
+            {
+                TMap<FName, float> MaterialCurves;
+                SourceAnim->AppendAnimationCurveList(EAnimCurveType::MaterialCurve, MaterialCurves);
+                if (!MaterialCurves.IsEmpty())
+                {
+                    TArray<FName> MaterialKeys;
+                    MaterialCurves.GetKeys(MaterialKeys);
+                    Names.Append(MaterialKeys);
+                }
+            }
+
+            // Morph target curves (when authored as anim curves)
+            {
+                TMap<FName, float> MorphCurves;
+                SourceAnim->AppendAnimationCurveList(EAnimCurveType::MorphTargetCurve, MorphCurves);
+                if (!MorphCurves.IsEmpty())
+                {
+                    TArray<FName> MorphKeys;
+                    MorphCurves.GetKeys(MorphKeys);
+                    Names.Append(MorphKeys);
+                }
+            }
+
             CurveNames.Reserve(CurveNames.Num() + Names.Num());
             for (const FName& N : Names)
             {
@@ -252,6 +294,12 @@ void UO3DSBroadcastComponent::RefreshCurveCache(USkeletalMeshComponent* SkelComp
             }
         }
     }
+
+    // Deterministic ordering: stable-sort lexicographically (case-sensitive)
+    CurveNames.Sort([](const FName& A, const FName& B)
+    {
+        return FCString::Strcmp(*A.ToString(), *B.ToString()) < 0;
+    });
 
     CurveValues.SetNumZeroed(CurveNames.Num());
     bCurveCacheInitialized = true;
@@ -272,32 +320,24 @@ void UO3DSBroadcastComponent::CaptureCurves(USkeletalMeshComponent* SkelComp)
     {
         CurveValues[i] = 0.0f;
     }
-
-    // 1) Read morph target weights directly when possible and clamp to [0,1]
-    if (USkeletalMesh* SkelMesh = SkelComp->GetSkeletalMeshAsset())
+    // Read named curves from the FINAL anim instance: prefer PostProcess instance if present
+    UAnimInstance* SourceAnim = nullptr;
+    if (USkeletalMeshComponent* SMC = SkelComp)
     {
-        const TArray<UMorphTarget*>& Morphs = SkelMesh->GetMorphTargets();
-        // Build a quick map from name to weight read via component API
-        for (int32 i = 0; i < CurveNames.Num(); ++i)
+        // UE 5.x: Post-process anim instance runs after the main graph
+        SourceAnim = SMC->GetPostProcessInstance();
+        if (!SourceAnim)
         {
-            const FName& Name = CurveNames[i];
-            if (MorphNameSet.Contains(Name))
-            {
-                // UE 5.6 API verified: USkeletalMeshComponent::GetMorphTargetWeight(FName) const -> float
-                const float RawWeight = SkelComp->GetMorphTargetWeight(Name);
-                CurveValues[i] = FMath::Clamp(RawWeight, 0.0f, 1.0f);
-            }
+            SourceAnim = SMC->GetAnimInstance();
         }
     }
 
-    // 2) Overlay with AnimInstance named curves for the same names if available (Anim curves may drive morphs)
-    if (UAnimInstance* AnimInst = SkelComp->GetAnimInstance())
+    if (SourceAnim)
     {
         for (int32 i = 0; i < CurveNames.Num(); ++i)
         {
             const FName& Name = CurveNames[i];
-            const float V = AnimInst->GetCurveValue(Name);
-            // Last-writer-wins: AnimInstance values override morph weight reads
+            const float V = SourceAnim->GetCurveValue(Name);
             CurveValues[i] = V;
         }
     }
@@ -312,21 +352,15 @@ void UO3DSBroadcastComponent::CaptureCurves(USkeletalMeshComponent* SkelComp)
     }
 }
 
-void UO3DSBroadcastComponent::HandleBoneTransformsFinalized(USkinnedMeshComponent* SkinnedMesh, bool /*bRequiredBonesOnly*/)
+void UO3DSBroadcastComponent::HandleBoneTransformsFinalized()
 {
     if (!bIsCapturing)
     {
         return;
     }
 
-    USkeletalMeshComponent* SkelComp = Cast<USkeletalMeshComponent>(SkinnedMesh);
+    USkeletalMeshComponent* SkelComp = TargetMesh.Get();
     if (!SkelComp)
-    {
-        return;
-    }
-
-    // Only process events from our target mesh
-    if (TargetMesh.Get() != SkelComp)
     {
         return;
     }
@@ -396,10 +430,5 @@ void UO3DSBroadcastComponent::HandleBoneTransformsFinalized(USkinnedMeshComponen
 void UO3DSBroadcastComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    if (!bIsCapturing || !TargetMesh.IsValid())
-    {
-        return;
-    }
-    // Delegate will call HandleBoneTransformsFinalized at the correct time.
+    // Capture is delegate-driven via HandleBoneTransformsFinalized
 }
