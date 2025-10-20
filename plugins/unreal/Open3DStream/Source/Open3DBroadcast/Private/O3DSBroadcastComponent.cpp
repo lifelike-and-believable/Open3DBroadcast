@@ -1,9 +1,10 @@
-// Copyright (c) Open3DStream Contributors
+mon// Copyright (c) Open3DStream Contributors
 
 #include "O3DSBroadcastComponent.h"
 #include "Open3DBroadcast.h" // for LogO3DSBroadcast category declaration
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Engine/Engine.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Animation/Skeleton.h"
@@ -28,6 +29,26 @@ static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugCurves(
     TEXT("Enable per-frame curve debug logging for Open3DBroadcast (0/1)."),
     ECVF_Default);
 
+// CVar to show on-screen (viewport) notifications for state changes
+static TAutoConsoleVariable<int32> CVarO3DSBroadcastOnScreen(
+    TEXT("o3ds.Broadcast.OnScreen"),
+    0,
+    TEXT("Show on-screen notifications for Open3DBroadcast state changes (0/1)."),
+    ECVF_Default);
+
+void UO3DSBroadcastComponent::NotifyOnScreen(const FString& Message, const FColor& Color, float DisplayTime) const
+{
+    if (CVarO3DSBroadcastOnScreen.GetValueOnAnyThread() == 0)
+    {
+        return;
+    }
+    if (GEngine)
+    {
+        // Key -1: auto
+        GEngine->AddOnScreenDebugMessage(-1, DisplayTime, Color, Message);
+    }
+}
+
 UO3DSBroadcastComponent::UO3DSBroadcastComponent()
 {
     PrimaryComponentTick.bCanEverTick = false; // delegate-driven capture, no tick needed
@@ -47,7 +68,13 @@ void UO3DSBroadcastComponent::BeginPlay()
         }
     }
 
-    // Do not start by default; StartCapture can be called from code/editor later
+    UE_LOG(LogO3DSBroadcast, Log, TEXT("O3DS Broadcast component BeginPlay on %s"), *GetNameSafe(GetOwner()));
+    NotifyOnScreen(FString::Printf(TEXT("O3DS Broadcast: BeginPlay on %s"), *GetNameSafe(GetOwner())), FColor::Cyan, 2.0f);
+
+    if (bAutoStartCapture)
+    {
+        StartCapture();
+    }
 }
 
 void UO3DSBroadcastComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -66,6 +93,11 @@ void UO3DSBroadcastComponent::StartCapture()
     bIsCapturing = TargetMesh.IsValid();
     LastCaptureTime = 0.0;
     FrameCounter = 0;
+    if (bIsCapturing)
+    {
+        UE_LOG(LogO3DSBroadcast, Log, TEXT("O3DS Broadcast: Started capture on %s"), *GetNameSafe(TargetMesh.Get()));
+        NotifyOnScreen(FString::Printf(TEXT("O3DS Broadcast: Started on %s"), *GetNameSafe(TargetMesh.Get())), FColor::Green, 2.0f);
+    }
 }
 
 void UO3DSBroadcastComponent::StopCapture()
@@ -76,6 +108,8 @@ void UO3DSBroadcastComponent::StopCapture()
     }
     UnbindFromTarget();
     bIsCapturing = false;
+    UE_LOG(LogO3DSBroadcast, Log, TEXT("O3DS Broadcast: Stopped capture on %s"), *GetNameSafe(TargetMesh.Get()));
+    NotifyOnScreen(FString::Printf(TEXT("O3DS Broadcast: Stopped on %s"), *GetNameSafe(TargetMesh.Get())), FColor::Yellow, 2.0f);
 }
 
 void UO3DSBroadcastComponent::BindToTarget()
@@ -96,7 +130,7 @@ void UO3DSBroadcastComponent::BindToTarget()
                 FOnBoneTransformsFinalizedMultiCast::FDelegate::CreateUObject(this, &UO3DSBroadcastComponent::HandleBoneTransformsFinalized));
         }
     }
-    UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture bound to %s"), *GetNameSafe(TargetMesh.Get()));
+    UE_LOG(LogO3DSBroadcast, Log, TEXT("O3DS Broadcast: Bound to %s"), *GetNameSafe(TargetMesh.Get()));
 }
 
 void UO3DSBroadcastComponent::UnbindFromTarget()
@@ -108,7 +142,7 @@ void UO3DSBroadcastComponent::UnbindFromTarget()
             Skinned->UnregisterOnBoneTransformsFinalizedDelegate(BoneTransformsFinalizedHandle);
             BoneTransformsFinalizedHandle.Reset();
         }
-        UE_LOG(LogO3DSBroadcast, Log, TEXT("Broadcast capture unbound from %s"), *GetNameSafe(Skinned));
+        UE_LOG(LogO3DSBroadcast, Log, TEXT("O3DS Broadcast: Unbound from %s"), *GetNameSafe(Skinned));
     }
 }
 
