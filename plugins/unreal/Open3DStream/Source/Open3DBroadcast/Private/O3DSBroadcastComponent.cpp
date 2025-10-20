@@ -250,7 +250,7 @@ void UO3DSBroadcastComponent::RefreshCurveCache(USkeletalMeshComponent* SkelComp
             // Attribute curves
             {
                 TMap<FName, float> AttrCurves;
-                SourceAnim->GetAnimationCurveList(EAnimCurveType::AttributeCurve, AttrCurves);
+                SourceAnim->AppendAnimationCurveList(EAnimCurveType::AttributeCurve, AttrCurves);
                 if (!AttrCurves.IsEmpty())
                 {
                     TArray<FName> AttrKeys;
@@ -262,7 +262,7 @@ void UO3DSBroadcastComponent::RefreshCurveCache(USkeletalMeshComponent* SkelComp
             // Material curves (if any)
             {
                 TMap<FName, float> MaterialCurves;
-                SourceAnim->GetAnimationCurveList(EAnimCurveType::MaterialCurve, MaterialCurves);
+                SourceAnim->AppendAnimationCurveList(EAnimCurveType::MaterialCurve, MaterialCurves);
                 if (!MaterialCurves.IsEmpty())
                 {
                     TArray<FName> MaterialKeys;
@@ -274,7 +274,7 @@ void UO3DSBroadcastComponent::RefreshCurveCache(USkeletalMeshComponent* SkelComp
             // Morph target curves (when authored as anim curves)
             {
                 TMap<FName, float> MorphCurves;
-                SourceAnim->GetAnimationCurveList(EAnimCurveType::MorphTargetCurve, MorphCurves);
+                SourceAnim->AppendAnimationCurveList(EAnimCurveType::MorphTargetCurve, MorphCurves);
                 if (!MorphCurves.IsEmpty())
                 {
                     TArray<FName> MorphKeys;
