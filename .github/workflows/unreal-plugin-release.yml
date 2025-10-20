@@ -146,7 +146,7 @@ jobs:
             $ueVersion = "5.6"  # Default fallback
           }
           
-          $targetPath = Join-Path $restructured "UE_$ueVersion\Plugins"
+          $targetPath = Join-Path $restructured "UE_$ueVersion\Plugins\$env:PLUGIN_NAME"
           
           Write-Host "Restructuring plugins for archive..."
           Write-Host "  Source: $pkg"
@@ -156,10 +156,10 @@ jobs:
           # Create target directory structure
           New-Item -ItemType Directory -Force -Path $targetPath | Out-Null
           
-          # Copy both plugins to new structure
+          # Copy plugin to new structure with proper plugin name subdirectory
           Copy-Item -Path "$pkg\*" -Destination $targetPath -Recurse -Force
           
-          Write-Host "[OK] Plugins restructured to UE_$ueVersion/Plugins/"
+          Write-Host "[OK] Plugin restructured to UE_$ueVersion/Plugins/$env:PLUGIN_NAME/"
 
       - name: Create archive
         shell: powershell
