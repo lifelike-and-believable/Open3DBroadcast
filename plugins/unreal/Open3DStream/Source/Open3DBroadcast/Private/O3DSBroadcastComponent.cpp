@@ -247,21 +247,41 @@ void UO3DSBroadcastComponent::RefreshCurveCache(USkeletalMeshComponent* SkelComp
         {
             // Collect attribute/material/morph curve names known to this instance
             TArray<FName> Names;
+
             // Attribute curves
-            SourceAnim->GetAnimationCurveList(EAnimCurveType::AttributeCurve, Names);
-            // Material curves (if any)
-            TArray<FName> MaterialNames;
-            SourceAnim->GetAnimationCurveList(EAnimCurveType::MaterialCurve, MaterialNames);
-            if (MaterialNames.Num() > 0)
             {
-                Names.Append(MaterialNames);
+                TMap<FName, float> AttrCurves;
+                SourceAnim->GetAnimationCurveList(EAnimCurveType::AttributeCurve, AttrCurves);
+                if (!AttrCurves.IsEmpty())
+                {
+                    TArray<FName> AttrKeys;
+                    AttrCurves.GetKeys(AttrKeys);
+                    Names.Append(AttrKeys);
+                }
             }
-            // Morph target curves (when authored as anim curves)
-            TArray<FName> MorphCurveNames;
-            SourceAnim->GetAnimationCurveList(EAnimCurveType::MorphTargetCurve, MorphCurveNames);
-            if (MorphCurveNames.Num() > 0)
+
+            // Material curves (if any)
             {
-                Names.Append(MorphCurveNames);
+                TMap<FName, float> MaterialCurves;
+                SourceAnim->GetAnimationCurveList(EAnimCurveType::MaterialCurve, MaterialCurves);
+                if (!MaterialCurves.IsEmpty())
+                {
+                    TArray<FName> MaterialKeys;
+                    MaterialCurves.GetKeys(MaterialKeys);
+                    Names.Append(MaterialKeys);
+                }
+            }
+
+            // Morph target curves (when authored as anim curves)
+            {
+                TMap<FName, float> MorphCurves;
+                SourceAnim->GetAnimationCurveList(EAnimCurveType::MorphTargetCurve, MorphCurves);
+                if (!MorphCurves.IsEmpty())
+                {
+                    TArray<FName> MorphKeys;
+                    MorphCurves.GetKeys(MorphKeys);
+                    Names.Append(MorphKeys);
+                }
             }
 
             CurveNames.Reserve(CurveNames.Num() + Names.Num());
