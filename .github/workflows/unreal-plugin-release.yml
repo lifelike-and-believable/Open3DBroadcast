@@ -132,6 +132,55 @@ jobs:
             -TargetPlatforms @("Win64") `
             -Configuration "Shipping"
 
+      # Ensure ThirdParty libraries are bundled into the packaged plugin (for redistribution/rebuilds)
+      - name: Bundle ThirdParty into packaged plugin
+        shell: powershell
+        run: |
+          $pkgRoot = Join-Path $env:RUNNER_TEMP 'PluginPackage'
+          $pluginName = "${{ steps.find.outputs.plugin_name }}"
+          $srcThirdParty = Join-Path "${{ steps.find.outputs.plugin_dir }}" 'ThirdParty'
+
+          if (!(Test-Path $srcThirdParty)) {
+            Write-Warning "Source ThirdParty not found at: $srcThirdParty. Skipping copy."
+            exit 0
+          }
+
+          # Try to detect the packaged plugin directory (usually PluginPackage\Open3DStream)
+          $candidate = Join-Path $pkgRoot $pluginName
+          if (Test-Path $candidate) {
+            $dstPluginDir = $candidate
+          } else {
+            # Fallback: if UAT didn't create a plugin-named subfolder, use the root
+            $dstPluginDir = $pkgRoot
+          }
+
+          $dstThirdParty = Join-Path $dstPluginDir 'ThirdParty'
+          Write-Host "Copying ThirdParty from $srcThirdParty to $dstThirdParty ..."
+          New-Item -ItemType Directory -Force -Path $dstThirdParty | Out-Null
+
+          # Use robocopy to preserve structure; suppress verbose logs
+          $rc = Start-Process -FilePath robocopy -ArgumentList @('"'+$srcThirdParty+'"','"'+$dstThirdParty+'"','/E','/NFL','/NDL','/NJH','/NJS','/NC','/NS') -Wait -PassThru
+          if ($rc.ExitCode -ge 8) {
+            Write-Error "Robocopy failed with exit code $($rc.ExitCode)"
+            exit 1
+          }
+
+          # Sanity check that critical libs made it into the package
+          $expected = @(
+            Join-Path $dstThirdParty 'webrtc\datachannel.lib'),
+            Join-Path $dstThirdParty 'webrtc\juice.lib'),
+            Join-Path $dstThirdParty 'webrtc\usrsctp.lib'),
+            Join-Path $dstThirdParty 'o3ds\lib\Win64\Release\o3ds.lib'
+          )
+          $missing = @()
+          foreach ($p in $expected) { if (!(Test-Path $p)) { $missing += $p } }
+          if ($missing.Count -gt 0) {
+            Write-Warning "ThirdParty copy completed, but some expected libs are missing in the packaged output:"
+            $missing | ForEach-Object { Write-Warning "  - $_" }
+          } else {
+            Write-Host "[OK] ThirdParty libraries bundled into packaged plugin"
+          }
+
       # Open3DBroadcast is now integrated as a module within Open3DStream plugin
       # No separate build step needed - it's built as part of Open3DStream
 
