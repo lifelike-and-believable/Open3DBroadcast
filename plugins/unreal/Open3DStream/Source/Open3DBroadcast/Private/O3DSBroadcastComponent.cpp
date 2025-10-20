@@ -13,7 +13,6 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimCurveTypes.h"
 #include "Animation/MorphTarget.h"
-#include "Animation/SmartName.h"
 
 // CVar to toggle verbose debug logging
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugPose(
