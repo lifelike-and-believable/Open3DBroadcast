@@ -27,33 +27,20 @@ public class Open3DStream : ModuleRules
 		PublicIncludePaths.AddRange( new string[] {} );
 		
 		string LibDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "../../ThirdParty/"));
-		string O3DSDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "../../ThirdParty/o3ds/"));
 		string WebRTCDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "../../ThirdParty/webrtc/"));
 	
 		PrivateIncludePaths.AddRange( new string[] 
         { 
-            O3DSDir + "include",
+            LibDir + "include",
             WebRTCDir + "include"
         } );
 
 		PublicDependencyModuleNames.AddRange( new string[] { "Core" } );
 
-        // O3DS core static library (prebuilt)
-        if (Target.Platform == UnrealTargetPlatform.Win64)
-        {
-            PublicAdditionalLibraries.Add(O3DSDir + "lib/Win64/Release/o3ds.lib");
-        }
-        else if (Target.Platform == UnrealTargetPlatform.Linux)
-        {
-            PublicAdditionalLibraries.Add(O3DSDir + "lib/Linux/Release/libo3ds.a");
-        }
-        else if (Target.Platform == UnrealTargetPlatform.Mac)
-        {
-            PublicAdditionalLibraries.Add(O3DSDir + "lib/Mac/Release/libo3ds.a");
-        }
-
-        // Define NNG_STATIC_LIB for O3DS core (NNG is statically linked into o3ds.lib)
-        PublicDefinitions.Add("NNG_STATIC_LIB");
+        // O3DS static libraries
+        PublicAdditionalLibraries.Add(LibDir + "nng.lib");
+        PublicAdditionalLibraries.Add(LibDir + "flatbuffers.lib");
+        PublicAdditionalLibraries.Add(LibDir + "open3dstreamstatic.lib");
 
         // libdatachannel static library for WebRTC support
         // Note: datachannel depends on usrsctp, juice, and mbedtls libraries
@@ -88,6 +75,7 @@ public class Open3DStream : ModuleRules
             PublicAdditionalLibraries.Add(WebRTCDir + "macos/libmbedcrypto.a");
         }
 
+        PublicDefinitions.Add("NNG_STATIC_LIB");
         PublicDefinitions.Add("RTC_STATIC=1"); // Define RTC_STATIC for static libdatachannel
 
         PrivateDependencyModuleNames.AddRange(
