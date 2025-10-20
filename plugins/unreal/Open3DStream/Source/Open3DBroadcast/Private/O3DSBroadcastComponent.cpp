@@ -1,4 +1,4 @@
-mon// Copyright (c) Open3DStream Contributors
+// Copyright (c) Open3DStream Contributors
 
 #include "O3DSBroadcastComponent.h"
 #include "Open3DBroadcast.h" // for LogO3DSBroadcast category declaration
