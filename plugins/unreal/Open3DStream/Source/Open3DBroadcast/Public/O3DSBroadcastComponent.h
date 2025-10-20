@@ -10,6 +10,71 @@ class USkeletalMeshComponent;
 class USkeleton;
 class USkeletalMesh;
 
+// Descriptor capturing a skeleton's stable description
+USTRUCT()
+struct OPEN3DBROADCAST_API FO3DSSkeletonDescriptor
+{
+    GENERATED_BODY()
+
+    UPROPERTY()
+    TArray<FName> BoneNames;
+
+    UPROPERTY()
+    TArray<int32> ParentIndices;
+
+    // Simple hash to detect changes quickly
+    UPROPERTY()
+    uint64 Hash = 0;
+
+    void Reset()
+    {
+        BoneNames.Reset();
+        ParentIndices.Reset();
+        Hash = 0;
+    }
+
+    bool IsValid() const { return BoneNames.Num() > 0 && BoneNames.Num() == ParentIndices.Num(); }
+};
+
+// Per-frame pose payload (parent-relative transforms in skeleton order)
+USTRUCT()
+struct OPEN3DBROADCAST_API FO3DSPoseFrame
+{
+    GENERATED_BODY()
+
+    // Subject this frame applies to (sanitized)
+    UPROPERTY()
+    FString Subject;
+
+    // Frame counter for debugging/ordering
+    UPROPERTY()
+    uint64 FrameIndex = 0;
+
+    // Parent-relative transforms, same order as FO3DSSkeletonDescriptor.BoneNames
+    UPROPERTY()
+    TArray<FTransform> BoneLocalTransforms;
+
+    // Optional curve names/values aligned arrays
+    UPROPERTY()
+    TArray<FName> CurveNames;
+
+    UPROPERTY()
+    TArray<float> CurveValues;
+
+    void Reset()
+    {
+        Subject.Reset();
+        FrameIndex = 0;
+        BoneLocalTransforms.Reset();
+        CurveNames.Reset();
+        CurveValues.Reset();
+    }
+};
+
+// Delegates to publish descriptor and frame events
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnO3DSDescriptorReady, const FString& /*Subject*/, const FO3DSSkeletonDescriptor& /*Descriptor*/);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnO3DSPoseFrameReady, const FString& /*Subject*/, const FO3DSPoseFrame& /*Frame*/);
+
 UCLASS(ClassGroup=(Open3DStream), meta=(BlueprintSpawnableComponent))
 class OPEN3DBROADCAST_API UO3DSBroadcastComponent : public UActorComponent
 {
@@ -44,6 +109,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast")
     bool bAutoStartCapture = true;
 
+    // Descriptor and Frame events
+    FOnO3DSDescriptorReady OnDescriptorReady;
+    FOnO3DSPoseFrameReady OnPoseFrameReady;
+
 protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -66,11 +135,17 @@ private:
     void RefreshCurveCache(USkeletalMeshComponent* SkelComp);
     void CaptureCurves(USkeletalMeshComponent* SkelComp);
 
+    // Hash helper for descriptor
+    uint64 ComputeDescriptorHash(const TArray<FName>& InNames, const TArray<int32>& InParents) const;
+
     // Cache
     TArray<FName> BoneNames;
     TArray<int32> ParentIndices;
     TWeakObjectPtr<USkeleton> CachedSkeleton;
     TWeakObjectPtr<USkeletalMesh> CachedSkeletalMesh;
+
+    FO3DSSkeletonDescriptor DescriptorCache;
+    bool bDescriptorDirty = false;
 
     // Curve cache and working buffers
     TArray<FName> CurveNames;          // Stable order: Morphs then Anim Curves

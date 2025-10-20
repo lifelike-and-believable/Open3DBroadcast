@@ -146,6 +146,31 @@ void UO3DSBroadcastComponent::UnbindFromTarget()
     }
 }
 
+uint64 UO3DSBroadcastComponent::ComputeDescriptorHash(const TArray<FName>& InNames, const TArray<int32>& InParents) const
+{
+    uint64 H = 1469598103934665603ull; // FNV-1a 64-bit offset basis
+    auto Mix = [&H](const void* Data, SIZE_T Bytes)
+    {
+        const uint8* P = static_cast<const uint8*>(Data);
+        for (SIZE_T i = 0; i < Bytes; ++i)
+        {
+            H ^= P[i];
+            H *= 1099511628211ull; // FNV prime
+        }
+    };
+
+    for (const FName& N : InNames)
+    {
+        const FString S = N.ToString();
+        Mix(*S, S.Len() * sizeof(TCHAR));
+    }
+    if (InParents.Num() > 0)
+    {
+        Mix(InParents.GetData(), InParents.Num() * sizeof(int32));
+    }
+    return H;
+}
+
 void UO3DSBroadcastComponent::EnsureSkeletonCache(USkeletalMeshComponent* SkelComp)
 {
     if (!SkelComp)
@@ -188,9 +213,29 @@ void UO3DSBroadcastComponent::RefreshSkeletonCache(USkeletalMeshComponent* SkelC
         BoneNames.Add(RefSkel.GetBoneName(BoneIndex));
         ParentIndices.Add(RefSkel.GetParentIndex(BoneIndex));
     }
+
+    // Rebuild descriptor cache and mark dirty if changed
+    uint64 NewHash = ComputeDescriptorHash(BoneNames, ParentIndices);
+    bool bChanged = (!DescriptorCache.IsValid()) || (DescriptorCache.BoneNames.Num() != BoneNames.Num()) || (DescriptorCache.Hash != NewHash);
+
+    DescriptorCache.BoneNames = BoneNames;
+    DescriptorCache.ParentIndices = ParentIndices;
+    DescriptorCache.Hash = NewHash;
+    bDescriptorDirty = bChanged;
+
     const bool bDebug = (CVarO3DSBroadcastDebugPose.GetValueOnAnyThread() != 0);
-    if (bDebug) {
-        UE_LOG(LogO3DSBroadcast, Log, TEXT("Cached skeleton for %s: %d bones"), *GetNameSafe(SkelComp), NumBones);
+    if (bDebug)
+    {
+        UE_LOG(LogO3DSBroadcast, Log, TEXT("Cached skeleton for %s: %d bones, Hash=0x%llx%s"),
+            *GetNameSafe(SkelComp), NumBones, (unsigned long long)DescriptorCache.Hash, bDescriptorDirty ? TEXT(" [Changed]") : TEXT(""));
+    }
+
+    // Emit descriptor if updated
+    if (bDescriptorDirty)
+    {
+        const FString Subject = BuildSubjectName(SkelComp);
+        OnDescriptorReady.Broadcast(Subject, DescriptorCache);
+        UE_LOG(LogO3DSBroadcast, Log, TEXT("[O3DS] Descriptor emitted for %s (%d bones)"), *Subject, NumBones);
     }
 }
 
@@ -424,11 +469,11 @@ void UO3DSBroadcastComponent::HandleBoneTransformsFinalized()
     const TArray<FTransform>& CompSpace = SkelComp->GetComponentSpaceTransforms();
     const int32 Count = CompSpace.Num();
 
-    // Guard: ensure names/parents align length-wise; if mismatch, refresh cache and clamp
-    //if (Count != BoneNames.Num())
-    //{
-    //    RefreshSkeletonCache(SkelComp);
-    //}
+    // If skeleton size changed relative to comp space, refresh descriptor
+    if (Count != BoneNames.Num())
+    {
+        RefreshSkeletonCache(SkelComp);
+    }
 
     const int32 N = FMath::Min(Count, BoneNames.Num());
     const FString Subject = BuildSubjectName(SkelComp);
@@ -436,7 +481,7 @@ void UO3DSBroadcastComponent::HandleBoneTransformsFinalized()
     const bool bDebug = (CVarO3DSBroadcastDebugPose.GetValueOnAnyThread() != 0);
     if (bDebug)
     {
-        UE_LOG(LogO3DSBroadcast, Log, TEXT("[O3DS] Pose #%llu Subject=%s Bones=%d"), (unsigned long long)++FrameCounter, *Subject, N);
+        UE_LOG(LogO3DSBroadcast, Log, TEXT("[O3DS] Pose #%llu Subject=%s Bones=%d"), (unsigned long long)(FrameCounter + 1ull), *Subject, N);
     }
 
     // Optional fix: compute effective parent index in the current component-space order
@@ -469,8 +514,12 @@ void UO3DSBroadcastComponent::HandleBoneTransformsFinalized()
         return (ParentByName >= 0 && ParentByName < Count) ? ParentByName : INDEX_NONE;
     };
 
-    // Log first few bones for verification (component-space parent-relative per M0.3)
-    const int32 LogCount = bDebug ? FMath::Min(5, N) : 0;
+    // Build pose frame
+    FO3DSPoseFrame Frame;
+    Frame.Subject = Subject;
+    Frame.FrameIndex = ++FrameCounter;
+    Frame.BoneLocalTransforms.SetNumUninitialized(N);
+
     for (int32 i = 0; i < N; ++i)
     {
         const int32 ParentIdx = GetEffectiveParentIndex(i);
@@ -485,10 +534,16 @@ void UO3DSBroadcastComponent::HandleBoneTransformsFinalized()
             Rel = ThisCS; // root relative to component origin
         }
 
-        if (i < LogCount)
+        // Normalize quaternion to keep stable rotations
+        FQuat Q = Rel.GetRotation();
+        Q.Normalize();
+        Rel.SetRotation(Q);
+
+        Frame.BoneLocalTransforms[i] = Rel;
+
+        if (bDebug && i < 5)
         {
             const FVector T = Rel.GetTranslation();
-            const FQuat Q = Rel.GetRotation().GetNormalized();
             const FVector S = Rel.GetScale3D();
             UE_LOG(LogO3DSBroadcast, Verbose, TEXT("  [%d] %s p=%d T(%.2f,%.2f,%.2f) Q(%.3f,%.3f,%.3f,%.3f) S(%.2f,%.2f,%.2f)"),
                 i, *BoneNames[i].ToString(), ParentIdx, T.X, T.Y, T.Z, Q.X, Q.Y, Q.Z, Q.W, S.X, S.Y, S.Z);
@@ -497,6 +552,19 @@ void UO3DSBroadcastComponent::HandleBoneTransformsFinalized()
 
     // Capture curves after pose
     CaptureCurves(SkelComp);
+    Frame.CurveNames = CurveNames;
+    Frame.CurveValues = CurveValues;
+
+    // If descriptor was marked dirty earlier (e.g., skeleton changed), emit it before first frame after change
+    if (bDescriptorDirty && DescriptorCache.IsValid())
+    {
+        OnDescriptorReady.Broadcast(Subject, DescriptorCache);
+        UE_LOG(LogO3DSBroadcast, Log, TEXT("[O3DS] Descriptor re-sent for %s"), *Subject);
+        bDescriptorDirty = false;
+    }
+
+    // Emit frame
+    OnPoseFrameReady.Broadcast(Subject, Frame);
 }
 
 void UO3DSBroadcastComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
