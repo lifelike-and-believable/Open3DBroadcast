@@ -19,10 +19,10 @@ public:
     UO3DSBroadcastComponent();
 
     // Start/Stop capture controls (C++)
-    UFUNCTION(BlueprintCallable, Category="Open3DStream|Broadcast")
+    UFUNCTION(BlueprintCallable, meta=(CallInEditor), Category="Open3DStream|Broadcast")
     void StartCapture();
 
-    UFUNCTION(BlueprintCallable, Category="Open3DStream|Broadcast")
+    UFUNCTION(BlueprintCallable, meta=(CallInEditor), Category="Open3DStream|Broadcast")
     void StopCapture();
 
     UFUNCTION(BlueprintPure, Category="Open3DStream|Broadcast")
@@ -36,6 +36,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast")
     float CaptureRateHz = 60.0f;
 
+    // Start capture automatically on BeginPlay (helpful for quick editor testing)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast")
+    bool bAutoStartCapture = true;
+
 protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -45,6 +49,7 @@ private:
     void BindToTarget();
     void UnbindFromTarget();
     void HandleBoneTransformsFinalized();
+    void NotifyOnScreen(const FString& Message, const FColor& Color = FColor::Green, float DisplayTime = 2.0f) const;
 
     void EnsureSkeletonCache(USkeletalMeshComponent* SkelComp);
     void RefreshSkeletonCache(USkeletalMeshComponent* SkelComp);
