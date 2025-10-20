@@ -295,6 +295,12 @@ void UO3DSBroadcastComponent::RefreshCurveCache(USkeletalMeshComponent* SkelComp
         }
     }
 
+    // Deterministic ordering: stable-sort lexicographically (case-sensitive)
+    CurveNames.Sort([](const FName& A, const FName& B)
+    {
+        return FCString::Strcmp(*A.ToString(), *B.ToString()) < 0;
+    });
+
     CurveValues.SetNumZeroed(CurveNames.Num());
     bCurveCacheInitialized = true;
 }
