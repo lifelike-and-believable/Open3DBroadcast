@@ -74,6 +74,7 @@ thirdparty/build_quick/
 !Build/*/
 Build/*/**
 !Build/*/PakBlacklist*.txt
+!Build/o3ds-core/CMakeLists.txt
 
 # Don't ignore icon files in Build
 !Build/**/*.ico
