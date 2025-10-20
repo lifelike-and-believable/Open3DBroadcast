@@ -1,13 +1,23 @@
 # Build Scripts and Tools
 
-This directory contains build scripts, test runners, and utilities for developing and testing the Open3DStream Unreal Engine plugin.
+This directory contains build scripts, test runners, utilities for developing and testing the Open3DStream Unreal Engine plugin, and CMake configurations for building prebuilt libraries.
 
 ## Directory Structure
 
 ```
 Build/
-└── Scripts/          # PowerShell and bash scripts for building and testing
+├── Scripts/          # PowerShell and bash scripts for building and testing
+└── o3ds-core/        # CMake configuration for O3DS core prebuilt libraries
+    ├── CMakeLists.txt
+    └── README.md     # Documentation for building O3DS core
 ```
+
+## Prebuilt Libraries
+
+The `o3ds-core/` directory contains the CMake configuration for building O3DS core as prebuilt static libraries. See [o3ds-core/README.md](o3ds-core/README.md) for details on:
+- Building O3DS core via GitHub Actions workflow
+- Downloading and committing artifacts
+- When to rebuild libraries
 
 ## Scripts
 
