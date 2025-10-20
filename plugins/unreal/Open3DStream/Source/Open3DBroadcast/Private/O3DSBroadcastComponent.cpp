@@ -188,12 +188,20 @@ void UO3DSBroadcastComponent::RefreshSkeletonCache(USkeletalMeshComponent* SkelC
         BoneNames.Add(RefSkel.GetBoneName(BoneIndex));
         ParentIndices.Add(RefSkel.GetParentIndex(BoneIndex));
     }
-
-    UE_LOG(LogO3DSBroadcast, Log, TEXT("Cached skeleton for %s: %d bones"), *GetNameSafe(SkelComp), NumBones);
+    const bool bDebug = (CVarO3DSBroadcastDebugPose.GetValueOnAnyThread() != 0);
+    if (bDebug) {
+        UE_LOG(LogO3DSBroadcast, Log, TEXT("Cached skeleton for %s: %d bones"), *GetNameSafe(SkelComp), NumBones);
+    }
 }
 
 FString UO3DSBroadcastComponent::BuildSubjectName(const USkeletalMeshComponent* SkelComp) const
 {
+    // If user provided an explicit subject name, prefer it.
+    if (!SubjectName.IsEmpty())
+    {
+        return SanitizeSubjectName(SubjectName);
+    }
+
     const UWorld* World = SkelComp ? SkelComp->GetWorld() : nullptr;
     const FString WorldName = World ? World->GetName() : TEXT("World");
     const FString ActorName = SkelComp && SkelComp->GetOwner() ? SkelComp->GetOwner()->GetName() : TEXT("Actor");
@@ -417,10 +425,10 @@ void UO3DSBroadcastComponent::HandleBoneTransformsFinalized()
     const int32 Count = CompSpace.Num();
 
     // Guard: ensure names/parents align length-wise; if mismatch, refresh cache and clamp
-    if (Count != BoneNames.Num())
-    {
-        RefreshSkeletonCache(SkelComp);
-    }
+    //if (Count != BoneNames.Num())
+    //{
+    //    RefreshSkeletonCache(SkelComp);
+    //}
 
     const int32 N = FMath::Min(Count, BoneNames.Num());
     const FString Subject = BuildSubjectName(SkelComp);
@@ -431,11 +439,41 @@ void UO3DSBroadcastComponent::HandleBoneTransformsFinalized()
         UE_LOG(LogO3DSBroadcast, Log, TEXT("[O3DS] Pose #%llu Subject=%s Bones=%d"), (unsigned long long)++FrameCounter, *Subject, N);
     }
 
+    // Optional fix: compute effective parent index in the current component-space order
+    auto GetEffectiveParentIndex = [&](int32 BoneIdx) -> int32
+    {
+        // Fast path: cached ref-skeleton parent that is valid for current CompSpace
+        if (BoneIdx >= 0 && BoneIdx < ParentIndices.Num())
+        {
+            const int32 P = ParentIndices[BoneIdx];
+            if (P >= 0 && P < Count)
+            {
+                return P;
+            }
+        }
+
+        // Fallback: use names to resolve a parent index that exists in current CompSpace
+        const FName BoneName = (BoneIdx >= 0 && BoneIdx < BoneNames.Num()) ? BoneNames[BoneIdx] : NAME_None;
+        if (BoneName == NAME_None)
+        {
+            return INDEX_NONE;
+        }
+
+        const FName ParentName = SkelComp->GetParentBone(BoneName);
+        if (ParentName == NAME_None)
+        {
+            return INDEX_NONE;
+        }
+
+        const int32 ParentByName = SkelComp->GetBoneIndex(ParentName);
+        return (ParentByName >= 0 && ParentByName < Count) ? ParentByName : INDEX_NONE;
+    };
+
     // Log first few bones for verification (component-space parent-relative per M0.3)
     const int32 LogCount = bDebug ? FMath::Min(5, N) : 0;
     for (int32 i = 0; i < N; ++i)
     {
-        const int32 ParentIdx = (i < ParentIndices.Num()) ? ParentIndices[i] : INDEX_NONE;
+        const int32 ParentIdx = GetEffectiveParentIndex(i);
         const FTransform& ThisCS = CompSpace[i];
         FTransform Rel;
         if (ParentIdx >= 0 && ParentIdx < CompSpace.Num())

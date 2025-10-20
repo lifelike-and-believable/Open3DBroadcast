@@ -32,6 +32,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast")
     TWeakObjectPtr<USkeletalMeshComponent> TargetMesh;
 
+    // Optional explicit subject name to use for broadcasting. If empty, a synthesized name is used.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast", meta=(DisplayName="Subject Name"))
+    FString SubjectName;
+
     // Optional capture rate limit (Hz). <= 0 means capture every evaluation.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast")
     float CaptureRateHz = 60.0f;
