@@ -119,6 +119,37 @@ jobs:
       # Open3DBroadcast is now integrated as a module within Open3DStream plugin
       # No separate build step needed - it's built as part of Open3DStream
 
+      - name: Copy ThirdParty folder to packaged plugin
+        shell: powershell
+        run: |
+          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
+          $sourcePluginDir = "plugins\unreal\$env:PLUGIN_NAME"
+          $sourceThirdParty = Join-Path $sourcePluginDir "ThirdParty"
+          $targetThirdParty = Join-Path $pkg "$env:PLUGIN_NAME\ThirdParty"
+          
+          Write-Host "Copying ThirdParty folder to packaged plugin..."
+          Write-Host "  Source: $sourceThirdParty"
+          Write-Host "  Target: $targetThirdParty"
+          
+          if (Test-Path $sourceThirdParty) {
+            # Create target directory if it doesn't exist
+            New-Item -ItemType Directory -Force -Path $targetThirdParty | Out-Null
+            
+            # Copy ThirdParty folder contents
+            Copy-Item -Path "$sourceThirdParty\*" -Destination $targetThirdParty -Recurse -Force
+            
+            Write-Host "[OK] ThirdParty folder copied successfully"
+            
+            # List what was copied for verification
+            Write-Host "Contents:"
+            Get-ChildItem -Path $targetThirdParty -Recurse | Select-Object -First 20 | ForEach-Object {
+              Write-Host "  - $($_.FullName -replace [regex]::Escape($targetThirdParty), '')"
+            }
+          } else {
+            Write-Warning "Source ThirdParty folder not found: $sourceThirdParty"
+            Write-Warning "Plugin may not function correctly without third-party libraries"
+          }
+
       # Optional: Build for additional platforms
       # - name: Build plugin (Linux, Shipping)
       #   shell: powershell
