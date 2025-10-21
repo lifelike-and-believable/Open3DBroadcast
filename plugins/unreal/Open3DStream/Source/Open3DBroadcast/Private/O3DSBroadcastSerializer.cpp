@@ -279,9 +279,10 @@ void FO3DSBroadcastSerializer::SerializeFrame(const FString& Subject, const FO3D
     // Ensure matrices are up-to-date for senders that rely on them
     o3subj->CalcMatrices();
 
-    // Serialize
+    // Serialize with real timestamp
     std::vector<char> out;
-    list.Serialize(out, /*timestamp*/ 0.0);
+    const double Now = FPlatformTime::Seconds();
+    list.Serialize(out, /*timestamp*/ Now);
 
     // Metrics accounting
     FSubjectCache& Cache = SubjectState.FindOrAdd(Subject);
@@ -291,7 +292,6 @@ void FO3DSBroadcastSerializer::SerializeFrame(const FString& Subject, const FO3D
         TArray<uint8> Buf;
         Buf.SetNumUninitialized((int32)out.size());
         FMemory::Memcpy(Buf.GetData(), out.data(), out.size());
-        const double Now = FPlatformTime::Seconds();
         OnSerializedFrame.Broadcast(Subject, Buf, Now);
 
         Cache.FramesSerialized++;

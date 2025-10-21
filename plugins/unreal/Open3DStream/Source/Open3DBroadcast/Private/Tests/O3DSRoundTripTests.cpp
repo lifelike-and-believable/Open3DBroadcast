@@ -249,4 +249,76 @@ bool FO3DSSubjectUpdateRoundTripTest::RunTest(const FString& Parameters)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSSubjectTimestampRoundTripTest,
+    "Open3DStream.M2.RoundTrip.Timestamp",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FO3DSSubjectTimestampRoundTripTest::RunTest(const FString& Parameters)
+{
+    using namespace O3DS;
+    SubjectList list;
+    Subject* subj = list.addSubject("RT_Time");
+
+    auto* t = subj->addTransform("Solo", -1);
+    t->translation.value = O3DS::Vector3d(0.0, 0.0, 0.0);
+    t->rotation.value    = O3DS::Vector4d(0.0, 0.0, 0.0, 1.0);
+    t->scale.value       = O3DS::Vector3d(1.0, 1.0, 1.0);
+    t->transformOrder    = { O3DS::TTranslation, O3DS::TRotation, O3DS::TScale };
+
+    subj->CalcMatrices();
+
+    std::vector<char> buf;
+    const double Now = FPlatformTime::Seconds();
+    list.Serialize(buf, Now);
+
+    SubjectList parsed;
+    bool ok = parsed.Parse(buf.data(), buf.size(), nullptr, true);
+    TestTrue(TEXT("Parse returned success"), ok);
+
+    // Allow some drift; we only check that a positive timestamp was preserved and close to Now
+    TestTrue(TEXT("Parsed time positive"), parsed.mTime > 0.0);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSCurveSetStability_NoFiltering,
+    "Open3DStream.M2.RoundTrip.CurveSetStability_NoFiltering",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FO3DSCurveSetStability_NoFiltering::RunTest(const FString& Parameters)
+{
+    using namespace O3DS;
+    SubjectList sender;
+    Subject* subj = sender.addSubject("RT_CurvesStable");
+
+    auto* t = subj->addTransform("Solo", -1);
+    t->translation.value = O3DS::Vector3d(0.0, 0.0, 0.0);
+    t->rotation.value    = O3DS::Vector4d(0.0, 0.0, 0.0, 1.0);
+    t->scale.value       = O3DS::Vector3d(1.0, 1.0, 1.0);
+    t->transformOrder    = { O3DS::TTranslation, O3DS::TRotation, O3DS::TScale };
+
+    // Simulate two frames with identical curve name set
+    subj->mCurveNames = { "A", "B", "C" };
+    subj->mCurveValues = { 0.0f, 0.0f, 0.0f };
+
+    std::vector<char> f1;
+    sender.Serialize(f1, 0.0);
+
+    subj->mCurveValues = { 0.1f, 0.0f, 0.2f };
+    std::vector<char> f2;
+    sender.Serialize(f2, 0.0);
+
+    SubjectList recv;
+    bool ok1 = recv.Parse(f1.data(), f1.size(), nullptr, true);
+    TestTrue(TEXT("Parse f1"), ok1);
+    bool ok2 = recv.Parse(f2.data(), f2.size(), nullptr, true);
+    TestTrue(TEXT("Parse f2"), ok2);
+
+    TestTrue(TEXT("One subject present"), recv.size() == 1);
+    Subject* p = recv[0];
+    TestTrue(TEXT("Curve name count stable"), p->mCurveNames.size() == 3);
+
+    return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

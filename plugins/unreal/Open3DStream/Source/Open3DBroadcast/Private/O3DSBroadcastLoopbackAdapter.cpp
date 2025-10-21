@@ -43,6 +43,22 @@ void UO3DSBroadcastLoopbackAdapter::BeginPlay()
 
 void UO3DSBroadcastLoopbackAdapter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+#if WITH_EDITOR
+    // Remove the in-memory LiveLink source first, before Unhook() resets the pointer
+    if (Source.IsValid())
+    {
+        if (IModularFeatures::Get().IsModularFeatureAvailable(ILiveLinkClient::ModularFeatureName))
+        {
+            ILiveLinkClient* LiveLinkClient = &IModularFeatures::Get().GetModularFeature<ILiveLinkClient>(ILiveLinkClient::ModularFeatureName);
+            if (LiveLinkClient)
+            {
+                // Prefer removing by SourceGuid when available
+                LiveLinkClient->RemoveSource(Source->SourceGuid);
+                UE_LOG(LogO3DSBroadcast, Log, TEXT("[Loopback] In-memory LiveLink source removed"));
+            }
+        }
+    }
+#endif
     Unhook();
     Super::EndPlay(EndPlayReason);
 }
