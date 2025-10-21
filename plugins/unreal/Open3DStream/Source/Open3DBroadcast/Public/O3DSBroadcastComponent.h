@@ -9,6 +9,7 @@
 class USkeletalMeshComponent;
 class USkeleton;
 class USkeletalMesh;
+class FO3DSBroadcastSerializer; // forward decl
 
 // Descriptor capturing a skeleton's stable description
 USTRUCT()
@@ -194,6 +195,9 @@ private:
     bool bIsCapturing = false;
     double LastCaptureTime = 0.0;
     uint64 FrameCounter = 0;
+
+    // Serializer (M2)
+    FO3DSBroadcastSerializer* Serializer = nullptr;
 
     // Reserved for future delegate-based capture when available
     FDelegateHandle BoneTransformsFinalizedHandle;

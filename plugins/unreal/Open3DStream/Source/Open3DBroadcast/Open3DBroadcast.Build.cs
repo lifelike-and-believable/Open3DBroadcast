@@ -36,7 +36,7 @@ public class Open3DBroadcast : ModuleRules
 				"Core",
 				"CoreUObject",
 				"Engine",
-				"Open3DStream"  // Now we can properly depend on Open3DStream since it's in the same plugin
+				"Open3DStream"  // Depend on Open3DStream to access protocol headers and connectors
 			}
 			);
 

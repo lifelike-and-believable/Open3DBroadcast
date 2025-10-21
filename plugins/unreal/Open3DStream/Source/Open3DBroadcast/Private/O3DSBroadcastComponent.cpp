@@ -15,6 +15,7 @@
 #include "Animation/AnimCurveTypes.h"
 #include "Animation/MorphTarget.h"
 #include "Animation/NamedValueArray.h"
+#include "O3DSBroadcastSerializer.h"
 #include <limits>
 
 // CVar to toggle verbose debug logging
@@ -82,6 +83,13 @@ void UO3DSBroadcastComponent::BeginPlay()
 void UO3DSBroadcastComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     StopCapture();
+    // Ensure serializer is cleaned up
+    if (Serializer)
+    {
+        Serializer->Detach(this);
+        delete Serializer;
+        Serializer = nullptr;
+    }
     Super::EndPlay(EndPlayReason);
 }
 
@@ -91,6 +99,14 @@ void UO3DSBroadcastComponent::StartCapture()
     {
         return;
     }
+
+    // Lazily create and attach serializer (M2)
+    if (!Serializer)
+    {
+        Serializer = new FO3DSBroadcastSerializer();
+        Serializer->Attach(this);
+    }
+
     BindToTarget();
     bIsCapturing = TargetMesh.IsValid();
     LastCaptureTime = 0.0;
@@ -110,6 +126,13 @@ void UO3DSBroadcastComponent::StopCapture()
     }
     UnbindFromTarget();
     bIsCapturing = false;
+
+    // Detach serializer (keep allocated for now; freed on EndPlay)
+    if (Serializer)
+    {
+        Serializer->Detach(this);
+    }
+
     UE_LOG(LogO3DSBroadcast, Log, TEXT("O3DS Broadcast: Stopped capture on %s"), *GetNameSafe(TargetMesh.Get()));
     NotifyOnScreen(FString::Printf(TEXT("O3DS Broadcast: Stopped on %s"), *GetNameSafe(TargetMesh.Get())), FColor::Yellow, 2.0f);
 }

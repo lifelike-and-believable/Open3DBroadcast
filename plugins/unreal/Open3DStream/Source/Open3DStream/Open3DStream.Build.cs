@@ -35,6 +35,12 @@ public class Open3DStream : ModuleRules
             WebRTCDir + "include"
         } );
 
+        // Expose O3DS headers to dependent modules (e.g., Open3DBroadcast)
+        PublicIncludePaths.AddRange(new string[]
+        {
+            LibDir + "include"
+        });
+
 		PublicDependencyModuleNames.AddRange( new string[] { "Core" } );
 
         // O3DS static libraries
