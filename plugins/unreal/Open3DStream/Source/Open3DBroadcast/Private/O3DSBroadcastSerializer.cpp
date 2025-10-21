@@ -56,6 +56,7 @@ void FO3DSBroadcastSerializer::BuildOrUpdateCache(const FString& Subject, const 
     FSubjectCache& Cache = SubjectState.FindOrAdd(Subject);
     Cache.SkeletonHash = Descriptor.Hash;
     Cache.ParentIndices = Descriptor.ParentIndices; // copy parent ids for mapping
+    Cache.BoneNames = Descriptor.BoneNames;         // copy bone names
     // Reset descriptor-sent flag so next frame includes Subject
     Cache.bDescriptorSent = false;
 }
@@ -93,14 +94,17 @@ void FO3DSBroadcastSerializer::OnPoseFrameReady(const FString& Subject, const FO
     // Build a minimal descriptor using cached parent indices if available
     FO3DSSkeletonDescriptor Desc;
     Desc.ParentIndices = Cache.ParentIndices;
-    Desc.BoneNames.SetNum(Frame.BoneLocalTransforms.Num()); // names unused by protocol here
+    Desc.BoneNames = Cache.BoneNames;
+    Desc.Hash = Cache.SkeletonHash;
     if (Desc.ParentIndices.Num() != Frame.BoneLocalTransforms.Num())
     {
         // fallback: linear chain if sizes mismatch
         Desc.ParentIndices.SetNum(Frame.BoneLocalTransforms.Num());
+        Desc.BoneNames.SetNum(Frame.BoneLocalTransforms.Num());
         for (int32 i = 0; i < Frame.BoneLocalTransforms.Num(); ++i)
         {
             Desc.ParentIndices[i] = (i == 0) ? -1 : i - 1;
+            if (!Desc.BoneNames.IsValidIndex(i)) { Desc.BoneNames.Add(FName(TEXT("Bone"))); }
         }
     }
 
@@ -117,7 +121,14 @@ void FO3DSBroadcastSerializer::BuildSubjectFromDescriptor(const FString& Subject
     for (int32 i = 0; i < BoneCount; ++i)
     {
         const int32 ParentId = Descriptor.ParentIndices.IsValidIndex(i) ? Descriptor.ParentIndices[i] : -1;
-        auto* t = OutSubject.addTransform("", ParentId);
+        const char* NodeName = "";
+        std::string NodeNameStd;
+        if (Descriptor.BoneNames.IsValidIndex(i))
+        {
+            NodeNameStd = ToStd(Descriptor.BoneNames[i]);
+            NodeName = NodeNameStd.c_str();
+        }
+        auto* t = OutSubject.addTransform(NodeName, ParentId);
         // Identity TRS in descriptor; values arrive per-frame
         t->translation.value = O3DS::Vector3d(0.0, 0.0, 0.0);
         t->rotation.value    = O3DS::Vector4d(0.0, 0.0, 0.0, 1.0);

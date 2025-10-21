@@ -39,6 +39,7 @@ private:
     struct FSubjectCache
     {
         uint64 SkeletonHash = 0;                  // hash from FO3DSSkeletonDescriptor
+        TArray<FName> BoneNames;                  // cached bone names from descriptor
         TArray<int32> ParentIndices;              // cached parent indices from descriptor
         TArray<FName> CurveNames;                 // stable full curve name set for descriptor
         TMap<FName, int32> CurveIndex;            // map for quick value placement

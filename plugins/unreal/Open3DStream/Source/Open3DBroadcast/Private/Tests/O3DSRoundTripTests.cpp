@@ -180,6 +180,12 @@ bool FO3DSSubjectUpdateRoundTripTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Receiver parsed full"), ok);
     TestTrue(TEXT("Receiver has one subject"), recv.size() == 1);
 
+    // Baseline receiver child's translation
+    Subject* pr0 = recv[0];
+    pr0->CalcMatrices();
+    auto* rChild0 = (*pr0).mTransforms[1];
+    auto baseChildT = rChild0->mMatrix.GetTranslation();
+
     // Seed last-sent state so deltas are relative to current values
     root->translation.sent();
     root->rotation.sent();
@@ -191,7 +197,7 @@ bool FO3DSSubjectUpdateRoundTripTest::RunTest(const FString& Parameters)
     // Set delta threshold on the sender
     sender.SetDeltaThreshold(0.001);
 
-    // 1) Update below threshold -> expect no bytes
+    // 1) Update below threshold -> expect zero subject updates (count==0). Buffer may contain protocol overhead.
     root->translation.value = O3DS::Vector3d(0.0001, 0.0, 0.0); // below threshold
 
     std::vector<char> updSmall;
@@ -199,7 +205,22 @@ bool FO3DSSubjectUpdateRoundTripTest::RunTest(const FString& Parameters)
     sender.SerializeUpdate(updSmall, countSmall, /*ts*/0.0);
 
     TestTrue(TEXT("Small update count == 0"), countSmall == 0);
-    TestTrue(TEXT("Small update buffer empty"), updSmall.empty());
+
+    // If any bytes present, parsing them should not change the receiver's transforms
+    if (!updSmall.empty())
+    {
+        bool okSmall = recv.Parse(updSmall.data(), updSmall.size(), nullptr, true);
+        TestTrue(TEXT("Receiver parsed small update"), okSmall);
+
+        Subject* pr1 = recv[0];
+        pr1->CalcMatrices();
+        auto* rChild1 = (*pr1).mTransforms[1];
+        auto childT1 = rChild1->mMatrix.GetTranslation();
+
+        TestTrue(TEXT("Child T.X unchanged on small update"), NearlyEqual(childT1[0], baseChildT[0]));
+        TestTrue(TEXT("Child T.Y unchanged on small update"), NearlyEqual(childT1[1], baseChildT[1]));
+        TestTrue(TEXT("Child T.Z unchanged on small update"), NearlyEqual(childT1[2], baseChildT[2]));
+    }
 
     // 2) Update above threshold on child -> expect bytes and parsed state changes
     const O3DS::Vector3d NewChildT(1.2, 0.0, 0.0);
