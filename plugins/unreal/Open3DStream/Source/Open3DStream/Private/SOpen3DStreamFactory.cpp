@@ -18,11 +18,11 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 	Options.Add(MakeShareable(new FString("NNG Subscribe (to NNG Publish)")));
 	Options.Add(MakeShareable(new FString("NNG Client (to NNG Server)")));
 	Options.Add(MakeShareable(new FString("NNG Server (to NNG Client)")));
-	Options.Add(MakeShareable(new FString("NNG Server (to NNG Client)")));
 	Options.Add(MakeShareable(new FString("TCP Client")));
 	Options.Add(MakeShareable(new FString("UDP Server")));
 	Options.Add(MakeShareable(new FString("WebRTC Client")));
 	Options.Add(MakeShareable(new FString("WebRTC Server")));
+	Options.Add(MakeShareable(new FString("Loopback (In-Editor Test)")));
 
 	if (SOpen3DStreamFactory::LastUrl.IsEmpty())
 	{
@@ -113,7 +113,7 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 					.Text(LOCTEXT("OkayButton", "Okay"))
 				]
 			]
-   		    + SHorizontalBox::Slot()
+    		+ SHorizontalBox::Slot()
 			.FillWidth(0.3f)
 		]
 		+ SVerticalBox::Slot()

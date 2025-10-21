@@ -44,6 +44,7 @@ public class Open3DBroadcast : ModuleRules
 			new string[]
 			{
 				"LiveLinkInterface",
+				"LiveLink",
 				"AnimGraphRuntime"
 			}
 			);

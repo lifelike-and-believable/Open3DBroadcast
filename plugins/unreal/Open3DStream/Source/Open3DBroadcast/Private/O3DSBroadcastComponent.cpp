@@ -105,6 +105,11 @@ void UO3DSBroadcastComponent::StartCapture()
     {
         Serializer = new FO3DSBroadcastSerializer();
         Serializer->Attach(this);
+        // Relay serialized frames out of the component for dev/testing (loopback)
+        Serializer->OnSerializedFrame.AddLambda([this](const FString& Subject, const TArray<uint8>& Buffer, double Timestamp)
+        {
+            OnSerializedFrame.Broadcast(Subject, Buffer, Timestamp);
+        });
     }
 
     BindToTarget();
@@ -223,12 +228,14 @@ void UO3DSBroadcastComponent::RefreshSkeletonCache(USkeletalMeshComponent* SkelC
     CachedSkeletalMesh = Mesh;
     CachedSkeleton = Skeleton;
 
-    if (!Skeleton)
+    if (!Mesh)
     {
         return;
     }
 
-    const FReferenceSkeleton& RefSkel = Skeleton->GetReferenceSkeleton();
+    // IMPORTANT: Build descriptor from the mesh's reference skeleton, not the USkeleton asset.
+    // This guarantees index order matches GetComponentSpaceTransforms() and vertex skinning.
+    const FReferenceSkeleton& RefSkel = Mesh->GetRefSkeleton();
     const int32 NumBones = RefSkel.GetNum();
     BoneNames.Reserve(NumBones);
     ParentIndices.Reserve(NumBones);

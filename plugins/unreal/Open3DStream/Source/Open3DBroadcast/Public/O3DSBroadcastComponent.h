@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "O3DSBroadcastSerializer.h"
 #include "O3DSBroadcastComponent.generated.h"
 
 class USkeletalMeshComponent;
@@ -143,6 +144,9 @@ public:
     // Descriptor and Frame events
     FOnO3DSDescriptorReady OnDescriptorReady;
     FOnO3DSPoseFrameReady OnPoseFrameReady;
+
+    // Serialized bytes event (component-level relay from serializer). Useful for dev loopback.
+    FOnO3DSSerializedFrame OnSerializedFrame;
 
 protected:
     virtual void BeginPlay() override;

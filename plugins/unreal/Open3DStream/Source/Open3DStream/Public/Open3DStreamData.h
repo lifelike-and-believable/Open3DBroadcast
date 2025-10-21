@@ -12,7 +12,12 @@ struct OPEN3DSTREAM_API FOpen3DStreamData
 public:
 	GENERATED_USTRUCT_BODY()
 	
-	FOpen3DStreamData() = default;
+	FOpen3DStreamData()
+		: Url(FText::GetEmpty())
+		, TimeOffset(0.0)
+		, Key(FText::GetEmpty())
+		, Protocol(FText::GetEmpty())
+	{}
 	
 	FOpen3DStreamData(const FText& InUrl, double InTimeOffset)
 		: Url(InUrl)

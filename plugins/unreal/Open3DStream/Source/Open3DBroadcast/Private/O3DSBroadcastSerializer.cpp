@@ -7,6 +7,9 @@
 // Core protocol headers
 #include "o3ds/model.h"
 
+// UE includes
+#include "HAL/IConsoleManager.h"
+
 namespace
 {
     // Convert UE types to std::string (UTF-8)
@@ -18,7 +21,22 @@ namespace
     {
         return std::string(TCHAR_TO_UTF8(*N.ToString()));
     }
+
+    // Debug CVars (editor/dev facing)
+    static TAutoConsoleVariable<int32> CVarO3DSDebugSerialize(
+        TEXT("o3ds.Broadcast.DebugSerialize"),
+        0,
+        TEXT("Enable verbose serialization logging (0=off,1=on)."),
+        ECVF_Default);
+
+    static TAutoConsoleVariable<int32> CVarO3DSDebugStats(
+        TEXT("o3ds.Broadcast.DebugStats"),
+        0,
+        TEXT("Enable per-frame basic stats logging (0=off,1=on)."),
+        ECVF_Default);
 }
+
+TArray<FO3DSBroadcastSerializer*> FO3DSBroadcastSerializer::GInstances;
 
 FO3DSBroadcastSerializer::FO3DSBroadcastSerializer() = default;
 FO3DSBroadcastSerializer::~FO3DSBroadcastSerializer() = default;
@@ -36,6 +54,21 @@ void FO3DSBroadcastSerializer::Attach(UO3DSBroadcastComponent* InComponent)
 
     Component = InComponent;
 
+    // Register instance for console stats dumping
+    GInstances.AddUnique(this);
+
+    // Register console command once per process (idempotent)
+    static bool bRegisteredCmd = false;
+    if (!bRegisteredCmd)
+    {
+        IConsoleManager::Get().RegisterConsoleCommand(
+            TEXT("o3ds.Broadcast.DumpStats"),
+            TEXT("Dump per-subject serialization stats to the log"),
+            FConsoleCommandDelegate::CreateStatic(&FO3DSBroadcastSerializer::DumpAllStats),
+            ECVF_Default);
+        bRegisteredCmd = true;
+    }
+
     // Bind delegates
     Component->OnDescriptorReady.AddRaw(this, &FO3DSBroadcastSerializer::OnDescriptorReady);
     Component->OnPoseFrameReady.AddRaw(this, &FO3DSBroadcastSerializer::OnPoseFrameReady);
@@ -48,17 +81,31 @@ void FO3DSBroadcastSerializer::Detach(UO3DSBroadcastComponent* InComponent)
         Component->OnDescriptorReady.RemoveAll(this);
         Component->OnPoseFrameReady.RemoveAll(this);
         Component = nullptr;
+
+        GInstances.Remove(this);
     }
 }
 
 void FO3DSBroadcastSerializer::BuildOrUpdateCache(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor)
 {
     FSubjectCache& Cache = SubjectState.FindOrAdd(Subject);
+    const bool bHashChanged = (Cache.SkeletonHash != Descriptor.Hash);
     Cache.SkeletonHash = Descriptor.Hash;
     Cache.ParentIndices = Descriptor.ParentIndices; // copy parent ids for mapping
     Cache.BoneNames = Descriptor.BoneNames;         // copy bone names
     // Reset descriptor-sent flag so next frame includes Subject
     Cache.bDescriptorSent = false;
+
+    // Log descriptor built/rebuilt when enabled
+    if (CVarO3DSDebugSerialize.GetValueOnAnyThread() != 0)
+    {
+        UE_LOG(LogO3DSBroadcast, Log, TEXT("Descriptor %s for Subject=%s Bones=%d Curves=%d Hash=%llu"),
+            bHashChanged ? TEXT("rebuilt") : TEXT("built"),
+            *Subject,
+            Cache.BoneNames.Num(),
+            Cache.CurveNames.Num(),
+            (unsigned long long)Cache.SkeletonHash);
+    }
 }
 
 void FO3DSBroadcastSerializer::EnsureCurveIndex(FSubjectCache& Cache)
@@ -73,6 +120,18 @@ void FO3DSBroadcastSerializer::EnsureCurveIndex(FSubjectCache& Cache)
 void FO3DSBroadcastSerializer::OnDescriptorReady(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor)
 {
     BuildOrUpdateCache(Subject, Descriptor);
+}
+
+static inline bool HasInvalid(const FTransform& T)
+{
+    const FVector Tr = T.GetTranslation();
+    const FQuat R = T.GetRotation();
+    const FVector S = T.GetScale3D();
+    auto IsBad = [](double v){ return !FMath::IsFinite(v); };
+    if (IsBad(Tr.X) || IsBad(Tr.Y) || IsBad(Tr.Z)) return true;
+    if (IsBad(R.X) || IsBad(R.Y) || IsBad(R.Z) || IsBad(R.W)) return true;
+    if (IsBad(S.X) || IsBad(S.Y) || IsBad(S.Z)) return true;
+    return false;
 }
 
 void FO3DSBroadcastSerializer::OnPoseFrameReady(const FString& Subject, const FO3DSPoseFrame& Frame)
@@ -91,20 +150,43 @@ void FO3DSBroadcastSerializer::OnPoseFrameReady(const FString& Subject, const FO
         Cache.bDescriptorSent = false; // ensure descriptor goes out with curves
     }
 
-    // Build a minimal descriptor using cached parent indices if available
+    // Validate sizes
+    const int32 BoneCount = Frame.BoneLocalTransforms.Num();
+    if (BoneCount <= 0)
+    {
+        Cache.DroppedFrames++;
+        Cache.LastError = TEXT("Empty transform array");
+        UE_LOG(LogO3DSBroadcast, Warning, TEXT("Skipping frame: Subject=%s reason=%s"), *Subject, *Cache.LastError);
+        return;
+    }
+
+    // Validate data
+    for (int32 i = 0; i < BoneCount; ++i)
+    {
+        if (HasInvalid(Frame.BoneLocalTransforms[i]))
+        {
+            Cache.DroppedFrames++;
+            Cache.LastError = FString::Printf(TEXT("NaN/Inf at bone %d"), i);
+            UE_LOG(LogO3DSBroadcast, Warning, TEXT("Skipping frame: Subject=%s reason=%s"), *Subject, *Cache.LastError);
+            return;
+        }
+    }
+
+    // Build a descriptor using cached skeleton and clamp to current required bones count
     FO3DSSkeletonDescriptor Desc;
     Desc.ParentIndices = Cache.ParentIndices;
     Desc.BoneNames = Cache.BoneNames;
     Desc.Hash = Cache.SkeletonHash;
-    if (Desc.ParentIndices.Num() != Frame.BoneLocalTransforms.Num())
+
+    const int32 RequiredCount = Frame.BoneLocalTransforms.Num();
+    if (Desc.ParentIndices.Num() != RequiredCount)
     {
-        // fallback: linear chain if sizes mismatch
-        Desc.ParentIndices.SetNum(Frame.BoneLocalTransforms.Num());
-        Desc.BoneNames.SetNum(Frame.BoneLocalTransforms.Num());
-        for (int32 i = 0; i < Frame.BoneLocalTransforms.Num(); ++i)
+        // Clamp to match the transforms count so indices and names remain valid
+        Desc.ParentIndices.SetNum(RequiredCount);
+        Desc.BoneNames.SetNum(RequiredCount);
+        if (CVarO3DSDebugSerialize.GetValueOnAnyThread() != 0)
         {
-            Desc.ParentIndices[i] = (i == 0) ? -1 : i - 1;
-            if (!Desc.BoneNames.IsValidIndex(i)) { Desc.BoneNames.Add(FName(TEXT("Bone"))); }
+            UE_LOG(LogO3DSBroadcast, Verbose, TEXT("Clamped descriptor to RequiredCount=%d for Subject=%s"), RequiredCount, *Subject);
         }
     }
 
@@ -201,6 +283,9 @@ void FO3DSBroadcastSerializer::SerializeFrame(const FString& Subject, const FO3D
     std::vector<char> out;
     list.Serialize(out, /*timestamp*/ 0.0);
 
+    // Metrics accounting
+    FSubjectCache& Cache = SubjectState.FindOrAdd(Subject);
+
     if (!out.empty())
     {
         TArray<uint8> Buf;
@@ -208,6 +293,55 @@ void FO3DSBroadcastSerializer::SerializeFrame(const FString& Subject, const FO3D
         FMemory::Memcpy(Buf.GetData(), out.data(), out.size());
         const double Now = FPlatformTime::Seconds();
         OnSerializedFrame.Broadcast(Subject, Buf, Now);
-        UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[M2] Serialized Subject=%s Bones=%d Curves=%d Bytes=%d"), *Subject, Frame.BoneLocalTransforms.Num(), Frame.CurveValues.Num(), Buf.Num());
+
+        Cache.FramesSerialized++;
+        Cache.BytesSerialized += (uint64)Buf.Num();
+
+        const bool bLogSerialize = (CVarO3DSDebugSerialize.GetValueOnAnyThread() != 0);
+        if (bLogSerialize)
+        {
+            UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[M2] Serialized Subject=%s Bones=%d Curves=%d Bytes=%d"), *Subject, Frame.BoneLocalTransforms.Num(), Frame.CurveValues.Num(), Buf.Num());
+        }
+
+        if (CVarO3DSDebugStats.GetValueOnAnyThread() != 0)
+        {
+            UE_LOG(LogO3DSBroadcast, Verbose, TEXT("Stats Subject=%s Frames=%llu Bytes=%llu Dropped=%llu"),
+                *Subject,
+                (unsigned long long)Cache.FramesSerialized,
+                (unsigned long long)Cache.BytesSerialized,
+                (unsigned long long)Cache.DroppedFrames);
+        }
+    }
+}
+
+void FO3DSBroadcastSerializer::DumpStatsInstance() const
+{
+    for (const TPair<FString, FSubjectCache>& Pair : SubjectState)
+    {
+        const FString& Subject = Pair.Key;
+        const FSubjectCache& Cache = Pair.Value;
+        UE_LOG(LogO3DSBroadcast, Display, TEXT("Subject=%s Frames=%llu Bytes=%llu Dropped=%llu LastError=%s"),
+            *Subject,
+            (unsigned long long)Cache.FramesSerialized,
+            (unsigned long long)Cache.BytesSerialized,
+            (unsigned long long)Cache.DroppedFrames,
+            Cache.LastError.IsEmpty() ? TEXT("<none>") : *Cache.LastError);
+    }
+}
+
+void FO3DSBroadcastSerializer::DumpAllStats()
+{
+    UE_LOG(LogO3DSBroadcast, Display, TEXT("---- O3DS Broadcast Serializer Stats ----"));
+    if (GInstances.Num() == 0)
+    {
+        UE_LOG(LogO3DSBroadcast, Display, TEXT("(no active serializer instances)"));
+        return;
+    }
+    for (const FO3DSBroadcastSerializer* Instance : GInstances)
+    {
+        if (Instance)
+        {
+            Instance->DumpStatsInstance();
+        }
     }
 }
