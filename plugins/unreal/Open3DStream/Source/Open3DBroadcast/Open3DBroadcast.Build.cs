@@ -48,6 +48,13 @@ public class Open3DBroadcast : ModuleRules
 				"AnimGraphRuntime"
 			}
 			);
+
+		PrivateDependencyModuleNames.AddRange(new string[]
+		{
+			"Projects",
+			"Sockets",
+			"Networking"
+		});
 				
 		DynamicallyLoadedModuleNames.AddRange( new string[] {} );
 	}
