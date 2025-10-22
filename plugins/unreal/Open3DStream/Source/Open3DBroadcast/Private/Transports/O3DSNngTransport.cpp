@@ -1,5 +1,6 @@
 #include "Transports/O3DSNngTransport.h"
 #include "Open3DBroadcast.h"
+#include "HAL/PlatformTime.h" // FPlatformTime::Seconds
 
 // Use NNG via Open3DStream third-party includes
 #include <nng/nng.h>

@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "IBroadcastTransport.h"
+#include "Containers/Queue.h" // TQueue, EQueueMode
 #include "O3DSBroadcastTransportAdapter.generated.h"
 
 class UO3DSBroadcastComponent;
