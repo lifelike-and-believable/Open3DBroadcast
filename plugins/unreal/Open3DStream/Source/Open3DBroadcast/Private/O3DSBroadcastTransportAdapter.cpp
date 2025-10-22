@@ -10,6 +10,7 @@
 #include "Transports/O3DSUdpTransport.h"
 #include "Transports/O3DSTcpServerTransport.h"
 #include "Transports/O3DSNngTransport.h"
+#include "Transports/O3DSWebRtcTransport.h"
 
 // CVars (runtime overrides)
 TAutoConsoleVariable<int32> UO3DSBroadcastTransportAdapter::CVarEnable(
@@ -167,6 +168,8 @@ TUniquePtr<IBroadcastTransport> UO3DSBroadcastTransportAdapter::CreateTransport(
             return MakeUnique<FO3DSUdpTransport>();
         case EO3DSTransportKind::NNG:
             return MakeUnique<FO3DSNngTransport>();
+        case EO3DSTransportKind::WebRTC:
+            return MakeUnique<FO3DSWebRtcTransport>();
         default:
             break;
     }

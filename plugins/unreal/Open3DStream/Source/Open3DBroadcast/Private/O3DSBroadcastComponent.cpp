@@ -24,6 +24,7 @@
 #include "Transports/O3DSTcpServerTransport.h"
 #include "Transports/O3DSUdpTransport.h"
 #include "Transports/O3DSNngTransport.h"
+#include "Transports/O3DSWebRtcTransport.h"
 
 // CVar to toggle verbose debug logging
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugPose(
@@ -123,6 +124,9 @@ void UO3DSBroadcastComponent::SetupInternalTransport()
             break;
         case EO3DSTransportKind::NNG:
             InternalTransport = MakeUnique<FO3DSNngTransport>();
+            break;
+        case EO3DSTransportKind::WebRTC:
+            InternalTransport = MakeUnique<FO3DSWebRtcTransport>();
             break;
         default:
             break;
