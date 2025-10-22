@@ -19,14 +19,13 @@ Value capture
 - Morph clamping: optional `bClampMorphCurvesToUnit` clamps to [0..1]
 - NaN/Inf guard: drop individual curves during filtering when enabled
 
-Filtering behavior (proposed/documented)
-- Default: `bEnableCurveFiltering=false` ? always send full curve name set and values; indices stable; receiver static data unchanged
+Filtering behavior
+- Default: `bEnableCurveFiltering=false` (stable name set each frame)
 - When `bEnableCurveFiltering=true`:
   - Include/exclude patterns applied
   - Epsilon filtering: drop |v| < `CurveEpsilon`
   - Delta filtering: drop |v - lastSent| < `CurveDeltaThreshold`
-  - Trade-off: Dropping entries changes the per-frame curve name set. Receivers like LiveLink will detect property-name changes and may refresh static data, causing overhead
-  - Recommendation for M2: leave filtering disabled for stable subjects; enable only for bandwidth-sensitive testing
+  - Trade-off: Dropping entries changes the per-frame curve name set; receivers may refresh static data
   - Future option: keep name set stable and send zeros for dropped values (M3+)
 
 Acceptance notes
@@ -37,6 +36,10 @@ CVars and settings
 - See `UO3DSBroadcastComponent` properties:
   - `bClampMorphCurvesToUnit`, `bDropNaNAndInfinity`, `bEnableCurveFiltering`
   - `CurveEpsilon`, `CurveDeltaThreshold`, `IncludeCurvePatterns`, `ExcludeCurvePatterns`, `bLogFilteredCurves`
+
+Diagnostics
+- Enable `o3ds.Broadcast.DebugCurves` for verbose logging of the first few curves.
+- Use transport commands for runtime counters: `o3ds.Broadcast.Transport.DumpStats`, `o3ds.Broadcast.Transport.DumpTransportStats`.
 
 References
 - `Plugins/Open3DStream/Source/Open3DBroadcast/Private/O3DSBroadcastComponent.cpp`

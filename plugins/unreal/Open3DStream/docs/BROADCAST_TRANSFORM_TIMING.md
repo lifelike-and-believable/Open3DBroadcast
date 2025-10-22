@@ -20,8 +20,8 @@ LOD and required bones
 - Descriptor is not rebuilt due to LOD; descriptor re-sent on actual mesh/skeleton change
 
 Validation
-- NaN/Inf in transforms cause the frame to be dropped and a warning logged
-- Debug CVars: `o3ds.Broadcast.DebugPose`, `o3ds.Broadcast.DebugSerialize`, `o3ds.Broadcast.DebugStats`
+- Debug CVars: `o3ds.Broadcast.DebugPose`, `o3ds.Broadcast.DebugCurves`
+- Stats/diagnostics: use `o3ds.Broadcast.Transport.DumpStats` and `o3ds.Broadcast.Transport.DumpTransportStats` to inspect queues and counters.
 
 References
 - `Plugins/Open3DStream/Source/Open3DBroadcast/Private/O3DSBroadcastComponent.cpp`

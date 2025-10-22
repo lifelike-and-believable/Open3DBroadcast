@@ -35,6 +35,12 @@ Compatibility and limits
 - Curve count: determined by component cache; see CURVE_CAPTURE doc.
 - Message size: full TRS + full curves per frame in M2; no compression by default.
 
+Diagnostics and stats
+- Counters: FramesSent, BytesSent, Dropped, Reconnects are tracked per-transport.
+- UE console commands:
+  - `o3ds.Broadcast.Transport.DumpStats` (adapter queue/counters overview)
+  - `o3ds.Broadcast.Transport.DumpTransportStats` (per-transport counters and connection state)
+
 References
 - `Plugins/Open3DStream/Source/Open3DBroadcast/Private/O3DSBroadcastSerializer.cpp`
 - `Plugins/Open3DStream/Source/Open3DBroadcast/Private/O3DSBroadcastComponent.cpp`
