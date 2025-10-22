@@ -3,6 +3,11 @@
 #include "CoreMinimal.h"
 #include "IBroadcastTransport.h"
 #include "HAL/ThreadSafeCounter.h"
+#include "Containers/Queue.h"          // TQueue, EQueueMode
+#include "HAL/Event.h"                 // FEvent
+#include "HAL/Runnable.h"              // FRunnable
+#include "HAL/RunnableThread.h"        // FRunnableThread
+#include "HAL/PlatformProcess.h"       // FPlatformProcess
 
 // NNG-based transport supporting publisher (default) and pair modes
 // URL forms:
