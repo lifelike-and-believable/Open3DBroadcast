@@ -15,7 +15,7 @@ on:
 
 jobs:
   build-windows:
-    name: Build libdatachannel (Windows)
+    name: Build libdatachannel - WebRTC (Windows)
     runs-on: self-hosted  # Use same runner as Unreal plugin CI to ensure toolchain compatibility
     defaults:
       run:
@@ -127,7 +127,7 @@ jobs:
           path: artifacts/windows
 
   build-linux:
-    name: Build libdatachannel (Linux)
+    name: Build libdatachannel - WebRTC (Linux)
     runs-on: ubuntu-latest
 
     steps:
