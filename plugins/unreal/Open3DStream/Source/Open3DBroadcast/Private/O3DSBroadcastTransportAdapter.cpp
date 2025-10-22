@@ -9,6 +9,7 @@
 #include "Transports/O3DSTcpTransport.h"
 #include "Transports/O3DSUdpTransport.h"
 #include "Transports/O3DSTcpServerTransport.h"
+#include "Transports/O3DSNngTransport.h"
 
 // CVars (runtime overrides)
 TAutoConsoleVariable<int32> UO3DSBroadcastTransportAdapter::CVarEnable(
@@ -49,6 +50,28 @@ void UO3DSBroadcastTransportAdapter::BeginPlay()
             TEXT("Dump transport adapter stats for all instances"),
             FConsoleCommandDelegate::CreateStatic(&UO3DSBroadcastTransportAdapter::DumpAllStats),
             ECVF_Default);
+
+        IConsoleManager::Get().RegisterConsoleCommand(
+            TEXT("o3ds.Broadcast.Transport.DumpTransportStats"),
+            TEXT("Dump transport-level counters for all active transports"),
+            FConsoleCommandDelegate::CreateLambda([]()
+            {
+                UE_LOG(LogO3DSBroadcast, Display, TEXT("---- O3DS Transport Counters ----"));
+                for (const UO3DSBroadcastTransportAdapter* A : GTransportAdapters)
+                {
+                    if (!A || !A->TransportImpl) continue;
+                    const IBroadcastTransport::FCounters& C = A->TransportImpl->GetCounters();
+                    const bool bConn = A->TransportImpl->IsConnected();
+                    UE_LOG(LogO3DSBroadcast, Display, TEXT("%s: Connected=%s FramesSent=%llu BytesSent=%llu Dropped=%llu Reconnects=%llu"),
+                        *GetNameSafe(A->GetOwner()), bConn?TEXT("true"):TEXT("false"),
+                        (unsigned long long)C.FramesSent.Load(),
+                        (unsigned long long)C.BytesSent.Load(),
+                        (unsigned long long)C.FramesDropped.Load(),
+                        (unsigned long long)C.Reconnects.Load());
+                }
+            }),
+            ECVF_Default);
+
         bRegisteredCmd = true;
     }
 
@@ -142,7 +165,8 @@ TUniquePtr<IBroadcastTransport> UO3DSBroadcastTransportAdapter::CreateTransport(
             return MakeUnique<FO3DSTcpServerTransport>();
         case EO3DSTransportKind::UDP:
             return MakeUnique<FO3DSUdpTransport>();
-        // NNG, WebRTC will be added in later milestones
+        case EO3DSTransportKind::NNG:
+            return MakeUnique<FO3DSNngTransport>();
         default:
             break;
     }

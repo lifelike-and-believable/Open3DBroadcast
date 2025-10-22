@@ -23,6 +23,7 @@
 #include "Transports/O3DSTcpTransport.h"
 #include "Transports/O3DSTcpServerTransport.h"
 #include "Transports/O3DSUdpTransport.h"
+#include "Transports/O3DSNngTransport.h"
 
 // CVar to toggle verbose debug logging
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugPose(
@@ -119,6 +120,9 @@ void UO3DSBroadcastComponent::SetupInternalTransport()
             break;
         case EO3DSTransportKind::UDP:
             InternalTransport = MakeUnique<FO3DSUdpTransport>();
+            break;
+        case EO3DSTransportKind::NNG:
+            InternalTransport = MakeUnique<FO3DSNngTransport>();
             break;
         default:
             break;
