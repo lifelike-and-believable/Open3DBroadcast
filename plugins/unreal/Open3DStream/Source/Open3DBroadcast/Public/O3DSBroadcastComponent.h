@@ -4,11 +4,81 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "O3DSBroadcastSerializer.h"
+#include "O3DSBroadcastTransportAdapter.h" // for EO3DSTransportKind
 #include "O3DSBroadcastComponent.generated.h"
 
 class USkeletalMeshComponent;
 class USkeleton;
 class USkeletalMesh;
+class FO3DSBroadcastSerializer; // forward decl
+
+class IBroadcastTransport; // fwd
+
+// Descriptor capturing a skeleton's stable description
+USTRUCT()
+struct OPEN3DBROADCAST_API FO3DSSkeletonDescriptor
+{
+    GENERATED_BODY()
+
+    UPROPERTY()
+    TArray<FName> BoneNames;
+
+    UPROPERTY()
+    TArray<int32> ParentIndices;
+
+    // Simple hash to detect changes quickly
+    UPROPERTY()
+    uint64 Hash = 0;
+
+    void Reset()
+    {
+        BoneNames.Reset();
+        ParentIndices.Reset();
+        Hash = 0;
+    }
+
+    bool IsValid() const { return BoneNames.Num() > 0 && BoneNames.Num() == ParentIndices.Num(); }
+};
+
+// Per-frame pose payload (parent-relative transforms in skeleton order)
+USTRUCT()
+struct OPEN3DBROADCAST_API FO3DSPoseFrame
+{
+    GENERATED_BODY()
+
+    // Subject this frame applies to (sanitized)
+    UPROPERTY()
+    FString Subject;
+
+    // Frame counter for debugging/ordering
+    UPROPERTY()
+    uint64 FrameIndex = 0;
+
+    // Parent-relative transforms, same order as FO3DSSkeletonDescriptor.BoneNames
+    UPROPERTY()
+    TArray<FTransform> BoneLocalTransforms;
+
+    // Optional curve names/values aligned arrays
+    UPROPERTY()
+    TArray<FName> CurveNames;
+
+    UPROPERTY()
+    TArray<float> CurveValues;
+
+    void Reset()
+    {
+        Subject.Reset();
+        FrameIndex = 0;
+        BoneLocalTransforms.Reset();
+        CurveNames.Reset();
+        CurveValues.Reset();
+    }
+};
+
+// Delegates to publish descriptor and frame events
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnO3DSDescriptorReady, const FString& /*Subject*/, const FO3DSSkeletonDescriptor& /*Descriptor*/);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnO3DSPoseFrameReady, const FString& /*Subject*/, const FO3DSPoseFrame& /*Frame*/);
 
 UCLASS(ClassGroup=(Open3DStream), meta=(BlueprintSpawnableComponent))
 class OPEN3DBROADCAST_API UO3DSBroadcastComponent : public UActorComponent
@@ -32,6 +102,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast")
     TWeakObjectPtr<USkeletalMeshComponent> TargetMesh;
 
+    // Optional explicit subject name to use for broadcasting. If empty, a synthesized name is used.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast", meta=(DisplayName="Subject Name"))
+    FString SubjectName;
+
     // Optional capture rate limit (Hz). <= 0 means capture every evaluation.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast")
     float CaptureRateHz = 60.0f;
@@ -39,6 +113,59 @@ public:
     // Start capture automatically on BeginPlay (helpful for quick editor testing)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast")
     bool bAutoStartCapture = true;
+
+    // Built-in transport (optional): enable to auto-send serialized frames without adding a second component
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport")
+    bool bAutoCreateTransport = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
+    EO3DSTransportKind Transport = EO3DSTransportKind::Disabled;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
+    FString TransportUrl = TEXT("tcp://127.0.0.1:9000");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
+    FString TransportKey;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
+    int32 TransportMaxQueuedBytes = 8 * 1024 * 1024;
+
+    // Curve normalization and filtering configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves")
+    bool bClampMorphCurvesToUnit = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves")
+    bool bDropNaNAndInfinity = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves|Filtering")
+    bool bEnableCurveFiltering = false;
+
+    // Drop very small values: |v| < Epsilon
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves|Filtering", meta=(EditCondition="bEnableCurveFiltering", ClampMin="0.0"))
+    float CurveEpsilon = 0.0005f;
+
+    // Send only if |v - lastSent| >= DeltaThreshold
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves|Filtering", meta=(EditCondition="bEnableCurveFiltering", ClampMin="0.0"))
+    float CurveDeltaThreshold = 0.001f;
+
+    // If non-empty, only curves matching at least one include pattern will be considered
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves|Filtering", meta=(EditCondition="bEnableCurveFiltering"))
+    TArray<FString> IncludeCurvePatterns;
+
+    // Curves matching any exclude pattern will be dropped
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves|Filtering", meta=(EditCondition="bEnableCurveFiltering"))
+    TArray<FString> ExcludeCurvePatterns;
+
+    // Log filtered/dropped curves for debugging
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves|Filtering")
+    bool bLogFilteredCurves = false;
+
+    // Descriptor and Frame events
+    FOnO3DSDescriptorReady OnDescriptorReady;
+    FOnO3DSPoseFrameReady OnPoseFrameReady;
+
+    // Serialized bytes event (component-level relay from serializer). Useful for dev loopback.
+    FOnO3DSSerializedFrame OnSerializedFrame;
 
 protected:
     virtual void BeginPlay() override;
@@ -62,15 +189,28 @@ private:
     void RefreshCurveCache(USkeletalMeshComponent* SkelComp);
     void CaptureCurves(USkeletalMeshComponent* SkelComp);
 
+    // Filtering helpers
+    bool NameMatchesPattern(const FString& Text, const FString& Pattern) const;
+    bool IsCurveAllowedByPatterns(const FName& Name) const;
+    void BuildFilteredCurves(TArray<FName>& OutNames, TArray<float>& OutValues);
+
+    // Hash helper for descriptor
+    uint64 ComputeDescriptorHash(const TArray<FName>& InNames, const TArray<int32>& InParents) const;
+
     // Cache
     TArray<FName> BoneNames;
     TArray<int32> ParentIndices;
     TWeakObjectPtr<USkeleton> CachedSkeleton;
     TWeakObjectPtr<USkeletalMesh> CachedSkeletalMesh;
 
+    FO3DSSkeletonDescriptor DescriptorCache;
+    bool bDescriptorDirty = false;
+
     // Curve cache and working buffers
     TArray<FName> CurveNames;          // Stable order: Morphs then Anim Curves
-    TArray<float> CurveValues;         // Same length as CurveNames
+    TArray<float> CurveValues;         // Same length as CurveNames, latest evaluated values
+    TArray<float> LastSentCurveValues; // Last sent values for delta filtering
+    TArray<uint8> LastSentHasValue;    // 0/1 per index indicating LastSentCurveValues set
     TSet<FName> MorphNameSet;          // For quick lookup when filling values
     TSet<FName> CurveNameSet;          // To avoid duplicates across sources
     bool bCurveCacheInitialized = false;
@@ -79,6 +219,21 @@ private:
     double LastCaptureTime = 0.0;
     uint64 FrameCounter = 0;
 
+    // Serializer (M2)
+    FO3DSBroadcastSerializer* Serializer = nullptr;
+
     // Reserved for future delegate-based capture when available
     FDelegateHandle BoneTransformsFinalizedHandle;
+
+    // Optional built-in transport members
+    TUniquePtr<IBroadcastTransport> InternalTransport;
+    struct FQItem { TArray<uint8> Data; double Ts = 0.0; };
+    TQueue<FQItem, EQueueMode::Mpsc> SendQueue;
+    TAtomic<uint64> QueuedBytes{0};
+    TAtomic<uint64> DroppedFrames{0};
+    FDelegateHandle SerializedFrameHandle;
+
+    void SetupInternalTransport();
+    void TeardownInternalTransport();
+    void OnSerializedForTransport(const FString& /*Subject*/, const TArray<uint8>& Buffer, double Timestamp);
 };

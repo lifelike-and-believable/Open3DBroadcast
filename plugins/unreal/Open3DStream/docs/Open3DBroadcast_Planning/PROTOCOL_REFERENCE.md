@@ -82,16 +82,40 @@ Parse/unpack
   - Calls `ParseSubject` for Subject entries and `ParseUpdate` for SubjectUpdate entries.
 - `ParseSubject` copies subject metadata (axes, format), clears and fills transforms and curves.
 
+## Transform components and `transformOrder` (critical)
+
+- Component-space TRS is the default encoding for bones.
+- TRS serialization is controlled by `Transform::transformOrder`:
+  - You must set `transformOrder = { TTranslation, TRotation, TScale }` on each `Transform` you intend to serialize.
+  - If `transformOrder` is empty, TRS components are not serialized and receivers will reconstruct identity transforms (0 translation, unit scale, identity rotation) unless matrices were sent.
+- Do not send both TRS and raw matrices for the same node in a single frame. Prefer TRS to minimize payload size and keep semantics clear.
+- Call `Subject::CalcMatrices()` prior to serialization to ensure internal matrices reflect the current TRS (useful for senders/consumers that rely on matrices internally).
+
+Example:
+```cpp
+auto* t = subj->addTransform("Bone", parentId);
+t->translation.value = O3DS::Vector3d(Tx, Ty, Tz);
+t->rotation.value    = O3DS::Vector4d(Qx, Qy, Qz, Qw);
+t->scale.value       = O3DS::Vector3d(Sx, Sy, Sz);
+// Ensure TRS is serialized
+t->transformOrder = { O3DS::TTranslation, O3DS::TRotation, O3DS::TScale };
+```
+
 ## Field alignment and lifecycle rules
 - Bone transforms order: Per Subject, the receiver expects per-frame arrays to align with the Subject’s nodes vector.
 - Curves alignment: Curve values are aligned by index to the names vector; send names in Subject; per-frame send values (or updates) only.
-- Descriptor resend: If the skeleton or curve set changes, resend a full Subject before sending further updates.
+- Descriptor resend: If the skeleton topology or curve set/order changes, resend a full Subject before sending further updates (reset delta state).
 - Multiple meshes: Batch multiple Subjects (and/or updates) into a single SubjectList per frame for efficiency.
 
 ## Coordinate system and units
 - Coordinate system: Unreal default (left-handed, Z-up). Carry axes in Subject (x_axis, y_axis, z_axis) for explicitness.
 - Units: Unreal centimeters. Do not apply unit scaling in the protocol; handle conversions in adapters if needed.
 - Transform space: Use component-space transforms for bones (parent-relative) to match stable skeletal hierarchies.
+
+## Delta/Update frames (later milestones)
+- `Subject::SerializeUpdate`/`SubjectList::SerializeUpdate` implement delta-threshold behavior. After successfully transmitting a component, call `translation.sent()`, `rotation.sent()`, and `scale.sent()` to advance last-sent state so `delta()` is meaningful.
+- Keep the same `transformOrder` in updates as in the descriptor frame; mismatches will apply deltas in the wrong order.
+- If any structural aspect changes (skeleton, curve set, order), send a full Subject frame and reset delta state before resuming updates.
 
 ## Minimal C++ packing example (sketch)
 
@@ -106,7 +130,10 @@ O3DS::Subject* subj = list.addSubject("World/Actor/SkeletalMesh");
 
 // Transforms (parent-relative/component space)
 auto* t = subj->addTransform("Root", -1);
-// fill translation/rotation/scale on t->translation.value, t->rotation.value, t->scale.value
+// Fill TRS
+// ...
+// Ensure TRS is serialized
+t->transformOrder = { O3DS::TTranslation, O3DS::TRotation, O3DS::TScale };
 
 // Optional curves
 subj->mCurveNames = {"Smile", "EyeBlink_L"};
@@ -123,9 +150,11 @@ list.Serialize(buf /*out*/, /*timestamp*/ 0.0 /*uses GetTime() when 0*/);
 - Auto-reconnect and backpressure are transport concerns in the adapter; the protocol payload is identical regardless of transport.
 
 ## Validation and tests
-- Round-trip tests: See `test_curves.cpp`, `test_curve_comprehensive.cpp` and `SubjectList::Parse` in `model.cpp`.
-- Receiver compatibility: Existing Unreal LiveLink source (`FOpen3DStreamSource`) consumes SubjectList, maps subjects to LiveLink subjects.
-- Recommended smoke test: One sender UE instance (planned Open3DBroadcast) → One receiver UE instance (existing Open3DStream source) over TCP/UDP/NNG.
+- Round-trip tests in this workspace validate TRS round-trips when `transformOrder` is set:
+  - `Open3DStream.M2.RoundTrip.Subject` — two-node hierarchy with curves.
+  - `Open3DStream.M2.RoundTrip.SubjectNoCurves` — single-node, no curves.
+- Additional core tests: `test_curves.cpp`, `test_curve_comprehensive.cpp`.
+- Receiver compatibility: Existing Unreal LiveLink source (`FOpen3DStreamSource`) consumes `SubjectList` and maps to LiveLink subjects.
 
 ## Limitations and notes
 - No exceptions in hot paths; use boolean results and `getError()` from connectors.
@@ -138,6 +167,7 @@ list.Serialize(buf /*out*/, /*timestamp*/ 0.0 /*uses GetTime() when 0*/);
 - Curves: Names sent once in Subject; values per-frame via Subject or SubjectUpdate; index-aligned.
 - Timestamps: Include `time` in SubjectList; also capture engine timecode separately in the adapter if needed (not in protocol).
 - Backpressure: Latest-wins—drop oldest pending frame if connector write is busy; batch multiple subjects per frame.
+- Enforcement in broadcaster: The Unreal broadcaster sets `transformOrder` for every node and calls `CalcMatrices()` prior to serialization to keep internal state consistent.
 
 ---
 

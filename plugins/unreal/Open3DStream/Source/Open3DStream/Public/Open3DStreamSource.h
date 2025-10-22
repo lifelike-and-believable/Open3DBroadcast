@@ -25,78 +25,81 @@ E:\Unreal\UE_4.25\Engine\Plugins\Animation\LiveLink\Source\LiveLink\Private\
 class OPEN3DSTREAM_API FOpen3DStreamSource : public ILiveLinkSource, public TSharedFromThis<FOpen3DStreamSource>, public FTickableGameObject
 {
 public:
-	FOpen3DStreamSource();
-	FOpen3DStreamSource(const FOpen3DStreamSettings& Settings);
-	virtual ~FOpen3DStreamSource();
+    FOpen3DStreamSource();
+    FOpen3DStreamSource(const FOpen3DStreamSettings& Settings);
+    virtual ~FOpen3DStreamSource();
 
-	// ILiveLinkSource Overrides
-	virtual void ReceiveClient(ILiveLinkClient* InClient, FGuid InSourceGuid) override;
+    // ILiveLinkSource Overrides
+    virtual void ReceiveClient(ILiveLinkClient* InClient, FGuid InSourceGuid) override;
 
-	virtual bool RequestSourceShutdown() override;
+    virtual bool RequestSourceShutdown() override;
 
-	FText SourceType;
-	FText SourceMachineName;
-	FText SourceStatus;
+    FText SourceType;
+    FText SourceMachineName;
+    FText SourceStatus;
 
 
-	virtual FText GetSourceType() const override { return SourceType; };
-	virtual FText GetSourceMachineName() const override { return SourceMachineName; }
-	virtual FText GetSourceStatus() const override { return SourceStatus; }
+    virtual FText GetSourceType() const override { return SourceType; };
+    virtual FText GetSourceMachineName() const override { return SourceMachineName; }
+    virtual FText GetSourceStatus() const override { return SourceStatus; }
 
-	// FTickableGameObject interface
-	virtual void    Tick(float DeltaTime) override;
-	virtual bool    IsTickable() const override;
-	virtual TStatId GetStatId() const override { RETURN_QUICK_DECLARE_CYCLE_STAT(FOpen3DStreamSource, STATGROUP_Tickables); }
-	virtual bool    IsTickableInEditor() const override { return true; }
-	virtual bool    IsTickableWhenPaused() const override { return true; }
+    // FTickableGameObject interface
+    virtual void    Tick(float DeltaTime) override;
+    virtual bool    IsTickable() const override;
+    virtual TStatId GetStatId() const override { RETURN_QUICK_DECLARE_CYCLE_STAT(FOpen3DStreamSource, STATGROUP_Tickables); }
+    virtual bool    IsTickableInEditor() const override { return true; }
+    virtual bool    IsTickableWhenPaused() const override { return true; }
 
-	// Settings
-	virtual void InitializeSettings(ULiveLinkSourceSettings* Settings);
-	virtual TSubclassOf < ULiveLinkSourceSettings > GetSettingsClass() const;
-	
-	ULiveLinkSourceSettings* Settings;
+    // Settings
+    virtual void InitializeSettings(ULiveLinkSourceSettings* Settings);
+    virtual TSubclassOf < ULiveLinkSourceSettings > GetSettingsClass() const;
+    
+    ULiveLinkSourceSettings* Settings;
 
-	ILiveLinkClient* Client;
-	FGuid            SourceGuid;
-	TArray<FName>    InitializedSubjects;
-	FText            Url;
-	FText            Key;
-	FText            Protocol;
-	float            TimeOffset;
-	double           ArrivalTimeOffset;
-	int              Frame;
-	bool             LogFlag;
+    ILiveLinkClient* Client;
+    FGuid            SourceGuid;
+    TArray<FName>    InitializedSubjects;
+    FText            Url;
+    FText            Key;
+    FText            Protocol;
+    float            TimeOffset;
+    double           ArrivalTimeOffset;
+    int              Frame;
+    bool             LogFlag;
 
-	std::atomic<bool>  bIsValid;
+    std::atomic<bool>  bIsValid;
 
-	O3DSServer server;
+    O3DSServer server;
 
-	TSharedRef<FInternetAddr> mAddr;
+    TSharedRef<FInternetAddr> mAddr;
 
-	std::vector<char> buffer;
+    std::vector<char> buffer;
 
-	O3DS::SubjectList mSubjects;
+    O3DS::SubjectList mSubjects;
 
-	void OnPackage(const TArray<uint8>&);
-	void OnStatus(FText, bool);
+    void OnPackage(const TArray<uint8>&);
+    void OnStatus(FText, bool);
 
-	FORCEINLINE void UpdateConnectionLastActive();
-	FCriticalSection ConnectionLastActiveSection;
-	double ConnectionLastActive;
+    FORCEINLINE void UpdateConnectionLastActive();
+    FCriticalSection ConnectionLastActiveSection;
+    double ConnectionLastActive;
 
-	virtual bool IsSourceStillValid() const override
-	{
-		return Client != nullptr && bIsValid;
-	}
+    virtual bool IsSourceStillValid() const override
+    {
+        return Client != nullptr && bIsValid;
+    }
 
-	virtual void Update() override;
+    virtual void Update() override;
 
-	// Track activity to remove subjects that are not active in a while
-	constexpr static float CheckInterval = 5.0f;
-	float TimeSinceLastCheck = 0.0f;
-	TMap<FName, double> SubjectLastUpdateTime;
-	constexpr static double InactivityThreshold = 5.0;
-	void RemoveInactiveSubjects();
+    // Track activity to remove subjects that are not active in a while
+    constexpr static float CheckInterval = 5.0f;
+    float TimeSinceLastCheck = 0.0f;
+    TMap<FName, double> SubjectLastUpdateTime;
+    constexpr static double InactivityThreshold = 5.0;
+    void RemoveInactiveSubjects();
 
+    // Runtime tracking of subject static data to detect changes
+    TMap<FName, uint64> SubjectSkeletonHash;   // hash of bone names + parents
+    TMap<FName, uint64> SubjectCurveSetHash;   // hash of curve name set/order
 };
 

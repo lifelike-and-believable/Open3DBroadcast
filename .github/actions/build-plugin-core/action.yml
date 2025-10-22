@@ -101,18 +101,27 @@ runs:
       shell: powershell
       run: |
         $pluginLib = "plugins\unreal\${{ inputs.plugin_name }}\ThirdParty"
+        
+        # Copy to new o3ds/ structure (prebuilt lib location)
+        New-Item -ItemType Directory -Force -Path "$pluginLib\o3ds\include\o3ds" | Out-Null
+        New-Item -ItemType Directory -Force -Path "$pluginLib\o3ds\lib\Win64\Release" | Out-Null
+        Copy-Item "vsbuild\src\${{ inputs.build_type }}\open3dstreamstatic.lib" "$pluginLib\o3ds\lib\Win64\Release\o3ds.lib" -Force
+        Copy-Item "src\o3ds\*.h" "$pluginLib\o3ds\include\o3ds\" -Force
+        Copy-Item "src\o3ds_generated.h" "$pluginLib\o3ds\include\" -Force
+        
+        # Also copy to legacy locations for backward compatibility during transition
         New-Item -ItemType Directory -Force -Path "$pluginLib\include\o3ds" | Out-Null
         New-Item -ItemType Directory -Force -Path "$pluginLib\include\nng" | Out-Null
         New-Item -ItemType Directory -Force -Path "$pluginLib\include\flatbuffers" | Out-Null
 
-        Copy-Item "vsbuild\src\${{ inputs.build_type }}\open3dstreamstatic.lib" "$pluginLib\"
-        Copy-Item "thirdparty\build\nng\${{ inputs.build_type }}\nng.lib" "$pluginLib\"
-        Copy-Item "thirdparty\build\flatbuffers\${{ inputs.build_type }}\flatbuffers.lib" "$pluginLib\"
+        Copy-Item "vsbuild\src\${{ inputs.build_type }}\open3dstreamstatic.lib" "$pluginLib\" -ErrorAction SilentlyContinue
+        Copy-Item "thirdparty\build\nng\${{ inputs.build_type }}\nng.lib" "$pluginLib\" -ErrorAction SilentlyContinue
+        Copy-Item "thirdparty\build\flatbuffers\${{ inputs.build_type }}\flatbuffers.lib" "$pluginLib\" -ErrorAction SilentlyContinue
 
-        Copy-Item "src\o3ds\*.h" "$pluginLib\include\o3ds\" -Force
-        Copy-Item "src\o3ds_generated.h" "$pluginLib\include\" -Force
-        if (Test-Path "usr\include\nng") { Copy-Item "usr\include\nng\*" "$pluginLib\include\nng\" -Recurse -Force }
-        if (Test-Path "usr\include\flatbuffers") { Copy-Item "usr\include\flatbuffers\*" "$pluginLib\include\flatbuffers\" -Recurse -Force }
+        Copy-Item "src\o3ds\*.h" "$pluginLib\include\o3ds\" -Force -ErrorAction SilentlyContinue
+        Copy-Item "src\o3ds_generated.h" "$pluginLib\include\" -Force -ErrorAction SilentlyContinue
+        if (Test-Path "usr\include\nng") { Copy-Item "usr\include\nng\*" "$pluginLib\include\nng\" -Recurse -Force -ErrorAction SilentlyContinue }
+        if (Test-Path "usr\include\flatbuffers") { Copy-Item "usr\include\flatbuffers\*" "$pluginLib\include\flatbuffers\" -Recurse -Force -ErrorAction SilentlyContinue }
 
     - name: Locate plugin (.uplugin)
       id: find

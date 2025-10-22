@@ -23,15 +23,39 @@ O3DSServer::O3DSServer()
 	, mBuffer(nullptr)
 	, mBufferSize(0)
 	, mPtr(0)
-	, mGoodTime(0.0f)
+	, mGoodTime(0.0)
 	, mNoDataFlag(false)
 	, mState(eState::SYNC)
+	, mTcpIp()
+	, mTcpPort(0)
+	, mLastTcpConnectAttempt(0.0)
+	, mTcpBackoffAttempt(0)
+	, mTcpAnnouncedConnected(false)
 {
+	// Initialize mGoodTime to current time to avoid immediate "No Data" warning
+	mGoodTime = FPlatformTime::Seconds();
 }
 
 O3DSServer::~O3DSServer()
 {
 	stop();
+}
+
+static bool ParseTcpUrl(const FString& In, FString& OutIp, int32& OutPort)
+{
+	FString Work = In;
+	if (Work.StartsWith(TEXT("tcp://")))
+	{
+		Work.RightChopInline(6, false);
+	}
+	int32 Colon = INDEX_NONE;
+	if (!Work.FindChar(':', Colon))
+	{
+		return false;
+	}
+	OutIp = Work.Left(Colon);
+	OutPort = FCString::Atoi(*Work.Mid(Colon + 1));
+	return !OutIp.IsEmpty() && OutPort > 0;
 }
 
 bool O3DSServer::start(FText Url, FText Protocol )
@@ -40,8 +64,6 @@ bool O3DSServer::start(FText Url, FText Protocol )
 
 	const char* surl = TCHAR_TO_ANSI(*Url.ToString());
 	const char* sprotocol = TCHAR_TO_ANSI(*Protocol.ToString());
-
-	// Note: Connection status message formatting removed - was unused
 
 	// NNG
 	if (strncmp(sprotocol, "NNG Subscribe", 13) == 0)
@@ -137,7 +159,20 @@ bool O3DSServer::start(FText Url, FText Protocol )
 			FString port = parseme.Right(parseme.Len() - pos - 1);
 
 			FIPv4Address address;
-			FIPv4Address::Parse(ip, address);
+
+			// Support shorthands: "*" => any, "0.0.0.0" => any, "localhost" => loopback
+			if (ip == TEXT("*") || ip == TEXT("0.0.0.0"))
+			{
+				address = FIPv4Address::Any;
+			}
+			else if (ip.Equals(TEXT("localhost"), ESearchCase::IgnoreCase))
+			{
+				address = FIPv4Address::InternalLoopback;
+			}
+			else
+			{
+				FIPv4Address::Parse(ip, address);
+			}
 
 			FIPv4Endpoint Endpoint(address, FCString::Atoi(*port));
 
@@ -163,12 +198,8 @@ bool O3DSServer::start(FText Url, FText Protocol )
 					TArray<uint8> Data;
 					Data.AddUninitialized(DataPtr->TotalSize());
 					DataPtr->Serialize(Data.GetData(), DataPtr->TotalSize());
-					mUdpMapper.addFragment((const char*)Data.GetData(), Data.Num());
-					std::vector<char> buf;
-					if (mUdpMapper.getFrame(buf))
-					{
-						if (OnData.IsBound()) { OnData.Execute(TArray<uint8>((uint8*)buf.data(), buf.size())); }
-					}
+					// Forward raw datagram as a complete O3DS message; broadcaster ensures one-message-per-datagram
+					if (OnData.IsBound()) { OnData.Execute(Data); }
 				});
 
 			mUdpReceiver->Start();
@@ -181,8 +212,7 @@ bool O3DSServer::start(FText Url, FText Protocol )
 	if (strcmp(sprotocol, "TCP Client") == 0)
 	{
 		mState = eState::SYNC;
-
-		mTcp = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateSocket(NAME_Stream, TEXT("default"), false);
+		mTcpAnnouncedConnected = false;
 
 		FString parseme(surl);
 
@@ -190,39 +220,38 @@ bool O3DSServer::start(FText Url, FText Protocol )
 			parseme = parseme.Right(parseme.Len() - 6);
 		}
 
-		int32 pos;
-		if (parseme.FindChar(':', pos))
-		{
-			FString ip = parseme.Left(pos);
-			FString port = parseme.Right(parseme.Len() - pos - 1);
-
-			FIPv4Address address;
-			FIPv4Address::Parse(ip, address);
-
-			TSharedRef<FInternetAddr> addr = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateInternetAddr();
-			addr->SetIp(address.Value);
-			addr->SetPort(FCString::Atoi(*port));
-
-			if (!mTcp->Connect(*addr))
-			{
-				OnState.ExecuteIfBound(LOCTEXT("NotConnected", "TCP Not Connected"), true);
-				mTcp->Close();
-				delete mTcp;
-				mTcp = nullptr;
-				return false;
-			}
-
-			mTcp->SetNonBlocking();
-			OnState.ExecuteIfBound(LOCTEXT("TCPConnected", "TCP Connected"), false);
-		}
-		else
+		// Cache URL parts for retries and use non-blocking connect
+		if (!ParseTcpUrl(parseme, mTcpIp, mTcpPort))
 		{
 			OnState.ExecuteIfBound(LOCTEXT("InvalidAddress", "Invalid Address"), true);
-			mTcp->Close();
-			delete mTcp;
-			mTcp = nullptr;
 			return false;
 		}
+
+		mTcp = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateSocket(NAME_Stream, TEXT("O3DS_TCP_CLIENT"), false);
+		if (!mTcp)
+		{
+			OnState.ExecuteIfBound(LOCTEXT("SocketCreateFailed", "TCP Socket Create Failed"), true);
+			return false;
+		}
+		mTcp->SetNonBlocking();
+
+		FIPv4Address address;
+		FIPv4Address::Parse(mTcpIp, address);
+		TSharedRef<FInternetAddr> addr = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateInternetAddr();
+		addr->SetIp(address.Value);
+		addr->SetPort(mTcpPort);
+
+		(void)mTcp->Connect(*addr); // may be pending
+		mLastTcpConnectAttempt = FPlatformTime::Seconds();
+		mTcpBackoffAttempt = 0;
+		mGoodTime = FPlatformTime::Seconds(); // Reset timer to avoid immediate "No Data" warning
+		
+		// Provide initial status
+		OnState.ExecuteIfBound(FText::Format(LOCTEXT("TCPConnecting", "TCP Connecting to {0}:{1}..."), 
+			FText::FromString(mTcpIp), FText::AsNumber(mTcpPort)), false);
+		
+		// Do not report failure immediately; Tick will resolve state
+		return true;
 	}
 
 	return true;
@@ -260,6 +289,7 @@ void O3DSServer::stop()
 		ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(mTcp);
 		mTcp = nullptr;
 	}
+	mTcpAnnouncedConnected = false;
 }
 
 bool O3DSServer::write(const char *msg, size_t len)
@@ -293,87 +323,262 @@ void O3DSServer::tick()
 		mWebRTCConnector->Tick();
 	}
 
-	if (!mNoDataFlag && FPlatformTime::Seconds() - mGoodTime > 1)
+	const double Now = FPlatformTime::Seconds();
+	
+	// TCP connection management
+	if (!mTcpIp.IsEmpty() && mTcpPort > 0)
 	{
-		OnState.ExecuteIfBound(LOCTEXT("NoData", "No Data"), true);
-		mNoDataFlag = true;
-	}
-
-	// Handle tcp - TODO: thread?
-	if (mTcp)
-	{
-		while (1)
+		ESocketConnectionState ConnState = ESocketConnectionState::SCS_NotConnected;
+		
+		// Check for "No Data" warning only when connected
+		if (mTcp)
 		{
-			int32 read = 0;
-
-			if (mState == eState::SYNC)
+			ConnState = mTcp->GetConnectionState();
+			bool bIsConnected = (ConnState == ESocketConnectionState::SCS_Connected);
+			
+			if (ConnState == ESocketConnectionState::SCS_Connected)
 			{
-				mPtr = 0;
-
-				if (!ReadTcp(1))
-					return;
-
-				if (mBuffer[0] != 0x00) continue;
-
-				bool ok = true;
-				for (int i = 1; i < 14; i++)
+				if (!mTcpAnnouncedConnected)
 				{
-					if (!ReadTcp(i+1))
-						return;
-					if (mBuffer[i] != header[i]) {
-						ok = false;  break;
+					UE_LOG(LogTemp, Log, TEXT("O3DS: TCP Connected to %s:%d"), *mTcpIp, mTcpPort);
+					OnState.ExecuteIfBound(LOCTEXT("TCPConnected", "TCP Connected"), false);
+					mTcpAnnouncedConnected = true;
+					mState = eState::SYNC; // reset parser on (re)connect
+					mPtr = 0;
+					mTcpBackoffAttempt = 0;
+					mGoodTime = Now; // Reset data timer on connection
+				}
+				
+				// If we haven't received data in a while and are connected, 
+				// the connection might be dead - try a 0-byte read to probe it
+				if (Now - mGoodTime > 2.0)
+				{
+					int32 Dummy = 0;
+					uint8 ProbeBuffer;
+					if (!mTcp->Recv(&ProbeBuffer, 0, Dummy))
+					{
+						ESocketErrors Err = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->GetLastErrorCode();
+						// If we get an actual error (not just EWOULDBLOCK), the connection is dead
+						if (Err != ESocketErrors::SE_EWOULDBLOCK && Err != ESocketErrors::SE_NO_ERROR)
+						{
+							UE_LOG(LogTemp, Warning, TEXT("O3DS: Socket probe detected dead connection (error %d)"), (int32)Err);
+							
+							OnState.ExecuteIfBound(FText::Format(LOCTEXT("TCPDisconnected", "TCP Disconnected from {0}:{1}, reconnecting..."), 
+								FText::FromString(mTcpIp), FText::AsNumber(mTcpPort)), true);
+							
+							mTcp->Close();
+							ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(mTcp);
+							mTcp = nullptr;
+							mTcpAnnouncedConnected = false;
+							ConnState = ESocketConnectionState::SCS_NotConnected;
+							mState = eState::SYNC;
+							mPtr = 0;
+							mLastTcpConnectAttempt = 0.0; // Allow immediate reconnection
+							
+							UE_LOG(LogTemp, Warning, TEXT("O3DS: Socket destroyed, will attempt reconnection"));
+						}
 					}
 				}
-				if (!ok) break;
-
-				mState = eState::HEADER;
-			}
-
-			if (mState == eState::HEADER)
-			{
-				while (mPtr < 18)
+				
+				// Fallback: if no data for 5 seconds, force reconnection even if probe didn't detect error
+				if (Now - mGoodTime > 5.0)
 				{
-					if (!ReadTcp(18))
-						return;
-				}
-
-				if (strncmp((char*)mBuffer, (char*)header, 14) != 0)
-				{
-					OnState.ExecuteIfBound(LOCTEXT("MalformedData", "Malformed Data"), true);
+					UE_LOG(LogTemp, Warning, TEXT("O3DS: No data for 5+ seconds, forcing reconnection"));
+					
+					OnState.ExecuteIfBound(FText::Format(LOCTEXT("TCPTimeout", "TCP Connection timeout, reconnecting to {0}:{1}..."), 
+						FText::FromString(mTcpIp), FText::AsNumber(mTcpPort)), true);
+					
+					mTcp->Close();
+					ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(mTcp);
+					mTcp = nullptr;
+					mTcpAnnouncedConnected = false;
+					ConnState = ESocketConnectionState::SCS_NotConnected;
 					mState = eState::SYNC;
-					continue;
+					mPtr = 0;
+					mLastTcpConnectAttempt = 0.0; // Allow immediate reconnection
 				}
-				mState = eState::DATA;
+				
+				// Show "No Data" warning if we haven't detected a dead connection
+				if (!mNoDataFlag && Now - mGoodTime > 1.0)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("O3DS: No data for %.1fs, socket state=%d"), Now - mGoodTime, (int32)ConnState);
+					OnState.ExecuteIfBound(LOCTEXT("NoData", "No Data"), true);
+					mNoDataFlag = true;
+				}
 			}
-
-			if (mState == eState::DATA)
+			else if (ConnState == ESocketConnectionState::SCS_ConnectionError)
 			{
-				bucketSize = *(uint32_t*)(mBuffer + 14);
-
-				if (bucketSize > 1024 * 50)
-				{
-					OnState.ExecuteIfBound(LOCTEXT("MalformedData", "Malformed Data"), true);
-					mState = eState::SYNC;
-					continue;
-				}
-
-				while (mPtr < bucketSize + 18)
-				{
-					if (!ReadTcp(bucketSize + 18))
-						return;
-				}
-
-
-				// Process
-				TArray<uint8> Data;
-				Data.Append((uint8*)(mBuffer + 18), bucketSize);
-				OnData.Execute(Data);
-				OnState.ExecuteIfBound(LOCTEXT("Receiving Data", "Receiving Data"), false);
-
-				mState = eState::HEADER;
-
+				// Connection attempt failed (not a disconnect during data transfer)
+				bool bWasConnected = mTcpAnnouncedConnected;
+				
+				UE_LOG(LogTemp, Warning, TEXT("O3DS: Connection error detected, was_connected=%d"), bWasConnected);
+				
+				// Tear down and allow retry path below to recreate socket
+				mTcp->Close();
+				ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(mTcp);
+				mTcp = nullptr;
+				mTcpAnnouncedConnected = false;
+				mState = eState::SYNC; // reset parser state
 				mPtr = 0;
+				
+				// Announce if this was an unexpected disconnection (not initial connection failure)
+				if (bWasConnected)
+				{
+					OnState.ExecuteIfBound(FText::Format(LOCTEXT("TCPDisconnected", "TCP Disconnected from {0}:{1}, reconnecting..."), 
+						FText::FromString(mTcpIp), FText::AsNumber(mTcpPort)), true);
+					// Reset backoff to allow quick reconnection after unexpected disconnect
+					mLastTcpConnectAttempt = 0.0;
+				}
 			}
+			// If pending connection, keep waiting without recreating socket
+		}
+
+		// Attempt (re)connect if no socket and backoff elapsed
+		if (!mTcp)
+		{
+			const double Delay = FMath::Min(5.0, FMath::Pow(2.0, (double)FMath::Clamp(mTcpBackoffAttempt, 0, 5)) * 0.1);
+			const double TimeSinceLastAttempt = Now - mLastTcpConnectAttempt;
+			
+			UE_LOG(LogTemp, Verbose, TEXT("O3DS: No socket - delay=%.2fs, time_since_last=%.2fs, backoff_attempt=%d"), 
+				Delay, TimeSinceLastAttempt, mTcpBackoffAttempt);
+			
+			if (TimeSinceLastAttempt > Delay)
+			{
+				UE_LOG(LogTemp, Log, TEXT("O3DS: Attempting reconnection to %s:%d (attempt %d)"), *mTcpIp, mTcpPort, mTcpBackoffAttempt + 1);
+				
+				mLastTcpConnectAttempt = Now;
+				
+				mTcp = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateSocket(NAME_Stream, TEXT("O3DS_TCP_CLIENT"), false);
+				if (!mTcp)
+				{
+					UE_LOG(LogTemp, Error, TEXT("O3DS: Failed to create socket!"));
+					++mTcpBackoffAttempt;
+					return; // will try again next tick
+				}
+				mTcp->SetNonBlocking();
+
+				FIPv4Address address;
+				FIPv4Address::Parse(mTcpIp, address);
+				TSharedRef<FInternetAddr> addr = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateInternetAddr();
+				addr->SetIp(address.Value);
+				addr->SetPort(mTcpPort);
+
+				(void)mTcp->Connect(*addr); // initiate connect (may be pending)
+				++mTcpBackoffAttempt;
+				
+				// Only show retry message if we've had multiple failures (not after a successful connection)
+				if (mTcpBackoffAttempt > 3 && mTcpBackoffAttempt % 5 == 0)
+				{
+					OnState.ExecuteIfBound(FText::Format(LOCTEXT("TCPRetrying", "TCP Reconnecting to {0}:{1}... (attempt {2})"), 
+						FText::FromString(mTcpIp), FText::AsNumber(mTcpPort), FText::AsNumber(mTcpBackoffAttempt)), false);
+				}
+			}
+		}
+
+		// Only read when connected to avoid reading during pending connection
+		if (mTcp && mTcp->GetConnectionState() == ESocketConnectionState::SCS_Connected)
+		{
+			while (1)
+			{
+				int32 read = 0;
+
+				if (mState == eState::SYNC)
+				{
+					mPtr = 0;
+
+					if (!ReadTcp(1))
+						return;
+
+					if (mBuffer[0] != 0x00) continue;
+
+					bool ok = true;
+					for (int i = 1; i < 14; i++)
+					{
+						if (!ReadTcp(i+1))
+							return;
+						if (mBuffer[i] != header[i]) {
+							ok = false;  break;
+						}
+					}
+					if (!ok) 
+					{
+						// Reset to start sync search over
+						mPtr = 0;
+						continue;
+					}
+
+					mState = eState::HEADER;
+				}
+
+				if (mState == eState::HEADER)
+				{
+					while (mPtr < 18)
+					{
+						if (!ReadTcp(18))
+							return;
+					}
+
+					if (strncmp((char*)mBuffer, (char*)header, 14) != 0)
+					{
+						OnState.ExecuteIfBound(LOCTEXT("MalformedData", "Malformed Data"), true);
+						mState = eState::SYNC;
+						mPtr = 0;
+						continue;
+					}
+					mState = eState::DATA;
+				}
+
+				if (mState == eState::DATA)
+				{
+					bucketSize = *(uint32_t*)(mBuffer + 14);
+
+					if (bucketSize > 1024 * 50)
+					{
+						OnState.ExecuteIfBound(LOCTEXT("MalformedData", "Malformed Data"), true);
+						mState = eState::SYNC;
+						mPtr = 0;
+						continue;
+					}
+
+					while (mPtr < bucketSize + 18)
+					{
+						if (!ReadTcp(bucketSize + 18))
+							return;
+					}
+
+
+					// Process
+					TArray<uint8> Data;
+					Data.Append((uint8*)(mBuffer + 18), bucketSize);
+					OnData.Execute(Data);
+					// Throttle 'Receiving Data' status: rely on NoData warning and suppress per-frame status spam
+
+					mState = eState::HEADER;
+
+					mPtr = 0;
+				}
+			}
+		}
+	}
+	else
+	{
+		// Log if TCP info is missing
+		static bool bLoggedMissingInfo = false;
+		if (!bLoggedMissingInfo && (!mTcpIp.IsEmpty() || mTcpPort > 0))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("O3DS: TCP info incomplete - IP='%s', Port=%d"), *mTcpIp, mTcpPort);
+			bLoggedMissingInfo = true;
+		}
+	}
+	
+	// Handle other transport types (NNG, WebRTC, UDP)
+	if (mServer || mWebRTCConnector || mUdp)
+	{
+		bool bHasActiveConnection = (mServer != nullptr) || (mWebRTCConnector != nullptr) || (mUdp != nullptr);
+		if (bHasActiveConnection && !mNoDataFlag && Now - mGoodTime > 1.0)
+		{
+			OnState.ExecuteIfBound(LOCTEXT("NoData", "No Data"), true);
+			mNoDataFlag = true;
 		}
 	}
 }
@@ -381,8 +586,8 @@ void O3DSServer::tick()
 
 bool O3DSServer::ReadTcp(size_t len)
 {
-	// Keep reading util the buffer is len bytes in size.
-	// Return false if no data was read so we can exit the tick.
+	// Keep reading until the buffer is len bytes in size.
+	// Return false if no data was read so we can exit the tick, without logging errors for EWOULDBLOCK.
 
 	if (len <= mPtr)
 		return true;
@@ -396,17 +601,41 @@ bool O3DSServer::ReadTcp(size_t len)
 	}
 	else
 	{
-		if (len + mPtr > mBufferSize)
+		if (len > mBufferSize)
 		{
-			mBuffer = (uint8*)realloc(mBuffer, len + mPtr);
-			mBufferSize = len + mPtr;
-		}		
+			mBuffer = (uint8*)realloc(mBuffer, len);
+			mBufferSize = len;
+		}
 	}
 
 	int32 read = 0;
 	if (!mTcp->Recv(mBuffer + mPtr, len - mPtr, read))
 	{
-		OnState.ExecuteIfBound(LOCTEXT("TCPError", "TCP Error"), true);
+		ESocketErrors Err = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->GetLastErrorCode();
+		if (Err == ESocketErrors::SE_EWOULDBLOCK || Err == ESocketErrors::SE_NO_ERROR)
+		{
+			// Non-blocking and no data available yet; not a hard error
+			return false;
+		}
+		// Fatal error (connection lost or other error); tear down socket and let tick() retry
+		if (mTcpAnnouncedConnected)
+		{
+			OnState.ExecuteIfBound(FText::Format(LOCTEXT("TCPDisconnected", "TCP Disconnected from {0}:{1}, reconnecting..."), 
+				FText::FromString(mTcpIp), FText::AsNumber(mTcpPort)), true);
+		}
+		else
+		{
+			OnState.ExecuteIfBound(LOCTEXT("TCPError", "TCP Connection Error"), true);
+		}
+		
+		mTcp->Close();
+		ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(mTcp);
+		mTcp = nullptr;
+		mTcpAnnouncedConnected = false;
+		mState = eState::SYNC; // reset parser state on error
+		mPtr = 0;
+		// Reset backoff to allow immediate reconnection attempt after disconnect
+		mLastTcpConnectAttempt = 0.0;
 		return false;
 	}
 

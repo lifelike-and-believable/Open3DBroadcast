@@ -36,6 +36,41 @@ Key references in this repository
   - [Build/README.md](https://github.com/lifelike-and-believable/Open3DStream/blob/develop/Build/README.md)
   - CI workflows overview: [.github/workflows/README.md](https://github.com/lifelike-and-believable/Open3DStream/blob/develop/.github/workflows/README.md)
 
+Current implementation status (UE 5.6)
+- Modules/classes in this repo implementing broadcast capture and serialization:
+  - `Open3DBroadcast` module with `UO3DSBroadcastComponent` (capture) and `FO3DSBroadcastSerializer` (O3DS mapping/bytes).
+  - Dev automation tests in `Plugins/Open3DStream/Source/Open3DBroadcast/Private/Tests` validating protocol round-trip.
+- Capture pipeline (component):
+  - Binds to `USkinnedMeshComponent::OnBoneTransformsFinalized` to sample after evaluation; tick disabled.
+  - Caches skeleton (`FReferenceSkeleton`) into a `FO3DSSkeletonDescriptor` with FNV-1a `Hash` and sets `bDescriptorDirty` on change.
+  - Computes parent-relative transforms from component-space, with fallback parent resolution by name if LOD/required-bones reduce the active set (prevents OOB when `CompSpace.Num() != RefSkeleton.GetNum()`).
+  - Subject naming uses `BuildSubjectName` + `SanitizeSubjectName`; allowed chars `[-._A-Za-z0-9/]`, whitespace replaced by `_`.
+  - Optional rate limiting via `CaptureRateHz`.
+- Curves (component):
+  - Builds a stable curve set: morph targets from mesh + named animation curves from skeleton metadata; deterministic lexicographic order.
+  - Options: clamp morphs to [0,1], drop NaN/Inf, include/exclude wildcards (`*`/`?`), epsilon and delta filtering (`CurveEpsilon`, `CurveDeltaThreshold`) with per-index last-sent state.
+  - Filtering logs optional; include/exclude patterns applied when (re)building the cache; changing patterns requires `RefreshCurveCache`.
+- Serialization (serializer):
+  - Maps descriptor and per-frame `FTransform` data into `O3DS::Subject`/`SubjectList` using `o3ds/model.h`.
+  - Currently sends full-frame payloads (skeleton + per-frame TRS + full curves) and emits `OnSerializedFrame(Subject, Buffer, Timestamp)`.
+  - Calls `CalcMatrices()` on `O3DS::Subject` before serialize to ensure matrices are propagated.
+  - Timestamp in `Serialize` is currently `0.0`; wall-clock/timecode selection pending.
+  - Delta updates (`Subject.SerializeUpdate` / `SubjectList.SerializeUpdate`) are not used yet; per-subject cache exists but not leveraged for updates.
+- Tests:
+  - `O3DSRoundTripTests.cpp` covers basic subject round-trip, curves, and update semantics using the core model API. These validate conformance and give examples for delta-threshold behavior.
+- Build/runtime toggles:
+  - Build define: `O3DS_WITH_BROADCAST` can disable the module as a stub in `Open3DBroadcast.Build.cs`.
+  - CVars: `o3ds.Broadcast.DebugPose`, `o3ds.Broadcast.DebugCurves`, `o3ds.Broadcast.OnScreen` for verbose logging and on-screen notifications.
+
+Known gaps and open items
+- Transport wiring: no sender transports are hooked up yet. `FO3DSBroadcastSerializer` exposes `OnSerializedFrame`, but no TCP/UDP/NNG/WebRTC transmitter is connected in the broadcast path.
+- Delta frames: serializer always sends full frames; does not use `SubjectList::SetDeltaThreshold` nor `SerializeUpdate` to emit sparse updates.
+- Timestamp/timecode: `Serialize` uses `0.0`; LiveLink/receiver-side time alignment needs a consistent source (UE timecode, `FPlatformTime::Seconds`, `FApp::GetCurrentTime`, etc.).
+- Multi-subject: component captures a single target; no subsystem yet to multiplex multiple subjects/components.
+- Editor UX: no editor UI for selecting transports/endpoints, subject naming presets, or runtime status.
+- Resilience: no reconnection/backoff logic, and no descriptor resend on reconnect (only on skeleton change within a session).
+- Threading/perf: capture/serialize/send happens on the game thread; no async pipeline, no quantization/batching.
+
 Transport pairing matrix (Broadcast role vs LiveLink Source option)
 Use complementary roles so the Broadcast sender connects correctly to the Unreal LiveLink source.
 
@@ -76,17 +111,12 @@ M0 — Protocol and role alignment
   - [ISSUE_M0_4_TRANSPORT_ROLES.md](https://github.com/lifelike-and-believable/Open3DStream/blob/develop/ISSUE_M0_4_TRANSPORT_ROLES.md) - Transport role pairing documentation
 
 M1 — Single-mesh capture (Unreal)
-- Tasks
-  - Add a Broadcast component/module in plugins/unreal/Open3DStream to capture final evaluated pose from a USkeletalMeshComponent post-evaluation.
-  - Extract stable bone names and parent indices; select and document transform space.
-  - Extract animation curves (morphs + named anim curves) per CURVE_SUPPORT.md.
+- Status: Implemented in `UO3DSBroadcastComponent` (capture) with skeleton caching, subject naming, pose/curve extraction, filtering options, and rate limiting.
 - Acceptance
   - In PIE, debug/log output shows bone transforms and curves matching Anim Previewer/AnimBP for a sandbox test mesh.
 
 M2 — O3DS serialization integration
-- Tasks
-  - Map captured data to O3DS models (Subject, SubjectList) using existing src/ APIs.
-  - Serialize skeleton description and frames; add round-trip unit tests for serialize/deserialize parity.
+- Status: Implemented basic full-frame serialization in `FO3DSBroadcastSerializer` with `OnSerializedFrame` event; round-trip tests present. Delta updates and timestamping deferred.
 - Acceptance
   - Unit tests pass; payloads conform to schema; no divergence from src-generated structures.
 
@@ -105,7 +135,7 @@ M3 — Transport integration (TCP, UDP, NNG)
 
 M4 — Multi-mesh multiplexing and subject identity
 - Tasks
-  - Broadcast multiple USkeletalMeshComponents as distinct O3DS subjects; stable naming scheme with collision handling.
+  - Broadcast multiple `USkeletalMeshComponent`s as distinct O3DS subjects; stable naming scheme with collision handling.
   - Send per-subject skeleton description once and on change.
 - Acceptance
   - Two+ subjects stream concurrently; receiver lists and consumes each stream correctly; skeleton change triggers resend.
@@ -153,9 +183,30 @@ M9 — WebRTC and optional additions
 - Acceptance
   - WebRTC validated where enabled; parity maintained across transports; BP control available if requested.
 
+Next-phase recommendations and considerations
+- Implement delta frames in the serializer:
+  - Maintain per-subject last-sent TRS/curve state and call `SubjectList::SetDeltaThreshold` and `Subject::SerializeUpdate`/`SubjectList::SerializeUpdate`.
+  - Only send when `count > 0`; avoid emitting protocol overhead for below-threshold updates.
+- Add timestamps/timecode:
+  - Choose `FPlatformTime::Seconds()` (monotonic) or UE Timecode if available; populate the SubjectList timestamp consistently.
+- Wire transports:
+  - Add a broadcaster-side adapter that subscribes to `OnSerializedFrame` and pushes bytes over selected transport (TCP Server/Client, UDP sender, NNG Publisher/Client/Server, optional WebRTC).
+  - Mirror LiveLink Source URLs and roles.
+- Multi-subject support:
+  - A lightweight subsystem to manage multiple components/subjects and multiplex into one stream (one `SubjectList` per tick or per send).
+- Performance and threading:
+  - Move serialization and I/O to a worker thread; keep capture on the game thread; add a lock-free queue or ring buffer.
+  - Optional quantization for scales/rotations to reduce bandwidth; batching frames at low FPS.
+- Curve-set stability:
+  - If include/exclude patterns change at runtime, rebuild curve cache and emit a new descriptor so receivers can realign indices.
+- Skeleton/LOD differences:
+  - Continue clamping against `CompSpace.Num()`; keep descriptor based on `FReferenceSkeleton` to remain stable across LOD changes.
+- Validation:
+  - Compare receiver pose vs. UE component pose (coordinate system parity); document any axis flips needed by consumers.
+
 Issue generation guide (for maintainers and coding agents)
 - General structure for issues
-  - Title: “[Milestone] Short, action-oriented description”
+  - Title: “\[Milestone] Short, action-oriented description”
   - Description:
     - Context and purpose (1–2 sentences)
     - Tasks (bullet list)
@@ -167,34 +218,6 @@ Issue generation guide (for maintainers and coding agents)
   - “milestone:M#”, “area:unreal”, “area:transport”, “protocol”, “perf”, “docs”, “tests”, “good-first-task” (as applicable)
 - Dependencies
   - Use cross-links and convert tasks to sub-issues when granular work benefits parallelization.
-- Suggested seed issues
-  - **M0 (✅ CREATED):**
-    - [ISSUE_M0_1_PROTOCOL_ALIGNMENT.md](https://github.com/lifelike-and-believable/Open3DStream/blob/develop/ISSUE_M0_1_PROTOCOL_ALIGNMENT.md) - Protocol & Message Types
-    - [ISSUE_M0_2_CURVE_SEMANTICS.md](https://github.com/lifelike-and-believable/Open3DStream/blob/develop/ISSUE_M0_2_CURVE_SEMANTICS.md) - Curve Semantics & Filtering
-    - [ISSUE_M0_3_TRANSFORM_SPACE.md](https://github.com/lifelike-and-believable/Open3DStream/blob/develop/ISSUE_M0_3_TRANSFORM_SPACE.md) - Transform Space & Timing
-    - [ISSUE_M0_4_TRANSPORT_ROLES.md](https://github.com/lifelike-and-believable/Open3DStream/blob/develop/ISSUE_M0_4_TRANSPORT_ROLES.md) - Transport Role Mapping
-  - **M1 (TODO):**
-    - Single-Mesh Pose Capture Module
-    - Single-Mesh Curve Capture (Morph + Named Curves)
-  - **M2 (TODO):** Serializer Integration + Round-trip Tests
-  - **M3 (TODO):**
-    - Transport Interface + TCP Server
-    - UDP Client Sender + Fragmentation Handling
-    - NNG Publisher + Client/Server Modes
-  - **M4 (TODO):** Multi-Subject Multiplex + Naming Scheme
-  - **M5 (TODO):**
-    - Timecode + Frame Number Integration
-    - Rate Control + Quantization + Threading
-  - **M6 (TODO):** Editor UI + Config Assets/Settings
-  - **M7 (TODO):**
-    - Reconnection + Skeleton Resend
-    - Logging + Metrics + On-screen Debug
-  - **M8 (TODO):**
-    - Example Map + Automation Tests
-    - Docs Refresh + Troubleshooting
-  - **M9 (TODO - Optional):**
-    - WebRTC Option in Broadcast UI (Optional/Beta)
-    - Blueprint API (Optional)
 
 Acceptance evidence patterns
 - Log parity: Printed transforms/curves match Anim Previewer/AnimBP at capture time.
@@ -246,3 +269,4 @@ Appendix: Quick transport role recipes
 Change log for this plan
 - v0.1: Initial plan aligned to repository transports (TCP/UDP/NNG), schema reuse, and Unreal plugin integration; WebRTC marked optional/beta.
 - v0.2: Added M0 issue documentation - created four detailed issue files (ISSUE_M0_1 through ISSUE_M0_4) covering protocol alignment, curve semantics, transform space, and transport role pairing.
+- v0.3: Documented current component/serializer implementation (UE 5.6), identified gaps (delta frames, timestamping, transport wiring, multi-subject, UI, resilience, threading), and added next-phase recommendations.

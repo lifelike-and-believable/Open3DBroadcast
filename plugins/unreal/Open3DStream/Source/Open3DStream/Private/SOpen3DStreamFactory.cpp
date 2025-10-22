@@ -5,6 +5,10 @@
 #include "Open3DStreamSource.h"
 #include "o3ds/o3ds_version.h"  // for version
 
+#include "Framework/Application/SlateApplication.h"
+#include "Input/Events.h"
+#include "InputCoreTypes.h"
+
 #define LOCTEXT_NAMESPACE "Open3DStream"
 
 FText SOpen3DStreamFactory::LastUrl;
@@ -18,11 +22,11 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 	Options.Add(MakeShareable(new FString("NNG Subscribe (to NNG Publish)")));
 	Options.Add(MakeShareable(new FString("NNG Client (to NNG Server)")));
 	Options.Add(MakeShareable(new FString("NNG Server (to NNG Client)")));
-	Options.Add(MakeShareable(new FString("NNG Server (to NNG Client)")));
 	Options.Add(MakeShareable(new FString("TCP Client")));
 	Options.Add(MakeShareable(new FString("UDP Server")));
 	Options.Add(MakeShareable(new FString("WebRTC Client")));
 	Options.Add(MakeShareable(new FString("WebRTC Server")));
+	Options.Add(MakeShareable(new FString("Loopback (In-Editor Test)")));
 
 	if (SOpen3DStreamFactory::LastUrl.IsEmpty())
 	{
@@ -52,6 +56,7 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 				SNew(SEditableTextBox)
 				.Text(mUrl)
 				.OnTextChanged(this, &SOpen3DStreamFactory::SetUrl)
+				.OnTextCommitted(this, &SOpen3DStreamFactory::OnUrlCommitted)
 			]
 		]
 		+ SVerticalBox::Slot()
@@ -92,6 +97,7 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 				SNew(SEditableTextBox)
 				.Text(this, &SOpen3DStreamFactory::GetKey)
 				.OnTextChanged(this, &SOpen3DStreamFactory::SetKey)
+				.OnTextCommitted(this, &SOpen3DStreamFactory::OnKeyCommitted)
 			]
 		]
 		+ SVerticalBox::Slot()
@@ -113,7 +119,7 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 					.Text(LOCTEXT("OkayButton", "Okay"))
 				]
 			]
-   		    + SHorizontalBox::Slot()
+    		+ SHorizontalBox::Slot()
 			.FillWidth(0.3f)
 		]
 		+ SVerticalBox::Slot()
@@ -122,6 +128,34 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 				SNew(STextBlock).Text(FText::FromString(ANSI_TO_TCHAR(verstr)))
 			]
 	];
+}
+
+// Pressing Enter commits the text boxes and we treat it like clicking Okay
+void SOpen3DStreamFactory::OnUrlCommitted(const FText& NewText, ETextCommit::Type CommitType)
+{
+	SetUrl(NewText);
+	if (CommitType == ETextCommit::OnEnter)
+	{
+		OnSource();
+	}
+}
+
+void SOpen3DStreamFactory::OnKeyCommitted(const FText& NewText, ETextCommit::Type CommitType)
+{
+	SetKey(NewText);
+	if (CommitType == ETextCommit::OnEnter)
+	{
+		OnSource();
+	}
+}
+
+FReply SOpen3DStreamFactory::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
+{
+	if (InKeyEvent.GetKey() == EKeys::Enter || InKeyEvent.GetKey() == EKeys::Virtual_Accept)
+	{
+		return OnSource();
+	}
+	return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
 }
 
 FReply SOpen3DStreamFactory::OnSource()
