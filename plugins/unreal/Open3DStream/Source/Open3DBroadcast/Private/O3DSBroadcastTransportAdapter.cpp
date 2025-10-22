@@ -6,6 +6,8 @@
 #include "Open3DBroadcast.h"
 #include "IBroadcastTransport.h"
 #include "HAL/IConsoleManager.h"
+#include "GameFramework/Actor.h"
+#include "UObject/UObjectBaseUtility.h"
 #include "Transports/O3DSTcpTransport.h"
 #include "Transports/O3DSUdpTransport.h"
 #include "Transports/O3DSTcpServerTransport.h"

@@ -35,7 +35,8 @@ static bool CreateTcpListener(FString& OutHost, int32& OutPort, FSocket*& OutLis
 
     OutHost = TEXT("127.0.0.1");
 
-    FSocket* Listen = Subsys->CreateSocket(NAME_Stream, TEXT("O3DS_Test_TCPListen"), Subsys->GetLocalBindAddr(*GLog)->GetProtocolType());
+    // Use IPv4 by default for local test listeners to avoid platform-specific protocol queries
+    FSocket* Listen = Subsys->CreateSocket(NAME_Stream, TEXT("O3DS_Test_TCPListen"), false);
     if (!Listen) { return false; }
 
     Listen->SetReuseAddr(true);
@@ -136,7 +137,8 @@ bool FO3DSTcpServerTransport_FrameHeader::RunTest(const FString& Parameters)
     ISocketSubsystem* Subsys = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
     if (!Subsys) { AddError(TEXT("No socket subsystem")); return false; }
 
-    FSocket* Tmp = Subsys->CreateSocket(NAME_Stream, TEXT("TmpBind"), Subsys->GetLocalBindAddr(*GLog)->GetProtocolType());
+    // Prefer IPv4 locally to simplify address family handling
+    FSocket* Tmp = Subsys->CreateSocket(NAME_Stream, TEXT("TmpBind"), false);
     bool bValid=false; TSharedRef<FInternetAddr> Addr = Subsys->CreateInternetAddr(); Addr->SetIp(TEXT("127.0.0.1"), bValid); Addr->SetPort(0);
     TestTrue(TEXT("Valid localhost"), bValid);
     TestTrue(TEXT("Bind tmp"), Tmp->Bind(*Addr));
@@ -149,7 +151,8 @@ bool FO3DSTcpServerTransport_FrameHeader::RunTest(const FString& Parameters)
 
     // Connect a raw client
     TSharedRef<FInternetAddr> ConnectAddr = Subsys->CreateInternetAddr(); ConnectAddr->SetIp(TEXT("127.0.0.1"), bValid); ConnectAddr->SetPort(Port);
-    FSocket* Client = Subsys->CreateSocket(NAME_Stream, TEXT("Client"), ConnectAddr->GetProtocolType());
+    // Use IPv4 for local client socket
+    FSocket* Client = Subsys->CreateSocket(NAME_Stream, TEXT("Client"), false);
     TestTrue(TEXT("Client connect"), Client->Connect(*ConnectAddr));
 
     // Give accept loop a moment
@@ -201,7 +204,8 @@ bool FO3DSUdpTransport_SendFragments::RunTest(const FString& Parameters)
     }
 
     // Create UDP receive socket bound to localhost:0
-    FSocket* Rx = Subsys->CreateSocket(NAME_DGram, TEXT("O3DS_Test_UDPRecv"), Subsys->GetLocalBindAddr(*GLog)->GetProtocolType());
+    // Use IPv4 for local UDP receive socket
+    FSocket* Rx = Subsys->CreateSocket(NAME_DGram, TEXT("O3DS_Test_UDPRecv"), false);
     if (!Rx)
     {
         AddError(TEXT("Failed to create UDP recv socket"));
@@ -263,7 +267,8 @@ static int32 FindFreeTcpPort()
 {
     ISocketSubsystem* Subsys = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
     if (!Subsys) { return 0; }
-    FSocket* Tmp = Subsys->CreateSocket(NAME_Stream, TEXT("TmpPort"), Subsys->GetLocalBindAddr(*GLog)->GetProtocolType());
+    // Use IPv4 for local ephemeral port discovery
+    FSocket* Tmp = Subsys->CreateSocket(NAME_Stream, TEXT("TmpPort"), false);
     if (!Tmp) { return 0; }
     bool bValid=false; TSharedRef<FInternetAddr> Addr = Subsys->CreateInternetAddr();
     Addr->SetIp(TEXT("127.0.0.1"), bValid); Addr->SetPort(0);
