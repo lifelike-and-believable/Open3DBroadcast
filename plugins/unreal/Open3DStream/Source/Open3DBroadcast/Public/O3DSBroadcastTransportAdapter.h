@@ -6,6 +6,7 @@
 #include "Components/ActorComponent.h"
 #include "IBroadcastTransport.h"
 #include "Containers/Queue.h" // TQueue, EQueueMode
+#include "HAL/IConsoleManager.h" // TAutoConsoleVariable
 #include "O3DSBroadcastTransportAdapter.generated.h"
 
 class UO3DSBroadcastComponent;
@@ -73,10 +74,10 @@ private:
     TAtomic<uint64> DroppedFrames{0};
 
     // CVars
-    static class TAutoConsoleVariable<int32> CVarEnable;
-    static class TAutoConsoleVariable<FString> CVarUrl;
-    static class TAutoConsoleVariable<FString> CVarKey;
-    static class TAutoConsoleVariable<int32> CVarMaxBytes;
+    static TAutoConsoleVariable<int32> CVarEnable;
+    static TAutoConsoleVariable<FString> CVarUrl;
+    static TAutoConsoleVariable<FString> CVarKey;
+    static TAutoConsoleVariable<int32> CVarMaxBytes;
 
     // Stats dumping support
     void DumpStatsInstance() const;
