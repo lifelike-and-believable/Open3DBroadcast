@@ -18,6 +18,12 @@
 #include "O3DSBroadcastSerializer.h"
 #include <limits>
 
+#include "O3DSBroadcastTransportAdapter.h" // for EO3DSTransportKind
+#include "IBroadcastTransport.h"
+#include "Transports/O3DSTcpTransport.h"
+#include "Transports/O3DSTcpServerTransport.h"
+#include "Transports/O3DSUdpTransport.h"
+
 // CVar to toggle verbose debug logging
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugPose(
     TEXT("o3ds.Broadcast.DebugPose"),
@@ -54,7 +60,7 @@ void UO3DSBroadcastComponent::NotifyOnScreen(const FString& Message, const FColo
 
 UO3DSBroadcastComponent::UO3DSBroadcastComponent()
 {
-    PrimaryComponentTick.bCanEverTick = false; // delegate-driven capture, no tick needed
+    PrimaryComponentTick.bCanEverTick = true; // we may drain an internal queue
     SetComponentTickEnabled(false);
 }
 
@@ -90,7 +96,90 @@ void UO3DSBroadcastComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
         delete Serializer;
         Serializer = nullptr;
     }
+
+    TeardownInternalTransport();
+
     Super::EndPlay(EndPlayReason);
+}
+
+void UO3DSBroadcastComponent::SetupInternalTransport()
+{
+    if (!bAutoCreateTransport || InternalTransport)
+    {
+        return;
+    }
+
+    switch (Transport)
+    {
+        case EO3DSTransportKind::TCP:
+            InternalTransport = MakeUnique<FO3DSTcpTransport>();
+            break;
+        case EO3DSTransportKind::TCPServer:
+            InternalTransport = MakeUnique<FO3DSTcpServerTransport>();
+            break;
+        case EO3DSTransportKind::UDP:
+            InternalTransport = MakeUnique<FO3DSUdpTransport>();
+            break;
+        default:
+            break;
+    }
+
+    if (InternalTransport)
+    {
+        if (!InternalTransport->Start(TransportUrl, UEnum::GetValueAsString(Transport), TransportKey))
+        {
+            UE_LOG(LogO3DSBroadcast, Warning, TEXT("Built-in transport failed to start: %s %s"), *UEnum::GetValueAsString(Transport), *TransportUrl);
+            InternalTransport.Reset();
+        }
+        else
+        {
+            // Hook serializer -> queue enqueuer
+            if (!SerializedFrameHandle.IsValid() && Serializer)
+            {
+                SerializedFrameHandle = Serializer->OnSerializedFrame.AddUObject(this, &UO3DSBroadcastComponent::OnSerializedForTransport);
+            }
+            SetComponentTickEnabled(true);
+        }
+    }
+}
+
+void UO3DSBroadcastComponent::TeardownInternalTransport()
+{
+    if (Serializer && SerializedFrameHandle.IsValid())
+    {
+        Serializer->OnSerializedFrame.Remove(SerializedFrameHandle);
+        SerializedFrameHandle.Reset();
+    }
+
+    if (InternalTransport)
+    {
+        InternalTransport->Stop();
+        InternalTransport.Reset();
+    }
+
+    // Drain queue
+    FQItem Item; while (SendQueue.Dequeue(Item)) {}
+    QueuedBytes.Store(0);
+    SetComponentTickEnabled(false);
+}
+
+void UO3DSBroadcastComponent::OnSerializedForTransport(const FString& /*Subject*/, const TArray<uint8>& Buffer, double Timestamp)
+{
+    if (!InternalTransport)
+    {
+        return;
+    }
+
+    const uint64 NewQ = QueuedBytes.Load() + (uint64)Buffer.Num();
+    if (TransportMaxQueuedBytes > 0 && NewQ > (uint64)TransportMaxQueuedBytes)
+    {
+        DroppedFrames.Store(DroppedFrames.Load() + 1);
+        return;
+    }
+
+    FQItem Item; Item.Data = Buffer; Item.Ts = Timestamp;
+    SendQueue.Enqueue(MoveTemp(Item));
+    QueuedBytes.Store(NewQ);
 }
 
 void UO3DSBroadcastComponent::StartCapture()
@@ -111,6 +200,9 @@ void UO3DSBroadcastComponent::StartCapture()
             OnSerializedFrame.Broadcast(Subject, Buffer, Timestamp);
         });
     }
+
+    // Setup optional built-in transport
+    SetupInternalTransport();
 
     BindToTarget();
     bIsCapturing = TargetMesh.IsValid();
@@ -137,6 +229,9 @@ void UO3DSBroadcastComponent::StopCapture()
     {
         Serializer->Detach(this);
     }
+
+    // Teardown transport if we created one
+    TeardownInternalTransport();
 
     UE_LOG(LogO3DSBroadcast, Log, TEXT("O3DS Broadcast: Stopped capture on %s"), *GetNameSafe(TargetMesh.Get()));
     NotifyOnScreen(FString::Printf(TEXT("O3DS Broadcast: Stopped on %s"), *GetNameSafe(TargetMesh.Get())), FColor::Yellow, 2.0f);
@@ -747,5 +842,22 @@ void UO3DSBroadcastComponent::HandleBoneTransformsFinalized()
 void UO3DSBroadcastComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-    // Capture is delegate-driven via HandleBoneTransformsFinalized
+
+    // Drain internal transport queue if enabled
+    if (InternalTransport)
+    {
+        constexpr int32 MaxPerTick = 32;
+        int32 Count = 0;
+        while (Count < MaxPerTick)
+        {
+            FQItem Item;
+            if (!SendQueue.Dequeue(Item))
+            {
+                break;
+            }
+            QueuedBytes.Store(QueuedBytes.Load() - (uint64)Item.Data.Num());
+            InternalTransport->Send(Item.Data.GetData(), Item.Data.Num(), Item.Ts);
+            ++Count;
+        }
+    }
 }

@@ -13,7 +13,8 @@ UENUM()
 enum class EO3DSTransportKind : uint8
 {
     Disabled,
-    TCP,
+    TCP UMETA(DisplayName="TCP"),
+    TCPServer UMETA(DisplayName="TCP Server"), // new: broadcaster listens and sends O3DS header framed payloads
     UDP,
     NNG,
     WebRTC

@@ -20,6 +20,9 @@ public:
 
     virtual bool IsConnected() const = 0;
 
+    // Optional per-frame/tick maintenance (accept connections, retry connect, etc.)
+    virtual void Tick(float /*DeltaTime*/) {}
+
     struct FCounters
     {
         TAtomic<uint64> FramesSent{0};

@@ -5,12 +5,15 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "O3DSBroadcastSerializer.h"
+#include "O3DSBroadcastTransportAdapter.h" // for EO3DSTransportKind
 #include "O3DSBroadcastComponent.generated.h"
 
 class USkeletalMeshComponent;
 class USkeleton;
 class USkeletalMesh;
 class FO3DSBroadcastSerializer; // forward decl
+
+class IBroadcastTransport; // fwd
 
 // Descriptor capturing a skeleton's stable description
 USTRUCT()
@@ -111,6 +114,22 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast")
     bool bAutoStartCapture = true;
 
+    // Built-in transport (optional): enable to auto-send serialized frames without adding a second component
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport")
+    bool bAutoCreateTransport = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
+    EO3DSTransportKind Transport = EO3DSTransportKind::Disabled;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
+    FString TransportUrl = TEXT("tcp://127.0.0.1:9000");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
+    FString TransportKey;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
+    int32 TransportMaxQueuedBytes = 8 * 1024 * 1024;
+
     // Curve normalization and filtering configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves")
     bool bClampMorphCurvesToUnit = true;
@@ -205,4 +224,16 @@ private:
 
     // Reserved for future delegate-based capture when available
     FDelegateHandle BoneTransformsFinalizedHandle;
+
+    // Optional built-in transport members
+    TUniquePtr<IBroadcastTransport> InternalTransport;
+    struct FQItem { TArray<uint8> Data; double Ts = 0.0; };
+    TQueue<FQItem, EQueueMode::Mpsc> SendQueue;
+    TAtomic<uint64> QueuedBytes{0};
+    TAtomic<uint64> DroppedFrames{0};
+    FDelegateHandle SerializedFrameHandle;
+
+    void SetupInternalTransport();
+    void TeardownInternalTransport();
+    void OnSerializedForTransport(const FString& /*Subject*/, const TArray<uint8>& Buffer, double Timestamp);
 };

@@ -11,7 +11,7 @@ DECLARE_DELEGATE_OneParam(FOnOpen3DStreamSelected, FOpen3DStreamSettingsPtr);
 class OPEN3DSTREAM_API SOpen3DStreamFactory : public SCompoundWidget
 {
 	SLATE_BEGIN_ARGS(SOpen3DStreamFactory) {}
-	SLATE_EVENT(FOnOpen3DStreamSelected, OnSelectedEvent)
+		SLATE_EVENT(FOnOpen3DStreamSelected, OnSelectedEvent)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& Args);
@@ -39,8 +39,16 @@ class OPEN3DSTREAM_API SOpen3DStreamFactory : public SCompoundWidget
 	void OnProtocolChanged(FComboItemType NewValue, ESelectInfo::Type);
 	FText GetCurrentProtocol() const;
 
+	// Ensure we can handle Enter even when focus is not in a text box
+	virtual bool SupportsKeyboardFocus() const override { return true; }
+	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
+
 private:
 	FReply OnSource();
+	// Commit handlers so Enter acts like Okay
+	void OnUrlCommitted(const FText& NewText, ETextCommit::Type CommitType);
+	void OnKeyCommitted(const FText& NewText, ETextCommit::Type CommitType);
+
 	FText mUrl;
 	FText mKey;
 

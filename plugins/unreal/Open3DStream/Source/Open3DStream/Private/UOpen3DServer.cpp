@@ -137,7 +137,20 @@ bool O3DSServer::start(FText Url, FText Protocol )
 			FString port = parseme.Right(parseme.Len() - pos - 1);
 
 			FIPv4Address address;
-			FIPv4Address::Parse(ip, address);
+
+			// Support shorthands: "*" => any, "0.0.0.0" => any, "localhost" => loopback
+			if (ip == TEXT("*") || ip == TEXT("0.0.0.0"))
+			{
+				address = FIPv4Address::Any;
+			}
+			else if (ip.Equals(TEXT("localhost"), ESearchCase::IgnoreCase))
+			{
+				address = FIPv4Address::InternalLoopback;
+			}
+			else
+			{
+				FIPv4Address::Parse(ip, address);
+			}
 
 			FIPv4Endpoint Endpoint(address, FCString::Atoi(*port));
 
@@ -163,12 +176,8 @@ bool O3DSServer::start(FText Url, FText Protocol )
 					TArray<uint8> Data;
 					Data.AddUninitialized(DataPtr->TotalSize());
 					DataPtr->Serialize(Data.GetData(), DataPtr->TotalSize());
-					mUdpMapper.addFragment((const char*)Data.GetData(), Data.Num());
-					std::vector<char> buf;
-					if (mUdpMapper.getFrame(buf))
-					{
-						if (OnData.IsBound()) { OnData.Execute(TArray<uint8>((uint8*)buf.data(), buf.size())); }
-					}
+					// Forward raw datagram as a complete O3DS message; broadcaster ensures one-message-per-datagram
+					if (OnData.IsBound()) { OnData.Execute(Data); }
 				});
 
 			mUdpReceiver->Start();

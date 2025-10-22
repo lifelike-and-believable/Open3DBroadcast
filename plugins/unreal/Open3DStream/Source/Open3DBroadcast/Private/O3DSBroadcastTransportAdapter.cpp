@@ -6,6 +6,9 @@
 #include "Open3DBroadcast.h"
 #include "IBroadcastTransport.h"
 #include "HAL/IConsoleManager.h"
+#include "Transports/O3DSTcpTransport.h"
+#include "Transports/O3DSUdpTransport.h"
+#include "Transports/O3DSTcpServerTransport.h"
 
 // CVars (runtime overrides)
 TAutoConsoleVariable<int32> UO3DSBroadcastTransportAdapter::CVarEnable(
@@ -131,7 +134,18 @@ void UO3DSBroadcastTransportAdapter::Unbind()
 
 TUniquePtr<IBroadcastTransport> UO3DSBroadcastTransportAdapter::CreateTransport() const
 {
-    // Placeholder: concrete implementations will be provided in M3.2+.
+    switch (Transport)
+    {
+        case EO3DSTransportKind::TCP:
+            return MakeUnique<FO3DSTcpTransport>();
+        case EO3DSTransportKind::TCPServer:
+            return MakeUnique<FO3DSTcpServerTransport>();
+        case EO3DSTransportKind::UDP:
+            return MakeUnique<FO3DSUdpTransport>();
+        // NNG, WebRTC will be added in later milestones
+        default:
+            break;
+    }
     return TUniquePtr<IBroadcastTransport>();
 }
 
@@ -155,6 +169,12 @@ void UO3DSBroadcastTransportAdapter::OnSerializedFrame(const FString& /*Subject*
 void UO3DSBroadcastTransportAdapter::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    // Drive transport maintenance (accept/connect retries)
+    if (TransportImpl)
+    {
+        TransportImpl->Tick(DeltaTime);
+    }
 
     // Drain a bounded number per tick to avoid long stalls
     constexpr int32 MaxPerTick = 32;

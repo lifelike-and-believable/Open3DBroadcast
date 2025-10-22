@@ -5,6 +5,10 @@
 #include "Open3DStreamSource.h"
 #include "o3ds/o3ds_version.h"  // for version
 
+#include "Framework/Application/SlateApplication.h"
+#include "Input/Events.h"
+#include "InputCoreTypes.h"
+
 #define LOCTEXT_NAMESPACE "Open3DStream"
 
 FText SOpen3DStreamFactory::LastUrl;
@@ -52,6 +56,7 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 				SNew(SEditableTextBox)
 				.Text(mUrl)
 				.OnTextChanged(this, &SOpen3DStreamFactory::SetUrl)
+				.OnTextCommitted(this, &SOpen3DStreamFactory::OnUrlCommitted)
 			]
 		]
 		+ SVerticalBox::Slot()
@@ -92,6 +97,7 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 				SNew(SEditableTextBox)
 				.Text(this, &SOpen3DStreamFactory::GetKey)
 				.OnTextChanged(this, &SOpen3DStreamFactory::SetKey)
+				.OnTextCommitted(this, &SOpen3DStreamFactory::OnKeyCommitted)
 			]
 		]
 		+ SVerticalBox::Slot()
@@ -122,6 +128,34 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 				SNew(STextBlock).Text(FText::FromString(ANSI_TO_TCHAR(verstr)))
 			]
 	];
+}
+
+// Pressing Enter commits the text boxes and we treat it like clicking Okay
+void SOpen3DStreamFactory::OnUrlCommitted(const FText& NewText, ETextCommit::Type CommitType)
+{
+	SetUrl(NewText);
+	if (CommitType == ETextCommit::OnEnter)
+	{
+		OnSource();
+	}
+}
+
+void SOpen3DStreamFactory::OnKeyCommitted(const FText& NewText, ETextCommit::Type CommitType)
+{
+	SetKey(NewText);
+	if (CommitType == ETextCommit::OnEnter)
+	{
+		OnSource();
+	}
+}
+
+FReply SOpen3DStreamFactory::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
+{
+	if (InKeyEvent.GetKey() == EKeys::Enter || InKeyEvent.GetKey() == EKeys::Virtual_Accept)
+	{
+		return OnSource();
+	}
+	return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
 }
 
 FReply SOpen3DStreamFactory::OnSource()
