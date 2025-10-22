@@ -1,0 +1,13 @@
+{
+  "name": "open3dstream-signaling-server",
+  "version": "1.0.0",
+  "description": "Simple WebRTC signaling server for Open3DStream testing",
+  "main": "signaling-server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node signaling-server.js --port 8080"
+  },
+  "dependencies": {
+    "ws": "^8.17.0"
+  }
+}
