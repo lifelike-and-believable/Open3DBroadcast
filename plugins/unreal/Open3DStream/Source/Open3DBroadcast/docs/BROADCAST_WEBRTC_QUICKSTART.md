@@ -1,7 +1,9 @@
 # WebRTC DataChannel Quick Start (M3.4)
 
+For a complete walkthrough and troubleshooting, see `BROADCAST_WEBRTC_USER_GUIDE.md`.
+
 Purpose
-- Verify mocap broadcast over WebRTC DataChannel from the Open3DBroadcast plugin to the Open3DStream LiveLink Source.
+- Verify mocap broadcast over WebRTC DataChannel from the Open3DBroadcast plugin to the Open3DStream Live Link Source.
 - Minimal steps for a local or LAN test.
 
 Prereqs
@@ -18,10 +20,10 @@ Sender (Broadcast) — Editor Instance A
 4) Use: `o3ds.Broadcast.Transport.DumpTransportStats` to see Connected/FramesSent/BytesSent.
 
 Receiver (LiveLink) — Editor Instance B
-1) Add LiveLink Source: Open3DStream.
+1) Add Live Link Source: Open3DStream.
 2) Protocol: `WebRTC Client` or `WebRTC Server` (complementary to sender).
 3) Url: `webrtc://<signaling-host>:8080/o3ds`.
-4) Press OK. In the LiveLink panel, watch for subject(s) appearing and updating.
+4) Press OK. In the Live Link panel, watch for subject(s) appearing and updating.
 
 Notes
 - Sender and receiver roles are explicit and symmetrical: choose complementary roles on both sides.
@@ -36,4 +38,4 @@ Troubleshooting
 References
 - Broadcast side: `UO3DSBroadcastComponent`, `UO3DSBroadcastTransportAdapter`, `FO3DSWebRtcTransport`.
 - Receiver side: `FOpen3DStreamSource`, `O3DSServer` (WebRTC Client/Server), `FWebRTCConnector`.
-- Docs: `BROADCAST_TRANSPORT_GUIDE.md`, `WEBRTC_IMPLEMENTATION_SUMMARY.md`.
+- Docs: `BROADCAST_TRANSPORT_GUIDE.md`, `BROADCAST_WEBRTC_USER_GUIDE.md`.
