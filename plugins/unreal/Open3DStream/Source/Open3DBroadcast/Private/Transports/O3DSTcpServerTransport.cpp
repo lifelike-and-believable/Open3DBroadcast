@@ -22,7 +22,7 @@ bool FO3DSTcpServerTransport::ParseTcpUrl(const FString& InUrl, FString& OutHost
     FString Work = InUrl;
     if (Work.StartsWith(TEXT("tcp://")))
     {
-        Work.RightChopInline(6, false);
+    Work.RightChopInline(6, EAllowShrinking::No);
     }
     int32 ColonIdx;
     if (!Work.FindChar(':', ColonIdx))

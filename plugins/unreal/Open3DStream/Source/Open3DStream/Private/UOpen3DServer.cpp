@@ -46,7 +46,7 @@ static bool ParseTcpUrl(const FString& In, FString& OutIp, int32& OutPort)
 	FString Work = In;
 	if (Work.StartsWith(TEXT("tcp://")))
 	{
-		Work.RightChopInline(6, false);
+		   Work.RightChopInline(6, EAllowShrinking::No);
 	}
 	int32 Colon = INDEX_NONE;
 	if (!Work.FindChar(':', Colon))
