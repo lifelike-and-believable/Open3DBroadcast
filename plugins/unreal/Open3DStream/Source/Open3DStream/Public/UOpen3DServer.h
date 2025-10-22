@@ -52,10 +52,17 @@ public:
 	size_t  mBufferSize;
 	uint8   mHeader[10];
 	size_t  mPtr;
-	float   mGoodTime;
+	double  mGoodTime;
 	bool    mNoDataFlag;
 
+	// TCP receive state machine
 	enum class eState { SYNC, HEADER, DATA } mState;
 
+	// TCP client connection management
+	FString mTcpIp;     // parsed IP from URL
+	int32   mTcpPort = 0; // parsed Port from URL
+	double  mLastTcpConnectAttempt = 0.0;
+	int32   mTcpBackoffAttempt = 0;
+	bool    mTcpAnnouncedConnected = false; // to gate status logs
 };
 

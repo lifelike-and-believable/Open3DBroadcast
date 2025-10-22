@@ -4,6 +4,9 @@
 #include "IPAddress.h"
 #include "HAL/UnrealMemory.h"
 #include "Open3DBroadcast.h"
+#include "o3ds/udp_fragment.h"
+
+#include <vector>
 
 FO3DSUdpTransport::FO3DSUdpTransport() {}
 FO3DSUdpTransport::~FO3DSUdpTransport() { Stop(); }
@@ -136,13 +139,42 @@ bool FO3DSUdpTransport::Send(const uint8* Data, int32 Size, double /*TimestampSe
         return false;
     }
 
-    // Receiver expects one full message per datagram. If message is larger than MaxDatagramBytes, drop.
-    if (Size > MaxDatagramBytes)
+    // If it fits in one datagram, send as-is
+    if (Size <= MaxDatagramBytes)
     {
-        UE_LOG(LogO3DSBroadcast, Warning, TEXT("UDP: Payload too large for single datagram (%d > %d) — dropping"), Size, MaxDatagramBytes);
+        return SendSingle(Data, Size);
+    }
+
+    // Fragment using O3DS helper (header is 16 bytes)
+    const int32 HeaderBytes = 16;
+    const int32 FragPayload = FMath::Clamp(MtuBytes - HeaderBytes, 256, MaxDatagramBytes);
+
+    if (FragPayload <= 0)
+    {
+        UE_LOG(LogO3DSBroadcast, Warning, TEXT("UDP: Invalid fragmentation payload size (MtuBytes=%d)"), MtuBytes);
         Counters.FramesDropped++;
         return false;
     }
 
-    return SendSingle(Data, Size);
+    UdpFragmenter Frag(reinterpret_cast<const char*>(Data), static_cast<size_t>(Size), static_cast<size_t>(FragPayload));
+    const uint32 MessageId = static_cast<uint32>(MessageCounter.Increment());
+
+    for (uint32 Seq = 0; Seq < static_cast<uint32>(Frag.mFrames); ++Seq)
+    {
+        std::vector<char> Out;
+        Frag.makeFragment(MessageId, Seq, Out);
+
+        int32 Sent = 0;
+        if (!Socket->SendTo(reinterpret_cast<const uint8*>(Out.data()), static_cast<int32>(Out.size()), Sent, *RemoteAddr)
+            || Sent != static_cast<int32>(Out.size()))
+        {
+            UE_LOG(LogO3DSBroadcast, Verbose, TEXT("UDP: Fragment send failed (seq=%u, sent=%d, size=%d)"), Seq, Sent, static_cast<int32>(Out.size()));
+            Counters.FramesDropped++;
+            return false;
+        }
+    }
+
+    Counters.BytesSent += static_cast<uint64>(Size);
+    Counters.FramesSent++;
+    return true;
 }

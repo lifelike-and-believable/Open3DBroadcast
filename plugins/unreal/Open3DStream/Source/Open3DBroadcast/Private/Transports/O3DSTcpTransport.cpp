@@ -37,6 +37,7 @@ bool FO3DSTcpTransport::Start(const FString& InUrl, const FString& InProtocol, c
 {
     Url = InUrl;
     Subsys = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+    // Start a connection attempt (non-blocking). Return true to allow ticking to drive completion.
     return Connect();
 }
 
@@ -63,30 +64,33 @@ bool FO3DSTcpTransport::Connect()
         return false;
     }
 
-    if (Socket)
-    {
-        Subsys->DestroySocket(Socket);
-        Socket = nullptr;
-    }
-
-    Socket = Subsys->CreateSocket(NAME_Stream, TEXT("O3DS_TCP"), Addr->GetProtocolType());
+    // Only create a new socket if we don't already have one (avoid thrashing in-flight connects)
     if (!Socket)
     {
-        return false;
+        Socket = Subsys->CreateSocket(NAME_Stream, TEXT("O3DS_TCP"), Addr->GetProtocolType());
+        if (!Socket)
+        {
+            return false;
+        }
+        Socket->SetNonBlocking(true);
+
+        // Initiate non-blocking connect. It may return false immediately with pending state.
+        (void)Socket->Connect(*Addr);
+        LastConnectAttemptTime = FPlatformTime::Seconds();
+        BackoffAttempt = 0;
     }
 
-    Socket->SetNonBlocking(true);
-
-    if (!Socket->Connect(*Addr))
+    // Determine if we connected immediately
+    const ESocketConnectionState State = Socket->GetConnectionState();
+    if (State == ESocketConnectionState::SCS_Connected)
     {
-        // Non-blocking Connect returns immediately; we'll retry later
-        bConnected = false;
-        return false;
+        bConnected = true;
+        UE_LOG(LogO3DSBroadcast, Log, TEXT("TCP: Connected to %s:%d"), *Host, Port);
+        return true;
     }
 
-    bConnected = true;
-    BackoffAttempt = 0;
-    UE_LOG(LogO3DSBroadcast, Log, TEXT("TCP: Connected to %s:%d"), *Host, Port);
+    // Not connected yet (pending). Let Tick() poll state and handle retries.
+    bConnected = false;
     return true;
 }
 
@@ -104,7 +108,7 @@ bool FO3DSTcpTransport::Send(const uint8* Data, int32 Size, double TimestampSeco
 {
     if (!bConnected.Load() || !Socket)
     {
-        // opportunistic retry handled in Tick()
+        // Connection not established yet; Tick() will progress connection
         return false;
     }
 
@@ -112,6 +116,12 @@ bool FO3DSTcpTransport::Send(const uint8* Data, int32 Size, double TimestampSeco
     if (!Socket->Send(Data, Size, Sent) || Sent != Size)
     {
         bConnected = false;
+        // Destroy socket on error to allow retry path to recreate
+        if (Subsys && Socket)
+        {
+            Subsys->DestroySocket(Socket);
+            Socket = nullptr;
+        }
         return false;
     }
 
@@ -124,18 +134,39 @@ void FO3DSTcpTransport::Tick(float /*DeltaTime*/)
 {
     if (bConnected.Load()) { return; }
 
-    const double Now = FPlatformTime::Seconds();
-    const double Delay = FMath::Min(5.0, FMath::Pow(2.0, (double)FMath::Clamp(BackoffAttempt, 0, 5)) * 0.1);
-    if (Now - LastConnectAttemptTime > Delay)
+    // If we have an in-flight socket, poll its state
+    if (Socket)
     {
-        LastConnectAttemptTime = Now;
-        if (Connect())
+        const ESocketConnectionState State = Socket->GetConnectionState();
+        if (State == ESocketConnectionState::SCS_Connected)
         {
+            bConnected = true;
+            BackoffAttempt = 0;
             Counters.Reconnects++;
+            UE_LOG(LogO3DSBroadcast, Log, TEXT("TCP: Connected to %s:%d"), *Host, Port);
+            return;
         }
-        else
+        if (State == ESocketConnectionState::SCS_ConnectionError)
         {
-            ++BackoffAttempt;
+            // Tear down and schedule a retry
+            if (Subsys) { Subsys->DestroySocket(Socket); }
+            Socket = nullptr;
+        }
+        // If pending/not connected yet, keep waiting without thrashing
+    }
+
+    // If no socket (error or not yet attempted), apply backoff and try again
+    if (!Socket)
+    {
+        const double Now = FPlatformTime::Seconds();
+        const double Delay = FMath::Min(5.0, FMath::Pow(2.0, (double)FMath::Clamp(BackoffAttempt, 0, 5)) * 0.1);
+        if (Now - LastConnectAttemptTime > Delay)
+        {
+            LastConnectAttemptTime = Now;
+            if (!Connect())
+            {
+                ++BackoffAttempt;
+            }
         }
     }
 }
