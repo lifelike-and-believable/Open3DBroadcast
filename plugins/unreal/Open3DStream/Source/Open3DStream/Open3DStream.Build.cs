@@ -27,8 +27,12 @@ public class Open3DStream : ModuleRules
 		PublicIncludePaths.AddRange( new string[] {} );
 		
 		// Resolve ThirdParty roots robustly and combine paths safely (avoid relying on trailing separators)
-		string ThirdPartyDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty"));
-		string WebRTCDir = Path.GetFullPath(Path.Combine(ThirdPartyDir, "webrtc"));
+        string ThirdPartyDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty"));
+        string WebRTCDir = Path.GetFullPath(Path.Combine(ThirdPartyDir, "webrtc"));
+
+        // Backward-compatibility alias: legacy code may have referenced 'LibDir' expecting a base path with a trailing separator.
+        // Keep it defined to avoid Rules compile errors if cached/staged files still reference it.
+        string LibDir = ThirdPartyDir + Path.DirectorySeparatorChar;
 
 		PrivateIncludePaths.AddRange(new string[]
         {
