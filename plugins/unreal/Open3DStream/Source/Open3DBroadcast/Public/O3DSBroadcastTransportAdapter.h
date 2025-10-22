@@ -74,10 +74,8 @@ private:
     TAtomic<uint64> DroppedFrames{0};
 
     // CVars
-    static TAutoConsoleVariable<int32> CVarEnable;
-    static TAutoConsoleVariable<FString> CVarUrl;
-    static TAutoConsoleVariable<FString> CVarKey;
-    static TAutoConsoleVariable<int32> CVarMaxBytes;
+    // Note: Runtime CVars for this adapter are defined at file scope in the .cpp to avoid
+    // template/macro conflicts in some non-editor builds. See O3DSBroadcastTransportAdapter.cpp.
 
     // Stats dumping support
     void DumpStatsInstance() const;
