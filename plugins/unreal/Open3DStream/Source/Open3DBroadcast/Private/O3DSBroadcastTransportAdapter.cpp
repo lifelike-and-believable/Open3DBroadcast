@@ -37,20 +37,20 @@ static FString EnsureWebRtcRoleInUrl(const FString& InUrl, EO3DSTransportKind Ki
     return Out;
 }
 
-// CVars (runtime overrides)
-TAutoConsoleVariable<int32> UO3DSBroadcastTransportAdapter::CVarEnable(
+// CVars (runtime overrides) - file scoped to avoid template/macro conflicts in some builds
+static TAutoConsoleVariable<int32> CVarO3DSBroadcastAdapterEnable(
     TEXT("o3ds.Broadcast.Enable"), 0,
     TEXT("Enable broadcast transport adapter (0/1)."), ECVF_Default);
 
-TAutoConsoleVariable<FString> UO3DSBroadcastTransportAdapter::CVarUrl(
+static TAutoConsoleVariable<FString> CVarO3DSBroadcastAdapterUrl(
     TEXT("o3ds.Broadcast.Url"), TEXT("") ,
     TEXT("Override broadcast URL endpoint."), ECVF_Default);
 
-TAutoConsoleVariable<FString> UO3DSBroadcastTransportAdapter::CVarKey(
+static TAutoConsoleVariable<FString> CVarO3DSBroadcastAdapterKey(
     TEXT("o3ds.Broadcast.Key"), TEXT("") ,
     TEXT("Override broadcast session key."), ECVF_Default);
 
-TAutoConsoleVariable<int32> UO3DSBroadcastTransportAdapter::CVarMaxBytes(
+static TAutoConsoleVariable<int32> CVarO3DSBroadcastAdapterMaxBytes(
     TEXT("o3ds.Broadcast.MaxQueuedBytes"), 0,
     TEXT("Override max queued bytes before dropping frames (0=use setting)."), ECVF_Default);
 
@@ -130,7 +130,7 @@ void UO3DSBroadcastTransportAdapter::Unbind()
 
 void UO3DSBroadcastTransportAdapter::EnsureBound()
 {
-    const bool bEnabled = (CVarEnable.GetValueOnGameThread() != 0) || (Transport != EO3DSTransportKind::Disabled);
+    const bool bEnabled = (CVarO3DSBroadcastAdapterEnable.GetValueOnGameThread() != 0) || (Transport != EO3DSTransportKind::Disabled);
     if (!bEnabled)
     {
         UE_LOG(LogO3DSBroadcast, Log, TEXT("Transport adapter disabled"));
@@ -157,13 +157,13 @@ void UO3DSBroadcastTransportAdapter::EnsureBound()
         }
 
         FString EffectiveUrl = Url;
-        const FString UrlOverride = CVarUrl.GetValueOnGameThread();
+    const FString UrlOverride = CVarO3DSBroadcastAdapterUrl.GetValueOnGameThread();
         if (!UrlOverride.IsEmpty()) { EffectiveUrl = UrlOverride; }
         FString EffectiveKey = Key;
-        const FString KeyOverride = CVarKey.GetValueOnGameThread();
+    const FString KeyOverride = CVarO3DSBroadcastAdapterKey.GetValueOnGameThread();
         if (!KeyOverride.IsEmpty()) { EffectiveKey = KeyOverride; }
 
-        const int32 CVarMax = CVarMaxBytes.GetValueOnGameThread();
+    const int32 CVarMax = CVarO3DSBroadcastAdapterMaxBytes.GetValueOnGameThread();
         if (CVarMax > 0) { MaxQueuedBytes = CVarMax; }
 
         // Inject role= when using explicit WebRTC kinds and URL lacks a role
