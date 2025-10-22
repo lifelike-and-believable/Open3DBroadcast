@@ -5,8 +5,6 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "IBroadcastTransport.h"
-#include "Containers/Queue.h" // TQueue, EQueueMode
-#include "HAL/IConsoleManager.h" // TAutoConsoleVariable
 #include "O3DSBroadcastTransportAdapter.generated.h"
 
 class UO3DSBroadcastComponent;
@@ -16,10 +14,12 @@ enum class EO3DSTransportKind : uint8
 {
     Disabled,
     TCP UMETA(DisplayName="TCP"),
-    TCPServer UMETA(DisplayName="TCP Server"), // new: broadcaster listens and sends O3DS header framed payloads
+    TCPServer UMETA(DisplayName="TCP Server"), // broadcaster listens and sends O3DS header framed payloads
     UDP,
     NNG,
-    WebRTC
+    // Explicit WebRTC roles for symmetry with receiver
+    WebRTCClient UMETA(DisplayName="WebRTC Client"),
+    WebRTCServer UMETA(DisplayName="WebRTC Server")
 };
 
 UCLASS(ClassGroup=(Open3DStream), meta=(BlueprintSpawnableComponent))

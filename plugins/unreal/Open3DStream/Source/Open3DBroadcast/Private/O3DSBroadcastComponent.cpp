@@ -125,7 +125,8 @@ void UO3DSBroadcastComponent::SetupInternalTransport()
         case EO3DSTransportKind::NNG:
             InternalTransport = MakeUnique<FO3DSNngTransport>();
             break;
-        case EO3DSTransportKind::WebRTC:
+        case EO3DSTransportKind::WebRTCClient:
+        case EO3DSTransportKind::WebRTCServer:
             InternalTransport = MakeUnique<FO3DSWebRtcTransport>();
             break;
         default:
@@ -134,9 +135,20 @@ void UO3DSBroadcastComponent::SetupInternalTransport()
 
     if (InternalTransport)
     {
-        if (!InternalTransport->Start(TransportUrl, UEnum::GetValueAsString(Transport), TransportKey))
+        FString EffectiveUrl = TransportUrl;
+        if (Transport == EO3DSTransportKind::WebRTCClient || Transport == EO3DSTransportKind::WebRTCServer)
         {
-            UE_LOG(LogO3DSBroadcast, Warning, TEXT("Built-in transport failed to start: %s %s"), *UEnum::GetValueAsString(Transport), *TransportUrl);
+            if (!EffectiveUrl.Contains(TEXT("role=")))
+            {
+                const TCHAR* RoleStr = (Transport == EO3DSTransportKind::WebRTCClient) ? TEXT("client") : TEXT("server");
+                EffectiveUrl += EffectiveUrl.Contains(TEXT("?")) ? FString::Printf(TEXT("&role=%s"), RoleStr)
+                                                                  : FString::Printf(TEXT("?role=%s"), RoleStr);
+            }
+        }
+
+        if (!InternalTransport->Start(EffectiveUrl, UEnum::GetValueAsString(Transport), TransportKey))
+        {
+            UE_LOG(LogO3DSBroadcast, Warning, TEXT("Built-in transport failed to start: %s %s"), *UEnum::GetValueAsString(Transport), *EffectiveUrl);
             InternalTransport.Reset();
         }
         else

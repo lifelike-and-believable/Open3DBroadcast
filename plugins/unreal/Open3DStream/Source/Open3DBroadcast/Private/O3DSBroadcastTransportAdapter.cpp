@@ -14,6 +14,29 @@
 #include "Transports/O3DSNngTransport.h"
 #include "Transports/O3DSWebRtcTransport.h"
 
+static FString EnsureWebRtcRoleInUrl(const FString& InUrl, EO3DSTransportKind Kind)
+{
+    if (Kind != EO3DSTransportKind::WebRTCClient && Kind != EO3DSTransportKind::WebRTCServer)
+    {
+        return InUrl; // leave as-is
+    }
+    if (InUrl.Contains(TEXT("role=")))
+    {
+        return InUrl;
+    }
+    FString Out = InUrl;
+    const TCHAR* RoleStr = (Kind == EO3DSTransportKind::WebRTCClient) ? TEXT("client") : TEXT("server");
+    if (Out.Contains(TEXT("?")))
+    {
+        Out += FString::Printf(TEXT("&role=%s"), RoleStr);
+    }
+    else
+    {
+        Out += FString::Printf(TEXT("?role=%s"), RoleStr);
+    }
+    return Out;
+}
+
 // CVars (runtime overrides)
 TAutoConsoleVariable<int32> UO3DSBroadcastTransportAdapter::CVarEnable(
     TEXT("o3ds.Broadcast.Enable"), 0,
@@ -95,6 +118,16 @@ void UO3DSBroadcastTransportAdapter::EndPlay(const EEndPlayReason::Type EndPlayR
     Super::EndPlay(EndPlayReason);
 }
 
+void UO3DSBroadcastTransportAdapter::Unbind()
+{
+    if (BroadcastComponent.IsValid() && SerializedHandle.IsValid())
+    {
+        BroadcastComponent->OnSerializedFrame.Remove(SerializedHandle);
+        SerializedHandle.Reset();
+    }
+    SetComponentTickEnabled(false);
+}
+
 void UO3DSBroadcastTransportAdapter::EnsureBound()
 {
     const bool bEnabled = (CVarEnable.GetValueOnGameThread() != 0) || (Transport != EO3DSTransportKind::Disabled);
@@ -133,6 +166,9 @@ void UO3DSBroadcastTransportAdapter::EnsureBound()
         const int32 CVarMax = CVarMaxBytes.GetValueOnGameThread();
         if (CVarMax > 0) { MaxQueuedBytes = CVarMax; }
 
+        // Inject role= when using explicit WebRTC kinds and URL lacks a role
+        EffectiveUrl = EnsureWebRtcRoleInUrl(EffectiveUrl, Transport);
+
         const FString ProtocolName = UEnum::GetValueAsString(Transport);
         if (!TransportImpl->Start(EffectiveUrl, ProtocolName, EffectiveKey))
         {
@@ -148,16 +184,6 @@ void UO3DSBroadcastTransportAdapter::EnsureBound()
     }
 }
 
-void UO3DSBroadcastTransportAdapter::Unbind()
-{
-    if (BroadcastComponent.IsValid() && SerializedHandle.IsValid())
-    {
-        BroadcastComponent->OnSerializedFrame.Remove(SerializedHandle);
-        SerializedHandle.Reset();
-    }
-    SetComponentTickEnabled(false);
-}
-
 TUniquePtr<IBroadcastTransport> UO3DSBroadcastTransportAdapter::CreateTransport() const
 {
     switch (Transport)
@@ -170,7 +196,8 @@ TUniquePtr<IBroadcastTransport> UO3DSBroadcastTransportAdapter::CreateTransport(
             return MakeUnique<FO3DSUdpTransport>();
         case EO3DSTransportKind::NNG:
             return MakeUnique<FO3DSNngTransport>();
-        case EO3DSTransportKind::WebRTC:
+        case EO3DSTransportKind::WebRTCClient:
+        case EO3DSTransportKind::WebRTCServer:
             return MakeUnique<FO3DSWebRtcTransport>();
         default:
             break;

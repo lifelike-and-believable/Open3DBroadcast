@@ -1,3 +1,5 @@
+// Copyright (c) Open3DStream Contributors
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -15,6 +17,8 @@ public:
     {
         Url = InUrl; Key = InKey; Protocol = InProtocol;
         Channel = MakeUnique<FO3DSWebRTCDataChannel>();
+        // Auto-detect role if not present; treat legacy "WebRTC (Deprecated)" as-is
+        const bool bIsServer = Url.Contains(TEXT("role=server")) || Protocol.Contains(TEXT("WebRTCServer"));
         if (!Channel->Start(Url))
         {
             return false;
