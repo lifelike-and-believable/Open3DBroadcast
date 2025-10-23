@@ -31,6 +31,14 @@ Open3DStream is a standardized protocol and library for real-time streaming of s
 
 ## Quick Start
 
+### Initialize Git submodules
+
+This repository uses Git submodules for third-party dependencies (e.g., FlatBuffers, NNG, CRC). Before building locally or creating Docker images, initialize submodules:
+
+```bash
+git submodule update --init --recursive
+```
+
 ### Building the Library
 
 ```bash
@@ -46,6 +54,21 @@ make -j4
 # Build with WebRTC support (optional)
 cmake .. -DO3DS_ENABLE_WEBRTC=ON
 make -j4
+```
+
+### Docker: Repeater image
+
+We provide a minimal Docker image for the Repeater app. Ensure submodules are initialized locally before building so the Docker build context contains third-party sources.
+
+```bash
+# From repo root (after submodule init)
+docker build -f docker/Dockerfile.repeater -t open3dstream-repeater:local .
+
+# Smoke test the image (non-root entrypoint)
+docker run --rm --entrypoint /bin/sh open3dstream-repeater:local -c "echo ok"
+
+# Run (example addresses)
+docker run --rm open3dstream-repeater:local tcp://0.0.0.0:7000 tcp://0.0.0.0:7001
 ```
 
 ### Using in Unreal Engine
@@ -260,6 +283,12 @@ We welcome contributions! Areas of interest:
 - Performance optimizations
 - Documentation
 - Bug fixes
+
+### CI expectations for contributors
+
+- Submodules are required for all CI builds. Local development and CI expect `git submodule update --init --recursive` to have been run.
+- The Docker Repeater image is built in CI for pull requests that touch code or the Dockerfile and is pushed for `main` and nightly scheduled runs.
+- Workflows use a lean trigger set and smoke-test the image by running a no-op command inside the container to catch regressions early.
 
 ## Community
 
