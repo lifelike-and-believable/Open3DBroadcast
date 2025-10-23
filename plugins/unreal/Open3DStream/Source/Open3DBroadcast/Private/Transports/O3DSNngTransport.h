@@ -9,11 +9,12 @@
 #include "HAL/RunnableThread.h"        // FRunnableThread
 #include "HAL/PlatformProcess.h"       // FPlatformProcess
 
-// NNG-based transport supporting publisher (default) and pair modes
+// NNG-based transport supporting publisher (default), pair, and push modes
 // URL forms:
 //   - Publisher (default): tcp://host:port or tcp://host:port?mode=pub
 //   - Pair client:         tcp://host:port?mode=pair&role=client
 //   - Pair server:         tcp://host:port?mode=pair&role=server
+//   - Push:                tcp://host:port?mode=push
 // Notes: Query string is stripped before passing to nng APIs.
 
 class FO3DSNngTransport : public IBroadcastTransport
@@ -34,7 +35,7 @@ public:
     uint32 WorkerRun();
 
     // Expose minimal state for static callbacks (kept public for C function interop)
-    enum class EMode : uint8 { Pub, PairClient, PairServer };
+    enum class EMode : uint8 { Pub, PairClient, PairServer, Push };
     FThreadSafeCounter PipeCount;
     TAtomic<bool> bConnected{false};
     EMode Mode = EMode::Pub;

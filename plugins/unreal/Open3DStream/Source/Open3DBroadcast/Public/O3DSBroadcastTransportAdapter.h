@@ -22,6 +22,42 @@ enum class EO3DSTransportKind : uint8
     WebRTCServer UMETA(DisplayName="WebRTC Server")
 };
 
+// Transport family for new UX (preferred over EO3DSTransportKind)
+UENUM(BlueprintType)
+enum class EO3DSTransportFamily : uint8
+{
+    NNG UMETA(DisplayName="NNG"),
+    TCP UMETA(DisplayName="TCP"),
+    UDP UMETA(DisplayName="UDP"),
+    WebRTC UMETA(DisplayName="WebRTC")
+};
+
+// NNG-specific modes
+UENUM(BlueprintType)
+enum class EO3DSNngMode : uint8
+{
+    Publisher UMETA(DisplayName="Publisher"),
+    PairClient UMETA(DisplayName="Pair Client"),
+    PairServer UMETA(DisplayName="Pair Server"),
+    Push UMETA(DisplayName="Push")
+};
+
+// TCP-specific modes
+UENUM(BlueprintType)
+enum class EO3DSTcpMode : uint8
+{
+    Client UMETA(DisplayName="Client"),
+    Server UMETA(DisplayName="Server")
+};
+
+// WebRTC-specific modes
+UENUM(BlueprintType)
+enum class EO3DSWebRtcMode : uint8
+{
+    Client UMETA(DisplayName="Client"),
+    Server UMETA(DisplayName="Server")
+};
+
 UCLASS(ClassGroup=(Open3DStream), meta=(BlueprintSpawnableComponent))
 class OPEN3DBROADCAST_API UO3DSBroadcastTransportAdapter : public UActorComponent
 {
@@ -32,6 +68,20 @@ public:
     // Transport selection and endpoint
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport")
     EO3DSTransportKind Transport = EO3DSTransportKind::Disabled;
+
+    // New Transport Family UX (preferred)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport")
+    EO3DSTransportFamily TransportFamily = EO3DSTransportFamily::NNG;
+
+    // Mode selection per family (conditional visibility)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="TransportFamily == EO3DSTransportFamily::NNG", EditConditionHides))
+    EO3DSNngMode NngMode = EO3DSNngMode::Publisher;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="TransportFamily == EO3DSTransportFamily::TCP", EditConditionHides))
+    EO3DSTcpMode TcpMode = EO3DSTcpMode::Client;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="TransportFamily == EO3DSTransportFamily::WebRTC", EditConditionHides))
+    EO3DSWebRtcMode WebRtcMode = EO3DSWebRtcMode::Client;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport")
     FString Url = TEXT("tcp://127.0.0.1:9000");
