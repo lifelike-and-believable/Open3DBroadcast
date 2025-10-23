@@ -7,6 +7,17 @@ on:
       - "**/*.cpp"
       - "**/*.h"
       - "CMakeLists.txt"
+      - "thirdparty/**"
+  pull_request:
+    branches: [ develop, main ]
+    paths:
+      - "docker/Dockerfile.repeater"
+      - "**/*.cpp"
+      - "**/*.h"
+      - "CMakeLists.txt"
+      - "thirdparty/**"
+  schedule:
+    - cron: '0 6 * * *' # daily 06:00 UTC nightly build
   workflow_dispatch:
 
 jobs:
@@ -15,23 +26,95 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/open3dstream-repeater
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository (with submodules)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GHCR
+      - name: Log in to GHCR (for pushes and pulls)
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      # Build for PRs (no push), load to local Docker for smoke test
+      - name: Build (PR)
+        if: github.event_name == 'pull_request' && (github.event.pull_request.draft == false)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.repeater
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:pr-${{ github.sha }}
+
+      - name: Smoke test (PR)
+        if: github.event_name == 'pull_request' && (github.event.pull_request.draft == false)
+        run: |
+          docker run --rm --entrypoint /bin/sh $IMAGE -c "echo ok"
+          # Optional usage check; don't fail on exit code
+          docker run --rm $IMAGE || true
+        env:
+          IMAGE: ${{ env.IMAGE_NAME }}:pr-${{ github.sha }}
+
+      # Build and push on main branch pushes
+      - name: Build and push (main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile.repeater
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/open3dstream-repeater:latest
+          tags: ${{ env.IMAGE_NAME }}:latest
+
+      - name: Pull and smoke test (latest)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker pull $IMAGE
+          docker run --rm --entrypoint /bin/sh $IMAGE -c "echo ok"
+        env:
+          IMAGE: ${{ env.IMAGE_NAME }}:latest
+
+      # Develop branch push publishes an :edge tag for immediate testing
+      - name: Build and push (develop)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.repeater
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:edge
+
+      - name: Pull and smoke test (edge)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        run: |
+          docker pull $IMAGE
+          docker run --rm --entrypoint /bin/sh $IMAGE -c "echo ok"
+        env:
+          IMAGE: ${{ env.IMAGE_NAME }}:edge
+
+      # Nightly scheduled build to 'nightly' tag
+      - name: Build and push (nightly)
+        if: github.event_name == 'schedule'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.repeater
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:nightly
+
+      - name: Pull and smoke test (nightly)
+        if: github.event_name == 'schedule'
+        run: |
+          docker pull $IMAGE
+          docker run --rm --entrypoint /bin/sh $IMAGE -c "echo ok"
+        env:
+          IMAGE: ${{ env.IMAGE_NAME }}:nightly
