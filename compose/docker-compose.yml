@@ -1,7 +1,7 @@
 version: "3.9"
 services:
   repeater:
-    image: ghcr.io/your-org/open3dstream-repeater:latest
+    image: ghcr.io/lifelike-and-believable/open3dstream-repeater:latest
     container_name: o3ds-repeater
     restart: always
     environment:
