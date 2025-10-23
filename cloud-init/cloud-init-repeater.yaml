@@ -19,24 +19,23 @@ runcmd:
       systemctl enable --now docker
     fi
 
-  # Compose project directory
   - mkdir -p /opt/repeater
   - chown ubuntu:ubuntu /opt/repeater || true
 
-  # Write compose file
   - |
     cat >/opt/repeater/docker-compose.yml <<'EOF'
     version: "3.9"
     services:
       repeater:
-        image: ghcr.io/your-org/open3dstream-repeater:latest
+        image: ghcr.io/lifelike-and-believable/open3dstream-repeater:latest
         container_name: o3ds-repeater
         restart: always
         environment:
-          - LISTEN_ADDR=${LISTEN_ADDR:-0.0.0.0:8000}
-          - BROADCAST_ADDR=${BROADCAST_ADDR:-127.0.0.1:9000}
-        # ports:
-        #   - "8000:8000"
+          - LISTEN_ADDR=${LISTEN_ADDR:-tcp://0.0.0.0:7000}
+          - BROADCAST_ADDR=${BROADCAST_ADDR:-tcp://0.0.0.0:7001}
+        ports:
+          - "7000:7000"
+          - "7001:7001"
         logging:
           driver: json-file
           options:
@@ -57,17 +56,15 @@ runcmd:
       portainer_data:
     EOF
 
-  # Default env values (you can change later in Portainer)
   - |
     cat >/opt/repeater/.env <<'EOF'
-    LISTEN_ADDR=0.0.0.0:8000
-    BROADCAST_ADDR=127.0.0.1:9000
+    LISTEN_ADDR=tcp://0.0.0.0:7000
+    BROADCAST_ADDR=tcp://0.0.0.0:7001
     EOF
 
-  # Launch stack
   - docker compose -f /opt/repeater/docker-compose.yml --env-file /opt/repeater/.env up -d
 
 final_message: |
   Repeater + Portainer deployed.
   Visit: http://<instance-public-ip>:9000 to finish Portainer setup.
-  In your AWS Security Group, restrict 9000 to trusted IPs only.
+  Restrict port 9000 (Portainer) and the Repeater ports (7000/7001) in the Security Group to trusted IPs.
