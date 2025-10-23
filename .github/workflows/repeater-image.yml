@@ -83,6 +83,24 @@ jobs:
         env:
           IMAGE: ${{ env.IMAGE_NAME }}:latest
 
+      # Develop branch push publishes an :edge tag for immediate testing
+      - name: Build and push (develop)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.repeater
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:edge
+
+      - name: Pull and smoke test (edge)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        run: |
+          docker pull $IMAGE
+          docker run --rm --entrypoint /bin/sh $IMAGE -c "echo ok"
+        env:
+          IMAGE: ${{ env.IMAGE_NAME }}:edge
+
       # Nightly scheduled build to 'nightly' tag
       - name: Build and push (nightly)
         if: github.event_name == 'schedule'
