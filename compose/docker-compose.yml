@@ -1,30 +1,38 @@
-version: "3.9"
+version: "3.8"
+
 services:
   repeater:
     image: ghcr.io/lifelike-and-believable/open3dstream-repeater:latest
-    container_name: o3ds-repeater
-    restart: always
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.repeater
     environment:
       - LISTEN_ADDR=${LISTEN_ADDR:-tcp://0.0.0.0:7000}
       - BROADCAST_ADDR=${BROADCAST_ADDR:-tcp://0.0.0.0:7001}
     ports:
       - "7000:7000"
       - "7001:7001"
+    restart: unless-stopped
     logging:
       driver: json-file
       options:
         max-size: "10m"
-        max-file: "5"
+        max-file: "3"
 
   portainer:
     image: portainer/portainer-ce:latest
-    container_name: portainer
-    restart: always
-    ports:
-      - "9000:9000"
+    command: -H unix:///var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - portainer_data:/data
+    ports:
+      - "9000:9000"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   portainer_data:
