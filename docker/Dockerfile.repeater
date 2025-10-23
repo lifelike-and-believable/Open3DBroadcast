@@ -34,5 +34,5 @@ ENV BROADCAST_ADDR=tcp://0.0.0.0:7001
 # Optional: document ports
 # EXPOSE 7000 7001
 
-ENTRYPOINT ["/app/repeater"]
-CMD ["${LISTEN_ADDR}", "${BROADCAST_ADDR}"]
+# Use shell form to allow environment variable expansion
+CMD ["/bin/sh", "-c", "/app/repeater ${LISTEN_ADDR} ${BROADCAST_ADDR}"]
