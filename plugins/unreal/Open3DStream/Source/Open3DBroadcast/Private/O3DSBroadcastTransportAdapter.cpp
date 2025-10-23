@@ -96,6 +96,29 @@ static FString InjectModeIntoUrl(const FString& InUrl, EO3DSTransportFamily Fami
     return Out;
 }
 
+// Derive a legacy-like protocol string to pass to transports
+static FString GetProtocolNameLegacy(EO3DSTransportFamily Family, EO3DSTcpMode TcpMode, EO3DSWebRtcMode WebRtcMode)
+{
+    switch (Family)
+    {
+        case EO3DSTransportFamily::TCP:
+            return (TcpMode == EO3DSTcpMode::Server)
+                ? UEnum::GetValueAsString(EO3DSTransportKind::TCPServer)
+                : UEnum::GetValueAsString(EO3DSTransportKind::TCP);
+        case EO3DSTransportFamily::UDP:
+            return UEnum::GetValueAsString(EO3DSTransportKind::UDP);
+        case EO3DSTransportFamily::NNG:
+            return UEnum::GetValueAsString(EO3DSTransportKind::NNG);
+        case EO3DSTransportFamily::WebRTC:
+            return (WebRtcMode == EO3DSWebRtcMode::Client)
+                ? UEnum::GetValueAsString(EO3DSTransportKind::WebRTCClient)
+                : UEnum::GetValueAsString(EO3DSTransportKind::WebRTCServer);
+        default:
+            break;
+    }
+    return TEXT("EO3DSTransportKind::Disabled");
+}
+
 // CVars (runtime overrides) - file scoped to avoid template/macro conflicts in some builds
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastAdapterEnable(
     TEXT("o3ds.Broadcast.Enable"), 0,
@@ -189,9 +212,13 @@ void UO3DSBroadcastTransportAdapter::Unbind()
 
 void UO3DSBroadcastTransportAdapter::EnsureBound()
 {
-    // Adapter is now always enabled when present, unless explicitly disabled via CVar
-    const bool bDisabledByCVar = (CVarO3DSBroadcastAdapterEnable.GetValueOnGameThread() == 0) ? false : false; // legacy CVar retained for backwards-compat
-    (void)bDisabledByCVar; // unused but kept to avoid breaking configs
+    // Require explicit enable (or runtime override) to avoid unintended localhost broadcasts
+    const bool bExplicitEnable = bEnable || (CVarO3DSBroadcastAdapterEnable.GetValueOnGameThread() > 0);
+    if (!bExplicitEnable)
+    {
+        UE_LOG(LogO3DSBroadcast, Log, TEXT("Transport adapter disabled (toggle bEnable or set o3ds.Broadcast.Enable=1)"));
+        return;
+    }
 
     if (!BroadcastComponent.IsValid())
     {
@@ -222,7 +249,7 @@ void UO3DSBroadcastTransportAdapter::EnsureBound()
         const int32 CVarMax = CVarO3DSBroadcastAdapterMaxBytes.GetValueOnGameThread();
         if (CVarMax > 0) { MaxQueuedBytes = CVarMax; }
 
-        // Inject role= when using explicit WebRTC kinds and URL lacks a role
+        // Inject role= when using explicit WebRTC kinds and URL lacks a role (legacy path)
         EffectiveUrl = EnsureWebRtcRoleInUrl(EffectiveUrl, Transport);
 
         // If using new family/mode UX and Transport is Disabled, inject mode parameters
@@ -231,6 +258,7 @@ void UO3DSBroadcastTransportAdapter::EnsureBound()
             EffectiveUrl = InjectModeIntoUrl(EffectiveUrl, TransportFamily, NngMode, WebRtcMode);
         }
 
+        // Derive protocol name compatible with legacy expectations
         FString ProtocolName;
         if (Transport != EO3DSTransportKind::Disabled)
         {
@@ -238,12 +266,16 @@ void UO3DSBroadcastTransportAdapter::EnsureBound()
         }
         else
         {
-            ProtocolName = UEnum::GetValueAsString(TransportFamily);
+            ProtocolName = GetProtocolNameLegacy(TransportFamily, TcpMode, WebRtcMode);
         }
 
         if (!TransportImpl->Start(EffectiveUrl, ProtocolName, EffectiveKey))
         {
             UE_LOG(LogO3DSBroadcast, Warning, TEXT("Transport failed to start: %s %s"), *ProtocolName, *EffectiveUrl);
+        }
+        else
+        {
+            UE_LOG(LogO3DSBroadcast, Log, TEXT("Transport started: %s %s"), *ProtocolName, *EffectiveUrl);
         }
     }
 

@@ -124,7 +124,7 @@ public:
 
     // New Transport Family UX (preferred)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
-    EO3DSTransportFamily TransportFamily = EO3DSTransportFamily::NNG;
+    EO3DSTransportFamily TransportFamily = EO3DSTransportFamily::TCP;
 
     // Mode selection per family (conditional visibility)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::NNG", EditConditionHides))

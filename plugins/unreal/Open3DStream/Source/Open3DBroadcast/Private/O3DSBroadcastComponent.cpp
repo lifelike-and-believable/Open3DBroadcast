@@ -55,7 +55,7 @@ static FString O3DS_EnsureWebRtcRoleInUrl(const FString& InUrl, EO3DSTransportKi
     {
         if (Kind != EO3DSTransportKind::WebRTCClient && Kind != EO3DSTransportKind::WebRTCServer)
         {
-            return Out;
+            return Out; // leave as-is
         }
         if (!Out.Contains(TEXT("role=")))
         {
@@ -102,6 +102,29 @@ static FString O3DS_InjectModeIntoUrl(const FString& InUrl, EO3DSTransportFamily
         Out = O3DS_EnsureWebRtcRoleInUrl(Out, EO3DSTransportKind::Disabled, WebRtcMode, /*bUseLegacy=*/false);
     }
     return Out;
+}
+
+// Derive a legacy-like protocol string to pass to transports
+static FString O3DS_GetProtocolNameLegacy(EO3DSTransportFamily Family, EO3DSTcpMode TcpMode, EO3DSWebRtcMode WebRtcMode)
+{
+    switch (Family)
+    {
+        case EO3DSTransportFamily::TCP:
+            return (TcpMode == EO3DSTcpMode::Server)
+                ? UEnum::GetValueAsString(EO3DSTransportKind::TCPServer)
+                : UEnum::GetValueAsString(EO3DSTransportKind::TCP);
+        case EO3DSTransportFamily::UDP:
+            return UEnum::GetValueAsString(EO3DSTransportKind::UDP);
+        case EO3DSTransportFamily::NNG:
+            return UEnum::GetValueAsString(EO3DSTransportKind::NNG);
+        case EO3DSTransportFamily::WebRTC:
+            return (WebRtcMode == EO3DSWebRtcMode::Client)
+                ? UEnum::GetValueAsString(EO3DSTransportKind::WebRTCClient)
+                : UEnum::GetValueAsString(EO3DSTransportKind::WebRTCServer);
+        default:
+            break;
+    }
+    return TEXT("EO3DSTransportKind::Disabled");
 }
 
 void UO3DSBroadcastComponent::NotifyOnScreen(const FString& Message, const FColor& Color, float DisplayTime) const
@@ -168,86 +191,41 @@ void UO3DSBroadcastComponent::SetupInternalTransport()
         return;
     }
 
-    // Back-compat: if legacy Transport is set, use it; otherwise use family/mode
-    bool bUsedLegacy = (Transport != EO3DSTransportKind::Disabled);
-
-    if (bUsedLegacy)
+    // Always use new TransportFamily + Mode UI. Legacy fields are ignored.
+    switch (TransportFamily)
     {
-        switch (Transport)
-        {
-            case EO3DSTransportKind::TCP:
-                InternalTransport = MakeUnique<FO3DSTcpTransport>();
-                break;
-            case EO3DSTransportKind::TCPServer:
+        case EO3DSTransportFamily::NNG:
+            InternalTransport = MakeUnique<FO3DSNngTransport>();
+            break;
+        case EO3DSTransportFamily::TCP:
+            if (TcpMode == EO3DSTcpMode::Server)
+            {
                 InternalTransport = MakeUnique<FO3DSTcpServerTransport>();
-                break;
-            case EO3DSTransportKind::UDP:
-                InternalTransport = MakeUnique<FO3DSUdpTransport>();
-                break;
-            case EO3DSTransportKind::NNG:
-                InternalTransport = MakeUnique<FO3DSNngTransport>();
-                break;
-            case EO3DSTransportKind::WebRTCClient:
-            case EO3DSTransportKind::WebRTCServer:
-                InternalTransport = MakeUnique<FO3DSWebRtcTransport>();
-                break;
-            default:
-                break;
-        }
-    }
-    else
-    {
-        switch (TransportFamily)
-        {
-            case EO3DSTransportFamily::NNG:
-                InternalTransport = MakeUnique<FO3DSNngTransport>();
-                break;
-            case EO3DSTransportFamily::TCP:
-                if (TcpMode == EO3DSTcpMode::Server)
-                {
-                    InternalTransport = MakeUnique<FO3DSTcpServerTransport>();
-                }
-                else
-                {
-                    InternalTransport = MakeUnique<FO3DSTcpTransport>();
-                }
-                break;
-            case EO3DSTransportFamily::UDP:
-                InternalTransport = MakeUnique<FO3DSUdpTransport>();
-                break;
-            case EO3DSTransportFamily::WebRTC:
-                InternalTransport = MakeUnique<FO3DSWebRtcTransport>();
-                break;
-            default:
-                break;
-        }
+            }
+            else
+            {
+                InternalTransport = MakeUnique<FO3DSTcpTransport>();
+            }
+            break;
+        case EO3DSTransportFamily::UDP:
+            InternalTransport = MakeUnique<FO3DSUdpTransport>();
+            break;
+        case EO3DSTransportFamily::WebRTC:
+            InternalTransport = MakeUnique<FO3DSWebRtcTransport>();
+            break;
+        default:
+            break;
     }
 
     if (InternalTransport)
     {
-        FString EffectiveUrl = bUsedLegacy ? TransportUrl : Url;
-        FString EffectiveKey = bUsedLegacy ? TransportKey : Key;
+        FString EffectiveUrl = Url;
+        FString EffectiveKey = Key;
 
-        if (bUsedLegacy)
-        {
-            // For legacy WebRTC explicit roles, ensure role= is present
-            EffectiveUrl = O3DS_EnsureWebRtcRoleInUrl(EffectiveUrl, Transport, /*WebRtcMode*/ EO3DSWebRtcMode::Client, /*bUseLegacy*/ true);
-        }
-        else
-        {
-            // Inject family/mode specific URL params
-            EffectiveUrl = O3DS_InjectModeIntoUrl(EffectiveUrl, TransportFamily, NngMode, WebRtcMode);
-        }
+        // Inject family/mode specific URL params
+        EffectiveUrl = O3DS_InjectModeIntoUrl(EffectiveUrl, TransportFamily, NngMode, WebRtcMode);
 
-        FString ProtocolName;
-        if (bUsedLegacy)
-        {
-            ProtocolName = UEnum::GetValueAsString(Transport);
-        }
-        else
-        {
-            ProtocolName = UEnum::GetValueAsString(TransportFamily);
-        }
+        const FString ProtocolName = O3DS_GetProtocolNameLegacy(TransportFamily, TcpMode, WebRtcMode);
 
         if (!InternalTransport->Start(EffectiveUrl, ProtocolName, EffectiveKey))
         {
@@ -262,6 +240,7 @@ void UO3DSBroadcastComponent::SetupInternalTransport()
                 SerializedFrameHandle = Serializer->OnSerializedFrame.AddUObject(this, &UO3DSBroadcastComponent::OnSerializedForTransport);
             }
             SetComponentTickEnabled(true);
+            UE_LOG(LogO3DSBroadcast, Log, TEXT("Built-in transport started: %s %s"), *ProtocolName, *EffectiveUrl);
         }
     }
 }
