@@ -6,6 +6,7 @@
 #include <nng/nng.h>
 #include <nng/protocol/pubsub0/pub.h>
 #include <nng/protocol/pair1/pair.h>
+#include <nng/protocol/pipeline0/push.h>
 
 extern "C" {
     // callback signature per nng.h
@@ -75,7 +76,7 @@ namespace
             const int32 Count = Self->PipeCount.Decrement();
             if (Count <= 0)
             {
-                Self->bConnected = (Self->Mode != FO3DSNngTransport::EMode::PairClient);
+                Self->bConnected = (Self->Mode != FO3DSNngTransport::EMode::PairClient && Self->Mode != FO3DSNngTransport::EMode::Push);
             }
             UE_LOG(LogO3DSBroadcast, Log, TEXT("NNG: Pipe removed (count=%d)"), FMath::Max(0, Count));
         }
@@ -116,6 +117,10 @@ bool FO3DSNngTransport::Start(const FString& InUrl, const FString& /*InProtocol*
         if (RoleStr && *RoleStr == TEXT("client")) Mode = EMode::PairClient;
         else                                        Mode = EMode::PairServer; // default server when pair without role
     }
+    else if (ModeStr && *ModeStr == TEXT("push"))
+    {
+        Mode = EMode::Push;
+    }
     else
     {
         Mode = EMode::Pub; // default
@@ -141,7 +146,7 @@ bool FO3DSNngTransport::Start(const FString& InUrl, const FString& /*InProtocol*
     StartWorker();
 
     UE_LOG(LogO3DSBroadcast, Log, TEXT("NNG: Started mode=%s url=%s (qmax=%llu)"),
-        (Mode==EMode::Pub?TEXT("pub"):Mode==EMode::PairClient?TEXT("pair-client"):TEXT("pair-server")), *BaseUrl,
+        (Mode==EMode::Pub?TEXT("pub"):Mode==EMode::PairClient?TEXT("pair-client"):Mode==EMode::PairServer?TEXT("pair-server"):TEXT("push")), *BaseUrl,
         (unsigned long long)MaxQueueBytes);
 
     return true;
@@ -185,6 +190,15 @@ bool FO3DSNngTransport::OpenSocket()
         ret = nng_listen(Sock->Sock, TCHAR_TO_ANSI(*BaseUrl), nullptr, 0);
         if (ret != 0) { delete Sock; UE_LOG(LogO3DSBroadcast, Warning, TEXT("NNG: listen failed %d (%s)"), ret, UTF8_TO_TCHAR(nng_strerror(ret))); return false; }
         bConnected = true; // server ready; peer may not be connected yet
+    }
+    else if (Mode == EMode::Push)
+    {
+        ret = nng_push0_open(&Sock->Sock);
+        if (ret != 0) { delete Sock; UE_LOG(LogO3DSBroadcast, Warning, TEXT("NNG: push open failed %d (%s)"), ret, UTF8_TO_TCHAR(nng_strerror(ret))); return false; }
+        ret = nng_dial(Sock->Sock, TCHAR_TO_ANSI(*BaseUrl), nullptr, NNG_FLAG_NONBLOCK);
+        if (ret != 0) { UE_LOG(LogO3DSBroadcast, Verbose, TEXT("NNG: initial dial failed %d (%s); will retry"), ret, UTF8_TO_TCHAR(nng_strerror(ret))); }
+        // Treat as not yet connected; will become connected when a pipe is added
+        bConnected = (ret == 0);
     }
     else // PairClient
     {
@@ -301,7 +315,7 @@ uint32 FO3DSNngTransport::WorkerRun()
             Counters.FramesDropped++;
             bConnected = false;
             UE_LOG(LogO3DSBroadcast, Verbose, TEXT("NNG: send failed %d (%s)"), ret, UTF8_TO_TCHAR(nng_strerror(ret)));
-            if (Mode == EMode::PairClient)
+            if (Mode == EMode::PairClient || Mode == EMode::Push)
             {
                 // Close and redial with backoff
                 CloseSocket();

@@ -37,6 +37,65 @@ static FString EnsureWebRtcRoleInUrl(const FString& InUrl, EO3DSTransportKind Ki
     return Out;
 }
 
+// Helper to inject URL query parameters based on family/mode selection
+static FString InjectModeIntoUrl(const FString& InUrl, EO3DSTransportFamily Family, EO3DSNngMode NngMode, EO3DSWebRtcMode WebRtcMode)
+{
+    FString Out = InUrl;
+
+    if (Family == EO3DSTransportFamily::NNG)
+    {
+        // Only inject if not already present
+        if (!Out.Contains(TEXT("mode=")))
+        {
+            FString ModeParam;
+            switch (NngMode)
+            {
+                case EO3DSNngMode::Publisher:
+                    ModeParam = TEXT("mode=pub");
+                    break;
+                case EO3DSNngMode::PairClient:
+                    ModeParam = TEXT("mode=pair&role=client");
+                    break;
+                case EO3DSNngMode::PairServer:
+                    ModeParam = TEXT("mode=pair&role=server");
+                    break;
+                case EO3DSNngMode::Push:
+                    ModeParam = TEXT("mode=push");
+                    break;
+            }
+            if (!ModeParam.IsEmpty())
+            {
+                if (Out.Contains(TEXT("?")))
+                {
+                    Out += TEXT("&") + ModeParam;
+                }
+                else
+                {
+                    Out += TEXT("?") + ModeParam;
+                }
+            }
+        }
+    }
+    else if (Family == EO3DSTransportFamily::WebRTC)
+    {
+        // Inject role if not present
+        if (!Out.Contains(TEXT("role=")))
+        {
+            const TCHAR* RoleStr = (WebRtcMode == EO3DSWebRtcMode::Client) ? TEXT("client") : TEXT("server");
+            if (Out.Contains(TEXT("?")))
+            {
+                Out += FString::Printf(TEXT("&role=%s"), RoleStr);
+            }
+            else
+            {
+                Out += FString::Printf(TEXT("?role=%s"), RoleStr);
+            }
+        }
+    }
+
+    return Out;
+}
+
 // CVars (runtime overrides) - file scoped to avoid template/macro conflicts in some builds
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastAdapterEnable(
     TEXT("o3ds.Broadcast.Enable"), 0,
@@ -169,6 +228,12 @@ void UO3DSBroadcastTransportAdapter::EnsureBound()
         // Inject role= when using explicit WebRTC kinds and URL lacks a role
         EffectiveUrl = EnsureWebRtcRoleInUrl(EffectiveUrl, Transport);
 
+        // If using new family/mode UX and Transport is Disabled, inject mode parameters
+        if (Transport == EO3DSTransportKind::Disabled)
+        {
+            EffectiveUrl = InjectModeIntoUrl(EffectiveUrl, TransportFamily, NngMode, WebRtcMode);
+        }
+
         const FString ProtocolName = UEnum::GetValueAsString(Transport);
         if (!TransportImpl->Start(EffectiveUrl, ProtocolName, EffectiveKey))
         {
@@ -186,22 +251,46 @@ void UO3DSBroadcastTransportAdapter::EnsureBound()
 
 TUniquePtr<IBroadcastTransport> UO3DSBroadcastTransportAdapter::CreateTransport() const
 {
-    switch (Transport)
+    // Prefer legacy Transport enum if set to non-Disabled
+    if (Transport != EO3DSTransportKind::Disabled)
     {
-        case EO3DSTransportKind::TCP:
-            return MakeUnique<FO3DSTcpTransport>();
-        case EO3DSTransportKind::TCPServer:
-            return MakeUnique<FO3DSTcpServerTransport>();
-        case EO3DSTransportKind::UDP:
-            return MakeUnique<FO3DSUdpTransport>();
-        case EO3DSTransportKind::NNG:
+        switch (Transport)
+        {
+            case EO3DSTransportKind::TCP:
+                return MakeUnique<FO3DSTcpTransport>();
+            case EO3DSTransportKind::TCPServer:
+                return MakeUnique<FO3DSTcpServerTransport>();
+            case EO3DSTransportKind::UDP:
+                return MakeUnique<FO3DSUdpTransport>();
+            case EO3DSTransportKind::NNG:
+                return MakeUnique<FO3DSNngTransport>();
+            case EO3DSTransportKind::WebRTCClient:
+            case EO3DSTransportKind::WebRTCServer:
+                return MakeUnique<FO3DSWebRtcTransport>();
+            default:
+                break;
+        }
+    }
+
+    // New family/mode UX
+    switch (TransportFamily)
+    {
+        case EO3DSTransportFamily::NNG:
             return MakeUnique<FO3DSNngTransport>();
-        case EO3DSTransportKind::WebRTCClient:
-        case EO3DSTransportKind::WebRTCServer:
+        case EO3DSTransportFamily::TCP:
+            if (TcpMode == EO3DSTcpMode::Server)
+            {
+                return MakeUnique<FO3DSTcpServerTransport>();
+            }
+            return MakeUnique<FO3DSTcpTransport>();
+        case EO3DSTransportFamily::UDP:
+            return MakeUnique<FO3DSUdpTransport>();
+        case EO3DSTransportFamily::WebRTC:
             return MakeUnique<FO3DSWebRtcTransport>();
         default:
             break;
     }
+
     return TUniquePtr<IBroadcastTransport>();
 }
 

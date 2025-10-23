@@ -59,7 +59,75 @@ Both modules are built and available by default.
 3. Configure connection URL and protocol
 
 ### Broadcasting (Open3DBroadcast module)
-*Implementation pending - framework is in place*
+
+**Requirements**: Unreal Engine 5.6+, built with `O3DS_WITH_BROADCAST=1` (enabled by default)
+
+The Open3DBroadcast module enables streaming animation data FROM Unreal Engine TO external clients or repeaters.
+
+#### Transport Family + Mode Configuration
+
+The broadcast adapter (`UO3DSBroadcastTransportAdapter`) provides a streamlined UX for selecting transport protocols:
+
+**Transport Families:**
+- **NNG**: High-performance scalability protocol with multiple modes
+- **TCP**: Traditional TCP client/server
+- **UDP**: Unreliable datagram transport
+- **WebRTC**: Peer-to-peer with NAT traversal
+
+**NNG Modes:**
+- **Publisher**: Broadcasts to multiple subscribers (one-to-many)
+- **Pair Client**: Connects to a pair server (one-to-one, client role)
+- **Pair Server**: Accepts pair client connections (one-to-one, server role)
+- **Push**: Pipeline push to a pull endpoint (many-to-one, ideal for repeaters)
+
+**TCP Modes:**
+- **Client**: Connects to a TCP server
+- **Server**: Accepts TCP client connections
+
+**WebRTC Modes:**
+- **Client**: WebRTC client role
+- **Server**: WebRTC server role
+
+#### Example: Broadcasting through a Repeater
+
+A common deployment pattern uses the standalone `Repeater` tool to aggregate multiple broadcasters and fan out to many subscribers:
+
+**Repeater Setup:**
+```bash
+# Start repeater with PULL input on port 7000, PUB output on port 7001
+Repeater tcp://0.0.0.0:7000 tcp://0.0.0.0:7001
+```
+
+**Broadcaster Configuration (in Unreal Editor):**
+1. Add `UO3DSBroadcastTransportAdapter` component to your actor
+2. Set **Transport Family** = `NNG`
+3. Set **NNG Mode** = `Push`
+4. Set **URL** = `tcp://repeater-host:7000`
+5. The adapter will automatically inject `?mode=push` into the URL
+
+**LiveLink Receiver Configuration:**
+1. Open **Window → Virtual Production → Live Link**
+2. Add **Open3DStream Source**
+3. Set **Protocol** = `NNG Subscribe`
+4. Set **URL** = `tcp://repeater-host:7001`
+
+The broadcaster pushes frames to the repeater's PULL socket, which then publishes to all subscribers on the PUB socket.
+
+#### Backward Compatibility
+
+The legacy `Transport` property (enum: `Disabled`, `TCP`, `TCPServer`, `UDP`, `NNG`, `WebRTCClient`, `WebRTCServer`) is still supported for existing configurations. When set to `Disabled`, the new `TransportFamily` and mode properties are used instead.
+
+#### Console Commands
+
+- `o3ds.Broadcast.Transport.DumpStats` - Show adapter queue/drop stats
+- `o3ds.Broadcast.Transport.DumpTransportStats` - Show transport-level counters (FramesSent, BytesSent, etc.)
+
+#### CVars
+
+- `o3ds.Broadcast.Enable` - Runtime enable/disable (0/1)
+- `o3ds.Broadcast.Url` - Override URL from console
+- `o3ds.Broadcast.Key` - Override session key
+- `o3ds.Broadcast.MaxQueuedBytes` - Override queue limit
 
 ## Support
 
