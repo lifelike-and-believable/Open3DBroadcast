@@ -14,7 +14,6 @@ COPY . /work
 
 # Create a build directory and configure the project disabling WebRTC to avoid heavy deps
 WORKDIR /work/build
-RUN curl -fsSL https://raw.githubusercontent.com/d-bahr/CRCpp/master/inc/CRC.h -o /work/src/CRC.h
 RUN rm -rf /work/build/* && \
     cmake -S /work -B /work/build -DO3DS_DISABLE_WEBRTC=ON -DCMAKE_BUILD_TYPE=Release && \
     cmake --build /work/build --target all -j$(nproc)

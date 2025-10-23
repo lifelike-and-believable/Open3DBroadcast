@@ -185,7 +185,8 @@ add_library(open3dstreamstatic STATIC ${SOURCES} ${pub_headers})
 target_include_directories(open3dstreamstatic PUBLIC 
 	${CMAKE_CURRENT_BINARY_DIR}/_generated ${CMAKE_CURRENT_LIST_DIR}
 	${FLATBUFFERS_INCLUDE_DIRS} 
-	${NNG_INCLUDE_DIRS}/..)
+	${NNG_INCLUDE_DIRS}/..
+	${CMAKE_CURRENT_LIST_DIR}/../thirdparty/crccpp)
 
 if(O3DS_WITH_WEBRTC)
     target_link_libraries(open3dstreamstatic PUBLIC LibDataChannel::LibDataChannel)
