@@ -1,4 +1,4 @@
-# Multi-stage build for the Repeater app
+# Multi-stage build for the Repeater app - insignificant edit
 
 FROM ubuntu:22.04 AS build
 ENV DEBIAN_FRONTEND=noninteractive
@@ -12,13 +12,15 @@ COPY . .
 
 # Configure and build
 # Disable WebRTC to keep dependencies minimal for this image
+# Add CRC header path directly for this build only
 RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DO3DS_DISABLE_WEBRTC=ON \
+    -DCMAKE_CXX_FLAGS="-I/src/thirdparty/crccpp/inc" \
  && cmake --build build -j"$(nproc)"
 
 FROM ubuntu:22.04 AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
-  ca-certificates libnng2 \
+  ca-certificates libnng1 \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
@@ -32,5 +34,5 @@ ENV BROADCAST_ADDR=tcp://0.0.0.0:7001
 # Optional: document ports
 # EXPOSE 7000 7001
 
-ENTRYPOINT ["/app/repeater"]
-CMD ["${LISTEN_ADDR}", "${BROADCAST_ADDR}"]
+# Use shell form to allow environment variable expansion
+CMD ["/bin/sh", "-c", "/app/repeater ${LISTEN_ADDR} ${BROADCAST_ADDR}"]
