@@ -1,48 +1,36 @@
-# Multi-stage Dockerfile for building and running the Repeater app
-# Builder: Ubuntu 22.04
-FROM ubuntu:22.04 AS builder
+# Multi-stage build for the Repeater app
+
+FROM ubuntu:22.04 AS build
 ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y \
+  build-essential cmake git pkg-config \
+  libflatbuffers-dev libnng-dev \
+  && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential cmake pkg-config git ca-certificates curl \
-    libflatbuffers-dev libnng-dev \
- && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY . .
 
-# Copy repo into container
-WORKDIR /work
-COPY . /work
+# Configure and build
+# Disable WebRTC to keep dependencies minimal for this image
+RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DO3DS_DISABLE_WEBRTC=ON \
+ && cmake --build build -j"$(nproc)"
 
-# Create a build directory and configure the project disabling WebRTC to avoid heavy deps
-WORKDIR /work/build
-RUN rm -rf /work/build/* && \
-    cmake -S /work -B /work/build -DO3DS_DISABLE_WEBRTC=ON -DCMAKE_BUILD_TYPE=Release && \
-    cmake --build /work/build --target all -j$(nproc)
-
-# Build a tiny NNG-based smoke push utility (no dependency on the core lib)
-RUN cc -O2 -o /work/build/repeater_smoke_push /work/apps/RepeaterSmokePushDocker/repeater_smoke_push.c -lnng
-
-# Runtime image
 FROM ubuntu:22.04 AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates tzdata \
- && rm -rf /var/lib/apt/lists/*
-
+RUN apt-get update && apt-get install -y \
+  ca-certificates libnng2 \
+  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-# Copy the built Repeater binary from the builder stage. Path inside build: apps/Repeater/Repeater
-COPY --from=builder /work/build/apps/Repeater/Repeater /app/Repeater
-# Copy nng runtime library from builder image
-COPY --from=builder /usr/lib/x86_64-linux-gnu/libnng.so* /usr/lib/x86_64-linux-gnu/
-# Copy mbedtls runtime libraries if present (some distros link nng against mbedtls)
-COPY --from=builder /usr/lib/x86_64-linux-gnu/libmbed*.so* /usr/lib/x86_64-linux-gnu/
-COPY --from=builder /work/build/repeater_smoke_push /app/smoke-push
 
-# Default environment variables (can be overridden at runtime)
-ENV LISTEN_ADDR="tcp://0.0.0.0:7000"
-ENV BROADCAST_ADDR="tcp://0.0.0.0:7001"
+# Adjust if your CMake target outputs elsewhere
+COPY --from=build /src/build/apps/Repeater/Repeater /app/repeater
 
-EXPOSE 7000 7001
+# Defaults use NNG URL scheme (tcp://)
+ENV LISTEN_ADDR=tcp://0.0.0.0:7000
+ENV BROADCAST_ADDR=tcp://0.0.0.0:7001
 
-# Use shell entrypoint so environment variables are expanded into positional args
-ENTRYPOINT ["/bin/sh","-c","exec /app/Repeater \"$LISTEN_ADDR\" \"$BROADCAST_ADDR\""]
+# Optional: document ports
+# EXPOSE 7000 7001
+
+ENTRYPOINT ["/app/repeater"]
+CMD ["${LISTEN_ADDR}", "${BROADCAST_ADDR}"]

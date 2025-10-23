@@ -1,14 +1,11 @@
 name: Build and publish Repeater image
-
 on:
   push:
     branches: [ main ]
     paths:
       - "docker/Dockerfile.repeater"
-      - "apps/Repeater/**"
-      - "apps/RepeaterSmokePushDocker/**"
-      - "src/**/*.cpp"
-      - "src/**/*.h"
+      - "**/*.cpp"
+      - "**/*.h"
       - "CMakeLists.txt"
   workflow_dispatch:
 
