@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "O3DSBroadcastSerializer.h"
-#include "O3DSBroadcastTransportAdapter.h" // for EO3DSTransportKind
+#include "O3DSBroadcastTransportAdapter.h" // for transport enums
 #include "O3DSBroadcastComponent.generated.h"
 
 class USkeletalMeshComponent;
@@ -118,16 +118,43 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport")
     bool bAutoCreateTransport = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
+    // Legacy transport (hidden/deprecated)
+    UPROPERTY(meta=(DisplayName="Transport (Deprecated)", DeprecatedProperty, DeprecationMessage="Use Transport Family + Mode instead", EditCondition="false", EditConditionHides), EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport")
     EO3DSTransportKind Transport = EO3DSTransportKind::Disabled;
 
+    // New Transport Family UX (preferred)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
+    EO3DSTransportFamily TransportFamily = EO3DSTransportFamily::NNG;
+
+    // Mode selection per family (conditional visibility)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::NNG", EditConditionHides))
+    EO3DSNngMode NngMode = EO3DSNngMode::Publisher;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::TCP", EditConditionHides))
+    EO3DSTcpMode TcpMode = EO3DSTcpMode::Client;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC", EditConditionHides))
+    EO3DSWebRtcMode WebRtcMode = EO3DSWebRtcMode::Client;
+
+    // Endpoint and key (new names)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
+    FString Url = TEXT("tcp://127.0.0.1:9000");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
+    FString Key;
+
+    // Queue size for backpressure (bytes) (new name)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
+    int32 MaxQueuedBytes = 8 * 1024 * 1024;
+
+    // Legacy fields (hidden/deprecated) kept to avoid breaking saved assets
+    UPROPERTY(meta=(DeprecatedProperty, DeprecationMessage="Use Url", EditCondition="false", EditConditionHides), EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport")
     FString TransportUrl = TEXT("tcp://127.0.0.1:9000");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
+    UPROPERTY(meta=(DeprecatedProperty, DeprecationMessage="Use Key", EditCondition="false", EditConditionHides), EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport")
     FString TransportKey;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
+    UPROPERTY(meta=(DeprecatedProperty, DeprecationMessage="Use MaxQueuedBytes", EditCondition="false", EditConditionHides), EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport")
     int32 TransportMaxQueuedBytes = 8 * 1024 * 1024;
 
     // Curve normalization and filtering configuration

@@ -65,8 +65,8 @@ class OPEN3DBROADCAST_API UO3DSBroadcastTransportAdapter : public UActorComponen
 public:
     UO3DSBroadcastTransportAdapter();
 
-    // Transport selection and endpoint
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport")
+    // Transport selection and endpoint (legacy; hidden)
+    UPROPERTY(meta=(DisplayName="Transport (Deprecated)", DeprecatedProperty, DeprecationMessage="Use Transport Family + Mode instead", EditCondition="false", EditConditionHides), EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport")
     EO3DSTransportKind Transport = EO3DSTransportKind::Disabled;
 
     // New Transport Family UX (preferred)

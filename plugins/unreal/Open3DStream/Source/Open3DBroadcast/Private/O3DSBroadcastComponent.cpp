@@ -18,7 +18,7 @@
 #include "O3DSBroadcastSerializer.h"
 #include <limits>
 
-#include "O3DSBroadcastTransportAdapter.h" // for EO3DSTransportKind
+#include "O3DSBroadcastTransportAdapter.h" // for transport enums
 #include "IBroadcastTransport.h"
 #include "Transports/O3DSTcpTransport.h"
 #include "Transports/O3DSTcpServerTransport.h"
@@ -46,6 +46,63 @@ static TAutoConsoleVariable<int32> CVarO3DSBroadcastOnScreen(
     0,
     TEXT("Show on-screen notifications for Open3DBroadcast state changes (0/1)."),
     ECVF_Default);
+
+// Helpers to inject URL params matching adapter behavior
+static FString O3DS_EnsureWebRtcRoleInUrl(const FString& InUrl, EO3DSTransportKind Kind, EO3DSWebRtcMode WebRtcMode, bool bUseLegacy)
+{
+    FString Out = InUrl;
+    if (bUseLegacy)
+    {
+        if (Kind != EO3DSTransportKind::WebRTCClient && Kind != EO3DSTransportKind::WebRTCServer)
+        {
+            return Out;
+        }
+        if (!Out.Contains(TEXT("role=")))
+        {
+            const TCHAR* RoleStr = (Kind == EO3DSTransportKind::WebRTCClient) ? TEXT("client") : TEXT("server");
+            Out += Out.Contains(TEXT("?")) ? FString::Printf(TEXT("&role=%s"), RoleStr)
+                                            : FString::Printf(TEXT("?role=%s"), RoleStr);
+        }
+        return Out;
+    }
+    // Family+mode path
+    if (!Out.Contains(TEXT("role=")))
+    {
+        const TCHAR* RoleStr = (WebRtcMode == EO3DSWebRtcMode::Client) ? TEXT("client") : TEXT("server");
+        Out += Out.Contains(TEXT("?")) ? FString::Printf(TEXT("&role=%s"), RoleStr)
+                                        : FString::Printf(TEXT("?role=%s"), RoleStr);
+    }
+    return Out;
+}
+
+static FString O3DS_InjectModeIntoUrl(const FString& InUrl, EO3DSTransportFamily Family, EO3DSNngMode NngMode, EO3DSWebRtcMode WebRtcMode)
+{
+    FString Out = InUrl;
+    if (Family == EO3DSTransportFamily::NNG)
+    {
+        if (!Out.Contains(TEXT("mode=")))
+        {
+            FString ModeParam;
+            switch (NngMode)
+            {
+                case EO3DSNngMode::Publisher: ModeParam = TEXT("mode=pub"); break;
+                case EO3DSNngMode::PairClient: ModeParam = TEXT("mode=pair&role=client"); break;
+                case EO3DSNngMode::PairServer: ModeParam = TEXT("mode=pair&role=server"); break;
+                case EO3DSNngMode::Push: ModeParam = TEXT("mode=push"); break;
+            }
+            if (!ModeParam.IsEmpty())
+            {
+                Out += Out.Contains(TEXT("?")) ? TEXT("&") + ModeParam : TEXT("?") + ModeParam;
+            }
+        }
+    }
+    else if (Family == EO3DSTransportFamily::WebRTC)
+    {
+        // Ensure role
+        Out = O3DS_EnsureWebRtcRoleInUrl(Out, EO3DSTransportKind::Disabled, WebRtcMode, /*bUseLegacy=*/false);
+    }
+    return Out;
+}
 
 void UO3DSBroadcastComponent::NotifyOnScreen(const FString& Message, const FColor& Color, float DisplayTime) const
 {
@@ -111,44 +168,90 @@ void UO3DSBroadcastComponent::SetupInternalTransport()
         return;
     }
 
-    switch (Transport)
+    // Back-compat: if legacy Transport is set, use it; otherwise use family/mode
+    bool bUsedLegacy = (Transport != EO3DSTransportKind::Disabled);
+
+    if (bUsedLegacy)
     {
-        case EO3DSTransportKind::TCP:
-            InternalTransport = MakeUnique<FO3DSTcpTransport>();
-            break;
-        case EO3DSTransportKind::TCPServer:
-            InternalTransport = MakeUnique<FO3DSTcpServerTransport>();
-            break;
-        case EO3DSTransportKind::UDP:
-            InternalTransport = MakeUnique<FO3DSUdpTransport>();
-            break;
-        case EO3DSTransportKind::NNG:
-            InternalTransport = MakeUnique<FO3DSNngTransport>();
-            break;
-        case EO3DSTransportKind::WebRTCClient:
-        case EO3DSTransportKind::WebRTCServer:
-            InternalTransport = MakeUnique<FO3DSWebRtcTransport>();
-            break;
-        default:
-            break;
+        switch (Transport)
+        {
+            case EO3DSTransportKind::TCP:
+                InternalTransport = MakeUnique<FO3DSTcpTransport>();
+                break;
+            case EO3DSTransportKind::TCPServer:
+                InternalTransport = MakeUnique<FO3DSTcpServerTransport>();
+                break;
+            case EO3DSTransportKind::UDP:
+                InternalTransport = MakeUnique<FO3DSUdpTransport>();
+                break;
+            case EO3DSTransportKind::NNG:
+                InternalTransport = MakeUnique<FO3DSNngTransport>();
+                break;
+            case EO3DSTransportKind::WebRTCClient:
+            case EO3DSTransportKind::WebRTCServer:
+                InternalTransport = MakeUnique<FO3DSWebRtcTransport>();
+                break;
+            default:
+                break;
+        }
+    }
+    else
+    {
+        switch (TransportFamily)
+        {
+            case EO3DSTransportFamily::NNG:
+                InternalTransport = MakeUnique<FO3DSNngTransport>();
+                break;
+            case EO3DSTransportFamily::TCP:
+                if (TcpMode == EO3DSTcpMode::Server)
+                {
+                    InternalTransport = MakeUnique<FO3DSTcpServerTransport>();
+                }
+                else
+                {
+                    InternalTransport = MakeUnique<FO3DSTcpTransport>();
+                }
+                break;
+            case EO3DSTransportFamily::UDP:
+                InternalTransport = MakeUnique<FO3DSUdpTransport>();
+                break;
+            case EO3DSTransportFamily::WebRTC:
+                InternalTransport = MakeUnique<FO3DSWebRtcTransport>();
+                break;
+            default:
+                break;
+        }
     }
 
     if (InternalTransport)
     {
-        FString EffectiveUrl = TransportUrl;
-        if (Transport == EO3DSTransportKind::WebRTCClient || Transport == EO3DSTransportKind::WebRTCServer)
+        FString EffectiveUrl = bUsedLegacy ? TransportUrl : Url;
+        FString EffectiveKey = bUsedLegacy ? TransportKey : Key;
+
+        if (bUsedLegacy)
         {
-            if (!EffectiveUrl.Contains(TEXT("role=")))
-            {
-                const TCHAR* RoleStr = (Transport == EO3DSTransportKind::WebRTCClient) ? TEXT("client") : TEXT("server");
-                EffectiveUrl += EffectiveUrl.Contains(TEXT("?")) ? FString::Printf(TEXT("&role=%s"), RoleStr)
-                                                                  : FString::Printf(TEXT("?role=%s"), RoleStr);
-            }
+            // For legacy WebRTC explicit roles, ensure role= is present
+            EffectiveUrl = O3DS_EnsureWebRtcRoleInUrl(EffectiveUrl, Transport, /*WebRtcMode*/ EO3DSWebRtcMode::Client, /*bUseLegacy*/ true);
+        }
+        else
+        {
+            // Inject family/mode specific URL params
+            EffectiveUrl = O3DS_InjectModeIntoUrl(EffectiveUrl, TransportFamily, NngMode, WebRtcMode);
         }
 
-        if (!InternalTransport->Start(EffectiveUrl, UEnum::GetValueAsString(Transport), TransportKey))
+        FString ProtocolName;
+        if (bUsedLegacy)
         {
-            UE_LOG(LogO3DSBroadcast, Warning, TEXT("Built-in transport failed to start: %s %s"), *UEnum::GetValueAsString(Transport), *EffectiveUrl);
+            ProtocolName = UEnum::GetValueAsString(Transport);
+        }
+        else
+        {
+            ProtocolName = UEnum::GetValueAsString(TransportFamily);
+        }
+
+        if (!InternalTransport->Start(EffectiveUrl, ProtocolName, EffectiveKey))
+        {
+            UE_LOG(LogO3DSBroadcast, Warning, TEXT("Built-in transport failed to start: %s %s"), *ProtocolName, *EffectiveUrl);
             InternalTransport.Reset();
         }
         else
@@ -191,7 +294,8 @@ void UO3DSBroadcastComponent::OnSerializedForTransport(const FString& /*Subject*
     }
 
     const uint64 NewQ = QueuedBytes.Load() + (uint64)Buffer.Num();
-    if (TransportMaxQueuedBytes > 0 && NewQ > (uint64)TransportMaxQueuedBytes)
+    const int32 LimitBytes = (MaxQueuedBytes > 0) ? MaxQueuedBytes : TransportMaxQueuedBytes; // use new, fallback legacy
+    if (LimitBytes > 0 && NewQ > (uint64)LimitBytes)
     {
         DroppedFrames.Store(DroppedFrames.Load() + 1);
         return;

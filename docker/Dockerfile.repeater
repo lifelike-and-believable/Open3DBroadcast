@@ -1,0 +1,32 @@
+# Multi-stage build for the Repeater app
+# This assumes a CMake-based build and a resulting binary at:
+#   build/apps/Repeater/Repeater
+# If your actual target/path differs, tweak the COPY line near the end.
+
+FROM ubuntu:22.04 AS build
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y \
+  build-essential cmake git pkg-config \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY . .
+
+# Configure and build
+RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+ && cmake --build build -j"$(nproc)"
+
+FROM ubuntu:22.04 AS runtime
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+
+# NOTE: Adjust this path if your CMake target outputs elsewhere.
+COPY --from=build /src/build/apps/Repeater/Repeater /app/repeater
+
+# Expose env-configurable addresses for convenience
+ENV LISTEN_ADDR=0.0.0.0:8000
+ENV BROADCAST_ADDR=127.0.0.1:9000
+
+# Logs go to Docker's stdout/stderr
+ENTRYPOINT ["/app/repeater"]
+CMD ["${LISTEN_ADDR}", "${BROADCAST_ADDR}"]

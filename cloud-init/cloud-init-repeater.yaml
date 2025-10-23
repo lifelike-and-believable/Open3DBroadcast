@@ -1,0 +1,73 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+
+runcmd:
+  # Install Docker on Ubuntu 22.04
+  - |
+    if ! command -v docker >/dev/null 2>&1; then
+      apt-get update
+      apt-get install -y ca-certificates curl gnupg
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      chmod a+r /etc/apt/keyrings/docker.gpg
+      echo \
+        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+        $(. /etc/os-release && echo $VERSION_CODENAME) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+      apt-get update
+      apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      systemctl enable --now docker
+    fi
+
+  # Compose project directory
+  - mkdir -p /opt/repeater
+  - chown ubuntu:ubuntu /opt/repeater || true
+
+  # Write compose file
+  - |
+    cat >/opt/repeater/docker-compose.yml <<'EOF'
+    version: "3.9"
+    services:
+      repeater:
+        image: ghcr.io/your-org/open3dstream-repeater:latest
+        container_name: o3ds-repeater
+        restart: always
+        environment:
+          - LISTEN_ADDR=${LISTEN_ADDR:-0.0.0.0:8000}
+          - BROADCAST_ADDR=${BROADCAST_ADDR:-127.0.0.1:9000}
+        # ports:
+        #   - "8000:8000"
+        logging:
+          driver: json-file
+          options:
+            max-size: "10m"
+            max-file: "5"
+
+      portainer:
+        image: portainer/portainer-ce:latest
+        container_name: portainer
+        restart: always
+        ports:
+          - "9000:9000"
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+          - portainer_data:/data
+
+    volumes:
+      portainer_data:
+    EOF
+
+  # Default env values (you can change later in Portainer)
+  - |
+    cat >/opt/repeater/.env <<'EOF'
+    LISTEN_ADDR=0.0.0.0:8000
+    BROADCAST_ADDR=127.0.0.1:9000
+    EOF
+
+  # Launch stack
+  - docker compose -f /opt/repeater/docker-compose.yml --env-file /opt/repeater/.env up -d
+
+final_message: |
+  Repeater + Portainer deployed.
+  Visit: http://<instance-public-ip>:9000 to finish Portainer setup.
+  In your AWS Security Group, restrict 9000 to trusted IPs only.

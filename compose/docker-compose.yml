@@ -1,0 +1,30 @@
+version: "3.9"
+services:
+  repeater:
+    image: ghcr.io/your-org/open3dstream-repeater:latest
+    container_name: o3ds-repeater
+    restart: always
+    environment:
+      - LISTEN_ADDR=${LISTEN_ADDR:-0.0.0.0:8000}
+      - BROADCAST_ADDR=${BROADCAST_ADDR:-127.0.0.1:9000}
+    # If your listen address uses TCP 8000 and should accept inbound connections:
+    # ports:
+    #   - "8000:8000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: always
+    ports:
+      - "9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+
+volumes:
+  portainer_data:

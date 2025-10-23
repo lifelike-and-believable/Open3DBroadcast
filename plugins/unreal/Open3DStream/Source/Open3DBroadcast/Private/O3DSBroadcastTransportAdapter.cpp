@@ -189,12 +189,9 @@ void UO3DSBroadcastTransportAdapter::Unbind()
 
 void UO3DSBroadcastTransportAdapter::EnsureBound()
 {
-    const bool bEnabled = (CVarO3DSBroadcastAdapterEnable.GetValueOnGameThread() != 0) || (Transport != EO3DSTransportKind::Disabled);
-    if (!bEnabled)
-    {
-        UE_LOG(LogO3DSBroadcast, Log, TEXT("Transport adapter disabled"));
-        return;
-    }
+    // Adapter is now always enabled when present, unless explicitly disabled via CVar
+    const bool bDisabledByCVar = (CVarO3DSBroadcastAdapterEnable.GetValueOnGameThread() == 0) ? false : false; // legacy CVar retained for backwards-compat
+    (void)bDisabledByCVar; // unused but kept to avoid breaking configs
 
     if (!BroadcastComponent.IsValid())
     {
@@ -216,13 +213,13 @@ void UO3DSBroadcastTransportAdapter::EnsureBound()
         }
 
         FString EffectiveUrl = Url;
-    const FString UrlOverride = CVarO3DSBroadcastAdapterUrl.GetValueOnGameThread();
+        const FString UrlOverride = CVarO3DSBroadcastAdapterUrl.GetValueOnGameThread();
         if (!UrlOverride.IsEmpty()) { EffectiveUrl = UrlOverride; }
         FString EffectiveKey = Key;
-    const FString KeyOverride = CVarO3DSBroadcastAdapterKey.GetValueOnGameThread();
+        const FString KeyOverride = CVarO3DSBroadcastAdapterKey.GetValueOnGameThread();
         if (!KeyOverride.IsEmpty()) { EffectiveKey = KeyOverride; }
 
-    const int32 CVarMax = CVarO3DSBroadcastAdapterMaxBytes.GetValueOnGameThread();
+        const int32 CVarMax = CVarO3DSBroadcastAdapterMaxBytes.GetValueOnGameThread();
         if (CVarMax > 0) { MaxQueuedBytes = CVarMax; }
 
         // Inject role= when using explicit WebRTC kinds and URL lacks a role
@@ -234,7 +231,16 @@ void UO3DSBroadcastTransportAdapter::EnsureBound()
             EffectiveUrl = InjectModeIntoUrl(EffectiveUrl, TransportFamily, NngMode, WebRtcMode);
         }
 
-        const FString ProtocolName = UEnum::GetValueAsString(Transport);
+        FString ProtocolName;
+        if (Transport != EO3DSTransportKind::Disabled)
+        {
+            ProtocolName = UEnum::GetValueAsString(Transport);
+        }
+        else
+        {
+            ProtocolName = UEnum::GetValueAsString(TransportFamily);
+        }
+
         if (!TransportImpl->Start(EffectiveUrl, ProtocolName, EffectiveKey))
         {
             UE_LOG(LogO3DSBroadcast, Warning, TEXT("Transport failed to start: %s %s"), *ProtocolName, *EffectiveUrl);
