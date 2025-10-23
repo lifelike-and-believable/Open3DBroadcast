@@ -67,4 +67,4 @@ runcmd:
 final_message: |
   Repeater + Portainer deployed.
   Visit: http://<instance-public-ip>:9000 to finish Portainer setup.
-  Restrict port 9000 (Portainer) and the Repeater ports (7000/7001) in the Security Group to trusted IPs.
+  In your AWS Security Group, restrict 9000 to trusted IPs only.
