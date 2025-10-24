@@ -20,12 +20,30 @@ static TAutoConsoleVariable<int32> CVarO3DSWebRtcTransportDebugPing(
     TEXT("When enabled, send a 4-byte heartbeat every second over the data channel to validate send path (0/1)."),
     ECVF_Default);
 
+// Temporary audio configuration while migrating to libwebrtc native audio tracks
+struct FO3DSWebRTCAudioConfig
+{
+    bool bEnable = false;
+    FString DeviceHint;    // substring filter for device name (optional)
+    int32 SampleRate = 48000;
+    int32 NumChannels = 1; // 1=mono, 2=stereo
+    int32 BitrateKbps = 32;
+    int32 PlayoutDelayMs = 0; // extra receiver-side buffering target
+};
+
 // WebRTC DataChannel transport (optional/beta). Uses libdatachannel via Open3DStream wrapper.
 class FO3DSWebRtcTransport : public IBroadcastTransport
 {
 public:
     FO3DSWebRtcTransport() = default;
     virtual ~FO3DSWebRtcTransport() override { Stop(); }
+
+    // Configure (future) native audio track parameters prior to Start.
+    // Note: Currently a no-op placeholder until libwebrtc migration lands.
+    void SetAudioConfig(const FO3DSWebRTCAudioConfig& In)
+    {
+        AudioConfig = In;
+    }
 
     virtual bool Start(const FString& InUrl, const FString& InProtocol, const FString& InKey) override
     {
@@ -63,6 +81,13 @@ public:
         }
         LastStateLogTime = 0.0;
         LastPingTime = 0.0;
+
+        // Warn that audio config is not yet active until libwebrtc-based audio track support lands
+        if (AudioConfig.bEnable)
+        {
+            UE_LOG(LogO3DSBroadcast, Warning, TEXT("[WebRTC] Native audio track requested (device='%s', %d Hz, %d ch, %d kbps, delay=%d ms) but not yet implemented in this transport. Audio will be silent."),
+                *AudioConfig.DeviceHint, AudioConfig.SampleRate, AudioConfig.NumChannels, AudioConfig.BitrateKbps, AudioConfig.PlayoutDelayMs);
+        }
         return true;
     }
 
@@ -154,4 +179,7 @@ private:
     FCounters Counters;
     double LastStateLogTime = 0.0;
     double LastPingTime = 0.0;
+
+    // Stored audio config for future native audio track support
+    FO3DSWebRTCAudioConfig AudioConfig;
 };

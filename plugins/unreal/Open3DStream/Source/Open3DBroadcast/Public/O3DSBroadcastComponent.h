@@ -157,6 +157,28 @@ public:
     UPROPERTY(meta=(DeprecatedProperty, DeprecationMessage="Use MaxQueuedBytes", EditCondition="false", EditConditionHides), EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport")
     int32 TransportMaxQueuedBytes = 8 * 1024 * 1024;
 
+    // WebRTC audio track settings (feature-gated; sender side)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|WebRTC", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC", EditConditionHides))
+    bool bEnableWebRTCAudio = false;
+
+    // Optional input device name filter (substring match). Empty = default system device
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|WebRTC", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio", EditConditionHides))
+    FString WebRTCAudioDevice;
+
+    // Capture/encode parameters (targets; actual may be adjusted by stack)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|WebRTC", meta=(ClampMin="8000", ClampMax="48000", EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio", EditConditionHides))
+    int32 WebRTCAudioSampleRate = 48000;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|WebRTC", meta=(ClampMin="1", ClampMax="2", EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio", EditConditionHides))
+    int32 WebRTCAudioNumChannels = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|WebRTC", meta=(ClampMin="6", ClampMax="128", EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio", EditConditionHides))
+    int32 WebRTCAudioBitrateKbps = 32;
+
+    // Extra buffering on receiver to trade latency for resilience
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|WebRTC", meta=(ClampMin="0", ClampMax="500", EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio", EditConditionHides))
+    int32 WebRTCAudioPlayoutDelayMs = 0;
+
     // Curve normalization and filtering configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves")
     bool bClampMorphCurvesToUnit = true;

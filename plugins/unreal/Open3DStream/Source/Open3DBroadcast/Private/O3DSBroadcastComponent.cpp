@@ -236,6 +236,22 @@ void UO3DSBroadcastComponent::SetupInternalTransport()
 
         const FString ProtocolName = O3DS_GetProtocolNameLegacy(TransportFamily, TcpMode, WebRtcMode);
 
+        // If WebRTC and audio enabled, push config into transport (stub for now)
+        if (TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio)
+        {
+            if (FO3DSWebRtcTransport* Wrtc = static_cast<FO3DSWebRtcTransport*>(InternalTransport.Get()))
+            {
+                FO3DSWebRTCAudioConfig AudioCfg;
+                AudioCfg.bEnable = true;
+                AudioCfg.DeviceHint = WebRTCAudioDevice;
+                AudioCfg.SampleRate = WebRTCAudioSampleRate;
+                AudioCfg.NumChannels = WebRTCAudioNumChannels;
+                AudioCfg.BitrateKbps = WebRTCAudioBitrateKbps;
+                AudioCfg.PlayoutDelayMs = WebRTCAudioPlayoutDelayMs;
+                Wrtc->SetAudioConfig(AudioCfg);
+            }
+        }
+
         if (!InternalTransport->Start(EffectiveUrl, ProtocolName, EffectiveKey))
         {
             UE_LOG(LogO3DSBroadcast, Warning, TEXT("Built-in transport failed to start: %s %s"), *ProtocolName, *EffectiveUrl);

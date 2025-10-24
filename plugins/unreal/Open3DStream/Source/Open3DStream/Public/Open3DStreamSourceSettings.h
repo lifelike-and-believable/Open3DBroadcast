@@ -29,6 +29,14 @@ public:
 
 	UPROPERTY(EditAnywhere, Category="Open3DStream")
 	double  TimeOffset;
+
+	// Receiver-side: enable native WebRTC audio track playback (when available)
+	UPROPERTY(EditAnywhere, Category="Open3DStream|Audio")
+	bool bEnableWebRTCAudio = false;
+
+	// Extra playout delay to trade latency for resilience (ms)
+	UPROPERTY(EditAnywhere, Category="Open3DStream|Audio", meta=(ClampMin="0", ClampMax="500"))
+	int32 WebRTCAudioPlayoutDelayMs = 0;
 };
 
 typedef TSharedPtr<FOpen3DStreamSettings, ESPMode::ThreadSafe> FOpen3DStreamSettingsPtr;
