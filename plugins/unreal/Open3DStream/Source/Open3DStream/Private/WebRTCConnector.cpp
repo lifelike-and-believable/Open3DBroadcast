@@ -14,13 +14,28 @@
 #include <string>
 #include <variant>
 
+static TAutoConsoleVariable<int32> CVarO3DSWebRTCVerbose(
+    TEXT("o3ds.WebRTC.Verbose"),
+    0,
+    TEXT("Enable extra verbose logging for WebRTC connector (0/1)."),
+    ECVF_Default);
+
+static TAutoConsoleVariable<int32> CVarO3DSWebRTCDebugRx(
+    TEXT("o3ds.WebRTC.DebugRx"),
+    1,
+    TEXT("Enable receiver-side debug logging for WebRTC data (0/1). Logs first packet and occasional stats."),
+    ECVF_Default);
+
 const char* FWebRTCConnector::DataChannelLabel = "Open3DStream";
 
 FWebRTCConnector::FWebRTCConnector()
 	: bIsConnected(false)
 	, bDataChannelOpen(false)
 	, bIsServer(false)
+	, bRemoteDescriptionSet(false)
+	, bLocalDescriptionSet(false)
 	, ConnectionState(TEXT("NOTSTARTED"))
+	, LastPeerState(-1)
 {
 	LastError.Empty();
 }
@@ -30,12 +45,36 @@ FWebRTCConnector::~FWebRTCConnector()
 	Stop();
 }
 
+void FWebRTCConnector::EnsurePeerConnectionForNewSession()
+{
+	FScopeLock Lock(&PeerConnectionLock);
+	bool bNeedsNew = false;
+	if (!PeerConnection)
+	{
+		bNeedsNew = true;
+	}
+	else if (LastPeerState == static_cast<int32>(rtc::PeerConnection::State::Failed) ||
+	         LastPeerState == static_cast<int32>(rtc::PeerConnection::State::Closed))
+	{
+		bNeedsNew = true;
+	}
+	if (bNeedsNew)
+	{
+		CleanupPeerConnection();
+		SetupPeerConnection();
+	}
+}
+
 bool FWebRTCConnector::Start(const FString& Url, bool bInIsServer)
 {
 	Stop();
 
 	bIsServer = bInIsServer;
 	LastError.Empty();
+	bRemoteDescriptionSet = false;
+	bLocalDescriptionSet = false;
+	PendingRemoteCandidates.Reset();
+	LastPeerState = -1;
 
 	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Starting connection (Mode: %s)"), bInIsServer ? TEXT("Server") : TEXT("Client"));
 
@@ -117,8 +156,12 @@ void FWebRTCConnector::Stop()
 
 	bIsConnected = false;
 	bDataChannelOpen = false;
+	bRemoteDescriptionSet = false;
+	bLocalDescriptionSet = false;
+	PendingRemoteCandidates.Reset();
 	ConnectionState = TEXT("CLOSED");
 	DataReceivedCallback = nullptr;
+	LastPeerState = -1;
 }
 
 bool FWebRTCConnector::Send(const uint8* Data, int32 Size)
@@ -126,7 +169,17 @@ bool FWebRTCConnector::Send(const uint8* Data, int32 Size)
 	if (!bDataChannelOpen || !DataChannel)
 	{
 		LastError = TEXT("Data channel is not open");
+		if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+		{
+			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Send(%d) rejected, channel_open=%d, has_channel=%d"),
+				Size, bDataChannelOpen ? 1 : 0, DataChannel ? 1 : 0);
+		}
 		return false;
+	}
+
+	if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Send(%d)"), Size);
 	}
 
 	try
@@ -159,15 +212,34 @@ void FWebRTCConnector::SetDataReceivedCallback(TFunction<void(const uint8*, int3
 
 void FWebRTCConnector::Tick()
 {
-	// Process queued received data
-	TArray<uint8> ReceivedData;
-	while (ReceivedDataQueue.Dequeue(ReceivedData))
-	{
-		if (DataReceivedCallback)
-		{
-			DataReceivedCallback(ReceivedData.GetData(), ReceivedData.Num());
-		}
-	}
+    // Process queued received data
+    TArray<uint8> ReceivedData;
+    while (ReceivedDataQueue.Dequeue(ReceivedData))
+    {
+        if (CVarO3DSWebRTCDebugRx->GetInt() != 0)
+        {
+            static bool bLoggedFirstRx = false;
+            if (!bLoggedFirstRx)
+            {
+                bLoggedFirstRx = true;
+                const int32 DumpN = FMath::Min(64, ReceivedData.Num());
+                FString Hex; Hex.Reserve(DumpN * 3);
+                for (int32 i = 0; i < DumpN; ++i)
+                {
+                    Hex += FString::Printf(TEXT("%02X "), ReceivedData[i]);
+                }
+                static const uint8 ExpectedHeader[14] = {0x00,0xFF,0x03,0xFE,'O','3','D','S','-','S','T','A','R','T'};
+                const bool bHeaderMatch = (ReceivedData.Num() >= 14) && (FMemory::Memcmp(ReceivedData.GetData(), ExpectedHeader, 14) == 0);
+                UE_LOG(LogTemp, Warning, TEXT("WebRTC RX: First packet size=%d header_match=%s first_%d=%s"),
+                    ReceivedData.Num(), bHeaderMatch?TEXT("true"):TEXT("false"), DumpN, *Hex);
+            }
+        }
+
+        if (DataReceivedCallback)
+        {
+            DataReceivedCallback(ReceivedData.GetData(), ReceivedData.Num());
+        }
+    }
 }
 
 void FWebRTCConnector::OnPeerConnectionStateChange(int StateInt)
@@ -175,6 +247,7 @@ void FWebRTCConnector::OnPeerConnectionStateChange(int StateInt)
 	FScopeLock Lock(&this->PeerConnectionLock);
 
 	rtc::PeerConnection::State State = static_cast<rtc::PeerConnection::State>(StateInt);
+	LastPeerState = StateInt;
 
 	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: PeerConnection state change"));
 
@@ -205,6 +278,13 @@ void FWebRTCConnector::OnPeerConnectionStateChange(int StateInt)
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: PeerConnection state: %s"), *this->ConnectionState);
+
+	// If the connection was closed/failed mid-session, keep signaling alive and allow a clean restart by recreating PC on next join
+	if (State == rtc::PeerConnection::State::Failed || State == rtc::PeerConnection::State::Closed)
+	{
+		// Do not call Stop(): we want signaling callbacks to keep working in this editor session
+		CleanupPeerConnection();
+	}
 }
 
 void FWebRTCConnector::OnDataChannelOpen()
@@ -217,6 +297,7 @@ void FWebRTCConnector::OnDataChannelMessage(const std::vector<uint8>& Message)
 {
 	// Queue the message for processing in game thread
 	TArray<uint8> Data(Message.data(), Message.size());
+	UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Received %d bytes on data channel"), Data.Num());
 	ReceivedDataQueue.Enqueue(Data);
 }
 
@@ -261,6 +342,10 @@ void FWebRTCConnector::OnLocalDescription(const rtc::Description& Description)
 			SignalingClient->SendAnswer(SDP);
 		}
 	}
+
+	// libdatachannel calls onLocalDescription after setLocalDescription, safe to mark and try flush queued ICE
+	bLocalDescriptionSet = true;
+	FlushPendingRemoteCandidates();
 }
 
 void FWebRTCConnector::OnSignalingConnected()
@@ -272,6 +357,21 @@ void FWebRTCConnector::OnSignalingConnected()
 	if (!bIsServer)
 	{
 		CreateDataChannel();
+		// In some cases the peer has already joined before this callback; proactively create offer
+		try
+		{
+			FScopeLock Lock(&PeerConnectionLock);
+			if (PeerConnection)
+			{
+				PeerConnection->createOffer();
+				UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Client created offer on signaling connect"));
+			}
+		}
+		catch (const std::exception& e)
+		{
+			LastError = FString(ANSI_TO_TCHAR(e.what()));
+			UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: Failed to create offer on connect: %s"), *LastError);
+		}
 	}
 }
 
@@ -294,9 +394,11 @@ void FWebRTCConnector::OnOfferReceived(const FString& SDP)
 	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Offer received from remote peer"));
 
 	FScopeLock Lock(&PeerConnectionLock);
+	// Recreate peer connection if needed (e.g., after a prior Closed/Failed state)
+	EnsurePeerConnectionForNewSession();
 	if (!PeerConnection)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: PeerConnection not ready"));
+		UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: PeerConnection not ready (offer) even after ensure"));
 		return;
 	}
 
@@ -304,6 +406,14 @@ void FWebRTCConnector::OnOfferReceived(const FString& SDP)
 	{
 		std::string SdpStr(TCHAR_TO_ANSI(*SDP));
 		PeerConnection->setRemoteDescription(rtc::Description(SdpStr, rtc::Description::Type::Offer));
+		bRemoteDescriptionSet = true;
+		
+		// Server must create answer in response to offer
+		UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Creating answer in response to offer"));
+		PeerConnection->createAnswer();
+		
+		// Don't flush ICE candidates yet - wait for local description (answer) to be set
+		// FlushPendingRemoteCandidates() will be called in OnLocalDescription
 	}
 	catch (const std::exception& e)
 	{
@@ -327,6 +437,8 @@ void FWebRTCConnector::OnAnswerReceived(const FString& SDP)
 	{
 		std::string SdpStr(TCHAR_TO_ANSI(*SDP));
 		PeerConnection->setRemoteDescription(rtc::Description(SdpStr, rtc::Description::Type::Answer));
+		bRemoteDescriptionSet = true;
+		FlushPendingRemoteCandidates();
 	}
 	catch (const std::exception& e)
 	{
@@ -346,6 +458,14 @@ void FWebRTCConnector::OnIceCandidateReceived(const FString& Candidate, const FS
 
 	try
 	{
+		// Do not add remote ICE until both ends have descriptions to avoid "no ICE transport" errors
+		if (!bRemoteDescriptionSet || !bLocalDescriptionSet)
+		{
+			PendingRemoteCandidates.Emplace(Candidate, SdpMid, SdpMLineIndex);
+			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Queued ICE candidate (waiting descriptions)"));
+			return;
+		}
+
 		std::string CandidateStr(TCHAR_TO_ANSI(*Candidate));
 		std::string SdpMidStr(TCHAR_TO_ANSI(*SdpMid));
 		rtc::Candidate RtcCandidate(CandidateStr, SdpMidStr);
@@ -363,6 +483,8 @@ void FWebRTCConnector::OnPeerJoined()
 	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Peer joined room, initiating connection"));
 
 	FScopeLock Lock(&PeerConnectionLock);
+	// Recreate if prior session closed/failed
+	EnsurePeerConnectionForNewSession();
 	if (!PeerConnection)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: PeerConnection not ready"));
@@ -522,6 +644,14 @@ bool FWebRTCConnector::SetupPeerConnection()
 						}
 						OnDataChannelMessage(Buffer);
 					}
+					else if (std::holds_alternative<std::string>(Message))
+					{
+						const auto& Str = std::get<std::string>(Message);
+						// Treat text payload as raw bytes
+						const uint8* Ptr = reinterpret_cast<const uint8*>(Str.data());
+						std::vector<uint8> Buffer(Ptr, Ptr + Str.size());
+						OnDataChannelMessage(Buffer);
+					}
 				});
 
 				IncomingChannel->onError([this](const std::string& Error)
@@ -561,16 +691,16 @@ bool FWebRTCConnector::CreateDataChannel()
 	{
 		// Create data channel
 		std::string Label(DataChannelLabel);
-			DataChannel = this->PeerConnection->createDataChannel(Label);
+		DataChannel = this->PeerConnection->createDataChannel(Label);
 
-			if (!DataChannel)
+		if (!DataChannel)
 		{
 			LastError = TEXT("Failed to create data channel");
 			return false;
 		}
 
 		// Bind data channel callbacks
-			auto LocalDataChannel = DataChannel;
+		auto LocalDataChannel = DataChannel;
 		LocalDataChannel->onOpen([this]()
 		{
 			OnDataChannelOpen();
@@ -590,9 +720,17 @@ bool FWebRTCConnector::CreateDataChannel()
 				}
 				OnDataChannelMessage(Buffer);
 			}
-		});		LocalDataChannel->onError([this](const std::string& Error)
+			else if (std::holds_alternative<std::string>(Message))
+			{
+				const auto& Str = std::get<std::string>(Message);
+				const uint8* Ptr = reinterpret_cast<const uint8*>(Str.data());
+				std::vector<uint8> Buffer(Ptr, Ptr + Str.size());
+				OnDataChannelMessage(Buffer);
+			}
+		});
+		LocalDataChannel->onError([this](const std::string& Error)
 		{
-				OnDataChannelError(Error);
+			OnDataChannelError(Error);
 		});
 
 		LocalDataChannel->onClosed([this]()
@@ -644,4 +782,34 @@ void FWebRTCConnector::CleanupPeerConnection()
 	}
 
 	RtcConfig.reset();
+}
+
+void FWebRTCConnector::FlushPendingRemoteCandidates()
+{
+	// Require both descriptions for stable ICE transport per libdatachannel behavior
+	if (!bRemoteDescriptionSet || !bLocalDescriptionSet || !PeerConnection)
+	{
+		return;
+	}
+
+	for (const auto& Tuple : PendingRemoteCandidates)
+	{
+		const FString& Candidate = Tuple.Get<0>();
+		const FString& SdpMid = Tuple.Get<1>();
+		// int32 Index = Tuple.Get<2>(); // not used by libdatachannel
+
+		try
+		{
+			std::string CandidateStr(TCHAR_TO_ANSI(*Candidate));
+			std::string SdpMidStr(TCHAR_TO_ANSI(*SdpMid));
+			rtc::Candidate RtcCandidate(CandidateStr, SdpMidStr);
+			PeerConnection->addRemoteCandidate(RtcCandidate);
+		}
+		catch (const std::exception& e)
+		{
+			LastError = FString(ANSI_TO_TCHAR(e.what()));
+			UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: Failed to add queued ICE candidate: %s"), *LastError);
+		}
+	}
+	PendingRemoteCandidates.Reset();
 }

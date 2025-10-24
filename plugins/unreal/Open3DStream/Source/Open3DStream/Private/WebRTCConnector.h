@@ -103,14 +103,21 @@ private:
 	bool bIsConnected;
 	bool bDataChannelOpen;
 	bool bIsServer;
+	bool bRemoteDescriptionSet = false;
+	bool bLocalDescriptionSet = false;
 	FString ConnectionState;
 	FString LastError;
+	// Track last known peer connection state as an integer to avoid including rtc headers here
+	int32 LastPeerState = -1; // -1 = unknown
 
 	// Data callbacks
 	TFunction<void(const uint8*, int32)> DataReceivedCallback;
 
 	// Message queue (thread-safe for libdatachannel callbacks)
 	TQueue<TArray<uint8>, EQueueMode::Mpsc> ReceivedDataQueue;
+
+	// Pending ICE candidates received before transports exist
+	TArray<TTuple<FString, FString, int32>> PendingRemoteCandidates; // Candidate, Mid, MLine
 
 	// Static data channel label
 	static const char* DataChannelLabel;
@@ -138,6 +145,9 @@ private:
 	bool SetupPeerConnection();
 	bool CreateDataChannel();
 	void CleanupPeerConnection();
+	void FlushPendingRemoteCandidates();
+	// Ensure we have a fresh PeerConnection if the current one is closed/failed
+	void EnsurePeerConnectionForNewSession();
 
 	// Thread-safety
 	FCriticalSection PeerConnectionLock;

@@ -9,6 +9,7 @@
 
 // UE includes
 #include "HAL/IConsoleManager.h"
+#include "Misc/ScopeLock.h"
 
 namespace
 {
@@ -27,6 +28,12 @@ namespace
         TEXT("o3ds.Broadcast.DebugSerialize"),
         0,
         TEXT("Enable verbose serialization logging (0=off,1=on)."),
+        ECVF_Default);
+
+    static TAutoConsoleVariable<int32> CVarO3DSSerializerSynthetic(
+        TEXT("o3ds.Broadcast.Serializer.UseSynthetic"),
+        0,
+        TEXT("Use synthetic minimal payloads for WebRTC pipeline tests (0=off,1=on). WebRTC-only."),
         ECVF_Default);
 
     static TAutoConsoleVariable<int32> CVarO3DSDebugStats(
@@ -81,9 +88,8 @@ void FO3DSBroadcastSerializer::Detach(UO3DSBroadcastComponent* InComponent)
         Component->OnDescriptorReady.RemoveAll(this);
         Component->OnPoseFrameReady.RemoveAll(this);
         Component = nullptr;
-
-        GInstances.Remove(this);
     }
+    GInstances.Remove(this);
 }
 
 void FO3DSBroadcastSerializer::BuildOrUpdateCache(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor)
@@ -99,13 +105,17 @@ void FO3DSBroadcastSerializer::BuildOrUpdateCache(const FString& Subject, const 
     // Log descriptor built/rebuilt when enabled
     if (CVarO3DSDebugSerialize.GetValueOnAnyThread() != 0)
     {
-        UE_LOG(LogO3DSBroadcast, Log, TEXT("Descriptor %s for Subject=%s Bones=%d Curves=%d Hash=%llu"),
+        UE_LOG(LogO3DSBroadcast, Log, TEXT("Descriptor %s for Subject=%s Bones=%d Hash=%llu"),
             bHashChanged ? TEXT("rebuilt") : TEXT("built"),
             *Subject,
             Cache.BoneNames.Num(),
-            Cache.CurveNames.Num(),
             (unsigned long long)Cache.SkeletonHash);
     }
+}
+
+void FO3DSBroadcastSerializer::OnDescriptorReady(const FString& Subject, const struct FO3DSSkeletonDescriptor& Descriptor)
+{
+    BuildOrUpdateCache(Subject, Descriptor);
 }
 
 void FO3DSBroadcastSerializer::EnsureCurveIndex(FSubjectCache& Cache)
@@ -115,11 +125,6 @@ void FO3DSBroadcastSerializer::EnsureCurveIndex(FSubjectCache& Cache)
     {
         Cache.CurveIndex.Add(Cache.CurveNames[i], i);
     }
-}
-
-void FO3DSBroadcastSerializer::OnDescriptorReady(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor)
-{
-    BuildOrUpdateCache(Subject, Descriptor);
 }
 
 static inline bool HasInvalid(const FTransform& T)
@@ -141,6 +146,27 @@ void FO3DSBroadcastSerializer::OnPoseFrameReady(const FString& Subject, const FO
         return;
     }
 
+    // Optional: synthetic test path, WebRTC-only
+    const bool bSynthetic = (CVarO3DSSerializerSynthetic.GetValueOnAnyThread() != 0);
+    const bool bWebRtcFamily = (Component->bAutoCreateTransport && Component->TransportFamily == EO3DSTransportFamily::WebRTC);
+    if (bSynthetic && bWebRtcFamily)
+    {
+        static uint32 Counter = 0;
+        ++Counter;
+        const uint8 Magic[14] = {0x00,0xFF,0x03,0xFE,'O','3','D','S','-','S','T','A','R','T'};
+        TArray<uint8> Buffer;
+        const uint32 PayloadSize = sizeof(uint32);
+        Buffer.Reserve(14 + 4 + PayloadSize);
+        Buffer.Append(Magic, 14);
+        uint32 SizeLE = PayloadSize;
+        Buffer.Append(reinterpret_cast<uint8*>(&SizeLE), 4);
+        Buffer.Append(reinterpret_cast<uint8*>(&Counter), sizeof(uint32));
+        const double Now = FPlatformTime::Seconds();
+        OnSerializedFrame.Broadcast(Subject, Buffer, Now);
+        UE_LOG(LogO3DSBroadcast, Verbose, TEXT("Serializer: Emitted synthetic frame #%u (%d bytes) for %s [WebRTC-only]"), Counter, Buffer.Num(), *Subject);
+        return;
+    }
+
     // Initialize curves on first frame
     FSubjectCache& Cache = SubjectState.FindOrAdd(Subject);
     if (Cache.CurveNames.Num() == 0 && Frame.CurveNames.Num() > 0)
@@ -159,8 +185,6 @@ void FO3DSBroadcastSerializer::OnPoseFrameReady(const FString& Subject, const FO
         UE_LOG(LogO3DSBroadcast, Warning, TEXT("Skipping frame: Subject=%s reason=%s"), *Subject, *Cache.LastError);
         return;
     }
-
-    // Validate data
     for (int32 i = 0; i < BoneCount; ++i)
     {
         if (HasInvalid(Frame.BoneLocalTransforms[i]))
@@ -172,7 +196,7 @@ void FO3DSBroadcastSerializer::OnPoseFrameReady(const FString& Subject, const FO
         }
     }
 
-    // Build a descriptor using cached skeleton and clamp to current required bones count
+    // Build a clamped descriptor for this frame (parent indices and names matching current transforms count)
     FO3DSSkeletonDescriptor Desc;
     Desc.ParentIndices = Cache.ParentIndices;
     Desc.BoneNames = Cache.BoneNames;
@@ -181,13 +205,11 @@ void FO3DSBroadcastSerializer::OnPoseFrameReady(const FString& Subject, const FO
     const int32 RequiredCount = Frame.BoneLocalTransforms.Num();
     if (Desc.ParentIndices.Num() != RequiredCount)
     {
-        // Clamp to match the transforms count so indices and names remain valid
         Desc.ParentIndices.SetNum(RequiredCount);
+    }
+    if (Desc.BoneNames.Num() != RequiredCount)
+    {
         Desc.BoneNames.SetNum(RequiredCount);
-        if (CVarO3DSDebugSerialize.GetValueOnAnyThread() != 0)
-        {
-            UE_LOG(LogO3DSBroadcast, Verbose, TEXT("Clamped descriptor to RequiredCount=%d for Subject=%s"), RequiredCount, *Subject);
-        }
     }
 
     SerializeFrame(Subject, Desc, Frame);
@@ -210,12 +232,12 @@ void FO3DSBroadcastSerializer::BuildSubjectFromDescriptor(const FString& Subject
             NodeNameStd = ToStd(Descriptor.BoneNames[i]);
             NodeName = NodeNameStd.c_str();
         }
-        auto* t = OutSubject.addTransform(NodeName, ParentId);
+        auto* T = OutSubject.addTransform(NodeName, ParentId);
         // Identity TRS in descriptor; values arrive per-frame
-        t->translation.value = O3DS::Vector3d(0.0, 0.0, 0.0);
-        t->rotation.value    = O3DS::Vector4d(0.0, 0.0, 0.0, 1.0);
-        t->scale.value       = O3DS::Vector3d(1.0, 1.0, 1.0);
-        t->transformOrder    = { O3DS::TTranslation, O3DS::TRotation, O3DS::TScale };
+        T->translation.value = O3DS::Vector3d(0.0, 0.0, 0.0);
+        T->rotation.value    = O3DS::Vector4d(0.0, 0.0, 0.0, 1.0);
+        T->scale.value       = O3DS::Vector3d(1.0, 1.0, 1.0);
+        T->transformOrder    = { O3DS::TTranslation, O3DS::TRotation, O3DS::TScale };
     }
 }
 
@@ -229,24 +251,24 @@ void FO3DSBroadcastSerializer::FillFrameValues(const FO3DSPoseFrame& Frame, O3DS
         InOutSubject.clear();
         for (int32 i = 0; i < BoneCount; ++i)
         {
-            auto* t = InOutSubject.addTransform("", (i == 0) ? -1 : i - 1);
-            t->transformOrder = { O3DS::TTranslation, O3DS::TRotation, O3DS::TScale };
+            auto* T = InOutSubject.addTransform("", (i == 0) ? -1 : i - 1);
+            T->transformOrder = { O3DS::TTranslation, O3DS::TRotation, O3DS::TScale };
         }
     }
 
     for (int32 i = 0; i < BoneCount; ++i)
     {
         const FTransform& Rel = Frame.BoneLocalTransforms[i];
-        const FVector T = Rel.GetTranslation();
-        const FQuat   Q = Rel.GetRotation();
-        const FVector S = Rel.GetScale3D();
-        auto* t = InOutSubject.mTransforms[i];
-        t->translation.value = O3DS::Vector3d((double)T.X, (double)T.Y, (double)T.Z);
-        t->rotation.value    = O3DS::Vector4d((double)Q.X, (double)Q.Y, (double)Q.Z, (double)Q.W);
-        t->scale.value       = O3DS::Vector3d((double)S.X, (double)S.Y, (double)S.Z);
-        if (t->transformOrder.empty())
+        const FVector Tv = Rel.GetTranslation();
+        const FQuat   Qv = Rel.GetRotation();
+        const FVector Sv = Rel.GetScale3D();
+        auto* T = InOutSubject.mTransforms[i];
+        T->translation.value = O3DS::Vector3d((double)Tv.X, (double)Tv.Y, (double)Tv.Z);
+        T->rotation.value    = O3DS::Vector4d((double)Qv.X, (double)Qv.Y, (double)Qv.Z, (double)Qv.W);
+        T->scale.value       = O3DS::Vector3d((double)Sv.X, (double)Sv.Y, (double)Sv.Z);
+        if (T->transformOrder.empty())
         {
-            t->transformOrder = { O3DS::TTranslation, O3DS::TRotation, O3DS::TScale };
+            T->transformOrder = { O3DS::TTranslation, O3DS::TRotation, O3DS::TScale };
         }
     }
 }
@@ -255,43 +277,43 @@ void FO3DSBroadcastSerializer::SerializeFrame(const FString& Subject, const FO3D
 {
     using namespace O3DS;
 
-    SubjectList list;
-    O3DS::Subject* o3subj = list.addSubject(ToStd(Subject));
+    SubjectList List;
+    O3DS::Subject* O3Subj = List.addSubject(ToStd(Subject));
 
     // Build descriptor skeleton and fill values
-    BuildSubjectFromDescriptor(Subject, Descriptor, *o3subj);
-    FillFrameValues(Frame, *o3subj);
+    BuildSubjectFromDescriptor(Subject, Descriptor, *O3Subj);
+    FillFrameValues(Frame, *O3Subj);
 
-    // Curves (full frame for M2)
+    // Curves (full frame for M2). Use Frame.CurveNames/Values directly
     if (Frame.CurveNames.Num() > 0)
     {
-        o3subj->mCurveNames.clear();
-        o3subj->mCurveValues.clear();
-        o3subj->mCurveNames.reserve(Frame.CurveNames.Num());
-        o3subj->mCurveValues.reserve(Frame.CurveNames.Num());
+        O3Subj->mCurveNames.clear();
+        O3Subj->mCurveValues.clear();
+        O3Subj->mCurveNames.reserve(Frame.CurveNames.Num());
+        O3Subj->mCurveValues.reserve(Frame.CurveNames.Num());
         for (int32 i = 0; i < Frame.CurveNames.Num(); ++i)
         {
-            o3subj->mCurveNames.push_back(ToStd(Frame.CurveNames[i]));
-            o3subj->mCurveValues.push_back(i < Frame.CurveValues.Num() ? Frame.CurveValues[i] : 0.0f);
+            O3Subj->mCurveNames.push_back(ToStd(Frame.CurveNames[i]));
+            O3Subj->mCurveValues.push_back(i < Frame.CurveValues.Num() ? Frame.CurveValues[i] : 0.0f);
         }
     }
 
     // Ensure matrices are up-to-date for senders that rely on them
-    o3subj->CalcMatrices();
+    O3Subj->CalcMatrices();
 
     // Serialize with real timestamp
-    std::vector<char> out;
+    std::vector<char> Out;
     const double Now = FPlatformTime::Seconds();
-    list.Serialize(out, /*timestamp*/ Now);
+    List.Serialize(Out, /*timestamp*/ Now);
 
     // Metrics accounting
     FSubjectCache& Cache = SubjectState.FindOrAdd(Subject);
 
-    if (!out.empty())
+    if (!Out.empty())
     {
         TArray<uint8> Buf;
-        Buf.SetNumUninitialized((int32)out.size());
-        FMemory::Memcpy(Buf.GetData(), out.data(), out.size());
+        Buf.SetNumUninitialized((int32)Out.size());
+        FMemory::Memcpy(Buf.GetData(), Out.data(), Out.size());
         OnSerializedFrame.Broadcast(Subject, Buf, Now);
 
         Cache.FramesSerialized++;
@@ -327,6 +349,7 @@ void FO3DSBroadcastSerializer::DumpStatsInstance() const
             (unsigned long long)Cache.DroppedFrames,
             Cache.LastError.IsEmpty() ? TEXT("<none>") : *Cache.LastError);
     }
+    UE_LOG(LogO3DSBroadcast, Display, TEXT("Serializer(Component=%s) subjects=%d"), *GetNameSafe(Component), SubjectState.Num());
 }
 
 void FO3DSBroadcastSerializer::DumpAllStats()

@@ -9,6 +9,14 @@
 
 #define LOCTEXT_NAMESPACE "Open3DStream"
 
+// Debug: one-shot dump of first received non-TCP packet (WebRTC/UDP/NNG)
+static TAutoConsoleVariable<int32> CVarO3DSDumpFirstPacket(
+    TEXT("o3ds.Debug.DumpFirstPacket"),
+    1,
+    TEXT("Dump the first received non-TCP O3DS packet bytes (0=off,1=on)."),
+    ECVF_Default);
+static bool GDumpedFirstNonTcpPacket = false;
+
 void InDataFunc(void* ptr, void* data, size_t msg)
 {
 	static_cast<O3DSServer*>(ptr)->inData((const uint8*)data, msg);
@@ -64,6 +72,9 @@ bool O3DSServer::start(FText Url, FText Protocol )
 
 	const char* surl = TCHAR_TO_ANSI(*Url.ToString());
 	const char* sprotocol = TCHAR_TO_ANSI(*Protocol.ToString());
+
+	// Reset one-shot dump per start()
+	GDumpedFirstNonTcpPacket = false;
 
 	// NNG
 	if (strncmp(sprotocol, "NNG Subscribe", 13) == 0)
@@ -200,6 +211,8 @@ bool O3DSServer::start(FText Url, FText Protocol )
 					DataPtr->Serialize(Data.GetData(), DataPtr->TotalSize());
 					// Forward raw datagram as a complete O3DS message; broadcaster ensures one-message-per-datagram
 					if (OnData.IsBound()) { OnData.Execute(Data); }
+					mGoodTime = FPlatformTime::Seconds();
+					mNoDataFlag = false;
 				});
 
 			mUdpReceiver->Start();
@@ -290,6 +303,9 @@ void O3DSServer::stop()
 		mTcp = nullptr;
 	}
 	mTcpAnnouncedConnected = false;
+
+	// Allow next session to dump first packet again
+	GDumpedFirstNonTcpPacket = false;
 }
 
 bool O3DSServer::write(const char *msg, size_t len)
@@ -305,7 +321,30 @@ bool O3DSServer::write(const char *msg, size_t len)
 
 void O3DSServer::inData(const uint8 *msg, size_t len)
 {
-	// NNG Data
+	// Update activity for WebRTC/UDP/NNG paths and forward payload
+	mGoodTime = FPlatformTime::Seconds();
+	mNoDataFlag = false;
+
+	// Optional: lightweight verbose trace
+	UE_LOG(LogTemp, Verbose, TEXT("O3DS: Received %d bytes (non-TCP)"), (int32)len);
+
+	// One-shot dump of first packet to verify header
+	if (!GDumpedFirstNonTcpPacket && CVarO3DSDumpFirstPacket->GetInt() != 0)
+	{
+		GDumpedFirstNonTcpPacket = true;
+		const unsigned char ExpectedHeader[] = "\x00\xff\x03\xfeO3DS-START"; // 14 bytes
+		const int32 DumpN = FMath::Min<int32>((int32)len, 64);
+		FString Hex;
+		Hex.Reserve(DumpN * 3);
+		for (int32 i = 0; i < DumpN; ++i)
+		{
+			Hex += FString::Printf(TEXT("%02X "), msg[i]);
+		}
+		const bool bHeaderMatch = (len >= 14) && (FMemory::Memcmp(msg, ExpectedHeader, 14) == 0);
+		UE_LOG(LogTemp, Warning, TEXT("O3DS: First non-TCP packet dump: size=%d header_match=%s first_%d_bytes=%s"),
+			(int32)len, bHeaderMatch?TEXT("true"):TEXT("false"), DumpN, *Hex);
+	}
+
 	TArray<uint8> Data;
 	Data.Append((uint8*)msg, len);
 	if (OnData.IsBound()) { OnData.Execute(Data); }
@@ -648,3 +687,5 @@ bool O3DSServer::ReadTcp(size_t len)
 	mPtr += read;
 	return read != 0;
 }
+
+#undef LOCTEXT_NAMESPACE

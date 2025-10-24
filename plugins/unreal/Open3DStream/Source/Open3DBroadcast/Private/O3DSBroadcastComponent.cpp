@@ -47,6 +47,13 @@ static TAutoConsoleVariable<int32> CVarO3DSBroadcastOnScreen(
     TEXT("Show on-screen notifications for Open3DBroadcast state changes (0/1)."),
     ECVF_Default);
 
+// New: Debug send path (serializer -> queue -> transport)
+static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugSend(
+    TEXT("o3ds.Broadcast.DebugSend"),
+    1,
+    TEXT("Debug the send pipeline: queueing and draining (0/1)."),
+    ECVF_Default);
+
 // Helpers to inject URL params matching adapter behavior
 static FString O3DS_EnsureWebRtcRoleInUrl(const FString& InUrl, EO3DSTransportKind Kind, EO3DSWebRtcMode WebRtcMode, bool bUseLegacy)
 {
@@ -75,6 +82,7 @@ static FString O3DS_EnsureWebRtcRoleInUrl(const FString& InUrl, EO3DSTransportKi
     return Out;
 }
 
+// Missing earlier. Inject mode parameters to URL based on selected family.
 static FString O3DS_InjectModeIntoUrl(const FString& InUrl, EO3DSTransportFamily Family, EO3DSNngMode NngMode, EO3DSWebRtcMode WebRtcMode)
 {
     FString Out = InUrl;
@@ -85,10 +93,11 @@ static FString O3DS_InjectModeIntoUrl(const FString& InUrl, EO3DSTransportFamily
             FString ModeParam;
             switch (NngMode)
             {
-                case EO3DSNngMode::Publisher: ModeParam = TEXT("mode=pub"); break;
-                case EO3DSNngMode::PairClient: ModeParam = TEXT("mode=pair&role=client"); break;
-                case EO3DSNngMode::PairServer: ModeParam = TEXT("mode=pair&role=server"); break;
-                case EO3DSNngMode::Push: ModeParam = TEXT("mode=push"); break;
+                case EO3DSNngMode::Publisher:   ModeParam = TEXT("mode=pub"); break;
+                case EO3DSNngMode::PairClient:  ModeParam = TEXT("mode=pair&role=client"); break;
+                case EO3DSNngMode::PairServer:  ModeParam = TEXT("mode=pair&role=server"); break;
+                case EO3DSNngMode::Push:        ModeParam = TEXT("mode=push"); break;
+                default: break;
             }
             if (!ModeParam.IsEmpty())
             {
@@ -98,7 +107,7 @@ static FString O3DS_InjectModeIntoUrl(const FString& InUrl, EO3DSTransportFamily
     }
     else if (Family == EO3DSTransportFamily::WebRTC)
     {
-        // Ensure role
+        // Ensure role is present
         Out = O3DS_EnsureWebRtcRoleInUrl(Out, EO3DSTransportKind::Disabled, WebRtcMode, /*bUseLegacy=*/false);
     }
     return Out;
@@ -238,6 +247,10 @@ void UO3DSBroadcastComponent::SetupInternalTransport()
             if (!SerializedFrameHandle.IsValid() && Serializer)
             {
                 SerializedFrameHandle = Serializer->OnSerializedFrame.AddUObject(this, &UO3DSBroadcastComponent::OnSerializedForTransport);
+                if (CVarO3DSBroadcastDebugSend->GetInt() != 0)
+                {
+                    UE_LOG(LogO3DSBroadcast, Log, TEXT("Send pipeline hooked: Serializer -> Queue (component %s)"), *GetNameSafe(this));
+                }
             }
             SetComponentTickEnabled(true);
             UE_LOG(LogO3DSBroadcast, Log, TEXT("Built-in transport started: %s %s"), *ProtocolName, *EffectiveUrl);
@@ -277,12 +290,21 @@ void UO3DSBroadcastComponent::OnSerializedForTransport(const FString& /*Subject*
     if (LimitBytes > 0 && NewQ > (uint64)LimitBytes)
     {
         DroppedFrames.Store(DroppedFrames.Load() + 1);
+        if (CVarO3DSBroadcastDebugSend->GetInt() != 0)
+        {
+            UE_LOG(LogO3DSBroadcast, Log, TEXT("Send queue full, dropping frame (%d bytes), limit=%d current=%llu"), Buffer.Num(), LimitBytes, (unsigned long long)QueuedBytes.Load());
+        }
         return;
     }
 
     FQItem Item; Item.Data = Buffer; Item.Ts = Timestamp;
     SendQueue.Enqueue(MoveTemp(Item));
     QueuedBytes.Store(NewQ);
+
+    if (CVarO3DSBroadcastDebugSend->GetInt() != 0)
+    {
+        UE_LOG(LogO3DSBroadcast, Log, TEXT("Queued %d bytes. Total queued=%llu"), Buffer.Num(), (unsigned long long)NewQ);
+    }
 }
 
 void UO3DSBroadcastComponent::StartCapture()
@@ -949,6 +971,20 @@ void UO3DSBroadcastComponent::TickComponent(float DeltaTime, ELevelTick TickType
     // Drain internal transport queue if enabled
     if (InternalTransport)
     {
+        const bool bTransportReady = InternalTransport->IsConnected();
+        // Allow transport (e.g., WebRTC) to pump its event loop regardless of connection state
+        InternalTransport->Tick(DeltaTime);
+
+        if (!bTransportReady)
+        {
+            // Don't dequeue until transport is ready/open to avoid dropping frames (e.g., descriptor before WebRTC opens)
+            if (CVarO3DSBroadcastDebugSend->GetInt() != 0)
+            {
+                UE_LOG(LogO3DSBroadcast, Verbose, TEXT("Transport not ready; deferring queue drain (queued=%llu)"), (unsigned long long)QueuedBytes.Load());
+            }
+            return;
+        }
+
         constexpr int32 MaxPerTick = 32;
         int32 Count = 0;
         while (Count < MaxPerTick)
@@ -959,6 +995,10 @@ void UO3DSBroadcastComponent::TickComponent(float DeltaTime, ELevelTick TickType
                 break;
             }
             QueuedBytes.Store(QueuedBytes.Load() - (uint64)Item.Data.Num());
+            if (CVarO3DSBroadcastDebugSend->GetInt() != 0)
+            {
+                UE_LOG(LogO3DSBroadcast, Log, TEXT("Dequeuing %d bytes to transport"), Item.Data.Num());
+            }
             InternalTransport->Send(Item.Data.GetData(), Item.Data.Num(), Item.Ts);
             ++Count;
         }
