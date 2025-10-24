@@ -1,0 +1,220 @@
+name: Build native WebRTC libraries
+
+# This workflow builds Google WebRTC (libwebrtc) static libraries for desktop platforms
+# and uploads them as artifacts. Use the resulting libs/headers to populate
+# plugins/unreal/Open3DStream/ThirdParty/webrtc for Unreal builds that link the
+# native WebRTC stack (for data channels and future audio track support).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - name: Prepare workspace directories
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/webrtc_build"
+          cd "$GITHUB_WORKSPACE/webrtc_build"
+
+      - name: Install Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Fetch depot_tools
+        run: |
+          cd "$GITHUB_WORKSPACE/webrtc_build"
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          echo "${{ github.workspace }}\webrtc_build\depot_tools" >> $GITHUB_PATH
+
+      - name: Bootstrap gclient
+        run: |
+          gclient --version
+
+      - name: Checkout WebRTC fork (lifelike-and-believable/webrtc)
+        run: |
+          cd "$GITHUB_WORKSPACE/webrtc_build"
+          git clone --depth=1 https://github.com/lifelike-and-believable/webrtc.git src
+
+      - name: Create .gclient and sync DEPS (CIPD)
+        run: |
+          cd "$GITHUB_WORKSPACE/webrtc_build"
+          cat > .gclient << 'EOF'
+          solutions = [
+            { "name": "src", "url": "https://github.com/lifelike-and-believable/webrtc.git", "deps_file": "DEPS", "managed": False, "custom_deps": {} },
+          ]
+          EOF
+          gclient sync --nohooks --with_branch_heads --with_tags -v
+
+      - name: Generate GN files (Release, static)
+        run: |
+          cd "$GITHUB_WORKSPACE/webrtc_build/src"
+          python3 tools_webrtc/mb/mb.py gen -m webrtc -c Release //out/Release --args="is_debug=false is_component_build=false rtc_include_tests=false rtc_build_examples=false rtc_build_tools=false rtc_use_h264=false treat_warnings_as_errors=false symbol_level=0"
+
+      - name: Build static libraries (target webrtc)
+        run: |
+          cd "$GITHUB_WORKSPACE/webrtc_build/src"
+          python3 tools_webrtc/mb/mb.py build -m webrtc -c Release //out/Release webrtc
+
+      - name: Collect artifacts
+        run: |
+          set -e
+          ART="$GITHUB_WORKSPACE/artifacts/windows"
+          mkdir -p "$ART/lib" "$ART/include"
+          # Copy all .lib from out/Release
+          find "$GITHUB_WORKSPACE/webrtc_build/src/out/Release" -maxdepth 2 -type f -name "*.lib" -print -exec cp {} "$ART/lib/" \;
+          # Copy a subset of public headers, then prune non-headers
+          cp -r "$GITHUB_WORKSPACE/webrtc_build/src/api" "$ART/include/"
+          cp -r "$GITHUB_WORKSPACE/webrtc_build/src/rtc_base" "$ART/include/"
+          cp -r "$GITHUB_WORKSPACE/webrtc_build/src/pc" "$ART/include/"
+          find "$ART/include" -type f ! -name "*.h" -delete
+          echo "Collected $(ls -1 "$ART/lib" | wc -l) libs"
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: libwebrtc-windows
+          path: artifacts/windows
+
+  linux:
+    name: Linux x64
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git python3 python3-pip pkg-config build-essential
+
+      - name: Prepare workspace
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/webrtc_build"
+
+      - name: Fetch depot_tools
+        run: |
+          cd "$GITHUB_WORKSPACE/webrtc_build"
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          echo "$GITHUB_WORKSPACE/webrtc_build/depot_tools" >> $GITHUB_PATH
+
+      - name: Bootstrap gclient
+        run: gclient --version
+
+      - name: Checkout WebRTC fork (lifelike-and-believable/webrtc)
+        run: |
+          cd "$GITHUB_WORKSPACE/webrtc_build"
+          git clone --depth=1 https://github.com/lifelike-and-believable/webrtc.git src
+
+      - name: Create .gclient and sync DEPS (CIPD)
+        run: |
+          cd "$GITHUB_WORKSPACE/webrtc_build"
+          cat > .gclient << 'EOF'
+          solutions = [
+            { "name": "src", "url": "https://github.com/lifelike-and-believable/webrtc.git", "deps_file": "DEPS", "managed": False, "custom_deps": {} },
+          ]
+          EOF
+          gclient sync --nohooks --with_branch_heads --with_tags -v
+
+      - name: Generate GN files (Release, static)
+        run: |
+          cd "$GITHUB_WORKSPACE/webrtc_build/src"
+          python3 tools_webrtc/mb/mb.py gen -m webrtc -c Release //out/Release --args="is_debug=false is_component_build=false rtc_include_tests=false rtc_build_examples=false rtc_build_tools=false rtc_use_h264=false treat_warnings_as_errors=false symbol_level=0"
+
+      - name: Build static libraries (target webrtc)
+        run: |
+          cd "$GITHUB_WORKSPACE/webrtc_build/src"
+          python3 tools_webrtc/mb/mb.py build -m webrtc -c Release //out/Release webrtc
+
+      - name: Collect artifacts
+        run: |
+          set -e
+          ART="$GITHUB_WORKSPACE/artifacts/linux"
+          mkdir -p "$ART/lib" "$ART/include"
+          # Copy all .a static archives from out/Release
+          find "$GITHUB_WORKSPACE/webrtc_build/src/out/Release" -maxdepth 2 -type f -name "*.a" -print -exec cp {} "$ART/lib/" \;
+          # Copy a subset of public headers, then prune non-headers
+          cp -r "$GITHUB_WORKSPACE/webrtc_build/src/api" "$ART/include/"
+          cp -r "$GITHUB_WORKSPACE/webrtc_build/src/rtc_base" "$ART/include/"
+          cp -r "$GITHUB_WORKSPACE/webrtc_build/src/pc" "$ART/include/"
+          find "$ART/include" -type f ! -name "*.h" -delete
+          echo "Collected $(ls -1 "$ART/lib" | wc -l) libs"
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: libwebrtc-linux
+          path: artifacts/linux
+
+  macos:
+    name: macOS x64
+    runs-on: macos-13
+    steps:
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Prepare workspace
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/webrtc_build"
+
+      - name: Fetch depot_tools
+        run: |
+          cd "$GITHUB_WORKSPACE/webrtc_build"
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          echo "$GITHUB_WORKSPACE/webrtc_build/depot_tools" >> $GITHUB_PATH
+
+      - name: Bootstrap gclient
+        run: gclient --version
+
+      - name: Checkout WebRTC fork (lifelike-and-believable/webrtc)
+        run: |
+          cd "$GITHUB_WORKSPACE/webrtc_build"
+          git clone --depth=1 https://github.com/lifelike-and-believable/webrtc.git src
+
+      - name: Create .gclient and sync DEPS (CIPD)
+        run: |
+          cd "$GITHUB_WORKSPACE/webrtc_build"
+          cat > .gclient << 'EOF'
+          solutions = [
+            { "name": "src", "url": "https://github.com/lifelike-and-believable/webrtc.git", "deps_file": "DEPS", "managed": False, "custom_deps": {} },
+          ]
+          EOF
+          gclient sync --nohooks --with_branch_heads --with_tags -v
+
+      - name: Generate GN files (Release, static)
+        run: |
+          cd "$GITHUB_WORKSPACE/webrtc_build/src"
+          python3 tools_webrtc/mb/mb.py gen -m webrtc -c Release //out/Release --args="is_debug=false is_component_build=false rtc_include_tests=false rtc_build_examples=false rtc_build_tools=false rtc_use_h264=false treat_warnings_as_errors=false symbol_level=0"
+
+      - name: Build static libraries (target webrtc)
+        run: |
+          cd "$GITHUB_WORKSPACE/webrtc_build/src"
+          python3 tools_webrtc/mb/mb.py build -m webrtc -c Release //out/Release webrtc
+
+      - name: Collect artifacts
+        run: |
+          set -e
+          ART="$GITHUB_WORKSPACE/artifacts/macos"
+          mkdir -p "$ART/lib" "$ART/include"
+          # Copy all .a static archives from out/Release
+          find "$GITHUB_WORKSPACE/webrtc_build/src/out/Release" -maxdepth 2 -type f -name "*.a" -print -exec cp {} "$ART/lib/" \;
+          # Copy a subset of public headers, then prune non-headers
+          cp -r "$GITHUB_WORKSPACE/webrtc_build/src/api" "$ART/include/"
+          cp -r "$GITHUB_WORKSPACE/webrtc_build/src/rtc_base" "$ART/include/"
+          cp -r "$GITHUB_WORKSPACE/webrtc_build/src/pc" "$ART/include/"
+          find "$ART/include" -type f ! -name "*.h" -delete
+          echo "Collected $(ls -1 "$ART/lib" | wc -l) libs"
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: libwebrtc-macos
+          path: artifacts/macos
