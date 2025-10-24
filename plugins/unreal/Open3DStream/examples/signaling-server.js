@@ -10,6 +10,17 @@
 //   Offer/Answer relayed: { type: "offer"|"answer", sdp: "..." }
 //   ICE relayed: { type: "ice", candidate, sdpMid, sdpMLineIndex }
 //   On disconnect, server notifies others: { type: "peer-left" }
+//
+// Enhancement (Issue #87):
+// - Late-join resilience via latest-offer cache per room with TTL (default 5s).
+//   When a peer joins, if a recent offer is cached for the room, it is replayed
+//   to the newcomer so they can answer even if the remote offered before join.
+//
+// Enhancement: Glare handling (simultaneous offers)
+// - Introduces a per-room negotiation lock window so only one offer is accepted
+//   at a time. If another peer sends an offer while a negotiation is in-flight,
+//   the server responds with { type: "collision", action: "wait-retry", retryAfterMs }
+//   and drops the colliding offer. The lock is cleared on answer or timeout.
 
 const http = require('http');
 const { WebSocketServer } = require('ws');
@@ -17,9 +28,22 @@ const { WebSocketServer } = require('ws');
 const args = process.argv.slice(2);
 const portFlagIndex = args.indexOf('--port');
 const PORT = portFlagIndex >= 0 ? parseInt(args[portFlagIndex + 1], 10) : 8080;
+const OFFER_TTL_MS = 5000; // configurable TTL for cached offers
+const NEGOTIATION_WINDOW_MS = 3000; // soft lock window to serialize offers
 
 // In-memory rooms: roomName -> Set of clients
 const rooms = new Map();
+// Latest offer cache: roomName -> { sdp: string, time: number }
+const latestOffers = new Map();
+// Per-room negotiation lock to mitigate glare: roomName -> { offerer: WebSocket|null, lockUntil: number }
+const negotiations = new Map();
+
+function ensureNegotiation(room) {
+  if (!negotiations.has(room)) {
+    negotiations.set(room, { offerer: null, lockUntil: 0 });
+  }
+  return negotiations.get(room);
+}
 
 function addToRoom(room, ws) {
   if (!rooms.has(room)) {
@@ -32,8 +56,16 @@ function removeFromRoom(room, ws) {
   if (!rooms.has(room)) return;
   const set = rooms.get(room);
   set.delete(ws);
+  const nego = negotiations.get(room);
+  // If the leaving peer was the current offerer, release the lock early
+  if (nego && nego.offerer === ws) {
+    nego.offerer = null;
+    nego.lockUntil = 0;
+  }
   if (set.size === 0) {
     rooms.delete(room);
+    latestOffers.delete(room);
+    negotiations.delete(room);
   }
 }
 
@@ -45,6 +77,12 @@ function broadcastToRoom(room, sender, messageObj) {
     if (client !== sender && client.readyState === 1) {
       client.send(msg);
     }
+  }
+}
+
+function sendTo(ws, obj) {
+  if (ws.readyState === 1) {
+    ws.send(JSON.stringify(obj));
   }
 }
 
@@ -73,14 +111,20 @@ wss.on('connection', (ws) => {
     if (type === 'join') {
       const room = String(msg.room || '').trim();
       if (!room) {
-        ws.send(JSON.stringify({ type: 'error', message: 'room required' }));
+        sendTo(ws, { type: 'error', message: 'room required' });
         return;
       }
       ws.room = room;
       ws.name = msg.name || 'peer';
       addToRoom(room, ws);
       // Ack join
-      ws.send(JSON.stringify({ type: 'joined' }));
+      sendTo(ws, { type: 'joined' });
+      // Send cached latest offer if still fresh
+      const cached = latestOffers.get(room);
+      const now = Date.now();
+      if (cached && (now - cached.time) <= OFFER_TTL_MS) {
+        sendTo(ws, { type: 'offer', sdp: cached.sdp });
+      }
       // Notify others
       broadcastToRoom(room, ws, { type: 'peer-joined' });
       return;
@@ -90,17 +134,43 @@ wss.on('connection', (ws) => {
     if (!ws.room) return;
 
     switch (type) {
-      case 'offer':
-        if (typeof msg.sdp === 'string') {
-          broadcastToRoom(ws.room, ws, { type: 'offer', sdp: msg.sdp });
+      case 'offer': {
+        if (typeof msg.sdp !== 'string') break;
+        const room = ws.room;
+        const now = Date.now();
+        const nego = ensureNegotiation(room);
+        // Release stale lock automatically
+        if (nego.lockUntil && now > nego.lockUntil) {
+          nego.offerer = null;
+          nego.lockUntil = 0;
+        }
+        // Accept if no active offerer or this ws is the active offerer (renegotiation)
+        const canAccept = !nego.offerer || nego.offerer === ws;
+        if (canAccept) {
+          nego.offerer = ws;
+          nego.lockUntil = now + NEGOTIATION_WINDOW_MS;
+          // Cache only accepted offers for late join replay
+          latestOffers.set(room, { sdp: msg.sdp, time: now });
+          broadcastToRoom(room, ws, { type: 'offer', sdp: msg.sdp });
+        } else {
+          // Collision: another peer is currently the offerer, ask to retry later
+          const retryAfterMs = Math.max(0, nego.lockUntil - now);
+          sendTo(ws, { type: 'collision', action: 'wait-retry', retryAfterMs });
+          // Do not update cached offer or broadcast the colliding one
         }
         break;
-      case 'answer':
-        if (typeof msg.sdp === 'string') {
-          broadcastToRoom(ws.room, ws, { type: 'answer', sdp: msg.sdp });
-        }
+      }
+      case 'answer': {
+        if (typeof msg.sdp !== 'string') break;
+        const room = ws.room;
+        broadcastToRoom(room, ws, { type: 'answer', sdp: msg.sdp });
+        // Clear negotiation lock on answer receipt
+        const nego = ensureNegotiation(room);
+        nego.offerer = null;
+        nego.lockUntil = 0;
         break;
-      case 'ice':
+      }
+      case 'ice': {
         if (typeof msg.candidate === 'string') {
           broadcastToRoom(ws.room, ws, {
             type: 'ice',
@@ -110,6 +180,7 @@ wss.on('connection', (ws) => {
           });
         }
         break;
+      }
       default:
         // ignore unknown
         break;
