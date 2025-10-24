@@ -14,10 +14,12 @@
 //#include "get_time.h"
 using namespace O3DS::Data;
 
-
-// E:\Unreal\UE_4.25\Engine\Plugins\Animation\LiveLink\Source\LiveLink\Private\LiveLinkMessageBusSource.cpp
-// E:\Unreal\UE_4.25\Engine\Source\Runtime\LiveLinkInterface\Public\LiveLinkTypes.h
-// E:\Unreal\UE_4.25\Engine\Plugins\Runtime\AR\Apple\AppleARKit\Source\AppleARKitPoseTrackingLiveLink\Private\AppleARKitPoseTrackingLiveLinkSource.cpp
+// Receiver-side diagnostics
+static TAutoConsoleVariable<int32> CVarO3DSReceiverDebugParse(
+    TEXT("o3ds.Receiver.DebugParse"),
+    1,
+    TEXT("Enable debug logs when parsing incoming O3DS packets (0/1)."),
+    ECVF_Default);
 
 
 #define LOCTEXT_NAMESPACE "Open3DStream"
@@ -75,6 +77,14 @@ FOpen3DStreamSource::FOpen3DStreamSource(const FOpen3DStreamSettings& Settings)
 
     server.OnData.BindRaw(this, &FOpen3DStreamSource::OnPackage);
     server.OnState.BindRaw(this, &FOpen3DStreamSource::OnStatus);
+
+    // One-time log to confirm that the receiver is wiring the OnData callback
+    static bool bLoggedBind = false;
+    if (!bLoggedBind)
+    {
+        bLoggedBind = true;
+        UE_LOG(LogTemp, Log, TEXT("O3DS RX: LiveLink OnData bound in Open3DStreamSource"));
+    }
 }
 
 FOpen3DStreamSource::~FOpen3DStreamSource()
@@ -170,11 +180,32 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
         LogFlag = true;
     }
 
-    //O3DS::Unreal::UnBuilder builder;
+    if (CVarO3DSReceiverDebugParse->GetInt() != 0)
+    {
+        const int32 DumpN = FMath::Min(64, data.Num());
+        FString Hex; Hex.Reserve(DumpN * 3);
+        for (int32 i = 0; i < DumpN; ++i) { Hex += FString::Printf(TEXT("%02X "), data[i]); }
+        static const uint8 Magic[14] = {0x00,0xFF,0x03,0xFE,'O','3','D','S','-','S','T','A','R','T'};
+        const bool bTcpMagic = (data.Num() >= 14) && (FMemory::Memcmp(data.GetData(), Magic, 14) == 0);
+        UE_LOG(LogTemp, Verbose, TEXT("O3DS Receiver: packet bytes=%d tcp_magic=%s first_%d=%s"), data.Num(), bTcpMagic?TEXT("true"):TEXT("false"), DumpN, *Hex);
+    }
+
+    // Parse O3DS buffer (non-TCP transports provide raw payload without TCP magic)
     if (!mSubjects.Parse((const char*)data.GetData(), data.Num(), 0))
     {
         OnStatus(LOCTEXT("DataError", "Data Error"), true);
+        if (CVarO3DSReceiverDebugParse->GetInt() != 0)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("O3DS Receiver: Parse failed (bytes=%d)"), data.Num());
+        }
         return;
+    }
+
+    if (CVarO3DSReceiverDebugParse->GetInt() != 0)
+    {
+        int32 Count = 0;
+        for (auto* S : mSubjects) { (void)S; ++Count; }
+        UE_LOG(LogTemp, Verbose, TEXT("O3DS Receiver: Parse OK subjects=%d time=%.6f"), Count, mSubjects.mTime);
     }
 
     TArray<FName>      BoneNames;
@@ -297,11 +328,11 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
             if (InitializedSubjects.Find(SubjectName) == INDEX_NONE)
             {
                 InitializedSubjects.Add(SubjectName);
-                UE_LOG(LogTemp, Log, TEXT("O3DS LiveLink: Created subject '%s'"), *SubjectName.Name.ToString());
+                UE_LOG(LogTemp, Log, TEXT("O3DS Receiver: Created subject '%s'"), *SubjectName.Name.ToString());
             }
             else
             {
-                UE_LOG(LogTemp, Log, TEXT("O3DS LiveLink: Static data updated for subject '%s' (bones/curves changed)"), *SubjectName.Name.ToString());
+                UE_LOG(LogTemp, Log, TEXT("O3DS Receiver: Static data updated for subject '%s' (bones/curves changed)"), *SubjectName.Name.ToString());
             }
 
             SubjectSkeletonHash.FindOrAdd(SubjectName.Name) = NewSkelHash;

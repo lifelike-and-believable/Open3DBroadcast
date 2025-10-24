@@ -67,7 +67,16 @@ void FWebRTCConnector::EnsurePeerConnectionForNewSession()
 
 bool FWebRTCConnector::Start(const FString& Url, bool bInIsServer)
 {
+	// Preserve any previously bound data callback across restarts
+	TFunction<void(const uint8*, int32)> SavedCallback = DataReceivedCallback;
+
 	Stop();
+
+	// Restore callback (Stop may have cleared internal state)
+	if (SavedCallback)
+	{
+		DataReceivedCallback = MoveTemp(SavedCallback);
+	}
 
 	bIsServer = bInIsServer;
 	LastError.Empty();
@@ -160,7 +169,7 @@ void FWebRTCConnector::Stop()
 	bLocalDescriptionSet = false;
 	PendingRemoteCandidates.Reset();
 	ConnectionState = TEXT("CLOSED");
-	DataReceivedCallback = nullptr;
+	// Do NOT clear DataReceivedCallback here; allow pre-bound sink to persist across restarts
 	LastPeerState = -1;
 }
 
@@ -208,6 +217,17 @@ bool FWebRTCConnector::Send(const uint8* Data, int32 Size)
 void FWebRTCConnector::SetDataReceivedCallback(TFunction<void(const uint8*, int32)> Callback)
 {
 	DataReceivedCallback = Callback;
+
+	// Per-instance bind log to help diagnose receive-path wiring
+	const TCHAR* RoleLabel = bIsServer ? TEXT("Server") : TEXT("Client");
+	if (DataReceivedCallback)
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("O3DS RX: DataReceivedCallback bound [%s %p]"), RoleLabel, this);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("O3DS RX: DataReceivedCallback cleared [%s %p]"), RoleLabel, this);
+	}
 }
 
 void FWebRTCConnector::Tick()
@@ -216,6 +236,8 @@ void FWebRTCConnector::Tick()
     TArray<uint8> ReceivedData;
     while (ReceivedDataQueue.Dequeue(ReceivedData))
     {
+        const TCHAR* RoleLabel = bIsServer ? TEXT("Server") : TEXT("Client");
+
         if (CVarO3DSWebRTCDebugRx->GetInt() != 0)
         {
             static bool bLoggedFirstRx = false;
@@ -230,14 +252,32 @@ void FWebRTCConnector::Tick()
                 }
                 static const uint8 ExpectedHeader[14] = {0x00,0xFF,0x03,0xFE,'O','3','D','S','-','S','T','A','R','T'};
                 const bool bHeaderMatch = (ReceivedData.Num() >= 14) && (FMemory::Memcmp(ReceivedData.GetData(), ExpectedHeader, 14) == 0);
-                UE_LOG(LogTemp, Warning, TEXT("WebRTC RX: First packet size=%d header_match=%s first_%d=%s"),
-                    ReceivedData.Num(), bHeaderMatch?TEXT("true"):TEXT("false"), DumpN, *Hex);
+                UE_LOG(LogTemp, Verbose, TEXT("WebRTC RX[%s %p]: First packet size=%d header_match=%s first_%d=%s"),
+                    RoleLabel, this, ReceivedData.Num(), bHeaderMatch?TEXT("true"):TEXT("false"), DumpN, *Hex);
             }
         }
 
         if (DataReceivedCallback)
         {
+            if (CVarO3DSWebRTCDebugRx->GetInt() != 0)
+            {
+                static int32 DispatchLogs = 0;
+                if (DispatchLogs < 3)
+                {
+                    ++DispatchLogs;
+                    UE_LOG(LogTemp, Verbose, TEXT("WebRTC RX[%s %p]: Dispatching %d bytes to receiver callback"), RoleLabel, this, ReceivedData.Num());
+                }
+            }
             DataReceivedCallback(ReceivedData.GetData(), ReceivedData.Num());
+        }
+        else if (CVarO3DSWebRTCDebugRx->GetInt() != 0)
+        {
+            static int32 DropLogs = 0;
+            if (DropLogs < 3)
+            {
+                ++DropLogs;
+                UE_LOG(LogTemp, Verbose, TEXT("WebRTC RX[%s %p]: Dropping %d bytes (no DataReceivedCallback bound)"), RoleLabel, this, ReceivedData.Num());
+            }
         }
     }
 }

@@ -55,7 +55,7 @@ public:
         const bool bStarted = Channel->Start(EffectiveUrl);
         if (CVarO3DSWebRtcTransportDebug->GetInt() != 0)
         {
-            UE_LOG(LogO3DSBroadcast, Log, TEXT("[WebRTC] Transport Start url=%s result=%s"), *EffectiveUrl, bStarted?TEXT("true"):TEXT("false"));
+            UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[WebRTC] Transport Start url=%s result=%s"), *EffectiveUrl, bStarted?TEXT("true"):TEXT("false"));
         }
         if (!bStarted)
         {
@@ -85,7 +85,7 @@ public:
         {
             if (CVarO3DSWebRtcTransportDebug->GetInt() != 0)
             {
-                UE_LOG(LogO3DSBroadcast, Log, TEXT("[WebRTC] Transport Send(%d) skipped bHas=%d bOpen=%d"), Size, bHas?1:0, bOpen?1:0);
+                UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[WebRTC] Transport Send(%d) skipped bHas=%d bOpen=%d"), Size, bHas?1:0, bOpen?1:0);
             }
             Counters.FramesDropped.Store(Counters.FramesDropped.Load() + 1);
             return false;
@@ -97,7 +97,7 @@ public:
             Counters.BytesSent.Store(Counters.BytesSent.Load() + (uint64)Size);
             if (CVarO3DSWebRtcTransportDebug->GetInt() != 0)
             {
-                UE_LOG(LogO3DSBroadcast, Log, TEXT("[WebRTC] Transport Send OK (%d bytes)"), Size);
+                UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[WebRTC] Transport Send OK (%d bytes)"), Size);
             }
         }
         else
@@ -128,7 +128,7 @@ public:
                 {
                     const bool bConn = Channel->IsConnected();
                     const bool bOpen = Channel->IsOpen();
-                    UE_LOG(LogO3DSBroadcast, Log, TEXT("[WebRTC] State connected=%d open=%d"), bConn?1:0, bOpen?1:0);
+                    UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[WebRTC] State connected=%d open=%d"), bConn?1:0, bOpen?1:0);
                     LastStateLogTime = Now;
                 }
             }
@@ -139,7 +139,7 @@ public:
                 {
                     const uint32 Ping = 0xDEADBEEF;
                     Channel->Send(reinterpret_cast<const uint8*>(&Ping), sizeof(Ping));
-                    UE_LOG(LogO3DSBroadcast, Log, TEXT("[WebRTC] DebugPing sent (4 bytes)"));
+                    UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[WebRTC] DebugPing sent (4 bytes)"));
                     LastPingTime = Now;
                 }
             }

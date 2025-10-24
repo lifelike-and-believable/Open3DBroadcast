@@ -249,7 +249,7 @@ void UO3DSBroadcastComponent::SetupInternalTransport()
                 SerializedFrameHandle = Serializer->OnSerializedFrame.AddUObject(this, &UO3DSBroadcastComponent::OnSerializedForTransport);
                 if (CVarO3DSBroadcastDebugSend->GetInt() != 0)
                 {
-                    UE_LOG(LogO3DSBroadcast, Log, TEXT("Send pipeline hooked: Serializer -> Queue (component %s)"), *GetNameSafe(this));
+                    UE_LOG(LogO3DSBroadcast, Verbose, TEXT("Send pipeline hooked: Serializer -> Queue (component %s)"), *GetNameSafe(this));
                 }
             }
             SetComponentTickEnabled(true);
@@ -292,7 +292,7 @@ void UO3DSBroadcastComponent::OnSerializedForTransport(const FString& /*Subject*
         DroppedFrames.Store(DroppedFrames.Load() + 1);
         if (CVarO3DSBroadcastDebugSend->GetInt() != 0)
         {
-            UE_LOG(LogO3DSBroadcast, Log, TEXT("Send queue full, dropping frame (%d bytes), limit=%d current=%llu"), Buffer.Num(), LimitBytes, (unsigned long long)QueuedBytes.Load());
+            UE_LOG(LogO3DSBroadcast, Verbose, TEXT("Send queue full, dropping frame (%d bytes), limit=%d current=%llu"), Buffer.Num(), LimitBytes, (unsigned long long)QueuedBytes.Load());
         }
         return;
     }
@@ -303,7 +303,7 @@ void UO3DSBroadcastComponent::OnSerializedForTransport(const FString& /*Subject*
 
     if (CVarO3DSBroadcastDebugSend->GetInt() != 0)
     {
-        UE_LOG(LogO3DSBroadcast, Log, TEXT("Queued %d bytes. Total queued=%llu"), Buffer.Num(), (unsigned long long)NewQ);
+        UE_LOG(LogO3DSBroadcast, Verbose, TEXT("Queued %d bytes. Total queued=%llu"), Buffer.Num(), (unsigned long long)NewQ);
     }
 }
 
@@ -997,7 +997,7 @@ void UO3DSBroadcastComponent::TickComponent(float DeltaTime, ELevelTick TickType
             QueuedBytes.Store(QueuedBytes.Load() - (uint64)Item.Data.Num());
             if (CVarO3DSBroadcastDebugSend->GetInt() != 0)
             {
-                UE_LOG(LogO3DSBroadcast, Log, TEXT("Dequeuing %d bytes to transport"), Item.Data.Num());
+                UE_LOG(LogO3DSBroadcast, Verbose, TEXT("Dequeuing %d bytes to transport"), Item.Data.Num());
             }
             InternalTransport->Send(Item.Data.GetData(), Item.Data.Num(), Item.Ts);
             ++Count;

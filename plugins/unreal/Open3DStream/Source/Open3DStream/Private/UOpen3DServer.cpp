@@ -97,6 +97,7 @@ bool O3DSServer::start(FText Url, FText Protocol )
 		{
 			this->inData(Data, Size);
 		});
+		UE_LOG(LogTemp, Log, TEXT("O3DS RX: DataReceivedCallback bound in UOpen3DServer (WebRTC Client)"));
 		
 		if (mWebRTCConnector->Start(Url.ToString(), false))
 		{
@@ -119,6 +120,7 @@ bool O3DSServer::start(FText Url, FText Protocol )
 		{
 			this->inData(Data, Size);
 		});
+		UE_LOG(LogTemp, Log, TEXT("O3DS RX: DataReceivedCallback bound in UOpen3DServer (WebRTC Server)"));
 		
 		if (mWebRTCConnector->Start(Url.ToString(), true))
 		{
