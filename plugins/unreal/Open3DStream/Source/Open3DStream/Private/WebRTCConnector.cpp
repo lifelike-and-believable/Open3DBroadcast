@@ -6,6 +6,8 @@
 #include "Serialization/JsonReader.h"
 #include "IPAddress.h"
 #include "Misc/ScopeLock.h"
+#include "HAL/IConsoleManager.h"
+#include "HAL/PlatformTime.h"
 
 // libdatachannel includes
 #include <rtc/rtc.hpp>
