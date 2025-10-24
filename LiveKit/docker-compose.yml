@@ -1,0 +1,28 @@
+version: "3.9"
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    command: ["--config", "/livekit/livekit.yaml"]
+    volumes:
+      - ./livekit.yaml:/livekit/livekit.yaml:ro
+    # Only expose the UDP media range publicly; signaling is proxied by Caddy.
+    ports:
+      - "50000-50050:50000-50050/udp"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    depends_on:
+      - livekit
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
