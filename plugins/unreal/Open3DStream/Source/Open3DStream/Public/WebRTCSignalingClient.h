@@ -15,6 +15,7 @@
  * - SDP offers and answers
  * - ICE candidates
  * - Peer discovery
+ * - Negotiation collision notifications
  */
 class OPEN3DSTREAM_API FWebRTCSignalingClient
 {
@@ -87,6 +88,9 @@ public:
 	/** Called when there's a signaling error */
 	TFunction<void(const FString& ErrorMsg)> OnSignalingError;
 
+	/** Called when server reports an offer glare collision; provides action and suggested retry in ms */
+	TFunction<void(const FString& Action, int32 RetryAfterMs)> OnCollision;
+
 	/**
 	 * Get last error message
 	 */
@@ -115,6 +119,7 @@ private:
 	bool ParseIceCandidate(const TSharedPtr<FJsonObject>& JsonMessage);
 	bool ParsePeerJoined(const TSharedPtr<FJsonObject>& JsonMessage);
 	bool ParsePeerLeft(const TSharedPtr<FJsonObject>& JsonMessage);
+	bool ParseCollision(const TSharedPtr<FJsonObject>& JsonMessage);
 
 	// Message construction
 	FString CreateJoinMessage() const;

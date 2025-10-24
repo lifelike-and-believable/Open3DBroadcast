@@ -201,6 +201,10 @@ bool FWebRTCSignalingClient::ParseSignalingMessage(const FString& MessageStr)
 		}
 		return true;
 	}
+	else if (MessageType == TEXT("collision"))
+	{
+		return ParseCollision(JsonMessage);
+	}
 
 	LastError = FString::Printf(TEXT("Unknown message type: %s"), *MessageType);
 	UE_LOG(LogTemp, Warning, TEXT("WebRTC Signaling: %s"), *LastError);
@@ -289,6 +293,24 @@ bool FWebRTCSignalingClient::ParsePeerLeft(const TSharedPtr<FJsonObject>& JsonMe
 		OnPeerLeft();
 	}
 
+	return true;
+}
+
+bool FWebRTCSignalingClient::ParseCollision(const TSharedPtr<FJsonObject>& JsonMessage)
+{
+	// Collision message shape: { type: "collision", action: "wait-retry", retryAfterMs: number }
+	FString Action = JsonMessage->GetStringField(TEXT("action"));
+	int32 RetryAfterMs = 0;
+	if (JsonMessage->HasTypedField<EJson::Number>(TEXT("retryAfterMs")))
+	{
+		RetryAfterMs = (int32)JsonMessage->GetNumberField(TEXT("retryAfterMs"));
+	}
+	UE_LOG(LogTemp, Warning, TEXT("WebRTC Signaling: Collision received (action=%s, retryAfterMs=%d)"), *Action, RetryAfterMs);
+
+	if (OnCollision)
+	{
+		OnCollision(Action, RetryAfterMs);
+	}
 	return true;
 }
 

@@ -26,6 +26,37 @@ static TAutoConsoleVariable<int32> CVarO3DSWebRTCDebugRx(
     TEXT("Enable receiver-side debug logging for WebRTC data (0/1). Logs first packet and occasional stats."),
     ECVF_Default);
 
+// New CVars for Issue #87 resiliency
+static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCAutoReconnect(
+    TEXT("o3ds.Broadcast.WebRTC.AutoReconnect"),
+    1,
+    TEXT("Enable auto-reconnect/re-offer logic on failures (0/1)."),
+    ECVF_Default);
+
+static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCBackoffInitialMs(
+    TEXT("o3ds.Broadcast.WebRTC.BackoffInitialMs"),
+    500,
+    TEXT("Initial backoff for re-offer/reconnect in milliseconds."),
+    ECVF_Default);
+
+static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCBackoffMaxMs(
+    TEXT("o3ds.Broadcast.WebRTC.BackoffMaxMs"),
+    10000,
+    TEXT("Maximum backoff for re-offer/reconnect in milliseconds."),
+    ECVF_Default);
+
+static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCNegoChannel(
+    TEXT("o3ds.Broadcast.WebRTC.NegotiatedChannel"),
+    0,
+    TEXT("Use negotiated data channel with fixed id on both sides (0/1)."),
+    ECVF_Default);
+
+static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCChannelId(
+    TEXT("o3ds.Broadcast.WebRTC.ChannelId"),
+    42,
+    TEXT("Fixed DataChannel id to use when NegotiatedChannel=1."),
+    ECVF_Default);
+
 const char* FWebRTCConnector::DataChannelLabel = "Open3DStream";
 
 FWebRTCConnector::FWebRTCConnector()
@@ -84,6 +115,14 @@ bool FWebRTCConnector::Start(const FString& Url, bool bInIsServer)
 	bLocalDescriptionSet = false;
 	PendingRemoteCandidates.Reset();
 	LastPeerState = -1;
+	bSignalingIsConnected = false;
+
+	// Snapshot negotiated channel settings
+	bNegotiatedChannelEnabled = (CVarO3DSBroadcastWebRTCNegoChannel->GetInt() != 0);
+	NegotiatedChannelId = CVarO3DSBroadcastWebRTCChannelId->GetInt();
+
+	ResetReofferBackoff(/*bImmediate*/true);
+	ResetReconnectBackoff(/*bImmediate*/true);
 
 	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Starting connection (Mode: %s)"), bInIsServer ? TEXT("Server") : TEXT("Client"));
 
@@ -136,6 +175,18 @@ bool FWebRTCConnector::Start(const FString& Url, bool bInIsServer)
 		OnIceCandidateReceived(Candidate, SdpMid, MLineIndex);
 	};
 	SignalingClient->OnPeerJoined = [this]() { OnPeerJoined(); };
+	SignalingClient->OnCollision = [this](const FString& Action, int32 RetryAfterMs)
+	{
+		// If client gets collision, schedule a re-offer after suggested delay
+		if (!bIsServer)
+		{
+			const double Now = FPlatformTime::Seconds();
+			double Delay = FMath::Clamp((double)RetryAfterMs / 1000.0, 0.05, 5.0);
+			OfferBackoffSeconds = Delay;
+			NextOfferTimeSeconds = Now + Delay;
+			UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Collision - scheduling re-offer in %.2fs (action=%s)"), Delay, *Action);
+		}
+	};
 
 	// Connect to signaling server
 	if (!SignalingClient->Connect(SignalingServerUrl, Room, bInIsServer))
@@ -171,6 +222,11 @@ void FWebRTCConnector::Stop()
 	ConnectionState = TEXT("CLOSED");
 	// Do NOT clear DataReceivedCallback here; allow pre-bound sink to persist across restarts
 	LastPeerState = -1;
+	bSignalingIsConnected = false;
+	NextOfferTimeSeconds = 0.0;
+	OfferBackoffSeconds = 0.0;
+	NextReconnectTimeSeconds = 0.0;
+	ReconnectBackoffSeconds = 0.0;
 }
 
 bool FWebRTCConnector::Send(const uint8* Data, int32 Size)
@@ -280,6 +336,44 @@ void FWebRTCConnector::Tick()
             }
         }
     }
+
+    // Re-offer / reconnect timers (Issue #87)
+    if (CVarO3DSBroadcastWebRTCAutoReconnect->GetInt() != 0)
+    {
+        const double Now = FPlatformTime::Seconds();
+        // Client re-offer loop when no remote description yet
+        if (!bIsServer && bSignalingIsConnected && !bRemoteDescriptionSet && PeerConnection)
+        {
+            if (Now >= NextOfferTimeSeconds && OfferBackoffSeconds > 0.0)
+            {
+                MaybeCreateOffer(TEXT("reoffer-timer"));
+                // Backoff grows up to max
+                const double MaxSec = (double)CVarO3DSBroadcastWebRTCBackoffMaxMs->GetInt() / 1000.0;
+                OfferBackoffSeconds = FMath::Min(OfferBackoffSeconds * 2.0, MaxSec);
+                const double Jitter = FMath::FRandRange(0.0, 0.25 * OfferBackoffSeconds);
+                NextOfferTimeSeconds = Now + OfferBackoffSeconds + Jitter;
+            }
+        }
+
+        // Reconnect/renegotiate on disconnection
+        const bool bPeerDown = (LastPeerState == (int32)rtc::PeerConnection::State::Failed) ||
+                               (LastPeerState == (int32)rtc::PeerConnection::State::Closed) ||
+                               (LastPeerState == (int32)rtc::PeerConnection::State::Disconnected);
+        if (bPeerDown && Now >= NextReconnectTimeSeconds && ReconnectBackoffSeconds > 0.0)
+        {
+            // Try to restart negotiation (fresh PC and offer if client; server just waits)
+            UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Reconnect timer fired (state=%d)"), LastPeerState);
+            EnsurePeerConnectionForNewSession();
+            if (!bIsServer)
+            {
+                MaybeCreateOffer(TEXT("reconnect"));
+            }
+            const double MaxSec = (double)CVarO3DSBroadcastWebRTCBackoffMaxMs->GetInt() / 1000.0;
+            ReconnectBackoffSeconds = FMath::Min(ReconnectBackoffSeconds * 2.0, MaxSec);
+            const double Jitter = FMath::FRandRange(0.0, 0.25 * ReconnectBackoffSeconds);
+            NextReconnectTimeSeconds = Now + ReconnectBackoffSeconds + Jitter;
+        }
+    }
 }
 
 void FWebRTCConnector::OnPeerConnectionStateChange(int StateInt)
@@ -299,19 +393,28 @@ void FWebRTCConnector::OnPeerConnectionStateChange(int StateInt)
 		case rtc::PeerConnection::State::Connected:
 			this->ConnectionState = TEXT("CONNECTED");
 			this->bIsConnected = true;
+			// Reset backoffs on success
+			ResetReofferBackoff(/*bImmediate*/false);
+			ResetReconnectBackoff(/*bImmediate*/false);
 			break;
 		case rtc::PeerConnection::State::Disconnected:
 			this->ConnectionState = TEXT("DISCONNECTED");
 			this->bIsConnected = false;
+			// Schedule reconnect attempts
+			ResetReconnectBackoff(/*bImmediate*/true);
 			break;
 		case rtc::PeerConnection::State::Failed:
 			this->ConnectionState = TEXT("FAILED");
 			this->bIsConnected = false;
 			this->LastError = TEXT("PeerConnection failed");
+			// Allow reconnection attempts
+			ResetReconnectBackoff(/*bImmediate*/true);
 			break;
 		case rtc::PeerConnection::State::Closed:
 			this->ConnectionState = TEXT("CLOSED");
 			this->bIsConnected = false;
+			// Allow reconnection attempts
+			ResetReconnectBackoff(/*bImmediate*/true);
 			break;
 		default:
 			this->ConnectionState = TEXT("UNKNOWN");
@@ -391,6 +494,7 @@ void FWebRTCConnector::OnLocalDescription(const rtc::Description& Description)
 void FWebRTCConnector::OnSignalingConnected()
 {
 	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Signaling connected"));
+	bSignalingIsConnected = true;
 	
 	// Only client mode creates data channel proactively
 	// Server mode will receive data channel from peer
@@ -398,20 +502,7 @@ void FWebRTCConnector::OnSignalingConnected()
 	{
 		CreateDataChannel();
 		// In some cases the peer has already joined before this callback; proactively create offer
-		try
-		{
-			FScopeLock Lock(&PeerConnectionLock);
-			if (PeerConnection)
-			{
-				PeerConnection->createOffer();
-				UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Client created offer on signaling connect"));
-			}
-		}
-		catch (const std::exception& e)
-		{
-			LastError = FString(ANSI_TO_TCHAR(e.what()));
-			UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: Failed to create offer on connect: %s"), *LastError);
-		}
+		MaybeCreateOffer(TEXT("on-signaling-connected"));
 	}
 }
 
@@ -427,6 +518,7 @@ void FWebRTCConnector::OnSignalingDisconnected(const FString& Reason)
 	UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: Signaling disconnected: %s"), *Reason);
 	bIsConnected = false;
 	bDataChannelOpen = false;
+	bSignalingIsConnected = false;
 }
 
 void FWebRTCConnector::OnOfferReceived(const FString& SDP)
@@ -538,17 +630,8 @@ void FWebRTCConnector::OnPeerJoined()
 	}
 	else
 	{
-		// Client creates offer
-		UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Client mode - creating offer"));
-		try
-		{
-			PeerConnection->createOffer();
-		}
-		catch (const std::exception& e)
-		{
-			LastError = FString(ANSI_TO_TCHAR(e.what()));
-			UE_LOG(LogTemp, Error, TEXT("WebRTC Connector: Failed to create offer: %s"), *LastError);
-		}
+		// Client creates/recreates offer when peer appears
+		MaybeCreateOffer(TEXT("peer-joined"));
 	}
 }
 
@@ -652,8 +735,8 @@ bool FWebRTCConnector::SetupPeerConnection()
 			OnLocalDescription(Description);
 		});
 
-		// If server mode, handle incoming data channels
-		if (bIsServer)
+		// If server mode, handle incoming data channels (non-negotiated mode)
+		if (bIsServer && !bNegotiatedChannelEnabled)
 		{
 			PeerConnection->onDataChannel([this](std::shared_ptr<rtc::DataChannel> IncomingChannel)
 			{
@@ -707,6 +790,14 @@ bool FWebRTCConnector::SetupPeerConnection()
 		}
 
 		UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: PeerConnection created successfully"));
+
+		// For negotiated channel mode, both sides must create the channel explicitly.
+		// Do it here so server doesn't rely on onDataChannel callback.
+		if (bNegotiatedChannelEnabled)
+		{
+			CreateDataChannel();
+		}
+
 		return true;
 	}
 	catch (const std::exception& e)
@@ -731,7 +822,18 @@ bool FWebRTCConnector::CreateDataChannel()
 	{
 		// Create data channel
 		std::string Label(DataChannelLabel);
-		DataChannel = this->PeerConnection->createDataChannel(Label);
+		if (bNegotiatedChannelEnabled)
+		{
+			// Use negotiated channel with fixed id to avoid glare/timing
+			rtc::DataChannelInit Init;
+			Init.negotiated = true;
+			Init.id = NegotiatedChannelId;
+			DataChannel = this->PeerConnection->createDataChannel(Label, Init);
+		}
+		else
+		{
+			DataChannel = this->PeerConnection->createDataChannel(Label);
+		}
 
 		if (!DataChannel)
 		{
@@ -778,7 +880,7 @@ bool FWebRTCConnector::CreateDataChannel()
 			OnDataChannelClosed();
 		});
 
-		UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Data channel created successfully"));
+		UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Data channel created successfully (negotiated=%d id=%d)"), bNegotiatedChannelEnabled?1:0, NegotiatedChannelId);
 		return true;
 	}
 	catch (const std::exception& e)
@@ -852,4 +954,62 @@ void FWebRTCConnector::FlushPendingRemoteCandidates()
 		}
 	}
 	PendingRemoteCandidates.Reset();
+}
+
+void FWebRTCConnector::ResetReofferBackoff(bool bImmediate)
+{
+	const double Initial = (double)CVarO3DSBroadcastWebRTCBackoffInitialMs->GetInt() / 1000.0;
+	OfferBackoffSeconds = Initial;
+	const double Now = FPlatformTime::Seconds();
+	if (bImmediate)
+	{
+		NextOfferTimeSeconds = Now + FMath::FRandRange(0.0, 0.25 * OfferBackoffSeconds);
+	}
+	else
+	{
+		NextOfferTimeSeconds = Now + OfferBackoffSeconds;
+	}
+}
+
+void FWebRTCConnector::ResetReconnectBackoff(bool bImmediate)
+{
+	const double Initial = (double)CVarO3DSBroadcastWebRTCBackoffInitialMs->GetInt() / 1000.0;
+	ReconnectBackoffSeconds = Initial;
+	const double Now = FPlatformTime::Seconds();
+	if (bImmediate)
+	{
+		NextReconnectTimeSeconds = Now + FMath::FRandRange(0.0, 0.25 * ReconnectBackoffSeconds);
+	}
+	else
+	{
+		NextReconnectTimeSeconds = Now + ReconnectBackoffSeconds;
+	}
+}
+
+void FWebRTCConnector::MaybeCreateOffer(const TCHAR* Context)
+{
+	if (bIsServer)
+	{
+		return; // server does not initiate offers
+	}
+	FScopeLock Lock(&PeerConnectionLock);
+	if (!PeerConnection)
+	{
+		return;
+	}
+	try
+	{
+		// Ensure a data channel exists first in non-negotiated mode so SDP has the m= line
+		if (!bNegotiatedChannelEnabled && !DataChannel)
+		{
+			CreateDataChannel();
+		}
+		PeerConnection->createOffer();
+		UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Client created offer (%s)"), Context);
+	}
+	catch (const std::exception& e)
+	{
+		LastError = FString(ANSI_TO_TCHAR(e.what()));
+		UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: Failed to create offer (%s): %s"), Context, *LastError);
+	}
 }

@@ -110,6 +110,17 @@ private:
 	// Track last known peer connection state as an integer to avoid including rtc headers here
 	int32 LastPeerState = -1; // -1 = unknown
 
+	// Retry/re-offer/reconnect state
+	double NextOfferTimeSeconds = 0.0;           // when to try next offer (client side)
+	double OfferBackoffSeconds = 0.0;            // current backoff
+	double NextReconnectTimeSeconds = 0.0;       // when to try reconnect (both roles)
+	double ReconnectBackoffSeconds = 0.0;        // current reconnect backoff
+	bool bSignalingIsConnected = false;          // cache of signaling join state
+
+	// Negotiated channel options snapshot
+	bool bNegotiatedChannelEnabled = false;
+	int32 NegotiatedChannelId = 42;
+
 	// Data callbacks
 	TFunction<void(const uint8*, int32)> DataReceivedCallback;
 
@@ -148,6 +159,11 @@ private:
 	void FlushPendingRemoteCandidates();
 	// Ensure we have a fresh PeerConnection if the current one is closed/failed
 	void EnsurePeerConnectionForNewSession();
+
+	// Retry/re-offer helpers
+	void ResetReofferBackoff(bool bImmediate);
+	void ResetReconnectBackoff(bool bImmediate);
+	void MaybeCreateOffer(const TCHAR* Context);
 
 	// Thread-safety
 	FCriticalSection PeerConnectionLock;
