@@ -6,6 +6,7 @@
 #include "Interfaces/IPv4/IPv4Address.h"
 #include "Common/UdpSocketBuilder.h"
 #include "HAL/PlatformTime.h"
+#include "HAL/IConsoleManager.h"
 
 #define LOCTEXT_NAMESPACE "Open3DStream"
 
