@@ -124,8 +124,8 @@ jobs:
           
           $rev = "${{ github.event.inputs.revision }}".Trim()
           if ([string]::IsNullOrWhiteSpace($rev) -and "$env:GITHUB_EVENT_NAME" -eq 'pull_request') {
-            # Use main/master branch by default for PR builds
-            $rev = 'main'
+            # Use a known stable release branch by default for PR builds
+            $rev = 'm137_release'
             Write-Host "No revision specified; defaulting to $rev"
           }
           
