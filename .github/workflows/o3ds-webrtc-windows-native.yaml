@@ -194,15 +194,18 @@ jobs:
       - name: Generate GN build files (Release, static, x64)
         shell: pwsh
         run: |
-          # Ensure depot_tools (includes Python) is in PATH
+          # Ensure depot_tools is FIRST in PATH to override MS Store Python wrapper
           $env:Path = "$env:DEPOT_TOOLS;" + $env:Path
           
-          # Verify Python is available using full path to avoid MS Store wrapper
-          $pythonExe = Join-Path $env:DEPOT_TOOLS "python.bat"
-          Write-Host "Checking Python at: $pythonExe"
-          & $pythonExe --version
+          # List what's in depot_tools for debugging
+          Write-Host "Contents of depot_tools (Python-related):"
+          Get-ChildItem "$env:DEPOT_TOOLS" -Filter "*python*" | Select-Object Name
+          
+          # Verify we can find GN (which will use depot_tools Python internally)
+          Write-Host "Checking GN..."
+          gn --version
           if ($LASTEXITCODE -ne 0) {
-            Write-Error "Python not found in depot_tools"
+            Write-Error "GN not found in depot_tools"
             exit 1
           }
           
