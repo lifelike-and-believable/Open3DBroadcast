@@ -226,6 +226,17 @@ jobs:
             exit 1
           }
           
+          # GN may look for python3 - create symlink/copy if needed
+          $pythonExe = (Get-Command python -ErrorAction SilentlyContinue).Source
+          if ($pythonExe) {
+            $pythonDir = Split-Path $pythonExe
+            $python3Exe = Join-Path $pythonDir "python3.exe"
+            if (-not (Test-Path $python3Exe)) {
+              Write-Host "Creating python3.exe symlink for GN..."
+              Copy-Item $pythonExe $python3Exe -Force
+            }
+          }
+          
           # Verify GN is available
           Write-Host "Checking GN..."
           gn --version
