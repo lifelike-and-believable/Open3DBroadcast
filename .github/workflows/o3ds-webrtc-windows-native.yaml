@@ -48,6 +48,10 @@ jobs:
           } else {
             Write-Host "vswhere.exe not found (OK if VS path is otherwise configured)"
           }
+          # Harden Git for large/slow networks
+          git config --global http.postBuffer 524288000
+          git config --global http.lowSpeedLimit 1000
+          git config --global http.lowSpeedTime 600
 
       - name: Set build environment paths
         shell: pwsh
@@ -60,6 +64,9 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "WEBRTC_DIR=$buildRoot\webrtc"
           Add-Content -Path $env:GITHUB_ENV -Value "WEBRTC_SRC=$buildRoot\webrtc\src"
           Add-Content -Path $env:GITHUB_ENV -Value "BUILD_DIR=$buildRoot\webrtc\src\out\StaticRelease"
+          # Caches to reduce network load on repeated runs (effective on self-hosted runners)
+          Add-Content -Path $env:GITHUB_ENV -Value "GCLIENT_CACHE=$buildRoot\git_cache"
+          Add-Content -Path $env:GITHUB_ENV -Value "CIPD_CACHE_DIR=$buildRoot\cipd_cache"
 
       - name: Prepare clean build root
         shell: pwsh
@@ -85,32 +92,44 @@ jobs:
             Write-Host "depot_tools already present, updating..."
             git -C "$env:DEPOT_TOOLS" pull --ff-only
           } else {
-            git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git "$env:DEPOT_TOOLS"
+            # Use the GitHub mirror to avoid googlesource rate limits
+            git clone https://github.com/chromium/depot_tools.git "$env:DEPOT_TOOLS"
           }
           "$env:DEPOT_TOOLS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Fetch WebRTC (first time) or sync (subsequent runs)
+      - name: Configure gclient to use GitHub WebRTC mirror
         shell: pwsh
         run: |
-          if (-not (Test-Path "$env:WEBRTC_DIR\.gclient")) {
-            New-Item -ItemType Directory -Force -Path "$env:WEBRTC_DIR" | Out-Null
-            Push-Location "$env:WEBRTC_DIR"
-            fetch --nohooks webrtc
-            Pop-Location
-          }
-          Push-Location "$env:WEBRTC_SRC"
-          $rev = "${{ github.event.inputs.revision }}".Trim()
-          if ($rev -ne "") {
-            Write-Host "Checking out requested WebRTC revision: $rev"
-            git fetch origin $rev --tags --force || Write-Host "Fetch of specific revision may be unnecessary if already present"
-            git checkout -f $rev
+          New-Item -ItemType Directory -Force -Path "$env:WEBRTC_DIR" | Out-Null
+          Push-Location "$env:WEBRTC_DIR"
+          if (-not (Test-Path ".gclient")) {
+            Write-Host "Configuring gclient to use GitHub mirror: lifelike-and-believable/webrtc"
+            gclient config --name src https://github.com/lifelike-and-believable/webrtc.git
+          } else {
+            Write-Host ".gclient already present; leaving as-is"
           }
 
-          $max = 3
+          $rev = "${{ github.event.inputs.revision }}".Trim()
+          if ([string]::IsNullOrWhiteSpace($rev) -and "$env:GITHUB_EVENT_NAME" -eq 'pull_request') {
+            # Default to a known stable branch-head for PR-triggered runs to avoid upstream churn.
+            $rev = 'branch-heads/5481'
+            Write-Host "No revision specified and event is pull_request; defaulting to $rev"
+          }
+
+          $revArg = ""
+          if ($rev -ne "") { $revArg = "--revision src@$rev" }
+
+          New-Item -ItemType Directory -Force -Path "$env:GCLIENT_CACHE" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$env:CIPD_CACHE_DIR" | Out-Null
+
+          $max = 5
           for ($i = 1; $i -le $max; $i++) {
-            Write-Host "gclient sync attempt $i of $max"
-            gclient sync --nohooks --with_branch_heads --with_tags -D -R -f && break
-            if ($i -lt $max) { Write-Host "Sync failed, retrying after backoff..."; Start-Sleep -Seconds (15 * $i) } else { exit 1 }
+            Write-Host "gclient sync attempt $i of $max (mirror + cache)"
+            $cmd = "gclient sync --nohooks --with_branch_heads --with_tags -D -R -f --cache-dir `"$env:GCLIENT_CACHE`" $revArg"
+            Write-Host $cmd
+            iex $cmd
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($i -lt $max) { $delay = 20 * $i; Write-Host "Sync failed, retrying in $delay seconds..."; Start-Sleep -Seconds $delay } else { exit 1 }
           }
           Pop-Location
 
