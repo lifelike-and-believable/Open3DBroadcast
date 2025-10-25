@@ -194,25 +194,35 @@ jobs:
       - name: Generate GN build files (Release, static, x64)
         shell: pwsh
         run: |
-          # Disable Windows Store Python app execution alias to prevent wrapper interference
-          # This ensures we use real Python from PATH instead of MS Store redirect
-          $appExecAliasDir = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
-          if (Test-Path "$appExecAliasDir\python.exe") {
-            Write-Host "Temporarily disabling MS Store Python wrapper..."
-            Rename-Item "$appExecAliasDir\python.exe" "$appExecAliasDir\python.exe.disabled" -Force -ErrorAction SilentlyContinue
-          }
-          if (Test-Path "$appExecAliasDir\python3.exe") {
-            Rename-Item "$appExecAliasDir\python3.exe" "$appExecAliasDir\python3.exe.disabled" -Force -ErrorAction SilentlyContinue
-          }
+          # Remove WindowsApps from PATH entirely to prevent MS Store wrapper interference
+          # This is more reliable than renaming files
+          $pathParts = $env:Path -split ';'
+          $filteredPath = $pathParts | Where-Object { $_ -notlike "*WindowsApps*" }
+          $env:Path = ($filteredPath -join ';')
           
           # Ensure depot_tools is FIRST in PATH
           $env:Path = "$env:DEPOT_TOOLS;" + $env:Path
           
-          # Verify Python is now accessible (should be system Python 3.10.0 or depot_tools Python)
+          # Find system Python 3.10.0 and add its directory to PATH
+          # Common installation locations
+          $pythonPaths = @(
+            "C:\Python310",
+            "C:\Python310\Scripts",
+            "$env:LOCALAPPDATA\Programs\Python\Python310",
+            "$env:LOCALAPPDATA\Programs\Python\Python310\Scripts"
+          )
+          foreach ($pyPath in $pythonPaths) {
+            if (Test-Path $pyPath) {
+              Write-Host "Adding Python path: $pyPath"
+              $env:Path = "$pyPath;" + $env:Path
+            }
+          }
+          
+          # Verify Python is now accessible
           Write-Host "Checking Python..."
           python --version
           if ($LASTEXITCODE -ne 0) {
-            Write-Error "Python still not accessible after disabling MS Store wrapper"
+            Write-Error "Python still not accessible"
             exit 1
           }
           
