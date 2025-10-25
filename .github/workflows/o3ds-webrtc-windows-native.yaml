@@ -252,9 +252,18 @@ jobs:
             }
           }
           
-          # Verify GN is available (run from src directory since gn.py checks for checkout)
+          # Verify GN is available
+          # GN must run from WEBRTC_DIR (gclient root) to find .gclient and .gclient_entries
           Write-Host "Checking GN..."
-          Push-Location "$env:WEBRTC_SRC"
+          Push-Location "$env:WEBRTC_DIR"
+          Write-Host "Current directory: $(Get-Location)"
+          Write-Host "Checking for .gclient_entries..."
+          if (Test-Path ".gclient_entries") {
+            Write-Host ".gclient_entries exists, contents:"
+            Get-Content ".gclient_entries"
+          } else {
+            Write-Host ".gclient_entries NOT FOUND!"
+          }
           gn --version
           $gnResult = $LASTEXITCODE
           Pop-Location
@@ -263,9 +272,9 @@ jobs:
             exit 1
           }
           
-          # Generate build files
+          # Generate build files (also from WEBRTC_DIR)
           Write-Host "Generating GN build files..."
-          Push-Location "$env:WEBRTC_SRC"
+          Push-Location "$env:WEBRTC_DIR"
           gn gen "$env:BUILD_DIR" --args="is_debug=false is_component_build=false target_cpu=`"x64`" is_clang=false rtc_include_tests=false rtc_build_examples=false use_rtti=true treat_warnings_as_errors=false symbol_level=1"
           Pop-Location
 
