@@ -121,6 +121,12 @@ jobs:
         run: |
           # Ensure depot_tools is first on PATH for this step
           $env:Path = "$env:DEPOT_TOOLS;" + $env:Path
+          # Ensure system Git is resolvable by CIPD Python subprocess calls
+          $gitCmd = (Get-Command git -ErrorAction SilentlyContinue)
+          if ($null -eq $gitCmd) { Write-Error "git not found in PATH"; exit 1 }
+          $gitDir = Split-Path -Path $gitCmd.Source -Parent
+          $env:Path = "$gitDir;" + $env:Path
+          Write-Host "Using git at: $($gitCmd.Source)"
           New-Item -ItemType Directory -Force -Path "$env:WEBRTC_DIR" | Out-Null
           Push-Location "$env:WEBRTC_DIR"
           if (-not (Test-Path ".gclient")) {
