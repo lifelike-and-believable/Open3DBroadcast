@@ -173,17 +173,15 @@ jobs:
           $gclientContent += ']' + "`n"
           $gclientContent | Out-File -FilePath ".gclient" -Encoding ASCII -NoNewline
           
-          # Create .gclient_entries - it's a Python dict file (not JSON!)
-          # Write it directly - simple format that Python eval() can parse
-          # Use single quotes for Python dict syntax - build line by line like we do for .gclient
-          $entriesContent = "{" + "`n"
-          $entriesContent += "  'entries': {" + "`n"
-          $entriesContent += "    'src': {" + "`n"
-          $entriesContent += "      'url': 'https://github.com/lifelike-and-believable/webrtc.git'," + "`n"
-          $entriesContent += "      'scm': 'git'" + "`n"
-          $entriesContent += "    }" + "`n"
+          # Create .gclient_entries - gclient expects Python code that defines
+          # a variable named `entries` (it exec()'s the file and looks up scope['entries']).
+          # Write it as an assignment: entries = { 'src': { ... } }
+          $entriesContent = "entries = {" + "`n"
+          $entriesContent += "  'src': {" + "`n"
+          $entriesContent += "    'url': 'https://github.com/lifelike-and-believable/webrtc.git'," + "`n"
+          $entriesContent += "    'scm': 'git'" + "`n"
           $entriesContent += "  }" + "`n"
-          $entriesContent += "}"
+          $entriesContent += "}" + "`n"
           $entriesContent | Out-File -FilePath ".gclient_entries" -Encoding ASCII
           
           # Debug: show what we created and verify it's valid Python
