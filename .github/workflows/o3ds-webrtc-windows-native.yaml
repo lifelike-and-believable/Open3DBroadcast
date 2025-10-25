@@ -173,8 +173,9 @@ jobs:
           $gclientContent += ']' + "`n"
           $gclientContent | Out-File -FilePath ".gclient" -Encoding ASCII -NoNewline
           
-          # Create .gclient_entries with proper structure
-          '{"entries": {}}' | Out-File -FilePath ".gclient_entries" -Encoding ASCII -NoNewline
+          # Create .gclient_entries - it's a Python dict file (not JSON!)
+          # gclient expects Python syntax that can be eval'd with single quotes
+          "{`n  'entries': {`n    'src': {'url': 'https://github.com/lifelike-and-believable/webrtc.git', 'scm': 'git'}`n  }`n}" | Out-File -FilePath ".gclient_entries" -Encoding ASCII
           
           Write-Host "WebRTC source ready at revision: $rev"
           Pop-Location
