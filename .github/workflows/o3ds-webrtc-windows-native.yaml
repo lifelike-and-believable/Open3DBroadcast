@@ -147,8 +147,8 @@ jobs:
 
           $max = 5
           for ($i = 1; $i -le $max; $i++) {
-            Write-Host "gclient sync attempt $i of $max (no_use_mirror)"
-            $cmd = "gclient sync --nohooks --with_branch_heads --with_tags -D -R -f --no_use_mirror $revArg"
+            Write-Host "gclient sync attempt $i of $max"
+            $cmd = "gclient sync --nohooks --with_branch_heads --with_tags -D -R -f $revArg"
             Write-Host $cmd
             iex $cmd
             if ($LASTEXITCODE -eq 0) { break }
