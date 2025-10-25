@@ -173,8 +173,8 @@ jobs:
           $gclientContent += ']' + "`n"
           $gclientContent | Out-File -FilePath ".gclient" -Encoding ASCII -NoNewline
           
-          # Create .gclient_entries to prevent warnings
-          '{}' | Out-File -FilePath ".gclient_entries" -Encoding ASCII -NoNewline
+          # Create .gclient_entries with proper structure
+          '{"entries": {}}' | Out-File -FilePath ".gclient_entries" -Encoding ASCII -NoNewline
           
           Write-Host "WebRTC source ready at revision: $rev"
           Pop-Location
@@ -197,11 +197,12 @@ jobs:
           # Ensure depot_tools (includes Python) is in PATH
           $env:Path = "$env:DEPOT_TOOLS;" + $env:Path
           
-          # Verify Python is available
-          Write-Host "Checking Python..."
-          python --version
+          # Verify Python is available using full path to avoid MS Store wrapper
+          $pythonExe = Join-Path $env:DEPOT_TOOLS "python.bat"
+          Write-Host "Checking Python at: $pythonExe"
+          & $pythonExe --version
           if ($LASTEXITCODE -ne 0) {
-            Write-Error "Python not found in depot_tools or PATH"
+            Write-Error "Python not found in depot_tools"
             exit 1
           }
           
