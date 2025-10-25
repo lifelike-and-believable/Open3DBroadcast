@@ -194,14 +194,29 @@ jobs:
       - name: Generate GN build files (Release, static, x64)
         shell: pwsh
         run: |
-          # Ensure depot_tools is FIRST in PATH to override MS Store Python wrapper
+          # Disable Windows Store Python app execution alias to prevent wrapper interference
+          # This ensures we use real Python from PATH instead of MS Store redirect
+          $appExecAliasDir = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
+          if (Test-Path "$appExecAliasDir\python.exe") {
+            Write-Host "Temporarily disabling MS Store Python wrapper..."
+            Rename-Item "$appExecAliasDir\python.exe" "$appExecAliasDir\python.exe.disabled" -Force -ErrorAction SilentlyContinue
+          }
+          if (Test-Path "$appExecAliasDir\python3.exe") {
+            Rename-Item "$appExecAliasDir\python3.exe" "$appExecAliasDir\python3.exe.disabled" -Force -ErrorAction SilentlyContinue
+          }
+          
+          # Ensure depot_tools is FIRST in PATH
           $env:Path = "$env:DEPOT_TOOLS;" + $env:Path
           
-          # List what's in depot_tools for debugging
-          Write-Host "Contents of depot_tools (Python-related):"
-          Get-ChildItem "$env:DEPOT_TOOLS" -Filter "*python*" | Select-Object Name
+          # Verify Python is now accessible (should be system Python 3.10.0 or depot_tools Python)
+          Write-Host "Checking Python..."
+          python --version
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Python still not accessible after disabling MS Store wrapper"
+            exit 1
+          }
           
-          # Verify we can find GN (which will use depot_tools Python internally)
+          # Verify GN is available
           Write-Host "Checking GN..."
           gn --version
           if ($LASTEXITCODE -ne 0) {
