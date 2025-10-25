@@ -121,12 +121,16 @@ jobs:
         run: |
           # Ensure depot_tools is first on PATH for this step
           $env:Path = "$env:DEPOT_TOOLS;" + $env:Path
-          # Ensure system Git is resolvable by CIPD Python subprocess calls
+          # Ensure system Git bin is resolvable by CIPD Python subprocess calls
+          # Git for Windows: C:\Program Files\Git\cmd contains wrappers; add bin and mingw64\bin
           $gitCmd = (Get-Command git -ErrorAction SilentlyContinue)
           if ($null -eq $gitCmd) { Write-Error "git not found in PATH"; exit 1 }
-          $gitDir = Split-Path -Path $gitCmd.Source -Parent
-          $env:Path = "$gitDir;" + $env:Path
-          Write-Host "Using git at: $($gitCmd.Source)"
+          $gitRoot = Split-Path -Path (Split-Path -Path $gitCmd.Source -Parent) -Parent
+          $gitBin = Join-Path $gitRoot "bin"
+          $gitMingw = Join-Path $gitRoot "mingw64\bin"
+          if (Test-Path $gitBin) { $env:Path = "$gitBin;" + $env:Path }
+          if (Test-Path $gitMingw) { $env:Path = "$gitMingw;" + $env:Path }
+          Write-Host "Using git at: $($gitCmd.Source); added bin paths: $gitBin, $gitMingw"
           New-Item -ItemType Directory -Force -Path "$env:WEBRTC_DIR" | Out-Null
           Push-Location "$env:WEBRTC_DIR"
           if (-not (Test-Path ".gclient")) {
