@@ -1,0 +1,104 @@
+name: o3ds: build webrtc static (windows self-hosted)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: o3ds-webrtc-static-windows-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-webrtc-static:
+    name: Build WebRTC static (Win x64, Release)
+    runs-on: [self-hosted, windows]
+    timeout-minutes: 360
+
+    env:
+      # Use local toolchain (Visual Studio installed on the self-hosted runner)
+      DEPOT_TOOLS_WIN_TOOLCHAIN: "0"
+      GYP_MSVS_VERSION: "2022"
+      # Workspace-local paths
+      DEPOT_TOOLS: ${{ github.workspace }}\depot_tools
+      WEBRTC_DIR: ${{ github.workspace }}\webrtc
+      WEBRTC_SRC: ${{ github.workspace }}\webrtc\src
+      BUILD_DIR: ${{ github.workspace }}\webrtc\src\out\StaticRelease
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure Git supports long paths (Windows)
+        shell: pwsh
+        run: git config --global core.longpaths true
+
+      - name: Get depot_tools
+        shell: pwsh
+        run: |
+          if (Test-Path "$env:DEPOT_TOOLS") {
+            Write-Host "depot_tools already present, updating..."
+            git -C "$env:DEPOT_TOOLS" pull --ff-only
+          } else {
+            git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git "$env:DEPOT_TOOLS"
+          }
+          # Add depot_tools to PATH for subsequent steps
+          "$env:DEPOT_TOOLS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Fetch WebRTC (first time) or sync (subsequent runs)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "$env:WEBRTC_DIR\.gclient")) {
+            New-Item -ItemType Directory -Force -Path "$env:WEBRTC_DIR" | Out-Null
+            Push-Location "$env:WEBRTC_DIR"
+            fetch --nohooks webrtc
+            Pop-Location
+          }
+          Push-Location "$env:WEBRTC_SRC"
+          gclient sync --nohooks --with_branch_heads --with_tags -D -R -f
+          Pop-Location
+
+      - name: Run WebRTC hooks
+        shell: pwsh
+        working-directory: ${{ env.WEBRTC_SRC }}
+        run: gclient runhooks
+
+      - name: Generate GN build files (Release, static, x64)
+        shell: pwsh
+        working-directory: ${{ env.WEBRTC_SRC }}
+        run: >
+          gn gen "$env:BUILD_DIR"
+          --args='is_debug=false
+          is_component_build=false
+          target_cpu="x64"
+          is_clang=false
+          rtc_include_tests=false
+          rtc_build_examples=false
+          use_rtti=true
+          treat_warnings_as_errors=false
+          symbol_level=1'
+
+      - name: Build static WebRTC libraries
+        shell: pwsh
+        working-directory: ${{ env.WEBRTC_SRC }}
+        run: ninja -C "$env:BUILD_DIR" webrtc
+
+      - name: Collect .lib artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:BUILD_DIR\package\lib" | Out-Null
+          Get-ChildItem -Path "$env:BUILD_DIR" -Filter *.lib -Recurse |
+            Copy-Item -Destination "$env:BUILD_DIR\package\lib" -Force
+
+      - name: Upload artifact (static libs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: webrtc-windows-x64-static-release
+          path: ${{ env.BUILD_DIR }}\package\lib\*.lib
+          if-no-files-found: error
+          retention-days: 7
