@@ -175,20 +175,16 @@ jobs:
           
           # Create .gclient_entries - it's a Python dict file (not JSON!)
           # gclient uses eval() to read it, so use Python dict syntax with single quotes
-          # Build it line by line to ensure proper formatting
-          $entries = "{" + "`n"
-          $entries += "  'entries': {" + "`n"
-          $entries += "    'src': {" + "`n"
-          $entries += "      'url': 'https://github.com/lifelike-and-believable/webrtc.git'," + "`n"
-          $entries += "      'scm': 'git'" + "`n"
-          $entries += "    }" + "`n"
-          $entries += "  }" + "`n"
-          $entries += "}" + "`n"
-          $entries | Out-File -FilePath ".gclient_entries" -Encoding UTF8
+          # CRITICAL: Must use ASCII encoding WITHOUT BOM or Python eval() fails
+          $entries = "{`n  'entries': {`n    'src': {`n      'url': 'https://github.com/lifelike-and-believable/webrtc.git',`n      'scm': 'git'`n    }`n  }`n}`n"
+          # Write with ASCII encoding, no BOM - use .NET directly to avoid PowerShell adding BOM
+          $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+          [System.IO.File]::WriteAllText((Join-Path $PWD ".gclient_entries"), $entries, $utf8NoBom)
           
           # Debug: show what we created
           Write-Host ".gclient_entries contents:"
-          Get-Content ".gclient_entries"
+          Get-Content ".gclient_entries" -Raw
+          Write-Host "File size: $((Get-Item '.gclient_entries').Length) bytes"
           
           Write-Host "WebRTC source ready at revision: $rev"
           Pop-Location
