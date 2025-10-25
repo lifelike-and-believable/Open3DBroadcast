@@ -174,17 +174,17 @@ jobs:
           $gclientContent | Out-File -FilePath ".gclient" -Encoding ASCII -NoNewline
           
           # Create .gclient_entries - it's a Python dict file (not JSON!)
-          # gclient uses eval() to read it, so use Python dict syntax with single quotes
-          # CRITICAL: Must use ASCII encoding WITHOUT BOM or Python eval() fails
-          $entries = "{`n  'entries': {`n    'src': {`n      'url': 'https://github.com/lifelike-and-believable/webrtc.git',`n      'scm': 'git'`n    }`n  }`n}`n"
-          # Write with ASCII encoding, no BOM - use .NET directly to avoid PowerShell adding BOM
-          $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-          [System.IO.File]::WriteAllText((Join-Path $PWD ".gclient_entries"), $entries, $utf8NoBom)
+          # Use Python to write it to guarantee correct format that eval() can parse
+          # Create a temp Python script to write the file
+          "with open('.gclient_entries', 'w') as f: f.write(\"{\n  'entries': {\n    'src': {\n      'url': 'https://github.com/lifelike-and-believable/webrtc.git',\n      'scm': 'git'\n    }\n  }\n}\n\")" | Out-File -FilePath "_write_entries.py" -Encoding ASCII
+          python _write_entries.py
+          Remove-Item "_write_entries.py"
           
-          # Debug: show what we created
+          # Debug: show what we created and verify it's valid Python
           Write-Host ".gclient_entries contents:"
           Get-Content ".gclient_entries" -Raw
-          Write-Host "File size: $((Get-Item '.gclient_entries').Length) bytes"
+          Write-Host "`nVerifying with Python eval..."
+          python -c "import pprint; data = eval(open('.gclient_entries').read()); pprint.pprint(data); print('Valid!' if 'entries' in data else 'INVALID!')"
           
           Write-Host "WebRTC source ready at revision: $rev"
           Pop-Location
