@@ -1,4 +1,4 @@
-name: o3ds: build webrtc static (windows self-hosted)
+name: o3ds build webrtc static (windows self-hosted)
 
 on:
   workflow_dispatch:
