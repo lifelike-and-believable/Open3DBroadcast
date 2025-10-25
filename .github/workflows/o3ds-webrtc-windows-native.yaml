@@ -116,54 +116,47 @@ jobs:
           restore-keys: |
             webrtc-cipd-cache-windows-
 
-      - name: Configure gclient to use GitHub WebRTC mirror
+      - name: Clone WebRTC directly (bypass gclient mirror cache issues)
         shell: pwsh
         run: |
-          # Ensure depot_tools is first on PATH for this step
+          # Ensure depot_tools is first on PATH
           $env:Path = "$env:DEPOT_TOOLS;" + $env:Path
-          # Ensure system Git bin is resolvable by CIPD Python subprocess calls
-          # Git for Windows: C:\Program Files\Git\cmd contains wrappers; add bin and mingw64\bin
-          $gitCmd = (Get-Command git -ErrorAction SilentlyContinue)
-          if ($null -eq $gitCmd) { Write-Error "git not found in PATH"; exit 1 }
-          $gitRoot = Split-Path -Path (Split-Path -Path $gitCmd.Source -Parent) -Parent
-          $gitBin = Join-Path $gitRoot "bin"
-          $gitMingw = Join-Path $gitRoot "mingw64\bin"
-          if (Test-Path $gitBin) { $env:Path = "$gitBin;" + $env:Path }
-          if (Test-Path $gitMingw) { $env:Path = "$gitMingw;" + $env:Path }
-          Write-Host "Using git at: $($gitCmd.Source); added bin paths: $gitBin, $gitMingw"
-          New-Item -ItemType Directory -Force -Path "$env:WEBRTC_DIR" | Out-Null
-          Push-Location "$env:WEBRTC_DIR"
-          if (-not (Test-Path ".gclient")) {
-            Write-Host "Configuring gclient to use GitHub mirror: lifelike-and-believable/webrtc"
-            gclient config --name src https://github.com/lifelike-and-believable/webrtc.git
-          } else {
-            Write-Host ".gclient already present; leaving as-is"
-          }
-
+          
           $rev = "${{ github.event.inputs.revision }}".Trim()
           if ([string]::IsNullOrWhiteSpace($rev) -and "$env:GITHUB_EVENT_NAME" -eq 'pull_request') {
-            # Default to a known stable branch-head for PR-triggered runs to avoid upstream churn.
             $rev = 'branch-heads/5481'
-            Write-Host "No revision specified and event is pull_request; defaulting to $rev"
+            Write-Host "No revision specified; defaulting to $rev"
           }
-
-          $revArg = ""
-          if ($rev -ne "") { $revArg = "--revision src@$rev" }
-
-          New-Item -ItemType Directory -Force -Path "$env:GCLIENT_CACHE" | Out-Null
-          New-Item -ItemType Directory -Force -Path "$env:CIPD_CACHE_DIR" | Out-Null
-          # Some depot_tools versions don't support --cache-dir on gclient; prefer env-based caches
-          $env:GIT_CACHE_PATH = "$env:GCLIENT_CACHE"
-
-          $max = 5
-          for ($i = 1; $i -le $max; $i++) {
-            Write-Host "gclient sync attempt $i of $max"
-            $cmd = "gclient sync --nohooks --with_branch_heads --with_tags -D -R -f $revArg"
-            Write-Host $cmd
-            iex $cmd
-            if ($LASTEXITCODE -eq 0) { break }
-            if ($i -lt $max) { $delay = 20 * $i; Write-Host "Sync failed, retrying in $delay seconds..."; Start-Sleep -Seconds $delay } else { exit 1 }
+          
+          New-Item -ItemType Directory -Force -Path "$env:WEBRTC_DIR" | Out-Null
+          Push-Location "$env:WEBRTC_DIR"
+          
+          if (-not (Test-Path "src\.git")) {
+            Write-Host "Cloning WebRTC from GitHub mirror..."
+            git clone --branch $rev --single-branch --depth 1 `
+              https://github.com/lifelike-and-believable/webrtc.git src
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "Shallow clone failed, trying full clone with checkout..."
+              git clone https://github.com/lifelike-and-believable/webrtc.git src
+              git -C src checkout $rev
+            }
+          } else {
+            Write-Host "WebRTC src already exists, pulling latest..."
+            git -C src fetch origin
+            git -C src checkout $rev
           }
+          
+          # Create minimal .gclient for hooks
+          $gclientContent = 'solutions = [' + "`n"
+          $gclientContent += '  {' + "`n"
+          $gclientContent += '    "name": "src",' + "`n"
+          $gclientContent += '    "url": "https://github.com/lifelike-and-believable/webrtc.git",' + "`n"
+          $gclientContent += '    "managed": False,' + "`n"
+          $gclientContent += '  },' + "`n"
+          $gclientContent += ']' + "`n"
+          $gclientContent | Out-File -FilePath ".gclient" -Encoding ASCII -NoNewline
+          
+          Write-Host "WebRTC source ready at revision: $rev"
           Pop-Location
 
       - name: Run WebRTC hooks
