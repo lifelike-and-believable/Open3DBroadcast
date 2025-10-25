@@ -175,8 +175,9 @@ jobs:
           
           # Create .gclient_entries - it's a Python dict file (not JSON!)
           # Use Python to write it to guarantee correct format that eval() can parse
-          # Create a temp Python script to write the file
-          "with open('.gclient_entries', 'w') as f: f.write(\"{\n  'entries': {\n    'src': {\n      'url': 'https://github.com/lifelike-and-believable/webrtc.git',\n      'scm': 'git'\n    }\n  }\n}\n\")" | Out-File -FilePath "_write_entries.py" -Encoding ASCII
+          # Escape curly braces for PowerShell
+          $pyCode = "with open('.gclient_entries', 'w') as f: f.write(`"`{`n  'entries': `{`n    'src': `{`n      'url': 'https://github.com/lifelike-and-believable/webrtc.git',`n      'scm': 'git'`n    `}`n  `}`n`}`n`")"
+          $pyCode | Out-File -FilePath "_write_entries.py" -Encoding ASCII
           python _write_entries.py
           Remove-Item "_write_entries.py"
           
