@@ -193,8 +193,21 @@ jobs:
 
       - name: Generate GN build files (Release, static, x64)
         shell: pwsh
-        run: >
-          Push-Location "$env:WEBRTC_SRC"; gn gen "$env:BUILD_DIR" --args="is_debug=false is_component_build=false target_cpu=\"x64\" is_clang=false rtc_include_tests=false rtc_build_examples=false use_rtti=true treat_warnings_as_errors=false symbol_level=1"; Pop-Location
+        run: |
+          # Ensure depot_tools (includes Python) is in PATH
+          $env:Path = "$env:DEPOT_TOOLS;" + $env:Path
+          
+          # Verify Python is available
+          Write-Host "Checking Python..."
+          python --version
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Python not found in depot_tools or PATH"
+            exit 1
+          }
+          
+          Push-Location "$env:WEBRTC_SRC"
+          gn gen "$env:BUILD_DIR" --args="is_debug=false is_component_build=false target_cpu=`"x64`" is_clang=false rtc_include_tests=false rtc_build_examples=false use_rtti=true treat_warnings_as_errors=false symbol_level=1"
+          Pop-Location
 
       - name: Build static WebRTC libraries
         shell: pwsh
