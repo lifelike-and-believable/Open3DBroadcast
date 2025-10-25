@@ -124,7 +124,8 @@ jobs:
           
           $rev = "${{ github.event.inputs.revision }}".Trim()
           if ([string]::IsNullOrWhiteSpace($rev) -and "$env:GITHUB_EVENT_NAME" -eq 'pull_request') {
-            $rev = 'branch-heads/5481'
+            # Use main/master branch by default for PR builds
+            $rev = 'main'
             Write-Host "No revision specified; defaulting to $rev"
           }
           
@@ -133,12 +134,26 @@ jobs:
           
           if (-not (Test-Path "src\.git")) {
             Write-Host "Cloning WebRTC from GitHub mirror..."
+            # Try shallow clone first
             git clone --branch $rev --single-branch --depth 1 `
               https://github.com/lifelike-and-believable/webrtc.git src
             if ($LASTEXITCODE -ne 0) {
-              Write-Host "Shallow clone failed, trying full clone with checkout..."
+              Write-Host "Shallow clone failed, doing full clone..."
               git clone https://github.com/lifelike-and-believable/webrtc.git src
-              git -C src checkout $rev
+              if ($LASTEXITCODE -eq 0) {
+                Push-Location src
+                # List available branches/tags to help debugging
+                Write-Host "Available remote branches:"
+                git branch -r | Select-Object -First 10
+                # Try to checkout the requested revision
+                git checkout $rev
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Host "Checkout failed; staying on default branch"
+                  git checkout main -f
+                  if ($LASTEXITCODE -ne 0) { git checkout master -f }
+                }
+                Pop-Location
+              }
             }
           } else {
             Write-Host "WebRTC src already exists, pulling latest..."
