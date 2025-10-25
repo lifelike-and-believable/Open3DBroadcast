@@ -119,6 +119,8 @@ jobs:
       - name: Configure gclient to use GitHub WebRTC mirror
         shell: pwsh
         run: |
+          # Ensure depot_tools is first on PATH for this step
+          $env:Path = "$env:DEPOT_TOOLS;" + $env:Path
           New-Item -ItemType Directory -Force -Path "$env:WEBRTC_DIR" | Out-Null
           Push-Location "$env:WEBRTC_DIR"
           if (-not (Test-Path ".gclient")) {
@@ -145,8 +147,8 @@ jobs:
 
           $max = 5
           for ($i = 1; $i -le $max; $i++) {
-            Write-Host "gclient sync attempt $i of $max (mirror + env cache)"
-            $cmd = "gclient sync --nohooks --with_branch_heads --with_tags -D -R -f $revArg"
+            Write-Host "gclient sync attempt $i of $max (no_use_mirror)"
+            $cmd = "gclient sync --nohooks --with_branch_heads --with_tags -D -R -f --no_use_mirror $revArg"
             Write-Host $cmd
             iex $cmd
             if ($LASTEXITCODE -eq 0) { break }
