@@ -1,10 +1,10 @@
-name: o3ds build webrtc static (windows self-hosted)
+name: "o3ds: build webrtc static (windows self-hosted, no checkout)"
 
 on:
   workflow_dispatch:
     inputs:
       clean:
-        description: "Remove existing webrtc checkout before syncing"
+        description: "Remove existing local checkout before syncing (safety on self-hosted)"
         required: false
         default: "false"
       revision:
@@ -33,42 +33,50 @@ jobs:
       # Use local toolchain (Visual Studio installed on the self-hosted runner)
       DEPOT_TOOLS_WIN_TOOLCHAIN: "0"
       GYP_MSVS_VERSION: "2022"
-      # Workspace-local paths
-      DEPOT_TOOLS: ${{ github.workspace }}\depot_tools
-      WEBRTC_DIR: ${{ github.workspace }}\webrtc
-      WEBRTC_SRC: ${{ github.workspace }}\webrtc\src
-      BUILD_DIR: ${{ github.workspace }}\webrtc\src\out\StaticRelease
+
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Environment preflight
         shell: pwsh
         run: |
           Write-Host "Git version:"; git --version
           Write-Host "Python version:"; python --version 2>$null; if ($LASTEXITCODE -ne 0) { Write-Host "python not found in PATH" }
           Write-Host "PowerShell version:"; $PSVersionTable.PSVersion
-          # Visual Studio discovery (helps diagnose toolchain issues later)
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           if (Test-Path $vswhere) {
-            & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+            Write-Host "VS installation path:"; & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
           } else {
-            Write-Host "vswhere.exe not found (OK if VS 2022 path is otherwise configured)"
+            Write-Host "vswhere.exe not found (OK if VS path is otherwise configured)"
           }
+
+      - name: Set build environment paths
+        shell: pwsh
+        run: |
+          $rt = $env:RUNNER_TEMP
+          if (-not $rt) { $rt = $env:TEMP }
+          $buildRoot = Join-Path $rt "webrtc_build"
+          Add-Content -Path $env:GITHUB_ENV -Value "BUILD_ROOT=$buildRoot"
+          Add-Content -Path $env:GITHUB_ENV -Value "DEPOT_TOOLS=$buildRoot\depot_tools"
+          Add-Content -Path $env:GITHUB_ENV -Value "WEBRTC_DIR=$buildRoot\webrtc"
+          Add-Content -Path $env:GITHUB_ENV -Value "WEBRTC_SRC=$buildRoot\webrtc\src"
+          Add-Content -Path $env:GITHUB_ENV -Value "BUILD_DIR=$buildRoot\webrtc\src\out\StaticRelease"
+
+      - name: Prepare clean build root
+        shell: pwsh
+        run: |
+          if (Test-Path "$env:BUILD_ROOT") {
+            if ('${{ github.event.inputs.clean }}' -eq 'true') {
+              Write-Host "Cleaning existing build root: $env:BUILD_ROOT (clean=true)"
+              Remove-Item -Recurse -Force "$env:BUILD_ROOT"
+            } else {
+              Write-Host "Build root exists and clean=false; will reuse where possible."
+            }
+          }
+          New-Item -ItemType Directory -Force -Path "$env:BUILD_ROOT" | Out-Null
 
       - name: Ensure Git supports long paths (Windows)
         shell: pwsh
         run: git config --global core.longpaths true
-
-      - name: Clean previous WebRTC checkout (optional)
-        if: ${{ github.event.inputs.clean == 'true' }}
-        shell: pwsh
-        run: |
-          if (Test-Path "$env:WEBRTC_DIR") {
-            Write-Host "Removing existing $env:WEBRTC_DIR due to clean=true"
-            Remove-Item -Recurse -Force "$env:WEBRTC_DIR"
-          }
 
       - name: Get depot_tools
         shell: pwsh
@@ -79,7 +87,6 @@ jobs:
           } else {
             git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git "$env:DEPOT_TOOLS"
           }
-          # Add depot_tools to PATH for subsequent steps
           "$env:DEPOT_TOOLS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Fetch WebRTC (first time) or sync (subsequent runs)
@@ -92,7 +99,6 @@ jobs:
             Pop-Location
           }
           Push-Location "$env:WEBRTC_SRC"
-          # Optionally pin to a known-good revision/branch to avoid upstream churn
           $rev = "${{ github.event.inputs.revision }}".Trim()
           if ($rev -ne "") {
             Write-Host "Checking out requested WebRTC revision: $rev"
@@ -100,7 +106,6 @@ jobs:
             git checkout -f $rev
           }
 
-          # Robust sync with limited retries to mitigate transient network hiccups
           $max = 3
           for ($i = 1; $i -le $max; $i++) {
             Write-Host "gclient sync attempt $i of $max"
@@ -111,40 +116,79 @@ jobs:
 
       - name: Run WebRTC hooks
         shell: pwsh
-        working-directory: ${{ env.WEBRTC_SRC }}
-        run: gclient runhooks
+        run: |
+          Push-Location "$env:WEBRTC_SRC"
+          gclient runhooks
+          Pop-Location
 
       - name: Generate GN build files (Release, static, x64)
         shell: pwsh
-        working-directory: ${{ env.WEBRTC_SRC }}
         run: >
-          gn gen "$env:BUILD_DIR"
-          --args='is_debug=false
-          is_component_build=false
-          target_cpu="x64"
-          is_clang=false
-          rtc_include_tests=false
-          rtc_build_examples=false
-          use_rtti=true
-          treat_warnings_as_errors=false
-          symbol_level=1'
+          Push-Location "$env:WEBRTC_SRC"; gn gen "$env:BUILD_DIR" --args="is_debug=false is_component_build=false target_cpu=\"x64\" is_clang=false rtc_include_tests=false rtc_build_examples=false use_rtti=true treat_warnings_as_errors=false symbol_level=1"; Pop-Location
 
       - name: Build static WebRTC libraries
         shell: pwsh
-        working-directory: ${{ env.WEBRTC_SRC }}
         run: ninja -C "$env:BUILD_DIR" webrtc
 
       - name: Collect .lib artifacts
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path "$env:BUILD_DIR\package\lib" | Out-Null
+          $pkgLib = Join-Path $env:GITHUB_WORKSPACE "webrtc_artifacts\lib"
+          New-Item -ItemType Directory -Force -Path $pkgLib | Out-Null
           Get-ChildItem -Path "$env:BUILD_DIR" -Filter *.lib -Recurse |
-            Copy-Item -Destination "$env:BUILD_DIR\package\lib" -Force
+            Copy-Item -Destination $pkgLib -Force
+
+      - name: Collect headers (src + third_party)
+        shell: pwsh
+        run: |
+          $pkgInc = Join-Path $env:GITHUB_WORKSPACE "webrtc_artifacts\include"
+          New-Item -ItemType Directory -Force -Path $pkgInc | Out-Null
+
+          function Copy-Includes {
+            param([string]$src, [string]$dst)
+            if (-not (Test-Path $src)) { return }
+            New-Item -ItemType Directory -Force -Path $dst | Out-Null
+            foreach ($pattern in @("*.h","*.hpp","*.hh","*.inc","*.inl")) {
+              robocopy $src $dst $pattern /S /NFL /NDL /NP /NJH /NJS | Out-Null
+              if ($LASTEXITCODE -ge 8) { exit $LASTEXITCODE }
+            }
+          }
+
+          $root = $env:WEBRTC_SRC
+
+          # Core WebRTC public include trees
+          Copy-Includes (Join-Path $root "api")             (Join-Path $pkgInc "api")
+          Copy-Includes (Join-Path $root "audio")           (Join-Path $pkgInc "audio")
+          Copy-Includes (Join-Path $root "call")            (Join-Path $pkgInc "call")
+          Copy-Includes (Join-Path $root "common_audio")    (Join-Path $pkgInc "common_audio")
+          Copy-Includes (Join-Path $root "common_video")    (Join-Path $pkgInc "common_video")
+          Copy-Includes (Join-Path $root "media")           (Join-Path $pkgInc "media")
+          Copy-Includes (Join-Path $root "modules")         (Join-Path $pkgInc "modules")
+          Copy-Includes (Join-Path $root "p2p")             (Join-Path $pkgInc "p2p")
+          Copy-Includes (Join-Path $root "pc")              (Join-Path $pkgInc "pc")
+          Copy-Includes (Join-Path $root "rtc_base")        (Join-Path $pkgInc "rtc_base")
+          Copy-Includes (Join-Path $root "system_wrappers") (Join-Path $pkgInc "system_wrappers")
+          Copy-Includes (Join-Path $root "video")           (Join-Path $pkgInc "video")
+
+          # Third-party dependencies frequently required by WebRTC headers
+          Copy-Includes (Join-Path $root "third_party\abseil-cpp\absl")        (Join-Path $pkgInc "absl")
+          Copy-Includes (Join-Path $root "third_party\libyuv\include")         (Join-Path $pkgInc "libyuv")
+          Copy-Includes (Join-Path $root "third_party\boringssl\src\include")  (Join-Path $pkgInc "openssl")
+          Copy-Includes (Join-Path $root "third_party\libvpx\source\libvpx")   (Join-Path $pkgInc "vpx")
+          Copy-Includes (Join-Path $root "third_party\jsoncpp\source\include") (Join-Path $pkgInc "json")
 
       - name: Upload artifact (static libs)
         uses: actions/upload-artifact@v4
         with:
           name: webrtc-windows-x64-static-release
-          path: ${{ env.BUILD_DIR }}\package\lib\*.lib
+          path: ${{ github.workspace }}\webrtc_artifacts\lib\*.lib
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload artifact (headers)
+        uses: actions/upload-artifact@v4
+        with:
+          name: webrtc-windows-x64-headers
+          path: ${{ github.workspace }}\webrtc_artifacts\include
           if-no-files-found: error
           retention-days: 7
