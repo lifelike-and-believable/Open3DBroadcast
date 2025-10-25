@@ -2,6 +2,15 @@ name: o3ds build webrtc static (windows self-hosted)
 
 on:
   workflow_dispatch:
+    inputs:
+      clean:
+        description: "Remove existing webrtc checkout before syncing"
+        required: false
+        default: "false"
+      revision:
+        description: "Optional WebRTC revision to checkout (e.g., branch-heads/5481 or a commit SHA)"
+        required: false
+        default: ""
   pull_request:
     branches: [ develop ]
   push:
@@ -34,9 +43,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Environment preflight
+        shell: pwsh
+        run: |
+          Write-Host "Git version:"; git --version
+          Write-Host "Python version:"; python --version 2>$null; if ($LASTEXITCODE -ne 0) { Write-Host "python not found in PATH" }
+          Write-Host "PowerShell version:"; $PSVersionTable.PSVersion
+          # Visual Studio discovery (helps diagnose toolchain issues later)
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vswhere) {
+            & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+          } else {
+            Write-Host "vswhere.exe not found (OK if VS 2022 path is otherwise configured)"
+          }
+
       - name: Ensure Git supports long paths (Windows)
         shell: pwsh
         run: git config --global core.longpaths true
+
+      - name: Clean previous WebRTC checkout (optional)
+        if: ${{ github.event.inputs.clean == 'true' }}
+        shell: pwsh
+        run: |
+          if (Test-Path "$env:WEBRTC_DIR") {
+            Write-Host "Removing existing $env:WEBRTC_DIR due to clean=true"
+            Remove-Item -Recurse -Force "$env:WEBRTC_DIR"
+          }
 
       - name: Get depot_tools
         shell: pwsh
@@ -60,7 +92,21 @@ jobs:
             Pop-Location
           }
           Push-Location "$env:WEBRTC_SRC"
-          gclient sync --nohooks --with_branch_heads --with_tags -D -R -f
+          # Optionally pin to a known-good revision/branch to avoid upstream churn
+          $rev = "${{ github.event.inputs.revision }}".Trim()
+          if ($rev -ne "") {
+            Write-Host "Checking out requested WebRTC revision: $rev"
+            git fetch origin $rev --tags --force || Write-Host "Fetch of specific revision may be unnecessary if already present"
+            git checkout -f $rev
+          }
+
+          # Robust sync with limited retries to mitigate transient network hiccups
+          $max = 3
+          for ($i = 1; $i -le $max; $i++) {
+            Write-Host "gclient sync attempt $i of $max"
+            gclient sync --nohooks --with_branch_heads --with_tags -D -R -f && break
+            if ($i -lt $max) { Write-Host "Sync failed, retrying after backoff..."; Start-Sleep -Seconds (15 * $i) } else { exit 1 }
+          }
           Pop-Location
 
       - name: Run WebRTC hooks
