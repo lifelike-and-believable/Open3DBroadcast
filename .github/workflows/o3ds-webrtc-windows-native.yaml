@@ -174,12 +174,17 @@ jobs:
           $gclientContent | Out-File -FilePath ".gclient" -Encoding ASCII -NoNewline
           
           # Create .gclient_entries - it's a Python dict file (not JSON!)
-          # Use Python to write it to guarantee correct format that eval() can parse
-          # Escape curly braces for PowerShell
-          $pyCode = "with open('.gclient_entries', 'w') as f: f.write(`"`{`n  'entries': `{`n    'src': `{`n      'url': 'https://github.com/lifelike-and-believable/webrtc.git',`n      'scm': 'git'`n    `}`n  `}`n`}`n`")"
-          $pyCode | Out-File -FilePath "_write_entries.py" -Encoding ASCII
-          python _write_entries.py
-          Remove-Item "_write_entries.py"
+          # Write it directly - simple format that Python eval() can parse
+          # Use single quotes for Python dict syntax - build line by line like we do for .gclient
+          $entriesContent = "{" + "`n"
+          $entriesContent += "  'entries': {" + "`n"
+          $entriesContent += "    'src': {" + "`n"
+          $entriesContent += "      'url': 'https://github.com/lifelike-and-believable/webrtc.git'," + "`n"
+          $entriesContent += "      'scm': 'git'" + "`n"
+          $entriesContent += "    }" + "`n"
+          $entriesContent += "  }" + "`n"
+          $entriesContent += "}"
+          $entriesContent | Out-File -FilePath ".gclient_entries" -Encoding ASCII
           
           # Debug: show what we created and verify it's valid Python
           Write-Host ".gclient_entries contents:"
