@@ -183,7 +183,8 @@ jobs:
         shell: pwsh
         continue-on-error: true
         run: |
-          Push-Location "$env:WEBRTC_SRC"
+          # gclient runhooks must run from the directory containing .gclient (WEBRTC_DIR, not WEBRTC_SRC)
+          Push-Location "$env:WEBRTC_DIR"
           Write-Host "Attempting gclient runhooks (may fail if DEPS aren't fully synced)..."
           gclient runhooks
           if ($LASTEXITCODE -ne 0) {
@@ -237,14 +238,19 @@ jobs:
             }
           }
           
-          # Verify GN is available
+          # Verify GN is available (run from src directory since gn.py checks for checkout)
           Write-Host "Checking GN..."
+          Push-Location "$env:WEBRTC_SRC"
           gn --version
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "GN not found in depot_tools"
+          $gnResult = $LASTEXITCODE
+          Pop-Location
+          if ($gnResult -ne 0) {
+            Write-Error "GN not found or failed"
             exit 1
           }
           
+          # Generate build files
+          Write-Host "Generating GN build files..."
           Push-Location "$env:WEBRTC_SRC"
           gn gen "$env:BUILD_DIR" --args="is_debug=false is_component_build=false target_cpu=`"x64`" is_clang=false rtc_include_tests=false rtc_build_examples=false use_rtti=true treat_warnings_as_errors=false symbol_level=1"
           Pop-Location
