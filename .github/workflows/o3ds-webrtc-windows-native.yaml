@@ -174,8 +174,21 @@ jobs:
           $gclientContent | Out-File -FilePath ".gclient" -Encoding ASCII -NoNewline
           
           # Create .gclient_entries - it's a Python dict file (not JSON!)
-          # gclient expects Python syntax that can be eval'd with single quotes
-          "{`n  'entries': {`n    'src': {'url': 'https://github.com/lifelike-and-believable/webrtc.git', 'scm': 'git'}`n  }`n}" | Out-File -FilePath ".gclient_entries" -Encoding ASCII
+          # gclient uses eval() to read it, so use Python dict syntax with single quotes
+          # Build it line by line to ensure proper formatting
+          $entries = "{" + "`n"
+          $entries += "  'entries': {" + "`n"
+          $entries += "    'src': {" + "`n"
+          $entries += "      'url': 'https://github.com/lifelike-and-believable/webrtc.git'," + "`n"
+          $entries += "      'scm': 'git'" + "`n"
+          $entries += "    }" + "`n"
+          $entries += "  }" + "`n"
+          $entries += "}" + "`n"
+          $entries | Out-File -FilePath ".gclient_entries" -Encoding UTF8
+          
+          # Debug: show what we created
+          Write-Host ".gclient_entries contents:"
+          Get-Content ".gclient_entries"
           
           Write-Host "WebRTC source ready at revision: $rev"
           Pop-Location
