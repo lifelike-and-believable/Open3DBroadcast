@@ -2,33 +2,17 @@
 
 #include "Open3DWebRTCDataChannel.h"
 #include "IWebRTCConnector.h"
-#include "O3DSBroadcastTransportAdapter.h" // For EO3DSWebRtcBackend enum
 #include "Open3DStreamSourceSettings.h"    // For EO3DSWebRtcBackendReceiver enum
-
-// Helper to convert broadcast backend enum to receiver backend enum
-static EO3DSWebRtcBackendReceiver ConvertBackendEnum(EO3DSWebRtcBackend BroadcastBackend)
-{
-    switch (BroadcastBackend)
-    {
-    case EO3DSWebRtcBackend::LibDataChannel:
-        return EO3DSWebRtcBackendReceiver::LibDataChannel;
-    case EO3DSWebRtcBackend::LiveKit:
-        return EO3DSWebRtcBackendReceiver::LiveKit;
-    default:
-        return EO3DSWebRtcBackendReceiver::LibDataChannel;
-    }
-}
 
 class FO3DSWebRTCDataChannel::FImpl
 {
 public:
     FImpl() = default;
 
-    bool Start(const FString& Url, EO3DSWebRtcBackend Backend)
+    bool Start(const FString& Url, EO3DSWebRtcBackendReceiver Backend)
     {
-        // Convert backend enum and create connector via factory
-        EO3DSWebRtcBackendReceiver ReceiverBackend = ConvertBackendEnum(Backend);
-        Connector = CreateWebRTCConnector(ReceiverBackend);
+        // Create connector via factory using provided backend
+        Connector = CreateWebRTCConnector(Backend);
         if (!Connector)
         {
             UE_LOG(LogTemp, Error, TEXT("Failed to create WebRTC connector for backend %d"), (int)Backend);
@@ -102,7 +86,7 @@ public:
 FO3DSWebRTCDataChannel::FO3DSWebRTCDataChannel() : Impl(MakeUnique<FImpl>()) {}
 FO3DSWebRTCDataChannel::~FO3DSWebRTCDataChannel() { Stop(); }
 
-bool FO3DSWebRTCDataChannel::Start(const FString& Url, EO3DSWebRtcBackend Backend) { return Impl->Start(Url, Backend); }
+bool FO3DSWebRTCDataChannel::Start(const FString& Url, EO3DSWebRtcBackendReceiver Backend) { return Impl->Start(Url, Backend); }
 void FO3DSWebRTCDataChannel::Stop() { if (Impl) Impl->Stop(); }
 bool FO3DSWebRTCDataChannel::Send(const uint8* Data, int32 Size) { return Impl->Send(Data, Size); }
 bool FO3DSWebRTCDataChannel::IsConnected() const { return Impl->IsConnected(); }

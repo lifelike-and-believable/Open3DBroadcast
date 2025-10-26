@@ -6,7 +6,7 @@
 #include <functional>
 
 // Forward declarations
-enum class EO3DSWebRtcBackend : uint8;
+enum class EO3DSWebRtcBackendReceiver : uint8;
 
 /**
  * Public wrapper for WebRTC DataChannel used by broadcast/receiver modules.
@@ -22,7 +22,7 @@ public:
     // Url example: webrtc://host:port/room?role=client|server&stun=stun.l.google.com:19302
     // If role is omitted, defaults to client.
     // Backend parameter selects between LibDataChannel (P2P) and LiveKit (SFU).
-    bool Start(const FString& Url, EO3DSWebRtcBackend Backend = static_cast<EO3DSWebRtcBackend>(0));
+    bool Start(const FString& Url, EO3DSWebRtcBackendReceiver Backend = static_cast<EO3DSWebRtcBackendReceiver>(0));
 
     // Stop the connection and close the DataChannel.
     void Stop();

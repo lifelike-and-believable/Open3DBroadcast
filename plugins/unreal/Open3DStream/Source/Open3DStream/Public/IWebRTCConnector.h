@@ -6,6 +6,9 @@
 #include "Delegates/Delegate.h"
 #include <memory>
 
+// Forward declarations
+enum class EO3DSWebRtcBackendReceiver : uint8;
+
 /**
  * Backend-agnostic WebRTC connector interface
  * 

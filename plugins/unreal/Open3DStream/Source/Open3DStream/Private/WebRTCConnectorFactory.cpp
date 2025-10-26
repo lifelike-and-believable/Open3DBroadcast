@@ -2,6 +2,7 @@
 
 #include "IWebRTCConnector.h"
 #include "LibDataChannelConnector.h"
+#include "Open3DStreamSourceSettings.h" // for EO3DSWebRtcBackendReceiver definition
 // #include "LiveKitConnector.h" // TODO: Implement in future PR
 
 TSharedPtr<IWebRTCConnector> CreateWebRTCConnector(
