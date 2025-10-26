@@ -27,19 +27,26 @@ class OPEN3DSTREAM_API SOpen3DStreamFactory : public SCompoundWidget
 	void SetKey(const FText &InKey) { mKey = InKey; }
 	FText GetKey() const { return mKey; }
 
-	FOpen3DStreamSettings GetSourceData() const { return Result;  }
+	FOpen3DStreamSettings GetSourceData() const { return Result; }
 
 	FOpen3DStreamSettings Result;
 
 	FOnOpen3DStreamSelected OnSelectedEvent;
 
-	// Protocol Combo
+	// Combo option shared type
 	typedef TSharedPtr<FString> FComboItemType;
 	TSharedRef<SWidget> MakeWidgetForOption(FComboItemType InOption);
-	void OnProtocolChanged(FComboItemType NewValue, ESelectInfo::Type);
-	FText GetCurrentProtocol() const;
 
-	// Backend Combo
+	// Transport Family Combo
+	void OnFamilyChanged(FComboItemType NewValue, ESelectInfo::Type);
+	FText GetCurrentFamily() const;
+
+	// Transport Mode Combo (varies with family)
+	void OnModeChanged(FComboItemType NewValue, ESelectInfo::Type);
+	FText GetCurrentMode() const;
+	EVisibility GetModeVisibility() const;
+
+	// Backend Combo (WebRTC only)
 	void OnBackendChanged(FComboItemType NewValue, ESelectInfo::Type);
 	FText GetCurrentBackend() const;
 
@@ -67,26 +74,41 @@ private:
 	void OnUrlCommitted(const FText& NewText, ETextCommit::Type CommitType);
 	void OnKeyCommitted(const FText& NewText, ETextCommit::Type CommitType);
 
+	// Helpers
+	void RebuildModeOptions();
+	static bool LooksLikeHostPort(const FString& In);
+	static FString NormalizeUrlForFamily(const FString& In, const FString& Family, const FString& Mode);
+	static FString ComputeProtocolFor(const FString& Family, const FString& Mode);
+
 	FText mUrl;
 	FText mKey;
 	FText mLiveKitServerUrl = FText::FromString(TEXT("wss://livekit.example.com"));
 	FText mLiveKitRoom = FText::FromString(TEXT("room1"));
 	FText mLiveKitToken;
 
-	TArray<FComboItemType> Options;
-	FComboItemType CurrentProtocol;
+	// Family + Mode combos
+	TArray<FComboItemType> FamilyOptions;
+	FComboItemType CurrentFamily;
 
+	TArray<FComboItemType> ModeOptions;
+	FComboItemType CurrentMode;
+
+	// WebRTC backend
 	TArray<FComboItemType> BackendOptions;
 	FComboItemType CurrentBackend;
 
 	// Slate widgets for conditional visibility
+	TSharedPtr<SHorizontalBox> ModeRow;
+	TSharedPtr<SComboBox<FComboItemType>> ModeCombo;
 	TSharedPtr<SHorizontalBox> WebRtcBackendRow;
+	TSharedPtr<SHorizontalBox> WebRtcRoomRow;
 	TSharedPtr<SHorizontalBox> LiveKitServerUrlRow;
 	TSharedPtr<SHorizontalBox> LiveKitRoomRow;
 	TSharedPtr<SHorizontalBox> LiveKitTokenRow;
 
 	static FText LastUrl;
-	static int LastComboId;
+	static int LastFamilyId;
+	static int LastModeId;
 	static int LastBackendComboId;
 
 };

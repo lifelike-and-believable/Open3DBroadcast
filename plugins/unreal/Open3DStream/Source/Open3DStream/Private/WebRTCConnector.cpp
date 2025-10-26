@@ -126,7 +126,7 @@ bool FWebRTCConnector::Start(const FString& Url, bool bInIsServer)
 	ResetReofferBackoff(/*bImmediate*/true);
 	ResetReconnectBackoff(/*bImmediate*/true);
 
-	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Starting connection (Mode: %s)"), bInIsServer ? TEXT("Server") : TEXT("Client"));
+	UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Starting connection (Mode: %s)"), bInIsServer ? TEXT("Server") : TEXT("Client"));
 
 	// Parse URL
 	FString Host;
@@ -154,7 +154,7 @@ bool FWebRTCConnector::Start(const FString& Url, bool bInIsServer)
 	}
 	SignalingServerUrl = FString::Printf(TEXT("%s://%s:%d"), *Protocol, *Host, Port);
 
-	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Parsed URL - Host: %s, Port: %d, Room: %s, Protocol: %s, Signaling: %s"),
+	UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Parsed URL - Host: %s, Port: %d, Room: %s, Protocol: %s, Signaling: %s"),
 		*Host, Port, *Room, *Protocol, *SignalingServerUrl);
 
 	// Setup WebRTC configuration
@@ -186,7 +186,7 @@ bool FWebRTCConnector::Start(const FString& Url, bool bInIsServer)
 			double Delay = FMath::Clamp((double)RetryAfterMs / 1000.0, 0.05, 5.0);
 			OfferBackoffSeconds = Delay;
 			NextOfferTimeSeconds = Now + Delay;
-			UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Collision - scheduling re-offer in %.2fs (action=%s)"), Delay, *Action);
+			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Collision - scheduling re-offer in %.2fs (action=%s)"), Delay, *Action);
 		}
 	};
 
@@ -205,7 +205,7 @@ bool FWebRTCConnector::Start(const FString& Url, bool bInIsServer)
 
 void FWebRTCConnector::Stop()
 {
-	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Stopping connection"));
+	UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Stopping connection"));
 
 	// Cleanup signaling
 	if (SignalingClient)
@@ -364,7 +364,7 @@ void FWebRTCConnector::Tick()
         if (bPeerDown && Now >= NextReconnectTimeSeconds && ReconnectBackoffSeconds > 0.0)
         {
             // Try to restart negotiation (fresh PC and offer if client; server just waits)
-            UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Reconnect timer fired (state=%d)"), LastPeerState);
+            UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Reconnect timer fired (state=%d)"), LastPeerState);
             EnsurePeerConnectionForNewSession();
             if (!bIsServer)
             {
@@ -385,7 +385,7 @@ void FWebRTCConnector::OnPeerConnectionStateChange(int StateInt)
 	rtc::PeerConnection::State State = static_cast<rtc::PeerConnection::State>(StateInt);
 	LastPeerState = StateInt;
 
-	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: PeerConnection state change"));
+	UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PeerConnection state change"));
 
 	switch (State)
 	{
@@ -422,7 +422,7 @@ void FWebRTCConnector::OnPeerConnectionStateChange(int StateInt)
 			this->ConnectionState = TEXT("UNKNOWN");
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: PeerConnection state: %s"), *this->ConnectionState);
+	UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PeerConnection state: %s"), *this->ConnectionState);
 
 	// If the connection was closed/failed mid-session, keep signaling alive and allow a clean restart by recreating PC on next join
 	if (State == rtc::PeerConnection::State::Failed || State == rtc::PeerConnection::State::Closed)
@@ -434,7 +434,7 @@ void FWebRTCConnector::OnPeerConnectionStateChange(int StateInt)
 
 void FWebRTCConnector::OnDataChannelOpen()
 {
-	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Data channel opened"));
+	UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Data channel opened"));
 	bDataChannelOpen = true;
 }
 
@@ -495,7 +495,7 @@ void FWebRTCConnector::OnLocalDescription(const rtc::Description& Description)
 
 void FWebRTCConnector::OnSignalingConnected()
 {
-	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Signaling connected"));
+	UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Signaling connected"));
 	bSignalingIsConnected = true;
 	
 	// Only client mode creates data channel proactively
@@ -525,7 +525,7 @@ void FWebRTCConnector::OnSignalingDisconnected(const FString& Reason)
 
 void FWebRTCConnector::OnOfferReceived(const FString& SDP)
 {
-	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Offer received from remote peer"));
+	UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Offer received from remote peer"));
 
 	FScopeLock Lock(&PeerConnectionLock);
 	// Recreate peer connection if needed (e.g., after a prior Closed/Failed state)
@@ -543,7 +543,7 @@ void FWebRTCConnector::OnOfferReceived(const FString& SDP)
 		bRemoteDescriptionSet = true;
 		
 		// Server must create answer in response to offer
-		UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Creating answer in response to offer"));
+		UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Creating answer in response to offer"));
 		PeerConnection->createAnswer();
 		
 		// Don't flush ICE candidates yet - wait for local description (answer) to be set
@@ -558,7 +558,7 @@ void FWebRTCConnector::OnOfferReceived(const FString& SDP)
 
 void FWebRTCConnector::OnAnswerReceived(const FString& SDP)
 {
-	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Answer received from remote peer"));
+	UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Answer received from remote peer"));
 
 	FScopeLock Lock(&PeerConnectionLock);
 	if (!PeerConnection)
@@ -614,7 +614,7 @@ void FWebRTCConnector::OnIceCandidateReceived(const FString& Candidate, const FS
 
 void FWebRTCConnector::OnPeerJoined()
 {
-	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Peer joined room, initiating connection"));
+	UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Peer joined room, initiating connection"));
 
 	FScopeLock Lock(&PeerConnectionLock);
 	// Recreate if prior session closed/failed
@@ -628,7 +628,7 @@ void FWebRTCConnector::OnPeerJoined()
 	if (bIsServer)
 	{
 		// Server waits for client to send offer
-		UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Server mode - waiting for client offer"));
+		UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Server mode - waiting for client offer"));
 	}
 	else
 	{
@@ -639,69 +639,188 @@ void FWebRTCConnector::OnPeerJoined()
 
 bool FWebRTCConnector::ParseWebRtcUrl(const FString& Url, FString& OutHost, uint16& OutPort, FString& OutRoom, TMap<FString, FString>& OutParams)
 {
-	// Expected format: webrtc://host:port/room?param=value&param2=value2
+	// Accepts formats like:
+	// - webrtc://host:port/room?param=val
+	// - ws://host/room?room=name&param=val
+	// - wss://host:port?room=name&param=val
 
-	// Remove scheme
-	FString UrlWithoutScheme = Url;
-	if (!UrlWithoutScheme.StartsWith(TEXT("webrtc://")))
+	OutHost.Empty();
+	OutRoom.Empty();
+	OutParams.Reset();
+	OutPort =0;
+
+	if (Url.IsEmpty())
 	{
-		LastError = TEXT("URL must start with webrtc://");
+		LastError = TEXT("Empty URL");
 		return false;
 	}
 
-	UrlWithoutScheme.RemoveFromStart(TEXT("webrtc://"));
-
-	// Extract query string
-	FString QueryString;
-	int32 QueryPos = UrlWithoutScheme.Find(TEXT("?"));
-	if (QueryPos != INDEX_NONE)
+	FString Working = Url;
+	// Extract scheme
+	int32 SchemePos = Working.Find(TEXT("://"));
+	if (SchemePos == INDEX_NONE)
 	{
-		QueryString = UrlWithoutScheme.Mid(QueryPos + 1);
-		UrlWithoutScheme = UrlWithoutScheme.Left(QueryPos);
+		LastError = TEXT("URL must include scheme (webrtc:// or ws(s)://)");
+		return false;
 	}
 
-	// Extract room
-	FString HostPort = UrlWithoutScheme;
-	int32 RoomPos = UrlWithoutScheme.Find(TEXT("/"));
-	if (RoomPos != INDEX_NONE)
+	const FString Scheme = Working.Left(SchemePos).ToLower();
+	Working = Working.Mid(SchemePos +3);
+
+	if (!(Scheme.Equals(TEXT("webrtc"), ESearchCase::IgnoreCase) || Scheme.Equals(TEXT("ws"), ESearchCase::IgnoreCase) || Scheme.Equals(TEXT("wss"), ESearchCase::IgnoreCase)))
 	{
-		HostPort = UrlWithoutScheme.Left(RoomPos);
-		OutRoom = UrlWithoutScheme.Mid(RoomPos + 1);
+		LastError = TEXT("URL must start with webrtc:// or ws(s)://");
+		return false;
+	}
+
+	// Split off query string if present
+	FString QueryString;
+	int32 QPos = Working.Find(TEXT("?"));
+	if (QPos != INDEX_NONE)
+	{
+		QueryString = Working.Mid(QPos +1);
+		Working = Working.Left(QPos);
+	}
+
+	// Extract first path segment as room if present
+	FString HostPort = Working;
+	FString Path;
+	int32 SlashPos = Working.Find(TEXT("/"));
+	if (SlashPos != INDEX_NONE)
+	{
+		HostPort = Working.Left(SlashPos);
+		Path = Working.Mid(SlashPos +1);
+		// take only first segment as room
+		int32 NextSlash = Path.Find(TEXT("/"));
+		if (NextSlash != INDEX_NONE)
+		{
+			Path = Path.Left(NextSlash);
+		}
+	}
+
+	// Parse host and optional port. Handle IPv6 [addr]:port
+	FString HostPart = HostPort;
+	FString PortStr;
+	if (HostPart.StartsWith(TEXT("[")))
+	{
+		int32 Close = HostPart.Find(TEXT("]"));
+		if (Close == INDEX_NONE)
+		{
+			LastError = TEXT("Malformed IPv6 host");
+			return false;
+		}
+		OutHost = HostPart.Mid(0, Close +1);
+		if (HostPart.Len() > Close +1 && HostPart[Close +1] == TEXT(':'))
+		{
+			PortStr = HostPart.Mid(Close +2);
+		}
 	}
 	else
 	{
-		LastError = TEXT("URL must contain /room");
-		return false;
-	}
-
-	// Parse host and port
-	if (!HostPort.Contains(TEXT(":")))
-	{
-		LastError = TEXT("URL must contain :port");
-		return false;
-	}
-
-	int32 PortPos = HostPort.Find(TEXT(":"), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
-	OutHost = HostPort.Left(PortPos);
-	FString PortStr = HostPort.Mid(PortPos + 1);
-	OutPort = FCString::Atoi(*PortStr);
-
-	// Parse query parameters
-	if (!QueryString.IsEmpty())
-	{
-		TArray<FString> Params;
-		QueryString.ParseIntoArray(Params, TEXT("&"));
-
-		for (const FString& Param : Params)
+		int32 LastColon = HostPart.Find(TEXT(":"), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+		if (LastColon != INDEX_NONE)
 		{
-			int32 EqualPos = Param.Find(TEXT("="));
-			if (EqualPos != INDEX_NONE)
+			// If there is a colon and the substring after is numeric treat as port
+			FString MaybePort = HostPart.Mid(LastColon +1);
+			bool bAllDigits = true;
+			for (int32 i =0; i < MaybePort.Len(); ++i)
 			{
-				FString Key = Param.Left(EqualPos);
-				FString Value = Param.Mid(EqualPos + 1);
-				OutParams.Add(Key, Value);
+				if (!FChar::IsDigit(MaybePort[i])) { bAllDigits = false; break; }
+			}
+			if (bAllDigits && MaybePort.Len() >0)
+			{
+				OutHost = HostPart.Left(LastColon);
+				PortStr = MaybePort;
+			}
+			else
+			{
+				OutHost = HostPart; // colon is part of hostname (uncommon)
 			}
 		}
+		else
+		{
+			OutHost = HostPart;
+		}
+	}
+
+	// Default ports
+	if (PortStr.IsEmpty())
+	{
+		if (Scheme.Equals(TEXT("wss"), ESearchCase::IgnoreCase))
+		{
+			OutPort =443;
+		}
+		else if (Scheme.Equals(TEXT("ws"), ESearchCase::IgnoreCase))
+		{
+			OutPort =80;
+		}
+		else
+		{
+			// for webrtc scheme default to443 (secure)
+			OutPort =443;
+		}
+	}
+	else
+	{
+		int32 P = FCString::Atoi(*PortStr);
+		if (P <=0 || P >65535)
+		{
+			LastError = TEXT("Invalid port in URL");
+			return false;
+		}
+		OutPort = (uint16)P;
+	}
+
+	// Parse query params into map
+	if (!QueryString.IsEmpty())
+	{
+		TArray<FString> Pairs;
+		QueryString.ParseIntoArray(Pairs, TEXT("&"), true);
+		for (const FString& Pair : Pairs)
+		{
+			if (Pair.IsEmpty()) continue;
+			int32 Eq = Pair.Find(TEXT("="));
+			if (Eq != INDEX_NONE)
+			{
+				const FString Key = Pair.Left(Eq);
+				const FString Val = Pair.Mid(Eq +1);
+				OutParams.Add(Key, Val);
+			}
+			else
+			{
+				OutParams.Add(Pair, TEXT(""));
+			}
+		}
+	}
+
+	// If room provided in path use it, else check params case-insensitively for 'room'
+	if (!Path.IsEmpty())
+	{
+		OutRoom = Path;
+	}
+	else
+	{
+		// look for 'room' key case-insensitive
+		for (const auto& Pair : OutParams)
+		{
+			if (Pair.Key.Equals(TEXT("room"), ESearchCase::IgnoreCase))
+			{
+				OutRoom = Pair.Value;
+				break;
+			}
+		}
+	}
+
+	if (OutRoom.IsEmpty())
+	{
+		LastError = TEXT("URL must include room either in path or as ?room=...");
+		return false;
+	}
+
+	// Normalize host (strip brackets around IPv6 for later comparison if needed)
+	if (OutHost.StartsWith(TEXT("[")) && OutHost.EndsWith(TEXT("]")))
+	{
+		// keep brackets for logging but leave as-is
 	}
 
 	return true;
@@ -742,7 +861,7 @@ bool FWebRTCConnector::SetupPeerConnection()
 		{
 			PeerConnection->onDataChannel([this](std::shared_ptr<rtc::DataChannel> IncomingChannel)
 			{
-				UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Incoming data channel from peer"));
+				UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Incoming data channel from peer"));
 				
 				{
 					FScopeLock Lock(&DataChannelLock);
@@ -791,7 +910,7 @@ bool FWebRTCConnector::SetupPeerConnection()
 			});
 		}
 
-		UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: PeerConnection created successfully"));
+		UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PeerConnection created successfully"));
 
 		// For negotiated channel mode, both sides must create the channel explicitly.
 		// Do it here so server doesn't rely on onDataChannel callback.
@@ -882,7 +1001,7 @@ bool FWebRTCConnector::CreateDataChannel()
 			OnDataChannelClosed();
 		});
 
-		UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Data channel created successfully (negotiated=%d id=%d)"), bNegotiatedChannelEnabled?1:0, NegotiatedChannelId);
+		UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Data channel created successfully (negotiated=%d id=%d)"), bNegotiatedChannelEnabled?1:0, NegotiatedChannelId);
 		return true;
 	}
 	catch (const std::exception& e)

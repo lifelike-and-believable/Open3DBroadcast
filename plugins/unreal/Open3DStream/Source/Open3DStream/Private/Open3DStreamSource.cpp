@@ -59,32 +59,44 @@ FOpen3DStreamSource::FOpen3DStreamSource()
 }
 
 FOpen3DStreamSource::FOpen3DStreamSource(const FOpen3DStreamSettings& Settings)
-    : SourceType(LOCTEXT("ConnctionType", "Open 3D Stream"))
-    , SourceMachineName(LOCTEXT("SourceMachineName", "-"))
-    , SourceStatus(LOCTEXT("ConnctionStatus", "Inactive"))
-    , Settings(nullptr)
-    , Client(nullptr)
-    , ArrivalTimeOffset(0.0)
-    , Frame(0)
-    , LogFlag(false)
-    , bIsValid(true)
-    , mAddr(ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateInternetAddr())
+ : SourceType(LOCTEXT("ConnctionType", "Open3D Stream"))
+ , SourceMachineName(LOCTEXT("SourceMachineName", "-"))
+ , SourceStatus(LOCTEXT("ConnctionStatus", "Inactive"))
+ , Settings(nullptr)
+ , Client(nullptr)
+ , ArrivalTimeOffset(0.0)
+ , Frame(0)
+ , LogFlag(false)
+ , bIsValid(true)
+ , mAddr(ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateInternetAddr())
 {
-    Url        = Settings.Url;
-    Protocol   = Settings.Protocol;
-    Key        = Settings.Key;
-    TimeOffset = Settings.TimeOffset;
+ Url        = Settings.Url;
+ Protocol   = Settings.Protocol;
+ Key        = Settings.Key;
+ TimeOffset = Settings.TimeOffset;
 
-    server.OnData.BindRaw(this, &FOpen3DStreamSource::OnPackage);
-    server.OnState.BindRaw(this, &FOpen3DStreamSource::OnStatus);
+ // If WebRTC, ensure room exists as query param in URL for transport that expects it
+ if (Protocol.ToString().Contains(TEXT("WebRTC")))
+ {
+ FString U = Url.ToString();
+ const FString Room = Settings.WebRtcRoom;
+ if (!Room.IsEmpty() && !U.Contains(TEXT("room=")))
+ {
+ U += U.Contains(TEXT("?")) ? FString::Printf(TEXT("&room=%s"), *Room) : FString::Printf(TEXT("?room=%s"), *Room);
+ Url = FText::FromString(U);
+ }
+ }
 
-    // One-time log to confirm that the receiver is wiring the OnData callback
-    static bool bLoggedBind = false;
-    if (!bLoggedBind)
-    {
-        bLoggedBind = true;
-        UE_LOG(LogTemp, Log, TEXT("O3DS RX: LiveLink OnData bound in Open3DStreamSource"));
-    }
+ server.OnData.BindRaw(this, &FOpen3DStreamSource::OnPackage);
+ server.OnState.BindRaw(this, &FOpen3DStreamSource::OnStatus);
+
+ // One-time log to confirm that the receiver is wiring the OnData callback
+ static bool bLoggedBind = false;
+ if (!bLoggedBind)
+ {
+ bLoggedBind = true;
+ UE_LOG(LogTemp, Log, TEXT("O3DS RX: LiveLink OnData bound in Open3DStreamSource"));
+ }
 }
 
 FOpen3DStreamSource::~FOpen3DStreamSource()

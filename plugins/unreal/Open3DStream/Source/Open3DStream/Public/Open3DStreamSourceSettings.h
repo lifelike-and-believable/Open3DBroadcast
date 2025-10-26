@@ -31,7 +31,7 @@ public:
 	UPROPERTY(EditAnywhere, Category="Open3DStream")
 	FText Url;
 
-	UPROPERTY(EditAnywhere, Category="Open3DStream")
+	UPROPERTY(EditAnywhere, Category="Open3DStream", meta=(EditCondition="false", EditConditionHides))
 	FText Key;
 
 	UPROPERTY(EditAnywhere, Category="Open3DStream")
@@ -44,12 +44,12 @@ public:
 	UPROPERTY(EditAnywhere, Category="Open3DStream|WebRTC")
 	EO3DSWebRtcBackendReceiver WebRtcBackend = EO3DSWebRtcBackendReceiver::LibDataChannel;
 
-	// LiveKit-specific configuration (only used when WebRtcBackend is LiveKit)
-	UPROPERTY(EditAnywhere, Category="Open3DStream|WebRTC|LiveKit")
-	FString LiveKitServerUrl = TEXT("wss://livekit.example.com");
+	// Common WebRTC room for both P2P and LiveKit
+	UPROPERTY(EditAnywhere, Category="Open3DStream|WebRTC")
+	FString WebRtcRoom = TEXT("room1");
 
-	UPROPERTY(EditAnywhere, Category="Open3DStream|WebRTC|LiveKit")
-	FString LiveKitRoom = TEXT("room1");
+	// LiveKit-specific configuration (only used when WebRtcBackend is LiveKit)
+	// Connection URL will be taken from Url (wss://). ServerUrl field removed in favor of a single URL field.
 
 	UPROPERTY(EditAnywhere, Category="Open3DStream|WebRTC|LiveKit")
 	FString LiveKitToken;

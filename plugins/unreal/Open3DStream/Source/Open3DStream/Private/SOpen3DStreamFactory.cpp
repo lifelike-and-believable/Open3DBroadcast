@@ -4,7 +4,7 @@
 #include "Widgets/Text/STextBlock.h"
 
 #include "Open3DStreamSource.h"
-#include "o3ds/o3ds_version.h"  // for version
+#include "o3ds/o3ds_version.h" // for version
 
 #include "Framework/Application/SlateApplication.h"
 #include "Input/Events.h"
@@ -13,22 +13,20 @@
 #define LOCTEXT_NAMESPACE "Open3DStream"
 
 FText SOpen3DStreamFactory::LastUrl;
-int SOpen3DStreamFactory::LastComboId = 0;
-int SOpen3DStreamFactory::LastBackendComboId = 0;
+int SOpen3DStreamFactory::LastFamilyId =0;
+int SOpen3DStreamFactory::LastModeId =0;
+int SOpen3DStreamFactory::LastBackendComboId =0;
 
 void SOpen3DStreamFactory::Construct(const FArguments& Args)
 {
-	//LastTickTime = 0.0;
 	OnSelectedEvent = Args._OnSelectedEvent;
 
-	Options.Add(MakeShareable(new FString("NNG Subscribe (to NNG Publish)")));
-	Options.Add(MakeShareable(new FString("NNG Client (to NNG Server)")));
-	Options.Add(MakeShareable(new FString("NNG Server (to NNG Client)")));
-	Options.Add(MakeShareable(new FString("TCP Client")));
-	Options.Add(MakeShareable(new FString("UDP Server")));
-	Options.Add(MakeShareable(new FString("WebRTC Client")));
-	Options.Add(MakeShareable(new FString("WebRTC Server")));
-	Options.Add(MakeShareable(new FString("Loopback (In-Editor Test)")));
+	// Transport Family options
+	FamilyOptions.Add(MakeShareable(new FString(TEXT("TCP"))));
+	FamilyOptions.Add(MakeShareable(new FString(TEXT("UDP"))));
+	FamilyOptions.Add(MakeShareable(new FString(TEXT("NNG"))));
+	FamilyOptions.Add(MakeShareable(new FString(TEXT("WebRTC"))));
+	FamilyOptions.Add(MakeShareable(new FString(TEXT("Loopback (In-Editor Test)"))));
 
 	// WebRTC backend options
 	BackendOptions.Add(MakeShareable(new FString("Peer-to-Peer (libdatachannel)")));
@@ -39,7 +37,9 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 		LastUrl = LOCTEXT("Open3DStreamUrlValue", "tcp://meta.o3ds.net:9001");
 	}
 
-	CurrentProtocol = Options[LastComboId];
+	CurrentFamily = FamilyOptions.IsValidIndex(LastFamilyId) ? FamilyOptions[LastFamilyId] : FamilyOptions[0];
+	RebuildModeOptions();
+	CurrentMode = ModeOptions.IsValidIndex(LastModeId) ? ModeOptions[LastModeId] : (ModeOptions.Num() >0 ? ModeOptions[0] : nullptr);
 	CurrentBackend = BackendOptions[LastBackendComboId];
 
 	mUrl = LastUrl;
@@ -55,7 +55,7 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 			+ SHorizontalBox::Slot()
 			.FillWidth(0.3f)
 			[
-				SNew(STextBlock).Text(LOCTEXT("Open3DStreamUrl", "Url")).MinDesiredWidth(150)
+				SNew(STextBlock).Text(LOCTEXT("Open3DStreamUrl", "Url")).MinDesiredWidth(175)
 			]
 			+ SHorizontalBox::Slot()
 			.FillWidth(0.7f)
@@ -66,6 +66,7 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 				.OnTextCommitted(this, &SOpen3DStreamFactory::OnUrlCommitted)
 			]
 		]
+		// Transport Family
 		+ SVerticalBox::Slot()
 		.Padding(5)
 		[
@@ -73,22 +74,49 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 			+ SHorizontalBox::Slot()
 			.FillWidth(0.3f)
 			[
-				SNew(STextBlock).Text(LOCTEXT("Open3DStreamProtocol", "Protocol")).MinDesiredWidth(150)
+				SNew(STextBlock).Text(LOCTEXT("Open3DStreamFamily", "Transport Family")).MinDesiredWidth(200)
 			]
 			+ SHorizontalBox::Slot()
 			.FillWidth(0.7f)
-			[	
+			[
 				SNew(SComboBox<FComboItemType>)
-				.OptionsSource(&Options)
-				.OnSelectionChanged(this, &SOpen3DStreamFactory::OnProtocolChanged)
+				.OptionsSource(&FamilyOptions)
+				.OnSelectionChanged(this, &SOpen3DStreamFactory::OnFamilyChanged)
 				.OnGenerateWidget(this, &SOpen3DStreamFactory::MakeWidgetForOption)
-				.InitiallySelectedItem(CurrentProtocol)
+				.InitiallySelectedItem(CurrentFamily)
 				[
 					SNew(STextBlock)
-					.Text(this, &SOpen3DStreamFactory::GetCurrentProtocol)
+					.Text(this, &SOpen3DStreamFactory::GetCurrentFamily)
 				]
 			]
 		]
+		// Transport Mode (varies per family)
+		+ SVerticalBox::Slot()
+		.Padding(5)
+		.AutoHeight()
+		[
+			SAssignNew(ModeRow, SHorizontalBox)
+			.Visibility(this, &SOpen3DStreamFactory::GetModeVisibility)
+			+ SHorizontalBox::Slot()
+			.FillWidth(0.3f)
+			[
+				SNew(STextBlock).Text(LOCTEXT("Open3DStreamMode", "Transport Mode")).MinDesiredWidth(200)
+			]
+			+ SHorizontalBox::Slot()
+			.FillWidth(0.7f)
+			[
+				SAssignNew(ModeCombo, SComboBox<FComboItemType>)
+				.OptionsSource(&ModeOptions)
+				.OnSelectionChanged(this, &SOpen3DStreamFactory::OnModeChanged)
+				.OnGenerateWidget(this, &SOpen3DStreamFactory::MakeWidgetForOption)
+				.InitiallySelectedItem(CurrentMode)
+				[
+					SNew(STextBlock)
+					.Text(this, &SOpen3DStreamFactory::GetCurrentMode)
+				]
+			]
+		]
+		// WebRTC Backend
 		+ SVerticalBox::Slot()
 		.Padding(5)
 		.AutoHeight()
@@ -98,7 +126,7 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 			+ SHorizontalBox::Slot()
 			.FillWidth(0.3f)
 			[
-				SNew(STextBlock).Text(LOCTEXT("Open3DStreamBackend", "Backend")).MinDesiredWidth(150)
+				SNew(STextBlock).Text(LOCTEXT("Open3DStreamBackend", "Backend")).MinDesiredWidth(200)
 			]
 			+ SHorizontalBox::Slot()
 			.FillWidth(0.7f)
@@ -114,44 +142,27 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 				]
 			]
 		]
+		// WebRTC Room (common)
 		+ SVerticalBox::Slot()
 		.Padding(5)
 		.AutoHeight()
 		[
-			SAssignNew(LiveKitServerUrlRow, SHorizontalBox)
-			.Visibility(this, &SOpen3DStreamFactory::GetLiveKitFieldsVisibility)
+			SAssignNew(WebRtcRoomRow, SHorizontalBox)
+			.Visibility(this, &SOpen3DStreamFactory::GetWebRtcBackendVisibility)
 			+ SHorizontalBox::Slot()
 			.FillWidth(0.3f)
 			[
-				SNew(STextBlock).Text(LOCTEXT("LiveKitServerUrl", "LiveKit Server URL")).MinDesiredWidth(150)
+				SNew(STextBlock).Text(LOCTEXT("WebRtcRoom", "Room")).MinDesiredWidth(200)
 			]
 			+ SHorizontalBox::Slot()
 			.FillWidth(0.7f)
-			[	
-				SNew(SEditableTextBox)
-				.Text(this, &SOpen3DStreamFactory::GetLiveKitServerUrl)
-				.OnTextChanged(this, &SOpen3DStreamFactory::SetLiveKitServerUrl)
-			]
-		]
-		+ SVerticalBox::Slot()
-		.Padding(5)
-		.AutoHeight()
-		[
-			SAssignNew(LiveKitRoomRow, SHorizontalBox)
-			.Visibility(this, &SOpen3DStreamFactory::GetLiveKitFieldsVisibility)
-			+ SHorizontalBox::Slot()
-			.FillWidth(0.3f)
 			[
-				SNew(STextBlock).Text(LOCTEXT("LiveKitRoom", "LiveKit Room")).MinDesiredWidth(150)
-			]
-			+ SHorizontalBox::Slot()
-			.FillWidth(0.7f)
-			[	
 				SNew(SEditableTextBox)
 				.Text(this, &SOpen3DStreamFactory::GetLiveKitRoom)
 				.OnTextChanged(this, &SOpen3DStreamFactory::SetLiveKitRoom)
 			]
 		]
+		// LiveKit Token
 		+ SVerticalBox::Slot()
 		.Padding(5)
 		.AutoHeight()
@@ -161,7 +172,7 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 			+ SHorizontalBox::Slot()
 			.FillWidth(0.3f)
 			[
-				SNew(STextBlock).Text(LOCTEXT("LiveKitToken", "LiveKit Token (JWT)")).MinDesiredWidth(150)
+				SNew(STextBlock).Text(LOCTEXT("LiveKitToken", "LiveKit Token")).MinDesiredWidth(200)
 			]
 			+ SHorizontalBox::Slot()
 			.FillWidth(0.7f)
@@ -171,24 +182,26 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 				.OnTextChanged(this, &SOpen3DStreamFactory::SetLiveKitToken)
 			]
 		]
-		+ SVerticalBox::Slot()
-		.Padding(5)
-		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot()
-			.FillWidth(0.3f)
-			[
-				SNew(STextBlock).Text(LOCTEXT("Open3DStreamKey", "Key")).MinDesiredWidth(150)
-			]
-			+ SHorizontalBox::Slot()
-			.FillWidth(0.7f)
-			[	
-				SNew(SEditableTextBox)
-				.Text(this, &SOpen3DStreamFactory::GetKey)
-				.OnTextChanged(this, &SOpen3DStreamFactory::SetKey)
-				.OnTextCommitted(this, &SOpen3DStreamFactory::OnKeyCommitted)
-			]
-		]
+		// Key
+		//+ SVerticalBox::Slot()
+		//.Padding(5)
+		//[
+		//	SNew(SHorizontalBox)
+		//	+ SHorizontalBox::Slot()
+		//	.FillWidth(0.3f)
+		//	[
+		//		SNew(STextBlock).Text(LOCTEXT("Open3DStreamKey", "Key")).MinDesiredWidth(200)
+		//	]
+		//	+ SHorizontalBox::Slot()
+		//	.FillWidth(0.7f)
+		//	[	
+		//		SNew(SEditableTextBox)
+		//		.Text(this, &SOpen3DStreamFactory::GetKey)
+		//		.OnTextChanged(this, &SOpen3DStreamFactory::SetKey)
+		//		.OnTextCommitted(this, &SOpen3DStreamFactory::OnKeyCommitted)
+		//	]
+		//]
+		// Buttons
 		+ SVerticalBox::Slot()
 		.Padding(5)
 		[
@@ -208,7 +221,7 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 					.Text(LOCTEXT("OkayButton", "Okay"))
 				]
 			]
-    		+ SHorizontalBox::Slot()
+ 		+ SHorizontalBox::Slot()
 			.FillWidth(0.3f)
 		]
 		+ SVerticalBox::Slot()
@@ -247,23 +260,132 @@ FReply SOpen3DStreamFactory::OnKeyDown(const FGeometry& MyGeometry, const FKeyEv
 	return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
 }
 
+static bool HasSchemePrefix(const FString& In)
+{
+	return In.StartsWith(TEXT("tcp://"), ESearchCase::IgnoreCase)
+		|| In.StartsWith(TEXT("udp://"), ESearchCase::IgnoreCase)
+		|| In.StartsWith(TEXT("nng://"), ESearchCase::IgnoreCase)
+		|| In.StartsWith(TEXT("webrtc://"), ESearchCase::IgnoreCase);
+}
+
+bool SOpen3DStreamFactory::LooksLikeHostPort(const FString& In)
+{
+	for (TCHAR C : In)
+	{
+		if ((C >= '0' && C <= '9') || C == '.' || C == ':' ) { continue; }
+		return false;
+	}
+	return !In.IsEmpty();
+}
+
+FString SOpen3DStreamFactory::NormalizeUrlForFamily(const FString& In, const FString& Family, const FString& Mode)
+{
+	FString Out = In;
+	if (!HasSchemePrefix(Out))
+	{
+		if (Family.Equals(TEXT("TCP"), ESearchCase::IgnoreCase))
+		{
+			if (LooksLikeHostPort(Out)) { Out = FString::Printf(TEXT("tcp://%s"), *Out); }
+		}
+		else if (Family.Equals(TEXT("UDP"), ESearchCase::IgnoreCase))
+		{
+			if (LooksLikeHostPort(Out)) { Out = FString::Printf(TEXT("udp://%s"), *Out); }
+		}
+		else if (Family.Equals(TEXT("NNG"), ESearchCase::IgnoreCase))
+		{
+			// Default NNG transport uses TCP addresses
+			if (LooksLikeHostPort(Out)) { Out = FString::Printf(TEXT("tcp://%s"), *Out); }
+		}
+		else if (Family.Equals(TEXT("WebRTC"), ESearchCase::IgnoreCase))
+		{
+			if (LooksLikeHostPort(Out)) { Out = FString::Printf(TEXT("webrtc://%s"), *Out); }
+		}
+	}
+
+	// Inject WebRTC role param if missing
+	if (Family.Equals(TEXT("WebRTC"), ESearchCase::IgnoreCase))
+	{
+		if (!Out.Contains(TEXT("role="), ESearchCase::IgnoreCase))
+		{
+			const TCHAR* RoleStr = (Mode.Contains(TEXT("Server"))) ? TEXT("server") : TEXT("client");
+			Out += Out.Contains(TEXT("?")) ? FString::Printf(TEXT("&role=%s"), RoleStr)
+					 : FString::Printf(TEXT("?role=%s"), RoleStr);
+		}
+	}
+	return Out;
+}
+
+FString SOpen3DStreamFactory::ComputeProtocolFor(const FString& Family, const FString& Mode)
+{
+	if (Family.Equals(TEXT("Loopback (In-Editor Test)"), ESearchCase::IgnoreCase))
+	{
+		return TEXT("Loopback (In-Editor Test)");
+	}
+	if (Family.Equals(TEXT("TCP"), ESearchCase::IgnoreCase))
+	{
+		// Receiver supports TCP client only
+		return TEXT("TCP Client");
+	}
+	if (Family.Equals(TEXT("UDP"), ESearchCase::IgnoreCase))
+	{
+		return TEXT("UDP Server");
+	}
+	if (Family.Equals(TEXT("NNG"), ESearchCase::IgnoreCase))
+	{
+		if (Mode.Contains(TEXT("Subscribe"))) return TEXT("NNG Subscribe");
+		if (Mode.Contains(TEXT("Client"))) return TEXT("NNG Client");
+		if (Mode.Contains(TEXT("Server"))) return TEXT("NNG Server");
+	}
+	if (Family.Equals(TEXT("WebRTC"), ESearchCase::IgnoreCase))
+	{
+		return Mode.Contains(TEXT("Server")) ? TEXT("WebRTC Server") : TEXT("WebRTC Client");
+	}
+	return TEXT("TCP Client");
+}
+
 FReply SOpen3DStreamFactory::OnSource()
 {	
-	FString s = mUrl.ToString();
-	const TCHAR* url = s.operator*();
 	TSharedPtr<FOpen3DStreamSettings, ESPMode::ThreadSafe> Settings = MakeShared<FOpen3DStreamSettings, ESPMode::ThreadSafe>();
-	Settings->TimeOffset = 0;
-	Settings->Url = mUrl;
-	Settings->Protocol = GetCurrentProtocol();
-	
-	// Populate WebRTC backend and LiveKit configuration
-	FString CurrentBackendStr = CurrentBackend.IsValid() ? *CurrentBackend : TEXT("");
-	if (CurrentBackendStr.Contains(TEXT("LiveKit")))
+	Settings->TimeOffset =0;
+
+	const FString FamilyStr = CurrentFamily.IsValid() ? *CurrentFamily : TEXT("TCP");
+	const FString ModeStr = CurrentMode.IsValid() ? *CurrentMode : TEXT("");
+	const FString InputUrl = mUrl.ToString();
+	const FString Room = mLiveKitRoom.ToString();
+
+	FString EffectiveUrl = NormalizeUrlForFamily(InputUrl, FamilyStr, ModeStr);
+	const FString ProtocolName = ComputeProtocolFor(FamilyStr, ModeStr);
+
+	// For WebRTC, compose URL with room/role consistently
+	if (FamilyStr.Equals(TEXT("WebRTC"), ESearchCase::IgnoreCase))
 	{
-		Settings->WebRtcBackend = EO3DSWebRtcBackendReceiver::LiveKit;
-		Settings->LiveKitServerUrl = mLiveKitServerUrl.ToString();
-		Settings->LiveKitRoom = mLiveKitRoom.ToString();
-		Settings->LiveKitToken = mLiveKitToken.ToString();
+		if (EffectiveUrl.EndsWith(TEXT("/"))) { EffectiveUrl.LeftChopInline(1); }
+		// P2P uses path /<room>; LiveKit uses ?room= param – unify on query param to avoid clashes
+		if (!EffectiveUrl.Contains(TEXT("room=")))
+		{
+			EffectiveUrl += EffectiveUrl.Contains(TEXT("?"))
+				? FString::Printf(TEXT("&room=%s"), *Room)
+				: FString::Printf(TEXT("?room=%s"), *Room);
+		}
+	}
+
+	Settings->Url = FText::FromString(EffectiveUrl);
+	Settings->Protocol = FText::FromString(ProtocolName);
+
+	// Populate WebRTC backend and LiveKit configuration
+	if (FamilyStr.Equals(TEXT("WebRTC"), ESearchCase::IgnoreCase))
+	{
+		Settings->WebRtcRoom = Room;
+		FString CurrentBackendStr = CurrentBackend.IsValid() ? *CurrentBackend : TEXT("");
+		if (CurrentBackendStr.Contains(TEXT("LiveKit")))
+		{
+			Settings->WebRtcBackend = EO3DSWebRtcBackendReceiver::LiveKit;
+			Settings->LiveKitToken = mLiveKitToken.ToString();
+		}
+		else
+		{
+			Settings->WebRtcBackend = EO3DSWebRtcBackendReceiver::LibDataChannel;
+		}
 	}
 	else
 	{
@@ -279,23 +401,73 @@ TSharedRef<SWidget> SOpen3DStreamFactory::MakeWidgetForOption(FComboItemType InO
 	return SNew(STextBlock).Text(FText::FromString(*InOption));
 }
 
-void SOpen3DStreamFactory::OnProtocolChanged(FComboItemType NewValue, ESelectInfo::Type)
+void SOpen3DStreamFactory::OnFamilyChanged(FComboItemType NewValue, ESelectInfo::Type)
 {
-	CurrentProtocol = NewValue;
-	for (int i = 0; i < Options.Num(); i++)
+	CurrentFamily = NewValue;
+	for (int i =0; i < FamilyOptions.Num(); i++)
 	{
-		if (Options[i] == NewValue)
+		if (FamilyOptions[i] == NewValue)
 		{
-			LastComboId = i; 
+			LastFamilyId = i;
+			break;
+		}
+	}
+	RebuildModeOptions();
+	// Reset mode selection when family changes
+	CurrentMode = ModeOptions.Num() >0 ? ModeOptions[0] : nullptr;
+	if (ModeCombo.IsValid())
+	{
+		ModeCombo->SetSelectedItem(CurrentMode);
+	}
+	LastModeId =0;
+}
+
+void SOpen3DStreamFactory::OnModeChanged(FComboItemType NewValue, ESelectInfo::Type)
+{
+	CurrentMode = NewValue;
+	for (int i =0; i < ModeOptions.Num(); i++)
+	{
+		if (ModeOptions[i] == NewValue)
+		{
+			LastModeId = i;
 			break;
 		}
 	}
 }
 
+FText SOpen3DStreamFactory::GetCurrentFamily() const
+{
+	if (CurrentFamily.IsValid())
+	{
+		return FText::FromString(*CurrentFamily);
+	}
+	return LOCTEXT("InvalidComboEntryText", "<<Invalid option>>");
+}
+
+FText SOpen3DStreamFactory::GetCurrentMode() const
+{
+	if (CurrentMode.IsValid())
+	{
+		return FText::FromString(*CurrentMode);
+	}
+	// Fallback: show the first available option as the default until a choice is made
+	if (ModeOptions.Num() >0 && ModeOptions[0].IsValid())
+	{
+		return FText::FromString(*ModeOptions[0]);
+	}
+	return LOCTEXT("InvalidComboEntryText", "<<Invalid option>>");
+}
+
+EVisibility SOpen3DStreamFactory::GetModeVisibility() const
+{
+	// Hide when no modes are available (e.g., Loopback)
+	return (ModeOptions.Num() >0) ? EVisibility::Visible : EVisibility::Collapsed;
+}
+
 void SOpen3DStreamFactory::OnBackendChanged(FComboItemType NewValue, ESelectInfo::Type)
 {
 	CurrentBackend = NewValue;
-	for (int i = 0; i < BackendOptions.Num(); i++)
+	for (int i =0; i < BackendOptions.Num(); i++)
 	{
 		if (BackendOptions[i] == NewValue)
 		{
@@ -307,8 +479,8 @@ void SOpen3DStreamFactory::OnBackendChanged(FComboItemType NewValue, ESelectInfo
 
 EVisibility SOpen3DStreamFactory::GetWebRtcBackendVisibility() const
 {
-	FString ProtocolStr = CurrentProtocol.IsValid() ? *CurrentProtocol : TEXT("");
-	if (ProtocolStr.Contains(TEXT("WebRTC")))
+	const FString Fam = CurrentFamily.IsValid() ? *CurrentFamily : TEXT("");
+	if (Fam.Contains(TEXT("WebRTC")))
 	{
 		return EVisibility::Visible;
 	}
@@ -317,10 +489,9 @@ EVisibility SOpen3DStreamFactory::GetWebRtcBackendVisibility() const
 
 EVisibility SOpen3DStreamFactory::GetLiveKitFieldsVisibility() const
 {
-	FString ProtocolStr = CurrentProtocol.IsValid() ? *CurrentProtocol : TEXT("");
-	FString BackendStr = CurrentBackend.IsValid() ? *CurrentBackend : TEXT("");
-	
-	if (ProtocolStr.Contains(TEXT("WebRTC")) && BackendStr.Contains(TEXT("LiveKit")))
+	const FString Fam = CurrentFamily.IsValid() ? *CurrentFamily : TEXT("");
+	const FString BackendStr = CurrentBackend.IsValid() ? *CurrentBackend : TEXT("");
+	if (Fam.Contains(TEXT("WebRTC")) && BackendStr.Contains(TEXT("LiveKit")))
 	{
 		return EVisibility::Visible;
 	}
@@ -337,12 +508,48 @@ FText SOpen3DStreamFactory::GetCurrentBackend() const
 	return LOCTEXT("InvalidComboEntryText", "<<Invalid option>>");
 }
 
-FText SOpen3DStreamFactory::GetCurrentProtocol() const
+void SOpen3DStreamFactory::RebuildModeOptions()
 {
-	if (CurrentProtocol.IsValid())
+	ModeOptions.Reset();
+	const FString Fam = CurrentFamily.IsValid() ? *CurrentFamily : TEXT("TCP");
+	if (Fam.Equals(TEXT("TCP"), ESearchCase::IgnoreCase))
 	{
-		return FText::FromString(*CurrentProtocol);
+		// Receiver supports only client mode for TCP
+		ModeOptions.Add(MakeShareable(new FString(TEXT("Client"))));
+	}
+	else if (Fam.Equals(TEXT("UDP"), ESearchCase::IgnoreCase))
+	{
+		ModeOptions.Add(MakeShareable(new FString(TEXT("Server"))));
+	}
+	else if (Fam.Equals(TEXT("NNG"), ESearchCase::IgnoreCase))
+	{
+		ModeOptions.Add(MakeShareable(new FString(TEXT("Subscribe (to Publish)"))));
+		ModeOptions.Add(MakeShareable(new FString(TEXT("Client (to Pair Server)"))));
+		ModeOptions.Add(MakeShareable(new FString(TEXT("Server (to Pair Client)"))));
+	}
+	else if (Fam.Equals(TEXT("WebRTC"), ESearchCase::IgnoreCase))
+	{
+		ModeOptions.Add(MakeShareable(new FString(TEXT("Client"))));
+		ModeOptions.Add(MakeShareable(new FString(TEXT("Server"))));
+	}
+	else if (Fam.Contains(TEXT("Loopback")))
+	{
+		// No mode for loopback
 	}
 
-	return LOCTEXT("InvalidComboEntryText", "<<Invalid option>>");
+	// Ensure CurrentMode is always set to a valid default option after rebuild
+	if (ModeOptions.Num() >0)
+	{
+		if (!CurrentMode.IsValid() || !ModeOptions.Contains(CurrentMode))
+		{
+			CurrentMode = ModeOptions[0];
+		}
+		if (ModeCombo.IsValid())
+		{
+			ModeCombo->RefreshOptions();
+			ModeCombo->SetSelectedItem(CurrentMode);
+		}
+	}
 }
+
+#undef LOCTEXT_NAMESPACE

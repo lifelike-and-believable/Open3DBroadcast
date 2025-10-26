@@ -127,34 +127,32 @@ public:
     EO3DSTransportFamily TransportFamily = EO3DSTransportFamily::TCP;
 
     // Mode selection per family (conditional visibility)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::NNG", EditConditionHides))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bShowNngProps", EditConditionHides))
     EO3DSNngMode NngMode = EO3DSNngMode::Publisher;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::TCP", EditConditionHides))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bShowTcpProps", EditConditionHides))
     EO3DSTcpMode TcpMode = EO3DSTcpMode::Client;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC", EditConditionHides))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bShowWebRtcProps", EditConditionHides))
     EO3DSWebRtcMode WebRtcMode = EO3DSWebRtcMode::Client;
 
     // WebRTC backend selection (libdatachannel P2P or LiveKit SFU)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC", EditConditionHides))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bShowWebRtcProps", EditConditionHides))
     EO3DSWebRtcBackend WebRtcBackend = EO3DSWebRtcBackend::LibDataChannel;
 
-    // LiveKit-specific configuration (only shown when WebRTC + LiveKit backend)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|LiveKit", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC && WebRtcBackend == EO3DSWebRtcBackend::LiveKit", EditConditionHides))
-    FString LiveKitServerUrl = TEXT("wss://livekit.example.com");
+    // Common WebRTC room across backends (shown under WebRTC heading)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|WebRTC", meta=(EditCondition="bShowWebRtcProps", EditConditionHides))
+    FString WebRtcRoom = TEXT("room1");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|LiveKit", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC && WebRtcBackend == EO3DSWebRtcBackend::LiveKit", EditConditionHides))
-    FString LiveKitRoom = TEXT("room1");
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|LiveKit", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC && WebRtcBackend == EO3DSWebRtcBackend::LiveKit", EditConditionHides))
+    // LiveKit-specific configuration (only token kept; server URL uses Url)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|LiveKit", meta=(EditCondition="bShowLiveKitProps", EditConditionHides))
     FString LiveKitToken;
 
     // Endpoint and key (new names)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
     FString Url = TEXT("tcp://127.0.0.1:9000");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="false", EditConditionHides))
     FString Key;
 
     // Queue size for backpressure (bytes) (new name)
@@ -172,26 +170,26 @@ public:
     int32 TransportMaxQueuedBytes = 8 * 1024 * 1024;
 
     // WebRTC audio track settings (feature-gated; sender side)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|WebRTC", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC", EditConditionHides))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|WebRTC", meta=(EditCondition="bShowWebRtcProps", EditConditionHides))
     bool bEnableWebRTCAudio = false;
 
     // Optional input device name filter (substring match). Empty = default system device
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|WebRTC", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio", EditConditionHides))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|WebRTC", meta=(EditCondition="bShowWebRtcAudioProps", EditConditionHides))
     FString WebRTCAudioDevice;
 
     // Capture/encode parameters (targets; actual may be adjusted by stack)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|WebRTC", meta=(ClampMin="8000", ClampMax="48000", EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio", EditConditionHides))
-    int32 WebRTCAudioSampleRate = 48000;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|WebRTC", meta=(ClampMin="8000", ClampMax="48000", EditCondition="bShowWebRtcAudioProps", EditConditionHides))
+    int32 WebRTCAudioSampleRate =48000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|WebRTC", meta=(ClampMin="1", ClampMax="2", EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio", EditConditionHides))
-    int32 WebRTCAudioNumChannels = 1;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|WebRTC", meta=(ClampMin="1", ClampMax="2", EditCondition="bShowWebRtcAudioProps", EditConditionHides))
+    int32 WebRTCAudioNumChannels =1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|WebRTC", meta=(ClampMin="6", ClampMax="128", EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio", EditConditionHides))
-    int32 WebRTCAudioBitrateKbps = 32;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|WebRTC", meta=(ClampMin="6", ClampMax="128", EditCondition="bShowWebRtcAudioProps", EditConditionHides))
+    int32 WebRTCAudioBitrateKbps =32;
 
     // Extra buffering on receiver to trade latency for resilience
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|WebRTC", meta=(ClampMin="0", ClampMax="500", EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio", EditConditionHides))
-    int32 WebRTCAudioPlayoutDelayMs = 0;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|WebRTC", meta=(ClampMin="0", ClampMax="500", EditCondition="bShowWebRtcAudioProps", EditConditionHides))
+    int32 WebRTCAudioPlayoutDelayMs =0;
 
     // Curve normalization and filtering configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Curves")
@@ -234,6 +232,9 @@ protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void PostLoad() override;
+    virtual void OnRegister() override;
+    virtual void PostInitProperties() override;
 
 private:
     void BindToTarget();
@@ -299,4 +300,41 @@ private:
     void SetupInternalTransport();
     void TeardownInternalTransport();
     void OnSerializedForTransport(const FString& /*Subject*/, const TArray<uint8>& Buffer, double Timestamp);
+
+    // Helper properties used only for EditCondition evaluation (kept transient)
+    UPROPERTY(Transient, meta=(AllowPrivateAccess="true"))
+    bool bTransportFamilyIsNNG = false;
+
+    UPROPERTY(Transient, meta=(AllowPrivateAccess="true"))
+    bool bTransportFamilyIsTCP = false;
+
+    UPROPERTY(Transient, meta=(AllowPrivateAccess="true"))
+    bool bTransportFamilyIsWebRTC = false;
+
+    UPROPERTY(Transient, meta=(AllowPrivateAccess="true"))
+    bool bWebRtcBackendIsLiveKit = false;
+
+    // Presentation helpers to avoid complex edit condition expressions
+    UPROPERTY(Transient, meta=(AllowPrivateAccess="true"))
+    bool bShowNngProps = false;
+
+    UPROPERTY(Transient, meta=(AllowPrivateAccess="true"))
+    bool bShowTcpProps = false;
+
+    UPROPERTY(Transient, meta=(AllowPrivateAccess="true"))
+    bool bShowWebRtcProps = false;
+
+    UPROPERTY(Transient, meta=(AllowPrivateAccess="true"))
+    bool bShowWebRtcAudioProps = false;
+
+    UPROPERTY(Transient, meta=(AllowPrivateAccess="true"))
+    bool bShowLiveKitProps = false;
+
+    // Update helper flags when properties change
+    void UpdateEditConditionHelpers();
+
+    // Lifecycle hooks
+ #if WITH_EDITOR
+ virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+ #endif
 };

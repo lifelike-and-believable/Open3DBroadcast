@@ -26,6 +26,11 @@
 #include "Transports/O3DSNngTransport.h"
 #include "Transports/O3DSWebRtcTransport.h"
 
+// Forward declare property changed event type used in header override
+#if WITH_EDITOR
+#include "UObject/UnrealType.h"
+#endif
+
 // CVar to toggle verbose debug logging
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugPose(
     TEXT("o3ds.Broadcast.DebugPose"),
@@ -64,7 +69,7 @@ static FString O3DS_EnsureWebRtcRoleInUrl(const FString& InUrl, EO3DSTransportKi
         {
             return Out; // leave as-is
         }
-        if (!Out.Contains(TEXT("role=")))
+        if (!Out.Contains(TEXT("role="), ESearchCase::IgnoreCase))
         {
             const TCHAR* RoleStr = (Kind == EO3DSTransportKind::WebRTCClient) ? TEXT("client") : TEXT("server");
             Out += Out.Contains(TEXT("?")) ? FString::Printf(TEXT("&role=%s"), RoleStr)
@@ -73,7 +78,7 @@ static FString O3DS_EnsureWebRtcRoleInUrl(const FString& InUrl, EO3DSTransportKi
         return Out;
     }
     // Family+mode path
-    if (!Out.Contains(TEXT("role=")))
+    if (!Out.Contains(TEXT("role="), ESearchCase::IgnoreCase))
     {
         const TCHAR* RoleStr = (WebRtcMode == EO3DSWebRtcMode::Client) ? TEXT("client") : TEXT("server");
         Out += Out.Contains(TEXT("?")) ? FString::Printf(TEXT("&role=%s"), RoleStr)
@@ -88,7 +93,7 @@ static FString O3DS_InjectModeIntoUrl(const FString& InUrl, EO3DSTransportFamily
     FString Out = InUrl;
     if (Family == EO3DSTransportFamily::NNG)
     {
-        if (!Out.Contains(TEXT("mode=")))
+        if (!Out.Contains(TEXT("mode="), ESearchCase::IgnoreCase))
         {
             FString ModeParam;
             switch (NngMode)
@@ -249,6 +254,16 @@ void UO3DSBroadcastComponent::SetupInternalTransport()
                 AudioCfg.BitrateKbps = WebRTCAudioBitrateKbps;
                 AudioCfg.PlayoutDelayMs = WebRTCAudioPlayoutDelayMs;
                 Wrtc->SetAudioConfig(AudioCfg);
+            }
+        }
+
+        // Ensure WebRTC URL carries room parameter when enabled on component
+        if (TransportFamily == EO3DSTransportFamily::WebRTC)
+        {
+            if (!EffectiveUrl.Contains(TEXT("room="), ESearchCase::IgnoreCase) && !WebRtcRoom.IsEmpty())
+            {
+                EffectiveUrl += EffectiveUrl.Contains(TEXT("?")) ? FString::Printf(TEXT("&room=%s"), *WebRtcRoom)
+                                                                : FString::Printf(TEXT("?room=%s"), *WebRtcRoom);
             }
         }
 
@@ -1020,3 +1035,48 @@ void UO3DSBroadcastComponent::TickComponent(float DeltaTime, ELevelTick TickType
         }
     }
 }
+
+void UO3DSBroadcastComponent::UpdateEditConditionHelpers()
+{
+    bTransportFamilyIsNNG = (TransportFamily == EO3DSTransportFamily::NNG);
+    bTransportFamilyIsTCP = (TransportFamily == EO3DSTransportFamily::TCP);
+    bTransportFamilyIsWebRTC = (TransportFamily == EO3DSTransportFamily::WebRTC);
+    bWebRtcBackendIsLiveKit = (WebRtcBackend == EO3DSWebRtcBackend::LiveKit);
+
+    // Presentation flags depend on auto-create and family/backend/audio
+    const bool bAuto = bAutoCreateTransport;
+    bShowNngProps = bAuto && bTransportFamilyIsNNG;
+    bShowTcpProps = bAuto && bTransportFamilyIsTCP;
+    bShowWebRtcProps = bAuto && bTransportFamilyIsWebRTC;
+    bShowWebRtcAudioProps = bShowWebRtcProps && bEnableWebRTCAudio;
+    bShowLiveKitProps = bAuto && bTransportFamilyIsWebRTC && bWebRtcBackendIsLiveKit;
+}
+
+void UO3DSBroadcastComponent::PostInitProperties()
+{
+    Super::PostInitProperties();
+    UpdateEditConditionHelpers();
+}
+
+#if WITH_EDITOR
+void UO3DSBroadcastComponent::PostLoad()
+{
+    Super::PostLoad();
+    UpdateEditConditionHelpers();
+}
+#endif
+
+void UO3DSBroadcastComponent::OnRegister()
+{
+    Super::OnRegister();
+    UpdateEditConditionHelpers();
+}
+
+#if WITH_EDITOR
+void UO3DSBroadcastComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+    Super::PostEditChangeProperty(PropertyChangedEvent);
+    // Update helper flags so EditCondition expressions referencing them remain valid
+    UpdateEditConditionHelpers();
+}
+#endif
