@@ -54,7 +54,7 @@ public:
 	virtual bool EnableAudioSend(const FAudioSendConfig& Config) override;
 	virtual bool PushPcm(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, 
 	                     int32 NumChannels, int32 SampleRate, double TimestampSec) override;
-	virtual FOnRemoteAudio& OnRemoteAudio() override { return RemoteAudioDelegate; }
+	virtual FOnRemoteAudio& OnRemoteAudio() override { return RemoteAudioCallback; }
 
 	// Additional helpers (for backward compatibility)
 	bool Send(const uint8* Data, int32 Size); // Alias for SendDataLossy

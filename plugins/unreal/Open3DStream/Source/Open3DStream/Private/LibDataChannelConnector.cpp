@@ -313,17 +313,14 @@ bool FLibDataChannelConnector::EnableAudioSend(const FAudioSendConfig& Config)
 	return false;
 }
 
-void FLibDataChannelConnector::PushPcm(const int16* Samples, int32 NumSamples)
+bool FLibDataChannelConnector::PushPcm(const FString& StreamLabel, const float* Interleaved, int32 NumFrames,
+                                       int32 NumChannels, int32 SampleRate, double TimestampSec)
 {
-	// Audio tracks not yet implemented for libdatachannel connector.
-	// No-op for now.
-}
-
-void FLibDataChannelConnector::OnRemoteAudio(FOnRemoteAudio Callback)
-{
-	// Audio tracks not yet implemented for libdatachannel connector.
-	// Store callback for future implementation.
-	RemoteAudioCallback = Callback;
+    // Audio tracks not yet implemented for libdatachannel connector.
+    // Stub to satisfy interface; return false to indicate unsupported.
+    UE_LOG(LogTemp, Verbose, TEXT("FLibDataChannelConnector::PushPcm() not implemented (Stream=%s, Frames=%d, Ch=%d, Rate=%d)"),
+        *StreamLabel, NumFrames, NumChannels, SampleRate);
+    return false;
 }
 
 void FLibDataChannelConnector::Tick()

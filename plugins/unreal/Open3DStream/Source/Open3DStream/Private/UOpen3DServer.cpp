@@ -2,7 +2,6 @@
 #include "o3ds/async_pair.h"
 #include "o3ds/async_subscriber.h"
 #include "IWebRTCConnector.h"
-#include "WebRTCConnectorFactory.h"
 #include "Open3DStreamSourceSettings.h"
 #include "SocketSubsystem.h"
 #include "Interfaces/IPv4/IPv4Address.h"
