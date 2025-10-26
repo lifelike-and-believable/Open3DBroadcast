@@ -341,7 +341,8 @@ bool O3DSServer::write(const char *msg, size_t len)
 {
 	if (mWebRTCConnector)
 	{
-		return mWebRTCConnector->Send((const uint8*)msg, (int32)len);
+		// Default to lossy channel for streaming payloads; prefer Reliable for small control messages.
+		return mWebRTCConnector->SendDataLossy(reinterpret_cast<const uint8*>(msg), static_cast<int32>(len));
 	}
 	
 	if (!mServer) return false;
