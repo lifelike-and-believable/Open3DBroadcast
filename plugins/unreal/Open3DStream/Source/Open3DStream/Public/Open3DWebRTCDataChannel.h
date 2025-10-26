@@ -5,9 +5,12 @@
 #include "CoreMinimal.h"
 #include <functional>
 
+// Forward declarations
+enum class EO3DSWebRtcBackend : uint8;
+
 /**
  * Public wrapper for WebRTC DataChannel used by broadcast/receiver modules.
- * Internally delegates to the private FWebRTCConnector implementation in the Open3DStream module.
+ * Internally delegates to the IWebRTCConnector interface implementation via factory.
  */
 class OPEN3DSTREAM_API FO3DSWebRTCDataChannel
 {
@@ -16,9 +19,10 @@ public:
     ~FO3DSWebRTCDataChannel();
 
     // Start a WebRTC peer connection and open a binary DataChannel.
-    // Url example: webrtc://host:port/room?role=client|server&stun=stun:stun.l.google.com:19302
+    // Url example: webrtc://host:port/room?role=client|server&stun=stun.l.google.com:19302
     // If role is omitted, defaults to client.
-    bool Start(const FString& Url);
+    // Backend parameter selects between LibDataChannel (P2P) and LiveKit (SFU).
+    bool Start(const FString& Url, EO3DSWebRtcBackend Backend = static_cast<EO3DSWebRtcBackend>(0));
 
     // Stop the connection and close the DataChannel.
     void Stop();

@@ -1,21 +1,41 @@
 // Copyright (c) Open3DStream Contributors
 
 #include "Open3DWebRTCDataChannel.h"
-#include "WebRTCConnector.h"
+#include "IWebRTCConnector.h"
+#include "O3DSBroadcastTransportAdapter.h" // For EO3DSWebRtcBackend enum
+#include "Open3DStreamSourceSettings.h"    // For EO3DSWebRtcBackendReceiver enum
+
+// Helper to convert broadcast backend enum to receiver backend enum
+static EO3DSWebRtcBackendReceiver ConvertBackendEnum(EO3DSWebRtcBackend BroadcastBackend)
+{
+    switch (BroadcastBackend)
+    {
+    case EO3DSWebRtcBackend::LibDataChannel:
+        return EO3DSWebRtcBackendReceiver::LibDataChannel;
+    case EO3DSWebRtcBackend::LiveKit:
+        return EO3DSWebRtcBackendReceiver::LiveKit;
+    default:
+        return EO3DSWebRtcBackendReceiver::LibDataChannel;
+    }
+}
 
 class FO3DSWebRTCDataChannel::FImpl
 {
 public:
-    FImpl()
-    {
-        Connector = MakeUnique<FWebRTCConnector>();
-    }
+    FImpl() = default;
 
-    bool Start(const FString& Url)
+    bool Start(const FString& Url, EO3DSWebRtcBackend Backend)
     {
+        // Convert backend enum and create connector via factory
+        EO3DSWebRtcBackendReceiver ReceiverBackend = ConvertBackendEnum(Backend);
+        Connector = CreateWebRTCConnector(ReceiverBackend);
+        if (!Connector)
+        {
+            UE_LOG(LogTemp, Error, TEXT("Failed to create WebRTC connector for backend %d"), (int)Backend);
+            return false;
+        }
+
         // Default role client unless URL has role=server
-        FString Host; uint16 Port = 0; FString Room; TMap<FString,FString> Params;
-        // Use FWebRTCConnector helper to parse internally; if not available, fall back to simple heuristic
         const bool bServer = Url.Contains(TEXT("role=server"));
         const bool bOk = Connector->Start(Url, bServer);
         if (!bOk)
@@ -36,12 +56,13 @@ public:
         if (Connector)
         {
             Connector->Stop();
+            Connector.Reset();
         }
     }
 
     bool Send(const uint8* Data, int32 Size)
     {
-        return Connector ? Connector->Send(Data, Size) : false;
+        return Connector ? Connector->SendDataLossy(Data, Size) : false;
     }
 
     bool IsConnected() const
@@ -51,7 +72,8 @@ public:
 
     bool IsOpen() const
     {
-        return Connector ? Connector->IsDataChannelOpen() : false;
+        // For now, assume connected == open for the interface
+        return Connector ? Connector->IsConnected() : false;
     }
 
     void Tick()
@@ -72,7 +94,7 @@ public:
         }
     }
 
-    TUniquePtr<FWebRTCConnector> Connector;
+    TSharedPtr<IWebRTCConnector> Connector;
     TQueue<TArray<uint8>, EQueueMode::Mpsc> Received;
     TFunction<void(const uint8*, int32)> OnMessage;
 };
@@ -80,7 +102,7 @@ public:
 FO3DSWebRTCDataChannel::FO3DSWebRTCDataChannel() : Impl(MakeUnique<FImpl>()) {}
 FO3DSWebRTCDataChannel::~FO3DSWebRTCDataChannel() { Stop(); }
 
-bool FO3DSWebRTCDataChannel::Start(const FString& Url) { return Impl->Start(Url); }
+bool FO3DSWebRTCDataChannel::Start(const FString& Url, EO3DSWebRtcBackend Backend) { return Impl->Start(Url, Backend); }
 void FO3DSWebRTCDataChannel::Stop() { if (Impl) Impl->Stop(); }
 bool FO3DSWebRTCDataChannel::Send(const uint8* Data, int32 Size) { return Impl->Send(Data, Size); }
 bool FO3DSWebRTCDataChannel::IsConnected() const { return Impl->IsConnected(); }
