@@ -136,6 +136,20 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC", EditConditionHides))
     EO3DSWebRtcMode WebRtcMode = EO3DSWebRtcMode::Client;
 
+    // WebRTC backend selection (libdatachannel P2P or LiveKit SFU)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC", EditConditionHides))
+    EO3DSWebRtcBackend WebRtcBackend = EO3DSWebRtcBackend::LibDataChannel;
+
+    // LiveKit-specific configuration (only shown when WebRTC + LiveKit backend)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|LiveKit", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC && WebRtcBackend == EO3DSWebRtcBackend::LiveKit", EditConditionHides))
+    FString LiveKitServerUrl = TEXT("wss://livekit.example.com");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|LiveKit", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC && WebRtcBackend == EO3DSWebRtcBackend::LiveKit", EditConditionHides))
+    FString LiveKitRoom = TEXT("room1");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|LiveKit", meta=(EditCondition="bAutoCreateTransport && TransportFamily == EO3DSTransportFamily::WebRTC && WebRtcBackend == EO3DSWebRtcBackend::LiveKit", EditConditionHides))
+    FString LiveKitToken;
+
     // Endpoint and key (new names)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
     FString Url = TEXT("tcp://127.0.0.1:9000");

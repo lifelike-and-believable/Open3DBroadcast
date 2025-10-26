@@ -39,6 +39,24 @@ class OPEN3DSTREAM_API SOpen3DStreamFactory : public SCompoundWidget
 	void OnProtocolChanged(FComboItemType NewValue, ESelectInfo::Type);
 	FText GetCurrentProtocol() const;
 
+	// Backend Combo
+	void OnBackendChanged(FComboItemType NewValue, ESelectInfo::Type);
+	FText GetCurrentBackend() const;
+
+	// LiveKit configuration
+	void SetLiveKitServerUrl(const FText& InText) { mLiveKitServerUrl = InText; }
+	FText GetLiveKitServerUrl() const { return mLiveKitServerUrl; }
+	
+	void SetLiveKitRoom(const FText& InText) { mLiveKitRoom = InText; }
+	FText GetLiveKitRoom() const { return mLiveKitRoom; }
+	
+	void SetLiveKitToken(const FText& InText) { mLiveKitToken = InText; }
+	FText GetLiveKitToken() const { return mLiveKitToken; }
+
+	// Visibility helpers
+	EVisibility GetWebRtcBackendVisibility() const;
+	EVisibility GetLiveKitFieldsVisibility() const;
+
 	// Ensure we can handle Enter even when focus is not in a text box
 	virtual bool SupportsKeyboardFocus() const override { return true; }
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
@@ -51,11 +69,24 @@ private:
 
 	FText mUrl;
 	FText mKey;
+	FText mLiveKitServerUrl = FText::FromString(TEXT("wss://livekit.example.com"));
+	FText mLiveKitRoom = FText::FromString(TEXT("room1"));
+	FText mLiveKitToken;
 
 	TArray<FComboItemType> Options;
 	FComboItemType CurrentProtocol;
 
+	TArray<FComboItemType> BackendOptions;
+	FComboItemType CurrentBackend;
+
+	// Slate widgets for conditional visibility
+	TSharedPtr<SHorizontalBox> WebRtcBackendRow;
+	TSharedPtr<SHorizontalBox> LiveKitServerUrlRow;
+	TSharedPtr<SHorizontalBox> LiveKitRoomRow;
+	TSharedPtr<SHorizontalBox> LiveKitTokenRow;
+
 	static FText LastUrl;
 	static int LastComboId;
+	static int LastBackendComboId;
 
 };
