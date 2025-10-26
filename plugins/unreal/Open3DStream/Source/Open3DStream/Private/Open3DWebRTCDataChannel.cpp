@@ -3,6 +3,8 @@
 #include "Open3DWebRTCDataChannel.h"
 #include "IWebRTCConnector.h"
 #include "Open3DStreamSourceSettings.h"    // For EO3DSWebRtcBackendReceiver enum
+// For TQueue and EQueueMode
+#include "Containers/Queue.h"
 
 class FO3DSWebRTCDataChannel::FImpl
 {
