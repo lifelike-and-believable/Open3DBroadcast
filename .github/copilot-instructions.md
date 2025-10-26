@@ -10,7 +10,7 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 - **Source of truth:** This document. Any ambiguity must be resolved by updating this doc first, then implementing.
 - **UE API accuracy:** Verify all Unreal API signatures against **UE 5.6** documentation before use. Do not “best guess.” 
   - Reference Sources in order of preference:
-    - Unreal Engine 5.6 source code on GitHub: @lifelike-and-believable/UnrealEngine
+    - Unreal Engine 5.6 source code on GitHub: @lifelike-and-believable/UnrealEngine - Always use Github MCP server to access
     - "Unreal Engine C++ API Reference" + class name(s) (web search). 
     - https://dev.epicgames.com/documentation/en-us/unreal-engine/API (direct URL)
 - **Never Assume:** Always base decisions on actual APIs, build logs, etc. Always use Github MCP Server to interact with Github resources (logs, issues, PRs, repository access, etc)
