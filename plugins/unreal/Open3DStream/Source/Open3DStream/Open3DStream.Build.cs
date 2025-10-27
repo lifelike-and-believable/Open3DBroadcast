@@ -120,9 +120,18 @@ public class Open3DStream : ModuleRules
             PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "mbedtls.lib"));
             PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "mbedx509.lib"));
             PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "mbedcrypto.lib"));
-            // Required Windows system libraries
-            PublicSystemLibraries.Add("bcrypt.lib");  // For BCryptGenRandom (mbedtls entropy)
-            PublicSystemLibraries.Add("Synchronization.lib");  // For C11 threading (_Thrd_*, _Cnd_*)
+            // Required Windows system libraries for libdatachannel/usrsctp/mbedtls
+            // Notes:
+            //  - Winsock and helpers are needed by usrsctp/juice
+            //  - secur32/crypt32 provide TLS and credential routines
+            //  - winmm is used for time functions on Windows
+            //  - bcrypt is used by mbedtls for entropy
+            PublicSystemLibraries.Add("ws2_32.lib");
+            PublicSystemLibraries.Add("iphlpapi.lib");
+            PublicSystemLibraries.Add("secur32.lib");
+            PublicSystemLibraries.Add("crypt32.lib");
+            PublicSystemLibraries.Add("winmm.lib");
+            PublicSystemLibraries.Add("bcrypt.lib");
         }
         else if (Target.Platform == UnrealTargetPlatform.Linux)
         {

@@ -11,6 +11,7 @@
 
 // libdatachannel includes
 #include <rtc/rtc.hpp>
+#include <cstddef> // for std::byte
 #include <memory>
 #include <vector>
 #include <string>
