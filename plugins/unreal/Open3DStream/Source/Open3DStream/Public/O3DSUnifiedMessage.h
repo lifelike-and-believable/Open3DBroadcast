@@ -40,40 +40,31 @@ namespace O3DS
 
     struct FUnifiedHeader
     {
-        uint32 MagicBE = 0;     // 'O3DA'
-        uint8  Version = 1;     // 1
-        uint8  Kind = 0;        // EUnifiedKind
-        uint8  Codec = 0;       // EUnifiedCodec
-        uint8  Flags = 0;       // reserved
-        uint64 TimestampUsBE = 0; // microseconds since arbitrary epoch
-        uint32 PayloadSizeBE = 0; // bytes
+        // Raw fields decoded to host order by ParseUnifiedMessage
+        uint32 MagicBE = 0;        // 'O3DA' as big-endian literal for validation
+        uint8  Version = 1;        // 1
+        uint8  Kind = 0;           // EUnifiedKind
+        uint8  Codec = 0;          // EUnifiedCodec
+        uint8  Flags = 0;          // reserved
+        uint64 TimestampUsHost = 0; // microseconds since epoch, host order
+        uint32 PayloadSizeHost = 0; // bytes, host order
 
         static constexpr uint32 MagicValueBE() { return 0x4F334441u; } // 'O3DA'
 
         bool IsValidMagic() const { return MagicBE == MagicValueBE(); }
-        uint32 PayloadSize() const { return ByteSwap32(PayloadSizeBE); }
-        uint64 TimestampUs() const { return ByteSwap64(TimestampUsBE); }
+        uint32 PayloadSize() const { return PayloadSizeHost; }
+        uint64 TimestampUs() const { return TimestampUsHost; }
         EUnifiedKind GetKind() const { return static_cast<EUnifiedKind>(Kind); }
         EUnifiedCodec GetCodec() const { return static_cast<EUnifiedCodec>(Codec); }
 
-        static uint16 ByteSwap16(uint16 V)
+        static uint32 ReadBE32(const uint8* P)
         {
-            return (uint16)((V >> 8) | (V << 8));
+            return (uint32(P[0]) << 24) | (uint32(P[1]) << 16) | (uint32(P[2]) << 8) | uint32(P[3]);
         }
-        static uint32 ByteSwap32(uint32 V)
+        static uint64 ReadBE64(const uint8* P)
         {
-            return ((V & 0x000000FFu) << 24) | ((V & 0x0000FF00u) << 8) | ((V & 0x00FF0000u) >> 8) | ((V & 0xFF000000u) >> 24);
-        }
-        static uint64 ByteSwap64(uint64 V)
-        {
-            return ((V & 0x00000000000000FFull) << 56) |
-                   ((V & 0x000000000000FF00ull) << 40) |
-                   ((V & 0x0000000000FF0000ull) << 24) |
-                   ((V & 0x00000000FF000000ull) << 8)  |
-                   ((V & 0x000000FF00000000ull) >> 8)  |
-                   ((V & 0x0000FF0000000000ull) >> 24) |
-                   ((V & 0x00FF000000000000ull) >> 40) |
-                   ((V & 0xFF00000000000000ull) >> 56);
+            return (uint64(P[0]) << 56) | (uint64(P[1]) << 48) | (uint64(P[2]) << 40) | (uint64(P[3]) << 32) |
+                   (uint64(P[4]) << 24) | (uint64(P[5]) << 16) | (uint64(P[6]) << 8)  | uint64(P[7]);
         }
     };
 
@@ -94,27 +85,34 @@ namespace O3DS
                                     const uint8*& OutPayloadPtr,
                                     int32& OutPayloadSize)
     {
-        const int32 MinSize = sizeof(FUnifiedHeader);
-        if (!Data || Size < MinSize)
+        // Header is exactly 20 bytes on the wire: 4 + 1 + 1 + 1 + 1 + 8 + 4
+        constexpr int32 WireHeaderSize = 20;
+        if (!Data || Size < WireHeaderSize)
         {
             return false;
         }
-        // Safe memcpy to avoid alignment/packing concerns
-        FUnifiedHeader Hdr;
-        FMemory::Memcpy(&Hdr, Data, sizeof(FUnifiedHeader));
-        if (!Hdr.IsValidMagic())
+
+        FUnifiedHeader H;
+        H.MagicBE = FUnifiedHeader::ReadBE32(Data + 0);
+        if (!H.IsValidMagic())
         {
             return false;
         }
-        const uint32 PayloadSize = Hdr.PayloadSize();
-        const int64 TotalSize = (int64)sizeof(FUnifiedHeader) + (int64)PayloadSize;
-        if (TotalSize > Size)
+        H.Version = Data[4];
+        H.Kind = Data[5];
+        H.Codec = Data[6];
+        H.Flags = Data[7];
+        H.TimestampUsHost = FUnifiedHeader::ReadBE64(Data + 8);
+        H.PayloadSizeHost = FUnifiedHeader::ReadBE32(Data + 16);
+
+        const int64 Total = (int64)WireHeaderSize + (int64)H.PayloadSizeHost;
+        if (Total > Size)
         {
             return false;
         }
-        OutHeader = Hdr;
-        OutPayloadPtr = Data + sizeof(FUnifiedHeader);
-        OutPayloadSize = (int32)PayloadSize;
+        OutHeader = H;
+        OutPayloadPtr = Data + WireHeaderSize;
+        OutPayloadSize = (int32)H.PayloadSizeHost;
         return true;
     }
 }
