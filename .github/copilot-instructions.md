@@ -13,7 +13,7 @@ This file defines strict, testable rules so coding agents deliver high‑quality
     - Unreal Engine 5.6 source code on GitHub: @lifelike-and-believable/UnrealEngine - Always use Github MCP server to access
     - "Unreal Engine C++ API Reference" + class name(s) (web search). 
     - https://dev.epicgames.com/documentation/en-us/unreal-engine/API (direct URL)
-- **Never Assume:** Always base decisions on actual APIs, build logs, etc. Always use Github MCP Server to interact with Github resources (logs, issues, PRs, repository access, etc)
+- **Never Assume:** Always base decisions on actual APIs, build logs, etc. Always use Github MCP Server or Github CLI to interact with Github resources (logs, issues, PRs, repository access, etc)
 - **Determinism first:** Prefer predictable behavior over opportunistic performance wins unless performance is a stated acceptance criterion.
 - **Small steps:** Break work into small, testable tasks. Each PR should do one thing well, with passing checks and updated docs.
 - **Protocol schema:** `src/o3ds.fbs` is the authoritative source for data structures. After changes, regenerate `src/o3ds_generated.h` with `flatc --cpp src/o3ds.fbs`.
