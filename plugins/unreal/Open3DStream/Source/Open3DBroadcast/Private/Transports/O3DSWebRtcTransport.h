@@ -5,7 +5,10 @@
 #include "CoreMinimal.h"
 #include "IBroadcastTransport.h"
 #include "Open3DWebRTCDataChannel.h"
+#include "O3DSUnifiedMessage.h" // Unified header for audio multiplexing
 #include "Open3DStreamSourceSettings.h" // for EO3DSWebRtcBackendReceiver enum
+#include "Open3DBroadcast.h" // LogO3DSBroadcast category
+#include "HAL/IConsoleManager.h" // TAutoConsoleVariable
 
 // Debug cvar for transport send logging
 static TAutoConsoleVariable<int32> CVarO3DSWebRtcTransportDebug(
@@ -19,6 +22,43 @@ static TAutoConsoleVariable<int32> CVarO3DSWebRtcTransportDebugPing(
     TEXT("o3ds.Broadcast.WebRTC.DebugPing"),
     0,
     TEXT("When enabled, send a 4-byte heartbeat every second over the data channel to validate send path (0/1)."),
+    ECVF_Default);
+
+// Debug: optional built-in sine tone generator to validate audio receive path over DataChannel
+static TAutoConsoleVariable<int32> CVarO3DSWebRtcDebugToneEnable(
+    TEXT("o3ds.Broadcast.WebRTC.DebugToneEnable"),
+    0,
+    TEXT("Enable sending a synthetic PCM16 sine tone over WebRTC DataChannel using the O3DA header (0/1)."),
+    ECVF_Default);
+
+static TAutoConsoleVariable<float> CVarO3DSWebRtcDebugToneFreq(
+    TEXT("o3ds.Broadcast.WebRTC.DebugToneFreq"),
+    440.0f,
+    TEXT("Debug tone frequency in Hz."),
+    ECVF_Default);
+
+static TAutoConsoleVariable<float> CVarO3DSWebRtcDebugToneLevel(
+    TEXT("o3ds.Broadcast.WebRTC.DebugToneLevel"),
+    0.25f,
+    TEXT("Debug tone level (0..1)."),
+    ECVF_Default);
+
+static TAutoConsoleVariable<int32> CVarO3DSWebRtcDebugToneChannels(
+    TEXT("o3ds.Broadcast.WebRTC.DebugToneChannels"),
+    1,
+    TEXT("Debug tone channels (1=mono, 2=stereo)."),
+    ECVF_Default);
+
+static TAutoConsoleVariable<int32> CVarO3DSWebRtcDebugToneSampleRate(
+    TEXT("o3ds.Broadcast.WebRTC.DebugToneSampleRate"),
+    48000,
+    TEXT("Debug tone sample rate in Hz."),
+    ECVF_Default);
+
+static TAutoConsoleVariable<int32> CVarO3DSWebRtcDebugToneFrameMs(
+    TEXT("o3ds.Broadcast.WebRTC.DebugToneFrameMs"),
+    20,
+    TEXT("Debug tone frame duration in milliseconds (typical 10 or 20)."),
     ECVF_Default);
 
 // Temporary audio configuration while migrating to libwebrtc native audio tracks
@@ -181,17 +221,112 @@ public:
                     LastPingTime = Now;
                 }
             }
+
+            // Debug tone generator: send PCM16 frames with O3DA header over DataChannel
+            if (CVarO3DSWebRtcDebugToneEnable->GetInt() != 0 && Channel->IsOpen())
+            {
+                SendDebugToneIfDue();
+            }
         }
     }
 
     virtual const FCounters& GetCounters() const override { return Counters; }
 
 private:
+    void SendDebugToneIfDue()
+    {
+        const int32 SampleRate = FMath::Max(8000, CVarO3DSWebRtcDebugToneSampleRate->GetInt());
+        const int32 Channels = FMath::Clamp(CVarO3DSWebRtcDebugToneChannels->GetInt(), 1, 2);
+        const int32 FrameMs = FMath::Clamp(CVarO3DSWebRtcDebugToneFrameMs->GetInt(), 5, 60);
+        const float Freq = FMath::Max(20.0f, CVarO3DSWebRtcDebugToneFreq->GetFloat());
+        const float Level = FMath::Clamp(CVarO3DSWebRtcDebugToneLevel->GetFloat(), 0.0f, 1.0f);
+
+        const double Now = FPlatformTime::Seconds();
+        const double FrameDurSec = FrameMs / 1000.0;
+        if (LastDebugToneTime > 0.0 && (Now - LastDebugToneTime) < FrameDurSec)
+        {
+            return; // Not yet time for next frame
+        }
+
+        const int32 Frames = (int32)FMath::RoundToInt((double)SampleRate * FrameDurSec);
+        const int32 Samples = Frames * Channels;
+
+        // Generate interleaved PCM16
+        TArray<int16> PcmSamples;
+        PcmSamples.SetNumUninitialized(Samples);
+        const double TwoPiF = 2.0 * PI * (double)Freq;
+        for (int32 i = 0; i < Frames; ++i)
+        {
+            const double s = FMath::Sin((float)(TwoPiF * (DebugToneFrameIndex / (double)SampleRate)));
+            const int16 v = (int16)FMath::Clamp(s * Level * 32767.0, -32768.0, 32767.0);
+            for (int32 ch = 0; ch < Channels; ++ch)
+            {
+                PcmSamples[i * Channels + ch] = v;
+            }
+            ++DebugToneFrameIndex;
+        }
+
+        // Build minimal metadata: [LabelLen][Label][SubjectLen][Subject]
+        const ANSICHAR* LabelAnsi = "o3ds:mix"; // 8 bytes label
+        const uint8 LabelLen = 8;
+        const uint8 SubjectLen = 0;
+
+        TArray<uint8> Payload;
+        Payload.Reserve(2 + LabelLen + (Samples * sizeof(int16)));
+        Payload.Add(LabelLen);
+        Payload.Append(reinterpret_cast<const uint8*>(LabelAnsi), LabelLen);
+        Payload.Add(SubjectLen);
+        Payload.Append(reinterpret_cast<const uint8*>(PcmSamples.GetData()), PcmSamples.Num() * sizeof(int16));
+
+        // Pack O3DA header (big-endian fields)
+        const uint32 Magic = 0x4F334441u; // 'O3DA'
+        const uint8 Version = 1;
+        const uint8 Kind = static_cast<uint8>(O3DS::EUnifiedKind::Audio);
+        const uint8 Codec = static_cast<uint8>(O3DS::EUnifiedCodec::PCM16);
+        const uint8 Flags = 0;
+        const uint64 TsUs = (uint64)(Now * 1000000.0);
+        const uint32 PayloadSize = (uint32)Payload.Num();
+
+    TArray<uint8> Buf;
+    Buf.Reserve(20 + Payload.Num()); // fixed 20-byte wire header
+        // Write 4-byte magic BE
+        Buf.Add((uint8)((Magic >> 24) & 0xFF));
+        Buf.Add((uint8)((Magic >> 16) & 0xFF));
+        Buf.Add((uint8)((Magic >> 8) & 0xFF));
+        Buf.Add((uint8)(Magic & 0xFF));
+        // Version/Kind/Codec/Flags
+        Buf.Add(Version);
+        Buf.Add(Kind);
+        Buf.Add(Codec);
+        Buf.Add(Flags);
+        // TimestampUs BE
+        for (int i = 7; i >= 0; --i)
+        {
+            Buf.Add((uint8)((TsUs >> (i * 8)) & 0xFF));
+        }
+        // PayloadSize BE
+        Buf.Add((uint8)((PayloadSize >> 24) & 0xFF));
+        Buf.Add((uint8)((PayloadSize >> 16) & 0xFF));
+        Buf.Add((uint8)((PayloadSize >> 8) & 0xFF));
+        Buf.Add((uint8)(PayloadSize & 0xFF));
+
+        // Append payload
+        Buf.Append(Payload);
+
+        const bool bOk = Channel->Send(Buf.GetData(), Buf.Num());
+        if (bOk && CVarO3DSWebRtcTransportDebug->GetInt() != 0)
+        {
+            UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[WebRTC] DebugTone sent: %d bytes (%d frames, %d ch)"), Buf.Num(), Frames, Channels);
+        }
+        LastDebugToneTime = Now;
+    }
     FString Url, Key, Protocol;
     TUniquePtr<FO3DSWebRTCDataChannel> Channel;
     FCounters Counters;
     double LastStateLogTime = 0.0;
     double LastPingTime = 0.0;
+    double LastDebugToneTime = 0.0;
+    int64 DebugToneFrameIndex = 0;
 
     // Backend selection (LibDataChannel or LiveKit)
     EO3DSWebRtcBackend Backend = EO3DSWebRtcBackend::LibDataChannel;
