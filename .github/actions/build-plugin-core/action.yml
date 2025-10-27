@@ -252,23 +252,28 @@ runs:
         function Copy-Lib-And-Include {
           param(
             [string]$root,
-            [string[]]$libPatterns
+            [string[]]$libPatterns,
+            [string]$targetLibDir = $pluginLib,
+            [string]$targetIncDir = (Join-Path $pluginLib "include")
           )
           if ([string]::IsNullOrWhiteSpace($root)) { return }
           $libDir = Join-Path $root "lib"
           $incDir = Join-Path $root "include"
 
           if (Test-Path $incDir) {
-            Write-Host "Copying headers from $incDir to $pluginLib/include"
-            Copy-Item (Join-Path $incDir "*") (Join-Path $pluginLib "include") -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "Copying headers from $incDir to $targetIncDir"
+            New-Item -ItemType Directory -Force -Path $targetIncDir | Out-Null
+            Copy-Item (Join-Path $incDir "*") $targetIncDir -Recurse -Force -ErrorAction SilentlyContinue
           }
 
           if (Test-Path $libDir) {
+            Write-Host "Copying libraries to $targetLibDir"
+            New-Item -ItemType Directory -Force -Path $targetLibDir | Out-Null
             foreach ($pat in $libPatterns) {
               $libs = Get-ChildItem -Path $libDir -Recurse -Include $pat -ErrorAction SilentlyContinue
               foreach ($lib in $libs) {
-                Write-Host "Copying $($lib.Name) to $pluginLib"
-                Copy-Item $lib.FullName $pluginLib -Force -ErrorAction SilentlyContinue
+                Write-Host "  Copying $($lib.Name)"
+                Copy-Item $lib.FullName $targetLibDir -Force -ErrorAction SilentlyContinue
               }
             }
           }
@@ -283,13 +288,16 @@ runs:
           default   { $patterns = @('*.lib','*.a','*.so','*.dylib') }
         }
 
-        # Copy libdatachannel headers/libs (if downloaded)
+        # Copy libdatachannel headers/libs to webrtc subdirectory (if downloaded)
+        # This overwrites the committed libraries with fresh downloads from releases
         $ldcRoot = "${{ steps.fetch-ldc.outputs.ldc_root }}"
         if (-not [string]::IsNullOrWhiteSpace($ldcRoot)) {
-          Copy-Lib-And-Include -root $ldcRoot -libPatterns $patterns
+          $webrtcDir = Join-Path $pluginLib "webrtc"
+          $webrtcIncDir = Join-Path $pluginLib "webrtc/include"
+          Copy-Lib-And-Include -root $ldcRoot -libPatterns $patterns -targetLibDir $webrtcDir -targetIncDir $webrtcIncDir
         }
 
-        # Copy opus headers/libs
+        # Copy opus headers/libs to ThirdParty root for future use
         $opusRoot = "${{ steps.fetch-opus.outputs.opus_root }}"
         if (-not [string]::IsNullOrWhiteSpace($opusRoot)) {
           Copy-Lib-And-Include -root $opusRoot -libPatterns $patterns
