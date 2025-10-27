@@ -1,9 +1,17 @@
-Pre-built libdatachannel static library will be placed here.
+Pre-built libdatachannel static libraries are downloaded automatically from releases.
 
-To build it yourself:
-1. Ensure OpenSSL is installed on your system
-2. Run: cd thirdparty && cmake -B build -S . -G "Visual Studio 17 2022" -A x64
-3. Run: cmake --build build --config RelWithDebInfo --target datachannel-static
-4. Copy: build/libdatachannel/RelWithDebInfo/datachannel-static.lib to this location as datachannel.lib
+This directory is populated during the build process by the GitHub Actions workflow
+defined in .github/actions/build-plugin-core/action.yml
 
-File size: ~20-30 MB (static library with all dependencies)
+Libraries are downloaded from: https://github.com/lifelike-and-believable/libdatachannel/releases
+
+To manually download for local development:
+1. Visit https://github.com/lifelike-and-believable/libdatachannel/releases
+2. Download the latest release for your platform (Windows, Linux, or macOS)
+3. Extract the libraries and headers to this directory
+
+Expected files after download:
+- Windows: datachannel.lib, usrsctp.lib, mbedtls.lib, mbedcrypto.lib, mbedx509.lib, juice.lib
+- Linux: libdatachannel.a, libusrsctp.a, libmbedtls.a, libmbedcrypto.a, libmbedx509.a, libjuice.a
+- macOS: Same as Linux
+- All platforms: include/rtc/ directory with headers

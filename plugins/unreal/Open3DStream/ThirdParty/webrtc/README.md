@@ -4,23 +4,30 @@
 
 This directory contains the pre-built libdatachannel static libraries and headers for WebRTC support in the Open3DStream Unreal plugin.
 
-**Important:** The library artifacts are built via CI and should **NOT** be built manually unless developing libdatachannel itself.
+**Important:** The library artifacts are downloaded from the [lifelike-and-believable/libdatachannel](https://github.com/lifelike-and-believable/libdatachannel) releases during the build process. They are **NOT** committed to this repository to avoid binary bloat.
 
-## CI Build Process
+## Automated Download Process
 
-The libraries in this directory are built automatically by GitHub Actions using the workflow defined in `.github/workflows/build-libdatachannel.yml`.
+The libraries in this directory are downloaded automatically by the GitHub Actions workflow in `.github/actions/build-plugin-core/action.yml` from the latest release of the libdatachannel repository.
 
-### Build Configuration
+### Download Configuration
 
-- **TLS Backend**: MbedTLS 3.6.5 (no OpenSSL or GnuTLS)
+The workflow downloads the appropriate pre-built libraries based on the runner's platform and automatically extracts them to this directory during the build process.
+
+
+### Library Features
+
+- **TLS Backend**: MbedTLS (no OpenSSL or GnuTLS)
 - **Static Libraries Only**: No shared/dynamic libraries
 - **No Media Support**: Built with `NO_MEDIA=ON` (avoids libsrtp)
 - **No WebSocket Support**: Built with `NO_WEBSOCKET=ON`
 - **Platforms**: Windows, Linux, macOS
 
+
 ### Why MbedTLS?
 
-We use MbedTLS instead of OpenSSL for several key reasons:
+The pre-built libraries use MbedTLS instead of OpenSSL for several key reasons:
+
 
 1. **Licensing**: Apache 2.0 license (more permissive than OpenSSL)
 2. **Minimal Dependencies**: No system crypto library dependencies
@@ -38,17 +45,16 @@ We use MbedTLS instead of OpenSSL for several key reasons:
 
 ```
 plugins/unreal/Open3DStream/ThirdParty/webrtc/
-├── datachannel.lib           # Windows static library (from CI)
-├── libdatachannel.a          # Linux/macOS static library (from CI)
-├── include/                  # libdatachannel headers (from CI)
+├── datachannel.lib           # Windows static library (downloaded from releases)
+├── libdatachannel.a          # Linux static library (downloaded from releases)
+├── include/                  # libdatachannel headers (downloaded from releases)
 │   └── rtc/
 │       ├── rtc.hpp
 │       ├── peerconnection.hpp
 │       ├── datachannel.hpp
 │       └── ...
-├── BUILD_INFO.txt            # Build metadata (from CI)
 ├── README.md                 # This file
-└── datachannel.lib.placeholder  # Git placeholder
+└── datachannel.lib.placeholder  # Git placeholder (libraries not committed)
 ```
 
 ## How the Plugin Uses These Libraries
@@ -60,11 +66,26 @@ The Unreal plugin's `Open3DStream.Build.cs` automatically:
 3. Adds the `include/rtc/` headers to the include path
 4. Defines `RTC_STATIC=1` for static library mode
 
-**No manual configuration required** - just ensure the artifacts are present in this directory.
+**No manual configuration required** - the build-plugin-core GitHub Action automatically downloads the appropriate artifacts for your platform.
+
+## Where Libraries Come From
+
+The pre-built libraries are maintained in the [lifelike-and-believable/libdatachannel](https://github.com/lifelike-and-believable/libdatachannel) repository and published as GitHub releases. The workflow automatically:
+
+1. Fetches the latest release from the libdatachannel repository
+2. Downloads the appropriate platform-specific asset (Windows, Linux, or macOS)
+3. Extracts the libraries and headers to this directory
+4. The Unreal Build.cs then links against these downloaded libraries
 
 ## Local Development
 
-If you need to build libdatachannel locally (e.g., for testing or development):
+For local development, the GitHub Actions workflow (`.github/actions/build-plugin-core/action.yml`) will automatically download the pre-built libraries. However, if you need to use custom builds:
+
+### Option 1: Use Pre-built Releases (Recommended)
+
+Download the latest release artifacts from [lifelike-and-believable/libdatachannel releases](https://github.com/lifelike-and-believable/libdatachannel/releases) and extract them to this directory.
+
+### Option 2: Build Locally (Advanced)
 
 ### Prerequisites
 
@@ -87,21 +108,21 @@ See **[LIBDATACHANNEL_INTEGRATION.md](../../../../LIBDATACHANNEL_INTEGRATION.md)
    - `-DUSE_MBEDTLS=ON`
 3. Copy artifacts to this directory
 
-## CI Artifacts
+## Downloaded Artifacts
 
-The CI workflow produces artifacts for each platform:
+The workflow automatically downloads platform-specific artifacts:
 
-- **libdatachannel-windows**: Contains `datachannel.lib` and headers
-- **libdatachannel-linux**: Contains `libdatachannel.a` and headers
-- **libdatachannel-macos**: Contains `libdatachannel.a` and headers
+- **Windows**: `datachannel.lib`, `usrsctp.lib`, `mbedtls.lib`, etc. + headers
+- **Linux**: `libdatachannel.a`, `libusrsctp.a`, `libmbedtls.a`, etc. + headers
+- **macOS**: `libdatachannel.a`, `libusrsctp.a`, `libmbedtls.a`, etc. + headers
 
-These artifacts can be downloaded from GitHub Actions runs and extracted to this directory.
+These are extracted from the latest release zip files and placed in this directory during the build process.
 
 ## Troubleshooting
 
 ### "datachannel.lib not found" or "libdatachannel.a not found"
 
-**Solution**: Download the CI artifacts or build locally (see Local Development above)
+**Solution**: The build workflow should automatically download these. If building locally outside of the workflow, download the latest release from [lifelike-and-believable/libdatachannel releases](https://github.com/lifelike-and-believable/libdatachannel/releases) and extract to this directory.
 
 ### "Undefined reference to RTC symbols"
 
@@ -113,12 +134,13 @@ These artifacts can be downloaded from GitHub Actions runs and extracted to this
 
 ### Plugin compiles but WebRTC features don't work
 
-**Solution**: Check that the library file actually exists in this directory
+**Solution**: Ensure the libraries were downloaded correctly. Check that library files exist in this directory. Re-run the build workflow if needed.
 
 ## Version Information
 
-- **libdatachannel**: 0.23.2
-- **MbedTLS**: 3.6.5 (with DTLS-SRTP)
+The version of libdatachannel used is determined by the latest release in the [lifelike-and-believable/libdatachannel](https://github.com/lifelike-and-believable/libdatachannel) repository.
+
+- **TLS Backend**: MbedTLS (with DTLS-SRTP)
 - **Build Type**: Static, Release
 - **CMake Version**: 3.13+
 
@@ -147,7 +169,7 @@ These artifacts can be downloaded from GitHub Actions runs and extracted to this
 
 ## Links
 
-- **GitHub Workflow**: [.github/workflows/build-libdatachannel.yml](../../../../.github/workflows/build-libdatachannel.yml)
-- **Issue #13**: [Integrate libdatachannel with MbedTLS](https://github.com/lifelike-and-believable/Open3DStream/issues/13)
+- **Download Action**: [.github/actions/build-plugin-core/action.yml](../../../../.github/actions/build-plugin-core/action.yml) - Downloads releases automatically
+- **libdatachannel Releases**: https://github.com/lifelike-and-believable/libdatachannel/releases
 - **libdatachannel**: https://github.com/paullouisageneau/libdatachannel
 - **MbedTLS**: https://github.com/Mbed-TLS/mbedtls
