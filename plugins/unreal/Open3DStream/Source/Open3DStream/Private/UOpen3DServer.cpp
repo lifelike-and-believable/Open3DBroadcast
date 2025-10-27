@@ -1,7 +1,8 @@
 #include "UOpen3DServer.h"
 #include "o3ds/async_pair.h"
 #include "o3ds/async_subscriber.h"
-#include "WebRTCConnector.h"
+#include "IWebRTCConnector.h"
+#include "Open3DStreamSourceSettings.h"
 #include "SocketSubsystem.h"
 #include "Interfaces/IPv4/IPv4Address.h"
 #include "Common/UdpSocketBuilder.h"
@@ -67,7 +68,7 @@ static bool ParseTcpUrl(const FString& In, FString& OutIp, int32& OutPort)
 	return !OutIp.IsEmpty() && OutPort > 0;
 }
 
-bool O3DSServer::start(FText Url, FText Protocol )
+bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* Settings)
 {
 	stop();
 
@@ -93,7 +94,21 @@ bool O3DSServer::start(FText Url, FText Protocol )
 
 	if (strncmp(sprotocol, "WebRTC Client", 13) == 0)
 	{
-		mWebRTCConnector = new FWebRTCConnector();
+		// Determine backend from settings (default to LibDataChannel)
+		EO3DSWebRtcBackendReceiver Backend = EO3DSWebRtcBackendReceiver::LibDataChannel;
+		if (Settings)
+		{
+			Backend = Settings->WebRtcBackend;
+		}
+
+		// Create connector using factory
+		mWebRTCConnector = CreateWebRTCConnector(Backend);
+		if (!mWebRTCConnector)
+		{
+			OnState.ExecuteIfBound(LOCTEXT("WebRTCBackendNotSupported", "WebRTC backend not supported"), true);
+			return false;
+		}
+
 		mWebRTCConnector->SetDataReceivedCallback([this](const uint8* Data, int32 Size)
 		{
 			this->inData(Data, Size);
@@ -108,15 +123,28 @@ bool O3DSServer::start(FText Url, FText Protocol )
 		else
 		{
 			OnState.ExecuteIfBound(FText::FromString(mWebRTCConnector->GetLastError()), true);
-			delete mWebRTCConnector;
-			mWebRTCConnector = nullptr;
+			mWebRTCConnector.Reset();
 			return false;
 		}
 	}
 	
 	if (strncmp(sprotocol, "WebRTC Server", 13) == 0)
 	{
-		mWebRTCConnector = new FWebRTCConnector();
+		// Determine backend from settings (default to LibDataChannel)
+		EO3DSWebRtcBackendReceiver Backend = EO3DSWebRtcBackendReceiver::LibDataChannel;
+		if (Settings)
+		{
+			Backend = Settings->WebRtcBackend;
+		}
+
+		// Create connector using factory
+		mWebRTCConnector = CreateWebRTCConnector(Backend);
+		if (!mWebRTCConnector)
+		{
+			OnState.ExecuteIfBound(LOCTEXT("WebRTCBackendNotSupported", "WebRTC backend not supported"), true);
+			return false;
+		}
+
 		mWebRTCConnector->SetDataReceivedCallback([this](const uint8* Data, int32 Size)
 		{
 			this->inData(Data, Size);
@@ -131,8 +159,7 @@ bool O3DSServer::start(FText Url, FText Protocol )
 		else
 		{
 			OnState.ExecuteIfBound(FText::FromString(mWebRTCConnector->GetLastError()), true);
-			delete mWebRTCConnector;
-			mWebRTCConnector = nullptr;
+			mWebRTCConnector.Reset();
 			return false;
 		}
 	}
@@ -284,8 +311,7 @@ void O3DSServer::stop()
 	if (mWebRTCConnector)
 	{
 		mWebRTCConnector->Stop();
-		delete mWebRTCConnector;
-		mWebRTCConnector = nullptr;
+		mWebRTCConnector.Reset();
 	}
 
 	if (mUdp)
@@ -315,7 +341,8 @@ bool O3DSServer::write(const char *msg, size_t len)
 {
 	if (mWebRTCConnector)
 	{
-		return mWebRTCConnector->Send((const uint8*)msg, (int32)len);
+		// Default to lossy channel for streaming payloads; prefer Reliable for small control messages.
+		return mWebRTCConnector->SendDataLossy(reinterpret_cast<const uint8*>(msg), static_cast<int32>(len));
 	}
 	
 	if (!mServer) return false;

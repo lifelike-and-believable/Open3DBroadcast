@@ -77,6 +77,9 @@ public:
 
     O3DS::SubjectList mSubjects;
 
+    // Store settings for passing to server.start()
+    FOpen3DStreamSettings SourceSettings;
+
     void OnPackage(const TArray<uint8>&);
     void OnStatus(FText, bool);
 

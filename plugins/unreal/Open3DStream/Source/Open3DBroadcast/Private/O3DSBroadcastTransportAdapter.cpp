@@ -304,7 +304,7 @@ TUniquePtr<IBroadcastTransport> UO3DSBroadcastTransportAdapter::CreateTransport(
                 return MakeUnique<FO3DSNngTransport>();
             case EO3DSTransportKind::WebRTCClient:
             case EO3DSTransportKind::WebRTCServer:
-                return MakeUnique<FO3DSWebRtcTransport>();
+                return MakeUnique<FO3DSWebRtcTransport>(WebRtcBackend);
             default:
                 break;
         }
@@ -324,7 +324,7 @@ TUniquePtr<IBroadcastTransport> UO3DSBroadcastTransportAdapter::CreateTransport(
         case EO3DSTransportFamily::UDP:
             return MakeUnique<FO3DSUdpTransport>();
         case EO3DSTransportFamily::WebRTC:
-            return MakeUnique<FO3DSWebRtcTransport>();
+            return MakeUnique<FO3DSWebRtcTransport>(WebRtcBackend);
         default:
             break;
     }

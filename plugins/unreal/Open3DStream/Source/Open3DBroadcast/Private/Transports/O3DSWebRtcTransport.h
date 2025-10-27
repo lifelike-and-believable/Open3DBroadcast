@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "IBroadcastTransport.h"
 #include "Open3DWebRTCDataChannel.h"
+#include "Open3DStreamSourceSettings.h" // for EO3DSWebRtcBackendReceiver enum
 
 // Debug cvar for transport send logging
 static TAutoConsoleVariable<int32> CVarO3DSWebRtcTransportDebug(
@@ -36,6 +37,7 @@ class FO3DSWebRtcTransport : public IBroadcastTransport
 {
 public:
     FO3DSWebRtcTransport() = default;
+    explicit FO3DSWebRtcTransport(EO3DSWebRtcBackend InBackend) : Backend(InBackend) {}
     virtual ~FO3DSWebRtcTransport() override { Stop(); }
 
     // Configure (future) native audio track parameters prior to Start.
@@ -70,10 +72,21 @@ public:
             }
         }
 
-        const bool bStarted = Channel->Start(EffectiveUrl);
+        // Map broadcast backend enum to receiver enum for the shared data channel API
+        auto ToReceiverBackend = [](EO3DSWebRtcBackend In){
+            switch (In)
+            {
+            case EO3DSWebRtcBackend::LibDataChannel: return EO3DSWebRtcBackendReceiver::LibDataChannel;
+            case EO3DSWebRtcBackend::LiveKit: return EO3DSWebRtcBackendReceiver::LiveKit;
+            default: return EO3DSWebRtcBackendReceiver::LibDataChannel;
+            }
+        };
+        const EO3DSWebRtcBackendReceiver ReceiverBackend = ToReceiverBackend(Backend);
+        const bool bStarted = Channel->Start(EffectiveUrl, ReceiverBackend);
         if (CVarO3DSWebRtcTransportDebug->GetInt() != 0)
         {
-            UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[WebRTC] Transport Start url=%s result=%s"), *EffectiveUrl, bStarted?TEXT("true"):TEXT("false"));
+            UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[WebRTC] Transport Start url=%s backend=%d result=%s"), 
+                *EffectiveUrl, (int)Backend, bStarted?TEXT("true"):TEXT("false"));
         }
         if (!bStarted)
         {
@@ -179,6 +192,9 @@ private:
     FCounters Counters;
     double LastStateLogTime = 0.0;
     double LastPingTime = 0.0;
+
+    // Backend selection (LibDataChannel or LiveKit)
+    EO3DSWebRtcBackend Backend = EO3DSWebRtcBackend::LibDataChannel;
 
     // Stored audio config for future native audio track support
     FO3DSWebRTCAudioConfig AudioConfig;

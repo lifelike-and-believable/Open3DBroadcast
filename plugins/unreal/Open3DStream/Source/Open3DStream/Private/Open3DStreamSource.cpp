@@ -69,6 +69,7 @@ FOpen3DStreamSource::FOpen3DStreamSource(const FOpen3DStreamSettings& Settings)
  , LogFlag(false)
  , bIsValid(true)
  , mAddr(ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateInternetAddr())
+ , SourceSettings(Settings) // Store settings for later use
 {
  Url        = Settings.Url;
  Protocol   = Settings.Protocol;
@@ -146,7 +147,7 @@ void FOpen3DStreamSource::ReceiveClient(ILiveLinkClient* InClient, FGuid InSourc
         Url = FText::Format(LOCTEXT("FormattedUrl", "tcp://{0}"), Url);
     }
 
-    if (!server.start(Url, Protocol))
+    if (!server.start(Url, Protocol, &SourceSettings))
     {
         bIsValid = false;
     }

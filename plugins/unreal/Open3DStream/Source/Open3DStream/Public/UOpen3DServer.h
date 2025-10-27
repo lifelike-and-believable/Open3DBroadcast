@@ -7,8 +7,9 @@
 #include "o3ds/udp_fragment.h"
 #include "Sockets.h"
 
-// Forward declaration for Unreal's WebRTC connector
-class FWebRTCConnector;
+// Forward declarations
+class IWebRTCConnector;
+struct FOpen3DStreamSettings;
 
 
 DECLARE_DELEGATE_OneParam(FOnO3dsData, const TArray<uint8>&);
@@ -25,7 +26,7 @@ public:
 	O3DSServer();
 	~O3DSServer();
 
-	bool start(FText Url, FText Protocol);
+	bool start(FText Url, FText Protocol, const FOpen3DStreamSettings* Settings = nullptr);
 	void stop();
 	bool write(const char *data, size_t len);
 
@@ -36,7 +37,7 @@ public:
 	void tick();
 
 	O3DS::AsyncConnector* mServer;
-	FWebRTCConnector* mWebRTCConnector;
+	TSharedPtr<IWebRTCConnector> mWebRTCConnector;
 	FSocket* mTcp;
 	FSocket* mUdp;
 
