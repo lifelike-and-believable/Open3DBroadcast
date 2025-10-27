@@ -36,7 +36,7 @@ jobs:
           plugin_name: ${{ env.PLUGIN_NAME }}
           build_type: Release
           enable_webrtc: true
-          libdatachannel_root: ${{ github.workspace }}\plugins\unreal\${{ env.PLUGIN_NAME }}\ThirdParty\webrtc
+          # libdatachannel_root removed - now uses downloaded release from fetch-ldc step
 
       - name: Get version
         id: version
