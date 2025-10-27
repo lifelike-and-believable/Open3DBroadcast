@@ -27,145 +27,222 @@ public class Open3DStream : ModuleRules
 		PublicIncludePaths.AddRange( new string[] {} );
 		
 		// Resolve ThirdParty roots robustly and combine paths safely (avoid relying on trailing separators)
-        string ThirdPartyDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty"));
-        string WebRTCDir = Path.GetFullPath(Path.Combine(ThirdPartyDir, "webrtc"));
+		string ThirdPartyDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty"));
+		string WebRTCDir = Path.GetFullPath(Path.Combine(ThirdPartyDir, "webrtc"));
+		string OpusDir = Path.GetFullPath(Path.Combine(ThirdPartyDir, "opus"));
 
-        // Backward-compatibility alias: legacy code may have referenced 'LibDir' expecting a base path with a trailing separator.
-        // Keep it defined to avoid Rules compile errors if cached/staged files still reference it.
-        string LibDir = ThirdPartyDir + Path.DirectorySeparatorChar;
+		// Backward-compatibility alias: legacy code may have referenced 'LibDir' expecting a base path with a trailing separator.
+		// Keep it defined to avoid Rules compile errors if cached/staged files still reference it.
+		string LibDir = ThirdPartyDir + Path.DirectorySeparatorChar;
 
 		PrivateIncludePaths.AddRange(new string[]
-        {
-            Path.Combine(ThirdPartyDir, "include"),
-            Path.Combine(WebRTCDir, "include")
-        });
+		{
+			Path.Combine(ThirdPartyDir, "include"),
+			Path.Combine(WebRTCDir, "include")
+		});
 
-        // Preflight: ensure expected ThirdParty libraries are present for the active platform.
-        // This provides an immediate, actionable error in CI/UAT staging environments.
-        string[] RequiredLibs;
-        if (Target.Platform == UnrealTargetPlatform.Win64)
-        {
-            RequiredLibs = new string[]
-            {
-                Path.Combine(ThirdPartyDir, "open3dstreamstatic.lib"),
-                Path.Combine(ThirdPartyDir, "nng.lib"),
-                Path.Combine(ThirdPartyDir, "flatbuffers.lib"),
-                Path.Combine(WebRTCDir, "datachannel.lib"),
-                Path.Combine(WebRTCDir, "usrsctp.lib"),
-                Path.Combine(WebRTCDir, "juice.lib"),
-                Path.Combine(WebRTCDir, "mbedtls.lib"),
-                Path.Combine(WebRTCDir, "mbedx509.lib"),
-                Path.Combine(WebRTCDir, "mbedcrypto.lib"),
-            };
-        }
-        else if (Target.Platform == UnrealTargetPlatform.Linux)
-        {
-            RequiredLibs = new string[]
-            {
-                Path.Combine(WebRTCDir, "libdatachannel.a"),
-                Path.Combine(WebRTCDir, "libusrsctp.a"),
-                Path.Combine(WebRTCDir, "libjuice.a"),
-                Path.Combine(WebRTCDir, "libmbedtls.a"),
-                Path.Combine(WebRTCDir, "libmbedx509.a"),
-                Path.Combine(WebRTCDir, "libmbedcrypto.a"),
-            };
-        }
-        else if (Target.Platform == UnrealTargetPlatform.Mac)
-        {
-            string MacDir = Path.Combine(WebRTCDir, "macos");
-            RequiredLibs = new string[]
-            {
-                Path.Combine(MacDir, "libdatachannel.a"),
-                Path.Combine(MacDir, "libusrsctp.a"),
-                Path.Combine(MacDir, "libjuice.a"),
-                Path.Combine(MacDir, "libmbedtls.a"),
-                Path.Combine(MacDir, "libmbedx509.a"),
-                Path.Combine(MacDir, "libmbedcrypto.a"),
-            };
-        }
-        else
-        {
-            RequiredLibs = new string[0];
-        }
+		// Preflight: ensure expected ThirdParty libraries are present for the active platform.
+		// This provides an immediate, actionable error in CI/UAT staging environments.
+		string[] RequiredLibs;
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			RequiredLibs = new string[]
+			{
+				Path.Combine(ThirdPartyDir, "open3dstreamstatic.lib"),
+				Path.Combine(ThirdPartyDir, "nng.lib"),
+				Path.Combine(ThirdPartyDir, "flatbuffers.lib"),
+				Path.Combine(WebRTCDir, "datachannel.lib"),
+				Path.Combine(WebRTCDir, "usrsctp.lib"),
+				Path.Combine(WebRTCDir, "juice.lib"),
+				Path.Combine(WebRTCDir, "mbedtls.lib"),
+				Path.Combine(WebRTCDir, "mbedx509.lib"),
+				Path.Combine(WebRTCDir, "mbedcrypto.lib"),
+			};
+		}
+		else if (Target.Platform == UnrealTargetPlatform.Linux)
+		{
+			RequiredLibs = new string[]
+			{
+				Path.Combine(WebRTCDir, "libdatachannel.a"),
+				Path.Combine(WebRTCDir, "libusrsctp.a"),
+				Path.Combine(WebRTCDir, "libjuice.a"),
+				Path.Combine(WebRTCDir, "libmbedtls.a"),
+				Path.Combine(WebRTCDir, "libmbedx509.a"),
+				Path.Combine(WebRTCDir, "libmbedcrypto.a"),
+			};
+		}
+		else if (Target.Platform == UnrealTargetPlatform.Mac)
+		{
+			string MacDir = Path.Combine(WebRTCDir, "macos");
+			RequiredLibs = new string[]
+			{
+				Path.Combine(MacDir, "libdatachannel.a"),
+				Path.Combine(MacDir, "libusrsctp.a"),
+				Path.Combine(MacDir, "libjuice.a"),
+				Path.Combine(MacDir, "libmbedtls.a"),
+				Path.Combine(MacDir, "libmbedx509.a"),
+				Path.Combine(MacDir, "libmbedcrypto.a"),
+			};
+		}
+		else
+		{
+			RequiredLibs = new string[0];
+		}
 
-        foreach (var libPath in RequiredLibs)
-        {
-            if (!File.Exists(libPath))
-            {
-                throw new BuildException($"Open3DStream: Missing required library '{libPath}'. Ensure the 'Build Plugin Core' step populated ThirdParty libs prior to BuildPlugin.");
-            }
-        }
+		foreach (var libPath in RequiredLibs)
+		{
+			if (!File.Exists(libPath))
+			{
+				throw new BuildException($"Open3DStream: Missing required library '{libPath}'. Ensure the 'Build Plugin Core' step populated ThirdParty libs prior to BuildPlugin.");
+			}
+		}
 
-        // Expose O3DS headers to dependent modules (e.g., Open3DBroadcast)
-        PublicIncludePaths.AddRange(new string[]
-        {
-            LibDir + "include"
-        });
+		// Expose O3DS headers to dependent modules (e.g., Open3DBroadcast)
+		PublicIncludePaths.AddRange(new string[]
+		{
+			LibDir + "include"
+		});
 
 		PublicDependencyModuleNames.AddRange( new string[] { "Core" } );
 
-    // O3DS static libraries
-    PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyDir, "nng.lib"));
-    PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyDir, "flatbuffers.lib"));
-    PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyDir, "open3dstreamstatic.lib"));
+		// O3DS static libraries
+		PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyDir, "nng.lib"));
+		PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyDir, "flatbuffers.lib"));
+		PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyDir, "open3dstreamstatic.lib"));
 
-        // libdatachannel static library for WebRTC support
-        // Note: datachannel depends on usrsctp, juice, mbedtls, and srtp libraries
-        if (Target.Platform == UnrealTargetPlatform.Win64)
-        {
-            PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "datachannel.lib"));
-            PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "usrsctp.lib"));
-            PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "juice.lib"));
-            PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "srtp2.lib"));
-            PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "mbedtls.lib"));
-            PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "mbedx509.lib"));
-            PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "mbedcrypto.lib"));
-            // Required Windows system libraries
-            PublicSystemLibraries.Add("bcrypt.lib");  // For BCryptGenRandom (mbedtls entropy)
-            PublicSystemLibraries.Add("Synchronization.lib");  // For C11 threading (_Thrd_*, _Cnd_*)
-        }
-        else if (Target.Platform == UnrealTargetPlatform.Linux)
-        {
-            PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libdatachannel.a"));
-            PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libusrsctp.a"));
-            PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libjuice.a"));
-            PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libsrtp2.a"));
-            PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libmbedtls.a"));
-            PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libmbedx509.a"));
-            PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libmbedcrypto.a"));
-        }
-        else if (Target.Platform == UnrealTargetPlatform.Mac)
-        {
-            string MacDir = Path.Combine(WebRTCDir, "macos");
-            PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libdatachannel.a"));
-            PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libusrsctp.a"));
-            PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libjuice.a"));
-            PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libsrtp2.a"));
-            PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libmbedtls.a"));
-            PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libmbedx509.a"));
-            PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libmbedcrypto.a"));
-        }
+		// libdatachannel static library for WebRTC support
+		// Note: datachannel depends on usrsctp, juice, mbedtls, and srtp libraries
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "datachannel.lib"));
+			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "usrsctp.lib"));
+			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "juice.lib"));
+			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "srtp2.lib"));
+			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "mbedtls.lib"));
+			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "mbedx509.lib"));
+			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "mbedcrypto.lib"));
+			// Required Windows system libraries
+			PublicSystemLibraries.Add("bcrypt.lib");  // For BCryptGenRandom (mbedtls entropy)
+			PublicSystemLibraries.Add("Synchronization.lib");  // For C11 threading (_Thrd_*, _Cnd_*)
+		}
+		else if (Target.Platform == UnrealTargetPlatform.Linux)
+		{
+			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libdatachannel.a"));
+			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libusrsctp.a"));
+			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libjuice.a"));
+			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libsrtp2.a"));
+			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libmbedtls.a"));
+			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libmbedx509.a"));
+			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libmbedcrypto.a"));
+		}
+		else if (Target.Platform == UnrealTargetPlatform.Mac)
+		{
+			string MacDir = Path.Combine(WebRTCDir, "macos");
+			PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libdatachannel.a"));
+			PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libusrsctp.a"));
+			PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libjuice.a"));
+			PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libsrtp2.a"));
+			PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libmbedtls.a"));
+			PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libmbedx509.a"));
+			PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libmbedcrypto.a"));
+		}
 
-        PublicDefinitions.Add("NNG_STATIC_LIB");
-        PublicDefinitions.Add("RTC_STATIC=1"); // Define RTC_STATIC for static libdatachannel
+		PublicDefinitions.Add("NNG_STATIC_LIB");
+		PublicDefinitions.Add("RTC_STATIC=1"); // Define RTC_STATIC for static libdatachannel
 
-        PrivateDependencyModuleNames.AddRange(
-            new string[]
-            {
-                "CoreUObject",
-                "Engine",
-                "Slate",
-                "SlateCore",
-                "LiveLinkInterface",
-                "Networking",
-                "Sockets",
-                "InputCore",
-                "WebSockets",
-                "Json",
-                "JsonUtilities",
-            }
-            );
+		PrivateDependencyModuleNames.AddRange(
+			new string[]
+			{
+				"CoreUObject",
+				"Engine",
+				"Slate",
+				"SlateCore",
+				"LiveLinkInterface",
+				"Networking",
+				"Sockets",
+				"InputCore",
+				"WebSockets",
+				"Json",
+				"JsonUtilities",
+				"AudioMixer",
+			}
+			);
 				
 		DynamicallyLoadedModuleNames.AddRange( new string[] {} );
+
+		// Optional Opus integration for WebRTC audio tracks
+		bool bWithOpus = false;
+		bool bHasOpusHeader = false;
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			// User-provided layout: Plugins/Open3DStream/ThirdParty/opus.lib
+			string OpusLibFlat = Path.Combine(ThirdPartyDir, "opus.lib");
+			if (File.Exists(OpusLibFlat))
+			{
+				bWithOpus = true;
+				PublicAdditionalLibraries.Add(OpusLibFlat);
+			}
+			else
+			{
+				// Fallback to Plugins/Open3DStream/ThirdParty/opus/win64/opus.lib
+				string OpusLib = Path.Combine(OpusDir, "win64", "opus.lib");
+				if (File.Exists(OpusLib))
+				{
+					bWithOpus = true;
+					PublicAdditionalLibraries.Add(OpusLib);
+				}
+			}
+
+			// Header detection (either ThirdParty/include/opus/opus.h or OpusDir/include/opus/opus.h)
+			if (File.Exists(Path.Combine(ThirdPartyDir, "include", "opus.h")))
+			{
+				bHasOpusHeader = true;
+				// ThirdParty/include already added above
+			}
+			else if (File.Exists(Path.Combine(OpusDir, "include", "opus.h")))
+			{
+				bHasOpusHeader = true;
+				PublicIncludePaths.Add(Path.Combine(OpusDir, "include"));
+			}
+		}
+		else if (Target.Platform == UnrealTargetPlatform.Linux)
+		{
+			string OpusLib = Path.Combine(OpusDir, "linux", "libopus.a");
+			if (File.Exists(OpusLib))
+			{
+				bWithOpus = true;
+				PublicAdditionalLibraries.Add(OpusLib);
+			}
+			if (File.Exists(Path.Combine(ThirdPartyDir, "include", "opus.h")))
+			{
+				bHasOpusHeader = true;
+			}
+			else if (File.Exists(Path.Combine(OpusDir, "include", "opus.h")))
+			{
+				bHasOpusHeader = true;
+				PublicIncludePaths.Add(Path.Combine(OpusDir, "include"));
+			}
+		}
+		else if (Target.Platform == UnrealTargetPlatform.Mac)
+		{
+			string OpusLib = Path.Combine(OpusDir, "macos", "libopus.a");
+			if (File.Exists(OpusLib))
+			{
+				bWithOpus = true;
+				PublicAdditionalLibraries.Add(OpusLib);
+			}
+			if (File.Exists(Path.Combine(ThirdPartyDir, "include", "opus.h")))
+			{
+				bHasOpusHeader = true;
+			}
+			else if (File.Exists(Path.Combine(OpusDir, "include", "opus.h")))
+			{
+				bHasOpusHeader = true;
+				PublicIncludePaths.Add(Path.Combine(OpusDir, "include"));
+			}
+		}
+		// We already include ThirdParty/include by default; that's where opus headers usually live
+		PublicDefinitions.Add(bWithOpus ? "O3DS_WITH_OPUS=1" : "O3DS_WITH_OPUS=0");
+		PublicDefinitions.Add(bHasOpusHeader ? "O3DS_OPUS_NO_HEADER=0" : "O3DS_OPUS_NO_HEADER=1");
 	}
 }

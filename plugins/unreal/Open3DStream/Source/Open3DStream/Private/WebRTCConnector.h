@@ -8,6 +8,12 @@
 #include <vector>
 #include <string>
 
+// Forward declare Opus types when Opus support is enabled so we can hold pointers
+#if O3DS_WITH_OPUS
+struct OpusEncoder;
+struct OpusDecoder;
+#endif
+
 // Forward declarations
 class FWebRTCSignalingClient;
 
@@ -18,6 +24,7 @@ namespace rtc
 	struct Configuration;
 	class Candidate;
 	class Description;
+	class Track;
 }
 
 /**
@@ -30,7 +37,7 @@ namespace rtc
  * - Binary data channel for animation frames
  * - Automatic ICE/STUN negotiation
  */
-class FWebRTCConnector
+class FWebRTCConnector : public TSharedFromThis<FWebRTCConnector>
 {
 public:
 	FWebRTCConnector();
@@ -88,11 +95,45 @@ public:
 	 */
 	void Tick();
 
+	// ====== Audio (Opus over WebRTC track) ======
+	struct FAudioConfig
+	{
+		int32 SampleRate =48000;
+		int32 NumChannels =1; //1 mono,2 stereo
+		int32 BitrateKbps =32; // target encoder bitrate
+		int32 FrameSizeMs =20; //10/20/40 typical
+	};
+
+	// Enable Opus-encoded audio sending via a WebRTC audio track
+	void EnableAudioSend(const FAudioConfig& InConfig);
+	void DisableAudioSend();
+	// Push interleaved PCM16 samples (NumSamples is total across channels)
+	bool PushAudioPCM16(const int16* Samples, int32 NumSamples);
+
+	// Set callback for decoded PCM16 receive (called on game thread from Tick)
+	void SetAudioReceiveCallback(TFunction<void(const int16* PCM, int32 NumSamples, int32 NumChannels, int32 SampleRate)> Callback);
+
+	// Remote audio callback: Subject(stream) label, PCM16 interleaved samples, channels, sample rate
+	DECLARE_MULTICAST_DELEGATE_FiveParams(FOnRemoteAudioPcm16, const FString& /*SubjectOrEmpty*/, const FString& /*StreamLabel*/, const int16* /*PCM*/, int32 /*NumSamples*/, int32 /*NumChannels*/);
+	FOnRemoteAudioPcm16& OnRemoteAudio() { return RemoteAudioDelegate; }
+
+	// Configure RX audio routing labels (set by higher layers parsing announce/SDP)
+	void SetRxAudioRouting(const FString& InStreamLabel, const FString& InSubjectName)
+	{
+		RxStreamLabel = InStreamLabel;
+		RxSubjectName = InSubjectName;
+	}
+
+	// Active connector accessor (optional registry)
+	static void SetActiveConnector(const TSharedPtr<FWebRTCConnector>& InConnector);
+	static TSharedPtr<FWebRTCConnector> GetActiveConnector();
+
 private:
 	// libdatachannel objects
 	std::shared_ptr<rtc::PeerConnection> PeerConnection;
 	std::shared_ptr<rtc::DataChannel> DataChannel;
 	std::shared_ptr<rtc::Configuration> RtcConfig;
+	std::shared_ptr<rtc::Track> AudioTrack;
 
 	// Signaling
 	TUniquePtr<FWebRTCSignalingClient> SignalingClient;
@@ -106,43 +147,39 @@ private:
 	bool bRemoteDescriptionSet = false;
 	bool bLocalDescriptionSet = false;
 	FString ConnectionState;
-	FString LastError;
-	// Track last known peer connection state as an integer to avoid including rtc headers here
-	int32 LastPeerState = -1; // -1 = unknown
 
-	// Retry/re-offer/reconnect state
-	double NextOfferTimeSeconds = 0.0;           // when to try next offer (client side)
-	double OfferBackoffSeconds = 0.0;            // current backoff
-	double NextReconnectTimeSeconds = 0.0;       // when to try reconnect (both roles)
-	double ReconnectBackoffSeconds = 0.0;        // current reconnect backoff
-	bool bSignalingIsConnected = false;          // cache of signaling join state
+	// Pending remote ICE candidates until both descriptions are set
+	TArray<TTuple<FString, FString, int32>> PendingRemoteCandidates;
 
-	// Negotiated channel options snapshot
-	bool bNegotiatedChannelEnabled = false;
-	int32 NegotiatedChannelId = 42;
+	// Audio state
+	bool bAudioSendEnabled = false;
+	struct FAudioRuntime
+	{
+		FAudioConfig Config;
+		uint32 RTPClockHz =48000; // Opus RTP clock
+		uint32 Timestamp =0; // RTP timestamp counter
+		int32 FrameSizeSamples =960; //20ms @48k
+		TArray<int16> Pending;
+	} AudioRt;
+	TFunction<void(const int16*, int32, int32, int32)> AudioRxCallback;
+	struct FRxBuffer { TArray<int16> PCM; int32 NumChannels=1; int32 SampleRate=48000; };
+	TQueue<FRxBuffer, EQueueMode::Mpsc> DecodedPcmQueue;
 
-	// Data callbacks
-	TFunction<void(const uint8*, int32)> DataReceivedCallback;
+	// Internal helpers
+	void EnsurePeerConnectionForNewSession();
+	bool SetupPeerConnection();
+	bool CreateDataChannel();
+	void CleanupPeerConnection();
+	void FlushPendingRemoteCandidates();
 
-	// Message queue (thread-safe for libdatachannel callbacks)
-	TQueue<TArray<uint8>, EQueueMode::Mpsc> ReceivedDataQueue;
-
-	// Pending ICE candidates received before transports exist
-	TArray<TTuple<FString, FString, int32>> PendingRemoteCandidates; // Candidate, Mid, MLine
-
-	// Static data channel label
-	static const char* DataChannelLabel;
-
-	// libdatachannel callback handlers (called from libdatachannel thread)
-	void OnPeerConnectionStateChange(int State);
+	// Event handlers
+	void OnPeerConnectionStateChange(int StateInt);
 	void OnDataChannelOpen();
 	void OnDataChannelMessage(const std::vector<uint8>& Message);
 	void OnDataChannelError(const std::string& Error);
 	void OnDataChannelClosed();
 	void OnIceCandidate(const rtc::Candidate& Candidate);
 	void OnLocalDescription(const rtc::Description& Description);
-
-	// Signaling callbacks
 	void OnSignalingConnected();
 	void OnSignalingError(const FString& Error);
 	void OnSignalingDisconnected(const FString& Reason);
@@ -151,21 +188,51 @@ private:
 	void OnIceCandidateReceived(const FString& Candidate, const FString& SdpMid, int32 SdpMLineIndex);
 	void OnPeerJoined();
 
-	// Helper functions
 	bool ParseWebRtcUrl(const FString& Url, FString& OutHost, uint16& OutPort, FString& OutRoom, TMap<FString, FString>& OutParams);
-	bool SetupPeerConnection();
-	bool CreateDataChannel();
-	void CleanupPeerConnection();
-	void FlushPendingRemoteCandidates();
-	// Ensure we have a fresh PeerConnection if the current one is closed/failed
-	void EnsurePeerConnectionForNewSession();
 
-	// Retry/re-offer helpers
 	void ResetReofferBackoff(bool bImmediate);
 	void ResetReconnectBackoff(bool bImmediate);
 	void MaybeCreateOffer(const TCHAR* Context);
 
-	// Thread-safety
+	// Threading
 	FCriticalSection PeerConnectionLock;
 	FCriticalSection DataChannelLock;
+
+	// Re-offer/reconnect timers
+	bool bSignalingIsConnected = false;
+	double NextOfferTimeSeconds =0.0;
+	double OfferBackoffSeconds =0.0;
+	double NextReconnectTimeSeconds =0.0;
+	double ReconnectBackoffSeconds =0.0;
+	int32 LastPeerState;
+
+	// Negotiated channel support
+	bool bNegotiatedChannelEnabled = false;
+	int32 NegotiatedChannelId =42;
+
+	// Data receive queue
+	TQueue<TArray<uint8>, EQueueMode::Mpsc> ReceivedDataQueue;
+	TFunction<void(const uint8*, int32)> DataReceivedCallback;
+	FString LastError;
+
+	static const char* DataChannelLabel;
+
+	// Subject-aware remote audio multicast
+	FOnRemoteAudioPcm16 RemoteAudioDelegate;
+
+	// RX routing (defaults)
+	FString RxStreamLabel = TEXT("o3ds:mix");
+	FString RxSubjectName;
+
+	// Optional global active connector registry
+	static TWeakPtr<FWebRTCConnector> ActiveConnector;
+
+#if O3DS_WITH_OPUS
+	// Opus encoder/decoder handles (pointers only; full types provided in cpp)
+	OpusEncoder* OpusEnc = nullptr;
+	OpusDecoder* OpusDec = nullptr;
+	void DestroyOpus();
+	bool EnsureOpusEncoder(const FAudioConfig& In);
+	bool EnsureOpusDecoder(int32 SampleRate, int32 NumChannels);
+#endif
 };

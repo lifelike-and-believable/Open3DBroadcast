@@ -16,48 +16,61 @@
 #include <string>
 #include <variant>
 
+#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+// libopus header is provided at ThirdParty/include/opus.h
+#include <opus.h>
+#endif
+
+#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+using OpusEncoderT = OpusEncoder;
+using OpusDecoderT = OpusDecoder;
+#else
+struct OpusEncoderT;
+struct OpusDecoderT;
+#endif
+
 static TAutoConsoleVariable<int32> CVarO3DSWebRTCVerbose(
-    TEXT("o3ds.WebRTC.Verbose"),
-    0,
-    TEXT("Enable extra verbose logging for WebRTC connector (0/1)."),
-    ECVF_Default);
+ TEXT("o3ds.WebRTC.Verbose"),
+0,
+ TEXT("Enable extra verbose logging for WebRTC connector (0/1)."),
+ ECVF_Default);
 
 static TAutoConsoleVariable<int32> CVarO3DSWebRTCDebugRx(
-    TEXT("o3ds.WebRTC.DebugRx"),
-    1,
-    TEXT("Enable receiver-side debug logging for WebRTC data (0/1). Logs first packet and occasional stats."),
-    ECVF_Default);
+ TEXT("o3ds.WebRTC.DebugRx"),
+1,
+ TEXT("Enable receiver-side debug logging for WebRTC data (0/1). Logs first packet and occasional stats."),
+ ECVF_Default);
 
 // New CVars for Issue #87 resiliency
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCAutoReconnect(
-    TEXT("o3ds.Broadcast.WebRTC.AutoReconnect"),
-    1,
-    TEXT("Enable auto-reconnect/re-offer logic on failures (0/1)."),
-    ECVF_Default);
+ TEXT("o3ds.Broadcast.WebRTC.AutoReconnect"),
+1,
+ TEXT("Enable auto-reconnect/re-offer logic on failures (0/1)."),
+ ECVF_Default);
 
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCBackoffInitialMs(
-    TEXT("o3ds.Broadcast.WebRTC.BackoffInitialMs"),
-    500,
-    TEXT("Initial backoff for re-offer/reconnect in milliseconds."),
-    ECVF_Default);
+ TEXT("o3ds.Broadcast.WebRTC.BackoffInitialMs"),
+500,
+ TEXT("Initial backoff for re-offer/reconnect in milliseconds."),
+ ECVF_Default);
 
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCBackoffMaxMs(
-    TEXT("o3ds.Broadcast.WebRTC.BackoffMaxMs"),
-    10000,
-    TEXT("Maximum backoff for re-offer/reconnect in milliseconds."),
-    ECVF_Default);
+ TEXT("o3ds.Broadcast.WebRTC.BackoffMaxMs"),
+10000,
+ TEXT("Maximum backoff for re-offer/reconnect in milliseconds."),
+ ECVF_Default);
 
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCNegoChannel(
-    TEXT("o3ds.Broadcast.WebRTC.NegotiatedChannel"),
-    0,
-    TEXT("Use negotiated data channel with fixed id on both sides (0/1)."),
-    ECVF_Default);
+ TEXT("o3ds.Broadcast.WebRTC.NegotiatedChannel"),
+0,
+ TEXT("Use negotiated data channel with fixed id on both sides (0/1)."),
+ ECVF_Default);
 
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCChannelId(
-    TEXT("o3ds.Broadcast.WebRTC.ChannelId"),
-    42,
-    TEXT("Fixed DataChannel id to use when NegotiatedChannel=1."),
-    ECVF_Default);
+ TEXT("o3ds.Broadcast.WebRTC.ChannelId"),
+42,
+ TEXT("Fixed DataChannel id to use when NegotiatedChannel=1."),
+ ECVF_Default);
 
 const char* FWebRTCConnector::DataChannelLabel = "Open3DStream";
 
@@ -87,7 +100,7 @@ void FWebRTCConnector::EnsurePeerConnectionForNewSession()
 		bNeedsNew = true;
 	}
 	else if (LastPeerState == static_cast<int32>(rtc::PeerConnection::State::Failed) ||
-	         LastPeerState == static_cast<int32>(rtc::PeerConnection::State::Closed))
+	 LastPeerState == static_cast<int32>(rtc::PeerConnection::State::Closed))
 	{
 		bNeedsNew = true;
 	}
@@ -102,13 +115,18 @@ bool FWebRTCConnector::Start(const FString& Url, bool bInIsServer)
 {
 	// Preserve any previously bound data callback across restarts
 	TFunction<void(const uint8*, int32)> SavedCallback = DataReceivedCallback;
+	auto SavedAudioCb = AudioRxCallback;
 
 	Stop();
 
-	// Restore callback (Stop may have cleared internal state)
+	// Restore callbacks (Stop may have cleared internal state)
 	if (SavedCallback)
 	{
 		DataReceivedCallback = MoveTemp(SavedCallback);
+	}
+	if (SavedAudioCb)
+	{
+		AudioRxCallback = MoveTemp(SavedAudioCb);
 	}
 
 	bIsServer = bInIsServer;
@@ -120,7 +138,7 @@ bool FWebRTCConnector::Start(const FString& Url, bool bInIsServer)
 	bSignalingIsConnected = false;
 
 	// Snapshot negotiated channel settings
-	bNegotiatedChannelEnabled = (CVarO3DSBroadcastWebRTCNegoChannel->GetInt() != 0);
+	bNegotiatedChannelEnabled = (CVarO3DSBroadcastWebRTCNegoChannel->GetInt() !=0);
 	NegotiatedChannelId = CVarO3DSBroadcastWebRTCChannelId->GetInt();
 
 	ResetReofferBackoff(/*bImmediate*/true);
@@ -146,9 +164,9 @@ bool FWebRTCConnector::Start(const FString& Url, bool bInIsServer)
 	// Use wss:// for remote hosts (HTTPS/secure), ws:// for localhost
 	FString Protocol = TEXT("ws");
 	if (!Host.Equals(TEXT("localhost"), ESearchCase::IgnoreCase) && 
-	    !Host.Equals(TEXT("127.0.0.1")) && 
-	    !Host.StartsWith(TEXT("192.168.")) &&
-	    !Host.StartsWith(TEXT("10.")))
+	 !Host.Equals(TEXT("127.0.0.1")) && 
+	 !Host.StartsWith(TEXT("192.168.")) &&
+	 !Host.StartsWith(TEXT("10.")))
 	{
 		Protocol = TEXT("wss");
 	}
@@ -183,7 +201,7 @@ bool FWebRTCConnector::Start(const FString& Url, bool bInIsServer)
 		if (!bIsServer)
 		{
 			const double Now = FPlatformTime::Seconds();
-			double Delay = FMath::Clamp((double)RetryAfterMs / 1000.0, 0.05, 5.0);
+			double Delay = FMath::Clamp((double)RetryAfterMs /1000.0,0.05,5.0);
 			OfferBackoffSeconds = Delay;
 			NextOfferTimeSeconds = Now + Delay;
 			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Collision - scheduling re-offer in %.2fs (action=%s)"), Delay, *Action);
@@ -222,13 +240,17 @@ void FWebRTCConnector::Stop()
 	bLocalDescriptionSet = false;
 	PendingRemoteCandidates.Reset();
 	ConnectionState = TEXT("CLOSED");
-	// Do NOT clear DataReceivedCallback here; allow pre-bound sink to persist across restarts
+	// Do NOT clear callbacks here; allow pre-bound sinks to persist across restarts
 	LastPeerState = -1;
 	bSignalingIsConnected = false;
-	NextOfferTimeSeconds = 0.0;
-	OfferBackoffSeconds = 0.0;
-	NextReconnectTimeSeconds = 0.0;
-	ReconnectBackoffSeconds = 0.0;
+	NextOfferTimeSeconds =0.0;
+	OfferBackoffSeconds =0.0;
+	NextReconnectTimeSeconds =0.0;
+	ReconnectBackoffSeconds =0.0;
+
+#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+	DestroyOpus();
+#endif
 }
 
 bool FWebRTCConnector::Send(const uint8* Data, int32 Size)
@@ -236,15 +258,15 @@ bool FWebRTCConnector::Send(const uint8* Data, int32 Size)
 	if (!bDataChannelOpen || !DataChannel)
 	{
 		LastError = TEXT("Data channel is not open");
-		if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+		if (CVarO3DSWebRTCVerbose->GetInt() !=0)
 		{
 			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Send(%d) rejected, channel_open=%d, has_channel=%d"),
-				Size, bDataChannelOpen ? 1 : 0, DataChannel ? 1 : 0);
+				Size, bDataChannelOpen ?1 :0, DataChannel ?1 :0);
 		}
 		return false;
 	}
 
-	if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+	if (CVarO3DSWebRTCVerbose->GetInt() !=0)
 	{
 		UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Send(%d)"), Size);
 	}
@@ -256,7 +278,7 @@ bool FWebRTCConnector::Send(const uint8* Data, int32 Size)
 		// Convert uint8 data to std::byte for rtc::binary
 		rtc::binary Out;
 		Out.reserve(Size);
-		for (int32 i = 0; i < Size; ++i)
+		for (int32 i =0; i < Size; ++i)
 		{
 			Out.push_back(static_cast<std::byte>(Data[i]));
 		}
@@ -290,92 +312,107 @@ void FWebRTCConnector::SetDataReceivedCallback(TFunction<void(const uint8*, int3
 
 void FWebRTCConnector::Tick()
 {
-    // Process queued received data
-    TArray<uint8> ReceivedData;
-    while (ReceivedDataQueue.Dequeue(ReceivedData))
-    {
-        const TCHAR* RoleLabel = bIsServer ? TEXT("Server") : TEXT("Client");
+ // Process queued received data
+ TArray<uint8> ReceivedData;
+ while (ReceivedDataQueue.Dequeue(ReceivedData))
+ {
+ const TCHAR* RoleLabel = bIsServer ? TEXT("Server") : TEXT("Client");
 
-        if (CVarO3DSWebRTCDebugRx->GetInt() != 0)
-        {
-            static bool bLoggedFirstRx = false;
-            if (!bLoggedFirstRx)
-            {
-                bLoggedFirstRx = true;
-                const int32 DumpN = FMath::Min(64, ReceivedData.Num());
-                FString Hex; Hex.Reserve(DumpN * 3);
-                for (int32 i = 0; i < DumpN; ++i)
-                {
-                    Hex += FString::Printf(TEXT("%02X "), ReceivedData[i]);
-                }
-                static const uint8 ExpectedHeader[14] = {0x00,0xFF,0x03,0xFE,'O','3','D','S','-','S','T','A','R','T'};
-                const bool bHeaderMatch = (ReceivedData.Num() >= 14) && (FMemory::Memcmp(ReceivedData.GetData(), ExpectedHeader, 14) == 0);
-                UE_LOG(LogTemp, Verbose, TEXT("WebRTC RX[%s %p]: First packet size=%d header_match=%s first_%d=%s"),
-                    RoleLabel, this, ReceivedData.Num(), bHeaderMatch?TEXT("true"):TEXT("false"), DumpN, *Hex);
-            }
-        }
+ if (CVarO3DSWebRTCDebugRx->GetInt() !=0)
+ {
+ static bool bLoggedFirstRx = false;
+ if (!bLoggedFirstRx)
+ {
+ bLoggedFirstRx = true;
+ const int32 DumpN = FMath::Min(64, ReceivedData.Num());
+ FString Hex; Hex.Reserve(DumpN *3);
+ for (int32 i =0; i < DumpN; ++i)
+ {
+ Hex += FString::Printf(TEXT("%02X "), ReceivedData[i]);
+ }
+ static const uint8 ExpectedHeader[14] = {0x00,0xFF,0x03,0xFE,'O','3','D','S','-','S','T','A','R','T'};
+ const bool bHeaderMatch = (ReceivedData.Num() >=14) && (FMemory::Memcmp(ReceivedData.GetData(), ExpectedHeader,14) ==0);
+ UE_LOG(LogTemp, Verbose, TEXT("WebRTC RX[%s %p]: First packet size=%d header_match=%s first_%d=%s"),
+ RoleLabel, this, ReceivedData.Num(), bHeaderMatch?TEXT("true"):TEXT("false"), DumpN, *Hex);
+ }
+ }
 
-        if (DataReceivedCallback)
-        {
-            if (CVarO3DSWebRTCDebugRx->GetInt() != 0)
-            {
-                static int32 DispatchLogs = 0;
-                if (DispatchLogs < 3)
-                {
-                    ++DispatchLogs;
-                    UE_LOG(LogTemp, Verbose, TEXT("WebRTC RX[%s %p]: Dispatching %d bytes to receiver callback"), RoleLabel, this, ReceivedData.Num());
-                }
-            }
-            DataReceivedCallback(ReceivedData.GetData(), ReceivedData.Num());
-        }
-        else if (CVarO3DSWebRTCDebugRx->GetInt() != 0)
-        {
-            static int32 DropLogs = 0;
-            if (DropLogs < 3)
-            {
-                ++DropLogs;
-                UE_LOG(LogTemp, Verbose, TEXT("WebRTC RX[%s %p]: Dropping %d bytes (no DataReceivedCallback bound)"), RoleLabel, this, ReceivedData.Num());
-            }
-        }
-    }
+ if (DataReceivedCallback)
+ {
+ if (CVarO3DSWebRTCDebugRx->GetInt() !=0)
+ {
+ static int32 DispatchLogs =0;
+ if (DispatchLogs <3)
+ {
+ ++DispatchLogs;
+ UE_LOG(LogTemp, Verbose, TEXT("WebRTC RX[%s %p]: Dispatching %d bytes to receiver callback"), RoleLabel, this, ReceivedData.Num());
+ }
+ }
+ DataReceivedCallback(ReceivedData.GetData(), ReceivedData.Num());
+ }
+ else if (CVarO3DSWebRTCDebugRx->GetInt() !=0)
+ {
+ static int32 DropLogs =0;
+ if (DropLogs <3)
+ {
+ ++DropLogs;
+ UE_LOG(LogTemp, Verbose, TEXT("WebRTC RX[%s %p]: Dropping %d bytes (no DataReceivedCallback bound)"), RoleLabel, this, ReceivedData.Num());
+ }
+ }
+ }
 
-    // Re-offer / reconnect timers (Issue #87)
-    if (CVarO3DSBroadcastWebRTCAutoReconnect->GetInt() != 0)
-    {
-        const double Now = FPlatformTime::Seconds();
-        // Client re-offer loop when no remote description yet
-        if (!bIsServer && bSignalingIsConnected && !bRemoteDescriptionSet && PeerConnection)
-        {
-            if (Now >= NextOfferTimeSeconds && OfferBackoffSeconds > 0.0)
-            {
-                MaybeCreateOffer(TEXT("reoffer-timer"));
-                // Backoff grows up to max
-                const double MaxSec = (double)CVarO3DSBroadcastWebRTCBackoffMaxMs->GetInt() / 1000.0;
-                OfferBackoffSeconds = FMath::Min(OfferBackoffSeconds * 2.0, MaxSec);
-                const double Jitter = FMath::FRandRange(0.0, 0.25 * OfferBackoffSeconds);
-                NextOfferTimeSeconds = Now + OfferBackoffSeconds + Jitter;
-            }
-        }
+ // Process decoded PCM audio frames
+ FRxBuffer Rx;
+ while (DecodedPcmQueue.Dequeue(Rx))
+ {
+ if (AudioRxCallback && Rx.PCM.Num() >0)
+ {
+ AudioRxCallback(Rx.PCM.GetData(), Rx.PCM.Num(), Rx.NumChannels, Rx.SampleRate);
+ }
+ // Also notify generic remote audio listeners with real stream/subject labels
+ if (Rx.PCM.Num() >0)
+ {
+		RemoteAudioDelegate.Broadcast(RxSubjectName, RxStreamLabel, Rx.PCM.GetData(), Rx.PCM.Num(), Rx.NumChannels);
+ }
+ }
 
-        // Reconnect/renegotiate on disconnection
-        const bool bPeerDown = (LastPeerState == (int32)rtc::PeerConnection::State::Failed) ||
-                               (LastPeerState == (int32)rtc::PeerConnection::State::Closed) ||
-                               (LastPeerState == (int32)rtc::PeerConnection::State::Disconnected);
-        if (bPeerDown && Now >= NextReconnectTimeSeconds && ReconnectBackoffSeconds > 0.0)
-        {
-            // Try to restart negotiation (fresh PC and offer if client; server just waits)
-            UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Reconnect timer fired (state=%d)"), LastPeerState);
-            EnsurePeerConnectionForNewSession();
-            if (!bIsServer)
-            {
-                MaybeCreateOffer(TEXT("reconnect"));
-            }
-            const double MaxSec = (double)CVarO3DSBroadcastWebRTCBackoffMaxMs->GetInt() / 1000.0;
-            ReconnectBackoffSeconds = FMath::Min(ReconnectBackoffSeconds * 2.0, MaxSec);
-            const double Jitter = FMath::FRandRange(0.0, 0.25 * ReconnectBackoffSeconds);
-            NextReconnectTimeSeconds = Now + ReconnectBackoffSeconds + Jitter;
-        }
-    }
+ // Re-offer / reconnect timers (Issue #87)
+ if (CVarO3DSBroadcastWebRTCAutoReconnect->GetInt() !=0)
+ {
+ const double Now = FPlatformTime::Seconds();
+ // Client re-offer loop when no remote description yet
+ if (!bIsServer && bSignalingIsConnected && !bRemoteDescriptionSet && PeerConnection)
+ {
+ if (Now >= NextOfferTimeSeconds && OfferBackoffSeconds >0.0)
+ {
+ MaybeCreateOffer(TEXT("reoffer-timer"));
+ // Backoff grows up to max
+ const double MaxSec = (double)CVarO3DSBroadcastWebRTCBackoffMaxMs->GetInt() /1000.0;
+ OfferBackoffSeconds = FMath::Min(OfferBackoffSeconds *2.0, MaxSec);
+ const double Jitter = FMath::FRandRange(0.0,0.25 * OfferBackoffSeconds);
+ NextOfferTimeSeconds = Now + OfferBackoffSeconds + Jitter;
+ }
+ }
+
+ // Reconnect/renegotiate on disconnection
+ const bool bPeerDown = (LastPeerState == (int32)rtc::PeerConnection::State::Failed) ||
+ (LastPeerState == (int32)rtc::PeerConnection::State::Closed) ||
+ (LastPeerState == (int32)rtc::PeerConnection::State::Disconnected);
+ if (bPeerDown && Now >= NextReconnectTimeSeconds && ReconnectBackoffSeconds >0.0)
+ {
+ // Try to restart negotiation (fresh PC and offer if client; server just waits)
+ UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Reconnect timer fired (state=%d)"), LastPeerState);
+ EnsurePeerConnectionForNewSession();
+ if (!bIsServer)
+ {
+ MaybeCreateOffer(TEXT("reconnect"));
+ }
+ const double MaxSec = (double)CVarO3DSBroadcastWebRTCBackoffMaxMs->GetInt() /1000.0;
+ ReconnectBackoffSeconds = FMath::Min(ReconnectBackoffSeconds *2.0, MaxSec);
+ const double Jitter = FMath::FRandRange(0.0,0.25 * ReconnectBackoffSeconds);
+ NextReconnectTimeSeconds = Now + ReconnectBackoffSeconds + Jitter;
+ }
+ }
 }
 
 void FWebRTCConnector::OnPeerConnectionStateChange(int StateInt)
@@ -466,7 +503,7 @@ void FWebRTCConnector::OnIceCandidate(const rtc::Candidate& Candidate)
 		std::string CandidateStr = Candidate.candidate();
 		FString Candidate_FString(ANSI_TO_TCHAR(CandidateStr.c_str()));
 		FString SdpMid(ANSI_TO_TCHAR(Candidate.mid().c_str()));
-		int32 SdpMLineIndex = 0; // libdatachannel doesn't expose mLineIndex, use 0
+		int32 SdpMLineIndex =0; // libdatachannel doesn't expose mLineIndex, use0
 
 		SignalingClient->SendIceCandidate(Candidate_FString, SdpMid, SdpMLineIndex);
 	}
@@ -826,6 +863,22 @@ bool FWebRTCConnector::ParseWebRtcUrl(const FString& Url, FString& OutHost, uint
 	return true;
 }
 
+static std::shared_ptr<rtc::Track> AddOpusAudioSendTrack(std::shared_ptr<rtc::PeerConnection> PC, int32 BitrateKbps)
+{
+	if (!PC)
+	{
+		return nullptr;
+	}
+	// Build an audio media description with Opus payload111
+	rtc::Description::Audio Audio("audio", rtc::Description::Direction::SendOnly);
+	Audio.addOpusCodec(111);
+	if (BitrateKbps >0)
+	{
+		Audio.setBitrate(BitrateKbps *1000);
+	}
+	return PC->addTrack(Audio);
+}
+
 bool FWebRTCConnector::SetupPeerConnection()
 {
 	try
@@ -834,7 +887,7 @@ bool FWebRTCConnector::SetupPeerConnection()
 		RtcConfig = std::make_shared<rtc::Configuration>();
 
 		// Add STUN servers
-		rtc::IceServer StunServer("stun.l.google.com", 19302);
+		rtc::IceServer StunServer("stun.l.google.com",19302);
 		RtcConfig->iceServers.push_back(StunServer);
 
 		// Create PeerConnection
@@ -854,6 +907,48 @@ bool FWebRTCConnector::SetupPeerConnection()
 		PeerConnection->onLocalDescription([this](rtc::Description Description)
 		{
 			OnLocalDescription(Description);
+		});
+
+		// Audio receive: bind onTrack to decode Opus
+		PeerConnection->onTrack([this](std::shared_ptr<rtc::Track> Track)
+		{
+			if (!Track)
+				return;
+			const std::string Desc = Track->description().description();
+			if (Desc.find("audio") == std::string::npos)
+			{
+				return; // not audio
+			}
+			Track->onFrame([this](rtc::binary data, rtc::FrameInfo info)
+			{
+#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+				const uint8* Enc = reinterpret_cast<const uint8*>(data.data());
+				int32 EncSize = (int32)data.size();
+				int ChannelsFromPkt =1;
+				if (Enc && EncSize >0)
+				{
+					ChannelsFromPkt = opus_packet_get_nb_channels(Enc);
+					if (ChannelsFromPkt <=0 || ChannelsFromPkt >2) ChannelsFromPkt =1;
+				}
+				if (!EnsureOpusDecoder(48000, ChannelsFromPkt))
+				{
+					return;
+				}
+				// Worst-case120 ms =5760 samples per ch
+				const int MaxPerCh =5760;
+				TArray<int16> Pcm; Pcm.SetNumZeroed(MaxPerCh * ChannelsFromPkt);
+				int Decoded = opus_decode(OpusDec, Enc, EncSize, Pcm.GetData(), MaxPerCh,0);
+				if (Decoded >0)
+				{
+					FRxBuffer Out; Out.NumChannels = ChannelsFromPkt; Out.SampleRate =48000;
+					Out.PCM.SetNumUninitialized(Decoded * ChannelsFromPkt);
+					FMemory::Memcpy(Out.PCM.GetData(), Pcm.GetData(), sizeof(int16) * Out.PCM.Num());
+					DecodedPcmQueue.Enqueue(MoveTemp(Out));
+				}
+#else
+				(void)data; (void)info; // silence unused
+#endif
+			});
 		});
 
 		// If server mode, handle incoming data channels (non-negotiated mode)
@@ -918,6 +1013,18 @@ bool FWebRTCConnector::SetupPeerConnection()
 		{
 			CreateDataChannel();
 		}
+
+#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+		// If audio sending is enabled, add Opus audio track now
+		if (bAudioSendEnabled && !AudioTrack)
+		{
+			AudioTrack = AddOpusAudioSendTrack(PeerConnection, AudioRt.Config.BitrateKbps);
+			if (!AudioTrack)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: Failed to add Opus audio track"));
+			}
+		}
+#endif
 
 		return true;
 	}
@@ -1030,6 +1137,12 @@ void FWebRTCConnector::CleanupPeerConnection()
 		this->DataChannel.reset();
 	}
 
+	if (this->AudioTrack)
+	{
+		try { this->AudioTrack->close(); } catch (const std::exception&) {}
+		this->AudioTrack.reset();
+	}
+
 	if (this->PeerConnection)
 	{
 		try
@@ -1079,12 +1192,12 @@ void FWebRTCConnector::FlushPendingRemoteCandidates()
 
 void FWebRTCConnector::ResetReofferBackoff(bool bImmediate)
 {
-	const double Initial = (double)CVarO3DSBroadcastWebRTCBackoffInitialMs->GetInt() / 1000.0;
+	const double Initial = (double)CVarO3DSBroadcastWebRTCBackoffInitialMs->GetInt() /1000.0;
 	OfferBackoffSeconds = Initial;
 	const double Now = FPlatformTime::Seconds();
 	if (bImmediate)
 	{
-		NextOfferTimeSeconds = Now + FMath::FRandRange(0.0, 0.25 * OfferBackoffSeconds);
+		NextOfferTimeSeconds = Now + FMath::FRandRange(0.0,0.25 * OfferBackoffSeconds);
 	}
 	else
 	{
@@ -1094,12 +1207,12 @@ void FWebRTCConnector::ResetReofferBackoff(bool bImmediate)
 
 void FWebRTCConnector::ResetReconnectBackoff(bool bImmediate)
 {
-	const double Initial = (double)CVarO3DSBroadcastWebRTCBackoffInitialMs->GetInt() / 1000.0;
+	const double Initial = (double)CVarO3DSBroadcastWebRTCBackoffInitialMs->GetInt() /1000.0;
 	ReconnectBackoffSeconds = Initial;
 	const double Now = FPlatformTime::Seconds();
 	if (bImmediate)
 	{
-		NextReconnectTimeSeconds = Now + FMath::FRandRange(0.0, 0.25 * ReconnectBackoffSeconds);
+		NextReconnectTimeSeconds = Now + FMath::FRandRange(0.0,0.25 * ReconnectBackoffSeconds);
 	}
 	else
 	{
@@ -1133,4 +1246,168 @@ void FWebRTCConnector::MaybeCreateOffer(const TCHAR* Context)
 		LastError = FString(ANSI_TO_TCHAR(e.what()));
 		UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: Failed to create offer (%s): %s"), Context, *LastError);
 	}
+}
+
+// ======== Audio (Opus) API ========
+
+void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
+{
+	AudioRt.Config = InConfig;
+	AudioRt.FrameSizeSamples = FMath::Max(1, (InConfig.SampleRate * InConfig.FrameSizeMs) /1000);
+	AudioRt.Timestamp =0;
+	bAudioSendEnabled = true;
+#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+	EnsureOpusEncoder(InConfig);
+	// If PC already exists, add audio track and renegotiate on client
+	if (PeerConnection && !AudioTrack)
+	{
+		AudioTrack = AddOpusAudioSendTrack(PeerConnection, InConfig.BitrateKbps);
+		if (!bIsServer && bSignalingIsConnected)
+		{
+			MaybeCreateOffer(TEXT("audio-enabled"));
+		}
+	}
+#else
+	UE_LOG(LogTemp, Warning, TEXT("Open3DStream: Opus not fully available (library or headers missing). Audio send disabled."));
+#endif
+}
+
+void FWebRTCConnector::DisableAudioSend()
+{
+	bAudioSendEnabled = false;
+	AudioRt.Pending.Reset();
+	if (AudioTrack)
+	{
+		try { AudioTrack->close(); } catch (const std::exception&) {}
+		AudioTrack.reset();
+	}
+}
+
+bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
+{
+	if (!bAudioSendEnabled)
+	{
+		return false;
+	}
+#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+	if (!PeerConnection || !AudioTrack)
+	{
+		return false;
+	}
+	if (!EnsureOpusEncoder(AudioRt.Config))
+	{
+		return false;
+	}
+	if (!Samples || NumSamples <=0)
+	{
+		return true; // nothing
+	}
+	// Append to pending buffer
+	int32 Old = AudioRt.Pending.Num();
+	AudioRt.Pending.AddUninitialized(NumSamples);
+	FMemory::Memcpy(AudioRt.Pending.GetData() + Old, Samples, sizeof(int16) * NumSamples);
+
+	const int32 FrameSamplesTotal = AudioRt.FrameSizeSamples * AudioRt.Config.NumChannels;
+	uint8 Encoded[4000];
+	while (AudioRt.Pending.Num() >= FrameSamplesTotal)
+	{
+	 int16* FramePtr = AudioRt.Pending.GetData();
+	 int EncBytes = opus_encode(OpusEnc, FramePtr, AudioRt.FrameSizeSamples, Encoded, sizeof(Encoded));
+	 if (EncBytes >0)
+	 {
+		 // Send over audio track
+		 rtc::binary Packet;
+		 Packet.resize(EncBytes);
+		 for (int i=0;i<EncBytes;++i) Packet[i] = static_cast<std::byte>(Encoded[i]);
+		 // RTP timestamp increments in48kHz clock
+		 rtc::FrameInfo FI{ (uint32)AudioRt.Timestamp };
+		 AudioRt.Timestamp += (uint32)AudioRt.FrameSizeSamples; // per-channel count at48k clock
+		 if (AudioTrack)
+		 {
+			 AudioTrack->sendFrame(Packet, FI);
+		 }
+	 }
+	 // Pop consumed samples
+	 const int32 Remaining = AudioRt.Pending.Num() - FrameSamplesTotal;
+	 if (Remaining >0)
+	 {
+		 FMemory::Memmove(AudioRt.Pending.GetData(), AudioRt.Pending.GetData() + FrameSamplesTotal, Remaining * sizeof(int16));
+	 }
+	 AudioRt.Pending.SetNum(Remaining, /*bAllowShrinking*/false);
+	}
+ return true;
+#else
+	(void)Samples; (void)NumSamples; return false;
+#endif
+}
+
+void FWebRTCConnector::SetAudioReceiveCallback(TFunction<void(const int16* PCM, int32 NumSamples, int32 NumChannels, int32 SampleRate)> Callback)
+{
+	AudioRxCallback = MoveTemp(Callback);
+}
+
+#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+bool FWebRTCConnector::EnsureOpusEncoder(const FAudioConfig& In)
+{
+	if (OpusEnc)
+	{
+		return true;
+	}
+	int Err =0;
+	OpusEnc = opus_encoder_create(In.SampleRate, In.NumChannels, OPUS_APPLICATION_AUDIO, &Err);
+	if (!OpusEnc || Err != OPUS_OK)
+	{
+		OpusEnc = nullptr;
+		UE_LOG(LogTemp, Error, TEXT("Opus: Failed to create encoder err=%d"), Err);
+		return false;
+	}
+	opus_encoder_ctl(OpusEnc, OPUS_SET_BITRATE(In.BitrateKbps *1000));
+	opus_encoder_ctl(OpusEnc, OPUS_SET_COMPLEXITY(5));
+	opus_encoder_ctl(OpusEnc, OPUS_SET_INBAND_FEC(1));
+	return true;
+}
+
+bool FWebRTCConnector::EnsureOpusDecoder(int32 SampleRate, int32 NumChannels)
+{
+	if (OpusDec)
+	{
+		return true;
+	}
+	int Err =0;
+	OpusDec = opus_decoder_create(SampleRate, NumChannels, &Err);
+	if (!OpusDec || Err != OPUS_OK)
+	{
+		OpusDec = nullptr;
+		UE_LOG(LogTemp, Error, TEXT("Opus: Failed to create decoder err=%d"), Err);
+		return false;
+	}
+	return true;
+}
+
+void FWebRTCConnector::DestroyOpus()
+{
+	if (OpusEnc)
+	{
+		opus_encoder_destroy(OpusEnc);
+		OpusEnc = nullptr;
+	}
+	if (OpusDec)
+	{
+		opus_decoder_destroy(OpusDec);
+		OpusDec = nullptr;
+	}
+}
+#endif
+
+// Static active connector registry
+TWeakPtr<FWebRTCConnector> FWebRTCConnector::ActiveConnector;
+
+void FWebRTCConnector::SetActiveConnector(const TSharedPtr<FWebRTCConnector>& InConnector)
+{
+	ActiveConnector = InConnector;
+}
+
+TSharedPtr<FWebRTCConnector> FWebRTCConnector::GetActiveConnector()
+{
+	return ActiveConnector.Pin();
 }

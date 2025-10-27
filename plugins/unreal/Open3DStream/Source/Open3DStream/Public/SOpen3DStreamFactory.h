@@ -4,8 +4,6 @@
 #include "Widgets/Input/SComboBox.h"
 #include "Open3DStreamSourceSettings.h"
 
-// E:\Unreal\UE_4.25\Engine\Plugins\Animation\LiveLink\Source\LiveLink\Private\SLiveLinkMessageBusSourceFactory.h
-
 DECLARE_DELEGATE_OneParam(FOnOpen3DStreamSelected, FOpen3DStreamSettingsPtr);
 
 class OPEN3DSTREAM_API SOpen3DStreamFactory : public SCompoundWidget
