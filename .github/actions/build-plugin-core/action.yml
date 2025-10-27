@@ -71,7 +71,7 @@ runs:
         $headers = @{ Authorization = "Bearer $env:GITHUB_TOKEN"; 'User-Agent' = 'github-action' }
         $releaseUrl = "https://api.github.com/repos/$ownerRepo/releases"
         $releases = Invoke-RestMethod -Headers $headers -Uri $releaseUrl -Method GET
-        $release = $releases | Sort-Object -Property created_at -Descending | Select-Object -First 1
+        $release = $releases | Sort-Object -Property published_at -Descending | Select-Object -First 1
         if (-not $release) {
           Write-Error "No releases found for $ownerRepo"
         }
@@ -126,7 +126,7 @@ runs:
         $headers = @{ Authorization = "Bearer $env:GITHUB_TOKEN"; 'User-Agent' = 'github-action' }
         $releaseUrl = "https://api.github.com/repos/$ownerRepo/releases"
         $releases = Invoke-RestMethod -Headers $headers -Uri $releaseUrl -Method GET
-        $release = $releases | Sort-Object -Property created_at -Descending | Select-Object -First 1
+        $release = $releases | Sort-Object -Property published_at -Descending | Select-Object -First 1
         if (-not $release) {
           Write-Error "No releases found for $ownerRepo"
         }
