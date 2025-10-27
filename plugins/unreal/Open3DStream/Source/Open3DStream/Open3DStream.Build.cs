@@ -116,7 +116,7 @@ public class Open3DStream : ModuleRules
             PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "datachannel.lib"));
             PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "usrsctp.lib"));
             PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "juice.lib"));
-            PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "srtp.lib"));
+            PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "srtp2.lib"));
             PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "mbedtls.lib"));
             PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "mbedx509.lib"));
             PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "mbedcrypto.lib"));
@@ -129,7 +129,7 @@ public class Open3DStream : ModuleRules
             PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libdatachannel.a"));
             PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libusrsctp.a"));
             PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libjuice.a"));
-            PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libsrtp.a"));
+            PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libsrtp2.a"));
             PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libmbedtls.a"));
             PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libmbedx509.a"));
             PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libmbedcrypto.a"));
@@ -140,7 +140,7 @@ public class Open3DStream : ModuleRules
             PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libdatachannel.a"));
             PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libusrsctp.a"));
             PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libjuice.a"));
-            PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libsrtp.a"));
+            PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libsrtp2.a"));
             PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libmbedtls.a"));
             PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libmbedx509.a"));
             PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libmbedcrypto.a"));
