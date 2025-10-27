@@ -9,8 +9,16 @@
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformTime.h"
 
+// Opus wrappers (guarded by O3DS_WITH_OPUS)
+#include "O3DSOpusCodec.h"
+
 // libdatachannel includes
 #include <rtc/rtc.hpp>
+#include <rtc/track.hpp>
+#include <rtc/description.hpp>
+#include <rtc/rtppacketizer.hpp>
+#include <rtc/rtpdepacketizer.hpp>
+#include <rtc/rtppacketizationconfig.hpp>
 #include <cstddef> // for std::byte
 #include <memory>
 #include <vector>
@@ -308,20 +316,123 @@ bool FLibDataChannelConnector::SendDataLossy(const uint8* Data, int32 Size)
 
 bool FLibDataChannelConnector::EnableAudioSend(const FAudioSendConfig& Config)
 {
-	// Audio tracks not yet implemented for libdatachannel connector.
-	// Will be implemented in a future PR after LiveKit connector is added.
-	UE_LOG(LogTemp, Warning, TEXT("FLibDataChannelConnector::EnableAudioSend() not yet implemented"));
+	// Enable native audio track with Opus RTP
+#if !defined(RTC_ENABLE_MEDIA) || (O3DS_WITH_OPUS==0)
+	UE_LOG(LogTemp, Warning, TEXT("WebRTC audio send unavailable (RTC_ENABLE_MEDIA or O3DS_WITH_OPUS disabled)"));
 	return false;
+#else
+	if (!PeerConnection)
+	{
+		LastError = TEXT("PeerConnection not initialized");
+		return false;
+	}
+
+	// Construct audio description with Opus codec
+	rtc::Description::Audio AudioDesc("audio", rtc::Description::Direction::SendOnly);
+	const int PayloadType = 111;
+	AudioDesc.addOpusCodec(PayloadType, rtc::DEFAULT_OPUS_AUDIO_PROFILE);
+	if (Config.BitrateKbps > 0)
+	{
+		AudioDesc.setBitrate(Config.BitrateKbps * 1000);
+	}
+
+	// SSRC / CNAME / msid
+	const uint32 SSRC = (uint32)FMath::RandHelper(MAX_int32);
+	const std::string CName = std::string("o3ds-") + std::to_string(SSRC);
+	const std::string Msid = TCHAR_TO_ANSI(*Config.StreamLabel);
+	AudioDesc.addSSRC(SSRC, CName, Msid, std::nullopt);
+
+	std::shared_ptr<rtc::Track> Track;
+	try
+	{
+		Track = PeerConnection->addTrack(AudioDesc);
+	}
+	catch (const std::exception& e)
+	{
+		LastError = FString::Printf(TEXT("addTrack(audio) failed: %s"), ANSI_TO_TCHAR(e.what()));
+		UE_LOG(LogTemp, Error, TEXT("WebRTC Connector: %s"), *LastError);
+		return false;
+	}
+	if (!Track)
+	{
+		LastError = TEXT("Failed to add audio track");
+		UE_LOG(LogTemp, Error, TEXT("WebRTC Connector: %s"), *LastError);
+		return false;
+	}
+
+	// RTP packetizer for Opus
+	auto RtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(SSRC, CName, (uint8_t)PayloadType, 48000);
+	auto Packetizer = std::make_shared<rtc::OpusRtpPacketizer>(RtpCfg);
+	Track->setMediaHandler(Packetizer);
+
+	// Opus encoder
+	TUniquePtr<O3DS::FOpusEncoder> Enc = MakeUnique<O3DS::FOpusEncoder>();
+	if (!Enc->Init(Config.SampleRate, Config.NumChannels, Config.BitrateKbps, Config.bUseDTX))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: Opus encoder init failed (sr=%d ch=%d)"), Config.SampleRate, Config.NumChannels);
+		return false;
+	}
+
+	// Store state
+	FString Key = Config.StreamLabel.IsEmpty() ? FString(TEXT("o3ds:mix")) : Config.StreamLabel;
+	FAudioSendState State;
+	State.StreamLabel = Key;
+	State.SubjectName = Config.SubjectName;
+	State.SampleRate = Config.SampleRate;
+	State.NumChannels = Config.NumChannels;
+	State.BitrateKbps = Config.BitrateKbps;
+	State.Track = Track;
+	State.RtpConfig = RtpCfg;
+	State.Packetizer = Packetizer;
+	State.OpusEnc = MoveTemp(Enc);
+	AudioSenders.Add(Key, MoveTemp(State));
+
+	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Audio track enabled (label=%s, sr=%d, ch=%d, br=%dkbps)"),
+		*Key, Config.SampleRate, Config.NumChannels, Config.BitrateKbps);
+	return true;
+#endif
 }
 
 bool FLibDataChannelConnector::PushPcm(const FString& StreamLabel, const float* Interleaved, int32 NumFrames,
                                        int32 NumChannels, int32 SampleRate, double TimestampSec)
 {
-    // Audio tracks not yet implemented for libdatachannel connector.
-    // Stub to satisfy interface; return false to indicate unsupported.
-    UE_LOG(LogTemp, Verbose, TEXT("FLibDataChannelConnector::PushPcm() not implemented (Stream=%s, Frames=%d, Ch=%d, Rate=%d)"),
-        *StreamLabel, NumFrames, NumChannels, SampleRate);
-    return false;
+	if (StreamLabel.IsEmpty()) return false;
+#if !defined(RTC_ENABLE_MEDIA) || (O3DS_WITH_OPUS==0)
+	return false;
+#else
+	FAudioSendState* State = AudioSenders.Find(StreamLabel);
+	if (!State || !State->Track || !State->OpusEnc)
+	{
+		return false;
+	}
+
+	// Encode PCM -> Opus
+	TArray<uint8> Packet;
+	if (!State->OpusEnc->Encode(Interleaved, NumFrames, NumChannels, SampleRate, Packet))
+	{
+		return false;
+	}
+
+	rtc::binary Payload;
+	Payload.reserve((size_t)Packet.Num());
+	for (int32 i = 0; i < Packet.Num(); ++i)
+	{
+		Payload.push_back(static_cast<std::byte>(Packet[i]));
+	}
+	rtc::FrameInfo Info;
+	Info.timestampSeconds = TimestampSec;
+	try
+	{
+		State->Track->sendFrame(std::move(Payload), Info);
+		return true;
+	}
+	catch (const std::exception& e)
+	{
+		LastError = FString(ANSI_TO_TCHAR(e.what()));
+		UE_LOG(LogTemp, Verbose, TEXT("WebRTC Audio: sendFrame failed: %s"), *LastError);
+		return false;
+	}
+#endif
 }
 
 void FLibDataChannelConnector::Tick()
@@ -412,6 +523,16 @@ void FLibDataChannelConnector::Tick()
             NextReconnectTimeSeconds = Now + ReconnectBackoffSeconds + Jitter;
         }
     }
+
+	// Dispatch incoming audio frames on game thread
+	FIncomingAudio Audio;
+	while (IncomingAudioQueue.Dequeue(Audio))
+	{
+		if (RemoteAudioCallback.IsBound())
+		{
+			RemoteAudioCallback.Execute(Audio.StreamLabel, Audio.SubjectName, Audio.Samples.GetData(), Audio.NumFrames, Audio.NumChannels, Audio.SampleRate);
+		}
+	}
 }
 
 void FLibDataChannelConnector::OnPeerConnectionStateChange(int StateInt)
@@ -892,6 +1013,12 @@ bool FLibDataChannelConnector::SetupPeerConnection()
 			OnLocalDescription(Description);
 		});
 
+		// Media track callback (audio/video)
+		PeerConnection->onTrack([this](std::shared_ptr<rtc::Track> InTrack)
+		{
+			OnIncomingTrack(InTrack);
+		});
+
 		// If server mode, handle incoming data channels (non-negotiated mode)
 		if (bIsServer && !bNegotiatedChannelEnabled)
 		{
@@ -1169,4 +1296,86 @@ void FLibDataChannelConnector::MaybeCreateOffer(const TCHAR* Context)
 		LastError = FString(ANSI_TO_TCHAR(e.what()));
 		UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: Failed to create offer (%s): %s"), Context, *LastError);
 	}
+}
+
+void FLibDataChannelConnector::OnIncomingTrack(std::shared_ptr<rtc::Track> Track)
+{
+#if !defined(RTC_ENABLE_MEDIA) || (O3DS_WITH_OPUS==0)
+	UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Incoming media track ignored (media/opus disabled)"));
+	return;
+#else
+	if (!Track)
+	{
+		return;
+	}
+
+	// Best-effort: check if it's an audio track by inspecting description
+	rtc::Description::Media Desc = Track->description();
+	const std::string Type = Desc.type();
+	const bool bIsAudio = (Type == std::string("audio"));
+	UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Incoming track mid=%s type=%s"), *FString(ANSI_TO_TCHAR(Track->mid().c_str())), *FString(ANSI_TO_TCHAR(Type.c_str())));
+	if (!bIsAudio)
+	{
+		return;
+	}
+
+	// Attach Opus depacketizer
+	auto Depacketizer = std::make_shared<rtc::OpusRtpDepacketizer>();
+	Track->chainMediaHandler(Depacketizer);
+
+	// Create or get decoder for this track MID
+	const FString Mid = FString(ANSI_TO_TCHAR(Track->mid().c_str()));
+	if (!AudioDecoders.Contains(Mid))
+	{
+		TUniquePtr<O3DS::FOpusDecoder> Dec = MakeUnique<O3DS::FOpusDecoder>();
+		// Assume 48kHz mono unless negotiated otherwise
+		if (!Dec->Init(48000, 1))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: Opus decoder init failed for MID %s"), *Mid);
+		}
+		AudioDecoders.Add(Mid, MoveTemp(Dec));
+	}
+
+	// Receive frames (Opus payloads) and decode
+	Track->onFrame([this, Mid](rtc::binary Data, rtc::FrameInfo Info)
+	{
+		TUniquePtr<O3DS::FOpusDecoder>* DecPtr = AudioDecoders.Find(Mid);
+		if (!DecPtr || !DecPtr->IsValid())
+		{
+			return;
+		}
+
+		// Decode Opus -> PCM16
+		const uint8* PacketData = reinterpret_cast<const uint8*>(Data.data());
+		const int32 PacketBytes = (int32)Data.size();
+		TArray<uint8> Pcm16;
+		int32 OutFrames = 0;
+		if (!(*DecPtr)->DecodeToPcm16(PacketData, PacketBytes, Pcm16, OutFrames))
+		{
+			return;
+		}
+
+		const int32 Channels = (*DecPtr)->GetNumChannels();
+		const int32 SampleRate = (*DecPtr)->GetSampleRate();
+		const int32 NumSamples = OutFrames * Channels;
+		// Convert PCM16 -> float
+		TArray<float> Floats;
+		Floats.SetNumUninitialized(NumSamples);
+		const int16* Src = reinterpret_cast<const int16*>(Pcm16.GetData());
+		for (int32 i = 0; i < NumSamples; ++i)
+		{
+			Floats[i] = FMath::Clamp((float)Src[i] / 32768.0f, -1.0f, 1.0f);
+		}
+
+		// Queue for game thread callback
+		FIncomingAudio Item;
+		Item.StreamLabel = TEXT("webrtc:audio"); // TODO: recover from msid/announce
+		Item.SubjectName = TEXT("");
+		Item.NumFrames = OutFrames;
+		Item.NumChannels = Channels;
+		Item.SampleRate = SampleRate;
+		Item.Samples = MoveTemp(Floats);
+		IncomingAudioQueue.Enqueue(MoveTemp(Item));
+	});
+#endif
 }

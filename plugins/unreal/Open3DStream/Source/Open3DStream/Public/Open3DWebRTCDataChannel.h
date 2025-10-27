@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include <functional>
+#include "IWebRTCConnector.h" // For audio track config and delegate
 
 // Forward declarations
 enum class EO3DSWebRtcBackendReceiver : uint8;
@@ -39,6 +40,19 @@ public:
 
     // Pump internal queues (call from game thread each tick).
     void Tick();
+
+    // ========== Audio (Media Tracks) ==========
+    // Create and configure a media audio track for sending Opus via the backend connector.
+    // Returns true if the track is ready to accept PushPcm calls.
+    bool EnableAudioSend(const IWebRTCConnector::FAudioSendConfig& Config);
+
+    // Push interleaved float PCM to the named stream label (configured via EnableAudioSend).
+    // Call in 10–20 ms chunks at the configured sample rate.
+    bool PushPcm(const FString& StreamLabel, const float* Interleaved, int32 NumFrames,
+                 int32 NumChannels, int32 SampleRate, double TimestampSec);
+
+    // Access the remote audio callback delegate (called on game thread after Tick).
+    IWebRTCConnector::FOnRemoteAudio& OnRemoteAudio();
 
 private:
     class FImpl;

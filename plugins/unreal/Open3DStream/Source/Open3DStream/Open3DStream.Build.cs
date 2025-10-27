@@ -160,45 +160,47 @@ public class Open3DStream : ModuleRules
 
         // Optional Opus (audio) support
         // Strategy:
-        // 1) If ThirdParty/opus tree exists with platform libs, prefer that
-        // 2) Else on Linux/Mac, fall back to system opus (-lopus)
-        // 3) Else, disable opus (code will compile with O3DS_WITH_OPUS=0)
+        // 1) Prefer prebuilt artifacts placed by CI in ThirdParty root:
+        //    - Headers: ThirdParty/include/opus/opus.h
+        //    - Libs:    ThirdParty/opus.lib (Win), ThirdParty/libopus.a (Linux), ThirdParty/macos/libopus.a (Mac)
+        // 2) Also support legacy layout under ThirdParty/opus/...
+        // 3) Else on Linux/Mac, fall back to system opus (-lopus)
+        // 4) Else, disable opus (O3DS_WITH_OPUS=0)
         bool bWithOpus = false;
-        string OpusRoot = Path.Combine(ThirdPartyDir, "opus");
-        if (Directory.Exists(OpusRoot))
+        string OpusHeader = Path.Combine(ThirdPartyDir, "include", "opus", "opus.h");
+
+        // Probe library locations by platform (new layout first, then legacy)
+        if (Target.Platform == UnrealTargetPlatform.Win64)
         {
-            // Try to link prebuilt opus from ThirdParty
-            string OpusInclude = Path.Combine(OpusRoot, "include");
-            if (Directory.Exists(OpusInclude))
+            string LibPathNew = Path.Combine(ThirdPartyDir, "opus.lib");
+            string LibPathLegacy = Path.Combine(ThirdPartyDir, "opus", "opus.lib");
+            string UseLib = File.Exists(LibPathNew) ? LibPathNew : (File.Exists(LibPathLegacy) ? LibPathLegacy : null);
+            if (!string.IsNullOrEmpty(UseLib) && File.Exists(OpusHeader))
             {
-                PrivateIncludePaths.Add(OpusInclude);
+                PublicAdditionalLibraries.Add(UseLib);
+                bWithOpus = true;
             }
-            if (Target.Platform == UnrealTargetPlatform.Win64)
+        }
+        else if (Target.Platform == UnrealTargetPlatform.Linux)
+        {
+            string LibPathNew = Path.Combine(ThirdPartyDir, "libopus.a");
+            string LibPathLegacy = Path.Combine(ThirdPartyDir, "opus", "libopus.a");
+            string UseLib = File.Exists(LibPathNew) ? LibPathNew : (File.Exists(LibPathLegacy) ? LibPathLegacy : null);
+            if (!string.IsNullOrEmpty(UseLib) && File.Exists(OpusHeader))
             {
-                string LibPath = Path.Combine(OpusRoot, "opus.lib");
-                if (File.Exists(LibPath))
-                {
-                    PublicAdditionalLibraries.Add(LibPath);
-                    bWithOpus = true;
-                }
+                PublicAdditionalLibraries.Add(UseLib);
+                bWithOpus = true;
             }
-            else if (Target.Platform == UnrealTargetPlatform.Linux)
+        }
+        else if (Target.Platform == UnrealTargetPlatform.Mac)
+        {
+            string LibPathNew = Path.Combine(ThirdPartyDir, "macos", "libopus.a");
+            string LibPathLegacy = Path.Combine(ThirdPartyDir, "opus", "macos", "libopus.a");
+            string UseLib = File.Exists(LibPathNew) ? LibPathNew : (File.Exists(LibPathLegacy) ? LibPathLegacy : null);
+            if (!string.IsNullOrEmpty(UseLib) && File.Exists(OpusHeader))
             {
-                string LibPath = Path.Combine(OpusRoot, "libopus.a");
-                if (File.Exists(LibPath))
-                {
-                    PublicAdditionalLibraries.Add(LibPath);
-                    bWithOpus = true;
-                }
-            }
-            else if (Target.Platform == UnrealTargetPlatform.Mac)
-            {
-                string LibPath = Path.Combine(OpusRoot, "macos", "libopus.a");
-                if (File.Exists(LibPath))
-                {
-                    PublicAdditionalLibraries.Add(LibPath);
-                    bWithOpus = true;
-                }
+                PublicAdditionalLibraries.Add(UseLib);
+                bWithOpus = true;
             }
         }
 
@@ -212,7 +214,7 @@ public class Open3DStream : ModuleRules
             }
         }
 
-        PublicDefinitions.Add(bWithOpus ? "O3DS_WITH_OPUS=1" : "O3DS_WITH_OPUS=0");
+    PublicDefinitions.Add(bWithOpus ? "O3DS_WITH_OPUS=1" : "O3DS_WITH_OPUS=0");
 
         PrivateDependencyModuleNames.AddRange(
             new string[]

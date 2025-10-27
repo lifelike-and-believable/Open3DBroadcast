@@ -2,7 +2,7 @@
 
 #include "O3DSOpusCodec.h"
 
-#if defined(O3DS_WITH_OPUS)
+#if O3DS_WITH_OPUS
     #include <opus/opus.h>
 #endif
 
@@ -14,7 +14,7 @@ namespace O3DS
 
     bool FOpusEncoder::Init(int32 InSampleRate, int32 InNumChannels, int32 BitrateKbps, bool bUseDtx)
     {
-#if defined(O3DS_WITH_OPUS)
+#if O3DS_WITH_OPUS
         Reset();
         int Err = 0;
         OpusEncoder* E = opus_encoder_create(InSampleRate, InNumChannels, OPUS_APPLICATION_AUDIO, &Err);
@@ -40,7 +40,7 @@ namespace O3DS
 
     void FOpusEncoder::Reset()
     {
-#if defined(O3DS_WITH_OPUS)
+#if O3DS_WITH_OPUS
         if (Enc)
         {
             opus_encoder_destroy((OpusEncoder*)Enc);
@@ -53,7 +53,7 @@ namespace O3DS
     bool FOpusEncoder::Encode(const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 InSampleRate,
                                TArray<uint8>& OutPacket)
     {
-#if defined(O3DS_WITH_OPUS)
+#if O3DS_WITH_OPUS
         if (!Enc || NumChannels != Channels || InSampleRate != SampleRate || !Interleaved || NumFrames <= 0)
         {
             return false;
@@ -80,7 +80,7 @@ namespace O3DS
 
     bool FOpusDecoder::Init(int32 InSampleRate, int32 InNumChannels)
     {
-#if defined(O3DS_WITH_OPUS)
+#if O3DS_WITH_OPUS
         Reset();
         int Err = 0;
         OpusDecoder* D = opus_decoder_create(InSampleRate, InNumChannels, &Err);
@@ -99,7 +99,7 @@ namespace O3DS
 
     void FOpusDecoder::Reset()
     {
-#if defined(O3DS_WITH_OPUS)
+#if O3DS_WITH_OPUS
         if (Dec)
         {
             opus_decoder_destroy((OpusDecoder*)Dec);
@@ -112,7 +112,7 @@ namespace O3DS
     bool FOpusDecoder::DecodeToPcm16(const uint8* PacketData, int32 PacketBytes,
                                       TArray<uint8>& OutPcm16, int32& OutNumFrames)
     {
-#if defined(O3DS_WITH_OPUS)
+#if O3DS_WITH_OPUS
         if (!Dec || !PacketData || PacketBytes <= 0)
         {
             return false;

@@ -53,7 +53,7 @@ public:
 	// Audio support (placeholder for future implementation)
 	virtual bool EnableAudioSend(const FAudioSendConfig& Config) override;
 	virtual bool PushPcm(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, 
-	                     int32 NumChannels, int32 SampleRate, double TimestampSec) override;
+						 int32 NumChannels, int32 SampleRate, double TimestampSec) override;
 	virtual FOnRemoteAudio& OnRemoteAudio() override { return RemoteAudioCallback; }
 
 	// Additional helpers (for backward compatibility)
@@ -100,6 +100,43 @@ private:
 	// Message queue (thread-safe for libdatachannel callbacks)
 	TQueue<TArray<uint8>, EQueueMode::Mpsc> ReceivedDataQueue;
 
+	// ========== Audio Track State ==========
+	struct FAudioSendState
+	{
+		// Identifiers
+		FString StreamLabel;    // routing label (e.g., o3ds:mix)
+		FString SubjectName;    // optional
+		int32 SampleRate = 48000;
+		int32 NumChannels = 1;
+		int32 BitrateKbps = 64;
+
+		// WebRTC/libdatachannel objects
+		std::shared_ptr<rtc::Track> Track; // media track for this audio stream
+		std::shared_ptr<rtc::RtpPacketizationConfig> RtpConfig;
+		std::shared_ptr<rtc::OpusRtpPacketizer> Packetizer;
+
+		// Opus encoder (optional build)
+		TUniquePtr<class O3DS::FOpusEncoder> OpusEnc;
+	};
+
+	// Map by StreamLabel -> send state
+	TMap<FString, FAudioSendState> AudioSenders;
+
+	// Incoming audio frame queued for game thread dispatch
+	struct FIncomingAudio
+	{
+		FString StreamLabel;
+		FString SubjectName;
+		TArray<float> Samples; // interleaved [-1,1]
+		int32 NumFrames = 0;
+		int32 NumChannels = 1;
+		int32 SampleRate = 48000;
+	};
+	TQueue<FIncomingAudio, EQueueMode::Mpsc> IncomingAudioQueue;
+
+	// Per-track Opus decoders by MID (or other key)
+	TMap<FString, TUniquePtr<class O3DS::FOpusDecoder>> AudioDecoders;
+
 	// Pending ICE candidates
 	TArray<TTuple<FString, FString, int32>> PendingRemoteCandidates;
 
@@ -114,6 +151,7 @@ private:
 	void OnDataChannelClosed();
 	void OnIceCandidate(const rtc::Candidate& Candidate);
 	void OnLocalDescription(const rtc::Description& Description);
+	void OnIncomingTrack(std::shared_ptr<rtc::Track> Track);
 
 	// Signaling callbacks
 	void OnSignalingConnected();
