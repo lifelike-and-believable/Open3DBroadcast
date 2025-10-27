@@ -105,24 +105,44 @@ runs:
         Invoke-WebRequest -Headers $headers -Uri $asset.browser_download_url -OutFile $outPath
         Expand-Archive -LiteralPath $outPath -DestinationPath "prebuilt/libdatachannel/extracted" -Force
 
-        # Find a directory that has both include/ and lib/
-        # First, check if extracted directory itself has the structure
+        # Find the directory structure
+        # The CMake expects library files directly in the root, with include/ as a subdirectory
+        # But the zip might have lib/ and include/ as subdirectories
+        # We need to find where the actual lib files are and restructure if needed
+        
         $extractedRoot = Get-Item "prebuilt/libdatachannel/extracted"
         $candidate = $null
         
-        if ((Test-Path (Join-Path $extractedRoot.FullName 'include')) -and (Test-Path (Join-Path $extractedRoot.FullName 'lib'))) {
-          $candidate = $extractedRoot
+        # Look for .lib or .a files to determine where libraries are
+        $libFiles = Get-ChildItem -Path $extractedRoot.FullName -Recurse -Include "datachannel.lib","libdatachannel.a" -ErrorAction SilentlyContinue
+        if ($libFiles) {
+          $libDir = $libFiles[0].Directory
+          Write-Host "Found libdatachannel libraries in: $($libDir.FullName)"
+          
+          # Check if libraries are in a 'lib' subdirectory
+          if ($libDir.Name -eq 'lib') {
+            # Libraries are in lib/, we need to move them up one level
+            $targetRoot = $libDir.Parent
+            Write-Host "Moving libraries from lib/ to root: $($targetRoot.FullName)"
+            Get-ChildItem -Path $libDir.FullName -File | ForEach-Object {
+              Copy-Item $_.FullName -Destination $targetRoot.FullName -Force
+            }
+            $candidate = $targetRoot
+          } else {
+            # Libraries are already at the right level
+            $candidate = $libDir
+          }
         } else {
-          # Search recursively for a directory with both include/ and lib/
-          $candidate = Get-ChildItem -Path "prebuilt/libdatachannel/extracted" -Recurse -Directory `
-            | Where-Object { (Test-Path (Join-Path $_.FullName 'include')) -and (Test-Path (Join-Path $_.FullName 'lib')) } `
-            | Select-Object -First 1
+          Write-Error "Could not find datachannel library files in extracted archive"
+          exit 1
         }
         
         if (-not $candidate) { 
-          Write-Error "Could not find libdatachannel directory structure with include/ and lib/ subdirectories"
+          Write-Error "Could not determine libdatachannel root directory"
           exit 1
         }
+        
+        Write-Host "Using libdatachannel root: $($candidate.FullName)"
 
         "ldc_root=$($candidate.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
         "ldc_lib_exts=$($libExts -join ';')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
