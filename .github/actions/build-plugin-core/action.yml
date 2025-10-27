@@ -106,10 +106,23 @@ runs:
         Expand-Archive -LiteralPath $outPath -DestinationPath "prebuilt/libdatachannel/extracted" -Force
 
         # Find a directory that has both include/ and lib/
-        $candidate = Get-ChildItem -Path "prebuilt/libdatachannel/extracted" -Recurse -Directory `
-          | Where-Object { (Test-Path (Join-Path $_.FullName 'include')) -and (Test-Path (Join-Path $_.FullName 'lib')) } `
-          | Select-Object -First 1
-        if (-not $candidate) { $candidate = Get-Item "prebuilt/libdatachannel/extracted" }
+        # First, check if extracted directory itself has the structure
+        $extractedRoot = Get-Item "prebuilt/libdatachannel/extracted"
+        $candidate = $null
+        
+        if ((Test-Path (Join-Path $extractedRoot.FullName 'include')) -and (Test-Path (Join-Path $extractedRoot.FullName 'lib'))) {
+          $candidate = $extractedRoot
+        } else {
+          # Search recursively for a directory with both include/ and lib/
+          $candidate = Get-ChildItem -Path "prebuilt/libdatachannel/extracted" -Recurse -Directory `
+            | Where-Object { (Test-Path (Join-Path $_.FullName 'include')) -and (Test-Path (Join-Path $_.FullName 'lib')) } `
+            | Select-Object -First 1
+        }
+        
+        if (-not $candidate) { 
+          Write-Error "Could not find libdatachannel directory structure with include/ and lib/ subdirectories"
+          exit 1
+        }
 
         "ldc_root=$($candidate.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
         "ldc_lib_exts=$($libExts -join ';')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -161,10 +174,23 @@ runs:
         Expand-Archive -LiteralPath $outPath -DestinationPath "prebuilt/opus/extracted" -Force
 
         # Prefer a directory that contains lib/
-        $candidate = Get-ChildItem -Path "prebuilt/opus/extracted" -Recurse -Directory `
-          | Where-Object { Test-Path (Join-Path $_.FullName 'lib') } `
-          | Select-Object -First 1
-        if (-not $candidate) { $candidate = Get-Item "prebuilt/opus/extracted" }
+        # First, check if extracted directory itself has lib/
+        $extractedRoot = Get-Item "prebuilt/opus/extracted"
+        $candidate = $null
+        
+        if (Test-Path (Join-Path $extractedRoot.FullName 'lib')) {
+          $candidate = $extractedRoot
+        } else {
+          # Search recursively for a directory with lib/
+          $candidate = Get-ChildItem -Path "prebuilt/opus/extracted" -Recurse -Directory `
+            | Where-Object { Test-Path (Join-Path $_.FullName 'lib') } `
+            | Select-Object -First 1
+        }
+        
+        if (-not $candidate) { 
+          Write-Warning "Could not find opus directory with lib/ subdirectory, using extracted root"
+          $candidate = $extractedRoot
+        }
 
         "opus_root=$($candidate.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
         "opus_lib_exts=$($libExts -join ';')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
