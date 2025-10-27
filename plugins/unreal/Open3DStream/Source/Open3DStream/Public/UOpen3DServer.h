@@ -6,6 +6,8 @@
 #include "o3ds/base_connector.h"
 #include "o3ds/udp_fragment.h"
 #include "Sockets.h"
+#include "O3DSUnifiedMessage.h"
+#include "O3DSOpusCodec.h"
 
 // Forward declarations
 class IWebRTCConnector;
@@ -65,5 +67,8 @@ public:
 	double  mLastTcpConnectAttempt = 0.0;
 	int32   mTcpBackoffAttempt = 0;
 	bool    mTcpAnnouncedConnected = false; // to gate status logs
+
+    // Optional Opus decoder for unified audio frames
+    TUniquePtr<O3DS::FOpusDecoder> OpusDec;
 };
 

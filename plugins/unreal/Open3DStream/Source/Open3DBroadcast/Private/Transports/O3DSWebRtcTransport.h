@@ -6,6 +6,7 @@
 #include "IBroadcastTransport.h"
 #include "Open3DWebRTCDataChannel.h"
 #include "O3DSUnifiedMessage.h" // Unified header for audio multiplexing
+#include "O3DSOpusCodec.h"      // Opus encode (optional)
 #include "Open3DStreamSourceSettings.h" // for EO3DSWebRtcBackendReceiver enum
 
 // Debug cvar for transport send logging
@@ -57,6 +58,13 @@ static TAutoConsoleVariable<int32> CVarO3DSWebRtcDebugToneFrameMs(
     TEXT("o3ds.Broadcast.WebRTC.DebugToneFrameMs"),
     20,
     TEXT("Debug tone frame duration in milliseconds (typical 10 or 20)."),
+    ECVF_Default);
+
+// 0=PCM16, 1=Opus
+static TAutoConsoleVariable<int32> CVarO3DSWebRtcDebugToneCodec(
+    TEXT("o3ds.Broadcast.WebRTC.DebugToneCodec"),
+    0,
+    TEXT("Debug tone codec (0=PCM16, 1=Opus). Requires O3DS_WITH_OPUS for Opus."),
     ECVF_Default);
 
 // Temporary audio configuration while migrating to libwebrtc native audio tracks
@@ -274,13 +282,57 @@ private:
         Payload.Add(LabelLen);
         Payload.Append(reinterpret_cast<const uint8*>(LabelAnsi), LabelLen);
         Payload.Add(SubjectLen);
-        Payload.Append(reinterpret_cast<const uint8*>(PcmSamples.GetData()), PcmSamples.Num() * sizeof(int16));
+
+        // Choose codec
+        const bool bUseOpus = (CVarO3DSWebRtcDebugToneCodec->GetInt() == 1);
+        uint8 CodecField = static_cast<uint8>(O3DS::EUnifiedCodec::PCM16);
+        if (bUseOpus && O3DS_WITH_OPUS)
+        {
+            // Lazy-init encoder
+            if (!OpusEnc)
+            {
+                OpusEnc = MakeUnique<O3DS::FOpusEncoder>();
+                if (!OpusEnc->Init(SampleRate, Channels, /*BitrateKbps*/ 32, /*DTX*/ true))
+                {
+                    OpusEnc.Reset();
+                }
+            }
+            if (OpusEnc)
+            {
+                // Convert PCM16 to float [-1,1]
+                TArray<float> FloatBuf; FloatBuf.SetNumUninitialized(Samples);
+                for (int32 i = 0; i < Samples; ++i)
+                {
+                    FloatBuf[i] = (float)PcmSamples[i] / 32768.0f;
+                }
+                TArray<uint8> Packet;
+                if (OpusEnc->Encode(FloatBuf.GetData(), Frames, Channels, SampleRate, Packet) && Packet.Num() > 0)
+                {
+                    CodecField = static_cast<uint8>(O3DS::EUnifiedCodec::Opus);
+                    Payload.Append(Packet);
+                }
+                else
+                {
+                    // Fallback to PCM16 if encode failed
+                    CodecField = static_cast<uint8>(O3DS::EUnifiedCodec::PCM16);
+                    Payload.Append(reinterpret_cast<const uint8*>(PcmSamples.GetData()), PcmSamples.Num() * sizeof(int16));
+                }
+            }
+            else
+            {
+                Payload.Append(reinterpret_cast<const uint8*>(PcmSamples.GetData()), PcmSamples.Num() * sizeof(int16));
+            }
+        }
+        else
+        {
+            Payload.Append(reinterpret_cast<const uint8*>(PcmSamples.GetData()), PcmSamples.Num() * sizeof(int16));
+        }
 
         // Pack O3DA header (big-endian fields)
         const uint32 Magic = 0x4F334441u; // 'O3DA'
         const uint8 Version = 1;
         const uint8 Kind = static_cast<uint8>(O3DS::EUnifiedKind::Audio);
-        const uint8 Codec = static_cast<uint8>(O3DS::EUnifiedCodec::PCM16);
+    const uint8 Codec = CodecField;
         const uint8 Flags = 0;
         const uint64 TsUs = (uint64)(Now * 1000000.0);
         const uint32 PayloadSize = (uint32)Payload.Num();
@@ -331,4 +383,7 @@ private:
 
     // Stored audio config for future native audio track support
     FO3DSWebRTCAudioConfig AudioConfig;
+
+    // Optional Opus encoder for debug tone
+    TUniquePtr<O3DS::FOpusEncoder> OpusEnc;
 };

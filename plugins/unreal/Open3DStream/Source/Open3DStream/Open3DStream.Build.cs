@@ -40,7 +40,7 @@ public class Open3DStream : ModuleRules
             Path.Combine(WebRTCDir, "include")
         });
 
-        // Preflight: ensure expected ThirdParty libraries are present for the active platform.
+    // Preflight: ensure expected ThirdParty libraries are present for the active platform.
         // This provides an immediate, actionable error in CI/UAT staging environments.
         string[] RequiredLibs;
         if (Target.Platform == UnrealTargetPlatform.Win64)
@@ -157,6 +157,62 @@ public class Open3DStream : ModuleRules
 
         PublicDefinitions.Add("NNG_STATIC_LIB");
         PublicDefinitions.Add("RTC_STATIC=1"); // Define RTC_STATIC for static libdatachannel
+
+        // Optional Opus (audio) support
+        // Strategy:
+        // 1) If ThirdParty/opus tree exists with platform libs, prefer that
+        // 2) Else on Linux/Mac, fall back to system opus (-lopus)
+        // 3) Else, disable opus (code will compile with O3DS_WITH_OPUS=0)
+        bool bWithOpus = false;
+        string OpusRoot = Path.Combine(ThirdPartyDir, "opus");
+        if (Directory.Exists(OpusRoot))
+        {
+            // Try to link prebuilt opus from ThirdParty
+            string OpusInclude = Path.Combine(OpusRoot, "include");
+            if (Directory.Exists(OpusInclude))
+            {
+                PrivateIncludePaths.Add(OpusInclude);
+            }
+            if (Target.Platform == UnrealTargetPlatform.Win64)
+            {
+                string LibPath = Path.Combine(OpusRoot, "opus.lib");
+                if (File.Exists(LibPath))
+                {
+                    PublicAdditionalLibraries.Add(LibPath);
+                    bWithOpus = true;
+                }
+            }
+            else if (Target.Platform == UnrealTargetPlatform.Linux)
+            {
+                string LibPath = Path.Combine(OpusRoot, "libopus.a");
+                if (File.Exists(LibPath))
+                {
+                    PublicAdditionalLibraries.Add(LibPath);
+                    bWithOpus = true;
+                }
+            }
+            else if (Target.Platform == UnrealTargetPlatform.Mac)
+            {
+                string LibPath = Path.Combine(OpusRoot, "macos", "libopus.a");
+                if (File.Exists(LibPath))
+                {
+                    PublicAdditionalLibraries.Add(LibPath);
+                    bWithOpus = true;
+                }
+            }
+        }
+
+        if (!bWithOpus)
+        {
+            // Fallback to system opus on Linux/Mac
+            if (Target.Platform == UnrealTargetPlatform.Linux || Target.Platform == UnrealTargetPlatform.Mac)
+            {
+                PublicSystemLibraries.Add("opus");
+                bWithOpus = true; // Assume headers in system include path
+            }
+        }
+
+        PublicDefinitions.Add(bWithOpus ? "O3DS_WITH_OPUS=1" : "O3DS_WITH_OPUS=0");
 
         PrivateDependencyModuleNames.AddRange(
             new string[]

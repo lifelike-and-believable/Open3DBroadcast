@@ -46,6 +46,9 @@ O3DSServer::O3DSServer()
 {
 	// Initialize mGoodTime to current time to avoid immediate "No Data" warning
 	mGoodTime = FPlatformTime::Seconds();
+	
+    // Lazy-create Opus decoder on first use; keep null until an Opus frame arrives
+    OpusDec.Reset();
 }
 
 O3DSServer::~O3DSServer()
@@ -336,6 +339,12 @@ void O3DSServer::stop()
 	mTcpAnnouncedConnected = false;
 
 	// Allow next session to dump first packet again
+	    // Release Opus decoder
+	    if (OpusDec)
+	    {
+	        OpusDec->Reset();
+	        OpusDec.Reset();
+	    }
 	GDumpedFirstNonTcpPacket = false;
 }
 
@@ -417,6 +426,31 @@ void O3DSServer::inData(const uint8 *msg, size_t len)
 				if (Hdr.GetCodec() == O3DS::EUnifiedCodec::PCM16 && R > 0)
 				{
 					FO3DSAudioBus::PublishPcm16(Meta, P, R);
+					return; // handled
+				}
+
+				if (Hdr.GetCodec() == O3DS::EUnifiedCodec::Opus && R > 0)
+				{
+					// Lazy init decoder
+					if (!OpusDec)
+					{
+						OpusDec = MakeUnique<O3DS::FOpusDecoder>();
+						if (!OpusDec->Init(Meta.SampleRate, Meta.NumChannels))
+						{
+							UE_LOG(LogTemp, Warning, TEXT("O3DS: Opus decoder init failed (sr=%d ch=%d)"), Meta.SampleRate, Meta.NumChannels);
+							return;
+						}
+					}
+					TArray<uint8> Pcm16;
+					int32 Frames = 0;
+					if (OpusDec->DecodeToPcm16(P, R, Pcm16, Frames) && Pcm16.Num() > 0)
+					{
+						FO3DSAudioBus::PublishPcm16(Meta, Pcm16.GetData(), Pcm16.Num());
+					}
+					else
+					{
+						UE_LOG(LogTemp, Verbose, TEXT("O3DS: Opus decode failed (%d bytes)"), R);
+					}
 					return; // handled
 				}
 				// Unknown/unsupported audio codec: drop for now
