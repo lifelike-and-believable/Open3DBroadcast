@@ -70,7 +70,8 @@ void UO3DSRemoteAudioComponent::EnsureSoundWave(int32 NumChannels, int32 SampleR
         {
             SoundWave->bLooping = false;
             SoundWave->NumChannels = NumChannels;
-            SoundWave->SampleRate = SampleRate;
+            // UE 5.6: SampleRate is protected; use public setter
+            SoundWave->SetSampleRate(SampleRate);
             SoundWave->Duration = INDEFINITELY_LOOPING_DURATION;
             SoundWave->SoundGroup = SOUNDGROUP_Voice;
         }
