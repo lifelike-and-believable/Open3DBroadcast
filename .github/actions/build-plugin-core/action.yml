@@ -107,7 +107,7 @@ runs:
 
         # Find a directory that has both include/ and lib/
         $candidate = Get-ChildItem -Path "prebuilt/libdatachannel/extracted" -Recurse -Directory `
-          | Where-Object { Test-Path (Join-Path $_.FullName 'include') -and Test-Path (Join-Path $_.FullName 'lib') } `
+          | Where-Object { (Test-Path (Join-Path $_.FullName 'include')) -and (Test-Path (Join-Path $_.FullName 'lib')) } `
           | Select-Object -First 1
         if (-not $candidate) { $candidate = Get-Item "prebuilt/libdatachannel/extracted" }
 
