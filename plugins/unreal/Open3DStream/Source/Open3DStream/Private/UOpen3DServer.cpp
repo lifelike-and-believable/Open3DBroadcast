@@ -2,6 +2,8 @@
 #include "o3ds/async_pair.h"
 #include "o3ds/async_subscriber.h"
 #include "IWebRTCConnector.h"
+#include "O3DSUnifiedMessage.h"
+#include "O3DSAudioBus.h"
 #include "Open3DStreamSourceSettings.h"
 #include "SocketSubsystem.h"
 #include "Interfaces/IPv4/IPv4Address.h"
@@ -375,9 +377,61 @@ void O3DSServer::inData(const uint8 *msg, size_t len)
 			(int32)len, bHeaderMatch?TEXT("true"):TEXT("false"), DumpN, *Hex);
 	}
 
-	TArray<uint8> Data;
-	Data.Append((uint8*)msg, len);
-	if (OnData.IsBound()) { OnData.Execute(Data); }
+	// If coming from WebRTC, support optional unified multiplexing header for audio frames.
+	// We only special-case audio; mocap frames are forwarded as-is.
+	if (mWebRTCConnector && msg && len >= sizeof(O3DS::FUnifiedHeader))
+	{
+		O3DS::FUnifiedHeader Hdr;
+		const uint8* PayloadPtr = nullptr;
+		int32 PayloadSize = 0;
+		if (O3DS::ParseUnifiedMessage(msg, (int32)len, Hdr, PayloadPtr, PayloadSize))
+		{
+			if (Hdr.GetKind() == O3DS::EUnifiedKind::Audio)
+			{
+				// Decode simple metadata header (subject/label) if present at start of payload:
+				// [uint8 LabelLen][char Label[LabelLen]][uint8 SubjectLen][char Subject[SubjectLen]] followed by raw PCM16
+				const uint8* P = PayloadPtr;
+				int32 R = PayloadSize;
+				auto ReadByte = [&]() -> int32 { if (R <= 0) return -1; int32 V = *P; ++P; --R; return V; };
+				FString Label, Subject;
+				int32 LabelLen = ReadByte();
+				if (LabelLen >= 0 && R >= LabelLen)
+				{
+					Label = FString(UTF8_TO_TCHAR(reinterpret_cast<const char*>(P))).Left(LabelLen);
+					P += LabelLen; R -= LabelLen;
+				}
+				int32 SubjectLen = ReadByte();
+				if (SubjectLen >= 0 && R >= SubjectLen)
+				{
+					Subject = FString(UTF8_TO_TCHAR(reinterpret_cast<const char*>(P))).Left(SubjectLen);
+					P += SubjectLen; R -= SubjectLen;
+				}
+
+				O3DS::FAudioFrameMeta Meta;
+				Meta.StreamLabel = Label;
+				Meta.SubjectName = Subject;
+				Meta.NumChannels = 1; // default mono; future: encode channels
+				Meta.SampleRate = 48000; // default
+				Meta.TimestampSec = (double)Hdr.TimestampUs() / 1e6;
+
+				if (Hdr.GetCodec() == O3DS::EUnifiedCodec::PCM16 && R > 0)
+				{
+					FO3DSAudioBus::PublishPcm16(Meta, P, R);
+					return; // handled
+				}
+				// Unknown/unsupported audio codec: drop for now
+				return;
+			}
+			// If Kind=Mocap with header (not expected in this PR), fall through to default path after stripping header
+		}
+	}
+
+	// Default: forward to animation pipeline
+	{
+		TArray<uint8> Data;
+		Data.Append((uint8*)msg, len);
+		if (OnData.IsBound()) { OnData.Execute(Data); }
+	}
 }
 
 void O3DSServer::tick()
