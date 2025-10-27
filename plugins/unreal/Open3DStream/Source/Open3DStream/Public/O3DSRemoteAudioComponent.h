@@ -1,43 +1,53 @@
+// Copyright (c) Open3DStream Contributors
+
 #pragma once
+
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "O3DSAudioBus.h"
 #include "O3DSRemoteAudioComponent.generated.h"
 
 class USoundWaveProcedural;
 class UAudioComponent;
-class FWebRTCConnector;
 
 UCLASS(ClassGroup=(Open3DStream), meta=(BlueprintSpawnableComponent))
 class OPEN3DSTREAM_API UO3DSRemoteAudioComponent : public UActorComponent
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 public:
-	UO3DSRemoteAudioComponent();
+    UO3DSRemoteAudioComponent();
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio")
-	FName SubjectName;
+    // Filter: only play streams whose label matches. Empty means accept all.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="O3DS|Audio")
+    FString StreamLabelFilter;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio")
-	float Volume =1.0f;
+    // Optional subject filter (extracted from label if present). Empty accepts all.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="O3DS|Audio")
+    FString SubjectNameFilter;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio")
-	bool bAutoPlay = true;
+    // Auto-create and attach an AudioComponent on begin play if not present
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="O3DS|Audio")
+    bool bAutoCreateAudioComponent = true;
+
+    // Gain multiplier applied to queued PCM
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="O3DS|Audio", meta=(ClampMin="0.0", ClampMax="4.0"))
+    float Gain = 1.0f;
 
 protected:
-	virtual void BeginPlay() override;
-	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
-	void OnRemotePcm(const FString& Subject, const FString& Stream, const int16* PCM, int32 NumSamples, int32 NumChannels);
+    void OnAudioFrame(const O3DS::FAudioFrameMeta& Meta, const TArray<uint8>& PCM16Bytes);
+    bool MatchesFilter(const O3DS::FAudioFrameMeta& Meta) const;
+    void EnsureSoundWave(int32 NumChannels, int32 SampleRate);
 
-	void EnsureAudioObjects(int32 NumChannels, int32 SampleRate);
-
-	// Audio objects
-	UPROPERTY(Transient)
-	UAudioComponent* AudioComponent = nullptr;
-	UPROPERTY(Transient)
-	USoundWaveProcedural* ProcWave = nullptr;
-
-	TWeakPtr<FWebRTCConnector> ConnectorRef;
-	FDelegateHandle DelegateHandle;
+private:
+    FDelegateHandle BusHandle;
+    UPROPERTY(Transient)
+    USoundWaveProcedural* SoundWave = nullptr;
+    UPROPERTY(Transient)
+    UAudioComponent* AudioComp = nullptr;
+    int32 CurrentChannels = 0;
+    int32 CurrentSampleRate = 0;
 };
