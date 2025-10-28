@@ -27,6 +27,13 @@ namespace
 	};
 }
 
+// Opt-in verbose logging for audio capture path (Mix/Mic)
+static TAutoConsoleVariable<int32> CVarO3DSAudioCaptureDebug(
+	TEXT("o3ds.AudioCapture.Debug"),
+	0,
+	TEXT("Enable debug logs for O3DS audio capture component (0/1)."),
+	ECVF_Default);
+
 static TSharedPtr<IWebRTCConnector> GetSharedConnector()
 {
 	return UO3DSWebRTCService::Get()->GetConnector();
@@ -51,6 +58,13 @@ void UO3DSBroadcastAudioCaptureComponent::BeginPlay()
 
 	EnsureConnector();
 
+	if (CVarO3DSAudioCaptureDebug->GetInt() != 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: BeginPlay mode=%s sr=%d ch=%d kbps=%d"),
+			(CaptureMode == EO3DSCaptureMode::Mix) ? TEXT("Mix") : TEXT("Input"),
+			Config.SampleRate, Config.NumChannels, Config.BitrateKbps);
+	}
+
 	if (FAudioDevice* AudioDevice = GetWorld() ? GetWorld()->GetAudioDeviceRaw() : nullptr)
 	{
 		Audio::FMixerDevice* Mixer = static_cast<Audio::FMixerDevice*>(AudioDevice);
@@ -64,6 +78,10 @@ void UO3DSBroadcastAudioCaptureComponent::BeginPlay()
 			if (TargetSubmix)
 			{
 				Mixer->RegisterSubmixBufferListener(SubmixTap.ToSharedRef(), *TargetSubmix);
+				if (CVarO3DSAudioCaptureDebug->GetInt() != 0)
+				{
+					UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Submix tap registered on %s"), *GetNameSafe(TargetSubmix));
+				}
 			}
 		}
 	}
@@ -82,6 +100,10 @@ void UO3DSBroadcastAudioCaptureComponent::BeginPlay()
 		if (MicCapture && MicCapture->OpenAudioCaptureStream(Params, OnCapture, /*NumFramesDesired*/0))
 		{
 			MicCapture->StartStream();
+			if (CVarO3DSAudioCaptureDebug->GetInt() != 0)
+			{
+				UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Mic stream started (DeviceIndex=%d)"), Config.DeviceIndex);
+			}
 		}
 	}
 }
@@ -129,7 +151,18 @@ void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 			A.StreamLabel = StreamLabel;
 			A.SubjectName = SubjectName.ToString();
 			A.SourceType = (CaptureMode == EO3DSCaptureMode::Mix) ? TEXT("mix") : TEXT("mic");
-			Connector->EnableAudioSend(A);
+			const bool bEnabled = Connector->EnableAudioSend(A);
+			if (CVarO3DSAudioCaptureDebug->GetInt() != 0)
+			{
+				UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Connector ready=%d EnableAudioSend label=%s subject=%s sr=%d ch=%d br=%d -> %s"),
+					1,
+					*A.StreamLabel, *A.SubjectName, A.SampleRate, A.NumChannels, A.BitrateKbps,
+					bEnabled ? TEXT("OK") : TEXT("FAILED"));
+			}
+		}
+		else if (CVarO3DSAudioCaptureDebug->GetInt() != 0)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("O3DS AudioCapture: No shared connector available yet"));
 		}
 	}
 }
@@ -138,7 +171,15 @@ void UO3DSBroadcastAudioCaptureComponent::PushFrames(const float* Interleaved, i
 {
 	EnsureConnector();
 	if (!Connector) return;
-	Connector->PushPcm(StreamLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
+	const bool bPushed = Connector->PushPcm(StreamLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
+	if (CVarO3DSAudioCaptureDebug->GetInt() != 0)
+	{
+		static int32 LogEvery = 0; if ((LogEvery++ % 50) == 0)
+		{
+			UE_LOG(LogTemp, Verbose, TEXT("O3DS AudioCapture: PushFrames label=%s frames=%d ch=%d sr=%d ok=%d"),
+				*StreamLabel, NumFrames, NumChannels, SampleRate, bPushed?1:0);
+		}
+	}
 }
 
 TArray<FName> UO3DSBroadcastAudioCaptureComponent::GetAvailableInputDeviceOptions() const

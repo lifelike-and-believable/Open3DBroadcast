@@ -7,6 +7,13 @@
 #include "Sound/SoundWaveProcedural.h"
 #include "Components/AudioComponent.h"
 
+// Opt-in verbose logging for remote audio receive/playback
+static TAutoConsoleVariable<int32> CVarO3DSRemoteAudioDebug(
+	TEXT("o3ds.RemoteAudio.Debug"),
+	0,
+	TEXT("Enable debug logs for O3DS remote audio component (0/1)."),
+	ECVF_Default);
+
 UO3DSRemoteAudioComponent::UO3DSRemoteAudioComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
@@ -36,6 +43,15 @@ void UO3DSRemoteAudioComponent::BeginPlay()
 	if (TSharedPtr<IWebRTCConnector> Conn = UO3DSWebRTCService::Get()->GetConnector())
 	{
 		AudioDelegateHandle = Conn->OnRemoteAudio().AddUObject(this, &UO3DSRemoteAudioComponent::OnAudioFrame);
+		if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
+		{
+			UE_LOG(LogTemp, Log, TEXT("O3DS RemoteAudio: Bound to OnRemoteAudio (ReceiveMode=%s)"),
+				(ReceiveMode == EO3DSRemoteAudioMode::Mix) ? TEXT("Mix") : TEXT("Subject"));
+		}
+	}
+	else if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("O3DS RemoteAudio: No shared connector available at BeginPlay"));
 	}
 }
 
@@ -67,6 +83,10 @@ bool UO3DSRemoteAudioComponent::MatchesFilter(const FString& InSubject, const FS
 	}
 	if (!bSubjectMatch) return false;
 	if (!StreamLabelFilter.IsEmpty() && !InStream.Contains(StreamLabelFilter)) return false;
+	if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("O3DS RemoteAudio: Filter pass subject='%s' stream='%s'"), *InSubject, *InStream);
+	}
 	return true;
 }
 
@@ -94,6 +114,11 @@ void UO3DSRemoteAudioComponent::EnsureSoundWave(int32 NumChannels, int32 SampleR
 			{
 				AudioComp->Play();
 			}
+			if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
+			{
+				UE_LOG(LogTemp, Log, TEXT("O3DS RemoteAudio: SoundWave prepared ch=%d sr=%d; AudioComp playing=%d"),
+					NumChannels, SampleRate, AudioComp->IsPlaying()?1:0);
+			}
 		}
 	}
 }
@@ -102,6 +127,13 @@ void UO3DSRemoteAudioComponent::OnAudioFrame(const FString& StreamLabel, const F
 {
 	if (!MatchesFilter(SubjectName, StreamLabel))
 	{
+		if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
+		{
+			static int32 DropEvery = 0; if ((DropEvery++ % 100) == 0)
+			{
+				UE_LOG(LogTemp, Verbose, TEXT("O3DS RemoteAudio: Dropped frame by filter subject='%s' stream='%s'"), *SubjectName, *StreamLabel);
+			}
+		}
 		return;
 	}
 	EnsureSoundWave(NumChannels, SampleRate);
@@ -121,4 +153,13 @@ void UO3DSRemoteAudioComponent::OnAudioFrame(const FString& StreamLabel, const F
 		PCM16[i] = (int16)FMath::RoundToInt(v *32767.0f);
 	}
 	SoundWave->QueueAudio(reinterpret_cast<uint8*>(PCM16.GetData()), PCM16.Num() * sizeof(int16));
+
+	if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
+	{
+		static int32 LogEvery = 0; if ((LogEvery++ % 50) == 0)
+		{
+			UE_LOG(LogTemp, Verbose, TEXT("O3DS RemoteAudio: Queued frames=%d ch=%d sr=%d stream='%s' subject='%s'"),
+				NumFrames, NumChannels, SampleRate, *StreamLabel, *SubjectName);
+		}
+	}
 }

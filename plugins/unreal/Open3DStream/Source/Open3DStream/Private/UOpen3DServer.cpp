@@ -5,6 +5,7 @@
 #include "O3DSUnifiedMessage.h"
 #include "O3DSAudioBus.h"
 #include "Open3DStreamSourceSettings.h"
+#include "O3DSWebRTCService.h"
 #include "SocketSubsystem.h"
 #include "Interfaces/IPv4/IPv4Address.h"
 #include "Common/UdpSocketBuilder.h"
@@ -111,6 +112,13 @@ bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* S
 			return false;
 		}
 
+		// Register shared connector for audio playback components
+		if (UO3DSWebRTCService::Get())
+		{
+			UO3DSWebRTCService::Get()->SetConnector(mWebRTCConnector);
+            UE_LOG(LogTemp, Log, TEXT("O3DS RX: Registered shared connector for WebRTC Client"));
+		}
+
 		mWebRTCConnector->SetDataReceivedCallback([this](const uint8* Data, int32 Size)
 		{
 			this->inData(Data, Size);
@@ -145,6 +153,13 @@ bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* S
 		{
 			OnState.ExecuteIfBound(LOCTEXT("WebRTCBackendNotSupported", "WebRTC backend not supported"), true);
 			return false;
+		}
+
+		// Register shared connector for audio playback components
+		if (UO3DSWebRTCService::Get())
+		{
+			UO3DSWebRTCService::Get()->SetConnector(mWebRTCConnector);
+            UE_LOG(LogTemp, Log, TEXT("O3DS RX: Registered shared connector for WebRTC Server"));
 		}
 
 		mWebRTCConnector->SetDataReceivedCallback([this](const uint8* Data, int32 Size)

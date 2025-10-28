@@ -2,6 +2,7 @@
 
 #include "Open3DWebRTCDataChannel.h"
 #include "IWebRTCConnector.h"
+#include "O3DSWebRTCService.h"
 #include "Open3DStreamSourceSettings.h"    // For EO3DSWebRtcBackendReceiver enum
 // For TQueue and EQueueMode
 #include "Containers/Queue.h"
@@ -21,9 +22,17 @@ public:
             return false;
         }
 
+        // Register this connector as the shared instance for audio components
+        if (UO3DSWebRTCService::Get())
+        {
+            UO3DSWebRTCService::Get()->SetConnector(Connector);
+        }
+
         // Default role client unless URL has role=server
         const bool bServer = Url.Contains(TEXT("role=server"));
         const bool bOk = Connector->Start(Url, bServer);
+        UE_LOG(LogTemp, Log, TEXT("O3DS WebRTCDataChannel: Start url=%s backend=%d role=%s ok=%d"),
+            *Url, (int)Backend, bServer?TEXT("server"):TEXT("client"), bOk?1:0);
         if (!bOk)
         {
             return false;
@@ -41,6 +50,7 @@ public:
     {
         if (Connector)
         {
+            UE_LOG(LogTemp, Log, TEXT("O3DS WebRTCDataChannel: Stop"));
             Connector->Stop();
             Connector.Reset();
         }

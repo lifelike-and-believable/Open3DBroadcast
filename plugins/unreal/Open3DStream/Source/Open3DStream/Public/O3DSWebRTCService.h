@@ -12,6 +12,8 @@ class OPEN3DSTREAM_API UO3DSWebRTCService : public UObject
 public:
 	static UO3DSWebRTCService* Get();
 	TSharedPtr<IWebRTCConnector> GetConnector();
+	// Register a shared connector so capture/playback components can bind to it
+	void SetConnector(const TSharedPtr<IWebRTCConnector>& InConnector);
 	void InitializeFromSettings(const FOpen3DStreamSettings& Settings);
 
 private:
