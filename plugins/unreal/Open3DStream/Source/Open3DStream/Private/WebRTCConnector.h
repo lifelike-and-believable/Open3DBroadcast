@@ -111,6 +111,30 @@ public:
 	// Push interleaved PCM16 samples (NumSamples is total across channels)
 	bool PushAudioPCM16(const int16* Samples, int32 NumSamples);
 
+	// Debug/status snapshot for broadcaster audio send path
+	struct FAudioSendStatus
+	{
+		bool bSignalingConnected = false;
+		bool bPeerConnected = false;
+		bool bLocalDesc = false;
+		bool bRemoteDesc = false;
+		bool bDataChannelOpen = false;
+		bool bAudioSendEnabled = false;
+		bool bAudioTrackPresent = false;
+		bool bAudioTrackOpen = false;
+		bool bOpusEncoderReady = false;
+		int32 LastPeerStateInt = 0;
+		FString ConnectionStateLabel;
+		FString StreamLabel;
+		int32 PendingSamples = 0;
+		uint64 SentPackets = 0;
+		uint64 SentBytes = 0;
+		FString LastError;
+	};
+
+	// Retrieve a point-in-time status snapshot (thread-safe)
+	void GetAudioSendStatus(FAudioSendStatus& OutStatus) const;
+
 	// Set callback for decoded PCM16 receive (called on game thread from Tick)
 	void SetAudioReceiveCallback(TFunction<void(const int16* PCM, int32 NumSamples, int32 NumChannels, int32 SampleRate)> Callback);
 

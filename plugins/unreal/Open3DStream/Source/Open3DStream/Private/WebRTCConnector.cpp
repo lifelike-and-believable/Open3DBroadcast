@@ -1712,6 +1712,33 @@ void FWebRTCConnector::SetAudioReceiveCallback(TFunction<void(const int16* PCM, 
 	AudioRxCallback = MoveTemp(Callback);
 }
 
+void FWebRTCConnector::GetAudioSendStatus(FAudioSendStatus& OutStatus) const
+{
+	// Snapshot state, guarding shared resources
+	std::shared_ptr<rtc::Track> LocalAudioTrack;
+	{
+		FScopeLock Lock(const_cast<FCriticalSection*>(&PeerConnectionLock));
+		LocalAudioTrack = AudioTrack;
+	}
+
+	OutStatus.bSignalingConnected = bSignalingIsConnected;
+	OutStatus.bPeerConnected = bIsConnected;
+	OutStatus.bLocalDesc = bLocalDescriptionSet;
+	OutStatus.bRemoteDesc = bRemoteDescriptionSet;
+	OutStatus.bDataChannelOpen = bDataChannelOpen;
+	OutStatus.bAudioSendEnabled = bAudioSendEnabled;
+	OutStatus.bAudioTrackPresent = (LocalAudioTrack != nullptr);
+	OutStatus.bAudioTrackOpen = (LocalAudioTrack ? LocalAudioTrack->isOpen() : false);
+	OutStatus.bOpusEncoderReady = (OpusEnc != nullptr);
+	OutStatus.LastPeerStateInt = LastPeerState;
+	OutStatus.ConnectionStateLabel = ConnectionState;
+	OutStatus.StreamLabel = AudioRt.Config.StreamLabel;
+	OutStatus.PendingSamples = AudioRt.Pending.Num();
+	OutStatus.SentPackets = AudioRt.SentPackets;
+	OutStatus.SentBytes = AudioRt.SentBytes;
+	OutStatus.LastError = LastError;
+}
+
 #if O3DS_WITH_OPUS
 bool FWebRTCConnector::EnsureOpusEncoder(const FAudioConfig& In)
 {
@@ -1730,6 +1757,10 @@ bool FWebRTCConnector::EnsureOpusEncoder(const FAudioConfig& In)
 	opus_encoder_ctl(OpusEnc, OPUS_SET_BITRATE(In.BitrateKbps *1000));
 	opus_encoder_ctl(OpusEnc, OPUS_SET_COMPLEXITY(5));
 	opus_encoder_ctl(OpusEnc, OPUS_SET_INBAND_FEC(1));
+	if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("Opus: Encoder created sr=%d ch=%d br=%d kbps"), In.SampleRate, In.NumChannels, In.BitrateKbps);
+	}
 	return true;
 }
 
@@ -1777,3 +1808,32 @@ TSharedPtr<FWebRTCConnector> FWebRTCConnector::GetActiveConnector()
 {
 	return ActiveConnector.Pin();
 }
+
+// Console command to print current audio send status for broadcaster
+static FAutoConsoleCommand CmdO3DSDumpAudioStatus(
+	TEXT("o3ds.WebRTC.Audio.Status"),
+	TEXT("Print Open3DStream WebRTC audio send status (client/broadcaster)."),
+	FConsoleCommandDelegate::CreateLambda([]()
+	{
+		TSharedPtr<FWebRTCConnector> Conn = FWebRTCConnector::GetActiveConnector();
+		if (!Conn.IsValid())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("O3DS: No active WebRTC connector"));
+			return;
+		}
+		FWebRTCConnector::FAudioSendStatus S; Conn->GetAudioSendStatus(S);
+		UE_LOG(LogTemp, Log, TEXT("--- O3DS WebRTC Audio Send Status ---"));
+		UE_LOG(LogTemp, Log, TEXT("Signaling=%d PeerConnected=%d LocalDesc=%d RemoteDesc=%d DataChannelOpen=%d"),
+			S.bSignalingConnected?1:0, S.bPeerConnected?1:0, S.bLocalDesc?1:0, S.bRemoteDesc?1:0, S.bDataChannelOpen?1:0);
+		UE_LOG(LogTemp, Log, TEXT("AudioEnabled=%d TrackPresent=%d TrackOpen=%d OpusReady=%d"),
+			S.bAudioSendEnabled?1:0, S.bAudioTrackPresent?1:0, S.bAudioTrackOpen?1:0, S.bOpusEncoderReady?1:0);
+		UE_LOG(LogTemp, Log, TEXT("PeerState=%d ConnState=%s StreamLabel=%s"),
+			S.LastPeerStateInt, *S.ConnectionStateLabel, *S.StreamLabel);
+		UE_LOG(LogTemp, Log, TEXT("PendingSamples=%d SentPackets=%llu SentBytes=%llu"),
+			S.PendingSamples, (unsigned long long)S.SentPackets, (unsigned long long)S.SentBytes);
+		if (!S.LastError.IsEmpty())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("LastError: %s"), *S.LastError);
+		}
+	})
+);
