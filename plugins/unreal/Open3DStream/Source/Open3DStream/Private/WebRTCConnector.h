@@ -164,6 +164,11 @@ private:
 		// Track readiness heuristics to avoid spamming exceptions while SDP opens the track
 		bool bTrackReady = false;
 		double NextSendRetryTimeSeconds = 0.0;
+
+		// Debug instrumentation (updated on game thread)
+		uint64 SentPackets = 0;
+		uint64 SentBytes = 0;
+		double LastStatsLogTime = 0.0;
 	} AudioRt;
 	TFunction<void(const int16*, int32, int32, int32)> AudioRxCallback;
 	struct FRxBuffer { TArray<int16> PCM; int32 NumChannels=1; int32 SampleRate=48000; };

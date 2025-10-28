@@ -55,6 +55,13 @@ static TAutoConsoleVariable<int32> CVarO3DSWebRTCDebugRx(
  TEXT("Enable receiver-side debug logging for WebRTC data (0/1). Logs first packet and occasional stats."),
  ECVF_Default);
 
+// Audio send debug: periodic stats to verify frames are flowing
+static TAutoConsoleVariable<int32> CVarO3DSWebRTCAudioDebug(
+ TEXT("o3ds.WebRTC.Audio.Debug"),
+ 0,
+ TEXT("Enable periodic audio send stats (0/1). Logs packets/sec and bytes/sec."),
+ ECVF_Default);
+
 // New CVars for Issue #87 resiliency
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCAutoReconnect(
  TEXT("o3ds.Broadcast.WebRTC.AutoReconnect"),
@@ -465,6 +472,32 @@ void FWebRTCConnector::Tick()
  const double Jitter = FMath::FRandRange(0.0,0.25 * ReconnectBackoffSeconds);
  NextReconnectTimeSeconds = Now + ReconnectBackoffSeconds + Jitter;
  }
+ }
+
+ // Optional audio send stats
+ if (CVarO3DSWebRTCAudioDebug->GetInt() != 0)
+ {
+ 	const double Now = FPlatformTime::Seconds();
+ 	if (AudioRt.LastStatsLogTime == 0.0)
+ 	{
+ 		AudioRt.LastStatsLogTime = Now;
+ 	}
+ 	const double Elapsed = Now - AudioRt.LastStatsLogTime;
+ 	if (Elapsed >= 2.0) // log every ~2s
+ 	{
+ 		static uint64 PrevPackets = 0;
+ 		static uint64 PrevBytes = 0;
+ 		const uint64 Pkts = AudioRt.SentPackets;
+ 		const uint64 Bytes = AudioRt.SentBytes;
+ 		const uint64 Dp = (Pkts >= PrevPackets) ? (Pkts - PrevPackets) : 0;
+ 		const uint64 Db = (Bytes >= PrevBytes) ? (Bytes - PrevBytes) : 0;
+ 		const double Pps = Elapsed > 0.0 ? (double)Dp / Elapsed : 0.0;
+ 		const double Bps = Elapsed > 0.0 ? (double)Db / Elapsed : 0.0;
+ 		UE_LOG(LogTemp, Verbose, TEXT("WebRTC Audio: sent %.1f pkts/s, %.0f B/s (total pkts=%llu bytes=%llu)"), Pps, Bps, (unsigned long long)Pkts, (unsigned long long)Bytes);
+ 		PrevPackets = Pkts;
+ 		PrevBytes = Bytes;
+ 		AudioRt.LastStatsLogTime = Now;
+ 	}
  }
 }
 
@@ -1623,6 +1656,9 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 					return false;
 				}
 			}
+			// Update debug counters
+			AudioRt.SentPackets += 1;
+			AudioRt.SentBytes += (uint64)EncBytes;
 			if (CVarO3DSWebRTCVerbose->GetInt() != 0)
 			{
 				UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Encoded and sent audio packet %d bytes (timestamp=%u)"), EncBytes, FI.timestamp);
