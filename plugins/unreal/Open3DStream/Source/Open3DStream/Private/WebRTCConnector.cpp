@@ -568,6 +568,24 @@ void FWebRTCConnector::OnLocalDescription(const rtc::Description& Description)
 	{
 		FString SDP(ANSI_TO_TCHAR(std::string(Description).c_str()));
 
+		// Quick SDP sanity: check for audio m-line and log codecs once
+		{
+			bool bHasAudio = SDP.Contains(TEXT("\nm=audio")) || SDP.StartsWith(TEXT("m=audio"));
+			if (!bHasAudio)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: Local SDP has no m=audio; audio track may not negotiate"));
+			}
+			else
+			{
+				// Log first matching a=rtpmap for Opus/PT=111 if present
+				int32 OpusIdx = SDP.Find(TEXT("a=rtpmap:111 opus"), ESearchCase::IgnoreCase, ESearchDir::FromStart);
+				if (OpusIdx != INDEX_NONE)
+				{
+					UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Local SDP includes Opus PT=111"));
+				}
+			}
+		}
+
 		if (Description.type() == rtc::Description::Type::Offer)
 		{
 			SignalingClient->SendOffer(SDP);
@@ -1122,18 +1140,12 @@ bool FWebRTCConnector::SetupPeerConnection()
 				AudioTrack->onOpen([this]()
 				{
 					AudioRt.bTrackReady = true;
-					if (CVarO3DSWebRTCVerbose->GetInt() != 0)
-					{
-						UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Audio track opened"));
-					}
+					UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Audio track opened"));
 				});
 				AudioTrack->onClosed([this]()
 				{
 					AudioRt.bTrackReady = false;
-					if (CVarO3DSWebRTCVerbose->GetInt() != 0)
-					{
-						UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Audio track closed"));
-					}
+					UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Audio track closed"));
 				});
 			}
 		}
@@ -1420,18 +1432,12 @@ void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 			AudioTrack->onOpen([this]()
 			{
 				AudioRt.bTrackReady = true;
-				if (CVarO3DSWebRTCVerbose->GetInt() != 0)
-				{
-					UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Audio track opened"));
-				}
+				UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Audio track opened"));
 			});
 			AudioTrack->onClosed([this]()
 			{
 				AudioRt.bTrackReady = false;
-				if (CVarO3DSWebRTCVerbose->GetInt() != 0)
-				{
-					UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Audio track closed"));
-				}
+				UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Audio track closed"));
 			});
 		}
 	}
