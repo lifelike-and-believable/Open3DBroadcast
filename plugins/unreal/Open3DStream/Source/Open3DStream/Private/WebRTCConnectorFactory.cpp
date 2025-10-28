@@ -67,7 +67,13 @@ namespace
 			const bool bOk = Inner->PushAudioPCM16(TempPcm16.GetData(), TempPcm16.Num());
 			if (!bOk)
 			{
-				UE_LOG(LogTemp, Warning, TEXT("FLibDataChannelAdapter: PushAudioPCM16 failed"));
+				const double Now = FPlatformTime::Seconds();
+				static double sLastWarn = 0.0;
+				if (Now - sLastWarn > 0.5)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("FLibDataChannelAdapter: PushAudioPCM16 failed"));
+					sLastWarn = Now;
+				}
 			}
 			return bOk;
 #else
