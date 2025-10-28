@@ -43,8 +43,10 @@ namespace
 		{
 #if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
 			FWebRTCConnector::FAudioConfig A; A.SampleRate = Cfg.SampleRate; A.NumChannels = Cfg.NumChannels; A.BitrateKbps = Cfg.BitrateKbps; A.FrameSizeMs =20; A.StreamLabel = Cfg.StreamLabel;
+			UE_LOG(LogTemp, Verbose, TEXT("FLibDataChannelAdapter: EnableAudioSend stream=%s sr=%d ch=%d br=%d"), *A.StreamLabel, A.SampleRate, A.NumChannels, A.BitrateKbps);
 			Inner->EnableAudioSend(A);
 			EmitAnnounceIfNeeded(Cfg);
+			UE_LOG(LogTemp, Verbose, TEXT("FLibDataChannelAdapter: Announce emitted for stream=%s"), *Cfg.StreamLabel);
 			return true;
 #else
 			return false;
@@ -61,7 +63,13 @@ namespace
 				float v = FMath::Clamp(Interleaved[i], -1.0f,1.0f);
 				TempPcm16[i] = (int16)FMath::RoundToInt(v *32767.0f);
 			}
-			return Inner->PushAudioPCM16(TempPcm16.GetData(), TempPcm16.Num());
+			UE_LOG(LogTemp, Verbose, TEXT("FLibDataChannelAdapter: PushPcm frames=%d ch=%d sr=%d samples=%d"), NumFrames, NumChannels, SampleRate, TempPcm16.Num());
+			const bool bOk = Inner->PushAudioPCM16(TempPcm16.GetData(), TempPcm16.Num());
+			if (!bOk)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("FLibDataChannelAdapter: PushAudioPCM16 failed"));
+			}
+			return bOk;
 #else
 			return false;
 #endif

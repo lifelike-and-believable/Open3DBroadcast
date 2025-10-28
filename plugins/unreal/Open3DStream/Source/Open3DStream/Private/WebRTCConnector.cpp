@@ -1307,6 +1307,11 @@ void FWebRTCConnector::MaybeCreateOffer(const TCHAR* Context)
 
 void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 {
+	if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: EnableAudioSend sr=%d ch=%d br=%d frameMs=%d stream=%s"),
+			InConfig.SampleRate, InConfig.NumChannels, InConfig.BitrateKbps, InConfig.FrameSizeMs, *InConfig.StreamLabel);
+	}
 	AudioRt.Config = InConfig;
 	AudioRt.FrameSizeSamples = FMath::Max(1, (InConfig.SampleRate * InConfig.FrameSizeMs) /1000);
 	AudioRt.Timestamp =0;
@@ -1350,6 +1355,10 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 {
 	if (!bAudioSendEnabled)
 	{
+		if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+		{
+			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 called but audio send disabled"));
+		}
 		return false;
 	}
 #if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
@@ -1369,6 +1378,10 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 	int32 Old = AudioRt.Pending.Num();
 	AudioRt.Pending.AddUninitialized(NumSamples);
 	FMemory::Memcpy(AudioRt.Pending.GetData() + Old, Samples, sizeof(int16) * NumSamples);
+	if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 appended samples=%d pending=%d frameSamples=%d"), NumSamples, AudioRt.Pending.Num(), AudioRt.FrameSizeSamples * AudioRt.Config.NumChannels);
+	}
 
 	const int32 FrameSamplesTotal = AudioRt.FrameSizeSamples * AudioRt.Config.NumChannels;
 	uint8 Encoded[4000];
@@ -1388,6 +1401,10 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 		 if (AudioTrack)
 		 {
 			 AudioTrack->sendFrame(Packet, FI);
+		 }
+		 if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+		 {
+			 UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Encoded and sent audio packet %d bytes (timestamp=%u)"), EncBytes, FI.timestamp);
 		 }
 	 }
 	 // Pop consumed samples
