@@ -7,6 +7,8 @@
 #include "IWebRTCConnector.h"
 #include "Sound/SoundSubmix.h"
 #include "AudioCaptureCore.h"
+// Needed for GetWorld() usage in BeginPlay/EndPlay
+#include "Engine/World.h"
 
 namespace
 {
