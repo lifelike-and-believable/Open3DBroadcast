@@ -7,6 +7,7 @@
 #include "Open3DWebRTCDataChannel.h"
 #include "O3DSUnifiedMessage.h" // Unified header for audio multiplexing
 #include "Open3DStreamSourceSettings.h" // for EO3DSWebRtcBackendReceiver enum
+#include "IWebRTCConnector.h" // NEW for FAudioSendConfig
 
 // Debug cvar for transport send logging
 static TAutoConsoleVariable<int32> CVarO3DSWebRtcTransportDebug(
@@ -80,7 +81,21 @@ public:
     virtual ~FO3DSWebRtcTransport() override { Stop(); }
 
     // Retained for source compatibility; currently a no-op until native audio tracks are implemented.
-    void SetAudioConfig(const FO3DSWebRTCAudioConfig& /*In*/) {}
+    void SetAudioConfig(const FO3DSWebRTCAudioConfig& In)
+    {
+        AudioCfg = In;
+        // If a channel is already running, apply immediately
+        if (Channel && Channel->IsConnected() && AudioCfg.bEnable)
+        {
+            ApplyAudioConfig();
+        }
+    }
+
+    // NEW: expose the connector so capture components can push frames
+    TSharedPtr<IWebRTCConnector> GetConnector() const
+    {
+        return Channel ? Channel->GetConnector() : nullptr;
+    }
 
     virtual bool Start(const FString& InUrl, const FString& InProtocol, const FString& InKey) override
     {
@@ -129,8 +144,12 @@ public:
         LastStateLogTime = 0.0;
         LastPingTime = 0.0;
 
-        // Removed: warning about native audio track not implemented.
-        return true;
+        // NEW: enable native audio track if requested
+        if (bStarted && AudioCfg.bEnable)
+        {
+            ApplyAudioConfig();
+        }
+        return bStarted;
     }
 
     virtual void Stop() override
@@ -223,6 +242,21 @@ public:
     virtual const FCounters& GetCounters() const override { return Counters; }
 
 private:
+    void ApplyAudioConfig()
+    {
+        if (!Channel) return;
+        IWebRTCConnector::FAudioSendConfig Cfg;
+        Cfg.bEnable = true;
+        Cfg.SampleRate = FMath::Max(8000, AudioCfg.SampleRate);
+        Cfg.NumChannels = FMath::Clamp(AudioCfg.NumChannels, 1, 2);
+        Cfg.BitrateKbps = FMath::Max(6, AudioCfg.BitrateKbps);
+        Cfg.bUseDTX = true;
+        // Default stream/subject routing: "o3ds:mix" until a capture component supplies specific labels per PushPcm
+        Cfg.StreamLabel = TEXT("o3ds:mix");
+        Cfg.SourceType = TEXT("mix");
+        Channel->EnableAudioSend(Cfg);
+    }
+
     void SendDebugToneIfDue()
     {
         const int32 SampleRate = FMath::Max(8000, CVarO3DSWebRtcDebugToneSampleRate->GetInt());
@@ -314,5 +348,7 @@ private:
 
     // Backend selection (LibDataChannel or LiveKit)
     EO3DSWebRtcBackend Backend = EO3DSWebRtcBackend::LibDataChannel;
-    // Note: AudioConfig storage removed; native track path is currently unused.
+
+    // NEW: persist audio request until channel is ready
+    FO3DSWebRTCAudioConfig AudioCfg;
 };

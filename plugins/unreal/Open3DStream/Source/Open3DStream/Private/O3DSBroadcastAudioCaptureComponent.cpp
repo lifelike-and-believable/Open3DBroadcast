@@ -5,7 +5,6 @@
 #include "AudioMixerDevice.h"
 #include "ISubmixBufferListener.h"
 #include "IWebRTCConnector.h"
-// #include "O3DSWebRTCService.h" // removed shared singleton
 #include "Sound/SoundSubmix.h"
 #include "AudioCaptureCore.h"
 
@@ -136,7 +135,6 @@ void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 {
 	if (!Connector)
 	{
-		// Do not auto-fetch a shared connector anymore. Leave null to surface networking issues.
 		if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("O3DS AudioCapture: No connector set on component"));
@@ -144,7 +142,6 @@ void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 		return;
 	}
 
-	// If connector was set externally, (re)configure send params
 	IWebRTCConnector::FAudioSendConfig A;
 	A.bEnable = true;
 	A.SampleRate = Config.SampleRate;

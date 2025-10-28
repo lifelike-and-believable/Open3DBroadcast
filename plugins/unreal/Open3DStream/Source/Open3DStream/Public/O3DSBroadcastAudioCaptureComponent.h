@@ -102,4 +102,10 @@ private:
 	// Submix tap listener and optional microphone capture
 	TSharedPtr<ISubmixBufferListener, ESPMode::ThreadSafe> SubmixTap;
 	Audio::FAudioCapture* MicCapture = nullptr;
+public:
+	// NEW: setter to wire the active WebRTC connector from the transport
+	void SetConnector(const TSharedPtr<IWebRTCConnector>& InConnector)
+	{
+		Connector = InConnector;
+	}
 };

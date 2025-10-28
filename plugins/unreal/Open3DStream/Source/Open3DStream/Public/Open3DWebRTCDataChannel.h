@@ -3,10 +3,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include <functional>
-
-// Forward declarations
-enum class EO3DSWebRtcBackendReceiver : uint8;
+#include "Open3DStreamSourceSettings.h" // EO3DSWebRtcBackendReceiver
+#include "IWebRTCConnector.h"
 
 /**
  * Public wrapper for WebRTC DataChannel used by broadcast/receiver modules.
@@ -34,11 +32,18 @@ public:
     bool IsConnected() const;
     bool IsOpen() const;
 
-    // Set callback invoked on game thread from Tick() for received messages.
-    void SetOnMessage(TFunction<void(const uint8*, int32)> InOnMessage);
-
     // Pump internal queues (call from game thread each tick).
     void Tick();
+
+    // Message callback for inbound DataChannel messages (if used by receiver)
+    void SetOnMessage(TFunction<void(const uint8*, int32)> InOnMessage);
+
+    // NEW: expose active backend-agnostic connector (so other systems can push audio)
+    TSharedPtr<IWebRTCConnector> GetConnector() const;
+
+    // NEW: forward audio APIs to the underlying connector
+    bool EnableAudioSend(const IWebRTCConnector::FAudioSendConfig& Config);
+    bool PushPcm(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec);
 
 private:
     class FImpl;
