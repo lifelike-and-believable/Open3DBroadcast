@@ -118,6 +118,8 @@ public:
 		bool bPeerConnected = false;
 		bool bLocalDesc = false;
 		bool bRemoteDesc = false;
+		bool bLocalSdpHasAudio = false;
+		bool bRemoteSdpHasAudio = false;
 		bool bDataChannelOpen = false;
 		bool bAudioSendEnabled = false;
 		bool bAudioTrackPresent = false;
@@ -175,6 +177,10 @@ private:
 
 	// Pending remote ICE candidates until both descriptions are set
 	TArray<TTuple<FString, FString, int32>> PendingRemoteCandidates;
+
+	// SDP presence trackers for diagnostics
+	bool bLocalSDPHasAudio = false;
+	bool bRemoteSDPHasAudio = false;
 
 	// Audio state
 	bool bAudioSendEnabled = false;

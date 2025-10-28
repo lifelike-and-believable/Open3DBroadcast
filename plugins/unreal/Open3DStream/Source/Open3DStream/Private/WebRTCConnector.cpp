@@ -628,6 +628,7 @@ void FWebRTCConnector::OnLocalDescription(const rtc::Description& Description)
 		// Quick SDP sanity: check for audio m-line and log codecs once
 		{
 			bool bHasAudio = SDP.Contains(TEXT("\nm=audio")) || SDP.StartsWith(TEXT("m=audio"));
+			bLocalSDPHasAudio = bHasAudio;
 			if (!bHasAudio)
 			{
 				UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: Local SDP has no m=audio; audio track may not negotiate"));
@@ -706,6 +707,12 @@ void FWebRTCConnector::OnOfferReceived(const FString& SDP)
 		std::string SdpStr(TCHAR_TO_ANSI(*SDP));
 		PeerConnection->setRemoteDescription(rtc::Description(SdpStr, rtc::Description::Type::Offer));
 		bRemoteDescriptionSet = true;
+		// Diagnose remote SDP for audio support (server path)
+		bRemoteSDPHasAudio = SDP.Contains(TEXT("\nm=audio")) || SDP.StartsWith(TEXT("m=audio"));
+		if (!bRemoteSDPHasAudio)
+		{
+			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Remote offer has no m=audio"));
+		}
 		
 		// Server must create answer in response to offer
 		UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Creating answer in response to offer"));
@@ -737,6 +744,12 @@ void FWebRTCConnector::OnAnswerReceived(const FString& SDP)
 		std::string SdpStr(TCHAR_TO_ANSI(*SDP));
 		PeerConnection->setRemoteDescription(rtc::Description(SdpStr, rtc::Description::Type::Answer));
 		bRemoteDescriptionSet = true;
+		// Diagnose remote SDP for audio support
+		bRemoteSDPHasAudio = SDP.Contains(TEXT("\nm=audio")) || SDP.StartsWith(TEXT("m=audio"));
+		if (!bRemoteSDPHasAudio && bAudioSendEnabled)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: Remote SDP has no m=audio; audio track will not open"));
+		}
 		FlushPendingRemoteCandidates();
 	}
 	catch (const std::exception& e)
@@ -1731,6 +1744,8 @@ void FWebRTCConnector::GetAudioSendStatus(FAudioSendStatus& OutStatus) const
 	OutStatus.bPeerConnected = bIsConnected;
 	OutStatus.bLocalDesc = bLocalDescriptionSet;
 	OutStatus.bRemoteDesc = bRemoteDescriptionSet;
+	OutStatus.bLocalSdpHasAudio = bLocalSDPHasAudio;
+	OutStatus.bRemoteSdpHasAudio = bRemoteSDPHasAudio;
 	OutStatus.bDataChannelOpen = bDataChannelOpen;
 	OutStatus.bAudioSendEnabled = bAudioSendEnabled;
 	OutStatus.bAudioTrackPresent = (LocalAudioTrack != nullptr);
@@ -1831,6 +1846,7 @@ static FAutoConsoleCommand CmdO3DSDumpAudioStatus(
 		UE_LOG(LogTemp, Log, TEXT("--- O3DS WebRTC Audio Send Status ---"));
 		UE_LOG(LogTemp, Log, TEXT("Signaling=%d PeerConnected=%d LocalDesc=%d RemoteDesc=%d DataChannelOpen=%d"),
 			S.bSignalingConnected?1:0, S.bPeerConnected?1:0, S.bLocalDesc?1:0, S.bRemoteDesc?1:0, S.bDataChannelOpen?1:0);
+		UE_LOG(LogTemp, Log, TEXT("LocalSDP.m=audio=%d RemoteSDP.m=audio=%d"), S.bLocalSdpHasAudio?1:0, S.bRemoteSdpHasAudio?1:0);
 		UE_LOG(LogTemp, Log, TEXT("AudioEnabled=%d TrackPresent=%d TrackOpen=%d OpusReady=%d"),
 			S.bAudioSendEnabled?1:0, S.bAudioTrackPresent?1:0, S.bAudioTrackOpen?1:0, S.bOpusEncoderReady?1:0);
 		UE_LOG(LogTemp, Log, TEXT("PeerState=%d ConnState=%s StreamLabel=%s"),
