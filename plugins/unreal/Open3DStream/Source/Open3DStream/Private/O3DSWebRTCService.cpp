@@ -9,7 +9,7 @@ UO3DSWebRTCService* UO3DSWebRTCService::Get()
 {
 	if (!Instance.IsValid())
 	{
-		Instance = NewObject<UO3DSWebRTCService>(GetTransientPackage());
+		Instance = NewObject<UO3DSWebRTCService>(static_cast<UObject*>(GetTransientPackage()));
 		Instance->AddToRoot();
 	}
 	return Instance.Get();

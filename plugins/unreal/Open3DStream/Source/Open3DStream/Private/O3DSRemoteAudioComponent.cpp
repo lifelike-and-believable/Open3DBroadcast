@@ -6,6 +6,7 @@
 #include "O3DSWebRTCService.h"
 #include "Sound/SoundWaveProcedural.h"
 #include "Components/AudioComponent.h"
+#include "GameFramework/Actor.h"
 
 // Opt-in verbose logging for remote audio receive/playback
 static TAutoConsoleVariable<int32> CVarO3DSRemoteAudioDebug(
@@ -28,7 +29,7 @@ void UO3DSRemoteAudioComponent::BeginPlay()
 		AudioComp = GetOwner() ? GetOwner()->FindComponentByClass<UAudioComponent>() : nullptr;
 		if (!AudioComp)
 		{
-			AudioComp = NewObject<UAudioComponent>(GetOwner());
+			AudioComp = NewObject<UAudioComponent>(static_cast<UObject*>(GetOwner()));
 			if (AudioComp)
 			{
 				AudioComp->RegisterComponent();

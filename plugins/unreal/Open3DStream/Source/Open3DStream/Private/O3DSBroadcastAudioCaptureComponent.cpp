@@ -6,6 +6,7 @@
 #include "O3DSWebRTCService.h"
 #include "Sound/SoundSubmix.h"
 #include "AudioCaptureCore.h"
+#include "Engine/World.h"
 
 namespace
 {
