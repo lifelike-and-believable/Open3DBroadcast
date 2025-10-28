@@ -117,6 +117,26 @@ bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* S
 		{
 			this->inData(Data, Size);
 		});
+		// Bridge decoded remote audio (WebRTC track) to the global O3DS audio bus for in-world playback
+		mWebRTCConnector->OnRemoteAudio().AddLambda([](const FString& StreamLabel, const FString& SubjectName, const float* PCM, int32 NumFrames, int32 NumChannels, int32 SampleRate)
+		{
+			if (!PCM || NumFrames <= 0 || NumChannels <= 0) { return; }
+			// Convert float [-1,1] to PCM16 bytes
+			const int32 NumSamples = NumFrames * NumChannels;
+			TArray<int16> PCM16; PCM16.AddUninitialized(NumSamples);
+			for (int32 i = 0; i < NumSamples; ++i)
+			{
+				float v = FMath::Clamp(PCM[i], -1.0f, 1.0f);
+				PCM16[i] = (int16)FMath::RoundToInt(v * 32767.0f);
+			}
+			O3DS::FAudioFrameMeta Meta;
+			Meta.StreamLabel = StreamLabel;
+			Meta.SubjectName = SubjectName;
+			Meta.NumChannels = NumChannels > 0 ? NumChannels : 1;
+			Meta.SampleRate = SampleRate > 0 ? SampleRate : 48000;
+			Meta.TimestampSec = FPlatformTime::Seconds();
+			FO3DSAudioBus::PublishPcm16(Meta, reinterpret_cast<const uint8*>(PCM16.GetData()), PCM16.Num() * sizeof(int16));
+		});
 		UE_LOG(LogTemp, Log, TEXT("O3DS RX: DataReceivedCallback bound in UOpen3DServer (WebRTC Client)"));
 		
 		if (mWebRTCConnector->Start(Url.ToString(), false))
@@ -154,6 +174,26 @@ bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* S
 		mWebRTCConnector->SetDataReceivedCallback([this](const uint8* Data, int32 Size)
 		{
 			this->inData(Data, Size);
+		});
+		// Bridge decoded remote audio (WebRTC track) to the global O3DS audio bus for in-world playback
+		mWebRTCConnector->OnRemoteAudio().AddLambda([](const FString& StreamLabel, const FString& SubjectName, const float* PCM, int32 NumFrames, int32 NumChannels, int32 SampleRate)
+		{
+			if (!PCM || NumFrames <= 0 || NumChannels <= 0) { return; }
+			// Convert float [-1,1] to PCM16 bytes
+			const int32 NumSamples = NumFrames * NumChannels;
+			TArray<int16> PCM16; PCM16.AddUninitialized(NumSamples);
+			for (int32 i = 0; i < NumSamples; ++i)
+			{
+				float v = FMath::Clamp(PCM[i], -1.0f, 1.0f);
+				PCM16[i] = (int16)FMath::RoundToInt(v * 32767.0f);
+			}
+			O3DS::FAudioFrameMeta Meta;
+			Meta.StreamLabel = StreamLabel;
+			Meta.SubjectName = SubjectName;
+			Meta.NumChannels = NumChannels > 0 ? NumChannels : 1;
+			Meta.SampleRate = SampleRate > 0 ? SampleRate : 48000;
+			Meta.TimestampSec = FPlatformTime::Seconds();
+			FO3DSAudioBus::PublishPcm16(Meta, reinterpret_cast<const uint8*>(PCM16.GetData()), PCM16.Num() * sizeof(int16));
 		});
 		UE_LOG(LogTemp, Log, TEXT("O3DS RX: DataReceivedCallback bound in UOpen3DServer (WebRTC Server)"));
 		
