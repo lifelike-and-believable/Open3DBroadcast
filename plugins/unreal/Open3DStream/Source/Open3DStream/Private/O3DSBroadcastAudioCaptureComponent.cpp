@@ -133,17 +133,30 @@ void UO3DSBroadcastAudioCaptureComponent::EndPlay(const EEndPlayReason::Type End
 	Super::EndPlay(EndPlayReason);
 }
 
+void UO3DSBroadcastAudioCaptureComponent::SetConnector(TSharedPtr<IWebRTCConnector> InConnector)
+{
+	Connector = InConnector;
+	// Reset warning throttle so if connector goes null later, we warn once again
+	bWarnedNoConnector = false;
+	// Attempt to configure send immediately if possible
+	EnsureConnector();
+}
+
 void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 {
 	if (!Connector)
 	{
 		// Do not auto-fetch a shared connector anymore. Leave null to surface networking issues.
-		if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
+		if (CVarO3DSAudioCaptureDebug->GetInt() !=0 && !bWarnedNoConnector)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("O3DS AudioCapture: No connector set on component"));
+			bWarnedNoConnector = true;
 		}
 		return;
 	}
+
+	// Connector is valid again; allow future warnings if it becomes null later
+	bWarnedNoConnector = false;
 
 	// If connector was set externally, (re)configure send params
 	IWebRTCConnector::FAudioSendConfig A;

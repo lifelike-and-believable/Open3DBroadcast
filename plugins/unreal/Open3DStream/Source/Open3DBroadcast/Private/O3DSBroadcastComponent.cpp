@@ -387,6 +387,19 @@ void UO3DSBroadcastComponent::StartCapture()
  AudioCap->InputDeviceName = WebRTCInputDeviceName;
  AudioCap->Config.SubmixToTap = WebRTCSubmixToTap;
  AudioCap->SubjectName = *BuildSubjectName(TargetMesh.Get());
+
+	 // If our internal transport is WebRTC, inject its connector so audio can enable a track immediately
+	 if (InternalTransport)
+	 {
+	  if (FO3DSWebRtcTransport* Wrtc = static_cast<FO3DSWebRtcTransport*>(InternalTransport.Get()))
+	  {
+	   TSharedPtr<IWebRTCConnector> Conn = Wrtc->GetConnector();
+	   if (Conn.IsValid())
+	   {
+		AudioCap->SetConnector(Conn);
+	   }
+	  }
+	 }
  }
  }
  }

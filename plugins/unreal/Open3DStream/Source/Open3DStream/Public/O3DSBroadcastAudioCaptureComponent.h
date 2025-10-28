@@ -84,6 +84,9 @@ public:
 	// Public so submix tap can invoke it
 	void PushFrames(const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec);
 
+	// Inject a WebRTC connector to enable audio sending
+	void SetConnector(TSharedPtr<IWebRTCConnector> InConnector);
+
 	// Options provider for the device dropdown
 	UFUNCTION()
 	TArray<FName> GetAvailableInputDeviceOptions() const;
@@ -98,6 +101,9 @@ private:
 
 	TSharedPtr<IWebRTCConnector> Connector;
 	FString StreamLabel;
+
+	// Prevent spamming warnings when no connector is assigned; warn once until a connector appears
+	bool bWarnedNoConnector = false;
 
 	// Submix tap listener and optional microphone capture
 	TSharedPtr<ISubmixBufferListener, ESPMode::ThreadSafe> SubmixTap;

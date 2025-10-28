@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include <functional>
+#include "IWebRTCConnector.h"
 
 // Forward declarations
 enum class EO3DSWebRtcBackendReceiver : uint8;
@@ -39,6 +40,9 @@ public:
 
     // Pump internal queues (call from game thread each tick).
     void Tick();
+
+    // Expose underlying connector for advanced use (e.g., audio injection). May be null until Start succeeds.
+    TSharedPtr<IWebRTCConnector> GetConnector() const;
 
 private:
     class FImpl;

@@ -97,3 +97,4 @@ bool FO3DSWebRTCDataChannel::IsConnected() const { return Impl->IsConnected(); }
 bool FO3DSWebRTCDataChannel::IsOpen() const { return Impl->IsOpen(); }
 void FO3DSWebRTCDataChannel::SetOnMessage(TFunction<void(const uint8*, int32)> InOnMessage) { Impl->OnMessage = MoveTemp(InOnMessage); }
 void FO3DSWebRTCDataChannel::Tick() { Impl->Tick(); }
+TSharedPtr<IWebRTCConnector> FO3DSWebRTCDataChannel::GetConnector() const { return Impl ? Impl->Connector : nullptr; }
