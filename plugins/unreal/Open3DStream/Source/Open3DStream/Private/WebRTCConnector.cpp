@@ -1386,17 +1386,19 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 	std::shared_ptr<rtc::Track> LocalAudioTrack;
 	std::shared_ptr<rtc::PeerConnection> LocalPC;
 	bool bConnected = false;
+	bool bHaveDescriptions = false;
 	{
 		FScopeLock Lock(&PeerConnectionLock);
 		LocalAudioTrack = AudioTrack;
 		LocalPC = PeerConnection;
 		bConnected = bIsConnected;
+		bHaveDescriptions = bLocalDescriptionSet && bRemoteDescriptionSet;
 	}
-	if (!LocalPC || !bConnected)
+	if (!LocalPC || !bConnected || !bHaveDescriptions)
 	{
 		if (CVarO3DSWebRTCVerbose->GetInt() != 0)
 		{
-			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 dropped (pc/track not ready, connected=%d)"), bConnected?1:0);
+			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 dropped (pc/track not ready, connected=%d, haveDesc=%d)"), bConnected?1:0, bHaveDescriptions?1:0);
 		}
 		return false;
 	}
