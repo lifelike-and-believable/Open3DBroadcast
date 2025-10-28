@@ -1,8 +1,9 @@
 #pragma once
+
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Sound/SoundSubmix.h"
-#include "O3DSBroadcastAudioCaptureComponent.generated.h"
+#include "O3DSBroadcastAudioCaptureComponent.generated.h" // <-- This is required for GENERATED_BODY and UPROPERTY
 
 class IWebRTCConnector;
 class ISubmixBufferListener;
@@ -28,24 +29,32 @@ USTRUCT(BlueprintType)
 struct FO3DSAudioCaptureConfig
 {
 	GENERATED_BODY()
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio")
 	EO3DSAudioCaptureSource Source = EO3DSAudioCaptureSource::GameSubmix;
+
 	// No EditCondition here; gated UX is provided by component-level CaptureMode
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio")
 	USoundSubmix* SubmixToTap = nullptr;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	int32 SampleRate =48000;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	int32 NumChannels =1;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	int32 BitrateKbps =64;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio")
+	int32 SampleRate = 48000;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio"	)
+	int32 NumChannels = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio")
+	int32 BitrateKbps = 64;
+
 	// Optional device index when using Input mode; -1 uses system default
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(ClampMin="-1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio", meta = (ClampMin = "-1"))
 	int32 DeviceIndex = -1;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float GameGain =1.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float MicGain =1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio")
+	float GameGain = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio")
+	float MicGain = 1.0f;
 };
 
 UCLASS(ClassGroup=(Open3DStream), meta=(BlueprintSpawnableComponent))
