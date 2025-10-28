@@ -1424,6 +1424,8 @@ void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 	// If PC already exists, add audio track and renegotiate on client
 	if (PeerConnection && !AudioTrack)
 	{
+		UE_LOG(LogTemp, Log, TEXT("Open3DStream: PeerConnection active and Opus available. Proceeding to add Audio Track."));
+
 		// Prefer labeled track when stream label present
 		if (!InConfig.StreamLabel.IsEmpty())
 		{
@@ -1435,6 +1437,7 @@ void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 		}
 		if (!bIsServer && bSignalingIsConnected)
 		{
+			UE_LOG(LogTemp, Warning, TEXT("Open3DStream: [WebRTC Client] Audio Enabled."));
 			MaybeCreateOffer(TEXT("audio-enabled"));
 		}
 		if (AudioTrack)
@@ -1450,6 +1453,8 @@ void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 			{
 				Ssrc =0xA17C1234u;
 			}
+			UE_LOG(LogTemp, Warning, TEXT("Open3DStream: [WebRTC Client] Audio Track Added. StreamLabel=%s SSRC=0x%08X"), *InConfig.StreamLabel, Ssrc);
+
 			auto RtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(Ssrc, CName,111, rtc::OpusRtpPacketizer::DefaultClockRate);
 			auto Packetizer = std::make_shared<rtc::OpusRtpPacketizer>(RtpCfg);
 			auto SrReporter = std::make_shared<rtc::RtcpSrReporter>(RtpCfg);
