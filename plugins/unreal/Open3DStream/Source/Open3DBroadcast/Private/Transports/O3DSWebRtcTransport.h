@@ -129,13 +129,14 @@ public:
         LastStateLogTime = 0.0;
         LastPingTime = 0.0;
 
+        // Removed: warning about native audio track not implemented.
+        return true;
+    }
+
     // Expose the connector so other components (e.g., audio capture) can attach
     TSharedPtr<IWebRTCConnector> GetConnector() const
     {
         return Channel ? Channel->GetConnector() : nullptr;
-    }
-        // Removed: warning about native audio track not implemented.
-        return true;
     }
 
     virtual void Stop() override
