@@ -343,72 +343,63 @@ void UO3DSBroadcastComponent::OnSerializedForTransport(const FString& /*Subject*
 
 void UO3DSBroadcastComponent::StartCapture()
 {
-	if (bIsCapturing)
-	{
-		return;
-	}
+ if (bIsCapturing)
+ {
+ return;
+ }
 
-	// Lazily create and attach serializer (M2)
-	if (!Serializer)
-	{
-		Serializer = new FO3DSBroadcastSerializer();
-		Serializer->Attach(this);
-		// Relay serialized frames out of the component for dev/testing (loopback)
-		Serializer->OnSerializedFrame.AddLambda([this](const FString& Subject, const TArray<uint8>& Buffer, double Timestamp)
-		{
-			OnSerializedFrame.Broadcast(Subject, Buffer, Timestamp);
-		});
-	}
+ // Lazily create and attach serializer (M2)
+ if (!Serializer)
+ {
+ Serializer = new FO3DSBroadcastSerializer();
+ Serializer->Attach(this);
+ // Relay serialized frames out of the component for dev/testing (loopback)
+ Serializer->OnSerializedFrame.AddLambda([this](const FString& Subject, const TArray<uint8>& Buffer, double Timestamp)
+ {
+ OnSerializedFrame.Broadcast(Subject, Buffer, Timestamp);
+ });
+ }
 
-	// Setup optional built-in transport
-	SetupInternalTransport();
+ // Setup optional built-in transport
+ SetupInternalTransport();
 
-	// Attach or configure audio capture for WebRTC based on existing settings
-	if (TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio)
-	{
-		if (AActor* Owner = GetOwner())
-		{
-			UO3DSBroadcastAudioCaptureComponent* AudioCap = Owner->FindComponentByClass<UO3DSBroadcastAudioCaptureComponent>();
-			if (!AudioCap)
-			{
-				AudioCap = NewObject<UO3DSBroadcastAudioCaptureComponent>(Owner);
-				if (AudioCap)
-				{
-					AudioCap->RegisterComponent();
-				}
-			}
-			if (AudioCap)
-			{
-				// Map settings from component UX
-				AudioCap->Config.SampleRate = WebRTCAudioSampleRate;
-				AudioCap->Config.NumChannels = WebRTCAudioNumChannels;
-				AudioCap->Config.BitrateKbps = WebRTCAudioBitrateKbps;
-				AudioCap->CaptureMode = (WebRTCAudioMode == EO3DSWebRTCAudioMode::Mix) ? EO3DSCaptureMode::Mix : EO3DSCaptureMode::Input;
-				AudioCap->InputDeviceName = WebRTCInputDeviceName;
-				AudioCap->Config.SubmixToTap = WebRTCSubmixToTap;
-				AudioCap->SubjectName = *BuildSubjectName(TargetMesh.Get());
+ // Attach or configure audio capture for WebRTC based on existing settings
+ if (TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio)
+ {
+ if (AActor* Owner = GetOwner())
+ {
+ UO3DSBroadcastAudioCaptureComponent* AudioCap = Owner->FindComponentByClass<UO3DSBroadcastAudioCaptureComponent>();
+ if (!AudioCap)
+ {
+ AudioCap = NewObject<UO3DSBroadcastAudioCaptureComponent>(Owner);
+ if (AudioCap)
+ {
+ AudioCap->RegisterComponent();
+ }
+ }
+ if (AudioCap)
+ {
+ // Map settings from component UX
+ AudioCap->Config.SampleRate = WebRTCAudioSampleRate;
+ AudioCap->Config.NumChannels = WebRTCAudioNumChannels;
+ AudioCap->Config.BitrateKbps = WebRTCAudioBitrateKbps;
+ AudioCap->CaptureMode = (WebRTCAudioMode == EO3DSWebRTCAudioMode::Mix) ? EO3DSCaptureMode::Mix : EO3DSCaptureMode::Input;
+ AudioCap->InputDeviceName = WebRTCInputDeviceName;
+ AudioCap->Config.SubmixToTap = WebRTCSubmixToTap;
+ AudioCap->SubjectName = *BuildSubjectName(TargetMesh.Get());
+ }
+ }
+ }
 
-				// Wire the live WebRTC connector into the audio capture so it can push frames
-				if (FO3DSWebRtcTransport* Wrtc = static_cast<FO3DSWebRtcTransport*>(InternalTransport.Get()))
-				{
-					if (AudioCap)
-					{
-						AudioCap->SetConnector(Wrtc->GetConnector());
-					}
-				}
-			}
-		}
-	}
-
-	BindToTarget();
-	bIsCapturing = TargetMesh.IsValid();
-	LastCaptureTime = 0.0;
-	FrameCounter = 0;
-	if (bIsCapturing)
-	{
-		UE_LOG(LogO3DSBroadcast, Log, TEXT("O3DS Broadcast: Started capture on %s"), *GetNameSafe(TargetMesh.Get()));
-		NotifyOnScreen(FString::Printf(TEXT("O3DS Broadcast: Started on %s"), *GetNameSafe(TargetMesh.Get())), FColor::Green, 2.0f);
-	}
+ BindToTarget();
+ bIsCapturing = TargetMesh.IsValid();
+ LastCaptureTime =0.0;
+ FrameCounter =0;
+ if (bIsCapturing)
+ {
+ UE_LOG(LogO3DSBroadcast, Log, TEXT("O3DS Broadcast: Started capture on %s"), *GetNameSafe(TargetMesh.Get()));
+ NotifyOnScreen(FString::Printf(TEXT("O3DS Broadcast: Started on %s"), *GetNameSafe(TargetMesh.Get())), FColor::Green,2.0f);
+ }
 }
 
 void UO3DSBroadcastComponent::StopCapture()

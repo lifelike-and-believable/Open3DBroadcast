@@ -164,11 +164,6 @@ private:
 		// Track readiness heuristics to avoid spamming exceptions while SDP opens the track
 		bool bTrackReady = false;
 		double NextSendRetryTimeSeconds = 0.0;
-
-		// Stats (for debug logging)
-		uint64 FramesEncoded = 0;
-		uint64 BytesEncoded = 0;
-		double LastStatsLogTime = 0.0;
 	} AudioRt;
 	TFunction<void(const int16*, int32, int32, int32)> AudioRxCallback;
 	struct FRxBuffer { TArray<int16> PCM; int32 NumChannels=1; int32 SampleRate=48000; };

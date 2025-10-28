@@ -97,22 +97,3 @@ bool FO3DSWebRTCDataChannel::IsConnected() const { return Impl->IsConnected(); }
 bool FO3DSWebRTCDataChannel::IsOpen() const { return Impl->IsOpen(); }
 void FO3DSWebRTCDataChannel::SetOnMessage(TFunction<void(const uint8*, int32)> InOnMessage) { Impl->OnMessage = MoveTemp(InOnMessage); }
 void FO3DSWebRTCDataChannel::Tick() { Impl->Tick(); }
-
-// NEW: expose connector
-TSharedPtr<IWebRTCConnector> FO3DSWebRTCDataChannel::GetConnector() const
-{
-	return Impl ? Impl->Connector : nullptr;
-}
-
-// NEW: audio helpers
-bool FO3DSWebRTCDataChannel::EnableAudioSend(const IWebRTCConnector::FAudioSendConfig& Config)
-{
-	if (!Impl || !Impl->Connector) return false;
-	return Impl->Connector->EnableAudioSend(Config);
-}
-
-bool FO3DSWebRTCDataChannel::PushPcm(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec)
-{
-	if (!Impl || !Impl->Connector) return false;
-	return Impl->Connector->PushPcm(StreamLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
-}
