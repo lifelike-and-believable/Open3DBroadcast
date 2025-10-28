@@ -1,9 +1,11 @@
+// Copyright (c) Open3DStream Contributors
+
 #include "O3DSBroadcastAudioCaptureComponent.h"
 #include "AudioDevice.h"
 #include "AudioMixerDevice.h"
 #include "ISubmixBufferListener.h"
 #include "IWebRTCConnector.h"
-#include "O3DSWebRTCService.h"
+// #include "O3DSWebRTCService.h" // removed shared singleton
 #include "Sound/SoundSubmix.h"
 #include "AudioCaptureCore.h"
 
@@ -34,11 +36,6 @@ static TAutoConsoleVariable<int32> CVarO3DSAudioCaptureDebug(
 	TEXT("Enable debug logs for O3DS audio capture component (0/1)."),
 	ECVF_Default);
 
-static TSharedPtr<IWebRTCConnector> GetSharedConnector()
-{
-	return UO3DSWebRTCService::Get()->GetConnector();
-}
-
 UO3DSBroadcastAudioCaptureComponent::UO3DSBroadcastAudioCaptureComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
@@ -58,7 +55,7 @@ void UO3DSBroadcastAudioCaptureComponent::BeginPlay()
 
 	EnsureConnector();
 
-	if (CVarO3DSAudioCaptureDebug->GetInt() != 0)
+	if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
 	{
 		UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: BeginPlay mode=%s sr=%d ch=%d kbps=%d"),
 			(CaptureMode == EO3DSCaptureMode::Mix) ? TEXT("Mix") : TEXT("Input"),
@@ -78,7 +75,7 @@ void UO3DSBroadcastAudioCaptureComponent::BeginPlay()
 			if (TargetSubmix)
 			{
 				Mixer->RegisterSubmixBufferListener(SubmixTap.ToSharedRef(), *TargetSubmix);
-				if (CVarO3DSAudioCaptureDebug->GetInt() != 0)
+				if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
 				{
 					UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Submix tap registered on %s"), *GetNameSafe(TargetSubmix));
 				}
@@ -100,7 +97,7 @@ void UO3DSBroadcastAudioCaptureComponent::BeginPlay()
 		if (MicCapture && MicCapture->OpenAudioCaptureStream(Params, OnCapture, /*NumFramesDesired*/0))
 		{
 			MicCapture->StartStream();
-			if (CVarO3DSAudioCaptureDebug->GetInt() != 0)
+			if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
 			{
 				UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Mic stream started (DeviceIndex=%d)"), Config.DeviceIndex);
 			}
@@ -139,31 +136,54 @@ void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 {
 	if (!Connector)
 	{
-		Connector = GetSharedConnector();
-		if (Connector)
+		// Do not auto-fetch a shared connector anymore. Leave null to surface networking issues.
+		if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
 		{
-			IWebRTCConnector::FAudioSendConfig A;
-			A.bEnable = true;
-			A.SampleRate = Config.SampleRate;
-			A.NumChannels = Config.NumChannels;
-			A.BitrateKbps = Config.BitrateKbps;
-			StreamLabel = SubjectName.IsNone() ? FString(TEXT("o3ds:mix")) : FString::Printf(TEXT("o3ds:subject/%s"), *SubjectName.ToString());
-			A.StreamLabel = StreamLabel;
-			A.SubjectName = SubjectName.ToString();
-			A.SourceType = (CaptureMode == EO3DSCaptureMode::Mix) ? TEXT("mix") : TEXT("mic");
-			const bool bEnabled = Connector->EnableAudioSend(A);
-			if (CVarO3DSAudioCaptureDebug->GetInt() != 0)
-			{
-				UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Connector ready=%d EnableAudioSend label=%s subject=%s sr=%d ch=%d br=%d -> %s"),
-					1,
-					*A.StreamLabel, *A.SubjectName, A.SampleRate, A.NumChannels, A.BitrateKbps,
-					bEnabled ? TEXT("OK") : TEXT("FAILED"));
-			}
+			UE_LOG(LogTemp, Warning, TEXT("O3DS AudioCapture: No connector set on component"));
 		}
-		else if (CVarO3DSAudioCaptureDebug->GetInt() != 0)
+		return;
+	}
+
+	// If connector was set externally, (re)configure send params
+	IWebRTCConnector::FAudioSendConfig A;
+	A.bEnable = true;
+	A.SampleRate = Config.SampleRate;
+	A.NumChannels = Config.NumChannels;
+	A.BitrateKbps = Config.BitrateKbps;
+
+	// Choose StreamLabel based on mode and subject/device
+	if (CaptureMode == EO3DSCaptureMode::Input)
+	{
+		if (!SubjectName.IsNone())
 		{
-			UE_LOG(LogTemp, Warning, TEXT("O3DS AudioCapture: No shared connector available yet"));
+			StreamLabel = FString::Printf(TEXT("o3ds:subject/%s"), *SubjectName.ToString());
 		}
+		else if (!InputDeviceName.IsNone())
+		{
+			StreamLabel = FString::Printf(TEXT("o3ds:mic/%s"), *InputDeviceName.ToString());
+		}
+		else
+		{
+			StreamLabel = TEXT("o3ds:mic");
+		}
+		A.SourceType = TEXT("mic");
+	}
+	else // Mix
+	{
+		StreamLabel = SubjectName.IsNone() ? FString(TEXT("o3ds:mix")) : FString::Printf(TEXT("o3ds:subject/%s"), *SubjectName.ToString());
+		A.SourceType = TEXT("mix");
+	}
+
+	A.StreamLabel = StreamLabel;
+	A.SubjectName = SubjectName.ToString();
+
+	const bool bEnabled = Connector->EnableAudioSend(A);
+	if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Connector ready=%d EnableAudioSend label=%s subject=%s sr=%d ch=%d br=%d -> %s"),
+			Connector.IsValid()?1:0,
+			*A.StreamLabel, *A.SubjectName, A.SampleRate, A.NumChannels, A.BitrateKbps,
+			bEnabled ? TEXT("OK") : TEXT("FAILED"));
 	}
 }
 
@@ -172,12 +192,12 @@ void UO3DSBroadcastAudioCaptureComponent::PushFrames(const float* Interleaved, i
 	EnsureConnector();
 	if (!Connector) return;
 	const bool bPushed = Connector->PushPcm(StreamLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
-	if (CVarO3DSAudioCaptureDebug->GetInt() != 0)
+	if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
 	{
-		static int32 LogEvery = 0; if ((LogEvery++ % 50) == 0)
+		static int32 LogEvery =0; if ((LogEvery++ %50) ==0)
 		{
 			UE_LOG(LogTemp, Verbose, TEXT("O3DS AudioCapture: PushFrames label=%s frames=%d ch=%d sr=%d ok=%d"),
-				*StreamLabel, NumFrames, NumChannels, SampleRate, bPushed?1:0);
+				*StreamLabel, NumFrames, NumChannels, SampleRate, bPushed ?1 :0);
 		}
 	}
 }
@@ -189,7 +209,7 @@ TArray<FName> UO3DSBroadcastAudioCaptureComponent::GetAvailableInputDeviceOption
 	TArray<Audio::FCaptureDeviceInfo> Devices;
 	if (Temp.GetCaptureDevicesAvailable(Devices) >0)
 	{
-		for (int32 i=0;i<Devices.Num();++i)
+		for (int32 i =0; i < Devices.Num(); ++i)
 		{
 			Options.Add(FName(*Devices[i].DeviceName));
 		}
@@ -204,7 +224,7 @@ int32 UO3DSBroadcastAudioCaptureComponent::ResolveDeviceIndexFromName(const FNam
 	TArray<Audio::FCaptureDeviceInfo> Devices;
 	if (Temp.GetCaptureDevicesAvailable(Devices) >0)
 	{
-		for (int32 i=0;i<Devices.Num();++i)
+		for (int32 i =0; i < Devices.Num(); ++i)
 		{
 			if (Devices[i].DeviceName.Equals(Name.ToString(), ESearchCase::IgnoreCase))
 			{

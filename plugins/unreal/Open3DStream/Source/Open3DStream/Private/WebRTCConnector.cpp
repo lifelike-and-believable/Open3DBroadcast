@@ -30,12 +30,12 @@
 #include <rtc/rtcpsrreporter.hpp>
 #include <rtc/rtcpnackresponder.hpp>
 
-#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+#if O3DS_WITH_OPUS
 // libopus header is provided at ThirdParty/include/opus.h
 #include <opus.h>
 #endif
 
-#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+#if O3DS_WITH_OPUS
 using OpusEncoderT = OpusEncoder;
 using OpusDecoderT = OpusDecoder;
 #else
@@ -98,6 +98,7 @@ const char* FWebRTCConnector::DataChannelLabel = "Open3DStream";
 // Keep latest desired audio stream label to set on new tracks
 static FString G_O3DS_DesiredAudioMsid;
 
+// Helper to add labeled/unlabeled tracks
 static std::shared_ptr<rtc::Track> AddOpusAudioSendTrackWithLabel(std::shared_ptr<rtc::PeerConnection> PC, int32 BitrateKbps, const FString& StreamLabel)
 {
 	if (!PC)
@@ -122,6 +123,25 @@ static std::shared_ptr<rtc::Track> AddOpusAudioSendTrackWithLabel(std::shared_pt
 	return PC->addTrack(Audio);
 }
 
+// Unlabeled Opus send track helper (single definition)
+static std::shared_ptr<rtc::Track> AddOpusAudioSendTrack(std::shared_ptr<rtc::PeerConnection> PC, int32 BitrateKbps)
+{
+	if (!PC)
+	{
+		return nullptr;
+	}
+	rtc::Description::Audio Audio("audio", rtc::Description::Direction::SendOnly);
+	Audio.addOpusCodec(111);
+	if (BitrateKbps >0)
+	{
+		Audio.setBitrate(BitrateKbps *1000);
+	}
+	uint32 Ssrc =0xA17C1234u; std::string CName = "o3ds"; std::string Msid = "o3ds";
+	Audio.addSSRC(Ssrc, CName, Msid, Msid);
+	return PC->addTrack(Audio);
+}
+
+// ===== Missing methods restored =====
 FWebRTCConnector::FWebRTCConnector()
 	: bIsConnected(false)
 	, bDataChannelOpen(false)
@@ -296,7 +316,7 @@ void FWebRTCConnector::Stop()
 	NextReconnectTimeSeconds =0.0;
 	ReconnectBackoffSeconds =0.0;
 
-#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+#if O3DS_WITH_OPUS
 	DestroyOpus();
 #endif
 }
@@ -420,16 +440,16 @@ void FWebRTCConnector::Tick()
  // Also notify generic remote audio listeners with real stream/subject labels
  if (Rx.PCM.Num() >0)
  {
-		// Convert int16 PCM to float [-1.0, 1.0] for the delegate
+		// Convert int16 PCM to float [-1.0,1.0] for the delegate
 		TArray<float> PCMFloat;
 		PCMFloat.SetNumUninitialized(Rx.PCM.Num());
-		for (int32 i = 0; i < Rx.PCM.Num(); ++i)
+		for (int32 i =0; i < Rx.PCM.Num(); ++i)
 		{
-			PCMFloat[i] = static_cast<float>(Rx.PCM[i]) / 32768.0f;
+			PCMFloat[i] = static_cast<float>(Rx.PCM[i]) /32768.0f;
 		}
 		
 		// Calculate NumFrames from total samples and channels
-		const int32 NumFrames = (Rx.NumChannels > 0) ? (Rx.PCM.Num() / Rx.NumChannels) : 0;
+		const int32 NumFrames = (Rx.NumChannels >0) ? (Rx.PCM.Num() / Rx.NumChannels) :0;
 		
 		// Broadcast with correct parameter order: StreamLabel, SubjectName, float* PCM, NumFrames, NumChannels, SampleRate
 		RemoteAudioDelegate.Broadcast(RxStreamLabel, RxSubjectName, PCMFloat.GetData(), NumFrames, Rx.NumChannels, Rx.SampleRate);
@@ -967,29 +987,6 @@ bool FWebRTCConnector::ParseWebRtcUrl(const FString& Url, FString& OutHost, uint
 	return true;
 }
 
-static std::shared_ptr<rtc::Track> AddOpusAudioSendTrack(std::shared_ptr<rtc::PeerConnection> PC, int32 BitrateKbps)
-{
-	if (!PC)
-	{
-		return nullptr;
-	}
-	// Build an audio media description with Opus payload111
-	rtc::Description::Audio Audio("audio", rtc::Description::Direction::SendOnly);
-	Audio.addOpusCodec(111);
-	if (BitrateKbps >0)
-	{
-		Audio.setBitrate(BitrateKbps *1000);
-	}
-	// Ensure a deterministic SSRC even without a provided stream label so RTP handlers work
-	{
-		uint32 Ssrc = 0xA17C1234u; // stable default SSRC for unlabeled audio
-		std::string CName = "o3ds";
-		std::string Msid = "o3ds";
-		Audio.addSSRC(Ssrc, CName, Msid, Msid);
-	}
-	return PC->addTrack(Audio);
-}
-
 bool FWebRTCConnector::SetupPeerConnection()
 {
 	try
@@ -1033,7 +1030,7 @@ bool FWebRTCConnector::SetupPeerConnection()
 			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Incoming audio track detected"));
 			Track->onFrame([this](rtc::binary data, rtc::FrameInfo info)
 			{
-#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+#if O3DS_WITH_OPUS
 				const uint8* Enc = reinterpret_cast<const uint8*>(data.data());
 				int32 EncSize = (int32)data.size();
 				int ChannelsFromPkt =1;
@@ -1132,7 +1129,7 @@ bool FWebRTCConnector::SetupPeerConnection()
 			CreateDataChannel();
 		}
 
-#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+#if O3DS_WITH_OPUS
 		// If audio sending is enabled, add Opus audio track now (respect stream label if provided)
 		if (bAudioSendEnabled && !AudioTrack)
 		{
@@ -1152,18 +1149,18 @@ bool FWebRTCConnector::SetupPeerConnection()
 			{
 				UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Opus audio track added (stream=%s)"), *AudioRt.Config.StreamLabel);
 				// Install RTP/RTCP media handler chain for Opus
-				uint32 Ssrc = 0;
+				uint32 Ssrc =0;
 				std::string CName = "o3ds";
 				// Derive SSRC to match what we set in the description
 				if (!AudioRt.Config.StreamLabel.IsEmpty())
 				{
-					Ssrc = 0xA17C0000u ^ FCrc::StrCrc32(*AudioRt.Config.StreamLabel);
+					Ssrc =0xA17C0000u ^ FCrc::StrCrc32(*AudioRt.Config.StreamLabel);
 				}
 				else
 				{
-					Ssrc = 0xA17C1234u;
+					Ssrc =0xA17C1234u;
 				}
-				auto RtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(Ssrc, CName, 111, rtc::OpusRtpPacketizer::DefaultClockRate);
+				auto RtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(Ssrc, CName,111, rtc::OpusRtpPacketizer::DefaultClockRate);
 				auto Packetizer = std::make_shared<rtc::OpusRtpPacketizer>(RtpCfg);
 				auto SrReporter = std::make_shared<rtc::RtcpSrReporter>(RtpCfg);
 				Packetizer->addToChain(SrReporter);
@@ -1303,7 +1300,7 @@ void FWebRTCConnector::CleanupPeerConnection()
 	}
 
 	AudioRt.bTrackReady = false;
-	AudioRt.NextSendRetryTimeSeconds = 0.0;
+	AudioRt.NextSendRetryTimeSeconds =0.0;
 
 	if (this->PeerConnection)
 	{
@@ -1414,15 +1411,15 @@ void FWebRTCConnector::MaybeCreateOffer(const TCHAR* Context)
 
 void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 {
-	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: EnableAudioSend sr=%d ch=%d br=%d frameMs=%d stream=%s"),
+	UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: EnableAudioSend sr=%d ch=%d br=%d frameMs=%d stream=%s"),
 		InConfig.SampleRate, InConfig.NumChannels, InConfig.BitrateKbps, InConfig.FrameSizeMs, *InConfig.StreamLabel);
 	AudioRt.Config = InConfig;
 	AudioRt.FrameSizeSamples = FMath::Max(1, (InConfig.SampleRate * InConfig.FrameSizeMs) /1000);
 	AudioRt.Timestamp =0;
 	AudioRt.bTrackReady = false;
-	AudioRt.NextSendRetryTimeSeconds = 0.0;
+	AudioRt.NextSendRetryTimeSeconds =0.0;
 	bAudioSendEnabled = true;
-#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+#if O3DS_WITH_OPUS
 	EnsureOpusEncoder(InConfig);
 	// If PC already exists, add audio track and renegotiate on client
 	if (PeerConnection && !AudioTrack)
@@ -1443,17 +1440,17 @@ void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 		if (AudioTrack)
 		{
 			// Install RTP/RTCP media handler chain and open/close gating, same as in SetupPeerConnection path
-			uint32 Ssrc = 0;
+			uint32 Ssrc =0;
 			std::string CName = "o3ds";
 			if (!InConfig.StreamLabel.IsEmpty())
 			{
-				Ssrc = 0xA17C0000u ^ FCrc::StrCrc32(*InConfig.StreamLabel);
+				Ssrc =0xA17C0000u ^ FCrc::StrCrc32(*InConfig.StreamLabel);
 			}
 			else
 			{
-				Ssrc = 0xA17C1234u;
+				Ssrc =0xA17C1234u;
 			}
-			auto RtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(Ssrc, CName, 111, rtc::OpusRtpPacketizer::DefaultClockRate);
+			auto RtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(Ssrc, CName,111, rtc::OpusRtpPacketizer::DefaultClockRate);
 			auto Packetizer = std::make_shared<rtc::OpusRtpPacketizer>(RtpCfg);
 			auto SrReporter = std::make_shared<rtc::RtcpSrReporter>(RtpCfg);
 			Packetizer->addToChain(SrReporter);
@@ -1493,16 +1490,16 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 {
 	if (!bAudioSendEnabled)
 	{
-		if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+		if (CVarO3DSWebRTCVerbose->GetInt() !=0)
 		{
 			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 called but audio send disabled"));
 		}
 		return false;
 	}
-#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+#if O3DS_WITH_OPUS
 	// Backoff if the last send failed due to track not open
 	const double Now = FPlatformTime::Seconds();
-	if (AudioRt.NextSendRetryTimeSeconds > 0.0 && Now < AudioRt.NextSendRetryTimeSeconds)
+	if (AudioRt.NextSendRetryTimeSeconds >0.0 && Now < AudioRt.NextSendRetryTimeSeconds)
 	{
 		return false;
 	}
@@ -1521,8 +1518,8 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 	}
 	if (!LocalPC || !bConnected || !bHaveDescriptions)
 	{
-		static double sLastWarn = 0.0; const double nowWarn = FPlatformTime::Seconds();
-		if (nowWarn - sLastWarn > 1.0)
+		static double sLastWarn =0.0; const double nowWarn = FPlatformTime::Seconds();
+		if (nowWarn - sLastWarn >1.0)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("WebRTC: Audio not ready (connected=%d localDesc=%d remoteDesc=%d pc=%d), deferring frames"),
 				bConnected?1:0, bLocalDescriptionSet?1:0, bRemoteDescriptionSet?1:0, LocalPC?1:0);
@@ -1534,8 +1531,8 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 	if (LocalAudioTrack && !LocalAudioTrack->isOpen())
 	{
 		AudioRt.bTrackReady = false;
-		AudioRt.NextSendRetryTimeSeconds = Now + 0.25;
-		if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+		AudioRt.NextSendRetryTimeSeconds = Now +0.25;
+		if (CVarO3DSWebRTCVerbose->GetInt() !=0)
 		{
 			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 deferred (track not open)"));
 		}
@@ -1560,27 +1557,27 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 				if (AudioTrack)
 				{
 					// Reinstall media handler chain on re-attach
-					uint32 Ssrc = 0;
+					uint32 Ssrc =0;
 					std::string CName = "o3ds";
 					if (!AudioRt.Config.StreamLabel.IsEmpty())
 					{
-						Ssrc = 0xA17C0000u ^ FCrc::StrCrc32(*AudioRt.Config.StreamLabel);
+						Ssrc =0xA17C0000u ^ FCrc::StrCrc32(*AudioRt.Config.StreamLabel);
 					}
 					else
 					{
-						Ssrc = 0xA17C1234u;
+						Ssrc =0xA17C1234u;
 					}
-					auto RtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(Ssrc, CName, 111, rtc::OpusRtpPacketizer::DefaultClockRate);
+					auto RtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(Ssrc, CName,111, rtc::OpusRtpPacketizer::DefaultClockRate);
 					auto Packetizer = std::make_shared<rtc::OpusRtpPacketizer>(RtpCfg);
 					auto SrReporter = std::make_shared<rtc::RtcpSrReporter>(RtpCfg);
 					Packetizer->addToChain(SrReporter);
 					auto NackResponder = std::make_shared<rtc::RtcpNackResponder>();
 					Packetizer->addToChain(NackResponder);
 					AudioTrack->setMediaHandler(Packetizer);
-					AudioTrack->onOpen([this]()
+					LocalAudioTrack->onOpen([this]()
 					{
 						AudioRt.bTrackReady = true;
-						if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+						if (CVarO3DSWebRTCVerbose->GetInt() !=0)
 						{
 							UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Audio track opened"));
 						}
@@ -1588,7 +1585,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 					AudioTrack->onClosed([this]()
 					{
 						AudioRt.bTrackReady = false;
-						if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+						if (CVarO3DSWebRTCVerbose->GetInt() !=0)
 						{
 							UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Audio track closed"));
 						}
@@ -1603,7 +1600,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 		if (!LocalAudioTrack)
 		{
 			// Avoid tight loop
-			AudioRt.NextSendRetryTimeSeconds = Now + 0.25;
+			AudioRt.NextSendRetryTimeSeconds = Now +0.25;
 			return false;
 		}
 	}
@@ -1611,7 +1608,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 	{
 		return false;
 	}
-	if (!Samples || NumSamples <= 0)
+	if (!Samples || NumSamples <=0)
 	{
 		return true; // nothing
 	}
@@ -1619,26 +1616,26 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 	int32 Old = AudioRt.Pending.Num();
 	AudioRt.Pending.AddUninitialized(NumSamples);
 	FMemory::Memcpy(AudioRt.Pending.GetData() + Old, Samples, sizeof(int16) * NumSamples);
-	if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+	if (CVarO3DSWebRTCVerbose->GetInt() !=0)
 	{
 		UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 appended samples=%d pending=%d frameSamples=%d"), NumSamples, AudioRt.Pending.Num(), AudioRt.FrameSizeSamples * AudioRt.Config.NumChannels);
 	}
 
 	const int32 FrameSamplesTotal = AudioRt.FrameSizeSamples * AudioRt.Config.NumChannels;
-	// Step in 48kHz RTP clock regardless of source sample rate
-	const uint32 Step48k = (uint32)((int64)AudioRt.Config.FrameSizeMs * 48000 / 1000);
+	// Step in48kHz RTP clock regardless of source sample rate
+	const uint32 Step48k = (uint32)((int64)AudioRt.Config.FrameSizeMs *48000 /1000);
 	uint8 Encoded[4000];
 	while (AudioRt.Pending.Num() >= FrameSamplesTotal)
 	{
 		int16* FramePtr = AudioRt.Pending.GetData();
 		int EncBytes = opus_encode(OpusEnc, FramePtr, AudioRt.FrameSizeSamples, Encoded, sizeof(Encoded));
-		if (EncBytes > 0)
+		if (EncBytes >0)
 		{
 			// Send over audio track
 			rtc::binary Packet;
 			Packet.resize(EncBytes);
-			for (int i = 0; i < EncBytes; ++i) Packet[i] = static_cast<std::byte>(Encoded[i]);
-			// RTP timestamp increments in 48kHz clock
+			for (int i =0; i < EncBytes; ++i) Packet[i] = static_cast<std::byte>(Encoded[i]);
+			// RTP timestamp increments in48kHz clock
 			rtc::FrameInfo FI{ (uint32)AudioRt.Timestamp };
 			AudioRt.Timestamp += Step48k;
 			if (LocalAudioTrack)
@@ -1652,7 +1649,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 					UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: sendFrame threw exception: %s"), *FString(ANSI_TO_TCHAR(e.what())));
 					// Backoff and mark not ready; try to re-add track on next attempt
 					AudioRt.bTrackReady = false;
-					AudioRt.NextSendRetryTimeSeconds = FPlatformTime::Seconds() + 0.25;
+					AudioRt.NextSendRetryTimeSeconds = FPlatformTime::Seconds() +0.25;
 					return false;
 				}
 			}
@@ -1667,11 +1664,11 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 		}
 		// Pop consumed samples
 		const int32 Remaining = AudioRt.Pending.Num() - FrameSamplesTotal;
-		if (Remaining > 0)
+		if (Remaining >0)
 		{
 			FMemory::Memmove(AudioRt.Pending.GetData(), AudioRt.Pending.GetData() + FrameSamplesTotal, Remaining * sizeof(int16));
 		}
-		AudioRt.Pending.SetNum(Remaining, /*bAllowShrinking*/false);
+		AudioRt.Pending.SetNum(Remaining, EAllowShrinking::No);
 	}
 	return true;
 #else
@@ -1684,7 +1681,7 @@ void FWebRTCConnector::SetAudioReceiveCallback(TFunction<void(const int16* PCM, 
 	AudioRxCallback = MoveTemp(Callback);
 }
 
-#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+#if O3DS_WITH_OPUS
 bool FWebRTCConnector::EnsureOpusEncoder(const FAudioConfig& In)
 {
 	if (OpusEnc)

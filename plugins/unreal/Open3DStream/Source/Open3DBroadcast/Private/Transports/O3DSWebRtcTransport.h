@@ -59,15 +59,16 @@ static TAutoConsoleVariable<int32> CVarO3DSWebRtcDebugToneFrameMs(
     TEXT("Debug tone frame duration in milliseconds (typical 10 or 20)."),
     ECVF_Default);
 
-// Temporary audio configuration while migrating to libwebrtc native audio tracks
+// Temporary audio configuration type retained for API compatibility.
+// Note: Currently unused; native audio track support is not implemented in this transport.
 struct FO3DSWebRTCAudioConfig
 {
     bool bEnable = false;
-    FString DeviceHint;    // substring filter for device name (optional)
+    FString DeviceHint;
     int32 SampleRate = 48000;
-    int32 NumChannels = 1; // 1=mono, 2=stereo
+    int32 NumChannels = 1;
     int32 BitrateKbps = 32;
-    int32 PlayoutDelayMs = 0; // extra receiver-side buffering target
+    int32 PlayoutDelayMs = 0;
 };
 
 // WebRTC DataChannel transport (optional/beta). Uses libdatachannel via Open3DStream wrapper.
@@ -78,12 +79,8 @@ public:
     explicit FO3DSWebRtcTransport(EO3DSWebRtcBackend InBackend) : Backend(InBackend) {}
     virtual ~FO3DSWebRtcTransport() override { Stop(); }
 
-    // Configure (future) native audio track parameters prior to Start.
-    // Note: Currently a no-op placeholder until libwebrtc migration lands.
-    void SetAudioConfig(const FO3DSWebRTCAudioConfig& In)
-    {
-        AudioConfig = In;
-    }
+    // Retained for source compatibility; currently a no-op until native audio tracks are implemented.
+    void SetAudioConfig(const FO3DSWebRTCAudioConfig& /*In*/) {}
 
     virtual bool Start(const FString& InUrl, const FString& InProtocol, const FString& InKey) override
     {
@@ -91,7 +88,6 @@ public:
         Channel = MakeUnique<FO3DSWebRTCDataChannel>();
 
         // Ensure complementary WebRTC role is encoded in the URL query (client/server)
-        // LiveLink receiver passes explicit role to its connector; this side must mirror via ?role=
         FString EffectiveUrl = Url;
         const bool bUrlHasRole = EffectiveUrl.Contains(TEXT("role="), ESearchCase::IgnoreCase);
         const bool bIsServer = Url.Contains(TEXT("role=server"), ESearchCase::IgnoreCase) || Protocol.Contains(TEXT("WebRTC Server")) || Protocol.Contains(TEXT("WebRTCServer"));
@@ -123,7 +119,7 @@ public:
         const bool bStarted = Channel->Start(EffectiveUrl, ReceiverBackend);
         if (CVarO3DSWebRtcTransportDebug->GetInt() != 0)
         {
-            UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[WebRTC] Transport Start url=%s backend=%d result=%s"), 
+            UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[WebRTC] Transport Start url=%s backend=%d result=%s"),
                 *EffectiveUrl, (int)Backend, bStarted?TEXT("true"):TEXT("false"));
         }
         if (!bStarted)
@@ -133,12 +129,7 @@ public:
         LastStateLogTime = 0.0;
         LastPingTime = 0.0;
 
-        // Warn that audio config is not yet active until libwebrtc-based audio track support lands
-        if (AudioConfig.bEnable)
-        {
-            UE_LOG(LogO3DSBroadcast, Warning, TEXT("[WebRTC] Native audio track requested (device='%s', %d Hz, %d ch, %d kbps, delay=%d ms) but not yet implemented in this transport. Audio will be silent."),
-                *AudioConfig.DeviceHint, AudioConfig.SampleRate, AudioConfig.NumChannels, AudioConfig.BitrateKbps, AudioConfig.PlayoutDelayMs);
-        }
+        // Removed: warning about native audio track not implemented.
         return true;
     }
 
@@ -208,6 +199,7 @@ public:
                     LastStateLogTime = Now;
                 }
             }
+
             if (CVarO3DSWebRtcTransportDebugPing->GetInt() != 0 && Channel->IsOpen())
             {
                 const double Now = FPlatformTime::Seconds();
@@ -243,13 +235,12 @@ private:
         const double FrameDurSec = FrameMs / 1000.0;
         if (LastDebugToneTime > 0.0 && (Now - LastDebugToneTime) < FrameDurSec)
         {
-            return; // Not yet time for next frame
+            return;
         }
 
         const int32 Frames = (int32)FMath::RoundToInt((double)SampleRate * FrameDurSec);
         const int32 Samples = Frames * Channels;
 
-        // Generate interleaved PCM16
         TArray<int16> PcmSamples;
         PcmSamples.SetNumUninitialized(Samples);
         const double TwoPiF = 2.0 * PI * (double)Freq;
@@ -265,7 +256,7 @@ private:
         }
 
         // Build minimal metadata: [LabelLen][Label][SubjectLen][Subject]
-        const ANSICHAR* LabelAnsi = "o3ds:mix"; // 8 bytes label
+        const ANSICHAR* LabelAnsi = "o3ds:mix";
         const uint8 LabelLen = 8;
         const uint8 SubjectLen = 0;
 
@@ -286,29 +277,23 @@ private:
         const uint32 PayloadSize = (uint32)Payload.Num();
 
         TArray<uint8> Buf;
-        Buf.Reserve(20 + Payload.Num()); // fixed 20-byte wire header
-        // Write 4-byte magic BE
+        Buf.Reserve(20 + Payload.Num());
         Buf.Add((uint8)((Magic >> 24) & 0xFF));
         Buf.Add((uint8)((Magic >> 16) & 0xFF));
         Buf.Add((uint8)((Magic >> 8) & 0xFF));
         Buf.Add((uint8)(Magic & 0xFF));
-        // Version/Kind/Codec/Flags
         Buf.Add(Version);
         Buf.Add(Kind);
         Buf.Add(Codec);
         Buf.Add(Flags);
-        // TimestampUs BE
         for (int i = 7; i >= 0; --i)
         {
             Buf.Add((uint8)((TsUs >> (i * 8)) & 0xFF));
         }
-        // PayloadSize BE
         Buf.Add((uint8)((PayloadSize >> 24) & 0xFF));
         Buf.Add((uint8)((PayloadSize >> 16) & 0xFF));
         Buf.Add((uint8)((PayloadSize >> 8) & 0xFF));
         Buf.Add((uint8)(PayloadSize & 0xFF));
-
-        // Append payload
         Buf.Append(Payload);
 
         const bool bOk = Channel->Send(Buf.GetData(), Buf.Num());
@@ -318,6 +303,7 @@ private:
         }
         LastDebugToneTime = Now;
     }
+
     FString Url, Key, Protocol;
     TUniquePtr<FO3DSWebRTCDataChannel> Channel;
     FCounters Counters;
@@ -328,7 +314,5 @@ private:
 
     // Backend selection (LibDataChannel or LiveKit)
     EO3DSWebRtcBackend Backend = EO3DSWebRtcBackend::LibDataChannel;
-
-    // Stored audio config for future native audio track support
-    FO3DSWebRTCAudioConfig AudioConfig;
+    // Note: AudioConfig storage removed; native track path is currently unused.
 };

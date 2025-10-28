@@ -5,7 +5,7 @@
 #include "O3DSUnifiedMessage.h"
 #include "O3DSAudioBus.h"
 #include "Open3DStreamSourceSettings.h"
-#include "O3DSWebRTCService.h"
+// #include "O3DSWebRTCService.h" // removed shared singleton
 #include "SocketSubsystem.h"
 #include "Interfaces/IPv4/IPv4Address.h"
 #include "Common/UdpSocketBuilder.h"
@@ -16,15 +16,15 @@
 
 // Debug: one-shot dump of first received non-TCP packet (WebRTC/UDP/NNG)
 static TAutoConsoleVariable<int32> CVarO3DSDumpFirstPacket(
-    TEXT("o3ds.Debug.DumpFirstPacket"),
-    1,
-    TEXT("Dump the first received non-TCP O3DS packet bytes (0=off,1=on)."),
-    ECVF_Default);
+ TEXT("o3ds.Debug.DumpFirstPacket"),
+1,
+ TEXT("Dump the first received non-TCP O3DS packet bytes (0=off,1=on)."),
+ ECVF_Default);
 static bool GDumpedFirstNonTcpPacket = false;
 
 void InDataFunc(void* ptr, void* data, size_t msg)
 {
-	static_cast<O3DSServer*>(ptr)->inData((const uint8*)data, msg);
+ static_cast<O3DSServer*>(ptr)->inData((const uint8*)data, msg);
 }
 
 O3DSServer::O3DSServer()
@@ -59,7 +59,7 @@ static bool ParseTcpUrl(const FString& In, FString& OutIp, int32& OutPort)
 	FString Work = In;
 	if (Work.StartsWith(TEXT("tcp://")))
 	{
-		   Work.RightChopInline(6, EAllowShrinking::No);
+		 Work.RightChopInline(6, EAllowShrinking::No);
 	}
 	int32 Colon = INDEX_NONE;
 	if (!Work.FindChar(':', Colon))
@@ -67,8 +67,8 @@ static bool ParseTcpUrl(const FString& In, FString& OutIp, int32& OutPort)
 		return false;
 	}
 	OutIp = Work.Left(Colon);
-	OutPort = FCString::Atoi(*Work.Mid(Colon + 1));
-	return !OutIp.IsEmpty() && OutPort > 0;
+	OutPort = FCString::Atoi(*Work.Mid(Colon +1));
+	return !OutIp.IsEmpty() && OutPort >0;
 }
 
 bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* Settings)
@@ -82,20 +82,20 @@ bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* S
 	GDumpedFirstNonTcpPacket = false;
 
 	// NNG
-	if (strncmp(sprotocol, "NNG Subscribe", 13) == 0)
+	if (strncmp(sprotocol, "NNG Subscribe",13) ==0)
 	{
 		mServer = new O3DS::AsyncSubscriber();
 	}
-	if (strncmp(sprotocol, "NNG Client", 10) == 0)
+	if (strncmp(sprotocol, "NNG Client",10) ==0)
 	{
 		mServer = new O3DS::AsyncPairClient();
 	}
-	if (strncmp(sprotocol, "NNG Server", 10) == 0)
+	if (strncmp(sprotocol, "NNG Server",10) ==0)
 	{
 		mServer = new O3DS::AsyncPairServer();
 	}
 
-	if (strncmp(sprotocol, "WebRTC Client", 13) == 0)
+	if (strncmp(sprotocol, "WebRTC Client",13) ==0)
 	{
 		// Determine backend from settings (default to LibDataChannel)
 		EO3DSWebRtcBackendReceiver Backend = EO3DSWebRtcBackendReceiver::LibDataChannel;
@@ -112,12 +112,7 @@ bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* S
 			return false;
 		}
 
-		// Register shared connector for audio playback components
-		if (UO3DSWebRTCService::Get())
-		{
-			UO3DSWebRTCService::Get()->SetConnector(mWebRTCConnector);
-            UE_LOG(LogTemp, Log, TEXT("O3DS RX: Registered shared connector for WebRTC Client"));
-		}
+		// Do not register shared connector globally anymore
 
 		mWebRTCConnector->SetDataReceivedCallback([this](const uint8* Data, int32 Size)
 		{
@@ -138,7 +133,7 @@ bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* S
 		}
 	}
 	
-	if (strncmp(sprotocol, "WebRTC Server", 13) == 0)
+	if (strncmp(sprotocol, "WebRTC Server",13) ==0)
 	{
 		// Determine backend from settings (default to LibDataChannel)
 		EO3DSWebRtcBackendReceiver Backend = EO3DSWebRtcBackendReceiver::LibDataChannel;
@@ -155,12 +150,7 @@ bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* S
 			return false;
 		}
 
-		// Register shared connector for audio playback components
-		if (UO3DSWebRTCService::Get())
-		{
-			UO3DSWebRTCService::Get()->SetConnector(mWebRTCConnector);
-            UE_LOG(LogTemp, Log, TEXT("O3DS RX: Registered shared connector for WebRTC Server"));
-		}
+		// Do not register shared connector globally anymore
 
 		mWebRTCConnector->SetDataReceivedCallback([this](const uint8* Data, int32 Size)
 		{
@@ -197,12 +187,12 @@ bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* S
 
 	// UDP
 
-	if (strcmp(sprotocol, "UDP Server") == 0)
+	if (strcmp(sprotocol, "UDP Server") ==0)
 	{
 		FString parseme(surl);
 
 		if (parseme.StartsWith("udp://")) {
-			parseme = parseme.Right(parseme.Len() - 6);
+			parseme = parseme.Right(parseme.Len() -6);
 		}
 
 		if (parseme.StartsWith("tcp://")) {
@@ -214,7 +204,7 @@ bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* S
 		if (parseme.FindChar(':', pos))
 		{
 			FString ip = parseme.Left(pos);
-			FString port = parseme.Right(parseme.Len() - pos - 1);
+			FString port = parseme.Right(parseme.Len() - pos -1);
 
 			FIPv4Address address;
 
@@ -269,7 +259,7 @@ bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* S
 
 	// TCP
 
-	if (strcmp(sprotocol, "TCP Client") == 0)
+	if (strcmp(sprotocol, "TCP Client") ==0)
 	{
 		mState = eState::SYNC;
 		mTcpAnnouncedConnected = false;
@@ -277,7 +267,7 @@ bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* S
 		FString parseme(surl);
 
 		if (parseme.StartsWith("tcp://")) {
-			parseme = parseme.Right(parseme.Len() - 6);
+			parseme = parseme.Right(parseme.Len() -6);
 		}
 
 		// Cache URL parts for retries and use non-blocking connect
@@ -303,7 +293,7 @@ bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* S
 
 		(void)mTcp->Connect(*addr); // may be pending
 		mLastTcpConnectAttempt = FPlatformTime::Seconds();
-		mTcpBackoffAttempt = 0;
+		mTcpBackoffAttempt =0;
 		mGoodTime = FPlatformTime::Seconds(); // Reset timer to avoid immediate "No Data" warning
 		
 		// Provide initial status
@@ -376,18 +366,18 @@ void O3DSServer::inData(const uint8 *msg, size_t len)
 	UE_LOG(LogTemp, Verbose, TEXT("O3DS: Received %d bytes (non-TCP)"), (int32)len);
 
 	// One-shot dump of first packet to verify header
-	if (!GDumpedFirstNonTcpPacket && CVarO3DSDumpFirstPacket->GetInt() != 0)
+	if (!GDumpedFirstNonTcpPacket && CVarO3DSDumpFirstPacket->GetInt() !=0)
 	{
 		GDumpedFirstNonTcpPacket = true;
-		const unsigned char ExpectedHeader[] = "\x00\xff\x03\xfeO3DS-START"; // 14 bytes
-		const int32 DumpN = FMath::Min<int32>((int32)len, 64);
+		const unsigned char ExpectedHeader[] = "\x00\xff\x03\xfeO3DS-START"; //14 bytes
+		const int32 DumpN = FMath::Min<int32>((int32)len,64);
 		FString Hex;
-		Hex.Reserve(DumpN * 3);
-		for (int32 i = 0; i < DumpN; ++i)
+		Hex.Reserve(DumpN *3);
+		for (int32 i =0; i < DumpN; ++i)
 		{
 			Hex += FString::Printf(TEXT("%02X "), msg[i]);
 		}
-		const bool bHeaderMatch = (len >= 14) && (FMemory::Memcmp(msg, ExpectedHeader, 14) == 0);
+		const bool bHeaderMatch = (len >=14) && (FMemory::Memcmp(msg, ExpectedHeader,14) ==0);
 		UE_LOG(LogTemp, Warning, TEXT("O3DS: First non-TCP packet dump: size=%d header_match=%s first_%d_bytes=%s"),
 			(int32)len, bHeaderMatch?TEXT("true"):TEXT("false"), DumpN, *Hex);
 	}
@@ -398,7 +388,7 @@ void O3DSServer::inData(const uint8 *msg, size_t len)
 	{
 		O3DS::FUnifiedHeader Hdr;
 		const uint8* PayloadPtr = nullptr;
-		int32 PayloadSize = 0;
+		int32 PayloadSize =0;
 		if (O3DS::ParseUnifiedMessage(msg, (int32)len, Hdr, PayloadPtr, PayloadSize))
 		{
 			if (Hdr.GetKind() == O3DS::EUnifiedKind::Audio)
@@ -407,29 +397,30 @@ void O3DSServer::inData(const uint8 *msg, size_t len)
 				// [uint8 LabelLen][char Label[LabelLen]][uint8 SubjectLen][char Subject[SubjectLen]] followed by raw PCM16
 				const uint8* P = PayloadPtr;
 				int32 R = PayloadSize;
-				auto ReadByte = [&]() -> int32 { if (R <= 0) return -1; int32 V = *P; ++P; --R; return V; };
+				auto ReadByte = [&]() -> int32 { if (R <=0) return -1; int32 V = *P; ++P; --R; return V; };
 				FString Label, Subject;
 				int32 LabelLen = ReadByte();
-				if (LabelLen >= 0 && R >= LabelLen)
+				if (LabelLen >=0 && R >= LabelLen)
 				{
 					Label = FString(UTF8_TO_TCHAR(reinterpret_cast<const char*>(P))).Left(LabelLen);
 					P += LabelLen; R -= LabelLen;
 				}
 				int32 SubjectLen = ReadByte();
-				if (SubjectLen >= 0 && R >= SubjectLen)
+				if (SubjectLen >=0 && R >= SubjectLen)
 				{
 					Subject = FString(UTF8_TO_TCHAR(reinterpret_cast<const char*>(P))).Left(SubjectLen);
 					P += SubjectLen; R -= SubjectLen;
 				}
 
 				O3DS::FAudioFrameMeta Meta;
+				Meta.SourceGuid = FGuid(); // default for single-source; will be set by source when available
 				Meta.StreamLabel = Label;
 				Meta.SubjectName = Subject;
-				Meta.NumChannels = 1; // default mono; future: encode channels
-				Meta.SampleRate = 48000; // default
-				Meta.TimestampSec = (double)Hdr.TimestampUs() / 1e6;
+				Meta.NumChannels =1; // default mono; future: encode channels
+				Meta.SampleRate =48000; // default
+				Meta.TimestampSec = (double)Hdr.TimestampUs() /1e6;
 
-				if (Hdr.GetCodec() == O3DS::EUnifiedCodec::PCM16 && R > 0)
+				if (Hdr.GetCodec() == O3DS::EUnifiedCodec::PCM16 && R >0)
 				{
 					FO3DSAudioBus::PublishPcm16(Meta, P, R);
 					return; // handled
@@ -464,7 +455,7 @@ void O3DSServer::tick()
 	const double Now = FPlatformTime::Seconds();
 	
 	// TCP connection management
-	if (!mTcpIp.IsEmpty() && mTcpPort > 0)
+	if (!mTcpIp.IsEmpty() && mTcpPort >0)
 	{
 		ESocketConnectionState ConnState = ESocketConnectionState::SCS_NotConnected;
 		
@@ -482,18 +473,18 @@ void O3DSServer::tick()
 					OnState.ExecuteIfBound(LOCTEXT("TCPConnected", "TCP Connected"), false);
 					mTcpAnnouncedConnected = true;
 					mState = eState::SYNC; // reset parser on (re)connect
-					mPtr = 0;
-					mTcpBackoffAttempt = 0;
+					mPtr =0;
+					mTcpBackoffAttempt =0;
 					mGoodTime = Now; // Reset data timer on connection
 				}
 				
 				// If we haven't received data in a while and are connected, 
-				// the connection might be dead - try a 0-byte read to probe it
-				if (Now - mGoodTime > 2.0)
+				// the connection might be dead - try a0-byte read to probe it
+				if (Now - mGoodTime >2.0)
 				{
-					int32 Dummy = 0;
+					int32 Dummy =0;
 					uint8 ProbeBuffer;
-					if (!mTcp->Recv(&ProbeBuffer, 0, Dummy))
+					if (!mTcp->Recv(&ProbeBuffer,0, Dummy))
 					{
 						ESocketErrors Err = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->GetLastErrorCode();
 						// If we get an actual error (not just EWOULDBLOCK), the connection is dead
@@ -510,18 +501,18 @@ void O3DSServer::tick()
 							mTcpAnnouncedConnected = false;
 							ConnState = ESocketConnectionState::SCS_NotConnected;
 							mState = eState::SYNC;
-							mPtr = 0;
-							mLastTcpConnectAttempt = 0.0; // Allow immediate reconnection
+							mPtr =0;
+							mLastTcpConnectAttempt =0.0; // Allow immediate reconnection
 							
 							UE_LOG(LogTemp, Warning, TEXT("O3DS: Socket destroyed, will attempt reconnection"));
 						}
 					}
 				}
 				
-				// Fallback: if no data for 5 seconds, force reconnection even if probe didn't detect error
-				if (Now - mGoodTime > 5.0)
+				// Fallback: if no data for5 seconds, force reconnection even if probe didn't detect error
+				if (Now - mGoodTime >5.0)
 				{
-					UE_LOG(LogTemp, Warning, TEXT("O3DS: No data for 5+ seconds, forcing reconnection"));
+					UE_LOG(LogTemp, Warning, TEXT("O3DS: No data for5+ seconds, forcing reconnection"));
 					
 					OnState.ExecuteIfBound(FText::Format(LOCTEXT("TCPTimeout", "TCP Connection timeout, reconnecting to {0}:{1}..."), 
 						FText::FromString(mTcpIp), FText::AsNumber(mTcpPort)), true);
@@ -532,12 +523,12 @@ void O3DSServer::tick()
 					mTcpAnnouncedConnected = false;
 					ConnState = ESocketConnectionState::SCS_NotConnected;
 					mState = eState::SYNC;
-					mPtr = 0;
-					mLastTcpConnectAttempt = 0.0; // Allow immediate reconnection
+					mPtr =0;
+					mLastTcpConnectAttempt =0.0; // Allow immediate reconnection
 				}
 				
 				// Show "No Data" warning if we haven't detected a dead connection
-				if (!mNoDataFlag && Now - mGoodTime > 1.0)
+				if (!mNoDataFlag && Now - mGoodTime >1.0)
 				{
 					UE_LOG(LogTemp, Warning, TEXT("O3DS: No data for %.1fs, socket state=%d"), Now - mGoodTime, (int32)ConnState);
 					OnState.ExecuteIfBound(LOCTEXT("NoData", "No Data"), true);
@@ -557,7 +548,7 @@ void O3DSServer::tick()
 				mTcp = nullptr;
 				mTcpAnnouncedConnected = false;
 				mState = eState::SYNC; // reset parser state
-				mPtr = 0;
+				mPtr =0;
 				
 				// Announce if this was an unexpected disconnection (not initial connection failure)
 				if (bWasConnected)
@@ -565,7 +556,7 @@ void O3DSServer::tick()
 					OnState.ExecuteIfBound(FText::Format(LOCTEXT("TCPDisconnected", "TCP Disconnected from {0}:{1}, reconnecting..."), 
 						FText::FromString(mTcpIp), FText::AsNumber(mTcpPort)), true);
 					// Reset backoff to allow quick reconnection after unexpected disconnect
-					mLastTcpConnectAttempt = 0.0;
+					mLastTcpConnectAttempt =0.0;
 				}
 			}
 			// If pending connection, keep waiting without recreating socket
@@ -574,7 +565,7 @@ void O3DSServer::tick()
 		// Attempt (re)connect if no socket and backoff elapsed
 		if (!mTcp)
 		{
-			const double Delay = FMath::Min(5.0, FMath::Pow(2.0, (double)FMath::Clamp(mTcpBackoffAttempt, 0, 5)) * 0.1);
+			const double Delay = FMath::Min(5.0, FMath::Pow(2.0, (double)FMath::Clamp(mTcpBackoffAttempt,0,5)) *0.1);
 			const double TimeSinceLastAttempt = Now - mLastTcpConnectAttempt;
 			
 			UE_LOG(LogTemp, Verbose, TEXT("O3DS: No socket - delay=%.2fs, time_since_last=%.2fs, backoff_attempt=%d"), 
@@ -582,7 +573,7 @@ void O3DSServer::tick()
 			
 			if (TimeSinceLastAttempt > Delay)
 			{
-				UE_LOG(LogTemp, Log, TEXT("O3DS: Attempting reconnection to %s:%d (attempt %d)"), *mTcpIp, mTcpPort, mTcpBackoffAttempt + 1);
+				UE_LOG(LogTemp, Log, TEXT("O3DS: Attempting reconnection to %s:%d (attempt %d)"), *mTcpIp, mTcpPort, mTcpBackoffAttempt +1);
 				
 				mLastTcpConnectAttempt = Now;
 				
@@ -605,7 +596,7 @@ void O3DSServer::tick()
 				++mTcpBackoffAttempt;
 				
 				// Only show retry message if we've had multiple failures (not after a successful connection)
-				if (mTcpBackoffAttempt > 3 && mTcpBackoffAttempt % 5 == 0)
+				if (mTcpBackoffAttempt >3 && mTcpBackoffAttempt %5 ==0)
 				{
 					OnState.ExecuteIfBound(FText::Format(LOCTEXT("TCPRetrying", "TCP Reconnecting to {0}:{1}... (attempt {2})"), 
 						FText::FromString(mTcpIp), FText::AsNumber(mTcpPort), FText::AsNumber(mTcpBackoffAttempt)), false);
@@ -618,30 +609,30 @@ void O3DSServer::tick()
 		{
 			while (1)
 			{
-				int32 read = 0;
+				int32 read =0;
 
 				if (mState == eState::SYNC)
 				{
-					mPtr = 0;
+					mPtr =0;
 
 					if (!ReadTcp(1))
 						return;
 
-					if (mBuffer[0] != 0x00) continue;
+					if (mBuffer[0] !=0x00) continue;
 
 					bool ok = true;
-					for (int i = 1; i < 14; i++)
+					for (int i =1; i <14; i++)
 					{
 						if (!ReadTcp(i+1))
 							return;
 						if (mBuffer[i] != header[i]) {
-							ok = false;  break;
+							ok = false; break;
 						}
 					}
 					if (!ok) 
 					{
 						// Reset to start sync search over
-						mPtr = 0;
+						mPtr =0;
 						continue;
 					}
 
@@ -650,17 +641,17 @@ void O3DSServer::tick()
 
 				if (mState == eState::HEADER)
 				{
-					while (mPtr < 18)
+					while (mPtr <18)
 					{
 						if (!ReadTcp(18))
 							return;
 					}
 
-					if (strncmp((char*)mBuffer, (char*)header, 14) != 0)
+					if (strncmp((char*)mBuffer, (char*)header,14) !=0)
 					{
 						OnState.ExecuteIfBound(LOCTEXT("MalformedData", "Malformed Data"), true);
 						mState = eState::SYNC;
-						mPtr = 0;
+						mPtr =0;
 						continue;
 					}
 					mState = eState::DATA;
@@ -668,32 +659,32 @@ void O3DSServer::tick()
 
 				if (mState == eState::DATA)
 				{
-					bucketSize = *(uint32_t*)(mBuffer + 14);
+					bucketSize = *(uint32_t*)(mBuffer +14);
 
-					if (bucketSize > 1024 * 50)
+					if (bucketSize >1024 *50)
 					{
 						OnState.ExecuteIfBound(LOCTEXT("MalformedData", "Malformed Data"), true);
 						mState = eState::SYNC;
-						mPtr = 0;
+						mPtr =0;
 						continue;
 					}
 
-					while (mPtr < bucketSize + 18)
+					while (mPtr < bucketSize +18)
 					{
-						if (!ReadTcp(bucketSize + 18))
+						if (!ReadTcp(bucketSize +18))
 							return;
 					}
 
 
 					// Process
 					TArray<uint8> Data;
-					Data.Append((uint8*)(mBuffer + 18), bucketSize);
+					Data.Append((uint8*)(mBuffer +18), bucketSize);
 					OnData.Execute(Data);
 					// Throttle 'Receiving Data' status: rely on NoData warning and suppress per-frame status spam
 
 					mState = eState::HEADER;
 
-					mPtr = 0;
+					mPtr =0;
 				}
 			}
 		}
@@ -702,7 +693,7 @@ void O3DSServer::tick()
 	{
 		// Log if TCP info is missing
 		static bool bLoggedMissingInfo = false;
-		if (!bLoggedMissingInfo && (!mTcpIp.IsEmpty() || mTcpPort > 0))
+		if (!bLoggedMissingInfo && (!mTcpIp.IsEmpty() || mTcpPort >0))
 		{
 			UE_LOG(LogTemp, Warning, TEXT("O3DS: TCP info incomplete - IP='%s', Port=%d"), *mTcpIp, mTcpPort);
 			bLoggedMissingInfo = true;
@@ -713,7 +704,7 @@ void O3DSServer::tick()
 	if (mServer || mWebRTCConnector || mUdp)
 	{
 		bool bHasActiveConnection = (mServer != nullptr) || (mWebRTCConnector != nullptr) || (mUdp != nullptr);
-		if (bHasActiveConnection && !mNoDataFlag && Now - mGoodTime > 1.0)
+		if (bHasActiveConnection && !mNoDataFlag && Now - mGoodTime >1.0)
 		{
 			OnState.ExecuteIfBound(LOCTEXT("NoData", "No Data"), true);
 			mNoDataFlag = true;
@@ -732,10 +723,10 @@ bool O3DSServer::ReadTcp(size_t len)
 
 	if (mBuffer == nullptr)
 	{
-		size_t sz = len < 4096 ? 4096 : len;
+		size_t sz = len <4096 ?4096 : len;
 		mBuffer = (uint8*)malloc(sz);
 		mBufferSize = sz;
-		mPtr = 0;
+		mPtr =0;
 	}
 	else
 	{
@@ -746,7 +737,7 @@ bool O3DSServer::ReadTcp(size_t len)
 		}
 	}
 
-	int32 read = 0;
+	int32 read =0;
 	if (!mTcp->Recv(mBuffer + mPtr, len - mPtr, read))
 	{
 		ESocketErrors Err = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->GetLastErrorCode();
@@ -771,20 +762,20 @@ bool O3DSServer::ReadTcp(size_t len)
 		mTcp = nullptr;
 		mTcpAnnouncedConnected = false;
 		mState = eState::SYNC; // reset parser state on error
-		mPtr = 0;
+		mPtr =0;
 		// Reset backoff to allow immediate reconnection attempt after disconnect
-		mLastTcpConnectAttempt = 0.0;
+		mLastTcpConnectAttempt =0.0;
 		return false;
 	}
 
-	if (read > 0)
+	if (read >0)
 	{
 		mGoodTime = FPlatformTime::Seconds();
 		mNoDataFlag = false;
 	}
 
 	mPtr += read;
-	return read != 0;
+	return read !=0;
 }
 
 #undef LOCTEXT_NAMESPACE

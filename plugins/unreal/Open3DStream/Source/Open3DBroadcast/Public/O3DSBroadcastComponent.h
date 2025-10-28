@@ -252,7 +252,9 @@ protected:
  virtual void BeginPlay() override;
  virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
  virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+#if WITH_EDITORONLY_DATA
  virtual void PostLoad() override;
+#endif
  virtual void OnRegister() override;
  virtual void PostInitProperties() override;
 
@@ -356,5 +358,5 @@ private:
  // Lifecycle hooks
  #if WITH_EDITOR
  virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
- #endif
+ #endif 	
 };

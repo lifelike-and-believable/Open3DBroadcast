@@ -2,97 +2,89 @@
 
 #include "Open3DWebRTCDataChannel.h"
 #include "IWebRTCConnector.h"
-#include "O3DSWebRTCService.h"
-#include "Open3DStreamSourceSettings.h"    // For EO3DSWebRtcBackendReceiver enum
+#include "Open3DStreamSourceSettings.h" // For EO3DSWebRtcBackendReceiver enum
 // For TQueue and EQueueMode
 #include "Containers/Queue.h"
 
 class FO3DSWebRTCDataChannel::FImpl
 {
 public:
-    FImpl() = default;
+ FImpl() = default;
 
-    bool Start(const FString& Url, EO3DSWebRtcBackendReceiver Backend)
-    {
-        // Create connector via factory using provided backend
-        Connector = CreateWebRTCConnector(Backend);
-        if (!Connector)
-        {
-            UE_LOG(LogTemp, Error, TEXT("Failed to create WebRTC connector for backend %d"), (int)Backend);
-            return false;
-        }
+ bool Start(const FString& Url, EO3DSWebRtcBackendReceiver Backend)
+ {
+ // Create connector via factory using provided backend
+ Connector = CreateWebRTCConnector(Backend);
+ if (!Connector)
+ {
+ UE_LOG(LogTemp, Error, TEXT("Failed to create WebRTC connector for backend %d"), (int)Backend);
+ return false;
+ }
 
-        // Register this connector as the shared instance for audio components
-        if (UO3DSWebRTCService::Get())
-        {
-            UO3DSWebRTCService::Get()->SetConnector(Connector);
-        }
+ // Default role client unless URL has role=server
+ const bool bServer = Url.Contains(TEXT("role=server"));
+ const bool bOk = Connector->Start(Url, bServer);
+ UE_LOG(LogTemp, Log, TEXT("O3DS WebRTCDataChannel: Start url=%s backend=%d role=%s ok=%d"),
+ *Url, (int)Backend, bServer?TEXT("server"):TEXT("client"), bOk?1:0);
+ if (!bOk)
+ {
+ return false;
+ }
+ Connector->SetDataReceivedCallback([this](const uint8* Data, int32 Size)
+ {
+ // Enqueue for game-thread delivery
+ TArray<uint8> Copy; Copy.Append(Data, Size);
+ Received.Enqueue(MoveTemp(Copy));
+ });
+ return true;
+ }
 
-        // Default role client unless URL has role=server
-        const bool bServer = Url.Contains(TEXT("role=server"));
-        const bool bOk = Connector->Start(Url, bServer);
-        UE_LOG(LogTemp, Log, TEXT("O3DS WebRTCDataChannel: Start url=%s backend=%d role=%s ok=%d"),
-            *Url, (int)Backend, bServer?TEXT("server"):TEXT("client"), bOk?1:0);
-        if (!bOk)
-        {
-            return false;
-        }
-        Connector->SetDataReceivedCallback([this](const uint8* Data, int32 Size)
-        {
-            // Enqueue for game-thread delivery
-            TArray<uint8> Copy; Copy.Append(Data, Size);
-            Received.Enqueue(MoveTemp(Copy));
-        });
-        return true;
-    }
+ void Stop()
+ {
+ if (Connector)
+ {
+ UE_LOG(LogTemp, Log, TEXT("O3DS WebRTCDataChannel: Stop"));
+ Connector->Stop();
+ Connector.Reset();
+ }
+ }
 
-    void Stop()
-    {
-        if (Connector)
-        {
-            UE_LOG(LogTemp, Log, TEXT("O3DS WebRTCDataChannel: Stop"));
-            Connector->Stop();
-            Connector.Reset();
-        }
-    }
+ bool Send(const uint8* Data, int32 Size)
+ {
+ return Connector ? Connector->SendDataLossy(Data, Size) : false;
+ }
 
-    bool Send(const uint8* Data, int32 Size)
-    {
-        return Connector ? Connector->SendDataLossy(Data, Size) : false;
-    }
+ bool IsConnected() const
+ {
+ return Connector ? Connector->IsConnected() : false;
+ }
 
-    bool IsConnected() const
-    {
-        return Connector ? Connector->IsConnected() : false;
-    }
+ bool IsOpen() const
+ {
+ // For now, assume connected == open for the interface
+ return Connector ? Connector->IsConnected() : false;
+ }
 
-    bool IsOpen() const
-    {
-        // For now, assume connected == open for the interface
-        return Connector ? Connector->IsConnected() : false;
-    }
+ void Tick()
+ {
+ if (Connector)
+ {
+ Connector->Tick();
+ }
+ // Deliver queued messages on game thread
+ TArray<uint8> Msg;
+ while (Received.Dequeue(Msg))
+ {
+ if (OnMessage)
+ {
+ OnMessage(Msg.GetData(), Msg.Num());
+ }
+ }
+ }
 
-    void Tick()
-    {
-        if (Connector)
-        {
-            Connector->Tick();
-        }
-        // Deliver queued messages on game thread
-        TArray<uint8> Msg;
-        int SafeGuard = 32;
-        while (SafeGuard-- > 0 && Received.Dequeue(Msg))
-        {
-            if (OnMessage)
-            {
-                OnMessage(Msg.GetData(), Msg.Num());
-            }
-        }
-    }
-
-    TSharedPtr<IWebRTCConnector> Connector;
-    TQueue<TArray<uint8>, EQueueMode::Mpsc> Received;
-    TFunction<void(const uint8*, int32)> OnMessage;
+ TSharedPtr<IWebRTCConnector> Connector;
+ TQueue<TArray<uint8>, EQueueMode::Mpsc> Received;
+ TFunction<void(const uint8*, int32)> OnMessage;
 };
 
 FO3DSWebRTCDataChannel::FO3DSWebRTCDataChannel() : Impl(MakeUnique<FImpl>()) {}
