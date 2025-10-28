@@ -1656,7 +1656,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 			// Update debug counters
 			AudioRt.SentPackets += 1;
 			AudioRt.SentBytes += (uint64)EncBytes;
-			if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+			if (CVarO3DSWebRTCVerbose->GetInt() !=0)
 			{
 				UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Encoded and sent audio packet %d bytes (timestamp=%u)"), EncBytes, FI.timestamp);
 			}
