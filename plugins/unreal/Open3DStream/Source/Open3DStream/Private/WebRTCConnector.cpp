@@ -8,6 +8,16 @@
 #include "Misc/ScopeLock.h"
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformTime.h"
+#include "Misc/Char.h"
+#include "Containers/UnrealString.h"
+#include "Containers/HashTable.h"
+#include "Hash/CityHash.h"
+#include "Misc/Guid.h"
+#include "HAL/UnrealMemory.h"
+#include "Containers/Array.h"
+#include "Templates/UnrealTemplate.h"
+#include "Misc/ByteSwap.h"
+#include "Misc/Crc.h"
 
 // libdatachannel includes
 #include <rtc/rtc.hpp>
@@ -73,6 +83,32 @@ static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCChannelId(
  ECVF_Default);
 
 const char* FWebRTCConnector::DataChannelLabel = "Open3DStream";
+
+// Keep latest desired audio stream label to set on new tracks
+static FString G_O3DS_DesiredAudioMsid;
+
+static std::shared_ptr<rtc::Track> AddOpusAudioSendTrackWithLabel(std::shared_ptr<rtc::PeerConnection> PC, int32 BitrateKbps, const FString& StreamLabel)
+{
+	if (!PC)
+	{
+		return nullptr;
+	}
+	// Build an audio media description with Opus payload111
+	rtc::Description::Audio Audio("audio", rtc::Description::Direction::SendOnly);
+	Audio.addOpusCodec(111);
+	if (BitrateKbps >0)
+	{
+		Audio.setBitrate(BitrateKbps *1000);
+	}
+	// Attach an SSRC and msid label derived from StreamLabel when provided
+	if (!StreamLabel.IsEmpty())
+	{
+		uint32 Ssrc =0xA17C0000u ^ FCrc::StrCrc32(*StreamLabel);
+		std::string Msid = TCHAR_TO_ANSI(*StreamLabel);
+		Audio.addSSRC(Ssrc, std::nullopt, Msid, Msid);
+	}
+	return PC->addTrack(Audio);
+}
 
 FWebRTCConnector::FWebRTCConnector()
 	: bIsConnected(false)
@@ -372,7 +408,19 @@ void FWebRTCConnector::Tick()
  // Also notify generic remote audio listeners with real stream/subject labels
  if (Rx.PCM.Num() >0)
  {
-		RemoteAudioDelegate.Broadcast(RxSubjectName, RxStreamLabel, Rx.PCM.GetData(), Rx.PCM.Num(), Rx.NumChannels);
+		// Convert int16 PCM to float [-1.0, 1.0] for the delegate
+		TArray<float> PCMFloat;
+		PCMFloat.SetNumUninitialized(Rx.PCM.Num());
+		for (int32 i = 0; i < Rx.PCM.Num(); ++i)
+		{
+			PCMFloat[i] = static_cast<float>(Rx.PCM[i]) / 32768.0f;
+		}
+		
+		// Calculate NumFrames from total samples and channels
+		const int32 NumFrames = (Rx.NumChannels > 0) ? (Rx.PCM.Num() / Rx.NumChannels) : 0;
+		
+		// Broadcast with correct parameter order: StreamLabel, SubjectName, float* PCM, NumFrames, NumChannels, SampleRate
+		RemoteAudioDelegate.Broadcast(RxStreamLabel, RxSubjectName, PCMFloat.GetData(), NumFrames, Rx.NumChannels, Rx.SampleRate);
  }
  }
 
@@ -919,6 +967,7 @@ bool FWebRTCConnector::SetupPeerConnection()
 			{
 				return; // not audio
 			}
+			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Incoming audio track detected"));
 			Track->onFrame([this](rtc::binary data, rtc::FrameInfo info)
 			{
 #if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
@@ -944,6 +993,12 @@ bool FWebRTCConnector::SetupPeerConnection()
 					Out.PCM.SetNumUninitialized(Decoded * ChannelsFromPkt);
 					FMemory::Memcpy(Out.PCM.GetData(), Pcm.GetData(), sizeof(int16) * Out.PCM.Num());
 					DecodedPcmQueue.Enqueue(MoveTemp(Out));
+					static bool bLoggedFirstDec = false;
+					if (!bLoggedFirstDec && CVarO3DSWebRTCDebugRx->GetInt() !=0)
+					{
+						bLoggedFirstDec = true;
+						UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: First decoded audio frame: samples=%d ch=%d sr=48000"), Decoded, ChannelsFromPkt);
+					}
 				}
 #else
 				(void)data; (void)info; // silence unused
@@ -1261,7 +1316,15 @@ void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 	// If PC already exists, add audio track and renegotiate on client
 	if (PeerConnection && !AudioTrack)
 	{
-		AudioTrack = AddOpusAudioSendTrack(PeerConnection, InConfig.BitrateKbps);
+		// Prefer labeled track when stream label present
+		if (!InConfig.StreamLabel.IsEmpty())
+		{
+			AudioTrack = AddOpusAudioSendTrackWithLabel(PeerConnection, InConfig.BitrateKbps, InConfig.StreamLabel);
+		}
+		else
+		{
+			AudioTrack = AddOpusAudioSendTrack(PeerConnection, InConfig.BitrateKbps);
+		}
 		if (!bIsServer && bSignalingIsConnected)
 		{
 			MaybeCreateOffer(TEXT("audio-enabled"));

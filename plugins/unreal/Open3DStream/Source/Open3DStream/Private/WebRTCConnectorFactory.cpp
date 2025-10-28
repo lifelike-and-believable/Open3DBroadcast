@@ -17,6 +17,17 @@ namespace
 			Inner = MakeShared<FWebRTCConnector>();
 			FWebRTCConnector::SetActiveConnector(Inner);
 			BindFromInner();
+
+			// Chain a data callback to parse announce before user callback
+			Inner->SetDataReceivedCallback([this](const uint8* Data, int32 Size)
+			{
+				HandleIncomingData(Data, Size);
+				// Forward to external if bound
+				if (UserDataCallback)
+				{
+					UserDataCallback(Data, Size);
+				}
+			});
 		}
 
 		virtual bool Start(const FString& Url, bool bIsServer) override { return Inner->Start(Url, bIsServer); }
@@ -26,12 +37,12 @@ namespace
 
 		virtual bool SendDataReliable(const uint8* Data, int32 Size) override { return Inner->Send(Data, Size); }
 		virtual bool SendDataLossy(const uint8* Data, int32 Size) override { return Inner->Send(Data, Size); }
-		virtual void SetDataReceivedCallback(TFunction<void(const uint8*, int32)> Callback) override { Inner->SetDataReceivedCallback(MoveTemp(Callback)); }
+		virtual void SetDataReceivedCallback(TFunction<void(const uint8*, int32)> Callback) override { UserDataCallback = MoveTemp(Callback); }
 
 		virtual bool EnableAudioSend(const FAudioSendConfig& Cfg) override 
 		{
 #if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
-			FWebRTCConnector::FAudioConfig A; A.SampleRate = Cfg.SampleRate; A.NumChannels = Cfg.NumChannels; A.BitrateKbps = Cfg.BitrateKbps; A.FrameSizeMs =20;
+			FWebRTCConnector::FAudioConfig A; A.SampleRate = Cfg.SampleRate; A.NumChannels = Cfg.NumChannels; A.BitrateKbps = Cfg.BitrateKbps; A.FrameSizeMs =20; A.StreamLabel = Cfg.StreamLabel;
 			Inner->EnableAudioSend(A);
 			EmitAnnounceIfNeeded(Cfg);
 			return true;
@@ -61,16 +72,10 @@ namespace
 
 		void BindFromInner()
 		{
-			Inner->OnRemoteAudio().AddLambda([this](const FString& Subject, const FString& Stream, const int16* PCM, int32 NumSamples, int32 NumChannels)
+			Inner->OnRemoteAudio().AddLambda([this](const FString& StreamLabel, const FString& SubjectName, const float* PCM, int32 NumFrames, int32 NumChannels, int32 SampleRate)
 			{
-				// Convert to float and broadcast
-				TempPcmFloat.Reset(NumSamples);
-				TempPcmFloat.AddUninitialized(NumSamples);
-				for (int32 i=0;i<NumSamples;++i)
-				{
-					TempPcmFloat[i] = (float)PCM[i] /32768.0f;
-				}
-				RemoteAudio.Broadcast(Stream, Subject, TempPcmFloat.GetData(), NumSamples / NumChannels, NumChannels,48000);
+				// Already in float format from inner connector, just forward it
+				RemoteAudio.Broadcast(StreamLabel, SubjectName, PCM, NumFrames, NumChannels, SampleRate);
 			});
 		}
 
@@ -106,12 +111,44 @@ namespace
 			SendDataReliable(reinterpret_cast<const uint8*>(Conv.Get()), Conv.Length());
 		}
 
+		void HandleIncomingData(const uint8* Data, int32 Size)
+		{
+			// Try parse as JSON announce; ignore on failure
+			FString JsonStr;
+			FUTF8ToTCHAR Conv(reinterpret_cast<const ANSICHAR*>(Data), Size);
+			JsonStr = FString(Conv.Length(), Conv.Get());
+
+			TSharedPtr<FJsonObject> Root;
+			TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonStr);
+			if (FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid())
+			{
+				FString Type;
+				if (Root->TryGetStringField(TEXT("type"), Type) && Type.Equals(TEXT("o3ds.audio.announce"), ESearchCase::IgnoreCase))
+				{
+					const TArray<TSharedPtr<FJsonValue>>* Tracks;
+					if (Root->TryGetArrayField(TEXT("tracks"), Tracks))
+					{
+						for (const TSharedPtr<FJsonValue>& V : *Tracks)
+						{
+							TSharedPtr<FJsonObject> T = V->AsObject();
+							if (!T.IsValid()) continue;
+							FString Stream = T->GetStringField(TEXT("stream"));
+							FString Subject = T->GetStringField(TEXT("subject"));
+							// Inform inner for routing metadata
+							Inner->SetRxAudioRouting(Stream, Subject);
+						}
+					}
+				}
+			}
+		}
+
 	private:
 		TSharedPtr<FWebRTCConnector> Inner;
 		IWebRTCConnector::FOnRemoteAudio RemoteAudio;
 		TArray<int16> TempPcm16;
 		TArray<float> TempPcmFloat;
 		TSet<FString> AnnouncedStreams;
+		TFunction<void(const uint8*, int32)> UserDataCallback;
 	};
 }
 

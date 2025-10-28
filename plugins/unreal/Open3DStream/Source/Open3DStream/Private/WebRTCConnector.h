@@ -102,6 +102,7 @@ public:
 		int32 NumChannels =1; //1 mono,2 stereo
 		int32 BitrateKbps =32; // target encoder bitrate
 		int32 FrameSizeMs =20; //10/20/40 typical
+		FString StreamLabel; // optional desired msid label
 	};
 
 	// Enable Opus-encoded audio sending via a WebRTC audio track
@@ -113,9 +114,9 @@ public:
 	// Set callback for decoded PCM16 receive (called on game thread from Tick)
 	void SetAudioReceiveCallback(TFunction<void(const int16* PCM, int32 NumSamples, int32 NumChannels, int32 SampleRate)> Callback);
 
-	// Remote audio callback: Subject(stream) label, PCM16 interleaved samples, channels, sample rate
-	DECLARE_MULTICAST_DELEGATE_FiveParams(FOnRemoteAudioPcm16, const FString& /*SubjectOrEmpty*/, const FString& /*StreamLabel*/, const int16* /*PCM*/, int32 /*NumSamples*/, int32 /*NumChannels*/);
-	FOnRemoteAudioPcm16& OnRemoteAudio() { return RemoteAudioDelegate; }
+	// Remote audio callback: StreamLabel, SubjectName, PCM float interleaved samples, NumFrames, NumChannels, SampleRate
+	DECLARE_MULTICAST_DELEGATE_SixParams(FOnRemoteAudioFloat, const FString& /*StreamLabel*/, const FString& /*SubjectName*/, const float* /*PCM*/, int32 /*NumFrames*/, int32 /*NumChannels*/, int32 /*SampleRate*/);
+	FOnRemoteAudioFloat& OnRemoteAudio() { return RemoteAudioDelegate; }
 
 	// Configure RX audio routing labels (set by higher layers parsing announce/SDP)
 	void SetRxAudioRouting(const FString& InStreamLabel, const FString& InSubjectName)
@@ -218,7 +219,7 @@ private:
 	static const char* DataChannelLabel;
 
 	// Subject-aware remote audio multicast
-	FOnRemoteAudioPcm16 RemoteAudioDelegate;
+	FOnRemoteAudioFloat RemoteAudioDelegate;
 
 	// RX routing (defaults)
 	FString RxStreamLabel = TEXT("o3ds:mix");

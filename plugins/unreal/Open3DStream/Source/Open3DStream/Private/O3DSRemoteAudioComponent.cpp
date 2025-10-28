@@ -2,127 +2,123 @@
 
 #include "O3DSRemoteAudioComponent.h"
 
+#include "IWebRTCConnector.h"
+#include "O3DSWebRTCService.h"
 #include "Sound/SoundWaveProcedural.h"
 #include "Components/AudioComponent.h"
-#include "Kismet/GameplayStatics.h"
 
 UO3DSRemoteAudioComponent::UO3DSRemoteAudioComponent()
 {
-    PrimaryComponentTick.bCanEverTick = false;
+	PrimaryComponentTick.bCanEverTick = false;
 }
 
 void UO3DSRemoteAudioComponent::BeginPlay()
 {
-    Super::BeginPlay();
+	Super::BeginPlay();
 
-    // Subscribe to audio bus
-    BusHandle = FO3DSAudioBus::OnPcm16().AddUObject(this, &UO3DSRemoteAudioComponent::OnAudioFrame);
+	if (bAutoCreateAudioComponent)
+	{
+		AudioComp = GetOwner() ? GetOwner()->FindComponentByClass<UAudioComponent>() : nullptr;
+		if (!AudioComp)
+		{
+			AudioComp = NewObject<UAudioComponent>(GetOwner());
+			if (AudioComp)
+			{
+				AudioComp->RegisterComponent();
+				if (GetOwner() && GetOwner()->GetRootComponent())
+				{
+					AudioComp->AttachToComponent(GetOwner()->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
+				}
+			}
+		}
+	}
 
-    if (bAutoCreateAudioComponent)
-    {
-        AudioComp = GetOwner() ? GetOwner()->FindComponentByClass<UAudioComponent>() : nullptr;
-        if (!AudioComp)
-        {
-            AudioComp = NewObject<UAudioComponent>(GetOwner());
-            if (AudioComp)
-            {
-                AudioComp->RegisterComponent();
-                AudioComp->AttachToComponent(GetOwner()->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
-            }
-        }
-    }
+	if (TSharedPtr<IWebRTCConnector> Conn = UO3DSWebRTCService::Get()->GetConnector())
+	{
+		AudioDelegateHandle = Conn->OnRemoteAudio().AddUObject(this, &UO3DSRemoteAudioComponent::OnAudioFrame);
+	}
 }
 
 void UO3DSRemoteAudioComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    if (BusHandle.IsValid())
-    {
-        FO3DSAudioBus::OnPcm16().Remove(BusHandle);
-        BusHandle.Reset();
-    }
-    Super::EndPlay(EndPlayReason);
+	if (TSharedPtr<IWebRTCConnector> Conn = UO3DSWebRTCService::Get()->GetConnector())
+	{
+		if (AudioDelegateHandle.IsValid())
+		{
+			Conn->OnRemoteAudio().Remove(AudioDelegateHandle);
+			AudioDelegateHandle.Reset();
+		}
+	}
+	Super::EndPlay(EndPlayReason);
 }
 
-bool UO3DSRemoteAudioComponent::MatchesFilter(const O3DS::FAudioFrameMeta& Meta) const
+bool UO3DSRemoteAudioComponent::MatchesFilter(const FString& InSubject, const FString& InStream) const
 {
-    // Stream label filter (simple contains match if non-empty)
-    if (!StreamLabelFilter.IsEmpty() && !Meta.StreamLabel.Contains(StreamLabelFilter))
-    {
-        return false;
-    }
-    if (!SubjectNameFilter.IsEmpty() && !Meta.SubjectName.IsEmpty())
-    {
-        if (!Meta.SubjectName.Equals(SubjectNameFilter, ESearchCase::IgnoreCase))
-        {
-            return false;
-        }
-    }
-    return true;
+	const bool bIsMix = InStream.StartsWith(TEXT("o3ds:mix"));
+	bool bSubjectMatch = false;
+	if (ReceiveMode == EO3DSRemoteAudioMode::Mix)
+	{
+		bSubjectMatch = bIsMix;
+	}
+	else
+	{
+		const FString Desired = LiveLinkSubjectName.Name.ToString();
+		bSubjectMatch = !Desired.IsEmpty() && InSubject.Equals(Desired, ESearchCase::IgnoreCase);
+	}
+	if (!bSubjectMatch) return false;
+	if (!StreamLabelFilter.IsEmpty() && !InStream.Contains(StreamLabelFilter)) return false;
+	return true;
 }
 
 void UO3DSRemoteAudioComponent::EnsureSoundWave(int32 NumChannels, int32 SampleRate)
 {
-    const bool bNeedNew = (SoundWave == nullptr) || (CurrentChannels != NumChannels) || (CurrentSampleRate != SampleRate);
-    if (bNeedNew)
-    {
-        SoundWave = NewObject<USoundWaveProcedural>(this);
-        if (SoundWave)
-        {
-            SoundWave->bLooping = false;
-            SoundWave->NumChannels = NumChannels;
-            // UE 5.6: SampleRate is protected; use public setter
-            SoundWave->SetSampleRate(SampleRate);
-            SoundWave->Duration = INDEFINITELY_LOOPING_DURATION;
-            SoundWave->SoundGroup = SOUNDGROUP_Voice;
-        }
-        CurrentChannels = NumChannels;
-        CurrentSampleRate = SampleRate;
+	const bool bNeedNew = (SoundWave == nullptr) || (CurrentChannels != NumChannels) || (CurrentSampleRate != SampleRate);
+	if (bNeedNew)
+	{
+		SoundWave = NewObject<USoundWaveProcedural>(this);
+		if (SoundWave)
+		{
+			SoundWave->bLooping = false;
+			SoundWave->NumChannels = NumChannels;
+			SoundWave->SetSampleRate(SampleRate);
+			SoundWave->Duration = INDEFINITELY_LOOPING_DURATION;
+			SoundWave->SoundGroup = SOUNDGROUP_Voice;
+		}
+		CurrentChannels = NumChannels;
+		CurrentSampleRate = SampleRate;
 
-        if (AudioComp)
-        {
-            AudioComp->SetSound(SoundWave);
-            if (!AudioComp->IsPlaying())
-            {
-                AudioComp->Play();
-            }
-        }
-    }
+		if (AudioComp)
+		{
+			AudioComp->SetSound(SoundWave);
+			if (!AudioComp->IsPlaying())
+			{
+				AudioComp->Play();
+			}
+		}
+	}
 }
 
-void UO3DSRemoteAudioComponent::OnAudioFrame(const O3DS::FAudioFrameMeta& Meta, const TArray<uint8>& PCM16Bytes)
+void UO3DSRemoteAudioComponent::OnAudioFrame(const FString& StreamLabel, const FString& SubjectName, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate)
 {
-    if (!MatchesFilter(Meta))
-    {
-        return;
-    }
+	if (!MatchesFilter(SubjectName, StreamLabel))
+	{
+		return;
+	}
+	EnsureSoundWave(NumChannels, SampleRate);
+	if (!SoundWave || NumFrames <=0 || NumChannels <=0)
+	{
+		return;
+	}
 
-    if (PCM16Bytes.Num() == 0)
-    {
-        return;
-    }
-
-    EnsureSoundWave(Meta.NumChannels, Meta.SampleRate);
-
-    if (!SoundWave)
-    {
-        return;
-    }
-
-    // Optional gain: multiply samples in-place (16-bit signed)
-    if (!FMath::IsNearlyEqual(Gain, 1.0f))
-    {
-        TArray<uint8> Scaled = PCM16Bytes; // copy
-        int16* Samples = reinterpret_cast<int16*>(Scaled.GetData());
-        const int32 Count = Scaled.Num() / sizeof(int16);
-        for (int32 i = 0; i < Count; ++i)
-        {
-            const float F = FMath::Clamp((float)Samples[i] * Gain, -32768.0f, 32767.0f);
-            Samples[i] = (int16)F;
-        }
-        SoundWave->QueueAudio(Scaled.GetData(), Scaled.Num());
-    }
-    else
-    {
-        SoundWave->QueueAudio(PCM16Bytes.GetData(), PCM16Bytes.Num());
-    }
+	// Convert float [-1,1] to int16 and queue
+	const int32 NumSamples = NumFrames * NumChannels;
+	TArray<int16> PCM16;
+	PCM16.AddUninitialized(NumSamples);
+	for (int32 i =0; i < NumSamples; ++i)
+	{
+		float v = Interleaved[i] * Gain;
+		v = FMath::Clamp(v, -1.0f,1.0f);
+		PCM16[i] = (int16)FMath::RoundToInt(v *32767.0f);
+	}
+	SoundWave->QueueAudio(reinterpret_cast<uint8*>(PCM16.GetData()), PCM16.Num() * sizeof(int16));
 }

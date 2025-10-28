@@ -53,7 +53,8 @@ public class Open3DBroadcast : ModuleRules
 		{
 			"Projects",
 			"Sockets",
-			"Networking"
+			"Networking",
+			"AudioCaptureCore",
 		});
 				
 		DynamicallyLoadedModuleNames.AddRange( new string[] {} );
