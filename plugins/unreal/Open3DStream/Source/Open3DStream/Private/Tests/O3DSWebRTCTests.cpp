@@ -6,7 +6,9 @@
 #include "Misc/ScopeLock.h"
 #include "Misc/Paths.h"
 #include "Misc/OutputDeviceNull.h"
-#include "Misc/Char.h"
+#include "HAL/ThreadSafeBool.h"
+#include "Containers/StringConv.h"
+#include "Math/UnrealMathUtility.h"
 
 #include "IWebRTCConnector.h"
 #include "Open3DStreamSourceSettings.h" // for EO3DSWebRtcBackendReceiver
@@ -18,21 +20,13 @@ namespace
     // Get a signaling URL from environment; tests will skip if not provided.
     FString GetSignalingUrlFromEnv()
     {
-        // Preferred variable
-        TCHAR Buffer[4096];
-        FMemory::Memzero(Buffer, sizeof(Buffer));
-        FPlatformMisc::GetEnvironmentVariable(TEXT("O3DS_WEBRTC_URL"), Buffer, UE_ARRAY_COUNT(Buffer));
-        FString Url(Buffer);
+        // Prefer O3DS_WEBRTC_URL, fallback to O3DS_SIGNALING_URL
+        FString Url = FPlatformMisc::GetEnvironmentVariable(TEXT("O3DS_WEBRTC_URL"));
         if (!Url.IsEmpty())
         {
             return Url;
         }
-
-        // Back-compat alternative
-        FMemory::Memzero(Buffer, sizeof(Buffer));
-        FPlatformMisc::GetEnvironmentVariable(TEXT("O3DS_SIGNALING_URL"), Buffer, UE_ARRAY_COUNT(Buffer));
-        Url = FString(Buffer);
-        return Url;
+        return FPlatformMisc::GetEnvironmentVariable(TEXT("O3DS_SIGNALING_URL"));
     }
 
     // Simple pump loop helper: ticks connectors until timeout, returns elapsed seconds
@@ -120,10 +114,10 @@ bool FO3DSWebRTC_ConnectAndMessage::RunTest(const FString& Params)
     // Pump up to 3s for receive
     PumpUntil(3.0, All, [&]()
     {
-        return bGotMessage.Load();
+        return (bool)bGotMessage;
     });
 
-    TestTrue(TEXT("Server received data message"), bGotMessage.Load());
+    TestTrue(TEXT("Server received data message"), (bool)bGotMessage);
 
     Server->Stop();
     Client->Stop();
@@ -225,11 +219,11 @@ bool FO3DSWebRTC_AudioSendReceive::RunTest(const FString& Params)
     // Wait up to 5s for audio to arrive
     PumpUntil(5.0, All, [&]()
     {
-        return bGotAudio.Load();
+        return (bool)bGotAudio;
     });
 
     // Validate reception if present
-    if (!bGotAudio.Load())
+    if (!(bool)bGotAudio)
     {
         AddError(TEXT("Timed out waiting for remote audio"));
     }
@@ -242,7 +236,7 @@ bool FO3DSWebRTC_AudioSendReceive::RunTest(const FString& Params)
 
     Server->Stop();
     Client->Stop();
-    return bGotAudio.Load();
+    return (bool)bGotAudio;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSWebRTC_AudioAnnounce,
@@ -319,9 +313,9 @@ bool FO3DSWebRTC_AudioAnnounce::RunTest(const FString& Params)
     // Pump up to 3s to receive the announce message
     PumpUntil(3.0, All, [&]()
     {
-        return bGotAnnounce.Load();
+        return (bool)bGotAnnounce;
     });
-    TestTrue(TEXT("Received audio announce JSON on server"), bGotAnnounce.Load());
+    TestTrue(TEXT("Received audio announce JSON on server"), (bool)bGotAnnounce);
 
     Server->Stop();
     Client->Stop();
