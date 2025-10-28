@@ -1117,6 +1117,7 @@ bool FWebRTCConnector::SetupPeerConnection()
 			}
 			else
 			{
+				UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Opus audio track added (stream=%s)"), *AudioRt.Config.StreamLabel);
 				// Install RTP/RTCP media handler chain for Opus
 				uint32 Ssrc = 0;
 				std::string CName = "o3ds";
@@ -1380,11 +1381,8 @@ void FWebRTCConnector::MaybeCreateOffer(const TCHAR* Context)
 
 void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 {
-	if (CVarO3DSWebRTCVerbose->GetInt() != 0)
-	{
-		UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: EnableAudioSend sr=%d ch=%d br=%d frameMs=%d stream=%s"),
-			InConfig.SampleRate, InConfig.NumChannels, InConfig.BitrateKbps, InConfig.FrameSizeMs, *InConfig.StreamLabel);
-	}
+	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: EnableAudioSend sr=%d ch=%d br=%d frameMs=%d stream=%s"),
+		InConfig.SampleRate, InConfig.NumChannels, InConfig.BitrateKbps, InConfig.FrameSizeMs, *InConfig.StreamLabel);
 	AudioRt.Config = InConfig;
 	AudioRt.FrameSizeSamples = FMath::Max(1, (InConfig.SampleRate * InConfig.FrameSizeMs) /1000);
 	AudioRt.Timestamp =0;
@@ -1490,9 +1488,12 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 	}
 	if (!LocalPC || !bConnected || !bHaveDescriptions)
 	{
-		if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+		static double sLastWarn = 0.0; const double nowWarn = FPlatformTime::Seconds();
+		if (nowWarn - sLastWarn > 1.0)
 		{
-			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 dropped (pc/track not ready, connected=%d, haveDesc=%d)"), bConnected?1:0, bHaveDescriptions?1:0);
+			UE_LOG(LogTemp, Warning, TEXT("WebRTC: Audio not ready (connected=%d localDesc=%d remoteDesc=%d pc=%d), deferring frames"),
+				bConnected?1:0, bLocalDescriptionSet?1:0, bRemoteDescriptionSet?1:0, LocalPC?1:0);
+			sLastWarn = nowWarn;
 		}
 		return false;
 	}
