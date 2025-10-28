@@ -309,7 +309,7 @@ void FWebRTCConnector::Stop()
 	NextReconnectTimeSeconds =0.0;
 	ReconnectBackoffSeconds =0.0;
 
-#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+#if O3DS_WITH_OPUS
 	DestroyOpus();
 #endif
 }
@@ -997,7 +997,7 @@ bool FWebRTCConnector::SetupPeerConnection()
 			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Incoming audio track detected"));
 			Track->onFrame([this](rtc::binary data, rtc::FrameInfo info)
 			{
-#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+#if O3DS_WITH_OPUS
 				const uint8* Enc = reinterpret_cast<const uint8*>(data.data());
 				int32 EncSize = (int32)data.size();
 				int ChannelsFromPkt =1;
@@ -1096,7 +1096,7 @@ bool FWebRTCConnector::SetupPeerConnection()
 			CreateDataChannel();
 		}
 
-#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+#if O3DS_WITH_OPUS
 		// If audio sending is enabled, add Opus audio track now (respect stream label if provided)
 		if (bAudioSendEnabled && !AudioTrack)
 		{
@@ -1386,7 +1386,7 @@ void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 	AudioRt.bTrackReady = false;
 	AudioRt.NextSendRetryTimeSeconds =0.0;
 	bAudioSendEnabled = true;
-#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+#if O3DS_WITH_OPUS
 	EnsureOpusEncoder(InConfig);
 	// If PC already exists, add audio track and renegotiate on client
 	if (PeerConnection && !AudioTrack)
@@ -1463,7 +1463,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 		}
 		return false;
 	}
-#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+#if O3DS_WITH_OPUS
 	// Backoff if the last send failed due to track not open
 	const double Now = FPlatformTime::Seconds();
 	if (AudioRt.NextSendRetryTimeSeconds >0.0 && Now < AudioRt.NextSendRetryTimeSeconds)
@@ -1632,7 +1632,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 		{
 			FMemory::Memmove(AudioRt.Pending.GetData(), AudioRt.Pending.GetData() + FrameSamplesTotal, Remaining * sizeof(int16));
 		}
-		AudioRt.Pending.SetNum(Remaining, /*bAllowShrinking*/false);
+		AudioRt.Pending.SetNum(Remaining, EAllowShrinking::No);
 	}
 	return true;
 #else
@@ -1645,7 +1645,7 @@ void FWebRTCConnector::SetAudioReceiveCallback(TFunction<void(const int16* PCM, 
 	AudioRxCallback = MoveTemp(Callback);
 }
 
-#if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
+#if O3DS_WITH_OPUS
 bool FWebRTCConnector::EnsureOpusEncoder(const FAudioConfig& In)
 {
 	if (OpusEnc)
