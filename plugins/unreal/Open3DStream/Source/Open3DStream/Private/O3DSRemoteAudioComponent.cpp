@@ -2,10 +2,10 @@
 
 #include "O3DSRemoteAudioComponent.h"
 
-#include "IWebRTCConnector.h"
-#include "O3DSWebRTCService.h"
 #include "Sound/SoundWaveProcedural.h"
 #include "Components/AudioComponent.h"
+#include "O3DSAudioBus.h"
+#include "O3DSUnifiedMessage.h"
 
 // Opt-in verbose logging for remote audio receive/playback
 static TAutoConsoleVariable<int32> CVarO3DSRemoteAudioDebug(
@@ -40,30 +40,20 @@ void UO3DSRemoteAudioComponent::BeginPlay()
 		}
 	}
 
-	if (TSharedPtr<IWebRTCConnector> Conn = UO3DSWebRTCService::Get()->GetConnector())
+	// Subscribe to global audio bus published by the network receiver
+	BusDelegateHandle = FO3DSAudioBus::OnPcm16().AddUObject(this, &UO3DSRemoteAudioComponent::OnAudioPcm16);
+	if (CVarO3DSRemoteAudioDebug->GetInt() !=0)
 	{
-		AudioDelegateHandle = Conn->OnRemoteAudio().AddUObject(this, &UO3DSRemoteAudioComponent::OnAudioFrame);
-		if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
-		{
-			UE_LOG(LogTemp, Log, TEXT("O3DS RemoteAudio: Bound to OnRemoteAudio (ReceiveMode=%s)"),
-				(ReceiveMode == EO3DSRemoteAudioMode::Mix) ? TEXT("Mix") : TEXT("Subject"));
-		}
-	}
-	else if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("O3DS RemoteAudio: No shared connector available at BeginPlay"));
+		UE_LOG(LogTemp, Log, TEXT("O3DS RemoteAudio: Subscribed to FO3DSAudioBus"));
 	}
 }
 
 void UO3DSRemoteAudioComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	if (TSharedPtr<IWebRTCConnector> Conn = UO3DSWebRTCService::Get()->GetConnector())
+	if (BusDelegateHandle.IsValid())
 	{
-		if (AudioDelegateHandle.IsValid())
-		{
-			Conn->OnRemoteAudio().Remove(AudioDelegateHandle);
-			AudioDelegateHandle.Reset();
-		}
+		FO3DSAudioBus::OnPcm16().Remove(BusDelegateHandle);
+		BusDelegateHandle.Reset();
 	}
 	Super::EndPlay(EndPlayReason);
 }
@@ -83,7 +73,7 @@ bool UO3DSRemoteAudioComponent::MatchesFilter(const FString& InSubject, const FS
 	}
 	if (!bSubjectMatch) return false;
 	if (!StreamLabelFilter.IsEmpty() && !InStream.Contains(StreamLabelFilter)) return false;
-	if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
+	if (CVarO3DSRemoteAudioDebug->GetInt() !=0)
 	{
 		UE_LOG(LogTemp, Verbose, TEXT("O3DS RemoteAudio: Filter pass subject='%s' stream='%s'"), *InSubject, *InStream);
 	}
@@ -114,7 +104,7 @@ void UO3DSRemoteAudioComponent::EnsureSoundWave(int32 NumChannels, int32 SampleR
 			{
 				AudioComp->Play();
 			}
-			if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
+			if (CVarO3DSRemoteAudioDebug->GetInt() !=0)
 			{
 				UE_LOG(LogTemp, Log, TEXT("O3DS RemoteAudio: SoundWave prepared ch=%d sr=%d; AudioComp playing=%d"),
 					NumChannels, SampleRate, AudioComp->IsPlaying()?1:0);
@@ -127,9 +117,9 @@ void UO3DSRemoteAudioComponent::OnAudioFrame(const FString& StreamLabel, const F
 {
 	if (!MatchesFilter(SubjectName, StreamLabel))
 	{
-		if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
+		if (CVarO3DSRemoteAudioDebug->GetInt() !=0)
 		{
-			static int32 DropEvery = 0; if ((DropEvery++ % 100) == 0)
+			static int32 DropEvery =0; if ((DropEvery++ %100) ==0)
 			{
 				UE_LOG(LogTemp, Verbose, TEXT("O3DS RemoteAudio: Dropped frame by filter subject='%s' stream='%s'"), *SubjectName, *StreamLabel);
 			}
@@ -154,12 +144,34 @@ void UO3DSRemoteAudioComponent::OnAudioFrame(const FString& StreamLabel, const F
 	}
 	SoundWave->QueueAudio(reinterpret_cast<uint8*>(PCM16.GetData()), PCM16.Num() * sizeof(int16));
 
-	if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
+	if (CVarO3DSRemoteAudioDebug->GetInt() !=0)
 	{
-		static int32 LogEvery = 0; if ((LogEvery++ % 50) == 0)
+		static int32 LogEvery =0; if ((LogEvery++ %50) ==0)
 		{
 			UE_LOG(LogTemp, Verbose, TEXT("O3DS RemoteAudio: Queued frames=%d ch=%d sr=%d stream='%s' subject='%s'"),
 				NumFrames, NumChannels, SampleRate, *StreamLabel, *SubjectName);
 		}
 	}
+}
+
+void UO3DSRemoteAudioComponent::OnAudioPcm16(const O3DS::FAudioFrameMeta& Meta, const TArray<uint8>& PCM16Bytes)
+{
+	const FString& StreamLabel = Meta.StreamLabel;
+	const FString& SubjectName = Meta.SubjectName;
+	if (!MatchesFilter(SubjectName, StreamLabel))
+	{
+		return;
+	}
+	const int32 NumSamples = PCM16Bytes.Num() / sizeof(int16);
+	if (NumSamples <=0)
+	{
+		return;
+	}
+	// Queue PCM16 directly (no conversion)
+	EnsureSoundWave(Meta.NumChannels >0 ? Meta.NumChannels :1, Meta.SampleRate >0 ? Meta.SampleRate :48000);
+	if (!SoundWave)
+	{
+		return;
+	}
+	SoundWave->QueueAudio(const_cast<uint8*>(PCM16Bytes.GetData()), PCM16Bytes.Num());
 }

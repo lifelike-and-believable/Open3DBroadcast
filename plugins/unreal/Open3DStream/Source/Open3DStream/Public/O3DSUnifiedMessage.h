@@ -71,6 +71,9 @@ namespace O3DS
     // Metadata passed alongside audio payloads (PCM16 in this initial PR)
     struct FAudioFrameMeta
     {
+        // Optional identifier of the receiver source emitting this audio (future multi-source)
+        FGuid SourceGuid;         // default invalid for single-source setups
+
         FString StreamLabel;   // e.g. "o3ds:mix" or "o3ds:subject/<Name>"
         FString SubjectName;   // copied from label if encoded, optional
         int32   NumChannels = 1;

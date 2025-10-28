@@ -9,7 +9,8 @@
 
 class UAudioComponent;
 class USoundWaveProcedural;
-class IWebRTCConnector;
+
+namespace O3DS { struct FAudioFrameMeta; }
 
 UENUM(BlueprintType)
 enum class EO3DSRemoteAudioMode : uint8
@@ -51,6 +52,7 @@ protected:
 
 private:
 	void OnAudioFrame(const FString& StreamLabel, const FString& SubjectName, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate);
+	void OnAudioPcm16(const O3DS::FAudioFrameMeta& Meta, const TArray<uint8>& PCM16Bytes);
 	bool MatchesFilter(const FString& InSubject, const FString& InStream) const;
 	void EnsureSoundWave(int32 NumChannels, int32 SampleRate);
 
@@ -60,5 +62,5 @@ private:
 	int32 CurrentChannels =0;
 	int32 CurrentSampleRate =0;
 
-	FDelegateHandle AudioDelegateHandle;
+	FDelegateHandle BusDelegateHandle;
 };
