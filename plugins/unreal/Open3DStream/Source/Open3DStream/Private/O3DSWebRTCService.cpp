@@ -1,5 +1,7 @@
 #include "O3DSWebRTCService.h"
 #include "Engine/Engine.h"
+#include "IWebRTCConnector.h" // Assuming this is the interface for the connector
+#include "O3DSWebRTCConnectorFactory.h" // Assuming this is where CreateWebRTCConnector is declared
 
 TWeakObjectPtr<UO3DSWebRTCService> UO3DSWebRTCService::Instance;
 
