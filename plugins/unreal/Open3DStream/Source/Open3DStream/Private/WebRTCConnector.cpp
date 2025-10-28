@@ -26,6 +26,10 @@
 #include <string>
 #include <variant>
 
+#include <rtc/rtppacketizer.hpp>
+#include <rtc/rtcpsrreporter.hpp>
+#include <rtc/rtcpnackresponder.hpp>
+
 #if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
 // libopus header is provided at ThirdParty/include/opus.h
 #include <opus.h>
@@ -105,7 +109,8 @@ static std::shared_ptr<rtc::Track> AddOpusAudioSendTrackWithLabel(std::shared_pt
 	{
 		uint32 Ssrc =0xA17C0000u ^ FCrc::StrCrc32(*StreamLabel);
 		std::string Msid = TCHAR_TO_ANSI(*StreamLabel);
-		Audio.addSSRC(Ssrc, std::nullopt, Msid, Msid);
+		std::string CName = "o3ds";
+		Audio.addSSRC(Ssrc, CName, Msid, Msid);
 	}
 	return PC->addTrack(Audio);
 }
@@ -924,6 +929,13 @@ static std::shared_ptr<rtc::Track> AddOpusAudioSendTrack(std::shared_ptr<rtc::Pe
 	{
 		Audio.setBitrate(BitrateKbps *1000);
 	}
+	// Ensure a deterministic SSRC even without a provided stream label so RTP handlers work
+	{
+		uint32 Ssrc = 0xA17C1234u; // stable default SSRC for unlabeled audio
+		std::string CName = "o3ds";
+		std::string Msid = "o3ds";
+		Audio.addSSRC(Ssrc, CName, Msid, Msid);
+	}
 	return PC->addTrack(Audio);
 }
 
@@ -1084,6 +1096,45 @@ bool FWebRTCConnector::SetupPeerConnection()
 			if (!AudioTrack)
 			{
 				UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: Failed to add Opus audio track"));
+			}
+			else
+			{
+				// Install RTP/RTCP media handler chain for Opus
+				uint32 Ssrc = 0;
+				std::string CName = "o3ds";
+				// Derive SSRC to match what we set in the description
+				if (!AudioRt.Config.StreamLabel.IsEmpty())
+				{
+					Ssrc = 0xA17C0000u ^ FCrc::StrCrc32(*AudioRt.Config.StreamLabel);
+				}
+				else
+				{
+					Ssrc = 0xA17C1234u;
+				}
+				auto RtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(Ssrc, CName, 111, rtc::OpusRtpPacketizer::DefaultClockRate);
+				auto Packetizer = std::make_shared<rtc::OpusRtpPacketizer>(RtpCfg);
+				auto SrReporter = std::make_shared<rtc::RtcpSrReporter>(RtpCfg);
+				Packetizer->addToChain(SrReporter);
+				auto NackResponder = std::make_shared<rtc::RtcpNackResponder>();
+				Packetizer->addToChain(NackResponder);
+				AudioTrack->setMediaHandler(Packetizer);
+				// Track open/closed notifications to gate sending
+				AudioTrack->onOpen([this]()
+				{
+					AudioRt.bTrackReady = true;
+					if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+					{
+						UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Audio track opened"));
+					}
+				});
+				AudioTrack->onClosed([this]()
+				{
+					AudioRt.bTrackReady = false;
+					if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+					{
+						UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Audio track closed"));
+					}
+				});
 			}
 		}
 #endif
@@ -1346,6 +1397,43 @@ void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 		{
 			MaybeCreateOffer(TEXT("audio-enabled"));
 		}
+		if (AudioTrack)
+		{
+			// Install RTP/RTCP media handler chain and open/close gating, same as in SetupPeerConnection path
+			uint32 Ssrc = 0;
+			std::string CName = "o3ds";
+			if (!InConfig.StreamLabel.IsEmpty())
+			{
+				Ssrc = 0xA17C0000u ^ FCrc::StrCrc32(*InConfig.StreamLabel);
+			}
+			else
+			{
+				Ssrc = 0xA17C1234u;
+			}
+			auto RtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(Ssrc, CName, 111, rtc::OpusRtpPacketizer::DefaultClockRate);
+			auto Packetizer = std::make_shared<rtc::OpusRtpPacketizer>(RtpCfg);
+			auto SrReporter = std::make_shared<rtc::RtcpSrReporter>(RtpCfg);
+			Packetizer->addToChain(SrReporter);
+			auto NackResponder = std::make_shared<rtc::RtcpNackResponder>();
+			Packetizer->addToChain(NackResponder);
+			AudioTrack->setMediaHandler(Packetizer);
+			AudioTrack->onOpen([this]()
+			{
+				AudioRt.bTrackReady = true;
+				if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+				{
+					UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Audio track opened"));
+				}
+			});
+			AudioTrack->onClosed([this]()
+			{
+				AudioRt.bTrackReady = false;
+				if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+				{
+					UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Audio track closed"));
+				}
+			});
+		}
 	}
 #else
 	UE_LOG(LogTemp, Warning, TEXT("Open3DStream: Opus not fully available (library or headers missing). Audio send disabled."));
@@ -1402,6 +1490,17 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 		}
 		return false;
 	}
+	// Require track to be open before sending to avoid exceptions
+	if (LocalAudioTrack && !LocalAudioTrack->isOpen())
+	{
+		AudioRt.bTrackReady = false;
+		AudioRt.NextSendRetryTimeSeconds = Now + 0.25;
+		if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+		{
+			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 deferred (track not open)"));
+		}
+		return false;
+	}
 	// If we don't currently have a track, attempt to add one (e.g. after reconnect)
 	if (!LocalAudioTrack && bAudioSendEnabled)
 	{
@@ -1418,6 +1517,43 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 					AudioTrack = AddOpusAudioSendTrack(PeerConnection, AudioRt.Config.BitrateKbps);
 				}
 				LocalAudioTrack = AudioTrack;
+				if (AudioTrack)
+				{
+					// Reinstall media handler chain on re-attach
+					uint32 Ssrc = 0;
+					std::string CName = "o3ds";
+					if (!AudioRt.Config.StreamLabel.IsEmpty())
+					{
+						Ssrc = 0xA17C0000u ^ FCrc::StrCrc32(*AudioRt.Config.StreamLabel);
+					}
+					else
+					{
+						Ssrc = 0xA17C1234u;
+					}
+					auto RtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(Ssrc, CName, 111, rtc::OpusRtpPacketizer::DefaultClockRate);
+					auto Packetizer = std::make_shared<rtc::OpusRtpPacketizer>(RtpCfg);
+					auto SrReporter = std::make_shared<rtc::RtcpSrReporter>(RtpCfg);
+					Packetizer->addToChain(SrReporter);
+					auto NackResponder = std::make_shared<rtc::RtcpNackResponder>();
+					Packetizer->addToChain(NackResponder);
+					AudioTrack->setMediaHandler(Packetizer);
+					AudioTrack->onOpen([this]()
+					{
+						AudioRt.bTrackReady = true;
+						if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+						{
+							UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Audio track opened"));
+						}
+					});
+					AudioTrack->onClosed([this]()
+					{
+						AudioRt.bTrackReady = false;
+						if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+						{
+							UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Audio track closed"));
+						}
+					});
+				}
 			}
 		}
 		if (!bIsServer && bSignalingIsConnected)
