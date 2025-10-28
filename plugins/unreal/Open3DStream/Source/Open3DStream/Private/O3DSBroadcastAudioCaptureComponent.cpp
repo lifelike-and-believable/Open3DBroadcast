@@ -138,6 +138,8 @@ void UO3DSBroadcastAudioCaptureComponent::SetConnector(TSharedPtr<IWebRTCConnect
 	Connector = InConnector;
 	// Reset warning throttle so if connector goes null later, we warn once again
 	bWarnedNoConnector = false;
+	// Reset configured flag so we reapply settings on newly injected connector
+	bAudioSendConfigured = false;
 	// Attempt to configure send immediately if possible
 	EnsureConnector();
 }
@@ -190,20 +192,37 @@ void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 
 	A.StreamLabel = StreamLabel;
 	A.SubjectName = SubjectName.ToString();
-
-	const bool bEnabled = Connector->EnableAudioSend(A);
-	if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
+	// Only (re)apply if values changed or we haven't configured yet
+	const bool bChanged = (!bAudioSendConfigured)
+		|| (LastAppliedSampleRate != A.SampleRate)
+		|| (LastAppliedNumChannels != A.NumChannels)
+		|| (LastAppliedBitrateKbps != A.BitrateKbps)
+		|| (!LastAppliedStreamLabel.Equals(A.StreamLabel, ESearchCase::CaseSensitive));
+	if (bChanged)
 	{
-		UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Connector ready=%d EnableAudioSend label=%s subject=%s sr=%d ch=%d br=%d -> %s"),
-			Connector.IsValid()?1:0,
-			*A.StreamLabel, *A.SubjectName, A.SampleRate, A.NumChannels, A.BitrateKbps,
-			bEnabled ? TEXT("OK") : TEXT("FAILED"));
+		const bool bEnabled = Connector->EnableAudioSend(A);
+		if (bEnabled)
+		{
+			bAudioSendConfigured = true;
+			LastAppliedSampleRate = A.SampleRate;
+			LastAppliedNumChannels = A.NumChannels;
+			LastAppliedBitrateKbps = A.BitrateKbps;
+			LastAppliedStreamLabel = A.StreamLabel;
+		}
+		if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
+		{
+			UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Connector ready=%d EnableAudioSend label=%s subject=%s sr=%d ch=%d br=%d -> %s (changed=%d)"),
+				Connector.IsValid()?1:0,
+				*A.StreamLabel, *A.SubjectName, A.SampleRate, A.NumChannels, A.BitrateKbps,
+				bEnabled ? TEXT("OK") : TEXT("FAILED"), bChanged?1:0);
+		}
 	}
 }
 
 void UO3DSBroadcastAudioCaptureComponent::PushFrames(const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec)
 {
-	EnsureConnector();
+	// Connector injection should call EnsureConnector when it becomes available.
+	// Avoid reconfiguring every frame.
 	if (!Connector) return;
 	const bool bPushed = Connector->PushPcm(StreamLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
 	if (CVarO3DSAudioCaptureDebug->GetInt() !=0)

@@ -42,11 +42,16 @@ namespace
 		virtual bool EnableAudioSend(const FAudioSendConfig& Cfg) override 
 		{
 #if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
-			FWebRTCConnector::FAudioConfig A; A.SampleRate = Cfg.SampleRate; A.NumChannels = Cfg.NumChannels; A.BitrateKbps = Cfg.BitrateKbps; A.FrameSizeMs =20; A.StreamLabel = Cfg.StreamLabel;
-			UE_LOG(LogTemp, Verbose, TEXT("FLibDataChannelAdapter: EnableAudioSend stream=%s sr=%d ch=%d br=%d"), *A.StreamLabel, A.SampleRate, A.NumChannels, A.BitrateKbps);
-			Inner->EnableAudioSend(A);
-			EmitAnnounceIfNeeded(Cfg);
-			UE_LOG(LogTemp, Verbose, TEXT("FLibDataChannelAdapter: Announce emitted for stream=%s"), *Cfg.StreamLabel);
+			// Avoid repeated reconfiguration if the same stream label was already enabled
+			if (!EnabledStreams.Contains(Cfg.StreamLabel))
+			{
+				FWebRTCConnector::FAudioConfig A; A.SampleRate = Cfg.SampleRate; A.NumChannels = Cfg.NumChannels; A.BitrateKbps = Cfg.BitrateKbps; A.FrameSizeMs =20; A.StreamLabel = Cfg.StreamLabel;
+				UE_LOG(LogTemp, Verbose, TEXT("FLibDataChannelAdapter: EnableAudioSend stream=%s sr=%d ch=%d br=%d"), *A.StreamLabel, A.SampleRate, A.NumChannels, A.BitrateKbps);
+				Inner->EnableAudioSend(A);
+				EnabledStreams.Add(Cfg.StreamLabel);
+				EmitAnnounceIfNeeded(Cfg);
+				UE_LOG(LogTemp, Verbose, TEXT("FLibDataChannelAdapter: Announce emitted for stream=%s"), *Cfg.StreamLabel);
+			}
 			return true;
 #else
 			return false;
@@ -162,6 +167,7 @@ namespace
 		TArray<int16> TempPcm16;
 		TArray<float> TempPcmFloat;
 		TSet<FString> AnnouncedStreams;
+		TSet<FString> EnabledStreams;
 		TFunction<void(const uint8*, int32)> UserDataCallback;
 	};
 }

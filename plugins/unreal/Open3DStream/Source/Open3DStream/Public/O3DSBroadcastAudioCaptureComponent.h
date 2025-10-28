@@ -105,6 +105,14 @@ private:
 	// Prevent spamming warnings when no connector is assigned; warn once until a connector appears
 	bool bWarnedNoConnector = false;
 
+	// Track whether we've already configured audio send on the connector for current settings
+	bool bAudioSendConfigured = false;
+	// Last applied basic fields to detect changes that require reconfig
+	int32 LastAppliedSampleRate = 0;
+	int32 LastAppliedNumChannels = 0;
+	int32 LastAppliedBitrateKbps = 0;
+	FString LastAppliedStreamLabel;
+
 	// Submix tap listener and optional microphone capture
 	TSharedPtr<ISubmixBufferListener, ESPMode::ThreadSafe> SubmixTap;
 	Audio::FAudioCapture* MicCapture = nullptr;

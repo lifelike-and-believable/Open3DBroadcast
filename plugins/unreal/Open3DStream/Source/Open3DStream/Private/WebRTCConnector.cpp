@@ -1411,7 +1411,7 @@ void FWebRTCConnector::MaybeCreateOffer(const TCHAR* Context)
 
 void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 {
-	UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: EnableAudioSend sr=%d ch=%d br=%d frameMs=%d stream=%s"),
+	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: EnableAudioSend sr=%d ch=%d br=%d frameMs=%d stream=%s"),
 		InConfig.SampleRate, InConfig.NumChannels, InConfig.BitrateKbps, InConfig.FrameSizeMs, *InConfig.StreamLabel);
 	AudioRt.Config = InConfig;
 	AudioRt.FrameSizeSamples = FMath::Max(1, (InConfig.SampleRate * InConfig.FrameSizeMs) /1000);
@@ -1504,9 +1504,44 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 #if O3DS_WITH_OPUS
 	// Backoff if the last send failed due to track not open
 	const double Now = FPlatformTime::Seconds();
-	if (AudioRt.NextSendRetryTimeSeconds >0.0 && Now < AudioRt.NextSendRetryTimeSeconds)
+	if (AudioRt.NextSendRetryTimeSeconds > 0.0 && Now < AudioRt.NextSendRetryTimeSeconds)
+	{
+		// Still allow buffering a little while we're backing off
+		if (Samples && NumSamples > 0)
+		{
+			const int32 Old = AudioRt.Pending.Num();
+			AudioRt.Pending.AddUninitialized(NumSamples);
+			FMemory::Memcpy(AudioRt.Pending.GetData() + Old, Samples, sizeof(int16) * NumSamples);
+		}
+		return false;
+	}
+
+	// Ensure encoder is ready (based on config set by EnableAudioSend)
+	if (!EnsureOpusEncoder(AudioRt.Config))
 	{
 		return false;
+	}
+
+	// Append incoming samples to a bounded pending buffer so early frames aren't lost during negotiation
+	if (Samples && NumSamples > 0)
+	{
+		int32 Old = AudioRt.Pending.Num();
+		AudioRt.Pending.AddUninitialized(NumSamples);
+		FMemory::Memcpy(AudioRt.Pending.GetData() + Old, Samples, sizeof(int16) * NumSamples);
+
+		// Cap pending buffer to ~250ms to avoid unbounded growth
+		const int32 MaxPendingSamples = (AudioRt.Config.SampleRate * AudioRt.Config.NumChannels) / 4; // 250ms
+		if (AudioRt.Pending.Num() > MaxPendingSamples)
+		{
+			const int32 Drop = AudioRt.Pending.Num() - MaxPendingSamples;
+			FMemory::Memmove(AudioRt.Pending.GetData(), AudioRt.Pending.GetData() + Drop, (AudioRt.Pending.Num() - Drop) * sizeof(int16));
+			AudioRt.Pending.SetNum(MaxPendingSamples, EAllowShrinking::No);
+		}
+
+		if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+		{
+			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 buffered samples=%d pending=%d"), NumSamples, AudioRt.Pending.Num());
+		}
 	}
 
 	// Snapshot connection state and track under lock to avoid races with CleanupPeerConnection
@@ -1523,26 +1558,28 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 	}
 	if (!LocalPC || !bConnected || !bHaveDescriptions)
 	{
-		static double sLastWarn =0.0; const double nowWarn = FPlatformTime::Seconds();
-		if (nowWarn - sLastWarn >1.0)
+		static double sLastWarn = 0.0; const double nowWarn = FPlatformTime::Seconds();
+		if (nowWarn - sLastWarn > 1.0)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("WebRTC: Audio not ready (connected=%d localDesc=%d remoteDesc=%d pc=%d), deferring frames"),
-				bConnected?1:0, bLocalDescriptionSet?1:0, bRemoteDescriptionSet?1:0, LocalPC?1:0);
+				bConnected ? 1 : 0, bLocalDescriptionSet ? 1 : 0, bRemoteDescriptionSet ? 1 : 0, LocalPC ? 1 : 0);
 			sLastWarn = nowWarn;
 		}
 		return false;
 	}
+
 	// Require track to be open before sending to avoid exceptions
 	if (LocalAudioTrack && !LocalAudioTrack->isOpen())
 	{
 		AudioRt.bTrackReady = false;
-		AudioRt.NextSendRetryTimeSeconds = Now +0.25;
-		if (CVarO3DSWebRTCVerbose->GetInt() !=0)
+		AudioRt.NextSendRetryTimeSeconds = Now + 0.25;
+		if (CVarO3DSWebRTCVerbose->GetInt() != 0)
 		{
 			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 deferred (track not open)"));
 		}
 		return false;
 	}
+
 	// If we don't currently have a track, attempt to add one (e.g. after reconnect)
 	if (!LocalAudioTrack && bAudioSendEnabled)
 	{
@@ -1562,17 +1599,17 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 				if (AudioTrack)
 				{
 					// Reinstall media handler chain on re-attach
-					uint32 Ssrc =0;
+					uint32 Ssrc = 0;
 					std::string CName = "o3ds";
 					if (!AudioRt.Config.StreamLabel.IsEmpty())
 					{
-						Ssrc =0xA17C0000u ^ FCrc::StrCrc32(*AudioRt.Config.StreamLabel);
+						Ssrc = 0xA17C0000u ^ FCrc::StrCrc32(*AudioRt.Config.StreamLabel);
 					}
 					else
 					{
-						Ssrc =0xA17C1234u;
+						Ssrc = 0xA17C1234u;
 					}
-					auto RtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(Ssrc, CName,111, rtc::OpusRtpPacketizer::DefaultClockRate);
+					auto RtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(Ssrc, CName, 111, rtc::OpusRtpPacketizer::DefaultClockRate);
 					auto Packetizer = std::make_shared<rtc::OpusRtpPacketizer>(RtpCfg);
 					auto SrReporter = std::make_shared<rtc::RtcpSrReporter>(RtpCfg);
 					Packetizer->addToChain(SrReporter);
@@ -1582,7 +1619,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 					LocalAudioTrack->onOpen([this]()
 					{
 						AudioRt.bTrackReady = true;
-						if (CVarO3DSWebRTCVerbose->GetInt() !=0)
+						if (CVarO3DSWebRTCVerbose->GetInt() != 0)
 						{
 							UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Audio track opened"));
 						}
@@ -1590,7 +1627,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 					AudioTrack->onClosed([this]()
 					{
 						AudioRt.bTrackReady = false;
-						if (CVarO3DSWebRTCVerbose->GetInt() !=0)
+						if (CVarO3DSWebRTCVerbose->GetInt() != 0)
 						{
 							UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Audio track closed"));
 						}
@@ -1605,25 +1642,14 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 		if (!LocalAudioTrack)
 		{
 			// Avoid tight loop
-			AudioRt.NextSendRetryTimeSeconds = Now +0.25;
+			AudioRt.NextSendRetryTimeSeconds = Now + 0.25;
 			return false;
 		}
 	}
-	if (!EnsureOpusEncoder(AudioRt.Config))
+
+	if (!Samples || NumSamples <= 0)
 	{
-		return false;
-	}
-	if (!Samples || NumSamples <=0)
-	{
-		return true; // nothing
-	}
-	// Append to pending buffer
-	int32 Old = AudioRt.Pending.Num();
-	AudioRt.Pending.AddUninitialized(NumSamples);
-	FMemory::Memcpy(AudioRt.Pending.GetData() + Old, Samples, sizeof(int16) * NumSamples);
-	if (CVarO3DSWebRTCVerbose->GetInt() !=0)
-	{
-		UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 appended samples=%d pending=%d frameSamples=%d"), NumSamples, AudioRt.Pending.Num(), AudioRt.FrameSizeSamples * AudioRt.Config.NumChannels);
+		return true; // nothing to encode yet
 	}
 
 	const int32 FrameSamplesTotal = AudioRt.FrameSizeSamples * AudioRt.Config.NumChannels;
