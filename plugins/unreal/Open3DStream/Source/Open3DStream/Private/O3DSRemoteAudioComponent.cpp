@@ -6,6 +6,8 @@
 #include "Components/AudioComponent.h"
 #include "O3DSAudioBus.h"
 #include "O3DSUnifiedMessage.h"
+// Needed for AActor definition used by GetOwner() and attachment calls
+#include "GameFramework/Actor.h"
 
 // Opt-in verbose logging for remote audio receive/playback
 static TAutoConsoleVariable<int32> CVarO3DSRemoteAudioDebug(

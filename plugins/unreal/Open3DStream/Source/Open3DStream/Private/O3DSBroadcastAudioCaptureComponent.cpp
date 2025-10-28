@@ -5,9 +5,10 @@
 #include "AudioMixerDevice.h"
 #include "ISubmixBufferListener.h"
 #include "IWebRTCConnector.h"
-// #include "O3DSWebRTCService.h" // removed shared singleton
 #include "Sound/SoundSubmix.h"
 #include "AudioCaptureCore.h"
+// Needed for GetWorld() usage in BeginPlay/EndPlay
+#include "Engine/World.h"
 
 namespace
 {
