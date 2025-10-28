@@ -538,6 +538,8 @@ void FWebRTCConnector::OnPeerConnectionStateChange(int StateInt)
 		case rtc::PeerConnection::State::Connected:
 			this->ConnectionState = TEXT("CONNECTED");
 			this->bIsConnected = true;
+			// Clear any stale error once we reach CONNECTED
+			LastError.Empty();
 			// Reset backoffs on success
 			ResetReofferBackoff(/*bImmediate*/false);
 			ResetReconnectBackoff(/*bImmediate*/false);
@@ -579,6 +581,8 @@ void FWebRTCConnector::OnDataChannelOpen()
 {
 	UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Data channel opened"));
 	bDataChannelOpen = true;
+	// Clear any prior data channel errors to avoid stale status noise
+	LastError.Empty();
 }
 
 void FWebRTCConnector::OnDataChannelMessage(const std::vector<uint8>& Message)
@@ -1513,7 +1517,8 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 			AudioRt.Pending.AddUninitialized(NumSamples);
 			FMemory::Memcpy(AudioRt.Pending.GetData() + Old, Samples, sizeof(int16) * NumSamples);
 		}
-		return false;
+		// Indicate we accepted the audio for later send
+		return true;
 	}
 
 	// Ensure encoder is ready (based on config set by EnableAudioSend)
@@ -1565,7 +1570,8 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 				bConnected ? 1 : 0, bLocalDescriptionSet ? 1 : 0, bRemoteDescriptionSet ? 1 : 0, LocalPC ? 1 : 0);
 			sLastWarn = nowWarn;
 		}
-		return false;
+		// We buffered above; report accepted
+		return true;
 	}
 
 	// Require track to be open before sending to avoid exceptions
@@ -1577,7 +1583,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 		{
 			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 deferred (track not open)"));
 		}
-		return false;
+		return true; // accepted into buffer
 	}
 
 	// If we don't currently have a track, attempt to add one (e.g. after reconnect)
@@ -1643,7 +1649,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 		{
 			// Avoid tight loop
 			AudioRt.NextSendRetryTimeSeconds = Now + 0.25;
-			return false;
+			return true; // accepted into buffer
 		}
 	}
 
