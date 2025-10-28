@@ -1381,7 +1381,7 @@ void FWebRTCConnector::MaybeCreateOffer(const TCHAR* Context)
 
 void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 {
-	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: EnableAudioSend sr=%d ch=%d br=%d frameMs=%d stream=%s"),
+	UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: EnableAudioSend sr=%d ch=%d br=%d frameMs=%d stream=%s"),
 		InConfig.SampleRate, InConfig.NumChannels, InConfig.BitrateKbps, InConfig.FrameSizeMs, *InConfig.StreamLabel);
 	AudioRt.Config = InConfig;
 	AudioRt.FrameSizeSamples = FMath::Max(1, (InConfig.SampleRate * InConfig.FrameSizeMs) /1000);
