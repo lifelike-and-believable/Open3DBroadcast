@@ -1362,15 +1362,29 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 		return false;
 	}
 #if O3DS_WITH_OPUS && !O3DS_OPUS_NO_HEADER
-	if (!PeerConnection || !AudioTrack)
+	// Snapshot connection state and track under lock to avoid races with CleanupPeerConnection
+	std::shared_ptr<rtc::Track> LocalAudioTrack;
+	std::shared_ptr<rtc::PeerConnection> LocalPC;
+	bool bConnected = false;
 	{
+		FScopeLock Lock(&PeerConnectionLock);
+		LocalAudioTrack = AudioTrack;
+		LocalPC = PeerConnection;
+		bConnected = bIsConnected;
+	}
+	if (!LocalPC || !LocalAudioTrack || !bConnected)
+	{
+		if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+		{
+			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 dropped (pc/track not ready, connected=%d)"), bConnected?1:0);
+		}
 		return false;
 	}
 	if (!EnsureOpusEncoder(AudioRt.Config))
 	{
 		return false;
 	}
-	if (!Samples || NumSamples <=0)
+	if (!Samples || NumSamples <= 0)
 	{
 		return true; // nothing
 	}
@@ -1384,38 +1398,48 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 	}
 
 	const int32 FrameSamplesTotal = AudioRt.FrameSizeSamples * AudioRt.Config.NumChannels;
+	// Step in 48kHz RTP clock regardless of source sample rate
+	const uint32 Step48k = (uint32)((int64)AudioRt.Config.FrameSizeMs * 48000 / 1000);
 	uint8 Encoded[4000];
 	while (AudioRt.Pending.Num() >= FrameSamplesTotal)
 	{
-	 int16* FramePtr = AudioRt.Pending.GetData();
-	 int EncBytes = opus_encode(OpusEnc, FramePtr, AudioRt.FrameSizeSamples, Encoded, sizeof(Encoded));
-	 if (EncBytes >0)
-	 {
-		 // Send over audio track
-		 rtc::binary Packet;
-		 Packet.resize(EncBytes);
-		 for (int i=0;i<EncBytes;++i) Packet[i] = static_cast<std::byte>(Encoded[i]);
-		 // RTP timestamp increments in48kHz clock
-		 rtc::FrameInfo FI{ (uint32)AudioRt.Timestamp };
-		 AudioRt.Timestamp += (uint32)AudioRt.FrameSizeSamples; // per-channel count at48k clock
-		 if (AudioTrack)
-		 {
-			 AudioTrack->sendFrame(Packet, FI);
-		 }
-		 if (CVarO3DSWebRTCVerbose->GetInt() != 0)
-		 {
-			 UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Encoded and sent audio packet %d bytes (timestamp=%u)"), EncBytes, FI.timestamp);
-		 }
-	 }
-	 // Pop consumed samples
-	 const int32 Remaining = AudioRt.Pending.Num() - FrameSamplesTotal;
-	 if (Remaining >0)
-	 {
-		 FMemory::Memmove(AudioRt.Pending.GetData(), AudioRt.Pending.GetData() + FrameSamplesTotal, Remaining * sizeof(int16));
-	 }
-	 AudioRt.Pending.SetNum(Remaining, /*bAllowShrinking*/false);
+		int16* FramePtr = AudioRt.Pending.GetData();
+		int EncBytes = opus_encode(OpusEnc, FramePtr, AudioRt.FrameSizeSamples, Encoded, sizeof(Encoded));
+		if (EncBytes > 0)
+		{
+			// Send over audio track
+			rtc::binary Packet;
+			Packet.resize(EncBytes);
+			for (int i = 0; i < EncBytes; ++i) Packet[i] = static_cast<std::byte>(Encoded[i]);
+			// RTP timestamp increments in 48kHz clock
+			rtc::FrameInfo FI{ (uint32)AudioRt.Timestamp };
+			AudioRt.Timestamp += Step48k;
+			if (LocalAudioTrack)
+			{
+				try
+				{
+					LocalAudioTrack->sendFrame(Packet, FI);
+				}
+				catch (const std::exception& e)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: sendFrame threw exception: %s"), *FString(ANSI_TO_TCHAR(e.what())));
+					return false;
+				}
+			}
+			if (CVarO3DSWebRTCVerbose->GetInt() != 0)
+			{
+				UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Encoded and sent audio packet %d bytes (timestamp=%u)"), EncBytes, FI.timestamp);
+			}
+		}
+		// Pop consumed samples
+		const int32 Remaining = AudioRt.Pending.Num() - FrameSamplesTotal;
+		if (Remaining > 0)
+		{
+			FMemory::Memmove(AudioRt.Pending.GetData(), AudioRt.Pending.GetData() + FrameSamplesTotal, Remaining * sizeof(int16));
+		}
+		AudioRt.Pending.SetNum(Remaining, /*bAllowShrinking*/false);
 	}
- return true;
+	return true;
 #else
 	(void)Samples; (void)NumSamples; return false;
 #endif
