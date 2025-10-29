@@ -1667,12 +1667,14 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 		return true;
 	}
 
-	// Require track to be open before sending to avoid exceptions
+	// If track exists but isn't open yet, still attempt a probe send (some stacks open on first frame).
+	// Keep re-offer cadence active to help finalize negotiation.
+	bool bTrackWasNotOpen = false;
 	if (LocalAudioTrack && !LocalAudioTrack->isOpen())
 	{
+		bTrackWasNotOpen = true;
 		AudioRt.bTrackReady = false;
 		AudioRt.NextSendRetryTimeSeconds = Now + 0.25;
-		// Proactively trigger a re-offer (client) to help finalize track opening, with backoff
 		if (!bIsServer)
 		{
 			const double Now2 = FPlatformTime::Seconds();
@@ -1686,9 +1688,9 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 		}
 		if (CVarO3DSWebRTCVerbose->GetInt() != 0)
 		{
-			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 deferred (track not open)"));
+			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 probe send while track not open"));
 		}
-		return true; // accepted into buffer
+		// Fall through to try sending; exceptions will be caught below
 	}
 
 	// If we don't currently have a track, attempt to add one (e.g. after reconnect)
