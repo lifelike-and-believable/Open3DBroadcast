@@ -132,7 +132,8 @@ namespace
 
 		void HandleIncomingData(const uint8* Data, int32 Size)
 		{
-			// Try parse as JSON announce; ignore on failure
+			// Try parse as JSON announce; if recognized, consume it here and do NOT forward to user callback,
+			// to avoid spurious parse errors in consumers expecting O3DS flatbuffers.
 			FString JsonStr;
 			FUTF8ToTCHAR Conv(reinterpret_cast<const ANSICHAR*>(Data), Size);
 			JsonStr = FString(Conv.Length(), Conv.Get());
@@ -157,8 +158,11 @@ namespace
 							Inner->SetRxAudioRouting(Stream, Subject);
 						}
 					}
+					// Announce handled; swallow this message
+					return;
 				}
 			}
+			// Not a recognized control message; let user-level handler see it
 		}
 
 	private:

@@ -1489,6 +1489,12 @@ void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 				AudioRt.bTrackReady = false;
 				UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Audio track closed"));
 			});
+					// Initialize a small reoffer timer to ensure track opens after enabling
+					{
+						const double Now = FPlatformTime::Seconds();
+						AudioOpenReofferBackoffSeconds = 1.0;
+						NextAudioOpenReofferTimeSeconds = Now + AudioOpenReofferBackoffSeconds;
+					}
 		}
 	}
 #else
@@ -1592,6 +1598,18 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 	{
 		AudioRt.bTrackReady = false;
 		AudioRt.NextSendRetryTimeSeconds = Now + 0.25;
+		// Proactively trigger a re-offer (client) to help finalize track opening, with backoff
+		if (!bIsServer)
+		{
+			const double Now2 = FPlatformTime::Seconds();
+			if (Now2 >= NextAudioOpenReofferTimeSeconds)
+			{
+				MaybeCreateOffer(TEXT("audio-not-open"));
+				AudioOpenReofferBackoffSeconds = FMath::Min(8.0, AudioOpenReofferBackoffSeconds * 2.0);
+				const double Jitter = (double)FMath::FRandRange(0.0f, (float)(0.25 * AudioOpenReofferBackoffSeconds));
+				NextAudioOpenReofferTimeSeconds = Now2 + AudioOpenReofferBackoffSeconds + Jitter;
+			}
+		}
 		if (CVarO3DSWebRTCVerbose->GetInt() != 0)
 		{
 			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 deferred (track not open)"));
