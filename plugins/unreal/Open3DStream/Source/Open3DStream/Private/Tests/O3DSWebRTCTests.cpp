@@ -17,16 +17,29 @@
 
 namespace
 {
-    // Get a signaling URL from environment; tests will skip if not provided.
-    FString GetSignalingUrlFromEnv()
+    // Get a signaling URL. If not provided via env, default to localhost:8080 with a unique room.
+    // Returns true and sets bUsedFallback if we constructed the default.
+    bool GetSignalingUrl(FString& OutUrl, bool& bUsedFallback)
     {
         // Prefer O3DS_WEBRTC_URL, fallback to O3DS_SIGNALING_URL
         FString Url = FPlatformMisc::GetEnvironmentVariable(TEXT("O3DS_WEBRTC_URL"));
+        if (Url.IsEmpty())
+        {
+            Url = FPlatformMisc::GetEnvironmentVariable(TEXT("O3DS_SIGNALING_URL"));
+        }
+
         if (!Url.IsEmpty())
         {
-            return Url;
+            OutUrl = Url;
+            bUsedFallback = false;
+            return true;
         }
-        return FPlatformMisc::GetEnvironmentVariable(TEXT("O3DS_SIGNALING_URL"));
+
+        // Construct a deterministic-but-unique room to avoid collisions across runs.
+        const int32 Pid = FPlatformProcess::GetCurrentProcessId();
+        OutUrl = FString::Printf(TEXT("webrtc://localhost:8080?room=o3ds-automation-%d"), Pid);
+        bUsedFallback = true;
+        return true;
     }
 
     // Simple pump loop helper: ticks connectors until timeout, returns elapsed seconds
@@ -59,12 +72,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSWebRTC_ConnectAndMessage,
 
 bool FO3DSWebRTC_ConnectAndMessage::RunTest(const FString& Params)
 {
-    const FString Url = GetSignalingUrlFromEnv();
-    if (Url.IsEmpty())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("O3DS WebRTC test skipped: set O3DS_WEBRTC_URL to run (e.g., webrtc://localhost:8080?room=test)"));
-        return true; // skip gracefully
-    }
+    FString Url; bool bFallback = false;
+    GetSignalingUrl(Url, bFallback);
 
     // Create libdatachannel backend connectors
     TSharedPtr<IWebRTCConnector> Server = CreateWebRTCConnector(EO3DSWebRtcBackendReceiver::LibDataChannel);
@@ -100,6 +109,13 @@ bool FO3DSWebRTC_ConnectAndMessage::RunTest(const FString& Params)
 
     if (!Server->IsConnected() || !Client->IsConnected())
     {
+        if (bFallback)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("O3DS WebRTC test skipped: couldn't connect to default localhost signaling at %s"), *Url);
+            Server->Stop();
+            Client->Stop();
+            return true; // skip gracefully when using fallback
+        }
         AddError(TEXT("Timed out waiting for WebRTC connection (ensure signaling server is running and URL is correct)"));
         Server->Stop();
         Client->Stop();
@@ -130,12 +146,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSWebRTC_AudioSendReceive,
 
 bool FO3DSWebRTC_AudioSendReceive::RunTest(const FString& Params)
 {
-    const FString Url = GetSignalingUrlFromEnv();
-    if (Url.IsEmpty())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("O3DS WebRTC audio test skipped: set O3DS_WEBRTC_URL to run (e.g., webrtc://localhost:8080?room=test)"));
-        return true;
-    }
+    FString Url; bool bFallback = false;
+    GetSignalingUrl(Url, bFallback);
 
     TSharedPtr<IWebRTCConnector> Server = CreateWebRTCConnector(EO3DSWebRtcBackendReceiver::LibDataChannel);
     TSharedPtr<IWebRTCConnector> Client = CreateWebRTCConnector(EO3DSWebRtcBackendReceiver::LibDataChannel);
@@ -176,6 +188,13 @@ bool FO3DSWebRTC_AudioSendReceive::RunTest(const FString& Params)
     });
     if (!Server->IsConnected() || !Client->IsConnected())
     {
+        if (bFallback)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("O3DS WebRTC audio test skipped: couldn't connect to default localhost signaling at %s"), *Url);
+            Server->Stop();
+            Client->Stop();
+            return true;
+        }
         AddError(TEXT("Timed out waiting for WebRTC connection (audio)"));
         Server->Stop();
         Client->Stop();
@@ -245,12 +264,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSWebRTC_AudioAnnounce,
 
 bool FO3DSWebRTC_AudioAnnounce::RunTest(const FString& Params)
 {
-    const FString Url = GetSignalingUrlFromEnv();
-    if (Url.IsEmpty())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("O3DS WebRTC audio announce test skipped: set O3DS_WEBRTC_URL"));
-        return true;
-    }
+    FString Url; bool bFallback = false;
+    GetSignalingUrl(Url, bFallback);
 
     TSharedPtr<IWebRTCConnector> Server = CreateWebRTCConnector(EO3DSWebRtcBackendReceiver::LibDataChannel);
     TSharedPtr<IWebRTCConnector> Client = CreateWebRTCConnector(EO3DSWebRtcBackendReceiver::LibDataChannel);
@@ -286,6 +301,13 @@ bool FO3DSWebRTC_AudioAnnounce::RunTest(const FString& Params)
     });
     if (!Server->IsConnected() || !Client->IsConnected())
     {
+        if (bFallback)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("O3DS WebRTC audio announce test skipped: couldn't connect to default localhost signaling at %s"), *Url);
+            Server->Stop();
+            Client->Stop();
+            return true;
+        }
         AddError(TEXT("Timed out waiting for WebRTC connection (announce)"));
         Server->Stop();
         Client->Stop();
@@ -320,6 +342,131 @@ bool FO3DSWebRTC_AudioAnnounce::RunTest(const FString& Params)
     Server->Stop();
     Client->Stop();
     return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSWebRTC_AudioPerFrame_Localhost,
+    "Open3DStream.WebRTC.AudioPerFrame_Localhost",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FO3DSWebRTC_AudioPerFrame_Localhost::RunTest(const FString& Params)
+{
+    // Always default to localhost unless explicit env URL provided; skip gracefully if unreachable.
+    FString Url; bool bFallback = false;
+    GetSignalingUrl(Url, bFallback);
+
+    TSharedPtr<IWebRTCConnector> Server = CreateWebRTCConnector(EO3DSWebRtcBackendReceiver::LibDataChannel);
+    TSharedPtr<IWebRTCConnector> Client = CreateWebRTCConnector(EO3DSWebRtcBackendReceiver::LibDataChannel);
+    if (!Server || !Client)
+    {
+        AddError(TEXT("Failed to create WebRTC connectors"));
+        return false;
+    }
+
+    // Count remote audio callbacks and frames
+    FThreadSafeBool bGotAudio(false);
+    int32 CallbackCount = 0;
+    int64 TotalFrames = 0;
+    int32 RxCh = 0, RxSr = 0;
+    Server->OnRemoteAudio().AddLambda([&](const FString& StreamLabel, const FString& SubjectName, const float* PCM, int32 NumFrames, int32 NumChannels, int32 SampleRate)
+    {
+        if (PCM && NumFrames > 0)
+        {
+            bGotAudio = true;
+            ++CallbackCount;
+            TotalFrames += NumFrames;
+            RxCh = NumChannels;
+            RxSr = SampleRate;
+        }
+    });
+
+    const bool bServerOk = Server->Start(Url, /*bIsServer*/true);
+    const bool bClientOk = Client->Start(Url, /*bIsServer*/false);
+    TestTrue(TEXT("Server start() returned true"), bServerOk);
+    TestTrue(TEXT("Client start() returned true"), bClientOk);
+
+    // Wait until connected or skip
+    TArray<TSharedPtr<IWebRTCConnector>> All{Server, Client};
+    PumpUntil(10.0, All, [&]()
+    {
+        return Server->IsConnected() && Client->IsConnected();
+    });
+    if (!Server->IsConnected() || !Client->IsConnected())
+    {
+        if (bFallback)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("O3DS WebRTC per-frame audio test skipped: couldn't connect to default localhost signaling at %s"), *Url);
+            Server->Stop();
+            Client->Stop();
+            return true;
+        }
+        AddError(TEXT("Timed out waiting for WebRTC connection (per-frame audio)"));
+        Server->Stop();
+        Client->Stop();
+        return false;
+    }
+
+    // Enable audio on client
+    IWebRTCConnector::FAudioSendConfig Cfg;
+    Cfg.bEnable = true;
+    Cfg.SampleRate = 48000;
+    Cfg.NumChannels = 1;
+    Cfg.BitrateKbps = 32;
+    Cfg.StreamLabel = TEXT("o3ds:mix");
+    Cfg.SubjectName = TEXT("PerFrameSubject");
+    Cfg.SourceType = TEXT("test");
+    const bool bAudioEnabled = Client->EnableAudioSend(Cfg);
+    if (!bAudioEnabled)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("O3DS WebRTC audio not enabled in this build (skipping per-frame audio test)"));
+        Server->Stop();
+        Client->Stop();
+        return true;
+    }
+
+    // Push 20 chunks of ~20ms each (~400ms total) to simulate per-frame sends
+    const int32 MsPerChunk = 20;
+    const int32 FramesPerChunk = (Cfg.SampleRate * MsPerChunk) / 1000; // 960 @ 48kHz
+    TArray<float> Pcm;
+    Pcm.SetNumUninitialized(FramesPerChunk * Cfg.NumChannels);
+    const float TwoPiF = 2.0f * PI * 440.0f;
+    double t0 = 0.0;
+    for (int32 chunk = 0; chunk < 20; ++chunk)
+    {
+        for (int32 i = 0; i < FramesPerChunk; ++i)
+        {
+            const float t = (float)((t0 * Cfg.SampleRate + i) / (double)Cfg.SampleRate);
+            const float s = FMath::Sin(TwoPiF * t) * 0.2f;
+            Pcm[i] = s;
+        }
+        t0 += (double)FramesPerChunk / (double)Cfg.SampleRate;
+        const bool bPushed = Client->PushPcm(Cfg.StreamLabel, Pcm.GetData(), FramesPerChunk, Cfg.NumChannels, Cfg.SampleRate, /*ts*/t0);
+        TestTrue(TEXT("Client PushPcm returned true (per-frame)"), bPushed);
+
+        // Pump a bit between pushes
+        PumpUntil(0.03, All, [](){ return false; });
+    }
+
+    // Give decoder time to deliver callbacks
+    PumpUntil(5.0, All, [&]()
+    {
+        return (bool)bGotAudio && CallbackCount >= 2; // expect at least a couple of callbacks
+    });
+
+    if (!(bool)bGotAudio)
+    {
+        AddError(TEXT("No remote audio received (per-frame)"));
+    }
+    else
+    {
+        TestTrue(TEXT("Per-frame: received multiple audio callbacks"), CallbackCount >= 2);
+        TestTrue(TEXT("Per-frame: total frames > 0"), TotalFrames > 0);
+        TestTrue(TEXT("Per-frame: remote channels == 1"), RxCh == 1);
+        TestTrue(TEXT("Per-frame: remote sample rate == 48000"), RxSr == 48000);
+    }
+
+    Server->Stop();
+    Client->Stop();
+    return (bool)bGotAudio;
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
