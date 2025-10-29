@@ -14,5 +14,6 @@ This area collects the documents for the WebRTC refactor (Issue #94), backend se
 
 ## Planning & Roadmap
 
+- [WEBRTC_AUDIO_PLANNING_SUMMARY.md](../WEBRTC_AUDIO_PLANNING_SUMMARY.md) — **START HERE**: Executive summary, timeline, next steps
 - [WEBRTC_AUDIO_INTEGRATION_PLAN.md](../WEBRTC_AUDIO_INTEGRATION_PLAN.md) — Comprehensive plan for full audio integration (core library, multi-track, LiveKit, scale-out)
 - [WEBRTC_AUDIO_ROADMAP.md](../WEBRTC_AUDIO_ROADMAP.md) — Quick reference implementation roadmap with checklists and examples

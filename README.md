@@ -128,8 +128,11 @@ libdatachannel is integrated with MbedTLS and enabled by default across the code
 - [Unreal WebRTC implementation notes](WEBRTC_UNREAL_IMPLEMENTATION.md)
 - [libdatachannel Integration](LIBDATACHANNEL_INTEGRATION.md)
 - [Issue #15](https://github.com/lifelike-and-believable/Open3DStream/issues/15) - Implementation roadmap
-- [WebRTC Audio Integration Plan](plugins/unreal/Open3DStream/docs/WEBRTC_AUDIO_INTEGRATION_PLAN.md) - Comprehensive audio planning
-- [WebRTC Audio Roadmap](plugins/unreal/Open3DStream/docs/WEBRTC_AUDIO_ROADMAP.md) - Quick implementation guide
+
+**Audio Integration Planning:**
+- [Planning Summary](plugins/unreal/Open3DStream/docs/WEBRTC_AUDIO_PLANNING_SUMMARY.md) - Executive overview and next steps
+- [Technical Plan](plugins/unreal/Open3DStream/docs/WEBRTC_AUDIO_INTEGRATION_PLAN.md) - Comprehensive 5-phase plan (~7 weeks)
+- [Implementation Roadmap](plugins/unreal/Open3DStream/docs/WEBRTC_AUDIO_ROADMAP.md) - Quick reference with checklists
 
 ## Docs Refresh and Source of Truth
 
