@@ -18,6 +18,8 @@
 #include "Templates/UnrealTemplate.h"
 #include "Misc/ByteSwap.h"
 #include "Misc/Crc.h"
+#include "Logging/LogMacros.h"
+#include "O3DSLog.h"
 
 // libdatachannel includes
 #include <rtc/rtc.hpp>
@@ -524,7 +526,7 @@ void FWebRTCConnector::Tick()
  		const uint64 Db = (Bytes >= PrevBytes) ? (Bytes - PrevBytes) : 0;
  		const double Pps = Elapsed > 0.0 ? (double)Dp / Elapsed : 0.0;
  		const double Bps = Elapsed > 0.0 ? (double)Db / Elapsed : 0.0;
- 		UE_LOG(LogTemp, Verbose, TEXT("WebRTC Audio: sent %.1f pkts/s, %.0f B/s (total pkts=%llu bytes=%llu)"), Pps, Bps, (unsigned long long)Pkts, (unsigned long long)Bytes);
+ 		UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Audio: sent %.1f pkts/s, %.0f B/s (total pkts=%llu bytes=%llu)"), Pps, Bps, (unsigned long long)Pkts, (unsigned long long)Bytes);
  		PrevPackets = Pkts;
  		PrevBytes = Bytes;
  		AudioRt.LastStatsLogTime = Now;
@@ -643,7 +645,7 @@ void FWebRTCConnector::OnLocalDescription(const rtc::Description& Description)
 			bLocalSDPHasAudio = bHasAudio;
 			if (!bHasAudio)
 			{
-				UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: Local SDP has no m=audio; audio track may not negotiate"));
+				UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("WebRTC Connector: Local SDP has no m=audio; audio track may not negotiate"));
 			}
 			else
 			{
@@ -671,9 +673,9 @@ void FWebRTCConnector::OnLocalDescription(const rtc::Description& Description)
 					bLocalHasOpus111 = Section.Contains(TEXT("a=rtpmap:111 opus"), ESearchCase::IgnoreCase);
 					if (bLocalHasOpus111)
 					{
-						UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Local SDP includes Opus PT=111"));
+						UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Local SDP includes Opus PT=111"));
 					}
-					UE_LOG(LogTemp, Verbose, TEXT("Local SDP audio dir: recvonly=%d sendonly=%d sendrecv=%d inactive=%d"),
+					UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("Local SDP audio dir: recvonly=%d sendonly=%d sendrecv=%d inactive=%d"),
 						bLocalDirRecvOnly?1:0, bLocalDirSendOnly?1:0, bLocalDirSendRecv?1:0, bLocalDirInactive?1:0);
 				}
 			}
@@ -746,7 +748,7 @@ void FWebRTCConnector::OnOfferReceived(const FString& SDP)
 		bRemoteSDPHasAudio = SDP.Contains(TEXT("m=audio"), ESearchCase::IgnoreCase);
 		if (!bRemoteSDPHasAudio)
 		{
-			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Remote offer has no m=audio"));
+			UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Remote offer has no m=audio"));
 		}
 		else
 		{
@@ -769,7 +771,7 @@ void FWebRTCConnector::OnOfferReceived(const FString& SDP)
 				bRemoteDirSendRecv = Section.Contains(TEXT("a=sendrecv"));
 				bRemoteDirInactive = Section.Contains(TEXT("a=inactive"));
 				bRemoteHasOpus111 = Section.Contains(TEXT("a=rtpmap:111 opus"), ESearchCase::IgnoreCase);
-				UE_LOG(LogTemp, Verbose, TEXT("Remote OFFER audio dir: recvonly=%d sendonly=%d sendrecv=%d inactive=%d opus111=%d"),
+				UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("Remote OFFER audio dir: recvonly=%d sendonly=%d sendrecv=%d inactive=%d opus111=%d"),
 					bRemoteDirRecvOnly?1:0, bRemoteDirSendOnly?1:0, bRemoteDirSendRecv?1:0, bRemoteDirInactive?1:0, bRemoteHasOpus111?1:0);
 			}
 		}
@@ -808,7 +810,7 @@ void FWebRTCConnector::OnAnswerReceived(const FString& SDP)
 		bRemoteSDPHasAudio = SDP.Contains(TEXT("m=audio"), ESearchCase::IgnoreCase);
 		if (!bRemoteSDPHasAudio && bAudioSendEnabled)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: Remote SDP has no m=audio; audio track will not open"));
+			UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("WebRTC Connector: Remote SDP has no m=audio; audio track will not open"));
 		}
 		else if (bRemoteSDPHasAudio)
 		{
@@ -832,7 +834,7 @@ void FWebRTCConnector::OnAnswerReceived(const FString& SDP)
 				bRemoteDirSendRecv = Section.Contains(TEXT("a=sendrecv"));
 				bRemoteDirInactive = Section.Contains(TEXT("a=inactive"));
 				bRemoteHasOpus111 = Section.Contains(TEXT("a=rtpmap:111 opus"), ESearchCase::IgnoreCase);
-				UE_LOG(LogTemp, Verbose, TEXT("Remote SDP audio dir: recvonly=%d sendonly=%d sendrecv=%d inactive=%d opus111=%d"),
+				UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("Remote SDP audio dir: recvonly=%d sendonly=%d sendrecv=%d inactive=%d opus111=%d"),
 					bRemoteDirRecvOnly?1:0, bRemoteDirSendOnly?1:0, bRemoteDirSendRecv?1:0, bRemoteDirInactive?1:0, bRemoteHasOpus111?1:0);
 			}
 		}
@@ -1129,7 +1131,7 @@ bool FWebRTCConnector::SetupPeerConnection()
 			{
 				return; // not audio
 			}
-			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Incoming audio track detected"));
+			UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Incoming audio track detected"));
 			Track->onFrame([this](rtc::binary data, rtc::FrameInfo info)
 			{
 #if O3DS_WITH_OPUS
@@ -1159,7 +1161,7 @@ bool FWebRTCConnector::SetupPeerConnection()
 					if (!bLoggedFirstDec && CVarO3DSWebRTCDebugRx->GetInt() !=0)
 					{
 						bLoggedFirstDec = true;
-						UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: First decoded audio frame: samples=%d ch=%d sr=48000"), Decoded, ChannelsFromPkt);
+						UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: First decoded audio frame: samples=%d ch=%d sr=48000"), Decoded, ChannelsFromPkt);
 					}
 				}
 #else
@@ -1245,11 +1247,11 @@ bool FWebRTCConnector::SetupPeerConnection()
 			}
 			if (!AudioTrack)
 			{
-				UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: Failed to add Opus audio track"));
+				UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("WebRTC Connector: Failed to add Opus audio track"));
 			}
 			else
 			{
-				UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Opus audio track added (stream=%s)"), *AudioRt.Config.StreamLabel);
+				UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: Opus audio track added (stream=%s)"), *AudioRt.Config.StreamLabel);
 				// Install RTP/RTCP media handler chain for Opus
 				uint32 Ssrc =0;
 				std::string CName = "o3ds";
@@ -1273,12 +1275,12 @@ bool FWebRTCConnector::SetupPeerConnection()
 				AudioTrack->onOpen([this]()
 				{
 					AudioRt.bTrackReady = true;
-					UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Audio track opened"));
+					UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: Audio track opened"));
 				});
 				AudioTrack->onClosed([this]()
 				{
 					AudioRt.bTrackReady = false;
-					UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Audio track closed"));
+					UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: Audio track closed"));
 				});
 			}
 		}
@@ -1513,7 +1515,7 @@ void FWebRTCConnector::MaybeCreateOffer(const TCHAR* Context)
 
 void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 {
-	UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: EnableAudioSend sr=%d ch=%d br=%d frameMs=%d stream=%s"),
+	UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: EnableAudioSend sr=%d ch=%d br=%d frameMs=%d stream=%s"),
 		InConfig.SampleRate, InConfig.NumChannels, InConfig.BitrateKbps, InConfig.FrameSizeMs, *InConfig.StreamLabel);
 	AudioRt.Config = InConfig;
 	AudioRt.FrameSizeSamples = FMath::Max(1, (InConfig.SampleRate * InConfig.FrameSizeMs) /1000);
@@ -1526,7 +1528,7 @@ void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 	// If PC already exists, add audio track and renegotiate on client
 	if (PeerConnection && !AudioTrack)
 	{
-		UE_LOG(LogTemp, Log, TEXT("Open3DStream: PeerConnection active and Opus available. Proceeding to add Audio Track."));
+		UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("Open3DStream: PeerConnection active and Opus available. Proceeding to add Audio Track."));
 
 		// Prefer labeled track when stream label present
 		if (!InConfig.StreamLabel.IsEmpty())
@@ -1539,7 +1541,7 @@ void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 		}
 		if (!bIsServer && bSignalingIsConnected)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("Open3DStream: [WebRTC Client] Audio Enabled."));
+			UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("Open3DStream: [WebRTC Client] Audio Enabled."));
 			MaybeCreateOffer(TEXT("audio-enabled"));
 		}
 		if (AudioTrack)
@@ -1555,7 +1557,7 @@ void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 			{
 				Ssrc =0xA17C1234u;
 			}
-			UE_LOG(LogTemp, Warning, TEXT("Open3DStream: [WebRTC Client] Audio Track Added. StreamLabel=%s SSRC=0x%08X"), *InConfig.StreamLabel, Ssrc);
+			UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("Open3DStream: [WebRTC Client] Audio Track Added. StreamLabel=%s SSRC=0x%08X"), *InConfig.StreamLabel, Ssrc);
 
 			auto RtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(Ssrc, CName,111, rtc::OpusRtpPacketizer::DefaultClockRate);
 			auto Packetizer = std::make_shared<rtc::OpusRtpPacketizer>(RtpCfg);
@@ -1567,12 +1569,12 @@ void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 			AudioTrack->onOpen([this]()
 			{
 				AudioRt.bTrackReady = true;
-				UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Audio track opened"));
+				UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: Audio track opened"));
 			});
 			AudioTrack->onClosed([this]()
 			{
 				AudioRt.bTrackReady = false;
-				UE_LOG(LogTemp, Log, TEXT("WebRTC Connector: Audio track closed"));
+				UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: Audio track closed"));
 			});
 					// Initialize a small reoffer timer to ensure track opens after enabling
 					{
@@ -1583,7 +1585,7 @@ void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 		}
 	}
 #else
-	UE_LOG(LogTemp, Warning, TEXT("Open3DStream: Opus not fully available (library or headers missing). Audio send disabled."));
+	UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("Open3DStream: Opus not fully available (library or headers missing). Audio send disabled."));
 #endif
 }
 
@@ -1605,7 +1607,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 	{
 		if (CVarO3DSWebRTCVerbose->GetInt() !=0)
 		{
-			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 called but audio send disabled"));
+			UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 called but audio send disabled"));
 		}
 		return false;
 	}
@@ -1649,7 +1651,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 
 		if (CVarO3DSWebRTCVerbose->GetInt() != 0)
 		{
-			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 buffered samples=%d pending=%d"), NumSamples, AudioRt.Pending.Num());
+			UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 buffered samples=%d pending=%d"), NumSamples, AudioRt.Pending.Num());
 		}
 	}
 
@@ -1670,7 +1672,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 		static double sLastWarn = 0.0; const double nowWarn = FPlatformTime::Seconds();
 		if (nowWarn - sLastWarn > 1.0)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("WebRTC: Audio not ready (connected=%d localDesc=%d remoteDesc=%d pc=%d), deferring frames"),
+			UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("WebRTC: Audio not ready (connected=%d localDesc=%d remoteDesc=%d pc=%d), deferring frames"),
 				bConnected ? 1 : 0, bLocalDescriptionSet ? 1 : 0, bRemoteDescriptionSet ? 1 : 0, LocalPC ? 1 : 0);
 			sLastWarn = nowWarn;
 		}
@@ -1699,7 +1701,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 		}
 		if (CVarO3DSWebRTCVerbose->GetInt() != 0)
 		{
-			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 probe send while track not open"));
+			UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 probe send while track not open"));
 		}
 		// Fall through to try sending; exceptions will be caught below
 	}
@@ -1745,7 +1747,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 						AudioRt.bTrackReady = true;
 						if (CVarO3DSWebRTCVerbose->GetInt() != 0)
 						{
-							UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Audio track opened"));
+							UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Audio track opened"));
 						}
 					});
 					AudioTrack->onClosed([this]()
@@ -1753,7 +1755,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 						AudioRt.bTrackReady = false;
 						if (CVarO3DSWebRTCVerbose->GetInt() != 0)
 						{
-							UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Audio track closed"));
+							UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Audio track closed"));
 						}
 					});
 				}
@@ -1801,7 +1803,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 				}
 				catch (const std::exception& e)
 				{
-					UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: sendFrame threw exception: %s"), *FString(ANSI_TO_TCHAR(e.what())));
+					UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("WebRTC Connector: sendFrame threw exception: %s"), *FString(ANSI_TO_TCHAR(e.what())));
 					// Backoff and mark not ready; try to re-add track on next attempt
 					AudioRt.bTrackReady = false;
 					AudioRt.NextSendRetryTimeSeconds = FPlatformTime::Seconds() +0.25;
@@ -1813,7 +1815,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 			AudioRt.SentBytes += (uint64)EncBytes;
 			if (CVarO3DSWebRTCVerbose->GetInt() !=0)
 			{
-				UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Encoded and sent audio packet %d bytes (timestamp=%u)"), EncBytes, FI.timestamp);
+				UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Encoded and sent audio packet %d bytes (timestamp=%u)"), EncBytes, FI.timestamp);
 			}
 			AudioRt.bTrackReady = true;
 		}
@@ -1890,7 +1892,7 @@ bool FWebRTCConnector::EnsureOpusEncoder(const FAudioConfig& In)
 	if (!OpusEnc || Err != OPUS_OK)
 	{
 		OpusEnc = nullptr;
-		UE_LOG(LogTemp, Error, TEXT("Opus: Failed to create encoder err=%d"), Err);
+		UE_LOG(O3DSWebRTCAudioLog, Error, TEXT("Opus: Failed to create encoder err=%d"), Err);
 		return false;
 	}
 	opus_encoder_ctl(OpusEnc, OPUS_SET_BITRATE(In.BitrateKbps *1000));
@@ -1898,7 +1900,7 @@ bool FWebRTCConnector::EnsureOpusEncoder(const FAudioConfig& In)
 	opus_encoder_ctl(OpusEnc, OPUS_SET_INBAND_FEC(1));
 	if (CVarO3DSWebRTCVerbose->GetInt() != 0)
 	{
-		UE_LOG(LogTemp, Verbose, TEXT("Opus: Encoder created sr=%d ch=%d br=%d kbps"), In.SampleRate, In.NumChannels, In.BitrateKbps);
+		UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("Opus: Encoder created sr=%d ch=%d br=%d kbps"), In.SampleRate, In.NumChannels, In.BitrateKbps);
 	}
 	return true;
 }
@@ -1914,7 +1916,7 @@ bool FWebRTCConnector::EnsureOpusDecoder(int32 SampleRate, int32 NumChannels)
 	if (!OpusDec || Err != OPUS_OK)
 	{
 		OpusDec = nullptr;
-		UE_LOG(LogTemp, Error, TEXT("Opus: Failed to create decoder err=%d"), Err);
+		UE_LOG(O3DSWebRTCAudioLog, Error, TEXT("Opus: Failed to create decoder err=%d"), Err);
 		return false;
 	}
 	return true;
@@ -1957,25 +1959,25 @@ static FAutoConsoleCommand CmdO3DSDumpAudioStatus(
 		TSharedPtr<FWebRTCConnector> Conn = FWebRTCConnector::GetActiveConnector();
 		if (!Conn.IsValid())
 		{
-			UE_LOG(LogTemp, Warning, TEXT("O3DS: No active WebRTC connector"));
+			UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("O3DS: No active WebRTC connector"));
 			return;
 		}
 		FWebRTCConnector::FAudioSendStatus S; Conn->GetAudioSendStatus(S);
-		UE_LOG(LogTemp, Log, TEXT("--- O3DS WebRTC Audio Send Status ---"));
-		UE_LOG(LogTemp, Log, TEXT("Signaling=%d PeerConnected=%d LocalDesc=%d RemoteDesc=%d DataChannelOpen=%d"),
+		UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("--- O3DS WebRTC Audio Send Status ---"));
+		UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("Signaling=%d PeerConnected=%d LocalDesc=%d RemoteDesc=%d DataChannelOpen=%d"),
 			S.bSignalingConnected?1:0, S.bPeerConnected?1:0, S.bLocalDesc?1:0, S.bRemoteDesc?1:0, S.bDataChannelOpen?1:0);
-		UE_LOG(LogTemp, Log, TEXT("LocalSDP.m=audio=%d RemoteSDP.m=audio=%d"), S.bLocalSdpHasAudio?1:0, S.bRemoteSdpHasAudio?1:0);
-		UE_LOG(LogTemp, Log, TEXT("Local SDP audio dir: %s opus111=%d"), *S.LocalAudioDir, S.bLocalOpus111?1:0);
-		UE_LOG(LogTemp, Log, TEXT("Remote SDP audio dir: %s opus111=%d"), *S.RemoteAudioDir, S.bRemoteOpus111?1:0);
-		UE_LOG(LogTemp, Log, TEXT("AudioEnabled=%d TrackPresent=%d TrackOpen=%d OpusReady=%d"),
+		UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("LocalSDP.m=audio=%d RemoteSDP.m=audio=%d"), S.bLocalSdpHasAudio?1:0, S.bRemoteSdpHasAudio?1:0);
+		UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("Local SDP audio dir: %s opus111=%d"), *S.LocalAudioDir, S.bLocalOpus111?1:0);
+		UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("Remote SDP audio dir: %s opus111=%d"), *S.RemoteAudioDir, S.bRemoteOpus111?1:0);
+		UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("AudioEnabled=%d TrackPresent=%d TrackOpen=%d OpusReady=%d"),
 			S.bAudioSendEnabled?1:0, S.bAudioTrackPresent?1:0, S.bAudioTrackOpen?1:0, S.bOpusEncoderReady?1:0);
-		UE_LOG(LogTemp, Log, TEXT("PeerState=%d ConnState=%s StreamLabel=%s"),
+		UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("PeerState=%d ConnState=%s StreamLabel=%s"),
 			S.LastPeerStateInt, *S.ConnectionStateLabel, *S.StreamLabel);
-		UE_LOG(LogTemp, Log, TEXT("PendingSamples=%d SentPackets=%llu SentBytes=%llu"),
+		UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("PendingSamples=%d SentPackets=%llu SentBytes=%llu"),
 			S.PendingSamples, (unsigned long long)S.SentPackets, (unsigned long long)S.SentBytes);
 		if (!S.LastError.IsEmpty())
 		{
-			UE_LOG(LogTemp, Warning, TEXT("LastError: %s"), *S.LastError);
+			UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("LastError: %s"), *S.LastError);
 		}
 	})
 );
