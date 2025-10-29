@@ -995,8 +995,20 @@ bool FWebRTCConnector::ParseWebRtcUrl(const FString& Url, FString& OutHost, uint
 			return false;
 		}
 		OutPort = (uint16)P;
+	}
+
+	// Parse query string into OutParams (case-preserving keys)
+	if (!QueryString.IsEmpty())
+	{
+		TArray<FString> Pairs;
+		QueryString.ParseIntoArray(Pairs, TEXT("&"), true);
+		for (const FString& Pair : Pairs)
+		{
+			int32 Eq = Pair.Find(TEXT("="));
+			if (Eq != INDEX_NONE)
+			{
 				const FString Key = Pair.Left(Eq);
-				const FString Val = Pair.Mid(Eq +1);
+				const FString Val = Pair.Mid(Eq + 1);
 				OutParams.Add(Key, Val);
 			}
 			else
