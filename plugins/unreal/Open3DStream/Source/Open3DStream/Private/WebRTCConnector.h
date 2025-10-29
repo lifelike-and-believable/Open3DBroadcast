@@ -245,6 +245,10 @@ private:
 	double ReconnectBackoffSeconds =0.0;
 	int32 LastPeerState;
 
+	// Audio-track not-open reoffer helper (client only)
+	double NextAudioOpenReofferTimeSeconds = 0.0;
+	double AudioOpenReofferBackoffSeconds = 1.0; // grow up to a small cap
+
 	// Negotiated channel support
 	bool bNegotiatedChannelEnabled = false;
 	int32 NegotiatedChannelId =42;
