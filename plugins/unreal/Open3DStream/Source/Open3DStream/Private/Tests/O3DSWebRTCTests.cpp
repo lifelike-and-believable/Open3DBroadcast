@@ -66,6 +66,18 @@ namespace
         }
         return FPlatformTime::Seconds() - Start;
     }
+
+    // Set a console variable if it exists; optionally capture old value
+    bool SetCVarIfExists(const TCHAR* Name, int32 Value, int32* OutOld)
+    {
+        if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(Name))
+        {
+            if (OutOld) *OutOld = CVar->GetInt();
+            CVar->Set(Value);
+            return true;
+        }
+        return false;
+    }
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSWebRTC_ConnectAndMessage,
@@ -305,16 +317,6 @@ bool FO3DSWebRTC_AudioAnnounce::RunTest(const FString& Params)
         Client->Stop();
         return false;
     }
-bool SetCVarIfExists(const TCHAR* Name, int32 Value, int32* OutOld)
-{
-    if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(Name))
-    {
-        if (OutOld) *OutOld = CVar->GetInt();
-        CVar->Set(Value);
-        return true;
-    }
-    return false;
-}
 
     // Enable audio; if unsupported, skip
     IWebRTCConnector::FAudioSendConfig Cfg;
