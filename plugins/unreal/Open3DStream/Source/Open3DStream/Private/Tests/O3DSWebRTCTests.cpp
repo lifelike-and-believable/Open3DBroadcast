@@ -14,6 +14,10 @@
 #include "IWebRTCConnector.h"
 #include "Open3DStreamSourceSettings.h" // for EO3DSWebRtcBackendReceiver
 
+// STL + libdatachannel for in-process tests (no signaling)
+#include <atomic>
+#include <rtc/rtc.hpp>
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 namespace
@@ -470,6 +474,108 @@ bool FO3DSWebRTC_AudioPerFrame_Localhost::RunTest(const FString& Params)
     Server->Stop();
     Client->Stop();
     return (bool)bGotAudio;
+}
+
+// In-process sanity checks: prove libdatachannel connects without any signaling server.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSWebRTC_InProc_DataChannel,
+    "Open3DStream.WebRTC.InProc.DataChannel",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FO3DSWebRTC_InProc_DataChannel::RunTest(const FString& Params)
+{
+    using namespace std::chrono_literals;
+    std::atomic<bool> aConnected{false}, bConnected{false};
+    std::atomic<bool> chOpen{false}, gotMsg{false};
+
+    auto cfg = std::make_shared<rtc::Configuration>();
+    auto A = std::make_shared<rtc::PeerConnection>(*cfg);
+    auto B = std::make_shared<rtc::PeerConnection>(*cfg);
+
+    // Wire ICE and SDP exchange directly between peers (no network/signaling)
+    A->onLocalDescription([&](rtc::Description desc){ B->setRemoteDescription(desc); B->createAnswer(); });
+    B->onLocalDescription([&](rtc::Description desc){ A->setRemoteDescription(desc); });
+    A->onLocalCandidate([&](rtc::Candidate c){ B->addRemoteCandidate(c); });
+    B->onLocalCandidate([&](rtc::Candidate c){ A->addRemoteCandidate(c); });
+
+    A->onStateChange([&](rtc::PeerConnection::State s){ if (s==rtc::PeerConnection::State::Connected) aConnected=true; });
+    B->onStateChange([&](rtc::PeerConnection::State s){ if (s==rtc::PeerConnection::State::Connected) bConnected=true; });
+
+    B->onDataChannel([&](std::shared_ptr<rtc::DataChannel> dc){
+        dc->onOpen([&](){ chOpen = true; });
+        dc->onMessage([&](rtc::message_variant msg){
+            if (auto *p = std::get_if<rtc::binary>(&msg)) {
+                std::string s(reinterpret_cast<const char*>(p->data()), p->size());
+                if (s == "HELLO") gotMsg = true;
+            } else if (auto *t = std::get_if<std::string>(&msg)) {
+                if (*t == "HELLO") gotMsg = true;
+            }
+        });
+    });
+
+    auto dc = A->createDataChannel("o3ds");
+    // Create offer/answer
+    A->createOffer();
+
+    // Wait for channel open or timeout
+    const double start = FPlatformTime::Seconds();
+    while ((FPlatformTime::Seconds() - start) < 5.0 && !chOpen.load())
+    {
+        FPlatformProcess::Sleep(0.01f);
+    }
+
+    TestTrue(TEXT("DataChannel opened"), chOpen.load());
+    if (!chOpen.load())
+    {
+        return false;
+    }
+
+    // Send message and await receipt
+    dc->send(std::string("HELLO"));
+    const double start2 = FPlatformTime::Seconds();
+    while ((FPlatformTime::Seconds() - start2) < 2.0 && !gotMsg.load())
+    {
+        FPlatformProcess::Sleep(0.01f);
+    }
+    TestTrue(TEXT("Received HELLO over DataChannel"), gotMsg.load());
+    return gotMsg.load();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSWebRTC_InProc_AudioTrackOpen,
+    "Open3DStream.WebRTC.InProc.AudioTrackOpen",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FO3DSWebRTC_InProc_AudioTrackOpen::RunTest(const FString& Params)
+{
+    std::atomic<bool> gotAudioTrack{false};
+    auto cfg = std::make_shared<rtc::Configuration>();
+    auto A = std::make_shared<rtc::PeerConnection>(*cfg);
+    auto B = std::make_shared<rtc::PeerConnection>(*cfg);
+
+    A->onLocalDescription([&](rtc::Description desc){ B->setRemoteDescription(desc); B->createAnswer(); });
+    B->onLocalDescription([&](rtc::Description desc){ A->setRemoteDescription(desc); });
+    A->onLocalCandidate([&](rtc::Candidate c){ B->addRemoteCandidate(c); });
+    B->onLocalCandidate([&](rtc::Candidate c){ A->addRemoteCandidate(c); });
+
+    B->onTrack([&](std::shared_ptr<rtc::Track> track){
+        if (track && track->kind() == rtc::Description::Media::Kind::Audio) {
+            gotAudioTrack = true;
+        }
+    });
+
+    // Create an Opus audio m-line and add track on A
+    rtc::Description::Audio audio("audio", rtc::Description::Direction::SendOnly);
+    audio.addOpusCodec(111);
+    audio.addSSRC(0xA17C0001u, "o3ds", "o3ds", "o3ds");
+    A->addTrack(audio);
+    A->createOffer();
+
+    const double start = FPlatformTime::Seconds();
+    while ((FPlatformTime::Seconds() - start) < 5.0 && !gotAudioTrack.load())
+    {
+        FPlatformProcess::Sleep(0.01f);
+    }
+    TestTrue(TEXT("Receiver observed remote audio track"), gotAudioTrack.load());
+    return gotAudioTrack.load();
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
