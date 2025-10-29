@@ -163,8 +163,8 @@ namespace
 							Inner->SetRxAudioRouting(Stream, Subject);
 						}
 					}
-					// Announce handled; swallow this message
-					UE_LOG(LogTemp, Verbose, TEXT("FLibDataChannelAdapter: Swallowed o3ds.audio.announce (tracks=%d)"), Root->GetArrayField(TEXT("tracks")).Num());
+					// Announce handled; swallow this message (VeryVerbose to avoid noise during normal Verbose debugging)
+					UE_LOG(LogTemp, VeryVerbose, TEXT("FLibDataChannelAdapter: Swallowed o3ds.audio.announce (tracks=%d)"), Root->GetArrayField(TEXT("tracks")).Num());
 					return true;
 				}
 			}
