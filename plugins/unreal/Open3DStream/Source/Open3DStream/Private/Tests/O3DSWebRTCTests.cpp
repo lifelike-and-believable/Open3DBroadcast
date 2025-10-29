@@ -9,6 +9,7 @@
 #include "HAL/ThreadSafeBool.h"
 #include "Containers/StringConv.h"
 #include "Math/UnrealMathUtility.h"
+#include "HAL/IConsoleManager.h"
 
 #include "IWebRTCConnector.h"
 #include "Open3DStreamSourceSettings.h" // for EO3DSWebRtcBackendReceiver
@@ -36,8 +37,9 @@ namespace
         }
 
         // Construct a deterministic-but-unique room to avoid collisions across runs.
+        // Prefer path-based room per our docs (webrtc://host:port/<room>)
         const int32 Pid = FPlatformProcess::GetCurrentProcessId();
-        OutUrl = FString::Printf(TEXT("webrtc://localhost:8080?room=o3ds-automation-%d"), Pid);
+        OutUrl = FString::Printf(TEXT("webrtc://localhost:8080/o3ds-automation-%d"), Pid);
         bUsedFallback = true;
         return true;
     }
@@ -109,14 +111,9 @@ bool FO3DSWebRTC_ConnectAndMessage::RunTest(const FString& Params)
 
     if (!Server->IsConnected() || !Client->IsConnected())
     {
-        if (bFallback)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("O3DS WebRTC test skipped: couldn't connect to default localhost signaling at %s"), *Url);
-            Server->Stop();
-            Client->Stop();
-            return true; // skip gracefully when using fallback
-        }
-        AddError(TEXT("Timed out waiting for WebRTC connection (ensure signaling server is running and URL is correct)"));
+        const FString ErrS = Server->GetLastError();
+        const FString ErrC = Client->GetLastError();
+        AddError(FString::Printf(TEXT("Timed out waiting for WebRTC connection. Url=%s ServerErr='%s' ClientErr='%s'"), *Url, *ErrS, *ErrC));
         Server->Stop();
         Client->Stop();
         return false;
@@ -188,14 +185,9 @@ bool FO3DSWebRTC_AudioSendReceive::RunTest(const FString& Params)
     });
     if (!Server->IsConnected() || !Client->IsConnected())
     {
-        if (bFallback)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("O3DS WebRTC audio test skipped: couldn't connect to default localhost signaling at %s"), *Url);
-            Server->Stop();
-            Client->Stop();
-            return true;
-        }
-        AddError(TEXT("Timed out waiting for WebRTC connection (audio)"));
+        const FString ErrS = Server->GetLastError();
+        const FString ErrC = Client->GetLastError();
+        AddError(FString::Printf(TEXT("Timed out waiting for WebRTC connection (audio). Url=%s ServerErr='%s' ClientErr='%s'"), *Url, *ErrS, *ErrC));
         Server->Stop();
         Client->Stop();
         return false;
@@ -210,6 +202,11 @@ bool FO3DSWebRTC_AudioSendReceive::RunTest(const FString& Params)
     Cfg.StreamLabel = TEXT("o3ds:mix");
     Cfg.SubjectName = TEXT("TestSubject");
     Cfg.SourceType = TEXT("test");
+    // Force sendrecv to mirror some stacks’ expectations
+    if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("o3ds.Broadcast.WebRTC.AudioForceSendRecv")))
+    {
+        CVar->Set(1);
+    }
     const bool bAudioEnabled = Client->EnableAudioSend(Cfg);
     if (!bAudioEnabled)
     {
@@ -301,18 +298,23 @@ bool FO3DSWebRTC_AudioAnnounce::RunTest(const FString& Params)
     });
     if (!Server->IsConnected() || !Client->IsConnected())
     {
-        if (bFallback)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("O3DS WebRTC audio announce test skipped: couldn't connect to default localhost signaling at %s"), *Url);
-            Server->Stop();
-            Client->Stop();
-            return true;
-        }
-        AddError(TEXT("Timed out waiting for WebRTC connection (announce)"));
+        const FString ErrS = Server->GetLastError();
+        const FString ErrC = Client->GetLastError();
+        AddError(FString::Printf(TEXT("Timed out waiting for WebRTC connection (announce). Url=%s ServerErr='%s' ClientErr='%s'"), *Url, *ErrS, *ErrC));
         Server->Stop();
         Client->Stop();
         return false;
     }
+bool SetCVarIfExists(const TCHAR* Name, int32 Value, int32* OutOld)
+{
+    if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(Name))
+    {
+        if (OutOld) *OutOld = CVar->GetInt();
+        CVar->Set(Value);
+        return true;
+    }
+    return false;
+}
 
     // Enable audio; if unsupported, skip
     IWebRTCConnector::FAudioSendConfig Cfg;
@@ -392,14 +394,9 @@ bool FO3DSWebRTC_AudioPerFrame_Localhost::RunTest(const FString& Params)
     });
     if (!Server->IsConnected() || !Client->IsConnected())
     {
-        if (bFallback)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("O3DS WebRTC per-frame audio test skipped: couldn't connect to default localhost signaling at %s"), *Url);
-            Server->Stop();
-            Client->Stop();
-            return true;
-        }
-        AddError(TEXT("Timed out waiting for WebRTC connection (per-frame audio)"));
+        const FString ErrS = Server->GetLastError();
+        const FString ErrC = Client->GetLastError();
+        AddError(FString::Printf(TEXT("Timed out waiting for WebRTC connection (per-frame audio). Url=%s ServerErr='%s' ClientErr='%s'"), *Url, *ErrS, *ErrC));
         Server->Stop();
         Client->Stop();
         return false;
@@ -414,10 +411,13 @@ bool FO3DSWebRTC_AudioPerFrame_Localhost::RunTest(const FString& Params)
     Cfg.StreamLabel = TEXT("o3ds:mix");
     Cfg.SubjectName = TEXT("PerFrameSubject");
     Cfg.SourceType = TEXT("test");
+    // Force sendrecv during this test
+    int32 OldForce = 0; bool bHadForce = SetCVarIfExists(TEXT("o3ds.Broadcast.WebRTC.AudioForceSendRecv"), 1, &OldForce);
     const bool bAudioEnabled = Client->EnableAudioSend(Cfg);
     if (!bAudioEnabled)
     {
         UE_LOG(LogTemp, Warning, TEXT("O3DS WebRTC audio not enabled in this build (skipping per-frame audio test)"));
+        if (bHadForce) SetCVarIfExists(TEXT("o3ds.Broadcast.WebRTC.AudioForceSendRecv"), OldForce, nullptr);
         Server->Stop();
         Client->Stop();
         return true;
@@ -464,6 +464,7 @@ bool FO3DSWebRTC_AudioPerFrame_Localhost::RunTest(const FString& Params)
         TestTrue(TEXT("Per-frame: remote sample rate == 48000"), RxSr == 48000);
     }
 
+    if (bHadForce) SetCVarIfExists(TEXT("o3ds.Broadcast.WebRTC.AudioForceSendRecv"), OldForce, nullptr);
     Server->Stop();
     Client->Stop();
     return (bool)bGotAudio;
