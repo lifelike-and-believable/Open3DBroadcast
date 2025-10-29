@@ -641,6 +641,19 @@ void FWebRTCConnector::OnLocalDescription(const rtc::Description& Description)
 				{
 					UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Local SDP includes Opus PT=111"));
 				}
+				// Also log local audio direction flags to help debug TrackOpen=0
+				int32 AudioStart = SDP.Find(TEXT("m=audio"), ESearchCase::IgnoreCase, ESearchDir::FromStart);
+				if (AudioStart != INDEX_NONE)
+				{
+					int32 NextM = SDP.Find(TEXT("\nm="), ESearchCase::IgnoreCase, ESearchDir::FromStart, AudioStart + 1);
+					const FString Section = (NextM == INDEX_NONE) ? SDP.Mid(AudioStart) : SDP.Mid(AudioStart, NextM - AudioStart);
+					const bool bRecvOnly = Section.Contains(TEXT("a=recvonly"));
+					const bool bSendOnly = Section.Contains(TEXT("a=sendonly"));
+					const bool bSendRecv = Section.Contains(TEXT("a=sendrecv"));
+					const bool bInactive = Section.Contains(TEXT("a=inactive"));
+					UE_LOG(LogTemp, Verbose, TEXT("Local SDP audio dir: recvonly=%d sendonly=%d sendrecv=%d inactive=%d"),
+						bRecvOnly?1:0, bSendOnly?1:0, bSendRecv?1:0, bInactive?1:0);
+				}
 			}
 		}
 
@@ -712,6 +725,23 @@ void FWebRTCConnector::OnOfferReceived(const FString& SDP)
 		if (!bRemoteSDPHasAudio)
 		{
 			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Remote offer has no m=audio"));
+		}
+		else
+		{
+			// Log remote offer audio direction and Opus presence
+			int32 AudioStart = SDP.Find(TEXT("m=audio"), ESearchCase::IgnoreCase, ESearchDir::FromStart);
+			if (AudioStart != INDEX_NONE)
+			{
+				int32 NextM = SDP.Find(TEXT("\nm="), ESearchCase::IgnoreCase, ESearchDir::FromStart, AudioStart + 1);
+				const FString Section = (NextM == INDEX_NONE) ? SDP.Mid(AudioStart) : SDP.Mid(AudioStart, NextM - AudioStart);
+				const bool bRecvOnly = Section.Contains(TEXT("a=recvonly"));
+				const bool bSendOnly = Section.Contains(TEXT("a=sendonly"));
+				const bool bSendRecv = Section.Contains(TEXT("a=sendrecv"));
+				const bool bInactive = Section.Contains(TEXT("a=inactive"));
+				const bool bOpus111 = Section.Contains(TEXT("a=rtpmap:111 opus"), ESearchCase::IgnoreCase);
+				UE_LOG(LogTemp, Verbose, TEXT("Remote OFFER audio dir: recvonly=%d sendonly=%d sendrecv=%d inactive=%d opus111=%d"),
+					bRecvOnly?1:0, bSendOnly?1:0, bSendRecv?1:0, bInactive?1:0, bOpus111?1:0);
+			}
 		}
 		
 		// Server must create answer in response to offer
@@ -965,19 +995,6 @@ bool FWebRTCConnector::ParseWebRtcUrl(const FString& Url, FString& OutHost, uint
 			return false;
 		}
 		OutPort = (uint16)P;
-	}
-
-	// Parse query params into map
-	if (!QueryString.IsEmpty())
-	{
-		TArray<FString> Pairs;
-		QueryString.ParseIntoArray(Pairs, TEXT("&"), true);
-		for (const FString& Pair : Pairs)
-		{
-			if (Pair.IsEmpty()) continue;
-			int32 Eq = Pair.Find(TEXT("="));
-			if (Eq != INDEX_NONE)
-			{
 				const FString Key = Pair.Left(Eq);
 				const FString Val = Pair.Mid(Eq +1);
 				OutParams.Add(Key, Val);

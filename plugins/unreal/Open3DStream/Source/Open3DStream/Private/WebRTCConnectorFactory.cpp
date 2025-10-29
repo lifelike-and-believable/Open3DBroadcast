@@ -164,6 +164,7 @@ namespace
 						}
 					}
 					// Announce handled; swallow this message
+					UE_LOG(LogTemp, Verbose, TEXT("FLibDataChannelAdapter: Swallowed o3ds.audio.announce (tracks=%d)"), Root->GetArrayField(TEXT("tracks")).Num());
 					return true;
 				}
 			}
