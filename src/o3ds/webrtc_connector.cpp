@@ -223,6 +223,10 @@ void WebRTCClient::createPeerConnection()
             }
         });
         
+        // NOTE: If adding audio track support in the future, tracks must be added
+        // BEFORE creating the data channel to be included in the initial SDP offer.
+        // See: libdatachannel examples/audio-comm-test for reference implementation.
+        
         // Create data channel
         createDataChannel();
         
