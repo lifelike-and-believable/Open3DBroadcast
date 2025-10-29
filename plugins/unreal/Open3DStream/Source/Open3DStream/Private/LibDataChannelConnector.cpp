@@ -8,6 +8,7 @@
 #include "Misc/ScopeLock.h"
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformTime.h"
+#include "O3DSConsoleVars.h"
 
 // libdatachannel includes
 #include <rtc/rtc.hpp>
@@ -17,48 +18,7 @@
 #include <string>
 #include <variant>
 
-static TAutoConsoleVariable<int32> CVarO3DSWebRTCVerbose(
-    TEXT("o3ds.WebRTC.Verbose"),
-    0,
-    TEXT("Enable extra verbose logging for WebRTC connector (0/1)."),
-    ECVF_Default);
-
-static TAutoConsoleVariable<int32> CVarO3DSWebRTCDebugRx(
-    TEXT("o3ds.WebRTC.DebugRx"),
-    1,
-    TEXT("Enable receiver-side debug logging for WebRTC data (0/1). Logs first packet and occasional stats."),
-    ECVF_Default);
-
-// New CVars for Issue #87 resiliency
-static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCAutoReconnect(
-    TEXT("o3ds.Broadcast.WebRTC.AutoReconnect"),
-    1,
-    TEXT("Enable auto-reconnect/re-offer logic on failures (0/1)."),
-    ECVF_Default);
-
-static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCBackoffInitialMs(
-    TEXT("o3ds.Broadcast.WebRTC.BackoffInitialMs"),
-    500,
-    TEXT("Initial backoff for re-offer/reconnect in milliseconds."),
-    ECVF_Default);
-
-static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCBackoffMaxMs(
-    TEXT("o3ds.Broadcast.WebRTC.BackoffMaxMs"),
-    10000,
-    TEXT("Maximum backoff for re-offer/reconnect in milliseconds."),
-    ECVF_Default);
-
-static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCNegoChannel(
-    TEXT("o3ds.Broadcast.WebRTC.NegotiatedChannel"),
-    0,
-    TEXT("Use negotiated data channel with fixed id on both sides (0/1)."),
-    ECVF_Default);
-
-static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCChannelId(
-    TEXT("o3ds.Broadcast.WebRTC.ChannelId"),
-    42,
-    TEXT("Fixed DataChannel id to use when NegotiatedChannel=1."),
-    ECVF_Default);
+// Console variables are centralized in O3DSConsoleVars.* to avoid unity-build conflicts
 
 const char* FLibDataChannelConnector::DataChannelLabel = "Open3DStream";
 

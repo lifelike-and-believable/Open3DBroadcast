@@ -12,6 +12,16 @@ public class Open3DStream : ModuleRules
 		
 		// Enable C++ exceptions for libdatachannel (which throws std::exception)
 		bEnableExceptions = true;
+
+		// Ensure automation tests in this module are compiled for Editor Debug/Development builds.
+		// Some installed engine configurations disable these by default; explicitly enable them
+		// so our tests in Private/Tests are discoverable when running the Editor headlessly.
+		if ((Target.Configuration == UnrealTargetConfiguration.Debug || Target.Configuration == UnrealTargetConfiguration.Development)
+			&& (Target.Type == TargetType.Editor || Target.bBuildEditor))
+		{
+			PublicDefinitions.Add("WITH_AUTOMATION_TESTS=1");
+			PublicDefinitions.Add("WITH_DEV_AUTOMATION_TESTS=1");
+		}
 		
 		// Support for conditional compilation of broadcast features
 		// By default, broadcast features are enabled unless explicitly disabled

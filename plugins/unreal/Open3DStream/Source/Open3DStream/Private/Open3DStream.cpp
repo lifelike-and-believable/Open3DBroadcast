@@ -7,6 +7,7 @@
 void FOpen3DStreamModule::StartupModule()
 {
 	// This code will execute after your module is loaded into memory; the exact timing is specified in the .uplugin file per-module
+	UE_LOG(LogTemp, Display, TEXT("Open3DStream module started"));
 }
 
 void FOpen3DStreamModule::ShutdownModule()
