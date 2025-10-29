@@ -3,7 +3,13 @@
 	"EngineAssociation": "5.6",
 	"Category": "",
 	"Description": "Test project for Open3DStream plugin",
-	"Modules": [],
+	"Modules": [
+		{
+			"Name": "ProjectSandbox",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
 	"Plugins": [
 		{
 			"Name": "Open3DStream",
