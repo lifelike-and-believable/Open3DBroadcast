@@ -39,30 +39,29 @@
 using OpusEncoderT = OpusEncoder;
 using OpusDecoderT = OpusDecoder;
 #else
-#include "O3DSLog.h"
 struct OpusEncoderT;
 struct OpusDecoderT;
-	UE_LOG(LogO3DSAudio, Log, TEXT("WebRTC Connector: EnableAudioSend sr=%d ch=%d br=%d frameMs=%d stream=%s"),
+#endif
 
 static TAutoConsoleVariable<int32> CVarO3DSWebRTCVerbose(
  TEXT("o3ds.WebRTC.Verbose"),
-		UE_LOG(LogO3DSAudio, Log, TEXT("Open3DStream: PeerConnection active and Opus available. Proceeding to add Audio Track."));
+0,
  TEXT("Enable extra verbose logging for WebRTC connector (0/1)."),
  ECVF_Default);
-			UE_LOG(LogO3DSAudio, Verbose, TEXT("Open3DStream: [WebRTC Client] Audio Enabled."));
+
 static TAutoConsoleVariable<int32> CVarO3DSWebRTCDebugRx(
  TEXT("o3ds.WebRTC.DebugRx"),
-			UE_LOG(LogO3DSAudio, Log, TEXT("Open3DStream: [WebRTC Client] Audio Track Added. StreamLabel=%s SSRC=0x%08X"), *InConfig.StreamLabel, Ssrc);
+1,
  TEXT("Enable receiver-side debug logging for WebRTC data (0/1). Logs first packet and occasional stats."),
  ECVF_Default);
 
 // Audio send debug: periodic stats to verify frames are flowing
-				UE_LOG(LogO3DSAudio, Log, TEXT("WebRTC Connector: Audio track opened"));
+static TAutoConsoleVariable<int32> CVarO3DSWebRTCAudioDebug(
  TEXT("o3ds.WebRTC.Audio.Debug"),
  0,
  TEXT("Enable periodic audio send stats (0/1). Logs packets/sec and bytes/sec."),
  ECVF_Default);
-				UE_LOG(LogO3DSAudio, Log, TEXT("WebRTC Connector: Audio track closed"));
+
 // New CVars for Issue #87 resiliency
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCAutoReconnect(
  TEXT("o3ds.Broadcast.WebRTC.AutoReconnect"),
@@ -71,7 +70,7 @@ static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCAutoReconnect(
  ECVF_Default);
 
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCBackoffInitialMs(
-			UE_LOG(LogO3DSAudio, Warning, TEXT("WebRTC: Audio not ready (connected=%d localDesc=%d remoteDesc=%d pc=%d), deferring frames"),
+ TEXT("o3ds.Broadcast.WebRTC.BackoffInitialMs"),
 500,
  TEXT("Initial backoff for re-offer/reconnect in milliseconds."),
  ECVF_Default);
@@ -90,7 +89,7 @@ static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCNegoChannel(
 
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCChannelId(
  TEXT("o3ds.Broadcast.WebRTC.ChannelId"),
-					UE_LOG(LogO3DSAudio, Warning, TEXT("WebRTC Connector: sendFrame threw exception: %s"), *FString(ANSI_TO_TCHAR(e.what())));
+42,
  TEXT("Fixed DataChannel id to use when NegotiatedChannel=1."),
  ECVF_Default);
 
@@ -98,25 +97,25 @@ static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCChannelId(
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCAudioForceSendRecv(
  TEXT("o3ds.Broadcast.WebRTC.AudioForceSendRecv"),
  0,
-	UE_LOG(LogO3DSAudio, Error, TEXT("Opus: Failed to create encoder err=%d"), Err);
+ TEXT("If 1, set local audio m-line direction to sendrecv instead of sendonly (helps some stacks open tracks)."),
  ECVF_Default);
 
-		UE_LOG(LogO3DSAudio, Verbose, TEXT("Opus: Encoder created sr=%d ch=%d br=%d kbps"), In.SampleRate, In.NumChannels, In.BitrateKbps);
+const char* FWebRTCConnector::DataChannelLabel = "Open3DStream";
 
 // Keep latest desired audio stream label to set on new tracks
-	UE_LOG(LogO3DSAudio, Error, TEXT("Opus: Failed to create decoder err=%d"), Err);
+static FString G_O3DS_DesiredAudioMsid;
 
 // Helper to add labeled/unlabeled tracks
-			UE_LOG(LogO3DSAudio, Verbose, TEXT("WebRTC Connector: Incoming audio track detected"));
+static std::shared_ptr<rtc::Track> AddOpusAudioSendTrackWithLabel(std::shared_ptr<rtc::PeerConnection> PC, int32 BitrateKbps, const FString& StreamLabel)
 {
 	if (!PC)
 	{
 		return nullptr;
-						UE_LOG(LogO3DSAudio, Verbose, TEXT("WebRTC Connector: First decoded audio frame: samples=%d ch=%d sr=48000"), Decoded, ChannelsFromPkt);
+	}
 	// Build an audio media description with Opus payload111
 	const bool bForceSendRecv = (CVarO3DSBroadcastWebRTCAudioForceSendRecv->GetInt() != 0);
 	rtc::Description::Direction Dir = bForceSendRecv ? rtc::Description::Direction::SendRecv : rtc::Description::Direction::SendOnly;
-				UE_LOG(LogO3DSAudio, Log, TEXT("WebRTC Connector: Opus audio track added (stream=%s)"), *AudioRt.Config.StreamLabel);
+	rtc::Description::Audio Audio("audio", Dir);
 	Audio.addOpusCodec(111);
 	if (BitrateKbps >0)
 	{
