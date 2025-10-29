@@ -627,7 +627,8 @@ void FWebRTCConnector::OnLocalDescription(const rtc::Description& Description)
 
 		// Quick SDP sanity: check for audio m-line and log codecs once
 		{
-			bool bHasAudio = SDP.Contains(TEXT("\nm=audio")) || SDP.StartsWith(TEXT("m=audio"));
+			// Detect m=audio regardless of line endings (\n, \r\n)
+			bool bHasAudio = SDP.Contains(TEXT("m=audio"), ESearchCase::IgnoreCase);
 			bLocalSDPHasAudio = bHasAudio;
 			if (!bHasAudio)
 			{
@@ -635,24 +636,34 @@ void FWebRTCConnector::OnLocalDescription(const rtc::Description& Description)
 			}
 			else
 			{
-				// Log first matching a=rtpmap for Opus/PT=111 if present
-				int32 OpusIdx = SDP.Find(TEXT("a=rtpmap:111 opus"), ESearchCase::IgnoreCase, ESearchDir::FromStart);
-				if (OpusIdx != INDEX_NONE)
-				{
-					UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Local SDP includes Opus PT=111"));
-				}
-				// Also log local audio direction flags to help debug TrackOpen=0
+				// Extract audio section robustly (handle CRLF or LF)
 				int32 AudioStart = SDP.Find(TEXT("m=audio"), ESearchCase::IgnoreCase, ESearchDir::FromStart);
+				int32 NextM = INDEX_NONE;
 				if (AudioStart != INDEX_NONE)
 				{
-					int32 NextM = SDP.Find(TEXT("\nm="), ESearchCase::IgnoreCase, ESearchDir::FromStart, AudioStart + 1);
+					// Try various line ending patterns to find the next media section
+					NextM = SDP.Find(TEXT("\nm="), ESearchCase::IgnoreCase, ESearchDir::FromStart, AudioStart + 1);
+					if (NextM == INDEX_NONE)
+					{
+						NextM = SDP.Find(TEXT("\r\nm="), ESearchCase::IgnoreCase, ESearchDir::FromStart, AudioStart + 1);
+					}
+					if (NextM == INDEX_NONE)
+					{
+						// Fallback: find any subsequent "m="
+						NextM = SDP.Find(TEXT("m="), ESearchCase::IgnoreCase, ESearchDir::FromStart, AudioStart + 1);
+					}
 					const FString Section = (NextM == INDEX_NONE) ? SDP.Mid(AudioStart) : SDP.Mid(AudioStart, NextM - AudioStart);
-					const bool bRecvOnly = Section.Contains(TEXT("a=recvonly"));
-					const bool bSendOnly = Section.Contains(TEXT("a=sendonly"));
-					const bool bSendRecv = Section.Contains(TEXT("a=sendrecv"));
-					const bool bInactive = Section.Contains(TEXT("a=inactive"));
+					bLocalDirRecvOnly = Section.Contains(TEXT("a=recvonly"));
+					bLocalDirSendOnly = Section.Contains(TEXT("a=sendonly"));
+					bLocalDirSendRecv = Section.Contains(TEXT("a=sendrecv"));
+					bLocalDirInactive = Section.Contains(TEXT("a=inactive"));
+					bLocalHasOpus111 = Section.Contains(TEXT("a=rtpmap:111 opus"), ESearchCase::IgnoreCase);
+					if (bLocalHasOpus111)
+					{
+						UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Local SDP includes Opus PT=111"));
+					}
 					UE_LOG(LogTemp, Verbose, TEXT("Local SDP audio dir: recvonly=%d sendonly=%d sendrecv=%d inactive=%d"),
-						bRecvOnly?1:0, bSendOnly?1:0, bSendRecv?1:0, bInactive?1:0);
+						bLocalDirRecvOnly?1:0, bLocalDirSendOnly?1:0, bLocalDirSendRecv?1:0, bLocalDirInactive?1:0);
 				}
 			}
 		}
@@ -721,26 +732,34 @@ void FWebRTCConnector::OnOfferReceived(const FString& SDP)
 		PeerConnection->setRemoteDescription(rtc::Description(SdpStr, rtc::Description::Type::Offer));
 		bRemoteDescriptionSet = true;
 		// Diagnose remote SDP for audio support (server path)
-		bRemoteSDPHasAudio = SDP.Contains(TEXT("\nm=audio")) || SDP.StartsWith(TEXT("m=audio"));
+		bRemoteSDPHasAudio = SDP.Contains(TEXT("m=audio"), ESearchCase::IgnoreCase);
 		if (!bRemoteSDPHasAudio)
 		{
 			UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Remote offer has no m=audio"));
 		}
 		else
 		{
-			// Log remote offer audio direction and Opus presence
+			// Log remote offer audio direction and Opus presence (robust line endings)
 			int32 AudioStart = SDP.Find(TEXT("m=audio"), ESearchCase::IgnoreCase, ESearchDir::FromStart);
 			if (AudioStart != INDEX_NONE)
 			{
 				int32 NextM = SDP.Find(TEXT("\nm="), ESearchCase::IgnoreCase, ESearchDir::FromStart, AudioStart + 1);
+				if (NextM == INDEX_NONE)
+				{
+					NextM = SDP.Find(TEXT("\r\nm="), ESearchCase::IgnoreCase, ESearchDir::FromStart, AudioStart + 1);
+				}
+				if (NextM == INDEX_NONE)
+				{
+					NextM = SDP.Find(TEXT("m="), ESearchCase::IgnoreCase, ESearchDir::FromStart, AudioStart + 1);
+				}
 				const FString Section = (NextM == INDEX_NONE) ? SDP.Mid(AudioStart) : SDP.Mid(AudioStart, NextM - AudioStart);
-				const bool bRecvOnly = Section.Contains(TEXT("a=recvonly"));
-				const bool bSendOnly = Section.Contains(TEXT("a=sendonly"));
-				const bool bSendRecv = Section.Contains(TEXT("a=sendrecv"));
-				const bool bInactive = Section.Contains(TEXT("a=inactive"));
-				const bool bOpus111 = Section.Contains(TEXT("a=rtpmap:111 opus"), ESearchCase::IgnoreCase);
+				bRemoteDirRecvOnly = Section.Contains(TEXT("a=recvonly"));
+				bRemoteDirSendOnly = Section.Contains(TEXT("a=sendonly"));
+				bRemoteDirSendRecv = Section.Contains(TEXT("a=sendrecv"));
+				bRemoteDirInactive = Section.Contains(TEXT("a=inactive"));
+				bRemoteHasOpus111 = Section.Contains(TEXT("a=rtpmap:111 opus"), ESearchCase::IgnoreCase);
 				UE_LOG(LogTemp, Verbose, TEXT("Remote OFFER audio dir: recvonly=%d sendonly=%d sendrecv=%d inactive=%d opus111=%d"),
-					bRecvOnly?1:0, bSendOnly?1:0, bSendRecv?1:0, bInactive?1:0, bOpus111?1:0);
+					bRemoteDirRecvOnly?1:0, bRemoteDirSendOnly?1:0, bRemoteDirSendRecv?1:0, bRemoteDirInactive?1:0, bRemoteHasOpus111?1:0);
 			}
 		}
 		
@@ -775,27 +794,35 @@ void FWebRTCConnector::OnAnswerReceived(const FString& SDP)
 		PeerConnection->setRemoteDescription(rtc::Description(SdpStr, rtc::Description::Type::Answer));
 		bRemoteDescriptionSet = true;
 		// Diagnose remote SDP for audio support
-		bRemoteSDPHasAudio = SDP.Contains(TEXT("\nm=audio")) || SDP.StartsWith(TEXT("m=audio"));
+		bRemoteSDPHasAudio = SDP.Contains(TEXT("m=audio"), ESearchCase::IgnoreCase);
 		if (!bRemoteSDPHasAudio && bAudioSendEnabled)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: Remote SDP has no m=audio; audio track will not open"));
 		}
 		else if (bRemoteSDPHasAudio)
 		{
-			// Log audio m-line direction and Opus PT presence to troubleshoot TrackOpen=0 cases
+			// Log audio m-line direction and Opus PT presence (robust line endings)
 			int32 AudioStart = SDP.Find(TEXT("m=audio"), ESearchCase::IgnoreCase, ESearchDir::FromStart);
 			int32 NextM = INDEX_NONE;
 			if (AudioStart != INDEX_NONE)
 			{
 				NextM = SDP.Find(TEXT("\nm="), ESearchCase::IgnoreCase, ESearchDir::FromStart, AudioStart + 1);
+				if (NextM == INDEX_NONE)
+				{
+					NextM = SDP.Find(TEXT("\r\nm="), ESearchCase::IgnoreCase, ESearchDir::FromStart, AudioStart + 1);
+				}
+				if (NextM == INDEX_NONE)
+				{
+					NextM = SDP.Find(TEXT("m="), ESearchCase::IgnoreCase, ESearchDir::FromStart, AudioStart + 1);
+				}
 				const FString Section = (NextM == INDEX_NONE) ? SDP.Mid(AudioStart) : SDP.Mid(AudioStart, NextM - AudioStart);
-				const bool bRecvOnly = Section.Contains(TEXT("a=recvonly"));
-				const bool bSendOnly = Section.Contains(TEXT("a=sendonly"));
-				const bool bSendRecv = Section.Contains(TEXT("a=sendrecv"));
-				const bool bInactive = Section.Contains(TEXT("a=inactive"));
-				const bool bOpus111 = Section.Contains(TEXT("a=rtpmap:111 opus"), ESearchCase::IgnoreCase);
+				bRemoteDirRecvOnly = Section.Contains(TEXT("a=recvonly"));
+				bRemoteDirSendOnly = Section.Contains(TEXT("a=sendonly"));
+				bRemoteDirSendRecv = Section.Contains(TEXT("a=sendrecv"));
+				bRemoteDirInactive = Section.Contains(TEXT("a=inactive"));
+				bRemoteHasOpus111 = Section.Contains(TEXT("a=rtpmap:111 opus"), ESearchCase::IgnoreCase);
 				UE_LOG(LogTemp, Verbose, TEXT("Remote SDP audio dir: recvonly=%d sendonly=%d sendrecv=%d inactive=%d opus111=%d"),
-					bRecvOnly?1:0, bSendOnly?1:0, bSendRecv?1:0, bInactive?1:0, bOpus111?1:0);
+					bRemoteDirRecvOnly?1:0, bRemoteDirSendOnly?1:0, bRemoteDirSendRecv?1:0, bRemoteDirInactive?1:0, bRemoteHasOpus111?1:0);
 			}
 		}
 		FlushPendingRemoteCandidates();
@@ -1823,6 +1850,19 @@ void FWebRTCConnector::GetAudioSendStatus(FAudioSendStatus& OutStatus) const
 	OutStatus.SentPackets = AudioRt.SentPackets;
 	OutStatus.SentBytes = AudioRt.SentBytes;
 	OutStatus.LastError = LastError;
+
+	// Summarize SDP directions and codec presence
+	{
+		const int lr = bLocalDirRecvOnly?1:0, ls = bLocalDirSendOnly?1:0, lsr = bLocalDirSendRecv?1:0, li = bLocalDirInactive?1:0;
+		OutStatus.LocalAudioDir = FString::Printf(TEXT("recvonly=%d sendonly=%d sendrecv=%d inactive=%d"), lr, ls, lsr, li);
+		OutStatus.bLocalOpus111 = bLocalHasOpus111;
+	}
+
+	{
+		const int rr = bRemoteDirRecvOnly?1:0, rs = bRemoteDirSendOnly?1:0, rsr = bRemoteDirSendRecv?1:0, ri = bRemoteDirInactive?1:0;
+		OutStatus.RemoteAudioDir = FString::Printf(TEXT("recvonly=%d sendonly=%d sendrecv=%d inactive=%d"), rr, rs, rsr, ri);
+		OutStatus.bRemoteOpus111 = bRemoteHasOpus111;
+	}
 }
 
 #if O3DS_WITH_OPUS
@@ -1912,6 +1952,8 @@ static FAutoConsoleCommand CmdO3DSDumpAudioStatus(
 		UE_LOG(LogTemp, Log, TEXT("Signaling=%d PeerConnected=%d LocalDesc=%d RemoteDesc=%d DataChannelOpen=%d"),
 			S.bSignalingConnected?1:0, S.bPeerConnected?1:0, S.bLocalDesc?1:0, S.bRemoteDesc?1:0, S.bDataChannelOpen?1:0);
 		UE_LOG(LogTemp, Log, TEXT("LocalSDP.m=audio=%d RemoteSDP.m=audio=%d"), S.bLocalSdpHasAudio?1:0, S.bRemoteSdpHasAudio?1:0);
+		UE_LOG(LogTemp, Log, TEXT("Local SDP audio dir: %s opus111=%d"), *S.LocalAudioDir, S.bLocalOpus111?1:0);
+		UE_LOG(LogTemp, Log, TEXT("Remote SDP audio dir: %s opus111=%d"), *S.RemoteAudioDir, S.bRemoteOpus111?1:0);
 		UE_LOG(LogTemp, Log, TEXT("AudioEnabled=%d TrackPresent=%d TrackOpen=%d OpusReady=%d"),
 			S.bAudioSendEnabled?1:0, S.bAudioTrackPresent?1:0, S.bAudioTrackOpen?1:0, S.bOpusEncoderReady?1:0);
 		UE_LOG(LogTemp, Log, TEXT("PeerState=%d ConnState=%s StreamLabel=%s"),

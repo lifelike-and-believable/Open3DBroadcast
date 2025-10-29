@@ -132,6 +132,12 @@ public:
 		uint64 SentPackets = 0;
 		uint64 SentBytes = 0;
 		FString LastError;
+
+		// SDP diagnostics (summaries for quick debugging)
+		FString LocalAudioDir;      // e.g. "recvonly=0 sendonly=1 sendrecv=0 inactive=0"
+		FString RemoteAudioDir;     // same format as above
+		bool bLocalOpus111 = false; // whether a=rtpmap:111 opus was present in local SDP audio m-line
+		bool bRemoteOpus111 = false; // whether present in last remote SDP (offer/answer)
 	};
 
 	// Retrieve a point-in-time status snapshot (thread-safe)
@@ -181,6 +187,19 @@ private:
 	// SDP presence trackers for diagnostics
 	bool bLocalSDPHasAudio = false;
 	bool bRemoteSDPHasAudio = false;
+
+	// Parsed SDP audio direction flags and codec presence for diagnostics
+	bool bLocalDirRecvOnly = false;
+	bool bLocalDirSendOnly = false;
+	bool bLocalDirSendRecv = false;
+	bool bLocalDirInactive = false;
+	bool bLocalHasOpus111 = false;
+
+	bool bRemoteDirRecvOnly = false;
+	bool bRemoteDirSendOnly = false;
+	bool bRemoteDirSendRecv = false;
+	bool bRemoteDirInactive = false;
+	bool bRemoteHasOpus111 = false;
 
 	// Audio state
 	bool bAudioSendEnabled = false;
