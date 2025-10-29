@@ -93,6 +93,13 @@ static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCChannelId(
  TEXT("Fixed DataChannel id to use when NegotiatedChannel=1."),
  ECVF_Default);
 
+// Experimental: force audio m-line direction to sendrecv instead of sendonly
+static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCAudioForceSendRecv(
+ TEXT("o3ds.Broadcast.WebRTC.AudioForceSendRecv"),
+ 0,
+ TEXT("If 1, set local audio m-line direction to sendrecv instead of sendonly (helps some stacks open tracks)."),
+ ECVF_Default);
+
 const char* FWebRTCConnector::DataChannelLabel = "Open3DStream";
 
 // Keep latest desired audio stream label to set on new tracks
@@ -106,7 +113,9 @@ static std::shared_ptr<rtc::Track> AddOpusAudioSendTrackWithLabel(std::shared_pt
 		return nullptr;
 	}
 	// Build an audio media description with Opus payload111
-	rtc::Description::Audio Audio("audio", rtc::Description::Direction::SendOnly);
+	const bool bForceSendRecv = (CVarO3DSBroadcastWebRTCAudioForceSendRecv->GetInt() != 0);
+	rtc::Description::Direction Dir = bForceSendRecv ? rtc::Description::Direction::SendRecv : rtc::Description::Direction::SendOnly;
+	rtc::Description::Audio Audio("audio", Dir);
 	Audio.addOpusCodec(111);
 	if (BitrateKbps >0)
 	{
@@ -130,7 +139,9 @@ static std::shared_ptr<rtc::Track> AddOpusAudioSendTrack(std::shared_ptr<rtc::Pe
 	{
 		return nullptr;
 	}
-	rtc::Description::Audio Audio("audio", rtc::Description::Direction::SendOnly);
+	const bool bForceSendRecv = (CVarO3DSBroadcastWebRTCAudioForceSendRecv->GetInt() != 0);
+	rtc::Description::Direction Dir = bForceSendRecv ? rtc::Description::Direction::SendRecv : rtc::Description::Direction::SendOnly;
+	rtc::Description::Audio Audio("audio", Dir);
 	Audio.addOpusCodec(111);
 	if (BitrateKbps >0)
 	{
