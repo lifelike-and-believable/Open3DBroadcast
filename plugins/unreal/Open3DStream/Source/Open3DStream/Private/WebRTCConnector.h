@@ -258,6 +258,8 @@ private:
 
 	// Re-offer/reconnect timers
 	bool bSignalingIsConnected = false;
+	double SignalingConnectStartSeconds = 0.0; // when Connect() initiated; used for join timeout diagnostics
+	bool bSignalingJoinErrorReported = false;
 	double NextOfferTimeSeconds =0.0;
 	double OfferBackoffSeconds =0.0;
 	double NextReconnectTimeSeconds =0.0;

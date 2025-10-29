@@ -95,6 +95,13 @@ static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCChannelId(
  TEXT("Fixed DataChannel id to use when NegotiatedChannel=1."),
  ECVF_Default);
 
+// Timeout for waiting the signaling 'joined' ack before reporting an error
+static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCSignalingJoinTimeoutMs(
+ TEXT("o3ds.Broadcast.WebRTC.SignalingJoinTimeoutMs"),
+ 4000,
+ TEXT("If > 0, report an error if signaling doesn't deliver a 'joined' ack within this time (milliseconds)."),
+ ECVF_Default);
+
 // Experimental: force audio m-line direction to sendrecv instead of sendonly
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCAudioForceSendRecv(
  TEXT("o3ds.Broadcast.WebRTC.AudioForceSendRecv"),
@@ -290,6 +297,8 @@ bool FWebRTCConnector::Start(const FString& Url, bool bInIsServer)
 	};
 
 	// Connect to signaling server
+	SignalingConnectStartSeconds = FPlatformTime::Seconds();
+	bSignalingJoinErrorReported = false;
 	if (!SignalingClient->Connect(SignalingServerUrl, Room, bInIsServer))
 	{
 		LastError = SignalingClient->GetLastError();
@@ -470,6 +479,24 @@ void FWebRTCConnector::Tick()
  }
 
  // Re-offer / reconnect timers (Issue #87)
+	// Signaling join watchdog: surface a clear error if no 'joined' ack arrives in time
+	if (SignalingClient && !bSignalingIsConnected && !bSignalingJoinErrorReported && SignalingConnectStartSeconds > 0.0)
+	{
+		const double Now = FPlatformTime::Seconds();
+		const int32 TimeoutMs = CVarO3DSBroadcastWebRTCSignalingJoinTimeoutMs->GetInt();
+		if (TimeoutMs > 0)
+		{
+			const double ElapsedMs = (Now - SignalingConnectStartSeconds) * 1000.0;
+			if (ElapsedMs >= (double)TimeoutMs)
+			{
+				LastError = FString::Printf(TEXT("Signaling join timeout after %d ms (ws=%s room=%s)"), TimeoutMs, *SignalingServerUrl, *RoomName);
+				UE_LOG(LogTemp, Warning, TEXT("WebRTC Connector: %s"), *LastError);
+				bSignalingJoinErrorReported = true;
+			}
+		}
+	}
+
+	// Re-offer / reconnect timers (Issue #87)
  if (CVarO3DSBroadcastWebRTCAutoReconnect->GetInt() !=0)
  {
  const double Now = FPlatformTime::Seconds();
@@ -700,6 +727,8 @@ void FWebRTCConnector::OnSignalingConnected()
 {
 	UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Signaling connected"));
 	bSignalingIsConnected = true;
+	SignalingConnectStartSeconds = 0.0;
+	bSignalingJoinErrorReported = false;
 	
 	// Only client mode creates data channel proactively
 	// Server mode will receive data channel from peer
@@ -724,6 +753,9 @@ void FWebRTCConnector::OnSignalingDisconnected(const FString& Reason)
 	bIsConnected = false;
 	bDataChannelOpen = false;
 	bSignalingIsConnected = false;
+	// allow future connects to report a new timeout if needed
+	SignalingConnectStartSeconds = 0.0;
+	bSignalingJoinErrorReported = false;
 }
 
 void FWebRTCConnector::OnOfferReceived(const FString& SDP)
