@@ -21,7 +21,11 @@ namespace
 			// Chain a data callback to parse announce before user callback
 			Inner->SetDataReceivedCallback([this](const uint8* Data, int32 Size)
 			{
-				HandleIncomingData(Data, Size);
+				// Swallow recognized control messages (e.g., o3ds.audio.announce)
+				if (HandleIncomingData(Data, Size))
+				{
+					return; // consumed
+				}
 				// Forward to external if bound
 				if (UserDataCallback)
 				{
@@ -130,7 +134,8 @@ namespace
 			SendDataReliable(reinterpret_cast<const uint8*>(Conv.Get()), Conv.Length());
 		}
 
-		void HandleIncomingData(const uint8* Data, int32 Size)
+		// Returns true if the message was recognized and consumed (not forwarded)
+		bool HandleIncomingData(const uint8* Data, int32 Size)
 		{
 			// Try parse as JSON announce; if recognized, consume it here and do NOT forward to user callback,
 			// to avoid spurious parse errors in consumers expecting O3DS flatbuffers.
@@ -159,10 +164,12 @@ namespace
 						}
 					}
 					// Announce handled; swallow this message
-					return;
+					UE_LOG(LogTemp, Verbose, TEXT("FLibDataChannelAdapter: Swallowed o3ds.audio.announce (tracks=%d)"), Root->GetArrayField(TEXT("tracks")).Num());
+					return true;
 				}
 			}
 			// Not a recognized control message; let user-level handler see it
+			return false;
 		}
 
 	private:
