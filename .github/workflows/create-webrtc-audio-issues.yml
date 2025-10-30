@@ -1,0 +1,121 @@
+name: Create WebRTC Audio Issues
+
+# This workflow creates GitHub issues for the WebRTC Audio Path Refactor
+# from the detailed specification in WEBRTC_AUDIO_REFACTOR_ISSUES_DETAILED.md
+#
+# To use:
+# 1. Go to the Actions tab in GitHub
+# 2. Select "Create WebRTC Audio Issues" workflow
+# 3. Click "Run workflow"
+# 4. Optionally customize the Epic title
+# 5. Click "Run workflow" button
+#
+# The workflow will create 1 Epic and 7 sub-issues with proper
+# labels and cross-references.
+
+on:
+  workflow_dispatch:
+    inputs:
+      epic_title:
+        description: 'Epic issue title (optional override)'
+        required: false
+        default: '[EPIC] WebRTC Audio Path Refactor'
+        type: string
+      dry_run:
+        description: 'Dry run (validate without creating issues)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  create-issues:
+    name: Create WebRTC Audio Issues
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Setup GitHub CLI
+        run: |
+          # GitHub CLI is pre-installed on ubuntu-latest runners
+          gh --version
+          
+          # Authenticate using GITHUB_TOKEN
+          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+          gh auth status
+      
+      - name: Validate issue specification file
+        run: |
+          if [ ! -f "WEBRTC_AUDIO_REFACTOR_ISSUES_DETAILED.md" ]; then
+            echo "Error: WEBRTC_AUDIO_REFACTOR_ISSUES_DETAILED.md not found"
+            exit 1
+          fi
+          
+          # Check file has expected issue headers
+          issue_count=$(grep -c "^## Issue [0-9]:" WEBRTC_AUDIO_REFACTOR_ISSUES_DETAILED.md || true)
+          echo "Found $issue_count issue sections"
+          
+          if [ "$issue_count" -ne 8 ]; then
+            echo "Error: Expected 8 issues, found $issue_count"
+            exit 1
+          fi
+          
+          echo "✓ Issue specification file validated"
+      
+      - name: Make script executable
+        run: chmod +x scripts/create_webrtc_audio_issues.py
+      
+      - name: Create issues (dry run)
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "Running in dry-run mode..."
+          python3 scripts/create_webrtc_audio_issues.py \
+            --repo ${{ github.repository }} \
+            --dry-run
+      
+      - name: Create issues
+        if: ${{ !inputs.dry_run }}
+        run: |
+          # Ensure epic label exists
+          gh label view epic >/dev/null 2>&1 || gh label create epic --description "Epic work item" --color d93f0b || true
+          
+          echo "Creating issues in ${{ github.repository }}..."
+          python3 scripts/create_webrtc_audio_issues.py \
+            --repo ${{ github.repository }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Summary
+        if: ${{ !inputs.dry_run }}
+        run: |
+          echo "## WebRTC Audio Issues Created ✓" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The Epic and 7 sub-issues have been created in this repository." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### What was created:" >> $GITHUB_STEP_SUMMARY
+          echo "- 1 Epic issue: [EPIC] WebRTC Audio Path Refactor" >> $GITHUB_STEP_SUMMARY
+          echo "- 7 Sub-issues covering all phases (A through D)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next steps:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Go to the [Issues tab](../../issues)" >> $GITHUB_STEP_SUMMARY
+          echo "2. Find the Epic issue (labeled \`epic\`)" >> $GITHUB_STEP_SUMMARY
+          echo "3. Review the sub-issues and assign developers" >> $GITHUB_STEP_SUMMARY
+          echo "4. Start with Phase A issues (#1 and #2)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Implementation timeline:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Phase A** (1.5 days): Issues #1-2" >> $GITHUB_STEP_SUMMARY
+          echo "- **Phase B** (2 days): Issues #3-4" >> $GITHUB_STEP_SUMMARY
+          echo "- **Phase C** (1 day): Issues #5-6" >> $GITHUB_STEP_SUMMARY
+          echo "- **Phase D** (0.5 day): Issue #7" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Total estimated time:** 3 days (with buffer)" >> $GITHUB_STEP_SUMMARY
