@@ -202,7 +202,6 @@ private:
 	bool bRemoteHasOpus111 = false;
 
 	// Audio state
-	bool bAudioSendEnabled = false;
 	struct FAudioRuntime
 	{
 		FAudioConfig Config;
@@ -229,6 +228,12 @@ private:
 	bool CreateDataChannel();
 	void CleanupPeerConnection();
 	void FlushPendingRemoteCandidates();
+	
+#if O3DS_WITH_OPUS
+	// Helper to set up audio track with RTP/RTCP handlers
+	// Returns true if track was created successfully
+	bool SetupAudioTrackAndHandlers(const FAudioConfig& Config, std::shared_ptr<rtc::PeerConnection> PC);
+#endif
 
 	// Event handlers
 	void OnPeerConnectionStateChange(int StateInt);
