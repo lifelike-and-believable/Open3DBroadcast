@@ -65,8 +65,8 @@ jobs:
           issue_count=$(grep -c "^## Issue [0-9]:" WEBRTC_AUDIO_REFACTOR_ISSUES_DETAILED.md || true)
           echo "Found $issue_count issue sections"
           
-          if [ "$issue_count" -ne 7 ]; then
-            echo "Error: Expected 7 issues, found $issue_count"
+          if [ "$issue_count" -ne 8 ]; then
+            echo "Error: Expected 8 issues, found $issue_count"
             exit 1
           fi
           
