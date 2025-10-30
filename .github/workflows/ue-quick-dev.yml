@@ -228,6 +228,63 @@ jobs:
           # Quick sanity: ensure typical subfolders exist (optional; adjust to your layout)
           # if (-not (Test-Path (Join-Path $dst 'Lib'))) { Write-Warning "ThirdParty\Lib not found under $dst (ok if your layout differs)." }
 
+      - name: Verify ThirdParty contents and create aliases (Windows)
+        shell: pwsh
+        run: |
+          $base   = Join-Path "${{ steps.paths.outputs.pluginDir }}" "ThirdParty"
+          $webrtc = Join-Path $base "webrtc"
+      
+          Write-Host "ThirdParty base: $base"
+          Write-Host "WebRTC dir:      $webrtc"
+          if (-not (Test-Path -Path $base -PathType Container)) { Write-Error "ThirdParty base '$base' not found"; exit 1 }
+          if (-not (Test-Path -Path $webrtc -PathType Container)) { Write-Error "ThirdParty/webrtc '$webrtc' not found"; exit 1 }
+      
+          Write-Host "`nTree (2 levels):"
+          Get-ChildItem $base -Recurse -Depth 2 | Select-Object FullName | ForEach-Object { $_.FullName } | Write-Host
+      
+          $expected = @(
+            Join-Path $base   "open3dstreamstatic.lib"),
+            Join-Path $base   "nng.lib"),
+            Join-Path $base   "flatbuffers.lib"),
+            Join-Path $base   "opus.lib"),
+            Join-Path $webrtc "datachannel.lib"),
+            Join-Path $webrtc "usrsctp.lib"),
+            Join-Path $webrtc "juice.lib"),
+            Join-Path $webrtc "mbedtls.lib"),
+            Join-Path $webrtc "mbedx509.lib"),
+            Join-Path $webrtc "mbedcrypto.lib"),
+            Join-Path $webrtc "srtp2.lib")
+          )
+      
+          $missing = @()
+          foreach ($p in $expected) {
+            if (-not (Test-Path -Path $p -PathType Leaf)) { $missing += $p }
+          }
+      
+          # Common aliases: datachannel-static.lib -> datachannel.lib, libsrtp2.lib -> srtp2.lib
+          $dcStatic = Join-Path $webrtc "datachannel-static.lib"
+          $dc       = Join-Path $webrtc "datachannel.lib"
+          if ((-not (Test-Path $dc)) -and (Test-Path $dcStatic)) {
+            Write-Host "Creating alias: $dc <- $dcStatic"
+            Copy-Item $dcStatic $dc
+            $missing = $missing | Where-Object { $_ -ne $dc }
+          }
+      
+          $libSrtp2 = Join-Path $webrtc "libsrtp2.lib"
+          $srtp2    = Join-Path $webrtc "srtp2.lib"
+          if ((-not (Test-Path $srtp2)) -and (Test-Path $libSrtp2)) {
+            Write-Host "Creating alias: $srtp2 <- $libSrtp2"
+            Copy-Item $libSrtp2 $srtp2
+            $missing = $missing | Where-Object { $_ -ne $srtp2 }
+          }
+      
+          if ($missing.Count -gt 0) {
+            Write-Error ("Missing required libraries:`n - " + ($missing -join "`n - "))
+            exit 1
+          }
+      
+          Write-Host "ThirdParty verification passed."
+
       - name: Link plugin into external host (junction)
         shell: pwsh
         run: |
