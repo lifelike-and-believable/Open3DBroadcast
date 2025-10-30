@@ -319,6 +319,11 @@ private:
  TAtomic<uint64> DroppedFrames{0};
  FDelegateHandle SerializedFrameHandle;
 
+ // Two-phase transport initialization for WebRTC audio support:
+ // Phase 1: CreateInternalTransport() - Creates transport and prepares connector (WebRTC only)
+ // Phase 2: StartInternalTransport() - Starts the actual connection
+ // This split allows audio configuration (EnableAudioSend) to occur between phases,
+ // ensuring audio tracks are added before PeerConnection creation.
  void CreateInternalTransport();
  void StartInternalTransport();
  void TeardownInternalTransport();
