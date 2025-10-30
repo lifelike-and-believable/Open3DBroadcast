@@ -441,3 +441,15 @@ jobs:
               target_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
               description: 'UE dev workflow failed',
             });
+
+      - name: Cleanup ThirdParty junction (remove link only)
+        if: always()
+        shell: pwsh
+        run: |
+          $dst = Join-Path "${{ steps.paths.outputs.pluginDir }}" "ThirdParty"
+          if (Test-Path -Path $dst) {
+            Write-Host "Removing ThirdParty junction at $dst"
+            # Use cmd rmdir to remove the junction itself without touching target contents
+            cmd /c rmdir "$dst" 2>$null | Out-Null
+            if (Test-Path -Path $dst) { Write-Warning "Could not remove ThirdParty junction (still present)" }
+          }
