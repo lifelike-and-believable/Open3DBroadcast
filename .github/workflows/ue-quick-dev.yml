@@ -118,8 +118,8 @@ jobs:
           }
           $candidates = @(
             $env:UE5_ROOT, $env:UE4_ROOT,
-            "C:\Program Files\Epic Games\UE_5.4",
-            "C:\Program Files\Epic Games\UE_5.3",
+            "C:\Program Files\Epic Games\UE_5.6",
+            "C:\Program Files\Epic Games\UE_5.5",
             "D:\Unreal\UE_5.4"
           ) | Where-Object { $_ }
           foreach ($root in $candidates) {
