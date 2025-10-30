@@ -111,24 +111,34 @@ jobs:
       - name: Find Unreal Engine (UE_ROOT)
         shell: pwsh
         run: |
+          Write-Host "Detecting Unreal Engine install..."
           if ($env:UE_ROOT) {
             "UE_ROOT=$($env:UE_ROOT)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
             Write-Host "Using UE_ROOT=$($env:UE_ROOT)"
             exit 0
           }
+          
           $candidates = @(
             $env:UE5_ROOT, $env:UE4_ROOT,
-            "C:\Program Files\Epic Games\UE_5.6"
+            "C:\Program Files\Epic Games\UE_5.6",
+            "C:\Program Files\Epic Games\UE_5.5",
+            "C:\Program Files\Epic Games\UE_5.4"
           ) | Where-Object { $_ }
+          
           foreach ($root in $candidates) {
             $uat    = Join-Path $root "Engine\Build\BatchFiles\RunUAT.bat"
             $editor = Join-Path $root "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
-            if (Test-Path $uat -PathType Leaf -and Test-Path $editor -PathType Leaf) {
+          
+            $hasUAT    = Test-Path -Path $uat -PathType Leaf
+            $hasEditor = Test-Path -Path $editor -PathType Leaf
+          
+            if ($hasUAT -and $hasEditor) {
               "UE_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
               Write-Host "Using UE_ROOT=$root"
               exit 0
             }
           }
+          
           Write-Error "Could not locate UE install. Set UE_ROOT on the runner or update search paths."
           exit 1
 
