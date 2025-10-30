@@ -394,6 +394,19 @@ jobs:
               body: `❌ UE ${cmd}${suffix} failed for PR #${pr}. Open the run logs for details.\n\nRun: ${runUrl}`
             });
 
+      - name: Comment UBT log tail on failure
+        if: github.event_name == 'issue_comment' && failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.CI_BOT_TOKEN != '' && secrets.CI_BOT_TOKEN || github.token }}
+        run: |
+          $log = "${{ steps.quickbuild.outputs.buildLog }}"
+          if (-not (Test-Path -LiteralPath $log -PathType Leaf)) { exit 0 }
+          $tail = (Get-Content -Path $log -Tail 200 -ErrorAction SilentlyContinue) -join "`n"
+          $body = "❌ UE quickbuild failed for PR #${{ steps.ctx.outputs.pr }}.`n`nLast 200 lines of UBT log:`n```````n$tail`n``````"
+          $url = "https://api.github.com/repos/${{ github.repository }}/issues/${{ steps.ctx.outputs.pr }}/comments"
+          Invoke-RestMethod -Method POST -Uri $url -Headers @{Authorization="token $env:GH_TOKEN"} -Body (@{ body=$body } | ConvertTo-Json)
+
       - name: Set commit status (success)
         if: success()
         uses: actions/github-script@v7
