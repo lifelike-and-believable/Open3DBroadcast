@@ -201,7 +201,7 @@ void UO3DSBroadcastComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
  Super::EndPlay(EndPlayReason);
 }
 
-void UO3DSBroadcastComponent::SetupInternalTransport()
+void UO3DSBroadcastComponent::CreateInternalTransport()
 {
  if (!bAutoCreateTransport || InternalTransport)
  {
@@ -228,14 +228,29 @@ void UO3DSBroadcastComponent::SetupInternalTransport()
  InternalTransport = MakeUnique<FO3DSUdpTransport>();
  break;
  case EO3DSTransportFamily::WebRTC:
+ {
  InternalTransport = MakeUnique<FO3DSWebRtcTransport>();
+ // For WebRTC: prepare channel/connector now so audio can be configured before Start()
+ FO3DSWebRtcTransport* Wrtc = static_cast<FO3DSWebRtcTransport*>(InternalTransport.Get());
+ if (Wrtc && !Wrtc->PrepareChannel())
+ {
+ UE_LOG(LogO3DSBroadcast, Error, TEXT("Failed to prepare WebRTC channel"));
+ InternalTransport.Reset();
+ }
  break;
+ }
  default:
  break;
  }
+}
 
- if (InternalTransport)
+void UO3DSBroadcastComponent::StartInternalTransport()
+{
+ if (!InternalTransport)
  {
+ return;
+ }
+
  FString EffectiveUrl = Url;
  FString EffectiveKey = Key;
 
@@ -288,7 +303,6 @@ void UO3DSBroadcastComponent::SetupInternalTransport()
  }
  SetComponentTickEnabled(true);
  UE_LOG(LogO3DSBroadcast, Log, TEXT("Built-in transport started: %s %s"), *ProtocolName, *EffectiveUrl);
- }
  }
 }
 
@@ -360,10 +374,11 @@ void UO3DSBroadcastComponent::StartCapture()
  });
  }
 
- // Setup optional built-in transport
- SetupInternalTransport();
+ // Create optional built-in transport (but don't start it yet)
+ CreateInternalTransport();
 
- // Attach or configure audio capture for WebRTC based on existing settings
+ // For WebRTC with audio: configure audio BEFORE starting transport
+ // This ensures EnableAudioSend() is called before the PeerConnection is created
  if (TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio)
  {
  if (AActor* Owner = GetOwner())
@@ -388,7 +403,7 @@ void UO3DSBroadcastComponent::StartCapture()
  AudioCap->Config.SubmixToTap = WebRTCSubmixToTap;
  AudioCap->SubjectName = *BuildSubjectName(TargetMesh.Get());
 
-	 // If our internal transport is WebRTC, inject its connector so audio can enable a track immediately
+	 // Inject connector and configure audio BEFORE transport starts
 	 if (InternalTransport)
 	 {
 	  if (FO3DSWebRtcTransport* Wrtc = static_cast<FO3DSWebRtcTransport*>(InternalTransport.Get()))
@@ -403,6 +418,9 @@ void UO3DSBroadcastComponent::StartCapture()
  }
  }
  }
+
+ // Now start the transport (after audio is configured)
+ StartInternalTransport();
 
  BindToTarget();
  bIsCapturing = TargetMesh.IsValid();
