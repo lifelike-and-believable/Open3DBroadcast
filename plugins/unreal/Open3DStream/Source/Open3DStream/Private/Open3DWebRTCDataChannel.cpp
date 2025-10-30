@@ -11,13 +11,29 @@ class FO3DSWebRTCDataChannel::FImpl
 public:
  FImpl() = default;
 
- bool Start(const FString& Url, EO3DSWebRtcBackendReceiver Backend)
+ // Create connector without starting (allows audio configuration before PeerConnection creation)
+ bool PrepareConnector(EO3DSWebRtcBackendReceiver Backend)
  {
+ if (Connector)
+ {
+ return true; // Already prepared
+ }
+ 
  // Create connector via factory using provided backend
  Connector = CreateWebRTCConnector(Backend);
  if (!Connector)
  {
  UE_LOG(LogTemp, Error, TEXT("Failed to create WebRTC connector for backend %d"), (int)Backend);
+ return false;
+ }
+ return true;
+ }
+
+ bool Start(const FString& Url, EO3DSWebRtcBackendReceiver Backend)
+ {
+ // Ensure connector is created (supports both old single-phase and new two-phase init)
+ if (!PrepareConnector(Backend))
+ {
  return false;
  }
 
@@ -90,6 +106,7 @@ public:
 FO3DSWebRTCDataChannel::FO3DSWebRTCDataChannel() : Impl(MakeUnique<FImpl>()) {}
 FO3DSWebRTCDataChannel::~FO3DSWebRTCDataChannel() { Stop(); }
 
+bool FO3DSWebRTCDataChannel::PrepareConnector(EO3DSWebRtcBackendReceiver Backend) { return Impl->PrepareConnector(Backend); }
 bool FO3DSWebRTCDataChannel::Start(const FString& Url, EO3DSWebRtcBackendReceiver Backend) { return Impl->Start(Url, Backend); }
 void FO3DSWebRTCDataChannel::Stop() { if (Impl) Impl->Stop(); }
 bool FO3DSWebRTCDataChannel::Send(const uint8* Data, int32 Size) { return Impl->Send(Data, Size); }

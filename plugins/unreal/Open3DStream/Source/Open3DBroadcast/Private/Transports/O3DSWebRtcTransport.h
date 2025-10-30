@@ -82,10 +82,41 @@ public:
     // Retained for source compatibility; currently a no-op until native audio tracks are implemented.
     void SetAudioConfig(const FO3DSWebRTCAudioConfig& /*In*/) {}
 
+    // Create channel and connector but don't start yet (allows audio configuration before connection)
+    bool PrepareChannel()
+    {
+        if (Channel)
+        {
+            return true; // Already prepared
+        }
+        
+        Channel = MakeUnique<FO3DSWebRTCDataChannel>();
+        
+        // Map broadcast backend enum to receiver enum for the shared data channel API
+        auto ToReceiverBackend = [](EO3DSWebRtcBackend In){
+            switch (In)
+            {
+            case EO3DSWebRtcBackend::LibDataChannel: return EO3DSWebRtcBackendReceiver::LibDataChannel;
+            case EO3DSWebRtcBackend::LiveKit: return EO3DSWebRtcBackendReceiver::LiveKit;
+            default: return EO3DSWebRtcBackendReceiver::LibDataChannel;
+            }
+        };
+        const EO3DSWebRtcBackendReceiver ReceiverBackend = ToReceiverBackend(Backend);
+        
+        // Create connector without starting (allows audio to be configured before PeerConnection)
+        return Channel->PrepareConnector(ReceiverBackend);
+    }
+
     virtual bool Start(const FString& InUrl, const FString& InProtocol, const FString& InKey) override
     {
         Url = InUrl; Key = InKey; Protocol = InProtocol;
-        Channel = MakeUnique<FO3DSWebRTCDataChannel>();
+        
+        // Ensure channel and connector are prepared (supports both old single-phase and new two-phase init)
+        if (!PrepareChannel())
+        {
+            UE_LOG(LogO3DSBroadcast, Error, TEXT("[WebRTC] Transport failed to prepare channel"));
+            return false;
+        }
 
         // Ensure complementary WebRTC role is encoded in the URL query (client/server)
         FString EffectiveUrl = Url;

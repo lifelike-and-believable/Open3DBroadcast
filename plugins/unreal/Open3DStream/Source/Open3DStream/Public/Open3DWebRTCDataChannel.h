@@ -19,6 +19,10 @@ public:
     FO3DSWebRTCDataChannel();
     ~FO3DSWebRTCDataChannel();
 
+    // Prepare connector without starting (allows audio configuration before PeerConnection creation).
+    // This is optional; Start() will call PrepareConnector() automatically if not already called.
+    bool PrepareConnector(EO3DSWebRtcBackendReceiver Backend = static_cast<EO3DSWebRtcBackendReceiver>(0));
+
     // Start a WebRTC peer connection and open a binary DataChannel.
     // Url example: webrtc://host:port/room?role=client|server&stun=stun.l.google.com:19302
     // If role is omitted, defaults to client.
