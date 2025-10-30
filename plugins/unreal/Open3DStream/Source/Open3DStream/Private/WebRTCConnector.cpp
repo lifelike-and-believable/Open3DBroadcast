@@ -184,7 +184,10 @@ bool FWebRTCConnector::Start(const FString& Url, bool bInIsServer)
 	ResetReofferBackoff(/*bImmediate*/true);
 	ResetReconnectBackoff(/*bImmediate*/true);
 
-	UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Starting connection (Mode: %s)"), bInIsServer ? TEXT("Server") : TEXT("Client"));
+	UE_LOG(LogTemp, Log, TEXT("[START 1] WebRTC Connector Start (Mode: %s, URL: %s, AudioConfigured: %s)"), 
+		bInIsServer ? TEXT("Server") : TEXT("Client"), 
+		*Url,
+		AudioRt.Config.StreamLabel.IsEmpty() ? TEXT("NO") : *FString::Printf(TEXT("YES (%s)"), *AudioRt.Config.StreamLabel));
 
 	// Parse URL
 	FString Host;
@@ -195,7 +198,7 @@ bool FWebRTCConnector::Start(const FString& Url, bool bInIsServer)
 	if (!ParseWebRtcUrl(Url, Host, Port, Room, Params))
 	{
 		LastError = FString::Printf(TEXT("Invalid WebRTC URL: %s"), *Url);
-		UE_LOG(LogTemp, Error, TEXT("WebRTC Connector: %s"), *LastError);
+		UE_LOG(LogTemp, Error, TEXT("[START ERROR] Invalid WebRTC URL: %s"), *LastError);
 		return false;
 	}
 
@@ -212,14 +215,17 @@ bool FWebRTCConnector::Start(const FString& Url, bool bInIsServer)
 	}
 	SignalingServerUrl = FString::Printf(TEXT("%s://%s:%d"), *Protocol, *Host, Port);
 
-	UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: Parsed URL - Host: %s, Port: %d, Room: %s, Protocol: %s, Signaling: %s"),
-		*Host, Port, *Room, *Protocol, *SignalingServerUrl);
+	UE_LOG(LogTemp, Log, TEXT("[START 2] Parsed URL - Host: %s, Port: %d, Room: %s, Signaling: %s"),
+		*Host, Port, *Room, *SignalingServerUrl);
 
 	// Setup WebRTC configuration
+	UE_LOG(LogTemp, Log, TEXT("[START 3] Calling SetupPeerConnection (will create PeerConnection and add audio track if configured)"));
 	if (!SetupPeerConnection())
 	{
+		UE_LOG(LogTemp, Error, TEXT("[START ERROR] SetupPeerConnection failed"));
 		return false;
 	}
+	UE_LOG(LogTemp, Log, TEXT("[START 4] SetupPeerConnection completed successfully"));
 
 	// Create signaling client
 	SignalingClient = MakeUnique<FWebRTCSignalingClient>();
@@ -1307,7 +1313,7 @@ bool FWebRTCConnector::SetupPeerConnection()
 			});
 		}
 
-		UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PeerConnection created successfully"));
+		UE_LOG(LogTemp, Log, TEXT("[PEERCONN 1] PeerConnection created successfully"));
 
 #if O3DS_WITH_OPUS
 		// CRITICAL: Add audio track BEFORE creating data channel
@@ -1316,8 +1322,20 @@ bool FWebRTCConnector::SetupPeerConnection()
 		// Audio track is ALWAYS added if we have a valid config, ensuring it's in the initial SDP
 		if (!AudioTrack && !AudioRt.Config.StreamLabel.IsEmpty())
 		{
-			SetupAudioTrackAndHandlers(AudioRt.Config, PeerConnection);
+			UE_LOG(LogTemp, Log, TEXT("[PEERCONN 2] Adding audio track BEFORE datachannel (StreamLabel='%s')"), *AudioRt.Config.StreamLabel);
+			const bool bTrackAdded = SetupAudioTrackAndHandlers(AudioRt.Config, PeerConnection);
+			UE_LOG(LogTemp, Log, TEXT("[PEERCONN 3] Audio track setup result: %s"), bTrackAdded ? TEXT("SUCCESS") : TEXT("FAILED"));
 		}
+		else if (AudioTrack)
+		{
+			UE_LOG(LogTemp, Log, TEXT("[PEERCONN 2] Audio track already exists - skipping"));
+		}
+		else
+		{
+			UE_LOG(LogTemp, Log, TEXT("[PEERCONN 2] No audio config (StreamLabel empty) - skipping audio track"));
+		}
+#else
+		UE_LOG(LogTemp, Log, TEXT("[PEERCONN 2] Opus not available - skipping audio track"));
 #endif
 
 		// For negotiated channel mode, both sides must create the channel explicitly.
@@ -1325,7 +1343,12 @@ bool FWebRTCConnector::SetupPeerConnection()
 		// Do it here so server doesn't rely on onDataChannel callback.
 		if (bNegotiatedChannelEnabled)
 		{
+			UE_LOG(LogTemp, Log, TEXT("[PEERCONN 4] Creating negotiated data channel AFTER audio track"));
 			CreateDataChannel();
+		}
+		else
+		{
+			UE_LOG(LogTemp, Log, TEXT("[PEERCONN 4] Non-negotiated mode - datachannel will be created by client or received from peer"));
 		}
 
 		return true;
@@ -1557,7 +1580,7 @@ void FWebRTCConnector::MaybeCreateOffer(const TCHAR* Context)
 
 bool FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 {
-	UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: EnableAudioSend sr=%d ch=%d br=%d frameMs=%d stream=%s"),
+	UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("[CONNECTOR 1] EnableAudioSend called: sr=%d ch=%d br=%d frameMs=%d stream=%s"),
 		InConfig.SampleRate, InConfig.NumChannels, InConfig.BitrateKbps, InConfig.FrameSizeMs, *InConfig.StreamLabel);
 	
 #if O3DS_WITH_OPUS
@@ -1566,10 +1589,12 @@ bool FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 	FScopeLock Lock(&PeerConnectionLock);
 	if (PeerConnection)
 	{
-		UE_LOG(O3DSWebRTCAudioLog, Error, TEXT("WebRTC Connector: EnableAudioSend called after Start() - audio must be configured before connection! Ignoring audio configuration."));
+		UE_LOG(O3DSWebRTCAudioLog, Error, TEXT("[CONNECTOR 2] EnableAudioSend REJECTED - PeerConnection already exists! Audio must be configured before Start()."));
 		LastError = TEXT("EnableAudioSend must be called before Start()");
 		return false; // Reject - do not store config
 	}
+	
+	UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("[CONNECTOR 2] PeerConnection not yet created - audio config allowed"));
 	
 	// Check if audio has already been configured to prevent reconfiguration
 	if (!AudioRt.Config.StreamLabel.IsEmpty())
@@ -1577,12 +1602,16 @@ bool FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 		// Allow reconfiguration only if the same stream label
 		if (!AudioRt.Config.StreamLabel.Equals(InConfig.StreamLabel, ESearchCase::CaseSensitive))
 		{
-			UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("WebRTC Connector: Audio already configured for stream '%s', ignoring new stream '%s'"),
+			UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("[CONNECTOR 3] Audio already configured for stream '%s', ignoring new stream '%s'"),
 				*AudioRt.Config.StreamLabel, *InConfig.StreamLabel);
 			return false; // Already configured with different stream
 		}
 		// Same stream label - allow reconfiguration of parameters
-		UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Updating audio config for stream '%s'"), *InConfig.StreamLabel);
+		UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("[CONNECTOR 3] Updating audio config for same stream '%s'"), *InConfig.StreamLabel);
+	}
+	else
+	{
+		UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("[CONNECTOR 3] First audio config - no previous config exists"));
 	}
 	
 	// Store audio configuration - this must be called BEFORE Start()
@@ -1592,16 +1621,17 @@ bool FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 	AudioRt.bTrackReady = false;
 	AudioRt.NextSendRetryTimeSeconds = 0.0;
 	
+	UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("[CONNECTOR 4] Ensuring Opus encoder is created"));
 	if (!EnsureOpusEncoder(InConfig))
 	{
-		UE_LOG(O3DSWebRTCAudioLog, Error, TEXT("WebRTC Connector: Failed to create Opus encoder"));
+		UE_LOG(O3DSWebRTCAudioLog, Error, TEXT("[CONNECTOR 5] Failed to create Opus encoder"));
 		return false;
 	}
 	
-	UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Audio config stored, will be applied when Start() is called"));
+	UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("[CONNECTOR 5] Audio config stored successfully, will be applied when Start() is called"));
 	return true;
 #else
-	(void)InConfig; // silence unused warning
+	[[maybe_unused]] const FAudioConfig& UnusedConfig = InConfig;
 	UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("WebRTC Connector: Opus not available - audio send disabled"));
 	return false;
 #endif

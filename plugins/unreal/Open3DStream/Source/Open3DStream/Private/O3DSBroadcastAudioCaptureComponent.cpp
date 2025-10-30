@@ -46,6 +46,10 @@ void UO3DSBroadcastAudioCaptureComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
+	UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP X] AudioCaptureComponent::BeginPlay (SubjectName='%s', Connector=%s)"),
+		*SubjectName.ToString(),
+		Connector ? TEXT("SET") : TEXT("NULL"));
+
 	// Sync high-level mode into low-level source selection
 	switch (CaptureMode)
 	{
@@ -59,7 +63,12 @@ void UO3DSBroadcastAudioCaptureComponent::BeginPlay()
 	// This prevents trying to configure audio after PeerConnection has been created.
 	if (Connector)
 	{
+		UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP Y] BeginPlay: Connector already set - calling EnsureConnector"));
 		EnsureConnector();
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP Y] BeginPlay: Connector not set - skipping audio config (will be done by SetConnector)"));
 	}
 
 	if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
@@ -141,12 +150,14 @@ void UO3DSBroadcastAudioCaptureComponent::EndPlay(const EEndPlayReason::Type End
 
 void UO3DSBroadcastAudioCaptureComponent::SetConnector(TSharedPtr<IWebRTCConnector> InConnector)
 {
+	UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP A] SetConnector called on AudioCaptureComponent"));
 	Connector = InConnector;
 	// Reset warning throttle so if connector goes null later, we warn once again
 	bWarnedNoConnector = false;
 	// Reset configured flag so we reapply settings on newly injected connector
 	bAudioSendConfigured = false;
 	// Attempt to configure send immediately if possible
+	UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP B] Calling EnsureConnector to configure audio send"));
 	EnsureConnector();
 }
 
@@ -154,6 +165,7 @@ void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 {
 	if (!Connector)
 	{
+		UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP C] EnsureConnector: No connector set - skipping"));
 		// Do not auto-fetch a shared connector anymore. Leave null to surface networking issues.
 		if (CVarO3DSAudioCaptureDebug->GetInt() !=0 && !bWarnedNoConnector)
 		{
@@ -162,6 +174,8 @@ void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 		}
 		return;
 	}
+
+	UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP D] EnsureConnector: Connector is valid, preparing audio config"));
 
 	// Connector is valid again; allow future warnings if it becomes null later
 	bWarnedNoConnector = false;
@@ -198,6 +212,12 @@ void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 
 	A.StreamLabel = StreamLabel;
 	A.SubjectName = SubjectName.ToString();
+	
+	UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP E] Computed StreamLabel='%s' (CaptureMode=%s, SubjectName='%s')"),
+		*A.StreamLabel,
+		(CaptureMode == EO3DSCaptureMode::Mix) ? TEXT("Mix") : TEXT("Input"),
+		*SubjectName.ToString());
+	
 	// Only (re)apply if values changed or we haven't configured yet
 	const bool bChanged = (!bAudioSendConfigured)
 		|| (LastAppliedSampleRate != A.SampleRate)
@@ -206,7 +226,9 @@ void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 		|| (!LastAppliedStreamLabel.Equals(A.StreamLabel, ESearchCase::CaseSensitive));
 	if (bChanged)
 	{
+		UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP F] Calling EnableAudioSend (configured=%d, changed=%d)"), bAudioSendConfigured?1:0, bChanged?1:0);
 		const bool bEnabled = Connector->EnableAudioSend(A);
+		UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP G] EnableAudioSend returned %s"), bEnabled ? TEXT("SUCCESS") : TEXT("FAILED"));
 		if (bEnabled)
 		{
 			bAudioSendConfigured = true;
@@ -222,6 +244,10 @@ void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 				*A.StreamLabel, *A.SubjectName, A.SampleRate, A.NumChannels, A.BitrateKbps,
 				bEnabled ? TEXT("OK") : TEXT("FAILED"), bChanged?1:0);
 		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP F] No changes detected - skipping EnableAudioSend call"));
 	}
 }
 
