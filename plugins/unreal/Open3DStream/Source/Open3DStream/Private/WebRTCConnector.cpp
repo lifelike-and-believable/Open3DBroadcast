@@ -1560,7 +1560,7 @@ void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 	UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: EnableAudioSend sr=%d ch=%d br=%d frameMs=%d stream=%s"),
 		InConfig.SampleRate, InConfig.NumChannels, InConfig.BitrateKbps, InConfig.FrameSizeMs, *InConfig.StreamLabel);
 	
-	// Update audio configuration
+	// Store audio configuration - this must be called BEFORE Start()
 	AudioRt.Config = InConfig;
 	AudioRt.FrameSizeSamples = FMath::Max(1, (InConfig.SampleRate * InConfig.FrameSizeMs) / 1000);
 	AudioRt.Timestamp = 0;
@@ -1570,37 +1570,17 @@ void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 #if O3DS_WITH_OPUS
 	EnsureOpusEncoder(InConfig);
 	
-	// If PeerConnection already exists and we don't have an audio track yet, this is late binding.
-	// The track should have been added in SetupPeerConnection() before datachannel creation.
-	// If we reach here with a PeerConnection but no AudioTrack, we need to trigger renegotiation.
+	// Audio configuration is edit-time only - it should be set before Start() is called.
+	// If PeerConnection already exists, this is an error condition.
 	FScopeLock Lock(&PeerConnectionLock);
-	if (PeerConnection && !AudioTrack)
+	if (PeerConnection)
 	{
-		UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("WebRTC Connector: EnableAudioSend called after connection setup - will require renegotiation"));
-		
-		// Set up the audio track (this will trigger renegotiation on next offer)
-		if (SetupAudioTrackAndHandlers(InConfig, PeerConnection))
-		{
-			// For client mode, trigger renegotiation to include the new track
-			if (!bIsServer && bSignalingIsConnected)
-			{
-				UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: Triggering renegotiation for late audio enable"));
-				MaybeCreateOffer(TEXT("audio-enabled-late"));
-			}
-			
-			// Initialize reoffer timer
-			const double Now = FPlatformTime::Seconds();
-			AudioOpenReofferBackoffSeconds = 1.0;
-			NextAudioOpenReofferTimeSeconds = Now + AudioOpenReofferBackoffSeconds;
-		}
-	}
-	else if (!PeerConnection)
-	{
-		UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Audio config stored, will be applied when connection starts"));
+		UE_LOG(O3DSWebRTCAudioLog, Error, TEXT("WebRTC Connector: EnableAudioSend called after Start() - audio must be configured before connection! Audio will not work correctly."));
+		LastError = TEXT("EnableAudioSend must be called before Start()");
 	}
 	else
 	{
-		UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Audio track already configured"));
+		UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Audio config stored, will be applied when Start() is called"));
 	}
 #else
 	UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("WebRTC Connector: Opus not available - audio send disabled"));

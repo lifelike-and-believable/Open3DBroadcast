@@ -82,37 +82,34 @@ bool FWebRTCConnector::SetupPeerConnection()
 }
 ```
 
-### 4. Simplified `EnableAudioSend()`
-`EnableAudioSend()` now:
-- Updates the audio configuration
+### 4. Simplified `EnableAudioSend()` - Edit-Time Configuration Only
+`EnableAudioSend()` is now strictly for configuration storage and **must be called before `Start()`**:
+- Stores the audio configuration for use when connection starts
 - Ensures Opus encoder is ready
-- If called after connection is established (late), triggers renegotiation with a warning
-- No longer creates tracks on-the-fly
+- **If called after `Start()` is called, logs an error** - this is invalid usage
+- Audio is edit-time configuration only - never enabled at runtime
 
 ```cpp
 void EnableAudioSend(const FAudioConfig& InConfig)
 {
-    // Update config
+    // Store audio configuration - must be called BEFORE Start()
     AudioRt.Config = InConfig;
     AudioRt.FrameSizeSamples = FMath::Max(1, (InConfig.SampleRate * InConfig.FrameSizeMs) / 1000);
     
     #if O3DS_WITH_OPUS
     EnsureOpusEncoder(InConfig);
     
-    // If PeerConnection already exists but no track, this is late binding (bad!)
-    if (PeerConnection && !AudioTrack)
+    // Audio configuration is edit-time only - must be set before Start()
+    if (PeerConnection)
     {
-        UE_LOG(Warning, TEXT("EnableAudioSend called after connection - will require renegotiation"));
-        SetupAudioTrackAndHandlers(InConfig, PeerConnection);
-        // Trigger renegotiation for client mode
-        if (!bIsServer && bSignalingIsConnected)
-        {
-            MaybeCreateOffer(TEXT("audio-enabled-late"));
-        }
+        UE_LOG(Error, TEXT("EnableAudioSend called after Start() - audio must be configured before connection!"));
+        LastError = TEXT("EnableAudioSend must be called before Start()");
     }
     #endif
 }
 ```
+
+**Key Principle**: Audio is either enabled or not at edit time. It never becomes enabled after `Start()` is called.
 
 ### 5. Removed Late-Binding from `PushAudioPCM16()`
 `PushAudioPCM16()` no longer attempts to create audio tracks. If no track exists, it logs a warning and buffers the audio.
@@ -159,14 +156,39 @@ bool PushAudioPCM16(const int16* Samples, int32 NumSamples)
 ## Migration Notes
 
 ### For Users
-**No API changes** - `EnableAudioSend()` and `DisableAudioSend()` work exactly as before from the caller's perspective.
+**Important API Change**: `EnableAudioSend()` **must now be called BEFORE `Start()`**. This reflects the reality that audio configuration is edit-time only.
+
+**Correct Usage**:
+```cpp
+// 1. Create connector
+auto Connector = MakeShared<FWebRTCConnector>();
+
+// 2. Configure audio BEFORE starting connection
+IWebRTCConnector::FAudioConfig AudioConfig;
+AudioConfig.SampleRate = 48000;
+AudioConfig.NumChannels = 1;
+AudioConfig.BitrateKbps = 32;
+AudioConfig.StreamLabel = TEXT("o3ds:mix");
+Connector->EnableAudioSend(AudioConfig);
+
+// 3. Start connection
+Connector->Start("webrtc://localhost:8080/room", false);
+```
+
+**Incorrect Usage** (will fail with error):
+```cpp
+auto Connector = MakeShared<FWebRTCConnector>();
+Connector->Start("webrtc://localhost:8080/room", false);
+Connector->EnableAudioSend(AudioConfig);  // ❌ ERROR - too late!
+```
 
 ### For Developers
 If you're working with the WebRTC connector code:
 
 1. **Audio enablement state**: Check `AudioRt.Config.StreamLabel.IsEmpty()` instead of `bAudioSendEnabled`
 2. **Adding features**: Use `SetupAudioTrackAndHandlers()` helper to avoid duplication
-3. **Testing**: The existing tests remain valid and should pass
+3. **Testing**: Ensure `EnableAudioSend()` is called before `Start()` in all tests
+4. **Edit-time principle**: Audio is never enabled at runtime - only at edit/setup time
 
 ## Testing
 
