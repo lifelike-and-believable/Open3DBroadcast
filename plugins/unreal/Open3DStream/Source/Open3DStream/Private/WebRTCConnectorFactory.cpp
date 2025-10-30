@@ -6,6 +6,8 @@
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
+// Audio logging category
+#include "O3DSLog.h"
 
 namespace
 {
@@ -50,12 +52,21 @@ namespace
 			if (!EnabledStreams.Contains(Cfg.StreamLabel))
 			{
 				FWebRTCConnector::FAudioConfig A; A.SampleRate = Cfg.SampleRate; A.NumChannels = Cfg.NumChannels; A.BitrateKbps = Cfg.BitrateKbps; A.FrameSizeMs =20; A.StreamLabel = Cfg.StreamLabel;
-				UE_LOG(LogTemp, Verbose, TEXT("FLibDataChannelAdapter: EnableAudioSend stream=%s sr=%d ch=%d br=%d"), *A.StreamLabel, A.SampleRate, A.NumChannels, A.BitrateKbps);
-				Inner->EnableAudioSend(A);
-				EnabledStreams.Add(Cfg.StreamLabel);
-				EmitAnnounceIfNeeded(Cfg);
-				UE_LOG(LogTemp, Verbose, TEXT("FLibDataChannelAdapter: Announce emitted for stream=%s"), *Cfg.StreamLabel);
+				UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("[ADAPTER] EnableAudioSend request stream=%s sr=%d ch=%d br=%d"), *A.StreamLabel, A.SampleRate, A.NumChannels, A.BitrateKbps);
+				const bool bSuccess = Inner->EnableAudioSend(A);
+				if (bSuccess)
+				{
+					EnabledStreams.Add(Cfg.StreamLabel);
+					EmitAnnounceIfNeeded(Cfg);
+					UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("[ADAPTER] EnableAudioSend(%s) -> SUCCESS"), *Cfg.StreamLabel);
+				}
+				else
+				{
+					UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("[ADAPTER] EnableAudioSend(%s) -> FAILED: %s"), *Cfg.StreamLabel, *Inner->GetLastError());
+				}
+				return bSuccess;
 			}
+			// Already configured with this label; treat as success (idempotent)
 			return true;
 #else
 			return false;

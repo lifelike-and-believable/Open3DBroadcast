@@ -476,6 +476,68 @@ bool FO3DSWebRTC_AudioPerFrame_Localhost::RunTest(const FString& Params)
     return (bool)bGotAudio;
 }
 
+// Verifies that calling EnableAudioSend after Start is rejected by the connector
+// and that the adapter propagates the failure (Issue #118).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSWebRTC_EnableAudioSend_RejectionPropagates,
+    "Open3DStream.WebRTC.Audio.EnableAudioSend_RejectionPropagates",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FO3DSWebRTC_EnableAudioSend_RejectionPropagates::RunTest(const FString& Params)
+{
+    FString Url; bool bFallback = false;
+    GetSignalingUrl(Url, bFallback);
+
+    TSharedPtr<IWebRTCConnector> Server = CreateWebRTCConnector(EO3DSWebRtcBackendReceiver::LibDataChannel);
+    TSharedPtr<IWebRTCConnector> Client = CreateWebRTCConnector(EO3DSWebRtcBackendReceiver::LibDataChannel);
+    if (!Server || !Client)
+    {
+        AddError(TEXT("Failed to create WebRTC connectors"));
+        return false;
+    }
+
+    const bool bServerOk = Server->Start(Url, /*bIsServer*/true);
+    const bool bClientOk = Client->Start(Url, /*bIsServer*/false);
+    TestTrue(TEXT("Server start() returned true"), bServerOk);
+    TestTrue(TEXT("Client start() returned true"), bClientOk);
+
+    // Wait until connected (or timeout)
+    TArray<TSharedPtr<IWebRTCConnector>> All{Server, Client};
+    PumpUntil(10.0, All, [&]()
+    {
+        return Server->IsConnected() && Client->IsConnected();
+    });
+
+    if (!Server->IsConnected() || !Client->IsConnected())
+    {
+        const FString ErrS = Server->GetLastError();
+        const FString ErrC = Client->GetLastError();
+        AddError(FString::Printf(TEXT("Timed out waiting for WebRTC connection (EnableAudioSend rejection test). Url=%s ServerErr='%s' ClientErr='%s'"), *Url, *ErrS, *ErrC));
+        Server->Stop();
+        Client->Stop();
+        return false;
+    }
+
+    // Now call EnableAudioSend AFTER Start, which must be rejected by inner connector.
+    IWebRTCConnector::FAudioSendConfig Cfg;
+    Cfg.bEnable = true;
+    Cfg.SampleRate = 48000;
+    Cfg.NumChannels = 1;
+    Cfg.BitrateKbps = 32;
+    Cfg.StreamLabel = TEXT("o3ds:test:late");
+    Cfg.SubjectName = TEXT("LateEnableSubject");
+    Cfg.SourceType = TEXT("test");
+
+    const bool bEnabled = Client->EnableAudioSend(Cfg);
+    TestFalse(TEXT("EnableAudioSend after Start should be rejected and return false (propagated by adapter)"), bEnabled);
+
+    // Optional: a quick push should also not be accepted as configured (may buffer or fail). We only assert
+    // the explicit contract here: the call returns false.
+
+    Server->Stop();
+    Client->Stop();
+    return true;
+}
+
 // In-process sanity checks: prove libdatachannel connects without any signaling server.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSWebRTC_InProc_DataChannel,
     "Open3DStream.WebRTC.InProc.DataChannel",
