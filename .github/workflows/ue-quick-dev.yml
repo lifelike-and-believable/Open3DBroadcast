@@ -453,3 +453,5 @@ jobs:
             cmd /c rmdir "$dst" 2>$null | Out-Null
             if (Test-Path -Path $dst) { Write-Warning "Could not remove ThirdParty junction (still present)" }
           }
+
+# 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
