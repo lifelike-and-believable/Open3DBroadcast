@@ -10,7 +10,7 @@ name: Create WebRTC Audio Issues
 # 4. Optionally customize the Epic title
 # 5. Click "Run workflow" button
 #
-# The workflow will create 8 issues (1 Epic + 7 sub-issues) with proper
+# The workflow will create 1 Epic and 7 sub-issues with proper
 # labels and cross-references.
 
 on:
@@ -65,8 +65,8 @@ jobs:
           issue_count=$(grep -c "^## Issue [0-9]:" WEBRTC_AUDIO_REFACTOR_ISSUES_DETAILED.md || true)
           echo "Found $issue_count issue sections"
           
-          if [ "$issue_count" -ne 8 ]; then
-            echo "Error: Expected 8 issues, found $issue_count"
+          if [ "$issue_count" -ne 7 ]; then
+            echo "Error: Expected 7 issues, found $issue_count"
             exit 1
           fi
           
@@ -86,6 +86,9 @@ jobs:
       - name: Create issues
         if: ${{ !inputs.dry_run }}
         run: |
+          # Ensure epic label exists
+          gh label view epic >/dev/null 2>&1 || gh label create epic --description "Epic work item" --color d93f0b || true
+          
           echo "Creating issues in ${{ github.repository }}..."
           python3 scripts/create_webrtc_audio_issues.py \
             --repo ${{ github.repository }}
