@@ -54,8 +54,12 @@ jobs:
         startsWith(github.event.comment.body, '/ue ') &&
         contains('OWNER,MEMBER,COLLABORATOR', github.event.comment.author_association)
       )
+    environment: copilot
     runs-on: [self-hosted, windows, x64, ue5]
     timeout-minutes: 180
+    env:
+      # Pull from the copilot environment’s variables
+      ENABLE_UI_LAUNCH: ${{ vars.ENABLE_UI_LAUNCH }}
 
     steps:
       - name: Derive context (PR number, command, args)
