@@ -243,17 +243,17 @@ jobs:
           Get-ChildItem $base -Recurse -Depth 2 | Select-Object FullName | ForEach-Object { $_.FullName } | Write-Host
       
           $expected = @(
-            Join-Path $base   "open3dstreamstatic.lib"),
-            Join-Path $base   "nng.lib"),
-            Join-Path $base   "flatbuffers.lib"),
-            Join-Path $base   "opus.lib"),
-            Join-Path $webrtc "datachannel.lib"),
-            Join-Path $webrtc "usrsctp.lib"),
-            Join-Path $webrtc "juice.lib"),
-            Join-Path $webrtc "mbedtls.lib"),
-            Join-Path $webrtc "mbedx509.lib"),
-            Join-Path $webrtc "mbedcrypto.lib"),
-            Join-Path $webrtc "srtp2.lib")
+            (Join-Path $base   "open3dstreamstatic.lib"),
+            (Join-Path $base   "nng.lib"),
+            (Join-Path $base   "flatbuffers.lib"),
+            (Join-Path $base   "opus.lib"),
+            (Join-Path $webrtc "datachannel.lib"),
+            (Join-Path $webrtc "usrsctp.lib"),
+            (Join-Path $webrtc "juice.lib"),
+            (Join-Path $webrtc "mbedtls.lib"),
+            (Join-Path $webrtc "mbedx509.lib"),
+            (Join-Path $webrtc "mbedcrypto.lib"),
+            (Join-Path $webrtc "srtp2.lib")
           )
       
           $missing = @()
