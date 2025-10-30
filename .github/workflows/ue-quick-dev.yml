@@ -1,0 +1,306 @@
+name: Unreal • Quick Dev Build (External host, junction, persistent)
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number to build"
+        required: false
+        type: string
+      command:
+        description: "Command: quickbuild, test, or launch"
+        required: false
+        type: choice
+        options: [quickbuild, test, launch]
+      launch_args:
+        description: "Extra args for /ue launch (optional)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+  statuses: write
+
+concurrency:
+  group: ue-quick-dev-${{ github.event_name == 'workflow_dispatch' && inputs.pr || (github.event.issue.number || 'manual') }}
+  cancel-in-progress: false
+
+env:
+  # Persistent workspace and shared DDC on your runner
+  UE_WORK_ROOT: D:\ue-ci\workspaces
+  UE_SHARED_DDC: D:\ue-ci\ddc
+
+  # Plugin path inside the repo clone (Windows is case-insensitive)
+  PLUGIN_UPLUGIN: plugins/unreal/Open3DStream/Open3DStream.uplugin
+
+  # External Host project (.uproject confirmed)
+  TEST_HOST_UPROJECT: E:\UnrealProjects\Open3DStreamProject\Open3DStreamProject.uproject
+
+  # Safety switch for interactive UI launch
+  ENABLE_UI_LAUNCH: "false"
+
+jobs:
+  ue-quick:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'issue_comment' &&
+        github.event.action == 'created' &&
+        github.event.issue.pull_request &&
+        startsWith(github.event.comment.body, '/ue ') &&
+        contains('OWNER,MEMBER,COLLABORATOR', github.event.comment.author_association)
+      )
+    runs-on: [self-hosted, windows, x64, ue5]
+    timeout-minutes: 180
+
+    steps:
+      - name: Derive context (PR number, command, args)
+        id: ctx
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $pr  = "${{ inputs.pr }}"; if (-not $pr) { Write-Error "Provide inputs.pr"; exit 1 }
+            $cmd = "${{ inputs.command }}"; if (-not $cmd) { $cmd = "quickbuild" }
+            $args = "${{ inputs.launch_args }}"
+          } else {
+            $pr = "${{ github.event.issue.number }}"
+            $raw = "${{ github.event.comment.body }}".Trim()
+            # Capture command and optional remainder as args: /ue <cmd> [args...]
+            $cmd = "quickbuild"; $args = ""
+            $m = [regex]::Match($raw, '^/ue\s+(\S+)(?:\s+(.+))?$', 'IgnoreCase')
+            if ($m.Success) {
+              $cmd  = $m.Groups[1].Value.ToLower()
+              $args = $m.Groups[2].Value
+            }
+          }
+          "pr=$pr"     | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "cmd=$cmd"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "args=$args" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "UE_START=$([DateTime]::UtcNow.ToString('o'))" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "PR #$pr, command: $cmd, args: $args"
+
+      - name: Get PR head SHA
+        id: prsha
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = Number('${{ steps.ctx.outputs.pr }}');
+            const { data } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: pr });
+            core.setOutput('sha', data.head.sha);
+
+      - name: Set commit status (pending)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner, repo: context.repo.repo,
+              sha: '${{ steps.prsha.outputs.sha }}',
+              state: 'pending', context: 'ue/quickbuild',
+              target_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              description: 'UE dev workflow started',
+            });
+
+      - name: Find Unreal Engine (UE_ROOT)
+        shell: pwsh
+        run: |
+          if ($env:UE_ROOT) {
+            "UE_ROOT=$($env:UE_ROOT)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "Using UE_ROOT=$($env:UE_ROOT)"
+            exit 0
+          }
+          $candidates = @(
+            $env:UE5_ROOT, $env:UE4_ROOT,
+            "C:\Program Files\Epic Games\UE_5.4",
+            "C:\Program Files\Epic Games\UE_5.3",
+            "D:\Unreal\UE_5.4"
+          ) | Where-Object { $_ }
+          foreach ($root in $candidates) {
+            $uat    = Join-Path $root "Engine\Build\BatchFiles\RunUAT.bat"
+            $editor = Join-Path $root "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
+            if (Test-Path $uat -PathType Leaf -and Test-Path $editor -PathType Leaf) {
+              "UE_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+              Write-Host "Using UE_ROOT=$root"
+              exit 0
+            }
+          }
+          Write-Error "Could not locate UE install. Set UE_ROOT on the runner or update search paths."
+          exit 1
+
+      - name: Prepare persistent workspace
+        id: ws
+        shell: pwsh
+        env:
+          PR: ${{ steps.ctx.outputs.pr }}
+        run: |
+          $ws = Join-Path $env:UE_WORK_ROOT ("pr-" + $env:PR)
+          New-Item -ItemType Directory -Force -Path $ws | Out-Null
+          "ws=$ws" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Workspace: $ws"
+
+          if (-not (Test-Path (Join-Path $ws ".git"))) {
+            git clone --no-tags --progress "${{ github.server_url }}/${{ github.repository }}.git" "$ws"
+          }
+          Set-Location $ws
+          git remote set-url origin "${{ github.server_url }}/${{ github.repository }}.git"
+          git fetch origin --prune
+          git fetch origin "pull/${env:PR}/head:pr-${env:PR}"
+          git checkout "pr-${env:PR}"
+          git reset --hard "pr-${env:PR}"
+          # Keep Binaries/Intermediate for incremental builds
+          git clean -xfd -e Binaries -e Intermediate
+          git lfs install
+          git lfs fetch
+          git lfs checkout
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+      - name: Resolve plugin path and host project
+        id: paths
+        shell: pwsh
+        run: |
+          $ws = "${{ steps.ws.outputs.ws }}"
+          $uplugin = Join-Path $ws $env:PLUGIN_UPLUGIN
+          if (-not (Test-Path $uplugin -PathType Leaf)) { Write-Error "Missing .uplugin at $uplugin"; exit 1 }
+          $uproject = $env:TEST_HOST_UPROJECT
+          if (-not (Test-Path $uproject -PathType Leaf)) { Write-Error "Missing external Host project at $uproject"; exit 1 }
+          $projName = [IO.Path]::GetFileNameWithoutExtension($uproject)
+          $editorTarget = "$projName" + "Editor"
+          $pluginDir = Split-Path $uplugin -Parent   # ...\plugins\unreal\Open3DStream
+          $pluginName = Split-Path $pluginDir -Leaf  # Open3DStream
+          "uplugin=$uplugin"           | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "uproject=$uproject"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "editorTarget=$editorTarget" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "pluginDir=$pluginDir"       | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "pluginName=$pluginName"     | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Plugin dir: $pluginDir"
+          Write-Host "Host project: $uproject"
+
+      - name: Link plugin into external host (junction)
+        shell: pwsh
+        run: |
+          . ".github/workflows/steps/junction-plugin-into-host.ps1" `
+            -PluginSourcePath "${{ steps.paths.outputs.pluginDir }}" `
+            -HostUProjectPath "${{ steps.paths.outputs.uproject }}" `
+            -PluginFolderName "${{ steps.paths.outputs.pluginName }}"
+
+      - name: Configure Shared DDC (optional)
+        shell: pwsh
+        run: |
+          if ($env:UE_SHARED_DDC) {
+            New-Item -ItemType Directory -Force -Path $env:UE_SHARED_DDC | Out-Null
+            "UE-SharedDataCachePath=$($env:UE_SHARED_DDC)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "Shared DDC: $env:UE_SHARED_DDC"
+          }
+
+      - name: Generate project files (if needed)
+        shell: pwsh
+        run: |
+          $uproject = "${{ steps.paths.outputs.uproject }}"
+          $sln = Join-Path (Split-Path $uproject -Parent) "Intermediate\ProjectFiles\${{ steps.paths.outputs.editorTarget }}.sln"
+          if (-not (Test-Path $sln)) {
+            & "$env:UE_ROOT\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe" -ProjectFiles -Project="$uproject" -Game -Engine -VS2022
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Quick build (incremental)
+        if: steps.ctx.outputs.cmd == 'quickbuild'
+        shell: pwsh
+        run: |
+          $uproject = "${{ steps.paths.outputs.uproject }}"
+          & "$env:UE_ROOT\Engine\Build\BatchFiles\Build.bat" `
+            "${{ steps.paths.outputs.editorTarget }}" Win64 Development `
+            -Project="$uproject" -WaitMutex -NoHotReload -NoXGE
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run automation tests (headless)
+        if: steps.ctx.outputs.cmd == 'test'
+        shell: pwsh
+        run: |
+          $uproject = "${{ steps.paths.outputs.uproject }}"
+          $log = Join-Path $env:RUNNER_TEMP "UE-Automation-${{ steps.ctx.outputs.pr }}.log"
+          $editorCmd = Join-Path $env:UE_ROOT "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
+          & "$editorCmd" "$uproject" -unattended -nop4 -NullRHI -NoSound `
+            -TestExit="Automation Test Queue Empty" `
+            -ExecCmds="Automation RunTests Project; Quit" -log="$log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Launch Unreal Editor (UI, waits for close)
+        if: steps.ctx.outputs.cmd == 'launch'
+        shell: pwsh
+        run: |
+          if ($env:ENABLE_UI_LAUNCH -ne "true") {
+            Write-Error "ENABLE_UI_LAUNCH is not true. To use /ue launch, run the runner interactively (not as a service) and set ENABLE_UI_LAUNCH=true."
+            exit 1
+          }
+          $uproject = "${{ steps.paths.outputs.uproject }}"
+          $extra = "${{ steps.ctx.outputs.args }}"
+          $editorUI = Join-Path $env:UE_ROOT "Engine\Binaries\Win64\UnrealEditor.exe"
+
+          # Ensure -log is present so you can see a log window; add it if not supplied
+          if (-not ($extra -match '(^|\s)-log(\s|$)')) { $extra = ($extra + " -log").Trim() }
+
+          Write-Host "Launching: `"$editorUI`" `"$uproject`" $extra"
+          $p = Start-Process -FilePath "$editorUI" -ArgumentList @("$uproject $extra") -PassThru
+          Write-Host "UnrealEditor.exe started (PID $($p.Id)). Waiting for it to exit..."
+          Wait-Process -Id $p.Id
+          $code = $p.ExitCode
+          Write-Host "UnrealEditor.exe exited with code $code"
+          if ($code -ne 0) { exit $code }
+
+      - name: Comment result (success)
+        if: github.event_name == 'issue_comment' && success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = Number('${{ steps.ctx.outputs.pr }}');
+            const cmd = '${{ steps.ctx.outputs.cmd }}';
+            const args = `${{ steps.ctx.outputs.args }}`.trim();
+            const suffix = args ? ` (args: ${args})` : '';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: pr,
+              body: `✅ UE ${cmd}${suffix} succeeded for PR #${pr}.`
+            });
+
+      - name: Comment result (failure)
+        if: github.event_name == 'issue_comment' && failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = Number('${{ steps.ctx.outputs.pr }}');
+            const cmd = '${{ steps.ctx.outputs.cmd }}';
+            const args = `${{ steps.ctx.outputs.args }}`.trim();
+            const suffix = args ? ` (args: ${args})` : '';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: pr,
+              body: `❌ UE ${cmd}${suffix} failed for PR #${pr}. Open the run logs for details.`
+            });
+
+      - name: Set commit status (success)
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner, repo: context.repo.repo,
+              sha: '${{ steps.prsha.outputs.sha }}',
+              state: 'success', context: 'ue/quickbuild',
+              target_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              description: 'UE dev workflow passed',
+            });
+
+      - name: Set commit status (failure)
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner, repo: context.repo.repo,
+              sha: '${{ steps.prsha.outputs.sha }}',
+              state: 'failure', context: 'ue/quickbuild',
+              target_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              description: 'UE dev workflow failed',
+            });
