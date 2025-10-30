@@ -194,10 +194,31 @@ jobs:
       - name: Link plugin into external host (junction)
         shell: pwsh
         run: |
-          . ".github/workflows/steps/junction-plugin-into-host.ps1" `
-            -PluginSourcePath "${{ steps.paths.outputs.pluginDir }}" `
-            -HostUProjectPath "${{ steps.paths.outputs.uproject }}" `
-            -PluginFolderName "${{ steps.paths.outputs.pluginName }}"
+          $pluginSrc = "${{ steps.paths.outputs.pluginDir }}"
+          $uproject  = "${{ steps.paths.outputs.uproject }}"
+          $name      = "${{ steps.paths.outputs.pluginName }}"
+          if (-not (Test-Path -Path $pluginSrc -PathType Container)) {
+            Write-Error "Plugin source not found at $pluginSrc"
+            exit 1
+          }
+          $hostDir    = Split-Path -Path $uproject -Parent
+          $dstPlugins = Join-Path $hostDir "Plugins"
+          $dst        = Join-Path $dstPlugins $name
+      
+          New-Item -ItemType Directory -Force -Path $dstPlugins | Out-Null
+          if (Test-Path $dst) {
+            try { cmd /c rmdir "$dst" 2>$null | Out-Null } catch { }
+            if (Test-Path $dst) { Remove-Item -Recurse -Force -Path $dst }
+          }
+      
+          try {
+            New-Item -ItemType Junction -Path $dst -Target $pluginSrc | Out-Null
+          } catch {
+            $cmd = "mklink /J `"$dst`" `"$pluginSrc`""
+            cmd /c $cmd | Write-Host
+            if (-not (Test-Path $dst)) { throw "Failed to create junction with both methods." }
+          }
+          Write-Host "Junction created: $dst -> $pluginSrc"
 
       - name: Configure Shared DDC (optional)
         shell: pwsh
