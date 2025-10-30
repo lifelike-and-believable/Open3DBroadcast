@@ -1555,10 +1555,35 @@ void FWebRTCConnector::MaybeCreateOffer(const TCHAR* Context)
 
 // ======== Audio (Opus) API ========
 
-void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
+bool FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 {
 	UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: EnableAudioSend sr=%d ch=%d br=%d frameMs=%d stream=%s"),
 		InConfig.SampleRate, InConfig.NumChannels, InConfig.BitrateKbps, InConfig.FrameSizeMs, *InConfig.StreamLabel);
+	
+#if O3DS_WITH_OPUS
+	// CRITICAL: Audio configuration must be set BEFORE Start() is called.
+	// If PeerConnection already exists, reject the configuration entirely.
+	FScopeLock Lock(&PeerConnectionLock);
+	if (PeerConnection)
+	{
+		UE_LOG(O3DSWebRTCAudioLog, Error, TEXT("WebRTC Connector: EnableAudioSend called after Start() - audio must be configured before connection! Ignoring audio configuration."));
+		LastError = TEXT("EnableAudioSend must be called before Start()");
+		return false; // Reject - do not store config
+	}
+	
+	// Check if audio has already been configured to prevent reconfiguration
+	if (!AudioRt.Config.StreamLabel.IsEmpty())
+	{
+		// Allow reconfiguration only if the same stream label
+		if (!AudioRt.Config.StreamLabel.Equals(InConfig.StreamLabel, ESearchCase::CaseSensitive))
+		{
+			UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("WebRTC Connector: Audio already configured for stream '%s', ignoring new stream '%s'"),
+				*AudioRt.Config.StreamLabel, *InConfig.StreamLabel);
+			return false; // Already configured with different stream
+		}
+		// Same stream label - allow reconfiguration of parameters
+		UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Updating audio config for stream '%s'"), *InConfig.StreamLabel);
+	}
 	
 	// Store audio configuration - this must be called BEFORE Start()
 	AudioRt.Config = InConfig;
@@ -1567,23 +1592,18 @@ void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 	AudioRt.bTrackReady = false;
 	AudioRt.NextSendRetryTimeSeconds = 0.0;
 	
-#if O3DS_WITH_OPUS
-	EnsureOpusEncoder(InConfig);
+	if (!EnsureOpusEncoder(InConfig))
+	{
+		UE_LOG(O3DSWebRTCAudioLog, Error, TEXT("WebRTC Connector: Failed to create Opus encoder"));
+		return false;
+	}
 	
-	// Audio configuration is edit-time only - it should be set before Start() is called.
-	// If PeerConnection already exists, this is an error condition.
-	FScopeLock Lock(&PeerConnectionLock);
-	if (PeerConnection)
-	{
-		UE_LOG(O3DSWebRTCAudioLog, Error, TEXT("WebRTC Connector: EnableAudioSend called after Start() - audio must be configured before connection! Audio will not work correctly."));
-		LastError = TEXT("EnableAudioSend must be called before Start()");
-	}
-	else
-	{
-		UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Audio config stored, will be applied when Start() is called"));
-	}
+	UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Audio config stored, will be applied when Start() is called"));
+	return true;
 #else
+	(void)InConfig; // silence unused warning
 	UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("WebRTC Connector: Opus not available - audio send disabled"));
+	return false;
 #endif
 }
 

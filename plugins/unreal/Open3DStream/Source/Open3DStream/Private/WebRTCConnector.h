@@ -106,7 +106,8 @@ public:
 	};
 
 	// Enable Opus-encoded audio sending via a WebRTC audio track
-	void EnableAudioSend(const FAudioConfig& InConfig);
+	// Returns true if configuration was successful, false if called after Start() or reconfiguration attempted
+	bool EnableAudioSend(const FAudioConfig& InConfig);
 	void DisableAudioSend();
 	// Push interleaved PCM16 samples (NumSamples is total across channels)
 	bool PushAudioPCM16(const int16* Samples, int32 NumSamples);

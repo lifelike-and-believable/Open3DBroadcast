@@ -389,12 +389,8 @@ void UO3DSBroadcastComponent::StartCapture()
  AudioCap = NewObject<UO3DSBroadcastAudioCaptureComponent>(Owner);
  if (AudioCap)
  {
- AudioCap->RegisterComponent();
- }
- }
- if (AudioCap)
- {
- // Map settings from component UX
+ // CRITICAL: Set SubjectName and other config BEFORE RegisterComponent()
+ // This ensures BeginPlay() will use the correct StreamLabel if it's called immediately
  AudioCap->Config.SampleRate = WebRTCAudioSampleRate;
  AudioCap->Config.NumChannels = WebRTCAudioNumChannels;
  AudioCap->Config.BitrateKbps = WebRTCAudioBitrateKbps;
@@ -402,7 +398,23 @@ void UO3DSBroadcastComponent::StartCapture()
  AudioCap->InputDeviceName = WebRTCInputDeviceName;
  AudioCap->Config.SubmixToTap = WebRTCSubmixToTap;
  AudioCap->SubjectName = *BuildSubjectName(TargetMesh.Get());
-
+ 
+ AudioCap->RegisterComponent();
+ }
+ }
+ else
+ {
+ // If component already exists, update its settings
+ AudioCap->Config.SampleRate = WebRTCAudioSampleRate;
+ AudioCap->Config.NumChannels = WebRTCAudioNumChannels;
+ AudioCap->Config.BitrateKbps = WebRTCAudioBitrateKbps;
+ AudioCap->CaptureMode = (WebRTCAudioMode == EO3DSWebRTCAudioMode::Mix) ? EO3DSCaptureMode::Mix : EO3DSCaptureMode::Input;
+ AudioCap->InputDeviceName = WebRTCInputDeviceName;
+ AudioCap->Config.SubmixToTap = WebRTCSubmixToTap;
+ AudioCap->SubjectName = *BuildSubjectName(TargetMesh.Get());
+ }
+ if (AudioCap)
+ {
 	 // Inject connector and configure audio BEFORE transport starts
 	 if (InternalTransport)
 	 {
@@ -411,6 +423,7 @@ void UO3DSBroadcastComponent::StartCapture()
 	   TSharedPtr<IWebRTCConnector> Conn = Wrtc->GetConnector();
 	   if (Conn.IsValid())
 	   {
+		// Set connector which will trigger immediate audio configuration
 		AudioCap->SetConnector(Conn);
 	   }
 	  }

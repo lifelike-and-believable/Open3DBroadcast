@@ -54,7 +54,13 @@ void UO3DSBroadcastAudioCaptureComponent::BeginPlay()
 		default: break;
 	}
 
-	EnsureConnector();
+	// Only configure connector if it's already been set.
+	// If not set yet, configuration will happen when SetConnector() is called later.
+	// This prevents trying to configure audio after PeerConnection has been created.
+	if (Connector)
+	{
+		EnsureConnector();
+	}
 
 	if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
 	{
