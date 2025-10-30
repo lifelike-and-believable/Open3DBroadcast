@@ -165,7 +165,9 @@ jobs:
           git checkout "pr-${env:PR}"
           git reset --hard "pr-${env:PR}"
           # Keep Binaries/Intermediate for incremental builds
+          
           git clean -xfd -e Binaries -e Intermediate
+          
           git lfs install
           git lfs fetch
           git lfs checkout
