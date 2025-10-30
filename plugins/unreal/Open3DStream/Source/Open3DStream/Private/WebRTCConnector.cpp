@@ -1223,15 +1223,10 @@ bool FWebRTCConnector::SetupPeerConnection()
 
 		UE_LOG(LogTemp, Verbose, TEXT("WebRTC Connector: PeerConnection created successfully"));
 
-		// For negotiated channel mode, both sides must create the channel explicitly.
-		// Do it here so server doesn't rely on onDataChannel callback.
-		if (bNegotiatedChannelEnabled)
-		{
-			CreateDataChannel();
-		}
-
 #if O3DS_WITH_OPUS
-		// If audio sending is enabled, add Opus audio track now (respect stream label if provided)
+		// CRITICAL: Add audio track BEFORE creating data channel
+		// Per libdatachannel audio-comm-test findings, audio track must be added before
+		// data channel creation to be included in the initial SDP offer
 		if (bAudioSendEnabled && !AudioTrack)
 		{
 			if (!AudioRt.Config.StreamLabel.IsEmpty())
@@ -1296,6 +1291,14 @@ bool FWebRTCConnector::SetupPeerConnection()
 			}
 		}
 #endif
+
+		// For negotiated channel mode, both sides must create the channel explicitly.
+		// IMPORTANT: Create data channel AFTER audio track to ensure audio is in initial offer
+		// Do it here so server doesn't rely on onDataChannel callback.
+		if (bNegotiatedChannelEnabled)
+		{
+			CreateDataChannel();
+		}
 
 		return true;
 	}
