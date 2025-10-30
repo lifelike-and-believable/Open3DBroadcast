@@ -381,7 +381,9 @@ jobs:
       - name: Comment result (success)
         if: github.event_name == 'issue_comment' && success()
         uses: actions/github-script@v7
+        continue-on-error: true
         with:
+          github-token: ${{ secrets.CI_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const pr = Number('${{ steps.ctx.outputs.pr }}');
             const cmd = '${{ steps.ctx.outputs.cmd }}';
@@ -391,11 +393,13 @@ jobs:
               owner: context.repo.owner, repo: context.repo.repo, issue_number: pr,
               body: `✅ UE ${cmd}${suffix} succeeded for PR #${pr}.`
             });
-
+      
       - name: Comment result (failure)
         if: github.event_name == 'issue_comment' && failure()
         uses: actions/github-script@v7
+        continue-on-error: true
         with:
+          github-token: ${{ secrets.CI_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const pr = Number('${{ steps.ctx.outputs.pr }}');
             const cmd = '${{ steps.ctx.outputs.cmd }}';
@@ -405,7 +409,7 @@ jobs:
               owner: context.repo.owner, repo: context.repo.repo, issue_number: pr,
               body: `❌ UE ${cmd}${suffix} failed for PR #${pr}. Open the run logs for details.`
             });
-
+            
       - name: Set commit status (success)
         if: success()
         uses: actions/github-script@v7
