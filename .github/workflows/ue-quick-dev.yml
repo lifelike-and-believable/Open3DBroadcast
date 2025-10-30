@@ -1,4 +1,4 @@
-name: Unreal • Quick Dev Build (External host, junction, persistent)
+name: Unreal • Quick Dev Build (External host, junction, persistent) test
 
 on:
   issue_comment:
@@ -21,7 +21,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
+  pull-requests: write   # was: read
   issues: write
   statuses: write
 
@@ -42,9 +42,7 @@ env:
 
   # Safety switch for interactive UI launch
   ENABLE_UI_LAUNCH: "false"
-  # Third-Party File location on local runner
-  THIRDPARTY_OPEN3DSTREAM: ${{ vars.THIRDPARTY_OPEN3DSTREAM }}
-  
+
 jobs:
   ue-quick:
     if: >
@@ -113,34 +111,26 @@ jobs:
       - name: Find Unreal Engine (UE_ROOT)
         shell: pwsh
         run: |
-          Write-Host "Detecting Unreal Engine install..."
           if ($env:UE_ROOT) {
             "UE_ROOT=$($env:UE_ROOT)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
             Write-Host "Using UE_ROOT=$($env:UE_ROOT)"
             exit 0
           }
-          
           $candidates = @(
             $env:UE5_ROOT, $env:UE4_ROOT,
-            "C:\Program Files\Epic Games\UE_5.6",
-            "C:\Program Files\Epic Games\UE_5.5",
-            "C:\Program Files\Epic Games\UE_5.4"
+            "C:\Program Files\Epic Games\UE_5.4",
+            "C:\Program Files\Epic Games\UE_5.3",
+            "D:\Unreal\UE_5.4"
           ) | Where-Object { $_ }
-          
           foreach ($root in $candidates) {
             $uat    = Join-Path $root "Engine\Build\BatchFiles\RunUAT.bat"
             $editor = Join-Path $root "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
-          
-            $hasUAT    = Test-Path -Path $uat -PathType Leaf
-            $hasEditor = Test-Path -Path $editor -PathType Leaf
-          
-            if ($hasUAT -and $hasEditor) {
+            if (Test-Path $uat -PathType Leaf -and Test-Path $editor -PathType Leaf) {
               "UE_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
               Write-Host "Using UE_ROOT=$root"
               exit 0
             }
           }
-          
           Write-Error "Could not locate UE install. Set UE_ROOT on the runner or update search paths."
           exit 1
 
@@ -165,13 +155,7 @@ jobs:
           git checkout "pr-${env:PR}"
           git reset --hard "pr-${env:PR}"
           # Keep Binaries/Intermediate for incremental builds
-          
-            git clean -ffd `
-              -e Binaries -e Intermediate `
-              -e plugins/unreal/Open3DStream/ThirdParty `
-              -e plugins/unreal/Open3DStream/Binaries `
-              -e plugins/unreal/Open3DStream/Intermediate
-          
+          git clean -xfd -e Binaries -e Intermediate
           git lfs install
           git lfs fetch
           git lfs checkout
@@ -198,177 +182,14 @@ jobs:
           "pluginName=$pluginName"     | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Plugin dir: $pluginDir"
           Write-Host "Host project: $uproject"
-          
-      - name: Link ThirdParty into plugin (junction, retry, non-terminating)
-        shell: pwsh
-        run: |
-          $tp = $env:THIRDPARTY_OPEN3DSTREAM
-          Write-Host "THIRDPARTY_OPEN3DSTREAM = '$tp'"
-          if (-not $tp) { Write-Error "THIRDPARTY_OPEN3DSTREAM not set"; exit 1 }
-          if (-not (Test-Path -Path $tp -PathType Container)) {
-            Write-Error "ThirdParty source '$tp' not found"
-            exit 1
-          }
-      
-          $pluginDir = "${{ steps.paths.outputs.pluginDir }}"
-          $dst = Join-Path $pluginDir "ThirdParty"
-          Write-Host "Plugin ThirdParty path = '$dst'"
-      
-          function Remove-ThirdPartyPath {
-            param([string]$Path)
-            if (-not (Test-Path -LiteralPath $Path)) { return $true }
-            try {
-              $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
-              $isJunction = $false
-              if ($item) { $isJunction = (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) }
-              if ($isJunction) {
-                Write-Host "Removing existing junction at $Path"
-                cmd /c rmdir "$Path" 2>$null | Out-Null
-              } else {
-                Write-Host "Removing plain directory at $Path"
-                Remove-Item -LiteralPath $Path -Force -Recurse -ErrorAction SilentlyContinue
-              }
-            } catch {
-              Write-Warning "Remove-ThirdPartyPath error: $($_.Exception.Message)"
-            }
-            return (-not (Test-Path -LiteralPath $Path))
-          }
-      
-          # Ensure any stray real folder is gone first
-          $ok = $false
-          for ($i=1; $i -le 5; $i++) {
-            if (Remove-ThirdPartyPath -Path $dst) { $ok = $true; break }
-            Write-Warning "Failed to remove '$dst' (attempt $i/5). Waiting and retrying..."
-            Start-Sleep -Seconds 1
-          }
-          if (-not $ok) {
-            Write-Error "Could not prepare destination '$dst' for junction after retries."
-            exit 1
-          }
-      
-          # Create junction with retry
-          $created = $false
-          for ($i=1; $i -le 3; $i++) {
-            try {
-              New-Item -ItemType Junction -Path $dst -Target $tp | Out-Null
-              $created = $true
-            } catch {
-              Write-Warning "New-Item Junction failed (attempt $i/3): $($_.Exception.Message) — trying mklink /J"
-              $cmd = "mklink /J `"$dst`" `"$tp`""
-              cmd /c $cmd | Write-Host
-              $created = Test-Path -LiteralPath $dst
-            }
-            if ($created) { break }
-            Start-Sleep -Seconds 1
-          }
-      
-          if (-not $created) {
-            Write-Error "Failed to create ThirdParty junction at '$dst' -> '$tp'"
-            exit 1
-          }
-      
-          # Confirm it really is a junction
-          try {
-            $post = Get-Item -LiteralPath $dst -Force
-            $isJunction = (($post.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
-            Write-Host "ThirdParty link created. IsJunction=$isJunction"
-            if (-not $isJunction) {
-              Write-Warning "ThirdParty path exists but is not a junction; continuing, but build may not see updates."
-            }
-          } catch {
-            Write-Warning "Could not stat '$dst' after creation: $($_.Exception.Message)"
-          }
-      
-          # Lightweight listing for confidence; keep it non-fatal
-          try {
-            Get-ChildItem -LiteralPath $dst -Force -ErrorAction SilentlyContinue | Select-Object -First 5 | ForEach-Object { $_.FullName | Write-Host }
-          } catch {}
-          
-      - name: Verify ThirdParty contents and create aliases (Windows)
-        shell: pwsh
-        run: |
-          $base   = Join-Path "${{ steps.paths.outputs.pluginDir }}" "ThirdParty"
-          $webrtc = Join-Path $base "webrtc"
-      
-          Write-Host "ThirdParty base: $base"
-          Write-Host "WebRTC dir:      $webrtc"
-          if (-not (Test-Path -Path $base -PathType Container)) { Write-Error "ThirdParty base '$base' not found"; exit 1 }
-          if (-not (Test-Path -Path $webrtc -PathType Container)) { Write-Error "ThirdParty/webrtc '$webrtc' not found"; exit 1 }
-      
-          Write-Host "`nTree (2 levels):"
-          Get-ChildItem $base -Recurse -Depth 2 | Select-Object FullName | ForEach-Object { $_.FullName } | Write-Host
-      
-          $expected = @(
-            (Join-Path $base   "open3dstreamstatic.lib"),
-            (Join-Path $base   "nng.lib"),
-            (Join-Path $base   "flatbuffers.lib"),
-            (Join-Path $base   "opus.lib"),
-            (Join-Path $webrtc "datachannel.lib"),
-            (Join-Path $webrtc "usrsctp.lib"),
-            (Join-Path $webrtc "juice.lib"),
-            (Join-Path $webrtc "mbedtls.lib"),
-            (Join-Path $webrtc "mbedx509.lib"),
-            (Join-Path $webrtc "mbedcrypto.lib"),
-            (Join-Path $webrtc "srtp2.lib")
-          )
-      
-          $missing = @()
-          foreach ($p in $expected) {
-            if (-not (Test-Path -Path $p -PathType Leaf)) { $missing += $p }
-          }
-      
-          # Common aliases: datachannel-static.lib -> datachannel.lib, libsrtp2.lib -> srtp2.lib
-          $dcStatic = Join-Path $webrtc "datachannel-static.lib"
-          $dc       = Join-Path $webrtc "datachannel.lib"
-          if ((-not (Test-Path $dc)) -and (Test-Path $dcStatic)) {
-            Write-Host "Creating alias: $dc <- $dcStatic"
-            Copy-Item $dcStatic $dc
-            $missing = $missing | Where-Object { $_ -ne $dc }
-          }
-      
-          $libSrtp2 = Join-Path $webrtc "libsrtp2.lib"
-          $srtp2    = Join-Path $webrtc "srtp2.lib"
-          if ((-not (Test-Path $srtp2)) -and (Test-Path $libSrtp2)) {
-            Write-Host "Creating alias: $srtp2 <- $libSrtp2"
-            Copy-Item $libSrtp2 $srtp2
-            $missing = $missing | Where-Object { $_ -ne $srtp2 }
-          }
-      
-          if ($missing.Count -gt 0) {
-            Write-Error ("Missing required libraries:`n - " + ($missing -join "`n - "))
-            exit 1
-          }
-      
-          Write-Host "ThirdParty verification passed."
 
       - name: Link plugin into external host (junction)
         shell: pwsh
         run: |
-          $pluginSrc = "${{ steps.paths.outputs.pluginDir }}"
-          $uproject  = "${{ steps.paths.outputs.uproject }}"
-          $name      = "${{ steps.paths.outputs.pluginName }}"
-          if (-not (Test-Path -Path $pluginSrc -PathType Container)) {
-            Write-Error "Plugin source not found at $pluginSrc"
-            exit 1
-          }
-          $hostDir    = Split-Path -Path $uproject -Parent
-          $dstPlugins = Join-Path $hostDir "Plugins"
-          $dst        = Join-Path $dstPlugins $name
-      
-          New-Item -ItemType Directory -Force -Path $dstPlugins | Out-Null
-          if (Test-Path $dst) {
-            try { cmd /c rmdir "$dst" 2>$null | Out-Null } catch { }
-            if (Test-Path $dst) { Remove-Item -Recurse -Force -Path $dst }
-          }
-      
-          try {
-            New-Item -ItemType Junction -Path $dst -Target $pluginSrc | Out-Null
-          } catch {
-            $cmd = "mklink /J `"$dst`" `"$pluginSrc`""
-            cmd /c $cmd | Write-Host
-            if (-not (Test-Path $dst)) { throw "Failed to create junction with both methods." }
-          }
-          Write-Host "Junction created: $dst -> $pluginSrc"
+          . ".github/workflows/steps/junction-plugin-into-host.ps1" `
+            -PluginSourcePath "${{ steps.paths.outputs.pluginDir }}" `
+            -HostUProjectPath "${{ steps.paths.outputs.uproject }}" `
+            -PluginFolderName "${{ steps.paths.outputs.pluginName }}"
 
       - name: Configure Shared DDC (optional)
         shell: pwsh
@@ -390,13 +211,17 @@ jobs:
           }
 
       - name: Quick build (incremental)
+        id: quickbuild
         if: steps.ctx.outputs.cmd == 'quickbuild'
         shell: pwsh
         run: |
           $uproject = "${{ steps.paths.outputs.uproject }}"
+          $buildLog = Join-Path $env:RUNNER_TEMP "UBT-PR${{ steps.ctx.outputs.pr }}.log"
+          Write-Host "Starting quick build for $uproject"
           & "$env:UE_ROOT\Engine\Build\BatchFiles\Build.bat" `
             "${{ steps.paths.outputs.editorTarget }}" Win64 Development `
-            -Project="$uproject" -WaitMutex -NoHotReload -NoXGE
+            -Project="$uproject" -WaitMutex -NoHotReload -NoXGE 2>&1 | Tee-Object -FilePath $buildLog
+          "buildLog=$buildLog" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run automation tests (headless)
@@ -434,38 +259,82 @@ jobs:
           Write-Host "UnrealEditor.exe exited with code $code"
           if ($code -ne 0) { exit $code }
 
+      - name: Collect project logs dir
+        id: collectlogs
+        shell: pwsh
+        run: |
+          $uproject = "${{ steps.paths.outputs.uproject }}"
+          $projDir  = Split-Path -Path $uproject -Parent
+          $logsDir  = Join-Path $projDir "Saved\Logs"
+          if (-not (Test-Path -Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir | Out-Null }
+          "logsDir=$logsDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Write job summary
+        if: always()
+        shell: pwsh
+        run: |
+          $summary = @()
+          $summary += "# UE quick summary"
+          $summary += ""
+          $summary += "- PR: #${{ steps.ctx.outputs.pr }} ([open run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}))"
+          $summary += "- Command: `${{ steps.ctx.outputs.cmd }}`"
+          $summary += "- UE Root: `${{ env.UE_ROOT }}`"
+          $summary += "- Host project: `${{ steps.paths.outputs.uproject }}`"
+          $summary += "- Plugin dir: `${{ steps.paths.outputs.pluginDir }}`"
+          if ('${{ steps.quickbuild.outputs.buildLog }}') {
+            $summary += "- Build log: `${{ steps.quickbuild.outputs.buildLog }}` (also in artifact)"
+          }
+          $summary += "- Project logs dir: `${{ steps.collectlogs.outputs.logsDir }}`"
+          $summary += ""
+          $summary += "Tip: download the artifact below for full logs."
+          $summaryText = ($summary -join "`n")
+          $summaryText | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload logs (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ue-quick-logs-pr-${{ steps.ctx.outputs.pr }}
+          retention-days: 7
+          path: |
+            ${{ steps.quickbuild.outputs.buildLog }}
+            ${{ steps.collectlogs.outputs.logsDir }}\*.log
+            ${{ runner.temp }}\UE-Automation-*.log
+
       - name: Comment result (success)
         if: github.event_name == 'issue_comment' && success()
         uses: actions/github-script@v7
         continue-on-error: true
         with:
-          github-token: ${{ secrets.CI_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.CI_BOT_TOKEN != '' && secrets.CI_BOT_TOKEN || github.token }}
           script: |
             const pr = Number('${{ steps.ctx.outputs.pr }}');
             const cmd = '${{ steps.ctx.outputs.cmd }}';
             const args = `${{ steps.ctx.outputs.args }}`.trim();
             const suffix = args ? ` (args: ${args})` : '';
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             await github.rest.issues.createComment({
               owner: context.repo.owner, repo: context.repo.repo, issue_number: pr,
-              body: `✅ UE ${cmd}${suffix} succeeded for PR #${pr}.`
+              body: `✅ UE ${cmd}${suffix} succeeded for PR #${pr}.\n\nRun: ${runUrl}`
             });
-      
+
       - name: Comment result (failure)
         if: github.event_name == 'issue_comment' && failure()
         uses: actions/github-script@v7
         continue-on-error: true
         with:
-          github-token: ${{ secrets.CI_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.CI_BOT_TOKEN != '' && secrets.CI_BOT_TOKEN || github.token }}
           script: |
             const pr = Number('${{ steps.ctx.outputs.pr }}');
             const cmd = '${{ steps.ctx.outputs.cmd }}';
             const args = `${{ steps.ctx.outputs.args }}`.trim();
             const suffix = args ? ` (args: ${args})` : '';
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             await github.rest.issues.createComment({
               owner: context.repo.owner, repo: context.repo.repo, issue_number: pr,
-              body: `❌ UE ${cmd}${suffix} failed for PR #${pr}. Open the run logs for details.`
+              body: `❌ UE ${cmd}${suffix} failed for PR #${pr}. Open the run logs for details.\n\nRun: ${runUrl}`
             });
-            
+
       - name: Set commit status (success)
         if: success()
         uses: actions/github-script@v7
@@ -490,18 +359,4 @@ jobs:
               state: 'failure', context: 'ue/quickbuild',
               target_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
               description: 'UE dev workflow failed',
-            });
-
-#      - name: Cleanup ThirdParty junction (remove link only)
-#        if: always()
-#        shell: pwsh
-#        run: |
-#          $dst = Join-Path "${{ steps.paths.outputs.pluginDir }}" "ThirdParty"
-#          if (Test-Path -Path $dst) {
-#            Write-Host "Removing ThirdParty junction at $dst"
-#            # Use cmd rmdir to remove the junction itself without touching target contents
-#            cmd /c rmdir "$dst" 2>$null | Out-Null
-#            if (Test-Path -Path $dst) { Write-Warning "Could not remove ThirdParty junction (still present)" }
-#          }
-#
-# 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
+            })
