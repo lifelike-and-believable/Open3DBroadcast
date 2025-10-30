@@ -4,7 +4,7 @@
 **Source Document:** `plugins/unreal/Open3DStream/docs/WEBRTC_AUDIO_REFACTOR.md`  
 **Reference Example:** https://github.com/lifelike-and-believable/libdatachannel/blob/master/examples/audio-comm-test/client.cpp
 
-This document provides an executive summary of the GitHub Issues that should be created to execute the WebRTC Audio Path Refactor. The full, detailed issue descriptions are available in `/tmp/webrtc_audio_refactor_issues.md`.
+This document provides an executive summary of the GitHub Issues that should be created to execute the WebRTC Audio Path Refactor. The full, detailed issue descriptions are available in `WEBRTC_AUDIO_REFACTOR_ISSUES_DETAILED.md`.
 
 ---
 
@@ -245,11 +245,11 @@ Once the PeerConnection exists, you can't retroactively add media to the initial
 
 1. **Review this summary** with the team
 2. **Create the Epic issue** in GitHub
-3. **Create sub-issues #1-7** using the detailed descriptions in `/tmp/webrtc_audio_refactor_issues.md`
+3. **Create sub-issues #1-7** using the detailed descriptions in `WEBRTC_AUDIO_REFACTOR_ISSUES_DETAILED.md`
 4. **Link all sub-issues** to the Epic
 5. **Assign Phase A issues** (#1-2) to start implementation
 6. **Set up project board** to track progress
 
 ---
 
-**Note:** The full, detailed issue descriptions with complete code examples, acceptance criteria, and testing instructions are available in the temporary file `/tmp/webrtc_audio_refactor_issues.md`. Copy issue content from there when creating GitHub issues.
+**Note:** The full, detailed issue descriptions with complete code examples, acceptance criteria, and testing instructions are available in `WEBRTC_AUDIO_REFACTOR_ISSUES_DETAILED.md`. Copy issue content from there when creating GitHub issues.
