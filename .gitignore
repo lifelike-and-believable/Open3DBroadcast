@@ -132,3 +132,4 @@ plugins/unreal/Open3DStream/ThirdParty/webrtc/include/rtc/utils.hpp
 plugins/unreal/Open3DStream/ThirdParty/webrtc/include/rtc/version.h
 plugins/unreal/Open3DStream/ThirdParty/webrtc/include/rtc/websocket.hpp
 plugins/unreal/Open3DStream/ThirdParty/webrtc/include/rtc/websocketserver.hpp
+__pycache__/

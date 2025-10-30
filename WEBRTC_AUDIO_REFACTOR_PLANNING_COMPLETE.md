@@ -36,7 +36,7 @@ Step-by-step instructions for:
 **Use this for:** Actually creating the GitHub issues
 
 ### 3. Detailed Issue Specifications
-**File:** `/tmp/webrtc_audio_refactor_issues.md` (temporary location)
+**File:** `WEBRTC_AUDIO_REFACTOR_ISSUES_DETAILED.md` (repository root)
 
 Complete specifications for all 8 issues including:
 - Problem statements with root cause analysis
@@ -125,7 +125,7 @@ FWebRTCConnector
 
 2. **Review the detailed specifications**
    ```bash
-   cat /tmp/webrtc_audio_refactor_issues.md | less
+   cat WEBRTC_AUDIO_REFACTOR_ISSUES_DETAILED.md | less
    ```
 
 3. **Discuss with team:** Priorities, timeline, resource allocation
@@ -159,15 +159,13 @@ FWebRTCConnector
 
 ```
 Open3DStream/
-├── WEBRTC_AUDIO_REFACTOR_PLANNING_COMPLETE.md  ← You are here
-├── WEBRTC_AUDIO_REFACTOR_ISSUES_SUMMARY.md     ← Executive summary
-├── WEBRTC_AUDIO_REFACTOR_ISSUES_HOWTO.md       ← Creation guide
+├── WEBRTC_AUDIO_REFACTOR_PLANNING_COMPLETE.md     ← You are here
+├── WEBRTC_AUDIO_REFACTOR_ISSUES_SUMMARY.md        ← Executive summary
+├── WEBRTC_AUDIO_REFACTOR_ISSUES_DETAILED.md       ← Detailed specs (all 8 issues)
+├── WEBRTC_AUDIO_REFACTOR_ISSUES_HOWTO.md          ← Creation guide
 └── plugins/unreal/Open3DStream/
     └── docs/
-        └── WEBRTC_AUDIO_REFACTOR.md            ← Original plan
-
-/tmp/
-└── webrtc_audio_refactor_issues.md             ← Detailed specs
+        └── WEBRTC_AUDIO_REFACTOR.md               ← Original plan
 ```
 
 ## ✅ Quality Assurance
@@ -206,7 +204,7 @@ When implementing these issues:
 If you have questions about:
 - **The plan:** Review original doc and summary
 - **Creating issues:** See HOWTO guide
-- **Implementation:** Read detailed specs in `/tmp/webrtc_audio_refactor_issues.md`
+- **Implementation:** Read detailed specs in `WEBRTC_AUDIO_REFACTOR_ISSUES_DETAILED.md`
 - **Architecture:** See "Solution Architecture" section above
 
 ## ✨ Success Metrics

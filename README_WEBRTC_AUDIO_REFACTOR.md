@@ -25,7 +25,7 @@
 | **WEBRTC_AUDIO_REFACTOR_PLANNING_COMPLETE.md** | Main summary and next steps | PM, Team Lead | 5 min |
 | **WEBRTC_AUDIO_REFACTOR_ISSUES_SUMMARY.md** | Executive overview of all issues | PM, Developers | 10 min |
 | **WEBRTC_AUDIO_REFACTOR_ISSUES_HOWTO.md** | How to create GitHub issues | PM, Team Lead | 30 min |
-| **/tmp/webrtc_audio_refactor_issues.md** | Detailed specs for all 8 issues | Developers | Full reference |
+| **WEBRTC_AUDIO_REFACTOR_ISSUES_DETAILED.md** | Detailed specs for all 8 issues | Developers | Full reference |
 
 ## 🎯 The 8 Issues
 
@@ -87,13 +87,13 @@ cat WEBRTC_AUDIO_REFACTOR_ISSUES_SUMMARY.md
 cat WEBRTC_AUDIO_REFACTOR_ISSUES_HOWTO.md
 
 # View detailed issue specs
-cat /tmp/webrtc_audio_refactor_issues.md | less
+cat WEBRTC_AUDIO_REFACTOR_ISSUES_DETAILED.md | less
 
-# Create Epic issue (example)
+# Create Epic issue (example - see HOWTO for full automation)
 gh issue create --repo lifelike-and-believable/Open3DStream \
   --title "[EPIC] WebRTC Audio Path Refactor" \
   --label "epic,area:unreal,area:webrtc,audio" \
-  --body-file <(sed -n '/## Issue 8/,/^---$/p' /tmp/webrtc_audio_refactor_issues.md)
+  --body-file <(sed -n '/## Issue 8/,/^---$/p' WEBRTC_AUDIO_REFACTOR_ISSUES_DETAILED.md)
 ```
 
 ## 🎓 Background
@@ -130,7 +130,7 @@ After implementation:
 
 **Questions about the plan?** → Read `WEBRTC_AUDIO_REFACTOR_ISSUES_SUMMARY.md`  
 **Questions about creating issues?** → Read `WEBRTC_AUDIO_REFACTOR_ISSUES_HOWTO.md`  
-**Questions during implementation?** → Check detailed specs in `/tmp/webrtc_audio_refactor_issues.md`
+**Questions during implementation?** → Check detailed specs in `WEBRTC_AUDIO_REFACTOR_ISSUES_DETAILED.md`
 
 ---
 
