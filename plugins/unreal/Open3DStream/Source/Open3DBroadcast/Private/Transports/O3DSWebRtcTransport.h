@@ -281,28 +281,17 @@ private:
 
         if (bHaveConn)
         {
-            // One-time or on-change: enable audio send on the connector
-            const bool bStreamChanged = !LastDebugToneStreamLabel.Equals(TEXT("o3ds:mix"), ESearchCase::CaseSensitive);
-            const bool bParamsChanged = (LastDebugToneSr != SampleRate) || (LastDebugToneCh != Channels);
-            if (!bDebugToneAudioConfigured || bStreamChanged || bParamsChanged)
+            // CRITICAL: Do not call EnableAudioSend() after connection is established.
+            // Audio tracks must be configured before PeerConnection creation.
+            // Debug tone should only be used for testing during development, not production.
+            if (!bDebugToneAudioConfigured)
             {
-                IWebRTCConnector::FAudioSendConfig Cfg;
-                Cfg.bEnable = true;
-                Cfg.SampleRate = SampleRate;
-                Cfg.NumChannels = Channels;
-                Cfg.BitrateKbps = 32;
-                Cfg.StreamLabel = TEXT("o3ds:mix");
-                Cfg.SubjectName = TEXT("");
-                Cfg.SourceType = TEXT("mix");
-                const bool bEnabled = Conn->EnableAudioSend(Cfg);
+                // If audio was not configured before Start(), we cannot add it now
                 if (CVarO3DSWebRtcTransportDebug->GetInt() != 0)
                 {
-                    UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[WebRTC] DebugTone audio-enable via connector sr=%d ch=%d -> %s"), SampleRate, Channels, bEnabled?TEXT("OK"):TEXT("FAIL"));
+                    UE_LOG(LogO3DSBroadcast, Warning, TEXT("[WebRTC] DebugTone: Cannot enable audio after connection established. Audio must be configured before Start()."));
                 }
-                bDebugToneAudioConfigured = bEnabled;
-                LastDebugToneSr = SampleRate;
-                LastDebugToneCh = Channels;
-                LastDebugToneStreamLabel = TEXT("o3ds:mix");
+                bDebugToneAudioConfigured = false; // Mark as failed/skipped
             }
 
             // Generate float PCM frame and push via new path
