@@ -78,6 +78,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio")
 	FName SubjectName;
 
+	// Early lifecycle hooks to prime transport config prior to BeginPlay
+	virtual void OnRegister() override;
+	virtual void InitializeComponent() override;
+
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 

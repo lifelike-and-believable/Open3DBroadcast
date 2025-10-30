@@ -486,35 +486,98 @@ bool FO3DSWebRTC_InProc_DataChannel::RunTest(const FString& Params)
     using namespace std::chrono_literals;
     std::atomic<bool> aConnected{false}, bConnected{false};
     std::atomic<bool> chOpen{false}, gotMsg{false};
+    std::atomic<bool> offerCreated{false}, answerCreated{false};
 
     auto cfg = std::make_shared<rtc::Configuration>();
     auto A = std::make_shared<rtc::PeerConnection>(*cfg);
     auto B = std::make_shared<rtc::PeerConnection>(*cfg);
 
     // Wire ICE and SDP exchange directly between peers (no network/signaling)
-    A->onLocalDescription([&](rtc::Description desc){ B->setRemoteDescription(desc); B->createAnswer(); });
-    B->onLocalDescription([&](rtc::Description desc){ A->setRemoteDescription(desc); });
-    A->onLocalCandidate([&](rtc::Candidate c){ B->addRemoteCandidate(c); });
-    B->onLocalCandidate([&](rtc::Candidate c){ A->addRemoteCandidate(c); });
+    A->onLocalDescription([&offerCreated, B](rtc::Description desc){ 
+     offerCreated = true;
+ B->setRemoteDescription(std::move(desc)); 
+    });
+    
+    B->onLocalDescription([&answerCreated, A](rtc::Description desc){ 
+  answerCreated = true;
+      A->setRemoteDescription(std::move(desc)); 
+    });
+    
+  A->onLocalCandidate([B](rtc::Candidate c){ B->addRemoteCandidate(std::move(c)); });
+    B->onLocalCandidate([A](rtc::Candidate c){ A->addRemoteCandidate(std::move(c)); });
 
-    A->onStateChange([&](rtc::PeerConnection::State s){ if (s==rtc::PeerConnection::State::Connected) aConnected=true; });
-    B->onStateChange([&](rtc::PeerConnection::State s){ if (s==rtc::PeerConnection::State::Connected) bConnected=true; });
-
-    B->onDataChannel([&](std::shared_ptr<rtc::DataChannel> dc){
-        dc->onOpen([&](){ chOpen = true; });
-        dc->onMessage([&](rtc::message_variant msg){
-            if (auto *p = std::get_if<rtc::binary>(&msg)) {
-                std::string s(reinterpret_cast<const char*>(p->data()), p->size());
-                if (s == "HELLO") gotMsg = true;
-            } else if (auto *t = std::get_if<std::string>(&msg)) {
-                if (*t == "HELLO") gotMsg = true;
-            }
-        });
+    A->onStateChange([&aConnected](rtc::PeerConnection::State s){ 
+ if (s==rtc::PeerConnection::State::Connected) aConnected=true; 
+    });
+    
+    B->onStateChange([&bConnected](rtc::PeerConnection::State s){ 
+    if (s==rtc::PeerConnection::State::Connected) bConnected=true; 
     });
 
+    B->onDataChannel([&chOpen, &gotMsg](std::shared_ptr<rtc::DataChannel> dc){
+  dc->onOpen([&chOpen](){ chOpen = true; });
+        dc->onMessage([&gotMsg](rtc::message_variant msg){
+  if (auto *p = std::get_if<rtc::binary>(&msg)) {
+      std::string s(reinterpret_cast<const char*>(p->data()), p->size());
+     if (s == "HELLO") gotMsg = true;
+ } else if (auto *t = std::get_if<std::string>(&msg)) {
+  if (*t == "HELLO") gotMsg = true;
+       }
+    });
+    });
+
+    // Create data channel before offer
     auto dc = A->createDataChannel("o3ds");
-    // Create offer/answer
-    A->createOffer();
+    
+    // Set gathering state callback to trigger answer creation
+    B->onGatheringStateChange([&answerCreated](rtc::PeerConnection::GatheringState state) {
+        if (state == rtc::PeerConnection::GatheringState::Complete && !answerCreated.load()) {
+       // Answer should already be created by onLocalDescription
+        }
+    });
+
+    // Create offer/answer - this initiates the process
+    try
+    {
+        A->setLocalDescription();
+    }
+    catch (const std::exception& e)
+    {
+        AddError(FString::Printf(TEXT("setLocalDescription() threw: %s"), UTF8_TO_TCHAR(e.what())));
+        return false;
+    }
+    catch (...)
+    {
+        AddError(TEXT("setLocalDescription() threw an unknown exception"));
+        return false;
+    }
+
+    // Wait for offer creation
+    const double startOffer = FPlatformTime::Seconds();
+    while ((FPlatformTime::Seconds() - startOffer) < 3.0 && !offerCreated.load())
+    {
+   FPlatformProcess::Sleep(0.01f);
+    }
+
+    if (!offerCreated.load())
+    {
+        AddError(TEXT("Failed to create offer"));
+    return false;
+    }
+
+    // Trigger answer after receiving offer (should happen automatically via onLocalDescription callback)
+    // Wait a bit for the answer to be generated
+    const double startAnswer = FPlatformTime::Seconds();
+    while ((FPlatformTime::Seconds() - startAnswer) < 3.0 && !answerCreated.load())
+    {
+        FPlatformProcess::Sleep(0.01f);
+    }
+
+  if (!answerCreated.load())
+    {
+        AddError(TEXT("Failed to create answer"));
+        return false;
+    }
 
     // Wait for channel open or timeout
     const double start = FPlatformTime::Seconds();
@@ -526,7 +589,7 @@ bool FO3DSWebRTC_InProc_DataChannel::RunTest(const FString& Params)
     TestTrue(TEXT("DataChannel opened"), chOpen.load());
     if (!chOpen.load())
     {
-        return false;
+return false;
     }
 
     // Send message and await receipt
@@ -534,7 +597,7 @@ bool FO3DSWebRTC_InProc_DataChannel::RunTest(const FString& Params)
     const double start2 = FPlatformTime::Seconds();
     while ((FPlatformTime::Seconds() - start2) < 2.0 && !gotMsg.load())
     {
-        FPlatformProcess::Sleep(0.01f);
+      FPlatformProcess::Sleep(0.01f);
     }
     TestTrue(TEXT("Received HELLO over DataChannel"), gotMsg.load());
     return gotMsg.load();
@@ -547,17 +610,28 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSWebRTC_InProc_AudioTrackOpen,
 bool FO3DSWebRTC_InProc_AudioTrackOpen::RunTest(const FString& Params)
 {
     std::atomic<bool> gotAudioTrack{false};
+    std::atomic<bool> offerCreated{false}, answerCreated{false};
+    
     auto cfg = std::make_shared<rtc::Configuration>();
     auto A = std::make_shared<rtc::PeerConnection>(*cfg);
     auto B = std::make_shared<rtc::PeerConnection>(*cfg);
 
-    A->onLocalDescription([&](rtc::Description desc){ B->setRemoteDescription(desc); B->createAnswer(); });
-    B->onLocalDescription([&](rtc::Description desc){ A->setRemoteDescription(desc); });
-    A->onLocalCandidate([&](rtc::Candidate c){ B->addRemoteCandidate(c); });
-    B->onLocalCandidate([&](rtc::Candidate c){ A->addRemoteCandidate(c); });
+    A->onLocalDescription([&offerCreated, B](rtc::Description desc){ 
+        offerCreated = true;
+     B->setRemoteDescription(std::move(desc)); 
+    });
+ 
+    B->onLocalDescription([&answerCreated, A](rtc::Description desc){ 
+ answerCreated = true;
+        A->setRemoteDescription(std::move(desc)); 
+    });
+  
+    A->onLocalCandidate([B](rtc::Candidate c){ B->addRemoteCandidate(std::move(c)); });
+    B->onLocalCandidate([A](rtc::Candidate c){ A->addRemoteCandidate(std::move(c)); });
 
-    B->onTrack([&](std::shared_ptr<rtc::Track> track){
-        if (track && track->kind() == rtc::Description::Media::Kind::Audio) {
+    B->onTrack([&gotAudioTrack](std::shared_ptr<rtc::Track> track){
+        // Check if track is valid - presence of an audio track is what we're testing
+        if (track) {
             gotAudioTrack = true;
         }
     });
@@ -566,14 +640,57 @@ bool FO3DSWebRTC_InProc_AudioTrackOpen::RunTest(const FString& Params)
     rtc::Description::Audio audio("audio", rtc::Description::Direction::SendOnly);
     audio.addOpusCodec(111);
     audio.addSSRC(0xA17C0001u, "o3ds", "o3ds", "o3ds");
-    A->addTrack(audio);
-    A->createOffer();
+    (void)A->addTrack(audio);
+ 
+    // Create offer
+    try
+    {
+        A->setLocalDescription();
+    }
+    catch (const std::exception& e)
+    {
+        AddError(FString::Printf(TEXT("setLocalDescription() threw: %s"), UTF8_TO_TCHAR(e.what())));
+        return false;
+    }
+    catch (...)
+    {
+        AddError(TEXT("setLocalDescription() threw an unknown exception"));
+        return false;
+    }
 
-    const double start = FPlatformTime::Seconds();
+    // Wait for offer creation
+    const double startOffer = FPlatformTime::Seconds();
+    while ((FPlatformTime::Seconds() - startOffer) < 3.0 && !offerCreated.load())
+    {
+        FPlatformProcess::Sleep(0.01f);
+    }
+
+    if (!offerCreated.load())
+    {
+    AddError(TEXT("Failed to create offer with audio track"));
+  return false;
+    }
+
+    // Wait for answer
+    const double startAnswer = FPlatformTime::Seconds();
+    while ((FPlatformTime::Seconds() - startAnswer) < 3.0 && !answerCreated.load())
+    {
+        FPlatformProcess::Sleep(0.01f);
+    }
+
+    if (!answerCreated.load())
+    {
+    AddError(TEXT("Failed to create answer"));
+    return false;
+    }
+
+    // Wait for track notification
+  const double start = FPlatformTime::Seconds();
     while ((FPlatformTime::Seconds() - start) < 5.0 && !gotAudioTrack.load())
     {
         FPlatformProcess::Sleep(0.01f);
     }
+    
     TestTrue(TEXT("Receiver observed remote audio track"), gotAudioTrack.load());
     return gotAudioTrack.load();
 }

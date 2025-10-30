@@ -82,10 +82,41 @@ public:
     // Retained for source compatibility; currently a no-op until native audio tracks are implemented.
     void SetAudioConfig(const FO3DSWebRTCAudioConfig& /*In*/) {}
 
+    // Create channel and connector but don't start yet (allows audio configuration before connection)
+    bool PrepareChannel()
+    {
+        if (Channel)
+        {
+            return true; // Already prepared
+        }
+        
+        Channel = MakeUnique<FO3DSWebRTCDataChannel>();
+        
+        // Map broadcast backend enum to receiver enum for the shared data channel API
+        auto ToReceiverBackend = [](EO3DSWebRtcBackend In){
+            switch (In)
+            {
+            case EO3DSWebRtcBackend::LibDataChannel: return EO3DSWebRtcBackendReceiver::LibDataChannel;
+            case EO3DSWebRtcBackend::LiveKit: return EO3DSWebRtcBackendReceiver::LiveKit;
+            default: return EO3DSWebRtcBackendReceiver::LibDataChannel;
+            }
+        };
+        const EO3DSWebRtcBackendReceiver ReceiverBackend = ToReceiverBackend(Backend);
+        
+        // Create connector without starting (allows audio to be configured before PeerConnection)
+        return Channel->PrepareConnector(ReceiverBackend);
+    }
+
     virtual bool Start(const FString& InUrl, const FString& InProtocol, const FString& InKey) override
     {
         Url = InUrl; Key = InKey; Protocol = InProtocol;
-        Channel = MakeUnique<FO3DSWebRTCDataChannel>();
+        
+        // Ensure channel and connector are prepared (supports both old single-phase and new two-phase init)
+        if (!PrepareChannel())
+        {
+            UE_LOG(LogO3DSBroadcast, Error, TEXT("[WebRTC] Transport failed to prepare channel"));
+            return false;
+        }
 
         // Ensure complementary WebRTC role is encoded in the URL query (client/server)
         FString EffectiveUrl = Url;
@@ -250,28 +281,17 @@ private:
 
         if (bHaveConn)
         {
-            // One-time or on-change: enable audio send on the connector
-            const bool bStreamChanged = !LastDebugToneStreamLabel.Equals(TEXT("o3ds:mix"), ESearchCase::CaseSensitive);
-            const bool bParamsChanged = (LastDebugToneSr != SampleRate) || (LastDebugToneCh != Channels);
-            if (!bDebugToneAudioConfigured || bStreamChanged || bParamsChanged)
+            // CRITICAL: Do not call EnableAudioSend() after connection is established.
+            // Audio tracks must be configured before PeerConnection creation.
+            // Debug tone should only be used for testing during development, not production.
+            if (!bDebugToneAudioConfigured)
             {
-                IWebRTCConnector::FAudioSendConfig Cfg;
-                Cfg.bEnable = true;
-                Cfg.SampleRate = SampleRate;
-                Cfg.NumChannels = Channels;
-                Cfg.BitrateKbps = 32;
-                Cfg.StreamLabel = TEXT("o3ds:mix");
-                Cfg.SubjectName = TEXT("");
-                Cfg.SourceType = TEXT("mix");
-                const bool bEnabled = Conn->EnableAudioSend(Cfg);
+                // If audio was not configured before Start(), we cannot add it now
                 if (CVarO3DSWebRtcTransportDebug->GetInt() != 0)
                 {
-                    UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[WebRTC] DebugTone audio-enable via connector sr=%d ch=%d -> %s"), SampleRate, Channels, bEnabled?TEXT("OK"):TEXT("FAIL"));
+                    UE_LOG(LogO3DSBroadcast, Warning, TEXT("[WebRTC] DebugTone: Cannot enable audio after connection established. Audio must be configured before Start()."));
                 }
-                bDebugToneAudioConfigured = bEnabled;
-                LastDebugToneSr = SampleRate;
-                LastDebugToneCh = Channels;
-                LastDebugToneStreamLabel = TEXT("o3ds:mix");
+                bDebugToneAudioConfigured = false; // Mark as failed/skipped
             }
 
             // Generate float PCM frame and push via new path

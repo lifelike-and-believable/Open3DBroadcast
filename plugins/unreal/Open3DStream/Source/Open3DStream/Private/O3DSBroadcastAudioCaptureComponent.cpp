@@ -9,6 +9,7 @@
 #include "AudioCaptureCore.h"
 // Needed for GetWorld() usage in BeginPlay/EndPlay
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 
 namespace
 {
@@ -42,9 +43,42 @@ UO3DSBroadcastAudioCaptureComponent::UO3DSBroadcastAudioCaptureComponent()
 	PrimaryComponentTick.bCanEverTick = false;
 }
 
+void UO3DSBroadcastAudioCaptureComponent::OnRegister()
+{
+	Super::OnRegister();
+	// Keep low-level source in sync with high-level mode as early as possible
+	switch (CaptureMode)
+	{
+		case EO3DSCaptureMode::Mix: Config.Source = EO3DSAudioCaptureSource::GameSubmix; break;
+		case EO3DSCaptureMode::Input: Config.Source = EO3DSAudioCaptureSource::Microphone; break;
+		default: break;
+	}
+	// If a connector is already provided before play, prime it with the config
+	if (Connector && !bAudioSendConfigured)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP0] OnRegister: priming connector with audio config"));
+		EnsureConnector();
+	}
+}
+
+void UO3DSBroadcastAudioCaptureComponent::InitializeComponent()
+{
+	Super::InitializeComponent();
+	// Extra safety: attempt to ensure audio config is applied right before BeginPlay
+	if (Connector && !bAudioSendConfigured)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP0b] InitializeComponent: ensuring audio config is applied"));
+		EnsureConnector();
+	}
+}
+
 void UO3DSBroadcastAudioCaptureComponent::BeginPlay()
 {
 	Super::BeginPlay();
+
+	UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP X] AudioCaptureComponent::BeginPlay (SubjectName='%s', Connector=%s)"),
+		*SubjectName.ToString(),
+		Connector ? TEXT("SET") : TEXT("NULL"));
 
 	// Sync high-level mode into low-level source selection
 	switch (CaptureMode)
@@ -54,7 +88,18 @@ void UO3DSBroadcastAudioCaptureComponent::BeginPlay()
 		default: break;
 	}
 
-	EnsureConnector();
+	// Only configure connector if it's already been set.
+	// If not set yet, configuration will happen when SetConnector() is called later.
+	// This prevents trying to configure audio after PeerConnection has been created.
+	if (Connector)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP Y] BeginPlay: Connector already set - calling EnsureConnector"));
+		EnsureConnector();
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP Y] BeginPlay: Connector not set - skipping audio config (will be done by SetConnector)"));
+	}
 
 	if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
 	{
@@ -81,6 +126,10 @@ void UO3DSBroadcastAudioCaptureComponent::BeginPlay()
 					UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Submix tap registered on %s"), *GetNameSafe(TargetSubmix));
 				}
 			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("O3DS AudioCapture: No target submix available for tap registration"));
+			}
 		}
 	}
 
@@ -102,6 +151,10 @@ void UO3DSBroadcastAudioCaptureComponent::BeginPlay()
 			{
 				UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Mic stream started (DeviceIndex=%d)"), Config.DeviceIndex);
 			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("O3DS AudioCapture: Failed to open mic stream (DeviceIndex=%d)"), Config.DeviceIndex);
 		}
 	}
 }
@@ -135,12 +188,14 @@ void UO3DSBroadcastAudioCaptureComponent::EndPlay(const EEndPlayReason::Type End
 
 void UO3DSBroadcastAudioCaptureComponent::SetConnector(TSharedPtr<IWebRTCConnector> InConnector)
 {
+	UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP A] SetConnector called on AudioCaptureComponent"));
 	Connector = InConnector;
 	// Reset warning throttle so if connector goes null later, we warn once again
 	bWarnedNoConnector = false;
 	// Reset configured flag so we reapply settings on newly injected connector
 	bAudioSendConfigured = false;
 	// Attempt to configure send immediately if possible
+	UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP B] Calling EnsureConnector to configure audio send"));
 	EnsureConnector();
 }
 
@@ -148,6 +203,7 @@ void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 {
 	if (!Connector)
 	{
+		UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP C] EnsureConnector: No connector set - skipping"));
 		// Do not auto-fetch a shared connector anymore. Leave null to surface networking issues.
 		if (CVarO3DSAudioCaptureDebug->GetInt() !=0 && !bWarnedNoConnector)
 		{
@@ -157,15 +213,17 @@ void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 		return;
 	}
 
+	UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP D] EnsureConnector: Connector is valid, preparing audio config"));
+
 	// Connector is valid again; allow future warnings if it becomes null later
 	bWarnedNoConnector = false;
 
 	// If connector was set externally, (re)configure send params
 	IWebRTCConnector::FAudioSendConfig A;
 	A.bEnable = true;
-	A.SampleRate = Config.SampleRate;
-	A.NumChannels = Config.NumChannels;
-	A.BitrateKbps = Config.BitrateKbps;
+	A.SampleRate = (Config.SampleRate >0) ? Config.SampleRate :48000;
+	A.NumChannels = (Config.NumChannels >0) ? Config.NumChannels :1;
+	A.BitrateKbps = (Config.BitrateKbps >0) ? Config.BitrateKbps :64;
 
 	// Choose StreamLabel based on mode and subject/device
 	if (CaptureMode == EO3DSCaptureMode::Input)
@@ -192,6 +250,12 @@ void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 
 	A.StreamLabel = StreamLabel;
 	A.SubjectName = SubjectName.ToString();
+	
+	UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP E] Computed StreamLabel='%s' (CaptureMode=%s, SubjectName='%s')"),
+		*A.StreamLabel,
+		(CaptureMode == EO3DSCaptureMode::Mix) ? TEXT("Mix") : TEXT("Input"),
+		*SubjectName.ToString());
+	
 	// Only (re)apply if values changed or we haven't configured yet
 	const bool bChanged = (!bAudioSendConfigured)
 		|| (LastAppliedSampleRate != A.SampleRate)
@@ -200,7 +264,9 @@ void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 		|| (!LastAppliedStreamLabel.Equals(A.StreamLabel, ESearchCase::CaseSensitive));
 	if (bChanged)
 	{
+		UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP F] Calling EnableAudioSend (configured=%d, changed=%d)"), bAudioSendConfigured?1:0, bChanged?1:0);
 		const bool bEnabled = Connector->EnableAudioSend(A);
+		UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP G] EnableAudioSend returned %s"), bEnabled ? TEXT("SUCCESS") : TEXT("FAILED"));
 		if (bEnabled)
 		{
 			bAudioSendConfigured = true;
@@ -209,6 +275,11 @@ void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 			LastAppliedBitrateKbps = A.BitrateKbps;
 			LastAppliedStreamLabel = A.StreamLabel;
 		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("O3DS AudioCapture: EnableAudioSend failed (label=%s sr=%d ch=%d br=%d type=%s)"),
+				*A.StreamLabel, A.SampleRate, A.NumChannels, A.BitrateKbps, *A.SourceType);
+		}
 		if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
 		{
 			UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Connector ready=%d EnableAudioSend label=%s subject=%s sr=%d ch=%d br=%d -> %s (changed=%d)"),
@@ -216,6 +287,10 @@ void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 				*A.StreamLabel, *A.SubjectName, A.SampleRate, A.NumChannels, A.BitrateKbps,
 				bEnabled ? TEXT("OK") : TEXT("FAILED"), bChanged?1:0);
 		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP F] No changes detected - skipping EnableAudioSend call"));
 	}
 }
 
@@ -273,13 +348,31 @@ void UO3DSBroadcastAudioCaptureComponent::PostEditChangeProperty(FPropertyChange
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 	const FName Prop = PropertyChangedEvent.MemberProperty ? PropertyChangedEvent.MemberProperty->GetFName() : NAME_None;
+	bool bAffectsAudio = false;
 	if (Prop == GET_MEMBER_NAME_CHECKED(UO3DSBroadcastAudioCaptureComponent, CaptureMode))
 	{
 		Config.Source = (CaptureMode == EO3DSCaptureMode::Mix) ? EO3DSAudioCaptureSource::GameSubmix : EO3DSAudioCaptureSource::Microphone;
+		bAffectsAudio = true;
 	}
 	else if (Prop == GET_MEMBER_NAME_CHECKED(UO3DSBroadcastAudioCaptureComponent, InputDeviceName))
 	{
 		Config.DeviceIndex = ResolveDeviceIndexFromName(InputDeviceName);
+		bAffectsAudio = true;
+	}
+	else if (Prop == GET_MEMBER_NAME_CHECKED(UO3DSBroadcastAudioCaptureComponent, Config))
+	{
+		bAffectsAudio = true;
+	}
+
+	if (bAffectsAudio)
+	{
+		// Force re-apply on next EnsureConnector
+		bAudioSendConfigured = false;
+		// If connector exists, push new config immediately (pre-play or PIE)
+		if (Connector)
+		{
+			EnsureConnector();
+		}
 	}
 }
 #endif
