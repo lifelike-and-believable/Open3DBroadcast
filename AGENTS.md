@@ -24,9 +24,8 @@ Key expectations (short version):
   4) Post a short status comment summarizing what you will do next.
 
 - Ignore comments by bots (`github-actions`, `github-actions[bot]`) and CI messages.
-- Do not post `/ue` commands yourself; wait for a human to trigger CI (`/ue quickbuild` or `/ue test`).
 
-## How to run CI (human-triggered)
+## How to run CI 
 
 - Post a comment on this PR:
   - `/ue quickbuild` for a fast editor build
