@@ -21,7 +21,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write   # was: read
+  pull-requests: write
   issues: write
   statuses: write
 
@@ -125,7 +125,7 @@ jobs:
           foreach ($root in $candidates) {
             $uat    = Join-Path $root "Engine\Build\BatchFiles\RunUAT.bat"
             $editor = Join-Path $root "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
-            if (Test-Path $uat -PathType Leaf -and Test-Path $editor -PathType Leaf) {
+            if ((Test-Path -Path $uat -PathType Leaf) -and (Test-Path -Path $editor -PathType Leaf)) {
               "UE_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
               Write-Host "Using UE_ROOT=$root"
               exit 0
@@ -273,22 +273,32 @@ jobs:
         if: always()
         shell: pwsh
         run: |
+          $bt = [char]96
+          $prNum        = "${{ steps.ctx.outputs.pr }}"
+          $cmdOut       = "${{ steps.ctx.outputs.cmd }}"
+          $runUrl       = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          $ueRoot       = $env:UE_ROOT
+          $uprojectOut  = "${{ steps.paths.outputs.uproject }}"
+          $pluginDirOut = "${{ steps.paths.outputs.pluginDir }}"
+          $buildLogOut  = "${{ steps.quickbuild.outputs.buildLog }}"
+          $logsDirOut   = "${{ steps.collectlogs.outputs.logsDir }}"
+
           $summary = @()
           $summary += "# UE quick summary"
           $summary += ""
-          $summary += "- PR: #${{ steps.ctx.outputs.pr }} ([open run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}))"
-          $summary += "- Command: `${{ steps.ctx.outputs.cmd }}`"
-          $summary += "- UE Root: `${{ env.UE_ROOT }}`"
-          $summary += "- Host project: `${{ steps.paths.outputs.uproject }}`"
-          $summary += "- Plugin dir: `${{ steps.paths.outputs.pluginDir }}`"
-          if ('${{ steps.quickbuild.outputs.buildLog }}') {
-            $summary += "- Build log: `${{ steps.quickbuild.outputs.buildLog }}` (also in artifact)"
+          $summary += "- PR: #$prNum ([open run]($runUrl))"
+          $summary += "- Command: $bt$cmdOut$bt"
+          $summary += "- UE Root: " + ($(if ($ueRoot) { "$bt$ueRoot$bt" } else { "(not detected)" }))
+          $summary += "- Host project: " + ($(if ($uprojectOut) { "$bt$uprojectOut$bt" } else { "(n/a)" }))
+          $summary += "- Plugin dir: " + ($(if ($pluginDirOut) { "$bt$pluginDirOut$bt" } else { "(n/a)" }))
+          if ($buildLogOut) {
+            $summary += "- Build log: $bt$buildLogOut$bt (also in artifact)"
           }
-          $summary += "- Project logs dir: `${{ steps.collectlogs.outputs.logsDir }}`"
+          $summary += "- Project logs dir: " + ($(if ($logsDirOut) { "$bt$logsDirOut$bt" } else { "(n/a)" }))
           $summary += ""
           $summary += "Tip: download the artifact below for full logs."
-          $summaryText = ($summary -join "`n")
-          $summaryText | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+          $summary -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Upload logs (always)
         if: always()
