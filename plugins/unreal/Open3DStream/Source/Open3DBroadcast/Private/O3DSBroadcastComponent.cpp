@@ -1170,6 +1170,39 @@ void UO3DSBroadcastComponent::PostEditChangeProperty(FPropertyChangedEvent& Prop
  Super::PostEditChangeProperty(PropertyChangedEvent);
  // Update helper flags so EditCondition expressions referencing them remain valid
  UpdateEditConditionHelpers();
+
+ const FName Prop = PropertyChangedEvent.MemberProperty ? PropertyChangedEvent.MemberProperty->GetFName() : NAME_None;
+ // Properties that should force a full restart of the WebRTC connection (audio or animation config changes)
+ static const TSet<FName> RestartProps = {
+		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, bEnableWebRTCAudio),
+		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, WebRTCAudioMode),
+		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, WebRTCInputDeviceName),
+		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, WebRTCSubmixToTap),
+		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, WebRTCAudioSampleRate),
+		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, WebRTCAudioNumChannels),
+		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, WebRTCAudioBitrateKbps),
+		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, WebRTCAudioPlayoutDelayMs),
+		// Animation/pose serialization related
+		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, bClampMorphCurvesToUnit),
+		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, bDropNaNAndInfinity),
+		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, bEnableCurveFiltering),
+		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, CurveEpsilon),
+		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, CurveDeltaThreshold),
+		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, IncludeCurvePatterns),
+		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, ExcludeCurvePatterns),
+		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, SubjectName),
+		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, TargetMesh)
+	};
+
+	if (RestartProps.Contains(Prop))
+	{
+		const bool bWasCapturing = bIsCapturing;
+		StopCapture();
+		if (bAutoStartCapture || bWasCapturing)
+		{
+			StartCapture();
+		}
+	}
 }
 #endif
 

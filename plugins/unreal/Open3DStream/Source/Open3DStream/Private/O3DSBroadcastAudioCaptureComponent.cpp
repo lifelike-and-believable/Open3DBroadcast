@@ -9,6 +9,7 @@
 #include "AudioCaptureCore.h"
 // Needed for GetWorld() usage in BeginPlay/EndPlay
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 
 namespace
 {
@@ -40,6 +41,35 @@ static TAutoConsoleVariable<int32> CVarO3DSAudioCaptureDebug(
 UO3DSBroadcastAudioCaptureComponent::UO3DSBroadcastAudioCaptureComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
+}
+
+void UO3DSBroadcastAudioCaptureComponent::OnRegister()
+{
+	Super::OnRegister();
+	// Keep low-level source in sync with high-level mode as early as possible
+	switch (CaptureMode)
+	{
+		case EO3DSCaptureMode::Mix: Config.Source = EO3DSAudioCaptureSource::GameSubmix; break;
+		case EO3DSCaptureMode::Input: Config.Source = EO3DSAudioCaptureSource::Microphone; break;
+		default: break;
+	}
+	// If a connector is already provided before play, prime it with the config
+	if (Connector && !bAudioSendConfigured)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP0] OnRegister: priming connector with audio config"));
+		EnsureConnector();
+	}
+}
+
+void UO3DSBroadcastAudioCaptureComponent::InitializeComponent()
+{
+	Super::InitializeComponent();
+	// Extra safety: attempt to ensure audio config is applied right before BeginPlay
+	if (Connector && !bAudioSendConfigured)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[AUDIO SETUP0b] InitializeComponent: ensuring audio config is applied"));
+		EnsureConnector();
+	}
 }
 
 void UO3DSBroadcastAudioCaptureComponent::BeginPlay()
@@ -96,6 +126,10 @@ void UO3DSBroadcastAudioCaptureComponent::BeginPlay()
 					UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Submix tap registered on %s"), *GetNameSafe(TargetSubmix));
 				}
 			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("O3DS AudioCapture: No target submix available for tap registration"));
+			}
 		}
 	}
 
@@ -117,6 +151,10 @@ void UO3DSBroadcastAudioCaptureComponent::BeginPlay()
 			{
 				UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Mic stream started (DeviceIndex=%d)"), Config.DeviceIndex);
 			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("O3DS AudioCapture: Failed to open mic stream (DeviceIndex=%d)"), Config.DeviceIndex);
 		}
 	}
 }
@@ -183,9 +221,9 @@ void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 	// If connector was set externally, (re)configure send params
 	IWebRTCConnector::FAudioSendConfig A;
 	A.bEnable = true;
-	A.SampleRate = Config.SampleRate;
-	A.NumChannels = Config.NumChannels;
-	A.BitrateKbps = Config.BitrateKbps;
+	A.SampleRate = (Config.SampleRate >0) ? Config.SampleRate :48000;
+	A.NumChannels = (Config.NumChannels >0) ? Config.NumChannels :1;
+	A.BitrateKbps = (Config.BitrateKbps >0) ? Config.BitrateKbps :64;
 
 	// Choose StreamLabel based on mode and subject/device
 	if (CaptureMode == EO3DSCaptureMode::Input)
@@ -236,6 +274,11 @@ void UO3DSBroadcastAudioCaptureComponent::EnsureConnector()
 			LastAppliedNumChannels = A.NumChannels;
 			LastAppliedBitrateKbps = A.BitrateKbps;
 			LastAppliedStreamLabel = A.StreamLabel;
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("O3DS AudioCapture: EnableAudioSend failed (label=%s sr=%d ch=%d br=%d type=%s)"),
+				*A.StreamLabel, A.SampleRate, A.NumChannels, A.BitrateKbps, *A.SourceType);
 		}
 		if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
 		{
@@ -305,13 +348,31 @@ void UO3DSBroadcastAudioCaptureComponent::PostEditChangeProperty(FPropertyChange
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 	const FName Prop = PropertyChangedEvent.MemberProperty ? PropertyChangedEvent.MemberProperty->GetFName() : NAME_None;
+	bool bAffectsAudio = false;
 	if (Prop == GET_MEMBER_NAME_CHECKED(UO3DSBroadcastAudioCaptureComponent, CaptureMode))
 	{
 		Config.Source = (CaptureMode == EO3DSCaptureMode::Mix) ? EO3DSAudioCaptureSource::GameSubmix : EO3DSAudioCaptureSource::Microphone;
+		bAffectsAudio = true;
 	}
 	else if (Prop == GET_MEMBER_NAME_CHECKED(UO3DSBroadcastAudioCaptureComponent, InputDeviceName))
 	{
 		Config.DeviceIndex = ResolveDeviceIndexFromName(InputDeviceName);
+		bAffectsAudio = true;
+	}
+	else if (Prop == GET_MEMBER_NAME_CHECKED(UO3DSBroadcastAudioCaptureComponent, Config))
+	{
+		bAffectsAudio = true;
+	}
+
+	if (bAffectsAudio)
+	{
+		// Force re-apply on next EnsureConnector
+		bAudioSendConfigured = false;
+		// If connector exists, push new config immediately (pre-play or PIE)
+		if (Connector)
+		{
+			EnsureConnector();
+		}
 	}
 }
 #endif

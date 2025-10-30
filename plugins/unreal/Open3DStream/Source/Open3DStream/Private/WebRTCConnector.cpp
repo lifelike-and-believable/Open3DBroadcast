@@ -689,11 +689,23 @@ void FWebRTCConnector::OnSignalingConnected()
 	bSignalingJoinErrorReported = false;
 	
 	// Only client mode creates data channel proactively
-	// Server mode will receive data channel from peer
 	if (!bIsServer)
 	{
+#if O3DS_WITH_OPUS
+		// Ensure audio track exists BEFORE creating data channel and offer
+		{
+			FScopeLock Lock(&PeerConnectionLock);
+			if (PeerConnection && !AudioTrack && !AudioRt.Config.StreamLabel.IsEmpty())
+			{
+				UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("[SIGNALING] Ensuring audio track before datachannel/offer (stream=%s)"), *AudioRt.Config.StreamLabel);
+				const bool bOk = SetupAudioTrackAndHandlers(AudioRt.Config, PeerConnection);
+				UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("[SIGNALING] Audio track ensure result: %s"), bOk ? TEXT("SUCCESS") : TEXT("FAILED"));
+			}
+		}
+#endif
+		// Create data channel AFTER audio track is in place
 		CreateDataChannel();
-		// In some cases the peer has already joined before this callback; proactively create offer
+		// Now create the offer
 		MaybeCreateOffer(TEXT("on-signaling-connected"));
 	}
 }
@@ -742,7 +754,7 @@ void FWebRTCConnector::OnOfferReceived(const FString& SDP)
 		}
 		else
 		{
-			// Log remote offer audio direction and Opus presence (robust line endings)
+			// Log remote offer audio direction and Opus PT presence (robust line endings)
 			int32 AudioStart = SDP.Find(TEXT("m=audio"), ESearchCase::IgnoreCase, ESearchDir::FromStart);
 			if (AudioStart != INDEX_NONE)
 			{
@@ -1561,7 +1573,15 @@ void FWebRTCConnector::MaybeCreateOffer(const TCHAR* Context)
 	}
 	try
 	{
-		// Ensure a data channel exists first in non-negotiated mode so SDP has the m= line
+#if O3DS_WITH_OPUS
+		// Ensure audio track is present before creating the offer
+		if (!AudioTrack && !AudioRt.Config.StreamLabel.IsEmpty())
+		{
+			UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("Ensuring audio track before creating offer (%s)"), Context);
+			SetupAudioTrackAndHandlers(AudioRt.Config, PeerConnection);
+		}
+#endif
+		// Create data channel (negotiated mode only needs this on both ends)
 		if (!bNegotiatedChannelEnabled && !DataChannel)
 		{
 			CreateDataChannel();
@@ -1732,10 +1752,8 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 
 	// If track exists but isn't open yet, still attempt a probe send (some stacks open on first frame).
 	// Keep re-offer cadence active to help finalize negotiation.
-	bool bTrackWasNotOpen = false;
 	if (LocalAudioTrack && !LocalAudioTrack->isOpen())
 	{
-		bTrackWasNotOpen = true;
 		AudioRt.bTrackReady = false;
 		AudioRt.NextSendRetryTimeSeconds = Now + 0.25;
 		if (!bIsServer)
@@ -1769,7 +1787,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 		{
 			UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 probe send while track not open"));
 		}
-		// Fall through to try sending; exceptions will be caught below
+		// IMPORTANT: Do NOT return here; fall through to try sending one encoded packet.
 	}
 
 	// If we don't have a track at this point, something went wrong - audio should have been
@@ -1800,20 +1818,20 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 	}
 
 	const int32 FrameSamplesTotal = AudioRt.FrameSizeSamples * AudioRt.Config.NumChannels;
-	// Step in48kHz RTP clock regardless of source sample rate
-	const uint32 Step48k = (uint32)((int64)AudioRt.Config.FrameSizeMs *48000 /1000);
+	// Step in 48kHz RTP clock regardless of source sample rate
+	const uint32 Step48k = (uint32)((int64)AudioRt.Config.FrameSizeMs * 48000 / 1000);
 	uint8 Encoded[4000];
 	while (AudioRt.Pending.Num() >= FrameSamplesTotal)
 	{
 		int16* FramePtr = AudioRt.Pending.GetData();
 		int EncBytes = opus_encode(OpusEnc, FramePtr, AudioRt.FrameSizeSamples, Encoded, sizeof(Encoded));
-		if (EncBytes >0)
+		if (EncBytes > 0)
 		{
 			// Send over audio track
 			rtc::binary Packet;
 			Packet.resize(EncBytes);
-			for (int i =0; i < EncBytes; ++i) Packet[i] = static_cast<std::byte>(Encoded[i]);
-			// RTP timestamp increments in48kHz clock
+			for (int i = 0; i < EncBytes; ++i) Packet[i] = static_cast<std::byte>(Encoded[i]);
+			// RTP timestamp increments in 48kHz clock
 			rtc::FrameInfo FI{ (uint32)AudioRt.Timestamp };
 			AudioRt.Timestamp += Step48k;
 			if (LocalAudioTrack)
@@ -1825,16 +1843,16 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 				catch (const std::exception& e)
 				{
 					UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("WebRTC Connector: sendFrame threw exception: %s"), *FString(ANSI_TO_TCHAR(e.what())));
-					// Backoff and mark not ready; try to re-add track on next attempt
+					// Backoff and mark not ready
 					AudioRt.bTrackReady = false;
-					AudioRt.NextSendRetryTimeSeconds = FPlatformTime::Seconds() +0.25;
+					AudioRt.NextSendRetryTimeSeconds = FPlatformTime::Seconds() + 0.25;
 					return false;
 				}
 			}
 			// Update debug counters
 			AudioRt.SentPackets += 1;
 			AudioRt.SentBytes += (uint64)EncBytes;
-			if (CVarO3DSWebRTCVerbose->GetInt() !=0)
+			if (CVarO3DSWebRTCVerbose->GetInt() != 0)
 			{
 				UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Encoded and sent audio packet %d bytes (timestamp=%u)"), EncBytes, FI.timestamp);
 			}
@@ -1842,7 +1860,7 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 		}
 		// Pop consumed samples
 		const int32 Remaining = AudioRt.Pending.Num() - FrameSamplesTotal;
-		if (Remaining >0)
+		if (Remaining > 0)
 		{
 			FMemory::Memmove(AudioRt.Pending.GetData(), AudioRt.Pending.GetData() + FrameSamplesTotal, Remaining * sizeof(int16));
 		}
