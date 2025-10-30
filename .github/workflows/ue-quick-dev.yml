@@ -42,7 +42,9 @@ env:
 
   # Safety switch for interactive UI launch
   ENABLE_UI_LAUNCH: "false"
-
+  # Third-Party File location on local runner
+  THIRDPARTY_OPEN3DSTREAM: ${{ vars.THIRDPARTY_OPEN3DSTREAM }}
+  
 jobs:
   ue-quick:
     if: >
@@ -190,6 +192,41 @@ jobs:
           "pluginName=$pluginName"     | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Plugin dir: $pluginDir"
           Write-Host "Host project: $uproject"
+          
+      - name: Link ThirdParty into plugin (junction)
+        shell: pwsh
+        run: |
+          $tp = $env:THIRDPARTY_OPEN3DSTREAM
+          if (-not $tp) {
+            Write-Warning "THIRDPARTY_OPEN3DSTREAM not set; skipping ThirdParty junction."
+            exit 0
+          }
+          if (-not (Test-Path -Path $tp -PathType Container)) {
+            Write-Error "THIRDPARTY_OPEN3DSTREAM points to '$tp' which does not exist."
+            exit 1
+          }
+
+          $pluginDir = "${{ steps.paths.outputs.pluginDir }}"
+          $dst = Join-Path $pluginDir "ThirdParty"
+
+          # Remove existing folder/junction to avoid mixed content
+          if (Test-Path $dst) {
+            try { cmd /c rmdir "$dst" 2>$null | Out-Null } catch { }
+            if (Test-Path $dst) { Remove-Item -Recurse -Force -Path $dst }
+          }
+
+          Write-Host "Creating junction: $dst -> $tp"
+          try {
+            New-Item -ItemType Junction -Path $dst -Target $tp | Out-Null
+          } catch {
+            Write-Host "New-Item Junction failed, falling back to mklink /J..."
+            $cmd = "mklink /J `"$dst`" `"$tp`""
+            cmd /c $cmd | Write-Host
+            if (-not (Test-Path $dst)) { Write-Error "Failed to create ThirdParty junction."; exit 1 }
+          }
+
+          # Quick sanity: ensure typical subfolders exist (optional; adjust to your layout)
+          # if (-not (Test-Path (Join-Path $dst 'Lib'))) { Write-Warning "ThirdParty\Lib not found under $dst (ok if your layout differs)." }
 
       - name: Link plugin into external host (junction)
         shell: pwsh
