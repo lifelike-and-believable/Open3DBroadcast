@@ -382,66 +382,123 @@ void UO3DSBroadcastComponent::StartCapture()
  // This ensures EnableAudioSend() is called before the PeerConnection is created
  if (TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio)
  {
- UE_LOG(LogO3DSBroadcast, Log, TEXT("[WEBRTC SETUP 2/7] WebRTC with audio enabled - configuring audio capture"));
- if (AActor* Owner = GetOwner())
- {
- UO3DSBroadcastAudioCaptureComponent* AudioCap = Owner->FindComponentByClass<UO3DSBroadcastAudioCaptureComponent>();
- if (!AudioCap)
- {
- UE_LOG(LogO3DSBroadcast, Log, TEXT("[WEBRTC SETUP 3/7] Creating new AudioCaptureComponent"));
- AudioCap = NewObject<UO3DSBroadcastAudioCaptureComponent>(Owner);
- if (AudioCap)
- {
- // CRITICAL: Set SubjectName and other config BEFORE RegisterComponent()
- // This ensures BeginPlay() will use the correct StreamLabel if it's called immediately
- AudioCap->Config.SampleRate = WebRTCAudioSampleRate;
- AudioCap->Config.NumChannels = WebRTCAudioNumChannels;
- AudioCap->Config.BitrateKbps = WebRTCAudioBitrateKbps;
- AudioCap->CaptureMode = (WebRTCAudioMode == EO3DSWebRTCAudioMode::Mix) ? EO3DSCaptureMode::Mix : EO3DSCaptureMode::Input;
- AudioCap->InputDeviceName = WebRTCInputDeviceName;
- AudioCap->Config.SubmixToTap = WebRTCSubmixToTap;
- AudioCap->SubjectName = *BuildSubjectName(TargetMesh.Get());
- 
- UE_LOG(LogO3DSBroadcast, Log, TEXT("[WEBRTC SETUP 4/7] Registering AudioCaptureComponent (SubjectName='%s')"), *AudioCap->SubjectName.ToString());
- AudioCap->RegisterComponent();
- }
- }
- else
- {
- UE_LOG(LogO3DSBroadcast, Log, TEXT("[WEBRTC SETUP 3/7] Using existing AudioCaptureComponent"));
- // If component already exists, update its settings
- AudioCap->Config.SampleRate = WebRTCAudioSampleRate;
- AudioCap->Config.NumChannels = WebRTCAudioNumChannels;
- AudioCap->Config.BitrateKbps = WebRTCAudioBitrateKbps;
- AudioCap->CaptureMode = (WebRTCAudioMode == EO3DSWebRTCAudioMode::Mix) ? EO3DSCaptureMode::Mix : EO3DSCaptureMode::Input;
- AudioCap->InputDeviceName = WebRTCInputDeviceName;
- AudioCap->Config.SubmixToTap = WebRTCSubmixToTap;
- AudioCap->SubjectName = *BuildSubjectName(TargetMesh.Get());
- UE_LOG(LogO3DSBroadcast, Log, TEXT("[WEBRTC SETUP 4/7] Updated existing AudioCaptureComponent config (SubjectName='%s')"), *AudioCap->SubjectName.ToString());
- }
- if (AudioCap)
- {
-	 // Inject connector and configure audio BEFORE transport starts
-	 if (InternalTransport)
-	 {
-	  if (FO3DSWebRtcTransport* Wrtc = static_cast<FO3DSWebRtcTransport*>(InternalTransport.Get()))
-	  {
-	   TSharedPtr<IWebRTCConnector> Conn = Wrtc->GetConnector();
-	   if (Conn.IsValid())
-	   {
-		UE_LOG(LogO3DSBroadcast, Log, TEXT("[WEBRTC SETUP 5/7] Setting connector on AudioCaptureComponent (will call EnableAudioSend)"));
-		// Set connector which will trigger immediate audio configuration
-		AudioCap->SetConnector(Conn);
-	   }
-	   else
-	   {
-		UE_LOG(LogO3DSBroadcast, Warning, TEXT("[WEBRTC SETUP 5/7] Connector not valid - audio will not be configured"));
-	   }
-	  }
-	 }
- }
- }
- }
+  UE_LOG(LogO3DSBroadcast, Log, TEXT("[WEBRTC SETUP 2/7] WebRTC with audio enabled - configuring audio capture"));
+  
+  // Step 1: Get connector reference (PC doesn't exist yet - PrepareChannel was called)
+  if (!InternalTransport)
+  {
+   UE_LOG(LogO3DSBroadcast, Error, TEXT("[WEBRTC SETUP ERROR] Internal transport not created"));
+   return;
+  }
+  
+  FO3DSWebRtcTransport* Wrtc = static_cast<FO3DSWebRtcTransport*>(InternalTransport.Get());
+  if (!Wrtc)
+  {
+   UE_LOG(LogO3DSBroadcast, Error, TEXT("[WEBRTC SETUP ERROR] Failed to cast to WebRtcTransport"));
+   return;
+  }
+  
+  TSharedPtr<IWebRTCConnector> Connector = Wrtc->GetConnector();
+  if (!Connector.IsValid())
+  {
+   UE_LOG(LogO3DSBroadcast, Error, TEXT("[WEBRTC SETUP ERROR] Connector not valid"));
+   return;
+  }
+  
+  UE_LOG(LogO3DSBroadcast, Log, TEXT("[WEBRTC SETUP 3/7] Connector retrieved (PC not yet created)"));
+  
+  // Step 2: Compute StreamLabel once based on configuration
+  FString SubjectNameStr = BuildSubjectName(TargetMesh.Get());
+  FString StreamLabel;
+  if (WebRTCAudioMode == EO3DSWebRTCAudioMode::Mix)
+  {
+   // For subject-associated audio (mix/submix)
+   StreamLabel = SubjectNameStr.IsEmpty() ? TEXT("o3ds:mix") : FString::Printf(TEXT("o3ds:subject/%s"), *SubjectNameStr);
+  }
+  else // Input/Microphone
+  {
+   // For mic-based audio
+   if (WebRTCInputDeviceName.IsNone())
+   {
+    StreamLabel = TEXT("o3ds:mic");
+   }
+   else
+   {
+    StreamLabel = FString::Printf(TEXT("o3ds:mic/%s"), *WebRTCInputDeviceName.ToString());
+   }
+  }
+  
+  UE_LOG(LogO3DSBroadcast, Log, TEXT("[WEBRTC SETUP 4/7] Computed StreamLabel='%s'"), *StreamLabel);
+  
+  // Step 3: Call EnableAudioSend BEFORE Start (enforces ordering contract)
+  IWebRTCConnector::FAudioSendConfig AudioConfig;
+  AudioConfig.bEnable = true;
+  AudioConfig.StreamLabel = StreamLabel;
+  AudioConfig.SampleRate = WebRTCAudioSampleRate;
+  AudioConfig.NumChannels = WebRTCAudioNumChannels;
+  AudioConfig.BitrateKbps = WebRTCAudioBitrateKbps;
+  AudioConfig.SubjectName = SubjectNameStr;
+  AudioConfig.SourceType = (WebRTCAudioMode == EO3DSWebRTCAudioMode::Mix) ? TEXT("mix") : TEXT("mic");
+  
+  const bool bAudioEnabled = Connector->EnableAudioSend(AudioConfig);
+  if (!bAudioEnabled)
+  {
+   UE_LOG(LogO3DSBroadcast, Error, TEXT("[WEBRTC SETUP ERROR] EnableAudioSend failed: %s"), 
+    *Connector->GetLastError());
+   return;
+  }
+  
+  UE_LOG(LogO3DSBroadcast, Log, TEXT("[WEBRTC SETUP 5/7] EnableAudioSend succeeded"));
+  
+  // Step 4: Wire AudioCaptureComponent with StreamLabel and sink callback
+  if (AActor* Owner = GetOwner())
+  {
+   UO3DSBroadcastAudioCaptureComponent* AudioCap = Owner->FindComponentByClass<UO3DSBroadcastAudioCaptureComponent>();
+   if (!AudioCap)
+   {
+    UE_LOG(LogO3DSBroadcast, Log, TEXT("[WEBRTC SETUP 6a/7] Creating new AudioCaptureComponent"));
+    AudioCap = NewObject<UO3DSBroadcastAudioCaptureComponent>(Owner);
+    if (AudioCap)
+    {
+     // Configure capture parameters
+     AudioCap->Config.SampleRate = WebRTCAudioSampleRate;
+     AudioCap->Config.NumChannels = WebRTCAudioNumChannels;
+     AudioCap->Config.BitrateKbps = WebRTCAudioBitrateKbps;
+     AudioCap->CaptureMode = (WebRTCAudioMode == EO3DSWebRTCAudioMode::Mix) ? EO3DSCaptureMode::Mix : EO3DSCaptureMode::Input;
+     AudioCap->InputDeviceName = WebRTCInputDeviceName;
+     AudioCap->Config.SubmixToTap = WebRTCSubmixToTap;
+     AudioCap->SubjectName = *SubjectNameStr;
+     
+     AudioCap->RegisterComponent();
+    }
+   }
+   else
+   {
+    UE_LOG(LogO3DSBroadcast, Log, TEXT("[WEBRTC SETUP 6a/7] Using existing AudioCaptureComponent"));
+    // Update settings on existing component
+    AudioCap->Config.SampleRate = WebRTCAudioSampleRate;
+    AudioCap->Config.NumChannels = WebRTCAudioNumChannels;
+    AudioCap->Config.BitrateKbps = WebRTCAudioBitrateKbps;
+    AudioCap->CaptureMode = (WebRTCAudioMode == EO3DSWebRTCAudioMode::Mix) ? EO3DSCaptureMode::Mix : EO3DSCaptureMode::Input;
+    AudioCap->InputDeviceName = WebRTCInputDeviceName;
+    AudioCap->Config.SubmixToTap = WebRTCSubmixToTap;
+    AudioCap->SubjectName = *SubjectNameStr;
+   }
+   
+   if (AudioCap)
+   {
+    // Set StreamLabel and AudioSink on the component (new pure PCM source API)
+    AudioCap->SetStreamLabel(StreamLabel);
+    AudioCap->SetAudioSink([Connector](const FString& Label, const float* Data, int32 NumFrames,
+                       int32 NumChannels, int32 SampleRate, double Timestamp) -> bool
+    {
+     return Connector->PushPcm(Label, Data, NumFrames, NumChannels, SampleRate, Timestamp);
+    });
+    
+    UE_LOG(LogO3DSBroadcast, Log, TEXT("[WEBRTC SETUP 6b/7] AudioCaptureComponent configured with StreamLabel and sink"));
+   }
+  }
+  }
  else if (TransportFamily == EO3DSTransportFamily::WebRTC)
  {
  UE_LOG(LogO3DSBroadcast, Log, TEXT("[WEBRTC SETUP 2/7] WebRTC transport but audio disabled - skipping audio setup"));
