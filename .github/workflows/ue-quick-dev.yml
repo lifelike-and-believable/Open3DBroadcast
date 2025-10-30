@@ -325,16 +325,40 @@ jobs:
 
           $summary -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
-      - name: Upload logs (always)
+      - name: Stage logs for artifact
+        id: stagelogs
+        shell: pwsh
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP "ue-quick-logs-pr-${{ steps.ctx.outputs.pr }}"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+      
+          # Build log (may not exist on non-quickbuild)
+          $buildLog = "${{ steps.quickbuild.outputs.buildLog }}"
+          if ($buildLog -and (Test-Path -LiteralPath $buildLog -PathType Leaf)) {
+            Copy-Item -LiteralPath $buildLog -Destination (Join-Path $stage (Split-Path $buildLog -Leaf)) -Force
+          }
+      
+          # Project logs from E:\... (copy *.log if present)
+          $logsDir = "${{ steps.collectlogs.outputs.logsDir }}"
+          if ($logsDir -and (Test-Path -LiteralPath $logsDir -PathType Container)) {
+            Get-ChildItem -LiteralPath $logsDir -Filter *.log -File -ErrorAction SilentlyContinue |
+              Copy-Item -Destination $stage -Force
+          }
+      
+          # Any automation logs in runner temp
+          Get-ChildItem (Join-Path $env:RUNNER_TEMP "UE-Automation-*.log") -File -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $stage -Force
+      
+          "dir=$stage" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+      
+      - name: Upload logs (staged)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ue-quick-logs-pr-${{ steps.ctx.outputs.pr }}
           retention-days: 7
-          path: |
-            ${{ steps.quickbuild.outputs.buildLog }}
-            ${{ steps.collectlogs.outputs.logsDir }}\*.log
-            ${{ runner.temp }}\UE-Automation-*.log
+          path: ${{ steps.stagelogs.outputs.dir }}
+          if-no-files-found: warn
 
       - name: Comment result (success)
         if: github.event_name == 'issue_comment' && success()
