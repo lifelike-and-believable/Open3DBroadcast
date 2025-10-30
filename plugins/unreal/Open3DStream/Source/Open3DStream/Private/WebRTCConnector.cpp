@@ -805,7 +805,7 @@ void FWebRTCConnector::OnAnswerReceived(const FString& SDP)
 		bRemoteDescriptionSet = true;
 		// Diagnose remote SDP for audio support
 		bRemoteSDPHasAudio = SDP.Contains(TEXT("m=audio"), ESearchCase::IgnoreCase);
-		if (!bRemoteSDPHasAudio && bAudioSendEnabled)
+		if (!bRemoteSDPHasAudio && !AudioRt.Config.StreamLabel.IsEmpty())
 		{
 			UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("WebRTC Connector: Remote SDP has no m=audio; audio track will not open"));
 		}
@@ -1088,6 +1088,92 @@ bool FWebRTCConnector::ParseWebRtcUrl(const FString& Url, FString& OutHost, uint
 	return true;
 }
 
+#if O3DS_WITH_OPUS
+// Helper function to set up audio track with RTP/RTCP handlers
+// Consolidates duplicated logic from SetupPeerConnection, EnableAudioSend, and PushAudioPCM16
+bool FWebRTCConnector::SetupAudioTrackAndHandlers(const FAudioConfig& Config, std::shared_ptr<rtc::PeerConnection> PC)
+{
+	if (!PC)
+	{
+		return false;
+	}
+	
+	// Create the audio track (labeled or unlabeled)
+	std::shared_ptr<rtc::Track> NewTrack;
+	if (!Config.StreamLabel.IsEmpty())
+	{
+		NewTrack = AddOpusAudioSendTrackWithLabel(PC, Config.BitrateKbps, Config.StreamLabel);
+	}
+	else
+	{
+		NewTrack = AddOpusAudioSendTrack(PC, Config.BitrateKbps);
+	}
+	
+	if (!NewTrack)
+	{
+		UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("WebRTC Connector: Failed to add Opus audio track"));
+		return false;
+	}
+	
+	// Store the track
+	AudioTrack = NewTrack;
+	UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: Opus audio track added (stream=%s)"), *Config.StreamLabel);
+	
+	// Calculate SSRC from stream label (deterministic)
+	uint32 Ssrc = 0;
+	std::string CName = "o3ds";
+	if (!Config.StreamLabel.IsEmpty())
+	{
+		Ssrc = 0xA17C0000u ^ FCrc::StrCrc32(*Config.StreamLabel);
+	}
+	else
+	{
+		Ssrc = 0xA17C1234u;
+	}
+	
+	// Set up RTP packetization config
+	auto RtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(Ssrc, CName, 111, rtc::OpusRtpPacketizer::DefaultClockRate);
+	auto Packetizer = std::make_shared<rtc::OpusRtpPacketizer>(RtpCfg);
+	
+	// Attempt to attach MID for BUNDLE demux (best effort)
+	try {
+		if (AudioTrack) {
+			const std::string Mid = AudioTrack->mid();
+			if (!Mid.empty()) {
+				RtpCfg->mid = Mid;
+				UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Attached MID '%s' to RTP config"), *FString(Mid.c_str()));
+			}
+		}
+	} catch (...) {
+		// Ignore if not supported
+	}
+	
+	// Add RTCP reporters to the chain
+	auto SrReporter = std::make_shared<rtc::RtcpSrReporter>(RtpCfg);
+	Packetizer->addToChain(SrReporter);
+	auto NackResponder = std::make_shared<rtc::RtcpNackResponder>();
+	Packetizer->addToChain(NackResponder);
+	AudioTrack->setMediaHandler(Packetizer);
+	
+	// Set up track open/close callbacks
+	AudioTrack->onOpen([this, Track=AudioTrack]()
+	{
+		AudioRt.bTrackReady = true;
+		FString MidStr = Track ? FString(ANSI_TO_TCHAR(Track->mid().c_str())) : FString();
+		UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: Audio track opened (mid=%s)"), MidStr.IsEmpty() ? TEXT("<none>") : *MidStr);
+	});
+	
+	AudioTrack->onClosed([this, Track=AudioTrack]()
+	{
+		AudioRt.bTrackReady = false;
+		FString MidStr = Track ? FString(ANSI_TO_TCHAR(Track->mid().c_str())) : FString();
+		UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: Audio track closed (mid=%s)"), MidStr.IsEmpty() ? TEXT("<none>") : *MidStr);
+	});
+	
+	return true;
+}
+#endif
+
 bool FWebRTCConnector::SetupPeerConnection()
 {
 	try
@@ -1227,68 +1313,10 @@ bool FWebRTCConnector::SetupPeerConnection()
 		// CRITICAL: Add audio track BEFORE creating data channel
 		// Per libdatachannel audio-comm-test findings, audio track must be added before
 		// data channel creation to be included in the initial SDP offer
-		if (bAudioSendEnabled && !AudioTrack)
+		// Audio track is ALWAYS added if we have a valid config, ensuring it's in the initial SDP
+		if (!AudioTrack && !AudioRt.Config.StreamLabel.IsEmpty())
 		{
-			if (!AudioRt.Config.StreamLabel.IsEmpty())
-			{
-				AudioTrack = AddOpusAudioSendTrackWithLabel(PeerConnection, AudioRt.Config.BitrateKbps, AudioRt.Config.StreamLabel);
-			}
-			else
-			{
-				AudioTrack = AddOpusAudioSendTrack(PeerConnection, AudioRt.Config.BitrateKbps);
-			}
-			if (!AudioTrack)
-			{
-				UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("WebRTC Connector: Failed to add Opus audio track"));
-			}
-			else
-			{
-				UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: Opus audio track added (stream=%s)"), *AudioRt.Config.StreamLabel);
-				// Install RTP/RTCP media handler chain for Opus
-				uint32 Ssrc =0;
-				std::string CName = "o3ds";
-				// Derive SSRC to match what we set in the description
-				if (!AudioRt.Config.StreamLabel.IsEmpty())
-				{
-					Ssrc =0xA17C0000u ^ FCrc::StrCrc32(*AudioRt.Config.StreamLabel);
-				}
-				else
-				{
-					Ssrc =0xA17C1234u;
-				}
-				auto RtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(Ssrc, CName,111, rtc::OpusRtpPacketizer::DefaultClockRate);
-				auto Packetizer = std::make_shared<rtc::OpusRtpPacketizer>(RtpCfg);
-				// Attempt to attach MID for BUNDLE demux if available on this libdatachannel version
-				try {
-					if (AudioTrack) {
-						const std::string Mid = AudioTrack->mid();
-						if (!Mid.empty()) {
-							RtpCfg->mid = Mid; // may not exist on older libdatachannel; build will reveal
-							UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Attached MID '%s' to RTP config"), *FString(Mid.c_str()));
-						}
-					}
-				} catch (...) {
-					// best-effort; ignore if not supported
-				}
-				auto SrReporter = std::make_shared<rtc::RtcpSrReporter>(RtpCfg);
-				Packetizer->addToChain(SrReporter);
-				auto NackResponder = std::make_shared<rtc::RtcpNackResponder>();
-				Packetizer->addToChain(NackResponder);
-				AudioTrack->setMediaHandler(Packetizer);
-				// Track open/closed notifications to gate sending
-				AudioTrack->onOpen([this, Track=AudioTrack]()
-				{
-					AudioRt.bTrackReady = true;
-					FString MidStr = Track ? FString(ANSI_TO_TCHAR(Track->mid().c_str())) : FString();
-					UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: Audio track opened (mid=%s)"), MidStr.IsEmpty()?TEXT("<none>"):*MidStr);
-				});
-				AudioTrack->onClosed([this, Track=AudioTrack]()
-				{
-					AudioRt.bTrackReady = false;
-					FString MidStr = Track ? FString(ANSI_TO_TCHAR(Track->mid().c_str())) : FString();
-					UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: Audio track closed (mid=%s)"), MidStr.IsEmpty()?TEXT("<none>"):*MidStr);
-				});
-			}
+			SetupAudioTrackAndHandlers(AudioRt.Config, PeerConnection);
 		}
 #endif
 
@@ -1531,95 +1559,58 @@ void FWebRTCConnector::EnableAudioSend(const FAudioConfig& InConfig)
 {
 	UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: EnableAudioSend sr=%d ch=%d br=%d frameMs=%d stream=%s"),
 		InConfig.SampleRate, InConfig.NumChannels, InConfig.BitrateKbps, InConfig.FrameSizeMs, *InConfig.StreamLabel);
+	
+	// Update audio configuration
 	AudioRt.Config = InConfig;
-	AudioRt.FrameSizeSamples = FMath::Max(1, (InConfig.SampleRate * InConfig.FrameSizeMs) /1000);
-	AudioRt.Timestamp =0;
+	AudioRt.FrameSizeSamples = FMath::Max(1, (InConfig.SampleRate * InConfig.FrameSizeMs) / 1000);
+	AudioRt.Timestamp = 0;
 	AudioRt.bTrackReady = false;
-	AudioRt.NextSendRetryTimeSeconds =0.0;
-	bAudioSendEnabled = true;
+	AudioRt.NextSendRetryTimeSeconds = 0.0;
+	
 #if O3DS_WITH_OPUS
 	EnsureOpusEncoder(InConfig);
-	// If PC already exists, add audio track and renegotiate on client
+	
+	// If PeerConnection already exists and we don't have an audio track yet, this is late binding.
+	// The track should have been added in SetupPeerConnection() before datachannel creation.
+	// If we reach here with a PeerConnection but no AudioTrack, we need to trigger renegotiation.
+	FScopeLock Lock(&PeerConnectionLock);
 	if (PeerConnection && !AudioTrack)
 	{
-		UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("Open3DStream: PeerConnection active and Opus available. Proceeding to add Audio Track."));
-
-		// Prefer labeled track when stream label present
-		if (!InConfig.StreamLabel.IsEmpty())
+		UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("WebRTC Connector: EnableAudioSend called after connection setup - will require renegotiation"));
+		
+		// Set up the audio track (this will trigger renegotiation on next offer)
+		if (SetupAudioTrackAndHandlers(InConfig, PeerConnection))
 		{
-			AudioTrack = AddOpusAudioSendTrackWithLabel(PeerConnection, InConfig.BitrateKbps, InConfig.StreamLabel);
-		}
-		else
-		{
-			AudioTrack = AddOpusAudioSendTrack(PeerConnection, InConfig.BitrateKbps);
-		}
-		if (!bIsServer && bSignalingIsConnected)
-		{
-			UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("Open3DStream: [WebRTC Client] Audio Enabled."));
-			MaybeCreateOffer(TEXT("audio-enabled"));
-		}
-		if (AudioTrack)
-		{
-			// Install RTP/RTCP media handler chain and open/close gating, same as in SetupPeerConnection path
-			uint32 Ssrc =0;
-			std::string CName = "o3ds";
-			if (!InConfig.StreamLabel.IsEmpty())
+			// For client mode, trigger renegotiation to include the new track
+			if (!bIsServer && bSignalingIsConnected)
 			{
-				Ssrc =0xA17C0000u ^ FCrc::StrCrc32(*InConfig.StreamLabel);
+				UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: Triggering renegotiation for late audio enable"));
+				MaybeCreateOffer(TEXT("audio-enabled-late"));
 			}
-			else
-			{
-				Ssrc =0xA17C1234u;
-			}
-			UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("Open3DStream: [WebRTC Client] Audio Track Added. StreamLabel=%s SSRC=0x%08X"), *InConfig.StreamLabel, Ssrc);
-
-			auto RtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(Ssrc, CName,111, rtc::OpusRtpPacketizer::DefaultClockRate);
-			auto Packetizer = std::make_shared<rtc::OpusRtpPacketizer>(RtpCfg);
-			// Attempt to attach MID for BUNDLE demux if available on this libdatachannel version
-			try {
-				if (AudioTrack) {
-					const std::string Mid = AudioTrack->mid();
-					if (!Mid.empty()) {
-						RtpCfg->mid = Mid; // may not exist on older libdatachannel; build will reveal
-						UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Attached MID '%s' to RTP config"), *FString(Mid.c_str()));
-					}
-				}
-			} catch (...) {
-				// best-effort; ignore if not supported
-			}
-			auto SrReporter = std::make_shared<rtc::RtcpSrReporter>(RtpCfg);
-			Packetizer->addToChain(SrReporter);
-			auto NackResponder = std::make_shared<rtc::RtcpNackResponder>();
-			Packetizer->addToChain(NackResponder);
-			AudioTrack->setMediaHandler(Packetizer);
-			AudioTrack->onOpen([this, Track=AudioTrack]()
-			{
-				AudioRt.bTrackReady = true;
-				FString MidStr = Track ? FString(ANSI_TO_TCHAR(Track->mid().c_str())) : FString();
-				UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: Audio track opened (mid=%s)"), MidStr.IsEmpty()?TEXT("<none>"):*MidStr);
-			});
-			AudioTrack->onClosed([this, Track=AudioTrack]()
-			{
-				AudioRt.bTrackReady = false;
-				FString MidStr = Track ? FString(ANSI_TO_TCHAR(Track->mid().c_str())) : FString();
-				UE_LOG(O3DSWebRTCAudioLog, Log, TEXT("WebRTC Connector: Audio track closed (mid=%s)"), MidStr.IsEmpty()?TEXT("<none>"):*MidStr);
-			});
-					// Initialize a small reoffer timer to ensure track opens after enabling
-					{
-						const double Now = FPlatformTime::Seconds();
-						AudioOpenReofferBackoffSeconds = 1.0;
-						NextAudioOpenReofferTimeSeconds = Now + AudioOpenReofferBackoffSeconds;
-					}
+			
+			// Initialize reoffer timer
+			const double Now = FPlatformTime::Seconds();
+			AudioOpenReofferBackoffSeconds = 1.0;
+			NextAudioOpenReofferTimeSeconds = Now + AudioOpenReofferBackoffSeconds;
 		}
 	}
+	else if (!PeerConnection)
+	{
+		UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Audio config stored, will be applied when connection starts"));
+	}
+	else
+	{
+		UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Audio track already configured"));
+	}
 #else
-	UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("Open3DStream: Opus not fully available (library or headers missing). Audio send disabled."));
+	UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("WebRTC Connector: Opus not available - audio send disabled"));
 #endif
 }
 
 void FWebRTCConnector::DisableAudioSend()
 {
-	bAudioSendEnabled = false;
+	// Clear audio configuration to indicate audio is no longer active
+	AudioRt.Config.StreamLabel.Empty();
 	AudioRt.Pending.Reset();
 	AudioRt.bTrackReady = false;
 	if (AudioTrack)
@@ -1631,11 +1622,12 @@ void FWebRTCConnector::DisableAudioSend()
 
 bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 {
-	if (!bAudioSendEnabled)
+	// Check if audio is configured (StreamLabel is set when EnableAudioSend is called)
+	if (AudioRt.Config.StreamLabel.IsEmpty())
 	{
-		if (CVarO3DSWebRTCVerbose->GetInt() !=0)
+		if (CVarO3DSWebRTCVerbose->GetInt() != 0)
 		{
-			UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 called but audio send disabled"));
+			UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: PushAudioPCM16 called but audio not configured"));
 		}
 		return false;
 	}
@@ -1750,85 +1742,26 @@ bool FWebRTCConnector::PushAudioPCM16(const int16* Samples, int32 NumSamples)
 		// Fall through to try sending; exceptions will be caught below
 	}
 
-	// If we don't currently have a track, attempt to add one (e.g. after reconnect)
-	if (!LocalAudioTrack && bAudioSendEnabled)
+	// If we don't have a track at this point, something went wrong - audio should have been
+	// configured in SetupPeerConnection() before the datachannel was created
+	if (!LocalAudioTrack)
 	{
+		static double sLastWarn = 0.0;
+		const double nowWarn = FPlatformTime::Seconds();
+		if (nowWarn - sLastWarn > 1.0)
 		{
-			FScopeLock Lock(&PeerConnectionLock);
-			if (!AudioTrack && PeerConnection)
-			{
-				if (!AudioRt.Config.StreamLabel.IsEmpty())
-				{
-					AudioTrack = AddOpusAudioSendTrackWithLabel(PeerConnection, AudioRt.Config.BitrateKbps, AudioRt.Config.StreamLabel);
-				}
-				else
-				{
-					AudioTrack = AddOpusAudioSendTrack(PeerConnection, AudioRt.Config.BitrateKbps);
-				}
-				LocalAudioTrack = AudioTrack;
-				if (AudioTrack)
-				{
-					// Reinstall media handler chain on re-attach
-					uint32 Ssrc = 0;
-					std::string CName = "o3ds";
-					if (!AudioRt.Config.StreamLabel.IsEmpty())
-					{
-						Ssrc = 0xA17C0000u ^ FCrc::StrCrc32(*AudioRt.Config.StreamLabel);
-					}
-					else
-					{
-						Ssrc = 0xA17C1234u;
-					}
-					auto RtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(Ssrc, CName, 111, rtc::OpusRtpPacketizer::DefaultClockRate);
-					auto Packetizer = std::make_shared<rtc::OpusRtpPacketizer>(RtpCfg);
-					// Attempt to attach MID for BUNDLE demux if available on this libdatachannel version
-					try {
-						if (AudioTrack) {
-							const std::string Mid = AudioTrack->mid();
-							if (!Mid.empty()) {
-								RtpCfg->mid = Mid; // may not exist on older libdatachannel; build will reveal
-								UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Attached MID '%s' to RTP config"), *FString(Mid.c_str()));
-							}
-						}
-					} catch (...) {
-						// best-effort; ignore if not supported
-					}
-					auto SrReporter = std::make_shared<rtc::RtcpSrReporter>(RtpCfg);
-					Packetizer->addToChain(SrReporter);
-					auto NackResponder = std::make_shared<rtc::RtcpNackResponder>();
-					Packetizer->addToChain(NackResponder);
-					AudioTrack->setMediaHandler(Packetizer);
-					LocalAudioTrack->onOpen([this, Track=LocalAudioTrack]()
-					{
-						AudioRt.bTrackReady = true;
-						if (CVarO3DSWebRTCVerbose->GetInt() != 0)
-						{
-							FString MidStr = Track ? FString(ANSI_TO_TCHAR(Track->mid().c_str())) : FString();
-							UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Audio track opened (mid=%s)"), MidStr.IsEmpty()?TEXT("<none>"):*MidStr);
-						}
-					});
-					AudioTrack->onClosed([this, Track=AudioTrack]()
-					{
-						AudioRt.bTrackReady = false;
-						if (CVarO3DSWebRTCVerbose->GetInt() != 0)
-						{
-							FString MidStr = Track ? FString(ANSI_TO_TCHAR(Track->mid().c_str())) : FString();
-							UE_LOG(O3DSWebRTCAudioLog, Verbose, TEXT("WebRTC Connector: Audio track closed (mid=%s)"), MidStr.IsEmpty()?TEXT("<none>"):*MidStr);
-						}
-					});
-				}
-			}
+			UE_LOG(O3DSWebRTCAudioLog, Warning, TEXT("WebRTC Connector: PushAudioPCM16 called but no audio track present - was EnableAudioSend called before Start()?"));
+			sLastWarn = nowWarn;
 		}
-		if (!bIsServer && bSignalingIsConnected)
+		// Buffer the audio in case the track appears later
+		if (Samples && NumSamples > 0)
 		{
-			MaybeCreateOffer(TEXT("audio-ensure-before-send"));
+			const int32 Old = AudioRt.Pending.Num();
+			AudioRt.Pending.AddUninitialized(NumSamples);
+			FMemory::Memcpy(AudioRt.Pending.GetData() + Old, Samples, sizeof(int16) * NumSamples);
 		}
-		if (!LocalAudioTrack)
-		{
-			// Avoid tight loop
-			AudioRt.NextSendRetryTimeSeconds = Now + 0.25;
-			return true; // accepted into buffer
-		}
+		AudioRt.NextSendRetryTimeSeconds = Now + 0.25;
+		return true; // accepted into buffer
 	}
 
 	if (!Samples || NumSamples <= 0)
@@ -1912,7 +1845,8 @@ void FWebRTCConnector::GetAudioSendStatus(FAudioSendStatus& OutStatus) const
 	OutStatus.bLocalSdpHasAudio = bLocalSDPHasAudio;
 	OutStatus.bRemoteSdpHasAudio = bRemoteSDPHasAudio;
 	OutStatus.bDataChannelOpen = bDataChannelOpen;
-	OutStatus.bAudioSendEnabled = bAudioSendEnabled;
+	// Audio is enabled if we have a valid config (StreamLabel is set)
+	OutStatus.bAudioSendEnabled = !AudioRt.Config.StreamLabel.IsEmpty();
 	OutStatus.bAudioTrackPresent = (LocalAudioTrack != nullptr);
 	OutStatus.bAudioTrackOpen = (LocalAudioTrack ? LocalAudioTrack->isOpen() : false);
 	OutStatus.bOpusEncoderReady = (OpusEnc != nullptr);
