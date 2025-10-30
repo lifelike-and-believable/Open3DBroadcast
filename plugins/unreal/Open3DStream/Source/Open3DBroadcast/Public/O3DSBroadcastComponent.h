@@ -319,7 +319,8 @@ private:
  TAtomic<uint64> DroppedFrames{0};
  FDelegateHandle SerializedFrameHandle;
 
- void SetupInternalTransport();
+ void CreateInternalTransport();
+ void StartInternalTransport();
  void TeardownInternalTransport();
  void OnSerializedForTransport(const FString& /*Subject*/, const TArray<uint8>& Buffer, double Timestamp);
 
