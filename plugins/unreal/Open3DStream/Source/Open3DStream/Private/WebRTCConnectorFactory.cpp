@@ -51,11 +51,27 @@ namespace
 			{
 				FWebRTCConnector::FAudioConfig A; A.SampleRate = Cfg.SampleRate; A.NumChannels = Cfg.NumChannels; A.BitrateKbps = Cfg.BitrateKbps; A.FrameSizeMs =20; A.StreamLabel = Cfg.StreamLabel;
 				UE_LOG(LogTemp, Verbose, TEXT("FLibDataChannelAdapter: EnableAudioSend stream=%s sr=%d ch=%d br=%d"), *A.StreamLabel, A.SampleRate, A.NumChannels, A.BitrateKbps);
-				Inner->EnableAudioSend(A);
-				EnabledStreams.Add(Cfg.StreamLabel);
-				EmitAnnounceIfNeeded(Cfg);
-				UE_LOG(LogTemp, Verbose, TEXT("FLibDataChannelAdapter: Announce emitted for stream=%s"), *Cfg.StreamLabel);
+				
+				// Capture the actual result from inner connector - do NOT mask failures
+				const bool bSuccess = Inner->EnableAudioSend(A);
+				
+				if (bSuccess)
+				{
+					// Only mark as enabled and announce if inner connector accepted the configuration
+					EnabledStreams.Add(Cfg.StreamLabel);
+					EmitAnnounceIfNeeded(Cfg);
+					UE_LOG(LogTemp, Log, TEXT("[ADAPTER] EnableAudioSend(%s) -> SUCCESS"), *Cfg.StreamLabel);
+				}
+				else
+				{
+					// Log failure with reason from inner connector
+					UE_LOG(LogTemp, Warning, TEXT("[ADAPTER] EnableAudioSend(%s) -> FAILED: %s"), 
+						*Cfg.StreamLabel, *Inner->GetLastError());
+				}
+				
+				return bSuccess;
 			}
+			// Stream already enabled, return true (already configured successfully)
 			return true;
 #else
 			return false;

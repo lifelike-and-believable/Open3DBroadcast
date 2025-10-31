@@ -5,7 +5,6 @@
 #include "Sound/SoundSubmix.h"
 #include "O3DSBroadcastAudioCaptureComponent.generated.h" // <-- This is required for GENERATED_BODY and UPROPERTY
 
-class IWebRTCConnector;
 class ISubmixBufferListener;
 
 namespace Audio { class FAudioCapture; }
@@ -88,8 +87,9 @@ public:
 	// Public so submix tap can invoke it
 	void PushFrames(const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec);
 
-	// Inject a WebRTC connector to enable audio sending
-	void SetConnector(TSharedPtr<IWebRTCConnector> InConnector);
+	// New API - Pure PCM source pattern (no WebRTC negotiation)
+	void SetStreamLabel(const FString& InLabel);
+	void SetAudioSink(TFunction<bool(const FString&, const float*, int32, int32, int32, double)> InSink);
 
 	// Options provider for the device dropdown
 	UFUNCTION()
@@ -100,22 +100,11 @@ public:
 #endif
 
 private:
-	void EnsureConnector();
 	int32 ResolveDeviceIndexFromName(const FName& Name) const;
 
-	TSharedPtr<IWebRTCConnector> Connector;
+	// Pure PCM source - no connector, just forward to sink
 	FString StreamLabel;
-
-	// Prevent spamming warnings when no connector is assigned; warn once until a connector appears
-	bool bWarnedNoConnector = false;
-
-	// Track whether we've already configured audio send on the connector for current settings
-	bool bAudioSendConfigured = false;
-	// Last applied basic fields to detect changes that require reconfig
-	int32 LastAppliedSampleRate = 0;
-	int32 LastAppliedNumChannels = 0;
-	int32 LastAppliedBitrateKbps = 0;
-	FString LastAppliedStreamLabel;
+	TFunction<bool(const FString&, const float*, int32, int32, int32, double)> AudioSink;
 
 	// Submix tap listener and optional microphone capture
 	TSharedPtr<ISubmixBufferListener, ESPMode::ThreadSafe> SubmixTap;
