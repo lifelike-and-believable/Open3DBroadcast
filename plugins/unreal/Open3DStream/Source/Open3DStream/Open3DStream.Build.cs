@@ -60,9 +60,8 @@ public class Open3DStream : ModuleRules
  Path.Combine(WebRTCDir, "datachannel.lib"),
  Path.Combine(WebRTCDir, "usrsctp.lib"),
  Path.Combine(WebRTCDir, "juice.lib"),
- Path.Combine(WebRTCDir, "mbedtls.lib"),
- Path.Combine(WebRTCDir, "mbedx509.lib"),
- Path.Combine(WebRTCDir, "mbedcrypto.lib"),
+ Path.Combine(WebRTCDir, "libssl.lib"),
+ Path.Combine(WebRTCDir, "libcrypto.lib"),
  };
  }
  else if (Target.Platform == UnrealTargetPlatform.Linux)
@@ -72,9 +71,9 @@ public class Open3DStream : ModuleRules
  Path.Combine(WebRTCDir, "libdatachannel.a"),
  Path.Combine(WebRTCDir, "libusrsctp.a"),
  Path.Combine(WebRTCDir, "libjuice.a"),
- Path.Combine(WebRTCDir, "libmbedtls.a"),
- Path.Combine(WebRTCDir, "libmbedx509.a"),
- Path.Combine(WebRTCDir, "libmbedcrypto.a"),
+ Path.Combine(WebRTCDir, "libcrypto.a"),
+ Path.Combine(WebRTCDir, "libssl.a"),
+
  };
  }
  else if (Target.Platform == UnrealTargetPlatform.Mac)
@@ -85,9 +84,8 @@ public class Open3DStream : ModuleRules
  Path.Combine(MacDir, "libdatachannel.a"),
  Path.Combine(MacDir, "libusrsctp.a"),
  Path.Combine(MacDir, "libjuice.a"),
- Path.Combine(MacDir, "libmbedtls.a"),
- Path.Combine(MacDir, "libmbedx509.a"),
- Path.Combine(MacDir, "libmbedcrypto.a"),
+ Path.Combine(MacDir, "libcrypto.a"),
+ Path.Combine(MacDir, "libssl.a"),
  };
  }
  else
@@ -103,10 +101,11 @@ public class Open3DStream : ModuleRules
  }
  }
 
- // Expose O3DS headers to dependent modules (e.g., Open3DBroadcast)
+ // Expose O3DS and WebRTC (libdatachannel) headers to dependent modules (e.g., Open3DBroadcast)
  PublicIncludePaths.AddRange(new string[]
  {
- LibDir + "include"
+ LibDir + "include",
+ Path.Combine(WebRTCDir, "include")
  });
 
 		PublicDependencyModuleNames.AddRange( new string[] { "Core" } );
@@ -125,15 +124,14 @@ public class Open3DStream : ModuleRules
  PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "usrsctp.lib"));
  PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "juice.lib"));
  PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "srtp2.lib"));
- PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "mbedtls.lib"));
- PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "mbedx509.lib"));
- PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "mbedcrypto.lib"));
- // Required Windows system libraries for libdatachannel/usrsctp/mbedtls
+ PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libcrypto.lib"));
+ PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libssl.lib"));
+ // Required Windows system libraries for libdatachannel, usrsctp, and OpenSSL (libssl/libcrypto)
  // Notes:
  // - Winsock and helpers are needed by usrsctp/juice
- // - secur32/crypt32 provide TLS and credential routines
+ // - secur32/crypt32 provide TLS and credential routines for OpenSSL
  // - winmm is used for time functions on Windows
- // - bcrypt is used by mbedtls for entropy
+ // - bcrypt is used by OpenSSL for entropy
  PublicSystemLibraries.Add("ws2_32.lib");
  PublicSystemLibraries.Add("iphlpapi.lib");
  PublicSystemLibraries.Add("secur32.lib");
@@ -147,9 +145,8 @@ public class Open3DStream : ModuleRules
  PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libusrsctp.a"));
  PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libjuice.a"));
  PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libsrtp2.a"));
- PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libmbedtls.a"));
- PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libmbedx509.a"));
- PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libmbedcrypto.a"));
+ PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libcrypto.a"));
+ PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libssl.a"));
  }
  else if (Target.Platform == UnrealTargetPlatform.Mac)
  {
@@ -158,16 +155,15 @@ public class Open3DStream : ModuleRules
  PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libusrsctp.a"));
  PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libjuice.a"));
  PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libsrtp2.a"));
- PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libmbedtls.a"));
- PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libmbedx509.a"));
- PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libmbedcrypto.a"));
+ PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libcrypto.a"));
+ PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libssl.a"));
  }
 
  PublicDefinitions.Add("NNG_STATIC_LIB");
  PublicDefinitions.Add("RTC_STATIC=1"); // Define RTC_STATIC for static libdatachannel
 
-		// Enable Opus support for WebRTC audio encode/decode
-		PublicDefinitions.Add("O3DS_WITH_OPUS=1");
+// Enable Opus support for WebRTC audio encode/decode
+PublicDefinitions.Add("O3DS_WITH_OPUS=1");
 
  PrivateDependencyModuleNames.AddRange(
  new string[]
