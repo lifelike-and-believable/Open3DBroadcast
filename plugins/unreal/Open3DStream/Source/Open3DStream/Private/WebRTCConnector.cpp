@@ -134,18 +134,22 @@ FWebRTCConnector::~FWebRTCConnector()
 void FWebRTCConnector::EnsurePeerConnectionForNewSession()
 {
 	FScopeLock Lock(&PeerConnectionLock);
+	UE_LOG(LogTemp, Verbose, TEXT("[ENSURE_PC] this=%p hasPC=%d lastState=%d"), this, PeerConnection ? 1 : 0, LastPeerState);
+
 	bool bNeedsNew = false;
+	const TCHAR* Reason = TEXT("none");
 	if (!PeerConnection)
 	{
-		bNeedsNew = true;
+		bNeedsNew = true; Reason = TEXT("no-pc");
 	}
 	else if (LastPeerState == static_cast<int32>(rtc::PeerConnection::State::Failed) ||
-	 LastPeerState == static_cast<int32>(rtc::PeerConnection::State::Closed))
+	         LastPeerState == static_cast<int32>(rtc::PeerConnection::State::Closed))
 	{
-		bNeedsNew = true;
+		bNeedsNew = true; Reason = TEXT("failed-or-closed");
 	}
 	if (bNeedsNew)
 	{
+		UE_LOG(LogTemp, Log, TEXT("[ENSURE_PC] Creating new PeerConnection (reason=%s) this=%p"), Reason, this);
 		CleanupPeerConnection();
 		SetupPeerConnection();
 	}
@@ -1194,6 +1198,14 @@ bool FWebRTCConnector::SetupAudioTrackAndHandlers(const FAudioConfig& Config, st
 
 bool FWebRTCConnector::SetupPeerConnection()
 {
+	// If already created, don’t recreate
+	if (PeerConnection)
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("[PEERCONN 0] Reusing existing PeerConnection this=%p pc=%p state=%d"),
+			this, PeerConnection.get(), LastPeerState);
+		return true;
+	}
+
 	try
 	{
 		// Create configuration
@@ -1325,7 +1337,8 @@ bool FWebRTCConnector::SetupPeerConnection()
 			});
 		}
 
-		UE_LOG(LogTemp, Log, TEXT("[PEERCONN 1] PeerConnection created successfully"));
+		UE_LOG(LogTemp, Log, TEXT("[PEERCONN 1] PeerConnection created successfully (this=%p pc=%p)"),
+			this, PeerConnection.get());
 
 #if O3DS_WITH_OPUS
 		// CRITICAL: Add audio track BEFORE creating data channel
