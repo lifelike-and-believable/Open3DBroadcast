@@ -29,15 +29,7 @@ public class Open3DBroadcast : ModuleRules
 		
 		PublicDefinitions.Add("O3DS_WITH_BROADCAST=1");
 
-		// ThirdParty roots (shared layout with Open3DStream module)
-		string ThirdPartyDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty"));
-		string WebRTCDir = Path.GetFullPath(Path.Combine(ThirdPartyDir, "webrtc"));
-
-		// Make libdatachannel headers visible when compiling this module
-		PublicIncludePaths.AddRange(new string[]
-		{
-			Path.Combine(WebRTCDir, "include") // provides <rtc/rtc.hpp>
-		});
+		// ThirdParty roots no longer needed here; Shared owns WebRTC linkage
 		
 		PrivateIncludePaths.AddRange( new string[] {} );
 
@@ -47,7 +39,8 @@ public class Open3DBroadcast : ModuleRules
 				"Core",
 				"CoreUObject",
 				"Engine",
-				"Open3DStream"  // Depend on Open3DStream to access protocol headers and connectors
+				"Open3DShared",
+				"Open3DStream"
 			}
 			);
 
@@ -72,29 +65,7 @@ public class Open3DBroadcast : ModuleRules
 			"JsonUtilities",
 		});
 
-		// Link against libdatachannel and its Windows dependencies because this module
-		// directly references rtc::* symbols (headers) in its sources.
-		if (Target.Platform == UnrealTargetPlatform.Win64)
-		{
-			PublicDefinitions.Add("RTC_STATIC=1");
-			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "datachannel.lib"));
-			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "usrsctp.lib"));
-			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "juice.lib"));
-			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "srtp2.lib"));
-			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libcrypto.lib"));
-			PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libssl.lib"));
-
-			// Required Windows system libs
-			PublicSystemLibraries.AddRange(new string[]
-			{
-				"ws2_32.lib",
-				"iphlpapi.lib",
-				"secur32.lib",
-				"crypt32.lib",
-				"winmm.lib",
-				"bcrypt.lib"
-			});
-		}
+		// WebRTC libraries are linked by Open3DShared
 				
 		DynamicallyLoadedModuleNames.AddRange( new string[] {} );
 	}

@@ -1,7 +1,7 @@
 // Copyright (c) Open3DStream Contributors
 
-#include "Open3DShared/Open3DWebRTCDataChannel.h"
-#include "Open3DShared/IWebRTCConnector.h"
+#include "Open3DWebRTCDataChannel.h"
+#include "IWebRTCConnector.h"
 #include "O3DSWebRtcBackend.h"
 // For TQueue and EQueueMode
 #include "Containers/Queue.h"

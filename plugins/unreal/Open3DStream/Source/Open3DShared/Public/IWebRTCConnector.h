@@ -12,7 +12,7 @@
 /**
  * Backend-agnostic WebRTC connector interface (shared header)
  */
-class OPEN3DSTREAM_API IWebRTCConnector
+class OPEN3DSHARED_API IWebRTCConnector
 {
 public:
 	virtual ~IWebRTCConnector() = default;
@@ -60,7 +60,7 @@ struct FLiveKitConfig
 	FString Identity;
 };
 
-OPEN3DSTREAM_API TSharedPtr<IWebRTCConnector> CreateWebRTCConnector(
+OPEN3DSHARED_API TSharedPtr<IWebRTCConnector> CreateWebRTCConnector(
     EO3DSWebRtcBackend Backend,
     const FLiveKitConfig* LiveKitConfig = nullptr
 );

@@ -1,7 +1,7 @@
 #include "UOpen3DServer.h"
 #include "o3ds/async_pair.h"
 #include "o3ds/async_subscriber.h"
-#include "Open3DShared/IWebRTCConnector.h"
+#include "IWebRTCConnector.h"
 #include "O3DSUnifiedMessage.h"
 #include "O3DSAudioBus.h"
 #include "Open3DStreamSourceSettings.h"
