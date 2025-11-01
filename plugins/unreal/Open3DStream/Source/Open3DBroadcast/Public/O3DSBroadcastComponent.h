@@ -144,10 +144,6 @@ public:
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bShowWebRtcProps", EditConditionHides))
  EO3DSWebRtcMode WebRtcMode = EO3DSWebRtcMode::Client;
 
- // WebRTC backend selection (libdatachannel P2P or LiveKit SFU)
- UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bShowWebRtcProps", EditConditionHides))
- EO3DSWebRtcBackend WebRtcBackend = EO3DSWebRtcBackend::LibDataChannel;
-
  // Common WebRTC room across backends (shown under WebRTC heading)
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|WebRTC", meta=(EditCondition="bShowWebRtcProps", EditConditionHides))
  FString WebRtcRoom = TEXT("room1");

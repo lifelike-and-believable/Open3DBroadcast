@@ -1,11 +1,9 @@
 #include "UOpen3DServer.h"
 #include "o3ds/async_pair.h"
 #include "o3ds/async_subscriber.h"
-#include "IWebRTCConnector.h"
 #include "O3DSUnifiedMessage.h"
 #include "O3DSAudioBus.h"
 #include "Open3DStreamSourceSettings.h"
-#include "O3DSWebRtcBackend.h"
 #include "O3DSHelpers.h"
 #include "SocketSubsystem.h"
 #include "Interfaces/IPv4/IPv4Address.h"
@@ -30,7 +28,6 @@ void InDataFunc(void* ptr, void* data, size_t msg)
 
 O3DSServer::O3DSServer()
 	: mServer(nullptr)
-	, mWebRTCConnector(nullptr)
 	, mTcp(nullptr)
 	, mUdp(nullptr)
 	, mUdpReceiver(nullptr)
@@ -109,122 +106,10 @@ bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* S
 
 	if (strncmp(sprotocol, "WebRTC Client",13) ==0)
 	{
-		// Determine backend from settings (default to LibDataChannel) and map to shared enum
-		EO3DSWebRtcBackend SharedBackend = EO3DSWebRtcBackend::LibDataChannel;
-		if (Settings)
-		{
-			SharedBackend = (Settings->WebRtcBackend == EO3DSWebRtcBackendReceiver::LiveKit)
-				? EO3DSWebRtcBackend::LiveKit
-				: EO3DSWebRtcBackend::LibDataChannel;
-		}
-
-		// Create connector using factory
-		mWebRTCConnector = CreateWebRTCConnector(SharedBackend);
-		if (!mWebRTCConnector)
-		{
-			OnState.ExecuteIfBound(LOCTEXT("WebRTCBackendNotSupported", "WebRTC backend not supported"), true);
-			return false;
-		}
-
-		// Do not register shared connector globally anymore
-
-		mWebRTCConnector->SetDataReceivedCallback([this](const uint8* Data, int32 Size)
-		{
-			this->inData(Data, Size);
-		});
-		// Bridge decoded remote audio (WebRTC track) to the global O3DS audio bus for in-world playback
-		mWebRTCConnector->OnRemoteAudio().AddLambda([](const FString& StreamLabel, const FString& SubjectName, const float* PCM, int32 NumFrames, int32 NumChannels, int32 SampleRate)
-		{
-			if (!PCM || NumFrames <= 0 || NumChannels <= 0) { return; }
-			// Convert float [-1,1] to PCM16 bytes
-			const int32 NumSamples = NumFrames * NumChannels;
-			TArray<int16> PCM16; PCM16.AddUninitialized(NumSamples);
-			for (int32 i = 0; i < NumSamples; ++i)
-			{
-				float v = FMath::Clamp(PCM[i], -1.0f, 1.0f);
-				PCM16[i] = (int16)FMath::RoundToInt(v * 32767.0f);
-			}
-			O3DS::FAudioFrameMeta Meta;
-			Meta.StreamLabel = StreamLabel;
-			Meta.SubjectName = SubjectName;
-			Meta.NumChannels = NumChannels > 0 ? NumChannels : 1;
-			Meta.SampleRate = SampleRate > 0 ? SampleRate : 48000;
-			Meta.TimestampSec = FPlatformTime::Seconds();
-			FO3DSAudioBus::PublishPcm16(Meta, reinterpret_cast<const uint8*>(PCM16.GetData()), PCM16.Num() * sizeof(int16));
-		});
-		UE_LOG(LogTemp, Log, TEXT("O3DS RX: DataReceivedCallback bound in UOpen3DServer (WebRTC Client)"));
-		
-		if (mWebRTCConnector->Start(Url.ToString(), false))
-		{
-			OnState.ExecuteIfBound(LOCTEXT("WebRTCClientStarted", "WebRTC Client started."), false);
-			return true;
-		}
-		else
-		{
-			OnState.ExecuteIfBound(FText::FromString(mWebRTCConnector->GetLastError()), true);
-			mWebRTCConnector.Reset();
-			return false;
-		}
 	}
 	
 	if (strncmp(sprotocol, "WebRTC Server",13) ==0)
 	{
-		// Determine backend from settings (default to LibDataChannel) and map to shared enum
-		EO3DSWebRtcBackend SharedBackend = EO3DSWebRtcBackend::LibDataChannel;
-		if (Settings)
-		{
-			SharedBackend = (Settings->WebRtcBackend == EO3DSWebRtcBackendReceiver::LiveKit)
-				? EO3DSWebRtcBackend::LiveKit
-				: EO3DSWebRtcBackend::LibDataChannel;
-		}
-
-		// Create connector using factory
-		mWebRTCConnector = CreateWebRTCConnector(SharedBackend);
-		if (!mWebRTCConnector)
-		{
-			OnState.ExecuteIfBound(LOCTEXT("WebRTCBackendNotSupported", "WebRTC backend not supported"), true);
-			return false;
-		}
-
-		// Do not register shared connector globally anymore
-
-		mWebRTCConnector->SetDataReceivedCallback([this](const uint8* Data, int32 Size)
-		{
-			this->inData(Data, Size);
-		});
-		// Bridge decoded remote audio (WebRTC track) to the global O3DS audio bus for in-world playback
-		mWebRTCConnector->OnRemoteAudio().AddLambda([](const FString& StreamLabel, const FString& SubjectName, const float* PCM, int32 NumFrames, int32 NumChannels, int32 SampleRate)
-		{
-			if (!PCM || NumFrames <= 0 || NumChannels <= 0) { return; }
-			// Convert float [-1,1] to PCM16 bytes
-			const int32 NumSamples = NumFrames * NumChannels;
-			TArray<int16> PCM16; PCM16.AddUninitialized(NumSamples);
-			for (int32 i = 0; i < NumSamples; ++i)
-			{
-				float v = FMath::Clamp(PCM[i], -1.0f, 1.0f);
-				PCM16[i] = (int16)FMath::RoundToInt(v * 32767.0f);
-			}
-			O3DS::FAudioFrameMeta Meta;
-			Meta.StreamLabel = StreamLabel;
-			Meta.SubjectName = SubjectName;
-			Meta.NumChannels = NumChannels > 0 ? NumChannels : 1;
-			Meta.SampleRate = SampleRate > 0 ? SampleRate : 48000;
-			Meta.TimestampSec = FPlatformTime::Seconds();
-			FO3DSAudioBus::PublishPcm16(Meta, reinterpret_cast<const uint8*>(PCM16.GetData()), PCM16.Num() * sizeof(int16));
-		});
-		UE_LOG(LogTemp, Log, TEXT("O3DS RX: DataReceivedCallback bound in UOpen3DServer (WebRTC Server)"));
-		
-		if (mWebRTCConnector->Start(Url.ToString(), true))
-		{
-			OnState.ExecuteIfBound(LOCTEXT("WebRTCServerStarted", "WebRTC Server started."), false);
-			return true;
-		}
-		else
-		{
-			OnState.ExecuteIfBound(FText::FromString(mWebRTCConnector->GetLastError()), true);
-			mWebRTCConnector.Reset();
-			return false;
-		}
 	}
 
 	if (mServer)
@@ -371,12 +256,6 @@ void O3DSServer::stop()
 		mServer = nullptr;
 	}
 
-	if (mWebRTCConnector)
-	{
-		mWebRTCConnector->Stop();
-		mWebRTCConnector.Reset();
-	}
-
 	if (mUdp)
 	{
 		mUdpReceiver->Stop();
@@ -401,13 +280,7 @@ void O3DSServer::stop()
 }
 
 bool O3DSServer::write(const char *msg, size_t len)
-{
-	if (mWebRTCConnector)
-	{
-		// Default to lossy channel for streaming payloads; prefer Reliable for small control messages.
-		return mWebRTCConnector->SendDataLossy(reinterpret_cast<const uint8*>(msg), static_cast<int32>(len));
-	}
-	
+{	
 	if (!mServer) return false;
 	return mServer->write(msg, len);
 }
@@ -438,56 +311,6 @@ void O3DSServer::inData(const uint8 *msg, size_t len)
 			(int32)len, bHeaderMatch?TEXT("true"):TEXT("false"), DumpN, *Hex);
 	}
 
-	// If coming from WebRTC, support optional unified multiplexing header for audio frames.
-	// We only special-case audio; mocap frames are forwarded as-is.
-	if (mWebRTCConnector && msg && len >= sizeof(O3DS::FUnifiedHeader))
-	{
-		O3DS::FUnifiedHeader Hdr;
-		const uint8* PayloadPtr = nullptr;
-		int32 PayloadSize =0;
-		if (O3DS::ParseUnifiedMessage(msg, (int32)len, Hdr, PayloadPtr, PayloadSize))
-		{
-			if (Hdr.GetKind() == O3DS::EUnifiedKind::Audio)
-			{
-				// Decode simple metadata header (subject/label) if present at start of payload:
-				// [uint8 LabelLen][char Label[LabelLen]][uint8 SubjectLen][char Subject[SubjectLen]] followed by raw PCM16
-				const uint8* P = PayloadPtr;
-				int32 R = PayloadSize;
-				auto ReadByte = [&]() -> int32 { if (R <=0) return -1; int32 V = *P; ++P; --R; return V; };
-				FString Label, Subject;
-				int32 LabelLen = ReadByte();
-				if (LabelLen >=0 && R >= LabelLen)
-				{
-					Label = FString(UTF8_TO_TCHAR(reinterpret_cast<const char*>(P))).Left(LabelLen);
-					P += LabelLen; R -= LabelLen;
-				}
-				int32 SubjectLen = ReadByte();
-				if (SubjectLen >=0 && R >= SubjectLen)
-				{
-					Subject = FString(UTF8_TO_TCHAR(reinterpret_cast<const char*>(P))).Left(SubjectLen);
-					P += SubjectLen; R -= SubjectLen;
-				}
-
-				O3DS::FAudioFrameMeta Meta;
-				Meta.SourceGuid = FGuid(); // default for single-source; will be set by source when available
-				Meta.StreamLabel = Label;
-				Meta.SubjectName = Subject;
-				Meta.NumChannels =1; // default mono; future: encode channels
-				Meta.SampleRate =48000; // default
-				Meta.TimestampSec = (double)Hdr.TimestampUs() /1e6;
-
-				if (Hdr.GetCodec() == O3DS::EUnifiedCodec::PCM16 && R >0)
-				{
-					FO3DSAudioBus::PublishPcm16(Meta, P, R);
-					return; // handled
-				}
-				// Unknown/unsupported audio codec: drop for now
-				return;
-			}
-			// If Kind=Mocap with header (not expected in this PR), fall through to default path after stripping header
-		}
-	}
-
 	// Default: forward to animation pipeline
 	{
 		TArray<uint8> Data;
@@ -503,10 +326,6 @@ void O3DSServer::tick()
 	const unsigned char header[] = "\x00\xff\x03\xfeO3DS-START";
 
 	// Process WebRTC messages if connected
-	if (mWebRTCConnector)
-	{
-		mWebRTCConnector->Tick();
-	}
 
 	const double Now = FPlatformTime::Seconds();
 	
@@ -757,9 +576,9 @@ void O3DSServer::tick()
 	}
 	
 	// Handle other transport types (NNG, WebRTC, UDP)
-	if (mServer || mWebRTCConnector || mUdp)
+	if (mServer || mUdp)
 	{
-		bool bHasActiveConnection = (mServer != nullptr) || (mWebRTCConnector != nullptr) || (mUdp != nullptr);
+		bool bHasActiveConnection = (mServer != nullptr) || (mUdp != nullptr);
 		if (bHasActiveConnection && !mNoDataFlag && Now - mGoodTime >1.0)
 		{
 			OnState.ExecuteIfBound(LOCTEXT("NoData", "No Data"), true);

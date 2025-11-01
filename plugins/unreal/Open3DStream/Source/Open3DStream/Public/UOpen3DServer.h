@@ -8,7 +8,6 @@
 #include "Sockets.h"
 
 // Forward declarations
-class IWebRTCConnector;
 struct FOpen3DStreamSettings;
 
 
@@ -37,7 +36,6 @@ public:
 	void tick();
 
 	O3DS::AsyncConnector* mServer;
-	TSharedPtr<IWebRTCConnector> mWebRTCConnector;
 	FSocket* mTcp;
 	FSocket* mUdp;
 

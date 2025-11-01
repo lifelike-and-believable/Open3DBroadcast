@@ -12,7 +12,6 @@
 #include "Transports/O3DSUdpTransport.h"
 #include "Transports/O3DSTcpServerTransport.h"
 #include "Transports/O3DSNngTransport.h"
-#include "Transports/O3DSWebRtcTransport.h"
 
 static FString EnsureWebRtcRoleInUrl(const FString& InUrl, EO3DSTransportKind Kind)
 {
@@ -304,7 +303,7 @@ TUniquePtr<IBroadcastTransport> UO3DSBroadcastTransportAdapter::CreateTransport(
                 return MakeUnique<FO3DSNngTransport>();
             case EO3DSTransportKind::WebRTCClient:
             case EO3DSTransportKind::WebRTCServer:
-                return MakeUnique<FO3DSWebRtcTransport>(WebRtcBackend);
+                break;
             default:
                 break;
         }
@@ -324,7 +323,7 @@ TUniquePtr<IBroadcastTransport> UO3DSBroadcastTransportAdapter::CreateTransport(
         case EO3DSTransportFamily::UDP:
             return MakeUnique<FO3DSUdpTransport>();
         case EO3DSTransportFamily::WebRTC:
-            return MakeUnique<FO3DSWebRtcTransport>(WebRtcBackend);
+            break;
         default:
             break;
     }

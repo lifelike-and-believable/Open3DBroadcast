@@ -5,7 +5,6 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "IBroadcastTransport.h"
-#include "O3DSWebRtcBackend.h" // shared WebRTC backend enum (BlueprintType)
 #include "O3DSBroadcastTransportAdapter.generated.h"
 
 class UO3DSBroadcastComponent;
@@ -89,10 +88,6 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="TransportFamily == EO3DSTransportFamily::WebRTC", EditConditionHides))
     EO3DSWebRtcMode WebRtcMode = EO3DSWebRtcMode::Client;
-
-    // WebRTC backend selection (libdatachannel P2P or LiveKit SFU)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="TransportFamily == EO3DSTransportFamily::WebRTC", EditConditionHides))
-    EO3DSWebRtcBackend WebRtcBackend = EO3DSWebRtcBackend::LibDataChannel;
 
     // LiveKit-specific configuration (only shown when WebRTC + LiveKit backend)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|LiveKit", meta=(EditCondition="TransportFamily == EO3DSTransportFamily::WebRTC && WebRtcBackend == EO3DSWebRtcBackend::LiveKit", EditConditionHides))
