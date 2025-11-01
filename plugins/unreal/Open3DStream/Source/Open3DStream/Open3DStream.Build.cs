@@ -90,20 +90,6 @@ public class Open3DStream : ModuleRules
 	// WebRTC libraries are now linked via Open3DShared
 
  PublicDefinitions.Add("NNG_STATIC_LIB");
-
-	// Ensure required Windows system libraries are available when linking against static libs
-	if (Target.Platform == UnrealTargetPlatform.Win64)
-	{
-		PublicSystemLibraries.AddRange(new string[]
-		{
-			"ws2_32.lib",
-			"iphlpapi.lib",
-			"secur32.lib",
-			"crypt32.lib",
-			"winmm.lib",
-			"bcrypt.lib"
-		});
-	}
 	// Enable Opus flag remains globally defined by Shared
 
 	 PrivateDependencyModuleNames.AddRange(
