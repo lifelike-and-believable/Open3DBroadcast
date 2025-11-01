@@ -4,6 +4,8 @@
 #include "IPAddress.h"
 #include "HAL/PlatformTime.h"
 #include "Open3DBroadcast.h"
+// Shared helpers
+#include "O3DSHelpers.h"
 
 namespace { static const uint8 kO3DSMagic[] = { 0x00, 0xFF, 0x03, 0xFE, 'O','3','D','S','-','S','T','A','R','T' }; }
 
@@ -37,7 +39,13 @@ bool FO3DSTcpServerTransport::ParseTcpUrl(const FString& InUrl, FString& OutHost
 
 bool FO3DSTcpServerTransport::Start(const FString& InUrl, const FString& InProtocol, const FString& InKey)
 {
-    Url = InUrl;
+    // Normalize to tcp://host:port (auto-correct common host.port typos)
+    const FString Normalized = O3DSHelpers::NormalizeTcpUrlHostPort(InUrl);
+    if (Normalized != InUrl)
+    {
+        UE_LOG(LogO3DSBroadcast, Log, TEXT("TCPServer: Normalized URL '%s' -> '%s'"), *InUrl, *Normalized);
+    }
+    Url = Normalized;
     Subsys = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
     return Listen();
 }

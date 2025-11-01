@@ -1,5 +1,6 @@
 #include "Transports/O3DSNngTransport.h"
 #include "Open3DBroadcast.h"
+#include "O3DSHelpers.h" // Shared URL helpers
 #include "HAL/PlatformTime.h" // FPlatformTime::Seconds
 
 // Use NNG via Open3DStream third-party includes
@@ -22,32 +23,7 @@ namespace
         ~FNngSock() { if (Sock.id) { nng_close(Sock); } }
     };
 
-    static void UrlSplitQuery(const FString& InUrl, FString& OutBase, TMap<FString,FString>& OutQuery)
-    {
-        int32 QIdx;
-        if (InUrl.FindChar('?', QIdx))
-        {
-            OutBase = InUrl.Left(QIdx);
-            const FString Qs = InUrl.Mid(QIdx + 1);
-            TArray<FString> Pairs; Qs.ParseIntoArray(Pairs, TEXT("&"), true);
-            for (const FString& P : Pairs)
-            {
-                FString K,V;
-                if (P.Split(TEXT("="), &K, &V))
-                {
-                    OutQuery.Add(K.ToLower(), V.ToLower());
-                }
-                else
-                {
-                    OutQuery.Add(P.ToLower(), TEXT(""));
-                }
-            }
-        }
-        else
-        {
-            OutBase = InUrl;
-        }
-    }
+    // (moved) UrlSplitQuery now lives in O3DSHelpers
 
     // Worker runnable that calls outer->WorkerRun()
     class FNNGWorker : public FRunnable
@@ -89,13 +65,13 @@ FO3DSNngTransport::~FO3DSNngTransport() { Stop(); }
 bool FO3DSNngTransport::ParseUrl(const FString& InUrl, FString& OutBaseUrl, TMap<FString, FString>& OutQuery) const
 {
     if (InUrl.IsEmpty()) { return false; }
-    UrlSplitQuery(InUrl, OutBaseUrl, OutQuery);
+    O3DSHelpers::UrlSplitQuery(InUrl, OutBaseUrl, OutQuery);
     return !OutBaseUrl.IsEmpty();
 }
 
 FString FO3DSNngTransport::StripQuery(const FString& InUrl)
 {
-    int32 QIdx; return InUrl.FindChar('?', QIdx) ? InUrl.Left(QIdx) : InUrl;
+    return O3DSHelpers::StripQuery(InUrl);
 }
 
 bool FO3DSNngTransport::Start(const FString& InUrl, const FString& /*InProtocol*/, const FString& /*InKey*/)

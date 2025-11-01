@@ -157,7 +157,9 @@ public:
  FString LiveKitToken;
 
  // Endpoint and key (new names)
- UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport"))
+ // TODO: Consider splitting Address and Port into separate fields (e.g., FString Address + int32 Port) and deriving Url at runtime to avoid formatting mistakes.
+ // The component currently auto-corrects the common dot-vs-colon typo for tcp URLs (e.g., tcp://0.0.0.0.9000 -> tcp://0.0.0.0:9000).
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bAutoCreateTransport", ToolTip="Endpoint URL (e.g., tcp://127.0.0.1:9000). Note: we may split Address and Port in future to avoid formatting mistakes. The component auto-corrects tcp://host.port to tcp://host:port."))
  FString Url = TEXT("tcp://127.0.0.1:9000");
 
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="false", EditConditionHides))

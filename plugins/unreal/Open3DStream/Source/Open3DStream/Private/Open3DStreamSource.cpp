@@ -8,6 +8,7 @@
 #include "Internationalization/Regex.h"
 
 #include "o3ds_generated.h"
+#include "O3DSHelpers.h"
 #include "UnrealModel.h"
 #include "o3ds/model.h"
 
@@ -24,33 +25,16 @@ static TAutoConsoleVariable<int32> CVarO3DSReceiverDebugParse(
 
 #define LOCTEXT_NAMESPACE "Open3DStream"
 
+// Use shared hashing helpers
 static uint64 HashArray(const TArray<FName>& Names, const TArray<int32>* Parents = nullptr)
 {
- uint64 H =1469598103934665603ull; // FNV-1a64-bit
- auto Mix = [&H](const void* Data, SIZE_T Bytes)
- {
- const uint8* P = static_cast<const uint8*>(Data);
- for (SIZE_T i =0; i < Bytes; ++i)
- {
- H ^= P[i];
- H *=1099511628211ull;
- }
- };
- for (const FName& N : Names)
- {
- const FString S = N.ToString();
- Mix(*S, S.Len() * sizeof(TCHAR));
- }
- if (Parents && Parents->Num() >0)
- {
- Mix(Parents->GetData(), Parents->Num() * sizeof(int32));
- }
- return H;
+	return Parents ? O3DSHelpers::HashNamesAndParents(Names, *Parents)
+				   : O3DSHelpers::HashNames(Names);
 }
 
 static uint64 HashCurveNames(const TArray<FName>& Names)
 {
- return HashArray(Names, nullptr);
+	return O3DSHelpers::HashNames(Names);
 }
 
 FOpen3DStreamSource::FOpen3DStreamSource()
@@ -145,6 +129,17 @@ void FOpen3DStreamSource::ReceiveClient(ILiveLinkClient* InClient, FGuid InSourc
  if (matcher.FindNext())
  {
  Url = FText::Format(LOCTEXT("FormattedUrl", "tcp://{0}"), Url);
+ }
+
+ // Normalize tcp URL typos (e.g., tcp://0.0.0.0.9000)
+ {
+	 FString U = Url.ToString();
+	 const FString Normalized = O3DSHelpers::NormalizeTcpUrlHostPort(U);
+	 if (!Normalized.Equals(U))
+	 {
+		 UE_LOG(LogTemp, Log, TEXT("O3DS RX: Normalized URL '%s' -> '%s'"), *U, *Normalized);
+		 Url = FText::FromString(Normalized);
+	 }
  }
 
  if (!server.start(Url, Protocol, &SourceSettings))

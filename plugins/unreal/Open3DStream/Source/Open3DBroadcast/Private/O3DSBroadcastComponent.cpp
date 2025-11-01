@@ -90,6 +90,8 @@ static FString O3DS_EnsureWebRtcRoleInUrl(const FString& InUrl, EO3DSTransportKi
  return Out;
 }
 
+#include "O3DSHelpers.h" // Shared helpers (sanitize/pattern/url)
+
 // Missing earlier. Inject mode parameters to URL based on selected family.
 static FString O3DS_InjectModeIntoUrl(const FString& InUrl, EO3DSTransportFamily Family, EO3DSNngMode NngMode, EO3DSWebRtcMode WebRtcMode)
 {
@@ -253,6 +255,17 @@ void UO3DSBroadcastComponent::StartInternalTransport()
 
  FString EffectiveUrl = Url;
  FString EffectiveKey = Key;
+
+    // Normalize common mistakes in tcp URL formatting to reduce user error
+    if (TransportFamily == EO3DSTransportFamily::TCP || TransportFamily == EO3DSTransportFamily::NNG)
+    {
+        const FString Normalized = O3DSHelpers::NormalizeTcpUrlHostPort(EffectiveUrl);
+        if (!Normalized.Equals(EffectiveUrl))
+        {
+            UE_LOG(LogO3DSBroadcast, Log, TEXT("Normalized URL '%s' -> '%s'"), *EffectiveUrl, *Normalized);
+            EffectiveUrl = Normalized;
+        }
+    }
 
  // Inject family/mode specific URL params
  EffectiveUrl = O3DS_InjectModeIntoUrl(EffectiveUrl, TransportFamily, NngMode, WebRtcMode);
@@ -578,27 +591,7 @@ void UO3DSBroadcastComponent::UnbindFromTarget()
 
 uint64 UO3DSBroadcastComponent::ComputeDescriptorHash(const TArray<FName>& InNames, const TArray<int32>& InParents) const
 {
- uint64 H = 1469598103934665603ull; // FNV-1a 64-bit offset basis
- auto Mix = [&H](const void* Data, SIZE_T Bytes)
- {
- const uint8* P = static_cast<const uint8*>(Data);
- for (SIZE_T i = 0; i < Bytes; ++i)
- {
- H ^= P[i];
- H *= 1099511628211ull; // FNV prime
- }
- };
-
- for (const FName& N : InNames)
- {
- const FString S = N.ToString();
- Mix(*S, S.Len() * sizeof(TCHAR));
- }
- if (InParents.Num() > 0)
- {
- Mix(InParents.GetData(), InParents.Num() * sizeof(int32));
- }
- return H;
+    return O3DSHelpers::HashNamesAndParents(InNames, InParents);
 }
 
 void UO3DSBroadcastComponent::EnsureSkeletonCache(USkeletalMeshComponent* SkelComp)
@@ -689,28 +682,7 @@ FString UO3DSBroadcastComponent::BuildSubjectName(const USkeletalMeshComponent* 
 
 FString UO3DSBroadcastComponent::SanitizeSubjectName(const FString& Raw) const
 {
- // Replace whitespace with underscore
- FString Out = Raw;
- Out = Out.Replace(TEXT(" "), TEXT("_"));
-
- // Remove characters not in [-._A-Za-z0-9/]
- // Build allowed set and remove others by iterating
- FString Result;
- Result.Reserve(Out.Len());
- for (int32 i = 0; i < Out.Len(); ++i)
- {
- TCHAR C = Out[i];
- bool bAllow = false;
- if ((C >= 'A' && C <= 'Z') || (C >= 'a' && C <= 'z') || (C >= '0' && C <= '9'))
- bAllow = true;
- else if (C == '-' || C == '.' || C == '_' || C == '/')
- bAllow = true;
-
- if (bAllow)
- Result.AppendChar(C);
- // else drop
- }
- return Result;
+    return O3DSHelpers::SanitizeSubjectName(Raw);
 }
 
 void UO3DSBroadcastComponent::EnsureCurveCache(USkeletalMeshComponent* SkelComp)
@@ -871,39 +843,7 @@ void UO3DSBroadcastComponent::CaptureCurves(USkeletalMeshComponent* SkelComp)
 // Simple wildcard matching with '*' and '?' (case-sensitive)
 bool UO3DSBroadcastComponent::NameMatchesPattern(const FString& Text, const FString& Pattern) const
 {
- auto Match = [](const TCHAR* str, const TCHAR* pat) -> bool
- {
- // iterative backtracking for '*'
- const TCHAR* s = str;
- const TCHAR* p = pat;
- const TCHAR* star = nullptr;
- const TCHAR* ss = nullptr;
- while (*s)
- {
- if (*p == '?' || *p == *s)
- {
- ++s; ++p;
- }
- else if (*p == '*')
- {
- star = p++;
- ss = s;
- }
- else if (star)
- {
- p = star + 1;
- s = ++ss;
- }
- else
- {
- return false;
- }
- }
- while (*p == '*') ++p;
- return *p == 0;
- };
-
- return Match(*Text, *Pattern);
+    return O3DSHelpers::NameMatchesPattern(Text, Pattern);
 }
 
 bool UO3DSBroadcastComponent::IsCurveAllowedByPatterns(const FName& Name) const
