@@ -99,6 +99,29 @@ docker run --rm open3dstream-repeater:local tcp://0.0.0.0:7000 tcp://0.0.0.0:700
 
 ## Recent Updates
 
+### Module layout update (UE 5.6)
+
+We introduced a new shared Unreal module, `Open3DShared`, to host cross‑cutting code and third‑party integration wiring used by both receiver (`Open3DStream`) and sender (`Open3DBroadcast`).
+
+- Open3DShared now contains:
+   - WebRTC abstractions and implementations (connector, data channel, signaling)
+   - Shared loopback registry for serialized frames (decouples Broadcast from Stream)
+   - Logging categories and console variables
+   - Helper utilities (subject name sanitize, wildcard matching, URL parsing/normalization)
+   - Consolidated third‑party linking (libdatachannel, OpenSSL, Opus)
+
+- Open3DBroadcast changes:
+   - No longer depends on `Open3DStream`
+   - Audio capture component lives in Broadcast
+   - Built‑in transports consume helpers from `Open3DShared`
+   - User URL typos like `tcp://0.0.0.0.9000` are auto‑normalized to `tcp://0.0.0.0:9000`
+
+- Open3DStream changes:
+   - Registers a LiveLink‑backed consumer via the shared loopback registry
+   - Depends on `Open3DShared` instead of `Open3DBroadcast`
+
+These changes preserve prior behavior while making responsibilities clearer and avoiding circular dependencies.
+
 ### Animation Curve Support (October 2025)
  
 Added support for animation curves to enable morph target-based facial animation:

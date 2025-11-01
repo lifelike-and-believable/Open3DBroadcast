@@ -6,6 +6,7 @@
 #include "O3DSAudioBus.h"
 #include "Open3DStreamSourceSettings.h"
 #include "O3DSWebRtcBackend.h"
+#include "O3DSHelpers.h"
 #include "SocketSubsystem.h"
 #include "Interfaces/IPv4/IPv4Address.h"
 #include "Common/UdpSocketBuilder.h"
@@ -74,6 +75,17 @@ static bool ParseTcpUrl(const FString& In, FString& OutIp, int32& OutPort)
 bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* Settings)
 {
 	stop();
+
+	// Normalize TCP URL typos (e.g., tcp://0.0.0.0.9000)
+	{
+		FString U = Url.ToString();
+		const FString Normalized = O3DSHelpers::NormalizeTcpUrlHostPort(U);
+		if (!Normalized.Equals(U))
+		{
+			UE_LOG(LogTemp, Log, TEXT("O3DS RX: Normalized URL '%s' -> '%s'"), *U, *Normalized);
+			Url = FText::FromString(Normalized);
+		}
+	}
 
 	const char* surl = TCHAR_TO_ANSI(*Url.ToString());
 	const char* sprotocol = TCHAR_TO_ANSI(*Protocol.ToString());
