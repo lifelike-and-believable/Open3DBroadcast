@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "IBroadcastTransport.h"
-#include "Open3DShared/Open3DWebRTCDataChannel.h"
+#include "Open3DWebRTCDataChannel.h"
 #include "O3DSUnifiedMessage.h" // Unified header for audio multiplexing
 #include "O3DSWebRtcBackend.h" // shared backend enum
 

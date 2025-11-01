@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Open3DShared/IWebRTCConnector.h"
+#include "IWebRTCConnector.h"
 #include "Containers/Queue.h"
 #include <memory>
 #include <vector>

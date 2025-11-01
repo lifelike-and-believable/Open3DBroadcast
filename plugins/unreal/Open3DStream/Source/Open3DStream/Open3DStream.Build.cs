@@ -31,19 +31,13 @@ public class Open3DStream : ModuleRules
 		PublicDefinitions.Add("O3DS_WITH_BROADCAST=1");
 		PublicIncludePaths.AddRange( new string[] {} );
 		
-		// Resolve ThirdParty roots robustly and combine paths safely (avoid relying on trailing separators)
- string ThirdPartyDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty"));
- string WebRTCDir = Path.GetFullPath(Path.Combine(ThirdPartyDir, "webrtc"));
-
- // Backward-compatibility alias: legacy code may have referenced 'LibDir' expecting a base path with a trailing separator.
- // Keep it defined to avoid Rules compile errors if cached/staged files still reference it.
- string LibDir = ThirdPartyDir + Path.DirectorySeparatorChar;
+		// Resolve ThirdParty roots
+		string ThirdPartyDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty"));
 
 		PrivateIncludePaths.AddRange(new string[]
- {
- Path.Combine(ThirdPartyDir, "include"),
- Path.Combine(WebRTCDir, "include")
- });
+		{
+			Path.Combine(ThirdPartyDir, "include"),
+		});
 
  // Preflight: ensure expected ThirdParty libraries are present for the active platform.
  // This provides an immediate, actionable error in CI/UAT staging environments.
@@ -56,36 +50,15 @@ public class Open3DStream : ModuleRules
  Path.Combine(ThirdPartyDir, "nng.lib"),
  Path.Combine(ThirdPartyDir, "flatbuffers.lib"),
  Path.Combine(ThirdPartyDir, "opus.lib"),
- Path.Combine(WebRTCDir, "datachannel.lib"),
- Path.Combine(WebRTCDir, "usrsctp.lib"),
- Path.Combine(WebRTCDir, "juice.lib"),
- Path.Combine(WebRTCDir, "libssl.lib"),
- Path.Combine(WebRTCDir, "libcrypto.lib"),
  };
  }
  else if (Target.Platform == UnrealTargetPlatform.Linux)
  {
- RequiredLibs = new string[]
- {
- Path.Combine(WebRTCDir, "libdatachannel.a"),
- Path.Combine(WebRTCDir, "libusrsctp.a"),
- Path.Combine(WebRTCDir, "libjuice.a"),
- Path.Combine(WebRTCDir, "libcrypto.a"),
- Path.Combine(WebRTCDir, "libssl.a"),
-
- };
+	 RequiredLibs = new string[] {};
  }
  else if (Target.Platform == UnrealTargetPlatform.Mac)
  {
- string MacDir = Path.Combine(WebRTCDir, "macos");
- RequiredLibs = new string[]
- {
- Path.Combine(MacDir, "libdatachannel.a"),
- Path.Combine(MacDir, "libusrsctp.a"),
- Path.Combine(MacDir, "libjuice.a"),
- Path.Combine(MacDir, "libcrypto.a"),
- Path.Combine(MacDir, "libssl.a"),
- };
+	 RequiredLibs = new string[] {};
  }
  else
  {
@@ -100,12 +73,11 @@ public class Open3DStream : ModuleRules
  }
  }
 
- // Expose O3DS and WebRTC (libdatachannel) headers to dependent modules (e.g., Open3DBroadcast)
- PublicIncludePaths.AddRange(new string[]
- {
- LibDir + "include",
- Path.Combine(WebRTCDir, "include")
- });
+		// Expose O3DS headers to dependent modules
+		PublicIncludePaths.AddRange(new string[]
+		{
+			Path.Combine(ThirdPartyDir, "include"),
+		});
 
 		PublicDependencyModuleNames.AddRange( new string[] { "Core" } );
 
@@ -115,54 +87,10 @@ public class Open3DStream : ModuleRules
  PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyDir, "opus.lib"));
  PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyDir, "open3dstreamstatic.lib"));
 
- // libdatachannel static library for WebRTC support
- // Note: datachannel depends on usrsctp, juice, mbedtls, and srtp libraries
- if (Target.Platform == UnrealTargetPlatform.Win64)
- {
- PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "datachannel.lib"));
- PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "usrsctp.lib"));
- PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "juice.lib"));
- PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "srtp2.lib"));
- PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libcrypto.lib"));
- PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libssl.lib"));
- // Required Windows system libraries for libdatachannel, usrsctp, and OpenSSL (libssl/libcrypto)
- // Notes:
- // - Winsock and helpers are needed by usrsctp/juice
- // - secur32/crypt32 provide TLS and credential routines for OpenSSL
- // - winmm is used for time functions on Windows
- // - bcrypt is used by OpenSSL for entropy
- PublicSystemLibraries.Add("ws2_32.lib");
- PublicSystemLibraries.Add("iphlpapi.lib");
- PublicSystemLibraries.Add("secur32.lib");
- PublicSystemLibraries.Add("crypt32.lib");
- PublicSystemLibraries.Add("winmm.lib");
- PublicSystemLibraries.Add("bcrypt.lib");
- }
- else if (Target.Platform == UnrealTargetPlatform.Linux)
- {
- PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libdatachannel.a"));
- PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libusrsctp.a"));
- PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libjuice.a"));
- PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libsrtp2.a"));
- PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libcrypto.a"));
- PublicAdditionalLibraries.Add(Path.Combine(WebRTCDir, "libssl.a"));
- }
- else if (Target.Platform == UnrealTargetPlatform.Mac)
- {
- string MacDir = Path.Combine(WebRTCDir, "macos");
- PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libdatachannel.a"));
- PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libusrsctp.a"));
- PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libjuice.a"));
- PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libsrtp2.a"));
- PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libcrypto.a"));
- PublicAdditionalLibraries.Add(Path.Combine(MacDir, "libssl.a"));
- }
+	// WebRTC libraries are now linked via Open3DShared
 
  PublicDefinitions.Add("NNG_STATIC_LIB");
- PublicDefinitions.Add("RTC_STATIC=1"); // Define RTC_STATIC for static libdatachannel
-
-// Enable Opus support for WebRTC audio encode/decode
-PublicDefinitions.Add("O3DS_WITH_OPUS=1");
+	// Enable Opus flag remains globally defined by Shared
 
 	 PrivateDependencyModuleNames.AddRange(
  new string[]

@@ -1,6 +1,6 @@
 // Copyright (c) Open3DStream Contributors
 
-#include "Open3DShared/IWebRTCConnector.h"
+#include "IWebRTCConnector.h"
 #include "WebRTCConnector.h"
 #include "O3DSWebRtcBackend.h"
 #include "Dom/JsonObject.h"

@@ -4,14 +4,14 @@
 
 #include "CoreMinimal.h"
 #include <functional>
-#include "Open3DShared/IWebRTCConnector.h"
+#include "IWebRTCConnector.h"
 #include "O3DSWebRtcBackend.h"
 
 /**
  * Public wrapper for WebRTC DataChannel used by broadcast/receiver modules.
  * Internally delegates to the IWebRTCConnector interface implementation via factory.
  */
-class OPEN3DSTREAM_API FO3DSWebRTCDataChannel
+class OPEN3DSHARED_API FO3DSWebRTCDataChannel
 {
 public:
     FO3DSWebRTCDataChannel();

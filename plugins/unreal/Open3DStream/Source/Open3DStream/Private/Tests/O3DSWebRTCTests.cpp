@@ -11,7 +11,7 @@
 #include "Math/UnrealMathUtility.h"
 #include "HAL/IConsoleManager.h"
 
-#include "Open3DShared/IWebRTCConnector.h"
+#include "IWebRTCConnector.h"
 #include "O3DSWebRtcBackend.h" // shared EO3DSWebRtcBackend
 
 // STL + libdatachannel for in-process tests (no signaling)
