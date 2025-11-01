@@ -19,6 +19,11 @@
 	],
 	"Modules": [
 		{
+			"Name": "Open3DShared",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
 			"Name": "Open3DStream",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"

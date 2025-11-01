@@ -20,7 +20,7 @@
 #include "Misc/ByteSwap.h"
 #include "Misc/Crc.h"
 #include "Logging/LogMacros.h"
-#include "O3DSLog.h"
+#include "O3DSLogs.h"
 
 // libdatachannel includes
 #include <rtc/rtc.hpp>
@@ -1198,7 +1198,7 @@ bool FWebRTCConnector::SetupAudioTrackAndHandlers(const FAudioConfig& Config, st
 
 bool FWebRTCConnector::SetupPeerConnection()
 {
-	// If already created, don’t recreate
+	// If already created, donï¿½t recreate
 	if (PeerConnection)
 	{
 		UE_LOG(LogTemp, Verbose, TEXT("[PEERCONN 0] Reusing existing PeerConnection this=%p pc=%p state=%d"),

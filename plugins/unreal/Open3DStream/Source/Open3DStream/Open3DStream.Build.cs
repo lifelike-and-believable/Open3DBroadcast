@@ -19,7 +19,6 @@ public class Open3DStream : ModuleRules
 		if ((Target.Configuration == UnrealTargetConfiguration.Debug || Target.Configuration == UnrealTargetConfiguration.Development)
 			&& (Target.Type == TargetType.Editor || Target.bBuildEditor))
 		{
-			PublicDefinitions.Add("WITH_AUTOMATION_TESTS=1");
 			PublicDefinitions.Add("WITH_DEV_AUTOMATION_TESTS=1");
 		}
 		
@@ -165,7 +164,7 @@ public class Open3DStream : ModuleRules
 // Enable Opus support for WebRTC audio encode/decode
 PublicDefinitions.Add("O3DS_WITH_OPUS=1");
 
- PrivateDependencyModuleNames.AddRange(
+	 PrivateDependencyModuleNames.AddRange(
  new string[]
  {
  "CoreUObject",
@@ -181,6 +180,7 @@ PublicDefinitions.Add("O3DS_WITH_OPUS=1");
  "JsonUtilities",
  "AudioMixer",
  "AudioCaptureCore",
+ "Open3DShared",
  }
  );
 				
