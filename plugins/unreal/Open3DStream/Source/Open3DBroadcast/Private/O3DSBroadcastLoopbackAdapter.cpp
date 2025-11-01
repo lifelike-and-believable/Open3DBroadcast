@@ -9,9 +9,7 @@
 #include "Open3DStreamSource.h"
 #endif
 #include "ILiveLinkClient.h"
-#if O3DS_HAVE_STREAM_MODULE
-#include "Open3DStreamSourceSettings.h"
-#endif
+#include "O3DSLoopback.h"
 #include "Features/IModularFeatures.h"
 
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastLoopback(
@@ -48,24 +46,7 @@ void UO3DSBroadcastLoopbackAdapter::BeginPlay()
 void UO3DSBroadcastLoopbackAdapter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 #if WITH_EDITOR
-    // Remove the in-memory LiveLink source first, before Unhook() resets the pointer
-    if (Source.IsValid())
-    {
-        if (IModularFeatures::Get().IsModularFeatureAvailable(ILiveLinkClient::ModularFeatureName))
-        {
-            ILiveLinkClient* LiveLinkClient = &IModularFeatures::Get().GetModularFeature<ILiveLinkClient>(ILiveLinkClient::ModularFeatureName);
-            if (LiveLinkClient)
-            {
-#if O3DS_HAVE_STREAM_MODULE
-                // Prefer removing by SourceGuid when available
-                LiveLinkClient->RemoveSource(Source->SourceGuid);
-                UE_LOG(LogO3DSBroadcast, Log, TEXT("[Loopback] In-memory LiveLink source removed"));
-#else
-                UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[Loopback] Stream module not available; skipping LiveLink source remove"));
-#endif
-            }
-        }
-    }
+    // Let consumer handle its own teardown by going out of scope
 #endif
     Unhook();
     Super::EndPlay(EndPlayReason);
@@ -96,7 +77,7 @@ void UO3DSBroadcastLoopbackAdapter::EnsureHooked()
         }
     }
 
-    EnsureLiveLinkSource();
+    EnsureConsumer();
 
     if (!SerializedFrameHandle.IsValid())
     {
@@ -116,61 +97,33 @@ void UO3DSBroadcastLoopbackAdapter::Unhook()
         SerializedFrameHandle.Reset();
     }
     BroadcastComponent.Reset();
-    Source.Reset();
+    Consumer.Reset();
 #endif
 }
 
-void UO3DSBroadcastLoopbackAdapter::EnsureLiveLinkSource()
+void UO3DSBroadcastLoopbackAdapter::EnsureConsumer()
 {
 #if WITH_EDITOR
-#if !O3DS_HAVE_STREAM_MODULE
-    UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[Loopback] Stream module not available; loopback disabled."));
-    return;
-#else
-    if (Source.IsValid())
+    if (Consumer.IsValid())
     {
         return;
     }
-
-    // Create an in-memory source without sockets; we will call OnPackage directly
-    FOpen3DStreamSettings Settings = GetDefault<UOpen3DStreamSettingsObject>()->Settings;
-    Settings.Protocol = FText::FromString(TEXT("InMemory"));
-    Settings.Url = FText::FromString(TEXT("mem://loopback"));
-
-    Source = MakeShared<FOpen3DStreamSource>(Settings);
-
-    // Acquire LiveLink client via modular features and register the source properly
-    if (IModularFeatures::Get().IsModularFeatureAvailable(ILiveLinkClient::ModularFeatureName))
+    Consumer = FSerializedFrameConsumerRegistry::Create();
+    if (!Consumer.IsValid())
     {
-        ILiveLinkClient* LiveLinkClient = &IModularFeatures::Get().GetModularFeature<ILiveLinkClient>(ILiveLinkClient::ModularFeatureName);
-        if (LiveLinkClient)
-        {
-            LiveLinkClient->AddSource(Source.ToSharedRef());
-            UE_LOG(LogO3DSBroadcast, Log, TEXT("[Loopback] In-memory LiveLink source added"));
-        }
+        UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[Loopback] No registered frame consumer; loopback disabled."));
     }
-    else
-    {
-        UE_LOG(LogO3DSBroadcast, Warning, TEXT("[Loopback] LiveLink client not available"));
-    }
-#endif // O3DS_HAVE_STREAM_MODULE
 #endif
 }
 
 void UO3DSBroadcastLoopbackAdapter::OnSerializedFrameReceived(const FString& Subject, const TArray<uint8>& Buffer, double /*Timestamp*/)
 {
 #if WITH_EDITOR
-#if !O3DS_HAVE_STREAM_MODULE
-    // No-op: loopback requires the receiver module
-    return;
-#else
-    if (!Source.IsValid())
+    if (!Consumer.IsValid())
     {
         return;
     }
     UE_LOG(LogO3DSBroadcast, VeryVerbose, TEXT("[Loopback] Forwarding serialized frame for %s (%d bytes)"), *Subject, Buffer.Num());
-    // Directly feed the serialized bytes into the receiver parsing path
-    Source->OnPackage(Buffer);
-#endif // O3DS_HAVE_STREAM_MODULE
+    Consumer->SubmitFrame(Subject, Buffer, 0.0);
 #endif
 }

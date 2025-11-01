@@ -7,8 +7,7 @@
 #include "O3DSBroadcastLoopbackAdapter.generated.h"
 
 class UO3DSBroadcastComponent;
-class FOpen3DStreamSource;
-class ULiveLinkSubsystem;
+class ISerializedFrameConsumer;
 
 /**
  * Dev-only in-memory loopback from broadcast serialized bytes to the local LiveLink receiver.
@@ -36,15 +35,14 @@ protected:
 private:
     void EnsureHooked();
     void Unhook();
-    void EnsureLiveLinkSource();
+    void EnsureConsumer();
 
     void OnSerializedFrameReceived(const FString& Subject, const TArray<uint8>& Buffer, double Timestamp);
 
     TWeakObjectPtr<UO3DSBroadcastComponent> BroadcastComponent;
 
-    // LiveLink
-    TSharedPtr<FOpen3DStreamSource> Source;
-    FGuid SourceGuid;
+    // Loopback consumer provided by the receiver via Shared registry
+    TSharedPtr<ISerializedFrameConsumer> Consumer;
 
     FDelegateHandle SerializedFrameHandle;
 };
