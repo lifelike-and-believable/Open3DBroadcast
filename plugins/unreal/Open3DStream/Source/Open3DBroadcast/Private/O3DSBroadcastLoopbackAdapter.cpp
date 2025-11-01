@@ -5,9 +5,13 @@
 #include "Open3DBroadcast.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#if O3DS_HAVE_STREAM_MODULE
 #include "Open3DStreamSource.h"
+#endif
 #include "ILiveLinkClient.h"
+#if O3DS_HAVE_STREAM_MODULE
 #include "Open3DStreamSourceSettings.h"
+#endif
 #include "Features/IModularFeatures.h"
 
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastLoopback(
@@ -52,9 +56,13 @@ void UO3DSBroadcastLoopbackAdapter::EndPlay(const EEndPlayReason::Type EndPlayRe
             ILiveLinkClient* LiveLinkClient = &IModularFeatures::Get().GetModularFeature<ILiveLinkClient>(ILiveLinkClient::ModularFeatureName);
             if (LiveLinkClient)
             {
+#if O3DS_HAVE_STREAM_MODULE
                 // Prefer removing by SourceGuid when available
                 LiveLinkClient->RemoveSource(Source->SourceGuid);
                 UE_LOG(LogO3DSBroadcast, Log, TEXT("[Loopback] In-memory LiveLink source removed"));
+#else
+                UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[Loopback] Stream module not available; skipping LiveLink source remove"));
+#endif
             }
         }
     }
@@ -115,6 +123,10 @@ void UO3DSBroadcastLoopbackAdapter::Unhook()
 void UO3DSBroadcastLoopbackAdapter::EnsureLiveLinkSource()
 {
 #if WITH_EDITOR
+#if !O3DS_HAVE_STREAM_MODULE
+    UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[Loopback] Stream module not available; loopback disabled."));
+    return;
+#else
     if (Source.IsValid())
     {
         return;
@@ -141,12 +153,17 @@ void UO3DSBroadcastLoopbackAdapter::EnsureLiveLinkSource()
     {
         UE_LOG(LogO3DSBroadcast, Warning, TEXT("[Loopback] LiveLink client not available"));
     }
+#endif // O3DS_HAVE_STREAM_MODULE
 #endif
 }
 
 void UO3DSBroadcastLoopbackAdapter::OnSerializedFrameReceived(const FString& Subject, const TArray<uint8>& Buffer, double /*Timestamp*/)
 {
 #if WITH_EDITOR
+#if !O3DS_HAVE_STREAM_MODULE
+    // No-op: loopback requires the receiver module
+    return;
+#else
     if (!Source.IsValid())
     {
         return;
@@ -154,5 +171,6 @@ void UO3DSBroadcastLoopbackAdapter::OnSerializedFrameReceived(const FString& Sub
     UE_LOG(LogO3DSBroadcast, VeryVerbose, TEXT("[Loopback] Forwarding serialized frame for %s (%d bytes)"), *Subject, Buffer.Num());
     // Directly feed the serialized bytes into the receiver parsing path
     Source->OnPackage(Buffer);
+#endif // O3DS_HAVE_STREAM_MODULE
 #endif
 }

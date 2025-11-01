@@ -28,6 +28,8 @@ public class Open3DBroadcast : ModuleRules
 		}
 		
 		PublicDefinitions.Add("O3DS_WITH_BROADCAST=1");
+		// Broadcast module is decoupled from receiver; default to no stream module available
+		PublicDefinitions.Add("O3DS_HAVE_STREAM_MODULE=0");
 
 		// ThirdParty roots no longer needed here; Shared owns WebRTC linkage
 		
@@ -39,8 +41,7 @@ public class Open3DBroadcast : ModuleRules
 				"Core",
 				"CoreUObject",
 				"Engine",
-				"Open3DShared",
-				"Open3DStream"
+				"Open3DShared"
 			}
 			);
 
@@ -60,10 +61,25 @@ public class Open3DBroadcast : ModuleRules
 			"Sockets",
 			"Networking",
 			"AudioCaptureCore",
+			"AudioMixer",
 			"WebSockets",
 			"Json",
 			"JsonUtilities",
 		});
+
+		// ThirdParty roots for core O3DS static libs (same layout as Open3DStream module)
+		string ThirdPartyDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty"));
+		// Expose O3DS headers to dependent modules
+		PublicIncludePaths.AddRange(new string[]
+		{
+			Path.Combine(ThirdPartyDir, "include"),
+		});
+
+		// Link core O3DS libraries needed by broadcast transports and tests
+		PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyDir, "nng.lib"));
+		PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyDir, "flatbuffers.lib"));
+		PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyDir, "open3dstreamstatic.lib"));
+		PublicDefinitions.Add("NNG_STATIC_LIB");
 
 		// WebRTC libraries are linked by Open3DShared
 				

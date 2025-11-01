@@ -57,7 +57,7 @@ struct FO3DSAudioCaptureConfig
 };
 
 UCLASS(ClassGroup=(Open3DStream), meta=(BlueprintSpawnableComponent))
-class OPEN3DSTREAM_API UO3DSBroadcastAudioCaptureComponent : public UActorComponent
+class OPEN3DBROADCAST_API UO3DSBroadcastAudioCaptureComponent : public UActorComponent
 {
 	GENERATED_BODY()
 public:
