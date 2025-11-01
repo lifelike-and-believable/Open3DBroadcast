@@ -11,8 +11,8 @@
 #include "Math/UnrealMathUtility.h"
 #include "HAL/IConsoleManager.h"
 
-#include "IWebRTCConnector.h"
-#include "Open3DStreamSourceSettings.h" // for EO3DSWebRtcBackendReceiver
+#include "Open3DShared/IWebRTCConnector.h"
+#include "O3DSWebRtcBackend.h" // shared EO3DSWebRtcBackend
 
 // STL + libdatachannel for in-process tests (no signaling)
 #include <atomic>
@@ -94,8 +94,8 @@ bool FO3DSWebRTC_ConnectAndMessage::RunTest(const FString& Params)
     GetSignalingUrl(Url, bFallback);
 
     // Create libdatachannel backend connectors
-    TSharedPtr<IWebRTCConnector> Server = CreateWebRTCConnector(EO3DSWebRtcBackendReceiver::LibDataChannel);
-    TSharedPtr<IWebRTCConnector> Client = CreateWebRTCConnector(EO3DSWebRtcBackendReceiver::LibDataChannel);
+    TSharedPtr<IWebRTCConnector> Server = CreateWebRTCConnector(EO3DSWebRtcBackend::LibDataChannel);
+    TSharedPtr<IWebRTCConnector> Client = CreateWebRTCConnector(EO3DSWebRtcBackend::LibDataChannel);
     if (!Server || !Client)
     {
         AddError(TEXT("Failed to create WebRTC connectors"));
@@ -162,8 +162,8 @@ bool FO3DSWebRTC_AudioSendReceive::RunTest(const FString& Params)
     FString Url; bool bFallback = false;
     GetSignalingUrl(Url, bFallback);
 
-    TSharedPtr<IWebRTCConnector> Server = CreateWebRTCConnector(EO3DSWebRtcBackendReceiver::LibDataChannel);
-    TSharedPtr<IWebRTCConnector> Client = CreateWebRTCConnector(EO3DSWebRtcBackendReceiver::LibDataChannel);
+    TSharedPtr<IWebRTCConnector> Server = CreateWebRTCConnector(EO3DSWebRtcBackend::LibDataChannel);
+    TSharedPtr<IWebRTCConnector> Client = CreateWebRTCConnector(EO3DSWebRtcBackend::LibDataChannel);
     if (!Server || !Client)
     {
         AddError(TEXT("Failed to create WebRTC connectors"));
@@ -280,8 +280,8 @@ bool FO3DSWebRTC_AudioAnnounce::RunTest(const FString& Params)
     FString Url; bool bFallback = false;
     GetSignalingUrl(Url, bFallback);
 
-    TSharedPtr<IWebRTCConnector> Server = CreateWebRTCConnector(EO3DSWebRtcBackendReceiver::LibDataChannel);
-    TSharedPtr<IWebRTCConnector> Client = CreateWebRTCConnector(EO3DSWebRtcBackendReceiver::LibDataChannel);
+    TSharedPtr<IWebRTCConnector> Server = CreateWebRTCConnector(EO3DSWebRtcBackend::LibDataChannel);
+    TSharedPtr<IWebRTCConnector> Client = CreateWebRTCConnector(EO3DSWebRtcBackend::LibDataChannel);
     if (!Server || !Client)
     {
         AddError(TEXT("Failed to create WebRTC connectors"));
@@ -362,8 +362,8 @@ bool FO3DSWebRTC_AudioPerFrame_Localhost::RunTest(const FString& Params)
     FString Url; bool bFallback = false;
     GetSignalingUrl(Url, bFallback);
 
-    TSharedPtr<IWebRTCConnector> Server = CreateWebRTCConnector(EO3DSWebRtcBackendReceiver::LibDataChannel);
-    TSharedPtr<IWebRTCConnector> Client = CreateWebRTCConnector(EO3DSWebRtcBackendReceiver::LibDataChannel);
+    TSharedPtr<IWebRTCConnector> Server = CreateWebRTCConnector(EO3DSWebRtcBackend::LibDataChannel);
+    TSharedPtr<IWebRTCConnector> Client = CreateWebRTCConnector(EO3DSWebRtcBackend::LibDataChannel);
     if (!Server || !Client)
     {
         AddError(TEXT("Failed to create WebRTC connectors"));

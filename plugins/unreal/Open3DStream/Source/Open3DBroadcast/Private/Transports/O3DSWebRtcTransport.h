@@ -4,9 +4,9 @@
 
 #include "CoreMinimal.h"
 #include "IBroadcastTransport.h"
-#include "Open3DWebRTCDataChannel.h"
+#include "Open3DShared/Open3DWebRTCDataChannel.h"
 #include "O3DSUnifiedMessage.h" // Unified header for audio multiplexing
-#include "Open3DStreamSourceSettings.h" // for EO3DSWebRtcBackendReceiver enum
+#include "O3DSWebRtcBackend.h" // shared backend enum
 
 // Debug cvar for transport send logging
 static TAutoConsoleVariable<int32> CVarO3DSWebRtcTransportDebug(
@@ -92,19 +92,8 @@ public:
         
         Channel = MakeUnique<FO3DSWebRTCDataChannel>();
         
-        // Map broadcast backend enum to receiver enum for the shared data channel API
-        auto ToReceiverBackend = [](EO3DSWebRtcBackend In){
-            switch (In)
-            {
-            case EO3DSWebRtcBackend::LibDataChannel: return EO3DSWebRtcBackendReceiver::LibDataChannel;
-            case EO3DSWebRtcBackend::LiveKit: return EO3DSWebRtcBackendReceiver::LiveKit;
-            default: return EO3DSWebRtcBackendReceiver::LibDataChannel;
-            }
-        };
-        const EO3DSWebRtcBackendReceiver ReceiverBackend = ToReceiverBackend(Backend);
-        
         // Create connector without starting (allows audio to be configured before PeerConnection)
-        return Channel->PrepareConnector(ReceiverBackend);
+        return Channel->PrepareConnector(Backend);
     }
 
     virtual bool Start(const FString& InUrl, const FString& InProtocol, const FString& InKey) override
@@ -137,17 +126,7 @@ public:
             }
         }
 
-        // Map broadcast backend enum to receiver enum for the shared data channel API
-        auto ToReceiverBackend = [](EO3DSWebRtcBackend In){
-            switch (In)
-            {
-            case EO3DSWebRtcBackend::LibDataChannel: return EO3DSWebRtcBackendReceiver::LibDataChannel;
-            case EO3DSWebRtcBackend::LiveKit: return EO3DSWebRtcBackendReceiver::LiveKit;
-            default: return EO3DSWebRtcBackendReceiver::LibDataChannel;
-            }
-        };
-        const EO3DSWebRtcBackendReceiver ReceiverBackend = ToReceiverBackend(Backend);
-        const bool bStarted = Channel->Start(EffectiveUrl, ReceiverBackend);
+        const bool bStarted = Channel->Start(EffectiveUrl, Backend);
         if (CVarO3DSWebRtcTransportDebug->GetInt() != 0)
         {
             UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[WebRTC] Transport Start url=%s backend=%d result=%s"),

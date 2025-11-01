@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "IBroadcastTransport.h"
+#include "O3DSWebRtcBackend.h" // shared WebRTC backend enum (BlueprintType)
 #include "O3DSBroadcastTransportAdapter.generated.h"
 
 class UO3DSBroadcastComponent;
@@ -58,13 +59,7 @@ enum class EO3DSWebRtcMode : uint8
     Server UMETA(DisplayName="Server")
 };
 
-// WebRTC backend selection
-UENUM(BlueprintType)
-enum class EO3DSWebRtcBackend : uint8
-{
-    LibDataChannel UMETA(DisplayName="Peer-to-Peer (libdatachannel)"),
-    LiveKit UMETA(DisplayName="LiveKit SFU")
-};
+// WebRTC backend selection now comes from shared header (EO3DSWebRtcBackend)
 
 UCLASS(ClassGroup=(Open3DStream), meta=(BlueprintSpawnableComponent))
 class OPEN3DBROADCAST_API UO3DSBroadcastTransportAdapter : public UActorComponent

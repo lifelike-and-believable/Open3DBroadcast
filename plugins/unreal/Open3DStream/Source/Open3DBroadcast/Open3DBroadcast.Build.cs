@@ -56,7 +56,8 @@ public class Open3DBroadcast : ModuleRules
 			{
 				"LiveLinkInterface",
 				"LiveLink",
-				"AnimGraphRuntime"
+				"AnimGraphRuntime",
+				"Open3DShared"
 			}
 			);
 

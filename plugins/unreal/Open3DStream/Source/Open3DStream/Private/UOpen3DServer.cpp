@@ -1,10 +1,11 @@
 #include "UOpen3DServer.h"
 #include "o3ds/async_pair.h"
 #include "o3ds/async_subscriber.h"
-#include "IWebRTCConnector.h"
+#include "Open3DShared/IWebRTCConnector.h"
 #include "O3DSUnifiedMessage.h"
 #include "O3DSAudioBus.h"
 #include "Open3DStreamSourceSettings.h"
+#include "O3DSWebRtcBackend.h"
 #include "SocketSubsystem.h"
 #include "Interfaces/IPv4/IPv4Address.h"
 #include "Common/UdpSocketBuilder.h"
@@ -96,15 +97,17 @@ bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* S
 
 	if (strncmp(sprotocol, "WebRTC Client",13) ==0)
 	{
-		// Determine backend from settings (default to LibDataChannel)
-		EO3DSWebRtcBackendReceiver Backend = EO3DSWebRtcBackendReceiver::LibDataChannel;
+		// Determine backend from settings (default to LibDataChannel) and map to shared enum
+		EO3DSWebRtcBackend SharedBackend = EO3DSWebRtcBackend::LibDataChannel;
 		if (Settings)
 		{
-			Backend = Settings->WebRtcBackend;
+			SharedBackend = (Settings->WebRtcBackend == EO3DSWebRtcBackendReceiver::LiveKit)
+				? EO3DSWebRtcBackend::LiveKit
+				: EO3DSWebRtcBackend::LibDataChannel;
 		}
 
 		// Create connector using factory
-		mWebRTCConnector = CreateWebRTCConnector(Backend);
+		mWebRTCConnector = CreateWebRTCConnector(SharedBackend);
 		if (!mWebRTCConnector)
 		{
 			OnState.ExecuteIfBound(LOCTEXT("WebRTCBackendNotSupported", "WebRTC backend not supported"), true);
@@ -154,15 +157,17 @@ bool O3DSServer::start(FText Url, FText Protocol, const FOpen3DStreamSettings* S
 	
 	if (strncmp(sprotocol, "WebRTC Server",13) ==0)
 	{
-		// Determine backend from settings (default to LibDataChannel)
-		EO3DSWebRtcBackendReceiver Backend = EO3DSWebRtcBackendReceiver::LibDataChannel;
+		// Determine backend from settings (default to LibDataChannel) and map to shared enum
+		EO3DSWebRtcBackend SharedBackend = EO3DSWebRtcBackend::LibDataChannel;
 		if (Settings)
 		{
-			Backend = Settings->WebRtcBackend;
+			SharedBackend = (Settings->WebRtcBackend == EO3DSWebRtcBackendReceiver::LiveKit)
+				? EO3DSWebRtcBackend::LiveKit
+				: EO3DSWebRtcBackend::LibDataChannel;
 		}
 
 		// Create connector using factory
-		mWebRTCConnector = CreateWebRTCConnector(Backend);
+		mWebRTCConnector = CreateWebRTCConnector(SharedBackend);
 		if (!mWebRTCConnector)
 		{
 			OnState.ExecuteIfBound(LOCTEXT("WebRTCBackendNotSupported", "WebRTC backend not supported"), true);

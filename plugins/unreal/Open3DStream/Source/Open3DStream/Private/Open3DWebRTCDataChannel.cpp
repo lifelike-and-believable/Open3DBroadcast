@@ -1,8 +1,8 @@
 // Copyright (c) Open3DStream Contributors
 
-#include "Open3DWebRTCDataChannel.h"
-#include "IWebRTCConnector.h"
-#include "Open3DStreamSourceSettings.h" // For EO3DSWebRtcBackendReceiver enum
+#include "Open3DShared/Open3DWebRTCDataChannel.h"
+#include "Open3DShared/IWebRTCConnector.h"
+#include "O3DSWebRtcBackend.h"
 // For TQueue and EQueueMode
 #include "Containers/Queue.h"
 
@@ -12,7 +12,7 @@ public:
  FImpl() = default;
 
  // Create connector without starting (allows audio configuration before PeerConnection creation)
- bool PrepareConnector(EO3DSWebRtcBackendReceiver Backend)
+ bool PrepareConnector(EO3DSWebRtcBackend Backend)
  {
  if (Connector)
  {
@@ -29,7 +29,7 @@ public:
  return true;
  }
 
- bool Start(const FString& Url, EO3DSWebRtcBackendReceiver Backend)
+ bool Start(const FString& Url, EO3DSWebRtcBackend Backend)
  {
  // Ensure connector is created (supports both old single-phase and new two-phase init)
  if (!PrepareConnector(Backend))
@@ -106,8 +106,8 @@ public:
 FO3DSWebRTCDataChannel::FO3DSWebRTCDataChannel() : Impl(MakeUnique<FImpl>()) {}
 FO3DSWebRTCDataChannel::~FO3DSWebRTCDataChannel() { Stop(); }
 
-bool FO3DSWebRTCDataChannel::PrepareConnector(EO3DSWebRtcBackendReceiver Backend) { return Impl->PrepareConnector(Backend); }
-bool FO3DSWebRTCDataChannel::Start(const FString& Url, EO3DSWebRtcBackendReceiver Backend) { return Impl->Start(Url, Backend); }
+ bool FO3DSWebRTCDataChannel::PrepareConnector(EO3DSWebRtcBackend Backend) { return Impl->PrepareConnector(Backend); }
+ bool FO3DSWebRTCDataChannel::Start(const FString& Url, EO3DSWebRtcBackend Backend) { return Impl->Start(Url, Backend); }
 void FO3DSWebRTCDataChannel::Stop() { if (Impl) Impl->Stop(); }
 bool FO3DSWebRTCDataChannel::Send(const uint8* Data, int32 Size) { return Impl->Send(Data, Size); }
 bool FO3DSWebRTCDataChannel::IsConnected() const { return Impl->IsConnected(); }

@@ -1,8 +1,8 @@
 // Copyright (c) Open3DStream Contributors
 
-#include "IWebRTCConnector.h"
+#include "Open3DShared/IWebRTCConnector.h"
 #include "WebRTCConnector.h"
-#include "Open3DStreamSourceSettings.h"
+#include "O3DSWebRtcBackend.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
@@ -199,9 +199,9 @@ namespace
 	};
 }
 
-TSharedPtr<IWebRTCConnector> CreateWebRTCConnector(EO3DSWebRtcBackendReceiver Backend, const FLiveKitConfig* /*LiveKitConfig*/)
+TSharedPtr<IWebRTCConnector> CreateWebRTCConnector(EO3DSWebRtcBackend Backend, const FLiveKitConfig* /*LiveKitConfig*/)
 {
-	if (Backend == EO3DSWebRtcBackendReceiver::LibDataChannel)
+	if (Backend == EO3DSWebRtcBackend::LibDataChannel)
 	{
 		return MakeShared<FLibDataChannelAdapter>();
 	}
