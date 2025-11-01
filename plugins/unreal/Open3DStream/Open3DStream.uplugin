@@ -32,7 +32,6 @@
 			"Name": "Open3DBroadcast",
 			"Type": "Runtime",
 			"LoadingPhase": "Default",
-			"AdditionalDependencies": ["Open3DStream", "LiveLink"],
 			"WhitelistPlatforms": ["Win64", "Linux", "Mac"]
 		}
 	]
