@@ -81,6 +81,20 @@ public class Open3DBroadcast : ModuleRules
 		PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyDir, "open3dstreamstatic.lib"));
 		PublicDefinitions.Add("NNG_STATIC_LIB");
 
+		// Ensure required Windows system libraries are available when linking against static libs
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			PublicSystemLibraries.AddRange(new string[]
+			{
+				"ws2_32.lib",
+				"iphlpapi.lib",
+				"secur32.lib",
+				"crypt32.lib",
+				"winmm.lib",
+				"bcrypt.lib"
+			});
+		}
+
 		// WebRTC libraries are linked by Open3DShared
 				
 		DynamicallyLoadedModuleNames.AddRange( new string[] {} );
