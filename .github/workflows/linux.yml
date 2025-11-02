@@ -25,7 +25,7 @@ jobs:
         submodules: 'recursive'
 
     - name: Get Tools
-      run: sudo apt-get install -y cmake ninja-build libmbedtls-dev patchelf
+      run: sudo apt-get install -y cmake ninja-build libssl-dev patchelf
 
     - name: NNG
       working-directory: thirdparty/nng
@@ -65,7 +65,8 @@ jobs:
     - name: Package Release
       run: |
         mkdir ./out/bin/lib
-        cp -d /usr/lib/x86_64-linux-gnu/libmbed*.so* ./out/bin/lib/
+        cp -d /usr/lib/x86_64-linux-gnu/libssl.so* ./out/bin/lib/ 2>/dev/null || true
+        cp -d /usr/lib/x86_64-linux-gnu/libcrypto.so* ./out/bin/lib/ 2>/dev/null || true
         patchelf --set-rpath '$ORIGIN/lib' ./out/bin/Repeater
         tar -czvf o3ds.tgz -C out .
 
