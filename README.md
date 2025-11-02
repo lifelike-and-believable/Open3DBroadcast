@@ -128,7 +128,7 @@ Added support for animation curves to enable morph target-based facial animation
 
 ### WebRTC Status (October 2025)
 
-libdatachannel is integrated with MbedTLS and enabled by default across the codebase:
+libdatachannel is integrated with OpenSSL and enabled by default across the codebase:
 
 - C++ command-line tools support WebRTC (ready) – see [WEBRTC_QUICKSTART.md](WEBRTC_QUICKSTART.md)
 - Unreal plugin includes a functional WebRTC connector (beta) using a lightweight WebSocket signaling server – see [WEBRTC_UNREAL_IMPLEMENTATION.md](WEBRTC_UNREAL_IMPLEMENTATION.md)
