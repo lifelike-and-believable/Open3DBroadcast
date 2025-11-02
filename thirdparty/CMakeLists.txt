@@ -13,18 +13,20 @@ add_subdirectory(crccpp)
 option(O3DS_BUILD_WEBRTC "Build libdatachannel for WebRTC support" ON)
 
 if(O3DS_BUILD_WEBRTC)
-    message(STATUS "Building libdatachannel for WebRTC support with MbedTLS")
+    message(STATUS "Building libdatachannel for WebRTC support with OpenSSL")
     
-    # Build MbedTLS first (required by libdatachannel)
-    # Note: Using v3.6.5 stable with DTLS-SRTP enabled
-    message(STATUS "Building MbedTLS for libdatachannel")
-    
-    # Configure MbedTLS options
-    set(ENABLE_TESTING OFF CACHE BOOL "Disable MbedTLS tests")
-    set(ENABLE_PROGRAMS OFF CACHE BOOL "Disable MbedTLS programs")
-    set(GEN_FILES ON CACHE BOOL "Enable file generation for MbedTLS")
-    
-    add_subdirectory(mbedtls)
+    # OpenSSL is the default TLS backend for libdatachannel
+    # Ensure OpenSSL is available on the system
+    find_package(OpenSSL QUIET)
+    if(NOT OPENSSL_FOUND)
+        message(WARNING "OpenSSL not found. Install OpenSSL development libraries.")
+        message(WARNING "  Ubuntu/Debian: sudo apt-get install libssl-dev")
+        message(WARNING "  Fedora/RHEL: sudo dnf install openssl-devel")
+        message(WARNING "  macOS: brew install openssl")
+        message(WARNING "  Windows: choco install openssl")
+    else()
+        message(STATUS "Found OpenSSL ${OPENSSL_VERSION}")
+    endif()
     
     # Configure libdatachannel options for CI compatibility
     # Build static libraries only
@@ -39,14 +41,9 @@ if(O3DS_BUILD_WEBRTC)
     set(NO_TESTS ON CACHE BOOL "Disable libdatachannel tests")
     set(USE_NICE OFF CACHE BOOL "Disable libnice ICE support")
     
-    # Use MbedTLS instead of OpenSSL or GnuTLS
+    # Use OpenSSL (default) by explicitly disabling other TLS backends
     set(USE_GNUTLS OFF CACHE BOOL "Don't use GnuTLS")
-    set(USE_MBEDTLS ON CACHE BOOL "Use MbedTLS for crypto")
-    
-    # Point to our MbedTLS installation
-    if(NOT MBEDTLS_ROOT_DIR)
-        set(MBEDTLS_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/mbedtls" CACHE PATH "MbedTLS root directory")
-    endif()
+    set(USE_MBEDTLS OFF CACHE BOOL "Don't use MbedTLS - use OpenSSL instead")
     
     add_subdirectory(libdatachannel)
 else()
