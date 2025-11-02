@@ -24,9 +24,12 @@
 #include "Transports/O3DSTcpServerTransport.h"
 #include "Transports/O3DSUdpTransport.h"
 #include "Transports/O3DSNngTransport.h"
+#include "Transports/O3DSWebRtcTransport.h"
+#include "O3DSBroadcastAudioCaptureComponent.h"
 
 #include "O3DSBroadcastAudioCaptureComponent.h"
 #include "AudioCaptureCore.h"
+#include "IWebRTCConnector.h" // for FO3DSWebRtcConfig
 
 // Forward declare property changed event type used in header override
 #if WITH_EDITOR
@@ -57,8 +60,25 @@ static TAutoConsoleVariable<int32> CVarO3DSBroadcastOnScreen(
 // New: Debug send path (serializer -> queue -> transport)
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugSend(
  TEXT("o3ds.Broadcast.DebugSend"),
-1,
+0,
  TEXT("Debug the send pipeline: queueing and draining (0/1)."),
+ ECVF_Default);
+
+// Optional debug tone controls for WebRTC connectivity tests
+static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCDebugTone(
+ TEXT("o3ds.Broadcast.WebRTC.DebugTone"),
+ 0,
+ TEXT("When 1, request the connector to send a short debug tone on the audio track."),
+ ECVF_Default);
+static TAutoConsoleVariable<float> CVarO3DSBroadcastWebRTCToneHz(
+ TEXT("o3ds.Broadcast.WebRTC.ToneHz"),
+ 440.0f,
+ TEXT("Debug tone frequency in Hz (when DebugTone=1)."),
+ ECVF_Default);
+static TAutoConsoleVariable<float> CVarO3DSBroadcastWebRTCToneDur(
+ TEXT("o3ds.Broadcast.WebRTC.ToneDur"),
+ 1.0f,
+ TEXT("Debug tone duration in seconds (when DebugTone=1)."),
  ECVF_Default);
 
 // Helpers to inject URL params matching adapter behavior
@@ -90,6 +110,64 @@ static FString O3DS_EnsureWebRtcRoleInUrl(const FString& InUrl, EO3DSTransportKi
 }
 
 #include "O3DSHelpers.h" // Shared helpers (sanitize/pattern/url)
+
+// Minimal URL-encode for query values we generate (spaces and parentheses are common in device names)
+static FString O3DS_MinimalUrlEncode(const FString& In)
+{
+ FString Out; Out.Reserve(In.Len());
+ for (TCHAR C : In)
+ {
+ switch (C)
+ {
+ case ' ': Out += TEXT("%20"); break;
+ case '(' : Out += TEXT("%28"); break;
+ case ')' : Out += TEXT("%29"); break;
+ case '"': Out += TEXT("%22"); break;
+ case '#': Out += TEXT("%23"); break;
+ case '&': Out += TEXT("%26"); break;
+ case '+': Out += TEXT("%2B"); break;
+ default: Out.AppendChar(C); break;
+ }
+ }
+ return Out;
+}
+
+// Ensure a local path id (e.g., /client) is present for WebRTC Client mode to match the
+// WebRTCConnectorComponent default pattern expected by the sample signaling server.
+static FString O3DS_EnsureWebRtcLocalPathId(const FString& InUrl, EO3DSWebRtcMode WebRtcMode, const FString& DefaultLocalId)
+{
+ if (WebRtcMode != EO3DSWebRtcMode::Client)
+ {
+ return InUrl;
+ }
+
+ // Split base and query to avoid appending into the query segment
+ FString Base; TMap<FString,FString> Q; O3DSHelpers::UrlSplitQuery(InUrl, Base, Q);
+
+ // Detect if Base already has a path after scheme://host:port
+ int32 SchemeIdx = Base.Find(TEXT("://"), ESearchCase::IgnoreCase, ESearchDir::FromStart);
+ if (SchemeIdx == INDEX_NONE)
+ {
+ return InUrl; // unknown scheme; leave untouched
+ }
+ const int32 AfterScheme = SchemeIdx + 3;
+ // Find first '/' after host:port
+ const int32 FirstSlash = Base.Find(TEXT("/"), ESearchCase::IgnoreCase, ESearchDir::FromStart, AfterScheme);
+ FString NewBase = Base;
+ if (FirstSlash == INDEX_NONE)
+ {
+ NewBase = Base + TEXT("/") + DefaultLocalId;
+ }
+
+ // Recompose with original query (if any)
+ if (Q.Num() == 0)
+ {
+ return NewBase;
+ }
+ // Keep original query ordering by reusing the substring from original InUrl
+ const int32 QMark = InUrl.Find(TEXT("?"));
+ return (QMark != INDEX_NONE) ? (NewBase + InUrl.Mid(QMark)) : NewBase;
+}
 
 // Missing earlier. Inject mode parameters to URL based on selected family.
 static FString O3DS_InjectModeIntoUrl(const FString& InUrl, EO3DSTransportFamily Family, EO3DSNngMode NngMode, EO3DSWebRtcMode WebRtcMode)
@@ -230,7 +308,9 @@ void UO3DSBroadcastComponent::CreateInternalTransport()
  break;
  case EO3DSTransportFamily::WebRTC:
  {
-    
+	 InternalTransport = MakeUnique<FO3DSWebRtcTransport>();
+	 // Cache raw ptr for audio forwarding without RTTI
+	 WebRtcTransportRaw = static_cast<FO3DSWebRtcTransport*>(InternalTransport.Get());
  break;
  }
  default:
@@ -262,12 +342,59 @@ void UO3DSBroadcastComponent::StartInternalTransport()
  // Inject family/mode specific URL params
  EffectiveUrl = O3DS_InjectModeIntoUrl(EffectiveUrl, TransportFamily, NngMode, WebRtcMode);
 
+ // For WebRTC Client mode, ensure a local path id exists (e.g., "/client")
+ if (TransportFamily == EO3DSTransportFamily::WebRTC)
+ {
+ EffectiveUrl = O3DS_EnsureWebRtcLocalPathId(EffectiveUrl, WebRtcMode, TEXT("client"));
+ }
+
  const FString ProtocolName = O3DS_GetProtocolNameLegacy(TransportFamily, TcpMode, WebRtcMode);
 
- // If WebRTC and audio enabled, push config into transport (stub for now)
- if (TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio)
+ // If WebRTC, prepare connector pre-start config (verbosity, optional audio) before starting transport
+ if (TransportFamily == EO3DSTransportFamily::WebRTC)
  {
+	 // Encode pre-start options into URL query to avoid RTTI downcasts
+	 TArray<FString> ParamsToAdd;
+	 if (CVarO3DSBroadcastDebugSend.GetValueOnAnyThread() != 0)
+	 {
+		 ParamsToAdd.Add(TEXT("verbose=1"));
+	 }
+	 if (bEnableWebRTCAudio)
+	 {
+		 ParamsToAdd.Add(TEXT("audio=1"));
+		 ParamsToAdd.Add(FString::Printf(TEXT("samplerate=%d"), WebRTCAudioSampleRate));
+		 ParamsToAdd.Add(FString::Printf(TEXT("channels=%d"), WebRTCAudioNumChannels));
+		 ParamsToAdd.Add(FString::Printf(TEXT("bitrate=%d"), WebRTCAudioBitrateKbps));
+		 if (WebRTCAudioMode == EO3DSWebRTCAudioMode::Input)
+		 {
+			 const FString Dev = WebRTCInputDeviceName.ToString();
+			 if (!Dev.IsEmpty())
+			 {
+				 ParamsToAdd.Add(FString::Printf(TEXT("device=%s"), *O3DS_MinimalUrlEncode(Dev)));
+			 }
+		 }
+		 else if (WebRTCSubmixToTap)
+		 {
+			 ParamsToAdd.Add(FString::Printf(TEXT("submix=%s"), *O3DS_MinimalUrlEncode(WebRTCSubmixToTap->GetName())));
+		 }
 
+		 // If requested, enable debug tone generation (parsed by WebRTC transport/connector)
+		 if (CVarO3DSBroadcastWebRTCDebugTone.GetValueOnAnyThread() != 0)
+		 {
+			 const float Hz = CVarO3DSBroadcastWebRTCToneHz.GetValueOnAnyThread();
+			 const float Dur = CVarO3DSBroadcastWebRTCToneDur.GetValueOnAnyThread();
+			 ParamsToAdd.Add(TEXT("tone=1"));
+			 ParamsToAdd.Add(FString::Printf(TEXT("tonehz=%g"), Hz));
+			 ParamsToAdd.Add(FString::Printf(TEXT("tonedur=%g"), Dur));
+		 }
+	 }
+	 if (ParamsToAdd.Num() > 0)
+	 {
+		 const FString Joined = FString::Join(ParamsToAdd, TEXT("&"));
+		 EffectiveUrl += EffectiveUrl.Contains(TEXT("?"))
+			 ? FString::Printf(TEXT("&%s"), *Joined)
+			 : FString::Printf(TEXT("?%s"), *Joined);
+	 }
  }
 
  // Ensure WebRTC URL carries room parameter when enabled on component
@@ -314,6 +441,8 @@ void UO3DSBroadcastComponent::TeardownInternalTransport()
  InternalTransport->Stop();
  InternalTransport.Reset();
  }
+ // Clear cached raw pointer when transport goes away
+ WebRtcTransportRaw = nullptr;
 
  // Drain queue
  FQItem Item; while (SendQueue.Dequeue(Item)) {}
@@ -373,16 +502,121 @@ void UO3DSBroadcastComponent::StartCapture()
  UE_LOG(LogO3DSBroadcast, Log, TEXT("[WEBRTC SETUP 1/7] Creating internal transport"));
  CreateInternalTransport();
 
- // For WebRTC with audio: configure audio BEFORE starting transport
- // This ensures EnableAudioSend() is called before the PeerConnection is created
+ // Pre-start config is applied inside StartInternalTransport
+ StartInternalTransport();
+
+ // If WebRTC audio is enabled, ensure an audio capture component is present and wire PCM sink -> WebRTC transport
  if (TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio)
  {
+	 AActor* Owner = GetOwner();
+	 if (Owner)
+	 {
+		 UO3DSBroadcastAudioCaptureComponent* AudioComp = Owner->FindComponentByClass<UO3DSBroadcastAudioCaptureComponent>();
+		 if (!AudioComp)
+		 {
+			 AudioComp = NewObject<UO3DSBroadcastAudioCaptureComponent>(Owner, UO3DSBroadcastAudioCaptureComponent::StaticClass(), NAME_None, RF_Transactional);
+			 if (AudioComp)
+			 {
+				 AudioComp->RegisterComponent();
+			 }
+		 }
 
+		 if (AudioComp)
+		 {
+			 // Configure capture mode and targets from this component's settings
+			 AudioComp->CaptureMode = (WebRTCAudioMode == EO3DSWebRTCAudioMode::Input) ? EO3DSCaptureMode::Input : EO3DSCaptureMode::Mix;
+			 AudioComp->Config.SampleRate = WebRTCAudioSampleRate;
+			 AudioComp->Config.NumChannels = WebRTCAudioNumChannels;
+			 AudioComp->Config.BitrateKbps = WebRTCAudioBitrateKbps;
+			 if (AudioComp->CaptureMode == EO3DSCaptureMode::Mix)
+			 {
+				 AudioComp->Config.SubmixToTap = WebRTCSubmixToTap;
+			 }
+			 else
+			 {
+				 AudioComp->InputDeviceName = WebRTCInputDeviceName;
+			 }
+
+			 // Provide a friendly label and the PCM sink that forwards to WebRTC transport
+			 const FString Label = TEXT("o3ds-webrtc");
+			 AudioComp->SetStreamLabel(Label);
+
+			 // Weak owner pointer for safety; transport raw cleared on teardown
+			 TWeakObjectPtr<UO3DSBroadcastComponent> WeakThis(this);
+			 const int32 TargetSR = WebRTCAudioSampleRate;
+			 const int32 TargetCh = WebRTCAudioNumChannels;
+			 AudioComp->SetAudioSink([WeakThis, TargetSR, TargetCh](const FString& /*Label*/, const float* InInterleaved, int32 InFrames, int32 InCh, int32 InSR, double /*Ts*/)
+			 {
+				 UO3DSBroadcastComponent* Self = WeakThis.Get();
+				 if (!Self || !Self->WebRtcTransportRaw || !InInterleaved || InFrames <= 0 || InCh <= 0 || InSR <= 0)
+				 {
+					 return false;
+				 }
+
+				 // Resample and channel-convert into interleaved int16
+				 const int32 OutSR = TargetSR;
+				 const int32 OutCh = TargetCh;
+				 const double Ratio = (double)OutSR / (double)InSR;
+				 const int32 OutFrames = (int32)FMath::Max(1.0, FMath::RoundToDouble(InFrames * Ratio));
+				 TArray<int16> Out;
+				 Out.SetNumUninitialized(OutFrames * OutCh);
+
+				 auto SampleAt = [&](int32 frame, int32 ch)->float
+				 {
+					 // Linear interpolation in time on a per-channel basis
+					 const double srcPos = (double)frame / Ratio; // map output frame -> source position
+					 const int32 i0 = FMath::Clamp((int32)srcPos, 0, InFrames - 1);
+					 const int32 i1 = FMath::Clamp(i0 + 1, 0, InFrames - 1);
+					 const float frac = (float)(srcPos - (double)i0);
+					 const int32 idx0 = i0 * InCh;
+					 const int32 idx1 = i1 * InCh;
+					 const int32 c0 = FMath::Clamp(ch, 0, InCh - 1);
+					 const float s0 = InInterleaved[idx0 + c0];
+					 const float s1 = InInterleaved[idx1 + c0];
+					 return s0 + (s1 - s0) * frac;
+				 };
+
+				 for (int32 of = 0; of < OutFrames; ++of)
+				 {
+					 if (OutCh == InCh)
+					 {
+						 for (int32 c = 0; c < OutCh; ++c)
+						 {
+							 const float f = SampleAt(of, c);
+							 const int32 s = FMath::Clamp((int32)FMath::RoundToInt(f * 32767.0f), -32768, 32767);
+							 Out[of * OutCh + c] = (int16)s;
+						 }
+					 }
+					 else if (OutCh == 1)
+					 {
+						 // Downmix: average all input channels
+						 float acc = 0.0f;
+						 for (int32 c = 0; c < InCh; ++c) { acc += SampleAt(of, c); }
+						 const float f = acc / (float)InCh;
+						 const int32 s = FMath::Clamp((int32)FMath::RoundToInt(f * 32767.0f), -32768, 32767);
+						 Out[of] = (int16)s;
+					 }
+					 else // OutCh > 1 and possibly InCh == 1; duplicate or truncate as needed
+					 {
+						 for (int32 c = 0; c < OutCh; ++c)
+						 {
+							 const int32 srcC = (InCh == 1) ? 0 : FMath::Min(c, InCh - 1);
+							 const float f = SampleAt(of, srcC);
+							 const int32 s = FMath::Clamp((int32)FMath::RoundToInt(f * 32767.0f), -32768, 32767);
+							 Out[of * OutCh + c] = (int16)s;
+						 }
+					 }
+				 }
+
+				 return Self->WebRtcTransportRaw->SendAudioPcm16(Out.GetData(), Out.Num(), OutSR, OutCh);
+			 });
+			 
+			 // Start capture with the configured mode (tears down and restarts if already running from BeginPlay)
+			 EO3DSCaptureMode DesiredMode = (WebRTCAudioMode == EO3DSWebRTCAudioMode::Input) ? EO3DSCaptureMode::Input : EO3DSCaptureMode::Mix;
+			 AudioComp->StartCaptureWithMode(DesiredMode);
+		 }
+	 }
  }
-  else if (TransportFamily == EO3DSTransportFamily::WebRTC)
- {
- }
- StartInternalTransport();
 
  BindToTarget();
  bIsCapturing = TargetMesh.IsValid();

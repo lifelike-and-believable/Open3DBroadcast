@@ -104,7 +104,7 @@ void UO3DSBroadcastAudioCaptureComponent::BeginPlay()
 		}
 	}
 
-	// Optional input capture
+	// Optional input capture - create and open stream, but defer starting until sink is configured
 	if (CaptureMode == EO3DSCaptureMode::Input)
 	{
 		MicCapture = new Audio::FAudioCapture();
@@ -117,10 +117,19 @@ void UO3DSBroadcastAudioCaptureComponent::BeginPlay()
 		};
 		if (MicCapture && MicCapture->OpenAudioCaptureStream(Params, OnCapture, /*NumFramesDesired*/0))
 		{
-			MicCapture->StartStream();
-			if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
+			// Only start stream if sink is already configured (e.g., toggled in editor)
+			// Otherwise StartStream() will be called explicitly when SetAudioSink is invoked
+			if (AudioSink)
 			{
-				UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Mic stream started (DeviceIndex=%d)"), Config.DeviceIndex);
+				MicCapture->StartStream();
+				if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
+				{
+					UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Mic stream started immediately (DeviceIndex=%d)"), Config.DeviceIndex);
+				}
+			}
+			else if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
+			{
+				UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Mic stream opened, waiting for sink (DeviceIndex=%d)"), Config.DeviceIndex);
 			}
 		}
 		else
@@ -172,6 +181,105 @@ void UO3DSBroadcastAudioCaptureComponent::SetAudioSink(TFunction<bool(const FStr
 	if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
 	{
 		UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: AudioSink configured"));
+	}
+	
+	// If mic stream was opened but waiting for sink, start it now
+	if (MicCapture && CaptureMode == EO3DSCaptureMode::Input)
+	{
+		MicCapture->StartStream();
+		if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
+		{
+			UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Mic stream started after sink configured"));
+		}
+	}
+}
+
+void UO3DSBroadcastAudioCaptureComponent::StartCaptureWithMode(EO3DSCaptureMode InMode)
+{
+	// Tear down existing capture resources
+	if (FAudioDevice* AudioDevice = GetWorld() ? GetWorld()->GetAudioDeviceRaw() : nullptr)
+	{
+		Audio::FMixerDevice* Mixer = static_cast<Audio::FMixerDevice*>(AudioDevice);
+		if (Mixer && SubmixTap.IsValid())
+		{
+			USoundSubmix* TargetSubmix = Config.SubmixToTap ? Config.SubmixToTap : &Mixer->GetMainSubmixObject();
+			if (TargetSubmix)
+			{
+				Mixer->UnregisterSubmixBufferListener(SubmixTap.ToSharedRef(), *TargetSubmix);
+			}
+			SubmixTap.Reset();
+		}
+	}
+	
+	if (MicCapture)
+	{
+		MicCapture->StopStream();
+		MicCapture->CloseStream();
+		delete MicCapture;
+		MicCapture = nullptr;
+	}
+	
+	// Update mode and sync to Config.Source
+	CaptureMode = InMode;
+	switch (CaptureMode)
+	{
+		case EO3DSCaptureMode::Mix: Config.Source = EO3DSAudioCaptureSource::GameSubmix; break;
+		case EO3DSCaptureMode::Input: Config.Source = EO3DSAudioCaptureSource::Microphone; break;
+		default: break;
+	}
+	
+	if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: StartCaptureWithMode mode=%s"),
+			(CaptureMode == EO3DSCaptureMode::Mix) ? TEXT("Mix") : TEXT("Input"));
+	}
+	
+	// Start new capture based on mode
+	if (CaptureMode == EO3DSCaptureMode::Mix)
+	{
+		if (FAudioDevice* AudioDevice = GetWorld() ? GetWorld()->GetAudioDeviceRaw() : nullptr)
+		{
+			Audio::FMixerDevice* Mixer = static_cast<Audio::FMixerDevice*>(AudioDevice);
+			if (Mixer)
+			{
+				if (!SubmixTap.IsValid())
+				{
+					SubmixTap = MakeShared<FSubmixTap, ESPMode::ThreadSafe>(this);
+				}
+				USoundSubmix* TargetSubmix = Config.SubmixToTap ? Config.SubmixToTap : &Mixer->GetMainSubmixObject();
+				if (TargetSubmix)
+				{
+					Mixer->RegisterSubmixBufferListener(SubmixTap.ToSharedRef(), *TargetSubmix);
+					if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
+					{
+						UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Submix tap registered on %s"), *GetNameSafe(TargetSubmix));
+					}
+				}
+			}
+		}
+	}
+	else if (CaptureMode == EO3DSCaptureMode::Input)
+	{
+		MicCapture = new Audio::FAudioCapture();
+		Audio::FAudioCaptureDeviceParams Params;
+		Params.DeviceIndex = Config.DeviceIndex;
+		Audio::FOnAudioCaptureFunction OnCapture = [this](const void* Buffer, int32 NumFrames, int32 NumChannels, int32 SampleRate, double StreamTimeSec, bool /*bOverflow*/)
+		{
+			const float* PCM = reinterpret_cast<const float*>(Buffer);
+			this->PushFrames(PCM, NumFrames, NumChannels, SampleRate, StreamTimeSec);
+		};
+		if (MicCapture && MicCapture->OpenAudioCaptureStream(Params, OnCapture, 0))
+		{
+			MicCapture->StartStream();
+			if (CVarO3DSAudioCaptureDebug->GetInt() !=0)
+			{
+				UE_LOG(LogTemp, Log, TEXT("O3DS AudioCapture: Mic stream started (DeviceIndex=%d)"), Config.DeviceIndex);
+			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("O3DS AudioCapture: Failed to open mic stream (DeviceIndex=%d)"), Config.DeviceIndex);
+		}
 	}
 }
 

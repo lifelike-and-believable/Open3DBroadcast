@@ -82,5 +82,6 @@ public class Open3DShared : ModuleRules
         }
 
         PublicDefinitions.Add("O3DS_WITH_OPUS=1");
+        PublicDefinitions.Add("O3DS_WITH_WEBRTC=1");
     }
 }

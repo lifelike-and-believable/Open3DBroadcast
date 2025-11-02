@@ -363,4 +363,7 @@ private:
  #if WITH_EDITOR
  virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
  #endif 	
+
+ // Cached pointer when WebRTC transport is active (no RTTI at call sites)
+ class FO3DSWebRtcTransport* WebRtcTransportRaw = nullptr;
 };
