@@ -6,7 +6,15 @@
 #include <cmath>
 #include <cstring>
 #include <thread>
+#include <chrono>
 #include <vector>
+#include "Async/Async.h"
+#include <deque>
+#include <chrono>
+#include <mutex>
+#if O3DS_WITH_OPUS
+#include <opus.h>
+#endif
 
 using namespace std::chrono_literals;
 
@@ -32,6 +40,11 @@ bool FLibDataChannelConnector::Start(const FO3DSWebRtcConfig& InConfig)
     Config = InConfig;
     bOpen.store(false);
     bAudioOpen.store(false);
+    bRemoteDescriptionSet = false;
+    PendingCandidates.Reset();
+    // Stop audio pump thread if running
+    bAudioPump.store(false);
+    if (AudioThread.joinable()) { AudioThread.join(); }
 
     // Init libdatachannel logger once per process is fine; calling again is benign.
     rtc::InitLogger(Config.bVerbose ? rtc::LogLevel::Info : rtc::LogLevel::Warning);
@@ -43,67 +56,144 @@ bool FLibDataChannelConnector::Start(const FO3DSWebRtcConfig& InConfig)
     }
 
     bStarted.store(true);
-    StateDelegate.Broadcast(TEXT("Starting"), false);
+    // Defer state broadcasts onto the game thread to avoid re-entrancy into engine delegate dispatch
+    {
+        TWeakPtr<IWebRTCConnector> Weak = AsShared();
+        AsyncTask(ENamedThreads::GameThread, [Weak]()
+        {
+            if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+            {
+                P->OnState().Broadcast(TEXT("Starting"), false);
+            }
+        });
+    }
+
+    // Open signaling and proceed
     OpenWebSocket();
     return true;
 }
 
 void FLibDataChannelConnector::Stop()
 {
-    if (!bStarted.load()) return;
-
+    // Stop signaling and media cleanly; idempotent
     bStarted.store(false);
-    bOpen.store(false);
-    bAudioOpen.store(false);
 
-    // Close WS first to stop inflight signaling
-    if (WS.IsValid())
-    {
-        WS->Close();
-        WS.Reset();
+    // Stop audio pump
+    bAudioPump.store(false);
+    if (AudioThread.joinable()) { AudioThread.join(); }
+
+    // Clear callbacks before resetting objects
+    if (DC) {
+        try { DC->onOpen(nullptr); DC->onClosed(nullptr); DC->onMessage(nullptr); } catch (...) {}
+    }
+    if (SendAudioTrack) {
+        try { SendAudioTrack->onOpen(nullptr); SendAudioTrack->onClosed(nullptr); SendAudioTrack->onMessage(nullptr); } catch (...) {}
+    }
+    if (RecvAudioTrack) {
+        try { RecvAudioTrack->onOpen(nullptr); RecvAudioTrack->onClosed(nullptr); RecvAudioTrack->onMessage(nullptr); } catch (...) {}
     }
 
-    // Release libdatachannel objects
+#if O3DS_WITH_OPUS
+    if (OpusEnc) { opus_encoder_destroy(OpusEnc); OpusEnc = nullptr; }
+    OpusAccumPcm.Reset();
+#endif
+
     DC.reset();
     SendAudioTrack.reset();
     RecvAudioTrack.reset();
     PC.reset();
-    RemotePeerId.Reset();
 
-    if (Config.bVerbose)
+    if (WS.IsValid()) { WS->Close(); WS.Reset(); }
+
+    // Only broadcast Stopped if not in destructor
+    if (!bInDestructor.load())
     {
-        UE_LOG(LogTemp, Log, TEXT("LibDataChannelConnector: Stopped"));
+        TWeakPtr<IWebRTCConnector> Weak = AsShared();
+        AsyncTask(ENamedThreads::GameThread, [Weak]()
+        {
+            if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+            {
+                P->OnState().Broadcast(TEXT("Stopped"), false);
+            }
+        });
     }
-    StateDelegate.Broadcast(TEXT("Stopped"), false);
 }
 
 void FLibDataChannelConnector::Tick(float /*DeltaSeconds*/)
 {
-    // libdatachannel and UE WebSockets are internally pumped. No blocking here.
+    // No-op: libdatachannel operates on its own threads
 }
 
 bool FLibDataChannelConnector::Send(const uint8* Data, int32 NumBytes)
 {
-    if (!bStarted.load() || !DC || !bOpen.load() || !Data || NumBytes <= 0) return false;
-    try
-    {
-        rtc::binary Bin;
-        Bin.resize((size_t)NumBytes);
-        FMemory::Memcpy(Bin.data(), Data, (size_t)NumBytes);
-        DC->send(std::move(Bin));
+    if (!Data || NumBytes <= 0) return false;
+    if (!DC || !bOpen.load()) return false;
+    try {
+        std::vector<std::byte> Buf((size_t)NumBytes);
+        std::memcpy(Buf.data(), Data, (size_t)NumBytes);
+        DC->send(Buf);
         return true;
-    }
-    catch (...)
-    {
+    } catch (...) {
         return false;
     }
 }
 
 bool FLibDataChannelConnector::EnableAudioSend(bool bEnable)
 {
-    // This toggles intent; for LibDC we add the sendonly track during client setup.
-    // For dynamic toggling, we could renegotiate; for now, return the desired state.
-    return bEnable;
+    Config.bEnableAudio = bEnable;
+    return true;
+}
+
+bool FLibDataChannelConnector::SendAudioPcm16(const int16* Samples, int32 NumSamples, int32 SampleRate, int32 NumChannels)
+{
+    // Only accept audio when the send track is actually open to avoid negotiation-time backlog
+    if (!bStarted.load() || !bAudioOpen.load() || !Samples || NumSamples <= 0 || SampleRate <= 0 || NumChannels <= 0)
+    {
+        return false;
+    }
+    // For now, only accept 48k input; others will be dropped (future: resample)
+    if (SampleRate != 48000)
+    {
+        if (Config.bVerbose)
+        {
+            UE_LOG(LogTemp, Verbose, TEXT("[LibDC] Drop non-48k input chunk (SR=%d)"), SampleRate);
+        }
+        return false;
+    }
+    FAudioChunk Chunk;
+    Chunk.SampleRate = SampleRate;
+    Chunk.NumChannels = NumChannels;
+    Chunk.Samples.SetNumUninitialized(NumSamples);
+    FMemory::Memcpy(Chunk.Samples.GetData(), Samples, (SIZE_T)NumSamples * sizeof(int16));
+    {
+        std::lock_guard<std::mutex> L(AudioMutex);
+        // Enforce a small bounded queue to preserve real-time behavior
+        const int32 MaxQueueMs = 200; // keep at most ~200ms buffered
+        auto queuedMs = 0;
+        for (const auto& Q : AudioQueue)
+        {
+            if (Q.SampleRate > 0 && Q.NumChannels > 0)
+            {
+                queuedMs += (int32)((int64)Q.Samples.Num() * 1000 / (Q.SampleRate * Q.NumChannels));
+            }
+        }
+        const int32 newMs = (int32)((int64)NumSamples * 1000 / (SampleRate * FMath::Max(NumChannels, 1)));
+        while (!AudioQueue.empty() && queuedMs + newMs > MaxQueueMs)
+        {
+            const auto& Old = AudioQueue.front();
+            if (Old.SampleRate > 0 && Old.NumChannels > 0)
+            {
+                queuedMs -= (int32)((int64)Old.Samples.Num() * 1000 / (Old.SampleRate * Old.NumChannels));
+            }
+            AudioQueue.pop_front();
+            if (Config.bVerbose)
+            {
+                UE_LOG(LogTemp, Verbose, TEXT("[LibDC] Dropped oldest audio chunk to enforce %dms cap (queued ~%dms)"), MaxQueueMs, queuedMs);
+            }
+        }
+        AudioQueue.emplace_back(MoveTemp(Chunk));
+    }
+    return true;
 }
 
 void FLibDataChannelConnector::OpenWebSocket()
@@ -166,10 +256,18 @@ void FLibDataChannelConnector::OpenWebSocket()
 
     WS = WSM.CreateWebSocket(Url);
 
-    WS->OnConnected().AddLambda([this, Url]()
+    {
+        TWeakPtr<IWebRTCConnector> Weak = AsShared();
+        WS->OnConnected().AddLambda([this, Url, Weak]()
     {
         UE_LOG(LogTemp, Log, TEXT("[LibDC] WebSocket connected (%s)"), *Url);
-        StateDelegate.Broadcast(TEXT("SignalingConnected"), false);
+        AsyncTask(ENamedThreads::GameThread, [Weak]()
+        {
+            if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+            {
+                P->OnState().Broadcast(TEXT("SignalingConnected"), false);
+            }
+        });
 
         rtc::Configuration Cfg; // No STUN by default; can be extended via config later
         SetupPeerConnection(Cfg);
@@ -180,17 +278,31 @@ void FLibDataChannelConnector::OpenWebSocket()
         }
     });
 
-    WS->OnConnectionError().AddLambda([this, Url](const FString& Err)
+    WS->OnConnectionError().AddLambda([this, Url, Weak](const FString& Err)
     {
         UE_LOG(LogTemp, Error, TEXT("[LibDC] WebSocket error: %s (url=%s)"), *Err, *Url);
-        StateDelegate.Broadcast(FString::Printf(TEXT("SignalingError: %s"), *Err), true);
+        const FString Msg = FString::Printf(TEXT("SignalingError: %s"), *Err);
+        AsyncTask(ENamedThreads::GameThread, [Weak, Msg]()
+        {
+            if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+            {
+                P->OnState().Broadcast(Msg, true);
+            }
+        });
     });
 
-    WS->OnClosed().AddLambda([this](int32 /*Status*/, const FString& Reason, bool /*bClean*/)
+    WS->OnClosed().AddLambda([this, Weak](int32 /*Status*/, const FString& Reason, bool /*bClean*/)
     {
         UE_LOG(LogTemp, Warning, TEXT("[LibDC] WebSocket closed: %s"), *Reason);
-        StateDelegate.Broadcast(TEXT("SignalingClosed"), false);
+        AsyncTask(ENamedThreads::GameThread, [Weak]()
+        {
+            if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+            {
+                P->OnState().Broadcast(TEXT("SignalingClosed"), false);
+            }
+        });
     });
+    }
 
     WS->OnMessage().AddLambda([this](const FString& Msg)
     {
@@ -205,9 +317,18 @@ void FLibDataChannelConnector::SetupPeerConnection(const rtc::Configuration& Cfg
 {
     PC = std::make_shared<rtc::PeerConnection>(Cfg);
 
-    PC->onStateChange([this](rtc::PeerConnection::State S)
+    TWeakPtr<IWebRTCConnector> Weak = AsShared();
+
+    PC->onStateChange([this, Weak](rtc::PeerConnection::State S)
     {
-        StateDelegate.Broadcast(FString::Printf(TEXT("PeerConnectionState:%d"), (int)S), false);
+        const FString Msg = FString::Printf(TEXT("PeerConnectionState:%d"), (int)S);
+        AsyncTask(ENamedThreads::GameThread, [Weak, Msg]()
+        {
+            if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+            {
+                P->OnState().Broadcast(Msg, false);
+            }
+        });
     });
 
     PC->onLocalDescription([this](rtc::Description Desc)
@@ -263,34 +384,58 @@ void FLibDataChannelConnector::SetupPeerConnection(const rtc::Configuration& Cfg
             }
         }
 
-        PC->onDataChannel([this](std::shared_ptr<rtc::DataChannel> InDC)
+        PC->onDataChannel([this, Weak](std::shared_ptr<rtc::DataChannel> InDC)
         {
             DC = InDC;
-            DC->onOpen([this]()
+            DC->onOpen([this, Weak]()
             {
                 bOpen.store(true);
-                StateDelegate.Broadcast(TEXT("DataChannelOpen"), false);
+                AsyncTask(ENamedThreads::GameThread, [Weak]()
+                {
+                    if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+                    {
+                        P->OnState().Broadcast(TEXT("DataChannelOpen"), false);
+                    }
+                });
             });
-            DC->onClosed([this]()
+            DC->onClosed([this, Weak]()
             {
                 bOpen.store(false);
-                StateDelegate.Broadcast(TEXT("DataChannelClosed"), false);
+                AsyncTask(ENamedThreads::GameThread, [Weak]()
+                {
+                    if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+                    {
+                        P->OnState().Broadcast(TEXT("DataChannelClosed"), false);
+                    }
+                });
             });
-            DC->onMessage([this](rtc::message_variant M)
+            DC->onMessage([this, Weak](rtc::message_variant M)
             {
                 if (std::holds_alternative<rtc::binary>(M))
                 {
                     const auto& Bin = std::get<rtc::binary>(M);
                     TArray<uint8> Bytes; Bytes.SetNumUninitialized((int32)Bin.size());
                     FMemory::Memcpy(Bytes.GetData(), Bin.data(), Bytes.Num());
-                    DataDelegate.Broadcast(Bytes);
+                    AsyncTask(ENamedThreads::GameThread, [Weak, Bytes = MoveTemp(Bytes)]() mutable
+                    {
+                        if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+                        {
+                            P->OnData().Broadcast(Bytes);
+                        }
+                    });
                 }
                 else if (std::holds_alternative<std::string>(M))
                 {
                     const auto& S = std::get<std::string>(M);
                     TArray<uint8> Bytes; Bytes.SetNumUninitialized((int32)S.size());
                     FMemory::Memcpy(Bytes.GetData(), S.data(), Bytes.Num());
-                    DataDelegate.Broadcast(Bytes);
+                    AsyncTask(ENamedThreads::GameThread, [Weak, Bytes = MoveTemp(Bytes)]() mutable
+                    {
+                        if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+                        {
+                            P->OnData().Broadcast(Bytes);
+                        }
+                    });
                 }
             });
         });
@@ -307,6 +452,8 @@ void FLibDataChannelConnector::CreateClientMediaAndDC()
 {
     if (!PC) return;
 
+    TWeakPtr<IWebRTCConnector> Weak = AsShared();
+
     // Audio track first so offer contains audio m-line
     if (Config.bEnableAudio)
     {
@@ -317,75 +464,206 @@ void FLibDataChannelConnector::CreateClientMediaAndDC()
             Media.addOpusCodec(111);
             Media.addSSRC(SSRC, "o3ds-audio");
             SendAudioTrack = PC->addTrack(Media);
-            SendAudioTrack->onOpen([this]() { 
+            SendAudioTrack->onOpen([this, Weak]() { 
                 bAudioOpen.store(true); 
-                StateDelegate.Broadcast(TEXT("AudioOpen"), false);
-                // Optionally kick a debug tone when audio is open
+                AsyncTask(ENamedThreads::GameThread, [Weak]()
+                {
+                    if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+                    {
+                        P->OnState().Broadcast(TEXT("AudioOpen"), false);
+                    }
+                });
+#if O3DS_WITH_OPUS
+                // Create Opus encoder with current config
+                OpusChannels = FMath::Clamp(Config.NumChannels, 1, 2);
+                OpusSampleRate = 48000; // Opus internal sample rate fixed at 48k API side
+                OpusFrameSamplesPerChannel = OpusSampleRate / 50; // 20ms
+                int OpusErr = OPUS_OK;
+                if (OpusEnc)
+                {
+                    opus_encoder_destroy(OpusEnc);
+                    OpusEnc = nullptr;
+                }
+                OpusEnc = opus_encoder_create(OpusSampleRate, OpusChannels, OPUS_APPLICATION_AUDIO, &OpusErr);
+                if (OpusErr != OPUS_OK || !OpusEnc)
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("[LibDC] Opus encoder create failed: %d"), OpusErr);
+                }
+                else
+                {
+                    opus_encoder_ctl(OpusEnc, OPUS_SET_BITRATE(Config.BitrateKbps * 1000));
+                    opus_encoder_ctl(OpusEnc, OPUS_SET_COMPLEXITY(8));
+                }
+                OpusAccumPcm.Reset();
+                OpusOutBuf.SetNumUninitialized(4000); // generous enough for 20ms stereo frame
+#endif
+                // Start audio pump thread for queued PCM -> RTP
+                bAudioPump.store(true);
+                AudioSeq = 0;
+                AudioThread = std::thread([this]()
+                {
+                    auto nextSend = std::chrono::steady_clock::now(); // Initialize nextSend for pacing
+                    while (bAudioPump.load())
+                    {
+                        FAudioChunk Chunk;
+                        bool bHas = false;
+                        {
+                            std::lock_guard<std::mutex> L(AudioMutex);
+                            if (!AudioQueue.empty())
+                            {
+                                Chunk = MoveTemp(AudioQueue.front());
+                                AudioQueue.pop_front();
+                                bHas = true;
+                            }
+                        }
+                        if (!bHas)
+                        {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                            continue;
+                        }
+                        // Accumulate PCM and emit 20ms Opus frames
+#if O3DS_WITH_OPUS
+                        if (!OpusEnc)
+                        {
+                            continue; // no encoder available
+                        }
+                        if (Chunk.SampleRate != 48000)
+                        {
+                            // For now, only accept 48k input. Future: resample here.
+                            UE_LOG(LogTemp, Verbose, TEXT("[LibDC] Skipping non-48k PCM chunk (SR=%d)"), Chunk.SampleRate);
+                            continue;
+                        }
+                        if (Chunk.NumChannels != OpusChannels)
+                        {
+                            // Simple downmix to mono if needed
+                            if (OpusChannels == 1 && Chunk.NumChannels > 1)
+                            {
+                                const int frames = Chunk.Samples.Num() / Chunk.NumChannels;
+                                TArray<int16> Down; Down.SetNumUninitialized(frames);
+                                for (int i = 0; i < frames; ++i)
+                                {
+                                    int32 acc = 0;
+                                    for (int c = 0; c < Chunk.NumChannels; ++c) acc += Chunk.Samples[i * Chunk.NumChannels + c];
+                                    Down[i] = (int16)(acc / Chunk.NumChannels);
+                                }
+                                OpusAccumPcm.Append(Down.GetData(), Down.Num());
+                            }
+                            else
+                            {
+                                // Channels mismatch and not supported -> skip
+                                continue;
+                            }
+                        }
+                        else
+                        {
+                            OpusAccumPcm.Append(Chunk.Samples.GetData(), Chunk.Samples.Num());
+                        }
+
+                        const int frameStride = OpusFrameSamplesPerChannel * OpusChannels;
+                        int32 available = OpusAccumPcm.Num();
+                        int32 consumeOffset = 0;
+                        while (available - consumeOffset >= frameStride && SendAudioTrack && SendAudioTrack->isOpen())
+                        {
+                            const opus_int16* framePtr = reinterpret_cast<const opus_int16*>(OpusAccumPcm.GetData() + consumeOffset);
+                            const int maxBytes = OpusOutBuf.Num();
+                            int bytes = 0;
+                            if (OpusEnc)
+                            {
+                                bytes = opus_encode(OpusEnc, framePtr, OpusFrameSamplesPerChannel, OpusOutBuf.GetData(), maxBytes);
+                            }
+                            if (bytes > 0)
+                            {
+                                if (Config.bVerbose)
+                                {
+                                    UE_LOG(LogTemp, Log, TEXT("[LibDC] Opus frame: %d bytes payload (seq=%d)"), bytes, AudioSeq);
+                                }
+                                std::vector<std::byte> rtp(12 + bytes);
+                                // RTP header: V=2, PT=111 (Opus)
+                                rtp[0] = std::byte(0x80);
+                                rtp[1] = std::byte(111);
+                                rtp[2] = std::byte((AudioSeq >> 8) & 0xFF);
+                                rtp[3] = std::byte(AudioSeq & 0xFF);
+                                const uint32 ts = (uint32)(AudioSeq * OpusFrameSamplesPerChannel);
+                                rtp[4] = std::byte((ts >> 24) & 0xFF);
+                                rtp[5] = std::byte((ts >> 16) & 0xFF);
+                                rtp[6] = std::byte((ts >> 8) & 0xFF);
+                                rtp[7] = std::byte(ts & 0xFF);
+                                const uint32 SSRC = 1234;
+                                rtp[8] = std::byte((SSRC >> 24) & 0xFF);
+                                rtp[9] = std::byte((SSRC >> 16) & 0xFF);
+                                rtp[10] = std::byte((SSRC >> 8) & 0xFF);
+                                rtp[11] = std::byte(SSRC & 0xFF);
+                                std::memcpy(reinterpret_cast<uint8*>(&rtp[12]), OpusOutBuf.GetData(), (size_t)bytes);
+                                try { SendAudioTrack->send(rtp); } catch (...) { break; }
+                                AudioSeq++;
+                                // Pace to 20ms per frame in wall-clock time
+                                nextSend += std::chrono::milliseconds(20);
+                                std::this_thread::sleep_until(nextSend);
+                            }
+                            consumeOffset += frameStride;
+                        }
+                        if (consumeOffset > 0)
+                        {
+                            // slide remaining samples to front
+                            const int32 remaining = available - consumeOffset;
+                            if (remaining > 0)
+                            {
+                                FMemory::Memmove(OpusAccumPcm.GetData(), OpusAccumPcm.GetData() + consumeOffset, remaining * sizeof(int16));
+                            }
+                            OpusAccumPcm.SetNumUninitialized(remaining);
+                        }
+#else
+                        // Fallback: drop if Opus not enabled
+#endif
+                    }
+                });
+                // Optionally synthesize a debug tone by pushing PCM into the queue
                 if (Config.bSendDebugTone) {
                     std::thread([this]() {
-                        // small delay to ensure remote is ready
-                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                        // Synthesize and send RTP tone packets
                         const float Hz = FMath::Max(1.f, Config.ToneHz);
                         const double Dur = FMath::Max(0.1, Config.ToneDurationSec);
-                        const int SR = FMath::Clamp(Config.SampleRate, 8000, 48000);
-
-                        // Generate PCM16 mono
-                        const int numSamples = static_cast<int>(Dur * SR);
-                        std::vector<uint8> pcm; pcm.resize(numSamples * 2);
-                        for (int i = 0; i < numSamples; ++i) {
+                        const int SR = 48000; // ensure 48k for Opus path
+                        const int NumSamples = static_cast<int>(Dur * SR);
+                        TArray<int16> Pcm; Pcm.SetNumUninitialized(NumSamples);
+                        for (int i = 0; i < NumSamples; ++i) {
                             const double t = static_cast<double>(i) / static_cast<double>(SR);
                             const double v = std::sin(2.0 * 3.141592653589793 * Hz * t) * 0.5; // 50% volume
-                            const int16 s = (int16)FMath::RoundToInt(v * 32767.0);
-                            pcm[2 * i + 0] = (uint8)(s & 0xFF);
-                            pcm[2 * i + 1] = (uint8)((s >> 8) & 0xFF);
+                            Pcm[i] = (int16)FMath::RoundToInt(v * 32767.0);
                         }
-
-                        // Chunk into ~20ms frames ~960 samples at 48k (scale with SR)
-                        const int samplesPerPacket = (SR / 50); // 20ms
-                        const size_t payloadBytes = (size_t)(samplesPerPacket * 2);
-                        const uint32 SSRC = 1234;
-                        int seq = 0;
-                        int packets = 0;
-                        size_t totalBytes = 0;
-                        size_t off = 0;
-                        while (off < pcm.size() && SendAudioTrack && SendAudioTrack->isOpen()) {
-                            const size_t remain = pcm.size() - off;
-                            const size_t chunk = FMath::Min<size_t>(payloadBytes, remain);
-                            std::vector<std::byte> rtp(12 + chunk);
-                            // RTP header: V=2, PT=111 (Opus), simple seq/ts progression
-                            rtp[0] = std::byte(0x80);
-                            rtp[1] = std::byte(111);
-                            rtp[2] = std::byte((seq >> 8) & 0xFF);
-                            rtp[3] = std::byte(seq & 0xFF);
-                            const uint32 ts = (uint32)(seq * samplesPerPacket);
-                            rtp[4] = std::byte((ts >> 24) & 0xFF);
-                            rtp[5] = std::byte((ts >> 16) & 0xFF);
-                            rtp[6] = std::byte((ts >> 8) & 0xFF);
-                            rtp[7] = std::byte(ts & 0xFF);
-                            rtp[8] = std::byte((SSRC >> 24) & 0xFF);
-                            rtp[9] = std::byte((SSRC >> 16) & 0xFF);
-                            rtp[10] = std::byte((SSRC >> 8) & 0xFF);
-                            rtp[11] = std::byte(SSRC & 0xFF);
-                            // copy payload
-                            std::memcpy(reinterpret_cast<uint8*>(&rtp[12]), pcm.data() + off, chunk);
-                            try { SendAudioTrack->send(rtp); } catch (...) { break; }
-                            off += chunk; seq++; packets++; totalBytes += chunk;
-                            if (Config.bVerbose)
-                            {
-                                UE_LOG(LogTemp, Log, TEXT("[LibDC] DebugTone RTP sent: seq=%d bytes=%d (accum=%d)"), seq-1, (int)chunk, (int)totalBytes);
-                            }
-                            std::this_thread::sleep_for(std::chrono::milliseconds(20));
-                        }
-                        StateDelegate.Broadcast(TEXT("DebugToneSent"), false);
-                        if (Config.bVerbose)
+                            // Preempt any backlog (e.g., mic silence) so tone starts immediately
                         {
-                            UE_LOG(LogTemp, Log, TEXT("[LibDC] DebugTone summary: packets=%d totalBytes=%d"), packets, (int)totalBytes);
+                            std::lock_guard<std::mutex> L(AudioMutex);
+                            AudioQueue.clear();
                         }
+                        SendAudioPcm16(Pcm.GetData(), Pcm.Num(), SR, 1);
+                        TWeakPtr<IWebRTCConnector> WeakInner = AsShared();
+                        AsyncTask(ENamedThreads::GameThread, [WeakInner]()
+                        {
+                            if (TSharedPtr<IWebRTCConnector> P = WeakInner.Pin())
+                            {
+                                P->OnState().Broadcast(TEXT("DebugToneQueued"), false);
+                            }
+                        });
                     }).detach();
                 }
             });
-            SendAudioTrack->onClosed([this]() { bAudioOpen.store(false); StateDelegate.Broadcast(TEXT("AudioClosed"), false); });
+            SendAudioTrack->onClosed([this, Weak]() { 
+                bAudioOpen.store(false); 
+                // Stop pump thread
+                bAudioPump.store(false);
+                if (AudioThread.joinable()) { AudioThread.join(); }
+#if O3DS_WITH_OPUS
+                if (OpusEnc) { opus_encoder_destroy(OpusEnc); OpusEnc = nullptr; }
+                OpusAccumPcm.Reset();
+#endif
+                AsyncTask(ENamedThreads::GameThread, [Weak]()
+                {
+                    if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+                    {
+                        P->OnState().Broadcast(TEXT("AudioClosed"), false);
+                    }
+                });
+            });
         }
         catch (...)
         {
@@ -395,31 +673,55 @@ void FLibDataChannelConnector::CreateClientMediaAndDC()
 
     // Create DC (offerer)
     DC = PC->createDataChannel("o3ds");
-    DC->onOpen([this]()
+    DC->onOpen([this, Weak]()
     {
         bOpen.store(true);
-        StateDelegate.Broadcast(TEXT("DataChannelOpen"), false);
+        AsyncTask(ENamedThreads::GameThread, [Weak]()
+        {
+            if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+            {
+                P->OnState().Broadcast(TEXT("DataChannelOpen"), false);
+            }
+        });
     });
-    DC->onClosed([this]()
+    DC->onClosed([this, Weak]()
     {
         bOpen.store(false);
-        StateDelegate.Broadcast(TEXT("DataChannelClosed"), false);
+        AsyncTask(ENamedThreads::GameThread, [Weak]()
+        {
+            if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+            {
+                P->OnState().Broadcast(TEXT("DataChannelClosed"), false);
+            }
+        });
     });
-    DC->onMessage([this](auto M)
+    DC->onMessage([this, Weak](auto M)
     {
         if (std::holds_alternative<rtc::binary>(M))
         {
             const auto& Bin = std::get<rtc::binary>(M);
             TArray<uint8> Bytes; Bytes.SetNumUninitialized((int32)Bin.size());
             FMemory::Memcpy(Bytes.GetData(), Bin.data(), Bytes.Num());
-            DataDelegate.Broadcast(Bytes);
+            AsyncTask(ENamedThreads::GameThread, [Weak, Bytes = MoveTemp(Bytes)]() mutable
+            {
+                if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+                {
+                    P->OnData().Broadcast(Bytes);
+                }
+            });
         }
         else if (std::holds_alternative<std::string>(M))
         {
             const auto& S = std::get<std::string>(M);
             TArray<uint8> Bytes; Bytes.SetNumUninitialized((int32)S.size());
             FMemory::Memcpy(Bytes.GetData(), S.data(), Bytes.Num());
-            DataDelegate.Broadcast(Bytes);
+            AsyncTask(ENamedThreads::GameThread, [Weak, Bytes = MoveTemp(Bytes)]() mutable
+            {
+                if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+                {
+                    P->OnData().Broadcast(Bytes);
+                }
+            });
         }
     });
 }
@@ -427,9 +729,28 @@ void FLibDataChannelConnector::CreateClientMediaAndDC()
 void FLibDataChannelConnector::AttachRecvAudioCallbacks(const std::shared_ptr<rtc::Track>& Track)
 {
     if (!Track) return;
-    Track->onOpen([this]() { StateDelegate.Broadcast(TEXT("RecvAudioOpen"), false); });
-    Track->onClosed([this]() { StateDelegate.Broadcast(TEXT("RecvAudioClosed"), false); });
-    Track->onMessage([this](auto M)
+    TWeakPtr<IWebRTCConnector> Weak = AsShared();
+    Track->onOpen([this, Weak]() 
+    { 
+        AsyncTask(ENamedThreads::GameThread, [Weak]()
+        {
+            if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+            {
+                P->OnState().Broadcast(TEXT("RecvAudioOpen"), false);
+            }
+        });
+    });
+    Track->onClosed([this, Weak]() 
+    { 
+        AsyncTask(ENamedThreads::GameThread, [Weak]()
+        {
+            if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+            {
+                P->OnState().Broadcast(TEXT("RecvAudioClosed"), false);
+            }
+        });
+    });
+    Track->onMessage([this, Weak](auto M)
     {
         if (std::holds_alternative<rtc::binary>(M))
         {
@@ -440,7 +761,13 @@ void FLibDataChannelConnector::AttachRecvAudioCallbacks(const std::shared_ptr<rt
             {
                 UE_LOG(LogTemp, Log, TEXT("[LibDC] Recv audio RTP packet: %d bytes"), Bytes.Num());
             }
-            RtpDelegate.Broadcast(Bytes);
+            AsyncTask(ENamedThreads::GameThread, [Weak, Bytes = MoveTemp(Bytes)]() mutable
+            {
+                if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
+                {
+                    P->OnRemoteAudioRtp().Broadcast(Bytes);
+                }
+            });
         }
     });
 }
@@ -480,13 +807,34 @@ void FLibDataChannelConnector::HandleIncomingJson(const FString& JsonStr)
         if (Type == TEXT("answer"))
         {
             const FString Sdp = Obj->GetStringField(TEXT("description"));
-            if (PC) PC->setRemoteDescription(rtc::Description(ToStd(Sdp), "answer"));
+            if (PC)
+            {
+                PC->setRemoteDescription(rtc::Description(ToStd(Sdp), "answer"));
+                bRemoteDescriptionSet = true;
+                for (const FQueuedCand& C : PendingCandidates)
+                {
+                    try { PC->addRemoteCandidate(rtc::Candidate(C.Cand, C.Mid)); } catch (...) {}
+                }
+                PendingCandidates.Reset();
+            }
         }
         else if (Type == TEXT("candidate"))
         {
             const FString Cand = Obj->GetStringField(TEXT("candidate"));
             const FString Mid = Obj->GetStringField(TEXT("mid"));
-            if (PC) PC->addRemoteCandidate(rtc::Candidate(ToStd(Cand), ToStd(Mid)));
+            if (PC)
+            {
+                if (Cand.IsEmpty() || Mid.IsEmpty()) return;
+                if (!bRemoteDescriptionSet)
+                {
+                    FQueuedCand QC{ ToStd(Cand), ToStd(Mid) };
+                    PendingCandidates.Add(MoveTemp(QC));
+                }
+                else
+                {
+                    try { PC->addRemoteCandidate(rtc::Candidate(ToStd(Cand), ToStd(Mid))); } catch (...) {}
+                }
+            }
         }
     }
     else // Server role
@@ -501,6 +849,12 @@ void FLibDataChannelConnector::HandleIncomingJson(const FString& JsonStr)
             }
             const FString Sdp = Obj->GetStringField(TEXT("description"));
             PC->setRemoteDescription(rtc::Description(ToStd(Sdp), "offer"));
+            bRemoteDescriptionSet = true;
+            for (const FQueuedCand& C : PendingCandidates)
+            {
+                try { PC->addRemoteCandidate(rtc::Candidate(C.Cand, C.Mid)); } catch (...) {}
+            }
+            PendingCandidates.Reset();
             PC->createAnswer();
         }
         else if (Type == TEXT("candidate"))
@@ -508,13 +862,28 @@ void FLibDataChannelConnector::HandleIncomingJson(const FString& JsonStr)
             if (!PC) return;
             const FString Cand = Obj->GetStringField(TEXT("candidate"));
             const FString Mid = Obj->GetStringField(TEXT("mid"));
-            PC->addRemoteCandidate(rtc::Candidate(ToStd(Cand), ToStd(Mid)));
+            if (Cand.IsEmpty() || Mid.IsEmpty()) return;
+            if (!bRemoteDescriptionSet)
+            {
+                FQueuedCand QC{ ToStd(Cand), ToStd(Mid) };
+                PendingCandidates.Add(MoveTemp(QC));
+            }
+            else
+            {
+                try { PC->addRemoteCandidate(rtc::Candidate(ToStd(Cand), ToStd(Mid))); } catch (...) {}
+            }
         }
         else if (Type == TEXT("answer"))
         {
             if (!PC) return;
             const FString Sdp = Obj->GetStringField(TEXT("description"));
             PC->setRemoteDescription(rtc::Description(ToStd(Sdp), "answer"));
+            bRemoteDescriptionSet = true;
+            for (const FQueuedCand& C : PendingCandidates)
+            {
+                try { PC->addRemoteCandidate(rtc::Candidate(C.Cand, C.Mid)); } catch (...) {}
+            }
+            PendingCandidates.Reset();
         }
     }
 }

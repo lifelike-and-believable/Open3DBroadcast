@@ -127,13 +127,17 @@ void UO3DSWebRTCConnectorComponent::OnData(const TArray<uint8>& Bytes)
 	const bool bLogCount = (CVarO3DSWebRTCExampleLogDataCount.GetValueOnAnyThread() != 0);
 	if (bLogContent)
 	{
-		// Truncate to keep logs readable
-		const int32 MaxChars = 128;
-		FString AsText; AsText.Reserve(FMath::Min(Bytes.Num(), MaxChars));
-		const int32 N = FMath::Min(Bytes.Num(), MaxChars);
-		for (int32 i = 0; i < N; ++i) { AsText.AppendChar((TCHAR)Bytes[i]); }
-		if (Bytes.Num() > MaxChars) { AsText += TEXT("..."); }
-		UE_LOG(LogTemp, Log, TEXT("[ExampleConnector] Data: %s (%d bytes)"), *AsText, Bytes.Num());
+		// Show the first 64 byte values (hex) for FlatBuffer-style payloads
+		const int32 MaxShow = 64;
+		const int32 N = FMath::Min(Bytes.Num(), MaxShow);
+		TArray<FString> Hex; Hex.Reserve(N);
+		for (int32 i = 0; i < N; ++i)
+		{
+			Hex.Add(FString::Printf(TEXT("%02X"), Bytes[i]));
+		}
+		const FString Head = FString::Join(Hex, TEXT(" "));
+		const bool bTrunc = (Bytes.Num() > MaxShow);
+		UE_LOG(LogTemp, Log, TEXT("[ExampleConnector] Data: [%s]%s (%d bytes)"), *Head, bTrunc ? TEXT(" ...") : TEXT(""), Bytes.Num());
 	}
 	else if (bLogCount)
 	{

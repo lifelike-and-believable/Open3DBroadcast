@@ -27,6 +27,12 @@ public:
     // Optional: apply audio and verbosity settings before Start()
     void ApplyPreStartConfig(const FO3DSWebRtcConfig& InConfig);
 
+    // Audio forwarding: push interleaved PCM16 to connector's audio track (if available)
+    bool SendAudioPcm16(const int16* Samples, int32 NumSamples, int32 SampleRate, int32 NumChannels)
+    {
+        return Connector.IsValid() ? Connector->SendAudioPcm16(Samples, NumSamples, SampleRate, NumChannels) : false;
+    }
+
 private:
     static bool ParseBoolParam(const FString& Url, const TCHAR* Key, bool& OutVal);
     static bool ParseIntParam(const FString& Url, const TCHAR* Key, int32& OutVal);

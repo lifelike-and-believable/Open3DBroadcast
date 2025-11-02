@@ -67,6 +67,13 @@ public:
     // Audio (negotiation is done internally; this flag switches send path on/off)
     virtual bool EnableAudioSend(bool bEnable) = 0;
 
+    // Optional: push raw PCM16 audio to be packetized and sent over the negotiated audio track.
+    // - Samples: interleaved PCM16
+    // - NumSamples: total sample count across all channels
+    // - SampleRate/NumChannels: format of provided Samples; connector may resample/downmix if needed
+    // Returns false if audio track not available or connector not started.
+    virtual bool SendAudioPcm16(const int16* Samples, int32 NumSamples, int32 SampleRate, int32 NumChannels) = 0;
+
     // Delegate accessors
     virtual FO3DSOnWebRtcState& OnState() = 0;
     virtual FO3DSOnWebRtcData& OnData() = 0;

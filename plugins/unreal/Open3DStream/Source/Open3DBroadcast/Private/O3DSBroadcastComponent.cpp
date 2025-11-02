@@ -25,6 +25,7 @@
 #include "Transports/O3DSUdpTransport.h"
 #include "Transports/O3DSNngTransport.h"
 #include "Transports/O3DSWebRtcTransport.h"
+#include "O3DSBroadcastAudioCaptureComponent.h"
 
 #include "O3DSBroadcastAudioCaptureComponent.h"
 #include "AudioCaptureCore.h"
@@ -308,6 +309,8 @@ void UO3DSBroadcastComponent::CreateInternalTransport()
  case EO3DSTransportFamily::WebRTC:
  {
 	 InternalTransport = MakeUnique<FO3DSWebRtcTransport>();
+	 // Cache raw ptr for audio forwarding without RTTI
+	 WebRtcTransportRaw = static_cast<FO3DSWebRtcTransport*>(InternalTransport.Get());
  break;
  }
  default:
@@ -438,6 +441,8 @@ void UO3DSBroadcastComponent::TeardownInternalTransport()
  InternalTransport->Stop();
  InternalTransport.Reset();
  }
+ // Clear cached raw pointer when transport goes away
+ WebRtcTransportRaw = nullptr;
 
  // Drain queue
  FQItem Item; while (SendQueue.Dequeue(Item)) {}
@@ -499,6 +504,119 @@ void UO3DSBroadcastComponent::StartCapture()
 
  // Pre-start config is applied inside StartInternalTransport
  StartInternalTransport();
+
+ // If WebRTC audio is enabled, ensure an audio capture component is present and wire PCM sink -> WebRTC transport
+ if (TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio)
+ {
+	 AActor* Owner = GetOwner();
+	 if (Owner)
+	 {
+		 UO3DSBroadcastAudioCaptureComponent* AudioComp = Owner->FindComponentByClass<UO3DSBroadcastAudioCaptureComponent>();
+		 if (!AudioComp)
+		 {
+			 AudioComp = NewObject<UO3DSBroadcastAudioCaptureComponent>(Owner, UO3DSBroadcastAudioCaptureComponent::StaticClass(), NAME_None, RF_Transactional);
+			 if (AudioComp)
+			 {
+				 AudioComp->RegisterComponent();
+			 }
+		 }
+
+		 if (AudioComp)
+		 {
+			 // Configure capture mode and targets from this component's settings
+			 AudioComp->CaptureMode = (WebRTCAudioMode == EO3DSWebRTCAudioMode::Input) ? EO3DSCaptureMode::Input : EO3DSCaptureMode::Mix;
+			 AudioComp->Config.SampleRate = WebRTCAudioSampleRate;
+			 AudioComp->Config.NumChannels = WebRTCAudioNumChannels;
+			 AudioComp->Config.BitrateKbps = WebRTCAudioBitrateKbps;
+			 if (AudioComp->CaptureMode == EO3DSCaptureMode::Mix)
+			 {
+				 AudioComp->Config.SubmixToTap = WebRTCSubmixToTap;
+			 }
+			 else
+			 {
+				 AudioComp->InputDeviceName = WebRTCInputDeviceName;
+			 }
+
+			 // Provide a friendly label and the PCM sink that forwards to WebRTC transport
+			 const FString Label = TEXT("o3ds-webrtc");
+			 AudioComp->SetStreamLabel(Label);
+
+			 // Weak owner pointer for safety; transport raw cleared on teardown
+			 TWeakObjectPtr<UO3DSBroadcastComponent> WeakThis(this);
+			 const int32 TargetSR = WebRTCAudioSampleRate;
+			 const int32 TargetCh = WebRTCAudioNumChannels;
+			 AudioComp->SetAudioSink([WeakThis, TargetSR, TargetCh](const FString& /*Label*/, const float* InInterleaved, int32 InFrames, int32 InCh, int32 InSR, double /*Ts*/)
+			 {
+				 UO3DSBroadcastComponent* Self = WeakThis.Get();
+				 if (!Self || !Self->WebRtcTransportRaw || !InInterleaved || InFrames <= 0 || InCh <= 0 || InSR <= 0)
+				 {
+					 return false;
+				 }
+
+				 // Resample and channel-convert into interleaved int16
+				 const int32 OutSR = TargetSR;
+				 const int32 OutCh = TargetCh;
+				 const double Ratio = (double)OutSR / (double)InSR;
+				 const int32 OutFrames = (int32)FMath::Max(1.0, FMath::RoundToDouble(InFrames * Ratio));
+				 TArray<int16> Out;
+				 Out.SetNumUninitialized(OutFrames * OutCh);
+
+				 auto SampleAt = [&](int32 frame, int32 ch)->float
+				 {
+					 // Linear interpolation in time on a per-channel basis
+					 const double srcPos = (double)frame / Ratio; // map output frame -> source position
+					 const int32 i0 = FMath::Clamp((int32)srcPos, 0, InFrames - 1);
+					 const int32 i1 = FMath::Clamp(i0 + 1, 0, InFrames - 1);
+					 const float frac = (float)(srcPos - (double)i0);
+					 const int32 idx0 = i0 * InCh;
+					 const int32 idx1 = i1 * InCh;
+					 const int32 c0 = FMath::Clamp(ch, 0, InCh - 1);
+					 const float s0 = InInterleaved[idx0 + c0];
+					 const float s1 = InInterleaved[idx1 + c0];
+					 return s0 + (s1 - s0) * frac;
+				 };
+
+				 for (int32 of = 0; of < OutFrames; ++of)
+				 {
+					 if (OutCh == InCh)
+					 {
+						 for (int32 c = 0; c < OutCh; ++c)
+						 {
+							 const float f = SampleAt(of, c);
+							 const int32 s = FMath::Clamp((int32)FMath::RoundToInt(f * 32767.0f), -32768, 32767);
+							 Out[of * OutCh + c] = (int16)s;
+						 }
+					 }
+					 else if (OutCh == 1)
+					 {
+						 // Downmix: average all input channels
+						 float acc = 0.0f;
+						 for (int32 c = 0; c < InCh; ++c) { acc += SampleAt(of, c); }
+						 const float f = acc / (float)InCh;
+						 const int32 s = FMath::Clamp((int32)FMath::RoundToInt(f * 32767.0f), -32768, 32767);
+						 Out[of] = (int16)s;
+					 }
+					 else // OutCh > 1 and possibly InCh == 1; duplicate or truncate as needed
+					 {
+						 for (int32 c = 0; c < OutCh; ++c)
+						 {
+							 const int32 srcC = (InCh == 1) ? 0 : FMath::Min(c, InCh - 1);
+							 const float f = SampleAt(of, srcC);
+							 const int32 s = FMath::Clamp((int32)FMath::RoundToInt(f * 32767.0f), -32768, 32767);
+							 Out[of * OutCh + c] = (int16)s;
+						 }
+					 }
+				 }
+
+				 return Self->WebRtcTransportRaw->SendAudioPcm16(Out.GetData(), Out.Num(), OutSR, OutCh);
+			 });
+			 
+			 // Start capture with the configured mode (tears down and restarts if already running from BeginPlay)
+			 EO3DSCaptureMode DesiredMode = (WebRTCAudioMode == EO3DSWebRTCAudioMode::Input) ? EO3DSCaptureMode::Input : EO3DSCaptureMode::Mix;
+			 AudioComp->StartCaptureWithMode(DesiredMode);
+		 }
+	 }
+ }
 
  BindToTarget();
  bIsCapturing = TargetMesh.IsValid();

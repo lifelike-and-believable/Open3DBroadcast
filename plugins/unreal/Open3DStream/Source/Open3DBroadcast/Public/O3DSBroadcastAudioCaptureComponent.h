@@ -90,6 +90,9 @@ public:
 	// New API - Pure PCM source pattern (no WebRTC negotiation)
 	void SetStreamLabel(const FString& InLabel);
 	void SetAudioSink(TFunction<bool(const FString&, const float*, int32, int32, int32, double)> InSink);
+	
+	// Reconfigure and start capture after mode/config changes (can be called after BeginPlay)
+	void StartCaptureWithMode(EO3DSCaptureMode InMode);
 
 	// Options provider for the device dropdown
 	UFUNCTION()
