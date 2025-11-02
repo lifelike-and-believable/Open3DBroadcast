@@ -134,3 +134,11 @@ The legacy `Transport` property (enum: `Disabled`, `TCP`, `TCPServer`, `UDP`, `N
 - Website: https://open3dstream.com/
 - Repository: https://github.com/lifelike-and-believable/Open3DStream
 - Issues: [GitHub Issues](https://github.com/lifelike-and-believable/Open3DStream/issues)
+
+## Design & refactor plans
+
+- WebRTC connector refactor (Issue #134): see `docs/WEBRTC_CONNECTOR_REFACTOR_PLAN_ISSUE134.md` for the architecture, milestones, and test plan.
+
+## Troubleshooting
+
+- Build/Test Sandbox Paths: Editor builds/tests run in `ProjectSandbox`, where `ProjectSandbox/Plugins/Open3DStream` is a symlink to this plugin folder. Compiler/linker errors may reference `ProjectSandbox/Plugins/Open3DStream/...`; map them back to `plugins/unreal/Open3DStream/...` in the repo. See `docs/TROUBLESHOOTING.md` for more tips.

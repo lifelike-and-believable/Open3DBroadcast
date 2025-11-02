@@ -24,9 +24,11 @@
 #include "Transports/O3DSTcpServerTransport.h"
 #include "Transports/O3DSUdpTransport.h"
 #include "Transports/O3DSNngTransport.h"
+#include "Transports/O3DSWebRtcTransport.h"
 
 #include "O3DSBroadcastAudioCaptureComponent.h"
 #include "AudioCaptureCore.h"
+#include "IWebRTCConnector.h" // for FO3DSWebRtcConfig
 
 // Forward declare property changed event type used in header override
 #if WITH_EDITOR
@@ -57,8 +59,25 @@ static TAutoConsoleVariable<int32> CVarO3DSBroadcastOnScreen(
 // New: Debug send path (serializer -> queue -> transport)
 static TAutoConsoleVariable<int32> CVarO3DSBroadcastDebugSend(
  TEXT("o3ds.Broadcast.DebugSend"),
-1,
+0,
  TEXT("Debug the send pipeline: queueing and draining (0/1)."),
+ ECVF_Default);
+
+// Optional debug tone controls for WebRTC connectivity tests
+static TAutoConsoleVariable<int32> CVarO3DSBroadcastWebRTCDebugTone(
+ TEXT("o3ds.Broadcast.WebRTC.DebugTone"),
+ 0,
+ TEXT("When 1, request the connector to send a short debug tone on the audio track."),
+ ECVF_Default);
+static TAutoConsoleVariable<float> CVarO3DSBroadcastWebRTCToneHz(
+ TEXT("o3ds.Broadcast.WebRTC.ToneHz"),
+ 440.0f,
+ TEXT("Debug tone frequency in Hz (when DebugTone=1)."),
+ ECVF_Default);
+static TAutoConsoleVariable<float> CVarO3DSBroadcastWebRTCToneDur(
+ TEXT("o3ds.Broadcast.WebRTC.ToneDur"),
+ 1.0f,
+ TEXT("Debug tone duration in seconds (when DebugTone=1)."),
  ECVF_Default);
 
 // Helpers to inject URL params matching adapter behavior
@@ -90,6 +109,64 @@ static FString O3DS_EnsureWebRtcRoleInUrl(const FString& InUrl, EO3DSTransportKi
 }
 
 #include "O3DSHelpers.h" // Shared helpers (sanitize/pattern/url)
+
+// Minimal URL-encode for query values we generate (spaces and parentheses are common in device names)
+static FString O3DS_MinimalUrlEncode(const FString& In)
+{
+ FString Out; Out.Reserve(In.Len());
+ for (TCHAR C : In)
+ {
+ switch (C)
+ {
+ case ' ': Out += TEXT("%20"); break;
+ case '(' : Out += TEXT("%28"); break;
+ case ')' : Out += TEXT("%29"); break;
+ case '"': Out += TEXT("%22"); break;
+ case '#': Out += TEXT("%23"); break;
+ case '&': Out += TEXT("%26"); break;
+ case '+': Out += TEXT("%2B"); break;
+ default: Out.AppendChar(C); break;
+ }
+ }
+ return Out;
+}
+
+// Ensure a local path id (e.g., /client) is present for WebRTC Client mode to match the
+// WebRTCConnectorComponent default pattern expected by the sample signaling server.
+static FString O3DS_EnsureWebRtcLocalPathId(const FString& InUrl, EO3DSWebRtcMode WebRtcMode, const FString& DefaultLocalId)
+{
+ if (WebRtcMode != EO3DSWebRtcMode::Client)
+ {
+ return InUrl;
+ }
+
+ // Split base and query to avoid appending into the query segment
+ FString Base; TMap<FString,FString> Q; O3DSHelpers::UrlSplitQuery(InUrl, Base, Q);
+
+ // Detect if Base already has a path after scheme://host:port
+ int32 SchemeIdx = Base.Find(TEXT("://"), ESearchCase::IgnoreCase, ESearchDir::FromStart);
+ if (SchemeIdx == INDEX_NONE)
+ {
+ return InUrl; // unknown scheme; leave untouched
+ }
+ const int32 AfterScheme = SchemeIdx + 3;
+ // Find first '/' after host:port
+ const int32 FirstSlash = Base.Find(TEXT("/"), ESearchCase::IgnoreCase, ESearchDir::FromStart, AfterScheme);
+ FString NewBase = Base;
+ if (FirstSlash == INDEX_NONE)
+ {
+ NewBase = Base + TEXT("/") + DefaultLocalId;
+ }
+
+ // Recompose with original query (if any)
+ if (Q.Num() == 0)
+ {
+ return NewBase;
+ }
+ // Keep original query ordering by reusing the substring from original InUrl
+ const int32 QMark = InUrl.Find(TEXT("?"));
+ return (QMark != INDEX_NONE) ? (NewBase + InUrl.Mid(QMark)) : NewBase;
+}
 
 // Missing earlier. Inject mode parameters to URL based on selected family.
 static FString O3DS_InjectModeIntoUrl(const FString& InUrl, EO3DSTransportFamily Family, EO3DSNngMode NngMode, EO3DSWebRtcMode WebRtcMode)
@@ -230,7 +307,7 @@ void UO3DSBroadcastComponent::CreateInternalTransport()
  break;
  case EO3DSTransportFamily::WebRTC:
  {
-    
+	 InternalTransport = MakeUnique<FO3DSWebRtcTransport>();
  break;
  }
  default:
@@ -262,12 +339,59 @@ void UO3DSBroadcastComponent::StartInternalTransport()
  // Inject family/mode specific URL params
  EffectiveUrl = O3DS_InjectModeIntoUrl(EffectiveUrl, TransportFamily, NngMode, WebRtcMode);
 
+ // For WebRTC Client mode, ensure a local path id exists (e.g., "/client")
+ if (TransportFamily == EO3DSTransportFamily::WebRTC)
+ {
+ EffectiveUrl = O3DS_EnsureWebRtcLocalPathId(EffectiveUrl, WebRtcMode, TEXT("client"));
+ }
+
  const FString ProtocolName = O3DS_GetProtocolNameLegacy(TransportFamily, TcpMode, WebRtcMode);
 
- // If WebRTC and audio enabled, push config into transport (stub for now)
- if (TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio)
+ // If WebRTC, prepare connector pre-start config (verbosity, optional audio) before starting transport
+ if (TransportFamily == EO3DSTransportFamily::WebRTC)
  {
+	 // Encode pre-start options into URL query to avoid RTTI downcasts
+	 TArray<FString> ParamsToAdd;
+	 if (CVarO3DSBroadcastDebugSend.GetValueOnAnyThread() != 0)
+	 {
+		 ParamsToAdd.Add(TEXT("verbose=1"));
+	 }
+	 if (bEnableWebRTCAudio)
+	 {
+		 ParamsToAdd.Add(TEXT("audio=1"));
+		 ParamsToAdd.Add(FString::Printf(TEXT("samplerate=%d"), WebRTCAudioSampleRate));
+		 ParamsToAdd.Add(FString::Printf(TEXT("channels=%d"), WebRTCAudioNumChannels));
+		 ParamsToAdd.Add(FString::Printf(TEXT("bitrate=%d"), WebRTCAudioBitrateKbps));
+		 if (WebRTCAudioMode == EO3DSWebRTCAudioMode::Input)
+		 {
+			 const FString Dev = WebRTCInputDeviceName.ToString();
+			 if (!Dev.IsEmpty())
+			 {
+				 ParamsToAdd.Add(FString::Printf(TEXT("device=%s"), *O3DS_MinimalUrlEncode(Dev)));
+			 }
+		 }
+		 else if (WebRTCSubmixToTap)
+		 {
+			 ParamsToAdd.Add(FString::Printf(TEXT("submix=%s"), *O3DS_MinimalUrlEncode(WebRTCSubmixToTap->GetName())));
+		 }
 
+		 // If requested, enable debug tone generation (parsed by WebRTC transport/connector)
+		 if (CVarO3DSBroadcastWebRTCDebugTone.GetValueOnAnyThread() != 0)
+		 {
+			 const float Hz = CVarO3DSBroadcastWebRTCToneHz.GetValueOnAnyThread();
+			 const float Dur = CVarO3DSBroadcastWebRTCToneDur.GetValueOnAnyThread();
+			 ParamsToAdd.Add(TEXT("tone=1"));
+			 ParamsToAdd.Add(FString::Printf(TEXT("tonehz=%g"), Hz));
+			 ParamsToAdd.Add(FString::Printf(TEXT("tonedur=%g"), Dur));
+		 }
+	 }
+	 if (ParamsToAdd.Num() > 0)
+	 {
+		 const FString Joined = FString::Join(ParamsToAdd, TEXT("&"));
+		 EffectiveUrl += EffectiveUrl.Contains(TEXT("?"))
+			 ? FString::Printf(TEXT("&%s"), *Joined)
+			 : FString::Printf(TEXT("?%s"), *Joined);
+	 }
  }
 
  // Ensure WebRTC URL carries room parameter when enabled on component
@@ -373,15 +497,7 @@ void UO3DSBroadcastComponent::StartCapture()
  UE_LOG(LogO3DSBroadcast, Log, TEXT("[WEBRTC SETUP 1/7] Creating internal transport"));
  CreateInternalTransport();
 
- // For WebRTC with audio: configure audio BEFORE starting transport
- // This ensures EnableAudioSend() is called before the PeerConnection is created
- if (TransportFamily == EO3DSTransportFamily::WebRTC && bEnableWebRTCAudio)
- {
-
- }
-  else if (TransportFamily == EO3DSTransportFamily::WebRTC)
- {
- }
+ // Pre-start config is applied inside StartInternalTransport
  StartInternalTransport();
 
  BindToTarget();
