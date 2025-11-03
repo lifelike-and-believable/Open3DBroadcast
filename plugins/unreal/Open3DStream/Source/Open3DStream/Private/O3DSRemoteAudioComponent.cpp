@@ -42,8 +42,9 @@ void UO3DSRemoteAudioComponent::BeginPlay()
 				// Ensure 2D playback so it's audible regardless of listener position
 				AudioComp->bAllowSpatialization = false;
 				AudioComp->bIsUISound = true;
-				// Apply initial gain
+				// Apply initial gain only to components we create/own
 				AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, Gain));
+				bOwnsAudioComponent = true;
 			}
 		}
 		else
@@ -51,7 +52,8 @@ void UO3DSRemoteAudioComponent::BeginPlay()
 			// If an existing component was found, make sure settings are friendly for remote 2D playback
 			AudioComp->bAllowSpatialization = false;
 			AudioComp->bIsUISound = true;
-			AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, Gain));
+			// Respect user VolumeMultiplier when using an existing AudioComponent
+			bOwnsAudioComponent = false;
 		}
 	}
 
@@ -134,8 +136,11 @@ void UO3DSRemoteAudioComponent::EnsureSoundWave(int32 NumChannels, int32 SampleR
 			{
 				AudioComp->Play();
 			}
-			// Ensure current gain is applied whenever we swap sound waves
-			AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, Gain));
+			// Only apply Gain if we created/own the AudioComponent; otherwise respect user's VolumeMultiplier
+			if (bOwnsAudioComponent)
+			{
+				AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, Gain));
+			}
 			if (CVarO3DSRemoteAudioDebug->GetInt() !=0)
 			{
 				UE_LOG(LogO3DSReceiverAudio, Log, TEXT("SoundWave prepared ch=%d sr=%d; AudioComp playing=%d"),
@@ -214,10 +219,9 @@ void UO3DSRemoteAudioComponent::OnAudioPcm16(const O3DS::FAudioFrameMeta& Meta, 
 			UE_LOG(LogO3DSReceiverAudio, Log, TEXT("First PCM16 frame received (%d samples) stream='%s' subject='%s'"), NumSamples, *StreamLabel, *SubjectName);
 		}
 	}
-	// Keep audio component volume in sync with Gain slider
+	// Keep audio component playing; do not override user's volume when they provided their own component
 	if (AudioComp)
 	{
-		AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, Gain));
 		if (!AudioComp->IsPlaying())
 		{
 			AudioComp->Play();

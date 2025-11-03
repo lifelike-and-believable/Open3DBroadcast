@@ -61,6 +61,8 @@ private:
 	USoundWaveProcedural* SoundWave = nullptr;
 	int32 CurrentChannels =0;
 	int32 CurrentSampleRate =0;
+	// True if we created the AudioComponent; in that case we own its VolumeMultiplier (apply Gain)
+	bool bOwnsAudioComponent = false;
 
 	FDelegateHandle BusDelegateHandle;
 };
