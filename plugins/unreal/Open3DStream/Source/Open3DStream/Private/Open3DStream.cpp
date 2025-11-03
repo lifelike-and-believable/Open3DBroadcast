@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Open3DStream.h"
+#include "O3DSStreamLogs.h"
 #include "O3DSLoopback.h"
 #include "Modules/ModuleManager.h"
 #include "Features/IModularFeatures.h"
@@ -10,10 +11,15 @@
 
 #define LOCTEXT_NAMESPACE "FOpen3DStreamModule"
 
+// Define receiver-specific log categories
+DEFINE_LOG_CATEGORY(LogO3DSReceiver);
+DEFINE_LOG_CATEGORY(LogO3DSReceiverWebRTC);
+DEFINE_LOG_CATEGORY(LogO3DSReceiverAudio);
+
 void FOpen3DStreamModule::StartupModule()
 {
 	// This code will execute after your module is loaded into memory; the exact timing is specified in the .uplugin file per-module
-	UE_LOG(LogTemp, Display, TEXT("Open3DStream module started"));
+	UE_LOG(LogO3DSReceiver, Display, TEXT("Open3DStream module started"));
 
 	// Register loopback consumer factory so Broadcast can forward serialized frames without a hard dependency
 	FSerializedFrameConsumerRegistry::RegisterFactory([]() -> TSharedPtr<ISerializedFrameConsumer>

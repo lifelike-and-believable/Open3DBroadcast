@@ -12,6 +12,7 @@
 #include "UnrealModel.h"
 #include "o3ds/model.h"
 #include "WebRTC/Open3DSWebRtcReceiver.h"
+#include "O3DSStreamLogs.h"
 
 //#include "get_time.h"
 using namespace O3DS::Data;
@@ -81,7 +82,7 @@ FOpen3DStreamSource::FOpen3DStreamSource(const FOpen3DStreamSettings& Settings)
  if (!bLoggedBind)
  {
  bLoggedBind = true;
- UE_LOG(LogTemp, Log, TEXT("O3DS RX: LiveLink OnData bound in Open3DStreamSource"));
+ UE_LOG(LogO3DSReceiver, Log, TEXT("LiveLink OnData bound in Open3DStreamSource"));
  }
 }
 
@@ -138,7 +139,7 @@ void FOpen3DStreamSource::ReceiveClient(ILiveLinkClient* InClient, FGuid InSourc
 	 const FString Normalized = O3DSHelpers::NormalizeTcpUrlHostPort(U);
 	 if (!Normalized.Equals(U))
 	 {
-		 UE_LOG(LogTemp, Log, TEXT("O3DS RX: Normalized URL '%s' -> '%s'"), *U, *Normalized);
+		 UE_LOG(LogO3DSReceiver, Log, TEXT("Normalized URL '%s' -> '%s'"), *U, *Normalized);
 		 Url = FText::FromString(Normalized);
 	 }
  }
@@ -219,7 +220,7 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
  for (int32 i =0; i < DumpN; ++i) { Hex += FString::Printf(TEXT("%02X "), data[i]); }
  static const uint8 Magic[14] = {0x00,0xFF,0x03,0xFE,'O','3','D','S','-','S','T','A','R','T'};
  const bool bTcpMagic = (data.Num() >=14) && (FMemory::Memcmp(data.GetData(), Magic,14) ==0);
- UE_LOG(LogTemp, Verbose, TEXT("O3DS Receiver: packet bytes=%d tcp_magic=%s first_%d=%s"), data.Num(), bTcpMagic?TEXT("true"):TEXT("false"), DumpN, *Hex);
+ UE_LOG(LogO3DSReceiver, Verbose, TEXT("packet bytes=%d tcp_magic=%s first_%d=%s"), data.Num(), bTcpMagic?TEXT("true"):TEXT("false"), DumpN, *Hex);
  }
 
  // Parse O3DS buffer (non-TCP transports provide raw payload without TCP magic)
@@ -228,7 +229,7 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
  OnStatus(LOCTEXT("DataError", "Data Error"), true);
  if (CVarO3DSReceiverDebugParse->GetInt() !=0)
  {
- UE_LOG(LogTemp, Warning, TEXT("O3DS Receiver: Parse failed (bytes=%d)"), data.Num());
+ UE_LOG(LogO3DSReceiver, Warning, TEXT("Parse failed (bytes=%d)"), data.Num());
  }
  return;
  }
@@ -237,7 +238,7 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
  {
  int32 Count =0;
  for (auto* S : mSubjects) { (void)S; ++Count; }
- UE_LOG(LogTemp, Verbose, TEXT("O3DS Receiver: Parse OK subjects=%d time=%.6f"), Count, mSubjects.mTime);
+ UE_LOG(LogO3DSReceiver, Verbose, TEXT("Parse OK subjects=%d time=%.6f"), Count, mSubjects.mTime);
  }
 
  TArray<FName> BoneNames;
@@ -360,11 +361,11 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
  if (InitializedSubjects.Find(SubjectName) == INDEX_NONE)
  {
  InitializedSubjects.Add(SubjectName);
- UE_LOG(LogTemp, Log, TEXT("O3DS Receiver: Created subject '%s'"), *SubjectName.Name.ToString());
+ UE_LOG(LogO3DSReceiver, Log, TEXT("Created subject '%s'"), *SubjectName.Name.ToString());
  }
  else
  {
- UE_LOG(LogTemp, Log, TEXT("O3DS Receiver: Static data updated for subject '%s' (bones/curves changed)"), *SubjectName.Name.ToString());
+ UE_LOG(LogO3DSReceiver, Log, TEXT("Static data updated for subject '%s' (bones/curves changed)"), *SubjectName.Name.ToString());
  }
 
  SubjectSkeletonHash.FindOrAdd(SubjectName.Name) = NewSkelHash;

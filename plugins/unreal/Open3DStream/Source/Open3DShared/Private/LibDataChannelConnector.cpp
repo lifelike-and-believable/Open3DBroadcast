@@ -42,6 +42,11 @@ bool FLibDataChannelConnector::Start(const FO3DSWebRtcConfig& InConfig)
     bAudioOpen.store(false);
     bRemoteDescriptionSet = false;
     PendingCandidates.Reset();
+    bSignalingConnected.store(false);
+    // Stop any existing offer retry pump
+    bOfferRetryPump.store(false);
+    if (OfferRetryThread.joinable()) { OfferRetryThread.join(); }
+    OfferRetryAttempt = 0;
     // Stop audio pump thread if running
     bAudioPump.store(false);
     if (AudioThread.joinable()) { AudioThread.join(); }
@@ -68,7 +73,8 @@ bool FLibDataChannelConnector::Start(const FO3DSWebRtcConfig& InConfig)
         });
     }
 
-    // Open signaling and proceed
+    // Start signaling reconnect pump and initiate first connect
+    StartSignalingReconnectPump();
     OpenWebSocket();
     return true;
 }
@@ -77,6 +83,14 @@ void FLibDataChannelConnector::Stop()
 {
     // Stop signaling and media cleanly; idempotent
     bStarted.store(false);
+
+    // Stop client offer retry pump
+    bOfferRetryPump.store(false);
+    if (OfferRetryThread.joinable()) { OfferRetryThread.join(); }
+
+    // Stop signaling reconnect pump
+    bSignalingReconnectPump.store(false);
+    if (SignalingReconnectThread.joinable()) { SignalingReconnectThread.join(); }
 
     // Stop audio pump
     bAudioPump.store(false);
@@ -218,12 +232,13 @@ void FLibDataChannelConnector::OpenWebSocket()
         FString Query;
         if (Url.Split(TEXT("?"), &Base, &Query))
         {
-            // Remove any room=... from the query
+            // Remove any room=... and role=... from the query (server ID should be clean room name)
             TArray<FString> Parts; Query.ParseIntoArray(Parts, TEXT("&"), true);
             TArray<FString> Kept;
             for (const FString& P : Parts)
             {
-                if (!P.StartsWith(TEXT("room="), ESearchCase::IgnoreCase))
+                if (!P.StartsWith(TEXT("room="), ESearchCase::IgnoreCase) &&
+                    !P.StartsWith(TEXT("role="), ESearchCase::IgnoreCase))
                 {
                     Kept.Add(P);
                 }
@@ -254,6 +269,7 @@ void FLibDataChannelConnector::OpenWebSocket()
         }
     }
 
+    if (WS.IsValid()) { WS.Reset(); }
     WS = WSM.CreateWebSocket(Url);
 
     {
@@ -261,6 +277,7 @@ void FLibDataChannelConnector::OpenWebSocket()
         WS->OnConnected().AddLambda([this, Url, Weak]()
     {
         UE_LOG(LogTemp, Log, TEXT("[LibDC] WebSocket connected (%s)"), *Url);
+        bSignalingConnected.store(true);
         AsyncTask(ENamedThreads::GameThread, [Weak]()
         {
             if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
@@ -275,12 +292,14 @@ void FLibDataChannelConnector::OpenWebSocket()
         if (Config.Role == EO3DSWebRtcRole::Client)
         {
             CreateClientMediaAndDC();
+            StartClientOfferRetryPump();
         }
     });
 
     WS->OnConnectionError().AddLambda([this, Url, Weak](const FString& Err)
     {
         UE_LOG(LogTemp, Error, TEXT("[LibDC] WebSocket error: %s (url=%s)"), *Err, *Url);
+        bSignalingConnected.store(false);
         const FString Msg = FString::Printf(TEXT("SignalingError: %s"), *Err);
         AsyncTask(ENamedThreads::GameThread, [Weak, Msg]()
         {
@@ -294,6 +313,12 @@ void FLibDataChannelConnector::OpenWebSocket()
     WS->OnClosed().AddLambda([this, Weak](int32 /*Status*/, const FString& Reason, bool /*bClean*/)
     {
         UE_LOG(LogTemp, Warning, TEXT("[LibDC] WebSocket closed: %s"), *Reason);
+        // Reset peer/media so we can accept a fresh session on reconnect
+        ResetPeerConnection();
+        // Stop client offer retry pump while disconnected
+        bOfferRetryPump.store(false);
+        if (OfferRetryThread.joinable()) { OfferRetryThread.join(); }
+        bSignalingConnected.store(false);
         AsyncTask(ENamedThreads::GameThread, [Weak]()
         {
             if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
@@ -446,6 +471,147 @@ void FLibDataChannelConnector::SetupPeerConnection(const rtc::Configuration& Cfg
             AttachRecvAudioCallbacks(RecvAudioTrack);
         });
     }
+}
+
+void FLibDataChannelConnector::ResetPeerConnection()
+{
+    // Stop audio pump
+    bAudioPump.store(false);
+    if (AudioThread.joinable()) { AudioThread.join(); }
+
+    // Clear media/data callbacks to break cycles before reset
+    if (DC) {
+        try { DC->onOpen(nullptr); DC->onClosed(nullptr); DC->onMessage(nullptr); } catch (...) {}
+    }
+    if (SendAudioTrack) {
+        try { SendAudioTrack->onOpen(nullptr); SendAudioTrack->onClosed(nullptr); SendAudioTrack->onMessage(nullptr); } catch (...) {}
+    }
+    if (RecvAudioTrack) {
+        try { RecvAudioTrack->onOpen(nullptr); RecvAudioTrack->onClosed(nullptr); RecvAudioTrack->onMessage(nullptr); } catch (...) {}
+    }
+
+#if O3DS_WITH_OPUS
+    if (OpusEnc) { opus_encoder_destroy(OpusEnc); OpusEnc = nullptr; }
+    OpusAccumPcm.Reset();
+#endif
+
+    bOpen.store(false);
+    bAudioOpen.store(false);
+    bRemoteDescriptionSet = false;
+    PendingCandidates.Reset();
+
+    DC.reset();
+    SendAudioTrack.reset();
+    RecvAudioTrack.reset();
+    PC.reset();
+}
+
+void FLibDataChannelConnector::StartSignalingReconnectPump()
+{
+    // Ensure single pump
+    bSignalingReconnectPump.store(false);
+    if (SignalingReconnectThread.joinable()) { SignalingReconnectThread.join(); }
+    SignalingReconnectAttempt = 0;
+    bSignalingReconnectPump.store(true);
+    SignalingReconnectThread = std::thread([this]()
+    {
+        while (bSignalingReconnectPump.load())
+        {
+            if (!bStarted.load()) break;
+            if (!bSignalingConnected.load())
+            {
+                // Backoff before attempting reconnection to avoid hammering
+                ++SignalingReconnectAttempt;
+                int delay = FMath::Min(1 << FMath::Min(SignalingReconnectAttempt, 4), 16); // 1,2,4,8,16 cap
+                UE_LOG(LogTemp, Log, TEXT("[LibDC] Signaling reconnect attempt %d in %ds"), SignalingReconnectAttempt, delay);
+                for (int i = 0; i < delay && bSignalingReconnectPump.load() && !bSignalingConnected.load() && bStarted.load(); ++i)
+                {
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                }
+                if (!bSignalingReconnectPump.load() || bSignalingConnected.load() || !bStarted.load()) continue;
+                // Ask game thread to open a new WebSocket
+                AsyncTask(ENamedThreads::GameThread, [this]()
+                {
+                    if (bStarted.load())
+                    {
+                        OpenWebSocket();
+                    }
+                });
+                // After scheduling, wait a bit for connection callbacks to fire
+                std::this_thread::sleep_for(std::chrono::seconds(2));
+                continue;
+            }
+            else
+            {
+                // Connected; reset attempt counter and sleep a little
+                SignalingReconnectAttempt = 0;
+                std::this_thread::sleep_for(std::chrono::seconds(2));
+            }
+        }
+        bSignalingReconnectPump.store(false);
+    });
+}
+
+void FLibDataChannelConnector::StopSignalingReconnectPump()
+{
+    bSignalingReconnectPump.store(false);
+    if (SignalingReconnectThread.joinable()) { SignalingReconnectThread.join(); }
+}
+
+void FLibDataChannelConnector::StartClientOfferRetryPump()
+{
+    if (Config.Role != EO3DSWebRtcRole::Client) return;
+    // Ensure any prior pump is stopped
+    bOfferRetryPump.store(false);
+    if (OfferRetryThread.joinable()) { OfferRetryThread.join(); }
+    OfferRetryAttempt = 0;
+    bOfferRetryPump.store(true);
+    OfferRetryThread = std::thread([this]()
+    {
+        // Retry with modest backoff until an answer is set or stopped
+        while (bOfferRetryPump.load())
+        {
+            // Wait a bit before checking for an answer
+            std::this_thread::sleep_for(std::chrono::seconds(3));
+            if (!bOfferRetryPump.load()) break;
+
+            // If answer arrived, stop
+            if (bRemoteDescriptionSet) break;
+
+            // Only retry when signaling is present and connector running
+            if (!bStarted.load() || !WS.IsValid()) continue;
+
+            ++OfferRetryAttempt;
+            UE_LOG(LogTemp, Log, TEXT("[LibDC] Client re-offering (no answer yet), attempt %d"), OfferRetryAttempt);
+            ForceClientReoffer();
+
+            // Backoff: 3s, 5s, 7s, up to 11s
+            int backoff = 3 + FMath::Min(OfferRetryAttempt * 2, 8);
+            for (int i = 0; i < backoff && bOfferRetryPump.load(); ++i)
+            {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+                if (bRemoteDescriptionSet) break;
+            }
+            if (bRemoteDescriptionSet) break;
+        }
+        bOfferRetryPump.store(false);
+    });
+}
+
+void FLibDataChannelConnector::StopClientOfferRetryPump()
+{
+    bOfferRetryPump.store(false);
+    if (OfferRetryThread.joinable()) { OfferRetryThread.join(); }
+}
+
+void FLibDataChannelConnector::ForceClientReoffer()
+{
+    if (Config.Role != EO3DSWebRtcRole::Client) return;
+    // Recreate PC and media; this triggers a fresh offer via onLocalDescription
+    ResetPeerConnection();
+    rtc::Configuration Cfg;
+    SetupPeerConnection(Cfg);
+    CreateClientMediaAndDC();
 }
 
 void FLibDataChannelConnector::CreateClientMediaAndDC()
@@ -694,6 +860,13 @@ void FLibDataChannelConnector::CreateClientMediaAndDC()
                 P->OnState().Broadcast(TEXT("DataChannelClosed"), false);
             }
         });
+        // If signaling is still connected but DC closed, attempt a client re-offer
+        if (Config.Role == EO3DSWebRtcRole::Client && bStarted.load() && bSignalingConnected.load())
+        {
+            UE_LOG(LogTemp, Log, TEXT("[LibDC] DataChannel closed while signaling connected; forcing client re-offer"));
+            ForceClientReoffer();
+            StartClientOfferRetryPump();
+        }
     });
     DC->onMessage([this, Weak](auto M)
     {
@@ -790,6 +963,10 @@ void FLibDataChannelConnector::SendJson(const TSharedPtr<FJsonObject>& Obj)
 
 void FLibDataChannelConnector::HandleIncomingJson(const FString& JsonStr)
 {
+    if (!bStarted.load())
+    {
+        return; // ignore stray signaling after Stop()
+    }
     TSharedPtr<FJsonObject> Obj;
     TSharedRef<TJsonReader<>> R = TJsonReaderFactory<>::Create(JsonStr);
     if (!FJsonSerializer::Deserialize(R, Obj) || !Obj.IsValid()) return;
@@ -811,6 +988,7 @@ void FLibDataChannelConnector::HandleIncomingJson(const FString& JsonStr)
             {
                 PC->setRemoteDescription(rtc::Description(ToStd(Sdp), "answer"));
                 bRemoteDescriptionSet = true;
+                StopClientOfferRetryPump();
                 for (const FQueuedCand& C : PendingCandidates)
                 {
                     try { PC->addRemoteCandidate(rtc::Candidate(C.Cand, C.Mid)); } catch (...) {}
@@ -842,20 +1020,24 @@ void FLibDataChannelConnector::HandleIncomingJson(const FString& JsonStr)
         if (Type == TEXT("offer"))
         {
             RemotePeerId = Obj->GetStringField(TEXT("id"));
-            if (!PC)
+            // Always recreate a fresh PeerConnection for a new offer to avoid invalid states after disconnects
+            ResetPeerConnection();
             {
                 rtc::Configuration Cfg;
                 SetupPeerConnection(Cfg);
             }
             const FString Sdp = Obj->GetStringField(TEXT("description"));
-            PC->setRemoteDescription(rtc::Description(ToStd(Sdp), "offer"));
-            bRemoteDescriptionSet = true;
-            for (const FQueuedCand& C : PendingCandidates)
+            if (PC)
             {
-                try { PC->addRemoteCandidate(rtc::Candidate(C.Cand, C.Mid)); } catch (...) {}
+                try { PC->setRemoteDescription(rtc::Description(ToStd(Sdp), "offer")); } catch (...) { return; }
+                bRemoteDescriptionSet = true;
+                for (const FQueuedCand& C : PendingCandidates)
+                {
+                    try { PC->addRemoteCandidate(rtc::Candidate(C.Cand, C.Mid)); } catch (...) {}
+                }
+                PendingCandidates.Reset();
+                try { PC->createAnswer(); } catch (...) { /* swallow and wait for next offer */ }
             }
-            PendingCandidates.Reset();
-            PC->createAnswer();
         }
         else if (Type == TEXT("candidate"))
         {

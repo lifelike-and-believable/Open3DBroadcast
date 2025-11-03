@@ -58,6 +58,13 @@ class OPEN3DSTREAM_API SOpen3DStreamFactory : public SCompoundWidget
 	void SetLiveKitToken(const FText& InText) { mLiveKitToken = InText; }
 	FText GetLiveKitToken() const { return mLiveKitToken; }
 
+	// Audio settings (WebRTC)
+	void OnEnableWebRTCAudioChanged(ECheckBoxState NewState) { bEnableWebRTCAudio = (NewState == ECheckBoxState::Checked); }
+	ECheckBoxState GetEnableWebRTCAudioState() const { return bEnableWebRTCAudio ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; }
+	
+	void OnAudioPlayoutDelayChanged(int32 NewValue) { WebRTCAudioPlayoutDelayMs = NewValue; }
+	int32 GetAudioPlayoutDelay() const { return WebRTCAudioPlayoutDelayMs; }
+
 	// Visibility helpers
 	EVisibility GetWebRtcBackendVisibility() const;
 	EVisibility GetLiveKitFieldsVisibility() const;
@@ -84,6 +91,10 @@ private:
 	FText mLiveKitRoom = FText::FromString(TEXT("room1"));
 	FText mLiveKitToken;
 
+	// Audio settings (WebRTC)
+	bool bEnableWebRTCAudio = false;
+	int32 WebRTCAudioPlayoutDelayMs = 0;
+
 	// Family + Mode combos
 	TArray<FComboItemType> FamilyOptions;
 	FComboItemType CurrentFamily;
@@ -103,6 +114,8 @@ private:
 	TSharedPtr<SHorizontalBox> LiveKitServerUrlRow;
 	TSharedPtr<SHorizontalBox> LiveKitRoomRow;
 	TSharedPtr<SHorizontalBox> LiveKitTokenRow;
+	TSharedPtr<SHorizontalBox> WebRtcAudioRow;
+	TSharedPtr<SHorizontalBox> AudioDelayRow;
 
 	static FText LastUrl;
 	static int LastFamilyId;

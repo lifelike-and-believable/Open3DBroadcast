@@ -1,6 +1,8 @@
 #include "SOpen3DStreamFactory.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Input/SSpinBox.h"
 #include "Widgets/Text/STextBlock.h"
 
 #include "Open3DStreamSource.h"
@@ -182,6 +184,49 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 				.OnTextChanged(this, &SOpen3DStreamFactory::SetLiveKitToken)
 			]
 		]
+		// WebRTC Audio Enable
+		+ SVerticalBox::Slot()
+		.Padding(5)
+		.AutoHeight()
+		[
+			SAssignNew(WebRtcAudioRow, SHorizontalBox)
+			.Visibility(this, &SOpen3DStreamFactory::GetWebRtcBackendVisibility)
+			+ SHorizontalBox::Slot()
+			.FillWidth(0.3f)
+			[
+				SNew(STextBlock).Text(LOCTEXT("EnableWebRTCAudio", "Enable WebRTC Audio")).MinDesiredWidth(200)
+			]
+			+ SHorizontalBox::Slot()
+			.FillWidth(0.7f)
+			.HAlign(HAlign_Left)
+			[
+				SNew(SCheckBox)
+				.IsChecked(this, &SOpen3DStreamFactory::GetEnableWebRTCAudioState)
+				.OnCheckStateChanged(this, &SOpen3DStreamFactory::OnEnableWebRTCAudioChanged)
+			]
+		]
+		// Audio Playout Delay
+		+ SVerticalBox::Slot()
+		.Padding(5)
+		.AutoHeight()
+		[
+			SAssignNew(AudioDelayRow, SHorizontalBox)
+			.Visibility(this, &SOpen3DStreamFactory::GetWebRtcBackendVisibility)
+			+ SHorizontalBox::Slot()
+			.FillWidth(0.3f)
+			[
+				SNew(STextBlock).Text(LOCTEXT("AudioPlayoutDelay", "Audio Playout Delay (ms)")).MinDesiredWidth(200)
+			]
+			+ SHorizontalBox::Slot()
+			.FillWidth(0.7f)
+			[
+				SNew(SSpinBox<int32>)
+				.MinValue(0)
+				.MaxValue(500)
+				.Value(this, &SOpen3DStreamFactory::GetAudioPlayoutDelay)
+				.OnValueChanged(this, &SOpen3DStreamFactory::OnAudioPlayoutDelayChanged)
+			]
+		]
 		// Key
 		//+ SVerticalBox::Slot()
 		//.Padding(5)
@@ -356,23 +401,21 @@ FReply SOpen3DStreamFactory::OnSource()
 	FString EffectiveUrl = NormalizeUrlForFamily(InputUrl, FamilyStr, ModeStr);
 	const FString ProtocolName = ComputeProtocolFor(FamilyStr, ModeStr);
 
-	// For WebRTC, compose URL with room/role consistently
+	// For WebRTC: do NOT append room to URL for LibDataChannel backend in server mode.
+	// LibDataChannelConnector will handle path construction from Config.Room.
+	// For LiveKit or other backends, query params may be needed.
+	// For now, keep URL clean and pass Room separately via Settings->WebRtcRoom.
 	if (FamilyStr.Equals(TEXT("WebRTC"), ESearchCase::IgnoreCase))
 	{
 		if (EffectiveUrl.EndsWith(TEXT("/"))) { EffectiveUrl.LeftChopInline(1); }
-		// P2P uses path /<room>; LiveKit uses ?room= param – unify on query param to avoid clashes
-		if (!EffectiveUrl.Contains(TEXT("room=")))
-		{
-			EffectiveUrl += EffectiveUrl.Contains(TEXT("?"))
-				? FString::Printf(TEXT("&room=%s"), *Room)
-				: FString::Printf(TEXT("?room=%s"), *Room);
-		}
+		// Room will be passed separately in Settings->WebRtcRoom
+		// LibDataChannelConnector handles URL construction based on Role
 	}
 
 	Settings->Url = FText::FromString(EffectiveUrl);
 	Settings->Protocol = FText::FromString(ProtocolName);
 
-	// Populate WebRTC backend and LiveKit configuration
+	// Populate WebRTC backend and LiveLink configuration
 	if (FamilyStr.Equals(TEXT("WebRTC"), ESearchCase::IgnoreCase))
 	{
 		Settings->WebRtcRoom = Room;
@@ -391,6 +434,10 @@ FReply SOpen3DStreamFactory::OnSource()
 	{
 		Settings->WebRtcBackend = EO3DSWebRtcBackendReceiver::LibDataChannel;
 	}
+
+	// Populate audio settings
+	Settings->bEnableWebRTCAudio = bEnableWebRTCAudio;
+	Settings->WebRTCAudioPlayoutDelayMs = WebRTCAudioPlayoutDelayMs;
 	
 	OnSelectedEvent.ExecuteIfBound(Settings);
 	return FReply::Handled();

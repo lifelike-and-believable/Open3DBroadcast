@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "WebRTC/Open3DSWebRtcReceiver.h"
+#include "O3DSStreamLogs.h"
 #include "WebRTC/O3DSOpusDecoder.h"
 #include "Open3DStreamSourceSettings.h"
 #include "WebRTCConnectorFactory.h"
@@ -11,6 +12,21 @@ static TAutoConsoleVariable<int32> CVarO3DSReceiverWebRtcLog(
     TEXT("o3ds.Receiver.WebRTC.Log"),
     0,
     TEXT("Enable verbose logging for WebRTC receiver adapter (0/1)."),
+    ECVF_Default);
+static TAutoConsoleVariable<int32> CVarO3DSReceiverWebRtcLogDataContent(
+    TEXT("o3ds.Receiver.WebRTC.LogDataContent"),
+    0,
+    TEXT("When 1, log the received DataChannel payload as hex (first 64 bytes)."),
+    ECVF_Default);
+static TAutoConsoleVariable<int32> CVarO3DSReceiverWebRtcLogDataCount(
+    TEXT("o3ds.Receiver.WebRTC.LogDataCount"),
+    0,
+    TEXT("When 1, log only the number of bytes received on the DataChannel."),
+    ECVF_Default);
+static TAutoConsoleVariable<int32> CVarO3DSReceiverWebRtcLogAudioRtp(
+    TEXT("o3ds.Receiver.WebRTC.LogAudioRtp"),
+    0,
+    TEXT("When 1, log received RTP audio packet sizes."),
     ECVF_Default);
 
 FOpen3DSWebRtcReceiver::FOpen3DSWebRtcReceiver()
@@ -26,7 +42,7 @@ bool FOpen3DSWebRtcReceiver::Start(const FOpen3DStreamSettings& Settings)
 {
     if (bStarted)
     {
-        UE_LOG(LogTemp, Warning, TEXT("O3DS WebRTC Receiver: already started"));
+        UE_LOG(LogO3DSReceiverWebRTC, Warning, TEXT("already started"));
         return false;
     }
 
@@ -38,7 +54,7 @@ bool FOpen3DSWebRtcReceiver::Start(const FOpen3DStreamSettings& Settings)
     Connector = FWebRTCConnectorFactory::Create(Backend);
     if (!Connector)
     {
-        UE_LOG(LogTemp, Error, TEXT("O3DS WebRTC Receiver: failed to create connector for backend"));
+        UE_LOG(LogO3DSReceiverWebRTC, Error, TEXT("failed to create connector for backend"));
         return false;
     }
 
@@ -46,8 +62,14 @@ bool FOpen3DSWebRtcReceiver::Start(const FOpen3DStreamSettings& Settings)
     FO3DSWebRtcConfig Config;
     Config.Backend = EO3DSWebRtcBackend::LibDataChannel;
     Config.Role = EO3DSWebRtcRole::Server;
+    
+    // For server role, ensure the URL is normalized per LibDataChannelConnector expectations:
+    // The Room will be moved into the WebSocket path (e.g., ws://host:port/<Room>)
+    // and query parameters will be stripped by the connector's OpenWebSocket() logic.
+    // Just pass the base signaling URL and let the connector handle path construction.
     Config.SignalingUrl = Settings.Url.ToString();
     Config.Room = Settings.WebRtcRoom;
+    
     Config.bEnableAudio = Settings.bEnableWebRTCAudio;
     Config.SampleRate = 48000;
     Config.NumChannels = 1;
@@ -61,7 +83,7 @@ bool FOpen3DSWebRtcReceiver::Start(const FOpen3DStreamSettings& Settings)
     // Start connector
     if (!Connector->Start(Config))
     {
-        UE_LOG(LogTemp, Error, TEXT("O3DS WebRTC Receiver: failed to start connector"));
+        UE_LOG(LogO3DSReceiverWebRTC, Error, TEXT("failed to start connector"));
         return false;
     }
 
@@ -71,12 +93,14 @@ bool FOpen3DSWebRtcReceiver::Start(const FOpen3DStreamSettings& Settings)
         OpusDecoder = MakeShared<FO3DSOpusDecoder>();
         if (!OpusDecoder->Initialize(Config.SampleRate, Config.NumChannels))
         {
-            UE_LOG(LogTemp, Error, TEXT("O3DS WebRTC Receiver: failed to initialize Opus decoder"));
+            UE_LOG(LogO3DSReceiverAudio, Error, TEXT("failed to initialize Opus decoder"));
             OpusDecoder.Reset();
         }
         else
         {
             bAudioEnabled = true;
+            // Always log once so users can confirm audio decode path enabled
+            UE_LOG(LogO3DSReceiverAudio, Log, TEXT("Audio enabled (sr=%d ch=%d)"), Config.SampleRate, Config.NumChannels);
         }
     }
 
@@ -84,7 +108,7 @@ bool FOpen3DSWebRtcReceiver::Start(const FOpen3DStreamSettings& Settings)
 
     if (CVarO3DSReceiverWebRtcLog->GetInt() != 0)
     {
-        UE_LOG(LogTemp, Log, TEXT("O3DS WebRTC Receiver: started (audio=%s)"),
+        UE_LOG(LogO3DSReceiverWebRTC, Log, TEXT("started (audio=%s)"),
             bAudioEnabled ? TEXT("enabled") : TEXT("disabled"));
     }
 
@@ -115,7 +139,7 @@ void FOpen3DSWebRtcReceiver::Stop()
 
     if (CVarO3DSReceiverWebRtcLog->GetInt() != 0)
     {
-        UE_LOG(LogTemp, Log, TEXT("O3DS WebRTC Receiver: stopped"));
+        UE_LOG(LogO3DSReceiverWebRTC, Log, TEXT("stopped"));
     }
 }
 
@@ -149,7 +173,7 @@ void FOpen3DSWebRtcReceiver::OnConnectorState(const FString& State, bool bIsErro
     {
         if (CVarO3DSReceiverWebRtcLog->GetInt() != 0)
         {
-            UE_LOG(LogTemp, Log, TEXT("O3DS WebRTC Receiver: state=%s error=%d"), *State, bIsError ? 1 : 0);
+            UE_LOG(LogO3DSReceiverWebRTC, Log, TEXT("state=%s error=%d"), *State, bIsError ? 1 : 0);
         }
 
         if (OnStateCallback)
@@ -164,9 +188,31 @@ void FOpen3DSWebRtcReceiver::OnConnectorData(const TArray<uint8>& Bytes)
     // Marshal to game thread and forward to source parsing
     AsyncTask(ENamedThreads::GameThread, [this, Bytes]()
     {
-        if (CVarO3DSReceiverWebRtcLog->GetInt() != 0)
+        const bool bLogContent = (CVarO3DSReceiverWebRtcLogDataContent->GetInt() != 0);
+        const bool bLogCount = (CVarO3DSReceiverWebRtcLogDataCount->GetInt() != 0);
+        const bool bLogVerbose = (CVarO3DSReceiverWebRtcLog->GetInt() != 0);
+        
+        if (bLogContent)
         {
-            UE_LOG(LogTemp, Verbose, TEXT("O3DS WebRTC Receiver: data bytes=%d"), Bytes.Num());
+            // Show the first 64 byte values (hex) for FlatBuffer-style payloads
+            const int32 MaxShow = 64;
+            const int32 N = FMath::Min(Bytes.Num(), MaxShow);
+            TArray<FString> Hex; Hex.Reserve(N);
+            for (int32 i = 0; i < N; ++i)
+            {
+                Hex.Add(FString::Printf(TEXT("%02X"), Bytes[i]));
+            }
+            const FString Head = FString::Join(Hex, TEXT(" "));
+            const bool bTrunc = (Bytes.Num() > MaxShow);
+            UE_LOG(LogO3DSReceiverWebRTC, Log, TEXT("Data: [%s]%s (%d bytes)"), *Head, bTrunc ? TEXT(" ...") : TEXT(""), Bytes.Num());
+        }
+        else if (bLogCount)
+        {
+            UE_LOG(LogO3DSReceiverWebRTC, Verbose, TEXT("Data: %d bytes"), Bytes.Num());
+        }
+        else if (bLogVerbose)
+        {
+            UE_LOG(LogO3DSReceiverWebRTC, Verbose, TEXT("data bytes=%d"), Bytes.Num());
         }
 
         if (OnDataCallback)
@@ -178,9 +224,31 @@ void FOpen3DSWebRtcReceiver::OnConnectorData(const TArray<uint8>& Bytes)
 
 void FOpen3DSWebRtcReceiver::OnConnectorAudioRtp(const TArray<uint8>& RtpBytes)
 {
+    // Log first packet once so users can confirm audio RTP path is live
+    {
+        static bool bFirstRtpSeen = false;
+        if (!bFirstRtpSeen)
+        {
+            bFirstRtpSeen = true;
+            UE_LOG(LogO3DSReceiverAudio, Log, TEXT("First audio RTP received (%d bytes)"), RtpBytes.Num());
+        }
+    }
+    if (CVarO3DSReceiverWebRtcLogAudioRtp->GetInt() != 0)
+    {
+        UE_LOG(LogO3DSReceiverAudio, Log, TEXT("RTP: %d bytes"), RtpBytes.Num());
+    }
+    
     // Decode off the game thread (already on connector thread)
     if (OpusDecoder && OpusDecoder->IsInitialized())
     {
         OpusDecoder->DecodeRtpPacket(RtpBytes);
+    }
+    else
+    {
+        static int32 WarnEvery = 0;
+        if ((WarnEvery++ % 100) == 0)
+        {
+            UE_LOG(LogO3DSReceiverAudio, Warning, TEXT("Audio RTP received but decoder not initialized (audio disabled?)"));
+        }
     }
 }
