@@ -2,7 +2,6 @@
 
 using UnrealBuildTool;
 
-[SupportedTargetTypes(TargetType.Editor, TargetType.Game, TargetType.Client, TargetType.Server)]
 public class Open3DShared : ModuleRules
 {
     public Open3DShared(ReadOnlyTargetRules Target) : base(Target)
