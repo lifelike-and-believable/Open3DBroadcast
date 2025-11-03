@@ -5,7 +5,7 @@
 	"FriendlyName": "Open3DStream",
 	"Description": "Realtime streaming with both receiver (LiveLink Source) and broadcaster capabilities",
 	"Category": "Other",
-	"CreatedBy": "Alastair Macleod",
+	"CreatedBy": "Alastair Macleod (with extensions by Athomas Goldberg)",
 	"CreatedByURL": "https://peeldev.com/",
 	"DocsURL": "",
 	"MarketplaceURL": "",
@@ -32,7 +32,6 @@
 			"Name": "Open3DBroadcast",
 			"Type": "Runtime",
 			"LoadingPhase": "Default",
-			"WhitelistPlatforms": ["Win64", "Linux", "Mac"]
 		}
 	]
 }

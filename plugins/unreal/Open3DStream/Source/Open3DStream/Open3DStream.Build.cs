@@ -94,23 +94,23 @@ public class Open3DStream : ModuleRules
 	// Enable Opus flag remains globally defined by Shared
 
 	 PrivateDependencyModuleNames.AddRange(
- new string[]
- {
- "CoreUObject",
- "Engine",
- "Slate",
- "SlateCore",
- "LiveLinkInterface",
- "Networking",
- "Sockets",
- "InputCore",
- "WebSockets",
- "Json",
- "JsonUtilities",
- "AudioMixer",
- "AudioCaptureCore",
- "Open3DShared",
- }
+		new string[]
+		{
+			"CoreUObject",
+			"Engine",
+			"Slate",
+			"SlateCore",
+			"LiveLinkInterface",
+			"Networking",
+			"Sockets",
+			"InputCore",
+			"WebSockets",
+			"Json",
+			"JsonUtilities",
+			"AudioMixer",
+			"AudioCaptureCore",
+			"Open3DShared",
+		}
  );
 				
 		DynamicallyLoadedModuleNames.AddRange( new string[] {} );
