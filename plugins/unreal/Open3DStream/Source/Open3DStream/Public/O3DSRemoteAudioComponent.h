@@ -9,6 +9,8 @@
 
 class UAudioComponent;
 class USoundWaveProcedural;
+class USoundAttenuation;
+struct FSoundAttenuationSettings;
 
 namespace O3DS { struct FAudioFrameMeta; }
 
@@ -42,9 +44,27 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio")
 	float Gain =1.0f;
 
-	// Auto-create and attach an AudioComponent to owner
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio")
-	bool bAutoCreateAudioComponent = true;
+	// AudioComponent configuration (applies to the auto-created component)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio|AudioComponent")
+	bool bAC_AllowSpatialization = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio|AudioComponent")
+	bool bAC_IsUISound = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio|AudioComponent", meta=(ClampMin="0.0"))
+	float AC_VolumeMultiplier = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio|AudioComponent")
+	float AC_PitchMultiplier = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio|AudioComponent")
+	bool bAC_OverrideAttenuation = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio|AudioComponent", meta=(EditCondition="!bAC_OverrideAttenuation"))
+	TObjectPtr<USoundAttenuation> AC_AttenuationSettings = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio|AudioComponent", meta=(EditCondition="bAC_OverrideAttenuation"))
+	FSoundAttenuationSettings AC_AttenuationOverrides;
 
 protected:
 	virtual void BeginPlay() override;
@@ -61,8 +81,6 @@ private:
 	USoundWaveProcedural* SoundWave = nullptr;
 	int32 CurrentChannels =0;
 	int32 CurrentSampleRate =0;
-	// True if we created the AudioComponent; in that case we own its VolumeMultiplier (apply Gain)
-	bool bOwnsAudioComponent = false;
 
 	FDelegateHandle BusDelegateHandle;
 };

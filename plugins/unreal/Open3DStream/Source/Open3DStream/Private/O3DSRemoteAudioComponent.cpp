@@ -9,6 +9,7 @@
 #include "O3DSStreamLogs.h"
 // Needed for AActor definition used by GetOwner() and attachment calls
 #include "GameFramework/Actor.h"
+#include "Sound/SoundAttenuation.h"
 
 // Opt-in verbose logging for remote audio receive/playback
 static TAutoConsoleVariable<int32> CVarO3DSRemoteAudioDebug(
@@ -26,31 +27,25 @@ void UO3DSRemoteAudioComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (bAutoCreateAudioComponent)
+	// Always create and configure a dedicated AudioComponent
+	AudioComp = NewObject<UAudioComponent>(GetOwner());
+	if (AudioComp)
 	{
-		AudioComp = GetOwner() ? GetOwner()->FindComponentByClass<UAudioComponent>() : nullptr;
-		if (!AudioComp)
+		AudioComp->RegisterComponent();
+		if (GetOwner() && GetOwner()->GetRootComponent())
 		{
-			AudioComp = NewObject<UAudioComponent>(GetOwner());
-			if (AudioComp)
-			{
-				AudioComp->RegisterComponent();
-				if (GetOwner() && GetOwner()->GetRootComponent())
-				{
-					AudioComp->AttachToComponent(GetOwner()->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
-				}
-				// Ensure 2D playback so it's audible regardless of listener position
-				AudioComp->bAllowSpatialization = false;
-				AudioComp->bIsUISound = true;
-				// Apply initial gain only to components we create/own
-				AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, Gain));
-				bOwnsAudioComponent = true;
-			}
+			AudioComp->AttachToComponent(GetOwner()->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
 		}
-		else
+		// Configure from mirrored properties (leave out Sound Source)
+		AudioComp->bAllowSpatialization = bAC_AllowSpatialization;
+		AudioComp->bIsUISound = bAC_IsUISound;
+		AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, AC_VolumeMultiplier));
+		AudioComp->SetPitchMultiplier(AC_PitchMultiplier);
+		AudioComp->bOverrideAttenuation = bAC_OverrideAttenuation;
+		AudioComp->AttenuationSettings = AC_AttenuationSettings;
+		if (AudioComp->bOverrideAttenuation)
 		{
-			// Adopt existing component as-is; respect all user-defined properties (attenuation, spatialization, etc.)
-			bOwnsAudioComponent = false;
+			AudioComp->AttenuationOverrides = AC_AttenuationOverrides;
 		}
 	}
 
@@ -62,7 +57,7 @@ void UO3DSRemoteAudioComponent::BeginPlay()
 		if (!bOnce)
 		{
 			bOnce = true;
-			UE_LOG(LogO3DSReceiverAudio, Log, TEXT("Subscribed to FO3DSAudioBus (Gain=%.2f, AutoCreateAudioComp=%d)"), Gain, bAutoCreateAudioComponent ? 1 : 0);
+			UE_LOG(LogO3DSReceiverAudio, Log, TEXT("Subscribed to FO3DSAudioBus (Gain=%.2f)"), Gain);
 			if (!AudioComp)
 			{
 				UE_LOG(LogO3DSReceiverAudio, Warning, TEXT("No UAudioComponent present/created on owner '%s'"), *GetOwner()->GetName());
@@ -133,11 +128,8 @@ void UO3DSRemoteAudioComponent::EnsureSoundWave(int32 NumChannels, int32 SampleR
 			{
 				AudioComp->Play();
 			}
-			// Only apply Gain if we created/own the AudioComponent; otherwise respect user's VolumeMultiplier
-			if (bOwnsAudioComponent)
-			{
-				AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, Gain));
-			}
+			// Apply component-configured volume; source Gain is applied at sample enqueue time
+			AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, AC_VolumeMultiplier));
 			if (CVarO3DSRemoteAudioDebug->GetInt() !=0)
 			{
 				UE_LOG(LogO3DSReceiverAudio, Log, TEXT("SoundWave prepared ch=%d sr=%d; AudioComp playing=%d"),
@@ -216,7 +208,7 @@ void UO3DSRemoteAudioComponent::OnAudioPcm16(const O3DS::FAudioFrameMeta& Meta, 
 			UE_LOG(LogO3DSReceiverAudio, Log, TEXT("First PCM16 frame received (%d samples) stream='%s' subject='%s'"), NumSamples, *StreamLabel, *SubjectName);
 		}
 	}
-	// Keep audio component playing; do not override user's volume when they provided their own component
+	// Keep audio component playing; volume comes from AC_VolumeMultiplier and Gain is applied at source
 	if (AudioComp)
 	{
 		if (!AudioComp->IsPlaying())
