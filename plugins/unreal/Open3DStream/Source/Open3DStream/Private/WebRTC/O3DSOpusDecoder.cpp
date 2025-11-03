@@ -3,6 +3,7 @@
 #include "WebRTC/O3DSOpusDecoder.h"
 #include "O3DSAudioBus.h"
 #include "O3DSUnifiedMessage.h"
+#include "O3DSStreamLogs.h"
 #include "Async/Async.h"
 #include "HAL/PlatformTime.h"
 
@@ -36,7 +37,7 @@ bool FO3DSOpusDecoder::Initialize(int32 InSampleRate, int32 InNumChannels)
     // For MVP, only support 48 kHz
     if (InSampleRate != 48000)
     {
-        UE_LOG(LogTemp, Error, TEXT("O3DS Opus Decoder: unsupported sample rate %d (only 48000 supported)"), InSampleRate);
+        UE_LOG(LogO3DSReceiverAudio, Error, TEXT("unsupported sample rate %d (only 48000 supported)"), InSampleRate);
         return false;
     }
 
@@ -48,7 +49,7 @@ bool FO3DSOpusDecoder::Initialize(int32 InSampleRate, int32 InNumChannels)
     Decoder = opus_decoder_create(SampleRate, NumChannels, &Error);
     if (Error != OPUS_OK || !Decoder)
     {
-        UE_LOG(LogTemp, Error, TEXT("O3DS Opus Decoder: opus_decoder_create failed (error=%d)"), Error);
+        UE_LOG(LogO3DSReceiverAudio, Error, TEXT("opus_decoder_create failed (error=%d)"), Error);
         return false;
     }
 
@@ -57,7 +58,7 @@ bool FO3DSOpusDecoder::Initialize(int32 InSampleRate, int32 InNumChannels)
 
     if (CVarO3DSReceiverAudioLog->GetInt() != 0)
     {
-        UE_LOG(LogTemp, Log, TEXT("O3DS Opus Decoder: initialized (rate=%d, channels=%d, frame=%d samples)"),
+        UE_LOG(LogO3DSReceiverAudio, Log, TEXT("initialized (rate=%d, channels=%d, frame=%d samples)"),
             SampleRate, NumChannels, FrameSizeSamples);
     }
 
@@ -73,7 +74,7 @@ void FO3DSOpusDecoder::Shutdown()
 
         if (CVarO3DSReceiverAudioLog->GetInt() != 0)
         {
-            UE_LOG(LogTemp, Log, TEXT("O3DS Opus Decoder: shutdown"));
+            UE_LOG(LogO3DSReceiverAudio, Log, TEXT("shutdown"));
         }
     }
 }
@@ -95,7 +96,7 @@ void FO3DSOpusDecoder::DecodeRtpPacket(const TArray<uint8>& RtpBytes)
         const double Now = FPlatformTime::Seconds();
         if (Now - LastErrorLogTime > ErrorLogThrottleSec)
         {
-            UE_LOG(LogTemp, Warning, TEXT("O3DS Opus Decoder: invalid RTP packet (size=%d)"), RtpBytes.Num());
+            UE_LOG(LogO3DSReceiverAudio, Warning, TEXT("invalid RTP packet (size=%d)"), RtpBytes.Num());
             LastErrorLogTime = Now;
         }
         return;
@@ -107,7 +108,7 @@ void FO3DSOpusDecoder::DecodeRtpPacket(const TArray<uint8>& RtpBytes)
         const double Now = FPlatformTime::Seconds();
         if (Now - LastErrorLogTime > ErrorLogThrottleSec)
         {
-            UE_LOG(LogTemp, Warning, TEXT("O3DS Opus Decoder: unexpected payload type %d (expected 111)"), PayloadType);
+            UE_LOG(LogO3DSReceiverAudio, Warning, TEXT("unexpected payload type %d (expected 111)"), PayloadType);
             LastErrorLogTime = Now;
         }
         return;
@@ -128,7 +129,7 @@ void FO3DSOpusDecoder::DecodeRtpPacket(const TArray<uint8>& RtpBytes)
         const double Now = FPlatformTime::Seconds();
         if (Now - LastErrorLogTime > ErrorLogThrottleSec)
         {
-            UE_LOG(LogTemp, Warning, TEXT("O3DS Opus Decoder: opus_decode failed (error=%d)"), SamplesDecoded);
+            UE_LOG(LogO3DSReceiverAudio, Warning, TEXT("opus_decode failed (error=%d)"), SamplesDecoded);
             LastErrorLogTime = Now;
         }
         return;
@@ -136,7 +137,7 @@ void FO3DSOpusDecoder::DecodeRtpPacket(const TArray<uint8>& RtpBytes)
 
     if (CVarO3DSReceiverAudioLog->GetInt() != 0)
     {
-        UE_LOG(LogTemp, Verbose, TEXT("O3DS Opus Decoder: decoded %d samples (payload=%d bytes, ts=%u)"),
+        UE_LOG(LogO3DSReceiverAudio, Verbose, TEXT("decoded %d samples (payload=%d bytes, ts=%u)"),
             SamplesDecoded, PayloadLen, Timestamp);
     }
 
@@ -199,7 +200,8 @@ void FO3DSOpusDecoder::PublishAudio(const int16* Samples, int32 NumSamples, uint
     {
         // Build metadata for Audio Bus
         O3DS::FAudioFrameMeta Meta;
-        Meta.StreamLabel = TEXT("o3ds:webrtc:remote");
+        // Use a stream label that passes the RemoteAudio Mix-mode filter (starts with "o3ds:mix")
+        Meta.StreamLabel = TEXT("o3ds:mix:webrtc");
         Meta.SubjectName = TEXT("WebRTC");
         Meta.NumChannels = LocalChannels;
         Meta.SampleRate = LocalRate;
@@ -213,7 +215,7 @@ void FO3DSOpusDecoder::PublishAudio(const int16* Samples, int32 NumSamples, uint
 
         if (CVarO3DSReceiverAudioLog->GetInt() != 0)
         {
-            UE_LOG(LogTemp, Verbose, TEXT("O3DS Opus Decoder: published %d samples (%d bytes) to Audio Bus"),
+            UE_LOG(LogO3DSReceiverAudio, Verbose, TEXT("published %d samples (%d bytes) to Audio Bus"),
                 SamplesCopy.Num(), NumBytes);
         }
     });

@@ -48,6 +48,17 @@ private:
     void SetupPeerConnection(const rtc::Configuration& Cfg);
     void CreateClientMediaAndDC();
     void AttachRecvAudioCallbacks(const std::shared_ptr<rtc::Track>& Track);
+    // Reset only the peer/media objects (keep signaling socket). Call on game thread before re-offer handling.
+    void ResetPeerConnection();
+
+    // Client role: retry offer if no answer arrives (handles client-starts-before-server)
+    void StartClientOfferRetryPump();
+    void StopClientOfferRetryPump();
+    void ForceClientReoffer();
+
+    // Signaling reconnect (handles server restarts after initial connect)
+    void StartSignalingReconnectPump();
+    void StopSignalingReconnectPump();
 
     void SendJson(const TSharedPtr<class FJsonObject>& Obj);
     void HandleIncomingJson(const FString& JsonStr);
@@ -95,4 +106,15 @@ private:
      struct FQueuedCand { std::string Cand; std::string Mid; };
      bool bRemoteDescriptionSet = false;
      TArray<FQueuedCand> PendingCandidates; // accessed on game thread only
+
+    // Client-side re-offer
+    std::atomic<bool> bOfferRetryPump{false};
+    std::thread OfferRetryThread;
+    int OfferRetryAttempt = 0;
+
+    // Signaling reconnect state
+    std::atomic<bool> bSignalingReconnectPump{false};
+    std::thread SignalingReconnectThread;
+    int SignalingReconnectAttempt = 0;
+    std::atomic<bool> bSignalingConnected{false};
 };

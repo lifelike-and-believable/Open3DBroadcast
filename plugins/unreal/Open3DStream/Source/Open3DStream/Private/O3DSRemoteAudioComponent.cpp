@@ -6,6 +6,7 @@
 #include "Components/AudioComponent.h"
 #include "O3DSAudioBus.h"
 #include "O3DSUnifiedMessage.h"
+#include "O3DSStreamLogs.h"
 // Needed for AActor definition used by GetOwner() and attachment calls
 #include "GameFramework/Actor.h"
 
@@ -38,15 +39,40 @@ void UO3DSRemoteAudioComponent::BeginPlay()
 				{
 					AudioComp->AttachToComponent(GetOwner()->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
 				}
+				// Ensure 2D playback so it's audible regardless of listener position
+				AudioComp->bAllowSpatialization = false;
+				AudioComp->bIsUISound = true;
+				// Apply initial gain
+				AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, Gain));
 			}
+		}
+		else
+		{
+			// If an existing component was found, make sure settings are friendly for remote 2D playback
+			AudioComp->bAllowSpatialization = false;
+			AudioComp->bIsUISound = true;
+			AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, Gain));
 		}
 	}
 
 	// Subscribe to global audio bus published by the network receiver
 	BusDelegateHandle = FO3DSAudioBus::OnPcm16().AddUObject(this, &UO3DSRemoteAudioComponent::OnAudioPcm16);
+	// Always emit a single confirmation log so users can verify subscription without CVars
+	{
+		static bool bOnce = false;
+		if (!bOnce)
+		{
+			bOnce = true;
+			UE_LOG(LogO3DSReceiverAudio, Log, TEXT("Subscribed to FO3DSAudioBus (Gain=%.2f, AutoCreateAudioComp=%d)"), Gain, bAutoCreateAudioComponent ? 1 : 0);
+			if (!AudioComp)
+			{
+				UE_LOG(LogO3DSReceiverAudio, Warning, TEXT("No UAudioComponent present/created on owner '%s'"), *GetOwner()->GetName());
+			}
+		}
+	}
 	if (CVarO3DSRemoteAudioDebug->GetInt() !=0)
 	{
-		UE_LOG(LogTemp, Log, TEXT("O3DS RemoteAudio: Subscribed to FO3DSAudioBus"));
+		UE_LOG(LogO3DSReceiverAudio, Log, TEXT("Debug enabled"));
 	}
 }
 
@@ -77,7 +103,7 @@ bool UO3DSRemoteAudioComponent::MatchesFilter(const FString& InSubject, const FS
 	if (!StreamLabelFilter.IsEmpty() && !InStream.Contains(StreamLabelFilter)) return false;
 	if (CVarO3DSRemoteAudioDebug->GetInt() !=0)
 	{
-		UE_LOG(LogTemp, Verbose, TEXT("O3DS RemoteAudio: Filter pass subject='%s' stream='%s'"), *InSubject, *InStream);
+		UE_LOG(LogO3DSReceiverAudio, Verbose, TEXT("Filter pass subject='%s' stream='%s'"), *InSubject, *InStream);
 	}
 	return true;
 }
@@ -95,6 +121,8 @@ void UO3DSRemoteAudioComponent::EnsureSoundWave(int32 NumChannels, int32 SampleR
 			SoundWave->SetSampleRate(SampleRate);
 			SoundWave->Duration = INDEFINITELY_LOOPING_DURATION;
 			SoundWave->SoundGroup = SOUNDGROUP_Voice;
+			// Explicitly mark as procedural/streaming source
+			SoundWave->bProcedural = true;
 		}
 		CurrentChannels = NumChannels;
 		CurrentSampleRate = SampleRate;
@@ -106,9 +134,11 @@ void UO3DSRemoteAudioComponent::EnsureSoundWave(int32 NumChannels, int32 SampleR
 			{
 				AudioComp->Play();
 			}
+			// Ensure current gain is applied whenever we swap sound waves
+			AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, Gain));
 			if (CVarO3DSRemoteAudioDebug->GetInt() !=0)
 			{
-				UE_LOG(LogTemp, Log, TEXT("O3DS RemoteAudio: SoundWave prepared ch=%d sr=%d; AudioComp playing=%d"),
+				UE_LOG(LogO3DSReceiverAudio, Log, TEXT("SoundWave prepared ch=%d sr=%d; AudioComp playing=%d"),
 					NumChannels, SampleRate, AudioComp->IsPlaying()?1:0);
 			}
 		}
@@ -123,7 +153,7 @@ void UO3DSRemoteAudioComponent::OnAudioFrame(const FString& StreamLabel, const F
 		{
 			static int32 DropEvery =0; if ((DropEvery++ %100) ==0)
 			{
-				UE_LOG(LogTemp, Verbose, TEXT("O3DS RemoteAudio: Dropped frame by filter subject='%s' stream='%s'"), *SubjectName, *StreamLabel);
+				UE_LOG(LogO3DSReceiverAudio, Verbose, TEXT("Dropped frame by filter subject='%s' stream='%s'"), *SubjectName, *StreamLabel);
 			}
 		}
 		return;
@@ -150,7 +180,7 @@ void UO3DSRemoteAudioComponent::OnAudioFrame(const FString& StreamLabel, const F
 	{
 		static int32 LogEvery =0; if ((LogEvery++ %50) ==0)
 		{
-			UE_LOG(LogTemp, Verbose, TEXT("O3DS RemoteAudio: Queued frames=%d ch=%d sr=%d stream='%s' subject='%s'"),
+			UE_LOG(LogO3DSReceiverAudio, Verbose, TEXT("Queued frames=%d ch=%d sr=%d stream='%s' subject='%s'"),
 				NumFrames, NumChannels, SampleRate, *StreamLabel, *SubjectName);
 		}
 	}
@@ -174,6 +204,24 @@ void UO3DSRemoteAudioComponent::OnAudioPcm16(const O3DS::FAudioFrameMeta& Meta, 
 	if (!SoundWave)
 	{
 		return;
+	}
+	// One-time confirmation log on first received frame
+	{
+		static bool bFirstFrame = false;
+		if (!bFirstFrame)
+		{
+			bFirstFrame = true;
+			UE_LOG(LogO3DSReceiverAudio, Log, TEXT("First PCM16 frame received (%d samples) stream='%s' subject='%s'"), NumSamples, *StreamLabel, *SubjectName);
+		}
+	}
+	// Keep audio component volume in sync with Gain slider
+	if (AudioComp)
+	{
+		AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, Gain));
+		if (!AudioComp->IsPlaying())
+		{
+			AudioComp->Play();
+		}
 	}
 	SoundWave->QueueAudio(const_cast<uint8*>(PCM16Bytes.GetData()), PCM16Bytes.Num());
 }
