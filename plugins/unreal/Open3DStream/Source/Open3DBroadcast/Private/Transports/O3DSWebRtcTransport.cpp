@@ -106,6 +106,18 @@ bool FO3DSWebRtcTransport::Start(const FString& InUrl, const FString& InProtocol
     // Optional room/token from query
     FString RoomParam; if (ParseStringParam(InUrl, TEXT("room"), RoomParam)) { Cfg.Room = RoomParam; }
     FString TokenParam; if (ParseStringParam(InUrl, TEXT("token"), TokenParam)) { Cfg.Token = TokenParam; }
+    // Optional backend selection (backend=livekit or backend=libdatachannel/p2p)
+    FString BackendParam; if (ParseStringParam(InUrl, TEXT("backend"), BackendParam))
+    {
+        if (BackendParam.Equals(TEXT("livekit"), ESearchCase::IgnoreCase))
+        {
+            Cfg.Backend = EO3DSWebRtcBackend::LiveKit;
+        }
+        else if (BackendParam.Equals(TEXT("libdatachannel"), ESearchCase::IgnoreCase) || BackendParam.Equals(TEXT("p2p"), ESearchCase::IgnoreCase))
+        {
+            Cfg.Backend = EO3DSWebRtcBackend::LibDataChannel;
+        }
+    }
 
     // Optional verbosity and audio params from query
     bool bVerboseParam = false; if (ParseBoolParam(InUrl, TEXT("verbose"), bVerboseParam)) { Cfg.bVerbose = bVerboseParam; }
@@ -133,6 +145,9 @@ bool FO3DSWebRtcTransport::Start(const FString& InUrl, const FString& InProtocol
         Cfg.ToneDurationSec = PreConfig.ToneDurationSec;
         Cfg.bVerbose = PreConfig.bVerbose;
         if (Cfg.Room.IsEmpty() && !PreConfig.Room.IsEmpty()) { Cfg.Room = PreConfig.Room; }
+        if (Cfg.Token.IsEmpty() && !PreConfig.Token.IsEmpty()) { Cfg.Token = PreConfig.Token; }
+        // Prefer explicit backend if provided in pre-config
+        Cfg.Backend = PreConfig.Backend;
     }
 
     Connector = FWebRTCConnectorFactory::Create(Cfg.Backend);
