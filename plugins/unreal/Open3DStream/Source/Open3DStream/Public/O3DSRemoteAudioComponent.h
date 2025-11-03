@@ -3,8 +3,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
+#include "Components/SceneComponent.h"
 #include "LiveLinkTypes.h"
+#include "Engine/EngineTypes.h" // FComponentReference
 #include "O3DSRemoteAudioComponent.generated.h"
 
 class UAudioComponent;
@@ -17,6 +18,7 @@ class USoundConcurrency;
 struct FSoundSubmixSendInfo;
 struct FSoundConcurrencySettings;
 struct FSoundModulationDestinationSettings;
+class USceneComponent;
 
 namespace O3DS { struct FAudioFrameMeta; }
 
@@ -28,7 +30,7 @@ enum class EO3DSRemoteAudioMode : uint8
 };
 
 UCLASS(ClassGroup=(Open3DStream), meta=(BlueprintSpawnableComponent))
-class OPEN3DSTREAM_API UO3DSRemoteAudioComponent : public UActorComponent
+class OPEN3DSTREAM_API UO3DSRemoteAudioComponent : public USceneComponent
 {
 	GENERATED_BODY()
 public:
@@ -50,6 +52,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio")
 	float Gain =1.0f;
 
+	// Quick access mixers at top
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio", meta=(DisplayName="Volume Multiplier", ClampMin="0.0", ToolTip="Scales the overall output level of the audio component. 1.0 = original level."))
+	float AC_VolumeMultiplier = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio", meta=(DisplayName="Pitch Multiplier", ToolTip="Scales playback pitch. 1.0 = original pitch."))
+	float AC_PitchMultiplier = 1.0f;
+
+	// Attachment for the internally-created UAudioComponent (SceneComponent)
+	UPROPERTY(EditAnywhere, Category="Open3DStream|Audio|Attachment", meta=(DisplayName="Attach Parent", ToolTip="Optional parent scene component to attach the internal UAudioComponent to. If unset, attaches to the Actor's RootComponent."))
+	FComponentReference AC_AttachParent;
+
+	UPROPERTY(EditAnywhere, Category="Open3DStream|Audio|Attachment", meta=(DisplayName="Attach Socket Name", ToolTip="Optional socket to use when attaching to the parent component."))
+	FName AC_AttachSocketName;
+
 	// AudioComponent configuration (applies to the auto-created component)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Attenuation", meta=(DisplayName="Allow Spatialization", ToolTip="Whether to spatialize this sound when playing in 3D."))
 	bool bAC_AllowSpatialization = false;
@@ -57,19 +73,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sound", meta=(DisplayName="Is UI Sound", ToolTip="If true, plays as a non-spatialized UI sound and may bypass reverb/occlusion."))
 	bool bAC_IsUISound = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sound", meta=(DisplayName="Volume Multiplier", ClampMin="0.0", ToolTip="Scales the overall output level of the audio component. 1.0 = original level."))
-	float AC_VolumeMultiplier = 1.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sound", meta=(DisplayName="Pitch Multiplier", ToolTip="Scales playback pitch. 1.0 = original pitch."))
-	float AC_PitchMultiplier = 1.0f;
+    
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Attenuation", meta=(DisplayName="Override Attenuation", ToolTip="Enable per-instance attenuation overrides below instead of using the asset's attenuation settings."))
 	bool bAC_OverrideAttenuation = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Attenuation", meta=(DisplayName="Attenuation Settings", EditCondition="!bAC_OverrideAttenuation", ToolTip="Asset-based attenuation settings to apply when not overriding."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Attenuation", meta=(DisplayName="Attenuation Settings", EditCondition="!bAC_OverrideAttenuation", EditConditionHides, ToolTip="Asset-based attenuation settings to apply when not overriding."))
 	TObjectPtr<USoundAttenuation> AC_AttenuationSettings = nullptr;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Attenuation", meta=(DisplayName="Attenuation Overrides", EditCondition="bAC_OverrideAttenuation", ToolTip="Per-instance attenuation overrides used when Override Attenuation is enabled."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Attenuation", meta=(DisplayName="Attenuation Overrides", EditCondition="bAC_OverrideAttenuation", EditConditionHides, ToolTip="Per-instance attenuation overrides used when Override Attenuation is enabled."))
 	FSoundAttenuationSettings AC_AttenuationOverrides;
 
 	// Submix Sends
@@ -101,6 +113,7 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void OnRegister() override;
 
 private:
 	void OnAudioFrame(const FString& StreamLabel, const FString& SubjectName, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate);

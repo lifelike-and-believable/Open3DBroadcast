@@ -10,6 +10,8 @@
 // Needed for AActor definition used by GetOwner() and attachment calls
 #include "GameFramework/Actor.h"
 #include "Sound/SoundAttenuation.h"
+// For scene component attachment
+#include "Components/SceneComponent.h"
 // Submix/Effects/Concurrency/Modulation support
 #include "Sound/SoundSubmix.h"
 #include "Sound/SoundSubmixSend.h"
@@ -27,6 +29,29 @@ UO3DSRemoteAudioComponent::UO3DSRemoteAudioComponent()
 	PrimaryComponentTick.bCanEverTick = false;
 }
 
+void UO3DSRemoteAudioComponent::OnRegister()
+{
+	Super::OnRegister();
+
+	// Attach this SceneComponent to the specified parent (or owner's root)
+	USceneComponent* ParentToAttach = nullptr;
+	if (AActor* Owner = GetOwner())
+	{
+		if (UActorComponent* RefComp = AC_AttachParent.GetComponent(Owner))
+		{
+			ParentToAttach = Cast<USceneComponent>(RefComp);
+		}
+		if (!ParentToAttach)
+		{
+			ParentToAttach = Owner->GetRootComponent();
+		}
+	}
+	if (ParentToAttach && ParentToAttach != GetAttachParent())
+	{
+		AttachToComponent(ParentToAttach, FAttachmentTransformRules::KeepRelativeTransform, AC_AttachSocketName);
+	}
+}
+
 void UO3DSRemoteAudioComponent::BeginPlay()
 {
 	Super::BeginPlay();
@@ -36,10 +61,8 @@ void UO3DSRemoteAudioComponent::BeginPlay()
 	if (AudioComp)
 	{
 		AudioComp->RegisterComponent();
-		if (GetOwner() && GetOwner()->GetRootComponent())
-		{
-			AudioComp->AttachToComponent(GetOwner()->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
-		}
+		// Attach internal audio component to this SceneComponent for consistent transform inheritance
+		AudioComp->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
 		// Configure from mirrored properties (leave out Sound Source)
 		AudioComp->bAutoActivate = bAC_AutoActivate;
 		AudioComp->bAllowSpatialization = bAC_AllowSpatialization;
