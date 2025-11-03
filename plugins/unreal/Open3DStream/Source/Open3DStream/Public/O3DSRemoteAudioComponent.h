@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
+#include "Components/SceneComponent.h"
 #include "LiveLinkTypes.h"
 #include "Engine/EngineTypes.h" // FComponentReference
 #include "O3DSRemoteAudioComponent.generated.h"
@@ -30,7 +30,7 @@ enum class EO3DSRemoteAudioMode : uint8
 };
 
 UCLASS(ClassGroup=(Open3DStream), meta=(BlueprintSpawnableComponent))
-class OPEN3DSTREAM_API UO3DSRemoteAudioComponent : public UActorComponent
+class OPEN3DSTREAM_API UO3DSRemoteAudioComponent : public USceneComponent
 {
 	GENERATED_BODY()
 public:
@@ -113,6 +113,7 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void OnRegister() override;
 
 private:
 	void OnAudioFrame(const FString& StreamLabel, const FString& SubjectName, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate);
