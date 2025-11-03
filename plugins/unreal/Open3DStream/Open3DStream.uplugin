@@ -26,13 +26,15 @@
 		{
 			"Name": "Open3DStream",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": ["Open3DShared"]
 		},
 		{
 			"Name": "Open3DBroadcast",
 			"Type": "Runtime",
 			"LoadingPhase": "Default",
-			"WhitelistPlatforms": ["Win64", "Linux", "Mac"]
+			"AdditionalDependencies": ["Open3DShared"]
 		}
 	]
 }
+
