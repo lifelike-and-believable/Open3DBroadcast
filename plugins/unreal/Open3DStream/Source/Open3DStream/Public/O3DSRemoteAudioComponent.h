@@ -11,6 +11,12 @@ class UAudioComponent;
 class USoundWaveProcedural;
 class USoundAttenuation;
 struct FSoundAttenuationSettings;
+class USoundSubmix;
+class USoundEffectSourcePresetChain;
+class USoundConcurrency;
+struct FSoundSubmixSendInfo;
+struct FSoundConcurrencySettings;
+struct FSoundModulationDestinationSettings;
 
 namespace O3DS { struct FAudioFrameMeta; }
 
@@ -65,6 +71,32 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio|AudioComponent", meta=(EditCondition="bAC_OverrideAttenuation"))
 	FSoundAttenuationSettings AC_AttenuationOverrides;
+
+	// Submix Sends
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio|AudioComponent|Submix")
+	TArray<FSoundSubmixSendInfo> AC_SubmixSends;
+
+	// Source Effect Chain
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio|AudioComponent|Effects")
+	TObjectPtr<USoundEffectSourcePresetChain> AC_SourceEffectChain = nullptr;
+
+	// Modulation (basic volume/pitch destinations)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio|AudioComponent|Modulation")
+	FSoundModulationDestinationSettings AC_VolumeModulation;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio|AudioComponent|Modulation")
+	FSoundModulationDestinationSettings AC_PitchModulation;
+
+	// Concurrency
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio|AudioComponent|Concurrency")
+	TArray<TObjectPtr<USoundConcurrency>> AC_ConcurrencySet;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio|AudioComponent|Concurrency")
+	FSoundConcurrencySettings AC_ConcurrencyOverrides;
+
+	// Auto-activate the internal audio component
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio|AudioComponent")
+	bool bAC_AutoActivate = true;
 
 protected:
 	virtual void BeginPlay() override;
