@@ -50,6 +50,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio")
 	float Gain =1.0f;
 
+	// Quick access mixers at top
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio", meta=(DisplayName="Volume Multiplier", ClampMin="0.0", ToolTip="Scales the overall output level of the audio component. 1.0 = original level."))
+	float AC_VolumeMultiplier = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio", meta=(DisplayName="Pitch Multiplier", ToolTip="Scales playback pitch. 1.0 = original pitch."))
+	float AC_PitchMultiplier = 1.0f;
+
 	// AudioComponent configuration (applies to the auto-created component)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Attenuation", meta=(DisplayName="Allow Spatialization", ToolTip="Whether to spatialize this sound when playing in 3D."))
 	bool bAC_AllowSpatialization = false;
@@ -57,19 +64,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sound", meta=(DisplayName="Is UI Sound", ToolTip="If true, plays as a non-spatialized UI sound and may bypass reverb/occlusion."))
 	bool bAC_IsUISound = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sound", meta=(DisplayName="Volume Multiplier", ClampMin="0.0", ToolTip="Scales the overall output level of the audio component. 1.0 = original level."))
-	float AC_VolumeMultiplier = 1.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sound", meta=(DisplayName="Pitch Multiplier", ToolTip="Scales playback pitch. 1.0 = original pitch."))
-	float AC_PitchMultiplier = 1.0f;
+    
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Attenuation", meta=(DisplayName="Override Attenuation", ToolTip="Enable per-instance attenuation overrides below instead of using the asset's attenuation settings."))
 	bool bAC_OverrideAttenuation = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Attenuation", meta=(DisplayName="Attenuation Settings", EditCondition="!bAC_OverrideAttenuation", ToolTip="Asset-based attenuation settings to apply when not overriding."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Attenuation", meta=(DisplayName="Attenuation Settings", EditCondition="!bAC_OverrideAttenuation", EditConditionHides, ToolTip="Asset-based attenuation settings to apply when not overriding."))
 	TObjectPtr<USoundAttenuation> AC_AttenuationSettings = nullptr;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Attenuation", meta=(DisplayName="Attenuation Overrides", EditCondition="bAC_OverrideAttenuation", ToolTip="Per-instance attenuation overrides used when Override Attenuation is enabled."))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Attenuation", meta=(DisplayName="Attenuation Overrides", EditCondition="bAC_OverrideAttenuation", EditConditionHides, ToolTip="Per-instance attenuation overrides used when Override Attenuation is enabled."))
 	FSoundAttenuationSettings AC_AttenuationOverrides;
 
 	// Submix Sends
