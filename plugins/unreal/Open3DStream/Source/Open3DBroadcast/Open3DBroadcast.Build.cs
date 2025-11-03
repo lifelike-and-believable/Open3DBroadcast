@@ -4,6 +4,7 @@ using UnrealBuildTool;
 using System.Linq; // For IEnumerable<T>.Contains extension
 using System.IO;
 
+ [SupportedTargetTypes(TargetType.Game, TargetType.Editor)]
 public class Open3DBroadcast : ModuleRules
 {
 	public Open3DBroadcast(ReadOnlyTargetRules Target) : base(Target)

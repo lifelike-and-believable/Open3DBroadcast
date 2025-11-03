@@ -4,6 +4,7 @@ using UnrealBuildTool;
 using System.IO;
 using System.Linq; // For IEnumerable<T>.Contains extension
 
+[SupportedTargetTypes(TargetType.Game, TargetType.Editor)]
 public class Open3DStream : ModuleRules
 {
 	public Open3DStream(ReadOnlyTargetRules Target) : base(Target)

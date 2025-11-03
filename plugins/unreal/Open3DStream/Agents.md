@@ -12,10 +12,3 @@
 - Ignore comments by bots (`github-actions`, `github-actions[bot]`) and CI messages.
 - Do not post `/ue` commands yourself; wait for a human to trigger CI (`/ue quickbuild` or `/ue test`).
 
-## How to run CI (human-triggered)
-
-- Post a comment on this PR:
-  - `/ue quickbuild` for a fast editor build
-  - `/ue test` for headless automation tests
-- The bot replies ✅/❌ with a link to the run.
-- Logs artifact: `ue-quick-logs-pr-<PR#>` (uploaded even on failure).

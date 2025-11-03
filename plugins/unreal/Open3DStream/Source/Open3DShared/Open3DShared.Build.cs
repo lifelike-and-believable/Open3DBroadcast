@@ -1,7 +1,10 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 using UnrealBuildTool;
+using System.Linq; // For IEnumerable<T>.Contains extension
+using System.IO;
 
+[SupportedTargetTypes(TargetType.Game, TargetType.Editor)]
 public class Open3DShared : ModuleRules
 {
     public Open3DShared(ReadOnlyTargetRules Target) : base(Target)
