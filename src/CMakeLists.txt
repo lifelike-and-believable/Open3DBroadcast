@@ -38,9 +38,8 @@ if(O3DS_WITH_WEBRTC)
 				"${O3DS_LIBDATACHANNEL_ROOT}/datachannel.lib"
 				"${O3DS_LIBDATACHANNEL_ROOT}/usrsctp.lib"
 				"${O3DS_LIBDATACHANNEL_ROOT}/juice.lib"
-				"${O3DS_LIBDATACHANNEL_ROOT}/mbedtls.lib"
-				"${O3DS_LIBDATACHANNEL_ROOT}/mbedx509.lib"
-				"${O3DS_LIBDATACHANNEL_ROOT}/mbedcrypto.lib"
+				"${O3DS_LIBDATACHANNEL_ROOT}/libssl.lib"
+				"${O3DS_LIBDATACHANNEL_ROOT}/libcrypto.lib"
 			)
 			set(LDC_SYSTEM_LIBS bcrypt synchronization)
 		elseif(APPLE)
@@ -48,9 +47,8 @@ if(O3DS_WITH_WEBRTC)
 				"${O3DS_LIBDATACHANNEL_ROOT}/libdatachannel.a"
 				"${O3DS_LIBDATACHANNEL_ROOT}/libusrsctp.a"
 				"${O3DS_LIBDATACHANNEL_ROOT}/libjuice.a"
-				"${O3DS_LIBDATACHANNEL_ROOT}/libmbedtls.a"
-				"${O3DS_LIBDATACHANNEL_ROOT}/libmbedx509.a"
-				"${O3DS_LIBDATACHANNEL_ROOT}/libmbedcrypto.a"
+				"${O3DS_LIBDATACHANNEL_ROOT}/libssl.a"
+				"${O3DS_LIBDATACHANNEL_ROOT}/libcrypto.a"
 			)
 			set(LDC_SYSTEM_LIBS "")
 		else()
@@ -59,9 +57,8 @@ if(O3DS_WITH_WEBRTC)
 				"${O3DS_LIBDATACHANNEL_ROOT}/libdatachannel.a"
 				"${O3DS_LIBDATACHANNEL_ROOT}/libusrsctp.a"
 				"${O3DS_LIBDATACHANNEL_ROOT}/libjuice.a"
-				"${O3DS_LIBDATACHANNEL_ROOT}/libmbedtls.a"
-				"${O3DS_LIBDATACHANNEL_ROOT}/libmbedx509.a"
-				"${O3DS_LIBDATACHANNEL_ROOT}/libmbedcrypto.a"
+				"${O3DS_LIBDATACHANNEL_ROOT}/libssl.a"
+				"${O3DS_LIBDATACHANNEL_ROOT}/libcrypto.a"
 			)
 			set(LDC_SYSTEM_LIBS "")
 		endif()

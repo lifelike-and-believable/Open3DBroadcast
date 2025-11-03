@@ -61,9 +61,8 @@ jobs:
             "$pluginLib\webrtc\datachannel.lib",
             "$pluginLib\webrtc\juice.lib",
             "$pluginLib\webrtc\usrsctp.lib",
-            "$pluginLib\webrtc\mbedtls.lib",
-            "$pluginLib\webrtc\mbedx509.lib",
-            "$pluginLib\webrtc\mbedcrypto.lib"
+            "$pluginLib\webrtc\libssl.lib",
+            "$pluginLib\webrtc\libcrypto.lib"
           )
           $missing = @()
           foreach ($lib in $webrtcLibs) { if (!(Test-Path $lib)) { $missing += $lib } }

@@ -10,21 +10,21 @@ Open3DStream uses libdatachannel for WebRTC support, providing real-time data ch
 
 libdatachannel is built as a **static library only** with the following configuration:
 
-- **TLS Backend**: MbedTLS v3.6.5 (stable) with DTLS-SRTP enabled
-  - **Important**: DTLS-SRTP must be explicitly enabled via `python scripts/config.py set MBEDTLS_SSL_DTLS_SRTP`
-  - MbedTLS 4.0+ (development) is not compatible with libdatachannel 0.23.2
+- **TLS Backend**: OpenSSL (default) for DTLS/SRTP support
+  - OpenSSL is the default TLS backend and provides robust DTLS-SRTP support
+  - Compatible with libdatachannel 0.23.2 and later versions
 - **No Media Support**: Built with `NO_MEDIA=ON` to avoid libsrtp and related dependencies
 - **No WebSocket Support**: Built with `NO_WEBSOCKET=ON` to minimize dependencies
 - **Static Linking**: Only static libraries are produced and consumed
 
-### Why MbedTLS?
+### Why OpenSSL?
 
-We use MbedTLS instead of OpenSSL or GnuTLS for several reasons:
+We use OpenSSL as the TLS backend for several reasons:
 
-1. **Licensing**: MbedTLS uses Apache 2.0 license, which is more permissive and compatible with commercial projects
-2. **Minimal Dependencies**: Smaller footprint and fewer system dependencies
-3. **CI Reproducibility**: Easier to build from source consistently across all platforms
-4. **Cross-Platform**: Works consistently on Windows, Linux, and macOS
+1. **Industry Standard**: OpenSSL is widely used and well-supported across all platforms
+2. **Performance**: Better performance characteristics for cryptographic operations
+3. **Compatibility**: Excellent compatibility with existing infrastructure and tools
+4. **Active Development**: Well-maintained with regular security updates
 
 ### Why No Media/WebSocket Support?
 
@@ -63,24 +63,27 @@ The libdatachannel build workflow is configured for **manual trigger only** (`wo
 The GitHub Actions workflow `.github/workflows/build-libdatachannel.yml` builds libdatachannel for all platforms:
 
 1. **Clone Repository**: Checks out Open3DStream with all submodules
-2. **Build MbedTLS**: 
-   - Configures with `GEN_FILES=ON`, `ENABLE_TESTING=OFF`, `ENABLE_PROGRAMS=OFF`
-   - Builds and installs to a staging directory
+2. **Install OpenSSL**: 
+   - Windows: Installs via Chocolatey
+   - Linux: Uses system libssl-dev package
+   - macOS: Installs via Homebrew
 3. **Build libdatachannel**:
    - Configures with required flags:
      ```
      -DBUILD_SHARED_LIBS=OFF
      -DNO_MEDIA=ON
      -DNO_WEBSOCKET=ON
-     -DUSE_MBEDTLS=ON
+     -DUSE_GNUTLS=OFF
+     -DUSE_MBEDTLS=OFF
      -DNO_EXAMPLES=ON
      -DNO_TESTS=ON
      ```
-   - Points to MbedTLS installation
+   - OpenSSL is automatically detected by CMake
    - Builds and installs static library
 4. **Package Artifacts**: 
    - Collects headers from `include/rtc/`
    - Collects static library (`datachannel.lib` on Windows, `libdatachannel.a` on Linux/macOS)
+   - Collects OpenSSL libraries
    - Uploads as CI artifacts
 
 ### Supported Platforms
@@ -145,15 +148,12 @@ If you need to build libdatachannel locally for development:
 #### Windows
 
 ```powershell
-# Build MbedTLS
-cd thirdparty/mbedtls
-cmake -S . -B build -DGEN_FILES=ON -DENABLE_TESTING=OFF -DENABLE_PROGRAMS=OFF -DCMAKE_INSTALL_PREFIX=../../install
-cmake --build build --config Release
-cmake --install build --config Release
+# Install OpenSSL (if not already installed)
+choco install openssl -y
 
 # Build libdatachannel
-cd ../libdatachannel
-cmake -S . -B build -DBUILD_SHARED_LIBS=OFF -DNO_MEDIA=ON -DNO_WEBSOCKET=ON -DUSE_MBEDTLS=ON -DNO_EXAMPLES=ON -DNO_TESTS=ON -DCMAKE_PREFIX_PATH=../../install -DCMAKE_INSTALL_PREFIX=../../install
+cd thirdparty/libdatachannel
+cmake -S . -B build -DBUILD_SHARED_LIBS=OFF -DNO_MEDIA=ON -DNO_WEBSOCKET=ON -DUSE_GNUTLS=OFF -DUSE_MBEDTLS=OFF -DNO_EXAMPLES=ON -DNO_TESTS=ON -DCMAKE_INSTALL_PREFIX=../../install
 cmake --build build --config Release
 cmake --install build --config Release
 
@@ -165,15 +165,13 @@ Copy-Item ../../install/lib/datachannel.lib ../../../plugins/unreal/Open3DStream
 #### Linux/macOS
 
 ```bash
-# Build MbedTLS
-cd thirdparty/mbedtls
-cmake -S . -B build -DGEN_FILES=ON -DENABLE_TESTING=OFF -DENABLE_PROGRAMS=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=../../install
-cmake --build build
-cmake --install build
+# Install OpenSSL (if not already installed)
+# Linux: sudo apt-get install libssl-dev
+# macOS: brew install openssl
 
 # Build libdatachannel
-cd ../libdatachannel
-cmake -S . -B build -DBUILD_SHARED_LIBS=OFF -DNO_MEDIA=ON -DNO_WEBSOCKET=ON -DUSE_MBEDTLS=ON -DNO_EXAMPLES=ON -DNO_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=../../install -DCMAKE_INSTALL_PREFIX=../../install
+cd thirdparty/libdatachannel
+cmake -S . -B build -DBUILD_SHARED_LIBS=OFF -DNO_MEDIA=ON -DNO_WEBSOCKET=ON -DUSE_GNUTLS=OFF -DUSE_MBEDTLS=OFF -DNO_EXAMPLES=ON -DNO_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=../../install
 cmake --build build
 cmake --install build
 
@@ -186,17 +184,17 @@ cp ../../install/lib/libdatachannel.a ../../../plugins/unreal/Open3DStream/Third
 
 ### Explicitly NOT Supported
 
-- **OpenSSL**: Not used due to licensing concerns and system dependency issues
 - **GnuTLS**: Not used to maintain consistency across platforms
+- **MbedTLS**: Previously used, now replaced with OpenSSL for better compatibility
 - **Dynamic/Shared Libraries**: Only static libraries are supported for the Unreal plugin
 - **Media Support**: Not needed for Open3DStream's use case
 - **WebSocket Support**: Not needed for Open3DStream's use case
 
 ### Version Requirements
 
-- **MbedTLS**: 4.0+ (development branch) 
-  - **Note**: Stable 3.x releases do not have DTLS-SRTP APIs
-  - The submodule in `thirdparty/mbedtls` is checked out to the `development` branch
+- **OpenSSL**: 1.1.1 or later (3.x recommended)
+  - Available via system package managers on Linux/macOS
+  - Available via Chocolatey or manual install on Windows
 - **libdatachannel**: 0.23.2 or compatible
 - **CMake**: 3.13 or later
 - **C++ Standard**: C++17
@@ -205,9 +203,9 @@ cp ../../install/lib/libdatachannel.a ../../../plugins/unreal/Open3DStream/Third
 
 ### Build Failures
 
-1. **MbedTLS not found**: Ensure MbedTLS is built and installed first, and `CMAKE_PREFIX_PATH` points to the installation directory
+1. **OpenSSL not found**: Ensure OpenSSL development libraries are installed (libssl-dev on Linux, openssl via Chocolatey/Homebrew on Windows/macOS)
 2. **Missing headers**: Check that the `include/rtc/` directory is properly copied to the plugin's lib directory
-3. **Linker errors about OpenSSL**: Ensure `USE_MBEDTLS=ON` and `USE_GNUTLS=OFF` are set
+3. **Linker errors about TLS**: Ensure `USE_GNUTLS=OFF` and `USE_MBEDTLS=OFF` are set to use OpenSSL as the default backend
 4. **Media-related errors**: Ensure `NO_MEDIA=ON` is set
 
 ### Plugin Integration Issues
@@ -219,11 +217,11 @@ cp ../../install/lib/libdatachannel.a ../../../plugins/unreal/Open3DStream/Third
 ## References
 
 - [libdatachannel GitHub](https://github.com/paullouisageneau/libdatachannel)
-- [MbedTLS GitHub](https://github.com/Mbed-TLS/mbedtls)
+- [OpenSSL Website](https://www.openssl.org/)
 - [Open3DStream WebRTC Documentation](WEBRTC_QUICKSTART.md)
 
 ## License
 
 - **libdatachannel**: MPL 2.0
-- **MbedTLS**: Apache 2.0
+- **OpenSSL**: Apache-style license
 - **Open3DStream**: See LICENSE file

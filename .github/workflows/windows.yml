@@ -41,13 +41,11 @@ jobs:
       - name: CMake
         run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
             
-      - name: mbedtls
-        working-directory: thirdparty/mbedtls
+      - name: OpenSSL
         run: |
-          mkdir build
-          cmake -S . -B build -DGEN_FILES=ON -DENABLE_TESTING=Off -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
-          cmake --build build --config Release && cmake --install build
-        shell: cmd
+          choco install openssl -y --no-progress
+          echo "OpenSSL installed successfully"
+        shell: powershell
 
       - name: NNG
         working-directory: thirdparty/nng

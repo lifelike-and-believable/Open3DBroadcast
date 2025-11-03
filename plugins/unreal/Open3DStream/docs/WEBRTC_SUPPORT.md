@@ -30,7 +30,7 @@ The WebRTC implementation uses libdatachannel, a lightweight C++ library that pr
 
 1. CMake 3.13 or higher
 2. A C++17 compiler
-3. No external libdatachannel install required for typical builds: Open3DStream bundles and links against libdatachannel (and mbedtls) via its thirdparty configuration and prebuilt binaries.
+3. No external libdatachannel install required for typical builds: Open3DStream bundles and links against libdatachannel (with OpenSSL) via its thirdparty configuration and prebuilt binaries.
 
 ### Installation
 
