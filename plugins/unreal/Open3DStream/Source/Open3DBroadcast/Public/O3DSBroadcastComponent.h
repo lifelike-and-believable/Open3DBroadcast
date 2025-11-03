@@ -23,6 +23,14 @@ enum class EO3DSWebRTCAudioMode : uint8
  Input
 };
 
+// Sender-side WebRTC backend selection (mirrors shared enum; kept local for reflection/UI)
+UENUM(BlueprintType)
+enum class EO3DSWebRtcBackendSender : uint8
+{
+	LibDataChannel UMETA(DisplayName="Peer-to-Peer (libdatachannel)"),
+	LiveKit       UMETA(DisplayName="LiveKit SFU")
+};
+
 // Descriptor capturing a skeleton's stable description
 USTRUCT()
 struct OPEN3DBROADCAST_API FO3DSSkeletonDescriptor
@@ -143,6 +151,10 @@ public:
 
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bShowWebRtcProps", EditConditionHides))
  EO3DSWebRtcMode WebRtcMode = EO3DSWebRtcMode::Client;
+
+ // Backend selection (controls connector backend and LiveKit UI visibility)
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|WebRTC", meta=(EditCondition="bShowWebRtcProps", EditConditionHides))
+ EO3DSWebRtcBackendSender WebRtcBackend = EO3DSWebRtcBackendSender::LibDataChannel;
 
  // Common WebRTC room across backends (shown under WebRTC heading)
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|WebRTC", meta=(EditCondition="bShowWebRtcProps", EditConditionHides))

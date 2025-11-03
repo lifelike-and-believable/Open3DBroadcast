@@ -346,6 +346,17 @@ void UO3DSBroadcastComponent::StartInternalTransport()
  if (TransportFamily == EO3DSTransportFamily::WebRTC)
  {
  EffectiveUrl = O3DS_EnsureWebRtcLocalPathId(EffectiveUrl, WebRtcMode, TEXT("client"));
+
+	 // Add backend and token hints when using LiveKit backend
+	 if (bWebRtcBackendIsLiveKit)
+	 {
+		 const FString BackendParam = TEXT("backend=livekit");
+		 EffectiveUrl += EffectiveUrl.Contains(TEXT("?")) ? (TEXT("&") + BackendParam) : (TEXT("?") + BackendParam);
+		 if (!LiveKitToken.IsEmpty())
+		 {
+			 EffectiveUrl += FString::Printf(TEXT("&token=%s"), *LiveKitToken);
+		 }
+	 }
  }
 
  const FString ProtocolName = O3DS_GetProtocolNameLegacy(TransportFamily, TcpMode, WebRtcMode);
@@ -1227,6 +1238,9 @@ void UO3DSBroadcastComponent::UpdateEditConditionHelpers()
  bTransportFamilyIsTCP = (TransportFamily == EO3DSTransportFamily::TCP);
  bTransportFamilyIsWebRTC = (TransportFamily == EO3DSTransportFamily::WebRTC);
 
+ // Backend flag driven by selection
+ bWebRtcBackendIsLiveKit = (WebRtcBackend == EO3DSWebRtcBackendSender::LiveKit);
+
  // Presentation flags depend on auto-create and family/backend/audio
  const bool bAuto = bAutoCreateTransport;
  bShowNngProps = bAuto && bTransportFamilyIsNNG;
@@ -1274,6 +1288,8 @@ void UO3DSBroadcastComponent::PostEditChangeProperty(FPropertyChangedEvent& Prop
 		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, WebRTCAudioNumChannels),
 		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, WebRTCAudioBitrateKbps),
 		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, WebRTCAudioPlayoutDelayMs),
+        GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, WebRtcBackend),
+        GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, LiveKitToken),
 		// Animation/pose serialization related
 		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, bClampMorphCurvesToUnit),
 		GET_MEMBER_NAME_CHECKED(UO3DSBroadcastComponent, bDropNaNAndInfinity),
