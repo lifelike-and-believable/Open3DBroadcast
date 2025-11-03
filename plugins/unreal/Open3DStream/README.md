@@ -58,6 +58,29 @@ Both modules are built and available by default.
 2. Add source: **+ Source → Open3DStream Source**
 3. Configure connection URL and protocol
 
+#### WebRTC Receiver (Server Role)
+To receive animation and audio from a WebRTC broadcaster:
+
+1. Add **Open3DStream Source** in Live Link
+2. Set **Protocol** = `WebRTC Server`
+3. Set **URL** = signaling server URL (e.g., `ws://localhost:8080`)
+4. Set **WebRTC Room** = matching room name (e.g., `room1`)
+5. Enable **Enable WebRTC Audio** for audio playback
+6. (Optional) Adjust **Audio Playout Delay Ms** for resilience vs. latency tradeoff
+
+**CVars:**
+- `o3ds.Receiver.WebRTC.Log` - Enable receiver adapter logging (0/1)
+- `o3ds.Receiver.Audio.Log` - Enable Opus decoder logging (0/1)
+- `o3ds.Receiver.DebugParse` - Enable packet parsing diagnostics (0/1)
+
+**Audio Routing:**
+Decoded audio is published to `FO3DSAudioBus` with metadata (stream label, channels, rate). Components can subscribe to `FO3DSAudioBus::OnPcm16()` for in-world playback.
+
+**Limitations (MVP):**
+- No jitter buffer (decode per-packet; may cause artifacts on lossy links)
+- Non-48kHz audio is dropped with verbose log
+- Reconnect requires manual source restart
+
 ### Broadcasting (Open3DBroadcast module)
 
 **Requirements**: Unreal Engine 5.6+, built with `O3DS_WITH_BROADCAST=1` (enabled by default)
