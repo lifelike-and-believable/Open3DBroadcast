@@ -22,24 +22,22 @@
 			"Name": "Open3DShared",
 			"Type": "Runtime",
 			"LoadingPhase": "Default",
-			"SupportedTargetTypes" : ["Win64", "Linux", "Mac"]
 		},
 		{
 			"Name": "Open3DStream",
 			"Type": "Runtime",
 			"LoadingPhase": "Default",
 			"AdditionalDependencies": ["Open3DShared"]
-			"SupportedTargetTypes" : ["Win64", "Linux", "Mac"]
 		},
 		{
 			"Name": "Open3DBroadcast",
 			"Type": "Runtime",
 			"LoadingPhase": "Default",
 			"AdditionalDependencies": ["Open3DShared"]
-			"SupportedTargetTypes" : ["Win64", "Linux", "Mac"]
 		}
 	]
 }
+
 
 
 
