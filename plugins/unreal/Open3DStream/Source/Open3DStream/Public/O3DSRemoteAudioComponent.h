@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "LiveLinkTypes.h"
+#include "Engine/EngineTypes.h" // FComponentReference
 #include "O3DSRemoteAudioComponent.generated.h"
 
 class UAudioComponent;
@@ -17,6 +18,7 @@ class USoundConcurrency;
 struct FSoundSubmixSendInfo;
 struct FSoundConcurrencySettings;
 struct FSoundModulationDestinationSettings;
+class USceneComponent;
 
 namespace O3DS { struct FAudioFrameMeta; }
 
@@ -56,6 +58,13 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Audio", meta=(DisplayName="Pitch Multiplier", ToolTip="Scales playback pitch. 1.0 = original pitch."))
 	float AC_PitchMultiplier = 1.0f;
+
+	// Attachment for the internally-created UAudioComponent (SceneComponent)
+	UPROPERTY(EditAnywhere, Category="Open3DStream|Audio|Attachment", meta=(DisplayName="Attach Parent", ToolTip="Optional parent scene component to attach the internal UAudioComponent to. If unset, attaches to the Actor's RootComponent."))
+	FComponentReference AC_AttachParent;
+
+	UPROPERTY(EditAnywhere, Category="Open3DStream|Audio|Attachment", meta=(DisplayName="Attach Socket Name", ToolTip="Optional socket to use when attaching to the parent component."))
+	FName AC_AttachSocketName;
 
 	// AudioComponent configuration (applies to the auto-created component)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Attenuation", meta=(DisplayName="Allow Spatialization", ToolTip="Whether to spatialize this sound when playing in 3D."))

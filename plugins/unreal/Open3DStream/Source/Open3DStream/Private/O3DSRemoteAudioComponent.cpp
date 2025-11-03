@@ -10,6 +10,8 @@
 // Needed for AActor definition used by GetOwner() and attachment calls
 #include "GameFramework/Actor.h"
 #include "Sound/SoundAttenuation.h"
+// For scene component attachment
+#include "Components/SceneComponent.h"
 // Submix/Effects/Concurrency/Modulation support
 #include "Sound/SoundSubmix.h"
 #include "Sound/SoundSubmixSend.h"
@@ -36,9 +38,22 @@ void UO3DSRemoteAudioComponent::BeginPlay()
 	if (AudioComp)
 	{
 		AudioComp->RegisterComponent();
-		if (GetOwner() && GetOwner()->GetRootComponent())
+		// Choose attachment parent: explicit reference first, then owner's root
+		USceneComponent* ParentToAttach = nullptr;
+		if (GetOwner())
 		{
-			AudioComp->AttachToComponent(GetOwner()->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
+			if (UActorComponent* RefComp = AC_AttachParent.GetComponent(GetOwner()))
+			{
+				ParentToAttach = Cast<USceneComponent>(RefComp);
+			}
+			if (!ParentToAttach)
+			{
+				ParentToAttach = GetOwner()->GetRootComponent();
+			}
+		}
+		if (ParentToAttach)
+		{
+			AudioComp->AttachToComponent(ParentToAttach, FAttachmentTransformRules::KeepRelativeTransform, AC_AttachSocketName);
 		}
 		// Configure from mirrored properties (leave out Sound Source)
 		AudioComp->bAutoActivate = bAC_AutoActivate;
