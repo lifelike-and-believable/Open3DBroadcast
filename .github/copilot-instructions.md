@@ -77,6 +77,7 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 - **Logging:** Quiet hot paths. Only state transitions and errors are logged by default (see §9).
 - **Configs:** No hard‑coded credentials, ports, or absolute paths. Use project settings or env vars (see §8).
 - **Docs & examples:** Update code comments and the README/CHANGELOG when behavior or schema changes.
+- **WebRTC testing:** Always update and test `UO3DSWebRTCConnectorComponent` in isolation after changes to `IWebRTCConnector` or `LibDataChannelConnector` before modifying broadcaster/receiver code.
 
 **Prohibited**
 - Calling Unreal APIs without verifying exact **UE 5.6** signatures in the official docs.
@@ -99,6 +100,21 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 - Prefer small, cohesive PRs over omnibus changes.
 - Document tradeoffs explicitly in PR descriptions.
 - Where choices exist (e.g., codec, transport), record rationale in comments to save future archeologists from guesswork.
+
+---
+
+## 5) Documentation vs Implementation Priority
+
+**Golden Rule:** Documentation describes the **intended** workflow and behavior. When implementation doesn't match documentation:
+
+1. **Default action:** Fix the implementation to match the docs.
+2. **Exception only if:** Documentation is demonstrably wrong (contradicts specifications, impossible to implement, breaks backward compatibility).
+3. **Rationale:** Documentation represents deliberate design decisions. WIP implementation bugs should not drive doc rewrites.
+
+**In practice:**
+- If testing guide says "check Enable WebRTC Audio" but UI lacks the checkbox → add the checkbox, don't update the guide.
+- If docs describe a feature that isn't implemented yet → implement it, don't remove it from docs.
+- If docs contain factual errors (wrong API signatures, obsolete commands) → fix docs with clear justification in commit message.
 
 ---
 
