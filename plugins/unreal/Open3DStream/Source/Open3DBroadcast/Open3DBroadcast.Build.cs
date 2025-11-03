@@ -15,7 +15,8 @@ public class Open3DBroadcast : ModuleRules
 		
 		// Allow conditional compilation via O3DS_WITH_BROADCAST flag
 		bool bWithBroadcast = true;
-		if (Target.GlobalDefinitions.Contains("O3DS_WITH_BROADCAST=0"))
+		// Target.GlobalDefinitions can be null under some UAT/BuildPlugin contexts; guard access
+		if (Target.GlobalDefinitions != null && Target.GlobalDefinitions.Contains("O3DS_WITH_BROADCAST=0"))
 		{
 			bWithBroadcast = false;
 		}
