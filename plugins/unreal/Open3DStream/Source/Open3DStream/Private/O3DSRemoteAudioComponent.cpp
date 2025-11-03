@@ -9,6 +9,13 @@
 #include "O3DSStreamLogs.h"
 // Needed for AActor definition used by GetOwner() and attachment calls
 #include "GameFramework/Actor.h"
+#include "Sound/SoundAttenuation.h"
+// For scene component attachment
+#include "Components/SceneComponent.h"
+// Submix/Effects/Concurrency/Modulation support
+#include "Sound/SoundSubmix.h"
+#include "Sound/SoundSubmixSend.h"
+#include "Sound/SoundConcurrency.h"
 
 // Opt-in verbose logging for remote audio receive/playback
 static TAutoConsoleVariable<int32> CVarO3DSRemoteAudioDebug(
@@ -22,14 +29,49 @@ UO3DSRemoteAudioComponent::UO3DSRemoteAudioComponent()
 	PrimaryComponentTick.bCanEverTick = false;
 }
 
+void UO3DSRemoteAudioComponent::OnRegister()
+{
+	Super::OnRegister();
+
+	// Attach this SceneComponent to the specified parent (or owner's root)
+	USceneComponent* ParentToAttach = nullptr;
+	if (AActor* Owner = GetOwner())
+	{
+		if (UActorComponent* RefComp = AC_AttachParent.GetComponent(Owner))
+		{
+			ParentToAttach = Cast<USceneComponent>(RefComp);
+		}
+		if (!ParentToAttach)
+		{
+			ParentToAttach = Owner->GetRootComponent();
+		}
+	}
+	if (ParentToAttach && ParentToAttach != GetAttachParent())
+	{
+		AttachToComponent(ParentToAttach, FAttachmentTransformRules::KeepRelativeTransform, AC_AttachSocketName);
+	}
+}
+
 void UO3DSRemoteAudioComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (bAutoCreateAudioComponent)
+	// Always create and configure a dedicated AudioComponent
+	AudioComp = NewObject<UAudioComponent>(GetOwner());
+	if (AudioComp)
 	{
-		AudioComp = GetOwner() ? GetOwner()->FindComponentByClass<UAudioComponent>() : nullptr;
-		if (!AudioComp)
+		AudioComp->RegisterComponent();
+		// Attach internal audio component to this SceneComponent for consistent transform inheritance
+		AudioComp->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
+		// Configure from mirrored properties (leave out Sound Source)
+		AudioComp->bAutoActivate = bAC_AutoActivate;
+		AudioComp->bAllowSpatialization = bAC_AllowSpatialization;
+		AudioComp->bIsUISound = bAC_IsUISound;
+		AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, AC_VolumeMultiplier));
+		AudioComp->SetPitchMultiplier(AC_PitchMultiplier);
+		AudioComp->bOverrideAttenuation = bAC_OverrideAttenuation;
+		AudioComp->AttenuationSettings = AC_AttenuationSettings;
+		if (AudioComp->bOverrideAttenuation)
 		{
 			AudioComp = NewObject<UAudioComponent>(GetOwner());
 			if (AudioComp)
@@ -55,6 +97,8 @@ void UO3DSRemoteAudioComponent::BeginPlay()
 			// Respect user VolumeMultiplier when using an existing AudioComponent
 			bOwnsAudioComponent = false;
 		}
+
+		// Advanced audio settings will be applied on the procedural SoundWave when created
 	}
 
 	// Subscribe to global audio bus published by the network receiver
@@ -65,7 +109,7 @@ void UO3DSRemoteAudioComponent::BeginPlay()
 		if (!bOnce)
 		{
 			bOnce = true;
-			UE_LOG(LogO3DSReceiverAudio, Log, TEXT("Subscribed to FO3DSAudioBus (Gain=%.2f, AutoCreateAudioComp=%d)"), Gain, bAutoCreateAudioComponent ? 1 : 0);
+			UE_LOG(LogO3DSReceiverAudio, Log, TEXT("Subscribed to FO3DSAudioBus (Gain=%.2f)"), Gain);
 			if (!AudioComp)
 			{
 				UE_LOG(LogO3DSReceiverAudio, Warning, TEXT("No UAudioComponent present/created on owner '%s'"), *GetOwner()->GetName());
@@ -125,6 +169,20 @@ void UO3DSRemoteAudioComponent::EnsureSoundWave(int32 NumChannels, int32 SampleR
 			SoundWave->SoundGroup = SOUNDGROUP_Voice;
 			// Explicitly mark as procedural/streaming source
 			SoundWave->bProcedural = true;
+			// Apply mirrored settings that are defined on USoundBase/USoundWave
+			SoundWave->SourceEffectChain = AC_SourceEffectChain;
+			SoundWave->SoundSubmixSends = AC_SubmixSends;
+			// Concurrency
+			SoundWave->ConcurrencyOverrides = AC_ConcurrencyOverrides;
+			SoundWave->ConcurrencySet.Reset();
+			for (TObjectPtr<USoundConcurrency> Concurrency : AC_ConcurrencySet)
+			{
+				if (Concurrency)
+				{
+					SoundWave->ConcurrencySet.Add(Concurrency);
+				}
+			}
+			// Modulation destinations (omitted here if not available on this engine version)
 		}
 		CurrentChannels = NumChannels;
 		CurrentSampleRate = SampleRate;
@@ -132,7 +190,7 @@ void UO3DSRemoteAudioComponent::EnsureSoundWave(int32 NumChannels, int32 SampleR
 		if (AudioComp)
 		{
 			AudioComp->SetSound(SoundWave);
-			if (!AudioComp->IsPlaying())
+			if (bAC_AutoActivate && !AudioComp->IsPlaying())
 			{
 				AudioComp->Play();
 			}
