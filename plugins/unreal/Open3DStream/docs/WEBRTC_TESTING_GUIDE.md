@@ -12,15 +12,15 @@ This guide provides step-by-step instructions for testing the WebRTC receiver an
 
 ---
 
-## Important: Startup Order
+## Connection Order and Resilience
 
-**⚠️ Critical:** Until reconnect logic is implemented, you **must start components in this order**:
+The receiver and broadcaster now include reconnect logic:
 
-1. **Signaling Server** (first)
-2. **Receiver/Server** (second - waits for client)
-3. **Broadcaster/Client** (last - initiates connection)
+- Client-first is supported. If the client starts before the receiver, it will retry offers with backoff until the receiver appears.
+- Receiver survives signaling restarts and Live Link source recreation; it resets the PeerConnection and re-offers as needed.
+- If the DataChannel closes while signaling remains connected, the client will re-offer.
 
-Starting the client before the server may result in connection timeouts or failures. If this happens, restart the client after the receiver is up.
+Recommended order (for faster connects): signaling → receiver → broadcaster. Not strictly required.
 
 ---
 
@@ -79,11 +79,26 @@ The receiver is now **waiting for a client to connect**.
 
 To hear the audio stream:
 
-1. In the receiver editor's level, add a new actor (or use existing one)
-2. Add **O3DSRemoteAudioComponent**:
-   - **Receive Mode**: `Mix` (receives all audio)
-   - **Auto Create Audio Component**: ✓ (checked)
-   - **Gain**: `1.0`
+1. In the receiver editor's level, add a new actor (or use an existing one)
+2. Add **O3DSRemoteAudioComponent** (now a SceneComponent so it can be attached):
+    - Top section:
+       - **Receive Mode**: `Mix` (receives all audio) or `Subject`
+       - **LiveLink Subject Name**: set when using `Subject`
+       - **Stream Label Filter**: optional substring filter
+       - **Gain**: `1.0` (source-side scaling before enqueue)
+       - **Volume Multiplier** / **Pitch Multiplier**: component-level mix controls
+    - Attachment:
+       - **Attach Parent**: optional parent scene component (e.g., SkeletalMeshComponent)
+       - **Attach Socket Name**: optional socket on parent
+    - Attenuation:
+       - **Allow Spatialization**: enable for 3D placement
+       - **Override Attenuation**: when enabled, **Attenuation Overrides** become editable; otherwise use **Attenuation Settings** asset
+    - Routing & processing:
+       - **Submix Sends**: route to one or more submixes
+       - **Source Effect Chain**: optional source effects chain
+       - **Concurrency Set/Overrides**: concurrency behavior
+    - Activation:
+       - **Auto Activate**: ✓ (default; auto-plays when the procedural wave is ready)
 3. (Optional) Enable audio debug logging:
    ```
    o3ds.RemoteAudio.Debug 1
@@ -154,7 +169,7 @@ O3DS Opus Decoder: published <N> samples (<N> bytes) to Audio Bus
 
 With the sender's audio enabled (microphone or game audio):
 
-1. You should **hear audio** playing in the receiver editor (if O3DSRemoteAudioComponent is added)
+1. You should **hear audio** playing in the receiver editor (with O3DSRemoteAudioComponent added)
 2. Check receiver logs for audio activity:
    ```
    [Opus Decoder] decoded 960 samples (payload=93 bytes, ts=<N>)
@@ -364,12 +379,15 @@ python signaling-server.py
 6. For `Mix` mode: play music in UE (add AudioComponent with SoundWave)
 
 **Solutions (Receiver):**
-1. Verify **O3DSRemoteAudioComponent** is added to an actor
+1. Verify **O3DSRemoteAudioComponent** is added and attached where you expect
 2. Check component settings:
-   - **Receive Mode** = `Mix` (receives all audio)
-   - **Auto Create Audio Component** = checked
-   - **Gain** > 0
-3. Enable audio debug:
+   - **Receive Mode** = `Mix` (receives all audio) or a valid **Subject**
+   - **Auto Activate** = true (or call Play() manually if false)
+   - **Gain** > 0 and **Volume Multiplier** > 0
+3. Check routing/processing:
+   - If using Submix Sends, confirm the target submix is audible
+   - If using Source Effects Chain, disable temporarily to test
+4. Enable audio debug:
    ```
    o3ds.RemoteAudio.Debug 1
    o3ds.Receiver.Audio.Log 1
@@ -489,32 +507,32 @@ o3ds.RemoteAudio.Debug 0/1            // Log audio bus events and playback
 
 ---
 
-## Known Limitations (MVP)
+## Known Limitations
 
-These are expected behaviors in the current implementation:
+These are the current limits/caveats:
 
-1. **No reconnect logic:**
-   - If connection drops, manual restart required
-   - Client must start after server (see startup order above)
-
-2. **No jitter buffer:**
+1. **No jitter buffer:**
    - Audio decoded per-packet (no reordering)
    - May cause rare artifacts on lossy/reordered networks
    - Future: add jitter buffer for production deployments
 
-3. **48 kHz audio only:**
+2. **48 kHz audio only:**
    - Non-48kHz input is dropped with verbose log
    - Future: add resampler for arbitrary sample rates
 
-4. **No persistent signaling:**
+3. **No persistent signaling:**
    - Sample signaling server doesn't queue messages
    - Clients/servers must overlap connection window
    - Future: upgrade to production signaling with persistence
 
-5. **Single room per source:**
+4. **Single room per source:**
    - One Live Link source = one room
    - Multiple sources require multiple Live Link sources
    - Future: multi-room receiver or dynamic room switching
+
+5. **Modulation destinations (UE 5.6):**
+   - Volume/Pitch modulation properties are exposed on the component but may not be wired by default on 5.6 API surface.
+   - Future: version-aware wiring when engine exposes destinations on the component or sound asset.
 
 ---
 

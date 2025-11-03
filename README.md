@@ -97,6 +97,18 @@ docker run --rm open3dstream-repeater:local tcp://0.0.0.0:7000 tcp://0.0.0.0:700
    - **Protocol**: TCP Client, UDP Server, WebRTC Client, etc.
 4. Click **Create**
 
+#### Unreal Receiver Audio (WebRTC)
+
+To hear audio from a WebRTC sender, add `O3DSRemoteAudioComponent` to an actor in your level:
+
+- The component is a `USceneComponent` (attach to a parent component or socket as needed)
+- It always creates and manages an internal `UAudioComponent` + procedural `USoundWave`
+- Mirrored AudioComponent-style settings are available:
+   - Volume/Pitch at the top; Attenuation (with override gating); Submix Sends; Source Effect Chain; Concurrency; AutoActivate
+- Client-first and reconnect flows are supported (signaling restarts, re-offer on DataChannel close)
+
+See `plugins/unreal/Open3DStream/docs/WEBRTC_TESTING_GUIDE.md` for step-by-step setup and troubleshooting.
+
 ## Recent Updates
 
 ### Module layout update (UE 5.6)
@@ -127,6 +139,13 @@ These changes preserve prior behavior while making responsibilities clearer and 
 Added support for animation curves to enable morph target-based facial animation:
 
 ### WebRTC Status (October 2025)
+### Receiver Audio Polish & Reconnect (November 2025)
+
+- `O3DSRemoteAudioComponent` is now a `USceneComponent` with attachment options (parent/socket)
+- Always-owned internal `UAudioComponent` + procedural `USoundWave`
+- Mirrored AudioComponent features: Submix Sends, Source Effects Chain, Concurrency, AutoActivate (default true)
+- Editor experience: categories/tooltips aligned with `UAudioComponent` layout; Volume/Pitch surfaced at the top
+- Reconnect/resilience: client-first offer retry, signaling reconnect, re-offer on DataChannel close; receiver resets PC on new offers
 
 libdatachannel is integrated with OpenSSL and enabled by default across the codebase:
 
