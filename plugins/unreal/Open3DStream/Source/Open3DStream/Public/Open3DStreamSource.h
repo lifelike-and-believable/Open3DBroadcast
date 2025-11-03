@@ -14,6 +14,7 @@
 #define NET_BUFFER_SIZE (1024 * 48)
 
 class ILiveLinkClient;
+class FOpen3DSWebRtcReceiver;
 
 /*
 https://docs.unrealengine.com/en-US/API/Runtime/LiveLinkInterface/ILiveLinkSource/index.html
@@ -70,6 +71,9 @@ public:
     std::atomic<bool>  bIsValid;
 
     O3DSServer server;
+
+    // WebRTC receiver adapter (when protocol is WebRTC Server/Client)
+    TSharedPtr<FOpen3DSWebRtcReceiver> WebRtcReceiver;
 
     TSharedRef<FInternetAddr> mAddr;
 

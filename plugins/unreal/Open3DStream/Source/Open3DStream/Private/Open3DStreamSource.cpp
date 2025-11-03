@@ -11,6 +11,7 @@
 #include "O3DSHelpers.h"
 #include "UnrealModel.h"
 #include "o3ds/model.h"
+#include "WebRTC/Open3DSWebRtcReceiver.h"
 
 //#include "get_time.h"
 using namespace O3DS::Data;
@@ -142,25 +143,48 @@ void FOpen3DStreamSource::ReceiveClient(ILiveLinkClient* InClient, FGuid InSourc
 	 }
  }
 
- if (!server.start(Url, Protocol, &SourceSettings))
+ // Branch: if WebRTC, use the receiver adapter; otherwise use legacy server.start()
+ if (Protocol.ToString().Contains(TEXT("WebRTC")))
  {
- bIsValid = false;
+	 WebRtcReceiver = MakeShared<FOpen3DSWebRtcReceiver>();
+	 WebRtcReceiver->SetOnDataCallback([this](const TArray<uint8>& Bytes) { OnPackage(Bytes); });
+	 WebRtcReceiver->SetOnStateCallback([this](const FString& State, bool bIsError) { OnStatus(FText::FromString(State), bIsError); });
+
+	 if (!WebRtcReceiver->Start(SourceSettings))
+	 {
+		 UE_LOG(LogTemp, Error, TEXT("O3DS RX: WebRTC receiver failed to start"));
+		 bIsValid = false;
+	 }
+ }
+ else
+ {
+	 if (!server.start(Url, Protocol, &SourceSettings))
+	 {
+		 bIsValid = false;
+	 }
  }
  UpdateConnectionLastActive();
 }
 
 void FOpen3DStreamSource::Tick(float DeltaTime)
 {
- TimeSinceLastCheck += DeltaTime;
- if (TimeSinceLastCheck >= CheckInterval)
- {
- RemoveInactiveSubjects();
- TimeSinceLastCheck =0;
- }
- this->server.tick();
-}
+	TimeSinceLastCheck += DeltaTime;
+	if (TimeSinceLastCheck >= CheckInterval)
+	{
+		RemoveInactiveSubjects();
+		TimeSinceLastCheck =0;
+	}
 
-bool FOpen3DStreamSource::IsTickable() const
+	// Tick WebRTC receiver if active
+	if (WebRtcReceiver)
+	{
+		WebRtcReceiver->Tick(DeltaTime);
+	}
+	else
+	{
+		this->server.tick();
+	}
+}bool FOpen3DStreamSource::IsTickable() const
 {
  return true; // this->server.mTcp != nullptr;
 }
@@ -375,6 +399,14 @@ void FOpen3DStreamSource::RemoveInactiveSubjects()
 bool FOpen3DStreamSource::RequestSourceShutdown()
 {
  bIsValid = false;
+
+ // Stop WebRTC receiver if active
+ if (WebRtcReceiver)
+ {
+	 WebRtcReceiver->Stop();
+	 WebRtcReceiver.Reset();
+ }
+
  this->server.OnData.Unbind();
  this->server.stop();
  Client = nullptr;
