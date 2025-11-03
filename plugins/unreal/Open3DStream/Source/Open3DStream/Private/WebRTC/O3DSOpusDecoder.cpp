@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "WebRTC/O3DSOpusDecoder.h"
+#include "O3DSAudioBus.h"
+#include "O3DSUnifiedMessage.h"
 #include "Async/Async.h"
 #include "HAL/PlatformTime.h"
 
@@ -185,17 +187,34 @@ const uint8* FO3DSOpusDecoder::ParseRtpHeader(const uint8* RtpBytes, int32 RtpLe
 
 void FO3DSOpusDecoder::PublishAudio(const int16* Samples, int32 NumSamples, uint32 RtpTimestamp)
 {
-    // For MVP: log sample count; actual Audio Bus/component integration is follow-up
-    // Marshal to game thread for UE audio API access
-    AsyncTask(ENamedThreads::GameThread, [NumSamples, RtpTimestamp]()
+    // Marshal to game thread for Audio Bus publish
+    // Copy samples to avoid lifetime issues across threads
+    TArray<int16> SamplesCopy;
+    SamplesCopy.Append(Samples, NumSamples);
+    
+    const int32 LocalChannels = NumChannels;
+    const int32 LocalRate = SampleRate;
+
+    AsyncTask(ENamedThreads::GameThread, [SamplesCopy, LocalChannels, LocalRate, RtpTimestamp]()
     {
+        // Build metadata for Audio Bus
+        O3DS::FAudioFrameMeta Meta;
+        Meta.StreamLabel = TEXT("o3ds:webrtc:remote");
+        Meta.SubjectName = TEXT("WebRTC");
+        Meta.NumChannels = LocalChannels;
+        Meta.SampleRate = LocalRate;
+        Meta.TimestampSec = (double)RtpTimestamp / (double)LocalRate; // approximate
+
+        // Publish to Audio Bus (PCM16 bytes)
+        const uint8* BytePtr = reinterpret_cast<const uint8*>(SamplesCopy.GetData());
+        const int32 NumBytes = SamplesCopy.Num() * sizeof(int16);
+
+        FO3DSAudioBus::PublishPcm16(Meta, BytePtr, NumBytes);
+
         if (CVarO3DSReceiverAudioLog->GetInt() != 0)
         {
-            UE_LOG(LogTemp, Verbose, TEXT("O3DS Opus Decoder: publish %d samples (ts=%u) [Audio Bus routing TBD]"),
-                NumSamples, RtpTimestamp);
+            UE_LOG(LogTemp, Verbose, TEXT("O3DS Opus Decoder: published %d samples (%d bytes) to Audio Bus"),
+                SamplesCopy.Num(), NumBytes);
         }
-
-        // TODO: Push to Audio Bus or dedicated audio component for in-world playback
-        // Example: UAudioBus::PushAudio() or custom IAudioMixerSubmix listener
     });
 }
