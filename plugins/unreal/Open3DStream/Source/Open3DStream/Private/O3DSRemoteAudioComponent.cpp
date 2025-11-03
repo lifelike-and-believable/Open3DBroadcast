@@ -49,10 +49,7 @@ void UO3DSRemoteAudioComponent::BeginPlay()
 		}
 		else
 		{
-			// If an existing component was found, make sure settings are friendly for remote 2D playback
-			AudioComp->bAllowSpatialization = false;
-			AudioComp->bIsUISound = true;
-			// Respect user VolumeMultiplier when using an existing AudioComponent
+			// Adopt existing component as-is; respect all user-defined properties (attenuation, spatialization, etc.)
 			bOwnsAudioComponent = false;
 		}
 	}
