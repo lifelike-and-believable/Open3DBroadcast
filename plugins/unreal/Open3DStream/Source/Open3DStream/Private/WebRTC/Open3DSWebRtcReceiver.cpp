@@ -60,7 +60,7 @@ bool FOpen3DSWebRtcReceiver::Start(const FOpen3DStreamSettings& Settings)
 
     // Configure connector in server role
     FO3DSWebRtcConfig Config;
-    Config.Backend = EO3DSWebRtcBackend::LibDataChannel;
+    Config.Backend = Backend;
     Config.Role = EO3DSWebRtcRole::Server;
     
     // For server role, ensure the URL is normalized per LibDataChannelConnector expectations:
@@ -69,6 +69,11 @@ bool FOpen3DSWebRtcReceiver::Start(const FOpen3DStreamSettings& Settings)
     // Just pass the base signaling URL and let the connector handle path construction.
     Config.SignalingUrl = Settings.Url.ToString();
     Config.Room = Settings.WebRtcRoom;
+    // Optional: token for backends that require it (e.g., LiveKit)
+    if (!Settings.LiveKitToken.IsEmpty())
+    {
+        Config.Token = Settings.LiveKitToken;
+    }
     
     Config.bEnableAudio = Settings.bEnableWebRTCAudio;
     Config.SampleRate = 48000;
