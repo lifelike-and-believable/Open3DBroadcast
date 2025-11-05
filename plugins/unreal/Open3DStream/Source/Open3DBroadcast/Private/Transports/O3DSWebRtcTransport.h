@@ -45,5 +45,8 @@ private:
     FO3DSWebRtcConfig PreConfig; // settings provided by component prior to Start
     bool bHasPreConfig = false;
 
+    // Default reliability mode for DataChannel sends (configurable via URL: reliability=lossy|reliable)
+    IWebRTCConnector::EO3DSReliability DefaultReliability = IWebRTCConnector::EO3DSReliability::Reliable;
+
     FCounters Counters;
 };

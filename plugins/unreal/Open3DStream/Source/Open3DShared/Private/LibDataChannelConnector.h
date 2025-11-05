@@ -32,6 +32,7 @@ public:
     virtual void Tick(float DeltaSeconds) override;
     virtual bool IsOpen() const override { return bOpen.load(); }
     virtual bool Send(const uint8* Data, int32 NumBytes) override;
+    virtual bool SendEx(const uint8* Data, int32 NumBytes, EO3DSReliability Mode) override { return Send(Data, NumBytes); }
     virtual bool EnableAudioSend(bool bEnable) override;
     virtual bool SendAudioPcm16(const int16* Samples, int32 NumSamples, int32 SampleRate, int32 NumChannels) override;
 

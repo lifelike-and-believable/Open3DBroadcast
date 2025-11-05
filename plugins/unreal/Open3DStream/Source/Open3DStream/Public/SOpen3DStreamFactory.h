@@ -58,6 +58,9 @@ class OPEN3DSTREAM_API SOpen3DStreamFactory : public SCompoundWidget
 	void SetLiveKitToken(const FText& InText) { mLiveKitToken = InText; }
 	FText GetLiveKitToken() const { return mLiveKitToken; }
 
+	// Token hint text derived from backend capability
+	FText GetTokenHint() const;
+
 	// Audio settings (WebRTC)
 	void OnEnableWebRTCAudioChanged(ECheckBoxState NewState) { bEnableWebRTCAudio = (NewState == ECheckBoxState::Checked); }
 	ECheckBoxState GetEnableWebRTCAudioState() const { return bEnableWebRTCAudio ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; }

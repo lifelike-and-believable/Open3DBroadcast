@@ -1,7 +1,7 @@
 // Copyright (c) Open3DStream Contributors
 
-#include "Modules/ModuleManager.h"
 #include "Open3DShared.h"
+#include "Modules/ModuleManager.h"
 
 #define LOCTEXT_NAMESPACE "FOpen3DSharedModule"
 

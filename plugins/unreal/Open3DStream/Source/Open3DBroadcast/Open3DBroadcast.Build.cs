@@ -53,7 +53,10 @@ public class Open3DBroadcast : ModuleRules
 				"LiveLinkInterface",
 				"LiveLink",
 				"AnimGraphRuntime",
-				"Open3DShared"
+				"Open3DShared",
+				"PropertyEditor",
+				"Slate",
+				"SlateCore"
 			}
 			);
 

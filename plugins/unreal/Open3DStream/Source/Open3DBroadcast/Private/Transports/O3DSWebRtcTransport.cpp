@@ -87,11 +87,20 @@ EO3DSWebRtcRole FO3DSWebRtcTransport::RoleFromUrlOrProtocol(const FString& Url, 
     FString RoleParam;
     if (ParseStringParam(Url, TEXT("role"), RoleParam))
     {
-        if (RoleParam.Equals(TEXT("server"), ESearchCase::IgnoreCase)) return EO3DSWebRtcRole::Server;
+        // Accept legacy and new terms
+        if (RoleParam.Equals(TEXT("server"), ESearchCase::IgnoreCase) || RoleParam.Equals(TEXT("subscriber"), ESearchCase::IgnoreCase))
+        {
+            return EO3DSWebRtcRole::Server;
+        }
+        if (RoleParam.Equals(TEXT("client"), ESearchCase::IgnoreCase) || RoleParam.Equals(TEXT("publisher"), ESearchCase::IgnoreCase))
+        {
+            return EO3DSWebRtcRole::Client;
+        }
+        // Default to Client (Publisher)
         return EO3DSWebRtcRole::Client;
     }
     const FString P = ToLowerCopy(Protocol);
-    if (P.Contains(TEXT("webrtcserver"))) return EO3DSWebRtcRole::Server;
+    if (P.Contains(TEXT("webrtcserver")) || P.Contains(TEXT("webrtc subscriber"))) return EO3DSWebRtcRole::Server;
     return EO3DSWebRtcRole::Client;
 }
 
@@ -131,9 +140,26 @@ bool FO3DSWebRtcTransport::Start(const FString& InUrl, const FString& InProtocol
     float ToneHz = 0.f; if (ParseFloatParam(InUrl, TEXT("tonehz"), ToneHz)) { Cfg.ToneHz = ToneHz; }
     float ToneDur = 0.f; if (ParseFloatParam(InUrl, TEXT("tonedur"), ToneDur)) { Cfg.ToneDurationSec = ToneDur; }
 
-    // Merge pre-config (audio/debug verbosity) if provided
+    // Optional send reliability: reliability=lossy|reliable (default reliable)
+    FString ReliabilityParam; if (ParseStringParam(InUrl, TEXT("reliability"), ReliabilityParam))
+    {
+        if (ReliabilityParam.Equals(TEXT("lossy"), ESearchCase::IgnoreCase))
+        {
+            DefaultReliability = IWebRTCConnector::EO3DSReliability::Lossy;
+        }
+        else
+        {
+            DefaultReliability = IWebRTCConnector::EO3DSReliability::Reliable;
+        }
+    }
+
+    // Merge pre-config (authoritative for backend/role/room/token/audio/verbosity)
     if (bHasPreConfig)
     {
+        Cfg.Backend = PreConfig.Backend;
+        Cfg.Role = PreConfig.Role;
+        Cfg.Room = PreConfig.Room;
+        Cfg.Token = PreConfig.Token;
         Cfg.bEnableAudio = PreConfig.bEnableAudio;
         Cfg.SampleRate = PreConfig.SampleRate;
         Cfg.NumChannels = PreConfig.NumChannels;
@@ -144,10 +170,6 @@ bool FO3DSWebRtcTransport::Start(const FString& InUrl, const FString& InProtocol
         Cfg.ToneHz = PreConfig.ToneHz;
         Cfg.ToneDurationSec = PreConfig.ToneDurationSec;
         Cfg.bVerbose = PreConfig.bVerbose;
-        if (Cfg.Room.IsEmpty() && !PreConfig.Room.IsEmpty()) { Cfg.Room = PreConfig.Room; }
-        if (Cfg.Token.IsEmpty() && !PreConfig.Token.IsEmpty()) { Cfg.Token = PreConfig.Token; }
-        // Prefer explicit backend if provided in pre-config
-        Cfg.Backend = PreConfig.Backend;
     }
 
     Connector = FWebRTCConnectorFactory::Create(Cfg.Backend);
@@ -190,6 +212,12 @@ bool FO3DSWebRtcTransport::Start(const FString& InUrl, const FString& InProtocol
         return false;
     }
 
+    // Enable audio send if requested
+    if (Cfg.bEnableAudio)
+    {
+        Connector->EnableAudioSend(true);
+    }
+
     return true;
 }
 
@@ -214,7 +242,7 @@ bool FO3DSWebRtcTransport::Send(const uint8* Data, int32 Size, double /*Timestam
         Counters.FramesDropped.Store(Counters.FramesDropped.Load() + 1);
         return false;
     }
-    const bool bOk = Connector->Send(Data, Size);
+    const bool bOk = Connector->SendEx(Data, Size, DefaultReliability);
     if (bOk)
     {
         Counters.FramesSent.Store(Counters.FramesSent.Load() + 1);

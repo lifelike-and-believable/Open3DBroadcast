@@ -6,6 +6,7 @@
 #include "Widgets/Text/STextBlock.h"
 
 #include "Open3DStreamSource.h"
+#include "WebRTCConnectorFactory.h"
 #include "o3ds/o3ds_version.h" // for version
 
 #include "Framework/Application/SlateApplication.h"
@@ -164,24 +165,26 @@ void SOpen3DStreamFactory::Construct(const FArguments& Args)
 				.OnTextChanged(this, &SOpen3DStreamFactory::SetLiveKitRoom)
 			]
 		]
-		// LiveKit Token
+		// Token (backend-dependent)
 		+ SVerticalBox::Slot()
 		.Padding(5)
 		.AutoHeight()
 		[
 			SAssignNew(LiveKitTokenRow, SHorizontalBox)
-			.Visibility(this, &SOpen3DStreamFactory::GetLiveKitFieldsVisibility)
+			.Visibility(this, &SOpen3DStreamFactory::GetWebRtcBackendVisibility)
 			+ SHorizontalBox::Slot()
 			.FillWidth(0.3f)
 			[
-				SNew(STextBlock).Text(LOCTEXT("LiveKitToken", "LiveKit Token")).MinDesiredWidth(200)
+				SNew(STextBlock).Text(LOCTEXT("WebRtcToken", "Token"))
+				.MinDesiredWidth(200)
 			]
 			+ SHorizontalBox::Slot()
 			.FillWidth(0.7f)
-			[	
+			[
 				SNew(SEditableTextBox)
 				.Text(this, &SOpen3DStreamFactory::GetLiveKitToken)
 				.OnTextChanged(this, &SOpen3DStreamFactory::SetLiveKitToken)
+				.HintText(this, &SOpen3DStreamFactory::GetTokenHint)
 			]
 		]
 		// WebRTC Audio Enable
@@ -347,16 +350,7 @@ FString SOpen3DStreamFactory::NormalizeUrlForFamily(const FString& In, const FSt
 		}
 	}
 
-	// Inject WebRTC role param if missing
-	if (Family.Equals(TEXT("WebRTC"), ESearchCase::IgnoreCase))
-	{
-		if (!Out.Contains(TEXT("role="), ESearchCase::IgnoreCase))
-		{
-			const TCHAR* RoleStr = (Mode.Contains(TEXT("Server"))) ? TEXT("server") : TEXT("client");
-			Out += Out.Contains(TEXT("?")) ? FString::Printf(TEXT("&role=%s"), RoleStr)
-					 : FString::Printf(TEXT("?role=%s"), RoleStr);
-		}
-	}
+	// Do not inject WebRTC role into the URL; connectors derive role from config.
 	return Out;
 }
 
@@ -383,7 +377,8 @@ FString SOpen3DStreamFactory::ComputeProtocolFor(const FString& Family, const FS
 	}
 	if (Family.Equals(TEXT("WebRTC"), ESearchCase::IgnoreCase))
 	{
-		return Mode.Contains(TEXT("Server")) ? TEXT("WebRTC Server") : TEXT("WebRTC Client");
+		// Present user-facing nomenclature as Publisher/Subscriber
+		return Mode.Contains(TEXT("Subscriber"), ESearchCase::IgnoreCase) ? TEXT("WebRTC Subscriber") : TEXT("WebRTC Publisher");
 	}
 	return TEXT("TCP Client");
 }
@@ -555,6 +550,22 @@ FText SOpen3DStreamFactory::GetCurrentBackend() const
 	return LOCTEXT("InvalidComboEntryText", "<<Invalid option>>");
 }
 
+FText SOpen3DStreamFactory::GetTokenHint() const
+{
+	// Default to libdatachannel when not under WebRTC or no selection
+	EO3DSWebRtcBackend Backend = EO3DSWebRtcBackend::LibDataChannel;
+	const FString Fam = CurrentFamily.IsValid() ? *CurrentFamily : TEXT("");
+	if (Fam.Contains(TEXT("WebRTC")))
+	{
+		const FString BackendStr = CurrentBackend.IsValid() ? *CurrentBackend : TEXT("");
+		if (BackendStr.Contains(TEXT("LiveKit")))
+		{
+			Backend = EO3DSWebRtcBackend::LiveKit;
+		}
+	}
+	return FText::FromString(FWebRTCConnectorFactory::BackendTokenHint(Backend));
+}
+
 void SOpen3DStreamFactory::RebuildModeOptions()
 {
 	ModeOptions.Reset();
@@ -576,8 +587,8 @@ void SOpen3DStreamFactory::RebuildModeOptions()
 	}
 	else if (Fam.Equals(TEXT("WebRTC"), ESearchCase::IgnoreCase))
 	{
-		ModeOptions.Add(MakeShareable(new FString(TEXT("Client"))));
-		ModeOptions.Add(MakeShareable(new FString(TEXT("Server"))));
+		// Receiver only supports Subscriber for WebRTC
+		ModeOptions.Add(MakeShareable(new FString(TEXT("Subscriber"))));
 	}
 	else if (Fam.Contains(TEXT("Loopback")))
 	{

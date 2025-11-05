@@ -6,6 +6,7 @@
 #include "Roles/LiveLinkAnimationRole.h"
 #include "Common/UdpSocketBuilder.h"
 #include "Internationalization/Regex.h"
+#include "Async/Async.h"
 
 #include "o3ds_generated.h"
 #include "O3DSHelpers.h"
@@ -99,15 +100,32 @@ TSubclassOf < ULiveLinkSourceSettings > FOpen3DStreamSource::GetSettingsClass() 
 
 void FOpen3DStreamSource::OnStatus(FText msg, bool IsError)
 {
- FString smsg = msg.ToString();
- if (IsError) {
- UE_LOG(LogTemp, Warning, TEXT("O3DS: %s"), *smsg);
- }
- else {
- UE_LOG(LogTemp, Log, TEXT("O3DS: %s"), *smsg);
- }
- SourceStatus = msg;
- LogFlag = false;
+	if (!IsInGameThread())
+	{
+		// Marshal to game thread without capturing raw 'this' to avoid UAF on source deletion
+		TWeakPtr<FOpen3DStreamSource> WeakSelf = AsShared();
+		FText Copy = msg;
+		AsyncTask(ENamedThreads::GameThread, [WeakSelf, Copy, IsError]()
+		{
+			if (TSharedPtr<FOpen3DStreamSource> Pinned = WeakSelf.Pin())
+			{
+				Pinned->OnStatus(Copy, IsError);
+			}
+		});
+		return;
+	}
+
+	const FString Smsg = msg.ToString();
+	if (IsError)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("O3DS: %s"), *Smsg);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("O3DS: %s"), *Smsg);
+	}
+	SourceStatus = msg;
+	LogFlag = false;
 }
 
 void FOpen3DStreamSource::ReceiveClient(ILiveLinkClient* InClient, FGuid InSourceGuid)
@@ -204,6 +222,20 @@ void operator >>(const O3DS::Matrixd& src, FMatrix& dst)
 
 void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
 {
+ if (!IsInGameThread())
+ {
+	 // Marshal to game thread without capturing raw 'this' to avoid UAF on source deletion
+	 TWeakPtr<FOpen3DStreamSource> WeakSelf = AsShared();
+	 TArray<uint8> Copy = data; // copy for thread hop
+	 AsyncTask(ENamedThreads::GameThread, [WeakSelf, Copy = MoveTemp(Copy)]() mutable
+	 {
+		 if (TSharedPtr<FOpen3DStreamSource> Pinned = WeakSelf.Pin())
+		 {
+			 Pinned->OnPackage(Copy);
+		 }
+	 });
+	 return;
+ }
  if (!bIsValid)
  return;
 
@@ -327,7 +359,7 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
  const bool bNeedStaticUpdate = (ExistingSkelHash == nullptr || *ExistingSkelHash != NewSkelHash) ||
  (ExistingCurveHash == nullptr || *ExistingCurveHash != NewCurveHash);
 
- if (InitializedSubjects.Find(SubjectName) == INDEX_NONE || bNeedStaticUpdate)
+	if (InitializedSubjects.Find(SubjectName) == INDEX_NONE || bNeedStaticUpdate)
  {
  if (BoneNames.Num() ==0)
  continue;
@@ -355,7 +387,6 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
  }
  SkeletonDataPtr->PropertyNames = PropertyNames;
 
- Client->RemoveSubject_AnyThread(SubjectKey);
  Client->PushSubjectStaticData_AnyThread(SubjectKey, ULiveLinkAnimationRole::StaticClass(), MoveTemp(LiveLinkSkeletonStaticData));
 
  if (InitializedSubjects.Find(SubjectName) == INDEX_NONE)
@@ -379,21 +410,31 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
 
 void FOpen3DStreamSource::RemoveInactiveSubjects()
 {
+ // If client is gone or source invalid, skip removals
+ if (!Client || !bIsValid)
+ {
+	 return;
+ }
  const double CurrentTime = FPlatformTime::Seconds();
 
  for (auto It = SubjectLastUpdateTime.CreateIterator(); It; ++It)
  {
- double LastUpdateTime = It.Value();
- if (CurrentTime - LastUpdateTime > InactivityThreshold)
- {
- FName SubjectName = It.Key();
- SubjectLastUpdateTime.Remove(SubjectName);
- const FLiveLinkSubjectKey SubjectKey(SourceGuid, SubjectName);
- Client->RemoveSubject_AnyThread(SubjectKey);
- InitializedSubjects.Remove(SubjectName);
- SubjectSkeletonHash.Remove(SubjectName);
- SubjectCurveSetHash.Remove(SubjectName);
- }
+	 const double LastUpdateTime = It.Value();
+	 if (CurrentTime - LastUpdateTime > InactivityThreshold)
+	 {
+		 const FName SubjectName = It.Key();
+		 const FLiveLinkSubjectKey SubjectKey(SourceGuid, SubjectName);
+		 // Remove subject from LiveLink and internal tracking first (client may be null during shutdown)
+		 if (Client)
+		 {
+			 Client->RemoveSubject_AnyThread(SubjectKey);
+		 }
+		 InitializedSubjects.Remove(SubjectName);
+		 SubjectSkeletonHash.Remove(SubjectName);
+		 SubjectCurveSetHash.Remove(SubjectName);
+		 // Safely remove current map entry while iterating
+		 It.RemoveCurrent();
+	 }
  }
 }
 
@@ -404,12 +445,22 @@ bool FOpen3DStreamSource::RequestSourceShutdown()
  // Stop WebRTC receiver if active
  if (WebRtcReceiver)
  {
+	 // Clear callbacks to avoid late calls into this during/after shutdown
+	 WebRtcReceiver->SetOnDataCallback(TFunction<void(const TArray<uint8>&)>());
+	 WebRtcReceiver->SetOnStateCallback(TFunction<void(const FString&, bool)>());
 	 WebRtcReceiver->Stop();
 	 WebRtcReceiver.Reset();
  }
 
+ // Unbind server delegates to avoid late notifications during teardown
  this->server.OnData.Unbind();
+ this->server.OnState.Unbind();
  this->server.stop();
+ // Clear subject tracking to avoid post-shutdown removals
+ SubjectLastUpdateTime.Empty();
+ InitializedSubjects.Empty();
+ SubjectSkeletonHash.Empty();
+ SubjectCurveSetHash.Empty();
  Client = nullptr;
  SourceGuid.Invalidate();
 

@@ -50,6 +50,17 @@ DECLARE_MULTICAST_DELEGATE_TwoParams(FO3DSOnWebRtcState, const FString& /*State*
 DECLARE_MULTICAST_DELEGATE_OneParam(FO3DSOnWebRtcData, const TArray<uint8>& /*Bytes*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FO3DSOnWebRtcRtp, const TArray<uint8>& /*RtpBytes*/);
 
+// Remote PCM16 audio frame (engine-friendly). Samples are interleaved PCM16.
+struct FO3DSPcm16Frame
+{
+    TArray<int16> Samples;     // interleaved
+    int32 FramesPerChannel = 0;
+    int32 NumChannels = 0;
+    int32 SampleRate = 0;
+};
+
+DECLARE_MULTICAST_DELEGATE_OneParam(FO3DSOnWebRtcPcm16, const FO3DSPcm16Frame& /*Frame*/);
+
 class OPEN3DSHARED_API IWebRTCConnector : public TSharedFromThis<IWebRTCConnector>
 {
 public:
@@ -63,6 +74,14 @@ public:
 
     // Data channel send (reliable/unordered by default)
     virtual bool Send(const uint8* Data, int32 NumBytes) = 0;
+
+    // Reliability mode for optional per-send control
+    enum class EO3DSReliability : uint8 { Reliable = 0, Lossy = 1 };
+    // Extended send with reliability; default falls back to Send()
+    virtual bool SendEx(const uint8* Data, int32 NumBytes, EO3DSReliability Mode)
+    {
+        return Send(Data, NumBytes);
+    }
 
     // Audio (negotiation is done internally; this flag switches send path on/off)
     virtual bool EnableAudioSend(bool bEnable) = 0;
@@ -78,4 +97,15 @@ public:
     virtual FO3DSOnWebRtcState& OnState() = 0;
     virtual FO3DSOnWebRtcData& OnData() = 0;
     virtual FO3DSOnWebRtcRtp&  OnRemoteAudioRtp() = 0;
+
+    // Optional: remote PCM16 audio (LiveKit-backed connectors expose this).
+    // Default returns nullptr when not supported (e.g., libdatachannel RTP-only path).
+    virtual FO3DSOnWebRtcPcm16* OnRemoteAudioPcm() { return nullptr; }
+
+    // Token capability query for implementation-agnostic UX wiring
+    // Returns true if this connector requires/accepts a token in FO3DSWebRtcConfig::Token
+    virtual bool SupportsToken() const { return false; }
+    // Returns a short, user-facing hint about the token purpose (e.g., "client token").
+    // Default provides "unused" when tokens are not supported.
+    virtual const TCHAR* TokenFieldHint() const { return TEXT("unused"); }
 };
