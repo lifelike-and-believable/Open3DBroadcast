@@ -93,7 +93,7 @@ static FString O3DS_EnsureWebRtcRoleInUrl(const FString& InUrl, EO3DSTransportKi
  }
  if (!Out.Contains(TEXT("role="), ESearchCase::IgnoreCase))
  {
- const TCHAR* RoleStr = (Kind == EO3DSTransportKind::WebRTCClient) ? TEXT("client") : TEXT("server");
+ const TCHAR* RoleStr = (Kind == EO3DSTransportKind::WebRTCClient) ? TEXT("publisher") : TEXT("subscriber");
  Out += Out.Contains(TEXT("?")) ? FString::Printf(TEXT("&role=%s"), RoleStr)
  : FString::Printf(TEXT("?role=%s"), RoleStr);
  }
@@ -102,7 +102,7 @@ static FString O3DS_EnsureWebRtcRoleInUrl(const FString& InUrl, EO3DSTransportKi
  // Family+mode path
  if (!Out.Contains(TEXT("role="), ESearchCase::IgnoreCase))
  {
- const TCHAR* RoleStr = (WebRtcMode == EO3DSWebRtcMode::Client) ? TEXT("client") : TEXT("server");
+ const TCHAR* RoleStr = (WebRtcMode == EO3DSWebRtcMode::Client) ? TEXT("publisher") : TEXT("subscriber");
  Out += Out.Contains(TEXT("?")) ? FString::Printf(TEXT("&role=%s"), RoleStr)
  : FString::Printf(TEXT("?role=%s"), RoleStr);
  }
@@ -339,84 +339,54 @@ void UO3DSBroadcastComponent::StartInternalTransport()
         }
     }
 
- // Inject family/mode specific URL params
- EffectiveUrl = O3DS_InjectModeIntoUrl(EffectiveUrl, TransportFamily, NngMode, WebRtcMode);
-
- // For WebRTC Client mode, ensure a local path id exists (e.g., "/client")
- if (TransportFamily == EO3DSTransportFamily::WebRTC)
+ // Inject family/mode specific URL params for non-WebRTC families only.
+ if (TransportFamily != EO3DSTransportFamily::WebRTC)
  {
- EffectiveUrl = O3DS_EnsureWebRtcLocalPathId(EffectiveUrl, WebRtcMode, TEXT("client"));
-
-	 // Add backend and token hints when using LiveKit backend
-	 if (bWebRtcBackendIsLiveKit)
-	 {
-		 const FString BackendParam = TEXT("backend=livekit");
-		 EffectiveUrl += EffectiveUrl.Contains(TEXT("?")) ? (TEXT("&") + BackendParam) : (TEXT("?") + BackendParam);
-		 if (!LiveKitToken.IsEmpty())
-		 {
-			 EffectiveUrl += FString::Printf(TEXT("&token=%s"), *LiveKitToken);
-		 }
-	 }
+	 EffectiveUrl = O3DS_InjectModeIntoUrl(EffectiveUrl, TransportFamily, NngMode, WebRtcMode);
  }
+
+ // For WebRTC, do not modify URL path or query here; connectors assemble backend-specific needs.
 
  const FString ProtocolName = O3DS_GetProtocolNameLegacy(TransportFamily, TcpMode, WebRtcMode);
 
- // If WebRTC, prepare connector pre-start config (verbosity, optional audio) before starting transport
- if (TransportFamily == EO3DSTransportFamily::WebRTC)
+ // If WebRTC, prepare connector pre-start config (role, backend, audio, token, room) before starting transport
+ if (TransportFamily == EO3DSTransportFamily::WebRTC && WebRtcTransportRaw)
  {
-	 // Encode pre-start options into URL query to avoid RTTI downcasts
-	 TArray<FString> ParamsToAdd;
-	 if (CVarO3DSBroadcastDebugSend.GetValueOnAnyThread() != 0)
-	 {
-		 ParamsToAdd.Add(TEXT("verbose=1"));
-	 }
-	 if (bEnableWebRTCAudio)
-	 {
-		 ParamsToAdd.Add(TEXT("audio=1"));
-		 ParamsToAdd.Add(FString::Printf(TEXT("samplerate=%d"), WebRTCAudioSampleRate));
-		 ParamsToAdd.Add(FString::Printf(TEXT("channels=%d"), WebRTCAudioNumChannels));
-		 ParamsToAdd.Add(FString::Printf(TEXT("bitrate=%d"), WebRTCAudioBitrateKbps));
-		 if (WebRTCAudioMode == EO3DSWebRTCAudioMode::Input)
-		 {
-			 const FString Dev = WebRTCInputDeviceName.ToString();
-			 if (!Dev.IsEmpty())
-			 {
-				 ParamsToAdd.Add(FString::Printf(TEXT("device=%s"), *O3DS_MinimalUrlEncode(Dev)));
-			 }
-		 }
-		 else if (WebRTCSubmixToTap)
-		 {
-			 ParamsToAdd.Add(FString::Printf(TEXT("submix=%s"), *O3DS_MinimalUrlEncode(WebRTCSubmixToTap->GetName())));
-		 }
-
-		 // If requested, enable debug tone generation (parsed by WebRTC transport/connector)
-		 if (CVarO3DSBroadcastWebRTCDebugTone.GetValueOnAnyThread() != 0)
-		 {
-			 const float Hz = CVarO3DSBroadcastWebRTCToneHz.GetValueOnAnyThread();
-			 const float Dur = CVarO3DSBroadcastWebRTCToneDur.GetValueOnAnyThread();
-			 ParamsToAdd.Add(TEXT("tone=1"));
-			 ParamsToAdd.Add(FString::Printf(TEXT("tonehz=%g"), Hz));
-			 ParamsToAdd.Add(FString::Printf(TEXT("tonedur=%g"), Dur));
-		 }
-	 }
-	 if (ParamsToAdd.Num() > 0)
-	 {
-		 const FString Joined = FString::Join(ParamsToAdd, TEXT("&"));
-		 EffectiveUrl += EffectiveUrl.Contains(TEXT("?"))
-			 ? FString::Printf(TEXT("&%s"), *Joined)
-			 : FString::Printf(TEXT("?%s"), *Joined);
-	 }
+     FO3DSWebRtcConfig Cfg;
+     Cfg.Backend = bWebRtcBackendIsLiveKit ? EO3DSWebRtcBackend::LiveKit : EO3DSWebRtcBackend::LibDataChannel;
+     Cfg.Role = (WebRtcMode == EO3DSWebRtcMode::Client) ? EO3DSWebRtcRole::Client : EO3DSWebRtcRole::Server;
+     Cfg.SignalingUrl = EffectiveUrl;
+     Cfg.Room = WebRtcRoom;
+     if (bWebRtcBackendIsLiveKit)
+     {
+         Cfg.Token = LiveKitToken;
+     }
+     Cfg.bVerbose = (CVarO3DSBroadcastDebugSend.GetValueOnAnyThread() != 0);
+     Cfg.bEnableAudio = bEnableWebRTCAudio;
+     if (Cfg.bEnableAudio)
+     {
+         Cfg.SampleRate = WebRTCAudioSampleRate;
+         Cfg.NumChannels = WebRTCAudioNumChannels;
+         Cfg.BitrateKbps = WebRTCAudioBitrateKbps;
+         if (WebRTCAudioMode == EO3DSWebRTCAudioMode::Input)
+         {
+             Cfg.AudioDeviceName = WebRTCInputDeviceName.ToString();
+         }
+         else if (WebRTCSubmixToTap)
+         {
+             Cfg.SubmixName = WebRTCSubmixToTap->GetName();
+         }
+         if (CVarO3DSBroadcastWebRTCDebugTone.GetValueOnAnyThread() != 0)
+         {
+             Cfg.bSendDebugTone = true;
+             Cfg.ToneHz = CVarO3DSBroadcastWebRTCToneHz.GetValueOnAnyThread();
+             Cfg.ToneDurationSec = CVarO3DSBroadcastWebRTCToneDur.GetValueOnAnyThread();
+         }
+     }
+     WebRtcTransportRaw->ApplyPreStartConfig(Cfg);
  }
 
- // Ensure WebRTC URL carries room parameter when enabled on component
- if (TransportFamily == EO3DSTransportFamily::WebRTC)
- {
- if (!EffectiveUrl.Contains(TEXT("room="), ESearchCase::IgnoreCase) && !WebRtcRoom.IsEmpty())
- {
- EffectiveUrl += EffectiveUrl.Contains(TEXT("?")) ? FString::Printf(TEXT("&room=%s"), *WebRtcRoom)
- : FString::Printf(TEXT("?room=%s"), *WebRtcRoom);
- }
- }
+ // Do not append room/token/backend to URL; connectors receive them via pre-start config.
 
  if (!InternalTransport->Start(EffectiveUrl, ProtocolName, EffectiveKey))
  {
@@ -425,6 +395,20 @@ void UO3DSBroadcastComponent::StartInternalTransport()
  }
  else
  {
+ // Helpful verbose log for LiveKit URL (token elided)
+ if (TransportFamily == EO3DSTransportFamily::WebRTC && bWebRtcBackendIsLiveKit)
+ {
+ 	FString Elided = EffectiveUrl;
+ 	// naive elision for token query value
+ 	const int32 TokIdx = Elided.Find(TEXT("token="), ESearchCase::IgnoreCase);
+ 	if (TokIdx != INDEX_NONE)
+ 	{
+ 		int32 End = Elided.Find(TEXT("&"), ESearchCase::IgnoreCase, ESearchDir::FromStart, TokIdx);
+ 		if (End == INDEX_NONE) { End = Elided.Len(); }
+ 		Elided = Elided.Left(TokIdx) + TEXT("token=<elided>") + Elided.Mid(End);
+ 	}
+ 	UE_LOG(LogO3DSBroadcast, Verbose, TEXT("[LiveKit] Starting with URL: %s"), *Elided);
+ }
  // Hook serializer -> queue enqueuer
  if (!SerializedFrameHandle.IsValid() && Serializer)
  {
@@ -1247,7 +1231,8 @@ void UO3DSBroadcastComponent::UpdateEditConditionHelpers()
  bShowTcpProps = bAuto && bTransportFamilyIsTCP;
  bShowWebRtcProps = bAuto && bTransportFamilyIsWebRTC;
  bShowWebRtcAudioProps = bShowWebRtcProps && bEnableWebRTCAudio;
- bShowLiveKitProps = bAuto && bTransportFamilyIsWebRTC && bWebRtcBackendIsLiveKit;
+ // Expose LiveKit-specific fields whenever WebRTC+LiveKit is selected, regardless of auto-transport
+ bShowLiveKitProps = bTransportFamilyIsWebRTC && bWebRtcBackendIsLiveKit;
 }
 
 void UO3DSBroadcastComponent::PostInitProperties()

@@ -24,8 +24,8 @@ public:
 	UPROPERTY(EditAnywhere, Category="WebRTC")
 	bool bAppendLocalIdToUrl = true;
 
-	// If true, act as server (answerer); otherwise client (offerer)
-	UPROPERTY(EditAnywhere, Category="WebRTC")
+	// If true, act as Subscriber (answerer); otherwise Publisher (offerer)
+	UPROPERTY(EditAnywhere, Category="WebRTC", meta=(DisplayName="Act as Subscriber"))
 	bool bServer = false;
 
 	// Optional routing id / room used by the signaling server

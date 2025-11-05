@@ -14,27 +14,10 @@
 #include "Transports/O3DSNngTransport.h"
 #include "Transports/O3DSWebRtcTransport.h"
 
-static FString EnsureWebRtcRoleInUrl(const FString& InUrl, EO3DSTransportKind Kind)
+static FString EnsureWebRtcRoleInUrl(const FString& InUrl, EO3DSTransportKind /*Kind*/)
 {
-    if (Kind != EO3DSTransportKind::WebRTCClient && Kind != EO3DSTransportKind::WebRTCServer)
-    {
-        return InUrl; // leave as-is
-    }
-    if (InUrl.Contains(TEXT("role=")))
-    {
-        return InUrl;
-    }
-    FString Out = InUrl;
-    const TCHAR* RoleStr = (Kind == EO3DSTransportKind::WebRTCClient) ? TEXT("client") : TEXT("server");
-    if (Out.Contains(TEXT("?")))
-    {
-        Out += FString::Printf(TEXT("&role=%s"), RoleStr);
-    }
-    else
-    {
-        Out += FString::Printf(TEXT("?role=%s"), RoleStr);
-    }
-    return Out;
+    // Do not inject WebRTC role parameters into URLs; connectors derive role from config.
+    return InUrl;
 }
 
 // Helper to inject URL query parameters based on family/mode selection
@@ -78,19 +61,7 @@ static FString InjectModeIntoUrl(const FString& InUrl, EO3DSTransportFamily Fami
     }
     else if (Family == EO3DSTransportFamily::WebRTC)
     {
-        // Inject role if not present
-        if (!Out.Contains(TEXT("role=")))
-        {
-            const TCHAR* RoleStr = (WebRtcMode == EO3DSWebRtcMode::Client) ? TEXT("client") : TEXT("server");
-            if (Out.Contains(TEXT("?")))
-            {
-                Out += FString::Printf(TEXT("&role=%s"), RoleStr);
-            }
-            else
-            {
-                Out += FString::Printf(TEXT("?role=%s"), RoleStr);
-            }
-        }
+        // No URL mutation for WebRTC; role/backend are handled via FO3DSWebRtcConfig in the transport.
     }
 
     return Out;

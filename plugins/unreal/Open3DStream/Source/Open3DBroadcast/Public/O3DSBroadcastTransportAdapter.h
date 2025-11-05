@@ -54,8 +54,8 @@ enum class EO3DSTcpMode : uint8
 UENUM(BlueprintType)
 enum class EO3DSWebRtcMode : uint8
 {
-    Client UMETA(DisplayName="Client"),
-    Server UMETA(DisplayName="Server")
+    Client UMETA(DisplayName="Publisher"),
+    Server UMETA(DisplayName="Subscriber")
 };
 
 // WebRTC backend selection now comes from shared header (EO3DSWebRtcBackend)

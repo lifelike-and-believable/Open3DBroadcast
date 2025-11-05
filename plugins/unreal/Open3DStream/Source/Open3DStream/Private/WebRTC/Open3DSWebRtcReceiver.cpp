@@ -6,6 +6,8 @@
 #include "Open3DStreamSourceSettings.h"
 #include "WebRTCConnectorFactory.h"
 #include "Async/Async.h"
+#include "O3DSAudioBus.h"
+#include "O3DSUnifiedMessage.h"
 
 // CVars for receiver-side logging
 static TAutoConsoleVariable<int32> CVarO3DSReceiverWebRtcLog(
@@ -84,6 +86,26 @@ bool FOpen3DSWebRtcReceiver::Start(const FOpen3DStreamSettings& Settings)
     Connector->OnState().AddRaw(this, &FOpen3DSWebRtcReceiver::OnConnectorState);
     Connector->OnData().AddRaw(this, &FOpen3DSWebRtcReceiver::OnConnectorData);
     Connector->OnRemoteAudioRtp().AddRaw(this, &FOpen3DSWebRtcReceiver::OnConnectorAudioRtp);
+    if (FO3DSOnWebRtcPcm16* Pcm = Connector->OnRemoteAudioPcm())
+    {
+        Pcm->AddLambda([this](const FO3DSPcm16Frame& Frame)
+        {
+            // Publish PCM16 directly to audio bus on the game thread
+            TArray<int16> Copy = Frame.Samples; // copy to ensure lifetime across thread hop
+            AsyncTask(ENamedThreads::GameThread, [Copy = MoveTemp(Copy), Frame]()
+            {
+                O3DS::FAudioFrameMeta Meta;
+                Meta.StreamLabel = TEXT("o3ds:mix:livekit");
+                Meta.SubjectName = TEXT("WebRTC");
+                Meta.NumChannels = Frame.NumChannels;
+                Meta.SampleRate = Frame.SampleRate;
+                // Timestamp unknown here; leave default 0
+                const uint8* Bytes = reinterpret_cast<const uint8*>(Copy.GetData());
+                const int32 NumBytes = Copy.Num() * sizeof(int16);
+                FO3DSAudioBus::PublishPcm16(Meta, Bytes, NumBytes);
+            });
+        });
+    }
 
     // Start connector
     if (!Connector->Start(Config))

@@ -149,7 +149,7 @@ public:
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bShowTcpProps", EditConditionHides))
  EO3DSTcpMode TcpMode = EO3DSTcpMode::Client;
 
- UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="bShowWebRtcProps", EditConditionHides))
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport", meta=(EditCondition="false", EditConditionHides))
  EO3DSWebRtcMode WebRtcMode = EO3DSWebRtcMode::Client;
 
  // Backend selection (controls connector backend and LiveKit UI visibility)
@@ -160,8 +160,8 @@ public:
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|WebRTC", meta=(EditCondition="bShowWebRtcProps", EditConditionHides))
  FString WebRtcRoom = TEXT("room1");
 
- // LiveKit-specific configuration (only token kept; server URL uses Url)
- UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|LiveKit", meta=(EditCondition="bShowLiveKitProps", EditConditionHides))
+ // Token shown under WebRTC for all backends (unused for P2P/libdatachannel)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Open3DStream|Broadcast|Transport|WebRTC", meta=(DisplayName="Token", EditCondition="bShowWebRtcProps", EditConditionHides))
  FString LiveKitToken;
 
  // Endpoint and key (new names)
