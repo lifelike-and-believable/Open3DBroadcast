@@ -71,6 +71,7 @@ bool FOpen3DSWebRtcReceiver::Start(const FOpen3DStreamSettings& Settings)
     // Just pass the base signaling URL and let the connector handle path construction.
     Config.SignalingUrl = Settings.Url.ToString();
     Config.Room = Settings.WebRtcRoom;
+        // Connector implementers handle backend-specific defaults and URL normalization.
     // Optional: token for backends that require it (e.g., LiveKit)
     if (!Settings.LiveKitToken.IsEmpty())
     {
@@ -81,6 +82,13 @@ bool FOpen3DSWebRtcReceiver::Start(const FOpen3DStreamSettings& Settings)
     Config.SampleRate = 48000;
     Config.NumChannels = 1;
     Config.bVerbose = (CVarO3DSReceiverWebRtcLog->GetInt() != 0);
+
+    if (Config.bVerbose)
+    {
+        FString ElidedUrl = Config.SignalingUrl;
+        UE_LOG(LogO3DSReceiverWebRTC, Log, TEXT("[WebRTC] Start backend=%d role=%d url=%s room=%s"),
+            (int32)Config.Backend, (int32)Config.Role, *ElidedUrl, *Config.Room);
+    }
 
     // Bind internal callbacks (connector delegates fire on arbitrary threads; marshal to game thread)
     Connector->OnState().AddRaw(this, &FOpen3DSWebRtcReceiver::OnConnectorState);
