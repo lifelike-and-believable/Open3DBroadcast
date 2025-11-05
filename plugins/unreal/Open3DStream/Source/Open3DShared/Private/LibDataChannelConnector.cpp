@@ -3,6 +3,7 @@
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "HAL/IConsoleManager.h"
 #include <cmath>
 #include <cstring>
 #include <thread>
@@ -17,6 +18,13 @@
 #endif
 
 using namespace std::chrono_literals;
+
+// Optional debug CVar to dump raw signaling JSON (only when Config.bVerbose is also enabled)
+static TAutoConsoleVariable<int32> CVarO3DSLibDCDumpJson(
+    TEXT("o3ds.WebRTC.LibDC.DumpJson"),
+    0,
+    TEXT("When 1, dump raw libdatachannel signaling JSON (send/recv). Requires connector verbose."),
+    ECVF_Default);
 
 // --- helpers ---
 std::string FLibDataChannelConnector::ToStd(const FString& S)
@@ -38,6 +46,15 @@ bool FLibDataChannelConnector::Start(const FO3DSWebRtcConfig& InConfig)
     }
 
     Config = InConfig;
+    // Backend-specific defaulting tucked inside the connector: LibDC server requires a non-empty room.
+    if (Config.Role == EO3DSWebRtcRole::Server && Config.Room.IsEmpty())
+    {
+        Config.Room = TEXT("server");
+        if (Config.bVerbose)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("LibDataChannelConnector: No room set for server role; defaulting to 'server'"));
+        }
+    }
     bOpen.store(false);
     bAudioOpen.store(false);
     bRemoteDescriptionSet = false;
@@ -69,19 +86,6 @@ bool FLibDataChannelConnector::Start(const FO3DSWebRtcConfig& InConfig)
             if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
             {
                 P->OnState().Broadcast(TEXT("Starting"), false);
-            }
-        });
-    }
-
-    // Informational: publish semantic role mapping for clarity (Client=Publisher, Server=Subscriber)
-    {
-        TWeakPtr<IWebRTCConnector> Weak = AsShared();
-        const bool bIsPublisher = (Config.Role == EO3DSWebRtcRole::Client);
-        AsyncTask(ENamedThreads::GameThread, [Weak, bIsPublisher]()
-        {
-            if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
-            {
-                P->OnState().Broadcast(bIsPublisher ? TEXT("Role:Publisher") : TEXT("Role:Subscriber"), false);
             }
         });
     }
@@ -234,49 +238,57 @@ void FLibDataChannelConnector::OpenWebSocket()
         return;
     }
 
-    // Normalize URL for libdatachannel sample signaling server (server role only):
-    // If acting as server and a room is specified via query (?room=<id>) with no path id,
-    // move it into the path: ws://host:port/<id>?<rest>
-    // The client role should not claim the room id in the path; it targets the server via the 'id' field.
-    if (Config.Role == EO3DSWebRtcRole::Server && !Config.Room.IsEmpty())
+    // Client role: if no explicit path segment present, append "/client" to establish a stable identity.
+    if (Config.Role == EO3DSWebRtcRole::Client)
     {
-        // Extract base (scheme://host:port[/path]) and query
         FString Base = Url;
         FString Query;
-        if (Url.Split(TEXT("?"), &Base, &Query))
+        const bool bHasQuery = Base.Split(TEXT("?"), &Base, &Query);
+        const int32 SchemeIdx = Base.Find(TEXT("://"), ESearchCase::IgnoreCase, ESearchDir::FromStart);
+        if (SchemeIdx != INDEX_NONE)
         {
-            // Remove any room=... and role=... from the query (server ID should be clean room name)
-            TArray<FString> Parts; Query.ParseIntoArray(Parts, TEXT("&"), true);
-            TArray<FString> Kept;
-            for (const FString& P : Parts)
+            const int32 AfterScheme = SchemeIdx + 3;
+            const int32 FirstSlash = Base.Find(TEXT("/"), ESearchCase::IgnoreCase, ESearchDir::FromStart, AfterScheme);
+            if (FirstSlash == INDEX_NONE)
             {
-                if (!P.StartsWith(TEXT("room="), ESearchCase::IgnoreCase) &&
-                    !P.StartsWith(TEXT("role="), ESearchCase::IgnoreCase))
+                Base = Base.EndsWith(TEXT("/")) ? (Base + TEXT("client")) : (Base + TEXT("/client"));
+                Url = bHasQuery && !Query.IsEmpty() ? (Base + TEXT("?") + Query) : Base;
+            }
+        }
+    }
+
+    // Server role: force path identity to '/<room>' and drop any conflicting path or room= from query.
+    if (Config.Role == EO3DSWebRtcRole::Server && !Config.Room.IsEmpty())
+    {
+        FString Base = Url;
+        FString Query;
+        const bool bHasQuery = Base.Split(TEXT("?"), &Base, &Query);
+        const int32 SchemeIdx = Base.Find(TEXT("://"), ESearchCase::IgnoreCase, ESearchDir::FromStart);
+        if (SchemeIdx != INDEX_NONE)
+        {
+            const int32 AfterScheme = SchemeIdx + 3;
+            int32 FirstSlash = Base.Find(TEXT("/"), ESearchCase::IgnoreCase, ESearchDir::FromStart, AfterScheme);
+            // BaseAuthority is up to the first slash after scheme (or full Base if none)
+            const FString Authority = (FirstSlash != INDEX_NONE) ? Base.Left(FirstSlash) : Base;
+            FString NewUrl = Authority;
+            if (!NewUrl.EndsWith(TEXT("/"))) NewUrl += TEXT("/");
+            NewUrl += Config.Room;
+            if (bHasQuery && !Query.IsEmpty())
+            {
+                TArray<FString> Parts; Query.ParseIntoArray(Parts, TEXT("&"), true);
+                TArray<FString> Kept;
+                for (const FString& P : Parts)
                 {
-                    Kept.Add(P);
+                    if (!P.StartsWith(TEXT("room="), ESearchCase::IgnoreCase) &&
+                        !P.StartsWith(TEXT("role="), ESearchCase::IgnoreCase))
+                    {
+                        Kept.Add(P);
+                    }
                 }
-            }
-
-            // If base currently has no explicit path segment, append /<room>
-            // Very conservative: only append if Base ends at the authority with optional trailing '/'
-            // (avoid appending if Base already contains a non-empty path segment)
-            int SchemeIdx = -1; int HostStart = -1; int PathStart = -1;
-            if (Base.FindChar(':', SchemeIdx))
-            {
-                HostStart = Base.Find(TEXT("//"), ESearchCase::IgnoreCase, ESearchDir::FromStart, SchemeIdx) + 2;
-                PathStart = Base.Find(TEXT("/"), ESearchCase::IgnoreCase, ESearchDir::FromStart, HostStart);
-            }
-            const bool bBaseHasPath = (PathStart != INDEX_NONE) && (PathStart > HostStart);
-            FString NewUrl = Base;
-            if (!bBaseHasPath || Base.EndsWith(TEXT("/")))
-            {
-                if (!Base.EndsWith(TEXT("/"))) NewUrl += TEXT("/");
-                NewUrl += Config.Room;
-            }
-
-            if (Kept.Num() > 0)
-            {
-                NewUrl += TEXT("?") + FString::Join(Kept, TEXT("&"));
+                if (Kept.Num() > 0)
+                {
+                    NewUrl += TEXT("?") + FString::Join(Kept, TEXT("&"));
+                }
             }
             Url = NewUrl;
         }
@@ -371,10 +383,10 @@ void FLibDataChannelConnector::SetupPeerConnection(const rtc::Configuration& Cfg
 
     PC->onLocalDescription([this](rtc::Description Desc)
     {
-        // For client role, we use Config.Room as routing id. For server, prefer RemotePeerId if provided.
+        // Routing: client targets server by room (path id); server targets "client"
         const FString Id = (Config.Role == EO3DSWebRtcRole::Client)
-            ? (Config.Room.IsEmpty() ? FString(TEXT("default")) : Config.Room)
-            : RemotePeerId;
+            ? (!Config.Room.IsEmpty() ? Config.Room : FString(TEXT("server")))
+            : FString(TEXT("client"));
 
         TSharedPtr<FJsonObject> Msg = MakeShared<FJsonObject>();
         if (!Id.IsEmpty())
@@ -389,8 +401,8 @@ void FLibDataChannelConnector::SetupPeerConnection(const rtc::Configuration& Cfg
     PC->onLocalCandidate([this](rtc::Candidate Cand)
     {
         const FString Id = (Config.Role == EO3DSWebRtcRole::Client)
-            ? (Config.Room.IsEmpty() ? FString(TEXT("default")) : Config.Room)
-            : RemotePeerId;
+            ? (!Config.Room.IsEmpty() ? Config.Room : FString(TEXT("server")))
+            : FString(TEXT("client"));
 
         TSharedPtr<FJsonObject> Msg = MakeShared<FJsonObject>();
         if (!Id.IsEmpty())
@@ -970,6 +982,10 @@ void FLibDataChannelConnector::SendJson(const TSharedPtr<FJsonObject>& Obj)
         const FString Id   = Obj->HasField(TEXT("id")) ? Obj->GetStringField(TEXT("id")) : TEXT("");
         UE_LOG(LogTemp, Log, TEXT("[LibDC] signaling send: role=%s id='%s' type=%s len=%d"),
             (Config.Role == EO3DSWebRtcRole::Client ? TEXT("client") : TEXT("server")), *Id, *Type, Out.Len());
+        if (CVarO3DSLibDCDumpJson.GetValueOnAnyThread() != 0)
+        {
+            UE_LOG(LogTemp, VeryVerbose, TEXT("[LibDC] JSON_OUT: %s"), *Out);
+        }
     }
     WS->Send(Out);
 }
@@ -979,6 +995,10 @@ void FLibDataChannelConnector::HandleIncomingJson(const FString& JsonStr)
     if (!bStarted.load())
     {
         return; // ignore stray signaling after Stop()
+    }
+    if (Config.bVerbose && CVarO3DSLibDCDumpJson.GetValueOnAnyThread() != 0)
+    {
+        UE_LOG(LogTemp, VeryVerbose, TEXT("[LibDC] JSON_IN: %s"), *JsonStr);
     }
     TSharedPtr<FJsonObject> Obj;
     TSharedRef<TJsonReader<>> R = TJsonReaderFactory<>::Create(JsonStr);
