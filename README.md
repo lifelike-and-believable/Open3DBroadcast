@@ -19,7 +19,7 @@ Open3DStream is a standardized protocol and library for real-time streaming of s
 ✅ TCP Client/Server
 ✅ UDP Server
 ✅ NNG (Subscribe, Pair, Publisher)
-✅ WebRTC peer-to-peer with NAT traversal (libdatachannel)
+✅ WebRTC: P2P (libdatachannel) and SFU (LiveKit)
 
 ### Platform Support
 
@@ -138,7 +138,7 @@ These changes preserve prior behavior while making responsibilities clearer and 
  
 Added support for animation curves to enable morph target-based facial animation:
 
-### WebRTC Status (October 2025)
+### WebRTC Status (November 2025)
 ### Receiver Audio Polish & Reconnect (November 2025)
 
 - `O3DSRemoteAudioComponent` is now a `USceneComponent` with attachment options (parent/socket)
@@ -147,10 +147,13 @@ Added support for animation curves to enable morph target-based facial animation
 - Editor experience: categories/tooltips aligned with `UAudioComponent` layout; Volume/Pitch surfaced at the top
 - Reconnect/resilience: client-first offer retry, signaling reconnect, re-offer on DataChannel close; receiver resets PC on new offers
 
-libdatachannel is integrated with OpenSSL and enabled by default across the codebase:
+WebRTC backends are now unified behind a connector interface:
 
-- C++ command-line tools support WebRTC (ready) – see [WEBRTC_QUICKSTART.md](WEBRTC_QUICKSTART.md)
-- Unreal plugin includes a functional WebRTC connector (beta) using a lightweight WebSocket signaling server – see [WEBRTC_UNREAL_IMPLEMENTATION.md](WEBRTC_UNREAL_IMPLEMENTATION.md)
+- LibDataChannel (P2P) and LiveKit (SFU) are selectable backends in Unreal.
+- URL assembly and backend-specific semantics live inside connectors; you no longer add `role=` or backend hints to URLs.
+- A Token field is available under WebRTC settings when required by the chosen backend (e.g., LiveKit). A dynamic hint guides the expected token format.
+- C++ command-line tools support WebRTC – see [WEBRTC_QUICKSTART.md](WEBRTC_QUICKSTART.md)
+- Unreal plugin includes WebRTC connectors for both backends – see [LIVEKIT_README.md](LIVEKIT_README.md) and testing guide below.
 
 ## Documentation
 
@@ -170,6 +173,16 @@ libdatachannel is integrated with OpenSSL and enabled by default across the code
 - [Unreal WebRTC implementation notes](WEBRTC_UNREAL_IMPLEMENTATION.md)
 - [libdatachannel Integration](LIBDATACHANNEL_INTEGRATION.md)
 - [Issue #15](https://github.com/lifelike-and-believable/Open3DStream/issues/15) - Implementation roadmap
+- [LiveKit Backend Overview](LIVEKIT_README.md)
+- [LiveKit vs. LibDataChannel](plugins/unreal/Open3DStream/docs/WEBRTC_BACKENDS_COMPARISON.md)
+
+### WebRTC Backends (Unreal)
+
+- Backend selection: choose `LibDataChannel` (P2P) or `LiveKit` (SFU) from WebRTC settings in the UI.
+- Roles: components determine roles (Broadcaster acts as Publisher; Live Link Source acts as Subscriber). Do not append `role=` to URLs.
+- URL inputs: provide the signaling base URL and Room. Connectors assemble the final signaling address internally per backend.
+- Token: enter under the WebRTC section when required by the backend. The UI provides a backend-specific hint (e.g., LiveKit JWT).
+- Reliability: data channels support reliable/lossy modes internally; no URL flags are required for typical use.
 
 ## Docs Refresh and Source of Truth
 
@@ -191,9 +204,9 @@ If you update the schema, rebuild the core library and the Unreal plugin.
 | TCP | ✅ Ready | Medium | Easy | ❌ | ❌ | Local networks |
 | UDP | ✅ Ready | Low | Easy | ❌ | ❌ | Low latency, lossy OK |
 | NNG | ✅ Ready | Low | Medium | ❌ | ❌ | Microservices |
-| WebRTC | ✅ Ready (Beta) | Low | Medium | ✅ | ✅ | Cloud, remote |
+| WebRTC | ✅ Ready | Low | Medium | ✅ | ✅ | Cloud, remote |
 
-**WebRTC Status**: Unreal WebRTC path implemented with libdatachannel ([Issue #15](https://github.com/lifelike-and-believable/Open3DStream/issues/15)); uses a simple WebSocket signaling server. Marked Beta pending broader testing.
+**WebRTC Status**: Unreal WebRTC path supports both libdatachannel (P2P) and LiveKit (SFU). Backend-specific URL details are handled by connectors; configure URL/Room (and Token if required) in the WebRTC section.
 
 ### C++ Command-Line Tools
 

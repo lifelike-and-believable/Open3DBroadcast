@@ -2,6 +2,8 @@
 
 This guide provides step-by-step instructions for testing the WebRTC receiver and broadcaster functionality in Open3DStream.
 
+Note: Backend-specific URL semantics are now handled inside connectors. You should not append `role=` or backend hints to URLs. Select the backend (LibDataChannel or LiveKit) in the UI, set URL/Room (and Token if required), and let the connector assemble the correct signaling details.
+
 ## Prerequisites
 
 - Unreal Engine 5.6 with Open3DStream plugin installed

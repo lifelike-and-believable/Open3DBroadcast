@@ -172,6 +172,9 @@ bool FO3DSWebRtcTransport::Start(const FString& InUrl, const FString& InProtocol
         Cfg.bVerbose = PreConfig.bVerbose;
     }
 
+    // Note: Any LibDataChannel-specific URL normalization (e.g., default client path)
+    // is handled inside the LibDataChannelConnector to keep backend logic encapsulated.
+
     Connector = FWebRTCConnectorFactory::Create(Cfg.Backend);
     if (!Connector.IsValid())
     {

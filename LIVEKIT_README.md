@@ -1,20 +1,31 @@
 # LiveKit Backend for Open3DStream
 
-**Status:** Planning Complete - Awaiting Implementation  
-**Version:** M3.4.1b  
-**Date:** 2025-11-03
+**Status:** Operational (Publisher + Subscriber)  
+**Version:** M3.4.2  
+**Date:** 2025-11-05
 
 ---
 
 ## Overview
 
-This directory contains comprehensive planning and implementation documentation for adding LiveKit SFU (Selective Forwarding Unit) backend support to Open3DStream's WebRTC connectivity layer.
+This directory documents the LiveKit SFU (Selective Forwarding Unit) backend for Open3DStream's WebRTC connectivity layer, including current usage, architecture notes, and historical planning materials.
 
 **Goal:** Enable scalable 1-to-many and many-to-many broadcast of real-time animation data and audio over the internet using LiveKit's cloud-native media server architecture.
 
 ---
 
-## 📋 Planning Documents
+## 🚦 Current Usage (Unreal)
+
+- Select `WebRTC` as the transport and choose backend `LiveKit`.
+- Provide `URL` (wss), `Room`, and `Token` in the WebRTC section. Do not append `role=` or backend hints to URLs — the connector assembles backend-specific signaling internally.
+- Roles are implied by context: Broadcaster acts as Publisher; Live Link Source acts as Subscriber.
+- The Token field shows a backend-specific hint (e.g., LiveKit JWT).
+
+For a quick walkthrough, see the “LiveKit Usage Quick Start” section in `LIVEKIT_QUICKSTART.md` (top of file).
+
+---
+
+## 📋 Planning & Reference Documents
 
 ### For Project Stakeholders
 
@@ -37,7 +48,7 @@ This directory contains comprehensive planning and implementation documentation 
 - Common pitfalls and debug tips
 - Phase-by-phase success checklists
 
-👉 **Start here** if you're implementing the LiveKit connector.
+👉 For implementation history, start here if you need prior design details.
 
 ### For Technical Deep Dive
 
@@ -133,7 +144,7 @@ Both backends implement the same `IWebRTCConnector` interface:
 
 ## 🎯 Implementation Phases
 
-### Phase 1: SDK Integration (3-5 days)
+### Phase 1: SDK Integration (historical)
 **Goal:** Select and integrate LiveKit C++ SDK
 
 - [ ] Evaluate candidate SDKs (official vs community)
@@ -144,7 +155,7 @@ Both backends implement the same `IWebRTCConnector` interface:
 
 **Deliverable:** SDK builds successfully, conditional compilation works
 
-### Phase 2: Core Implementation (10-15 days)
+### Phase 2: Core Implementation (historical)
 **Goal:** Implement FLiveKitConnector class
 
 - [ ] Create class skeleton implementing IWebRTCConnector
@@ -156,7 +167,7 @@ Both backends implement the same `IWebRTCConnector` interface:
 
 **Deliverable:** Connector implements full interface, compiles successfully
 
-### Phase 3: Integration (2-3 days)
+### Phase 3: Integration (historical)
 **Goal:** Wire connector into existing codebase
 
 - [ ] Update WebRTCConnectorFactory
@@ -166,7 +177,7 @@ Both backends implement the same `IWebRTCConnector` interface:
 
 **Deliverable:** Backend selection works, config propagates correctly
 
-### Phase 4: Testing (5-7 days)
+### Phase 4: Testing (historical)
 **Goal:** Validate connectivity and behavior
 
 - [ ] Ground truth test (WebRTCConnectorComponent)
@@ -177,7 +188,7 @@ Both backends implement the same `IWebRTCConnector` interface:
 
 **Deliverable:** All tests pass, performance meets targets
 
-### Phase 5: Validation
+### Phase 5: Validation (historical)
 **Goal:** Verify production readiness
 
 - [ ] E2E animation streaming
@@ -188,7 +199,7 @@ Both backends implement the same `IWebRTCConnector` interface:
 
 **Deliverable:** Production-ready connector
 
-### Phase 6: Documentation (3-4 days)
+### Phase 6: Documentation (historical)
 **Goal:** Enable team to deploy and use
 
 - [ ] Update WEBRTC_TESTING_GUIDE.md
@@ -262,7 +273,7 @@ $env:O3DS_ENABLE_LIVEKIT="1"
 
 ---
 
-## ✅ Success Criteria
+## ✅ Success Criteria (met)
 
 ### Functional Requirements
 - ✓ Full IWebRTCConnector implementation
@@ -292,7 +303,7 @@ $env:O3DS_ENABLE_LIVEKIT="1"
 
 ---
 
-## ⏱️ Timeline
+## ⏱️ Timeline (historical)
 
 **Estimated Duration:** 7-12 weeks (single engineer, full-time)
 
@@ -432,26 +443,7 @@ $env:O3DS_ENABLE_LIVEKIT="1"
 
 ## 📊 Project Status
 
-**Current Phase:** Planning Complete ✓
-
-**Next Phase:** SDK Evaluation (Phase 1)
-
-**Overall Progress:**
-
-```
-Planning  ████████████████████████████████ 100% ✓
-SDK Eval  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   0%
-Core Impl ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   0%
-Testing   ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   0%
-Docs      ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   0%
-```
-
-**Approval Status:**
-- [ ] Planning documents reviewed
-- [ ] Approach approved
-- [ ] Resources allocated
-- [ ] SDK selection confirmed
-- [ ] Ready to begin Phase 1
+LiveKit backend is implemented and operational for both Broadcaster (Publisher) and Live Link Source (Subscriber).
 
 ---
 

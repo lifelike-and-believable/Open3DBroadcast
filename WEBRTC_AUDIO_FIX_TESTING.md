@@ -4,6 +4,8 @@
 
 This document describes how to test the WebRTC audio track ordering fix implemented to resolve audio negotiation failures.
 
+Note: Examples below using URLs with `?role=` refer to the legacy P2P libdatachannel path. In current builds, backend-specific URL semantics are handled inside connectors. Do not append `role=` or backend hints to URLs when using the unified WebRTC configuration; set backend/role in the UI and provide URL/Room (and Token if required).
+
 ## Problem Statement
 
 The WebRTC audio track was failing to open because tracks were not being added before data channel creation, causing them to be omitted from the initial SDP offer.

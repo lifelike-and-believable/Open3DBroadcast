@@ -1,4 +1,34 @@
-# LiveKit Implementation Quick Start
+# LiveKit Usage Quick Start
+
+**For:** Users of the LiveKit backend in Unreal  
+**Status:** Implemented — Publisher and Subscriber supported  
+**Prerequisites:** Unreal Engine 5.6, LiveKit server (local or cloud), Token (JWT)
+
+---
+
+## Fast Path (Unreal)
+
+1) Broadcaster (Publisher)
+- Add `UO3DSBroadcastComponent` to an actor with a skeletal mesh.
+- Set `Transport = WebRTC`, `Backend = LiveKit`.
+- Fill in `URL` (e.g., `wss://your-livekit.example.com`), `Room`, and `Token` under the WebRTC section.
+- Choose Subject and (optionally) enable audio capture (Input or Mix).
+- Press Play; logs should show connection established.
+
+2) Receiver (Subscriber)
+- Open Live Link: `Window → Virtual Production → Live Link` → `+ Source → Open3D Stream`.
+- Set `Protocol = WebRTC`, `Backend = LiveKit`.
+- Fill in `URL`, `Room`, and `Token` under WebRTC.
+- A Live Link subject should appear and animate; add `O3DSRemoteAudioComponent` for audio playback.
+
+Notes
+- Do not append `role=` or backend flags to URLs; connectors assemble backend-specific signaling internally.
+- A backend-specific hint appears next to the Token field (e.g., LiveKit JWT guidance).
+- Roles are implied by context: Broadcaster acts as Publisher; Live Link Source acts as Subscriber.
+
+---
+
+# LiveKit Implementation Quick Start (Historical)
 
 **For:** Engineers implementing the LiveKit backend  
 **Status:** Planning phase - SDK evaluation pending  
