@@ -73,19 +73,6 @@ bool FLibDataChannelConnector::Start(const FO3DSWebRtcConfig& InConfig)
         });
     }
 
-    // Informational: publish semantic role mapping for clarity (Client=Publisher, Server=Subscriber)
-    {
-        TWeakPtr<IWebRTCConnector> Weak = AsShared();
-        const bool bIsPublisher = (Config.Role == EO3DSWebRtcRole::Client);
-        AsyncTask(ENamedThreads::GameThread, [Weak, bIsPublisher]()
-        {
-            if (TSharedPtr<IWebRTCConnector> P = Weak.Pin())
-            {
-                P->OnState().Broadcast(bIsPublisher ? TEXT("Role:Publisher") : TEXT("Role:Subscriber"), false);
-            }
-        });
-    }
-
     // Start signaling reconnect pump and initiate first connect
     StartSignalingReconnectPump();
     OpenWebSocket();
