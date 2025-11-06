@@ -325,6 +325,16 @@ void UO3DSBroadcastComponent::StartInternalTransport()
  return;
  }
 
+	// Safety: never start network transports while not in a game/PIE world
+	if (UWorld* World = GetWorld())
+	{
+		if (!World->IsGameWorld())
+		{
+			UE_LOG(LogO3DSBroadcast, Verbose, TEXT("Skip starting transport outside of game world (editor change)"));
+			return;
+		}
+	}
+
  FString EffectiveUrl = Url;
  FString EffectiveKey = Key;
 
@@ -476,6 +486,16 @@ void UO3DSBroadcastComponent::OnSerializedForTransport(const FString& /*Subject*
 
 void UO3DSBroadcastComponent::StartCapture()
 {
+	// Do not start capture when not in an actual game/PIE world
+	if (UWorld* World = GetWorld())
+	{
+		if (!World->IsGameWorld())
+		{
+			UE_LOG(LogO3DSBroadcast, Verbose, TEXT("Skip StartCapture outside of game world (editor change)"));
+			return;
+		}
+	}
+
  if (bIsCapturing)
  {
  return;
@@ -641,6 +661,19 @@ void UO3DSBroadcastComponent::StopCapture()
 
  // Teardown transport if we created one
  TeardownInternalTransport();
+
+	// If we configured a WebRTC audio sink, clear it so editor-time audio taps don't spam warnings
+	if (TransportFamily == EO3DSTransportFamily::WebRTC)
+	{
+		if (AActor* Owner = GetOwner())
+		{
+			if (UO3DSBroadcastAudioCaptureComponent* AudioComp = Owner->FindComponentByClass<UO3DSBroadcastAudioCaptureComponent>())
+			{
+				// Reset the sink to an empty TFunction so PushFrames early-outs without warnings
+				AudioComp->SetAudioSink(TFunction<bool(const FString&, const float*, int32, int32, int32, double)>());
+			}
+		}
+	}
 
  UE_LOG(LogO3DSBroadcast, Log, TEXT("O3DS Broadcast: Stopped capture on %s"), *GetNameSafe(TargetMesh.Get()));
  NotifyOnScreen(FString::Printf(TEXT("O3DS Broadcast: Stopped on %s"), *GetNameSafe(TargetMesh.Get())), FColor::Yellow,2.0f);
@@ -1289,11 +1322,26 @@ void UO3DSBroadcastComponent::PostEditChangeProperty(FPropertyChangedEvent& Prop
 
 	if (RestartProps.Contains(Prop))
 	{
+		// Only (re)start capture from editor property changes when in a game/PIE world
+		const bool bInGameWorld = (GetWorld() && GetWorld()->IsGameWorld());
 		const bool bWasCapturing = bIsCapturing;
+		// Always stop to flush any accidental editor-time pipelines
 		StopCapture();
-		if (bAutoStartCapture || bWasCapturing)
+		if (bInGameWorld && (bAutoStartCapture || bWasCapturing))
 		{
 			StartCapture();
+		}
+		else
+		{
+			// Outside of game world: ensure no background transport or audio sink remains wired
+			TeardownInternalTransport();
+			if (AActor* Owner = GetOwner())
+			{
+				if (UO3DSBroadcastAudioCaptureComponent* AudioComp = Owner->FindComponentByClass<UO3DSBroadcastAudioCaptureComponent>())
+				{
+					AudioComp->SetAudioSink(TFunction<bool(const FString&, const float*, int32, int32, int32, double)>());
+				}
+			}
 		}
 	}
 }
