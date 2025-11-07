@@ -470,11 +470,11 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		flatbuffers::Offset<O3DS::Data::Subject> s = this->Serialize(builder);
 		subjects.push_back(s);
 
-		auto ovSubjects = builder.CreateVector(subjects);
+\tauto ovSubjects = builder.CreateVector(subjects);
 
-		auto root = CreateSubjectList(builder, ovSubjects, 0, timestamp);
+\tauto root = CreateSubjectList(builder, ovSubjects, 0, timestamp, mTxSeq, mTxAudioTime);
 
-		builder.Finish(root);
+\tbuilder.Finish(root);
 
 		finalize(builder, outbuf, 1);
 
@@ -493,11 +493,11 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		std::vector<flatbuffers::Offset<O3DS::Data::SubjectUpdate>> outSubjectUpdates;
 		outSubjectUpdates.push_back(this->SerializeUpdate(builder, count, deltaThreshold));
 
-		auto ovSubjectUpdates = builder.CreateVector(outSubjectUpdates);
+\tauto ovSubjectUpdates = builder.CreateVector(outSubjectUpdates);
 
-		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp);
+\tauto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, mTxSeq, mTxAudioTime);
 
-		builder.Finish(root);
+\tbuilder.Finish(root);
 
 		finalize(builder, outbuf, 1);
 
@@ -600,11 +600,13 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			return false;
 		}
 
-		auto root = GetSubjectList(data+8);
+\tauto root = GetSubjectList(data+8);
 
-		this->mTime = root->time();
+\tthis->mTime = root->time();
+\tthis->mTxSeq = root->tx_seq();
+\tthis->mTxAudioTime = root->tx_audio_time();
 
-		auto subjects_data = root->subjects();
+\tauto subjects_data = root->subjects();
 		auto updates_data = root->updates();
 
 		auto ovSubjects = root->subjects();

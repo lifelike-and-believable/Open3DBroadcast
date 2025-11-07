@@ -97,6 +97,8 @@ table SubjectList {
    subjects:[Subject];
    updates:[SubjectUpdate];
    time:double;
+   tx_seq:ulong = 0;           // Monotonic sequence number from broadcaster
+   tx_audio_time:double = 0.0; // Audio clock timestamp (seconds) when frame captured
 }
 
 

@@ -213,11 +213,15 @@ namespace O3DS
 		SubjectList()
 			: mTime(0.0)
 			, mDeltaThreshold(std::numeric_limits<double>::min())
+			, mTxSeq(0)
+			, mTxAudioTime(0.0)
 		{}
 
 		SubjectList(const SubjectList &other)
 			: mTime(0.0)
 			, mDeltaThreshold(std::numeric_limits<double>::min())
+			, mTxSeq(0)
+			, mTxAudioTime(0.0)
 		{}
 
 		virtual ~SubjectList()
@@ -262,6 +266,8 @@ namespace O3DS
 
 		double mTime;
 		double mDeltaThreshold;
+		uint64_t mTxSeq;          // Monotonic sequence number
+		double mTxAudioTime;      // Audio clock timestamp
 		std::string mError;
 
 		//! Encode all of the items in the subject list as binary data
