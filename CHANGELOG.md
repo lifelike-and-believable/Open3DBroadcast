@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 - `Open3DStream` registers a LiveLink-backed consumer via the shared loopback registry and now depends on `Open3DShared`.
 - Built-in transports (e.g., NNG) use shared URL helpers; common tcp URL typos like `tcp://0.0.0.0.9000` are auto-normalized to `tcp://0.0.0.0:9000`.
  - Unified WebRTC configuration via `FO3DSWebRtcConfig`; backend-specific URL semantics are handled inside connectors. External URL `role=` and backend hints removed.
+ - LiveKit connector: realtime strategy updated (single lossy unordered stream + forward-paced send scheduling). Removed size-based reliability switching and ordered lossy mode to eliminate head-of-line stalls causing freeze/speed-up cycles.
  - Token moved under the WebRTC section for both sender and receiver; backend-specific token hint surfaced in UI (e.g., LiveKit JWT guidance).
  - LiveLink receiver stability: marshal status/data to game thread and guard async dispatch with weak pointers; safe subject removal; remove remove-then-push during static refresh.
  - LiveKit teardown stability: unregister FFI callbacks before disconnect/destroy to avoid late callbacks into freed objects.

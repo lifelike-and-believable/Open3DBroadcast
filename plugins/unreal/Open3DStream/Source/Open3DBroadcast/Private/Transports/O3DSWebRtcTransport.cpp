@@ -141,17 +141,30 @@ bool FO3DSWebRtcTransport::Start(const FString& InUrl, const FString& InProtocol
     float ToneDur = 0.f; if (ParseFloatParam(InUrl, TEXT("tonedur"), ToneDur)) { Cfg.ToneDurationSec = ToneDur; }
 
     // Optional send reliability: reliability=lossy|reliable (default reliable)
+    bool bReliabilitySet = false;
     FString ReliabilityParam; if (ParseStringParam(InUrl, TEXT("reliability"), ReliabilityParam))
     {
         if (ReliabilityParam.Equals(TEXT("lossy"), ESearchCase::IgnoreCase))
         {
             DefaultReliability = IWebRTCConnector::EO3DSReliability::Lossy;
+            Cfg.bPreferLossyData = true;
         }
         else
         {
             DefaultReliability = IWebRTCConnector::EO3DSReliability::Reliable;
+            Cfg.bPreferLossyData = false;
         }
+        bReliabilitySet = true;
     }
+    // For LiveKit backend, prefer lossy by default when not explicitly set
+    if (!bReliabilitySet && Cfg.Backend == EO3DSWebRtcBackend::LiveKit)
+    {
+        DefaultReliability = IWebRTCConnector::EO3DSReliability::Lossy;
+        Cfg.bPreferLossyData = true;
+    }
+
+    // Optional gating of sends until channel is open: gate=1|0 (default 1)
+    bool bGate = true; if (ParseBoolParam(InUrl, TEXT("gate"), bGate)) { Cfg.bRequireOpenBeforeSend = bGate; }
 
     // Merge pre-config (authoritative for backend/role/room/token/audio/verbosity)
     if (bHasPreConfig)
@@ -170,6 +183,8 @@ bool FO3DSWebRtcTransport::Start(const FString& InUrl, const FString& InProtocol
         Cfg.ToneHz = PreConfig.ToneHz;
         Cfg.ToneDurationSec = PreConfig.ToneDurationSec;
         Cfg.bVerbose = PreConfig.bVerbose;
+        Cfg.bPreferLossyData = PreConfig.bPreferLossyData;
+        Cfg.bRequireOpenBeforeSend = PreConfig.bRequireOpenBeforeSend;
     }
 
     // Note: Any LibDataChannel-specific URL normalization (e.g., default client path)

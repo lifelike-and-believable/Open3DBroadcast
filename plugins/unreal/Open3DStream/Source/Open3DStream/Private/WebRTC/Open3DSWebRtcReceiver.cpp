@@ -31,6 +31,13 @@ static TAutoConsoleVariable<int32> CVarO3DSReceiverWebRtcLogAudioRtp(
     TEXT("When 1, log received RTP audio packet sizes."),
     ECVF_Default);
 
+// Prefer PCM callback over RTP decoding when available
+static TAutoConsoleVariable<int32> CVarO3DSReceiverUsePcm(
+    TEXT("o3ds.Receiver.Audio.UsePcm"),
+    1,
+    TEXT("When 1 and connector provides PCM callback, prefer PCM over RTP decoding for audio."),
+    ECVF_Default);
+
 FOpen3DSWebRtcReceiver::FOpen3DSWebRtcReceiver()
 {
 }
@@ -93,26 +100,34 @@ bool FOpen3DSWebRtcReceiver::Start(const FOpen3DStreamSettings& Settings)
     // Bind internal callbacks (connector delegates fire on arbitrary threads; marshal to game thread)
     Connector->OnState().AddRaw(this, &FOpen3DSWebRtcReceiver::OnConnectorState);
     Connector->OnData().AddRaw(this, &FOpen3DSWebRtcReceiver::OnConnectorData);
-    Connector->OnRemoteAudioRtp().AddRaw(this, &FOpen3DSWebRtcReceiver::OnConnectorAudioRtp);
-    if (FO3DSOnWebRtcPcm16* Pcm = Connector->OnRemoteAudioPcm())
+    // Decide audio path: PCM callback (preferred) or RTP decoding (fallback)
+    bPreferPcmCallback = (CVarO3DSReceiverUsePcm->GetInt() != 0) && (Connector->OnRemoteAudioPcm() != nullptr);
+    if (bPreferPcmCallback)
     {
-        Pcm->AddLambda([this](const FO3DSPcm16Frame& Frame)
+        if (FO3DSOnWebRtcPcm16* Pcm = Connector->OnRemoteAudioPcm())
         {
-            // Publish PCM16 directly to audio bus on the game thread
-            TArray<int16> Copy = Frame.Samples; // copy to ensure lifetime across thread hop
-            AsyncTask(ENamedThreads::GameThread, [Copy = MoveTemp(Copy), Frame]()
+            Pcm->AddLambda([this](const FO3DSPcm16Frame& Frame)
             {
-                O3DS::FAudioFrameMeta Meta;
-                Meta.StreamLabel = TEXT("o3ds:mix:livekit");
-                Meta.SubjectName = TEXT("WebRTC");
-                Meta.NumChannels = Frame.NumChannels;
-                Meta.SampleRate = Frame.SampleRate;
-                // Timestamp unknown here; leave default 0
-                const uint8* Bytes = reinterpret_cast<const uint8*>(Copy.GetData());
-                const int32 NumBytes = Copy.Num() * sizeof(int16);
-                FO3DSAudioBus::PublishPcm16(Meta, Bytes, NumBytes);
+                // Publish PCM16 directly to audio bus on the game thread
+                TArray<int16> Copy = Frame.Samples; // copy to ensure lifetime across thread hop
+                AsyncTask(ENamedThreads::GameThread, [Copy = MoveTemp(Copy), Frame]()
+                {
+                    O3DS::FAudioFrameMeta Meta;
+                    Meta.StreamLabel = TEXT("o3ds:mix:livekit");
+                    Meta.SubjectName = TEXT("WebRTC");
+                    Meta.NumChannels = Frame.NumChannels;
+                    Meta.SampleRate = Frame.SampleRate;
+                    // Timestamp unknown here; leave default 0
+                    const uint8* Bytes = reinterpret_cast<const uint8*>(Copy.GetData());
+                    const int32 NumBytes = Copy.Num() * sizeof(int16);
+                    FO3DSAudioBus::PublishPcm16(Meta, Bytes, NumBytes);
+                });
             });
-        });
+        }
+    }
+    else
+    {
+        Connector->OnRemoteAudioRtp().AddRaw(this, &FOpen3DSWebRtcReceiver::OnConnectorAudioRtp);
     }
 
     // Start connector
@@ -220,41 +235,51 @@ void FOpen3DSWebRtcReceiver::OnConnectorState(const FString& State, bool bIsErro
 
 void FOpen3DSWebRtcReceiver::OnConnectorData(const TArray<uint8>& Bytes)
 {
-    // Marshal to game thread and forward to source parsing
-    AsyncTask(ENamedThreads::GameThread, [this, Bytes]()
+    // Coalesce game-thread dispatch to avoid backlog replay; keep only the latest frame.
     {
-        const bool bLogContent = (CVarO3DSReceiverWebRtcLogDataContent->GetInt() != 0);
-        const bool bLogCount = (CVarO3DSReceiverWebRtcLogDataCount->GetInt() != 0);
-        const bool bLogVerbose = (CVarO3DSReceiverWebRtcLog->GetInt() != 0);
-        
-        if (bLogContent)
+        FScopeLock L(&CoalesceMutex);
+        PendingData = Bytes; // copy latest
+        if (!bDataDispatchScheduled.Load())
         {
-            // Show the first 64 byte values (hex) for FlatBuffer-style payloads
-            const int32 MaxShow = 64;
-            const int32 N = FMath::Min(Bytes.Num(), MaxShow);
-            TArray<FString> Hex; Hex.Reserve(N);
-            for (int32 i = 0; i < N; ++i)
+            bDataDispatchScheduled.Store(true);
+            AsyncTask(ENamedThreads::GameThread, [this]()
             {
-                Hex.Add(FString::Printf(TEXT("%02X"), Bytes[i]));
-            }
-            const FString Head = FString::Join(Hex, TEXT(" "));
-            const bool bTrunc = (Bytes.Num() > MaxShow);
-            UE_LOG(LogO3DSReceiverWebRTC, Log, TEXT("Data: [%s]%s (%d bytes)"), *Head, bTrunc ? TEXT(" ...") : TEXT(""), Bytes.Num());
-        }
-        else if (bLogCount)
-        {
-            UE_LOG(LogO3DSReceiverWebRTC, Verbose, TEXT("Data: %d bytes"), Bytes.Num());
-        }
-        else if (bLogVerbose)
-        {
-            UE_LOG(LogO3DSReceiverWebRTC, Verbose, TEXT("data bytes=%d"), Bytes.Num());
-        }
+                TArray<uint8> Dispatch;
+                {
+                    FScopeLock L2(&CoalesceMutex);
+                    Dispatch = PendingData;
+                    bDataDispatchScheduled.Store(false);
+                }
+                const bool bLogContent = (CVarO3DSReceiverWebRtcLogDataContent->GetInt() != 0);
+                const bool bLogCount = (CVarO3DSReceiverWebRtcLogDataCount->GetInt() != 0);
+                const bool bLogVerbose = (CVarO3DSReceiverWebRtcLog->GetInt() != 0);
 
-        if (OnDataCallback)
-        {
-            OnDataCallback(Bytes);
+                if (bLogContent)
+                {
+                    const int32 MaxShow = 64;
+                    const int32 N = FMath::Min(Dispatch.Num(), MaxShow);
+                    TArray<FString> Hex; Hex.Reserve(N);
+                    for (int32 i = 0; i < N; ++i) { Hex.Add(FString::Printf(TEXT("%02X"), Dispatch[i])); }
+                    const FString Head = FString::Join(Hex, TEXT(" "));
+                    const bool bTrunc = (Dispatch.Num() > MaxShow);
+                    UE_LOG(LogO3DSReceiverWebRTC, Log, TEXT("Data: [%s]%s (%d bytes)"), *Head, bTrunc ? TEXT(" ...") : TEXT(""), Dispatch.Num());
+                }
+                else if (bLogCount)
+                {
+                    UE_LOG(LogO3DSReceiverWebRTC, Verbose, TEXT("Data: %d bytes"), Dispatch.Num());
+                }
+                else if (bLogVerbose)
+                {
+                    UE_LOG(LogO3DSReceiverWebRTC, Verbose, TEXT("data bytes=%d"), Dispatch.Num());
+                }
+
+                if (OnDataCallback)
+                {
+                    OnDataCallback(Dispatch);
+                }
+            });
         }
-    });
+    }
 }
 
 void FOpen3DSWebRtcReceiver::OnConnectorAudioRtp(const TArray<uint8>& RtpBytes)
@@ -274,7 +299,7 @@ void FOpen3DSWebRtcReceiver::OnConnectorAudioRtp(const TArray<uint8>& RtpBytes)
     }
     
     // Decode off the game thread (already on connector thread)
-    if (OpusDecoder && OpusDecoder->IsInitialized())
+    if (!bPreferPcmCallback && OpusDecoder && OpusDecoder->IsInitialized())
     {
         OpusDecoder->DecodeRtpPacket(RtpBytes);
     }

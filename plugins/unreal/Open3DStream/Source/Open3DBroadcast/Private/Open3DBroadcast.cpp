@@ -1,12 +1,17 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Open3DBroadcast.h"
-#include "PropertyEditorModule.h"
 #include "Modules/ModuleManager.h"
+
+#if WITH_EDITOR
+#include "PropertyEditorModule.h"
 #include "IDetailCustomization.h"
 #include "O3DSBroadcastComponentCustomization.h"
+#endif
 
+#if WITH_EDITOR
 class FO3DSBroadcastComponentCustomization;
+#endif
 
 #define LOCTEXT_NAMESPACE "FOpen3DBroadcastModule"
 

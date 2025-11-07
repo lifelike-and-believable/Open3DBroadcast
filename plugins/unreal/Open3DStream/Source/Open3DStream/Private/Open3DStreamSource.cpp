@@ -25,6 +25,14 @@ static TAutoConsoleVariable<int32> CVarO3DSReceiverDebugParse(
  TEXT("Enable debug logs when parsing incoming O3DS packets (0/1)."),
  ECVF_Default);
 
+// Drop frames that arrive with older protocol timestamps than the last applied one (guards against reordering).
+static TAutoConsoleVariable<int32> CVarO3DSReceiverDropOutOfOrder(
+ TEXT("o3ds.Receiver.DropOutOfOrder"),
+ 1,
+ TEXT("When 1, drop frames whose SubjectList.time is older than the last applied timestamp."),
+ ECVF_Default);
+
+
 
 #define LOCTEXT_NAMESPACE "Open3DStream"
 
@@ -57,6 +65,7 @@ FOpen3DStreamSource::FOpen3DStreamSource(const FOpen3DStreamSettings& Settings)
  , bIsValid(true)
  , mAddr(ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateInternetAddr())
  , SourceSettings(Settings) // Store settings for later use
+, LastAppliedSubjectListTime(-1.0)
 {
  Url = Settings.Url;
  Protocol = Settings.Protocol;
@@ -126,6 +135,12 @@ void FOpen3DStreamSource::OnStatus(FText msg, bool IsError)
 	}
 	SourceStatus = msg;
 	LogFlag = false;
+
+	// Reset timestamp tracking on new data channel open to avoid carrying stale state across reconnects.
+	if (!IsError && (Smsg.Contains(TEXT("DataChannelOpen")) || Smsg.Contains(TEXT("connecting"))))
+	{
+		LastAppliedSubjectListTime = -1.0;
+	}
 }
 
 void FOpen3DStreamSource::ReceiveClient(ILiveLinkClient* InClient, FGuid InSourceGuid)
@@ -256,6 +271,7 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
  }
 
  // Parse O3DS buffer (non-TCP transports provide raw payload without TCP magic)
+ const double ParseStartWall = FPlatformTime::Seconds();
  if (!mSubjects.Parse((const char*)data.GetData(), data.Num(),0))
  {
  OnStatus(LOCTEXT("DataError", "Data Error"), true);
@@ -273,6 +289,29 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
  UE_LOG(LogO3DSReceiver, Verbose, TEXT("Parse OK subjects=%d time=%.6f"), Count, mSubjects.mTime);
  }
 
+ const double SubjectListTime = mSubjects.mTime; // protocol time (seconds) from FlatBuffer
+
+ // If applying frames faster than protocol time advanced (duplicate timestamps), collapse duplicates
+ if (LastAppliedSubjectListTime >= 0.0 && SubjectListTime == LastAppliedSubjectListTime)
+ {
+	 // Treat as duplicate; skip
+	 if (CVarO3DSReceiverDebugParse->GetInt() != 0)
+	 {
+		 UE_LOG(LogO3DSReceiver, Verbose, TEXT("Dropping duplicate timestamp frame t=%.6f"), SubjectListTime);
+	 }
+	 return;
+ }
+ // Optionally drop out-of-order older frames (arrival reordering under SFU/ice paths)
+ if (CVarO3DSReceiverDropOutOfOrder->GetInt() != 0 && LastAppliedSubjectListTime >= 0.0 && SubjectListTime < LastAppliedSubjectListTime)
+ {
+	 if (CVarO3DSReceiverDebugParse->GetInt() != 0)
+	 {
+		 UE_LOG(LogO3DSReceiver, Verbose, TEXT("Dropping out-of-order frame t=%.6f < last=%.6f"), SubjectListTime, LastAppliedSubjectListTime);
+	 }
+	 return;
+ }
+ LastAppliedSubjectListTime = SubjectListTime;
+
  TArray<FName> BoneNames;
  TArray<int32> BoneParents;
 
@@ -282,11 +321,10 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
  FLiveLinkAnimationFrameData& FrameData = *FrameDataStruct.Cast<FLiveLinkAnimationFrameData>();
  FLiveLinkBaseFrameData& BaseFrameData = static_cast<FLiveLinkBaseFrameData&>(FrameData);
 
- FrameData.WorldTime = FPlatformTime::Seconds();
- FFrameRate FrameRate(60,1);
- FFrameTime FrameTime = FFrameTime(FrameRate.AsFrameTime(mSubjects.mTime));
- FrameData.FrameId = Frame++;
- FrameData.MetaData.SceneTime = FQualifiedFrameTime(FrameTime, FrameRate);
+	FrameData.WorldTime = FPlatformTime::Seconds();
+	FrameData.FrameId = Frame++;
+	// Do not set SceneTime; rely on WorldTime for LiveLink interpolation
+	FrameData.MetaData.SceneTime = FQualifiedFrameTime();
 
  BoneNames.Empty();
  BoneParents.Empty();

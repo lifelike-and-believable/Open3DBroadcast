@@ -1,6 +1,8 @@
 ﻿#pragma once
 
 #include "IWebRTCConnector.h"
+#include "HAL/CriticalSection.h"
+#include "Templates/Atomic.h"
 
 // LiveKit-backed connector using the livekit_ffi C ABI.
 class FLiveKitConnector : public IWebRTCConnector
@@ -43,4 +45,27 @@ private:
     FO3DSOnWebRtcData DataDelegate;
     FO3DSOnWebRtcRtp  RtpDelegate;
     FO3DSOnWebRtcPcm16 PcmDelegate;
+
+    // Diagnostics pacing
+    double LastStatsLogSec = 0.0;
+
+    // Coalesced delivery (avoid game-thread backlog):
+    // - Only the latest lossy Data payload will be dispatched when the game thread is ready.
+    // - Only the latest PCM frame will be dispatched when the game thread is ready.
+    FCriticalSection CoalesceMutex;
+    TArray<uint8> PendingLossyData;
+    TAtomic<bool> bLossyDataDispatchScheduled{false};
+
+    FO3DSPcm16Frame PendingPcm;
+    TAtomic<bool> bPcmDispatchScheduled{false};
+
+    // Outgoing lossy pacing/coalescing
+    FCriticalSection OutPaceMutex;
+    TArray<uint8> PendingLossyOut;
+    TAtomic<bool> bHasPendingLossyOut{false};
+    double LastDataSendSec = 0.0;
+    double NextPacedSendSec = 0.0; // target timestamp for next paced send
+    bool bPacingPrimed = false;    // set once pacing schedule initialized after open
+    // Pacing approach: maintain a forward-moving target time rather than relying solely on
+    // last-send deltas. This yields more uniform cadence under variable Tick intervals.
 };

@@ -67,38 +67,14 @@ void UO3DSRemoteAudioComponent::BeginPlay()
 		AudioComp->bAutoActivate = bAC_AutoActivate;
 		AudioComp->bAllowSpatialization = bAC_AllowSpatialization;
 		AudioComp->bIsUISound = bAC_IsUISound;
-		AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, AC_VolumeMultiplier));
-		AudioComp->SetPitchMultiplier(AC_PitchMultiplier);
 		AudioComp->bOverrideAttenuation = bAC_OverrideAttenuation;
 		AudioComp->AttenuationSettings = AC_AttenuationSettings;
-		if (AudioComp->bOverrideAttenuation)
-		{
-			AudioComp = NewObject<UAudioComponent>(GetOwner());
-			if (AudioComp)
-			{
-				AudioComp->RegisterComponent();
-				if (GetOwner() && GetOwner()->GetRootComponent())
-				{
-					AudioComp->AttachToComponent(GetOwner()->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
-				}
-				// Ensure 2D playback so it's audible regardless of listener position
-				AudioComp->bAllowSpatialization = false;
-				AudioComp->bIsUISound = true;
-				// Apply initial gain only to components we create/own
-				AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, Gain));
-				bOwnsAudioComponent = true;
-			}
-		}
-		else
-		{
-			// If an existing component was found, make sure settings are friendly for remote 2D playback
-			AudioComp->bAllowSpatialization = false;
-			AudioComp->bIsUISound = true;
-			// Respect user VolumeMultiplier when using an existing AudioComponent
-			bOwnsAudioComponent = false;
-		}
+		AudioComp->SetPitchMultiplier(AC_PitchMultiplier);
+		// Effective volume = user multiplier * Gain
+		AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, AC_VolumeMultiplier * Gain));
+		bOwnsAudioComponent = true;
 
-		// Advanced audio settings will be applied on the procedural SoundWave when created
+		// Advanced settings (submix/effects/concurrency) applied on SoundWave when created
 	}
 
 	// Subscribe to global audio bus published by the network receiver
@@ -194,11 +170,8 @@ void UO3DSRemoteAudioComponent::EnsureSoundWave(int32 NumChannels, int32 SampleR
 			{
 				AudioComp->Play();
 			}
-			// Only apply Gain if we created/own the AudioComponent; otherwise respect user's VolumeMultiplier
-			if (bOwnsAudioComponent)
-			{
-				AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, Gain));
-			}
+			// Always apply effective volume = user multiplier * Gain
+			AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, AC_VolumeMultiplier * Gain));
 			if (CVarO3DSRemoteAudioDebug->GetInt() !=0)
 			{
 				UE_LOG(LogO3DSReceiverAudio, Log, TEXT("SoundWave prepared ch=%d sr=%d; AudioComp playing=%d"),
@@ -277,13 +250,14 @@ void UO3DSRemoteAudioComponent::OnAudioPcm16(const O3DS::FAudioFrameMeta& Meta, 
 			UE_LOG(LogO3DSReceiverAudio, Log, TEXT("First PCM16 frame received (%d samples) stream='%s' subject='%s'"), NumSamples, *StreamLabel, *SubjectName);
 		}
 	}
-	// Keep audio component playing; do not override user's volume when they provided their own component
+	// Keep audio component playing; ensure effective volume applied even when user changes settings at runtime
 	if (AudioComp)
 	{
 		if (!AudioComp->IsPlaying())
 		{
 			AudioComp->Play();
 		}
+		AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, AC_VolumeMultiplier * Gain));
 	}
 	SoundWave->QueueAudio(const_cast<uint8*>(PCM16Bytes.GetData()), PCM16Bytes.Num());
 }

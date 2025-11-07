@@ -1,3 +1,26 @@
+## Realtime data channel defaults (Nov 2025)
+
+We tuned the LiveKit-backed connector for realtime animation streaming:
+
+- Pose frames use a single lossy, unordered data channel. Unordered delivery avoids stalls when frames are dropped; receiver consumes latest arrival immediately.
+- Outgoing pose sends are paced (coalesced) at a target rate (default 60 Hz). When multiple updates occur within one interval, only the newest is sent.
+- We do not switch reliability based on payload size. WebRTC data channels fragment messages internally; switching between lossy and reliable channels can introduce cross-channel reordering and visible jitter.
+
+Relevant config in `FO3DSWebRtcConfig`:
+
+- `bPreferLossyData = true`
+- `bRequireOpenBeforeSend = true`
+- `bEnableSendPacing = true`
+- `TargetDataSendHz = 60` (set 30 for heavy scenes)
+
+If you observe choppy playback or freeze/speed-up cycles:
+
+- Try `TargetDataSendHz = 30`.
+- Confirm publisher isn't saturating CPU with serialization (starving Tick).
+- (Advanced) Add a monotonic sequence or timestamp in the FlatBuffer payload and discard late/out-of-order frames on the receiver.
+- Temporarily set `bEnableSendPacing = false` to compare against per-frame sending.
+- Ensure the receiver applies frames in arrival order (our connector preserves ordering on the lossy stream).
+
 # LiveKit Backend for Open3DStream
 
 **Status:** Operational (Publisher + Subscriber)  

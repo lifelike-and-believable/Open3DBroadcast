@@ -441,13 +441,14 @@ void UO3DSBroadcastComponent::TeardownInternalTransport()
  SerializedFrameHandle.Reset();
  }
 
+ // Clear cached raw pointer early to avoid races with audio callbacks reading a dangling pointer
+ WebRtcTransportRaw = nullptr;
+
  if (InternalTransport)
  {
- InternalTransport->Stop();
- InternalTransport.Reset();
+	 InternalTransport->Stop();
+	 InternalTransport.Reset();
  }
- // Clear cached raw pointer when transport goes away
- WebRtcTransportRaw = nullptr;
 
  // Drain queue
  FQItem Item; while (SendQueue.Dequeue(Item)) {}
@@ -659,12 +660,11 @@ void UO3DSBroadcastComponent::StopCapture()
  Serializer->Detach(this);
  }
 
- // Teardown transport if we created one
- TeardownInternalTransport();
-
-	// If we configured a WebRTC audio sink, clear it so editor-time audio taps don't spam warnings
+	// If we configured a WebRTC audio sink, clear it first so audio callbacks early-out before transport teardown
 	if (TransportFamily == EO3DSTransportFamily::WebRTC)
 	{
+		// Proactively null the raw transport pointer so any in-flight audio sink calls will early-out
+		WebRtcTransportRaw = nullptr;
 		if (AActor* Owner = GetOwner())
 		{
 			if (UO3DSBroadcastAudioCaptureComponent* AudioComp = Owner->FindComponentByClass<UO3DSBroadcastAudioCaptureComponent>())
@@ -674,6 +674,9 @@ void UO3DSBroadcastComponent::StopCapture()
 			}
 		}
 	}
+
+	// Teardown transport if we created one (after clearing audio sink to avoid race with audio thread)
+	TeardownInternalTransport();
 
  UE_LOG(LogO3DSBroadcast, Log, TEXT("O3DS Broadcast: Stopped capture on %s"), *GetNameSafe(TargetMesh.Get()));
  NotifyOnScreen(FString::Printf(TEXT("O3DS Broadcast: Stopped on %s"), *GetNameSafe(TargetMesh.Get())), FColor::Yellow,2.0f);

@@ -1,3 +1,6 @@
+// Editor-only detail customization implementation. Excluded from non-editor builds.
+#if WITH_EDITOR
+
 #include "O3DSBroadcastComponentCustomization.h"
 
 #include "DetailLayoutBuilder.h"
@@ -16,7 +19,6 @@ TSharedRef<IDetailCustomization> FO3DSBroadcastComponentCustomization::MakeInsta
 
 void FO3DSBroadcastComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
 {
-#if WITH_EDITOR
     TArray<TWeakObjectPtr<UObject>> Objects;
     DetailBuilder.GetObjectsBeingCustomized(Objects);
     if (Objects.Num() == 0) { return; }
@@ -62,5 +64,6 @@ void FO3DSBroadcastComponentCustomization::CustomizeDetails(IDetailLayoutBuilder
             ];
         }
     }
-#endif
 }
+
+#endif // WITH_EDITOR

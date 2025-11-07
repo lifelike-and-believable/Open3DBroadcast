@@ -28,6 +28,8 @@ public class Open3DShared : ModuleRules
             "Sockets",
             "AudioMixer",
             "AudioCaptureCore",
+            // Needed for IPluginManager used by LiveKitConnector to locate plugin binaries
+            "Projects",
         });
 
         // ThirdParty layout (shared with other modules)

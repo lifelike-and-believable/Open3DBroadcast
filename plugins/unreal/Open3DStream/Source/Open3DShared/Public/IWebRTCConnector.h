@@ -43,6 +43,20 @@ struct FO3DSWebRtcConfig
     double  ToneDurationSec = 1.0;
 
     bool    bVerbose        = false;
+
+    // Realtime tuning (data channel)
+    // - When true, prefer lossy semantics for data payloads so old poses can be dropped under congestion.
+    //   Implementations that support per-send reliability will map default Send() to lossy when enabled.
+    bool    bPreferLossyData = true;
+    // - When true, implementations should avoid buffering and will refuse to send until the channel is open.
+    //   This prevents a burst of pre-connection messages being delivered on connect.
+    bool    bRequireOpenBeforeSend = true;
+
+    // Outgoing pacing for real-time streams (useful when caller ticks faster than network budget)
+    // - When enabled, lossy data sends are rate-limited to TargetDataSendHz and coalesced: only newest is sent.
+    // - Reliable sends are not paced by default.
+    bool    bEnableSendPacing = true;
+    int32   TargetDataSendHz = 60; // 30 or 60 typical
 };
 
 // Delegates for state and data callbacks

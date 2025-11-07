@@ -1,5 +1,7 @@
 #pragma once
 
+#if WITH_EDITOR
+
 #include "IDetailCustomization.h"
 
 class IDetailLayoutBuilder;
@@ -11,3 +13,5 @@ public:
 
     virtual void CustomizeDetails(IDetailLayoutBuilder& DetailBuilder) override;
 };
+
+#endif // WITH_EDITOR

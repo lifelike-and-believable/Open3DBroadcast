@@ -54,11 +54,19 @@ public class Open3DBroadcast : ModuleRules
 				"LiveLink",
 				"AnimGraphRuntime",
 				"Open3DShared",
-				"PropertyEditor",
 				"Slate",
 				"SlateCore"
 			}
 			);
+
+		// Editor-only dependencies
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.AddRange(new string[]
+			{
+				"PropertyEditor"
+			});
+		}
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{

@@ -79,4 +79,10 @@ private:
     // State tracking
     bool bStarted = false;
     bool bAudioEnabled = false;
+    bool bPreferPcmCallback = false; // when true and PCM callback available, do not decode RTP
+
+    // Data coalescing: keep only latest payload, schedule single GT dispatch
+    FCriticalSection CoalesceMutex;
+    TArray<uint8> PendingData;
+    TAtomic<bool> bDataDispatchScheduled{false};
 };

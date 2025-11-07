@@ -108,5 +108,10 @@ public:
     // Runtime tracking of subject static data to detect changes
     TMap<FName, uint64> SubjectSkeletonHash;   // hash of bone names + parents
     TMap<FName, uint64> SubjectCurveSetHash;   // hash of curve name set/order
+
+    // Receiver startup warmup to avoid backlog replay on late join
+    double LastAppliedSubjectListTime = -1.0;   // last applied SubjectList.time to drop duplicates
+
+    // Note: SceneTime manipulation removed; rely on WorldTime to avoid timeline divergence.
 };
 
