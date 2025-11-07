@@ -1,0 +1,7 @@
+// Append these at the end of the SubjectList table in o3ds.fbs (do not reorder existing fields).
+
+// tx_seq: monotonic per-process sequence number (0 == unset).
+// tx_wallclock_us: transmit wall-clock timestamp in UTC microseconds since Unix epoch (0 == unset).
+
+tx_seq:ulong = 0;           // 0 == unset; monotonic per publisher process
+tx_wallclock_us:ulong = 0;  // 0 == unset; UTC microseconds since Unix epoch
