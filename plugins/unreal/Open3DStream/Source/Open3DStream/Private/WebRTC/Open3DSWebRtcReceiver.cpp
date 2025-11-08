@@ -8,6 +8,8 @@
 #include "Async/Async.h"
 #include "O3DSAudioBus.h"
 #include "O3DSUnifiedMessage.h"
+#include "Misc/ScopeLock.h"
+#include "HAL/PlatformTime.h" // added for timing
 
 // CVars for receiver-side logging
 static TAutoConsoleVariable<int32> CVarO3DSReceiverWebRtcLog(
@@ -38,6 +40,20 @@ static TAutoConsoleVariable<int32> CVarO3DSReceiverUsePcm(
     TEXT("When 1 and connector provides PCM callback, prefer PCM over RTP decoding for audio."),
     ECVF_Default);
 
+// Diagnostic: log PCM arrival timing for LiveKit PCM path
+static TAutoConsoleVariable<int32> CVarO3DSReceiverWebRtcLogPcmTiming(
+    TEXT("o3ds.Receiver.WebRTC.LogPcmTiming"),
+    0,
+    TEXT("When 1, log PCM arrival timing (delta seconds) for LiveKit PCM callback."),
+    ECVF_Default);
+
+// New: control whether receiver coalesces even if data arrives on the GameThread
+static TAutoConsoleVariable<int32> CVarO3DSReceiverCoalesceOnGameThread(
+    TEXT("o3ds.Receiver.CoalesceOnGameThread"),
+    1,
+    TEXT("When 1, the receiver will coalesce incoming DataChannel payloads and schedule a single GT dispatch even if the callback runs on the GameThread."),
+    ECVF_Default);
+
 FOpen3DSWebRtcReceiver::FOpen3DSWebRtcReceiver()
 {
 }
@@ -53,6 +69,16 @@ bool FOpen3DSWebRtcReceiver::Start(const FOpen3DStreamSettings& Settings)
     {
         UE_LOG(LogO3DSReceiverWebRTC, Warning, TEXT("already started"));
         return false;
+    }
+
+    // Ensure shutdown guard is cleared when starting (important for reconnect flows)
+    bShuttingDown = false;
+
+    // Ensure no stale coalesced data from previous run
+    {
+        FScopeLock L(&CoalesceMutex);
+        PendingData.Reset();
+        bDataDispatchScheduled.Store(false);
     }
 
     // Create connector via factory based on backend selection
@@ -90,6 +116,10 @@ bool FOpen3DSWebRtcReceiver::Start(const FOpen3DStreamSettings& Settings)
     Config.NumChannels = 1;
     Config.bVerbose = (CVarO3DSReceiverWebRtcLog->GetInt() != 0);
 
+    // Store audio format for potential re-init on reconnect
+    AudioSampleRate = Config.SampleRate;
+    AudioNumChannels = Config.NumChannels;
+
     if (Config.bVerbose)
     {
         FString ElidedUrl = Config.SignalingUrl;
@@ -106,18 +136,33 @@ bool FOpen3DSWebRtcReceiver::Start(const FOpen3DStreamSettings& Settings)
     {
         if (FO3DSOnWebRtcPcm16* Pcm = Connector->OnRemoteAudioPcm())
         {
-            Pcm->AddLambda([this](const FO3DSPcm16Frame& Frame)
+            // Avoid capturing 'this' in the connector-stored lambda.
+            // Keep timing log on connector thread, but publish PCM on the GameThread to satisfy delegate/thread-safety.
+            Pcm->AddLambda([](const FO3DSPcm16Frame& Frame)
             {
-                // Publish PCM16 directly to audio bus on the game thread
+                const double Now = FPlatformTime::Seconds();
+                static double LastPcmWall = 0.0;
+                if (CVarO3DSReceiverWebRtcLogPcmTiming->GetInt() != 0)
+                {
+                    const double Delta = (LastPcmWall > 0.0) ? (Now - LastPcmWall) : 0.0;
+                    UE_LOG(LogO3DSReceiverWebRTC, Verbose, TEXT("PCM recv frames=%d ch=%d sr=%d wallDelta=%.6f"),
+                        Frame.FramesPerChannel, Frame.NumChannels, Frame.SampleRate, Delta);
+                }
+                LastPcmWall = Now;
+
+                // Copy samples and forward to the game thread for publishing (safe for delegates).
                 TArray<int16> Copy = Frame.Samples; // copy to ensure lifetime across thread hop
-                AsyncTask(ENamedThreads::GameThread, [Copy = MoveTemp(Copy), Frame]()
+                const int32 NumChannels = Frame.NumChannels;
+                const int32 SampleRate  = Frame.SampleRate;
+
+                // Dispatch to GameThread to avoid multicast-delegate thread-safety violations.
+                AsyncTask(ENamedThreads::GameThread, [Copy = MoveTemp(Copy), NumChannels, SampleRate]() mutable
                 {
                     O3DS::FAudioFrameMeta Meta;
                     Meta.StreamLabel = TEXT("o3ds:mix:livekit");
                     Meta.SubjectName = TEXT("WebRTC");
-                    Meta.NumChannels = Frame.NumChannels;
-                    Meta.SampleRate = Frame.SampleRate;
-                    // Timestamp unknown here; leave default 0
+                    Meta.NumChannels = NumChannels;
+                    Meta.SampleRate = SampleRate;
                     const uint8* Bytes = reinterpret_cast<const uint8*>(Copy.GetData());
                     const int32 NumBytes = Copy.Num() * sizeof(int16);
                     FO3DSAudioBus::PublishPcm16(Meta, Bytes, NumBytes);
@@ -138,20 +183,25 @@ bool FOpen3DSWebRtcReceiver::Start(const FOpen3DStreamSettings& Settings)
     }
 
     // Create Opus decoder if audio enabled
-    if (Config.bEnableAudio)
+    if (Config.bEnableAudio && !bPreferPcmCallback)
     {
+        FScopeLock Lock(&OpusDecoderMutex);
         OpusDecoder = MakeShared<FO3DSOpusDecoder>();
-        if (!OpusDecoder->Initialize(Config.SampleRate, Config.NumChannels))
+        if (!OpusDecoder->Initialize(AudioSampleRate, AudioNumChannels))
         {
             UE_LOG(LogO3DSReceiverAudio, Error, TEXT("failed to initialize Opus decoder"));
             OpusDecoder.Reset();
+            bAudioEnabled = false;
         }
         else
         {
             bAudioEnabled = true;
-            // Always log once so users can confirm audio decode path enabled
-            UE_LOG(LogO3DSReceiverAudio, Log, TEXT("Audio enabled (sr=%d ch=%d)"), Config.SampleRate, Config.NumChannels);
+            UE_LOG(LogO3DSReceiverAudio, Log, TEXT("Audio enabled (sr=%d ch=%d)"), AudioSampleRate, AudioNumChannels);
         }
+    }
+    else if (Config.bEnableAudio && bPreferPcmCallback)
+    {
+        bAudioEnabled = true; // PCM path active
     }
 
     bStarted = true;
@@ -170,11 +220,26 @@ void FOpen3DSWebRtcReceiver::Stop()
     if (!bStarted)
         return;
 
-    // Shutdown decoder
-    if (OpusDecoder)
+    // Prevent any in-flight tasks from dispatching after stop
+    bShuttingDown = true;
+    OnDataCallback = nullptr;
+    OnStateCallback = nullptr;
+
+    // Clear any pending coalesced data so we don't drain after stop
     {
-        OpusDecoder->Shutdown();
-        OpusDecoder.Reset();
+        FScopeLock L(&CoalesceMutex);
+        PendingData.Reset();
+        bDataDispatchScheduled.Store(false);
+    }
+
+    // Shutdown decoder (safe under mutex)
+    {
+        FScopeLock Lock(&OpusDecoderMutex);
+        if (OpusDecoder)
+        {
+            OpusDecoder->Shutdown();
+            OpusDecoder.Reset();
+        }
     }
 
     // Stop connector
@@ -218,64 +283,122 @@ void FOpen3DSWebRtcReceiver::SetOnStateCallback(TFunction<void(const FString&, b
 
 void FOpen3DSWebRtcReceiver::OnConnectorState(const FString& State, bool bIsError)
 {
-    // Marshal to game thread
-    AsyncTask(ENamedThreads::GameThread, [this, State, bIsError]()
+    // Marshal to game thread with weak capture to avoid UAF
+    TWeakPtr<FOpen3DSWebRtcReceiver> Weak = AsShared();
+    AsyncTask(ENamedThreads::GameThread, [Weak, State, bIsError]()
     {
-        if (CVarO3DSReceiverWebRtcLog->GetInt() != 0)
+        if (TSharedPtr<FOpen3DSWebRtcReceiver> P = Weak.Pin())
         {
-            UE_LOG(LogO3DSReceiverWebRTC, Log, TEXT("state=%s error=%d"), *State, bIsError ? 1 : 0);
-        }
+            if (CVarO3DSReceiverWebRtcLog->GetInt() != 0)
+            {
+                UE_LOG(LogO3DSReceiverWebRTC, Log, TEXT("state=%s error=%d"), *State, bIsError ? 1 : 0);
+            }
 
-        if (OnStateCallback)
-        {
-            OnStateCallback(State, bIsError);
+            // Reinitialize audio decoder when the data channel becomes open/connected
+            if (!bIsError && !P->bPreferPcmCallback && P->bAudioEnabled &&
+                (State.Contains(TEXT("DataChannelOpen")) || State.Contains(TEXT("connected")) || State.Contains(TEXT("connecting"))))
+            {
+                FScopeLock Lock(&P->OpusDecoderMutex);
+                if (P->OpusDecoder)
+                {
+                    P->OpusDecoder->Shutdown();
+                    P->OpusDecoder.Reset();
+                }
+                P->OpusDecoder = MakeShared<FO3DSOpusDecoder>();
+                if (!P->OpusDecoder->Initialize(P->AudioSampleRate, P->AudioNumChannels))
+                {
+                    UE_LOG(LogO3DSReceiverAudio, Error, TEXT("failed to reinitialize Opus decoder on reconnect"));
+                    P->OpusDecoder.Reset();
+                    P->bAudioEnabled = false;
+                }
+                else
+                {
+                    P->bAudioEnabled = true;
+                    UE_LOG(LogO3DSReceiverAudio, Log, TEXT("Reinitialized Opus decoder (sr=%d ch=%d)"), P->AudioSampleRate, P->AudioNumChannels);
+                }
+            }
+
+            if (P->OnStateCallback)
+            {
+                P->OnStateCallback(State, bIsError);
+            }
         }
     });
 }
 
+void FOpen3DSWebRtcReceiver::DispatchData(const TArray<uint8>& Bytes)
+{
+    if (bShuttingDown)
+        return;
+
+    const bool bLogContent = (CVarO3DSReceiverWebRtcLogDataContent->GetInt() != 0);
+    const bool bLogCount   = (CVarO3DSReceiverWebRtcLogDataCount->GetInt() != 0);
+    const bool bLogVerbose = (CVarO3DSReceiverWebRtcLog->GetInt() != 0);
+
+    if (bLogContent)
+    {
+        const int32 MaxShow = 64;
+        const int32 N = FMath::Min(Bytes.Num(), MaxShow);
+        TArray<FString> Hex; Hex.Reserve(N);
+        for (int32 i = 0; i < N; ++i) { Hex.Add(FString::Printf(TEXT("%02X"), Bytes[i])); }
+        const FString Head = FString::Join(Hex, TEXT(" "));
+        UE_LOG(LogO3DSReceiverWebRTC, Log, TEXT("Data: [%s]%s (%d bytes)"), *Head, (Bytes.Num() > MaxShow) ? TEXT(" ...") : TEXT(""), Bytes.Num());
+    }
+    else if (bLogCount)
+    {
+        UE_LOG(LogO3DSReceiverWebRTC, Verbose, TEXT("Data: %d bytes"), Bytes.Num());
+    }
+    else if (bLogVerbose)
+    {
+        UE_LOG(LogO3DSReceiverWebRTC, Verbose, TEXT("data bytes=%d"), Bytes.Num());
+    }
+
+    if (OnDataCallback)
+    {
+        OnDataCallback(Bytes);
+    }
+}
+
 void FOpen3DSWebRtcReceiver::OnConnectorData(const TArray<uint8>& Bytes)
 {
-    // Coalesce game-thread dispatch to avoid backlog replay; keep only the latest frame.
+    if (bShuttingDown)
+        return;
+
+    const bool bCoalesceOnGT = (CVarO3DSReceiverCoalesceOnGameThread->GetInt() != 0);
+
+    // If caller is on GT and coalescing is disabled, dispatch immediately (old behavior)
+    if (IsInGameThread() && !bCoalesceOnGT)
+    {
+        DispatchData(Bytes);
+        return;
+    }
+
+    // Coalesce latest payload and schedule a single GT flush (works for off-thread and, when enabled, for GT arrivals).
     {
         FScopeLock L(&CoalesceMutex);
-        PendingData = Bytes; // copy latest
+        PendingData = Bytes; // keep latest
         if (!bDataDispatchScheduled.Load())
         {
             bDataDispatchScheduled.Store(true);
-            AsyncTask(ENamedThreads::GameThread, [this]()
+            TWeakPtr<FOpen3DSWebRtcReceiver> Weak = AsShared();
+            AsyncTask(ENamedThreads::GameThread, [Weak]() 
             {
-                TArray<uint8> Dispatch;
+                if (TSharedPtr<FOpen3DSWebRtcReceiver> P = Weak.Pin())
                 {
-                    FScopeLock L2(&CoalesceMutex);
-                    Dispatch = PendingData;
-                    bDataDispatchScheduled.Store(false);
-                }
-                const bool bLogContent = (CVarO3DSReceiverWebRtcLogDataContent->GetInt() != 0);
-                const bool bLogCount = (CVarO3DSReceiverWebRtcLogDataCount->GetInt() != 0);
-                const bool bLogVerbose = (CVarO3DSReceiverWebRtcLog->GetInt() != 0);
+                    // early abort if shutting down
+                    if (P->bShuttingDown)
+                    {
+                        P->bDataDispatchScheduled.Store(false);
+                        return;
+                    }
 
-                if (bLogContent)
-                {
-                    const int32 MaxShow = 64;
-                    const int32 N = FMath::Min(Dispatch.Num(), MaxShow);
-                    TArray<FString> Hex; Hex.Reserve(N);
-                    for (int32 i = 0; i < N; ++i) { Hex.Add(FString::Printf(TEXT("%02X"), Dispatch[i])); }
-                    const FString Head = FString::Join(Hex, TEXT(" "));
-                    const bool bTrunc = (Dispatch.Num() > MaxShow);
-                    UE_LOG(LogO3DSReceiverWebRTC, Log, TEXT("Data: [%s]%s (%d bytes)"), *Head, bTrunc ? TEXT(" ...") : TEXT(""), Dispatch.Num());
-                }
-                else if (bLogCount)
-                {
-                    UE_LOG(LogO3DSReceiverWebRTC, Verbose, TEXT("Data: %d bytes"), Dispatch.Num());
-                }
-                else if (bLogVerbose)
-                {
-                    UE_LOG(LogO3DSReceiverWebRTC, Verbose, TEXT("data bytes=%d"), Dispatch.Num());
-                }
-
-                if (OnDataCallback)
-                {
-                    OnDataCallback(Dispatch);
+                    TArray<uint8> Dispatch;
+                    {
+                        FScopeLock L2(&P->CoalesceMutex);
+                        Dispatch = P->PendingData; // copy latest
+                        P->bDataDispatchScheduled.Store(false);
+                    }
+                    P->DispatchData(Dispatch);
                 }
             });
         }
@@ -297,18 +420,22 @@ void FOpen3DSWebRtcReceiver::OnConnectorAudioRtp(const TArray<uint8>& RtpBytes)
     {
         UE_LOG(LogO3DSReceiverAudio, Log, TEXT("RTP: %d bytes"), RtpBytes.Num());
     }
-    
-    // Decode off the game thread (already on connector thread)
-    if (!bPreferPcmCallback && OpusDecoder && OpusDecoder->IsInitialized())
+
+    // Protect decoder usage with mutex to avoid races vs re-init on reconnect
+    if (!bPreferPcmCallback)
     {
-        OpusDecoder->DecodeRtpPacket(RtpBytes);
-    }
-    else
-    {
-        static int32 WarnEvery = 0;
-        if ((WarnEvery++ % 100) == 0)
+        FScopeLock Lock(&OpusDecoderMutex);
+        if (OpusDecoder && OpusDecoder->IsInitialized())
         {
-            UE_LOG(LogO3DSReceiverAudio, Warning, TEXT("Audio RTP received but decoder not initialized (audio disabled?)"));
+            OpusDecoder->DecodeRtpPacket(RtpBytes);
+            return;
         }
+    }
+
+    // Decoder not initialized or using PCM path
+    static int32 WarnEvery = 0;
+    if ((WarnEvery++ % 100) == 0)
+    {
+        UE_LOG(LogO3DSReceiverAudio, Warning, TEXT("Audio RTP received but decoder not initialized (audio disabled?)"));
     }
 }

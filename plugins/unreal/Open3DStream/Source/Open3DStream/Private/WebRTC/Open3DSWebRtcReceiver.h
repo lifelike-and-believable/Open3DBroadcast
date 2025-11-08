@@ -5,6 +5,8 @@
 #include "CoreMinimal.h"
 #include "IWebRTCConnector.h"
 #include "Templates/SharedPointer.h"
+#include "HAL/CriticalSection.h"
+#include "Templates/Atomic.h"
 
 // Forward declarations
 class FO3DSOpusDecoder;
@@ -81,8 +83,20 @@ private:
     bool bAudioEnabled = false;
     bool bPreferPcmCallback = false; // when true and PCM callback available, do not decode RTP
 
+    // Shutdown guard: prevents late dispatch after Stop()
+    bool bShuttingDown = false;
+
     // Data coalescing: keep only latest payload, schedule single GT dispatch
     FCriticalSection CoalesceMutex;
     TArray<uint8> PendingData;
     TAtomic<bool> bDataDispatchScheduled{false};
+
+    // Audio decoder synchronization + stored format
+    // (used to safely reinitialize decoder when the remote publisher restarts)
+    FCriticalSection OpusDecoderMutex;
+    int32 AudioSampleRate = 48000;
+    int32 AudioNumChannels = 1;
+
+    // Helper to process a received buffer on the game thread (logging + callback)
+    void DispatchData(const TArray<uint8>& Bytes);
 };

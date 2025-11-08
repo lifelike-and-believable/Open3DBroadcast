@@ -39,6 +39,14 @@ static TAutoConsoleVariable<float> CVarO3DSReceiverSilenceResetSeconds(
  TEXT("Seconds of no packets after which timestamp ordering state is reset (handles LiveKit broadcaster pause then restart). 0 disables."),
  ECVF_Default);
 
+// New: reset ordering if incoming SubjectList.time drops by more than this many seconds vs last applied.
+// 0 disables this heuristic (only silence-based reset will be used).
+static TAutoConsoleVariable<float> CVarO3DSReceiverTimestampJumpResetSeconds(
+ TEXT("o3ds.Receiver.TimestampJumpResetSeconds"),
+ 1.0f,
+ TEXT("If SubjectList.time decreases by more than this many seconds relative to last applied time, reset ordering. 0 disables."),
+ ECVF_Default);
+
 // Per-instance last packet wall time (kept local to TU to avoid header changes)
 namespace {
 	static TMap<const FOpen3DStreamSource*, double> GLastPacketWallTime;
@@ -305,7 +313,44 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
  UE_LOG(LogO3DSReceiver, Verbose, TEXT("Parse OK subjects=%d time=%.6f"), Count, mSubjects.mTime);
  }
 
- const double SubjectListTime = mSubjects.mTime; // protocol time (seconds) from FlatBuffer
+	const double SubjectListTime = mSubjects.mTime; // protocol time (seconds) from FlatBuffer
+
+	// Wall-time for this arrival (used for silence detection)
+	const double NowWall = FPlatformTime::Seconds();
+	const double* PrevWallPtr = GLastPacketWallTime.Find(this);
+	const double PrevWall = PrevWallPtr ? *PrevWallPtr : -1.0;
+
+	// Combined reset heuristics:
+	// - silence gap (no packet delivered for configured seconds), OR
+	// - timestamp jump: SubjectList.time has decreased by more than configured seconds
+	const float SilenceThreshold = CVarO3DSReceiverSilenceResetSeconds->GetFloat();
+	const float JumpThreshold = CVarO3DSReceiverTimestampJumpResetSeconds->GetFloat();
+
+	if (LastAppliedSubjectListTime >= 0.0)
+	{
+		bool bResetOrdering = false;
+		// Silence-based reset
+		if (SilenceThreshold > 0.f && PrevWall > 0.0 && (NowWall - PrevWall) > SilenceThreshold)
+		{
+			bResetOrdering = true;
+		}
+		// Timestamp-jump-based reset (handles broadcaster restart without transport disconnect)
+		else if (JumpThreshold > 0.f && (LastAppliedSubjectListTime - SubjectListTime) > (double)JumpThreshold)
+		{
+			bResetOrdering = true;
+		}
+
+		if (bResetOrdering)
+		{
+			if (CVarO3DSReceiverDebugParse->GetInt() != 0)
+			{
+				UE_LOG(LogO3DSReceiver, Log, TEXT("Reset timestamp ordering: wallGap=%.3f(s) jump=%.6f(s) last=%.6f new=%.6f"),
+					(PrevWall > 0.0 ? NowWall - PrevWall : -1.0), (LastAppliedSubjectListTime - SubjectListTime),
+					LastAppliedSubjectListTime, SubjectListTime);
+			}
+			LastAppliedSubjectListTime = -1.0; // accept next protocol timestamp even if it goes backwards
+		}
+	}
 
  // If applying frames faster than protocol time advanced (duplicate timestamps), collapse duplicates
  if (LastAppliedSubjectListTime >= 0.0 && SubjectListTime == LastAppliedSubjectListTime)
@@ -315,6 +360,8 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
 	 {
 		 UE_LOG(LogO3DSReceiver, Verbose, TEXT("Dropping duplicate timestamp frame t=%.6f"), SubjectListTime);
 	 }
+	 // Update last-arrival wall time so silence detection remains accurate
+	 GLastPacketWallTime.Add(this, NowWall);
 	 return;
  }
  // Optionally drop out-of-order older frames (arrival reordering under SFU/ice paths)
@@ -324,9 +371,14 @@ void FOpen3DStreamSource::OnPackage(const TArray<uint8>& data)
 	 {
 		 UE_LOG(LogO3DSReceiver, Verbose, TEXT("Dropping out-of-order frame t=%.6f < last=%.6f"), SubjectListTime, LastAppliedSubjectListTime);
 	 }
+	 // Update last-arrival wall time so silence detection remains accurate
+	 GLastPacketWallTime.Add(this, NowWall);
 	 return;
  }
+ // Accept this frame
  LastAppliedSubjectListTime = SubjectListTime;
+ // Update arrival time tracking for this receiver instance
+ GLastPacketWallTime.Add(this, NowWall);
 
  TArray<FName> BoneNames;
  TArray<int32> BoneParents;

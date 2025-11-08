@@ -76,6 +76,14 @@ namespace
     // reliability based on a guessed MTU, as doing so creates multiple channels and
     // can introduce cross-channel reordering. Keep a single, consistent reliability
     // mode for pose streaming to preserve temporal stability.
+
+	// Toggle transport receive coalescing: when 1 (default) keep current coalescing;
+	// when 0, broadcast every incoming packet immediately (may increase GT load).
+	static TAutoConsoleVariable<int32> CVarLiveKitCoalesceReceive(
+		TEXT("o3ds.LiveKit.CoalesceReceive"),
+		0, // changed default: deliver on caller thread so receivers see off-thread arrivals
+		TEXT("When 1, coalesce incoming LiveKit data to avoid game-thread backlog. When 0, deliver every packet immediately."),
+		ECVF_Default);
 }
 
 struct FLiveKitConnector::FCallbacks
@@ -85,10 +93,22 @@ struct FLiveKitConnector::FCallbacks
     {
         FLiveKitConnector* Self = reinterpret_cast<FLiveKitConnector*>(user);
         if (!Self || !bytes || len == 0) return;
-        // Coalesce: keep only the latest lossy-sized payload. We treat all LiveKit frames as pose deltas.
+
+        // If coalescing is disabled, deliver every packet immediately.
+        if (CVarLiveKitCoalesceReceive->GetInt() == 0)
+        {
+            TArray<uint8> Dispatch;
+            Dispatch.AddUninitialized((int32)len);
+            FMemory::Memcpy(Dispatch.GetData(), bytes, len);
+            // Broadcast synchronously on the caller thread; receivers should marshal if needed.
+            Self->OnData().Broadcast(Dispatch);
+            return;
+        }
+
+        // Default behavior (coalesce to avoid GT backlog)
         {
             FScopeLock Lock(&Self->CoalesceMutex);
-            Self->PendingLossyData.Reset(len);
+            Self->PendingLossyData.Reset((int32)len);
             Self->PendingLossyData.Append(bytes, (int32)len);
             if (!Self->bLossyDataDispatchScheduled.Load())
             {
