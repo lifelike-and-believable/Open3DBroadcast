@@ -32,7 +32,17 @@ static TAutoConsoleVariable<int32> CVarO3DSReceiverDropOutOfOrder(
  TEXT("When 1, drop frames whose SubjectList.time is older than the last applied timestamp."),
  ECVF_Default);
 
+// Reset timestamp ordering after broadcaster silence (pause/resume WebRTC session).
+static TAutoConsoleVariable<float> CVarO3DSReceiverSilenceResetSeconds(
+ TEXT("o3ds.Receiver.SilenceResetSeconds"),
+ 2.0f,
+ TEXT("Seconds of no packets after which timestamp ordering state is reset (handles LiveKit broadcaster pause then restart). 0 disables."),
+ ECVF_Default);
 
+// Per-instance last packet wall time (kept local to TU to avoid header changes)
+namespace {
+	static TMap<const FOpen3DStreamSource*, double> GLastPacketWallTime;
+}
 
 #define LOCTEXT_NAMESPACE "Open3DStream"
 
@@ -97,7 +107,10 @@ FOpen3DStreamSource::FOpen3DStreamSource(const FOpen3DStreamSettings& Settings)
 }
 
 FOpen3DStreamSource::~FOpen3DStreamSource()
-{}
+{
+	// Remove tracking entry (avoid stale pointer reuse)
+	GLastPacketWallTime.Remove(this);
+}
 
 void FOpen3DStreamSource::InitializeSettings(ULiveLinkSourceSettings* InSettings)
 {}
@@ -136,8 +149,11 @@ void FOpen3DStreamSource::OnStatus(FText msg, bool IsError)
 	SourceStatus = msg;
 	LogFlag = false;
 
-	// Reset timestamp tracking on new data channel open to avoid carrying stale state across reconnects.
-	if (!IsError && (Smsg.Contains(TEXT("DataChannelOpen")) || Smsg.Contains(TEXT("connecting"))))
+	// Reset timestamp tracking on (re)connect / data channel (include reconnect variants).
+	if (!IsError && (Smsg.Contains(TEXT("DataChannelOpen"))
+		|| Smsg.Contains(TEXT("connecting"))
+		|| Smsg.Contains(TEXT("Reconnect"))
+		|| Smsg.Contains(TEXT("reconnect"))))
 	{
 		LastAppliedSubjectListTime = -1.0;
 	}
