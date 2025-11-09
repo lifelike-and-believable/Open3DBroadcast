@@ -52,7 +52,7 @@ With these in place, begin migrating code in small PRs: transports first, then f
 To avoid brittle file moves/deletions inside the existing plugin, use an additive strategy:
 
 1) Create new top‑level plugin `Open3DBroadcast` with empty module skeletons for sender, receiver, shared, and transports.
-2) Copy code from the old `Open3DStream` plugin into the new modules incrementally (transport‑by‑transport), preserving namespaces and public interfaces.
+2) Copy code from the old `Open3DStream` plugin into the new modules incrementally (common, non-transport-specific, and then transport‑by‑transport), preserving namespaces and public interfaces.
 3) Disable registration in the old plugin (compile‑time define or config) while the new module takes over. Avoid two modules registering the same transport name.
 4) Verify build + runtime for the new module in isolation; then delete the corresponding code from the old plugin in a subsequent PR when parity is proven.
 
@@ -404,15 +404,19 @@ Automation gating: CI must run unit + integration tests with all transports comp
 
 ## 11. Migration Steps
 1. Create new module folders & minimal `.uplugin` / `.Build.cs` stubs.
-2. Add `Open3DTransportLoopback` first as a vertical slice to validate interfaces & UI (no network dependency).
-3. Move existing transport-specific code into respective modules (preserving namespaces).
-4. Introduce interfaces + factories adjustments (compile with all flags enabled first).
-5. Add build flags & conditional compilation scaffolding.
-6. Update existing references to use factories rather than direct class new (sender classes under `Open3DSender`, receiver under `Open3DReceiver`).
-7. Implement URI parsing & routing utilities.
-8. Add WebRTC backend abstraction layer; adapt current LiveKit implementation to new interface.
-9. Add tests (unit first, integration next).
-10. Run regression & performance benchmarks; compare (≤5% variance allowed unless justified).
+2. Migrate CORE (non‑transport) code first to establish test harness:
+	- Move/rename sender component classes (`Open3DBroadcastComponent`, `O3DSBroadcastComponent`, etc.) into `Open3DSender` as `O3DSenderComponent` (final name: `UO3DSenderComponent`).
+	- Move/rename LiveLink source / receiver classes (`Open3DStreamSource`, etc.) into `Open3DReceiver` prefixed `O3DReceiver*` (e.g., `FO3DReceiverSource`).
+	- Move protocol/model helpers (e.g., `UnrealModel`, skeletal conversion utilities) into `Open3DShared` with minimal renaming unless they carry old plugin prefixes.
+	- Establish factory scaffolding with stub transports (temporarily only a dummy no‑op transport) so receiver/sender tests can compile.
+3. Introduce interfaces + factories adjustments (compile with all flags enabled first).
+4. Add build flags & conditional compilation scaffolding.
+5. Implement URI parsing & routing utilities (loopback entries accepted but not active yet).
+6. Add `Open3DTransportLoopback` module (now testable because core sender/receiver exists) and implement loopback transport; run unit round‑trip tests.
+7. Migrate sockets transport code; register factories; add integration test.
+8. Migrate NNG transport code; register factories; add integration test.
+9. Introduce WebRTC backend abstraction; migrate LiveKit implementation; register factories; add integration test.
+10. Expand tests (URI parsing, per‑transport settings objects) & performance benchmarks; compare (≤5% variance allowed unless justified).
 11. Update README(s) and CHANGELOG (module split + build flags section).
  12. Add new CI workflows targeting only the `Open3DBroadcast` plugin modules (skip legacy plugin build where possible).
  11. Remove any Core Redirects added for migration only once downstream projects updated (only if names changed).
@@ -565,3 +569,41 @@ This refactor isolates transport logic into modular, flag-driven build units whi
 
 ---
 Whenever there is ambiguity, request clarification (see §16) before making irreversible implementation decisions.
+
+---
+## Appendix A: Class Renaming & Mapping Guidelines
+
+Purpose: Ensure deterministic naming and avoid lingering legacy prefixes during migration.
+
+| Legacy Name / Pattern | New Name / Pattern | Notes |
+|-----------------------|--------------------|-------|
+| `Open3DBroadcastComponent`, `O3DSBroadcastComponent` | `O3DSenderBroadcastComponent` / `UO3DSenderBroadcastComponent` | Prefix with `O3DSender` to indicate module ownership. Unreal class keeps `U` prefix. |
+| `Open3DStreamSource` (LiveLink) | `O3DReceiverLiveLinkSource` / `FOpen3DReceiverSource` | Use `O3DReceiver` prefix; keep existing LiveLink integration traits. |
+| `Open3DStream*` (other receiver helpers) | `O3DReceiver*` | Systematic replace `Open3DStream` → `O3DReceiver` where class signifies receiver concern. |
+| `Open3DBroadcast*` (other sender helpers) | `O3DSender*` | Systematic replace `Open3DBroadcast` → `O3DSender`. |
+| `UnrealModel` | (Optionally) `O3DSharedUnrealModel` or retain `UnrealModel` if widely referenced | Rename only if conflict risk; prefer stability. |
+| Transport classes `TcpConnector`, `UdpConnector`, `NNGConnector`, `WebRTCConnector` | `O3DTransportSocketsTcpConnector`, etc. OR keep short names within their module namespace | Avoid overlong names; clarity via module folder and namespace might suffice. |
+
+Namespace Strategy:
+- Keep existing `O3DS::` protocol namespace for data structures.
+- For Unreal module code, prefer top-level naming without adding deep nested namespaces; rely on module segmentation for clarity.
+
+Refactoring Rules:
+1. Rename only after the file physically moves into its destination module to simplify diffs.
+2. Do NOT alter public method signatures during the initial move; rename first, then extend in separate PR if needed.
+3. Add transitional `using OldName = NewName;` aliases ONLY if downstream code outside this repo consumes headers; remove before final DoD completion.
+4. Update includes and forward declarations to new paths; avoid wildcard includes.
+5. Run a comprehensive search for legacy prefixes to ensure no leftovers (`grep -R "Open3DBroadcast"`, `grep -R "Open3DStream"`).
+
+Testing Sequence Alignment:
+- After step 2 (core migration), implement a minimal smoke test using a dummy transport stub to assert that `O3DSenderBroadcastComponent` generates frames and `O3DReceiverLiveLinkSource` ingests them (no network).
+- After step 6 (loopback), replace dummy stub with loopback transport; all prior smoke tests should pass unmodified—verifies transport interchangeability.
+
+Documentation Updates:
+- In each PR description, include a short mapping table for renamed classes touched in that PR only.
+- Changelog entry: "Refactor: Renamed legacy classes to O3DSender*/O3DReceiver* patterns (no behavioral changes)."
+
+Definition of Done Addendum:
+- All legacy class name prefixes removed from active code paths (except intentional protocol/API names).
+- Search for `Open3DStream` / `Open3DBroadcast` yields only legacy plugin references or historical docs.
+- Loopback smoke test uses identical sender/receiver code paths as other transports (no `#ifdef` special cases).
