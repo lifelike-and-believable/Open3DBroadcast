@@ -62,6 +62,44 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 - **Docs & examples:** Update code comments and the README/CHANGELOG when behavior or schema changes.
 - **File handling:** When renaming or moving files, please rename or move the existing file, do no delete and recreate.
 
+## 3) Coding Rules - Design Patterns to Follow / Avoid
+- **Follow**
+-- ** Separated Concerns:** Keep serialization, transport, and application logic modular. Use interfaces and abstractions to decouple components.
+-- ** Immutable Data Structures:** Favor immutability for data structures where possible to enhance thread safety
+-- ** Single Responsibility Principle:** Ensure classes and functions have a single responsibility to improve maintainability and readability.
+-- ** Dependency Injection:** Use dependency injection to manage dependencies and facilitate testing.
+-- ** Avoid Global State:** Minimize the use of global variables or singletons to reduce coupling and improve testability.
+-- ** facade Pattern:** Use facades to provide a simplified interface to complex subsystems when appropriate.
+-- ** Interface Segregation Principle:** Design interfaces that are specific to clients' needs rather than general-purpose interfaces.
+-- ** Composition over Inheritance:** Prefer composition to achieve code reuse and flexibility.
+-- ** Unit Testing:** Write unit tests for critical components to ensure correctness and facilitate refactoring.
+-- ** Code Reviews:** Participate in code reviews to maintain code quality and share knowledge among team members.
+-- ** Consistent Coding Style:** Adhere to a consistent coding style and formatting guidelines to improve code readability.
+-- ** Documentation:** Document code, especially public APIs and complex logic, to aid future maintenance and usage.
+-- ** Logging and Monitoring:** Implement logging and monitoring to track application behavior and diagnose issues.
+-- ** Error Handling:** Use structured error handling to manage exceptions and ensure robustness.
+-- ** Performance Optimization:** Profile and optimize code only when necessary, focusing on bottlenecks that impact user experience.
+- ** Avoid**
+-- ** Tight Coupling:** Avoid tight coupling between components to enhance modularity and ease of testing.
+-- ** Overengineering:** Avoid unnecessary complexity; prefer simple, straightforward solutions that meet requirements.
+-- ** Premature Optimization:** Focus on clear, maintainable code before optimizing for performance. Profile and optimize only when necessary.
+-- ** God Objects:** Avoid creating classes that try to do too much; distribute responsibilities appropriately.
+-- ** Copy-Paste Programming:** Reuse code through functions, classes, or modules instead of duplicating code.
+-- ** Magic Numbers/Strings:** Avoid using unexplained constants; use named constants or enums for clarity.
+-- ** Inconsistent Naming Conventions:** Follow established naming conventions for variables, functions, and classes to maintain code consistency.
+-- ** Lack of Documentation:** Ensure code is well-documented, especially for complex logic or public APIs.
+-- ** Ignoring Error Handling:** Always handle potential errors and exceptions to ensure robustness.
+-- ** Neglecting Testing:** Write unit tests and integration tests to validate functionality and catch regressions.
+-- ** Overuse of Inheritance:** Prefer composition over inheritance to enhance flexibility and reduce complexity.
+-- ** Long Functions/Methods:** Keep functions and methods concise; break down large functions into smaller, manageable pieces.
+-- ** Deep Nesting:** Avoid deep nesting of code blocks; use early returns or refactor into smaller functions to improve readability.
+-- ** Inconsistent Code Style:** Adhere to a consistent coding style and formatting guidelines to improve code readability.
+-- ** Lava Flow Control Structures:** Avoid complex control structures that make code hard to follow; prefer clear and straightforward logic.
+-- ** Shotgun Debugging:** Use systematic debugging techniques rather than random changes to identify and fix issues.
+-- ** Overreliance on Comments:** Write self-explanatory code that minimizes the need for comments; use comments to explain why, not what.
+-- ** Neglecting Performance Considerations:** Be mindful of performance implications, especially in critical paths, but avoid premature optimization.
+
+
 **Prohibited**
 - Calling Unreal APIs without verifying exact **UE 5.6** signatures in the official docs.
 - Blocking on the game thread.
