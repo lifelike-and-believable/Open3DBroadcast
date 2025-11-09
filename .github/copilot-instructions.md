@@ -60,6 +60,7 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 - **Logging:** Quiet hot paths. Only state transitions and errors are logged by default (see §9).
 - **Configs:** No hard‑coded credentials, ports, or absolute paths. Use project settings or env vars (see §8).
 - **Docs & examples:** Update code comments and the README/CHANGELOG when behavior or schema changes.
+- **File handling:** When renaming or moving files, please rename or move the existing file, do no delete and recreate.
 
 **Prohibited**
 - Calling Unreal APIs without verifying exact **UE 5.6** signatures in the official docs.
