@@ -29,21 +29,9 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 - **Connectors:** Inherit from `Connector` (blocking) or `AsyncConnector` (non-blocking). Implementations: TCP (`tcp.h`), UDP, NNG (pub/sub/pair), WebRTC (`webrtc_connector.h`).
 - **Namespace:** All core types live in `namespace O3DS`.
 
-### Unreal Plugin (`plugins/unreal/Open3DStream/`)
-- **Two modules:**
-  - `Open3DStream` (receiver): LiveLink source consuming animation streams. Mature, production-ready.
-  - `Open3DBroadcast` (sender): Streams UE animation to external clients. Framework implemented, core functionality in progress. Conditionally compiled via `O3DS_WITH_BROADCAST` flag.
-- **Receiver pattern:** `FOpen3DStreamSource` polls connectors, parses FlatBuffers, populates LiveLink subjects with skeletal pose + curves.
-- **Sender pattern (broadcast):** `UO3DBroadcastComponent` captures post-anim-eval skeletal data via `UAnimInstance::GetCurveValue()`, encodes to FlatBuffers, sends via async connectors on worker threads.
-- **Build system:** Uses PowerShell scripts in `Build/Scripts/` to build/test plugins with UAT (Unreal Automation Tool).
-
-### DCC Plugins (`plugins/maya/`, `plugins/mobu/`)
-- Maya and MotionBuilder plugins follow platform-specific APIs but share the `O3DS::Subject` data model for interop.
-- Build with CMake; link against core library from `src/`.
 
 ### Development Workflows
 - **Local dev:** `Build/Scripts/link_plugin_into_sandbox.sh` symlinks plugin → `ProjectSandbox/Plugins/Open3DStream` for rapid iteration.
-- **Packaging:** `package.py` creates release ZIPs with `UE_X.X/Plugins/Open3DStream/` structure for easy project installation.
 - **Testing:** `Build/Scripts/Run-AutomationTests.ps1` and `Run-Gauntlet.ps1` for UE automation tests.
 - **C++ tests:** `test_curves.cpp` and `test_curve_comprehensive.cpp` validate FlatBuffers serialization round-trips.
 
@@ -62,11 +50,6 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 5. **Respond to review**  
    - Make focused changes; update docs/tests when requested.
 
-### Agent Idioms (Shorthand)
-- `pr-issue #123` → Read #123, summarize intent, and open PR titled `o3ds: <short imperative>` linking #123.
-- `smoke-webrtc` → Run the two‑UE WebRTC smoke test; paste latency/jitter/drop metrics into PR.
-- `bench-tcp` → Run TCP throughput/backpressure bench; summarize queue behavior and any frame drops.
-
 ---
 
 ## 2) General Programming Rules
@@ -77,7 +60,6 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 - **Logging:** Quiet hot paths. Only state transitions and errors are logged by default (see §9).
 - **Configs:** No hard‑coded credentials, ports, or absolute paths. Use project settings or env vars (see §8).
 - **Docs & examples:** Update code comments and the README/CHANGELOG when behavior or schema changes.
-- **WebRTC testing:** Always update and test `UO3DSWebRTCConnectorComponent` in isolation after changes to `IWebRTCConnector` or `LibDataChannelConnector` before modifying broadcaster/receiver code.
 
 **Prohibited**
 - Calling Unreal APIs without verifying exact **UE 5.6** signatures in the official docs.
