@@ -16,10 +16,6 @@
 			"Enabled": true
 		},
 		{
-			"Name": "Open3DStream",
-			"Enabled": false
-		},
-		{
 			"Name": "LiveLink",
 			"Enabled": true
 		}
