@@ -21,10 +21,13 @@ bool FO3DLoopbackReceiver::Initialize(const FO3DTransportConfig& Config)
     return bInitialized;
 }
 
-bool FO3DLoopbackReceiver::Start(const TSharedPtr<ISerializedFrameConsumer>& InConsumer)
+void FO3DLoopbackReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer)
 {
     Consumer = InConsumer;
+}
 
+bool FO3DLoopbackReceiver::Start()
+{
     if (!Consumer.IsValid())
     {
         Consumer = FSerializedFrameConsumerRegistry::Create();

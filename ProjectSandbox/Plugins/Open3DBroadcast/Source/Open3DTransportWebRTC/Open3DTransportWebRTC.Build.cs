@@ -1,4 +1,5 @@
 using UnrealBuildTool;
+//using O3DBroadcastBuild;
 using System.IO;
 
 [SupportedTargetTypes(TargetType.Game, TargetType.Editor)]
@@ -7,6 +8,8 @@ public class Open3DTransportWebRTC : ModuleRules
     public Open3DTransportWebRTC(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
+
+        //O3DModuleRules.ApplyTransportDefines(this);
 
         string platformSubdir;
         if (Target.Platform == UnrealTargetPlatform.Win64)
@@ -36,7 +39,7 @@ public class Open3DTransportWebRTC : ModuleRules
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
-            "Open3DSharedNext",
+            "Open3DShared",
             "Open3DSender",
             "Open3DReceiver"
         });

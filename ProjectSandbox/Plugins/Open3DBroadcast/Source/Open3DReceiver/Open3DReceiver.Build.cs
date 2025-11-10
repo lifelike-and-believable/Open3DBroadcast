@@ -1,4 +1,5 @@
 using UnrealBuildTool;
+//using O3DBroadcastBuild;
 using System.IO;
 
 [SupportedTargetTypes(TargetType.Game, TargetType.Editor)]
@@ -7,6 +8,8 @@ public class Open3DReceiver : ModuleRules
     public Open3DReceiver(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
+
+  //      O3DModuleRules.ApplyTransportDefines(this, bRequireReceiver: true);
 
         var RepoRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "..", "..", ".."));
         PublicIncludePaths.AddRange(new string[]
@@ -64,7 +67,7 @@ public class Open3DReceiver : ModuleRules
             "CoreUObject",
             "Engine",
             "LiveLinkInterface",
-            "Open3DSharedNext"
+            "Open3DShared"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]

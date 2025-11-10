@@ -64,6 +64,14 @@ private:
     void ResetOrderingState();
     void EnsureValidTransportName();
 
+    bool ParseSubjectListBuffer(const FString& Subject, const TArray<uint8>& Buffer);
+    bool ShouldProcessFrame(double SubjectListTime, double NowSeconds);
+    bool ShouldResetOrderingWindow(double NowSeconds, double SubjectListTime) const;
+    double GetLastConnectionActive() const;
+    bool BuildSubjectPose(O3DS::Subject* SubjectPtr, TArray<FName>& OutBoneNames, TArray<int32>& OutBoneParents, TArray<FTransform>& OutBoneTransforms) const;
+    void BuildSubjectCurves(O3DS::Subject* SubjectPtr, TArray<FName>& OutCurveNames, TArray<float>& OutCurveValues) const;
+    void ProcessParsedSubject(O3DS::Subject* SubjectPtr, double SubjectListTime, TArray<FName>& BoneNames, TArray<int32>& BoneParents, TArray<FTransform>& BoneTransforms, TArray<FName>& CurveNames, TArray<float>& CurveValues);
+
 private:
     // LiveLink bookkeeping
     FText SourceType;
@@ -87,7 +95,7 @@ private:
     O3DS::SubjectList SubjectScratch;
 
     // Activity tracking
-    FCriticalSection ConnectionLastActiveSection;
+    mutable FCriticalSection ConnectionLastActiveSection;
     double ConnectionLastActive = 0.0;
     TMap<FName, double> SubjectLastUpdateTime;
     static constexpr double InactivityThresholdSeconds = 5.0;

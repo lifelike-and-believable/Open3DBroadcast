@@ -14,7 +14,8 @@ public:
     virtual ~IOpen3DReceiver() = default;
 
     virtual bool Initialize(const FO3DTransportConfig& Config) = 0;
-    virtual bool Start(const TSharedPtr<ISerializedFrameConsumer>& Consumer = nullptr) = 0;
+    virtual void SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& Consumer) = 0;
+    virtual bool Start() = 0;
     virtual void Stop() = 0;
 
     /** Poll available data and deliver to the previously configured sink. Returns processed frames. */

@@ -19,6 +19,8 @@
 #include "O3DSenderComponent.h"
 #include "O3DSenderTransportCustomization.h"
 
+#define LOCTEXT_NAMESPACE "O3DSenderComponentCustomization"
+
 TSharedRef<IDetailCustomization> FO3DSenderComponentCustomization::MakeInstance()
 {
     return MakeShared<FO3DSenderComponentCustomization>();
@@ -35,35 +37,81 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
         WeakComponent = Cast<UO3DSenderComponent>(Objects[0].Get());
     }
 
-    IDetailCategoryBuilder& SenderCategory = DetailBuilder.EditCategory(TEXT("Open3DStream|Sender"));
-    SenderCategory.SetSortOrder(0);
-    SenderCategory.InitiallyCollapsed(false);
-
+    DetailBuilder.HideCategory(TEXT("Open3DStream|Sender"));
     DetailBuilder.HideCategory(TEXT("Open3DStream|Sender|Transport"));
+    DetailBuilder.HideCategory(TEXT("Open3DStream|Sender|Audio"));
+    DetailBuilder.HideCategory(TEXT("Open3DStream|Audio"));
+    DetailBuilder.HideCategory(TEXT("Open3DStream|Sender|Curves"));
+    DetailBuilder.HideCategory(TEXT("Open3DStream|Sender|Curves|Filtering"));
+    DetailBuilder.HideCategory(TEXT("Audio"));
 
     TSharedPtr<IPropertyHandle> TargetMeshHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TargetMesh));
     TSharedPtr<IPropertyHandle> SubjectNameHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, SubjectName));
     TSharedPtr<IPropertyHandle> CaptureRateHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, CaptureRateHz));
     TSharedPtr<IPropertyHandle> AutoStartHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bAutoStartCapture));
 
-    TArray<TSharedPtr<IPropertyHandle>> CommonHandles = {
-        TargetMeshHandle,
-        SubjectNameHandle,
-        CaptureRateHandle,
-        AutoStartHandle
-    };
-
-    for (const TSharedPtr<IPropertyHandle>& Handle : CommonHandles)
-    {
-        if (Handle.IsValid())
-        {
-            DetailBuilder.HideProperty(Handle);
-            SenderCategory.AddProperty(Handle);
-        }
-    }
-
     AutoCreateTransportHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bAutoCreateTransport));
     TransportNameHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TransportName));
+
+    TSharedPtr<IPropertyHandle> EnableAudioHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bEnableAudio));
+    TSharedPtr<IPropertyHandle> AudioCaptureModeHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioCaptureMode));
+        TSharedPtr<IPropertyHandle> ClampCurvesHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bClampMorphCurvesToUnit));
+        TSharedPtr<IPropertyHandle> DropNaNHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bDropNaNAndInfinity));
+        TSharedPtr<IPropertyHandle> EnableCurveFilteringHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bEnableCurveFiltering));
+        TSharedPtr<IPropertyHandle> CurveEpsilonHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, CurveEpsilon));
+        TSharedPtr<IPropertyHandle> CurveDeltaThresholdHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, CurveDeltaThreshold));
+        TSharedPtr<IPropertyHandle> IncludeCurvePatternsHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, IncludeCurvePatterns));
+        TSharedPtr<IPropertyHandle> ExcludeCurvePatternsHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, ExcludeCurvePatterns));
+        TSharedPtr<IPropertyHandle> LogFilteredCurvesHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bLogFilteredCurves));
+
+        TArray<TSharedPtr<IPropertyHandle>> CommonHandles = {
+            TargetMeshHandle,
+            SubjectNameHandle,
+            CaptureRateHandle,
+            AutoStartHandle,
+            ClampCurvesHandle,
+            DropNaNHandle,
+            EnableCurveFilteringHandle,
+            CurveEpsilonHandle,
+            CurveDeltaThresholdHandle,
+            IncludeCurvePatternsHandle,
+            ExcludeCurvePatternsHandle,
+            LogFilteredCurvesHandle
+        };
+
+        for (const TSharedPtr<IPropertyHandle>& Handle : CommonHandles)
+        {
+            if (Handle.IsValid())
+            {
+                DetailBuilder.HideProperty(Handle);
+            }
+        }
+
+    TSharedPtr<IPropertyHandle> AudioInputDeviceHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioInputDevice));
+    TSharedPtr<IPropertyHandle> AudioStreamLabelHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioStreamLabel));
+    TSharedPtr<IPropertyHandle> AudioCaptureConfigHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioCaptureConfig));
+
+    if (EnableAudioHandle.IsValid())
+    {
+        DetailBuilder.HideProperty(EnableAudioHandle);
+    }
+    if (AudioCaptureModeHandle.IsValid())
+    {
+        DetailBuilder.HideProperty(AudioCaptureModeHandle);
+    }
+    if (AudioInputDeviceHandle.IsValid())
+    {
+        DetailBuilder.HideProperty(AudioInputDeviceHandle);
+    }
+    if (AudioStreamLabelHandle.IsValid())
+    {
+        DetailBuilder.HideProperty(AudioStreamLabelHandle);
+    }
+    if (AudioCaptureConfigHandle.IsValid())
+    {
+        DetailBuilder.HideProperty(AudioCaptureConfigHandle);
+        AudioCaptureConfigHandle->MarkHiddenByCustomization();
+    }
 
     if (AutoCreateTransportHandle.IsValid())
     {
@@ -83,7 +131,35 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
 
     RefreshTransportOptions();
 
-    IDetailGroup& TransportGroup = SenderCategory.AddGroup(TEXT("TransportConfig"), NSLOCTEXT("O3DSenderCustomization", "TransportGroupLabel", "Transport"), false, false);
+    IDetailCategoryBuilder& RootCategory = DetailBuilder.EditCategory(TEXT("Open3DStream"));
+    RootCategory.SetDisplayName(LOCTEXT("RootCategoryLabel", "Open3DStream"));
+    RootCategory.SetSortOrder(0);
+
+    IDetailGroup& SenderGroup = RootCategory.AddGroup(TEXT("Sender"), LOCTEXT("SenderGroupLabel", "Sender"), false, true);
+
+    if (TargetMeshHandle.IsValid())
+    {
+        SenderGroup.AddPropertyRow(TargetMeshHandle.ToSharedRef());
+    }
+    if (SubjectNameHandle.IsValid())
+    {
+        SenderGroup.AddPropertyRow(SubjectNameHandle.ToSharedRef());
+    }
+    if (CaptureRateHandle.IsValid())
+    {
+        SenderGroup.AddPropertyRow(CaptureRateHandle.ToSharedRef());
+    }
+    if (AutoStartHandle.IsValid())
+    {
+        SenderGroup.AddPropertyRow(AutoStartHandle.ToSharedRef());
+    }
+
+    IDetailGroup& TransportGroup = RootCategory.AddGroup(TEXT("Transport"), LOCTEXT("TransportGroupLabel", "Transport"), false, true);
+
+    if (AutoCreateTransportHandle.IsValid())
+    {
+        TransportGroup.AddPropertyRow(AutoCreateTransportHandle.ToSharedRef());
+    }
 
     if (TransportNameHandle.IsValid())
     {
@@ -97,6 +173,7 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
         .MaxDesiredWidth(0.f)
         [
             SAssignNew(TransportComboBox, SComboBox<TSharedPtr<FName>>)
+            .IsEnabled(this, &FO3DSenderComponentCustomization::IsTransportSelectionEnabled)
             .OptionsSource(&TransportOptions)
             .OnGenerateWidget(this, &FO3DSenderComponentCustomization::GenerateTransportWidget)
             .OnSelectionChanged(this, &FO3DSenderComponentCustomization::HandleTransportSelectionChanged)
@@ -117,9 +194,78 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
         .Visibility_Lambda([this]() { return GetTransportCustomizationVisibility(); })
     ];
 
-    if (AutoCreateTransportHandle.IsValid())
+    IDetailGroup& CurvesGroup = RootCategory.AddGroup(TEXT("Curves"), LOCTEXT("CurvesGroupLabel", "Curves"), false, true);
+
+    if (ClampCurvesHandle.IsValid())
     {
-        TransportGroup.AddPropertyRow(AutoCreateTransportHandle.ToSharedRef());
+        CurvesGroup.AddPropertyRow(ClampCurvesHandle.ToSharedRef());
+    }
+    if (DropNaNHandle.IsValid())
+    {
+        CurvesGroup.AddPropertyRow(DropNaNHandle.ToSharedRef());
+    }
+
+    IDetailGroup& CurveFilteringGroup = CurvesGroup.AddGroup(TEXT("CurveFiltering"), LOCTEXT("CurveFilteringGroupLabel", "Filtering"), false);
+    if (EnableCurveFilteringHandle.IsValid())
+    {
+        CurveFilteringGroup.AddPropertyRow(EnableCurveFilteringHandle.ToSharedRef());
+    }
+    if (CurveEpsilonHandle.IsValid())
+    {
+        CurveFilteringGroup.AddPropertyRow(CurveEpsilonHandle.ToSharedRef());
+    }
+    if (CurveDeltaThresholdHandle.IsValid())
+    {
+        CurveFilteringGroup.AddPropertyRow(CurveDeltaThresholdHandle.ToSharedRef());
+    }
+    if (IncludeCurvePatternsHandle.IsValid())
+    {
+        CurveFilteringGroup.AddPropertyRow(IncludeCurvePatternsHandle.ToSharedRef());
+    }
+    if (ExcludeCurvePatternsHandle.IsValid())
+    {
+        CurveFilteringGroup.AddPropertyRow(ExcludeCurvePatternsHandle.ToSharedRef());
+    }
+    if (LogFilteredCurvesHandle.IsValid())
+    {
+        CurveFilteringGroup.AddPropertyRow(LogFilteredCurvesHandle.ToSharedRef());
+    }
+
+    IDetailGroup& AudioGroup = RootCategory.AddGroup(TEXT("Audio"), LOCTEXT("AudioGroupLabel", "Audio"), false, true);
+
+    if (EnableAudioHandle.IsValid())
+    {
+        AudioGroup.AddPropertyRow(EnableAudioHandle.ToSharedRef());
+    }
+    if (AudioCaptureModeHandle.IsValid())
+    {
+        AudioGroup.AddPropertyRow(AudioCaptureModeHandle.ToSharedRef());
+    }
+    if (AudioInputDeviceHandle.IsValid())
+    {
+        AudioGroup.AddPropertyRow(AudioInputDeviceHandle.ToSharedRef());
+    }
+    if (AudioStreamLabelHandle.IsValid())
+    {
+        AudioGroup.AddPropertyRow(AudioStreamLabelHandle.ToSharedRef());
+    }
+    if (AudioCaptureConfigHandle.IsValid())
+    {
+        IDetailGroup& AudioConfigGroup = AudioGroup.AddGroup(TEXT("AudioCaptureConfig"), LOCTEXT("AudioCaptureConfigLabel", "Audio Capture Config"), false);
+
+        uint32 NumChildren = 0;
+        if (AudioCaptureConfigHandle->GetNumChildren(NumChildren) == FPropertyAccess::Success)
+        {
+            for (uint32 ChildIndex = 0; ChildIndex < NumChildren; ++ChildIndex)
+            {
+                TSharedPtr<IPropertyHandle> ChildHandle = AudioCaptureConfigHandle->GetChildHandle(ChildIndex);
+                if (ChildHandle.IsValid())
+                {
+                    ChildHandle->MarkHiddenByCustomization();
+                    AudioConfigGroup.AddPropertyRow(ChildHandle.ToSharedRef());
+                }
+            }
+        }
     }
 
     RefreshTransportCustomization();
@@ -329,18 +475,55 @@ FName FO3DSenderComponentCustomization::GetSelectedTransportName() const
     return NAME_None;
 }
 
-EVisibility FO3DSenderComponentCustomization::GetTransportCustomizationVisibility() const
+bool FO3DSenderComponentCustomization::IsTransportSelectionEnabled() const
+{
+    bool bAutoCreate = false;
+    if (GetAutoCreateTransportValue(bAutoCreate))
+    {
+        return bAutoCreate;
+    }
+
+    return false;
+}
+
+bool FO3DSenderComponentCustomization::GetAutoCreateTransportValue(bool& bOutAutoCreate) const
 {
     if (AutoCreateTransportHandle.IsValid())
     {
-        bool bAutoCreate = true;
-        if (AutoCreateTransportHandle->GetValue(bAutoCreate) == FPropertyAccess::Success && !bAutoCreate)
+        bool bValue = false;
+        const FPropertyAccess::Result Result = AutoCreateTransportHandle->GetValue(bValue);
+        if (Result == FPropertyAccess::Success)
         {
-            return EVisibility::Collapsed;
+            bOutAutoCreate = bValue;
+            return true;
         }
+
+        if (Result == FPropertyAccess::MultipleValues)
+        {
+            return false;
+        }
+    }
+
+    if (const UO3DSenderComponent* Component = WeakComponent.Get())
+    {
+        bOutAutoCreate = Component->bAutoCreateTransport;
+        return true;
+    }
+
+    return false;
+}
+
+EVisibility FO3DSenderComponentCustomization::GetTransportCustomizationVisibility() const
+{
+    bool bAutoCreate = true;
+    if (GetAutoCreateTransportValue(bAutoCreate))
+    {
+        return bAutoCreate ? EVisibility::Visible : EVisibility::Collapsed;
     }
 
     return EVisibility::Visible;
 }
+
+#undef LOCTEXT_NAMESPACE
 
 #endif // WITH_EDITOR

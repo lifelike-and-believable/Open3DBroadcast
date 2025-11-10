@@ -19,7 +19,7 @@ namespace O3DS
         PCM16 = 2
     };
 
-    struct OPEN3DSHAREDNEXT_API FUnifiedHeader
+    struct OPEN3DSHARED_API FUnifiedHeader
     {
         uint32 MagicBE = 0;
         uint8 Version = 1;
@@ -47,7 +47,7 @@ namespace O3DS
         }
     };
 
-    struct OPEN3DSHAREDNEXT_API FAudioFrameMeta
+    struct OPEN3DSHARED_API FAudioFrameMeta
     {
         FGuid SourceGuid;
         FString StreamLabel;

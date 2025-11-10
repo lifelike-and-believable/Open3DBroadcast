@@ -1,6 +1,6 @@
 // Copyright (c) Open3DStream Contributors
 
-#include "O3DLoopback.h"
+#include "SerializedFrameConsumerRegistry.h"
 
 static TUniqueFunction<TSharedPtr<ISerializedFrameConsumer>()> GSerializedFrameConsumerFactory;
 

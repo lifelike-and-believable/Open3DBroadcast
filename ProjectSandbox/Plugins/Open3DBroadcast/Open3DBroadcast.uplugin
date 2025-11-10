@@ -19,7 +19,7 @@
 	],
 	"Modules": [
 		{
-			"Name": "Open3DSharedNext",
+			"Name": "Open3DShared",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
 		},

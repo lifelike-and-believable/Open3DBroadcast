@@ -38,6 +38,9 @@ private:
     FText GetSelectedTransportText() const;
     FName GetSelectedTransportName() const;
     EVisibility GetTransportCustomizationVisibility() const;
+    bool IsTransportSelectionEnabled() const;
+
+    bool GetAutoCreateTransportValue(bool& bOutAutoCreate) const;
 
     TWeakObjectPtr<UO3DSenderComponent> WeakComponent;
     TSharedPtr<SBox> TransportCustomizationContainer;

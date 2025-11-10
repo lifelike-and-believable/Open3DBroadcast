@@ -2,13 +2,14 @@
 
 #include "O3DReceiverInterface.h"
 #include "LoopbackChannel.h"
-#include "O3DLoopback.h"
+#include "SerializedFrameConsumerRegistry.h"
 
 class FO3DLoopbackReceiver : public IOpen3DReceiver
 {
 public:
     virtual bool Initialize(const FO3DTransportConfig& Config) override;
-    virtual bool Start(const TSharedPtr<ISerializedFrameConsumer>& Consumer = nullptr) override;
+    virtual void SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& Consumer) override;
+    virtual bool Start() override;
     virtual void Stop() override;
     virtual int32 Poll() override;
     virtual FO3DTransportStats GetStats() const override;

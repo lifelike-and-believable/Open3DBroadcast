@@ -5,7 +5,7 @@
 #include "ILiveLinkClient.h"
 #include "LiveLinkTypes.h"
 #include "LiveLinkPreset.h"
-#include "O3DLoopback.h"
+#include "SerializedFrameConsumerRegistry.h"
 #include "Roles/LiveLinkAnimationTypes.h"
 #include "Roles/LiveLinkAnimationRole.h"
 #include "HAL/PlatformTime.h"
@@ -189,10 +189,12 @@ bool FO3DReceiverSource::StartTransport()
     }
 
     ActiveConsumer = MakeShared<FSerializedConsumer>(TWeakPtr<FO3DReceiverSource>(AsShared()));
-    if (!ActiveReceiver->Start(ActiveConsumer))
+    ActiveReceiver->SetConsumer(ActiveConsumer);
+    if (!ActiveReceiver->Start())
     {
         UE_LOG(LogO3DReceiverSource, Warning, TEXT("Failed to start transport '%s'."), *ActiveConfig.Transport);
         ActiveReceiver->Stop();
+        ActiveReceiver->SetConsumer(nullptr);
         ActiveReceiver.Reset();
         ActiveConsumer.Reset();
         return false;
@@ -221,6 +223,7 @@ void FO3DReceiverSource::StopTransport()
 {
     if (ActiveReceiver.IsValid())
     {
+        ActiveReceiver->SetConsumer(nullptr);
         ActiveReceiver->Stop();
         ActiveReceiver.Reset();
     }
@@ -350,71 +353,16 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
     }
 
     const double ParseStartWall = FPlatformTime::Seconds();
-    if (!SubjectScratch.Parse(reinterpret_cast<const char*>(Buffer.GetData()), Buffer.Num(), nullptr, true))
+    if (!ParseSubjectListBuffer(Subject, Buffer))
     {
-        UE_LOG(LogO3DReceiverSource, Warning, TEXT("Parse failed for subject '%s' (%d bytes)"), *Subject, Buffer.Num());
         return;
     }
 
     const double SubjectListTime = SubjectScratch.mTime;
-
-    double LastActive = 0.0;
+    if (!ShouldProcessFrame(SubjectListTime, ParseStartWall))
     {
-        FScopeLock Lock(&ConnectionLastActiveSection);
-        LastActive = ConnectionLastActive;
+        return;
     }
-
-    const double NowWall = ParseStartWall;
-    const float SilenceThreshold = CVarO3DReceiverSilenceResetSeconds.GetValueOnAnyThread();
-    const float JumpThreshold = CVarO3DReceiverTimestampJumpResetSeconds.GetValueOnAnyThread();
-
-    bool bResetOrdering = false;
-    if (LastAppliedSubjectListTime >= 0.0)
-    {
-        if (SilenceThreshold > 0.0 && LastActive > 0.0 && (NowWall - LastActive) > SilenceThreshold)
-        {
-            bResetOrdering = true;
-        }
-        else if (JumpThreshold > 0.0 && (LastAppliedSubjectListTime - SubjectListTime) > JumpThreshold)
-        {
-            bResetOrdering = true;
-        }
-    }
-
-    if (bResetOrdering)
-    {
-        if (CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0)
-        {
-            UE_LOG(LogO3DReceiverSource, Verbose, TEXT("Reset ordering window (last=%.6f new=%.6f)"), LastAppliedSubjectListTime, SubjectListTime);
-        }
-        ResetOrderingState();
-    }
-
-    if (LastAppliedSubjectListTime >= 0.0)
-    {
-        if (SubjectListTime == LastAppliedSubjectListTime)
-        {
-            if (CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0)
-            {
-                UE_LOG(LogO3DReceiverSource, Verbose, TEXT("Dropping duplicate frame t=%.6f"), SubjectListTime);
-            }
-            UpdateConnectionLastActive();
-            return;
-        }
-
-        if (CVarO3DReceiverDropOutOfOrder.GetValueOnAnyThread() != 0 && SubjectListTime < LastAppliedSubjectListTime)
-        {
-            if (CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0)
-            {
-                UE_LOG(LogO3DReceiverSource, Verbose, TEXT("Dropping out-of-order frame t=%.6f < %.6f"), SubjectListTime, LastAppliedSubjectListTime);
-            }
-            UpdateConnectionLastActive();
-            return;
-        }
-    }
-
-    LastAppliedSubjectListTime = SubjectListTime;
-    UpdateConnectionLastActive();
 
     TArray<FName> BoneNames;
     TArray<int32> BoneParents;
@@ -424,131 +372,7 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
 
     for (O3DS::Subject* SubjectPtr : SubjectScratch)
     {
-        if (!SubjectPtr)
-        {
-            continue;
-        }
-
-        const FString SubjectNameUtf8 = UTF8_TO_TCHAR(SubjectPtr->mName.c_str());
-        const FName SubjectFName(*SubjectNameUtf8);
-        const FLiveLinkSubjectName SubjectName(SubjectFName);
-        const FLiveLinkSubjectKey SubjectKey(SourceGuid, SubjectName);
-
-        BoneNames.Reset();
-        BoneParents.Reset();
-        BoneTransforms.Reset();
-
-        const size_t TransformCount = SubjectPtr->mTransforms.mItems.size();
-        BoneNames.Reserve(static_cast<int32>(TransformCount));
-        BoneParents.Reserve(static_cast<int32>(TransformCount));
-        BoneTransforms.Reserve(static_cast<int32>(TransformCount));
-
-        bool bHasInvalid = false;
-        for (O3DS::Transform* TransformPtr : SubjectPtr->mTransforms.mItems)
-        {
-            if (!TransformPtr)
-            {
-                continue;
-            }
-
-            O3DS::Vector3d Translation = TransformPtr->translation.value;
-            O3DS::Vector4d Rotation = TransformPtr->rotation.value;
-            O3DS::Vector3d Scale = TransformPtr->scale.value;
-
-            FQuat Quat(static_cast<float>(Rotation[0]), static_cast<float>(Rotation[1]), static_cast<float>(Rotation[2]), static_cast<float>(Rotation[3]));
-            FVector Location(static_cast<float>(Translation[0]), static_cast<float>(Translation[1]), static_cast<float>(Translation[2]));
-            FVector ScaleVec(static_cast<float>(Scale[0]), static_cast<float>(Scale[1]), static_cast<float>(Scale[2]));
-
-            if (!FMath::IsFinite(Location.X) || !FMath::IsFinite(Location.Y) || !FMath::IsFinite(Location.Z) ||
-                !FMath::IsFinite(ScaleVec.X) || !FMath::IsFinite(ScaleVec.Y) || !FMath::IsFinite(ScaleVec.Z) ||
-                !FMath::IsFinite(Quat.X) || !FMath::IsFinite(Quat.Y) || !FMath::IsFinite(Quat.Z) || !FMath::IsFinite(Quat.W))
-            {
-                bHasInvalid = true;
-                break;
-            }
-
-            const float QuatSizeSq = Quat.SizeSquared();
-            if (QuatSizeSq <= KINDA_SMALL_NUMBER)
-            {
-                bHasInvalid = true;
-                break;
-            }
-
-            Quat.Normalize();
-            if (Quat.ContainsNaN())
-            {
-                bHasInvalid = true;
-                break;
-            }
-
-            std::string BoneNameUtf8 = TransformPtr->mName;
-            const size_t ColonIndex = BoneNameUtf8.rfind(':');
-            if (ColonIndex != std::string::npos)
-            {
-                BoneNameUtf8.erase(0, ColonIndex + 1);
-            }
-
-            const FName BoneName(UTF8_TO_TCHAR(BoneNameUtf8.c_str()));
-            BoneNames.Add(BoneName);
-            BoneParents.Add(TransformPtr->mParentId);
-            BoneTransforms.Emplace(Quat, Location, ScaleVec);
-        }
-
-        if (bHasInvalid || BoneTransforms.Num() == 0)
-        {
-            continue;
-        }
-
-        CurveNames.Reset();
-        CurveValues.Reset();
-        const size_t CurveCount = SubjectPtr->mCurveNames.size();
-        CurveNames.Reserve(static_cast<int32>(CurveCount));
-        CurveValues.Reserve(static_cast<int32>(CurveCount));
-
-        for (size_t CurveIndex = 0; CurveIndex < CurveCount; ++CurveIndex)
-        {
-            const std::string& CurveNameUtf8 = SubjectPtr->mCurveNames[CurveIndex];
-            const FName CurveName(UTF8_TO_TCHAR(CurveNameUtf8.c_str()));
-            CurveNames.Add(CurveName);
-
-            float Value = 0.0f;
-            if (CurveIndex < SubjectPtr->mCurveValues.size())
-            {
-                Value = SubjectPtr->mCurveValues[CurveIndex];
-            }
-            CurveValues.Add(Value);
-        }
-
-        const uint64 SkeletonHash = HashArray(BoneNames, &BoneParents);
-        const uint64 CurveHash = HashCurveNames(CurveNames);
-
-        const uint64* ExistingSkeletonHash = SubjectSkeletonHashes.Find(SubjectFName);
-        const uint64* ExistingCurveHash = SubjectCurveHashes.Find(SubjectFName);
-        const bool bNeedStaticUpdate = (!ExistingSkeletonHash || *ExistingSkeletonHash != SkeletonHash) || (!ExistingCurveHash || *ExistingCurveHash != CurveHash);
-
-        if (!InitializedSubjects.Contains(SubjectFName) || bNeedStaticUpdate)
-        {
-            PushSubjectStaticData(SubjectKey, BoneNames, BoneParents, CurveNames, SkeletonHash);
-            InitializedSubjects.Add(SubjectFName);
-            SubjectSkeletonHashes.Add(SubjectFName, SkeletonHash);
-            SubjectCurveHashes.Add(SubjectFName, CurveHash);
-
-            if (!ExistingSkeletonHash)
-            {
-                UE_LOG(LogO3DReceiverSource, Log, TEXT("Created subject '%s'"), *SubjectFName.ToString());
-            }
-            else if (bNeedStaticUpdate)
-            {
-                UE_LOG(LogO3DReceiverSource, Log, TEXT("Static data updated for subject '%s'"), *SubjectFName.ToString());
-            }
-        }
-        else
-        {
-            SubjectCurveHashes[SubjectFName] = CurveHash;
-        }
-
-        PushSubjectFrameData(SubjectKey, BoneTransforms, CurveNames, CurveValues, SubjectListTime, CurveHash);
-        SubjectLastUpdateTime.Add(SubjectFName, FPlatformTime::Seconds());
+        ProcessParsedSubject(SubjectPtr, SubjectListTime, BoneNames, BoneParents, BoneTransforms, CurveNames, CurveValues);
     }
 
     if (CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0)
@@ -557,6 +381,247 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
         UE_LOG(LogO3DReceiverSource, VeryVerbose, TEXT("Processed subject list (subjects=%d bytes=%d dt=%.6fms)"),
             static_cast<int32>(SubjectScratch.mItems.size()), Buffer.Num(), (ParseEnd - ParseStartWall) * 1000.0);
     }
+}
+
+bool FO3DReceiverSource::ParseSubjectListBuffer(const FString& Subject, const TArray<uint8>& Buffer)
+{
+    if (!SubjectScratch.Parse(reinterpret_cast<const char*>(Buffer.GetData()), Buffer.Num(), nullptr, true))
+    {
+        UE_LOG(LogO3DReceiverSource, Warning, TEXT("Parse failed for subject '%s' (%d bytes)"), *Subject, Buffer.Num());
+        return false;
+    }
+    return true;
+}
+
+bool FO3DReceiverSource::ShouldProcessFrame(double SubjectListTime, double NowSeconds)
+{
+    if (ShouldResetOrderingWindow(NowSeconds, SubjectListTime))
+    {
+        if (CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0)
+        {
+            UE_LOG(LogO3DReceiverSource, Verbose, TEXT("Reset ordering window (last=%.6f new=%.6f)"), LastAppliedSubjectListTime, SubjectListTime);
+        }
+        ResetOrderingState();
+    }
+
+    bool bShouldProcess = true;
+    if (LastAppliedSubjectListTime >= 0.0)
+    {
+        if (SubjectListTime == LastAppliedSubjectListTime)
+        {
+            if (CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0)
+            {
+                UE_LOG(LogO3DReceiverSource, Verbose, TEXT("Dropping duplicate frame t=%.6f"), SubjectListTime);
+            }
+            bShouldProcess = false;
+        }
+        else if (CVarO3DReceiverDropOutOfOrder.GetValueOnAnyThread() != 0 && SubjectListTime < LastAppliedSubjectListTime)
+        {
+            if (CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0)
+            {
+                UE_LOG(LogO3DReceiverSource, Verbose, TEXT("Dropping out-of-order frame t=%.6f < %.6f"), SubjectListTime, LastAppliedSubjectListTime);
+            }
+            bShouldProcess = false;
+        }
+    }
+
+    UpdateConnectionLastActive();
+    if (bShouldProcess)
+    {
+        LastAppliedSubjectListTime = SubjectListTime;
+    }
+
+    return bShouldProcess;
+}
+
+bool FO3DReceiverSource::ShouldResetOrderingWindow(double NowSeconds, double SubjectListTime) const
+{
+    if (LastAppliedSubjectListTime < 0.0)
+    {
+        return false;
+    }
+
+    const float SilenceThreshold = CVarO3DReceiverSilenceResetSeconds.GetValueOnAnyThread();
+    const float JumpThreshold = CVarO3DReceiverTimestampJumpResetSeconds.GetValueOnAnyThread();
+
+    const double LastActive = GetLastConnectionActive();
+    if (SilenceThreshold > 0.0 && LastActive > 0.0 && (NowSeconds - LastActive) > SilenceThreshold)
+    {
+        return true;
+    }
+
+    if (JumpThreshold > 0.0 && (LastAppliedSubjectListTime - SubjectListTime) > JumpThreshold)
+    {
+        return true;
+    }
+
+    return false;
+}
+
+double FO3DReceiverSource::GetLastConnectionActive() const
+{
+    FScopeLock Lock(&ConnectionLastActiveSection);
+    return ConnectionLastActive;
+}
+
+bool FO3DReceiverSource::BuildSubjectPose(O3DS::Subject* SubjectPtr, TArray<FName>& OutBoneNames, TArray<int32>& OutBoneParents, TArray<FTransform>& OutBoneTransforms) const
+{
+    OutBoneNames.Reset();
+    OutBoneParents.Reset();
+    OutBoneTransforms.Reset();
+
+    if (!SubjectPtr)
+    {
+        return false;
+    }
+
+    const size_t TransformCount = SubjectPtr->mTransforms.mItems.size();
+    if (TransformCount == 0)
+    {
+        return false;
+    }
+
+    OutBoneNames.Reserve(static_cast<int32>(TransformCount));
+    OutBoneParents.Reserve(static_cast<int32>(TransformCount));
+    OutBoneTransforms.Reserve(static_cast<int32>(TransformCount));
+
+    for (O3DS::Transform* TransformPtr : SubjectPtr->mTransforms.mItems)
+    {
+        if (!TransformPtr)
+        {
+            continue;
+        }
+
+        const O3DS::Vector3d Translation = TransformPtr->translation.value;
+        const O3DS::Vector4d Rotation = TransformPtr->rotation.value;
+        const O3DS::Vector3d Scale = TransformPtr->scale.value;
+
+        FQuat Quat(
+            static_cast<float>(Rotation.v[0]),
+            static_cast<float>(Rotation.v[1]),
+            static_cast<float>(Rotation.v[2]),
+            static_cast<float>(Rotation.v[3]));
+        FVector Location(
+            static_cast<float>(Translation.v[0]),
+            static_cast<float>(Translation.v[1]),
+            static_cast<float>(Translation.v[2]));
+        FVector ScaleVec(
+            static_cast<float>(Scale.v[0]),
+            static_cast<float>(Scale.v[1]),
+            static_cast<float>(Scale.v[2]));
+
+        if (!FMath::IsFinite(Location.X) || !FMath::IsFinite(Location.Y) || !FMath::IsFinite(Location.Z) ||
+            !FMath::IsFinite(ScaleVec.X) || !FMath::IsFinite(ScaleVec.Y) || !FMath::IsFinite(ScaleVec.Z) ||
+            !FMath::IsFinite(Quat.X) || !FMath::IsFinite(Quat.Y) || !FMath::IsFinite(Quat.Z) || !FMath::IsFinite(Quat.W))
+        {
+            return false;
+        }
+
+        if (Quat.SizeSquared() <= KINDA_SMALL_NUMBER)
+        {
+            return false;
+        }
+
+        Quat.Normalize();
+        if (Quat.ContainsNaN())
+        {
+            return false;
+        }
+
+        std::string BoneNameUtf8 = TransformPtr->mName;
+        const size_t ColonIndex = BoneNameUtf8.rfind(':');
+        if (ColonIndex != std::string::npos)
+        {
+            BoneNameUtf8.erase(0, ColonIndex + 1);
+        }
+
+        const FName BoneName(UTF8_TO_TCHAR(BoneNameUtf8.c_str()));
+        OutBoneNames.Add(BoneName);
+        OutBoneParents.Add(TransformPtr->mParentId);
+        OutBoneTransforms.Emplace(Quat, Location, ScaleVec);
+    }
+
+    return OutBoneTransforms.Num() > 0;
+}
+
+void FO3DReceiverSource::BuildSubjectCurves(O3DS::Subject* SubjectPtr, TArray<FName>& OutCurveNames, TArray<float>& OutCurveValues) const
+{
+    OutCurveNames.Reset();
+    OutCurveValues.Reset();
+
+    if (!SubjectPtr)
+    {
+        return;
+    }
+
+    const size_t CurveCount = SubjectPtr->mCurveNames.size();
+    OutCurveNames.Reserve(static_cast<int32>(CurveCount));
+    OutCurveValues.Reserve(static_cast<int32>(CurveCount));
+
+    for (size_t CurveIndex = 0; CurveIndex < CurveCount; ++CurveIndex)
+    {
+        const std::string& CurveNameUtf8 = SubjectPtr->mCurveNames[CurveIndex];
+        const FName CurveName(UTF8_TO_TCHAR(CurveNameUtf8.c_str()));
+        OutCurveNames.Add(CurveName);
+
+        float Value = 0.0f;
+        if (CurveIndex < SubjectPtr->mCurveValues.size())
+        {
+            Value = SubjectPtr->mCurveValues[CurveIndex];
+        }
+        OutCurveValues.Add(Value);
+    }
+}
+
+void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double SubjectListTime, TArray<FName>& BoneNames, TArray<int32>& BoneParents, TArray<FTransform>& BoneTransforms, TArray<FName>& CurveNames, TArray<float>& CurveValues)
+{
+    if (!SubjectPtr)
+    {
+        return;
+    }
+
+    if (!BuildSubjectPose(SubjectPtr, BoneNames, BoneParents, BoneTransforms))
+    {
+        return;
+    }
+
+    BuildSubjectCurves(SubjectPtr, CurveNames, CurveValues);
+
+    const FString SubjectNameUtf8 = UTF8_TO_TCHAR(SubjectPtr->mName.c_str());
+    const FName SubjectFName(*SubjectNameUtf8);
+    const FLiveLinkSubjectName SubjectName(SubjectFName);
+    const FLiveLinkSubjectKey SubjectKey(SourceGuid, SubjectName);
+
+    const uint64 SkeletonHash = HashArray(BoneNames, &BoneParents);
+    const uint64 CurveHash = HashCurveNames(CurveNames);
+
+    const uint64* ExistingSkeletonHash = SubjectSkeletonHashes.Find(SubjectFName);
+    const uint64* ExistingCurveHash = SubjectCurveHashes.Find(SubjectFName);
+    const bool bNeedStaticUpdate = (!ExistingSkeletonHash || *ExistingSkeletonHash != SkeletonHash) || (!ExistingCurveHash || *ExistingCurveHash != CurveHash);
+
+    if (!InitializedSubjects.Contains(SubjectFName) || bNeedStaticUpdate)
+    {
+        PushSubjectStaticData(SubjectKey, BoneNames, BoneParents, CurveNames, SkeletonHash);
+        InitializedSubjects.Add(SubjectFName);
+        SubjectSkeletonHashes.Add(SubjectFName, SkeletonHash);
+        SubjectCurveHashes.Add(SubjectFName, CurveHash);
+
+        if (!ExistingSkeletonHash)
+        {
+            UE_LOG(LogO3DReceiverSource, Log, TEXT("Created subject '%s'"), *SubjectFName.ToString());
+        }
+        else if (bNeedStaticUpdate)
+        {
+            UE_LOG(LogO3DReceiverSource, Log, TEXT("Static data updated for subject '%s'"), *SubjectFName.ToString());
+        }
+    }
+    else
+    {
+        SubjectCurveHashes[SubjectFName] = CurveHash;
+    }
+
+    PushSubjectFrameData(SubjectKey, BoneTransforms, CurveNames, CurveValues, SubjectListTime, CurveHash);
+    SubjectLastUpdateTime.Add(SubjectFName, FPlatformTime::Seconds());
 }
 
 void FO3DReceiverSource::PushSubjectStaticData(const FLiveLinkSubjectKey& SubjectKey, const TArray<FName>& BoneNames, const TArray<int32>& BoneParents, const TArray<FName>& CurveNames, uint64 DescriptorHash)

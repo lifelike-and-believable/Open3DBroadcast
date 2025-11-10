@@ -7,17 +7,18 @@
 #include "O3DSenderRegistry.h"
 #include "O3DSenderSerializer.h"
 #include "O3DSenderTransportCustomization.h"
+#include "O3DSenderCurveProcessor.h"
+#include "O3DSenderTransportController.h"
 #include "Engine/Engine.h"
 #include "Engine/SkeletalMesh.h"
 #include "Animation/Skeleton.h"
 #include "AnimationRuntime.h"
 #include "Animation/AnimInstance.h"
-#include "Animation/AnimCurveTypes.h"
-#include "Animation/MorphTarget.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SkinnedMeshComponent.h"
 #include "GameFramework/Actor.h"
 #include "HAL/IConsoleManager.h"
+#include "AudioCaptureCore.h"
 
 #define LOCTEXT_NAMESPACE "O3DSenderComponent"
 
@@ -41,16 +42,32 @@ static TAutoConsoleVariable<int32> CVarO3DSenderOnScreen(
 
 static const FName DefaultSenderTransportName(TEXT("loopback"));
 
+void FO3DSenderTransportControllerDeleter::operator()(FO3DSenderTransportController* Ptr) const
+{
+	delete Ptr;
+}
+
+void FO3DSenderCurveProcessorDeleter::operator()(FO3DSenderCurveProcessor* Ptr) const
+{
+	delete Ptr;
+}
+
+UO3DSenderComponent::~UO3DSenderComponent() = default;
+
 UO3DSenderComponent::UO3DSenderComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	SetComponentTickEnabled(false);
 	EnsureValidTransportName();
+	TransportController.Reset(new FO3DSenderTransportController());
+	CurveProcessor.Reset(new FO3DSenderCurveProcessor());
+	SyncAudioConfigSource();
 }
 
 void UO3DSenderComponent::BeginPlay()
 {
 	Super::BeginPlay();
+	SyncAudioConfigSource();
 
 	if (!TargetMesh.IsValid())
 	{
@@ -97,6 +114,7 @@ void UO3DSenderComponent::OnRegister()
 {
 	Super::OnRegister();
 	EnsureValidTransportName();
+	SyncAudioConfigSource();
 	UpdateEditConditionHelpers();
 }
 
@@ -104,6 +122,7 @@ void UO3DSenderComponent::PostInitProperties()
 {
 	Super::PostInitProperties();
 	EnsureValidTransportName();
+	SyncAudioConfigSource();
 	UpdateEditConditionHelpers();
 }
 
@@ -112,6 +131,7 @@ void UO3DSenderComponent::PostLoad()
 {
 	Super::PostLoad();
 	EnsureValidTransportName();
+	SyncAudioConfigSource();
 	UpdateEditConditionHelpers();
 }
 #endif
@@ -163,17 +183,32 @@ void UO3DSenderComponent::StartCapture()
 		}
 	}
 
+	if (CurveProcessor.IsValid())
+	{
+		CurveProcessor->Reset();
+	}
+
 	InitializeTransport();
+	UpdateAudioCaptureBinding();
 
 	BindToTarget();
-	bIsCapturing = TargetMesh.IsValid();
+	const bool bHasValidMesh = TargetMesh.IsValid();
+	bIsCapturing = bHasValidMesh || bEnableAudio;
 	LastCaptureTime = 0.0;
 	FrameCounter = 0;
 
 	if (bIsCapturing)
 	{
-		UE_LOG(LogO3DSenderComponent, Log, TEXT("Sender capture started on %s"), *GetNameSafe(TargetMesh.Get()));
-		NotifyOnScreen(FString::Printf(TEXT("O3D Sender: Started on %s"), *GetNameSafe(TargetMesh.Get())), FColor::Green, 2.0f);
+		if (bHasValidMesh)
+		{
+			UE_LOG(LogO3DSenderComponent, Log, TEXT("Sender capture started on %s"), *GetNameSafe(TargetMesh.Get()));
+			NotifyOnScreen(FString::Printf(TEXT("O3D Sender: Started on %s"), *GetNameSafe(TargetMesh.Get())), FColor::Green, 2.0f);
+		}
+		else
+		{
+			UE_LOG(LogO3DSenderComponent, Log, TEXT("Sender audio capture started without a skeletal mesh."));
+			NotifyOnScreen(TEXT("O3D Sender: Audio capture active"), FColor::Green, 2.0f);
+		}
 	}
 	else
 	{
@@ -196,6 +231,11 @@ void UO3DSenderComponent::StopCapture()
 		Serializer->Detach(this);
 	}
 
+	if (CurveProcessor.IsValid())
+	{
+		CurveProcessor->Reset();
+	}
+
 	TeardownTransport();
 
 	UE_LOG(LogO3DSenderComponent, Log, TEXT("Sender capture stopped on %s"), *GetNameSafe(TargetMesh.Get()));
@@ -204,10 +244,10 @@ void UO3DSenderComponent::StopCapture()
 
 void UO3DSenderComponent::TeardownTransport()
 {
-	if (ActiveSender.IsValid())
+	TeardownAudioCapture();
+	if (TransportController.IsValid())
 	{
-		ActiveSender->Stop();
-		ActiveSender.Reset();
+		TransportController->Stop();
 	}
 
 	SetComponentTickEnabled(false);
@@ -227,32 +267,14 @@ void UO3DSenderComponent::InitializeTransport()
 		return;
 	}
 
-	ActiveConfig = BuildTransportConfig();
-	if (ActiveConfig.Transport.IsEmpty())
+	if (!TransportController.IsValid())
 	{
-		UE_LOG(LogO3DSenderComponent, Warning, TEXT("No transport specified; skipping auto transport setup."));
-		return;
+		TransportController.Reset(new FO3DSenderTransportController());
 	}
 
-	const FName SelectedTransportName(*ActiveConfig.Transport);
-	ActiveSender = O3DTransport::CreateSender(SelectedTransportName);
-	if (!ActiveSender.IsValid())
+	FO3DTransportConfig Config = BuildTransportConfig();
+	if (!TransportController->Start(Config))
 	{
-		UE_LOG(LogO3DSenderComponent, Warning, TEXT("No sender registered for transport '%s'."), *ActiveConfig.Transport);
-		return;
-	}
-
-	if (!ActiveSender->Initialize(ActiveConfig))
-	{
-		UE_LOG(LogO3DSenderComponent, Warning, TEXT("Failed to initialize sender transport '%s'."), *ActiveConfig.Transport);
-		ActiveSender.Reset();
-		return;
-	}
-
-	if (!ActiveSender->Start())
-	{
-		UE_LOG(LogO3DSenderComponent, Warning, TEXT("Failed to start sender transport '%s'."), *ActiveConfig.Transport);
-		ActiveSender.Reset();
 		return;
 	}
 
@@ -267,12 +289,14 @@ void UO3DSenderComponent::InitializeTransport()
 		SerializerRelayHandle = Serializer->OnSerializedFrame.AddUObject(this, &UO3DSenderComponent::HandleSerializedFrameForward);
 	}
 
-	UE_LOG(LogO3DSenderComponent, Log, TEXT("Auto transport '%s' initialized."), *ActiveConfig.Transport);
+	UpdateAudioCaptureBinding();
+	UE_LOG(LogO3DSenderComponent, Log, TEXT("Auto transport '%s' initialized."), *TransportController->GetConfig().Transport);
 }
 
 FO3DTransportConfig UO3DSenderComponent::BuildTransportConfig() const
 {
 	FO3DTransportConfig Config;
+	const FO3DSenderAudioCaptureConfig CaptureConfig = BuildAudioCaptureConfig();
 
 	FName SelectedTransport = TransportName.IsNone() ? DefaultSenderTransportName : TransportName;
 	Config.Transport = SelectedTransport.ToString();
@@ -288,6 +312,8 @@ FO3DTransportConfig UO3DSenderComponent::BuildTransportConfig() const
 	{
 		Config.AdvancedParams.Add(Option.Key, Option.Value);
 	}
+
+	Config.Audio = BuildTransportAudioConfig(CaptureConfig);
 
 	if (!Config.Transport.IsEmpty())
 	{
@@ -310,15 +336,247 @@ void UO3DSenderComponent::HandleSerializedFrameForward(const FString& Subject, c
 
 void UO3DSenderComponent::OnSubjectListReady(const FString& Subject, const TSharedPtr<O3DS::SubjectList>& Payload)
 {
-	if (!ActiveSender.IsValid() || !Payload.IsValid())
+	if (!TransportController.IsValid() || !TransportController->IsActive() || !Payload.IsValid())
 	{
 		return;
 	}
 
-	if (!ActiveSender->Send(*Payload.Get()))
+	TSharedPtr<IOpen3DSender> SenderInstance = TransportController->GetSender();
+	if (!SenderInstance.IsValid())
 	{
-		UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Transport '%s' reported backpressure while sending subject '%s'."), *ActiveConfig.Transport, *Subject);
+		return;
 	}
+
+	if (!SenderInstance->Send(*Payload.Get()))
+	{
+		UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Transport '%s' reported backpressure while sending subject '%s'."), *TransportController->GetConfig().Transport, *Subject);
+	}
+}
+
+TArray<FName> UO3DSenderComponent::GetAvailableAudioInputDeviceOptions() const
+{
+	TArray<FName> Options;
+	Audio::FAudioCapture Temp;
+	TArray<Audio::FCaptureDeviceInfo> Devices;
+	if (Temp.GetCaptureDevicesAvailable(Devices) > 0)
+	{
+		for (const Audio::FCaptureDeviceInfo& Info : Devices)
+		{
+			Options.Add(FName(*Info.DeviceName));
+		}
+	}
+	return Options;
+}
+
+void UO3DSenderComponent::UpdateAudioCaptureBinding()
+{
+	if (HasAnyFlags(RF_ClassDefaultObject))
+	{
+		return;
+	}
+
+	if (!bEnableAudio)
+	{
+		if (AudioCaptureComponent)
+		{
+			AudioCaptureComponent->SetAudioSink(nullptr, FO3DTransportAudioConfig());
+		}
+		return;
+	}
+
+	EnsureAudioCaptureComponent();
+	if (!AudioCaptureComponent)
+	{
+		return;
+	}
+
+	const FO3DSenderAudioCaptureConfig CaptureConfig = BuildAudioCaptureConfig();
+	FO3DTransportAudioConfig TransportAudioConfig = BuildTransportAudioConfig(CaptureConfig);
+	if (TransportAudioConfig.StreamLabel.IsEmpty())
+	{
+		TransportAudioConfig.StreamLabel = AudioStreamLabel.IsEmpty() ? TEXT("o3ds:audio") : AudioStreamLabel;
+	}
+
+	ConfigureAudioCaptureComponent(CaptureConfig, TransportAudioConfig);
+
+	TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> AudioSink;
+	if (TransportController.IsValid() && TransportController->IsActive())
+	{
+		AudioSink = TransportController->GetAudioSink();
+	}
+
+	AudioCaptureComponent->SetAudioSink(AudioSink, TransportAudioConfig);
+
+	if (!AudioSink.IsValid())
+	{
+		const double Now = FPlatformTime::Seconds();
+		if (Now - LastAudioSinkWarningTime > 2.0)
+		{
+			UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Audio capture enabled but no active transport sink (transport=%s)."), *TransportName.ToString());
+			LastAudioSinkWarningTime = Now;
+		}
+	}
+	else
+	{
+		LastAudioSinkWarningTime = 0.0;
+	}
+}
+
+FO3DSenderAudioCaptureConfig UO3DSenderComponent::BuildAudioCaptureConfig() const
+{
+	FO3DSenderAudioCaptureConfig ConfigCopy = AudioCaptureConfig;
+	ConfigCopy.Source = (AudioCaptureMode == EO3DSenderCaptureMode::Mix)
+		? EO3DSenderAudioSource::GameSubmix
+		: EO3DSenderAudioSource::Microphone;
+
+	if (AudioCaptureMode == EO3DSenderCaptureMode::Input)
+	{
+		ConfigCopy.DeviceIndex = ResolveAudioDeviceIndex(AudioInputDevice);
+	}
+
+	return ConfigCopy;
+}
+
+FO3DTransportAudioConfig UO3DSenderComponent::BuildTransportAudioConfig(const FO3DSenderAudioCaptureConfig& CaptureConfig) const
+{
+	FO3DTransportAudioConfig AudioConfig;
+	AudioConfig.bEnableAudio = bEnableAudio;
+	if (!AudioConfig.bEnableAudio)
+	{
+		return AudioConfig;
+	}
+
+	AudioConfig.SampleRate = CaptureConfig.SampleRate;
+	AudioConfig.NumChannels = CaptureConfig.NumChannels;
+	AudioConfig.BitrateKbps = CaptureConfig.BitrateKbps;
+	AudioConfig.Mode = (AudioCaptureMode == EO3DSenderCaptureMode::Mix) ? TEXT("mix") : TEXT("input");
+	AudioConfig.StreamLabel = AudioStreamLabel.IsEmpty() ? TEXT("o3ds:audio") : AudioStreamLabel;
+	if (AudioCaptureMode == EO3DSenderCaptureMode::Input)
+	{
+		AudioConfig.InputDevice = AudioInputDevice.IsNone() ? FString() : AudioInputDevice.ToString();
+	}
+	else
+	{
+		AudioConfig.InputDevice.Reset();
+	}
+
+	AudioConfig.AdvancedParams.Empty();
+	AudioConfig.AdvancedParams.Add(TEXT("game_gain"), FString::SanitizeFloat(CaptureConfig.GameGain));
+	AudioConfig.AdvancedParams.Add(TEXT("mic_gain"), FString::SanitizeFloat(CaptureConfig.MicGain));
+	if (CaptureConfig.DeviceIndex >= 0)
+	{
+		AudioConfig.AdvancedParams.Add(TEXT("device_index"), FString::FromInt(CaptureConfig.DeviceIndex));
+	}
+	if (CaptureConfig.SubmixToTap)
+	{
+		AudioConfig.AdvancedParams.Add(TEXT("submix"), CaptureConfig.SubmixToTap->GetPathName());
+	}
+
+	return AudioConfig;
+}
+
+void UO3DSenderComponent::EnsureAudioCaptureComponent()
+{
+	if (HasAnyFlags(RF_ClassDefaultObject) || !bEnableAudio)
+	{
+		return;
+	}
+
+	if (AudioCaptureComponent)
+	{
+		if (!IsValid(AudioCaptureComponent) || AudioCaptureComponent->IsBeingDestroyed())
+		{
+			AudioCaptureComponent = nullptr;
+		}
+		else
+		{
+			return;
+		}
+	}
+
+	AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return;
+	}
+
+	if (!AudioCaptureComponent)
+	{
+		AudioCaptureComponent = Owner->FindComponentByClass<UO3DSenderAudioCaptureComponent>();
+	}
+
+	if (AudioCaptureComponent && AudioCaptureComponent->GetOwner() != Owner)
+	{
+		AudioCaptureComponent = nullptr;
+	}
+
+	if (!AudioCaptureComponent)
+	{
+		AudioCaptureComponent = NewObject<UO3DSenderAudioCaptureComponent>(Owner, TEXT("O3DSenderAudioCapture"));
+		if (AudioCaptureComponent)
+		{
+			AudioCaptureComponent->SetFlags(RF_Transactional);
+			AudioCaptureComponent->OnComponentCreated();
+			AudioCaptureComponent->RegisterComponent();
+			Owner->AddInstanceComponent(AudioCaptureComponent);
+		}
+	}
+}
+
+void UO3DSenderComponent::ConfigureAudioCaptureComponent(const FO3DSenderAudioCaptureConfig& CaptureConfig, const FO3DTransportAudioConfig& TransportAudioConfig)
+{
+	if (!AudioCaptureComponent)
+	{
+		return;
+	}
+
+	AudioCaptureComponent->InputDeviceName = AudioInputDevice;
+	AudioCaptureComponent->Config = CaptureConfig;
+	AudioCaptureComponent->SetStreamLabel(TransportAudioConfig.StreamLabel.IsEmpty() ? AudioStreamLabel : TransportAudioConfig.StreamLabel);
+	AudioCaptureComponent->StartCaptureWithMode(AudioCaptureMode);
+}
+
+void UO3DSenderComponent::TeardownAudioCapture()
+{
+	if (AudioCaptureComponent)
+	{
+		AudioCaptureComponent->SetAudioSink(nullptr, FO3DTransportAudioConfig());
+	}
+	LastAudioSinkWarningTime = 0.0;
+}
+
+void UO3DSenderComponent::SyncAudioConfigSource()
+{
+	AudioCaptureConfig.Source = (AudioCaptureMode == EO3DSenderCaptureMode::Mix)
+		? EO3DSenderAudioSource::GameSubmix
+		: EO3DSenderAudioSource::Microphone;
+	if (AudioCaptureMode == EO3DSenderCaptureMode::Input)
+	{
+		AudioCaptureConfig.DeviceIndex = ResolveAudioDeviceIndex(AudioInputDevice);
+	}
+}
+
+int32 UO3DSenderComponent::ResolveAudioDeviceIndex(const FName& DeviceName) const
+{
+	if (DeviceName.IsNone())
+	{
+		return -1;
+	}
+
+	Audio::FAudioCapture Temp;
+	TArray<Audio::FCaptureDeviceInfo> Devices;
+	if (Temp.GetCaptureDevicesAvailable(Devices) > 0)
+	{
+		for (int32 Index = 0; Index < Devices.Num(); ++Index)
+		{
+			if (Devices[Index].DeviceName.Equals(DeviceName.ToString(), ESearchCase::IgnoreCase))
+			{
+				return Index;
+			}
+		}
+	}
+
+	return -1;
 }
 
 FString UO3DSenderComponent::GetTransportOption(const FString& Key) const
@@ -472,7 +730,10 @@ void UO3DSenderComponent::EnsureSkeletonCache(USkeletalMeshComponent* SkelComp)
 	if (CachedSkeletalMesh.Get() != Mesh || CachedSkeleton.Get() != Skeleton)
 	{
 		RefreshSkeletonCache(SkelComp);
-		bCurveCacheInitialized = false;
+		if (CurveProcessor.IsValid())
+		{
+			CurveProcessor->InvalidateCache();
+		}
 	}
 }
 
@@ -525,367 +786,268 @@ void UO3DSenderComponent::RefreshSkeletonCache(USkeletalMeshComponent* SkelComp)
 	}
 }
 
-void UO3DSenderComponent::EnsureCurveCache(USkeletalMeshComponent* SkelComp)
+FO3DSenderCurveConfig UO3DSenderComponent::BuildCurveConfig() const
 {
-	if (!bCurveCacheInitialized)
-	{
-		RefreshCurveCache(SkelComp);
-	}
+	FO3DSenderCurveConfig Config;
+	Config.bClampMorphCurvesToUnit = bClampMorphCurvesToUnit;
+	Config.bDropNaNAndInfinity = bDropNaNAndInfinity;
+	Config.bEnableCurveFiltering = bEnableCurveFiltering;
+	Config.CurveEpsilon = CurveEpsilon;
+	Config.CurveDeltaThreshold = CurveDeltaThreshold;
+	Config.IncludeCurvePatterns = &IncludeCurvePatterns;
+	Config.ExcludeCurvePatterns = &ExcludeCurvePatterns;
+	Config.bLogFilteredCurves = bLogFilteredCurves;
+	return Config;
 }
 
-void UO3DSenderComponent::RefreshCurveCache(USkeletalMeshComponent* SkelComp)
+bool UO3DSenderComponent::ConsumeCaptureBudget(double NowSeconds, double& InOutLastCaptureTime, float CaptureRateHz)
 {
-	CurveNames.Reset();
-	CurveValues.Reset();
-	LastSentCurveValues.Reset();
-	LastSentHasValue.Reset();
-	MorphNameSet.Reset();
-	CurveNameSet.Reset();
-
-	if (!SkelComp)
+	if (CaptureRateHz <= 0.0f)
 	{
-		bCurveCacheInitialized = true;
-		return;
-	}
-
-	USkeletalMesh* SkelMesh = SkelComp->GetSkeletalMeshAsset();
-	USkeleton* Skeleton = SkelMesh ? SkelMesh->GetSkeleton() : nullptr;
-
-	if (SkelMesh)
-	{
-		const TArray<UMorphTarget*>& Morphs = SkelMesh->GetMorphTargets();
-		CurveNames.Reserve(Morphs.Num());
-		for (UMorphTarget* Morph : Morphs)
-		{
-			if (!Morph)
-			{
-				continue;
-			}
-			const FName Name = Morph->GetFName();
-			if (!CurveNameSet.Contains(Name))
-			{
-				MorphNameSet.Add(Name);
-				CurveNames.Add(Name);
-				CurveNameSet.Add(Name);
-			}
-		}
-	}
-
-	if (Skeleton)
-	{
-		TArray<FName> SkeletonCurveNames;
-		Skeleton->GetCurveMetaDataNames(SkeletonCurveNames);
-		for (const FName& CurveName : SkeletonCurveNames)
-		{
-			if (CurveName != NAME_None && !CurveNameSet.Contains(CurveName))
-			{
-				CurveNames.Add(CurveName);
-				CurveNameSet.Add(CurveName);
-			}
-		}
-	}
-
-	if (IncludeCurvePatterns.Num() > 0 || ExcludeCurvePatterns.Num() > 0)
-	{
-		TArray<FName> Filtered;
-		Filtered.Reserve(CurveNames.Num());
-		for (const FName& Name : CurveNames)
-		{
-			if (IsCurveAllowedByPatterns(Name))
-			{
-				Filtered.Add(Name);
-			}
-		}
-		CurveNames = MoveTemp(Filtered);
-		CurveNameSet.Reset();
-		for (const FName& Name : CurveNames)
-		{
-			CurveNameSet.Add(Name);
-		}
-	}
-
-	CurveNames.Sort([](const FName& A, const FName& B)
-	{
-		return FCString::Strcmp(*A.ToString(), *B.ToString()) < 0;
-	});
-
-	CurveValues.SetNumZeroed(CurveNames.Num());
-	LastSentCurveValues.SetNumZeroed(CurveNames.Num());
-	LastSentHasValue.SetNumZeroed(CurveNames.Num());
-	bCurveCacheInitialized = true;
-}
-
-void UO3DSenderComponent::CaptureCurves(USkeletalMeshComponent* SkelComp)
-{
-	EnsureCurveCache(SkelComp);
-	if (!SkelComp)
-	{
-		return;
-	}
-
-	const bool bDebugCurves = (CVarO3DSenderDebugCurves.GetValueOnAnyThread() != 0);
-
-	for (int32 Index = 0; Index < CurveNames.Num(); ++Index)
-	{
-		CurveValues[Index] = 0.0f;
-	}
-
-	const TMap<FName, float>& MorphOverrides = SkelComp->GetMorphTargetCurves();
-
-	for (int32 Index = 0; Index < CurveNames.Num(); ++Index)
-	{
-		const FName& Name = CurveNames[Index];
-		float Value = 0.0f;
-
-		if (MorphNameSet.Contains(Name))
-		{
-			if (const float* Override = MorphOverrides.Find(Name))
-			{
-				CurveValues[Index] = *Override;
-				continue;
-			}
-		}
-
-		float OutValue = 0.0f;
-		if (SkelComp->GetCurveValue(Name, 0.0f, OutValue))
-		{
-			Value = OutValue;
-		}
-		else if (MorphNameSet.Contains(Name))
-		{
-			Value = SkelComp->GetMorphTarget(Name);
-		}
-
-		CurveValues[Index] = Value;
-
-		if (bDebugCurves && Index < 5)
-		{
-			UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Curve[%d] %s = %.4f"), Index, *Name.ToString(), Value);
-		}
-	}
-}
-
-bool UO3DSenderComponent::NameMatchesPattern(const FString& Text, const FString& Pattern) const
-{
-	return O3DHelpers::NameMatchesPattern(Text, Pattern);
-}
-
-bool UO3DSenderComponent::IsCurveAllowedByPatterns(const FName& Name) const
-{
-	const FString Text = Name.ToString();
-	for (const FString& Pattern : ExcludeCurvePatterns)
-	{
-		if (!Pattern.IsEmpty() && NameMatchesPattern(Text, Pattern))
-		{
-			return false;
-		}
-	}
-
-	if (IncludeCurvePatterns.Num() == 0)
-	{
+		InOutLastCaptureTime = NowSeconds;
 		return true;
 	}
 
-	for (const FString& Pattern : IncludeCurvePatterns)
+	if (InOutLastCaptureTime <= 0.0)
 	{
-		if (!Pattern.IsEmpty() && NameMatchesPattern(Text, Pattern))
-		{
-			return true;
-		}
+		InOutLastCaptureTime = NowSeconds;
+		return true;
 	}
 
-	return false;
-}
-
-void UO3DSenderComponent::BuildFilteredCurves(TArray<FName>& OutNames, TArray<float>& OutValues)
-{
-	OutNames.Reset();
-	OutValues.Reset();
-
-	OutNames.Reserve(CurveNames.Num());
-	OutValues.Reserve(CurveNames.Num());
-
-	for (int32 Index = 0; Index < CurveNames.Num(); ++Index)
+	const double ClampedRate = FMath::Max(1e-6f, CaptureRateHz);
+	const double MinDelta = 1.0 / ClampedRate;
+	if ((NowSeconds - InOutLastCaptureTime) < MinDelta)
 	{
-		const FName& Name = CurveNames[Index];
-		float Value = CurveValues[Index];
-
-		if (bDropNaNAndInfinity && !FMath::IsFinite(Value))
-		{
-			if (bLogFilteredCurves)
-			{
-				UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Dropped curve %s (NaN/Inf)"), *Name.ToString());
-			}
-			continue;
-		}
-
-		if (bClampMorphCurvesToUnit && MorphNameSet.Contains(Name))
-		{
-			Value = FMath::Clamp(Value, 0.0f, 1.0f);
-		}
-
-		if (bEnableCurveFiltering)
-		{
-			if (!IsCurveAllowedByPatterns(Name))
-			{
-				if (bLogFilteredCurves)
-				{
-					UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Filtered curve %s (pattern)"), *Name.ToString());
-				}
-				continue;
-			}
-
-			if (FMath::Abs(Value) < CurveEpsilon)
-			{
-				if (bLogFilteredCurves)
-				{
-					UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Filtered curve %s (epsilon %.6f) V=%.6f"), *Name.ToString(), CurveEpsilon, Value);
-				}
-				continue;
-			}
-
-			const bool bHasLast = LastSentHasValue.IsValidIndex(Index) ? (LastSentHasValue[Index] != 0) : false;
-			if (bHasLast)
-			{
-				const float Last = LastSentCurveValues[Index];
-				if (FMath::Abs(Value - Last) < CurveDeltaThreshold)
-				{
-					if (bLogFilteredCurves)
-					{
-						UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Filtered curve %s (delta %.6f < %.6f) V=%.6f Last=%.6f"), *Name.ToString(), FMath::Abs(Value - Last), CurveDeltaThreshold, Value, Last);
-					}
-					continue;
-				}
-			}
-		}
-
-		OutNames.Add(Name);
-		OutValues.Add(Value);
-
-		if (LastSentCurveValues.IsValidIndex(Index))
-		{
-			LastSentCurveValues[Index] = Value;
-			LastSentHasValue[Index] = 1;
-		}
+		return false;
 	}
+
+	InOutLastCaptureTime = NowSeconds;
+	return true;
 }
 
-void UO3DSenderComponent::HandleBoneTransformsFinalized()
+bool UO3DSenderComponent::CanCaptureThisFrame(double NowSeconds, USkeletalMeshComponent*& OutMesh)
 {
+	OutMesh = nullptr;
 	if (!bIsCapturing)
 	{
-		return;
+		return false;
 	}
 
 	USkeletalMeshComponent* SkelComp = TargetMesh.Get();
 	if (!SkelComp)
 	{
-		return;
+		return false;
 	}
 
 	EnsureSkeletonCache(SkelComp);
 
-	if (CaptureRateHz > 0.0f)
+	if (!ConsumeCaptureBudget(NowSeconds, LastCaptureTime, CaptureRateHz))
 	{
-		const double Now = FPlatformTime::Seconds();
-		const double MinDelta = 1.0 / FMath::Max(1.0f, CaptureRateHz);
-		if ((Now - LastCaptureTime) < MinDelta)
-		{
-			return;
-		}
-		LastCaptureTime = Now;
+		return false;
 	}
 
-	const TArray<FTransform>& CompSpace = SkelComp->GetComponentSpaceTransforms();
-	const int32 Count = CompSpace.Num();
-	const int32 NumBones = FMath::Min(Count, BoneNames.Num());
-	const FString Subject = BuildSubjectName(SkelComp);
+	OutMesh = SkelComp;
+	return true;
+}
 
-	const bool bDebug = (CVarO3DSenderDebugPose.GetValueOnAnyThread() != 0);
+FString UO3DSenderComponent::ResolveSubjectName(const USkeletalMeshComponent* SkelComp) const
+{
+	return BuildSubjectName(SkelComp);
+}
 
+FO3DSPoseFrame UO3DSenderComponent::CreateFrameShell(const USkeletalMeshComponent* SkelComp)
+{
 	FO3DSPoseFrame Frame;
-	Frame.Subject = Subject;
+	Frame.Subject = ResolveSubjectName(SkelComp);
 	Frame.FrameIndex = ++FrameCounter;
-	Frame.BoneLocalTransforms.SetNumUninitialized(NumBones);
+	return Frame;
+}
 
-	auto GetEffectiveParentIndex = [&](int32 BoneIdx) -> int32
+void UO3DSenderComponent::BuildLocalBoneTransforms(const TArray<FTransform>& ComponentSpaceTransforms,
+	const TArray<int32>& CachedParentIndices,
+	int32 NumBones,
+	TFunctionRef<int32(int32)> ResolveFallbackParent,
+	TArray<FTransform>& OutLocalTransforms,
+	TArray<int32>* OutResolvedParents)
+{
+	if (NumBones <= 0)
 	{
-		if (BoneIdx >= 0 && BoneIdx < ParentIndices.Num())
+		OutLocalTransforms.Reset();
+		if (OutResolvedParents)
 		{
-			const int32 Parent = ParentIndices[BoneIdx];
-			if (Parent >= 0 && Parent < Count)
-			{
-				return Parent;
-			}
+			OutResolvedParents->Reset();
+		}
+		return;
+	}
+
+	OutLocalTransforms.SetNum(NumBones, EAllowShrinking::No);
+	if (OutResolvedParents)
+	{
+		OutResolvedParents->SetNum(NumBones, EAllowShrinking::No);
+	}
+
+	const int32 TransformCount = ComponentSpaceTransforms.Num();
+
+	for (int32 BoneIndex = 0; BoneIndex < NumBones; ++BoneIndex)
+	{
+		int32 ParentIndex = (BoneIndex >= 0 && BoneIndex < CachedParentIndices.Num()) ? CachedParentIndices[BoneIndex] : INDEX_NONE;
+		if (ParentIndex < 0 || ParentIndex >= TransformCount)
+		{
+			ParentIndex = ResolveFallbackParent(BoneIndex);
+		}
+		if (ParentIndex < 0 || ParentIndex >= TransformCount)
+		{
+			ParentIndex = INDEX_NONE;
 		}
 
-		const FName BoneName = (BoneIdx >= 0 && BoneIdx < BoneNames.Num()) ? BoneNames[BoneIdx] : NAME_None;
+		if (OutResolvedParents)
+		{
+			(*OutResolvedParents)[BoneIndex] = ParentIndex;
+		}
+
+		const FTransform& ComponentTransform = ComponentSpaceTransforms[BoneIndex];
+		FTransform Relative = ComponentTransform;
+		if (ParentIndex != INDEX_NONE)
+		{
+			Relative = ComponentTransform.GetRelativeTransform(ComponentSpaceTransforms[ParentIndex]);
+		}
+
+		FQuat Rotation = Relative.GetRotation();
+		if (!Rotation.IsNormalized())
+		{
+			Rotation.Normalize();
+			Relative.SetRotation(Rotation);
+		}
+
+		OutLocalTransforms[BoneIndex] = Relative;
+	}
+}
+
+void UO3DSenderComponent::PopulatePoseFrameBones(const USkeletalMeshComponent* SkelComp, FO3DSPoseFrame& Frame, bool bDebugPose)
+{
+	if (!SkelComp)
+	{
+		Frame.BoneLocalTransforms.Reset();
+		return;
+	}
+
+	const TArray<FTransform>& ComponentSpace = SkelComp->GetComponentSpaceTransforms();
+	const int32 NumBones = FMath::Min(ComponentSpace.Num(), BoneNames.Num());
+	if (NumBones <= 0)
+	{
+		Frame.BoneLocalTransforms.Reset();
+		return;
+	}
+
+	TArray<int32> ResolvedParents;
+	TArray<int32>* ResolvedParentsPtr = nullptr;
+	if (bDebugPose)
+	{
+		ResolvedParentsPtr = &ResolvedParents;
+	}
+
+	const auto ResolveFallbackParent = [&](int32 BoneIndex) -> int32
+	{
+		if (!SkelComp)
+		{
+			return INDEX_NONE;
+		}
+		if (!BoneNames.IsValidIndex(BoneIndex))
+		{
+			return INDEX_NONE;
+		}
+		const FName BoneName = BoneNames[BoneIndex];
 		if (BoneName == NAME_None)
 		{
 			return INDEX_NONE;
 		}
-
-		const FName ParentName = SkelComp->GetParentBone(BoneName);
-		if (ParentName == NAME_None)
+		const FName ParentBoneName = SkelComp->GetParentBone(BoneName);
+		if (ParentBoneName == NAME_None)
 		{
 			return INDEX_NONE;
 		}
-
-		const int32 ParentByName = SkelComp->GetBoneIndex(ParentName);
-		return (ParentByName >= 0 && ParentByName < Count) ? ParentByName : INDEX_NONE;
+		return SkelComp->GetBoneIndex(ParentBoneName);
 	};
 
-	for (int32 BoneIndex = 0; BoneIndex < NumBones; ++BoneIndex)
+	BuildLocalBoneTransforms(ComponentSpace, ParentIndices, NumBones, ResolveFallbackParent, Frame.BoneLocalTransforms, ResolvedParentsPtr);
+
+	if (bDebugPose)
 	{
-		const int32 ParentIndex = GetEffectiveParentIndex(BoneIndex);
-		const FTransform& ThisCS = CompSpace[BoneIndex];
-		FTransform Relative;
-		if (ParentIndex >= 0 && ParentIndex < CompSpace.Num())
+		const int32 DebugCount = FMath::Min(NumBones, 5);
+		for (int32 BoneIndex = 0; BoneIndex < DebugCount; ++BoneIndex)
 		{
-			Relative = ThisCS.GetRelativeTransform(CompSpace[ParentIndex]);
-		}
-		else
-		{
-			Relative = ThisCS;
-		}
-
-		FQuat Rotation = Relative.GetRotation();
-		Rotation.Normalize();
-		Relative.SetRotation(Rotation);
-		Frame.BoneLocalTransforms[BoneIndex] = Relative;
-
-		if (bDebug && BoneIndex < 5)
-		{
+			const int32 ParentIndex = ResolvedParentsPtr ? (*ResolvedParentsPtr)[BoneIndex] : INDEX_NONE;
+			const FTransform& Relative = Frame.BoneLocalTransforms[BoneIndex];
 			const FVector Translation = Relative.GetTranslation();
 			const FVector Scale = Relative.GetScale3D();
+			const FName BoneName = BoneNames.IsValidIndex(BoneIndex) ? BoneNames[BoneIndex] : NAME_None;
 			UE_LOG(LogO3DSenderComponent, Verbose, TEXT("[%d] %s Parent=%d Pos(%.2f,%.2f,%.2f) Scale(%.2f,%.2f,%.2f)"),
 				BoneIndex,
-				*BoneNames[BoneIndex].ToString(),
+				*BoneName.ToString(),
 				ParentIndex,
 				Translation.X, Translation.Y, Translation.Z,
 				Scale.X, Scale.Y, Scale.Z);
 		}
 	}
+}
 
-	CaptureCurves(SkelComp);
+void UO3DSenderComponent::PopulatePoseFrameCurves(USkeletalMeshComponent* SkelComp, const FO3DSenderCurveConfig& CurveConfig, FO3DSPoseFrame& Frame, bool bDebugCurves)
+{
+	if (!SkelComp)
+	{
+		Frame.CurveNames.Reset();
+		Frame.CurveValues.Reset();
+		return;
+	}
+
+	if (!CurveProcessor.IsValid())
+	{
+		CurveProcessor.Reset(new FO3DSenderCurveProcessor());
+	}
+
+	CurveProcessor->EnsureCurveCache(SkelComp, CurveConfig);
+	CurveProcessor->CaptureCurves(SkelComp, bDebugCurves);
 
 	TArray<FName> FilteredCurveNames;
 	TArray<float> FilteredCurveValues;
-	BuildFilteredCurves(FilteredCurveNames, FilteredCurveValues);
+	CurveProcessor->BuildFilteredCurves(CurveConfig, FilteredCurveNames, FilteredCurveValues);
 
 	Frame.CurveNames = MoveTemp(FilteredCurveNames);
 	Frame.CurveValues = MoveTemp(FilteredCurveValues);
+}
 
-	OnPoseFrameReady.Broadcast(Subject, Frame);
+void UO3DSenderComponent::HandleBoneTransformsFinalized()
+{
+	USkeletalMeshComponent* SkelComp = nullptr;
+	const double NowSeconds = FPlatformTime::Seconds();
+	if (!CanCaptureThisFrame(NowSeconds, SkelComp))
+	{
+		return;
+	}
+
+	const bool bDebugPose = (CVarO3DSenderDebugPose.GetValueOnAnyThread() != 0);
+	const bool bDebugCurves = (CVarO3DSenderDebugCurves.GetValueOnAnyThread() != 0);
+
+	FO3DSPoseFrame Frame = CreateFrameShell(SkelComp);
+	PopulatePoseFrameBones(SkelComp, Frame, bDebugPose);
+
+	const FO3DSenderCurveConfig CurveConfig = BuildCurveConfig();
+	PopulatePoseFrameCurves(SkelComp, CurveConfig, Frame, bDebugCurves);
+
+	OnPoseFrameReady.Broadcast(Frame.Subject, Frame);
 }
 
 void UO3DSenderComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	if (ActiveSender.IsValid())
+	if (TransportController.IsValid())
 	{
-		ActiveSender->Tick(DeltaTime);
+		TSharedPtr<IOpen3DSender> SenderInstance = TransportController->GetSender();
+		if (SenderInstance.IsValid())
+		{
+			SenderInstance->Tick(DeltaTime);
+		}
 	}
 }
 
@@ -907,7 +1069,12 @@ void UO3DSenderComponent::PostEditChangeProperty(FPropertyChangedEvent& Property
 		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, SubjectName),
 		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TargetMesh),
 		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TransportName),
-		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bAutoCreateTransport)
+		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bAutoCreateTransport),
+		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bEnableAudio),
+		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioCaptureMode),
+		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioInputDevice),
+		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioCaptureConfig),
+		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioStreamLabel)
 	};
 
 	const bool bInGameWorld = (GetWorld() && GetWorld()->IsGameWorld());
@@ -917,6 +1084,18 @@ void UO3DSenderComponent::PostEditChangeProperty(FPropertyChangedEvent& Property
 	{
 		EnsureValidTransportName();
 		ClearTransportOptions();
+	}
+	else if (Prop == GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioCaptureMode))
+	{
+		SyncAudioConfigSource();
+	}
+	else if (Prop == GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioCaptureConfig))
+	{
+		SyncAudioConfigSource();
+	}
+	else if (Prop == GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioInputDevice))
+	{
+		AudioCaptureConfig.DeviceIndex = ResolveAudioDeviceIndex(AudioInputDevice);
 	}
 
 	if (RestartProps.Contains(Prop))

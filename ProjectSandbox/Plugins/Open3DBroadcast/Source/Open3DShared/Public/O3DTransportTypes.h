@@ -1,7 +1,47 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Open3DSharedNext.h"
+
+/** Lightweight audio configuration shared between the sender component and transports. */ 
+struct FO3DTransportAudioConfig
+{
+    /** Toggle audio capture/sending. */
+    bool bEnableAudio = false;
+
+    /** Target PCM sample rate the transport expects from the capture path. */
+    int32 SampleRate = 48000;
+
+    /** Target channel count (1 = mono, 2 = stereo). */
+    int32 NumChannels = 1;
+
+    /** Desired encoded bitrate in kbps (transport may clamp). */
+    int32 BitrateKbps = 64;
+
+    /** Optional transport-specific capture mode hint (e.g. "mix", "input"). */
+    FString Mode;
+
+    /** Optional friendly label used when publishing audio streams. */
+    FString StreamLabel;
+
+    /** Optional input device identifier when capturing microphone input. */
+    FString InputDevice;
+
+    /** Additional transport specific overrides. */
+    TMap<FString, FString> AdvancedParams;
+
+    FString ToDebugString() const
+    {
+        return FString::Printf(TEXT("[Enabled=%d SR=%d Ch=%d Bitrate=%d Mode=%s Device=%s Label=%s Adv=%d]"),
+            bEnableAudio ? 1 : 0,
+            SampleRate,
+            NumChannels,
+            BitrateKbps,
+            *Mode,
+            *InputDevice,
+            *StreamLabel,
+            AdvancedParams.Num());
+    }
+};
 
 /**
  * Canonical configuration parameters used by transport implementations. Values are intentionally
@@ -36,6 +76,9 @@ struct FO3DTransportConfig
     /** Transport-specific advanced key/value overrides. Keys are case-insensitive. */
     TMap<FString, FString> AdvancedParams;
 
+    /** Optional audio configuration shared with transports that support audio. */
+    FO3DTransportAudioConfig Audio;
+
     /** Build a concise debug string summarising the configuration (secrets redacted). */
     FString ToDebugString() const
     {
@@ -50,14 +93,25 @@ struct FO3DTransportConfig
             }
             ParamsSummary = FString::Join(Pairs, TEXT(","));
         }
-        return FString::Printf(TEXT("[Transport=%s Role=%s Backend=%s Uri=%s StreamId=%s Advanced={%s} Token=%s]"),
+        FString AudioSummary;
+        if (Audio.bEnableAudio)
+        {
+            AudioSummary = Audio.ToDebugString();
+        }
+        else
+        {
+            AudioSummary = TEXT("[Enabled=0]");
+        }
+
+        return FString::Printf(TEXT("[Transport=%s Role=%s Backend=%s Uri=%s StreamId=%s Advanced={%s} Token=%s Audio=%s]"),
             *Transport,
             *Role,
             *Backend,
             *Uri,
             *StreamId,
             *ParamsSummary,
-            bPersistToken ? TEXT("<persist>") : (Token.IsEmpty() ? TEXT("<empty>") : TEXT("<provided>")));
+            bPersistToken ? TEXT("<persist>") : (Token.IsEmpty() ? TEXT("<empty>") : TEXT("<provided>")),
+            *AudioSummary);
     }
 };
 

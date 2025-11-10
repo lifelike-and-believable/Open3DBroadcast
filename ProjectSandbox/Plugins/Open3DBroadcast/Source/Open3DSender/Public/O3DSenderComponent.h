@@ -8,12 +8,28 @@
 #include "O3DSenderInterface.h"
 #include "O3DSenderLogs.h"
 #include "O3DTransportTypes.h"
+#include "O3DSenderAudioCaptureComponent.h"
+#include "Templates/UniquePtr.h"
+#include "Templates/Function.h"
 #include "O3DSenderComponent.generated.h"
 
 class USkeletalMeshComponent;
 class USkeleton;
 class USkeletalMesh;
 class USoundSubmix;
+class FO3DSenderTransportController;
+class FO3DSenderCurveProcessor;
+struct FO3DSenderCurveConfig;
+
+struct FO3DSenderTransportControllerDeleter
+{
+	void operator()(FO3DSenderTransportController* Ptr) const;
+};
+
+struct FO3DSenderCurveProcessorDeleter
+{
+	void operator()(FO3DSenderCurveProcessor* Ptr) const;
+};
 
 USTRUCT()
 struct OPEN3DSENDER_API FO3DSSkeletonDescriptor
@@ -77,8 +93,11 @@ class OPEN3DSENDER_API UO3DSenderComponent : public UActorComponent
 {
 	GENERATED_BODY()
 
+	friend class FO3DSenderTransportController;
+
 public:
 	UO3DSenderComponent();
+	virtual ~UO3DSenderComponent();
 
 	UFUNCTION(BlueprintCallable, meta = (CallInEditor), Category = "Open3DStream|Sender")
 	void StartCapture();
@@ -110,6 +129,21 @@ public:
 	/** Transport-provided key/value overrides populated by modular transport UIs. Hidden from the generic details panel. */
 	UPROPERTY(VisibleAnywhere, Category = "Open3DStream|Sender|Transport", meta = (HideInDetailPanel))
 	TMap<FString, FString> TransportOptions;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio")
+	bool bEnableAudio = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio", meta = (EditCondition = "bEnableAudio"))
+	EO3DSenderCaptureMode AudioCaptureMode = EO3DSenderCaptureMode::Mix;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio", meta = (GetOptions = "GetAvailableAudioInputDeviceOptions", EditCondition = "bEnableAudio && AudioCaptureMode == EO3DSenderCaptureMode::Input", EditConditionHides))
+	FName AudioInputDevice;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio", meta = (EditCondition = "bEnableAudio", ShowOnlyInnerProperties))
+	FO3DSenderAudioCaptureConfig AudioCaptureConfig;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio", meta = (EditCondition = "bEnableAudio"))
+	FString AudioStreamLabel = TEXT("o3ds:audio");
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves")
 	bool bClampMorphCurvesToUnit = true;
@@ -164,14 +198,7 @@ private:
 	void RefreshSkeletonCache(USkeletalMeshComponent* SkelComp);
 	FString BuildSubjectName(const USkeletalMeshComponent* SkelComp) const;
 	FString SanitizeSubjectName(const FString& Raw) const;
-
-	void EnsureCurveCache(USkeletalMeshComponent* SkelComp);
-	void RefreshCurveCache(USkeletalMeshComponent* SkelComp);
-	void CaptureCurves(USkeletalMeshComponent* SkelComp);
-
-	bool NameMatchesPattern(const FString& Text, const FString& Pattern) const;
-	bool IsCurveAllowedByPatterns(const FName& Name) const;
-	void BuildFilteredCurves(TArray<FName>& OutNames, TArray<float>& OutValues);
+	FO3DSenderCurveConfig BuildCurveConfig() const;
 
 	uint64 ComputeDescriptorHash(const TArray<FName>& InNames, const TArray<int32>& InParents) const;
 
@@ -183,14 +210,6 @@ private:
 	FO3DSSkeletonDescriptor DescriptorCache;
 	bool bDescriptorDirty = false;
 
-	TArray<FName> CurveNames;
-	TArray<float> CurveValues;
-	TArray<float> LastSentCurveValues;
-	TArray<uint8> LastSentHasValue;
-	TSet<FName> MorphNameSet;
-	TSet<FName> CurveNameSet;
-	bool bCurveCacheInitialized = false;
-
 	bool bIsCapturing = false;
 	double LastCaptureTime = 0.0;
 	uint64 FrameCounter = 0;
@@ -201,8 +220,11 @@ private:
 	FDelegateHandle SerializerRelayHandle;
 	FDelegateHandle SubjectListHandle;
 
-	TSharedPtr<IOpen3DSender> ActiveSender;
-	FO3DTransportConfig ActiveConfig;
+	TUniquePtr<FO3DSenderTransportController, FO3DSenderTransportControllerDeleter> TransportController;
+	TUniquePtr<FO3DSenderCurveProcessor, FO3DSenderCurveProcessorDeleter> CurveProcessor;
+	UPROPERTY(Transient)
+	UO3DSenderAudioCaptureComponent* AudioCaptureComponent = nullptr;
+	double LastAudioSinkWarningTime = 0.0;
 
 	void UpdateEditConditionHelpers();
 	void TeardownTransport();
@@ -210,6 +232,7 @@ private:
 	FO3DTransportConfig BuildTransportConfig() const;
 	void HandleSerializedFrameForward(const FString& Subject, const TArray<uint8>& Buffer, double Timestamp);
 	void OnSubjectListReady(const FString& Subject, const TSharedPtr<O3DS::SubjectList>& Payload);
+	void UpdateAudioCaptureBinding();
 
 public:
 	/** Retrieve a transport option by key (case-sensitive). Returns empty string if missing. */
@@ -221,7 +244,35 @@ public:
 	/** Remove all transport options (used when switching transports). */
 	void ClearTransportOptions();
 
+	UFUNCTION(BlueprintCallable, Category = "Open3DStream|Sender|Audio")
+	TArray<FName> GetAvailableAudioInputDeviceOptions() const;
+
 private:
+	bool CanCaptureThisFrame(double NowSeconds, USkeletalMeshComponent*& OutMesh);
+	FString ResolveSubjectName(const USkeletalMeshComponent* SkelComp) const;
+	FO3DSPoseFrame CreateFrameShell(const USkeletalMeshComponent* SkelComp);
+	void PopulatePoseFrameBones(const USkeletalMeshComponent* SkelComp, FO3DSPoseFrame& Frame, bool bDebugPose);
+	void PopulatePoseFrameCurves(USkeletalMeshComponent* SkelComp, const FO3DSenderCurveConfig& CurveConfig, FO3DSPoseFrame& Frame, bool bDebugCurves);
+	FO3DSenderAudioCaptureConfig BuildAudioCaptureConfig() const;
+	FO3DTransportAudioConfig BuildTransportAudioConfig(const FO3DSenderAudioCaptureConfig& CaptureConfig) const;
+	void EnsureAudioCaptureComponent();
+	void ConfigureAudioCaptureComponent(const FO3DSenderAudioCaptureConfig& CaptureConfig, const FO3DTransportAudioConfig& TransportAudioConfig);
+	void TeardownAudioCapture();
+	void SyncAudioConfigSource();
+	int32 ResolveAudioDeviceIndex(const FName& DeviceName) const;
+
+	static bool ConsumeCaptureBudget(double NowSeconds, double& InOutLastCaptureTime, float CaptureRateHz);
+	static void BuildLocalBoneTransforms(const TArray<FTransform>& ComponentSpaceTransforms,
+		const TArray<int32>& CachedParentIndices,
+		int32 NumBones,
+		TFunctionRef<int32(int32)> ResolveFallbackParent,
+		TArray<FTransform>& OutLocalTransforms,
+		TArray<int32>* OutResolvedParents);
+
+#if WITH_AUTOMATION_TESTS
+	friend struct FO3DSenderComponentTestHelper;
+#endif
+
 	void EnsureValidTransportName();
 
 #if WITH_EDITOR

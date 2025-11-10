@@ -10,6 +10,7 @@
 DEFINE_LOG_CATEGORY(LogO3DSender);
 DEFINE_LOG_CATEGORY(LogO3DSenderComponent);
 DEFINE_LOG_CATEGORY(LogO3DSenderSerializer);
+DEFINE_LOG_CATEGORY(LogO3DSenderAudio);
 
 class FOpen3DSenderModule : public IModuleInterface
 {
