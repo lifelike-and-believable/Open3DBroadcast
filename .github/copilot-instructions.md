@@ -31,7 +31,6 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 
 
 ### Development Workflows
-- **Local dev:** `Build/Scripts/link_plugin_into_sandbox.sh` symlinks plugin → `ProjectSandbox/Plugins/Open3DStream` for rapid iteration.
 - **Testing:** `Build/Scripts/Run-AutomationTests.ps1` and `Run-Gauntlet.ps1` for UE automation tests.
 - **C++ tests:** `test_curves.cpp` and `test_curve_comprehensive.cpp` validate FlatBuffers serialization round-trips.
 
@@ -49,6 +48,9 @@ This file defines strict, testable rules so coding agents deliver high‑quality
    - Use the PR template and checklists. Link the issue, include benchmarks/logs as required.
 5. **Respond to review**  
    - Make focused changes; update docs/tests when requested.
+6. **Don't make unverified claims**
+   - Don't claim to have fixed an issue or successfully implemented a feature before it has been adequately tested and verified, but do 
+   document your changes and the intended/expected behavior clearly in the PR description.
 
 ---
 
@@ -144,5 +146,9 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 - If docs contain factual errors (wrong API signatures, obsolete commands) → fix docs with clear justification in commit message.
 
 ---
+
+## 6) Running Automation Tests
+- Use `Build/Scripts/Run-AutomationTests.ps1` to run UE automation tests locally.
+- Use `Build/Scripts/Run-Gauntlet.ps1` to run Gauntlet tests locally.
 
 *End of instructions. Keep this file authoritative; update it before you code.*
