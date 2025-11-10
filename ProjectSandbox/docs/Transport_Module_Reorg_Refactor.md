@@ -2,6 +2,8 @@
 
 > Authoritative design document for splitting transport implementations (TCP/UDP, NNG, WebRTC/LiveKit) into independently buildable Unreal modules while preserving existing UX and protocol behavior. Changes MUST follow `.github/copilot-instructions.md` (no blocking game thread, deterministic behavior, do not mutate existing FlatBuffers schema unless explicitly versioned).
 
+> The original Open3DStream codebase is located at **/plugins/unreal/Open3DStream** in this workspace.
+
 ---
 ## 0. Pre‑refactor Readiness & Plugin Strategy
 
@@ -95,6 +97,20 @@ Additional rules:
 ## Progress Log
 
 > Entries are listed in reverse chronological order (newest first).
+
+### 2025-11-10 UTC – Sender/receiver refactor + build flag plumbing
+- **Completed Work:** Finished decomposing `FO3DReceiverSource::HandleSerializedFrame` into parse/pose helpers, wrapped sender transport orchestration inside `FO3DSenderTransportController`, and introduced the shared `O3DModuleRules.ApplyTransportDefines` helper so every module (`Open3DSharedNext`, sender, receiver, loopback, sockets, NNG, WebRTC) respects the `O3D_*` build defines.
+- **Verification:** `ProjectSandboxEditor Win64 Development` via `Build.bat` (UE 5.6 toolchain) now succeeds post‑refactor (`Result: Succeeded`, 12.4 s total).
+- **Open Questions / Risks:** Need follow-up to reconcile `IOpen3DReceiver::Start` signature with the roadmap and to implement the forthcoming transport config asset / URI canonicalizer before enabling transport-specific automation.
+- **Emergent / Follow-up Actions:** Implement `UO3DSTransportConfigAsset` + URI helpers, stage loopback round-trip automation (Step 5), and update docs once build flags are exercised in CI.
+
+### 2025-11-10 UTC – Core module audit vs migration roadmap
+- **Completed Work:** Reviewed Open3DSharedNext, Open3DSender, Open3DReceiver, and loopback transport implementations to map progress against Migration Steps 1–6; confirmed plugin gating and registry scaffolding align with Step 1/3 expectations while documenting remaining gaps.
+- **Verification:** Inspection only (code review; no build or tests executed in this session).
+- **Open Questions / Risks:** Receiver `Start` API still requires an injected consumer (deviates from spec); build flag defines from §4 are absent; transport config asset / canonical URI helpers not implemented; loopback lacks automated round-trip test coverage required for Step 6 sign-off.
+- **Emergent / Follow-up Actions:** Add build flag plumbing across ModuleRules; reconcile `IOpen3DReceiver::Start` signature with design doc or update spec; implement `UO3DSTransportConfigAsset` and URI canonicalization pipeline; port sockets/NNG/WebRTC transports and author loopback round-trip automation in line with Steps 7–10.
+
+> **Next Actions (2025-11-10):** Execute the design-pattern alignment plan — refactor oversized sender/receiver routines, introduce shared transport config assets + canonical URIs, wire `O3D_*` build flags through ModuleRules, and add loopback round-trip automation tests. Record each milestone above with verification details.
 
 ### 2025-11-09 UTC – Receiver transport-owned endpoint fields
 - **Completed Work:** Removed generic receiver `Endpoint` / `StreamId` properties, added loopback customization widget to capture channel name, and moved URI assembly into the transport module so the Live Link panel no longer surfaces obsolete fields.
