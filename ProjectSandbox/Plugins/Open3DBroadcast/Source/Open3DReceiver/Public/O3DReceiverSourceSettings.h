@@ -1,0 +1,37 @@
+// Copyright (c) Open3DStream Contributors
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "LiveLinkSourceSettings.h"
+#include "O3DReceiverSourceSettings.generated.h"
+
+USTRUCT(BlueprintType)
+struct FO3DReceiverSourceConfig
+{
+    GENERATED_BODY()
+
+public:
+    UPROPERTY(EditAnywhere, Category = "Open3DStream")
+    FName TransportName = TEXT("loopback");
+
+    /** Transport-specific key/value overrides populated by modular transport UIs. Hidden from the generic details panel. */
+    UPROPERTY(VisibleAnywhere, Category = "Open3DStream", meta = (HideInDetailPanel))
+    TMap<FString, FString> TransportOptions;
+};
+
+UCLASS(Config = GameUserSettings)
+class OPEN3DRECEIVER_API UO3DReceiverSettingsObject : public UObject
+{
+    GENERATED_BODY()
+
+public:
+    UPROPERTY(EditAnywhere, GlobalConfig, Category = "Open3DStream", Meta = (ShowOnlyInnerProperties))
+    FO3DReceiverSourceConfig Settings;
+};
+
+UCLASS()
+class OPEN3DRECEIVER_API UO3DReceiverSourceSettings : public ULiveLinkSourceSettings
+{
+    GENERATED_BODY()
+};

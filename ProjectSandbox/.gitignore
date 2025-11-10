@@ -7,9 +7,16 @@ Build/
 DerivedDataCache/
 Intermediate/
 Saved/
+Content/
 
 # Plugin symlink (created by Link script)
-Plugins/
+Plugins/*
+!Plugins/Open3DBroadcast/
+Plugins/Open3DBroadcast/**
+!Plugins/Open3DBroadcast/Open3DBroadcast.uplugin
+!Plugins/Open3DBroadcast/Source/
+!Plugins/Open3DBroadcast/Source/**
+Plugins/Open3DStream/
 
 # Visual Studio
 *.sln

@@ -1,0 +1,617 @@
+// Copyright (c) Open3DStream Contributors
+
+#include "O3DReceiverSource.h"
+
+#include "ILiveLinkClient.h"
+#include "LiveLinkTypes.h"
+#include "LiveLinkPreset.h"
+#include "O3DLoopback.h"
+#include "Roles/LiveLinkAnimationTypes.h"
+#include "Roles/LiveLinkAnimationRole.h"
+#include "HAL/PlatformTime.h"
+#include "HAL/IConsoleManager.h"
+#include "Async/Async.h"
+#include "Misc/ScopeLock.h"
+#include "Misc/QualifiedFrameTime.h"
+
+#include "O3DHelpers.h"
+#include "O3DReceiverRegistry.h"
+#include "O3DReceiverTransportCustomization.h"
+
+#include "o3ds_generated.h"
+
+#define LOCTEXT_NAMESPACE "O3DReceiverSource"
+
+// Receiver-side diagnostics
+static TAutoConsoleVariable<int32> CVarO3DReceiverDebugParse(
+    TEXT("o3ds.Receiver.DebugParse"),
+    1,
+    TEXT("Enable debug logs when parsing incoming O3DS packets (0/1)."),
+    ECVF_Default);
+
+static TAutoConsoleVariable<int32> CVarO3DReceiverDropOutOfOrder(
+    TEXT("o3ds.Receiver.DropOutOfOrder"),
+    1,
+    TEXT("When 1, drop frames whose SubjectList.time is older than the last applied timestamp."),
+    ECVF_Default);
+
+static TAutoConsoleVariable<float> CVarO3DReceiverSilenceResetSeconds(
+    TEXT("o3ds.Receiver.SilenceResetSeconds"),
+    2.0f,
+    TEXT("Seconds of no packets after which timestamp ordering state is reset. 0 disables."),
+    ECVF_Default);
+
+static TAutoConsoleVariable<float> CVarO3DReceiverTimestampJumpResetSeconds(
+    TEXT("o3ds.Receiver.TimestampJumpResetSeconds"),
+    1.0f,
+    TEXT("If SubjectList.time decreases by more than this many seconds relative to last applied time, reset ordering. 0 disables."),
+    ECVF_Default);
+
+class FO3DReceiverSource::FSerializedConsumer : public ISerializedFrameConsumer
+{
+public:
+    explicit FSerializedConsumer(TWeakPtr<FO3DReceiverSource> InOwner)
+        : Owner(MoveTemp(InOwner))
+    {
+    }
+
+    virtual ~FSerializedConsumer() override = default;
+
+    virtual void SubmitFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds) override
+    {
+        if (TSharedPtr<FO3DReceiverSource> OwnerPinned = Owner.Pin())
+        {
+            OwnerPinned->HandleSerializedFrame(Subject, Buffer, TimestampSeconds);
+        }
+    }
+
+private:
+    TWeakPtr<FO3DReceiverSource> Owner;
+};
+
+namespace
+{
+    uint64 HashArray(const TArray<FName>& Names, const TArray<int32>* Parents = nullptr)
+    {
+        return Parents ? O3DHelpers::HashNamesAndParents(Names, *Parents) : O3DHelpers::HashNames(Names);
+    }
+
+    uint64 HashCurveNames(const TArray<FName>& Names)
+    {
+        return O3DHelpers::HashNames(Names);
+    }
+
+    static const FName DefaultReceiverTransportName(TEXT("loopback"));
+}
+
+FO3DReceiverSource::FO3DReceiverSource()
+    : FO3DReceiverSource(GetDefault<UO3DReceiverSettingsObject>()->Settings)
+{
+}
+
+FO3DReceiverSource::FO3DReceiverSource(const FO3DReceiverSourceConfig& InSettings)
+    : SourceType(LOCTEXT("SourceType", "Open3D Stream"))
+    , SourceMachineName(LOCTEXT("SourceMachineName", "-"))
+    , SourceStatus(LOCTEXT("SourceStatus", "Inactive"))
+    , SourceSettings(InSettings)
+{
+    EnsureValidTransportName();
+}
+
+FO3DReceiverSource::~FO3DReceiverSource()
+{
+    StopTransport();
+}
+
+void FO3DReceiverSource::ReceiveClient(ILiveLinkClient* InClient, FGuid InSourceGuid)
+{
+    Client = InClient;
+    SourceGuid = InSourceGuid;
+    bIsValid = true;
+
+    SourceMachineName = LOCTEXT("SourceHostUnknown", "-");
+    bLoggedActiveState = false;
+
+    if (StartTransport())
+    {
+        SourceStatus = LOCTEXT("StatusActive", "Receiving");
+        UpdateConnectionLastActive();
+    }
+    else
+    {
+        SourceStatus = LOCTEXT("StatusError", "Inactive");
+    }
+}
+
+bool FO3DReceiverSource::RequestSourceShutdown()
+{
+    bIsValid = false;
+    StopTransport();
+    return true;
+}
+
+void FO3DReceiverSource::InitializeSettings(ULiveLinkSourceSettings* InSettings)
+{
+    Settings = InSettings;
+}
+
+TSubclassOf<ULiveLinkSourceSettings> FO3DReceiverSource::GetSettingsClass() const
+{
+    return UO3DReceiverSourceSettings::StaticClass();
+}
+
+void FO3DReceiverSource::Tick(float DeltaTime)
+{
+    TimeSinceLastActivityCheck += DeltaTime;
+
+    if (ActiveReceiver.IsValid())
+    {
+        ActiveReceiver->Poll();
+    }
+
+    if (TimeSinceLastActivityCheck >= ActivityCheckIntervalSeconds)
+    {
+        RemoveInactiveSubjects();
+        TimeSinceLastActivityCheck = 0.0f;
+    }
+}
+
+void FO3DReceiverSource::Update()
+{
+    // No-op; Tick handles polling.
+}
+
+bool FO3DReceiverSource::StartTransport()
+{
+    StopTransport();
+
+    EnsureValidTransportName();
+    ActiveConfig = BuildTransportConfig();
+    if (ActiveConfig.Transport.IsEmpty())
+    {
+        UE_LOG(LogO3DReceiverSource, Warning, TEXT("No transport selected for receiver source."));
+        return false;
+    }
+
+    const FName TransportName(*ActiveConfig.Transport);
+    ActiveReceiver = O3DTransport::CreateReceiver(TransportName);
+    if (!ActiveReceiver.IsValid())
+    {
+        UE_LOG(LogO3DReceiverSource, Warning, TEXT("No receiver registered for transport '%s'."), *ActiveConfig.Transport);
+        return false;
+    }
+
+    if (!ActiveReceiver->Initialize(ActiveConfig))
+    {
+        UE_LOG(LogO3DReceiverSource, Warning, TEXT("Failed to initialize transport '%s'."), *ActiveConfig.Transport);
+        ActiveReceiver.Reset();
+        return false;
+    }
+
+    ActiveConsumer = MakeShared<FSerializedConsumer>(TWeakPtr<FO3DReceiverSource>(AsShared()));
+    if (!ActiveReceiver->Start(ActiveConsumer))
+    {
+        UE_LOG(LogO3DReceiverSource, Warning, TEXT("Failed to start transport '%s'."), *ActiveConfig.Transport);
+        ActiveReceiver->Stop();
+        ActiveReceiver.Reset();
+        ActiveConsumer.Reset();
+        return false;
+    }
+
+    if (!ActiveConfig.Uri.IsEmpty())
+    {
+        SourceMachineName = FText::FromString(ActiveConfig.Uri);
+    }
+    else if (!ActiveConfig.StreamId.IsEmpty())
+    {
+        SourceMachineName = FText::FromString(ActiveConfig.StreamId);
+    }
+
+    UE_LOG(LogO3DReceiverSource, Log, TEXT("Receiver transport '%s' started (Uri=%s, StreamId=%s)."),
+        *ActiveConfig.Transport,
+        *ActiveConfig.Uri,
+        *ActiveConfig.StreamId);
+
+    SourceStatus = FText::Format(LOCTEXT("StatusReceivingFmt", "Receiving via {0}"), FText::FromString(ActiveConfig.Transport));
+    ResetOrderingState();
+    return true;
+}
+
+void FO3DReceiverSource::StopTransport()
+{
+    if (ActiveReceiver.IsValid())
+    {
+        ActiveReceiver->Stop();
+        ActiveReceiver.Reset();
+    }
+    ActiveConsumer.Reset();
+    InitializedSubjects.Empty();
+    SubjectSkeletonHashes.Empty();
+    SubjectCurveHashes.Empty();
+    SubjectLastUpdateTime.Empty();
+    bLoggedActiveState = false;
+    FrameCounter = 0;
+    ResetOrderingState();
+}
+
+void FO3DReceiverSource::EnsureValidTransportName()
+{
+    if (!SourceSettings.TransportName.IsNone())
+    {
+        return;
+    }
+
+    TArray<FName> RegisteredTransports;
+    O3DReceiver::GetRegisteredTransportNames(RegisteredTransports);
+    if (RegisteredTransports.Num() > 0)
+    {
+        SourceSettings.TransportName = RegisteredTransports[0];
+    }
+    else
+    {
+        SourceSettings.TransportName = DefaultReceiverTransportName;
+    }
+}
+
+FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
+{
+    FO3DTransportConfig Config;
+
+    FName TransportName = SourceSettings.TransportName;
+    if (TransportName.IsNone())
+    {
+        TransportName = DefaultReceiverTransportName;
+    }
+
+    Config.Transport = TransportName.ToString();
+    static const FName SocketsTransportName(TEXT("sockets"));
+    Config.Role = (TransportName == SocketsTransportName) ? TEXT("receiver") : TEXT("sub");
+
+    Config.bPersistToken = false;
+
+    for (const TPair<FString, FString>& Option : SourceSettings.TransportOptions)
+    {
+        Config.AdvancedParams.Add(Option.Key, Option.Value);
+    }
+
+    if (!Config.Transport.IsEmpty())
+    {
+        if (const FO3DReceiverTransportCustomization* Customization = O3DReceiver::FindTransportCustomization(TransportName))
+        {
+            if (Customization && Customization->ConfigureTransport)
+            {
+                Customization->ConfigureTransport(SourceSettings, Config);
+            }
+        }
+    }
+
+    if (Config.StreamId.IsEmpty() && !Config.Uri.IsEmpty())
+    {
+        Config.StreamId = Config.Uri;
+    }
+
+    return Config;
+}
+
+void FO3DReceiverSource::UpdateConnectionLastActive()
+{
+    const double Now = FPlatformTime::Seconds();
+    FScopeLock Lock(&ConnectionLastActiveSection);
+    ConnectionLastActive = Now;
+}
+
+void FO3DReceiverSource::RemoveInactiveSubjects()
+{
+    const double Now = FPlatformTime::Seconds();
+    for (auto It = SubjectLastUpdateTime.CreateIterator(); It; ++It)
+    {
+        if ((Now - It.Value()) > InactivityThresholdSeconds)
+        {
+            const FLiveLinkSubjectName SubjectName(It.Key());
+            const FLiveLinkSubjectKey SubjectKey(SourceGuid, SubjectName);
+            if (Client)
+            {
+                Client->RemoveSubject_AnyThread(SubjectKey);
+            }
+            UE_LOG(LogO3DReceiverSource, Verbose, TEXT("Removed inactive subject %s"), *It.Key().ToString());
+            SubjectSkeletonHashes.Remove(It.Key());
+            SubjectCurveHashes.Remove(It.Key());
+            InitializedSubjects.Remove(It.Key());
+            It.RemoveCurrent();
+        }
+    }
+}
+
+void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds)
+{
+    if (!Client || !bIsValid)
+    {
+        return;
+    }
+
+    if (!IsInGameThread())
+    {
+        TWeakPtr<FO3DReceiverSource> WeakSelf = AsShared();
+        TArray<uint8> BufferCopy(Buffer);
+        AsyncTask(ENamedThreads::GameThread, [WeakSelf, Subject, TimestampSeconds, BufferCopy = MoveTemp(BufferCopy)]() mutable
+        {
+            if (TSharedPtr<FO3DReceiverSource> Pinned = WeakSelf.Pin())
+            {
+                Pinned->HandleSerializedFrame(Subject, BufferCopy, TimestampSeconds);
+            }
+        });
+        return;
+    }
+
+    if (!bLoggedActiveState)
+    {
+        SourceStatus = FText::Format(LOCTEXT("StatusReceivingFmt", "Receiving via {0}"), FText::FromString(ActiveConfig.Transport));
+        bLoggedActiveState = true;
+    }
+
+    const double ParseStartWall = FPlatformTime::Seconds();
+    if (!SubjectScratch.Parse(reinterpret_cast<const char*>(Buffer.GetData()), Buffer.Num(), nullptr, true))
+    {
+        UE_LOG(LogO3DReceiverSource, Warning, TEXT("Parse failed for subject '%s' (%d bytes)"), *Subject, Buffer.Num());
+        return;
+    }
+
+    const double SubjectListTime = SubjectScratch.mTime;
+
+    double LastActive = 0.0;
+    {
+        FScopeLock Lock(&ConnectionLastActiveSection);
+        LastActive = ConnectionLastActive;
+    }
+
+    const double NowWall = ParseStartWall;
+    const float SilenceThreshold = CVarO3DReceiverSilenceResetSeconds.GetValueOnAnyThread();
+    const float JumpThreshold = CVarO3DReceiverTimestampJumpResetSeconds.GetValueOnAnyThread();
+
+    bool bResetOrdering = false;
+    if (LastAppliedSubjectListTime >= 0.0)
+    {
+        if (SilenceThreshold > 0.0 && LastActive > 0.0 && (NowWall - LastActive) > SilenceThreshold)
+        {
+            bResetOrdering = true;
+        }
+        else if (JumpThreshold > 0.0 && (LastAppliedSubjectListTime - SubjectListTime) > JumpThreshold)
+        {
+            bResetOrdering = true;
+        }
+    }
+
+    if (bResetOrdering)
+    {
+        if (CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0)
+        {
+            UE_LOG(LogO3DReceiverSource, Verbose, TEXT("Reset ordering window (last=%.6f new=%.6f)"), LastAppliedSubjectListTime, SubjectListTime);
+        }
+        ResetOrderingState();
+    }
+
+    if (LastAppliedSubjectListTime >= 0.0)
+    {
+        if (SubjectListTime == LastAppliedSubjectListTime)
+        {
+            if (CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0)
+            {
+                UE_LOG(LogO3DReceiverSource, Verbose, TEXT("Dropping duplicate frame t=%.6f"), SubjectListTime);
+            }
+            UpdateConnectionLastActive();
+            return;
+        }
+
+        if (CVarO3DReceiverDropOutOfOrder.GetValueOnAnyThread() != 0 && SubjectListTime < LastAppliedSubjectListTime)
+        {
+            if (CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0)
+            {
+                UE_LOG(LogO3DReceiverSource, Verbose, TEXT("Dropping out-of-order frame t=%.6f < %.6f"), SubjectListTime, LastAppliedSubjectListTime);
+            }
+            UpdateConnectionLastActive();
+            return;
+        }
+    }
+
+    LastAppliedSubjectListTime = SubjectListTime;
+    UpdateConnectionLastActive();
+
+    TArray<FName> BoneNames;
+    TArray<int32> BoneParents;
+    TArray<FTransform> BoneTransforms;
+    TArray<FName> CurveNames;
+    TArray<float> CurveValues;
+
+    for (O3DS::Subject* SubjectPtr : SubjectScratch)
+    {
+        if (!SubjectPtr)
+        {
+            continue;
+        }
+
+        const FString SubjectNameUtf8 = UTF8_TO_TCHAR(SubjectPtr->mName.c_str());
+        const FName SubjectFName(*SubjectNameUtf8);
+        const FLiveLinkSubjectName SubjectName(SubjectFName);
+        const FLiveLinkSubjectKey SubjectKey(SourceGuid, SubjectName);
+
+        BoneNames.Reset();
+        BoneParents.Reset();
+        BoneTransforms.Reset();
+
+        const size_t TransformCount = SubjectPtr->mTransforms.mItems.size();
+        BoneNames.Reserve(static_cast<int32>(TransformCount));
+        BoneParents.Reserve(static_cast<int32>(TransformCount));
+        BoneTransforms.Reserve(static_cast<int32>(TransformCount));
+
+        bool bHasInvalid = false;
+        for (O3DS::Transform* TransformPtr : SubjectPtr->mTransforms.mItems)
+        {
+            if (!TransformPtr)
+            {
+                continue;
+            }
+
+            O3DS::Vector3d Translation = TransformPtr->translation.value;
+            O3DS::Vector4d Rotation = TransformPtr->rotation.value;
+            O3DS::Vector3d Scale = TransformPtr->scale.value;
+
+            FQuat Quat(static_cast<float>(Rotation[0]), static_cast<float>(Rotation[1]), static_cast<float>(Rotation[2]), static_cast<float>(Rotation[3]));
+            FVector Location(static_cast<float>(Translation[0]), static_cast<float>(Translation[1]), static_cast<float>(Translation[2]));
+            FVector ScaleVec(static_cast<float>(Scale[0]), static_cast<float>(Scale[1]), static_cast<float>(Scale[2]));
+
+            if (!FMath::IsFinite(Location.X) || !FMath::IsFinite(Location.Y) || !FMath::IsFinite(Location.Z) ||
+                !FMath::IsFinite(ScaleVec.X) || !FMath::IsFinite(ScaleVec.Y) || !FMath::IsFinite(ScaleVec.Z) ||
+                !FMath::IsFinite(Quat.X) || !FMath::IsFinite(Quat.Y) || !FMath::IsFinite(Quat.Z) || !FMath::IsFinite(Quat.W))
+            {
+                bHasInvalid = true;
+                break;
+            }
+
+            const float QuatSizeSq = Quat.SizeSquared();
+            if (QuatSizeSq <= KINDA_SMALL_NUMBER)
+            {
+                bHasInvalid = true;
+                break;
+            }
+
+            Quat.Normalize();
+            if (Quat.ContainsNaN())
+            {
+                bHasInvalid = true;
+                break;
+            }
+
+            std::string BoneNameUtf8 = TransformPtr->mName;
+            const size_t ColonIndex = BoneNameUtf8.rfind(':');
+            if (ColonIndex != std::string::npos)
+            {
+                BoneNameUtf8.erase(0, ColonIndex + 1);
+            }
+
+            const FName BoneName(UTF8_TO_TCHAR(BoneNameUtf8.c_str()));
+            BoneNames.Add(BoneName);
+            BoneParents.Add(TransformPtr->mParentId);
+            BoneTransforms.Emplace(Quat, Location, ScaleVec);
+        }
+
+        if (bHasInvalid || BoneTransforms.Num() == 0)
+        {
+            continue;
+        }
+
+        CurveNames.Reset();
+        CurveValues.Reset();
+        const size_t CurveCount = SubjectPtr->mCurveNames.size();
+        CurveNames.Reserve(static_cast<int32>(CurveCount));
+        CurveValues.Reserve(static_cast<int32>(CurveCount));
+
+        for (size_t CurveIndex = 0; CurveIndex < CurveCount; ++CurveIndex)
+        {
+            const std::string& CurveNameUtf8 = SubjectPtr->mCurveNames[CurveIndex];
+            const FName CurveName(UTF8_TO_TCHAR(CurveNameUtf8.c_str()));
+            CurveNames.Add(CurveName);
+
+            float Value = 0.0f;
+            if (CurveIndex < SubjectPtr->mCurveValues.size())
+            {
+                Value = SubjectPtr->mCurveValues[CurveIndex];
+            }
+            CurveValues.Add(Value);
+        }
+
+        const uint64 SkeletonHash = HashArray(BoneNames, &BoneParents);
+        const uint64 CurveHash = HashCurveNames(CurveNames);
+
+        const uint64* ExistingSkeletonHash = SubjectSkeletonHashes.Find(SubjectFName);
+        const uint64* ExistingCurveHash = SubjectCurveHashes.Find(SubjectFName);
+        const bool bNeedStaticUpdate = (!ExistingSkeletonHash || *ExistingSkeletonHash != SkeletonHash) || (!ExistingCurveHash || *ExistingCurveHash != CurveHash);
+
+        if (!InitializedSubjects.Contains(SubjectFName) || bNeedStaticUpdate)
+        {
+            PushSubjectStaticData(SubjectKey, BoneNames, BoneParents, CurveNames, SkeletonHash);
+            InitializedSubjects.Add(SubjectFName);
+            SubjectSkeletonHashes.Add(SubjectFName, SkeletonHash);
+            SubjectCurveHashes.Add(SubjectFName, CurveHash);
+
+            if (!ExistingSkeletonHash)
+            {
+                UE_LOG(LogO3DReceiverSource, Log, TEXT("Created subject '%s'"), *SubjectFName.ToString());
+            }
+            else if (bNeedStaticUpdate)
+            {
+                UE_LOG(LogO3DReceiverSource, Log, TEXT("Static data updated for subject '%s'"), *SubjectFName.ToString());
+            }
+        }
+        else
+        {
+            SubjectCurveHashes[SubjectFName] = CurveHash;
+        }
+
+        PushSubjectFrameData(SubjectKey, BoneTransforms, CurveNames, CurveValues, SubjectListTime, CurveHash);
+        SubjectLastUpdateTime.Add(SubjectFName, FPlatformTime::Seconds());
+    }
+
+    if (CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0)
+    {
+        const double ParseEnd = FPlatformTime::Seconds();
+        UE_LOG(LogO3DReceiverSource, VeryVerbose, TEXT("Processed subject list (subjects=%d bytes=%d dt=%.6fms)"),
+            static_cast<int32>(SubjectScratch.mItems.size()), Buffer.Num(), (ParseEnd - ParseStartWall) * 1000.0);
+    }
+}
+
+void FO3DReceiverSource::PushSubjectStaticData(const FLiveLinkSubjectKey& SubjectKey, const TArray<FName>& BoneNames, const TArray<int32>& BoneParents, const TArray<FName>& CurveNames, uint64 DescriptorHash)
+{
+    if (!Client)
+    {
+        return;
+    }
+
+    FLiveLinkSubjectPreset Preset;
+    Preset.Key = SubjectKey;
+    Preset.Role = ULiveLinkAnimationRole::StaticClass();
+    Preset.Settings = nullptr;
+    Preset.bEnabled = true;
+    Client->CreateSubject(Preset);
+
+    FLiveLinkStaticDataStruct StaticDataStruct;
+    StaticDataStruct.InitializeWith(FLiveLinkSkeletonStaticData::StaticStruct(), nullptr);
+    FLiveLinkSkeletonStaticData* SkeletonData = StaticDataStruct.Cast<FLiveLinkSkeletonStaticData>();
+
+    SkeletonData->SetBoneNames(BoneNames);
+    SkeletonData->SetBoneParents(BoneParents);
+    SkeletonData->PropertyNames = CurveNames;
+
+    Client->PushSubjectStaticData_AnyThread(SubjectKey, ULiveLinkAnimationRole::StaticClass(), MoveTemp(StaticDataStruct));
+}
+
+void FO3DReceiverSource::PushSubjectFrameData(const FLiveLinkSubjectKey& SubjectKey, const TArray<FTransform>& BoneTransforms, const TArray<FName>& CurveNames, const TArray<float>& CurveValues, double TimestampSeconds, uint64 CurveHash)
+{
+    if (!Client)
+    {
+        return;
+    }
+
+    (void)CurveNames;
+
+    FLiveLinkFrameDataStruct FrameDataStruct(FLiveLinkAnimationFrameData::StaticStruct());
+    FLiveLinkAnimationFrameData& FrameData = *FrameDataStruct.Cast<FLiveLinkAnimationFrameData>();
+    FLiveLinkBaseFrameData& BaseFrameData = FrameData;
+
+    FrameData.Transforms = BoneTransforms;
+    BaseFrameData.PropertyValues = CurveValues;
+    BaseFrameData.WorldTime = FPlatformTime::Seconds();
+    BaseFrameData.MetaData.SceneTime = FQualifiedFrameTime();
+    BaseFrameData.MetaData.StringMetaData.Add(TEXT("CurveHash"), FString::Printf(TEXT("0x%016llx"), static_cast<unsigned long long>(CurveHash)));
+    BaseFrameData.MetaData.StringMetaData.Add(TEXT("SubjectListTime"), FString::Printf(TEXT("%.6f"), TimestampSeconds));
+
+    FrameData.FrameId = FrameCounter++;
+
+    Client->PushSubjectFrameData_AnyThread(SubjectKey, MoveTemp(FrameDataStruct));
+}
+
+void FO3DReceiverSource::ResetOrderingState()
+{
+    LastAppliedSubjectListTime = -1.0;
+}
+
+#undef LOCTEXT_NAMESPACE

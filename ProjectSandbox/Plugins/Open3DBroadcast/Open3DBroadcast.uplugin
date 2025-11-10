@@ -1,0 +1,57 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "Open3D Broadcast Suite",
+	"Description": "Modular sender, receiver, and transport implementation for Open3DStream",
+	"Category": "Other",
+	"CreatedBy": "Open3DStream Contributors",
+	"CreatedByURL": "https://open3dstream.com/",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "https://open3dstream.com/",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Plugins": [
+		{ "Name": "LiveLink", "Enabled": true }
+	],
+	"Modules": [
+		{
+			"Name": "Open3DSharedNext",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "Open3DSender",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "Open3DReceiver",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "Open3DTransportLoopback",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "Open3DTransportSockets",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "Open3DTransportNNG",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "Open3DTransportWebRTC",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}
