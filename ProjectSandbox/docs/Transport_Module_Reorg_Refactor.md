@@ -66,7 +66,7 @@ Guards to prevent double registration:
 Temporary naming to reduce collisions while both exist:
 - Keep canonical class names in the new modules (future‑proof).
 - If necessary, temporarily suffix legacy implementations with `Legacy` only inside the old plugin to avoid ODR collisions while both are compiled.
-- During the interim phase while the legacy plugin remains in the repository, the new shared module is introduced as `Open3DSharedNext` to avoid Unreal Build Tool `ModuleRules` naming collisions. Plan to rename it back to `Open3DShared` once the legacy module is retired.
+- During the interim phase while the legacy plugin remained in the repository, the new shared module carried the temporary name `Open3DSharedNext` to avoid Unreal Build Tool `ModuleRules` naming collisions. With the legacy module now retired, the shared module ships as `Open3DShared`.
 
 Phased PR sequence (suggested):
 1. PR A: Add new `Open3DBroadcast` plugin + empty module folders (`Open3DShared`, `Open3DReceiver`, `Open3DSender`, transports) + build flags + CI wiring. Update `ProjectSandbox.uproject` to enable `Open3DBroadcast` and disable `Open3DStream` by default (developers can re-enable the legacy plugin manually when they need parity validation).
@@ -98,14 +98,20 @@ Additional rules:
 
 > Entries are listed in reverse chronological order (newest first).
 
+### 2025-11-10 UTC – Sender curve processor integration
+- **Completed Work:** Routed `UO3DSenderComponent` curve capture/filtering through `FO3DSenderCurveProcessor`, removed legacy in-component caches, and ensured capture sessions reset helper state between runs.
+- **Verification:** `ProjectSandboxEditor Win64 Development` build via `Build.bat` (UE 5.6) succeeded (`Result: Succeeded`, total 4.35 s) after the refactor.
+- **Open Questions / Risks:** None.
+- **Emergent / Follow-up Actions:** Add targeted unit coverage for `FO3DSenderCurveProcessor` thresholds/pattern filtering and confirm curve helper is reused when subject delta tests migrate.
+
 ### 2025-11-10 UTC – Sender/receiver refactor + build flag plumbing
-- **Completed Work:** Finished decomposing `FO3DReceiverSource::HandleSerializedFrame` into parse/pose helpers, wrapped sender transport orchestration inside `FO3DSenderTransportController`, and introduced the shared `O3DModuleRules.ApplyTransportDefines` helper so every module (`Open3DSharedNext`, sender, receiver, loopback, sockets, NNG, WebRTC) respects the `O3D_*` build defines.
+- **Completed Work:** Finished decomposing `FO3DReceiverSource::HandleSerializedFrame` into parse/pose helpers, wrapped sender transport orchestration inside `FO3DSenderTransportController`, and introduced the shared `O3DModuleRules.ApplyTransportDefines` helper so every module (`Open3DShared`, sender, receiver, loopback, sockets, NNG, WebRTC) respects the `O3D_*` build defines.
 - **Verification:** `ProjectSandboxEditor Win64 Development` via `Build.bat` (UE 5.6 toolchain) now succeeds post‑refactor (`Result: Succeeded`, 12.4 s total).
 - **Open Questions / Risks:** Need follow-up to reconcile `IOpen3DReceiver::Start` signature with the roadmap and to implement the forthcoming transport config asset / URI canonicalizer before enabling transport-specific automation.
 - **Emergent / Follow-up Actions:** Implement `UO3DSTransportConfigAsset` + URI helpers, stage loopback round-trip automation (Step 5), and update docs once build flags are exercised in CI.
 
 ### 2025-11-10 UTC – Core module audit vs migration roadmap
-- **Completed Work:** Reviewed Open3DSharedNext, Open3DSender, Open3DReceiver, and loopback transport implementations to map progress against Migration Steps 1–6; confirmed plugin gating and registry scaffolding align with Step 1/3 expectations while documenting remaining gaps.
+- **Completed Work:** Reviewed Open3DShared, Open3DSender, Open3DReceiver, and loopback transport implementations to map progress against Migration Steps 1–6; confirmed plugin gating and registry scaffolding align with Step 1/3 expectations while documenting remaining gaps.
 - **Verification:** Inspection only (code review; no build or tests executed in this session).
 - **Open Questions / Risks:** Receiver `Start` API still requires an injected consumer (deviates from spec); build flag defines from §4 are absent; transport config asset / canonical URI helpers not implemented; loopback lacks automated round-trip test coverage required for Step 6 sign-off.
 - **Emergent / Follow-up Actions:** Add build flag plumbing across ModuleRules; reconcile `IOpen3DReceiver::Start` signature with design doc or update spec; implement `UO3DSTransportConfigAsset` and URI canonicalization pipeline; port sockets/NNG/WebRTC transports and author loopback round-trip automation in line with Steps 7–10.
@@ -155,13 +161,13 @@ Additional rules:
 - **Emergent / Follow-up Actions:** Update transport modules to register via the new module-specific APIs and audit includes to drop legacy `O3DTransportRegistry` usage once consumers migrate.
 
 ### 2025-11-09 UTC – Transport interfaces & registry scaffolding
-- **Completed Work:** Added shared transport interface definitions (`IOpen3DSender`, `IOpen3DReceiver`, `FO3DTransportConfig`, `FO3DTransportStats`) and implemented sender/receiver factory registries within `Open3DSharedNext`.
+- **Completed Work:** Added shared transport interface definitions (`IOpen3DSender`, `IOpen3DReceiver`, `FO3DTransportConfig`, `FO3DTransportStats`) and implemented sender/receiver factory registries within `Open3DShared`.
 - **Verification:** `ProjectSandboxEditor Win64 Development` build via `Build.bat` succeeded after invalidating makefile (new sources compiled cleanly).
 - **Open Questions / Risks:** None. Registry currently stores factories only; usage will be validated once transports migrate.
 - **Emergent / Follow-up Actions:** Wire upcoming transport modules to register with the new registry and remove legacy factory code once parity is achieved.
 
 ### 2025-11-09 UTC – Shared helper renames + build verification
-- **Completed Work:** Renamed Open3DSharedNext helper headers/sources (helpers, console vars, logs, loopback) from the `O3DS*` to `O3D*` prefix and introduced temporary compatibility shims where required.
+- **Completed Work:** Renamed Open3DShared helper headers/sources (helpers, console vars, logs, loopback) from the `O3DS*` to `O3D*` prefix and introduced temporary compatibility shims where required.
 - **Verification:** `ProjectSandboxEditor Win64 Development` build via `Build.bat` succeeded (no warnings beyond license reminder).
 - **Open Questions / Risks:** None; compatibility macros will remain until downstream modules migrate.
 - **Emergent / Follow-up Actions:** Track removal of compatibility aliases after dependent modules consume the new symbols.
