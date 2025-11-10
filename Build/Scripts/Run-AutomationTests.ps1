@@ -35,7 +35,7 @@ $cmds = "Automation RunTests $TestFilter; Automation WriteResults $ResultsXml; Q
 
 & $EditorExe `
   "$ProjectFile" `
-  -unattended -nop4 -NullRHI -NoSound -NoSplash -Nolog `
+  -unattended -nop4 -NullRHI -NoSound -NoSplash -NoLog `
   "-ExecCmds=$cmds"
 
 if ($LASTEXITCODE -eq 0) {
