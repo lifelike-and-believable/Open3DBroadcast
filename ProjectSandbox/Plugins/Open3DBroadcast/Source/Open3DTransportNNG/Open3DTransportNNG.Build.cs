@@ -9,7 +9,12 @@ public class Open3DTransportNNG : ModuleRules
     {
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        //O3DModuleRules.ApplyTransportDefines(this);
+        O3DBuildFlags.Apply(Target, this);
+
+        if (!O3DBuildFlags.IsNNGEnabled(Target))
+        {
+            return;
+        }
 
         string platformSubdir;
         if (Target.Platform == UnrealTargetPlatform.Win64)

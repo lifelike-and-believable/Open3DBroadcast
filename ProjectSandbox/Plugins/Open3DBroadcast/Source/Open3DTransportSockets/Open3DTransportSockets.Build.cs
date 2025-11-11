@@ -8,7 +8,12 @@ public class Open3DTransportSockets : ModuleRules
     {
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        //O3DModuleRules.ApplyTransportDefines(this);
+        O3DBuildFlags.Apply(Target, this);
+
+        if (!O3DBuildFlags.IsSocketsEnabled(Target))
+        {
+            return;
+        }
 
         PublicDependencyModuleNames.AddRange(new string[]
         {

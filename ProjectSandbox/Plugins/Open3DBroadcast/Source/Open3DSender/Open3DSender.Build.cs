@@ -9,7 +9,7 @@ public class Open3DSender : ModuleRules
     {
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        //O3DModuleRules.ApplyTransportDefines(this, bRequireSender: true);
+        O3DBuildFlags.Apply(Target, this, bRequireSender: true);
 
         var RepoRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "..", "..", ".."));
         PublicIncludePaths.AddRange(new string[]

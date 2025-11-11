@@ -8,7 +8,12 @@ public class Open3DTransportLoopback : ModuleRules
     {
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        //O3DModuleRules.ApplyTransportDefines(this);
+        O3DBuildFlags.Apply(Target, this);
+
+        if (!O3DBuildFlags.IsSenderEnabled(Target) || !O3DBuildFlags.IsReceiverEnabled(Target))
+        {
+            return;
+        }
 
         PublicDependencyModuleNames.AddRange(new string[]
         {

@@ -98,6 +98,30 @@ Additional rules:
 
 > Entries are listed in reverse chronological order (newest first).
 
+### 2025-11-11 UTC – Build flag helper validation pass
+- **Completed Work:** Rebuilt `ProjectSandboxEditor` with the new `O3DBuildFlags` helper in place and ensured every module honors the toggles without leaking dependencies outside the plugin.
+- **Verification:** `Build.bat ProjectSandboxEditor Win64 Development E:\OtherProjects\Open3DStream\ProjectSandbox\ProjectSandbox.uproject -waitmutex` followed by `Run-AutomationTests.ps1` targeting `Open3DStream.TransportLoopback.Audio.QueueOverflow+Open3DStream.TransportLoopback.Audio.RoundTrip` (`Artifacts\Tests\TransportLoopback_Audio\index.json`) — both succeeded in this session.
+- **Open Questions / Risks:** Platform parity still pending; need Win32/Linux validation once third-party libs staged.
+- **Emergent / Follow-up Actions:** Incorporate sender-only/receiver-only CI permutations using the new helper and extend automation coverage once additional transports migrate.
+
+### 2025-11-11 UTC – Build flag helper consolidation
+- **Completed Work:** Added `O3DBuildFlags` helper inside `Open3DShared.Build.cs` and updated all Open3DBroadcast module build files to reuse it, honoring sender/receiver/transport toggles without relying on external helpers.
+- **Verification:** `Build.bat ProjectSandboxEditor Win64 Development E:\OtherProjects\Open3DStream\ProjectSandbox\ProjectSandbox.uproject -waitmutex` and `Run-AutomationTests.ps1` with `Open3DStream.TransportLoopback.Audio.QueueOverflow+Open3DStream.TransportLoopback.Audio.RoundTrip` (`Artifacts\Tests\TransportLoopback_Audio\index.json`) — both succeeded.
+- **Open Questions / Risks:** Need validation on non-Win64 platforms once platform-specific libs are mirrored for toggled builds.
+- **Emergent / Follow-up Actions:** Finish wiring canonical transport config/URI work so feature flags can gate module registration paths; add CI job to exercise sender/receiver-only permutations.
+
+### 2025-11-11 UTC – Receiver audio metadata & filtering hardening
+- **Completed Work:** Captured the latest LiveLink subject name in `FO3DReceiverSource::FinalizeAudioMeta`, replaced the channel-derived fallback, tightened `UO3DRemoteAudioComponent` subject-mode gating, and added automation coverage that exercises metadata swap and stream-label filtering.
+- **Verification:** `Run-AutomationTests.ps1` with `Open3DStream.Receiver.RemoteAudioComponent.Filtering+Open3DStream.Receiver.RemoteAudioComponent.AudioQueue+Open3DStream.Shared.AudioBus.BroadcastCopy+Open3DStream.Receiver.Source.FinalizeAudioMeta` (report: `Artifacts\Tests\Open3DStream.Receiver.RemoteAudioComponent.Filtering_Open3DStream.Receiver.RemoteAudioComponent.AudioQueue_Open3DStream.Shared.AudioBus.BroadcastCopy_Open3DStream.Receiver.Source.FinalizeAudioMeta\index.json`) — all tests succeeded.
+- **Open Questions / Risks:** Need multi-subject ingest coverage to confirm subject overrides behave with concurrent senders.
+- **Emergent / Follow-up Actions:** Extend automation to cover runtime subject swaps and update the audio UX docs once the LiveLink panel reflects the guardrails.
+
+### 2025-11-11 UTC – Loopback transport automation validation
+- **Completed Work:** Validated the refactored loopback sender/receiver queue wiring after the file split, confirming transport registration and overflow/drop instrumentation behave deterministically.
+- **Verification:** `Run-AutomationTests.ps1` with `Open3DStream.TransportLoopback.Audio.QueueOverflow+Open3DStream.TransportLoopback.Audio.RoundTrip` (report: `Artifacts\Tests\LoopbackAudio\index.json`) — tests completed with the expected diagnostic warnings.
+- **Open Questions / Risks:** Loopback warnings highlight the missing serialized frame consumer; need a harness stub or logging refinement so the baseline run is warning-free.
+- **Emergent / Follow-up Actions:** Add a dedicated consumer shim for loopback automation, expand coverage to pose round-trips, and annotate the transport docs with the new queue behavior.
+
 ### 2025-11-10 UTC – Sender curve processor integration
 - **Completed Work:** Routed `UO3DSenderComponent` curve capture/filtering through `FO3DSenderCurveProcessor`, removed legacy in-component caches, and ensured capture sessions reset helper state between runs.
 - **Verification:** `ProjectSandboxEditor Win64 Development` build via `Build.bat` (UE 5.6) succeeded (`Result: Succeeded`, total 4.35 s) after the refactor.
@@ -510,17 +534,15 @@ Automation gating: CI must run unit + integration tests with all transports comp
 	- Move protocol/model helpers (e.g., `UnrealModel`, skeletal conversion utilities) into `Open3DShared` with minimal renaming unless they carry old plugin prefixes.
 	- Establish factory scaffolding with stub transports (temporarily only a dummy no‑op transport) so receiver/sender tests can compile.
 3. Introduce interfaces + factories adjustments (compile with all flags enabled first).
-4. Add build flags & conditional compilation scaffolding.
-5. Implement URI parsing & routing utilities (loopback entries accepted but not active yet).
-6. Add `Open3DTransportLoopback` module (now testable because core sender/receiver exists) and implement loopback transport; run unit round‑trip tests.
-7. Migrate sockets transport code; register factories; add integration test.
-8. Migrate NNG transport code; register factories; add integration test.
-9. Introduce WebRTC backend abstraction; migrate LiveKit implementation; register factories; add integration test.
+4. Implement URI parsing & routing utilities (loopback entries accepted but not active yet).
+5. Add `Open3DTransportLoopback` module (now testable because core sender/receiver exists) and implement loopback transport; run unit round‑trip tests.
+6. Migrate sockets transport code; register factories; add integration test.
+7. Migrate NNG transport code; register factories; add integration test.
+8. Introduce WebRTC backend abstraction; migrate LiveKit implementation; register factories; add integration test.
+9. Add build flags & conditional compilation scaffolding.
 10. Expand tests (URI parsing, per‑transport settings objects) & performance benchmarks; compare (≤5% variance allowed unless justified).
 11. Update README(s) and CHANGELOG (module split + build flags section).
- 12. Add new CI workflows targeting only the `Open3DBroadcast` plugin modules (skip legacy plugin build where possible).
- 11. Remove any Core Redirects added for migration only once downstream projects updated (only if names changed).
- 12. Gate old vs new plugin via `ProjectSandbox.uproject` plugin entries; do not modify legacy plugin contents.
+12. Add new CI workflows targeting only the `Open3DBroadcast` plugin modules (skip legacy plugin build where possible).
 
 ## 12. Risks & Mitigations
 | Risk | Impact | Mitigation |
