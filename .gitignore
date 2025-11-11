@@ -135,3 +135,12 @@ plugins/unreal/Open3DStream/ThirdParty/webrtc/include/rtc/websocketserver.hpp
 __pycache__/
 Artifacts/Tests/SenderComponent/index.html
 Artifacts/Tests/SenderComponent/index.json
+Artifacts/Tests/LoopbackAudio/index.html
+Artifacts/Tests/LoopbackAudio/index.json
+Artifacts/Tests/LoopbackAudio2/index.html
+Artifacts/Tests/LoopbackAudio2/index.json
+Artifacts/Tests/LoopbackAudioDebug/index.html
+Artifacts/Tests/LoopbackAudioDebug/index.json
+Artifacts/Tests/Open3DStream.Receiver.RemoteAudioComponent.Filtering_Open3DStream.Receiver.RemoteAudioComponent.AudioQueue_Open3DStream.Shared.AudioBus.BroadcastCopy_Open3DStream.Receiver.Source.FinalizeAudioMeta/index.html
+Artifacts/Tests/Open3DStream.Receiver.RemoteAudioComponent.Filtering_Open3DStream.Receiver.RemoteAudioComponent.AudioQueue_Open3DStream.Shared.AudioBus.BroadcastCopy_Open3DStream.Receiver.Source.FinalizeAudioMeta/index.json
+Artifacts
