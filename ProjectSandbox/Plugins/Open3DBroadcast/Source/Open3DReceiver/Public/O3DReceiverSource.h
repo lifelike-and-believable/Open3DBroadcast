@@ -9,6 +9,7 @@
 #include "O3DReceiverInterface.h"
 #include "O3DReceiverLogs.h"
 #include "O3DReceiverSourceSettings.h"
+#include "O3DUnifiedMessage.h"
 
 #include "o3ds/model.h"
 
@@ -50,6 +51,7 @@ public:
 
 private:
     class FSerializedConsumer;
+    class FAudioSink;
 
     void HandleSerializedFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds);
     bool StartTransport();
@@ -71,6 +73,7 @@ private:
     bool BuildSubjectPose(O3DS::Subject* SubjectPtr, TArray<FName>& OutBoneNames, TArray<int32>& OutBoneParents, TArray<FTransform>& OutBoneTransforms) const;
     void BuildSubjectCurves(O3DS::Subject* SubjectPtr, TArray<FName>& OutCurveNames, TArray<float>& OutCurveValues) const;
     void ProcessParsedSubject(O3DS::Subject* SubjectPtr, double SubjectListTime, TArray<FName>& BoneNames, TArray<int32>& BoneParents, TArray<FTransform>& BoneTransforms, TArray<FName>& CurveNames, TArray<float>& CurveValues);
+    void FinalizeAudioMeta(O3DS::FAudioFrameMeta& Meta) const;
 
 private:
     // LiveLink bookkeeping
@@ -90,6 +93,7 @@ private:
     FO3DTransportConfig ActiveConfig;
     TSharedPtr<IOpen3DReceiver> ActiveReceiver;
     TSharedPtr<ISerializedFrameConsumer> ActiveConsumer;
+    TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> ActiveAudioSink;
 
     // Frame parsing helpers
     O3DS::SubjectList SubjectScratch;

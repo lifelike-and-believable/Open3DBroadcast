@@ -17,6 +17,7 @@
 #include "O3DHelpers.h"
 #include "O3DReceiverRegistry.h"
 #include "O3DReceiverTransportCustomization.h"
+#include "O3DAudioBus.h"
 
 #include "o3ds_generated.h"
 
@@ -47,6 +48,12 @@ static TAutoConsoleVariable<float> CVarO3DReceiverTimestampJumpResetSeconds(
     TEXT("If SubjectList.time decreases by more than this many seconds relative to last applied time, reset ordering. 0 disables."),
     ECVF_Default);
 
+static TAutoConsoleVariable<int32> CVarO3DReceiverAudioDebug(
+    TEXT("o3ds.Receiver.Audio.Debug"),
+    0,
+    TEXT("Enable debug logs when publishing receiver audio frames (0/1)."),
+    ECVF_Default);
+
 class FO3DReceiverSource::FSerializedConsumer : public ISerializedFrameConsumer
 {
 public:
@@ -62,6 +69,50 @@ public:
         if (TSharedPtr<FO3DReceiverSource> OwnerPinned = Owner.Pin())
         {
             OwnerPinned->HandleSerializedFrame(Subject, Buffer, TimestampSeconds);
+        }
+    }
+
+private:
+    TWeakPtr<FO3DReceiverSource> Owner;
+};
+
+class FO3DReceiverSource::FAudioSink : public IO3DReceiverAudioSink
+{
+public:
+    explicit FAudioSink(TWeakPtr<FO3DReceiverSource> InOwner)
+        : Owner(MoveTemp(InOwner))
+    {
+    }
+
+    virtual void SubmitPcm16(const O3DS::FAudioFrameMeta& InMeta, const uint8* Data, int32 NumBytes) override
+    {
+        if (!Data || NumBytes <= 0)
+        {
+            return;
+        }
+
+        if (TSharedPtr<FO3DReceiverSource> OwnerPinned = Owner.Pin())
+        {
+            O3DS::FAudioFrameMeta MetaCopy = InMeta;
+            OwnerPinned->FinalizeAudioMeta(MetaCopy);
+
+            const bool bDebug = CVarO3DReceiverAudioDebug.GetValueOnAnyThread() != 0;
+            TArray<uint8> Payload;
+            Payload.Append(Data, NumBytes);
+
+            AsyncTask(ENamedThreads::GameThread, [MetaCopy, Payload = MoveTemp(Payload), bDebug]() mutable
+            {
+                FO3DAudioBus::PublishPcm16(MetaCopy, Payload.GetData(), Payload.Num());
+                if (bDebug)
+                {
+                    UE_LOG(LogO3DReceiverAudio, Verbose, TEXT("Published audio frame label='%s' subject='%s' bytes=%d sr=%d ch=%d"),
+                        *MetaCopy.StreamLabel,
+                        *MetaCopy.SubjectName,
+                        Payload.Num(),
+                        MetaCopy.SampleRate,
+                        MetaCopy.NumChannels);
+                }
+            });
         }
     }
 
@@ -188,6 +239,23 @@ bool FO3DReceiverSource::StartTransport()
         return false;
     }
 
+    ActiveAudioSink.Reset();
+    if (ActiveConfig.Audio.bEnableAudio)
+    {
+        if (ActiveReceiver->SupportsAudio())
+        {
+            ActiveAudioSink = MakeShared<FAudioSink>(TWeakPtr<FO3DReceiverSource>(AsShared()));
+            ActiveReceiver->SetAudioSink(ActiveAudioSink, ActiveConfig.Audio);
+            UE_LOG(LogO3DReceiverAudio, Log, TEXT("Audio sink bound for transport '%s' (label=%s)."),
+                *ActiveConfig.Transport,
+                *ActiveConfig.Audio.StreamLabel);
+        }
+        else
+        {
+            UE_LOG(LogO3DReceiverAudio, Warning, TEXT("Transport '%s' does not support audio; disabling audio for this source."), *ActiveConfig.Transport);
+        }
+    }
+
     ActiveConsumer = MakeShared<FSerializedConsumer>(TWeakPtr<FO3DReceiverSource>(AsShared()));
     ActiveReceiver->SetConsumer(ActiveConsumer);
     if (!ActiveReceiver->Start())
@@ -195,8 +263,13 @@ bool FO3DReceiverSource::StartTransport()
         UE_LOG(LogO3DReceiverSource, Warning, TEXT("Failed to start transport '%s'."), *ActiveConfig.Transport);
         ActiveReceiver->Stop();
         ActiveReceiver->SetConsumer(nullptr);
+        if (ActiveAudioSink.IsValid() && ActiveReceiver->SupportsAudio())
+        {
+            ActiveReceiver->SetAudioSink(nullptr, ActiveConfig.Audio);
+        }
         ActiveReceiver.Reset();
         ActiveConsumer.Reset();
+        ActiveAudioSink.Reset();
         return false;
     }
 
@@ -223,10 +296,15 @@ void FO3DReceiverSource::StopTransport()
 {
     if (ActiveReceiver.IsValid())
     {
+        if (ActiveConfig.Audio.bEnableAudio && ActiveReceiver->SupportsAudio())
+        {
+            ActiveReceiver->SetAudioSink(nullptr, ActiveConfig.Audio);
+        }
         ActiveReceiver->SetConsumer(nullptr);
         ActiveReceiver->Stop();
         ActiveReceiver.Reset();
     }
+    ActiveAudioSink.Reset();
     ActiveConsumer.Reset();
     InitializedSubjects.Empty();
     SubjectSkeletonHashes.Empty();
@@ -271,6 +349,22 @@ FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
     Config.Role = (TransportName == SocketsTransportName) ? TEXT("receiver") : TEXT("sub");
 
     Config.bPersistToken = false;
+
+    Config.Audio.bEnableAudio = SourceSettings.bEnableAudio;
+    if (Config.Audio.bEnableAudio)
+    {
+        Config.Audio.Mode = TEXT("playback");
+        Config.Audio.StreamLabel = SourceSettings.AudioStreamLabel;
+        if (Config.Audio.StreamLabel.IsEmpty())
+        {
+            Config.Audio.StreamLabel = TEXT("o3ds:mix");
+        }
+    }
+    else
+    {
+        Config.Audio.StreamLabel.Reset();
+        Config.Audio.Mode.Reset();
+    }
 
     for (const TPair<FString, FString>& Option : SourceSettings.TransportOptions)
     {
@@ -622,6 +716,43 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
 
     PushSubjectFrameData(SubjectKey, BoneTransforms, CurveNames, CurveValues, SubjectListTime, CurveHash);
     SubjectLastUpdateTime.Add(SubjectFName, FPlatformTime::Seconds());
+}
+
+void FO3DReceiverSource::FinalizeAudioMeta(O3DS::FAudioFrameMeta& Meta) const
+{
+    Meta.SourceGuid = SourceGuid;
+
+    if (ActiveConfig.Audio.bEnableAudio && !ActiveConfig.Audio.StreamLabel.IsEmpty())
+    {
+        Meta.StreamLabel = ActiveConfig.Audio.StreamLabel;
+    }
+
+    if (Meta.SubjectName.IsEmpty())
+    {
+        if (!ActiveConfig.StreamId.IsEmpty())
+        {
+            Meta.SubjectName = ActiveConfig.StreamId;
+        }
+        else
+        {
+            Meta.SubjectName = TEXT("Open3DReceiver");
+        }
+    }
+
+    if (Meta.SampleRate <= 0)
+    {
+        Meta.SampleRate = (ActiveConfig.Audio.SampleRate > 0) ? ActiveConfig.Audio.SampleRate : 48000;
+    }
+
+    if (Meta.NumChannels <= 0)
+    {
+        Meta.NumChannels = (ActiveConfig.Audio.NumChannels > 0) ? ActiveConfig.Audio.NumChannels : 1;
+    }
+
+    if (Meta.TimestampSec <= 0.0)
+    {
+        Meta.TimestampSec = FPlatformTime::Seconds();
+    }
 }
 
 void FO3DReceiverSource::PushSubjectStaticData(const FLiveLinkSubjectKey& SubjectKey, const TArray<FName>& BoneNames, const TArray<int32>& BoneParents, const TArray<FName>& CurveNames, uint64 DescriptorHash)

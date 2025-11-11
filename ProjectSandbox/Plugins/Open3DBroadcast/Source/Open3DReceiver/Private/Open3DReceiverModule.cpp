@@ -3,6 +3,7 @@
 
 DEFINE_LOG_CATEGORY(LogO3DReceiver);
 DEFINE_LOG_CATEGORY(LogO3DReceiverSource);
+DEFINE_LOG_CATEGORY(LogO3DReceiverAudio);
 
 class FOpen3DReceiverModule : public IModuleInterface
 {

@@ -15,6 +15,14 @@ public:
     UPROPERTY(EditAnywhere, Category = "Open3DStream")
     FName TransportName = TEXT("loopback");
 
+    /** Enable audio playback for transports that support it. */
+    UPROPERTY(EditAnywhere, Category = "Open3DStream|Audio")
+    bool bEnableAudio = false;
+
+    /** Optional stream label override applied to published audio frames. Defaults to transport-provided value. */
+    UPROPERTY(EditAnywhere, Category = "Open3DStream|Audio", meta = (EditCondition = "bEnableAudio", EditConditionHides))
+    FString AudioStreamLabel;
+
     /** Transport-specific key/value overrides populated by modular transport UIs. Hidden from the generic details panel. */
     UPROPERTY(VisibleAnywhere, Category = "Open3DStream", meta = (HideInDetailPanel))
     TMap<FString, FString> TransportOptions;
