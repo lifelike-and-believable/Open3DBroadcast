@@ -113,8 +113,16 @@ bool UO3DRemoteAudioComponent::MatchesFilter(const FString& InSubject, const FSt
     }
     else
     {
-        const FString Desired = LiveLinkSubjectName.Name.ToString();
-        bSubjectMatch = !Desired.IsEmpty() && InSubject.Equals(Desired, ESearchCase::IgnoreCase);
+        const FName DesiredName = LiveLinkSubjectName.Name;
+        if (DesiredName.IsNone())
+        {
+            bSubjectMatch = false;
+        }
+        else
+        {
+            const FString Desired = DesiredName.ToString();
+            bSubjectMatch = !Desired.IsEmpty() && InSubject.Equals(Desired, ESearchCase::IgnoreCase);
+        }
     }
 
     if (!bSubjectMatch)

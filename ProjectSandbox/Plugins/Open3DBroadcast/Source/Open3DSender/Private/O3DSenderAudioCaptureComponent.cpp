@@ -404,6 +404,20 @@ void UO3DSenderAudioCaptureComponent::ProcessAndSubmitAudio(const float* Interle
 
     if (!LocalSink.IsValid() || !LocalConfig.bEnableAudio)
     {
+        if (CVarO3DSenderAudioDebug->GetInt() != 0)
+        {
+            static double LastNoSinkLogTime = 0.0;
+            const double Now = FPlatformTime::Seconds();
+            if (Now - LastNoSinkLogTime > 0.5)
+            {
+                UE_LOG(LogO3DSenderAudio, Verbose, TEXT("Audio capture frame dropped (sink inactive). Frames=%d Channels=%d SampleRate=%d Label='%s'"),
+                    NumFrames,
+                    NumChannels,
+                    SampleRate,
+                    *LocalLabel);
+                LastNoSinkLogTime = Now;
+            }
+        }
         return;
     }
 
@@ -489,6 +503,24 @@ void UO3DSenderAudioCaptureComponent::ProcessAndSubmitAudio(const float* Interle
         }
     }
 
+    if (CVarO3DSenderAudioDebug->GetInt() != 0)
+    {
+        static double LastSubmitLogTime = 0.0;
+        const double Now = FPlatformTime::Seconds();
+        if (Now - LastSubmitLogTime > 0.25)
+        {
+            UE_LOG(LogO3DSenderAudio, Log, TEXT("Submitting audio frame Label='%s' Frames=%d Channels=%d SampleRate=%d Gain=%.2f Resample=%s Mix=%s"),
+                *LocalLabel,
+                NumFrames,
+                NumChannels,
+                SampleRate,
+                LocalGain,
+                bNeedsResample ? TEXT("Yes") : TEXT("No"),
+                bNeedsChannelMix ? TEXT("Yes") : TEXT("No"));
+            LastSubmitLogTime = Now;
+        }
+    }
+
     const bool bAccepted = LocalSink->SubmitPcm(LocalLabel, WorkingBuffer.GetData(), NumFrames, NumChannels, SampleRate, TimestampSec);
     if (!bAccepted && CVarO3DSenderAudioWarnFailures->GetInt() != 0)
     {
@@ -497,6 +529,18 @@ void UO3DSenderAudioCaptureComponent::ProcessAndSubmitAudio(const float* Interle
         {
             UE_LOG(LogO3DSenderAudio, Warning, TEXT("Audio sink rejected frame (Frames=%d Channels=%d SR=%d Label=%s)"), NumFrames, NumChannels, SampleRate, *LocalLabel);
             LastRejectedLogTime = Now;
+        }
+    }
+    else if (bAccepted && CVarO3DSenderAudioDebug->GetInt() != 0)
+    {
+        static double LastAcceptedLogTime = 0.0;
+        const double Now = FPlatformTime::Seconds();
+        if (Now - LastAcceptedLogTime > 0.25)
+        {
+            UE_LOG(LogO3DSenderAudio, Verbose, TEXT("Audio frame accepted by transport Label='%s' Timestamp=%.3f"),
+                *LocalLabel,
+                TimestampSec);
+            LastAcceptedLogTime = Now;
         }
     }
 }

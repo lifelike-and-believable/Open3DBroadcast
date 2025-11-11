@@ -13,15 +13,21 @@ public:
     virtual void Stop() override;
     virtual int32 Poll() override;
     virtual FO3DTransportStats GetStats() const override;
+    virtual bool SupportsAudio() const override;
+    virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
 
 private:
     FString ChannelKey;
     int32 QueueCapacity = 64;
+    int32 AudioQueueCapacity = 32;
     TSharedPtr<FO3DLoopbackChannel, ESPMode::ThreadSafe> Channel;
     TSharedPtr<ISerializedFrameConsumer> Consumer;
+    TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
+    FO3DTransportAudioConfig ActiveAudioConfig;
     bool bInitialized = false;
     FO3DTransportStats Stats;
     int64 LatencySamples = 0;
+    double LastAudioDropLogTime = 0.0;
 
     void AccumulateLatency(double LatencyMs);
 };

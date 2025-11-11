@@ -50,6 +50,8 @@ public:
     const FO3DReceiverSourceConfig& GetSourceSettings() const { return SourceSettings; }
 
 private:
+    friend struct FO3DReceiverSourceTestAccessor;
+
     class FSerializedConsumer;
     class FAudioSink;
 
@@ -109,6 +111,7 @@ private:
     // Descriptor caches
     TMap<FName, uint64> SubjectSkeletonHashes;
     TMap<FName, uint64> SubjectCurveHashes;
+    FName LastObservedSubjectName;
 
     // Timestamp ordering
     double LastAppliedSubjectListTime = -1.0;

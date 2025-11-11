@@ -686,6 +686,8 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
     const FLiveLinkSubjectName SubjectName(SubjectFName);
     const FLiveLinkSubjectKey SubjectKey(SourceGuid, SubjectName);
 
+    LastObservedSubjectName = SubjectFName;
+
     const uint64 SkeletonHash = HashArray(BoneNames, &BoneParents);
     const uint64 CurveHash = HashCurveNames(CurveNames);
 
@@ -727,11 +729,23 @@ void FO3DReceiverSource::FinalizeAudioMeta(O3DS::FAudioFrameMeta& Meta) const
         Meta.StreamLabel = ActiveConfig.Audio.StreamLabel;
     }
 
+    const FString StreamId = ActiveConfig.StreamId;
+    const bool bMetaSubjectMissing = Meta.SubjectName.IsEmpty();
+    const bool bMetaLooksLikeFallback =
+        bMetaSubjectMissing ||
+        (!StreamId.IsEmpty() && Meta.SubjectName.Equals(StreamId, ESearchCase::IgnoreCase)) ||
+        Meta.SubjectName.Equals(TEXT("Open3DReceiver"), ESearchCase::IgnoreCase);
+
+    if (bMetaLooksLikeFallback && !LastObservedSubjectName.IsNone())
+    {
+        Meta.SubjectName = LastObservedSubjectName.ToString();
+    }
+
     if (Meta.SubjectName.IsEmpty())
     {
-        if (!ActiveConfig.StreamId.IsEmpty())
+        if (!StreamId.IsEmpty())
         {
-            Meta.SubjectName = ActiveConfig.StreamId;
+            Meta.SubjectName = StreamId;
         }
         else
         {

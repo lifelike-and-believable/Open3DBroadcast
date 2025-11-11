@@ -1,6 +1,7 @@
 // Copyright (c) Open3DStream Contributors
 
 #include "O3DRemoteAudioComponent.h"
+#include "O3DReceiverSource.h"
 
 #if WITH_AUTOMATION_TESTS
 
@@ -42,6 +43,24 @@ struct FO3DRemoteAudioComponentTestAccessor
     }
 };
 
+struct FO3DReceiverSourceTestAccessor
+{
+    static void SetActiveConfig(FO3DReceiverSource& Source, const FO3DTransportConfig& Config)
+    {
+        Source.ActiveConfig = Config;
+    }
+
+    static void SetLastObservedSubjectName(FO3DReceiverSource& Source, const FName& SubjectName)
+    {
+        Source.LastObservedSubjectName = SubjectName;
+    }
+
+    static void CallFinalizeAudioMeta(const FO3DReceiverSource& Source, O3DS::FAudioFrameMeta& Meta)
+    {
+        Source.FinalizeAudioMeta(Meta);
+    }
+};
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DRemoteAudioComponentFilterTest, "Open3DStream.Receiver.RemoteAudioComponent.Filtering", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FO3DRemoteAudioComponentFilterTest::RunTest(const FString& Parameters)
 {
@@ -52,6 +71,9 @@ bool FO3DRemoteAudioComponentFilterTest::RunTest(const FString& Parameters)
 
     // Subject mode with specific name filtering
     Component->ReceiveMode = EO3DRemoteAudioMode::Subject;
+    Component->LiveLinkSubjectName = FLiveLinkSubjectName();
+    TestFalse(TEXT("Subject mode rejects when no subject selected"), FO3DRemoteAudioComponentTestAccessor::CallMatchesFilter(Component, TEXT("hero"), TEXT("streamA")));
+
     Component->LiveLinkSubjectName = FLiveLinkSubjectName(TEXT("Hero"));
 
     TestTrue(TEXT("Subject match case-insensitive"), FO3DRemoteAudioComponentTestAccessor::CallMatchesFilter(Component, TEXT("hero"), TEXT("streamA")));
@@ -150,6 +172,50 @@ bool FO3DAudioBusBroadcastTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Payload content copied"), ReceivedData == PCM16);
 
     FO3DAudioBus::OnPcm16().Remove(Handle);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverSourceFinalizeAudioMetaTest, "Open3DStream.Receiver.Source.FinalizeAudioMeta", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FO3DReceiverSourceFinalizeAudioMetaTest::RunTest(const FString& Parameters)
+{
+    FO3DTransportConfig Config;
+    Config.StreamId = TEXT("testanimchannel");
+    Config.Audio.bEnableAudio = true;
+    Config.Audio.StreamLabel = TEXT("o3ds:audio");
+    Config.Audio.SampleRate = 44100;
+    Config.Audio.NumChannels = 2;
+
+    FO3DReceiverSource Source;
+    FO3DReceiverSourceTestAccessor::SetActiveConfig(Source, Config);
+    FO3DReceiverSourceTestAccessor::SetLastObservedSubjectName(Source, FName(TEXT("Quinn")));
+
+    O3DS::FAudioFrameMeta Meta;
+    Meta.SampleRate = 0;
+    Meta.NumChannels = 0;
+    FO3DReceiverSourceTestAccessor::CallFinalizeAudioMeta(Source, Meta);
+
+    TestEqual(TEXT("Stream label overrides metadata"), Meta.StreamLabel, Config.Audio.StreamLabel);
+    TestEqual(TEXT("Observed subject applied"), Meta.SubjectName, FString(TEXT("Quinn")));
+    TestEqual(TEXT("Sample rate propagated"), Meta.SampleRate, Config.Audio.SampleRate);
+    TestEqual(TEXT("Channel count propagated"), Meta.NumChannels, Config.Audio.NumChannels);
+
+    O3DS::FAudioFrameMeta ChannelSubjectMeta;
+    ChannelSubjectMeta.SubjectName = Config.StreamId;
+    FO3DReceiverSourceTestAccessor::CallFinalizeAudioMeta(Source, ChannelSubjectMeta);
+    TestEqual(TEXT("Channel fallback replaced by subject"), ChannelSubjectMeta.SubjectName, FString(TEXT("Quinn")));
+
+    O3DS::FAudioFrameMeta ExplicitSubjectMeta;
+    ExplicitSubjectMeta.SubjectName = TEXT("AlreadySet");
+    FO3DReceiverSourceTestAccessor::CallFinalizeAudioMeta(Source, ExplicitSubjectMeta);
+    TestEqual(TEXT("Explicit subject preserved"), ExplicitSubjectMeta.SubjectName, FString(TEXT("AlreadySet")));
+
+    FO3DReceiverSource SourceWithoutSubject;
+    FO3DReceiverSourceTestAccessor::SetActiveConfig(SourceWithoutSubject, Config);
+
+    O3DS::FAudioFrameMeta FallbackMeta;
+    FO3DReceiverSourceTestAccessor::CallFinalizeAudioMeta(SourceWithoutSubject, FallbackMeta);
+    TestEqual(TEXT("Stream id used when no subject observed"), FallbackMeta.SubjectName, Config.StreamId);
 
     return true;
 }
