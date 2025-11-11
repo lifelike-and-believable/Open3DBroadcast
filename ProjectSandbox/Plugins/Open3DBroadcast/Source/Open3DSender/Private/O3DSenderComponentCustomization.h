@@ -48,8 +48,6 @@ private:
     TSharedPtr<IPropertyHandle> TransportNameHandle;
     TSharedPtr<class SComboBox<TSharedPtr<FName>>> TransportComboBox;
     TArray<TSharedPtr<FName>> TransportOptions;
-
-    IDetailLayoutBuilder* CachedDetailBuilder = nullptr;
 };
 
 #endif // WITH_EDITOR

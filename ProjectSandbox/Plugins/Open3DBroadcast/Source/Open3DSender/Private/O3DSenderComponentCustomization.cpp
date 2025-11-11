@@ -28,8 +28,6 @@ TSharedRef<IDetailCustomization> FO3DSenderComponentCustomization::MakeInstance(
 
 void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
 {
-    CachedDetailBuilder = &DetailBuilder;
-
     TArray<TWeakObjectPtr<UObject>> Objects;
     DetailBuilder.GetObjectsBeingCustomized(Objects);
     if (Objects.Num() > 0)
@@ -292,11 +290,6 @@ void FO3DSenderComponentCustomization::HandleTransportPropertyChanged()
     }
 
     RefreshTransportCustomization();
-
-    if (CachedDetailBuilder)
-    {
-        CachedDetailBuilder->ForceRefreshDetails();
-    }
 }
 
 void FO3DSenderComponentCustomization::HandleTransportConfigChanged()
