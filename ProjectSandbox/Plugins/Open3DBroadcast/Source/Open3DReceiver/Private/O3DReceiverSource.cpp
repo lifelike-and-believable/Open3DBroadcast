@@ -730,13 +730,21 @@ void FO3DReceiverSource::FinalizeAudioMeta(O3DS::FAudioFrameMeta& Meta) const
 
     const FString StreamId = ActiveConfig.StreamId;
     const bool bMetaSubjectMissing = Meta.SubjectName.IsEmpty();
+    const FName MetaSubjectFName = bMetaSubjectMissing ? NAME_None : FName(*Meta.SubjectName);
+    const bool bMetaSubjectKnown = !bMetaSubjectMissing && InitializedSubjects.Contains(MetaSubjectFName);
     const bool bMetaLooksLikeFallback =
         bMetaSubjectMissing ||
         (!StreamId.IsEmpty() && Meta.SubjectName.Equals(StreamId, ESearchCase::IgnoreCase)) ||
         Meta.SubjectName.Equals(TEXT("Open3DReceiver"), ESearchCase::IgnoreCase);
 
-    if (bMetaLooksLikeFallback && !LastObservedSubjectName.IsNone())
+    if ((bMetaLooksLikeFallback || (!bMetaSubjectMissing && !bMetaSubjectKnown)) && !LastObservedSubjectName.IsNone())
     {
+        if (!bMetaLooksLikeFallback && CVarO3DReceiverAudioDebug.GetValueOnAnyThread() != 0)
+        {
+            UE_LOG(LogO3DReceiverAudio, Verbose, TEXT("Remapping audio subject '%s' to last known subject '%s'."),
+                *Meta.SubjectName,
+                *LastObservedSubjectName.ToString());
+        }
         Meta.SubjectName = LastObservedSubjectName.ToString();
     }
 
