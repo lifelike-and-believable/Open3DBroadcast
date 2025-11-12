@@ -1,0 +1,161 @@
+name: Open3DBroadcast Plugin CI
+
+on:
+  pull_request:
+    branches: [ develop, main ]
+    types: [ opened, synchronize, ready_for_review ]
+  push:
+    branches: [ develop, main ]
+  workflow_dispatch:
+    inputs:
+      build_configuration:
+        description: "CMake build configuration"
+        required: false
+        type: choice
+        default: RelWithDebInfo
+        options:
+          - RelWithDebInfo
+          - Release
+      run_ctest:
+        description: "Run ctest after building core libraries"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+concurrency:
+  group: open3dbroadcast-plugin-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UE_ROOT: 'C:\\Program Files\\Epic Games\\UE_5.6'
+  PLUGIN_NAME: 'Open3DBroadcast'
+
+jobs:
+  changes:
+    name: Detect non-doc changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Filter paths (docs vs code)
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          filters: |
+            code:
+              - 'src/**'
+              - 'thirdparty/**'
+              - 'Build/**'
+              - 'CMakeLists.txt'
+              - 'package.py'
+              - 'o3ds.fbs'
+              - 'src/o3ds_generated.h'
+              - 'ProjectSandbox/ProjectSandbox.uproject'
+              - 'ProjectSandbox/Source/**'
+              - 'ProjectSandbox/Plugins/Open3DBroadcast/**'
+              - '.github/actions/**'
+              - '.github/workflows/open3dbroadcast-plugin-ci.yml'
+
+  build-and-test:
+    needs: changes
+    if: >-
+      (github.event_name == 'workflow_dispatch') ||
+      (needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false))
+    runs-on: [ self-hosted, ue5, windows ]
+
+    steps:
+      - name: Checkout (full)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+          submodules: recursive
+
+      - name: Post build started comment
+        if: github.event_name == 'pull_request' && github.event.pull_request.number != null
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `🚀 **Open3DBroadcast Plugin CI build started** for this PR!\n\n[View build logs →](${runUrl})`
+            });
+
+      - name: Build plugin core (composite)
+        id: core
+        uses: ./.github/actions/build-plugin-core
+        with:
+          ue_root: ${{ env.UE_ROOT }}
+          plugin_name: ${{ env.PLUGIN_NAME }}
+          plugin_relative_path: ProjectSandbox/Plugins/Open3DBroadcast
+          build_type: ${{ inputs.build_configuration || 'RelWithDebInfo' }}
+          enable_webrtc: true
+
+      - name: Optional ctest run
+        if: github.event_name == 'workflow_dispatch' && inputs.run_ctest == 'true'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'vsbuild')) { throw 'vsbuild directory not found for ctest.' }
+          Push-Location vsbuild
+          try {
+            ctest -C ${{ inputs.build_configuration || 'RelWithDebInfo' }} --output-on-failure
+          } finally {
+            Pop-Location
+          }
+
+      - name: Build Open3DBroadcast plugin (Win64)
+        shell: powershell
+        run: |
+          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
+          & .\Build\Scripts\Build-Plugin.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -PluginUPluginPath "${{ steps.core.outputs.uplugin_path }}" `
+            -OutDir "$pkg" `
+            -TargetPlatforms @("Win64") `
+            -Configuration "Development"
+
+      - name: Package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Open3DBroadcast-Win64-${{ github.sha }}
+          path: ${{ runner.temp }}/PluginPackage
+          retention-days: 30
+
+      - name: Post build completed comment
+        if: github.event_name == 'pull_request' && github.event.pull_request.number != null && success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `✅ **Open3DBroadcast Plugin CI build completed successfully!**\n\n[View build logs →](${runUrl})\n\n📦 Plugin artifacts are available for download in the workflow run.`
+            });
+
+      - name: Post build failed comment
+        if: github.event_name == 'pull_request' && github.event.pull_request.number != null && failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `❌ **Open3DBroadcast Plugin CI build failed.**\n\n[View build logs →](${runUrl})\n\nPlease check the logs for details.`
+            });

@@ -23,13 +23,17 @@ inputs:
   opus_asset_regex:
     required: false
     description: Optional override regex to pick an opus release asset for this runner OS/arch.
+  plugin_relative_path:
+    required: false
+    default: ''
+    description: Optional relative path to plugin directory when not under plugins/unreal/<plugin_name>.
 outputs:
   plugin_dir:
     description: Resolved plugin directory
-    value: ${{ steps.find.outputs.plugin_dir }}
+    value: ${{ steps.resolve.outputs.plugin_dir }}
   uplugin_path:
     description: Resolved .uplugin path
-    value: ${{ steps.find.outputs.plugin_path }}
+    value: ${{ steps.resolve.outputs.plugin_path }}
 runs:
   using: composite
   steps:
@@ -39,6 +43,33 @@ runs:
         fetch-depth: 0
         lfs: true
         submodules: recursive
+
+    - name: Resolve plugin location
+      id: resolve
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $custom = "${{ inputs.plugin_relative_path }}"
+        if ([string]::IsNullOrWhiteSpace($custom)) {
+          $pluginDir = Join-Path $PWD "plugins/unreal/${{ inputs.plugin_name }}"
+        } else {
+          $pluginDir = Join-Path $PWD $custom
+        }
+
+        if (!(Test-Path -LiteralPath $pluginDir)) {
+          throw "Plugin directory not found: $pluginDir"
+        }
+
+        $upluginPath = Join-Path $pluginDir "${{ inputs.plugin_name }}.uplugin"
+        if (!(Test-Path -LiteralPath $upluginPath)) {
+          throw "Plugin .uplugin file not found: $upluginPath"
+        }
+
+        "PLUGIN_DIR=$pluginDir" | Out-File -FilePath $env:GITHUB_ENV -Append
+        "PLUGIN_UPLUGIN=$upluginPath" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+        "plugin_dir=$pluginDir"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        "plugin_path=$upluginPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
@@ -270,13 +301,37 @@ runs:
     - name: Copy libraries and headers to plugin
       shell: pwsh
       run: |
-        $pluginLib = Join-Path "plugins/unreal" "${{ inputs.plugin_name }}/ThirdParty"
+        $ErrorActionPreference = 'Stop'
+        $pluginDir = $env:PLUGIN_DIR
+        if ([string]::IsNullOrWhiteSpace($pluginDir)) {
+          throw "PLUGIN_DIR environment variable not set. Ensure the resolve step executed successfully."
+        }
+
+        $pluginLib = Join-Path $pluginDir "ThirdParty"
+        $pluginLibWin64 = Join-Path $pluginLib "Lib/Win64"
+        New-Item -ItemType Directory -Force -Path $pluginLib | Out-Null
+        New-Item -ItemType Directory -Force -Path $pluginLibWin64 | Out-Null
+
+        $moduleLibTargets = @()
+        $sourceDir = Join-Path $pluginDir "Source"
+        if (Test-Path $sourceDir) {
+          Get-ChildItem -Path $sourceDir -Directory | ForEach-Object {
+            $moduleLibDir = Join-Path $_.FullName "ThirdParty/Lib/Win64"
+            New-Item -ItemType Directory -Force -Path $moduleLibDir | Out-Null
+            $moduleLibTargets += $moduleLibDir
+          }
+        }
+
         New-Item -ItemType Directory -Force -Path (Join-Path $pluginLib "include") | Out-Null
 
         # Copy o3ds to new structure (prebuilt lib location)
         New-Item -ItemType Directory -Force -Path (Join-Path $pluginLib "o3ds/include/o3ds") | Out-Null
         New-Item -ItemType Directory -Force -Path (Join-Path $pluginLib "o3ds/lib/Win64/Release") | Out-Null
         Copy-Item "vsbuild/src/${{ inputs.build_type }}/open3dstreamstatic.lib" (Join-Path $pluginLib "o3ds/lib/Win64/Release/o3ds.lib") -Force
+        Copy-Item "vsbuild/src/${{ inputs.build_type }}/open3dstreamstatic.lib" (Join-Path $pluginLibWin64 "open3dstreamstatic.lib") -Force
+        foreach ($target in $moduleLibTargets) {
+          Copy-Item "vsbuild/src/${{ inputs.build_type }}/open3dstreamstatic.lib" (Join-Path $target "open3dstreamstatic.lib") -Force
+        }
         Copy-Item "src/o3ds/*.h" (Join-Path $pluginLib "o3ds/include/o3ds") -Force
         Copy-Item "src/o3ds_generated.h" (Join-Path $pluginLib "o3ds/include") -Force
 
@@ -288,6 +343,12 @@ runs:
         Copy-Item "vsbuild/src/${{ inputs.build_type }}/open3dstreamstatic.lib" $pluginLib -ErrorAction SilentlyContinue
         Copy-Item "thirdparty/build/nng/${{ inputs.build_type }}/nng.lib" $pluginLib -ErrorAction SilentlyContinue
         Copy-Item "thirdparty/build/flatbuffers/${{ inputs.build_type }}/flatbuffers.lib" $pluginLib -ErrorAction SilentlyContinue
+        Copy-Item "thirdparty/build/nng/${{ inputs.build_type }}/nng.lib" (Join-Path $pluginLibWin64 "nng.lib") -Force -ErrorAction SilentlyContinue
+        Copy-Item "thirdparty/build/flatbuffers/${{ inputs.build_type }}/flatbuffers.lib" (Join-Path $pluginLibWin64 "flatbuffers.lib") -Force -ErrorAction SilentlyContinue
+        foreach ($target in $moduleLibTargets) {
+          Copy-Item "thirdparty/build/nng/${{ inputs.build_type }}/nng.lib" (Join-Path $target "nng.lib") -Force -ErrorAction SilentlyContinue
+          Copy-Item "thirdparty/build/flatbuffers/${{ inputs.build_type }}/flatbuffers.lib" (Join-Path $target "flatbuffers.lib") -Force -ErrorAction SilentlyContinue
+        }
 
         Copy-Item "src/o3ds/*.h" (Join-Path $pluginLib "include/o3ds") -Force -ErrorAction SilentlyContinue
         Copy-Item "src/o3ds_generated.h" (Join-Path $pluginLib "include") -Force -ErrorAction SilentlyContinue
@@ -299,7 +360,7 @@ runs:
           param(
             [string]$root,
             [string[]]$libPatterns,
-            [string]$targetLibDir = $pluginLib,
+            [string]$targetLibDir,
             [string]$targetIncDir = (Join-Path $pluginLib "include")
           )
           if ([string]::IsNullOrWhiteSpace($root)) { return }
@@ -341,20 +402,18 @@ runs:
           $webrtcDir = Join-Path $pluginLib "webrtc"
           $webrtcIncDir = Join-Path $pluginLib "webrtc/include"
           Copy-Lib-And-Include -root $ldcRoot -libPatterns $patterns -targetLibDir $webrtcDir -targetIncDir $webrtcIncDir
+          Copy-Lib-And-Include -root $ldcRoot -libPatterns $patterns -targetLibDir $pluginLibWin64 -targetIncDir $webrtcIncDir
+          foreach ($target in $moduleLibTargets) {
+            Copy-Lib-And-Include -root $ldcRoot -libPatterns $patterns -targetLibDir $target -targetIncDir $webrtcIncDir
+          }
         }
 
         # Copy opus headers/libs to ThirdParty root for future use
         $opusRoot = "${{ steps.fetch-opus.outputs.opus_root }}"
         if (-not [string]::IsNullOrWhiteSpace($opusRoot)) {
-          Copy-Lib-And-Include -root $opusRoot -libPatterns $patterns
+          Copy-Lib-And-Include -root $opusRoot -libPatterns $patterns -targetLibDir $pluginLib
+          Copy-Lib-And-Include -root $opusRoot -libPatterns $patterns -targetLibDir $pluginLibWin64
+          foreach ($target in $moduleLibTargets) {
+            Copy-Lib-And-Include -root $opusRoot -libPatterns $patterns -targetLibDir $target
+          }
         }
-
-    - name: Locate plugin (.uplugin)
-      id: find
-      shell: pwsh
-      run: |
-        $pluginDir = Join-Path $PWD "plugins/unreal/${{ inputs.plugin_name }}"
-        $upluginPath = Join-Path $pluginDir "${{ inputs.plugin_name }}.uplugin"
-        if (!(Test-Path -LiteralPath $upluginPath)) { Write-Error "Plugin file not found: $upluginPath"; exit 1 }
-        "plugin_path=$upluginPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-        "plugin_dir=$pluginDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
