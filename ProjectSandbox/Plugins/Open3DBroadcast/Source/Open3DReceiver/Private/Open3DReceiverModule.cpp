@@ -5,6 +5,7 @@ DEFINE_LOG_CATEGORY(LogO3DReceiver);
 DEFINE_LOG_CATEGORY(LogO3DReceiverSource);
 DEFINE_LOG_CATEGORY(LogO3DReceiverAudio);
 
+/** Module entry for the runtime LiveLink receiver integration. */
 class FOpen3DReceiverModule : public IModuleInterface
 {
 public:

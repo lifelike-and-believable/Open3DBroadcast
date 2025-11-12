@@ -7,6 +7,10 @@
 class IOpen3DSender;
 class IO3DSenderAudioSink;
 
+/**
+ * Owns the active sender transport instance for a capture component, encapsulating lifecycle
+ * management (Create/Start/Stop) and surfacing associated audio sinks on demand.
+ */
 class FO3DSenderTransportController
 {
 public:

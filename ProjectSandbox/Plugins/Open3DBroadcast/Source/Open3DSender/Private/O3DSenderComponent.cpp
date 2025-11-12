@@ -149,6 +149,7 @@ void UO3DSenderComponent::NotifyOnScreen(const FString& Message, const FColor& C
 	}
 }
 
+/** Orchestrates transport/audio bootstrapping and begins sampling skeletal data. */
 void UO3DSenderComponent::StartCapture()
 {
 	if (bIsCapturing)
@@ -216,6 +217,7 @@ void UO3DSenderComponent::StartCapture()
 	}
 }
 
+/** Stop ticking transports, detach delegates, and release capture helpers. */
 void UO3DSenderComponent::StopCapture()
 {
 	if (!bIsCapturing)
@@ -242,6 +244,7 @@ void UO3DSenderComponent::StopCapture()
 	NotifyOnScreen(FString::Printf(TEXT("O3D Sender: Stopped on %s"), *GetNameSafe(TargetMesh.Get())), FColor::Yellow, 2.0f);
 }
 
+/** Stop ticking the active transport and release audio capture bindings. */
 void UO3DSenderComponent::TeardownTransport()
 {
 	TeardownAudioCapture();
@@ -253,6 +256,7 @@ void UO3DSenderComponent::TeardownTransport()
 	SetComponentTickEnabled(false);
 }
 
+/** Prepare or refresh the active transport instance and hook up audio sinks if available. */
 void UO3DSenderComponent::InitializeTransport()
 {
 	TeardownTransport();
@@ -786,6 +790,7 @@ void UO3DSenderComponent::RefreshSkeletonCache(USkeletalMeshComponent* SkelComp)
 	}
 }
 
+/** Build the runtime curve processing configuration from component-level settings. */
 FO3DSenderCurveConfig UO3DSenderComponent::BuildCurveConfig() const
 {
 	FO3DSenderCurveConfig Config;
@@ -800,6 +805,7 @@ FO3DSenderCurveConfig UO3DSenderComponent::BuildCurveConfig() const
 	return Config;
 }
 
+/** Limits capture cadence to the configured rate while preserving first-frame responsiveness. */
 bool UO3DSenderComponent::ConsumeCaptureBudget(double NowSeconds, double& InOutLastCaptureTime, float CaptureRateHz)
 {
 	if (CaptureRateHz <= 0.0f)
@@ -825,6 +831,7 @@ bool UO3DSenderComponent::ConsumeCaptureBudget(double NowSeconds, double& InOutL
 	return true;
 }
 
+/** Validate capture preconditions (transport, target mesh, rate limiting) before emitting a frame. */
 bool UO3DSenderComponent::CanCaptureThisFrame(double NowSeconds, USkeletalMeshComponent*& OutMesh)
 {
 	OutMesh = nullptr;
@@ -1016,6 +1023,7 @@ void UO3DSenderComponent::PopulatePoseFrameCurves(USkeletalMeshComponent* SkelCo
 	Frame.CurveValues = MoveTemp(FilteredCurveValues);
 }
 
+/** Callback after animation updates; samples the skeletal mesh and pushes serializer events. */
 void UO3DSenderComponent::HandleBoneTransformsFinalized()
 {
 	USkeletalMeshComponent* SkelComp = nullptr;
@@ -1037,6 +1045,7 @@ void UO3DSenderComponent::HandleBoneTransformsFinalized()
 	OnPoseFrameReady.Broadcast(Frame.Subject, Frame);
 }
 
+/** Called every frame; forwards upkeep ticks to the live transport instance. */
 void UO3DSenderComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);

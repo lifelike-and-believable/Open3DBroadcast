@@ -4,6 +4,7 @@
 
 class USkeletalMeshComponent;
 
+/** Tunable curve filtering parameters shared between the sender component and processor. */
 struct FO3DSenderCurveConfig
 {
     bool bClampMorphCurvesToUnit = true;
@@ -16,6 +17,10 @@ struct FO3DSenderCurveConfig
     bool bLogFilteredCurves = false;
 };
 
+/**
+ * Helper that caches the available animation curves on a skeletal mesh component, collects per-frame
+ * values, and applies threshold/filter rules before they are forwarded to the serializer.
+ */
 class FO3DSenderCurveProcessor
 {
 public:

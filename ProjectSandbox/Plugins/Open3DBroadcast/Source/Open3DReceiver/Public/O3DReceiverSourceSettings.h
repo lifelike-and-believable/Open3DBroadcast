@@ -6,6 +6,7 @@
 #include "LiveLinkSourceSettings.h"
 #include "O3DReceiverSourceSettings.generated.h"
 
+/** User-facing configuration used to bootstrap receiver transports inside LiveLink. */
 USTRUCT(BlueprintType)
 struct FO3DReceiverSourceConfig
 {
@@ -28,6 +29,7 @@ public:
     TMap<FString, FString> TransportOptions;
 };
 
+/** Global config object that exposes default receiver settings via the Project Settings UI. */
 UCLASS(Config = GameUserSettings)
 class OPEN3DRECEIVER_API UO3DReceiverSettingsObject : public UObject
 {

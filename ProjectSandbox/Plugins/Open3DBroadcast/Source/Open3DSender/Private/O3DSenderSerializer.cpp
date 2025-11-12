@@ -30,6 +30,7 @@ TArray<FO3DSenderSerializer*> FO3DSenderSerializer::GInstances;
 FO3DSenderSerializer::FO3DSenderSerializer() = default;
 FO3DSenderSerializer::~FO3DSenderSerializer() = default;
 
+/** Register for descriptor/frame events emitted by the capture component. */
 void FO3DSenderSerializer::Attach(UO3DSenderComponent* InComponent)
 {
 	if (!InComponent)
@@ -59,6 +60,7 @@ void FO3DSenderSerializer::Attach(UO3DSenderComponent* InComponent)
 	Component->OnPoseFrameReady.AddRaw(this, &FO3DSenderSerializer::OnPoseFrameReady);
 }
 
+/** Remove previously registered delegates and release the owning component reference. */
 void FO3DSenderSerializer::Detach(UO3DSenderComponent* InComponent)
 {
 	if (Component && Component == InComponent)
@@ -70,6 +72,7 @@ void FO3DSenderSerializer::Detach(UO3DSenderComponent* InComponent)
 	GInstances.Remove(this);
 }
 
+/** Refresh the per-subject skeleton cache, invalidating pending descriptor state if the hash changes. */
 void FO3DSenderSerializer::BuildOrUpdateCache(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor)
 {
 	FSubjectCache& Cache = SubjectState.FindOrAdd(Subject);
@@ -94,6 +97,7 @@ void FO3DSenderSerializer::OnDescriptorReady(const FString& Subject, const FO3DS
 	BuildOrUpdateCache(Subject, Descriptor);
 }
 
+/** Rebuild a name->index lookup for the curve array when curve names change. */
 void FO3DSenderSerializer::EnsureCurveIndex(FSubjectCache& Cache)
 {
 	Cache.CurveIndex.Reset();
@@ -114,6 +118,7 @@ static inline bool HasInvalidTransform(const FTransform& T)
 		IsBad(Sc.X) || IsBad(Sc.Y) || IsBad(Sc.Z);
 }
 
+/** Validate and serialise a captured pose frame, emitting FlatBuffer payloads for transports. */
 void FO3DSenderSerializer::OnPoseFrameReady(const FString& Subject, const FO3DSPoseFrame& Frame)
 {
 	if (!Component)
@@ -161,6 +166,7 @@ void FO3DSenderSerializer::OnPoseFrameReady(const FString& Subject, const FO3DSP
 	SerializeFrame(Subject, DescriptorSnapshot, Frame);
 }
 
+/** Populate a mutable FlatBuffer Subject from a cached descriptor template. */
 void FO3DSenderSerializer::BuildSubjectFromDescriptor(const FString& SubjectName, const FO3DSSkeletonDescriptor& Descriptor, O3DS::Subject& OutSubject)
 {
 	using namespace O3DS;
@@ -184,6 +190,7 @@ void FO3DSenderSerializer::BuildSubjectFromDescriptor(const FString& SubjectName
 	}
 }
 
+/** Copy current pose data into the FlatBuffer subject structure in-place. */
 void FO3DSenderSerializer::FillFrameValues(const FO3DSPoseFrame& Frame, O3DS::Subject& InOutSubject)
 {
 	using namespace O3DS;
@@ -215,6 +222,7 @@ void FO3DSenderSerializer::FillFrameValues(const FO3DSPoseFrame& Frame, O3DS::Su
 	}
 }
 
+/** Construct the FlatBuffer SubjectList for the supplied frame and broadcast delegate notifications. */
 void FO3DSenderSerializer::SerializeFrame(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame)
 {
 	using namespace O3DS;
@@ -281,6 +289,7 @@ void FO3DSenderSerializer::SerializeFrame(const FString& Subject, const FO3DSSke
 	}
 }
 
+/** Emit per-subject stats for this serializer instance (invoked via console command). */
 void FO3DSenderSerializer::DumpStatsInstance() const
 {
 	for (const TPair<FString, FSubjectCache>& Pair : SubjectState)
@@ -297,6 +306,7 @@ void FO3DSenderSerializer::DumpStatsInstance() const
 	UE_LOG(LogO3DSenderSerializer, Display, TEXT("Serializer(Component=%s) subjects=%d"), *GetNameSafe(Component), SubjectState.Num());
 }
 
+/** Console command handler that walks all live serializer instances and logs aggregate stats. */
 void FO3DSenderSerializer::DumpAllStats()
 {
 	UE_LOG(LogO3DSenderSerializer, Display, TEXT("---- O3DS Sender Serializer Stats ----"));

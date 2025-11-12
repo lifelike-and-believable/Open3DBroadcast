@@ -21,16 +21,19 @@ class FO3DSenderTransportController;
 class FO3DSenderCurveProcessor;
 struct FO3DSenderCurveConfig;
 
+/** Smart-pointer deleter that keeps FO3DSenderTransportController implementation details private. */
 struct FO3DSenderTransportControllerDeleter
 {
 	void operator()(FO3DSenderTransportController* Ptr) const;
 };
 
+/** Smart-pointer deleter for the lazily created curve processor helper. */
 struct FO3DSenderCurveProcessorDeleter
 {
 	void operator()(FO3DSenderCurveProcessor* Ptr) const;
 };
 
+/** Describes the skeletal hierarchy and bone metadata emitted during capture. */
 USTRUCT()
 struct OPEN3DSENDER_API FO3DSSkeletonDescriptor
 {
@@ -55,6 +58,7 @@ struct OPEN3DSENDER_API FO3DSSkeletonDescriptor
 	bool IsValid() const { return BoneNames.Num() > 0 && BoneNames.Num() == ParentIndices.Num(); }
 };
 
+/** Per-frame pose payload containing bone transforms and curve values for a single subject. */
 USTRUCT()
 struct OPEN3DSENDER_API FO3DSPoseFrame
 {
@@ -85,9 +89,15 @@ struct OPEN3DSENDER_API FO3DSPoseFrame
 	}
 };
 
+/** Event emitted whenever the skeletal descriptor changes (usually first frame or mesh swap). */
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnO3DDescriptorReady, const FString& /*Subject*/, const FO3DSSkeletonDescriptor& /*Descriptor*/);
+/** Per-frame event carrying the captured pose prior to serialization. */
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnO3DPoseFrameReady, const FString& /*Subject*/, const FO3DSPoseFrame& /*Frame*/);
 
+/**
+ * Captures skeletal pose data (and optionally audio) from an actor, serialises it into the
+ * Open3DStream wire format, and forwards frames to a user-selectable transport implementation.
+ */
 UCLASS(ClassGroup = (Open3DStream), meta = (BlueprintSpawnableComponent))
 class OPEN3DSENDER_API UO3DSenderComponent : public UActorComponent
 {
@@ -99,30 +109,39 @@ public:
 	UO3DSenderComponent();
 	virtual ~UO3DSenderComponent();
 
+	/** Start gathering pose/audio frames. Safe to call when already capturing. */
 	UFUNCTION(BlueprintCallable, meta = (CallInEditor), Category = "Open3DStream|Sender")
 	void StartCapture();
 
+	/** Halt capture and detach from the active transport/audio sinks. */
 	UFUNCTION(BlueprintCallable, meta = (CallInEditor), Category = "Open3DStream|Sender")
 	void StopCapture();
 
+	/** Convenience accessor mirroring internal capture state. */
 	UFUNCTION(BlueprintPure, Category = "Open3DStream|Sender")
 	bool IsCapturing() const { return bIsCapturing; }
 
+	/** Skeletal mesh that supplies bone transforms; auto-located from the owner if unset. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender")
 	TWeakObjectPtr<USkeletalMeshComponent> TargetMesh;
 
+	/** Subject identifier embedded in serialized frames for downstream routing. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender", meta = (DisplayName = "Subject Name"))
 	FString SubjectName;
 
+	/** Desired pose capture rate in Hz (final rate clamped by world tick). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender")
 	float CaptureRateHz = 60.0f;
 
+	/** Start capture automatically as soon as the component is registered / BeginPlay runs. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender")
 	bool bAutoStartCapture = true;
 
+	/** When true, the component will spawn and manage a transport instance automatically. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Transport")
 	bool bAutoCreateTransport = false;
 
+	/** Name of the registered transport factory to use (loopback, sockets, webrtc, ...). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Transport", meta = (HideInDetailPanel))
 	FName TransportName = TEXT("loopback");
 
@@ -130,42 +149,55 @@ public:
 	UPROPERTY(VisibleAnywhere, Category = "Open3DStream|Sender|Transport", meta = (HideInDetailPanel))
 	TMap<FString, FString> TransportOptions;
 
+	/** Enable PCM capture and forwarding when the active transport supports it. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio")
 	bool bEnableAudio = false;
 
+	/** Select the audio capture source (game mix vs microphone). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio", meta = (EditCondition = "bEnableAudio"))
 	EO3DSenderCaptureMode AudioCaptureMode = EO3DSenderCaptureMode::Mix;
 
+	/** Friendly microphone name surfaced to users; resolved back to a device index at runtime. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio", meta = (GetOptions = "GetAvailableAudioInputDeviceOptions", EditCondition = "bEnableAudio && AudioCaptureMode == EO3DSenderCaptureMode::Input", EditConditionHides))
 	FName AudioInputDevice;
 
+	/** Full audio capture configuration (sample rate, bitrate, gains, etc.). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio", meta = (EditCondition = "bEnableAudio", ShowOnlyInnerProperties))
 	FO3DSenderAudioCaptureConfig AudioCaptureConfig;
 
+	/** Label attached to outgoing audio frames to aid receivers in routing/debugging. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio", meta = (EditCondition = "bEnableAudio"))
 	FString AudioStreamLabel = TEXT("o3ds:audio");
 
+	/** Clamp morph target values to [0,1] before serialisation. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves")
 	bool bClampMorphCurvesToUnit = true;
 
+	/** Treat NaN/Inf curve values as 0 to prevent propagating bad data to receivers. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves")
 	bool bDropNaNAndInfinity = true;
 
+	/** Enable delta/regex filtering for animation curves prior to emission. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves|Filtering")
 	bool bEnableCurveFiltering = false;
 
+	/** Ignore curve delta magnitudes smaller than this epsilon. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves|Filtering", meta = (EditCondition = "bEnableCurveFiltering", ClampMin = "0.0"))
 	float CurveEpsilon = 0.0005f;
 
+	/** Emit a new value only when it changes by more than this threshold. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves|Filtering", meta = (EditCondition = "bEnableCurveFiltering", ClampMin = "0.0"))
 	float CurveDeltaThreshold = 0.001f;
 
+	/** Wildcard patterns that whitelist curves for emission. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves|Filtering", meta = (EditCondition = "bEnableCurveFiltering"))
 	TArray<FString> IncludeCurvePatterns;
 
+	/** Wildcard patterns that blacklist curves from emission. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves|Filtering", meta = (EditCondition = "bEnableCurveFiltering"))
 	TArray<FString> ExcludeCurvePatterns;
 
+	/** Emit verbose log entries when curves are filtered out. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves|Filtering")
 	bool bLogFilteredCurves = false;
 

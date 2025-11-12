@@ -6,12 +6,14 @@
 
 namespace O3DS
 {
+    /** High-level payload families the unified framing format can transport. */
     enum class EUnifiedKind : uint8
     {
         Mocap = 0,
         Audio = 1
     };
 
+    /** Enumerates codecs carried within the unified envelope. */
     enum class EUnifiedCodec : uint8
     {
         O3DS = 0,
@@ -19,6 +21,7 @@ namespace O3DS
         PCM16 = 2
     };
 
+    /** Wire header shared by all Open3DStream unified messages (big-endian as laid out on the wire). */
     struct OPEN3DSHARED_API FUnifiedHeader
     {
         uint32 MagicBE = 0;
@@ -47,6 +50,7 @@ namespace O3DS
         }
     };
 
+    /** Metadata accompanying audio frames when surfaced to gameplay systems. */
     struct OPEN3DSHARED_API FAudioFrameMeta
     {
         FGuid SourceGuid;
@@ -57,6 +61,7 @@ namespace O3DS
         double TimestampSec = 0.0;
     };
 
+    /** Parse the unified message header/payload without copying, performing sanity checks along the way. */
     inline bool ParseUnifiedMessage(const uint8* Data, int32 Size,
                                     FUnifiedHeader& OutHeader,
                                     const uint8*& OutPayloadPtr,

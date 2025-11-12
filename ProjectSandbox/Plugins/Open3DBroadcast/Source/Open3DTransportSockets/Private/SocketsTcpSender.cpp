@@ -17,6 +17,8 @@
 
 namespace
 {
+	inline constexpr int32 DesiredSendBufferBytes = 512 * 1024;
+
 	inline FString ResolveBindHost(const FO3DTransportConfig& Config)
 	{
 		const FString BindOverride = O3DSockets::GetOptionValue(Config, O3DSockets::BindOptionKey);
@@ -62,6 +64,14 @@ namespace
 			return ExplicitPort;
 		}
 		return DefaultPort > 0 ? DefaultPort + 1 : 0;
+	}
+
+	inline bool IsRecoverableSendError(ESocketErrors Error)
+	{
+		return Error == SE_EWOULDBLOCK ||
+			Error == SE_EINTR ||
+			Error == SE_EINPROGRESS ||
+			Error == SE_ENOBUFS;
 	}
 
 }
@@ -452,6 +462,9 @@ bool FO3DSocketsTcpSender::AcceptClient()
 	}
 
 	Accepted->SetNonBlocking(true);
+	Accepted->SetNoDelay(true);
+	int32 ActualBuffer = 0;
+	Accepted->SetSendBufferSize(DesiredSendBufferBytes, ActualBuffer);
 	ClientSocket = Accepted;
 	UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP sender accepted client %s"), *PeerAddr->ToString(true));
 	return true;
@@ -485,6 +498,9 @@ bool FO3DSocketsTcpSender::AcceptAudioClient()
 	}
 
 	Accepted->SetNonBlocking(true);
+	Accepted->SetNoDelay(true);
+	int32 ActualBuffer = 0;
+	Accepted->SetSendBufferSize(DesiredSendBufferBytes, ActualBuffer);
 	AudioClientSocket = Accepted;
 	UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP sender accepted audio client %s"), *PeerAddr->ToString(true));
 	return true;
@@ -500,16 +516,28 @@ bool FO3DSocketsTcpSender::SendFramedPayload(const uint8* Data, int32 Size)
 	uint8 Header[O3DSockets::Tcp::FrameHeaderSize];
 	O3DSockets::Tcp::WriteFrameHeader(Header, Size);
 
-	if (!SendBytes(ClientSocket, Header, O3DSockets::Tcp::FrameHeaderSize, TEXT("data header")))
+	const ESocketErrors HeaderError = SendBytes(ClientSocket, Header, O3DSockets::Tcp::FrameHeaderSize, TEXT("data header"));
+	if (HeaderError != SE_NO_ERROR)
 	{
-		UE_LOG(LogSocketsTcpSender, Warning, TEXT("Failed to send TCP frame header."));
+		if (IsRecoverableSendError(HeaderError))
+		{
+			UE_LOG(LogSocketsTcpSender, Verbose, TEXT("Deferring TCP frame header send due to backpressure."));
+			return false;
+		}
+		UE_LOG(LogSocketsTcpSender, Warning, TEXT("Failed to send TCP frame header (error=%d)."), static_cast<int32>(HeaderError));
 		ResetClientSocket();
 		return false;
 	}
 
-	if (!SendBytes(ClientSocket, Data, Size, TEXT("data payload")))
+	const ESocketErrors PayloadError = SendBytes(ClientSocket, Data, Size, TEXT("data payload"));
+	if (PayloadError != SE_NO_ERROR)
 	{
-		UE_LOG(LogSocketsTcpSender, Warning, TEXT("Failed to send TCP frame payload (size=%d)."), Size);
+		if (IsRecoverableSendError(PayloadError))
+		{
+			UE_LOG(LogSocketsTcpSender, Verbose, TEXT("Deferring TCP frame payload send due to backpressure (size=%d)."), Size);
+			return false;
+		}
+		UE_LOG(LogSocketsTcpSender, Warning, TEXT("Failed to send TCP frame payload (size=%d, error=%d)."), Size, static_cast<int32>(PayloadError));
 		ResetClientSocket();
 		return false;
 	}
@@ -532,21 +560,33 @@ bool FO3DSocketsTcpSender::SendAudioFramedPayload(const uint8* Data, int32 Size)
 		return false;
 	}
 
-	UE_LOG(LogSocketsTcpSender, Warning, TEXT("Attempting to send TCP audio payload (size=%d)."), Size);
+	UE_LOG(LogSocketsTcpSender, Verbose, TEXT("Attempting to send TCP audio payload (size=%d)."), Size);
 
 	uint8 Header[O3DSockets::Tcp::FrameHeaderSize];
 	O3DSockets::Tcp::WriteFrameHeader(Header, Size);
 
-	if (!SendBytes(AudioClientSocket, Header, O3DSockets::Tcp::FrameHeaderSize, TEXT("audio header")))
+	const ESocketErrors AudioHeaderError = SendBytes(AudioClientSocket, Header, O3DSockets::Tcp::FrameHeaderSize, TEXT("audio header"));
+	if (AudioHeaderError != SE_NO_ERROR)
 	{
-		UE_LOG(LogSocketsTcpSender, Warning, TEXT("Failed to send TCP audio frame header."));
+		if (IsRecoverableSendError(AudioHeaderError))
+		{
+			UE_LOG(LogSocketsTcpSender, Verbose, TEXT("Deferring TCP audio frame header send due to backpressure."));
+			return false;
+		}
+		UE_LOG(LogSocketsTcpSender, Warning, TEXT("Failed to send TCP audio frame header (error=%d)."), static_cast<int32>(AudioHeaderError));
 		ResetAudioClientSocket();
 		return false;
 	}
 
-	if (!SendBytes(AudioClientSocket, Data, Size, TEXT("audio payload")))
+	const ESocketErrors AudioPayloadError = SendBytes(AudioClientSocket, Data, Size, TEXT("audio payload"));
+	if (AudioPayloadError != SE_NO_ERROR)
 	{
-		UE_LOG(LogSocketsTcpSender, Warning, TEXT("Failed to send TCP audio payload (size=%d)."), Size);
+		if (IsRecoverableSendError(AudioPayloadError))
+		{
+			UE_LOG(LogSocketsTcpSender, Verbose, TEXT("Deferring TCP audio frame payload send due to backpressure (size=%d)."), Size);
+			return false;
+		}
+		UE_LOG(LogSocketsTcpSender, Warning, TEXT("Failed to send TCP audio payload (size=%d, error=%d)."), Size, static_cast<int32>(AudioPayloadError));
 		ResetAudioClientSocket();
 		return false;
 	}
@@ -554,11 +594,18 @@ bool FO3DSocketsTcpSender::SendAudioFramedPayload(const uint8* Data, int32 Size)
 	return true;
 }
 
-bool FO3DSocketsTcpSender::SendBytes(FSocket* Socket, const uint8* Data, int32 Size, const TCHAR* Context)
+ESocketErrors FO3DSocketsTcpSender::SendBytes(FSocket* Socket, const uint8* Data, int32 Size, const TCHAR* Context)
 {
+	(void)Context;
+
+	if (!SocketSubsystem)
+	{
+		return SE_NOTINITIALISED;
+	}
+
 	if (!Socket || Data == nullptr || Size <= 0)
 	{
-		return false;
+		return SE_EINVAL;
 	}
 
 	int32 TotalSent = 0;
@@ -567,21 +614,19 @@ bool FO3DSocketsTcpSender::SendBytes(FSocket* Socket, const uint8* Data, int32 S
 		int32 SentThisCall = 0;
 		if (!Socket->Send(Data + TotalSent, Size - TotalSent, SentThisCall))
 		{
-			const ESocketErrors Error = SocketSubsystem ? SocketSubsystem->GetLastErrorCode() : SE_NO_ERROR;
-			UE_LOG(LogSocketsTcpSender, Warning, TEXT("Socket send failed (%s, error=%d, requested=%d, totalSent=%d)."), Context ? Context : TEXT("unknown"), static_cast<int32>(Error), Size - TotalSent, TotalSent);
-			return false;
+			const ESocketErrors Error = SocketSubsystem->GetLastErrorCode();
+			return (Error == SE_NO_ERROR) ? SE_EWOULDBLOCK : Error;
 		}
 
 		if (SentThisCall <= 0)
 		{
-			UE_LOG(LogSocketsTcpSender, Warning, TEXT("Socket reported zero bytes sent (%s) while %d bytes remain."), Context ? Context : TEXT("unknown"), Size - TotalSent);
-			return false;
+			return SE_ECONNRESET;
 		}
 
 		TotalSent += SentThisCall;
 	}
 
-	return true;
+	return SE_NO_ERROR;
 }
 
 bool FO3DSocketsTcpSender::SendAudioFrame(const FString& StreamLabel, const uint8* PCM16Data, int32 NumBytes, int32 NumChannels, int32 SampleRate, double TimestampSec)

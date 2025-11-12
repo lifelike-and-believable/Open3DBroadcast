@@ -54,6 +54,7 @@ static TAutoConsoleVariable<int32> CVarO3DReceiverAudioDebug(
     TEXT("Enable debug logs when publishing receiver audio frames (0/1)."),
     ECVF_Default);
 
+/** Adapts the shared consumer registry callback into this live source instance. */
 class FO3DReceiverSource::FSerializedConsumer : public ISerializedFrameConsumer
 {
 public:
@@ -76,6 +77,7 @@ private:
     TWeakPtr<FO3DReceiverSource> Owner;
 };
 
+/** Lightweight audio bridge that republishes transport frames onto the gameplay audio bus. */
 class FO3DReceiverSource::FAudioSink : public IO3DReceiverAudioSink
 {
 public:
@@ -212,6 +214,7 @@ void FO3DReceiverSource::Update()
     // No-op; Tick handles polling.
 }
 
+/** Tear down any existing transport and spin up the selected receiver implementation. */
 bool FO3DReceiverSource::StartTransport()
 {
     StopTransport();
@@ -292,6 +295,7 @@ bool FO3DReceiverSource::StartTransport()
     return true;
 }
 
+/** Stop the active transport and clear subject/audio caches. */
 void FO3DReceiverSource::StopTransport()
 {
     if (ActiveReceiver.IsValid())
@@ -315,6 +319,7 @@ void FO3DReceiverSource::StopTransport()
     ResetOrderingState();
 }
 
+/** Ensure we always have a transport name for details panels that expose the source settings. */
 void FO3DReceiverSource::EnsureValidTransportName()
 {
     if (!SourceSettings.TransportName.IsNone())
@@ -334,6 +339,7 @@ void FO3DReceiverSource::EnsureValidTransportName()
     }
 }
 
+/** Build a transport config from the user settings, applying customization hooks if present. */
 FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
 {
     FO3DTransportConfig Config;
@@ -389,6 +395,7 @@ FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
     return Config;
 }
 
+/** Record the wall-clock time that the last packet was processed for connection health checks. */
 void FO3DReceiverSource::UpdateConnectionLastActive()
 {
     const double Now = FPlatformTime::Seconds();
@@ -396,6 +403,7 @@ void FO3DReceiverSource::UpdateConnectionLastActive()
     ConnectionLastActive = Now;
 }
 
+/** Drop LiveLink subjects that have not produced frames within the inactivity window. */
 void FO3DReceiverSource::RemoveInactiveSubjects()
 {
     const double Now = FPlatformTime::Seconds();
@@ -418,6 +426,7 @@ void FO3DReceiverSource::RemoveInactiveSubjects()
     }
 }
 
+/** Entry point from the serialized consumer; parses payloads then pushes LiveLink updates. */
 void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds)
 {
     if (!Client || !bIsValid)
@@ -476,6 +485,7 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
     }
 }
 
+/** Parse the FlatBuffer payload into a reusable SubjectList scratch structure. */
 bool FO3DReceiverSource::ParseSubjectListBuffer(const FString& Subject, const TArray<uint8>& Buffer)
 {
     if (!SubjectScratch.Parse(reinterpret_cast<const char*>(Buffer.GetData()), Buffer.Num(), nullptr, true))
@@ -486,6 +496,7 @@ bool FO3DReceiverSource::ParseSubjectListBuffer(const FString& Subject, const TA
     return true;
 }
 
+/** Apply duplicate/out-of-order suppression while keeping activity timestamps in sync. */
 bool FO3DReceiverSource::ShouldProcessFrame(double SubjectListTime, double NowSeconds)
 {
     if (ShouldResetOrderingWindow(NowSeconds, SubjectListTime))
@@ -527,6 +538,7 @@ bool FO3DReceiverSource::ShouldProcessFrame(double SubjectListTime, double NowSe
     return bShouldProcess;
 }
 
+/** Decide whether latency spikes warrant resetting the timestamp ordering guardrails. */
 bool FO3DReceiverSource::ShouldResetOrderingWindow(double NowSeconds, double SubjectListTime) const
 {
     if (LastAppliedSubjectListTime < 0.0)
@@ -551,12 +563,14 @@ bool FO3DReceiverSource::ShouldResetOrderingWindow(double NowSeconds, double Sub
     return false;
 }
 
+/** Thread-safe accessor for when the last packet arrived. */
 double FO3DReceiverSource::GetLastConnectionActive() const
 {
     FScopeLock Lock(&ConnectionLastActiveSection);
     return ConnectionLastActive;
 }
 
+/** Convert SubjectList transform data into LiveLink-friendly arrays. */
 bool FO3DReceiverSource::BuildSubjectPose(O3DS::Subject* SubjectPtr, TArray<FName>& OutBoneNames, TArray<int32>& OutBoneParents, TArray<FTransform>& OutBoneTransforms) const
 {
     OutBoneNames.Reset();
@@ -637,6 +651,7 @@ bool FO3DReceiverSource::BuildSubjectPose(O3DS::Subject* SubjectPtr, TArray<FNam
     return OutBoneTransforms.Num() > 0;
 }
 
+/** Extract animation curve names/values while filtering out invalid data. */
 void FO3DReceiverSource::BuildSubjectCurves(O3DS::Subject* SubjectPtr, TArray<FName>& OutCurveNames, TArray<float>& OutCurveValues) const
 {
     OutCurveNames.Reset();
@@ -666,6 +681,7 @@ void FO3DReceiverSource::BuildSubjectCurves(O3DS::Subject* SubjectPtr, TArray<FN
     }
 }
 
+/** Build LiveLink static/frame data and push it to the client for a single parsed subject. */
 void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double SubjectListTime, TArray<FName>& BoneNames, TArray<int32>& BoneParents, TArray<FTransform>& BoneTransforms, TArray<FName>& CurveNames, TArray<float>& CurveValues)
 {
     if (!SubjectPtr)
@@ -719,6 +735,7 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
     SubjectLastUpdateTime.Add(SubjectFName, FPlatformTime::Seconds());
 }
 
+/** Fill in missing audio metadata (subject name, defaults) before publishing to the bus. */
 void FO3DReceiverSource::FinalizeAudioMeta(O3DS::FAudioFrameMeta& Meta) const
 {
     Meta.SourceGuid = SourceGuid;

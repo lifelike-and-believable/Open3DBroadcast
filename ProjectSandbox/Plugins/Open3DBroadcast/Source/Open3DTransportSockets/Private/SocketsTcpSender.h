@@ -9,6 +9,7 @@
 class FSocket;
 class ISocketSubsystem;
 class FInternetAddr;
+enum ESocketErrors;
 
 class FSocketsTcpSenderAudioSink;
 
@@ -41,7 +42,7 @@ private:
 	bool AcceptAudioClient();
 	bool SendFramedPayload(const uint8* Data, int32 Size);
 	bool SendAudioFramedPayload(const uint8* Data, int32 Size);
-	bool SendBytes(FSocket* Socket, const uint8* Data, int32 Size, const TCHAR* Context);
+	ESocketErrors SendBytes(FSocket* Socket, const uint8* Data, int32 Size, const TCHAR* Context);
 	bool SendAudioFrame(const FString& StreamLabel, const uint8* PCM16Data, int32 NumBytes, int32 NumChannels, int32 SampleRate, double TimestampSec);
 	TSharedPtr<FInternetAddr> CreateBindAddress(const FString& Host, int32 Port, bool& bOutValid) const;
 

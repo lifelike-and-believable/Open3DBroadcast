@@ -12,6 +12,7 @@ DEFINE_LOG_CATEGORY(LogO3DSenderComponent);
 DEFINE_LOG_CATEGORY(LogO3DSenderSerializer);
 DEFINE_LOG_CATEGORY(LogO3DSenderAudio);
 
+/** Module entry point for the Open3DStream sender feature set (runtime and editor bindings). */
 class FOpen3DSenderModule : public IModuleInterface
 {
 public:

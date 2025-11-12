@@ -12,9 +12,9 @@ namespace O3DS
 	class SubjectList;
 }
 
-// Serialized frame event: Subject, Buffer (flatbuffer bytes), Timestamp seconds
+/** Serialized frame event: Subject, Buffer (FlatBuffer bytes), Timestamp seconds. */
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnO3DSerializedFrame, const FString& /*Subject*/, const TArray<uint8>& /*Buffer*/, double /*Timestamp*/);
-// SubjectList event for transport interface consumption
+/** SubjectList event for transports that prefer direct access to the FlatBuffer object model. */
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnO3DSubjectListReady, const FString& /*Subject*/, const TSharedPtr<O3DS::SubjectList>& /*Payload*/);
 
 struct FO3DSSkeletonDescriptor;

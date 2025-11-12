@@ -6,6 +6,7 @@ DEFINE_LOG_CATEGORY(LogO3DShared);
 
 #define LOCTEXT_NAMESPACE "FOpen3DSharedModule"
 
+/** Houses shared utilities (transport types, helpers) consumed by sender/receiver modules. */
 class FOpen3DSharedModule : public IModuleInterface
 {
 public:
