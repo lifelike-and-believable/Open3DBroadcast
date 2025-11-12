@@ -1,0 +1,103 @@
+name: Open3DBroadcast Plugin Nightly
+
+on:
+  schedule:
+    - cron: "0 3 * * *"  # 3 AM UTC nightly
+  workflow_dispatch:
+    inputs:
+      build_configuration:
+        description: "CMake build configuration"
+        required: false
+        default: RelWithDebInfo
+        type: choice
+        options:
+          - RelWithDebInfo
+          - Release
+      run_editor_tests:
+        description: "Run Unreal automation tests"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  checks: write
+
+concurrency:
+  group: open3dbroadcast-plugin-nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UE_ROOT: 'C:\\Program Files\\Epic Games\\UE_5.6'
+  PLUGIN_NAME: 'Open3DBroadcast'
+
+jobs:
+  nightly-build:
+    runs-on: [ self-hosted, ue5, windows ]
+
+    steps:
+      - name: Build plugin core (composite)
+        id: core
+        uses: ./.github/actions/build-plugin-core
+        with:
+          ue_root: ${{ env.UE_ROOT }}
+          plugin_name: ${{ env.PLUGIN_NAME }}
+          plugin_relative_path: ProjectSandbox/Plugins/Open3DBroadcast
+          build_type: ${{ inputs.build_configuration || 'RelWithDebInfo' }}
+          enable_webrtc: true
+
+      - name: Run ctest
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'vsbuild')) { throw 'vsbuild directory not found for ctest.' }
+          Push-Location vsbuild
+          try {
+            ctest -C ${{ inputs.build_configuration || 'RelWithDebInfo' }} --output-on-failure
+          } finally {
+            Pop-Location
+          }
+
+      - name: Build Open3DBroadcast plugin (Win64)
+        shell: powershell
+        run: |
+          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
+          & .\Build\Scripts\Build-Plugin.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -PluginUPluginPath "${{ steps.core.outputs.uplugin_path }}" `
+            -OutDir "$pkg" `
+            -TargetPlatforms @("Win64") `
+            -Configuration "Shipping"
+
+      - name: Upload plugin package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Open3DBroadcast-Nightly-${{ github.sha }}
+          path: ${{ runner.temp }}/PluginPackage
+          retention-days: 21
+
+      - name: Run Unreal automation tests
+        if: inputs.run_editor_tests != 'false'
+        shell: powershell
+        run: |
+          & .\Build\Scripts\Run-AutomationTests.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -ProjectFile "$PWD\ProjectSandbox\ProjectSandbox.uproject" `
+            -ResultsDir "$PWD\Artifacts\NightlyAutomation" `
+            -TestFilter "Open3DBroadcast.*"
+
+      - name: Upload automation artifacts
+        if: inputs.run_editor_tests != 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Open3DBroadcast-NightlyTests-${{ github.sha }}
+          path: Artifacts/NightlyAutomation
+          if-no-files-found: ignore
+          retention-days: 21
+
+      - name: Report failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            console.log(`❌ Nightly Open3DBroadcast build failed. See: ${runUrl}`);

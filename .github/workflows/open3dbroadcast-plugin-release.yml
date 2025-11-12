@@ -1,0 +1,204 @@
+
+name: Open3DBroadcast Plugin Release
+
+on:
+  push:
+    tags:
+      - "open3dbroadcast-v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: 'Version tag (e.g., open3dbroadcast-v1.0.0)'
+        required: true
+        type: string
+      build_configuration:
+        description: 'CMake build configuration'
+        required: false
+        default: Release
+        type: choice
+        options:
+          - Release
+          - RelWithDebInfo
+
+permissions:
+  contents: write
+  checks: write
+
+concurrency:
+  group: open3dbroadcast-plugin-release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UE_ROOT: 'C:\Program Files\Epic Games\UE_5.6'
+  PLUGIN_NAME: 'Open3DBroadcast'
+
+jobs:
+  build-release:
+    runs-on: [ self-hosted, ue5, windows ]
+
+    steps:
+      - name: Build plugin core (composite)
+        id: core
+        uses: ./.github/actions/build-plugin-core
+        with:
+          ue_root: ${{ env.UE_ROOT }}
+          plugin_name: ${{ env.PLUGIN_NAME }}
+          plugin_relative_path: ProjectSandbox/Plugins/Open3DBroadcast
+          build_type: ${{ inputs.build_configuration || 'Release' }}
+          enable_webrtc: true
+
+      - name: Determine version
+        id: version
+        shell: powershell
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = "${{ inputs.version_tag }}"
+          } else {
+            $version = "${{ github.ref_name }}"
+          }
+          $normalized = $version -replace '^open3dbroadcast-v', ''
+          "tag=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "number=$normalized" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Version tag: $version"
+          Write-Host "Version number: $normalized"
+
+      - name: Verify required libraries
+        shell: powershell
+        run: |
+          $libRoot = Join-Path "${{ steps.core.outputs.plugin_dir }}" "ThirdParty/Lib/Win64"
+          $required = @(
+            "open3dstreamstatic.lib",
+            "flatbuffers.lib",
+            "nng.lib",
+            "opus.lib"
+          )
+          $missing = @()
+          foreach ($lib in $required) {
+            $full = Join-Path $libRoot $lib
+            if (-not (Test-Path $full)) {
+              $missing += $full
+            }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Error "Missing required third-party libraries:"
+            $missing | ForEach-Object { Write-Error "  - $_" }
+            exit 1
+          }
+          Write-Host "[OK] All required libraries present in $libRoot"
+
+      - name: Update plugin descriptor version
+        shell: powershell
+        run: |
+          $uplugin = "${{ steps.core.outputs.uplugin_path }}"
+          $versionNumber = "${{ steps.version.outputs.number }}"
+          $content = Get-Content -Path $uplugin -Raw | ConvertFrom-Json
+          $content.VersionName = $versionNumber
+          if ($content.Version) {
+            $content.Version = [int]$content.Version + 1
+          }
+          $content | ConvertTo-Json -Depth 10 | Set-Content -Path $uplugin -Encoding UTF8
+          Write-Host "Updated $uplugin to version $versionNumber"
+
+      - name: Build Open3DBroadcast plugin (Win64, Shipping)
+        shell: powershell
+        run: |
+          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
+          & .\Build\Scripts\Build-Plugin.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -PluginUPluginPath "${{ steps.core.outputs.uplugin_path }}" `
+            -OutDir "$pkg" `
+            -TargetPlatforms @("Win64") `
+            -Configuration "Shipping"
+
+      - name: Copy ThirdParty payload into packaged plugin
+        shell: powershell
+        run: |
+          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
+          $sourceThirdParty = Join-Path "${{ steps.core.outputs.plugin_dir }}" 'ThirdParty'
+          $targetThirdParty = Join-Path $pkg 'HostProject/Plugins/Open3DBroadcast/ThirdParty'
+          if (Test-Path $sourceThirdParty) {
+            New-Item -ItemType Directory -Force -Path $targetThirdParty | Out-Null
+            Copy-Item -Path "$sourceThirdParty/*" -Destination $targetThirdParty -Recurse -Force
+            Write-Host "Copied ThirdParty assets into packaged plugin"
+          } else {
+            Write-Warning "No ThirdParty directory found at $sourceThirdParty"
+          }
+
+      - name: Restructure package for archive
+        id: restructure
+        shell: powershell
+        run: |
+          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
+          $restructured = Join-Path $env:RUNNER_TEMP 'PluginArchive'
+
+          $ueVersionMatch = [regex]::Match($env:UE_ROOT, 'UE_(\d+\.\d+)')
+          if ($ueVersionMatch.Success) {
+            $ueVersion = $ueVersionMatch.Groups[1].Value
+          } else {
+            $ueVersion = '5.6'
+          }
+
+          $targetPath = Join-Path $restructured "UE_$ueVersion/Plugins/Open3DBroadcast"
+          New-Item -ItemType Directory -Force -Path $targetPath | Out-Null
+          Copy-Item -Path "$pkg/*" -Destination $targetPath -Recurse -Force
+          "archive_root=$restructured" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "ue_version=$ueVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Create archive
+        id: archive
+        shell: powershell
+        run: |
+          $restructured = "${{ steps.restructure.outputs.archive_root }}"
+          $archiveName = "Open3DBroadcast-Plugin-${{ steps.version.outputs.number }}-Win64.zip"
+          $archivePath = Join-Path $env:RUNNER_TEMP $archiveName
+          Compress-Archive -Path "$restructured/*" -DestinationPath $archivePath -CompressionLevel Optimal
+          "path=$archivePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "name=$archiveName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Created archive $archiveName"
+
+      - name: Generate release notes
+        id: notes
+        shell: powershell
+        run: |
+          $notes = @"
+          ## Open3DBroadcast ${{ steps.version.outputs.tag }}
+
+          ### Installation
+
+          1. Download the attached archive.
+          2. Extract the `UE_X.X/Plugins/Open3DBroadcast` folder that matches your Unreal Engine version.
+          3. Copy the folder into your project's `Plugins` directory.
+          4. Restart Unreal Editor and enable **Open3DBroadcast**.
+
+          ### Compatibility
+
+          - **Unreal Engine**: Built with ${{ steps.restructure.outputs.ue_version }} (compatible with UE 5.6+)
+          - **Platform**: Windows (Win64)
+
+          ### Contents
+
+          - Open3DBroadcast plugin modules (Sender, Receiver, Shared, Transport implementations)
+          - Required Open3DStream core libraries and third-party dependencies
+          - Host project with plugin pre-mounted for quick validation
+          "@
+          $notes | Out-File -FilePath "$env:RUNNER_TEMP\release_notes.md" -Encoding UTF8
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Open3DBroadcast ${{ steps.version.outputs.number }}
+          body_path: ${{ runner.temp }}/release_notes.md
+          files: ${{ steps.archive.outputs.path }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Open3DBroadcast-Release-${{ steps.version.outputs.number }}
+          path: ${{ runner.temp }}/PluginPackage
+          retention-days: 90
