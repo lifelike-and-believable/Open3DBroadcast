@@ -1,0 +1,71 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "O3DSenderInterface.h"
+#include "SocketsTransportCommon.h"
+
+#include "HAL/ThreadSafeCounter.h"
+
+class FSocket;
+class ISocketSubsystem;
+class FInternetAddr;
+class FSocketsUdpSenderAudioSink;
+
+/**
+ * UDP-based sender implementation for the sockets transport module.
+ */
+class FO3DSocketsUdpSender : public IOpen3DSender
+{
+public:
+	FO3DSocketsUdpSender();
+	virtual ~FO3DSocketsUdpSender() override;
+
+	virtual bool Initialize(const FO3DTransportConfig& Config) override;
+	virtual bool Start() override;
+	virtual void Stop() override;
+	virtual bool Send(const O3DS::SubjectList& List) override;
+	virtual void Tick(float DeltaSeconds) override;
+	virtual FO3DTransportStats GetStats() const override;
+	virtual bool SupportsAudio() const override;
+	virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
+
+private:
+	bool ResolveRemoteAddress(const FString& Host, int32 Port);
+	bool ResolveAddress(const FString& Host, int32 Port, TSharedPtr<FInternetAddr>& OutAddr);
+	bool CreateSocket();
+	bool CreateAudioSocket();
+	void DestroySocket();
+	void DestroyAudioSocket();
+	bool SendPayload(FSocket* InSocket, const TSharedPtr<FInternetAddr>& InAddr, const uint8* Data, int32 Size, const TCHAR* Context);
+	bool SendDatagram(FSocket* InSocket, const TSharedPtr<FInternetAddr>& InAddr, const uint8* Data, int32 Size, const TCHAR* Context);
+	bool SendFragmented(FSocket* InSocket, const TSharedPtr<FInternetAddr>& InAddr, const uint8* Data, int32 Size, const TCHAR* Context);
+	bool SendAudioFrame(const FString& StreamLabel, const uint8* PCM16Data, int32 NumBytes, int32 NumChannels, int32 SampleRate, double TimestampSec);
+
+private:
+	friend class FSocketsUdpSenderAudioSink;
+
+	FO3DTransportConfig ActiveConfig;
+	FO3DTransportStats Stats;
+	FO3DTransportAudioConfig ActiveAudioConfig;
+
+	ISocketSubsystem* SocketSubsystem = nullptr;
+	FSocket* Socket = nullptr;
+	FSocket* AudioSocket = nullptr;
+	TSharedPtr<FInternetAddr> RemoteAddr;
+	TSharedPtr<FInternetAddr> AudioRemoteAddr;
+
+	FString RemoteHost;
+	int32 RemotePort = 0;
+	FString StreamId;
+	FString AudioRemoteHost;
+	int32 AudioRemotePort = 0;
+
+	bool bAllowBroadcast = false;
+	int32 MaxDatagramBytes = 64000;
+	int32 MtuBytes = 1200;
+	bool bAudioEnabled = false;
+	FGuid AudioSourceGuid;
+
+	FThreadSafeCounter MessageCounter;
+};
+

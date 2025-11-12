@@ -1,4 +1,5 @@
 using UnrealBuildTool;
+using System.Collections.Generic;
 //using O3DBroadcastBuild;
 
 [SupportedTargetTypes(TargetType.Game, TargetType.Editor)]
@@ -24,11 +25,31 @@ public class Open3DTransportSockets : ModuleRules
             "Networking"
         });
 
-        PrivateDependencyModuleNames.AddRange(new string[]
+        List<string> PrivateModules = new List<string>
         {
-            "Open3DShared",
-            "Open3DSender",
-            "Open3DReceiver"
-        });
+            "Open3DShared"
+        };
+
+        if (O3DBuildFlags.IsSenderEnabled(Target))
+        {
+            PrivateModules.Add("Open3DSender");
+        }
+
+        if (O3DBuildFlags.IsReceiverEnabled(Target))
+        {
+            PrivateModules.Add("Open3DReceiver");
+        }
+
+        PrivateDependencyModuleNames.AddRange(PrivateModules);
+
+        if (Target.bBuildEditor)
+        {
+            PrivateDependencyModuleNames.AddRange(new string[]
+            {
+                "Slate",
+                "SlateCore",
+                "AppFramework"
+            });
+        }
     }
 }

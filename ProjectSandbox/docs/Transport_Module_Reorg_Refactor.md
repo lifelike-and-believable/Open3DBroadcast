@@ -98,6 +98,23 @@ Additional rules:
 
 > Entries are listed in reverse chronological order (newest first).
 
+### 2025-11-11 UTC – PR C: NNG transport automation verification
+- **Completed Work:** Enabled NNG automation tests under `WITH_DEV_AUTOMATION_TESTS`, added module dependencies for socket helpers, and wired cleanup/queue-limit handling so both data round-trip and queue-limit cases execute deterministically.
+- **Verification:** `Build.bat ProjectSandboxEditor Win64 Development E:/OtherProjects/Open3DStream/ProjectSandbox/ProjectSandbox.uproject -waitmutex` (succeeded) and `Run-AutomationTests.ps1` for `Open3DStream.TransportNNG.Data.RoundTrip` and `Open3DStream.TransportNNG.Queue.Limit` (both green; reports in `Artifacts/Tests/NNG-*`).
+- **Open Questions / Risks:** None.
+- **Emergent / Follow-up Actions:** 1) Extend NNG coverage to multi-subscriber scenarios; 2) Update transport docs to call out advanced queue-limit configuration defaults.
+
+### 2025-11-12 UTC – UDP sockets audio enablement
+- **Completed Work:** Added PCM16 audio ingest/egress to the UDP sender and receiver modules, including dual-socket setup, fragment-aware serialization, and sink wiring to mirror existing TCP behaviour.
+- **Verification:** Build/tests not yet executed in this workspace; pending `ProjectSandboxEditor` rebuild and transport automation once staging agent is free.
+- **Open Questions / Risks:** Need to validate runtime fragmentation thresholds against UE 5.6 networking limits and confirm no regressions in mixed audio/data traffic.
+- **Emergent / Follow-up Actions:** 1) Run `Open3DStream.TransportSockets.Audio.RoundTrip` automation after next build; 2) Capture packet traces to confirm audio payload ordering; 3) Update transport configuration docs to note UDP audio requirements.
+### 2025-11-11 UTC – PR B: TCP sockets translation unit stabilization
+- **Completed Work:** Restored the TCP sender/receiver translation units by adding the missing `ISerializedFrameConsumer`, `FIPv4Address`, and FlatBuffers model includes and adjusted the receiver connection-state handling so the new split build produces the expected objects.
+- **Verification:** `Build.bat ProjectSandboxEditor Win64 Development E:\OtherProjects\Open3DStream\ProjectSandbox\ProjectSandbox.uproject -waitmutex` — succeeded (`Result: Succeeded`, 4.91 s total) after the fix.
+- **Open Questions / Risks:** None.
+- **Emergent / Follow-up Actions:** Add sockets transport automation coverage to guard the split translation units and stage serialization consumer harness updates before re-enabling verbose warnings.
+
 ### 2025-11-11 UTC – Build flag helper validation pass
 - **Completed Work:** Rebuilt `ProjectSandboxEditor` with the new `O3DBuildFlags` helper in place and ensured every module honors the toggles without leaking dependencies outside the plugin.
 - **Verification:** `Build.bat ProjectSandboxEditor Win64 Development E:\OtherProjects\Open3DStream\ProjectSandbox\ProjectSandbox.uproject -waitmutex` followed by `Run-AutomationTests.ps1` targeting `Open3DStream.TransportLoopback.Audio.QueueOverflow+Open3DStream.TransportLoopback.Audio.RoundTrip` (`Artifacts\Tests\TransportLoopback_Audio\index.json`) — both succeeded in this session.
@@ -729,3 +746,4 @@ Definition of Done Addendum:
 - All legacy class name prefixes removed from active code paths (except intentional protocol/API names).
 - Search for `Open3DStream` / `Open3DBroadcast` yields only legacy plugin references or historical docs.
 - Loopback smoke test uses identical sender/receiver code paths as other transports (no `#ifdef` special cases).
+

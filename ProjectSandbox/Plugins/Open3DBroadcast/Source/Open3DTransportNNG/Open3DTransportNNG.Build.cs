@@ -26,7 +26,22 @@ public class Open3DTransportNNG : ModuleRules
             throw new BuildException($"Open3DTransportNNG does not define third-party binaries for platform {Target.Platform} yet.");
         }
 
-        var ModuleThirdPartyLibDir = Path.Combine(ModuleDirectory, "ThirdParty", "Lib", platformSubdir);
+        var moduleThirdPartyRoot = Path.Combine(ModuleDirectory, "ThirdParty");
+        var moduleThirdPartyIncludeDir = Path.Combine(moduleThirdPartyRoot, "Include");
+        if (Directory.Exists(moduleThirdPartyIncludeDir))
+        {
+            PublicSystemIncludePaths.Add(moduleThirdPartyIncludeDir);
+        }
+
+        var repoRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "..", "..", ".."));
+        var sharedNngIncludeDir = Path.Combine(repoRoot, "thirdparty", "nng", "include");
+        if (!Directory.Exists(sharedNngIncludeDir))
+        {
+            throw new BuildException($"Missing NNG headers at '{sharedNngIncludeDir}'.");
+        }
+        PublicSystemIncludePaths.Add(sharedNngIncludeDir);
+
+        var ModuleThirdPartyLibDir = Path.Combine(moduleThirdPartyRoot, "Lib", platformSubdir);
 
         var nngLibPath = Path.Combine(ModuleThirdPartyLibDir, "nng.lib");
         if (!File.Exists(nngLibPath))
@@ -48,7 +63,22 @@ public class Open3DTransportNNG : ModuleRules
         {
             "Open3DShared",
             "Open3DSender",
-            "Open3DReceiver"
+            "Open3DReceiver",
+            "InputCore",
+            "ApplicationCore",
+            "HTTP",
+            "Sockets",
+            "Networking"
         });
+
+        if (Target.bBuildEditor)
+        {
+            PrivateDependencyModuleNames.AddRange(new string[]
+            {
+                "Slate",
+                "SlateCore",
+                "AppFramework"
+            });
+        }
     }
 }

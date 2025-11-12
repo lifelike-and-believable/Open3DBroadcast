@@ -1,0 +1,388 @@
+// Copyright (c) Open3DStream Contributors
+#include "Receiver/NngReceiver.h"
+
+#include "Logging/LogMacros.h"
+#include "HAL/PlatformTime.h"
+#include "SerializedFrameConsumerRegistry.h"
+
+#if !defined(NNG_STATIC_LIB)
+#define NNG_STATIC_LIB 1
+#endif
+
+#include <nng/nng.h>
+#include <nng/protocol/pair1/pair.h>
+#include <nng/protocol/pipeline0/pull.h>
+#include <nng/protocol/pubsub0/sub.h>
+
+DEFINE_LOG_CATEGORY_STATIC(LogO3DNngReceiver, Log, All);
+
+namespace
+{
+    constexpr double InitialBackoffSeconds = 0.1;
+    constexpr double MaxBackoffSeconds = 5.0;
+    constexpr uint64 MaxPayloadBytes = 50ull * 1024ull * 1024ull;
+
+    static void StaticPipeCallback(nng_pipe /*Pipe*/, nng_pipe_ev Event, void* Context)
+    {
+        FO3DNngReceiver* Receiver = static_cast<FO3DNngReceiver*>(Context);
+        if (!Receiver)
+        {
+            return;
+        }
+
+        if (Event == NNG_PIPE_EV_ADD_POST)
+        {
+            Receiver->HandlePipeAdded();
+        }
+        else if (Event == NNG_PIPE_EV_REM_POST)
+        {
+            Receiver->HandlePipeRemoved();
+        }
+    }
+}
+
+struct FO3DNngReceiver::FNngSocketWrapper
+{
+    nng_socket Socket{ NNG_SOCKET_INITIALIZER };
+
+    ~FNngSocketWrapper()
+    {
+        if (Socket.id != 0)
+        {
+            nng_close(Socket);
+            Socket.id = 0;
+        }
+    }
+};
+
+bool FO3DNngReceiver::Initialize(const FO3DTransportConfig& Config)
+{
+    Stop();
+
+    FString Error;
+    if (!O3DNNG::ParseReceiverOptions(Config, Options, Error))
+    {
+        UE_LOG(LogO3DNngReceiver, Warning, TEXT("Failed to parse NNG receiver config: %s"), *Error);
+        return false;
+    }
+
+    ActiveConfig = Config;
+    ActiveConfig.Uri = Options.CanonicalUri;
+    ActiveConfig.StreamId = Options.StreamId;
+
+    Stats.Reset();
+    PipeCount.Reset();
+    BackoffAttempt = 0;
+    LastDialAttempt = 0.0;
+    LastErrorLogTimestamp = 0.0;
+
+    bInitialized = true;
+    return true;
+}
+
+void FO3DNngReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer)
+{
+    Consumer = InConsumer;
+}
+
+bool FO3DNngReceiver::Start()
+{
+    if (!bInitialized.Load())
+    {
+        UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver Start called before Initialize"));
+        return false;
+    }
+
+    if (bRunning.Load())
+    {
+        return true;
+    }
+
+    BackoffAttempt = 0;
+    LastDialAttempt = 0.0;
+
+    const bool bOpened = OpenSocket();
+    bRunning = true;
+
+    UE_LOG(LogO3DNngReceiver, Log, TEXT("NNG receiver started uri=%s"), *Options.CanonicalUri);
+    return bOpened || !Options.bListen;
+}
+
+void FO3DNngReceiver::Stop()
+{
+    if (!bRunning.Load())
+    {
+        CloseSocket();
+        return;
+    }
+
+    CloseSocket();
+    bRunning = false;
+    bConnected = false;
+}
+
+int32 FO3DNngReceiver::Poll()
+{
+    if (!bRunning.Load())
+    {
+        return 0;
+    }
+
+    if (!Options.bListen)
+    {
+        if (!EnsureDialSocket())
+        {
+            return 0;
+        }
+    }
+    else if (!Socket)
+    {
+        if (!OpenSocket())
+        {
+            return 0;
+        }
+    }
+
+    if (!Socket)
+    {
+        return 0;
+    }
+
+    int32 FramesProcessed = 0;
+
+    while (FramesProcessed < 16)
+    {
+        void* Buffer = nullptr;
+        size_t Size = 0;
+        const int Ret = nng_recv(Socket->Socket, &Buffer, &Size, NNG_FLAG_NONBLOCK | NNG_FLAG_ALLOC);
+        if (Ret == NNG_EAGAIN || Ret == NNG_ETIMEDOUT)
+        {
+            break;
+        }
+
+        if (Ret != 0)
+        {
+            HandleReceiveError(Ret);
+            break;
+        }
+
+        if (Size == 0)
+        {
+            nng_free(Buffer, Size);
+            continue;
+        }
+
+        if (Size > MaxPayloadBytes)
+        {
+            UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver payload %llu bytes exceeds safety cap; dropping."), static_cast<unsigned long long>(Size));
+            nng_free(Buffer, Size);
+            Stats.DroppedFrames++;
+            continue;
+        }
+
+        TArray<uint8> Payload;
+        Payload.SetNumUninitialized(static_cast<int32>(Size));
+        FMemory::Memcpy(Payload.GetData(), Buffer, Size);
+        nng_free(Buffer, Size);
+
+        if (TSharedPtr<ISerializedFrameConsumer> ConsumerPinned = Consumer.Pin())
+        {
+            ConsumerPinned->SubmitFrame(Options.StreamId, Payload, FPlatformTime::Seconds());
+        }
+
+        Stats.FramesReceived++;
+        Stats.BytesReceived += static_cast<int64>(Payload.Num());
+        ++FramesProcessed;
+    }
+
+    return FramesProcessed;
+}
+
+FO3DTransportStats FO3DNngReceiver::GetStats() const
+{
+    return Stats;
+}
+
+void FO3DNngReceiver::HandlePipeAdded()
+{
+    const int32 Count = PipeCount.Increment();
+    bConnected = true;
+    BackoffAttempt = 0;
+    UE_LOG(LogO3DNngReceiver, Log, TEXT("NNG receiver pipe added (count=%d)"), Count);
+}
+
+void FO3DNngReceiver::HandlePipeRemoved()
+{
+    const int32 Count = PipeCount.Decrement();
+    if (Count <= 0)
+    {
+        if (!Options.bListen)
+        {
+            bConnected = false;
+        }
+        else
+        {
+            bConnected = true;
+        }
+    }
+    UE_LOG(LogO3DNngReceiver, Log, TEXT("NNG receiver pipe removed (count=%d)"), FMath::Max(0, Count));
+}
+
+bool FO3DNngReceiver::OpenSocket()
+{
+    CloseSocket();
+
+    FNngSocketWrapper* NewSocket = new FNngSocketWrapper();
+    int Ret = 0;
+
+    const FTCHARToUTF8 AddressUtf8(*Options.TcpAddress);
+
+    switch (Options.Mode)
+    {
+    case O3DNNG::ENngMode::Sub:
+        Ret = nng_sub0_open(&NewSocket->Socket);
+        if (Ret == 0)
+        {
+            if (Options.Topic.IsEmpty())
+            {
+                Ret = nng_setopt(NewSocket->Socket, NNG_OPT_SUB_SUBSCRIBE, "", 0);
+            }
+            else
+            {
+                const FTCHARToUTF8 TopicUtf8(*Options.Topic);
+                Ret = nng_setopt(NewSocket->Socket, NNG_OPT_SUB_SUBSCRIBE, TopicUtf8.Get(), static_cast<size_t>(TopicUtf8.Length()));
+            }
+        }
+        if (Ret == 0)
+        {
+            if (Options.bListen)
+            {
+                Ret = nng_listen(NewSocket->Socket, AddressUtf8.Get(), nullptr, 0);
+                bConnected = (Ret == 0);
+            }
+            else
+            {
+                Ret = nng_dial(NewSocket->Socket, AddressUtf8.Get(), nullptr, NNG_FLAG_NONBLOCK);
+                bConnected = (Ret == 0);
+            }
+        }
+        break;
+    case O3DNNG::ENngMode::Pair:
+        Ret = nng_pair1_open(&NewSocket->Socket);
+        if (Ret == 0)
+        {
+            if (Options.bListen)
+            {
+                Ret = nng_listen(NewSocket->Socket, AddressUtf8.Get(), nullptr, 0);
+                bConnected = (Ret == 0);
+            }
+            else
+            {
+                Ret = nng_dial(NewSocket->Socket, AddressUtf8.Get(), nullptr, NNG_FLAG_NONBLOCK);
+                bConnected = (Ret == 0);
+            }
+        }
+        break;
+    case O3DNNG::ENngMode::Pull:
+        Ret = nng_pull0_open(&NewSocket->Socket);
+        if (Ret == 0)
+        {
+            if (Options.bListen)
+            {
+                Ret = nng_listen(NewSocket->Socket, AddressUtf8.Get(), nullptr, 0);
+                bConnected = (Ret == 0);
+            }
+            else
+            {
+                Ret = nng_dial(NewSocket->Socket, AddressUtf8.Get(), nullptr, NNG_FLAG_NONBLOCK);
+                bConnected = (Ret == 0);
+            }
+        }
+        break;
+    default:
+        UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver unsupported mode"));
+        delete NewSocket;
+        return false;
+    }
+
+    if (Ret != 0)
+    {
+        UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver socket open failed (%d) %s"), Ret, UTF8_TO_TCHAR(nng_strerror(Ret)));
+        delete NewSocket;
+        Socket = nullptr;
+        if (!Options.bListen)
+        {
+            LastDialAttempt = FPlatformTime::Seconds();
+            BackoffAttempt++;
+        }
+        return false;
+    }
+
+    PipeCount.Reset();
+    const int AddNotify = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_ADD_POST, StaticPipeCallback, this);
+    if (AddNotify != 0)
+    {
+        UE_LOG(LogO3DNngReceiver, Verbose, TEXT("NNG receiver pipe notify add failed (%d) %s"), AddNotify, UTF8_TO_TCHAR(nng_strerror(AddNotify)));
+    }
+    const int RemoveNotify = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_REM_POST, StaticPipeCallback, this);
+    if (RemoveNotify != 0)
+    {
+        UE_LOG(LogO3DNngReceiver, Verbose, TEXT("NNG receiver pipe notify remove failed (%d) %s"), RemoveNotify, UTF8_TO_TCHAR(nng_strerror(RemoveNotify)));
+    }
+
+    Socket = NewSocket;
+    LastDialAttempt = FPlatformTime::Seconds();
+    return true;
+}
+
+void FO3DNngReceiver::CloseSocket()
+{
+    if (Socket)
+    {
+        delete Socket;
+        Socket = nullptr;
+    }
+}
+
+void FO3DNngReceiver::HandleReceiveError(int ErrorCode)
+{
+    const double Now = FPlatformTime::Seconds();
+    if (Now - LastErrorLogTimestamp > 0.25)
+    {
+        UE_LOG(LogO3DNngReceiver, Verbose, TEXT("NNG receiver recv failed (%d) %s"), ErrorCode, UTF8_TO_TCHAR(nng_strerror(ErrorCode)));
+        LastErrorLogTimestamp = Now;
+    }
+
+    Stats.DroppedFrames++;
+
+    if (!Options.bListen)
+    {
+        CloseSocket();
+        BackoffAttempt = FMath::Min(BackoffAttempt + 1, 10);
+        LastDialAttempt = Now;
+        bConnected = false;
+    }
+}
+
+bool FO3DNngReceiver::EnsureDialSocket()
+{
+    if (Socket)
+    {
+        return true;
+    }
+
+    const double Now = FPlatformTime::Seconds();
+    const double Delay = FMath::Min(MaxBackoffSeconds, InitialBackoffSeconds * FMath::Pow(2.0, static_cast<double>(FMath::Clamp(BackoffAttempt, 0, 8))));
+    if ((Now - LastDialAttempt) >= Delay)
+    {
+        if (OpenSocket())
+        {
+            BackoffAttempt = 0;
+            return true;
+        }
+
+        LastDialAttempt = Now;
+    }
+
+    return Socket != nullptr;
+}
