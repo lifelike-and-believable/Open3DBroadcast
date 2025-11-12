@@ -345,8 +345,7 @@ FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
     }
 
     Config.Transport = TransportName.ToString();
-    static const FName SocketsTransportName(TEXT("sockets"));
-    Config.Role = (TransportName == SocketsTransportName) ? TEXT("receiver") : TEXT("sub");
+    Config.Role = TEXT("receiver");
 
     Config.bPersistToken = false;
 

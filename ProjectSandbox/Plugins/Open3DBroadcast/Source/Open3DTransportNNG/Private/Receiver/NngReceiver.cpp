@@ -22,7 +22,7 @@ namespace
     constexpr double MaxBackoffSeconds = 5.0;
     constexpr uint64 MaxPayloadBytes = 50ull * 1024ull * 1024ull;
 
-    static void StaticPipeCallback(nng_pipe /*Pipe*/, nng_pipe_ev Event, void* Context)
+    static void ReceiverPipeCallback(nng_pipe /*Pipe*/, nng_pipe_ev Event, void* Context)
     {
         FO3DNngReceiver* Receiver = static_cast<FO3DNngReceiver*>(Context);
         if (!Receiver)
@@ -319,12 +319,12 @@ bool FO3DNngReceiver::OpenSocket()
     }
 
     PipeCount.Reset();
-    const int AddNotify = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_ADD_POST, StaticPipeCallback, this);
+    const int AddNotify = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_ADD_POST, ReceiverPipeCallback, this);
     if (AddNotify != 0)
     {
         UE_LOG(LogO3DNngReceiver, Verbose, TEXT("NNG receiver pipe notify add failed (%d) %s"), AddNotify, UTF8_TO_TCHAR(nng_strerror(AddNotify)));
     }
-    const int RemoveNotify = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_REM_POST, StaticPipeCallback, this);
+    const int RemoveNotify = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_REM_POST, ReceiverPipeCallback, this);
     if (RemoveNotify != 0)
     {
         UE_LOG(LogO3DNngReceiver, Verbose, TEXT("NNG receiver pipe notify remove failed (%d) %s"), RemoveNotify, UTF8_TO_TCHAR(nng_strerror(RemoveNotify)));

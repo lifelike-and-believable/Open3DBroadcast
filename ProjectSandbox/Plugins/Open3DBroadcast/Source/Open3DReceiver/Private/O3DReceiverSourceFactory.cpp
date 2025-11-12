@@ -23,6 +23,8 @@
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Text/STextBlock.h"
 #include "DetailLayoutBuilder.h"
+#include "InputCoreTypes.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Algo/Sort.h"
 #include "O3DReceiverTransportCustomization.h"
 
@@ -32,6 +34,22 @@ using FReceiverSourceCreated = ULiveLinkSourceFactory::FOnLiveLinkSourceCreated;
 namespace
 {
     static constexpr TCHAR ReceiverConnectionImportName[] = TEXT("UO3DReceiverSourceFactory");
+
+#if WITH_EDITOR
+    FText GetReceiverTransportDisplayName(FName TransportName)
+    {
+        if (TransportName == FName(TEXT("sockets.tcp")))
+        {
+            return LOCTEXT("ReceiverTransportDisplayTcp", "TCP");
+        }
+        if (TransportName == FName(TEXT("sockets.udp")))
+        {
+            return LOCTEXT("ReceiverTransportDisplayUdp", "UDP");
+        }
+
+        return FText::FromName(TransportName);
+    }
+#endif // WITH_EDITOR
 }
 
 #if WITH_EDITOR
@@ -41,6 +59,8 @@ public:
     SLATE_BEGIN_ARGS(SO3DReceiverSourceFactoryPanel) {}
         SLATE_ARGUMENT(FReceiverSourceCreated, OnSourceCreated)
     SLATE_END_ARGS()
+
+    virtual bool SupportsKeyboardFocus() const override { return true; }
 
     void Construct(const FArguments& InArgs)
     {
@@ -130,6 +150,8 @@ public:
         RefreshTransportOptions();
         SyncTransportSelection();
         RefreshTransportCustomization();
+
+        FSlateApplication::Get().SetKeyboardFocus(AsShared(), EFocusCause::SetDirectly);
     }
 
 private:
@@ -156,6 +178,17 @@ private:
     }
 
 private:
+    virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override
+    {
+        const FKey Key = InKeyEvent.GetKey();
+        if (Key == EKeys::Enter || Key == EKeys::Virtual_Accept)
+        {
+            return OnCreateClicked();
+        }
+
+        return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
+    }
+
     void HandleSettingsPropertyChanged(const FPropertyChangedEvent& PropertyChangedEvent)
     {
         const FName PropertyName = PropertyChangedEvent.GetPropertyName();
@@ -330,7 +363,7 @@ private:
 
     TSharedRef<SWidget> GenerateTransportWidget(TSharedPtr<FName> InItem) const
     {
-        const FText Label = InItem.IsValid() ? FText::FromName(*InItem) : FText::GetEmpty();
+        const FText Label = InItem.IsValid() ? GetReceiverTransportDisplayName(*InItem) : FText::GetEmpty();
         return SNew(STextBlock)
             .Text(Label)
             .Font(IDetailLayoutBuilder::GetDetailFont());
@@ -341,7 +374,7 @@ private:
         const FName CurrentSelection = GetCurrentTransportName();
         return CurrentSelection.IsNone()
             ? LOCTEXT("ReceiverTransportSelectPrompt", "Select Transport")
-            : FText::FromName(CurrentSelection);
+            : GetReceiverTransportDisplayName(CurrentSelection);
     }
 
     FReceiverSourceCreated OnSourceCreated;

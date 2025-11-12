@@ -30,7 +30,7 @@ namespace
     constexpr uint64 kMinQueueBytes = 64ull * 1024ull;
     constexpr uint64 kMaxQueueBytes = 512ull * 1024ull * 1024ull;
 
-    static void StaticPipeCallback(nng_pipe /*Pipe*/, nng_pipe_ev Event, void* Context)
+    static void SenderPipeCallback(nng_pipe /*Pipe*/, nng_pipe_ev Event, void* Context)
     {
         FO3DNngSender* Sender = static_cast<FO3DNngSender*>(Context);
         if (!Sender)
@@ -325,12 +325,12 @@ bool FO3DNngSender::OpenSocket()
     }
 
     PipeCount.Reset();
-    int NotifyAdd = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_ADD_POST, StaticPipeCallback, this);
+    int NotifyAdd = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_ADD_POST, SenderPipeCallback, this);
     if (NotifyAdd != 0)
     {
         UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender pipe notify add failed (%d) %s"), NotifyAdd, UTF8_TO_TCHAR(nng_strerror(NotifyAdd)));
     }
-    int NotifyRem = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_REM_POST, StaticPipeCallback, this);
+    int NotifyRem = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_REM_POST, SenderPipeCallback, this);
     if (NotifyRem != 0)
     {
         UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender pipe notify remove failed (%d) %s"), NotifyRem, UTF8_TO_TCHAR(nng_strerror(NotifyRem)));

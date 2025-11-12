@@ -104,7 +104,7 @@ namespace
 	FO3DTransportConfig BuildSenderConfig(int32 DataPort, int32 AudioPort)
 	{
 		FO3DTransportConfig Config;
-		Config.Transport = TEXT("sockets");
+		Config.Transport = TEXT("sockets.tcp");
 		Config.Role = TEXT("sender");
 		Config.Uri = FString::Printf(TEXT("tcp://127.0.0.1:%d"), DataPort);
 		Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), DataPort);
@@ -123,7 +123,7 @@ namespace
 	FO3DTransportConfig BuildReceiverConfig(int32 DataPort, int32 AudioPort)
 	{
 		FO3DTransportConfig Config;
-		Config.Transport = TEXT("sockets");
+		Config.Transport = TEXT("sockets.tcp");
 		Config.Role = TEXT("receiver");
 		Config.Uri = FString::Printf(TEXT("tcp://127.0.0.1:%d"), DataPort);
 		Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), DataPort);

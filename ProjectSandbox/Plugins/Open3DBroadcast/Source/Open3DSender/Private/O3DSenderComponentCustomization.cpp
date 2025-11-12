@@ -21,6 +21,23 @@
 
 #define LOCTEXT_NAMESPACE "O3DSenderComponentCustomization"
 
+namespace
+{
+FText GetSenderTransportDisplayName(FName TransportName)
+{
+    if (TransportName == FName(TEXT("sockets.tcp")))
+    {
+        return LOCTEXT("SenderTransportDisplayTcp", "TCP");
+    }
+    if (TransportName == FName(TEXT("sockets.udp")))
+    {
+        return LOCTEXT("SenderTransportDisplayUdp", "UDP");
+    }
+
+    return FText::FromName(TransportName);
+}
+} // namespace
+
 TSharedRef<IDetailCustomization> FO3DSenderComponentCustomization::MakeInstance()
 {
     return MakeShared<FO3DSenderComponentCustomization>();
@@ -435,7 +452,7 @@ void FO3DSenderComponentCustomization::SyncTransportComboSelection()
 
 TSharedRef<SWidget> FO3DSenderComponentCustomization::GenerateTransportWidget(TSharedPtr<FName> InItem) const
 {
-    const FText Label = InItem.IsValid() ? FText::FromName(*InItem) : FText::GetEmpty();
+    const FText Label = InItem.IsValid() ? GetSenderTransportDisplayName(*InItem) : FText::GetEmpty();
     return SNew(STextBlock)
         .Text(Label)
         .Font(IDetailLayoutBuilder::GetDetailFont());
@@ -446,7 +463,7 @@ FText FO3DSenderComponentCustomization::GetSelectedTransportText() const
     const FName Transport = GetSelectedTransportName();
     return Transport.IsNone()
         ? NSLOCTEXT("O3DSenderCustomization", "TransportNoneSelected", "Select Transport")
-        : FText::FromName(Transport);
+        : GetSenderTransportDisplayName(Transport);
 }
 
 FName FO3DSenderComponentCustomization::GetSelectedTransportName() const
