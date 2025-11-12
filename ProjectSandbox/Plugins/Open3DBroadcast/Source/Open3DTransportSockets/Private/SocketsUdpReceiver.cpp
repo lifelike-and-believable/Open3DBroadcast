@@ -19,8 +19,11 @@ DEFINE_LOG_CATEGORY_STATIC(LogSocketsUdpReceiver, Log, All);
 
 namespace
 {
-	constexpr int32 FragmentHeaderSize = 16;
-	constexpr int32 MaxPayloadSizeBytes = 50 * 1024 * 1024; // 50 MiB safety cap
+	struct FReceiverConstants
+	{
+		static constexpr int32 FragmentHeaderSize = 16;
+		static constexpr int32 MaxPayloadSizeBytes = 50 * 1024 * 1024; // 50 MiB safety cap
+	};
 }
 
 struct FO3DSocketsUdpReceiver::FFragmentState
@@ -163,9 +166,9 @@ int32 FO3DSocketsUdpReceiver::Poll()
 
 	int32 FramesProcessed = 0;
 
-	if (ReceiveBuffer.Num() < MaxDatagramBytes + FragmentHeaderSize)
+	if (ReceiveBuffer.Num() < MaxDatagramBytes + FReceiverConstants::FragmentHeaderSize)
 	{
-		ReceiveBuffer.SetNum(MaxDatagramBytes + FragmentHeaderSize);
+		ReceiveBuffer.SetNum(MaxDatagramBytes + FReceiverConstants::FragmentHeaderSize);
 	}
 
 	while (true)
@@ -201,7 +204,7 @@ int32 FO3DSocketsUdpReceiver::Poll()
 			continue;
 		}
 
-		if (Frame.Num() > MaxPayloadSizeBytes)
+		if (Frame.Num() > FReceiverConstants::MaxPayloadSizeBytes)
 		{
 			UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP payload exceeds safety cap (%d bytes). Dropping."), Frame.Num());
 			continue;
@@ -348,7 +351,7 @@ bool FO3DSocketsUdpReceiver::CreateSocket()
 	int32 AppliedSize = 0;
 	Socket->SetReceiveBufferSize(RequestedSize, AppliedSize);
 
-	ReceiveBuffer.SetNum(MaxDatagramBytes + FragmentHeaderSize);
+	ReceiveBuffer.SetNum(MaxDatagramBytes + FReceiverConstants::FragmentHeaderSize);
 
 	UE_LOG(LogSocketsUdpReceiver, Log, TEXT("UDP receiver listening on %s:%d (broadcast=%d, recvBuf=%d)."),
 		*BindAddr->ToString(false), BindAddr->GetPort(), bAllowBroadcast ? 1 : 0, AppliedSize);
@@ -424,7 +427,7 @@ bool FO3DSocketsUdpReceiver::CreateAudioSocket()
 	int32 AppliedSize = 0;
 	AudioSocket->SetReceiveBufferSize(RequestedSize, AppliedSize);
 
-	AudioReceiveBuffer.SetNum(MaxDatagramBytes + FragmentHeaderSize);
+	AudioReceiveBuffer.SetNum(MaxDatagramBytes + FReceiverConstants::FragmentHeaderSize);
 
 	UE_LOG(LogSocketsUdpReceiver, Log, TEXT("UDP audio receiver listening on %s:%d (broadcast=%d, recvBuf=%d)."),
 		*BindAddr->ToString(false), BindAddr->GetPort(), bAllowBroadcast ? 1 : 0, AppliedSize);
@@ -459,7 +462,7 @@ bool FO3DSocketsUdpReceiver::ProcessDatagram(const uint8* Data, int32 Bytes, TAr
 		return false;
 	}
 
-	if (Bytes > MaxDatagramBytes + FragmentHeaderSize)
+	if (Bytes > MaxDatagramBytes + FReceiverConstants::FragmentHeaderSize)
 	{
 		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP datagram too large (%d bytes)."), Bytes);
 		return false;
@@ -491,7 +494,7 @@ bool FO3DSocketsUdpReceiver::HandleFragment(const uint8* Data, int32 Bytes, TArr
 	std::vector<char> Combined;
 	if (InState->Mapper.getFrame(Combined))
 	{
-		if (Combined.size() > static_cast<size_t>(MaxPayloadSizeBytes))
+		if (Combined.size() > static_cast<size_t>(FReceiverConstants::MaxPayloadSizeBytes))
 		{
 			UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("Reassembled UDP payload exceeds safety cap (%llu bytes). Dropping."), static_cast<unsigned long long>(Combined.size()));
 			return false;
@@ -509,7 +512,7 @@ bool FO3DSocketsUdpReceiver::HandleFragment(const uint8* Data, int32 Bytes, TArr
 
 bool FO3DSocketsUdpReceiver::IsFragmentPacket(const uint8* Data, int32 Bytes) const
 {
-	if (Bytes < FragmentHeaderSize)
+	if (Bytes < FReceiverConstants::FragmentHeaderSize)
 	{
 		return false;
 	}
@@ -524,7 +527,7 @@ bool FO3DSocketsUdpReceiver::IsFragmentPacket(const uint8* Data, int32 Bytes) co
 		return false;
 	}
 
-	if (TotalSize == 0 || TotalSize > static_cast<uint32>(MaxPayloadSizeBytes))
+	if (TotalSize == 0 || TotalSize > static_cast<uint32>(FReceiverConstants::MaxPayloadSizeBytes))
 	{
 		return false;
 	}
@@ -544,7 +547,7 @@ bool FO3DSocketsUdpReceiver::IsFragmentPacket(const uint8* Data, int32 Bytes) co
 		? (TotalSize - (FrameCount - 1) * FragmentSize)
 		: FragmentSize;
 
-	const uint32 ActualPayload = static_cast<uint32>(Bytes - FragmentHeaderSize);
+	const uint32 ActualPayload = static_cast<uint32>(Bytes - FReceiverConstants::FragmentHeaderSize);
 	return ActualPayload == ExpectedPayload;
 }
 
@@ -555,9 +558,9 @@ void FO3DSocketsUdpReceiver::PollAudioChannel(int32& OutFramesProcessed)
 		return;
 	}
 
-	if (AudioReceiveBuffer.Num() < MaxDatagramBytes + FragmentHeaderSize)
+	if (AudioReceiveBuffer.Num() < MaxDatagramBytes + FReceiverConstants::FragmentHeaderSize)
 	{
-		AudioReceiveBuffer.SetNum(MaxDatagramBytes + FragmentHeaderSize);
+		AudioReceiveBuffer.SetNum(MaxDatagramBytes + FReceiverConstants::FragmentHeaderSize);
 	}
 
 	while (true)
@@ -592,7 +595,7 @@ void FO3DSocketsUdpReceiver::PollAudioChannel(int32& OutFramesProcessed)
 			continue;
 		}
 
-		if (Payload.Num() > MaxPayloadSizeBytes)
+		if (Payload.Num() > FReceiverConstants::MaxPayloadSizeBytes)
 		{
 			UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP audio payload exceeds safety cap (%d bytes). Dropping."), Payload.Num());
 			continue;

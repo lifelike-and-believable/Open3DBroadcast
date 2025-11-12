@@ -17,11 +17,6 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogSocketsUdpSender, Log, All);
 
-namespace
-{
-	constexpr int32 FragmentHeaderSize = 16;
-}
-
 class FSocketsUdpSenderAudioSink final : public IO3DSenderAudioSink
 {
 public:
@@ -478,6 +473,7 @@ bool FO3DSocketsUdpSender::SendFragmented(FSocket* InSocket, const TSharedPtr<FI
 		return false;
 	}
 
+	constexpr int32 FragmentHeaderSize = 16;
 	const int32 FragmentPayload = FMath::Clamp(MtuBytes - FragmentHeaderSize, 256, MaxDatagramBytes);
 	if (FragmentPayload <= 0)
 	{
