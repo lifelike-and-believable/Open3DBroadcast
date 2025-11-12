@@ -4,6 +4,7 @@
 #include "O3DSenderInterface.h"
 #include "SocketsTransportCommon.h"
 
+#include "HAL/CriticalSection.h"
 #include "HAL/ThreadSafeCounter.h"
 
 class FSocket;
@@ -67,5 +68,6 @@ private:
 	FGuid AudioSourceGuid;
 
 	FThreadSafeCounter MessageCounter;
+	mutable FCriticalSection SubjectNameLock;
+	FString LastSubjectName;
 };
-

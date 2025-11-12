@@ -8,6 +8,7 @@
 #include "Interfaces/IPv4/IPv4Address.h"
 #include "IPAddress.h"
 #include "HAL/PlatformTime.h"
+#include "Misc/ScopeLock.h"
 #include "Logging/LogMacros.h"
 
 #include "o3ds/model.h"
@@ -80,6 +81,10 @@ bool FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& Config)
 	RemotePort = 0;
 	StreamId = ActiveConfig.StreamId;
 	RemoteAddr.Reset();
+	{
+		FScopeLock Lock(&SubjectNameLock);
+		LastSubjectName.Reset();
+	}
 
 	ActiveAudioConfig = Config.Audio;
 	bAudioEnabled = ActiveAudioConfig.bEnableAudio;
@@ -198,6 +203,12 @@ bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
 		return false;
 	}
 
+	FString ObservedSubject;
+	if (!List.mItems.empty() && List.mItems[0])
+	{
+		ObservedSubject = UTF8_TO_TCHAR(List.mItems[0]->mName.c_str());
+	}
+
 	std::vector<char> Buffer;
 	const double Timestamp = FPlatformTime::Seconds();
 	int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(Buffer, Timestamp);
@@ -206,6 +217,12 @@ bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
 		UE_LOG(LogSocketsUdpSender, Verbose, TEXT("UDP sender failed to serialize SubjectList."));
 		Stats.DroppedFrames++;
 		return false;
+	}
+
+	if (!ObservedSubject.IsEmpty())
+	{
+		FScopeLock Lock(&SubjectNameLock);
+		LastSubjectName = MoveTemp(ObservedSubject);
 	}
 
 	if (!SendPayload(Socket, RemoteAddr, reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten, TEXT("data")))
@@ -523,7 +540,16 @@ bool FO3DSocketsUdpSender::SendAudioFrame(const FString& StreamLabel, const uint
 	Meta.StreamLabel = StreamLabel.IsEmpty()
 		? (ActiveAudioConfig.StreamLabel.IsEmpty() ? (ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId) : ActiveAudioConfig.StreamLabel)
 		: StreamLabel;
-	Meta.SubjectName = ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId;
+	FString SubjectForAudio;
+	{
+		FScopeLock Lock(&SubjectNameLock);
+		SubjectForAudio = LastSubjectName;
+	}
+	if (SubjectForAudio.IsEmpty())
+	{
+		SubjectForAudio = ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId;
+	}
+	Meta.SubjectName = MoveTemp(SubjectForAudio);
 	Meta.NumChannels = NumChannels > 0 ? NumChannels : FMath::Max(ActiveAudioConfig.NumChannels, 1);
 	Meta.SampleRate = SampleRate > 0 ? SampleRate : FMath::Max(ActiveAudioConfig.SampleRate, 1);
 	Meta.TimestampSec = TimestampSec;
