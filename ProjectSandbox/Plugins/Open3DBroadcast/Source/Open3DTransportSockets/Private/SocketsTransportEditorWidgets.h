@@ -5,13 +5,15 @@
 #include "Delegates/Delegate.h"
 #include "Templates/SharedPointer.h"
 
+#include "O3DTransportConfigPanelBase.h"
+
 class UO3DSenderComponent;
 class UO3DReceiverSettingsObject;
 class SWidget;
 
 namespace SocketsEditor
 {
-inline constexpr float TransportPanelWidth = 360.f;
+inline constexpr float TransportPanelWidth = SO3DTransportConfigPanelBase::DefaultPanelWidth;
 
 namespace Sender
 {
@@ -21,8 +23,8 @@ TSharedPtr<SWidget> BuildUdpSenderSettingsPanel(UO3DSenderComponent* SenderCompo
 
 namespace Receiver
 {
-TSharedPtr<SWidget> BuildTcpReceiverSettingsPanel(UO3DReceiverSettingsObject* SettingsObject);
-TSharedPtr<SWidget> BuildUdpReceiverSettingsPanel(UO3DReceiverSettingsObject* SettingsObject);
+TSharedPtr<SO3DTransportConfigPanelBase> BuildTcpReceiverSettingsPanel(UO3DReceiverSettingsObject* SettingsObject, FSimpleDelegate OnSubmit);
+TSharedPtr<SO3DTransportConfigPanelBase> BuildUdpReceiverSettingsPanel(UO3DReceiverSettingsObject* SettingsObject, FSimpleDelegate OnSubmit);
 }
 } // namespace SocketsEditor
 

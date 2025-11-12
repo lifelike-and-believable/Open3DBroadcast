@@ -6,6 +6,7 @@
 #include "O3DReceiverRegistry.h"
 #include "O3DSenderTransportCustomization.h"
 #include "O3DReceiverTransportCustomization.h"
+#include "O3DTransportConfigPanelBase.h"
 #include "O3DTransportTypes.h"
 #include "Shared/NngHelpers.h"
 #include "Sender/NngSender.h"
@@ -490,16 +491,21 @@ namespace NNGReceiver
 		return Options.Num() > 0 ? Options[0] : nullptr;
 	}
 
-	class SNngReceiverSettingsPanel : public SCompoundWidget
+	class SNngReceiverSettingsPanel : public SO3DTransportConfigPanelBase
 	{
 	public:
-		SLATE_BEGIN_ARGS(SNngReceiverSettingsPanel) {}
+		SLATE_BEGIN_ARGS(SNngReceiverSettingsPanel)
+			: _PanelWidthOverride(SO3DTransportConfigPanelBase::DefaultPanelWidth)
+		{}
 			SLATE_ARGUMENT(UO3DReceiverSettingsObject*, SettingsObject)
+			SLATE_ARGUMENT(float, PanelWidthOverride)
+			SLATE_EVENT(FSimpleDelegate, OnSubmit)
 		SLATE_END_ARGS()
 
 		void Construct(const FArguments& InArgs)
 		{
 			SettingsObject = InArgs._SettingsObject;
+			SetOnSubmit(InArgs._OnSubmit);
 			BuildModeOptions();
 
 			const FString ModeValue = GetOption(O3DNNG::ModeOptionKey, TEXT("sub"));
@@ -526,30 +532,32 @@ namespace NNGReceiver
 				SelectedMode = ModeOptions.Num() > 0 ? ModeOptions[0] : nullptr;
 			}
 
-			ChildSlot
-			[
-				SNew(SVerticalBox)
-				+ SVerticalBox::Slot()
+			TSharedRef<SVerticalBox> PanelContent = SNew(SVerticalBox);
+
+			PanelContent->AddSlot()
 				.AutoHeight()
 				[
 					SNew(STextBlock)
 					.Text(LOCTEXT("NNGReceiverHostLabel", "Host"))
-				]
-				+ SVerticalBox::Slot()
+				];
+
+			PanelContent->AddSlot()
 				.AutoHeight()
 				.Padding(0.f, 4.f, 0.f, 8.f)
 				[
 					SAssignNew(HostTextBox, SEditableTextBox)
 					.Text(FText::FromString(GetHostValue()))
 					.OnTextCommitted(this, &SNngReceiverSettingsPanel::HandleHostCommitted)
-				]
-				+ SVerticalBox::Slot()
+				];
+
+			PanelContent->AddSlot()
 				.AutoHeight()
 				[
 					SNew(STextBlock)
 					.Text(LOCTEXT("NNGReceiverPortLabel", "Port"))
-				]
-				+ SVerticalBox::Slot()
+				];
+
+			PanelContent->AddSlot()
 				.AutoHeight()
 				.Padding(0.f, 4.f, 0.f, 8.f)
 				[
@@ -558,14 +566,17 @@ namespace NNGReceiver
 					.MaxValue(65535)
 					.Value(GetPortValue())
 					.OnValueChanged(this, &SNngReceiverSettingsPanel::HandlePortChanged)
-				]
-				+ SVerticalBox::Slot()
+					.OnValueCommitted(this, &SNngReceiverSettingsPanel::HandlePortCommitted)
+				];
+
+			PanelContent->AddSlot()
 				.AutoHeight()
 				[
 					SNew(STextBlock)
 					.Text(LOCTEXT("NNGReceiverModeLabel", "Mode"))
-				]
-				+ SVerticalBox::Slot()
+				];
+
+			PanelContent->AddSlot()
 				.AutoHeight()
 				.Padding(0.f, 4.f, 0.f, 8.f)
 				[
@@ -581,14 +592,16 @@ namespace NNGReceiver
 						SNew(STextBlock)
 						.Text(this, &SNngReceiverSettingsPanel::GetCurrentModeLabel)
 					]
-				]
-				+ SVerticalBox::Slot()
+				];
+
+			PanelContent->AddSlot()
 				.AutoHeight()
 				[
 					SNew(STextBlock)
 					.Text(LOCTEXT("NNGReceiverTopicLabel", "Subscription Topic"))
-				]
-				+ SVerticalBox::Slot()
+				];
+
+			PanelContent->AddSlot()
 				.AutoHeight()
 				.Padding(0.f, 4.f, 0.f, 0.f)
 				[
@@ -596,8 +609,9 @@ namespace NNGReceiver
 					.Text(FText::FromString(GetTopicValue()))
 					.OnTextCommitted(this, &SNngReceiverSettingsPanel::HandleTopicCommitted)
 					.IsEnabled(this, &SNngReceiverSettingsPanel::IsTopicEnabled)
-				]
-			];
+				];
+
+			BuildPanel(PanelContent, InArgs._PanelWidthOverride);
 		}
 
 	private:
@@ -721,6 +735,8 @@ namespace NNGReceiver
 			{
 				SetHostValue(Sanitized);
 			}
+
+			SubmitFromTextCommit(CommitType);
 		}
 
 		void HandlePortChanged(int32 NewValue)
@@ -728,9 +744,16 @@ namespace NNGReceiver
 			SetPortValue(NewValue);
 		}
 
+		void HandlePortCommitted(int32 NewValue, ETextCommit::Type CommitType)
+		{
+			HandlePortChanged(NewValue);
+			SubmitFromTextCommit(CommitType);
+		}
+
 		void HandleTopicCommitted(const FText& NewText, ETextCommit::Type CommitType)
 		{
 			SetTopicValue(NewText.ToString());
+			SubmitFromTextCommit(CommitType);
 		}
 
 		void HandleModeChanged(TSharedPtr<FModeOption> NewSelection, ESelectInfo::Type SelectionType)
@@ -966,7 +989,7 @@ public:
 			}
 		};
 #if WITH_EDITOR
-		ReceiverCustomization.BuildTransportWidget = [](UO3DReceiverSettingsObject* SettingsObject) -> TSharedPtr<SWidget>
+		ReceiverCustomization.BuildTransportWidget = [](UO3DReceiverSettingsObject* SettingsObject, FSimpleDelegate OnSubmit) -> TSharedPtr<SO3DTransportConfigPanelBase>
 		{
 			if (!SettingsObject)
 			{
@@ -974,7 +997,9 @@ public:
 			}
 
 			return SNew(NNGReceiver::SNngReceiverSettingsPanel)
-				.SettingsObject(SettingsObject);
+			.SettingsObject(SettingsObject)
+			.PanelWidthOverride(SO3DTransportConfigPanelBase::DefaultPanelWidth)
+			.OnSubmit(OnSubmit);
 		};
 #endif // WITH_EDITOR
 

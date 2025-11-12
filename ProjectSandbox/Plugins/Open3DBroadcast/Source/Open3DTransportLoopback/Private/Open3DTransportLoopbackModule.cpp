@@ -5,6 +5,7 @@
 #include "O3DSenderRegistry.h"
 #include "O3DReceiverRegistry.h"
 #include "O3DReceiverTransportCustomization.h"
+#include "O3DTransportConfigPanelBase.h"
 #include "O3DReceiverSourceSettings.h"
 #include "O3DSenderTransportCustomization.h"
 #include "O3DSenderComponent.h"
@@ -16,7 +17,6 @@
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/SBoxPanel.h"
-#include "Widgets/Layout/SBox.h"
 #endif // WITH_EDITOR
 
 DEFINE_LOG_CATEGORY_STATIC(LogOpen3DTransportLoopbackModule, Log, All);
@@ -28,16 +28,21 @@ namespace LoopbackReceiver
 	static constexpr TCHAR ChannelOptionKey[] = TEXT("channel");
 
 #if WITH_EDITOR
-	class SLoopbackReceiverSettingsPanel : public SCompoundWidget
+	class SLoopbackReceiverSettingsPanel : public SO3DTransportConfigPanelBase
 	{
 	public:
-		SLATE_BEGIN_ARGS(SLoopbackReceiverSettingsPanel) {}
+		SLATE_BEGIN_ARGS(SLoopbackReceiverSettingsPanel)
+			: _PanelWidthOverride(SO3DTransportConfigPanelBase::DefaultPanelWidth)
+		{}
 			SLATE_ARGUMENT(UO3DReceiverSettingsObject*, SettingsObject)
+			SLATE_ARGUMENT(float, PanelWidthOverride)
+			SLATE_EVENT(FSimpleDelegate, OnSubmit)
 		SLATE_END_ARGS()
 
 		void Construct(const FArguments& InArgs)
 		{
 			SettingsObject = InArgs._SettingsObject;
+			SetOnSubmit(InArgs._OnSubmit);
 
 			FString InitialChannel = GetChannelValue();
 			if (InitialChannel.IsEmpty())
@@ -46,24 +51,24 @@ namespace LoopbackReceiver
 				SetChannelValue(InitialChannel);
 			}
 
-			ChildSlot
-			[
-				SNew(SVerticalBox)
-				+ SVerticalBox::Slot()
+			TSharedRef<SVerticalBox> PanelContent = SNew(SVerticalBox);
+			PanelContent->AddSlot()
 				.AutoHeight()
 				[
 					SNew(STextBlock)
 					.Text(LOCTEXT("LoopbackChannelLabel", "Channel Name"))
-				]
-				+ SVerticalBox::Slot()
+				];
+
+			PanelContent->AddSlot()
 				.AutoHeight()
 				.Padding(0.f, 4.f, 0.f, 0.f)
 				[
 					SAssignNew(ChannelTextBox, SEditableTextBox)
 					.Text(FText::FromString(InitialChannel))
 					.OnTextCommitted(this, &SLoopbackReceiverSettingsPanel::HandleChannelCommitted)
-				]
-			];
+				];
+
+			BuildPanel(PanelContent, InArgs._PanelWidthOverride);
 		}
 
 	private:
@@ -82,6 +87,8 @@ namespace LoopbackReceiver
 			{
 				SetChannelValue(NewValue);
 			}
+
+			SubmitFromTextCommit(CommitType);
 		}
 
 		FString GetChannelValue() const
@@ -286,7 +293,7 @@ public:
 			Config.AdvancedParams.Add(LoopbackReceiver::ChannelOptionKey, ChannelName);
 		};
 #if WITH_EDITOR
-		LoopbackCustomization.BuildTransportWidget = [](UO3DReceiverSettingsObject* SettingsObject) -> TSharedPtr<SWidget>
+	LoopbackCustomization.BuildTransportWidget = [](UO3DReceiverSettingsObject* SettingsObject, FSimpleDelegate OnSubmit) -> TSharedPtr<SO3DTransportConfigPanelBase>
 		{
 			if (!SettingsObject)
 			{
@@ -294,7 +301,9 @@ public:
 			}
 
 			return SNew(LoopbackReceiver::SLoopbackReceiverSettingsPanel)
-				.SettingsObject(SettingsObject);
+		.SettingsObject(SettingsObject)
+		.PanelWidthOverride(SO3DTransportConfigPanelBase::DefaultPanelWidth)
+		.OnSubmit(OnSubmit);
 		};
 #endif // WITH_EDITOR
 		O3DReceiver::RegisterTransportCustomization(TEXT("loopback"), MoveTemp(LoopbackCustomization));

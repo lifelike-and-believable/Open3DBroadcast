@@ -4,6 +4,7 @@
 
 #include "O3DReceiverSource.h"
 #include "O3DReceiverSourceSettings.h"
+#include "O3DTransportConfigPanelBase.h"
 
 #include "UObject/UnrealType.h"
 #include "Widgets/SNullWidget.h"
@@ -234,12 +235,19 @@ private:
         {
             if (Customization && Customization->BuildTransportWidget)
             {
-                if (TSharedPtr<SWidget> CustomWidget = Customization->BuildTransportWidget(SourceSettingsObject))
+                const FSimpleDelegate SubmitDelegate = FSimpleDelegate::CreateSP(this, &SO3DReceiverSourceFactoryPanel::HandleCustomizationSubmit);
+                if (TSharedPtr<SO3DTransportConfigPanelBase> CustomPanel = Customization->BuildTransportWidget(SourceSettingsObject, SubmitDelegate))
                 {
-                    TransportCustomizationContainer->SetContent(CustomWidget.ToSharedRef());
+                    CustomPanel->SetPanelWidth(SO3DTransportConfigPanelBase::DefaultPanelWidth);
+                    TransportCustomizationContainer->SetContent(CustomPanel.ToSharedRef());
                 }
             }
         }
+    }
+
+    void HandleCustomizationSubmit()
+    {
+        OnCreateClicked();
     }
 
     FName GetCurrentTransportName() const

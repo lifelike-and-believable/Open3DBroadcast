@@ -70,9 +70,9 @@ public:
 			O3DSocketsConfig::ConfigureTcpReceiver(Settings, Config, SocketsTcpName);
 		};
 #if WITH_EDITOR
-		TcpReceiverCustomization.BuildTransportWidget = [](UO3DReceiverSettingsObject* SettingsObject) -> TSharedPtr<SWidget>
+		TcpReceiverCustomization.BuildTransportWidget = [](UO3DReceiverSettingsObject* SettingsObject, FSimpleDelegate OnSubmit) -> TSharedPtr<SO3DTransportConfigPanelBase>
 		{
-			return SettingsObject ? SocketsEditor::Receiver::BuildTcpReceiverSettingsPanel(SettingsObject) : nullptr;
+			return SocketsEditor::Receiver::BuildTcpReceiverSettingsPanel(SettingsObject, OnSubmit);
 		};
 #endif // WITH_EDITOR
 		O3DReceiver::RegisterTransportCustomization(SocketsTcpName, MoveTemp(TcpReceiverCustomization));
@@ -83,9 +83,9 @@ public:
 			O3DSocketsConfig::ConfigureUdpReceiver(Settings, Config);
 		};
 #if WITH_EDITOR
-		UdpReceiverCustomization.BuildTransportWidget = [](UO3DReceiverSettingsObject* SettingsObject) -> TSharedPtr<SWidget>
+		UdpReceiverCustomization.BuildTransportWidget = [](UO3DReceiverSettingsObject* SettingsObject, FSimpleDelegate OnSubmit) -> TSharedPtr<SO3DTransportConfigPanelBase>
 		{
-			return SettingsObject ? SocketsEditor::Receiver::BuildUdpReceiverSettingsPanel(SettingsObject) : nullptr;
+			return SocketsEditor::Receiver::BuildUdpReceiverSettingsPanel(SettingsObject, OnSubmit);
 		};
 #endif // WITH_EDITOR
 		O3DReceiver::RegisterTransportCustomization(SocketsUdpName, MoveTemp(UdpReceiverCustomization));

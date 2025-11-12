@@ -9,7 +9,6 @@
 
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SSpinBox.h"
-#include "Widgets/Layout/SBox.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
@@ -20,16 +19,21 @@ namespace
 {
 	using namespace O3DSocketsConfig;
 
-	class STcpReceiverSettingsPanel : public SCompoundWidget
+	class STcpReceiverSettingsPanel : public SO3DTransportConfigPanelBase
 	{
 	public:
-		SLATE_BEGIN_ARGS(STcpReceiverSettingsPanel) {}
+		SLATE_BEGIN_ARGS(STcpReceiverSettingsPanel)
+			: _PanelWidthOverride(SO3DTransportConfigPanelBase::DefaultPanelWidth)
+		{}
 			SLATE_ARGUMENT(UO3DReceiverSettingsObject*, SettingsObject)
+			SLATE_ARGUMENT(float, PanelWidthOverride)
+			SLATE_EVENT(FSimpleDelegate, OnSubmit)
 		SLATE_END_ARGS()
 
 		void Construct(const FArguments& InArgs)
 		{
 			SettingsObject = InArgs._SettingsObject;
+			SetOnSubmit(InArgs._OnSubmit);
 
 			if (SettingsObject)
 			{
@@ -53,75 +57,80 @@ namespace
 
 			const FString CurrentAudioHost = GetAudioHost();
 
-			ChildSlot
-			[
-				SNew(SBox)
-				.WidthOverride(SocketsEditor::TransportPanelWidth)
+			TSharedRef<SVerticalBox> PanelContent = SNew(SVerticalBox);
+
+			PanelContent->AddSlot()
+				.AutoHeight()
 				[
-					SNew(SVerticalBox)
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("TcpReceiverHostLabel", "Remote Host"))
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0.f, 4.f, 0.f, 8.f)
-					[
-						SAssignNew(HostTextBox, SEditableTextBox)
-						.Text(FText::FromString(GetHost()))
-						.OnTextCommitted(this, &STcpReceiverSettingsPanel::HandleHostCommitted)
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("TcpReceiverPortLabel", "Data Port"))
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0.f, 4.f, 0.f, 8.f)
-					[
-						SAssignNew(PortSpinBox, SSpinBox<int32>)
-						.MinValue(1)
-						.MaxValue(65535)
-						.Value(GetPort())
-						.OnValueChanged(this, &STcpReceiverSettingsPanel::HandlePortChanged)
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("TcpReceiverAudioHostLabel", "Audio Host"))
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0.f, 4.f, 0.f, 8.f)
-					[
-						SAssignNew(AudioHostTextBox, SEditableTextBox)
-						.Text(CurrentAudioHost.IsEmpty() ? FText::GetEmpty() : FText::FromString(CurrentAudioHost))
-						.HintText(LOCTEXT("TcpReceiverAudioHostHint", "Defaults to remote host"))
-						.OnTextCommitted(this, &STcpReceiverSettingsPanel::HandleAudioHostCommitted)
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("TcpReceiverAudioPortLabel", "Audio Port"))
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0.f, 4.f, 0.f, 0.f)
-					[
-						SAssignNew(AudioPortSpinBox, SSpinBox<int32>)
-						.MinValue(1)
-						.MaxValue(65535)
-						.Value(FMath::Max(1, GetAudioPort()))
-						.OnValueChanged(this, &STcpReceiverSettingsPanel::HandleAudioPortChanged)
-					]
-				]
-			];
+					SNew(STextBlock)
+					.Text(LOCTEXT("TcpReceiverHostLabel", "Remote Host"))
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				.Padding(0.f, 4.f, 0.f, 8.f)
+				[
+					SAssignNew(HostTextBox, SEditableTextBox)
+					.Text(FText::FromString(GetHost()))
+					.OnTextCommitted(this, &STcpReceiverSettingsPanel::HandleHostCommitted)
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("TcpReceiverPortLabel", "Data Port"))
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				.Padding(0.f, 4.f, 0.f, 8.f)
+				[
+					SAssignNew(PortSpinBox, SSpinBox<int32>)
+					.MinValue(1)
+					.MaxValue(65535)
+					.Value(GetPort())
+					.OnValueChanged(this, &STcpReceiverSettingsPanel::HandlePortChanged)
+					.OnValueCommitted(this, &STcpReceiverSettingsPanel::HandlePortCommitted)
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("TcpReceiverAudioHostLabel", "Audio Host"))
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				.Padding(0.f, 4.f, 0.f, 8.f)
+				[
+					SAssignNew(AudioHostTextBox, SEditableTextBox)
+					.Text(CurrentAudioHost.IsEmpty() ? FText::GetEmpty() : FText::FromString(CurrentAudioHost))
+					.HintText(LOCTEXT("TcpReceiverAudioHostHint", "Defaults to remote host"))
+					.OnTextCommitted(this, &STcpReceiverSettingsPanel::HandleAudioHostCommitted)
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("TcpReceiverAudioPortLabel", "Audio Port"))
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				.Padding(0.f, 4.f, 0.f, 0.f)
+				[
+					SAssignNew(AudioPortSpinBox, SSpinBox<int32>)
+					.MinValue(1)
+					.MaxValue(65535)
+					.Value(FMath::Max(1, GetAudioPort()))
+					.OnValueChanged(this, &STcpReceiverSettingsPanel::HandleAudioPortChanged)
+					.OnValueCommitted(this, &STcpReceiverSettingsPanel::HandleAudioPortCommitted)
+				];
+
+			BuildPanel(PanelContent, InArgs._PanelWidthOverride);
 		}
 
 	private:
@@ -232,13 +241,15 @@ namespace
 			SetOption(O3DSockets::AudioPortOptionKey, FString::FromInt(FMath::Clamp(Port, 1, 65535)));
 		}
 
-		void HandleHostCommitted(const FText& NewText, ETextCommit::Type)
+		void HandleHostCommitted(const FText& NewText, ETextCommit::Type CommitType)
 		{
 			SetHost(NewText.ToString());
 			if (HostTextBox.IsValid())
 			{
 				HostTextBox->SetText(FText::FromString(GetHost()));
 			}
+
+			SubmitFromTextCommit(CommitType);
 		}
 
 		void HandlePortChanged(int32 NewValue)
@@ -250,7 +261,13 @@ namespace
 			}
 		}
 
-		void HandleAudioHostCommitted(const FText& NewText, ETextCommit::Type)
+		void HandlePortCommitted(int32 NewValue, ETextCommit::Type CommitType)
+		{
+			HandlePortChanged(NewValue);
+			SubmitFromTextCommit(CommitType);
+		}
+
+		void HandleAudioHostCommitted(const FText& NewText, ETextCommit::Type CommitType)
 		{
 			SetAudioHost(NewText.ToString());
 			if (AudioHostTextBox.IsValid())
@@ -258,11 +275,19 @@ namespace
 				const FString Value = GetAudioHost();
 				AudioHostTextBox->SetText(Value.IsEmpty() ? FText::GetEmpty() : FText::FromString(Value));
 			}
+
+			SubmitFromTextCommit(CommitType);
 		}
 
 		void HandleAudioPortChanged(int32 NewValue)
 		{
 			SetAudioPort(NewValue);
+		}
+
+		void HandleAudioPortCommitted(int32 NewValue, ETextCommit::Type CommitType)
+		{
+			HandleAudioPortChanged(NewValue);
+			SubmitFromTextCommit(CommitType);
 		}
 
 		UO3DReceiverSettingsObject* SettingsObject = nullptr;
@@ -277,10 +302,17 @@ namespace SocketsEditor
 {
 namespace Receiver
 {
-TSharedPtr<SWidget> BuildTcpReceiverSettingsPanel(UO3DReceiverSettingsObject* SettingsObject)
+TSharedPtr<SO3DTransportConfigPanelBase> BuildTcpReceiverSettingsPanel(UO3DReceiverSettingsObject* SettingsObject, FSimpleDelegate OnSubmit)
 {
+	if (!SettingsObject)
+	{
+		return nullptr;
+	}
+
 	return SNew(STcpReceiverSettingsPanel)
-		.SettingsObject(SettingsObject);
+		.SettingsObject(SettingsObject)
+		.PanelWidthOverride(SocketsEditor::TransportPanelWidth)
+		.OnSubmit(OnSubmit);
 }
 } // namespace Receiver
 } // namespace SocketsEditor

@@ -10,7 +10,6 @@
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SSpinBox.h"
 #include "Widgets/Input/SCheckBox.h"
-#include "Widgets/Layout/SBox.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
@@ -21,16 +20,21 @@ namespace
 {
 	using namespace O3DSocketsConfig;
 
-	class SUdpReceiverSettingsPanel : public SCompoundWidget
+	class SUdpReceiverSettingsPanel : public SO3DTransportConfigPanelBase
 	{
 	public:
-		SLATE_BEGIN_ARGS(SUdpReceiverSettingsPanel) {}
+		SLATE_BEGIN_ARGS(SUdpReceiverSettingsPanel)
+			: _PanelWidthOverride(SO3DTransportConfigPanelBase::DefaultPanelWidth)
+		{}
 			SLATE_ARGUMENT(UO3DReceiverSettingsObject*, SettingsObject)
+			SLATE_ARGUMENT(float, PanelWidthOverride)
+			SLATE_EVENT(FSimpleDelegate, OnSubmit)
 		SLATE_END_ARGS()
 
 		void Construct(const FArguments& InArgs)
 		{
 			SettingsObject = InArgs._SettingsObject;
+			SetOnSubmit(InArgs._OnSubmit);
 
 			if (SettingsObject)
 			{
@@ -74,129 +78,141 @@ namespace
 
 			const FString CurrentAudioHost = GetAudioHost();
 
-			ChildSlot
-			[
-				SNew(SBox)
-				.WidthOverride(SocketsEditor::TransportPanelWidth)
+			TSharedRef<SVerticalBox> PanelContent = SNew(SVerticalBox);
+
+			PanelContent->AddSlot()
+				.AutoHeight()
 				[
-					SNew(SVerticalBox)
-					+ SVerticalBox::Slot()
-					.AutoHeight()
+					SNew(STextBlock)
+					.Text(LOCTEXT("UdpReceiverBindHostLabel", "Bind Address"))
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				.Padding(0.f, 4.f, 0.f, 8.f)
+				[
+					SAssignNew(HostTextBox, SEditableTextBox)
+					.Text(FText::FromString(GetHost()))
+					.OnTextCommitted(this, &SUdpReceiverSettingsPanel::HandleHostCommitted)
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("UdpReceiverPortLabel", "Data Port"))
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				.Padding(0.f, 4.f, 0.f, 8.f)
+				[
+					SAssignNew(PortSpinBox, SSpinBox<int32>)
+					.MinValue(1)
+					.MaxValue(65535)
+					.Value(GetPort())
+					.OnValueChanged(this, &SUdpReceiverSettingsPanel::HandlePortChanged)
+					.OnValueCommitted(this, &SUdpReceiverSettingsPanel::HandlePortCommitted)
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					[
+						SAssignNew(BroadcastCheckBox, SCheckBox)
+						.IsChecked(this, &SUdpReceiverSettingsPanel::GetBroadcastCheckState)
+						.OnCheckStateChanged(this, &SUdpReceiverSettingsPanel::HandleBroadcastChanged)
+					]
+					+ SHorizontalBox::Slot()
+					.FillWidth(1.f)
+					.VAlign(VAlign_Center)
+					.Padding(4.f, 0.f)
 					[
 						SNew(STextBlock)
-						.Text(LOCTEXT("UdpReceiverBindHostLabel", "Bind Address"))
+						.Text(LOCTEXT("UdpReceiverBroadcastLabel", "Accept Broadcast Packets"))
 					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0.f, 4.f, 0.f, 8.f)
-					[
-						SAssignNew(HostTextBox, SEditableTextBox)
-						.Text(FText::FromString(GetHost()))
-						.OnTextCommitted(this, &SUdpReceiverSettingsPanel::HandleHostCommitted)
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("UdpReceiverPortLabel", "Data Port"))
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0.f, 4.f, 0.f, 8.f)
-					[
-						SAssignNew(PortSpinBox, SSpinBox<int32>)
-						.MinValue(1)
-						.MaxValue(65535)
-						.Value(GetPort())
-						.OnValueChanged(this, &SUdpReceiverSettingsPanel::HandlePortChanged)
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot()
-						.AutoWidth()
-						.VAlign(VAlign_Center)
-						[
-							SAssignNew(BroadcastCheckBox, SCheckBox)
-							.IsChecked(this, &SUdpReceiverSettingsPanel::GetBroadcastCheckState)
-							.OnCheckStateChanged(this, &SUdpReceiverSettingsPanel::HandleBroadcastChanged)
-						]
-						+ SHorizontalBox::Slot()
-						.FillWidth(1.f)
-						.VAlign(VAlign_Center)
-						.Padding(4.f, 0.f)
-						[
-							SNew(STextBlock)
-							.Text(LOCTEXT("UdpReceiverBroadcastLabel", "Accept Broadcast Packets"))
-						]
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0.f, 8.f, 0.f, 0.f)
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("UdpReceiverMtuLabel", "MTU"))
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0.f, 4.f, 0.f, 8.f)
-					[
-						SAssignNew(MtuSpinBox, SSpinBox<int32>)
-						.MinValue(256)
-						.MaxValue(65507)
-						.Value(GetMtu())
-						.OnValueChanged(this, &SUdpReceiverSettingsPanel::HandleMtuChanged)
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("UdpReceiverMaxDatagramLabel", "Max Datagram Bytes"))
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0.f, 4.f, 0.f, 8.f)
-					[
-						SAssignNew(MaxDatagramSpinBox, SSpinBox<int32>)
-						.MinValue(512)
-						.MaxValue(65507)
-						.Value(GetMaxDatagram())
-						.OnValueChanged(this, &SUdpReceiverSettingsPanel::HandleMaxDatagramChanged)
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("UdpReceiverAudioHostLabel", "Audio Bind Address"))
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0.f, 4.f, 0.f, 8.f)
-					[
-						SAssignNew(AudioHostTextBox, SEditableTextBox)
-						.Text(CurrentAudioHost.IsEmpty() ? FText::GetEmpty() : FText::FromString(CurrentAudioHost))
-						.HintText(LOCTEXT("UdpReceiverAudioHostHint", "Defaults to bind address"))
-						.OnTextCommitted(this, &SUdpReceiverSettingsPanel::HandleAudioHostCommitted)
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("UdpReceiverAudioPortLabel", "Audio Port"))
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0.f, 4.f, 0.f, 0.f)
-					[
-						SAssignNew(AudioPortSpinBox, SSpinBox<int32>)
-						.MinValue(1)
-						.MaxValue(65535)
-						.Value(FMath::Max(1, GetAudioPort()))
-						.OnValueChanged(this, &SUdpReceiverSettingsPanel::HandleAudioPortChanged)
-					]
-				]
-			];
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				.Padding(0.f, 8.f, 0.f, 0.f)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("UdpReceiverMtuLabel", "MTU"))
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				.Padding(0.f, 4.f, 0.f, 8.f)
+				[
+					SAssignNew(MtuSpinBox, SSpinBox<int32>)
+					.MinValue(256)
+					.MaxValue(65507)
+					.Value(GetMtu())
+					.OnValueChanged(this, &SUdpReceiverSettingsPanel::HandleMtuChanged)
+					.OnValueCommitted(this, &SUdpReceiverSettingsPanel::HandleMtuCommitted)
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("UdpReceiverMaxDatagramLabel", "Max Datagram Bytes"))
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				.Padding(0.f, 4.f, 0.f, 8.f)
+				[
+					SAssignNew(MaxDatagramSpinBox, SSpinBox<int32>)
+					.MinValue(512)
+					.MaxValue(65507)
+					.Value(GetMaxDatagram())
+					.OnValueChanged(this, &SUdpReceiverSettingsPanel::HandleMaxDatagramChanged)
+					.OnValueCommitted(this, &SUdpReceiverSettingsPanel::HandleMaxDatagramCommitted)
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("UdpReceiverAudioHostLabel", "Audio Bind Address"))
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				.Padding(0.f, 4.f, 0.f, 8.f)
+				[
+					SAssignNew(AudioHostTextBox, SEditableTextBox)
+					.Text(CurrentAudioHost.IsEmpty() ? FText::GetEmpty() : FText::FromString(CurrentAudioHost))
+					.HintText(LOCTEXT("UdpReceiverAudioHostHint", "Defaults to bind address"))
+					.OnTextCommitted(this, &SUdpReceiverSettingsPanel::HandleAudioHostCommitted)
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("UdpReceiverAudioPortLabel", "Audio Port"))
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				.Padding(0.f, 4.f, 0.f, 0.f)
+				[
+					SAssignNew(AudioPortSpinBox, SSpinBox<int32>)
+					.MinValue(1)
+					.MaxValue(65535)
+					.Value(FMath::Max(1, GetAudioPort()))
+					.OnValueChanged(this, &SUdpReceiverSettingsPanel::HandleAudioPortChanged)
+					.OnValueCommitted(this, &SUdpReceiverSettingsPanel::HandleAudioPortCommitted)
+				];
+
+			BuildPanel(PanelContent, InArgs._PanelWidthOverride);
 		}
 
 	private:
@@ -351,13 +367,15 @@ namespace
 			SetOption(O3DSockets::AudioPortOptionKey, FString::FromInt(FMath::Clamp(Port, 1, 65535)));
 		}
 
-		void HandleHostCommitted(const FText& NewText, ETextCommit::Type)
+		void HandleHostCommitted(const FText& NewText, ETextCommit::Type CommitType)
 		{
 			SetHost(NewText.ToString());
 			if (HostTextBox.IsValid())
 			{
 				HostTextBox->SetText(FText::FromString(GetHost()));
 			}
+
+			SubmitFromTextCommit(CommitType);
 		}
 
 		void HandlePortChanged(int32 NewValue)
@@ -367,6 +385,12 @@ namespace
 			{
 				AudioPortSpinBox->SetValue(FMath::Max(1, GetAudioPort()));
 			}
+		}
+
+		void HandlePortCommitted(int32 NewValue, ETextCommit::Type CommitType)
+		{
+			HandlePortChanged(NewValue);
+			SubmitFromTextCommit(CommitType);
 		}
 
 		void HandleBroadcastChanged(ECheckBoxState NewState)
@@ -384,23 +408,43 @@ namespace
 			SetMtu(NewValue);
 		}
 
+		void HandleMtuCommitted(int32 NewValue, ETextCommit::Type CommitType)
+		{
+			HandleMtuChanged(NewValue);
+			SubmitFromTextCommit(CommitType);
+		}
+
 		void HandleMaxDatagramChanged(int32 NewValue)
 		{
 			SetMaxDatagram(NewValue);
 		}
 
-		void HandleAudioHostCommitted(const FText& NewText, ETextCommit::Type)
+		void HandleMaxDatagramCommitted(int32 NewValue, ETextCommit::Type CommitType)
+		{
+			HandleMaxDatagramChanged(NewValue);
+			SubmitFromTextCommit(CommitType);
+		}
+
+		void HandleAudioHostCommitted(const FText& NewText, ETextCommit::Type CommitType)
 		{
 			SetAudioHost(NewText.ToString());
 			if (AudioHostTextBox.IsValid())
 			{
 				AudioHostTextBox->SetText(FText::FromString(GetAudioHost()));
 			}
+
+			SubmitFromTextCommit(CommitType);
 		}
 
 		void HandleAudioPortChanged(int32 NewValue)
 		{
 			SetAudioPort(NewValue);
+		}
+
+		void HandleAudioPortCommitted(int32 NewValue, ETextCommit::Type CommitType)
+		{
+			HandleAudioPortChanged(NewValue);
+			SubmitFromTextCommit(CommitType);
 		}
 
 		UO3DReceiverSettingsObject* SettingsObject = nullptr;
@@ -418,10 +462,17 @@ namespace SocketsEditor
 {
 namespace Receiver
 {
-TSharedPtr<SWidget> BuildUdpReceiverSettingsPanel(UO3DReceiverSettingsObject* SettingsObject)
+TSharedPtr<SO3DTransportConfigPanelBase> BuildUdpReceiverSettingsPanel(UO3DReceiverSettingsObject* SettingsObject, FSimpleDelegate OnSubmit)
 {
+	if (!SettingsObject)
+	{
+		return nullptr;
+	}
+
 	return SNew(SUdpReceiverSettingsPanel)
-		.SettingsObject(SettingsObject);
+		.SettingsObject(SettingsObject)
+		.PanelWidthOverride(SocketsEditor::TransportPanelWidth)
+		.OnSubmit(OnSubmit);
 }
 } // namespace Receiver
 } // namespace SocketsEditor
