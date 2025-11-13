@@ -8,6 +8,9 @@ struct FO3DTransportAudioConfig
     /** Toggle audio capture/sending. */
     bool bEnableAudio = false;
 
+    /** Preferred audio codec identifier (e.g. "pcm16", "opus"). Empty uses transport default. */
+    FString Codec;
+
     /** Target PCM sample rate the transport expects from the capture path. */
     int32 SampleRate = 48000;
 
@@ -31,8 +34,9 @@ struct FO3DTransportAudioConfig
 
     FString ToDebugString() const
     {
-        return FString::Printf(TEXT("[Enabled=%d SR=%d Ch=%d Bitrate=%d Mode=%s Device=%s Label=%s Adv=%d]"),
+        return FString::Printf(TEXT("[Enabled=%d Codec=%s SR=%d Ch=%d Bitrate=%d Mode=%s Device=%s Label=%s Adv=%d]"),
             bEnableAudio ? 1 : 0,
+            Codec.IsEmpty() ? TEXT("<default>") : *Codec,
             SampleRate,
             NumChannels,
             BitrateKbps,

@@ -87,23 +87,31 @@ int32 FO3DLoopbackReceiver::Poll()
 
         if (AudioSink.IsValid())
         {
-            AudioSink->SubmitPcm16(AudioPacket.Meta, AudioPacket.Payload.GetData(), AudioPacket.Payload.Num());
-
-            if (DebugLevel > 0)
+            if (AudioPacket.Codec == O3DS::EUnifiedCodec::PCM16)
             {
-                static double LastAudioLogTime = 0.0;
-                const double Now = FPlatformTime::Seconds();
-                if (DebugLevel > 1 || Now - LastAudioLogTime > 0.25)
+                AudioSink->SubmitPcm16(AudioPacket.Meta, AudioPacket.Payload.GetData(), AudioPacket.Payload.Num());
+
+                if (DebugLevel > 0)
                 {
-                    UE_LOG(LogO3DLoopbackTransport, Log, TEXT("Loopback audio dequeued channel='%s' label='%s' bytes=%d sr=%d ch=%d pending=%d"),
-                        *ChannelKey,
-                        *AudioPacket.Meta.StreamLabel,
-                        AudioPacket.Payload.Num(),
-                        AudioPacket.Meta.SampleRate,
-                        AudioPacket.Meta.NumChannels,
-                        Channel->AudioPendingCount.load());
-                    LastAudioLogTime = Now;
+                    static double LastAudioLogTime = 0.0;
+                    const double Now = FPlatformTime::Seconds();
+                    if (DebugLevel > 1 || Now - LastAudioLogTime > 0.25)
+                    {
+                        UE_LOG(LogO3DLoopbackTransport, Log, TEXT("Loopback audio dequeued channel='%s' label='%s' bytes=%d sr=%d ch=%d pending=%d"),
+                            *ChannelKey,
+                            *AudioPacket.Meta.StreamLabel,
+                            AudioPacket.Payload.Num(),
+                            AudioPacket.Meta.SampleRate,
+                            AudioPacket.Meta.NumChannels,
+                            Channel->AudioPendingCount.load());
+                        LastAudioLogTime = Now;
+                    }
                 }
+            }
+            else
+            {
+                UE_LOG(LogO3DLoopbackTransport, Verbose, TEXT("Loopback audio codec '%d' not yet supported for sink delivery."),
+                    static_cast<int32>(AudioPacket.Codec));
             }
         }
         else

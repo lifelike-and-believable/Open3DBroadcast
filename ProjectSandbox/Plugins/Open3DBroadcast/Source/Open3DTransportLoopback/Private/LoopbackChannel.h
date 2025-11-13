@@ -25,6 +25,7 @@ struct FO3DLoopbackPacket
 
 struct FO3DLoopbackAudioPacket
 {
+    O3DS::EUnifiedCodec Codec = O3DS::EUnifiedCodec::PCM16;
     O3DS::FAudioFrameMeta Meta;
     TArray<uint8> Payload;
     double TimestampSeconds = 0.0;

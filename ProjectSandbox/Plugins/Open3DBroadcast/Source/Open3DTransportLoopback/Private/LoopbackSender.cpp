@@ -66,6 +66,7 @@ namespace
             FO3DLoopbackAudioPacket Packet;
             Packet.Payload = MoveTemp(Encoded);
             Packet.TimestampSeconds = TimestampSec;
+            Packet.Codec = O3DS::EUnifiedCodec::PCM16;
             Packet.Meta.StreamLabel = StreamLabel.IsEmpty() ? ChannelKey : StreamLabel;
             Packet.Meta.SubjectName = SubjectForAudio.IsEmpty() ? ChannelKey : SubjectForAudio;
             Packet.Meta.SampleRate = SampleRate;

@@ -1,5 +1,6 @@
 using UnrealBuildTool;
 using System;
+using System.IO;
 
 [SupportedTargetTypes(TargetType.Game, TargetType.Editor)]
 public class Open3DShared : ModuleRules
@@ -9,6 +10,25 @@ public class Open3DShared : ModuleRules
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
         O3DBuildFlags.Apply(Target, this);
+
+        var PluginRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", ".."));
+        var ThirdPartyIncludeDir = Path.Combine(PluginRoot, "ThirdParty", "Include");
+        if (Directory.Exists(ThirdPartyIncludeDir))
+        {
+            PublicIncludePaths.Add(ThirdPartyIncludeDir);
+        }
+
+        bool bWithOpus = false;
+        if (Target.Platform == UnrealTargetPlatform.Win64)
+        {
+            var OpusLib = Path.Combine(PluginRoot, "ThirdParty", "Lib", "Win64", "opus.lib");
+            if (File.Exists(OpusLib))
+            {
+                PublicAdditionalLibraries.Add(OpusLib);
+                bWithOpus = true;
+            }
+        }
+        PublicDefinitions.Add($"O3D_WITH_OPUS={(bWithOpus ? 1 : 0)}");
 
         PublicDependencyModuleNames.AddRange(new string[]
         {
