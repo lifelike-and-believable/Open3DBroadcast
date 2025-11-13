@@ -47,15 +47,7 @@ namespace
 			{
 				SetPort(DefaultTcpPort);
 			}
-
-			const int32 ExistingAudioPort = GetAudioPortInternal();
-			if ((ExistingAudioPort <= 0 || ExistingAudioPort == DefaultUdpPort + 1) && GetPort() > 0)
-			{
-				SetAudioPort(GetPort() + 1);
 			}
-			}
-
-			const FString CurrentAudioHost = GetAudioHost();
 
 			TSharedRef<SVerticalBox> PanelContent = SNew(SVerticalBox);
 
@@ -79,7 +71,7 @@ namespace
 				.AutoHeight()
 				[
 					SNew(STextBlock)
-					.Text(LOCTEXT("TcpReceiverPortLabel", "Data Port"))
+					.Text(LOCTEXT("TcpReceiverPortLabel", "Port"))
 				];
 
 			PanelContent->AddSlot()
@@ -92,42 +84,6 @@ namespace
 					.Value(GetPort())
 					.OnValueChanged(this, &STcpReceiverSettingsPanel::HandlePortChanged)
 					.OnValueCommitted(this, &STcpReceiverSettingsPanel::HandlePortCommitted)
-				];
-
-			PanelContent->AddSlot()
-				.AutoHeight()
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("TcpReceiverAudioHostLabel", "Audio Host"))
-				];
-
-			PanelContent->AddSlot()
-				.AutoHeight()
-				.Padding(0.f, 4.f, 0.f, 8.f)
-				[
-					SAssignNew(AudioHostTextBox, SEditableTextBox)
-					.Text(CurrentAudioHost.IsEmpty() ? FText::GetEmpty() : FText::FromString(CurrentAudioHost))
-					.HintText(LOCTEXT("TcpReceiverAudioHostHint", "Defaults to remote host"))
-					.OnTextCommitted(this, &STcpReceiverSettingsPanel::HandleAudioHostCommitted)
-				];
-
-			PanelContent->AddSlot()
-				.AutoHeight()
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("TcpReceiverAudioPortLabel", "Audio Port"))
-				];
-
-			PanelContent->AddSlot()
-				.AutoHeight()
-				.Padding(0.f, 4.f, 0.f, 8.f)
-				[
-					SAssignNew(AudioPortSpinBox, SSpinBox<int32>)
-					.MinValue(1)
-					.MaxValue(65535)
-					.Value(FMath::Max(1, GetAudioPort()))
-					.OnValueChanged(this, &STcpReceiverSettingsPanel::HandleAudioPortChanged)
-					.OnValueCommitted(this, &STcpReceiverSettingsPanel::HandleAudioPortCommitted)
 				];
 
 			PanelContent->AddSlot()
@@ -222,45 +178,6 @@ namespace
 			SetOption(O3DSockets::PortOptionKey, FString::FromInt(FMath::Clamp(Port, 1, 65535)));
 		}
 
-		FString GetAudioHost() const
-		{
-			return GetOption(O3DSockets::AudioHostOptionKey);
-		}
-
-		void SetAudioHost(const FString& Value)
-		{
-			FString Sanitized = Value.TrimStartAndEnd();
-			if (Sanitized.IsEmpty())
-			{
-				SetOption(O3DSockets::AudioHostOptionKey, FString());
-			}
-			else
-			{
-				SetOption(O3DSockets::AudioHostOptionKey, O3DSockets::NormaliseHostname(Sanitized));
-			}
-		}
-
-		int32 GetAudioPortInternal() const
-		{
-			const FString Value = GetOption(O3DSockets::AudioPortOptionKey);
-			return Value.IsEmpty() ? 0 : FCString::Atoi(*Value);
-		}
-
-		int32 GetAudioPort() const
-		{
-			const int32 Raw = GetAudioPortInternal();
-			return Raw > 0 ? Raw : GetPort() + 1;
-		}
-
-		void SetAudioPort(int32 Port)
-		{
-			if (Port <= 0)
-			{
-				Port = GetPort() + 1;
-			}
-			SetOption(O3DSockets::AudioPortOptionKey, FString::FromInt(FMath::Clamp(Port, 1, 65535)));
-		}
-
 		int32 GetTimeout() const
 		{
 			const FString Value = GetOption(O3DSockets::TimeoutOptionKey);
@@ -290,38 +207,11 @@ namespace
 		void HandlePortChanged(int32 NewValue)
 		{
 			SetPort(NewValue);
-			if (AudioPortSpinBox.IsValid())
-			{
-				AudioPortSpinBox->SetValue(FMath::Max(1, GetAudioPort()));
-			}
 		}
 
 		void HandlePortCommitted(int32 NewValue, ETextCommit::Type CommitType)
 		{
 			HandlePortChanged(NewValue);
-			SubmitFromTextCommit(CommitType);
-		}
-
-		void HandleAudioHostCommitted(const FText& NewText, ETextCommit::Type CommitType)
-		{
-			SetAudioHost(NewText.ToString());
-			if (AudioHostTextBox.IsValid())
-			{
-				const FString Value = GetAudioHost();
-				AudioHostTextBox->SetText(Value.IsEmpty() ? FText::GetEmpty() : FText::FromString(Value));
-			}
-
-			SubmitFromTextCommit(CommitType);
-		}
-
-		void HandleAudioPortChanged(int32 NewValue)
-		{
-			SetAudioPort(NewValue);
-		}
-
-		void HandleAudioPortCommitted(int32 NewValue, ETextCommit::Type CommitType)
-		{
-			HandleAudioPortChanged(NewValue);
 			SubmitFromTextCommit(CommitType);
 		}
 
@@ -339,8 +229,6 @@ namespace
 		UO3DReceiverSettingsObject* SettingsObject = nullptr;
 		TSharedPtr<SEditableTextBox> HostTextBox;
 		TSharedPtr<SSpinBox<int32>> PortSpinBox;
-		TSharedPtr<SEditableTextBox> AudioHostTextBox;
-		TSharedPtr<SSpinBox<int32>> AudioPortSpinBox;
 		TSharedPtr<SSpinBox<int32>> TimeoutSpinBox;
 	};
 } // anonymous namespace
