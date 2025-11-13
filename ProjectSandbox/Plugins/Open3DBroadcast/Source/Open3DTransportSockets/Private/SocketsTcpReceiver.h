@@ -11,11 +11,11 @@ class ISocketSubsystem;
  * TCP receiver - client mode (connects to sender).
  * Adapted from UDP receiver pattern for reliability.
  */
-class FO3DSocketsTcpReceiverNew : public IOpen3DReceiver
+class FO3DSocketsTcpReceiver : public IOpen3DReceiver
 {
 public:
-	FO3DSocketsTcpReceiverNew();
-	virtual ~FO3DSocketsTcpReceiverNew() override;
+	FO3DSocketsTcpReceiver();
+	virtual ~FO3DSocketsTcpReceiver() override;
 
 	virtual bool Initialize(const FO3DTransportConfig& Config) override;
 	virtual void SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& Consumer) override;

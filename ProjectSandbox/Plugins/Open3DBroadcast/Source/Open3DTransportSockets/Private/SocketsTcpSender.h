@@ -9,17 +9,17 @@
 class FSocket;
 class ISocketSubsystem;
 class FInternetAddr;
-class FSocketsTcpSenderAudioSinkNew;
+class FSocketsTcpSenderAudioSink;
 
 /**
  * TCP sender - server mode (listens and accepts connections).
  * Adapted from UDP sender pattern for reliability.
  */
-class FO3DSocketsTcpSenderNew : public IOpen3DSender
+class FO3DSocketsTcpSender : public IOpen3DSender
 {
 public:
-	FO3DSocketsTcpSenderNew();
-	virtual ~FO3DSocketsTcpSenderNew() override;
+	FO3DSocketsTcpSender();
+	virtual ~FO3DSocketsTcpSender() override;
 
 	virtual bool Initialize(const FO3DTransportConfig& Config) override;
 	virtual bool Start() override;
@@ -42,7 +42,7 @@ private:
 	TSharedPtr<FInternetAddr> CreateBindAddress(const FString& Host, int32 Port, bool& bOutValid);
 
 private:
-	friend class FSocketsTcpSenderAudioSinkNew;
+	friend class FSocketsTcpSenderAudioSink;
 
 	FO3DTransportConfig ActiveConfig;
 	FO3DTransportStats Stats;
