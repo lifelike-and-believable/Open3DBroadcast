@@ -18,6 +18,7 @@
 #include "O3DReceiverRegistry.h"
 #include "O3DReceiverTransportCustomization.h"
 #include "O3DAudioBus.h"
+#include "O3DAudioFrameCodec.h"
 
 #include "o3ds_generated.h"
 
@@ -364,11 +365,23 @@ FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
         {
             Config.Audio.StreamLabel = TEXT("o3ds:mix");
         }
+
+        if (!SourceSettings.AudioCodec.IsNone())
+        {
+            const FString CodecString = O3DAudio::SanitizeCodecString(SourceSettings.AudioCodec.ToString());
+            if (!CodecString.IsEmpty())
+            {
+                Config.Audio.Codec = CodecString;
+                Config.Audio.AdvancedParams.Add(TEXT("codec"), CodecString);
+            }
+        }
     }
     else
     {
         Config.Audio.StreamLabel.Reset();
         Config.Audio.Mode.Reset();
+        Config.Audio.Codec.Reset();
+        Config.Audio.AdvancedParams.Remove(TEXT("codec"));
     }
 
     for (const TPair<FString, FString>& Option : SourceSettings.TransportOptions)

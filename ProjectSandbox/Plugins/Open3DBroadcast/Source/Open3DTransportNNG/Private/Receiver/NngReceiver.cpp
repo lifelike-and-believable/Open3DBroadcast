@@ -5,7 +5,7 @@
 #include "HAL/PlatformTime.h"
 #include "SerializedFrameConsumerRegistry.h"
 #include "O3DUnifiedMessage.h"
-#include "O3DAudioSerialization.h"
+#include "O3DAudioFrameCodec.h"
 
 #if !defined(NNG_STATIC_LIB)
 #define NNG_STATIC_LIB 1
@@ -71,6 +71,11 @@ bool FO3DNngReceiver::Initialize(const FO3DTransportConfig& Config)
     ActiveConfig = Config;
     ActiveConfig.Uri = Options.CanonicalUri;
     ActiveConfig.StreamId = Options.StreamId;
+    ActiveAudioConfig = Config.Audio;
+    if (ActiveAudioConfig.StreamLabel.IsEmpty())
+    {
+        ActiveAudioConfig.StreamLabel = Options.StreamId;
+    }
 
     Stats.Reset();
     PipeCount.Reset();
@@ -95,7 +100,7 @@ void FO3DNngReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMo
         ActiveAudioConfig = AudioConfig;
         if (ActiveAudioConfig.StreamLabel.IsEmpty())
         {
-            ActiveAudioConfig.StreamLabel = ActiveConfig.StreamId;
+            ActiveAudioConfig.StreamLabel = ActiveConfig.StreamId.IsEmpty() ? Options.StreamId : ActiveConfig.StreamId;
         }
     }
 }
@@ -420,7 +425,7 @@ bool FO3DNngReceiver::ProcessReceivedPayload(const uint8* Data, int32 Size)
         // Successfully parsed unified header - route based on message kind
         if (Header.GetKind() == O3DS::EUnifiedKind::Audio)
         {
-            return ProcessAudioPayload(PayloadPtr, PayloadSize);
+            return ProcessAudioPayload(Header.GetCodec(), PayloadPtr, PayloadSize);
         }
         else if (Header.GetKind() == O3DS::EUnifiedKind::Mocap)
         {
@@ -451,7 +456,7 @@ bool FO3DNngReceiver::ProcessReceivedPayload(const uint8* Data, int32 Size)
     return false;
 }
 
-bool FO3DNngReceiver::ProcessAudioPayload(const uint8* Payload, int32 PayloadSize)
+bool FO3DNngReceiver::ProcessAudioPayload(O3DS::EUnifiedCodec Codec, const uint8* Payload, int32 PayloadSize)
 {
     if (!Payload || PayloadSize <= 0)
     {
@@ -465,15 +470,31 @@ bool FO3DNngReceiver::ProcessAudioPayload(const uint8* Payload, int32 PayloadSiz
         return true;
     }
 
-    // Deserialize the PCM16 audio frame
-    O3DAudio::FPcm16Frame AudioFrame;
-    if (!O3DAudio::DeserializePcm16Frame(Payload, PayloadSize, AudioFrame))
+    O3DAudio::FEncodedAudioFrame EncodedFrame;
+    if (!O3DAudio::DeserializeEncodedAudioFrame(Codec, Payload, PayloadSize, EncodedFrame))
     {
-        UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver failed to deserialize audio frame"));
+        UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver failed to deserialize audio frame (payload=%d codec=%d)."), PayloadSize, static_cast<int32>(Codec));
         return false;
     }
 
-    // Submit to audio sink
-    SinkPinned->SubmitPcm16(AudioFrame.Meta, AudioFrame.PCM16.GetData(), AudioFrame.PCM16.Num());
+    if (Codec == O3DS::EUnifiedCodec::PCM16)
+    {
+        SinkPinned->SubmitPcm16(EncodedFrame.Meta, EncodedFrame.Payload.GetData(), EncodedFrame.Payload.Num());
+        Stats.FramesReceived++;
+        Stats.BytesReceived += PayloadSize;
+        return true;
+    }
+
+    if (!AudioDecoder.Decode(Codec, EncodedFrame.Meta, EncodedFrame.Payload.GetData(), EncodedFrame.Payload.Num(), DecodedPcmScratch))
+    {
+        UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver failed to decode audio frame (codec=%d)."), static_cast<int32>(Codec));
+        return false;
+    }
+
+    SinkPinned->SubmitPcm16(EncodedFrame.Meta,
+        reinterpret_cast<const uint8*>(DecodedPcmScratch.GetData()),
+        DecodedPcmScratch.Num() * sizeof(int16));
+    Stats.FramesReceived++;
+    Stats.BytesReceived += PayloadSize;
     return true;
 }

@@ -33,24 +33,13 @@ public:
 			return false;
 		}
 
-		const int32 NumSamples = NumFrames * NumChannels;
-		TArray<uint8> Encoded;
-		Encoded.SetNumUninitialized(NumSamples * static_cast<int32>(sizeof(int16)));
-		int16* Dest = reinterpret_cast<int16*>(Encoded.GetData());
-		for (int32 SampleIndex = 0; SampleIndex < NumSamples; ++SampleIndex)
-		{
-			const float Clamped = FMath::Clamp(Interleaved[SampleIndex], -1.0f, 1.0f);
-			const int32 Scaled = FMath::RoundToInt(Clamped * 32767.0f);
-			Dest[SampleIndex] = static_cast<int16>(FMath::Clamp(Scaled, -32768, 32767));
-		}
-
 		FString EffectiveLabel = StreamLabel;
 		if (EffectiveLabel.IsEmpty())
 		{
 			EffectiveLabel = AudioConfig.StreamLabel;
 		}
 
-		return Owner.SendAudioFrame(EffectiveLabel, Encoded.GetData(), Encoded.Num(), NumChannels, SampleRate, TimestampSec);
+		return Owner.ProcessCapturedAudio(EffectiveLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
 	}
 
 private:
@@ -105,6 +94,8 @@ bool FO3DSocketsTcpSender::Initialize(const FO3DTransportConfig& Config)
 		UE_LOG(LogSocketsTcpSender, Warning, TEXT("TCP sender could not access socket subsystem."));
 		return false;
 	}
+
+	RefreshAudioEncoder();
 
 	return true;
 }
@@ -189,6 +180,7 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DSocketsTcpSender::Creat
 	}
 
 	ActiveAudioConfig = EffectiveConfig;
+	RefreshAudioEncoder();
 
 	return MakeShared<FSocketsTcpSenderAudioSink>(*this, ActiveAudioConfig);
 }
@@ -302,46 +294,60 @@ bool FO3DSocketsTcpSender::SendFramed(FSocket* InSocket, const uint8* Data, int3
 	return true;
 }
 
-bool FO3DSocketsTcpSender::SendAudioFrame(const FString& StreamLabel, const uint8* PCM16Data, int32 NumBytes, int32 NumChannels, int32 SampleRate, double TimestampSec)
+void FO3DSocketsTcpSender::RefreshAudioEncoder()
 {
-	if (!PCM16Data || NumBytes <= 0 || !ClientSocket)
+	const FString StreamLabelFallback = ActiveAudioConfig.StreamLabel.IsEmpty()
+		? (ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId)
+		: ActiveAudioConfig.StreamLabel;
+	const FString SubjectFallback = ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId;
+
+	bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, StreamLabelFallback, SubjectFallback);
+}
+
+bool FO3DSocketsTcpSender::ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec)
+{
+	if (!bAudioEncoderInitialized || !ClientSocket)
 	{
 		return false;
 	}
 
-	// Build audio frame metadata
-	O3DS::FAudioFrameMeta Meta;
-	Meta.SourceGuid = AudioSourceGuid;
-	Meta.StreamLabel = StreamLabel.IsEmpty() ? ActiveAudioConfig.StreamLabel : StreamLabel;
-	Meta.SubjectName = ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId;
-	Meta.NumChannels = NumChannels > 0 ? NumChannels : FMath::Max(ActiveAudioConfig.NumChannels, 1);
-	Meta.SampleRate = SampleRate > 0 ? SampleRate : FMath::Max(ActiveAudioConfig.SampleRate, 1);
-	Meta.TimestampSec = TimestampSec;
+	const FString SubjectForAudio = ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId;
 
-	// Serialize PCM16 audio frame
-	TArray<uint8> AudioPayload;
-	if (!O3DSockets::Tcp::SerializeAudioFramePayload(Meta, PCM16Data, NumBytes, AudioPayload))
+	O3DAudio::FEncodedFrame Frame;
+	if (!AudioEncoder.BuildEncodedFrame(StreamLabel, SubjectForAudio, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Frame))
 	{
-		UE_LOG(LogSocketsTcpSender, Warning, TEXT("TCP sender failed to serialize audio frame"));
 		return false;
 	}
 
-	// Wrap the audio payload in a unified message envelope so the receiver can identify it
-	TArray<uint8> UnifiedMessage;
-	if (!O3DS::CreateUnifiedMessage(O3DS::EUnifiedKind::Audio, O3DS::EUnifiedCodec::PCM16, AudioPayload.GetData(), AudioPayload.Num(), TimestampSec, UnifiedMessage))
+	if (Frame.Meta.SubjectName.IsEmpty())
+	{
+		Frame.Meta.SubjectName = SubjectForAudio;
+	}
+	Frame.Meta.SourceGuid = AudioSourceGuid;
+
+	return SendEncodedAudio(Frame, TimestampSec);
+}
+
+bool FO3DSocketsTcpSender::SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, double TimestampSec)
+{
+	if (!ClientSocket || Frame.Encoded.Num() <= 0)
+	{
+		return false;
+	}
+
+	if (!O3DAudio::CreateUnifiedAudioMessage(Frame, TimestampSec, UnifiedAudioScratch))
 	{
 		UE_LOG(LogSocketsTcpSender, Warning, TEXT("TCP sender failed to create unified audio message"));
 		return false;
 	}
 
-	// Send through main socket
-	if (!SendFramed(ClientSocket, UnifiedMessage.GetData(), UnifiedMessage.Num()))
+	if (!SendFramed(ClientSocket, UnifiedAudioScratch.GetData(), UnifiedAudioScratch.Num()))
 	{
 		UE_LOG(LogSocketsTcpSender, Verbose, TEXT("TCP sender failed to send audio frame"));
 		return false;
 	}
 
-	Stats.BytesSent += UnifiedMessage.Num();
+	Stats.BytesSent += UnifiedAudioScratch.Num();
 	return true;
 }
 

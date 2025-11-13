@@ -74,6 +74,7 @@ public:
         }
 
         RefreshTransportOptions();
+        RefreshAudioCodecOptions();
 
         FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
 
@@ -122,6 +123,35 @@ public:
                 ]
             ]
             + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0.0f, 0.0f, 0.0f, 8.0f)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                .VAlign(VAlign_Center)
+                .Padding(0.0f, 0.0f, 8.0f, 0.0f)
+                [
+                    SNew(STextBlock)
+                    .Text(LOCTEXT("ReceiverAudioCodecLabel", "Audio Codec"))
+                    .Font(IDetailLayoutBuilder::GetDetailFont())
+                ]
+                + SHorizontalBox::Slot()
+                .FillWidth(1.0f)
+                [
+                    SAssignNew(AudioCodecComboBox, SComboBox<TSharedPtr<FName>>)
+                    .OptionsSource(&AudioCodecOptions)
+                    .IsEnabled(this, &SO3DReceiverSourceFactoryPanel::IsAudioCodecSelectionEnabled)
+                    .OnGenerateWidget(this, &SO3DReceiverSourceFactoryPanel::GenerateAudioCodecWidget)
+                    .OnSelectionChanged(this, &SO3DReceiverSourceFactoryPanel::HandleAudioCodecSelectionChanged)
+                    [
+                        SNew(STextBlock)
+                        .Text(this, &SO3DReceiverSourceFactoryPanel::GetSelectedAudioCodecText)
+                        .Font(IDetailLayoutBuilder::GetDetailFont())
+                    ]
+                ]
+            ]
+            + SVerticalBox::Slot()
             .FillHeight(1.0f)
             .Padding(0.0f, 0.0f, 0.0f, 8.0f)
             [
@@ -150,6 +180,7 @@ public:
 
         RefreshTransportOptions();
         SyncTransportSelection();
+        SyncAudioCodecSelection();
         RefreshTransportCustomization();
 
         FSlateApplication::Get().SetKeyboardFocus(AsShared(), EFocusCause::SetDirectly);
@@ -198,6 +229,11 @@ private:
             RefreshTransportOptions();
             RefreshTransportCustomization();
         }
+        else if (PropertyName == GET_MEMBER_NAME_CHECKED(FO3DReceiverSourceConfig, AudioCodec)
+            || PropertyName == GET_MEMBER_NAME_CHECKED(FO3DReceiverSourceConfig, bEnableAudio))
+        {
+            SyncAudioCodecSelection();
+        }
     }
 
     bool HandleIsPropertyVisible(const FPropertyAndParent& PropertyAndParent) const
@@ -206,7 +242,8 @@ private:
 
         const FName PropertyName = Property.GetFName();
         if (PropertyName == GET_MEMBER_NAME_CHECKED(FO3DReceiverSourceConfig, TransportOptions) ||
-            PropertyName == GET_MEMBER_NAME_CHECKED(FO3DReceiverSourceConfig, TransportName))
+            PropertyName == GET_MEMBER_NAME_CHECKED(FO3DReceiverSourceConfig, TransportName) ||
+            PropertyName == GET_MEMBER_NAME_CHECKED(FO3DReceiverSourceConfig, AudioCodec))
         {
             return false;
         }
@@ -253,6 +290,106 @@ private:
     FName GetCurrentTransportName() const
     {
         return SourceSettingsObject ? SourceSettingsObject->Settings.TransportName : NAME_None;
+    }
+
+    void RefreshAudioCodecOptions()
+    {
+        AudioCodecOptions.Reset();
+
+        AudioCodecOptions.Add(MakeShared<FName>(NAME_None));
+        AudioCodecOptions.Add(MakeShared<FName>(FName(TEXT("pcm16"))));
+#if O3D_WITH_OPUS
+        AudioCodecOptions.Add(MakeShared<FName>(FName(TEXT("opus"))));
+#endif
+
+        if (AudioCodecComboBox.IsValid())
+        {
+            AudioCodecComboBox->RefreshOptions();
+            SyncAudioCodecSelection();
+        }
+    }
+
+    void SyncAudioCodecSelection()
+    {
+        if (!AudioCodecComboBox.IsValid())
+        {
+            return;
+        }
+
+        const FName CurrentCodec = SourceSettingsObject ? SourceSettingsObject->Settings.AudioCodec : NAME_None;
+
+        TSharedPtr<FName> MatchingItem;
+        for (const TSharedPtr<FName>& Option : AudioCodecOptions)
+        {
+            if (Option.IsValid() && *Option == CurrentCodec)
+            {
+                MatchingItem = Option;
+                break;
+            }
+        }
+
+        if (!MatchingItem.IsValid() && AudioCodecOptions.Num() > 0)
+        {
+            MatchingItem = AudioCodecOptions[0];
+        }
+
+        if (MatchingItem.IsValid())
+        {
+            AudioCodecComboBox->SetSelectedItem(MatchingItem);
+        }
+        else
+        {
+            AudioCodecComboBox->ClearSelection();
+        }
+    }
+
+    void HandleAudioCodecSelectionChanged(TSharedPtr<FName> NewSelection, ESelectInfo::Type /*SelectInfo*/)
+    {
+        if (!SourceSettingsObject)
+        {
+            return;
+        }
+
+        const FName SelectedCodec = (NewSelection.IsValid() ? *NewSelection : NAME_None);
+        if (SourceSettingsObject->Settings.AudioCodec != SelectedCodec)
+        {
+            SourceSettingsObject->Modify();
+            SourceSettingsObject->Settings.AudioCodec = SelectedCodec;
+        }
+    }
+
+    TSharedRef<SWidget> GenerateAudioCodecWidget(TSharedPtr<FName> InItem) const
+    {
+        const FName CodecName = InItem.IsValid() ? *InItem : NAME_None;
+        FText Label;
+        if (CodecName.IsNone())
+        {
+            Label = LOCTEXT("ReceiverAudioCodecDefault", "Transport Default");
+        }
+        else
+        {
+            Label = FText::FromName(CodecName);
+        }
+
+        return SNew(STextBlock)
+            .Text(Label)
+            .Font(IDetailLayoutBuilder::GetDetailFont());
+    }
+
+    FText GetSelectedAudioCodecText() const
+    {
+        const FName CurrentCodec = SourceSettingsObject ? SourceSettingsObject->Settings.AudioCodec : NAME_None;
+        if (CurrentCodec.IsNone())
+        {
+            return LOCTEXT("ReceiverAudioCodecDefaultLabel", "Transport Default");
+        }
+
+        return FText::FromName(CurrentCodec);
+    }
+
+    bool IsAudioCodecSelectionEnabled() const
+    {
+        return SourceSettingsObject && SourceSettingsObject->Settings.bEnableAudio;
     }
 
     void RefreshTransportOptions()
@@ -391,6 +528,8 @@ private:
     TSharedPtr<SBox> TransportCustomizationContainer;
     TSharedPtr<SComboBox<TSharedPtr<FName>>> TransportComboBox;
     TArray<TSharedPtr<FName>> TransportOptions;
+    TSharedPtr<SComboBox<TSharedPtr<FName>>> AudioCodecComboBox;
+    TArray<TSharedPtr<FName>> AudioCodecOptions;
 };
 #endif // WITH_EDITOR
 

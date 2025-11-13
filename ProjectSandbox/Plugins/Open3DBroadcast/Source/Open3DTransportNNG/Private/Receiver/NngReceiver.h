@@ -7,6 +7,7 @@
 
 #include "O3DReceiverInterface.h"
 #include "Shared/NngHelpers.h"
+#include "O3DAudioFrameCodec.h"
 
 class FO3DNngReceiver : public IOpen3DReceiver
 {
@@ -33,7 +34,7 @@ private:
     void HandleReceiveError(int ErrorCode);
     bool EnsureDialSocket();
     bool ProcessReceivedPayload(const uint8* Data, int32 Size);
-    bool ProcessAudioPayload(const uint8* Payload, int32 PayloadSize);
+    bool ProcessAudioPayload(O3DS::EUnifiedCodec Codec, const uint8* Payload, int32 PayloadSize);
 
     O3DNNG::FNngReceiverOptions Options;
     FO3DTransportStats Stats;
@@ -42,6 +43,8 @@ private:
 
     TWeakPtr<ISerializedFrameConsumer> Consumer;
     TWeakPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
+    O3DAudio::FFrameDecoder AudioDecoder;
+    TArray<int16> DecodedPcmScratch;
 
     FNngSocketWrapper* Socket = nullptr;
 

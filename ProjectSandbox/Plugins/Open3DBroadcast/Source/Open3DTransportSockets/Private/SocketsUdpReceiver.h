@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "O3DReceiverInterface.h"
 #include "SocketsTransportCommon.h"
+#include "O3DAudioFrameCodec.h"
 
 #include "Templates/UniquePtr.h"
 
@@ -39,7 +40,7 @@ private:
 	bool HandleFragment(const uint8* Data, int32 Bytes, TArray<uint8>& OutFrame, TUniquePtr<FFragmentState>& InState);
 	bool IsFragmentPacket(const uint8* Data, int32 Bytes) const;
 	bool ProcessReceivedPayload(const uint8* Data, int32 Size);
-	bool ProcessAudioPayload(const uint8* Payload, int32 PayloadSize);
+	bool ProcessAudioPayload(O3DS::EUnifiedCodec Codec, const uint8* Payload, int32 PayloadSize);
 
 private:
 	FO3DTransportConfig ActiveConfig;
@@ -63,4 +64,6 @@ private:
 	TArray<uint8> ReceiveBuffer;
 
 	TUniquePtr<FFragmentState> FragmentState;
+	O3DAudio::FFrameDecoder AudioDecoder;
+	TArray<int16> DecodedPcmScratch;
 };

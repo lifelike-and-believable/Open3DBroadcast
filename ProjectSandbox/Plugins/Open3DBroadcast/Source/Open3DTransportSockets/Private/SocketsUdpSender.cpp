@@ -35,29 +35,13 @@ public:
 			return false;
 		}
 
-		const int32 NumSamples = NumFrames * NumChannels;
-		if (NumSamples <= 0)
-		{
-			return false;
-		}
-
-		TArray<uint8> Encoded;
-		Encoded.SetNumUninitialized(NumSamples * static_cast<int32>(sizeof(int16)));
-		int16* Dest = reinterpret_cast<int16*>(Encoded.GetData());
-		for (int32 SampleIndex = 0; SampleIndex < NumSamples; ++SampleIndex)
-		{
-			const float Clamped = FMath::Clamp(Interleaved[SampleIndex], -1.0f, 1.0f);
-			const int32 Scaled = FMath::RoundToInt(Clamped * 32767.0f);
-			Dest[SampleIndex] = static_cast<int16>(FMath::Clamp(Scaled, -32768, 32767));
-		}
-
 		FString EffectiveLabel = StreamLabel;
 		if (EffectiveLabel.IsEmpty())
 		{
 			EffectiveLabel = AudioConfig.StreamLabel;
 		}
 
-		return Owner.SendAudioFrame(EffectiveLabel, Encoded.GetData(), Encoded.Num(), NumChannels, SampleRate, TimestampSec);
+		return Owner.ProcessCapturedAudio(EffectiveLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
 	}
 
 private:
@@ -130,6 +114,8 @@ bool FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& Config)
 	{
 		ActiveAudioConfig.StreamLabel = ActiveConfig.StreamId;
 	}
+
+	RefreshAudioEncoder();
 
 	return true;
 }
@@ -216,6 +202,7 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DSocketsUdpSender::Creat
 	}
 
 	ActiveAudioConfig = EffectiveConfig;
+	RefreshAudioEncoder();
 
 	return MakeShared<FSocketsUdpSenderAudioSink, ESPMode::ThreadSafe>(*this, ActiveAudioConfig);
 }
@@ -394,18 +381,23 @@ bool FO3DSocketsUdpSender::SendFragmented(FSocket* InSocket, const TSharedPtr<FI
 	return true;
 }
 
-bool FO3DSocketsUdpSender::SendAudioFrame(const FString& StreamLabel, const uint8* PCM16Data, int32 NumBytes, int32 NumChannels, int32 SampleRate, double TimestampSec)
+void FO3DSocketsUdpSender::RefreshAudioEncoder()
 {
-	if (PCM16Data == nullptr || NumBytes <= 0 || !Socket || !RemoteAddr.IsValid())
+	const FString StreamLabelFallback = ActiveAudioConfig.StreamLabel.IsEmpty()
+		? (ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId)
+		: ActiveAudioConfig.StreamLabel;
+	const FString SubjectFallback = ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId;
+
+	bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, StreamLabelFallback, SubjectFallback);
+}
+
+bool FO3DSocketsUdpSender::ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec)
+{
+	if (!bAudioEncoderInitialized || !Socket || !RemoteAddr.IsValid())
 	{
 		return false;
 	}
 
-	O3DS::FAudioFrameMeta Meta;
-	Meta.SourceGuid = AudioSourceGuid;
-	Meta.StreamLabel = StreamLabel.IsEmpty()
-		? (ActiveAudioConfig.StreamLabel.IsEmpty() ? (ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId) : ActiveAudioConfig.StreamLabel)
-		: StreamLabel;
 	FString SubjectForAudio;
 	{
 		FScopeLock Lock(&SubjectNameLock);
@@ -415,33 +407,40 @@ bool FO3DSocketsUdpSender::SendAudioFrame(const FString& StreamLabel, const uint
 	{
 		SubjectForAudio = ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId;
 	}
-	Meta.SubjectName = MoveTemp(SubjectForAudio);
-	Meta.NumChannels = NumChannels > 0 ? NumChannels : FMath::Max(ActiveAudioConfig.NumChannels, 1);
-	Meta.SampleRate = SampleRate > 0 ? SampleRate : FMath::Max(ActiveAudioConfig.SampleRate, 1);
-	Meta.TimestampSec = TimestampSec;
 
-	// Serialize PCM16 audio frame
-	TArray<uint8> AudioPayload;
-	if (!O3DAudio::SerializePcm16Frame(Meta, PCM16Data, NumBytes, AudioPayload))
+	O3DAudio::FEncodedFrame Frame;
+	if (!AudioEncoder.BuildEncodedFrame(StreamLabel, SubjectForAudio, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Frame))
 	{
-		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP sender failed to serialize audio frame"));
 		return false;
 	}
 
-	// Wrap in unified message envelope
-	TArray<uint8> UnifiedMessage;
-	if (!O3DS::CreateUnifiedMessage(O3DS::EUnifiedKind::Audio, O3DS::EUnifiedCodec::PCM16, AudioPayload.GetData(), AudioPayload.Num(), TimestampSec, UnifiedMessage))
+	if (Frame.Meta.SubjectName.IsEmpty())
+	{
+		Frame.Meta.SubjectName = SubjectForAudio;
+	}
+	Frame.Meta.SourceGuid = AudioSourceGuid;
+
+	return SendEncodedAudio(Frame, TimestampSec);
+}
+
+bool FO3DSocketsUdpSender::SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, double TimestampSec)
+{
+	if (Frame.Encoded.Num() <= 0)
+	{
+		return false;
+	}
+
+	if (!O3DAudio::CreateUnifiedAudioMessage(Frame, TimestampSec, UnifiedAudioScratch))
 	{
 		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP sender failed to create unified audio message"));
 		return false;
 	}
 
-	// Send through main socket
-	if (!SendPayload(Socket, RemoteAddr, UnifiedMessage.GetData(), UnifiedMessage.Num(), TEXT("audio")))
+	if (!SendPayload(Socket, RemoteAddr, UnifiedAudioScratch.GetData(), UnifiedAudioScratch.Num(), TEXT("audio")))
 	{
 		return false;
 	}
 
-	Stats.BytesSent += UnifiedMessage.Num();
+	Stats.BytesSent += UnifiedAudioScratch.Num();
 	return true;
 }

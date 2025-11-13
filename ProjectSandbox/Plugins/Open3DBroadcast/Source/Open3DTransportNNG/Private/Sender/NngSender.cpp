@@ -9,7 +9,7 @@
 #include "HAL/Runnable.h"
 #include "HAL/RunnableThread.h"
 #include "Misc/ScopeLock.h"
-#include "O3DAudioSerialization.h"
+#include "O3DAudioFrameCodec.h"
 #include "O3DUnifiedMessage.h"
 
 #include "o3ds/model.h"
@@ -34,7 +34,7 @@ namespace
 }
 
 /**
- * Audio sink implementation for NNG sender that converts float audio to PCM16 and sends via the same NNG socket.
+ * Audio sink implementation for NNG sender that forwards captured audio through the configured codec.
  */
 class FO3DNngSender::FNngSenderAudioSink final : public IO3DSenderAudioSink
 {
@@ -52,24 +52,13 @@ public:
             return false;
         }
 
-        const int32 NumSamples = NumFrames * NumChannels;
-        TArray<uint8> Encoded;
-        Encoded.SetNumUninitialized(NumSamples * static_cast<int32>(sizeof(int16)));
-        int16* Dest = reinterpret_cast<int16*>(Encoded.GetData());
-        for (int32 SampleIndex = 0; SampleIndex < NumSamples; ++SampleIndex)
-        {
-            const float Clamped = FMath::Clamp(Interleaved[SampleIndex], -1.0f, 1.0f);
-            const int32 Scaled = FMath::RoundToInt(Clamped * 32767.0f);
-            Dest[SampleIndex] = static_cast<int16>(FMath::Clamp(Scaled, -32768, 32767));
-        }
-
         FString EffectiveLabel = StreamLabel;
         if (EffectiveLabel.IsEmpty())
         {
             EffectiveLabel = AudioConfig.StreamLabel;
         }
 
-        return Owner.SendAudioFrame(EffectiveLabel, Encoded.GetData(), Encoded.Num(), NumChannels, SampleRate, TimestampSec);
+        return Owner.ProcessCapturedAudio(EffectiveLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
     }
 
 private:
@@ -182,6 +171,7 @@ bool FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
         ActiveAudioConfig.StreamLabel = Config.StreamId;
     }
     AudioSourceGuid = FGuid::NewGuid();
+    RefreshAudioEncoder();
 
     Stats.Reset();
     QueueBytes = 0;
@@ -568,48 +558,88 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DNngSender::CreateAudioS
     }
 
     ActiveAudioConfig = EffectiveConfig;
+    RefreshAudioEncoder();
 
     return MakeShared<FNngSenderAudioSink, ESPMode::ThreadSafe>(*this, EffectiveConfig);
 }
 
-bool FO3DNngSender::SendAudioFrame(const FString& StreamLabel, const uint8* PCM16Data, int32 NumBytes, int32 NumChannels, int32 SampleRate, double TimestampSec)
+void FO3DNngSender::RefreshAudioEncoder()
 {
-    if (!bInitialized.Load() || !bRunning.Load() || !PCM16Data || NumBytes <= 0)
+    FString SubjectFallback = ActiveConfig.StreamId;
+    if (SubjectFallback.IsEmpty())
+    {
+        SubjectFallback = Options.StreamId;
+    }
+    if (SubjectFallback.IsEmpty())
+    {
+        SubjectFallback = TEXT("nng");
+    }
+
+    FString StreamLabelFallback = ActiveAudioConfig.StreamLabel;
+    if (StreamLabelFallback.IsEmpty())
+    {
+        StreamLabelFallback = SubjectFallback;
+    }
+
+    bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, StreamLabelFallback, SubjectFallback);
+}
+
+bool FO3DNngSender::ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec)
+{
+    if (!bInitialized.Load() || !bRunning.Load() || !bAudioEncoderInitialized)
     {
         return false;
     }
 
-    // Build audio frame metadata
-    O3DS::FAudioFrameMeta Meta;
-    Meta.SourceGuid = AudioSourceGuid;
-    Meta.StreamLabel = StreamLabel.IsEmpty() ? ActiveAudioConfig.StreamLabel : StreamLabel;
-    Meta.SubjectName = ActiveConfig.StreamId;
-    Meta.NumChannels = NumChannels > 0 ? NumChannels : FMath::Max(ActiveAudioConfig.NumChannels, 1);
-    Meta.SampleRate = SampleRate > 0 ? SampleRate : FMath::Max(ActiveAudioConfig.SampleRate, 1);
-    Meta.TimestampSec = TimestampSec;
-
-    // Serialize PCM16 audio frame
-    TArray<uint8> AudioPayload;
-    if (!O3DAudio::SerializePcm16Frame(Meta, PCM16Data, NumBytes, AudioPayload))
+    FString SubjectFallback = ActiveConfig.StreamId;
+    if (SubjectFallback.IsEmpty())
     {
-        UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender failed to serialize audio frame"));
+        SubjectFallback = Options.StreamId;
+    }
+    if (SubjectFallback.IsEmpty())
+    {
+        SubjectFallback = TEXT("nng");
+    }
+
+    O3DAudio::FEncodedFrame Frame;
+    if (!AudioEncoder.BuildEncodedFrame(StreamLabel, SubjectFallback, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Frame))
+    {
         return false;
     }
 
-    // Wrap the audio payload in a unified message envelope so the receiver can identify it
-    TArray<uint8> UnifiedMessage;
-    if (!O3DS::CreateUnifiedMessage(O3DS::EUnifiedKind::Audio, O3DS::EUnifiedCodec::PCM16, AudioPayload.GetData(), AudioPayload.Num(), TimestampSec, UnifiedMessage))
+    if (Frame.Meta.SubjectName.IsEmpty())
+    {
+        Frame.Meta.SubjectName = SubjectFallback;
+    }
+    Frame.Meta.SourceGuid = AudioSourceGuid;
+
+    return SendEncodedAudio(Frame, TimestampSec);
+}
+
+bool FO3DNngSender::SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, double TimestampSec)
+{
+    if (!bInitialized.Load() || !bRunning.Load() || Frame.Encoded.Num() <= 0)
+    {
+        return false;
+    }
+
+    if (!O3DAudio::CreateUnifiedAudioMessage(Frame, TimestampSec, UnifiedAudioScratch))
     {
         UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender failed to create unified audio message"));
         return false;
     }
 
-    // Enqueue the unified message through the same queue as mocap data
-    if (!EnqueuePayload(UnifiedMessage.GetData(), UnifiedMessage.Num()))
+    if (!EnqueuePayload(UnifiedAudioScratch.GetData(), UnifiedAudioScratch.Num()))
     {
         FScopeLock StatsLock(&StatsMutex);
         Stats.DroppedFrames++;
         return false;
+    }
+
+    {
+        FScopeLock StatsLock(&StatsMutex);
+        Stats.FramesSent++;
+        Stats.BytesSent += UnifiedAudioScratch.Num();
     }
 
     return true;

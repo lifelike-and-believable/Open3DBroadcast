@@ -108,11 +108,17 @@ int32 FO3DLoopbackReceiver::Poll()
                     }
                 }
             }
-            else
-            {
-                UE_LOG(LogO3DLoopbackTransport, Verbose, TEXT("Loopback audio codec '%d' not yet supported for sink delivery."),
-                    static_cast<int32>(AudioPacket.Codec));
-            }
+			else
+			{
+				if (AudioDecoder.Decode(AudioPacket.Codec, AudioPacket.Meta, AudioPacket.Payload.GetData(), AudioPacket.Payload.Num(), DecodedPcmScratch) && DecodedPcmScratch.Num() > 0)
+				{
+					AudioSink->SubmitPcm16(AudioPacket.Meta, reinterpret_cast<const uint8*>(DecodedPcmScratch.GetData()), DecodedPcmScratch.Num() * sizeof(int16));
+				}
+				else
+				{
+					UE_LOG(LogO3DLoopbackTransport, Verbose, TEXT("Loopback audio decode failed for codec '%d'."), static_cast<int32>(AudioPacket.Codec));
+				}
+			}
         }
         else
         {

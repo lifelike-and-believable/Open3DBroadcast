@@ -19,6 +19,7 @@
 #include "GameFramework/Actor.h"
 #include "HAL/IConsoleManager.h"
 #include "AudioCaptureCore.h"
+#include "O3DAudioFrameCodec.h"
 
 #define LOCTEXT_NAMESPACE "O3DSenderComponent"
 
@@ -372,6 +373,16 @@ TArray<FName> UO3DSenderComponent::GetAvailableAudioInputDeviceOptions() const
 	return Options;
 }
 
+TArray<FName> UO3DSenderComponent::GetAvailableAudioCodecOptions() const
+{
+	TArray<FName> Options;
+	Options.Add(FName(TEXT("pcm16")));
+#if O3D_WITH_OPUS
+	Options.Add(FName(TEXT("opus")));
+#endif
+	return Options;
+}
+
 void UO3DSenderComponent::UpdateAudioCaptureBinding()
 {
 	if (HasAnyFlags(RF_ClassDefaultObject))
@@ -464,6 +475,7 @@ FO3DTransportAudioConfig UO3DSenderComponent::BuildTransportAudioConfig(const FO
 		AudioConfig.InputDevice.Reset();
 	}
 
+	const FString CodecString = O3DAudio::SanitizeCodecString(AudioCodec.IsNone() ? FString() : AudioCodec.ToString());
 	AudioConfig.AdvancedParams.Empty();
 	AudioConfig.AdvancedParams.Add(TEXT("game_gain"), FString::SanitizeFloat(CaptureConfig.GameGain));
 	AudioConfig.AdvancedParams.Add(TEXT("mic_gain"), FString::SanitizeFloat(CaptureConfig.MicGain));
@@ -474,6 +486,15 @@ FO3DTransportAudioConfig UO3DSenderComponent::BuildTransportAudioConfig(const FO
 	if (CaptureConfig.SubmixToTap)
 	{
 		AudioConfig.AdvancedParams.Add(TEXT("submix"), CaptureConfig.SubmixToTap->GetPathName());
+	}
+	if (!CodecString.IsEmpty())
+	{
+		AudioConfig.Codec = CodecString;
+		AudioConfig.AdvancedParams.Add(TEXT("codec"), CodecString);
+	}
+	else
+	{
+		AudioConfig.Codec.Reset();
 	}
 
 	return AudioConfig;

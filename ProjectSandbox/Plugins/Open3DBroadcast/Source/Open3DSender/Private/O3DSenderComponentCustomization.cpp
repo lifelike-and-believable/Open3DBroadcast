@@ -70,6 +70,7 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
 
     TSharedPtr<IPropertyHandle> EnableAudioHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bEnableAudio));
     TSharedPtr<IPropertyHandle> AudioCaptureModeHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioCaptureMode));
+    TSharedPtr<IPropertyHandle> AudioCodecHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioCodec));
         TSharedPtr<IPropertyHandle> ClampCurvesHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bClampMorphCurvesToUnit));
         TSharedPtr<IPropertyHandle> DropNaNHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bDropNaNAndInfinity));
         TSharedPtr<IPropertyHandle> EnableCurveFilteringHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bEnableCurveFiltering));
@@ -121,6 +122,10 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
     if (AudioStreamLabelHandle.IsValid())
     {
         DetailBuilder.HideProperty(AudioStreamLabelHandle);
+    }
+    if (AudioCodecHandle.IsValid())
+    {
+        DetailBuilder.HideProperty(AudioCodecHandle);
     }
     if (AudioCaptureConfigHandle.IsValid())
     {
@@ -263,6 +268,10 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
     if (AudioStreamLabelHandle.IsValid())
     {
         AudioGroup.AddPropertyRow(AudioStreamLabelHandle.ToSharedRef());
+    }
+    if (AudioCodecHandle.IsValid())
+    {
+        AudioGroup.AddPropertyRow(AudioCodecHandle.ToSharedRef());
     }
     if (AudioCaptureConfigHandle.IsValid())
     {

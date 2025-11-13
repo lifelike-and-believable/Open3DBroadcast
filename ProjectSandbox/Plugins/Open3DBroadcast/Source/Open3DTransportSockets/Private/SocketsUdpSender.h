@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "O3DSenderInterface.h"
 #include "SocketsTransportCommon.h"
+#include "O3DAudioFrameCodec.h"
 
 #include "HAL/CriticalSection.h"
 #include "HAL/ThreadSafeCounter.h"
@@ -38,7 +39,9 @@ private:
 	bool SendPayload(FSocket* InSocket, const TSharedPtr<FInternetAddr>& InAddr, const uint8* Data, int32 Size, const TCHAR* Context);
 	bool SendDatagram(FSocket* InSocket, const TSharedPtr<FInternetAddr>& InAddr, const uint8* Data, int32 Size, const TCHAR* Context);
 	bool SendFragmented(FSocket* InSocket, const TSharedPtr<FInternetAddr>& InAddr, const uint8* Data, int32 Size, const TCHAR* Context);
-	bool SendAudioFrame(const FString& StreamLabel, const uint8* PCM16Data, int32 NumBytes, int32 NumChannels, int32 SampleRate, double TimestampSec);
+	void RefreshAudioEncoder();
+	bool ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec);
+	bool SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, double TimestampSec);
 
 private:
 	friend class FSocketsUdpSenderAudioSink;
@@ -59,6 +62,10 @@ private:
 	int32 MaxDatagramBytes = 64000;
 	int32 MtuBytes = 1200;
 	FGuid AudioSourceGuid;
+
+	bool bAudioEncoderInitialized = false;
+	O3DAudio::FFrameEncoder AudioEncoder;
+	TArray<uint8> UnifiedAudioScratch;
 
 	FThreadSafeCounter MessageCounter;
 	mutable FCriticalSection SubjectNameLock;

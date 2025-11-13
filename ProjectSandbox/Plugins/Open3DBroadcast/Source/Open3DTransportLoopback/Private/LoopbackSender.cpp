@@ -7,110 +7,95 @@
 
 #include <vector>
 
-namespace
+class FLoopbackSenderAudioSink final : public IO3DSenderAudioSink
 {
-    class FLoopbackSenderAudioSink final : public IO3DSenderAudioSink
+public:
+    FLoopbackSenderAudioSink(FO3DLoopbackSender& InOwner,
+                             TWeakPtr<FO3DLoopbackChannel, ESPMode::ThreadSafe> InChannel,
+                             FString InChannelKey)
+        : Owner(InOwner)
+        , Channel(MoveTemp(InChannel))
+        , ChannelKey(MoveTemp(InChannelKey))
     {
-    public:
-        FLoopbackSenderAudioSink(TWeakPtr<FO3DLoopbackChannel, ESPMode::ThreadSafe> InChannel,
-                                 FString InChannelKey)
-            : Channel(MoveTemp(InChannel))
-            , ChannelKey(MoveTemp(InChannelKey))
+    }
+
+    virtual bool SubmitPcm(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
+    {
+        if (!Interleaved || NumFrames <= 0 || NumChannels <= 0 || SampleRate <= 0)
         {
+            return false;
         }
 
-        virtual bool SubmitPcm(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
+        TSharedPtr<FO3DLoopbackChannel, ESPMode::ThreadSafe> PinnedChannel = Channel.Pin();
+        if (!PinnedChannel.IsValid())
         {
-            if (!Interleaved || NumFrames <= 0 || NumChannels <= 0 || SampleRate <= 0)
-            {
-                return false;
-            }
-
-            TSharedPtr<FO3DLoopbackChannel, ESPMode::ThreadSafe> PinnedChannel = Channel.Pin();
-            if (!PinnedChannel.IsValid())
-            {
-                return false;
-            }
-
-            const int32 PendingAudio = PinnedChannel->AudioPendingCount.load();
-            if (PendingAudio >= PinnedChannel->AudioCapacity)
-            {
-                const double Now = FPlatformTime::Seconds();
-                if (Now - LastDropLogTime > 1.0)
-                {
-                    UE_LOG(LogO3DLoopbackTransport, Warning, TEXT("Loopback audio queue full for '%s'; dropping frame."), *ChannelKey);
-                    LastDropLogTime = Now;
-                }
-                return false;
-            }
-
-            const int32 NumSamples = NumFrames * NumChannels;
-            if (NumSamples <= 0)
-            {
-                return false;
-            }
-
-            TArray<uint8> Encoded;
-            Encoded.SetNumUninitialized(NumSamples * sizeof(int16));
-            int16* Dest = reinterpret_cast<int16*>(Encoded.GetData());
-
-            for (int32 SampleIndex = 0; SampleIndex < NumSamples; ++SampleIndex)
-            {
-                const float Clamped = FMath::Clamp(Interleaved[SampleIndex], -1.0f, 1.0f);
-                const int32 Scaled = FMath::RoundToInt(Clamped * 32767.0f);
-                Dest[SampleIndex] = static_cast<int16>(FMath::Clamp(Scaled, -32768, 32767));
-            }
-
-            const FString SubjectForAudio = PinnedChannel->GetLastSubjectName();
-
-            FO3DLoopbackAudioPacket Packet;
-            Packet.Payload = MoveTemp(Encoded);
-            Packet.TimestampSeconds = TimestampSec;
-            Packet.Codec = O3DS::EUnifiedCodec::PCM16;
-            Packet.Meta.StreamLabel = StreamLabel.IsEmpty() ? ChannelKey : StreamLabel;
-            Packet.Meta.SubjectName = SubjectForAudio.IsEmpty() ? ChannelKey : SubjectForAudio;
-            Packet.Meta.SampleRate = SampleRate;
-            Packet.Meta.NumChannels = NumChannels;
-            Packet.Meta.TimestampSec = TimestampSec;
-
-            PinnedChannel->AudioQueue.Enqueue(MoveTemp(Packet));
-            PinnedChannel->AudioPendingCount.fetch_add(1);
-
-            const int32 DebugLevel = O3DLoopback::GetAudioDebugLevel();
-            if (DebugLevel > 0)
-            {
-                const double Now = FPlatformTime::Seconds();
-                if (DebugLevel > 1 || Now - LastEnqueueLogTime > 0.25)
-                {
-                    const int32 PendingNow = PinnedChannel->AudioPendingCount.load();
-                    const FString EffectiveLabel = StreamLabel.IsEmpty() ? ChannelKey : StreamLabel;
-                    UE_LOG(LogO3DLoopbackTransport, Log, TEXT("Loopback audio enqueued channel='%s' label='%s' frames=%d channels=%d sr=%d pending=%d timestamp=%.3f"),
-                        *ChannelKey,
-                        *EffectiveLabel,
-                        NumFrames,
-                        NumChannels,
-                        SampleRate,
-                        PendingNow,
-                        TimestampSec);
-                    LastEnqueueLogTime = Now;
-                }
-            }
-
-            return true;
+            return false;
         }
 
-        virtual void OnCaptureStopped() override
+        const int32 PendingAudio = PinnedChannel->AudioPendingCount.load();
+        if (PendingAudio >= PinnedChannel->AudioCapacity)
         {
-            // No persistent state to release.
+            const double Now = FPlatformTime::Seconds();
+            if (Now - LastDropLogTime > 1.0)
+            {
+                UE_LOG(LogO3DLoopbackTransport, Warning, TEXT("Loopback audio queue full for '%s'; dropping frame."), *ChannelKey);
+                LastDropLogTime = Now;
+            }
+            return false;
         }
 
-    private:
-        TWeakPtr<FO3DLoopbackChannel, ESPMode::ThreadSafe> Channel;
-        FString ChannelKey;
-        double LastDropLogTime = 0.0;
-        double LastEnqueueLogTime = 0.0;
-    };
-}
+        const FString SubjectForAudio = PinnedChannel->GetLastSubjectName();
+
+        O3DAudio::FEncodedFrame EncodedFrame;
+        if (!Owner.EncodeAudioFrame(StreamLabel, SubjectForAudio, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, EncodedFrame))
+        {
+            return false;
+        }
+
+        FO3DLoopbackAudioPacket Packet;
+        Packet.Payload = MoveTemp(EncodedFrame.Encoded);
+        Packet.TimestampSeconds = TimestampSec;
+        Packet.Codec = EncodedFrame.Codec;
+        Packet.Meta = MoveTemp(EncodedFrame.Meta);
+
+        PinnedChannel->AudioQueue.Enqueue(MoveTemp(Packet));
+        PinnedChannel->AudioPendingCount.fetch_add(1);
+
+        const int32 DebugLevel = O3DLoopback::GetAudioDebugLevel();
+        if (DebugLevel > 0)
+        {
+            const double Now = FPlatformTime::Seconds();
+            if (DebugLevel > 1 || Now - LastEnqueueLogTime > 0.25)
+            {
+                const int32 PendingNow = PinnedChannel->AudioPendingCount.load();
+                const FString EffectiveLabel = StreamLabel.IsEmpty() ? ChannelKey : StreamLabel;
+                UE_LOG(LogO3DLoopbackTransport, Log, TEXT("Loopback audio enqueued channel='%s' label='%s' frames=%d channels=%d sr=%d pending=%d timestamp=%.3f"),
+                    *ChannelKey,
+                    *EffectiveLabel,
+                    NumFrames,
+                    NumChannels,
+                    SampleRate,
+                    PendingNow,
+                    TimestampSec);
+                LastEnqueueLogTime = Now;
+            }
+        }
+
+        return true;
+    }
+
+    virtual void OnCaptureStopped() override
+    {
+        // No persistent state to release.
+    }
+
+private:
+    FO3DLoopbackSender& Owner;
+    TWeakPtr<FO3DLoopbackChannel, ESPMode::ThreadSafe> Channel;
+    FString ChannelKey;
+    double LastDropLogTime = 0.0;
+    double LastEnqueueLogTime = 0.0;
+};
 
 bool FO3DLoopbackSender::Initialize(const FO3DTransportConfig& Config)
 {
@@ -121,6 +106,9 @@ bool FO3DLoopbackSender::Initialize(const FO3DTransportConfig& Config)
     Channel = O3DLoopback::AcquireChannel(ChannelKey, QueueCapacity, AudioQueueCapacity);
     bInitialized = Channel.IsValid();
     Stats.Reset();
+    ActiveAudioConfig = Config.Audio;
+    const FString DefaultLabel = ActiveAudioConfig.StreamLabel.IsEmpty() ? ChannelKey : ActiveAudioConfig.StreamLabel;
+    bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, DefaultLabel.IsEmpty() ? ChannelKey : DefaultLabel, ChannelKey);
 
     if (!bInitialized)
     {
@@ -222,12 +210,34 @@ bool FO3DLoopbackSender::SupportsAudio() const
     return true;
 }
 
-TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DLoopbackSender::CreateAudioSink(const FO3DTransportAudioConfig& /*AudioConfig*/)
+TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DLoopbackSender::CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig)
 {
     if (!bInitialized || !Channel.IsValid())
     {
         return nullptr;
     }
 
-    return MakeShared<FLoopbackSenderAudioSink, ESPMode::ThreadSafe>(Channel, ChannelKey);
+    ActiveAudioConfig = AudioConfig;
+    const FString DefaultLabel = ActiveAudioConfig.StreamLabel.IsEmpty() ? ChannelKey : ActiveAudioConfig.StreamLabel;
+    bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, DefaultLabel.IsEmpty() ? ChannelKey : DefaultLabel, ChannelKey);
+
+    return MakeShared<FLoopbackSenderAudioSink, ESPMode::ThreadSafe>(*this, Channel, ChannelKey);
+}
+
+bool FO3DLoopbackSender::EncodeAudioFrame(const FString& StreamLabelOverride,
+    const FString& SubjectOverride,
+    const float* Interleaved,
+    int32 NumFrames,
+    int32 NumChannels,
+    int32 SampleRate,
+    double TimestampSec,
+    O3DAudio::FEncodedFrame& OutFrame)
+{
+    if (!bAudioEncoderInitialized)
+    {
+        return false;
+    }
+
+    const FString EffectiveSubject = SubjectOverride.IsEmpty() ? ChannelKey : SubjectOverride;
+    return AudioEncoder.BuildEncodedFrame(StreamLabelOverride, EffectiveSubject, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, OutFrame);
 }

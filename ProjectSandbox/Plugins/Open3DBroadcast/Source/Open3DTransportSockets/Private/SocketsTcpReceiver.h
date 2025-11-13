@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "O3DReceiverInterface.h"
 #include "SocketsTransportCommon.h"
+#include "O3DAudioFrameCodec.h"
 
 class FSocket;
 class ISocketSubsystem;
@@ -41,7 +42,7 @@ private:
 	void TickConnection();
 	bool ReadFramed(FSocket* InSocket, EState& State, TArray<uint8>& Buffer, int32& InOutBytesBuffered, int32& InOutExpectedPayloadSize, TArray<uint8>& OutFrame);
 	bool ProcessReceivedPayload(const uint8* Data, int32 Size);
-	bool ProcessAudioPayload(const uint8* Payload, int32 PayloadSize);
+	bool ProcessAudioPayload(O3DS::EUnifiedCodec Codec, const uint8* Payload, int32 PayloadSize);
 
 private:
 	FO3DTransportConfig ActiveConfig;
@@ -70,4 +71,6 @@ private:
 
 	TWeakPtr<ISerializedFrameConsumer> Consumer;
 	TWeakPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
+	O3DAudio::FFrameDecoder AudioDecoder;
+	TArray<int16> DecodedPcmScratch;
 };

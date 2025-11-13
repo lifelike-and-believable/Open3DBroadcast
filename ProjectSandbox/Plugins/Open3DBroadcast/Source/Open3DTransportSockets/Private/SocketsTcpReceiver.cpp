@@ -375,7 +375,7 @@ bool FO3DSocketsTcpReceiver::ProcessReceivedPayload(const uint8* Data, int32 Siz
 		// Unified message - route by kind
 		if (Header.GetKind() == O3DS::EUnifiedKind::Audio)
 		{
-			return ProcessAudioPayload(PayloadPtr, PayloadSize);
+			return ProcessAudioPayload(Header.GetCodec(), PayloadPtr, PayloadSize);
 		}
 		else if (Header.GetKind() == O3DS::EUnifiedKind::Mocap)
 		{
@@ -410,23 +410,38 @@ bool FO3DSocketsTcpReceiver::ProcessReceivedPayload(const uint8* Data, int32 Siz
 	return false;
 }
 
-bool FO3DSocketsTcpReceiver::ProcessAudioPayload(const uint8* Payload, int32 PayloadSize)
+bool FO3DSocketsTcpReceiver::ProcessAudioPayload(O3DS::EUnifiedCodec Codec, const uint8* Payload, int32 PayloadSize)
 {
 	if (!Payload || PayloadSize <= 0)
 	{
 		return false;
 	}
 
-	O3DAudio::FPcm16Frame AudioFrame;
-	if (!O3DAudio::DeserializePcm16Frame(Payload, PayloadSize, AudioFrame))
+	O3DAudio::FEncodedAudioFrame EncodedAudio;
+	if (!O3DAudio::DeserializeEncodedAudioFrame(Codec, Payload, PayloadSize, EncodedAudio))
 	{
-		UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("Failed to deserialize audio frame"));
+		UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("Failed to deserialize TCP audio frame (payloadSize=%d codec=%d)."), PayloadSize, static_cast<int32>(Codec));
 		return false;
 	}
 
 	if (TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> SinkPinned = AudioSink.Pin())
 	{
-		SinkPinned->SubmitPcm16(AudioFrame.Meta, AudioFrame.PCM16.GetData(), AudioFrame.PCM16.Num());
+		if (Codec == O3DS::EUnifiedCodec::PCM16)
+		{
+			SinkPinned->SubmitPcm16(EncodedAudio.Meta, EncodedAudio.Payload.GetData(), EncodedAudio.Payload.Num());
+		}
+		else
+		{
+			if (!AudioDecoder.Decode(Codec, EncodedAudio.Meta, EncodedAudio.Payload.GetData(), EncodedAudio.Payload.Num(), DecodedPcmScratch))
+			{
+				UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("Failed to decode TCP audio frame (codec=%d)."), static_cast<int32>(Codec));
+				return false;
+			}
+
+			SinkPinned->SubmitPcm16(EncodedAudio.Meta,
+				reinterpret_cast<const uint8*>(DecodedPcmScratch.GetData()),
+				DecodedPcmScratch.Num() * sizeof(int16));
+		}
 	}
 
 	return true;

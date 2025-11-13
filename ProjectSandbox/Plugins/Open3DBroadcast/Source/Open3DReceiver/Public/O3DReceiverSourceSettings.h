@@ -24,6 +24,10 @@ public:
     UPROPERTY(EditAnywhere, Category = "Open3DStream|Audio", meta = (EditCondition = "bEnableAudio", EditConditionHides))
     FString AudioStreamLabel;
 
+    /** Preferred decoder codec; leave empty to use transport default. */
+    UPROPERTY(EditAnywhere, Category = "Open3DStream|Audio", meta = (EditCondition = "bEnableAudio", EditConditionHides))
+    FName AudioCodec = NAME_None;
+
     /** Transport-specific key/value overrides populated by modular transport UIs. Hidden from the generic details panel. */
     UPROPERTY(VisibleAnywhere, Category = "Open3DStream", meta = (HideInDetailPanel))
     TMap<FString, FString> TransportOptions;

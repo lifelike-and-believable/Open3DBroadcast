@@ -8,6 +8,7 @@
 
 #include "O3DSenderInterface.h"
 #include "Shared/NngHelpers.h"
+#include "O3DAudioFrameCodec.h"
 
 class FO3DNngSender : public IOpen3DSender
 {
@@ -47,7 +48,9 @@ private:
     bool EnqueuePayload(const uint8* Data, int32 Size);
     void DrainQueue();
     void HandleSendError(int ErrorCode);
-    bool SendAudioFrame(const FString& StreamLabel, const uint8* PCM16Data, int32 NumBytes, int32 NumChannels, int32 SampleRate, double TimestampSec);
+    void RefreshAudioEncoder();
+    bool ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec);
+    bool SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, double TimestampSec);
 
     mutable FCriticalSection StateMutex;
     mutable FCriticalSection StatsMutex;
@@ -57,6 +60,9 @@ private:
     FO3DTransportConfig ActiveConfig;
     FO3DTransportAudioConfig ActiveAudioConfig;
     FGuid AudioSourceGuid;
+    bool bAudioEncoderInitialized = false;
+    O3DAudio::FFrameEncoder AudioEncoder;
+    TArray<uint8> UnifiedAudioScratch;
 
     TAtomic<bool> bInitialized{ false };
     TAtomic<bool> bRunning{ false };

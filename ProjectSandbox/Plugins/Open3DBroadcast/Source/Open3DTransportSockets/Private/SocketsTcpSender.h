@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "O3DSenderInterface.h"
 #include "SocketsTransportCommon.h"
+#include "O3DAudioFrameCodec.h"
 
 #include "HAL/CriticalSection.h"
 
@@ -35,7 +36,9 @@ private:
 	void DestroySocket();
 	void TickAcceptClient();
 	bool SendFramed(FSocket* InSocket, const uint8* Data, int32 Size);
-	bool SendAudioFrame(const FString& StreamLabel, const uint8* PCM16Data, int32 NumBytes, int32 NumChannels, int32 SampleRate, double TimestampSec);
+	void RefreshAudioEncoder();
+	bool ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec);
+	bool SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, double TimestampSec);
 	TSharedPtr<FInternetAddr> CreateBindAddress(const FString& Host, int32 Port, bool& bOutValid);
 
 private:
@@ -56,4 +59,7 @@ private:
 	FGuid AudioSourceGuid;
 
 	double LastAcceptPollTime = 0.0;
+	bool bAudioEncoderInitialized = false;
+	O3DAudio::FFrameEncoder AudioEncoder;
+	TArray<uint8> UnifiedAudioScratch;
 };

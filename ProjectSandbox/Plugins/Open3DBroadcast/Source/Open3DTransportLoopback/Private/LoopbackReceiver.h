@@ -3,6 +3,7 @@
 #include "O3DReceiverInterface.h"
 #include "LoopbackChannel.h"
 #include "SerializedFrameConsumerRegistry.h"
+#include "O3DAudioFrameCodec.h"
 
 class FO3DLoopbackReceiver : public IOpen3DReceiver
 {
@@ -28,6 +29,8 @@ private:
     FO3DTransportStats Stats;
     int64 LatencySamples = 0;
     double LastAudioDropLogTime = 0.0;
+    O3DAudio::FFrameDecoder AudioDecoder;
+    TArray<int16> DecodedPcmScratch;
 
     void AccumulateLatency(double LatencyMs);
 };
