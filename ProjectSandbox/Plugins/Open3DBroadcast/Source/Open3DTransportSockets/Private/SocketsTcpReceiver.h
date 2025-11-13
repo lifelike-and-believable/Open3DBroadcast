@@ -4,23 +4,21 @@
 #include "O3DReceiverInterface.h"
 #include "SocketsTransportCommon.h"
 
-#include "Containers/Array.h"
-#include "Templates/SharedPointer.h"
-
 class FSocket;
 class ISocketSubsystem;
 
 /**
- * Dedicated TCP receiver implementation for the sockets transport module.
+ * TCP receiver - client mode (connects to sender).
+ * Adapted from UDP receiver pattern for reliability.
  */
-class FO3DSocketsTcpReceiver : public IOpen3DReceiver
+class FO3DSocketsTcpReceiverNew : public IOpen3DReceiver
 {
 public:
-	FO3DSocketsTcpReceiver();
-	virtual ~FO3DSocketsTcpReceiver() override;
+	FO3DSocketsTcpReceiverNew();
+	virtual ~FO3DSocketsTcpReceiverNew() override;
 
 	virtual bool Initialize(const FO3DTransportConfig& Config) override;
-	virtual void SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer) override;
+	virtual void SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& Consumer) override;
 	virtual bool Start() override;
 	virtual void Stop() override;
 	virtual int32 Poll() override;
@@ -31,27 +29,22 @@ public:
 private:
 	enum class EState : uint8
 	{
-		Sync,
-		Header,
-		Data
+		Disconnected,
+		Connecting,
+		Connected,
+		ReadingHeader,
+		ReadingPayload
 	};
 
-	bool EnsureSocket();
-	bool BeginConnect();
-	void DestroySocket();
-	bool ReadBytes(int32 TargetBytes);
-	bool ProcessFrame(int32 PayloadSize, TArray<uint8>& OutFrame);
-	void HandleSocketError();
-	void ResetState();
-	bool ShouldReceiveAudio() const;
-	bool EnsureAudioSocket();
-	bool BeginAudioConnect();
-	void DestroyAudioSocket();
-	bool ReadAudioBytes(int32 TargetBytes);
-	bool ProcessAudioFrame(int32 PayloadSize);
-	void HandleAudioSocketError();
-	void ResetAudioState();
+	bool ConnectToServer();
+	bool ConnectAudioToServer();
+	void DisconnectSocket();
+	void DisconnectAudioSocket();
+	void TickConnection();
+	void TickAudioConnection();
+	bool ReadFramed(FSocket* InSocket, EState& State, TArray<uint8>& Buffer, int32& InOutBytesBuffered, int32& InOutExpectedPayloadSize, TArray<uint8>& OutFrame);
 	void PollAudioChannel(int32& OutFramesProcessed);
+	bool ProcessAudioPayload(const TArray<uint8>& Payload);
 
 private:
 	FO3DTransportConfig ActiveConfig;
@@ -65,25 +58,26 @@ private:
 	FString RemoteHost;
 	int32 RemotePort = 0;
 	FString StreamId;
-	FString AudioHost;
-	int32 AudioPort = 0;
+	FString AudioRemoteHost;
+	int32 AudioRemotePort = 0;
+
 	bool bAudioEnabled = false;
 
-	double LastConnectAttempt = 0.0;
-	int32 BackoffAttempt = 0;
-	bool bAnnouncedConnected = false;
-	double LastAudioConnectAttempt = 0.0;
-	int32 AudioBackoffAttempt = 0;
-	bool bAudioAnnouncedConnected = false;
+	EState State = EState::Disconnected;
+	EState AudioState = EState::Disconnected;
 
-	EState State = EState::Sync;
-	TArray<uint8> Buffer;
+	TArray<uint8> ReceiveBuffer;
 	int32 BytesBuffered = 0;
 	int32 ExpectedPayloadSize = 0;
-	EState AudioState = EState::Sync;
-	TArray<uint8> AudioBuffer;
+
+	TArray<uint8> AudioReceiveBuffer;
 	int32 AudioBytesBuffered = 0;
 	int32 AudioExpectedPayloadSize = 0;
+
+	double LastConnectAttempt = 0.0;
+	double LastAudioConnectAttempt = 0.0;
+	int32 ConnectBackoffAttempt = 0;
+	int32 AudioConnectBackoffAttempt = 0;
 
 	TWeakPtr<ISerializedFrameConsumer> Consumer;
 	TWeakPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
