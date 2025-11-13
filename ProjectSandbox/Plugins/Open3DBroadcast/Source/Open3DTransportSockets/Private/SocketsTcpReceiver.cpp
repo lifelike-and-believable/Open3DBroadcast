@@ -550,7 +550,7 @@ bool FO3DSocketsTcpReceiver::EnsureAudioSocket()
 		{
 			if (!bAudioAnnouncedConnected)
 			{
-				UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("TCP receiver audio connected to %s:%d."), *AudioHost, AudioPort);
+				UE_LOG(LogSocketsTcpReceiver, Log, TEXT("TCP receiver audio connected to %s:%d."), *AudioHost, AudioPort);
 				bAudioAnnouncedConnected = true;
 				AudioBackoffAttempt = 0;
 			}
@@ -710,7 +710,7 @@ bool FO3DSocketsTcpReceiver::ProcessAudioFrame(int32 PayloadSize)
 
 void FO3DSocketsTcpReceiver::HandleAudioSocketError()
 {
-	UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("HandleAudioSocketError invoked (DroppedFrames=%llu)."), static_cast<unsigned long long>(Stats.DroppedFrames + 1));
+	UE_LOG(LogSocketsTcpReceiver, Verbose, TEXT("HandleAudioSocketError invoked (DroppedFrames=%llu)."), static_cast<unsigned long long>(Stats.DroppedFrames + 1));
 	DestroyAudioSocket();
 	Stats.DroppedFrames++;
 	ResetAudioState();

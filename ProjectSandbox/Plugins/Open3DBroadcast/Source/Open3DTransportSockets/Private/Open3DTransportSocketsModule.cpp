@@ -6,8 +6,8 @@
 #include "O3DReceiverRegistry.h"
 #include "O3DReceiverTransportCustomization.h"
 #include "O3DReceiverSourceSettings.h"
-#include "SocketsTcpSender.h"
-#include "SocketsTcpReceiver.h"
+#include "SocketsTcpSenderNew.h"
+#include "SocketsTcpReceiverNew.h"
 #include "SocketsUdpSender.h"
 #include "SocketsUdpReceiver.h"
 #include "SocketsTransportCommon.h"
@@ -32,8 +32,8 @@ class FOpen3DTransportSocketsModule : public IModuleInterface
 public:
 	virtual void StartupModule() override
 	{
-		O3DTransport::RegisterSender(SocketsTcpName, []() { return MakeShared<FO3DSocketsTcpSender>(); });
-		O3DTransport::RegisterReceiver(SocketsTcpName, []() { return MakeShared<FO3DSocketsTcpReceiver>(); });
+		O3DTransport::RegisterSender(SocketsTcpName, []() { return MakeShared<FO3DSocketsTcpSenderNew>(); });
+		O3DTransport::RegisterReceiver(SocketsTcpName, []() { return MakeShared<FO3DSocketsTcpReceiverNew>(); });
 
 		O3DTransport::RegisterSender(SocketsUdpName, []() { return MakeShared<FO3DSocketsUdpSender>(); });
 		O3DTransport::RegisterReceiver(SocketsUdpName, []() { return MakeShared<FO3DSocketsUdpReceiver>(); });

@@ -4,23 +4,22 @@
 #include "O3DSenderInterface.h"
 #include "SocketsTransportCommon.h"
 
-#include "Templates/SharedPointer.h"
+#include "HAL/CriticalSection.h"
 
 class FSocket;
 class ISocketSubsystem;
 class FInternetAddr;
-enum ESocketErrors;
-
-class FSocketsTcpSenderAudioSink;
+class FSocketsTcpSenderAudioSinkNew;
 
 /**
- * Dedicated TCP sender implementation for the sockets transport module.
+ * TCP sender - server mode (listens and accepts connections).
+ * Adapted from UDP sender pattern for reliability.
  */
-class FO3DSocketsTcpSender : public IOpen3DSender
+class FO3DSocketsTcpSenderNew : public IOpen3DSender
 {
 public:
-	FO3DSocketsTcpSender();
-	virtual ~FO3DSocketsTcpSender() override;
+	FO3DSocketsTcpSenderNew();
+	virtual ~FO3DSocketsTcpSenderNew() override;
 
 	virtual bool Initialize(const FO3DTransportConfig& Config) override;
 	virtual bool Start() override;
@@ -34,19 +33,16 @@ public:
 private:
 	bool CreateListenSocket();
 	bool CreateAudioListenSocket();
-	void DestroySockets();
-	void DestroyAudioSockets();
-	void ResetClientSocket();
-	void ResetAudioClientSocket();
-	bool AcceptClient();
-	bool AcceptAudioClient();
-	bool SendFramedPayload(const uint8* Data, int32 Size);
-	bool SendAudioFramedPayload(const uint8* Data, int32 Size);
+	void DestroySocket();
+	void DestroyAudioSocket();
+	void TickAcceptClient();
+	void TickAcceptAudioClient();
+	bool SendFramed(FSocket* InSocket, const uint8* Data, int32 Size);
 	bool SendAudioFrame(const FString& StreamLabel, const uint8* PCM16Data, int32 NumBytes, int32 NumChannels, int32 SampleRate, double TimestampSec);
-	TSharedPtr<FInternetAddr> CreateBindAddress(const FString& Host, int32 Port, bool& bOutValid) const;
+	TSharedPtr<FInternetAddr> CreateBindAddress(const FString& Host, int32 Port, bool& bOutValid);
 
 private:
-	friend class FSocketsTcpSenderAudioSink;
+	friend class FSocketsTcpSenderAudioSinkNew;
 
 	FO3DTransportConfig ActiveConfig;
 	FO3DTransportStats Stats;
@@ -63,10 +59,12 @@ private:
 	FString StreamId;
 	FString AudioBindHost;
 	int32 AudioBindPort = 0;
-	FGuid AudioSourceGuid;
-	bool bAudioEnabled = false;
 
-	double LastAcceptPollSeconds = 0.0;
-	double LastAudioAcceptPollSeconds = 0.0;
+	bool bAudioEnabled = false;
+	FGuid AudioSourceGuid;
+
+	double LastAcceptPollTime = 0.0;
+	double LastAudioAcceptPollTime = 0.0;
+	
 	FCriticalSection AudioSocketLock;
 };
