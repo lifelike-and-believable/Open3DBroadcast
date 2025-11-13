@@ -32,11 +32,8 @@ public:
 
 private:
 	bool CreateListenSocket();
-	bool CreateAudioListenSocket();
 	void DestroySocket();
-	void DestroyAudioSocket();
 	void TickAcceptClient();
-	void TickAcceptAudioClient();
 	bool SendFramed(FSocket* InSocket, const uint8* Data, int32 Size);
 	bool SendAudioFrame(const FString& StreamLabel, const uint8* PCM16Data, int32 NumBytes, int32 NumChannels, int32 SampleRate, double TimestampSec);
 	TSharedPtr<FInternetAddr> CreateBindAddress(const FString& Host, int32 Port, bool& bOutValid);
@@ -51,20 +48,12 @@ private:
 	ISocketSubsystem* SocketSubsystem = nullptr;
 	FSocket* ListenSocket = nullptr;
 	FSocket* ClientSocket = nullptr;
-	FSocket* AudioListenSocket = nullptr;
-	FSocket* AudioClientSocket = nullptr;
 
 	FString BindHost;
 	int32 BindPort = 0;
 	FString StreamId;
-	FString AudioBindHost;
-	int32 AudioBindPort = 0;
 
-	bool bAudioEnabled = false;
 	FGuid AudioSourceGuid;
 
 	double LastAcceptPollTime = 0.0;
-	double LastAudioAcceptPollTime = 0.0;
-	
-	FCriticalSection AudioSocketLock;
 };

@@ -20,7 +20,8 @@ public:
     virtual bool Send(const O3DS::SubjectList& List) override;
     virtual void Tick(float DeltaSeconds) override;
     virtual FO3DTransportStats GetStats() const override;
-    virtual bool SupportsAudio() const override { return false; }
+    virtual bool SupportsAudio() const override { return true; }
+    virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
 
     void HandlePipeAdded();
     void HandlePipeRemoved();
@@ -33,8 +34,10 @@ private:
 
     struct FNngSocketWrapper;
     class FNngSenderRunnable;
+    class FNngSenderAudioSink;
 
     friend class FNngSenderRunnable;
+    friend class FNngSenderAudioSink;
 
     bool OpenSocket();
     void CloseSocket();
@@ -44,12 +47,16 @@ private:
     bool EnqueuePayload(const uint8* Data, int32 Size);
     void DrainQueue();
     void HandleSendError(int ErrorCode);
+    bool SendAudioFrame(const FString& StreamLabel, const uint8* PCM16Data, int32 NumBytes, int32 NumChannels, int32 SampleRate, double TimestampSec);
 
     mutable FCriticalSection StateMutex;
     mutable FCriticalSection StatsMutex;
 
     O3DNNG::FNngSenderOptions Options;
     FO3DTransportStats Stats;
+    FO3DTransportConfig ActiveConfig;
+    FO3DTransportAudioConfig ActiveAudioConfig;
+    FGuid AudioSourceGuid;
 
     TAtomic<bool> bInitialized{ false };
     TAtomic<bool> bRunning{ false };

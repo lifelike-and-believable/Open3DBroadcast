@@ -19,7 +19,8 @@ public:
     virtual void Stop() override;
     virtual int32 Poll() override;
     virtual FO3DTransportStats GetStats() const override;
-    virtual bool SupportsAudio() const override { return false; }
+    virtual bool SupportsAudio() const override { return true; }
+    virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
 
     void HandlePipeAdded();
     void HandlePipeRemoved();
@@ -31,12 +32,16 @@ private:
     void CloseSocket();
     void HandleReceiveError(int ErrorCode);
     bool EnsureDialSocket();
+    bool ProcessReceivedPayload(const uint8* Data, int32 Size);
+    bool ProcessAudioPayload(const uint8* Payload, int32 PayloadSize);
 
     O3DNNG::FNngReceiverOptions Options;
     FO3DTransportStats Stats;
     FO3DTransportConfig ActiveConfig;
+    FO3DTransportAudioConfig ActiveAudioConfig;
 
     TWeakPtr<ISerializedFrameConsumer> Consumer;
+    TWeakPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
 
     FNngSocketWrapper* Socket = nullptr;
 

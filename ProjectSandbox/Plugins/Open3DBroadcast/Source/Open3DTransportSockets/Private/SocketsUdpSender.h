@@ -34,9 +34,7 @@ private:
 	bool ResolveRemoteAddress(const FString& Host, int32 Port);
 	bool ResolveAddress(const FString& Host, int32 Port, TSharedPtr<FInternetAddr>& OutAddr);
 	bool CreateSocket();
-	bool CreateAudioSocket();
 	void DestroySocket();
-	void DestroyAudioSocket();
 	bool SendPayload(FSocket* InSocket, const TSharedPtr<FInternetAddr>& InAddr, const uint8* Data, int32 Size, const TCHAR* Context);
 	bool SendDatagram(FSocket* InSocket, const TSharedPtr<FInternetAddr>& InAddr, const uint8* Data, int32 Size, const TCHAR* Context);
 	bool SendFragmented(FSocket* InSocket, const TSharedPtr<FInternetAddr>& InAddr, const uint8* Data, int32 Size, const TCHAR* Context);
@@ -51,20 +49,15 @@ private:
 
 	ISocketSubsystem* SocketSubsystem = nullptr;
 	FSocket* Socket = nullptr;
-	FSocket* AudioSocket = nullptr;
 	TSharedPtr<FInternetAddr> RemoteAddr;
-	TSharedPtr<FInternetAddr> AudioRemoteAddr;
 
 	FString RemoteHost;
 	int32 RemotePort = 0;
 	FString StreamId;
-	FString AudioRemoteHost;
-	int32 AudioRemotePort = 0;
 
 	bool bAllowBroadcast = false;
 	int32 MaxDatagramBytes = 64000;
 	int32 MtuBytes = 1200;
-	bool bAudioEnabled = false;
 	FGuid AudioSourceGuid;
 
 	FThreadSafeCounter MessageCounter;

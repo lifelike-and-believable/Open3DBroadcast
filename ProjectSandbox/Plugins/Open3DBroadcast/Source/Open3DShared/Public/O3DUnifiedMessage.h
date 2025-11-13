@@ -61,6 +61,26 @@ namespace O3DS
         double TimestampSec = 0.0;
     };
 
+    static void WriteBE32(uint8* Dest, uint32 Value)
+    {
+        Dest[0] = static_cast<uint8>((Value >> 24) & 0xFF);
+        Dest[1] = static_cast<uint8>((Value >> 16) & 0xFF);
+        Dest[2] = static_cast<uint8>((Value >> 8) & 0xFF);
+        Dest[3] = static_cast<uint8>(Value & 0xFF);
+    }
+
+    static void WriteBE64(uint8* Dest, uint64 Value)
+    {
+        Dest[0] = static_cast<uint8>((Value >> 56) & 0xFF);
+        Dest[1] = static_cast<uint8>((Value >> 48) & 0xFF);
+        Dest[2] = static_cast<uint8>((Value >> 40) & 0xFF);
+        Dest[3] = static_cast<uint8>((Value >> 32) & 0xFF);
+        Dest[4] = static_cast<uint8>((Value >> 24) & 0xFF);
+        Dest[5] = static_cast<uint8>((Value >> 16) & 0xFF);
+        Dest[6] = static_cast<uint8>((Value >> 8) & 0xFF);
+        Dest[7] = static_cast<uint8>(Value & 0xFF);
+    }
+
     /** Parse the unified message header/payload without copying, performing sanity checks along the way. */
     inline bool ParseUnifiedMessage(const uint8* Data, int32 Size,
                                     FUnifiedHeader& OutHeader,
@@ -94,6 +114,44 @@ namespace O3DS
         OutHeader = H;
         OutPayloadPtr = Data + WireHeaderSize;
         OutPayloadSize = (int32)H.PayloadSizeHost;
+        return true;
+    }
+
+    /** Create a unified message by wrapping a payload with the proper header. */
+    inline bool CreateUnifiedMessage(EUnifiedKind Kind, EUnifiedCodec Codec, const uint8* PayloadData, int32 PayloadSize, double TimestampSec, TArray<uint8>& OutMessage)
+    {
+        constexpr int32 WireHeaderSize = 20;
+        if (!PayloadData || PayloadSize <= 0 || PayloadSize > 50 * 1024 * 1024) // 50 MB safety limit
+        {
+            return false;
+        }
+
+        const int32 TotalSize = WireHeaderSize + PayloadSize;
+        OutMessage.SetNumUninitialized(TotalSize);
+
+        // Convert timestamp to microseconds
+        const uint64 TimestampUs = static_cast<uint64>(TimestampSec * 1000000.0);
+
+        uint8* WritePtr = OutMessage.GetData();
+
+        // Write magic number (big-endian)
+        WriteBE32(WritePtr + 0, FUnifiedHeader::MagicValueBE());
+
+        // Write version, kind, codec, flags
+        WritePtr[4] = 1; // Version
+        WritePtr[5] = static_cast<uint8>(Kind);
+        WritePtr[6] = static_cast<uint8>(Codec);
+        WritePtr[7] = 0; // Flags
+
+        // Write timestamp (big-endian)
+        WriteBE64(WritePtr + 8, TimestampUs);
+
+        // Write payload size (big-endian)
+        WriteBE32(WritePtr + 16, static_cast<uint32>(PayloadSize));
+
+        // Copy payload
+        FMemory::Memcpy(WritePtr + WireHeaderSize, PayloadData, PayloadSize);
+
         return true;
     }
 }

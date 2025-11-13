@@ -12,6 +12,7 @@ namespace O3DSockets
 	static constexpr TCHAR AudioPortOptionKey[] = TEXT("audio.port");
 	static constexpr TCHAR AudioBindOptionKey[] = TEXT("audio.bind");
 	static constexpr TCHAR AudioHostOptionKey[] = TEXT("audio.host");
+	static constexpr TCHAR TimeoutOptionKey[] = TEXT("tcp.timeout");
 	static constexpr TCHAR BroadcastOptionKey[] = TEXT("udp.broadcast");
 	static constexpr TCHAR MtuOptionKey[] = TEXT("udp.mtu");
 	static constexpr TCHAR MaxDatagramOptionKey[] = TEXT("udp.maxdatagram");

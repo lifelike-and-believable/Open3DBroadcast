@@ -4,6 +4,8 @@
 #include "Logging/LogMacros.h"
 #include "HAL/PlatformTime.h"
 #include "SerializedFrameConsumerRegistry.h"
+#include "O3DUnifiedMessage.h"
+#include "O3DAudioSerialization.h"
 
 #if !defined(NNG_STATIC_LIB)
 #define NNG_STATIC_LIB 1
@@ -83,6 +85,19 @@ bool FO3DNngReceiver::Initialize(const FO3DTransportConfig& Config)
 void FO3DNngReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer)
 {
     Consumer = InConsumer;
+}
+
+void FO3DNngReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig)
+{
+    AudioSink = Sink;
+    if (Sink.IsValid())
+    {
+        ActiveAudioConfig = AudioConfig;
+        if (ActiveAudioConfig.StreamLabel.IsEmpty())
+        {
+            ActiveAudioConfig.StreamLabel = ActiveConfig.StreamId;
+        }
+    }
 }
 
 bool FO3DNngReceiver::Start()
@@ -180,19 +195,20 @@ int32 FO3DNngReceiver::Poll()
             continue;
         }
 
-        TArray<uint8> Payload;
-        Payload.SetNumUninitialized(static_cast<int32>(Size));
-        FMemory::Memcpy(Payload.GetData(), Buffer, Size);
+        // Process the payload (routes to mocap or audio based on unified header)
+        const bool bProcessed = ProcessReceivedPayload(static_cast<const uint8*>(Buffer), static_cast<int32>(Size));
         nng_free(Buffer, Size);
 
-        if (TSharedPtr<ISerializedFrameConsumer> ConsumerPinned = Consumer.Pin())
+        if (bProcessed)
         {
-            ConsumerPinned->SubmitFrame(Options.StreamId, Payload, FPlatformTime::Seconds());
+            Stats.FramesReceived++;
+            Stats.BytesReceived += static_cast<int64>(Size);
+            ++FramesProcessed;
         }
-
-        Stats.FramesReceived++;
-        Stats.BytesReceived += static_cast<int64>(Payload.Num());
-        ++FramesProcessed;
+        else
+        {
+            Stats.DroppedFrames++;
+        }
     }
 
     return FramesProcessed;
@@ -385,4 +401,79 @@ bool FO3DNngReceiver::EnsureDialSocket()
     }
 
     return Socket != nullptr;
+}
+
+bool FO3DNngReceiver::ProcessReceivedPayload(const uint8* Data, int32 Size)
+{
+    if (!Data || Size <= 0)
+    {
+        return false;
+    }
+
+    // Try to parse as a unified message
+    O3DS::FUnifiedHeader Header;
+    const uint8* PayloadPtr = nullptr;
+    int32 PayloadSize = 0;
+
+    if (O3DS::ParseUnifiedMessage(Data, Size, Header, PayloadPtr, PayloadSize))
+    {
+        // Successfully parsed unified header - route based on message kind
+        if (Header.GetKind() == O3DS::EUnifiedKind::Audio)
+        {
+            return ProcessAudioPayload(PayloadPtr, PayloadSize);
+        }
+        else if (Header.GetKind() == O3DS::EUnifiedKind::Mocap)
+        {
+            // Route mocap data to the frame consumer
+            if (TSharedPtr<ISerializedFrameConsumer> ConsumerPinned = Consumer.Pin())
+            {
+                TArray<uint8> Payload;
+                Payload.SetNumUninitialized(Size);
+                FMemory::Memcpy(Payload.GetData(), Data, Size);
+                ConsumerPinned->SubmitFrame(Options.StreamId, Payload, FPlatformTime::Seconds());
+                return true;
+            }
+        }
+    }
+    else
+    {
+        // Not a unified message - assume it's raw mocap data for backward compatibility
+        if (TSharedPtr<ISerializedFrameConsumer> ConsumerPinned = Consumer.Pin())
+        {
+            TArray<uint8> Payload;
+            Payload.SetNumUninitialized(Size);
+            FMemory::Memcpy(Payload.GetData(), Data, Size);
+            ConsumerPinned->SubmitFrame(Options.StreamId, Payload, FPlatformTime::Seconds());
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool FO3DNngReceiver::ProcessAudioPayload(const uint8* Payload, int32 PayloadSize)
+{
+    if (!Payload || PayloadSize <= 0)
+    {
+        return false;
+    }
+
+    TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> SinkPinned = AudioSink.Pin();
+    if (!SinkPinned.IsValid())
+    {
+        // No audio sink configured - silently drop
+        return true;
+    }
+
+    // Deserialize the PCM16 audio frame
+    O3DAudio::FPcm16Frame AudioFrame;
+    if (!O3DAudio::DeserializePcm16Frame(Payload, PayloadSize, AudioFrame))
+    {
+        UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver failed to deserialize audio frame"));
+        return false;
+    }
+
+    // Submit to audio sink
+    SinkPinned->SubmitPcm16(AudioFrame.Meta, AudioFrame.PCM16.GetData(), AudioFrame.PCM16.Num());
+    return true;
 }

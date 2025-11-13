@@ -2,6 +2,8 @@
 #include "SocketsTcpAudio.h"
 #include "SocketsTcpTransport.h"
 #include "O3DTransportTypes.h"
+#include "O3DUnifiedMessage.h"
+#include "O3DAudioSerialization.h"
 #include "SerializedFrameConsumerRegistry.h"
 
 #include "Sockets.h"
@@ -36,7 +38,6 @@ bool FO3DSocketsTcpReceiver::Initialize(const FO3DTransportConfig& Config)
 	StreamId = ActiveConfig.StreamId;
 
 	ActiveAudioConfig = Config.Audio;
-	bAudioEnabled = ActiveAudioConfig.bEnableAudio;
 
 	if (!O3DSockets::ParseHostPort(Config, RemoteHost, RemotePort, TEXT("tcp")))
 	{
@@ -56,24 +57,6 @@ bool FO3DSocketsTcpReceiver::Initialize(const FO3DTransportConfig& Config)
 		ActiveConfig.StreamId = StreamId;
 	}
 
-	AudioRemoteHost = O3DSockets::GetOptionValue(Config, O3DSockets::AudioHostOptionKey);
-	if (AudioRemoteHost.IsEmpty())
-	{
-		AudioRemoteHost = RemoteHost;
-	}
-
-	AudioRemotePort = O3DSockets::GetIntOption(Config, O3DSockets::AudioPortOptionKey, 0);
-	if (AudioRemotePort <= 0 && RemotePort > 0)
-	{
-		AudioRemotePort = RemotePort + 1;
-	}
-
-	if (bAudioEnabled && AudioRemotePort <= 0)
-	{
-		UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("Audio requested but no valid audio port."));
-		bAudioEnabled = false;
-	}
-
 	if (ActiveAudioConfig.StreamLabel.IsEmpty())
 	{
 		ActiveAudioConfig.StreamLabel = ActiveConfig.StreamId;
@@ -86,6 +69,9 @@ bool FO3DSocketsTcpReceiver::Initialize(const FO3DTransportConfig& Config)
 		return false;
 	}
 
+	// Read connection timeout setting (defaults to 5.0 seconds)
+	ConnectionTimeoutSeconds = FMath::Max(0.5, O3DSockets::GetIntOption(Config, O3DSockets::TimeoutOptionKey, 5));
+
 	return true;
 }
 
@@ -97,17 +83,12 @@ void FO3DSocketsTcpReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsum
 bool FO3DSocketsTcpReceiver::Start()
 {
 	DisconnectSocket();
-	DisconnectAudioSocket();
-
-	const bool bStarted = ConnectToServer();
-	const bool bAudioStarted = !bAudioEnabled || ConnectAudioToServer();
-	return bStarted && bAudioStarted;
+	return ConnectToServer();
 }
 
 void FO3DSocketsTcpReceiver::Stop()
 {
 	DisconnectSocket();
-	DisconnectAudioSocket();
 	SocketSubsystem = nullptr;
 }
 
@@ -119,7 +100,7 @@ int32 FO3DSocketsTcpReceiver::Poll()
 	}
 
 	TickConnection();
-	
+
 	int32 FramesProcessed = 0;
 
 	if (Socket && State == EState::Connected)
@@ -129,22 +110,15 @@ int32 FO3DSocketsTcpReceiver::Poll()
 		{
 			if (Frame.Num() > 0)
 			{
-				if (TSharedPtr<ISerializedFrameConsumer> ConsumerPinned = Consumer.Pin())
-				{
-					ConsumerPinned->SubmitFrame(StreamId, Frame, FPlatformTime::Seconds());
-				}
+				LastDataReceiveTime = FPlatformTime::Seconds();
 
-				Stats.FramesReceived++;
-				Stats.BytesReceived += Frame.Num();
-				++FramesProcessed;
+				// Process received payload through unified demultiplexer
+				if (ProcessReceivedPayload(Frame.GetData(), Frame.Num()))
+				{
+					++FramesProcessed;
+				}
 			}
 		}
-	}
-
-	if (bAudioEnabled)
-	{
-		TickAudioConnection();
-		PollAudioChannel(FramesProcessed);
 	}
 
 	return FramesProcessed;
@@ -165,8 +139,6 @@ void FO3DSocketsTcpReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink
 	AudioSink = Sink;
 	if (!Sink.IsValid())
 	{
-		DisconnectAudioSocket();
-		bAudioEnabled = false;
 		return;
 	}
 
@@ -185,12 +157,6 @@ void FO3DSocketsTcpReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink
 	}
 
 	ActiveAudioConfig = EffectiveConfig;
-	bAudioEnabled = true;
-
-	if (SocketSubsystem && !AudioSocket)
-	{
-		ConnectAudioToServer();
-	}
 }
 
 bool FO3DSocketsTcpReceiver::ConnectToServer()
@@ -238,60 +204,10 @@ bool FO3DSocketsTcpReceiver::ConnectToServer()
 
 	Socket->Connect(*Addr);
 	LastConnectAttempt = FPlatformTime::Seconds();
+	LastDataReceiveTime = FPlatformTime::Seconds();
 	ConnectBackoffAttempt = 0;
 
 	UE_LOG(LogSocketsTcpReceiver, Log, TEXT("TCP receiver connecting to %s:%d"), *RemoteHost, RemotePort);
-	return true;
-}
-
-bool FO3DSocketsTcpReceiver::ConnectAudioToServer()
-{
-	if (!SocketSubsystem || !bAudioEnabled || AudioRemotePort <= 0)
-	{
-		return false;
-	}
-
-	DisconnectAudioSocket();
-
-	AudioSocket = SocketSubsystem->CreateSocket(NAME_Stream, TEXT("O3DS_TCP_AUDIO_CLIENT"), false);
-	if (!AudioSocket)
-	{
-		return false;
-	}
-
-	AudioSocket->SetNonBlocking(true);
-
-	TSharedRef<FInternetAddr> Addr = SocketSubsystem->CreateInternetAddr();
-	bool bValid = false;
-	Addr->SetIp(*AudioRemoteHost, bValid);
-	if (!bValid)
-	{
-		FIPv4Address IPv4;
-		if (FIPv4Address::Parse(AudioRemoteHost, IPv4))
-		{
-			Addr->SetIp(IPv4.Value);
-			bValid = true;
-		}
-	}
-
-	if (!bValid)
-	{
-		UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("Invalid TCP audio host '%s'"), *AudioRemoteHost);
-		DisconnectAudioSocket();
-		return false;
-	}
-
-	Addr->SetPort(AudioRemotePort);
-
-	AudioState = EState::Connecting;
-	AudioBytesBuffered = 0;
-	AudioExpectedPayloadSize = 0;
-
-	AudioSocket->Connect(*Addr);
-	LastAudioConnectAttempt = FPlatformTime::Seconds();
-	AudioConnectBackoffAttempt = 0;
-
-	UE_LOG(LogSocketsTcpReceiver, Log, TEXT("TCP receiver audio connecting to %s:%d"), *AudioRemoteHost, AudioRemotePort);
 	return true;
 }
 
@@ -306,19 +222,6 @@ void FO3DSocketsTcpReceiver::DisconnectSocket()
 	BytesBuffered = 0;
 	ExpectedPayloadSize = 0;
 	ReceiveBuffer.Reset();
-}
-
-void FO3DSocketsTcpReceiver::DisconnectAudioSocket()
-{
-	if (AudioSocket && SocketSubsystem)
-	{
-		SocketSubsystem->DestroySocket(AudioSocket);
-	}
-	AudioSocket = nullptr;
-	AudioState = EState::Disconnected;
-	AudioBytesBuffered = 0;
-	AudioExpectedPayloadSize = 0;
-	AudioReceiveBuffer.Reset();
 }
 
 void FO3DSocketsTcpReceiver::TickConnection()
@@ -360,52 +263,15 @@ void FO3DSocketsTcpReceiver::TickConnection()
 			UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("TCP connection lost, will reconnect"));
 			DisconnectSocket();
 		}
-	}
-}
-
-void FO3DSocketsTcpReceiver::TickAudioConnection()
-{
-	if (!AudioSocket && bAudioEnabled)
-	{
-		// Need to reconnect
-		const double Now = FPlatformTime::Seconds();
-		const double BackoffSeconds = FMath::Min(MaxBackoffSeconds, InitialBackoffSeconds * FMath::Pow(2.0, static_cast<double>(FMath::Clamp(AudioConnectBackoffAttempt, 0, 8))));
-		if ((Now - LastAudioConnectAttempt) >= BackoffSeconds)
+		else
 		{
-			LastAudioConnectAttempt = Now;
-			++AudioConnectBackoffAttempt;
-			ConnectAudioToServer();
-		}
-		return;
-	}
-
-	if (!AudioSocket)
-	{
-		return;
-	}
-
-	if (AudioState == EState::Connecting)
-	{
-		const ESocketConnectionState ConnState = AudioSocket->GetConnectionState();
-		if (ConnState == SCS_Connected)
-		{
-			AudioState = EState::Connected;
-			AudioConnectBackoffAttempt = 0;
-			UE_LOG(LogSocketsTcpReceiver, Log, TEXT("TCP receiver audio connected to %s:%d"), *AudioRemoteHost, AudioRemotePort);
-		}
-		else if (ConnState == SCS_ConnectionError)
-		{
-			UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("TCP audio connection error, will retry"));
-			DisconnectAudioSocket();
-		}
-	}
-	else if (AudioState == EState::Connected)
-	{
-		const ESocketConnectionState ConnState = AudioSocket->GetConnectionState();
-		if (ConnState != SCS_Connected)
-		{
-			UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("TCP audio connection lost, will reconnect"));
-			DisconnectAudioSocket();
+			// Check for timeout - if no data received for too long, assume stale connection
+			const double Now = FPlatformTime::Seconds();
+			if ((Now - LastDataReceiveTime) > ConnectionTimeoutSeconds)
+			{
+				UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("TCP connection timeout (no data for %.1fs), forcing reconnect"), Now - LastDataReceiveTime);
+				DisconnectSocket();
+			}
 		}
 	}
 }
@@ -492,33 +358,67 @@ bool FO3DSocketsTcpReceiver::ReadFramed(FSocket* InSocket, EState& InState, TArr
 	return false;
 }
 
-void FO3DSocketsTcpReceiver::PollAudioChannel(int32& OutFramesProcessed)
+bool FO3DSocketsTcpReceiver::ProcessReceivedPayload(const uint8* Data, int32 Size)
 {
-	if (!AudioSocket || AudioState != EState::Connected || !AudioSink.Pin().IsValid())
-	{
-		return;
-	}
-
-	TArray<uint8> Frame;
-	while (ReadFramed(AudioSocket, AudioState, AudioReceiveBuffer, AudioBytesBuffered, AudioExpectedPayloadSize, Frame))
-	{
-		if (Frame.Num() > 0)
-		{
-			ProcessAudioPayload(Frame);
-			++OutFramesProcessed;
-		}
-	}
-}
-
-bool FO3DSocketsTcpReceiver::ProcessAudioPayload(const TArray<uint8>& Payload)
-{
-	if (Payload.Num() == 0)
+	if (!Data || Size <= 0)
 	{
 		return false;
 	}
 
-	O3DSockets::Tcp::FAudioFrame AudioFrame;
-	if (!O3DSockets::Tcp::DeserializeAudioFramePayload(Payload.GetData(), Payload.Num(), AudioFrame))
+	// Try to parse as unified message
+	O3DS::FUnifiedHeader Header;
+	const uint8* PayloadPtr = nullptr;
+	int32 PayloadSize = 0;
+
+	if (O3DS::ParseUnifiedMessage(Data, Size, Header, PayloadPtr, PayloadSize))
+	{
+		// Unified message - route by kind
+		if (Header.GetKind() == O3DS::EUnifiedKind::Audio)
+		{
+			return ProcessAudioPayload(PayloadPtr, PayloadSize);
+		}
+		else if (Header.GetKind() == O3DS::EUnifiedKind::Mocap)
+		{
+			// Route to frame consumer
+			if (TSharedPtr<ISerializedFrameConsumer> ConsumerPinned = Consumer.Pin())
+			{
+				TArray<uint8> PayloadCopy;
+				PayloadCopy.SetNumUninitialized(PayloadSize);
+				FMemory::Memcpy(PayloadCopy.GetData(), PayloadPtr, PayloadSize);
+				ConsumerPinned->SubmitFrame(StreamId, PayloadCopy, FPlatformTime::Seconds());
+			}
+			Stats.FramesReceived++;
+			Stats.BytesReceived += Size;
+			return true;
+		}
+	}
+	else
+	{
+		// Backward compatibility: treat non-unified messages as mocap data
+		if (TSharedPtr<ISerializedFrameConsumer> ConsumerPinned = Consumer.Pin())
+		{
+			TArray<uint8> PayloadCopy;
+			PayloadCopy.SetNumUninitialized(Size);
+			FMemory::Memcpy(PayloadCopy.GetData(), Data, Size);
+			ConsumerPinned->SubmitFrame(StreamId, PayloadCopy, FPlatformTime::Seconds());
+		}
+		Stats.FramesReceived++;
+		Stats.BytesReceived += Size;
+		return true;
+	}
+
+	return false;
+}
+
+bool FO3DSocketsTcpReceiver::ProcessAudioPayload(const uint8* Payload, int32 PayloadSize)
+{
+	if (!Payload || PayloadSize <= 0)
+	{
+		return false;
+	}
+
+	O3DAudio::FPcm16Frame AudioFrame;
+	if (!O3DAudio::DeserializePcm16Frame(Payload, PayloadSize, AudioFrame))
 	{
 		UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("Failed to deserialize audio frame"));
 		return false;
@@ -529,6 +429,5 @@ bool FO3DSocketsTcpReceiver::ProcessAudioPayload(const TArray<uint8>& Payload)
 		SinkPinned->SubmitPcm16(AudioFrame.Meta, AudioFrame.PCM16.GetData(), AudioFrame.PCM16.Num());
 	}
 
-	Stats.BytesReceived += Payload.Num();
 	return true;
 }

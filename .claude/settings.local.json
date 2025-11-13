@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Build\\BatchFiles\\Build.bat\" -Target=\"UnrealEditor Win64 Development\" -Project=\"E:\\OtherProjects\\Open3DStream\\ProjectSandbox\\ProjectSandbox.uproject\" -Module=Open3DTransportNNG)",
+      "Bash(\"C:/Program Files/Epic Games/UE_5.4/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe\" ProjectSandboxEditor Win64 Development \"E:\\OtherProjects\\Open3DStream\\ProjectSandbox\\ProjectSandbox.uproject\" -WaitMutex)",
+      "Bash(cmd.exe /c:*)",
+      "Bash(\"C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Build\\BatchFiles\\Build.bat\" UnrealEditor Win64 Development -Project=\"E:\\OtherProjects\\Open3DStream\\ProjectSandbox\\ProjectSandbox.uproject\" -Module=Open3DTransportSockets)",
+      "Bash(\"C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Build\\BatchFiles\\Build.bat\" Open3DTransportSockets Win64 Development -Project=\"E:\\OtherProjects\\Open3DStream\\ProjectSandbox\\ProjectSandbox.uproject\")",
+      "Bash(Select-String -Pattern \"Compile|Link|Error|Warning|succeeded|failed\")",
+      "Bash(Select-Object -Last 30)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

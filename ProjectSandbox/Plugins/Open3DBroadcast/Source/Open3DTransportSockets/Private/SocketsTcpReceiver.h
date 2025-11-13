@@ -37,14 +37,11 @@ private:
 	};
 
 	bool ConnectToServer();
-	bool ConnectAudioToServer();
 	void DisconnectSocket();
-	void DisconnectAudioSocket();
 	void TickConnection();
-	void TickAudioConnection();
 	bool ReadFramed(FSocket* InSocket, EState& State, TArray<uint8>& Buffer, int32& InOutBytesBuffered, int32& InOutExpectedPayloadSize, TArray<uint8>& OutFrame);
-	void PollAudioChannel(int32& OutFramesProcessed);
-	bool ProcessAudioPayload(const TArray<uint8>& Payload);
+	bool ProcessReceivedPayload(const uint8* Data, int32 Size);
+	bool ProcessAudioPayload(const uint8* Payload, int32 PayloadSize);
 
 private:
 	FO3DTransportConfig ActiveConfig;
@@ -53,31 +50,23 @@ private:
 
 	ISocketSubsystem* SocketSubsystem = nullptr;
 	FSocket* Socket = nullptr;
-	FSocket* AudioSocket = nullptr;
 
 	FString RemoteHost;
 	int32 RemotePort = 0;
 	FString StreamId;
-	FString AudioRemoteHost;
-	int32 AudioRemotePort = 0;
-
-	bool bAudioEnabled = false;
 
 	EState State = EState::Disconnected;
-	EState AudioState = EState::Disconnected;
 
 	TArray<uint8> ReceiveBuffer;
 	int32 BytesBuffered = 0;
 	int32 ExpectedPayloadSize = 0;
 
-	TArray<uint8> AudioReceiveBuffer;
-	int32 AudioBytesBuffered = 0;
-	int32 AudioExpectedPayloadSize = 0;
-
 	double LastConnectAttempt = 0.0;
-	double LastAudioConnectAttempt = 0.0;
 	int32 ConnectBackoffAttempt = 0;
-	int32 AudioConnectBackoffAttempt = 0;
+
+	double LastDataReceiveTime = 0.0;
+
+	double ConnectionTimeoutSeconds = 5.0;
 
 	TWeakPtr<ISerializedFrameConsumer> Consumer;
 	TWeakPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;

@@ -34,14 +34,12 @@ private:
 	struct FFragmentState;
 
 	bool CreateSocket();
-	bool CreateAudioSocket();
 	void DestroySocket();
-	void DestroyAudioSocket();
 	bool ProcessDatagram(const uint8* Data, int32 Bytes, TArray<uint8>& OutFrame, TUniquePtr<FFragmentState>& InState);
 	bool HandleFragment(const uint8* Data, int32 Bytes, TArray<uint8>& OutFrame, TUniquePtr<FFragmentState>& InState);
 	bool IsFragmentPacket(const uint8* Data, int32 Bytes) const;
-	void PollAudioChannel(int32& OutFramesProcessed);
-	bool ProcessAudioPayload(const TArray<uint8>& Payload);
+	bool ProcessReceivedPayload(const uint8* Data, int32 Size);
+	bool ProcessAudioPayload(const uint8* Payload, int32 PayloadSize);
 
 private:
 	FO3DTransportConfig ActiveConfig;
@@ -50,27 +48,19 @@ private:
 
 	ISocketSubsystem* SocketSubsystem = nullptr;
 	FSocket* Socket = nullptr;
-	FSocket* AudioSocket = nullptr;
 
 	FString BindHost;
 	int32 BindPort = 0;
 	FString StreamId;
-	FString AudioBindHost;
-	int32 AudioBindPort = 0;
 
 	bool bAllowBroadcast = false;
 	int32 MaxDatagramBytes = 64000;
 	int32 MtuBytes = 1200;
-	bool bAudioEnabled = false;
 
 	TWeakPtr<ISerializedFrameConsumer> Consumer;
 	TWeakPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
 
 	TArray<uint8> ReceiveBuffer;
-	TArray<uint8> AudioReceiveBuffer;
 
 	TUniquePtr<FFragmentState> FragmentState;
-	TUniquePtr<FFragmentState> AudioFragmentState;
-
-	double LastAudioDropLogTimeSeconds = 0.0;
 };

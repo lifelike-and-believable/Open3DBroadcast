@@ -2,6 +2,7 @@
 #include "SocketsTcpAudio.h"
 #include "SocketsTcpTransport.h"
 #include "O3DTransportTypes.h"
+#include "O3DUnifiedMessage.h"
 
 #include "Sockets.h"
 #include "SocketSubsystem.h"
@@ -73,7 +74,10 @@ bool FO3DSocketsTcpSender::Initialize(const FO3DTransportConfig& Config)
 	StreamId = ActiveConfig.StreamId;
 
 	ActiveAudioConfig = Config.Audio;
-	bAudioEnabled = ActiveAudioConfig.bEnableAudio;
+	if (ActiveAudioConfig.StreamLabel.IsEmpty())
+	{
+		ActiveAudioConfig.StreamLabel = Config.StreamId;
+	}
 	AudioSourceGuid = FGuid::NewGuid();
 
 	// Parse bind address from config
@@ -95,30 +99,6 @@ bool FO3DSocketsTcpSender::Initialize(const FO3DTransportConfig& Config)
 		ActiveConfig.StreamId = StreamId;
 	}
 
-	// Audio port defaults to data port + 1
-	AudioBindHost = O3DSockets::GetOptionValue(Config, O3DSockets::AudioBindOptionKey);
-	if (AudioBindHost.IsEmpty())
-	{
-		AudioBindHost = BindHost;
-	}
-
-	AudioBindPort = O3DSockets::GetIntOption(Config, O3DSockets::AudioPortOptionKey, 0);
-	if (AudioBindPort <= 0 && BindPort > 0)
-	{
-		AudioBindPort = BindPort + 1;
-	}
-
-	if (ActiveAudioConfig.StreamLabel.IsEmpty())
-	{
-		ActiveAudioConfig.StreamLabel = ActiveConfig.StreamId;
-	}
-
-	if (bAudioEnabled && AudioBindPort <= 0)
-	{
-		UE_LOG(LogSocketsTcpSender, Warning, TEXT("Audio requested but no valid audio port."));
-		bAudioEnabled = false;
-	}
-
 	SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
 	if (!SocketSubsystem)
 	{
@@ -132,29 +112,12 @@ bool FO3DSocketsTcpSender::Initialize(const FO3DTransportConfig& Config)
 bool FO3DSocketsTcpSender::Start()
 {
 	DestroySocket();
-	DestroyAudioSocket();
-
-	const bool bDataStarted = CreateListenSocket();
-	bool bAudioStarted = true;
-	if (bAudioEnabled)
-	{
-		bAudioStarted = CreateAudioListenSocket();
-		if (!bAudioStarted)
-		{
-			UE_LOG(LogSocketsTcpSender, Warning, TEXT("Failed to create TCP audio listen socket; disabling audio."));
-			bAudioEnabled = false;
-			DestroyAudioSocket();
-			bAudioStarted = true;
-		}
-	}
-
-	return bDataStarted && bAudioStarted;
+	return CreateListenSocket();
 }
 
 void FO3DSocketsTcpSender::Stop()
 {
 	DestroySocket();
-	DestroyAudioSocket();
 	SocketSubsystem = nullptr;
 }
 
@@ -197,11 +160,6 @@ bool FO3DSocketsTcpSender::Send(const O3DS::SubjectList& List)
 void FO3DSocketsTcpSender::Tick(float /*DeltaSeconds*/)
 {
 	TickAcceptClient();
-	
-	if (bAudioEnabled)
-	{
-		TickAcceptAudioClient();
-	}
 }
 
 FO3DTransportStats FO3DSocketsTcpSender::GetStats() const
@@ -231,17 +189,6 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DSocketsTcpSender::Creat
 	}
 
 	ActiveAudioConfig = EffectiveConfig;
-	bAudioEnabled = true;
-
-	if (SocketSubsystem && ListenSocket && bAudioEnabled && !AudioListenSocket)
-	{
-		if (!CreateAudioListenSocket())
-		{
-			UE_LOG(LogSocketsTcpSender, Warning, TEXT("Failed to create audio listen socket when enabling audio."));
-			bAudioEnabled = false;
-			return nullptr;
-		}
-	}
 
 	return MakeShared<FSocketsTcpSenderAudioSink>(*this, ActiveAudioConfig);
 }
@@ -289,49 +236,6 @@ bool FO3DSocketsTcpSender::CreateListenSocket()
 	return true;
 }
 
-bool FO3DSocketsTcpSender::CreateAudioListenSocket()
-{
-	if (!SocketSubsystem)
-	{
-		return false;
-	}
-
-	bool bValid = false;
-	TSharedPtr<FInternetAddr> BindAddr = CreateBindAddress(AudioBindHost, AudioBindPort, bValid);
-	if (!bValid || !BindAddr.IsValid())
-	{
-		UE_LOG(LogSocketsTcpSender, Warning, TEXT("Invalid audio bind address %s:%d"), *AudioBindHost, AudioBindPort);
-		return false;
-	}
-
-	AudioListenSocket = SocketSubsystem->CreateSocket(NAME_Stream, TEXT("O3DS_TCP_AUDIO_LISTEN"), BindAddr->GetProtocolType());
-	if (!AudioListenSocket)
-	{
-		UE_LOG(LogSocketsTcpSender, Warning, TEXT("Failed to create audio listen socket."));
-		return false;
-	}
-
-	AudioListenSocket->SetReuseAddr(true);
-	AudioListenSocket->SetNonBlocking(true);
-
-	if (!AudioListenSocket->Bind(*BindAddr))
-	{
-		UE_LOG(LogSocketsTcpSender, Warning, TEXT("Audio bind failed on %s"), *BindAddr->ToString(true));
-		DestroyAudioSocket();
-		return false;
-	}
-
-	if (!AudioListenSocket->Listen(8))
-	{
-		UE_LOG(LogSocketsTcpSender, Warning, TEXT("Audio listen failed on %s"), *BindAddr->ToString(true));
-		DestroyAudioSocket();
-		return false;
-	}
-
-	UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP sender listening for audio on %s"), *BindAddr->ToString(true));
-	return true;
-}
-
 void FO3DSocketsTcpSender::DestroySocket()
 {
 	if (ClientSocket && SocketSubsystem)
@@ -345,22 +249,6 @@ void FO3DSocketsTcpSender::DestroySocket()
 		SocketSubsystem->DestroySocket(ListenSocket);
 	}
 	ListenSocket = nullptr;
-}
-
-void FO3DSocketsTcpSender::DestroyAudioSocket()
-{
-	FScopeLock Lock(&AudioSocketLock);
-	if (AudioClientSocket && SocketSubsystem)
-	{
-		SocketSubsystem->DestroySocket(AudioClientSocket);
-	}
-	AudioClientSocket = nullptr;
-
-	if (AudioListenSocket && SocketSubsystem)
-	{
-		SocketSubsystem->DestroySocket(AudioListenSocket);
-	}
-	AudioListenSocket = nullptr;
 }
 
 void FO3DSocketsTcpSender::TickAcceptClient()
@@ -384,36 +272,6 @@ void FO3DSocketsTcpSender::TickAcceptClient()
 		Accepted->SetNonBlocking(true);
 		ClientSocket = Accepted;
 		UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP sender accepted client %s"), *PeerAddr->ToString(true));
-	}
-}
-
-void FO3DSocketsTcpSender::TickAcceptAudioClient()
-{
-	if (!AudioListenSocket)
-	{
-		return;
-	}
-
-	FScopeLock Lock(&AudioSocketLock);
-	if (AudioClientSocket)
-	{
-		return; // Already have a client
-	}
-
-	const double Now = FPlatformTime::Seconds();
-	if (Now - LastAudioAcceptPollTime < 0.01)
-	{
-		return;
-	}
-	LastAudioAcceptPollTime = Now;
-
-	TSharedRef<FInternetAddr> PeerAddr = SocketSubsystem->CreateInternetAddr();
-	FSocket* Accepted = AudioListenSocket->Accept(*PeerAddr, TEXT("O3DS_TCP_AUDIO_CLIENT"));
-	if (Accepted)
-	{
-		Accepted->SetNonBlocking(true);
-		AudioClientSocket = Accepted;
-		UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP sender accepted audio client %s"), *PeerAddr->ToString(true));
 	}
 }
 
@@ -446,17 +304,12 @@ bool FO3DSocketsTcpSender::SendFramed(FSocket* InSocket, const uint8* Data, int3
 
 bool FO3DSocketsTcpSender::SendAudioFrame(const FString& StreamLabel, const uint8* PCM16Data, int32 NumBytes, int32 NumChannels, int32 SampleRate, double TimestampSec)
 {
-	if (!bAudioEnabled || !PCM16Data || NumBytes <= 0)
+	if (!PCM16Data || NumBytes <= 0 || !ClientSocket)
 	{
 		return false;
 	}
 
-	FScopeLock Lock(&AudioSocketLock);
-	if (!AudioClientSocket)
-	{
-		return false; // No client connected
-	}
-
+	// Build audio frame metadata
 	O3DS::FAudioFrameMeta Meta;
 	Meta.SourceGuid = AudioSourceGuid;
 	Meta.StreamLabel = StreamLabel.IsEmpty() ? ActiveAudioConfig.StreamLabel : StreamLabel;
@@ -465,24 +318,30 @@ bool FO3DSocketsTcpSender::SendAudioFrame(const FString& StreamLabel, const uint
 	Meta.SampleRate = SampleRate > 0 ? SampleRate : FMath::Max(ActiveAudioConfig.SampleRate, 1);
 	Meta.TimestampSec = TimestampSec;
 
-	TArray<uint8> Payload;
-	if (!O3DSockets::Tcp::SerializeAudioFramePayload(Meta, PCM16Data, NumBytes, Payload))
+	// Serialize PCM16 audio frame
+	TArray<uint8> AudioPayload;
+	if (!O3DSockets::Tcp::SerializeAudioFramePayload(Meta, PCM16Data, NumBytes, AudioPayload))
 	{
+		UE_LOG(LogSocketsTcpSender, Warning, TEXT("TCP sender failed to serialize audio frame"));
 		return false;
 	}
 
-	if (!SendFramed(AudioClientSocket, Payload.GetData(), Payload.Num()))
+	// Wrap the audio payload in a unified message envelope so the receiver can identify it
+	TArray<uint8> UnifiedMessage;
+	if (!O3DS::CreateUnifiedMessage(O3DS::EUnifiedKind::Audio, O3DS::EUnifiedCodec::PCM16, AudioPayload.GetData(), AudioPayload.Num(), TimestampSec, UnifiedMessage))
 	{
-		// Send failed - drop audio client
-		if (AudioClientSocket && SocketSubsystem)
-		{
-			SocketSubsystem->DestroySocket(AudioClientSocket);
-		}
-		AudioClientSocket = nullptr;
+		UE_LOG(LogSocketsTcpSender, Warning, TEXT("TCP sender failed to create unified audio message"));
 		return false;
 	}
 
-	Stats.BytesSent += Payload.Num();
+	// Send through main socket
+	if (!SendFramed(ClientSocket, UnifiedMessage.GetData(), UnifiedMessage.Num()))
+	{
+		UE_LOG(LogSocketsTcpSender, Verbose, TEXT("TCP sender failed to send audio frame"));
+		return false;
+	}
+
+	Stats.BytesSent += UnifiedMessage.Num();
 	return true;
 }
 

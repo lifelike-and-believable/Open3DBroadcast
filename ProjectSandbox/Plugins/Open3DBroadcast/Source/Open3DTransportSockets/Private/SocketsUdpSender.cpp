@@ -1,6 +1,7 @@
 #include "SocketsUdpSender.h"
 
 #include "O3DAudioSerialization.h"
+#include "O3DUnifiedMessage.h"
 #include "O3DTransportTypes.h"
 
 #include "Sockets.h"
@@ -87,10 +88,6 @@ bool FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& Config)
 	}
 
 	ActiveAudioConfig = Config.Audio;
-	bAudioEnabled = ActiveAudioConfig.bEnableAudio;
-	AudioRemoteHost.Reset();
-	AudioRemotePort = 0;
-	AudioRemoteAddr.Reset();
 	AudioSourceGuid = FGuid::NewGuid();
 
 	if (!O3DSockets::ParseHostPort(Config, RemoteHost, RemotePort, TEXT("udp")))
@@ -129,39 +126,9 @@ bool FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& Config)
 		return false;
 	}
 
-	AudioRemoteHost = O3DSockets::GetOptionValue(Config, O3DSockets::AudioHostOptionKey);
-	if (AudioRemoteHost.IsEmpty())
-	{
-		AudioRemoteHost = RemoteHost;
-	}
-
-	AudioRemotePort = O3DSockets::GetIntOption(Config, O3DSockets::AudioPortOptionKey, 0);
-	if (AudioRemotePort <= 0 && RemotePort > 0)
-	{
-		AudioRemotePort = RemotePort + 1;
-	}
-
 	if (ActiveAudioConfig.StreamLabel.IsEmpty())
 	{
 		ActiveAudioConfig.StreamLabel = ActiveConfig.StreamId;
-	}
-
-	if (AudioRemotePort > 0)
-	{
-		if (!ResolveAddress(AudioRemoteHost, AudioRemotePort, AudioRemoteAddr))
-		{
-			UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP sender invalid audio host '%s'."), *AudioRemoteHost);
-			AudioRemoteAddr.Reset();
-			bAudioEnabled = false;
-		}
-	}
-	else
-	{
-		if (bAudioEnabled)
-		{
-			UE_LOG(LogSocketsUdpSender, Warning, TEXT("Audio support requested but no valid audio port specified."));
-		}
-		bAudioEnabled = false;
 	}
 
 	return true;
@@ -170,29 +137,12 @@ bool FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& Config)
 bool FO3DSocketsUdpSender::Start()
 {
 	DestroySocket();
-	DestroyAudioSocket();
-
-	const bool bDataStarted = CreateSocket();
-	bool bAudioStarted = true;
-	if (bAudioEnabled)
-	{
-		bAudioStarted = CreateAudioSocket();
-		if (!bAudioStarted)
-		{
-			UE_LOG(LogSocketsUdpSender, Warning, TEXT("Failed to initialise UDP audio socket; disabling audio channel."));
-			bAudioEnabled = false;
-			DestroyAudioSocket();
-			bAudioStarted = true;
-		}
-	}
-
-	return bDataStarted && bAudioStarted;
+	return CreateSocket();
 }
 
 void FO3DSocketsUdpSender::Stop()
 {
 	DestroySocket();
-	DestroyAudioSocket();
 	SocketSubsystem = nullptr;
 }
 
@@ -266,34 +216,6 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DSocketsUdpSender::Creat
 	}
 
 	ActiveAudioConfig = EffectiveConfig;
-	bAudioEnabled = true;
-
-	if (AudioRemotePort <= 0)
-	{
-		UE_LOG(LogSocketsUdpSender, Warning, TEXT("CreateAudioSink failed: no valid audio port configured."));
-		bAudioEnabled = false;
-		return nullptr;
-	}
-
-	if (!AudioRemoteAddr.IsValid())
-	{
-		if (!ResolveAddress(AudioRemoteHost, AudioRemotePort, AudioRemoteAddr))
-		{
-			UE_LOG(LogSocketsUdpSender, Warning, TEXT("CreateAudioSink failed: invalid audio host '%s'."), *AudioRemoteHost);
-			bAudioEnabled = false;
-			return nullptr;
-		}
-	}
-
-	if (SocketSubsystem && Socket && bAudioEnabled && !AudioSocket)
-	{
-		if (!CreateAudioSocket())
-		{
-			UE_LOG(LogSocketsUdpSender, Warning, TEXT("CreateAudioSink failed: could not create audio socket."));
-			bAudioEnabled = false;
-			return nullptr;
-		}
-	}
 
 	return MakeShared<FSocketsUdpSenderAudioSink, ESPMode::ThreadSafe>(*this, ActiveAudioConfig);
 }
@@ -392,40 +314,6 @@ bool FO3DSocketsUdpSender::CreateSocket()
 	return true;
 }
 
-bool FO3DSocketsUdpSender::CreateAudioSocket()
-{
-	if (!SocketSubsystem || !AudioRemoteAddr.IsValid())
-	{
-		return false;
-	}
-
-	DestroyAudioSocket();
-
-	AudioSocket = SocketSubsystem->CreateSocket(NAME_DGram, TEXT("O3DS_UDP_AUDIO_SENDER"), AudioRemoteAddr->GetProtocolType());
-	if (!AudioSocket)
-	{
-		UE_LOG(LogSocketsUdpSender, Warning, TEXT("Failed to create UDP audio socket."));
-		return false;
-	}
-
-	AudioSocket->SetReuseAddr(true);
-	AudioSocket->SetNonBlocking(true);
-
-	if (bAllowBroadcast)
-	{
-		AudioSocket->SetBroadcast(true);
-	}
-
-	int32 RequestedSize = 2 * 1024 * 1024;
-	int32 AppliedSize = 0;
-	AudioSocket->SetSendBufferSize(RequestedSize, AppliedSize);
-
-	UE_LOG(LogSocketsUdpSender, Log, TEXT("UDP audio sender targeting %s:%d (broadcast=%d, sendBuf=%d)."),
-		*AudioRemoteAddr->ToString(false), AudioRemoteAddr->GetPort(), bAllowBroadcast ? 1 : 0, AppliedSize);
-
-	return true;
-}
-
 void FO3DSocketsUdpSender::DestroySocket()
 {
 	if (Socket && SocketSubsystem)
@@ -433,15 +321,6 @@ void FO3DSocketsUdpSender::DestroySocket()
 		SocketSubsystem->DestroySocket(Socket);
 	}
 	Socket = nullptr;
-}
-
-void FO3DSocketsUdpSender::DestroyAudioSocket()
-{
-	if (AudioSocket && SocketSubsystem)
-	{
-		SocketSubsystem->DestroySocket(AudioSocket);
-	}
-	AudioSocket = nullptr;
 }
 
 bool FO3DSocketsUdpSender::SendPayload(FSocket* InSocket, const TSharedPtr<FInternetAddr>& InAddr, const uint8* Data, int32 Size, const TCHAR* Context)
@@ -517,22 +396,9 @@ bool FO3DSocketsUdpSender::SendFragmented(FSocket* InSocket, const TSharedPtr<FI
 
 bool FO3DSocketsUdpSender::SendAudioFrame(const FString& StreamLabel, const uint8* PCM16Data, int32 NumBytes, int32 NumChannels, int32 SampleRate, double TimestampSec)
 {
-	if (!bAudioEnabled || PCM16Data == nullptr || NumBytes <= 0)
+	if (PCM16Data == nullptr || NumBytes <= 0 || !Socket || !RemoteAddr.IsValid())
 	{
 		return false;
-	}
-
-	if (!SocketSubsystem || !AudioRemoteAddr.IsValid())
-	{
-		return false;
-	}
-
-	if (!AudioSocket)
-	{
-		if (!CreateAudioSocket())
-		{
-			return false;
-		}
 	}
 
 	O3DS::FAudioFrameMeta Meta;
@@ -554,17 +420,28 @@ bool FO3DSocketsUdpSender::SendAudioFrame(const FString& StreamLabel, const uint
 	Meta.SampleRate = SampleRate > 0 ? SampleRate : FMath::Max(ActiveAudioConfig.SampleRate, 1);
 	Meta.TimestampSec = TimestampSec;
 
-	TArray<uint8> Payload;
-	if (!O3DAudio::SerializePcm16Frame(Meta, PCM16Data, NumBytes, Payload))
+	// Serialize PCM16 audio frame
+	TArray<uint8> AudioPayload;
+	if (!O3DAudio::SerializePcm16Frame(Meta, PCM16Data, NumBytes, AudioPayload))
+	{
+		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP sender failed to serialize audio frame"));
+		return false;
+	}
+
+	// Wrap in unified message envelope
+	TArray<uint8> UnifiedMessage;
+	if (!O3DS::CreateUnifiedMessage(O3DS::EUnifiedKind::Audio, O3DS::EUnifiedCodec::PCM16, AudioPayload.GetData(), AudioPayload.Num(), TimestampSec, UnifiedMessage))
+	{
+		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP sender failed to create unified audio message"));
+		return false;
+	}
+
+	// Send through main socket
+	if (!SendPayload(Socket, RemoteAddr, UnifiedMessage.GetData(), UnifiedMessage.Num(), TEXT("audio")))
 	{
 		return false;
 	}
 
-	if (!SendPayload(AudioSocket, AudioRemoteAddr, Payload.GetData(), Payload.Num(), TEXT("audio")))
-	{
-		return false;
-	}
-
-	Stats.BytesSent += Payload.Num();
+	Stats.BytesSent += UnifiedMessage.Num();
 	return true;
 }

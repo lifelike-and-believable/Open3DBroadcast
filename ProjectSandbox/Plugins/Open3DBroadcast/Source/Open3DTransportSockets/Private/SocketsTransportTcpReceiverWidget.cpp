@@ -120,7 +120,7 @@ namespace
 
 			PanelContent->AddSlot()
 				.AutoHeight()
-				.Padding(0.f, 4.f, 0.f, 0.f)
+				.Padding(0.f, 4.f, 0.f, 8.f)
 				[
 					SAssignNew(AudioPortSpinBox, SSpinBox<int32>)
 					.MinValue(1)
@@ -128,6 +128,26 @@ namespace
 					.Value(FMath::Max(1, GetAudioPort()))
 					.OnValueChanged(this, &STcpReceiverSettingsPanel::HandleAudioPortChanged)
 					.OnValueCommitted(this, &STcpReceiverSettingsPanel::HandleAudioPortCommitted)
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("TcpReceiverTimeoutLabel", "Connection Timeout (seconds)"))
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				.Padding(0.f, 4.f, 0.f, 0.f)
+				[
+					SAssignNew(TimeoutSpinBox, SSpinBox<int32>)
+					.MinValue(1)
+					.MaxValue(60)
+					.Value(GetTimeout())
+					.ToolTipText(LOCTEXT("TcpReceiverTimeoutTooltip", "Reconnect if no data received for this many seconds (1-60)"))
+					.OnValueChanged(this, &STcpReceiverSettingsPanel::HandleTimeoutChanged)
+					.OnValueCommitted(this, &STcpReceiverSettingsPanel::HandleTimeoutCommitted)
 				];
 
 			BuildPanel(PanelContent, InArgs._PanelWidthOverride);
@@ -241,6 +261,21 @@ namespace
 			SetOption(O3DSockets::AudioPortOptionKey, FString::FromInt(FMath::Clamp(Port, 1, 65535)));
 		}
 
+		int32 GetTimeout() const
+		{
+			const FString Value = GetOption(O3DSockets::TimeoutOptionKey);
+			return Value.IsEmpty() ? 5 : FCString::Atoi(*Value);
+		}
+
+		void SetTimeout(int32 Seconds)
+		{
+			if (Seconds <= 0)
+			{
+				Seconds = 5;
+			}
+			SetOption(O3DSockets::TimeoutOptionKey, FString::FromInt(FMath::Clamp(Seconds, 1, 60)));
+		}
+
 		void HandleHostCommitted(const FText& NewText, ETextCommit::Type CommitType)
 		{
 			SetHost(NewText.ToString());
@@ -290,11 +325,23 @@ namespace
 			SubmitFromTextCommit(CommitType);
 		}
 
+		void HandleTimeoutChanged(int32 NewValue)
+		{
+			SetTimeout(NewValue);
+		}
+
+		void HandleTimeoutCommitted(int32 NewValue, ETextCommit::Type CommitType)
+		{
+			HandleTimeoutChanged(NewValue);
+			SubmitFromTextCommit(CommitType);
+		}
+
 		UO3DReceiverSettingsObject* SettingsObject = nullptr;
 		TSharedPtr<SEditableTextBox> HostTextBox;
 		TSharedPtr<SSpinBox<int32>> PortSpinBox;
 		TSharedPtr<SEditableTextBox> AudioHostTextBox;
 		TSharedPtr<SSpinBox<int32>> AudioPortSpinBox;
+		TSharedPtr<SSpinBox<int32>> TimeoutSpinBox;
 	};
 } // anonymous namespace
 
