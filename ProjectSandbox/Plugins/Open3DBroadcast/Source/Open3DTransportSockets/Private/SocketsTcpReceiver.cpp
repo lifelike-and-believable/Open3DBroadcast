@@ -106,8 +106,14 @@ int32 FO3DSocketsTcpReceiver::Poll()
 	if (Socket && State == EState::Connected)
 	{
 		TArray<uint8> Frame;
-		while (ReadFramed(Socket, State, ReceiveBuffer, BytesBuffered, ExpectedPayloadSize, Frame))
+		// Batch-process frames like NNG does (improves throughput during bursts)
+		while (FramesProcessed < 16)
 		{
+			if (!ReadFramed(Socket, State, ReceiveBuffer, BytesBuffered, ExpectedPayloadSize, Frame))
+			{
+				break; // No more complete frames available
+			}
+
 			if (Frame.Num() > 0)
 			{
 				LastDataReceiveTime = FPlatformTime::Seconds();
@@ -176,6 +182,14 @@ bool FO3DSocketsTcpReceiver::ConnectToServer()
 
 	Socket->SetNonBlocking(true);
 
+	// Configure socket buffers for better performance
+	int32 ReceiveBufferSize = 2 * 1024 * 1024; // 2MB (match UDP)
+	int32 AppliedSize = 0;
+	Socket->SetReceiveBufferSize(ReceiveBufferSize, AppliedSize);
+
+	// Disable Nagle's algorithm for low-latency transmission (critical for audio)
+	Socket->SetNoDelay(true);
+
 	TSharedRef<FInternetAddr> Addr = SocketSubsystem->CreateInternetAddr();
 	bool bValid = false;
 	Addr->SetIp(*RemoteHost, bValid);
@@ -202,12 +216,19 @@ bool FO3DSocketsTcpReceiver::ConnectToServer()
 	BytesBuffered = 0;
 	ExpectedPayloadSize = 0;
 
+	// Pre-allocate receive buffer to avoid frequent reallocations
+	// Start with 256KB, will grow as needed (typical mocap frame ~50KB, audio ~2-12KB)
+	if (ReceiveBuffer.Num() < 256 * 1024)
+	{
+		ReceiveBuffer.SetNum(256 * 1024);
+	}
+
 	Socket->Connect(*Addr);
 	LastConnectAttempt = FPlatformTime::Seconds();
 	LastDataReceiveTime = FPlatformTime::Seconds();
 	ConnectBackoffAttempt = 0;
 
-	UE_LOG(LogSocketsTcpReceiver, Log, TEXT("TCP receiver connecting to %s:%d"), *RemoteHost, RemotePort);
+	UE_LOG(LogSocketsTcpReceiver, Log, TEXT("TCP receiver connecting to %s:%d (recvBuf=%d, TCP_NODELAY=true)"), *RemoteHost, RemotePort, AppliedSize);
 	return true;
 }
 
@@ -320,24 +341,47 @@ bool FO3DSocketsTcpReceiver::ReadFramed(FSocket* InSocket, EState& InState, TArr
 		// Check magic
 		if (!O3DSockets::Tcp::MatchesMagic(Buffer.GetData()))
 		{
-			// Resync - look for magic
-			InOutBytesBuffered = 0;
-			return false;
+			// Resync - search for magic without discarding all data
+			// Scan forward byte-by-byte to find valid frame header
+			bool bFoundMagic = false;
+			for (int32 Offset = 1; Offset <= InOutBytesBuffered - HeaderSize; ++Offset)
+			{
+				if (O3DSockets::Tcp::MatchesMagic(Buffer.GetData() + Offset))
+				{
+					// Found magic at this offset - shift buffer and continue
+					FMemory::Memmove(Buffer.GetData(), Buffer.GetData() + Offset, InOutBytesBuffered - Offset);
+					InOutBytesBuffered -= Offset;
+					bFoundMagic = true;
+					break;
+				}
+			}
+
+			if (!bFoundMagic)
+			{
+				// No magic found in current buffer - discard oldest byte and try again next poll
+				FMemory::Memmove(Buffer.GetData(), Buffer.GetData() + 1, InOutBytesBuffered - 1);
+				InOutBytesBuffered--;
+				return false;
+			}
 		}
 
 		InOutExpectedPayloadSize = static_cast<int32>(O3DSockets::Tcp::DecodePayloadSize(Buffer.GetData()));
 		if (InOutExpectedPayloadSize <= 0 || InOutExpectedPayloadSize > MaxPayloadSizeBytes)
 		{
 			UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("Invalid frame size %d"), InOutExpectedPayloadSize);
-			InOutBytesBuffered = 0;
+			// Skip this byte and try next position
+			FMemory::Memmove(Buffer.GetData(), Buffer.GetData() + 1, InOutBytesBuffered - 1);
+			InOutBytesBuffered--;
 			InOutExpectedPayloadSize = 0;
 			return false;
 		}
 
-		// Ensure buffer can hold header + payload
-		if (Buffer.Num() < HeaderSize + InOutExpectedPayloadSize)
+		// Ensure buffer can hold header + payload (use reserved space to avoid reallocations)
+		const int32 RequiredSize = HeaderSize + InOutExpectedPayloadSize;
+		if (Buffer.Num() < RequiredSize)
 		{
-			Buffer.SetNum(HeaderSize + InOutExpectedPayloadSize);
+			// Grow buffer with some headroom to reduce future reallocations
+			Buffer.SetNum(FMath::Max(RequiredSize, 512 * 1024)); // 512KB growth increment
 		}
 	}
 

@@ -6,11 +6,14 @@
 #include "O3DAudioFrameCodec.h"
 
 #include "HAL/CriticalSection.h"
+#include "Containers/Queue.h"
 
 class FSocket;
 class ISocketSubsystem;
 class FInternetAddr;
 class FSocketsTcpSenderAudioSink;
+class FRunnableThread;
+class FEvent;
 
 /**
  * TCP sender - server mode (listens and accepts connections).
@@ -32,6 +35,13 @@ public:
 	virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
 
 private:
+	struct FQueuedPayload
+	{
+		TArray<uint8> Bytes;
+	};
+
+	class FTcpSenderRunnable;
+
 	bool CreateListenSocket();
 	void DestroySocket();
 	void TickAcceptClient();
@@ -40,6 +50,13 @@ private:
 	bool ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec);
 	bool SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, double TimestampSec);
 	TSharedPtr<FInternetAddr> CreateBindAddress(const FString& Host, int32 Port, bool& bOutValid);
+
+	// Async send worker
+	void StartWorker();
+	void StopWorker();
+	uint32 RunWorker();
+	bool EnqueuePayload(const uint8* Data, int32 Size);
+	void DrainQueue();
 
 private:
 	friend class FSocketsTcpSenderAudioSink;
@@ -62,4 +79,15 @@ private:
 	bool bAudioEncoderInitialized = false;
 	O3DAudio::FFrameEncoder AudioEncoder;
 	TArray<uint8> UnifiedAudioScratch;
+
+	// Async send queue
+	TQueue<FQueuedPayload, EQueueMode::Mpsc> SendQueue;
+	FTcpSenderRunnable* Worker = nullptr;
+	FRunnableThread* WorkerThread = nullptr;
+	FEvent* WakeEvent = nullptr;
+	TAtomic<bool> bStopWorker{false};
+	TAtomic<uint64> QueueBytes{0};
+	uint64 MaxQueueBytes = 4 * 1024 * 1024; // 4MB default
+
+	mutable FCriticalSection StatsMutex;
 };

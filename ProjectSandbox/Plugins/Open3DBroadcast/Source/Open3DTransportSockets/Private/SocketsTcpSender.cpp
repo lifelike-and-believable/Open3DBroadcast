@@ -8,6 +8,9 @@
 #include "SocketSubsystem.h"
 #include "IPAddress.h"
 #include "HAL/PlatformTime.h"
+#include "HAL/PlatformProcess.h"
+#include "HAL/Runnable.h"
+#include "HAL/RunnableThread.h"
 #include "Misc/ScopeLock.h"
 #include "Logging/LogMacros.h"
 
@@ -16,6 +19,28 @@
 #include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogSocketsTcpSender, Log, All);
+
+class FO3DSocketsTcpSender::FTcpSenderRunnable final : public FRunnable
+{
+public:
+	explicit FTcpSenderRunnable(FO3DSocketsTcpSender& InOwner)
+		: Owner(InOwner)
+	{
+	}
+
+	virtual uint32 Run() override
+	{
+		return Owner.RunWorker();
+	}
+
+	virtual void Stop() override
+	{
+		// Owner drives stop via atomics; nothing required here.
+	}
+
+private:
+	FO3DSocketsTcpSender& Owner;
+};
 
 class FSocketsTcpSenderAudioSink final : public IO3DSenderAudioSink
 {
@@ -103,12 +128,36 @@ bool FO3DSocketsTcpSender::Initialize(const FO3DTransportConfig& Config)
 bool FO3DSocketsTcpSender::Start()
 {
 	DestroySocket();
+
+	if (!WakeEvent)
+	{
+		WakeEvent = FPlatformProcess::GetSynchEventFromPool(false);
+	}
+
+	bStopWorker = false;
+	StartWorker();
+
 	return CreateListenSocket();
 }
 
 void FO3DSocketsTcpSender::Stop()
 {
+	bStopWorker = true;
+	if (WakeEvent)
+	{
+		WakeEvent->Trigger();
+	}
+
+	StopWorker();
+
+	if (WakeEvent)
+	{
+		FPlatformProcess::ReturnSynchEventToPool(WakeEvent);
+		WakeEvent = nullptr;
+	}
+
 	DestroySocket();
+	DrainQueue();
 	SocketSubsystem = nullptr;
 }
 
@@ -126,25 +175,27 @@ bool FO3DSocketsTcpSender::Send(const O3DS::SubjectList& List)
 	if (BytesWritten <= 0)
 	{
 		UE_LOG(LogSocketsTcpSender, Verbose, TEXT("TCP sender failed to serialize SubjectList."));
+		FScopeLock Lock(&StatsMutex);
 		Stats.DroppedFrames++;
 		return false;
 	}
 
-	if (!SendFramed(ClientSocket, reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten))
+	// Prepare framed message (header + payload)
+	const int32 HeaderSize = O3DSockets::Tcp::FrameHeaderSize;
+	const int32 TotalSize = HeaderSize + BytesWritten;
+
+	if (!EnqueuePayload(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten))
 	{
-		// Send failed - drop client and wait for reconnect
-		UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP send failed, dropping client."));
-		if (ClientSocket && SocketSubsystem)
-		{
-			SocketSubsystem->DestroySocket(ClientSocket);
-		}
-		ClientSocket = nullptr;
+		FScopeLock Lock(&StatsMutex);
 		Stats.DroppedFrames++;
 		return false;
 	}
 
-	Stats.FramesSent++;
-	Stats.BytesSent += BytesWritten;
+	{
+		FScopeLock Lock(&StatsMutex);
+		Stats.FramesSent++;
+		Stats.BytesSent += BytesWritten;
+	}
 	return true;
 }
 
@@ -155,6 +206,7 @@ void FO3DSocketsTcpSender::Tick(float /*DeltaSeconds*/)
 
 FO3DTransportStats FO3DSocketsTcpSender::GetStats() const
 {
+	FScopeLock Lock(&StatsMutex);
 	return Stats;
 }
 
@@ -262,8 +314,17 @@ void FO3DSocketsTcpSender::TickAcceptClient()
 	if (Accepted)
 	{
 		Accepted->SetNonBlocking(true);
+
+		// Configure socket buffers for better performance
+		int32 SendBufferSize = 2 * 1024 * 1024; // 2MB (match UDP)
+		int32 AppliedSize = 0;
+		Accepted->SetSendBufferSize(SendBufferSize, AppliedSize);
+
+		// Disable Nagle's algorithm for low-latency transmission (critical for audio)
+		Accepted->SetNoDelay(true);
+
 		ClientSocket = Accepted;
-		UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP sender accepted client %s"), *PeerAddr->ToString(true));
+		UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP sender accepted client %s (sendBuf=%d, TCP_NODELAY=true)"), *PeerAddr->ToString(true), AppliedSize);
 	}
 }
 
@@ -274,19 +335,10 @@ bool FO3DSocketsTcpSender::SendFramed(FSocket* InSocket, const uint8* Data, int3
 		return false;
 	}
 
-	// Send header
-	uint8 Header[O3DSockets::Tcp::FrameHeaderSize];
-	O3DSockets::Tcp::WriteFrameHeader(Header, Size);
-
-	int32 HeaderSent = 0;
-	if (!InSocket->Send(Header, O3DSockets::Tcp::FrameHeaderSize, HeaderSent) || HeaderSent != O3DSockets::Tcp::FrameHeaderSize)
-	{
-		return false;
-	}
-
-	// Send payload
-	int32 PayloadSent = 0;
-	if (!InSocket->Send(Data, Size, PayloadSent) || PayloadSent != Size)
+	// Data already includes frame header (added by EnqueuePayload)
+	// Send the complete framed message in a single call
+	int32 BytesSent = 0;
+	if (!InSocket->Send(Data, Size, BytesSent) || BytesSent != Size)
 	{
 		return false;
 	}
@@ -341,13 +393,16 @@ bool FO3DSocketsTcpSender::SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame
 		return false;
 	}
 
-	if (!SendFramed(ClientSocket, UnifiedAudioScratch.GetData(), UnifiedAudioScratch.Num()))
+	if (!EnqueuePayload(UnifiedAudioScratch.GetData(), UnifiedAudioScratch.Num()))
 	{
-		UE_LOG(LogSocketsTcpSender, Verbose, TEXT("TCP sender failed to send audio frame"));
+		UE_LOG(LogSocketsTcpSender, Verbose, TEXT("TCP sender failed to enqueue audio frame"));
 		return false;
 	}
 
-	Stats.BytesSent += UnifiedAudioScratch.Num();
+	{
+		FScopeLock Lock(&StatsMutex);
+		Stats.BytesSent += UnifiedAudioScratch.Num();
+	}
 	return true;
 }
 
@@ -374,4 +429,122 @@ TSharedPtr<FInternetAddr> FO3DSocketsTcpSender::CreateBindAddress(const FString&
 	Addr->SetPort(Port);
 	Addr->SetIp(*HostToUse, bOutValid);
 	return Addr;
+}
+
+void FO3DSocketsTcpSender::StartWorker()
+{
+	if (!WorkerThread)
+	{
+		Worker = new FTcpSenderRunnable(*this);
+		WorkerThread = FRunnableThread::Create(Worker, TEXT("O3D_TCP_Sender_Worker"));
+	}
+}
+
+void FO3DSocketsTcpSender::StopWorker()
+{
+	if (WorkerThread)
+	{
+		WorkerThread->WaitForCompletion();
+		delete WorkerThread;
+		WorkerThread = nullptr;
+	}
+	if (Worker)
+	{
+		delete Worker;
+		Worker = nullptr;
+	}
+
+	bStopWorker = false;
+}
+
+uint32 FO3DSocketsTcpSender::RunWorker()
+{
+	while (!bStopWorker.Load())
+	{
+		FQueuedPayload Payload;
+		if (!SendQueue.Dequeue(Payload))
+		{
+			if (WakeEvent)
+			{
+				WakeEvent->Wait(50);
+			}
+			continue;
+		}
+
+		const uint64 PayloadSize = static_cast<uint64>(Payload.Bytes.Num());
+		const uint64 Current = QueueBytes.Load();
+		QueueBytes.Store(Current > PayloadSize ? Current - PayloadSize : 0);
+
+		FSocket* ActiveSocket = ClientSocket;
+		if (!ActiveSocket)
+		{
+			FScopeLock StatsLock(&StatsMutex);
+			Stats.DroppedFrames++;
+			continue;
+		}
+
+		if (!SendFramed(ActiveSocket, Payload.Bytes.GetData(), Payload.Bytes.Num()))
+		{
+			// Send failed - drop client and wait for reconnect
+			UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP send failed, dropping client."));
+			if (ClientSocket && SocketSubsystem)
+			{
+				SocketSubsystem->DestroySocket(ClientSocket);
+			}
+			ClientSocket = nullptr;
+
+			FScopeLock StatsLock(&StatsMutex);
+			Stats.DroppedFrames++;
+			continue;
+		}
+	}
+
+	return 0;
+}
+
+bool FO3DSocketsTcpSender::EnqueuePayload(const uint8* Data, int32 Size)
+{
+	if (Size <= 0 || Data == nullptr)
+	{
+		return false;
+	}
+
+	// Prepare framed message (header + payload)
+	const int32 HeaderSize = O3DSockets::Tcp::FrameHeaderSize;
+	const int32 TotalSize = HeaderSize + Size;
+
+	const uint64 Pending = QueueBytes.Load();
+	if (MaxQueueBytes > 0 && Pending + static_cast<uint64>(TotalSize) > MaxQueueBytes)
+	{
+		return false;
+	}
+
+	FQueuedPayload Payload;
+	Payload.Bytes.SetNumUninitialized(TotalSize);
+
+	// Write header
+	O3DSockets::Tcp::WriteFrameHeader(Payload.Bytes.GetData(), Size);
+
+	// Copy payload
+	FMemory::Memcpy(Payload.Bytes.GetData() + HeaderSize, Data, Size);
+
+	SendQueue.Enqueue(MoveTemp(Payload));
+	QueueBytes.Store(Pending + static_cast<uint64>(TotalSize));
+
+	if (WakeEvent)
+	{
+		WakeEvent->Trigger();
+	}
+
+	return true;
+}
+
+void FO3DSocketsTcpSender::DrainQueue()
+{
+	FQueuedPayload Payload;
+	while (SendQueue.Dequeue(Payload))
+	{
+		// release payload
+	}
+	QueueBytes.Store(0);
 }
