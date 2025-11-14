@@ -1,0 +1,419 @@
+name: Build Plugin Core
+description: Checkout, cache, build third-party and core, copy headers/libs, and locate .uplugin
+inputs:
+  ue_root:
+    required: true
+    description: Path to Unreal Engine root (e.g., C:\\Program Files\\Epic Games\\UE_5.6)
+  plugin_name:
+    required: true
+    description: Plugin name (e.g., Open3DStream)
+  build_type:
+    required: true
+    description: CMake build type (e.g., RelWithDebInfo or Release)
+  enable_webrtc:
+    required: true
+    description: Enable WebRTC in core (true/false)
+  libdatachannel_root:
+    required: false
+    description: Optional root for prebuilt libdatachannel stack. If empty, we fetch latest release.
+  # Optional overrides for asset selection
+  libdatachannel_asset_regex:
+    required: false
+    description: Optional override regex to pick a libdatachannel release asset for this runner OS/arch.
+  opus_asset_regex:
+    required: false
+    description: Optional override regex to pick an opus release asset for this runner OS/arch.
+  plugin_relative_path:
+    required: false
+    default: ''
+    description: Optional relative path to plugin directory when not under plugins/unreal/<plugin_name>.
+outputs:
+  plugin_dir:
+    description: Resolved plugin directory
+    value: ${{ steps.resolve.outputs.plugin_dir }}
+  uplugin_path:
+    description: Resolved .uplugin path
+    value: ${{ steps.resolve.outputs.plugin_path }}
+runs:
+  using: composite
+  steps:
+    - name: Checkout (full)
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        lfs: true
+        submodules: recursive
+
+    - name: Resolve plugin location
+      id: resolve
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $custom = "${{ inputs.plugin_relative_path }}"
+        if ([string]::IsNullOrWhiteSpace($custom)) {
+          $pluginDir = Join-Path $PWD "plugins/unreal/${{ inputs.plugin_name }}"
+        } else {
+          $pluginDir = Join-Path $PWD $custom
+        }
+
+        if (!(Test-Path -LiteralPath $pluginDir)) {
+          throw "Plugin directory not found: $pluginDir"
+        }
+
+        $upluginPath = Join-Path $pluginDir "${{ inputs.plugin_name }}.uplugin"
+        if (!(Test-Path -LiteralPath $upluginPath)) {
+          throw "Plugin .uplugin file not found: $upluginPath"
+        }
+
+        "PLUGIN_DIR=$pluginDir" | Out-File -FilePath $env:GITHUB_ENV -Append
+        "PLUGIN_UPLUGIN=$upluginPath" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+        "plugin_dir=$pluginDir"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        "plugin_path=$upluginPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Link plugin into Sandbox
+      shell: pwsh
+      run: |
+        & .\Build\Scripts\Link-PluginIntoSandbox.ps1
+
+    - name: Setup UE
+      shell: pwsh
+      run: |
+        & .\Build\Scripts\Setup-UE.ps1 -UEPath "${{ inputs.ue_root }}"
+
+    # Download latest libdatachannel release (unless libdatachannel_root is provided)
+    - name: Download prebuilt libdatachannel (latest release)
+      id: fetch-ldc
+      shell: pwsh
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+
+        if (-not [string]::IsNullOrWhiteSpace("${{ inputs.libdatachannel_root }}")) {
+          "ldc_root=${{ inputs.libdatachannel_root }}" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          exit 0
+        }
+
+        $ownerRepo = 'lifelike-and-believable/libdatachannel'
+        $headers = @{ Authorization = "Bearer $env:GITHUB_TOKEN"; 'User-Agent' = 'github-action' }
+        $releaseUrl = "https://api.github.com/repos/$ownerRepo/releases"
+        $releases = Invoke-RestMethod -Headers $headers -Uri $releaseUrl -Method GET
+        $release = $releases | Sort-Object -Property published_at -Descending | Select-Object -First 1
+        if (-not $release) {
+          Write-Error "No releases found for $ownerRepo"
+        }
+
+        $os = $env:RUNNER_OS
+        $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLower()
+        switch ($os) {
+          'Windows' { $osRegex = '(?i)(win|windows)'; $libExts = @('*.lib','*.dll') }
+          'Linux'   { $osRegex = '(?i)(linux|ubuntu)'; $libExts = @('*.a','*.so') }
+          'macOS'   { $osRegex = '(?i)(mac|osx|darwin)'; $libExts = @('*.a','*.dylib') }
+          default   { $osRegex = '(?i).*'; $libExts = @('*.lib','*.a','*.so','*.dylib') }
+        }
+        if ($arch -eq 'x64') { $archRegex = '(?i)(x64|amd64|x86_64)' }
+        elseif ($arch -eq 'arm64') { $archRegex = '(?i)(arm64|aarch64)' }
+        else { $archRegex = '(?i).*' }
+
+        $overrideRegex = "${{ inputs.libdatachannel_asset_regex }}"
+        if (-not [string]::IsNullOrWhiteSpace($overrideRegex)) {
+          $asset = $release.assets | Where-Object { $_.name -match $overrideRegex } | Select-Object -First 1
+        } else {
+          $asset = $release.assets | Where-Object {
+            $_.name -match $osRegex -and $_.name -match $archRegex -and $_.name -match '\.zip$'
+          } | Select-Object -First 1
+        }
+        if (-not $asset) {
+          Write-Error "No libdatachannel asset matched OS='$os' arch='$arch'. Available: $($release.assets.name -join ', ')"
+        }
+
+        New-Item -ItemType Directory -Force -Path "prebuilt/libdatachannel" | Out-Null
+        $outPath = Join-Path $PWD "prebuilt/libdatachannel/$($asset.name)"
+        Invoke-WebRequest -Headers $headers -Uri $asset.browser_download_url -OutFile $outPath
+        Expand-Archive -LiteralPath $outPath -DestinationPath "prebuilt/libdatachannel/extracted" -Force
+
+        # Find the directory structure
+        # The CMake expects library files directly in the root, with include/ as a subdirectory
+        # But the zip might have lib/ and include/ as subdirectories
+        # We need to find where the actual lib files are and restructure if needed
+        
+        $extractedRoot = Get-Item "prebuilt/libdatachannel/extracted"
+        $candidate = $null
+        
+        # Look for .lib or .a files to determine where libraries are
+        $libFiles = Get-ChildItem -Path $extractedRoot.FullName -Recurse -Include "datachannel.lib","libdatachannel.a" -ErrorAction SilentlyContinue
+        if ($libFiles) {
+          $libDir = $libFiles[0].Directory
+          Write-Host "Found libdatachannel libraries in: $($libDir.FullName)"
+          
+          # Check if libraries are in a 'lib' subdirectory
+          if ($libDir.Name -eq 'lib') {
+            # Libraries are in lib/, we need to move them up one level
+            $targetRoot = $libDir.Parent
+            Write-Host "Moving libraries from lib/ to root: $($targetRoot.FullName)"
+            Get-ChildItem -Path $libDir.FullName -File | ForEach-Object {
+              Copy-Item $_.FullName -Destination $targetRoot.FullName -Force
+            }
+            $candidate = $targetRoot
+          } else {
+            # Libraries are already at the right level
+            $candidate = $libDir
+          }
+        } else {
+          Write-Error "Could not find datachannel library files in extracted archive"
+          exit 1
+        }
+        
+        if (-not $candidate) { 
+          Write-Error "Could not determine libdatachannel root directory"
+          exit 1
+        }
+        
+        Write-Host "Using libdatachannel root: $($candidate.FullName)"
+
+        "ldc_root=$($candidate.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        "ldc_lib_exts=$($libExts -join ';')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+    # Download latest opus release
+    - name: Download prebuilt opus (latest release)
+      id: fetch-opus
+      shell: pwsh
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $ownerRepo = 'lifelike-and-believable/opus'
+        $headers = @{ Authorization = "Bearer $env:GITHUB_TOKEN"; 'User-Agent' = 'github-action' }
+        $releaseUrl = "https://api.github.com/repos/$ownerRepo/releases"
+        $releases = Invoke-RestMethod -Headers $headers -Uri $releaseUrl -Method GET
+        $release = $releases | Sort-Object -Property published_at -Descending | Select-Object -First 1
+        if (-not $release) {
+          Write-Error "No releases found for $ownerRepo"
+        }
+
+        $os = $env:RUNNER_OS
+        $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLower()
+        switch ($os) {
+          'Windows' { $osRegex = '(?i)(win|windows)'; $libExts = @('*.lib','*.dll') }
+          'Linux'   { $osRegex = '(?i)(linux|ubuntu)'; $libExts = @('*.a','*.so') }
+          'macOS'   { $osRegex = '(?i)(mac|osx|darwin)'; $libExts = @('*.a','*.dylib') }
+          default   { $osRegex = '(?i).*'; $libExts = @('*.lib','*.a','*.so','*.dylib') }
+        }
+        if ($arch -eq 'x64') { $archRegex = '(?i)(x64|amd64|x86_64)' }
+        elseif ($arch -eq 'arm64') { $archRegex = '(?i)(arm64|aarch64)' }
+        else { $archRegex = '(?i).*' }
+
+        $overrideRegex = "${{ inputs.opus_asset_regex }}"
+        if (-not [string]::IsNullOrWhiteSpace($overrideRegex)) {
+          $asset = $release.assets | Where-Object { $_.name -match $overrideRegex } | Select-Object -First 1
+        } else {
+          $asset = $release.assets | Where-Object {
+            $_.name -match $osRegex -and $_.name -match $archRegex -and $_.name -match '\.zip$'
+          } | Select-Object -First 1
+        }
+        if (-not $asset) {
+          Write-Error "No opus asset matched OS='$os' arch='$arch'. Available: $($release.assets.name -join ', ')"
+        }
+
+        New-Item -ItemType Directory -Force -Path "prebuilt/opus" | Out-Null
+        $outPath = Join-Path $PWD "prebuilt/opus/$($asset.name)"
+        Invoke-WebRequest -Headers $headers -Uri $asset.browser_download_url -OutFile $outPath
+        Expand-Archive -LiteralPath $outPath -DestinationPath "prebuilt/opus/extracted" -Force
+
+        # Prefer a directory that contains lib/
+        # First, check if extracted directory itself has lib/
+        $extractedRoot = Get-Item "prebuilt/opus/extracted"
+        $candidate = $null
+        
+        if (Test-Path (Join-Path $extractedRoot.FullName 'lib')) {
+          $candidate = $extractedRoot
+        } else {
+          # Search recursively for a directory with lib/
+          $candidate = Get-ChildItem -Path "prebuilt/opus/extracted" -Recurse -Directory `
+            | Where-Object { Test-Path (Join-Path $_.FullName 'lib') } `
+            | Select-Object -First 1
+        }
+        
+        if (-not $candidate) { 
+          Write-Warning "Could not find opus directory with lib/ subdirectory, using extracted root"
+          $candidate = $extractedRoot
+        }
+
+        "opus_root=$($candidate.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        "opus_lib_exts=$($libExts -join ';')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+    - name: Cache native libraries
+      uses: actions/cache@v4
+      id: cache-libs
+      with:
+        path: |
+          vsbuild
+          usr
+          thirdparty/build
+        key: o3ds-libs-${{ runner.os }}-${{ hashFiles('src/**/*.cpp', 'src/**/*.h', 'thirdparty/CMakeLists.txt', 'CMakeLists.txt', '.gitmodules') }}
+        restore-keys: |
+          o3ds-libs-${{ runner.os }}-
+
+    - name: Build Third-Party Dependencies
+      if: steps.cache-libs.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        cd thirdparty
+        cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -DO3DS_BUILD_WEBRTC=OFF
+        cmake --build build --config ${{ inputs.build_type }} --parallel
+        cmake --install build --config ${{ inputs.build_type }} --prefix ../usr
+
+    - name: Build Open3DStream C++ Library
+      if: steps.cache-libs.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        $flatcCfg = "${{ inputs.build_type }}"
+        $flatcPath = "thirdparty/build/flatbuffers/$flatcCfg/flatc.exe"
+        & "$flatcPath" --cpp -o src src/o3ds.fbs
+
+        $webrtcFlag = if ("${{ inputs.enable_webrtc }}" -eq "true") { "ON" } else { "OFF" }
+
+        # Use explicit input if provided; else use downloaded prebuilt
+        $ldcRoot = "${{ inputs.libdatachannel_root }}"
+        if ([string]::IsNullOrWhiteSpace($ldcRoot)) {
+          $ldcRoot = "${{ steps.fetch-ldc.outputs.ldc_root }}"
+        }
+
+        $cmakeArgs = @(
+          "-B","vsbuild",
+          "-S",".",
+          "-G","Visual Studio 17 2022",
+          "-A","x64",
+          "-DCMAKE_PREFIX_PATH=$PWD/usr",
+          "-DO3DS_ENABLE_WEBRTC=$webrtcFlag"
+        )
+        if (-not [string]::IsNullOrWhiteSpace($ldcRoot)) {
+          $cmakeArgs += "-DO3DS_LIBDATACHANNEL_ROOT=$ldcRoot"
+        }
+
+        & cmake $cmakeArgs
+        cmake --build vsbuild --config ${{ inputs.build_type }} --parallel
+
+    - name: Copy libraries and headers to plugin
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $pluginDir = $env:PLUGIN_DIR
+        if ([string]::IsNullOrWhiteSpace($pluginDir)) {
+          throw "PLUGIN_DIR environment variable not set. Ensure the resolve step executed successfully."
+        }
+
+        $pluginLib = Join-Path $pluginDir "ThirdParty"
+        $pluginLibWin64 = Join-Path $pluginLib "Lib/Win64"
+        New-Item -ItemType Directory -Force -Path $pluginLib | Out-Null
+        New-Item -ItemType Directory -Force -Path $pluginLibWin64 | Out-Null
+
+        $moduleLibTargets = @()
+        $sourceDir = Join-Path $pluginDir "Source"
+        if (Test-Path $sourceDir) {
+          Get-ChildItem -Path $sourceDir -Directory | ForEach-Object {
+            $moduleLibDir = Join-Path $_.FullName "ThirdParty/Lib/Win64"
+            New-Item -ItemType Directory -Force -Path $moduleLibDir | Out-Null
+            $moduleLibTargets += $moduleLibDir
+          }
+        }
+
+        New-Item -ItemType Directory -Force -Path (Join-Path $pluginLib "include") | Out-Null
+
+        # Copy o3ds to new structure (prebuilt lib location)
+        New-Item -ItemType Directory -Force -Path (Join-Path $pluginLib "o3ds/include/o3ds") | Out-Null
+        New-Item -ItemType Directory -Force -Path (Join-Path $pluginLib "o3ds/lib/Win64/Release") | Out-Null
+        Copy-Item "vsbuild/src/${{ inputs.build_type }}/open3dstreamstatic.lib" (Join-Path $pluginLib "o3ds/lib/Win64/Release/o3ds.lib") -Force
+        Copy-Item "vsbuild/src/${{ inputs.build_type }}/open3dstreamstatic.lib" (Join-Path $pluginLibWin64 "open3dstreamstatic.lib") -Force
+        foreach ($target in $moduleLibTargets) {
+          Copy-Item "vsbuild/src/${{ inputs.build_type }}/open3dstreamstatic.lib" (Join-Path $target "open3dstreamstatic.lib") -Force
+        }
+        Copy-Item "src/o3ds/*.h" (Join-Path $pluginLib "o3ds/include/o3ds") -Force
+        Copy-Item "src/o3ds_generated.h" (Join-Path $pluginLib "o3ds/include") -Force
+
+        # Legacy layout for transition
+        New-Item -ItemType Directory -Force -Path (Join-Path $pluginLib "include/o3ds") | Out-Null
+        New-Item -ItemType Directory -Force -Path (Join-Path $pluginLib "include/nng") | Out-Null
+        New-Item -ItemType Directory -Force -Path (Join-Path $pluginLib "include/flatbuffers") | Out-Null
+
+        Copy-Item "vsbuild/src/${{ inputs.build_type }}/open3dstreamstatic.lib" $pluginLib -ErrorAction SilentlyContinue
+        Copy-Item "thirdparty/build/nng/${{ inputs.build_type }}/nng.lib" $pluginLib -ErrorAction SilentlyContinue
+        Copy-Item "thirdparty/build/flatbuffers/${{ inputs.build_type }}/flatbuffers.lib" $pluginLib -ErrorAction SilentlyContinue
+        Copy-Item "thirdparty/build/nng/${{ inputs.build_type }}/nng.lib" (Join-Path $pluginLibWin64 "nng.lib") -Force -ErrorAction SilentlyContinue
+        Copy-Item "thirdparty/build/flatbuffers/${{ inputs.build_type }}/flatbuffers.lib" (Join-Path $pluginLibWin64 "flatbuffers.lib") -Force -ErrorAction SilentlyContinue
+        foreach ($target in $moduleLibTargets) {
+          Copy-Item "thirdparty/build/nng/${{ inputs.build_type }}/nng.lib" (Join-Path $target "nng.lib") -Force -ErrorAction SilentlyContinue
+          Copy-Item "thirdparty/build/flatbuffers/${{ inputs.build_type }}/flatbuffers.lib" (Join-Path $target "flatbuffers.lib") -Force -ErrorAction SilentlyContinue
+        }
+
+        Copy-Item "src/o3ds/*.h" (Join-Path $pluginLib "include/o3ds") -Force -ErrorAction SilentlyContinue
+        Copy-Item "src/o3ds_generated.h" (Join-Path $pluginLib "include") -Force -ErrorAction SilentlyContinue
+        if (Test-Path "usr/include/nng") { Copy-Item "usr/include/nng/*" (Join-Path $pluginLib "include/nng") -Recurse -Force -ErrorAction SilentlyContinue }
+        if (Test-Path "usr/include/flatbuffers") { Copy-Item "usr/include/flatbuffers/*" (Join-Path $pluginLib "include/flatbuffers") -Recurse -Force -ErrorAction SilentlyContinue }
+
+        # Helper to copy libs and includes from a given root
+        function Copy-Lib-And-Include {
+          param(
+            [string]$root,
+            [string[]]$libPatterns,
+            [string]$targetLibDir,
+            [string]$targetIncDir = (Join-Path $pluginLib "include")
+          )
+          if ([string]::IsNullOrWhiteSpace($root)) { return }
+          $libDir = Join-Path $root "lib"
+          $incDir = Join-Path $root "include"
+
+          if (Test-Path $incDir) {
+            Write-Host "Copying headers from $incDir to $targetIncDir"
+            New-Item -ItemType Directory -Force -Path $targetIncDir | Out-Null
+            Copy-Item (Join-Path $incDir "*") $targetIncDir -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+          if (Test-Path $libDir) {
+            Write-Host "Copying libraries to $targetLibDir"
+            New-Item -ItemType Directory -Force -Path $targetLibDir | Out-Null
+            foreach ($pat in $libPatterns) {
+              $libs = Get-ChildItem -Path $libDir -Recurse -Include $pat -ErrorAction SilentlyContinue
+              foreach ($lib in $libs) {
+                Write-Host "  Copying $($lib.Name)"
+                Copy-Item $lib.FullName $targetLibDir -Force -ErrorAction SilentlyContinue
+              }
+            }
+          }
+        }
+
+        # Determine patterns by OS for copying
+        $os = $env:RUNNER_OS
+        switch ($os) {
+          'Windows' { $patterns = @('*.lib','*.dll') }
+          'Linux'   { $patterns = @('*.a','*.so') }
+          'macOS'   { $patterns = @('*.a','*.dylib') }
+          default   { $patterns = @('*.lib','*.a','*.so','*.dylib') }
+        }
+
+        # Copy libdatachannel headers/libs to webrtc subdirectory (if downloaded)
+        # This overwrites the committed libraries with fresh downloads from releases
+        $ldcRoot = "${{ steps.fetch-ldc.outputs.ldc_root }}"
+        if (-not [string]::IsNullOrWhiteSpace($ldcRoot)) {
+          $webrtcDir = Join-Path $pluginLib "webrtc"
+          $webrtcIncDir = Join-Path $pluginLib "webrtc/include"
+          Copy-Lib-And-Include -root $ldcRoot -libPatterns $patterns -targetLibDir $webrtcDir -targetIncDir $webrtcIncDir
+          Copy-Lib-And-Include -root $ldcRoot -libPatterns $patterns -targetLibDir $pluginLibWin64 -targetIncDir $webrtcIncDir
+          foreach ($target in $moduleLibTargets) {
+            Copy-Lib-And-Include -root $ldcRoot -libPatterns $patterns -targetLibDir $target -targetIncDir $webrtcIncDir
+          }
+        }
+
+        # Copy opus headers/libs to ThirdParty root for future use
+        $opusRoot = "${{ steps.fetch-opus.outputs.opus_root }}"
+        if (-not [string]::IsNullOrWhiteSpace($opusRoot)) {
+          Copy-Lib-And-Include -root $opusRoot -libPatterns $patterns -targetLibDir $pluginLib
+          Copy-Lib-And-Include -root $opusRoot -libPatterns $patterns -targetLibDir $pluginLibWin64
+          foreach ($target in $moduleLibTargets) {
+            Copy-Lib-And-Include -root $opusRoot -libPatterns $patterns -targetLibDir $target
+          }
+        }
