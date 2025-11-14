@@ -12,18 +12,16 @@ public class Open3DShared : ModuleRules
         O3DBuildFlags.Apply(Target, this);
 
         var PluginRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", ".."));
-        var ThirdPartyIncludeDir = Path.Combine(PluginRoot, "ThirdParty", "Include");
-        if (Directory.Exists(ThirdPartyIncludeDir))
-        {
-            PublicIncludePaths.Add(ThirdPartyIncludeDir);
-        }
 
+        // Opus library and headers
         bool bWithOpus = false;
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
-            var OpusLib = Path.Combine(PluginRoot, "ThirdParty", "Lib", "Win64", "opus.lib");
+            var OpusIncludeDir = Path.Combine(PluginRoot, "ThirdParty", "opus", "include");
+            var OpusLib = Path.Combine(PluginRoot, "ThirdParty", "opus", "lib", "Win64", "opus.lib");
             if (File.Exists(OpusLib))
             {
+                PublicSystemIncludePaths.Add(OpusIncludeDir);
                 PublicAdditionalLibraries.Add(OpusLib);
                 bWithOpus = true;
             }
