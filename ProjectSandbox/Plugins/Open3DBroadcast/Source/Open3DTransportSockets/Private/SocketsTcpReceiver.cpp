@@ -105,21 +105,27 @@ int32 FO3DSocketsTcpReceiver::Poll()
 
 	if (Socket && State == EState::Connected)
 	{
-		TArray<uint8> Frame;
+		// Pre-allocate Frame buffer outside loop to avoid repeated allocations
+		// Reuse the same buffer for all 16 iterations
+		if (PayloadExtractBuffer.Num() == 0)
+		{
+			PayloadExtractBuffer.Reserve(512 * 1024); // Reserve but don't allocate yet
+		}
+
 		// Batch-process frames like NNG does (improves throughput during bursts)
 		while (FramesProcessed < 16)
 		{
-			if (!ReadFramed(Socket, State, ReceiveBuffer, BytesBuffered, ExpectedPayloadSize, Frame))
+			if (!ReadFramed(Socket, State, ReceiveBuffer, BytesBuffered, ExpectedPayloadSize, PayloadExtractBuffer))
 			{
 				break; // No more complete frames available
 			}
 
-			if (Frame.Num() > 0)
+			if (PayloadExtractBuffer.Num() > 0)
 			{
 				LastDataReceiveTime = FPlatformTime::Seconds();
 
 				// Process received payload through unified demultiplexer
-				if (ProcessReceivedPayload(Frame.GetData(), Frame.Num()))
+				if (ProcessReceivedPayload(PayloadExtractBuffer.GetData(), PayloadExtractBuffer.Num()))
 				{
 					++FramesProcessed;
 				}

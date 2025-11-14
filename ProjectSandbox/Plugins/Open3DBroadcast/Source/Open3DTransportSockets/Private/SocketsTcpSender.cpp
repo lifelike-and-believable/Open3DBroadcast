@@ -163,15 +163,19 @@ void FO3DSocketsTcpSender::Stop()
 
 bool FO3DSocketsTcpSender::Send(const O3DS::SubjectList& List)
 {
-	if (!ClientSocket)
+	// Fast path: check connection state without locks
+	if (!bConnected.Load())
 	{
 		// No client connected yet
 		return false;
 	}
 
-	std::vector<char> Buffer;
 	const double Timestamp = FPlatformTime::Seconds();
-	int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(Buffer, Timestamp);
+
+	// Reuse serialization buffer instead of allocating std::vector every frame
+	// This avoids malloc/free overhead and heap fragmentation at 60fps
+	SerializationScratch.clear();
+	int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(SerializationScratch, Timestamp);
 	if (BytesWritten <= 0)
 	{
 		UE_LOG(LogSocketsTcpSender, Verbose, TEXT("TCP sender failed to serialize SubjectList."));
@@ -180,11 +184,7 @@ bool FO3DSocketsTcpSender::Send(const O3DS::SubjectList& List)
 		return false;
 	}
 
-	// Prepare framed message (header + payload)
-	const int32 HeaderSize = O3DSockets::Tcp::FrameHeaderSize;
-	const int32 TotalSize = HeaderSize + BytesWritten;
-
-	if (!EnqueuePayload(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten))
+	if (!EnqueuePayload(reinterpret_cast<const uint8*>(SerializationScratch.data()), BytesWritten))
 	{
 		FScopeLock Lock(&StatsMutex);
 		Stats.DroppedFrames++;
@@ -287,6 +287,7 @@ void FO3DSocketsTcpSender::DestroySocket()
 		SocketSubsystem->DestroySocket(ClientSocket);
 	}
 	ClientSocket = nullptr;
+	bConnected = false;
 
 	if (ListenSocket && SocketSubsystem)
 	{
@@ -324,6 +325,7 @@ void FO3DSocketsTcpSender::TickAcceptClient()
 		Accepted->SetNoDelay(true);
 
 		ClientSocket = Accepted;
+		bConnected = true; // Set connection state for fast checks in Send()
 		UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP sender accepted client %s (sendBuf=%d, TCP_NODELAY=true)"), *PeerAddr->ToString(true), AppliedSize);
 	}
 }
@@ -492,6 +494,7 @@ uint32 FO3DSocketsTcpSender::RunWorker()
 				SocketSubsystem->DestroySocket(ClientSocket);
 			}
 			ClientSocket = nullptr;
+			bConnected = false; // Update connection state
 
 			FScopeLock StatsLock(&StatsMutex);
 			Stats.DroppedFrames++;

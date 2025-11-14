@@ -59,6 +59,7 @@ private:
 	EState State = EState::Disconnected;
 
 	TArray<uint8> ReceiveBuffer;
+	TArray<uint8> PayloadExtractBuffer; // Reused extraction buffer to avoid per-frame allocations
 	int32 BytesBuffered = 0;
 	int32 ExpectedPayloadSize = 0;
 

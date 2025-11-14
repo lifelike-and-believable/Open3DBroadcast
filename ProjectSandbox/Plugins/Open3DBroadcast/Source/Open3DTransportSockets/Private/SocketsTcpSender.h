@@ -8,6 +8,8 @@
 #include "HAL/CriticalSection.h"
 #include "Containers/Queue.h"
 
+#include <vector>
+
 class FSocket;
 class ISocketSubsystem;
 class FInternetAddr;
@@ -68,6 +70,7 @@ private:
 	ISocketSubsystem* SocketSubsystem = nullptr;
 	FSocket* ListenSocket = nullptr;
 	FSocket* ClientSocket = nullptr;
+	TAtomic<bool> bConnected{false}; // Connection state for fast checks without lock
 
 	FString BindHost;
 	int32 BindPort = 0;
@@ -79,6 +82,7 @@ private:
 	bool bAudioEncoderInitialized = false;
 	O3DAudio::FFrameEncoder AudioEncoder;
 	TArray<uint8> UnifiedAudioScratch;
+	mutable std::vector<char> SerializationScratch; // Reused buffer for mocap serialization to avoid per-frame allocations
 
 	// Async send queue
 	TQueue<FQueuedPayload, EQueueMode::Mpsc> SendQueue;
