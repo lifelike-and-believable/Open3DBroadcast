@@ -7,7 +7,18 @@
       "Bash(\"C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Build\\BatchFiles\\Build.bat\" UnrealEditor Win64 Development -Project=\"E:\\OtherProjects\\Open3DStream\\ProjectSandbox\\ProjectSandbox.uproject\" -Module=Open3DTransportSockets)",
       "Bash(\"C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Build\\BatchFiles\\Build.bat\" Open3DTransportSockets Win64 Development -Project=\"E:\\OtherProjects\\Open3DStream\\ProjectSandbox\\ProjectSandbox.uproject\")",
       "Bash(Select-String -Pattern \"Compile|Link|Error|Warning|succeeded|failed\")",
-      "Bash(Select-Object -Last 30)"
+      "Bash(Select-Object -Last 30)",
+      "Bash(\"C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Build\\BatchFiles\\Build.bat\" ProjectSandboxEditor Win64 Development \"E:\\OtherProjects\\Open3DStream\\ProjectSandbox\\ProjectSandbox.uproject\")",
+      "Bash(\"C:\\Program Files\\Epic Games\\UE_5.6\\Engine\\Build\\BatchFiles\\Build.bat\" ProjectSandboxEditor Win64 Development \"E:\\OtherProjects\\Open3DStream\\ProjectSandbox\\ProjectSandbox.uproject\")",
+      "Bash(\"C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Build\\BatchFiles\\Build.bat\" ProjectSandboxEditor Win64 Development \"E:\\OtherProjects\\Open3DStream\\ProjectSandbox\\ProjectSandbox.uproject\" -WaitMutex)",
+      "Bash(\"C:\\Program Files\\Epic Games\\UE_5.6\\Engine\\Build\\BatchFiles\\Build.bat\" ProjectSandboxEditor Win64 Development \"E:\\OtherProjects\\Open3DStream\\ProjectSandbox\\ProjectSandbox.uproject\" -WaitMutex)",
+      "Bash(dir /s /b \"ProjectSandbox\\Plugins\\Open3DBroadcast\")",
+      "Bash(powershell -Command \"Get-ChildItem -Path ''e:\\OtherProjects\\Open3DStream\\ProjectSandbox\\Plugins\\Open3DBroadcast'' -Directory | Select-Object Name\")",
+      "Bash(powershell -Command:*)",
+      "Bash(cat:*)",
+      "Bash(wc:*)",
+      "Bash(dir /b \"e:\\OtherProjects\\Open3DStream\\ProjectSandbox\\Plugins\\Open3DBroadcast\\Source\" 2)",
+      "Bash(nul)"
     ],
     "deny": [],
     "ask": []

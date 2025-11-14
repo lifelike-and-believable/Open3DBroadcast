@@ -12,9 +12,10 @@
 #include "Sender/NngSender.h"
 #include "Receiver/NngReceiver.h"
 
-#if WITH_EDITOR
 #include "O3DSenderComponent.h"
 #include "O3DReceiverSourceSettings.h"
+
+#if WITH_EDITOR
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Input/SEditableTextBox.h"
