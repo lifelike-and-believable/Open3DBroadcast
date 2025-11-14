@@ -8,7 +8,7 @@ struct FO3DTransportAudioConfig
     /** Toggle audio capture/sending. */
     bool bEnableAudio = false;
 
-    /** Preferred audio codec identifier (e.g. "pcm16", "opus"). Empty uses transport default. */
+    /** Preferred audio codec identifier (e.g. "PCM16", "Opus"). Empty uses transport default. */
     FString Codec;
 
     /** Target PCM sample rate the transport expects from the capture path. */

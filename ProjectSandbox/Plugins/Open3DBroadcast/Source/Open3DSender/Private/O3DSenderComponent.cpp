@@ -376,9 +376,9 @@ TArray<FName> UO3DSenderComponent::GetAvailableAudioInputDeviceOptions() const
 TArray<FName> UO3DSenderComponent::GetAvailableAudioCodecOptions() const
 {
 	TArray<FName> Options;
-	Options.Add(FName(TEXT("pcm16")));
+	Options.Add(FName(TEXT("PCM16")));
 #if O3D_WITH_OPUS
-	Options.Add(FName(TEXT("opus")));
+	Options.Add(FName(TEXT("Opus")));
 #endif
 	return Options;
 }

@@ -171,7 +171,7 @@ public:
 
 	/** Preferred audio codec for transport delivery. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio", meta = (EditCondition = "bEnableAudio", GetOptions = "GetAvailableAudioCodecOptions"))
-	FName AudioCodec = TEXT("pcm16");
+	FName AudioCodec = TEXT("PCM16");
 
 	/** Clamp morph target values to [0,1] before serialisation. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves")

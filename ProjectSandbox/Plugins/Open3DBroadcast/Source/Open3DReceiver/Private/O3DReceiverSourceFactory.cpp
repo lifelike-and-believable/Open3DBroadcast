@@ -288,9 +288,9 @@ private:
         AudioCodecOptions.Reset();
 
         AudioCodecOptions.Add(MakeShared<FName>(NAME_None));
-        AudioCodecOptions.Add(MakeShared<FName>(FName(TEXT("pcm16"))));
+        AudioCodecOptions.Add(MakeShared<FName>(FName(TEXT("PCM16"))));
 #if O3D_WITH_OPUS
-        AudioCodecOptions.Add(MakeShared<FName>(FName(TEXT("opus"))));
+        AudioCodecOptions.Add(MakeShared<FName>(FName(TEXT("Opus"))));
 #endif
 
         if (AudioCodecComboBox.IsValid())
