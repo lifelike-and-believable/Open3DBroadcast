@@ -1,6 +1,6 @@
 # Build Scripts and Tools
 
-This directory contains build scripts, test runners, utilities for developing and testing the Open3DStream Unreal Engine plugin, and CMake configurations for building prebuilt libraries.
+This directory contains build scripts, test runners, utilities for developing and testing Unreal Engine plugins, and CMake configurations for building prebuilt libraries.
 
 ## Directory Structure
 
@@ -12,12 +12,22 @@ Build/
     └── README.md     # Documentation for building O3DS core
 ```
 
+## Plugins Overview
+
+### Open3DStream Plugin
+Located at `plugins/unreal/Open3DStream/`, this plugin requires pre-built O3DS core libraries and uses the `build-plugin-core` composite action in CI/CD workflows.
+
+### Open3DBroadcast Plugin
+Located at `ProjectSandbox/Plugins/Open3DBroadcast/`, this plugin is **self-contained** with all third-party libraries pre-compiled and included. It requires no pre-build steps and builds directly with Unreal Engine's build system.
+
 ## Prebuilt Libraries
 
 The `o3ds-core/` directory contains the CMake configuration for building O3DS core as prebuilt static libraries. See [o3ds-core/README.md](o3ds-core/README.md) for details on:
 - Building O3DS core via GitHub Actions workflow
 - Downloading and committing artifacts
 - When to rebuild libraries
+
+**Note**: These prebuilt libraries are only needed for the Open3DStream plugin. The Open3DBroadcast plugin includes its own pre-compiled libraries and does not use this build system.
 
 ## Scripts
 
@@ -39,7 +49,7 @@ Verifies Unreal Engine installation.
 ### Plugin Linking
 
 #### `Link-PluginIntoSandbox.ps1` (Windows)
-Creates junction links from the plugin to ProjectSandbox.
+Creates junction links from the Open3DStream plugin to ProjectSandbox.
 
 **Usage:**
 ```powershell
@@ -51,8 +61,10 @@ Creates junction links from the plugin to ProjectSandbox.
 - Removes existing links if present
 - Automatically determines repository paths
 
+**Note**: This script is for the Open3DStream plugin only. The Open3DBroadcast plugin is already located at `ProjectSandbox/Plugins/Open3DBroadcast/` and doesn't need linking.
+
 #### `link_plugin_into_sandbox.sh` (Linux/Mac)
-Creates a symbolic link from the plugin to ProjectSandbox.
+Creates a symbolic link from the Open3DStream plugin to ProjectSandbox.
 
 **Usage:**
 ```bash
@@ -64,9 +76,9 @@ Creates a symbolic link from the plugin to ProjectSandbox.
 ### Building
 
 #### `Build-Plugin.ps1`
-Builds the plugin using Unreal Automation Tool (UAT).
+Builds any Unreal plugin using Unreal Automation Tool (UAT). Works with both Open3DStream and Open3DBroadcast plugins.
 
-**Usage:**
+**Usage for Open3DStream:**
 ```powershell
 .\Build\Scripts\Build-Plugin.ps1 `
   -UEPath "C:\Program Files\Epic Games\UE_5.4" `
@@ -74,6 +86,16 @@ Builds the plugin using Unreal Automation Tool (UAT).
   -OutDir "Artifacts\Win64" `
   -TargetPlatforms @("Win64") `
   -Configuration "Development"
+```
+
+**Usage for Open3DBroadcast:**
+```powershell
+.\Build\Scripts\Build-Plugin.ps1 `
+  -UEPath "C:\Program Files\Epic Games\UE_5.6" `
+  -PluginUPluginPath "ProjectSandbox\Plugins\Open3DBroadcast\Open3DBroadcast.uplugin" `
+  -OutDir "Artifacts\Open3DBroadcast" `
+  -TargetPlatforms @("Win64") `
+  -Configuration "Shipping"
 ```
 
 **Parameters:**

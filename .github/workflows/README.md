@@ -1,15 +1,28 @@
 # Unreal Plugin CI/CD Workflows
 
-This directory contains GitHub Actions workflows for building, testing, and releasing the Open3DStream Unreal Engine plugin.
+This directory contains GitHub Actions workflows for building, testing, and releasing Unreal Engine plugins in this repository.
 
 ## Overview
 
-The CI/CD setup consists of four main workflows:
+### Open3DStream Plugin Workflows
+
+The CI/CD setup for the Open3DStream plugin consists of four main workflows:
 
 1. **Unreal Plugin CI** (`unreal-plugin-ci.yml`) - Standard CI for PRs and pushes
 2. **Unreal Plugin Agent CI** (`unreal-plugin-agent-ci.yml`) - Fast iteration for development branches
 3. **Unreal Plugin Nightly** (`unreal-plugin-nightly.yml`) - Scheduled comprehensive testing
 4. **Unreal Plugin Release** (`unreal-plugin-release.yml`) - Release builds and publishing
+
+### Open3DBroadcast Plugin Workflows
+
+The CI/CD setup for the self-contained Open3DBroadcast plugin consists of four simplified workflows:
+
+1. **Open3DBroadcast Plugin CI** (`open3dbroadcast-plugin-ci.yml`) - Standard CI for PRs and pushes
+2. **Open3DBroadcast Plugin Tests** (`open3dbroadcast-plugin-test.yml`) - Feature branch testing
+3. **Open3DBroadcast Plugin Nightly** (`open3dbroadcast-plugin-nightly.yml`) - Scheduled nightly builds
+4. **Open3DBroadcast Plugin Release** (`open3dbroadcast-plugin-release.yml`) - Release builds and publishing
+
+**Key Difference**: Open3DBroadcast workflows are simpler as the plugin is self-contained with all third-party libraries pre-compiled and included in the plugin directory. No pre-build steps or external dependencies are required.
 
 ## Prerequisites
 
@@ -289,6 +302,69 @@ To enable verbose logging, add this to any workflow step:
 3. **Review release notes**
    - Auto-generated notes can be edited after creation
 
+## Open3DBroadcast Plugin Workflows
+
+The Open3DBroadcast plugin uses simplified workflows because it's fully self-contained:
+
+### What's Different
+
+**No Pre-Build Steps Required**:
+- All third-party libraries are pre-compiled and included in the plugin
+- No CMake builds or external downloads needed
+- Faster workflow execution (5-10 minutes saved per run)
+
+**Self-Contained Structure**:
+```
+ProjectSandbox/Plugins/Open3DBroadcast/
+├── ThirdParty/
+│   ├── open3dstream/
+│   │   ├── include/
+│   │   └── lib/Win64/open3dstreamstatic.lib
+│   ├── flatbuffers/
+│   │   ├── include/
+│   │   └── lib/Win64/flatbuffers.lib
+│   └── opus/
+│       ├── include/
+│       └── lib/Win64/opus.lib
+└── Source/
+    └── Open3DTransportNNG/
+        └── ThirdParty/nng/
+            └── lib/Win64/nng.lib
+```
+
+### Workflow Triggers
+
+| Workflow | Triggers | Configuration |
+|----------|----------|---------------|
+| **CI** | PRs to `develop`/`main`, pushes to `develop`/`main` | Development |
+| **Tests** | Pushes to `feature/*`, `bugfix/*`, `hotfix/*` | Development |
+| **Nightly** | Daily at 3 AM UTC | Shipping |
+| **Release** | Tags matching `open3dbroadcast-v*.*.*` | Shipping |
+
+### Version Tags
+
+For Open3DBroadcast releases, use the format:
+```bash
+git tag open3dbroadcast-v1.0.0
+git push origin open3dbroadcast-v1.0.0
+```
+
+This will automatically:
+1. Update the plugin descriptor version
+2. Build in Shipping configuration
+3. Create a GitHub release with installation instructions
+4. Upload the packaged plugin as a release asset
+
+### Path Filters
+
+Open3DBroadcast workflows only trigger on changes to:
+- `ProjectSandbox/Plugins/Open3DBroadcast/**`
+- `ProjectSandbox/Source/**`
+- `Build/**`
+- `.github/workflows/open3dbroadcast-*.yml`
+
+Changes to core library sources (`src/`, `thirdparty/`) do NOT trigger these workflows since the plugin is self-contained.
+
 ## Migration from Template
 
 These workflows were adapted from [ue-plugin-template](https://github.com/lifelike-and-believable/ue-plugin-template) with the following changes:
@@ -298,6 +374,7 @@ These workflows were adapted from [ue-plugin-template](https://github.com/lifeli
 - ✅ Updated plugin name references
 - ✅ Configured for Open3DStream project structure
 - ✅ Maintained compatibility with existing C++ library builds
+- ✅ Created simplified Open3DBroadcast workflows for self-contained plugin
 
 ## Additional Resources
 
