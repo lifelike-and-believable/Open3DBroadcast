@@ -52,14 +52,14 @@ public class Open3DReceiver : ModuleRules
             "Core",
             "CoreUObject",
             "Engine",
+			"LiveLink",
+            "LiveLinkAnimationCore",
             "LiveLinkInterface",
             "Open3DShared"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
-            "LiveLink",
-            "LiveLinkAnimationCore",
             "Projects",
             "Slate",
             "SlateCore"

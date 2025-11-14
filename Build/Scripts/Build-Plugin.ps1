@@ -46,6 +46,7 @@ function Invoke-UBTBuild {
     "-Project=$ProjectPath",
     "-WaitMutex",
     "-NoHotReload",
+    "-LiveCoding=0",
     "-log=$logFile"
   )
 
@@ -66,6 +67,7 @@ function Invoke-ProjectSandboxPackaging {
     [string[]]$AdditionalPluginDirectories
   )
 
+  try {
   $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
   $sandboxUProject = Join-Path $repoRoot "ProjectSandbox\ProjectSandbox.uproject"
   if (!(Test-Path -LiteralPath $sandboxUProject)) {
@@ -88,11 +90,8 @@ function Invoke-ProjectSandboxPackaging {
 
   $pluginRoot = Split-Path -Parent $PluginDescriptor
   $pluginName = [IO.Path]::GetFileNameWithoutExtension($PluginDescriptor)
-  $destPluginDir = Join-Path $hostPluginsDir $pluginName
-  Write-Host "Packaging plugin contents into $destPluginDir"
-  Copy-Item -LiteralPath $pluginRoot -Destination $destPluginDir -Recurse -Force
 
-  $additionalPlugins = @()
+  $resolvedAdditionalDirs = @()
   foreach ($dir in $AdditionalPluginDirectories) {
     try {
       $resolvedDir = (Resolve-Path -LiteralPath $dir).Path
@@ -100,25 +99,141 @@ function Invoke-ProjectSandboxPackaging {
       Write-Warning "Additional plugin directory '$dir' cannot be resolved. Skipping."
       continue
     }
-    $descriptor = Get-ChildItem -LiteralPath $resolvedDir -Filter *.uplugin -File | Select-Object -First 1
+    $resolvedAdditionalDirs += $resolvedDir
+  }
+
+  # Helper lookups for locating plugin folders when satisfying dependencies
+  $searchRoots = @()
+  $repoPluginRoots = @(
+    (Join-Path $repoRoot "plugins"),
+    (Join-Path $repoRoot "ProjectSandbox\Plugins")
+  )
+  foreach ($root in $repoPluginRoots) {
+    if (Test-Path -LiteralPath $root) { $searchRoots += $root }
+  }
+  $searchRoots += $resolvedAdditionalDirs
+  $enginePluginRoots = @(
+    (Join-Path $EngineRoot "Engine\Plugins"),
+    (Join-Path $EngineRoot "Engine\Restricted")
+  )
+  foreach ($root in $enginePluginRoots) {
+    if (Test-Path -LiteralPath $root) { $searchRoots += $root }
+  }
+
+  $packagedPlugins = @{}
+  $resolvedPluginCache = @{}
+  $pluginQueue = New-Object System.Collections.Queue
+
+  function Add-PackagedPlugin {
+    param(
+      [Parameter(Mandatory=$true)][string]$PluginName,
+      [Parameter(Mandatory=$true)][string]$SourceDir,
+      [string]$HostPluginsDir,
+      [System.Collections.IDictionary]$PackagedPlugins,
+      [System.Collections.Queue]$PluginQueue
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PluginName)) {
+      throw "Cannot package a plugin with an empty name."
+    }
+    if ([string]::IsNullOrWhiteSpace($SourceDir)) {
+      throw "Cannot package plugin '$PluginName' because its source directory was not resolved."
+    }
+    if ($PackagedPlugins.ContainsKey($PluginName)) {
+      return
+    }
+
+    $destDir = Join-Path $HostPluginsDir $PluginName
+    Write-Host "Packaging plugin '$PluginName' from '$SourceDir'"
+    Copy-Item -LiteralPath $SourceDir -Destination $destDir -Recurse -Force
+    $descriptorPath = Join-Path $destDir "$PluginName.uplugin"
+    $PackagedPlugins[$PluginName] = @{
+      Path = $destDir
+      Descriptor = $descriptorPath
+    }
+    $PluginQueue.Enqueue($PluginName)
+  }
+
+  function Get-PluginDependencies {
+    param([string]$DescriptorPath)
+
+    if (!(Test-Path -LiteralPath $DescriptorPath)) {
+      Write-Warning "Descriptor '$DescriptorPath' not found while evaluating dependencies."
+      return @()
+    }
+
+    try {
+      $content = Get-Content -LiteralPath $DescriptorPath -Raw | ConvertFrom-Json
+    } catch {
+      Write-Warning "Failed to parse descriptor '$DescriptorPath': $_"
+      return @()
+    }
+
+    if (-not $content.Plugins) {
+      return @()
+    }
+
+    return $content.Plugins | Where-Object {
+      $_ -and $_.Enabled -ne $false -and ![string]::IsNullOrWhiteSpace($_.Name)
+    } | Select-Object -ExpandProperty Name
+  }
+
+  function Find-PluginSourceDir {
+    param(
+      [string]$PluginName,
+      [string[]]$SearchRoots,
+      [System.Collections.IDictionary]$Cache
+    )
+
+    if ($Cache.ContainsKey($PluginName)) {
+      return $Cache[$PluginName]
+    }
+
+    foreach ($root in $SearchRoots) {
+      if (!(Test-Path -LiteralPath $root)) {
+        continue
+      }
+      $match = Get-ChildItem -LiteralPath $root -Recurse -Filter "$PluginName.uplugin" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($match) {
+        $Cache[$PluginName] = $match.Directory.FullName
+        return $match.Directory.FullName
+      }
+    }
+
+    $Cache[$PluginName] = $null
+    return $null
+  }
+
+  Add-PackagedPlugin -PluginName $pluginName -SourceDir $pluginRoot -HostPluginsDir $hostPluginsDir -PackagedPlugins $packagedPlugins -PluginQueue $pluginQueue
+
+  foreach ($dir in $resolvedAdditionalDirs) {
+    $descriptor = Get-ChildItem -LiteralPath $dir -Filter *.uplugin -File | Select-Object -First 1
     if (-not $descriptor) {
-      Write-Warning "No .uplugin descriptor found under '$resolvedDir'. Skipping."
+      Write-Warning "No .uplugin descriptor found under '$dir'. Skipping."
       continue
     }
-    $name = [IO.Path]::GetFileNameWithoutExtension($descriptor.FullName)
-    $additionalPlugins += @{ Name = $name; Path = $descriptor.Directory.FullName }
+    $additionalName = [IO.Path]::GetFileNameWithoutExtension($descriptor.FullName)
+    Add-PackagedPlugin -PluginName $additionalName -SourceDir $descriptor.Directory.FullName -HostPluginsDir $hostPluginsDir -PackagedPlugins $packagedPlugins -PluginQueue $pluginQueue
   }
 
-  foreach ($plugin in $additionalPlugins) {
-    $dst = Join-Path $hostPluginsDir $plugin.Name
-    Write-Host "Packaging additional plugin '$($plugin.Name)'"
-    Copy-Item -LiteralPath $plugin.Path -Destination $dst -Recurse -Force
+  while ($pluginQueue.Count -gt 0) {
+    $current = $pluginQueue.Dequeue()
+    $descriptorPath = $packagedPlugins[$current].Descriptor
+    $dependencies = Get-PluginDependencies -DescriptorPath $descriptorPath
+    foreach ($dep in $dependencies) {
+      if ($packagedPlugins.ContainsKey($dep)) {
+        continue
+      }
+      $source = Find-PluginSourceDir -PluginName $dep -SearchRoots $searchRoots -Cache $resolvedPluginCache
+      if ($source) {
+        Add-PackagedPlugin -PluginName $dep -SourceDir $source -HostPluginsDir $hostPluginsDir -PackagedPlugins $packagedPlugins -PluginQueue $pluginQueue
+      } else {
+        Write-Warning "Dependency plugin '$dep' could not be located. The packaged project may fail to launch if this plugin is required."
+      }
+    }
   }
 
-  $pluginEntries = @(@{ Name = $pluginName; Enabled = $true })
-  foreach ($plugin in $additionalPlugins) {
-    $pluginEntries += @{ Name = $plugin.Name; Enabled = $true }
-  }
+  $pluginEntries = $packagedPlugins.Keys | Sort-Object | ForEach-Object { @{ Name = $_; Enabled = $true } }
 
   $hostUproject = @{
     FileVersion = 3
@@ -133,6 +248,13 @@ function Invoke-ProjectSandboxPackaging {
 
   Write-Host "[OK] Fallback packaging completed at $OutDir"
   return 0
+  } catch {
+    Write-Error "Fallback packaging failed: $($_.Exception.Message)"
+    if ($_.InvocationInfo) {
+      Write-Host $_.InvocationInfo.PositionMessage
+    }
+    throw
+  }
 }
 
 # Sanitize and normalize inputs
