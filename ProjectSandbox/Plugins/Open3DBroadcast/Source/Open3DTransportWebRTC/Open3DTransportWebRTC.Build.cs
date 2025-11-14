@@ -25,10 +25,8 @@ public class Open3DTransportWebRTC : ModuleRules
         {
             throw new BuildException($"Open3DTransportWebRTC does not define third-party binaries for platform {Target.Platform} yet.");
         }
-        var PluginThirdPartyLibDir = Path.Combine(PluginDirectory, "ThirdParty", "Lib", platformSubdir);
-        var ModuleThirdPartyLibDir = Path.Combine(ModuleDirectory, "ThirdParty", "Lib", platformSubdir);
-
-        var opusLibPath = Path.Combine(PluginThirdPartyLibDir, "opus.lib");
+        // Opus library
+        var opusLibPath = Path.Combine(PluginDirectory, "ThirdParty", "opus", "lib", platformSubdir, "opus.lib");
         if (!File.Exists(opusLibPath))
         {
             throw new BuildException($"Missing required Open3DTransportWebRTC library 'opus.lib' at '{opusLibPath}'.");

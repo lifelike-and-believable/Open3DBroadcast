@@ -26,24 +26,18 @@ public class Open3DTransportNNG : ModuleRules
             throw new BuildException($"Open3DTransportNNG does not define third-party binaries for platform {Target.Platform} yet.");
         }
 
-        var moduleThirdPartyRoot = Path.Combine(ModuleDirectory, "ThirdParty");
-        var moduleThirdPartyIncludeDir = Path.Combine(moduleThirdPartyRoot, "Include");
-        if (Directory.Exists(moduleThirdPartyIncludeDir))
+        var moduleThirdPartyRoot = Path.Combine(ModuleDirectory, "ThirdParty", "nng");
+
+        // NNG headers
+        var nngIncludeDir = Path.Combine(moduleThirdPartyRoot, "include");
+        if (!Directory.Exists(nngIncludeDir))
         {
-            PublicSystemIncludePaths.Add(moduleThirdPartyIncludeDir);
+            throw new BuildException($"Missing NNG headers at '{nngIncludeDir}'.");
         }
+        PublicSystemIncludePaths.Add(nngIncludeDir);
 
-        var repoRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "..", "..", ".."));
-        var sharedNngIncludeDir = Path.Combine(repoRoot, "thirdparty", "nng", "include");
-        if (!Directory.Exists(sharedNngIncludeDir))
-        {
-            throw new BuildException($"Missing NNG headers at '{sharedNngIncludeDir}'.");
-        }
-        PublicSystemIncludePaths.Add(sharedNngIncludeDir);
-
-        var ModuleThirdPartyLibDir = Path.Combine(moduleThirdPartyRoot, "Lib", platformSubdir);
-
-        var nngLibPath = Path.Combine(ModuleThirdPartyLibDir, "nng.lib");
+        // NNG library
+        var nngLibPath = Path.Combine(moduleThirdPartyRoot, "lib", platformSubdir, "nng.lib");
         if (!File.Exists(nngLibPath))
         {
             throw new BuildException($"Missing required Open3DTransportNNG library 'nng.lib' at '{nngLibPath}'.");

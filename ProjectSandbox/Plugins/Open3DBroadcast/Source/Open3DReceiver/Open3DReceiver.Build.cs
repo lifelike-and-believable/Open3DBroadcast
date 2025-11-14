@@ -11,12 +11,15 @@ public class Open3DReceiver : ModuleRules
 
         O3DBuildFlags.Apply(Target, this, bRequireReceiver: true);
 
-        var RepoRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "..", "..", ".."));
-        PublicIncludePaths.AddRange(new string[]
-        {
-            Path.Combine(RepoRoot, "src"),
-            Path.Combine(RepoRoot, "thirdparty", "flatbuffers", "include")
-        });
+        var PluginRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", ".."));
+
+        // Open3DStream headers and library
+        var Open3DStreamIncludeDir = Path.Combine(PluginRoot, "ThirdParty", "open3dstream", "include");
+        PublicIncludePaths.Add(Open3DStreamIncludeDir);
+
+        // Flatbuffers headers
+        var FlatbuffersIncludeDir = Path.Combine(PluginRoot, "ThirdParty", "flatbuffers", "include");
+        PublicSystemIncludePaths.Add(FlatbuffersIncludeDir);
 
         string platformSubdir;
         if (Target.Platform == UnrealTargetPlatform.Win64)
@@ -28,38 +31,21 @@ public class Open3DReceiver : ModuleRules
             throw new BuildException($"Open3DReceiver does not define third-party binaries for platform {Target.Platform} yet.");
         }
 
-        var PluginThirdPartyLibDir = Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "Lib", platformSubdir);
-        var ModuleThirdPartyLibDir = Path.Combine(ModuleDirectory, "ThirdParty", "Lib", platformSubdir);
+        // Link libraries
+        var Open3DStreamLib = Path.Combine(PluginRoot, "ThirdParty", "open3dstream", "lib", platformSubdir, "open3dstreamstatic.lib");
+        var FlatbuffersLib = Path.Combine(PluginRoot, "ThirdParty", "flatbuffers", "lib", platformSubdir, "flatbuffers.lib");
 
-        string[] commonLibs =
+        if (!File.Exists(Open3DStreamLib))
         {
-            "open3dstreamstatic.lib",
-            "flatbuffers.lib"
-        };
-
-        string[] moduleLibs =
+            throw new BuildException($"Missing required library 'open3dstreamstatic.lib' at '{Open3DStreamLib}'.");
+        }
+        if (!File.Exists(FlatbuffersLib))
         {
-        };
-
-        foreach (var lib in commonLibs)
-        {
-            var fullPath = Path.Combine(PluginThirdPartyLibDir, lib);
-            if (!File.Exists(fullPath))
-            {
-                throw new BuildException($"Missing required common library '{lib}' at '{fullPath}'.");
-            }
-            PublicAdditionalLibraries.Add(fullPath);
+            throw new BuildException($"Missing required library 'flatbuffers.lib' at '{FlatbuffersLib}'.");
         }
 
-        foreach (var lib in moduleLibs)
-        {
-            var fullPath = Path.Combine(ModuleThirdPartyLibDir, lib);
-            if (!File.Exists(fullPath))
-            {
-                throw new BuildException($"Missing required Open3DReceiver library '{lib}' at '{fullPath}'.");
-            }
-            PublicAdditionalLibraries.Add(fullPath);
-        }
+        PublicAdditionalLibraries.Add(Open3DStreamLib);
+        PublicAdditionalLibraries.Add(FlatbuffersLib);
 
         PublicDependencyModuleNames.AddRange(new string[]
         {
