@@ -25,15 +25,6 @@ namespace
 {
 FText GetSenderTransportDisplayName(FName TransportName)
 {
-    if (TransportName == FName(TEXT("sockets.tcp")))
-    {
-        return LOCTEXT("SenderTransportDisplayTcp", "TCP");
-    }
-    if (TransportName == FName(TEXT("sockets.udp")))
-    {
-        return LOCTEXT("SenderTransportDisplayUdp", "UDP");
-    }
-
     return FText::FromName(TransportName);
 }
 } // namespace
