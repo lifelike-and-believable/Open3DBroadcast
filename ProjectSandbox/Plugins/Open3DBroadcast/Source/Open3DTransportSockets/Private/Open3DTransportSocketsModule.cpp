@@ -23,8 +23,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogOpen3DTransportSocketsModule, Log, All);
 
 namespace
 {
-	constexpr TCHAR SocketsTcpName[] = TEXT("sockets.tcp");
-	constexpr TCHAR SocketsUdpName[] = TEXT("sockets.udp");
+	constexpr TCHAR SocketsTcpName[] = TEXT("TCP");
+	constexpr TCHAR SocketsUdpName[] = TEXT("UDP");
 }
 
 class FOpen3DTransportSocketsModule : public IModuleInterface

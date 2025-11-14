@@ -272,8 +272,8 @@ class FOpen3DTransportLoopbackModule : public IModuleInterface
 public:
 	virtual void StartupModule() override
 	{
-		O3DTransport::RegisterSender(TEXT("loopback"), []() { return MakeShared<FO3DLoopbackSender>(); });
-		O3DTransport::RegisterReceiver(TEXT("loopback"), []() { return MakeShared<FO3DLoopbackReceiver>(); });
+		O3DTransport::RegisterSender(TEXT("Loopback"), []() { return MakeShared<FO3DLoopbackSender>(); });
+		O3DTransport::RegisterReceiver(TEXT("Loopback"), []() { return MakeShared<FO3DLoopbackReceiver>(); });
 
 		FO3DReceiverTransportCustomization LoopbackCustomization;
 		LoopbackCustomization.ConfigureTransport = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
@@ -288,6 +288,7 @@ public:
 				ChannelName = TEXT("default");
 			}
 
+			Config.Transport = TEXT("Loopback");
 			Config.StreamId = ChannelName;
 			Config.Uri = FString::Printf(TEXT("loopback://%s?role=sub"), *ChannelName);
 			Config.AdvancedParams.Add(LoopbackReceiver::ChannelOptionKey, ChannelName);
@@ -306,7 +307,7 @@ public:
 		.OnSubmit(OnSubmit);
 		};
 #endif // WITH_EDITOR
-		O3DReceiver::RegisterTransportCustomization(TEXT("loopback"), MoveTemp(LoopbackCustomization));
+		O3DReceiver::RegisterTransportCustomization(TEXT("Loopback"), MoveTemp(LoopbackCustomization));
 
 		FO3DSenderTransportCustomization LoopbackSenderCustomization;
 		LoopbackSenderCustomization.ConfigureTransport = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
@@ -317,7 +318,7 @@ public:
 				ChannelName = TEXT("default");
 			}
 
-			Config.Transport = TEXT("loopback");
+			Config.Transport = TEXT("Loopback");
 			Config.Role = TEXT("sender");
 			Config.StreamId = ChannelName;
 			Config.Uri = FString::Printf(TEXT("loopback://%s?role=pub"), *ChannelName);
@@ -340,17 +341,17 @@ public:
 				.OnConfigChanged(OnConfigChanged);
 		};
 #endif // WITH_EDITOR
-		O3DSender::RegisterTransportCustomization(TEXT("loopback"), MoveTemp(LoopbackSenderCustomization));
+		O3DSender::RegisterTransportCustomization(TEXT("Loopback"), MoveTemp(LoopbackSenderCustomization));
 
 		UE_LOG(LogOpen3DTransportLoopbackModule, Log, TEXT("Open3D loopback transport module started."));
 	}
 
 	virtual void ShutdownModule() override
 	{
-		O3DTransport::UnregisterSender(TEXT("loopback"));
-		O3DTransport::UnregisterReceiver(TEXT("loopback"));
-		O3DReceiver::UnregisterTransportCustomization(TEXT("loopback"));
-		O3DSender::UnregisterTransportCustomization(TEXT("loopback"));
+		O3DTransport::UnregisterSender(TEXT("Loopback"));
+		O3DTransport::UnregisterReceiver(TEXT("Loopback"));
+		O3DReceiver::UnregisterTransportCustomization(TEXT("Loopback"));
+		O3DSender::UnregisterTransportCustomization(TEXT("Loopback"));
 
 		UE_LOG(LogOpen3DTransportLoopbackModule, Log, TEXT("Open3D loopback transport module shut down."));
 	}

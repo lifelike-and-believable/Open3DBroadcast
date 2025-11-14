@@ -839,13 +839,13 @@ class FOpen3DTransportNNGModule : public IModuleInterface
 public:
 	virtual void StartupModule() override
 	{
-		O3DTransport::RegisterSender(TEXT("nng"), []() { return MakeShared<FO3DNngSender>(); });
-		O3DTransport::RegisterReceiver(TEXT("nng"), []() { return MakeShared<FO3DNngReceiver>(); });
+		O3DTransport::RegisterSender(TEXT("NNG"), []() { return MakeShared<FO3DNngSender>(); });
+		O3DTransport::RegisterReceiver(TEXT("NNG"), []() { return MakeShared<FO3DNngReceiver>(); });
 
 		FO3DSenderTransportCustomization SenderCustomization;
 		SenderCustomization.ConfigureTransport = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
 		{
-			Config.Transport = TEXT("nng");
+			Config.Transport = TEXT("NNG");
 
 			const FString ModeString = NNGSenderConfig::GetOption(SenderComponent, O3DNNG::ModeOptionKey);
 			const FString RoleString = NNGSenderConfig::GetOption(SenderComponent, O3DNNG::RoleOptionKey);
@@ -910,12 +910,12 @@ public:
 				.OnConfigChanged(OnConfigChanged);
 		};
 #endif // WITH_EDITOR
-		O3DSender::RegisterTransportCustomization(TEXT("nng"), MoveTemp(SenderCustomization));
+		O3DSender::RegisterTransportCustomization(TEXT("NNG"), MoveTemp(SenderCustomization));
 
 		FO3DReceiverTransportCustomization ReceiverCustomization;
 		ReceiverCustomization.ConfigureTransport = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
 		{
-			Config.Transport = TEXT("nng");
+			Config.Transport = TEXT("NNG");
 
 			const FString ModeString = NNGReceiverConfig::GetOption(Settings, O3DNNG::ModeOptionKey);
 			const FString RoleString = NNGReceiverConfig::GetOption(Settings, O3DNNG::RoleOptionKey);
@@ -1003,17 +1003,17 @@ public:
 		};
 #endif // WITH_EDITOR
 
-		O3DReceiver::RegisterTransportCustomization(TEXT("nng"), MoveTemp(ReceiverCustomization));
+		O3DReceiver::RegisterTransportCustomization(TEXT("NNG"), MoveTemp(ReceiverCustomization));
 
 		UE_LOG(LogOpen3DTransportNNGModule, Log, TEXT("Open3D NNG transport module started."));
 	}
 
 	virtual void ShutdownModule() override
 	{
-		O3DTransport::UnregisterSender(TEXT("nng"));
-		O3DTransport::UnregisterReceiver(TEXT("nng"));
-		O3DSender::UnregisterTransportCustomization(TEXT("nng"));
-		O3DReceiver::UnregisterTransportCustomization(TEXT("nng"));
+		O3DTransport::UnregisterSender(TEXT("NNG"));
+		O3DTransport::UnregisterReceiver(TEXT("NNG"));
+		O3DSender::UnregisterTransportCustomization(TEXT("NNG"));
+		O3DReceiver::UnregisterTransportCustomization(TEXT("NNG"));
 
 		UE_LOG(LogOpen3DTransportNNGModule, Log, TEXT("Open3D NNG transport module shut down."));
 	}
