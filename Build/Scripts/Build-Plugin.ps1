@@ -75,7 +75,8 @@ function Invoke-ProjectSandboxPackaging {
   }
 
   foreach ($platform in $TargetPlatforms) {
-    Invoke-UBTBuild -EngineRoot $EngineRoot -Target "ProjectSandboxEditor" -Platform $platform -Configuration $Configuration -ProjectPath $sandboxUProject
+    # Editor targets must be built in Development configuration
+    Invoke-UBTBuild -EngineRoot $EngineRoot -Target "ProjectSandboxEditor" -Platform $platform -Configuration "Development" -ProjectPath $sandboxUProject
     Invoke-UBTBuild -EngineRoot $EngineRoot -Target "ProjectSandbox" -Platform $platform -Configuration $Configuration -ProjectPath $sandboxUProject
   }
 
