@@ -5,14 +5,6 @@ on:
     - cron: "0 3 * * *"  # 3 AM UTC nightly
   workflow_dispatch:
     inputs:
-      build_configuration:
-        description: "CMake build configuration"
-        required: false
-        default: RelWithDebInfo
-        type: choice
-        options:
-          - RelWithDebInfo
-          - Release
       run_editor_tests:
         description: "Run Unreal automation tests"
         required: false
@@ -30,32 +22,45 @@ concurrency:
 env:
   UE_ROOT: 'C:\\Program Files\\Epic Games\\UE_5.6'
   PLUGIN_NAME: 'Open3DBroadcast'
+  PLUGIN_PATH: 'ProjectSandbox/Plugins/Open3DBroadcast'
 
 jobs:
   nightly-build:
     runs-on: [ self-hosted, ue5, windows ]
 
     steps:
-      - name: Build plugin core (composite)
-        id: core
-        uses: ./.github/actions/build-plugin-core
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          ue_root: ${{ env.UE_ROOT }}
-          plugin_name: ${{ env.PLUGIN_NAME }}
-          plugin_relative_path: ProjectSandbox/Plugins/Open3DBroadcast
-          build_type: ${{ inputs.build_configuration || 'RelWithDebInfo' }}
-          enable_webrtc: true
+          fetch-depth: 0
+          lfs: true
 
-      - name: Run ctest
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup UE
         shell: pwsh
         run: |
-          if (-not (Test-Path 'vsbuild')) { throw 'vsbuild directory not found for ctest.' }
-          Push-Location vsbuild
-          try {
-            ctest -C ${{ inputs.build_configuration || 'RelWithDebInfo' }} --output-on-failure
-          } finally {
-            Pop-Location
+          & .\Build\Scripts\Setup-UE.ps1 -UEPath "${{ env.UE_ROOT }}"
+
+      - name: Resolve plugin paths
+        id: paths
+        shell: powershell
+        run: |
+          $pluginDir = Join-Path $PWD "${{ env.PLUGIN_PATH }}"
+          $upluginPath = Join-Path $pluginDir "${{ env.PLUGIN_NAME }}.uplugin"
+          
+          if (!(Test-Path -LiteralPath $pluginDir)) {
+            throw "Plugin directory not found: $pluginDir"
           }
+          if (!(Test-Path -LiteralPath $upluginPath)) {
+            throw "Plugin .uplugin file not found: $upluginPath"
+          }
+          
+          "plugin_dir=$pluginDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "uplugin_path=$upluginPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Plugin directory: $pluginDir"
+          Write-Host "Plugin file: $upluginPath"
 
       - name: Build Open3DBroadcast plugin (Win64)
         shell: powershell
@@ -63,7 +68,7 @@ jobs:
           $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
           & .\Build\Scripts\Build-Plugin.ps1 `
             -UEPath "$env:UE_ROOT" `
-            -PluginUPluginPath "${{ steps.core.outputs.uplugin_path }}" `
+            -PluginUPluginPath "${{ steps.paths.outputs.uplugin_path }}" `
             -OutDir "$pkg" `
             -TargetPlatforms @("Win64") `
             -Configuration "Shipping"

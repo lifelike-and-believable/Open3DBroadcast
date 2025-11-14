@@ -11,14 +11,6 @@ on:
         description: 'Version tag (e.g., open3dbroadcast-v1.0.0)'
         required: true
         type: string
-      build_configuration:
-        description: 'CMake build configuration'
-        required: false
-        default: Release
-        type: choice
-        options:
-          - Release
-          - RelWithDebInfo
 
 permissions:
   contents: write
@@ -31,21 +23,45 @@ concurrency:
 env:
   UE_ROOT: 'C:\Program Files\Epic Games\UE_5.6'
   PLUGIN_NAME: 'Open3DBroadcast'
+  PLUGIN_PATH: 'ProjectSandbox/Plugins/Open3DBroadcast'
 
 jobs:
   build-release:
     runs-on: [ self-hosted, ue5, windows ]
 
     steps:
-      - name: Build plugin core (composite)
-        id: core
-        uses: ./.github/actions/build-plugin-core
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          ue_root: ${{ env.UE_ROOT }}
-          plugin_name: ${{ env.PLUGIN_NAME }}
-          plugin_relative_path: ProjectSandbox/Plugins/Open3DBroadcast
-          build_type: ${{ inputs.build_configuration || 'Release' }}
-          enable_webrtc: true
+          fetch-depth: 0
+          lfs: true
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup UE
+        shell: pwsh
+        run: |
+          & .\Build\Scripts\Setup-UE.ps1 -UEPath "${{ env.UE_ROOT }}"
+
+      - name: Resolve plugin paths
+        id: paths
+        shell: powershell
+        run: |
+          $pluginDir = Join-Path $PWD "${{ env.PLUGIN_PATH }}"
+          $upluginPath = Join-Path $pluginDir "${{ env.PLUGIN_NAME }}.uplugin"
+          
+          if (!(Test-Path -LiteralPath $pluginDir)) {
+            throw "Plugin directory not found: $pluginDir"
+          }
+          if (!(Test-Path -LiteralPath $upluginPath)) {
+            throw "Plugin .uplugin file not found: $upluginPath"
+          }
+          
+          "plugin_dir=$pluginDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "uplugin_path=$upluginPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Plugin directory: $pluginDir"
+          Write-Host "Plugin file: $upluginPath"
 
       - name: Determine version
         id: version
@@ -65,31 +81,39 @@ jobs:
       - name: Verify required libraries
         shell: powershell
         run: |
-          $libRoot = Join-Path "${{ steps.core.outputs.plugin_dir }}" "ThirdParty/Lib/Win64"
-          $required = @(
-            "open3dstreamstatic.lib",
-            "flatbuffers.lib",
-            "nng.lib",
-            "opus.lib"
+          $pluginDir = "${{ steps.paths.outputs.plugin_dir }}"
+          
+          # Check core libraries at plugin ThirdParty root
+          $requiredLibs = @(
+            @{ Path = "ThirdParty/open3dstream/lib/Win64/open3dstreamstatic.lib"; Name = "open3dstream" },
+            @{ Path = "ThirdParty/flatbuffers/lib/Win64/flatbuffers.lib"; Name = "flatbuffers" },
+            @{ Path = "ThirdParty/opus/lib/Win64/opus.lib"; Name = "opus" }
           )
+          
+          # Check NNG in module-specific location
+          $requiredLibs += @{ Path = "Source/Open3DTransportNNG/ThirdParty/nng/lib/Win64/nng.lib"; Name = "nng" }
+          
           $missing = @()
-          foreach ($lib in $required) {
-            $full = Join-Path $libRoot $lib
-            if (-not (Test-Path $full)) {
-              $missing += $full
+          foreach ($lib in $requiredLibs) {
+            $fullPath = Join-Path $pluginDir $lib.Path
+            if (-not (Test-Path $fullPath)) {
+              $missing += "$($lib.Name): $fullPath"
+            } else {
+              Write-Host "[OK] Found $($lib.Name): $fullPath"
             }
           }
+          
           if ($missing.Count -gt 0) {
             Write-Error "Missing required third-party libraries:"
             $missing | ForEach-Object { Write-Error "  - $_" }
             exit 1
           }
-          Write-Host "[OK] All required libraries present in $libRoot"
+          Write-Host "[OK] All required libraries present in plugin"
 
       - name: Update plugin descriptor version
         shell: powershell
         run: |
-          $uplugin = "${{ steps.core.outputs.uplugin_path }}"
+          $uplugin = "${{ steps.paths.outputs.uplugin_path }}"
           $versionNumber = "${{ steps.version.outputs.number }}"
           $content = Get-Content -Path $uplugin -Raw | ConvertFrom-Json
           $content.VersionName = $versionNumber
@@ -105,24 +129,10 @@ jobs:
           $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
           & .\Build\Scripts\Build-Plugin.ps1 `
             -UEPath "$env:UE_ROOT" `
-            -PluginUPluginPath "${{ steps.core.outputs.uplugin_path }}" `
+            -PluginUPluginPath "${{ steps.paths.outputs.uplugin_path }}" `
             -OutDir "$pkg" `
             -TargetPlatforms @("Win64") `
             -Configuration "Shipping"
-
-      - name: Copy ThirdParty payload into packaged plugin
-        shell: powershell
-        run: |
-          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
-          $sourceThirdParty = Join-Path "${{ steps.core.outputs.plugin_dir }}" 'ThirdParty'
-          $targetThirdParty = Join-Path $pkg 'HostProject/Plugins/Open3DBroadcast/ThirdParty'
-          if (Test-Path $sourceThirdParty) {
-            New-Item -ItemType Directory -Force -Path $targetThirdParty | Out-Null
-            Copy-Item -Path "$sourceThirdParty/*" -Destination $targetThirdParty -Recurse -Force
-            Write-Host "Copied ThirdParty assets into packaged plugin"
-          } else {
-            Write-Warning "No ThirdParty directory found at $sourceThirdParty"
-          }
 
       - name: Restructure package for archive
         id: restructure
