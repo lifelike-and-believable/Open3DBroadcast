@@ -69,5 +69,5 @@ private:
     static void OnDataReceived(void* user, const uint8_t* bytes, size_t len);
     static void OnAudioReceived(void* user, const int16_t* pcm_interleaved, size_t frames_per_channel, int32_t channels, int32_t sample_rate);
 
-    double LastAudioDropLogTime = 0.0;
+    TAtomic<double> LastAudioDropLogTime{ 0.0 };
 };

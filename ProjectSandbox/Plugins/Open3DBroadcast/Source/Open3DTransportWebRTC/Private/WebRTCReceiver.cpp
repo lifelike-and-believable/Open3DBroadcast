@@ -103,11 +103,11 @@ void FO3DWebRTCReceiver::OnAudioReceived(void* user, const int16_t* pcm_interlea
     else
     {
         const double Now = FPlatformTime::Seconds();
-        if (Now - Self->LastAudioDropLogTime > 1.0)
+        if (Now - Self->LastAudioDropLogTime.Load() > 1.0)
         {
             UE_LOG(LogO3DWebRTCReceiver, Verbose, TEXT("WebRTC audio frame discarded (no sink) - frames=%d channels=%d sr=%d"),
                 (int32)frames_per_channel, channels, sample_rate);
-            Self->LastAudioDropLogTime = Now;
+            Self->LastAudioDropLogTime.Store(Now);
         }
     }
 }
