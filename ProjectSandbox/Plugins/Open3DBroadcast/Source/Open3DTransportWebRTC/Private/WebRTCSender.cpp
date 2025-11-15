@@ -227,8 +227,8 @@ bool FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
     Stats.Reset();
     bInitialized.Store(true);
 
-    UE_LOG(LogO3DWebRTCSender, Log, TEXT("WebRTC sender initialized: URL=%s Audio=%d"),
-        *RoomUrl, ActiveAudioConfig.bEnableAudio ? 1 : 0);
+    UE_LOG(LogO3DWebRTCSender, Log, TEXT("WebRTC sender initialized: URL=%s Audio=%s"),
+        *RoomUrl, ActiveAudioConfig.bEnableAudio ? TEXT("true") : TEXT("false"));
 
     return true;
 }
