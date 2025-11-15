@@ -310,7 +310,7 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
     std::vector<char> Buffer;
     const double TimestampSeconds = FPlatformTime::Seconds();
 
-    int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(Buffer, TimestampSeconds);
+    int32 BytesWritten = List.Serialize(Buffer, TimestampSeconds);
     if (BytesWritten <= 0)
     {
         UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to serialize SubjectList"));
