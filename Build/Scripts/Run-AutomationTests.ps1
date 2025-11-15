@@ -10,7 +10,11 @@ param(
 $UEPath = $UEPath.Trim('"', "'")
 $ProjectFile = $ProjectFile.Trim('"', "'")
 $ResultsDir = $ResultsDir.Trim('"', "'")
-$TestFilter = $TestFilter ? $TestFilter.Trim() : ""
+if ($TestFilter) {
+  $TestFilter = $TestFilter.Trim()
+} else {
+  $TestFilter = ""
+}
 
 if ([string]::IsNullOrWhiteSpace($TestFilter)) {
   Write-Error "TestFilter cannot be empty. Provide fully-qualified automation test names separated by '+' or a group specifier (for example 'Group:MyGroup')."
