@@ -42,10 +42,11 @@ public class Open3DTransportWebRTC : ModuleRules
 
         // LiveKit FFI include path
         string livekitFfiIncludePath = Path.Combine(moduleThirdPartyDir, "livekit_ffi", "include");
-        if (Directory.Exists(livekitFfiIncludePath))
+        if (!Directory.Exists(livekitFfiIncludePath))
         {
-            PublicIncludePaths.Add(livekitFfiIncludePath);
+            throw new BuildException($"Missing required LiveKit FFI include directory at '{livekitFfiIncludePath}'.");
         }
+        PublicIncludePaths.Add(livekitFfiIncludePath);
 
         // Stage LiveKit FFI DLL to Binaries folder
         string livekitFfiDllPath = Path.Combine(moduleThirdPartyDir, "livekit_ffi", "bin", platformSubdir, "livekit_ffi.dll");
