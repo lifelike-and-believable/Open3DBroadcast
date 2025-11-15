@@ -118,7 +118,7 @@ void FO3DNngSender::HandlePipeAdded()
     const int32 Count = PipeCount.Increment();
     bConnected = true;
     BackoffAttempt = 0;
-    UE_LOG(LogO3DNngSender, Log, TEXT("NNG sender pipe added (count=%d)"), Count);
+    UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender CONNECTION ESTABLISHED to %s (pipe count=%d)"), *Options.CanonicalUri, Count);
 }
 
 void FO3DNngSender::HandlePipeRemoved()
@@ -139,7 +139,7 @@ void FO3DNngSender::HandlePipeRemoved()
             bConnected = true; // listening sockets remain available
         }
     }
-    UE_LOG(LogO3DNngSender, Log, TEXT("NNG sender pipe removed (count=%d)"), FMath::Max(0, Count));
+    UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender CONNECTION LOST from %s (pipe count=%d)"), *Options.CanonicalUri, FMath::Max(0, Count));
 }
 
 bool FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
@@ -205,7 +205,16 @@ bool FO3DNngSender::Start()
     StartWorker();
     bRunning = true;
 
-    UE_LOG(LogO3DNngSender, Log, TEXT("NNG sender started uri=%s queue=%llu bytes"), *Options.CanonicalUri, Options.MaxQueueBytes);
+    UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender STARTED - Mode=%s Role=%s URI=%s (queue=%llu bytes)"),
+        *O3DNNG::ModeToString(Options.Mode),
+        *O3DNNG::RoleToString(Options.Role),
+        *Options.CanonicalUri,
+        Options.MaxQueueBytes);
+
+    if (!bOpened && !Options.bListen)
+    {
+        UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender will attempt to connect to %s with exponential backoff (check host/port)"), *Options.CanonicalUri);
+    }
 
     return bOpened || !Options.bListen;
 }
