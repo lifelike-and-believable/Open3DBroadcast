@@ -19,7 +19,11 @@ if (!(Test-Path -LiteralPath $ProjectFile)) {
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 $cfgs = $GauntletConfigs -join ","
-$extra = $NullRHI.IsPresent ? "-NullRHI" : ""
+if ($NullRHI.IsPresent) {
+  $extra = "-NullRHI"
+} else {
+  $extra = ""
+}
 
 Write-Host "Running Gauntlet tests..."
 Write-Host "  UAT: $UAT"
