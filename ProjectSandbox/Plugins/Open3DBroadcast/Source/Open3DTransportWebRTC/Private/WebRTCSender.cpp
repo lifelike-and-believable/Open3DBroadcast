@@ -87,19 +87,19 @@ public:
             return false;
         }
 
-        // Convert float to int16
-        TArray<int16> PcmInt16;
-        PcmInt16.SetNumUninitialized(NumFrames * NumChannels);
-        for (int32 i = 0; i < NumFrames * NumChannels; ++i)
+        // Convert float to int16 using reusable buffer
+        const int32 TotalSamples = NumFrames * NumChannels;
+        ConversionBuffer.SetNumUninitialized(TotalSamples, false);  // Don't shrink
+        for (int32 i = 0; i < TotalSamples; ++i)
         {
             float Sample = FMath::Clamp(Interleaved[i], -1.0f, 1.0f);
-            PcmInt16[i] = static_cast<int16>(Sample * 32767.0f);
+            ConversionBuffer[i] = static_cast<int16>(Sample * 32767.0f);
         }
 
         // Publish to LiveKit
         LkResult Result = lk_publish_audio_pcm_i16(
             Owner.ClientHandle,
-            PcmInt16.GetData(),
+            ConversionBuffer.GetData(),
             NumFrames,
             NumChannels,
             SampleRate
@@ -125,6 +125,7 @@ public:
 
 private:
     FO3DWebRTCSender& Owner;
+    TArray<int16> ConversionBuffer;  // Reusable scratch space for float-to-int16 conversion
 };
 
 // Static callback for connection state changes
