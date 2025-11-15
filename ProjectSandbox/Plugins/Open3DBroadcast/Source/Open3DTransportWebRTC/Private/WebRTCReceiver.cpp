@@ -2,6 +2,7 @@
 #include "HAL/PlatformTime.h"
 #include "Logging/LogMacros.h"
 #include "livekit_ffi.h"
+#include "o3ds/model.h"
 
 namespace
 {

@@ -8,8 +8,6 @@
 #include "o3ds/model.h"
 #include <vector>
 
-DEFINE_LOG_CATEGORY(LogO3DWebRTCTransport);
-
 namespace
 {
     static void* GLiveKitFfiHandle = nullptr;
