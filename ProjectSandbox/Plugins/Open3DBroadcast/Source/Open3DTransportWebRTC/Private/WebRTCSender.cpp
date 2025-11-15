@@ -197,7 +197,7 @@ bool FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
     }
 
     // Set connection callback
-    LkResult Result = lk_set_connection_callback(ClientHandle, &FO3DWebRTCSender::OnConnectionState, this);
+    LkResult Result = lk_set_connection_callback(ClientHandle, FO3DWebRTCSender::OnConnectionState, this);
     if (Result.code != 0)
     {
         UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("Failed to set connection callback: %s"), *FromAnsi(Result.message));

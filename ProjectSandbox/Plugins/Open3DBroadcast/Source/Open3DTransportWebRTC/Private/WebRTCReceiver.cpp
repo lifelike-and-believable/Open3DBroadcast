@@ -147,7 +147,7 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
     }
 
     // Set connection callback
-    LkResult Result = lk_set_connection_callback(ClientHandle, &FO3DWebRTCReceiver::OnConnectionState, this);
+    LkResult Result = lk_set_connection_callback(ClientHandle, FO3DWebRTCReceiver::OnConnectionState, this);
     if (Result.code != 0)
     {
         UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("Failed to set connection callback: %s"), *FromAnsi(Result.message));
@@ -158,7 +158,7 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
     }
 
     // Set data callback
-    Result = lk_client_set_data_callback(ClientHandle, &FO3DWebRTCReceiver::OnDataReceived, this);
+    Result = lk_client_set_data_callback(ClientHandle, FO3DWebRTCReceiver::OnDataReceived, this);
     if (Result.code != 0)
     {
         UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("Failed to set data callback: %s"), *FromAnsi(Result.message));
@@ -169,7 +169,7 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
     }
 
     // Set audio callback
-    Result = lk_client_set_audio_callback(ClientHandle, &FO3DWebRTCReceiver::OnAudioReceived, this);
+    Result = lk_client_set_audio_callback(ClientHandle, FO3DWebRTCReceiver::OnAudioReceived, this);
     if (Result.code != 0)
     {
         UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("Failed to set audio callback: %s"), *FromAnsi(Result.message));

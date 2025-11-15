@@ -9,6 +9,8 @@
 // Forward declare LiveKit FFI types
 struct LkClientHandle;
 
+DECLARE_LOG_CATEGORY_EXTERN(LogO3DWebRTCTransport, Log, All);
+
 // Note: LiveKit FFI handles Opus decoding internally.
 // We receive PCM16 audio directly via the audio callback.
 
