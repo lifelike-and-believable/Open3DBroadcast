@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  UE_ROOT: 'C:\Program Files\Epic Games\UE_5.6'
+  UE_ROOT: 'C:\Program Files\Epic Games\UE_5.7'
   PLUGIN_NAME: 'Open3DBroadcast'
   PLUGIN_PATH: 'ProjectSandbox/Plugins/Open3DBroadcast'
 
