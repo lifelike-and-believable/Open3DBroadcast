@@ -376,6 +376,24 @@ bool FO3DNngSender::OpenSocket()
         UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender pipe notify remove failed (%d) %s"), NotifyRem, UTF8_TO_TCHAR(nng_strerror(NotifyRem)));
     }
 
+    // Increase NNG's internal send buffer to handle cloud network latency
+    // This prevents NNG from hitting backpressure before our application queue does
+    int SetSendBufRet = nng_setopt_size(NewSocket->Socket, NNG_OPT_SENDBUF, Options.MaxQueueBytes);
+    if (SetSendBufRet != 0)
+    {
+        UE_LOG(LogO3DNngSender, Log, TEXT("NNG sender set send buffer to %llu bytes (result: %d %s)"),
+            Options.MaxQueueBytes, SetSendBufRet, UTF8_TO_TCHAR(nng_strerror(SetSendBufRet)));
+    }
+
+    // Set send timeout to prevent worker thread from blocking indefinitely on slow/dead connections
+    // 30 second timeout allows for slow cloud links while preventing permanent hangs
+    int SetTimeoutRet = nng_setopt_ms(NewSocket->Socket, NNG_OPT_SENDTIMEO, 30000);
+    if (SetTimeoutRet != 0)
+    {
+        UE_LOG(LogO3DNngSender, Log, TEXT("NNG sender set send timeout (result: %d %s)"),
+            SetTimeoutRet, UTF8_TO_TCHAR(nng_strerror(SetTimeoutRet)));
+    }
+
     Socket = NewSocket;
     LastBackoffAttemptTime = FPlatformTime::Seconds();
     return true;
@@ -442,7 +460,19 @@ uint32 FO3DNngSender::RunWorker()
             continue;
         }
 
-        const int Ret = nng_send(ActiveSocket->Socket, Payload.Bytes.GetData(), Payload.Bytes.Num(), 0);
+        const int Ret = nng_send(ActiveSocket->Socket, Payload.Bytes.GetData(), Payload.Bytes.Num(), NNG_FLAG_NONBLOCK);
+        if (Ret == NNG_EAGAIN)
+        {
+            // Socket buffer full due to slow receiver/network - re-queue to retry later
+            // This prevents blocking the worker thread on slow cloud connections
+            Queue.Enqueue(MoveTemp(Payload));
+            // Re-add the payload size back to queue counter since send failed
+            const uint64 PreviousCurrent = Current > PayloadSize ? Current - PayloadSize : 0;
+            QueueBytes.Store(PreviousCurrent + PayloadSize);
+            // Brief yield to avoid busy-spinning when consistently backed up
+            FPlatformProcess::Sleep(0.001f);
+            continue;
+        }
         if (Ret != 0)
         {
             FScopeLock StatsLock(&StatsMutex);

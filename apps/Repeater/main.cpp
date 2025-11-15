@@ -42,17 +42,19 @@ int main(int argc, char *argv[])
         return 3;
     }
     
-    size_t bufsz = 1024 * 80;
+    // Increase buffer to handle larger frames (mocap + audio can be several MB)
+    // Use 8MB to match typical sender queue sizes
+    size_t bufsz = 1024 * 1024 * 8;
     char* data = (char*)malloc(bufsz);
 
     size_t sz;
-    
+
     while (1)
     {
         sz = O3DS::listener.read(&data, &bufsz);
         if (sz > 0)
         {
-            printf("%ld\n", sz);
+            printf("%ld bytes\n", sz);
             O3DS::broadcast.write(data, sz);
         }
     }
