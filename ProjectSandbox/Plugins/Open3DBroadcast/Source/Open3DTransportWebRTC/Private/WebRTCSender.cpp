@@ -115,7 +115,7 @@ void FO3DWebRTCSender::OnConnectionState(void* user, LkConnectionState state, in
 
 FO3DWebRTCSender::FO3DWebRTCSender()
 {
-    EnsureFfiLoaded();
+    // LiveKit FFI DLL is loaded automatically via .lib linkage
 }
 
 FO3DWebRTCSender::~FO3DWebRTCSender()
