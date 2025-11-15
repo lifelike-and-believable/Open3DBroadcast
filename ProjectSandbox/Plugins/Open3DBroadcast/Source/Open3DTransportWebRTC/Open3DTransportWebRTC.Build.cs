@@ -49,10 +49,11 @@ public class Open3DTransportWebRTC : ModuleRules
 
         // Stage LiveKit FFI DLL to Binaries folder
         string livekitFfiDllPath = Path.Combine(moduleThirdPartyDir, "livekit_ffi", "bin", platformSubdir, "livekit_ffi.dll");
-        if (File.Exists(livekitFfiDllPath))
+        if (!File.Exists(livekitFfiDllPath))
         {
-            RuntimeDependencies.Add(livekitFfiDllPath);
+            throw new BuildException($"Missing required LiveKit FFI DLL at '{livekitFfiDllPath}'.");
         }
+        RuntimeDependencies.Add(livekitFfiDllPath);
 
         // Note: Opus library NOT needed - LiveKit FFI handles Opus encoding/decoding internally.
         // We only provide/receive PCM16 audio at the API boundary.
