@@ -128,14 +128,12 @@ private:
 };
 
 // Static callback for connection state changes
-void FO3DWebRTCSender::OnConnectionState(void* user, int32_t state, int32_t reason_code, const char* message)
+void FO3DWebRTCSender::OnConnectionState(void* user, LkConnectionState state, int32_t reason_code, const char* message)
 {
     FO3DWebRTCSender* Self = reinterpret_cast<FO3DWebRTCSender*>(user);
     if (!Self) return;
 
-    const LkConnectionState ConnState = static_cast<LkConnectionState>(state);
-
-    switch (ConnState)
+    switch (state)
     {
     case LkConnConnecting:
         UE_LOG(LogO3DWebRTCTransport, Log, TEXT("WebRTC connecting..."));

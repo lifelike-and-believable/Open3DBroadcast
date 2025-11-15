@@ -8,8 +8,7 @@
 
 // Forward declare LiveKit FFI types
 struct LkClientHandle;
-
-DECLARE_LOG_CATEGORY_EXTERN(LogO3DWebRTCTransport, Log, All);
+enum LkConnectionState : int;
 
 // Note: LiveKit FFI handles Opus decoding internally.
 // We receive PCM16 audio directly via the audio callback.
@@ -65,7 +64,7 @@ private:
 
     // LiveKit FFI callbacks (static)
     struct FCallbacks;
-    static void OnConnectionState(void* user, int32_t state, int32_t reason_code, const char* message);
+    static void OnConnectionState(void* user, LkConnectionState state, int32_t reason_code, const char* message);
     static void OnDataReceived(void* user, const uint8_t* bytes, size_t len);
     static void OnAudioReceived(void* user, const int16_t* pcm_interleaved, size_t frames_per_channel, int32_t channels, int32_t sample_rate);
 

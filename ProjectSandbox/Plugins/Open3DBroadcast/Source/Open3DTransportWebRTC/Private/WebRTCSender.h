@@ -7,6 +7,7 @@
 
 // Forward declare LiveKit FFI types
 struct LkClientHandle;
+enum LkConnectionState : int;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogO3DWebRTCTransport, Log, All);
 
@@ -60,5 +61,5 @@ private:
 
     // LiveKit FFI callbacks (static)
     struct FCallbacks;
-    static void OnConnectionState(void* user, int32_t state, int32_t reason_code, const char* message);
+    static void OnConnectionState(void* user, LkConnectionState state, int32_t reason_code, const char* message);
 };

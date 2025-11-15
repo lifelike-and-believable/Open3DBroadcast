@@ -13,14 +13,12 @@ namespace
 }
 
 // Static callback for connection state changes
-void FO3DWebRTCReceiver::OnConnectionState(void* user, int32_t state, int32_t reason_code, const char* message)
+void FO3DWebRTCReceiver::OnConnectionState(void* user, LkConnectionState state, int32_t reason_code, const char* message)
 {
     FO3DWebRTCReceiver* Self = reinterpret_cast<FO3DWebRTCReceiver*>(user);
     if (!Self) return;
 
-    const LkConnectionState ConnState = static_cast<LkConnectionState>(state);
-
-    switch (ConnState)
+    switch (state)
     {
     case LkConnConnecting:
         UE_LOG(LogO3DWebRTCTransport, Log, TEXT("WebRTC receiver connecting..."));
