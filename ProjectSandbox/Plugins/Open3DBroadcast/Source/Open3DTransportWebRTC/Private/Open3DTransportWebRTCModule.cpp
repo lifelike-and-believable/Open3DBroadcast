@@ -4,7 +4,8 @@
 #include "O3DSenderRegistry.h"
 #include "O3DReceiverRegistry.h"
 
-DEFINE_LOG_CATEGORY(LogO3DWebRTCTransport);
+DEFINE_LOG_CATEGORY(LogO3DWebRTCSender);
+DEFINE_LOG_CATEGORY(LogO3DWebRTCReceiver);
 
 #define LOCTEXT_NAMESPACE "Open3DTransportWebRTC"
 
@@ -19,7 +20,7 @@ public:
 		// Register WebRTC receiver factory
 		O3DTransport::RegisterReceiver(TEXT("WebRTC"), []() { return MakeShared<FO3DWebRTCReceiver>(); });
 
-		UE_LOG(LogO3DWebRTCTransport, Log, TEXT("Open3D WebRTC transport module started (LiveKit FFI backend)"));
+		UE_LOG(LogO3DWebRTCSender, Log, TEXT("Open3D WebRTC transport module started (LiveKit FFI backend)"));
 	}
 
 	virtual void ShutdownModule() override
@@ -28,7 +29,7 @@ public:
 		O3DTransport::UnregisterSender(TEXT("WebRTC"));
 		O3DTransport::UnregisterReceiver(TEXT("WebRTC"));
 
-		UE_LOG(LogO3DWebRTCTransport, Log, TEXT("Open3D WebRTC transport module shut down"));
+		UE_LOG(LogO3DWebRTCSender, Log, TEXT("Open3D WebRTC transport module shut down"));
 	}
 };
 

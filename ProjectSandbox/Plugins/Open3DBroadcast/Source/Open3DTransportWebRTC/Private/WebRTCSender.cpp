@@ -44,16 +44,16 @@ namespace
             if (Handle)
             {
                 GLiveKitFfiHandle = Handle;
-                UE_LOG(LogO3DWebRTCTransport, Log, TEXT("LiveKit FFI loaded: %s"), *Candidate);
+                UE_LOG(LogO3DWebRTCSender, Log, TEXT("LiveKit FFI loaded: %s"), *Candidate);
             }
             else
             {
-                UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("Failed to load LiveKit FFI from %s"), *Candidate);
+                UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to load LiveKit FFI from %s"), *Candidate);
             }
         }
         else
         {
-            UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("LiveKit FFI DLL not found at: %s"), *Candidate);
+            UE_LOG(LogO3DWebRTCSender, Warning, TEXT("LiveKit FFI DLL not found at: %s"), *Candidate);
         }
 #endif
     }
@@ -107,7 +107,7 @@ public:
 
         if (Result.code != 0)
         {
-            UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("Failed to publish audio: %s"), *FromAnsi(Result.message));
+            UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to publish audio: %s"), *FromAnsi(Result.message));
             if (Result.message)
             {
                 lk_free_str(const_cast<char*>(Result.message));
@@ -136,26 +136,26 @@ void FO3DWebRTCSender::OnConnectionState(void* user, LkConnectionState state, in
     switch (state)
     {
     case LkConnConnecting:
-        UE_LOG(LogO3DWebRTCTransport, Log, TEXT("WebRTC connecting..."));
+        UE_LOG(LogO3DWebRTCSender, Log, TEXT("WebRTC connecting..."));
         break;
 
     case LkConnConnected:
-        UE_LOG(LogO3DWebRTCTransport, Log, TEXT("WebRTC connected"));
+        UE_LOG(LogO3DWebRTCSender, Log, TEXT("WebRTC connected"));
         Self->bConnected.Store(true);
         break;
 
     case LkConnReconnecting:
-        UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("WebRTC reconnecting..."));
+        UE_LOG(LogO3DWebRTCSender, Warning, TEXT("WebRTC reconnecting..."));
         Self->bConnected.Store(false);
         break;
 
     case LkConnDisconnected:
-        UE_LOG(LogO3DWebRTCTransport, Log, TEXT("WebRTC disconnected: %s"), *FromAnsi(message));
+        UE_LOG(LogO3DWebRTCSender, Log, TEXT("WebRTC disconnected: %s"), *FromAnsi(message));
         Self->bConnected.Store(false);
         break;
 
     case LkConnFailed:
-        UE_LOG(LogO3DWebRTCTransport, Error, TEXT("WebRTC connection failed (code=%d): %s"), reason_code, *FromAnsi(message));
+        UE_LOG(LogO3DWebRTCSender, Error, TEXT("WebRTC connection failed (code=%d): %s"), reason_code, *FromAnsi(message));
         Self->bConnected.Store(false);
         break;
     }
@@ -177,7 +177,7 @@ bool FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
 
     if (bInitialized.Load())
     {
-        UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("WebRTC sender already initialized"));
+        UE_LOG(LogO3DWebRTCSender, Warning, TEXT("WebRTC sender already initialized"));
         return false;
     }
 
@@ -190,7 +190,7 @@ bool FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
     ClientHandle = lk_client_create();
     if (!ClientHandle)
     {
-        UE_LOG(LogO3DWebRTCTransport, Error, TEXT("Failed to create LiveKit client"));
+        UE_LOG(LogO3DWebRTCSender, Error, TEXT("Failed to create LiveKit client"));
         return false;
     }
 
@@ -198,7 +198,7 @@ bool FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
     LkResult Result = lk_set_connection_callback(ClientHandle, FO3DWebRTCSender::OnConnectionState, this);
     if (Result.code != 0)
     {
-        UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("Failed to set connection callback: %s"), *FromAnsi(Result.message));
+        UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to set connection callback: %s"), *FromAnsi(Result.message));
         if (Result.message)
         {
             lk_free_str(const_cast<char*>(Result.message));
@@ -215,7 +215,7 @@ bool FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
 
         if (Result.code != 0)
         {
-            UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("Failed to set audio options: %s"), *FromAnsi(Result.message));
+            UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to set audio options: %s"), *FromAnsi(Result.message));
             if (Result.message)
             {
                 lk_free_str(const_cast<char*>(Result.message));
@@ -227,7 +227,7 @@ bool FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
     Stats.Reset();
     bInitialized.Store(true);
 
-    UE_LOG(LogO3DWebRTCTransport, Log, TEXT("WebRTC sender initialized: URL=%s Audio=%d"),
+    UE_LOG(LogO3DWebRTCSender, Log, TEXT("WebRTC sender initialized: URL=%s Audio=%d"),
         *RoomUrl, ActiveAudioConfig.bEnableAudio ? 1 : 0);
 
     return true;
@@ -239,13 +239,13 @@ bool FO3DWebRTCSender::Start()
 
     if (!bInitialized.Load())
     {
-        UE_LOG(LogO3DWebRTCTransport, Error, TEXT("Cannot start WebRTC sender: not initialized"));
+        UE_LOG(LogO3DWebRTCSender, Error, TEXT("Cannot start WebRTC sender: not initialized"));
         return false;
     }
 
     if (bConnected.Load())
     {
-        UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("WebRTC sender already connected"));
+        UE_LOG(LogO3DWebRTCSender, Warning, TEXT("WebRTC sender already connected"));
         return true;
     }
 
@@ -259,7 +259,7 @@ bool FO3DWebRTCSender::Start()
 
     if (Result.code != 0)
     {
-        UE_LOG(LogO3DWebRTCTransport, Error, TEXT("Failed to connect: %s"), *FromAnsi(Result.message));
+        UE_LOG(LogO3DWebRTCSender, Error, TEXT("Failed to connect: %s"), *FromAnsi(Result.message));
         if (Result.message)
         {
             lk_free_str(const_cast<char*>(Result.message));
@@ -267,7 +267,7 @@ bool FO3DWebRTCSender::Start()
         return false;
     }
 
-    UE_LOG(LogO3DWebRTCTransport, Log, TEXT("WebRTC sender connecting..."));
+    UE_LOG(LogO3DWebRTCSender, Log, TEXT("WebRTC sender connecting..."));
     return true;
 }
 
@@ -285,7 +285,7 @@ void FO3DWebRTCSender::Stop()
         LkResult Result = lk_disconnect(ClientHandle);
         if (Result.code != 0 && Result.message)
         {
-            UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("Disconnect warning: %s"), *FromAnsi(Result.message));
+            UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Disconnect warning: %s"), *FromAnsi(Result.message));
             lk_free_str(const_cast<char*>(Result.message));
         }
     }
@@ -296,7 +296,7 @@ void FO3DWebRTCSender::Stop()
     bConnected.Store(false);
     bInitialized.Store(false);
 
-    UE_LOG(LogO3DWebRTCTransport, Log, TEXT("WebRTC sender stopped"));
+    UE_LOG(LogO3DWebRTCSender, Log, TEXT("WebRTC sender stopped"));
 }
 
 bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
@@ -313,7 +313,7 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
     int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(Buffer, TimestampSeconds);
     if (BytesWritten <= 0)
     {
-        UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("Failed to serialize SubjectList"));
+        UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to serialize SubjectList"));
         return false;
     }
 
@@ -330,7 +330,7 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
         FScopeLock Lock(&StatsMutex);
         Stats.DroppedFrames++;
 
-        UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("Failed to send data: %s"), *FromAnsi(Result.message));
+        UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to send data: %s"), *FromAnsi(Result.message));
         if (Result.message)
         {
             lk_free_str(const_cast<char*>(Result.message));
@@ -375,7 +375,7 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DWebRTCSender::CreateAud
 
     if (Result.code != 0)
     {
-        UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("Failed to update audio options: %s"), *FromAnsi(Result.message));
+        UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to update audio options: %s"), *FromAnsi(Result.message));
         if (Result.message)
         {
             lk_free_str(const_cast<char*>(Result.message));
@@ -390,14 +390,14 @@ bool FO3DWebRTCSender::ParseConfig(const FO3DTransportConfig& Config)
     RoomUrl = Config.Uri;
     if (RoomUrl.IsEmpty())
     {
-        UE_LOG(LogO3DWebRTCTransport, Error, TEXT("WebRTC URL not specified"));
+        UE_LOG(LogO3DWebRTCSender, Error, TEXT("WebRTC URL not specified"));
         return false;
     }
 
     Token = Config.Token;
     if (Token.IsEmpty())
     {
-        UE_LOG(LogO3DWebRTCTransport, Error, TEXT("WebRTC token not provided"));
+        UE_LOG(LogO3DWebRTCSender, Error, TEXT("WebRTC token not provided"));
         return false;
     }
 

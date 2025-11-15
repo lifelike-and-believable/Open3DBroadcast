@@ -21,26 +21,26 @@ void FO3DWebRTCReceiver::OnConnectionState(void* user, LkConnectionState state, 
     switch (state)
     {
     case LkConnConnecting:
-        UE_LOG(LogO3DWebRTCTransport, Log, TEXT("WebRTC receiver connecting..."));
+        UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver connecting..."));
         break;
 
     case LkConnConnected:
-        UE_LOG(LogO3DWebRTCTransport, Log, TEXT("WebRTC receiver connected"));
+        UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver connected"));
         Self->bConnected.Store(true);
         break;
 
     case LkConnReconnecting:
-        UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("WebRTC receiver reconnecting..."));
+        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("WebRTC receiver reconnecting..."));
         Self->bConnected.Store(false);
         break;
 
     case LkConnDisconnected:
-        UE_LOG(LogO3DWebRTCTransport, Log, TEXT("WebRTC receiver disconnected: %s"), *FromAnsi(message));
+        UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver disconnected: %s"), *FromAnsi(message));
         Self->bConnected.Store(false);
         break;
 
     case LkConnFailed:
-        UE_LOG(LogO3DWebRTCTransport, Error, TEXT("WebRTC receiver connection failed (code=%d): %s"), reason_code, *FromAnsi(message));
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC receiver connection failed (code=%d): %s"), reason_code, *FromAnsi(message));
         Self->bConnected.Store(false);
         break;
     }
@@ -105,7 +105,7 @@ void FO3DWebRTCReceiver::OnAudioReceived(void* user, const int16_t* pcm_interlea
         const double Now = FPlatformTime::Seconds();
         if (Now - Self->LastAudioDropLogTime > 1.0)
         {
-            UE_LOG(LogO3DWebRTCTransport, Verbose, TEXT("WebRTC audio frame discarded (no sink) - frames=%d channels=%d sr=%d"),
+            UE_LOG(LogO3DWebRTCReceiver, Verbose, TEXT("WebRTC audio frame discarded (no sink) - frames=%d channels=%d sr=%d"),
                 (int32)frames_per_channel, channels, sample_rate);
             Self->LastAudioDropLogTime = Now;
         }
@@ -127,7 +127,7 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
 
     if (bInitialized.Load())
     {
-        UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("WebRTC receiver already initialized"));
+        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("WebRTC receiver already initialized"));
         return false;
     }
 
@@ -140,7 +140,7 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
     ClientHandle = lk_client_create();
     if (!ClientHandle)
     {
-        UE_LOG(LogO3DWebRTCTransport, Error, TEXT("Failed to create LiveKit client"));
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Failed to create LiveKit client"));
         return false;
     }
 
@@ -148,7 +148,7 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
     LkResult Result = lk_set_connection_callback(ClientHandle, FO3DWebRTCReceiver::OnConnectionState, this);
     if (Result.code != 0)
     {
-        UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("Failed to set connection callback: %s"), *FromAnsi(Result.message));
+        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Failed to set connection callback: %s"), *FromAnsi(Result.message));
         if (Result.message)
         {
             lk_free_str(const_cast<char*>(Result.message));
@@ -159,7 +159,7 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
     Result = lk_client_set_data_callback(ClientHandle, FO3DWebRTCReceiver::OnDataReceived, this);
     if (Result.code != 0)
     {
-        UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("Failed to set data callback: %s"), *FromAnsi(Result.message));
+        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Failed to set data callback: %s"), *FromAnsi(Result.message));
         if (Result.message)
         {
             lk_free_str(const_cast<char*>(Result.message));
@@ -170,7 +170,7 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
     Result = lk_client_set_audio_callback(ClientHandle, FO3DWebRTCReceiver::OnAudioReceived, this);
     if (Result.code != 0)
     {
-        UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("Failed to set audio callback: %s"), *FromAnsi(Result.message));
+        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Failed to set audio callback: %s"), *FromAnsi(Result.message));
         if (Result.message)
         {
             lk_free_str(const_cast<char*>(Result.message));
@@ -185,7 +185,7 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
 
         if (Result.code != 0)
         {
-            UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("Failed to set audio output format: %s"), *FromAnsi(Result.message));
+            UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Failed to set audio output format: %s"), *FromAnsi(Result.message));
             if (Result.message)
             {
                 lk_free_str(const_cast<char*>(Result.message));
@@ -199,7 +199,7 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
     LastAudioDropLogTime = 0.0;
     bInitialized.Store(true);
 
-    UE_LOG(LogO3DWebRTCTransport, Log, TEXT("WebRTC receiver initialized: URL=%s"),
+    UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver initialized: URL=%s"),
         *RoomUrl);
 
     return true;
@@ -217,13 +217,13 @@ bool FO3DWebRTCReceiver::Start()
 
     if (!bInitialized.Load())
     {
-        UE_LOG(LogO3DWebRTCTransport, Error, TEXT("Cannot start WebRTC receiver: not initialized"));
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Cannot start WebRTC receiver: not initialized"));
         return false;
     }
 
     if (bConnected.Load())
     {
-        UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("WebRTC receiver already connected"));
+        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("WebRTC receiver already connected"));
         return true;
     }
 
@@ -233,7 +233,7 @@ bool FO3DWebRTCReceiver::Start()
         Consumer = FSerializedFrameConsumerRegistry::Create();
         if (!Consumer.IsValid())
         {
-            UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("No serialized frame consumer registered; frames will be dropped"));
+            UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("No serialized frame consumer registered; frames will be dropped"));
         }
     }
 
@@ -247,7 +247,7 @@ bool FO3DWebRTCReceiver::Start()
 
     if (Result.code != 0)
     {
-        UE_LOG(LogO3DWebRTCTransport, Error, TEXT("Failed to connect: %s"), *FromAnsi(Result.message));
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Failed to connect: %s"), *FromAnsi(Result.message));
         if (Result.message)
         {
             lk_free_str(const_cast<char*>(Result.message));
@@ -255,7 +255,7 @@ bool FO3DWebRTCReceiver::Start()
         return false;
     }
 
-    UE_LOG(LogO3DWebRTCTransport, Log, TEXT("WebRTC receiver connecting..."));
+    UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver connecting..."));
     return true;
 }
 
@@ -273,7 +273,7 @@ void FO3DWebRTCReceiver::Stop()
         LkResult Result = lk_disconnect(ClientHandle);
         if (Result.code != 0 && Result.message)
         {
-            UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("Disconnect warning: %s"), *FromAnsi(Result.message));
+            UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Disconnect warning: %s"), *FromAnsi(Result.message));
             lk_free_str(const_cast<char*>(Result.message));
         }
     }
@@ -287,7 +287,7 @@ void FO3DWebRTCReceiver::Stop()
     bConnected.Store(false);
     bInitialized.Store(false);
 
-    UE_LOG(LogO3DWebRTCTransport, Log, TEXT("WebRTC receiver stopped"));
+    UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver stopped"));
 }
 
 int32 FO3DWebRTCReceiver::Poll()
@@ -314,7 +314,7 @@ void FO3DWebRTCReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ES
         LkResult Result = lk_set_audio_output_format(ClientHandle, ActiveAudioConfig.SampleRate, ActiveAudioConfig.NumChannels);
         if (Result.code != 0)
         {
-            UE_LOG(LogO3DWebRTCTransport, Warning, TEXT("Failed to update audio output format: %s"), *FromAnsi(Result.message));
+            UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Failed to update audio output format: %s"), *FromAnsi(Result.message));
             if (Result.message)
             {
                 lk_free_str(const_cast<char*>(Result.message));
@@ -328,14 +328,14 @@ bool FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& Config)
     RoomUrl = Config.Uri;
     if (RoomUrl.IsEmpty())
     {
-        UE_LOG(LogO3DWebRTCTransport, Error, TEXT("WebRTC URL not specified"));
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC URL not specified"));
         return false;
     }
 
     Token = Config.Token;
     if (Token.IsEmpty())
     {
-        UE_LOG(LogO3DWebRTCTransport, Error, TEXT("WebRTC token not provided"));
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC token not provided"));
         return false;
     }
 

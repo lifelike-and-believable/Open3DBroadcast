@@ -5,11 +5,10 @@
 #include "HAL/CriticalSection.h"
 #include "Templates/Atomic.h"
 
-// Forward declare LiveKit FFI types
-struct LkClientHandle;
-enum LkConnectionState : int;
+// Include LiveKit FFI for callback types
+#include "livekit_ffi.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogO3DWebRTCTransport, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogO3DWebRTCSender, Log, All);
 
 // Note: LiveKit FFI handles Opus encoding internally.
 // We only need to provide PCM16 audio via lk_publish_audio_pcm_i16().
