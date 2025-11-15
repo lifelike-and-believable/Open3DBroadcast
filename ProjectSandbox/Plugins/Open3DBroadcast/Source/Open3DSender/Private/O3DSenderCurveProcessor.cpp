@@ -30,11 +30,14 @@ void FO3DSenderCurveProcessor::Reset()
     MorphNameSet.Reset();
     CurveNameSet.Reset();
     bCurveCacheInitialized = false;
+    CurveRevision = 0;
+    PatternCache.Reset();
 }
 
 void FO3DSenderCurveProcessor::InvalidateCache()
 {
     bCurveCacheInitialized = false;
+    PatternCache.Reset();
 }
 
 void FO3DSenderCurveProcessor::EnsureCurveCache(USkeletalMeshComponent* SkelComp, const FO3DSenderCurveConfig& Config)
@@ -100,16 +103,23 @@ void FO3DSenderCurveProcessor::BuildFilteredCurves(const FO3DSenderCurveConfig& 
     OutNames.Reserve(CurveNames.Num());
     OutValues.Reserve(CurveNames.Num());
 
+    const bool bFilteringEnabled = Config.bEnableCurveFiltering;
+    if (bFilteringEnabled)
+    {
+        UpdatePatternCacheIfNeeded(Config);
+    }
+
     for (int32 Index = 0; Index < CurveNames.Num(); ++Index)
     {
         const FName& Name = CurveNames[Index];
+        const FString NameString = Name.ToString();
         float Value = CurveValues[Index];
 
         if (Config.bDropNaNAndInfinity && !FMath::IsFinite(Value))
         {
             if (Config.bLogFilteredCurves)
             {
-                UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Dropped curve %s (NaN/Inf)"), *Name.ToString());
+                UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Dropped curve %s (NaN/Inf)"), *NameString);
             }
             continue;
         }
@@ -119,13 +129,24 @@ void FO3DSenderCurveProcessor::BuildFilteredCurves(const FO3DSenderCurveConfig& 
             Value = FMath::Clamp(Value, 0.0f, 1.0f);
         }
 
-        if (Config.bEnableCurveFiltering)
+        if (bFilteringEnabled)
         {
-            if (!IsCurveAllowedByPatterns(Name.ToString(), Config))
+            bool bPatternAllowed = true;
+            if (PatternCache.bHasActiveFilters)
+            {
+                const bool bMaskValid = PatternCache.AllowedMask.IsValidIndex(Index);
+                bPatternAllowed = bMaskValid ? PatternCache.AllowedMask[Index] : true;
+            }
+            else if (ShouldFilterByPatterns(Config.IncludeCurvePatterns) || ShouldFilterByPatterns(Config.ExcludeCurvePatterns))
+            {
+                bPatternAllowed = EvaluatePatternForName(NameString, Config);
+            }
+
+            if (!bPatternAllowed)
             {
                 if (Config.bLogFilteredCurves)
                 {
-                    UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Filtered curve %s (pattern)"), *Name.ToString());
+                    UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Filtered curve %s (pattern)"), *NameString);
                 }
                 continue;
             }
@@ -134,7 +155,7 @@ void FO3DSenderCurveProcessor::BuildFilteredCurves(const FO3DSenderCurveConfig& 
             {
                 if (Config.bLogFilteredCurves)
                 {
-                    UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Filtered curve %s (epsilon %.6f) V=%.6f"), *Name.ToString(), Config.CurveEpsilon, Value);
+                    UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Filtered curve %s (epsilon %.6f) V=%.6f"), *NameString, Config.CurveEpsilon, Value);
                 }
                 continue;
             }
@@ -147,7 +168,7 @@ void FO3DSenderCurveProcessor::BuildFilteredCurves(const FO3DSenderCurveConfig& 
                 {
                     if (Config.bLogFilteredCurves)
                     {
-                        UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Filtered curve %s (delta %.6f < %.6f) V=%.6f Last=%.6f"), *Name.ToString(), FMath::Abs(Value - Last), Config.CurveDeltaThreshold, Value, Last);
+                        UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Filtered curve %s (delta %.6f < %.6f) V=%.6f Last=%.6f"), *NameString, FMath::Abs(Value - Last), Config.CurveDeltaThreshold, Value, Last);
                     }
                     continue;
                 }
@@ -245,10 +266,76 @@ void FO3DSenderCurveProcessor::RefreshCurveCache(USkeletalMeshComponent* SkelCom
     LastSentCurveValues.SetNumZeroed(CurveNames.Num());
     LastSentHasValue.SetNumZeroed(CurveNames.Num());
 
+    ++CurveRevision;
+    PatternCache.Reset();
+
     bCurveCacheInitialized = true;
 }
 
 bool FO3DSenderCurveProcessor::IsCurveAllowedByPatterns(const FString& Name, const FO3DSenderCurveConfig& Config) const
+{
+    return EvaluatePatternForName(Name, Config);
+}
+
+void FO3DSenderCurveProcessor::UpdatePatternCacheIfNeeded(const FO3DSenderCurveConfig& Config)
+{
+    if (!Config.bEnableCurveFiltering)
+    {
+        PatternCache.Reset();
+        return;
+    }
+
+    const uint32 DesiredHash = ComputePatternHash(Config);
+    const bool bNeedsRebuild = (PatternCache.PatternHash != DesiredHash)
+        || (PatternCache.CachedCurveRevision != CurveRevision)
+        || (PatternCache.AllowedMask.Num() != CurveNames.Num());
+
+    if (!bNeedsRebuild)
+    {
+        return;
+    }
+
+    PatternCache.PatternHash = DesiredHash;
+    PatternCache.CachedCurveRevision = CurveRevision;
+    PatternCache.AllowedMask.Init(true, CurveNames.Num());
+    PatternCache.bHasActiveFilters = ShouldFilterByPatterns(Config.IncludeCurvePatterns) || ShouldFilterByPatterns(Config.ExcludeCurvePatterns);
+
+    if (!PatternCache.bHasActiveFilters)
+    {
+        return;
+    }
+
+    for (int32 Index = 0; Index < CurveNames.Num(); ++Index)
+    {
+        const bool bAllowed = EvaluatePatternForName(CurveNames[Index].ToString(), Config);
+        PatternCache.AllowedMask[Index] = bAllowed;
+    }
+}
+
+uint32 FO3DSenderCurveProcessor::ComputePatternHash(const FO3DSenderCurveConfig& Config) const
+{
+    uint32 Hash = Config.bEnableCurveFiltering ? 0x1u : 0u;
+    Hash = HashCombineFast(Hash, HashPatternList(Config.IncludeCurvePatterns));
+    Hash = HashCombineFast(Hash, HashPatternList(Config.ExcludeCurvePatterns));
+    return Hash;
+}
+
+uint32 FO3DSenderCurveProcessor::HashPatternList(const TArray<FString>* Patterns)
+{
+    if (!Patterns)
+    {
+        return 0u;
+    }
+
+    uint32 Hash = ::GetTypeHash(Patterns->Num());
+    for (const FString& Pattern : *Patterns)
+    {
+        Hash = HashCombineFast(Hash, GetTypeHash(Pattern));
+    }
+    return Hash;
+}
+
+bool FO3DSenderCurveProcessor::EvaluatePatternForName(const FString& Name, const FO3DSenderCurveConfig& Config) const
 {
     if (ShouldFilterByPatterns(Config.ExcludeCurvePatterns))
     {

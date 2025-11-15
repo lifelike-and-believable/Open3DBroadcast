@@ -44,6 +44,18 @@ public:
 	// Console hook to dump all serializer stats across live instances
 	static void DumpAllStats();
 
+	/**
+	 * Removes a specific subject cache entry. Useful when subjects are dynamically destroyed or renamed
+	 * so long-running serializer instances do not retain stale metadata.
+	 */
+	void RemoveSubjectCache(const FString& Subject);
+
+	/** Clears every cached subject, typically invoked when the owning component stops capturing. */
+	void ClearAllCaches();
+
+	/** Returns the number of cached subjects (primarily for diagnostics/tests). */
+	int32 GetCacheCount() const { return SubjectState.Num(); }
+
 private:
 	void OnDescriptorReady(const FString& Subject, const struct FO3DSSkeletonDescriptor& Descriptor);
 	void OnPoseFrameReady(const FString& Subject, const struct FO3DSPoseFrame& Frame);

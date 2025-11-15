@@ -237,14 +237,16 @@ private:
 	FO3DSenderCurveConfig BuildCurveConfig() const;
 
 	uint64 ComputeDescriptorHash(const TArray<FName>& InNames, const TArray<int32>& InParents) const;
-
-	TArray<FName> BoneNames;
-	TArray<int32> ParentIndices;
 	TWeakObjectPtr<USkeleton> CachedSkeleton;
 	TWeakObjectPtr<USkeletalMesh> CachedSkeletalMesh;
+	FName CachedSkeletalMeshName = NAME_None;
 
 	FO3DSSkeletonDescriptor DescriptorCache;
 	bool bDescriptorDirty = false;
+
+	FString CachedSubjectName;
+	FString LastSubjectSourceValue;
+	TWeakObjectPtr<USkeletalMesh> CachedSubjectMeshForName;
 
 	bool bIsCapturing = false;
 	double LastCaptureTime = 0.0;
@@ -286,9 +288,10 @@ public:
 	UFUNCTION()
 	TArray<FName> GetAvailableAudioCodecOptions() const;
 
+
 private:
 	bool CanCaptureThisFrame(double NowSeconds, USkeletalMeshComponent*& OutMesh);
-	FString ResolveSubjectName(const USkeletalMeshComponent* SkelComp) const;
+	FString ResolveSubjectName(const USkeletalMeshComponent* SkelComp);
 	FO3DSPoseFrame CreateFrameShell(const USkeletalMeshComponent* SkelComp);
 	void PopulatePoseFrameBones(const USkeletalMeshComponent* SkelComp, FO3DSPoseFrame& Frame, bool bDebugPose);
 	void PopulatePoseFrameCurves(USkeletalMeshComponent* SkelComp, const FO3DSenderCurveConfig& CurveConfig, FO3DSPoseFrame& Frame, bool bDebugCurves);
@@ -299,6 +302,9 @@ private:
 	void TeardownAudioCapture();
 	void SyncAudioConfigSource();
 	int32 ResolveAudioDeviceIndex(const FName& DeviceName) const;
+	void EnsureSubjectNameCached(const USkeletalMeshComponent* SkelComp);
+	void InvalidateSubjectNameCache();
+	void PurgeSerializerCacheForSubject(const FString& Subject);
 
 	static bool ConsumeCaptureBudget(double NowSeconds, double& InOutLastCaptureTime, float CaptureRateHz);
 	static void BuildLocalBoneTransforms(const TArray<FTransform>& ComponentSpaceTransforms,

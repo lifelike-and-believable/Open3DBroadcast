@@ -8,6 +8,8 @@
 #include "HAL/CriticalSection.h"
 #include "HAL/ThreadSafeCounter.h"
 
+#include <vector>
+
 class FSocket;
 class ISocketSubsystem;
 class FInternetAddr;
@@ -48,6 +50,7 @@ private:
 
 	FO3DTransportConfig ActiveConfig;
 	FO3DTransportStats Stats;
+	mutable FCriticalSection StatsMutex;
 	FO3DTransportAudioConfig ActiveAudioConfig;
 
 	ISocketSubsystem* SocketSubsystem = nullptr;
@@ -70,4 +73,7 @@ private:
 	FThreadSafeCounter MessageCounter;
 	mutable FCriticalSection SubjectNameLock;
 	FString LastSubjectName;
+
+	std::vector<char> SerializationScratch;
+	std::vector<char> FragmentScratch;
 };

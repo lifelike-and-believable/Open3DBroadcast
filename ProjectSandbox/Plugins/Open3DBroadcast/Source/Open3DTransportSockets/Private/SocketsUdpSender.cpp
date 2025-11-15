@@ -1,5 +1,6 @@
 #include "SocketsUdpSender.h"
 
+#include "O3DAudioSenderSink.h"
 #include "O3DAudioSerialization.h"
 #include "O3DUnifiedMessage.h"
 #include "O3DTransportTypes.h"
@@ -19,34 +20,22 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogSocketsUdpSender, Log, All);
 
-class FSocketsUdpSenderAudioSink final : public IO3DSenderAudioSink
+class FSocketsUdpSenderAudioSink final : public FO3DSenderAudioSinkBase
 {
 public:
 	FSocketsUdpSenderAudioSink(FO3DSocketsUdpSender& InOwner, FO3DTransportAudioConfig InConfig)
-		: Owner(InOwner)
-		, AudioConfig(MoveTemp(InConfig))
+		: FO3DSenderAudioSinkBase(MoveTemp(InConfig))
+		, Owner(InOwner)
 	{
 	}
 
-	virtual bool SubmitPcm(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
+	virtual bool OnSubmitPcmInternal(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
 	{
-		if (!Interleaved || NumFrames <= 0 || NumChannels <= 0 || SampleRate <= 0)
-		{
-			return false;
-		}
-
-		FString EffectiveLabel = StreamLabel;
-		if (EffectiveLabel.IsEmpty())
-		{
-			EffectiveLabel = AudioConfig.StreamLabel;
-		}
-
-		return Owner.ProcessCapturedAudio(EffectiveLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
+		return Owner.ProcessCapturedAudio(StreamLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
 	}
 
 private:
 	FO3DSocketsUdpSender& Owner;
-	FO3DTransportAudioConfig AudioConfig;
 };
 
 FO3DSocketsUdpSender::FO3DSocketsUdpSender() = default;
@@ -61,7 +50,10 @@ bool FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& Config)
 	Stop();
 
 	ActiveConfig = Config;
-	Stats.Reset();
+	{
+		FScopeLock Lock(&StatsMutex);
+		Stats.Reset();
+	}
 	RemoteHost.Reset();
 	RemotePort = 0;
 	StreamId = ActiveConfig.StreamId;
@@ -73,6 +65,9 @@ bool FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& Config)
 
 	ActiveAudioConfig = Config.Audio;
 	AudioSourceGuid = FGuid::NewGuid();
+	SerializationScratch.clear();
+	SerializationScratch.reserve(512 * 1024);
+	FragmentScratch.clear();
 
 	if (!O3DSockets::ParseHostPort(Config, RemoteHost, RemotePort, TEXT("udp")))
 	{
@@ -96,6 +91,7 @@ bool FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& Config)
 	MaxDatagramBytes = FMath::Clamp(O3DSockets::GetIntOption(Config, O3DSockets::MaxDatagramOptionKey, 64000), 512, 65507);
 	MtuBytes = O3DSockets::GetIntOption(Config, O3DSockets::MtuOptionKey, 1200);
 	MtuBytes = FMath::Clamp(MtuBytes, 256, MaxDatagramBytes);
+	FragmentScratch.reserve(MaxDatagramBytes);
 
 	SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
 	if (!SocketSubsystem)
@@ -145,13 +141,16 @@ bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
 		ObservedSubject = UTF8_TO_TCHAR(List.mItems[0]->mName.c_str());
 	}
 
-	std::vector<char> Buffer;
+	SerializationScratch.clear();
 	const double Timestamp = FPlatformTime::Seconds();
-	int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(Buffer, Timestamp);
+	int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(SerializationScratch, Timestamp);
 	if (BytesWritten <= 0)
 	{
 		UE_LOG(LogSocketsUdpSender, Verbose, TEXT("UDP sender failed to serialize SubjectList."));
-		Stats.DroppedFrames++;
+		{
+			FScopeLock Lock(&StatsMutex);
+			Stats.DroppedFrames++;
+		}
 		return false;
 	}
 
@@ -161,14 +160,20 @@ bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
 		LastSubjectName = MoveTemp(ObservedSubject);
 	}
 
-	if (!SendPayload(Socket, RemoteAddr, reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten, TEXT("data")))
+	if (!SendPayload(Socket, RemoteAddr, reinterpret_cast<const uint8*>(SerializationScratch.data()), BytesWritten, TEXT("data")))
 	{
-		Stats.DroppedFrames++;
+		{
+			FScopeLock Lock(&StatsMutex);
+			Stats.DroppedFrames++;
+		}
 		return false;
 	}
 
-	Stats.FramesSent++;
-	Stats.BytesSent += BytesWritten;
+	{
+		FScopeLock Lock(&StatsMutex);
+		Stats.FramesSent++;
+		Stats.BytesSent += BytesWritten;
+	}
 	return true;
 }
 
@@ -179,6 +184,7 @@ void FO3DSocketsUdpSender::Tick(float /*DeltaSeconds*/)
 
 FO3DTransportStats FO3DSocketsUdpSender::GetStats() const
 {
+	FScopeLock Lock(&StatsMutex);
 	return Stats;
 }
 
@@ -369,9 +375,9 @@ bool FO3DSocketsUdpSender::SendFragmented(FSocket* InSocket, const TSharedPtr<FI
 
 	for (uint32 Seq = 0; Seq < static_cast<uint32>(Fragmenter.mFrames); ++Seq)
 	{
-		std::vector<char> Out;
-		Fragmenter.makeFragment(MessageId, Seq, Out);
-		if (!SendDatagram(InSocket, InAddr, reinterpret_cast<const uint8*>(Out.data()), static_cast<int32>(Out.size()), Context))
+		FragmentScratch.clear();
+		Fragmenter.makeFragment(MessageId, Seq, FragmentScratch);
+		if (!SendDatagram(InSocket, InAddr, reinterpret_cast<const uint8*>(FragmentScratch.data()), static_cast<int32>(FragmentScratch.size()), Context))
 		{
 			UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP %s fragment send failed (seq=%u/%llu)."), Context ? Context : TEXT("data"), Seq, static_cast<unsigned long long>(Fragmenter.mFrames));
 			return false;
@@ -441,6 +447,9 @@ bool FO3DSocketsUdpSender::SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame
 		return false;
 	}
 
-	Stats.BytesSent += UnifiedAudioScratch.Num();
+	{
+		FScopeLock Lock(&StatsMutex);
+		Stats.BytesSent += UnifiedAudioScratch.Num();
+	}
 	return true;
 }

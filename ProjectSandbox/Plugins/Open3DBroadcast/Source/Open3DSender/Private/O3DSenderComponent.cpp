@@ -63,6 +63,7 @@ UO3DSenderComponent::UO3DSenderComponent()
 	TransportController.Reset(new FO3DSenderTransportController());
 	CurveProcessor.Reset(new FO3DSenderCurveProcessor());
 	SyncAudioConfigSource();
+	LastSubjectSourceValue = SubjectName;
 }
 
 void UO3DSenderComponent::BeginPlay()
@@ -103,6 +104,7 @@ void UO3DSenderComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 			Serializer->OnSubjectListReady.Remove(SubjectListHandle);
 			SubjectListHandle.Reset();
 		}
+		Serializer->ClearAllCaches();
 		Serializer.Reset();
 	}
 
@@ -226,12 +228,14 @@ void UO3DSenderComponent::StopCapture()
 		return;
 	}
 
+	InvalidateSubjectNameCache();
 	UnbindFromTarget();
 	bIsCapturing = false;
 
 	if (Serializer)
 	{
 		Serializer->Detach(this);
+		Serializer->ClearAllCaches();
 	}
 
 	if (CurveProcessor.IsValid())
@@ -737,6 +741,52 @@ FString UO3DSenderComponent::SanitizeSubjectName(const FString& Raw) const
 	return O3DHelpers::SanitizeSubjectName(Raw);
 }
 
+void UO3DSenderComponent::EnsureSubjectNameCached(const USkeletalMeshComponent* SkelComp)
+{
+	USkeletalMesh* Mesh = SkelComp ? SkelComp->GetSkeletalMeshAsset() : nullptr;
+	const bool bSubjectOverrideChanged = (LastSubjectSourceValue != SubjectName);
+	const bool bMeshChanged = CachedSubjectMeshForName.Get() != Mesh;
+
+	if (!bSubjectOverrideChanged && !bMeshChanged && !CachedSubjectName.IsEmpty())
+	{
+		return;
+	}
+
+	const FString PreviousName = CachedSubjectName;
+	CachedSubjectName = BuildSubjectName(SkelComp);
+	CachedSubjectMeshForName = Mesh;
+	LastSubjectSourceValue = SubjectName;
+
+	if (!PreviousName.IsEmpty() && !PreviousName.Equals(CachedSubjectName, ESearchCase::CaseSensitive))
+	{
+		PurgeSerializerCacheForSubject(PreviousName);
+	}
+}
+
+void UO3DSenderComponent::InvalidateSubjectNameCache()
+{
+	if (!CachedSubjectName.IsEmpty())
+	{
+		PurgeSerializerCacheForSubject(CachedSubjectName);
+	}
+	CachedSubjectName.Reset();
+	CachedSubjectMeshForName.Reset();
+	LastSubjectSourceValue = SubjectName;
+}
+
+void UO3DSenderComponent::PurgeSerializerCacheForSubject(const FString& Subject)
+{
+	if (Subject.IsEmpty())
+	{
+		return;
+	}
+
+	if (Serializer)
+	{
+		Serializer->RemoveSubjectCache(Subject);
+	}
+}
+
 uint64 UO3DSenderComponent::ComputeDescriptorHash(const TArray<FName>& InNames, const TArray<int32>& InParents) const
 {
 	return O3DHelpers::HashNamesAndParents(InNames, InParents);
@@ -751,8 +801,9 @@ void UO3DSenderComponent::EnsureSkeletonCache(USkeletalMeshComponent* SkelComp)
 
 	USkeletalMesh* Mesh = SkelComp->GetSkeletalMeshAsset();
 	USkeleton* Skeleton = Mesh ? Mesh->GetSkeleton() : nullptr;
+	const FName CurrentMeshName = Mesh ? Mesh->GetFName() : NAME_None;
 
-	if (CachedSkeletalMesh.Get() != Mesh || CachedSkeleton.Get() != Skeleton)
+	if (CachedSkeletalMesh.Get() != Mesh || CachedSkeleton.Get() != Skeleton || CachedSkeletalMeshName != CurrentMeshName)
 	{
 		RefreshSkeletonCache(SkelComp);
 		if (CurveProcessor.IsValid())
@@ -764,35 +815,38 @@ void UO3DSenderComponent::EnsureSkeletonCache(USkeletalMeshComponent* SkelComp)
 
 void UO3DSenderComponent::RefreshSkeletonCache(USkeletalMeshComponent* SkelComp)
 {
-	BoneNames.Reset();
-	ParentIndices.Reset();
-
 	USkeletalMesh* Mesh = SkelComp ? SkelComp->GetSkeletalMeshAsset() : nullptr;
 	USkeleton* Skeleton = Mesh ? Mesh->GetSkeleton() : nullptr;
 	CachedSkeletalMesh = Mesh;
 	CachedSkeleton = Skeleton;
+	CachedSkeletalMeshName = Mesh ? Mesh->GetFName() : NAME_None;
 
 	if (!Mesh)
 	{
+		DescriptorCache.Reset();
+		bDescriptorDirty = true;
 		return;
 	}
 
+	const uint64 PreviousHash = DescriptorCache.Hash;
+	const int32 PreviousCount = DescriptorCache.BoneNames.Num();
+
+	DescriptorCache.BoneNames.Reset();
+	DescriptorCache.ParentIndices.Reset();
+
 	const FReferenceSkeleton& RefSkel = Mesh->GetRefSkeleton();
 	const int32 NumBones = RefSkel.GetNum();
-	BoneNames.Reserve(NumBones);
-	ParentIndices.Reserve(NumBones);
+	DescriptorCache.BoneNames.Reserve(NumBones);
+	DescriptorCache.ParentIndices.Reserve(NumBones);
 
 	for (int32 BoneIndex = 0; BoneIndex < NumBones; ++BoneIndex)
 	{
-		BoneNames.Add(RefSkel.GetBoneName(BoneIndex));
-		ParentIndices.Add(RefSkel.GetParentIndex(BoneIndex));
+		DescriptorCache.BoneNames.Add(RefSkel.GetBoneName(BoneIndex));
+		DescriptorCache.ParentIndices.Add(RefSkel.GetParentIndex(BoneIndex));
 	}
 
-	const uint64 NewHash = ComputeDescriptorHash(BoneNames, ParentIndices);
-	const bool bChanged = !DescriptorCache.IsValid() || DescriptorCache.BoneNames.Num() != BoneNames.Num() || DescriptorCache.Hash != NewHash;
-
-	DescriptorCache.BoneNames = BoneNames;
-	DescriptorCache.ParentIndices = ParentIndices;
+	const uint64 NewHash = ComputeDescriptorHash(DescriptorCache.BoneNames, DescriptorCache.ParentIndices);
+	const bool bChanged = (PreviousHash != NewHash) || (PreviousCount != DescriptorCache.BoneNames.Num());
 	DescriptorCache.Hash = NewHash;
 	bDescriptorDirty = bChanged;
 
@@ -878,9 +932,10 @@ bool UO3DSenderComponent::CanCaptureThisFrame(double NowSeconds, USkeletalMeshCo
 	return true;
 }
 
-FString UO3DSenderComponent::ResolveSubjectName(const USkeletalMeshComponent* SkelComp) const
+FString UO3DSenderComponent::ResolveSubjectName(const USkeletalMeshComponent* SkelComp)
 {
-	return BuildSubjectName(SkelComp);
+	EnsureSubjectNameCached(SkelComp);
+	return CachedSubjectName;
 }
 
 FO3DSPoseFrame UO3DSenderComponent::CreateFrameShell(const USkeletalMeshComponent* SkelComp)
@@ -960,7 +1015,9 @@ void UO3DSenderComponent::PopulatePoseFrameBones(const USkeletalMeshComponent* S
 	}
 
 	const TArray<FTransform>& ComponentSpace = SkelComp->GetComponentSpaceTransforms();
-	const int32 NumBones = FMath::Min(ComponentSpace.Num(), BoneNames.Num());
+	const TArray<FName>& CachedBoneNames = DescriptorCache.BoneNames;
+	const TArray<int32>& CachedParentIndices = DescriptorCache.ParentIndices;
+	const int32 NumBones = FMath::Min(ComponentSpace.Num(), CachedBoneNames.Num());
 	if (NumBones <= 0)
 	{
 		Frame.BoneLocalTransforms.Reset();
@@ -980,11 +1037,11 @@ void UO3DSenderComponent::PopulatePoseFrameBones(const USkeletalMeshComponent* S
 		{
 			return INDEX_NONE;
 		}
-		if (!BoneNames.IsValidIndex(BoneIndex))
+		if (!CachedBoneNames.IsValidIndex(BoneIndex))
 		{
 			return INDEX_NONE;
 		}
-		const FName BoneName = BoneNames[BoneIndex];
+		const FName BoneName = CachedBoneNames[BoneIndex];
 		if (BoneName == NAME_None)
 		{
 			return INDEX_NONE;
@@ -997,7 +1054,7 @@ void UO3DSenderComponent::PopulatePoseFrameBones(const USkeletalMeshComponent* S
 		return SkelComp->GetBoneIndex(ParentBoneName);
 	};
 
-	BuildLocalBoneTransforms(ComponentSpace, ParentIndices, NumBones, ResolveFallbackParent, Frame.BoneLocalTransforms, ResolvedParentsPtr);
+	BuildLocalBoneTransforms(ComponentSpace, CachedParentIndices, NumBones, ResolveFallbackParent, Frame.BoneLocalTransforms, ResolvedParentsPtr);
 
 	if (bDebugPose)
 	{
@@ -1008,7 +1065,7 @@ void UO3DSenderComponent::PopulatePoseFrameBones(const USkeletalMeshComponent* S
 			const FTransform& Relative = Frame.BoneLocalTransforms[BoneIndex];
 			const FVector Translation = Relative.GetTranslation();
 			const FVector Scale = Relative.GetScale3D();
-			const FName BoneName = BoneNames.IsValidIndex(BoneIndex) ? BoneNames[BoneIndex] : NAME_None;
+			const FName BoneName = CachedBoneNames.IsValidIndex(BoneIndex) ? CachedBoneNames[BoneIndex] : NAME_None;
 			UE_LOG(LogO3DSenderComponent, Verbose, TEXT("[%d] %s Parent=%d Pos(%.2f,%.2f,%.2f) Scale(%.2f,%.2f,%.2f)"),
 				BoneIndex,
 				*BoneName.ToString(),
@@ -1126,6 +1183,12 @@ void UO3DSenderComponent::PostEditChangeProperty(FPropertyChangedEvent& Property
 	else if (Prop == GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioInputDevice))
 	{
 		AudioCaptureConfig.DeviceIndex = ResolveAudioDeviceIndex(AudioInputDevice);
+	}
+
+	if (Prop == GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, SubjectName) ||
+		Prop == GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TargetMesh))
+	{
+		InvalidateSubjectNameCache();
 	}
 
 	if (RestartProps.Contains(Prop))

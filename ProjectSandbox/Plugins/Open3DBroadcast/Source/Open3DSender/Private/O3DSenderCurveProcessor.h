@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Containers/BitArray.h"
 
 class USkeletalMeshComponent;
 
@@ -36,6 +37,10 @@ public:
 
 private:
     void RefreshCurveCache(USkeletalMeshComponent* SkelComp, const FO3DSenderCurveConfig& Config);
+    void UpdatePatternCacheIfNeeded(const FO3DSenderCurveConfig& Config);
+    uint32 ComputePatternHash(const FO3DSenderCurveConfig& Config) const;
+    static uint32 HashPatternList(const TArray<FString>* Patterns);
+    bool EvaluatePatternForName(const FString& Name, const FO3DSenderCurveConfig& Config) const;
     bool IsCurveAllowedByPatterns(const FString& Name, const FO3DSenderCurveConfig& Config) const;
 
 private:
@@ -46,4 +51,23 @@ private:
     TSet<FName> MorphNameSet;
     TSet<FName> CurveNameSet;
     bool bCurveCacheInitialized = false;
+    int32 CurveRevision = 0;
+
+    struct FCurvePatternCache
+    {
+        uint32 PatternHash = 0;
+        int32 CachedCurveRevision = -1;
+        TBitArray<> AllowedMask;
+        bool bHasActiveFilters = false;
+
+        void Reset()
+        {
+            PatternHash = 0;
+            CachedCurveRevision = -1;
+            AllowedMask.Reset();
+            bHasActiveFilters = false;
+        }
+    };
+
+    FCurvePatternCache PatternCache;
 };

@@ -83,4 +83,5 @@ private:
     double LastErrorLogTimestamp = 0.0;
     double LastBackoffAttemptTime = 0.0;
     int32 BackoffAttempt = 0;
+    double LastBackpressureLogTimestamp = 0.0;
 };

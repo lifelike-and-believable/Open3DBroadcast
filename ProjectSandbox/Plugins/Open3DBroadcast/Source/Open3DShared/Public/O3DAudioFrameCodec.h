@@ -60,6 +60,7 @@ namespace O3DAudio
 		bool bOpusReady = false;
 		FO3DAudioOpusEncoder OpusEncoder;
 		TArray<int16> PCM16Scratch;
+		int32 PCM16ScratchCapacity = 0;
 	};
 
 	/**

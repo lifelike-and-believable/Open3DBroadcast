@@ -10,6 +10,7 @@
 #include "HAL/RunnableThread.h"
 #include "Misc/ScopeLock.h"
 #include "O3DAudioFrameCodec.h"
+#include "O3DAudioSenderSink.h"
 #include "O3DUnifiedMessage.h"
 
 #include "o3ds/model.h"
@@ -36,34 +37,22 @@ namespace
 /**
  * Audio sink implementation for NNG sender that forwards captured audio through the configured codec.
  */
-class FO3DNngSender::FNngSenderAudioSink final : public IO3DSenderAudioSink
+class FO3DNngSender::FNngSenderAudioSink final : public FO3DSenderAudioSinkBase
 {
 public:
     explicit FNngSenderAudioSink(FO3DNngSender& InOwner, const FO3DTransportAudioConfig& InAudioConfig)
-        : Owner(InOwner)
-        , AudioConfig(InAudioConfig)
+        : FO3DSenderAudioSinkBase(InAudioConfig)
+        , Owner(InOwner)
     {
     }
 
-    virtual bool SubmitPcm(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
+    virtual bool OnSubmitPcmInternal(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
     {
-        if (!Interleaved || NumFrames <= 0 || NumChannels <= 0 || SampleRate <= 0)
-        {
-            return false;
-        }
-
-        FString EffectiveLabel = StreamLabel;
-        if (EffectiveLabel.IsEmpty())
-        {
-            EffectiveLabel = AudioConfig.StreamLabel;
-        }
-
-        return Owner.ProcessCapturedAudio(EffectiveLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
+        return Owner.ProcessCapturedAudio(StreamLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
     }
 
 private:
     FO3DNngSender& Owner;
-    FO3DTransportAudioConfig AudioConfig;
 };
 
 namespace
@@ -163,6 +152,7 @@ bool FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
     }
 
     Options.MaxQueueBytes = FMath::Clamp<uint64>(Options.MaxQueueBytes, kMinQueueBytes, kMaxQueueBytes);
+    UE_LOG(LogO3DNngSender, Log, TEXT("NNG sender queue limit set to %llu bytes"), Options.MaxQueueBytes);
 
     ActiveConfig = Config;
     ActiveAudioConfig = Config.Audio;
@@ -179,6 +169,7 @@ bool FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
     BackoffAttempt = 0;
     LastBackoffAttemptTime = 0.0;
     LastErrorLogTimestamp = 0.0;
+    LastBackpressureLogTimestamp = 0.0;
 
     bInitialized = true;
     return true;
@@ -480,6 +471,14 @@ bool FO3DNngSender::EnqueuePayload(const uint8* Data, int32 Size)
     const uint64 Pending = QueueBytes.Load();
     if (Options.MaxQueueBytes > 0 && Pending + static_cast<uint64>(Size) > Options.MaxQueueBytes)
     {
+        const double Now = FPlatformTime::Seconds();
+        if (Now - LastBackpressureLogTimestamp > 0.5)
+        {
+            UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender queue full (pending=%llu / limit=%llu bytes). Dropping frame."),
+                Pending,
+                Options.MaxQueueBytes);
+            LastBackpressureLogTimestamp = Now;
+        }
         return false;
     }
 

@@ -70,6 +70,28 @@ void FO3DSenderSerializer::Detach(UO3DSenderComponent* InComponent)
 		Component = nullptr;
 	}
 	GInstances.Remove(this);
+	ClearAllCaches();
+}
+
+void FO3DSenderSerializer::RemoveSubjectCache(const FString& Subject)
+{
+	if (Subject.IsEmpty())
+	{
+		return;
+	}
+
+	if (SubjectState.Remove(Subject) > 0)
+	{
+		UE_LOG(LogO3DSenderSerializer, Verbose, TEXT("Removed serializer cache for subject '%s'"), *Subject);
+	}
+}
+
+void FO3DSenderSerializer::ClearAllCaches()
+{
+	if (SubjectState.Num() > 0)
+	{
+		SubjectState.Empty();
+	}
 }
 
 /** Refresh the per-subject skeleton cache, invalidating pending descriptor state if the hash changes. */

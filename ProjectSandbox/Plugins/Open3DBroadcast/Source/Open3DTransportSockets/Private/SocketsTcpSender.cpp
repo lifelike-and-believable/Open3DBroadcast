@@ -1,6 +1,7 @@
 #include "SocketsTcpSender.h"
 #include "SocketsTcpAudio.h"
 #include "SocketsTcpTransport.h"
+#include "O3DAudioSenderSink.h"
 #include "O3DTransportTypes.h"
 #include "O3DUnifiedMessage.h"
 
@@ -43,34 +44,22 @@ private:
 	FO3DSocketsTcpSender& Owner;
 };
 
-class FSocketsTcpSenderAudioSink final : public IO3DSenderAudioSink
+class FSocketsTcpSenderAudioSink final : public FO3DSenderAudioSinkBase
 {
 public:
 	FSocketsTcpSenderAudioSink(FO3DSocketsTcpSender& InOwner, FO3DTransportAudioConfig InConfig)
-		: Owner(InOwner)
-		, AudioConfig(MoveTemp(InConfig))
+		: FO3DSenderAudioSinkBase(MoveTemp(InConfig))
+		, Owner(InOwner)
 	{
 	}
 
-	virtual bool SubmitPcm(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
+	virtual bool OnSubmitPcmInternal(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
 	{
-		if (!Interleaved || NumFrames <= 0 || NumChannels <= 0 || SampleRate <= 0)
-		{
-			return false;
-		}
-
-		FString EffectiveLabel = StreamLabel;
-		if (EffectiveLabel.IsEmpty())
-		{
-			EffectiveLabel = AudioConfig.StreamLabel;
-		}
-
-		return Owner.ProcessCapturedAudio(EffectiveLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
+		return Owner.ProcessCapturedAudio(StreamLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
 	}
 
 private:
 	FO3DSocketsTcpSender& Owner;
-	FO3DTransportAudioConfig AudioConfig;
 };
 
 FO3DSocketsTcpSender::FO3DSocketsTcpSender() = default;

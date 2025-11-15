@@ -61,6 +61,7 @@ namespace O3DAudio
 		bInitialized = true;
 		bOpusReady = false;
 		PCM16Scratch.Reset();
+		PCM16ScratchCapacity = 0;
 		return true;
 	}
 
@@ -185,6 +186,13 @@ namespace O3DAudio
 		}
 
 		// PCM16 path (default or Opus fallback)
+		const int32 DesiredCapacity = NumSamples + (NumSamples / 2);
+		if (PCM16ScratchCapacity < DesiredCapacity)
+		{
+			PCM16Scratch.Reserve(DesiredCapacity);
+			PCM16ScratchCapacity = DesiredCapacity;
+		}
+
 		PCM16Scratch.SetNumUninitialized(NumSamples);
 		for (int32 SampleIndex = 0; SampleIndex < NumSamples; ++SampleIndex)
 		{

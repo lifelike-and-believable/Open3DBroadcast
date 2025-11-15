@@ -2,30 +2,28 @@
 
 #include "Logging/LogMacros.h"
 #include "HAL/PlatformTime.h"
+#include "O3DAudioSenderSink.h"
 
 #include "o3ds/model.h"
 
 #include <vector>
 
-class FLoopbackSenderAudioSink final : public IO3DSenderAudioSink
+class FLoopbackSenderAudioSink final : public FO3DSenderAudioSinkBase
 {
 public:
     FLoopbackSenderAudioSink(FO3DLoopbackSender& InOwner,
                              TWeakPtr<FO3DLoopbackChannel, ESPMode::ThreadSafe> InChannel,
-                             FString InChannelKey)
-        : Owner(InOwner)
+                             FString InChannelKey,
+                             FO3DTransportAudioConfig InConfig)
+        : FO3DSenderAudioSinkBase(MoveTemp(InConfig))
+        , Owner(InOwner)
         , Channel(MoveTemp(InChannel))
         , ChannelKey(MoveTemp(InChannelKey))
     {
     }
 
-    virtual bool SubmitPcm(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
+    virtual bool OnSubmitPcmInternal(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
     {
-        if (!Interleaved || NumFrames <= 0 || NumChannels <= 0 || SampleRate <= 0)
-        {
-            return false;
-        }
-
         TSharedPtr<FO3DLoopbackChannel, ESPMode::ThreadSafe> PinnedChannel = Channel.Pin();
         if (!PinnedChannel.IsValid())
         {
@@ -46,8 +44,10 @@ public:
 
         const FString SubjectForAudio = PinnedChannel->GetLastSubjectName();
 
+        const FString LabelForPacket = StreamLabel.IsEmpty() ? ChannelKey : StreamLabel;
+
         O3DAudio::FEncodedFrame EncodedFrame;
-        if (!Owner.EncodeAudioFrame(StreamLabel, SubjectForAudio, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, EncodedFrame))
+        if (!Owner.EncodeAudioFrame(LabelForPacket, SubjectForAudio, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, EncodedFrame))
         {
             return false;
         }
@@ -68,10 +68,9 @@ public:
             if (DebugLevel > 1 || Now - LastEnqueueLogTime > 0.25)
             {
                 const int32 PendingNow = PinnedChannel->AudioPendingCount.load();
-                const FString EffectiveLabel = StreamLabel.IsEmpty() ? ChannelKey : StreamLabel;
                 UE_LOG(LogO3DLoopbackTransport, Log, TEXT("Loopback audio enqueued channel='%s' label='%s' frames=%d channels=%d sr=%d pending=%d timestamp=%.3f"),
                     *ChannelKey,
-                    *EffectiveLabel,
+                    *LabelForPacket,
                     NumFrames,
                     NumChannels,
                     SampleRate,
@@ -108,7 +107,8 @@ bool FO3DLoopbackSender::Initialize(const FO3DTransportConfig& Config)
     Stats.Reset();
     ActiveAudioConfig = Config.Audio;
     const FString DefaultLabel = ActiveAudioConfig.StreamLabel.IsEmpty() ? ChannelKey : ActiveAudioConfig.StreamLabel;
-    bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, DefaultLabel.IsEmpty() ? ChannelKey : DefaultLabel, ChannelKey);
+    ActiveAudioConfig.StreamLabel = DefaultLabel.IsEmpty() ? ChannelKey : DefaultLabel;
+    bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, ActiveAudioConfig.StreamLabel, ChannelKey);
 
     if (!bInitialized)
     {
@@ -219,9 +219,10 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DLoopbackSender::CreateA
 
     ActiveAudioConfig = AudioConfig;
     const FString DefaultLabel = ActiveAudioConfig.StreamLabel.IsEmpty() ? ChannelKey : ActiveAudioConfig.StreamLabel;
-    bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, DefaultLabel.IsEmpty() ? ChannelKey : DefaultLabel, ChannelKey);
+    ActiveAudioConfig.StreamLabel = DefaultLabel.IsEmpty() ? ChannelKey : DefaultLabel;
+    bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, ActiveAudioConfig.StreamLabel, ChannelKey);
 
-    return MakeShared<FLoopbackSenderAudioSink, ESPMode::ThreadSafe>(*this, Channel, ChannelKey);
+    return MakeShared<FLoopbackSenderAudioSink, ESPMode::ThreadSafe>(*this, Channel, ChannelKey, ActiveAudioConfig);
 }
 
 bool FO3DLoopbackSender::EncodeAudioFrame(const FString& StreamLabelOverride,
