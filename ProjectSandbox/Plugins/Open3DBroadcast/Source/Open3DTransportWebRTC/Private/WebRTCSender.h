@@ -1,0 +1,61 @@
+#pragma once
+
+#include "O3DSenderInterface.h"
+#include "O3DTransportTypes.h"
+#include "HAL/CriticalSection.h"
+#include "Templates/Atomic.h"
+
+// Forward declare LiveKit FFI types
+struct LkClientHandle;
+
+DECLARE_LOG_CATEGORY_EXTERN(LogO3DWebRTCTransport, Log, All);
+
+/**
+ * WebRTC transport sender implementation using LiveKit FFI.
+ * Adapts the LiveKit FFI C ABI to the IOpen3DSender interface.
+ */
+class FO3DWebRTCSender : public IOpen3DSender
+{
+public:
+    FO3DWebRTCSender();
+    virtual ~FO3DWebRTCSender() override;
+
+    // IOpen3DSender interface
+    virtual bool Initialize(const FO3DTransportConfig& Config) override;
+    virtual bool Start() override;
+    virtual void Stop() override;
+    virtual bool Send(const O3DS::SubjectList& List) override;
+    virtual void Tick(float DeltaSeconds) override;
+    virtual FO3DTransportStats GetStats() const override;
+    virtual bool SupportsAudio() const override { return true; }
+    virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
+
+private:
+    friend class FWebRTCSenderAudioSink;
+
+    // Configuration
+    FO3DTransportConfig ActiveConfig;
+    FO3DTransportAudioConfig ActiveAudioConfig;
+    FString RoomUrl;
+    FString Token;
+
+    // LiveKit FFI client handle (opaque)
+    LkClientHandle* ClientHandle = nullptr;
+
+    // State
+    mutable FCriticalSection StateMutex;
+    TAtomic<bool> bInitialized{ false };
+    TAtomic<bool> bConnected{ false };
+
+    // Stats
+    mutable FCriticalSection StatsMutex;
+    FO3DTransportStats Stats;
+
+    // Helper methods
+    bool ParseConfig(const FO3DTransportConfig& Config);
+    void EnsureLiveKitFfiLoaded();
+
+    // LiveKit FFI callbacks (static)
+    struct FCallbacks;
+    static void OnConnectionState(void* user, int32_t state, int32_t reason_code, const char* message);
+};
