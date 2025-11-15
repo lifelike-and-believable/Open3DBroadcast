@@ -9,6 +9,9 @@
 // Forward declare LiveKit FFI types
 struct LkClientHandle;
 
+// Note: LiveKit FFI handles Opus decoding internally.
+// We receive PCM16 audio directly via the audio callback.
+
 /**
  * WebRTC transport receiver implementation using LiveKit FFI.
  * Adapts the LiveKit FFI C ABI to the IOpen3DReceiver interface.

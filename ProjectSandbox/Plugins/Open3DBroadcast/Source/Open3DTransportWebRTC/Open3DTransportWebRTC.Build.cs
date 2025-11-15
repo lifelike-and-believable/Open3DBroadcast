@@ -54,22 +54,10 @@ public class Open3DTransportWebRTC : ModuleRules
             RuntimeDependencies.Add(livekitFfiDllPath);
         }
 
-        // Opus library (plugin-level ThirdParty)
-        string opusLibPath = Path.Combine(pluginThirdPartyDir, "opus", "lib", platformSubdir, "opus.lib");
-        if (!File.Exists(opusLibPath))
-        {
-            throw new BuildException($"Missing required Opus library 'opus.lib' at '{opusLibPath}'.");
-        }
-        PublicAdditionalLibraries.Add(opusLibPath);
+        // Note: Opus library NOT needed - LiveKit FFI handles Opus encoding/decoding internally.
+        // We only provide/receive PCM16 audio at the API boundary.
 
-        // Opus include path
-        string opusIncludePath = Path.Combine(pluginThirdPartyDir, "Include");
-        if (Directory.Exists(opusIncludePath))
-        {
-            PublicIncludePaths.Add(opusIncludePath);
-        }
-
-        // Open3DStream core library includes
+        // Open3DStream core library includes (for O3DS::SubjectList and O3DS::FAudioFrameMeta)
         string o3dsIncludePath = Path.Combine(pluginThirdPartyDir, "open3dstream", "include");
         if (Directory.Exists(o3dsIncludePath))
         {

@@ -10,6 +10,9 @@ struct LkClientHandle;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogO3DWebRTCTransport, Log, All);
 
+// Note: LiveKit FFI handles Opus encoding internally.
+// We only need to provide PCM16 audio via lk_publish_audio_pcm_i16().
+
 /**
  * WebRTC transport sender implementation using LiveKit FFI.
  * Adapts the LiveKit FFI C ABI to the IOpen3DSender interface.
