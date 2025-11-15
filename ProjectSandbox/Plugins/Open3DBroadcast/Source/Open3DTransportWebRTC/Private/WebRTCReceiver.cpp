@@ -84,6 +84,7 @@ void FO3DWebRTCReceiver::OnAudioReceived(void* user, const int16_t* pcm_interlea
 
     {
         FScopeLock Lock(&Self->StatsMutex);
+        Self->Stats.FramesReceived++;  // Count audio frames
         Self->Stats.BytesReceived += frames_per_channel * channels * sizeof(int16);
     }
 
