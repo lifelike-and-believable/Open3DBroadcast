@@ -12,11 +12,23 @@ namespace
 {
     static void* GLiveKitFfiHandle = nullptr;
 
-    static void EnsureFfiLoaded()
+    /// Attempts to load the LiveKit FFI DLL if not already loaded.
+    /// 
+    /// This function searches for livekit_ffi.dll in two locations:
+    /// 1. Plugin Binaries folder (staged by Build.cs during packaging)
+    /// 2. ThirdParty folder (development builds)
+    /// 
+    /// @return true if the DLL is already loaded or was successfully loaded, false otherwise.
+    /// 
+    /// Note: Callers should verify that LiveKit FFI function calls succeed by checking
+    /// ClientHandle != nullptr after calling lk_client_create() and checking error codes
+    /// in LkResult structures. A false return indicates the DLL could not be loaded and
+    /// all LiveKit FFI functions will fail.
+    static bool EnsureFfiLoaded()
     {
         if (GLiveKitFfiHandle)
         {
-            return;
+            return true;
         }
 
 #if PLATFORM_WINDOWS
@@ -45,16 +57,22 @@ namespace
             {
                 GLiveKitFfiHandle = Handle;
                 UE_LOG(LogO3DWebRTCSender, Log, TEXT("LiveKit FFI loaded: %s"), *Candidate);
+                return true;
             }
             else
             {
-                UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to load LiveKit FFI from %s"), *Candidate);
+                UE_LOG(LogO3DWebRTCSender, Error, TEXT("Failed to load LiveKit FFI from %s"), *Candidate);
+                return false;
             }
         }
         else
         {
-            UE_LOG(LogO3DWebRTCSender, Warning, TEXT("LiveKit FFI DLL not found at: %s"), *Candidate);
+            UE_LOG(LogO3DWebRTCSender, Error, TEXT("LiveKit FFI DLL not found at: %s"), *Candidate);
+            return false;
         }
+#else
+        // Non-Windows platforms not yet supported
+        return false;
 #endif
     }
 
@@ -163,6 +181,7 @@ void FO3DWebRTCSender::OnConnectionState(void* user, LkConnectionState state, in
 
 FO3DWebRTCSender::FO3DWebRTCSender()
 {
+    // Attempt to load FFI DLL early, but Initialize() will check again and fail gracefully if needed
     EnsureFfiLoaded();
 }
 
@@ -183,6 +202,13 @@ bool FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
 
     if (!ParseConfig(Config))
     {
+        return false;
+    }
+
+    // Ensure LiveKit FFI DLL is loaded before attempting to use it
+    if (!EnsureFfiLoaded())
+    {
+        UE_LOG(LogO3DWebRTCSender, Error, TEXT("Cannot initialize WebRTC sender: LiveKit FFI DLL could not be loaded"));
         return false;
     }
 
