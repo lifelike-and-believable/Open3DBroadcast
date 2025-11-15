@@ -65,14 +65,15 @@ void FO3DWebRTCReceiver::OnDataReceived(void* user, const uint8_t* bytes, size_t
         Self->AccumulateLatency(10.0); // Placeholder: 10ms assumed latency
     }
 
-    // Forward to consumer
-    if (Self->Consumer.IsValid())
+    // Queue data frame for processing on game thread via Poll()
+    // This callback executes on a LiveKit worker thread, so we must not call
+    // Consumer->SubmitFrame() directly (see §2 Threading guideline)
     {
-        TArray<uint8> Payload;
-        Payload.AddUninitialized((int32)len);
-        FMemory::Memcpy(Payload.GetData(), bytes, len);
-
-        Self->Consumer->SubmitFrame(Self->SubjectName, Payload, NowSeconds);
+        FScopeLock Lock(&Self->DataQueueMutex);
+        FQueuedDataFrame& Frame = Self->DataQueue.AddDefaulted_GetRef();
+        Frame.Payload.AddUninitialized((int32)len);
+        FMemory::Memcpy(Frame.Payload.GetData(), bytes, len);
+        Frame.TimestampSeconds = NowSeconds;
     }
 }
 
@@ -285,6 +286,12 @@ void FO3DWebRTCReceiver::Stop()
     Consumer.Reset();
     AudioSink.Reset();
 
+    // Clear any queued data frames
+    {
+        FScopeLock DataLock(&DataQueueMutex);
+        DataQueue.Reset();
+    }
+
     bConnected.Store(false);
     bInitialized.Store(false);
 
@@ -293,9 +300,34 @@ void FO3DWebRTCReceiver::Stop()
 
 int32 FO3DWebRTCReceiver::Poll()
 {
-    // LiveKit FFI delivers data via callbacks, so Poll() is a no-op
-    // Callbacks handle data delivery directly
-    return 0;
+    // Process queued data frames received from LiveKit callbacks
+    // Poll() is always called from the game thread, so this is where we
+    // safely forward frames to the consumer
+    
+    TArray<FQueuedDataFrame> FramesToProcess;
+    {
+        FScopeLock Lock(&DataQueueMutex);
+        if (DataQueue.Num() == 0)
+        {
+            return 0;
+        }
+        
+        // Swap to process frames outside the lock
+        FramesToProcess = MoveTemp(DataQueue);
+        DataQueue.Reset();
+    }
+
+    int32 FramesProcessed = 0;
+    if (Consumer.IsValid())
+    {
+        for (const FQueuedDataFrame& Frame : FramesToProcess)
+        {
+            Consumer->SubmitFrame(SubjectName, Frame.Payload, Frame.TimestampSeconds);
+            ++FramesProcessed;
+        }
+    }
+
+    return FramesProcessed;
 }
 
 FO3DTransportStats FO3DWebRTCReceiver::GetStats() const

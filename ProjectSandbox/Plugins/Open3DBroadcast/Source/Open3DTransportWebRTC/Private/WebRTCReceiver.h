@@ -59,6 +59,15 @@ private:
     FO3DTransportStats Stats;
     int64 LatencySamples = 0;
 
+    // Data frame queue (for thread-safe callback -> Poll() handoff)
+    struct FQueuedDataFrame
+    {
+        TArray<uint8> Payload;
+        double TimestampSeconds;
+    };
+    mutable FCriticalSection DataQueueMutex;
+    TArray<FQueuedDataFrame> DataQueue;
+
     // Helper methods
     bool ParseConfig(const FO3DTransportConfig& Config);
     void AccumulateLatency(double LatencyMs);
