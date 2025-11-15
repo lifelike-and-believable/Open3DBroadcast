@@ -1,7 +1,7 @@
 #include "SocketsTcpSender.h"
 #include "SocketsTcpAudio.h"
 #include "SocketsTcpTransport.h"
-#include "O3DAudioSenderSink.h"
+#include "O3DSenderAudioSinkBase.h"
 #include "O3DTransportTypes.h"
 #include "O3DUnifiedMessage.h"
 

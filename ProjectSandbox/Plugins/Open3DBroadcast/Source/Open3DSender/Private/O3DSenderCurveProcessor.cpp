@@ -76,12 +76,16 @@ void FO3DSenderCurveProcessor::CaptureCurves(USkeletalMeshComponent* SkelComp, b
             }
         }
 
-        float OutValue = 0.0f;
-        if (SkelComp->GetCurveValue(Name, 0.0f, OutValue))
+        // In UE 5.4+, curve values are accessed from AnimInstance, not GetCurveValue
+        // Try to get from AnimInstance first
+        if (UAnimInstance* AnimInstance = SkelComp->GetAnimInstance())
         {
-            Value = OutValue;
+            // GetCurveValue on AnimInstance to get evaluated curve
+            Value = AnimInstance->GetCurveValue(Name);
         }
-        else if (MorphNameSet.Contains(Name))
+
+        // Fallback for morphs
+        if (Value == 0.0f && MorphNameSet.Contains(Name))
         {
             Value = SkelComp->GetMorphTarget(Name);
         }

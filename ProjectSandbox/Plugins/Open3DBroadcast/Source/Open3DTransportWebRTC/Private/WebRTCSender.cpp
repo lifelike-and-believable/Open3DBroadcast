@@ -1,4 +1,5 @@
 #include "WebRTCSender.h"
+#include "WebRTCUtils.h"
 #include "HAL/PlatformTime.h"
 #include "HAL/PlatformProcess.h"
 #include "Logging/LogMacros.h"
@@ -8,13 +9,7 @@
 #include "o3ds/model.h"
 #include <vector>
 
-namespace
-{
-    static FString FromAnsi(const char* S)
-    {
-        return S ? FString(UTF8_TO_TCHAR(S)) : FString();
-    }
-}
+using WebRTCUtils::FromAnsi;
 
 /**
  * Audio sink implementation for WebRTC sender using LiveKit FFI.

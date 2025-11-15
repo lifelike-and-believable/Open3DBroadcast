@@ -10,7 +10,7 @@
 #include "HAL/RunnableThread.h"
 #include "Misc/ScopeLock.h"
 #include "O3DAudioFrameCodec.h"
-#include "O3DAudioSenderSink.h"
+#include "O3DSenderAudioSinkBase.h"
 #include "O3DUnifiedMessage.h"
 
 #include "o3ds/model.h"

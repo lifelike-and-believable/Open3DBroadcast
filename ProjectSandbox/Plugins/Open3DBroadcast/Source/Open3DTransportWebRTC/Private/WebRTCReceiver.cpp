@@ -1,16 +1,11 @@
 #include "WebRTCReceiver.h"
+#include "WebRTCUtils.h"
 #include "HAL/PlatformTime.h"
 #include "Logging/LogMacros.h"
 #include "livekit_ffi.h"
 #include "o3ds/model.h"
 
-namespace
-{
-    static FString FromAnsi(const char* S)
-    {
-        return S ? FString(UTF8_TO_TCHAR(S)) : FString();
-    }
-}
+using WebRTCUtils::FromAnsi;
 
 // Static callback for connection state changes
 void FO3DWebRTCReceiver::OnConnectionState(void* user, LkConnectionState state, int32_t reason_code, const char* message)

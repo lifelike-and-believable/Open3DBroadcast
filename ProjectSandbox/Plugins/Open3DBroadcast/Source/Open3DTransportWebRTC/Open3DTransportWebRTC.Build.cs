@@ -48,12 +48,15 @@ public class Open3DTransportWebRTC : ModuleRules
         }
         PublicIncludePaths.Add(livekitFfiIncludePath);
 
-        // Stage LiveKit FFI DLL to Binaries folder
+        // LiveKit FFI DLL - use delay-load to allow custom path loading
         string livekitFfiDllPath = Path.Combine(moduleThirdPartyDir, "livekit_ffi", "bin", platformSubdir, "livekit_ffi.dll");
         if (!File.Exists(livekitFfiDllPath))
         {
             throw new BuildException($"Missing required LiveKit FFI DLL at '{livekitFfiDllPath}'.");
         }
+        PublicDelayLoadDLLs.Add("livekit_ffi.dll");
+
+        // Register the DLL as a runtime dependency for packaging
         RuntimeDependencies.Add(livekitFfiDllPath);
 
         // Note: Opus library NOT needed - LiveKit FFI handles Opus encoding/decoding internally.

@@ -21,7 +21,18 @@
       "Bash(nul)",
       "Bash(find:*)",
       "Bash(findstr:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(\"C:\\Program Files\\Epic Games\\UE_5.6\\Engine\\Build\\BatchFiles\\Build.bat\" ProjectSandboxEditor Win64 Development \"e:\\OtherProjects\\Open3DStream\\ProjectSandbox\\ProjectSandbox.uproject\")",
+      "Bash(timeout 300 powershell:*)",
+      "Bash(\"C:\\Program Files\\Epic Games\\UE_5.6\\Engine\\Build\\BatchFiles\\Build.bat\" ProjectSandboxEditor Win64 Development \"e:\\OtherProjects\\Open3DStream\\ProjectSandbox\\ProjectSandbox.uproject\" -WaitMutex)",
+      "Bash(timeout 30 powershell:*)",
+      "Bash(xargs sed:*)",
+      "Bash(timeout 60 powershell:*)",
+      "Bash(Write-Host \"Build in progress...\")",
+      "Bash(git checkout:*)",
+      "Bash(\"C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Build\\BatchFiles\\Build.bat\" ProjectSandboxEditor Win64 Development \"e:\\OtherProjects\\Open3DStream\\ProjectSandbox\\ProjectSandbox.uproject\" -Module=Open3DTransportWebRTC)",
+      "Bash(Select-Object -Last 50)",
+      "Bash(\"C:\\Program Files\\Epic Games\\UE_5.6\\Engine\\Build\\BatchFiles\\Build.bat\" Open3DTransportWebRTC Win64 Development -Project=\"e:\\OtherProjects\\Open3DStream\\ProjectSandbox\\ProjectSandbox.uproject\")"
     ],
     "deny": [],
     "ask": []

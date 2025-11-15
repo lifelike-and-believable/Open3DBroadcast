@@ -700,26 +700,13 @@ void UO3DSenderComponent::BindToTarget()
 
 	EnsureSkeletonCache(TargetMesh.Get());
 
-	if (USkinnedMeshComponent* Skinned = TargetMesh.Get())
-	{
-		if (!BoneTransformsFinalizedHandle.IsValid())
-		{
-			BoneTransformsFinalizedHandle = Skinned->RegisterOnBoneTransformsFinalizedDelegate(
-				FOnBoneTransformsFinalizedMultiCast::FDelegate::CreateUObject(this, &UO3DSenderComponent::HandleBoneTransformsFinalized));
-		}
-	}
+	// Note: In UE 5.4+, RegisterOnBoneTransformsFinalizedDelegate was removed.
+	// Pose updates are now handled in TickComponent instead.
 }
 
 void UO3DSenderComponent::UnbindFromTarget()
 {
-	if (USkinnedMeshComponent* Skinned = TargetMesh.Get())
-	{
-		if (BoneTransformsFinalizedHandle.IsValid())
-		{
-			Skinned->UnregisterOnBoneTransformsFinalizedDelegate(BoneTransformsFinalizedHandle);
-			BoneTransformsFinalizedHandle.Reset();
-		}
-	}
+	// Note: Delegate unbinding no longer needed in UE 5.4+
 }
 
 FString UO3DSenderComponent::BuildSubjectName(const USkeletalMeshComponent* SkelComp) const
@@ -1127,6 +1114,9 @@ void UO3DSenderComponent::HandleBoneTransformsFinalized()
 void UO3DSenderComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	// In UE 5.4+, capture bone transforms in tick instead of via deprecated callback
+	HandleBoneTransformsFinalized();
 
 	if (TransportController.IsValid())
 	{

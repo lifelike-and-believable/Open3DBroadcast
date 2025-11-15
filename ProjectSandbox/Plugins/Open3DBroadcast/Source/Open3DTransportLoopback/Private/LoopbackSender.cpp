@@ -2,7 +2,7 @@
 
 #include "Logging/LogMacros.h"
 #include "HAL/PlatformTime.h"
-#include "O3DAudioSenderSink.h"
+#include "O3DSenderAudioSinkBase.h"
 
 #include "o3ds/model.h"
 

@@ -1,6 +1,6 @@
 #include "SocketsUdpSender.h"
 
-#include "O3DAudioSenderSink.h"
+#include "O3DSenderAudioSinkBase.h"
 #include "O3DAudioSerialization.h"
 #include "O3DUnifiedMessage.h"
 #include "O3DTransportTypes.h"

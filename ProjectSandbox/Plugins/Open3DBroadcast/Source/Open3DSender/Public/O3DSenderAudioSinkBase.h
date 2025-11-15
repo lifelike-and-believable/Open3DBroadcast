@@ -8,7 +8,7 @@
  * Lightweight helper base that validates audio submissions and normalises stream labels before
  * forwarding PCM frames to transport-specific implementations.
  */
-class OPEN3DSHARED_API FO3DSenderAudioSinkBase : public IO3DSenderAudioSink
+class OPEN3DSENDER_API FO3DSenderAudioSinkBase : public IO3DSenderAudioSink
 {
 public:
 	explicit FO3DSenderAudioSinkBase(FO3DTransportAudioConfig InConfig)
@@ -23,21 +23,7 @@ public:
 		int32 NumFrames,
 		int32 NumChannels,
 		int32 SampleRate,
-		double TimestampSec) override final
-	{
-		if (!Interleaved || NumFrames <= 0 || NumChannels <= 0 || SampleRate <= 0)
-		{
-			return false;
-		}
-
-		FString EffectiveLabel = StreamLabel;
-		if (EffectiveLabel.IsEmpty())
-		{
-			EffectiveLabel = AudioConfig.StreamLabel;
-		}
-
-		return OnSubmitPcmInternal(EffectiveLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
-	}
+		double TimestampSec) override final;
 
 protected:
 	virtual bool OnSubmitPcmInternal(const FString& ResolvedStreamLabel,
