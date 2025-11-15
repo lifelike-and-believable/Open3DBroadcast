@@ -8,7 +8,7 @@ namespace O3DSocketsConfig
 {
 	void ConfigureUdpSender(const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
 	{
-		Config.Transport = TEXT("sockets.udp");
+		Config.Transport = TEXT("UDP");
 		Config.Role = TEXT("sender");
 
 		const FString StoredHost = SenderComponent ? SenderComponent->GetTransportOption(O3DSockets::HostOptionKey) : FString();
@@ -51,7 +51,7 @@ namespace O3DSocketsConfig
 
 	void ConfigureUdpReceiver(const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
 	{
-		Config.Transport = TEXT("sockets.udp");
+		Config.Transport = TEXT("UDP");
 
 		const FString* HostOption = Settings.TransportOptions.Find(O3DSockets::HostOptionKey);
 		const FString Host = HostOption ? O3DSockets::NormaliseHostname(*HostOption) : FString(TEXT("0.0.0.0"));
