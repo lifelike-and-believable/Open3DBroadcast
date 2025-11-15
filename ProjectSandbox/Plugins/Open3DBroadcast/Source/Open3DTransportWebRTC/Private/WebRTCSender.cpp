@@ -10,54 +10,6 @@
 
 namespace
 {
-    static void* GLiveKitFfiHandle = nullptr;
-
-    static void EnsureFfiLoaded()
-    {
-        if (GLiveKitFfiHandle)
-        {
-            return;
-        }
-
-#if PLATFORM_WINDOWS
-        // Find the plugin base directory
-        FString PluginBaseDir;
-        TSharedPtr<IPlugin> PluginPtr = IPluginManager::Get().FindPlugin(TEXT("Open3DBroadcast"));
-        if (PluginPtr.IsValid())
-        {
-            PluginBaseDir = PluginPtr->GetBaseDir();
-        }
-
-        const FString DllName = TEXT("livekit_ffi.dll");
-        // Try Binaries folder first (staged by Build.cs)
-        FString Candidate = FPaths::Combine(PluginBaseDir, TEXT("Binaries"), TEXT("Win64"), DllName);
-
-        if (!FPaths::FileExists(Candidate))
-        {
-            // Fallback to ThirdParty/bin layout
-            Candidate = FPaths::Combine(PluginBaseDir, TEXT("Source"), TEXT("Open3DTransportWebRTC"), TEXT("ThirdParty"), TEXT("livekit_ffi"), TEXT("bin"), TEXT("Win64"), DllName);
-        }
-
-        if (FPaths::FileExists(Candidate))
-        {
-            void* Handle = FPlatformProcess::GetDllHandle(*Candidate);
-            if (Handle)
-            {
-                GLiveKitFfiHandle = Handle;
-                UE_LOG(LogO3DWebRTCSender, Log, TEXT("LiveKit FFI loaded: %s"), *Candidate);
-            }
-            else
-            {
-                UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to load LiveKit FFI from %s"), *Candidate);
-            }
-        }
-        else
-        {
-            UE_LOG(LogO3DWebRTCSender, Warning, TEXT("LiveKit FFI DLL not found at: %s"), *Candidate);
-        }
-#endif
-    }
-
     static FString FromAnsi(const char* S)
     {
         return S ? FString(UTF8_TO_TCHAR(S)) : FString();
