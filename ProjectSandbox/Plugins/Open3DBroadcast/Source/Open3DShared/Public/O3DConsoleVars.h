@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "HAL/IConsoleManager.h"
 
 // Extern declarations for console variables used across transports/connectors
 extern TAutoConsoleVariable<int32> CVarO3DWebRTCVerbose;

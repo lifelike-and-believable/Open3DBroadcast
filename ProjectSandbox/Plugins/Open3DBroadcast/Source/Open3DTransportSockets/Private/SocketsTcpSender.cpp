@@ -11,6 +11,7 @@
 #include "HAL/PlatformProcess.h"
 #include "HAL/Runnable.h"
 #include "HAL/RunnableThread.h"
+#include "HAL/Event.h"
 #include "Misc/ScopeLock.h"
 #include "Logging/LogMacros.h"
 

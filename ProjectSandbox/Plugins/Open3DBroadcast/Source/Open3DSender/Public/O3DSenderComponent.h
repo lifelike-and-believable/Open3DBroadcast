@@ -308,7 +308,7 @@ private:
 		TArray<FTransform>& OutLocalTransforms,
 		TArray<int32>* OutResolvedParents);
 
-#if WITH_AUTOMATION_TESTS
+#if defined(WITH_AUTOMATION_TESTS) && WITH_AUTOMATION_TESTS
 	friend struct FO3DSenderComponentTestHelper;
 #endif
 

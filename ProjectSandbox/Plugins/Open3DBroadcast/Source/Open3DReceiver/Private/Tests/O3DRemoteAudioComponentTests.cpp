@@ -3,7 +3,7 @@
 #include "O3DRemoteAudioComponent.h"
 #include "O3DReceiverSource.h"
 
-#if WITH_AUTOMATION_TESTS
+#if defined(WITH_DEV_AUTOMATION_TESTS) && WITH_DEV_AUTOMATION_TESTS
 
 #include "O3DAudioBus.h"
 

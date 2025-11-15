@@ -62,7 +62,8 @@ public class Open3DReceiver : ModuleRules
         {
             "Projects",
             "Slate",
-            "SlateCore"
+            "SlateCore",
+            "AudioMixer"
         });
 
         if (Target.bBuildEditor)

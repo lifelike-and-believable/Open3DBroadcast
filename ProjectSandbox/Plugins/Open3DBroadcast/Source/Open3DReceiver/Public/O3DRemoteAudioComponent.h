@@ -11,12 +11,11 @@
 class UAudioComponent;
 class USoundWaveProcedural;
 class USoundAttenuation;
-struct FSoundAttenuationSettings;
+//struct FSoundAttenuationSettings;
 class USoundSubmix;
 class USoundEffectSourcePresetChain;
 class USoundConcurrency;
 struct FSoundSubmixSendInfo;
-struct FSoundConcurrencySettings;
 struct FSoundModulationDestinationSettings;
 class USceneComponent;
 
@@ -83,8 +82,8 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attenuation", meta = (DisplayName = "Attenuation Settings", EditCondition = "!bAC_OverrideAttenuation", EditConditionHides, ToolTip = "Asset-based attenuation settings to apply when not overriding."))
     TObjectPtr<USoundAttenuation> AC_AttenuationSettings = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attenuation", meta = (DisplayName = "Attenuation Overrides", EditCondition = "bAC_OverrideAttenuation", EditConditionHides, ToolTip = "Per-instance attenuation overrides used when Override Attenuation is enabled."))
-    FSoundAttenuationSettings AC_AttenuationOverrides;
+    //UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attenuation", meta = (DisplayName = "Attenuation Overrides", EditCondition = "bAC_OverrideAttenuation", EditConditionHides, ToolTip = "Per-instance attenuation overrides used when Override Attenuation is enabled."))
+    //FSoundAttenuationSettings AC_AttenuationOverrides;
 
     /** Submix Sends. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Submix", meta = (DisplayName = "Submix Sends", ToolTip = "Routes this source to one or more submixes using configurable send levels."))
@@ -95,18 +94,18 @@ public:
     TObjectPtr<USoundEffectSourcePresetChain> AC_SourceEffectChain = nullptr;
 
     /** Modulation (basic volume/pitch destinations). */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Modulation", meta = (DisplayName = "Volume Modulation", ToolTip = "Modulation routing for source volume (if supported by this engine version)."))
-    FSoundModulationDestinationSettings AC_VolumeModulation;
+    //UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Modulation", meta = (DisplayName = "Volume Modulation", ToolTip = "Modulation routing for source volume (if supported by this engine version)."))
+    //FSoundModulationDestinationSettings AC_VolumeModulation;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Modulation", meta = (DisplayName = "Pitch Modulation", ToolTip = "Modulation routing for source pitch (if supported by this engine version)."))
-    FSoundModulationDestinationSettings AC_PitchModulation;
+    //UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Modulation", meta = (DisplayName = "Pitch Modulation", ToolTip = "Modulation routing for source pitch (if supported by this engine version)."))
+    //FSoundModulationDestinationSettings AC_PitchModulation;
 
     /** Concurrency. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Concurrency", meta = (DisplayName = "Concurrency Set", ToolTip = "Concurrency assets that limit how many instances of this sound can play."))
     TArray<TObjectPtr<USoundConcurrency>> AC_ConcurrencySet;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Concurrency", meta = (DisplayName = "Concurrency Overrides", ToolTip = "Per-instance concurrency overrides."))
-    FSoundConcurrencySettings AC_ConcurrencyOverrides;
+    // NOTE: Using asset-based concurrency (AC_ConcurrencySet) for all engine versions.
+    // This provides consistent behavior across UE 5.6+ and avoids per-instance struct initialization issues in UE 5.7+.
 
     /** Auto-activate the internal audio component. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Activation", meta = (DisplayName = "Auto Activate", ToolTip = "If true, the internal audio component auto-starts when the procedural sound is ready."))

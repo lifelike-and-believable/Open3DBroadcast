@@ -67,7 +67,7 @@ void UO3DRemoteAudioComponent::BeginPlay()
         AudioComp->bIsUISound = bAC_IsUISound;
         AudioComp->bOverrideAttenuation = bAC_OverrideAttenuation;
         AudioComp->AttenuationSettings = AC_AttenuationSettings;
-        AudioComp->AttenuationOverrides = AC_AttenuationOverrides;
+        //AudioComp->AttenuationOverrides = AC_AttenuationOverrides;
         AudioComp->SetPitchMultiplier(AC_PitchMultiplier);
         AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, AC_VolumeMultiplier * Gain));
         bOwnsAudioComponent = true;
@@ -159,7 +159,6 @@ void UO3DRemoteAudioComponent::EnsureSoundWave(int32 NumChannels, int32 SampleRa
             SoundWave->bProcedural = true;
             SoundWave->SourceEffectChain = AC_SourceEffectChain;
             SoundWave->SoundSubmixSends = AC_SubmixSends;
-            SoundWave->ConcurrencyOverrides = AC_ConcurrencyOverrides;
             SoundWave->ConcurrencySet.Reset();
             for (TObjectPtr<USoundConcurrency> Concurrency : AC_ConcurrencySet)
             {

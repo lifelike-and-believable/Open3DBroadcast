@@ -18,7 +18,10 @@
       "Bash(cat:*)",
       "Bash(wc:*)",
       "Bash(dir /b \"e:\\OtherProjects\\Open3DStream\\ProjectSandbox\\Plugins\\Open3DBroadcast\\Source\" 2)",
-      "Bash(nul)"
+      "Bash(nul)",
+      "Bash(find:*)",
+      "Bash(findstr:*)",
+      "Bash(dir:*)"
     ],
     "deny": [],
     "ask": []

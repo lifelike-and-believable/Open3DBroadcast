@@ -18,6 +18,11 @@
 		{
 			"Name": "LiveLink",
 			"Enabled": true
+		},
+		{
+			"Name": "PluginBuilder",
+			"Enabled": true,
+			"MarketplaceURL": "com.epicgames.launcher://ue/marketplace/content/8480a6b969b047aca3ab8957509730dd"
 		}
 	],
 	"TargetPlatforms": [

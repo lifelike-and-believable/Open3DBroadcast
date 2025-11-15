@@ -1,6 +1,6 @@
 // Copyright (c) Open3DStream Contributors
 
-#if WITH_AUTOMATION_TESTS
+#if WITH_DEV_AUTOMATION_TESTS
 
 #include "LoopbackSender.h"
 #include "LoopbackReceiver.h"
