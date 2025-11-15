@@ -56,7 +56,6 @@ private:
 
     // Helper methods
     bool ParseConfig(const FO3DTransportConfig& Config);
-    void EnsureLiveKitFfiLoaded();
 
     // LiveKit FFI callbacks (static)
     struct FCallbacks;
