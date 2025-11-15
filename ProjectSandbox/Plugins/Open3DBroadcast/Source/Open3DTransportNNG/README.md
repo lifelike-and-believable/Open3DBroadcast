@@ -30,10 +30,10 @@ nng://127.0.0.1:5555
 ```
 
 **Cloud Push/Pull via Repeater:**
-- Sender (Push): `tcp://127.0.0.1:7000`
+- Sender (Push): `tcp://52.89.47.134:7000`
 - Repeater Listen: `tcp://0.0.0.0:7000` (receives Push from sender)
 - Repeater Broadcast: `tcp://0.0.0.0:7001` (publishes to receivers)
-- Receiver (Subscribe): `tcp://cloud-host:7001`
+- Receiver (Subscribe): `tcp://52.89.47.134:7001`
 
 ## Troubleshooting
 
