@@ -268,6 +268,8 @@ void FO3DWebRTCReceiver::Stop()
         return;
     }
 
+    // Step 1: Disconnect to stop new data from arriving
+    // This signals the LiveKit server to stop sending data, but callbacks may still be in flight
     if (bConnected.Load())
     {
         LkResult Result = lk_disconnect(ClientHandle);
@@ -278,9 +280,17 @@ void FO3DWebRTCReceiver::Stop()
         }
     }
 
+    // Step 2: Destroy the LiveKit client handle
+    // IMPORTANT: LiveKit FFI guarantees that no callbacks will fire after lk_client_destroy() returns.
+    // This means all worker threads are joined and all callbacks have completed by the time this returns.
     lk_client_destroy(ClientHandle);
     ClientHandle = nullptr;
 
+    // Step 3: Now it's safe to reset shared state (Consumer, AudioSink)
+    // Because lk_client_destroy() has returned, we know:
+    // - OnDataReceived() is not executing and will not be called again
+    // - OnAudioReceived() is not executing and will not be called again
+    // Therefore, no callbacks can access Consumer or AudioSink after this point
     Consumer.Reset();
     AudioSink.Reset();
 
