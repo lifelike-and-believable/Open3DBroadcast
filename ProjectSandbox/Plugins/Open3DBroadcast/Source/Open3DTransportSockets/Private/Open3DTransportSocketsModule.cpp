@@ -6,17 +6,17 @@
 #include "O3DReceiverRegistry.h"
 #include "O3DReceiverTransportCustomization.h"
 #include "O3DReceiverSourceSettings.h"
-#include "SocketsTcpSender.h"
-#include "SocketsTcpReceiver.h"
-#include "SocketsUdpSender.h"
-#include "SocketsUdpReceiver.h"
-#include "SocketsTransportCommon.h"
-#include "SocketsTransportConfig.h"
+#include "Sender/SocketsTcpSender.h"
+#include "Receiver/SocketsTcpReceiver.h"
+#include "Sender/SocketsUdpSender.h"
+#include "Receiver/SocketsUdpReceiver.h"
+#include "Shared/SocketsTransportCommon.h"
+#include "Shared/SocketsTransportConfig.h"
 
 #include "Logging/LogMacros.h"
 
 #if WITH_EDITOR
-#include "SocketsTransportEditorWidgets.h"
+#include "Shared/SocketsTransportEditorWidgets.h"
 #endif // WITH_EDITOR
 
 DEFINE_LOG_CATEGORY_STATIC(LogOpen3DTransportSocketsModule, Log, All);

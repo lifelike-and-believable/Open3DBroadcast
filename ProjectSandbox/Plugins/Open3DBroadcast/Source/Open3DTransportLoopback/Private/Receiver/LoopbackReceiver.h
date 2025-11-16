@@ -1,7 +1,7 @@
 #pragma once
 
 #include "O3DReceiverInterface.h"
-#include "LoopbackChannel.h"
+#include "../Shared/LoopbackChannel.h"
 #include "SerializedFrameConsumerRegistry.h"
 #include "O3DAudioFrameCodec.h"
 

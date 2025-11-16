@@ -2,8 +2,8 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "LoopbackSender.h"
-#include "LoopbackReceiver.h"
+#include "../Sender/LoopbackSender.h"
+#include "../Receiver/LoopbackReceiver.h"
 
 #include "Misc/AutomationTest.h"
 

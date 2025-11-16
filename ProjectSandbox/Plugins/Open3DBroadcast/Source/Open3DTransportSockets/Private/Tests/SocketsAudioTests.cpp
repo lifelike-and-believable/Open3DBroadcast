@@ -1,8 +1,8 @@
 #if defined(WITH_AUTOMATION_TESTS) && WITH_AUTOMATION_TESTS
 
-#include "SocketsTcpSender.h"
-#include "SocketsTcpReceiver.h"
-#include "SocketsTransportCommon.h"
+#include "../Sender/SocketsTcpSender.h"
+#include "../Receiver/SocketsTcpReceiver.h"
+#include "../Shared/SocketsTransportCommon.h"
 
 #include "Misc/AutomationTest.h"
 #include "HAL/PlatformProcess.h"

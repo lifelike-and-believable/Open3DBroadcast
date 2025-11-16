@@ -1,6 +1,6 @@
 #include "SocketsTcpReceiver.h"
-#include "SocketsTcpAudio.h"
-#include "SocketsTcpTransport.h"
+#include "../Shared/SocketsTcpAudio.h"
+#include "../Shared/SocketsTcpTransport.h"
 #include "O3DTransportTypes.h"
 #include "O3DUnifiedMessage.h"
 #include "O3DAudioSerialization.h"

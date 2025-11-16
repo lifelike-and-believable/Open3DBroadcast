@@ -1,7 +1,7 @@
 #pragma once
 
 #include "O3DSenderInterface.h"
-#include "LoopbackChannel.h"
+#include "../Shared/LoopbackChannel.h"
 #include "O3DAudioFrameCodec.h"
 
 class FO3DLoopbackSender : public IOpen3DSender

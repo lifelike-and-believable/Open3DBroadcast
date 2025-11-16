@@ -1,8 +1,8 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "WebRTCSender.h"
-#include "WebRTCReceiver.h"
-#include "WebRTCUtils.h"
+#include "../Sender/WebRTCSender.h"
+#include "../Receiver/WebRTCReceiver.h"
+#include "../Shared/WebRTCUtils.h"
 
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"

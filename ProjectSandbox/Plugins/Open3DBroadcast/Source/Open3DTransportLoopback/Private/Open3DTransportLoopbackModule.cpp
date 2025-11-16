@@ -1,7 +1,7 @@
 #include "Modules/ModuleManager.h"
 
-#include "LoopbackSender.h"
-#include "LoopbackReceiver.h"
+#include "Sender/LoopbackSender.h"
+#include "Receiver/LoopbackReceiver.h"
 #include "O3DSenderRegistry.h"
 #include "O3DReceiverRegistry.h"
 #include "O3DReceiverTransportCustomization.h"

@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "O3DReceiverInterface.h"
-#include "SocketsTransportCommon.h"
+#include "../Shared/SocketsTransportCommon.h"
 #include "O3DAudioFrameCodec.h"
 
 #include "Templates/UniquePtr.h"
