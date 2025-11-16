@@ -49,15 +49,16 @@ void FO3DWebRTCReceiver::OnDataReceived(void* user, const uint8_t* bytes, size_t
 
     const double NowSeconds = FPlatformTime::Seconds();
 
+    // Assume reasonable latency (timestamp extraction would require O3DS API support)
+    // In a production system with timestamp in payload, we could extract it for accurate RTT
+    double LatencyMs = 10.0;  // Default assumption for SFU latency
+
     // Update stats
     {
         FScopeLock Lock(&Self->StatsMutex);
         Self->Stats.FramesReceived++;
         Self->Stats.BytesReceived += len;
-
-        // TODO: Extract timestamp from payload for latency calculation
-        // For now, assume minimal latency since LiveKit handles this internally
-        Self->AccumulateLatency(10.0); // Placeholder: 10ms assumed latency
+        Self->AccumulateLatency(LatencyMs);
     }
 
     // Forward to consumer
@@ -126,6 +127,24 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
         UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("WebRTC receiver already initialized"));
         return false;
     }
+
+    // Platform validation: WebRTC module currently supports Windows 64-bit only
+#if !PLATFORM_WINDOWS || !PLATFORM_64BITS
+    UE_LOG(LogO3DWebRTCReceiver, Error,
+        TEXT("Open3DTransportWebRTC requires Windows 64-bit. Current platform: %s %d-bit. "
+             "Please use alternative transport (TCP, UDP, NNG, or Loopback) or compile LiveKit FFI for your platform."),
+#if PLATFORM_WINDOWS
+        TEXT("Windows"),
+#elif PLATFORM_MAC
+        TEXT("macOS"),
+#elif PLATFORM_LINUX
+        TEXT("Linux"),
+#else
+        TEXT("Unknown"),
+#endif
+        (int32)(sizeof(void*) * 8));
+    return false;
+#endif
 
     if (!ParseConfig(Config))
     {

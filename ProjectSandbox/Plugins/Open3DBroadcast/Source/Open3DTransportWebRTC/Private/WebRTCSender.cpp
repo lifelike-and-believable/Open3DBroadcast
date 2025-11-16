@@ -13,12 +13,15 @@ using WebRTCUtils::FromAnsi;
 
 /**
  * Audio sink implementation for WebRTC sender using LiveKit FFI.
+ *
+ * Optimized with reusable PCM conversion buffer to avoid per-frame allocations.
+ * This significantly reduces allocator pressure on the audio thread.
  */
 class FWebRTCSenderAudioSink final : public IO3DSenderAudioSink
 {
 public:
     FWebRTCSenderAudioSink(FO3DWebRTCSender& InOwner)
-        : Owner(InOwner)
+        : Owner(InOwner), PcmConversionBuffer()
     {
     }
 
@@ -34,19 +37,24 @@ public:
             return false;
         }
 
-        // Convert float to int16
-        TArray<int16> PcmInt16;
-        PcmInt16.SetNumUninitialized(NumFrames * NumChannels);
-        for (int32 i = 0; i < NumFrames * NumChannels; ++i)
+        // Reuse buffer, allocate only if necessary (optimization to reduce per-frame allocations)
+        const int32 TotalSamples = NumFrames * NumChannels;
+        if (PcmConversionBuffer.Num() < TotalSamples)
+        {
+            PcmConversionBuffer.SetNumUninitialized(TotalSamples);
+        }
+
+        // Convert float to int16 with clamping
+        for (int32 i = 0; i < TotalSamples; ++i)
         {
             float Sample = FMath::Clamp(Interleaved[i], -1.0f, 1.0f);
-            PcmInt16[i] = static_cast<int16>(Sample * 32767.0f);
+            PcmConversionBuffer[i] = static_cast<int16>(Sample * 32767.0f);
         }
 
         // Publish to LiveKit
         LkResult Result = lk_publish_audio_pcm_i16(
             Owner.ClientHandle,
-            PcmInt16.GetData(),
+            PcmConversionBuffer.GetData(),
             NumFrames,
             NumChannels,
             SampleRate
@@ -72,6 +80,10 @@ public:
 
 private:
     FO3DWebRTCSender& Owner;
+
+    // Reusable buffer for float->int16 conversion (optimization: avoid per-frame allocation)
+    // Typical size: 960 samples * 2 channels * 2 bytes = 3840 bytes
+    TArray<int16> PcmConversionBuffer;
 };
 
 // Static callback for connection state changes
@@ -127,6 +139,24 @@ bool FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
         UE_LOG(LogO3DWebRTCSender, Warning, TEXT("WebRTC sender already initialized"));
         return false;
     }
+
+    // Platform validation: WebRTC module currently supports Windows 64-bit only
+#if !PLATFORM_WINDOWS || !PLATFORM_64BITS
+    UE_LOG(LogO3DWebRTCSender, Error,
+        TEXT("Open3DTransportWebRTC requires Windows 64-bit. Current platform: %s %d-bit. "
+             "Please use alternative transport (TCP, UDP, NNG, or Loopback) or compile LiveKit FFI for your platform."),
+#if PLATFORM_WINDOWS
+        TEXT("Windows"),
+#elif PLATFORM_MAC
+        TEXT("macOS"),
+#elif PLATFORM_LINUX
+        TEXT("Linux"),
+#else
+        TEXT("Unknown"),
+#endif
+        (int32)(sizeof(void*) * 8));
+    return false;
+#endif
 
     if (!ParseConfig(Config))
     {
@@ -250,6 +280,13 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
 {
     if (!bConnected.Load())
     {
+        static double LastDisconnectedWarningTime = 0.0;
+        const double Now = FPlatformTime::Seconds();
+        if (Now - LastDisconnectedWarningTime > 5.0)
+        {
+            UE_LOG(LogO3DWebRTCSender, Verbose, TEXT("Send() called while not connected, dropping frame"));
+            LastDisconnectedWarningTime = Now;
+        }
         return false;
     }
 
@@ -265,12 +302,41 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
         return false;
     }
 
-    // Send via LiveKit FFI using lossy (unreliable) mode for real-time pose data
+    // Validate payload size (LiveKit lossy DataChannel limit ~1300 bytes, reliable ~15KB)
+    // See: https://docs.livekit.io/home/server/overview/concepts/data-channel-reliability
+    constexpr int32 LossyMaxBytes = 1300;
+    constexpr int32 ReliableMaxBytes = 15000;
+
+    LkReliability Reliability = LkLossy;
+    if (BytesWritten > LossyMaxBytes)
+    {
+        if (BytesWritten <= ReliableMaxBytes)
+        {
+            Reliability = LkReliable;
+            UE_LOG(LogO3DWebRTCSender, Warning,
+                TEXT("Payload size (%d bytes) exceeds lossy limit (%d bytes), switching to reliable channel"),
+                BytesWritten, LossyMaxBytes);
+        }
+        else
+        {
+            UE_LOG(LogO3DWebRTCSender, Error,
+                TEXT("Payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton or reducing data"),
+                BytesWritten, ReliableMaxBytes);
+
+            {
+                FScopeLock Lock(&StatsMutex);
+                Stats.DroppedFrames++;
+            }
+            return false;
+        }
+    }
+
+    // Send via LiveKit FFI
     LkResult Result = lk_send_data(
         ClientHandle,
         reinterpret_cast<const uint8*>(Buffer.data()),
         BytesWritten,
-        LkLossy
+        Reliability
     );
 
     if (Result.code != 0)

@@ -1,6 +1,7 @@
 #include "O3DSenderCurveProcessor.h"
 
 #include "Animation/AnimCurveTypes.h"
+#include "Animation/AnimInstance.h"
 #include "Animation/MorphTarget.h"
 #include "Animation/Skeleton.h"
 #include "Components/SkeletalMeshComponent.h"
