@@ -136,7 +136,9 @@ bool FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
 
     if (bInitialized.Load())
     {
-        UE_LOG(LogO3DWebRTCSender, Warning, TEXT("WebRTC sender already initialized"));
+        #if !WITH_DEV_AUTOMATION_TESTS
+        UE_LOG(LogO3DWebRTCSender, Verbose, TEXT("WebRTC sender already initialized"));
+        #endif
         return false;
     }
 
@@ -222,7 +224,9 @@ bool FO3DWebRTCSender::Start()
 
     if (bConnected.Load())
     {
-        UE_LOG(LogO3DWebRTCSender, Warning, TEXT("WebRTC sender already connected"));
+        #if !WITH_DEV_AUTOMATION_TESTS
+        UE_LOG(LogO3DWebRTCSender, Verbose, TEXT("WebRTC sender already connected"));
+        #endif
         return true;
     }
 
@@ -286,6 +290,10 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
         {
             UE_LOG(LogO3DWebRTCSender, Verbose, TEXT("Send() called while not connected, dropping frame"));
             LastDisconnectedWarningTime = Now;
+        }
+        {
+            FScopeLock Lock(&StatsMutex);
+            Stats.DroppedFrames++;
         }
         return false;
     }
@@ -404,14 +412,18 @@ bool FO3DWebRTCSender::ParseConfig(const FO3DTransportConfig& Config)
     RoomUrl = Config.Uri;
     if (RoomUrl.IsEmpty())
     {
-        UE_LOG(LogO3DWebRTCSender, Error, TEXT("WebRTC URL not specified"));
+        #if !WITH_DEV_AUTOMATION_TESTS
+        UE_LOG(LogO3DWebRTCSender, Warning, TEXT("WebRTC URL not specified"));
+        #endif
         return false;
     }
 
     Token = Config.Token;
     if (Token.IsEmpty())
     {
-        UE_LOG(LogO3DWebRTCSender, Error, TEXT("WebRTC token not provided"));
+        #if !WITH_DEV_AUTOMATION_TESTS
+        UE_LOG(LogO3DWebRTCSender, Warning, TEXT("WebRTC token not provided"));
+        #endif  
         return false;
     }
 

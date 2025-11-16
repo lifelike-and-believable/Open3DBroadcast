@@ -35,7 +35,7 @@ namespace
     };
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLoopbackAudioRoundTripTest, "Open3DStream.TransportLoopback.Audio.RoundTrip", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLoopbackAudioRoundTripTest, "Open3DBroadcast.Open3DTransportLoopback.Audio.RoundTrip", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FO3DLoopbackAudioRoundTripTest::RunTest(const FString& Parameters)
 {
     FO3DTransportConfig Config;
@@ -91,7 +91,7 @@ bool FO3DLoopbackAudioRoundTripTest::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLoopbackAudioQueueOverflowTest, "Open3DStream.TransportLoopback.Audio.QueueOverflow", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLoopbackAudioQueueOverflowTest, "Open3DBroadcast.Open3DTransportLoopback.Audio.QueueOverflow", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FO3DLoopbackAudioQueueOverflowTest::RunTest(const FString& Parameters)
 {
     FO3DTransportConfig Config;

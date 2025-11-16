@@ -140,7 +140,7 @@ namespace
 	}
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsAudioRoundTripTest, "Open3DStream.TransportSockets.Audio.RoundTrip", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsAudioRoundTripTest, "Open3DBroadcast.Open3DTransportSockets.Audio.RoundTrip", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FO3DSocketsAudioRoundTripTest::RunTest(const FString& Parameters)
 {
 	const int32 DataPort = FindAvailableTcpPort();
@@ -221,7 +221,7 @@ bool FO3DSocketsAudioRoundTripTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsAudioQueueOverflowTest, "Open3DStream.TransportSockets.Audio.QueueOverflow", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsAudioQueueOverflowTest, "Open3DBroadcast.Open3DTransportSockets.Audio.QueueOverflow", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FO3DSocketsAudioQueueOverflowTest::RunTest(const FString& Parameters)
 {
 	const int32 DataPort = FindAvailableTcpPort();

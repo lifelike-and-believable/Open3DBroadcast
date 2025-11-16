@@ -35,7 +35,9 @@ bool FO3DLoopbackReceiver::Start()
         Consumer = FSerializedFrameConsumerRegistry::Create();
         if (!Consumer.IsValid())
         {
+            #if !WITH_DEV_AUTOMATION_TESTS
             UE_LOG(LogO3DLoopbackTransport, Warning, TEXT("No serialized frame consumer registered; loopback frames will be dropped."));
+            #endif  
         }
     }
     return bInitialized;

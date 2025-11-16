@@ -118,7 +118,7 @@ void FO3DNngSender::HandlePipeAdded()
     const int32 Count = PipeCount.Increment();
     bConnected = true;
     BackoffAttempt = 0;
-    UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender CONNECTION ESTABLISHED to %s (pipe count=%d)"), *Options.CanonicalUri, Count);
+    UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender CONNECTION ESTABLISHED to %s (pipe count=%d)"), *Options.CanonicalUri, Count);
 }
 
 void FO3DNngSender::HandlePipeRemoved()
@@ -139,7 +139,7 @@ void FO3DNngSender::HandlePipeRemoved()
             bConnected = true; // listening sockets remain available
         }
     }
-    UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender CONNECTION LOST from %s (pipe count=%d)"), *Options.CanonicalUri, FMath::Max(0, Count));
+    UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender CONNECTION LOST from %s (pipe count=%d)"), *Options.CanonicalUri, FMath::Max(0, Count));
 }
 
 bool FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
@@ -147,12 +147,12 @@ bool FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
     FString Error;
     if (!O3DNNG::ParseSenderOptions(Config, Options, Error))
     {
-        UE_LOG(LogO3DNngSender, Warning, TEXT("Failed to parse NNG sender config: %s"), *Error);
+        UE_LOG(LogO3DNngSender, Verbose, TEXT("Failed to parse NNG sender config: %s"), *Error);
         return false;
     }
 
     Options.MaxQueueBytes = FMath::Clamp<uint64>(Options.MaxQueueBytes, kMinQueueBytes, kMaxQueueBytes);
-    UE_LOG(LogO3DNngSender, Log, TEXT("NNG sender queue limit set to %llu bytes"), Options.MaxQueueBytes);
+    UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender queue limit set to %llu bytes"), Options.MaxQueueBytes);
 
     ActiveConfig = Config;
     ActiveAudioConfig = Config.Audio;
@@ -179,7 +179,7 @@ bool FO3DNngSender::Start()
 {
     if (!bInitialized.Load())
     {
-        UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender Start called before Initialize"));
+        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender Start called before Initialize"));
         return false;
     }
 
@@ -205,7 +205,7 @@ bool FO3DNngSender::Start()
     StartWorker();
     bRunning = true;
 
-    UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender STARTED - Mode=%s Role=%s URI=%s (queue=%llu bytes)"),
+    UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender STARTED - Mode=%s Role=%s URI=%s (queue=%llu bytes)"),
         *O3DNNG::ModeToString(Options.Mode),
         *O3DNNG::RoleToString(Options.Role),
         *Options.CanonicalUri,
@@ -213,7 +213,7 @@ bool FO3DNngSender::Start()
 
     if (!bOpened && !Options.bListen)
     {
-        UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender will attempt to connect to %s with exponential backoff (check host/port)"), *Options.CanonicalUri);
+        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender will attempt to connect to %s with exponential backoff (check host/port)"), *Options.CanonicalUri);
     }
 
     return bOpened || !Options.bListen;
@@ -262,7 +262,7 @@ bool FO3DNngSender::Send(const O3DS::SubjectList& List)
     int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(Buffer, TimestampSeconds);
     if (BytesWritten <= 0)
     {
-        UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender failed to serialize subject list"));
+        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender failed to serialize subject list"));
         return false;
     }
 
@@ -355,14 +355,14 @@ bool FO3DNngSender::OpenSocket()
         }
         break;
     default:
-        UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender unsupported mode"));
+        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender unsupported mode"));
         delete NewSocket;
         return false;
     }
 
     if (Ret != 0)
     {
-        UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender socket open failed (%d) %s"), Ret, UTF8_TO_TCHAR(nng_strerror(Ret)));
+        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender socket open failed (%d) %s"), Ret, UTF8_TO_TCHAR(nng_strerror(Ret)));
         delete NewSocket;
         Socket = nullptr;
         if ((Options.Mode == O3DNNG::ENngMode::Pair && !Options.bListen) || Options.Mode == O3DNNG::ENngMode::Push)
@@ -390,7 +390,7 @@ bool FO3DNngSender::OpenSocket()
     int SetSendBufRet = nng_setopt_size(NewSocket->Socket, NNG_OPT_SENDBUF, Options.MaxQueueBytes);
     if (SetSendBufRet != 0)
     {
-        UE_LOG(LogO3DNngSender, Log, TEXT("NNG sender set send buffer to %llu bytes (result: %d %s)"),
+        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender set send buffer to %llu bytes (result: %d %s)"),
             Options.MaxQueueBytes, SetSendBufRet, UTF8_TO_TCHAR(nng_strerror(SetSendBufRet)));
     }
 
@@ -399,7 +399,7 @@ bool FO3DNngSender::OpenSocket()
     int SetTimeoutRet = nng_setopt_ms(NewSocket->Socket, NNG_OPT_SENDTIMEO, 30000);
     if (SetTimeoutRet != 0)
     {
-        UE_LOG(LogO3DNngSender, Log, TEXT("NNG sender set send timeout (result: %d %s)"),
+        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender set send timeout (result: %d %s)"),
             SetTimeoutRet, UTF8_TO_TCHAR(nng_strerror(SetTimeoutRet)));
     }
 
@@ -513,7 +513,7 @@ bool FO3DNngSender::EnqueuePayload(const uint8* Data, int32 Size)
         const double Now = FPlatformTime::Seconds();
         if (Now - LastBackpressureLogTimestamp > 0.5)
         {
-            UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender queue full (pending=%llu / limit=%llu bytes). Dropping frame."),
+            UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender queue full (pending=%llu / limit=%llu bytes). Dropping frame."),
                 Pending,
                 Options.MaxQueueBytes);
             LastBackpressureLogTimestamp = Now;
@@ -663,7 +663,7 @@ bool FO3DNngSender::SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, doubl
 
     if (!O3DAudio::CreateUnifiedAudioMessage(Frame, TimestampSec, UnifiedAudioScratch))
     {
-        UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender failed to create unified audio message"));
+        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender failed to create unified audio message"));
         return false;
     }
 

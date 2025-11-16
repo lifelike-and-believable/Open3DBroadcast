@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "HAL/ThreadSafeCounter.h"
+#include "Misc/ScopeLock.h"
 
 #include "O3DReceiverInterface.h"
 #include "Shared/NngHelpers.h"
@@ -23,6 +24,8 @@ public:
     virtual bool SupportsAudio() const override { return true; }
     virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
 
+    bool IsConnected() const { return bConnected.Load(); }
+
     void HandlePipeAdded();
     void HandlePipeRemoved();
 
@@ -38,6 +41,7 @@ private:
 
     O3DNNG::FNngReceiverOptions Options;
     FO3DTransportStats Stats;
+    mutable FCriticalSection StatsMutex;
     FO3DTransportConfig ActiveConfig;
     FO3DTransportAudioConfig ActiveAudioConfig;
 

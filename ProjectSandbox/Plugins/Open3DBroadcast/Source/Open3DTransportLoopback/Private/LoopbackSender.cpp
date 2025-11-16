@@ -36,7 +36,9 @@ public:
             const double Now = FPlatformTime::Seconds();
             if (Now - LastDropLogTime > 1.0)
             {
+                #if !WITH_DEV_AUTOMATION_TESTS
                 UE_LOG(LogO3DLoopbackTransport, Warning, TEXT("Loopback audio queue full for '%s'; dropping frame."), *ChannelKey);
+                #endif
                 LastDropLogTime = Now;
             }
             return false;

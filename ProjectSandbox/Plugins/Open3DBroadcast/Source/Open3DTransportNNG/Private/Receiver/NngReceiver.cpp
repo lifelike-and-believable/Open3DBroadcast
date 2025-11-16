@@ -196,7 +196,10 @@ int32 FO3DNngReceiver::Poll()
         {
             UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver payload %llu bytes exceeds safety cap; dropping."), static_cast<unsigned long long>(Size));
             nng_free(Buffer, Size);
-            Stats.DroppedFrames++;
+            {
+                FScopeLock Lock(&StatsMutex);
+                Stats.DroppedFrames++;
+            }
             continue;
         }
 
@@ -206,12 +209,16 @@ int32 FO3DNngReceiver::Poll()
 
         if (bProcessed)
         {
-            Stats.FramesReceived++;
-            Stats.BytesReceived += static_cast<int64>(Size);
+            {
+                FScopeLock Lock(&StatsMutex);
+                Stats.FramesReceived++;
+                Stats.BytesReceived += static_cast<int64>(Size);
+            }
             ++FramesProcessed;
         }
         else
         {
+            FScopeLock Lock(&StatsMutex);
             Stats.DroppedFrames++;
         }
     }
@@ -221,6 +228,7 @@ int32 FO3DNngReceiver::Poll()
 
 FO3DTransportStats FO3DNngReceiver::GetStats() const
 {
+    FScopeLock Lock(&StatsMutex);
     return Stats;
 }
 
@@ -374,7 +382,10 @@ void FO3DNngReceiver::HandleReceiveError(int ErrorCode)
         LastErrorLogTimestamp = Now;
     }
 
-    Stats.DroppedFrames++;
+    {
+        FScopeLock Lock(&StatsMutex);
+        Stats.DroppedFrames++;
+    }
 
     if (!Options.bListen)
     {
@@ -480,8 +491,11 @@ bool FO3DNngReceiver::ProcessAudioPayload(O3DS::EUnifiedCodec Codec, const uint8
     if (Codec == O3DS::EUnifiedCodec::PCM16)
     {
         SinkPinned->SubmitPcm16(EncodedFrame.Meta, EncodedFrame.Payload.GetData(), EncodedFrame.Payload.Num());
-        Stats.FramesReceived++;
-        Stats.BytesReceived += PayloadSize;
+        {
+            FScopeLock Lock(&StatsMutex);
+            Stats.FramesReceived++;
+            Stats.BytesReceived += PayloadSize;
+        }
         return true;
     }
 
@@ -494,7 +508,10 @@ bool FO3DNngReceiver::ProcessAudioPayload(O3DS::EUnifiedCodec Codec, const uint8
     SinkPinned->SubmitPcm16(EncodedFrame.Meta,
         reinterpret_cast<const uint8*>(DecodedPcmScratch.GetData()),
         DecodedPcmScratch.Num() * sizeof(int16));
-    Stats.FramesReceived++;
-    Stats.BytesReceived += PayloadSize;
+    {
+        FScopeLock Lock(&StatsMutex);
+        Stats.FramesReceived++;
+        Stats.BytesReceived += PayloadSize;
+    }
     return true;
 }

@@ -24,6 +24,8 @@ public:
     virtual bool SupportsAudio() const override { return true; }
     virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
 
+    bool IsConnected() const { return bConnected.Load(); }
+
     void HandlePipeAdded();
     void HandlePipeRemoved();
 

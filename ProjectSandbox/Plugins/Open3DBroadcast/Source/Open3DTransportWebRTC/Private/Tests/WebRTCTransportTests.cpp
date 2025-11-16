@@ -149,7 +149,7 @@ namespace
 // ============================================================================
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCConnectionInitializeTest,
-	"Open3DStream.WebRTC.Connection.Initialize",
+	"Open3DBroadcast.Open3DTransportWebRTC.Connection.Initialize",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCConnectionInitializeTest::RunTest(const FString& Parameters)
@@ -170,8 +170,14 @@ bool FWebRTCConnectionInitializeTest::RunTest(const FString& Parameters)
 
 #if PLATFORM_WINDOWS && PLATFORM_64BITS
 	TestTrue(TEXT("Sender should initialize on Win64"), bResult);
+	//AddWarning(TEXT("FWebRTCConnectionInitializeTest: This test uses a hardcoded example server (wss://test-server.livekit.example.com) which is not a real LiveKit server. Full validation requires an active remote server with proper authentication token. For complete testing, configure WEBRTC_TEST_SERVER_URL and WEBRTC_TEST_TOKEN environment variables or modify this test with actual server credentials."));
 #else
-	TestFalse(TEXT("Sender should fail on non-Win64 with clear message"), bResult);
+	// On non-Win64 platforms, sender should fail to initialize
+	if (bResult)
+	{
+		AddError(TEXT("Sender should fail on non-Win64 platforms but succeeded"));
+		return false;
+	}
 #endif
 
 	Sender.Stop();
@@ -179,7 +185,7 @@ bool FWebRTCConnectionInitializeTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCConnectionDubleInitializeTest,
-	"Open3DStream.WebRTC.Connection.DoubleInitialize",
+	"Open3DBroadcast.Open3DTransportWebRTC.Connection.DoubleInitialize",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCConnectionDubleInitializeTest::RunTest(const FString& Parameters)
@@ -196,21 +202,27 @@ bool FWebRTCConnectionDubleInitializeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("First initialize should succeed"), bFirstInit);
 
 	bool bSecondInit = Sender.Initialize(Config);
-	TestFalse(TEXT("Second initialize should fail"), bSecondInit);
+	// Second initialization should fail - if it succeeds, test fails
+	if (bSecondInit)
+	{
+		AddError(TEXT("Second initialize should fail but succeeded"));
+		return false;
+	}
 
 	Sender.Stop();
+	//AddWarning(TEXT("FWebRTCConnectionDubleInitializeTest: This test uses a hardcoded example server (wss://test.livekit.example.com) which is not a real LiveKit server. Full validation of double-initialization behavior with actual server connection requires an active remote server with proper authentication token. For complete testing, configure WEBRTC_TEST_SERVER_URL and WEBRTC_TEST_TOKEN environment variables or modify this test with actual server credentials."));
 #endif
 
 	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCConnectionInvalidUrlTest,
-	"Open3DStream.WebRTC.Connection.InvalidUrl",
+	"Open3DBroadcast.Open3DTransportWebRTC.Connection.InvalidUrl",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCConnectionInvalidUrlTest::RunTest(const FString& Parameters)
 {
-	// Test that empty URL is rejected
+	// Test that empty URL is rejected - initialization should return false
 	FO3DWebRTCSender Sender;
 	FO3DTransportConfig Config;
 	Config.Uri = TEXT("");  // Empty URL
@@ -218,19 +230,36 @@ bool FWebRTCConnectionInvalidUrlTest::RunTest(const FString& Parameters)
 
 #if PLATFORM_WINDOWS && PLATFORM_64BITS
 	bool bResult = Sender.Initialize(Config);
-	TestFalse(TEXT("Initialize should fail with empty URL"), bResult);
+	// Initialization should fail when URL is empty - if it does, test passes
+	if (bResult)
+	{
+		AddError(TEXT("Initialize should fail with empty URL but succeeded"));
+		return false;
+	}
+#else
+	// On non-Win64 platforms, initialization should fail due to platform check before ParseConfig
+	FO3DWebRTCSender TestSender;
+	FO3DTransportConfig TestConfig;
+	TestConfig.Uri = TEXT("");
+	TestConfig.Token = TEXT("test-token");
+	bool bResult = TestSender.Initialize(TestConfig);
+	if (bResult)
+	{
+		AddError(TEXT("Initialize should fail on non-Win64 platforms but succeeded"));
+		return false;
+	}
 #endif
 
 	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCConnectionEmptyTokenTest,
-	"Open3DStream.WebRTC.Connection.EmptyToken",
+	"Open3DBroadcast.Open3DTransportWebRTC.Connection.EmptyToken",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCConnectionEmptyTokenTest::RunTest(const FString& Parameters)
 {
-	// Test that empty token is rejected
+	// Test that empty token is rejected - initialization should return false
 	FO3DWebRTCSender Sender;
 	FO3DTransportConfig Config;
 	Config.Uri = TEXT("wss://test.livekit.example.com");
@@ -238,14 +267,31 @@ bool FWebRTCConnectionEmptyTokenTest::RunTest(const FString& Parameters)
 
 #if PLATFORM_WINDOWS && PLATFORM_64BITS
 	bool bResult = Sender.Initialize(Config);
-	TestFalse(TEXT("Initialize should fail with empty token"), bResult);
+	// Initialization should fail when token is empty - if it does, test passes
+	if (bResult)
+	{
+		AddError(TEXT("Initialize should fail with empty token but succeeded"));
+		return false;
+	}
+#else
+	// On non-Win64 platforms, initialization should fail due to platform check before ParseConfig
+	FO3DWebRTCSender TestSender;
+	FO3DTransportConfig TestConfig;
+	TestConfig.Uri = TEXT("wss://test.livekit.example.com");
+	TestConfig.Token = TEXT("");
+	bool bResult = TestSender.Initialize(TestConfig);
+	if (bResult)
+	{
+		AddError(TEXT("Initialize should fail on non-Win64 platforms but succeeded"));
+		return false;
+	}
 #endif
 
 	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCReceiverInitializeTest,
-	"Open3DStream.WebRTC.Receiver.Initialize",
+	"Open3DBroadcast.Open3DTransportWebRTC.Receiver.Initialize",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCReceiverInitializeTest::RunTest(const FString& Parameters)
@@ -262,6 +308,7 @@ bool FWebRTCReceiverInitializeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Receiver should initialize on Win64"), bResult);
 
 	Receiver.Stop();
+	//AddWarning(TEXT("FWebRTCReceiverInitializeTest: This test uses a hardcoded example server (wss://test.livekit.example.com) which is not a real LiveKit server. Full validation of receiver initialization with actual server connection requires an active remote server with proper authentication token. For complete testing, configure WEBRTC_TEST_SERVER_URL and WEBRTC_TEST_TOKEN environment variables or modify this test with actual server credentials."));
 #endif
 
 	return true;
@@ -272,7 +319,7 @@ bool FWebRTCReceiverInitializeTest::RunTest(const FString& Parameters)
 // ============================================================================
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCSendBeforeConnectedTest,
-	"Open3DStream.WebRTC.DataTransfer.SendBeforeConnected",
+	"Open3DBroadcast.Open3DTransportWebRTC.DataTransfer.SendBeforeConnected",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCSendBeforeConnectedTest::RunTest(const FString& Parameters)
@@ -292,10 +339,15 @@ bool FWebRTCSendBeforeConnectedTest::RunTest(const FString& Parameters)
 
 	// Send should fail because we're not connected
 	bool bResult = Sender.Send(List);
-	TestFalse(TEXT("Send should fail when not connected"), bResult);
+	// If Send() returns true (unexpected success), test fails
+	if (bResult)
+	{
+		AddError(TEXT("Send should fail when not connected but succeeded"));
+		return false;
+	}
 
 	FO3DTransportStats Stats = Sender.GetStats();
-	TestEqual(TEXT("DroppedFrames should increase"), (int32)1, (int32)Stats.DroppedFrames);
+	TestEqual(TEXT("DroppedFrames should increase"), (int32)Stats.DroppedFrames, (int32)1);
 
 	Sender.Stop();
 #endif
@@ -304,7 +356,7 @@ bool FWebRTCSendBeforeConnectedTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCPayloadSizeValidationSmallTest,
-	"Open3DStream.WebRTC.DataTransfer.PayloadSizeSmall",
+	"Open3DBroadcast.Open3DTransportWebRTC.DataTransfer.PayloadSizeSmall",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCPayloadSizeValidationSmallTest::RunTest(const FString& Parameters)
@@ -339,7 +391,7 @@ bool FWebRTCPayloadSizeValidationSmallTest::RunTest(const FString& Parameters)
 // ============================================================================
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCAudioSinkCreationTest,
-	"Open3DStream.WebRTC.Audio.SinkCreation",
+	"Open3DBroadcast.Open3DTransportWebRTC.Audio.SinkCreation",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCAudioSinkCreationTest::RunTest(const FString& Parameters)
@@ -370,7 +422,7 @@ bool FWebRTCAudioSinkCreationTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCAudioBitrateClampTest,
-	"Open3DStream.WebRTC.Audio.BitrateClamping",
+	"Open3DBroadcast.Open3DTransportWebRTC.Audio.BitrateClamping",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCAudioBitrateClampTest::RunTest(const FString& Parameters)
@@ -398,7 +450,7 @@ bool FWebRTCAudioBitrateClampTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCAudioSubmitWithoutConnectionTest,
-	"Open3DStream.WebRTC.Audio.SubmitWithoutConnection",
+	"Open3DBroadcast.Open3DTransportWebRTC.Audio.SubmitWithoutConnection",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCAudioSubmitWithoutConnectionTest::RunTest(const FString& Parameters)
@@ -432,7 +484,11 @@ bool FWebRTCAudioSubmitWithoutConnectionTest::RunTest(const FString& Parameters)
 
 	// SubmitPcm should return false when not connected
 	bool bResult = AudioSink->SubmitPcm(TEXT("Test"), TestAudio.GetData(), 960, 1, 48000, FPlatformTime::Seconds());
-	TestFalse(TEXT("SubmitPcm should fail when not connected"), bResult);
+	if (bResult)
+	{
+		AddError(TEXT("SubmitPcm should fail when not connected but succeeded"));
+		return false;
+	}
 
 	Sender.Stop();
 #endif
@@ -441,7 +497,7 @@ bool FWebRTCAudioSubmitWithoutConnectionTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCAudioClippingTest,
-	"Open3DStream.WebRTC.Audio.Clipping",
+	"Open3DBroadcast.Open3DTransportWebRTC.Audio.Clipping",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCAudioClippingTest::RunTest(const FString& Parameters)
@@ -474,7 +530,11 @@ bool FWebRTCAudioClippingTest::RunTest(const FString& Parameters)
 
 	// Should not crash, clipping should happen internally
 	bool bResult = AudioSink->SubmitPcm(TEXT("Test"), TestAudio.GetData(), 960, 1, 48000, FPlatformTime::Seconds());
-	TestFalse(TEXT("SubmitPcm should fail when not connected (but not crash)"), bResult);
+	if (bResult)
+	{
+		AddError(TEXT("SubmitPcm should fail when not connected but succeeded"));
+		return false;
+	}
 
 	Sender.Stop();
 #endif
@@ -487,7 +547,7 @@ bool FWebRTCAudioClippingTest::RunTest(const FString& Parameters)
 // ============================================================================
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCStatsResetTest,
-	"Open3DStream.WebRTC.Stats.Reset",
+	"Open3DBroadcast.Open3DTransportWebRTC.Stats.Reset",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCStatsResetTest::RunTest(const FString& Parameters)
@@ -513,7 +573,7 @@ bool FWebRTCStatsResetTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCMultipleStopCallsTest,
-	"Open3DStream.WebRTC.Lifecycle.MultipleStopcalls",
+	"Open3DBroadcast.Open3DTransportWebRTC.Lifecycle.MultipleStopCalls",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCMultipleStopCallsTest::RunTest(const FString& Parameters)
@@ -540,7 +600,7 @@ bool FWebRTCMultipleStopCallsTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCReceiverSetConsumerTest,
-	"Open3DStream.WebRTC.Receiver.SetConsumer",
+	"Open3DBroadcast.Open3DTransportWebRTC.Receiver.SetConsumer",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCReceiverSetConsumerTest::RunTest(const FString& Parameters)
@@ -567,7 +627,7 @@ bool FWebRTCReceiverSetConsumerTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCReceiverSetAudioSinkTest,
-	"Open3DStream.WebRTC.Receiver.SetAudioSink",
+	"Open3DBroadcast.Open3DTransportWebRTC.Receiver.SetAudioSink",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCReceiverSetAudioSinkTest::RunTest(const FString& Parameters)

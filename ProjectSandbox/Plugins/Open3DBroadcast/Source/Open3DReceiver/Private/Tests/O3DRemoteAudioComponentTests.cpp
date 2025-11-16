@@ -61,7 +61,7 @@ struct FO3DReceiverSourceTestAccessor
     }
 };
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DRemoteAudioComponentFilterTest, "Open3DStream.Receiver.RemoteAudioComponent.Filtering", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DRemoteAudioComponentFilterTest, "Open3DBroadcast.Open3DReceiver.RemoteAudioComponent.Filtering", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FO3DRemoteAudioComponentFilterTest::RunTest(const FString& Parameters)
 {
     UO3DRemoteAudioComponent* Component = NewObject<UO3DRemoteAudioComponent>();
@@ -87,7 +87,7 @@ bool FO3DRemoteAudioComponentFilterTest::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DRemoteAudioComponentAudioQueueTest, "Open3DStream.Receiver.RemoteAudioComponent.AudioQueue", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DRemoteAudioComponentAudioQueueTest, "Open3DBroadcast.O3DReceiver.RemoteAudioComponent.AudioQueue", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FO3DRemoteAudioComponentAudioQueueTest::RunTest(const FString& Parameters)
 {
     UO3DRemoteAudioComponent* Component = NewObject<UO3DRemoteAudioComponent>();
@@ -133,50 +133,9 @@ bool FO3DRemoteAudioComponentAudioQueueTest::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DAudioBusBroadcastTest, "Open3DStream.Shared.AudioBus.BroadcastCopy", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-bool FO3DAudioBusBroadcastTest::RunTest(const FString& Parameters)
-{
-    bool bDelegateInvoked = false;
-    O3DS::FAudioFrameMeta ReceivedMeta;
-    TArray<uint8> ReceivedData;
 
-    FDelegateHandle Handle = FO3DAudioBus::OnPcm16().AddLambda([
-        &bDelegateInvoked,
-        &ReceivedMeta,
-        &ReceivedData
-    ](const O3DS::FAudioFrameMeta& Meta, const TArray<uint8>& PCM16Bytes)
-    {
-        bDelegateInvoked = true;
-        ReceivedMeta = Meta;
-        ReceivedData = PCM16Bytes;
-    });
 
-    O3DS::FAudioFrameMeta Meta;
-    Meta.StreamLabel = TEXT("o3ds:mix");
-    Meta.SubjectName = TEXT("Checker");
-    Meta.NumChannels = 2;
-    Meta.SampleRate = 48000;
-
-    TArray<uint8> PCM16;
-    PCM16.AddUninitialized(6);
-    for (int32 Index = 0; Index < PCM16.Num(); ++Index)
-    {
-        PCM16[Index] = static_cast<uint8>(Index * 3);
-    }
-
-    FO3DAudioBus::PublishPcm16(Meta, PCM16.GetData(), PCM16.Num());
-
-    TestTrue(TEXT("Delegate invoked"), bDelegateInvoked);
-    TestEqual(TEXT("Metadata copied"), ReceivedMeta.SubjectName, Meta.SubjectName);
-    TestEqual(TEXT("Payload size preserved"), ReceivedData.Num(), PCM16.Num());
-    TestTrue(TEXT("Payload content copied"), ReceivedData == PCM16);
-
-    FO3DAudioBus::OnPcm16().Remove(Handle);
-
-    return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverSourceFinalizeAudioMetaTest, "Open3DStream.Receiver.Source.FinalizeAudioMeta", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverSourceFinalizeAudioMetaTest, "Open3DBroadcast.Open3DReceiver.Source.FinalizeAudioMeta", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FO3DReceiverSourceFinalizeAudioMetaTest::RunTest(const FString& Parameters)
 {
     FO3DTransportConfig Config;

@@ -150,7 +150,7 @@ namespace
 	}
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DNngDataRoundTripTest, "Open3DStream.TransportNNG.Data.RoundTrip", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DNngDataRoundTripTest, "Open3DBroadcast.Open3DTransportNNG.Data.RoundTrip", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FO3DNngDataRoundTripTest::RunTest(const FString& Parameters)
 {
 	const int32 Port = FindAvailableTcpPort();
@@ -183,10 +183,14 @@ bool FO3DNngDataRoundTripTest::RunTest(const FString& Parameters)
 	ON_SCOPE_EXIT
 	{
 		Sender.Stop();
+		// Allow time for socket cleanup and TIME_WAIT resolution for subsequent test runs
+		FPlatformProcess::Sleep(0.1);
 	};
 	ON_SCOPE_EXIT
 	{
 		Receiver.Stop();
+		// Allow time for socket cleanup and TIME_WAIT resolution for subsequent test runs
+		FPlatformProcess::Sleep(0.1);
 	};
 
 	TSharedPtr<FTestFrameConsumer, ESPMode::ThreadSafe> FrameConsumer = MakeShared<FTestFrameConsumer, ESPMode::ThreadSafe>();
@@ -206,7 +210,14 @@ bool FO3DNngDataRoundTripTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	PumpTransports(Sender, Receiver, 0.2);
+	// Pump transports to allow connection establishment and initial handshake
+	// Use longer initial pump to ensure pub/sub subscription is fully negotiated.
+	// nng_dial with NNG_FLAG_NONBLOCK returns immediately, but the actual connection
+	// and pub/sub subscription negotiation happens asynchronously. We need time for:
+	// 1. TCP connection to establish
+	// 2. NNG protocol handshake
+	// 3. Publisher to recognize the subscriber
+	PumpTransports(Sender, Receiver, 2.0);
 
 	static constexpr const TCHAR* SubjectLabel = TEXT("NNGSubject");
 	O3DS::SubjectList SubjectList;
@@ -256,7 +267,7 @@ bool FO3DNngDataRoundTripTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DNngQueueLimitTest, "Open3DStream.TransportNNG.Queue.Limit", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DNngQueueLimitTest, "Open3DBroadcast.Open3DTransportNNG.Queue.Limit", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FO3DNngQueueLimitTest::RunTest(const FString& Parameters)
 {
 	const int32 Port = FindAvailableTcpPort();

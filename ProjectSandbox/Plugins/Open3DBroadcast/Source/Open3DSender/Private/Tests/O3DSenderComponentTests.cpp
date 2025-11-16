@@ -22,7 +22,7 @@ struct FO3DSenderComponentTestHelper
 	}
 };
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderConsumeCaptureBudgetTest, "Open3DStream.Sender.ConsumeCaptureBudget", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderConsumeCaptureBudgetTest, "Open3DBroadcast.O3DSender.ConsumeCaptureBudget", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FO3DSenderConsumeCaptureBudgetTest::RunTest(const FString& Parameters)
 {
 	double LastCaptureTime = 0.0;
@@ -41,7 +41,7 @@ bool FO3DSenderConsumeCaptureBudgetTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderBuildLocalBoneTransformsTest, "Open3DStream.Sender.BuildLocalBoneTransforms", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderBuildLocalBoneTransformsTest, "Open3DBroadcast.Open3DSender.BuildLocalBoneTransforms", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FO3DSenderBuildLocalBoneTransformsTest::RunTest(const FString& Parameters)
 {
 	TArray<FTransform> ComponentSpace;
