@@ -11,6 +11,38 @@
 
 using WebRTCUtils::FromAnsi;
 
+namespace WebRTCOptions
+{
+    static constexpr TCHAR PreferLossyOptionKey[] = TEXT("webrtc.prefer_lossy");
+
+    static bool ParseBool(const TMap<FString, FString>& Params, const TCHAR* Key, bool DefaultValue)
+    {
+        if (!Key)
+        {
+            return DefaultValue;
+        }
+
+        if (const FString* Value = Params.Find(Key))
+        {
+            if (Value->Equals(TEXT("1"), ESearchCase::IgnoreCase) ||
+                Value->Equals(TEXT("true"), ESearchCase::IgnoreCase) ||
+                Value->Equals(TEXT("yes"), ESearchCase::IgnoreCase))
+            {
+                return true;
+            }
+
+            if (Value->Equals(TEXT("0"), ESearchCase::IgnoreCase) ||
+                Value->Equals(TEXT("false"), ESearchCase::IgnoreCase) ||
+                Value->Equals(TEXT("no"), ESearchCase::IgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return DefaultValue;
+    }
+}
+
 /**
  * Audio sink implementation for WebRTC sender using LiveKit FFI.
  *
@@ -206,8 +238,10 @@ bool FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
     Stats.Reset();
     bInitialized.Store(true);
 
-    UE_LOG(LogO3DWebRTCSender, Log, TEXT("WebRTC sender initialized: URL=%s Audio=%s"),
-        *RoomUrl, ActiveAudioConfig.bEnableAudio ? TEXT("true") : TEXT("false"));
+    UE_LOG(LogO3DWebRTCSender, Log, TEXT("WebRTC sender initialized: URL=%s Audio=%s PreferLossy=%s"),
+        *RoomUrl,
+        ActiveAudioConfig.bEnableAudio ? TEXT("true") : TEXT("false"),
+        bPreferLossyData ? TEXT("true") : TEXT("false"));
 
     return true;
 }
@@ -315,17 +349,37 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
     constexpr int32 LossyMaxBytes = 1300;
     constexpr int32 ReliableMaxBytes = 15000;
 
-    LkReliability Reliability = LkLossy;
-    if (BytesWritten > LossyMaxBytes)
+    const bool bAllowLossy = bPreferLossyData;
+    LkReliability Reliability = bAllowLossy ? LkLossy : LkReliable;
+
+    if (bAllowLossy)
     {
-        if (BytesWritten <= ReliableMaxBytes)
+        if (BytesWritten > LossyMaxBytes)
         {
-            Reliability = LkReliable;
-            UE_LOG(LogO3DWebRTCSender, Warning,
-                TEXT("Payload size (%d bytes) exceeds lossy limit (%d bytes), switching to reliable channel"),
-                BytesWritten, LossyMaxBytes);
+            if (BytesWritten <= ReliableMaxBytes)
+            {
+                Reliability = LkReliable;
+                UE_LOG(LogO3DWebRTCSender, Warning,
+                    TEXT("Payload size (%d bytes) exceeds lossy limit (%d bytes), switching to reliable channel"),
+                    BytesWritten, LossyMaxBytes);
+            }
+            else
+            {
+                UE_LOG(LogO3DWebRTCSender, Error,
+                    TEXT("Payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton or reducing data"),
+                    BytesWritten, ReliableMaxBytes);
+
+                {
+                    FScopeLock Lock(&StatsMutex);
+                    Stats.DroppedFrames++;
+                }
+                return false;
+            }
         }
-        else
+    }
+    else
+    {
+        if (BytesWritten > ReliableMaxBytes)
         {
             UE_LOG(LogO3DWebRTCSender, Error,
                 TEXT("Payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton or reducing data"),
@@ -426,6 +480,8 @@ bool FO3DWebRTCSender::ParseConfig(const FO3DTransportConfig& Config)
         #endif  
         return false;
     }
+
+    bPreferLossyData = WebRTCOptions::ParseBool(Config.AdvancedParams, WebRTCOptions::PreferLossyOptionKey, /*DefaultValue=*/false);
 
     return true;
 }

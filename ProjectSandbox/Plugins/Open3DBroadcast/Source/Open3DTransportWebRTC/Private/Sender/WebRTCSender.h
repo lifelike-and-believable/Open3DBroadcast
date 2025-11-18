@@ -41,6 +41,7 @@ private:
     FO3DTransportAudioConfig ActiveAudioConfig;
     FString RoomUrl;
     FString Token;
+    bool bPreferLossyData = false;
 
     // LiveKit FFI client handle (opaque)
     LkClientHandle* ClientHandle = nullptr;

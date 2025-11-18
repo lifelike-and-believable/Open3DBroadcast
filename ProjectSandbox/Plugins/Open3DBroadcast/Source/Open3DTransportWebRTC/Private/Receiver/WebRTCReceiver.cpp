@@ -1,11 +1,98 @@
 #include "WebRTCReceiver.h"
 #include "../Shared/WebRTCUtils.h"
+#include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
+#include "Interfaces/IPluginManager.h"
 #include "Logging/LogMacros.h"
+#include "Misc/Paths.h"
 #include "livekit_ffi.h"
 #include "o3ds/model.h"
 
 using WebRTCUtils::FromAnsi;
+
+namespace
+{
+    FString GetPluginBaseDir()
+    {
+        if (TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Open3DBroadcast")))
+        {
+            return Plugin->GetBaseDir();
+        }
+        return FString();
+    }
+
+    static void* GLiveKitFfiHandle = nullptr;
+
+    void EnsureLiveKitFfiLoaded()
+    {
+#if PLATFORM_WINDOWS
+        if (GLiveKitFfiHandle)
+        {
+            return;
+        }
+
+        const FString PluginBaseDir = GetPluginBaseDir();
+        if (PluginBaseDir.IsEmpty())
+        {
+            UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Unable to locate Open3DBroadcast plugin directory while loading LiveKit FFI."));
+        }
+
+        const FString DllName = TEXT("livekit_ffi.dll");
+        FString CandidatePath;
+        if (!PluginBaseDir.IsEmpty())
+        {
+            CandidatePath = FPaths::Combine(PluginBaseDir, TEXT("Binaries"), TEXT("Win64"), DllName);
+            if (!FPaths::FileExists(CandidatePath))
+            {
+                CandidatePath = FPaths::Combine(PluginBaseDir, TEXT("ThirdParty"), TEXT("livekit_ffi"), TEXT("bin"), TEXT("Win64"), TEXT("Release"), DllName);
+            }
+        }
+
+        if (!CandidatePath.IsEmpty() && FPaths::FileExists(CandidatePath))
+        {
+            void* Handle = FPlatformProcess::GetDllHandle(*CandidatePath);
+            if (Handle)
+            {
+                GLiveKitFfiHandle = Handle;
+                UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("LiveKit FFI loaded from %s"), *CandidatePath);
+            }
+            else
+            {
+                UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Failed to load LiveKit FFI from %s"), *CandidatePath);
+            }
+        }
+        else
+        {
+            UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("LiveKit FFI DLL not found near plugin; relying on system loader."));
+        }
+#else
+        // Non-Windows platforms rely on the runtime dependency staging provided by the build scripts.
+#endif
+    }
+
+    void LogIfFailed(const LkResult& Result, const TCHAR* Context)
+    {
+        if (Result.code == 0)
+        {
+            return;
+        }
+
+        const FString Message = FromAnsi(Result.message);
+        if (Message.IsEmpty())
+        {
+            UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("%s failed (code=%d)"), Context, Result.code);
+        }
+        else
+        {
+            UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("%s failed (code=%d): %s"), Context, Result.code, *Message);
+        }
+
+        if (Result.message)
+        {
+            lk_free_str(const_cast<char*>(Result.message));
+        }
+    }
+}
 
 // Static callback for connection state changes
 void FO3DWebRTCReceiver::OnConnectionState(void* user, LkConnectionState state, int32_t reason_code, const char* message)
@@ -146,10 +233,14 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
     return false;
 #endif
 
+    bConnected.Store(false);
+
     if (!ParseConfig(Config))
     {
         return false;
     }
+
+    EnsureLiveKitFfiLoaded();
 
     // Create LiveKit client handle
     ClientHandle = lk_client_create();
@@ -159,53 +250,29 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
         return false;
     }
 
+    LogIfFailed(lk_set_log_level(ClientHandle, LkLogInfo), TEXT("LiveKit set log level"));
+
     // Set connection callback
-    LkResult Result = lk_set_connection_callback(ClientHandle, FO3DWebRTCReceiver::OnConnectionState, this);
-    if (Result.code != 0)
-    {
-        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Failed to set connection callback: %s"), *FromAnsi(Result.message));
-        if (Result.message)
-        {
-            lk_free_str(const_cast<char*>(Result.message));
-        }
-    }
+    LogIfFailed(lk_set_connection_callback(ClientHandle, FO3DWebRTCReceiver::OnConnectionState, this),
+        TEXT("LiveKit set connection callback"));
 
     // Set data callback
-    Result = lk_client_set_data_callback(ClientHandle, FO3DWebRTCReceiver::OnDataReceived, this);
-    if (Result.code != 0)
-    {
-        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Failed to set data callback: %s"), *FromAnsi(Result.message));
-        if (Result.message)
-        {
-            lk_free_str(const_cast<char*>(Result.message));
-        }
-    }
+    LogIfFailed(lk_client_set_data_callback(ClientHandle, FO3DWebRTCReceiver::OnDataReceived, this),
+        TEXT("LiveKit set data callback"));
 
     // Set audio callback
-    Result = lk_client_set_audio_callback(ClientHandle, FO3DWebRTCReceiver::OnAudioReceived, this);
-    if (Result.code != 0)
-    {
-        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Failed to set audio callback: %s"), *FromAnsi(Result.message));
-        if (Result.message)
-        {
-            lk_free_str(const_cast<char*>(Result.message));
-        }
-    }
+    LogIfFailed(lk_client_set_audio_callback(ClientHandle, FO3DWebRTCReceiver::OnAudioReceived, this),
+        TEXT("LiveKit set audio callback"));
+
+    LogIfFailed(lk_set_default_data_labels(ClientHandle, "o3ds-rel", "o3ds-lossy"),
+        TEXT("LiveKit set default data labels"));
 
     // Configure audio output format if needed
     if (Config.Audio.bEnableAudio)
     {
         ActiveAudioConfig = Config.Audio;
-        Result = lk_set_audio_output_format(ClientHandle, ActiveAudioConfig.SampleRate, ActiveAudioConfig.NumChannels);
-
-        if (Result.code != 0)
-        {
-            UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Failed to set audio output format: %s"), *FromAnsi(Result.message));
-            if (Result.message)
-            {
-                lk_free_str(const_cast<char*>(Result.message));
-            }
-        }
+        LogIfFailed(lk_set_audio_output_format(ClientHandle, ActiveAudioConfig.SampleRate, ActiveAudioConfig.NumChannels),
+            TEXT("LiveKit set audio output format"));
     }
 
     ActiveConfig = Config;
@@ -278,23 +345,17 @@ void FO3DWebRTCReceiver::Stop()
 {
     FScopeLock Lock(&StateMutex);
 
-    if (!ClientHandle)
+    if (ClientHandle)
     {
-        return;
-    }
+        lk_client_set_data_callback(ClientHandle, nullptr, nullptr);
+        lk_client_set_audio_callback(ClientHandle, nullptr, nullptr);
+        lk_set_connection_callback(ClientHandle, nullptr, nullptr);
 
-    if (bConnected.Load())
-    {
-        LkResult Result = lk_disconnect(ClientHandle);
-        if (Result.code != 0 && Result.message)
-        {
-            UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Disconnect warning: %s"), *FromAnsi(Result.message));
-            lk_free_str(const_cast<char*>(Result.message));
-        }
-    }
+        LogIfFailed(lk_disconnect(ClientHandle), TEXT("LiveKit disconnect"));
 
-    lk_client_destroy(ClientHandle);
-    ClientHandle = nullptr;
+        lk_client_destroy(ClientHandle);
+        ClientHandle = nullptr;
+    }
 
     Consumer.Reset();
     AudioSink.Reset();
@@ -326,15 +387,8 @@ void FO3DWebRTCReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ES
 
     if (ClientHandle && bInitialized.Load())
     {
-        LkResult Result = lk_set_audio_output_format(ClientHandle, ActiveAudioConfig.SampleRate, ActiveAudioConfig.NumChannels);
-        if (Result.code != 0)
-        {
-            UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Failed to update audio output format: %s"), *FromAnsi(Result.message));
-            if (Result.message)
-            {
-                lk_free_str(const_cast<char*>(Result.message));
-            }
-        }
+        LogIfFailed(lk_set_audio_output_format(ClientHandle, ActiveAudioConfig.SampleRate, ActiveAudioConfig.NumChannels),
+            TEXT("LiveKit update audio output format"));
     }
 }
 
