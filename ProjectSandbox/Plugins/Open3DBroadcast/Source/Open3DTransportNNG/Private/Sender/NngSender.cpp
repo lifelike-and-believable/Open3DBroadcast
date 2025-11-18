@@ -170,6 +170,10 @@ bool FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
     LastBackoffAttemptTime = 0.0;
     LastErrorLogTimestamp = 0.0;
     LastBackpressureLogTimestamp = 0.0;
+    {
+        FScopeLock SubjectLock(&SubjectNameLock);
+        LastSubjectName.Reset();
+    }
 
     bInitialized = true;
     return true;
@@ -264,6 +268,17 @@ bool FO3DNngSender::Send(const O3DS::SubjectList& List)
     {
         UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender failed to serialize subject list"));
         return false;
+    }
+
+    FString ObservedSubject;
+    if (!List.mItems.empty() && List.mItems[0])
+    {
+        ObservedSubject = UTF8_TO_TCHAR(List.mItems[0]->mName.c_str());
+    }
+    if (!ObservedSubject.IsEmpty())
+    {
+        FScopeLock SubjectLock(&SubjectNameLock);
+        LastSubjectName = MoveTemp(ObservedSubject);
     }
 
     if (!EnqueuePayload(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten))
@@ -629,25 +644,33 @@ bool FO3DNngSender::ProcessCapturedAudio(const FString& StreamLabel, const float
         return false;
     }
 
-    FString SubjectFallback = ActiveConfig.StreamId;
-    if (SubjectFallback.IsEmpty())
+    FString SubjectForAudio;
     {
-        SubjectFallback = Options.StreamId;
+        FScopeLock SubjectLock(&SubjectNameLock);
+        SubjectForAudio = LastSubjectName;
     }
-    if (SubjectFallback.IsEmpty())
+    if (SubjectForAudio.IsEmpty())
     {
-        SubjectFallback = TEXT("nng");
+        SubjectForAudio = ActiveConfig.StreamId;
+    }
+    if (SubjectForAudio.IsEmpty())
+    {
+        SubjectForAudio = Options.StreamId;
+    }
+    if (SubjectForAudio.IsEmpty())
+    {
+        SubjectForAudio = TEXT("nng");
     }
 
     O3DAudio::FEncodedFrame Frame;
-    if (!AudioEncoder.BuildEncodedFrame(StreamLabel, SubjectFallback, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Frame))
+    if (!AudioEncoder.BuildEncodedFrame(StreamLabel, SubjectForAudio, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Frame))
     {
         return false;
     }
 
     if (Frame.Meta.SubjectName.IsEmpty())
     {
-        Frame.Meta.SubjectName = SubjectFallback;
+        Frame.Meta.SubjectName = SubjectForAudio;
     }
     Frame.Meta.SourceGuid = AudioSourceGuid;
 

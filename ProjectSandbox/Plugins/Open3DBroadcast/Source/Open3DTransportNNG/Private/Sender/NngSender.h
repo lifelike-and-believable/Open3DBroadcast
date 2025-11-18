@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Containers/Queue.h"
 #include "HAL/ThreadSafeCounter.h"
+#include "HAL/CriticalSection.h"
 
 #include "O3DSenderInterface.h"
 #include "Shared/NngHelpers.h"
@@ -79,6 +80,9 @@ private:
 
     TQueue<FQueuedPayload, EQueueMode::Mpsc> Queue;
     TAtomic<uint64> QueueBytes{ 0 };
+
+    mutable FCriticalSection SubjectNameLock;
+    FString LastSubjectName;
 
     FThreadSafeCounter PipeCount;
 
