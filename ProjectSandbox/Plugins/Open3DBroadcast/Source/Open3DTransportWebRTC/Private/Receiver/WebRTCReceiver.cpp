@@ -12,6 +12,8 @@ using WebRTCUtils::FromAnsi;
 
 namespace
 {
+    static constexpr TCHAR ReconnectTimeoutOptionKey[] = TEXT("webrtc.reconnect_timeout");
+
     FString GetPluginBaseDir()
     {
         if (TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Open3DBroadcast")))
@@ -92,6 +94,27 @@ namespace
             lk_free_str(const_cast<char*>(Result.message));
         }
     }
+
+    double ParseDoubleOption(const TMap<FString, FString>& Params, const TCHAR* Key, double DefaultValue)
+    {
+        if (!Key)
+        {
+            return DefaultValue;
+        }
+
+        if (const FString* Value = Params.Find(Key))
+        {
+            if (!Value->IsEmpty())
+            {
+                const double Parsed = FCString::Atod(**Value);
+                if (Parsed == 0.0 || FMath::IsFinite(Parsed))
+                {
+                    return Parsed;
+                }
+            }
+        }
+        return DefaultValue;
+    }
 }
 
 // Static callback for connection state changes
@@ -109,6 +132,12 @@ void FO3DWebRTCReceiver::OnConnectionState(void* user, LkConnectionState state, 
     case LkConnConnected:
         UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver connected"));
         Self->bConnected.Store(true);
+        Self->bPendingAudioFormatApply.Store(true);
+        Self->bReconnectPending.Store(false);
+        {
+            FScopeLock DataLock(&Self->LastDataMutex);
+            Self->LastDataReceiveTime = FPlatformTime::Seconds();
+        }
         break;
 
     case LkConnReconnecting:
@@ -119,11 +148,13 @@ void FO3DWebRTCReceiver::OnConnectionState(void* user, LkConnectionState state, 
     case LkConnDisconnected:
         UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver disconnected: %s"), *FromAnsi(message));
         Self->bConnected.Store(false);
+        Self->RequestReconnect(true);
         break;
 
     case LkConnFailed:
         UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC receiver connection failed (code=%d): %s"), reason_code, *FromAnsi(message));
         Self->bConnected.Store(false);
+        Self->RequestReconnect(true);
         break;
     }
 }
@@ -142,7 +173,17 @@ void FO3DWebRTCReceiver::OnDataReceived(void* user, const uint8_t* bytes, size_t
     {
         FScopeLock Lock(&Self->PendingFramesMutex);
         Self->PendingFrames.Emplace(MoveTemp(Frame));
+        UE_LOG(LogO3DWebRTCReceiver, Verbose, TEXT("OnDataReceived %d bytes (Queue=%d)"),
+            static_cast<int32>(len),
+            Self->PendingFrames.Num());
     }
+
+    {
+        FScopeLock DataLock(&Self->LastDataMutex);
+        Self->LastDataReceiveTime = FPlatformTime::Seconds();
+    }
+
+    Self->bReconnectPending.Store(false);
 }
 
 // Static callback for incoming audio
@@ -228,43 +269,21 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
 
     EnsureLiveKitFfiLoaded();
 
-    // Create LiveKit client handle
-    ClientHandle = lk_client_create();
-    if (!ClientHandle)
+    ActiveAudioConfig = Config.Audio;
+
+    if (!SetupClientHandle())
     {
-        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Failed to create LiveKit client"));
         return false;
-    }
-
-    LogIfFailed(lk_set_log_level(ClientHandle, LkLogInfo), TEXT("LiveKit set log level"));
-
-    // Set connection callback
-    LogIfFailed(lk_set_connection_callback(ClientHandle, FO3DWebRTCReceiver::OnConnectionState, this),
-        TEXT("LiveKit set connection callback"));
-
-    // Set data callback
-    LogIfFailed(lk_client_set_data_callback(ClientHandle, FO3DWebRTCReceiver::OnDataReceived, this),
-        TEXT("LiveKit set data callback"));
-
-    // Set audio callback
-    LogIfFailed(lk_client_set_audio_callback(ClientHandle, FO3DWebRTCReceiver::OnAudioReceived, this),
-        TEXT("LiveKit set audio callback"));
-
-    LogIfFailed(lk_set_default_data_labels(ClientHandle, "o3ds-rel", "o3ds-lossy"),
-        TEXT("LiveKit set default data labels"));
-
-    // Configure audio output format if needed
-    if (Config.Audio.bEnableAudio)
-    {
-        ActiveAudioConfig = Config.Audio;
-        LogIfFailed(lk_set_audio_output_format(ClientHandle, ActiveAudioConfig.SampleRate, ActiveAudioConfig.NumChannels),
-            TEXT("LiveKit set audio output format"));
     }
 
     ActiveConfig = Config;
     Stats.Reset();
     LatencySamples = 0;
     LastAudioDropLogTime = 0.0;
+    {
+        FScopeLock DataLock(&LastDataMutex);
+        LastDataReceiveTime = FPlatformTime::Seconds();
+    }
     bInitialized.Store(true);
 
     UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver initialized: URL=%s"),
@@ -305,25 +324,22 @@ bool FO3DWebRTCReceiver::Start()
         }
     }
 
-    // Connect asynchronously with Subscriber role
-    LkResult Result = lk_connect_with_role_async(
-        ClientHandle,
-        TCHAR_TO_UTF8(*RoomUrl),
-        TCHAR_TO_UTF8(*Token),
-        LkRoleSubscriber
-    );
-
-    if (Result.code != 0)
+    if (!SetupClientHandle())
     {
-        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Failed to connect: %s"), *FromAnsi(Result.message));
-        if (Result.message)
-        {
-            lk_free_str(const_cast<char*>(Result.message));
-        }
         return false;
     }
 
-    UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver connecting..."));
+    if (!BeginConnect())
+    {
+        return false;
+    }
+
+    {
+        FScopeLock DataLock(&LastDataMutex);
+        LastDataReceiveTime = FPlatformTime::Seconds();
+    }
+
+    bReconnectPending.Store(false);
     return true;
 }
 
@@ -345,9 +361,15 @@ void FO3DWebRTCReceiver::Stop()
 
     Consumer.Reset();
     AudioSink.Reset();
+    {
+        FScopeLock PendingLock(&PendingFramesMutex);
+        PendingFrames.Reset();
+    }
 
     bConnected.Store(false);
     bInitialized.Store(false);
+    bPendingAudioFormatApply.Store(false);
+    bReconnectPending.Store(false);
 
     UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver stopped"));
 }
@@ -370,33 +392,48 @@ int32 FO3DWebRTCReceiver::Poll()
         }
     }
 
-    if (!bHasFrame)
+    int32 FramesProcessed = 0;
+
+    if (bHasFrame)
     {
-        return 0;
+        const double ReceiveLatencyMs = FMath::Max(0.0, (FPlatformTime::Seconds() - LatestFrame.EnqueueTimeSeconds) * 1000.0);
+
+        {
+            FScopeLock Lock(&StatsMutex);
+            Stats.FramesReceived++;
+            Stats.BytesReceived += LatestFrame.Payload.Num();
+            Stats.DroppedFrames += DroppedFrames;
+
+            Stats.MaxLatencyMs = FMath::Max(Stats.MaxLatencyMs, ReceiveLatencyMs);
+            const int64 NewSampleCount = LatencySamples + 1;
+            const double PreviousTotal = Stats.AverageLatencyMs * LatencySamples;
+            Stats.AverageLatencyMs = (PreviousTotal + ReceiveLatencyMs) / FMath::Max<int64>(1, NewSampleCount);
+            LatencySamples = NewSampleCount;
+        }
+
+        if (Consumer.IsValid())
+        {
+            Consumer->SubmitFrame(SubjectName, LatestFrame.Payload, LatestFrame.EnqueueTimeSeconds);
+            FramesProcessed = 1;
+        }
     }
 
-    const double ReceiveLatencyMs = FMath::Max(0.0, (FPlatformTime::Seconds() - LatestFrame.EnqueueTimeSeconds) * 1000.0);
-
+    const double NowSeconds = FPlatformTime::Seconds();
+    double LastDataTime = 0.0;
     {
-        FScopeLock Lock(&StatsMutex);
-        Stats.FramesReceived++;
-        Stats.BytesReceived += LatestFrame.Payload.Num();
-        Stats.DroppedFrames += DroppedFrames;
-
-        Stats.MaxLatencyMs = FMath::Max(Stats.MaxLatencyMs, ReceiveLatencyMs);
-        const int64 NewSampleCount = LatencySamples + 1;
-        const double PreviousTotal = Stats.AverageLatencyMs * LatencySamples;
-        Stats.AverageLatencyMs = (PreviousTotal + ReceiveLatencyMs) / FMath::Max<int64>(1, NewSampleCount);
-        LatencySamples = NewSampleCount;
+        FScopeLock DataLock(&LastDataMutex);
+        LastDataTime = LastDataReceiveTime;
     }
 
-    if (Consumer.IsValid())
+    if (NoDataReconnectTimeoutSec > 0.0 && (NowSeconds - LastDataTime) > NoDataReconnectTimeoutSec)
     {
-        Consumer->SubmitFrame(SubjectName, LatestFrame.Payload, LatestFrame.EnqueueTimeSeconds);
-        return 1;
+        RequestReconnect();
     }
 
-    return 0;
+    ApplyPendingAudioFormatIfNeeded();
+    ProcessReconnectIfNeeded();
+
+    return FramesProcessed;
 }
 
 FO3DTransportStats FO3DWebRTCReceiver::GetStats() const
@@ -415,6 +452,11 @@ void FO3DWebRTCReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ES
     {
         LogIfFailed(lk_set_audio_output_format(ClientHandle, ActiveAudioConfig.SampleRate, ActiveAudioConfig.NumChannels),
             TEXT("LiveKit update audio output format"));
+        bPendingAudioFormatApply.Store(false);
+    }
+    else
+    {
+        bPendingAudioFormatApply.Store(ActiveAudioConfig.bEnableAudio);
     }
 }
 
@@ -437,5 +479,170 @@ bool FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& Config)
     // Use StreamId as subject name if provided, otherwise use a default
     SubjectName = Config.StreamId.IsEmpty() ? TEXT("WebRTCStream") : Config.StreamId;
 
+    const double TimeoutSeconds = FMath::Clamp(ParseDoubleOption(Config.AdvancedParams, ReconnectTimeoutOptionKey, 2.0), 0.0, 300.0);
+    NoDataReconnectTimeoutSec = TimeoutSeconds;
+
     return true;
+}
+
+bool FO3DWebRTCReceiver::SetupClientHandle()
+{
+    EnsureLiveKitFfiLoaded();
+
+    if (ClientHandle)
+    {
+        return true;
+    }
+
+    ClientHandle = lk_client_create();
+    if (!ClientHandle)
+    {
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Failed to create LiveKit client"));
+        return false;
+    }
+
+    LogIfFailed(lk_set_log_level(ClientHandle, LkLogInfo), TEXT("LiveKit set log level"));
+
+    LogIfFailed(lk_set_connection_callback(ClientHandle, FO3DWebRTCReceiver::OnConnectionState, this),
+        TEXT("LiveKit set connection callback"));
+    LogIfFailed(lk_client_set_data_callback(ClientHandle, FO3DWebRTCReceiver::OnDataReceived, this),
+        TEXT("LiveKit set data callback"));
+    LogIfFailed(lk_client_set_audio_callback(ClientHandle, FO3DWebRTCReceiver::OnAudioReceived, this),
+        TEXT("LiveKit set audio callback"));
+    LogIfFailed(lk_set_default_data_labels(ClientHandle, "o3ds-rel", "o3ds-lossy"),
+        TEXT("LiveKit set default data labels"));
+
+    if (ActiveAudioConfig.bEnableAudio && ActiveAudioConfig.SampleRate > 0 && ActiveAudioConfig.NumChannels > 0)
+    {
+        LogIfFailed(lk_set_audio_output_format(ClientHandle, ActiveAudioConfig.SampleRate, ActiveAudioConfig.NumChannels),
+            TEXT("LiveKit set audio output format"));
+    }
+
+    return true;
+}
+
+bool FO3DWebRTCReceiver::BeginConnect()
+{
+    if (!ClientHandle)
+    {
+        return false;
+    }
+
+    LkResult Result = lk_connect_with_role_async(
+        ClientHandle,
+        TCHAR_TO_UTF8(*RoomUrl),
+        TCHAR_TO_UTF8(*Token),
+        LkRoleSubscriber);
+
+    if (Result.code != 0)
+    {
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Failed to connect: %s"), *FromAnsi(Result.message));
+        if (Result.message)
+        {
+            lk_free_str(const_cast<char*>(Result.message));
+        }
+        return false;
+    }
+
+    UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver connecting..."));
+    return true;
+}
+
+void FO3DWebRTCReceiver::RequestReconnect(bool bForce)
+{
+    if (!bForce && NoDataReconnectTimeoutSec <= 0.0)
+    {
+        return;
+    }
+
+    if (!bReconnectPending.Load())
+    {
+        bReconnectPending.Store(true);
+        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("WebRTC receiver scheduling reconnect (force=%d)"), bForce ? 1 : 0);
+    }
+}
+
+void FO3DWebRTCReceiver::ProcessReconnectIfNeeded()
+{
+    if (!bReconnectPending.Load())
+    {
+        return;
+    }
+
+    FScopeLock Lock(&StateMutex);
+    if (!bReconnectPending.Load())
+    {
+        return;
+    }
+
+    bReconnectPending.Store(false);
+
+    if (ClientHandle)
+    {
+        lk_client_set_data_callback(ClientHandle, nullptr, nullptr);
+        lk_client_set_audio_callback(ClientHandle, nullptr, nullptr);
+        lk_set_connection_callback(ClientHandle, nullptr, nullptr);
+        LogIfFailed(lk_disconnect(ClientHandle), TEXT("LiveKit reconnect disconnect"));
+        lk_client_destroy(ClientHandle);
+        ClientHandle = nullptr;
+    }
+
+    bConnected.Store(false);
+
+    if (!SetupClientHandle())
+    {
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC receiver failed to recreate LiveKit client during reconnect"));
+        return;
+    }
+
+    if (!BeginConnect())
+    {
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC receiver failed to reconnect; will retry"));
+        bReconnectPending.Store(true);
+        return;
+    }
+
+    {
+        FScopeLock PendingLock(&PendingFramesMutex);
+        PendingFrames.Reset();
+    }
+
+    {
+        FScopeLock DataLock(&LastDataMutex);
+        LastDataReceiveTime = FPlatformTime::Seconds();
+    }
+
+    UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver reconnect initiated"));
+}
+
+void FO3DWebRTCReceiver::ApplyPendingAudioFormatIfNeeded()
+{
+    if (!bPendingAudioFormatApply.Load())
+    {
+        return;
+    }
+
+    LkClientHandle* LocalHandle = nullptr;
+    FO3DTransportAudioConfig AudioConfigCopy;
+    {
+        FScopeLock Lock(&StateMutex);
+        LocalHandle = ClientHandle;
+        AudioConfigCopy = ActiveAudioConfig;
+    }
+
+    if (!LocalHandle)
+    {
+        return;
+    }
+
+    if (AudioConfigCopy.bEnableAudio && AudioConfigCopy.SampleRate > 0 && AudioConfigCopy.NumChannels > 0)
+    {
+        LogIfFailed(lk_set_audio_output_format(LocalHandle, AudioConfigCopy.SampleRate, AudioConfigCopy.NumChannels),
+            TEXT("LiveKit reapply audio output format"));
+        bPendingAudioFormatApply.Store(false);
+        return;
+    }
+
+    // Audio disabled (or invalid config) – nothing to apply.
+    bPendingAudioFormatApply.Store(false);
 }

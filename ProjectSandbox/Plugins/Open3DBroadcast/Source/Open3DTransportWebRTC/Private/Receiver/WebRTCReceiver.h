@@ -61,13 +61,23 @@ private:
     mutable FCriticalSection PendingFramesMutex;
     TArray<FPendingFrame> PendingFrames;
 
-    // Stats
+    // Stats / diagnostics
     mutable FCriticalSection StatsMutex;
     FO3DTransportStats Stats;
     int64 LatencySamples = 0;
+    TAtomic<bool> bPendingAudioFormatApply{ false };
+    mutable FCriticalSection LastDataMutex;
+    double LastDataReceiveTime = 0.0;
+    double NoDataReconnectTimeoutSec = 5.0;
+    TAtomic<bool> bReconnectPending{ false };
 
     // Helper methods
     bool ParseConfig(const FO3DTransportConfig& Config);
+    bool SetupClientHandle();
+    bool BeginConnect();
+    void ApplyPendingAudioFormatIfNeeded();
+    void ProcessReconnectIfNeeded();
+    void RequestReconnect(bool bForce = false);
 
     // LiveKit FFI callbacks (static)
     struct FCallbacks;
