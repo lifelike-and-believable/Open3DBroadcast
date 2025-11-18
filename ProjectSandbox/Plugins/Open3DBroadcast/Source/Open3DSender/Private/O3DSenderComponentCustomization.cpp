@@ -9,6 +9,7 @@
 #include "DetailLayoutBuilder.h"
 #include "DetailWidgetRow.h"
 #include "PropertyHandle.h"
+#include "Logging/LogMacros.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Text/STextBlock.h"
@@ -20,6 +21,7 @@
 #include "O3DSenderTransportCustomization.h"
 
 #define LOCTEXT_NAMESPACE "O3DSenderComponentCustomization"
+DEFINE_LOG_CATEGORY_STATIC(LogO3DSenderDetails, Log, All);
 
 namespace
 {
@@ -38,9 +40,45 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
 {
     TArray<TWeakObjectPtr<UObject>> Objects;
     DetailBuilder.GetObjectsBeingCustomized(Objects);
-    if (Objects.Num() > 0)
+    UE_LOG(LogO3DSenderDetails, Verbose, TEXT("CustomizeDetails start: %d objects"), Objects.Num());
+    for (int32 Index = 0; Index < Objects.Num(); ++Index)
     {
-        WeakComponent = Cast<UO3DSenderComponent>(Objects[0].Get());
+        if (UObject* Obj = Objects[Index].Get())
+        {
+            UE_LOG(LogO3DSenderDetails, Verbose, TEXT("  [%d] %s (%s)"), Index, *Obj->GetName(), *Obj->GetClass()->GetName());
+        }
+        else
+        {
+            UE_LOG(LogO3DSenderDetails, Warning, TEXT("  [%d] null object in customization list"), Index);
+        }
+    }
+    WeakComponent.Reset();
+    for (const TWeakObjectPtr<UObject>& WeakObj : Objects)
+    {
+        if (UO3DSenderComponent* Candidate = Cast<UO3DSenderComponent>(WeakObj.Get()))
+        {
+            if (!WeakComponent.IsValid())
+            {
+                WeakComponent = Candidate;
+            }
+
+            if (!Candidate->HasAnyFlags(RF_ClassDefaultObject))
+            {
+                WeakComponent = Candidate;
+                break;
+            }
+        }
+    }
+
+    if (WeakComponent.IsValid())
+    {
+        UE_LOG(LogO3DSenderDetails, Verbose, TEXT("Primary component: %s%s"),
+            *WeakComponent->GetName(),
+            WeakComponent->HasAnyFlags(RF_ClassDefaultObject) ? TEXT(" [CDO]") : TEXT(""));
+    }
+    else
+    {
+        UE_LOG(LogO3DSenderDetails, Warning, TEXT("CustomizeDetails could not resolve a valid sender component."));
     }
 
     DetailBuilder.HideCategory(TEXT("Open3DStream|Sender"));
@@ -254,7 +292,31 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
     }
     if (AudioInputDeviceHandle.IsValid())
     {
-        AudioGroup.AddPropertyRow(AudioInputDeviceHandle.ToSharedRef());
+        const TWeakPtr<FO3DSenderComponentCustomization> CustomizationWeak = AsSharedCustomization();
+        IDetailPropertyRow& AudioInputRow = AudioGroup.AddPropertyRow(AudioInputDeviceHandle.ToSharedRef());
+        AudioInputRow.Visibility(TAttribute<EVisibility>::CreateLambda([CustomizationWeak]()
+        {
+            const TSharedPtr<FO3DSenderComponentCustomization> Customization = CustomizationWeak.Pin();
+            if (!Customization.IsValid())
+            {
+                return EVisibility::Collapsed;
+            }
+
+            if (const UO3DSenderComponent* Component = Customization->ResolveEditingComponent())
+            {
+                const bool bEnableAudioValue = Component->bEnableAudio;
+                const bool bMicMode = (Component->AudioCaptureMode == EO3DSenderCaptureMode::Input);
+                UE_LOG(LogO3DSenderDetails, VeryVerbose, TEXT("AudioInputDevice visibility (component state): Enable=%d Mode=%d -> %s"),
+                    bEnableAudioValue,
+                    static_cast<int32>(Component->AudioCaptureMode),
+                    (bEnableAudioValue && bMicMode) ? TEXT("Visible") : TEXT("Collapsed"));
+
+                return (bEnableAudioValue && bMicMode) ? EVisibility::Visible : EVisibility::Collapsed;
+            }
+
+            UE_LOG(LogO3DSenderDetails, VeryVerbose, TEXT("AudioInputDevice visibility: component unavailable"));
+            return EVisibility::Collapsed;
+        }));
     }
     if (AudioStreamLabelHandle.IsValid())
     {
@@ -285,12 +347,23 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
 
     RefreshTransportCustomization();
     SyncTransportComboSelection();
+
+    UE_LOG(LogO3DSenderDetails, Verbose, TEXT("CustomizeDetails completed"));
 }
 
 void FO3DSenderComponentCustomization::HandleTransportSelectionChanged(TSharedPtr<FName> NewSelection, ESelectInfo::Type /*SelectInfo*/)
 {
+    UE_LOG(LogO3DSenderDetails, Verbose, TEXT("HandleTransportSelectionChanged: %s"),
+        (NewSelection.IsValid() ? *NewSelection->ToString() : TEXT("<none>")));
     if (!TransportNameHandle.IsValid() || !NewSelection.IsValid())
     {
+        return;
+    }
+
+    FName ExistingValue = NAME_None;
+    if (TransportNameHandle->GetValue(ExistingValue) == FPropertyAccess::Success && ExistingValue == *NewSelection)
+    {
+        UE_LOG(LogO3DSenderDetails, VeryVerbose, TEXT("Transport selection unchanged, skipping SetValue"));
         return;
     }
 
@@ -299,9 +372,10 @@ void FO3DSenderComponentCustomization::HandleTransportSelectionChanged(TSharedPt
 
 void FO3DSenderComponentCustomization::HandleTransportPropertyChanged()
 {
+    UE_LOG(LogO3DSenderDetails, Verbose, TEXT("HandleTransportPropertyChanged"));
     RefreshTransportOptions();
 
-    if (UO3DSenderComponent* Component = WeakComponent.Get())
+    if (UO3DSenderComponent* Component = ResolveEditingComponent())
     {
         Component->ClearTransportOptions();
     }
@@ -311,11 +385,13 @@ void FO3DSenderComponentCustomization::HandleTransportPropertyChanged()
 
 void FO3DSenderComponentCustomization::HandleTransportConfigChanged()
 {
+    UE_LOG(LogO3DSenderDetails, Verbose, TEXT("HandleTransportConfigChanged"));
     RefreshTransportCustomization();
 }
 
 void FO3DSenderComponentCustomization::RefreshTransportOptions()
 {
+    UE_LOG(LogO3DSenderDetails, Verbose, TEXT("RefreshTransportOptions begin"));
     TransportOptions.Reset();
 
     TArray<FName> RegisteredTransports;
@@ -333,7 +409,12 @@ void FO3DSenderComponentCustomization::RefreshTransportOptions()
         CurrentSelection = *TransportOptions[0];
         if (TransportNameHandle.IsValid())
         {
-            TransportNameHandle->SetValue(CurrentSelection);
+            FName ExistingValue = NAME_None;
+            const bool bHasValue = (TransportNameHandle->GetValue(ExistingValue) == FPropertyAccess::Success);
+            if (!bHasValue || ExistingValue.IsNone())
+            {
+                TransportNameHandle->SetValue(CurrentSelection);
+            }
         }
     }
 
@@ -369,28 +450,34 @@ void FO3DSenderComponentCustomization::RefreshTransportOptions()
     }
 
     SyncTransportComboSelection();
+    UE_LOG(LogO3DSenderDetails, Verbose, TEXT("RefreshTransportOptions end: %d options"), TransportOptions.Num());
 }
 
 void FO3DSenderComponentCustomization::RefreshTransportCustomization()
 {
+    UE_LOG(LogO3DSenderDetails, Verbose, TEXT("RefreshTransportCustomization begin"));
     SyncTransportComboSelection();
 
     if (!TransportCustomizationContainer.IsValid())
     {
+        UE_LOG(LogO3DSenderDetails, Warning, TEXT("TransportCustomizationContainer invalid"));
         return;
     }
 
     TransportCustomizationContainer->SetContent(SNullWidget::NullWidget);
 
-    UO3DSenderComponent* Component = WeakComponent.Get();
+    UO3DSenderComponent* Component = ResolveEditingComponent();
     if (!Component)
     {
+        UE_LOG(LogO3DSenderDetails, Verbose, TEXT("No valid component while refreshing transport customization; clearing widget"));
+        TransportCustomizationContainer->SetContent(SNullWidget::NullWidget);
         return;
     }
 
     const FName TransportName = GetSelectedTransportName();
     if (TransportName.IsNone())
     {
+        UE_LOG(LogO3DSenderDetails, Verbose, TEXT("No transport selected; skipping customization widget"));
         return;
     }
 
@@ -402,7 +489,9 @@ void FO3DSenderComponentCustomization::RefreshTransportCustomization()
             FSimpleDelegate OnConfigChanged = FSimpleDelegate::CreateSP(AsSharedCustomization(), &FO3DSenderComponentCustomization::HandleTransportConfigChanged);
             if (TSharedPtr<SWidget> CustomWidget = Customization->BuildTransportWidget(Component, OnConfigChanged))
             {
+                UE_LOG(LogO3DSenderDetails, Verbose, TEXT("Built transport widget for %s"), *TransportName.ToString());
                 TransportCustomizationContainer->SetContent(CustomWidget.ToSharedRef());
+                UE_LOG(LogO3DSenderDetails, Verbose, TEXT("RefreshTransportCustomization end (custom widget)"));
                 return;
             }
         }
@@ -414,10 +503,13 @@ void FO3DSenderComponentCustomization::RefreshTransportCustomization()
         .Text(NSLOCTEXT("O3DSenderCustomization", "NoTransportOptions", "No transport-specific settings available."))
         .Font(IDetailLayoutBuilder::GetDetailFontItalic())
     );
+    UE_LOG(LogO3DSenderDetails, Verbose, TEXT("Transport customization widget not available for %s"), *TransportName.ToString());
+    UE_LOG(LogO3DSenderDetails, Verbose, TEXT("RefreshTransportCustomization end (fallback text)"));
 }
 
 void FO3DSenderComponentCustomization::SyncTransportComboSelection()
 {
+    UE_LOG(LogO3DSenderDetails, VeryVerbose, TEXT("SyncTransportComboSelection begin"));
     if (!TransportComboBox.IsValid())
     {
         return;
@@ -448,10 +540,14 @@ void FO3DSenderComponentCustomization::SyncTransportComboSelection()
     {
         TransportComboBox->ClearSelection();
     }
+    UE_LOG(LogO3DSenderDetails, VeryVerbose, TEXT("SyncTransportComboSelection end (%s)"),
+        MatchingItem.IsValid() ? *MatchingItem->ToString() : TEXT("<none>"));
 }
 
 TSharedRef<SWidget> FO3DSenderComponentCustomization::GenerateTransportWidget(TSharedPtr<FName> InItem) const
 {
+    UE_LOG(LogO3DSenderDetails, VeryVerbose, TEXT("GenerateTransportWidget for %s"),
+        InItem.IsValid() ? *InItem->ToString() : TEXT("<none>"));
     const FText Label = InItem.IsValid() ? GetSenderTransportDisplayName(*InItem) : FText::GetEmpty();
     return SNew(STextBlock)
         .Text(Label)
@@ -468,6 +564,7 @@ FText FO3DSenderComponentCustomization::GetSelectedTransportText() const
 
 FName FO3DSenderComponentCustomization::GetSelectedTransportName() const
 {
+    UE_LOG(LogO3DSenderDetails, VeryVerbose, TEXT("GetSelectedTransportName invoked"));
     if (TransportNameHandle.IsValid())
     {
         FName PropertyValue = NAME_None;
@@ -487,6 +584,7 @@ FName FO3DSenderComponentCustomization::GetSelectedTransportName() const
 
 bool FO3DSenderComponentCustomization::IsTransportSelectionEnabled() const
 {
+    UE_LOG(LogO3DSenderDetails, VeryVerbose, TEXT("IsTransportSelectionEnabled invoked"));
     bool bAutoCreate = false;
     if (GetAutoCreateTransportValue(bAutoCreate))
     {
@@ -498,6 +596,7 @@ bool FO3DSenderComponentCustomization::IsTransportSelectionEnabled() const
 
 bool FO3DSenderComponentCustomization::GetAutoCreateTransportValue(bool& bOutAutoCreate) const
 {
+    UE_LOG(LogO3DSenderDetails, VeryVerbose, TEXT("GetAutoCreateTransportValue invoked"));
     if (AutoCreateTransportHandle.IsValid())
     {
         bool bValue = false;
@@ -525,6 +624,7 @@ bool FO3DSenderComponentCustomization::GetAutoCreateTransportValue(bool& bOutAut
 
 EVisibility FO3DSenderComponentCustomization::GetTransportCustomizationVisibility() const
 {
+    UE_LOG(LogO3DSenderDetails, VeryVerbose, TEXT("GetTransportCustomizationVisibility invoked"));
     bool bAutoCreate = true;
     if (GetAutoCreateTransportValue(bAutoCreate))
     {
@@ -532,6 +632,35 @@ EVisibility FO3DSenderComponentCustomization::GetTransportCustomizationVisibilit
     }
 
     return EVisibility::Visible;
+}
+
+UO3DSenderComponent* FO3DSenderComponentCustomization::ResolveEditingComponent()
+{
+    if (WeakComponent.IsStale())
+    {
+        WeakComponent.Reset();
+    }
+
+    if (WeakComponent.IsValid())
+    {
+        return WeakComponent.Get();
+    }
+
+    if (TransportNameHandle.IsValid())
+    {
+        TArray<UObject*> OuterObjects;
+        TransportNameHandle->GetOuterObjects(OuterObjects);
+        for (UObject* Outer : OuterObjects)
+        {
+            if (UO3DSenderComponent* Component = Cast<UO3DSenderComponent>(Outer))
+            {
+                WeakComponent = Component;
+                return Component;
+            }
+        }
+    }
+
+    return nullptr;
 }
 
 #undef LOCTEXT_NAMESPACE

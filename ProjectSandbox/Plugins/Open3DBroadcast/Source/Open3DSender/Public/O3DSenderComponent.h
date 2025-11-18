@@ -158,7 +158,7 @@ public:
 	EO3DSenderCaptureMode AudioCaptureMode = EO3DSenderCaptureMode::Mix;
 
 	/** Friendly microphone name surfaced to users; resolved back to a device index at runtime. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio", meta = (GetOptions = "GetAvailableAudioInputDeviceOptions", EditCondition = "bEnableAudio && AudioCaptureMode == EO3DSenderCaptureMode::Input", EditConditionHides))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio", meta = (GetOptions = "GetAvailableAudioInputDeviceOptions", EditCondition = "bEnableAudio", EditConditionHides))
 	FName AudioInputDevice;
 
 	/** Full audio capture configuration (sample rate, bitrate, gains, etc.). */

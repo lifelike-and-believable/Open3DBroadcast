@@ -41,6 +41,7 @@ private:
     bool IsTransportSelectionEnabled() const;
 
     bool GetAutoCreateTransportValue(bool& bOutAutoCreate) const;
+    UO3DSenderComponent* ResolveEditingComponent();
 
     TWeakObjectPtr<UO3DSenderComponent> WeakComponent;
     TSharedPtr<SBox> TransportCustomizationContainer;
