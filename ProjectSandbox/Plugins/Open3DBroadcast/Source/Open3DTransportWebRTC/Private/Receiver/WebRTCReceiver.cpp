@@ -134,28 +134,14 @@ void FO3DWebRTCReceiver::OnDataReceived(void* user, const uint8_t* bytes, size_t
     FO3DWebRTCReceiver* Self = reinterpret_cast<FO3DWebRTCReceiver*>(user);
     if (!Self || !bytes || len == 0) return;
 
-    const double NowSeconds = FPlatformTime::Seconds();
+    FO3DWebRTCReceiver::FPendingFrame Frame;
+    Frame.EnqueueTimeSeconds = FPlatformTime::Seconds();
+    Frame.Payload.AddUninitialized((int32)len);
+    FMemory::Memcpy(Frame.Payload.GetData(), bytes, len);
 
-    // Assume reasonable latency (timestamp extraction would require O3DS API support)
-    // In a production system with timestamp in payload, we could extract it for accurate RTT
-    double LatencyMs = 10.0;  // Default assumption for SFU latency
-
-    // Update stats
     {
-        FScopeLock Lock(&Self->StatsMutex);
-        Self->Stats.FramesReceived++;
-        Self->Stats.BytesReceived += len;
-        Self->AccumulateLatency(LatencyMs);
-    }
-
-    // Forward to consumer
-    if (Self->Consumer.IsValid())
-    {
-        TArray<uint8> Payload;
-        Payload.AddUninitialized((int32)len);
-        FMemory::Memcpy(Payload.GetData(), bytes, len);
-
-        Self->Consumer->SubmitFrame(Self->SubjectName, Payload, NowSeconds);
+        FScopeLock Lock(&Self->PendingFramesMutex);
+        Self->PendingFrames.Emplace(MoveTemp(Frame));
     }
 }
 
@@ -368,8 +354,48 @@ void FO3DWebRTCReceiver::Stop()
 
 int32 FO3DWebRTCReceiver::Poll()
 {
-    // LiveKit FFI delivers data via callbacks, so Poll() is a no-op
-    // Callbacks handle data delivery directly
+    FPendingFrame LatestFrame;
+    bool bHasFrame = false;
+    int32 DroppedFrames = 0;
+
+    {
+        FScopeLock Lock(&PendingFramesMutex);
+        const int32 NumPending = PendingFrames.Num();
+        if (NumPending > 0)
+        {
+            DroppedFrames = NumPending - 1;
+            LatestFrame = MoveTemp(PendingFrames.Last());
+            PendingFrames.Reset();
+            bHasFrame = true;
+        }
+    }
+
+    if (!bHasFrame)
+    {
+        return 0;
+    }
+
+    const double ReceiveLatencyMs = FMath::Max(0.0, (FPlatformTime::Seconds() - LatestFrame.EnqueueTimeSeconds) * 1000.0);
+
+    {
+        FScopeLock Lock(&StatsMutex);
+        Stats.FramesReceived++;
+        Stats.BytesReceived += LatestFrame.Payload.Num();
+        Stats.DroppedFrames += DroppedFrames;
+
+        Stats.MaxLatencyMs = FMath::Max(Stats.MaxLatencyMs, ReceiveLatencyMs);
+        const int64 NewSampleCount = LatencySamples + 1;
+        const double PreviousTotal = Stats.AverageLatencyMs * LatencySamples;
+        Stats.AverageLatencyMs = (PreviousTotal + ReceiveLatencyMs) / FMath::Max<int64>(1, NewSampleCount);
+        LatencySamples = NewSampleCount;
+    }
+
+    if (Consumer.IsValid())
+    {
+        Consumer->SubmitFrame(SubjectName, LatestFrame.Payload, LatestFrame.EnqueueTimeSeconds);
+        return 1;
+    }
+
     return 0;
 }
 
@@ -412,16 +438,4 @@ bool FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& Config)
     SubjectName = Config.StreamId.IsEmpty() ? TEXT("WebRTCStream") : Config.StreamId;
 
     return true;
-}
-
-void FO3DWebRTCReceiver::AccumulateLatency(double LatencyMs)
-{
-    FScopeLock Lock(&StatsMutex);
-
-    Stats.MaxLatencyMs = FMath::Max(Stats.MaxLatencyMs, LatencyMs);
-
-    const int64 NewSampleCount = LatencySamples + 1;
-    const double PreviousTotal = Stats.AverageLatencyMs * LatencySamples;
-    Stats.AverageLatencyMs = (PreviousTotal + LatencyMs) / FMath::Max<int64>(1, NewSampleCount);
-    LatencySamples = NewSampleCount;
 }

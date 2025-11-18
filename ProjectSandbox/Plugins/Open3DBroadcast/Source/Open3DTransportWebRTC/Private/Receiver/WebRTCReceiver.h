@@ -53,6 +53,13 @@ private:
     // Consumer
     TSharedPtr<ISerializedFrameConsumer> Consumer;
     TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
+    struct FPendingFrame
+    {
+        TArray<uint8> Payload;
+        double EnqueueTimeSeconds = 0.0;
+    };
+    mutable FCriticalSection PendingFramesMutex;
+    TArray<FPendingFrame> PendingFrames;
 
     // Stats
     mutable FCriticalSection StatsMutex;
@@ -61,7 +68,6 @@ private:
 
     // Helper methods
     bool ParseConfig(const FO3DTransportConfig& Config);
-    void AccumulateLatency(double LatencyMs);
 
     // LiveKit FFI callbacks (static)
     struct FCallbacks;
