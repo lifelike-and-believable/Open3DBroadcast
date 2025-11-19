@@ -433,6 +433,11 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
     bool bAnyFrameSucceeded = false;
     int32 SubjectsProcessed = 0;
 
+    // ARCHITECTURE VERIFICATION LOGGING
+    UE_LOG(LogO3DWebRTCSender, Verbose,
+        TEXT("[ARCH] Send() START: Input SubjectList has %zu subjects"),
+        List.mItems.size());
+
     // Serialize and send each subject individually with its own labeled data channel.
     // This allows multiple senders to coexist without overwhelming a single channel.
     // Each subject's mocap data (typically ~13KB) stays well within the reliable limit.
@@ -444,6 +449,14 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
             continue;
         }
 
+        // ARCHITECTURE VERIFICATION: Log subject being processed
+        FString SubjectNameStr = FString(Subject->mName.c_str());
+        const TCHAR* SubjectNameDisplay = SubjectNameStr.IsEmpty() ? TEXT("(unnamed)") : *SubjectNameStr;
+        UE_LOG(LogO3DWebRTCSender, Verbose,
+            TEXT("[ARCH] Processing subject[%zu]: name='%s' transforms=%zu"),
+            SubjectIdx, SubjectNameDisplay,
+            Subject->mTransforms.mItems.size());
+
         // Create a single-subject list for serialization
         O3DS::SubjectList SingleSubjectList;
         O3DS::Subject* NewSubject = SingleSubjectList.addSubject(Subject->mName, Subject->mReference);
@@ -452,6 +465,11 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
             UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to create single-subject list for Subject[%zu]"), SubjectIdx);
             continue;
         }
+
+        // ARCHITECTURE VERIFICATION: Log single-subject list creation
+        UE_LOG(LogO3DWebRTCSender, Verbose,
+            TEXT("[ARCH] SingleSubjectList created for subject[%zu]: %zu transforms will be copied"),
+            SubjectIdx, Subject->mTransforms.mItems.size());
 
         // Copy subject data to new subject
         NewSubject->mJoints = Subject->mJoints;
@@ -476,6 +494,11 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
             UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to serialize Subject[%zu]"), SubjectIdx);
             continue;
         }
+
+        // ARCHITECTURE VERIFICATION: Log serialization success
+        UE_LOG(LogO3DWebRTCSender, Verbose,
+            TEXT("[ARCH] Serialized subject[%zu]: %d bytes (SingleSubjectList buffer)"),
+            SubjectIdx, BytesWritten);
 
         // IMPORTANT: Clear the transform list before SingleSubjectList is destroyed.
         // We added raw pointers from the source Subject, so we must prevent
@@ -515,6 +538,12 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
             SubjectLabel = FString::Printf(TEXT("subject_%zu"), SubjectIdx);
         }
 
+        // ARCHITECTURE VERIFICATION: Log label and send attempt
+        UE_LOG(LogO3DWebRTCSender, Verbose,
+            TEXT("[ARCH] Sending subject[%zu] with label='%s' (%d bytes, %s)"),
+            SubjectIdx, *SubjectLabel, BytesWritten,
+            Reliability == LkReliable ? TEXT("reliable") : TEXT("lossy"));
+
         // Send via labeled LiveKit data channel
         // The label allows the receiver to route this subject's data to the correct consumer
         LkResult Result = lk_send_data_ex(
@@ -537,6 +566,11 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
             continue;
         }
 
+        // ARCHITECTURE VERIFICATION: Log successful send
+        UE_LOG(LogO3DWebRTCSender, Verbose,
+            TEXT("[ARCH] Successfully sent subject[%zu] with label='%s'"),
+            SubjectIdx, *SubjectLabel);
+
         bAnyFrameSucceeded = true;
         SubjectsProcessed++;
 
@@ -552,6 +586,12 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
         FScopeLock Lock(&StatsMutex);
         Stats.DroppedFrames++;
     }
+
+    // ARCHITECTURE VERIFICATION: Log end of send
+    UE_LOG(LogO3DWebRTCSender, Verbose,
+        TEXT("[ARCH] Send() END: Processed %d/%zu subjects (%s)"),
+        SubjectsProcessed, List.mItems.size(),
+        bAnyFrameSucceeded ? TEXT("SUCCESS") : TEXT("FAILED"));
 
     return bAnyFrameSucceeded;
 }

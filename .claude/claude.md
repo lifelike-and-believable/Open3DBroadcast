@@ -36,9 +36,12 @@ If either file is missing these settings, add them immediately.
    - **NEVER assume method names or member names**
 
 2. **LiveKit FFI APIs**
-   - File: `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/include/livekit_ffi.h`
+   - Header File: `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/include/livekit_ffi.h`
+   - **Source Code Reference:** `E:\OtherProjects\livekit-ffi-ue\livekit_ffi` (for detailed implementation and undocumented features)
    - Functions: `lk_audio_track_create()`, `lk_audio_track_publish_pcm_i16()`, `lk_send_data_ex()`, etc.
    - **Check exact parameter types and order**
+   - **For missing APIs or ambiguous functionality:** Refer to the source code in the livekit-ffi-ue repository
+   - **To request new C++ wrapper APIs:** Ask and forward the request to the LiveKit FFI developers
 
 **Example of WRONG approach:**
 ```cpp
