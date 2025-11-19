@@ -15,6 +15,8 @@ Plugins/*
 Plugins/Open3DBroadcast/**
 !Plugins/Open3DBroadcast/Open3DBroadcast.uplugin
 !Plugins/Open3DBroadcast/README.md
+!Plugins/Open3DBroadcast/USER_GUIDE.md
+!Plugins/Open3DBroadcast/Transport_Module_Comparison.md
 !Plugins/Open3DBroadcast/Source/
 !Plugins/Open3DBroadcast/Source/**
 !Plugins/Open3DBroadcast/ThirdParty/
