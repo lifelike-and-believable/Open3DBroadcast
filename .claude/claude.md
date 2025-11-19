@@ -98,7 +98,38 @@ for (size_t i = 0; i < List.mItems.size(); ++i)
 
 ---
 
-### 4. Build Error Resolution Process
+### 4. MCP Server and Tool Preferences
+
+**RULE:** Always use Exa MCP tools for web searches and code context lookups.
+
+**Why:** Exa tools are pre-configured and don't require permission prompts. They provide better performance and integration.
+
+**Tools to use:**
+- **Web searches:** `mcp__plugin_exa-mcp-server_exa__web_search_exa`
+  - Use for: Finding articles, documentation, best practices, research
+  - Parameters: `query`, `numResults`, `type` (auto/fast/deep), `livecrawl` (fallback/preferred)
+
+- **Code context:** `mcp__plugin_exa-mcp-server_exa__get_code_context_exa`
+  - Use for: API examples, library documentation, code patterns
+  - Parameters: `query`, `tokensNum` (1000-50000, default 5000)
+
+- **Library documentation:** Context7 tools
+  - `mcp__context7__resolve-library-id` - Resolve package names to library IDs
+  - `mcp__context7__get-library-docs` - Get up-to-date docs for libraries
+
+**Tools to AVOID:**
+- ❌ Built-in `WebSearch` tool - causes permission prompt issues in dontAsk mode
+- Use MCP Exa tools instead
+
+**Example usage:**
+```
+mcp__plugin_exa-mcp-server_exa__web_search_exa with query "WebRTC performance optimization"
+mcp__plugin_exa-mcp-server_exa__get_code_context_exa with query "LiveKit FFI audio track creation"
+```
+
+---
+
+### 5. Build Error Resolution Process
 
 **If build fails:**
 1. Check that you're using UE 5.7 (not 5.4)
@@ -157,6 +188,9 @@ If you need to work on WebRTC transport:
 
 ---
 
-**Last Updated:** November 18, 2025
-**Version:** 1.0
+**Last Updated:** November 19, 2025
+**Version:** 1.1
 **Status:** Active - Follow these rules for all work on this project
+
+## Changes in v1.1
+- Added Rule 4: MCP Server and Tool Preferences (always use Exa MCP tools for searches)
