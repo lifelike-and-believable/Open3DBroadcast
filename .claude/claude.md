@@ -7,8 +7,8 @@
 
 **How to enforce:**
 - Project file is already configured: `.uproject` has `"EngineAssociation": "5.7"`
-- When building, use: `C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat`
-- NOT: `C:\Program Files\Epic Games\UE_5.4\...`
+- When building, use: 
+"C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat" ProjectSandboxEditor Win64 Development -Project="e:\OtherProjects\Open3DStream\ProjectSandbox\ProjectSandbox.uproject"
 
 **Target.cs files must have:**
 ```cpp
