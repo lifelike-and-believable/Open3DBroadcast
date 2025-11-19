@@ -61,14 +61,36 @@ private:
     {
         TArray<uint8> Payload;
         double EnqueueTimeSeconds = 0.0;
+
+        // Pre-allocate buffer to typical mocap frame size to reduce GC pressure
+        void ReserveForTypicalFrame()
+        {
+            static constexpr int32 TypicalFrameSizeBytes = 15 * 1024;  // ~15KB typical mocap frame
+            if (Payload.Max() < TypicalFrameSizeBytes)
+            {
+                Payload.Reserve(TypicalFrameSizeBytes);
+            }
+        }
     };
     mutable FCriticalSection PendingFramesMutex;
     // Map from subject label to queue of pending frames
     TMap<FString, TArray<FPendingFrame>> PendingFramesBySubject;
 
+    // Subject label cache - avoids repeated C-string→FString conversions (optimization)
+    mutable FCriticalSection LabelCacheMutex;
+    TMap<uint32, FString> SubjectLabelCache;
+
     // Stats / diagnostics
     mutable FCriticalSection StatsMutex;
-    FO3DTransportStats Stats;
+    mutable FO3DTransportStats Stats;  // Mutable to allow updates in const GetStats() method
+
+    // Atomic statistics for lock-free updates (high-frequency updates)
+    TAtomic<int64> AtomicFramesReceived{ 0 };
+    TAtomic<int64> AtomicFramesSent{ 0 };
+    TAtomic<int64> AtomicBytesReceived{ 0 };
+    TAtomic<int64> AtomicBytesSent{ 0 };
+    TAtomic<int64> AtomicDroppedFrames{ 0 };
+
     int64 LatencySamples = 0;
     TAtomic<bool> bPendingAudioFormatApply{ false };
     mutable FCriticalSection LastDataMutex;
@@ -83,6 +105,7 @@ private:
     void ApplyPendingAudioFormatIfNeeded();
     void ProcessReconnectIfNeeded();
     void RequestReconnect(bool bForce = false);
+    FString GetOrCacheSubjectLabel(const char* RawLabel);  // Cache C-string→FString conversions
 
     // LiveKit FFI callbacks (static)
     struct FCallbacks;

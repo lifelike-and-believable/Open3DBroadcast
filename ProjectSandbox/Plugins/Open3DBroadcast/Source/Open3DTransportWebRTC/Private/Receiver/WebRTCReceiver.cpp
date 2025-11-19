@@ -192,11 +192,12 @@ void FO3DWebRTCReceiver::OnDataReceivedEx(void* user, const char* label, LkRelia
         ThisCallNumber, label ? label : "(NULL)", len,
         reliability == LkReliable ? TEXT("Reliable") : TEXT("Lossy"));
 
-    // Convert label to FString, use a default if not provided
-    FString SubjectLabel = label && *label ? FString(label) : TEXT("default");
+    // Convert label to FString with caching (optimization: avoids repeated UTF8→UTF16 conversion)
+    FString SubjectLabel = Self->GetOrCacheSubjectLabel(label);
 
     FO3DWebRTCReceiver::FPendingFrame Frame;
     Frame.EnqueueTimeSeconds = FPlatformTime::Seconds();
+    Frame.ReserveForTypicalFrame();  // Pre-allocate to typical frame size (optimization)
     Frame.Payload.AddUninitialized((int32)len);
     FMemory::Memcpy(Frame.Payload.GetData(), bytes, len);
 
@@ -257,6 +258,7 @@ void FO3DWebRTCReceiver::OnDataReceived(void* user, const uint8_t* bytes, size_t
 
     FO3DWebRTCReceiver::FPendingFrame Frame;
     Frame.EnqueueTimeSeconds = FPlatformTime::Seconds();
+    Frame.ReserveForTypicalFrame();  // Pre-allocate to typical frame size (optimization)
     Frame.Payload.AddUninitialized((int32)len);
     FMemory::Memcpy(Frame.Payload.GetData(), bytes, len);
 
@@ -294,11 +296,9 @@ void FO3DWebRTCReceiver::OnAudioReceivedEx(void* user, const int16_t* pcm_interl
     FO3DWebRTCReceiver* Self = reinterpret_cast<FO3DWebRTCReceiver*>(user);
     if (!Self || !pcm_interleaved || frames_per_channel == 0 || channels <= 0 || sample_rate <= 0) return;
 
-    {
-        FScopeLock Lock(&Self->StatsMutex);
-        Self->Stats.FramesReceived++;  // Count audio frames
-        Self->Stats.BytesReceived += frames_per_channel * channels * sizeof(int16);
-    }
+    // Lock-free atomic updates for high-frequency stats (optimization: replace mutex with atomics)
+    Self->AtomicFramesReceived.IncrementExchange();
+    Self->AtomicBytesReceived.AddExchange(static_cast<int64>(frames_per_channel * channels) * static_cast<int64>(sizeof(int16)));
 
     if (Self->AudioSink.IsValid())
     {
@@ -309,8 +309,8 @@ void FO3DWebRTCReceiver::OnAudioReceivedEx(void* user, const int16_t* pcm_interl
         // LiveKit now correctly preserves the track_name we set during track creation.
         // We use track_name to identify which subject's audio this is.
         // This allows audio to be routed to the same subject as mocap data (which uses the same label).
-        FString SubjectLabel = (track_name && *track_name)
-            ? FString(track_name)
+        FString SubjectLabel = track_name && *track_name
+            ? Self->GetOrCacheSubjectLabel(track_name)
             : TEXT("audio_default");
 
         UE_LOG(LogO3DWebRTCReceiver, Verbose,
@@ -349,11 +349,9 @@ void FO3DWebRTCReceiver::OnAudioReceived(void* user, const int16_t* pcm_interlea
     FO3DWebRTCReceiver* Self = reinterpret_cast<FO3DWebRTCReceiver*>(user);
     if (!Self || !pcm_interleaved || frames_per_channel == 0 || channels <= 0 || sample_rate <= 0) return;
 
-    {
-        FScopeLock Lock(&Self->StatsMutex);
-        Self->Stats.FramesReceived++;  // Count audio frames
-        Self->Stats.BytesReceived += frames_per_channel * channels * sizeof(int16);
-    }
+    // Lock-free atomic updates for high-frequency stats (optimization: replace mutex with atomics)
+    Self->AtomicFramesReceived.IncrementExchange();
+    Self->AtomicBytesReceived.AddExchange(static_cast<int64>(frames_per_channel * channels) * static_cast<int64>(sizeof(int16)));
 
     if (Self->AudioSink.IsValid())
     {
@@ -595,11 +593,13 @@ int32 FO3DWebRTCReceiver::Poll()
             {
                 const double ReceiveLatencyMs = FMath::Max(0.0, (NowSeconds - Frame.EnqueueTimeSeconds) * 1000.0);
 
+                // Update frame and byte stats with lock-free atomics (optimization)
+                AtomicFramesReceived.IncrementExchange();
+                AtomicBytesReceived.AddExchange(Frame.Payload.Num());
+
+                // Latency tracking still uses mutex (calculated less frequently)
                 {
                     FScopeLock Lock(&StatsMutex);
-                    Stats.FramesReceived++;
-                    Stats.BytesReceived += Frame.Payload.Num();
-
                     Stats.MaxLatencyMs = FMath::Max(Stats.MaxLatencyMs, ReceiveLatencyMs);
                     const int64 NewSampleCount = LatencySamples + 1;
                     const double PreviousTotal = Stats.AverageLatencyMs * LatencySamples;
@@ -656,6 +656,12 @@ int32 FO3DWebRTCReceiver::Poll()
 FO3DTransportStats FO3DWebRTCReceiver::GetStats() const
 {
     FScopeLock Lock(&StatsMutex);
+    // Sync atomic stats into the main stats struct for return (called less frequently)
+    Stats.FramesReceived = AtomicFramesReceived.Load();
+    Stats.FramesSent = AtomicFramesSent.Load();
+    Stats.BytesReceived = AtomicBytesReceived.Load();
+    Stats.BytesSent = AtomicBytesSent.Load();
+    Stats.DroppedFrames = AtomicDroppedFrames.Load();
     return Stats;
 }
 
@@ -700,6 +706,44 @@ bool FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& Config)
     NoDataReconnectTimeoutSec = TimeoutSeconds;
 
     return true;
+}
+
+FString FO3DWebRTCReceiver::GetOrCacheSubjectLabel(const char* RawLabel)
+{
+    // Handle null or empty label
+    if (!RawLabel || !*RawLabel)
+    {
+        return TEXT("default");
+    }
+
+    // Compute hash of the C-string
+    const uint32 Hash = FCrc::MemCrc32(RawLabel, static_cast<int32>(FCStringAnsi::Strlen(RawLabel)));
+
+    // Check cache (brief lock)
+    {
+        FScopeLock Lock(&LabelCacheMutex);
+        FString* CachedLabel = SubjectLabelCache.Find(Hash);
+        if (CachedLabel)
+        {
+            return *CachedLabel;
+        }
+    }
+
+    // Not in cache - convert and cache (avoid repeated UTF8→UTF16 conversion)
+    FString NewLabel(RawLabel);
+
+    {
+        FScopeLock Lock(&LabelCacheMutex);
+        // Double-check in case another thread added it
+        FString* CachedLabel = SubjectLabelCache.Find(Hash);
+        if (CachedLabel)
+        {
+            return *CachedLabel;
+        }
+        SubjectLabelCache.Add(Hash, NewLabel);
+    }
+
+    return NewLabel;
 }
 
 bool FO3DWebRTCReceiver::SetupClientHandle()

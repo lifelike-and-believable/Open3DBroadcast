@@ -746,34 +746,24 @@ void FO3DReceiverSource::FinalizeAudioMeta(O3DS::FAudioFrameMeta& Meta) const
 {
     Meta.SourceGuid = SourceGuid;
 
-    // Note: Audio stream label is now automatically derived from StreamId / subject name in transport implementations
+    // Audio stream label is now provided directly by WebRTC transport via per-subject audio callback (OnAudioReceivedEx)
+    // which receives explicit subject labels from LiveKit FFI. No fallback logic needed.
     if (ActiveConfig.Audio.bEnableAudio && Meta.StreamLabel.IsEmpty())
     {
         Meta.StreamLabel = ActiveConfig.StreamId.IsEmpty() ? TEXT("o3ds:mix") : ActiveConfig.StreamId;
     }
 
-    const FString StreamId = ActiveConfig.StreamId;
-    const bool bMetaSubjectMissing = Meta.SubjectName.IsEmpty();
-    const FName MetaSubjectFName = bMetaSubjectMissing ? NAME_None : FName(*Meta.SubjectName);
-    const bool bMetaSubjectKnown = !bMetaSubjectMissing && InitializedSubjects.Contains(MetaSubjectFName);
-    const bool bMetaLooksLikeFallback =
-        bMetaSubjectMissing ||
-        (!StreamId.IsEmpty() && Meta.SubjectName.Equals(StreamId, ESearchCase::IgnoreCase)) ||
-        Meta.SubjectName.Equals(TEXT("Open3DReceiver"), ESearchCase::IgnoreCase);
-
-    if (bMetaLooksLikeFallback && !LastObservedSubjectName.IsNone())
+    // With per-subject audio labels from the callback, audio is explicitly routed to the correct subject
+    // SubjectName should be populated from the StreamLabel provided by the callback
+    if (Meta.SubjectName.IsEmpty() && !Meta.StreamLabel.IsEmpty())
     {
-        if (CVarO3DReceiverAudioDebug.GetValueOnAnyThread() != 0)
-        {
-            UE_LOG(LogO3DReceiverAudio, Verbose, TEXT("Remapping audio subject '%s' to last known subject '%s'."),
-                *Meta.SubjectName,
-                *LastObservedSubjectName.ToString());
-        }
-        Meta.SubjectName = LastObservedSubjectName.ToString();
+        Meta.SubjectName = Meta.StreamLabel;  // Direct mapping from explicit label
     }
 
+    // Fallback for edge cases (but should not be needed with proper label routing)
     if (Meta.SubjectName.IsEmpty())
     {
+        const FString StreamId = ActiveConfig.StreamId;
         if (!StreamId.IsEmpty())
         {
             Meta.SubjectName = StreamId;
