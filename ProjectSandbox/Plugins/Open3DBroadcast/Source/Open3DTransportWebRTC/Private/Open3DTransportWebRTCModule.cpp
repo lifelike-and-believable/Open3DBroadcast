@@ -365,7 +365,7 @@ public:
 			Config.AdvancedParams.Add(WebRTCConfig::TokenOptionKey, TokenValue);
 
 			Config.Audio.bEnableAudio = Settings.bEnableAudio;
-			Config.Audio.StreamLabel = Settings.AudioStreamLabel;
+			// Note: Audio stream label is now automatically derived from StreamId
 		};
 
 #if WITH_EDITOR

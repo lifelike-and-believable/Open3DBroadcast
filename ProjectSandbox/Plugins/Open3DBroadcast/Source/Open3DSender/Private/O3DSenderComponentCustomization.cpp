@@ -133,7 +133,6 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
         }
 
     TSharedPtr<IPropertyHandle> AudioInputDeviceHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioInputDevice));
-    TSharedPtr<IPropertyHandle> AudioStreamLabelHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioStreamLabel));
     TSharedPtr<IPropertyHandle> AudioCaptureConfigHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioCaptureConfig));
 
     if (EnableAudioHandle.IsValid())
@@ -147,10 +146,6 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
     if (AudioInputDeviceHandle.IsValid())
     {
         DetailBuilder.HideProperty(AudioInputDeviceHandle);
-    }
-    if (AudioStreamLabelHandle.IsValid())
-    {
-        DetailBuilder.HideProperty(AudioStreamLabelHandle);
     }
     if (AudioCodecHandle.IsValid())
     {
@@ -317,10 +312,6 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
             UE_LOG(LogO3DSenderDetails, VeryVerbose, TEXT("AudioInputDevice visibility: component unavailable"));
             return EVisibility::Collapsed;
         }));
-    }
-    if (AudioStreamLabelHandle.IsValid())
-    {
-        AudioGroup.AddPropertyRow(AudioStreamLabelHandle.ToSharedRef());
     }
     if (AudioCodecHandle.IsValid())
     {

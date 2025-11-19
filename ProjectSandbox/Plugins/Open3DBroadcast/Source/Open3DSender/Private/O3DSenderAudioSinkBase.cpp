@@ -15,7 +15,7 @@ bool FO3DSenderAudioSinkBase::SubmitPcm(const FString& StreamLabel,
 	FString EffectiveLabel = StreamLabel;
 	if (EffectiveLabel.IsEmpty())
 	{
-		EffectiveLabel = AudioConfig.StreamLabel;
+		EffectiveLabel = TEXT("audio_default");
 	}
 
 	return OnSubmitPcmInternal(EffectiveLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);

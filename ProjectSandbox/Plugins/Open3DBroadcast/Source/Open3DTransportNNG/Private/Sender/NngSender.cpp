@@ -156,10 +156,7 @@ bool FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
 
     ActiveConfig = Config;
     ActiveAudioConfig = Config.Audio;
-    if (ActiveAudioConfig.StreamLabel.IsEmpty())
-    {
-        ActiveAudioConfig.StreamLabel = Config.StreamId;
-    }
+    // Note: Audio stream label is now automatically derived from StreamId
     AudioSourceGuid = FGuid::NewGuid();
     RefreshAudioEncoder();
 
@@ -605,10 +602,7 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DNngSender::CreateAudioS
     EffectiveConfig.bEnableAudio = true;
     EffectiveConfig.NumChannels = FMath::Max(EffectiveConfig.NumChannels, 1);
     EffectiveConfig.SampleRate = FMath::Max(EffectiveConfig.SampleRate, 1);
-    if (EffectiveConfig.StreamLabel.IsEmpty())
-    {
-        EffectiveConfig.StreamLabel = ActiveConfig.StreamId;
-    }
+    // Note: Audio stream label is now automatically derived from StreamId
 
     ActiveAudioConfig = EffectiveConfig;
     RefreshAudioEncoder();
@@ -628,13 +622,8 @@ void FO3DNngSender::RefreshAudioEncoder()
         SubjectFallback = TEXT("nng");
     }
 
-    FString StreamLabelFallback = ActiveAudioConfig.StreamLabel;
-    if (StreamLabelFallback.IsEmpty())
-    {
-        StreamLabelFallback = SubjectFallback;
-    }
-
-    bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, StreamLabelFallback, SubjectFallback);
+    // Note: Audio stream label is now automatically derived from StreamId (SubjectFallback)
+    bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, SubjectFallback, SubjectFallback);
 }
 
 bool FO3DNngSender::ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec)

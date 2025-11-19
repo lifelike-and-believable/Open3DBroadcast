@@ -108,9 +108,7 @@ bool FO3DLoopbackSender::Initialize(const FO3DTransportConfig& Config)
     bInitialized = Channel.IsValid();
     Stats.Reset();
     ActiveAudioConfig = Config.Audio;
-    const FString DefaultLabel = ActiveAudioConfig.StreamLabel.IsEmpty() ? ChannelKey : ActiveAudioConfig.StreamLabel;
-    ActiveAudioConfig.StreamLabel = DefaultLabel.IsEmpty() ? ChannelKey : DefaultLabel;
-    bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, ActiveAudioConfig.StreamLabel, ChannelKey);
+    bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, ChannelKey, ChannelKey);
 
     if (!bInitialized)
     {
@@ -220,9 +218,7 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DLoopbackSender::CreateA
     }
 
     ActiveAudioConfig = AudioConfig;
-    const FString DefaultLabel = ActiveAudioConfig.StreamLabel.IsEmpty() ? ChannelKey : ActiveAudioConfig.StreamLabel;
-    ActiveAudioConfig.StreamLabel = DefaultLabel.IsEmpty() ? ChannelKey : DefaultLabel;
-    bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, ActiveAudioConfig.StreamLabel, ChannelKey);
+    bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, ChannelKey, ChannelKey);
 
     return MakeShared<FLoopbackSenderAudioSink, ESPMode::ThreadSafe>(*this, Channel, ChannelKey, ActiveAudioConfig);
 }

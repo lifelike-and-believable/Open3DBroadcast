@@ -23,9 +23,6 @@ struct FO3DTransportAudioConfig
     /** Optional transport-specific capture mode hint (e.g. "mix", "input"). */
     FString Mode;
 
-    /** Optional friendly label used when publishing audio streams. */
-    FString StreamLabel;
-
     /** Optional input device identifier when capturing microphone input. */
     FString InputDevice;
 
@@ -34,7 +31,7 @@ struct FO3DTransportAudioConfig
 
     FString ToDebugString() const
     {
-        return FString::Printf(TEXT("[Enabled=%d Codec=%s SR=%d Ch=%d Bitrate=%d Mode=%s Device=%s Label=%s Adv=%d]"),
+        return FString::Printf(TEXT("[Enabled=%d Codec=%s SR=%d Ch=%d Bitrate=%d Mode=%s Device=%s Adv=%d]"),
             bEnableAudio ? 1 : 0,
             Codec.IsEmpty() ? TEXT("<default>") : *Codec,
             SampleRate,
@@ -42,7 +39,6 @@ struct FO3DTransportAudioConfig
             BitrateKbps,
             *Mode,
             *InputDevice,
-            *StreamLabel,
             AdvancedParams.Num());
     }
 };

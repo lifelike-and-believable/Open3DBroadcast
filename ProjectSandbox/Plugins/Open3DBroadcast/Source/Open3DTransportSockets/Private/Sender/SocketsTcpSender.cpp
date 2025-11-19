@@ -78,10 +78,7 @@ bool FO3DSocketsTcpSender::Initialize(const FO3DTransportConfig& Config)
 	StreamId = ActiveConfig.StreamId;
 
 	ActiveAudioConfig = Config.Audio;
-	if (ActiveAudioConfig.StreamLabel.IsEmpty())
-	{
-		ActiveAudioConfig.StreamLabel = Config.StreamId;
-	}
+	// Note: Audio stream label is now automatically derived from StreamId
 	AudioSourceGuid = FGuid::NewGuid();
 
 	// Parse bind address from config
@@ -216,10 +213,7 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DSocketsTcpSender::Creat
 	EffectiveConfig.bEnableAudio = true;
 	EffectiveConfig.NumChannels = FMath::Max(EffectiveConfig.NumChannels, 1);
 	EffectiveConfig.SampleRate = FMath::Max(EffectiveConfig.SampleRate, 1);
-	if (EffectiveConfig.StreamLabel.IsEmpty())
-	{
-		EffectiveConfig.StreamLabel = ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId;
-	}
+	// Note: Audio stream label is now automatically derived from StreamId
 
 	ActiveAudioConfig = EffectiveConfig;
 	RefreshAudioEncoder();
@@ -340,9 +334,8 @@ bool FO3DSocketsTcpSender::SendFramed(FSocket* InSocket, const uint8* Data, int3
 
 void FO3DSocketsTcpSender::RefreshAudioEncoder()
 {
-	const FString StreamLabelFallback = ActiveAudioConfig.StreamLabel.IsEmpty()
-		? (ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId)
-		: ActiveAudioConfig.StreamLabel;
+	// Note: Audio stream label is now automatically derived from StreamId
+	const FString StreamLabelFallback = ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId;
 	const FString SubjectFallback = ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId;
 
 	bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, StreamLabelFallback, SubjectFallback);

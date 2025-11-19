@@ -52,11 +52,6 @@ namespace O3DAudio
 			DefaultStreamLabel = DefaultSubject;
 		}
 
-		if (AudioConfig.StreamLabel.IsEmpty())
-		{
-			AudioConfig.StreamLabel = DefaultStreamLabel;
-		}
-
 		ActiveCodec = SelectCodec(AudioConfig);
 		bInitialized = true;
 		bOpusReady = false;
@@ -117,10 +112,6 @@ namespace O3DAudio
 		if (!Override.IsEmpty())
 		{
 			return Override;
-		}
-		if (!AudioConfig.StreamLabel.IsEmpty())
-		{
-			return AudioConfig.StreamLabel;
 		}
 		return DefaultStreamLabel;
 	}

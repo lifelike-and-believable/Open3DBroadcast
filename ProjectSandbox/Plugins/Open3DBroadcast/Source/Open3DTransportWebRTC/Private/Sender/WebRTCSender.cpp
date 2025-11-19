@@ -477,6 +477,11 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
             continue;
         }
 
+        // IMPORTANT: Clear the transform list before SingleSubjectList is destroyed.
+        // We added raw pointers from the source Subject, so we must prevent
+        // SingleSubjectList's destructor from deleting them (they're still owned by List).
+        NewSubject->mTransforms.mItems.clear();
+
         // Determine reliability based on payload size
         const bool bAllowLossy = bPreferLossyData;
         LkReliability Reliability = bAllowLossy ? LkLossy : LkReliable;

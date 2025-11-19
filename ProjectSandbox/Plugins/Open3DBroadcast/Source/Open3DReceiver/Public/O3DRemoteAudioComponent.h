@@ -47,10 +47,6 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio", meta = (EditCondition = "ReceiveMode == EO3DRemoteAudioMode::Subject", EditConditionHides))
     FLiveLinkSubjectName LiveLinkSubjectName;
 
-    /** Optional stream label substring filter (advanced). */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio")
-    FString StreamLabelFilter;
-
     /** Output gain applied to incoming samples prior to playback. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio")
     float Gain = 1.0f;

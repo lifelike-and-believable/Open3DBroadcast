@@ -79,11 +79,6 @@ bool FO3DRemoteAudioComponentFilterTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Subject match case-insensitive"), FO3DRemoteAudioComponentTestAccessor::CallMatchesFilter(Component, TEXT("hero"), TEXT("streamA")));
     TestFalse(TEXT("Subject mismatch rejected"), FO3DRemoteAudioComponentTestAccessor::CallMatchesFilter(Component, TEXT("Villain"), TEXT("streamA")));
 
-    // Stream label filter
-    Component->StreamLabelFilter = TEXT("vocals");
-    TestTrue(TEXT("Stream label substring accepted"), FO3DRemoteAudioComponentTestAccessor::CallMatchesFilter(Component, TEXT("hero"), TEXT("subject:vocals")));
-    TestFalse(TEXT("Stream label mismatch rejected"), FO3DRemoteAudioComponentTestAccessor::CallMatchesFilter(Component, TEXT("hero"), TEXT("subject:fx")));
-
     return true;
 }
 
@@ -141,7 +136,6 @@ bool FO3DReceiverSourceFinalizeAudioMetaTest::RunTest(const FString& Parameters)
     FO3DTransportConfig Config;
     Config.StreamId = TEXT("testanimchannel");
     Config.Audio.bEnableAudio = true;
-    Config.Audio.StreamLabel = TEXT("o3ds:audio");
     Config.Audio.SampleRate = 44100;
     Config.Audio.NumChannels = 2;
 
@@ -154,7 +148,6 @@ bool FO3DReceiverSourceFinalizeAudioMetaTest::RunTest(const FString& Parameters)
     Meta.NumChannels = 0;
     FO3DReceiverSourceTestAccessor::CallFinalizeAudioMeta(Source, Meta);
 
-    TestEqual(TEXT("Stream label overrides metadata"), Meta.StreamLabel, Config.Audio.StreamLabel);
     TestEqual(TEXT("Observed subject applied"), Meta.SubjectName, FString(TEXT("Quinn")));
     TestEqual(TEXT("Sample rate propagated"), Meta.SampleRate, Config.Audio.SampleRate);
     TestEqual(TEXT("Channel count propagated"), Meta.NumChannels, Config.Audio.NumChannels);

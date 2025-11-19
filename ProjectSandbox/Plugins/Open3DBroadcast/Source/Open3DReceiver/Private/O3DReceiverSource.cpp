@@ -250,9 +250,8 @@ bool FO3DReceiverSource::StartTransport()
         {
             ActiveAudioSink = MakeShared<FAudioSink>(TWeakPtr<FO3DReceiverSource>(AsShared()));
             ActiveReceiver->SetAudioSink(ActiveAudioSink, ActiveConfig.Audio);
-            UE_LOG(LogO3DReceiverAudio, Log, TEXT("Audio sink bound for transport '%s' (label=%s)."),
-                *ActiveConfig.Transport,
-                *ActiveConfig.Audio.StreamLabel);
+            UE_LOG(LogO3DReceiverAudio, Log, TEXT("Audio sink bound for transport '%s'."),
+                *ActiveConfig.Transport);
         }
         else
         {
@@ -360,12 +359,7 @@ FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
     if (Config.Audio.bEnableAudio)
     {
         Config.Audio.Mode = TEXT("playback");
-        Config.Audio.StreamLabel = SourceSettings.AudioStreamLabel;
-        if (Config.Audio.StreamLabel.IsEmpty())
-        {
-            Config.Audio.StreamLabel = TEXT("o3ds:mix");
-        }
-
+        // Note: Audio stream label is now automatically derived from StreamId / subject name
         if (!SourceSettings.AudioCodec.IsNone())
         {
             const FString CodecString = O3DAudio::SanitizeCodecString(SourceSettings.AudioCodec.ToString());
@@ -378,7 +372,6 @@ FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
     }
     else
     {
-        Config.Audio.StreamLabel.Reset();
         Config.Audio.Mode.Reset();
         Config.Audio.Codec.Reset();
         Config.Audio.AdvancedParams.Remove(TEXT("codec"));
@@ -753,9 +746,10 @@ void FO3DReceiverSource::FinalizeAudioMeta(O3DS::FAudioFrameMeta& Meta) const
 {
     Meta.SourceGuid = SourceGuid;
 
-    if (ActiveConfig.Audio.bEnableAudio && !ActiveConfig.Audio.StreamLabel.IsEmpty())
+    // Note: Audio stream label is now automatically derived from StreamId / subject name in transport implementations
+    if (ActiveConfig.Audio.bEnableAudio && Meta.StreamLabel.IsEmpty())
     {
-        Meta.StreamLabel = ActiveConfig.Audio.StreamLabel;
+        Meta.StreamLabel = ActiveConfig.StreamId.IsEmpty() ? TEXT("o3ds:mix") : ActiveConfig.StreamId;
     }
 
     const FString StreamId = ActiveConfig.StreamId;

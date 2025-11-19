@@ -91,13 +91,7 @@ void UO3DSenderAudioCaptureComponent::EndPlay(const EEndPlayReason::Type EndPlay
     Super::EndPlay(EndPlayReason);
 }
 
-void UO3DSenderAudioCaptureComponent::SetStreamLabel(const FString& InLabel)
-{
-    FScopeLock Lock(&SinkMutex);
-    StreamLabel = InLabel;
-}
-
-void UO3DSenderAudioCaptureComponent::SetAudioSink(const TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe>& InSink, const FO3DTransportAudioConfig& InAudioConfig)
+void UO3DSenderAudioCaptureComponent::SetAudioSink(const TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe>& InSink, const FString& InSubjectName)
 {
     const bool bDebugLog = (CVarO3DSenderAudioDebug->GetInt() != 0);
 
@@ -109,15 +103,12 @@ void UO3DSenderAudioCaptureComponent::SetAudioSink(const TSharedPtr<IO3DSenderAu
     {
         FScopeLock Lock(&SinkMutex);
         AudioSink = InSink;
-        ActiveAudioConfig = InAudioConfig;
-        if (ActiveAudioConfig.StreamLabel.IsEmpty())
-        {
-            ActiveAudioConfig.StreamLabel = StreamLabel.IsEmpty() ? TEXT("o3ds:audio") : StreamLabel;
-        }
-        else
-        {
-            StreamLabel = ActiveAudioConfig.StreamLabel;
-        }
+        SubjectName = InSubjectName;
+        // Build a minimal audio config with subject name as label (no longer exposed as property)
+        ActiveAudioConfig.bEnableAudio = InSink.IsValid();
+        ActiveAudioConfig.SampleRate = Config.SampleRate;
+        ActiveAudioConfig.NumChannels = Config.NumChannels;
+        ActiveAudioConfig.BitrateKbps = Config.BitrateKbps;
 
         LocalSink = AudioSink;
         MicCaptureRaw = MicCapture.Get();
@@ -398,7 +389,8 @@ void UO3DSenderAudioCaptureComponent::ProcessAndSubmitAudio(const float* Interle
         FScopeLock Lock(&SinkMutex);
         LocalSink = AudioSink;
         LocalConfig = ActiveAudioConfig;
-        LocalLabel = LocalConfig.StreamLabel.IsEmpty() ? StreamLabel : LocalConfig.StreamLabel;
+        // Audio stream label is automatically derived from SubjectName
+        LocalLabel = SubjectName.IsEmpty() ? TEXT("o3ds:audio") : SubjectName;
         LocalGain = (CaptureMode == EO3DSenderCaptureMode::Mix) ? Config.GameGain : Config.MicGain;
     }
 

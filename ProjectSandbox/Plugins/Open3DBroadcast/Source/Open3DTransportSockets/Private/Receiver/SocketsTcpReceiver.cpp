@@ -57,10 +57,7 @@ bool FO3DSocketsTcpReceiver::Initialize(const FO3DTransportConfig& Config)
 		ActiveConfig.StreamId = StreamId;
 	}
 
-	if (ActiveAudioConfig.StreamLabel.IsEmpty())
-	{
-		ActiveAudioConfig.StreamLabel = ActiveConfig.StreamId;
-	}
+	// Note: Audio stream label is now automatically derived from StreamId
 
 	SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
 	if (!SocketSubsystem)
@@ -163,10 +160,7 @@ void FO3DSocketsTcpReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink
 	EffectiveConfig.bEnableAudio = true;
 	EffectiveConfig.NumChannels = FMath::Max(EffectiveConfig.NumChannels, 1);
 	EffectiveConfig.SampleRate = FMath::Max(EffectiveConfig.SampleRate, 1);
-	if (EffectiveConfig.StreamLabel.IsEmpty())
-	{
-		EffectiveConfig.StreamLabel = ActiveConfig.StreamId;
-	}
+	// Note: Audio stream label is now automatically derived from StreamId
 
 	ActiveAudioConfig = EffectiveConfig;
 }

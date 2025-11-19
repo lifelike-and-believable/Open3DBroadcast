@@ -90,11 +90,8 @@ public:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-    /** Update the user-facing stream label, mainly for debugging. */
-    void SetStreamLabel(const FString& InLabel);
-
     /** Bind a transport-provided audio sink. Passing nullptr disables capture delivery. */
-    void SetAudioSink(const TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe>& InSink, const FO3DTransportAudioConfig& InAudioConfig);
+    void SetAudioSink(const TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe>& InSink, const FString& InSubjectName);
 
     /** Change capture mode and immediately restart capture resources. */
     void StartCaptureWithMode(EO3DSenderCaptureMode InMode);
@@ -120,9 +117,8 @@ private:
 
     void ProcessAndSubmitAudio(const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec);
 
-    FString StreamLabel;
-
     mutable FCriticalSection SinkMutex;
+    FString SubjectName;  // Audio stream label is derived from this
     FO3DTransportAudioConfig ActiveAudioConfig;
     TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> AudioSink;
 

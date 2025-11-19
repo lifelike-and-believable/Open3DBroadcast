@@ -270,11 +270,6 @@ void FO3DSenderSerializer::SerializeFrame(const FString& Subject, const FO3DSSke
 
 	SubjectObject->CalcMatrices();
 
-	if (OnSubjectListReady.IsBound())
-	{
-		OnSubjectListReady.Broadcast(Subject, SubjectListPtr);
-	}
-
 	std::vector<char> Buffer;
 	const double Now = FPlatformTime::Seconds();
 	SubjectListPtr->Serialize(Buffer, Now);
@@ -286,6 +281,14 @@ void FO3DSenderSerializer::SerializeFrame(const FString& Subject, const FO3DSSke
 		TArray<uint8> Payload;
 		Payload.SetNumUninitialized((int32)Buffer.size());
 		FMemory::Memcpy(Payload.GetData(), Buffer.data(), Buffer.size());
+
+		// Broadcast SubjectList first to allow transports to use it via Send()
+		// Keep SubjectListPtr alive during this broadcast to prevent premature destruction
+		if (OnSubjectListReady.IsBound())
+		{
+			OnSubjectListReady.Broadcast(Subject, SubjectListPtr);
+		}
+
 		OnSerializedFrame.Broadcast(Subject, Payload, Now);
 
 		Cache.FramesSerialized++;

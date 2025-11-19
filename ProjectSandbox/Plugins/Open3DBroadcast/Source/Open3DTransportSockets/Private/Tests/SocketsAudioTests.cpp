@@ -116,7 +116,7 @@ namespace
 		Config.Audio.bEnableAudio = true;
 		Config.Audio.SampleRate = 48000;
 		Config.Audio.NumChannels = 2;
-		Config.Audio.StreamLabel = TEXT("o3ds:audio/test");
+		// Note: Audio stream label is now automatically derived from StreamId
 		return Config;
 	}
 
@@ -135,7 +135,7 @@ namespace
 		Config.Audio.bEnableAudio = true;
 		Config.Audio.SampleRate = 48000;
 		Config.Audio.NumChannels = 2;
-		Config.Audio.StreamLabel = TEXT("o3ds:audio/test");
+		// Note: Audio stream label is now automatically derived from StreamId
 		return Config;
 	}
 }
@@ -191,7 +191,7 @@ bool FO3DSocketsAudioRoundTripTest::RunTest(const FString& Parameters)
 	while ((FPlatformTime::Seconds() - StartTime) < TimeoutSeconds && !bSubmitted)
 	{
 		PumpTransports(Sender, Receiver, 0.05);
-		bSubmitted = SenderAudioSink->SubmitPcm(SenderConfig.Audio.StreamLabel, Samples.GetData(), NumFrames, NumChannels, SenderConfig.Audio.SampleRate, 123.45);
+		bSubmitted = SenderAudioSink->SubmitPcm(TEXT("audio_test"), Samples.GetData(), NumFrames, NumChannels, SenderConfig.Audio.SampleRate, 123.45);
 	}
 	TestTrue(TEXT("Audio frame submitted"), bSubmitted);
 
@@ -211,7 +211,8 @@ bool FO3DSocketsAudioRoundTripTest::RunTest(const FString& Parameters)
 		const int16* PcmData = reinterpret_cast<const int16*>(Payload.GetData());
 		const int32 ExpectedFirst = FMath::Clamp(FMath::RoundToInt(Samples[0] * 32767.0f), -32768, 32767);
 		TestEqual(TEXT("PCM16 conversion"), PcmData[0], static_cast<int16>(ExpectedFirst));
-		TestEqual(TEXT("Meta stream label"), ReceiverAudioSink->GetMeta().StreamLabel, SenderConfig.Audio.StreamLabel);
+		// Note: Stream label is now automatically derived from StreamId
+		TestEqual(TEXT("Meta stream label matches StreamId"), ReceiverAudioSink->GetMeta().StreamLabel, SenderConfig.StreamId);
 		TestEqual(TEXT("Meta channel count"), ReceiverAudioSink->GetMeta().NumChannels, NumChannels);
 		TestEqual(TEXT("Meta sample rate"), ReceiverAudioSink->GetMeta().SampleRate, SenderConfig.Audio.SampleRate);
 	}
@@ -245,7 +246,8 @@ bool FO3DSocketsAudioQueueOverflowTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Audio sink created"), SenderAudioSink.IsValid());
 
 	const float SampleValue = 0.25f;
-	const bool bFrameAccepted = SenderAudioSink->SubmitPcm(SenderConfig.Audio.StreamLabel, &SampleValue, 1, 1, SenderConfig.Audio.SampleRate, 0.0);
+	// Note: Stream label is now automatically derived from StreamId
+	const bool bFrameAccepted = SenderAudioSink->SubmitPcm(SenderConfig.StreamId, &SampleValue, 1, 1, SenderConfig.Audio.SampleRate, 0.0);
 	TestFalse(TEXT("Frame dropped without receiver connection"), bFrameAccepted);
 
 	Sender.Stop();

@@ -44,7 +44,6 @@ bool FO3DLoopbackAudioRoundTripTest::RunTest(const FString& Parameters)
     Config.Audio.bEnableAudio = true;
     Config.Audio.SampleRate = 48000;
     Config.Audio.NumChannels = 2;
-    Config.Audio.StreamLabel = TEXT("o3ds:audio/test");
 
     FO3DLoopbackSender Sender;
     FO3DLoopbackReceiver Receiver;
@@ -71,7 +70,7 @@ bool FO3DLoopbackAudioRoundTripTest::RunTest(const FString& Parameters)
     }
 
     const double TimestampSec = 123.45;
-    const bool bSubmitted = SenderAudioSink->SubmitPcm(Config.Audio.StreamLabel, Samples.GetData(), NumFrames, NumChannels, Config.Audio.SampleRate, TimestampSec);
+    const bool bSubmitted = SenderAudioSink->SubmitPcm(TEXT("audio_test"), Samples.GetData(), NumFrames, NumChannels, Config.Audio.SampleRate, TimestampSec);
     TestTrue(TEXT("Audio frame submitted"), bSubmitted);
 
     const int32 Processed = Receiver.Poll();
@@ -84,7 +83,7 @@ bool FO3DLoopbackAudioRoundTripTest::RunTest(const FString& Parameters)
     const int16* PcmData = reinterpret_cast<const int16*>(Payload.GetData());
     const int32 ExpectedFirst = FMath::Clamp(FMath::RoundToInt(Samples[0] * 32767.0f), -32768, 32767);
     TestEqual(TEXT("PCM16 conversion first sample"), PcmData[0], static_cast<int16>(ExpectedFirst));
-    TestEqual(TEXT("Meta stream label propagated"), ReceiverAudioSink->GetMeta().StreamLabel, Config.Audio.StreamLabel);
+    TestEqual(TEXT("Meta stream label propagated"), ReceiverAudioSink->GetMeta().StreamLabel, TEXT("audio_test"));
     TestEqual(TEXT("Meta channel count propagated"), ReceiverAudioSink->GetMeta().NumChannels, NumChannels);
     TestEqual(TEXT("Meta sample rate propagated"), ReceiverAudioSink->GetMeta().SampleRate, Config.Audio.SampleRate);
 
@@ -110,10 +109,10 @@ bool FO3DLoopbackAudioQueueOverflowTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Audio sink created"), AudioSink.IsValid());
 
     const float SampleValue = 0.25f;
-    const bool bFirstAccepted = AudioSink->SubmitPcm(Config.Audio.StreamLabel, &SampleValue, 1, 1, Config.Audio.SampleRate, 0.0);
+    const bool bFirstAccepted = AudioSink->SubmitPcm(TEXT("audio_overflow"), &SampleValue, 1, 1, Config.Audio.SampleRate, 0.0);
     TestTrue(TEXT("First audio frame accepted"), bFirstAccepted);
 
-    const bool bSecondAccepted = AudioSink->SubmitPcm(Config.Audio.StreamLabel, &SampleValue, 1, 1, Config.Audio.SampleRate, 0.1);
+    const bool bSecondAccepted = AudioSink->SubmitPcm(TEXT("audio_overflow"), &SampleValue, 1, 1, Config.Audio.SampleRate, 0.1);
     TestFalse(TEXT("Second audio frame dropped when queue full"), bSecondAccepted);
 
     return true;

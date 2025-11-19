@@ -961,7 +961,7 @@ public:
 			}
 
 			Config.Audio.bEnableAudio = Settings.bEnableAudio;
-			Config.Audio.StreamLabel = Settings.AudioStreamLabel;
+			// Note: Audio stream label is now automatically derived from StreamId
 
 			O3DNNG::FNngReceiverOptions ParsedOptions;
 			FString ErrorMessage;

@@ -398,7 +398,7 @@ void UO3DSenderComponent::UpdateAudioCaptureBinding()
 	{
 		if (AudioCaptureComponent)
 		{
-			AudioCaptureComponent->SetAudioSink(nullptr, FO3DTransportAudioConfig());
+			AudioCaptureComponent->SetAudioSink(nullptr, FString());
 		}
 		return;
 	}
@@ -411,10 +411,6 @@ void UO3DSenderComponent::UpdateAudioCaptureBinding()
 
 	const FO3DSenderAudioCaptureConfig CaptureConfig = BuildAudioCaptureConfig();
 	FO3DTransportAudioConfig TransportAudioConfig = BuildTransportAudioConfig(CaptureConfig);
-	if (TransportAudioConfig.StreamLabel.IsEmpty())
-	{
-		TransportAudioConfig.StreamLabel = AudioStreamLabel.IsEmpty() ? TEXT("o3ds:audio") : AudioStreamLabel;
-	}
 
 	ConfigureAudioCaptureComponent(CaptureConfig, TransportAudioConfig);
 
@@ -424,7 +420,8 @@ void UO3DSenderComponent::UpdateAudioCaptureBinding()
 		AudioSink = TransportController->GetAudioSink();
 	}
 
-	AudioCaptureComponent->SetAudioSink(AudioSink, TransportAudioConfig);
+	// Pass SubjectName to audio capture component so audio stream label matches mocap subject
+	AudioCaptureComponent->SetAudioSink(AudioSink, SubjectName);
 
 	if (!AudioSink.IsValid())
 	{
@@ -469,7 +466,7 @@ FO3DTransportAudioConfig UO3DSenderComponent::BuildTransportAudioConfig(const FO
 	AudioConfig.NumChannels = CaptureConfig.NumChannels;
 	AudioConfig.BitrateKbps = CaptureConfig.BitrateKbps;
 	AudioConfig.Mode = (AudioCaptureMode == EO3DSenderCaptureMode::Mix) ? TEXT("mix") : TEXT("input");
-	AudioConfig.StreamLabel = AudioStreamLabel.IsEmpty() ? TEXT("o3ds:audio") : AudioStreamLabel;
+	// Audio stream label is automatically derived from SubjectName for logical association on receiver side
 	if (AudioCaptureMode == EO3DSenderCaptureMode::Input)
 	{
 		AudioConfig.InputDevice = AudioInputDevice.IsNone() ? FString() : AudioInputDevice.ToString();
@@ -561,7 +558,7 @@ void UO3DSenderComponent::ConfigureAudioCaptureComponent(const FO3DSenderAudioCa
 
 	AudioCaptureComponent->InputDeviceName = AudioInputDevice;
 	AudioCaptureComponent->Config = CaptureConfig;
-	AudioCaptureComponent->SetStreamLabel(TransportAudioConfig.StreamLabel.IsEmpty() ? AudioStreamLabel : TransportAudioConfig.StreamLabel);
+	// Audio stream label is automatically derived from SubjectName (no longer configurable per component)
 	AudioCaptureComponent->StartCaptureWithMode(AudioCaptureMode);
 }
 
@@ -569,7 +566,7 @@ void UO3DSenderComponent::TeardownAudioCapture()
 {
 	if (AudioCaptureComponent)
 	{
-		AudioCaptureComponent->SetAudioSink(nullptr, FO3DTransportAudioConfig());
+		AudioCaptureComponent->SetAudioSink(nullptr, FString());
 	}
 	LastAudioSinkWarningTime = 0.0;
 }
@@ -1150,8 +1147,7 @@ void UO3DSenderComponent::PostEditChangeProperty(FPropertyChangedEvent& Property
 		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bEnableAudio),
 		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioCaptureMode),
 		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioInputDevice),
-		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioCaptureConfig),
-		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioStreamLabel)
+		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioCaptureConfig)
 	};
 
 	const bool bInGameWorld = (GetWorld() && GetWorld()->IsGameWorld());

@@ -130,11 +130,7 @@ bool UO3DRemoteAudioComponent::MatchesFilter(const FString& InSubject, const FSt
         return false;
     }
 
-    if (!StreamLabelFilter.IsEmpty() && !InStream.Contains(StreamLabelFilter))
-    {
-        return false;
-    }
-
+    // Note: Audio stream label is now automatically derived from SubjectName, no additional filtering needed
     if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
     {
         UE_LOG(LogO3DReceiverAudio, Verbose, TEXT("Filter pass subject='%s' stream='%s'"), *InSubject, *InStream);

@@ -165,10 +165,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio", meta = (EditCondition = "bEnableAudio", ShowOnlyInnerProperties))
 	FO3DSenderAudioCaptureConfig AudioCaptureConfig;
 
-	/** Label attached to outgoing audio frames to aid receivers in routing/debugging. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio", meta = (EditCondition = "bEnableAudio"))
-	FString AudioStreamLabel = TEXT("o3ds:audio");
-
 	/** Preferred audio codec for transport delivery. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio", meta = (EditCondition = "bEnableAudio", GetOptions = "GetAvailableAudioCodecOptions"))
 	FName AudioCodec = TEXT("PCM16");

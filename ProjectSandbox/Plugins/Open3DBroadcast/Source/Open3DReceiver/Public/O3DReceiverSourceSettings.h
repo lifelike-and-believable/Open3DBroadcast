@@ -20,10 +20,6 @@ public:
     UPROPERTY(EditAnywhere, Category = "Open3DStream|Audio")
     bool bEnableAudio = false;
 
-    /** Optional stream label override applied to published audio frames. Defaults to transport-provided value. */
-    UPROPERTY(EditAnywhere, Category = "Open3DStream|Audio", meta = (EditCondition = "bEnableAudio", EditConditionHides))
-    FString AudioStreamLabel;
-
     /** Preferred decoder codec; leave empty to use transport default. */
     UPROPERTY(EditAnywhere, Category = "Open3DStream|Audio", meta = (EditCondition = "bEnableAudio", EditConditionHides))
     FName AudioCodec = NAME_None;

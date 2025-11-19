@@ -72,10 +72,7 @@ bool FO3DNngReceiver::Initialize(const FO3DTransportConfig& Config)
     ActiveConfig.Uri = Options.CanonicalUri;
     ActiveConfig.StreamId = Options.StreamId;
     ActiveAudioConfig = Config.Audio;
-    if (ActiveAudioConfig.StreamLabel.IsEmpty())
-    {
-        ActiveAudioConfig.StreamLabel = Options.StreamId;
-    }
+    // Note: Audio stream label is now automatically derived from StreamId
 
     Stats.Reset();
     PipeCount.Reset();
@@ -98,10 +95,7 @@ void FO3DNngReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMo
     if (Sink.IsValid())
     {
         ActiveAudioConfig = AudioConfig;
-        if (ActiveAudioConfig.StreamLabel.IsEmpty())
-        {
-            ActiveAudioConfig.StreamLabel = ActiveConfig.StreamId.IsEmpty() ? Options.StreamId : ActiveConfig.StreamId;
-        }
+        // Note: Audio stream label is now automatically derived from StreamId
     }
 }
 
