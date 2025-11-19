@@ -53,13 +53,18 @@ private:
     // Consumer
     TSharedPtr<ISerializedFrameConsumer> Consumer;
     TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
+
+    // Per-subject frame buffering
+    // With multiple labeled senders, we buffer frames per subject to avoid data loss
+    // when multiple subjects transmit simultaneously.
     struct FPendingFrame
     {
         TArray<uint8> Payload;
         double EnqueueTimeSeconds = 0.0;
     };
     mutable FCriticalSection PendingFramesMutex;
-    TArray<FPendingFrame> PendingFrames;
+    // Map from subject label to queue of pending frames
+    TMap<FString, TArray<FPendingFrame>> PendingFramesBySubject;
 
     // Stats / diagnostics
     mutable FCriticalSection StatsMutex;
@@ -82,7 +87,7 @@ private:
     // LiveKit FFI callbacks (static)
     struct FCallbacks;
     static void OnConnectionState(void* user, LkConnectionState state, int32_t reason_code, const char* message);
-    static void OnDataReceived(void* user, const uint8_t* bytes, size_t len);
+    static void OnDataReceivedEx(void* user, const char* label, LkReliability reliability, const uint8_t* bytes, size_t len);
     static void OnAudioReceived(void* user, const int16_t* pcm_interleaved, size_t frames_per_channel, int32_t channels, int32_t sample_rate);
 
     double LastAudioDropLogTime = 0.0;

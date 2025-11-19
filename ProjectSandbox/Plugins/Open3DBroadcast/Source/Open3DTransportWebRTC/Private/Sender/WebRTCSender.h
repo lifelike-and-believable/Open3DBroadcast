@@ -46,6 +46,11 @@ private:
     // LiveKit FFI client handle (opaque)
     LkClientHandle* ClientHandle = nullptr;
 
+    // Per-subject audio tracks (labeled audio publishing)
+    // Map from StreamLabel to audio track handle
+    TMap<FString, LkAudioTrackHandle*> AudioTracks;
+    mutable FCriticalSection AudioTracksMutex;
+
     // State
     mutable FCriticalSection StateMutex;
     TAtomic<bool> bInitialized{ false };

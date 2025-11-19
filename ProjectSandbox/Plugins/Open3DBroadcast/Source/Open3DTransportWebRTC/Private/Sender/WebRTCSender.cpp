@@ -46,8 +46,18 @@ namespace WebRTCOptions
 /**
  * Audio sink implementation for WebRTC sender using LiveKit FFI.
  *
+ * Publishes audio to per-subject labeled audio tracks via lk_audio_track_publish_pcm_i16().
+ * Each StreamLabel gets its own dedicated audio track, preventing distortion from multiple
+ * concurrent audio sources.
+ *
  * Optimized with reusable PCM conversion buffer to avoid per-frame allocations.
  * This significantly reduces allocator pressure on the audio thread.
+ *
+ * Key Features:
+ * - Per-subject audio isolation (no mixing distortion)
+ * - Automatic track creation on first audio for each subject
+ * - Thread-safe via AudioTracksMutex in parent sender
+ * - Graceful fallback if track creation fails
  */
 class FWebRTCSenderAudioSink final : public IO3DSenderAudioSink
 {
@@ -69,6 +79,14 @@ public:
             return false;
         }
 
+        // Get or create audio track for this subject
+        LkAudioTrackHandle* Track = GetOrCreateAudioTrack(StreamLabel, NumChannels, SampleRate);
+        if (!Track)
+        {
+            // Track creation failed, but we return false so it's logged properly
+            return false;
+        }
+
         // Reuse buffer, allocate only if necessary (optimization to reduce per-frame allocations)
         const int32 TotalSamples = NumFrames * NumChannels;
         if (PcmConversionBuffer.Num() < TotalSamples)
@@ -83,18 +101,18 @@ public:
             PcmConversionBuffer[i] = static_cast<int16>(Sample * 32767.0f);
         }
 
-        // Publish to LiveKit
-        LkResult Result = lk_publish_audio_pcm_i16(
-            Owner.ClientHandle,
+        // Publish to labeled audio track
+        LkResult Result = lk_audio_track_publish_pcm_i16(
+            Track,
             PcmConversionBuffer.GetData(),
-            NumFrames,
-            NumChannels,
-            SampleRate
+            NumFrames
         );
 
         if (Result.code != 0)
         {
-            UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to publish audio: %s"), *FromAnsi(Result.message));
+            UE_LOG(LogO3DWebRTCSender, Warning,
+                TEXT("Failed to publish audio to track '%s' (frames=%d, ch=%d, sr=%d): %s"),
+                *StreamLabel, NumFrames, NumChannels, SampleRate, *FromAnsi(Result.message));
             if (Result.message)
             {
                 lk_free_str(const_cast<char*>(Result.message));
@@ -107,7 +125,7 @@ public:
 
     virtual void OnCaptureStopped() override
     {
-        // No cleanup needed
+        // No cleanup needed (tracks cleaned up in FO3DWebRTCSender::Stop())
     }
 
 private:
@@ -116,6 +134,61 @@ private:
     // Reusable buffer for float->int16 conversion (optimization: avoid per-frame allocation)
     // Typical size: 960 samples * 2 channels * 2 bytes = 3840 bytes
     TArray<int16> PcmConversionBuffer;
+
+    /**
+     * Gets existing audio track for StreamLabel, or creates one if it doesn't exist.
+     * Thread-safe via Owner.AudioTracksMutex.
+     *
+     * @param StreamLabel Subject name / track identifier
+     * @param NumChannels Audio channel count (1=mono, 2=stereo)
+     * @param SampleRate Audio sample rate in Hz (e.g., 48000)
+     * @return Pointer to audio track, or nullptr if creation failed
+     */
+    LkAudioTrackHandle* GetOrCreateAudioTrack(const FString& StreamLabel, int32 NumChannels, int32 SampleRate)
+    {
+        FScopeLock Lock(&Owner.AudioTracksMutex);
+
+        // Check if track already exists for this subject
+        LkAudioTrackHandle* const* ExistingTrack = Owner.AudioTracks.Find(StreamLabel);
+        if (ExistingTrack && *ExistingTrack)
+        {
+            return *ExistingTrack;
+        }
+
+        // Create new track with configuration
+        LkAudioTrackConfig TrackConfig;
+        TrackConfig.track_name = TCHAR_TO_UTF8(*StreamLabel);
+        TrackConfig.sample_rate = SampleRate;
+        TrackConfig.channels = NumChannels;
+        TrackConfig.buffer_ms = 100; // 100ms buffer for smooth audio streaming
+
+        LkAudioTrackHandle* NewTrack = nullptr;
+        LkResult Result = lk_audio_track_create(
+            Owner.ClientHandle,
+            &TrackConfig,
+            &NewTrack
+        );
+
+        if (Result.code != 0 || !NewTrack)
+        {
+            UE_LOG(LogO3DWebRTCSender, Error,
+                TEXT("Failed to create audio track for '%s' (ch=%d, sr=%d): %s"),
+                *StreamLabel, NumChannels, SampleRate, *FromAnsi(Result.message));
+            if (Result.message)
+            {
+                lk_free_str(const_cast<char*>(Result.message));
+            }
+            return nullptr;
+        }
+
+        // Store and return new track
+        Owner.AudioTracks.Add(StreamLabel, NewTrack);
+        UE_LOG(LogO3DWebRTCSender, Log,
+            TEXT("Created audio track '%s' (ch=%d, sr=%d kHz, buf=100ms)"),
+            *StreamLabel, NumChannels, SampleRate / 1000);
+
+        return NewTrack;
+    }
 };
 
 // Static callback for connection state changes
@@ -295,6 +368,27 @@ void FO3DWebRTCSender::Stop()
         return;
     }
 
+    // Clean up all audio tracks before disconnecting
+    {
+        FScopeLock AudioLock(&AudioTracksMutex);
+        for (auto& TrackEntry : AudioTracks)
+        {
+            if (TrackEntry.Value)
+            {
+                LkResult Result = lk_audio_track_destroy(TrackEntry.Value);
+                if (Result.code != 0 && Result.message)
+                {
+                    UE_LOG(LogO3DWebRTCSender, Warning,
+                        TEXT("Failed to destroy audio track '%s': %s"),
+                        *TrackEntry.Key, *FromAnsi(Result.message));
+                    lk_free_str(const_cast<char*>(Result.message));
+                }
+                TrackEntry.Value = nullptr;
+            }
+        }
+        AudioTracks.Reset();
+    }
+
     if (bConnected.Load())
     {
         LkResult Result = lk_disconnect(ClientHandle);
@@ -332,95 +426,106 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
         return false;
     }
 
-    // Serialize the SubjectList
-    std::vector<char> Buffer;
     const double TimestampSeconds = FPlatformTime::Seconds();
-
-    // Note: Serialize() is non-const, but doesn't modify the SubjectList in practice
-    int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(Buffer, TimestampSeconds);
-    if (BytesWritten <= 0)
-    {
-        UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to serialize SubjectList"));
-        return false;
-    }
-
-    // Validate payload size (LiveKit lossy DataChannel limit ~1300 bytes, reliable ~15KB)
-    // See: https://docs.livekit.io/home/server/overview/concepts/data-channel-reliability
     constexpr int32 LossyMaxBytes = 1300;
     constexpr int32 ReliableMaxBytes = 15000;
 
-    const bool bAllowLossy = bPreferLossyData;
-    LkReliability Reliability = bAllowLossy ? LkLossy : LkReliable;
+    bool bAnyFrameSucceeded = false;
+    int32 SubjectsProcessed = 0;
 
-    if (bAllowLossy)
+    // Serialize and send each subject individually with its own labeled data channel.
+    // This allows multiple senders to coexist without overwhelming a single channel.
+    // Each subject's mocap data (typically ~13KB) stays well within the reliable limit.
+    for (int32 SubjectIdx = 0; SubjectIdx < List.size(); ++SubjectIdx)
     {
-        if (BytesWritten > LossyMaxBytes)
+        const auto& Subject = List.at(SubjectIdx);
+
+        // Create a single-subject list for serialization
+        O3DS::SubjectList SingleSubjectList;
+        SingleSubjectList.add();
+        *SingleSubjectList.mutable_subjects(0) = Subject;
+
+        // Serialize the single-subject list
+        std::vector<char> Buffer;
+        int32 BytesWritten = SingleSubjectList.Serialize(Buffer, TimestampSeconds);
+        if (BytesWritten <= 0)
+        {
+            UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to serialize Subject[%d]"), SubjectIdx);
+            continue;
+        }
+
+        // Determine reliability based on payload size
+        const bool bAllowLossy = bPreferLossyData;
+        LkReliability Reliability = bAllowLossy ? LkLossy : LkReliable;
+
+        if (bAllowLossy && BytesWritten > LossyMaxBytes)
         {
             if (BytesWritten <= ReliableMaxBytes)
             {
                 Reliability = LkReliable;
-                UE_LOG(LogO3DWebRTCSender, Warning,
-                    TEXT("Payload size (%d bytes) exceeds lossy limit (%d bytes), switching to reliable channel"),
-                    BytesWritten, LossyMaxBytes);
             }
             else
             {
                 UE_LOG(LogO3DWebRTCSender, Error,
-                    TEXT("Payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton or reducing data"),
-                    BytesWritten, ReliableMaxBytes);
-
-                {
-                    FScopeLock Lock(&StatsMutex);
-                    Stats.DroppedFrames++;
-                }
-                return false;
+                    TEXT("Subject[%d] '%s' payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton"),
+                    SubjectIdx, *FString(Subject.name().c_str()), BytesWritten, ReliableMaxBytes);
+                continue;
             }
         }
-    }
-    else
-    {
-        if (BytesWritten > ReliableMaxBytes)
+        else if (!bAllowLossy && BytesWritten > ReliableMaxBytes)
         {
             UE_LOG(LogO3DWebRTCSender, Error,
-                TEXT("Payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton or reducing data"),
-                BytesWritten, ReliableMaxBytes);
+                TEXT("Subject[%d] '%s' payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton"),
+                SubjectIdx, *FString(Subject.name().c_str()), BytesWritten, ReliableMaxBytes);
+            continue;
+        }
 
+        // Use subject name as the data channel label for routing on receiver side
+        FString SubjectLabel = FString(Subject.name().c_str());
+        if (SubjectLabel.IsEmpty())
+        {
+            SubjectLabel = FString::Printf(TEXT("subject_%d"), SubjectIdx);
+        }
+
+        // Send via labeled LiveKit data channel
+        // The label allows the receiver to route this subject's data to the correct consumer
+        LkResult Result = lk_send_data_ex(
+            ClientHandle,
+            reinterpret_cast<const uint8*>(Buffer.data()),
+            BytesWritten,
+            Reliability,
+            1, // ordered = true (preserve frame order)
+            TCHAR_TO_UTF8(*SubjectLabel)
+        );
+
+        if (Result.code != 0)
+        {
+            UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to send Subject[%d] '%s': %s"),
+                SubjectIdx, *SubjectLabel, *FromAnsi(Result.message));
+            if (Result.message)
             {
-                FScopeLock Lock(&StatsMutex);
-                Stats.DroppedFrames++;
+                lk_free_str(const_cast<char*>(Result.message));
             }
-            return false;
+            continue;
+        }
+
+        bAnyFrameSucceeded = true;
+        SubjectsProcessed++;
+
+        {
+            FScopeLock Lock(&StatsMutex);
+            Stats.FramesSent++;
+            Stats.BytesSent += BytesWritten;
         }
     }
 
-    // Send via LiveKit FFI
-    LkResult Result = lk_send_data(
-        ClientHandle,
-        reinterpret_cast<const uint8*>(Buffer.data()),
-        BytesWritten,
-        Reliability
-    );
-
-    if (Result.code != 0)
+    if (!bAnyFrameSucceeded)
     {
         FScopeLock Lock(&StatsMutex);
         Stats.DroppedFrames++;
-
-        UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to send data: %s"), *FromAnsi(Result.message));
-        if (Result.message)
-        {
-            lk_free_str(const_cast<char*>(Result.message));
-        }
-        return false;
     }
 
-    {
-        FScopeLock Lock(&StatsMutex);
-        Stats.FramesSent++;
-        Stats.BytesSent += BytesWritten;
-    }
-
-    return true;
+    return bAnyFrameSucceeded;
 }
 
 void FO3DWebRTCSender::Tick(float DeltaSeconds)

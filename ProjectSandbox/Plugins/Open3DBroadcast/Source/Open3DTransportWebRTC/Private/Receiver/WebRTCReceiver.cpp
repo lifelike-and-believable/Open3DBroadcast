@@ -159,11 +159,14 @@ void FO3DWebRTCReceiver::OnConnectionState(void* user, LkConnectionState state, 
     }
 }
 
-// Static callback for incoming data
-void FO3DWebRTCReceiver::OnDataReceived(void* user, const uint8_t* bytes, size_t len)
+// Static callback for incoming data with label and reliability info
+void FO3DWebRTCReceiver::OnDataReceivedEx(void* user, const char* label, LkReliability reliability, const uint8_t* bytes, size_t len)
 {
     FO3DWebRTCReceiver* Self = reinterpret_cast<FO3DWebRTCReceiver*>(user);
     if (!Self || !bytes || len == 0) return;
+
+    // Convert label to FString, use a default if not provided
+    FString SubjectLabel = label && *label ? FString(label) : TEXT("default");
 
     FO3DWebRTCReceiver::FPendingFrame Frame;
     Frame.EnqueueTimeSeconds = FPlatformTime::Seconds();
@@ -172,10 +175,13 @@ void FO3DWebRTCReceiver::OnDataReceived(void* user, const uint8_t* bytes, size_t
 
     {
         FScopeLock Lock(&Self->PendingFramesMutex);
-        Self->PendingFrames.Emplace(MoveTemp(Frame));
-        UE_LOG(LogO3DWebRTCReceiver, Verbose, TEXT("OnDataReceived %d bytes (Queue=%d)"),
-            static_cast<int32>(len),
-            Self->PendingFrames.Num());
+        TArray<FPendingFrame>& SubjectQueue = Self->PendingFramesBySubject.FindOrAdd(SubjectLabel);
+        SubjectQueue.Emplace(MoveTemp(Frame));
+
+        UE_LOG(LogO3DWebRTCReceiver, Verbose,
+            TEXT("OnDataReceivedEx label='%s' %d bytes (Queue=%d, Reliability=%s)"),
+            *SubjectLabel, static_cast<int32>(len), SubjectQueue.Num(),
+            reliability == LkReliable ? TEXT("Reliable") : TEXT("Lossy"));
     }
 
     {
@@ -187,6 +193,10 @@ void FO3DWebRTCReceiver::OnDataReceived(void* user, const uint8_t* bytes, size_t
 }
 
 // Static callback for incoming audio
+// NOTE: The current LiveKit FFI does not provide per-audio-track label information in the audio callback.
+// All audio is received in a single stream. When LiveKit FFI is updated to support
+// LkAudioCallbackEx with label information, audio can be routed per-subject like data channels.
+// For now, audio is delivered to the audio sink with StreamLabel set to a generic identifier.
 void FO3DWebRTCReceiver::OnAudioReceived(void* user, const int16_t* pcm_interleaved, size_t frames_per_channel, int32_t channels, int32_t sample_rate)
 {
     FO3DWebRTCReceiver* Self = reinterpret_cast<FO3DWebRTCReceiver*>(user);
@@ -204,7 +214,9 @@ void FO3DWebRTCReceiver::OnAudioReceived(void* user, const int16_t* pcm_interlea
         O3DS::FAudioFrameMeta Meta;
         Meta.SampleRate = sample_rate;
         Meta.NumChannels = channels;
-        Meta.StreamLabel = Self->SubjectName;
+        // Use a generic stream label since audio label routing is not yet available in LiveKit FFI
+        // This will be updated when lk_client_set_audio_callback_ex() becomes available
+        Meta.StreamLabel = TEXT("audio_default");
 
         const size_t TotalSamples = frames_per_channel * channels;
         const size_t NumBytes = TotalSamples * sizeof(int16);
@@ -349,7 +361,7 @@ void FO3DWebRTCReceiver::Stop()
 
     if (ClientHandle)
     {
-        lk_client_set_data_callback(ClientHandle, nullptr, nullptr);
+        lk_client_set_data_callback_ex(ClientHandle, nullptr, nullptr);
         lk_client_set_audio_callback(ClientHandle, nullptr, nullptr);
         lk_set_connection_callback(ClientHandle, nullptr, nullptr);
 
@@ -363,7 +375,7 @@ void FO3DWebRTCReceiver::Stop()
     AudioSink.Reset();
     {
         FScopeLock PendingLock(&PendingFramesMutex);
-        PendingFrames.Reset();
+        PendingFramesBySubject.Reset();
     }
 
     bConnected.Store(false);
@@ -376,49 +388,71 @@ void FO3DWebRTCReceiver::Stop()
 
 int32 FO3DWebRTCReceiver::Poll()
 {
-    FPendingFrame LatestFrame;
-    bool bHasFrame = false;
-    int32 DroppedFrames = 0;
+    // Process frames from each subject's queue
+    // This supports multiple concurrent senders without data loss
+    TMap<FString, FPendingFrame> LatestFrameBySubject;
+    TMap<FString, int32> DroppedFramesBySubject;
 
     {
         FScopeLock Lock(&PendingFramesMutex);
-        const int32 NumPending = PendingFrames.Num();
-        if (NumPending > 0)
+        for (auto& SubjectQueue : PendingFramesBySubject)
         {
-            DroppedFrames = NumPending - 1;
-            LatestFrame = MoveTemp(PendingFrames.Last());
-            PendingFrames.Reset();
-            bHasFrame = true;
+            const FString& SubjectLabel = SubjectQueue.Key;
+            TArray<FPendingFrame>& Frames = SubjectQueue.Value;
+
+            if (Frames.Num() > 0)
+            {
+                // Keep only the latest frame for this subject (drop intermediate frames)
+                DroppedFramesBySubject.Add(SubjectLabel, Frames.Num() - 1);
+                LatestFrameBySubject.Add(SubjectLabel, MoveTemp(Frames.Last()));
+                Frames.Reset();
+            }
         }
     }
 
     int32 FramesProcessed = 0;
+    const double NowSeconds = FPlatformTime::Seconds();
 
-    if (bHasFrame)
+    // Submit each subject's latest frame to the consumer
+    if (Consumer.IsValid())
     {
-        const double ReceiveLatencyMs = FMath::Max(0.0, (FPlatformTime::Seconds() - LatestFrame.EnqueueTimeSeconds) * 1000.0);
-
+        for (auto& FrameEntry : LatestFrameBySubject)
         {
-            FScopeLock Lock(&StatsMutex);
-            Stats.FramesReceived++;
-            Stats.BytesReceived += LatestFrame.Payload.Num();
-            Stats.DroppedFrames += DroppedFrames;
+            const FString& SubjectLabel = FrameEntry.Key;
+            FPendingFrame& Frame = FrameEntry.Value;
 
-            Stats.MaxLatencyMs = FMath::Max(Stats.MaxLatencyMs, ReceiveLatencyMs);
-            const int64 NewSampleCount = LatencySamples + 1;
-            const double PreviousTotal = Stats.AverageLatencyMs * LatencySamples;
-            Stats.AverageLatencyMs = (PreviousTotal + ReceiveLatencyMs) / FMath::Max<int64>(1, NewSampleCount);
-            LatencySamples = NewSampleCount;
-        }
+            const double ReceiveLatencyMs = FMath::Max(0.0, (NowSeconds - Frame.EnqueueTimeSeconds) * 1000.0);
 
-        if (Consumer.IsValid())
-        {
-            Consumer->SubmitFrame(SubjectName, LatestFrame.Payload, LatestFrame.EnqueueTimeSeconds);
-            FramesProcessed = 1;
+            {
+                FScopeLock Lock(&StatsMutex);
+                Stats.FramesReceived++;
+                Stats.BytesReceived += Frame.Payload.Num();
+
+                if (DroppedFramesBySubject.Contains(SubjectLabel))
+                {
+                    int32 Dropped = DroppedFramesBySubject[SubjectLabel];
+                    Stats.DroppedFrames += Dropped;
+                    UE_LOG(LogO3DWebRTCReceiver, Verbose,
+                        TEXT("Subject '%s': dropped %d intermediate frames"), *SubjectLabel, Dropped);
+                }
+
+                Stats.MaxLatencyMs = FMath::Max(Stats.MaxLatencyMs, ReceiveLatencyMs);
+                const int64 NewSampleCount = LatencySamples + 1;
+                const double PreviousTotal = Stats.AverageLatencyMs * LatencySamples;
+                Stats.AverageLatencyMs = (PreviousTotal + ReceiveLatencyMs) / FMath::Max<int64>(1, NewSampleCount);
+                LatencySamples = NewSampleCount;
+            }
+
+            // Submit frame to consumer with the subject label as the subject name
+            Consumer->SubmitFrame(SubjectLabel, Frame.Payload, Frame.EnqueueTimeSeconds);
+            FramesProcessed++;
+
+            UE_LOG(LogO3DWebRTCReceiver, Verbose,
+                TEXT("Poll() submitted frame for subject '%s' (%d bytes, latency=%.2fms)"),
+                *SubjectLabel, Frame.Payload.Num(), ReceiveLatencyMs);
         }
     }
 
-    const double NowSeconds = FPlatformTime::Seconds();
     double LastDataTime = 0.0;
     {
         FScopeLock DataLock(&LastDataMutex);
@@ -505,8 +539,8 @@ bool FO3DWebRTCReceiver::SetupClientHandle()
 
     LogIfFailed(lk_set_connection_callback(ClientHandle, FO3DWebRTCReceiver::OnConnectionState, this),
         TEXT("LiveKit set connection callback"));
-    LogIfFailed(lk_client_set_data_callback(ClientHandle, FO3DWebRTCReceiver::OnDataReceived, this),
-        TEXT("LiveKit set data callback"));
+    LogIfFailed(lk_client_set_data_callback_ex(ClientHandle, FO3DWebRTCReceiver::OnDataReceivedEx, this),
+        TEXT("LiveKit set extended data callback"));
     LogIfFailed(lk_client_set_audio_callback(ClientHandle, FO3DWebRTCReceiver::OnAudioReceived, this),
         TEXT("LiveKit set audio callback"));
     LogIfFailed(lk_set_default_data_labels(ClientHandle, "o3ds-rel", "o3ds-lossy"),
@@ -579,7 +613,7 @@ void FO3DWebRTCReceiver::ProcessReconnectIfNeeded()
 
     if (ClientHandle)
     {
-        lk_client_set_data_callback(ClientHandle, nullptr, nullptr);
+        lk_client_set_data_callback_ex(ClientHandle, nullptr, nullptr);
         lk_client_set_audio_callback(ClientHandle, nullptr, nullptr);
         lk_set_connection_callback(ClientHandle, nullptr, nullptr);
         LogIfFailed(lk_disconnect(ClientHandle), TEXT("LiveKit reconnect disconnect"));
@@ -604,7 +638,7 @@ void FO3DWebRTCReceiver::ProcessReconnectIfNeeded()
 
     {
         FScopeLock PendingLock(&PendingFramesMutex);
-        PendingFrames.Reset();
+        PendingFramesBySubject.Reset();
     }
 
     {

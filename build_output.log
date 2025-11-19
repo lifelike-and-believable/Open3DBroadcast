@@ -1,0 +1,32 @@
+Using bundled DotNet SDK version: 8.0.412 win-x64
+Running UnrealBuildTool: dotnet "..\..\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.dll" ProjectSandboxEditor Win64 Development e:\OtherProjects\Open3DStream\ProjectSandbox\ProjectSandbox.uproject -WaitMutex
+Log file: C:\Users\Athomas\AppData\Local\UnrealBuildTool\Log.txt
+Using 'git status' to determine working set for adaptive non-unity build (E:\OtherProjects\Open3DStream).
+Invalidating makefile for ProjectSandboxEditor (working set of source files changed)
+UHT compiled-in object format Default
+Building ProjectSandboxEditor...
+Using Visual Studio 2022 14.44.35219 toolchain (C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207) and Windows 10.0.22621.0 SDK (C:\Program Files (x86)\Windows Kits\10).
+[Upgrade]
+[Upgrade] Using backward-compatible include order. The latest version of UE has changed the order of includes, which may require code changes. The current setting is:
+[Upgrade]     IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_4
+[Upgrade] Suppress this message by setting 'IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_7;' in ProjectSandboxEditor.Target.cs.
+[Upgrade] Alternatively you can set this to 'EngineIncludeOrderVersion.Latest' to always use the latest include order. This will potentially cause compile errors when integrating new versions of the engine.
+[Upgrade]
+[Adaptive Build] Excluded from Open3DTransportWebRTC unity file: WebRTCSender.cpp
+Determining max actions to execute in parallel (16 physical cores, 32 logical cores)
+  Executing up to 16 processes, one per physical core
+Using Unreal Build Accelerator local executor to run 5 action(s)
+  Storage capacity 40Gb
+---- Starting trace: 251117_174925 ----
+UbaSessionServer - Disable remote execution (remote sessions will finish current processes)
+[1/5] Compile [x64] WebRTCSender.cpp
+[2/5] Compile [x64] Module.Open3DTransportWebRTC.cpp
+[3/5] Link [x64] UnrealEditor-Open3DTransportWebRTC.lib
+[4/5] Link [x64] UnrealEditor-Open3DTransportWebRTC.dll
+[5/5] WriteMetadata ProjectSandboxEditor.target [NoUba]
+
+Trace written to file C:/Users/Athomas/AppData/Local/UnrealBuildTool/Log.uba with size 3.9kb
+Total time in Unreal Build Accelerator local executor: 5.30 seconds
+
+Result: Succeeded
+Total execution time: 11.21 seconds
