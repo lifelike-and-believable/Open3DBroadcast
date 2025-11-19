@@ -436,21 +436,44 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
     // Serialize and send each subject individually with its own labeled data channel.
     // This allows multiple senders to coexist without overwhelming a single channel.
     // Each subject's mocap data (typically ~13KB) stays well within the reliable limit.
-    for (int32 SubjectIdx = 0; SubjectIdx < List.size(); ++SubjectIdx)
+    for (size_t SubjectIdx = 0; SubjectIdx < List.mItems.size(); ++SubjectIdx)
     {
-        const auto& Subject = List.at(SubjectIdx);
+        O3DS::Subject* Subject = List.mItems[SubjectIdx];
+        if (!Subject)
+        {
+            continue;
+        }
 
         // Create a single-subject list for serialization
         O3DS::SubjectList SingleSubjectList;
-        SingleSubjectList.add();
-        *SingleSubjectList.mutable_subjects(0) = Subject;
+        O3DS::Subject* NewSubject = SingleSubjectList.addSubject(Subject->mName, Subject->mReference);
+        if (!NewSubject)
+        {
+            UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to create single-subject list for Subject[%zu]"), SubjectIdx);
+            continue;
+        }
+
+        // Copy subject data to new subject
+        NewSubject->mJoints = Subject->mJoints;
+        NewSubject->mCurveNames = Subject->mCurveNames;
+        NewSubject->mCurveValues = Subject->mCurveValues;
+        NewSubject->mContext = Subject->mContext;
+
+        // Copy all transforms
+        for (const auto& Transform : Subject->mTransforms.mItems)
+        {
+            if (Transform)
+            {
+                NewSubject->addTransform(Transform);
+            }
+        }
 
         // Serialize the single-subject list
         std::vector<char> Buffer;
         int32 BytesWritten = SingleSubjectList.Serialize(Buffer, TimestampSeconds);
         if (BytesWritten <= 0)
         {
-            UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to serialize Subject[%d]"), SubjectIdx);
+            UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to serialize Subject[%zu]"), SubjectIdx);
             continue;
         }
 
@@ -467,24 +490,24 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
             else
             {
                 UE_LOG(LogO3DWebRTCSender, Error,
-                    TEXT("Subject[%d] '%s' payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton"),
-                    SubjectIdx, *FString(Subject.name().c_str()), BytesWritten, ReliableMaxBytes);
+                    TEXT("Subject[%zu] '%s' payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton"),
+                    SubjectIdx, *FString(Subject->mName.c_str()), BytesWritten, ReliableMaxBytes);
                 continue;
             }
         }
         else if (!bAllowLossy && BytesWritten > ReliableMaxBytes)
         {
             UE_LOG(LogO3DWebRTCSender, Error,
-                TEXT("Subject[%d] '%s' payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton"),
-                SubjectIdx, *FString(Subject.name().c_str()), BytesWritten, ReliableMaxBytes);
+                TEXT("Subject[%zu] '%s' payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton"),
+                SubjectIdx, *FString(Subject->mName.c_str()), BytesWritten, ReliableMaxBytes);
             continue;
         }
 
         // Use subject name as the data channel label for routing on receiver side
-        FString SubjectLabel = FString(Subject.name().c_str());
+        FString SubjectLabel = FString(Subject->mName.c_str());
         if (SubjectLabel.IsEmpty())
         {
-            SubjectLabel = FString::Printf(TEXT("subject_%d"), SubjectIdx);
+            SubjectLabel = FString::Printf(TEXT("subject_%zu"), SubjectIdx);
         }
 
         // Send via labeled LiveKit data channel
@@ -500,7 +523,7 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
 
         if (Result.code != 0)
         {
-            UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to send Subject[%d] '%s': %s"),
+            UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to send Subject[%zu] '%s': %s"),
                 SubjectIdx, *SubjectLabel, *FromAnsi(Result.message));
             if (Result.message)
             {
