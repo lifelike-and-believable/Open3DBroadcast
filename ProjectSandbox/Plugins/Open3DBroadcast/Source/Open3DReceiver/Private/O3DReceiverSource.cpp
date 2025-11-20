@@ -835,16 +835,77 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
         }
     }
 
-    // If cache exists and fingerprint matches, reuse cached transforms
+    // If cache exists and fingerprint matches, reuse cached bone structure but extract current transforms
     uint64 SkeletonHash = 0;
     uint64 CurveHash = 0;
     bool bSkeletonCacheHit = false;
 
     if (ExistingCache && ExistingCache->SkeletonFingerprint == QuickSkeletonFingerprint)
     {
+        // PHASE 4 OPTIMIZATION: Reuse cached bone structure (names and parents)
         BoneNames = ExistingCache->BoneNames;
         BoneParents = ExistingCache->BoneParents;
-        BoneTransforms = ExistingCache->BoneTransforms;
+
+        // CRITICAL: Always extract current frame's transform VALUES from SubjectPtr
+        // Do NOT reuse cached BoneTransforms - those are stale from previous frame!
+        // We need to extract the actual animation data for this frame.
+        BoneTransforms.Reset();
+        BoneTransforms.Reserve(static_cast<int32>(SubjectPtr->mTransforms.mItems.size()));
+
+        bool bTransformError = false;
+        for (O3DS::Transform* TransformPtr : SubjectPtr->mTransforms.mItems)
+        {
+            if (!TransformPtr)
+            {
+                continue;
+            }
+
+            const O3DS::Vector3d Translation = TransformPtr->translation.value;
+            const O3DS::Vector4d Rotation = TransformPtr->rotation.value;
+            const O3DS::Vector3d Scale = TransformPtr->scale.value;
+
+            FQuat Quat(
+                static_cast<float>(Rotation.v[0]),
+                static_cast<float>(Rotation.v[1]),
+                static_cast<float>(Rotation.v[2]),
+                static_cast<float>(Rotation.v[3]));
+            FVector Location(
+                static_cast<float>(Translation.v[0]),
+                static_cast<float>(Translation.v[1]),
+                static_cast<float>(Translation.v[2]));
+            FVector ScaleVec(
+                static_cast<float>(Scale.v[0]),
+                static_cast<float>(Scale.v[1]),
+                static_cast<float>(Scale.v[2]));
+
+            if (!FMath::IsFinite(Location.X) || !FMath::IsFinite(Location.Y) || !FMath::IsFinite(Location.Z) ||
+                !FMath::IsFinite(ScaleVec.X) || !FMath::IsFinite(ScaleVec.Y) || !FMath::IsFinite(ScaleVec.Z) ||
+                !FMath::IsFinite(Quat.X) || !FMath::IsFinite(Quat.Y) || !FMath::IsFinite(Quat.Z) || !FMath::IsFinite(Quat.W))
+            {
+                bTransformError = true;
+                break;
+            }
+
+            if (Quat.SizeSquared() <= KINDA_SMALL_NUMBER)
+            {
+                bTransformError = true;
+                break;
+            }
+
+            Quat.Normalize();
+            if (Quat.ContainsNaN())
+            {
+                bTransformError = true;
+                break;
+            }
+
+            BoneTransforms.Add(FTransform(Quat, Location, ScaleVec));
+        }
+
+        if (bTransformError || BoneTransforms.Num() == 0)
+        {
+            return;  // Invalid transforms in current frame
+        }
 
         // PHASE 7 OPTIMIZATION: Use cached hashes instead of recomputing
         // This eliminates ~99% of hash computations for stable skeletons (expected -8-12% CPU savings)
