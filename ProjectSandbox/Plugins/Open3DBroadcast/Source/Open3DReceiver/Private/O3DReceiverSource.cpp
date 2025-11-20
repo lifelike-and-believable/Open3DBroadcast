@@ -929,9 +929,21 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
     double LiveLinkPushTimeMs = 0.0;
     const double LiveLinkStartTime = FPlatformTime::Seconds();
 
+    // Measure static data push separately to identify which operation blocks
     if (!InitializedSubjects.Contains(SubjectFName) || bNeedStaticUpdate)
     {
+        const double StaticStartTime = FPlatformTime::Seconds();
         PushSubjectStaticData(SubjectKey, BoneNames, BoneParents, CurveNames, SkeletonHash);
+        const double StaticTimeMs = (FPlatformTime::Seconds() - StaticStartTime) * 1000.0;
+
+        // Log if static push is slow (potential blocking point)
+        if (StaticTimeMs > 5.0)
+        {
+            UE_LOG(LogO3DReceiverSource, Warning,
+                TEXT("PushSubjectStaticData took %.2f ms (subject='%s', may indicate LiveLink client blocking)"),
+                StaticTimeMs, *SubjectFName.ToString());
+        }
+
         InitializedSubjects.Add(SubjectFName);
         SubjectSkeletonHashes.Add(SubjectFName, SkeletonHash);
         SubjectCurveHashes.Add(SubjectFName, CurveHash);
@@ -950,7 +962,18 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
         SubjectCurveHashes[SubjectFName] = CurveHash;
     }
 
+    const double FrameStartTime = FPlatformTime::Seconds();
     PushSubjectFrameData(SubjectKey, BoneTransforms, CurveNames, CurveValues, SubjectListTime, CurveHash);
+    const double FrameTimeMs = (FPlatformTime::Seconds() - FrameStartTime) * 1000.0;
+
+    // Log if frame push is slow (primary blocking suspect)
+    if (FrameTimeMs > 5.0)
+    {
+        UE_LOG(LogO3DReceiverSource, Warning,
+            TEXT("PushSubjectFrameData took %.2f ms (subject='%s', PRIMARY SUSPECT for latency)"),
+            FrameTimeMs, *SubjectFName.ToString());
+    }
+
     LiveLinkPushTimeMs = (FPlatformTime::Seconds() - LiveLinkStartTime) * 1000.0;
     FO3DPerformanceMetrics::Get().RecordLiveLinkPushTimeMs(LiveLinkPushTimeMs);
 
