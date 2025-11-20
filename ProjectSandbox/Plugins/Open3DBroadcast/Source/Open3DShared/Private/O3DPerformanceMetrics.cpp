@@ -453,3 +453,52 @@ static FAutoConsoleCommand ResetMetricsCmd(
 	TEXT("Reset all Open3DBroadcast performance metrics"),
 	FConsoleCommandDelegate::CreateStatic(&ResetO3DMetrics)
 );
+
+// =====================================================================
+// PHASE 13 PROFILING COMMANDS - Main Thread Diagnostics
+// =====================================================================
+
+void PrintProfileGuide()
+{
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("\n"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("========== PHASE 13: MAIN THREAD PROFILING GUIDE =========="));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("To diagnose the 2000+ ms latency spike root cause:"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("Step 1: Enable frame rate limiting (optional but recommended)"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  t.MaxFrameRate 30"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("Step 2: Monitor main thread activity during stalls"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  stat unit         - Overall frame breakdown (Game/Render/GPU time)"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  stat engine       - Engine subsystem times"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  stat game         - Game thread specific details"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  stat scenerendering - Rendering system details"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  stat gc           - Garbage collection stats"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("Step 3: Start animation and watch console"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  - Watch for spikes in Game thread time when animation stalls"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  - Note which system is running (shown in stat output)"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  - Check if GC is active during stalls (stat gc output)"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("Step 4: Collect metrics"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  o3d.DumpMetrics   - Show current receiver timing breakdown"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("Key Information from Phase 12:"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  - Receiver processes in 0.219-0.256 ms (EXCELLENT)"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  - LiveLink push takes 0.010-0.011 ms (INSTANT)"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  - Yet max latency is 2000+ ms (ASYNCHRONOUS QUEUE)"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  - The 2000 ms gap is spent WAITING for LiveLink queue"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("What to Look For:"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  1. If Game thread time spikes: Main thread is busy (GC/Render/Physics)"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  2. If stat gc shows activity: Garbage collection may be the culprit"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  3. If no obvious spike: LiveLink is batching/queuing updates"));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("========== END PROFILING GUIDE ==========\n"));
+}
+
+static FAutoConsoleCommand ProfileGuideCmd(
+	TEXT("o3d.ProfileGuide"),
+	TEXT("Show Phase 13 main thread profiling guide"),
+	FConsoleCommandDelegate::CreateStatic(&PrintProfileGuide)
+);

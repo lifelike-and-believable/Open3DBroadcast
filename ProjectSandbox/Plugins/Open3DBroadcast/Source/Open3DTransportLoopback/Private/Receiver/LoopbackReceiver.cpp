@@ -75,7 +75,10 @@ int32 FO3DLoopbackReceiver::Poll()
 
         if (Consumer.IsValid())
         {
-            Consumer->SubmitFrame(Packet.Subject, Packet.Payload, Packet.TimestampSeconds);
+            // PHASE 13: Timestamp alignment fix (same as WebRTC/NNG/TCP/UDP)
+            // Use FPlatformTime::Seconds() instead of Packet.TimestampSeconds
+            // LiveLink expects "when to display" not "when this arrived in queue"
+            Consumer->SubmitFrame(Packet.Subject, Packet.Payload, FPlatformTime::Seconds());
         }
     }
 

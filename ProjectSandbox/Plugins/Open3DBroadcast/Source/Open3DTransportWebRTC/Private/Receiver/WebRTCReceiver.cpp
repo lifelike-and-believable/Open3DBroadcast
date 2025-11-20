@@ -612,8 +612,15 @@ int32 FO3DWebRTCReceiver::Poll()
                     TEXT("[ARCH] Poll() SUBMITTING: subject='%s' bytes=%d to consumer"),
                     *SubjectLabel, Frame.Payload.Num());
 
+                // PHASE 13: Timestamp alignment fix
+                // LiveLink expects WorldTime to be "when to display" not "when it arrived"
+                // Using FPlatformTime::Seconds() (current time) instead of Frame.EnqueueTimeSeconds (arrival time)
+                // This prevents LiveLink from buffering frames as "old" data
+                const double SubmitTimeNow = FPlatformTime::Seconds();
+
                 // Submit frame to consumer with the subject label as the subject name
-                Consumer->SubmitFrame(SubjectLabel, Frame.Payload, Frame.EnqueueTimeSeconds);
+                // Using current time (SubmitTimeNow) instead of old arrival time
+                Consumer->SubmitFrame(SubjectLabel, Frame.Payload, SubmitTimeNow);
                 FramesProcessed++;
 
                 // ARCHITECTURE VERIFICATION: Log successful submission (Verbose)
