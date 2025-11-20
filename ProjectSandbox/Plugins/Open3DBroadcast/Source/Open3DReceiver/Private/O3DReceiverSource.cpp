@@ -485,11 +485,14 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
     // }
 
     // Deserialize frame - full parsing required for reliable operation
+    const double ParseTimingStart = FPlatformTime::Seconds();
     if (!ParseSubjectListBuffer(Subject, Buffer))
     {
         FO3DPerformanceMetrics::Get().RecordDeserializationError();
         return;
     }
+    const double ParseTimeMs = (FPlatformTime::Seconds() - ParseTimingStart) * 1000.0;
+    FO3DPerformanceMetrics::Get().RecordParseTimeMs(ParseTimeMs);
 
     const double SubjectListTime = SubjectScratch.mTime;
     // Re-check (in case peek wasn't accurate, though it should match)
@@ -515,12 +518,18 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
     TArray<FName> CurveNames;
     TArray<float> CurveValues;
 
+    // Track per-operation timing for bottleneck identification
+    const double PoseExtractionStartTime = FPlatformTime::Seconds();
+
     int32 PoseUpdateCount = 0;
     for (O3DS::Subject* SubjectPtr : SubjectScratch)
     {
         ProcessParsedSubject(SubjectPtr, SubjectListTime, BoneNames, BoneParents, BoneTransforms, CurveNames, CurveValues);
         ++PoseUpdateCount;
     }
+
+    const double PoseExtractionTimeMs = (FPlatformTime::Seconds() - PoseExtractionStartTime) * 1000.0;
+    FO3DPerformanceMetrics::Get().RecordPoseExtractionTimeMs(PoseExtractionTimeMs);
 
     // Record pose and skeleton updates
     if (PoseUpdateCount > 0)
@@ -530,6 +539,10 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
 
     // Update active subject count
     FO3DPerformanceMetrics::Get().SetReceiverActiveSubjectCount(static_cast<int32>(SubjectScratch.mItems.size()));
+
+    // Record total frame processing time
+    const double TotalProcessingTimeMs = (FPlatformTime::Seconds() - ParseStartWall) * 1000.0;
+    FO3DPerformanceMetrics::Get().RecordTotalProcessingTimeMs(TotalProcessingTimeMs);
 
     if (CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0)
     {
@@ -913,6 +926,9 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
     const uint64* ExistingCurveHash = SubjectCurveHashes.Find(SubjectFName);
     const bool bNeedStaticUpdate = (!ExistingSkeletonHash || *ExistingSkeletonHash != SkeletonHash) || (!ExistingCurveHash || *ExistingCurveHash != CurveHash);
 
+    double LiveLinkPushTimeMs = 0.0;
+    const double LiveLinkStartTime = FPlatformTime::Seconds();
+
     if (!InitializedSubjects.Contains(SubjectFName) || bNeedStaticUpdate)
     {
         PushSubjectStaticData(SubjectKey, BoneNames, BoneParents, CurveNames, SkeletonHash);
@@ -935,6 +951,9 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
     }
 
     PushSubjectFrameData(SubjectKey, BoneTransforms, CurveNames, CurveValues, SubjectListTime, CurveHash);
+    LiveLinkPushTimeMs = (FPlatformTime::Seconds() - LiveLinkStartTime) * 1000.0;
+    FO3DPerformanceMetrics::Get().RecordLiveLinkPushTimeMs(LiveLinkPushTimeMs);
+
     SubjectLastUpdateTime.Add(SubjectFName, FPlatformTime::Seconds());
 }
 

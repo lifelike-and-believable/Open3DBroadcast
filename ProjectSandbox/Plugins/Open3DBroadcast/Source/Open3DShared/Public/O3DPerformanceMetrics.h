@@ -190,6 +190,12 @@ public:
 	FORCEINLINE void RecordPoseUpdate() { ++ReceiverMetrics.PoseUpdates; }
 	FORCEINLINE void SetReceiverActiveSubjectCount(int32 Count) { ReceiverMetrics.ActiveSubjectCount.Store(Count); }
 
+	/** Record per-operation timing metrics (for bottleneck identification) */
+	void RecordParseTimeMs(double TimeMs);
+	void RecordPoseExtractionTimeMs(double TimeMs);
+	void RecordLiveLinkPushTimeMs(double TimeMs);
+	void RecordTotalProcessingTimeMs(double TimeMs);
+
 	/** Record latency for a frame (timestamp-based) */
 	void RecordFrameLatency(double LatencyMs);
 

@@ -122,6 +122,46 @@ void FO3DPerformanceMetrics::RecordFrameLatency(double LatencyMs)
 }
 
 // =====================================================================
+// PER-OPERATION TIMING TRACKING (for bottleneck identification)
+// =====================================================================
+
+void FO3DPerformanceMetrics::RecordParseTimeMs(double TimeMs)
+{
+	// Exponential moving average with α = 0.2
+	const double Alpha = 0.2;
+	const double CurrentAvg = ReceiverMetrics.AvgParseTimeMs.Load();
+	const double NewAvg = (CurrentAvg * (1.0 - Alpha)) + (TimeMs * Alpha);
+	ReceiverMetrics.AvgParseTimeMs.Store(NewAvg);
+}
+
+void FO3DPerformanceMetrics::RecordPoseExtractionTimeMs(double TimeMs)
+{
+	// Exponential moving average with α = 0.2
+	const double Alpha = 0.2;
+	const double CurrentAvg = ReceiverMetrics.AvgPoseExtractionTimeMs.Load();
+	const double NewAvg = (CurrentAvg * (1.0 - Alpha)) + (TimeMs * Alpha);
+	ReceiverMetrics.AvgPoseExtractionTimeMs.Store(NewAvg);
+}
+
+void FO3DPerformanceMetrics::RecordLiveLinkPushTimeMs(double TimeMs)
+{
+	// Exponential moving average with α = 0.2
+	const double Alpha = 0.2;
+	const double CurrentAvg = ReceiverMetrics.AvgLiveLinkPushTimeMs.Load();
+	const double NewAvg = (CurrentAvg * (1.0 - Alpha)) + (TimeMs * Alpha);
+	ReceiverMetrics.AvgLiveLinkPushTimeMs.Store(NewAvg);
+}
+
+void FO3DPerformanceMetrics::RecordTotalProcessingTimeMs(double TimeMs)
+{
+	// Exponential moving average with α = 0.2
+	const double Alpha = 0.2;
+	const double CurrentAvg = ReceiverMetrics.AvgTotalProcessingTimeMs.Load();
+	const double NewAvg = (CurrentAvg * (1.0 - Alpha)) + (TimeMs * Alpha);
+	ReceiverMetrics.AvgTotalProcessingTimeMs.Store(NewAvg);
+}
+
+// =====================================================================
 // TRANSPORT TRACKING
 // =====================================================================
 
@@ -296,6 +336,22 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Pose Updates: %llu"), ReceiverMetrics.PoseUpdates.Load());
 		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Deserialization Errors: %llu"), ReceiverMetrics.DeserializationErrors.Load());
 		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+
+		// Per-operation timing breakdown
+		double AvgParseTime = ReceiverMetrics.AvgParseTimeMs.Load();
+		double AvgPoseExtraction = ReceiverMetrics.AvgPoseExtractionTimeMs.Load();
+		double AvgLiveLinkPush = ReceiverMetrics.AvgLiveLinkPushTimeMs.Load();
+		double AvgTotalProcessing = ReceiverMetrics.AvgTotalProcessingTimeMs.Load();
+
+		if (AvgParseTime > 0.0 || AvgPoseExtraction > 0.0 || AvgLiveLinkPush > 0.0 || AvgTotalProcessing > 0.0)
+		{
+			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("[RECEIVER - PER-OPERATION TIMING]"));
+			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg FlatBuffer Parse Time: %.3f ms"), AvgParseTime);
+			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg Pose Extraction Time: %.3f ms"), AvgPoseExtraction);
+			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg LiveLink Push Time: %.3f ms"), AvgLiveLinkPush);
+			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg Total Processing Time: %.3f ms"), AvgTotalProcessing);
+			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+		}
 	}
 
 	// ========== TRANSPORT METRICS ==========
