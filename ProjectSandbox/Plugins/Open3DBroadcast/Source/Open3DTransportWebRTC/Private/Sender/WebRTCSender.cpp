@@ -854,21 +854,24 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DWebRTCSender::CreateAud
 
 bool FO3DWebRTCSender::ParseConfig(const FO3DTransportConfig& Config)
 {
-    RoomUrl = Config.Uri;
-    if (RoomUrl.IsEmpty())
+    FString HostAddress = Config.Uri;
+    if (HostAddress.IsEmpty())
     {
         #if !WITH_DEV_AUTOMATION_TESTS
-        UE_LOG(LogO3DWebRTCSender, Warning, TEXT("WebRTC URL not specified"));
+        UE_LOG(LogO3DWebRTCSender, Warning, TEXT("WebRTC host address not specified"));
         #endif
         return false;
     }
+
+    // Automatically prepend the correct WebSocket protocol prefix
+    RoomUrl = WebRTCUtils::PrependWebSocketProtocol(HostAddress);
 
     Token = Config.Token;
     if (Token.IsEmpty())
     {
         #if !WITH_DEV_AUTOMATION_TESTS
         UE_LOG(LogO3DWebRTCSender, Warning, TEXT("WebRTC token not provided"));
-        #endif  
+        #endif
         return false;
     }
 

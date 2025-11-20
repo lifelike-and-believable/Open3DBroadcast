@@ -692,12 +692,15 @@ void FO3DWebRTCReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ES
 
 bool FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& Config)
 {
-    RoomUrl = Config.Uri;
-    if (RoomUrl.IsEmpty())
+    FString HostAddress = Config.Uri;
+    if (HostAddress.IsEmpty())
     {
-        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC URL not specified"));
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC host address not specified"));
         return false;
     }
+
+    // Automatically prepend the correct WebSocket protocol prefix
+    RoomUrl = WebRTCUtils::PrependWebSocketProtocol(HostAddress);
 
     Token = Config.Token;
     if (Token.IsEmpty())

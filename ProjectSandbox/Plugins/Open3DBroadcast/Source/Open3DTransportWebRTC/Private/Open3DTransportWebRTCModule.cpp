@@ -90,7 +90,7 @@ namespace WebRTCSender
 				.AutoHeight()
 				[
 					SNew(STextBlock)
-					.Text(LOCTEXT("WebRTCUrlLabel", "LiveKit Room URL"))
+					.Text(LOCTEXT("WebRTCUrlLabel", "LiveKit Host"))
 				]
 				+ SVerticalBox::Slot()
 				.AutoHeight()
@@ -99,7 +99,7 @@ namespace WebRTCSender
 					SAssignNew(UrlTextBox, SEditableTextBox)
 					.Text(FText::FromString(InitialUrl))
 					.OnTextCommitted(this, &SWebRTCSenderSettingsPanel::HandleUrlCommitted)
-					.HintText(LOCTEXT("WebRTCUrlHint", "e.g., wss://livkit.example.com"))
+					.HintText(LOCTEXT("WebRTCUrlHint", "e.g., livkit.example.com or 127.0.0.1"))
 				]
 				+ SVerticalBox::Slot()
 				.AutoHeight()
@@ -207,7 +207,7 @@ namespace WebRTCReceiver
 				.AutoHeight()
 				[
 					SNew(STextBlock)
-					.Text(LOCTEXT("WebRTCReceiverUrlLabel", "LiveKit Room URL"))
+					.Text(LOCTEXT("WebRTCReceiverUrlLabel", "LiveKit Host"))
 				];
 
 			PanelContent->AddSlot()
@@ -217,7 +217,7 @@ namespace WebRTCReceiver
 					SAssignNew(UrlTextBox, SEditableTextBox)
 					.Text(FText::FromString(InitialUrl))
 					.OnTextCommitted(this, &SWebRTCReceiverSettingsPanel::HandleUrlCommitted)
-					.HintText(LOCTEXT("WebRTCReceiverUrlHint", "e.g., wss://livkit.example.com"))
+					.HintText(LOCTEXT("WebRTCReceiverUrlHint", "e.g., livkit.example.com or 127.0.0.1"))
 				];
 
 			PanelContent->AddSlot()
