@@ -231,6 +231,27 @@ void FO3DNngReceiver::HandlePipeAdded()
     const int32 Count = PipeCount.Increment();
     bConnected = true;
     BackoffAttempt = 0;
+
+    // Phase 2: Real-time optimization - flush stale buffered frames on first connection
+    // Real-time systems should start from current state, not replay buffered history
+    if (Count == 1)
+    {
+        void* Buffer = nullptr;
+        size_t Size = 0;
+        int FramesFlushed = 0;
+
+        while (nng_recv(Socket->Socket, &Buffer, &Size, NNG_FLAG_NONBLOCK | NNG_FLAG_ALLOC) == 0)
+        {
+            nng_free(Buffer, Size);
+            FramesFlushed++;
+        }
+
+        if (FramesFlushed > 0)
+        {
+            UE_LOG(LogO3DNngReceiver, Log, TEXT("NNG receiver: Flushed %d stale frames on connection (real-time start)"), FramesFlushed);
+        }
+    }
+
     UE_LOG(LogO3DNngReceiver, Log, TEXT("NNG receiver pipe added (count=%d)"), Count);
 }
 
