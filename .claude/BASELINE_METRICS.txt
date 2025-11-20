@@ -5,10 +5,10 @@ BASELINE PERFORMANCE METRICS - PHASE 11 INSTRUMENTATION
 Test Configuration:
 - Date: 2025-11-20
 - Remote NNG Server: Connected
-- Senders: 2 (NNG)
-- Subjects: 1 per sender (2 total in LiveLink)
+- Senders: 2 (NNG) - each independently sending 1 subject
+- Subjects: 2 total (1 per sender, arriving in separate frames)
 - Duration: 187.6 seconds (~3 minutes)
-- Frame Rate: ~47.5 FPS (8904 frames / 187.6s)
+- Frame Rate: ~47.5 FPS total (8904 frames / 187.6s from both senders combined)
 
 ═════════════════════════════════════════════════════════════════
 SENDER METRICS (BROADCAST)
@@ -49,6 +49,12 @@ Deserialization:
 LiveLink Updates:
   Pose Updates:           8,523
   Skeleton Updates:       0
+
+Note on ActiveSubjectCount:
+  Shows 1 because metrics are per-frame and subjects arrive in separate frames
+  from different senders (Subject A from Sender 1, Subject B from Sender 2).
+  Currently only captures the last frame's subject count.
+  Future: Could track unique subjects across all active senders.
 
 Latency:
   Avg Round-Trip Latency: 0.19 ms (!)
