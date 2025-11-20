@@ -7,6 +7,7 @@
 #include "Interfaces/IPluginManager.h"
 #include "livekit_ffi.h"
 #include "o3ds/model.h"
+#include "O3DPerformanceMetrics.h"
 #include <vector>
 
 using WebRTCUtils::FromAnsi;
@@ -419,6 +420,7 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
             UE_LOG(LogO3DWebRTCSender, Verbose, TEXT("Send() called while not connected, dropping frame"));
             LastDisconnectedWarningTime = Now;
         }
+        FO3DPerformanceMetrics::Get().RecordFrameDropped();
         {
             FScopeLock Lock(&StatsMutex);
             Stats.DroppedFrames++;
@@ -432,6 +434,10 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
 
     bool bAnyFrameSucceeded = false;
     int32 SubjectsProcessed = 0;
+
+    // Record frame capture attempt
+    FO3DPerformanceMetrics::Get().RecordFrameCaptured();
+    FO3DPerformanceMetrics::Get().SetActiveSubjectCount(static_cast<int32>(List.mItems.size()));
 
     // ARCHITECTURE VERIFICATION LOGGING
     UE_LOG(LogO3DWebRTCSender, Verbose,
@@ -492,8 +498,12 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
         if (BytesWritten <= 0)
         {
             UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to serialize Subject[%zu]"), SubjectIdx);
+            FO3DPerformanceMetrics::Get().RecordSerializationError();
             continue;
         }
+
+        // Record serialization metrics
+        FO3DPerformanceMetrics::Get().RecordBytesSerialized(BytesWritten);
 
         // ARCHITECTURE VERIFICATION: Log serialization success
         UE_LOG(LogO3DWebRTCSender, Verbose,
@@ -563,6 +573,7 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
             {
                 lk_free_str(const_cast<char*>(Result.message));
             }
+            FO3DPerformanceMetrics::Get().RecordTransportFrameDropped();
             continue;
         }
 
@@ -570,6 +581,10 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
         UE_LOG(LogO3DWebRTCSender, Verbose,
             TEXT("[ARCH] Successfully sent subject[%zu] with label='%s'"),
             SubjectIdx, *SubjectLabel);
+
+        // Record transport send metrics
+        FO3DPerformanceMetrics::Get().RecordBytesSent(BytesWritten);
+        FO3DPerformanceMetrics::Get().RecordTransportFrameSent(TEXT("WebRTC"), BytesWritten);
 
         bAnyFrameSucceeded = true;
         SubjectsProcessed++;

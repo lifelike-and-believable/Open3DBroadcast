@@ -12,6 +12,7 @@
 #include "O3DAudioFrameCodec.h"
 #include "O3DSenderAudioSinkBase.h"
 #include "O3DUnifiedMessage.h"
+#include "O3DPerformanceMetrics.h"
 
 #include "o3ds/model.h"
 
@@ -255,8 +256,13 @@ bool FO3DNngSender::Send(const O3DS::SubjectList& List)
 {
     if (!bInitialized.Load() || !bRunning.Load())
     {
+        FO3DPerformanceMetrics::Get().RecordFrameDropped();
         return false;
     }
+
+    // Record frame capture attempt
+    FO3DPerformanceMetrics::Get().RecordFrameCaptured();
+    FO3DPerformanceMetrics::Get().SetActiveSubjectCount(static_cast<int32>(List.mItems.size()));
 
     std::vector<char> Buffer;
     const double TimestampSeconds = FPlatformTime::Seconds();
@@ -264,8 +270,12 @@ bool FO3DNngSender::Send(const O3DS::SubjectList& List)
     if (BytesWritten <= 0)
     {
         UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender failed to serialize subject list"));
+        FO3DPerformanceMetrics::Get().RecordSerializationError();
         return false;
     }
+
+    // Record serialization metrics
+    FO3DPerformanceMetrics::Get().RecordBytesSerialized(BytesWritten);
 
     FString ObservedSubject;
     if (!List.mItems.empty() && List.mItems[0])
@@ -282,8 +292,13 @@ bool FO3DNngSender::Send(const O3DS::SubjectList& List)
     {
         FScopeLock StatsLock(&StatsMutex);
         Stats.DroppedFrames++;
+        FO3DPerformanceMetrics::Get().RecordTransportFrameDropped();
         return false;
     }
+
+    // Record successful send metrics
+    FO3DPerformanceMetrics::Get().RecordBytesSent(BytesWritten);
+    FO3DPerformanceMetrics::Get().RecordTransportFrameSent(TEXT("NNG"), BytesWritten);
 
     return true;
 }

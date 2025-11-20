@@ -19,6 +19,7 @@
 #include "O3DReceiverTransportCustomization.h"
 #include "O3DAudioBus.h"
 #include "O3DAudioFrameCodec.h"
+#include "O3DPerformanceMetrics.h"
 
 #include "o3ds_generated.h"
 
@@ -440,6 +441,10 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
         return;
     }
 
+    // Record frame received
+    FO3DPerformanceMetrics::Get().RecordFrameReceived();
+    FO3DPerformanceMetrics::Get().RecordBytesDeserialized(Buffer.Num());
+
     if (!IsInGameThread())
     {
         TWeakPtr<FO3DReceiverSource> WeakSelf = AsShared();
@@ -463,13 +468,25 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
     const double ParseStartWall = FPlatformTime::Seconds();
     if (!ParseSubjectListBuffer(Subject, Buffer))
     {
+        FO3DPerformanceMetrics::Get().RecordDeserializationError();
         return;
     }
 
     const double SubjectListTime = SubjectScratch.mTime;
     if (!ShouldProcessFrame(SubjectListTime, ParseStartWall))
     {
+        FO3DPerformanceMetrics::Get().RecordReceiverFrameDropped();
         return;
+    }
+
+    // Record frame applied
+    FO3DPerformanceMetrics::Get().RecordFrameApplied();
+
+    // Record round-trip latency if we have the timestamp
+    double LatencyMs = (FPlatformTime::Seconds() - TimestampSeconds) * 1000.0;
+    if (LatencyMs >= 0.0 && LatencyMs < 10000.0)  // sanity check: latency should be < 10 seconds
+    {
+        FO3DPerformanceMetrics::Get().RecordFrameLatency(LatencyMs);
     }
 
     TArray<FName> BoneNames;
@@ -478,10 +495,21 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
     TArray<FName> CurveNames;
     TArray<float> CurveValues;
 
+    int32 PoseUpdateCount = 0;
     for (O3DS::Subject* SubjectPtr : SubjectScratch)
     {
         ProcessParsedSubject(SubjectPtr, SubjectListTime, BoneNames, BoneParents, BoneTransforms, CurveNames, CurveValues);
+        ++PoseUpdateCount;
     }
+
+    // Record pose and skeleton updates
+    if (PoseUpdateCount > 0)
+    {
+        FO3DPerformanceMetrics::Get().RecordPoseUpdate();
+    }
+
+    // Update active subject count
+    FO3DPerformanceMetrics::Get().SetReceiverActiveSubjectCount(static_cast<int32>(SubjectScratch.mItems.size()));
 
     if (CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0)
     {
