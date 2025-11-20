@@ -467,20 +467,23 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
 
     const double ParseStartWall = FPlatformTime::Seconds();
 
-    // PHASE 6 OPTIMIZATION: Try to peek timestamp BEFORE expensive deserialization
-    // This avoids parsing duplicate/out-of-order frames which would be dropped anyway
-    double PeekedTime = -1.0;
-    if (TryPeekSubjectListTime(Buffer, PeekedTime))
-    {
-        if (!ShouldProcessFrame(PeekedTime, ParseStartWall))
-        {
-            // Frame is a duplicate/out-of-order - skip expensive deserialization
-            FO3DPerformanceMetrics::Get().RecordReceiverFrameDropped();
-            return;
-        }
-    }
+    // PHASE 6 OPTIMIZATION: DISABLED
+    // Attempted to peek timestamp before deserialization to skip duplicate/out-of-order frames,
+    // but FlatBuffer verification was too strict and rejected valid frames, breaking receiver animation.
+    // Measured impact was minimal anyway (~0.16-0.19% of frames), so full deserialization is safer.
+    // Keeping TryPeekSubjectListTime() method for potential future use with different strategy (e.g., unsafe raw access).
+    //
+    // double PeekedTime = -1.0;
+    // if (TryPeekSubjectListTime(Buffer, PeekedTime))
+    // {
+    //     if (!ShouldProcessFrame(PeekedTime, ParseStartWall))
+    //     {
+    //         FO3DPerformanceMetrics::Get().RecordReceiverFrameDropped();
+    //         return;
+    //     }
+    // }
 
-    // Deserialize only if frame passed timestamp check
+    // Deserialize frame - full parsing required for reliable operation
     if (!ParseSubjectListBuffer(Subject, Buffer))
     {
         FO3DPerformanceMetrics::Get().RecordDeserializationError();
