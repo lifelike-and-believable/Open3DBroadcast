@@ -807,19 +807,59 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
         return;
     }
 
-    if (!BuildSubjectPose(SubjectPtr, BoneNames, BoneParents, BoneTransforms))
-    {
-        return;
-    }
-
-    BuildSubjectCurves(SubjectPtr, CurveNames, CurveValues);
-
     const FString SubjectNameUtf8 = UTF8_TO_TCHAR(SubjectPtr->mName.c_str());
     const FName SubjectFName(*SubjectNameUtf8);
-    const FLiveLinkSubjectName SubjectName(SubjectFName);
-    const FLiveLinkSubjectKey SubjectKey(SourceGuid, SubjectName);
 
     LastObservedSubjectName = SubjectFName;
+
+    // PHASE 4 OPTIMIZATION: Check transform cache BEFORE rebuilding skeleton
+    // Compute skeleton hash early to check if we can reuse cached transform data
+    // This avoids the expensive per-frame BuildSubjectPose() call for stable skeletons
+
+    // First, we need to peek at what the skeleton would be to compute its hash
+    // We can do this by checking transform count and parent IDs (quick, no conversion)
+    FSubjectTransformCache* ExistingCache = SubjectTransformCaches.Find(SubjectFName);
+
+    // Quick skeleton fingerprint: transform count + parent ID sum (very cheap to compute)
+    size_t TransformCount = SubjectPtr->mTransforms.mItems.size();
+    uint64 QuickSkeletonFingerprint = TransformCount;
+    for (O3DS::Transform* TransformPtr : SubjectPtr->mTransforms.mItems)
+    {
+        if (TransformPtr)
+        {
+            QuickSkeletonFingerprint = QuickSkeletonFingerprint * 31 + TransformPtr->mParentId;
+        }
+    }
+
+    // If cache exists and fingerprint matches, reuse cached transforms
+    if (ExistingCache && ExistingCache->SkeletonFingerprint == QuickSkeletonFingerprint)
+    {
+        BoneNames = ExistingCache->BoneNames;
+        BoneParents = ExistingCache->BoneParents;
+        BoneTransforms = ExistingCache->BoneTransforms;
+        // Still need to rebuild curves (they can change independently)
+        BuildSubjectCurves(SubjectPtr, CurveNames, CurveValues);
+    }
+    else
+    {
+        // Skeleton changed or first time - rebuild everything
+        if (!BuildSubjectPose(SubjectPtr, BoneNames, BoneParents, BoneTransforms))
+        {
+            return;
+        }
+
+        BuildSubjectCurves(SubjectPtr, CurveNames, CurveValues);
+
+        // Update cache with new skeleton data
+        FSubjectTransformCache& Cache = SubjectTransformCaches.FindOrAdd(SubjectFName);
+        Cache.BoneNames = BoneNames;
+        Cache.BoneParents = BoneParents;
+        Cache.BoneTransforms = BoneTransforms;
+        Cache.SkeletonFingerprint = QuickSkeletonFingerprint;
+    }
+
+    const FLiveLinkSubjectName SubjectName(SubjectFName);
+    const FLiveLinkSubjectKey SubjectKey(SourceGuid, SubjectName);
 
     const uint64 SkeletonHash = HashArray(BoneNames, &BoneParents);
     const uint64 CurveHash = HashCurveNames(CurveNames);
