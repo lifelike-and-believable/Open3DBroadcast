@@ -334,32 +334,41 @@ void FO3DWebRTCSender::OnConnectionState(void* user, LkConnectionState state, in
     FO3DWebRTCSender* Self = reinterpret_cast<FO3DWebRTCSender*>(user);
     if (!Self) return;
 
+    // Update metrics for connection state
+    bool bNewConnectedState = false;
+
     switch (state)
     {
     case LkConnConnecting:
         UE_LOG(LogO3DWebRTCSender, Log, TEXT("WebRTC connecting..."));
+        bNewConnectedState = false;
         break;
 
     case LkConnConnected:
         UE_LOG(LogO3DWebRTCSender, Log, TEXT("WebRTC connected"));
-        Self->bConnected.Store(true);
+        bNewConnectedState = true;
+        // PHASE 12: Reset backpressure on connection (frames should flow again)
+        Self->EstimatedPendingFrames.Store(0);
         break;
 
     case LkConnReconnecting:
         UE_LOG(LogO3DWebRTCSender, Warning, TEXT("WebRTC reconnecting..."));
-        Self->bConnected.Store(false);
+        bNewConnectedState = false;
         break;
 
     case LkConnDisconnected:
         UE_LOG(LogO3DWebRTCSender, Log, TEXT("WebRTC disconnected: %s"), *FromAnsi(message));
-        Self->bConnected.Store(false);
+        bNewConnectedState = false;
         break;
 
     case LkConnFailed:
         UE_LOG(LogO3DWebRTCSender, Error, TEXT("WebRTC connection failed (code=%d): %s"), reason_code, *FromAnsi(message));
-        Self->bConnected.Store(false);
+        bNewConnectedState = false;
         break;
     }
+
+    Self->bConnected.Store(bNewConnectedState);
+    FO3DPerformanceMetrics::Get().SetTransportConnected(TEXT("WebRTC"), bNewConnectedState);
 }
 
 FO3DWebRTCSender::FO3DWebRTCSender()
@@ -760,7 +769,16 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
 
         // PHASE 10: Update backpressure tracking
         // Increment estimated pending frames (will be decremented by periodic decay)
-        EstimatedPendingFrames.IncrementExchange();
+        int32 NewPendingCount = EstimatedPendingFrames.IncrementExchange();
+
+        // PHASE 12: Enhanced diagnostics - log queue buildup patterns
+        // This helps diagnose the 4070 ms latency spike by showing when the FFI queue backs up
+        if (NewPendingCount > DefaultBackpressureThreshold * 0.5)  // 50% of threshold (15 frames)
+        {
+            UE_LOG(LogO3DWebRTCSender, Warning,
+                TEXT("WebRTC queue building: %d pending frames (threshold=%d, subject='%s')"),
+                NewPendingCount, DefaultBackpressureThreshold, *SubjectLabel);
+        }
 
         // PHASE 1: Return pooled object for reuse (resets and returns to pool)
         SerializerPool->Release(PooledSubject);
