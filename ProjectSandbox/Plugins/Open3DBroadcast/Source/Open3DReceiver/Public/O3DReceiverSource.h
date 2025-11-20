@@ -114,22 +114,15 @@ private:
     TMap<FName, uint64> SubjectCurveHashes;
     FName LastObservedSubjectName;
 
-    // PHASE 4 OPTIMIZATION: Per-subject transform cache to avoid re-building identical skeletons
+    // PHASE 4 OPTIMIZATION: Per-subject bone structure cache to avoid re-building identical skeletons
     // When skeleton structure doesn't change (same parent IDs and count), we can reuse
-    // the cached bone names, parents, and transforms instead of re-parsing each frame.
-    // Expected impact: Skips BuildSubjectPose() for ~99% of frames (only rebuilds on skeleton change)
-    //
-    // PHASE 7 OPTIMIZATION: Cache skeleton and curve hashes to avoid repeated computation
-    // Hashes are computed once per skeleton change (via fingerprint check), then reused.
-    // This eliminates ~99% of hash computations for stable skeletons (expected -8-12% CPU savings).
+    // the cached bone names and parents instead of re-parsing each frame.
+    // Expected impact: Skips most of BuildSubjectPose() for ~99% of frames (only rebuilds on skeleton change)
     struct FSubjectTransformCache
     {
         TArray<FName> BoneNames;
         TArray<int32> BoneParents;
-        TArray<FTransform> BoneTransforms;
         uint64 SkeletonFingerprint = 0;  // Quick check: transform count + parent ID hash
-        uint64 SkeletonHash = 0;         // PHASE 7: Cached hash of bone names + parents
-        uint64 CurveHash = 0;            // PHASE 7: Cached hash of curve names
     };
     TMap<FName, FSubjectTransformCache> SubjectTransformCaches;
 

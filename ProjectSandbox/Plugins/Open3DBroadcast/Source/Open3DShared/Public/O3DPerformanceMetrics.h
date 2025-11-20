@@ -62,6 +62,12 @@ public:
 		TAtomic<uint64> DeserializationErrors{ 0 };    // Deserialization failures
 		TAtomic<double> AvgDeserializationTimeMs{ 0.0 }; // Rolling average deserialization latency
 
+		// Per-operation timing (to identify bottlenecks)
+		TAtomic<double> AvgParseTimeMs{ 0.0 };         // Rolling avg: FlatBuffer parse time
+		TAtomic<double> AvgPoseExtractionTimeMs{ 0.0 }; // Rolling avg: bone structure extraction
+		TAtomic<double> AvgLiveLinkPushTimeMs{ 0.0 };  // Rolling avg: LiveLink frame data push time
+		TAtomic<double> AvgTotalProcessingTimeMs{ 0.0 }; // Rolling avg: total per-frame processing
+
 		// LiveLink updates
 		TAtomic<uint64> SkeletonUpdates{ 0 };          // Number of skeleton hierarchy updates
 		TAtomic<uint64> PoseUpdates{ 0 };              // Number of pose frame updates

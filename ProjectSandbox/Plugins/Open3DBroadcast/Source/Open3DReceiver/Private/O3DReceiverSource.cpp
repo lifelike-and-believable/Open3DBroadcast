@@ -835,98 +835,59 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
         }
     }
 
-    // If cache exists and fingerprint matches, reuse cached bone structure but extract current transforms
-    uint64 SkeletonHash = 0;
-    uint64 CurveHash = 0;
-    bool bSkeletonCacheHit = false;
-
+    // PHASE 4: Cache check - can we skip rebuilding the skeleton structure?
     if (ExistingCache && ExistingCache->SkeletonFingerprint == QuickSkeletonFingerprint)
     {
-        // PHASE 4 OPTIMIZATION: Reuse cached bone structure (names and parents)
+        // Skeleton structure didn't change, reuse cached bone names/parents
+        // BUT we still need to extract the transform VALUES from this frame!
         BoneNames = ExistingCache->BoneNames;
         BoneParents = ExistingCache->BoneParents;
 
-        // CRITICAL: Always extract current frame's transform VALUES from SubjectPtr
-        // Do NOT reuse cached BoneTransforms - those are stale from previous frame!
-        // We need to extract the actual animation data for this frame.
+        // Extract only the transform values for this frame
         BoneTransforms.Reset();
         BoneTransforms.Reserve(static_cast<int32>(SubjectPtr->mTransforms.mItems.size()));
-
-        bool bTransformError = false;
         for (O3DS::Transform* TransformPtr : SubjectPtr->mTransforms.mItems)
         {
             if (!TransformPtr)
-            {
                 continue;
-            }
 
             const O3DS::Vector3d Translation = TransformPtr->translation.value;
             const O3DS::Vector4d Rotation = TransformPtr->rotation.value;
             const O3DS::Vector3d Scale = TransformPtr->scale.value;
 
-            FQuat Quat(
-                static_cast<float>(Rotation.v[0]),
-                static_cast<float>(Rotation.v[1]),
-                static_cast<float>(Rotation.v[2]),
-                static_cast<float>(Rotation.v[3]));
-            FVector Location(
-                static_cast<float>(Translation.v[0]),
-                static_cast<float>(Translation.v[1]),
-                static_cast<float>(Translation.v[2]));
-            FVector ScaleVec(
-                static_cast<float>(Scale.v[0]),
-                static_cast<float>(Scale.v[1]),
-                static_cast<float>(Scale.v[2]));
+            FQuat Quat(static_cast<float>(Rotation.v[0]), static_cast<float>(Rotation.v[1]),
+                       static_cast<float>(Rotation.v[2]), static_cast<float>(Rotation.v[3]));
+            FVector Location(static_cast<float>(Translation.v[0]), static_cast<float>(Translation.v[1]),
+                            static_cast<float>(Translation.v[2]));
+            FVector ScaleVec(static_cast<float>(Scale.v[0]), static_cast<float>(Scale.v[1]),
+                            static_cast<float>(Scale.v[2]));
 
+            // Validation checks
             if (!FMath::IsFinite(Location.X) || !FMath::IsFinite(Location.Y) || !FMath::IsFinite(Location.Z) ||
                 !FMath::IsFinite(ScaleVec.X) || !FMath::IsFinite(ScaleVec.Y) || !FMath::IsFinite(ScaleVec.Z) ||
                 !FMath::IsFinite(Quat.X) || !FMath::IsFinite(Quat.Y) || !FMath::IsFinite(Quat.Z) || !FMath::IsFinite(Quat.W))
             {
-                bTransformError = true;
-                break;
+                return;
             }
 
             if (Quat.SizeSquared() <= KINDA_SMALL_NUMBER)
-            {
-                bTransformError = true;
-                break;
-            }
+                return;
 
             Quat.Normalize();
             if (Quat.ContainsNaN())
-            {
-                bTransformError = true;
-                break;
-            }
+                return;
 
             BoneTransforms.Add(FTransform(Quat, Location, ScaleVec));
         }
 
-        if (bTransformError || BoneTransforms.Num() == 0)
-        {
-            return;  // Invalid transforms in current frame
-        }
+        if (BoneTransforms.Num() == 0)
+            return;
 
-        // PHASE 7 OPTIMIZATION: Use cached hashes instead of recomputing
-        // This eliminates ~99% of hash computations for stable skeletons (expected -8-12% CPU savings)
-        SkeletonHash = ExistingCache->SkeletonHash;
-        CurveHash = ExistingCache->CurveHash;
-        bSkeletonCacheHit = true;
-
-        // Still need to rebuild curves (they can change independently)
         BuildSubjectCurves(SubjectPtr, CurveNames, CurveValues);
-
-        // Check if curve structure changed (recompute curve hash)
-        const uint64 NewCurveHash = HashCurveNames(CurveNames);
-        if (NewCurveHash != CurveHash)
-        {
-            CurveHash = NewCurveHash;  // Curve changed, use new hash
-            bSkeletonCacheHit = false;  // Force static update
-        }
     }
     else
     {
-        // Skeleton changed or first time - rebuild everything
+        // Skeleton structure changed or first time - rebuild everything
         if (!BuildSubjectPose(SubjectPtr, BoneNames, BoneParents, BoneTransforms))
         {
             return;
@@ -934,24 +895,20 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
 
         BuildSubjectCurves(SubjectPtr, CurveNames, CurveValues);
 
-        // PHASE 7 OPTIMIZATION: Compute and cache hashes with skeleton
-        SkeletonHash = HashArray(BoneNames, &BoneParents);
-        CurveHash = HashCurveNames(CurveNames);
-
-        // Update cache with new skeleton data and computed hashes
+        // Cache the new skeleton structure
         FSubjectTransformCache& Cache = SubjectTransformCaches.FindOrAdd(SubjectFName);
         Cache.BoneNames = BoneNames;
         Cache.BoneParents = BoneParents;
-        Cache.BoneTransforms = BoneTransforms;
         Cache.SkeletonFingerprint = QuickSkeletonFingerprint;
-        Cache.SkeletonHash = SkeletonHash;  // PHASE 7: Cache the computed hashes
-        Cache.CurveHash = CurveHash;        // PHASE 7: Cache curve hash too
     }
 
     const FLiveLinkSubjectName SubjectName(SubjectFName);
     const FLiveLinkSubjectKey SubjectKey(SourceGuid, SubjectName);
 
-    // PHASE 7 OPTIMIZATION: Check hashes with cached values (already computed)
+    // Compute hashes for LiveLink update check
+    const uint64 SkeletonHash = HashArray(BoneNames, &BoneParents);
+    const uint64 CurveHash = HashCurveNames(CurveNames);
+
     const uint64* ExistingSkeletonHash = SubjectSkeletonHashes.Find(SubjectFName);
     const uint64* ExistingCurveHash = SubjectCurveHashes.Find(SubjectFName);
     const bool bNeedStaticUpdate = (!ExistingSkeletonHash || *ExistingSkeletonHash != SkeletonHash) || (!ExistingCurveHash || *ExistingCurveHash != CurveHash);
