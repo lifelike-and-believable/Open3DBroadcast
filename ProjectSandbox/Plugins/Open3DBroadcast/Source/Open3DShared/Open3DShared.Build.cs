@@ -116,6 +116,11 @@ internal static class O3DBuildFlags
     {
         Settings Flags = Get(Target);
 
+        // Several O3DS modules rely on third-party code (FlatBuffers, libdatachannel, nng)
+        // that uses standard C++ exceptions. Ensure /EHsc is enabled so try/catch blocks
+        // compile successfully (prevents C4530).
+        Rules.bEnableExceptions = true;
+
         Rules.PublicDefinitions.Add($"O3D_BUILD_SENDER={(Flags.BuildSender ? 1 : 0)}");
         Rules.PublicDefinitions.Add($"O3D_BUILD_RECEIVER={(Flags.BuildReceiver ? 1 : 0)}");
         Rules.PublicDefinitions.Add($"O3D_WITH_TRANSPORT_SOCKETS={(Flags.WithSockets ? 1 : 0)}");

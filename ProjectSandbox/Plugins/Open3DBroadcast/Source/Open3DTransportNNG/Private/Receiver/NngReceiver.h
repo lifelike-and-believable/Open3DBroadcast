@@ -61,4 +61,6 @@ private:
     double LastDialAttempt = 0.0;
     int32 BackoffAttempt = 0;
     double LastErrorLogTimestamp = 0.0;
+    constexpr static int32 FramesPerPoll = 16; // adjust to the polling budget you expect per tick
+    
 };

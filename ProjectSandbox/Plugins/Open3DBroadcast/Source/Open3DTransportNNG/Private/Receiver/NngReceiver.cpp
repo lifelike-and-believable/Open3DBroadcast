@@ -135,6 +135,24 @@ void FO3DNngReceiver::Stop()
     bConnected = false;
 }
 
+/**
+ * Polls the NNG socket for incoming messages and processes up to FO3DNngReceiver::FramesPerPoll frames.
+ *
+ * Behavior:
+ *  - Returns 0 immediately if the receiver is not running or if a required socket cannot be opened/dialed.
+ *  - Ensures a dial or listen socket depending on Options.bListen (calls EnsureDialSocket() or OpenSocket()).
+ *  - Receives messages using nng_recv with NNG_FLAG_NONBLOCK | NNG_FLAG_ALLOC.
+ *    - If nng_recv returns NNG_EAGAIN or NNG_ETIMEDOUT, the poll loop stops (no more messages).
+ *    - On other non-zero return values, HandleReceiveError(Ret) is called and the loop exits.
+ *  - Zero-length messages are freed and skipped.
+ *  - Messages exceeding MaxPayloadBytes are freed, counted as dropped (Stats.DroppedFrames++), and skipped.
+ *  - Valid messages are handed to ProcessReceivedPayload(...). The allocated buffer is freed with nng_free after processing.
+ *    - If ProcessReceivedPayload returns true: increment FramesProcessed, increment Stats.FramesReceived, add to Stats.BytesReceived.
+ *    - If it returns false: increment Stats.DroppedFrames.
+ *  - All updates to Stats are performed under StatsMutex (FScopeLock).
+ *
+ * @return Number of frames successfully processed during this poll.
+ */
 int32 FO3DNngReceiver::Poll()
 {
     if (!bRunning.Load())
@@ -164,7 +182,7 @@ int32 FO3DNngReceiver::Poll()
 
     int32 FramesProcessed = 0;
 
-    while (FramesProcessed < 16)
+    while (FramesProcessed < FO3DNngReceiver::FramesPerPoll)
     {
         void* Buffer = nullptr;
         size_t Size = 0;
@@ -203,11 +221,9 @@ int32 FO3DNngReceiver::Poll()
 
         if (bProcessed)
         {
-            {
-                FScopeLock Lock(&StatsMutex);
-                Stats.FramesReceived++;
-                Stats.BytesReceived += static_cast<int64>(Size);
-            }
+            FScopeLock Lock(&StatsMutex);
+            Stats.FramesReceived++;
+            Stats.BytesReceived += static_cast<int64>(Size);
             ++FramesProcessed;
         }
         else
@@ -251,6 +267,36 @@ void FO3DNngReceiver::HandlePipeRemoved()
     UE_LOG(LogO3DNngReceiver, Log, TEXT("NNG receiver pipe removed (count=%d)"), FMath::Max(0, Count));
 }
 
+/**
+ * OpenSocket
+ *
+ * Initialize and open an NNG socket based on the current Options and attach it to this receiver.
+ *
+ * Behavior:
+ * - Closes any prior socket before proceeding.
+ * - Allocates a new FNngSocketWrapper and attempts to open the appropriate NNG socket for Options.Mode:
+ *     - ENngMode::Sub  : open SUB socket and subscribe to Options.Topic (subscribe to all if Topic is empty).
+ *     - ENngMode::Pair : open PAIR socket.
+ *     - ENngMode::Pull : open PULL socket.
+ *     - Other modes     : log a warning, free the temporary socket and return false.
+ * - For listening endpoints (Options.bListen == true) calls nng_listen; otherwise calls nng_dial with NNG_FLAG_NONBLOCK.
+ * - On successful listen/dial sets bConnected accordingly.
+ * - On any open/configure failure logs a warning, deletes the temporary socket, sets Socket to nullptr, and if dialing
+ *   updates LastDialAttempt and increments BackoffAttempt.
+ * - On success resets PipeCount, registers pipe add/remove notifications (logs verbose if notify registration fails),
+ *   assigns the new socket to Socket and updates LastDialAttempt.
+ *
+ * Side effects / member modifications:
+ * - Socket            : set to the newly allocated FNngSocketWrapper on success, left/nullified on failure.
+ * - bConnected        : set to true if the listen/dial call succeeds.
+ * - LastDialAttempt   : set to current FPlatformTime::Seconds() on success and on dial failure.
+ * - BackoffAttempt    : incremented on dial failure when not listening.
+ * - PipeCount         : reset when socket opens successfully.
+ *
+ * Return:
+ * - true  if the socket was successfully created, configured and attached to this receiver.
+ * - false if any step failed or the mode is unsupported.
+ */
 bool FO3DNngReceiver::OpenSocket()
 {
     CloseSocket();
@@ -358,6 +404,19 @@ bool FO3DNngReceiver::OpenSocket()
     return true;
 }
 
+/**
+ * Closes and releases the internal NNG socket used by the receiver.
+ *
+ * If the Socket member is non-null, this function deletes the object and
+ * resets the Socket pointer to nullptr. Calling this method multiple times
+ * is safe; subsequent calls are no-ops.
+ *
+ * Note:
+ * - The function takes ownership of the pointer and ensures the socket's
+ *   resources are freed via deletion.
+ * - This operation is not inherently thread-safe; callers must ensure no
+ *   concurrent access to the Socket member when invoking CloseSocket.
+ */
 void FO3DNngReceiver::CloseSocket()
 {
     if (Socket)
