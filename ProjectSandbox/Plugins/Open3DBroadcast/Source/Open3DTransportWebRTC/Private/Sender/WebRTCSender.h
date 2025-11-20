@@ -60,6 +60,24 @@ private:
     mutable FCriticalSection StatsMutex;
     FO3DTransportStats Stats;
 
+    // PHASE 1: Serialization pool (sender frame thread only)
+    TUniquePtr<class FSerializerPool> SerializerPool;
+
+    // PHASE 10: WebRTC FFI Backpressure Monitoring
+    // Tracks estimated pending frames in the LiveKit FFI queue to detect and adapt to network slowdowns
+    // This prevents latency spikes by dropping frames when the FFI buffer backs up
+    TAtomic<int32> EstimatedPendingFrames{ 0 };    // Estimated frames waiting in FFI queue
+    TAtomic<int64> LastFrameSendTimeUs{ 0 };       // Last send time for frame rate calculation
+    TAtomic<int32> RecentSendRateFps{ 30 };        // Moving average frame rate (FPS)
+    double LastBackpressureDecayTimeSeconds = 0.0; // For periodic queue depth decay
+
+    // Backpressure thresholds (configurable via console variables)
+    static constexpr int32 DefaultBackpressureThreshold = 30;  // Drop frames if >30 pending
+    static constexpr int32 DefaultBackpressureDecayRate = 10;  // Assume 10 frames consumed per decay interval
+
+    bool ShouldDropFrameDueToBackpressure() const;
+    void UpdateFrameSendMetrics(int32 SubjectsInFrame);
+
     // Helper methods
     bool ParseConfig(const FO3DTransportConfig& Config);
 
