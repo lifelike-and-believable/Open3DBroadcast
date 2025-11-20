@@ -69,6 +69,7 @@ private:
     void EnsureValidTransportName();
 
     bool ParseSubjectListBuffer(const FString& Subject, const TArray<uint8>& Buffer);
+    bool TryPeekSubjectListTime(const TArray<uint8>& Buffer, double& OutTime);
     bool ShouldProcessFrame(double SubjectListTime, double NowSeconds);
     bool ShouldResetOrderingWindow(double NowSeconds, double SubjectListTime) const;
     double GetLastConnectionActive() const;
