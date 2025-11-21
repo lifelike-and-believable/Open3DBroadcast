@@ -57,6 +57,26 @@ struct FO3DNngReceiver::FNngSocketWrapper
     }
 };
 
+/**
+ * Initialize the NNG receiver from a transport configuration.
+ *
+ * Parses receiver-specific options and prepares internal state for operation.
+ *
+ * - Calls Stop() to ensure any previous receiver state is torn down.
+ * - Parses receiver options via O3DNNG::ParseReceiverOptions(Config, Options, Error).
+ *   On parse failure a warning is logged (UE_LOG) and the method returns false.
+ * - On success updates ActiveConfig from Config and overrides:
+ *     - ActiveConfig.Uri = Options.CanonicalUri
+ *     - ActiveConfig.StreamId = Options.StreamId
+ * - Copies audio settings into ActiveAudioConfig (audio stream label is derived from StreamId).
+ * - Resets runtime counters/state: Stats, PipeCount, BackoffAttempt, LastDialAttempt, LastErrorLogTimestamp.
+ * - Marks the receiver initialized (bInitialized = true).
+ *
+ * @param Config  Transport configuration to use for initialization.
+ * @return true if initialization succeeded; false if option parsing failed.
+ *
+ * Thread-safety: Not thread-safe. Caller must ensure no concurrent access to the receiver while initializing.
+ */
 bool FO3DNngReceiver::Initialize(const FO3DTransportConfig& Config)
 {
     Stop();
@@ -404,19 +424,6 @@ bool FO3DNngReceiver::OpenSocket()
     return true;
 }
 
-/**
- * Closes and releases the internal NNG socket used by the receiver.
- *
- * If the Socket member is non-null, this function deletes the object and
- * resets the Socket pointer to nullptr. Calling this method multiple times
- * is safe; subsequent calls are no-ops.
- *
- * Note:
- * - The function takes ownership of the pointer and ensures the socket's
- *   resources are freed via deletion.
- * - This operation is not inherently thread-safe; callers must ensure no
- *   concurrent access to the Socket member when invoking CloseSocket.
- */
 void FO3DNngReceiver::CloseSocket()
 {
     if (Socket)
