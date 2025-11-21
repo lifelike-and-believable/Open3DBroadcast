@@ -215,7 +215,7 @@ The implementation uses **Cloudflare's moq-rs** for standards-compliant IETF MoQ
 - **This is the production/internet-scale deployment model**
 - Use for real-world performance testing and validation
 - Enables truly distributed, global deployments
-- Relay URL: CloudFlare's experimental MoQ relay endpoint (TBD)
+- Relay URL: CloudFlare's experimental MoQ relay endpoint (relay.cloudflare.mediaoverquic.com)
 
 #### MoQ Roles (via moq-transport)
 
