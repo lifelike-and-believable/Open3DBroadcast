@@ -24,10 +24,24 @@ If either file is missing these settings, add them immediately.
 
 ---
 
-### 2. NEVER GUESS APIs - Always Read Header Files First
-**RULE:** Never assume API signatures, member names, or class structures. ALWAYS read the actual header files.
+### 2. **NEVER EVER GUESS - ALWAYS VERIFY WITH ACTUAL SOURCE CODE**
+**RULE:** **Nobody ever wants you to guess. Ever.** Never assume anything about APIs, behavior, architecture, or implementation details without verifying against actual source code or documentation.
 
-**Why:** Incorrect API usage causes compilation failures. Always check the source.
+**NEVER:**
+- Guess what an API does or how it works
+- Assume field values, member names, or method signatures
+- Speculate about architectural decisions or design patterns
+- Provide explanations without citing the actual source
+- Make assumptions about why code works a certain way
+
+**ALWAYS:**
+- Read the actual header files or source code
+- Check documentation for the specific version you're using
+- Provide evidence when explaining something
+- Say "I don't know" or "I can't find this information" rather than guess
+- Ask for clarification if you need more details
+
+**Why:** Guesses waste time, cause bugs, and undermine trust. The user will know if you're guessing.
 
 **Critical header files for this project:**
 1. **Open3DStream Data APIs**
