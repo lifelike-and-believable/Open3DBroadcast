@@ -3,7 +3,7 @@
 **Issue Type:** Feature Implementation  
 **Priority:** High  
 **Estimated Complexity:** Large (3-4 weeks)  
-**Dependencies:** msquic library (recommended), UE 5.6 build system  
+**Dependencies:** msquic library (recommended), UE 5.7 build system  
 **Target Platform:** Win64 (initially), architecturally ready for Linux/Mac
 
 ---
@@ -60,7 +60,7 @@ Implement a complete QUIC transport module (`Open3DTransportQUIC`) for the Open3
 
 ```
 Required:
-- Unreal Engine 5.6 (verified API compatibility)
+- Unreal Engine 5.7 (verified API compatibility)
 - msquic 2.3+ (latest stable)
 - OpenSSL (for TLS, may be bundled with msquic)
 - CMake (for building msquic if needed)
@@ -608,7 +608,7 @@ ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportQUIC/
 | TLS certificate complexity | High | Medium | Use test certs, document generation clearly |
 | QUIC datagram size limits | Low | Medium | Fallback to reliable stream, make threshold configurable |
 | Audio sync issues | Low | High | Use separate stream, reference WebRTC audio code |
-| UE API changes in 5.6 | Low | High | Verify all APIs against UE 5.6 docs before use |
+| UE API changes in 5.7 | Low | High | Verify all APIs against UE 5.7 docs before use |
 | Threading bugs | Medium | High | Follow NNG threading pattern exactly, extensive testing |
 
 ### Contingency Plans
@@ -688,7 +688,7 @@ ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportQUIC/
    - File: `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportSockets/`
    - Minimal TCP/UDP implementation
 
-### UE 5.6 API References
+### UE 5.7 API References
 
 **Verify these APIs before use:**
 - `FRunnableThread` - For async worker threads
@@ -783,7 +783,7 @@ This plan is structured to be executed step-by-step. Each phase builds on the pr
 **Before starting:**
 1. Read this entire document
 2. Study the existing NNG and WebRTC transport implementations
-3. Verify UE 5.6 API compatibility for all planned APIs
+3. Verify UE 5.7 API compatibility for all planned APIs
 4. Acquire msquic binaries or confirm build process
 
 **During implementation:**
