@@ -1042,6 +1042,8 @@ void FO3DReceiverSource::PushSubjectStaticData(const FLiveLinkSubjectKey& Subjec
     if (SubjectSettings)
     {
         SubjectSettings->Initialize(SubjectKey);
+        // CRITICAL: Set the role on the settings object so ValidateProcessors() won't clear preprocessors/interpolation/translators
+        SubjectSettings->Role = ULiveLinkAnimationRole::StaticClass();
     }
 
     FLiveLinkSubjectPreset Preset;
