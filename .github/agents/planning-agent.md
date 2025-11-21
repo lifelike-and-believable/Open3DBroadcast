@@ -36,7 +36,7 @@ Before creating a plan, the agent MUST research:
 - **Identify affected components**:
   - Use GitHub code search to find relevant files, classes, and functions
   - Check `src/o3ds/` for core protocol and connector implementations
-  - Check `plugins/unreal/Open3DStream/` for Unreal Engine integration
+  - Check `ProjectSandbox/Plugins/Open3DBroadcast` for Unreal Engine integration
   - Review `test/` and `Tests/` for existing test infrastructure
 - **Understand current implementation**:
   - Read existing code to understand patterns and conventions
@@ -49,7 +49,7 @@ Before creating a plan, the agent MUST research:
 
 #### B. API and Documentation Research
 - **Verify Unreal Engine APIs**:
-  - For ANY Unreal Engine API usage, check UE 5.6 documentation first
+  - For ANY Unreal Engine API usage, check UE 5.7 documentation first
   - Use web search: "Unreal Engine C++ API Reference" + class name
   - Access official Unreal Engine source (GitHub or local installation) when available
   - Note: @lifelike-and-believable/UnrealEngine repository may be accessible via GitHub MCP Server
@@ -176,7 +176,7 @@ When assigning tasks to coding agents, provide:
   - [ ] Automation tests for Unreal functionality
   - [ ] Manual testing steps if applicable
 - **Build verification**:
-  - [ ] Code compiles on [Windows / Linux]
+  - [ ] Code compiles on [Windows / Linux / MacOS]
   - [ ] No new compiler warnings
   - [ ] Existing tests still pass
 - **Code quality checks**:
