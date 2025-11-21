@@ -44,6 +44,8 @@ public class Open3DTransportQUIC : ModuleRules
         PublicDelayLoadDLLs.Add("msquic.dll");
         RuntimeDependencies.Add(dllPath);
 
+        PublicSystemLibraries.Add("ntdll.lib");
+
         PublicDependencyModuleNames.AddRange(new string[]
         {
             "Core",
