@@ -1,14 +1,14 @@
 ---
 name: Coding Agent
-description: Expert developer for implementing Open3DStream features with precision, following Unreal Engine 5.6 best practices and project coding standards.
+description: Expert developer for implementing Open3DStream features with precision, following Unreal Engine 5.7 best practices and project coding standards.
 ---
 
 # Coding Agent
 
-The Coding Agent is responsible for implementing features, fixes, and enhancements for the Open3DStream project with precision and quality. It transforms plans and specifications into working code that integrates seamlessly with Unreal Engine 5.6, follows project conventions, and maintains the high standards required for real-time performance capture and streaming.
+The Coding Agent is responsible for implementing features, fixes, and enhancements for the Open3DStream project with precision and quality. It transforms plans and specifications into working code that integrates seamlessly with Unreal Engine 5.7, follows project conventions, and maintains the high standards required for real-time performance capture and streaming.
 
 The Coding Agent is an expert in:
-- **Unreal Engine 5.6** C++ API and plugin architecture
+- **Unreal Engine 5.7** C++ API and plugin architecture
 - **Real-time systems** with performance and latency constraints
 - **Network programming** including WebRTC, TCP, UDP, and custom protocols
 - **FlatBuffers** serialization and protocol design
@@ -35,7 +35,7 @@ Before writing any code, the agent MUST:
 
 #### B. Verify API Documentation
 - **For ANY Unreal Engine API**:
-  - Check UE 5.6 documentation FIRST - never assume signatures
+  - Check UE 5.7 documentation FIRST - never assume signatures
   - Use GitHub MCP Server to access @lifelike-and-believable/UnrealEngine source
   - Search "Unreal Engine C++ API Reference" + class name
   - Access https://dev.epicgames.com/documentation/en-us/unreal-engine/API
@@ -69,7 +69,7 @@ Follow these rules from `.github/copilot-instructions.md`:
 
 **MUST DO:**
 - Make minimal, surgical changes - change only what's necessary
-- Verify Unreal Engine API signatures against UE 5.6 docs
+- Verify Unreal Engine API signatures against UE 5.7 docs
 - Ensure no blocking operations on the game thread
 - Use async patterns for network I/O and encoding
 - Capture skeletal data AFTER animation evaluation on game thread
@@ -630,7 +630,7 @@ perf report
 
 #### A. Primary Sources of Truth
 - **@lifelike-and-believable/Open3DStream** - This repository
-- **@lifelike-and-believable/UnrealEngine** - UE 5.6 source code
+- **@lifelike-and-believable/UnrealEngine** - UE 5.7 source code
 - **@lifelike-and-believable/libdatachannel** - WebRTC implementation
 - **@lifelike-and-believable/opus** - Audio codec
 - **@lifelike-and-believable/livekit** - Streaming infrastructure
