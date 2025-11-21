@@ -2,10 +2,70 @@
 
 #include "MoQ/MoQProtocol.h"
 #include "MoQ/MoQTrackManager.h"
+#include "Sender/QuicSender.h"
+#include "Shared/QuicHelpers.h"
+
+#include "O3DTransportTypes.h"
 
 #include "Misc/AutomationTest.h"
 
 using namespace O3DMoQ;
+
+#if WITH_DEV_AUTOMATION_TESTS
+class FMockQuicRelay : public O3DQuic::IQuicPublisherRelay
+{
+public:
+	int32 FanoutReturn = 1;
+	int32 LastPayloadBytes = 0;
+	int32 AnnounceCount = 0;
+
+	virtual bool Initialize(const O3DQuic::FQuicSenderOptions& Options, FString& OutError) override
+	{
+		(void)Options;
+		OutError.Reset();
+		return true;
+	}
+
+	virtual void Shutdown() override {}
+
+	virtual void UpdateTrackMetadata(O3DMoQ::FMoQTrackId TrackId, const TArray<uint8>& AnnouncePayload, const TArray<uint8>& UnannouncePayload) override
+	{
+		(void)TrackId;
+		(void)AnnouncePayload;
+		(void)UnannouncePayload;
+	}
+
+	virtual bool SendAnnounce(const TArray<uint8>& Payload) override
+	{
+		AnnounceCount++;
+		return Payload.Num() > 0;
+	}
+
+	virtual bool SendUnannounce(const TArray<uint8>& Payload) override
+	{
+		return Payload.Num() > 0;
+	}
+
+	virtual int32 FanoutObject(const TArray<uint8>& Payload, FString& OutError) override
+	{
+		LastPayloadBytes = Payload.Num();
+		if (FanoutReturn <= 0)
+		{
+			OutError = TEXT("Relay rejected payload");
+		}
+		else
+		{
+			OutError.Reset();
+		}
+		return FanoutReturn;
+	}
+
+	virtual bool HasActiveSubscribers() const override
+	{
+		return true;
+	}
+};
+#endif
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQAnnounceSerializationTest, "Open3DBroadcast.Open3DTransportQUIC.MoQ.Protocol.Announce", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FMoQAnnounceSerializationTest::RunTest(const FString& Parameters)
@@ -128,6 +188,117 @@ bool FMoQPatternMatchingTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Mismatch"), FMoQTrackManager::DoesPatternMatch(TEXT("mocap/session1/*"), TEXT("audio/session1/track")));
 	TestFalse(TEXT("Empty pattern"), FMoQTrackManager::DoesPatternMatch(TEXT(""), TEXT("anything")));
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuicSenderOptionsParseTest, "Open3DBroadcast.Open3DTransportQUIC.Helpers.SenderOptions", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FQuicSenderOptionsParseTest::RunTest(const FString& Parameters)
+{
+	FO3DTransportConfig Config;
+	Config.Uri = TEXT("quic://127.0.0.1:9100");
+	Config.StreamId = TEXT("mocap/session1/actorA");
+	Config.AdvancedParams.Add(TEXT("quic.track_name"), TEXT("mocap/session1/actorB"));
+	Config.AdvancedParams.Add(TEXT("quic.priority"), TEXT("180"));
+	Config.AdvancedParams.Add(TEXT("quic.reliability"), TEXT("unreliable"));
+	Config.AdvancedParams.Add(TEXT("quic.datagrams"), TEXT("0"));
+
+	O3DQuic::FQuicSenderOptions Options;
+	FString Error;
+	TestTrue(TEXT("ParseSenderOptions succeeds"), O3DQuic::ParseSenderOptions(Config, Options, Error));
+	TestTrue(TEXT("No error on parse"), Error.IsEmpty());
+	TestEqual(TEXT("Endpoint host"), Options.Endpoint.Host, FString(TEXT("127.0.0.1")));
+	TestEqual(TEXT("Endpoint port"), Options.Endpoint.Port, static_cast<uint16>(9100));
+	TestEqual(TEXT("Track name"), Options.TrackName, FString(TEXT("mocap/session1/actorB")));
+	TestEqual(TEXT("Priority"), Options.TrackProperties.Priority, static_cast<uint8>(180));
+	TestTrue(TEXT("Reliability mode"), Options.TrackProperties.Reliability == EMoQReliabilityMode::UnreliableSequenced);
+	TestFalse(TEXT("Datagrams disabled"), Options.bEnableDatagrams);
+	TestEqual(TEXT("Stream id"), Options.StreamId, FString(TEXT("127.0.0.1:9100")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuicSenderOptionsInvalidTrackTest, "Open3DBroadcast.Open3DTransportQUIC.Helpers.SenderOptionsInvalid", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FQuicSenderOptionsInvalidTrackTest::RunTest(const FString& Parameters)
+{
+	FO3DTransportConfig Config;
+	Config.AdvancedParams.Add(TEXT("quic.track_name"), TEXT("invalid track"));
+
+	O3DQuic::FQuicSenderOptions Options;
+	FString Error;
+	TestFalse(TEXT("Invalid track fails"), O3DQuic::ParseSenderOptions(Config, Options, Error));
+	TestTrue(TEXT("Error populated"), !Error.IsEmpty());
+
+	return true;
+}
+
+#if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuicSenderStatsFanoutTest, "Open3DBroadcast.Open3DTransportQUIC.Sender.StatsFanout", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FQuicSenderStatsFanoutTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	FO3DQuicSender Sender;
+	FO3DTransportConfig Config;
+	Config.Uri = TEXT("quic://127.0.0.1:4700");
+	Config.Transport = TEXT("QUIC");
+	TestTrue(TEXT("Sender initialized"), Sender.Initialize(Config));
+
+	TSharedPtr<FMockQuicRelay, ESPMode::ThreadSafe> Relay = MakeShared<FMockQuicRelay, ESPMode::ThreadSafe>();
+	Relay->FanoutReturn = 2;
+	Sender.SetRelayForTesting(Relay);
+
+	TArray<uint8> Payload;
+	Payload.Init(0x5A, 32);
+	TestTrue(TEXT("Frame enqueued"), Sender.EnqueueFrameForTesting(Payload, 1000));
+	TestTrue(TEXT("Frame processed"), Sender.ProcessSingleFrameForTesting());
+
+	FO3DTransportStats Stats = Sender.GetStats();
+	TestEqual(TEXT("FramesSent counted once"), Stats.FramesSent, static_cast<int64>(1));
+	TestEqual(TEXT("BytesSent matches relay payload"), Stats.BytesSent, static_cast<int64>(Relay->LastPayloadBytes));
+	TestEqual(TEXT("DroppedFrames stays zero"), Stats.DroppedFrames, static_cast<int64>(0));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuicSenderStatsDropTest, "Open3DBroadcast.Open3DTransportQUIC.Sender.StatsDrop", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FQuicSenderStatsDropTest::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	FO3DQuicSender Sender;
+	FO3DTransportConfig Config;
+	Config.Uri = TEXT("quic://127.0.0.1:4700");
+	Config.Transport = TEXT("QUIC");
+	TestTrue(TEXT("Sender initialized"), Sender.Initialize(Config));
+
+	TSharedPtr<FMockQuicRelay, ESPMode::ThreadSafe> Relay = MakeShared<FMockQuicRelay, ESPMode::ThreadSafe>();
+	Relay->FanoutReturn = 0;
+	Sender.SetRelayForTesting(Relay);
+
+	TArray<uint8> Payload;
+	Payload.Init(0x11, 24);
+	TestTrue(TEXT("Frame enqueued"), Sender.EnqueueFrameForTesting(Payload, 2000));
+	TestTrue(TEXT("Frame processed"), Sender.ProcessSingleFrameForTesting());
+
+	FO3DTransportStats Stats = Sender.GetStats();
+	TestEqual(TEXT("FramesSent remains zero"), Stats.FramesSent, static_cast<int64>(0));
+	TestEqual(TEXT("DroppedFrames increments"), Stats.DroppedFrames, static_cast<int64>(1));
+
+	return true;
+}
+#endif
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuicSenderOptionsDefaultsTest, "Open3DBroadcast.Open3DTransportQUIC.Helpers.SenderOptionsDefaults", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FQuicSenderOptionsDefaultsTest::RunTest(const FString& Parameters)
+{
+	FO3DTransportConfig Config;
+	O3DQuic::FQuicSenderOptions Options;
+	FString Error;
+	TestTrue(TEXT("ParseSenderOptions applies defaults"), O3DQuic::ParseSenderOptions(Config, Options, Error));
+	TestTrue(TEXT("No error for defaults"), Error.IsEmpty());
+	TestEqual(TEXT("Default host"), Options.Endpoint.Host, FString(TEXT("0.0.0.0")));
+	TestEqual(TEXT("Default port"), Options.Endpoint.Port, O3DQuic::DefaultQuicPort);
+	TestEqual(TEXT("Default track name"), Options.TrackName, FString(O3DQuic::DefaultTrackName));
+	TestEqual(TEXT("Default stream id"), Options.StreamId, FString::Printf(TEXT("%s:%u"), TEXT("0.0.0.0"), O3DQuic::DefaultQuicPort));
+	const FString Description = Options.Describe();
+	TestTrue(TEXT("Describe contains track"), Description.Contains(Options.TrackName));
 	return true;
 }
 

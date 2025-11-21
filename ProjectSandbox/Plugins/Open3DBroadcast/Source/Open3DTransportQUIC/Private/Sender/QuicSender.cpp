@@ -1,6 +1,6 @@
 // Copyright (c) Open3DStream Contributors
 
-#include "Sender/QuicSender.h"
+#include "QuicSender.h"
 
 #include "Open3DTransportQUICLog.h"
 
