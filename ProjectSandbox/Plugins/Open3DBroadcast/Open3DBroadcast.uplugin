@@ -52,6 +52,11 @@
 			"Name": "Open3DTransportWebRTC",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "Open3DTransportQUIC",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	]
 }

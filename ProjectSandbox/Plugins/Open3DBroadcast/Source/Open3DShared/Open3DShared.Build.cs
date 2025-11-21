@@ -48,6 +48,7 @@ internal static class O3DBuildFlags
         public bool WithSockets = true;
         public bool WithNNG = true;
         public bool WithWebRTC = true;
+        public bool WithQuic = true;
         public bool WebRtcBackendLiveKit = true;
         public bool WebRtcBackendLibDc = true;
         public bool EnableLegacy = false;
@@ -72,6 +73,7 @@ internal static class O3DBuildFlags
             Result.WithSockets = ReadBool("O3D_WITH_TRANSPORT_SOCKETS", Result.WithSockets);
             Result.WithNNG = ReadBool("O3D_WITH_TRANSPORT_NNG", Result.WithNNG);
             Result.WithWebRTC = ReadBool("O3D_WITH_TRANSPORT_WEBRTC", Result.WithWebRTC);
+            Result.WithQuic = ReadBool("O3D_WITH_TRANSPORT_QUIC", Result.WithQuic);
             Result.WebRtcBackendLiveKit = ReadBool("O3D_WEBRTC_BACKEND_LIVEKIT", Result.WebRtcBackendLiveKit);
             Result.WebRtcBackendLibDc = ReadBool("O3D_WEBRTC_BACKEND_LIBDC", Result.WebRtcBackendLibDc);
             Result.EnableLegacy = ReadBool("O3D_ENABLE_LEGACY", Result.EnableLegacy);
@@ -126,6 +128,7 @@ internal static class O3DBuildFlags
         Rules.PublicDefinitions.Add($"O3D_WITH_TRANSPORT_SOCKETS={(Flags.WithSockets ? 1 : 0)}");
         Rules.PublicDefinitions.Add($"O3D_WITH_TRANSPORT_NNG={(Flags.WithNNG ? 1 : 0)}");
         Rules.PublicDefinitions.Add($"O3D_WITH_TRANSPORT_WEBRTC={(Flags.WithWebRTC ? 1 : 0)}");
+        Rules.PublicDefinitions.Add($"O3D_WITH_TRANSPORT_QUIC={(Flags.WithQuic ? 1 : 0)}");
         Rules.PublicDefinitions.Add($"O3D_WEBRTC_BACKEND_LIVEKIT={(Flags.WebRtcBackendLiveKit ? 1 : 0)}");
         Rules.PublicDefinitions.Add($"O3D_WEBRTC_BACKEND_LIBDC={(Flags.WebRtcBackendLibDc ? 1 : 0)}");
         Rules.PublicDefinitions.Add($"O3D_ENABLE_LEGACY={(Flags.EnableLegacy ? 1 : 0)}");
@@ -146,6 +149,7 @@ internal static class O3DBuildFlags
     public static bool IsSocketsEnabled(ReadOnlyTargetRules Target) => Get(Target).WithSockets;
     public static bool IsNNGEnabled(ReadOnlyTargetRules Target) => Get(Target).WithNNG;
     public static bool IsWebRtcEnabled(ReadOnlyTargetRules Target) => Get(Target).WithWebRTC;
+    public static bool IsQuicEnabled(ReadOnlyTargetRules Target) => Get(Target).WithQuic;
     public static bool IsLegacyEnabled(ReadOnlyTargetRules Target) => Get(Target).EnableLegacy;
 }
 
