@@ -51,7 +51,8 @@ Before creating a plan, the agent MUST research:
 - **Verify Unreal Engine APIs**:
   - For ANY Unreal Engine API usage, check UE 5.6 documentation first
   - Use web search: "Unreal Engine C++ API Reference" + class name
-  - Access @lifelike-and-believable/UnrealEngine repository when available
+  - Access official Unreal Engine source (GitHub or local installation) when available
+  - Note: @lifelike-and-believable/UnrealEngine repository may be accessible via GitHub MCP Server
   - NEVER assume API signatures - always verify
 - **Review protocol specifications**:
   - `src/o3ds.fbs` - FlatBuffers schema (authoritative source)
