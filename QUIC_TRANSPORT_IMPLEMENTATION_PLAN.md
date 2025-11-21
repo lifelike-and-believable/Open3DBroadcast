@@ -10,16 +10,17 @@
 
 ## Executive Summary
 
-Implement a complete QUIC transport module (`Open3DTransportQUIC`) for the Open3DBroadcast plugin, following the established architectural patterns from existing transports (NNG, WebRTC, Sockets, Loopback). QUIC provides modern connection-oriented transport with multiplexing, low latency, and built-in encryption, filling a gap between basic TCP/UDP and heavyweight WebRTC solutions.
+Implement a complete QUIC transport module (`Open3DTransportQUIC`) for the Open3DBroadcast plugin, following the established architectural patterns from existing transports (NNG, WebRTC, Sockets, Loopback). The implementation uses **MoQ (Media over QUIC) pub/sub semantics** to enable N:M deployments with named track subscription, mirroring NNG's flexible messaging patterns while leveraging QUIC's modern features: multiplexing, low latency, built-in encryption, and connection migration.
 
 ### Key Objectives
 
 1. **Complete interface compliance** with `IOpen3DSender` and `IOpen3DReceiver`
-2. **Full audio support** using O3DAudio framework (PCM16/Opus)
-3. **Editor UI customization** for host/port/stream configuration
-4. **Comprehensive testing** with UE automation tests
-5. **Production-ready documentation** (README, USER_GUIDE, IMPLEMENTATION_SUMMARY)
-6. **Platform support**: Win64 first, Linux/Mac architectural support
+2. **MoQ pub/sub semantics** for N:M deployments with track-based subscription
+3. **Full audio support** using O3DAudio framework (PCM16/Opus)
+4. **Editor UI customization** for host/port/track configuration
+5. **Comprehensive testing** with UE automation tests (17+ tests)
+6. **Production-ready documentation** (README, USER_GUIDE, IMPLEMENTATION_SUMMARY)
+7. **Platform support**: Win64 first, Linux/Mac architectural support
 
 ---
 
@@ -87,31 +88,86 @@ Result.WithQUIC = ReadBool("O3D_WITH_TRANSPORT_QUIC", Result.WithQUIC);
 
 ### Design Principles
 
-1. **Modular isolation**: Self-contained module with no changes to core Open3D* modules
-2. **Interface compliance**: 100% parity with IOpen3DSender/IOpen3DReceiver contracts
-3. **Threading model**: Async I/O with dedicated worker threads (following NNG pattern)
-4. **Stream multiplexing**: Separate QUIC streams for mocap data and audio
-5. **Backpressure handling**: Queue-based buffering with overflow detection
-6. **Connection management**: Auto-reconnect with exponential backoff
+1. **MoQ pub/sub semantics**: Named track subscription enabling N:M deployments (production mode)
+2. **Dual deployment modes**: 
+   - **Client-Server mode**: Direct QUIC connections for local testing and development
+   - **Relay mode**: MoQ relay for production N:M pub/sub deployments
+3. **Modular isolation**: Self-contained module with no changes to core Open3D* modules
+4. **Interface compliance**: 100% parity with IOpen3DSender/IOpen3DReceiver contracts
+5. **Threading model**: Async I/O with dedicated worker threads (following NNG pattern)
+6. **Stream multiplexing**: Separate QUIC streams for control, mocap data, and audio
+7. **Backpressure handling**: Queue-based buffering with overflow detection
+8. **Connection management**: Auto-reconnect with exponential backoff
 
-### QUIC Stream Strategy
+### MoQ Pub/Sub Architecture
 
-**Stream 0: Control Channel**
+The implementation follows **Media over QUIC (MoQ)** concepts for track-based pub/sub:
+
+#### Deployment Modes
+
+**1. Client-Server Mode (Local Testing)**
+- Direct QUIC connection between sender and receiver
+- Single publisher → single subscriber (1:1)
+- Used for local network testing and development
+- No relay required
+- Simpler configuration and debugging
+
+**2. Relay Mode (Production)**
+- Publishers and subscribers connect to centralized MoQ relay
+- Multiple publishers and subscribers (N:M)
+- Track-based routing via relay
+- **This is the production deployment model**
+- Enables scalable, distributed deployments
+- Future migration path to CloudFlare enterprise relay
+
+#### MoQ Roles
+
+**Publisher Role (Sender)**:
+- Announces available tracks (e.g., "mocap/character1", "audio/character1")
+- Publishes objects (individual frames) to subscribed tracks
+- In relay mode: connects to relay and announces tracks
+- In client-server mode: accepts direct subscriber connections
+
+**Subscriber Role (Receiver)**:
+- Discovers available tracks via control channel
+- Subscribes to tracks by name pattern
+- Receives objects for subscribed tracks only
+- Supports multiple simultaneous subscriptions
+- In relay mode: connects to relay and subscribes to tracks
+- In client-server mode: connects directly to publisher
+
+#### Track Naming Convention
+```
+<namespace>/<identifier>/<subtrack>
+Examples:
+  - "mocap/session1/character1"  (skeletal animation)
+  - "audio/session1/character1"  (audio stream)
+  - "mocap/session1/*"           (all characters in session - wildcard subscription)
+```
+
+### QUIC Stream Strategy with MoQ Semantics
+
+**Stream 0: Control Channel (MoQ Control)**
 - Bidirectional, reliable
-- Connection handshake and metadata exchange
-- Protocol version negotiation
+- ANNOUNCE messages (publisher → subscriber)
+- SUBSCRIBE/UNSUBSCRIBE messages (subscriber → publisher)
+- Track metadata exchange
+- Connection health monitoring
 
-**Stream 1: Mocap Data (Primary)**
-- Unidirectional, unreliable with QUIC datagrams (for low latency)
+**Streams 1-N: Mocap Data Tracks (MoQ Objects)**
+- Unidirectional, unreliable via QUIC datagrams (for low latency)
+- Each track can use separate stream or shared datagram channel
+- Object sequence numbers for loss detection
 - Fallback to reliable ordered stream if datagram size exceeded
-- Similar to WebRTC's unreliable datachannel with reliable fallback
+- Per-track priority levels
 
-**Stream 2: Audio Data**
+**Streams N+1 onwards: Audio Data Tracks**
 - Unidirectional, reliable ordered
 - PCM16 or Opus encoded frames
-- Separate from mocap to prevent head-of-line blocking
+- Separate streams per audio track
+- Higher priority than mocap to prevent starvation
 
-### Component Diagram
+### Component Diagram with MoQ Pub/Sub
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -120,31 +176,44 @@ Result.WithQUIC = ReadBool("O3D_WITH_TRANSPORT_QUIC", Result.WithQUIC);
 │                                                                   │
 │  ┌──────────────────┐              ┌──────────────────┐         │
 │  │  FO3DQuicSender  │              │ FO3DQuicReceiver │         │
+│  │  (Publisher)     │              │  (Subscriber)    │         │
 │  │                  │              │                  │         │
 │  │ - Initialize()   │              │ - Initialize()   │         │
 │  │ - Start()        │              │ - Start()        │         │
 │  │ - Stop()         │              │ - Stop()         │         │
-│  │ - Send()         │              │ - Poll()         │         │
-│  │ - Tick()         │              │ - SetConsumer()  │         │
+│  │ - Send()         │◄────MoQ─────►│ - Poll()         │         │
+│  │ - Tick()         │   Objects    │ - SetConsumer()  │         │
 │  │ - CreateAudio    │              │ - SetAudioSink() │         │
 │  │   Sink()         │              │                  │         │
 │  └────────┬─────────┘              └────────┬─────────┘         │
 │           │                                 │                    │
-│           └────────┬────────────────────────┘                    │
-│                    │                                             │
-│         ┌──────────▼──────────┐                                 │
-│         │  FQuicConnection    │                                 │
-│         │  (Wrapper)          │                                 │
-│         │                     │                                 │
-│         │ - QUIC_HANDLE       │                                 │
-│         │ - Stream Management │                                 │
-│         │ - Event Callbacks   │                                 │
-│         └──────────┬──────────┘                                 │
-│                    │                                             │
-│         ┌──────────▼──────────┐                                 │
-│         │   msquic Library    │                                 │
-│         │   (ThirdParty/)     │                                 │
-│         └─────────────────────┘                                 │
+│           │    ┌────────────────────────────┘                    │
+│           │    │                                                 │
+│  ┌────────▼────▼─────────────────────────┐                      │
+│  │    FMoQTrackManager                   │                      │
+│  │    (MoQ Pub/Sub Layer)                │                      │
+│  │                                        │                      │
+│  │  - PublishTrack(name, priority)       │                      │
+│  │  - SubscribeTrack(name, callback)     │                      │
+│  │  - PublishObject(track, data, seq)    │                      │
+│  │  - HandleControlMessages()            │                      │
+│  │  - Track metadata management          │                      │
+│  └────────────────┬───────────────────────┘                      │
+│                   │                                              │
+│         ┌─────────▼──────────┐                                  │
+│         │  FQuicConnection   │                                  │
+│         │  (QUIC Wrapper)    │                                  │
+│         │                    │                                  │
+│         │ - QUIC_HANDLE      │                                  │
+│         │ - Stream Muxing    │                                  │
+│         │ - Event Callbacks  │                                  │
+│         │ - Datagram Support │                                  │
+│         └─────────┬──────────┘                                  │
+│                   │                                              │
+│         ┌─────────▼──────────┐                                  │
+│         │   msquic Library   │                                  │
+│         │   (ThirdParty/)    │                                  │
+│         └────────────────────┘                                  │
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────┐       │
 │  │           Editor UI Customization                     │       │
@@ -153,6 +222,41 @@ Result.WithQUIC = ReadBool("O3D_WITH_TRANSPORT_QUIC", Result.WithQUIC);
 │  └──────────────────────────────────────────────────────┘       │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+### Lightweight MoQ Relay Architecture
+
+The lightweight relay is an **interim solution** for N:M deployments with a clear migration path to CloudFlare's enterprise MoQ relay.
+
+**Relay Responsibilities:**
+1. **Track Directory**: Maintain mapping of track names to publisher connections
+2. **Subscription Management**: Route SUBSCRIBE messages to appropriate publishers
+3. **Object Forwarding**: Fan out objects from publishers to all subscribed receivers
+4. **Connection Management**: Handle publisher and subscriber lifecycle
+5. **Stats and Monitoring**: Track active tracks, subscriber counts, throughput
+
+**Relay Deployment Diagram:**
+```
+┌──────────────┐         ┌──────────────┐         ┌──────────────┐
+│  Publisher 1 │────────►│              │◄────────│ Subscriber 1 │
+│ (UE Sender)  │ ANNOUNCE│  Lightweight │SUBSCRIBE│ (UE Receiver)│
+└──────────────┘  +      │  MoQ Relay   │    +    └──────────────┘
+                OBJECTS  │              │ OBJECTS
+┌──────────────┐         │   (Server)   │         ┌──────────────┐
+│  Publisher 2 │────────►│              │◄────────│ Subscriber 2 │
+│ (UE Sender)  │         │  - Track Dir │         │ (UE Receiver)│
+└──────────────┘         │  - Fanout    │         └──────────────┘
+                         │  - Stats     │
+                         └──────────────┘         ┌──────────────┐
+                                  ▲               │ Subscriber 3 │
+                                  └───────────────┤ (UE Receiver)│
+                                                  └──────────────┘
+```
+
+**Migration to CloudFlare MoQ:**
+- **Phase 1**: Use lightweight relay for initial production deployments
+- **Phase 2**: Test CloudFlare MoQ relay compatibility
+- **Phase 3**: Migrate to CloudFlare for enterprise-scale (100+ publishers/subscribers)
+- **Key**: MoQ protocol compatibility ensures smooth migration
 
 ---
 
@@ -169,132 +273,210 @@ Result.WithQUIC = ReadBool("O3D_WITH_TRANSPORT_QUIC", Result.WithQUIC);
 - [ ] 0.5: Verify clean compile with empty module stub
 - [ ] 0.6: Document msquic version and build configuration
 
-### Phase 1: Core Sender Implementation (5-7 days)
-**Goal:** Working sender that can establish QUIC connections and send mocap data
+### Phase 1: MoQ Protocol Layer (6-8 days)
+**Goal:** Implement MoQ pub/sub semantics for track-based communication
 
 **Tasks:**
-- [ ] 1.1: Implement FQuicConnection wrapper class
-- [ ] 1.2: Implement FO3DQuicSender skeleton
-- [ ] 1.3: Implement connection establishment
-- [ ] 1.4: Implement Send() method
-- [ ] 1.5: Implement async send worker thread (following NNG pattern)
-- [ ] 1.6: Implement Tick() and Stop()
+- [ ] 1.1: Create MoQProtocol.h with message type definitions
+- [ ] 1.2: Define MoQ control messages (ANNOUNCE, SUBSCRIBE, UNSUBSCRIBE, SUBSCRIBE_OK, SUBSCRIBE_ERROR)
+- [ ] 1.3: Define MoQ object message format (track_id, sequence, priority, payload)
+- [ ] 1.4: Implement control message serialization/deserialization
+- [ ] 1.5: Implement object message serialization/deserialization
+- [ ] 1.6: Create FMoQTrackManager class for track state management
+- [ ] 1.7: Implement PublishTrack() - announce track to subscribers
+- [ ] 1.8: Implement SubscribeTrack() - request subscription to track
+- [ ] 1.9: Implement track name pattern matching (e.g., "mocap/session1/*")
+- [ ] 1.10: Implement track priority and reliability mode settings
+- [ ] 1.11: Add track subscription state machine (PENDING, ACTIVE, ERROR, CLOSED)
 
-### Phase 2: Core Receiver Implementation (4-6 days)
-**Goal:** Working receiver that can accept connections and receive mocap data
-
-**Tasks:**
-- [ ] 2.1: Implement FO3DQuicReceiver skeleton
-- [ ] 2.2: Implement connection acceptance (server mode)
-- [ ] 2.3: Implement Poll() method
-- [ ] 2.4: Implement reconnection logic
-- [ ] 2.5: Implement latency tracking
-
-### Phase 3: Audio Support (4-6 days)
-**Goal:** Full audio transmission capability for both sender and receiver
+### Phase 2: Core Sender Implementation with MoQ Publisher (6-8 days)
+**Goal:** Working sender that publishes tracks and sends objects to subscribers
 
 **Tasks:**
-- [ ] 3.1: Implement FO3DQuicSenderAudioSink
-- [ ] 3.2: Implement CreateAudioSink() factory
-- [ ] 3.3: Implement receiver audio delivery
-- [ ] 3.4: Implement SetAudioSink() on receiver
-- [ ] 3.5: Audio error handling
+- [ ] 2.1: Implement FQuicConnection wrapper class
+- [ ] 2.2: Implement FO3DQuicSender skeleton with IOpen3DSender interface
+- [ ] 2.3: Integrate FMoQTrackManager into sender
+- [ ] 2.4: Implement connection establishment (server mode for publishers)
+- [ ] 2.5: Implement control stream (Stream 0) for MoQ messages
+- [ ] 2.6: Implement track announcement on connection (ANNOUNCE messages)
+- [ ] 2.7: Implement SUBSCRIBE message handling - add client to track subscribers
+- [ ] 2.8: Implement Send() method - publish object to mocap track
+- [ ] 2.9: Implement async send worker thread (following NNG pattern)
+- [ ] 2.10: Implement multi-subscriber fanout for published objects
+- [ ] 2.11: Implement Tick() for track health monitoring and subscriber management
+- [ ] 2.12: Implement Stop() with graceful UNANNOUNCE messages
 
-### Phase 4: Configuration & Options (3-4 days)
-**Goal:** Flexible configuration parsing matching existing transports
-
-**Tasks:**
-- [ ] 4.1: Define configuration keys in QuicHelpers.h
-- [ ] 4.2: Implement ParseSenderOptions() in QuicHelpers.cpp
-- [ ] 4.3: Implement ParseReceiverOptions() in QuicHelpers.cpp
-- [ ] 4.4: Implement MakeStreamId()
-
-### Phase 5: Editor UI Customization (3-4 days)
-**Goal:** User-friendly Slate widgets for sender and receiver configuration
+### Phase 3: Core Receiver Implementation with MoQ Subscriber (5-7 days)
+**Goal:** Working receiver that subscribes to tracks and receives objects
 
 **Tasks:**
-- [ ] 5.1: Implement SQuicSenderSettingsPanel (Slate widget)
-- [ ] 5.2: Implement SQuicReceiverSettingsPanel (Slate widget)
-- [ ] 5.3: Register UI customizations in module startup
-- [ ] 5.4: Test UI in Unreal Editor
+- [ ] 3.1: Implement FO3DQuicReceiver skeleton with IOpen3DReceiver interface
+- [ ] 3.2: Integrate FMoQTrackManager into receiver
+- [ ] 3.3: Implement connection establishment (client mode for subscribers)
+- [ ] 3.4: Implement control stream handling for MoQ messages
+- [ ] 3.5: Implement ANNOUNCE message handling - discover available tracks
+- [ ] 3.6: Implement track subscription (SUBSCRIBE messages for configured tracks)
+- [ ] 3.7: Implement SUBSCRIBE_OK/ERROR message handling
+- [ ] 3.8: Implement OBJECT message reception and queuing
+- [ ] 3.9: Implement Poll() method - dequeue objects from subscribed tracks
+- [ ] 3.10: Implement automatic resubscription on reconnect
+- [ ] 3.11: Implement latency tracking per track
+- [ ] 3.12: Implement Stop() with UNSUBSCRIBE messages
 
-### Phase 6: Module Registration & Integration (2-3 days)
+### Phase 4: Audio Support with MoQ Audio Tracks (4-6 days)
+**Goal:** Full audio transmission capability using separate MoQ audio tracks
+
+**Tasks:**
+- [ ] 4.1: Implement FO3DQuicSenderAudioSink
+- [ ] 4.2: Implement CreateAudioSink() factory
+- [ ] 4.3: Auto-announce audio track on CreateAudioSink() (e.g., "audio/session1/character1")
+- [ ] 4.4: Publish audio objects to audio track via MoQTrackManager
+- [ ] 4.5: Implement receiver audio track subscription
+- [ ] 4.6: Implement receiver audio delivery via SetAudioSink()
+- [ ] 4.7: Audio error handling and track state management
+
+### Phase 5: Lightweight MoQ Relay Implementation (5-7 days)
+**Goal:** Standalone relay for N:M deployments before CloudFlare enterprise relay
+
+**Tasks:**
+- [ ] 5.1: Create standalone MoQ relay project/module
+- [ ] 5.2: Implement relay connection acceptance (both publishers and subscribers)
+- [ ] 5.3: Implement track directory - map track names to publishers
+- [ ] 5.4: Implement ANNOUNCE message forwarding - add track to directory
+- [ ] 5.5: Implement SUBSCRIBE message routing - connect subscriber to publisher's track
+- [ ] 5.6: Implement object forwarding - relay objects from publisher to subscribers
+- [ ] 5.7: Implement multi-subscriber fanout for each track
+- [ ] 5.8: Implement connection health monitoring and cleanup
+- [ ] 5.9: Implement relay configuration (listen address, port, max connections)
+- [ ] 5.10: Add relay stats and monitoring (active tracks, subscribers per track, throughput)
+- [ ] 5.11: Document relay deployment and configuration
+- [ ] 5.12: Test relay with multiple publishers and subscribers
+
+### Phase 6: Configuration & Options with Track Names (3-4 days)
+**Goal:** Flexible configuration parsing with MoQ track naming support
+
+**Tasks:**
+- [ ] 6.1: Define configuration keys in QuicHelpers.h (host, port, track_name, relay_mode)
+- [ ] 6.2: Implement ParseSenderOptions() with track name parsing
+- [ ] 6.3: Implement ParseReceiverOptions() with track name pattern support
+- [ ] 6.4: Implement MakeStreamId() using track names
+- [ ] 6.5: Add relay configuration options (relay_url, relay_port)
+
+### Phase 7: Editor UI Customization with Track Selection (3-4 days)
+**Goal:** User-friendly Slate widgets with track name configuration and mode selection
+
+**Tasks:**
+- [ ] 7.1: Implement SQuicSenderSettingsPanel with track name input
+- [ ] 7.2: Implement SQuicReceiverSettingsPanel with track name pattern input
+- [ ] 7.3: Add deployment mode selector (Client-Server for testing, Relay for production)
+- [ ] 7.4: Add relay address configuration fields (only shown in relay mode)
+- [ ] 7.5: Add warning/info text explaining mode usage (client-server = local testing, relay = production)
+- [ ] 7.6: Register UI customizations in module startup
+- [ ] 7.7: Test UI in Unreal Editor for both modes
+
+### Phase 8: Module Registration & Integration (2-3 days)
 **Goal:** Plugin discovers and uses QUIC transport automatically
 
 **Tasks:**
-- [ ] 6.1: Implement Open3DTransportQUICModule.cpp
-- [ ] 6.2: Register transport factories
-- [ ] 6.3: Register customizations
-- [ ] 6.4: Update Open3DBroadcast.uplugin
-- [ ] 6.5: Verify plugin loads
+- [ ] 8.1: Implement Open3DTransportQUICModule.cpp
+- [ ] 8.2: Register transport factories
+- [ ] 8.3: Register customizations
+- [ ] 8.4: Update Open3DBroadcast.uplugin
+- [ ] 8.5: Verify plugin loads
 
-### Phase 7: Automated Testing (4-5 days)
-**Goal:** Comprehensive test coverage following UE automation test pattern
-
-**Tasks:**
-- [ ] 7.1: Create QuicTransportTests.cpp
-- [ ] 7.2: Implement initialization tests (3 tests)
-- [ ] 7.3: Implement connection tests (4 tests)
-- [ ] 7.4: Implement data transfer tests (3 tests)
-- [ ] 7.5: Implement audio tests (3 tests)
-- [ ] 7.6: Implement state management tests (2 tests)
-- [ ] 7.7: Implement error/edge case tests (2 tests)
-- [ ] 7.8: Platform-specific tests
-
-### Phase 8: Documentation (3-4 days)
-**Goal:** Production-quality user and developer documentation
+### Phase 9: Automated Testing with MoQ Scenarios (5-7 days)
+**Goal:** Comprehensive test coverage including both client-server and relay modes
 
 **Tasks:**
-- [ ] 8.1: Create README.md
-- [ ] 8.2: Create USER_GUIDE.md
-- [ ] 8.3: Create IMPLEMENTATION_SUMMARY.md
-- [ ] 8.4: Inline code documentation
+- [ ] 9.1: Create QuicTransportTests.cpp
+- [ ] 9.2: Implement initialization tests (3 tests)
+- [ ] 9.3: Implement client-server mode tests (4 tests - direct connection, 1:1 communication)
+- [ ] 9.4: Implement MoQ track announcement tests (3 tests)
+- [ ] 9.5: Implement MoQ track subscription tests (4 tests)
+- [ ] 9.6: Implement data transfer tests in both modes (3 tests)
+- [ ] 9.7: Implement multi-subscriber tests via relay (2 tests)
+- [ ] 9.8: Implement audio track tests (3 tests)
+- [ ] 9.9: Implement relay tests (4 tests - announce, subscribe, forward, N:M fanout)
+- [ ] 9.10: Implement state management tests (2 tests)
+- [ ] 9.11: Implement error/edge case tests (2 tests)
+- [ ] 9.12: Platform-specific tests
 
-### Phase 9: Build & Integration Testing (2-3 days)
-**Goal:** Verify module builds and runs in realistic scenarios
+### Phase 10: Documentation with MoQ & Relay (4-5 days)
+**Goal:** Production-quality documentation covering both modes and relay deployment
 
 **Tasks:**
-- [ ] 9.1: Clean build verification
-- [ ] 9.2: Runtime testing
-- [ ] 9.3: Cross-transport interoperability
-- [ ] 9.4: Audio end-to-end test
-- [ ] 9.5: Performance benchmarking
+- [ ] 10.1: Create README.md with MoQ overview and deployment modes
+- [ ] 10.2: Create USER_GUIDE.md with:
+  - Track naming conventions
+  - Client-server mode setup (for local testing)
+  - Relay mode setup (for production)
+  - Mode selection guidelines
+- [ ] 10.3: Create RELAY_DEPLOYMENT.md for lightweight relay:
+  - Relay installation and configuration
+  - Deployment architecture diagrams
+  - Performance tuning
+  - Monitoring and troubleshooting
+- [ ] 10.4: Create IMPLEMENTATION_SUMMARY.md with MoQ architecture
+- [ ] 10.5: Document migration path from lightweight relay to CloudFlare enterprise relay
+- [ ] 10.6: Add clear guidance: client-server for testing, relay for production
+- [ ] 10.7: Inline code documentation
 
-### Phase 10: Finalization & PR (2-3 days)
+### Phase 11: Build & Integration Testing (3-4 days)
+**Goal:** Verify module and relay in both client-server and production scenarios
+
+**Tasks:**
+- [ ] 11.1: Clean build verification (module + relay)
+- [ ] 11.2: Client-server mode testing (1:1, local network)
+- [ ] 11.3: Relay mode testing (publishers and subscribers via relay)
+- [ ] 11.4: N:M production scenario testing (2 publishers, 5 subscribers via relay)
+- [ ] 11.5: Cross-transport interoperability
+- [ ] 11.6: Audio end-to-end test in both modes
+- [ ] 11.7: Performance benchmarking (client-server vs relay latency)
+- [ ] 11.8: Relay stress testing (10+ connections, multi-track fanout)
+- [ ] 11.9: Verify client-server mode suitable for local testing only
+
+### Phase 12: Finalization & PR (2-3 days)
 **Goal:** Code review, polish, and merge readiness
 
 **Tasks:**
-- [ ] 10.1: Code review preparation
-- [ ] 10.2: Documentation review
-- [ ] 10.3: Testing final pass
-- [ ] 10.4: Changelog and version update
-- [ ] 10.5: Pull request
+- [ ] 12.1: Code review preparation
+- [ ] 12.2: Documentation review
+- [ ] 12.3: Testing final pass
+- [ ] 12.4: Changelog and version update
+- [ ] 12.5: Pull request with MoQ and relay documentation
 
 ---
 
 ## File Structure
 
-Complete file tree for Open3DTransportQUIC module:
+Complete file tree for Open3DTransportQUIC module with MoQ relay:
 
 ```
 ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportQUIC/
 ├── Open3DTransportQUIC.Build.cs          [Build configuration, msquic linkage]
-├── README.md                              [Module overview, quick start]
-├── USER_GUIDE.md                          [End-user configuration guide]
-├── IMPLEMENTATION_SUMMARY.md              [Architecture and decisions]
+├── README.md                              [Module overview, deployment modes]
+├── USER_GUIDE.md                          [Configuration guide, client-server vs relay]
+├── RELAY_DEPLOYMENT.md                    [Relay setup and production deployment]
+├── IMPLEMENTATION_SUMMARY.md              [MoQ architecture and design decisions]
 │
 ├── Private/
 │   ├── Open3DTransportQUICModule.cpp      [Module registration, transport factory]
 │   │
+│   ├── MoQ/
+│   │   ├── MoQProtocol.h                  [MoQ message types and constants]
+│   │   ├── MoQProtocol.cpp                [Message serialization/deserialization]
+│   │   ├── MoQTrackManager.h              [Track announcement and subscription logic]
+│   │   └── MoQTrackManager.cpp            [Track state management, routing]
+│   │
 │   ├── Sender/
-│   │   ├── QuicSender.h                   [FO3DQuicSender class declaration]
-│   │   ├── QuicSender.cpp                 [IOpen3DSender implementation]
+│   │   ├── QuicSender.h                   [FO3DQuicSender - MoQ publisher]
+│   │   ├── QuicSender.cpp                 [IOpen3DSender with track publishing]
 │   │   ├── QuicSenderAudioSink.h          [FO3DQuicSenderAudioSink class]
-│   │   └── QuicSenderAudioSink.cpp        [Audio encoding and transmission]
+│   │   └── QuicSenderAudioSink.cpp        [Audio track publishing]
 │   │
 │   ├── Receiver/
-│   │   ├── QuicReceiver.h                 [FO3DQuicReceiver class declaration]
-│   │   └── QuicReceiver.cpp               [IOpen3DReceiver implementation]
+│   │   ├── QuicReceiver.h                 [FO3DQuicReceiver - MoQ subscriber]
+│   │   └── QuicReceiver.cpp               [IOpen3DReceiver with track subscription]
 │   │
 │   ├── Shared/
 │   │   ├── QuicHelpers.h                  [Configuration parsing, utilities]
@@ -303,7 +485,17 @@ ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportQUIC/
 │   │   └── QuicConnection.cpp             [Connection lifecycle management]
 │   │
 │   └── Tests/
-│       └── QuicTransportTests.cpp         [17+ automation tests]
+│       └── QuicTransportTests.cpp         [25+ automation tests (both modes)]
+│
+├── Relay/                                 [Lightweight MoQ relay - standalone]
+│   ├── MoQRelay.h                         [Relay server class]
+│   ├── MoQRelay.cpp                       [Track directory and forwarding logic]
+│   ├── RelayConnection.h                  [Per-client connection management]
+│   ├── RelayConnection.cpp                [Publisher/subscriber handling]
+│   ├── RelayMain.cpp                      [Relay executable entry point]
+│   ├── RelayConfig.h                      [Configuration structure]
+│   ├── RelayConfig.cpp                    [Config file parsing]
+│   └── README.md                          [Relay build and deployment instructions]
 │
 └── ThirdParty/
     ├── README.md                          [msquic version, build instructions]
@@ -318,6 +510,10 @@ ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportQUIC/
             └── Win64/
                 └── msquic.dll             [Copy for packaging]
 ```
+
+**Note on Deployment Modes:**
+- **Client-Server**: Direct connections between sender/receiver (for local testing only)
+- **Relay (Production)**: All clients connect to relay for N:M pub/sub (production deployment)
 
 ---
 
