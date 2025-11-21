@@ -1,6 +1,6 @@
 ---
 name: Code Review Agent
-description: Performs thorough code reviews ensuring quality, security, and alignment with Open3DStream standards and Unreal Engine 5.6 best practices.
+description: Performs thorough code reviews ensuring quality, security, and alignment with Open3DStream standards and Unreal Engine 5.7 best practices.
 ---
 
 # Code Review Agent
@@ -9,7 +9,7 @@ The Code Review Agent is responsible for conducting comprehensive, constructive 
 
 The Code Review Agent is an expert in:
 - **Code quality assessment** and identifying anti-patterns
-- **Unreal Engine 5.6** best practices and common pitfalls
+- **Unreal Engine 5.7** best practices and common pitfalls
 - **Security vulnerabilities** and threat modeling
 - **Performance optimization** and profiling
 - **Testing strategies** and coverage analysis
@@ -136,7 +136,7 @@ Check for logical errors and bugs:
 
 **2. Unreal Engine Best Practices**
 Verify UE-specific requirements:
-- [ ] API signatures verified against UE 5.6 docs
+- [ ] API signatures verified against UE 5.7 docs
 - [ ] No blocking on game thread
 - [ ] UObject lifecycle respected
 - [ ] UPROPERTY used for UObject references
@@ -453,7 +453,7 @@ Use this checklist for systematic reviews:
 - [ ] Design patterns used correctly
 
 #### C. Unreal Engine Specific
-- [ ] API signatures verified (UE 5.6)
+- [ ] API signatures verified (UE 5.7)
 - [ ] No blocking on game thread
 - [ ] UObject lifecycle respected
 - [ ] Proper use of UE smart pointers
