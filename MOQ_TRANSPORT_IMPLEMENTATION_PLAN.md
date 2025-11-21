@@ -1,4 +1,4 @@
-# Open3DTransportQUIC - Complete Implementation Plan
+# Open3DTransportMoQ - Complete Implementation Plan
 
 **Issue Type:** Feature Implementation  
 **Priority:** High  
@@ -58,7 +58,7 @@
 **Work Completed:**
 - MoQProtocol.h/cpp (custom protocol) → **Refactor to wrap FFI types**
 - MoQTrackManager.h/cpp (custom track management) → **Refactor to delegate to FFI**
-- QuicMoQTests.cpp (basic tests) → **Update for FFI and relay architecture**
+- MoQTests.cpp (basic tests) → **Update for FFI and relay architecture**
 - Module structure → **Preserve, add FFI directories**
 
 **New Work Required:**
@@ -70,7 +70,7 @@
 
 ## Executive Summary
 
-Implement a complete QUIC transport module (`Open3DTransportQUIC`) for the Open3DBroadcast plugin, following the established architectural patterns from existing transports (NNG, WebRTC, Sockets, Loopback). The implementation integrates with **Cloudflare's moq-rs implementation** to provide standards-compliant **MoQ (Media over QUIC) pub/sub semantics** for N:M deployments with named track subscription. This approach leverages the production-ready moq-transport library (implementing IETF draft-ietf-moq-transport-07) and moq-relay-ietf for relay functionality, enabling both local testing and internet-scale deployments via CloudFlare's experimental MoQ relay network.
+Implement a complete MoQ transport module (`Open3DTransportMoQ`) for the Open3DBroadcast plugin, following the established architectural patterns from existing transports (NNG, WebRTC, Sockets, Loopback). The implementation integrates with **Cloudflare's moq-rs implementation** to provide standards-compliant **MoQ (Media over QUIC) pub/sub semantics** for N:M deployments with named track subscription. This approach leverages the production-ready moq-transport library (implementing IETF draft-ietf-moq-transport-07) and moq-relay-ietf for relay functionality, enabling both local testing and internet-scale deployments via CloudFlare's experimental MoQ relay network.
 
 ### Key Objectives
 
@@ -159,8 +159,8 @@ UE Module Dependencies:
 
 Add to O3DBuildFlags system (Open3DShared.Build.cs):
 ```csharp
-bool WithQUIC = true; // Default enabled
-Result.WithQUIC = ReadBool("O3D_WITH_TRANSPORT_QUIC", Result.WithQUIC);
+bool WithMoQ = true; // Default enabled
+Result.WithMoQ = ReadBool("O3D_WITH_TRANSPORT_MOQ", Result.WithMoQ);
 ```
 
 ### Relay Deployment Options
@@ -282,11 +282,11 @@ Examples:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                     Open3DTransportQUIC Module                       │
+│                     Open3DTransportMoQ Module                       │
 ├─────────────────────────────────────────────────────────────────────┤
 │                          C++/Unreal Layer                            │
 │  ┌──────────────────┐                  ┌──────────────────┐         │
-│  │  FO3DQuicSender  │                  │ FO3DQuicReceiver │         │
+│  │  FO3DMoQSender  │                  │ FO3DMoQReceiver │         │
 │  │  (Publisher)     │                  │  (Subscriber)    │         │
 │  │                  │                  │                  │         │
 │  │ - Initialize()   │                  │ - Initialize()   │         │
@@ -336,10 +336,10 @@ Examples:
 │                                                                       │
 │  ┌──────────────────────────────────────────────────────┐           │
 │  │           Editor UI Customization                     │           │
-│  │  - SQuicSenderSettingsPanel (Slate widget)           │           │
+│  │  - SMoQSenderSettingsPanel (Slate widget)           │           │
 │  │    * Relay URL configuration                         │           │
 │  │    * Track name/namespace input                      │           │
-│  │  - SQuicReceiverSettingsPanel (Slate widget)         │           │
+│  │  - SMoQReceiverSettingsPanel (Slate widget)         │           │
 │  │    * Relay URL configuration                         │           │
 │  │    * Track pattern subscription                      │           │
 │  └──────────────────────────────────────────────────────┘           │
@@ -428,8 +428,8 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
   - Object publish/receive
   - Error handling
 - [ ] 0.6: Create C++ FFI wrapper (FMoQRsSessionWrapper class)
-- [ ] 0.7: Update Open3DTransportQUIC.Build.cs to link FFI library
-- [ ] 0.8: Add O3D_WITH_TRANSPORT_QUIC flag to O3DBuildFlags
+- [ ] 0.7: Update Open3DTransportMoQ.Build.cs to link FFI library
+- [ ] 0.8: Add O3D_WITH_TRANSPORT_MOQ flag to O3DBuildFlags
 - [ ] 0.9: Verify clean compile with FFI integration stub
 - [ ] 0.10: Document Rust toolchain requirements and build process
 
@@ -438,7 +438,7 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
 - **Impact:** These files will be replaced/refactored to wrap moq-transport FFI
 - **Preserve:** Track naming conventions and UE integration patterns
 - **Change:** Protocol implementation now delegates to moq-rs
-- **Testing:** Existing QuicMoQTests.cpp will need updates for FFI layer
+- **Testing:** Existing MoQTests.cpp will need updates for FFI layer
 
 ### Phase 1: FFI Layer & moq-transport Integration (6-8 days)
 **Goal:** Complete FFI bridge between C++/Unreal and Rust moq-transport
@@ -482,7 +482,7 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
 **Goal:** Working sender that publishes tracks and sends objects via moq-relay-ietf
 
 **Tasks:**
-- [ ] 2.1: Implement FO3DQuicSender skeleton with IOpen3DSender interface
+- [ ] 2.1: Implement FO3DMoQSender skeleton with IOpen3DSender interface
 - [ ] 2.2: Integrate FMoQRsSessionWrapper (FFI layer) into sender
 - [ ] 2.3: Implement Initialize() - parse relay URL and track configuration
 - [ ] 2.4: Implement Start() - connect to moq-relay-ietf as publisher
@@ -516,7 +516,7 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
 **Goal:** Working receiver that subscribes to tracks and receives objects via moq-relay-ietf
 
 **Tasks:**
-- [ ] 3.1: Implement FO3DQuicReceiver skeleton with IOpen3DReceiver interface
+- [ ] 3.1: Implement FO3DMoQReceiver skeleton with IOpen3DReceiver interface
 - [ ] 3.2: Integrate FMoQRsSessionWrapper (FFI layer) into receiver
 - [ ] 3.3: Implement Initialize() - parse relay URL and track pattern configuration
 - [ ] 3.4: Implement Start() - connect to moq-relay-ietf as subscriber
@@ -553,7 +553,7 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
 **Goal:** Full audio transmission capability using separate MoQ audio tracks
 
 **Tasks:**
-- [ ] 4.1: Implement FO3DQuicSenderAudioSink
+- [ ] 4.1: Implement FO3DMoQSenderAudioSink
 - [ ] 4.2: Implement CreateAudioSink() factory in sender
 - [ ] 4.3: Auto-announce audio track on CreateAudioSink() via FFI
   - Announce track with namespace "audio/session1/character1"
@@ -624,7 +624,7 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
 **Goal:** Flexible configuration parsing with relay URL and MoQ track naming support
 
 **Tasks:**
-- [ ] 6.1: Define configuration keys in QuicHelpers.h
+- [ ] 6.1: Define configuration keys in MoQHelpers.h
   - relay_url (e.g., "https://localhost:4443" or CloudFlare URL)
   - track_namespace (e.g., "mocap/session1/character1")
   - track_pattern (e.g., "mocap/session1/*" for subscribers)
@@ -656,14 +656,14 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
 **Goal:** User-friendly Slate widgets with relay URL and track configuration
 
 **Tasks:**
-- [ ] 7.1: Implement SQuicSenderSettingsPanel
+- [ ] 7.1: Implement SMoQSenderSettingsPanel
   - Relay URL input field (editable text box)
   - Relay URL presets dropdown (Localhost, CloudFlare)
   - Track namespace input (e.g., "mocap/session1/alice")
   - Track priority slider (0-255)
   - Reliability mode dropdown (Reliable/Unreliable)
   - Visual feedback for connection status
-- [ ] 7.2: Implement SQuicReceiverSettingsPanel
+- [ ] 7.2: Implement SMoQReceiverSettingsPanel
   - Relay URL input field (same as sender)
   - Relay URL presets dropdown (Localhost, CloudFlare)
   - Track pattern input (e.g., "mocap/session1/*")
@@ -687,10 +687,10 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
 - Provide good defaults for quick setup
 
 ### Phase 8: Module Registration & Integration (2-3 days)
-**Goal:** Plugin discovers and uses QUIC transport automatically
+**Goal:** Plugin discovers and uses MoQ transport automatically
 
 **Tasks:**
-- [ ] 8.1: Implement Open3DTransportQUICModule.cpp
+- [ ] 8.1: Implement Open3DTransportMoQModule.cpp
 - [ ] 8.2: Register transport factories
 - [ ] 8.3: Register customizations
 - [ ] 8.4: Update Open3DBroadcast.uplugin
@@ -700,7 +700,7 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
 **Goal:** Comprehensive test coverage for FFI layer and relay-based communication
 
 **Tasks:**
-- [ ] 9.1: Update QuicTransportTests.cpp for FFI/relay architecture
+- [ ] 9.1: Update MoQTransportTests.cpp for FFI/relay architecture
 - [ ] 9.2: Implement FFI layer tests (4 tests)
   - Session creation/destruction
   - Track announcement via FFI
@@ -843,7 +843,7 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
   - Verify relay fan-out performance
 - [ ] 11.5: Cross-transport interoperability testing
   - Test with NNG, WebRTC, Sockets transports
-  - Verify Open3DBroadcast works with QUIC transport
+  - Verify Open3DBroadcast works with MoQ transport
   - Verify transport switching works
 - [ ] 11.6: Audio end-to-end testing
   - Audio track announcement and subscription
@@ -920,7 +920,7 @@ The following work has been started with a custom MoQ protocol:
 **Completed:**
 - `MoQProtocol.h/cpp`: Custom MoQ message types and serialization
 - `MoQTrackManager.h/cpp`: Custom track management logic
-- `QuicMoQTests.cpp`: Basic tests for custom protocol
+- `MoQTests.cpp`: Basic tests for custom protocol
 - Module directory structure created
 - Initial QUIC integration attempted
 
@@ -939,7 +939,7 @@ The following work has been started with a custom MoQ protocol:
    - Change: Delegate all operations to FFI layer
    - Add: Async callback handling for FFI events
 
-3. **QuicMoQTests.cpp**
+3. **MoQTests.cpp**
    - Keep: Test structure and patterns
    - Change: Update to test FFI layer instead of custom protocol
    - Add: FFI-specific boundary tests
@@ -975,7 +975,7 @@ The following work has been started with a custom MoQ protocol:
 - Add FFI error translation
 
 **Step 4: Update Tests (Phase 1)**
-- Refactor QuicMoQTests.cpp for FFI layer
+- Refactor MoQTests.cpp for FFI layer
 - Add FFI boundary tests
 - Ensure all tests pass with new architecture
 
@@ -1037,11 +1037,11 @@ The following work has been started with a custom MoQ protocol:
 
 ## File Structure
 
-Complete file tree for Open3DTransportQUIC module with moq-rs integration:
+Complete file tree for Open3DTransportMoQ module with moq-rs integration:
 
 ```
-ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportQUIC/
-├── Open3DTransportQUIC.Build.cs          [Build configuration, Rust FFI linkage]
+ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportMoQ/
+├── Open3DTransportMoQ.Build.cs          [Build configuration, Rust FFI linkage]
 ├── README.md                              [Module overview, moq-rs integration]
 ├── USER_GUIDE.md                          [Configuration guide, relay setup]
 ├── RELAY_DEPLOYMENT.md                    [moq-relay-ietf deployment guide]
@@ -1051,7 +1051,7 @@ ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportQUIC/
 ├── BUILD_GUIDE.md                         [Rust toolchain and build process]
 │
 ├── Private/
-│   ├── Open3DTransportQUICModule.cpp      [Module registration, transport factory]
+│   ├── Open3DTransportMoQModule.cpp      [Module registration, transport factory]
 │   │
 │   ├── FFI/
 │   │   ├── MoQRsSessionWrapper.h          [C++ wrapper for moq-transport Session]
@@ -1070,22 +1070,22 @@ ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportQUIC/
 │   │   └── MoQTrackManager.cpp            [Track management (delegates to FFI)]
 │   │
 │   ├── Sender/
-│   │   ├── QuicSender.h                   [FO3DQuicSender - uses MoQRsPublisher]
-│   │   ├── QuicSender.cpp                 [IOpen3DSender via moq-transport]
-│   │   ├── QuicSenderAudioSink.h          [FO3DQuicSenderAudioSink class]
-│   │   └── QuicSenderAudioSink.cpp        [Audio track publishing via FFI]
+│   │   ├── MoQSender.h                   [FO3DMoQSender - uses MoQRsPublisher]
+│   │   ├── MoQSender.cpp                 [IOpen3DSender via moq-transport]
+│   │   ├── MoQSenderAudioSink.h          [FO3DMoQSenderAudioSink class]
+│   │   └── MoQSenderAudioSink.cpp        [Audio track publishing via FFI]
 │   │
 │   ├── Receiver/
-│   │   ├── QuicReceiver.h                 [FO3DQuicReceiver - uses MoQRsSubscriber]
-│   │   └── QuicReceiver.cpp               [IOpen3DReceiver via moq-transport]
+│   │   ├── MoQReceiver.h                 [FO3DMoQReceiver - uses MoQRsSubscriber]
+│   │   └── MoQReceiver.cpp               [IOpen3DReceiver via moq-transport]
 │   │
 │   ├── Shared/
-│   │   ├── QuicHelpers.h                  [Configuration parsing, utilities]
-│   │   └── QuicHelpers.cpp                [ParseSenderOptions, ParseReceiverOptions]
+│   │   ├── MoQHelpers.h                  [Configuration parsing, utilities]
+│   │   └── MoQHelpers.cpp                [ParseSenderOptions, ParseReceiverOptions]
 │   │
 │   └── Tests/
-│       ├── QuicTransportTests.cpp         [25+ automation tests (relay mode)]
-│       └── QuicFFITests.cpp               [FFI boundary tests]
+│       ├── MoQTransportTests.cpp         [25+ automation tests (relay mode)]
+│       └── MoQFFITests.cpp               [FFI boundary tests]
 │
 ├── ThirdParty/
 │   ├── README.md                          [moq-rs version, build instructions]
@@ -1268,7 +1268,7 @@ moq-relay-ietf/                            [Deployed separately]
 
 ### Minimum Viable Product (MVP)
 
-- [ ] Module compiles cleanly with O3D_WITH_TRANSPORT_QUIC=1
+- [ ] Module compiles cleanly with O3D_WITH_TRANSPORT_MOQ=1
 - [ ] Rust FFI layer builds and links correctly
 - [ ] moq-relay-ietf deploys locally
 - [ ] Sender and receiver implement all interface methods
