@@ -5,6 +5,7 @@
 #include "ILiveLinkClient.h"
 #include "LiveLinkTypes.h"
 #include "LiveLinkPreset.h"
+#include "LiveLinkSubjectSettings.h"
 #include "SerializedFrameConsumerRegistry.h"
 #include "Roles/LiveLinkAnimationTypes.h"
 #include "Roles/LiveLinkAnimationRole.h"
@@ -1036,10 +1037,17 @@ void FO3DReceiverSource::PushSubjectStaticData(const FLiveLinkSubjectKey& Subjec
         return;
     }
 
+    // Create a settings object to allow subject-level configuration of preprocessors, interpolation, and translators
+    ULiveLinkSubjectSettings* SubjectSettings = NewObject<ULiveLinkSubjectSettings>();
+    if (SubjectSettings)
+    {
+        SubjectSettings->Initialize(SubjectKey);
+    }
+
     FLiveLinkSubjectPreset Preset;
     Preset.Key = SubjectKey;
     Preset.Role = ULiveLinkAnimationRole::StaticClass();
-    Preset.Settings = nullptr;
+    Preset.Settings = SubjectSettings;
     Preset.bEnabled = true;
     Client->CreateSubject(Preset);
 
