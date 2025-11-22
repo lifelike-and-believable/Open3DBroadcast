@@ -1,11 +1,11 @@
 # Product Roadmap Recommendations: Open3DStream/Open3DBroadcast
-**Product Management - November 2024**
+**Product Management - November 2025**
 
 ## Executive Summary
 
 This roadmap prioritizes features and initiatives for Open3DStream/Open3DBroadcast over the next 12-18 months based on market research, competitive analysis, and customer segment needs. All features are scored using the RICE framework (Reach × Impact × Confidence / Effort) to ensure data-driven prioritization.
 
-**Strategic Themes** (2024-2025):
+**Strategic Themes** (2025-2026):
 1. **Market Leadership**: Establish as #1 open-source mocap streaming solution
 2. **Professional Quality**: Match or exceed proprietary solutions in reliability and performance
 3. **Cloud-Native**: Best-in-class remote collaboration via WebRTC
@@ -742,7 +742,7 @@ This roadmap balances near-term market needs (onboarding, integrations) with lon
 
 ---
 
-**Last Updated**: November 2024  
+**Last Updated**: November 2025  
 **Next Review**: Q1 2025  
 **Owner**: Product Management Team  
 **Contributors**: Engineering, Community, Partnerships
