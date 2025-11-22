@@ -51,7 +51,7 @@ This roadmap prioritizes features and initiatives for Open3DStream/Open3DBroadca
 
 ## Roadmap Overview
 
-### Now (Q1 2025 - Months 1-3)
+### Now (Q4 2025 - Months 1-3)
 **Theme**: Polish, Launch, Foundation
 
 - **Priority 1**: Production-ready v1.0 release
@@ -60,7 +60,7 @@ This roadmap prioritizes features and initiatives for Open3DStream/Open3DBroadca
 - **Priority 4**: Community infrastructure (Discord, forums)
 - **Priority 5**: Sample projects and demos
 
-### Next (Q2 2025 - Months 4-6)
+### Next (Q1 2026 - Months 4-6)
 **Theme**: Growth, Partnerships, Performance
 
 - **Priority 1**: Hardware vendor integrations (Rokoko, OptiTrack adapters)
@@ -69,7 +69,7 @@ This roadmap prioritizes features and initiatives for Open3DStream/Open3DBroadca
 - **Priority 4**: Analytics and telemetry (opt-in)
 - **Priority 5**: First commercial support tier launch
 
-### Later (Q3-Q4 2025 - Months 7-12)
+### Later (Q2-Q3 2025 - Months 7-12)
 **Theme**: Scale, Enterprise, Ecosystem
 
 - **Priority 1**: Unity plugin (expand beyond Unreal)
