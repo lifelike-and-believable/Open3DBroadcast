@@ -6,9 +6,9 @@
 The real-time animation streaming market is experiencing explosive growth, driven by virtual production, live entertainment, VTubing, and XR experiences. The global addressable market spans multiple high-growth segments:
 
 - **Virtual Production**: $2.1B (2023) → $11B (2034) at 14-18% CAGR
-- **VTuber/Live Animation**: $2.5-6.9B (2024) → $80B (2034) at 30%+ CAGR  
-- **Motion Capture Systems**: $484M (2024) → $800M+ (2029)
-- **Virtual Concerts/Metaverse**: $2.1B (2024) → $19.4B (2033)
+- **VTuber/Live Animation**: $2.5-6.9B (2025) → $80B (2034) at 30%+ CAGR  
+- **Motion Capture Systems**: $484M (2025) → $800M+ (2029)
+- **Virtual Concerts/Metaverse**: $2.1B (2025) → $19.4B (2033)
 
 **Key Finding**: Open3DStream is uniquely positioned at the intersection of these markets as an **open-source, protocol-agnostic, Unreal Engine-native streaming solution** that bridges professional mocap hardware to real-time rendering pipelines.
 
@@ -29,7 +29,7 @@ This research aims to:
 
 ## Methodology
 
-**Research Period**: September-November 2024  
+**Research Period**: September-November 2025  
 **Sources Consulted**:
 - Industry publications (Markets and Markets, Precedence Research, Grand View Research)
 - Competitive product documentation and announcements
@@ -51,7 +51,7 @@ This research aims to:
 The convergence of gaming, streaming, and XR is creating massive demand for real-time character animation tools.
 
 **VTuber Market**:
-- **Current Size**: $2.5-6.9B (2024)
+- **Current Size**: $2.5-6.9B (2025)
 - **Projected**: $80B by 2034 (some estimates)
 - **Growth Rate**: 9.5-30% CAGR depending on segment
 - **Key Drivers**:
@@ -153,7 +153,7 @@ Unreal Engine has become the dominant platform for real-time content creation.
 **Unreal Marketplace Economics**:
 - **Revenue Share**: 88% to developer, 12% to Epic (highly competitive)
 - **Pricing Models**: Free, $49-499 one-time, $5-50/month subscriptions
-- **Distribution**: Marketplace + Fab (unified store launching 2024-2025)
+- **Distribution**: Marketplace + Fab (unified store launching 2025-2026)
 - **Audience**: 2M+ developers, from indies to AAA studios
 
 **LiveLink Plugin Ecosystem**:
@@ -442,7 +442,7 @@ Growing frustration with proprietary costs is driving open-source alternatives.
 Sum of all potential customers globally:
 - Virtual Production market: **$11B** (2034)
 - VTuber market: **$80B** (2034, aggressive estimate)
-- Game development market: **$300B** (2024, includes all games)
+- Game development market: **$300B** (2025, includes all games)
 - Live entertainment tech: **$20B** (metaverse concerts, events)
 
 **TAM for mocap streaming middleware**: ~**$5-10B** (subset of above markets)
@@ -581,6 +581,6 @@ With the right go-to-market strategy, Open3DStream can become the de facto stand
 
 ---
 
-**Report Prepared**: November 2024  
+**Report Prepared**: November 2025  
 **Next Update Scheduled**: Q1 2025  
 **Contact**: Open3DStream Product Management Team
