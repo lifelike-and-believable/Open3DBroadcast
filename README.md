@@ -155,6 +155,12 @@ WebRTC backends are now unified behind a connector interface:
 - C++ command-line tools support WebRTC – see [WEBRTC_QUICKSTART.md](WEBRTC_QUICKSTART.md)
 - Unreal plugin includes WebRTC connectors for both backends – see [LIVEKIT_README.md](LIVEKIT_README.md) and testing guide below.
 
+### QUIC Transport Updates (November 2025)
+
+- The QUIC sender now enforces MsQuic control-payload limits and tears down streams immediately when MsQuic rejects a send, preventing slow memory/handle leaks during long capture sessions.
+- Tracks configured as `unreliable` automatically publish via MsQuic datagrams when datagrams are allowed; when datagrams are disabled we log a one-time warning and fall back to reliable streams.
+- QUIC transport stats now count frames/bytes once per published frame (instead of once per subscriber) so dashboards stay aligned with other transports. New automation tests cover both the successful fan-out and drop paths.
+
 ## Documentation
 
 ### Feature docs
