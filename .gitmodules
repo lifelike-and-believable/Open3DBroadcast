@@ -16,3 +16,6 @@
 [submodule "thirdparty/libdatachannel"]
 	path = thirdparty/libdatachannel
 	url = https://github.com/paullouisageneau/libdatachannel.git
+[submodule "ProjectSandbox/External/moq-ffi"]
+	path = ProjectSandbox/External/moq-ffi
+	url = https://github.com/lifelike-and-believable/moq-ffi.git
