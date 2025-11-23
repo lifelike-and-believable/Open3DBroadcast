@@ -54,7 +54,7 @@
 			"LoadingPhase": "Default"
 		},
 		{
-			"Name": "Open3DTransportQUIC",
+			"Name": "Open3DTransportMoQ",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
 		}

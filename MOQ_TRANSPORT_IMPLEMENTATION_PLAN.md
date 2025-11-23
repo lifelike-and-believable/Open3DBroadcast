@@ -37,6 +37,14 @@
 - **Was:** Direct C++ implementation
 - **Now:** Rust (moq-transport) ↔ C (FFI) ↔ C++ (Unreal wrapper)
 
+**6. Third-Party Delivery:**
+- **Was:** Build FFI bindings inside this repo
+- **Now:** Consume prebuilt wrappers from `/lifelike-and-believable/moq-ffi` (vendored under `ThirdParty/moq-ffi`)
+
+**7. Implementation Baseline:**
+- **Was:** Incrementally refactor the prototype MoQ transport
+- **Now:** Restart Open3DTransportMoQ as a greenfield implementation on top of moq-ffi
+
 ### Benefits of This Approach
 
 ✅ **Standards Compliance:** Implements actual IETF MoQ specification  
@@ -55,16 +63,14 @@
 
 ### Migration Impact (Phases 0-2)
 
-**Work Completed:**
-- MoQProtocol.h/cpp (custom protocol) → **Refactor to wrap FFI types**
-- MoQTrackManager.h/cpp (custom track management) → **Refactor to delegate to FFI**
-- MoQTests.cpp (basic tests) → **Update for FFI and relay architecture**
-- Module structure → **Preserve, add FFI directories**
+**Current Baseline:**
+- `lifelike-and-believable/moq-ffi` already encapsulates the Rust↔C++ bridge and is mirrored under `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportMoQ/ThirdParty/moq-ffi`
+- Previous MoQ prototype files remain for historical reference only and will not be refactored
 
-**New Work Required:**
-- Phase 0: Rust toolchain setup, moq-rs build, FFI crate creation
-- Phase 1: Complete FFI layer (Rust→C→C++)
-- Phase 5: Deploy moq-relay-ietf (not build custom relay)
+**New Direction:**
+- Treat Open3DTransportMoQ as a fresh implementation built directly on top of moq-ffi
+- Use Phase 0 to wire the vendored package into the build, version it, and document refresh workflows
+- Use Phase 1 to create the Unreal-facing wrappers/threading helpers that adapt moq-ffi to the transport interfaces
 
 ---
 
@@ -119,11 +125,11 @@ Implement a complete MoQ transport module (`Open3DTransportMoQ`) for the Open3DB
 - **Features:** Standards-compliant MoQ pub/sub, track announcements, subscriptions, object delivery
 
 **Integration Strategy:**
-1. Create Rust-to-C FFI layer for moq-transport
-2. Build C++ wrapper around FFI for Unreal integration
-3. Use moq-relay-ietf as-is for relay server (no custom relay needed)
-4. Deploy moq-relay-ietf locally for testing
-5. Use CloudFlare's experimental MoQ relay network for internet-scale testing
+1. Vendor and version the `lifelike-and-believable/moq-ffi` package (headers, libs, DLLs) inside `ThirdParty/moq-ffi`
+2. Link the existing C++ wrappers from Unreal via `Open3DTransportMoQ.Build.cs` and extend `MoQFfiSupport` for runtime loading/validation
+3. Implement sender/receiver/audio features purely on top of the provided wrappers (no new Rust code in-tree)
+4. Use moq-relay-ietf as-is for relay server (local + CloudFlare tiers)
+5. Deploy moq-relay-ietf locally for testing and validate against CloudFlare's experimental relay network
 
 **Why moq-rs over custom implementation:**
 - Standards compliance with IETF draft-ietf-moq-transport-07
@@ -133,18 +139,27 @@ Implement a complete MoQ transport module (`Open3DTransportMoQ`) for the Open3DB
 - Reduces implementation risk and maintenance burden
 - Direct path to CloudFlare relay network for large-scale testing
 
+### Third-Party FFI Package: moq-ffi (vendored)
+
+- **Repository:** https://github.com/lifelike-and-believable/moq-ffi
+- **Purpose:** Ships the Rust async runtime, C bindings, and C++ convenience wrappers that talk to moq-transport
+- **Vendored Path:** `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportMoQ/ThirdParty/moq-ffi`
+- **Contents:**
+  - `include/moq_ffi.h` – C API surface exposed by the Rust crate
+  - `lib/bin/Win64/Release` – Prebuilt `moq_ffi.lib` + `moq_ffi.dll` + PDB for Win64
+  - `README.md` (to be added) – records upstream commit, build switches, and refresh instructions
+- **Update Policy:** Matches the LiveKit FFI workflow (download artifact, drop into ThirdParty/, record commit + hash, never rebuild during normal UE builds)
+
 ### Build Dependencies
 
 ```
 Required:
 - Unreal Engine 5.7 (verified API compatibility)
-- Rust toolchain (for building moq-rs)
-  - rustc 1.70+
-  - cargo
-- moq-rs repository (draft-ietf-moq-transport-07 branch)
-- cbindgen or manual FFI bindings (for Rust→C interface)
-- C++17 compiler (for FFI wrapper)
-- moq-relay-ietf binary (compiled from moq-rs)
+- moq-ffi third-party package (vendored copy of https://github.com/lifelike-and-believable/moq-ffi)
+  * `ThirdParty/moq-ffi/include` for headers
+  * `ThirdParty/moq-ffi/lib` + `bin` for Win64 Release artifacts (Linux/Mac placeholders reserved)
+- C++17 compiler (for transport module + thin wrappers)
+- moq-relay-ietf binary (compiled from moq-rs) for runtime validation
 
 UE Module Dependencies:
 - Core, CoreUObject, Engine (standard)
@@ -153,6 +168,11 @@ UE Module Dependencies:
 - Open3DReceiver (IOpen3DReceiver interface)
 - Sockets, Networking (for address resolution)
 - Slate, SlateCore, AppFramework (editor UI)
+
+Optional / Refresh Workflows:
+- Rust toolchain (rustc 1.70+, cargo) when rebuilding moq-ffi or moq-relay-ietf
+- moq-rs repository (draft-ietf-moq-transport-07 branch)
+- cbindgen or equivalent tooling used within the moq-ffi repo to regenerate headers
 ```
 
 ### Environment Variables
@@ -171,7 +191,7 @@ Result.WithMoQ = ReadBool("O3D_WITH_TRANSPORT_MOQ", Result.WithMoQ);
 - Use for development, CI/CD, and local network testing
 
 **Option 2: CloudFlare Experimental MoQ Relay (Internet-Scale Testing)**
-- Connect to CloudFlare's hosted relay network
+- Connect to CloudFlare's hosted relay network at https://relay.cloudflare.mediaoverquic.com
 - Test real-world internet conditions and latency
 - Validate interoperability with other MoQ clients
 - Use for performance benchmarking and scalability testing
@@ -215,7 +235,7 @@ The implementation uses **Cloudflare's moq-rs** for standards-compliant IETF MoQ
 - **This is the production/internet-scale deployment model**
 - Use for real-world performance testing and validation
 - Enables truly distributed, global deployments
-- Relay URL: CloudFlare's experimental MoQ relay endpoint (relay.cloudflare.mediaoverquic.com)
+- Relay URL: https://relay.cloudflare.mediaoverquic.com
 
 #### MoQ Roles (via moq-transport)
 
@@ -299,7 +319,7 @@ Examples:
 │  └────────┬─────────┘                  └────────┬─────────┘         │
 │           │                                     │                    │
 │  ┌────────▼─────────────────────────────────────▼──────────┐        │
-│  │         FMoQRsSessionWrapper (C++ Wrapper)              │        │
+│  │         FMoQSessionWrapper (C++ Wrapper)               │        │
 │  │  - Wraps Rust moq_transport::Session                    │        │
 │  │  - Manages WebTransport connection to relay             │        │
 │  │  - Announces/subscribes to tracks                       │        │
@@ -402,7 +422,7 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
 - Production-grade infrastructure
 - Multi-region, low-latency routing
 - Use for real-world performance testing and large-scale deployments
-- URL provided by CloudFlare (e.g., `https://relay.quic.video`)
+- URL: `https://relay.cloudflare.mediaoverquic.com`
 
 **Migration Path:**
 - Start with local relay for development
@@ -414,76 +434,42 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
 
 ## Implementation Phases
 
-### Phase 0: Setup & Dependencies with moq-rs (5-7 days)
-**Goal:** Establish Rust/FFI build infrastructure and moq-rs integration
+### Phase 0: Third-Party Integration & Build Plumbing (4-5 days)
+**Goal:** Wire the vendored moq-ffi package into the Unreal build, mirror the LiveKit FFI workflow, and document refresh procedures.
 
 **Tasks:**
-- [ ] 0.1: Clone moq-rs repository (branch: draft-ietf-moq-transport-07)
-- [ ] 0.2: Build moq-transport Rust library (verify Rust toolchain)
-- [ ] 0.3: Build moq-relay-ietf executable for local testing
-- [ ] 0.4: Design FFI layer architecture (Rust→C→C++)
-- [ ] 0.5: Create Rust FFI crate with C exports for moq-transport
-  - Session creation/destruction
-  - Track announcement/subscription
-  - Object publish/receive
-  - Error handling
-- [ ] 0.6: Create C++ FFI wrapper (FMoQRsSessionWrapper class)
-- [ ] 0.7: Update Open3DTransportMoQ.Build.cs to link FFI library
-- [ ] 0.8: Add O3D_WITH_TRANSPORT_MOQ flag to O3DBuildFlags
-- [ ] 0.9: Verify clean compile with FFI integration stub
-- [ ] 0.10: Document Rust toolchain requirements and build process
+- [ ] 0.1: Record the exact `lifelike-and-believable/moq-ffi` commit/hash used for the current drop inside `ThirdParty/moq-ffi/README.md` (or equivalent version file)
+- [ ] 0.2: Verify headers/libs/DLLs exist for Win64 Release (`include`, `lib`, `bin`) and add placeholders for Linux/Mac builds
+- [ ] 0.3: Update `Open3DTransportMoQ.Build.cs` to link against the vendored libraries (mirroring the LiveKit FFI pattern)
+- [ ] 0.4: Extend `Shared/MoQFfiSupport` to load/validate `moq_ffi.dll`, emit actionable errors when missing, and surface version info in logs
+- [ ] 0.5: Keep `O3D_WITH_TRANSPORT_MOQ` flag wiring but document it as controlling whether moq-ffi is linked/enabled
+- [ ] 0.6: Produce a short “refresh guide” describing how to pull a new moq-ffi release (Rust toolchain required only for that process)
+- [ ] 0.7: Run a clean Unreal build to confirm the transport module links against the vendored library even though networking remains stubbed
 
 **Migration Notes for Phases 0-2:**
-- **Existing work:** MoQProtocol.h/cpp and MoQTrackManager.h/cpp provide custom protocol
-- **Impact:** These files will be replaced/refactored to wrap moq-transport FFI
-- **Preserve:** Track naming conventions and UE integration patterns
-- **Change:** Protocol implementation now delegates to moq-rs
-- **Testing:** Existing MoQTests.cpp will need updates for FFI layer
+- **Reference only:** Earlier MoQProtocol/MoQTrackManager files remain as historical artifacts; the new implementation starts fresh
+- **Goal of Phase 0:** Ensure moq-ffi is treated like other ThirdParty dependencies (LiveKit, WebRTC) so future work focuses on gameplay code, not FFI plumbing
 
-### Phase 1: FFI Layer & moq-transport Integration (6-8 days)
-**Goal:** Complete FFI bridge between C++/Unreal and Rust moq-transport
+### Phase 1: Unreal Wrappers on top of moq-ffi (6-8 days)
+**Goal:** Build the lightweight Unreal-facing façade that owns moq-ffi handles, schedules callback processing, and exposes ergonomic helpers to the transport module.
 
 **Tasks:**
-- [ ] 1.1: Implement Rust FFI crate (moq_o3d_ffi)
-  - Session lifecycle (new, connect, close)
-  - Publisher role APIs (announce_track, publish_object)
-  - Subscriber role APIs (subscribe_track, poll_object)
-  - Callback registration for async events
-  - Error code mapping
-- [ ] 1.2: Implement C wrapper (moq_ffi.h/moq_ffi.c)
-  - Opaque handle types for Rust objects
-  - C-compatible function signatures
-  - Memory management functions
-- [ ] 1.3: Implement C++ wrapper classes
-  - FMoQRsSessionWrapper: manages moq-transport session
-  - FMoQRsPublisher: publisher role interface
-  - FMoQRsSubscriber: subscriber role interface
-- [ ] 1.4: Bridge Rust async/await to Unreal threading
-  - Tokio runtime integration
-  - Callback dispatch to game thread
-  - Event queue for async results
-- [ ] 1.5: Refactor MoQProtocol.h to wrap FFI types
-  - Keep UE-friendly type definitions
-  - Delegate serialization to moq-transport
-- [ ] 1.6: Refactor MoQTrackManager to use FFI layer
-  - Delegate track announcement to moq-transport
-  - Delegate subscription to moq-transport
-  - Maintain UE-side track state cache
-- [ ] 1.7: Add comprehensive error handling and logging
-- [ ] 1.8: Create unit tests for FFI layer
+- [ ] 1.1: Define RAII structs/classes (e.g., `FMoqSessionHandle`, `FMoqPublisherHandle`, `FMoqSubscriberHandle`) that manage the lifetimes of moq-ffi objects and enforce thread-safe access
+- [ ] 1.2: Implement `FMoQSessionWrapper` that encapsulates connection parameters, startup/shutdown, and track registration using the moq-ffi C++ exports
+- [ ] 1.3: Create an async dispatcher/worker that pumps moq-ffi callbacks off the Tokio runtime threads and routes them to Unreal (similar to the LiveKit event bridge)
+- [ ] 1.4: Add structured error translation so moq-ffi status codes become `EOpen3DTransportMoQError` enums with contextual logging
+- [ ] 1.5: Provide small unit/automation tests (or lightweight harness) that create/destroy sessions and simulate announce/subscribe flows without touching higher-level sender/receiver code
 
 **Migration Notes:**
-- Existing MoQProtocol.h/cpp: Refactor to thin wrapper over FFI
-- Track naming and UE types preserved
-- Protocol details now handled by moq-transport
-- Add FFI error translation layer
+- No modifications to the legacy MoQProtocol/MoQTrackManager files—new wrappers live under `Source/Open3DTransportMoQ/Private/Shared`
+- All Rust async concerns remain encapsulated inside moq-ffi; Unreal only needs to manage worker threads and callback queues
 
 ### Phase 2: Core Sender Implementation via moq-transport (6-8 days)
 **Goal:** Working sender that publishes tracks and sends objects via moq-relay-ietf
 
 **Tasks:**
 - [ ] 2.1: Implement FO3DMoQSender skeleton with IOpen3DSender interface
-- [ ] 2.2: Integrate FMoQRsSessionWrapper (FFI layer) into sender
+- [ ] 2.2: Integrate `FMoQSessionWrapper` (moq-ffi layer) into sender
 - [ ] 2.3: Implement Initialize() - parse relay URL and track configuration
 - [ ] 2.4: Implement Start() - connect to moq-relay-ietf as publisher
   - Connect via WebTransport to relay URL
@@ -492,7 +478,7 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
 - [ ] 2.5: Implement Send() method - publish object to mocap track
   - Serialize SubjectList to FlatBuffers
   - Create MoQ object with sequence number and timestamp
-  - Publish via moq-transport FFI
+  - Publish via moq-ffi wrappers
 - [ ] 2.6: Implement async worker thread for FFI event polling
   - Poll moq-transport for async results
   - Dispatch callbacks to game thread
@@ -517,7 +503,7 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
 
 **Tasks:**
 - [ ] 3.1: Implement FO3DMoQReceiver skeleton with IOpen3DReceiver interface
-- [ ] 3.2: Integrate FMoQRsSessionWrapper (FFI layer) into receiver
+- [ ] 3.2: Integrate `FMoQSessionWrapper` (moq-ffi layer) into receiver
 - [ ] 3.3: Implement Initialize() - parse relay URL and track pattern configuration
 - [ ] 3.4: Implement Start() - connect to moq-relay-ietf as subscriber
   - Connect via WebTransport to relay URL (same as publisher)
@@ -561,7 +547,7 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
 - [ ] 4.4: Implement SubmitAudio() - publish audio objects to audio track
   - Encode audio (PCM16 or Opus) via O3DAudio framework
   - Create MoQ object with audio payload
-  - Publish via moq-transport FFI
+  - Publish via moq-ffi wrappers
 - [ ] 4.5: Implement receiver audio track subscription via FFI
   - Subscribe to audio track pattern (e.g., "audio/session1/*")
   - Register audio object callback
@@ -787,7 +773,7 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
   - Memory management across language boundary
   - Async/await bridging to Unreal threading
   - Error handling and propagation
-  - Building and linking FFI layer
+  - Linking the vendored moq-ffi package (load paths, versioning, diagnostics)
 - [ ] 10.5: Create IMPLEMENTATION_SUMMARY.md
   - moq-rs integration rationale
   - Architecture decisions
@@ -807,10 +793,10 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
   - Document wrapper classes
   - Add usage examples
 - [ ] 10.8: Create BUILD_GUIDE.md
-  - Rust toolchain setup
-  - Building moq-rs dependencies
-  - FFI layer build process
-  - UE plugin build integration
+  - Optional Rust toolchain setup (only for regenerating moq-ffi or moq-relay-ietf)
+  - Steps to refresh the moq-ffi drop from https://github.com/lifelike-and-believable/moq-ffi
+  - Rebuilding moq-relay-ietf for local testing
+  - UE plugin build integration (linking vendored binaries, verifying DLL load)
 
 **Migration Notes:**
 - Documentation emphasizes standards compliance
@@ -823,9 +809,9 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
 
 **Tasks:**
 - [ ] 11.1: Clean build verification
-  - Build Rust FFI layer
-  - Build moq-relay-ietf
-  - Build UE plugin with FFI integration
+  - Verify vendored moq-ffi binaries are staged and loadable
+  - Build moq-relay-ietf (only if artifacts changed)
+  - Build UE plugin with moq-ffi linked in
   - Verify no build warnings
 - [ ] 11.2: Local relay testing
   - Deploy moq-relay-ietf on localhost
@@ -911,127 +897,71 @@ The implementation uses **moq-relay-ietf** from the moq-rs repository - a produc
 
 ---
 
-## Migration Strategy: From Custom Protocol to moq-rs
+## Migration Strategy: From Custom Protocol to moq-ffi-backed Transport
 
-### Current State (Phase 2)
+### Current State (November 2025)
 
-The following work has been started with a custom MoQ protocol:
+- A partial custom MoQ prototype (`MoQProtocol.*`, `MoQTrackManager.*`, `MoQTests.cpp`) exists but is no longer on the critical path
+- `lifelike-and-believable/moq-ffi` delivers prebuilt bindings (Rust↔C/C++) and has already been vendored into `ThirdParty/moq-ffi`
+- No production features rely on the prototype, making a restart low-risk
 
-**Completed:**
-- `MoQProtocol.h/cpp`: Custom MoQ message types and serialization
-- `MoQTrackManager.h/cpp`: Custom track management logic
-- `MoQTests.cpp`: Basic tests for custom protocol
-- Module directory structure created
-- Initial QUIC integration attempted
+### Strategy Overview
 
-**Status:** Phase 0-2 partially implemented with custom protocol
+1. **Archive, Don’t Refactor:** Keep the prototype sources for reference but disable them in the build. All new work targets brand-new files.
+2. **Consume moq-ffi:** Treat moq-ffi like LiveKit’s FFI package—versioned binaries plus headers that are linked directly from the Unreal module.
+3. **Greenfield Implementation:** Rebuild sender, receiver, audio, UI, and tests on top of the new `FMoQSessionWrapper` layer without carrying over legacy design constraints.
 
-### Migration Impact Analysis
+### Legacy Files to Sunset
 
-**Files to Refactor (Not Delete):**
-1. **MoQProtocol.h/cpp**
-   - Keep: UE-friendly type definitions (FMoQTrackProperties, etc.)
-   - Change: Remove custom serialization, wrap FFI types instead
-   - Add: Type conversion helpers (UE ↔ FFI)
+- `MoQProtocol.h/cpp`
+- `MoQTrackManager.h/cpp`
+- `MoQTests.cpp`
+- Any experimental QUIC/network helpers outside the new architecture
 
-2. **MoQTrackManager.h/cpp**
-   - Keep: UE-side track state caching
-   - Change: Delegate all operations to FFI layer
-   - Add: Async callback handling for FFI events
+These files remain in source control for archeology but will not be modified unless specific helpers prove reusable (e.g., enums or config structs).
 
-3. **MoQTests.cpp**
-   - Keep: Test structure and patterns
-   - Change: Update to test FFI layer instead of custom protocol
-   - Add: FFI-specific boundary tests
+### New Assets
 
-**New Files to Add:**
-- FFI wrapper classes (MoQRsSessionWrapper, etc.)
-- Rust FFI crate (moq_o3d_ffi)
-- FFI build integration in Build.cs
-- FFI architecture documentation
+- `Shared/MoQFfiSupport.*` plus additional wrappers (`FMoQSessionWrapper`, publisher/subscriber helpers)
+- `ThirdParty/moq-ffi` (headers, libs, DLLs, README with upstream commit)
+- Updated module documentation outlining how to refresh third-party drops
 
-**Files to Remove:**
-- Any custom QUIC connection handling (if exists)
-- Any custom stream multiplexing code (if exists)
-- Any placeholder relay implementation (if started)
+### Step-by-Step Plan
 
-### Step-by-Step Migration Plan
+**Step 1: Archive + Document**
+- Move legacy sources out of the build target (or wrap them in `#if 0`)
+- Document prior learnings so they can inform the restart
 
-**Step 1: Preserve Existing Work (Phase 0)**
-- Create git branch for moq-rs integration
-- Document current state and design decisions
-- Archive custom protocol implementation for reference
+**Step 2: Validate Third-Party Assets**
+- Confirm vendored binaries load correctly on Win64
+- Create version/README metadata describing how to refresh from GitHub
 
-**Step 2: Build FFI Infrastructure (Phase 0-1)**
-- Set up Rust toolchain
-- Build moq-rs dependencies
-- Create FFI crate structure
-- Implement basic FFI bindings
+**Step 3: Implement Wrappers + Core Transports**
+- Build the Unreal-facing wrapper layer (Phase 1)
+- Implement sender/receiver/audio flows (Phases 2-4)
 
-**Step 3: Refactor Protocol Layer (Phase 1)**
-- Update MoQProtocol.h to wrap FFI types
-- Update MoQTrackManager to delegate to FFI
-- Keep UE-friendly interfaces intact
-- Add FFI error translation
-
-**Step 4: Update Tests (Phase 1)**
-- Refactor MoQTests.cpp for FFI layer
-- Add FFI boundary tests
-- Ensure all tests pass with new architecture
-
-**Step 5: Complete Sender/Receiver (Phase 2-3)**
-- Implement sender using FFI wrappers
-- Implement receiver using FFI wrappers
-- Verify interface compliance maintained
+**Step 4: Expand Testing + Tooling**
+- Recreate/extend previous tests using the relay-only workflow
+- Add automation that validates DLL presence and compatibility
 
 ### Breaking Changes from Original Plan
 
-**Architecture:**
-- **Was:** Custom MoQ protocol + msquic
-- **Now:** moq-transport (Rust) via FFI
+- **Architecture:** From custom protocol + msquic to moq-ffi (moq-transport via Rust) + relay-only networking
+- **Code ownership:** From living inside this repo to depending on the external `moq-ffi` package for all cross-language concerns
+- **Workflow:** From “build everything locally with Rust” to “link prebuilt binaries; only rebuild when refreshing ThirdParty”
 
-**Deployment:**
-- **Was:** Client-server mode + custom relay
-- **Now:** Relay-only via moq-relay-ietf
+### Benefits of the Restart
 
-**Protocol:**
-- **Was:** Custom MoQ-like semantics
-- **Now:** IETF draft-ietf-moq-transport-07 compliant
+1. **Deterministic Builds:** UE projects simply link against known-good binaries
+2. **Faster Timeline:** Eliminates weeks of FFI crate work already completed in the dedicated repo
+3. **Cleaner Architecture:** Avoids retrofitting legacy classes—everything is designed around relay-only semantics from day one
+4. **Shared Practices:** Mirrors the proven LiveKit FFI approach, simplifying developer onboarding
 
-**Dependencies:**
-- **Was:** msquic (C library)
-- **Now:** moq-rs (Rust, includes quinn for QUIC)
+### Risks & Mitigation
 
-### Benefits of Migration
-
-1. **Standards Compliance**: Implements actual IETF MoQ draft
-2. **Interoperability**: Works with other MoQ clients/servers
-3. **Production Ready**: moq-rs is battle-tested by CloudFlare
-4. **CloudFlare Integration**: Direct path to experimental relay network
-5. **Reduced Maintenance**: Protocol implementation maintained by CloudFlare
-6. **Future-Proof**: Tracks IETF standardization process
-
-### Risks and Mitigation
-
-**Risk 1: FFI Complexity**
-- Mitigation: Start with simple FFI, iterate
-- Create comprehensive FFI tests
-- Document memory management carefully
-
-**Risk 2: Rust Toolchain Requirements**
-- Mitigation: Provide clear build documentation
-- Consider pre-built FFI binaries for common platforms
-- Add Rust setup to CI/CD
-
-**Risk 3: Async/Await Bridging**
-- Mitigation: Use well-tested async bridge patterns
-- Thorough testing of callback dispatch
-- Consider tokio runtime in dedicated thread
-
-**Risk 4: Additional Development Time**
-- Mitigation: ~2 week buffer already added to timeline
-- FFI layer is one-time investment
-- Long-term maintenance savings
+- **Binary Drift:** Track upstream commit/hash inside `ThirdParty/moq-ffi/README.md` and add CI checks that warn when DLLs are missing or outdated.
+- **Threading/Callback Surprises:** Clearly document the worker model in FFI_ARCHITECTURE.md and add automation to cover shutdown edge cases.
+- **Platform Coverage:** Prepare Linux/Mac placeholder directories now so future ports only need fresh binaries, not code changes.
 
 ---
 
@@ -1041,73 +971,52 @@ Complete file tree for Open3DTransportMoQ module with moq-rs integration:
 
 ```
 ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportMoQ/
-├── Open3DTransportMoQ.Build.cs          [Build configuration, Rust FFI linkage]
-├── README.md                              [Module overview, moq-rs integration]
-├── USER_GUIDE.md                          [Configuration guide, relay setup]
-├── RELAY_DEPLOYMENT.md                    [moq-relay-ietf deployment guide]
-├── FFI_ARCHITECTURE.md                    [Rust↔C↔C++ FFI design]
-├── IMPLEMENTATION_SUMMARY.md              [Architecture and design decisions]
-├── MOQ_STANDARDS_COMPLIANCE.md            [IETF MoQ compliance documentation]
-├── BUILD_GUIDE.md                         [Rust toolchain and build process]
+├── Open3DTransportMoQ.Build.cs          [Build configuration, links moq-ffi]
+├── README.md                            [Module overview, moq-ffi integration]
+├── USER_GUIDE.md                        [Configuration guide, relay setup]
+├── RELAY_DEPLOYMENT.md                  [moq-relay-ietf deployment guide]
+├── FFI_ARCHITECTURE.md                  [moq-ffi usage, threading, diagnostics]
+├── IMPLEMENTATION_SUMMARY.md            [Architecture and design decisions]
+├── MOQ_STANDARDS_COMPLIANCE.md          [IETF MoQ compliance documentation]
+├── BUILD_GUIDE.md                       [How to refresh moq-ffi + relay builds]
 │
 ├── Private/
-│   ├── Open3DTransportMoQModule.cpp      [Module registration, transport factory]
-│   │
-│   ├── FFI/
-│   │   ├── MoQRsSessionWrapper.h          [C++ wrapper for moq-transport Session]
-│   │   ├── MoQRsSessionWrapper.cpp        [FFI call wrappers, async bridging]
-│   │   ├── MoQRsPublisher.h               [C++ wrapper for publisher role]
-│   │   ├── MoQRsPublisher.cpp             [Track announcement, object publishing]
-│   │   ├── MoQRsSubscriber.h              [C++ wrapper for subscriber role]
-│   │   ├── MoQRsSubscriber.cpp            [Track subscription, object receiving]
-│   │   ├── MoQRsTypes.h                   [UE-friendly type wrappers]
-│   │   └── MoQRsAsyncBridge.h             [Rust async/await to UE threading]
-│   │
-│   ├── MoQ/
-│   │   ├── MoQProtocol.h                  [UE type definitions (wraps FFI)]
-│   │   ├── MoQProtocol.cpp                [Type conversion helpers]
-│   │   ├── MoQTrackManager.h              [UE-side track state cache]
-│   │   └── MoQTrackManager.cpp            [Track management (delegates to FFI)]
-│   │
-│   ├── Sender/
-│   │   ├── MoQSender.h                   [FO3DMoQSender - uses MoQRsPublisher]
-│   │   ├── MoQSender.cpp                 [IOpen3DSender via moq-transport]
-│   │   ├── MoQSenderAudioSink.h          [FO3DMoQSenderAudioSink class]
-│   │   └── MoQSenderAudioSink.cpp        [Audio track publishing via FFI]
-│   │
-│   ├── Receiver/
-│   │   ├── MoQReceiver.h                 [FO3DMoQReceiver - uses MoQRsSubscriber]
-│   │   └── MoQReceiver.cpp               [IOpen3DReceiver via moq-transport]
+│   ├── Open3DTransportMoQModule.cpp    [Module registration, transport factory]
 │   │
 │   ├── Shared/
-│   │   ├── MoQHelpers.h                  [Configuration parsing, utilities]
-│   │   └── MoQHelpers.cpp                [ParseSenderOptions, ParseReceiverOptions]
+│   │   ├── MoQFfiSupport.h/.cpp         [DLL loading, version checks, helpers]
+│   │   ├── MoQSessionWrapper.h/.cpp     [RAII wrapper over moq-ffi session]
+│   │   ├── MoQPublisher.h/.cpp          [Track announcement + publishing]
+│   │   ├── MoQSubscriber.h/.cpp         [Subscription + receive queue]
+│   │   ├── MoQAsyncDispatcher.h/.cpp    [Background worker pumping callbacks]
+│   │   ├── MoQHelpers.h/.cpp            [Configuration parsing, logging]
+│   │   └── MoQTypes.h                   [UE-friendly structs/enums]
+│   │
+│   ├── Sender/
+│   │   ├── MoQSender.h/.cpp             [FO3DMoQSender implementation]
+│   │   ├── MoQSenderAudioSink.h/.cpp    [Audio sink publishing support]
+│   │   └── ...
+│   │
+│   ├── Receiver/
+│   │   ├── MoQReceiver.h/.cpp           [FO3DMoQReceiver implementation]
+│   │   └── ...
 │   │
 │   └── Tests/
-│       ├── MoQTransportTests.cpp         [25+ automation tests (relay mode)]
-│       └── MoQFFITests.cpp               [FFI boundary tests]
+│       ├── MoQTransportTests.cpp        [Relay e2e tests]
+│       └── MoQFfiSmokeTests.cpp         [DLL + wrapper validation]
 │
 ├── ThirdParty/
-│   ├── README.md                          [moq-rs version, build instructions]
-│   ├── moq-rs/                            [Git submodule or source copy]
-│   │   └── [moq-rs repository files]
-│   │
-│   └── moq_o3d_ffi/                       [Rust FFI crate]
-│       ├── Cargo.toml                     [Rust project manifest]
-│       ├── build.rs                       [Build script for C header generation]
-│       ├── src/
-│       │   ├── lib.rs                     [FFI exports]
-│       │   ├── session.rs                 [Session lifecycle FFI]
-│       │   ├── publisher.rs               [Publisher role FFI]
-│       │   ├── subscriber.rs              [Subscriber role FFI]
-│       │   └── types.rs                   [Type conversions]
-│       └── include/
-│           └── moq_ffi.h                  [Generated C header]
+│   └── moq-ffi/
+│       ├── README.md                    [Upstream commit/hash, refresh steps]
+│       ├── include/moq_ffi.h            [Exported C header from moq-ffi repo]
+│       ├── lib/Win64/Release/moq_ffi.lib
+│       └── bin/Win64/Release/
+│           ├── moq_ffi.dll
+│           └── moq_ffi.pdb
 │
 └── Binaries/
-    └── Win64/
-        ├── moq_o3d_ffi.dll                [Rust FFI DLL]
-        └── moq_o3d_ffi.lib                [Import library]
+  └── Win64/
+    └── moq_ffi.dll                  [Copied/staged runtime binary]
 ```
 
 **External Dependencies (Not in Plugin):**
@@ -1269,7 +1178,7 @@ moq-relay-ietf/                            [Deployed separately]
 ### Minimum Viable Product (MVP)
 
 - [ ] Module compiles cleanly with O3D_WITH_TRANSPORT_MOQ=1
-- [ ] Rust FFI layer builds and links correctly
+- [ ] Vendored moq-ffi binaries load and link correctly
 - [ ] moq-relay-ietf deploys locally
 - [ ] Sender and receiver implement all interface methods
 - [ ] Publisher connects to local relay successfully
@@ -1285,7 +1194,7 @@ moq-relay-ietf/                            [Deployed separately]
 - [ ] All 25+ automation tests pass
 - [ ] FFI layer has no memory leaks (verified with sanitizers)
 - [ ] Performance meets targets (< 10ms latency via local relay, < 7% CPU)
-- [ ] Zero warnings on clean build (C++, Rust, and FFI layers)
+- [ ] Zero warnings on clean build (C++ sources + moq-ffi integration)
 - [ ] Standards compliance validated with moq-pub/moq-sub
 - [ ] Documentation complete with troubleshooting and FAQ
 - [ ] Runs stable for 60+ minutes in editor
@@ -1296,8 +1205,8 @@ moq-relay-ietf/                            [Deployed separately]
 ### Stretch Goals (Nice-to-Have)
 
 - [ ] CloudFlare relay integration working
-- [ ] Linux support (requires Rust FFI build on Linux)
-- [ ] Mac support (requires Rust FFI build on Mac)
+- [ ] Linux support (requires refreshed moq-ffi binaries for Linux)
+- [ ] Mac support (requires refreshed moq-ffi binaries for Mac)
 - [ ] Pre-built FFI binaries for all platforms
 - [ ] Interoperability with other MoQ clients demonstrated
 - [ ] Live latency graph in editor

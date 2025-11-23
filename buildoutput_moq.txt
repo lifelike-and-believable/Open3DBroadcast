@@ -1,0 +1,62 @@
+Log started at 11/22/2025 13:21:50 (2025-11-22T18:21:50Z)
+No project arugment provided while trying to parse Project File. Attempting fallback parsing to attempt to find a Project File.
+Resolved project argument E:\OtherProjects\Open3DStream\ProjectSandbox\ProjectSandbox.uproject to E:\OtherProjects\Open3DStream\ProjectSandbox\ProjectSandbox.uproject
+No config file at C:\ProgramData\Unreal Engine\UnrealBuildTool\BuildConfiguration.xml
+No config file at C:\Users\Athomas\AppData\Local\Unreal Engine\UnrealBuildTool\BuildConfiguration.xml
+No config file at D:\Athomas\Documents\Unreal Engine\UnrealBuildTool\BuildConfiguration.xml
+Configuration will be read from:
+  C:\Users\Athomas\AppData\Roaming\Unreal Engine\UnrealBuildTool\BuildConfiguration.xml
+Reading configuration file from cache (E:\OtherProjects\Open3DStream\ProjectSandbox\Intermediate\Build\XmlConfigCache.bin): C:\Users\Athomas\AppData\Roaming\Unreal Engine\UnrealBuildTool\BuildConfiguration.xml
+Reading configuration file from cache (E:\OtherProjects\Open3DStream\ProjectSandbox\Intermediate\Build\XmlConfigCache.bin): E:\OtherProjects\Open3DStream\ProjectSandbox\Saved\UnrealBuildTool\BuildConfiguration.xml
+Reading configuration file from cache (E:\OtherProjects\Open3DStream\ProjectSandbox\Intermediate\Build\XmlConfigCache.bin): C:\Users\Athomas\AppData\Local\UnrealEngine\Intermediate\Build\UnrealBuildTool.Env.BuildConfiguration.xml
+Log file: E:\OtherProjects\Open3DStream\buildoutput_moq.txt
+
+Setting temp directory to 'C:\Users\Athomas\AppData\Local\Temp\UnrealBuildTool\9de8e132'
+    Registering build platform: UnrealBuildTool.AndroidPlatformFactory
+    Registering build platform: UnrealBuildTool.IOSPlatformFactory
+    Registering build platform: UnrealBuildTool.LinuxPlatformFactory
+    Registering build platform: UnrealBuildTool.MacPlatformFactory
+    Registering build platform: UnrealBuildTool.TVOSPlatformFactory
+    Registering build platform: UnrealBuildTool.WindowsPlatformFactory
+Found Windows 10 SDK root at C:\Program Files (x86)\Windows Kits\10 (1)
+Found Windows 10 SDK root at C:\Program Files (x86)\Windows Kits\10 (2)
+Found Windows 10 SDK version 10.0.19041.0 at C:\Program Files (x86)\Windows Kits\10
+Found Universal CRT version 10.0.19041.0 at C:\Program Files (x86)\Windows Kits\10
+Found Windows 10 SDK version 10.0.22000.0 at C:\Program Files (x86)\Windows Kits\10
+Found Universal CRT version 10.0.22000.0 at C:\Program Files (x86)\Windows Kits\10
+Found Windows 10 SDK version 10.0.22621.0 at C:\Program Files (x86)\Windows Kits\10
+Found Universal CRT version 10.0.22621.0 at C:\Program Files (x86)\Windows Kits\10
+Found Windows 10 SDK version 10.0.26100.0 at C:\Program Files (x86)\Windows Kits\10
+Found Universal CRT version 10.0.26100.0 at C:\Program Files (x86)\Windows Kits\10
+Win64 Installed SDK(s): MinVersion_Sdk=10.0.19041.0, MaxVersion_Sdk=10.9.99999.0, CurrentVersion_Sdk=10.0.22621.0, Version_AutoSdk=10.0.22621.0, CurrentVersion_AutoSdk=
+        Registering build platform: Win64 - buildable: True
+    Registering build platform: UnrealBuildTool.VisionOSPlatformFactory
+Command line: "C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.dll" ProjectSandboxEditor Win64 Development E:\OtherProjects\Open3DStream\ProjectSandbox\ProjectSandbox.uproject -waitmutex -log=E:\OtherProjects\Open3DStream\buildoutput_moq.txt
+Using 'git status' to determine working set for adaptive non-unity build (E:\OtherProjects\Open3DStream).
+Waiting for 'git status' command to complete
+Generated code is up to date.
+Checking for live coding mutex: Global\LiveCoding_C++Program Files+Epic Games+UE_5.7+Engine+Binaries+Win64+UnrealEditor.exe
+Building ProjectSandboxEditor...
+Using Visual Studio 2022 14.44.35219 toolchain (C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207) and Windows 10.0.22621.0 SDK (C:\Program Files (x86)\Windows Kits\10).
+[Adaptive Build] Excluded from Open3DTransportMoQ unity file: Open3DTransportMoQModule.cpp, MoQReceiver.cpp, MoQSender.cpp, MoQAsyncDispatcher.cpp, MoQFfiSupport.cpp, MoQHandles.cpp, MoQSessionWrapper.cpp, MoQTypes.cpp, MoQSessionWrapperTests.cpp
+Determining max actions to execute in parallel (16 physical cores, 32 logical cores)
+  Executing up to 16 processes, one per physical core
+Using Unreal Build Accelerator local executor to run 4 action(s)
+  Storage capacity 40Gb
+  RootDir C:\ProgramData\Epic\UnrealBuildAccelerator
+---- Starting trace: 251122_132152 ----
+UbaSessionServer - Disable remote execution (remote sessions will finish current processes)
+Cache bucket 1926263699 used. Action: Compile [x64] MoQSessionWrapper.cpp ()
+Cache bucket 416513229 used. Action: Link [x64] UnrealEditor-Open3DTransportMoQ.dll ()
+All processes queued
+[1/4] Compile [x64] MoQSessionWrapper.cpp
+[2/4] Link [x64] UnrealEditor-Open3DTransportMoQ.lib
+[3/4] Link [x64] UnrealEditor-Open3DTransportMoQ.dll
+[4/4] WriteMetadata ProjectSandboxEditor.target [NoUba]
+
+Trace written to file E:/OtherProjects/Open3DStream/buildoutput_moq.uba with size 3.4kb
+Total time in Unreal Build Accelerator local executor: 3.11 seconds
+WriteFileIfChanged() wrote 0 changed files of 1 requested writes.
+
+Result: Succeeded
+Total execution time: 5.00 seconds
