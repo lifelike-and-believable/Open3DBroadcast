@@ -73,6 +73,47 @@ struct FO3DTransportConfig
      */
     bool bPersistToken = false;
 
+    /**
+     * Enable automatic token fetching from a token generator endpoint.
+     * When true, Token field is ignored and tokens are fetched from TokenEndpointUrl.
+     * Default: false (use manual token)
+     */
+    bool bUseAutoTokenFetch = false;
+
+    /**
+     * URL of the token generator endpoint (e.g., https://livekit.example.com/token).
+     * Only used when bUseAutoTokenFetch is true.
+     * Endpoint should respond to POST requests with JSON containing "token" field.
+     */
+    FString TokenEndpointUrl;
+
+    /**
+     * API key for authenticating with the token endpoint (optional).
+     * Sent as Authorization: Bearer <ApiKey> header.
+     * SECURITY: Should not persist by default. Set bPersistTokenCredentials to store.
+     */
+    FString TokenApiKey;
+
+    /**
+     * API secret for authenticating with the token endpoint (optional).
+     * May be used for HMAC signing or other authentication schemes.
+     * SECURITY: Should not persist by default. Set bPersistTokenCredentials to store.
+     */
+    FString TokenApiSecret;
+
+    /**
+     * Whether to persist token credentials (ApiKey/ApiSecret) to disk.
+     * Default: false for security. Use environment variables or secure vaults in production.
+     */
+    bool bPersistTokenCredentials = false;
+
+    /**
+     * Seconds before token expiry to trigger automatic refresh.
+     * Default: 300 (5 minutes)
+     * Only applies when bUseAutoTokenFetch is true.
+     */
+    int32 TokenRefreshLeadTimeSec = 300;
+
     /** Transport-specific advanced key/value overrides. Keys are case-insensitive. */
     TMap<FString, FString> AdvancedParams;
 
@@ -103,6 +144,18 @@ struct FO3DTransportConfig
             AudioSummary = TEXT("[Enabled=0]");
         }
 
+        FString TokenInfo;
+        if (bUseAutoTokenFetch)
+        {
+            TokenInfo = FString::Printf(TEXT("Auto-fetch(endpoint=%s,apikey=%s)"),
+                TokenEndpointUrl.IsEmpty() ? TEXT("<empty>") : TEXT("<provided>"),
+                TokenApiKey.IsEmpty() ? TEXT("<empty>") : TEXT("<provided>"));
+        }
+        else
+        {
+            TokenInfo = bPersistToken ? TEXT("<persist>") : (Token.IsEmpty() ? TEXT("<empty>") : TEXT("<provided>"));
+        }
+
         return FString::Printf(TEXT("[Transport=%s Role=%s Backend=%s Uri=%s StreamId=%s Advanced={%s} Token=%s Audio=%s]"),
             *Transport,
             *Role,
@@ -110,7 +163,7 @@ struct FO3DTransportConfig
             *Uri,
             *StreamId,
             *ParamsSummary,
-            bPersistToken ? TEXT("<persist>") : (Token.IsEmpty() ? TEXT("<empty>") : TEXT("<provided>")),
+            *TokenInfo,
             *AudioSummary);
     }
 };
