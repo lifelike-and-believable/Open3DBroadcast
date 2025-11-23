@@ -27,6 +27,9 @@ struct FO3DTokenFetchRequest
 	/** Request timeout in seconds (default: 10) */
 	float TimeoutSeconds = 10.0f;
 	
+	/** Maximum number of retry attempts (default: 5) */
+	int32 MaxRetries = 5;
+	
 	/** Additional grants for token generation (optional) */
 	TMap<FString, FString> AdditionalGrants;
 };
@@ -70,14 +73,24 @@ private:
 	FString BuildRequestBody(const FO3DTokenFetchRequest& Request) const;
 
 	/**
-	 * Handle HTTP request completion.
-	 */
-	void OnHttpRequestComplete(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful, TFunction<void(const FO3DTokenResult&)> OnComplete);
-
-	/**
 	 * Parse the HTTP response to extract token and expiry.
 	 */
 	FO3DTokenResult ParseResponse(FHttpResponsePtr Response) const;
+
+	/**
+	 * Execute a fetch request with retry context.
+	 */
+	void ExecuteFetchWithRetry(const FO3DTokenFetchRequest& Request, TFunction<void(const FO3DTokenResult&)> OnComplete, int32 RetryAttempt);
+
+	/**
+	 * Calculate exponential backoff delay in seconds.
+	 */
+	float CalculateBackoffDelay(int32 RetryAttempt) const;
+
+	/**
+	 * Determine if an error is retryable.
+	 */
+	bool IsRetryableError(const FO3DTokenResult& Result) const;
 
 	/** Active HTTP requests (for cancellation) */
 	TArray<FHttpRequestPtr> ActiveRequests;
