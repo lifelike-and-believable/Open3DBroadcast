@@ -8,6 +8,9 @@
 // Include LiveKit FFI for callback types
 #include "livekit_ffi.h"
 
+// Token management
+#include "../Shared/WebRTCTokenManager.h"
+
 DECLARE_LOG_CATEGORY_EXTERN(LogO3DWebRTCSender, Log, All);
 
 // Note: LiveKit FFI handles Opus encoding internally.
@@ -78,8 +81,16 @@ private:
     bool ShouldDropFrameDueToBackpressure() const;
     void UpdateFrameSendMetrics(int32 SubjectsInFrame);
 
+    // Token management (auto-fetch support)
+    TUniquePtr<FO3DTokenManager> TokenManager;
+    TAtomic<bool> bWaitingForToken{ false };
+    double TokenFetchStartTime = 0.0;
+    static constexpr double TokenFetchTimeoutSec = 30.0;
+
     // Helper methods
     bool ParseConfig(const FO3DTransportConfig& Config);
+    bool EnsureTokenAvailable();
+    void CheckTokenRefresh();
 
     // LiveKit FFI callbacks (static)
     struct FCallbacks;
