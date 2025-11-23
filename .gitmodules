@@ -19,3 +19,7 @@
 [submodule "ProjectSandbox/External/moq-ffi"]
 	path = ProjectSandbox/External/moq-ffi
 	url = https://github.com/lifelike-and-believable/moq-ffi.git
+[submodule "ProjectSandbox/External/moq-rs"]
+	path = ProjectSandbox/External/moq-rs
+	url = https://github.com/cloudflare/moq-rs.git
+	branch = draft-ietf-moq-transport-07
