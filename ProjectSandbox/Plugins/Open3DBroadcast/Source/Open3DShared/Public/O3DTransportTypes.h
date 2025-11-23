@@ -73,6 +73,31 @@ struct FO3DTransportConfig
      */
     bool bPersistToken = false;
 
+    /**
+     * Enable automatic token fetching from a token generator endpoint.
+     * When true, Token field is ignored and tokens are fetched from TokenEndpointUrl.
+     * Default: false (use manual token)
+     */
+    bool bUseAutoTokenFetch = false;
+
+    /**
+     * URL of the token generator endpoint (e.g., https://livekit.example.com/token).
+     * Only used when bUseAutoTokenFetch is true.
+     * Endpoint should respond to POST requests with JSON containing "token" field.
+     * 
+     * SECURITY NOTE: The token generator server should store LiveKit API credentials (API key/secret).
+     * The client only sends room, identity, and role information. The server generates and signs
+     * the JWT token using its stored credentials. This keeps LiveKit credentials secure on the server.
+     */
+    FString TokenEndpointUrl;
+
+    /**
+     * Seconds before token expiry to trigger automatic refresh.
+     * Default: 300 (5 minutes)
+     * Only applies when bUseAutoTokenFetch is true.
+     */
+    int32 TokenRefreshLeadTimeSec = 300;
+
     /** Transport-specific advanced key/value overrides. Keys are case-insensitive. */
     TMap<FString, FString> AdvancedParams;
 
@@ -103,6 +128,17 @@ struct FO3DTransportConfig
             AudioSummary = TEXT("[Enabled=0]");
         }
 
+        FString TokenInfo;
+        if (bUseAutoTokenFetch)
+        {
+            TokenInfo = FString::Printf(TEXT("Auto-fetch(endpoint=%s)"),
+                TokenEndpointUrl.IsEmpty() ? TEXT("<empty>") : TEXT("<provided>"));
+        }
+        else
+        {
+            TokenInfo = bPersistToken ? TEXT("<persist>") : (Token.IsEmpty() ? TEXT("<empty>") : TEXT("<provided>"));
+        }
+
         return FString::Printf(TEXT("[Transport=%s Role=%s Backend=%s Uri=%s StreamId=%s Advanced={%s} Token=%s Audio=%s]"),
             *Transport,
             *Role,
@@ -110,7 +146,7 @@ struct FO3DTransportConfig
             *Uri,
             *StreamId,
             *ParamsSummary,
-            bPersistToken ? TEXT("<persist>") : (Token.IsEmpty() ? TEXT("<empty>") : TEXT("<provided>")),
+            *TokenInfo,
             *AudioSummary);
     }
 };

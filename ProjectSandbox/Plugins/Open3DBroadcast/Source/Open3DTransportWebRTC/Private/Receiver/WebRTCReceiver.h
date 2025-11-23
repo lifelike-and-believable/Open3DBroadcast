@@ -9,6 +9,9 @@
 // Include LiveKit FFI for callback types
 #include "livekit_ffi.h"
 
+// Token management
+#include "../Shared/WebRTCTokenManager.h"
+
 DECLARE_LOG_CATEGORY_EXTERN(LogO3DWebRTCReceiver, Log, All);
 
 // Note: LiveKit FFI handles Opus decoding internally.
@@ -98,6 +101,12 @@ private:
     double NoDataReconnectTimeoutSec = 5.0;
     TAtomic<bool> bReconnectPending{ false };
 
+    // Token management (auto-fetch support)
+    TUniquePtr<FO3DTokenManager> TokenManager;
+    TAtomic<bool> bWaitingForToken{ false };
+    double TokenFetchStartTime = 0.0;
+    static constexpr double TokenFetchTimeoutSec = 30.0;
+
     // Helper methods
     bool ParseConfig(const FO3DTransportConfig& Config);
     bool SetupClientHandle();
@@ -106,6 +115,8 @@ private:
     void ProcessReconnectIfNeeded();
     void RequestReconnect(bool bForce = false);
     FString GetOrCacheSubjectLabel(const char* RawLabel);  // Cache C-string→FString conversions
+    bool EnsureTokenAvailable();
+    void CheckTokenRefresh();
 
     // LiveKit FFI callbacks (static)
     struct FCallbacks;

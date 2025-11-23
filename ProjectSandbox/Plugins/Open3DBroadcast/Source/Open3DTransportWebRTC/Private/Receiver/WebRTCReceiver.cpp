@@ -476,6 +476,20 @@ bool FO3DWebRTCReceiver::Start()
         return true;
     }
 
+    // Ensure we have a valid token
+    if (!EnsureTokenAvailable())
+    {
+        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Waiting for token before connecting..."));
+        // Will retry in Poll()
+        return true; // Return true to not fail startup, will connect when token available
+    }
+
+    if (Token.IsEmpty())
+    {
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Cannot connect: token is empty"));
+        return false;
+    }
+
     // Create default consumer if not set
     if (!Consumer.IsValid())
     {
@@ -528,10 +542,17 @@ void FO3DWebRTCReceiver::Stop()
         PendingFramesBySubject.Reset();
     }
 
+    // Reset token manager
+    if (TokenManager.IsValid())
+    {
+        TokenManager->Reset();
+    }
+
     bConnected.Store(false);
     bInitialized.Store(false);
     bPendingAudioFormatApply.Store(false);
     bReconnectPending.Store(false);
+    bWaitingForToken.Store(false);
 
     UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver stopped"));
 }
@@ -643,6 +664,28 @@ int32 FO3DWebRTCReceiver::Poll()
         TEXT("[ARCH] Poll() END: Processed %d frames from %d subjects"),
         FramesProcessed, PendingFramesBySubject.Num());
 
+    // Check if we're waiting for initial token and it's now available
+    if (bInitialized.Load() && !bConnected.Load() && !bWaitingForToken.Load())
+    {
+        FString CurrentToken;
+        if (TokenManager.IsValid() && TokenManager->GetCurrentToken(CurrentToken) && !CurrentToken.IsEmpty())
+        {
+            // Token is now available, retry connection
+            if (Token.IsEmpty() || Token != CurrentToken)
+            {
+                Token = CurrentToken;
+                UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("Token now available, attempting connection..."));
+                Start(); // Will use the newly fetched token
+            }
+        }
+    }
+
+    // Check for token refresh if connected
+    if (bConnected.Load())
+    {
+        CheckTokenRefresh();
+    }
+
     double LastDataTime = 0.0;
     {
         FScopeLock DataLock(&LastDataMutex);
@@ -702,20 +745,149 @@ bool FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& Config)
     // Automatically prepend the correct WebSocket protocol prefix
     RoomUrl = WebRTCUtils::PrependWebSocketProtocol(HostAddress);
 
-    Token = Config.Token;
-    if (Token.IsEmpty())
+    // Use StreamId as subject name if provided, otherwise use a default
+    SubjectName = Config.StreamId.IsEmpty() ? TEXT("WebRTCStream") : Config.StreamId;
+
+    // Initialize token manager
+    TokenManager = MakeUnique<FO3DTokenManager>();
+
+    FO3DTokenConfig TokenConfig;
+    
+    if (Config.bUseAutoTokenFetch)
     {
-        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC token not provided"));
+        // Auto-fetch mode
+        TokenConfig.Mode = EO3DTokenMode::AutoFetch;
+        TokenConfig.EndpointUrl = Config.TokenEndpointUrl;
+        TokenConfig.RoomName = Config.StreamId; // Use StreamId as room name
+        TokenConfig.Identity = FString::Printf(TEXT("receiver-%d"), FPlatformProcess::GetCurrentProcessId());
+        TokenConfig.Role = EO3DTokenRole::Subscriber;
+        TokenConfig.RefreshLeadTimeSec = Config.TokenRefreshLeadTimeSec;
+
+        if (TokenConfig.EndpointUrl.IsEmpty())
+        {
+            UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Auto-fetch enabled but no token endpoint URL provided"));
+            return false;
+        }
+
+        UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("Token auto-fetch enabled: endpoint=%s, room=%s"),
+            *TokenConfig.EndpointUrl, *TokenConfig.RoomName);
+    }
+    else
+    {
+        // Manual token mode
+        TokenConfig.Mode = EO3DTokenMode::Manual;
+        TokenConfig.ManualToken = Config.Token;
+
+        if (TokenConfig.ManualToken.IsEmpty())
+        {
+            UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC token not provided"));
+            return false;
+        }
+
+        UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("Manual token mode"));
+    }
+
+    if (!TokenManager->Initialize(TokenConfig))
+    {
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Failed to initialize token manager"));
         return false;
     }
 
-    // Use StreamId as subject name if provided, otherwise use a default
-    SubjectName = Config.StreamId.IsEmpty() ? TEXT("WebRTCStream") : Config.StreamId;
+    // Get initial token if in manual mode
+    if (!Config.bUseAutoTokenFetch)
+    {
+        if (!TokenManager->GetCurrentToken(Token))
+        {
+            UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Failed to get initial token"));
+            return false;
+        }
+    }
 
     const double TimeoutSeconds = FMath::Clamp(ParseDoubleOption(Config.AdvancedParams, ReconnectTimeoutOptionKey, 2.0), 0.0, 300.0);
     NoDataReconnectTimeoutSec = TimeoutSeconds;
 
     return true;
+}
+
+bool FO3DWebRTCReceiver::EnsureTokenAvailable()
+{
+    // Check if we already have a valid token
+    if (TokenManager->GetCurrentToken(Token))
+    {
+        return true;
+    }
+
+    // Need to fetch token
+    if (!bWaitingForToken.Load())
+    {
+        bWaitingForToken.Store(true);
+        TokenFetchStartTime = FPlatformTime::Seconds();
+
+        UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("Fetching token..."));
+
+        // Initiate async token fetch
+        TokenManager->RefreshTokenAsync([this](const FO3DTokenResult& Result)
+        {
+            if (Result.bSuccess && !Result.Token.IsEmpty())
+            {
+                UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("Token fetched successfully"));
+                Token = Result.Token;
+                bWaitingForToken.Store(false);
+            }
+            else
+            {
+                UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Token fetch failed: %s"), *Result.ErrorMessage);
+                bWaitingForToken.Store(false);
+            }
+        });
+    }
+
+    // Check for timeout
+    const double Now = FPlatformTime::Seconds();
+    if (bWaitingForToken.Load() && (Now - TokenFetchStartTime > TokenFetchTimeoutSec))
+    {
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Token fetch timed out after %.1f seconds"), TokenFetchTimeoutSec);
+        bWaitingForToken.Store(false);
+        return false;
+    }
+
+    // Still waiting for token
+    return false;
+}
+
+void FO3DWebRTCReceiver::CheckTokenRefresh()
+{
+    if (!TokenManager.IsValid())
+    {
+        return;
+    }
+
+    // Check if token needs refresh
+    if (TokenManager->NeedsRefresh() && !bWaitingForToken.Load())
+    {
+        const int64 TimeUntilExpiry = TokenManager->GetTimeUntilExpiry();
+        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Token expiring soon (in %lld seconds), refreshing..."), TimeUntilExpiry);
+
+        bWaitingForToken.Store(true);
+
+        TokenManager->RefreshTokenAsync([this](const FO3DTokenResult& Result)
+        {
+            if (Result.bSuccess && !Result.Token.IsEmpty())
+            {
+                UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("Token refreshed successfully"));
+                Token = Result.Token;
+                
+                // TODO: Reconnect with new token if already connected
+                // For now, we rely on token having sufficient TTL
+            }
+            else
+            {
+                UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Token refresh failed: %s"), *Result.ErrorMessage);
+            }
+            
+            bWaitingForToken.Store(false);
+        });
+    }
 }
 
 FString FO3DWebRTCReceiver::GetOrCacheSubjectLabel(const char* RawLabel)
