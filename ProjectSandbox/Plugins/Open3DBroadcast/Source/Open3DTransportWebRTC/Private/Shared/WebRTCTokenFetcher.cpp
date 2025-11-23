@@ -42,13 +42,6 @@ void FO3DTokenFetcher::FetchTokenAsync(const FO3DTokenFetchRequest& Request, TFu
 	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
 	HttpRequest->SetTimeout(Request.TimeoutSeconds);
 
-	// Add authentication header if API key provided
-	if (!Request.ApiKey.IsEmpty())
-	{
-		const FString AuthHeader = FString::Printf(TEXT("Bearer %s"), *Request.ApiKey);
-		HttpRequest->SetHeader(TEXT("Authorization"), AuthHeader);
-	}
-
 	// Build request body
 	FString RequestBody = BuildRequestBody(Request);
 	HttpRequest->SetContentAsString(RequestBody);

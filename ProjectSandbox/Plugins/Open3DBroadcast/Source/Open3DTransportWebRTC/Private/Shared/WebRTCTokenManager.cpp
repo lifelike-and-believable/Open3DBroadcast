@@ -188,8 +188,6 @@ void FO3DTokenManager::RefreshTokenAsync(TFunction<void(const FO3DTokenResult&)>
 	Request.RoomName = Config.RoomName;
 	Request.Identity = Config.Identity;
 	Request.Role = Config.Role == EO3DTokenRole::Publisher ? TEXT("publisher") : TEXT("subscriber");
-	Request.ApiKey = Config.ApiKey;
-	Request.ApiSecret = Config.ApiSecret;
 
 	// Initiate async fetch
 	UE_LOG(LogO3DWebRTCTokenManager, Log, TEXT("Fetching token from endpoint: %s (room: %s, identity: %s, role: %s)"),

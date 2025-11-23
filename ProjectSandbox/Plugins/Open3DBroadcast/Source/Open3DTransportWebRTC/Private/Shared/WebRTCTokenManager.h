@@ -41,12 +41,6 @@ struct FO3DTokenConfig
 	/** Token endpoint URL for auto-fetch (used when Mode == AutoFetch) */
 	FString EndpointUrl;
 	
-	/** API key for authentication (optional) */
-	FString ApiKey;
-	
-	/** API secret for authentication (optional) */
-	FString ApiSecret;
-	
 	/** Room name for token generation */
 	FString RoomName;
 	

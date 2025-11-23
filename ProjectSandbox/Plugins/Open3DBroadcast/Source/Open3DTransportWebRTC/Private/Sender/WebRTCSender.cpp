@@ -919,8 +919,6 @@ bool FO3DWebRTCSender::ParseConfig(const FO3DTransportConfig& Config)
         // Auto-fetch mode
         TokenConfig.Mode = EO3DTokenMode::AutoFetch;
         TokenConfig.EndpointUrl = Config.TokenEndpointUrl;
-        TokenConfig.ApiKey = Config.TokenApiKey;
-        TokenConfig.ApiSecret = Config.TokenApiSecret;
         TokenConfig.RoomName = Config.StreamId; // Use StreamId as room name
         TokenConfig.Identity = FString::Printf(TEXT("sender-%d"), FPlatformProcess::GetCurrentProcessId());
         TokenConfig.Role = EO3DTokenRole::Publisher;

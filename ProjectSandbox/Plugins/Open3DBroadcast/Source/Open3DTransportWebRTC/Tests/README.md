@@ -68,7 +68,9 @@ curl http://localhost:8080/health
 
 ### Examples
 
-#### With API Key Authentication
+#### With API Key Authentication (Optional)
+
+The mock server can optionally require authentication. This simulates a production token server that validates requests before generating tokens.
 
 ```bash
 # Start server with API key requirement
@@ -80,6 +82,8 @@ curl -X POST http://localhost:8080/token \
   -H "Authorization: Bearer my-secret-key" \
   -d '{"room":"test-room","identity":"sender-1","role":"publisher"}'
 ```
+
+**Note:** This authentication is between the client and the token server, NOT LiveKit credentials. The LiveKit API credentials are stored in the mock server's `API_SECRET` environment variable and never sent by the client.
 
 #### Custom Token TTL
 
@@ -106,9 +110,11 @@ To use the mock server with Open3DTransportWebRTC:
 2. In Unreal Editor, configure your sender/receiver:
    - Enable "Use Auto Token Fetch"
    - Set "Token Endpoint URL" to `http://localhost:8080/token`
-   - Leave "Token API Key" and "Token API Secret" empty (unless you set `API_KEY`)
+   - Set "Stream ID" to your room name (e.g., "test-room")
 
 3. The transport will automatically fetch tokens from the mock server
+
+**Security Note:** The mock server represents the token generator service that stores LiveKit API credentials. In production, this would be a secure backend service. The Unreal client only sends room, identity, and role information - it never has access to LiveKit API credentials.
 
 ### Token Format
 

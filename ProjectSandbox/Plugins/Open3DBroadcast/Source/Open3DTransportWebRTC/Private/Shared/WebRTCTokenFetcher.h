@@ -24,12 +24,6 @@ struct FO3DTokenFetchRequest
 	/** Role: "publisher" or "subscriber" */
 	FString Role;
 	
-	/** API key for authentication (optional, sent as Authorization header) */
-	FString ApiKey;
-	
-	/** API secret for authentication (optional, can be used for HMAC) */
-	FString ApiSecret;
-	
 	/** Request timeout in seconds (default: 10) */
 	float TimeoutSeconds = 10.0f;
 	

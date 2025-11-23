@@ -141,7 +141,6 @@ Implement automatic token fetching from a hosted token generator endpoint with:
 
 **Key Features:**
 - Async HTTP via Unreal's IHttpRequest
-- Authorization header support
 - JSON serialization/deserialization
 - Error handling with specific messages
 - Configurable request timeout (10 seconds default)
@@ -157,16 +156,12 @@ bool bUseAutoTokenFetch = false;
 // Token endpoint URL
 FString TokenEndpointUrl;  // e.g., "http://localhost:8080/token"
 
-// Optional authentication
-FString TokenApiKey;       // Sent as Bearer token
-FString TokenApiSecret;    // For HMAC or other schemes
-
-// Security flag
-bool bPersistTokenCredentials = false;  // Default: don't save
-
 // Refresh timing
 int32 TokenRefreshLeadTimeSec = 300;  // 5 minutes default
 ```
+
+**Security Architecture:**
+The token generator server stores LiveKit API credentials (API key/secret). The client only sends room, identity, and role information. The server generates and signs the JWT token using its stored credentials. This keeps LiveKit credentials secure on the server.
 
 ### Token Endpoint Protocol
 
@@ -176,19 +171,15 @@ int32 TokenRefreshLeadTimeSec = 300;  // 5 minutes default
 POST /token HTTP/1.1
 Host: livekit.example.com
 Content-Type: application/json
-Authorization: Bearer <TokenApiKey>  # If provided
 
 {
   "room": "test-room",
   "identity": "sender-12345",
-  "role": "publisher",  // or "subscriber"
-  "grants": {
-    "roomCreate": true,
-    "canPublish": true,
-    "canSubscribe": false
-  }
+  "role": "publisher"  // or "subscriber"
 }
 ```
+
+**Note:** The token generator server receives this request and uses its stored LiveKit API credentials to generate and sign the JWT. The client does not send or have access to LiveKit API credentials.
 
 #### Response Format
 
@@ -276,7 +267,6 @@ Config.Uri = TEXT("wss://livekit.example.com");
 Config.StreamId = TEXT("my-room");
 Config.bUseAutoTokenFetch = true;
 Config.TokenEndpointUrl = TEXT("https://livekit.example.com/token");
-Config.TokenApiKey = TEXT("my-api-key");  // Optional
 Config.TokenRefreshLeadTimeSec = 300;     // 5 minutes
 // Config.Token is ignored in auto-fetch mode
 ```
@@ -303,16 +293,23 @@ Config.TokenRefreshLeadTimeSec = 300;     // 5 minutes
 
 ### Credential Storage
 
-**Default Behavior:**
-- `bPersistTokenCredentials = false` by default
-- API keys and secrets not saved to disk
-- Tokens themselves are temporary (1 hour default TTL)
+**Architecture:**
+- LiveKit API credentials (API key/secret) are stored on the token generator server, NOT on the client
+- The client only sends room, identity, and role information to the token endpoint
+- The server uses its stored credentials to generate and sign JWT tokens
+- This architecture ensures LiveKit credentials never leave the server
 
-**Recommendations:**
-- Use environment variables for production credentials
-- Consider secure key vaults (e.g., AWS Secrets Manager)
-- Rotate API keys periodically
+**Default Behavior:**
+- Tokens are temporary (1 hour default TTL)
+- No credentials stored on client side
+- Token endpoint should use HTTPS in production
+
+**Recommendations for Token Server:**
+- Store LiveKit API credentials securely (environment variables or secure vaults like AWS Secrets Manager)
+- Rotate LiveKit API keys periodically
 - Use HTTPS for token endpoints in production
+- Implement rate limiting to prevent abuse
+- Validate client requests (e.g., check allowed identities/rooms)
 
 ### Token Transmission
 

@@ -84,28 +84,12 @@ struct FO3DTransportConfig
      * URL of the token generator endpoint (e.g., https://livekit.example.com/token).
      * Only used when bUseAutoTokenFetch is true.
      * Endpoint should respond to POST requests with JSON containing "token" field.
+     * 
+     * SECURITY NOTE: The token generator server should store LiveKit API credentials (API key/secret).
+     * The client only sends room, identity, and role information. The server generates and signs
+     * the JWT token using its stored credentials. This keeps LiveKit credentials secure on the server.
      */
     FString TokenEndpointUrl;
-
-    /**
-     * API key for authenticating with the token endpoint (optional).
-     * Sent as Authorization: Bearer <ApiKey> header.
-     * SECURITY: Should not persist by default. Set bPersistTokenCredentials to store.
-     */
-    FString TokenApiKey;
-
-    /**
-     * API secret for authenticating with the token endpoint (optional).
-     * May be used for HMAC signing or other authentication schemes.
-     * SECURITY: Should not persist by default. Set bPersistTokenCredentials to store.
-     */
-    FString TokenApiSecret;
-
-    /**
-     * Whether to persist token credentials (ApiKey/ApiSecret) to disk.
-     * Default: false for security. Use environment variables or secure vaults in production.
-     */
-    bool bPersistTokenCredentials = false;
 
     /**
      * Seconds before token expiry to trigger automatic refresh.
@@ -147,9 +131,8 @@ struct FO3DTransportConfig
         FString TokenInfo;
         if (bUseAutoTokenFetch)
         {
-            TokenInfo = FString::Printf(TEXT("Auto-fetch(endpoint=%s,apikey=%s)"),
-                TokenEndpointUrl.IsEmpty() ? TEXT("<empty>") : TEXT("<provided>"),
-                TokenApiKey.IsEmpty() ? TEXT("<empty>") : TEXT("<provided>"));
+            TokenInfo = FString::Printf(TEXT("Auto-fetch(endpoint=%s)"),
+                TokenEndpointUrl.IsEmpty() ? TEXT("<empty>") : TEXT("<provided>"));
         }
         else
         {
