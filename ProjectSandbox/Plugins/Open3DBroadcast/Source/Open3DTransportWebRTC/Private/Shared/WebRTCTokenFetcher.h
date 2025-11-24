@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Containers/UnrealString.h"
+#include "TimerManager.h"
 
 // Forward declarations
 struct FO3DTokenResult;
