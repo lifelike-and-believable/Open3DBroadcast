@@ -17,6 +17,26 @@ This document outlines the complete feature requirements, implementation status,
 
 ---
 
+## Verification Snapshot (November 23, 2024)
+
+**Scope:** Reviewed this document alongside the current Unreal implementation located under `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportWebRTC`.
+
+### Confirmed Functionality
+- `Shared/WebRTCTokenManager.*` and `Shared/WebRTCTokenFetcher.*` implement the auto-fetch pipeline, including JWT expiry parsing, async HTTP requests, and exponential backoff.
+- `Sender/WebRTCSender.cpp` and `Receiver/WebRTCReceiver.cpp` initialize the token manager inside `ParseConfig`, gate startup on `EnsureTokenAvailable()`, and poll `CheckTokenRefresh()` every tick.
+- `Open3DTransportWebRTCModule.cpp` exposes the same configuration toggles inside both the sender component and LiveLink source UI, persisting values through transport options.
+
+### Identified Gaps
+- `FO3DTokenFetcher::ExecuteFetchWithRetry` only sets the JSON body and `Content-Type` header. There is no way to attach Authorization/API-key headers yet, so protected token endpoints cannot be called from the client.
+- Refresh callbacks do not trigger LiveKit reconnection; `WebRTCSender.cpp` and `WebRTCReceiver.cpp` still contain TODOs to hot-swap tokens mid-session.
+- No automated unit or integration tests exist for the token manager/fetcher. The only shipped test artifact is the Flask mock token server.
+
+### Immediate Follow-Ups
+- Track client-side authentication header support as a Priority 2 item so deployments that enforce bearer/API tokens on `/token` are unblocked.
+- Prioritize the planned reconnection work and the missing unit tests before claiming production readiness.
+
+---
+
 ## Table of Contents
 
 1. [Feature Description](#feature-description)
@@ -97,6 +117,7 @@ When auto-fetch is enabled, the system shall:
 - [x] Error logging with actionable messages
 - [x] Configurable timeout (default: 10 seconds)
 - [x] Retry logic with exponential backoff
+- [ ] Authorization/API-key header injection for secured endpoints (client currently sends unauthenticated requests)
 
 #### FR-3: Token Refresh Before Expiry
 **Status:** ✅ Implemented
@@ -381,7 +402,7 @@ The system shall be easy to configure and use:
 - Flask-based mock token server
 - LiveKit-compatible JWT generation
 - Configurable TTL
-- Optional authentication
+- Optional authentication (server-side only; keep `API_KEY` unset unless/until the Unreal client learns to send Authorization headers)
 - Comprehensive documentation
 
 **Status:** Fully functional for development/testing
@@ -690,6 +711,21 @@ If a token expires during an active connection, the connection may drop. Manual 
 - No critical vulnerabilities
 - High/medium findings remediated
 - Security sign-off obtained
+
+#### Task P2-5: Client-Side Token Endpoint Authentication Support
+**Owner:** Core Developer  
+**Effort:** 4-6 hours  
+**Dependencies:** Token fetcher infrastructure
+
+**Deliverables:**
+- Ability to configure bearer/API-key credentials for token requests
+- `FO3DTokenFetcher` updates to attach Authorization headers (and redact them in logs)
+- Documentation update explaining how to supply credentials securely
+
+**Acceptance Criteria:**
+- Sender/receiver successfully call endpoints that require Authorization headers
+- Credentials never persisted to disk or written to verbose logs
+- Manual/auto modes remain backward compatible
 
 ### Priority 3: Nice to Have (Could Have)
 
