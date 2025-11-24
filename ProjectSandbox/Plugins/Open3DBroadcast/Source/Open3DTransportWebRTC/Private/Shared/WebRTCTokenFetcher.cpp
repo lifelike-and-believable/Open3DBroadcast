@@ -72,6 +72,7 @@ void FO3DTokenFetcher::ExecuteFetchWithRetry(const FO3DTokenFetchRequest& Reques
 		ActiveRequests.Remove(Req);
 
 		FO3DTokenResult Result;
+		int32 ResponseCode = 0;
 
 		if (!bSuccess)
 		{
@@ -87,7 +88,7 @@ void FO3DTokenFetcher::ExecuteFetchWithRetry(const FO3DTokenFetchRequest& Reques
 		}
 		else
 		{
-			const int32 ResponseCode = Resp->GetResponseCode();
+			ResponseCode = Resp->GetResponseCode();
 			
 			if (ResponseCode < 200 || ResponseCode >= 300)
 			{
@@ -112,7 +113,7 @@ void FO3DTokenFetcher::ExecuteFetchWithRetry(const FO3DTokenFetchRequest& Reques
 		}
 
 		// Check if we should retry
-		if (!Result.bSuccess && IsRetryableError(Result) && RetryAttempt < Request.MaxRetries)
+		if (!Result.bSuccess && IsRetryableError(Result, ResponseCode) && RetryAttempt < Request.MaxRetries)
 		{
 			// Calculate backoff delay
 			const float DelaySeconds = CalculateBackoffDelay(RetryAttempt);
@@ -128,9 +129,10 @@ void FO3DTokenFetcher::ExecuteFetchWithRetry(const FO3DTokenFetchRequest& Reques
 			
 			// Get timer manager from the world
 			UWorld* World = GWorld.GetReference();
-			if (World && World->GetTimerManager().IsValid())
+			if (World)
 			{
 				World->GetTimerManager().SetTimer(RetryTimer, RetryDelegate, DelaySeconds, false);
+				ActiveRetryTimers.Add(RetryTimer);
 			}
 			else
 			{
@@ -186,6 +188,18 @@ void FO3DTokenFetcher::CancelPendingRequests()
 	}
 	
 	ActiveRequests.Empty();
+	
+	// Clear any pending retry timers
+	UWorld* World = GWorld.GetReference();
+	if (World)
+	{
+		for (const FTimerHandle& TimerHandle : ActiveRetryTimers)
+		{
+			World->GetTimerManager().ClearTimer(TimerHandle);
+		}
+	}
+	
+	ActiveRetryTimers.Empty();
 }
 
 FString FO3DTokenFetcher::BuildRequestBody(const FO3DTokenFetchRequest& Request) const
@@ -267,35 +281,35 @@ float FO3DTokenFetcher::CalculateBackoffDelay(int32 RetryAttempt) const
 {
 	// Exponential backoff: 1s, 2s, 4s, 8s, 16s
 	// Formula: delay = 2^RetryAttempt seconds, capped at 16 seconds
+	// Clamp RetryAttempt to prevent integer overflow in bit shift
 	const int32 MaxDelay = 16;
-	const int32 Delay = FMath::Min(1 << RetryAttempt, MaxDelay);
+	const int32 Delay = FMath::Min(1 << FMath::Min(RetryAttempt, 4), MaxDelay);
 	return static_cast<float>(Delay);
 }
 
-bool FO3DTokenFetcher::IsRetryableError(const FO3DTokenResult& Result) const
+bool FO3DTokenFetcher::IsRetryableError(const FO3DTokenResult& Result, int32 ResponseCode) const
 {
-	// Retry on network errors, timeouts, and server errors (5xx)
-	// Don't retry on client errors (4xx) as those indicate bad requests
-	
+	// Retry on network errors and timeouts (no response code)
 	if (Result.ErrorMessage.Contains(TEXT("network error"), ESearchCase::IgnoreCase) ||
 		Result.ErrorMessage.Contains(TEXT("timeout"), ESearchCase::IgnoreCase))
 	{
 		return true;
 	}
 	
-	// Check for HTTP 5xx server errors
-	if (Result.ErrorMessage.Contains(TEXT("HTTP error 5"), ESearchCase::IgnoreCase))
+	// Check HTTP response code for retryable errors
+	// HTTP 5xx server errors are retryable
+	if (ResponseCode >= 500 && ResponseCode < 600)
 	{
 		return true;
 	}
 	
 	// HTTP 429 (Too Many Requests) is also retryable
-	if (Result.ErrorMessage.Contains(TEXT("HTTP error 429"), ESearchCase::IgnoreCase))
+	if (ResponseCode == 429)
 	{
 		return true;
 	}
 	
-	// Don't retry client errors (4xx) or parse errors
+	// Don't retry client errors (4xx) or other errors
 	return false;
 }
 

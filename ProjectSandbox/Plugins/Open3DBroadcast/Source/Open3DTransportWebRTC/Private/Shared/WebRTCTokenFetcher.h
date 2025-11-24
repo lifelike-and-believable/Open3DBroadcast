@@ -90,8 +90,11 @@ private:
 	/**
 	 * Determine if an error is retryable.
 	 */
-	bool IsRetryableError(const FO3DTokenResult& Result) const;
+	bool IsRetryableError(const FO3DTokenResult& Result, int32 ResponseCode) const;
 
 	/** Active HTTP requests (for cancellation) */
 	TArray<FHttpRequestPtr> ActiveRequests;
+	
+	/** Active retry timers (for cancellation during shutdown) */
+	TArray<FTimerHandle> ActiveRetryTimers;
 };

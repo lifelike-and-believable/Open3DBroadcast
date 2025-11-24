@@ -33,6 +33,11 @@ namespace WebRTCConfig
 	static constexpr TCHAR UseAutoTokenFetchKey[] = TEXT("webrtc.useAutoTokenFetch");
 	static constexpr TCHAR TokenEndpointUrlKey[] = TEXT("webrtc.tokenEndpointUrl");
 	static constexpr TCHAR TokenRefreshLeadTimeKey[] = TEXT("webrtc.tokenRefreshLeadTimeSec");
+	
+	// Token refresh lead time constants
+	static constexpr int32 MinTokenRefreshLeadTimeSec = 60;     // 1 minute
+	static constexpr int32 MaxTokenRefreshLeadTimeSec = 3600;   // 1 hour
+	static constexpr int32 DefaultTokenRefreshLeadTimeSec = 300; // 5 minutes
 
 	// Sender config helpers
 	static FString GetSenderOption(const UO3DSenderComponent* Component, const TCHAR* Key)
@@ -121,6 +126,7 @@ namespace WebRTCSender
 						SAssignNew(UseAutoTokenFetchCheckBox, SCheckBox)
 						.IsChecked(bInitialUseAutoFetch ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
 						.OnCheckStateChanged(this, &SWebRTCSenderSettingsPanel::HandleUseAutoTokenFetchChanged)
+						.ToolTipText(LOCTEXT("WebRTCUseAutoTokenFetchCheckboxTooltip", "Automatically fetch JWT tokens from a token generator endpoint instead of manually entering them. Requires a token server that implements the LiveKit token generation API."))
 					]
 					+ SHorizontalBox::Slot()
 					.Padding(8.f, 0.f, 0.f, 0.f)
@@ -182,8 +188,8 @@ namespace WebRTCSender
 				[
 					SAssignNew(TokenRefreshLeadTimeSpinBox, SSpinBox<int32>)
 					.Value(InitialRefreshLeadTime)
-					.MinValue(60)
-					.MaxValue(3600)
+					.MinValue(WebRTCConfig::MinTokenRefreshLeadTimeSec)
+					.MaxValue(WebRTCConfig::MaxTokenRefreshLeadTimeSec)
 					.OnValueCommitted(this, &SWebRTCSenderSettingsPanel::HandleTokenRefreshLeadTimeCommitted)
 					.Visibility_Lambda([this]() { return GetUseAutoTokenFetch() ? EVisibility::Visible : EVisibility::Collapsed; })
 				]
@@ -266,10 +272,10 @@ namespace WebRTCSender
 		{
 			if (!SenderComponent)
 			{
-				return 300; // Default: 5 minutes
+				return WebRTCConfig::DefaultTokenRefreshLeadTimeSec;
 			}
 			const FString Value = SenderComponent->GetTransportOption(WebRTCConfig::TokenRefreshLeadTimeKey);
-			return Value.IsEmpty() ? 300 : FCString::Atoi(*Value);
+			return Value.IsEmpty() ? WebRTCConfig::DefaultTokenRefreshLeadTimeSec : FCString::Atoi(*Value);
 		}
 
 		void SetTokenRefreshLeadTime(int32 Value)
@@ -385,6 +391,7 @@ namespace WebRTCReceiver
 						SAssignNew(UseAutoTokenFetchCheckBox, SCheckBox)
 						.IsChecked(bInitialUseAutoFetch ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
 						.OnCheckStateChanged(this, &SWebRTCReceiverSettingsPanel::HandleUseAutoTokenFetchChanged)
+						.ToolTipText(LOCTEXT("WebRTCReceiverUseAutoTokenFetchCheckboxTooltip", "Automatically fetch JWT tokens from a token generator endpoint instead of manually entering them. Requires a token server that implements the LiveKit token generation API."))
 					]
 					+ SHorizontalBox::Slot()
 					.Padding(8.f, 0.f, 0.f, 0.f)
@@ -452,8 +459,8 @@ namespace WebRTCReceiver
 				[
 					SAssignNew(TokenRefreshLeadTimeSpinBox, SSpinBox<int32>)
 					.Value(InitialRefreshLeadTime)
-					.MinValue(60)
-					.MaxValue(3600)
+					.MinValue(WebRTCConfig::MinTokenRefreshLeadTimeSec)
+					.MaxValue(WebRTCConfig::MaxTokenRefreshLeadTimeSec)
 					.OnValueCommitted(this, &SWebRTCReceiverSettingsPanel::HandleTokenRefreshLeadTimeCommitted)
 					.Visibility_Lambda([this]() { return GetUseAutoTokenFetchState() ? EVisibility::Visible : EVisibility::Collapsed; })
 				];
@@ -547,13 +554,13 @@ namespace WebRTCReceiver
 		{
 			if (!SettingsObject)
 			{
-				return 300; // Default: 5 minutes
+				return WebRTCConfig::DefaultTokenRefreshLeadTimeSec;
 			}
 			if (const FString* Existing = SettingsObject->Settings.TransportOptions.Find(WebRTCConfig::TokenRefreshLeadTimeKey))
 			{
 				return FCString::Atoi(**Existing);
 			}
-			return 300;
+			return WebRTCConfig::DefaultTokenRefreshLeadTimeSec;
 		}
 
 		void SetTokenRefreshLeadTime(int32 Value)
@@ -634,7 +641,7 @@ public:
 			// Configure auto-fetch fields
 			Config.bUseAutoTokenFetch = UseAutoTokenFetchStr.ToBool();
 			Config.TokenEndpointUrl = TokenEndpointUrlValue;
-			Config.TokenRefreshLeadTimeSec = TokenRefreshLeadTimeStr.IsEmpty() ? 300 : FCString::Atoi(*TokenRefreshLeadTimeStr);
+			Config.TokenRefreshLeadTimeSec = TokenRefreshLeadTimeStr.IsEmpty() ? WebRTCConfig::DefaultTokenRefreshLeadTimeSec : FCString::Atoi(*TokenRefreshLeadTimeStr);
 
 			Config.AdvancedParams.Add(WebRTCConfig::UrlOptionKey, UrlValue);
 			Config.AdvancedParams.Add(WebRTCConfig::TokenOptionKey, TokenValue);
@@ -675,7 +682,7 @@ public:
 			// Configure auto-fetch fields
 			Config.bUseAutoTokenFetch = UseAutoTokenFetchStr.ToBool();
 			Config.TokenEndpointUrl = TokenEndpointUrlValue;
-			Config.TokenRefreshLeadTimeSec = TokenRefreshLeadTimeStr.IsEmpty() ? 300 : FCString::Atoi(*TokenRefreshLeadTimeStr);
+			Config.TokenRefreshLeadTimeSec = TokenRefreshLeadTimeStr.IsEmpty() ? WebRTCConfig::DefaultTokenRefreshLeadTimeSec : FCString::Atoi(*TokenRefreshLeadTimeStr);
 
 			Config.AdvancedParams.Add(WebRTCConfig::UrlOptionKey, UrlValue);
 			Config.AdvancedParams.Add(WebRTCConfig::TokenOptionKey, TokenValue);
