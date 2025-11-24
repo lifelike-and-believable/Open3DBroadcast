@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo test:*)",
+      "Bash(cargo build:*)",
+      "Bash(dir:*)",
+      "Bash(cargo clean:*)",
+      "Bash(sort:*)",
+      "Bash(cargo rustc:*)",
+      "Bash(copy:*)",
+      "Bash(set RUST_LOG=debug:*)",
+      "Bash(\"C:\\Program Files\\Epic Games\\UE_5.7\\Engine\\Binaries\\Win64\\UE4Editor.exe\" \"e:\\OtherProjects\\Open3DStream\\ProjectSandbox\\ProjectSandbox.uproject\")",
+      "Bash(cmd /c:*)",
+      "Bash(\"C:\\Program Files\\Epic Games\\UE_5.7\\Engine\\Binaries\\Win64\\UnrealEditor.exe\" \"E:\\OtherProjects\\Open3DStream\\ProjectSandbox\\ProjectSandbox.uproject\" -log)",
+      "Bash(taskkill:*)",
+      "Bash(\"C:\\Program Files\\Epic Games\\UE_5.7\\Engine\\Build\\BatchFiles\\Build.bat\" Open3DTransportMoQEditor Win64 Development -Project=\"e:\\OtherProjects\\Open3DStream\\ProjectSandbox\\ProjectSandbox.uproject\" -waitmutex)",
+      "Bash(\"C:\\Program Files\\Epic Games\\UE_5.7\\Engine\\Build\\BatchFiles\\Build.bat\" ProjectSandboxEditor Win64 Development -Project=\"e:\\OtherProjects\\Open3DStream\\ProjectSandbox\\ProjectSandbox.uproject\" -waitmutex)",
+      "Bash(powershell -Command:*)",
+      "Bash(findstr:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
