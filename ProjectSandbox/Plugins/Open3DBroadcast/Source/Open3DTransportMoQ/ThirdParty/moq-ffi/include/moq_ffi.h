@@ -117,6 +117,37 @@ typedef void (*MoqDataCallback)(void* user_data, const uint8_t* data, size_t dat
 typedef void (*MoqTrackCallback)(void* user_data, const char* namespace_str, const char* track_name);
 
 /* ───────────────────────────────────────────────
+ * Initialization
+ * ─────────────────────────────────────────────── */
+
+/**
+ * Initialize the MoQ FFI crypto provider
+ *
+ * Must be called during module initialization before any TLS operations.
+ * Safe to call multiple times - subsequent calls are no-ops.
+ *
+ * This ensures the rustls crypto provider is installed in the process
+ * before any TLS connections are attempted.
+ *
+ * @return true on success (always succeeds)
+ * 
+ * @note Thread-safe: can be called from any thread
+ * @note Idempotent: safe to call multiple times
+ * @note Available since: v0.1.0
+ * 
+ * Example usage:
+ * @code
+ *   // C++: Call immediately after DLL load / module initialization
+ *   moq_init();
+ *   
+ *   // ... then later ...
+ *   // Now safe to create clients and connect
+ *   MoqClient* client = moq_client_create();
+ * @endcode
+ */
+MOQ_API bool moq_init(void);
+
+/* ───────────────────────────────────────────────
  * Client Management
  * ─────────────────────────────────────────────── */
 
