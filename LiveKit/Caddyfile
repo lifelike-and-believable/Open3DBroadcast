@@ -1,5 +1,0 @@
-# Automatic HTTPS with Let's Encrypt and reverse proxy to LiveKit
-livekit.maamawi.dance {
-  encode zstd gzip
-  reverse_proxy livekit:7880
-}
