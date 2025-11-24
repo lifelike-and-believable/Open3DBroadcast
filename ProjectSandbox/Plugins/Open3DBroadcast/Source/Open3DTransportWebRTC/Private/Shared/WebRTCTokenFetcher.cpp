@@ -6,6 +6,8 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonReader.h"
 #include "Logging/LogMacros.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 
 FO3DTokenFetcher::FO3DTokenFetcher()
 {
@@ -34,6 +36,12 @@ void FO3DTokenFetcher::FetchTokenAsync(const FO3DTokenFetchRequest& Request, TFu
 		return;
 	}
 
+	// Start fetch with retry logic (attempt 0 is the initial attempt)
+	ExecuteFetchWithRetry(Request, OnComplete, 0);
+}
+
+void FO3DTokenFetcher::ExecuteFetchWithRetry(const FO3DTokenFetchRequest& Request, TFunction<void(const FO3DTokenResult&)> OnComplete, int32 RetryAttempt)
+{
 	// Create HTTP request
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
 	
@@ -46,13 +54,107 @@ void FO3DTokenFetcher::FetchTokenAsync(const FO3DTokenFetchRequest& Request, TFu
 	FString RequestBody = BuildRequestBody(Request);
 	HttpRequest->SetContentAsString(RequestBody);
 
-	UE_LOG(LogO3DWebRTCTokenManager, Verbose, TEXT("Sending token fetch request to: %s"), *Request.EndpointUrl);
+	if (RetryAttempt == 0)
+	{
+		UE_LOG(LogO3DWebRTCTokenManager, Verbose, TEXT("Sending token fetch request to: %s"), *Request.EndpointUrl);
+	}
+	else
+	{
+		UE_LOG(LogO3DWebRTCTokenManager, Warning, TEXT("Retrying token fetch (attempt %d/%d) to: %s"), 
+			RetryAttempt, Request.MaxRetries, *Request.EndpointUrl);
+	}
 	UE_LOG(LogO3DWebRTCTokenManager, Verbose, TEXT("Request body: %s"), *RequestBody);
 
-	// Bind completion callback
-	HttpRequest->OnProcessRequestComplete().BindLambda([this, OnComplete](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bSuccess)
+	// Bind completion callback with retry context
+	HttpRequest->OnProcessRequestComplete().BindLambda([this, Request, OnComplete, RetryAttempt](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bSuccess)
 	{
-		OnHttpRequestComplete(Req, Resp, bSuccess, OnComplete);
+		// Remove from active requests
+		ActiveRequests.Remove(Req);
+
+		FO3DTokenResult Result;
+		int32 ResponseCode = 0;
+
+		if (!bSuccess)
+		{
+			Result.bSuccess = false;
+			Result.ErrorMessage = TEXT("HTTP request failed (network error or timeout)");
+			UE_LOG(LogO3DWebRTCTokenManager, Warning, TEXT("%s"), *Result.ErrorMessage);
+		}
+		else if (!Resp.IsValid())
+		{
+			Result.bSuccess = false;
+			Result.ErrorMessage = TEXT("Invalid HTTP response");
+			UE_LOG(LogO3DWebRTCTokenManager, Warning, TEXT("%s"), *Result.ErrorMessage);
+		}
+		else
+		{
+			ResponseCode = Resp->GetResponseCode();
+			
+			if (ResponseCode < 200 || ResponseCode >= 300)
+			{
+				Result.bSuccess = false;
+				Result.ErrorMessage = FString::Printf(TEXT("HTTP error %d: %s"), ResponseCode, *Resp->GetContentAsString());
+				UE_LOG(LogO3DWebRTCTokenManager, Warning, TEXT("Token fetch failed: %s"), *Result.ErrorMessage);
+			}
+			else
+			{
+				// Parse response
+				Result = ParseResponse(Resp);
+				
+				if (Result.bSuccess)
+				{
+					UE_LOG(LogO3DWebRTCTokenManager, Log, TEXT("Token fetched successfully (expires at: %lld)"), Result.ExpiresAt);
+				}
+				else
+				{
+					UE_LOG(LogO3DWebRTCTokenManager, Warning, TEXT("Failed to parse token response: %s"), *Result.ErrorMessage);
+				}
+			}
+		}
+
+		// Check if we should retry
+		if (!Result.bSuccess && IsRetryableError(Result, ResponseCode) && RetryAttempt < Request.MaxRetries)
+		{
+			// Calculate backoff delay
+			const float DelaySeconds = CalculateBackoffDelay(RetryAttempt);
+			
+			UE_LOG(LogO3DWebRTCTokenManager, Log, TEXT("Will retry after %.1f seconds..."), DelaySeconds);
+			
+			// Schedule retry using timer
+			FTimerHandle RetryTimer;
+			FTimerDelegate RetryDelegate = FTimerDelegate::CreateLambda([this, Request, OnComplete, RetryAttempt]()
+			{
+				ExecuteFetchWithRetry(Request, OnComplete, RetryAttempt + 1);
+			});
+			
+			// Get timer manager from the world
+			UWorld* World = GWorld.GetReference();
+			if (World)
+			{
+				World->GetTimerManager().SetTimer(RetryTimer, RetryDelegate, DelaySeconds, false);
+				ActiveRetryTimers.Add(RetryTimer);
+			}
+			else
+			{
+				// Fallback: immediate retry if no timer manager available
+				UE_LOG(LogO3DWebRTCTokenManager, Warning, TEXT("Timer manager not available, retrying immediately"));
+				ExecuteFetchWithRetry(Request, OnComplete, RetryAttempt + 1);
+			}
+		}
+		else
+		{
+			// No more retries or success - invoke completion callback
+			if (!Result.bSuccess && RetryAttempt >= Request.MaxRetries)
+			{
+				UE_LOG(LogO3DWebRTCTokenManager, Error, TEXT("Token fetch failed after %d attempts: %s"), 
+					RetryAttempt + 1, *Result.ErrorMessage);
+			}
+			
+			if (OnComplete)
+			{
+				OnComplete(Result);
+			}
+		}
 	});
 
 	// Send request
@@ -86,6 +188,18 @@ void FO3DTokenFetcher::CancelPendingRequests()
 	}
 	
 	ActiveRequests.Empty();
+	
+	// Clear any pending retry timers
+	UWorld* World = GWorld.GetReference();
+	if (World)
+	{
+		for (FTimerHandle& TimerHandle : ActiveRetryTimers)
+		{
+			World->GetTimerManager().ClearTimer(TimerHandle);
+		}
+	}
+	
+	ActiveRetryTimers.Empty();
 }
 
 FString FO3DTokenFetcher::BuildRequestBody(const FO3DTokenFetchRequest& Request) const
@@ -163,73 +277,40 @@ FString FO3DTokenFetcher::BuildRequestBody(const FO3DTokenFetchRequest& Request)
 	return TEXT("{}");
 }
 
-void FO3DTokenFetcher::OnHttpRequestComplete(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful, TFunction<void(const FO3DTokenResult&)> OnComplete)
+float FO3DTokenFetcher::CalculateBackoffDelay(int32 RetryAttempt) const
 {
-	// Remove from active requests
-	ActiveRequests.Remove(Request);
+	// Exponential backoff: 1s, 2s, 4s, 8s, 16s
+	// Formula: delay = 2^RetryAttempt seconds, capped at 16 seconds
+	// Clamp RetryAttempt to prevent integer overflow in bit shift
+	const int32 MaxDelay = 16;
+	const int32 Delay = FMath::Min(1 << FMath::Min(RetryAttempt, 4), MaxDelay);
+	return static_cast<float>(Delay);
+}
 
-	FO3DTokenResult Result;
-
-	if (!bWasSuccessful)
+bool FO3DTokenFetcher::IsRetryableError(const FO3DTokenResult& Result, int32 ResponseCode) const
+{
+	// Retry on network errors and timeouts (no response code)
+	if (Result.ErrorMessage.Contains(TEXT("network error"), ESearchCase::IgnoreCase) ||
+		Result.ErrorMessage.Contains(TEXT("timeout"), ESearchCase::IgnoreCase))
 	{
-		Result.bSuccess = false;
-		Result.ErrorMessage = TEXT("HTTP request failed (network error or timeout)");
-		
-		UE_LOG(LogO3DWebRTCTokenManager, Error, TEXT("%s"), *Result.ErrorMessage);
-		
-		if (OnComplete)
-		{
-			OnComplete(Result);
-		}
-		return;
+		return true;
 	}
-
-	if (!Response.IsValid())
-	{
-		Result.bSuccess = false;
-		Result.ErrorMessage = TEXT("Invalid HTTP response");
-		
-		UE_LOG(LogO3DWebRTCTokenManager, Error, TEXT("%s"), *Result.ErrorMessage);
-		
-		if (OnComplete)
-		{
-			OnComplete(Result);
-		}
-		return;
-	}
-
-	const int32 ResponseCode = Response->GetResponseCode();
 	
-	if (ResponseCode < 200 || ResponseCode >= 300)
+	// Check HTTP response code for retryable errors
+	// HTTP 5xx server errors are retryable
+	if (ResponseCode >= 500 && ResponseCode < 600)
 	{
-		Result.bSuccess = false;
-		Result.ErrorMessage = FString::Printf(TEXT("HTTP error %d: %s"), ResponseCode, *Response->GetContentAsString());
-		
-		UE_LOG(LogO3DWebRTCTokenManager, Error, TEXT("Token fetch failed: %s"), *Result.ErrorMessage);
-		
-		if (OnComplete)
-		{
-			OnComplete(Result);
-		}
-		return;
+		return true;
 	}
-
-	// Parse response
-	Result = ParseResponse(Response);
 	
-	if (Result.bSuccess)
+	// HTTP 429 (Too Many Requests) is also retryable
+	if (ResponseCode == 429)
 	{
-		UE_LOG(LogO3DWebRTCTokenManager, Log, TEXT("Token fetched successfully (expires at: %lld)"), Result.ExpiresAt);
+		return true;
 	}
-	else
-	{
-		UE_LOG(LogO3DWebRTCTokenManager, Error, TEXT("Failed to parse token response: %s"), *Result.ErrorMessage);
-	}
-
-	if (OnComplete)
-	{
-		OnComplete(Result);
-	}
+	
+	// Don't retry client errors (4xx) or other errors
+	return false;
 }
 
 FO3DTokenResult FO3DTokenFetcher::ParseResponse(FHttpResponsePtr Response) const

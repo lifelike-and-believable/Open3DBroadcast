@@ -6,6 +6,7 @@ A comprehensive guide to configuring, using, and troubleshooting the WebRTC tran
 
 1. [Quick Start](#quick-start)
 2. [Configuration Guide](#configuration-guide)
+   - [Automatic Token Fetch](#automatic-token-fetch-recommended)
 3. [Audio Configuration](#audio-configuration)
 4. [Platform Support](#platform-support)
 5. [Troubleshooting](#troubleshooting)
@@ -76,7 +77,71 @@ The WebRTC transport allows you to stream motion capture data and audio to/from 
 **Token Expiration**
 - ⚠️ Tokens have lifetimes (typically 24 hours default)
 - When expired: Connection fails with authentication error
-- **Solution:** Refresh token before expiration or request new one from server
+- **Solution:** Use automatic token fetch (recommended) or manually refresh tokens
+
+### Automatic Token Fetch (Recommended)
+
+**New in v1.0.5:** Automatically fetch JWT tokens from your token server instead of manual entry.
+
+**Benefits:**
+- No manual token copying during development
+- Tokens automatically refresh before expiration
+- Supports multiple concurrent users with unique credentials
+- LiveKit credentials stay secure on the server
+
+**Setup:**
+
+1. **Deploy a Token Generator Server**
+   - Your backend service that generates LiveKit JWTs
+   - Endpoint should accept POST requests to `/token`
+   - Example: `https://your-server.com/token`
+   - See `Tests/mock-token-server.py` for reference implementation
+
+2. **Configure in Unreal Editor**
+   - Select your O3DSenderComponent or open LiveLink source settings
+   - Choose "WebRTC" as transport
+   - Check "Use Auto Token Fetch"
+   - Enter "Token Endpoint URL": `https://your-server.com/token`
+   - Set "Token Refresh Lead Time": 300 seconds (5 minutes recommended)
+
+3. **How It Works**
+   - On startup: Unreal fetches token from your endpoint
+   - Request includes: room name, identity, role (publisher/subscriber)
+   - Your server generates and signs JWT using stored LiveKit credentials
+   - Token automatically refreshes before expiration
+   - No manual token management required
+
+**Token Server Requirements:**
+- Accept POST with JSON: `{room, identity, role}`
+- Return JSON: `{token, expiresAt}` or `{token, ttl}`
+- Store LiveKit API key/secret securely on server
+- Support HTTPS for production
+
+**Example Token Server Request/Response:**
+```json
+// Request
+POST https://your-server.com/token
+Content-Type: application/json
+{
+  "room": "MyRoom",
+  "identity": "sender-12345",
+  "role": "publisher"
+}
+
+// Response
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "expiresAt": 1700000000,
+  "ttl": 3600
+}
+```
+
+**Troubleshooting Auto Fetch:**
+- Check logs: `LogO3DWebRTCTokenManager` for fetch status
+- Verify endpoint URL is correct and accessible
+- Ensure server returns valid JSON with "token" field
+- Check network firewall allows HTTPS to your server
+- Review retry attempts in logs (automatic retry on failures)
 
 ### Room Configuration
 

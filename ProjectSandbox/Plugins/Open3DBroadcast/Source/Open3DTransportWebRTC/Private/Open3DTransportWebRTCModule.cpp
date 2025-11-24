@@ -15,6 +15,8 @@
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Input/SNumericEntryBox.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Layout/SBox.h"
 #endif // WITH_EDITOR
@@ -28,6 +30,14 @@ namespace WebRTCConfig
 {
 	static constexpr TCHAR UrlOptionKey[] = TEXT("webrtc.url");
 	static constexpr TCHAR TokenOptionKey[] = TEXT("webrtc.token");
+	static constexpr TCHAR UseAutoTokenFetchKey[] = TEXT("webrtc.useAutoTokenFetch");
+	static constexpr TCHAR TokenEndpointUrlKey[] = TEXT("webrtc.tokenEndpointUrl");
+	static constexpr TCHAR TokenRefreshLeadTimeKey[] = TEXT("webrtc.tokenRefreshLeadTimeSec");
+	
+	// Token refresh lead time constants
+	static constexpr int32 MinTokenRefreshLeadTimeSec = 60;     // 1 minute
+	static constexpr int32 MaxTokenRefreshLeadTimeSec = 3600;   // 1 hour
+	static constexpr int32 DefaultTokenRefreshLeadTimeSec = 300; // 5 minutes
 
 	// Sender config helpers
 	static FString GetSenderOption(const UO3DSenderComponent* Component, const TCHAR* Key)
@@ -82,6 +92,9 @@ namespace WebRTCSender
 
 			const FString InitialUrl = ResolveUrlValue();
 			const FString InitialToken = ResolveTokenValue();
+			const bool bInitialUseAutoFetch = ResolveUseAutoTokenFetch();
+			const FString InitialTokenEndpoint = ResolveTokenEndpointUrl();
+			const int32 InitialRefreshLeadTime = ResolveTokenRefreshLeadTime();
 
 			ChildSlot
 			[
@@ -91,6 +104,7 @@ namespace WebRTCSender
 				[
 					SNew(STextBlock)
 					.Text(LOCTEXT("WebRTCUrlLabel", "LiveKit Host"))
+					.ToolTipText(LOCTEXT("WebRTCUrlTooltip", "The WebSocket URL of your LiveKit server (e.g., wss://livekit.example.com)"))
 				]
 				+ SVerticalBox::Slot()
 				.AutoHeight()
@@ -99,23 +113,85 @@ namespace WebRTCSender
 					SAssignNew(UrlTextBox, SEditableTextBox)
 					.Text(FText::FromString(InitialUrl))
 					.OnTextCommitted(this, &SWebRTCSenderSettingsPanel::HandleUrlCommitted)
-					.HintText(LOCTEXT("WebRTCUrlHint", "e.g., livkit.example.com or 127.0.0.1"))
+					.HintText(LOCTEXT("WebRTCUrlHint", "e.g., wss://livekit.example.com or ws://127.0.0.1:7880"))
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(0.f, 0.f, 0.f, 8.f)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					[
+						SAssignNew(UseAutoTokenFetchCheckBox, SCheckBox)
+						.IsChecked(bInitialUseAutoFetch ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
+						.OnCheckStateChanged(this, &SWebRTCSenderSettingsPanel::HandleUseAutoTokenFetchChanged)
+						.ToolTipText(LOCTEXT("WebRTCUseAutoTokenFetchCheckboxTooltip", "Automatically fetch JWT tokens from a token generator endpoint instead of manually entering them. Requires a token server that implements the LiveKit token generation API."))
+					]
+					+ SHorizontalBox::Slot()
+					.Padding(8.f, 0.f, 0.f, 0.f)
+					.VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("WebRTCUseAutoTokenFetchLabel", "Use Auto Token Fetch"))
+						.ToolTipText(LOCTEXT("WebRTCUseAutoTokenFetchTooltip", "Automatically fetch JWT tokens from a token generator endpoint instead of manually entering them. Requires a token server that implements the LiveKit token generation API."))
+					]
 				]
 				+ SVerticalBox::Slot()
 				.AutoHeight()
 				[
 					SNew(STextBlock)
 					.Text(LOCTEXT("WebRTCTokenLabel", "Access Token"))
+					.ToolTipText(LOCTEXT("WebRTCTokenTooltip", "LiveKit JWT access token (only used when Auto Token Fetch is disabled)"))
+					.Visibility_Lambda([this]() { return GetUseAutoTokenFetch() ? EVisibility::Collapsed : EVisibility::Visible; })
 				]
 				+ SVerticalBox::Slot()
 				.AutoHeight()
-				.Padding(0.f, 4.f, 0.f, 0.f)
+				.Padding(0.f, 4.f, 0.f, 8.f)
 				[
 					SAssignNew(TokenTextBox, SEditableTextBox)
 					.Text(FText::FromString(InitialToken))
 					.OnTextCommitted(this, &SWebRTCSenderSettingsPanel::HandleTokenCommitted)
 					.HintText(LOCTEXT("WebRTCTokenHint", "LiveKit access token"))
 					.IsPassword(true)
+					.Visibility_Lambda([this]() { return GetUseAutoTokenFetch() ? EVisibility::Collapsed : EVisibility::Visible; })
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("WebRTCTokenEndpointLabel", "Token Endpoint URL"))
+					.ToolTipText(LOCTEXT("WebRTCTokenEndpointTooltip", "The HTTP/HTTPS endpoint that generates JWT tokens (e.g., https://myserver.com/token). The server should accept POST requests with room, identity, and role parameters."))
+					.Visibility_Lambda([this]() { return GetUseAutoTokenFetch() ? EVisibility::Visible : EVisibility::Collapsed; })
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(0.f, 4.f, 0.f, 8.f)
+				[
+					SAssignNew(TokenEndpointTextBox, SEditableTextBox)
+					.Text(FText::FromString(InitialTokenEndpoint))
+					.OnTextCommitted(this, &SWebRTCSenderSettingsPanel::HandleTokenEndpointCommitted)
+					.HintText(LOCTEXT("WebRTCTokenEndpointHint", "https://myserver.com/token"))
+					.Visibility_Lambda([this]() { return GetUseAutoTokenFetch() ? EVisibility::Visible : EVisibility::Collapsed; })
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("WebRTCTokenRefreshLeadTimeLabel", "Token Refresh Lead Time (seconds)"))
+					.ToolTipText(LOCTEXT("WebRTCTokenRefreshLeadTimeTooltip", "How many seconds before token expiry to trigger an automatic refresh. Default is 300 seconds (5 minutes)."))
+					.Visibility_Lambda([this]() { return GetUseAutoTokenFetch() ? EVisibility::Visible : EVisibility::Collapsed; })
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(0.f, 4.f, 0.f, 0.f)
+				[
+					SAssignNew(TokenRefreshLeadTimeSpinBox, SSpinBox<int32>)
+					.Value(InitialRefreshLeadTime)
+					.MinValue(WebRTCConfig::MinTokenRefreshLeadTimeSec)
+					.MaxValue(WebRTCConfig::MaxTokenRefreshLeadTimeSec)
+					.OnValueCommitted(this, &SWebRTCSenderSettingsPanel::HandleTokenRefreshLeadTimeCommitted)
+					.Visibility_Lambda([this]() { return GetUseAutoTokenFetch() ? EVisibility::Visible : EVisibility::Collapsed; })
 				]
 			];
 		}
@@ -153,6 +229,64 @@ namespace WebRTCSender
 			SenderComponent->SetTransportOption(WebRTCConfig::TokenOptionKey, Sanitized);
 		}
 
+		bool ResolveUseAutoTokenFetch() const
+		{
+			if (!SenderComponent)
+			{
+				return false;
+			}
+			const FString Value = SenderComponent->GetTransportOption(WebRTCConfig::UseAutoTokenFetchKey);
+			return Value.ToBool();
+		}
+
+		void SetUseAutoTokenFetch(bool bValue)
+		{
+			if (!SenderComponent)
+			{
+				return;
+			}
+			SenderComponent->SetTransportOption(WebRTCConfig::UseAutoTokenFetchKey, bValue ? TEXT("true") : TEXT("false"));
+		}
+
+		bool GetUseAutoTokenFetch() const
+		{
+			return UseAutoTokenFetchCheckBox.IsValid() && UseAutoTokenFetchCheckBox->IsChecked();
+		}
+
+		FString ResolveTokenEndpointUrl() const
+		{
+			return SenderComponent ? SenderComponent->GetTransportOption(WebRTCConfig::TokenEndpointUrlKey) : FString();
+		}
+
+		void SetTokenEndpointUrl(const FString& NewValue)
+		{
+			if (!SenderComponent)
+			{
+				return;
+			}
+			const FString Sanitized = NewValue.TrimStartAndEnd();
+			SenderComponent->SetTransportOption(WebRTCConfig::TokenEndpointUrlKey, Sanitized);
+		}
+
+		int32 ResolveTokenRefreshLeadTime() const
+		{
+			if (!SenderComponent)
+			{
+				return WebRTCConfig::DefaultTokenRefreshLeadTimeSec;
+			}
+			const FString Value = SenderComponent->GetTransportOption(WebRTCConfig::TokenRefreshLeadTimeKey);
+			return Value.IsEmpty() ? WebRTCConfig::DefaultTokenRefreshLeadTimeSec : FCString::Atoi(*Value);
+		}
+
+		void SetTokenRefreshLeadTime(int32 Value)
+		{
+			if (!SenderComponent)
+			{
+				return;
+			}
+			SenderComponent->SetTransportOption(WebRTCConfig::TokenRefreshLeadTimeKey, FString::FromInt(Value));
+		}
+
 		void HandleUrlCommitted(const FText& NewText, ETextCommit::Type CommitType)
 		{
 			SetUrlValue(NewText.ToString());
@@ -162,6 +296,25 @@ namespace WebRTCSender
 		void HandleTokenCommitted(const FText& NewText, ETextCommit::Type CommitType)
 		{
 			SetTokenValue(NewText.ToString());
+			NotifyConfigChanged();
+		}
+
+		void HandleUseAutoTokenFetchChanged(ECheckBoxState NewState)
+		{
+			const bool bNewValue = (NewState == ECheckBoxState::Checked);
+			SetUseAutoTokenFetch(bNewValue);
+			NotifyConfigChanged();
+		}
+
+		void HandleTokenEndpointCommitted(const FText& NewText, ETextCommit::Type CommitType)
+		{
+			SetTokenEndpointUrl(NewText.ToString());
+			NotifyConfigChanged();
+		}
+
+		void HandleTokenRefreshLeadTimeCommitted(int32 NewValue, ETextCommit::Type CommitType)
+		{
+			SetTokenRefreshLeadTime(NewValue);
 			NotifyConfigChanged();
 		}
 
@@ -177,6 +330,9 @@ namespace WebRTCSender
 		FSimpleDelegate OnConfigChanged;
 		TSharedPtr<SEditableTextBox> UrlTextBox;
 		TSharedPtr<SEditableTextBox> TokenTextBox;
+		TSharedPtr<SCheckBox> UseAutoTokenFetchCheckBox;
+		TSharedPtr<SEditableTextBox> TokenEndpointTextBox;
+		TSharedPtr<SSpinBox<int32>> TokenRefreshLeadTimeSpinBox;
 	};
 }
 
@@ -200,6 +356,9 @@ namespace WebRTCReceiver
 
 			const FString InitialUrl = GetUrlValue();
 			const FString InitialToken = GetTokenValue();
+			const bool bInitialUseAutoFetch = GetUseAutoTokenFetch();
+			const FString InitialTokenEndpoint = GetTokenEndpointUrl();
+			const int32 InitialRefreshLeadTime = GetTokenRefreshLeadTime();
 
 			TSharedRef<SVerticalBox> PanelContent = SNew(SVerticalBox);
 
@@ -208,6 +367,7 @@ namespace WebRTCReceiver
 				[
 					SNew(STextBlock)
 					.Text(LOCTEXT("WebRTCReceiverUrlLabel", "LiveKit Host"))
+					.ToolTipText(LOCTEXT("WebRTCReceiverUrlTooltip", "The WebSocket URL of your LiveKit server (e.g., wss://livekit.example.com)"))
 				];
 
 			PanelContent->AddSlot()
@@ -217,7 +377,30 @@ namespace WebRTCReceiver
 					SAssignNew(UrlTextBox, SEditableTextBox)
 					.Text(FText::FromString(InitialUrl))
 					.OnTextCommitted(this, &SWebRTCReceiverSettingsPanel::HandleUrlCommitted)
-					.HintText(LOCTEXT("WebRTCReceiverUrlHint", "e.g., livkit.example.com or 127.0.0.1"))
+					.HintText(LOCTEXT("WebRTCReceiverUrlHint", "e.g., wss://livekit.example.com or ws://127.0.0.1:7880"))
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				.Padding(0.f, 0.f, 0.f, 8.f)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					[
+						SAssignNew(UseAutoTokenFetchCheckBox, SCheckBox)
+						.IsChecked(bInitialUseAutoFetch ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
+						.OnCheckStateChanged(this, &SWebRTCReceiverSettingsPanel::HandleUseAutoTokenFetchChanged)
+						.ToolTipText(LOCTEXT("WebRTCReceiverUseAutoTokenFetchCheckboxTooltip", "Automatically fetch JWT tokens from a token generator endpoint instead of manually entering them. Requires a token server that implements the LiveKit token generation API."))
+					]
+					+ SHorizontalBox::Slot()
+					.Padding(8.f, 0.f, 0.f, 0.f)
+					.VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("WebRTCReceiverUseAutoTokenFetchLabel", "Use Auto Token Fetch"))
+						.ToolTipText(LOCTEXT("WebRTCReceiverUseAutoTokenFetchTooltip", "Automatically fetch JWT tokens from a token generator endpoint instead of manually entering them. Requires a token server that implements the LiveKit token generation API."))
+					]
 				];
 
 			PanelContent->AddSlot()
@@ -225,17 +408,61 @@ namespace WebRTCReceiver
 				[
 					SNew(STextBlock)
 					.Text(LOCTEXT("WebRTCReceiverTokenLabel", "Access Token"))
+					.ToolTipText(LOCTEXT("WebRTCReceiverTokenTooltip", "LiveKit JWT access token (only used when Auto Token Fetch is disabled)"))
+					.Visibility_Lambda([this]() { return GetUseAutoTokenFetchState() ? EVisibility::Collapsed : EVisibility::Visible; })
 				];
 
 			PanelContent->AddSlot()
 				.AutoHeight()
-				.Padding(0.f, 4.f, 0.f, 0.f)
+				.Padding(0.f, 4.f, 0.f, 8.f)
 				[
 					SAssignNew(TokenTextBox, SEditableTextBox)
 					.Text(FText::FromString(InitialToken))
 					.OnTextCommitted(this, &SWebRTCReceiverSettingsPanel::HandleTokenCommitted)
 					.HintText(LOCTEXT("WebRTCReceiverTokenHint", "LiveKit access token"))
 					.IsPassword(true)
+					.Visibility_Lambda([this]() { return GetUseAutoTokenFetchState() ? EVisibility::Collapsed : EVisibility::Visible; })
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("WebRTCReceiverTokenEndpointLabel", "Token Endpoint URL"))
+					.ToolTipText(LOCTEXT("WebRTCReceiverTokenEndpointTooltip", "The HTTP/HTTPS endpoint that generates JWT tokens (e.g., https://myserver.com/token). The server should accept POST requests with room, identity, and role parameters."))
+					.Visibility_Lambda([this]() { return GetUseAutoTokenFetchState() ? EVisibility::Visible : EVisibility::Collapsed; })
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				.Padding(0.f, 4.f, 0.f, 8.f)
+				[
+					SAssignNew(TokenEndpointTextBox, SEditableTextBox)
+					.Text(FText::FromString(InitialTokenEndpoint))
+					.OnTextCommitted(this, &SWebRTCReceiverSettingsPanel::HandleTokenEndpointCommitted)
+					.HintText(LOCTEXT("WebRTCReceiverTokenEndpointHint", "https://myserver.com/token"))
+					.Visibility_Lambda([this]() { return GetUseAutoTokenFetchState() ? EVisibility::Visible : EVisibility::Collapsed; })
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("WebRTCReceiverTokenRefreshLeadTimeLabel", "Token Refresh Lead Time (seconds)"))
+					.ToolTipText(LOCTEXT("WebRTCReceiverTokenRefreshLeadTimeTooltip", "How many seconds before token expiry to trigger an automatic refresh. Default is 300 seconds (5 minutes)."))
+					.Visibility_Lambda([this]() { return GetUseAutoTokenFetchState() ? EVisibility::Visible : EVisibility::Collapsed; })
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				.Padding(0.f, 4.f, 0.f, 0.f)
+				[
+					SAssignNew(TokenRefreshLeadTimeSpinBox, SSpinBox<int32>)
+					.Value(InitialRefreshLeadTime)
+					.MinValue(WebRTCConfig::MinTokenRefreshLeadTimeSec)
+					.MaxValue(WebRTCConfig::MaxTokenRefreshLeadTimeSec)
+					.OnValueCommitted(this, &SWebRTCReceiverSettingsPanel::HandleTokenRefreshLeadTimeCommitted)
+					.Visibility_Lambda([this]() { return GetUseAutoTokenFetchState() ? EVisibility::Visible : EVisibility::Collapsed; })
 				];
 
 			BuildPanel(PanelContent, InArgs._PanelWidthOverride);
@@ -282,6 +509,65 @@ namespace WebRTCReceiver
 			WebRTCConfig::SetReceiverOption(SettingsObject, WebRTCConfig::TokenOptionKey, Value.TrimStartAndEnd());
 		}
 
+		bool GetUseAutoTokenFetch() const
+		{
+			if (!SettingsObject)
+			{
+				return false;
+			}
+			if (const FString* Existing = SettingsObject->Settings.TransportOptions.Find(WebRTCConfig::UseAutoTokenFetchKey))
+			{
+				return Existing->ToBool();
+			}
+			return false;
+		}
+
+		void SetUseAutoTokenFetch(bool bValue)
+		{
+			WebRTCConfig::SetReceiverOption(SettingsObject, WebRTCConfig::UseAutoTokenFetchKey, bValue ? TEXT("true") : TEXT("false"));
+		}
+
+		bool GetUseAutoTokenFetchState() const
+		{
+			return UseAutoTokenFetchCheckBox.IsValid() && UseAutoTokenFetchCheckBox->IsChecked();
+		}
+
+		FString GetTokenEndpointUrl() const
+		{
+			if (!SettingsObject)
+			{
+				return FString();
+			}
+			if (const FString* Existing = SettingsObject->Settings.TransportOptions.Find(WebRTCConfig::TokenEndpointUrlKey))
+			{
+				return *Existing;
+			}
+			return FString();
+		}
+
+		void SetTokenEndpointUrl(const FString& Value)
+		{
+			WebRTCConfig::SetReceiverOption(SettingsObject, WebRTCConfig::TokenEndpointUrlKey, Value.TrimStartAndEnd());
+		}
+
+		int32 GetTokenRefreshLeadTime() const
+		{
+			if (!SettingsObject)
+			{
+				return WebRTCConfig::DefaultTokenRefreshLeadTimeSec;
+			}
+			if (const FString* Existing = SettingsObject->Settings.TransportOptions.Find(WebRTCConfig::TokenRefreshLeadTimeKey))
+			{
+				return FCString::Atoi(**Existing);
+			}
+			return WebRTCConfig::DefaultTokenRefreshLeadTimeSec;
+		}
+
+		void SetTokenRefreshLeadTime(int32 Value)
+		{
+			WebRTCConfig::SetReceiverOption(SettingsObject, WebRTCConfig::TokenRefreshLeadTimeKey, FString::FromInt(Value));
+		}
+
 		void HandleUrlCommitted(const FText& NewText, ETextCommit::Type CommitType)
 		{
 			SetUrlValue(NewText.ToString());
@@ -294,9 +580,30 @@ namespace WebRTCReceiver
 			SubmitFromTextCommit(CommitType);
 		}
 
+		void HandleUseAutoTokenFetchChanged(ECheckBoxState NewState)
+		{
+			const bool bNewValue = (NewState == ECheckBoxState::Checked);
+			SetUseAutoTokenFetch(bNewValue);
+		}
+
+		void HandleTokenEndpointCommitted(const FText& NewText, ETextCommit::Type CommitType)
+		{
+			SetTokenEndpointUrl(NewText.ToString());
+			SubmitFromTextCommit(CommitType);
+		}
+
+		void HandleTokenRefreshLeadTimeCommitted(int32 NewValue, ETextCommit::Type CommitType)
+		{
+			SetTokenRefreshLeadTime(NewValue);
+			SubmitFromTextCommit(CommitType);
+		}
+
 		UO3DReceiverSettingsObject* SettingsObject = nullptr;
 		TSharedPtr<SEditableTextBox> UrlTextBox;
 		TSharedPtr<SEditableTextBox> TokenTextBox;
+		TSharedPtr<SCheckBox> UseAutoTokenFetchCheckBox;
+		TSharedPtr<SEditableTextBox> TokenEndpointTextBox;
+		TSharedPtr<SSpinBox<int32>> TokenRefreshLeadTimeSpinBox;
 	};
 }
 #endif // WITH_EDITOR
@@ -323,10 +630,18 @@ public:
 
 			const FString UrlValue = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::UrlOptionKey);
 			const FString TokenValue = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::TokenOptionKey);
+			const FString UseAutoTokenFetchStr = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::UseAutoTokenFetchKey);
+			const FString TokenEndpointUrlValue = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::TokenEndpointUrlKey);
+			const FString TokenRefreshLeadTimeStr = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::TokenRefreshLeadTimeKey);
 
 			Config.Uri = UrlValue;
 			Config.Token = TokenValue;
 			Config.Role = TEXT("publisher");
+
+			// Configure auto-fetch fields
+			Config.bUseAutoTokenFetch = UseAutoTokenFetchStr.ToBool();
+			Config.TokenEndpointUrl = TokenEndpointUrlValue;
+			Config.TokenRefreshLeadTimeSec = TokenRefreshLeadTimeStr.IsEmpty() ? WebRTCConfig::DefaultTokenRefreshLeadTimeSec : FCString::Atoi(*TokenRefreshLeadTimeStr);
 
 			Config.AdvancedParams.Add(WebRTCConfig::UrlOptionKey, UrlValue);
 			Config.AdvancedParams.Add(WebRTCConfig::TokenOptionKey, TokenValue);
@@ -355,11 +670,19 @@ public:
 
 			const FString UrlValue = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::UrlOptionKey);
 			const FString TokenValue = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::TokenOptionKey);
+			const FString UseAutoTokenFetchStr = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::UseAutoTokenFetchKey);
+			const FString TokenEndpointUrlValue = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::TokenEndpointUrlKey);
+			const FString TokenRefreshLeadTimeStr = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::TokenRefreshLeadTimeKey);
 
 			Config.Uri = UrlValue;
 			Config.Token = TokenValue;
 			Config.StreamId = TEXT("WebRTCStream");
 			Config.Role = TEXT("subscriber");
+
+			// Configure auto-fetch fields
+			Config.bUseAutoTokenFetch = UseAutoTokenFetchStr.ToBool();
+			Config.TokenEndpointUrl = TokenEndpointUrlValue;
+			Config.TokenRefreshLeadTimeSec = TokenRefreshLeadTimeStr.IsEmpty() ? WebRTCConfig::DefaultTokenRefreshLeadTimeSec : FCString::Atoi(*TokenRefreshLeadTimeStr);
 
 			Config.AdvancedParams.Add(WebRTCConfig::UrlOptionKey, UrlValue);
 			Config.AdvancedParams.Add(WebRTCConfig::TokenOptionKey, TokenValue);
