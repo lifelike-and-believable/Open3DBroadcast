@@ -4,6 +4,8 @@
 
 #include "Containers/Array.h"
 #include "Containers/Set.h"
+#include "HAL/ThreadSafeBool.h"
+#include "Templates/Atomic.h"
 #include "Templates/Function.h"
 #include "Shared/MoQHandles.h"
 #include "Shared/MoQTypes.h"
