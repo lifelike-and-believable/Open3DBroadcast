@@ -35,10 +35,10 @@ public:
 			UE_LOG(LogO3DMoQSender, Error, TEXT("Failed to load MoQ FFI library: %s"), *FMoQFfiSupport::GetStatusMessage());
 			return;
 		}
-
+		moq_init();
 		// Ensure dispatcher is ready for Phase 1 wrapper usage
 		FMoQAsyncDispatcher::Get().Initialize();
-
+	
 		RegisterTransports();
 
 		UE_LOG(LogO3DMoQSender, Log, TEXT("Open3D MoQ transport module started (Phase 2 - sender online, receiver pending)"));
