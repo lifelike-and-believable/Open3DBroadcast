@@ -193,7 +193,7 @@ void FO3DTokenFetcher::CancelPendingRequests()
 	UWorld* World = GWorld.GetReference();
 	if (World)
 	{
-		for (const FTimerHandle& TimerHandle : ActiveRetryTimers)
+		for (FTimerHandle& TimerHandle : ActiveRetryTimers)
 		{
 			World->GetTimerManager().ClearTimer(TimerHandle);
 		}
