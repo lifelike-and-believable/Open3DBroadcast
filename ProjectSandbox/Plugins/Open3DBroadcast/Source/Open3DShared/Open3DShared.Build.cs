@@ -74,6 +74,11 @@ internal static class O3DBuildFlags
             Result.WithNNG = ReadBool("O3D_WITH_TRANSPORT_NNG", Result.WithNNG);
             Result.WithWebRTC = ReadBool("O3D_WITH_TRANSPORT_WEBRTC", Result.WithWebRTC);
             Result.WithMoQ = ReadBool("O3D_WITH_TRANSPORT_MOQ", Result.WithMoQ);
+            if (Result.WithMoQ && Target.Platform != UnrealTargetPlatform.Win64)
+            {
+                Log.TraceInformation("O3D_WITH_TRANSPORT_MOQ is only supported on Win64 (target platform: {0}). Disabling MoQ transport for this build.", Target.Platform);
+                Result.WithMoQ = false;
+            }
             Result.WebRtcBackendLiveKit = ReadBool("O3D_WEBRTC_BACKEND_LIVEKIT", Result.WebRtcBackendLiveKit);
             Result.WebRtcBackendLibDc = ReadBool("O3D_WEBRTC_BACKEND_LIBDC", Result.WebRtcBackendLibDc);
             Result.EnableLegacy = ReadBool("O3D_ENABLE_LEGACY", Result.EnableLegacy);
