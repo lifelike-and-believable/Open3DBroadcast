@@ -6,7 +6,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonReader.h"
 #include "Logging/LogMacros.h"
-#include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "TimerManager.h"
 
 FO3DTokenFetcher::FO3DTokenFetcher()
@@ -126,10 +126,11 @@ void FO3DTokenFetcher::ExecuteFetchWithRetry(const FO3DTokenFetchRequest& Reques
 				ExecuteFetchWithRetry(Request, OnComplete, RetryAttempt + 1);
 			});
 			
-			// Get timer manager from the engine
-			if (GEngine)
+			// Get timer manager from the world
+			UWorld* World = GWorld.GetReference();
+			if (World && World->GetTimerManager().IsValid())
 			{
-				GEngine->GetTimerManager()->SetTimer(RetryTimer, RetryDelegate, DelaySeconds, false);
+				World->GetTimerManager().SetTimer(RetryTimer, RetryDelegate, DelaySeconds, false);
 			}
 			else
 			{
