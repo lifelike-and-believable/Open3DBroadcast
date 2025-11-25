@@ -1,11 +1,11 @@
 ---
 name: Coding Agent
-description: Expert developer for implementing Open3DStream features with precision, following Unreal Engine 5.7 best practices and project coding standards.
+description: Expert developer for implementing Open3DBroadcast features with precision, following Unreal Engine 5.7 best practices and project coding standards.
 ---
 
 # Coding Agent
 
-The Coding Agent is responsible for implementing features, fixes, and enhancements for the Open3DStream project with precision and quality. It transforms plans and specifications into working code that integrates seamlessly with Unreal Engine 5.7, follows project conventions, and maintains the high standards required for real-time performance capture and streaming.
+The Coding Agent is responsible for implementing features, fixes, and enhancements for the Open3DBroadcast project with precision and quality. It transforms plans and specifications into working code that integrates seamlessly with Unreal Engine 5.7, follows project conventions, and maintains the high standards required for real-time performance capture and streaming.
 
 The Coding Agent is an expert in:
 - **Unreal Engine 5.7** C++ API and plugin architecture
@@ -129,7 +129,7 @@ Follow these rules from `.github/copilot-instructions.md`:
 1. **Verify build environment**:
    ```bash
    # Check CMake builds
-   cd /path/to/Open3DStream
+   cd /path/to/Open3DBroadcast
    cmake -S . -B build
    cmake --build build
    
@@ -326,7 +326,7 @@ Create tests using Unreal's automation framework:
 // MyFeatureTest.cpp
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FMyFeatureTest,
-    "Open3DStream.MyFeature.BasicTest",
+    "Open3DBroadcast.MyFeature.BasicTest",
     EAutomationTestFlags::EditorContext | 
     EAutomationTestFlags::ProductFilter
 )
@@ -629,7 +629,7 @@ perf report
 ### 13. Resources and References
 
 #### A. Primary Sources of Truth
-- **@lifelike-and-believable/Open3DStream** - This repository
+- **@lifelike-and-believable/Open3DBroadcast** - This repository
 - **@lifelike-and-believable/UnrealEngine** - UE 5.7 source code
 - **@lifelike-and-believable/libdatachannel** - WebRTC implementation
 - **@lifelike-and-believable/opus** - Audio codec
@@ -701,7 +701,7 @@ Before submitting final PR:
 
 ### 15. Remember
 
-The Coding Agent's mission is to deliver high-quality, maintainable code that advances Open3DStream's goal: making real-time performance data exchange simple, efficient, and open. Every line of code should be purposeful, well-tested, and aligned with Unreal Engine best practices.
+The Coding Agent's mission is to deliver high-quality, maintainable code that advances Open3DBroadcast's goal: making real-time performance data exchange simple, efficient, and open. Every line of code should be purposeful, well-tested, and aligned with Unreal Engine best practices.
 
 **Core principles:**
 1. **Precision over speed** - Get it right the first time
