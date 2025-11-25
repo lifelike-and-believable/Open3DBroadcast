@@ -6,7 +6,9 @@ The `O3D_WITH_TRANSPORT_MOQ` environment variable controls whether the MoQ (Medi
 
 ## Default Value
 
-**Default:** `true` (MoQ transport is enabled by default)
+**Default:** `true` (MoQ transport is enabled by default on Win64)
+
+> **Platform guard:** The build scripts automatically disable MoQ on non-Win64 targets until additional moq-ffi binaries are vendored. Setting `O3D_WITH_TRANSPORT_MOQ=1` on Linux/macOS will have no effect; the flag is forced off during build configuration with a warning.
 
 ## Usage
 
@@ -125,9 +127,9 @@ When MoQ transport is enabled:
 
 - **moq-ffi library** must be present in `ThirdParty/moq-ffi/`
 - **Rust-compiled binaries** (moq_ffi.dll/so/dylib) must exist
-- **Platform support:** Currently Win64 only (Linux/Mac placeholders exist)
+- **Platform support:** Currently Win64 only (Linux/Mac builds disable the flag automatically)
 
-See `ThirdParty/moq-ffi/README.md` for library setup instructions.
+See `ThirdParty/moq-ffi/README.md` for the exact upstream commit, binary hashes, and refresh workflow.
 
 ## Related Flags
 
@@ -169,19 +171,19 @@ $env:O3D_WITH_TRANSPORT_MOQ = "1"
 **Symptom:** Build fails with error about missing `moq_ffi.dll.lib`
 
 **Solution:**
-1. Check that `O3D_WITH_TRANSPORT_MOQ=1` (or unset for default)
-2. Verify moq-ffi binaries exist in `ThirdParty/moq-ffi/`
-3. See `ThirdParty/moq-ffi/README.md` for build instructions
-4. Or disable MoQ: `$env:O3D_WITH_TRANSPORT_MOQ = "0"`
+1. Confirm you are targeting **Win64**. Other platforms will disable the transport automatically.
+2. Verify `O3D_WITH_TRANSPORT_MOQ=1` (or unset for default)
+3. Ensure the files listed in `ThirdParty/moq-ffi/README.md` exist and their hashes match
+4. Rebuild after copying the binaries, or temporarily disable MoQ via `$env:O3D_WITH_TRANSPORT_MOQ = "0"`
 
 ### Error: "moq_ffi.dll not found" at runtime
 
 **Symptom:** Editor/game fails to start with DLL not found error
 
 **Solution:**
-1. Ensure DLL exists in `ThirdParty/moq-ffi/bin/Win64/Release/moq_ffi.dll`
+1. Ensure DLL exists in `ThirdParty/moq-ffi/bin/Win64/Release/moq_ffi.dll` (match SHA256 from README)
 2. Check that `RuntimeDependencies` in Build.cs includes the DLL
-3. Verify `O3D_WITH_TRANSPORT_MOQ=1` during build
+3. Verify `O3D_WITH_TRANSPORT_MOQ=1` during build (and that you built for Win64)
 4. Clean and rebuild the project
 
 ### MoQ transport not appearing in dropdown
