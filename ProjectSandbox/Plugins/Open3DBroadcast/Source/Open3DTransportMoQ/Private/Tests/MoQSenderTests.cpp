@@ -14,6 +14,8 @@ bool FMoQSenderRequiresUriTest::RunTest(const FString& Parameters)
     FO3DTransportConfig Config;
     Config.Transport = TEXT("MoQ");
 
+    AddExpectedError(TEXT("MoQ sender configuration invalid"), EAutomationExpectedMessageFlags::Contains, 1);
+
     TestFalse(TEXT("Initialize should fail when relay URI is missing"), Sender.Initialize(Config));
     return true;
 }

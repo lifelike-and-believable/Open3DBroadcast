@@ -42,6 +42,12 @@ FMoQResult FMoQSessionWrapper::Initialize(const FString& InRelayUrl)
     RelayUrl = MoveTemp(Normalized);
     AnnouncedNamespaces.Reset();
     bInitialized = true;
+
+    if (!SelfWeak.IsValid())
+    {
+        SelfWeak = AsShared();
+    }
+
     return SessionHandle.EnsureCreated();
 }
 
@@ -81,6 +87,10 @@ FMoQResult FMoQSessionWrapper::Connect()
         return EnsureResult;
     }
 
+    // Reset any previous "expected disconnect" markers now that we're attempting
+    // to bring the session back online.
+    bExpectingDisconnect.Store(false);
+
     // Ensure dispatcher is initialized before connecting (callbacks may fire immediately)
     FMoQAsyncDispatcher::Get().Initialize();
 
@@ -89,7 +99,7 @@ FMoQResult FMoQSessionWrapper::Connect()
     // CRITICAL: Run moq_connect on background thread to avoid blocking game thread
     // The Tokio runtime inside moq-ffi may block waiting for connection
     FString RelayUrlCopy = RelayUrl;
-    TWeakPtr<FMoQSessionWrapper> WeakSelf = AsShared();
+    TWeakPtr<FMoQSessionWrapper> WeakSelf = SelfWeak;
     
     AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [WeakSelf, RelayUrlCopy]()
     {
@@ -156,6 +166,8 @@ void FMoQSessionWrapper::Disconnect()
         return;
     }
 
+    bExpectingDisconnect.Store(true);
+
     {
         FScopeLock Lock(&SessionHandle.GetMutex());
         if (SessionHandle.GetUnsafe() != nullptr)
@@ -180,6 +192,8 @@ void FMoQSessionWrapper::Disconnect()
         FScopeLock Lock(&NamespaceMutex);
         AnnouncedNamespaces.Reset();
     }
+
+    bExpectingDisconnect.Store(false);
 }
 
 bool FMoQSessionWrapper::IsConnected() const
@@ -297,6 +311,17 @@ FMoQResult FMoQSessionWrapper::Subscribe(const FMoQSubscriptionConfig& Config, T
 
     if (Subscriber == nullptr)
     {
+        FString ExtraMessage;
+        if (const char* LastError = moq_last_error())
+        {
+            ExtraMessage = UTF8_TO_TCHAR(LastError);
+        }
+
+        if (!ExtraMessage.IsEmpty())
+        {
+            return FMoQResult::FromCode(EMoQErrorCode::Internal, FString::Printf(TEXT("Failed to subscribe to %s/%s (%s)"), *NamespaceValue, *TrackValue, *ExtraMessage));
+        }
+
         return FMoQResult::FromCode(EMoQErrorCode::Internal, FString::Printf(TEXT("Failed to subscribe to %s/%s"), *NamespaceValue, *TrackValue));
     }
 
@@ -306,7 +331,7 @@ FMoQResult FMoQSessionWrapper::Subscribe(const FMoQSubscriptionConfig& Config, T
     }
 
     TSharedPtr<FMoQSubscriberHandle> Handle = MakeShared<FMoQSubscriberHandle>(Subscriber);
-    TWeakPtr<FMoQSessionWrapper> WrapperWeak = AsShared();
+    TWeakPtr<FMoQSessionWrapper> WrapperWeak = SelfWeak;
     Handle->SetOnBeforeDestroy([WrapperWeak, Subscriber]()
     {
         if (const TSharedPtr<FMoQSessionWrapper> Pinned = WrapperWeak.Pin())
@@ -317,6 +342,47 @@ FMoQResult FMoQSessionWrapper::Subscribe(const FMoQSubscriptionConfig& Config, T
 
     OutSubscriber = MoveTemp(Handle);
     return FMoQResult::Ok();
+}
+
+FMoQResult FMoQSessionWrapper::SubscribeAsync(const FMoQSubscriptionConfig& Config, FSubscribeAsyncCallback&& Completion)
+{
+    if (!Completion)
+    {
+        return FMoQResult::FromCode(EMoQErrorCode::InvalidArgument, TEXT("Completion callback must be provided"));
+    }
+
+    FMoQAsyncDispatcher::Get().Initialize();
+
+    if (!SelfWeak.IsValid())
+    {
+        SelfWeak = AsShared();
+    }
+
+    const FMoQSubscriptionConfig ConfigCopy = Config;
+    TWeakPtr<FMoQSessionWrapper> WeakSelf = SelfWeak;
+
+    AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [WeakSelf, ConfigCopy, Completion = MoveTemp(Completion)]() mutable
+    {
+        TSharedPtr<FMoQSessionWrapper> StrongThis = WeakSelf.Pin();
+        if (!StrongThis.IsValid())
+        {
+            FMoQAsyncDispatcher::Get().EnqueueGameThreadTask([Completion = MoveTemp(Completion)]() mutable
+            {
+                Completion(FMoQResult::FromCode(EMoQErrorCode::Internal, TEXT("Session destroyed before subscribe executed")), nullptr);
+            });
+            return;
+        }
+
+        TSharedPtr<FMoQSubscriberHandle> Subscriber;
+        FMoQResult Result = StrongThis->Subscribe(ConfigCopy, Subscriber);
+
+        FMoQAsyncDispatcher::Get().EnqueueGameThreadTask([Completion = MoveTemp(Completion), Result = MoveTemp(Result), Subscriber]() mutable
+        {
+            Completion(Result, Subscriber);
+        });
+    });
+
+    return FMoQResult::FromCode(EMoQErrorCode::Ok, TEXT("Subscribe enqueued (async)"));
 }
 
 void FMoQSessionWrapper::Unsubscribe(const TSharedPtr<FMoQSubscriberHandle>& SubscriberHandle)
@@ -344,17 +410,27 @@ void FMoQSessionWrapper::HandleConnectionStateInternal(MoqConnectionState State)
     // Log state transitions for debugging
     UE_LOG(LogMoQBridge, Log, TEXT("Connection state changed: %s"), *LexToString(State));
 
-    // Try to get weak pointer, but handle case where this is called before TSharedFromThis is set up
-    TWeakPtr<FMoQSessionWrapper> WrapperWeak;
-    try
+    const bool bUnexpectedDisconnect =
+        (State == MOQ_STATE_DISCONNECTED || State == MOQ_STATE_FAILED) &&
+        !bExpectingDisconnect.Load();
+
+    if (bUnexpectedDisconnect)
     {
-        WrapperWeak = AsShared();
+        if (const char* LastError = moq_last_error())
+        {
+            UE_LOG(LogMoQBridge, Warning, TEXT("Unexpected MoQ session state %s: %s"), *LexToString(State), UTF8_TO_TCHAR(LastError));
+        }
+        else
+        {
+            UE_LOG(LogMoQBridge, Warning, TEXT("Unexpected MoQ session state %s (no additional FFI error provided)"), *LexToString(State));
+        }
     }
-    catch (...)
+
+    // Try to get weak pointer, but handle case where this is called before TSharedFromThis is set up
+    TWeakPtr<FMoQSessionWrapper> WrapperWeak = SelfWeak;
+    if (!WrapperWeak.IsValid())
     {
-        // If AsShared() fails (called before shared pointer is established), 
-        // just broadcast directly on this thread
-        UE_LOG(LogMoQBridge, Warning, TEXT("Connection state callback fired before shared pointer established, broadcasting directly"));
+        UE_LOG(LogMoQBridge, VeryVerbose, TEXT("Connection state callback received without a valid self-reference (state=%s)."), *LexToString(State));
         ConnectionStateDelegate.Broadcast(State);
         return;
     }

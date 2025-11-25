@@ -126,6 +126,11 @@ To update third-party libraries:
 
 **Note**: All third-party libraries should be committed to the repository to maintain the self-contained nature of the plugin.
 
+## MoQ Draft-07 Hotfix & Fallback
+
+- **Hotfix dependency**: `moq_ffi` now patches the vendored `moq-rs` submodule (see `moq_ffi/Cargo.toml`). Remove the `[patch]` stanza to fall back to upstream Cloudflare bits if needed.
+- **Runtime fallback**: Set the advanced transport option `delivery_mode=datagram` (or `moq.delivery=datagram`) to bypass stream groups entirely. This avoids the code path that triggered the Draft-07 reader panic and mirrors the `moq-pub`/`moq-sub` single-object behavior if the new stream fix is insufficient.
+
 ## License
 
 See the main repository LICENSE file for details.

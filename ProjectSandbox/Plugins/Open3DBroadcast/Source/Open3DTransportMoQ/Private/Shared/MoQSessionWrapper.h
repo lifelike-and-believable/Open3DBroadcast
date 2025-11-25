@@ -45,6 +45,8 @@ public:
     FMoQResult CreatePublisher(const FMoQPublisherConfig& Config, TSharedPtr<FMoQPublisherHandle>& OutPublisher);
 
     FMoQResult Subscribe(const FMoQSubscriptionConfig& Config, TSharedPtr<FMoQSubscriberHandle>& OutSubscriber);
+    using FSubscribeAsyncCallback = TFunction<void(FMoQResult, TSharedPtr<FMoQSubscriberHandle>)>;
+    FMoQResult SubscribeAsync(const FMoQSubscriptionConfig& Config, FSubscribeAsyncCallback&& Completion);
     void Unsubscribe(const TSharedPtr<FMoQSubscriberHandle>& SubscriberHandle);
 
 private:
@@ -66,6 +68,7 @@ private:
     FString RelayUrl;
     FThreadSafeBool bInitialized = false;
     TAtomic<MoqConnectionState> CurrentState;
+    TAtomic<bool> bExpectingDisconnect{false};
 
     TSet<FString> AnnouncedNamespaces;
     mutable FCriticalSection NamespaceMutex;
@@ -74,4 +77,27 @@ private:
     mutable FCriticalSection SubscriberMutex;
 
     FMoQConnectionStateDelegate ConnectionStateDelegate;
+    TWeakPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> SelfWeak;
+#if WITH_DEV_AUTOMATION_TESTS
+    friend class FMoQSessionWrapperTestHelper;
+#endif
 };
+
+#if WITH_DEV_AUTOMATION_TESTS
+class FMoQSessionWrapperTestHelper
+{
+public:
+    static void InvokeConnectionState(FMoQSessionWrapper& Wrapper, MoqConnectionState State)
+    {
+        Wrapper.HandleConnectionStateInternal(State);
+    }
+
+    static void InvokeSubscriberCallback(const TFunction<void(const TArray64<uint8>&)>& Callback, const TArray64<uint8>& Payload)
+    {
+        FMoQSessionWrapper::FSubscriberBinding Binding;
+        Binding.DataHandler = Callback;
+        const uint8* DataPtr = Payload.Num() > 0 ? Payload.GetData() : nullptr;
+        FMoQSessionWrapper::HandleSubscriberDataThunk(&Binding, DataPtr, static_cast<size_t>(Payload.Num()));
+    }
+};
+#endif

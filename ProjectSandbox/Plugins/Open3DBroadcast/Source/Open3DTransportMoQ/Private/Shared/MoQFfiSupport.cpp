@@ -58,10 +58,23 @@ bool FMoQFfiSupport::LoadLibrary()
 		return false;
 	}
 
+	// Get version string if available and ensure we are using the Draft 07 build for Cloudflare compatibility
+	const FString Version = GetVersion();
+	if (!Version.IsEmpty())
+	{
+		const bool bIsDraft07 = Version.Contains(TEXT("Draft 07"));
+		if (!bIsDraft07)
+		{
+			StatusMessage = FString::Printf(TEXT("MoQ FFI build mismatch (reported %s). Rebuild moq-ffi with --features with_moq_draft07."), *Version);
+			UE_LOG(LogMoQFfiSupport, Error, TEXT("%s"), *StatusMessage);
+			FPlatformProcess::FreeDllHandle(LibraryHandle);
+			LibraryHandle = nullptr;
+			return false;
+		}
+	}
+
 	bIsLoaded = true;
 
-	// Get version string if available
-	FString Version = GetVersion();
 	if (!Version.IsEmpty())
 	{
 		StatusMessage = FString::Printf(TEXT("MoQ FFI library loaded successfully (version %s)"), *Version);
@@ -99,7 +112,7 @@ bool FMoQFfiSupport::IsLoaded()
 
 FString FMoQFfiSupport::GetVersion()
 {
-	if (!bIsLoaded || LibraryHandle == nullptr)
+	if (LibraryHandle == nullptr)
 	{
 		return FString();
 	}
