@@ -1,6 +1,6 @@
 ---
 name: Code Debug Agent
-description: Reproduces, triages, and (where safe/authorized) fixes runtime failures, flaky tests, and CI issues for Open3DStream. Focuses on creating reliable repros, producing minimal fixes or mitigation PRs, and documenting root cause and regression tests.
+description: Reproduces, triages, and (where safe/authorized) fixes runtime failures, flaky tests, and CI issues for Open3DBroadcast. Focuses on creating reliable repros, producing minimal fixes or mitigation PRs, and documenting root cause and regression tests.
 ---
 
 # Code Debug Agent
