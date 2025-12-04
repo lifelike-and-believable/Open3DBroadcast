@@ -97,6 +97,10 @@ private:
 
 	FO3DTransportConfig ActiveConfig;
 
+	// Shared alive flag for safe callback handling - set to false during destruction
+	// This prevents use-after-free when callbacks are pending on the game thread
+	TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> AliveFlag;
+
 	static constexpr double kMinReconnectDelaySeconds = 0.5;
 	static constexpr double kMaxReconnectDelaySeconds = 10.0;
 	static constexpr double kErrorLogIntervalSeconds = 5.0;

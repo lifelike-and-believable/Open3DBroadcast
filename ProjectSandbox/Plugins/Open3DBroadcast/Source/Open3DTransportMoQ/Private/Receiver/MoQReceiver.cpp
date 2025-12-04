@@ -141,10 +141,16 @@ static FString ResolveRelayUrl(const FO3DTransportConfig& Config)
 FO3DMoQReceiver::FO3DMoQReceiver()
 {
 	CachedState = MOQ_STATE_DISCONNECTED;
+	AliveFlag = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(true);
 }
 
 FO3DMoQReceiver::~FO3DMoQReceiver()
 {
+	// Mark as dead before cleanup to prevent pending callbacks from accessing this
+	if (AliveFlag.IsValid())
+	{
+		*AliveFlag = false;
+	}
 	Stop();
 }
 
@@ -386,11 +392,18 @@ bool FO3DMoQReceiver::AttemptSubscribe()
 	SubscriptionConfig.Namespace = Options.TrackNamespace;
 	SubscriptionConfig.TrackName = Options.TrackName;
 
-	// Capture weak reference to self to safely handle callbacks
-	TWeakPtr<FO3DMoQReceiver> WeakThis = nullptr; // We don't have TSharedFromThis, use lambda capture carefully
+	// Capture AliveFlag by value to safely handle callbacks
+	// This ensures that if the receiver is destroyed before the callback fires,
+	// we can detect it and avoid use-after-free
+	TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> AliveFlagCopy = AliveFlag;
 	
-	SubscriptionConfig.OnData = [this](const TArray64<uint8>& Payload)
+	SubscriptionConfig.OnData = [this, AliveFlagCopy](const TArray64<uint8>& Payload)
 	{
+		// Check if the receiver is still alive before accessing 'this'
+		if (!AliveFlagCopy.IsValid() || !(*AliveFlagCopy))
+		{
+			return;
+		}
 		HandleDataReceived(Payload);
 	};
 
