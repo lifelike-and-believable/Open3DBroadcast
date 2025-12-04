@@ -1,4 +1,5 @@
 #include "Sender/MoQSender.h"
+#include "Sender/MoQSenderAudioSink.h"
 
 #include "HAL/Event.h"
 #include "HAL/PlatformProcess.h"
@@ -10,6 +11,7 @@
 #include "Misc/ScopeLock.h"
 #include "O3DPerformanceMetrics.h"
 #include "Shared/MoQHandles.h"
+#include "Shared/MoQHelpers.h"
 #include "Shared/MoQSessionWrapper.h"
 #include "Shared/MoQTypes.h"
 
@@ -19,193 +21,8 @@
 
 DEFINE_LOG_CATEGORY(LogO3DMoQSender);
 
-namespace MoQSender
-{
-	constexpr uint64 kDefaultQueueBytes = 8ull * 1024ull * 1024ull;
-	constexpr uint64 kMinQueueBytes = 256ull * 1024ull;
-	constexpr uint64 kMaxQueueBytes = 256ull * 1024ull * 1024ull;
-	constexpr double kErrorLogIntervalSeconds = 5.0;
-	constexpr double kDropLogIntervalSeconds = 2.0;
-	constexpr double kMinReconnectDelaySeconds = 0.5;
-	constexpr double kMaxReconnectDelaySeconds = 10.0;
-
-	FString GetAdvancedOption(const FO3DTransportConfig& Config, const TCHAR* Key)
-	{
-		for (const TPair<FString, FString>& Pair : Config.AdvancedParams)
-		{
-			if (Pair.Key.Equals(Key, ESearchCase::IgnoreCase))
-			{
-				FString Value = Pair.Value;
-				Value.TrimStartAndEndInline();
-				return Value;
-			}
-		}
-		return FString();
-	}
-
-	bool ParseUInt64(const FString& Input, uint64& OutValue)
-	{
-		if (Input.IsEmpty())
-		{
-			return false;
-		}
-
-		TCHAR* EndPtr = nullptr;
-		OutValue = FCString::Strtoui64(*Input, &EndPtr, 10);
-		return EndPtr != nullptr && *EndPtr == TEXT('\0');
-	}
-
-	FString SanitizeComponent(const FString& Value, bool bAllowSlash)
-	{
-		FString Result;
-		Result.Reserve(Value.Len());
-
-		for (const TCHAR Character : Value)
-		{
-			if (FChar::IsAlnum(Character) || Character == TEXT('_') || Character == TEXT('-') || (bAllowSlash && Character == TEXT('/')))
-			{
-				Result.AppendChar(Character);
-			}
-			else if (FChar::IsWhitespace(Character))
-			{
-				Result.AppendChar(TEXT('_'));
-			}
-		}
-
-		Result.TrimStartAndEndInline();
-		return Result;
-	}
-
-	FString BuildDefaultNamespace(const FO3DTransportConfig& Config)
-	{
-		FString Namespace = GetAdvancedOption(Config, TEXT("track_namespace"));
-		if (Namespace.IsEmpty())
-		{
-			Namespace = GetAdvancedOption(Config, TEXT("moq.namespace"));
-		}
-
-		if (Namespace.IsEmpty())
-		{
-			FString SessionId = GetAdvancedOption(Config, TEXT("moq.session"));
-			if (SessionId.IsEmpty())
-			{
-				SessionId = Config.StreamId;
-				SessionId.TrimStartAndEndInline();
-
-				int32 SlashIdx = INDEX_NONE;
-				if (SessionId.FindChar('/', SlashIdx))
-				{
-					SessionId = SessionId.Left(SlashIdx);
-				}
-			}
-
-			if (SessionId.IsEmpty())
-			{
-				SessionId = TEXT("default");
-			}
-
-			SessionId = SanitizeComponent(SessionId, false);
-			Namespace = FString::Printf(TEXT("mocap/%s"), *SessionId);
-		}
-
-		Namespace = SanitizeComponent(Namespace, true);
-		if (Namespace.EndsWith(TEXT("/")))
-		{
-			Namespace.LeftChopInline(1);
-		}
-
-		return Namespace;
-	}
-
-	FString BuildDefaultTrackName(const FO3DTransportConfig& Config)
-	{
-		FString TrackName = GetAdvancedOption(Config, TEXT("track_name"));
-		if (TrackName.IsEmpty())
-		{
-			TrackName = GetAdvancedOption(Config, TEXT("moq.track"));
-		}
-
-		if (TrackName.IsEmpty())
-		{
-			TrackName = Config.StreamId;
-			TrackName.TrimStartAndEndInline();
-
-			int32 SlashIdx = INDEX_NONE;
-			if (TrackName.FindLastChar('/', SlashIdx))
-			{
-				TrackName = TrackName.Mid(SlashIdx + 1);
-			}
-		}
-
-		if (TrackName.IsEmpty())
-		{
-			TrackName = TEXT("primary");
-		}
-
-		TrackName = SanitizeComponent(TrackName, false);
-		if (TrackName.IsEmpty())
-		{
-			TrackName = TEXT("primary");
-		}
-
-		return TrackName;
-	}
-}
-
-static FString ResolveRelayUrl(const FO3DTransportConfig& Config)
-{
-	FString Relay = MoQSender::GetAdvancedOption(Config, TEXT("relay_url"));
-	if (Relay.IsEmpty())
-	{
-		Relay = MoQSender::GetAdvancedOption(Config, TEXT("moq.relay"));
-	}
-	if (Relay.IsEmpty())
-	{
-		Relay = Config.Uri;
-	}
-
-	Relay.TrimStartAndEndInline();
-	return Relay;
-}
-
-static MoqDeliveryMode ResolveDeliveryMode(const FO3DTransportConfig& Config)
-{
-	FString Mode = MoQSender::GetAdvancedOption(Config, TEXT("delivery_mode"));
-	if (Mode.IsEmpty())
-	{
-		Mode = MoQSender::GetAdvancedOption(Config, TEXT("moq.delivery"));
-	}
-
-	if (Mode.Equals(TEXT("datagram"), ESearchCase::IgnoreCase))
-	{
-		return MOQ_DELIVERY_DATAGRAM;
-	}
-
-	return MOQ_DELIVERY_STREAM;
-}
-
-static uint64 ResolveQueueBytes(const FO3DTransportConfig& Config)
-{
-	uint64 QueueBytes = MoQSender::kDefaultQueueBytes;
-	FString QueueOverride = MoQSender::GetAdvancedOption(Config, TEXT("queue_bytes"));
-	if (QueueOverride.IsEmpty())
-	{
-		QueueOverride = MoQSender::GetAdvancedOption(Config, TEXT("moq.queue_bytes"));
-	}
-	if (QueueOverride.IsEmpty())
-	{
-		QueueOverride = MoQSender::GetAdvancedOption(Config, TEXT("moq.qbytes"));
-	}
-
-	uint64 Parsed = 0;
-	if (!QueueOverride.IsEmpty() && MoQSender::ParseUInt64(QueueOverride, Parsed))
-	{
-		QueueBytes = Parsed;
-	}
-
-	QueueBytes = FMath::Clamp<uint64>(QueueBytes, MoQSender::kMinQueueBytes, MoQSender::kMaxQueueBytes);
-	return QueueBytes;
-}
+// Use constants from MoQHelpers
+using namespace MoQHelpers;
 
 class FSendWorker : public FRunnable
 {
@@ -248,9 +65,12 @@ bool FO3DMoQSender::ParseOptions(const FO3DTransportConfig& Config, FString& Out
 		return false;
 	}
 
-	Options.TrackNamespace = MoQSender::BuildDefaultNamespace(Config);
-	Options.TrackName = MoQSender::BuildDefaultTrackName(Config);
-	if (Options.TrackNamespace.IsEmpty() || Options.TrackName.IsEmpty())
+	// Build separate namespaces for mocap and audio tracks
+	Options.MocapNamespace = BuildDefaultMocapNamespace(Config);
+	Options.AudioNamespace = BuildDefaultAudioNamespace(Config);
+	Options.TrackName = BuildDefaultTrackName(Config);
+	
+	if (Options.MocapNamespace.IsEmpty() || Options.TrackName.IsEmpty())
 	{
 		OutError = TEXT("Unable to derive track namespace/name");
 		return false;
@@ -259,9 +79,11 @@ bool FO3DMoQSender::ParseOptions(const FO3DTransportConfig& Config, FString& Out
 	Options.DeliveryMode = ResolveDeliveryMode(Config);
 	Options.MaxQueueBytes = ResolveQueueBytes(Config);
 
-	UE_LOG(LogO3DMoQSender, Log, TEXT("MoQ sender configured: Relay=%s Track=%s/%s Mode=%s Queue=%llu bytes"),
+	UE_LOG(LogO3DMoQSender, Log, TEXT("MoQ sender configured: Relay=%s MocapTrack=%s/%s AudioTrack=%s/%s Mode=%s Queue=%llu bytes"),
 		*Options.RelayUrl,
-		*Options.TrackNamespace,
+		*Options.MocapNamespace,
+		*Options.TrackName,
+		*Options.AudioNamespace,
 		*Options.TrackName,
 		Options.DeliveryMode == MOQ_DELIVERY_STREAM ? TEXT("stream") : TEXT("datagram"),
 		Options.MaxQueueBytes);
@@ -302,6 +124,10 @@ bool FO3DMoQSender::Initialize(const FO3DTransportConfig& Config)
 	}
 
 	ActiveConfig = Config;
+	ActiveAudioConfig = Config.Audio;
+	AudioSourceGuid = FGuid::NewGuid();
+	RefreshAudioEncoder();
+	
 	ResetStats();
 	PendingQueueBytes = 0;
 	DrainQueue();
@@ -312,6 +138,11 @@ bool FO3DMoQSender::Initialize(const FO3DTransportConfig& Config)
 	LastConnectAttemptTimeSeconds = 0.0;
 	LastErrorLogTimeSeconds = 0.0;
 	LastDropLogTimeSeconds = 0.0;
+	
+	{
+		FScopeLock Lock(&SubjectNameLock);
+		LastSubjectName.Reset();
+	}
 
 	bInitialized = true;
 	return true;
@@ -366,6 +197,7 @@ void FO3DMoQSender::Stop()
 	StopWorker();
 	DrainQueue();
 	DestroyPublisher();
+	DestroyAudioPublisher();
 
 	if (Session.IsValid())
 	{
@@ -420,6 +252,11 @@ void FO3DMoQSender::HandleConnectionStateChanged(MoqConnectionState NewState)
 		ConsecutiveFailures = 0;
 		UE_LOG(LogO3DMoQSender, Log, TEXT("Connected to MoQ relay %s"), *Options.RelayUrl);
 		EnsurePublisher();
+		// Audio publisher is created on-demand when CreateAudioSink is called
+		if (bAudioEncoderInitialized)
+		{
+			EnsureAudioPublisher();
+		}
 		WakeWorker();
 		break;
 
@@ -435,6 +272,7 @@ void FO3DMoQSender::HandleConnectionStateChanged(MoqConnectionState NewState)
 			ConsecutiveFailures++;
 		}
 		DestroyPublisher();
+		DestroyAudioPublisher();
 		break;
 
 	default:
@@ -452,6 +290,13 @@ bool FO3DMoQSender::Send(const O3DS::SubjectList& List)
 
 	FO3DPerformanceMetrics::Get().RecordFrameCaptured();
 	FO3DPerformanceMetrics::Get().SetActiveSubjectCount(static_cast<int32>(List.mItems.size()));
+
+	// Capture subject name for audio association
+	if (!List.mItems.empty() && List.mItems[0])
+	{
+		FScopeLock Lock(&SubjectNameLock);
+		LastSubjectName = UTF8_TO_TCHAR(List.mItems[0]->mName.c_str());
+	}
 
 	std::vector<char> Buffer;
 	const double TimestampSeconds = FPlatformTime::Seconds();
@@ -471,7 +316,7 @@ bool FO3DMoQSender::Send(const O3DS::SubjectList& List)
 		FMemory::Memcpy(Payload.GetData(), Buffer.data(), BytesWritten);
 	}
 
-	if (!EnqueuePayload(MoveTemp(Payload), TimestampSeconds))
+	if (!EnqueuePayload(MoveTemp(Payload), TimestampSeconds, /*bIsAudio=*/false))
 	{
 		FO3DPerformanceMetrics::Get().RecordTransportFrameDropped();
 		{
@@ -526,7 +371,20 @@ bool FO3DMoQSender::IsPublisherReady() const
 	{
 		return false;
 	}
-	return PublisherHandle.IsValid();
+	return MocapPublisherHandle.IsValid();
+}
+
+bool FO3DMoQSender::IsAudioPublisherReady() const
+{
+	if (!bRunning)
+	{
+		return false;
+	}
+	if (CachedState.Load() != MOQ_STATE_CONNECTED)
+	{
+		return false;
+	}
+	return AudioPublisherHandle.IsValid();
 }
 
 bool FO3DMoQSender::EnsurePublisher()
@@ -536,13 +394,13 @@ bool FO3DMoQSender::EnsurePublisher()
 		return false;
 	}
 
-	if (PublisherHandle.IsValid())
+	if (MocapPublisherHandle.IsValid())
 	{
 		return true;
 	}
 
 	FMoQPublisherConfig Config;
-	Config.Namespace = Options.TrackNamespace;
+	Config.Namespace = Options.MocapNamespace;
 	Config.TrackName = Options.TrackName;
 	Config.DeliveryMode = Options.DeliveryMode;
 
@@ -551,25 +409,66 @@ bool FO3DMoQSender::EnsurePublisher()
 	if (!Result.IsOk())
 	{
 		const double Now = FPlatformTime::Seconds();
-		if ((Now - LastErrorLogTimeSeconds) >= MoQSender::kErrorLogIntervalSeconds)
+		if ((Now - LastErrorLogTimeSeconds) >= kErrorLogIntervalSeconds)
 		{
 			LastErrorLogTimeSeconds = Now;
-			UE_LOG(LogO3DMoQSender, Warning, TEXT("Failed to create MoQ publisher: %s"), *Result.Message);
+			UE_LOG(LogO3DMoQSender, Warning, TEXT("Failed to create MoQ mocap publisher: %s"), *Result.Message);
 		}
 		return false;
 	}
 
-	PublisherHandle = NewPublisher;
-	UE_LOG(LogO3DMoQSender, Log, TEXT("MoQ track announced: %s/%s"), *Options.TrackNamespace, *Options.TrackName);
+	MocapPublisherHandle = NewPublisher;
+	UE_LOG(LogO3DMoQSender, Log, TEXT("MoQ mocap track announced: %s/%s"), *Options.MocapNamespace, *Options.TrackName);
+	return true;
+}
+
+bool FO3DMoQSender::EnsureAudioPublisher()
+{
+	if (!Session.IsValid())
+	{
+		return false;
+	}
+
+	if (AudioPublisherHandle.IsValid())
+	{
+		return true;
+	}
+
+	FMoQPublisherConfig Config;
+	Config.Namespace = Options.AudioNamespace;
+	Config.TrackName = Options.TrackName;
+	// Audio uses stream mode for reliable delivery
+	Config.DeliveryMode = MOQ_DELIVERY_STREAM;
+
+	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> NewPublisher;
+	const FMoQResult Result = Session->CreatePublisher(Config, NewPublisher);
+	if (!Result.IsOk())
+	{
+		const double Now = FPlatformTime::Seconds();
+		if ((Now - LastErrorLogTimeSeconds) >= kErrorLogIntervalSeconds)
+		{
+			LastErrorLogTimeSeconds = Now;
+			UE_LOG(LogO3DMoQSender, Warning, TEXT("Failed to create MoQ audio publisher: %s"), *Result.Message);
+		}
+		return false;
+	}
+
+	AudioPublisherHandle = NewPublisher;
+	UE_LOG(LogO3DMoQSender, Log, TEXT("MoQ audio track announced: %s/%s"), *Options.AudioNamespace, *Options.TrackName);
 	return true;
 }
 
 void FO3DMoQSender::DestroyPublisher()
 {
-	PublisherHandle.Reset();
+	MocapPublisherHandle.Reset();
 }
 
-bool FO3DMoQSender::EnqueuePayload(TArray<uint8>&& Data, double CaptureTimestampSec)
+void FO3DMoQSender::DestroyAudioPublisher()
+{
+	AudioPublisherHandle.Reset();
+}
+
+bool FO3DMoQSender::EnqueuePayload(TArray<uint8>&& Data, double CaptureTimestampSec, bool bIsAudio)
 {
 	const uint64 PayloadBytes = Data.Num();
 
@@ -578,10 +477,11 @@ bool FO3DMoQSender::EnqueuePayload(TArray<uint8>&& Data, double CaptureTimestamp
 		if ((PendingQueueBytes + PayloadBytes) > Options.MaxQueueBytes)
 		{
 			const double Now = FPlatformTime::Seconds();
-			if ((Now - LastDropLogTimeSeconds) >= MoQSender::kDropLogIntervalSeconds)
+			if ((Now - LastDropLogTimeSeconds) >= kDropLogIntervalSeconds)
 			{
 				LastDropLogTimeSeconds = Now;
-				UE_LOG(LogO3DMoQSender, Warning, TEXT("MoQ sender queue overflow (limit=%llu bytes); dropping frame"), Options.MaxQueueBytes);
+				UE_LOG(LogO3DMoQSender, Warning, TEXT("MoQ sender queue overflow (limit=%llu bytes); dropping %s frame"), 
+					Options.MaxQueueBytes, bIsAudio ? TEXT("audio") : TEXT("mocap"));
 			}
 			return false;
 		}
@@ -589,6 +489,7 @@ bool FO3DMoQSender::EnqueuePayload(TArray<uint8>&& Data, double CaptureTimestamp
 		TUniquePtr<FPendingPayload> Payload = MakeUnique<FPendingPayload>();
 		Payload->Data = MoveTemp(Data);
 		Payload->EnqueueTimestampSeconds = CaptureTimestampSec;
+		Payload->bIsAudio = bIsAudio;
 		SendQueue.Enqueue(MoveTemp(Payload));
 		PendingQueueBytes += PayloadBytes;
 	}
@@ -624,7 +525,10 @@ void FO3DMoQSender::DrainQueue()
 
 bool FO3DMoQSender::PublishPayload(const FPendingPayload& Payload)
 {
-	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> Publisher = PublisherHandle;
+	// Select appropriate publisher based on payload type
+	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> Publisher = 
+		Payload.bIsAudio ? AudioPublisherHandle : MocapPublisherHandle;
+	
 	if (!Publisher.IsValid())
 	{
 		return false;
@@ -636,15 +540,19 @@ bool FO3DMoQSender::PublishPayload(const FPendingPayload& Payload)
 		return false;
 	}
 
-	const MoqResult Result = moq_publish_data(RawPublisher, Payload.Data.GetData(), Payload.Data.Num(), Options.DeliveryMode);
+	// Audio uses stream mode for reliability; mocap uses configured mode
+	MoqDeliveryMode DeliveryMode = Payload.bIsAudio ? MOQ_DELIVERY_STREAM : Options.DeliveryMode;
+	
+	const MoqResult Result = moq_publish_data(RawPublisher, Payload.Data.GetData(), Payload.Data.Num(), DeliveryMode);
 	if (Result.code != MOQ_OK)
 	{
 		const FMoQResult Wrapped = FMoQResult::FromResult(Result);
 		const double Now = FPlatformTime::Seconds();
-		if ((Now - LastErrorLogTimeSeconds) >= MoQSender::kErrorLogIntervalSeconds)
+		if ((Now - LastErrorLogTimeSeconds) >= kErrorLogIntervalSeconds)
 		{
 			LastErrorLogTimeSeconds = Now;
-			UE_LOG(LogO3DMoQSender, Warning, TEXT("moq_publish_data failed: %s"), *Wrapped.Message);
+			UE_LOG(LogO3DMoQSender, Warning, TEXT("moq_publish_data failed for %s: %s"), 
+				Payload.bIsAudio ? TEXT("audio") : TEXT("mocap"), *Wrapped.Message);
 		}
 
 		FScopeLock StatsLock(&StatsMutex);
@@ -678,7 +586,8 @@ uint32 FO3DMoQSender::RunWorker()
 			break;
 		}
 
-		while (IsPublisherReady())
+		// Process all queued payloads - each may go to mocap or audio track
+		while (true)
 		{
 			TUniquePtr<FPendingPayload> Payload;
 			if (!DequeuePayload(Payload))
@@ -686,9 +595,20 @@ uint32 FO3DMoQSender::RunWorker()
 				break;
 			}
 
+			// Check if appropriate publisher is ready
+			bool bPublisherReady = Payload->bIsAudio ? IsAudioPublisherReady() : IsPublisherReady();
+			if (!bPublisherReady)
+			{
+				// Drop the payload if publisher not ready
+				FScopeLock StatsLock(&StatsMutex);
+				Stats.DroppedFrames++;
+				continue;
+			}
+
 			if (!PublishPayload(*Payload))
 			{
-				break;
+				// PublishPayload already logs and updates stats on failure
+				continue;
 			}
 		}
 	}
@@ -763,9 +683,116 @@ void FO3DMoQSender::ResetStats()
 	LatencyStats = FLatencyStats();
 }
 
-double FO3DMoQSender::ComputeReconnectDelaySeconds() const
+// ─────────────────────────────────────────────────────────────────────────
+// Audio Support (Phase 4)
+// ─────────────────────────────────────────────────────────────────────────
+
+TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DMoQSender::CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig)
 {
-	const int32 Attempts = FMath::Clamp(ConsecutiveFailures, 0, 6);
-	const double Delay = 0.5 * FMath::Pow(2.0, static_cast<double>(Attempts));
-	return FMath::Clamp(Delay, MoQSender::kMinReconnectDelaySeconds, MoQSender::kMaxReconnectDelaySeconds);
+	FO3DTransportAudioConfig EffectiveConfig = ActiveAudioConfig;
+	if (AudioConfig.bEnableAudio)
+	{
+		EffectiveConfig = AudioConfig;
+	}
+
+	EffectiveConfig.bEnableAudio = true;
+	EffectiveConfig.NumChannels = FMath::Max(EffectiveConfig.NumChannels, 1);
+	EffectiveConfig.SampleRate = FMath::Max(EffectiveConfig.SampleRate, 1);
+
+	ActiveAudioConfig = EffectiveConfig;
+	RefreshAudioEncoder();
+
+	// Ensure audio publisher is created if connected
+	if (CachedState.Load() == MOQ_STATE_CONNECTED)
+	{
+		EnsureAudioPublisher();
+	}
+
+	return MakeShared<FO3DMoQSenderAudioSink, ESPMode::ThreadSafe>(*this, EffectiveConfig);
+}
+
+void FO3DMoQSender::RefreshAudioEncoder()
+{
+	FString SubjectFallback = ActiveConfig.StreamId;
+	if (SubjectFallback.IsEmpty())
+	{
+		SubjectFallback = Options.TrackName;
+	}
+	if (SubjectFallback.IsEmpty())
+	{
+		SubjectFallback = TEXT("moq");
+	}
+
+	bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, SubjectFallback, SubjectFallback);
+	
+	if (bAudioEncoderInitialized)
+	{
+		UE_LOG(LogO3DMoQSender, Log, TEXT("MoQ audio encoder initialized (codec=%s, channels=%d, rate=%d)"),
+			AudioEncoder.GetActiveCodec() == O3DS::EUnifiedCodec::Opus ? TEXT("Opus") : TEXT("PCM16"),
+			ActiveAudioConfig.NumChannels,
+			ActiveAudioConfig.SampleRate);
+	}
+}
+
+bool FO3DMoQSender::ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec)
+{
+	if (!bInitialized.Load() || !bRunning.Load() || !bAudioEncoderInitialized)
+	{
+		return false;
+	}
+
+	FString SubjectForAudio;
+	{
+		FScopeLock Lock(&SubjectNameLock);
+		SubjectForAudio = LastSubjectName;
+	}
+	if (SubjectForAudio.IsEmpty())
+	{
+		SubjectForAudio = ActiveConfig.StreamId;
+	}
+	if (SubjectForAudio.IsEmpty())
+	{
+		SubjectForAudio = Options.TrackName;
+	}
+	if (SubjectForAudio.IsEmpty())
+	{
+		SubjectForAudio = TEXT("moq");
+	}
+
+	O3DAudio::FEncodedFrame Frame;
+	if (!AudioEncoder.BuildEncodedFrame(StreamLabel, SubjectForAudio, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Frame))
+	{
+		return false;
+	}
+
+	if (Frame.Meta.SubjectName.IsEmpty())
+	{
+		Frame.Meta.SubjectName = SubjectForAudio;
+	}
+	Frame.Meta.SourceGuid = AudioSourceGuid;
+
+	return SendEncodedAudio(Frame, TimestampSec);
+}
+
+bool FO3DMoQSender::SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, double TimestampSec)
+{
+	if (!bInitialized.Load() || !bRunning.Load() || Frame.Encoded.Num() <= 0)
+	{
+		return false;
+	}
+
+	// For MoQ, we publish the raw encoded audio data to the audio track
+	// The receiver will know it's audio based on the track namespace (audio/...)
+	TArray<uint8> AudioPayload;
+	AudioPayload.SetNumUninitialized(Frame.Encoded.Num());
+	FMemory::Memcpy(AudioPayload.GetData(), Frame.Encoded.GetData(), Frame.Encoded.Num());
+
+	if (!EnqueuePayload(MoveTemp(AudioPayload), TimestampSec, /*bIsAudio=*/true))
+	{
+		FScopeLock StatsLock(&StatsMutex);
+		Stats.DroppedFrames++;
+		return false;
+	}
+
+	return true;
 }
