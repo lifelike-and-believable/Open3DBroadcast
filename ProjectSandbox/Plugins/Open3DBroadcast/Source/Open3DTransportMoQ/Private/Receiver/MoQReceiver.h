@@ -6,6 +6,7 @@
 #include "Templates/SharedPointer.h"
 #include "Containers/Queue.h"
 #include "O3DReceiverInterface.h"
+#include "O3DAudioFrameCodec.h"
 #include "moq_ffi.h"
 
 class ISerializedFrameConsumer;
@@ -15,10 +16,19 @@ class FMoQSubscriberHandle;
 DECLARE_LOG_CATEGORY_EXTERN(LogO3DMoQReceiver, Log, All);
 
 /**
- * MoQ Transport Receiver Implementation (Phase 3)
+ * MoQ Transport Receiver Implementation (Phase 3 + Phase 4 Audio)
  * 
- * Connects to a MoQ relay as a subscriber and receives mocap data.
+ * Connects to a MoQ relay as a subscriber and receives mocap and audio data.
  * Uses the moq-ffi library for WebTransport/QUIC connectivity.
+ * 
+ * Track Architecture:
+ * - Mocap track: "mocap/<session>/<track>" - motion capture data
+ * - Audio track: "audio/<session>/<track>" - audio data (separate subscription)
+ * 
+ * Threading:
+ * - Initialize(), Start(), Stop(), Poll() must be called from game thread
+ * - SetConsumer(), SetAudioSink() should be called before Start()
+ * - Data callbacks from moq-ffi may arrive on worker threads
  */
 class FO3DMoQReceiver : public IOpen3DReceiver
 {
@@ -33,14 +43,15 @@ public:
 	virtual void Stop() override;
 	virtual int32 Poll() override;
 	virtual FO3DTransportStats GetStats() const override;
-	virtual bool SupportsAudio() const override { return false; } // Phase 4
-	virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override {} // Phase 4
+	virtual bool SupportsAudio() const override { return true; }
+	virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
 
 private:
 	struct FReceivedPayload
 	{
 		TArray<uint8> Data;
 		double ReceiveTimestampSeconds = 0.0;
+		bool bIsAudio = false;  // true if this payload came from audio track
 	};
 
 	struct FLatencyStats
@@ -53,8 +64,9 @@ private:
 	struct FMoQReceiverOptions
 	{
 		FString RelayUrl;
-		FString TrackNamespace;
-		FString TrackName;
+		FString MocapNamespace;      // e.g., "mocap/session1"
+		FString AudioNamespace;      // e.g., "audio/session1"
+		FString TrackName;           // e.g., "character1"
 		FString StreamId;
 	};
 
@@ -62,18 +74,23 @@ private:
 	bool AttemptConnect();
 	void HandleConnectionStateChanged(MoqConnectionState NewState);
 	bool AttemptSubscribe();
-	void HandleDataReceived(const TArray64<uint8>& Payload);
+	bool AttemptAudioSubscribe();
+	void HandleMocapDataReceived(const TArray64<uint8>& Payload);
+	void HandleAudioDataReceived(const TArray64<uint8>& Payload);
 	void DestroySubscriber();
+	void DestroyAudioSubscriber();
 	bool ProcessReceivedPayload(const FReceivedPayload& Payload);
+	bool ProcessAudioPayload(const FReceivedPayload& Payload);
 	void ResetStats();
-	double ComputeReconnectDelaySeconds() const;
 
 	FMoQReceiverOptions Options;
 	TSharedPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> Session;
-	TSharedPtr<FMoQSubscriberHandle, ESPMode::ThreadSafe> SubscriberHandle;
+	TSharedPtr<FMoQSubscriberHandle, ESPMode::ThreadSafe> MocapSubscriberHandle;
+	TSharedPtr<FMoQSubscriberHandle, ESPMode::ThreadSafe> AudioSubscriberHandle;
 	FDelegateHandle ConnectionDelegateHandle;
 
 	TWeakPtr<ISerializedFrameConsumer> Consumer;
+	TWeakPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
 
 	TQueue<TUniquePtr<FReceivedPayload>, EQueueMode::Mpsc> ReceiveQueue;
 	mutable FCriticalSection QueueMutex;
@@ -86,7 +103,8 @@ private:
 
 	FThreadSafeBool bInitialized = false;
 	FThreadSafeBool bRunning = false;
-	FThreadSafeBool bSubscribed = false;
+	FThreadSafeBool bMocapSubscribed = false;
+	FThreadSafeBool bAudioSubscribed = false;
 
 	TAtomic<MoqConnectionState> CachedState;
 	FThreadSafeBool bConnectInFlight = false;
@@ -96,6 +114,9 @@ private:
 	double LastErrorLogTimeSeconds = 0.0;
 
 	FO3DTransportConfig ActiveConfig;
+	FO3DTransportAudioConfig ActiveAudioConfig;
+	O3DAudio::FFrameDecoder AudioDecoder;
+	TArray<int16> DecodedPcmScratch;
 
 	// Shared alive flag for safe callback handling - set to false during destruction
 	// This prevents use-after-free when callbacks are pending on the game thread

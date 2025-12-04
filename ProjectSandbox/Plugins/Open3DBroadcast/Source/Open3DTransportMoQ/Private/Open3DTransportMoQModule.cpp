@@ -15,14 +15,10 @@
 /**
  * Open3DTransportMoQ Module
  *
- * Phase 2 status:
+ * Phase 4 status:
  * - Loads and validates the moq-ffi runtime
  * - Wires the async dispatcher used by the session wrapper
- * - Registers the fully featured Phase 2 sender factory
- * - Leaves the receiver factory as a placeholder for Phase 3 work
- *
- * Later phases will add the full receiver implementation (Phase 3) and
- * audio track support (Phase 4).
+ * - Registers sender and receiver factories with audio support
  */
 class FOpen3DTransportMoQModule : public IModuleInterface
 {
@@ -35,13 +31,22 @@ public:
 			UE_LOG(LogO3DMoQSender, Error, TEXT("Failed to load MoQ FFI library: %s"), *FMoQFfiSupport::GetStatusMessage());
 			return;
 		}
-		moq_init();
-		// Ensure dispatcher is ready for Phase 1 wrapper usage
+
+		// Initialize the MoQ FFI crypto provider - must be called before any TLS operations
+		// BUG-1 fix: Check return value of moq_init()
+		if (!moq_init())
+		{
+			UE_LOG(LogO3DMoQSender, Error, TEXT("Failed to initialize MoQ FFI crypto provider"));
+			FMoQFfiSupport::UnloadLibrary();
+			return;
+		}
+
+		// Ensure dispatcher is ready for wrapper usage
 		FMoQAsyncDispatcher::Get().Initialize();
 	
 		RegisterTransports();
 
-		UE_LOG(LogO3DMoQSender, Log, TEXT("Open3D MoQ transport module started (Phase 2 - sender online, receiver pending)"));
+		UE_LOG(LogO3DMoQSender, Log, TEXT("Open3D MoQ transport module started (Phase 4 - sender/receiver with audio support)"));
 	}
 
 	virtual void ShutdownModule() override

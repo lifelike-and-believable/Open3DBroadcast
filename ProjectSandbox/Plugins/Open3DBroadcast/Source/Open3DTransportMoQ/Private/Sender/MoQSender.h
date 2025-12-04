@@ -7,6 +7,7 @@
 #include "Templates/UniquePtr.h"
 #include "Containers/Queue.h"
 #include "O3DSenderInterface.h"
+#include "O3DAudioFrameCodec.h"
 #include "moq_ffi.h"
 
 class FMoQSessionWrapper;
@@ -17,6 +18,30 @@ class FRunnableThread;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogO3DMoQSender, Log, All);
 
+/**
+ * MoQ Transport Sender Implementation
+ * 
+ * Connects to a MoQ relay as a publisher and sends mocap and audio data.
+ * Uses the moq-ffi library for WebTransport/QUIC connectivity.
+ * 
+ * Track Architecture:
+ * - Mocap track: "mocap/<session>/<track>" - for motion capture data
+ * - Audio track: "audio/<session>/<track>" - for audio data (separate publisher)
+ * 
+ * This leverages MoQ's native support for multiple tracks, providing clean
+ * separation between data types rather than multiplexing like NNG.
+ * 
+ * Audio Support (Phase 4):
+ * - Audio is published on a separate MoQ track with "audio" namespace prefix
+ * - PCM audio is encoded to PCM16 or Opus using O3DAudio framework
+ * - Each track type has its own publisher for independent flow control
+ * 
+ * Threading:
+ * - Initialize(), Start(), Stop(), Tick() must be called from game thread
+ * - Send() may be called from any thread (typically frame capture thread)
+ * - Audio SubmitPcm() may be called from audio capture thread
+ * - Internal worker thread handles actual network publishing
+ */
 class FO3DMoQSender : public IOpen3DSender
 {
 public:
@@ -30,16 +55,18 @@ public:
 	virtual bool Send(const O3DS::SubjectList& List) override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual FO3DTransportStats GetStats() const override;
-	virtual bool SupportsAudio() const override { return false; }
-	virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override { return nullptr; }
+	virtual bool SupportsAudio() const override { return true; }
+	virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
 
 private:
 	friend class FSendWorker;
+	friend class FO3DMoQSenderAudioSink;
 
 	struct FPendingPayload
 	{
 		TArray<uint8> Data;
 		double EnqueueTimestampSeconds = 0.0;
+		bool bIsAudio = false;  // true if this payload should go to audio track
 	};
 
 	struct FLatencyStats
@@ -52,8 +79,9 @@ private:
 	struct FMoQSenderOptions
 	{
 		FString RelayUrl;
-		FString TrackNamespace;
-		FString TrackName;
+		FString MocapNamespace;      // e.g., "mocap/session1"
+		FString AudioNamespace;      // e.g., "audio/session1"
+		FString TrackName;           // e.g., "character1"
 		MoqDeliveryMode DeliveryMode = MOQ_DELIVERY_STREAM;
 		uint64 MaxQueueBytes = 8ull * 1024ull * 1024ull;
 	};
@@ -65,19 +93,27 @@ private:
 	void StopWorker();
 	void WakeWorker();
 	bool IsPublisherReady() const;
+	bool IsAudioPublisherReady() const;
 	bool EnsurePublisher();
+	bool EnsureAudioPublisher();
 	void DestroyPublisher();
-	bool EnqueuePayload(TArray<uint8>&& Data, double CaptureTimestampSec);
+	void DestroyAudioPublisher();
+	bool EnqueuePayload(TArray<uint8>&& Data, double CaptureTimestampSec, bool bIsAudio = false);
 	bool DequeuePayload(TUniquePtr<FPendingPayload>& OutPayload);
 	void DrainQueue();
 	bool PublishPayload(const FPendingPayload& Payload);
 	uint32 RunWorker();
 	void ResetStats();
-	double ComputeReconnectDelaySeconds() const;
+	
+	// Audio support (Phase 4)
+	void RefreshAudioEncoder();
+	bool ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec);
+	bool SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, double TimestampSec);
 
 	FMoQSenderOptions Options;
 	TSharedPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> Session;
-	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> PublisherHandle;
+	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> MocapPublisherHandle;
+	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> AudioPublisherHandle;
 	FDelegateHandle ConnectionDelegateHandle;
 
 	TQueue<TUniquePtr<FPendingPayload>, EQueueMode::Mpsc> SendQueue;
@@ -105,4 +141,13 @@ private:
 	double LastDropLogTimeSeconds = 0.0;
 
 	FO3DTransportConfig ActiveConfig;
+	
+	// Audio support (Phase 4)
+	FO3DTransportAudioConfig ActiveAudioConfig;
+	FGuid AudioSourceGuid;
+	bool bAudioEncoderInitialized = false;
+	O3DAudio::FFrameEncoder AudioEncoder;
+	
+	mutable FCriticalSection SubjectNameLock;
+	FString LastSubjectName;
 };
