@@ -58,14 +58,14 @@ Receiver->Poll();
 
 ## Configuration Options
 
-| Key | Alt Key | Description | Default |
-|-----|---------|-------------|---------|
+| Key | Alt Keys | Description | Default |
+|-----|----------|-------------|---------|
 | `relay_url` | `moq.relay` | MoQ relay server URL | (from Uri) |
 | `track_namespace` | `moq.namespace` | Track namespace | `mocap/<session>` |
 | `track_name` | `moq.track` | Track name | (from StreamId) |
 | `moq.session` | - | Session identifier | (from StreamId) |
 | `delivery_mode` | `moq.delivery` | `stream` or `datagram` | `stream` |
-| `queue_bytes` | `moq.qbytes` | Send queue size | 8MB |
+| `queue_bytes` | `moq.queue_bytes`, `moq.qbytes` | Send queue size | 8MB |
 
 ## Track Naming Convention
 

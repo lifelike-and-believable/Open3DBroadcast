@@ -781,11 +781,14 @@ bool FO3DMoQSender::SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, doubl
 		return false;
 	}
 
-	// For MoQ, we publish the raw encoded audio data to the audio track
-	// The receiver will know it's audio based on the track namespace (audio/...)
+	// Serialize the encoded frame with metadata for transport
+	// This allows the receiver to properly decode the audio data
 	TArray<uint8> AudioPayload;
-	AudioPayload.SetNumUninitialized(Frame.Encoded.Num());
-	FMemory::Memcpy(AudioPayload.GetData(), Frame.Encoded.GetData(), Frame.Encoded.Num());
+	if (!O3DAudio::SerializeForTransport(Frame, AudioPayload))
+	{
+		UE_LOG(LogO3DMoQSender, Warning, TEXT("Failed to serialize audio frame for transport"));
+		return false;
+	}
 
 	if (!EnqueuePayload(MoveTemp(AudioPayload), TimestampSec, /*bIsAudio=*/true))
 	{

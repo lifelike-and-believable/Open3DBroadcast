@@ -8,6 +8,8 @@
 #include "Shared/MoQHelpers.h"
 #include "Shared/MoQSessionWrapper.h"
 #include "Shared/MoQTypes.h"
+#include "O3DAudioFrameCodec.h"
+#include "O3DAudioSerialization.h"
 #include "O3DUnifiedMessage.h"
 
 DEFINE_LOG_CATEGORY(LogO3DMoQReceiver);
@@ -576,20 +578,35 @@ bool FO3DMoQReceiver::ProcessAudioPayload(const FReceivedPayload& Payload)
 		return true;
 	}
 
-	// For MoQ, the audio data is received as encoded frames
-	// The sender encodes with O3DAudio::FFrameEncoder, so we decode with O3DAudio::FFrameDecoder
-	// For now, we assume PCM16 format since the sender directly publishes encoded audio
-	
-	// Create metadata from config
-	O3DS::FAudioFrameMeta Meta;
-	Meta.NumChannels = ActiveAudioConfig.NumChannels;
-	Meta.SampleRate = ActiveAudioConfig.SampleRate;
-	Meta.TimestampSec = Payload.ReceiveTimestampSeconds;
-	Meta.StreamLabel = Options.StreamId;
-	Meta.SubjectName = Options.TrackName;
+	// Determine codec from audio config (matches sender's encoder config)
+	O3DS::EUnifiedCodec Codec = O3DAudio::SelectCodec(ActiveAudioConfig);
 
-	// Submit PCM16 data directly to the sink
-	SinkPinned->SubmitPcm16(Meta, Payload.Data.GetData(), Payload.Data.Num());
+	// Deserialize the encoded audio frame (produced by O3DAudio::SerializeForTransport on sender)
+	O3DAudio::FEncodedAudioFrame EncodedFrame;
+	if (!O3DAudio::DeserializeEncodedAudioFrame(Codec, Payload.Data.GetData(), Payload.Data.Num(), EncodedFrame))
+	{
+		UE_LOG(LogO3DMoQReceiver, Warning, TEXT("MoQ receiver failed to deserialize audio frame (payload=%d codec=%d)."), 
+			Payload.Data.Num(), static_cast<int32>(Codec));
+		return false;
+	}
+
+	// PCM16 can be submitted directly
+	if (Codec == O3DS::EUnifiedCodec::PCM16)
+	{
+		SinkPinned->SubmitPcm16(EncodedFrame.Meta, EncodedFrame.Payload.GetData(), EncodedFrame.Payload.Num());
+		return true;
+	}
+
+	// Decode Opus (or other codecs) to PCM16
+	if (!AudioDecoder.Decode(Codec, EncodedFrame.Meta, EncodedFrame.Payload.GetData(), EncodedFrame.Payload.Num(), DecodedPcmScratch))
+	{
+		UE_LOG(LogO3DMoQReceiver, Warning, TEXT("MoQ receiver failed to decode audio frame (codec=%d)."), static_cast<int32>(Codec));
+		return false;
+	}
+
+	SinkPinned->SubmitPcm16(EncodedFrame.Meta,
+		reinterpret_cast<const uint8*>(DecodedPcmScratch.GetData()),
+		DecodedPcmScratch.Num() * sizeof(int16));
 	return true;
 }
 

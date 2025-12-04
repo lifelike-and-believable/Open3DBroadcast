@@ -97,14 +97,17 @@ namespace MoQHelpers
 		else
 		{
 			// Replace the prefix if the namespace starts with mocap/ or audio/
-			// "mocap/" is 6 characters, so Mid(6) gets everything after the slash
+			// Calculate prefix lengths dynamically to avoid magic numbers
+			static const int32 MocapPrefixLen = FCString::Strlen(kMocapNamespacePrefix) + 1; // +1 for slash
+			static const int32 AudioPrefixLen = FCString::Strlen(kAudioNamespacePrefix) + 1; // +1 for slash
+			
 			if (Namespace.StartsWith(TEXT("mocap/"), ESearchCase::IgnoreCase))
 			{
-				Namespace = FString::Printf(TEXT("%s/%s"), Prefix, *Namespace.Mid(6));
+				Namespace = FString::Printf(TEXT("%s/%s"), Prefix, *Namespace.Mid(MocapPrefixLen));
 			}
 			else if (Namespace.StartsWith(TEXT("audio/"), ESearchCase::IgnoreCase))
 			{
-				Namespace = FString::Printf(TEXT("%s/%s"), Prefix, *Namespace.Mid(6));
+				Namespace = FString::Printf(TEXT("%s/%s"), Prefix, *Namespace.Mid(AudioPrefixLen));
 			}
 		}
 
