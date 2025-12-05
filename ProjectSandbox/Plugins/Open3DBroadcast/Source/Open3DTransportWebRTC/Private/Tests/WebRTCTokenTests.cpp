@@ -859,7 +859,8 @@ bool FErrorHandlingTimeoutTest::RunTest(const FString& Parameters)
 	FO3DTokenFetcher Fetcher;
 
 	FO3DTokenFetchRequest Request;
-	Request.EndpointUrl = TEXT("http://192.0.2.1:9999/token"); // Non-routable IP (TEST-NET-1)
+	// Use RFC 5737 TEST-NET-1 (192.0.2.0/24) - reserved for documentation, non-routable
+	Request.EndpointUrl = TEXT("http://192.0.2.1:9999/token");
 	Request.RoomName = TEXT("test-room");
 	Request.Identity = TEXT("test-user");
 	Request.Role = TEXT("publisher");
@@ -876,8 +877,8 @@ bool FErrorHandlingTimeoutTest::RunTest(const FString& Parameters)
 		bSuccess.Store(Result.bSuccess);
 	});
 
-	// Wait for timeout
-	FPlatformProcess::Sleep(3.0f);
+	// Wait for timeout plus small buffer (1.5s for 1.0s timeout)
+	FPlatformProcess::Sleep(1.5f);
 
 	TestTrue(TEXT("Callback should be invoked after timeout"), bCallbackInvoked.Load());
 	TestFalse(TEXT("Request should fail due to timeout"), bSuccess.Load());
