@@ -13,6 +13,30 @@ public class Open3DShared : ModuleRules
 
         var PluginRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", ".."));
 
+        // Open3DStream headers (needed for tests)
+        var Open3DStreamIncludeDir = Path.Combine(PluginRoot, "ThirdParty", "open3dstream", "include");
+        PublicIncludePaths.Add(Open3DStreamIncludeDir);
+
+        // Flatbuffers headers (needed for Open3DStream)
+        var FlatbuffersIncludeDir = Path.Combine(PluginRoot, "ThirdParty", "flatbuffers", "include");
+        PublicSystemIncludePaths.Add(FlatbuffersIncludeDir);
+
+        // Link Open3DStream and Flatbuffers libraries (needed for tests)
+        if (Target.Platform == UnrealTargetPlatform.Win64)
+        {
+            var Open3DStreamLib = Path.Combine(PluginRoot, "ThirdParty", "open3dstream", "lib", "Win64", "open3dstreamstatic.lib");
+            var FlatbuffersLib = Path.Combine(PluginRoot, "ThirdParty", "flatbuffers", "lib", "Win64", "flatbuffers.lib");
+
+            if (File.Exists(Open3DStreamLib))
+            {
+                PublicAdditionalLibraries.Add(Open3DStreamLib);
+            }
+            if (File.Exists(FlatbuffersLib))
+            {
+                PublicAdditionalLibraries.Add(FlatbuffersLib);
+            }
+        }
+
         // Opus library and headers
         bool bWithOpus = false;
         if (Target.Platform == UnrealTargetPlatform.Win64)
@@ -34,6 +58,12 @@ public class Open3DShared : ModuleRules
             "CoreUObject",
             "Engine"
         });
+
+        // Add Open3DSender include paths for tests (avoid circular dependency by using IncludePathModuleNames)
+        if (O3DBuildFlags.IsSenderEnabled(Target))
+        {
+            PublicIncludePathModuleNames.Add("Open3DSender");
+        }
 
         PrivateDependencyModuleNames.AddRange(new string[] {});
     }

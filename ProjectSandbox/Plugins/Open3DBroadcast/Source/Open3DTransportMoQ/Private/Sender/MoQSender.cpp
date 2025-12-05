@@ -342,7 +342,7 @@ void FO3DMoQSender::Tick(float /*DeltaSeconds*/)
 	if ((State == MOQ_STATE_DISCONNECTED || State == MOQ_STATE_FAILED) && !bConnectInFlight)
 	{
 		const double Now = FPlatformTime::Seconds();
-		if ((Now - LastConnectAttemptTimeSeconds) >= ComputeReconnectDelaySeconds())
+		if ((Now - LastConnectAttemptTimeSeconds) >= ComputeReconnectDelaySeconds(ConsecutiveFailures))
 		{
 			AttemptConnect();
 		}
@@ -736,7 +736,7 @@ void FO3DMoQSender::RefreshAudioEncoder()
 
 bool FO3DMoQSender::ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec)
 {
-	if (!bInitialized.Load() || !bRunning.Load() || !bAudioEncoderInitialized)
+	if (!bInitialized || !bRunning || !bAudioEncoderInitialized)
 	{
 		return false;
 	}
@@ -776,7 +776,7 @@ bool FO3DMoQSender::ProcessCapturedAudio(const FString& StreamLabel, const float
 
 bool FO3DMoQSender::SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, double TimestampSec)
 {
-	if (!bInitialized.Load() || !bRunning.Load() || Frame.Encoded.Num() <= 0)
+	if (!bInitialized || !bRunning || Frame.Encoded.Num() <= 0)
 	{
 		return false;
 	}
