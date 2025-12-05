@@ -2,6 +2,51 @@
 
 This directory contains testing utilities for the WebRTC transport module.
 
+## Table of Contents
+
+- [Mock Token Server](#mock-token-server) - Python server for testing auto-fetch
+- [Unit Tests](#unit-tests) - Comprehensive test suite
+
+---
+
+## Unit Tests
+
+The WebRTC transport module includes comprehensive unit tests for the token auto-fetch functionality. Tests are located in `Private/Tests/WebRTCTokenTests.cpp`.
+
+### Test Categories
+
+| Category | Test Count | Description |
+|----------|------------|-------------|
+| JWT Parsing | 5 | Token manager correctly parses JWT expiry claims |
+| Configuration | 3 | Manual vs auto-fetch mode initialization |
+| Thread Safety | 1 | Callback queuing for concurrent requests |
+| Request Building | 3 | Token fetcher constructs correct HTTP requests |
+| Integration | 4 | Sender/receiver with auto-fetch config |
+| Backward Compat | 2 | Existing manual token projects still work |
+| Error Handling | 4 | Timeout, reset, and cancellation |
+| Config | 2 | Role and refresh lead time settings |
+
+### Running Tests
+
+Tests run through Unreal Engine's automation testing framework:
+
+```powershell
+# Run all WebRTC token tests
+Build/Scripts/Run-AutomationTests.ps1 -TestFilter="Open3DBroadcast.Open3DTransportWebRTC.TokenAutoFetch"
+
+# Run specific test category
+Build/Scripts/Run-AutomationTests.ps1 -TestFilter="Open3DBroadcast.Open3DTransportWebRTC.TokenAutoFetch.Manager"
+```
+
+### Test Design Principles
+
+1. **No server required** - Tests validate logic without needing a live LiveKit server
+2. **JWT generation** - Helper functions create valid JWT tokens for testing
+3. **Failure simulation** - Tests cover network errors, timeouts, and malformed responses
+4. **Platform awareness** - Windows-64bit tests are appropriately guarded
+
+---
+
 ## Mock Token Server
 
 ### Overview
