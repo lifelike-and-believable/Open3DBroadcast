@@ -11,6 +11,7 @@ add_executable(o3ds_core_tests
 	model_tests.cpp
 	sequencing_tests.cpp
 	reorder_gate_tests.cpp
+	capture_tests.cpp
 )
 
 target_link_libraries(o3ds_core_tests PRIVATE open3dstreamstatic)
