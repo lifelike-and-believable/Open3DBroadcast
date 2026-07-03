@@ -1,0 +1,89 @@
+name: Core library tests
+
+# Builds and unit-tests the engine-agnostic core library (src/o3ds) on
+# every PR/push, independent of the UE plugin build (which is gated on a
+# self-hosted Windows runner and PR-draft state - see
+# open3dbroadcast-plugin-ci.yml). This is the CI job the core-first
+# section of docs/roadmap/resilient-streaming-and-motion-prediction.md
+# depends on: as much of the roadmap's logic as possible lives in
+# src/o3ds specifically so it can be verified here, on every PR, on
+# GitHub-hosted runners, with no external dependencies beyond what's
+# already vendored as submodules.
+
+on:
+  pull_request:
+    branches: [ develop, main ]
+  push:
+    branches: [ develop, main ]
+  workflow_dispatch:
+
+concurrency:
+  group: core-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build & test (Linux, ASan/UBSan)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Init required submodules
+        # Only what the core library + tests actually need. WebRTC/MoQ
+        # dependencies (libdatachannel, mbedtls, moq-ffi, moq-rs) are not
+        # initialized: this build uses -DO3DS_DISABLE_WEBRTC=ON. cml is
+        # not used anywhere under src/o3ds.
+        run: git submodule update --init thirdparty/flatbuffers thirdparty/crccpp thirdparty/nng
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Build & install NNG
+        working-directory: thirdparty/nng
+        run: |
+          cmake -B build -G Ninja -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/usr" \
+            -DCMAKE_BUILD_TYPE=Release -DNNG_TESTS=OFF -DNNG_ENABLE_TLS=OFF
+          cmake --build build
+          cmake --install build
+
+      - name: Build & install CRCpp
+        working-directory: thirdparty/crccpp
+        run: |
+          cmake -B build -G Ninja -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/usr"
+          cmake --build build
+          cmake --install build
+
+      - name: Build & install FlatBuffers
+        working-directory: thirdparty/flatbuffers
+        run: |
+          # The vendored v2.0.6 pin hardcodes -Werror in its own CMakeLists.
+          # On GCC 13+ (current ubuntu-latest), a handful of its own source
+          # files trip newer stringop-overflow/-overread/array-bounds/restrict
+          # static-analysis warnings unrelated to O3DS - disable those
+          # specific checks (not just their error status: a later bare
+          # -Werror in flatbuffers' own flags would otherwise re-escalate
+          # anything merely downgraded via -Wno-error=). This only affects
+          # how the vendored dependency itself is compiled.
+          cmake -B build -G Ninja -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/usr" \
+            -DCMAKE_BUILD_TYPE=Release -DFLATBUFFERS_BUILD_TESTS=OFF \
+            -DCMAKE_CXX_FLAGS="-Wno-stringop-overflow -Wno-stringop-overread -Wno-array-bounds -Wno-restrict"
+          cmake --build build
+          cmake --install build
+
+      - name: Configure core library + tests
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/usr" \
+            -DO3DS_DISABLE_WEBRTC=ON \
+            -DO3DS_BUILD_TESTS=ON \
+            -DO3DS_ENABLE_SANITIZERS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run tests (ctest, ASan/UBSan active)
+        working-directory: build
+        run: ctest --output-on-failure
