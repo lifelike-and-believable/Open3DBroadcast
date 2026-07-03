@@ -324,12 +324,44 @@ Goal: a pluggable pose predictor that delivers concealment, latency-hiding, and 
   - **Receiver concealment (C1):** the receiver keeps one predictor per subject, calls `Observe()` on every applied frame; when the A2 gate reports a gap at presentation time it calls `Predict(t_now)` and pushes that as the LiveLink frame; on the real frame's arrival, `Observe()` it and optionally blend-correct.
   - **Sender residual (C2):** in `SubjectList::SerializeUpdate`, replace the implicit "compare to last-sent value" with "compare to `predictor.Predict(t)`", encode the residual under the existing `deltaThreshold`, then `predictor.Observe(current)`. The `HoldPredictor` makes this reduce **exactly** to today's delta scheme — so C2 is a strict generalization, and shipping C0+`HoldPredictor` changes nothing observable (good for landing the plumbing safely).
 
-### Phase C1 — Receiver-side concealment & latency-hiding (UE glue)
-- **Goal:** when a frame is missing/late, synthesize a predicted pose instead of freezing or popping; optionally render slightly ahead to hide RTT. **Receiver-only, no determinism requirement** → first real payoff.
-- **Files/modules:** `Open3DReceiver/O3DReceiverSource.cpp`; `O3DPerformanceMetrics` (prediction-error metric: compare predicted vs the real frame when it later arrives).
-- **Approach:** drive the A2 gate; on a gap, feed `IPosePredictor.Predict()` to the LiveLink apply path (respecting §2.5). Bound the extrapolation horizon; always correct toward the next real frame (avoid visible snap — consider a short blend).
-- **Acceptance:** replay (B2) with injected loss shows measurably reduced visible "pops" and a reported prediction-error metric; with zero loss, behavior is identical to today (predictor is a no-op when every frame arrives on time). Manual + replay-driven.
-- **Dependencies:** C0, A2, B2. **Out of scope:** changing what the sender transmits.
+### Phase C1 — Receiver-side concealment & latency-hiding
+
+**Goal:** when a frame is missing/late, synthesize a *predicted* pose instead of freezing (hold) or popping; optionally render ahead to hide RTT. **Receiver-only → no cross-peer determinism → the first visible payoff of the whole predictor line.** With zero loss it is a strict no-op (every frame arrives → predictor never invoked → output identical to today). **Dependencies:** C0 (predictor), A2 (gate + clock mapping + HUD), B2 (test harness). **Out of scope:** changing what the sender transmits (C2). **Sender-side changes: none.**
+
+#### C1.a — Concealment state machine (per subject)
+Sits on the A2 apply path; the interesting math (blend/correction, error metric) goes **core-side** where it can be Linux-tested, UE holds only the LiveLink push.
+- Feed **every applied real frame** into the per-subject `IPosePredictor.Observe()` (§C0).
+- Each presentation instant (receiver tick / eval boundary) has a target time `t_pres` from A2.b (+ optional render-ahead horizon, C1.c). Decide the pose at `t_pres`:
+  - **Real frame available/coverable** → apply real (let LiveLink interpolate as normal); no prediction.
+  - **Starved / durable gap** → `predictor.Predict(t_pres)`. If it returns `true`, push that as a synthetic LiveLink frame **flagged predicted**; if `false` (insufficient history / first frames) → **hold** (today's behavior).
+- **Bound the horizon.** After `max_conceal_horizon` (e.g. ~100–200 ms) of pure prediction with no real data, **stop extrapolating and hold** — classical predictors diverge/overshoot on long gaps; a frozen pose beats a flung skeleton. Expose as a cvar.
+- Reset the predictor on keyframe / topology change / large seq gap / publisher restart (ties to A1.c re-baseline).
+
+#### C1.b — Correction without rewriting history
+- LiveLink samples by time and may already have evaluated past a concealed instant, so **do not try to un-apply or rewrite frames already in LiveLink's buffer.** When real frames resume, `Observe()` them and **correct forward**: blend/damp the applied output from the last-predicted trajectory toward the corrected one over a short window (avoid a hard snap-back "pop"). Keep bookkeeping of which presentation times were already covered by a prediction so you don't double-push.
+- **Key design decision (measure first, §2.5) — trigger model:**
+  - *Option 1 — gap-triggered (recommended start):* let LiveLink's own interpolation/hold cover small (1–2 frame) gaps; O3DB synthesizes only for gaps/starvation beyond that. Minimal change, leans on LiveLink for the easy cases; the hard part is cleanly detecting "LiveLink is about to starve."
+  - *Option 2 — continuous synthesis:* each tick, O3DB provides the pose at `t_pres` (real or predicted) so LiveLink always has a current-time sample and rarely holds. Simpler control flow, no starvation-detection, but pushes synthetic frames throughout gaps.
+  - **First measure LiveLink's native gap behavior** (does its interpolation/hold already look acceptable for 1–2 dropped frames?), then pick. Do not build both.
+
+#### C1.c — Latency-hiding / render-ahead (opt-in, default OFF)
+- Proactively predict `render_ahead` ms beyond the newest received frame so the displayed pose is closer to "real now," trading accuracy for lower effective latency. Separate mode because it changes the accuracy/latency tradeoff and **interacts with LiveLink's buffer offset (A2.c) — don't double-count the offset.** Off by default; a cvar with a conservative cap.
+
+#### C1.d — Metrics (feeds A2.d HUD)
+- **Prediction error** (the important one): when a real frame arrives for a time that was concealed, compare the earlier prediction to the actual → per-joint + aggregate error. **This number is the go/no-go signal for C3** (is a learned predictor worth it?).
+- Concealed-frame count/rate, fallback-to-hold count, horizon distribution, and a **"pop" metric** = inter-frame applied-pose discontinuity at gap-recovery boundaries (this is what concealment is meant to reduce vs hold).
+
+#### C1 — Acceptance (mostly via B2 — the capture is ground truth)
+- **The elegant test:** replay a clean capture through B2 with **loss-only** injection. The dropped frames' true poses are known (they're in the capture), so C1's prediction can be scored directly: assert aggregate **prediction error < bound** and the **pop metric < the `HoldPredictor` baseline** on the same dropped set.
+- **Baseline comparison:** `LinearPredictor` concealment error < `HoldPredictor` (== today) on the same dropped frames — validates the whole premise on real motion.
+- **No-op safety:** zero-loss replay → prediction never triggers → output byte-identical to today.
+- **Horizon bound:** a long injected outage → prediction stops at `max_conceal_horizon` and holds (no runaway extrapolation).
+- Core math (error, blend) unit-tested on Linux; LiveLink injection via B2 (UE-lite / optional Replay transport) + UE automation on the self-hosted runner (gated on the PR being out of draft).
+
+#### C1 — Open decisions
+- Trigger model Option 1 vs 2 (above) — measure LiveLink first.
+- `max_conceal_horizon`, `render_ahead` defaults and caps; blend/correction window length.
+- Which predictor is the C1 default (`Linear` almost certainly; `Quadratic` may overshoot — evaluate on captures).
 
 ### Phase C2 — Symmetric residual compression (core + both paths)
 - **Goal:** sender transmits `actual − predicted` residuals; receiver reconstructs. Bandwidth win + graceful degradation. **Requires the two ends to predict from the same history.**
