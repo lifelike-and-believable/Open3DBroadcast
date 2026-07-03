@@ -102,6 +102,8 @@ add_custom_target(protocol DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/_generated/o3ds_g
 set(pub_headers			
 	o3ds/o3ds.h
 	o3ds/getTime.h
+	o3ds/sequencing.h
+	o3ds/reorder_gate.h
 	o3ds/model.h
 	o3ds/base_connector.h
 	o3ds/nng_connector.h
@@ -137,7 +139,9 @@ endif()
 set(SOURCES 
 	o3ds/o3ds.cpp
 	o3ds/getTime.cpp
-	o3ds/model.cpp	
+	o3ds/sequencing.cpp
+	o3ds/reorder_gate.cpp
+	o3ds/model.cpp
 	o3ds/base_connector.cpp
 	o3ds/nng_connector.cpp
 	o3ds/subscriber.cpp
