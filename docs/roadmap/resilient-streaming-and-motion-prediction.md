@@ -26,7 +26,7 @@ Put as much logic as possible in the **engine-agnostic core library (`src/o3ds/`
 
 ### 0.2 Prerequisite hazard — core library duplication
 
-The core library is currently checked in **twice**: `src/o3ds/` and a verbatim copy under `ProjectSandbox/Plugins/Open3DBroadcast/ThirdParty/open3dstream/include/o3ds/` (tracked as issue #204). **Until that duplication is resolved, every serialization/schema change in this plan must be applied to both copies, or the plugin will silently use a stale core.** Strongly prefer resolving #204 (single source of truth, consumed via submodule or a packaging step) as an early task so the rest of this plan touches one copy. If #204 is not yet done, each phase that edits core files must note "mirror into the vendored copy" in its task list.
+The core library is currently checked in **twice**: `src/o3ds/` and a verbatim copy under `ProjectSandbox/Plugins/Open3DBroadcast/ThirdParty/open3dstream/include/o3ds/` (tracked as issue #203). **Until that duplication is resolved, every serialization/schema change in this plan must be applied to both copies, or the plugin will silently use a stale core.** Strongly prefer resolving #203 (single source of truth, consumed via submodule or a packaging step) as an early task so the rest of this plan touches one copy. If #203 is not yet done, each phase that edits core files must note "mirror into the vendored copy" in its task list.
 
 ---
 
@@ -100,7 +100,7 @@ This phase has three cohesive pieces; an agent can land them as a small stack (s
   tx_seq:ulong = 0;          // monotonic per logical stream; 0 = unset
   tx_wallclock_us:ulong = 0; // UTC microseconds at transmit; 0 = unset
   ```
-- Regenerate `src/o3ds_generated.h` with `flatc --cpp src/o3ds.fbs` (checked in; never hand-edit). **Mirror both the schema and the generated header into the vendored copy under `ProjectSandbox/.../ThirdParty/open3dstream/` until #204 lands** (§0.2).
+- Regenerate `src/o3ds_generated.h` with `flatc --cpp src/o3ds.fbs` (checked in; never hand-edit). **Mirror both the schema and the generated header into the vendored copy under `ProjectSandbox/.../ThirdParty/open3dstream/` until #203 lands** (§0.2).
 - **Do not conflate with the existing `time:double` field** — that is the animation/sample time (content clock). `tx_wallclock_us` is a *new, separate* value: when the frame left the sender. Both coexist.
 - Compatibility: an old sender never sets these → new receiver reads default `0` → treated as unset → gate bypassed (legacy path). An old receiver ignores the new fields. Verify both directions in tests.
 
@@ -417,13 +417,13 @@ Recommended order: **A1 → B1 → B2 → A2 → C0 → C1** (this delivers resi
 
 ## 8. Risks & open questions (consolidated)
 
-- **Core duplication (#204)** — resolve early or every core change is doubled (§0.2).
+- **Core duplication (#203)** — resolve early or every core change is doubled (§0.2).
 - **History divergence under loss (C2)** — residual coding silently breaks on lossy transports because the receiver's pose history diverges from the sender's; scope C2 to reliable/ordered transports (or use keyframe-relative independent deltas), and let C1 concealment carry unreliable links. Load-bearing — see C2.
 - **Float determinism** for residual coding (C2) — measure drift before committing; keyframe cadence / fixed-point as mitigations.
 - **LiveLink division of labor** — RESOLVED (§2.5): LiveLink owns presentation smoothing; O3DB owns the network layer + clock-offset→timestamp mapping + optional predicted-frame concealment. Verify the exact LiveLink buffer/time APIs against the target UE version before A2.
 - **Clock-offset estimation** (§2.5, A2) — mapping `tx_wallclock_us` to local engine time needs a robust moving/min estimate of the send→recv offset; absolute one-way latency additionally needs NTP-level sync, else report relative jitter/loss only.
 - **Inference budget** for the learned model (C3) — hard real-time constraint; keep C3 a gated spike.
-- **Two-copy schema edits** until #204 lands.
+- **Two-copy schema edits** until #203 lands.
 
 ## 9. Definition of done (program level)
 
