@@ -48,27 +48,46 @@ namespace O3DS
 			return;
 		}
 
-		// Restart detection. frame_epoch is unambiguous when present: any
-		// change means a new publisher session, full stop. The backward-jump
-		// heuristic is only consulted for streams that have never shown a
-		// non-zero epoch - once a stream demonstrates it carries epochs, a
-		// low seq is trusted to mean stale/duplicate, not a restart, since a
-		// real restart would already have been caught via the epoch change.
+		// Restart detection. frame_epoch, when present, must be treated as an
+		// ORDERED value, not just "changed vs not": a network can reorder a
+		// straggler from an OLDER session to arrive after the first frame of
+		// a new one (this is exactly the kind of reordering this whole gate
+		// exists to handle), and naively treating any epoch != mLastEpoch as
+		// a restart would misapply that stale frame as if it were current -
+		// and, if it also let mLastEpoch regress, would make every
+		// subsequent legitimate frame look like yet another restart.
 		bool isRestart = false;
-		if (frame.epoch != 0 && mHaveEpoch && frame.epoch != mLastEpoch)
+		if (frame.epoch != 0)
 		{
-			isRestart = true;
+			if (mHaveEpoch && frame.epoch < mLastEpoch)
+			{
+				// Straggler from an older session, not a restart. Drop it
+				// like any other out-of-window frame; do NOT touch mLastEpoch.
+				mStats.stale_dropped++;
+				CheckTimeouts(now_s, emit);
+				return;
+			}
+
+			if (mHaveEpoch && frame.epoch > mLastEpoch)
+			{
+				isRestart = true;
+			}
+
+			// Only ever advances - a legacy (epoch==0) frame or an already-
+			// rejected older-epoch straggler must never move this backward.
+			if (frame.epoch > mLastEpoch)
+			{
+				mLastEpoch = frame.epoch;
+			}
+			mHaveEpoch = true;
 		}
 		else if (mInitialized && !mHaveEpoch && frame.seq <= mLastApplied
 			&& (mLastApplied - frame.seq) > mConfig.reset_backjump)
 		{
+			// Legacy-only fallback (frame_epoch unavailable on this stream):
+			// only consulted when we have no better signal, since a stream
+			// that does carry epochs already resolves restarts above.
 			isRestart = true;
-		}
-
-		if (frame.epoch != 0)
-		{
-			mLastEpoch = frame.epoch;
-			mHaveEpoch = true;
 		}
 
 		if (isRestart)
@@ -96,16 +115,18 @@ namespace O3DS
 
 		if (frame.seq == mLastApplied + 1)
 		{
-			DeliverAndDrain(std::move(frame), emit);
+			DeliverAndDrain(std::move(frame), emit, /*countDrainAsReordered*/ true);
 		}
 		else
 		{
 			// Gap: buffer this frame and remember when we started waiting.
-			// map::emplace with a duplicate key (a resend of an already-
-			// pending seq) is a silent no-op, which is fine - we already
-			// have a copy waiting.
+			// A resend of a seq we're already holding (duplicate key) is a
+			// genuine duplicate arrival - the original buffered copy (and
+			// its wait timer) is kept, but still count it.
 			uint64_t seq = frame.seq;
-			mPending.emplace(seq, PendingEntry{ std::move(frame), now_s });
+			auto result = mPending.emplace(seq, PendingEntry{ std::move(frame), now_s });
+			if (!result.second)
+				mStats.dup_dropped++;
 		}
 
 		CheckTimeouts(now_s, emit);
@@ -116,7 +137,7 @@ namespace O3DS
 		CheckTimeouts(now_s, emit);
 	}
 
-	void ReorderGate::DeliverAndDrain(Frame&& frame, const std::function<void(Frame&&)>& emit)
+	void ReorderGate::DeliverAndDrain(Frame&& frame, const std::function<void(Frame&&)>& emit, bool countDrainAsReordered)
 	{
 		uint64_t seq = frame.seq;
 		emit(std::move(frame));
@@ -138,7 +159,8 @@ namespace O3DS
 			uint64_t nextSeq = next.seq;
 			emit(std::move(next));
 			mStats.delivered++;
-			mStats.reordered++; // arrived out of order relative to its predecessor; caught up now
+			if (countDrainAsReordered)
+				mStats.reordered++; // arrived out of order relative to its predecessor; caught up now
 			mLastApplied = nextSeq;
 			mRecentlyDelivered.insert(nextSeq);
 			PruneRecentlyDelivered();
@@ -169,7 +191,10 @@ namespace O3DS
 			mPending.erase(first);
 
 			mLastApplied = gapSeq - 1; // pretend caught up to just before the frame we're giving up on
-			DeliverAndDrain(std::move(frame), emit);
+			// These frames were simply waiting behind a hole we're giving up
+			// on, not reordered relative to each other - don't inflate the
+			// reordered stat for frames that arrived in perfectly good order.
+			DeliverAndDrain(std::move(frame), emit, /*countDrainAsReordered*/ false);
 		}
 	}
 

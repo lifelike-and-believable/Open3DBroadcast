@@ -43,6 +43,18 @@ O3DS_TEST(NowUtcMicrosIsPlausibleAndAdvances)
 	O3DS_CHECK(t2 >= t1);
 }
 
+O3DS_TEST(NewSessionEpochIsPlausibleAndNonZero)
+{
+	uint32_t epoch = NewSessionEpoch();
+
+	// Same sanity bound as NowUtcMicros, in seconds: any time after
+	// ~2020-01-01. Also confirms it's never 0 (0 means "unset" on the
+	// wire), which ReorderGate depends on to distinguish a real epoch from
+	// a legacy/unset one.
+	O3DS_CHECK(epoch > 1577836800u);
+	O3DS_CHECK(epoch != 0);
+}
+
 O3DS_TEST(TxSeqAndWallclockRoundTripThroughSerializeAndParse)
 {
 	SubjectList subjects;

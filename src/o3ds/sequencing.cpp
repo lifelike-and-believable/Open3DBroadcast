@@ -33,4 +33,9 @@ namespace O3DS
 		using namespace std::chrono;
 		return (uint64_t)duration_cast<microseconds>(system_clock::now().time_since_epoch()).count();
 	}
+
+	uint32_t NewSessionEpoch()
+	{
+		return (uint32_t)(NowUtcMicros() / 1000000ull);
+	}
 }

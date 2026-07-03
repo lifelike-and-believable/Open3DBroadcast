@@ -66,8 +66,17 @@ namespace O3DS
 	//! and delivers what it has, counting the hole as `lost`.
 	//!
 	//! Publisher restarts (the sender's SequenceCounter resets to 1) are
-	//! detected via frame_epoch when the stream carries it - an epoch
-	//! change is unambiguous, unlike guessing from a sequence backward jump.
+	//! detected via frame_epoch when the stream carries it: an epoch strictly
+	//! greater than the last one seen means a new session. frame_epoch is
+	//! treated as an ORDERED value, not just "changed vs not" - a smaller
+	//! epoch than the last one seen is a straggler from an older session
+	//! reordered in flight across the restart boundary (a real network
+	//! condition, not a hypothetical), and is dropped as stale rather than
+	//! mistaken for yet another restart; it never moves the tracked epoch
+	//! backward. Senders should generate frame_epoch with
+	//! O3DS::NewSessionEpoch() (sequencing.h), which is best-effort
+	//! monotonic across restarts (derived from wall-clock seconds) - see
+	//! its own doc comment for the failure mode this doesn't cover.
 	//! Config::reset_backjump is used only as a fallback for streams that
 	//! never set frame_epoch (legacy senders): once a stream has shown a
 	//! non-zero epoch, the backjump heuristic is not consulted again for it.
@@ -107,7 +116,16 @@ namespace O3DS
 			double buffered_at_s;
 		};
 
-		void DeliverAndDrain(Frame&& frame, const std::function<void(Frame&&)>& emit);
+		// countDrainAsReordered distinguishes two callers: when a frame
+		// fills a genuine gap (its predecessor arrived, and this frame had
+		// been waiting because it arrived ahead of that predecessor), any
+		// successors drained after it really were reordered relative to
+		// what unblocked them - true. When CheckTimeouts gives up on a lost
+		// gap instead, the frames it then drains were simply waiting behind
+		// a hole, in perfectly good order relative to each other - false,
+		// or they would inflate the reordered stat for frames that were
+		// never actually reordered.
+		void DeliverAndDrain(Frame&& frame, const std::function<void(Frame&&)>& emit, bool countDrainAsReordered);
 		void CheckTimeouts(double now_s, const std::function<void(Frame&&)>& emit);
 		void PruneRecentlyDelivered();
 

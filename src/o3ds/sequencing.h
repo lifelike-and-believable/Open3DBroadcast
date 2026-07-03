@@ -66,6 +66,28 @@ namespace O3DS
 	//! staleness estimation only. Frame *ordering* must never depend on it;
 	//! use tx_seq for that.
 	uint64_t NowUtcMicros();
+
+	//! Generates a value for SubjectList.frame_epoch. Call this ONCE per
+	//! publisher session (e.g. alongside SequenceCounter::Reset(), when a
+	//! stream (re)starts) - never per frame.
+	//!
+	//! ReorderGate (reorder_gate.h) relies on frame_epoch being strictly
+	//! greater on every new session than on the previous one, so it can
+	//! tell a restart from an old-session straggler that simply arrived
+	//! late. This returns wall-clock seconds since the Unix epoch
+	//! (truncated to 32 bits, wrapping only once every ~136 years - not a
+	//! practical concern), which is monotonic across restarts in virtually
+	//! every real deployment and is never 0 in any deployable timeframe.
+	//!
+	//! Known limitation: two restarts of the same stream within the same
+	//! wall-clock second produce the same epoch, which ReorderGate would
+	//! then be unable to distinguish from a continuing session - a restart
+	//! that fast falls back to being detected only via the (weaker)
+	//! backward-jump heuristic, or not at all if the new session's
+	//! sequence happens to climb back above the old one before the gate
+	//! would otherwise flag it as stale. A future revision could use a
+	//! persisted counter instead if this proves insufficient in practice.
+	uint32_t NewSessionEpoch();
 }
 
 #endif

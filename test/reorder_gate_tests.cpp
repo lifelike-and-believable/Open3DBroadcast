@@ -161,6 +161,99 @@ O3DS_TEST(ReorderGate_LegacyTxSeqZero_BypassesGate)
 	O3DS_CHECK_EQ(gate.Stats().dup_dropped, (uint64_t)0);
 }
 
+O3DS_TEST(ReorderGate_GiveUpDrain_DoesNotInflateReorderedStat)
+{
+	// Regression test for a review finding: frames drained after
+	// CheckTimeouts gives up on a lost gap were being counted as
+	// `reordered`, even when they arrived in perfectly good order relative
+	// to each other - they were just waiting behind a hole, not reordered.
+	ReorderGate::Config config;
+	config.max_window = 4;
+	ReorderGate gate(config);
+	Delivered out;
+
+	gate.Push(MakeFrame(100), 0.0, out.Sink()); // delivered normally
+	// 101 is missing. 102..105 arrive in strict ascending order and fill
+	// the window, forcing a give-up on the 101 gap.
+	gate.Push(MakeFrame(102), 0.0, out.Sink());
+	gate.Push(MakeFrame(103), 0.0, out.Sink());
+	gate.Push(MakeFrame(104), 0.0, out.Sink());
+	gate.Push(MakeFrame(105), 0.0, out.Sink());
+
+	O3DS_CHECK_EQ(gate.Stats().lost, (uint64_t)1);       // exactly seq 101
+	O3DS_CHECK_EQ(gate.Stats().reordered, (uint64_t)0);  // nothing here was actually reordered
+}
+
+O3DS_TEST(ReorderGate_DuplicateOfPendingFrame_CountedAsDup)
+{
+	// Regression test for a review finding: a resend of a seq that's
+	// already sitting in the pending-gap buffer was silently dropped by
+	// map::emplace with no stats update at all.
+	ReorderGate gate;
+	Delivered out;
+
+	gate.Push(MakeFrame(100), 0.0, out.Sink()); // delivered
+	gate.Push(MakeFrame(102), 0.0, out.Sink()); // buffered, waiting on 101
+	gate.Push(MakeFrame(102), 0.0, out.Sink()); // a duplicate of the buffered frame
+
+	O3DS_CHECK_EQ(gate.Stats().dup_dropped, (uint64_t)1);
+}
+
+O3DS_TEST(ReorderGate_OldEpochStraggler_DroppedNotMisappliedAsRestart)
+{
+	// Regression test for the review's critical finding: a frame from an
+	// OLDER epoch, reordered in flight to arrive after the new session has
+	// already started, must not be mistaken for another restart. Treating
+	// frame_epoch as "changed vs not" instead of an ORDERED value would
+	// apply this stale frame mid-stream and, because it would also drag
+	// mLastEpoch backward, make every subsequent legitimate frame look like
+	// yet another false restart.
+	ReorderGate gate;
+	Delivered out;
+
+	gate.Push(MakeFrame(500, /*epoch*/ 1), 0.0, out.Sink());
+	gate.Push(MakeFrame(501, /*epoch*/ 1), 0.0, out.Sink());
+	gate.Push(MakeFrame(1, /*epoch*/ 2), 0.0, out.Sink());   // genuine restart
+	gate.Push(MakeFrame(2, /*epoch*/ 2), 0.0, out.Sink());
+	gate.Push(MakeFrame(502, /*epoch*/ 1), 0.0, out.Sink()); // stale straggler from epoch 1
+	gate.Push(MakeFrame(3, /*epoch*/ 2), 0.0, out.Sink());   // must NOT look like another restart
+	gate.Push(MakeFrame(4, /*epoch*/ 2), 0.0, out.Sink());
+
+	// 502 must never be delivered - it's stale data from a dead session.
+	O3DS_CHECK_EQ(out.seqs.size(), (size_t)6);
+	O3DS_CHECK_EQ(out.seqs[0], (uint64_t)500);
+	O3DS_CHECK_EQ(out.seqs[1], (uint64_t)501);
+	O3DS_CHECK_EQ(out.seqs[2], (uint64_t)1);
+	O3DS_CHECK_EQ(out.seqs[3], (uint64_t)2);
+	O3DS_CHECK_EQ(out.seqs[4], (uint64_t)3);
+	O3DS_CHECK_EQ(out.seqs[5], (uint64_t)4);
+	O3DS_CHECK_EQ(gate.Stats().stale_dropped, (uint64_t)1); // the 502 straggler
+}
+
+O3DS_TEST(ReorderGate_OldEpochStraggler_DoesNotWipeBufferedNewSessionFrames)
+{
+	// Worse variant of the above: if the straggler were still (incorrectly)
+	// treated as a restart, its state-clearing would silently discard any
+	// legitimately-buffered new-session frame, not just misapply itself.
+	ReorderGate gate;
+	Delivered out;
+
+	gate.Push(MakeFrame(500, /*epoch*/ 1), 0.0, out.Sink());
+	gate.Push(MakeFrame(1, /*epoch*/ 2), 0.0, out.Sink());
+	// 3 arrives before 2, so 3 sits buffered in the pending-gap map.
+	gate.Push(MakeFrame(3, /*epoch*/ 2), 0.0, out.Sink());
+	// An old-epoch straggler must not wipe that buffered frame.
+	gate.Push(MakeFrame(600, /*epoch*/ 1), 0.0, out.Sink());
+	gate.Push(MakeFrame(2, /*epoch*/ 2), 0.0, out.Sink()); // unblocks the buffered 3
+
+	O3DS_CHECK_EQ(out.seqs.size(), (size_t)4);
+	O3DS_CHECK_EQ(out.seqs[0], (uint64_t)500);
+	O3DS_CHECK_EQ(out.seqs[1], (uint64_t)1);
+	O3DS_CHECK_EQ(out.seqs[2], (uint64_t)2);
+	O3DS_CHECK_EQ(out.seqs[3], (uint64_t)3); // proves 3 survived the straggler, not lost
+	O3DS_CHECK_EQ(gate.Stats().lost, (uint64_t)0);
+}
+
 O3DS_TEST(ReorderGate_RestartViaEpoch_Rebaselines)
 {
 	ReorderGate gate;
