@@ -74,7 +74,12 @@ Resolve these once; every workstream depends on them.
    - *Concealment / latency-hiding* is **receiver-only** and needs no cross-peer determinism → lowest risk, do first.
    - *Residual compression* requires **bit-compatible prediction on both ends** → needs a versioned, pinned predictor and periodic keyframes to bound drift → higher risk, do later.
 4. **Predictor versioning.** Carry a `predictor_version` (negotiated at session start or stamped on keyframes) so sender/receiver agree on the model. Mismatch → fall back to keyframe/last-pose behavior.
-5. **LiveLink interaction (open question, decide in A2/C1).** The UE receiver is a LiveLink source and LiveLink already has its own timestamped buffering/interpolation. Decide the division of labor: O3DB should own **network** concerns (dedup, reorder, loss detection, concealment decisions) and hand clean, correctly-timestamped frames to LiveLink, letting LiveLink do presentation smoothing — *unless* we want latency-hiding beyond LiveLink's, in which case O3DB synthesizes predicted frames and pushes them. Do not build a second buffer that fights LiveLink's; measure first.
+5. **LiveLink division of labor (RESOLVED — default posture).** The UE receiver is a LiveLink source, and LiveLink already buffers per subject and does presentation-time sampling with interpolation and a configurable evaluation offset (`BufferSettings` / interpolation processors). We therefore split responsibilities rather than duplicate them:
+   - **O3DB owns the network layer (pre-LiveLink):** the A1 reorder/dedup/stale-drop window, loss detection, and — critically — **mapping the sender's `tx_wallclock_us` into the local engine-time domain** so each LiveLink frame gets a correct `WorldTime`/`SceneTime`. O3DB hands LiveLink a clean, correctly-timestamped, monotonic frame stream and does **not** build its own interpolation/jitter buffer.
+   - **LiveLink owns presentation:** time-based interpolation and the latency-vs-smoothness offset. Configure a sane default subject buffer offset that covers expected jitter; expose it.
+   - **Concealment (C1) is the one exception where O3DB synthesizes frames:** only when a gap/lateness exceeds what LiveLink interpolation covers gracefully does O3DB push a *predicted* LiveLink frame (corrected when the real frame lands). **Latency-hiding (rendering ahead of the newest received frame) is a separate opt-in mode, default OFF**, because it changes the latency/accuracy tradeoff and interacts with LiveLink's offset.
+   - **The real sub-problem this creates: clock-offset estimation.** To map `tx_wallclock_us` → local time you need an estimate of `(local_recv - tx_wallclock)`; use a min-filter / robust moving estimate of that difference (its minimum over a window ≈ one-way delay + fixed skew). Fall back to receive-time timestamping when `tx_wallclock_us` is unset (legacy) or the offset can't yet be estimated. This estimator is an explicit A2 sub-task.
+   - **Verify against the target UE version:** exact `BufferSettings` fields, the frame-time API on `FLiveLinkFrameDataStruct` / how `WorldTime` and `SceneTime` are set, and default interpolation behavior. Do not hardcode assumptions — confirm in the LiveLink source before building A2.
 6. **Quaternion handling.** Rotation prediction/extrapolation must operate in a valid space (slerp / exp-map on the unit quaternion, then renormalize); never lerp raw components. Curves and translations are linear and simpler.
 
 ---
@@ -108,11 +113,37 @@ Goal: the stream degrades gracefully on jitter, reorder, and loss, and its behav
 Goal: capture a live wire stream to disk and replay it deterministically. Pulls double duty as **network-test harness** and **training-data pipeline** for Workstream C.
 
 ### Phase B1 — Capture format + core reader/writer
-- **Goal:** an append-only, streamable capture container and a core library reader/writer.
-- **Files/modules:** new `src/o3ds/capture.*` (engine-agnostic). Proposed `.o3dscap` layout: a header (magic, format version, schema/`predictor_version`, source description, base clock) followed by records `[recv_wallclock_us][wire_len:uint32][wire_bytes]`. Wire bytes are exactly the on-the-wire frame (already length-delimited FlatBuffers), so capture is near-zero-cost.
-- **Approach:** writer appends records; reader iterates records with their timestamps. Keep it format-versioned and forward-compatible.
-- **Acceptance:** core round-trip unit test (write N frames → read back identical bytes + timestamps); malformed/truncated file handled without crashing (feed it to the ASan harness). CTest-wired.
-- **Dependencies:** ideally A1 (so captures carry seq/clock), but format must tolerate unset. **Out of scope:** UI, network injection.
+- **Goal:** an append-only, streamable, truncation-tolerant capture container and a core library reader/writer.
+- **Files/modules:** new `src/o3ds/capture.*` (engine-agnostic).
+- **`.o3dscap` byte-level spec (v1, all multi-byte fields little-endian):**
+
+  **Header** (variable length, `header_len` bytes total):
+
+  | Offset | Size | Field | Notes |
+  |---|---|---|---|
+  | 0 | 8 | `magic` | ASCII `O3DSCAP\0` (`4F 33 44 53 43 41 50 00`) |
+  | 8 | 2 | `format_version` | `uint16` = 1 |
+  | 10 | 2 | `header_len` | `uint16`, total header size incl. variable tail |
+  | 12 | 4 | `flags` | `uint32`; bit0 = timestamps are UTC-µs; other bits reserved (0) |
+  | 16 | 8 | `base_wallclock_us` | `uint64`, capture start (0 = unset) |
+  | 24 | 4 | `schema_fingerprint` | `uint32`, e.g. CRC32 of `o3ds.fbs` or version-tag hash |
+  | 28 | 4 | `predictor_version` | `uint32` (0 = none) |
+  | 32 | 2 | `source_desc_len` | `uint16` |
+  | 34 | `source_desc_len` | `source_desc` | UTF-8 free-form (transport, host, notes) |
+  | … | pad | — | header zero-padded to `header_len` |
+
+  **Records** (repeat until EOF):
+
+  | Offset | Size | Field | Notes |
+  |---|---|---|---|
+  | 0 | 8 | `recv_wallclock_us` | `uint64`, capture/receive time (absolute) |
+  | 8 | 4 | `wire_len` | `uint32` |
+  | 12 | `wire_len` | `wire_bytes` | the exact on-the-wire O3DS frame, verbatim |
+
+- **Reader rules:** validate `magic`/`format_version` (reject unknown major); loop records; if `< 12` bytes remain, or `wire_len` exceeds remaining file bytes → treat as a truncated final record and **stop cleanly, not error** (captures may be cut mid-write). **Reject `wire_len > 64 MB`** to avoid huge allocations from a corrupt file (mirror the parser-hardening posture). No per-record checksum by default; reserve a `flags` bit for optional CRC32 later.
+- **Writer:** appends header once, then one record per frame; capture is verbatim wire bytes → near-zero cost, safe to run inline.
+- **Acceptance:** core round-trip unit test (write N frames → read back identical bytes + timestamps); truncated/garbage/oversized-`wire_len` files handled without crashing (feed to the ASan harness). CTest-wired.
+- **Dependencies:** ideally A1 (so captures carry seq/clock in the wire bytes), but the container itself is agnostic and tolerates unset. **Out of scope:** UI, network injection (B2).
 
 ### Phase B2 — Replay engine + network-condition injector
 - **Goal:** replay a capture through any transport (or directly into a receiver) at real or accelerated speed, with optional loss/jitter/reorder injection.
@@ -135,10 +166,48 @@ Goal: a pluggable pose predictor that delivers concealment, latency-hiding, and 
 
 ### Phase C0 — Predictor interface + classical baselines (core)
 - **Goal:** a clean `IPosePredictor` abstraction with non-ML implementations, unit-tested in the core.
-- **Files/modules:** new `src/o3ds/predict/` — `IPosePredictor` (per-subject state; `Update(pose, seq, t)`; `Predict(horizon) -> Pose`); implementations `HoldPredictor` (== current behavior), `LinearPredictor` (constant velocity), `QuadraticPredictor` (constant acceleration). Quaternion extrapolation per §2.6.
-- **Approach:** operate on the existing pose representation (translations, quaternions, scale, curves). Keep it allocation-light and fast (this will run per-frame).
-- **Acceptance:** core unit tests: on synthetic smooth motion, `LinearPredictor` error ≪ `HoldPredictor` error at horizon=1; quaternion predictions stay unit-norm; degenerate/short history handled. CTest-wired. No UE dependency.
-- **Dependencies:** A1 (needs seq/timing). **Out of scope:** wiring into send/receive paths.
+- **Files/modules:** new `src/o3ds/predict/` (`pose_predictor.h`, baseline impls).
+- **Interface (starting point — an agent may refine names/signatures, keep the shape):**
+
+  ```cpp
+  namespace O3DS {
+
+  // A flat, topology-stable snapshot of one subject's animatable values.
+  // Channel counts/order are fixed for a subject "epoch" (until a keyframe
+  // changes topology); this keeps the predictor pure-math and decoupled from
+  // the FlatBuffers/Subject types so it unit-tests without the model layer.
+  struct PoseSample {
+      double   t   = 0.0;   // sample time, seconds, in the SENDER clock domain
+      uint64_t seq = 0;     // tx_seq of the source frame (0 = unset)
+      std::vector<Vec3>  translations;  // per node
+      std::vector<Quat>  rotations;     // per node (unit quaternion)
+      std::vector<Vec3>  scales;        // per node
+      std::vector<float> curves;        // per curve
+  };
+
+  class IPosePredictor {
+  public:
+      virtual ~IPosePredictor() = default;
+      virtual uint32_t Version() const = 0;            // carried in-stream for residual mode
+      virtual void Observe(const PoseSample& sample) = 0;   // feed confirmed frames in order
+      virtual bool Predict(double t, PoseSample& out) const = 0; // false => insufficient history (caller holds last)
+      virtual void Reset() = 0;                        // keyframe / topology change / version mismatch / large gap
+  };
+
+  } // namespace O3DS
+  ```
+
+- **Baseline implementations:**
+  - `HoldPredictor` (**Version 0**): `Predict` returns the last observed sample. Exactly today's behavior; the universal fallback.
+  - `LinearPredictor` (**Version 1**): constant velocity. Linear channels: `x(t) = x1 + (x1−x0)/(t1−t0)·(t−t1)`. Rotations: angular velocity from `dq = q1 · q0⁻¹` → axis-angle → scale by `(t−t1)/(t1−t0)` → apply to `q1`, renormalize (§2.6). Guard tiny/zero `dt`.
+  - `QuadraticPredictor` (**Version 2**): constant acceleration (needs 3 samples); more responsive but overshoots — bound the horizon.
+- **Approach:** bounded history (ring of the last few samples); allocation-light (runs per-frame); the caller owns the `PoseSample ↔ O3DS::Subject` mapping (a small adapter), keeping the predictor free of engine/model types.
+- **Acceptance:** core unit tests on synthetic motion — `LinearPredictor` error ≪ `HoldPredictor` at horizon = 1 frame; quaternion predictions stay unit-norm; short/degenerate history returns `false` cleanly. CTest-wired. No UE dependency.
+- **Dependencies:** A1 (needs seq/timing). **Out of scope:** wiring into send/receive paths (C1/C2).
+
+- **Named hook points (for C1/C2 — documented here so C0's shape is right):**
+  - **Receiver concealment (C1):** the receiver keeps one predictor per subject, calls `Observe()` on every applied frame; when the A2 gate reports a gap at presentation time it calls `Predict(t_now)` and pushes that as the LiveLink frame; on the real frame's arrival, `Observe()` it and optionally blend-correct.
+  - **Sender residual (C2):** in `SubjectList::SerializeUpdate`, replace the implicit "compare to last-sent value" with "compare to `predictor.Predict(t)`", encode the residual under the existing `deltaThreshold`, then `predictor.Observe(current)`. The `HoldPredictor` makes this reduce **exactly** to today's delta scheme — so C2 is a strict generalization, and shipping C0+`HoldPredictor` changes nothing observable (good for landing the plumbing safely).
 
 ### Phase C1 — Receiver-side concealment & latency-hiding (UE glue)
 - **Goal:** when a frame is missing/late, synthesize a predicted pose instead of freezing or popping; optionally render slightly ahead to hide RTT. **Receiver-only, no determinism requirement** → first real payoff.
@@ -148,12 +217,16 @@ Goal: a pluggable pose predictor that delivers concealment, latency-hiding, and 
 - **Dependencies:** C0, A2, B2. **Out of scope:** changing what the sender transmits.
 
 ### Phase C2 — Symmetric residual compression (core + both paths)
-- **Goal:** sender transmits `actual − predicted` residuals; receiver reconstructs. Bandwidth win + inherent graceful degradation. **Requires bit-compatible prediction on both ends.**
-- **Files/modules:** `src/o3ds/model.cpp` (`SerializeUpdate`/`ParseUpdate` — generalize the delta path into residual coding), `src/o3ds/predict/`, schema (`predictor_version`, keyframe marker per §2), both UE paths.
-- **Approach:** both ends run the same versioned predictor over confirmed history; sender quantizes+thresholds the residual (small residual → send nothing, like today's delta but relative to a smart prediction); periodic keyframes bound drift and enable join-in-progress/error recovery. On `predictor_version` mismatch, fall back to today's last-pose delta.
-- **Acceptance:** on a representative corpus, bytes/frame drop materially vs the current delta scheme at equal visual error; a dropped P-frame is concealed by prediction with bounded error until the next keyframe; interop fallback with an old peer verified. Core round-trip unit tests + replay.
-- **Dependencies:** C0, A1; determinism decisions §2.3–2.4. **Out of scope:** learned model.
-- **Risk:** float determinism across platforms/compilers. Mitigations: keyframe cadence to bound drift, tolerance-based reconstruction, or fixed-point predictor. Prototype/measure drift before committing.
+- **Goal:** sender transmits `actual − predicted` residuals; receiver reconstructs. Bandwidth win + graceful degradation. **Requires the two ends to predict from the same history.**
+- **⚠️ The load-bearing constraint — history divergence under loss.** Residual coding assumes sender and receiver derive the *same* prediction. That holds only if they share the same observed history. But the predictor's history is prior *poses*, and on a **lossy/unordered transport the receiver never sees the frames it dropped** → its history diverges from the sender's → every subsequent residual decodes wrong until the next keyframe. This is a correctness problem, not just a quality one, and it's distinct from float determinism. Two ways out:
+  - **(a) Scope C2 to reliable/ordered transports only** (TCP, WebRTC reliable data channel, MoQ reliable streams). No loss → no divergence → the common case works with a strong (chained) predictor. **Recommended default.** On unreliable transports (UDP, MoQ datagrams), C2 is disabled and those links use **keyframe + independent deltas + concealment (C1)** instead.
+  - **(b) Keyframe-relative, independently-decodable P-frames:** predict each P-frame **only from the last keyframe + its own offset**, never from prior P-frames, so a lost P-frame doesn't corrupt its neighbors. Loss-tolerant but weaker prediction (shorter effective history) → smaller compression win. Viable fallback for unreliable transports if (a)'s "concealment-only" isn't enough.
+  - A back-channel/ACK scheme (predict from last-*acked*) is explicitly **out of scope** — not all transports are bidirectional.
+- **Files/modules:** `src/o3ds/model.cpp` (`SerializeUpdate`/`ParseUpdate` — generalize the delta path into residual coding), `src/o3ds/predict/`, schema (`predictor_version`, keyframe/epoch marker per §2), both UE paths, transport capability flag (reliable vs unreliable).
+- **Approach:** both ends run the same versioned predictor; sender quantizes+thresholds the residual (small residual → send nothing — today's delta, but relative to a smart prediction); periodic keyframes bound drift, enable join-in-progress, and re-anchor after loss. Gate the whole path on the transport's reliability capability per the constraint above. On `predictor_version` mismatch or unreliable transport, fall back to today's last-pose delta.
+- **Acceptance:** on a reliable transport + representative corpus, bytes/frame drop materially vs today's delta scheme at equal visual error; interop fallback with an old peer verified; on an unreliable transport, C2 stays disabled and C1 concealment carries the loss case. Core round-trip unit tests + replay.
+- **Dependencies:** C0, A1; §2.3–2.4 determinism decisions; transport reliability capability flag. **Out of scope:** learned model, back-channel ACKs.
+- **Risks:** (1) history divergence under loss — handled by the scoping above; (2) float determinism across platforms/compilers — mitigate with keyframe cadence, tolerance-based reconstruction, or a fixed-point predictor; **prototype and measure drift on the target platforms before committing to (a) with a chained predictor.**
 
 ### Phase C3 — Learned predictor (research → productization)
 - **Goal:** swap a small learned motion model in behind `IPosePredictor` for better prediction than the classical baselines.
@@ -194,9 +267,10 @@ Recommended order: **A1 → B1 → B2 → A2 → C0 → C1** (this delivers resi
 ## 8. Risks & open questions (consolidated)
 
 - **Core duplication (#204)** — resolve early or every core change is doubled (§0.2).
+- **History divergence under loss (C2)** — residual coding silently breaks on lossy transports because the receiver's pose history diverges from the sender's; scope C2 to reliable/ordered transports (or use keyframe-relative independent deltas), and let C1 concealment carry unreliable links. Load-bearing — see C2.
 - **Float determinism** for residual coding (C2) — measure drift before committing; keyframe cadence / fixed-point as mitigations.
-- **LiveLink buffering interaction** (§2.5) — don't build a competing buffer; measure and decide the division of labor in A2/C1.
-- **Clock sync** — absolute one-way latency needs NTP-level sync; may report only relative jitter/loss (A2).
+- **LiveLink division of labor** — RESOLVED (§2.5): LiveLink owns presentation smoothing; O3DB owns the network layer + clock-offset→timestamp mapping + optional predicted-frame concealment. Verify the exact LiveLink buffer/time APIs against the target UE version before A2.
+- **Clock-offset estimation** (§2.5, A2) — mapping `tx_wallclock_us` to local engine time needs a robust moving/min estimate of the send→recv offset; absolute one-way latency additionally needs NTP-level sync, else report relative jitter/loss only.
 - **Inference budget** for the learned model (C3) — hard real-time constraint; keep C3 a gated spike.
 - **Two-copy schema edits** until #204 lands.
 
