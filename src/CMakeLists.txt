@@ -104,6 +104,7 @@ set(pub_headers
 	o3ds/getTime.h
 	o3ds/sequencing.h
 	o3ds/reorder_gate.h
+	o3ds/capture.h
 	o3ds/model.h
 	o3ds/base_connector.h
 	o3ds/nng_connector.h
@@ -141,6 +142,7 @@ set(SOURCES
 	o3ds/getTime.cpp
 	o3ds/sequencing.cpp
 	o3ds/reorder_gate.cpp
+	o3ds/capture.cpp
 	o3ds/model.cpp
 	o3ds/base_connector.cpp
 	o3ds/nng_connector.cpp
