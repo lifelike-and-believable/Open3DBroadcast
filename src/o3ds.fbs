@@ -97,6 +97,14 @@ table SubjectList {
    subjects:[Subject];
    updates:[SubjectUpdate];
    time:double;
+
+   // Appended fields (do not reorder/remove the above; append-only from here).
+   // 0 == unset on all three; a receiver must treat 0 exactly like an old
+   // sender that never set these fields (see ReorderGate legacy bypass).
+   tx_seq:ulong = 0;            // monotonic per logical (sender->receiver) stream, not per process
+   tx_wallclock_us:ulong = 0;   // UTC microseconds at transmit; distinct from `time` (content clock)
+   frame_epoch:uint = 0;        // bumped once per publisher process/session; lets a receiver detect
+                                 // a sender restart unambiguously instead of guessing from a seq backward-jump
 }
 
 
