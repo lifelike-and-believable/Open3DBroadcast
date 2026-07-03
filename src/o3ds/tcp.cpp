@@ -331,7 +331,7 @@ bool TcpSocket::Receive(std::vector<char>& data)
 
 		if (bytesRecv > 0)
 		{
-			std::copy(c, c + bytesRecv, data.begin());
+			data.insert(data.end(), c, c + bytesRecv);
 		}
 	}
 

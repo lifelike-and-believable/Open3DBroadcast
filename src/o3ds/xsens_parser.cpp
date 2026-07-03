@@ -135,14 +135,25 @@ enum class SegmentIndexes
 	XS_SEG_NUM_FINGERS = 67//number of segments with fingers enabled
 };
 
+namespace {
+	// Parse a single ASCII hex digit without throwing, unlike std::stoi, since
+	// this is fed directly from untrusted network input.
+	bool hex_nibble(char c, int& out)
+	{
+		if (c >= '0' && c <= '9') { out = c - '0'; return true; }
+		if (c >= 'a' && c <= 'f') { out = c - 'a' + 10; return true; }
+		if (c >= 'A' && c <= 'F') { out = c - 'A' + 10; return true; }
+		return false;
+	}
+}
+
 enum O3DS::XSENS::ProtocolID O3DS::XSENS::get_protocol_id(uint8_t* data)
 {
-	char buf[3];
-	buf[0] = data[0];
-	buf[1] = data[1];
-	buf[2] = 0;
+	int hi = 0, lo = 0;
+	if (!hex_nibble((char)data[0], hi) || !hex_nibble((char)data[1], lo))
+		return O3DS::XSENS::ProtocolID::Error;
 
-	switch (std::stoi(buf, nullptr, 16)) {
+	switch ((hi << 4) | lo) {
 	case 0x01: return O3DS::XSENS::ProtocolID::PoseEuler;
 	case 0x02: return O3DS::XSENS::ProtocolID::PoseQuaternion;
 	case 0x03: return O3DS::XSENS::ProtocolID::PosePositions;
@@ -238,25 +249,25 @@ void O3DS::XSENS::Parser::get_quaternion_pose(uint8_t* payload, size_t len)
 		stream.get(q2);
 		stream.get(q3);		
 
-		if (n >= xsens_names.size())
+		if (n >= (int)xsens_names.size())
 			continue;
-		
+
 		std::string name;
-		
+
 		if (segmentId > 0 && segmentId - 1 < meta.names.size())
 		{
 			name = meta.names[segmentId - 1];
 		}
 
-		while (xsens_names[n] != name && n < xsens_names.size())
+		while (n < (int)xsens_names.size() && xsens_names[n] != name)
 		{
 			// Add missing props
 			std::string nn = xsens_names[n];
 			transform = subject->addTransform(nn, 0);
 			n++;
 		}
-		
-		if (n == xsens_names.size())
+
+		if (n >= (int)xsens_names.size() || n >= (int)parentIndex.size())
 			return;
 
 		int parentId = parentIndex[n];
@@ -276,7 +287,7 @@ void O3DS::XSENS::Parser::get_quaternion_pose(uint8_t* payload, size_t len)
 		transform->rotation.value[2] = -q3;
 		transform->rotation.value[3] = q0;
 
-		if (n < meta.scale.size())
+		if ((size_t)i < meta.scale.size())
 				transform->scale.value = meta.scale[i];
 
 		n++;
@@ -290,6 +301,11 @@ O3DS::XSENS::Parser::Parser()
 
 bool O3DS::XSENS::Parser::parse(const char* data, size_t sz)
 {
+	// Header is 24 bytes; reject anything shorter before touching it (also
+	// covers the 4-byte "MXTP" magic and the 6-byte offset get_header() uses).
+	if (data == nullptr || sz < 24)
+		return false;
+
 	if (strncmp(data, "MXTP", 4) != 0)
 		return false;
 

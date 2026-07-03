@@ -288,7 +288,7 @@ namespace O3DS
 					return false;
 				}
 
-				if (transform->mParentId < 0 || transform->mParentId > this->mTransforms.size())
+				if (transform->mParentId < 0 || (size_t)transform->mParentId >= this->mTransforms.size())
 				{
 					mError = "Invalid Parent Id";
 					return false;
@@ -583,12 +583,21 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 	bool SubjectList::Parse(const char *data, size_t len, TransformBuilder *builder, bool clearInactive)
 	{
+		mError = "";
+
+		// Header is 8 bytes (flags + CRC) followed by the FlatBuffers payload;
+		// reject anything too short before doing any arithmetic on len or
+		// dereferencing data, since len - 8 would otherwise underflow.
+		if (data == nullptr || len < 8)
+		{
+			mError = "Buffer too short";
+			return false;
+		}
+
 		std::uint32_t crc = CRCPP::CRC::Calculate(data + 8, len - 8, CRCPP::CRC::CRC_32());
 
 		std::uint32_t flags = *(std::uint32_t*)data;
 		std::uint32_t check = *(std::uint32_t*)(data + 4);
-
-		mError = "";
 
 		if (flags != 0x0001) {
 			mError = "Invalid data structure";
@@ -597,6 +606,17 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		if (crc != check) {
 			mError = "CRC Check failed";
+			return false;
+		}
+
+		// The CRC only proves the payload wasn't corrupted in transit, not that
+		// it is well-formed FlatBuffers data (this is untrusted network input).
+		// Verify the buffer before trusting any offsets in it.
+		flatbuffers::Verifier verifier(
+			reinterpret_cast<const uint8_t*>(data + 8), len - 8);
+		if (!O3DS::Data::VerifySubjectListBuffer(verifier))
+		{
+			mError = "FlatBuffers verification failed";
 			return false;
 		}
 
@@ -643,6 +663,14 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 	void SubjectList::ParseSubject(const O3DS::Data::Subject *inSubject,  TransformBuilder *builder )
 	{
+		// This buffer has passed FlatBuffers Verifier, so offsets are safe to
+		// follow, but none of these table/string fields are marked `required`
+		// in the schema, so a well-formed sender can still legitimately (or a
+		// malicious one deliberately) omit them. Skip anything we can't parse
+		// rather than dereferencing a null field.
+		if (inSubject->name() == nullptr)
+			return;
+
 		std::string subjectName = inSubject->name()->str();
 
 		// Check to see if this subject already exists
@@ -656,13 +684,15 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		outSubject->mContext.mX = dir(inSubject->x_axis());
 		outSubject->mContext.mY = dir(inSubject->y_axis());
 		outSubject->mContext.mZ = dir(inSubject->z_axis());
-		outSubject->mContext.mFormat = inSubject->format()->str();
+		outSubject->mContext.mFormat = (inSubject->format() != nullptr) ? inSubject->format()->str() : std::string();
 
 		// Parse curves if present
 		if (inSubject->curves()) {
 			outSubject->mCurveNames.clear();
 			outSubject->mCurveValues.clear();
 			for (auto each : *inSubject->curves()) {
+				if (each == nullptr || each->name() == nullptr)
+					continue;
 				outSubject->mCurveNames.push_back(each->name()->str());
 				outSubject->mCurveValues.push_back(each->value());
 			}
@@ -670,53 +700,66 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		// Get the nodes (transforms) for this subject
 		auto ovNodes = inSubject->nodes();
-			
+
 		// Clear the subject and add the transforms
 		outSubject->clear();
+		if (ovNodes == nullptr)
+			return;
+
 		for (int n = 0; n < (int)ovNodes->size(); n++)
 		{
 			auto inNode = ovNodes->Get(n);
+			if (inNode == nullptr)
+				continue;
+
 			auto inName = inNode->name();
+			if (inName == nullptr)
+				continue;
+
 			auto inTranslation = inNode->translation();
 			auto inRotation = inNode->rotation();
 			auto inScale = inNode->scale();
 			auto inMatrix = inNode->matrix();
 			auto inComponents = inNode->components();
 
-			auto inMatrixIter = inMatrix->begin();
-
 			std::string transformName = inName->str();
 			Transform *outTransform = outSubject->addTransform(transformName, inNode->parent());
 
 			// Add the components to the transform stack in the order they are defined.
-			for (int8_t componentId : *inComponents)
+			if (inComponents != nullptr)
 			{
-				if (componentId == O3DS::Data::Component::Component_Translation)
+				for (int8_t componentId : *inComponents)
 				{
-					*inTranslation >> outTransform->translation;
-					outTransform->transformOrder.push_back(O3DS::TTranslation);
-				}
-				if (componentId == O3DS::Data::Component::Component_Rotation)
-				{
-					*inRotation >> outTransform->rotation;
-					outTransform->transformOrder.push_back(O3DS::TRotation);
-				}
-				if (componentId == O3DS::Data::Component::Component_Scale)
-				{
-					*inScale >> outTransform->scale;
-					outTransform->transformOrder.push_back(O3DS::TScale);
-				}
-				if (componentId == O3DS::Data::Component::Component_Matrix)
-				{
-					outTransform->transformOrder.push_back(O3DS::TMatrix);
+					if (componentId == O3DS::Data::Component::Component_Translation && inTranslation != nullptr)
+					{
+						*inTranslation >> outTransform->translation;
+						outTransform->transformOrder.push_back(O3DS::TTranslation);
+					}
+					if (componentId == O3DS::Data::Component::Component_Rotation && inRotation != nullptr)
+					{
+						*inRotation >> outTransform->rotation;
+						outTransform->transformOrder.push_back(O3DS::TRotation);
+					}
+					if (componentId == O3DS::Data::Component::Component_Scale && inScale != nullptr)
+					{
+						*inScale >> outTransform->scale;
+						outTransform->transformOrder.push_back(O3DS::TScale);
+					}
+					if (componentId == O3DS::Data::Component::Component_Matrix)
+					{
+						outTransform->transformOrder.push_back(O3DS::TMatrix);
+					}
 				}
 			}
 
 			// Copy all matrices, allows adding other matrix data to be used as offsets
-			for (auto eachMatrix : *inMatrix) {
-				auto transformMatrix = O3DS::TransformMatrix();
-				*eachMatrix >> transformMatrix;
-				outTransform->matrices.push_back(transformMatrix);
+			if (inMatrix != nullptr)
+			{
+				for (auto eachMatrix : *inMatrix) {
+					auto transformMatrix = O3DS::TransformMatrix();
+					*eachMatrix >> transformMatrix;
+					outTransform->matrices.push_back(transformMatrix);
+				}
 			}
 		}
 	}
