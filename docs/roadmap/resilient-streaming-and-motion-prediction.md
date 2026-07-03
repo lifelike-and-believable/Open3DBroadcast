@@ -89,11 +89,66 @@ Resolve these once; every workstream depends on them.
 Goal: the stream degrades gracefully on jitter, reorder, and loss, and its behavior is measurable.
 
 ### Phase A1 — Sequencing & transmit clock (core)
-- **Goal:** every frame carries a real monotonic `tx_seq` and `tx_wallclock_us`; receivers can order, dedup, and drop stale frames.
-- **Files/modules:** `src/o3ds.fbs` (+ regenerate `src/o3ds_generated.h`); `src/o3ds/model.cpp` (`Serialize`/`SerializeUpdate` populate the fields; `Parse` reads them); a small `src/o3ds/sequencing.*` helper (per-publisher atomic counter + UTC-us clock). Mirror into the vendored core copy if #204 is unresolved.
-- **Approach:** monotonic per-process counter starting at 1; `tx_wallclock_us` from a UTC clock. Receiver-side: a small reorder/dedup gate keyed on `tx_seq` (accept in-order, buffer small out-of-order window, drop duplicates and frames older than the last-applied seq).
-- **Acceptance:** unit tests in the core (Linux/CTest) covering: increasing seq, out-of-order `[100,101,99,102]` reorders correctly, duplicate `101` dropped, stale frame after a newer one dropped, and unset (0) fields → legacy passthrough. Wire the tests into CTest so CI runs them (ties to the "CI verifies nothing" gap).
-- **Dependencies:** none. **Out of scope:** jitter buffering by time, concealment.
+
+**Goal:** every frame carries a real monotonic `tx_seq` and transmit wall-clock; a receiver-side gate orders, dedups, and drops stale frames, emitting loss/reorder stats. Entirely in `src/o3ds` (engine-agnostic, Linux-CTest-able). **Dependencies:** none. **Out of scope:** time-based jitter buffering and concealment (A2/C1).
+
+This phase has three cohesive pieces; an agent can land them as a small stack (schema → sender → gate).
+
+#### A1.a — Schema & wire (append-only)
+- Add to the **end** of the `SubjectList` table in `src/o3ds.fbs` (never reorder/remove existing fields; FlatBuffers assigns field IDs by declaration order, so appending is the compatible move):
+  ```
+  tx_seq:ulong = 0;          // monotonic per logical stream; 0 = unset
+  tx_wallclock_us:ulong = 0; // UTC microseconds at transmit; 0 = unset
+  ```
+- Regenerate `src/o3ds_generated.h` with `flatc --cpp src/o3ds.fbs` (checked in; never hand-edit). **Mirror both the schema and the generated header into the vendored copy under `ProjectSandbox/.../ThirdParty/open3dstream/` until #204 lands** (§0.2).
+- **Do not conflate with the existing `time:double` field** — that is the animation/sample time (content clock). `tx_wallclock_us` is a *new, separate* value: when the frame left the sender. Both coexist.
+- Compatibility: an old sender never sets these → new receiver reads default `0` → treated as unset → gate bypassed (legacy path). An old receiver ignores the new fields. Verify both directions in tests.
+
+#### A1.b — Sender: sequence source + clock (`src/o3ds/sequencing.*`)
+- Provide `class SequenceCounter { std::atomic<uint64_t> mNext{1}; uint64_t Next(){ return mNext.fetch_add(1, std::memory_order_relaxed); } }` and `uint64_t NowUtcMicros()` (`std::chrono::system_clock` → µs since epoch).
+- **`tx_seq` is per *logical stream*, not per process.** One counter per sender→receiver stream so the receiver sees a contiguous `1,2,3,…` and a gap unambiguously means loss. A process-global counter would make fan-out to N receivers look like N× loss — avoid it. The counter's natural home is the per-stream serializer on the sender (`O3DSenderSerializer`), which passes `Next()` and `NowUtcMicros()` in per frame.
+- Extend the core serialize entry points **by appending defaulted params** (keeps every existing caller source-compatible):
+  `int Serialize(std::vector<char>& out, double time, uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0);` (same for `SerializeUpdate`). Write them into the flatbuffer; `0` means "unset" by convention.
+- `tx_wallclock_us` uses UTC (`system_clock`) because it must be comparable *across machines*; document that it can step under NTP adjustment and is therefore for latency/staleness only — **ordering is driven solely by `tx_seq`, which is strictly monotonic.**
+
+#### A1.c — Receiver: reorder / dedup / stale gate (`src/o3ds/reorder_gate.*`)
+A per-source state machine. Operate on a small value `Frame { uint64_t seq; double wallclock_s; std::vector<char> bytes; }`. The receiver verifies the buffer **once** at ingress (reuse the hardened `Verifier` path), reads `tx_seq`/`tx_wallclock_us` from the verified root, constructs a `Frame`, and calls `Push`; parse-and-apply happens lazily **on delivery** (so buffered-then-dropped frames are never fully parsed). Suggested shape:
+```cpp
+struct ReorderStats { uint64_t delivered=0, dup_dropped=0, stale_dropped=0, lost=0, reordered=0; };
+
+class ReorderGate {
+public:
+    struct Config { uint32_t max_window = 16; double max_delay_s = 0.05; int64_t reset_backjump = 256; };
+    explicit ReorderGate(Config = {});
+    // emit is called, in ascending seq order, for each frame ready to apply.
+    void Push(Frame&& f, double now_s, const std::function<void(Frame&&)>& emit);
+    void Flush(double now_s, const std::function<void(Frame&&)>& emit); // timeout / teardown
+    const ReorderStats& Stats() const;
+};
+```
+Behavior for incoming seq `S` (with `last_applied` = highest delivered seq):
+- **`S == 0` (unset/legacy):** bypass entirely — emit immediately in arrival order (preserves today's behavior; supports old senders and mixed streams).
+- **First frame:** initialize `last_applied = S - 1` so `S` delivers immediately.
+- **`S <= last_applied`:** duplicate or late-past-successor → **drop** (`dup_dropped` if seen before, else `stale_dropped`); never un-apply.
+- **`S == last_applied + 1`:** emit; then drain any buffered consecutive successors (`+2, +3, …`), advancing `last_applied` (each drained out-of-order arrival counts `reordered`).
+- **`S > last_applied + 1`:** gap → buffer `S`. Recover if the missing seq(s) arrive within `max_window` frames / `max_delay_s`. If the window fills or the timeout elapses (checked on `Push`/`Flush`), **give up the gap**: emit buffered frames in order, advance `last_applied` past the hole, count skipped seqs as `lost`.
+- **Publisher restart:** the counter resets to `1`, so `S` jumps far below `last_applied`. Detect a backward jump `> reset_backjump` (or ≥K consecutive sub-`last_applied` frames) and **re-baseline** to the new session (else the stream would drop forever). *This is the case the optional `frame_epoch` field (§2.1) makes unambiguous — recommend deciding here whether to add `frame_epoch:uint = 0` now rather than rely on the heuristic.*
+
+#### A1 — Acceptance (core, CTest-wired; extend the ASan/UBSan harness)
+- In-order run → all delivered, `lost==0`.
+- **Reorder recovered:** arrive `100, 102, 101` → emit `100,101,102`, `reordered==1`, `lost==0`.
+- **Stale-after-successor:** arrive `100, 101, 99` → emit `100,101`, `99` dropped stale, `lost==0`.
+- **Duplicate:** `100, 100` → second `dup_dropped`.
+- **Gap timeout:** `100, 102`, advance clock past `max_delay_s` with no `101` → emit `102`, `lost==1`.
+- **Window overflow:** persistent gap fills window → flush past hole, correct `lost`.
+- **Legacy:** `tx_seq==0` frames pass straight through in arrival order.
+- **Restart:** seq jumps backward beyond `reset_backjump` → re-baseline, delivery resumes.
+- **Safety:** malformed/short buffers and unverifiable roots at ingress → treated as unset/dropped, never crash (ASan/UBSan clean).
+
+#### A1 — Open decisions (resolve in the design step)
+- Add `frame_epoch` now (clean restart handling) vs. rely on the backward-jump heuristic? (Leaning: add it — it's cheap and removes ambiguity.)
+- Default `max_window` / `max_delay_s` (starting point 16 frames / 50 ms ≈ 3 frames @ 60 fps); expose as config/console vars in A2.
+- Payload storage in the gate: `std::vector<char>` bytes (simple, one copy) vs. type-erased handle (zero-copy, more complex). Bytes are fine to start.
 
 ### Phase A2 — Jitter/latency handling on the receiver (UE glue)
 - **Goal:** absorb network jitter and expose end-to-end latency/loss without fighting LiveLink.
