@@ -23,25 +23,53 @@ DEFINE_LOG_CATEGORY_STATIC(LogSocketsUdpSender, Log, All);
 class FSocketsUdpSenderAudioSink final : public FO3DSenderAudioSinkBase
 {
 public:
-	FSocketsUdpSenderAudioSink(FO3DSocketsUdpSender& InOwner, FO3DTransportAudioConfig InConfig)
+	FSocketsUdpSenderAudioSink(TSharedPtr<FSocketsUdpSenderOwnerGuard, ESPMode::ThreadSafe> InOwnerGuard, FO3DTransportAudioConfig InConfig)
 		: FO3DSenderAudioSinkBase(MoveTemp(InConfig))
-		, Owner(InOwner)
+		, OwnerGuard(MoveTemp(InOwnerGuard))
 	{
 	}
 
 	virtual bool OnSubmitPcmInternal(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
 	{
-		return Owner.ProcessCapturedAudio(StreamLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
+		if (!OwnerGuard.IsValid())
+		{
+			return false;
+		}
+
+		// Holding this lock blocks the sender's destructor (which takes the
+		// same lock to null out Owner) until this call returns, so Owner is
+		// guaranteed valid for the duration of the call below.
+		FScopeLock Lock(&OwnerGuard->Lock);
+		if (!OwnerGuard->Owner)
+		{
+			return false;
+		}
+		return OwnerGuard->Owner->ProcessCapturedAudio(StreamLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
 	}
 
 private:
-	FO3DSocketsUdpSender& Owner;
+	TSharedPtr<FSocketsUdpSenderOwnerGuard, ESPMode::ThreadSafe> OwnerGuard;
 };
 
-FO3DSocketsUdpSender::FO3DSocketsUdpSender() = default;
+FO3DSocketsUdpSender::FO3DSocketsUdpSender()
+{
+	OwnerGuard = MakeShared<FSocketsUdpSenderOwnerGuard, ESPMode::ThreadSafe>();
+	OwnerGuard->Owner = this;
+}
 
 FO3DSocketsUdpSender::~FO3DSocketsUdpSender()
 {
+	// Invalidate before tearing down anything else: any audio-thread call
+	// already inside FSocketsUdpSenderAudioSink::OnSubmitPcmInternal is
+	// holding OwnerGuard->Lock, so this blocks until that call returns, and
+	// every call after this point sees Owner == nullptr instead of touching
+	// a partially/fully destroyed sender.
+	if (OwnerGuard.IsValid())
+	{
+		FScopeLock Lock(&OwnerGuard->Lock);
+		OwnerGuard->Owner = nullptr;
+	}
+
 	Stop();
 }
 
@@ -204,7 +232,7 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DSocketsUdpSender::Creat
 	ActiveAudioConfig = EffectiveConfig;
 	RefreshAudioEncoder();
 
-	return MakeShared<FSocketsUdpSenderAudioSink, ESPMode::ThreadSafe>(*this, ActiveAudioConfig);
+	return MakeShared<FSocketsUdpSenderAudioSink, ESPMode::ThreadSafe>(OwnerGuard, ActiveAudioConfig);
 }
 
 bool FO3DSocketsUdpSender::ResolveRemoteAddress(const FString& Host, int32 Port)

@@ -16,6 +16,19 @@ class FInternetAddr;
 class FSocketsUdpSenderAudioSink;
 
 /**
+ * Shared between FO3DSocketsUdpSender and any audio sinks it hands out.
+ * The audio capture component can keep a sink alive (via its own TSharedPtr)
+ * independently of the sender's own lifetime, so the sink must never touch
+ * the sender through a raw pointer/reference without first confirming under
+ * this lock that the sender hasn't been torn down.
+ */
+struct FSocketsUdpSenderOwnerGuard
+{
+	FCriticalSection Lock;
+	FO3DSocketsUdpSender* Owner = nullptr;
+};
+
+/**
  * UDP-based sender implementation for the sockets transport module.
  */
 class FO3DSocketsUdpSender : public IOpen3DSender
@@ -76,4 +89,6 @@ private:
 
 	std::vector<char> SerializationScratch;
 	std::vector<char> FragmentScratch;
+
+	TSharedPtr<FSocketsUdpSenderOwnerGuard, ESPMode::ThreadSafe> OwnerGuard;
 };

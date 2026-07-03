@@ -18,6 +18,19 @@ class FRunnableThread;
 class FEvent;
 
 /**
+ * Shared between FO3DSocketsTcpSender and any audio sinks it hands out.
+ * The audio capture component can keep a sink alive (via its own TSharedPtr)
+ * independently of the sender's own lifetime, so the sink must never touch
+ * the sender through a raw pointer/reference without first confirming under
+ * this lock that the sender hasn't been torn down.
+ */
+struct FSocketsTcpSenderOwnerGuard
+{
+	FCriticalSection Lock;
+	FO3DSocketsTcpSender* Owner = nullptr;
+};
+
+/**
  * TCP sender - server mode (listens and accepts connections).
  * Adapted from UDP sender pattern for reliability.
  */
@@ -94,4 +107,6 @@ private:
 	uint64 MaxQueueBytes = 4 * 1024 * 1024; // 4MB default
 
 	mutable FCriticalSection StatsMutex;
+
+	TSharedPtr<FSocketsTcpSenderOwnerGuard, ESPMode::ThreadSafe> OwnerGuard;
 };
