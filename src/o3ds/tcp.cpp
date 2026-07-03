@@ -291,6 +291,12 @@ void TcpSocket::Send(void* data, int len)
 
 void TcpSocket::Receive(void* buf, int len, int* recd)
 {
+	// *recd is an out-param for "bytes received this call" and must be
+	// updated on every path, including EWOULDBLOCK - callers that
+	// accumulate into a running count (e.g. the loop below) would otherwise
+	// re-add a stale value left over from a previous successful call.
+	if (recd != NULL) *recd = 0;
+
 	int bytesRecv = 0;
 	bytesRecv = recv(m_socket, (char*)buf, len, 0);
 

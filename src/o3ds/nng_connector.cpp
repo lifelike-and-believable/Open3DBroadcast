@@ -250,10 +250,19 @@ namespace O3DS
 			return 0;
 
 		size_t msglen = nng_msg_len(msg);
-		if (msglen > *len)
+		if (*data == nullptr)
 		{
+			*data = (char*)malloc(msglen);
+			if (!*data) { nng_msg_free(msg); return 0; }
+			*len = msglen;
+		}
+		else if (msglen > *len)
+		{
+			// realloc may move the block; *data must be updated to the new
+			// address or the memcpy below writes through a dangling pointer.
 			char* buf = (char*)realloc(*data, msglen);
-			if (!buf) return 0;
+			if (!buf) { nng_msg_free(msg); return 0; }
+			*data = buf;
 			*len = msglen;
 		}
 
