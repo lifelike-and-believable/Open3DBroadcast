@@ -13,7 +13,7 @@
 class FO3DNngReceiver : public IOpen3DReceiver
 {
 public:
-    virtual ~FO3DNngReceiver() override = default;
+    virtual ~FO3DNngReceiver() override;
 
     virtual bool Initialize(const FO3DTransportConfig& Config) override;
     virtual void SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer) override;

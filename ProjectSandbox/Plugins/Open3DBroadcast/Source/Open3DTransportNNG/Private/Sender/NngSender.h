@@ -14,7 +14,7 @@
 class FO3DNngSender : public IOpen3DSender
 {
 public:
-    virtual ~FO3DNngSender() override = default;
+    virtual ~FO3DNngSender() override;
 
     virtual bool Initialize(const FO3DTransportConfig& Config) override;
     virtual bool Start() override;

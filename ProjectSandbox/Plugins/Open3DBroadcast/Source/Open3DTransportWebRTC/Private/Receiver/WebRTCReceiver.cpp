@@ -5,6 +5,7 @@
 #include "Interfaces/IPluginManager.h"
 #include "Logging/LogMacros.h"
 #include "Misc/Paths.h"
+#include "Templates/NumericLimits.h"
 #include "livekit_ffi.h"
 #include "o3ds/model.h"
 
@@ -13,6 +14,17 @@ using WebRTCUtils::FromAnsi;
 namespace
 {
     static constexpr TCHAR ReconnectTimeoutOptionKey[] = TEXT("webrtc.reconnect_timeout");
+
+    // Upper bound on a single incoming data-channel message. `len` originates from the
+    // peer-controlled LiveKit FFI callback as a size_t; it must be validated before being
+    // truncated to int32 for TArray allocation, otherwise a value exceeding INT32_MAX (or
+    // simply an oversized/malicious payload) can cause the allocation to be smaller than the
+    // subsequent Memcpy, resulting in a heap buffer overflow. The sender caps reliable
+    // messages at 15000 bytes (see WebRTCSender.cpp), so this generous cap leaves headroom
+    // while still bounding worst-case allocation/copy size.
+    static constexpr size_t MaxIncomingDataPayloadBytes = 8 * 1024 * 1024; // 8 MB
+    static_assert(MaxIncomingDataPayloadBytes <= static_cast<size_t>(TNumericLimits<int32>::Max()),
+        "MaxIncomingDataPayloadBytes must fit within int32 for TArray allocation");
 
     FString GetPluginBaseDir()
     {
@@ -192,6 +204,17 @@ void FO3DWebRTCReceiver::OnDataReceivedEx(void* user, const char* label, LkRelia
         ThisCallNumber, label ? label : "(NULL)", len,
         reliability == LkReliable ? TEXT("Reliable") : TEXT("Lossy"));
 
+    // SECURITY: `len` is peer-controlled. Reject payloads that would overflow the int32
+    // cast used for TArray allocation (or are simply unreasonably large) before allocating
+    // or copying, to prevent a heap buffer overflow (allocation smaller than the Memcpy size).
+    if (len > MaxIncomingDataPayloadBytes || len > static_cast<size_t>(TNumericLimits<int32>::Max()))
+    {
+        UE_LOG(LogO3DWebRTCReceiver, Error,
+            TEXT("OnDataReceivedEx: rejecting oversized payload len=%zu (max=%zu) label='%hs'"),
+            len, MaxIncomingDataPayloadBytes, label ? label : "(NULL)");
+        return;
+    }
+
     // Convert label to FString with caching (optimization: avoids repeated UTF8→UTF16 conversion)
     FString SubjectLabel = Self->GetOrCacheSubjectLabel(label);
 
@@ -252,6 +275,17 @@ void FO3DWebRTCReceiver::OnDataReceived(void* user, const uint8_t* bytes, size_t
     UE_LOG(LogO3DWebRTCReceiver, Verbose,
         TEXT("[ARCH] OnDataReceived ENTRY (call#%llu): len=%zu (received on DEFAULT/UNNAMED channel)"),
         ThisCallNumber, len);
+
+    // SECURITY: `len` is peer-controlled. Reject payloads that would overflow the int32
+    // cast used for TArray allocation (or are simply unreasonably large) before allocating
+    // or copying, to prevent a heap buffer overflow (allocation smaller than the Memcpy size).
+    if (len > MaxIncomingDataPayloadBytes || len > static_cast<size_t>(TNumericLimits<int32>::Max()))
+    {
+        UE_LOG(LogO3DWebRTCReceiver, Error,
+            TEXT("OnDataReceived: rejecting oversized payload len=%zu (max=%zu)"),
+            len, MaxIncomingDataPayloadBytes);
+        return;
+    }
 
     // Use default label since this is unlabeled channel
     FString SubjectLabel = TEXT("default");
@@ -526,7 +560,8 @@ void FO3DWebRTCReceiver::Stop()
     if (ClientHandle)
     {
         lk_client_set_data_callback_ex(ClientHandle, nullptr, nullptr);
-        lk_client_set_audio_callback(ClientHandle, nullptr, nullptr);
+        lk_client_set_data_callback(ClientHandle, nullptr, nullptr);
+        lk_client_set_audio_callback_ex(ClientHandle, nullptr, nullptr);
         lk_set_connection_callback(ClientHandle, nullptr, nullptr);
 
         LogIfFailed(lk_disconnect(ClientHandle), TEXT("LiveKit disconnect"));
@@ -1078,7 +1113,8 @@ void FO3DWebRTCReceiver::ProcessReconnectIfNeeded()
     if (ClientHandle)
     {
         lk_client_set_data_callback_ex(ClientHandle, nullptr, nullptr);
-        lk_client_set_audio_callback(ClientHandle, nullptr, nullptr);
+        lk_client_set_data_callback(ClientHandle, nullptr, nullptr);
+        lk_client_set_audio_callback_ex(ClientHandle, nullptr, nullptr);
         lk_set_connection_callback(ClientHandle, nullptr, nullptr);
         LogIfFailed(lk_disconnect(ClientHandle), TEXT("LiveKit reconnect disconnect"));
         lk_client_destroy(ClientHandle);

@@ -119,6 +119,11 @@ void FO3DNngReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMo
     }
 }
 
+FO3DNngReceiver::~FO3DNngReceiver()
+{
+    Stop();
+}
+
 bool FO3DNngReceiver::Start()
 {
     if (!bInitialized.Load())

@@ -203,6 +203,12 @@ void UO3DSenderComponent::StartCapture()
 
 	if (bIsCapturing)
 	{
+		// Tick drives HandleBoneTransformsFinalized()/frame sampling, so it must track bIsCapturing
+		// directly. Do not rely on InitializeTransport() to enable it: that only happens on the
+		// auto-create-transport success path, leaving capture silently inert whenever
+		// bAutoCreateTransport is false or the transport fails to start.
+		SetComponentTickEnabled(true);
+
 		if (bHasValidMesh)
 		{
 			UE_LOG(LogO3DSenderComponent, Log, TEXT("Sender capture started on %s"), *GetNameSafe(TargetMesh.Get()));
@@ -231,6 +237,10 @@ void UO3DSenderComponent::StopCapture()
 	InvalidateSubjectNameCache();
 	UnbindFromTarget();
 	bIsCapturing = false;
+
+	// Keep tick state tied directly to bIsCapturing; TeardownTransport() below also disables tick
+	// as a side effect, but this makes the invariant explicit regardless of transport state.
+	SetComponentTickEnabled(false);
 
 	if (Serializer)
 	{
@@ -287,7 +297,9 @@ void UO3DSenderComponent::InitializeTransport()
 		return;
 	}
 
-	SetComponentTickEnabled(true);
+	// Note: tick enablement is driven by StartCapture() based on bIsCapturing, not by transport
+	// start success here, so pose capture still runs for externally-managed transports and even
+	// when auto-transport creation fails.
 
 	if (!SubjectListHandle.IsValid())
 	{
