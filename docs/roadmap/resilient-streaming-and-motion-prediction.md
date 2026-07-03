@@ -150,16 +150,44 @@ Behavior for incoming seq `S` (with `last_applied` = highest delivered seq):
 - Default `max_window` / `max_delay_s` (starting point 16 frames / 50 ms ≈ 3 frames @ 60 fps); expose as config/console vars in A2.
 - Payload storage in the gate: `std::vector<char>` bytes (simple, one copy) vs. type-erased handle (zero-copy, more complex). Bytes are fine to start.
 
-### Phase A2 — Jitter/latency handling on the receiver (UE glue)
-- **Goal:** absorb network jitter and expose end-to-end latency/loss without fighting LiveLink.
-- **Files/modules:** `Open3DReceiver/O3DReceiverSource.cpp` (apply path), `O3DPerformanceMetrics`.
-- **Approach:** resolve design decision §2.5 first. Feed the A1 reorder/dedup gate; compute end-to-end latency from `tx_wallclock_us` vs receive time (document clock-skew caveats — this is one-way delay, not RTT, and depends on NTP-level sync; treat absolute value as indicative, trends as reliable). Surface latency, jitter, loss %, reorder count in the existing HUD.
-- **Acceptance:** with a recorded session replayed under injected jitter/loss (Workstream B), the HUD reports plausible latency/loss and the applied pose stream is monotonic (no backward jumps). Manual + replay-driven verification.
-- **Dependencies:** A1; benefits from B2. **Out of scope:** prediction/concealment (Workstream C).
+### Phase A2 — Receiver integration: gate wiring, clock mapping, metrics
 
-### Open questions (A)
-- One-way latency needs sender/receiver clock sync to be absolute; do we require/assume NTP, or report only relative jitter + loss? Decide in A2.
-- Reorder window size / max buffering delay — expose as a console var with a sane default.
+**Goal:** wire A1's gate into the UE receiver, map the sender clock onto LiveLink frame time (per the resolved §2.5 posture — LiveLink owns presentation smoothing; O3DB owns the network layer + clock mapping), and surface latency/jitter/loss on the HUD. **Dependencies:** A1; tested via B2. **Out of scope:** prediction/concealment (Workstream C). Follow **core-first (§0.1)** — the estimator math goes in core (Linux-testable); UE files are thin glue.
+
+#### A2.a — Wire `ReorderGate` into the receiver apply path (UE glue)
+- **Files:** `Open3DReceiver/O3DReceiverSource.cpp` (`HandleSerializedFrame` ingress + the poll/tick).
+- Ingress: verify the buffer once, extract `tx_seq`/`tx_wallclock_us`, build a `Frame`, `gate.Push(...)`. The gate's `emit` callback does the existing parse+apply (`BuildSubjectPose` → LiveLink push) — so reorder/dedup/stale-drop happens **before** the expensive apply, and superseded frames are never parsed.
+- Call `gate.Flush(now)` from the receiver's existing tick/poll so gap-wait timeouts release buffered frames even when no new frame arrives (not only on `Push`).
+- **Threading:** the gate is **not** thread-safe — confine it to one thread and match the receiver's existing worker-thread-ingest / game-thread-apply split; do not introduce a new cross-thread path. (LiveLink push itself is callable off the game thread, but keep to the existing pattern.) One gate per source; if a source ever multiplexes multiple senders, key gates by sender identity (note the caveat, don't build it yet).
+
+#### A2.b — Clock-offset estimator (core: `src/o3ds/clock_offset.*`)
+The real sub-problem behind §2.5. Pure math → **put it in core and unit-test it on Linux.**
+- For each frame, `offset_i = local_recv_i − tx_wallclock_i = skew + delay_i`, where `delay_i ≥ 0`. The **minimum** `offset` over a window ≈ `skew + min_delay` (the least-delayed frame is closest to pure clock skew). Maintain a **rolling minimum** (min-filter over a bounded time/count window) as the offset estimate — the classic NTP-style approach.
+- **Mapped presentation time (local) = `tx_wallclock + rolling_min_offset`.** A frame's `offset − rolling_min` is its *excess delay* → feeds the jitter metric.
+- Handle clock steps (NTP adjustment): the bounded window re-tracks over time; **slew** the estimate toward a new level rather than jumping, to avoid presentation-time discontinuities.
+- **What it does and doesn't buy you:** it gives *relative* correctness for free — correct playback speed and multi-subject/same-sender sync — **without** cross-machine clock sync. **Absolute one-way latency additionally requires NTP-level sync**; without it the "latency" figure conflates skew + delay, so report it as indicative only (or behind an "assume synced clocks" flag) while **jitter and loss are reliable regardless.**
+
+#### A2.c — LiveLink frame-time mapping (UE glue)
+- Set each emitted LiveLink frame's `WorldTime` (and `SceneTime`/timecode where available) from the A2.b mapped presentation time, so LiveLink's time-based interpolation works across the network and subjects stay in sync.
+- **Fallback:** `tx_wallclock == 0` (legacy) or estimator still warming up → timestamp with local receive time (today's behavior).
+- Set a sane default LiveLink subject **buffer offset** covering expected jitter (the presentation-delay knob) and expose it; make sure it doesn't *double* with any O3DB-side delay — measure, don't stack buffers (§2.5).
+- **Verify against the target UE version:** exact API to set frame `WorldTime`/`SceneTime` on `FLiveLinkFrameDataStruct` and the `BufferSettings` fields — confirm in the LiveLink source, don't assume.
+
+#### A2.d — Metrics / HUD (`O3DPerformanceMetrics`)
+- Per source, surface: latency estimate (caveated per A2.b), jitter (spread of `offset` around the rolling min), loss % and reorder rate (from `gate.Stats()`), duplicate/stale drops, and current gate buffer occupancy. Wire into the existing `o3d.ProfileGuide` HUD.
+- Use the atomic-safe update pattern from the Shared metrics fix (#215) — don't reintroduce the `Load()`→compute→`Store()` RMW races for the new counters.
+
+#### A2 — Acceptance
+- **Estimator (core, CTest):** synthetic constant skew + bounded jitter → estimated offset converges to `skew + min_delay`; mapped presentation times are monotonic and correctly ordered; a simulated clock step is slewed, not jumped.
+- **Integration (B2 replay):** replay a capture with injected jitter/loss into the receiver → HUD reports plausible latency/jitter/loss; **applied pose stream is monotonic (no backward `tx_seq` ever applied)**; with zero loss/jitter the output is identical to today.
+- **Legacy:** `tx_seq`/`tx_wallclock == 0` → gate bypassed, receive-time timestamping, behaves exactly as today.
+- Estimator verified on Linux CI; receiver wiring via B2 (UE-lite / optional Replay transport) + UE automation on the self-hosted runner (gated on the PR being out of draft).
+
+#### A2 — Open decisions
+- Rolling-min window: time-based vs count-based; slew rate on clock step. Start with a few-second window.
+- Trust absolute latency (assume NTP) vs report jitter+loss only? **Recommendation: jitter + loss are primary and always shown; absolute latency shown only when clocks are declared synced** (a setting), else labeled "relative."
+- Reorder window / buffer offset defaults (tie to A1's `max_window`/`max_delay_s`); expose as console vars.
+- Per-source vs per-sender gate keying if multiplexing is ever added.
 
 ---
 
@@ -344,7 +372,7 @@ Recommended order: **A1 → B1 → B2 → A2 → C0 → C1** (this delivers resi
 
 ## 7. Testing strategy
 
-- **Core-first (§0.1):** sequencing (A1), capture round-trip (B1), predictor math (C0), residual round-trip (C2) are all pure C++ — unit-test in the core and **wire into CTest so the Linux CI actually runs them.** Reuse the ASan/UBSan harness pattern already used for the parser-hardening work; feed malformed inputs to every new parser/reader.
+- **Core-first (§0.1):** sequencing + reorder gate (A1), capture round-trip (B1), channel model (B2), clock-offset estimator (A2.b), predictor math (C0), residual round-trip (C2) are all pure C++ — unit-test in the core and **wire into CTest so the Linux CI actually runs them.** Reuse the ASan/UBSan harness pattern already used for the parser-hardening work; feed malformed inputs to every new parser/reader.
 - **Replay-as-test (B2):** the primary integration harness. Golden `.o3dscap` sessions + seeded channel models give deterministic, UE-free (or UE-lite) regression tests for A2 and C1.
 - **UE automation:** extend the existing automation suites for the receiver apply-path changes; run them on the self-hosted runner (note: gated on the PR being out of draft).
 - Every phase's acceptance criteria above names its concrete test.
