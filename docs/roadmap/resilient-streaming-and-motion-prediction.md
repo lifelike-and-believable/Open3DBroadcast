@@ -66,9 +66,9 @@ This maps directly onto the protocol that already exists: a full `Subject` descr
 Resolve these once; every workstream depends on them.
 
 1. **Frame identity & clock.** Add to the `SubjectList` table (append-only):
-   - `tx_seq:ulong = 0;` — monotonic per-publisher sequence (0 = unset).
-   - `tx_wallclock_us:ulong = 0;` — UTC microseconds at transmit (0 = unset).
-   - (Design-to-confirm) `frame_epoch:uint = 0;` and/or explicit `is_keyframe:bool` if prediction needs an unambiguous I-frame marker beyond "has `subjects`". Decide in A1/C0.
+   - `tx_seq:ulong = 0;` — monotonic per **logical stream** (sender→receiver), not per process, so a gap means loss rather than fan-out (see A1.b). 0 = unset.
+   - `tx_wallclock_us:ulong = 0;` — UTC microseconds at transmit (0 = unset); distinct from the existing `time:double` content clock.
+   - (Design-to-confirm, leaning yes) `frame_epoch:uint = 0;` — bumped per publisher session so the receiver detects a sender restart unambiguously instead of via a backward-jump heuristic (A1.c). Decide in A1. A separate `is_keyframe` is likely unnecessary — "has `subjects`" already marks an I-frame — but confirm in C2.
 2. **Backward compatibility.** Unset (0) fields must behave exactly like today's stream. A new receiver talking to an old sender (no seq/clock) must fall back cleanly; an old receiver ignores the new fields.
 3. **Predictor determinism tiers.**
    - *Concealment / latency-hiding* is **receiver-only** and needs no cross-peer determinism → lowest risk, do first.
@@ -387,16 +387,20 @@ Sits on the A2 apply path; the interesting math (blend/correction, error metric)
 
 ## 6. Sequencing & dependency graph
 
+Node tags: **(core)** = engine-agnostic, Linux/CTest-testable; **(core+UE)** = core logic + thin UE glue; **(UE)** = plugin glue.
+
 ```
-A1 (seq/clock, core)  ──┬──► A2 (jitter/latency, UE)
-                        │
-                        ├──► C0 (predictor iface + baselines, core) ──► C1 (concealment, UE)
-                        │                                               │
-B1 (capture format) ──► B2 (replay + injector) ──────────────► (fixtures for A2, C1)
+A1 (seq/clock + gate, core) ──┬──► A2 (receiver integ., core+UE)
+                              │
+                              ├──► C0 (predictor + baselines, core) ──► C1 (concealment, core+UE)
+                              │                                          │
+B1 (capture fmt, core) ──► B2 (replay + channel, core+UE) ──► (test fixtures for A2, C1)
         │                                                              │
         └──► B3 (repeater capture, opt)                                ▼
-                                                        C2 (residual compression)  ──► C3 (learned)
+                                                   C2 (residual compression, core+UE) ──► C3 (learned)
 ```
+
+Dependencies: A2 ← A1. C0 ← A1. C1 ← C0, A2, B2. B2 ← B1. C2 ← C0, A1 (evaluate *after* C1). C3 ← C0–C2, B. (The C1→C2 line is sequencing, not a hard dependency.)
 
 Recommended order: **A1 → B1 → B2 → A2 → C0 → C1** (this delivers resilience + concealment + the test harness), then evaluate **C2**, then a gated **C3** spike. A1, B1, and C0 are independent enough to run in parallel by separate agents.
 
