@@ -201,11 +201,43 @@ Goal: capture a live wire stream to disk and replay it deterministically. Pulls 
 - **Dependencies:** ideally A1 (so captures carry seq/clock in the wire bytes), but the container itself is agnostic and tolerates unset. **Out of scope:** UI, network injection (B2).
 
 ### Phase B2 — Replay engine + network-condition injector
-- **Goal:** replay a capture through any transport (or directly into a receiver) at real or accelerated speed, with optional loss/jitter/reorder injection.
-- **Files/modules:** `src/o3ds` replay driver; a small CLI app under `apps/` (mirrors `apps/Repeater`); optional hook so the UE receiver can consume a replay as a virtual transport.
-- **Approach:** read records, re-emit respecting inter-arrival gaps (or as-fast-as-possible for deterministic tests); pluggable "channel model" that drops/delays/reorders per configurable probabilities with a fixed seed for reproducibility.
-- **Acceptance:** replaying a capture with zero loss reproduces the original applied poses bit-for-bit; with seeded 5%-loss/120ms-jitter the output is deterministic across runs. Becomes a reusable fixture for A2 and C1 tests.
-- **Dependencies:** B1. **Out of scope:** learned-model training loop (that consumes B output but lives in Workstream C tooling).
+
+**Goal:** replay a `.o3dscap` capture — through a real transport or straight into a consumer — at real or accelerated speed, with a deterministic loss/jitter/reorder/dup channel model in between. This is the **primary integration-test harness**: A1's `ReorderGate` and C1's concealment are validated by replaying captures through it. **Dependencies:** B1 (reader); interlocks with A1. **Out of scope:** the learned-model training loop (consumes captures, but lives in C3 tooling).
+
+Three cohesive pieces.
+
+#### B2.a — Replay driver (`src/o3ds/replay.*`)
+- Reads a capture via the B1 reader and emits frames to a sink `std::function<void(const Frame&)>` (same `Frame { seq, wallclock_s, bytes }` the gate consumes).
+- **Timing modes:**
+  - *Realtime:* wait the inter-arrival delta `recv_wallclock_us[i+1] − recv_wallclock_us[i]` (clamped ≥ 0), optionally × a `speed` factor.
+  - *AFAP (as-fast-as-possible):* ignore timing, emit back-to-back — for deterministic unit tests.
+- Optional loop. Purely a source; it does not itself drop/reorder — that's the channel model, kept separate so it can be tested in isolation.
+
+#### B2.b — Channel model (`src/o3ds/channel_model.*`) — the key primitive
+A deterministic simulator that sits between the replay source and the sink and reproduces real network pathologies. It is what makes B2 a rigorous test of A1.
+- **Config:** `{ uint64_t seed; double loss_prob; double base_latency_s; double max_jitter_s; double dup_prob; }`.
+- **Per frame, in a fixed draw order** (loss → jitter → dup, always the same order so a seed is reproducible): drop with `loss_prob`; assign delivery time `emit_t + base_latency + jitter` where `jitter ∈ [0, max_jitter]`; duplicate with `dup_prob`.
+- **Reordering emerges physically:** frames are released in **delivery-time order**, not arrival order — a high-jitter frame naturally lands after a later low-jitter one. Implement with a small delivery-time priority queue. (No separate "reorder" knob needed; jitter is the realistic mechanism.)
+- **⚠️ Cross-platform determinism trap:** use `std::mt19937_64` seeded explicitly, **but do not use `std::uniform_real_distribution`/`std::normal_distribution`** — their output is *not* specified to be identical across standard-library implementations, which would break "deterministic across runs/platforms." Derive draws manually from the raw generator (e.g. `gen() / (double)UINT64_MAX` for a uniform). Start with a uniform jitter distribution (simple, sufficient); gaussian is a later refinement.
+- Exposes ground-truth counters (`dropped`, `duplicated`, `reordered` = frames released out of original seq order) so tests can assert the gate's stats against them.
+
+#### B2.c — Replay CLI (`apps/Replay/`, engine-agnostic, mirrors `apps/Repeater`)
+- Args: capture path; target transport URI (`tcp://`, `udp://`, `nng://`, …); timing mode + `speed`; channel params (`--loss`, `--jitter`, `--dup`, `--seed`); `--loop`.
+- Links the existing sender/transport code to push post-channel-model frames onto a **real** transport → replay a captured session to a live receiver over any protocol. Turns B2 from a unit-test primitive into a field/integration tool.
+- **(Optional / stretch)** a UE-side "Replay" transport registered in the `IOpen3DReceiver` registry, so the plugin can consume a `.o3dscap` as if it were a live source — exercises the receiver apply path / A2 / C1 with no live sender.
+
+#### B2 — Acceptance (core, CTest-wired)
+- **Pass-through:** zero-param channel (`loss=jitter=dup=0`) → replay output == capture input, same order and bytes.
+- **Determinism:** fixed `seed` + params → byte-identical output event log across two runs (and, given manual distributions, across platforms).
+- **Loss-only fed into A1's `ReorderGate`** (`loss=0.05`, `jitter=0`): `gate.Stats().lost == channel.dropped` and `gate.reordered == 0` — crisp because with no jitter there is no reordering.
+- **Jitter-only** (`loss=0`, `max_jitter <` gate window): `gate.lost == 0` and `gate.reordered == channel.reordered` — bounding jitter below the gate window guarantees every reordering is recoverable.
+- **Combined realism** (`loss=0.05`, `jitter=120 ms`): runs without assertion-fragility; used for A2/C1 HUD/quality checks rather than exact counts.
+- **Robustness:** truncated/garbage capture handled by the B1 reader rules (no crash; ASan/UBSan clean).
+
+#### B2 — Open decisions
+- Manual vs `std::` distributions — **manual**, for cross-platform determinism (above).
+- Jitter shape: uniform to start; gaussian later if realism demands.
+- Does the CLI reuse the exact transport-send path used in production (preferred, so it tests real code) vs a thin re-impl? Prefer reuse.
 
 ### Phase B3 — Capture at the repeater (optional, high-value)
 - **Goal:** record sessions network-side with no UE in the loop (field debugging, corpus building).
