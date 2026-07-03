@@ -155,6 +155,12 @@ void FO3DSocketsUdpSender::Stop()
 
 bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
 {
+	// Guards Socket/RemoteAddr against a concurrent CreateSocket()/DestroySocket()
+	// from Start()/Stop() (which take the same lock), and against the audio
+	// thread's ProcessCapturedAudio()/SendEncodedAudio() call, which runs
+	// entirely inside this same lock (see FSocketsUdpSenderAudioSink above).
+	FScopeLock Lock(&OwnerGuard->Lock);
+
 	if (!Socket || !RemoteAddr.IsValid())
 	{
 		return false;
@@ -297,6 +303,11 @@ bool FO3DSocketsUdpSender::ResolveAddress(const FString& Host, int32 Port, TShar
 
 bool FO3DSocketsUdpSender::CreateSocket()
 {
+	// Same lock as Send()/DestroySocket(); FCriticalSection is recursive in
+	// UE so the DestroySocket() call below re-entering the lock on this
+	// thread is safe.
+	FScopeLock Lock(&OwnerGuard->Lock);
+
 	if (!SocketSubsystem || !RemoteAddr.IsValid())
 	{
 		return false;
@@ -331,6 +342,11 @@ bool FO3DSocketsUdpSender::CreateSocket()
 
 void FO3DSocketsUdpSender::DestroySocket()
 {
+	// Same lock as Send()/CreateSocket(); recursive-safe when called from
+	// CreateSocket() above, and blocks until any in-flight audio-thread call
+	// (see FSocketsUdpSenderAudioSink) has finished reading Socket.
+	FScopeLock Lock(&OwnerGuard->Lock);
+
 	if (Socket && SocketSubsystem)
 	{
 		SocketSubsystem->DestroySocket(Socket);

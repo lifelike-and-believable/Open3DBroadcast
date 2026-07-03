@@ -294,6 +294,10 @@ bool FO3DSocketsTcpSender::CreateListenSocket()
 
 void FO3DSocketsTcpSender::DestroySocket()
 {
+	// Same lock as TickAcceptClient()/RunWorker(); blocks until any in-flight
+	// worker-thread send finishes before ClientSocket is torn down.
+	FScopeLock Lock(&OwnerGuard->Lock);
+
 	if (ClientSocket && SocketSubsystem)
 	{
 		SocketSubsystem->DestroySocket(ClientSocket);
@@ -310,9 +314,9 @@ void FO3DSocketsTcpSender::DestroySocket()
 
 void FO3DSocketsTcpSender::TickAcceptClient()
 {
-	if (!ListenSocket || ClientSocket)
+	if (!ListenSocket)
 	{
-		return; // Already have a client
+		return;
 	}
 
 	const double Now = FPlatformTime::Seconds();
@@ -321,6 +325,15 @@ void FO3DSocketsTcpSender::TickAcceptClient()
 		return;
 	}
 	LastAcceptPollTime = Now;
+
+	// Same lock as DestroySocket()/RunWorker(); guards the ClientSocket
+	// read-then-write below against a concurrent worker-thread send/teardown.
+	FScopeLock Lock(&OwnerGuard->Lock);
+
+	if (ClientSocket)
+	{
+		return; // Already have a client
+	}
 
 	TSharedRef<FInternetAddr> PeerAddr = SocketSubsystem->CreateInternetAddr();
 	FSocket* Accepted = ListenSocket->Accept(*PeerAddr, TEXT("O3DS_TCP_CLIENT"));
@@ -487,6 +500,11 @@ uint32 FO3DSocketsTcpSender::RunWorker()
 		const uint64 PayloadSize = static_cast<uint64>(Payload.Bytes.Num());
 		const uint64 Current = QueueBytes.Load();
 		QueueBytes.Store(Current > PayloadSize ? Current - PayloadSize : 0);
+
+		// Same lock as TickAcceptClient()/DestroySocket(); held for the whole
+		// send so a concurrent accept/teardown on the game thread can't touch
+		// ClientSocket (or free the underlying FSocket) mid-send.
+		FScopeLock Lock(&OwnerGuard->Lock);
 
 		FSocket* ActiveSocket = ClientSocket;
 		if (!ActiveSocket)
