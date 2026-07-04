@@ -448,8 +448,14 @@ void FO3DReceiverSource::RemoveInactiveSubjects()
 /** Entry point from the serialized consumer; peeks sequencing metadata, then either
  *  routes through the A1 reorder gate (senders that set tx_seq) or falls back to the
  *  pre-A1 legacy dedup/reorder path unchanged (senders that don't). */
-void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds)
+void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds, uint64 ArrivalEpochUsOverride)
 {
+    // Capture the true arrival instant exactly once, on whichever thread this frame
+    // first arrived on - not after a possible transport-thread -> game-thread hop
+    // below, which would otherwise fold scheduling delay into the gated path's
+    // jitter/offset estimate (see ArrivalEpochUsOverride's doc comment on the header).
+    const uint64 ArrivalEpochUs = (ArrivalEpochUsOverride != 0) ? ArrivalEpochUsOverride : O3DS::NowUtcMicros();
+
     if (!Client || !bIsValid)
     {
         return;
@@ -463,11 +469,11 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
     {
         TWeakPtr<FO3DReceiverSource> WeakSelf = AsShared();
         TArray<uint8> BufferCopy(Buffer);
-        AsyncTask(ENamedThreads::GameThread, [WeakSelf, Subject, TimestampSeconds, BufferCopy = MoveTemp(BufferCopy)]() mutable
+        AsyncTask(ENamedThreads::GameThread, [WeakSelf, Subject, TimestampSeconds, ArrivalEpochUs, BufferCopy = MoveTemp(BufferCopy)]() mutable
         {
             if (TSharedPtr<FO3DReceiverSource> Pinned = WeakSelf.Pin())
             {
-                Pinned->HandleSerializedFrame(Subject, BufferCopy, TimestampSeconds);
+                Pinned->HandleSerializedFrame(Subject, BufferCopy, TimestampSeconds, ArrivalEpochUs);
             }
         });
         return;
@@ -500,7 +506,7 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
     Frame.seq = TxSeq;
     Frame.wallclock_us = TxWallclockUs;
     Frame.epoch = FrameEpoch;
-    Frame.local_recv_us = O3DS::NowUtcMicros(); // true arrival instant - see Frame's doc comment
+    Frame.local_recv_us = ArrivalEpochUs; // true arrival instant - see Frame's doc comment
     Frame.bytes.assign(reinterpret_cast<const char*>(Buffer.GetData()),
         reinterpret_cast<const char*>(Buffer.GetData()) + Buffer.Num());
 

@@ -57,7 +57,12 @@ private:
     class FSerializedConsumer;
     class FAudioSink;
 
-    void HandleSerializedFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds);
+    // ArrivalEpochUsOverride == 0 means "capture the arrival time now" (the top-level
+    // call from the serialized consumer); a nonzero value is used when re-invoking
+    // after the transport-thread -> game-thread AsyncTask hop below, so the gated
+    // path's Frame.local_recv_us reflects the frame's true wire-arrival instant, not
+    // whenever the game thread got around to running the dispatched task.
+    void HandleSerializedFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds, uint64 ArrivalEpochUsOverride = 0);
     void HandleLegacyFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds);
     void EmitGatedFrame(O3DS::Frame&& Frame);
     void ReportGateMetricsDelta();

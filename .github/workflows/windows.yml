@@ -24,7 +24,7 @@ jobs:
 
       - name: mkdir usr
         run: |
-          mkdir -p $env:GITHUB_WORKSPACE/usr
+          New-Item -ItemType Directory -Force -Path $env:GITHUB_WORKSPACE/usr | Out-Null
 
       - name: Perl
         uses: shogo82148/actions-setup-perl@v1.27.0
