@@ -92,6 +92,17 @@ jobs:
           cmake --build _o3ds_build --config Release && cmake --install _o3ds_build --config Release
         shell: cmd
 
+      # C2 prerequisite (roadmap doc, Phase C2's "Float determinism" risk
+      # note): runs the same deterministic synthetic-corpus/predictor-chain
+      # probe built on Linux CI, but compiled with MSVC here. Diff this
+      # step's output against the Linux CI run's "Build & test" log for the
+      # same commit to measure real cross-compiler float drift before
+      # committing to a chained predictor for residual coding. Not a pass/
+      # fail gate (no known-good baseline yet) - just surfaces the numbers.
+      - name: Run Determinism Probe (C2 prototype)
+        run: _o3ds_build\apps\DeterminismProbe\Release\DeterminismProbe.exe
+        shell: cmd
+
       - name: Create Zip File for Release
         run: |
           cd out

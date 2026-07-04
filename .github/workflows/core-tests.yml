@@ -87,3 +87,14 @@ jobs:
       - name: Run tests (ctest, ASan/UBSan active)
         working-directory: build
         run: ctest --output-on-failure
+
+      # C2 prerequisite (roadmap doc, Phase C2's "Float determinism" risk
+      # note): runs the same deterministic synthetic-corpus/predictor-chain
+      # probe built with MSVC in windows.yml, but compiled with GCC here.
+      # Diff this step's output against that workflow's "Run Determinism
+      # Probe" step output for the same commit to measure real cross-
+      # compiler float drift before committing to a chained predictor for
+      # residual coding. Not a pass/fail gate (no known-good baseline yet)
+      # - just surfaces the numbers.
+      - name: Run Determinism Probe (C2 prototype)
+        run: build/apps/DeterminismProbe/DeterminismProbe
