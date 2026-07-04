@@ -139,11 +139,21 @@ bool UdpCombiner::addFragment(const char* data, size_t sz)
 			return false;
 	}
 
-	mFound[seq] = true;
-
-	if (seq != (uint32_t)(frames - 1) && sz != fragSize + HEADERSIZE) {
+	// Every fragment must fill its slot exactly: non-last fragments must be a
+	// full fragSize payload, and the last fragment must be exactly the
+	// remaining tail (bufSz - seq*fragSize). Without this, a short last
+	// fragment would still satisfy writeEnd <= bufSz above yet leave the
+	// gap between writeEnd and bufSz uninitialized (mBuffer is malloc'd, not
+	// zeroed) - isComplete() only checks mFound flags, so getFrame() would
+	// happily hand back those uninitialized bytes to the caller.
+	const uint64_t sliceStart = (uint64_t)seq * (uint64_t)fragSize;
+	const uint64_t expectedPayloadLen = (seq == (uint32_t)(frames - 1)) ? ((uint64_t)bufSz - sliceStart) : (uint64_t)fragSize;
+	if ((uint64_t)payloadLen != expectedPayloadLen)
+	{
 		return false;
 	}
+
+	mFound[seq] = true;
 
 	memcpy(mBuffer + (size_t)seq * fragSize, data + HEADERSIZE, payloadLen);
 

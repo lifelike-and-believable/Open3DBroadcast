@@ -821,7 +821,7 @@ O3DS::ConcealmentEngine& FO3DReceiverSource::GetOrCreateSubjectConcealment(FName
     Config.maxConcealHorizonSeconds = FMath::Max(0.0, (double)CVarO3DReceiverConcealmentHorizonMs.GetValueOnGameThread() / 1000.0);
     Config.correctionWindowSeconds = FMath::Max(0.0, (double)CVarO3DReceiverConcealmentCorrectionMs.GetValueOnGameThread() / 1000.0);
 
-    TUniquePtr<O3DS::ConcealmentEngine> NewEngine = MakeUnique<O3DS::ConcealmentEngine>(MakeUnique<O3DS::LinearPredictor>(), Config);
+    TUniquePtr<O3DS::ConcealmentEngine> NewEngine = MakeUnique<O3DS::ConcealmentEngine>(std::make_unique<O3DS::LinearPredictor>(), Config);
     O3DS::ConcealmentEngine& Ref = *NewEngine;
     SubjectConcealment.Add(SubjectName, MoveTemp(NewEngine));
     return Ref;
@@ -850,10 +850,17 @@ void FO3DReceiverSource::ObserveConcealmentRealFrame(FName SubjectName, double P
 
 /** Per-tick concealment poll (roadmap doc §5/C1.a): for every subject with an active
  *  engine, ask whether "now" needs a synthesized frame (gap beyond LiveLink's own
- *  interpolation) and push one if so. "Now" is the mapped presentation time computed
- *  the same way EmitGatedFrame maps a real frame's tx_wallclock_us, but anchored to the
- *  last known clock-offset estimate rather than a fresh Observe() call, since there's
- *  no new frame to observe here - see LastClockOffsetEstimateUs's declaration comment. */
+ *  interpolation) and push one if so. Engines are only fed real frames whose
+ *  PresentationTimeSeconds is EmitGatedFrame's MappedWorldTimeSeconds - which is
+ *  already expressed in the local FPlatformTime::Seconds() domain (it converts
+ *  mapped_presentation_time_us to platform time using a NowEpochUs/NowPlatformS
+ *  anchor pair taken at that instant). So "now" in that same domain is simply a
+ *  fresh FPlatformTime::Seconds() reading; LastClockOffsetEstimateUs must NOT be
+ *  added here too - that offset is already baked into each frame's own
+ *  MappedWorldTimeSeconds, and re-applying it would skew TryConceal's gap/horizon
+ *  math by roughly the current send-to-receive offset. bHasClockOffsetEstimate is
+ *  still used below purely as "has the gated path observed at least one real
+ *  frame yet", not to adjust the time base. */
 void FO3DReceiverSource::TickConcealment()
 {
     if (!Client || !bHasClockOffsetEstimate || SubjectConcealment.Num() == 0)
@@ -866,7 +873,7 @@ void FO3DReceiverSource::TickConcealment()
         return;
     }
 
-    const double TNow = FPlatformTime::Seconds() + (double)LastClockOffsetEstimateUs / 1.0e6;
+    const double TNow = FPlatformTime::Seconds();
 
     for (TPair<FName, TUniquePtr<O3DS::ConcealmentEngine>>& Pair : SubjectConcealment)
     {

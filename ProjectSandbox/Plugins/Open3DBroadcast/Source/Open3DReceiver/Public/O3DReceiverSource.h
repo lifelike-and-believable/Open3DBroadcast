@@ -168,10 +168,14 @@ private:
     FString LastGateSubjectLabel;     // diagnostic-only subject label for the gate's emit path
 
     // C1: cached from the most recent ClockEstimator::Observe() (in
-    // EmitGatedFrame) so TickConcealment() can compute "the mapped
-    // presentation time right now" without a real frame arriving -
-    // mapped_now = FPlatformTime::Seconds() + LastClockOffsetEstimateUs/1e6,
-    // the same conversion EmitGatedFrame already does for an actual sample.
+    // EmitGatedFrame). Real frames' PresentationTimeSeconds is already
+    // MappedWorldTimeSeconds - a local-FPlatformTime::Seconds()-domain value,
+    // since EmitGatedFrame converts mapped_presentation_time_us via a
+    // NowEpochUs/NowPlatformS anchor taken at that same instant. So
+    // TickConcealment()'s "now" is just a fresh FPlatformTime::Seconds()
+    // reading, with no offset added - LastClockOffsetEstimateUs itself is
+    // only used as bHasClockOffsetEstimate's payload (i.e. "has the gated
+    // path observed at least one real frame"), not as a time-base correction.
     int64 LastClockOffsetEstimateUs = 0;
     bool bHasClockOffsetEstimate = false;
 
