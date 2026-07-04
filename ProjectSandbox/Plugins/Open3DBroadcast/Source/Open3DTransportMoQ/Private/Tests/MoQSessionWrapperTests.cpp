@@ -1,3 +1,5 @@
+#if WITH_DEV_AUTOMATION_TESTS
+
 #include "Misc/AutomationTest.h"
 
 #include "HAL/PlatformProcess.h"
@@ -7,8 +9,6 @@
 #include "Shared/MoQTypes.h"
 
 #include <atomic>
-
-#if WITH_DEV_AUTOMATION_TESTS
 
 #if O3D_WITH_TRANSPORT_MOQ
 
