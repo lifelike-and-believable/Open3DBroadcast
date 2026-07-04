@@ -1171,7 +1171,11 @@ void FO3DReceiverSource::ResetOrderingState()
     LastAppliedSubjectListTime = -1.0;
     // A2.a: a transport restart starts a clean gate/estimator session too, so
     // stale sequence/epoch/offset state from a previous connection never bleeds
-    // into a new one.
+    // into a new one. Note this is also reachable from the legacy path's own
+    // silence/timestamp-jump reset (ShouldResetOrderingWindow), so a stream that
+    // mixes tx_seq and non-tx_seq frames would have a legacy-triggered reset also
+    // wipe the gate's buffered frames/epoch tracking - a real caveat only for that
+    // mixed-stream case, not for a source that's purely gated or purely legacy.
     ReceiverGate = O3DS::ReorderGate();
     ClockEstimator = O3DS::ClockOffsetEstimator();
     PrevGateStats = O3DS::ReorderStats();

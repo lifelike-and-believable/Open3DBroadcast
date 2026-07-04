@@ -203,7 +203,7 @@ public:
 
 	FORCEINLINE void RecordFrameReceived() { ++ReceiverMetrics.FramesReceived; }
 	FORCEINLINE void RecordFrameApplied() { ++ReceiverMetrics.FramesApplied; }
-	FORCEINLINE void RecordReceiverFrameDropped() { ++ReceiverMetrics.FramesDropped; }
+	FORCEINLINE void RecordReceiverFrameDropped(uint64 Delta = 1) { ReceiverMetrics.FramesDropped += Delta; }
 	FORCEINLINE void RecordBytesDeserialized(uint64 ByteCount) { ReceiverMetrics.BytesDeserialized += ByteCount; }
 	FORCEINLINE void RecordDeserializationError() { ++ReceiverMetrics.DeserializationErrors; }
 	FORCEINLINE void RecordSkeletonUpdate() { ++ReceiverMetrics.SkeletonUpdates; }
