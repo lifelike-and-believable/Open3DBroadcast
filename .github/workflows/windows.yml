@@ -61,34 +61,34 @@ jobs:
       - name: NNG
         working-directory: thirdparty/nng
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNNG_ENABLE_TLS=Off -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr -DCMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%/usr
+          cmake -S . -B build -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DNNG_ENABLE_TLS=Off -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr -DCMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%/usr
           cmake --build build --config Release && cmake --install build --config Release
         shell: cmd
 
       - name: CML
         working-directory: thirdparty/cml
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
+          cmake -S . -B build -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
           cmake --build build --config Release && cmake --install build --config Release
         shell: cmd
 
       - name: CRC
         working-directory: thirdparty/crccpp
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
+          cmake -S . -B build -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
           cmake --build build --config Release && cmake --install build --config Release
         shell: cmd
 
       - name: FlatBuffers
         working-directory: thirdparty/flatbuffers
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
+          cmake -S . -B build -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
           cmake --build build --config Release && cmake --install build --config Release
         shell: cmd
 
       - name: Open3DStream
         run: |
-          cmake -S . -B _o3ds_build -DCMAKE_BUILD_TYPE=Release -DVERSION_TAG=${{ steps.get_version.outputs.version-without-v }} -DCMAKE_PREFIX_PATH=usr -DCMAKE_INSTALL_PREFIX=out -DO3DS_DISABLE_WEBRTC=ON
+          cmake -S . -B _o3ds_build -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DVERSION_TAG=${{ steps.get_version.outputs.version-without-v }} -DCMAKE_PREFIX_PATH=usr -DCMAKE_INSTALL_PREFIX=out -DO3DS_DISABLE_WEBRTC=ON
           cmake --build _o3ds_build --config Release && cmake --install _o3ds_build --config Release
         shell: cmd
 
