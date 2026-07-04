@@ -661,6 +661,29 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		return static_cast<int>(outbuf.size());
 	}
 
+	int Subject::SerializeUpdateResidual(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp, uint64_t seq)
+	{
+		if (timestamp == 0.0)
+		{
+			timestamp = GetTime();
+		}
+
+		flatbuffers::FlatBufferBuilder builder;
+
+		std::vector<flatbuffers::Offset<O3DS::Data::SubjectUpdate>> outSubjectUpdates;
+		outSubjectUpdates.push_back(this->SerializeUpdateResidual(builder, count, deltaThreshold, timestamp, seq));
+
+		auto ovSubjectUpdates = builder.CreateVector(outSubjectUpdates);
+
+		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp);
+
+		builder.Finish(root);
+
+		finalize(builder, outbuf, 1);
+
+		return static_cast<int>(outbuf.size());
+	}
+
 	int SubjectList::Serialize(std::vector<char> &outbuf, double timestamp,
 		uint64_t tx_seq, uint64_t tx_wallclock_us, uint32_t frame_epoch)
 	{
