@@ -2,11 +2,12 @@
 
 **Status:** Draft for delegation · **Owner:** TBD · **Audience:** coding agents + maintainers
 
-This document is a delegable implementation plan for three interlocking workstreams:
+This document is a delegable implementation plan for four interlocking workstreams:
 
 - **A — Reliability & Sequencing:** make the stream survive real (WAN) networks.
 - **B — Record & Replay:** capture/replay the wire protocol deterministically.
 - **C — Predictive Motion:** a shared pose predictor for loss concealment, latency-hiding, and residual compression.
+- **D — Wire Efficiency:** shrink bytes/frame on the wire encoding itself, independent of prediction.
 
 It is written so an agent can pick up any **phase**, produce its own task breakdown, and implement it against clear acceptance criteria. Read §0–§2 first regardless of which phase you take.
 
@@ -390,13 +391,13 @@ Sits on the A2 apply path; the interesting math (blend/correction, error metric)
 ### Phase D1 — Adaptive/variable-bit channel quantization (wire-format, transport- and prediction-agnostic)
 
 - **Goal:** shrink bytes/frame on the wire encoding itself, independent of whether a channel is predicted (C0–C2) or held (today). Today's `Subject::SerializeUpdate` (`src/o3ds/model.cpp`) sends each changed channel as full 32-bit floats once its `delta() > deltaThreshold` — an all-or-nothing "send at full precision, or send nothing" decision per channel, with **no quantization at all today**. Variable-bit quantization sends fewer bits for a channel moving slowly/predictably and holds full precision for one moving fast — a standard motion-codec technique that **stacks with C2 rather than competing with it** (a residual is just another value to quantize, same as a raw delta is today).
-- **Why this first:** unlike C2, this never touches predictor history, so it carries none of C2's history-divergence-under-loss risk (§ Phase C2) — it's a strictly per-frame, stateless-across-loss encoding change. That means it applies uniformly to **both reliable and unreliable transports**, including the ones C2 explicitly excludes (UDP, MoQ datagrams) — the one concrete "make unreliable-transport streaming cheaper/better" lever identified so far that doesn't require solving C2's divergence problem first.
+- **Why this first:** unlike C2, this never touches predictor history, so it carries none of C2's history-divergence-under-loss risk (see Phase C2) — it's a strictly per-frame, stateless-across-loss encoding change. That means it applies uniformly to **both reliable and unreliable transports**, including the ones C2 explicitly excludes (UDP, MoQ datagrams) — the one concrete "make unreliable-transport streaming cheaper/better" lever identified so far that doesn't require solving C2's divergence problem first.
 - **Approach:**
   - Per-channel (translation/rotation/scale/curve) variable bit-depth chosen from the channel's own recent delta magnitude (small movement → fewer bits; large/fast movement → up to today's full-float ceiling) instead of today's fixed all-or-nothing threshold.
   - Encode the chosen precision (a small enumerated class, not a raw bit count) alongside each channel update so it's self-describing per record — no session-level renegotiation needed when a joint suddenly starts moving fast mid-stream.
   - Rotations need their own care: naive per-component quantization of a quaternion can denormalize it — quantize via axis-angle or a "smallest-three" representation instead so decode always renormalizes cleanly. Treat this as its own accuracy check, separate from translation/scale.
   - `deltaThreshold` keeps its existing role as the "send nothing" floor; quantization only decides *how precisely* to encode a channel that already cleared that floor.
-- **Files/modules:** `src/o3ds/model.cpp`/`model.h` (`Subject::SerializeUpdate`/`ParseUpdate` — the same functions C2's residual generalization touches, so sequence the two changes to not conflict), schema (`o3ds.fbs` — new per-channel precision field/enum).
+- **Files/modules:** `src/o3ds/model.cpp`/`src/o3ds/model.h` (`Subject::SerializeUpdate`/`ParseUpdate` — the same functions C2's residual generalization touches, so sequence the two changes to not conflict), schema (`src/o3ds.fbs` — new per-channel precision field/enum).
 - **Acceptance:** bytes/frame drop measurably vs today's fixed-float encoding on a representative capture corpus (reuse B2's replay harness), within a bounded per-channel reconstruction-error budget (analogous to C1's prediction-error metric); encode→decode round-trip fidelity unit-tested in core; benefit holds whether or not C2 is active (applies equally to a raw delta or a C2 residual).
 - **Dependencies:** none blocking — independent of C0–C3; can land before, after, or in parallel with C2. **Out of scope:** a full entropy coder (arithmetic/range coding) — variable-bit quantization only; that would be a further follow-on if this proves out. Cross-peer prediction is C2's concern, not this phase's.
 - **Open decisions:** exact bit-depth tiers and how a channel's tier is chosen (fixed thresholds on delta magnitude first, same "classical baseline before anything adaptive/learned" posture as C0); how quaternion quantization error interacts with C1's correction-blend math (`QuatSlerpShortestPath`) — rounding noise inside a concealment correction window needs to stay well under the "pop" metric's threshold.
