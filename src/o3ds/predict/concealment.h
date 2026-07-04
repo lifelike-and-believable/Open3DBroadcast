@@ -127,11 +127,14 @@ namespace O3DS
 		//! for the next `correctionWindowSeconds`.
 		void ObserveRealFrame(const PoseSample& sample);
 
-		//! Evaluate presentation time `tNow`. Returns false (outPose left
-		//! untouched) when real data already covers this instant closely
-		//! enough, or when there's no history at all yet. Returns true and
-		//! populates outPose (predicted, held, or correction-blended)
-		//! otherwise.
+		//! Evaluate presentation time `tNow` - same clock domain as
+		//! PoseSample::t (the sender clock, per A2.b's mapping into local
+		//! time), not the receiver's wall clock; mixing domains silently
+		//! breaks every gap/horizon/window comparison below. Returns false
+		//! (outPose left untouched) when real data already covers this
+		//! instant closely enough, or when there's no history at all yet.
+		//! Returns true and populates outPose (predicted, held, or
+		//! correction-blended) otherwise.
 		bool TryConceal(double tNow, PoseSample& outPose);
 
 		//! Clears history (predictor + internal state): call on keyframe /
