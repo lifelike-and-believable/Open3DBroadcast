@@ -141,7 +141,14 @@ namespace O3DS
 
 		if (mConcealing)
 		{
-			const double duration = real.t - mConcealStartTime;
+			// Clamp at 0: real.t is the arriving frame's own timestamp, not
+			// tNow, so an out-of-order/late arrival whose t predates
+			// mConcealStartTime (a lossy/unordered transport - the whole
+			// motivation for C1 - doesn't guarantee non-decreasing arrival)
+			// would otherwise corrupt the running total with a negative
+			// duration; concealedTimeSecondsMax already used std::max, but
+			// the total needs the same guard.
+			const double duration = std::max(0.0, real.t - mConcealStartTime);
 			mMetrics.concealedTimeSecondsTotal += duration;
 			mMetrics.concealedTimeSecondsMax = std::max(mMetrics.concealedTimeSecondsMax, duration);
 		}
@@ -189,8 +196,15 @@ namespace O3DS
 			}
 			else
 			{
+				// Clamp both ends: elapsed can go negative (tNow behind
+				// mCorrectionStartTime is a normal, reachable state under a
+				// buffered/offset presentation clock - e.g. the A2.c LiveLink
+				// buffer offset - where t_pres intentionally lags the newest
+				// received time), and an unclamped negative alpha would
+				// extrapolate BlendPoseSample past mCorrectionBase, away
+				// from the real pose it's supposed to be converging toward.
 				const double alpha = mConfig.correctionWindowSeconds > 0.0
-					? std::min(1.0, elapsed / mConfig.correctionWindowSeconds)
+					? std::max(0.0, std::min(1.0, elapsed / mConfig.correctionWindowSeconds))
 					: 1.0;
 				outPose = BlendPoseSample(mCorrectionBase, mLastReal, alpha, tNow, mLastReal.seq);
 				mLastOutput = outPose;

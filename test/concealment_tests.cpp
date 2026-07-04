@@ -76,6 +76,24 @@ O3DS_TEST(QuatSlerp_AlphaHalf_MidpointAngleAndUnitNorm)
 	O3DS_CHECK(QuatsNearlyEqual(mid, QuatFromAxisAngle(Vector3d(0, 0, 1), 0.5)));
 }
 
+O3DS_TEST(QuatSlerp_AlphaOutsideUnitRange_ExtrapolatesAtConstantAngularVelocity)
+{
+	// The header explicitly documents that alpha isn't clamped - callers
+	// extrapolating (e.g. LinearPredictor) rely on that.
+	Quat q0 = QuatFromAxisAngle(Vector3d(0, 0, 1), 0.2);
+	Quat q1 = QuatFromAxisAngle(Vector3d(0, 0, 1), 0.4);
+	Quat beyond = QuatSlerpShortestPath(q0, q1, 2.0); // delta doubled past q1
+	O3DS_CHECK(IsUnitNorm(beyond));
+	O3DS_CHECK(QuatsNearlyEqual(beyond, QuatFromAxisAngle(Vector3d(0, 0, 1), 0.6)));
+}
+
+O3DS_TEST(QuatSlerp_NearIdentityDelta_ReturnsFirstOperand)
+{
+	Quat q0 = QuatFromAxisAngle(Vector3d(0, 0, 1), 0.5);
+	Quat q1 = q0; // zero delta -> QuatToAxisAngle(dq) returns false (near-identity)
+	O3DS_CHECK(QuatsNearlyEqual(QuatSlerpShortestPath(q0, q1, 0.5), q0));
+}
+
 // ---------------------------------------------------------------------------
 // BlendPoseSample
 // ---------------------------------------------------------------------------
@@ -269,6 +287,64 @@ O3DS_TEST(ConcealmentEngine_CorrectionWindow_BlendsThenStopsAfterWindowElapses)
 	PoseSample afterWindow;
 	O3DS_CHECK(!engine.TryConceal(0.23, afterWindow));
 	O3DS_CHECK_EQ(engine.Metrics().recoveryCount, (uint64_t)1); // never spuriously re-recorded
+}
+
+O3DS_TEST(ConcealmentEngine_CorrectionAlpha_ClampedAtZero_ForBackwardPresentationTime)
+{
+	// Regression: tNow behind mCorrectionStartTime is a normal, reachable
+	// state under a buffered/offset presentation clock (t_pres intentionally
+	// lags newest-received per A2.c) - an unclamped negative alpha would
+	// extrapolate BlendPoseSample past the correction base, away from the
+	// real pose it's supposed to be converging toward.
+	ConcealmentEngine engine(std::make_unique<LinearPredictor>());
+	engine.ObserveRealFrame(MakeSample(0.0, 1, 10.0, 2.0));
+	engine.ObserveRealFrame(MakeSample(0.02, 2, 10.0, 2.0));
+
+	PoseSample duringGap;
+	engine.TryConceal(0.09, duringGap); // mCorrectionBase will be this pose (x = 0.9)
+	engine.ObserveRealFrame(MakeSample(0.12, 3, 10.0, 2.0)); // recovery starts correction at t=0.12
+
+	// tNow (0.11) is behind mCorrectionStartTime (0.12) -> elapsed < 0.
+	PoseSample corrected;
+	O3DS_CHECK(engine.TryConceal(0.11, corrected));
+	O3DS_CHECK(std::abs(corrected.translations[0].v[0] - duringGap.translations[0].v[0]) < 1.0e-9);
+}
+
+O3DS_TEST(ConcealmentEngine_ConcealedDuration_ClampedAtZero_ForOutOfOrderRealFrame)
+{
+	// Regression: real.t is the arriving frame's own timestamp, not tNow: a
+	// late/out-of-order arrival predating mConcealStartTime (a lossy/
+	// unordered transport doesn't guarantee non-decreasing arrival) must not
+	// drive the running concealed-time total negative.
+	ConcealmentEngine engine(std::make_unique<LinearPredictor>());
+	engine.ObserveRealFrame(MakeSample(0.0, 1, 10.0, 2.0));
+	engine.ObserveRealFrame(MakeSample(0.02, 2, 10.0, 2.0));
+
+	PoseSample out;
+	O3DS_CHECK(engine.TryConceal(0.20, out)); // concealStartTime = 0.20
+
+	engine.ObserveRealFrame(MakeSample(0.15, 3, 10.0, 2.0)); // predates concealStartTime
+	O3DS_CHECK(engine.Metrics().concealedTimeSecondsTotal >= 0.0);
+	O3DS_CHECK(engine.Metrics().concealedTimeSecondsMax >= 0.0);
+}
+
+O3DS_TEST(ConcealmentEngine_SecondGapMidCorrection_StartsFreshConcealmentAndRecordsBothRecoveries)
+{
+	ConcealmentEngine engine(std::make_unique<LinearPredictor>());
+	engine.ObserveRealFrame(MakeSample(0.0, 1, 10.0, 2.0));
+	engine.ObserveRealFrame(MakeSample(0.02, 2, 10.0, 2.0));
+
+	PoseSample out;
+	engine.TryConceal(0.09, out);
+	engine.ObserveRealFrame(MakeSample(0.12, 3, 10.0, 2.0)); // recovery #1, starts correction window
+
+	// A fresh gap opens before the correction window (0.10s) elapses -
+	// should cleanly transition into a new concealment rather than getting
+	// stuck in the (now-abandoned) correction state.
+	O3DS_CHECK(engine.TryConceal(0.20, out)); // gap since 0.12 = 0.08 > threshold(0.05)
+
+	engine.ObserveRealFrame(MakeSample(0.24, 4, 10.0, 2.0)); // recovery #2
+	O3DS_CHECK_EQ(engine.Metrics().recoveryCount, (uint64_t)2);
 }
 
 O3DS_TEST(ConcealmentEngine_Reset_ClearsHistoryButKeepsMetrics)
