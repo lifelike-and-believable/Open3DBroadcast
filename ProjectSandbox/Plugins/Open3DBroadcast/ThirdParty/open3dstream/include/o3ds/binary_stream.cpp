@@ -153,7 +153,7 @@ namespace O3DS
 
 	void BinaryStream::get(double& value, const char* msg)
 	{
-		get(&value, sizeof(float), msg);
+		get(&value, sizeof(double), msg);
 		if (swaporder) value = O3DS::swap(value);
 	}
 

@@ -102,18 +102,35 @@ bool UdpCombiner::addFragment(const char* data, size_t sz)
 	uint32_t bufSz    = heading[2];
 	uint32_t fragSize = heading[3];
 
-	int frames = (bufSz + fragSize - 1) / fragSize;
+	// Reject degenerate/oversized reassembly parameters from the wire before
+	// doing any arithmetic with them (fragSize == 0 would divide by zero;
+	// an unbounded bufSz would allow an unbounded allocation).
+	if (fragSize == 0) return false;
 
-	if (seq >= frames)
+	static const uint32_t kMaxReassembledSize = 64u * 1024u * 1024u; // 64MB
+	if (bufSz == 0 || bufSz > kMaxReassembledSize) return false;
+
+	uint64_t frames64 = ((uint64_t)bufSz + fragSize - 1) / fragSize;
+	if (frames64 == 0 || frames64 > (uint64_t)0x7fffffff) return false;
+	int frames = (int)frames64;
+
+	if (seq >= (uint32_t)frames)
 		return false;
 
-	if (seq * (fragSize-1) > bufSz)
+	// Bound the actual write range (in 64-bit to avoid seq*fragSize overflow)
+	// against the reassembled buffer size before touching mBuffer.
+	size_t payloadLen = sz - HEADERSIZE;
+	uint64_t writeEnd = (uint64_t)seq * (uint64_t)fragSize + (uint64_t)payloadLen;
+	if (writeEnd > (uint64_t)bufSz)
 		return false;
-	
+
 	if (mBufferSize == 0)
 	{
-		mFound.assign(frames, false);
 		mBuffer = (char*)malloc(bufSz);
+		if (mBuffer == nullptr)
+			return false;
+
+		mFound.assign(frames, false);
 		mBufferSize = bufSz;
 	}
 	else
@@ -122,18 +139,23 @@ bool UdpCombiner::addFragment(const char* data, size_t sz)
 			return false;
 	}
 
-	mFound[seq] = true;
-
-	if (seq != frames - 1 && sz != fragSize + HEADERSIZE) {
+	// Every fragment must fill its slot exactly: non-last fragments must be a
+	// full fragSize payload, and the last fragment must be exactly the
+	// remaining tail (bufSz - seq*fragSize). Without this, a short last
+	// fragment would still satisfy writeEnd <= bufSz above yet leave the
+	// gap between writeEnd and bufSz uninitialized (mBuffer is malloc'd, not
+	// zeroed) - isComplete() only checks mFound flags, so getFrame() would
+	// happily hand back those uninitialized bytes to the caller.
+	const uint64_t sliceStart = (uint64_t)seq * (uint64_t)fragSize;
+	const uint64_t expectedPayloadLen = (seq == (uint32_t)(frames - 1)) ? ((uint64_t)bufSz - sliceStart) : (uint64_t)fragSize;
+	if ((uint64_t)payloadLen != expectedPayloadLen)
+	{
 		return false;
 	}
 
-	if (seq == frames - 1)
-	{
-		size_t sz = bufSz - (frames - 1) * fragSize + HEADERSIZE;
-	}
+	mFound[seq] = true;
 
-	memcpy(mBuffer + seq * fragSize, data + HEADERSIZE, sz - HEADERSIZE);
+	memcpy(mBuffer + (size_t)seq * fragSize, data + HEADERSIZE, payloadLen);
 
 	return true;
 

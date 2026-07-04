@@ -54,6 +54,14 @@ void FO3DPerformanceMetrics::Reset()
 	ReceiverMetrics.GateBufferOccupancy.Store(0);
 	ReceiverMetrics.AvgClockOffsetMs.Store(0.0);
 	ReceiverMetrics.AvgJitterMs.Store(0.0);
+	ReceiverMetrics.ConcealedFrames.Store(0);
+	ReceiverMetrics.ConcealmentFallbackHolds.Store(0);
+	ReceiverMetrics.ConcealmentCorrectionFrames.Store(0);
+	ReceiverMetrics.ConcealmentRecoveries.Store(0);
+	ReceiverMetrics.AvgConcealmentPredictionTranslationError.Store(0.0);
+	ReceiverMetrics.AvgConcealmentPredictionRotationErrorDeg.Store(0.0);
+	ReceiverMetrics.AvgConcealmentPopTranslation.Store(0.0);
+	ReceiverMetrics.AvgConcealmentPopRotationDeg.Store(0.0);
 	ReceiverMetrics.MetricsStartTime = FDateTime::Now();
 
 	// Transport metrics
@@ -389,6 +397,26 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg Jitter (excess delay above rolling-min floor): %.2f ms"), AvgJitter);
 			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
 		}
+
+		// C1: receiver-side concealment diagnostics
+		{
+			uint64 ConcealedFrames = ReceiverMetrics.ConcealedFrames.Load();
+			uint64 FallbackHolds = ReceiverMetrics.ConcealmentFallbackHolds.Load();
+			uint64 CorrectionFrames = ReceiverMetrics.ConcealmentCorrectionFrames.Load();
+			uint64 Recoveries = ReceiverMetrics.ConcealmentRecoveries.Load();
+
+			if (ConcealedFrames > 0 || CorrectionFrames > 0 || Recoveries > 0)
+			{
+				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("[RECEIVER - CONCEALMENT]"));
+				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Concealed Frames: %llu (%llu held rather than predicted)"), ConcealedFrames, FallbackHolds);
+				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Correction Frames: %llu, Recoveries: %llu"), CorrectionFrames, Recoveries);
+				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg Prediction Error: %.3f units, %.2f deg"),
+					ReceiverMetrics.AvgConcealmentPredictionTranslationError.Load(), ReceiverMetrics.AvgConcealmentPredictionRotationErrorDeg.Load());
+				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg Pop (discontinuity at recovery): %.3f units, %.2f deg"),
+					ReceiverMetrics.AvgConcealmentPopTranslation.Load(), ReceiverMetrics.AvgConcealmentPopRotationDeg.Load());
+				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+			}
+		}
 	}
 
 	// ========== TRANSPORT METRICS ==========
@@ -467,6 +495,14 @@ FString FO3DPerformanceMetrics::GetMetricsAsCSV() const
 	CSV += FString::Printf(TEXT("GateBufferOccupancy,%d\n"), ReceiverMetrics.GateBufferOccupancy.Load());
 	CSV += FString::Printf(TEXT("AvgClockOffsetMs,%.2f\n"), ReceiverMetrics.AvgClockOffsetMs.Load());
 	CSV += FString::Printf(TEXT("AvgJitterMs,%.2f\n"), ReceiverMetrics.AvgJitterMs.Load());
+	CSV += FString::Printf(TEXT("ConcealedFrames,%llu\n"), ReceiverMetrics.ConcealedFrames.Load());
+	CSV += FString::Printf(TEXT("ConcealmentFallbackHolds,%llu\n"), ReceiverMetrics.ConcealmentFallbackHolds.Load());
+	CSV += FString::Printf(TEXT("ConcealmentCorrectionFrames,%llu\n"), ReceiverMetrics.ConcealmentCorrectionFrames.Load());
+	CSV += FString::Printf(TEXT("ConcealmentRecoveries,%llu\n"), ReceiverMetrics.ConcealmentRecoveries.Load());
+	CSV += FString::Printf(TEXT("AvgConcealmentPredictionTranslationError,%.4f\n"), ReceiverMetrics.AvgConcealmentPredictionTranslationError.Load());
+	CSV += FString::Printf(TEXT("AvgConcealmentPredictionRotationErrorDeg,%.2f\n"), ReceiverMetrics.AvgConcealmentPredictionRotationErrorDeg.Load());
+	CSV += FString::Printf(TEXT("AvgConcealmentPopTranslation,%.4f\n"), ReceiverMetrics.AvgConcealmentPopTranslation.Load());
+	CSV += FString::Printf(TEXT("AvgConcealmentPopRotationDeg,%.2f\n"), ReceiverMetrics.AvgConcealmentPopRotationDeg.Load());
 
 	return CSV;
 }

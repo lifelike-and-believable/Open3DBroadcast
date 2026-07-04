@@ -24,6 +24,7 @@
 
 #include "o3ds_generated.h"
 #include "o3ds/sequencing.h"
+#include "o3ds/predict/linear_predictor.h"
 
 #include <utility>
 
@@ -58,6 +59,34 @@ static TAutoConsoleVariable<int32> CVarO3DReceiverAudioDebug(
     TEXT("o3ds.Receiver.Audio.Debug"),
     0,
     TEXT("Enable debug logs when publishing receiver audio frames (0/1)."),
+    ECVF_Default);
+
+// C1: receiver-side concealment (roadmap doc §5/C1). Defaults match
+// ConcealmentConfig's own defaults (see concealment.h) - exposed as cvars so
+// they can be tuned per-deployment without a rebuild, per the roadmap's "Open
+// decisions" note that these values need real-world/live-LiveLink tuning.
+static TAutoConsoleVariable<int32> CVarO3DReceiverConcealmentEnabled(
+    TEXT("o3ds.Receiver.Concealment.Enabled"),
+    1,
+    TEXT("Enable receiver-side concealment (predict/hold synthetic frames on a gap) for gated (A2) frames (0/1)."),
+    ECVF_Default);
+
+static TAutoConsoleVariable<float> CVarO3DReceiverConcealmentStarvationMs(
+    TEXT("o3ds.Receiver.Concealment.StarvationThresholdMs"),
+    50.0f,
+    TEXT("Gap since the last real frame (ms) beyond which concealment starts synthesizing, instead of leaving small gaps to LiveLink's own interpolation."),
+    ECVF_Default);
+
+static TAutoConsoleVariable<float> CVarO3DReceiverConcealmentHorizonMs(
+    TEXT("o3ds.Receiver.Concealment.MaxHorizonMs"),
+    150.0f,
+    TEXT("Stop extrapolating and hold after this many ms of continuous concealment with no real frame."),
+    ECVF_Default);
+
+static TAutoConsoleVariable<float> CVarO3DReceiverConcealmentCorrectionMs(
+    TEXT("o3ds.Receiver.Concealment.CorrectionWindowMs"),
+    100.0f,
+    TEXT("Blend from the last synthesized pose toward the resumed real trajectory over this many ms after a gap recovers, instead of snapping. 0 disables correction blending."),
     ECVF_Default);
 
 /** Adapts the shared consumer registry callback into this live source instance. */
@@ -140,6 +169,72 @@ namespace
         return O3DHelpers::HashNames(Names);
     }
 
+    // C1: PoseSample <-> LiveLink transform/curve conversion. PoseSample
+    // stores rotations as (x,y,z,w) doubles (O3DS::Quat = Vector4d), matching
+    // FQuat's own component order, so no component reshuffling is needed.
+    O3DS::PoseSample BuildPoseSampleFromLiveLink(double PresentationTimeSeconds, const TArray<FTransform>& BoneTransforms, const TArray<float>& CurveValues)
+    {
+        O3DS::PoseSample Sample;
+        Sample.t = PresentationTimeSeconds;
+
+        Sample.translations.reserve(BoneTransforms.Num());
+        Sample.rotations.reserve(BoneTransforms.Num());
+        Sample.scales.reserve(BoneTransforms.Num());
+        for (const FTransform& Xform : BoneTransforms)
+        {
+            const FVector Loc = Xform.GetLocation();
+            const FQuat Rot = Xform.GetRotation();
+            const FVector Scale = Xform.GetScale3D();
+            Sample.translations.emplace_back((double)Loc.X, (double)Loc.Y, (double)Loc.Z);
+            Sample.rotations.emplace_back((double)Rot.X, (double)Rot.Y, (double)Rot.Z, (double)Rot.W);
+            Sample.scales.emplace_back((double)Scale.X, (double)Scale.Y, (double)Scale.Z);
+        }
+
+        Sample.curves.reserve(CurveValues.Num());
+        for (float Value : CurveValues)
+        {
+            Sample.curves.push_back(Value);
+        }
+
+        return Sample;
+    }
+
+    // Inverse of BuildPoseSampleFromLiveLink, for pushing a synthesized
+    // (predicted/held/corrected) pose back through the same LiveLink path a
+    // real frame takes. Scales default to 1 (matching BuildSubjectPose's
+    // real-frame default when a channel is missing) if the sample has fewer
+    // scale entries than translations/rotations - shouldn't happen in
+    // practice since PoseSample channel counts are contractually stable
+    // within an epoch, but avoids reading out of bounds if it ever does.
+    void ApplyPoseSampleToLiveLink(const O3DS::PoseSample& Sample, TArray<FTransform>& OutBoneTransforms, TArray<float>& OutCurveValues)
+    {
+        const int32 Count = static_cast<int32>(Sample.translations.size());
+        OutBoneTransforms.Reset(Count);
+        for (int32 Index = 0; Index < Count; ++Index)
+        {
+            const O3DS::Vector3d& Translation = Sample.translations[(size_t)Index];
+            const O3DS::Vector3d Scale = (Index < (int32)Sample.scales.size()) ? Sample.scales[(size_t)Index] : O3DS::Vector3d(1.0, 1.0, 1.0);
+
+            FQuat Rot = FQuat::Identity;
+            if (Index < (int32)Sample.rotations.size())
+            {
+                const O3DS::Quat& Q = Sample.rotations[(size_t)Index];
+                Rot = FQuat(Q.v[0], Q.v[1], Q.v[2], Q.v[3]);
+                Rot.Normalize();
+            }
+
+            const FVector Location(Translation.v[0], Translation.v[1], Translation.v[2]);
+            const FVector ScaleVec(Scale.v[0], Scale.v[1], Scale.v[2]);
+            OutBoneTransforms.Emplace(Rot, Location, ScaleVec);
+        }
+
+        OutCurveValues.Reset(static_cast<int32>(Sample.curves.size()));
+        for (float Value : Sample.curves)
+        {
+            OutCurveValues.Add(Value);
+        }
+    }
+
     static const FName DefaultReceiverTransportName(TEXT("loopback"));
 }
 
@@ -214,6 +309,11 @@ void FO3DReceiverSource::Tick(float DeltaTime)
     const double NowS = FPlatformTime::Seconds();
     ReceiverGate.Flush(NowS, [this](O3DS::Frame&& F) { EmitGatedFrame(std::move(F)); });
     ReportGateMetricsDelta();
+
+    // C1: synthesize a frame for any subject whose real data has starved
+    // beyond LiveLink's own interpolation - see TickConcealment's declaration
+    // comment.
+    TickConcealment();
 
     if (TimeSinceLastActivityCheck >= ActivityCheckIntervalSeconds)
     {
@@ -440,6 +540,8 @@ void FO3DReceiverSource::RemoveInactiveSubjects()
             SubjectSkeletonHashes.Remove(It.Key());
             SubjectCurveHashes.Remove(It.Key());
             InitializedSubjects.Remove(It.Key());
+            SubjectConcealment.Remove(It.Key());  // C1: drop the per-subject predictor/state too
+            PrevConcealmentMetricsBySubject.Remove(It.Key());
             It.RemoveCurrent();
         }
     }
@@ -632,6 +734,15 @@ void FO3DReceiverSource::EmitGatedFrame(O3DS::Frame&& Frame)
 
     if (Frame.wallclock_us != 0)
     {
+        // C1: cache for TickConcealment()'s "mapped time right now" query.
+        // Guarded the same as the metrics record below: offset_estimate_us
+        // is hardwired to 0 in ClockOffsetEstimator::Observe()'s legacy
+        // (tx_wallclock_us == 0) branch, so caching it unconditionally would
+        // corrupt this with a bogus 0 offset whenever an untimestamped frame
+        // arrives mixed into an otherwise-gated stream.
+        LastClockOffsetEstimateUs = Sample.offset_estimate_us;
+        bHasClockOffsetEstimate = true;
+
         FO3DPerformanceMetrics::Get().RecordClockOffsetSampleMs(
             (double)Sample.offset_estimate_us / 1000.0,
             (double)Sample.excess_delay_us / 1000.0);
@@ -693,6 +804,158 @@ void FO3DReceiverSource::ReportGateMetricsDelta()
     Metrics.SetGateBufferOccupancy(static_cast<int32>(ReceiverGate.PendingCount()));
 
     PrevGateStats = Stats;
+}
+
+/** Lazily creates a per-subject ConcealmentEngine on first use (roadmap doc §5/C1.a).
+ *  LinearPredictor is the roadmap's recommended C1 default ("almost certainly" - see
+ *  §5/C1's "Open decisions"); Quadratic may overshoot on longer horizons. */
+O3DS::ConcealmentEngine& FO3DReceiverSource::GetOrCreateSubjectConcealment(FName SubjectName)
+{
+    if (TUniquePtr<O3DS::ConcealmentEngine>* Existing = SubjectConcealment.Find(SubjectName))
+    {
+        return **Existing;
+    }
+
+    O3DS::ConcealmentConfig Config;
+    Config.starvationThresholdSeconds = FMath::Max(0.0, (double)CVarO3DReceiverConcealmentStarvationMs.GetValueOnGameThread() / 1000.0);
+    Config.maxConcealHorizonSeconds = FMath::Max(0.0, (double)CVarO3DReceiverConcealmentHorizonMs.GetValueOnGameThread() / 1000.0);
+    Config.correctionWindowSeconds = FMath::Max(0.0, (double)CVarO3DReceiverConcealmentCorrectionMs.GetValueOnGameThread() / 1000.0);
+
+    TUniquePtr<O3DS::ConcealmentEngine> NewEngine = MakeUnique<O3DS::ConcealmentEngine>(std::make_unique<O3DS::LinearPredictor>(), Config);
+    O3DS::ConcealmentEngine& Ref = *NewEngine;
+    SubjectConcealment.Add(SubjectName, MoveTemp(NewEngine));
+    return Ref;
+}
+
+/** Feed one confirmed real (gated) frame into this subject's concealment engine. Only
+ *  called for the A2-gated path - see this method's declaration comment on why the
+ *  legacy/ungated path is left alone. Resets the engine on a topology/curve-set change
+ *  (bTopologyChanged) so stale per-node history from a different skeleton never mixes
+ *  into a prediction, per C1.a's "Reset the predictor on... topology change". */
+void FO3DReceiverSource::ObserveConcealmentRealFrame(FName SubjectName, double PresentationTimeSeconds, const TArray<FTransform>& BoneTransforms, const TArray<float>& CurveValues, bool bTopologyChanged)
+{
+    if (CVarO3DReceiverConcealmentEnabled.GetValueOnGameThread() == 0)
+    {
+        return;
+    }
+
+    O3DS::ConcealmentEngine& Engine = GetOrCreateSubjectConcealment(SubjectName);
+    if (bTopologyChanged)
+    {
+        Engine.Reset();
+    }
+
+    Engine.ObserveRealFrame(BuildPoseSampleFromLiveLink(PresentationTimeSeconds, BoneTransforms, CurveValues));
+}
+
+/** Per-tick concealment poll (roadmap doc §5/C1.a): for every subject with an active
+ *  engine, ask whether "now" needs a synthesized frame (gap beyond LiveLink's own
+ *  interpolation) and push one if so. Engines are only fed real frames whose
+ *  PresentationTimeSeconds is EmitGatedFrame's MappedWorldTimeSeconds - which is
+ *  already expressed in the local FPlatformTime::Seconds() domain (it converts
+ *  mapped_presentation_time_us to platform time using a NowEpochUs/NowPlatformS
+ *  anchor pair taken at that instant). So "now" in that same domain is simply a
+ *  fresh FPlatformTime::Seconds() reading; LastClockOffsetEstimateUs must NOT be
+ *  added here too - that offset is already baked into each frame's own
+ *  MappedWorldTimeSeconds, and re-applying it would skew TryConceal's gap/horizon
+ *  math by roughly the current send-to-receive offset. bHasClockOffsetEstimate is
+ *  still used below purely as "has the gated path observed at least one real
+ *  frame yet", not to adjust the time base. */
+void FO3DReceiverSource::TickConcealment()
+{
+    if (!Client || !bHasClockOffsetEstimate || SubjectConcealment.Num() == 0)
+    {
+        return;
+    }
+
+    if (CVarO3DReceiverConcealmentEnabled.GetValueOnGameThread() == 0)
+    {
+        return;
+    }
+
+    const double TNow = FPlatformTime::Seconds();
+
+    for (TPair<FName, TUniquePtr<O3DS::ConcealmentEngine>>& Pair : SubjectConcealment)
+    {
+        if (!Pair.Value.IsValid())
+        {
+            continue;
+        }
+
+        O3DS::PoseSample Predicted;
+        if (!Pair.Value->TryConceal(TNow, Predicted))
+        {
+            continue;
+        }
+
+        TArray<FTransform> BoneTransforms;
+        TArray<float> CurveValues;
+        ApplyPoseSampleToLiveLink(Predicted, BoneTransforms, CurveValues);
+        if (BoneTransforms.Num() == 0)
+        {
+            continue;
+        }
+
+        const FLiveLinkSubjectKey SubjectKey(SourceGuid, FLiveLinkSubjectName(Pair.Key));
+        const uint64* CurveHashPtr = SubjectCurveHashes.Find(Pair.Key);
+        // No static-data re-push: a synthesized frame never changes topology
+        // (bTopologyChanged already reset the engine above when that
+        // happens), so the already-registered skeleton/curve names apply.
+        PushSubjectFrameData(SubjectKey, BoneTransforms, TArray<FName>(), CurveValues, Predicted.t, Predicted.t, CurveHashPtr ? *CurveHashPtr : 0);
+    }
+
+    ReportConcealmentMetricsDelta();
+}
+
+/** Report each subject's ConcealmentEngine stats as a delta against its last-reported
+ *  snapshot (same convention as ReportGateMetricsDelta above), summed across subjects
+ *  into the shared metrics singleton. The error/pop averages are a last-writer-wins
+ *  gauge across subjects/sources, same simplification as AvgClockOffsetMs. */
+void FO3DReceiverSource::ReportConcealmentMetricsDelta()
+{
+    auto Delta = [](uint64 NewVal, uint64 OldVal) -> uint64 { return NewVal >= OldVal ? (NewVal - OldVal) : 0; };
+
+    uint64 DeltaConcealed = 0, DeltaFallback = 0, DeltaCorrection = 0, DeltaRecovery = 0;
+    bool bHasAnyRecovery = false;
+    double LastTransErr = 0.0, LastRotErrDeg = 0.0, LastPopTrans = 0.0, LastPopRotDeg = 0.0;
+
+    for (TPair<FName, TUniquePtr<O3DS::ConcealmentEngine>>& Pair : SubjectConcealment)
+    {
+        if (!Pair.Value.IsValid())
+        {
+            continue;
+        }
+
+        const O3DS::ConcealmentMetrics& Current = Pair.Value->Metrics();
+        O3DS::ConcealmentMetrics& Prev = PrevConcealmentMetricsBySubject.FindOrAdd(Pair.Key);
+
+        DeltaConcealed += Delta(Current.concealedFrameCount, Prev.concealedFrameCount);
+        DeltaFallback += Delta(Current.fallbackHoldCount, Prev.fallbackHoldCount);
+        DeltaCorrection += Delta(Current.correctionFrameCount, Prev.correctionFrameCount);
+        DeltaRecovery += Delta(Current.recoveryCount, Prev.recoveryCount);
+
+        if (Current.recoveryCount > 0)
+        {
+            bHasAnyRecovery = true;
+            LastTransErr = Current.MeanPredictionTranslationError();
+            LastRotErrDeg = FMath::RadiansToDegrees(Current.MeanPredictionRotationErrorRadians());
+            LastPopTrans = Current.MeanPopTranslation();
+            LastPopRotDeg = FMath::RadiansToDegrees(Current.MeanPopRotationRadians());
+        }
+
+        Prev = Current;
+    }
+
+    FO3DPerformanceMetrics& Metrics = FO3DPerformanceMetrics::Get();
+    if (DeltaConcealed) Metrics.RecordConcealedFrames(DeltaConcealed);
+    if (DeltaFallback) Metrics.RecordConcealmentFallbackHolds(DeltaFallback);
+    if (DeltaCorrection) Metrics.RecordConcealmentCorrectionFrames(DeltaCorrection);
+    if (DeltaRecovery) Metrics.RecordConcealmentRecoveries(DeltaRecovery);
+    if (bHasAnyRecovery)
+    {
+        Metrics.SetConcealmentPredictionError(LastTransErr, LastRotErrDeg);
+        Metrics.SetConcealmentPop(LastPopTrans, LastPopRotDeg);
+    }
 }
 
 /** Parse the FlatBuffer payload into a reusable SubjectList scratch structure. */
@@ -1044,6 +1307,16 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
         SubjectCurveHashes[SubjectFName] = CurveHash;
     }
 
+    // C1: feed the real frame into this subject's concealment engine before
+    // pushing it - only for the gated (A2) path, where WorldTimeSecondsOverride
+    // is a real sender-clock-mapped time (>= 0.0); the legacy path has no
+    // reliable clock domain to reason about gaps in (see the roadmap's C1.a
+    // scope note and ObserveConcealmentRealFrame's declaration comment).
+    if (WorldTimeSecondsOverride >= 0.0)
+    {
+        ObserveConcealmentRealFrame(SubjectFName, WorldTimeSecondsOverride, BoneTransforms, CurveValues, bNeedStaticUpdate);
+    }
+
     const double FrameStartTime = FPlatformTime::Seconds();
     PushSubjectFrameData(SubjectKey, BoneTransforms, CurveNames, CurveValues, SubjectListTime, WorldTimeSecondsOverride, CurveHash);
     const double FrameTimeMs = (FPlatformTime::Seconds() - FrameStartTime) * 1000.0;
@@ -1185,6 +1458,14 @@ void FO3DReceiverSource::ResetOrderingState()
     ReceiverGate = O3DS::ReorderGate();
     ClockEstimator = O3DS::ClockOffsetEstimator();
     PrevGateStats = O3DS::ReorderStats();
+
+    // C1: a publisher restart invalidates every subject's prediction history
+    // equally (ties to C1.a's "Reset the predictor on... publisher restart"),
+    // and the cached clock-offset estimate above is now stale too.
+    SubjectConcealment.Empty();
+    PrevConcealmentMetricsBySubject.Empty();
+    bHasClockOffsetEstimate = false;
+    LastClockOffsetEstimateUs = 0;
 }
 
 #undef LOCTEXT_NAMESPACE
