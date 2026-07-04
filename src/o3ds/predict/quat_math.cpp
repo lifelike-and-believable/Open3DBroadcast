@@ -94,4 +94,16 @@ namespace O3DS
 
 		return Quat(axis.v[0] * invLen * s, axis.v[1] * invLen * s, axis.v[2] * invLen * s, std::cos(half));
 	}
+
+	Quat QuatSlerpShortestPath(const Quat& q0, const Quat& q1, double alpha)
+	{
+		const Quat dq = QuatMultiply(q1, QuatConjugate(q0));
+
+		Vector3d axis;
+		double angle = 0.0;
+		if (!QuatToAxisAngle(dq, axis, angle)) return q0;
+
+		const Quat dqScaled = QuatFromAxisAngle(axis, angle * alpha);
+		return QuatNormalize(QuatMultiply(dqScaled, q0));
+	}
 }
