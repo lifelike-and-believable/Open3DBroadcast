@@ -128,7 +128,7 @@ namespace O3DS
 				continue;
 			}
 
-			const double omega2 = angleB / dtB; // angular speed between s1,s2, about axisB
+			const double omega2 = angleB / dtB; // mean angular speed over [t1,t2], about axisB
 
 			double alpha = 0.0;
 			if (hasA)
@@ -140,8 +140,14 @@ namespace O3DS
 				alpha = (omega2 - omega1) / ((s2.t - s0.t) * 0.5);
 			}
 
+			// omega2 is the mean speed over [t1,t2], i.e. the instantaneous
+			// speed at the interval midpoint (t1 + dtB/2), not at t2. Advance
+			// it by half the interval under the constant-alpha model to get
+			// the instantaneous speed at t2 before extrapolating further.
+			const double omegaAtT2 = omega2 + alpha * (dtB * 0.5);
+
 			const double dtExtrap = t - s2.t;
-			const double thetaExtrap = omega2 * dtExtrap + 0.5 * alpha * dtExtrap * dtExtrap;
+			const double thetaExtrap = omegaAtT2 * dtExtrap + 0.5 * alpha * dtExtrap * dtExtrap;
 
 			const Quat dqExtrap = QuatFromAxisAngle(axisB, thetaExtrap);
 			out.rotations[i] = QuatNormalize(QuatMultiply(dqExtrap, q2));

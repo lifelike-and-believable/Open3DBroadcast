@@ -93,6 +93,23 @@ O3DS_TEST(QuatMath_ToAxisAngle_NearIdentity_ReturnsFalse)
 	O3DS_CHECK(!QuatToAxisAngle(QuatIdentity(), axis, angle));
 }
 
+O3DS_TEST(QuatMath_ToAxisAngle_NearHalfTurn_RecoversRotation)
+{
+	// w~=0, s~=1: well-conditioned, but exercises the opposite extreme from
+	// the near-identity guard.
+	Vector3d axis(0.267261, 0.534522, 0.801784); // normalized (1,2,3)
+	double angle = 179.94 * kPi / 180.0;
+
+	Quat q = QuatFromAxisAngle(axis, angle);
+	Vector3d outAxis;
+	double outAngle = 0.0;
+	O3DS_CHECK(QuatToAxisAngle(q, outAxis, outAngle));
+	O3DS_CHECK(IsUnitNorm(QuatFromAxisAngle(outAxis, outAngle)));
+
+	Quat rebuilt = QuatFromAxisAngle(outAxis, outAngle);
+	O3DS_CHECK(QuatsNearlyEqual(q, rebuilt));
+}
+
 O3DS_TEST(QuatMath_Normalize_ScaledQuat_RecoversUnitNorm)
 {
 	Quat q(2.0, 0.0, 0.0, 2.0); // unnormalized, direction (1,0,0,1)
@@ -234,6 +251,19 @@ O3DS_TEST(LinearPredictor_ErrorMuchLessThanHold_AtOneFrameHorizon)
 	O3DS_CHECK(linearError < holdError * 0.01);
 }
 
+O3DS_TEST(LinearPredictor_Interpolation_BetweenSamples_PredictsExactly)
+{
+	// x(t) = 5 + 2*t, requested t is between the two observed samples
+	// (interpolation) rather than past the newest (extrapolation).
+	LinearPredictor pred;
+	pred.Observe(MakeSample(0.0, 1, 5.0, 0.0, 0.0, QuatIdentity(), 0.0f));
+	pred.Observe(MakeSample(2.0, 2, 9.0, 0.0, 0.0, QuatIdentity(), 0.0f));
+
+	PoseSample out;
+	O3DS_CHECK(pred.Predict(1.0, out));
+	O3DS_CHECK(std::abs(out.translations[0].v[0] - 7.0) < 1.0e-9);
+}
+
 O3DS_TEST(LinearPredictor_DegenerateSpacing_HoldsRatherThanDividesByZero)
 {
 	LinearPredictor pred;
@@ -271,6 +301,18 @@ O3DS_TEST(QuadraticPredictor_InsufficientHistory_ReturnsFalse)
 	O3DS_CHECK(!pred.Predict(2.0, out)); // only 2 samples so far
 }
 
+O3DS_TEST(QuadraticPredictor_OutUntouched_OnInsufficientHistory)
+{
+	QuadraticPredictor pred;
+	pred.Observe(MakeSample(0.0, 1, 0, 0, 0, QuatIdentity(), 0.0f));
+
+	PoseSample out = MakeSample(42.0, 99, 1.0, 2.0, 3.0, QuatIdentity(), 0.75f);
+	O3DS_CHECK(!pred.Predict(1.0, out));
+	O3DS_CHECK_EQ(out.t, 42.0);
+	O3DS_CHECK_EQ(out.seq, (uint64_t)99);
+	O3DS_CHECK_EQ(out.translations[0].v[0], 1.0);
+}
+
 O3DS_TEST(QuadraticPredictor_ConstantAccelerationTranslation_PredictsExactly)
 {
 	// x(t) = 1 + 2*t + 0.5*4*t^2 = 1 + 2t + 2t^2. Three points exactly
@@ -299,6 +341,27 @@ O3DS_TEST(QuadraticPredictor_RotationStaysUnitNorm)
 	PoseSample out;
 	O3DS_CHECK(pred.Predict(1.5, out));
 	O3DS_CHECK(IsUnitNorm(out.rotations[0]));
+}
+
+O3DS_TEST(QuadraticPredictor_ConstantAngularAcceleration_PredictsRotationAngleExactly)
+{
+	// theta(t) = 0.2*t + 0.3*t^2 about a fixed axis: exercises the rotation
+	// channel's velocity/acceleration terms (not just unit-norm), catching
+	// the case where the base angular speed is evaluated at the [t1,t2]
+	// interval's mean instead of at t2 before extrapolating further.
+	Vector3d axis(0.3, -0.7, 0.65); // off-axis; QuatFromAxisAngle normalizes
+	auto theta = [](double t) { return 0.2 * t + 0.3 * t * t; };
+
+	QuadraticPredictor pred;
+	pred.Observe(MakeSample(0.0, 1, 0, 0, 0, QuatFromAxisAngle(axis, theta(0.0)), 0.0f));
+	pred.Observe(MakeSample(0.5, 2, 0, 0, 0, QuatFromAxisAngle(axis, theta(0.5)), 0.0f));
+	pred.Observe(MakeSample(1.0, 3, 0, 0, 0, QuatFromAxisAngle(axis, theta(1.0)), 0.0f));
+
+	PoseSample out;
+	O3DS_CHECK(pred.Predict(1.5, out));
+
+	Quat expected = QuatFromAxisAngle(axis, theta(1.5));
+	O3DS_CHECK(QuatsNearlyEqual(out.rotations[0], expected, 1.0e-6));
 }
 
 O3DS_TEST(QuadraticPredictor_DegenerateSpacing_HoldsRatherThanDividesByZero)
