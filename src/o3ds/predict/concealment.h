@@ -70,22 +70,30 @@ namespace O3DS
 	};
 
 	//! Running counters/aggregates for the C1.d HUD metrics. "Prediction
-	//! error" and "pop" are reported as separate translation (scene units)
-	//! and rotation (radians) RMS-style aggregates rather than one combined
-	//! number, since the two use different units; both are recorded once
-	//! per concealment-span recovery (when a real frame ends a gap this
-	//! engine was concealing/correcting for).
+	//! error" and "pop" are each the mean, over recoveries that produced a
+	//! sample, of a per-node distance/angle magnitude (translation in scene
+	//! units, rotation in radians) - a mean of magnitudes, not a true RMS.
+	//! Reported as separate translation/rotation numbers rather than one
+	//! combined value, since the two use different units.
 	struct ConcealmentMetrics
 	{
 		uint64_t concealedFrameCount = 0;  //!< TryConceal() returned true (predicted or held)
 		uint64_t fallbackHoldCount = 0;    //!< ...of which, held rather than freshly predicted (horizon exceeded or predictor lacks history)
 		uint64_t correctionFrameCount = 0; //!< frames output during a post-recovery correction blend
-		uint64_t recoveryCount = 0;        //!< concealment spans that ended in a real-frame recovery (each contributes one prediction-error + pop sample)
+		uint64_t recoveryCount = 0;        //!< concealment spans that ended in a real-frame recovery
+
+		//! Of recoveryCount, how many actually contributed a sample to the
+		//! corresponding Mean*() below - kept separate from recoveryCount
+		//! (rather than reusing it as the divisor) so a recovery where
+		//! Predict() has no history yet, or there's no prior output to
+		//! diff against, doesn't dilute the mean toward 0.
+		uint64_t predictionSampleCount = 0;
+		uint64_t popSampleCount = 0;
 
 		double concealedTimeSecondsTotal = 0.0;
 		double concealedTimeSecondsMax = 0.0; //!< longest single concealed span - the horizon-distribution signal from C1.d
 
-		double predictionTranslationErrorSum = 0.0; //!< sum over recoveries, for MeanPredictionTranslationError()
+		double predictionTranslationErrorSum = 0.0; //!< sum over predictionSampleCount, for MeanPredictionTranslationError()
 		double predictionTranslationErrorMax = 0.0;
 		double predictionRotationErrorRadiansSum = 0.0;
 		double predictionRotationErrorRadiansMax = 0.0;
@@ -95,10 +103,10 @@ namespace O3DS
 		double popRotationRadiansSum = 0.0;
 		double popRotationRadiansMax = 0.0;
 
-		double MeanPredictionTranslationError() const { return recoveryCount ? predictionTranslationErrorSum / (double)recoveryCount : 0.0; }
-		double MeanPredictionRotationErrorRadians() const { return recoveryCount ? predictionRotationErrorRadiansSum / (double)recoveryCount : 0.0; }
-		double MeanPopTranslation() const { return recoveryCount ? popTranslationSum / (double)recoveryCount : 0.0; }
-		double MeanPopRotationRadians() const { return recoveryCount ? popRotationRadiansSum / (double)recoveryCount : 0.0; }
+		double MeanPredictionTranslationError() const { return predictionSampleCount ? predictionTranslationErrorSum / (double)predictionSampleCount : 0.0; }
+		double MeanPredictionRotationErrorRadians() const { return predictionSampleCount ? predictionRotationErrorRadiansSum / (double)predictionSampleCount : 0.0; }
+		double MeanPopTranslation() const { return popSampleCount ? popTranslationSum / (double)popSampleCount : 0.0; }
+		double MeanPopRotationRadians() const { return popSampleCount ? popRotationRadiansSum / (double)popSampleCount : 0.0; }
 	};
 
 	//! Per-subject receiver-side concealment state machine (roadmap doc,

@@ -14,8 +14,6 @@ using namespace O3DS;
 
 namespace
 {
-	constexpr double kPi = 3.14159265358979323846;
-
 	double QuatDot(const Quat& a, const Quat& b)
 	{
 		return a.v[0] * b.v[0] + a.v[1] * b.v[1] + a.v[2] * b.v[2] + a.v[3] * b.v[3];
@@ -287,6 +285,79 @@ O3DS_TEST(ConcealmentEngine_CorrectionWindow_BlendsThenStopsAfterWindowElapses)
 	PoseSample afterWindow;
 	O3DS_CHECK(!engine.TryConceal(0.23, afterWindow));
 	O3DS_CHECK_EQ(engine.Metrics().recoveryCount, (uint64_t)1); // never spuriously re-recorded
+}
+
+O3DS_TEST(ConcealmentEngine_CorrectionDisabled_ZeroWindow_NeverEmitsEvenForBackwardTime)
+{
+	// Regression: correctionWindowSeconds <= 0 means "disable correction
+	// blending" - that must hold even for a backward/buffered tNow, which
+	// previously fell through to the blend branch with alpha forced to 1.0
+	// and emitted a synthetic frame despite correction being configured off.
+	ConcealmentConfig config;
+	config.correctionWindowSeconds = 0.0;
+
+	ConcealmentEngine engine(std::make_unique<LinearPredictor>(), config);
+	engine.ObserveRealFrame(MakeSample(0.0, 1, 10.0, 2.0));
+	engine.ObserveRealFrame(MakeSample(0.02, 2, 10.0, 2.0));
+
+	PoseSample out;
+	engine.TryConceal(0.09, out);
+	engine.ObserveRealFrame(MakeSample(0.12, 3, 10.0, 2.0)); // recovery
+
+	// tNow (0.11) is behind mCorrectionStartTime (0.12) - elapsed < 0.
+	O3DS_CHECK(!engine.TryConceal(0.11, out));
+	O3DS_CHECK_EQ(engine.Metrics().correctionFrameCount, (uint64_t)0);
+}
+
+O3DS_TEST(ConcealmentEngine_MeanPredictionError_NotDilutedByRecoveriesWithoutAPredictionSample)
+{
+	// Regression: recoveryCount used to double as the divisor for
+	// MeanPrediction*Error() too, so a recovery where Predict() had no
+	// history yet (contributing nothing to the error sum) still diluted the
+	// mean. predictionSampleCount now tracks only recoveries that actually
+	// contributed a sample.
+	auto MakeTranslationOnlySample = [](double t, uint64_t seq, double x) {
+		PoseSample s;
+		s.t = t;
+		s.seq = seq;
+		s.translations.push_back(Vector3d(x, 0.0, 0.0));
+		s.rotations.push_back(QuatIdentity());
+		s.scales.push_back(Vector3d(1.0, 1.0, 1.0));
+		s.curves.push_back(0.0f);
+		return s;
+	};
+
+	ConcealmentEngine engine(std::make_unique<LinearPredictor>());
+
+	// Only one real sample so far - LinearPredictor::Predict() can't
+	// succeed yet (needs 2). Concealing here falls back to a held pose.
+	engine.ObserveRealFrame(MakeTranslationOnlySample(0.0, 1, 0.0));
+	PoseSample out;
+	O3DS_CHECK(engine.TryConceal(0.10, out));
+	O3DS_CHECK_EQ(engine.Metrics().fallbackHoldCount, (uint64_t)1);
+
+	// Recovery #1: Predict() still can't succeed (still only 1 prior
+	// sample) - contributes no prediction-error sample, but does count as
+	// a recovery.
+	engine.ObserveRealFrame(MakeTranslationOnlySample(0.12, 2, 1.2)); // velocity 10/s from t=0
+	O3DS_CHECK_EQ(engine.Metrics().recoveryCount, (uint64_t)1);
+	O3DS_CHECK_EQ(engine.Metrics().predictionSampleCount, (uint64_t)0);
+
+	// Now the predictor has 2 samples (0.0,0) and (0.12,1.2) -> implied
+	// velocity 10/s. Conceal again, then recover with ground truth that
+	// deviates from that linear extrapolation (a real, nonzero error).
+	engine.ObserveRealFrame(MakeTranslationOnlySample(0.14, 3, 1.4)); // still velocity 10/s
+	O3DS_CHECK(engine.TryConceal(0.20, out));
+
+	// Predict(0.22) from (0.12,1.2)/(0.14,1.4) extrapolates to 1.4 + 10*0.08 = 2.2;
+	// ground truth jumps to 2.5 instead - a real 0.3 error.
+	engine.ObserveRealFrame(MakeTranslationOnlySample(0.22, 4, 2.5));
+	O3DS_CHECK_EQ(engine.Metrics().recoveryCount, (uint64_t)2);
+	O3DS_CHECK_EQ(engine.Metrics().predictionSampleCount, (uint64_t)1);
+
+	// Fixed: mean = 0.3 / 1 sample. The old (buggy) recoveryCount-divisor
+	// formula would have given 0.3 / 2 = 0.15 - a diluted, wrong value.
+	O3DS_CHECK(std::abs(engine.Metrics().MeanPredictionTranslationError() - 0.3) < 1.0e-6);
 }
 
 O3DS_TEST(ConcealmentEngine_CorrectionAlpha_ClampedAtZero_ForBackwardPresentationTime)

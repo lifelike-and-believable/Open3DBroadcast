@@ -120,6 +120,7 @@ namespace O3DS
 		{
 			const double transErr = AggregateTranslationDistance(predicted.translations, real.translations);
 			const double rotErr = AggregateRotationAngleRadians(predicted.rotations, real.rotations);
+			++mMetrics.predictionSampleCount;
 			mMetrics.predictionTranslationErrorSum += transErr;
 			mMetrics.predictionTranslationErrorMax = std::max(mMetrics.predictionTranslationErrorMax, transErr);
 			mMetrics.predictionRotationErrorRadiansSum += rotErr;
@@ -133,6 +134,7 @@ namespace O3DS
 		{
 			const double popTrans = AggregateTranslationDistance(mLastOutput.translations, real.translations);
 			const double popRot = AggregateRotationAngleRadians(mLastOutput.rotations, real.rotations);
+			++mMetrics.popSampleCount;
 			mMetrics.popTranslationSum += popTrans;
 			mMetrics.popTranslationMax = std::max(mMetrics.popTranslationMax, popTrans);
 			mMetrics.popRotationRadiansSum += popRot;
@@ -190,7 +192,13 @@ namespace O3DS
 		if (mCorrecting)
 		{
 			const double elapsed = tNow - mCorrectionStartTime;
-			if (elapsed >= mConfig.correctionWindowSeconds || gap > mConfig.starvationThresholdSeconds)
+
+			// correctionWindowSeconds <= 0 means "correction disabled" -
+			// exit unconditionally, including for a backward/buffered tNow
+			// (elapsed < 0), which would otherwise fall through to the
+			// blend branch below and emit a synthetic frame despite
+			// correction being configured off.
+			if (mConfig.correctionWindowSeconds <= 0.0 || elapsed >= mConfig.correctionWindowSeconds || gap > mConfig.starvationThresholdSeconds)
 			{
 				mCorrecting = false;
 			}
@@ -203,9 +211,9 @@ namespace O3DS
 				// received time), and an unclamped negative alpha would
 				// extrapolate BlendPoseSample past mCorrectionBase, away
 				// from the real pose it's supposed to be converging toward.
-				const double alpha = mConfig.correctionWindowSeconds > 0.0
-					? std::max(0.0, std::min(1.0, elapsed / mConfig.correctionWindowSeconds))
-					: 1.0;
+				// (correctionWindowSeconds is guaranteed > 0 here - the
+				// disabled case exits above.)
+				const double alpha = std::max(0.0, std::min(1.0, elapsed / mConfig.correctionWindowSeconds));
 				outPose = BlendPoseSample(mCorrectionBase, mLastReal, alpha, tNow, mLastReal.seq);
 				mLastOutput = outPose;
 				mHasLastOutput = true;
