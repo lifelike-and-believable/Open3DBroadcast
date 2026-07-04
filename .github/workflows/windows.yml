@@ -39,18 +39,26 @@ jobs:
 
       # This self-hosted runner is a minimal box built for the UE plugin CI
       # (VS, UE, git) - it doesn't have chocolatey pre-installed the way
-      # GitHub-hosted images do. Bootstrap it once (idempotent - skips if
-      # already present) and add its bin dir to GITHUB_PATH so it resolves
-      # for this and every later step in the job.
+      # GitHub-hosted images do, and its service account isn't an
+      # administrator (chocolatey's default install location under
+      # ProgramData requires elevation). Install to a workspace-local
+      # directory instead - chocolatey's documented non-admin install path,
+      # triggered by setting ChocolateyInstall before running its bootstrap
+      # script. Persist ChocolateyInstall via GITHUB_ENV (not just this
+      # step's process) so later `choco install` steps target the same
+      # non-admin location, and add its bin dir to GITHUB_PATH.
       - name: Bootstrap Chocolatey
         shell: powershell
         run: |
+          $chocoRoot = "$env:GITHUB_WORKSPACE\.chocolatey"
+          "ChocolateyInstall=$chocoRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $env:ChocolateyInstall = $chocoRoot
           if (-not (Get-Command choco.exe -ErrorAction SilentlyContinue)) {
             Set-ExecutionPolicy Bypass -Scope Process -Force
             [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
             iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
           }
-          "$env:ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "$chocoRoot\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: CMake
         run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
