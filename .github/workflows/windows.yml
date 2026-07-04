@@ -37,6 +37,21 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path $env:GITHUB_WORKSPACE/usr | Out-Null
 
+      # This self-hosted runner is a minimal box built for the UE plugin CI
+      # (VS, UE, git) - it doesn't have chocolatey pre-installed the way
+      # GitHub-hosted images do. Bootstrap it once (idempotent - skips if
+      # already present) and add its bin dir to GITHUB_PATH so it resolves
+      # for this and every later step in the job.
+      - name: Bootstrap Chocolatey
+        shell: powershell
+        run: |
+          if (-not (Get-Command choco.exe -ErrorAction SilentlyContinue)) {
+            Set-ExecutionPolicy Bypass -Scope Process -Force
+            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+            iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+          }
+          "$env:ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
       - name: CMake
         run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
 
