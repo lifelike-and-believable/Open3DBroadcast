@@ -8,6 +8,8 @@
 
 #include <atomic>
 
+#if WITH_DEV_AUTOMATION_TESTS
+
 #if O3D_WITH_TRANSPORT_MOQ
 
 namespace
@@ -172,3 +174,5 @@ bool FMoQResultFromCodeFallbackTest::RunTest(const FString& Parameters)
 }
 
 #endif // O3D_WITH_TRANSPORT_MOQ
+
+#endif // WITH_DEV_AUTOMATION_TESTS
