@@ -61,7 +61,7 @@ jobs:
           "$chocoRoot\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: CMake
-        run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
+        run: choco install cmake -y --installargs 'ADD_CMAKE_TO_PATH=System'
 
       - name: OpenSSL
         run: |
