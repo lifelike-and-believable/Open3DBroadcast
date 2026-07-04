@@ -418,6 +418,96 @@ O3DS_TEST(ConcealmentEngine_SecondGapMidCorrection_StartsFreshConcealmentAndReco
 	O3DS_CHECK_EQ(engine.Metrics().recoveryCount, (uint64_t)2);
 }
 
+// ---------------------------------------------------------------------------
+// ConcealmentEngine::TryRenderAhead (C1.c)
+// ---------------------------------------------------------------------------
+
+O3DS_TEST(RenderAhead_DisabledByDefault_AlwaysReturnsFalse)
+{
+	ConcealmentEngine engine(std::make_unique<LinearPredictor>());
+	engine.ObserveRealFrame(MakeSample(0.0, 1, 10.0, 2.0));
+	engine.ObserveRealFrame(MakeSample(0.02, 2, 10.0, 2.0));
+
+	PoseSample out;
+	O3DS_CHECK(!engine.TryRenderAhead(out));
+	O3DS_CHECK_EQ(engine.Metrics().renderAheadFrameCount, (uint64_t)0);
+}
+
+O3DS_TEST(RenderAhead_NoHistoryYet_ReturnsFalseEvenWhenEnabled)
+{
+	ConcealmentConfig config;
+	config.renderAheadSeconds = 0.08;
+	ConcealmentEngine engine(std::make_unique<LinearPredictor>(), config);
+
+	PoseSample out;
+	O3DS_CHECK(!engine.TryRenderAhead(out));
+}
+
+O3DS_TEST(RenderAhead_Enabled_TargetsPastNewestRealFrameByConfiguredHorizon)
+{
+	ConcealmentConfig config;
+	config.renderAheadSeconds = 0.08;
+	ConcealmentEngine engine(std::make_unique<LinearPredictor>(), config);
+
+	engine.ObserveRealFrame(MakeSample(0.0, 1, 10.0, 2.0));
+	engine.ObserveRealFrame(MakeSample(0.02, 2, 10.0, 2.0)); // implied velocity 10/s from these two samples
+
+	PoseSample out;
+	O3DS_CHECK(engine.TryRenderAhead(out));
+
+	const double expectedT = 0.02 + 0.08;
+	const double expectedX = 10.0 * expectedT; // constant-velocity ground truth
+	O3DS_CHECK(std::abs(out.t - expectedT) < 1.0e-9);
+	O3DS_CHECK(std::abs(out.translations[0].v[0] - expectedX) < 1.0e-6);
+	O3DS_CHECK_EQ(engine.Metrics().renderAheadFrameCount, (uint64_t)1);
+}
+
+O3DS_TEST(RenderAhead_InsufficientPredictorHistory_HoldsLastRealPose)
+{
+	ConcealmentConfig config;
+	config.renderAheadSeconds = 0.08;
+	ConcealmentEngine engine(std::make_unique<LinearPredictor>(), config);
+
+	// Only one sample: LinearPredictor::Predict() can't succeed yet (needs 2).
+	engine.ObserveRealFrame(MakeSample(0.0, 1, 10.0, 2.0));
+
+	PoseSample out;
+	O3DS_CHECK(engine.TryRenderAhead(out));
+	O3DS_CHECK(std::abs(out.t - (0.0 + 0.08)) < 1.0e-9);
+	O3DS_CHECK(std::abs(out.translations[0].v[0] - 0.0) < 1.0e-9); // held at the one real sample's value
+}
+
+O3DS_TEST(RenderAhead_DoesNotPerturbGapConcealmentStateOrMetrics)
+{
+	// Render-ahead must be fully independent of the gap/correction machinery:
+	// interleaving TryRenderAhead() calls should not affect TryConceal()'s
+	// own starvation/horizon/correction bookkeeping or its metrics.
+	ConcealmentConfig config;
+	config.renderAheadSeconds = 0.08;
+	ConcealmentEngine engine(std::make_unique<LinearPredictor>(), config);
+
+	engine.ObserveRealFrame(MakeSample(0.0, 1, 10.0, 2.0));
+	engine.ObserveRealFrame(MakeSample(0.02, 2, 10.0, 2.0));
+
+	// Normal on-time cadence: TryConceal never fires, same as the no-op
+	// safety test above, regardless of interleaved TryRenderAhead() calls.
+	for (int i = 2; i < 10; ++i)
+	{
+		double t = i * (1.0 / 60.0);
+		engine.ObserveRealFrame(MakeSample(t, (uint64_t)i, 10.0, 2.0));
+
+		PoseSample gapOut;
+		O3DS_CHECK(!engine.TryConceal(t, gapOut));
+
+		PoseSample aheadOut;
+		O3DS_CHECK(engine.TryRenderAhead(aheadOut));
+	}
+
+	O3DS_CHECK_EQ(engine.Metrics().concealedFrameCount, (uint64_t)0);
+	O3DS_CHECK_EQ(engine.Metrics().recoveryCount, (uint64_t)0);
+	O3DS_CHECK(engine.Metrics().renderAheadFrameCount > (uint64_t)0);
+}
+
 O3DS_TEST(ConcealmentEngine_Reset_ClearsHistoryButKeepsMetrics)
 {
 	ConcealmentEngine engine(std::make_unique<LinearPredictor>());

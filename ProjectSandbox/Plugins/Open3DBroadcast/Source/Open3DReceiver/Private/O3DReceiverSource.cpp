@@ -89,6 +89,17 @@ static TAutoConsoleVariable<float> CVarO3DReceiverConcealmentCorrectionMs(
     TEXT("Blend from the last synthesized pose toward the resumed real trajectory over this many ms after a gap recovers, instead of snapping. 0 disables correction blending."),
     ECVF_Default);
 
+// C1.c: latency-hiding/render-ahead (roadmap doc §5/C1.c). Opt-in, default OFF
+// (0 = disabled) per the roadmap - trades prediction accuracy for lower
+// perceived latency by continuously showing a pose ahead of the newest real
+// frame, even with no actual gap. See TickConcealment()'s TryRenderAhead()
+// call for why this only applies when TryConceal() found no gap to handle.
+static TAutoConsoleVariable<float> CVarO3DReceiverConcealmentRenderAheadMs(
+    TEXT("o3ds.Receiver.Concealment.RenderAheadMs"),
+    0.0f,
+    TEXT("Latency-hiding horizon (ms) beyond the newest real frame to proactively predict toward, even with no gap. 0 (default) disables render-ahead entirely."),
+    ECVF_Default);
+
 /** Adapts the shared consumer registry callback into this live source instance. */
 class FO3DReceiverSource::FSerializedConsumer : public ISerializedFrameConsumer
 {
@@ -820,6 +831,7 @@ O3DS::ConcealmentEngine& FO3DReceiverSource::GetOrCreateSubjectConcealment(FName
     Config.starvationThresholdSeconds = FMath::Max(0.0, (double)CVarO3DReceiverConcealmentStarvationMs.GetValueOnGameThread() / 1000.0);
     Config.maxConcealHorizonSeconds = FMath::Max(0.0, (double)CVarO3DReceiverConcealmentHorizonMs.GetValueOnGameThread() / 1000.0);
     Config.correctionWindowSeconds = FMath::Max(0.0, (double)CVarO3DReceiverConcealmentCorrectionMs.GetValueOnGameThread() / 1000.0);
+    Config.renderAheadSeconds = FMath::Max(0.0, (double)CVarO3DReceiverConcealmentRenderAheadMs.GetValueOnGameThread() / 1000.0);
 
     TUniquePtr<O3DS::ConcealmentEngine> NewEngine = MakeUnique<O3DS::ConcealmentEngine>(std::make_unique<O3DS::LinearPredictor>(), Config);
     O3DS::ConcealmentEngine& Ref = *NewEngine;
@@ -885,7 +897,15 @@ void FO3DReceiverSource::TickConcealment()
         O3DS::PoseSample Predicted;
         if (!Pair.Value->TryConceal(TNow, Predicted))
         {
-            continue;
+            // No actual gap right now (real data is flowing on schedule) -
+            // C1.c latency-hiding only applies on top of that healthy case
+            // (see TryRenderAhead()'s own doc comment on why it must not run
+            // during a genuine TryConceal()-handled gap/correction). Opt-in,
+            // default OFF: returns false immediately when disabled.
+            if (!Pair.Value->TryRenderAhead(Predicted))
+            {
+                continue;
+            }
         }
 
         TArray<FTransform> BoneTransforms;
@@ -915,7 +935,7 @@ void FO3DReceiverSource::ReportConcealmentMetricsDelta()
 {
     auto Delta = [](uint64 NewVal, uint64 OldVal) -> uint64 { return NewVal >= OldVal ? (NewVal - OldVal) : 0; };
 
-    uint64 DeltaConcealed = 0, DeltaFallback = 0, DeltaCorrection = 0, DeltaRecovery = 0;
+    uint64 DeltaConcealed = 0, DeltaFallback = 0, DeltaCorrection = 0, DeltaRecovery = 0, DeltaRenderAhead = 0;
     bool bHasAnyRecovery = false;
     double LastTransErr = 0.0, LastRotErrDeg = 0.0, LastPopTrans = 0.0, LastPopRotDeg = 0.0;
 
@@ -933,6 +953,7 @@ void FO3DReceiverSource::ReportConcealmentMetricsDelta()
         DeltaFallback += Delta(Current.fallbackHoldCount, Prev.fallbackHoldCount);
         DeltaCorrection += Delta(Current.correctionFrameCount, Prev.correctionFrameCount);
         DeltaRecovery += Delta(Current.recoveryCount, Prev.recoveryCount);
+        DeltaRenderAhead += Delta(Current.renderAheadFrameCount, Prev.renderAheadFrameCount);
 
         if (Current.recoveryCount > 0)
         {
@@ -951,6 +972,7 @@ void FO3DReceiverSource::ReportConcealmentMetricsDelta()
     if (DeltaFallback) Metrics.RecordConcealmentFallbackHolds(DeltaFallback);
     if (DeltaCorrection) Metrics.RecordConcealmentCorrectionFrames(DeltaCorrection);
     if (DeltaRecovery) Metrics.RecordConcealmentRecoveries(DeltaRecovery);
+    if (DeltaRenderAhead) Metrics.RecordConcealmentRenderAheadFrames(DeltaRenderAhead);
     if (bHasAnyRecovery)
     {
         Metrics.SetConcealmentPredictionError(LastTransErr, LastRotErrDeg);

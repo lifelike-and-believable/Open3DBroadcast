@@ -113,6 +113,12 @@ public:
 		TAtomic<double> AvgConcealmentPopTranslation{ 0.0 }; // discontinuity at recovery - what concealment should reduce vs Hold
 		TAtomic<double> AvgConcealmentPopRotationDeg{ 0.0 };
 
+		// C1.c: latency-hiding/render-ahead (opt-in, default OFF). A simple
+		// counter, not error-scored like the recovery metrics above - see
+		// O3DS::ConcealmentEngine::TryRenderAhead()'s doc comment on why it's
+		// tracked independently of the loss-recovery metrics.
+		TAtomic<uint64> ConcealmentRenderAheadFrames{ 0 };
+
 		// Timestamps
 		FDateTime MetricsStartTime = FDateTime::Now();
 		FDateTime LastApplyTime = FDateTime::Now();
@@ -252,6 +258,7 @@ public:
 	FORCEINLINE void RecordConcealmentFallbackHolds(uint64 Delta) { ReceiverMetrics.ConcealmentFallbackHolds += Delta; }
 	FORCEINLINE void RecordConcealmentCorrectionFrames(uint64 Delta) { ReceiverMetrics.ConcealmentCorrectionFrames += Delta; }
 	FORCEINLINE void RecordConcealmentRecoveries(uint64 Delta) { ReceiverMetrics.ConcealmentRecoveries += Delta; }
+	FORCEINLINE void RecordConcealmentRenderAheadFrames(uint64 Delta) { ReceiverMetrics.ConcealmentRenderAheadFrames += Delta; }
 	FORCEINLINE void SetConcealmentPredictionError(double TranslationUnits, double RotationDegrees)
 	{
 		ReceiverMetrics.AvgConcealmentPredictionTranslationError.Store(TranslationUnits);

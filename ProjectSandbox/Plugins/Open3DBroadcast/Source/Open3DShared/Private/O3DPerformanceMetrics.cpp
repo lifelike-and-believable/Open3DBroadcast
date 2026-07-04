@@ -62,6 +62,7 @@ void FO3DPerformanceMetrics::Reset()
 	ReceiverMetrics.AvgConcealmentPredictionRotationErrorDeg.Store(0.0);
 	ReceiverMetrics.AvgConcealmentPopTranslation.Store(0.0);
 	ReceiverMetrics.AvgConcealmentPopRotationDeg.Store(0.0);
+	ReceiverMetrics.ConcealmentRenderAheadFrames.Store(0);
 	ReceiverMetrics.MetricsStartTime = FDateTime::Now();
 
 	// Transport metrics
@@ -404,8 +405,9 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 			uint64 FallbackHolds = ReceiverMetrics.ConcealmentFallbackHolds.Load();
 			uint64 CorrectionFrames = ReceiverMetrics.ConcealmentCorrectionFrames.Load();
 			uint64 Recoveries = ReceiverMetrics.ConcealmentRecoveries.Load();
+			uint64 RenderAheadFrames = ReceiverMetrics.ConcealmentRenderAheadFrames.Load();
 
-			if (ConcealedFrames > 0 || CorrectionFrames > 0 || Recoveries > 0)
+			if (ConcealedFrames > 0 || CorrectionFrames > 0 || Recoveries > 0 || RenderAheadFrames > 0)
 			{
 				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("[RECEIVER - CONCEALMENT]"));
 				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Concealed Frames: %llu (%llu held rather than predicted)"), ConcealedFrames, FallbackHolds);
@@ -414,6 +416,7 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 					ReceiverMetrics.AvgConcealmentPredictionTranslationError.Load(), ReceiverMetrics.AvgConcealmentPredictionRotationErrorDeg.Load());
 				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg Pop (discontinuity at recovery): %.3f units, %.2f deg"),
 					ReceiverMetrics.AvgConcealmentPopTranslation.Load(), ReceiverMetrics.AvgConcealmentPopRotationDeg.Load());
+				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Render-Ahead Frames (C1.c, opt-in): %llu"), RenderAheadFrames);
 				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
 			}
 		}
@@ -499,6 +502,7 @@ FString FO3DPerformanceMetrics::GetMetricsAsCSV() const
 	CSV += FString::Printf(TEXT("ConcealmentFallbackHolds,%llu\n"), ReceiverMetrics.ConcealmentFallbackHolds.Load());
 	CSV += FString::Printf(TEXT("ConcealmentCorrectionFrames,%llu\n"), ReceiverMetrics.ConcealmentCorrectionFrames.Load());
 	CSV += FString::Printf(TEXT("ConcealmentRecoveries,%llu\n"), ReceiverMetrics.ConcealmentRecoveries.Load());
+	CSV += FString::Printf(TEXT("ConcealmentRenderAheadFrames,%llu\n"), ReceiverMetrics.ConcealmentRenderAheadFrames.Load());
 	CSV += FString::Printf(TEXT("AvgConcealmentPredictionTranslationError,%.4f\n"), ReceiverMetrics.AvgConcealmentPredictionTranslationError.Load());
 	CSV += FString::Printf(TEXT("AvgConcealmentPredictionRotationErrorDeg,%.2f\n"), ReceiverMetrics.AvgConcealmentPredictionRotationErrorDeg.Load());
 	CSV += FString::Printf(TEXT("AvgConcealmentPopTranslation,%.4f\n"), ReceiverMetrics.AvgConcealmentPopTranslation.Load());
