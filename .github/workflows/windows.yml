@@ -97,17 +97,26 @@ jobs:
           cd out
           Compress-Archive -Path * -DestinationPath ../o3ds.zip
         shell: powershell
-        
+
+      # Uploaded as a run artifact independent of the release steps below, so
+      # the build output is retrievable even if release creation fails (e.g.
+      # tag_name already exists from a prior run).
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: o3ds-windows-build
+          path: o3ds.zip
+
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.get_version.outputs.version-without-v }}-win
-          release_name: Release ${{ github.ref }}-win
+          tag_name: ${{ steps.get_version.outputs.version-without-v }}-win-${{ github.run_number }}
+          release_name: Release ${{ github.ref }}-win (run ${{ github.run_number }})
           draft: false
-          prerelease: false       
+          prerelease: false
 
       - name: Upload Release Asset
         id: upload-release-asset
