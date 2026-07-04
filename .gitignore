@@ -11,8 +11,10 @@ Artifacts
 /Build/Logs
 /Build/.cmake
 /Build/CMakeFiles
+/Build/CMakeCache.txt
 ThirdParty
 Binaries
 Intermediate
 lib
 /vsbuild
+/_o3ds_build

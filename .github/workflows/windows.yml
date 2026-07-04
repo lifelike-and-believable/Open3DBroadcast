@@ -77,8 +77,8 @@ jobs:
 
       - name: Open3DStream
         run: |
-          cmake -S . -B build -DVERSION_TAG=${{ steps.get_version.outputs.version-without-v }} -DCMAKE_PREFIX_PATH=usr -DCMAKE_INSTALL_PREFIX=out
-          cmake --build build --config Release && cmake --install build
+          cmake -S . -B _o3ds_build -DVERSION_TAG=${{ steps.get_version.outputs.version-without-v }} -DCMAKE_PREFIX_PATH=usr -DCMAKE_INSTALL_PREFIX=out
+          cmake --build _o3ds_build --config Release && cmake --install _o3ds_build
         shell: cmd
 
       - name: Create Zip File for Release
