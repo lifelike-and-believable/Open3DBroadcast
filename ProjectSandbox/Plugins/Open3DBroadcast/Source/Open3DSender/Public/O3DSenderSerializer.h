@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 
+#include <vector>
+
 class UO3DSenderComponent;
 
 namespace O3DS
@@ -78,9 +80,24 @@ private:
 	TMap<FString, FSubjectCache> SubjectState;
 	UO3DSenderComponent* Component = nullptr;
 
+	// C2 (roadmap doc §5/C2): persistent per-subject state for delta/
+	// residual transmission (o3ds.Sender.Residual.Enabled). Unlike the
+	// legacy path - which allocates a fresh O3DS::SubjectList/Subject
+	// every single frame, since a full Serialize() snapshot needs no
+	// state to carry over - residual coding fundamentally requires a
+	// predictor's history (and the legacy TransformComponent delta
+	// tracking SerializeUpdateResidual falls back to) to survive across
+	// frames, so one SubjectList persists for the serializer's lifetime,
+	// holding one O3DS::Subject per subject name. Lazily created on first
+	// use; untouched (and irrelevant) while residual mode is disabled.
+	TSharedPtr<O3DS::SubjectList> PersistentSubjects;
+
 	void BuildOrUpdateCache(const FString& Subject, const struct FO3DSSkeletonDescriptor& Descriptor);
 	void EnsureCurveIndex(FSubjectCache& Cache);
 	void SerializeFrame(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame);
+	void SerializeFrameLegacy(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache);
+	void SerializeFrameResidual(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache);
+	void BroadcastSerializedBuffer(const FString& Subject, const std::vector<char>& Buffer, double Now, FSubjectCache& Cache);
 	void BuildSubjectFromDescriptor(const FString& SubjectName, const FO3DSSkeletonDescriptor& Descriptor, O3DS::Subject& OutSubject);
 	void FillFrameValues(const FO3DSPoseFrame& Frame, O3DS::Subject& InOutSubject);
 	void DumpStatsInstance() const;

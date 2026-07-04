@@ -231,9 +231,19 @@ namespace O3DS
 		flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<O3DS::Data::Curve>>> SerializeCurves(flatbuffers::FlatBufferBuilder& builder);
 		flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> SerializeCurveUpdates(flatbuffers::FlatBufferBuilder& builder, size_t &count);
 
-		int Serialize(std::vector<char>& outbuf, double timestamp);	
+		int Serialize(std::vector<char>& outbuf, double timestamp);
 
 		int SerializeUpdate(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp);
+
+		//! Self-contained residual-coded variant of the vector<char> overload
+		//! above, mirroring it exactly (builds its own FlatBufferBuilder and
+		//! wraps this one subject's update in a single-subject SubjectList,
+		//! rather than requiring a caller-owned builder/SubjectList like the
+		//! offset-returning overload above does) - the natural entry point
+		//! for a sender that serializes one subject's frame at a time (see
+		//! UE glue in Open3DSender). `seq` defaults to 0 (unset); pass a real
+		//! tx_seq if this subject's frames flow through A1 sequencing.
+		int SerializeUpdateResidual(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp, uint64_t seq = 0);
 
 	private:
 		std::unique_ptr<ResidualEncoder> mResidualEncoder;

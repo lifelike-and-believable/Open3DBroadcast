@@ -38,8 +38,32 @@ public:
     /** Stop networking and release resources. Idempotent. */
     virtual void Stop() = 0;
 
-    /** Attempt to send a serialized SubjectList payload. Return false if backpressure drops it. */
+    /** Attempt to send a serialized SubjectList payload. Return false if backpressure drops it.
+     *  Implementations call SubjectList::Serialize() (a full topology+value
+     *  snapshot) internally - see SendSerialized() below for the path that
+     *  transmits whatever encoding the caller already chose instead. */
     virtual bool Send(const O3DS::SubjectList& List) = 0;
+
+    /** Send already-serialized FlatBuffer bytes directly, bypassing this
+     *  transport's own SubjectList::Serialize() call in Send() above. Used
+     *  by the normal per-frame pose pipeline (FO3DSenderSerializer via
+     *  UO3DSenderComponent), which decides once - not per-transport -
+     *  whether a frame is a full-sync snapshot or a C2 delta/residual
+     *  update (roadmap doc §5/C2) and produces the final wire bytes
+     *  itself; every transport should prefer this over re-deriving bytes
+     *  from a SubjectList object, since only the caller knows which
+     *  encoding was actually used. `SubjectName` mirrors what Send(List)
+     *  implementations already extract from List.mItems[0]->mName for
+     *  stats/diagnostics - passed explicitly here since raw bytes don't
+     *  expose it without a redundant parse. Default returns false
+     *  (unsupported/dropped): a transport that hasn't been updated to
+     *  implement this doesn't support the byte-oriented path yet, and the
+     *  caller falls back to Send(List) for it. */
+    virtual bool SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName)
+    {
+        (void)Data; (void)Len; (void)SubjectName;
+        return false;
+    }
 
     /** Lightweight upkeep hook. MUST NOT block. */
     virtual void Tick(float DeltaSeconds) = 0;

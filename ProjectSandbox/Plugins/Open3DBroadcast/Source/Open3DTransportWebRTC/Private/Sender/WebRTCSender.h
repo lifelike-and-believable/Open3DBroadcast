@@ -31,6 +31,7 @@ public:
     virtual bool Start() override;
     virtual void Stop() override;
     virtual bool Send(const O3DS::SubjectList& List) override;
+    virtual bool SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName) override;
     virtual void Tick(float DeltaSeconds) override;
     virtual FO3DTransportStats GetStats() const override;
     virtual bool SupportsAudio() const override { return true; }
@@ -80,6 +81,7 @@ private:
 
     bool ShouldDropFrameDueToBackpressure() const;
     void UpdateFrameSendMetrics(int32 SubjectsInFrame);
+    bool SendBytes(const uint8* Data, int32 Len, const FString& SubjectName);
 
     // Token management (auto-fetch support)
     TUniquePtr<FO3DTokenManager> TokenManager;

@@ -11,6 +11,7 @@ public:
     virtual bool Start() override;
     virtual void Stop() override;
     virtual bool Send(const O3DS::SubjectList& List) override;
+    virtual bool SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName) override;
     virtual void Tick(float DeltaSeconds) override;
     virtual FO3DTransportStats GetStats() const override;
     virtual bool SupportsAudio() const override;
@@ -28,6 +29,8 @@ private:
     FO3DTransportAudioConfig ActiveAudioConfig;
     O3DAudio::FFrameEncoder AudioEncoder;
     FO3DTransportStats Stats;
+
+    bool SendBytes(const uint8* Data, int32 Len, const FString& SubjectName);
 
     bool EncodeAudioFrame(const FString& StreamLabelOverride,
         const FString& SubjectOverride,

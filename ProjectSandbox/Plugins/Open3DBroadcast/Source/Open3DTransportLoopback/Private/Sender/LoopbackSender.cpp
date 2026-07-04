@@ -169,11 +169,34 @@ bool FO3DLoopbackSender::Send(const O3DS::SubjectList& List)
         return false;
     }
 
+    return SendBytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten, SubjectName);
+}
+
+bool FO3DLoopbackSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName)
+{
+    if (!bInitialized || !Channel.IsValid() || Len <= 0)
+    {
+        return false;
+    }
+
+    if (Channel->PendingCount.load() >= Channel->Capacity)
+    {
+        Stats.DroppedFrames++;
+        UE_LOG(LogO3DLoopbackTransport, Verbose, TEXT("Loopback queue full for '%s'; dropping frame."), *ChannelKey);
+        return false;
+    }
+
+    return SendBytes(Data, Len, SubjectName.IsEmpty() ? ChannelKey : SubjectName);
+}
+
+/** Enqueue an already-serialized payload onto the loopback channel and record stats/subject bookkeeping. */
+bool FO3DLoopbackSender::SendBytes(const uint8* Data, int32 Len, const FString& SubjectName)
+{
     FO3DLoopbackPacket Packet;
     Packet.Subject = SubjectName;
-    Packet.TimestampSeconds = TimestampSeconds;
-    Packet.Payload.SetNumUninitialized(BytesWritten);
-    FMemory::Memcpy(Packet.Payload.GetData(), Buffer.data(), BytesWritten);
+    Packet.TimestampSeconds = FPlatformTime::Seconds();
+    Packet.Payload.SetNumUninitialized(Len);
+    FMemory::Memcpy(Packet.Payload.GetData(), Data, Len);
 
     Channel->SetLastSubjectName(SubjectName);
 
@@ -181,14 +204,14 @@ bool FO3DLoopbackSender::Send(const O3DS::SubjectList& List)
     Channel->PendingCount.fetch_add(1);
 
     Stats.FramesSent++;
-    Stats.BytesSent += BytesWritten;
+    Stats.BytesSent += Len;
 
     if (O3DLoopback::GetAudioDebugLevel() > 1)
     {
         UE_LOG(LogO3DLoopbackTransport, Verbose, TEXT("Loopback subject enqueued channel='%s' subject='%s' bytes=%d pending=%d"),
             *ChannelKey,
             *SubjectName,
-            BytesWritten,
+            Len,
             Channel->PendingCount.load());
     }
 

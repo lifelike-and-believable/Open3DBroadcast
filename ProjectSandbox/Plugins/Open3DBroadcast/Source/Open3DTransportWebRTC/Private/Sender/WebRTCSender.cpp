@@ -839,6 +839,123 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
     return bAnyFrameSucceeded;
 }
 
+bool FO3DWebRTCSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName)
+{
+    if (!bConnected.Load())
+    {
+        FO3DPerformanceMetrics::Get().RecordFrameDropped();
+        FScopeLock Lock(&StatsMutex);
+        Stats.DroppedFrames++;
+        return false;
+    }
+
+    if (ShouldDropFrameDueToBackpressure())
+    {
+        UE_LOG(LogO3DWebRTCSender, Warning,
+            TEXT("WebRTC backpressure: dropping frame (pending=%d)"),
+            EstimatedPendingFrames.Load());
+        FO3DPerformanceMetrics::Get().RecordFrameDropped();
+        FScopeLock Lock(&StatsMutex);
+        Stats.DroppedFrames++;
+        return false;
+    }
+
+    if (Len <= 0)
+    {
+        return false;
+    }
+
+    FO3DPerformanceMetrics::Get().RecordFrameCaptured();
+    FO3DPerformanceMetrics::Get().RecordBytesSerialized(Len);
+
+    const bool bSucceeded = SendBytes(Data, Len, SubjectName);
+    UpdateFrameSendMetrics(bSucceeded ? 1 : 0);
+
+    if (!bSucceeded)
+    {
+        FScopeLock Lock(&StatsMutex);
+        Stats.DroppedFrames++;
+    }
+
+    return bSucceeded;
+}
+
+/** Sends an already-serialized single-subject payload over a labeled LiveKit
+ *  data channel - the tail portion of Send(SubjectList&)'s per-subject loop
+ *  above (reliability selection, lk_send_data_ex, stats/backpressure
+ *  bookkeeping), reused here since SendSerialized() already has its bytes
+ *  and doesn't need Send()'s own pooled-serializer machinery to produce them. */
+bool FO3DWebRTCSender::SendBytes(const uint8* Data, int32 Len, const FString& SubjectName)
+{
+    constexpr int32 LossyMaxBytes = 1300;
+    constexpr int32 ReliableMaxBytes = 15000;
+
+    const bool bAllowLossy = bPreferLossyData;
+    LkReliability Reliability = bAllowLossy ? LkLossy : LkReliable;
+
+    if (bAllowLossy && Len > LossyMaxBytes)
+    {
+        if (Len <= ReliableMaxBytes)
+        {
+            Reliability = LkReliable;
+        }
+        else
+        {
+            UE_LOG(LogO3DWebRTCSender, Error,
+                TEXT("Subject '%s' payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton"),
+                *SubjectName, Len, ReliableMaxBytes);
+            return false;
+        }
+    }
+    else if (!bAllowLossy && Len > ReliableMaxBytes)
+    {
+        UE_LOG(LogO3DWebRTCSender, Error,
+            TEXT("Subject '%s' payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton"),
+            *SubjectName, Len, ReliableMaxBytes);
+        return false;
+    }
+
+    FString SubjectLabel = SubjectName;
+    if (SubjectLabel.IsEmpty())
+    {
+        SubjectLabel = TEXT("subject_0");
+    }
+
+    LkResult Result = lk_send_data_ex(
+        ClientHandle,
+        Data,
+        Len,
+        Reliability,
+        1, // ordered = true (preserve frame order)
+        TCHAR_TO_UTF8(*SubjectLabel)
+    );
+
+    if (Result.code != 0)
+    {
+        UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to send subject '%s': %s"),
+            *SubjectLabel, *FromAnsi(Result.message));
+        if (Result.message)
+        {
+            lk_free_str(const_cast<char*>(Result.message));
+        }
+        FO3DPerformanceMetrics::Get().RecordTransportFrameDropped();
+        return false;
+    }
+
+    FO3DPerformanceMetrics::Get().RecordBytesSent(Len);
+    FO3DPerformanceMetrics::Get().RecordTransportFrameSent(TEXT("WebRTC"), Len);
+
+    EstimatedPendingFrames.IncrementExchange();
+
+    {
+        FScopeLock Lock(&StatsMutex);
+        Stats.FramesSent++;
+        Stats.BytesSent += Len;
+    }
+
+    return true;
+}
+
 void FO3DWebRTCSender::Tick(float DeltaSeconds)
 {
     // LiveKit FFI handles internal event processing

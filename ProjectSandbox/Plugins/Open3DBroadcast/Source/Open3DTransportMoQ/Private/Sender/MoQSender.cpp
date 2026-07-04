@@ -292,10 +292,10 @@ bool FO3DMoQSender::Send(const O3DS::SubjectList& List)
 	FO3DPerformanceMetrics::Get().SetActiveSubjectCount(static_cast<int32>(List.mItems.size()));
 
 	// Capture subject name for audio association
+	FString ObservedSubject;
 	if (!List.mItems.empty() && List.mItems[0])
 	{
-		FScopeLock Lock(&SubjectNameLock);
-		LastSubjectName = UTF8_TO_TCHAR(List.mItems[0]->mName.c_str());
+		ObservedSubject = UTF8_TO_TCHAR(List.mItems[0]->mName.c_str());
 	}
 
 	std::vector<char> Buffer;
@@ -309,13 +309,42 @@ bool FO3DMoQSender::Send(const O3DS::SubjectList& List)
 
 	FO3DPerformanceMetrics::Get().RecordBytesSerialized(BytesWritten);
 
-	TArray<uint8> Payload;
-	Payload.SetNumUninitialized(BytesWritten);
-	if (BytesWritten > 0)
+	return SendBytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten, ObservedSubject);
+}
+
+bool FO3DMoQSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName)
+{
+	if (!bInitialized || !bRunning)
 	{
-		FMemory::Memcpy(Payload.GetData(), Buffer.data(), BytesWritten);
+		FO3DPerformanceMetrics::Get().RecordFrameDropped();
+		return false;
 	}
 
+	if (Len <= 0)
+	{
+		return false;
+	}
+
+	FO3DPerformanceMetrics::Get().RecordFrameCaptured();
+	FO3DPerformanceMetrics::Get().RecordBytesSerialized(Len);
+
+	return SendBytes(Data, Len, SubjectName);
+}
+
+/** Enqueue an already-serialized payload for the send worker and record transport-level stats/subject bookkeeping. */
+bool FO3DMoQSender::SendBytes(const uint8* Data, int32 Len, const FString& SubjectName)
+{
+	if (!SubjectName.IsEmpty())
+	{
+		FScopeLock Lock(&SubjectNameLock);
+		LastSubjectName = SubjectName;
+	}
+
+	TArray<uint8> Payload;
+	Payload.SetNumUninitialized(Len);
+	FMemory::Memcpy(Payload.GetData(), Data, Len);
+
+	const double TimestampSeconds = FPlatformTime::Seconds();
 	if (!EnqueuePayload(MoveTemp(Payload), TimestampSeconds, /*bIsAudio=*/false))
 	{
 		FO3DPerformanceMetrics::Get().RecordTransportFrameDropped();
@@ -326,8 +355,8 @@ bool FO3DMoQSender::Send(const O3DS::SubjectList& List)
 		return false;
 	}
 
-	FO3DPerformanceMetrics::Get().RecordBytesSent(BytesWritten);
-	FO3DPerformanceMetrics::Get().RecordTransportFrameSent(TEXT("MoQ"), BytesWritten);
+	FO3DPerformanceMetrics::Get().RecordBytesSent(Len);
+	FO3DPerformanceMetrics::Get().RecordTransportFrameSent(TEXT("MoQ"), Len);
 	return true;
 }
 

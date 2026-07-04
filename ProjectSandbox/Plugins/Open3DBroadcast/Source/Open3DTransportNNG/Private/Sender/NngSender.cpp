@@ -287,13 +287,43 @@ bool FO3DNngSender::Send(const O3DS::SubjectList& List)
     {
         ObservedSubject = UTF8_TO_TCHAR(List.mItems[0]->mName.c_str());
     }
-    if (!ObservedSubject.IsEmpty())
+
+    return SendBytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten, ObservedSubject);
+}
+
+bool FO3DNngSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName)
+{
+    if (!bInitialized.Load() || !bRunning.Load())
     {
-        FScopeLock SubjectLock(&SubjectNameLock);
-        LastSubjectName = MoveTemp(ObservedSubject);
+        FO3DPerformanceMetrics::Get().RecordFrameDropped();
+        return false;
     }
 
-    if (!EnqueuePayload(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten))
+    if (Len <= 0)
+    {
+        return false;
+    }
+
+    // The caller (FO3DSenderSerializer) already serialized these bytes -
+    // no RecordBytesSerialized()/RecordFrameCaptured() double-count here,
+    // since Send(SubjectList&) above is what owns that accounting for its
+    // own (self-serialized) path. Only transmission-side metrics apply.
+    FO3DPerformanceMetrics::Get().RecordFrameCaptured();
+    FO3DPerformanceMetrics::Get().RecordBytesSerialized(Len);
+
+    return SendBytes(Data, Len, SubjectName);
+}
+
+/** Enqueue already-serialized bytes for transmission and record transport-level stats/subject bookkeeping. */
+bool FO3DNngSender::SendBytes(const uint8* Data, int32 Len, const FString& SubjectName)
+{
+    if (!SubjectName.IsEmpty())
+    {
+        FScopeLock SubjectLock(&SubjectNameLock);
+        LastSubjectName = SubjectName;
+    }
+
+    if (!EnqueuePayload(Data, Len))
     {
         FScopeLock StatsLock(&StatsMutex);
         Stats.DroppedFrames++;
@@ -302,8 +332,8 @@ bool FO3DNngSender::Send(const O3DS::SubjectList& List)
     }
 
     // Record successful send metrics
-    FO3DPerformanceMetrics::Get().RecordBytesSent(BytesWritten);
-    FO3DPerformanceMetrics::Get().RecordTransportFrameSent(TEXT("NNG"), BytesWritten);
+    FO3DPerformanceMetrics::Get().RecordBytesSent(Len);
+    FO3DPerformanceMetrics::Get().RecordTransportFrameSent(TEXT("NNG"), Len);
 
     return true;
 }
