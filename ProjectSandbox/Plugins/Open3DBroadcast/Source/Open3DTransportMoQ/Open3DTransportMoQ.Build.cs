@@ -146,7 +146,8 @@ public class Open3DTransportMoQ : ModuleRules
             {
                 "Slate",
                 "SlateCore",
-                "AppFramework"
+                "AppFramework",
+                "InputCore" // EKeys symbols used by SComboBox/SListView's key-handling (see Open3DTransportNNG, the other module using SComboBox directly)
             });
         }
     }
