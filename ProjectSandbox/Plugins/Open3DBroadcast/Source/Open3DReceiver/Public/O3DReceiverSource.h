@@ -14,6 +14,7 @@
 #include "o3ds/model.h"
 #include "o3ds/reorder_gate.h"
 #include "o3ds/clock_offset.h"
+#include "o3ds/predict/concealment.h"
 
 #include <atomic>
 
@@ -77,6 +78,18 @@ private:
 
     void ResetOrderingState();
     void EnsureValidTransportName();
+
+    // C1: receiver-side concealment (roadmap doc §5/C1). One ConcealmentEngine
+    // per subject, matching the same per-subject-map convention as
+    // SubjectTransformCaches etc. Only active for the A2-gated path (a real
+    // sender-clock-mapped presentation time is required - see
+    // ObserveConcealmentRealFrame's WorldTimeSecondsOverride guard); the
+    // legacy/ungated path has no reliable clock domain to reason about gaps
+    // in, so it's left exactly as it behaves today (freeze-on-loss).
+    O3DS::ConcealmentEngine& GetOrCreateSubjectConcealment(FName SubjectName);
+    void ObserveConcealmentRealFrame(FName SubjectName, double PresentationTimeSeconds, const TArray<FTransform>& BoneTransforms, const TArray<float>& CurveValues, bool bTopologyChanged);
+    void TickConcealment();
+    void ReportConcealmentMetricsDelta();
 
     bool ParseSubjectListBuffer(const FString& Subject, const TArray<uint8>& Buffer);
     bool ParseSubjectListRaw(const FString& Subject, const char* Data, size_t Len);
@@ -153,4 +166,15 @@ private:
     O3DS::ClockOffsetEstimator ClockEstimator;
     O3DS::ReorderStats PrevGateStats; // last-reported snapshot, for delta metrics reporting
     FString LastGateSubjectLabel;     // diagnostic-only subject label for the gate's emit path
+
+    // C1: cached from the most recent ClockEstimator::Observe() (in
+    // EmitGatedFrame) so TickConcealment() can compute "the mapped
+    // presentation time right now" without a real frame arriving -
+    // mapped_now = FPlatformTime::Seconds() + LastClockOffsetEstimateUs/1e6,
+    // the same conversion EmitGatedFrame already does for an actual sample.
+    int64 LastClockOffsetEstimateUs = 0;
+    bool bHasClockOffsetEstimate = false;
+
+    TMap<FName, TUniquePtr<O3DS::ConcealmentEngine>> SubjectConcealment;
+    TMap<FName, O3DS::ConcealmentMetrics> PrevConcealmentMetricsBySubject; // last-reported snapshot per subject, for delta metrics reporting
 };

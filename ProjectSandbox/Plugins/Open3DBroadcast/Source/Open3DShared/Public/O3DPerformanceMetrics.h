@@ -97,6 +97,22 @@ public:
 		TAtomic<double> AvgClockOffsetMs{ 0.0 };
 		TAtomic<double> AvgJitterMs{ 0.0 };
 
+		// C1: receiver-side concealment (see O3DS::ConcealmentEngine / roadmap
+		// doc §5/C1.d). Counters are cumulative deltas summed across all
+		// per-subject engines and all receiver sources sharing this singleton,
+		// the same convention as GateDupDropped etc. above. The error/pop
+		// averages are gauges (last-writer-wins snapshot of whichever
+		// subject/source most recently had a recovery), same simplification
+		// as AvgClockOffsetMs/GateBufferOccupancy.
+		TAtomic<uint64> ConcealedFrames{ 0 };            // TryConceal() returned true (predicted or held)
+		TAtomic<uint64> ConcealmentFallbackHolds{ 0 };   // ...of which, held rather than freshly predicted
+		TAtomic<uint64> ConcealmentCorrectionFrames{ 0 }; // frames output during a post-recovery correction blend
+		TAtomic<uint64> ConcealmentRecoveries{ 0 };      // concealment spans that ended in a real-frame recovery
+		TAtomic<double> AvgConcealmentPredictionTranslationError{ 0.0 }; // scene units
+		TAtomic<double> AvgConcealmentPredictionRotationErrorDeg{ 0.0 };
+		TAtomic<double> AvgConcealmentPopTranslation{ 0.0 }; // discontinuity at recovery - what concealment should reduce vs Hold
+		TAtomic<double> AvgConcealmentPopRotationDeg{ 0.0 };
+
 		// Timestamps
 		FDateTime MetricsStartTime = FDateTime::Now();
 		FDateTime LastApplyTime = FDateTime::Now();
@@ -229,6 +245,23 @@ public:
 
 	/** Record one frame's clock-offset estimate and jitter (excess delay), both in ms. */
 	void RecordClockOffsetSampleMs(double OffsetMs, double JitterMs);
+
+	// C1.d: concealment metrics. Counters take a delta (not a cumulative
+	// total), same convention as the gate counters above.
+	FORCEINLINE void RecordConcealedFrames(uint64 Delta) { ReceiverMetrics.ConcealedFrames += Delta; }
+	FORCEINLINE void RecordConcealmentFallbackHolds(uint64 Delta) { ReceiverMetrics.ConcealmentFallbackHolds += Delta; }
+	FORCEINLINE void RecordConcealmentCorrectionFrames(uint64 Delta) { ReceiverMetrics.ConcealmentCorrectionFrames += Delta; }
+	FORCEINLINE void RecordConcealmentRecoveries(uint64 Delta) { ReceiverMetrics.ConcealmentRecoveries += Delta; }
+	FORCEINLINE void SetConcealmentPredictionError(double TranslationUnits, double RotationDegrees)
+	{
+		ReceiverMetrics.AvgConcealmentPredictionTranslationError.Store(TranslationUnits);
+		ReceiverMetrics.AvgConcealmentPredictionRotationErrorDeg.Store(RotationDegrees);
+	}
+	FORCEINLINE void SetConcealmentPop(double TranslationUnits, double RotationDegrees)
+	{
+		ReceiverMetrics.AvgConcealmentPopTranslation.Store(TranslationUnits);
+		ReceiverMetrics.AvgConcealmentPopRotationDeg.Store(RotationDegrees);
+	}
 
 	// =====================================================================
 	// TRANSPORT SIDE API

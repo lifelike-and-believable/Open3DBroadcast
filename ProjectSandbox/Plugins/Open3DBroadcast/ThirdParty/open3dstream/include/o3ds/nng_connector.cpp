@@ -205,6 +205,7 @@ namespace O3DS
 		if (msglen > len)
 		{
 			Connector::setError("Message too large");
+			nng_msg_free(msg);
 			return false;
 		}
 
@@ -216,7 +217,11 @@ namespace O3DS
 			return false;
 		}
 
-		memcpy(data, msgBody, len);
+		// Copy only the bytes actually present in the message body; msglen is
+		// already verified <= len above, so this can't overflow the caller's
+		// buffer, but copying `len` here would over-read msgBody whenever the
+		// message is shorter than the caller's buffer.
+		memcpy(data, msgBody, msglen);
 
 		nng_msg_free(msg);
 
@@ -245,10 +250,19 @@ namespace O3DS
 			return 0;
 
 		size_t msglen = nng_msg_len(msg);
-		if (msglen > *len)
+		if (*data == nullptr)
 		{
+			*data = (char*)malloc(msglen);
+			if (!*data) { nng_msg_free(msg); return 0; }
+			*len = msglen;
+		}
+		else if (msglen > *len)
+		{
+			// realloc may move the block; *data must be updated to the new
+			// address or the memcpy below writes through a dangling pointer.
 			char* buf = (char*)realloc(*data, msglen);
-			if (!buf) return 0;
+			if (!buf) { nng_msg_free(msg); return 0; }
+			*data = buf;
 			*len = msglen;
 		}
 
