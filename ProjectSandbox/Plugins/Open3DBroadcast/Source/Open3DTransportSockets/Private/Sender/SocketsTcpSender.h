@@ -16,6 +16,7 @@ class FInternetAddr;
 class FSocketsTcpSenderAudioSink;
 class FRunnableThread;
 class FEvent;
+class FO3DSocketsTcpSender;
 
 /**
  * Shared between FO3DSocketsTcpSender and any audio sinks it hands out.

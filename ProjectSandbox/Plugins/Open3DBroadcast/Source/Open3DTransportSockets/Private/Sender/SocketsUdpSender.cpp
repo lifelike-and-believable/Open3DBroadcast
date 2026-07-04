@@ -179,7 +179,7 @@ bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
 	{
 		UE_LOG(LogSocketsUdpSender, Verbose, TEXT("UDP sender failed to serialize SubjectList."));
 		{
-			FScopeLock Lock(&StatsMutex);
+			FScopeLock StatsLock(&StatsMutex);
 			Stats.DroppedFrames++;
 		}
 		return false;
@@ -187,21 +187,21 @@ bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
 
 	if (!ObservedSubject.IsEmpty())
 	{
-		FScopeLock Lock(&SubjectNameLock);
+		FScopeLock NameLock(&SubjectNameLock);
 		LastSubjectName = MoveTemp(ObservedSubject);
 	}
 
 	if (!SendPayload(Socket, RemoteAddr, reinterpret_cast<const uint8*>(SerializationScratch.data()), BytesWritten, TEXT("data")))
 	{
 		{
-			FScopeLock Lock(&StatsMutex);
+			FScopeLock StatsLock(&StatsMutex);
 			Stats.DroppedFrames++;
 		}
 		return false;
 	}
 
 	{
-		FScopeLock Lock(&StatsMutex);
+		FScopeLock StatsLock(&StatsMutex);
 		Stats.FramesSent++;
 		Stats.BytesSent += BytesWritten;
 	}

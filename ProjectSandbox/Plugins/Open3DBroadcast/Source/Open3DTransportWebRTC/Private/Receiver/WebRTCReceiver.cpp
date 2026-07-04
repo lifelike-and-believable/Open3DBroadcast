@@ -5,7 +5,7 @@
 #include "Interfaces/IPluginManager.h"
 #include "Logging/LogMacros.h"
 #include "Misc/Paths.h"
-#include "Templates/NumericLimits.h"
+#include "Math/NumericLimits.h"
 #include "livekit_ffi.h"
 #include "o3ds/model.h"
 

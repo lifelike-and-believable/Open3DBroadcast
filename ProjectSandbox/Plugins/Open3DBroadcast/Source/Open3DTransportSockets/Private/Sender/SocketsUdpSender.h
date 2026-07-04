@@ -14,6 +14,7 @@ class FSocket;
 class ISocketSubsystem;
 class FInternetAddr;
 class FSocketsUdpSenderAudioSink;
+class FO3DSocketsUdpSender;
 
 /**
  * Shared between FO3DSocketsUdpSender and any audio sinks it hands out.
