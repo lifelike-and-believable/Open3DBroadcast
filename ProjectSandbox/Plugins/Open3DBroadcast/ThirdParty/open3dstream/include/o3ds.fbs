@@ -91,12 +91,32 @@ table SubjectUpdate {
   rotation:[RotationUpdate];
   scale:[ScaleUpdate];
   curves:[CurveUpdate];
+
+  // Appended (C2, roadmap doc §5/C2): residual-coding metadata. Defaults
+  // (0/false) exactly preserve today's legacy last-pose-delta behavior -
+  // an old reader simply ignores these fields (FlatBuffers is
+  // forward-compatible), and a new reader must treat predictor_id==0 as
+  // "the values above are absolute, not residuals" regardless of
+  // is_keyframe, i.e. today's ParseUpdate contract, unchanged. NOT the
+  // same enumeration as O3DS::IPosePredictor::Version() (Hold=0/Linear=1/
+  // Quadratic=2) - see O3DS::ResidualPredictorId's own doc comment for why
+  // that collision (0 meaning two different things) would be dangerous.
+  predictor_id:uint = 0;
+  is_keyframe:bool = false;
 }
 
 table SubjectList {
    subjects:[Subject];
    updates:[SubjectUpdate];
    time:double;
+
+   // Appended fields (do not reorder/remove the above; append-only from here).
+   // 0 == unset on all three; a receiver must treat 0 exactly like an old
+   // sender that never set these fields (see ReorderGate legacy bypass).
+   tx_seq:ulong = 0;            // monotonic per logical (sender->receiver) stream, not per process
+   tx_wallclock_us:ulong = 0;   // UTC microseconds at transmit; distinct from `time` (content clock)
+   frame_epoch:uint = 0;        // bumped once per publisher process/session; lets a receiver detect
+                                 // a sender restart unambiguously instead of guessing from a seq backward-jump
 }
 
 

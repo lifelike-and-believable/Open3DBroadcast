@@ -720,7 +720,9 @@ struct SubjectUpdate FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     VT_TRANSLATIONS = 6,
     VT_ROTATION = 8,
     VT_SCALE = 10,
-    VT_CURVES = 12
+    VT_CURVES = 12,
+    VT_PREDICTOR_ID = 14,
+    VT_IS_KEYFRAME = 16
   };
   const flatbuffers::String *name() const {
     return GetPointer<const flatbuffers::String *>(VT_NAME);
@@ -737,6 +739,12 @@ struct SubjectUpdate FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   const flatbuffers::Vector<const O3DS::Data::CurveUpdate *> *curves() const {
     return GetPointer<const flatbuffers::Vector<const O3DS::Data::CurveUpdate *> *>(VT_CURVES);
   }
+  uint32_t predictor_id() const {
+    return GetField<uint32_t>(VT_PREDICTOR_ID, 0);
+  }
+  bool is_keyframe() const {
+    return GetField<uint8_t>(VT_IS_KEYFRAME, 0) != 0;
+  }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_NAME) &&
@@ -749,6 +757,8 @@ struct SubjectUpdate FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            verifier.VerifyVector(scale()) &&
            VerifyOffset(verifier, VT_CURVES) &&
            verifier.VerifyVector(curves()) &&
+           VerifyField<uint32_t>(verifier, VT_PREDICTOR_ID, 4) &&
+           VerifyField<uint8_t>(verifier, VT_IS_KEYFRAME, 1) &&
            verifier.EndTable();
   }
 };
@@ -772,6 +782,12 @@ struct SubjectUpdateBuilder {
   void add_curves(flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> curves) {
     fbb_.AddOffset(SubjectUpdate::VT_CURVES, curves);
   }
+  void add_predictor_id(uint32_t predictor_id) {
+    fbb_.AddElement<uint32_t>(SubjectUpdate::VT_PREDICTOR_ID, predictor_id, 0);
+  }
+  void add_is_keyframe(bool is_keyframe) {
+    fbb_.AddElement<uint8_t>(SubjectUpdate::VT_IS_KEYFRAME, static_cast<uint8_t>(is_keyframe), 0);
+  }
   explicit SubjectUpdateBuilder(flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -789,13 +805,17 @@ inline flatbuffers::Offset<SubjectUpdate> CreateSubjectUpdate(
     flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::TranslationUpdate *>> translations = 0,
     flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::RotationUpdate *>> rotation = 0,
     flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::ScaleUpdate *>> scale = 0,
-    flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> curves = 0) {
+    flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> curves = 0,
+    uint32_t predictor_id = 0,
+    bool is_keyframe = false) {
   SubjectUpdateBuilder builder_(_fbb);
+  builder_.add_predictor_id(predictor_id);
   builder_.add_curves(curves);
   builder_.add_scale(scale);
   builder_.add_rotation(rotation);
   builder_.add_translations(translations);
   builder_.add_name(name);
+  builder_.add_is_keyframe(is_keyframe);
   return builder_.Finish();
 }
 
@@ -805,7 +825,9 @@ inline flatbuffers::Offset<SubjectUpdate> CreateSubjectUpdateDirect(
     const std::vector<O3DS::Data::TranslationUpdate> *translations = nullptr,
     const std::vector<O3DS::Data::RotationUpdate> *rotation = nullptr,
     const std::vector<O3DS::Data::ScaleUpdate> *scale = nullptr,
-    const std::vector<O3DS::Data::CurveUpdate> *curves = nullptr) {
+    const std::vector<O3DS::Data::CurveUpdate> *curves = nullptr,
+    uint32_t predictor_id = 0,
+    bool is_keyframe = false) {
   auto name__ = name ? _fbb.CreateString(name) : 0;
   auto translations__ = translations ? _fbb.CreateVectorOfStructs<O3DS::Data::TranslationUpdate>(*translations) : 0;
   auto rotation__ = rotation ? _fbb.CreateVectorOfStructs<O3DS::Data::RotationUpdate>(*rotation) : 0;
@@ -817,7 +839,9 @@ inline flatbuffers::Offset<SubjectUpdate> CreateSubjectUpdateDirect(
       translations__,
       rotation__,
       scale__,
-      curves__);
+      curves__,
+      predictor_id,
+      is_keyframe);
 }
 
 struct SubjectList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {

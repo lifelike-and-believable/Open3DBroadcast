@@ -18,6 +18,8 @@ add_executable(o3ds_core_tests
 	pose_predictor_tests.cpp
 	concealment_tests.cpp
 	udp_fragment_tests.cpp
+	residual_codec_tests.cpp
+	model_residual_tests.cpp
 )
 
 target_link_libraries(o3ds_core_tests PRIVATE open3dstreamstatic)
