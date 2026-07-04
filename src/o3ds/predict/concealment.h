@@ -67,6 +67,14 @@ namespace O3DS
 		//! (C1.b). Does not rewrite any already-applied frame - it only
 		//! shapes what TryConceal() returns for the next little while.
 		double correctionWindowSeconds = 0.10;
+
+		//! C1.c: latency-hiding/render-ahead horizon (seconds) beyond the
+		//! newest real frame's own timestamp. 0 (the default) disables
+		//! render-ahead entirely - TryRenderAhead() always returns false.
+		//! Opt-in and separate from the gap/horizon/correction tunables
+		//! above: see TryRenderAhead()'s own doc comment for why it doesn't
+		//! reuse that machinery.
+		double renderAheadSeconds = 0.0;
 	};
 
 	//! Running counters/aggregates for the C1.d HUD metrics. "Prediction
@@ -102,6 +110,8 @@ namespace O3DS
 		double popTranslationMax = 0.0;
 		double popRotationRadiansSum = 0.0;
 		double popRotationRadiansMax = 0.0;
+
+		uint64_t renderAheadFrameCount = 0; //!< TryRenderAhead() produced a frame (C1.c, opt-in) - a simple counter, not error-scored like the loss-recovery metrics above
 
 		double MeanPredictionTranslationError() const { return predictionSampleCount ? predictionTranslationErrorSum / (double)predictionSampleCount : 0.0; }
 		double MeanPredictionRotationErrorRadians() const { return predictionSampleCount ? predictionRotationErrorRadiansSum / (double)predictionSampleCount : 0.0; }
@@ -149,6 +159,36 @@ namespace O3DS
 		//! topology change / version mismatch / large sequence gap, same
 		//! triggers as IPosePredictor::Reset() (ties to A1.c re-baseline).
 		void Reset();
+
+		//! C1.c: latency-hiding/render-ahead (opt-in, disabled by default via
+		//! ConcealmentConfig::renderAheadSeconds == 0). Proactively predicts
+		//! renderAheadSeconds beyond the newest real frame's own timestamp,
+		//! regardless of whether an actual gap has opened - unlike
+		//! TryConceal(), which only engages past starvationThresholdSeconds.
+		//!
+		//! Call this only when TryConceal() returned false for the same
+		//! presentation instant (i.e. real data is flowing close to
+		//! on-time): a genuine loss/lateness event is already better served
+		//! by TryConceal()'s horizon-bounded, correction-blended handling.
+		//! This method deliberately never touches mConcealing/mCorrecting or
+		//! the loss-recovery metrics above - folding routine render-ahead
+		//! operation into that bookkeeping would misreport nearly every real
+		//! frame arrival as a "recovery" (render-ahead's gap, measured
+		//! against mLastReal, is by design almost always larger than
+		//! starvationThresholdSeconds) and corrupt the prediction-error/pop
+		//! metrics C1.d relies on to measure actual gap-recovery quality.
+		//!
+		//! Deliberately takes no `tNow`/presentation-clock argument: the
+		//! target is always relative to the newest real frame's own
+		//! timestamp, never to the receiver's mapped presentation time -
+		//! this is what keeps it from double-counting A2.c's LiveLink
+		//! buffer offset (the roadmap's C1.c warning): there is no
+		//! presentation-clock offset here to double-count in the first
+		//! place.
+		//!
+		//! Returns false (outPose untouched) when render-ahead is disabled
+		//! (renderAheadSeconds <= 0) or there's no real-frame history yet.
+		bool TryRenderAhead(PoseSample& outPose);
 
 		const ConcealmentMetrics& Metrics() const { return mMetrics; }
 

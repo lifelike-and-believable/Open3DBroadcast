@@ -258,6 +258,26 @@ namespace O3DS
 		return true;
 	}
 
+	bool ConcealmentEngine::TryRenderAhead(PoseSample& outPose)
+	{
+		if (!mHasHistory || mConfig.renderAheadSeconds <= 0.0) return false;
+
+		const double target = mLastReal.t + mConfig.renderAheadSeconds;
+		PoseSample predicted;
+		if (!mPredictor->Predict(target, predicted))
+		{
+			// Insufficient predictor history: hold the last real pose rather
+			// than fabricate motion (mirrors TryConceal()'s own no-history
+			// fallback further down its gap-triggered path).
+			predicted = mLastReal;
+			predicted.t = target;
+		}
+
+		outPose = predicted;
+		++mMetrics.renderAheadFrameCount;
+		return true;
+	}
+
 	void ConcealmentEngine::Reset()
 	{
 		mPredictor->Reset();
