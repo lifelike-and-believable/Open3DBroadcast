@@ -23,6 +23,9 @@
 #include "O3DPerformanceMetrics.h"
 
 #include "o3ds_generated.h"
+#include "o3ds/sequencing.h"
+
+#include <utility>
 
 #define LOCTEXT_NAMESPACE "O3DReceiverSource"
 
@@ -204,6 +207,13 @@ void FO3DReceiverSource::Tick(float DeltaTime)
     {
         ActiveReceiver->Poll();
     }
+
+    // A2.a: release any gap-buffered frames whose wait has timed out even when no
+    // new frame arrives to trigger it via Push. Confined to the game thread, same
+    // as HandleSerializedFrame - see ReceiverGate's declaration comment.
+    const double NowS = FPlatformTime::Seconds();
+    ReceiverGate.Flush(NowS, [this](O3DS::Frame&& F) { EmitGatedFrame(std::move(F)); });
+    ReportGateMetricsDelta();
 
     if (TimeSinceLastActivityCheck >= ActivityCheckIntervalSeconds)
     {
@@ -435,9 +445,17 @@ void FO3DReceiverSource::RemoveInactiveSubjects()
     }
 }
 
-/** Entry point from the serialized consumer; parses payloads then pushes LiveLink updates. */
-void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds)
+/** Entry point from the serialized consumer; peeks sequencing metadata, then either
+ *  routes through the A1 reorder gate (senders that set tx_seq) or falls back to the
+ *  pre-A1 legacy dedup/reorder path unchanged (senders that don't). */
+void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds, uint64 ArrivalEpochUsOverride)
 {
+    // Capture the true arrival instant exactly once, on whichever thread this frame
+    // first arrived on - not after a possible transport-thread -> game-thread hop
+    // below, which would otherwise fold scheduling delay into the gated path's
+    // jitter/offset estimate (see ArrivalEpochUsOverride's doc comment on the header).
+    const uint64 ArrivalEpochUs = (ArrivalEpochUsOverride != 0) ? ArrivalEpochUsOverride : O3DS::NowUtcMicros();
+
     if (!Client || !bIsValid)
     {
         return;
@@ -451,11 +469,11 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
     {
         TWeakPtr<FO3DReceiverSource> WeakSelf = AsShared();
         TArray<uint8> BufferCopy(Buffer);
-        AsyncTask(ENamedThreads::GameThread, [WeakSelf, Subject, TimestampSeconds, BufferCopy = MoveTemp(BufferCopy)]() mutable
+        AsyncTask(ENamedThreads::GameThread, [WeakSelf, Subject, TimestampSeconds, ArrivalEpochUs, BufferCopy = MoveTemp(BufferCopy)]() mutable
         {
             if (TSharedPtr<FO3DReceiverSource> Pinned = WeakSelf.Pin())
             {
-                Pinned->HandleSerializedFrame(Subject, BufferCopy, TimestampSeconds);
+                Pinned->HandleSerializedFrame(Subject, BufferCopy, TimestampSeconds, ArrivalEpochUs);
             }
         });
         return;
@@ -467,25 +485,44 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
         bLoggedActiveState = true;
     }
 
+    // A2.a: peek tx_seq/tx_wallclock_us/frame_epoch without a full FlatBuffer parse
+    // (O3DS::SubjectList::PeekMeta verifies the buffer first, so this is safe on
+    // malformed input). This lets reorder/dedup/stale-drop happen before the
+    // expensive parse+apply, so a superseded frame is never fully parsed.
+    uint64 TxSeq = 0, TxWallclockUs = 0;
+    uint32 FrameEpoch = 0;
+    const bool bHasSeq = O3DS::SubjectList::PeekMeta(
+        reinterpret_cast<const char*>(Buffer.GetData()), (size_t)Buffer.Num(),
+        TxSeq, TxWallclockUs, FrameEpoch) && TxSeq != 0;
+
+    if (!bHasSeq)
+    {
+        // Legacy sender (no tx_seq): behaves exactly as before A1/A2.
+        HandleLegacyFrame(Subject, Buffer, TimestampSeconds);
+        return;
+    }
+
+    O3DS::Frame Frame;
+    Frame.seq = TxSeq;
+    Frame.wallclock_us = TxWallclockUs;
+    Frame.epoch = FrameEpoch;
+    Frame.local_recv_us = ArrivalEpochUs; // true arrival instant - see Frame's doc comment
+    Frame.bytes.assign(reinterpret_cast<const char*>(Buffer.GetData()),
+        reinterpret_cast<const char*>(Buffer.GetData()) + Buffer.Num());
+
+    LastGateSubjectLabel = Subject;
+
+    const double NowS = FPlatformTime::Seconds();
+    ReceiverGate.Push(std::move(Frame), NowS, [this](O3DS::Frame&& F) { EmitGatedFrame(std::move(F)); });
+    ReportGateMetricsDelta();
+}
+
+/** Legacy (pre-A1) path for senders that don't set tx_seq: full parse, then
+ *  SubjectList.time-based dedup/reorder suppression, then apply. */
+void FO3DReceiverSource::HandleLegacyFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds)
+{
     const double ParseStartWall = FPlatformTime::Seconds();
 
-    // PHASE 6 OPTIMIZATION: DISABLED
-    // Attempted to peek timestamp before deserialization to skip duplicate/out-of-order frames,
-    // but FlatBuffer verification was too strict and rejected valid frames, breaking receiver animation.
-    // Measured impact was minimal anyway (~0.16-0.19% of frames), so full deserialization is safer.
-    // Keeping TryPeekSubjectListTime() method for potential future use with different strategy (e.g., unsafe raw access).
-    //
-    // double PeekedTime = -1.0;
-    // if (TryPeekSubjectListTime(Buffer, PeekedTime))
-    // {
-    //     if (!ShouldProcessFrame(PeekedTime, ParseStartWall))
-    //     {
-    //         FO3DPerformanceMetrics::Get().RecordReceiverFrameDropped();
-    //         return;
-    //     }
-    // }
-
-    // Deserialize frame - full parsing required for reliable operation
     const double ParseTimingStart = FPlatformTime::Seconds();
     if (!ParseSubjectListBuffer(Subject, Buffer))
     {
@@ -496,7 +533,6 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
     FO3DPerformanceMetrics::Get().RecordParseTimeMs(ParseTimeMs);
 
     const double SubjectListTime = SubjectScratch.mTime;
-    // Re-check (in case peek wasn't accurate, though it should match)
     if (!ShouldProcessFrame(SubjectListTime, ParseStartWall))
     {
         FO3DPerformanceMetrics::Get().RecordReceiverFrameDropped();
@@ -525,7 +561,7 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
     int32 PoseUpdateCount = 0;
     for (O3DS::Subject* SubjectPtr : SubjectScratch)
     {
-        ProcessParsedSubject(SubjectPtr, SubjectListTime, BoneNames, BoneParents, BoneTransforms, CurveNames, CurveValues);
+        ProcessParsedSubject(SubjectPtr, SubjectListTime, -1.0, BoneNames, BoneParents, BoneTransforms, CurveNames, CurveValues);
         ++PoseUpdateCount;
     }
 
@@ -553,83 +589,128 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
     }
 }
 
+/** The A1 ReorderGate's emit callback: full parse + apply for a frame the gate has
+ *  determined is in-order (called synchronously from Push, or later from Flush for
+ *  a frame that was buffered waiting on a gap). Maps the sender's tx_wallclock onto
+ *  local engine time (A2.b/A2.c) instead of the legacy path's "apply-time" stamp. */
+void FO3DReceiverSource::EmitGatedFrame(O3DS::Frame&& Frame)
+{
+    if (!Client || !bIsValid)
+    {
+        return;
+    }
+
+    const double ParseStartWall = FPlatformTime::Seconds();
+
+    if (!ParseSubjectListRaw(LastGateSubjectLabel, Frame.bytes.data(), Frame.bytes.size()))
+    {
+        FO3DPerformanceMetrics::Get().RecordDeserializationError();
+        return;
+    }
+    const double ParseTimeMs = (FPlatformTime::Seconds() - ParseStartWall) * 1000.0;
+    FO3DPerformanceMetrics::Get().RecordParseTimeMs(ParseTimeMs);
+
+    const double SubjectListTime = SubjectScratch.mTime;
+
+    FO3DPerformanceMetrics::Get().RecordFrameApplied();
+
+    // A2.b/A2.c: map tx_wallclock_us onto local engine time. Observe() uses
+    // Frame.local_recv_us (the true arrival instant, not "now") so gate-buffering
+    // wait never gets misattributed as network jitter. The estimator's result is in
+    // epoch microseconds; the (NowEpochUs, NowPlatformS) pair taken back-to-back
+    // right here is purely an anchor to translate that into FPlatformTime::Seconds()
+    // terms - the two clocks tick at the same rate, so this conversion holds
+    // regardless of when it's taken, as long as both readings are simultaneous.
+    // Falls back to "now" (this frame's true arrival time, via Observe()'s own
+    // tx_wallclock_us==0 handling) when the sender didn't set tx_wallclock_us,
+    // matching the roadmap's A2.c legacy-timestamp fallback.
+    auto Sample = ClockEstimator.Observe(Frame.wallclock_us, Frame.local_recv_us);
+    const uint64 NowEpochUs = O3DS::NowUtcMicros();
+    const double NowPlatformS = FPlatformTime::Seconds();
+    const double MappedWorldTimeSeconds = NowPlatformS +
+        (double)((int64)Sample.mapped_presentation_time_us - (int64)NowEpochUs) / 1.0e6;
+
+    if (Frame.wallclock_us != 0)
+    {
+        FO3DPerformanceMetrics::Get().RecordClockOffsetSampleMs(
+            (double)Sample.offset_estimate_us / 1000.0,
+            (double)Sample.excess_delay_us / 1000.0);
+    }
+
+    TArray<FName> BoneNames;
+    TArray<int32> BoneParents;
+    TArray<FTransform> BoneTransforms;
+    TArray<FName> CurveNames;
+    TArray<float> CurveValues;
+
+    const double PoseExtractionStartTime = FPlatformTime::Seconds();
+    int32 PoseUpdateCount = 0;
+    for (O3DS::Subject* SubjectPtr : SubjectScratch)
+    {
+        ProcessParsedSubject(SubjectPtr, SubjectListTime, MappedWorldTimeSeconds, BoneNames, BoneParents, BoneTransforms, CurveNames, CurveValues);
+        ++PoseUpdateCount;
+    }
+    const double PoseExtractionTimeMs = (FPlatformTime::Seconds() - PoseExtractionStartTime) * 1000.0;
+    FO3DPerformanceMetrics::Get().RecordPoseExtractionTimeMs(PoseExtractionTimeMs);
+
+    if (PoseUpdateCount > 0)
+    {
+        FO3DPerformanceMetrics::Get().RecordPoseUpdate();
+    }
+
+    FO3DPerformanceMetrics::Get().SetReceiverActiveSubjectCount(static_cast<int32>(SubjectScratch.mItems.size()));
+
+    const double TotalProcessingTimeMs = (FPlatformTime::Seconds() - ParseStartWall) * 1000.0;
+    FO3DPerformanceMetrics::Get().RecordTotalProcessingTimeMs(TotalProcessingTimeMs);
+
+    if (CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0)
+    {
+        UE_LOG(LogO3DReceiverSource, VeryVerbose, TEXT("Processed gated subject list (subjects=%d bytes=%d seq=%llu)"),
+            static_cast<int32>(SubjectScratch.mItems.size()), (int32)Frame.bytes.size(), Frame.seq);
+    }
+}
+
+/** Report the ReorderGate's stats as a delta against the last-reported snapshot (so
+ *  multiple receiver sources correctly aggregate into the shared metrics singleton,
+ *  the same convention as FramesReceived etc. - see FReceiverMetrics's doc comment). */
+void FO3DReceiverSource::ReportGateMetricsDelta()
+{
+    const O3DS::ReorderStats& Stats = ReceiverGate.Stats();
+    auto Delta = [](uint64 NewVal, uint64 OldVal) -> uint64 { return NewVal >= OldVal ? (NewVal - OldVal) : 0; };
+
+    const uint64 DeltaDup = Delta(Stats.dup_dropped, PrevGateStats.dup_dropped);
+    const uint64 DeltaStale = Delta(Stats.stale_dropped, PrevGateStats.stale_dropped);
+    const uint64 DeltaLost = Delta(Stats.lost, PrevGateStats.lost);
+    const uint64 DeltaReordered = Delta(Stats.reordered, PrevGateStats.reordered);
+
+    FO3DPerformanceMetrics& Metrics = FO3DPerformanceMetrics::Get();
+    if (DeltaDup) Metrics.RecordGateDupDropped(DeltaDup);
+    if (DeltaStale) Metrics.RecordGateStaleDropped(DeltaStale);
+    if (DeltaLost) Metrics.RecordGateLost(DeltaLost);
+    if (DeltaReordered) Metrics.RecordGateReordered(DeltaReordered);
+    if (DeltaDup || DeltaStale) Metrics.RecordReceiverFrameDropped(DeltaDup + DeltaStale);
+
+    Metrics.SetGateBufferOccupancy(static_cast<int32>(ReceiverGate.PendingCount()));
+
+    PrevGateStats = Stats;
+}
+
 /** Parse the FlatBuffer payload into a reusable SubjectList scratch structure. */
 bool FO3DReceiverSource::ParseSubjectListBuffer(const FString& Subject, const TArray<uint8>& Buffer)
 {
-    if (!SubjectScratch.Parse(reinterpret_cast<const char*>(Buffer.GetData()), Buffer.Num(), nullptr, true))
+    return ParseSubjectListRaw(Subject, reinterpret_cast<const char*>(Buffer.GetData()), (size_t)Buffer.Num());
+}
+
+/** Parse the FlatBuffer payload (raw pointer form, used by the gate's emit path
+ *  since its payload is a std::vector<char> rather than a TArray<uint8>). */
+bool FO3DReceiverSource::ParseSubjectListRaw(const FString& Subject, const char* Data, size_t Len)
+{
+    if (!SubjectScratch.Parse(Data, Len, nullptr, true))
     {
-        UE_LOG(LogO3DReceiverSource, Warning, TEXT("Parse failed for subject '%s' (%d bytes)"), *Subject, Buffer.Num());
+        UE_LOG(LogO3DReceiverSource, Warning, TEXT("Parse failed for subject '%s' (%d bytes)"), *Subject, (int32)Len);
         return false;
     }
     return true;
-}
-
-/**
- * PHASE 6 OPTIMIZATION: Peek at the timestamp field in the FlatBuffer WITHOUT full deserialization.
- *
- * FlatBuffers are lazy-evaluation - we can access individual fields by their offset
- * without parsing the entire structure. This lets us check timestamps before
- * committing to expensive deserialization of duplicate/out-of-order frames.
- *
- * Performance impact: Saves deserialization cost for ~0.16-0.19% of received frames.
- *
- * @param Buffer The serialized FlatBuffer data
- * @param OutTime Reference to receive the timestamp value
- * @return True if timestamp was successfully extracted, False if buffer too small or invalid
- */
-bool FO3DReceiverSource::TryPeekSubjectListTime(const TArray<uint8>& Buffer, double& OutTime)
-{
-    // FlatBuffer minimum size check: need at least the root table pointer + some overhead
-    if (Buffer.Num() < 12)
-    {
-        return false;
-    }
-
-    try
-    {
-        // SAFETY: Verify the buffer structure before attempting to access any fields.
-        // This prevents crashes from corrupted or malformed buffers by validating the vtable
-        // and field offsets before dereferencing any pointers.
-        flatbuffers::Verifier Verifier(Buffer.GetData(), Buffer.Num());
-        if (!O3DS::Data::VerifySubjectListBuffer(Verifier))
-        {
-            if (CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0)
-            {
-                UE_LOG(LogO3DReceiverSource, Warning, TEXT("TryPeekSubjectListTime: Buffer verification failed (corrupted FlatBuffer)"));
-            }
-            return false;
-        }
-
-        // Now safe to access the buffer - verification confirmed structure is valid
-        const O3DS::Data::SubjectList* FlatBufferRoot =
-            O3DS::Data::GetSubjectList(static_cast<const void*>(Buffer.GetData()));
-
-        if (!FlatBufferRoot)
-        {
-            return false;
-        }
-
-        // Call time() which is a simple field accessor in FlatBuffers
-        // This retrieves just the VT_TIME field at its offset without parsing transforms/subjects
-        OutTime = FlatBufferRoot->time();
-        return true;
-    }
-    catch (const std::exception& Ex)
-    {
-        if (CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0)
-        {
-            UE_LOG(LogO3DReceiverSource, Warning, TEXT("TryPeekSubjectListTime exception: %s"), ANSI_TO_TCHAR(Ex.what()));
-        }
-        return false;
-    }
-    catch (...)
-    {
-        if (CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0)
-        {
-            UE_LOG(LogO3DReceiverSource, Warning, TEXT("TryPeekSubjectListTime unknown exception"));
-        }
-        return false;
-    }
 }
 
 /** Apply duplicate/out-of-order suppression while keeping activity timestamps in sync. */
@@ -818,7 +899,7 @@ void FO3DReceiverSource::BuildSubjectCurves(O3DS::Subject* SubjectPtr, TArray<FN
 }
 
 /** Build LiveLink static/frame data and push it to the client for a single parsed subject. */
-void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double SubjectListTime, TArray<FName>& BoneNames, TArray<int32>& BoneParents, TArray<FTransform>& BoneTransforms, TArray<FName>& CurveNames, TArray<float>& CurveValues)
+void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double SubjectListTime, double WorldTimeSecondsOverride, TArray<FName>& BoneNames, TArray<int32>& BoneParents, TArray<FTransform>& BoneTransforms, TArray<FName>& CurveNames, TArray<float>& CurveValues)
 {
     if (!SubjectPtr)
     {
@@ -964,7 +1045,7 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
     }
 
     const double FrameStartTime = FPlatformTime::Seconds();
-    PushSubjectFrameData(SubjectKey, BoneTransforms, CurveNames, CurveValues, SubjectListTime, CurveHash);
+    PushSubjectFrameData(SubjectKey, BoneTransforms, CurveNames, CurveValues, SubjectListTime, WorldTimeSecondsOverride, CurveHash);
     const double FrameTimeMs = (FPlatformTime::Seconds() - FrameStartTime) * 1000.0;
 
     // Log if frame push is slow (primary blocking suspect)
@@ -1064,7 +1145,7 @@ void FO3DReceiverSource::PushSubjectStaticData(const FLiveLinkSubjectKey& Subjec
     Client->PushSubjectStaticData_AnyThread(SubjectKey, ULiveLinkAnimationRole::StaticClass(), MoveTemp(StaticDataStruct));
 }
 
-void FO3DReceiverSource::PushSubjectFrameData(const FLiveLinkSubjectKey& SubjectKey, const TArray<FTransform>& BoneTransforms, const TArray<FName>& CurveNames, const TArray<float>& CurveValues, double TimestampSeconds, uint64 CurveHash)
+void FO3DReceiverSource::PushSubjectFrameData(const FLiveLinkSubjectKey& SubjectKey, const TArray<FTransform>& BoneTransforms, const TArray<FName>& CurveNames, const TArray<float>& CurveValues, double TimestampSeconds, double WorldTimeSecondsOverride, uint64 CurveHash)
 {
     if (!Client)
     {
@@ -1079,7 +1160,9 @@ void FO3DReceiverSource::PushSubjectFrameData(const FLiveLinkSubjectKey& Subject
 
     FrameData.Transforms = BoneTransforms;
     BaseFrameData.PropertyValues = CurveValues;
-    BaseFrameData.WorldTime = FPlatformTime::Seconds();
+    // A2.c: use the sender-clock-mapped presentation time when available (gated
+    // path), falling back to today's apply-time stamp for legacy/ungated frames.
+    BaseFrameData.WorldTime = (WorldTimeSecondsOverride >= 0.0) ? WorldTimeSecondsOverride : FPlatformTime::Seconds();
     BaseFrameData.MetaData.SceneTime = FQualifiedFrameTime();
     BaseFrameData.MetaData.StringMetaData.Add(TEXT("CurveHash"), FString::Printf(TEXT("0x%016llx"), static_cast<unsigned long long>(CurveHash)));
     BaseFrameData.MetaData.StringMetaData.Add(TEXT("SubjectListTime"), FString::Printf(TEXT("%.6f"), TimestampSeconds));
@@ -1092,6 +1175,16 @@ void FO3DReceiverSource::PushSubjectFrameData(const FLiveLinkSubjectKey& Subject
 void FO3DReceiverSource::ResetOrderingState()
 {
     LastAppliedSubjectListTime = -1.0;
+    // A2.a: a transport restart starts a clean gate/estimator session too, so
+    // stale sequence/epoch/offset state from a previous connection never bleeds
+    // into a new one. Note this is also reachable from the legacy path's own
+    // silence/timestamp-jump reset (ShouldResetOrderingWindow), so a stream that
+    // mixes tx_seq and non-tx_seq frames would have a legacy-triggered reset also
+    // wipe the gate's buffered frames/epoch tracking - a real caveat only for that
+    // mixed-stream case, not for a source that's purely gated or purely legacy.
+    ReceiverGate = O3DS::ReorderGate();
+    ClockEstimator = O3DS::ClockOffsetEstimator();
+    PrevGateStats = O3DS::ReorderStats();
 }
 
 #undef LOCTEXT_NAMESPACE

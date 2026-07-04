@@ -47,6 +47,13 @@ void FO3DPerformanceMetrics::Reset()
 	ReceiverMetrics.PoseUpdates.Store(0);
 	ReceiverMetrics.AvgRoundTripLatencyMs.Store(0.0);
 	ReceiverMetrics.MaxLatencyMs.Store(0.0);
+	ReceiverMetrics.GateDupDropped.Store(0);
+	ReceiverMetrics.GateStaleDropped.Store(0);
+	ReceiverMetrics.GateLost.Store(0);
+	ReceiverMetrics.GateReordered.Store(0);
+	ReceiverMetrics.GateBufferOccupancy.Store(0);
+	ReceiverMetrics.AvgClockOffsetMs.Store(0.0);
+	ReceiverMetrics.AvgJitterMs.Store(0.0);
 	ReceiverMetrics.MetricsStartTime = FDateTime::Now();
 
 	// Transport metrics
@@ -119,6 +126,17 @@ void FO3DPerformanceMetrics::RecordFrameLatency(double LatencyMs)
 	{
 		ReceiverMetrics.MaxLatencyMs.Store(LatencyMs);
 	}
+}
+
+void FO3DPerformanceMetrics::RecordClockOffsetSampleMs(double OffsetMs, double JitterMs)
+{
+	const double Alpha = 0.2;
+
+	const double CurrentOffsetAvg = ReceiverMetrics.AvgClockOffsetMs.Load();
+	ReceiverMetrics.AvgClockOffsetMs.Store((CurrentOffsetAvg * (1.0 - Alpha)) + (OffsetMs * Alpha));
+
+	const double CurrentJitterAvg = ReceiverMetrics.AvgJitterMs.Load();
+	ReceiverMetrics.AvgJitterMs.Store((CurrentJitterAvg * (1.0 - Alpha)) + (JitterMs * Alpha));
 }
 
 // =====================================================================
@@ -352,6 +370,25 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg Total Processing Time: %.3f ms"), AvgTotalProcessing);
 			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
 		}
+
+		// A2: reorder gate / clock-offset diagnostics
+		{
+			uint64 GateLost = ReceiverMetrics.GateLost.Load();
+			uint64 GateReordered = ReceiverMetrics.GateReordered.Load();
+			uint64 GateDupDropped = ReceiverMetrics.GateDupDropped.Load();
+			uint64 GateStaleDropped = ReceiverMetrics.GateStaleDropped.Load();
+			int32 GateOccupancy = ReceiverMetrics.GateBufferOccupancy.Load();
+			double AvgOffset = ReceiverMetrics.AvgClockOffsetMs.Load();
+			double AvgJitter = ReceiverMetrics.AvgJitterMs.Load();
+
+			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("[RECEIVER - REORDER GATE / CLOCK MAPPING]"));
+			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Lost: %llu, Reordered: %llu, Duplicate: %llu, Stale: %llu"),
+				GateLost, GateReordered, GateDupDropped, GateStaleDropped);
+			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Gate Buffer Occupancy: %d"), GateOccupancy);
+			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg Clock Offset (relative unless clocks declared synced): %.2f ms"), AvgOffset);
+			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg Jitter (excess delay above rolling-min floor): %.2f ms"), AvgJitter);
+			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+		}
 	}
 
 	// ========== TRANSPORT METRICS ==========
@@ -423,6 +460,13 @@ FString FO3DPerformanceMetrics::GetMetricsAsCSV() const
 	CSV += FString::Printf(TEXT("ReceiverFramesDropped,%llu\n"), ReceiverMetrics.FramesDropped.Load());
 	CSV += FString::Printf(TEXT("ReceiverBytesDeserialized,%llu\n"), ReceiverMetrics.BytesDeserialized.Load());
 	CSV += FString::Printf(TEXT("AvgRoundTripLatencyMs,%.2f\n"), ReceiverMetrics.AvgRoundTripLatencyMs.Load());
+	CSV += FString::Printf(TEXT("GateLost,%llu\n"), ReceiverMetrics.GateLost.Load());
+	CSV += FString::Printf(TEXT("GateReordered,%llu\n"), ReceiverMetrics.GateReordered.Load());
+	CSV += FString::Printf(TEXT("GateDupDropped,%llu\n"), ReceiverMetrics.GateDupDropped.Load());
+	CSV += FString::Printf(TEXT("GateStaleDropped,%llu\n"), ReceiverMetrics.GateStaleDropped.Load());
+	CSV += FString::Printf(TEXT("GateBufferOccupancy,%d\n"), ReceiverMetrics.GateBufferOccupancy.Load());
+	CSV += FString::Printf(TEXT("AvgClockOffsetMs,%.2f\n"), ReceiverMetrics.AvgClockOffsetMs.Load());
+	CSV += FString::Printf(TEXT("AvgJitterMs,%.2f\n"), ReceiverMetrics.AvgJitterMs.Load());
 
 	return CSV;
 }

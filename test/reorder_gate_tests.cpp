@@ -69,6 +69,26 @@ O3DS_TEST(ReorderGate_ReorderRecovered)
 	O3DS_CHECK_EQ(gate.Stats().lost, (uint64_t)0);
 }
 
+O3DS_TEST(ReorderGate_PendingCount_ReflectsBufferedGap)
+{
+	ReorderGate gate;
+	Delivered out;
+
+	O3DS_CHECK_EQ(gate.PendingCount(), (size_t)0);
+
+	gate.Push(MakeFrame(100), 0.0, out.Sink());
+	O3DS_CHECK_EQ(gate.PendingCount(), (size_t)0);
+
+	gate.Push(MakeFrame(102), 0.0, out.Sink()); // buffered - waiting on 101
+	O3DS_CHECK_EQ(gate.PendingCount(), (size_t)1);
+
+	gate.Push(MakeFrame(103), 0.0, out.Sink()); // also buffered
+	O3DS_CHECK_EQ(gate.PendingCount(), (size_t)2);
+
+	gate.Push(MakeFrame(101), 0.0, out.Sink()); // fills the gap, drains both
+	O3DS_CHECK_EQ(gate.PendingCount(), (size_t)0);
+}
+
 O3DS_TEST(ReorderGate_StaleAfterSuccessor_Dropped)
 {
 	// 100, 101, 99 -> emit 100,101; 99 dropped stale; lost==0

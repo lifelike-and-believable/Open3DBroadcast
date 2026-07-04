@@ -504,8 +504,9 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		return static_cast<int>(outbuf.size());
 	}
 
-	int SubjectList::Serialize(std::vector<char> &outbuf, double timestamp)
-	{	
+	int SubjectList::Serialize(std::vector<char> &outbuf, double timestamp,
+		uint64_t tx_seq, uint64_t tx_wallclock_us, uint32_t frame_epoch)
+	{
 		if(timestamp == 0.0) timestamp = GetTime();
 
 		flatbuffers::FlatBufferBuilder builder;
@@ -520,7 +521,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		auto ovSubjects = builder.CreateVector(subjects);
 
-		auto root = CreateSubjectList(builder, ovSubjects, 0, timestamp);
+		auto root = CreateSubjectList(builder, ovSubjects, 0, timestamp, tx_seq, tx_wallclock_us, frame_epoch);
 
 		builder.Finish(root);
 
@@ -554,7 +555,8 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 	// Subject List
 
-	int SubjectList::SerializeUpdate(std::vector<char> &outbuf, size_t& count, double timestamp)
+	int SubjectList::SerializeUpdate(std::vector<char> &outbuf, size_t& count, double timestamp,
+		uint64_t tx_seq, uint64_t tx_wallclock_us, uint32_t frame_epoch)
 	{
 		if (timestamp == 0.0)
 		{
@@ -566,19 +568,47 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		std::vector<flatbuffers::Offset<O3DS::Data::SubjectUpdate>> outSubjectUpdates;
 
 		for (auto& subject : this->mItems)
-		{			
+		{
 			outSubjectUpdates.push_back(subject->SerializeUpdate(builder, count, mDeltaThreshold));
 		}
 
 		auto ovSubjectUpdates = builder.CreateVector(outSubjectUpdates);
 
-		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp);
+		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, tx_seq, tx_wallclock_us, frame_epoch);
 
 		builder.Finish(root);
 
 		finalize(builder, outbuf, 1);
 
 		return static_cast<int>(outbuf.size());
+	}
+
+	bool SubjectList::PeekMeta(const char* data, size_t len,
+		uint64_t& outTxSeq, uint64_t& outTxWallclockUs, uint32_t& outFrameEpoch)
+	{
+		outTxSeq = 0;
+		outTxWallclockUs = 0;
+		outFrameEpoch = 0;
+
+		// Header is 8 bytes (flags + CRC) followed by the FlatBuffers payload;
+		// reject anything too short before doing arithmetic on len or
+		// dereferencing data (len - 8 would otherwise underflow).
+		if (data == nullptr || len < 8)
+			return false;
+
+		flatbuffers::Verifier verifier(
+			reinterpret_cast<const uint8_t*>(data + 8), len - 8);
+		if (!O3DS::Data::VerifySubjectListBuffer(verifier))
+			return false;
+
+		auto root = GetSubjectList(data + 8);
+		if (root == nullptr)
+			return false;
+
+		outTxSeq = root->tx_seq();
+		outTxWallclockUs = root->tx_wallclock_us();
+		outFrameEpoch = root->frame_epoch();
+		return true;
 	}
 
 	bool SubjectList::Parse(const char *data, size_t len, TransformBuilder *builder, bool clearInactive)

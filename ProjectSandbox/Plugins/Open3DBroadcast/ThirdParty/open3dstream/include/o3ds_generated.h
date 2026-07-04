@@ -825,7 +825,10 @@ struct SubjectList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_SUBJECTS = 4,
     VT_UPDATES = 6,
-    VT_TIME = 8
+    VT_TIME = 8,
+    VT_TX_SEQ = 10,
+    VT_TX_WALLCLOCK_US = 12,
+    VT_FRAME_EPOCH = 14
   };
   const flatbuffers::Vector<flatbuffers::Offset<O3DS::Data::Subject>> *subjects() const {
     return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<O3DS::Data::Subject>> *>(VT_SUBJECTS);
@@ -836,6 +839,15 @@ struct SubjectList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   double time() const {
     return GetField<double>(VT_TIME, 0.0);
   }
+  uint64_t tx_seq() const {
+    return GetField<uint64_t>(VT_TX_SEQ, 0);
+  }
+  uint64_t tx_wallclock_us() const {
+    return GetField<uint64_t>(VT_TX_WALLCLOCK_US, 0);
+  }
+  uint32_t frame_epoch() const {
+    return GetField<uint32_t>(VT_FRAME_EPOCH, 0);
+  }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_SUBJECTS) &&
@@ -845,6 +857,9 @@ struct SubjectList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            verifier.VerifyVector(updates()) &&
            verifier.VerifyVectorOfTables(updates()) &&
            VerifyField<double>(verifier, VT_TIME, 8) &&
+           VerifyField<uint64_t>(verifier, VT_TX_SEQ, 8) &&
+           VerifyField<uint64_t>(verifier, VT_TX_WALLCLOCK_US, 8) &&
+           VerifyField<uint32_t>(verifier, VT_FRAME_EPOCH, 4) &&
            verifier.EndTable();
   }
 };
@@ -862,6 +877,15 @@ struct SubjectListBuilder {
   void add_time(double time) {
     fbb_.AddElement<double>(SubjectList::VT_TIME, time, 0.0);
   }
+  void add_tx_seq(uint64_t tx_seq) {
+    fbb_.AddElement<uint64_t>(SubjectList::VT_TX_SEQ, tx_seq, 0);
+  }
+  void add_tx_wallclock_us(uint64_t tx_wallclock_us) {
+    fbb_.AddElement<uint64_t>(SubjectList::VT_TX_WALLCLOCK_US, tx_wallclock_us, 0);
+  }
+  void add_frame_epoch(uint32_t frame_epoch) {
+    fbb_.AddElement<uint32_t>(SubjectList::VT_FRAME_EPOCH, frame_epoch, 0);
+  }
   explicit SubjectListBuilder(flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -877,9 +901,15 @@ inline flatbuffers::Offset<SubjectList> CreateSubjectList(
     flatbuffers::FlatBufferBuilder &_fbb,
     flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<O3DS::Data::Subject>>> subjects = 0,
     flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<O3DS::Data::SubjectUpdate>>> updates = 0,
-    double time = 0.0) {
+    double time = 0.0,
+    uint64_t tx_seq = 0,
+    uint64_t tx_wallclock_us = 0,
+    uint32_t frame_epoch = 0) {
   SubjectListBuilder builder_(_fbb);
+  builder_.add_tx_wallclock_us(tx_wallclock_us);
+  builder_.add_tx_seq(tx_seq);
   builder_.add_time(time);
+  builder_.add_frame_epoch(frame_epoch);
   builder_.add_updates(updates);
   builder_.add_subjects(subjects);
   return builder_.Finish();
@@ -889,14 +919,20 @@ inline flatbuffers::Offset<SubjectList> CreateSubjectListDirect(
     flatbuffers::FlatBufferBuilder &_fbb,
     const std::vector<flatbuffers::Offset<O3DS::Data::Subject>> *subjects = nullptr,
     const std::vector<flatbuffers::Offset<O3DS::Data::SubjectUpdate>> *updates = nullptr,
-    double time = 0.0) {
+    double time = 0.0,
+    uint64_t tx_seq = 0,
+    uint64_t tx_wallclock_us = 0,
+    uint32_t frame_epoch = 0) {
   auto subjects__ = subjects ? _fbb.CreateVector<flatbuffers::Offset<O3DS::Data::Subject>>(*subjects) : 0;
   auto updates__ = updates ? _fbb.CreateVector<flatbuffers::Offset<O3DS::Data::SubjectUpdate>>(*updates) : 0;
   return O3DS::Data::CreateSubjectList(
       _fbb,
       subjects__,
       updates__,
-      time);
+      time,
+      tx_seq,
+      tx_wallclock_us,
+      frame_epoch);
 }
 
 struct Curve FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
