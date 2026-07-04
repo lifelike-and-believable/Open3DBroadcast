@@ -255,6 +255,70 @@ O3DS_TEST(ResidualRoundTrip_NoisyMotionWithRealisticThreshold_StaysBoundedOverMa
 	}
 }
 
+O3DS_TEST(ResidualRoundTrip_LargeMagnitudeValues_QuantizationErrorStaysBoundedNotGrowing)
+{
+	// Regression for a real bug an adversarial (Copilot) review found: for
+	// a SENT channel, `reconstructed` (Commit()'d into the encoder's
+	// predictor history) was left at the sender's full double-precision
+	// `actual` value, but the wire only ever carries a float32 residual -
+	// the receiver reconstructs `ref + (double)float(residual)`, which is
+	// NOT bit-identical to `actual`. Committing the un-quantized value
+	// broke the lockstep requirement (encoder and decoder must Observe()
+	// the exact same value) and, via LinearPredictor's extrapolation,
+	// would compound that tiny per-frame quantization gap into a GROWING
+	// divergence over many frames - not just a fixed, harmless rounding
+	// artifact. Uses large translation magnitudes (~1e5 units) specifically
+	// because float32's absolute precision there (~0.01 units) is coarse
+	// enough to matter, and a realistic per-frame threshold (1e-6) at that
+	// magnitude means virtually every frame's residual clears it and gets
+	// sent - continuously exercising the exact "Commit() the reconstructed
+	// value, not actual" code path this test is for.
+	SubjectList sender;
+	BuildSkeleton(sender, "Actor");
+	Subject* senderSubject = sender.findSubject("Actor");
+	senderSubject->SetResidualEncoder(std::make_unique<ResidualEncoder>(ResidualPredictorId::Linear, /*keyframeIntervalFrames*/ 0));
+	sender.SetDeltaThreshold(1.0e-6);
+
+	std::vector<char> fullBuf;
+	O3DS_CHECK(sender.Serialize(fullBuf) > 0);
+	SubjectList receiver;
+	O3DS_CHECK(receiver.Parse(fullBuf.data(), fullBuf.size()));
+	Subject* receiverSubject = receiver.findSubject("Actor");
+	receiverSubject->SetResidualDecoder(std::make_unique<ResidualDecoder>(ResidualPredictorId::Linear));
+
+	const double baseX = 100000.0;
+	const double velocity = 137.0; // arbitrary, non-round to avoid accidental exactness
+	double firstError = -1.0, lastError = -1.0;
+
+	for (int i = 1; i <= 200; ++i)
+	{
+		double t = i * 0.02;
+		senderSubject->mTransforms[0]->translation.value = Vector3d(baseX + velocity * t, 0.0, 0.0);
+
+		size_t count = 0;
+		std::vector<char> buf;
+		O3DS_CHECK(sender.SerializeUpdateResidual(buf, count, t) > 0);
+		O3DS_CHECK(receiver.Parse(buf.data(), buf.size()));
+
+		const double error = std::abs(receiverSubject->mTransforms[0]->translation.value.v[0] - senderSubject->mTransforms[0]->translation.value.v[0]);
+
+		// Bounded by float32 precision at this magnitude (generously -
+		// float32 epsilon * 2*baseX is ~0.012), not by anything that
+		// grows with frame count. The old bug would blow well past this
+		// within a few dozen frames as LinearPredictor's extrapolation
+		// compounds the per-frame quantization gap.
+		O3DS_CHECK(error < 0.1);
+
+		if (i == 3) firstError = error;   // first frame with a real (2-sample) prediction
+		lastError = error;
+	}
+
+	// The clearest signal of "bounded" vs "growing": the error late in
+	// the run must not be materially larger than it was near the start.
+	O3DS_CHECK(firstError >= 0.0);
+	O3DS_CHECK(lastError < firstError * 10.0 + 0.01);
+}
+
 O3DS_TEST(ResidualRoundTrip_TopologyChangeMidStream_ResyncsWithoutMisalignment)
 {
 	// Regression for the topology-change safety gap an adversarial review

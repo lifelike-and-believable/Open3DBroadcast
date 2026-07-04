@@ -523,13 +523,25 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		int transformId = 0;
 		for (const auto& tform : this->mTransforms)
 		{
+			const Vector3d refTrans = ((size_t)transformId < refTransCount) ? reference.translations[transformId] : Vector3d(0.0, 0.0, 0.0);
+			const Quat refRot = ((size_t)transformId < refRotCount) ? reference.rotations[transformId] : Quat(0.0, 0.0, 0.0, 0.0);
+
 			if (tform->nan())
 			{
+				// `reconstructed` started as a copy of `actual`, which
+				// carries this channel's NaN straight from ToPoseSample()
+				// (nan() isn't checked there). Committing a NaN into the
+				// predictor's history would poison every later
+				// Predict()/Observe() for this subject via ordinary
+				// floating-point NaN propagation - fall back to the
+				// reference value instead, exactly like a genuinely
+				// omitted (unsent) channel.
+				reconstructed.translations[transformId] = refTrans;
+				reconstructed.rotations[transformId] = refRot;
 				transformId++;
 				continue;
 			}
 
-			const Vector3d refTrans = ((size_t)transformId < refTransCount) ? reference.translations[transformId] : Vector3d(0.0, 0.0, 0.0);
 			// A keyframe must include every channel unconditionally (it
 			// exists to fully resync a receiver joining mid-stream or
 			// recovering from loss - omitting a channel just because it's
@@ -537,28 +549,42 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			// deltaThreshold gate applies to residual (non-keyframe) frames.
 			if (isKeyframe || dist(tform->translation.value, refTrans) > deltaThreshold)
 			{
-				translations.push_back(O3DS::Data::TranslationUpdate(
-					(float)(tform->translation.value.v[0] - refTrans.v[0]),
-					(float)(tform->translation.value.v[1] - refTrans.v[1]),
-					(float)(tform->translation.value.v[2] - refTrans.v[2]),
-					transformId));
+				// Round-trip through float explicitly (not just at
+				// serialization time) so `reconstructed` - what gets
+				// Commit()'d into the predictor's history - matches
+				// exactly what the receiver reconstructs (ref + the
+				// float-precision residual actually on the wire), not the
+				// sender's own full double-precision `actual`. Committing
+				// anything more precise would desync the two sides'
+				// history the moment this channel is next predicted from.
+				const float residualX = (float)(tform->translation.value.v[0] - refTrans.v[0]);
+				const float residualY = (float)(tform->translation.value.v[1] - refTrans.v[1]);
+				const float residualZ = (float)(tform->translation.value.v[2] - refTrans.v[2]);
+				translations.push_back(O3DS::Data::TranslationUpdate(residualX, residualY, residualZ, transformId));
 				count++;
+				reconstructed.translations[transformId] = Vector3d(
+					refTrans.v[0] + (double)residualX,
+					refTrans.v[1] + (double)residualY,
+					refTrans.v[2] + (double)residualZ);
 			}
 			else
 			{
 				reconstructed.translations[transformId] = refTrans;
 			}
 
-			const Quat refRot = ((size_t)transformId < refRotCount) ? reference.rotations[transformId] : Quat(0.0, 0.0, 0.0, 0.0);
 			if (isKeyframe || dist(tform->rotation.value, refRot) > deltaThreshold)
 			{
-				rotations.push_back(O3DS::Data::RotationUpdate(
-					(float)(tform->rotation.value.v[0] - refRot.v[0]),
-					(float)(tform->rotation.value.v[1] - refRot.v[1]),
-					(float)(tform->rotation.value.v[2] - refRot.v[2]),
-					(float)(tform->rotation.value.v[3] - refRot.v[3]),
-					transformId));
+				const float residualX = (float)(tform->rotation.value.v[0] - refRot.v[0]);
+				const float residualY = (float)(tform->rotation.value.v[1] - refRot.v[1]);
+				const float residualZ = (float)(tform->rotation.value.v[2] - refRot.v[2]);
+				const float residualW = (float)(tform->rotation.value.v[3] - refRot.v[3]);
+				rotations.push_back(O3DS::Data::RotationUpdate(residualX, residualY, residualZ, residualW, transformId));
 				count++;
+				reconstructed.rotations[transformId] = Quat(
+					refRot.v[0] + (double)residualX,
+					refRot.v[1] + (double)residualY,
+					refRot.v[2] + (double)residualZ,
+					refRot.v[3] + (double)residualW);
 			}
 			else
 			{
@@ -990,6 +1016,13 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		const O3DS::Data::SubjectUpdate *inUpdate,
 		TransformBuilder *builder)
 	{
+		// name/translations/rotation/scale are all optional (non-
+		// `required`) fields in the schema, same as curves() below - a
+		// well-formed sender can legitimately omit any of them, and this
+		// is untrusted network input, so dereferencing them
+		// unconditionally is a crash waiting to happen.
+		if (inUpdate->name() == nullptr)
+			return;
 		std::string name = inUpdate->name()->str();
 		int id;
 
@@ -1000,31 +1033,37 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		// Update TRS
 
-		for (auto inTranslation : *inUpdate->translations())
-		{
-			id = inTranslation->i();
-			if (id < outSubject->mTransforms.size())
-				*inTranslation >> outSubject->mTransforms[id]->translation;
-			else
-				break;
+		if (inUpdate->translations()) {
+			for (auto inTranslation : *inUpdate->translations())
+			{
+				id = inTranslation->i();
+				if (id < outSubject->mTransforms.size())
+					*inTranslation >> outSubject->mTransforms[id]->translation;
+				else
+					break;
+			}
 		}
 
-		for (auto inRotation : *inUpdate->rotation())
-		{
-			id = inRotation->i();
-			if (id < outSubject->mTransforms.size())
-				*inRotation >> outSubject->mTransforms[id]->rotation;
-			else
-				break;
+		if (inUpdate->rotation()) {
+			for (auto inRotation : *inUpdate->rotation())
+			{
+				id = inRotation->i();
+				if (id < outSubject->mTransforms.size())
+					*inRotation >> outSubject->mTransforms[id]->rotation;
+				else
+					break;
+			}
 		}
 
-		for (auto inScale : *inUpdate->scale())
-		{
-			id = inScale->i();
-			if (id < outSubject->mTransforms.size())
-				*inScale >> outSubject->mTransforms[id]->scale;
-			else
-				break;
+		if (inUpdate->scale()) {
+			for (auto inScale : *inUpdate->scale())
+			{
+				id = inScale->i();
+				if (id < outSubject->mTransforms.size())
+					*inScale >> outSubject->mTransforms[id]->scale;
+				else
+					break;
+			}
 		}
 
 		// Curve updates
@@ -1054,6 +1093,17 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		const ResidualPredictorId wireId = static_cast<ResidualPredictorId>(inUpdate->predictor_id());
 
+		// predictor_id is untrusted network input - Parse()'s dispatch
+		// already guarantees it's nonzero here, but a corrupt or
+		// forward-incompatible value (anything this build doesn't
+		// recognize) would make MakePredictorForId() return nullptr, and
+		// a ResidualDecoder built around a null predictor crashes on its
+		// very first BeginFrame()/EndFrame() call. Drop the update rather
+		// than construct one, matching ParseSubject's "skip what we can't
+		// parse" posture for untrusted input.
+		if (wireId != ResidualPredictorId::Hold && wireId != ResidualPredictorId::Linear && wireId != ResidualPredictorId::Quadratic)
+			return;
+
 		O3DS::ResidualDecoder* decoder = outSubject->GetResidualDecoder();
 		if (!decoder || decoder->Id() != wireId)
 		{
@@ -1069,7 +1119,6 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		}
 
 		decoder->BeginFrame(inUpdate->is_keyframe(), this->mTime);
-		const bool isKeyframe = decoder->IsKeyframe();
 		const PoseSample& reference = decoder->Reference();
 
 		const size_t refTransCount = reference.translations.size();
@@ -1099,29 +1148,38 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			outSubject->mCurveValues[i] = reference.curves[i];
 
 		int id;
-		for (auto inTranslation : *inUpdate->translations())
-		{
-			id = inTranslation->i();
-			if (id < 0 || (size_t)id >= outSubject->mTransforms.size())
-				continue;
-			const Vector3d refTrans = ((size_t)id < refTransCount) ? reference.translations[id] : Vector3d(0.0, 0.0, 0.0);
-			outSubject->mTransforms[id]->translation = O3DS::TransformTranslation(
-				refTrans.v[0] + inTranslation->x(),
-				refTrans.v[1] + inTranslation->y(),
-				refTrans.v[2] + inTranslation->z());
+		// translations()/rotation() are optional (non-`required`) fields
+		// in the schema, same as curves() below - a well-formed sender
+		// can legitimately omit them (e.g. a frame with no translation
+		// changes at all), and untrusted network input could omit them
+		// deliberately, so dereferencing them unconditionally is a crash.
+		if (inUpdate->translations()) {
+			for (auto inTranslation : *inUpdate->translations())
+			{
+				id = inTranslation->i();
+				if (id < 0 || (size_t)id >= outSubject->mTransforms.size())
+					continue;
+				const Vector3d refTrans = ((size_t)id < refTransCount) ? reference.translations[id] : Vector3d(0.0, 0.0, 0.0);
+				outSubject->mTransforms[id]->translation = O3DS::TransformTranslation(
+					refTrans.v[0] + inTranslation->x(),
+					refTrans.v[1] + inTranslation->y(),
+					refTrans.v[2] + inTranslation->z());
+			}
 		}
 
-		for (auto inRotation : *inUpdate->rotation())
-		{
-			id = inRotation->i();
-			if (id < 0 || (size_t)id >= outSubject->mTransforms.size())
-				continue;
-			const Quat refRot = ((size_t)id < refRotCount) ? reference.rotations[id] : Quat(0.0, 0.0, 0.0, 0.0);
-			outSubject->mTransforms[id]->rotation = O3DS::TransformRotation(
-				refRot.v[0] + inRotation->x(),
-				refRot.v[1] + inRotation->y(),
-				refRot.v[2] + inRotation->z(),
-				refRot.v[3] + inRotation->w());
+		if (inUpdate->rotation()) {
+			for (auto inRotation : *inUpdate->rotation())
+			{
+				id = inRotation->i();
+				if (id < 0 || (size_t)id >= outSubject->mTransforms.size())
+					continue;
+				const Quat refRot = ((size_t)id < refRotCount) ? reference.rotations[id] : Quat(0.0, 0.0, 0.0, 0.0);
+				outSubject->mTransforms[id]->rotation = O3DS::TransformRotation(
+					refRot.v[0] + inRotation->x(),
+					refRot.v[1] + inRotation->y(),
+					refRot.v[2] + inRotation->z(),
+					refRot.v[3] + inRotation->w());
+			}
 		}
 
 		// Scale: the legacy path doesn't send scale updates at all today
