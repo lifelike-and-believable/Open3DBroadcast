@@ -43,6 +43,8 @@ namespace O3DS
 	template <size_t N>
 	class SampleRing
 	{
+		static_assert(N > 0, "SampleRing requires N > 0");
+
 	public:
 		void Push(const PoseSample& sample)
 		{

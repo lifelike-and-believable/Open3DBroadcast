@@ -71,6 +71,12 @@ namespace O3DS
 		out.t = t;
 		out.seq = s2.seq;
 
+		// PoseSample's channel counts are contractually stable within an
+		// epoch (see class doc comment on Reset()); std::min guards against
+		// a caller violating that contract (e.g. missing a Reset() on
+		// topology change) by truncating to the common count instead of
+		// reading out of bounds. A caller that hits this should treat it as
+		// a bug - it will not fail loudly here.
 		const size_t nTrans = std::min({ s0.translations.size(), s1.translations.size(), s2.translations.size() });
 		out.translations.resize(nTrans);
 		for (size_t i = 0; i < nTrans; ++i)
