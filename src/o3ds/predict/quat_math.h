@@ -58,6 +58,13 @@ namespace O3DS
 	//! about axis (which need not be pre-normalized). Returns the identity
 	//! quaternion if axis is near-zero-length.
 	Quat QuatFromAxisAngle(const Vector3d& axis, double angleRad);
+
+	//! Shortest-path interpolation between two unit quaternions: decomposes
+	//! the delta rotation q1*conj(q0) into axis-angle, scales the angle by
+	//! alpha (0 = q0, 1 = q1), and reapplies - equivalent to slerp for unit
+	//! quaternions. Returns q0 unchanged if the delta is near-identity
+	//! (undefined axis). Not clamped: alpha outside [0,1] extrapolates.
+	Quat QuatSlerpShortestPath(const Quat& q0, const Quat& q1, double alpha);
 }
 
 #endif

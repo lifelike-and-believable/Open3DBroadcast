@@ -16,6 +16,7 @@ add_executable(o3ds_core_tests
 	replay_tests.cpp
 	clock_offset_tests.cpp
 	pose_predictor_tests.cpp
+	concealment_tests.cpp
 )
 
 target_link_libraries(o3ds_core_tests PRIVATE open3dstreamstatic)
