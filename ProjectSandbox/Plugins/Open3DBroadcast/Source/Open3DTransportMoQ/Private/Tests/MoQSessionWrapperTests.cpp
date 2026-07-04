@@ -1,3 +1,5 @@
+#if WITH_DEV_AUTOMATION_TESTS
+
 #include "Misc/AutomationTest.h"
 
 #include "HAL/PlatformProcess.h"
@@ -172,3 +174,5 @@ bool FMoQResultFromCodeFallbackTest::RunTest(const FString& Parameters)
 }
 
 #endif // O3D_WITH_TRANSPORT_MOQ
+
+#endif // WITH_DEV_AUTOMATION_TESTS
