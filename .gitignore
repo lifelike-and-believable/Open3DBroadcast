@@ -35,3 +35,5 @@ __pycache__/
 buildoutput*.txt
 *.zip
 *.tgz
+
+/_o3ds_build

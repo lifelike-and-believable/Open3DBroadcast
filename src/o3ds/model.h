@@ -264,13 +264,34 @@ namespace O3DS
 		double mDeltaThreshold;
 		std::string mError;
 
-		//! Encode all of the items in the subject list as binary data
-		int Serialize(std::vector<char> &outbuf, double timestamp=0.0);
+		//! Encode all of the items in the subject list as binary data.
+		//! tx_seq/tx_wallclock_us/frame_epoch are optional (0 == unset, the
+		//! default); a receiver must treat 0 exactly like a sender that
+		//! predates these fields. See src/o3ds/sequencing.h for generating
+		//! them - callers own a SequenceCounter per outbound stream, this
+		//! function does not generate them itself, it only writes what it's
+		//! given onto the wire.
+		int Serialize(std::vector<char> &outbuf, double timestamp = 0.0,
+			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0);
 
-		int SerializeUpdate(std::vector<char>& outbuf, size_t& count, double timestamp=0.0);
+		int SerializeUpdate(std::vector<char>& outbuf, size_t& count, double timestamp = 0.0,
+			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0);
 
 		//! Populate or update the subject list with the binary data provided (created by Serialize)
 		bool Parse(const char *data, size_t len, TransformBuilder* = nullptr, bool clearInactive = true);
+
+		//! Extract just the transmit-sequencing metadata (tx_seq/
+		//! tx_wallclock_us/frame_epoch) from a wire buffer, without doing a
+		//! full parse of its subjects/updates. Used by ReorderGate to make
+		//! ordering decisions before paying the cost of a full Parse().
+		//! Validates buffer length and runs the FlatBuffers Verifier (this
+		//! reads untrusted network bytes) but does NOT check the CRC - a
+		//! corrupt-but-well-formed-enough buffer that fails CRC is still
+		//! caught later, when it's actually delivered and Parse()'d.
+		//! Returns false (outputs left at 0, their "unset" value) if the
+		//! buffer is too short or fails FlatBuffers verification.
+		static bool PeekMeta(const char* data, size_t len,
+			uint64_t& outTxSeq, uint64_t& outTxWallclockUs, uint32_t& outFrameEpoch);
 
 		void ParseSubject(const O3DS::Data::Subject*, TransformBuilder* = nullptr);
 

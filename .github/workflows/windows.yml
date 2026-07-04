@@ -11,7 +11,18 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    # Runs on the same self-hosted Windows runner used for the UE plugin build
+    # (open3dbroadcast-plugin-ci.yml) - a known-good, curated MSVC toolchain.
+    # GitHub-hosted windows-latest's generic image bundles Strawberry Perl's
+    # MinGW gcc.exe, which CMake's default Ninja generator picks up ahead of
+    # cl.exe regardless of PATH order or msvc-dev-cmd, and has no full Visual
+    # Studio IDE install for the VS project generator to discover either -
+    # this workflow was apparently only ever exercised on a self-hosted
+    # runner in the past, which is why none of that surfaced before.
+    runs-on: [ self-hosted, ue5, windows ]
+    env:
+      CC: cl
+      CXX: cl
 
     steps:
       - id: get_version
@@ -24,61 +35,61 @@ jobs:
 
       - name: mkdir usr
         run: |
-          mkdir -p $env:GITHUB_WORKSPACE/usr
-
-      - name: Perl
-        uses: shogo82148/actions-setup-perl@v1.27.0
-        with:
-          perl-version: '5.32'
-
-      - name: Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.9'
-          cache: 'pip' # caching pip dependencies
-      - run: pip install jsonschema jinja2         
+          New-Item -ItemType Directory -Force -Path $env:GITHUB_WORKSPACE/usr | Out-Null
 
       - name: CMake
-        run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
-            
+        run: choco install cmake -y --installargs 'ADD_CMAKE_TO_PATH=System'
+
       - name: OpenSSL
         run: |
           choco install openssl -y --no-progress
           echo "OpenSSL installed successfully"
         shell: powershell
 
+      # Sets up cl.exe + INCLUDE/LIB/LIBPATH for the job-level CC=cl/CXX=cl
+      # above to actually resolve to something. Deliberately NOT using
+      # `-G "Visual Studio 17 2022"`: that generator requires vswhere to find
+      # a full Visual Studio IDE installation, which windows-latest doesn't
+      # have (only a standalone toolset via msvc-dev-cmd). Ninja + an
+      # explicit CC/CXX needs no such discovery and is the standard
+      # combination for this.
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: NNG
         working-directory: thirdparty/nng
         run: |
-          cmake -S . -B build -DNNG_ENABLE_TLS=Off -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr -DCMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%/usr
-          cmake --build build --config Release && cmake --install build
-        shell: cmd          
+          cmake -S . -B build -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DNNG_ENABLE_TLS=Off -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr -DCMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%/usr
+          cmake --build build --config Release && cmake --install build --config Release
+        shell: cmd
 
       - name: CML
         working-directory: thirdparty/cml
         run: |
-          cmake -S . -B build -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
-          cmake --build build --config Release && cmake --install build
+          cmake -S . -B build -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
+          cmake --build build --config Release && cmake --install build --config Release
         shell: cmd
 
       - name: CRC
         working-directory: thirdparty/crccpp
         run: |
-          cmake -S . -B build -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
-          cmake --build build --config Release && cmake --install build
+          cmake -S . -B build -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
+          cmake --build build --config Release && cmake --install build --config Release
         shell: cmd
 
       - name: FlatBuffers
         working-directory: thirdparty/flatbuffers
         run: |
-          cmake -S . -B build -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
-          cmake --build build --config Release && cmake --install build          
+          cmake -S . -B build -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
+          cmake --build build --config Release && cmake --install build --config Release
         shell: cmd
 
       - name: Open3DStream
         run: |
-          cmake -S . -B build -DVERSION_TAG=${{ steps.get_version.outputs.version-without-v }} -DCMAKE_PREFIX_PATH=usr -DCMAKE_INSTALL_PREFIX=out
-          cmake --build build --config Release && cmake --install build
+          cmake -S . -B _o3ds_build -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DVERSION_TAG=${{ steps.get_version.outputs.version-without-v }} -DCMAKE_PREFIX_PATH=usr -DCMAKE_INSTALL_PREFIX=out -DO3DS_DISABLE_WEBRTC=ON
+          cmake --build _o3ds_build --config Release && cmake --install _o3ds_build --config Release
         shell: cmd
 
       - name: Create Zip File for Release
@@ -86,17 +97,26 @@ jobs:
           cd out
           Compress-Archive -Path * -DestinationPath ../o3ds.zip
         shell: powershell
-        
+
+      # Uploaded as a run artifact independent of the release steps below, so
+      # the build output is retrievable even if release creation fails (e.g.
+      # tag_name already exists from a prior run).
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: o3ds-windows-build
+          path: o3ds.zip
+
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.get_version.outputs.version-without-v }}-win
-          release_name: Release ${{ github.ref }}-win
+          tag_name: ${{ steps.get_version.outputs.version-without-v }}-win-${{ github.run_number }}
+          release_name: Release ${{ github.ref }}-win (run ${{ github.run_number }})
           draft: false
-          prerelease: false       
+          prerelease: false
 
       - name: Upload Release Asset
         id: upload-release-asset
