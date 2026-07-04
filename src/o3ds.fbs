@@ -91,6 +91,18 @@ table SubjectUpdate {
   rotation:[RotationUpdate];
   scale:[ScaleUpdate];
   curves:[CurveUpdate];
+
+  // Appended (C2, roadmap doc §5/C2): residual-coding metadata. Defaults
+  // (0/false) exactly preserve today's legacy last-pose-delta behavior -
+  // an old reader simply ignores these fields (FlatBuffers is
+  // forward-compatible), and a new reader must treat predictor_id==0 as
+  // "the values above are absolute, not residuals" regardless of
+  // is_keyframe, i.e. today's ParseUpdate contract, unchanged. NOT the
+  // same enumeration as O3DS::IPosePredictor::Version() (Hold=0/Linear=1/
+  // Quadratic=2) - see O3DS::ResidualPredictorId's own doc comment for why
+  // that collision (0 meaning two different things) would be dangerous.
+  predictor_id:uint = 0;
+  is_keyframe:bool = false;
 }
 
 table SubjectList {
