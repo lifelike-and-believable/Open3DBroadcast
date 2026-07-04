@@ -494,7 +494,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		mResidualEncoder->BeginFrame(actual);
 
 		const bool isKeyframe = mResidualEncoder->IsKeyframe();
-		const PoseSample& reference = mResidualEncoder->Reference(); // only indexed when !isKeyframe (see below)
+		const PoseSample& reference = mResidualEncoder->Reference(); // empty when isKeyframe (see below)
 
 		auto oSubjectName = builder.CreateString(this->mName);
 
@@ -502,13 +502,23 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		std::vector<O3DS::Data::RotationUpdate> rotations;
 		std::vector<O3DS::Data::ScaleUpdate> scales; // scale updates are unsent today (see legacy SerializeUpdate's commented-out block) - residual mode preserves that, nothing to generalize here
 
+		// The exact pose a receiver will end up with, built alongside the
+		// wire entries below: `actual`'s value for every channel this
+		// frame sends (the residual round-trips it exactly), or
+		// `reference`'s (the receiver's own prediction) for every channel
+		// this frame omits. Fed to Commit() below instead of `actual`
+		// itself - see ResidualEncoder's own doc comment for why
+		// observing anything else would let the encoder's and decoder's
+		// predictor history silently diverge.
+		PoseSample reconstructed = actual;
+
 		// Bounds-checked defensively: `reference` only matches mTransforms'
 		// current topology if it hasn't changed since the last
-		// ResidualEncoder::BeginFrame() (or the encoder's own Reset()) - a
-		// topology change without an external reset is a caller error, but
-		// this must not read out of bounds if it happens anyway.
-		const size_t refTransCount = isKeyframe ? 0 : reference.translations.size();
-		const size_t refRotCount = isKeyframe ? 0 : reference.rotations.size();
+		// ResidualEncoder::BeginFrame() - which itself now detects a
+		// topology change and forces isKeyframe in that case, so this is
+		// just defense in depth, not the primary safeguard.
+		const size_t refTransCount = reference.translations.size();
+		const size_t refRotCount = reference.rotations.size();
 
 		int transformId = 0;
 		for (const auto& tform : this->mTransforms)
@@ -520,7 +530,12 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			}
 
 			const Vector3d refTrans = ((size_t)transformId < refTransCount) ? reference.translations[transformId] : Vector3d(0.0, 0.0, 0.0);
-			if (dist(tform->translation.value, refTrans) > deltaThreshold)
+			// A keyframe must include every channel unconditionally (it
+			// exists to fully resync a receiver joining mid-stream or
+			// recovering from loss - omitting a channel just because it's
+			// near the zero reference would defeat that), so only the
+			// deltaThreshold gate applies to residual (non-keyframe) frames.
+			if (isKeyframe || dist(tform->translation.value, refTrans) > deltaThreshold)
 			{
 				translations.push_back(O3DS::Data::TranslationUpdate(
 					(float)(tform->translation.value.v[0] - refTrans.v[0]),
@@ -529,9 +544,13 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 					transformId));
 				count++;
 			}
+			else
+			{
+				reconstructed.translations[transformId] = refTrans;
+			}
 
 			const Quat refRot = ((size_t)transformId < refRotCount) ? reference.rotations[transformId] : Quat(0.0, 0.0, 0.0, 0.0);
-			if (dist(tform->rotation.value, refRot) > deltaThreshold)
+			if (isKeyframe || dist(tform->rotation.value, refRot) > deltaThreshold)
 			{
 				rotations.push_back(O3DS::Data::RotationUpdate(
 					(float)(tform->rotation.value.v[0] - refRot.v[0]),
@@ -541,21 +560,27 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 					transformId));
 				count++;
 			}
+			else
+			{
+				reconstructed.rotations[transformId] = refRot;
+			}
 
 			transformId++;
 		}
 
-		// Curves: always sent today (see SerializeCurveUpdates), residual
-		// mode preserves that cadence but sends the residual instead of
-		// the absolute value.
+		// Curves: always sent unconditionally today (see
+		// SerializeCurveUpdates) - never omitted, so `reconstructed.curves`
+		// (== `actual.curves`, copied above) needs no adjustment here.
 		std::vector<O3DS::Data::CurveUpdate> curveUpdates;
-		const size_t refCurveCount = isKeyframe ? 0 : reference.curves.size();
+		const size_t refCurveCount = reference.curves.size();
 		for (size_t i = 0; i < mCurveValues.size(); ++i)
 		{
 			const float refCurve = (i < refCurveCount) ? reference.curves[i] : 0.0f;
 			curveUpdates.push_back(O3DS::Data::CurveUpdate(mCurveValues[i] - refCurve, (int)i));
 			count++;
 		}
+
+		mResidualEncoder->Commit(reconstructed);
 
 		auto tr = builder.CreateVectorOfStructs(translations);
 		auto ro = builder.CreateVectorOfStructs(rotations);
@@ -795,8 +820,17 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		if (subjects_data)
 		{
-			// Clear the list before populating
+			// Clear the list before populating. mItems owns these Subject
+			// pointers (~SubjectList deletes them the same way), so a bare
+			// vector::clear() here would leak every previously-tracked
+			// subject instead of dropping it - delete them first, matching
+			// the pattern TransformList::clear()/Subject::clear() already
+			// use for their own owned pointers.
 			if (clearInactive) {
+				for (Subject* s : this->mItems)
+				{
+					delete s;
+				}
 				this->mItems.clear();
 			}
 			for (uint32_t i = 0; i < subjects_data->size(); i++)
@@ -877,6 +911,20 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		// Clear the subject and add the transforms
 		outSubject->clear();
+
+		// C2 (roadmap doc §5/C2): a full subject (re)sync means the
+		// topology may have changed - a residual decoder's history is
+		// indexed by the OLD transform/curve layout, and reusing it
+		// against a possibly different one could silently misapply one
+		// channel's prediction onto a different channel. Drop it;
+		// ParseUpdateResidual constructs a fresh one on next use with no
+		// history - the same "insufficient history -> keyframe" fallback
+		// it already has to handle a subject's very first residual frame.
+		// (The sender-side encoder doesn't need this: it detects a
+		// topology change itself, from ToPoseSample()'s own channel
+		// counts, every BeginFrame() - see ResidualEncoder::BeginFrame.)
+		outSubject->SetResidualDecoder(nullptr);
+
 		if (ovNodes == nullptr)
 			return;
 

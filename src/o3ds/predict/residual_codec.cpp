@@ -52,15 +52,47 @@ namespace O3DS
 
 	void ResidualEncoder::BeginFrame(const PoseSample& actual)
 	{
+		// A channel-count mismatch vs the last Commit()'d pose means the
+		// topology changed (a bone/curve was added or removed) - the
+		// predictor's history is indexed by the OLD topology, so a stale
+		// Reference() would silently get applied to the wrong channel
+		// under the new one. Treat it exactly like fresh construction:
+		// drop history and force this frame to a keyframe.
+		const bool topologyChanged = mHasCommitted &&
+			(actual.translations.size() != mLastTranslationCount ||
+			 actual.rotations.size() != mLastRotationCount ||
+			 actual.curves.size() != mLastCurveCount);
+		if (topologyChanged)
+		{
+			mPredictor->Reset();
+			mHasCommitted = false;
+		}
+
 		PoseSample predicted;
-		const bool hasPrediction = mPredictor->Predict(actual.t, predicted);
+		const bool hasPrediction = !topologyChanged && mPredictor->Predict(actual.t, predicted);
 		const bool cadenceElapsed = (mKeyframeIntervalFrames > 0) && (mFramesSinceKeyframe >= mKeyframeIntervalFrames);
 
 		mIsKeyframe = !hasPrediction || cadenceElapsed;
 		mReference = mIsKeyframe ? PoseSample() : predicted;
 		mFramesSinceKeyframe = mIsKeyframe ? 0 : (mFramesSinceKeyframe + 1);
+	}
 
-		mPredictor->Observe(actual);
+	void ResidualEncoder::Commit(const PoseSample& reconstructedPose)
+	{
+		mPredictor->Observe(reconstructedPose);
+		mHasCommitted = true;
+		mLastTranslationCount = reconstructedPose.translations.size();
+		mLastRotationCount = reconstructedPose.rotations.size();
+		mLastCurveCount = reconstructedPose.curves.size();
+	}
+
+	void ResidualEncoder::Reset()
+	{
+		mPredictor->Reset();
+		mIsKeyframe = true;
+		mReference = PoseSample();
+		mFramesSinceKeyframe = 0;
+		mHasCommitted = false;
 	}
 
 	ResidualDecoder::ResidualDecoder(ResidualPredictorId id)

@@ -64,15 +64,26 @@ namespace O3DS
 	//! shipping Hold-based residual coding changes nothing observable on
 	//! the wire vs today's plain delta path.
 	//!
-	//! Usage: call BeginFrame(actual) once per frame (not once per
-	//! channel), then read IsKeyframe()/Reference() to decide, per
-	//! channel, what to encode - reference channel value if !IsKeyframe(),
-	//! or the zero/identity-relative absolute value if IsKeyframe() (the
-	//! caller diffs `actual` against Reference() the same way it already
-	//! diffs against a "last sent" value today, using the same
-	//! deltaThreshold-gated convention - this class does not do that
-	//! per-channel diffing itself, since the caller already owns that loop
-	//! and its wire structures).
+	//! Usage per frame: BeginFrame(actual) - decides keyframe-vs-residual
+	//! and exposes Reference(); the caller diffs `actual` against
+	//! Reference() per channel (same deltaThreshold-gated convention it
+	//! already uses today) to decide what to put on the wire - THEN calls
+	//! Commit(reconstructedPose), where reconstructedPose is the exact
+	//! pose a receiver will end up with: Reference()'s value for every
+	//! channel the caller decided NOT to send, `actual`'s value for every
+	//! channel it did send. This "local decode" (observe what the
+	//! receiver will reconstruct, not the true actual value) is required,
+	//! not an optimization detail: if the encoder instead observed
+	//! `actual` directly, its predictor's history would silently diverge
+	//! from the receiver's the very first time a channel's residual fell
+	//! under deltaThreshold and got omitted (the receiver only ever knows
+	//! about the channels it was actually told about, plus its own
+	//! Reference() for the rest) - and once the two sides' histories
+	//! differ, EVERY later Reference() differs too, so even a
+	//! subsequently-*sent* channel reconstructs wrong (predicted+residual
+	//! only equals actual when both sides computed the identical
+	//! prediction). Observing reconstructedPose instead keeps the two
+	//! sides' predictor state bit-for-bit in lockstep by construction.
 	class ResidualEncoder
 	{
 	public:
@@ -81,29 +92,57 @@ namespace O3DS
 		//! nothing" (there is no meaningful predictor to back it).
 		explicit ResidualEncoder(ResidualPredictorId id, uint32_t keyframeIntervalFrames = 0);
 
-		//! Advances one frame: decides keyframe-vs-residual for the whole
-		//! frame (a single decision/reference shared by every channel -
-		//! never mixed per-channel within one frame) and observes `actual`
-		//! into the underlying predictor's history. Call exactly once per
-		//! frame, in non-decreasing `actual.t` order (same precondition as
-		//! IPosePredictor::Observe()).
+		//! Phase 1 of the frame: decides keyframe-vs-residual using
+		//! history committed so far (this frame's own values must not
+		//! affect that decision - Predict() is evaluated before this
+		//! frame is Commit()'d, never after). `actual`'s channel counts
+		//! are also compared against the last Commit()'d pose - a
+		//! mismatch (a bone/curve added or removed) would otherwise let a
+		//! stale Reference() get indexed against the wrong channel under
+		//! the new topology, so it forces a fresh start (predictor
+		//! Reset(), this frame reported as a keyframe) instead.
 		void BeginFrame(const PoseSample& actual);
 
 		//! True when this frame's reference is zero/identity (i.e. every
 		//! channel's wire value is its absolute value, not a residual) -
-		//! either because the predictor doesn't have enough history yet,
-		//! or because keyframeIntervalFrames elapsed and a re-anchor is
-		//! due (roadmap's "periodic keyframes bound drift, enable
-		//! join-in-progress, and re-anchor after loss").
+		//! because the predictor doesn't have enough history yet, a
+		//! topology change was just detected, or keyframeIntervalFrames
+		//! elapsed and a re-anchor is due (roadmap's "periodic keyframes
+		//! bound drift, enable join-in-progress, and re-anchor after
+		//! loss"). The caller must send EVERY channel unconditionally on
+		//! a keyframe (bypassing its own deltaThreshold gate) - a keyframe
+		//! exists to fully resync state, and a channel omitted from one
+		//! (because it happened to be near the zero/identity reference)
+		//! would defeat that for a receiver joining mid-stream or
+		//! recovering from loss.
 		bool IsKeyframe() const { return mIsKeyframe; }
 
-		//! Valid only between BeginFrame() calls. Empty (default
-		//! PoseSample, no channels) when IsKeyframe() - the caller must
-		//! not index into it in that case; treat every channel's
-		//! reference as zero/identity instead (see class comment).
+		//! Valid only between BeginFrame() and Commit() calls. Empty
+		//! (default PoseSample, no channels) when IsKeyframe() - the
+		//! caller must not index into it in that case; treat every
+		//! channel's reference as zero/identity instead (see class
+		//! comment), and must send every channel (see IsKeyframe()).
 		const PoseSample& Reference() const { return mReference; }
 
+		//! Phase 2: advances the predictor's history with
+		//! `reconstructedPose` (see class comment for why this must be
+		//! the reconstructed pose, not the true actual one) and remembers
+		//! its channel counts for the next BeginFrame()'s topology check.
+		//! Call exactly once per frame, after BeginFrame(), in
+		//! non-decreasing `reconstructedPose.t` order (same precondition
+		//! as IPosePredictor::Observe()).
+		void Commit(const PoseSample& reconstructedPose);
+
 		ResidualPredictorId Id() const { return mId; }
+
+		//! Clears the underlying predictor's history and topology
+		//! tracking: call on a topology change detected by the caller
+		//! ahead of BeginFrame() (ties to the same triggers as
+		//! IPosePredictor::Reset()) - BeginFrame() also detects and
+		//! handles this automatically via its own channel-count check, so
+		//! calling this explicitly is only needed if the caller wants to
+		//! force a reset the frame it happens rather than the frame after.
+		void Reset();
 
 	private:
 		ResidualPredictorId mId;
@@ -112,6 +151,10 @@ namespace O3DS
 		uint32_t mFramesSinceKeyframe = 0;
 		bool mIsKeyframe = true;
 		PoseSample mReference;
+		bool mHasCommitted = false;
+		size_t mLastTranslationCount = 0;
+		size_t mLastRotationCount = 0;
+		size_t mLastCurveCount = 0;
 	};
 
 	//! Receiver-side mirror of ResidualEncoder. One instance per subject.
