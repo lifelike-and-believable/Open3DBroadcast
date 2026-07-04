@@ -2,11 +2,12 @@
 
 **Status:** Draft for delegation · **Owner:** TBD · **Audience:** coding agents + maintainers
 
-This document is a delegable implementation plan for three interlocking workstreams:
+This document is a delegable implementation plan for four interlocking workstreams:
 
 - **A — Reliability & Sequencing:** make the stream survive real (WAN) networks.
 - **B — Record & Replay:** capture/replay the wire protocol deterministically.
 - **C — Predictive Motion:** a shared pose predictor for loss concealment, latency-hiding, and residual compression.
+- **D — Wire Efficiency:** shrink bytes/frame on the wire encoding itself, independent of prediction.
 
 It is written so an agent can pick up any **phase**, produce its own task breakdown, and implement it against clear acceptance criteria. Read §0–§2 first regardless of which phase you take.
 
@@ -385,7 +386,25 @@ Sits on the A2 apply path; the interesting math (blend/correction, error metric)
 
 ---
 
-## 6. Sequencing & dependency graph
+## 6. Workstream D — Wire Efficiency
+
+### Phase D1 — Adaptive/variable-bit channel quantization (wire-format, transport- and prediction-agnostic)
+
+- **Goal:** shrink bytes/frame on the wire encoding itself, independent of whether a channel is predicted (C0–C2) or held (today). Today's `Subject::SerializeUpdate` (`src/o3ds/model.cpp`) sends each changed channel as full 32-bit floats once its `delta() > deltaThreshold` — an all-or-nothing "send at full precision, or send nothing" decision per channel, with **no quantization at all today**. Variable-bit quantization sends fewer bits for a channel moving slowly/predictably and holds full precision for one moving fast — a standard motion-codec technique that **stacks with C2 rather than competing with it** (a residual is just another value to quantize, same as a raw delta is today).
+- **Why this first:** unlike C2, this never touches predictor history, so it carries none of C2's history-divergence-under-loss risk (see Phase C2) — it's a strictly per-frame, stateless-across-loss encoding change. That means it applies uniformly to **both reliable and unreliable transports**, including the ones C2 explicitly excludes (UDP, MoQ datagrams) — the one concrete "make unreliable-transport streaming cheaper/better" lever identified so far that doesn't require solving C2's divergence problem first.
+- **Approach:**
+  - Per-channel (translation/rotation/scale/curve) variable bit-depth chosen from the channel's own recent delta magnitude (small movement → fewer bits; large/fast movement → up to today's full-float ceiling) instead of today's fixed all-or-nothing threshold.
+  - Encode the chosen precision (a small enumerated class, not a raw bit count) alongside each channel update so it's self-describing per record — no session-level renegotiation needed when a joint suddenly starts moving fast mid-stream.
+  - Rotations need their own care: naive per-component quantization of a quaternion can denormalize it — quantize via axis-angle or a "smallest-three" representation instead so decode always renormalizes cleanly. Treat this as its own accuracy check, separate from translation/scale.
+  - `deltaThreshold` keeps its existing role as the "send nothing" floor; quantization only decides *how precisely* to encode a channel that already cleared that floor.
+- **Files/modules:** `src/o3ds/model.cpp`/`src/o3ds/model.h` (`Subject::SerializeUpdate`/`ParseUpdate` — the same functions C2's residual generalization touches, so sequence the two changes to not conflict), schema (`src/o3ds.fbs` — new per-channel precision field/enum).
+- **Acceptance:** bytes/frame drop measurably vs today's fixed-float encoding on a representative capture corpus (reuse B2's replay harness), within a bounded per-channel reconstruction-error budget (analogous to C1's prediction-error metric); encode→decode round-trip fidelity unit-tested in core; benefit holds whether or not C2 is active (applies equally to a raw delta or a C2 residual).
+- **Dependencies:** none blocking — independent of C0–C3; can land before, after, or in parallel with C2. **Out of scope:** a full entropy coder (arithmetic/range coding) — variable-bit quantization only; that would be a further follow-on if this proves out. Cross-peer prediction is C2's concern, not this phase's.
+- **Open decisions:** exact bit-depth tiers and how a channel's tier is chosen (fixed thresholds on delta magnitude first, same "classical baseline before anything adaptive/learned" posture as C0); how quaternion quantization error interacts with C1's correction-blend math (`QuatSlerpShortestPath`) — rounding noise inside a concealment correction window needs to stay well under the "pop" metric's threshold.
+
+---
+
+## 7. Sequencing & dependency graph
 
 Node tags: **(core)** = engine-agnostic, Linux/CTest-testable; **(core+UE)** = core logic + thin UE glue; **(UE)** = plugin glue.
 
@@ -398,24 +417,26 @@ B1 (capture fmt, core) ──► B2 (replay + channel, core+UE) ──► (test 
         │                                                              │
         └──► B3 (repeater capture, opt)                                ▼
                                                    C2 (residual compression, core+UE) ──► C3 (learned)
+
+D1 (adaptive quantization, core+UE) ── independent of A/B/C; can run in parallel with any of them
 ```
 
-Dependencies: A2 ← A1. C0 ← A1. C1 ← C0, A2, B2. B2 ← B1. C2 ← C0, A1 (evaluate *after* C1). C3 ← C0–C2, B. (The C1→C2 line is sequencing, not a hard dependency.)
+Dependencies: A2 ← A1. C0 ← A1. C1 ← C0, A2, B2. B2 ← B1. C2 ← C0, A1 (evaluate *after* C1). C3 ← C0–C2, B. D1 ← none (touches the same `model.cpp` functions as C2, so sequence the two to avoid merge conflicts, but neither blocks the other). (The C1→C2 line is sequencing, not a hard dependency.)
 
-Recommended order: **A1 → B1 → B2 → A2 → C0 → C1** (this delivers resilience + concealment + the test harness), then evaluate **C2**, then a gated **C3** spike. A1, B1, and C0 are independent enough to run in parallel by separate agents.
+Recommended order: **A1 → B1 → B2 → A2 → C0 → C1** (this delivers resilience + concealment + the test harness), then evaluate **C2**, then a gated **C3** spike. **D1** can be picked up whenever convenient — it has no dependencies and no history-divergence risk, so it's a good fill-in between the sequenced phases above. A1, B1, C0, and D1 are independent enough to run in parallel by separate agents.
 
 ---
 
-## 7. Testing strategy
+## 8. Testing strategy
 
-- **Core-first (§0.1):** sequencing + reorder gate (A1), capture round-trip (B1), channel model (B2), clock-offset estimator (A2.b), predictor math (C0), residual round-trip (C2) are all pure C++ — unit-test in the core and **wire into CTest so the Linux CI actually runs them.** Reuse the ASan/UBSan harness pattern already used for the parser-hardening work; feed malformed inputs to every new parser/reader.
+- **Core-first (§0.1):** sequencing + reorder gate (A1), capture round-trip (B1), channel model (B2), clock-offset estimator (A2.b), predictor math (C0), residual round-trip (C2), channel quantization round-trip (D1) are all pure C++ — unit-test in the core and **wire into CTest so the Linux CI actually runs them.** Reuse the ASan/UBSan harness pattern already used for the parser-hardening work; feed malformed inputs to every new parser/reader.
 - **Replay-as-test (B2):** the primary integration harness. Golden `.o3dscap` sessions + seeded channel models give deterministic, UE-free (or UE-lite) regression tests for A2 and C1.
 - **UE automation:** extend the existing automation suites for the receiver apply-path changes; run them on the self-hosted runner (note: gated on the PR being out of draft).
 - Every phase's acceptance criteria above names its concrete test.
 
 ---
 
-## 8. Risks & open questions (consolidated)
+## 9. Risks & open questions (consolidated)
 
 - **Core duplication (#203)** — resolve early or every core change is doubled (§0.2).
 - **History divergence under loss (C2)** — residual coding silently breaks on lossy transports because the receiver's pose history diverges from the sender's; scope C2 to reliable/ordered transports (or use keyframe-relative independent deltas), and let C1 concealment carry unreliable links. Load-bearing — see C2.
@@ -423,13 +444,15 @@ Recommended order: **A1 → B1 → B2 → A2 → C0 → C1** (this delivers resi
 - **LiveLink division of labor** — RESOLVED (§2.5): LiveLink owns presentation smoothing; O3DB owns the network layer + clock-offset→timestamp mapping + optional predicted-frame concealment. Verify the exact LiveLink buffer/time APIs against the target UE version before A2.
 - **Clock-offset estimation** (§2.5, A2) — mapping `tx_wallclock_us` to local engine time needs a robust moving/min estimate of the send→recv offset; absolute one-way latency additionally needs NTP-level sync, else report relative jitter/loss only.
 - **Inference budget** for the learned model (C3) — hard real-time constraint; keep C3 a gated spike.
+- **Quaternion quantization error vs. C1's correction blend (D1)** — rounding noise from a quantized rotation must stay well under the "pop" metric's threshold, or D1 could visibly fight with C1's own smoothing; verify empirically before tightening bit-depth tiers.
 - **Two-copy schema edits** until #203 lands.
 
-## 9. Definition of done (program level)
+## 10. Definition of done (program level)
 
 - `tx_seq`/`tx_wallclock_us` shipped, populated, and consumed; legacy interop preserved.
 - Receiver reorders/dedups/drops-stale and reports latency/jitter/loss on the HUD.
 - Capture/replay format + CLI exist; replay drives deterministic tests.
 - A pluggable predictor with classical baselines conceals loss/hides latency on the receiver, measured against real frames.
 - (Stretch) residual compression reduces bytes/frame at equal visual error; (research) learned predictor beats baselines within budget.
+- Adaptive channel quantization reduces bytes/frame on both reliable and unreliable transports at a bounded reconstruction-error cost.
 - New core logic is unit-tested and running in CI.
