@@ -12,6 +12,8 @@
 #include "O3DUnifiedMessage.h"
 
 #include "o3ds/model.h"
+#include "o3ds/reorder_gate.h"
+#include "o3ds/clock_offset.h"
 
 #include <atomic>
 
@@ -56,6 +58,9 @@ private:
     class FAudioSink;
 
     void HandleSerializedFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds);
+    void HandleLegacyFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds);
+    void EmitGatedFrame(O3DS::Frame&& Frame);
+    void ReportGateMetricsDelta();
     bool StartTransport();
     void StopTransport();
     FO3DTransportConfig BuildTransportConfig() const;
@@ -63,19 +68,22 @@ private:
     void RemoveInactiveSubjects();
 
     void PushSubjectStaticData(const FLiveLinkSubjectKey& SubjectKey, const TArray<FName>& BoneNames, const TArray<int32>& BoneParents, const TArray<FName>& CurveNames, uint64 DescriptorHash);
-    void PushSubjectFrameData(const FLiveLinkSubjectKey& SubjectKey, const TArray<FTransform>& BoneTransforms, const TArray<FName>& CurveNames, const TArray<float>& CurveValues, double TimestampSeconds, uint64 CurveHash);
+    void PushSubjectFrameData(const FLiveLinkSubjectKey& SubjectKey, const TArray<FTransform>& BoneTransforms, const TArray<FName>& CurveNames, const TArray<float>& CurveValues, double TimestampSeconds, double WorldTimeSecondsOverride, uint64 CurveHash);
 
     void ResetOrderingState();
     void EnsureValidTransportName();
 
     bool ParseSubjectListBuffer(const FString& Subject, const TArray<uint8>& Buffer);
-    bool TryPeekSubjectListTime(const TArray<uint8>& Buffer, double& OutTime);
+    bool ParseSubjectListRaw(const FString& Subject, const char* Data, size_t Len);
     bool ShouldProcessFrame(double SubjectListTime, double NowSeconds);
     bool ShouldResetOrderingWindow(double NowSeconds, double SubjectListTime) const;
     double GetLastConnectionActive() const;
     bool BuildSubjectPose(O3DS::Subject* SubjectPtr, TArray<FName>& OutBoneNames, TArray<int32>& OutBoneParents, TArray<FTransform>& OutBoneTransforms) const;
     void BuildSubjectCurves(O3DS::Subject* SubjectPtr, TArray<FName>& OutCurveNames, TArray<float>& OutCurveValues) const;
-    void ProcessParsedSubject(O3DS::Subject* SubjectPtr, double SubjectListTime, TArray<FName>& BoneNames, TArray<int32>& BoneParents, TArray<FTransform>& BoneTransforms, TArray<FName>& CurveNames, TArray<float>& CurveValues);
+    // WorldTimeSecondsOverride < 0.0 means "unset" - PushSubjectFrameData falls back to
+    // FPlatformTime::Seconds() (today's behavior, used by the legacy/ungated path); the
+    // gated path (A2.a/A2.c) always passes a real mapped presentation time.
+    void ProcessParsedSubject(O3DS::Subject* SubjectPtr, double SubjectListTime, double WorldTimeSecondsOverride, TArray<FName>& BoneNames, TArray<int32>& BoneParents, TArray<FTransform>& BoneTransforms, TArray<FName>& CurveNames, TArray<float>& CurveValues);
     void FinalizeAudioMeta(O3DS::FAudioFrameMeta& Meta) const;
 
 private:
@@ -126,8 +134,18 @@ private:
     };
     TMap<FName, FSubjectTransformCache> SubjectTransformCaches;
 
-    // Timestamp ordering
+    // Timestamp ordering (legacy path, used when a sender doesn't set tx_seq)
     double LastAppliedSubjectListTime = -1.0;
     uint64 FrameCounter = 0;
     bool bLoggedActiveState = false;
+
+    // A2.a/A2.b: reorder/dedup/stale-drop gate + clock-offset estimator for senders
+    // that do set tx_seq. One gate per receiver source (not per multiplexed subject) -
+    // see reorder_gate.h's own doc comment on the multi-sender caveat this doesn't
+    // yet handle. Both are reset alongside LastAppliedSubjectListTime in
+    // ResetOrderingState() so a transport restart starts a clean session.
+    O3DS::ReorderGate ReceiverGate;
+    O3DS::ClockOffsetEstimator ClockEstimator;
+    O3DS::ReorderStats PrevGateStats; // last-reported snapshot, for delta metrics reporting
+    FString LastGateSubjectLabel;     // diagnostic-only subject label for the gate's emit path
 };

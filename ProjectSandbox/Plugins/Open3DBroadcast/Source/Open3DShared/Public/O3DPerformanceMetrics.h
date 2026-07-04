@@ -77,6 +77,26 @@ public:
 		TAtomic<double> AvgRoundTripLatencyMs{ 0.0 };  // Rolling average RTT (if timestamped)
 		TAtomic<double> MaxLatencyMs{ 0.0 };           // Peak latency in last collection period
 
+		// A2: ReorderGate / ClockOffsetEstimator metrics (see O3DReceiverSource.cpp).
+		// Gate counters are cumulative deltas summed across all receiver sources sharing
+		// this singleton (each source tracks its own previous ReorderStats snapshot and
+		// reports only the delta per tick, the same convention as FramesReceived etc.).
+		TAtomic<uint64> GateDupDropped{ 0 };
+		TAtomic<uint64> GateStaleDropped{ 0 };
+		TAtomic<uint64> GateLost{ 0 };
+		TAtomic<uint64> GateReordered{ 0 };
+		// Current buffer occupancy is a gauge, not a cumulative counter; with multiple
+		// receiver sources this is a last-writer-wins snapshot (same accepted
+		// simplification as ActiveSubjectCount above - exact for the common single-source
+		// case).
+		TAtomic<int32> GateBufferOccupancy{ 0 };
+		// Clock-offset estimate (caveated - see ClockOffsetEstimator's doc comment: only
+		// meaningful as an absolute latency figure if clocks are known to be synced;
+		// otherwise treat as relative/indicative) and jitter (excess delay above the
+		// rolling-min floor), both rolling EMAs alpha=0.2 like AvgRoundTripLatencyMs above.
+		TAtomic<double> AvgClockOffsetMs{ 0.0 };
+		TAtomic<double> AvgJitterMs{ 0.0 };
+
 		// Timestamps
 		FDateTime MetricsStartTime = FDateTime::Now();
 		FDateTime LastApplyTime = FDateTime::Now();
@@ -198,6 +218,17 @@ public:
 
 	/** Record latency for a frame (timestamp-based) */
 	void RecordFrameLatency(double LatencyMs);
+
+	// A2.d: ReorderGate / ClockOffsetEstimator metrics. Counters take a delta (not a
+	// cumulative total) - see FReceiverMetrics's gate counters doc comment.
+	FORCEINLINE void RecordGateDupDropped(uint64 Delta) { ReceiverMetrics.GateDupDropped += Delta; }
+	FORCEINLINE void RecordGateStaleDropped(uint64 Delta) { ReceiverMetrics.GateStaleDropped += Delta; }
+	FORCEINLINE void RecordGateLost(uint64 Delta) { ReceiverMetrics.GateLost += Delta; }
+	FORCEINLINE void RecordGateReordered(uint64 Delta) { ReceiverMetrics.GateReordered += Delta; }
+	FORCEINLINE void SetGateBufferOccupancy(int32 Count) { ReceiverMetrics.GateBufferOccupancy.Store(Count); }
+
+	/** Record one frame's clock-offset estimate and jitter (excess delay), both in ms. */
+	void RecordClockOffsetSampleMs(double OffsetMs, double JitterMs);
 
 	// =====================================================================
 	// TRANSPORT SIDE API

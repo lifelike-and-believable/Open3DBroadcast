@@ -45,6 +45,13 @@ namespace O3DS
 		                           // gate's own gap-timeout bookkeeping uses the caller-supplied
 		                           // `now_s` clock (see Push/Flush below), never this field
 		uint32_t epoch = 0;        // SubjectList.frame_epoch (0 = legacy/unset)
+		uint64_t local_recv_us = 0; // Receiver's own wall-clock at ingress (UTC micros, e.g.
+		                            // O3DS::NowUtcMicros()), NOT when the gate happens to emit
+		                            // this frame. Pass-through only, same as wallclock_us - the
+		                            // gate never inspects it. Callers driving A2's
+		                            // ClockOffsetEstimator need this: using drain time instead
+		                            // for a frame the gate buffered would misattribute gate wait
+		                            // as network delay/jitter.
 		std::vector<char> bytes;   // raw wire bytes, unparsed
 	};
 
@@ -108,6 +115,10 @@ namespace O3DS
 		void Flush(double now_s, const std::function<void(Frame&&)>& emit);
 
 		const ReorderStats& Stats() const { return mStats; }
+
+		//! Number of frames currently buffered waiting on a gap (0 when
+		//! nothing is pending). For HUD/metrics occupancy display (A2.d).
+		size_t PendingCount() const { return mPending.size(); }
 
 	private:
 		struct PendingEntry
