@@ -124,7 +124,13 @@ namespace MoQEditor
 
 	static int32 BytesToMb(uint64 Bytes)
 	{
-		const uint64 Mb = Bytes / (1024ull * 1024ull);
+		// Round to nearest rather than floor: kMinQueueBytes (256 KiB) and
+		// other non-MiB-aligned values would otherwise always under-report
+		// (e.g. a stored 1.5 MiB value would silently display/round-trip as
+		// 1 MiB), which can also change the saved byte count once the user
+		// touches the spinner and it writes the displayed MiB value back out.
+		constexpr uint64 BytesPerMb = 1024ull * 1024ull;
+		const uint64 Mb = (Bytes + BytesPerMb / 2) / BytesPerMb;
 		return Mb > 0 ? static_cast<int32>(Mb) : 1;
 	}
 
@@ -666,8 +672,17 @@ private:
 		FO3DReceiverTransportCustomization ReceiverCustomization;
 		ReceiverCustomization.ConfigureTransport = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
 		{
+			// Deliberately does NOT set Config.Uri here (unlike the sender
+			// side): O3DReceiverSource::BuildTransportConfig() auto-fills
+			// Config.StreamId = Config.Uri whenever StreamId is still empty
+			// after this callback returns, and MoQReceiver::ParseOptions()
+			// only derives its own mocap/<namespace>/<track> default StreamId
+			// when Config.StreamId arrives empty - so setting Config.Uri to
+			// the relay URL here would silently make the receiver use the
+			// relay URL itself as the stream/subject identifier instead.
+			// relay_url is already read directly from Config.AdvancedParams
+			// by MoQHelpers::ResolveRelayUrl, so Config.Uri isn't needed.
 			Config.Transport = TEXT("MoQ");
-			Config.Uri = MoQConfig::GetReceiverOption(Settings, MoQHelpers::kKeyRelayUrl);
 		};
 #if WITH_EDITOR
 		ReceiverCustomization.BuildTransportWidget = [](UO3DReceiverSettingsObject* SettingsObject, FSimpleDelegate OnSubmit) -> TSharedPtr<SO3DTransportConfigPanelBase>
