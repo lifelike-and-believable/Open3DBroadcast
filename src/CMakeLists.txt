@@ -108,6 +108,12 @@ set(pub_headers
 	o3ds/channel_model.h
 	o3ds/replay.h
 	o3ds/clock_offset.h
+	o3ds/predict/quat_math.h
+	o3ds/predict/pose_predictor.h
+	o3ds/predict/sample_ring.h
+	o3ds/predict/hold_predictor.h
+	o3ds/predict/linear_predictor.h
+	o3ds/predict/quadratic_predictor.h
 	o3ds/model.h
 	o3ds/base_connector.h
 	o3ds/nng_connector.h
@@ -149,6 +155,10 @@ set(SOURCES
 	o3ds/channel_model.cpp
 	o3ds/replay.cpp
 	o3ds/clock_offset.cpp
+	o3ds/predict/quat_math.cpp
+	o3ds/predict/hold_predictor.cpp
+	o3ds/predict/linear_predictor.cpp
+	o3ds/predict/quadratic_predictor.cpp
 	o3ds/model.cpp
 	o3ds/base_connector.cpp
 	o3ds/nng_connector.cpp
