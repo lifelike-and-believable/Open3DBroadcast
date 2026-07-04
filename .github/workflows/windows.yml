@@ -12,6 +12,13 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    # Ninja's default C/C++ compiler search tries cc/gcc before cl even when
+    # cl.exe is earlier on PATH (msvc-dev-cmd's prepend doesn't change this -
+    # it's CMake's own candidate-order logic for this generator on Windows).
+    # Forcing CC/CXX here is what actually makes it use MSVC.
+    env:
+      CC: cl
+      CXX: cl
 
     steps:
       - id: get_version
@@ -47,16 +54,13 @@ jobs:
           echo "OpenSSL installed successfully"
         shell: powershell
 
-      # Puts cl.exe (and INCLUDE/LIB/LIBPATH) on PATH ahead of Strawberry Perl's
-      # bundled MinGW gcc.exe, which CMake's default Ninja generator would
-      # otherwise silently pick up - producing .a archives instead of
-      # MSVC-compatible .lib files, incompatible with the UE plugin these are
-      # vendored into. Must run after the Perl step so its PATH prepend wins.
-      # Deliberately NOT using `-G "Visual Studio 17 2022"` below: that
-      # generator requires vswhere to find a full Visual Studio IDE
-      # installation, which windows-latest doesn't have (only via
-      # msvc-dev-cmd's toolset). Ninja + cl.exe on PATH needs no such
-      # discovery and is the standard combination for this.
+      # Sets up cl.exe + INCLUDE/LIB/LIBPATH for the job-level CC=cl/CXX=cl
+      # above to actually resolve to something. Deliberately NOT using
+      # `-G "Visual Studio 17 2022"`: that generator requires vswhere to find
+      # a full Visual Studio IDE installation, which windows-latest doesn't
+      # have (only a standalone toolset via msvc-dev-cmd). Ninja + an
+      # explicit CC/CXX needs no such discovery and is the standard
+      # combination for this.
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -65,34 +69,34 @@ jobs:
       - name: NNG
         working-directory: thirdparty/nng
         run: |
-          cmake -S . -B build -DNNG_ENABLE_TLS=Off -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr -DCMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%/usr
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNNG_ENABLE_TLS=Off -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr -DCMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%/usr
           cmake --build build --config Release && cmake --install build --config Release
         shell: cmd
 
       - name: CML
         working-directory: thirdparty/cml
         run: |
-          cmake -S . -B build -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
           cmake --build build --config Release && cmake --install build --config Release
         shell: cmd
 
       - name: CRC
         working-directory: thirdparty/crccpp
         run: |
-          cmake -S . -B build -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
           cmake --build build --config Release && cmake --install build --config Release
         shell: cmd
 
       - name: FlatBuffers
         working-directory: thirdparty/flatbuffers
         run: |
-          cmake -S . -B build -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/usr
           cmake --build build --config Release && cmake --install build --config Release
         shell: cmd
 
       - name: Open3DStream
         run: |
-          cmake -S . -B _o3ds_build -DVERSION_TAG=${{ steps.get_version.outputs.version-without-v }} -DCMAKE_PREFIX_PATH=usr -DCMAKE_INSTALL_PREFIX=out -DO3DS_DISABLE_WEBRTC=ON
+          cmake -S . -B _o3ds_build -DCMAKE_BUILD_TYPE=Release -DVERSION_TAG=${{ steps.get_version.outputs.version-without-v }} -DCMAKE_PREFIX_PATH=usr -DCMAKE_INSTALL_PREFIX=out -DO3DS_DISABLE_WEBRTC=ON
           cmake --build _o3ds_build --config Release && cmake --install _o3ds_build --config Release
         shell: cmd
 
