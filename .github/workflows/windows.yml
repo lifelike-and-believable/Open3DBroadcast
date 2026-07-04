@@ -37,11 +37,6 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path $env:GITHUB_WORKSPACE/usr | Out-Null
 
-      - name: Perl
-        uses: shogo82148/actions-setup-perl@v1.27.0
-        with:
-          perl-version: '5.32'
-
       - name: Python
         uses: actions/setup-python@v5
         with:
