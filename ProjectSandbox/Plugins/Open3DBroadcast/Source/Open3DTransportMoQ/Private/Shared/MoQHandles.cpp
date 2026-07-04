@@ -141,11 +141,11 @@ void FMoQSubscriberHandle::Reset(MoqSubscriber* InSubscriber)
 {
     if (Subscriber != nullptr)
     {
+        moq_subscriber_destroy(Subscriber);
         if (OnBeforeDestroy)
         {
             OnBeforeDestroy();
         }
-        moq_subscriber_destroy(Subscriber);
     }
     Subscriber = InSubscriber;
 }

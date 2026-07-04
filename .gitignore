@@ -3,7 +3,7 @@
 *.sqlite
 *.bin
 *.exe
-out
+out/
 .venv
 .vs
 .vscode
@@ -17,4 +17,23 @@ Binaries
 Intermediate
 lib
 /vsbuild
+
+# Secrets
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Node
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+
+# Build logs / generated artifacts
+buildoutput*.txt
+*.zip
+*.tgz
+
 /_o3ds_build

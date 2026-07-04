@@ -25,10 +25,11 @@ SOFTWARE.
 #ifndef O3DS_MATRIX_H
 #define O3DS_MATRIX_H
 
-#include <math.h>
+#include <cmath>
 
 namespace O3DS
 {
+	using std::sqrt;
 
 	double rad(double deg);
 

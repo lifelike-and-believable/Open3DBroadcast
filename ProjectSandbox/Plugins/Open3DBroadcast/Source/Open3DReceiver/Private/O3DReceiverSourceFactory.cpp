@@ -7,6 +7,7 @@
 #include "O3DTransportConfigPanelBase.h"
 
 #include "UObject/UnrealType.h"
+#include "UObject/StrongObjectPtr.h"
 #include "Widgets/SNullWidget.h"
 
 #define LOCTEXT_NAMESPACE "O3DReceiverSourceFactory"
@@ -58,10 +59,10 @@ public:
     {
         OnSourceCreated = InArgs._OnSourceCreated;
 
-        SourceSettingsObject = DuplicateObject<UO3DReceiverSettingsObject>(GetMutableDefault<UO3DReceiverSettingsObject>(), GetTransientPackage());
-        if (!SourceSettingsObject)
+        SourceSettingsObject = TStrongObjectPtr<UO3DReceiverSettingsObject>(DuplicateObject<UO3DReceiverSettingsObject>(GetMutableDefault<UO3DReceiverSettingsObject>(), GetTransientPackage()));
+        if (!SourceSettingsObject.IsValid())
         {
-            SourceSettingsObject = NewObject<UO3DReceiverSettingsObject>(GetTransientPackage());
+            SourceSettingsObject = TStrongObjectPtr<UO3DReceiverSettingsObject>(NewObject<UO3DReceiverSettingsObject>(GetTransientPackage()));
         }
 
         RefreshTransportOptions();
@@ -78,7 +79,7 @@ public:
 
         DetailsView = PropertyModule.CreateDetailView(DetailsArgs);
     DetailsView->SetIsPropertyVisibleDelegate(FIsPropertyVisible::CreateSP(this, &SO3DReceiverSourceFactoryPanel::HandleIsPropertyVisible));
-        DetailsView->SetObject(SourceSettingsObject);
+        DetailsView->SetObject(SourceSettingsObject.Get());
         DetailsView->OnFinishedChangingProperties().AddSP(this, &SO3DReceiverSourceFactoryPanel::HandleSettingsPropertyChanged);
 
         ChildSlot
@@ -180,7 +181,7 @@ public:
 private:
     FReply OnCreateClicked()
     {
-        if (!OnSourceCreated.IsBound() || !SourceSettingsObject)
+        if (!OnSourceCreated.IsBound() || !SourceSettingsObject.IsValid())
         {
             return FReply::Handled();
         }
@@ -264,7 +265,7 @@ private:
             if (Customization && Customization->BuildTransportWidget)
             {
                 const FSimpleDelegate SubmitDelegate = FSimpleDelegate::CreateSP(this, &SO3DReceiverSourceFactoryPanel::HandleCustomizationSubmit);
-                if (TSharedPtr<SO3DTransportConfigPanelBase> CustomPanel = Customization->BuildTransportWidget(SourceSettingsObject, SubmitDelegate))
+                if (TSharedPtr<SO3DTransportConfigPanelBase> CustomPanel = Customization->BuildTransportWidget(SourceSettingsObject.Get(), SubmitDelegate))
                 {
                     CustomPanel->SetPanelWidth(SO3DTransportConfigPanelBase::DefaultPanelWidth);
                     TransportCustomizationContainer->SetContent(CustomPanel.ToSharedRef());
@@ -280,7 +281,7 @@ private:
 
     FName GetCurrentTransportName() const
     {
-        return SourceSettingsObject ? SourceSettingsObject->Settings.TransportName : NAME_None;
+        return SourceSettingsObject.IsValid() ? SourceSettingsObject->Settings.TransportName : NAME_None;
     }
 
     void RefreshAudioCodecOptions()
@@ -307,7 +308,7 @@ private:
             return;
         }
 
-        const FName CurrentCodec = SourceSettingsObject ? SourceSettingsObject->Settings.AudioCodec : NAME_None;
+        const FName CurrentCodec = SourceSettingsObject.IsValid() ? SourceSettingsObject->Settings.AudioCodec : NAME_None;
 
         TSharedPtr<FName> MatchingItem;
         for (const TSharedPtr<FName>& Option : AudioCodecOptions)
@@ -336,7 +337,7 @@ private:
 
     void HandleAudioCodecSelectionChanged(TSharedPtr<FName> NewSelection, ESelectInfo::Type /*SelectInfo*/)
     {
-        if (!SourceSettingsObject)
+        if (!SourceSettingsObject.IsValid())
         {
             return;
         }
@@ -369,7 +370,7 @@ private:
 
     FText GetSelectedAudioCodecText() const
     {
-        const FName CurrentCodec = SourceSettingsObject ? SourceSettingsObject->Settings.AudioCodec : NAME_None;
+        const FName CurrentCodec = SourceSettingsObject.IsValid() ? SourceSettingsObject->Settings.AudioCodec : NAME_None;
         if (CurrentCodec.IsNone())
         {
             return LOCTEXT("ReceiverAudioCodecDefaultLabel", "Transport Default");
@@ -380,7 +381,7 @@ private:
 
     bool IsAudioCodecSelectionEnabled() const
     {
-        return SourceSettingsObject && SourceSettingsObject->Settings.bEnableAudio;
+        return SourceSettingsObject.IsValid() && SourceSettingsObject->Settings.bEnableAudio;
     }
 
     void RefreshTransportOptions()
@@ -399,7 +400,7 @@ private:
         if (CurrentSelection.IsNone() && TransportOptions.Num() > 0)
         {
             CurrentSelection = *TransportOptions[0];
-            if (SourceSettingsObject)
+            if (SourceSettingsObject.IsValid())
             {
                 SourceSettingsObject->Settings.TransportName = CurrentSelection;
             }
@@ -475,7 +476,7 @@ private:
 
     void HandleTransportSelectionChanged(TSharedPtr<FName> NewSelection, ESelectInfo::Type /*SelectInfo*/)
     {
-        if (!SourceSettingsObject || !NewSelection.IsValid())
+        if (!SourceSettingsObject.IsValid() || !NewSelection.IsValid())
         {
             return;
         }
@@ -514,7 +515,7 @@ private:
     }
 
     FReceiverSourceCreated OnSourceCreated;
-    UO3DReceiverSettingsObject* SourceSettingsObject = nullptr;
+    TStrongObjectPtr<UO3DReceiverSettingsObject> SourceSettingsObject;
     TSharedPtr<IDetailsView> DetailsView;
     TSharedPtr<SBox> TransportCustomizationContainer;
     TSharedPtr<SComboBox<TSharedPtr<FName>>> TransportComboBox;

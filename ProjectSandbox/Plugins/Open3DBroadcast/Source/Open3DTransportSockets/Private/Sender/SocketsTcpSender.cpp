@@ -47,25 +47,53 @@ private:
 class FSocketsTcpSenderAudioSink final : public FO3DSenderAudioSinkBase
 {
 public:
-	FSocketsTcpSenderAudioSink(FO3DSocketsTcpSender& InOwner, FO3DTransportAudioConfig InConfig)
+	FSocketsTcpSenderAudioSink(TSharedPtr<FSocketsTcpSenderOwnerGuard, ESPMode::ThreadSafe> InOwnerGuard, FO3DTransportAudioConfig InConfig)
 		: FO3DSenderAudioSinkBase(MoveTemp(InConfig))
-		, Owner(InOwner)
+		, OwnerGuard(MoveTemp(InOwnerGuard))
 	{
 	}
 
 	virtual bool OnSubmitPcmInternal(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
 	{
-		return Owner.ProcessCapturedAudio(StreamLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
+		if (!OwnerGuard.IsValid())
+		{
+			return false;
+		}
+
+		// Holding this lock blocks the sender's destructor (which takes the
+		// same lock to null out Owner) until this call returns, so Owner is
+		// guaranteed valid for the duration of the call below.
+		FScopeLock Lock(&OwnerGuard->Lock);
+		if (!OwnerGuard->Owner)
+		{
+			return false;
+		}
+		return OwnerGuard->Owner->ProcessCapturedAudio(StreamLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
 	}
 
 private:
-	FO3DSocketsTcpSender& Owner;
+	TSharedPtr<FSocketsTcpSenderOwnerGuard, ESPMode::ThreadSafe> OwnerGuard;
 };
 
-FO3DSocketsTcpSender::FO3DSocketsTcpSender() = default;
+FO3DSocketsTcpSender::FO3DSocketsTcpSender()
+{
+	OwnerGuard = MakeShared<FSocketsTcpSenderOwnerGuard, ESPMode::ThreadSafe>();
+	OwnerGuard->Owner = this;
+}
 
 FO3DSocketsTcpSender::~FO3DSocketsTcpSender()
 {
+	// Invalidate before tearing down anything else: any audio-thread call
+	// already inside FSocketsTcpSenderAudioSink::OnSubmitPcmInternal is
+	// holding OwnerGuard->Lock, so this blocks until that call returns, and
+	// every call after this point sees Owner == nullptr instead of touching
+	// a partially/fully destroyed sender.
+	if (OwnerGuard.IsValid())
+	{
+		FScopeLock Lock(&OwnerGuard->Lock);
+		OwnerGuard->Owner = nullptr;
+	}
+
 	Stop();
 }
 
@@ -218,7 +246,7 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DSocketsTcpSender::Creat
 	ActiveAudioConfig = EffectiveConfig;
 	RefreshAudioEncoder();
 
-	return MakeShared<FSocketsTcpSenderAudioSink>(*this, ActiveAudioConfig);
+	return MakeShared<FSocketsTcpSenderAudioSink>(OwnerGuard, ActiveAudioConfig);
 }
 
 bool FO3DSocketsTcpSender::CreateListenSocket()
@@ -266,6 +294,10 @@ bool FO3DSocketsTcpSender::CreateListenSocket()
 
 void FO3DSocketsTcpSender::DestroySocket()
 {
+	// Same lock as TickAcceptClient()/RunWorker(); blocks until any in-flight
+	// worker-thread send finishes before ClientSocket is torn down.
+	FScopeLock Lock(&OwnerGuard->Lock);
+
 	if (ClientSocket && SocketSubsystem)
 	{
 		SocketSubsystem->DestroySocket(ClientSocket);
@@ -282,9 +314,9 @@ void FO3DSocketsTcpSender::DestroySocket()
 
 void FO3DSocketsTcpSender::TickAcceptClient()
 {
-	if (!ListenSocket || ClientSocket)
+	if (!ListenSocket)
 	{
-		return; // Already have a client
+		return;
 	}
 
 	const double Now = FPlatformTime::Seconds();
@@ -293,6 +325,15 @@ void FO3DSocketsTcpSender::TickAcceptClient()
 		return;
 	}
 	LastAcceptPollTime = Now;
+
+	// Same lock as DestroySocket()/RunWorker(); guards the ClientSocket
+	// read-then-write below against a concurrent worker-thread send/teardown.
+	FScopeLock Lock(&OwnerGuard->Lock);
+
+	if (ClientSocket)
+	{
+		return; // Already have a client
+	}
 
 	TSharedRef<FInternetAddr> PeerAddr = SocketSubsystem->CreateInternetAddr();
 	FSocket* Accepted = ListenSocket->Accept(*PeerAddr, TEXT("O3DS_TCP_CLIENT"));
@@ -459,6 +500,11 @@ uint32 FO3DSocketsTcpSender::RunWorker()
 		const uint64 PayloadSize = static_cast<uint64>(Payload.Bytes.Num());
 		const uint64 Current = QueueBytes.Load();
 		QueueBytes.Store(Current > PayloadSize ? Current - PayloadSize : 0);
+
+		// Same lock as TickAcceptClient()/DestroySocket(); held for the whole
+		// send so a concurrent accept/teardown on the game thread can't touch
+		// ClientSocket (or free the underlying FSocket) mid-send.
+		FScopeLock Lock(&OwnerGuard->Lock);
 
 		FSocket* ActiveSocket = ClientSocket;
 		if (!ActiveSocket)

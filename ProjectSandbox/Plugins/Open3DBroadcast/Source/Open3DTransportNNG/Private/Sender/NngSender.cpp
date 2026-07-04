@@ -177,6 +177,11 @@ bool FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
     return true;
 }
 
+FO3DNngSender::~FO3DNngSender()
+{
+    Stop();
+}
+
 bool FO3DNngSender::Start()
 {
     if (!bInitialized.Load())

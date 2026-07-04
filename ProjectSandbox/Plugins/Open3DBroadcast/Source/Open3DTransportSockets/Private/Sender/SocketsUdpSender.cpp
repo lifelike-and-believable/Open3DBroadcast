@@ -23,25 +23,53 @@ DEFINE_LOG_CATEGORY_STATIC(LogSocketsUdpSender, Log, All);
 class FSocketsUdpSenderAudioSink final : public FO3DSenderAudioSinkBase
 {
 public:
-	FSocketsUdpSenderAudioSink(FO3DSocketsUdpSender& InOwner, FO3DTransportAudioConfig InConfig)
+	FSocketsUdpSenderAudioSink(TSharedPtr<FSocketsUdpSenderOwnerGuard, ESPMode::ThreadSafe> InOwnerGuard, FO3DTransportAudioConfig InConfig)
 		: FO3DSenderAudioSinkBase(MoveTemp(InConfig))
-		, Owner(InOwner)
+		, OwnerGuard(MoveTemp(InOwnerGuard))
 	{
 	}
 
 	virtual bool OnSubmitPcmInternal(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
 	{
-		return Owner.ProcessCapturedAudio(StreamLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
+		if (!OwnerGuard.IsValid())
+		{
+			return false;
+		}
+
+		// Holding this lock blocks the sender's destructor (which takes the
+		// same lock to null out Owner) until this call returns, so Owner is
+		// guaranteed valid for the duration of the call below.
+		FScopeLock Lock(&OwnerGuard->Lock);
+		if (!OwnerGuard->Owner)
+		{
+			return false;
+		}
+		return OwnerGuard->Owner->ProcessCapturedAudio(StreamLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
 	}
 
 private:
-	FO3DSocketsUdpSender& Owner;
+	TSharedPtr<FSocketsUdpSenderOwnerGuard, ESPMode::ThreadSafe> OwnerGuard;
 };
 
-FO3DSocketsUdpSender::FO3DSocketsUdpSender() = default;
+FO3DSocketsUdpSender::FO3DSocketsUdpSender()
+{
+	OwnerGuard = MakeShared<FSocketsUdpSenderOwnerGuard, ESPMode::ThreadSafe>();
+	OwnerGuard->Owner = this;
+}
 
 FO3DSocketsUdpSender::~FO3DSocketsUdpSender()
 {
+	// Invalidate before tearing down anything else: any audio-thread call
+	// already inside FSocketsUdpSenderAudioSink::OnSubmitPcmInternal is
+	// holding OwnerGuard->Lock, so this blocks until that call returns, and
+	// every call after this point sees Owner == nullptr instead of touching
+	// a partially/fully destroyed sender.
+	if (OwnerGuard.IsValid())
+	{
+		FScopeLock Lock(&OwnerGuard->Lock);
+		OwnerGuard->Owner = nullptr;
+	}
+
 	Stop();
 }
 
@@ -127,6 +155,12 @@ void FO3DSocketsUdpSender::Stop()
 
 bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
 {
+	// Guards Socket/RemoteAddr against a concurrent CreateSocket()/DestroySocket()
+	// from Start()/Stop() (which take the same lock), and against the audio
+	// thread's ProcessCapturedAudio()/SendEncodedAudio() call, which runs
+	// entirely inside this same lock (see FSocketsUdpSenderAudioSink above).
+	FScopeLock Lock(&OwnerGuard->Lock);
+
 	if (!Socket || !RemoteAddr.IsValid())
 	{
 		return false;
@@ -145,7 +179,7 @@ bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
 	{
 		UE_LOG(LogSocketsUdpSender, Verbose, TEXT("UDP sender failed to serialize SubjectList."));
 		{
-			FScopeLock Lock(&StatsMutex);
+			FScopeLock StatsLock(&StatsMutex);
 			Stats.DroppedFrames++;
 		}
 		return false;
@@ -153,21 +187,21 @@ bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
 
 	if (!ObservedSubject.IsEmpty())
 	{
-		FScopeLock Lock(&SubjectNameLock);
+		FScopeLock NameLock(&SubjectNameLock);
 		LastSubjectName = MoveTemp(ObservedSubject);
 	}
 
 	if (!SendPayload(Socket, RemoteAddr, reinterpret_cast<const uint8*>(SerializationScratch.data()), BytesWritten, TEXT("data")))
 	{
 		{
-			FScopeLock Lock(&StatsMutex);
+			FScopeLock StatsLock(&StatsMutex);
 			Stats.DroppedFrames++;
 		}
 		return false;
 	}
 
 	{
-		FScopeLock Lock(&StatsMutex);
+		FScopeLock StatsLock(&StatsMutex);
 		Stats.FramesSent++;
 		Stats.BytesSent += BytesWritten;
 	}
@@ -204,7 +238,7 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DSocketsUdpSender::Creat
 	ActiveAudioConfig = EffectiveConfig;
 	RefreshAudioEncoder();
 
-	return MakeShared<FSocketsUdpSenderAudioSink, ESPMode::ThreadSafe>(*this, ActiveAudioConfig);
+	return MakeShared<FSocketsUdpSenderAudioSink, ESPMode::ThreadSafe>(OwnerGuard, ActiveAudioConfig);
 }
 
 bool FO3DSocketsUdpSender::ResolveRemoteAddress(const FString& Host, int32 Port)
@@ -269,6 +303,11 @@ bool FO3DSocketsUdpSender::ResolveAddress(const FString& Host, int32 Port, TShar
 
 bool FO3DSocketsUdpSender::CreateSocket()
 {
+	// Same lock as Send()/DestroySocket(); FCriticalSection is recursive in
+	// UE so the DestroySocket() call below re-entering the lock on this
+	// thread is safe.
+	FScopeLock Lock(&OwnerGuard->Lock);
+
 	if (!SocketSubsystem || !RemoteAddr.IsValid())
 	{
 		return false;
@@ -303,6 +342,11 @@ bool FO3DSocketsUdpSender::CreateSocket()
 
 void FO3DSocketsUdpSender::DestroySocket()
 {
+	// Same lock as Send()/CreateSocket(); recursive-safe when called from
+	// CreateSocket() above, and blocks until any in-flight audio-thread call
+	// (see FSocketsUdpSenderAudioSink) has finished reading Socket.
+	FScopeLock Lock(&OwnerGuard->Lock);
+
 	if (Socket && SocketSubsystem)
 	{
 		SocketSubsystem->DestroySocket(Socket);

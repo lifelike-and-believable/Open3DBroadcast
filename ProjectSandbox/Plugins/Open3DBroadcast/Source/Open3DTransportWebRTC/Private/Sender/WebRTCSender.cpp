@@ -564,6 +564,10 @@ void FO3DWebRTCSender::Stop()
         }
     }
 
+    // Unregister the connection callback before destroying the client so the FFI layer
+    // cannot invoke it against a `this` pointer that is about to go out of scope.
+    lk_set_connection_callback(ClientHandle, nullptr, nullptr);
+
     lk_client_destroy(ClientHandle);
     ClientHandle = nullptr;
 
