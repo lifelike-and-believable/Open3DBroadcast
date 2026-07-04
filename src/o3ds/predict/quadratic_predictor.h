@@ -42,6 +42,12 @@ namespace O3DS
 	//! direction) to the acceleration estimate. This is an approximation -
 	//! a fully general constant-angular-acceleration model in SO(3) is
 	//! materially more complex and not needed for a classical baseline.
+	//! A consequence: a rotation that reverses sense between the older and
+	//! newer delta is read as decelerating (magnitude only), not reversing
+	//! direction, and on long horizons the extrapolated angle can cross
+	//! zero and continue backward along the newer delta's axis rather than
+	//! actually reversing to a new axis - another reason callers must bound
+	//! the prediction horizon.
 	//!
 	//! Needs 3 samples with distinct timestamps; Predict() returns false
 	//! otherwise (caller should hold).
