@@ -11,11 +11,15 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
-    # Ninja's default C/C++ compiler search tries cc/gcc before cl even when
-    # cl.exe is earlier on PATH (msvc-dev-cmd's prepend doesn't change this -
-    # it's CMake's own candidate-order logic for this generator on Windows).
-    # Forcing CC/CXX here is what actually makes it use MSVC.
+    # Runs on the same self-hosted Windows runner used for the UE plugin build
+    # (open3dbroadcast-plugin-ci.yml) - a known-good, curated MSVC toolchain.
+    # GitHub-hosted windows-latest's generic image bundles Strawberry Perl's
+    # MinGW gcc.exe, which CMake's default Ninja generator picks up ahead of
+    # cl.exe regardless of PATH order or msvc-dev-cmd, and has no full Visual
+    # Studio IDE install for the VS project generator to discover either -
+    # this workflow was apparently only ever exercised on a self-hosted
+    # runner in the past, which is why none of that surfaced before.
+    runs-on: [ self-hosted, ue5, windows ]
     env:
       CC: cl
       CXX: cl
