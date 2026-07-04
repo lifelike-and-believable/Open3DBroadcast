@@ -402,6 +402,27 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 	return builder.CreateVectorOfStructs(out);
 }
 
+	PoseSample Subject::ToPoseSample(double t, uint64_t seq) const
+	{
+		PoseSample s;
+		s.t = t;
+		s.seq = seq;
+
+		s.translations.reserve(mTransforms.mItems.size());
+		s.rotations.reserve(mTransforms.mItems.size());
+		s.scales.reserve(mTransforms.mItems.size());
+		for (Transform* const& transform : mTransforms.mItems)
+		{
+			s.translations.push_back(transform->translation.value);
+			s.rotations.push_back(transform->rotation.value);
+			s.scales.push_back(transform->scale.value);
+		}
+
+		s.curves = mCurveValues;
+
+		return s;
+	}
+
 	flatbuffers::Offset<O3DS::Data::SubjectUpdate> Subject::SerializeUpdate(flatbuffers::FlatBufferBuilder& builder, size_t &count, double deltaThreshold)
 	{
 		auto oSubjectName = builder.CreateString(this->mName);
@@ -458,6 +479,116 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		auto sc = builder.CreateVectorOfStructs(scales);
 		auto cu = SerializeCurveUpdates(builder, count);
 		return CreateSubjectUpdate(builder, oSubjectName, tr, ro, sc, cu);
+	}
+
+	flatbuffers::Offset<O3DS::Data::SubjectUpdate> Subject::SerializeUpdateResidual(flatbuffers::FlatBufferBuilder& builder, size_t& count, double deltaThreshold, double t, uint64_t seq)
+	{
+		if (!mResidualEncoder)
+		{
+			// No encoder configured for this subject - behave exactly like
+			// the legacy path (predictor_id defaults to 0/None on the wire).
+			return SerializeUpdate(builder, count, deltaThreshold);
+		}
+
+		const PoseSample actual = ToPoseSample(t, seq);
+		mResidualEncoder->BeginFrame(actual);
+
+		const bool isKeyframe = mResidualEncoder->IsKeyframe();
+		const PoseSample& reference = mResidualEncoder->Reference(); // empty when isKeyframe (see below)
+
+		auto oSubjectName = builder.CreateString(this->mName);
+
+		std::vector<O3DS::Data::TranslationUpdate> translations;
+		std::vector<O3DS::Data::RotationUpdate> rotations;
+		std::vector<O3DS::Data::ScaleUpdate> scales; // scale updates are unsent today (see legacy SerializeUpdate's commented-out block) - residual mode preserves that, nothing to generalize here
+
+		// The exact pose a receiver will end up with, built alongside the
+		// wire entries below: `actual`'s value for every channel this
+		// frame sends (the residual round-trips it exactly), or
+		// `reference`'s (the receiver's own prediction) for every channel
+		// this frame omits. Fed to Commit() below instead of `actual`
+		// itself - see ResidualEncoder's own doc comment for why
+		// observing anything else would let the encoder's and decoder's
+		// predictor history silently diverge.
+		PoseSample reconstructed = actual;
+
+		// Bounds-checked defensively: `reference` only matches mTransforms'
+		// current topology if it hasn't changed since the last
+		// ResidualEncoder::BeginFrame() - which itself now detects a
+		// topology change and forces isKeyframe in that case, so this is
+		// just defense in depth, not the primary safeguard.
+		const size_t refTransCount = reference.translations.size();
+		const size_t refRotCount = reference.rotations.size();
+
+		int transformId = 0;
+		for (const auto& tform : this->mTransforms)
+		{
+			if (tform->nan())
+			{
+				transformId++;
+				continue;
+			}
+
+			const Vector3d refTrans = ((size_t)transformId < refTransCount) ? reference.translations[transformId] : Vector3d(0.0, 0.0, 0.0);
+			// A keyframe must include every channel unconditionally (it
+			// exists to fully resync a receiver joining mid-stream or
+			// recovering from loss - omitting a channel just because it's
+			// near the zero reference would defeat that), so only the
+			// deltaThreshold gate applies to residual (non-keyframe) frames.
+			if (isKeyframe || dist(tform->translation.value, refTrans) > deltaThreshold)
+			{
+				translations.push_back(O3DS::Data::TranslationUpdate(
+					(float)(tform->translation.value.v[0] - refTrans.v[0]),
+					(float)(tform->translation.value.v[1] - refTrans.v[1]),
+					(float)(tform->translation.value.v[2] - refTrans.v[2]),
+					transformId));
+				count++;
+			}
+			else
+			{
+				reconstructed.translations[transformId] = refTrans;
+			}
+
+			const Quat refRot = ((size_t)transformId < refRotCount) ? reference.rotations[transformId] : Quat(0.0, 0.0, 0.0, 0.0);
+			if (isKeyframe || dist(tform->rotation.value, refRot) > deltaThreshold)
+			{
+				rotations.push_back(O3DS::Data::RotationUpdate(
+					(float)(tform->rotation.value.v[0] - refRot.v[0]),
+					(float)(tform->rotation.value.v[1] - refRot.v[1]),
+					(float)(tform->rotation.value.v[2] - refRot.v[2]),
+					(float)(tform->rotation.value.v[3] - refRot.v[3]),
+					transformId));
+				count++;
+			}
+			else
+			{
+				reconstructed.rotations[transformId] = refRot;
+			}
+
+			transformId++;
+		}
+
+		// Curves: always sent unconditionally today (see
+		// SerializeCurveUpdates) - never omitted, so `reconstructed.curves`
+		// (== `actual.curves`, copied above) needs no adjustment here.
+		std::vector<O3DS::Data::CurveUpdate> curveUpdates;
+		const size_t refCurveCount = reference.curves.size();
+		for (size_t i = 0; i < mCurveValues.size(); ++i)
+		{
+			const float refCurve = (i < refCurveCount) ? reference.curves[i] : 0.0f;
+			curveUpdates.push_back(O3DS::Data::CurveUpdate(mCurveValues[i] - refCurve, (int)i));
+			count++;
+		}
+
+		mResidualEncoder->Commit(reconstructed);
+
+		auto tr = builder.CreateVectorOfStructs(translations);
+		auto ro = builder.CreateVectorOfStructs(rotations);
+		auto sc = builder.CreateVectorOfStructs(scales);
+		auto cu = builder.CreateVectorOfStructs(curveUpdates);
+
+		return CreateSubjectUpdate(builder, oSubjectName, tr, ro, sc, cu,
+			static_cast<uint32_t>(mResidualEncoder->Id()), isKeyframe);
 	}
 
 	int Subject::Serialize(std::vector<char> &outbuf, double timestamp)
@@ -583,6 +714,34 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		return static_cast<int>(outbuf.size());
 	}
 
+	int SubjectList::SerializeUpdateResidual(std::vector<char> &outbuf, size_t& count, double timestamp,
+		uint64_t tx_seq, uint64_t tx_wallclock_us, uint32_t frame_epoch)
+	{
+		if (timestamp == 0.0)
+		{
+			timestamp = GetTime();
+		}
+
+		flatbuffers::FlatBufferBuilder builder;
+
+		std::vector<flatbuffers::Offset<O3DS::Data::SubjectUpdate>> outSubjectUpdates;
+
+		for (auto& subject : this->mItems)
+		{
+			outSubjectUpdates.push_back(subject->SerializeUpdateResidual(builder, count, mDeltaThreshold, timestamp, tx_seq));
+		}
+
+		auto ovSubjectUpdates = builder.CreateVector(outSubjectUpdates);
+
+		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, tx_seq, tx_wallclock_us, frame_epoch);
+
+		builder.Finish(root);
+
+		finalize(builder, outbuf, 1);
+
+		return static_cast<int>(outbuf.size());
+	}
+
 	bool SubjectList::PeekMeta(const char* data, size_t len,
 		uint64_t& outTxSeq, uint64_t& outTxWallclockUs, uint32_t& outFrameEpoch)
 	{
@@ -661,8 +820,17 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		if (subjects_data)
 		{
-			// Clear the list before populating
+			// Clear the list before populating. mItems owns these Subject
+			// pointers (~SubjectList deletes them the same way), so a bare
+			// vector::clear() here would leak every previously-tracked
+			// subject instead of dropping it - delete them first, matching
+			// the pattern TransformList::clear()/Subject::clear() already
+			// use for their own owned pointers.
 			if (clearInactive) {
+				for (Subject* s : this->mItems)
+				{
+					delete s;
+				}
 				this->mItems.clear();
 			}
 			for (uint32_t i = 0; i < subjects_data->size(); i++)
@@ -676,8 +844,18 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		{
 			for (uint32_t i = 0; i < updates_data->size(); i++)
 			{
-				// For each update
-				this->ParseUpdate(updates_data->Get(i), builder);
+				// For each update - dispatch on the wire's own predictor_id
+				// (C2, roadmap doc §5/C2): 0/None is exactly today's legacy
+				// last-pose-delta format (old senders never set this
+				// field, so it defaults to 0), everything else is
+				// residual-coded. Mixed legacy/residual subjects in the
+				// same SubjectList are fine - this is a per-update, not
+				// per-buffer, decision.
+				auto inUpdate = updates_data->Get(i);
+				if (inUpdate->predictor_id() != 0)
+					this->ParseUpdateResidual(inUpdate, builder);
+				else
+					this->ParseUpdate(inUpdate, builder);
 			}
 		}
 
@@ -733,6 +911,20 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		// Clear the subject and add the transforms
 		outSubject->clear();
+
+		// C2 (roadmap doc §5/C2): a full subject (re)sync means the
+		// topology may have changed - a residual decoder's history is
+		// indexed by the OLD transform/curve layout, and reusing it
+		// against a possibly different one could silently misapply one
+		// channel's prediction onto a different channel. Drop it;
+		// ParseUpdateResidual constructs a fresh one on next use with no
+		// history - the same "insufficient history -> keyframe" fallback
+		// it already has to handle a subject's very first residual frame.
+		// (The sender-side encoder doesn't need this: it detects a
+		// topology change itself, from ToPoseSample()'s own channel
+		// counts, every BeginFrame() - see ResidualEncoder::BeginFrame.)
+		outSubject->SetResidualDecoder(nullptr);
+
 		if (ovNodes == nullptr)
 			return;
 
@@ -846,6 +1038,111 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 				}
 			}
 		}
+	}
+
+	void SubjectList::ParseUpdateResidual(
+		const O3DS::Data::SubjectUpdate *inUpdate,
+		TransformBuilder *builder)
+	{
+		if (inUpdate->name() == nullptr)
+			return;
+		std::string name = inUpdate->name()->str();
+
+		O3DS::Subject *outSubject = this->findSubject(name);
+		if (!outSubject)
+			return;
+
+		const ResidualPredictorId wireId = static_cast<ResidualPredictorId>(inUpdate->predictor_id());
+
+		O3DS::ResidualDecoder* decoder = outSubject->GetResidualDecoder();
+		if (!decoder || decoder->Id() != wireId)
+		{
+			// First residual frame for this subject, or the sender
+			// switched predictors mid-stream - (re)construct a matching
+			// decoder. It has no history yet, so BeginFrame() below
+			// safely falls back to a zero/identity reference regardless
+			// of what is_keyframe says (see ResidualDecoder's own doc
+			// comment), same fallback contract as a fresh encoder.
+			auto newDecoder = std::make_unique<ResidualDecoder>(wireId);
+			decoder = newDecoder.get();
+			outSubject->SetResidualDecoder(std::move(newDecoder));
+		}
+
+		decoder->BeginFrame(inUpdate->is_keyframe(), this->mTime);
+		const bool isKeyframe = decoder->IsKeyframe();
+		const PoseSample& reference = decoder->Reference();
+
+		const size_t refTransCount = reference.translations.size();
+		const size_t refRotCount = reference.rotations.size();
+		const size_t refCurveCount = reference.curves.size();
+
+		// Baseline every channel to its own current prediction before
+		// overlaying the sparse wire entries below. This is the crux of
+		// why residual coding isn't just "sparse delta with extra math":
+		// an OMITTED channel here means "residual ~= 0", i.e. "value ==
+		// prediction" - NOT "value is unchanged since it was last sent"
+		// the way an omission in the legacy delta scheme means. A moving
+		// (but well-predicted) channel's value must still advance every
+		// frame even when it never appears on the wire, or it would
+		// visibly freeze the instant its residual first drops below
+		// deltaThreshold. (On a keyframe, reference is empty/zero - see
+		// ResidualDecoder::Reference() - and every real channel is
+		// expected to be present on the wire per the encoder's own
+		// zero-reference gating, so there is no meaningful baseline to
+		// apply here beyond what Vector3d()/Quat()'s own zero defaults
+		// already are.)
+		for (size_t i = 0; i < refTransCount && i < outSubject->mTransforms.size(); ++i)
+			outSubject->mTransforms[i]->translation.value = reference.translations[i];
+		for (size_t i = 0; i < refRotCount && i < outSubject->mTransforms.size(); ++i)
+			outSubject->mTransforms[i]->rotation.value = reference.rotations[i];
+		for (size_t i = 0; i < refCurveCount && i < outSubject->mCurveValues.size(); ++i)
+			outSubject->mCurveValues[i] = reference.curves[i];
+
+		int id;
+		for (auto inTranslation : *inUpdate->translations())
+		{
+			id = inTranslation->i();
+			if (id < 0 || (size_t)id >= outSubject->mTransforms.size())
+				continue;
+			const Vector3d refTrans = ((size_t)id < refTransCount) ? reference.translations[id] : Vector3d(0.0, 0.0, 0.0);
+			outSubject->mTransforms[id]->translation = O3DS::TransformTranslation(
+				refTrans.v[0] + inTranslation->x(),
+				refTrans.v[1] + inTranslation->y(),
+				refTrans.v[2] + inTranslation->z());
+		}
+
+		for (auto inRotation : *inUpdate->rotation())
+		{
+			id = inRotation->i();
+			if (id < 0 || (size_t)id >= outSubject->mTransforms.size())
+				continue;
+			const Quat refRot = ((size_t)id < refRotCount) ? reference.rotations[id] : Quat(0.0, 0.0, 0.0, 0.0);
+			outSubject->mTransforms[id]->rotation = O3DS::TransformRotation(
+				refRot.v[0] + inRotation->x(),
+				refRot.v[1] + inRotation->y(),
+				refRot.v[2] + inRotation->z(),
+				refRot.v[3] + inRotation->w());
+		}
+
+		// Scale: the legacy path doesn't send scale updates at all today
+		// (see Subject::SerializeUpdate's commented-out block) - residual
+		// mode preserves that, nothing to reconstruct here.
+
+		if (inUpdate->curves()) {
+			for (auto inCurve : *inUpdate->curves()) {
+				id = inCurve->i();
+				if (id < 0 || (size_t)id >= outSubject->mCurveValues.size())
+					continue;
+				const float refCurve = ((size_t)id < refCurveCount) ? reference.curves[id] : 0.0f;
+				outSubject->mCurveValues[id] = refCurve + inCurve->value();
+			}
+		}
+
+		// Advance the decoder's predictor with the subject's full current
+		// pose (changed channels just applied above, plus any unchanged
+		// carried-over ones) - same full-state Observe() contract
+		// ResidualEncoder::BeginFrame() already relies on.
+		decoder->EndFrame(outSubject->ToPoseSample(this->mTime, 0));
 	}
 
 

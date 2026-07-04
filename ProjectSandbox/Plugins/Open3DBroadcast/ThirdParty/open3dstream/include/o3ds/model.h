@@ -31,6 +31,7 @@ SOFTWARE.
 #include "math.h"
 #include "context.h"
 #include "transform_component.h"
+#include "predict/residual_codec.h"
 #include "o3ds_generated.h"
 
 
@@ -194,6 +195,38 @@ namespace O3DS
 
 		flatbuffers::Offset<O3DS::Data::SubjectUpdate> SerializeUpdate(flatbuffers::FlatBufferBuilder& builder, size_t& count, double deltaThreshold);
 
+		// C2 (roadmap doc §5/C2): opt-in per-subject residual coding. Both
+		// members are null by default (legacy mode, unaffected). Whichever
+		// role this Subject instance plays, set up the matching one -
+		// SetResidualEncoder() before calling SerializeUpdateResidual()
+		// (sender), SetResidualDecoder() before a receiver's Parse() sees
+		// a residual-coded update for this subject's name (receiver, see
+		// SubjectList::ParseUpdateResidual). Nothing stops both being set
+		// on the same instance since Subject is shared code for both
+		// roles today, but only one is meaningful in practice.
+		void SetResidualEncoder(std::unique_ptr<ResidualEncoder> encoder) { mResidualEncoder = std::move(encoder); }
+		void SetResidualDecoder(std::unique_ptr<ResidualDecoder> decoder) { mResidualDecoder = std::move(decoder); }
+		ResidualEncoder* GetResidualEncoder() const { return mResidualEncoder.get(); }
+		ResidualDecoder* GetResidualDecoder() const { return mResidualDecoder.get(); }
+
+		//! Builds a flat PoseSample snapshot of this subject's current
+		//! translations/rotations/scales/curves, in mTransforms/
+		//! mCurveValues index order - the same order TranslationUpdate::i()
+		//! etc. already index into, so residual channel alignment needs no
+		//! remapping.
+		PoseSample ToPoseSample(double t, uint64_t seq) const;
+
+		//! Residual-coded variant of SerializeUpdate(). Requires
+		//! GetResidualEncoder() != nullptr (call SetResidualEncoder()
+		//! first) - falls back to the legacy SerializeUpdate() overload
+		//! otherwise (predictor_id defaults to 0 on the wire either way,
+		//! so this is safe to call unconditionally once an encoder is
+		//! wired up). `t`/`seq` become the PoseSample fed to the encoder
+		//! and, on Predict() success, the wire's implicit reference time -
+		//! callers should pass the same `t` as the enclosing
+		//! SubjectList::SerializeUpdateResidual()'s timestamp.
+		flatbuffers::Offset<O3DS::Data::SubjectUpdate> SerializeUpdateResidual(flatbuffers::FlatBufferBuilder& builder, size_t& count, double deltaThreshold, double t, uint64_t seq);
+
 		// Curves
 		flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<O3DS::Data::Curve>>> SerializeCurves(flatbuffers::FlatBufferBuilder& builder);
 		flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> SerializeCurveUpdates(flatbuffers::FlatBufferBuilder& builder, size_t &count);
@@ -202,6 +235,9 @@ namespace O3DS
 
 		int SerializeUpdate(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp);
 
+	private:
+		std::unique_ptr<ResidualEncoder> mResidualEncoder;
+		std::unique_ptr<ResidualDecoder> mResidualDecoder;
 	};
 
 	/*! \class SubjectList model.h o3ds/model.h */
@@ -277,6 +313,15 @@ namespace O3DS
 		int SerializeUpdate(std::vector<char>& outbuf, size_t& count, double timestamp = 0.0,
 			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0);
 
+		//! Residual-coded variant of SerializeUpdate() (roadmap doc §5/C2).
+		//! Subjects with a residual encoder configured (Subject::
+		//! SetResidualEncoder()) are encoded via
+		//! Subject::SerializeUpdateResidual(); subjects without one fall
+		//! back to the legacy Subject::SerializeUpdate() path unchanged -
+		//! safe to mix residual-coded and legacy subjects in the same list.
+		int SerializeUpdateResidual(std::vector<char>& outbuf, size_t& count, double timestamp = 0.0,
+			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0);
+
 		//! Populate or update the subject list with the binary data provided (created by Serialize)
 		bool Parse(const char *data, size_t len, TransformBuilder* = nullptr, bool clearInactive = true);
 
@@ -296,6 +341,18 @@ namespace O3DS
 		void ParseSubject(const O3DS::Data::Subject*, TransformBuilder* = nullptr);
 
 		void ParseUpdate(const O3DS::Data::SubjectUpdate*, TransformBuilder* = nullptr);
+
+		//! Residual-coded counterpart to ParseUpdate() (roadmap doc §5/C2).
+		//! Dispatched automatically from Parse() based on the wire's own
+		//! predictor_id (0 -> ParseUpdate(), non-zero -> this) - callers
+		//! never need to know in advance whether an incoming stream uses
+		//! residual coding. (Re)constructs the named subject's
+		//! ResidualDecoder on first use or on a predictor_id change
+		//! mid-stream; a fresh decoder has no history, so its own
+		//! BeginFrame() safely falls back to a zero/identity reference
+		//! regardless of what is_keyframe says (see ResidualDecoder's own
+		//! doc comment).
+		void ParseUpdateResidual(const O3DS::Data::SubjectUpdate*, TransformBuilder* = nullptr);
 
 		//! Change distance threshold below which O3DS skips transmitting a transform update.
 		void SetDeltaThreshold(double newThreshold) { mDeltaThreshold = newThreshold; }
