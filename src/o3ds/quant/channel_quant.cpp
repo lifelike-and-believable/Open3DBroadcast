@@ -88,34 +88,48 @@ namespace O3DS
 			return ChooseScalarTier(absDelta, ranges);
 		}
 
-		const double expandedByteRange = ranges.byteRange * (1.0 + h);
 		const double contractedByteRange = ranges.byteRange * (1.0 - h);
-		const double expandedHalfRange = ranges.halfRange * (1.0 + h);
 		const double contractedHalfRange = ranges.halfRange * (1.0 - h);
 
+		// Upgrades (finer -> coarser tier, i.e. away from Byte/Half toward
+		// Full) always happen immediately at the plain, unexpanded boundary
+		// - never later. QuantRanges::byteRange/halfRange are the max |delta|
+		// a tier can represent WITHOUT clamping (QuantizeByte/QuantizeHalf's
+		// documented precondition); letting a value that already exceeds a
+		// tier's range stay in that tier - which an earlier version of this
+		// function did, via an "expanded" upgrade threshold - would silently
+		// clamp it, trading a correctness violation for smoothness. Only
+		// downgrades (coarser -> finer tier) get the hysteresis margin
+		// (contractedByteRange/contractedHalfRange below), since those are
+		// what actually caused the flapping this function exists to prevent:
+		// once a value has crossed into a coarser tier, it shouldn't
+		// immediately drop back the moment it dips slightly below the
+		// boundary again, only once it's clearly settled back inside the
+		// finer tier's range. Full has nothing coarser to upgrade to, so
+		// these checks only apply when previousTier is Byte or Half - see
+		// that case below for why hoisting them above the switch entirely
+		// is wrong (it would preempt Full's own downgrade logic for any
+		// absDelta between byteRange and halfRange).
 		switch (previousTier)
 		{
 		case QuantTier::Byte:
-			// Upgrading out of Byte needs to clear byteRange by the margin;
-			// a big-enough single-frame jump can go straight to Full.
-			if (absDelta > expandedHalfRange)
+			if (absDelta > ranges.halfRange)
 			{
 				return QuantTier::Full;
 			}
-			if (absDelta > expandedByteRange)
+			if (absDelta > ranges.byteRange)
 			{
 				return QuantTier::Half;
 			}
 			return QuantTier::Byte;
 
 		case QuantTier::Half:
-			// Downgrading to Byte needs to clear byteRange's margin on the
-			// low side; upgrading to Full needs to clear halfRange's margin
-			// on the high side. Otherwise stay put.
-			if (absDelta > expandedHalfRange)
+			if (absDelta > ranges.halfRange)
 			{
 				return QuantTier::Full;
 			}
+			// Downgrade to Byte only once it's clearly within Byte's range,
+			// not just barely.
 			if (absDelta <= contractedByteRange)
 			{
 				return QuantTier::Byte;
@@ -124,9 +138,10 @@ namespace O3DS
 
 		case QuantTier::Full:
 		default:
-			// Entering a finer tier from Full needs to clear the relevant
-			// margin on the low side - a single big drop can go straight to
-			// Byte, matching ChooseScalarTier's own precedence.
+			// Full is already the safe ceiling - no upgrade check needed.
+			// Entering a finer tier needs to clear the relevant margin on
+			// the low side - a single big drop can go straight to Byte,
+			// matching ChooseScalarTier's own precedence.
 			if (absDelta <= contractedByteRange)
 			{
 				return QuantTier::Byte;

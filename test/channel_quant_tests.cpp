@@ -77,21 +77,22 @@ O3DS_TEST(ChooseScalarTierWithHysteresis_MatchesPlainTierWhenFactorIsZero)
 	}
 }
 
-O3DS_TEST(ChooseScalarTierWithHysteresis_StaysInByteWithinUpperBand)
+O3DS_TEST(ChooseScalarTierWithHysteresis_UpgradesToHalfImmediatelyAtByteRange)
 {
-	// byteRange=0.01, hysteresisFactor=0.15 -> expandedByteRange=0.0115.
-	// A delta just past byteRange but still within the band should NOT
-	// flip Byte -> Half yet - this is the exact "hovering near a boundary"
-	// case that caused every-frame tier flapping (and thus a visible
-	// reconstruction jump every flap, since Byte/Half round differently).
+	// Regression guard (Copilot review, PR #247): upgrades must happen at
+	// the plain byteRange boundary, NOT a hysteresis-expanded one - a value
+	// that already exceeds byteRange must never stay in Byte, since
+	// QuantizeByte would then silently clamp it (byteRange is the max
+	// |delta| Byte can represent WITHOUT clamping). Only downgrades get a
+	// hysteresis margin - see QuantRanges::hysteresisFactor's doc comment.
 	QuantRanges ranges;
 	ranges.byteRange = 0.01;
 	ranges.halfRange = 1.0;
 	ranges.hysteresisFactor = 0.15;
-	O3DS_CHECK(ChooseScalarTierWithHysteresis(0.011, ranges, QuantTier::Byte) == QuantTier::Byte);
+	O3DS_CHECK(ChooseScalarTierWithHysteresis(0.011, ranges, QuantTier::Byte) == QuantTier::Half);
 }
 
-O3DS_TEST(ChooseScalarTierWithHysteresis_UpgradesToHalfPastUpperBand)
+O3DS_TEST(ChooseScalarTierWithHysteresis_UpgradesToHalfImmediatelyFurtherPastByteRange)
 {
 	QuantRanges ranges;
 	ranges.byteRange = 0.01;
@@ -120,18 +121,19 @@ O3DS_TEST(ChooseScalarTierWithHysteresis_DowngradesToBytePastLowerBand)
 	O3DS_CHECK(ChooseScalarTierWithHysteresis(0.008, ranges, QuantTier::Half) == QuantTier::Byte);
 }
 
-O3DS_TEST(ChooseScalarTierWithHysteresis_StaysInHalfNearHalfRangeUpperSide)
+O3DS_TEST(ChooseScalarTierWithHysteresis_UpgradesToFullImmediatelyAtHalfRange)
 {
-	// expandedHalfRange=1.15. A delta just past halfRange but still within
-	// the band should NOT flip Half -> Full yet.
+	// Same regression guard as UpgradesToHalfImmediatelyAtByteRange, one
+	// tier up: a value past halfRange must upgrade to Full immediately,
+	// never stay in Half and risk QuantizeHalf clamping it.
 	QuantRanges ranges;
 	ranges.byteRange = 0.01;
 	ranges.halfRange = 1.0;
 	ranges.hysteresisFactor = 0.15;
-	O3DS_CHECK(ChooseScalarTierWithHysteresis(1.1, ranges, QuantTier::Half) == QuantTier::Half);
+	O3DS_CHECK(ChooseScalarTierWithHysteresis(1.1, ranges, QuantTier::Half) == QuantTier::Full);
 }
 
-O3DS_TEST(ChooseScalarTierWithHysteresis_UpgradesToFullPastHalfRangeUpperBand)
+O3DS_TEST(ChooseScalarTierWithHysteresis_UpgradesToFullImmediatelyFurtherPastHalfRange)
 {
 	QuantRanges ranges;
 	ranges.byteRange = 0.01;

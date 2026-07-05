@@ -67,15 +67,22 @@ namespace O3DS
 		double byteRange = 0.01; //!< Max |delta| representable at Byte tier.
 		double halfRange = 1.0;  //!< Max |delta| representable at Half tier.
 
-		//! Fractional hysteresis margin (e.g. 0.15 == 15%) applied around
-		//! each tier boundary by ChooseScalarTierWithHysteresis. Without it,
-		//! a value that naturally hovers near byteRange/halfRange (e.g.
-		//! idle-animation sway oscillating around a roughly constant
-		//! amplitude) flips tiers every time it crosses back and forth -
-		//! and since each tier reconstructs on a different rounding grid,
-		//! every flip is a visible jump on the receiver, not just added
-		//! noise. 0 (or a non-finite value) disables hysteresis, matching
-		//! plain ChooseScalarTier exactly.
+		//! Fractional hysteresis margin (e.g. 0.15 == 15%) applied by
+		//! ChooseScalarTierWithHysteresis to the DOWNGRADE threshold only
+		//! (coarser tier -> finer tier) - upgrades (finer -> coarser) always
+		//! happen immediately at the plain byteRange/halfRange boundary,
+		//! since byteRange/halfRange are the max |delta| a tier can
+		//! represent WITHOUT clamping (see QuantizeByte/QuantizeHalf's
+		//! documented precondition); delaying an upgrade would let a value
+		//! that already exceeds the current tier's range stay there and
+		//! silently clamp. Without this margin on downgrades, a value that
+		//! naturally hovers near a boundary (e.g. idle-animation sway
+		//! oscillating around a roughly constant amplitude) would cross back
+		//! and forth and flip tiers every time - and since each tier
+		//! reconstructs on a different rounding grid, every flip is a
+		//! visible jump on the receiver, not just added noise. 0 (or a
+		//! non-finite value) disables hysteresis, matching plain
+		//! ChooseScalarTier exactly.
 		double hysteresisFactor = 0.15;
 	};
 
@@ -88,15 +95,19 @@ namespace O3DS
 	QuantTier ChooseScalarTier(double absDelta, const QuantRanges& ranges);
 
 	//! Hysteresis-aware tier selection for a channel whose previously-chosen
-	//! tier is known. Only moves away from previousTier once absDelta clears
-	//! the boundary on the *opposite* side by ranges.hysteresisFactor,
-	//! instead of the instant the plain boundary is crossed - see
-	//! QuantRanges::hysteresisFactor's doc comment for the flapping problem
-	//! this avoids. A channel with no meaningful prior choice (e.g. a
-	//! freshly-created Transform) should pass QuantTier::Full, the always-
-	//! safe/correct starting point already used elsewhere in this scheme
-	//! (e.g. "no anchor yet" falls back to Full too) - hysteresis then
-	//! applies normally from there and converges within one call.
+	//! tier is known. Upgrading to a coarser tier (Byte->Half, Half->Full,
+	//! or a big-enough single-frame jump straight to Full) always happens
+	//! immediately at the plain byteRange/halfRange boundary - absDelta
+	//! never sits in a tier that can't represent it. Downgrading to a finer
+	//! tier only happens once absDelta clears the boundary by
+	//! ranges.hysteresisFactor, instead of the instant it dips back below -
+	//! see QuantRanges::hysteresisFactor's doc comment for the flapping
+	//! problem this asymmetry avoids. A channel with no meaningful prior
+	//! choice (e.g. a freshly-created Transform) should pass
+	//! QuantTier::Full, the always-safe/correct starting point already used
+	//! elsewhere in this scheme (e.g. "no anchor yet" falls back to Full
+	//! too) - hysteresis then applies normally from there and converges
+	//! within one call.
 	QuantTier ChooseScalarTierWithHysteresis(double absDelta, const QuantRanges& ranges, QuantTier previousTier);
 
 	//! Quantizes delta (already known to satisfy |delta| <= range - callers
