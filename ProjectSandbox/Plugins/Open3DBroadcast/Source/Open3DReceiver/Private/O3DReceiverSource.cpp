@@ -61,44 +61,14 @@ static TAutoConsoleVariable<int32> CVarO3DReceiverAudioDebug(
     TEXT("Enable debug logs when publishing receiver audio frames (0/1)."),
     ECVF_Default);
 
-// C1: receiver-side concealment (roadmap doc §5/C1). Defaults match
-// ConcealmentConfig's own defaults (see concealment.h) - exposed as cvars so
-// they can be tuned per-deployment without a rebuild, per the roadmap's "Open
-// decisions" note that these values need real-world/live-LiveLink tuning.
-static TAutoConsoleVariable<int32> CVarO3DReceiverConcealmentEnabled(
-    TEXT("o3ds.Receiver.Concealment.Enabled"),
-    1,
-    TEXT("Enable receiver-side concealment (predict/hold synthetic frames on a gap) for gated (A2) frames (0/1)."),
-    ECVF_Default);
-
-static TAutoConsoleVariable<float> CVarO3DReceiverConcealmentStarvationMs(
-    TEXT("o3ds.Receiver.Concealment.StarvationThresholdMs"),
-    50.0f,
-    TEXT("Gap since the last real frame (ms) beyond which concealment starts synthesizing, instead of leaving small gaps to LiveLink's own interpolation."),
-    ECVF_Default);
-
-static TAutoConsoleVariable<float> CVarO3DReceiverConcealmentHorizonMs(
-    TEXT("o3ds.Receiver.Concealment.MaxHorizonMs"),
-    150.0f,
-    TEXT("Stop extrapolating and hold after this many ms of continuous concealment with no real frame."),
-    ECVF_Default);
-
-static TAutoConsoleVariable<float> CVarO3DReceiverConcealmentCorrectionMs(
-    TEXT("o3ds.Receiver.Concealment.CorrectionWindowMs"),
-    100.0f,
-    TEXT("Blend from the last synthesized pose toward the resumed real trajectory over this many ms after a gap recovers, instead of snapping. 0 disables correction blending."),
-    ECVF_Default);
-
-// C1.c: latency-hiding/render-ahead (roadmap doc §5/C1.c). Opt-in, default OFF
-// (0 = disabled) per the roadmap - trades prediction accuracy for lower
-// perceived latency by continuously showing a pose ahead of the newest real
-// frame, even with no actual gap. See TickConcealment()'s TryRenderAhead()
-// call for why this only applies when TryConceal() found no gap to handle.
-static TAutoConsoleVariable<float> CVarO3DReceiverConcealmentRenderAheadMs(
-    TEXT("o3ds.Receiver.Concealment.RenderAheadMs"),
-    0.0f,
-    TEXT("Latency-hiding horizon (ms) beyond the newest real frame to proactively predict toward, even with no gap. 0 (default) disables render-ahead entirely."),
-    ECVF_Default);
+// C1: receiver-side concealment (roadmap doc §5/C1) config used to live here
+// as cvars. These are production tuning knobs a project would set per
+// deployment (per the roadmap's "Open decisions" note that they need
+// real-world/live-LiveLink tuning), not debug/iteration toggles, so they're
+// now real UPROPERTY fields on UO3DReceiverSourceSettings - see
+// GetConcealmentSettings() below - editable from LiveLink's own per-source
+// "Settings" panel instead of requiring a console command. Defaults still
+// match ConcealmentConfig's own defaults (see concealment.h).
 
 /** Adapts the shared consumer registry callback into this live source instance. */
 class FO3DReceiverSource::FSerializedConsumer : public ISerializedFrameConsumer
@@ -817,6 +787,12 @@ void FO3DReceiverSource::ReportGateMetricsDelta()
     PrevGateStats = Stats;
 }
 
+/** Casts Settings to access concealment config - see the header's own doc comment. */
+const UO3DReceiverSourceSettings* FO3DReceiverSource::GetConcealmentSettings() const
+{
+    return Cast<UO3DReceiverSourceSettings>(Settings);
+}
+
 /** Lazily creates a per-subject ConcealmentEngine on first use (roadmap doc §5/C1.a).
  *  LinearPredictor is the roadmap's recommended C1 default ("almost certainly" - see
  *  §5/C1's "Open decisions"); Quadratic may overshoot on longer horizons. */
@@ -827,11 +803,12 @@ O3DS::ConcealmentEngine& FO3DReceiverSource::GetOrCreateSubjectConcealment(FName
         return **Existing;
     }
 
+    const UO3DReceiverSourceSettings* ConcealmentSettings = GetConcealmentSettings();
     O3DS::ConcealmentConfig Config;
-    Config.starvationThresholdSeconds = FMath::Max(0.0, (double)CVarO3DReceiverConcealmentStarvationMs.GetValueOnGameThread() / 1000.0);
-    Config.maxConcealHorizonSeconds = FMath::Max(0.0, (double)CVarO3DReceiverConcealmentHorizonMs.GetValueOnGameThread() / 1000.0);
-    Config.correctionWindowSeconds = FMath::Max(0.0, (double)CVarO3DReceiverConcealmentCorrectionMs.GetValueOnGameThread() / 1000.0);
-    Config.renderAheadSeconds = FMath::Max(0.0, (double)CVarO3DReceiverConcealmentRenderAheadMs.GetValueOnGameThread() / 1000.0);
+    Config.starvationThresholdSeconds = FMath::Max(0.0, (double)(ConcealmentSettings ? ConcealmentSettings->StarvationThresholdMs : 50.0f) / 1000.0);
+    Config.maxConcealHorizonSeconds = FMath::Max(0.0, (double)(ConcealmentSettings ? ConcealmentSettings->MaxHorizonMs : 150.0f) / 1000.0);
+    Config.correctionWindowSeconds = FMath::Max(0.0, (double)(ConcealmentSettings ? ConcealmentSettings->CorrectionWindowMs : 100.0f) / 1000.0);
+    Config.renderAheadSeconds = FMath::Max(0.0, (double)(ConcealmentSettings ? ConcealmentSettings->RenderAheadMs : 0.0f) / 1000.0);
 
     TUniquePtr<O3DS::ConcealmentEngine> NewEngine = MakeUnique<O3DS::ConcealmentEngine>(std::make_unique<O3DS::LinearPredictor>(), Config);
     O3DS::ConcealmentEngine& Ref = *NewEngine;
@@ -846,7 +823,8 @@ O3DS::ConcealmentEngine& FO3DReceiverSource::GetOrCreateSubjectConcealment(FName
  *  into a prediction, per C1.a's "Reset the predictor on... topology change". */
 void FO3DReceiverSource::ObserveConcealmentRealFrame(FName SubjectName, double PresentationTimeSeconds, const TArray<FTransform>& BoneTransforms, const TArray<float>& CurveValues, bool bTopologyChanged)
 {
-    if (CVarO3DReceiverConcealmentEnabled.GetValueOnGameThread() == 0)
+    const UO3DReceiverSourceSettings* ConcealmentSettings = GetConcealmentSettings();
+    if (ConcealmentSettings != nullptr && !ConcealmentSettings->bEnableConcealment)
     {
         return;
     }
@@ -880,7 +858,8 @@ void FO3DReceiverSource::TickConcealment()
         return;
     }
 
-    if (CVarO3DReceiverConcealmentEnabled.GetValueOnGameThread() == 0)
+    const UO3DReceiverSourceSettings* ConcealmentSettings = GetConcealmentSettings();
+    if (ConcealmentSettings != nullptr && !ConcealmentSettings->bEnableConcealment)
     {
         return;
     }

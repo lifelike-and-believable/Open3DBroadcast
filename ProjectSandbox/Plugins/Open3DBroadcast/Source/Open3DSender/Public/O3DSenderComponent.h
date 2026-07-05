@@ -33,6 +33,17 @@ struct FO3DSenderCurveProcessorDeleter
 	void operator()(FO3DSenderCurveProcessor* Ptr) const;
 };
 
+/** Predictor for residual/delta coding (roadmap doc §5/C2). Maps to O3DS::ResidualPredictorId
+ *  (Hold=1/Linear=2/Quadratic=3 on the wire; None=0 is never used here, since Residual is only
+ *  consulted at all when residual coding is enabled). */
+UENUM(BlueprintType)
+enum class EO3DSenderResidualPredictor : uint8
+{
+	Hold UMETA(DisplayName = "Hold (reduces to legacy last-sent delta)"),
+	Linear UMETA(DisplayName = "Linear (recommended default)"),
+	Quadratic UMETA(DisplayName = "Quadratic")
+};
+
 /** Describes the skeletal hierarchy and bone metadata emitted during capture. */
 USTRUCT()
 struct OPEN3DSENDER_API FO3DSSkeletonDescriptor
@@ -200,6 +211,50 @@ public:
 	/** Emit verbose log entries when curves are filtered out. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves|Filtering")
 	bool bLogFilteredCurves = false;
+
+	/** Enable delta/residual transmission (roadmap doc §5/C2) instead of a full snapshot every
+	 *  frame. Only safe on reliable/ordered transports (TCP, WebRTC reliable channel, MoQ reliable
+	 *  streams) - residual coding's predictor history can silently diverge from the receiver's if a
+	 *  packet is dropped, and there is no automatic transport-reliability gate yet. Does not compose
+	 *  with quantization below - if both are enabled, Residual takes precedence. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Residual")
+	bool bEnableResidualCoding = false;
+
+	/** Predictor for residual coding. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Residual", meta = (EditCondition = "bEnableResidualCoding"))
+	EO3DSenderResidualPredictor ResidualPredictor = EO3DSenderResidualPredictor::Linear;
+
+	/** Force a residual keyframe (absolute values, re-anchors drift) every N frames. 0 disables
+	 *  periodic keyframes (only the first frame / a topology change forces one). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Residual", meta = (EditCondition = "bEnableResidualCoding", ClampMin = "0"))
+	int32 ResidualKeyframeIntervalFrames = 300;
+
+	/** Per-channel residual magnitude below which a channel is omitted from the wire. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Residual", meta = (EditCondition = "bEnableResidualCoding", ClampMin = "0.0"))
+	float ResidualDeltaThreshold = 0.0001f;
+
+	/** Enable adaptive variable-bit channel quantization (roadmap doc §6/D1) on the legacy
+	 *  delta-threshold path instead of a full snapshot every frame. Unlike Residual, this is
+	 *  stateless-across-loss and safe on unreliable transports too. Does not compose with Residual
+	 *  above yet - if both are enabled, Residual takes precedence and this is ignored. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Quantization")
+	bool bEnableQuantization = false;
+
+	/** Max |delta| (from a transform's rest-pose anchor, in the transform's own local-space units)
+	 *  representable at the 8-bit quantization tier. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Quantization", meta = (EditCondition = "bEnableQuantization", ClampMin = "0.0"))
+	float QuantizationByteRange = 0.01f;
+
+	/** Max |delta| representable at the 16-bit quantization tier; beyond this a channel falls back
+	 *  to full float32 precision. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Quantization", meta = (EditCondition = "bEnableQuantization", ClampMin = "0.0"))
+	float QuantizationHalfRange = 1.0f;
+
+	/** Per-channel magnitude below which a channel is omitted from the wire entirely - the same
+	 *  "send nothing" floor the legacy delta scheme already has; quantization only decides how
+	 *  precisely to encode a channel that already cleared this. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Quantization", meta = (EditCondition = "bEnableQuantization", ClampMin = "0.0"))
+	float QuantizationDeltaThreshold = 0.0001f;
 
 	FOnO3DDescriptorReady OnDescriptorReady;
 	FOnO3DPoseFrameReady OnPoseFrameReady;

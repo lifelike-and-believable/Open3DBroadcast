@@ -40,8 +40,37 @@ public:
     FO3DReceiverSourceConfig Settings;
 };
 
+/** Per-source-instance settings shown in LiveLink's "Settings" panel for this receiver source.
+ *  Concealment (roadmap doc §5/C1) config lives here rather than as cvars - these are production
+ *  tuning knobs a project would set per-deployment, not debug/iteration toggles, so they belong in
+ *  the UI a user actually configures a LiveLink source from, not a console command. */
 UCLASS()
 class OPEN3DRECEIVER_API UO3DReceiverSourceSettings : public ULiveLinkSourceSettings
 {
     GENERATED_BODY()
+
+public:
+    /** Enable receiver-side concealment (predict/hold synthetic frames on a gap) for gated (A2) frames. */
+    UPROPERTY(EditAnywhere, Category = "Open3DStream|Concealment")
+    bool bEnableConcealment = true;
+
+    /** Gap since the last real frame (ms) beyond which concealment starts synthesizing, instead of
+     *  leaving small gaps to LiveLink's own interpolation. */
+    UPROPERTY(EditAnywhere, Category = "Open3DStream|Concealment", meta = (EditCondition = "bEnableConcealment", ClampMin = "0.0"))
+    float StarvationThresholdMs = 50.0f;
+
+    /** Stop extrapolating and hold after this many ms of continuous concealment with no real frame. */
+    UPROPERTY(EditAnywhere, Category = "Open3DStream|Concealment", meta = (EditCondition = "bEnableConcealment", ClampMin = "0.0"))
+    float MaxHorizonMs = 150.0f;
+
+    /** Blend from the last synthesized pose toward the resumed real trajectory over this many ms
+     *  after a gap recovers, instead of snapping. 0 disables correction blending. */
+    UPROPERTY(EditAnywhere, Category = "Open3DStream|Concealment", meta = (EditCondition = "bEnableConcealment", ClampMin = "0.0"))
+    float CorrectionWindowMs = 100.0f;
+
+    /** Latency-hiding horizon (ms, roadmap doc §5/C1.c) beyond the newest real frame to proactively
+     *  predict toward, even with no gap. 0 (default) disables render-ahead entirely - it trades
+     *  prediction accuracy for lower perceived latency, so it's opt-in. */
+    UPROPERTY(EditAnywhere, Category = "Open3DStream|Concealment", meta = (EditCondition = "bEnableConcealment", ClampMin = "0.0"))
+    float RenderAheadMs = 0.0f;
 };

@@ -97,6 +97,7 @@ private:
 	void SerializeFrame(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame);
 	void SerializeFrameLegacy(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache);
 	void SerializeFrameResidual(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache);
+	void SerializeFrameQuantized(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache);
 	void BroadcastSerializedBuffer(const FString& Subject, const std::vector<char>& Buffer, double Now, FSubjectCache& Cache);
 	void BuildSubjectFromDescriptor(const FString& SubjectName, const FO3DSSkeletonDescriptor& Descriptor, O3DS::Subject& OutSubject);
 	void FillFrameValues(const FO3DSPoseFrame& Frame, O3DS::Subject& InOutSubject);

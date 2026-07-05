@@ -23,6 +23,18 @@ struct RotationUpdate;
 
 struct ScaleUpdate;
 
+struct TranslationUpdateQ8;
+
+struct TranslationUpdateQ16;
+
+struct CurveUpdateQ8;
+
+struct CurveUpdateQ16;
+
+struct RotationUpdateQ8;
+
+struct RotationUpdateQ16;
+
 struct Transform;
 struct TransformBuilder;
 
@@ -432,6 +444,233 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) ScaleUpdate FLATBUFFERS_FINAL_CLASS {
 };
 FLATBUFFERS_STRUCT_END(ScaleUpdate, 16);
 
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) TranslationUpdateQ8 FLATBUFFERS_FINAL_CLASS {
+ private:
+  int8_t dx_;
+  int8_t dy_;
+  int8_t dz_;
+  int8_t padding0__;
+  int32_t i_;
+
+ public:
+  TranslationUpdateQ8()
+      : dx_(0),
+        dy_(0),
+        dz_(0),
+        padding0__(0),
+        i_(0) {
+    (void)padding0__;
+  }
+  TranslationUpdateQ8(int8_t _dx, int8_t _dy, int8_t _dz, int32_t _i)
+      : dx_(flatbuffers::EndianScalar(_dx)),
+        dy_(flatbuffers::EndianScalar(_dy)),
+        dz_(flatbuffers::EndianScalar(_dz)),
+        padding0__(0),
+        i_(flatbuffers::EndianScalar(_i)) {
+    (void)padding0__;
+  }
+  int8_t dx() const {
+    return flatbuffers::EndianScalar(dx_);
+  }
+  int8_t dy() const {
+    return flatbuffers::EndianScalar(dy_);
+  }
+  int8_t dz() const {
+    return flatbuffers::EndianScalar(dz_);
+  }
+  int32_t i() const {
+    return flatbuffers::EndianScalar(i_);
+  }
+};
+FLATBUFFERS_STRUCT_END(TranslationUpdateQ8, 8);
+
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) TranslationUpdateQ16 FLATBUFFERS_FINAL_CLASS {
+ private:
+  int16_t dx_;
+  int16_t dy_;
+  int16_t dz_;
+  int16_t padding0__;
+  int32_t i_;
+
+ public:
+  TranslationUpdateQ16()
+      : dx_(0),
+        dy_(0),
+        dz_(0),
+        padding0__(0),
+        i_(0) {
+    (void)padding0__;
+  }
+  TranslationUpdateQ16(int16_t _dx, int16_t _dy, int16_t _dz, int32_t _i)
+      : dx_(flatbuffers::EndianScalar(_dx)),
+        dy_(flatbuffers::EndianScalar(_dy)),
+        dz_(flatbuffers::EndianScalar(_dz)),
+        padding0__(0),
+        i_(flatbuffers::EndianScalar(_i)) {
+    (void)padding0__;
+  }
+  int16_t dx() const {
+    return flatbuffers::EndianScalar(dx_);
+  }
+  int16_t dy() const {
+    return flatbuffers::EndianScalar(dy_);
+  }
+  int16_t dz() const {
+    return flatbuffers::EndianScalar(dz_);
+  }
+  int32_t i() const {
+    return flatbuffers::EndianScalar(i_);
+  }
+};
+FLATBUFFERS_STRUCT_END(TranslationUpdateQ16, 12);
+
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) CurveUpdateQ8 FLATBUFFERS_FINAL_CLASS {
+ private:
+  int8_t dv_;
+  int8_t padding0__;  int16_t padding1__;
+  int32_t i_;
+
+ public:
+  CurveUpdateQ8()
+      : dv_(0),
+        padding0__(0),
+        padding1__(0),
+        i_(0) {
+    (void)padding0__;
+    (void)padding1__;
+  }
+  CurveUpdateQ8(int8_t _dv, int32_t _i)
+      : dv_(flatbuffers::EndianScalar(_dv)),
+        padding0__(0),
+        padding1__(0),
+        i_(flatbuffers::EndianScalar(_i)) {
+    (void)padding0__;
+    (void)padding1__;
+  }
+  int8_t dv() const {
+    return flatbuffers::EndianScalar(dv_);
+  }
+  int32_t i() const {
+    return flatbuffers::EndianScalar(i_);
+  }
+};
+FLATBUFFERS_STRUCT_END(CurveUpdateQ8, 8);
+
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) CurveUpdateQ16 FLATBUFFERS_FINAL_CLASS {
+ private:
+  int16_t dv_;
+  int16_t padding0__;
+  int32_t i_;
+
+ public:
+  CurveUpdateQ16()
+      : dv_(0),
+        padding0__(0),
+        i_(0) {
+    (void)padding0__;
+  }
+  CurveUpdateQ16(int16_t _dv, int32_t _i)
+      : dv_(flatbuffers::EndianScalar(_dv)),
+        padding0__(0),
+        i_(flatbuffers::EndianScalar(_i)) {
+    (void)padding0__;
+  }
+  int16_t dv() const {
+    return flatbuffers::EndianScalar(dv_);
+  }
+  int32_t i() const {
+    return flatbuffers::EndianScalar(i_);
+  }
+};
+FLATBUFFERS_STRUCT_END(CurveUpdateQ16, 8);
+
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) RotationUpdateQ8 FLATBUFFERS_FINAL_CLASS {
+ private:
+  uint8_t dropped_;
+  int8_t a_;
+  int8_t b_;
+  int8_t c_;
+  int32_t i_;
+
+ public:
+  RotationUpdateQ8()
+      : dropped_(0),
+        a_(0),
+        b_(0),
+        c_(0),
+        i_(0) {
+  }
+  RotationUpdateQ8(uint8_t _dropped, int8_t _a, int8_t _b, int8_t _c, int32_t _i)
+      : dropped_(flatbuffers::EndianScalar(_dropped)),
+        a_(flatbuffers::EndianScalar(_a)),
+        b_(flatbuffers::EndianScalar(_b)),
+        c_(flatbuffers::EndianScalar(_c)),
+        i_(flatbuffers::EndianScalar(_i)) {
+  }
+  uint8_t dropped() const {
+    return flatbuffers::EndianScalar(dropped_);
+  }
+  int8_t a() const {
+    return flatbuffers::EndianScalar(a_);
+  }
+  int8_t b() const {
+    return flatbuffers::EndianScalar(b_);
+  }
+  int8_t c() const {
+    return flatbuffers::EndianScalar(c_);
+  }
+  int32_t i() const {
+    return flatbuffers::EndianScalar(i_);
+  }
+};
+FLATBUFFERS_STRUCT_END(RotationUpdateQ8, 8);
+
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) RotationUpdateQ16 FLATBUFFERS_FINAL_CLASS {
+ private:
+  uint8_t dropped_;
+  int8_t padding0__;
+  int16_t a_;
+  int16_t b_;
+  int16_t c_;
+  int32_t i_;
+
+ public:
+  RotationUpdateQ16()
+      : dropped_(0),
+        padding0__(0),
+        a_(0),
+        b_(0),
+        c_(0),
+        i_(0) {
+    (void)padding0__;
+  }
+  RotationUpdateQ16(uint8_t _dropped, int16_t _a, int16_t _b, int16_t _c, int32_t _i)
+      : dropped_(flatbuffers::EndianScalar(_dropped)),
+        padding0__(0),
+        a_(flatbuffers::EndianScalar(_a)),
+        b_(flatbuffers::EndianScalar(_b)),
+        c_(flatbuffers::EndianScalar(_c)),
+        i_(flatbuffers::EndianScalar(_i)) {
+    (void)padding0__;
+  }
+  uint8_t dropped() const {
+    return flatbuffers::EndianScalar(dropped_);
+  }
+  int16_t a() const {
+    return flatbuffers::EndianScalar(a_);
+  }
+  int16_t b() const {
+    return flatbuffers::EndianScalar(b_);
+  }
+  int16_t c() const {
+    return flatbuffers::EndianScalar(c_);
+  }
+  int32_t i() const {
+    return flatbuffers::EndianScalar(i_);
+  }
+};
+FLATBUFFERS_STRUCT_END(RotationUpdateQ16, 12);
+
 FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) CurveUpdate FLATBUFFERS_FINAL_CLASS {
  private:
   float value_;
@@ -722,7 +961,15 @@ struct SubjectUpdate FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     VT_SCALE = 10,
     VT_CURVES = 12,
     VT_PREDICTOR_ID = 14,
-    VT_IS_KEYFRAME = 16
+    VT_IS_KEYFRAME = 16,
+    VT_QUANT_BYTE_RANGE = 18,
+    VT_QUANT_HALF_RANGE = 20,
+    VT_TRANSLATIONS_Q8 = 22,
+    VT_TRANSLATIONS_Q16 = 24,
+    VT_ROTATIONS_Q8 = 26,
+    VT_ROTATIONS_Q16 = 28,
+    VT_CURVES_Q8 = 30,
+    VT_CURVES_Q16 = 32
   };
   const flatbuffers::String *name() const {
     return GetPointer<const flatbuffers::String *>(VT_NAME);
@@ -745,6 +992,30 @@ struct SubjectUpdate FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool is_keyframe() const {
     return GetField<uint8_t>(VT_IS_KEYFRAME, 0) != 0;
   }
+  float quant_byte_range() const {
+    return GetField<float>(VT_QUANT_BYTE_RANGE, 0.0f);
+  }
+  float quant_half_range() const {
+    return GetField<float>(VT_QUANT_HALF_RANGE, 0.0f);
+  }
+  const flatbuffers::Vector<const O3DS::Data::TranslationUpdateQ8 *> *translations_q8() const {
+    return GetPointer<const flatbuffers::Vector<const O3DS::Data::TranslationUpdateQ8 *> *>(VT_TRANSLATIONS_Q8);
+  }
+  const flatbuffers::Vector<const O3DS::Data::TranslationUpdateQ16 *> *translations_q16() const {
+    return GetPointer<const flatbuffers::Vector<const O3DS::Data::TranslationUpdateQ16 *> *>(VT_TRANSLATIONS_Q16);
+  }
+  const flatbuffers::Vector<const O3DS::Data::RotationUpdateQ8 *> *rotations_q8() const {
+    return GetPointer<const flatbuffers::Vector<const O3DS::Data::RotationUpdateQ8 *> *>(VT_ROTATIONS_Q8);
+  }
+  const flatbuffers::Vector<const O3DS::Data::RotationUpdateQ16 *> *rotations_q16() const {
+    return GetPointer<const flatbuffers::Vector<const O3DS::Data::RotationUpdateQ16 *> *>(VT_ROTATIONS_Q16);
+  }
+  const flatbuffers::Vector<const O3DS::Data::CurveUpdateQ8 *> *curves_q8() const {
+    return GetPointer<const flatbuffers::Vector<const O3DS::Data::CurveUpdateQ8 *> *>(VT_CURVES_Q8);
+  }
+  const flatbuffers::Vector<const O3DS::Data::CurveUpdateQ16 *> *curves_q16() const {
+    return GetPointer<const flatbuffers::Vector<const O3DS::Data::CurveUpdateQ16 *> *>(VT_CURVES_Q16);
+  }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_NAME) &&
@@ -759,6 +1030,20 @@ struct SubjectUpdate FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            verifier.VerifyVector(curves()) &&
            VerifyField<uint32_t>(verifier, VT_PREDICTOR_ID, 4) &&
            VerifyField<uint8_t>(verifier, VT_IS_KEYFRAME, 1) &&
+           VerifyField<float>(verifier, VT_QUANT_BYTE_RANGE, 4) &&
+           VerifyField<float>(verifier, VT_QUANT_HALF_RANGE, 4) &&
+           VerifyOffset(verifier, VT_TRANSLATIONS_Q8) &&
+           verifier.VerifyVector(translations_q8()) &&
+           VerifyOffset(verifier, VT_TRANSLATIONS_Q16) &&
+           verifier.VerifyVector(translations_q16()) &&
+           VerifyOffset(verifier, VT_ROTATIONS_Q8) &&
+           verifier.VerifyVector(rotations_q8()) &&
+           VerifyOffset(verifier, VT_ROTATIONS_Q16) &&
+           verifier.VerifyVector(rotations_q16()) &&
+           VerifyOffset(verifier, VT_CURVES_Q8) &&
+           verifier.VerifyVector(curves_q8()) &&
+           VerifyOffset(verifier, VT_CURVES_Q16) &&
+           verifier.VerifyVector(curves_q16()) &&
            verifier.EndTable();
   }
 };
@@ -788,6 +1073,30 @@ struct SubjectUpdateBuilder {
   void add_is_keyframe(bool is_keyframe) {
     fbb_.AddElement<uint8_t>(SubjectUpdate::VT_IS_KEYFRAME, static_cast<uint8_t>(is_keyframe), 0);
   }
+  void add_quant_byte_range(float quant_byte_range) {
+    fbb_.AddElement<float>(SubjectUpdate::VT_QUANT_BYTE_RANGE, quant_byte_range, 0.0f);
+  }
+  void add_quant_half_range(float quant_half_range) {
+    fbb_.AddElement<float>(SubjectUpdate::VT_QUANT_HALF_RANGE, quant_half_range, 0.0f);
+  }
+  void add_translations_q8(flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::TranslationUpdateQ8 *>> translations_q8) {
+    fbb_.AddOffset(SubjectUpdate::VT_TRANSLATIONS_Q8, translations_q8);
+  }
+  void add_translations_q16(flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::TranslationUpdateQ16 *>> translations_q16) {
+    fbb_.AddOffset(SubjectUpdate::VT_TRANSLATIONS_Q16, translations_q16);
+  }
+  void add_rotations_q8(flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::RotationUpdateQ8 *>> rotations_q8) {
+    fbb_.AddOffset(SubjectUpdate::VT_ROTATIONS_Q8, rotations_q8);
+  }
+  void add_rotations_q16(flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::RotationUpdateQ16 *>> rotations_q16) {
+    fbb_.AddOffset(SubjectUpdate::VT_ROTATIONS_Q16, rotations_q16);
+  }
+  void add_curves_q8(flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdateQ8 *>> curves_q8) {
+    fbb_.AddOffset(SubjectUpdate::VT_CURVES_Q8, curves_q8);
+  }
+  void add_curves_q16(flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdateQ16 *>> curves_q16) {
+    fbb_.AddOffset(SubjectUpdate::VT_CURVES_Q16, curves_q16);
+  }
   explicit SubjectUpdateBuilder(flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -807,8 +1116,24 @@ inline flatbuffers::Offset<SubjectUpdate> CreateSubjectUpdate(
     flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::ScaleUpdate *>> scale = 0,
     flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> curves = 0,
     uint32_t predictor_id = 0,
-    bool is_keyframe = false) {
+    bool is_keyframe = false,
+    float quant_byte_range = 0.0f,
+    float quant_half_range = 0.0f,
+    flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::TranslationUpdateQ8 *>> translations_q8 = 0,
+    flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::TranslationUpdateQ16 *>> translations_q16 = 0,
+    flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::RotationUpdateQ8 *>> rotations_q8 = 0,
+    flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::RotationUpdateQ16 *>> rotations_q16 = 0,
+    flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdateQ8 *>> curves_q8 = 0,
+    flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdateQ16 *>> curves_q16 = 0) {
   SubjectUpdateBuilder builder_(_fbb);
+  builder_.add_curves_q16(curves_q16);
+  builder_.add_curves_q8(curves_q8);
+  builder_.add_rotations_q16(rotations_q16);
+  builder_.add_rotations_q8(rotations_q8);
+  builder_.add_translations_q16(translations_q16);
+  builder_.add_translations_q8(translations_q8);
+  builder_.add_quant_half_range(quant_half_range);
+  builder_.add_quant_byte_range(quant_byte_range);
   builder_.add_predictor_id(predictor_id);
   builder_.add_curves(curves);
   builder_.add_scale(scale);
@@ -827,12 +1152,26 @@ inline flatbuffers::Offset<SubjectUpdate> CreateSubjectUpdateDirect(
     const std::vector<O3DS::Data::ScaleUpdate> *scale = nullptr,
     const std::vector<O3DS::Data::CurveUpdate> *curves = nullptr,
     uint32_t predictor_id = 0,
-    bool is_keyframe = false) {
+    bool is_keyframe = false,
+    float quant_byte_range = 0.0f,
+    float quant_half_range = 0.0f,
+    const std::vector<O3DS::Data::TranslationUpdateQ8> *translations_q8 = nullptr,
+    const std::vector<O3DS::Data::TranslationUpdateQ16> *translations_q16 = nullptr,
+    const std::vector<O3DS::Data::RotationUpdateQ8> *rotations_q8 = nullptr,
+    const std::vector<O3DS::Data::RotationUpdateQ16> *rotations_q16 = nullptr,
+    const std::vector<O3DS::Data::CurveUpdateQ8> *curves_q8 = nullptr,
+    const std::vector<O3DS::Data::CurveUpdateQ16> *curves_q16 = nullptr) {
   auto name__ = name ? _fbb.CreateString(name) : 0;
   auto translations__ = translations ? _fbb.CreateVectorOfStructs<O3DS::Data::TranslationUpdate>(*translations) : 0;
   auto rotation__ = rotation ? _fbb.CreateVectorOfStructs<O3DS::Data::RotationUpdate>(*rotation) : 0;
   auto scale__ = scale ? _fbb.CreateVectorOfStructs<O3DS::Data::ScaleUpdate>(*scale) : 0;
   auto curves__ = curves ? _fbb.CreateVectorOfStructs<O3DS::Data::CurveUpdate>(*curves) : 0;
+  auto translations_q8__ = translations_q8 ? _fbb.CreateVectorOfStructs<O3DS::Data::TranslationUpdateQ8>(*translations_q8) : 0;
+  auto translations_q16__ = translations_q16 ? _fbb.CreateVectorOfStructs<O3DS::Data::TranslationUpdateQ16>(*translations_q16) : 0;
+  auto rotations_q8__ = rotations_q8 ? _fbb.CreateVectorOfStructs<O3DS::Data::RotationUpdateQ8>(*rotations_q8) : 0;
+  auto rotations_q16__ = rotations_q16 ? _fbb.CreateVectorOfStructs<O3DS::Data::RotationUpdateQ16>(*rotations_q16) : 0;
+  auto curves_q8__ = curves_q8 ? _fbb.CreateVectorOfStructs<O3DS::Data::CurveUpdateQ8>(*curves_q8) : 0;
+  auto curves_q16__ = curves_q16 ? _fbb.CreateVectorOfStructs<O3DS::Data::CurveUpdateQ16>(*curves_q16) : 0;
   return O3DS::Data::CreateSubjectUpdate(
       _fbb,
       name__,
@@ -841,7 +1180,15 @@ inline flatbuffers::Offset<SubjectUpdate> CreateSubjectUpdateDirect(
       scale__,
       curves__,
       predictor_id,
-      is_keyframe);
+      is_keyframe,
+      quant_byte_range,
+      quant_half_range,
+      translations_q8__,
+      translations_q16__,
+      rotations_q8__,
+      rotations_q16__,
+      curves_q8__,
+      curves_q16__);
 }
 
 struct SubjectList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {

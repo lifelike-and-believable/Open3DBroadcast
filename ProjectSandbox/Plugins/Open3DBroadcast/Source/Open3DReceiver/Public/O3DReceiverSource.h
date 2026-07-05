@@ -89,6 +89,9 @@ private:
     O3DS::ConcealmentEngine& GetOrCreateSubjectConcealment(FName SubjectName);
     void ObserveConcealmentRealFrame(FName SubjectName, double PresentationTimeSeconds, const TArray<FTransform>& BoneTransforms, const TArray<float>& CurveValues, bool bTopologyChanged);
     void TickConcealment();
+    /** Casts Settings (populated by InitializeSettings(), always a UO3DReceiverSourceSettings -
+     *  see GetSettingsClass()) to access concealment config; null before InitializeSettings() runs. */
+    const class UO3DReceiverSourceSettings* GetConcealmentSettings() const;
     void ReportConcealmentMetricsDelta();
 
     bool ParseSubjectListBuffer(const FString& Subject, const TArray<uint8>& Buffer);
