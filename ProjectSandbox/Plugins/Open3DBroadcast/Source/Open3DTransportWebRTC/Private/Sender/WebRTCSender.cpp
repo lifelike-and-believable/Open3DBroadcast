@@ -839,7 +839,7 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
     return bAnyFrameSucceeded;
 }
 
-bool FO3DWebRTCSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName)
+bool FO3DWebRTCSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double /*CaptureTimestampSec*/)
 {
     if (!bConnected.Load())
     {

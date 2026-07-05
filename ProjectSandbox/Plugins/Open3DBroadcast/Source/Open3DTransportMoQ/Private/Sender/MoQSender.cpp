@@ -309,10 +309,10 @@ bool FO3DMoQSender::Send(const O3DS::SubjectList& List)
 
 	FO3DPerformanceMetrics::Get().RecordBytesSerialized(BytesWritten);
 
-	return SendBytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten, ObservedSubject);
+	return SendBytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten, ObservedSubject, TimestampSeconds);
 }
 
-bool FO3DMoQSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName)
+bool FO3DMoQSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec)
 {
 	if (!bInitialized || !bRunning)
 	{
@@ -328,11 +328,15 @@ bool FO3DMoQSender::SendSerialized(const uint8* Data, int32 Len, const FString& 
 	FO3DPerformanceMetrics::Get().RecordFrameCaptured();
 	FO3DPerformanceMetrics::Get().RecordBytesSerialized(Len);
 
-	return SendBytes(Data, Len, SubjectName);
+	return SendBytes(Data, Len, SubjectName, CaptureTimestampSec);
 }
 
-/** Enqueue an already-serialized payload for the send worker and record transport-level stats/subject bookkeeping. */
-bool FO3DMoQSender::SendBytes(const uint8* Data, int32 Len, const FString& SubjectName)
+/** Enqueue an already-serialized payload for the send worker and record transport-level stats/subject bookkeeping.
+ *  CaptureTimestampSec is the same value the caller already embedded in Data (Send()'s own
+ *  FPlatformTime::Seconds() call, or FO3DSenderSerializer's `Now` via SendSerialized()) - reused for
+ *  EnqueuePayload()'s capture timestamp so the enqueue-to-publish latency measurement below reflects
+ *  true frame-capture time rather than "whenever SendBytes() happened to run". */
+bool FO3DMoQSender::SendBytes(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec)
 {
 	if (!SubjectName.IsEmpty())
 	{
@@ -344,8 +348,7 @@ bool FO3DMoQSender::SendBytes(const uint8* Data, int32 Len, const FString& Subje
 	Payload.SetNumUninitialized(Len);
 	FMemory::Memcpy(Payload.GetData(), Data, Len);
 
-	const double TimestampSeconds = FPlatformTime::Seconds();
-	if (!EnqueuePayload(MoveTemp(Payload), TimestampSeconds, /*bIsAudio=*/false))
+	if (!EnqueuePayload(MoveTemp(Payload), CaptureTimestampSec, /*bIsAudio=*/false))
 	{
 		FO3DPerformanceMetrics::Get().RecordTransportFrameDropped();
 		{

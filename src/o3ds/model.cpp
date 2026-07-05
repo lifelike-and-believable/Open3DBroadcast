@@ -675,7 +675,11 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		auto ovSubjectUpdates = builder.CreateVector(outSubjectUpdates);
 
-		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp);
+		// `seq` must also reach the root SubjectList's own tx_seq field, not
+		// just PoseSample::seq (fed to the predictor above) - a caller
+		// passing a real A1 tx_seq expects it on the wire for the
+		// receiver's ReorderGate, exactly like SubjectList::SerializeUpdateResidual
+		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, seq);
 
 		builder.Finish(root);
 

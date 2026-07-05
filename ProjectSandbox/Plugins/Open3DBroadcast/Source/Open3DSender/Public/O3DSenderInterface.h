@@ -55,13 +55,24 @@ public:
      *  encoding was actually used. `SubjectName` mirrors what Send(List)
      *  implementations already extract from List.mItems[0]->mName for
      *  stats/diagnostics - passed explicitly here since raw bytes don't
-     *  expose it without a redundant parse. Default returns false
+     *  expose it without a redundant parse. `CaptureTimestampSec` is the
+     *  same capture-time value already embedded in `Data` by the caller's
+     *  own serialization (FO3DSenderSerializer's `Now`) - a transport that
+     *  keeps its own local packet/latency metadata alongside the payload
+     *  (e.g. Loopback's queued packet timestamp, MoQ's enqueue-to-publish
+     *  latency measurement) should use this rather than sampling a fresh
+     *  FPlatformTime::Seconds() itself, or that local metadata drifts from
+     *  what's actually encoded on the wire. Default returns false
      *  (unsupported/dropped): a transport that hasn't been updated to
-     *  implement this doesn't support the byte-oriented path yet, and the
-     *  caller falls back to Send(List) for it. */
-    virtual bool SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName)
+     *  implement this doesn't support the byte-oriented path yet. Note
+     *  there is no Send(List) fallback for this failure: the normal frame
+     *  pipeline (UO3DSenderComponent::HandleSerializedFrameForward) only
+     *  ever has bytes at this point, not a SubjectList, so a false return
+     *  here means the frame is dropped for that transport, not resent via
+     *  Send(). */
+    virtual bool SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec)
     {
-        (void)Data; (void)Len; (void)SubjectName;
+        (void)Data; (void)Len; (void)SubjectName; (void)CaptureTimestampSec;
         return false;
     }
 

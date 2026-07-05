@@ -375,9 +375,12 @@ void UO3DSenderComponent::HandleSerializedFrameForward(const FString& Subject, c
 		return;
 	}
 
-	if (!SenderInstance->SendSerialized(Buffer.GetData(), Buffer.Num(), Subject))
+	if (!SenderInstance->SendSerialized(Buffer.GetData(), Buffer.Num(), Subject, Timestamp))
 	{
-		UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Transport '%s' reported backpressure while sending subject '%s'."), *TransportController->GetConfig().Transport, *Subject);
+		// False can mean backpressure, a connection-state check, or simply
+		// an unimplemented SendSerialized() (the interface's default
+		// returns false/unsupported) - not backpressure specifically.
+		UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Transport '%s' dropped or does not support subject '%s' via SendSerialized()."), *TransportController->GetConfig().Transport, *Subject);
 	}
 }
 

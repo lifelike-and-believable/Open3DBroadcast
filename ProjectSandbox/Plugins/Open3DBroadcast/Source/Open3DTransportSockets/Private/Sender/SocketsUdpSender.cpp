@@ -208,7 +208,7 @@ bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
 	return true;
 }
 
-bool FO3DSocketsUdpSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName)
+bool FO3DSocketsUdpSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double /*CaptureTimestampSec*/)
 {
 	// Same OwnerGuard lock discipline as Send(SubjectList&) above - guards
 	// Socket/RemoteAddr against a concurrent CreateSocket()/DestroySocket()

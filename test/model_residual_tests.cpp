@@ -436,6 +436,37 @@ O3DS_TEST(Subject_SelfContainedSerializeUpdateResidual_RoundTripsViaSubjectListP
 	}
 }
 
+O3DS_TEST(Subject_SelfContainedSerializeUpdateResidual_PropagatesTxSeqToWire)
+{
+	// Regression (Copilot review, PR #242): the self-contained overload's
+	// `seq` parameter was only reaching PoseSample::seq (the predictor's
+	// internal bookkeeping via ToPoseSample) and never the root
+	// SubjectList's own tx_seq field, silently discarding it - unlike
+	// SubjectList::SerializeUpdateResidual (the multi-subject overload),
+	// which already propagated tx_seq correctly. A caller passing a real
+	// A1 tx_seq here expects it to actually land on the wire for the
+	// receiver's ReorderGate.
+	SubjectList sender;
+	BuildSkeleton(sender, "Actor");
+	Subject* senderSubject = sender.findSubject("Actor");
+	senderSubject->SetResidualEncoder(std::make_unique<ResidualEncoder>(ResidualPredictorId::Linear));
+
+	std::vector<char> fullBuf;
+	O3DS_CHECK(sender.Serialize(fullBuf) > 0);
+
+	ApplyMotion(senderSubject, 0.02);
+
+	size_t count = 0;
+	std::vector<char> buf;
+	const uint64_t expectedSeq = 424242ULL;
+	O3DS_CHECK(senderSubject->SerializeUpdateResidual(buf, count, 1.0e-6, 0.02, expectedSeq) > 0);
+
+	uint64_t outTxSeq = 0, outTxWallclockUs = 0;
+	uint32_t outFrameEpoch = 0;
+	O3DS_CHECK(SubjectList::PeekMeta(buf.data(), buf.size(), outTxSeq, outTxWallclockUs, outFrameEpoch));
+	O3DS_CHECK(outTxSeq == expectedSeq);
+}
+
 O3DS_TEST(LegacyUpdate_StillDispatchesCorrectly_RegressionForPredictorIdSwitch)
 {
 	// Regression: Parse()'s new predictor_id-based dispatch must not

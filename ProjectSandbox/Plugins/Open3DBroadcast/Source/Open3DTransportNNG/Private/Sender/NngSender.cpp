@@ -291,7 +291,7 @@ bool FO3DNngSender::Send(const O3DS::SubjectList& List)
     return SendBytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten, ObservedSubject);
 }
 
-bool FO3DNngSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName)
+bool FO3DNngSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double /*CaptureTimestampSec*/)
 {
     if (!bInitialized.Load() || !bRunning.Load())
     {
@@ -304,10 +304,11 @@ bool FO3DNngSender::SendSerialized(const uint8* Data, int32 Len, const FString& 
         return false;
     }
 
-    // The caller (FO3DSenderSerializer) already serialized these bytes -
-    // no RecordBytesSerialized()/RecordFrameCaptured() double-count here,
-    // since Send(SubjectList&) above is what owns that accounting for its
-    // own (self-serialized) path. Only transmission-side metrics apply.
+    // The caller (FO3DSenderSerializer) already serialized these bytes, not
+    // Send(SubjectList&) - this IS the only place that records capture/
+    // serialization metrics for this frame (Send() is dormant in the
+    // normal per-frame pipeline; see O3DSenderSerializer.cpp), so recording
+    // them here is not a double-count against anything.
     FO3DPerformanceMetrics::Get().RecordFrameCaptured();
     FO3DPerformanceMetrics::Get().RecordBytesSerialized(Len);
 

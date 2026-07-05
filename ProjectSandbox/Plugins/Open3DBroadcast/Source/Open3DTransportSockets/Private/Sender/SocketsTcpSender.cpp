@@ -202,7 +202,7 @@ bool FO3DSocketsTcpSender::Send(const O3DS::SubjectList& List)
 	return SendBytes(reinterpret_cast<const uint8*>(SerializationScratch.data()), BytesWritten);
 }
 
-bool FO3DSocketsTcpSender::SendSerialized(const uint8* Data, int32 Len, const FString& /*SubjectName*/)
+bool FO3DSocketsTcpSender::SendSerialized(const uint8* Data, int32 Len, const FString& /*SubjectName*/, double /*CaptureTimestampSec*/)
 {
 	if (!bConnected.Load() || Len <= 0)
 	{
