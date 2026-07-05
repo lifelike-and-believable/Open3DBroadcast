@@ -45,6 +45,7 @@ public:
 	virtual bool Start() override;
 	virtual void Stop() override;
 	virtual bool Send(const O3DS::SubjectList& List) override;
+	virtual bool SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec) override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual FO3DTransportStats GetStats() const override;
 	virtual bool SupportsAudio() const override;
@@ -60,6 +61,7 @@ private:
 
 	bool CreateListenSocket();
 	void DestroySocket();
+	bool SendBytes(const uint8* Data, int32 Len);
 	void TickAcceptClient();
 	bool SendFramed(FSocket* InSocket, const uint8* Data, int32 Size);
 	void RefreshAudioEncoder();

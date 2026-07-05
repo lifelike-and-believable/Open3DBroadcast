@@ -208,6 +208,40 @@ bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
 	return true;
 }
 
+bool FO3DSocketsUdpSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double /*CaptureTimestampSec*/)
+{
+	// Same OwnerGuard lock discipline as Send(SubjectList&) above - guards
+	// Socket/RemoteAddr against a concurrent CreateSocket()/DestroySocket()
+	// from Start()/Stop(), and against the audio thread's
+	// ProcessCapturedAudio()/SendEncodedAudio() call.
+	FScopeLock Lock(&OwnerGuard->Lock);
+
+	if (!Socket || !RemoteAddr.IsValid() || Len <= 0)
+	{
+		return false;
+	}
+
+	if (!SubjectName.IsEmpty())
+	{
+		FScopeLock NameLock(&SubjectNameLock);
+		LastSubjectName = SubjectName;
+	}
+
+	if (!SendPayload(Socket, RemoteAddr, Data, Len, TEXT("data")))
+	{
+		FScopeLock StatsLock(&StatsMutex);
+		Stats.DroppedFrames++;
+		return false;
+	}
+
+	{
+		FScopeLock StatsLock(&StatsMutex);
+		Stats.FramesSent++;
+		Stats.BytesSent += Len;
+	}
+	return true;
+}
+
 void FO3DSocketsUdpSender::Tick(float /*DeltaSeconds*/)
 {
 	// UDP sender currently has no periodic upkeep.

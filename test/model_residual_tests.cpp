@@ -401,6 +401,72 @@ O3DS_TEST(ResidualRoundTrip_TopologyChangeMidStream_ResyncsWithoutMisalignment)
 	}
 }
 
+O3DS_TEST(Subject_SelfContainedSerializeUpdateResidual_RoundTripsViaSubjectListParse)
+{
+	// Subject::SerializeUpdateResidual(vector<char>&, ...) is a
+	// self-contained mirror of Subject::SerializeUpdate(vector<char>&, ...)
+	// - the natural entry point for a caller (e.g. a UE sender) that
+	// serializes one subject's frame at a time without owning a shared
+	// FlatBufferBuilder/SubjectList itself. Confirms it produces a buffer
+	// SubjectList::Parse() reconstructs correctly, same as the
+	// SubjectList-level overload already covered by every other test above.
+	SubjectList sender;
+	BuildSkeleton(sender, "Actor");
+	Subject* senderSubject = sender.findSubject("Actor");
+	senderSubject->SetResidualEncoder(std::make_unique<ResidualEncoder>(ResidualPredictorId::Linear));
+
+	std::vector<char> fullBuf;
+	O3DS_CHECK(sender.Serialize(fullBuf) > 0);
+	SubjectList receiver;
+	O3DS_CHECK(receiver.Parse(fullBuf.data(), fullBuf.size()));
+	Subject* receiverSubject = receiver.findSubject("Actor");
+	receiverSubject->SetResidualDecoder(std::make_unique<ResidualDecoder>(ResidualPredictorId::Linear));
+
+	for (int i = 1; i <= 10; ++i)
+	{
+		double t = i * 0.02;
+		ApplyMotion(senderSubject, t);
+
+		size_t count = 0;
+		std::vector<char> buf;
+		O3DS_CHECK(senderSubject->SerializeUpdateResidual(buf, count, 1.0e-6, t) > 0);
+		O3DS_CHECK(receiver.Parse(buf.data(), buf.size()));
+
+		O3DS_CHECK(NearlyEqual(receiverSubject->mTransforms[0]->translation.value.v[0], senderSubject->mTransforms[0]->translation.value.v[0], 1.0e-4));
+	}
+}
+
+O3DS_TEST(Subject_SelfContainedSerializeUpdateResidual_PropagatesTxSeqToWire)
+{
+	// Regression (Copilot review, PR #242): the self-contained overload's
+	// `seq` parameter was only reaching PoseSample::seq (the predictor's
+	// internal bookkeeping via ToPoseSample) and never the root
+	// SubjectList's own tx_seq field, silently discarding it - unlike
+	// SubjectList::SerializeUpdateResidual (the multi-subject overload),
+	// which already propagated tx_seq correctly. A caller passing a real
+	// A1 tx_seq here expects it to actually land on the wire for the
+	// receiver's ReorderGate.
+	SubjectList sender;
+	BuildSkeleton(sender, "Actor");
+	Subject* senderSubject = sender.findSubject("Actor");
+	senderSubject->SetResidualEncoder(std::make_unique<ResidualEncoder>(ResidualPredictorId::Linear));
+
+	std::vector<char> fullBuf;
+	O3DS_CHECK(sender.Serialize(fullBuf) > 0);
+
+	ApplyMotion(senderSubject, 0.02);
+
+	size_t count = 0;
+	std::vector<char> buf;
+	const uint64_t expectedSeq = 424242ULL;
+	O3DS_CHECK(senderSubject->SerializeUpdateResidual(buf, count, 1.0e-6, 0.02, expectedSeq) > 0);
+
+	uint64_t outTxSeq = 0, outTxWallclockUs = 0;
+	uint32_t outFrameEpoch = 0;
+	O3DS_CHECK(SubjectList::PeekMeta(buf.data(), buf.size(), outTxSeq, outTxWallclockUs, outFrameEpoch));
+	O3DS_CHECK(outTxSeq == expectedSeq);
+}
+
 O3DS_TEST(LegacyUpdate_StillDispatchesCorrectly_RegressionForPredictorIdSwitch)
 {
 	// Regression: Parse()'s new predictor_id-based dispatch must not

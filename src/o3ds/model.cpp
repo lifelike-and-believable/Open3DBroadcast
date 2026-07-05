@@ -661,6 +661,33 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		return static_cast<int>(outbuf.size());
 	}
 
+	int Subject::SerializeUpdateResidual(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp, uint64_t seq)
+	{
+		if (timestamp == 0.0)
+		{
+			timestamp = GetTime();
+		}
+
+		flatbuffers::FlatBufferBuilder builder;
+
+		std::vector<flatbuffers::Offset<O3DS::Data::SubjectUpdate>> outSubjectUpdates;
+		outSubjectUpdates.push_back(this->SerializeUpdateResidual(builder, count, deltaThreshold, timestamp, seq));
+
+		auto ovSubjectUpdates = builder.CreateVector(outSubjectUpdates);
+
+		// `seq` must also reach the root SubjectList's own tx_seq field, not
+		// just PoseSample::seq (fed to the predictor above) - a caller
+		// passing a real A1 tx_seq expects it on the wire for the
+		// receiver's ReorderGate, exactly like SubjectList::SerializeUpdateResidual
+		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, seq);
+
+		builder.Finish(root);
+
+		finalize(builder, outbuf, 1);
+
+		return static_cast<int>(outbuf.size());
+	}
+
 	int SubjectList::Serialize(std::vector<char> &outbuf, double timestamp,
 		uint64_t tx_seq, uint64_t tx_wallclock_us, uint32_t frame_epoch)
 	{

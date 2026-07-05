@@ -199,7 +199,23 @@ bool FO3DSocketsTcpSender::Send(const O3DS::SubjectList& List)
 		return false;
 	}
 
-	if (!EnqueuePayload(reinterpret_cast<const uint8*>(SerializationScratch.data()), BytesWritten))
+	return SendBytes(reinterpret_cast<const uint8*>(SerializationScratch.data()), BytesWritten);
+}
+
+bool FO3DSocketsTcpSender::SendSerialized(const uint8* Data, int32 Len, const FString& /*SubjectName*/, double /*CaptureTimestampSec*/)
+{
+	if (!bConnected.Load() || Len <= 0)
+	{
+		return false;
+	}
+
+	return SendBytes(Data, Len);
+}
+
+/** Enqueue already-serialized bytes for transmission and record transport-level stats. */
+bool FO3DSocketsTcpSender::SendBytes(const uint8* Data, int32 Len)
+{
+	if (!EnqueuePayload(Data, Len))
 	{
 		FScopeLock Lock(&StatsMutex);
 		Stats.DroppedFrames++;
@@ -209,7 +225,7 @@ bool FO3DSocketsTcpSender::Send(const O3DS::SubjectList& List)
 	{
 		FScopeLock Lock(&StatsMutex);
 		Stats.FramesSent++;
-		Stats.BytesSent += BytesWritten;
+		Stats.BytesSent += Len;
 	}
 	return true;
 }
