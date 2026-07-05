@@ -79,6 +79,19 @@ set(O3DS_SOURCES
     ${SRC_DIR}/o3ds/async_pair.cpp
     ${SRC_DIR}/o3ds/async_request.cpp
     ${SRC_DIR}/o3ds/async_pipeline.cpp
+    # predict/ and quant/ (roadmap doc §5/C0-C2, §6/D1): model.cpp has
+    # depended on the predict/ subsystem (predictors, concealment, residual
+    # coding) since C0-C2 landed, but this list was never updated to
+    # include it - this build target has been unable to link since then.
+    # channel_quant.cpp is D1's own addition and itself depends on
+    # predict/quat_math.cpp (QuatNormalize).
+    ${SRC_DIR}/o3ds/predict/quat_math.cpp
+    ${SRC_DIR}/o3ds/predict/hold_predictor.cpp
+    ${SRC_DIR}/o3ds/predict/linear_predictor.cpp
+    ${SRC_DIR}/o3ds/predict/quadratic_predictor.cpp
+    ${SRC_DIR}/o3ds/predict/concealment.cpp
+    ${SRC_DIR}/o3ds/predict/residual_codec.cpp
+    ${SRC_DIR}/o3ds/quant/channel_quant.cpp
 )
 
 # Optional WebSocket support (not needed for Unreal)
@@ -124,6 +137,15 @@ set(O3DS_HEADERS
     ${SRC_DIR}/o3ds/binary_stream.h
     ${SRC_DIR}/o3ds/xsens_parser.h
     ${SRC_DIR}/o3ds/o3ds_version.h
+    ${SRC_DIR}/o3ds/predict/quat_math.h
+    ${SRC_DIR}/o3ds/predict/pose_predictor.h
+    ${SRC_DIR}/o3ds/predict/sample_ring.h
+    ${SRC_DIR}/o3ds/predict/hold_predictor.h
+    ${SRC_DIR}/o3ds/predict/linear_predictor.h
+    ${SRC_DIR}/o3ds/predict/quadratic_predictor.h
+    ${SRC_DIR}/o3ds/predict/concealment.h
+    ${SRC_DIR}/o3ds/predict/residual_codec.h
+    ${SRC_DIR}/o3ds/quant/channel_quant.h
 )
 
 if(O3DS_WITH_WEBSOCKET)

@@ -116,6 +116,7 @@ set(pub_headers
 	o3ds/predict/quadratic_predictor.h
 	o3ds/predict/concealment.h
 	o3ds/predict/residual_codec.h
+	o3ds/quant/channel_quant.h
 	o3ds/model.h
 	o3ds/base_connector.h
 	o3ds/nng_connector.h
@@ -163,6 +164,7 @@ set(SOURCES
 	o3ds/predict/quadratic_predictor.cpp
 	o3ds/predict/concealment.cpp
 	o3ds/predict/residual_codec.cpp
+	o3ds/quant/channel_quant.cpp
 	o3ds/model.cpp
 	o3ds/base_connector.cpp
 	o3ds/nng_connector.cpp
