@@ -34,6 +34,7 @@ jobs:
         with:
           fetch-depth: 0
           lfs: true
+          submodules: 'recursive'
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
