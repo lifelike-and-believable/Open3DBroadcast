@@ -69,6 +69,76 @@ namespace O3DS
 		return QuantTier::Full;
 	}
 
+	QuantTier ChooseScalarTierWithHysteresis(double absDelta, const QuantRanges& ranges, QuantTier previousTier)
+	{
+		double h = ranges.hysteresisFactor;
+		if (!std::isfinite(h) || h < 0.0)
+		{
+			h = 0.0;
+		}
+		else if (h > 0.99)
+		{
+			// Keep the contracted thresholds strictly positive (and the band
+			// non-degenerate) regardless of caller-supplied config.
+			h = 0.99;
+		}
+
+		if (h == 0.0)
+		{
+			return ChooseScalarTier(absDelta, ranges);
+		}
+
+		const double expandedByteRange = ranges.byteRange * (1.0 + h);
+		const double contractedByteRange = ranges.byteRange * (1.0 - h);
+		const double expandedHalfRange = ranges.halfRange * (1.0 + h);
+		const double contractedHalfRange = ranges.halfRange * (1.0 - h);
+
+		switch (previousTier)
+		{
+		case QuantTier::Byte:
+			// Upgrading out of Byte needs to clear byteRange by the margin;
+			// a big-enough single-frame jump can go straight to Full.
+			if (absDelta > expandedHalfRange)
+			{
+				return QuantTier::Full;
+			}
+			if (absDelta > expandedByteRange)
+			{
+				return QuantTier::Half;
+			}
+			return QuantTier::Byte;
+
+		case QuantTier::Half:
+			// Downgrading to Byte needs to clear byteRange's margin on the
+			// low side; upgrading to Full needs to clear halfRange's margin
+			// on the high side. Otherwise stay put.
+			if (absDelta > expandedHalfRange)
+			{
+				return QuantTier::Full;
+			}
+			if (absDelta <= contractedByteRange)
+			{
+				return QuantTier::Byte;
+			}
+			return QuantTier::Half;
+
+		case QuantTier::Full:
+		default:
+			// Entering a finer tier from Full needs to clear the relevant
+			// margin on the low side - a single big drop can go straight to
+			// Byte, matching ChooseScalarTier's own precedence.
+			if (absDelta <= contractedByteRange)
+			{
+				return QuantTier::Byte;
+			}
+			if (absDelta <= contractedHalfRange)
+			{
+				return QuantTier::Half;
+			}
+			return QuantTier::Full;
+		}
+	}
+
 	int8_t QuantizeByte(double delta, double range)
 	{
 		// range can come from caller-supplied config (e.g. a UE UPROPERTY,

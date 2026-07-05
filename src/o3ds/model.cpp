@@ -484,7 +484,14 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 					double dy = t->translation.value.v[1] - t->mQuantAnchorTranslation.v[1];
 					double dz = t->translation.value.v[2] - t->mQuantAnchorTranslation.v[2];
 					double maxAbs = std::max(std::fabs(dx), std::max(std::fabs(dy), std::fabs(dz)));
-					QuantTier tier = ChooseScalarTier(maxAbs, *quantRanges);
+					// Hysteresis-aware (see quant/channel_quant.h): re-evaluating
+					// against a stateless boundary test every frame flaps tiers
+					// (and thus reconstruction precision) whenever maxAbs hovers
+					// near byteRange/halfRange - exactly what continuous,
+					// small-amplitude motion (e.g. idle-animation sway around
+					// the rest-pose anchor) does.
+					QuantTier tier = ChooseScalarTierWithHysteresis(maxAbs, *quantRanges, t->mLastTranslationTier);
+					t->mLastTranslationTier = tier;
 					if (tier == QuantTier::Byte)
 					{
 						translationsQ8.push_back(O3DS::Data::TranslationUpdateQ8(
@@ -503,6 +510,14 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 							transformId));
 						quantized = true;
 					}
+				}
+				else if (quantRanges != nullptr)
+				{
+					// No anchor yet - the same "fall back to Full for this call
+					// only" case the comment above describes. Reset the
+					// hysteresis state too, so a real anchor arriving later
+					// starts unbiased rather than inheriting a stale tier.
+					t->mLastTranslationTier = QuantTier::Full;
 				}
 				if (!quantized)
 				{
@@ -528,7 +543,14 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 				// to translation's own linear units.
 				if (quantRanges != nullptr)
 				{
-					QuantTier tier = ChooseScalarTier(t->rotation.delta(), *quantRanges);
+					// Hysteresis-aware for the same reason as translation above -
+					// t->rotation.delta() (frame-to-last-sent quaternion distance)
+					// oscillates at a roughly constant magnitude during continuous
+					// low-amplitude motion (idle sway/look-around), and re-picking
+					// the tier from scratch every frame flaps it whenever that
+					// magnitude hovers near byteRange/halfRange.
+					QuantTier tier = ChooseScalarTierWithHysteresis(t->rotation.delta(), *quantRanges, t->mLastRotationTier);
+					t->mLastRotationTier = tier;
 					if (tier == QuantTier::Byte)
 					{
 						SmallestThreeQ8 q = QuantizeRotationByte(t->rotation.value);

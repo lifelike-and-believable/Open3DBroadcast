@@ -91,6 +91,19 @@ namespace O3DS
 		// tier, same safety net as today's deltaThreshold.
 		Vector3d mQuantAnchorTranslation = Vector3d(0.0, 0.0, 0.0);
 		bool     mQuantAnchorSet = false;
+
+		// D1 hysteresis: the tier ChooseScalarTierWithHysteresis last chose
+		// for this channel (see quant/channel_quant.h) - carried per-Transform,
+		// per-channel so the next call can require clearing the *opposite*
+		// side of a boundary before switching tiers again, instead of
+		// flapping every frame a value hovers near byteRange/halfRange (each
+		// tier reconstructs on a different rounding grid, so every flap is a
+		// visible jump on the receiver). Defaults to Full, the always-correct
+		// starting point - a fresh Transform (this object's whole lifetime,
+		// same "resets only on topology change" rule as mQuantAnchorSet
+		// above) has no prior tier to be biased toward.
+		QuantTier mLastTranslationTier = QuantTier::Full;
+		QuantTier mLastRotationTier = QuantTier::Full;
 	};
 
 	//! Platform specific builder to make a transform object
