@@ -166,17 +166,25 @@ table SubjectUpdate {
   // despite the schema fields living alongside predictor_id/is_keyframe
   // above; wiring D1 into the residual path (using ResidualEncoder/
   // Decoder's own Reference() as the anchor instead of the rest-pose one
-  // below) is a natural follow-on, not yet done. Quantizes whatever value
-  // the legacy path would otherwise send (a last-sent delta) into a
-  // smaller wire representation when its magnitude is small enough. A
-  // channel appears in at most ONE of {translations, translations_q8, translations_q16}
+  // below) is a natural follow-on, not yet done. Translation quantizes a
+  // DELTA FROM A FIXED REST-POSE ANCHOR (Transform::mQuantAnchorTranslation,
+  // captured once at the first full sync and held for the transform's
+  // lifetime) - NOT the legacy path's own absolute-float translation
+  // values, and NOT a last-sent delta (a moving reference would desync
+  // permanently the first time a periodic full "keyframe" resync was
+  // dropped - see the anchor's own doc comment in model.h). A channel
+  // appears in at most ONE of {translations, translations_q8, translations_q16}
   // (same rule for rotation/curves) - never sent at all means "unchanged,
   // below deltaThreshold", exactly as today. quant_byte_range/
-  // quant_half_range default to 0 ("quantization not used this update"),
-  // so an old reader (or a new reader talking to a sender with
-  // quantization disabled) simply never sees the *_q8/*_q16 vectors
-  // populated, preserving today's behavior exactly. Rotation needs no
-  // range field: quantized absolute, not delta - see RotationUpdateQ8/16.
+  // quant_half_range each default to 0, meaning there is no
+  // translations_q8/translations_q16 vector (respectively) present in this
+  // update to decode - NOT "quantization is off overall": rotation's
+  // smallest-three encoding (RotationUpdateQ8/16) never uses either range
+  // field, quantizing the absolute value directly (bounded to [-1,1]
+  // already, no reference needed), so a rotations_q8/q16 vector can be
+  // present even when both ranges are 0. An old reader (or a new reader
+  // talking to a sender with quantization disabled) simply never sees any
+  // *_q8/*_q16 vectors populated, preserving today's behavior exactly.
   quant_byte_range:float = 0.0;
   quant_half_range:float = 0.0;
   translations_q8:[TranslationUpdateQ8];

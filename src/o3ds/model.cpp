@@ -585,8 +585,15 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		auto roQ8 = rotationsQ8.empty() ? 0 : builder.CreateVectorOfStructs(rotationsQ8);
 		auto roQ16 = rotationsQ16.empty() ? 0 : builder.CreateVectorOfStructs(rotationsQ16);
 
-		const float byteRangeOut = (quantRanges != nullptr) ? (float)quantRanges->byteRange : 0.0f;
-		const float halfRangeOut = (quantRanges != nullptr) ? (float)quantRanges->halfRange : 0.0f;
+		// Only non-zero when actually needed to decode something in THIS
+		// update: rotation's smallest-three quantization needs no range at
+		// all (see RotationUpdateQ8/16's own doc comment), so an update
+		// with only quantized rotation channels (or none quantized at all)
+		// must not carry a stale non-zero range - that would contradict the
+		// schema's "0 == not used this update" contract and waste 4-8
+		// bytes for nothing.
+		const float byteRangeOut = translationsQ8.empty() ? 0.0f : (float)quantRanges->byteRange;
+		const float halfRangeOut = translationsQ16.empty() ? 0.0f : (float)quantRanges->halfRange;
 
 		return CreateSubjectUpdate(builder, oSubjectName, tr, ro, sc, cu,
 			/*predictor_id*/0, /*is_keyframe*/false,

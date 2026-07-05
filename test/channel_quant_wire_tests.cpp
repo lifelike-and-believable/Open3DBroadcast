@@ -219,6 +219,21 @@ O3DS_TEST(D1_RotationQuantization_RoundTripsViaByteAndHalfTiers)
 	size_t count = 0;
 	std::vector<char> buf;
 	O3DS_CHECK(sender.SerializeUpdate(buf, count, 1.0e-6) > 0);
+
+	// Regression (Copilot review): quant_byte_range/quant_half_range must
+	// stay 0 when no TRANSLATION channel was quantized this update - only
+	// rotation was quantized here, and rotation's smallest-three encoding
+	// needs neither range field to decode. A stale non-zero range would
+	// contradict the schema's "0 == no [byte/half]-tier translation vector
+	// present" contract for no reason.
+	{
+		auto root = O3DS::Data::GetSubjectList(buf.data() + 8);
+		auto update = root->updates()->Get(0);
+		O3DS_CHECK(update->quant_byte_range() == 0.0f);
+		O3DS_CHECK(update->quant_half_range() == 0.0f);
+		O3DS_CHECK(update->rotations_q8() != nullptr || update->rotations_q16() != nullptr);
+	}
+
 	O3DS_CHECK(receiver.Parse(buf.data(), buf.size()));
 
 	Subject* r = receiver.findSubject("Actor");
