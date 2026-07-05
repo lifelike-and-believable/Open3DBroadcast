@@ -24,37 +24,15 @@ namespace
 		TEXT("Enable per-frame serializer stats logging (0/1)."),
 		ECVF_Default);
 
-	// C2 (roadmap doc §5/C2): delta/residual transmission. Defaults keep
-	// today's behavior exactly (Enabled=0 -> full Serialize() snapshot
-	// every frame, unchanged). Exposed as cvars, matching the convention
-	// already established for C1's o3ds.Receiver.Concealment.* set - the
-	// roadmap's own "Open decisions" flag these as needing real-world/
-	// live tuning, which this session's sandbox can't do.
-	static TAutoConsoleVariable<int32> CVarO3DSenderResidualEnabled(
-		TEXT("o3ds.Sender.Residual.Enabled"),
-		0,
-		TEXT("Enable delta/residual transmission instead of a full snapshot every frame (0/1). Only safe on reliable/ordered transports (TCP, WebRTC reliable channel, MoQ reliable streams) - see roadmap doc Phase C2's history-divergence-under-loss risk; there is no automatic transport-reliability gate yet."),
-		ECVF_Default);
-
-	// ResidualPredictorId: 0=None(legacy, meaningless here since Enabled
-	// gates this whole path), 1=Hold, 2=Linear, 3=Quadratic.
-	static TAutoConsoleVariable<int32> CVarO3DSenderResidualPredictor(
-		TEXT("o3ds.Sender.Residual.Predictor"),
-		2,
-		TEXT("Predictor for residual coding: 1=Hold (reduces exactly to legacy delta), 2=Linear (roadmap's recommended default), 3=Quadratic."),
-		ECVF_Default);
-
-	static TAutoConsoleVariable<int32> CVarO3DSenderResidualKeyframeIntervalFrames(
-		TEXT("o3ds.Sender.Residual.KeyframeIntervalFrames"),
-		300,
-		TEXT("Force a residual keyframe (absolute values, re-anchors drift) every N frames. 0 disables periodic keyframes (only the first frame / a topology change forces one)."),
-		ECVF_Default);
-
-	static TAutoConsoleVariable<float> CVarO3DSenderResidualDeltaThreshold(
-		TEXT("o3ds.Sender.Residual.DeltaThreshold"),
-		0.0001f,
-		TEXT("Per-channel residual magnitude below which a channel is omitted from the wire (same convention as the legacy delta scheme's threshold, just measured against the predictor's reference instead of the last-sent value)."),
-		ECVF_Default);
+	// Residual coding (C2, roadmap doc §5) and quantization (D1, roadmap
+	// doc §6) configuration used to live here as cvars. Both are
+	// production tuning knobs a project would set per-instance, not
+	// debug/iteration toggles (unlike DebugSerialize/DebugStats above), so
+	// they're now real UPROPERTY fields on UO3DSenderComponent - see
+	// bEnableResidualCoding/ResidualPredictor/ResidualKeyframeIntervalFrames/
+	// ResidualDeltaThreshold and bEnableQuantization/QuantizationByteRange/
+	// QuantizationHalfRange/QuantizationDeltaThreshold there, editable from
+	// the component's Details panel instead of requiring a console command.
 }
 
 TArray<FO3DSenderSerializer*> FO3DSenderSerializer::GInstances;
@@ -117,13 +95,15 @@ void FO3DSenderSerializer::RemoveSubjectCache(const FString& Subject)
 		UE_LOG(LogO3DSenderSerializer, Verbose, TEXT("Removed serializer cache for subject '%s'"), *Subject);
 	}
 
-	// C2: drop the persistent residual-mode Subject too, so if this name
-	// reappears later it gets a fresh full sync + encoder (bDescriptorSent
-	// is gone along with the SubjectState entry above, which already
-	// forces that - this just avoids leaking the now-orphaned O3DS::Subject
-	// object, which PersistentSubjects owns via a raw pointer it only frees
-	// in its own destructor or a bare vector erase, same pattern as the
-	// SubjectList::Parse clearInactive leak fixed earlier this session).
+	// C2/D1: drop the persistent residual- or quantization-mode Subject too
+	// (PersistentSubjects is shared by both - see its own declaration), so
+	// if this name reappears later it gets a fresh full sync + encoder/
+	// anchor (bDescriptorSent is gone along with the SubjectState entry
+	// above, which already forces that - this just avoids leaking the now-
+	// orphaned O3DS::Subject object, which PersistentSubjects owns via a
+	// raw pointer it only frees in its own destructor or a bare vector
+	// erase, same pattern as the SubjectList::Parse clearInactive leak
+	// fixed earlier this session).
 	if (PersistentSubjects.IsValid())
 	{
 		const std::string SubjectNameUtf8 = std::string(TCHAR_TO_UTF8(*Subject));
@@ -311,9 +291,17 @@ void FO3DSenderSerializer::SerializeFrame(const FString& Subject, const FO3DSSke
 {
 	FSubjectCache& Cache = SubjectState.FindOrAdd(Subject);
 
-	if (CVarO3DSenderResidualEnabled.GetValueOnAnyThread() != 0)
+	// D1 doesn't compose with C2 yet (see bEnableQuantization's own doc
+	// comment on UO3DSenderComponent) - Residual takes precedence if both
+	// are enabled, rather than silently ignoring whichever the caller
+	// thought was in effect.
+	if (Component != nullptr && Component->bEnableResidualCoding)
 	{
 		SerializeFrameResidual(Subject, Descriptor, Frame, Cache);
+	}
+	else if (Component != nullptr && Component->bEnableQuantization)
+	{
+		SerializeFrameQuantized(Subject, Descriptor, Frame, Cache);
 	}
 	else
 	{
@@ -442,9 +430,18 @@ void FO3DSenderSerializer::SerializeFrameResidual(const FString& Subject, const 
 		// (Subject::SetResidualEncoder) takes a standard std::unique_ptr,
 		// not UE's TUniquePtr - see the C1 UE glue fix earlier this
 		// session for the exact same mismatch on the receiver side.
-		const int32 PredictorValue = FMath::Clamp(CVarO3DSenderResidualPredictor.GetValueOnAnyThread(), 1, 3);
-		const ResidualPredictorId PredictorId = static_cast<ResidualPredictorId>(PredictorValue);
-		const uint32 KeyframeInterval = (uint32)FMath::Max(0, CVarO3DSenderResidualKeyframeIntervalFrames.GetValueOnAnyThread());
+		ResidualPredictorId PredictorId = ResidualPredictorId::Linear;
+		if (Component != nullptr)
+		{
+			switch (Component->ResidualPredictor)
+			{
+			case EO3DSenderResidualPredictor::Hold: PredictorId = ResidualPredictorId::Hold; break;
+			case EO3DSenderResidualPredictor::Quadratic: PredictorId = ResidualPredictorId::Quadratic; break;
+			case EO3DSenderResidualPredictor::Linear:
+			default: PredictorId = ResidualPredictorId::Linear; break;
+			}
+		}
+		const uint32 KeyframeInterval = (Component != nullptr) ? (uint32)FMath::Max(0, Component->ResidualKeyframeIntervalFrames) : 300u;
 		SubjectObject->SetResidualEncoder(std::make_unique<ResidualEncoder>(PredictorId, KeyframeInterval));
 
 		SubjectObject->Serialize(Buffer, Now);
@@ -467,7 +464,7 @@ void FO3DSenderSerializer::SerializeFrameResidual(const FString& Subject, const 
 		SubjectObject->CalcMatrices();
 
 		size_t Count = 0;
-		const double DeltaThreshold = (double)FMath::Max(0.0f, CVarO3DSenderResidualDeltaThreshold.GetValueOnAnyThread());
+		const double DeltaThreshold = (Component != nullptr) ? (double)FMath::Max(0.0f, Component->ResidualDeltaThreshold) : 0.0001;
 		SubjectObject->SerializeUpdateResidual(Buffer, Count, DeltaThreshold, Now);
 	}
 
@@ -484,7 +481,110 @@ void FO3DSenderSerializer::SerializeFrameResidual(const FString& Subject, const 
 	}
 }
 
-/** Shared broadcast + stats tail for both the legacy and residual serialization paths. */
+/** D1 (roadmap doc §6/D1): persistent-Subject adaptive channel quantization on
+ *  the legacy delta-threshold path. Structurally mirrors SerializeFrameResidual
+ *  (a persistent Subject is required either way, since quantization needs its
+ *  own rest-pose anchor to survive across frames - see Transform::
+ *  mQuantAnchorTranslation's doc comment in model.h), but without any
+ *  predictor/encoder state. D1 itself only quantizes translation/rotation,
+ *  but this mode's steady-state branch still clamps curve VALUES to
+ *  min(Frame.CurveValues.Num(), SubjectObject->mCurveValues.size()) exactly
+ *  like Residual's does (same underlying SerializeUpdate curve-serialization
+ *  path) - so it needs the same curve-count-change resync trigger Residual
+ *  already has, or added/removed curves would silently drop/go stale the
+ *  same way. */
+void FO3DSenderSerializer::SerializeFrameQuantized(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache)
+{
+	using namespace O3DS;
+
+	if (!PersistentSubjects.IsValid())
+	{
+		PersistentSubjects = MakeShared<SubjectList>();
+	}
+
+	const std::string SubjectNameUtf8 = std::string(TCHAR_TO_UTF8(*Subject));
+	O3DS::Subject* SubjectObject = PersistentSubjects->findSubject(SubjectNameUtf8);
+
+	const bool bCurveCountChanged = (SubjectObject != nullptr)
+		&& ((size_t)Frame.CurveValues.Num() != SubjectObject->mCurveValues.size());
+	const bool bNeedFullSync = (SubjectObject == nullptr) || !Cache.bDescriptorSent || bCurveCountChanged;
+
+	const double Now = FPlatformTime::Seconds();
+	std::vector<char> Buffer;
+
+	if (bNeedFullSync)
+	{
+		if (!SubjectObject)
+		{
+			SubjectObject = PersistentSubjects->addSubject(SubjectNameUtf8);
+		}
+
+		BuildSubjectFromDescriptor(Subject, Descriptor, *SubjectObject);
+		FillFrameValues(Frame, *SubjectObject);
+
+		if (Frame.CurveNames.Num() > 0)
+		{
+			SubjectObject->mCurveNames.clear();
+			SubjectObject->mCurveValues.clear();
+			SubjectObject->mCurveNames.reserve(Frame.CurveNames.Num());
+			SubjectObject->mCurveValues.reserve(Frame.CurveNames.Num());
+			for (int32 Index = 0; Index < Frame.CurveNames.Num(); ++Index)
+			{
+				SubjectObject->mCurveNames.push_back(std::string(TCHAR_TO_UTF8(*Frame.CurveNames[Index].ToString())));
+				SubjectObject->mCurveValues.push_back(Index < Frame.CurveValues.Num() ? Frame.CurveValues[Index] : 0.0f);
+			}
+		}
+
+		SubjectObject->CalcMatrices();
+
+		// Subject::Serialize() itself captures each Transform's rest-pose
+		// quantization anchor - but only once, ever, per Transform object
+		// (see model.h/model.cpp) - so a genuinely fresh Transform (first
+		// frame, or just rebuilt by BuildSubjectFromDescriptor above after a
+		// topology change) gets a fresh anchor here, while a full resync of
+		// UNCHANGED topology (e.g. a periodic keyframe-equivalent full sync
+		// some future caller might add) would correctly preserve the
+		// existing one instead of silently moving it. Nothing to do here
+		// beyond calling Serialize() - no encoder/predictor to construct,
+		// unlike Residual.
+		SubjectObject->Serialize(Buffer, Now);
+		Cache.bDescriptorSent = true;
+	}
+	else
+	{
+		FillFrameValues(Frame, *SubjectObject);
+
+		const int32 CurveCount = FMath::Min(Frame.CurveValues.Num(), (int32)SubjectObject->mCurveValues.size());
+		for (int32 Index = 0; Index < CurveCount; ++Index)
+		{
+			SubjectObject->mCurveValues[Index] = Frame.CurveValues[Index];
+		}
+
+		SubjectObject->CalcMatrices();
+
+		O3DS::QuantRanges Ranges;
+		Ranges.byteRange = (Component != nullptr) ? (double)FMath::Max(0.0f, Component->QuantizationByteRange) : 0.01;
+		Ranges.halfRange = (Component != nullptr) ? (double)FMath::Max(0.0f, Component->QuantizationHalfRange) : 1.0;
+
+		size_t Count = 0;
+		const double DeltaThreshold = (Component != nullptr) ? (double)FMath::Max(0.0f, Component->QuantizationDeltaThreshold) : 0.0001;
+		SubjectObject->SerializeUpdate(Buffer, Count, DeltaThreshold, Now, &Ranges);
+	}
+
+	BroadcastSerializedBuffer(Subject, Buffer, Now, Cache);
+
+	if (CVarO3DSenderDebugSerialize.GetValueOnAnyThread() != 0)
+	{
+		UE_LOG(LogO3DSenderSerializer, Verbose, TEXT("SerializedQuantized Subject=%s Bones=%d Curves=%d Bytes=%d FullSync=%s"),
+			*Subject,
+			Frame.BoneLocalTransforms.Num(),
+			Frame.CurveValues.Num(),
+			(int32)Buffer.size(),
+			bNeedFullSync ? TEXT("true") : TEXT("false"));
+	}
+}
+
+/** Shared broadcast + stats tail for the legacy, residual, and quantized serialization paths. */
 void FO3DSenderSerializer::BroadcastSerializedBuffer(const FString& Subject, const std::vector<char>& Buffer, double Now, FSubjectCache& Cache)
 {
 	if (Buffer.empty())
