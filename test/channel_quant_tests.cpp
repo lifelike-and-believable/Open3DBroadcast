@@ -6,6 +6,7 @@
 #include "o3ds/quant/channel_quant.h"
 
 #include <cmath>
+#include <limits>
 
 using namespace O3DS;
 
@@ -74,6 +75,20 @@ O3DS_TEST(QuantizeByte_ClampsOutOfRangeInputInsteadOfOverflowing)
 	O3DS_CHECK(codeLow == -127);
 }
 
+O3DS_TEST(QuantizeByte_NonFiniteRangeDisablesQuantizationInsteadOfProducingGarbage)
+{
+	// Regression (Copilot review): range can come from caller-supplied
+	// config (e.g. a UE UPROPERTY) - only checking range<=0 lets a NaN
+	// range slip through (NaN<=0 is false in IEEE 754), producing a
+	// garbage saturated code from the division instead of safely
+	// disabling quantization.
+	const double nan = std::numeric_limits<double>::quiet_NaN();
+	const double inf = std::numeric_limits<double>::infinity();
+	O3DS_CHECK(QuantizeByte(0.005, nan) == 0);
+	O3DS_CHECK(QuantizeByte(0.005, inf) == 0);
+	O3DS_CHECK(QuantizeByte(0.005, -inf) == 0);
+}
+
 O3DS_TEST(QuantizeByte_ZeroRoundTripsExactly)
 {
 	const double range = 0.01;
@@ -99,6 +114,15 @@ O3DS_TEST(QuantizeHalf_ClampsOutOfRangeInputInsteadOfOverflowing)
 	int16_t codeLow = QuantizeHalf(-range * 100.0, range);
 	O3DS_CHECK(codeHigh == 32767);
 	O3DS_CHECK(codeLow == -32767);
+}
+
+O3DS_TEST(QuantizeHalf_NonFiniteRangeDisablesQuantizationInsteadOfProducingGarbage)
+{
+	const double nan = std::numeric_limits<double>::quiet_NaN();
+	const double inf = std::numeric_limits<double>::infinity();
+	O3DS_CHECK(QuantizeHalf(0.5, nan) == 0);
+	O3DS_CHECK(QuantizeHalf(0.5, inf) == 0);
+	O3DS_CHECK(QuantizeHalf(0.5, -inf) == 0);
 }
 
 O3DS_TEST(QuantizeHalf_IsMeaningfullyMorePreciseThanByte)

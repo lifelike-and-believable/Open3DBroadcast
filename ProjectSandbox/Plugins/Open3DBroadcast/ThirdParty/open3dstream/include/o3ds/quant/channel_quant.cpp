@@ -71,7 +71,13 @@ namespace O3DS
 
 	int8_t QuantizeByte(double delta, double range)
 	{
-		if (range <= 0.0)
+		// range can come from caller-supplied config (e.g. a UE UPROPERTY,
+		// which a Blueprint or malformed config could set to NaN/Inf) - only
+		// checking range<=0 lets a NaN range slip through (NaN<=0 is false),
+		// producing a garbage saturated code from the division below instead
+		// of safely disabling quantization. Mirrors DequantizeByte's own
+		// decode-side guard.
+		if (!(range > 0.0) || !std::isfinite(range))
 		{
 			return 0;
 		}
@@ -97,7 +103,8 @@ namespace O3DS
 
 	int16_t QuantizeHalf(double delta, double range)
 	{
-		if (range <= 0.0)
+		// See QuantizeByte's comment - same non-finite-range guard.
+		if (!(range > 0.0) || !std::isfinite(range))
 		{
 			return 0;
 		}

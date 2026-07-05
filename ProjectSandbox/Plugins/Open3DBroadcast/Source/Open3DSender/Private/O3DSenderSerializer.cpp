@@ -486,10 +486,13 @@ void FO3DSenderSerializer::SerializeFrameResidual(const FString& Subject, const 
  *  (a persistent Subject is required either way, since quantization needs its
  *  own rest-pose anchor to survive across frames - see Transform::
  *  mQuantAnchorTranslation's doc comment in model.h), but without any
- *  predictor/encoder state: D1 only quantizes translation/rotation (curves
- *  are unaffected either way, still sent via the same unquantized path), so
- *  unlike Residual there's no curve-count-driven resync condition to add on
- *  top of the descriptor-hash one. */
+ *  predictor/encoder state. D1 itself only quantizes translation/rotation,
+ *  but this mode's steady-state branch still clamps curve VALUES to
+ *  min(Frame.CurveValues.Num(), SubjectObject->mCurveValues.size()) exactly
+ *  like Residual's does (same underlying SerializeUpdate curve-serialization
+ *  path) - so it needs the same curve-count-change resync trigger Residual
+ *  already has, or added/removed curves would silently drop/go stale the
+ *  same way. */
 void FO3DSenderSerializer::SerializeFrameQuantized(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache)
 {
 	using namespace O3DS;
@@ -502,7 +505,9 @@ void FO3DSenderSerializer::SerializeFrameQuantized(const FString& Subject, const
 	const std::string SubjectNameUtf8 = std::string(TCHAR_TO_UTF8(*Subject));
 	O3DS::Subject* SubjectObject = PersistentSubjects->findSubject(SubjectNameUtf8);
 
-	const bool bNeedFullSync = (SubjectObject == nullptr) || !Cache.bDescriptorSent;
+	const bool bCurveCountChanged = (SubjectObject != nullptr)
+		&& ((size_t)Frame.CurveValues.Num() != SubjectObject->mCurveValues.size());
+	const bool bNeedFullSync = (SubjectObject == nullptr) || !Cache.bDescriptorSent || bCurveCountChanged;
 
 	const double Now = FPlatformTime::Seconds();
 	std::vector<char> Buffer;
