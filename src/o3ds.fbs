@@ -160,11 +160,16 @@ table SubjectUpdate {
   is_keyframe:bool = false;
 
   // Appended (D1, roadmap doc §6/D1): adaptive/variable-bit channel
-  // quantization - orthogonal to (and stacks with) the residual-coding
-  // fields above; quantizes whatever value would otherwise be sent (a
-  // legacy last-sent delta OR a C2 residual) into a smaller wire
-  // representation when its magnitude is small enough. A channel appears
-  // in at most ONE of {translations, translations_q8, translations_q16}
+  // quantization for the LEGACY (predictor_id==0) path only in this first
+  // pass - Subject::SerializeUpdateResidual (C2) does not yet consult
+  // mQuantRanges, so a residual-coded update is never quantized today
+  // despite the schema fields living alongside predictor_id/is_keyframe
+  // above; wiring D1 into the residual path (using ResidualEncoder/
+  // Decoder's own Reference() as the anchor instead of the rest-pose one
+  // below) is a natural follow-on, not yet done. Quantizes whatever value
+  // the legacy path would otherwise send (a last-sent delta) into a
+  // smaller wire representation when its magnitude is small enough. A
+  // channel appears in at most ONE of {translations, translations_q8, translations_q16}
   // (same rule for rotation/curves) - never sent at all means "unchanged,
   // below deltaThreshold", exactly as today. quant_byte_range/
   // quant_half_range default to 0 ("quantization not used this update"),

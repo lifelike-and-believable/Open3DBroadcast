@@ -80,6 +80,18 @@ namespace O3DS
 
 	double DequantizeByte(int8_t code, double range)
 	{
+		// range comes straight from the wire (SubjectUpdate::quant_byte_range)
+		// on the decode path - untrusted network input. A non-finite or
+		// non-positive value would otherwise propagate an Infinity/NaN
+		// straight into Transform::translation.value, which nothing
+		// downstream (CalcMatrices()'s NaN check runs before translation is
+		// applied; Infinity isn't NaN anyway) would catch. Treat it the same
+		// as QuantizeByte already treats an invalid encode-side range: no
+		// usable delta.
+		if (!(range > 0.0) || !std::isfinite(range))
+		{
+			return 0.0;
+		}
 		return (static_cast<double>(code) / kByteMax) * range;
 	}
 
@@ -94,6 +106,11 @@ namespace O3DS
 
 	double DequantizeHalf(int16_t code, double range)
 	{
+		// See DequantizeByte's comment - same untrusted-wire-range guard.
+		if (!(range > 0.0) || !std::isfinite(range))
+		{
+			return 0.0;
+		}
 		return (static_cast<double>(code) / kHalfMax) * range;
 	}
 
