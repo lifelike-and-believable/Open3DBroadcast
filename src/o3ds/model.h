@@ -32,6 +32,7 @@ SOFTWARE.
 #include "context.h"
 #include "transform_component.h"
 #include "predict/residual_codec.h"
+#include "quant/channel_quant.h"
 #include "o3ds_generated.h"
 
 
@@ -71,6 +72,25 @@ namespace O3DS
 
 		void *mReference;
 
+		// D1 (roadmap doc §6/D1): rest-pose/bind-pose LOCAL translation
+		// anchor for legacy-mode quantization (Subject::SerializeUpdate/
+		// SubjectList::ParseUpdate's Byte/Half tiers - see quant/
+		// channel_quant.h). Deliberately NOT the last-SENT value (that
+		// would be a moving reference: one dropped packet on an unreliable
+		// transport permanently desyncs every later quantized delta,
+		// reintroducing exactly the history-divergence-under-loss problem
+		// D1 exists to avoid - see C2's own risk notes). Captured lazily,
+		// once, the first time quantization runs for this Transform, and
+		// held for this object's entire lifetime - it only "resets" when a
+		// topology change creates a brand-new Transform, matching "known
+		// from the skeleton descriptor" rather than per-frame state. A
+		// typical rigid skeleton's LOCAL (parent-relative, not world-space)
+		// translation stays near this anchor even during animation - only
+		// large local deviations (e.g. IK stretching, or a root bone whose
+		// local space is effectively world space) fall back to the Full
+		// tier, same safety net as today's deltaThreshold.
+		Vector3d mQuantAnchorTranslation = Vector3d(0.0, 0.0, 0.0);
+		bool     mQuantAnchorSet = false;
 	};
 
 	//! Platform specific builder to make a transform object
@@ -193,7 +213,22 @@ namespace O3DS
 
 		flatbuffers::Offset<O3DS::Data::Subject> Serialize(flatbuffers::FlatBufferBuilder& builder);
 
-		flatbuffers::Offset<O3DS::Data::SubjectUpdate> SerializeUpdate(flatbuffers::FlatBufferBuilder& builder, size_t& count, double deltaThreshold);
+		//! `quantRanges` (D1, roadmap doc §6/D1): when non-null, translation/
+		//! rotation channels that clear deltaThreshold are additionally
+		//! considered for adaptive quantization (Byte/Half tiers) instead of
+		//! always being sent at full float32 precision - see quant/
+		//! channel_quant.h. Translation quantizes a delta from this
+		//! Transform's rest-pose anchor (see Transform::
+		//! mQuantAnchorTranslation's own doc comment for why NOT a moving
+		//! last-sent reference); a Transform with no anchor yet (never gone
+		//! through a full Serialize()/ParseSubject()) always falls back to
+		//! Full for this call. Rotation quantizes the absolute value
+		//! (smallest-three, no anchor needed) and reuses the same
+		//! byteRange/halfRange thresholds against its own quaternion-space
+		//! delta() as a simple, classical tier-selection rule. Default
+		//! nullptr (disabled) leaves the wire byte-for-byte identical to
+		//! before D1 existed.
+		flatbuffers::Offset<O3DS::Data::SubjectUpdate> SerializeUpdate(flatbuffers::FlatBufferBuilder& builder, size_t& count, double deltaThreshold, const QuantRanges* quantRanges = nullptr);
 
 		// C2 (roadmap doc §5/C2): opt-in per-subject residual coding. Both
 		// members are null by default (legacy mode, unaffected). Whichever
@@ -233,7 +268,7 @@ namespace O3DS
 
 		int Serialize(std::vector<char>& outbuf, double timestamp);
 
-		int SerializeUpdate(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp);
+		int SerializeUpdate(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp, const QuantRanges* quantRanges = nullptr);
 
 		//! Self-contained residual-coded variant of the vector<char> overload
 		//! above, mirroring it exactly (builds its own FlatBufferBuilder and
@@ -309,6 +344,15 @@ namespace O3DS
 		double mTime;
 		double mDeltaThreshold;
 		std::string mError;
+
+		// D1 (roadmap doc §6/D1): opt-in adaptive channel quantization for
+		// SerializeUpdate() below, mirroring mDeltaThreshold's own
+		// member-not-parameter pattern. Disabled (false) by default -
+		// SerializeUpdate()'s wire output is then byte-for-byte identical
+		// to before D1 existed. mQuantRanges is only consulted when
+		// mQuantizationEnabled is true.
+		bool mQuantizationEnabled = false;
+		QuantRanges mQuantRanges;
 
 		//! Encode all of the items in the subject list as binary data.
 		//! tx_seq/tx_wallclock_us/frame_epoch are optional (0 == unset, the

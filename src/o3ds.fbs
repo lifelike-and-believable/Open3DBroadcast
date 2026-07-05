@@ -62,6 +62,61 @@ struct ScaleUpdate {
   i:int;
 }
 
+// Appended (D1, roadmap doc §6/D1): fixed-size, per-tier quantized variants
+// of the *Update structs above - kept as structs (not tables) deliberately,
+// to preserve the zero-vtable/zero-offset compactness that makes the plain
+// *Update structs cheap in a vector; a table-based "optional precision
+// field" would reintroduce per-instance overhead and could erase D1's own
+// byte savings. Each carries a signed fixed-point code (see
+// quant/channel_quant.h's QuantizeByte/QuantizeHalf) for a DELTA already
+// known to be bounded within the update's own quant_byte_range/
+// quant_half_range (below) - never an absolute world-space value, which is
+// not bounded.
+struct TranslationUpdateQ8 {
+  dx:byte;
+  dy:byte;
+  dz:byte;
+  i:int;
+}
+
+struct TranslationUpdateQ16 {
+  dx:short;
+  dy:short;
+  dz:short;
+  i:int;
+}
+
+struct CurveUpdateQ8 {
+  dv:byte;
+  i:int;
+}
+
+struct CurveUpdateQ16 {
+  dv:short;
+  i:int;
+}
+
+// Smallest-three quantized rotation (see quant/channel_quant.h's
+// QuantizeRotationByte/QuantizeRotationHalf): quantizes the ABSOLUTE
+// rotation, not a delta - unit-quaternion components are already bounded
+// to [-1,1], so no caller-supplied range is needed (unlike translation/
+// curve above). `dropped` is which of x/y/z/w (0-3) was omitted and must
+// be reconstructed from the unit-length constraint on decode.
+struct RotationUpdateQ8 {
+  dropped:ubyte;
+  a:byte;
+  b:byte;
+  c:byte;
+  i:int;
+}
+
+struct RotationUpdateQ16 {
+  dropped:ubyte;
+  a:short;
+  b:short;
+  c:short;
+  i:int;
+}
 
 enum Component : byte { Translation, Rotation, Scale, Matrix }
 
@@ -103,6 +158,28 @@ table SubjectUpdate {
   // that collision (0 meaning two different things) would be dangerous.
   predictor_id:uint = 0;
   is_keyframe:bool = false;
+
+  // Appended (D1, roadmap doc §6/D1): adaptive/variable-bit channel
+  // quantization - orthogonal to (and stacks with) the residual-coding
+  // fields above; quantizes whatever value would otherwise be sent (a
+  // legacy last-sent delta OR a C2 residual) into a smaller wire
+  // representation when its magnitude is small enough. A channel appears
+  // in at most ONE of {translations, translations_q8, translations_q16}
+  // (same rule for rotation/curves) - never sent at all means "unchanged,
+  // below deltaThreshold", exactly as today. quant_byte_range/
+  // quant_half_range default to 0 ("quantization not used this update"),
+  // so an old reader (or a new reader talking to a sender with
+  // quantization disabled) simply never sees the *_q8/*_q16 vectors
+  // populated, preserving today's behavior exactly. Rotation needs no
+  // range field: quantized absolute, not delta - see RotationUpdateQ8/16.
+  quant_byte_range:float = 0.0;
+  quant_half_range:float = 0.0;
+  translations_q8:[TranslationUpdateQ8];
+  translations_q16:[TranslationUpdateQ16];
+  rotations_q8:[RotationUpdateQ8];
+  rotations_q16:[RotationUpdateQ16];
+  curves_q8:[CurveUpdateQ8];
+  curves_q16:[CurveUpdateQ16];
 }
 
 table SubjectList {

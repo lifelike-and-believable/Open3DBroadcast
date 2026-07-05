@@ -335,6 +335,18 @@ namespace O3DS
 			t->rotation >> rotation;
 			t->scale >> scale;
 
+			// D1 (roadmap doc §6/D1): (re)anchor this transform's
+			// quantization reference to whatever value is being sent in
+			// THIS full sync - see Transform::mQuantAnchorTranslation's own
+			// doc comment for why a fixed, sync-time anchor (not a moving
+			// last-sent value) is required for D1's quantized deltas to
+			// stay loss-safe. Unconditional, not just first-time: every
+			// full resync re-establishes a fresh anchor, matching
+			// ParseSubject's receive-side capture below exactly, so both
+			// sides always agree on the same anchor.
+			t->mQuantAnchorTranslation = t->translation.value;
+			t->mQuantAnchorSet = true;
+
 			for (const auto component : t->transformOrder) {
 				if (component == O3DS::TTranslation) {
 					components.push_back(O3DS::Data::Component::Component_Translation);
@@ -423,12 +435,16 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		return s;
 	}
 
-	flatbuffers::Offset<O3DS::Data::SubjectUpdate> Subject::SerializeUpdate(flatbuffers::FlatBufferBuilder& builder, size_t &count, double deltaThreshold)
+	flatbuffers::Offset<O3DS::Data::SubjectUpdate> Subject::SerializeUpdate(flatbuffers::FlatBufferBuilder& builder, size_t &count, double deltaThreshold, const QuantRanges* quantRanges)
 	{
 		auto oSubjectName = builder.CreateString(this->mName);
 
 		std::vector<O3DS::Data::TranslationUpdate> translations;
+		std::vector<O3DS::Data::TranslationUpdateQ8> translationsQ8;
+		std::vector<O3DS::Data::TranslationUpdateQ16> translationsQ16;
 		std::vector<O3DS::Data::RotationUpdate> rotations;
+		std::vector<O3DS::Data::RotationUpdateQ8> rotationsQ8;
+		std::vector<O3DS::Data::RotationUpdateQ16> rotationsQ16;
 		std::vector<O3DS::Data::ScaleUpdate> scales;
 		std::vector<flatbuffers::Offset<O3DS::Data::CurveUpdate>> curveUpdates;
 
@@ -442,21 +458,86 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			}
 			if (t->translation.delta() > deltaThreshold)
 			{
-				translations.push_back(O3DS::Data::TranslationUpdate(
-					(float)t->translation.value.v[0],
-					(float)t->translation.value.v[1],
-					(float)t->translation.value.v[2], transformId));
+				bool quantized = false;
+				// D1 (roadmap doc §6/D1): quantize a delta from this
+				// Transform's fixed rest-pose anchor, never from
+				// lastSentValue - see Transform::mQuantAnchorTranslation's
+				// doc comment for why a moving reference would reintroduce
+				// loss-sensitivity D1 is meant to avoid. No anchor yet
+				// (never seen a full Serialize()) means no safe delta to
+				// quantize - fall back to Full for this call only.
+				if (quantRanges != nullptr && t->mQuantAnchorSet)
+				{
+					double dx = t->translation.value.v[0] - t->mQuantAnchorTranslation.v[0];
+					double dy = t->translation.value.v[1] - t->mQuantAnchorTranslation.v[1];
+					double dz = t->translation.value.v[2] - t->mQuantAnchorTranslation.v[2];
+					double maxAbs = std::max(std::fabs(dx), std::max(std::fabs(dy), std::fabs(dz)));
+					QuantTier tier = ChooseScalarTier(maxAbs, *quantRanges);
+					if (tier == QuantTier::Byte)
+					{
+						translationsQ8.push_back(O3DS::Data::TranslationUpdateQ8(
+							QuantizeByte(dx, quantRanges->byteRange),
+							QuantizeByte(dy, quantRanges->byteRange),
+							QuantizeByte(dz, quantRanges->byteRange),
+							transformId));
+						quantized = true;
+					}
+					else if (tier == QuantTier::Half)
+					{
+						translationsQ16.push_back(O3DS::Data::TranslationUpdateQ16(
+							QuantizeHalf(dx, quantRanges->halfRange),
+							QuantizeHalf(dy, quantRanges->halfRange),
+							QuantizeHalf(dz, quantRanges->halfRange),
+							transformId));
+						quantized = true;
+					}
+				}
+				if (!quantized)
+				{
+					translations.push_back(O3DS::Data::TranslationUpdate(
+						(float)t->translation.value.v[0],
+						(float)t->translation.value.v[1],
+						(float)t->translation.value.v[2], transformId));
+				}
 				t->translation.sent();
 				count++;
 			}
 
 			if (t->rotation.delta() > deltaThreshold)
 			{
-				rotations.push_back(O3DS::Data::RotationUpdate(
-					(float)t->rotation.value.v[0],
-					(float)t->rotation.value.v[1],
-					(float)t->rotation.value.v[2],
-					(float)t->rotation.value.v[3], transformId));
+				bool quantized = false;
+				// Rotation quantizes the ABSOLUTE value (smallest-three) -
+				// unlike translation, unit-quaternion components are
+				// already bounded, so no anchor is needed. Reuses
+				// quantRanges' byteRange/halfRange as a generic "how much
+				// did this channel move" threshold against the same
+				// quaternion-space delta() already computed above - a
+				// classical fixed-threshold choice, not dimensionally tied
+				// to translation's own linear units.
+				if (quantRanges != nullptr)
+				{
+					QuantTier tier = ChooseScalarTier(t->rotation.delta(), *quantRanges);
+					if (tier == QuantTier::Byte)
+					{
+						SmallestThreeQ8 q = QuantizeRotationByte(t->rotation.value);
+						rotationsQ8.push_back(O3DS::Data::RotationUpdateQ8(q.droppedIndex, q.a, q.b, q.c, transformId));
+						quantized = true;
+					}
+					else if (tier == QuantTier::Half)
+					{
+						SmallestThreeQ16 q = QuantizeRotationHalf(t->rotation.value);
+						rotationsQ16.push_back(O3DS::Data::RotationUpdateQ16(q.droppedIndex, q.a, q.b, q.c, transformId));
+						quantized = true;
+					}
+				}
+				if (!quantized)
+				{
+					rotations.push_back(O3DS::Data::RotationUpdate(
+						(float)t->rotation.value.v[0],
+						(float)t->rotation.value.v[1],
+						(float)t->rotation.value.v[2],
+						(float)t->rotation.value.v[3], transformId));
+				}
 				t->rotation.sent();
 				count++;
 			}
@@ -478,7 +559,18 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		auto ro = builder.CreateVectorOfStructs(rotations);
 		auto sc = builder.CreateVectorOfStructs(scales);
 		auto cu = SerializeCurveUpdates(builder, count);
-		return CreateSubjectUpdate(builder, oSubjectName, tr, ro, sc, cu);
+		auto trQ8 = builder.CreateVectorOfStructs(translationsQ8);
+		auto trQ16 = builder.CreateVectorOfStructs(translationsQ16);
+		auto roQ8 = builder.CreateVectorOfStructs(rotationsQ8);
+		auto roQ16 = builder.CreateVectorOfStructs(rotationsQ16);
+
+		const float byteRangeOut = (quantRanges != nullptr) ? (float)quantRanges->byteRange : 0.0f;
+		const float halfRangeOut = (quantRanges != nullptr) ? (float)quantRanges->halfRange : 0.0f;
+
+		return CreateSubjectUpdate(builder, oSubjectName, tr, ro, sc, cu,
+			/*predictor_id*/0, /*is_keyframe*/false,
+			byteRangeOut, halfRangeOut,
+			trQ8, trQ16, roQ8, roQ16, /*curves_q8*/0, /*curves_q16*/0);
 	}
 
 	flatbuffers::Offset<O3DS::Data::SubjectUpdate> Subject::SerializeUpdateResidual(flatbuffers::FlatBufferBuilder& builder, size_t& count, double deltaThreshold, double t, uint64_t seq)
@@ -638,7 +730,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		return static_cast<int>(outbuf.size());
 	}
 
-	int Subject::SerializeUpdate(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp)
+	int Subject::SerializeUpdate(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp, const QuantRanges* quantRanges)
 	{
 		if (timestamp == 0.0)
 		{
@@ -648,7 +740,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		flatbuffers::FlatBufferBuilder builder;
 
 		std::vector<flatbuffers::Offset<O3DS::Data::SubjectUpdate>> outSubjectUpdates;
-		outSubjectUpdates.push_back(this->SerializeUpdate(builder, count, deltaThreshold));
+		outSubjectUpdates.push_back(this->SerializeUpdate(builder, count, deltaThreshold, quantRanges));
 
 		auto ovSubjectUpdates = builder.CreateVector(outSubjectUpdates);
 
@@ -751,9 +843,10 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		std::vector<flatbuffers::Offset<O3DS::Data::SubjectUpdate>> outSubjectUpdates;
 
+		const QuantRanges* quantRanges = mQuantizationEnabled ? &mQuantRanges : nullptr;
 		for (auto& subject : this->mItems)
 		{
-			outSubjectUpdates.push_back(subject->SerializeUpdate(builder, count, mDeltaThreshold));
+			outSubjectUpdates.push_back(subject->SerializeUpdate(builder, count, mDeltaThreshold, quantRanges));
 		}
 
 		auto ovSubjectUpdates = builder.CreateVector(outSubjectUpdates);
@@ -1009,6 +1102,15 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 					{
 						*inTranslation >> outTransform->translation;
 						outTransform->transformOrder.push_back(O3DS::TTranslation);
+
+						// D1 (roadmap doc §6/D1): mirrors the sender-side
+						// anchor capture in Subject::Serialize() above -
+						// both sides (re)anchor to the same full-sync value,
+						// so a later quantized delta update decodes
+						// correctly regardless of which side's clock it's
+						// measured against.
+						outTransform->mQuantAnchorTranslation = outTransform->translation.value;
+						outTransform->mQuantAnchorSet = true;
 					}
 					if (componentId == O3DS::Data::Component::Component_Rotation && inRotation != nullptr)
 					{
@@ -1071,6 +1173,51 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			}
 		}
 
+		// D1 (roadmap doc §6/D1): quantized translation deltas are relative
+		// to this Transform's rest-pose anchor (see Transform::
+		// mQuantAnchorTranslation's own doc comment) - NOT the value
+		// currently sitting in translation.value, which the plain
+		// translations() loop above may not even have touched this frame.
+		// A Transform with no anchor yet (its first-ever full sync hasn't
+		// happened) has nothing safe to reconstruct against and is skipped;
+		// this shouldn't occur in practice with a matching sender - both
+		// sides always anchor at the same full sync (see Subject::Serialize
+		// and ParseSubject) - but a corrupt/adversarial buffer could still
+		// carry these fields for a channel that doesn't have one.
+		if (inUpdate->translations_q8()) {
+			const double byteRange = inUpdate->quant_byte_range();
+			for (auto inTranslation : *inUpdate->translations_q8())
+			{
+				id = inTranslation->i();
+				if (id < 0 || (size_t)id >= outSubject->mTransforms.size())
+					continue;
+				Transform* xf = outSubject->mTransforms[id];
+				if (!xf->mQuantAnchorSet)
+					continue;
+				xf->translation = O3DS::TransformTranslation(
+					xf->mQuantAnchorTranslation.v[0] + DequantizeByte(inTranslation->dx(), byteRange),
+					xf->mQuantAnchorTranslation.v[1] + DequantizeByte(inTranslation->dy(), byteRange),
+					xf->mQuantAnchorTranslation.v[2] + DequantizeByte(inTranslation->dz(), byteRange));
+			}
+		}
+
+		if (inUpdate->translations_q16()) {
+			const double halfRange = inUpdate->quant_half_range();
+			for (auto inTranslation : *inUpdate->translations_q16())
+			{
+				id = inTranslation->i();
+				if (id < 0 || (size_t)id >= outSubject->mTransforms.size())
+					continue;
+				Transform* xf = outSubject->mTransforms[id];
+				if (!xf->mQuantAnchorSet)
+					continue;
+				xf->translation = O3DS::TransformTranslation(
+					xf->mQuantAnchorTranslation.v[0] + DequantizeHalf(inTranslation->dx(), halfRange),
+					xf->mQuantAnchorTranslation.v[1] + DequantizeHalf(inTranslation->dy(), halfRange),
+					xf->mQuantAnchorTranslation.v[2] + DequantizeHalf(inTranslation->dz(), halfRange));
+			}
+		}
+
 		if (inUpdate->rotation()) {
 			for (auto inRotation : *inUpdate->rotation())
 			{
@@ -1079,6 +1226,42 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 					*inRotation >> outSubject->mTransforms[id]->rotation;
 				else
 					break;
+			}
+		}
+
+		// Quantized rotation is the ABSOLUTE value (smallest-three) - no
+		// anchor needed, unlike translation above.
+		if (inUpdate->rotations_q8()) {
+			for (auto inRotation : *inUpdate->rotations_q8())
+			{
+				id = inRotation->i();
+				if (id < 0 || (size_t)id >= outSubject->mTransforms.size())
+					continue;
+				SmallestThreeQ8 q;
+				q.droppedIndex = inRotation->dropped();
+				q.a = inRotation->a();
+				q.b = inRotation->b();
+				q.c = inRotation->c();
+				Quat decoded = DequantizeRotationByte(q);
+				outSubject->mTransforms[id]->rotation = O3DS::TransformRotation(
+					decoded.v[0], decoded.v[1], decoded.v[2], decoded.v[3]);
+			}
+		}
+
+		if (inUpdate->rotations_q16()) {
+			for (auto inRotation : *inUpdate->rotations_q16())
+			{
+				id = inRotation->i();
+				if (id < 0 || (size_t)id >= outSubject->mTransforms.size())
+					continue;
+				SmallestThreeQ16 q;
+				q.droppedIndex = inRotation->dropped();
+				q.a = inRotation->a();
+				q.b = inRotation->b();
+				q.c = inRotation->c();
+				Quat decoded = DequantizeRotationHalf(q);
+				outSubject->mTransforms[id]->rotation = O3DS::TransformRotation(
+					decoded.v[0], decoded.v[1], decoded.v[2], decoded.v[3]);
 			}
 		}
 
