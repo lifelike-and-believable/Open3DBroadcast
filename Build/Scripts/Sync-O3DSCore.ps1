@@ -85,13 +85,14 @@ foreach ($Dep in $Deps)
     $DepPath = Join-Path $RepoRoot $Dep.Path
     $DepBuild = Join-Path $BuildDir ("dep_" + (Split-Path $Dep.Path -Leaf))
     Write-Host "  -- $($Dep.Path)"
-    Invoke-Checked "cmake" @(
+    $ConfigureArgs = @(
         "-S", $DepPath, "-B", $DepBuild,
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         "-DCMAKE_BUILD_TYPE=$Configuration",
         "-DCMAKE_INSTALL_PREFIX=$Prefix",
         "-DCMAKE_PREFIX_PATH=$Prefix"
     ) + $Dep.ExtraArgs
+    Invoke-Checked "cmake" $ConfigureArgs
     Invoke-Checked "cmake" @("--build", $DepBuild, "--config", $Configuration)
     Invoke-Checked "cmake" @("--install", $DepBuild, "--config", $Configuration)
 }
