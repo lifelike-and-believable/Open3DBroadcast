@@ -21,6 +21,16 @@ Plugins/Open3DBroadcast/**
 !Plugins/Open3DBroadcast/Source/**
 !Plugins/Open3DBroadcast/ThirdParty/
 !Plugins/Open3DBroadcast/ThirdParty/**
+
+# Fix #203/#204: o3ds core (compiled lib + vendored headers/schema) is built
+# from source by Build/Scripts/Sync-O3DSCore.ps1 in CI, not committed.
+Plugins/Open3DBroadcast/ThirdParty/open3dstream/include/o3ds/
+Plugins/Open3DBroadcast/ThirdParty/open3dstream/include/o3ds.fbs
+Plugins/Open3DBroadcast/ThirdParty/open3dstream/include/o3ds_generated.h
+Plugins/Open3DBroadcast/ThirdParty/open3dstream/include/core/
+Plugins/Open3DBroadcast/ThirdParty/open3dstream/include/receiver/
+Plugins/Open3DBroadcast/ThirdParty/open3dstream/lib/
+
 Plugins/Open3DStream/
 
 # Visual Studio
