@@ -29,7 +29,7 @@ Builds the o3ds core library (and its NNG/CML/CRCpp/FlatBuffers dependencies) fr
 
 **Parameters:**
 - `-RepoRoot` - Path to the repository root (default: inferred from script location)
-- `-BuildDir` - Scratch directory for CMake build trees (default: `<RepoRoot>/_o3ds_core_build`)
+- `-BuildDir` - Scratch directory for CMake build trees (default: `<RepoRoot>/_o3ds_build`, already covered by the repo root `.gitignore`)
 - `-Configuration` - CMake build configuration (default: `Release`)
 - `-PluginRoot` - Path to the Open3DBroadcast plugin root (default: `<RepoRoot>/ProjectSandbox/Plugins/Open3DBroadcast`)
 

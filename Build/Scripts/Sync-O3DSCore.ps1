@@ -33,7 +33,8 @@
 
 .PARAMETER BuildDir
     Scratch directory for CMake build trees and the dependency install
-    prefix. Defaults to $RepoRoot/_o3ds_core_build.
+    prefix. Defaults to $RepoRoot/_o3ds_build (already covered by the repo
+    root .gitignore, unlike an ad hoc name).
 
 .PARAMETER Configuration
     CMake build configuration. Defaults to Release.
@@ -45,7 +46,7 @@
 [CmdletBinding()]
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
-    [string]$BuildDir = (Join-Path $RepoRoot "_o3ds_core_build"),
+    [string]$BuildDir = (Join-Path $RepoRoot "_o3ds_build"),
     [string]$Configuration = "Release",
     [string]$PluginRoot = (Join-Path $RepoRoot "ProjectSandbox\Plugins\Open3DBroadcast")
 )
@@ -70,19 +71,27 @@ $InstallDir = Join-Path $BuildDir "out"
 New-Item -ItemType Directory -Force -Path $Prefix | Out-Null
 
 Write-Host "==> Building o3ds dependencies (NNG, CML, CRCpp, FlatBuffers) into $Prefix"
-$Deps = @("thirdparty/nng", "thirdparty/cml", "thirdparty/crccpp", "thirdparty/flatbuffers")
+# Extra per-dependency args mirroring .github/workflows/windows.yml's own recipe -
+# in particular NNG_ENABLE_TLS=Off, so this script doesn't silently pull in a TLS
+# backend (mbedtls/OpenSSL) that windows.yml deliberately avoids.
+$Deps = @(
+    @{ Path = "thirdparty/nng"; ExtraArgs = @("-DNNG_ENABLE_TLS=Off") },
+    @{ Path = "thirdparty/cml"; ExtraArgs = @() },
+    @{ Path = "thirdparty/crccpp"; ExtraArgs = @() },
+    @{ Path = "thirdparty/flatbuffers"; ExtraArgs = @() }
+)
 foreach ($Dep in $Deps)
 {
-    $DepPath = Join-Path $RepoRoot $Dep
-    $DepBuild = Join-Path $BuildDir ("dep_" + (Split-Path $Dep -Leaf))
-    Write-Host "  -- $Dep"
+    $DepPath = Join-Path $RepoRoot $Dep.Path
+    $DepBuild = Join-Path $BuildDir ("dep_" + (Split-Path $Dep.Path -Leaf))
+    Write-Host "  -- $($Dep.Path)"
     Invoke-Checked "cmake" @(
         "-S", $DepPath, "-B", $DepBuild,
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         "-DCMAKE_BUILD_TYPE=$Configuration",
         "-DCMAKE_INSTALL_PREFIX=$Prefix",
         "-DCMAKE_PREFIX_PATH=$Prefix"
-    )
+    ) + $Dep.ExtraArgs
     Invoke-Checked "cmake" @("--build", $DepBuild, "--config", $Configuration)
     Invoke-Checked "cmake" @("--install", $DepBuild, "--config", $Configuration)
 }
