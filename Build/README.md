@@ -6,10 +6,7 @@ This directory contains build scripts, test runners, utilities for developing an
 
 ```
 Build/
-├── Scripts/          # PowerShell and bash scripts for building and testing
-└── o3ds-core/        # CMake configuration for O3DS core prebuilt libraries
-    ├── CMakeLists.txt
-    └── README.md     # Documentation for building O3DS core
+└── Scripts/          # PowerShell and bash scripts for building and testing
 ```
 
 ## Plugins Overview
@@ -18,16 +15,25 @@ Build/
 Located at `plugins/unreal/Open3DStream/`, this plugin requires pre-built O3DS core libraries and uses the `build-plugin-core` composite action in CI/CD workflows.
 
 ### Open3DBroadcast Plugin
-Located at `ProjectSandbox/Plugins/Open3DBroadcast/`, this plugin is **self-contained** with all third-party libraries pre-compiled and included. It requires no pre-build steps and builds directly with Unreal Engine's build system.
+Located at `ProjectSandbox/Plugins/Open3DBroadcast/`, this plugin vendors the o3ds core library's headers and compiled static library under `ThirdParty/open3dstream/`. As of the fix for issues #203/#204, that vendored tree is no longer git-committed - it's rebuilt from source on every CI run (see `Sync-O3DSCore.ps1` below) using the same root `CMakeLists.txt` recipe `.github/workflows/windows.yml` uses to produce release zips.
 
-## Prebuilt Libraries
+## Building O3DS Core From Source
 
-The `o3ds-core/` directory contains the CMake configuration for building O3DS core as prebuilt static libraries. See [o3ds-core/README.md](o3ds-core/README.md) for details on:
-- Building O3DS core via GitHub Actions workflow
-- Downloading and committing artifacts
-- When to rebuild libraries
+#### `Sync-O3DSCore.ps1`
+Builds the o3ds core library (and its NNG/CML/CRCpp/FlatBuffers dependencies) from source, then copies the compiled static library and `src/o3ds` headers/source directly into the Open3DBroadcast plugin's `ThirdParty/open3dstream/` tree. Run this before building the plugin itself - all four `open3dbroadcast-plugin-*.yml` CI workflows call it automatically.
 
-**Note**: These prebuilt libraries are only needed for the Open3DStream plugin. The Open3DBroadcast plugin includes its own pre-compiled libraries and does not use this build system.
+**Usage:**
+```powershell
+.\Build\Scripts\Sync-O3DSCore.ps1
+```
+
+**Parameters:**
+- `-RepoRoot` - Path to the repository root (default: inferred from script location)
+- `-BuildDir` - Scratch directory for CMake build trees (default: `<RepoRoot>/_o3ds_core_build`)
+- `-Configuration` - CMake build configuration (default: `Release`)
+- `-PluginRoot` - Path to the Open3DBroadcast plugin root (default: `<RepoRoot>/ProjectSandbox/Plugins/Open3DBroadcast`)
+
+**Note**: Headers are copied directly from `src/o3ds`, not from the CMake install tree - `src/CMakeLists.txt`'s `PUBLIC_HEADER` install rule does not actually install any headers (verified empirically). Only the compiled library and the flatc-generated `o3ds_generated.h` come from the CMake install output.
 
 ## Scripts
 

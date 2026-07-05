@@ -73,6 +73,29 @@ jobs:
         run: |
           & .\Build\Scripts\Setup-UE.ps1 -UEPath "${{ env.UE_ROOT }}"
 
+      - name: Install CMake
+        shell: powershell
+        run: choco install cmake -y --installargs 'ADD_CMAKE_TO_PATH=System'
+
+      # Same toolchain windows.yml uses to build the o3ds release zip - see
+      # that workflow's own comment on why -G "Visual Studio 17 2022" isn't
+      # used here (no full VS IDE install for vswhere to find on this runner).
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # Fix #203/#204: build o3ds from source instead of linking a
+      # git-committed prebuilt open3dstreamstatic.lib. See
+      # Build/Scripts/Sync-O3DSCore.ps1 for the full recipe.
+      - name: Build o3ds core from source
+        shell: pwsh
+        run: |
+          & .\Build\Scripts\Sync-O3DSCore.ps1
+        env:
+          CC: cl
+          CXX: cl
+
       - name: Resolve plugin paths
         id: paths
         shell: powershell
