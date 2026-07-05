@@ -54,6 +54,190 @@ O3DS_TEST(ChooseScalarTier_FallsBackToFullBeyondHalfRange)
 	O3DS_CHECK(ChooseScalarTier(1000.0, ranges) == QuantTier::Full);
 }
 
+O3DS_TEST(ChooseScalarTierWithHysteresis_MatchesPlainTierWhenFactorIsZero)
+{
+	// Regression guard for jitter reported from a live PIE test (idle
+	// animations flapping between quantization tiers frame-to-frame):
+	// with hysteresisFactor == 0, the hysteresis-aware selector must be
+	// byte-for-byte identical to the stateless ChooseScalarTier, regardless
+	// of previousTier.
+	QuantRanges ranges;
+	ranges.byteRange = 0.01;
+	ranges.halfRange = 1.0;
+	ranges.hysteresisFactor = 0.0;
+
+	double samples[] = { 0.001, 0.01, 0.5, 1.0, 1.0001, 1000.0 };
+	QuantTier previousTiers[] = { QuantTier::Full, QuantTier::Half, QuantTier::Byte };
+	for (double sample : samples)
+	{
+		for (QuantTier previous : previousTiers)
+		{
+			O3DS_CHECK(ChooseScalarTierWithHysteresis(sample, ranges, previous) == ChooseScalarTier(sample, ranges));
+		}
+	}
+}
+
+O3DS_TEST(ChooseScalarTierWithHysteresis_StaysInByteWithinUpperBand)
+{
+	// byteRange=0.01, hysteresisFactor=0.15 -> expandedByteRange=0.0115.
+	// A delta just past byteRange but still within the band should NOT
+	// flip Byte -> Half yet - this is the exact "hovering near a boundary"
+	// case that caused every-frame tier flapping (and thus a visible
+	// reconstruction jump every flap, since Byte/Half round differently).
+	QuantRanges ranges;
+	ranges.byteRange = 0.01;
+	ranges.halfRange = 1.0;
+	ranges.hysteresisFactor = 0.15;
+	O3DS_CHECK(ChooseScalarTierWithHysteresis(0.011, ranges, QuantTier::Byte) == QuantTier::Byte);
+}
+
+O3DS_TEST(ChooseScalarTierWithHysteresis_UpgradesToHalfPastUpperBand)
+{
+	QuantRanges ranges;
+	ranges.byteRange = 0.01;
+	ranges.halfRange = 1.0;
+	ranges.hysteresisFactor = 0.15;
+	O3DS_CHECK(ChooseScalarTierWithHysteresis(0.012, ranges, QuantTier::Byte) == QuantTier::Half);
+}
+
+O3DS_TEST(ChooseScalarTierWithHysteresis_StaysInHalfWithinLowerBand)
+{
+	// contractedByteRange=0.0085. A delta just below byteRange but still
+	// within the band should NOT flip Half -> Byte yet.
+	QuantRanges ranges;
+	ranges.byteRange = 0.01;
+	ranges.halfRange = 1.0;
+	ranges.hysteresisFactor = 0.15;
+	O3DS_CHECK(ChooseScalarTierWithHysteresis(0.009, ranges, QuantTier::Half) == QuantTier::Half);
+}
+
+O3DS_TEST(ChooseScalarTierWithHysteresis_DowngradesToBytePastLowerBand)
+{
+	QuantRanges ranges;
+	ranges.byteRange = 0.01;
+	ranges.halfRange = 1.0;
+	ranges.hysteresisFactor = 0.15;
+	O3DS_CHECK(ChooseScalarTierWithHysteresis(0.008, ranges, QuantTier::Half) == QuantTier::Byte);
+}
+
+O3DS_TEST(ChooseScalarTierWithHysteresis_StaysInHalfNearHalfRangeUpperSide)
+{
+	// expandedHalfRange=1.15. A delta just past halfRange but still within
+	// the band should NOT flip Half -> Full yet.
+	QuantRanges ranges;
+	ranges.byteRange = 0.01;
+	ranges.halfRange = 1.0;
+	ranges.hysteresisFactor = 0.15;
+	O3DS_CHECK(ChooseScalarTierWithHysteresis(1.1, ranges, QuantTier::Half) == QuantTier::Half);
+}
+
+O3DS_TEST(ChooseScalarTierWithHysteresis_UpgradesToFullPastHalfRangeUpperBand)
+{
+	QuantRanges ranges;
+	ranges.byteRange = 0.01;
+	ranges.halfRange = 1.0;
+	ranges.hysteresisFactor = 0.15;
+	O3DS_CHECK(ChooseScalarTierWithHysteresis(1.2, ranges, QuantTier::Half) == QuantTier::Full);
+}
+
+O3DS_TEST(ChooseScalarTierWithHysteresis_StaysInFullWithinLowerBand)
+{
+	// contractedHalfRange=0.85. A delta just below halfRange but still
+	// within the band should NOT flip Full -> Half yet.
+	QuantRanges ranges;
+	ranges.byteRange = 0.01;
+	ranges.halfRange = 1.0;
+	ranges.hysteresisFactor = 0.15;
+	O3DS_CHECK(ChooseScalarTierWithHysteresis(0.9, ranges, QuantTier::Full) == QuantTier::Full);
+}
+
+O3DS_TEST(ChooseScalarTierWithHysteresis_DowngradesFromFullToHalfPastLowerBand)
+{
+	QuantRanges ranges;
+	ranges.byteRange = 0.01;
+	ranges.halfRange = 1.0;
+	ranges.hysteresisFactor = 0.15;
+	O3DS_CHECK(ChooseScalarTierWithHysteresis(0.8, ranges, QuantTier::Full) == QuantTier::Half);
+}
+
+O3DS_TEST(ChooseScalarTierWithHysteresis_FreshChannelFromFullNeedsToClearContractedThreshold)
+{
+	// A "fresh" channel (no prior tier - see Transform::mLastTranslationTier's
+	// default of QuantTier::Full) is slightly more conservative on its very
+	// first evaluation than the stateless ChooseScalarTier: entering Byte
+	// specifically (not just some finer tier) needs to clear the tighter
+	// contractedByteRange (0.0085), not just byteRange (0.01) itself. A
+	// delta in between - comfortably "Byte territory" for the plain
+	// function, but not quite past Full's Byte-entry margin - settles into
+	// Half instead of Byte on this first call (it easily clears the more
+	// lenient contractedHalfRange), and only reaches Byte once the delta
+	// itself drops below contractedByteRange. This converges quickly for
+	// any genuinely continuous signal (the next frame's previousTier
+	// reflects whichever tier was just settled into) so it isn't a
+	// user-visible regression - see StaysInFullWithinLowerBand above for
+	// the "doesn't enter any finer tier at all yet" case.
+	QuantRanges ranges;
+	ranges.byteRange = 0.01;
+	ranges.halfRange = 1.0;
+	ranges.hysteresisFactor = 0.15;
+	O3DS_CHECK(ChooseScalarTierWithHysteresis(0.009, ranges, QuantTier::Full) == QuantTier::Half);
+	O3DS_CHECK(ChooseScalarTierWithHysteresis(0.008, ranges, QuantTier::Full) == QuantTier::Byte);
+}
+
+O3DS_TEST(ChooseScalarTierWithHysteresis_HugeJumpFromByteSkipsHalfGoesStraightToFull)
+{
+	// A genuinely large single-frame movement (e.g. a snap/teleport) must
+	// still reach Full in one call, not get stuck needing two calls to pass
+	// through Half first.
+	QuantRanges ranges;
+	ranges.byteRange = 0.01;
+	ranges.halfRange = 1.0;
+	ranges.hysteresisFactor = 0.15;
+	O3DS_CHECK(ChooseScalarTierWithHysteresis(5.0, ranges, QuantTier::Byte) == QuantTier::Full);
+}
+
+O3DS_TEST(ChooseScalarTierWithHysteresis_HugeDropFromFullSkipsHalfGoesStraightToByte)
+{
+	QuantRanges ranges;
+	ranges.byteRange = 0.01;
+	ranges.halfRange = 1.0;
+	ranges.hysteresisFactor = 0.15;
+	O3DS_CHECK(ChooseScalarTierWithHysteresis(0.0001, ranges, QuantTier::Full) == QuantTier::Byte);
+}
+
+O3DS_TEST(ChooseScalarTierWithHysteresis_NonFiniteOrNegativeFactorDisablesHysteresis)
+{
+	// Mirrors QuantizeByte/QuantizeHalf's own non-finite-range guard - a
+	// caller-supplied hysteresisFactor (UE UPROPERTY) could be NaN or
+	// negative; both should behave exactly like plain ChooseScalarTier
+	// rather than propagating garbage into the expanded/contracted math.
+	const double nan = std::numeric_limits<double>::quiet_NaN();
+	QuantRanges rangesNan;
+	rangesNan.byteRange = 0.01;
+	rangesNan.halfRange = 1.0;
+	rangesNan.hysteresisFactor = nan;
+	O3DS_CHECK(ChooseScalarTierWithHysteresis(0.011, rangesNan, QuantTier::Byte) == QuantTier::Half);
+
+	QuantRanges rangesNegative;
+	rangesNegative.byteRange = 0.01;
+	rangesNegative.halfRange = 1.0;
+	rangesNegative.hysteresisFactor = -0.5;
+	O3DS_CHECK(ChooseScalarTierWithHysteresis(0.011, rangesNegative, QuantTier::Byte) == QuantTier::Half);
+}
+
+O3DS_TEST(ChooseScalarTierWithHysteresis_FactorAboveOneIsClampedNotDegenerate)
+{
+	// hysteresisFactor >= 1.0 would otherwise make contractedByteRange <= 0
+	// (or negative), which could make every delta - even zero - unable to
+	// clear the "enter Byte" threshold. Confirm it's clamped to something
+	// still usable instead.
+	QuantRanges ranges;
+	ranges.byteRange = 0.01;
+	ranges.halfRange = 1.0;
+	ranges.hysteresisFactor = 5.0;
+	O3DS_CHECK(ChooseScalarTierWithHysteresis(0.0, ranges, QuantTier::Full) == QuantTier::Byte);
+}
+
 O3DS_TEST(QuantizeByte_RoundTripsWithinExpectedResolution)
 {
 	const double range = 0.01;
