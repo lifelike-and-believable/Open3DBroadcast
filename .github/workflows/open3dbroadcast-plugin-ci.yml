@@ -78,7 +78,7 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Setup UE
-        shell: pwsh
+        shell: powershell
         run: |
           & .\Build\Scripts\Setup-UE.ps1 -UEPath "${{ env.UE_ROOT }}"
 
@@ -98,7 +98,7 @@ jobs:
       # git-committed prebuilt open3dstreamstatic.lib. See
       # Build/Scripts/Sync-O3DSCore.ps1 for the full recipe.
       - name: Build o3ds core from source
-        shell: pwsh
+        shell: powershell
         run: |
           & .\Build\Scripts\Sync-O3DSCore.ps1
         env:
