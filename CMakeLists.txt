@@ -32,6 +32,7 @@ add_subdirectory(plugins/mobu)
 
 add_subdirectory(apps/Test1)
 add_subdirectory(apps/DeterminismProbe)
+add_subdirectory(apps/PredictorEval)
 
 if(O3DS_BUILD_TESTS)
 	enable_testing()
