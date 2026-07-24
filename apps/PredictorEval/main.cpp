@@ -262,11 +262,32 @@ int main(int argc, char** argv)
 			// Fresh predictors per (clip, horizon) so no history leaks across runs.
 			std::vector<NamedPredictor> preds = MakePredictors();
 
-			double holdRmse = 0.0;
+			// Score everything first, so the relative column below never depends
+			// on evaluation order. Deriving "% vs Hold" inside the print loop
+			// would silently baseline against whichever predictor happened to be
+			// first if MakePredictors() were ever reordered - and since this
+			// tool's entire output is comparative percentages, that failure
+			// would be invisible in the numbers themselves.
+			std::vector<ErrorStats> stats;
+			stats.reserve(preds.size());
 			for (NamedPredictor& np : preds)
+				stats.push_back(Evaluate(*np.pred, clip, h));
+
+			double holdRmse = -1.0;
+			for (size_t p = 0; p < preds.size(); ++p)
+				if (std::strcmp(preds[p].name, "Hold") == 0) holdRmse = stats[p].transRmse;
+
+			if (holdRmse < 0.0)
 			{
-				const ErrorStats st = Evaluate(*np.pred, clip, h);
-				if (std::strcmp(np.name, "Hold") == 0) holdRmse = st.transRmse;
+				std::fprintf(stderr,
+					"ERROR: no 'Hold' predictor in the set - nothing to baseline against\n");
+				return 2;
+			}
+
+			for (size_t p = 0; p < preds.size(); ++p)
+			{
+				const NamedPredictor& np = preds[p];
+				const ErrorStats&     st = stats[p];
 
 				if (csv)
 				{
@@ -277,9 +298,9 @@ int main(int argc, char** argv)
 				}
 				else
 				{
-					// Relative-to-Hold column is the number the C3 gate turns on:
-					// if extrapolation isn't beating "just hold the last pose",
-					// a learned model has to clear a much higher bar to be worth it.
+					// Relative-to-Hold is the number the C3 gate turns on: if
+					// extrapolation isn't beating "just hold the last pose", a
+					// learned model has to clear a much higher bar to be worth it.
 					char rel[32] = "  (baseline)";
 					if (std::strcmp(np.name, "Hold") != 0 && holdRmse > 0.0)
 					{
