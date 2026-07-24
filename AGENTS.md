@@ -6,7 +6,7 @@ For the full, authoritative rules and workflows, see:
 - .github/copilot-instructions.md
 
 Key expectations (short version):
-- Verify Unreal Engine API signatures against UE 5.6 docs before use.
+- Verify Unreal Engine API signatures against UE 5.7 docs before use.
 - Never block the game thread; networking/encoding runs async.
 - FlatBuffers schema is src/o3ds.fbs — regenerate src/o3ds_generated.h after schema changes.
 - Prefer deterministic behavior and small, focused changes with tests.

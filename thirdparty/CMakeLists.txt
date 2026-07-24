@@ -8,7 +8,10 @@ add_subdirectory(nng)
 add_subdirectory(crccpp)
 
 # WebRTC Support - libdatachannel
-# Note: Pre-built libraries are available in plugins/unreal/Open3DStream/ThirdParty/webrtc/
+# Note: prebuilt libraries used to be committed under the plugins/unreal/Open3DStream
+# tree, which was removed in #203. The shipping WebRTC transport now uses livekit_ffi
+# (ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportWebRTC/ThirdParty/),
+# not libdatachannel, so nothing consumes a prebuilt libdatachannel today.
 # Only build from source if explicitly needed (e.g., updating libdatachannel version)
 option(O3DS_BUILD_WEBRTC "Build libdatachannel for WebRTC support" ON)
 

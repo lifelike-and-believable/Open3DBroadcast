@@ -84,7 +84,7 @@ docker run --rm open3dstream-repeater:local tcp://0.0.0.0:7000 tcp://0.0.0.0:700
 
 **Installation from Source:**
  
-1. Copy the `plugins/unreal/Open3DStream` folder to your project's `Plugins` directory
+1. Copy the `ProjectSandbox/Plugins/Open3DBroadcast` folder to your project's `Plugins` directory
 2. Build the native libraries (see Building the Library above)
 3. Enable the plugin in your project settings
 
@@ -107,7 +107,7 @@ To hear audio from a WebRTC sender, add `O3DSRemoteAudioComponent` to an actor i
    - Volume/Pitch at the top; Attenuation (with override gating); Submix Sends; Source Effect Chain; Concurrency; AutoActivate
 - Client-first and reconnect flows are supported (signaling restarts, re-offer on DataChannel close)
 
-See `plugins/unreal/Open3DStream/docs/WEBRTC_TESTING_GUIDE.md` for step-by-step setup and troubleshooting.
+See `ProjectSandbox/Plugins/Open3DBroadcast/USER_GUIDE.md` for step-by-step setup and troubleshooting.
 
 ## Recent Updates
 
@@ -180,7 +180,7 @@ WebRTC backends are now unified behind a connector interface:
 - [libdatachannel Integration](LIBDATACHANNEL_INTEGRATION.md)
 - [Issue #15](https://github.com/lifelike-and-believable/Open3DStream/issues/15) - Implementation roadmap
 - [LiveKit Backend Overview](LIVEKIT_README.md)
-- [LiveKit vs. LibDataChannel](plugins/unreal/Open3DStream/docs/WEBRTC_BACKENDS_COMPARISON.md)
+- [Transport module comparison](ProjectSandbox/Plugins/Open3DBroadcast/Transport_Module_Comparison.md)
 
 ### WebRTC Backends (Unreal)
 
@@ -297,7 +297,7 @@ Users can extract the entire version folder (e.g., `UE_5.5`) to their project ro
 
 ```bash
 # Plugin is ready to use - just copy to your project
-cp -r plugins/unreal/Open3DStream /path/to/YourProject/Plugins/
+cp -r ProjectSandbox/Plugins/Open3DBroadcast /path/to/YourProject/Plugins/
 ```
 
 ### Maya

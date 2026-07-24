@@ -11,9 +11,6 @@ Build/
 
 ## Plugins Overview
 
-### Open3DStream Plugin
-Located at `plugins/unreal/Open3DStream/`, this plugin requires pre-built O3DS core libraries and uses the `build-plugin-core` composite action in CI/CD workflows.
-
 ### Open3DBroadcast Plugin
 Located at `ProjectSandbox/Plugins/Open3DBroadcast/`, this plugin vendors the o3ds core library's headers and compiled static library under `ThirdParty/open3dstream/`. As of the fix for issues #203/#204, that vendored tree is no longer git-committed - it's rebuilt from source on every CI run (see `Sync-O3DSCore.ps1` below) using the same root `CMakeLists.txt` recipe `.github/workflows/windows.yml` uses to produce release zips.
 
@@ -44,60 +41,23 @@ Verifies Unreal Engine installation.
 
 **Usage:**
 ```powershell
-.\Build\Scripts\Setup-UE.ps1 -UEPath "C:\Program Files\Epic Games\UE_5.4"
+.\Build\Scripts\Setup-UE.ps1 -UEPath "C:\Program Files\Epic Games\UE_5.7"
 ```
 
 **Parameters:**
-- `-UEPath` - Path to Unreal Engine installation (default: `C:\Program Files\Epic Games\UE_5.4`)
-
----
-
-### Plugin Linking
-
-#### `Link-PluginIntoSandbox.ps1` (Windows)
-Creates junction links from the Open3DStream plugin to ProjectSandbox.
-
-**Usage:**
-```powershell
-.\Build\Scripts\Link-PluginIntoSandbox.ps1
-```
-
-**What it does:**
-- Creates `ProjectSandbox/Plugins/Open3DStream` → `plugins/unreal/Open3DStream`
-- Removes existing links if present
-- Automatically determines repository paths
-
-**Note**: This script is for the Open3DStream plugin only. The Open3DBroadcast plugin is already located at `ProjectSandbox/Plugins/Open3DBroadcast/` and doesn't need linking.
-
-#### `link_plugin_into_sandbox.sh` (Linux/Mac)
-Creates a symbolic link from the Open3DStream plugin to ProjectSandbox.
-
-**Usage:**
-```bash
-./Build/Scripts/link_plugin_into_sandbox.sh
-```
+- `-UEPath` - Path to Unreal Engine installation (default: `C:\Program Files\Epic Games\UE_5.7`)
 
 ---
 
 ### Building
 
 #### `Build-Plugin.ps1`
-Builds any Unreal plugin using Unreal Automation Tool (UAT). Works with both Open3DStream and Open3DBroadcast plugins.
+Builds an Unreal plugin using Unreal Automation Tool (UAT).
 
-**Usage for Open3DStream:**
+**Usage:**
 ```powershell
 .\Build\Scripts\Build-Plugin.ps1 `
-  -UEPath "C:\Program Files\Epic Games\UE_5.4" `
-  -PluginUPluginPath "plugins\unreal\Open3DStream\Open3DStream.uplugin" `
-  -OutDir "Artifacts\Win64" `
-  -TargetPlatforms @("Win64") `
-  -Configuration "Development"
-```
-
-**Usage for Open3DBroadcast:**
-```powershell
-.\Build\Scripts\Build-Plugin.ps1 `
-  -UEPath "C:\Program Files\Epic Games\UE_5.6" `
+  -UEPath "C:\Program Files\Epic Games\UE_5.7" `
   -PluginUPluginPath "ProjectSandbox\Plugins\Open3DBroadcast\Open3DBroadcast.uplugin" `
   -OutDir "Artifacts\Open3DBroadcast" `
   -TargetPlatforms @("Win64") `
@@ -125,9 +85,9 @@ Runs Unreal's automation tests for the plugin.
 **Usage:**
 ```powershell
 .\Build\Scripts\Run-AutomationTests.ps1 `
-  -UEPath "C:\Program Files\Epic Games\UE_5.4" `
+  -UEPath "C:\Program Files\Epic Games\UE_5.7" `
   -ProjectFile "ProjectSandbox\ProjectSandbox.uproject" `
-  -TestFilter "Open3DStream.*" `
+  -TestFilter "Open3DBroadcast.*" `
   -ResultsDir "Artifacts\Tests"
 ```
 
@@ -147,9 +107,9 @@ Runs Gauntlet integration tests.
 **Usage:**
 ```powershell
 .\Build\Scripts\Run-Gauntlet.ps1 `
-  -UEPath "C:\Program Files\Epic Games\UE_5.4" `
+  -UEPath "C:\Program Files\Epic Games\UE_5.7" `
   -ProjectFile "ProjectSandbox\ProjectSandbox.uproject" `
-  -GauntletConfigs @("Open3DStreamTests") `
+  -GauntletConfigs @("Open3DBroadcastTests") `
   -OutputDir "Artifacts\Gauntlet" `
   -NullRHI
 ```
@@ -174,10 +134,9 @@ Runs Gauntlet integration tests.
 
 ```powershell
 # 1. Verify UE installation
-.\Build\Scripts\Setup-UE.ps1 -UEPath "C:\Program Files\Epic Games\UE_5.4"
+.\Build\Scripts\Setup-UE.ps1 -UEPath "C:\Program Files\Epic Games\UE_5.7"
 
-# 2. Link plugin into sandbox
-.\Build\Scripts\Link-PluginIntoSandbox.ps1
+# 2. The plugin lives in-tree at ProjectSandbox/Plugins/Open3DBroadcast - nothing to link
 ```
 
 ### Local Development
@@ -185,8 +144,8 @@ Runs Gauntlet integration tests.
 ```powershell
 # Build plugin for local testing
 .\Build\Scripts\Build-Plugin.ps1 `
-  -UEPath "C:\Program Files\Epic Games\UE_5.4" `
-  -PluginUPluginPath "$PWD\plugins\unreal\Open3DStream\Open3DStream.uplugin" `
+  -UEPath "C:\Program Files\Epic Games\UE_5.7" `
+  -PluginUPluginPath "$PWD\ProjectSandbox\Plugins\Open3DBroadcast\Open3DBroadcast.uplugin" `
   -OutDir "$PWD\Artifacts\Local"
 ```
 
@@ -195,15 +154,15 @@ Runs Gauntlet integration tests.
 ```powershell
 # Run all plugin automation tests
 .\Build\Scripts\Run-AutomationTests.ps1 `
-  -UEPath "C:\Program Files\Epic Games\UE_5.4" `
+  -UEPath "C:\Program Files\Epic Games\UE_5.7" `
   -ProjectFile "$PWD\ProjectSandbox\ProjectSandbox.uproject" `
-  -TestFilter "Open3DStream.*"
+  -TestFilter "Open3DBroadcast.*"
 
 # Run Gauntlet integration tests
 .\Build\Scripts\Run-Gauntlet.ps1 `
-  -UEPath "C:\Program Files\Epic Games\UE_5.4" `
+  -UEPath "C:\Program Files\Epic Games\UE_5.7" `
   -ProjectFile "$PWD\ProjectSandbox\ProjectSandbox.uproject" `
-  -GauntletConfigs @("Open3DStreamTests") `
+  -GauntletConfigs @("Open3DBroadcastTests") `
   -NullRHI
 ```
 
@@ -212,27 +171,28 @@ Runs Gauntlet integration tests.
 ```powershell
 # Complete workflow
 .\Build\Scripts\Setup-UE.ps1
-.\Build\Scripts\Link-PluginIntoSandbox.ps1
 .\Build\Scripts\Build-Plugin.ps1 `
-  -UEPath "C:\Program Files\Epic Games\UE_5.4" `
-  -PluginUPluginPath "$PWD\plugins\unreal\Open3DStream\Open3DStream.uplugin" `
+  -UEPath "C:\Program Files\Epic Games\UE_5.7" `
+  -PluginUPluginPath "$PWD\ProjectSandbox\Plugins\Open3DBroadcast\Open3DBroadcast.uplugin" `
   -OutDir "$PWD\Artifacts\Win64"
 .\Build\Scripts\Run-AutomationTests.ps1 `
-  -UEPath "C:\Program Files\Epic Games\UE_5.4" `
+  -UEPath "C:\Program Files\Epic Games\UE_5.7" `
   -ProjectFile "$PWD\ProjectSandbox\ProjectSandbox.uproject" `
-  -TestFilter "Open3DStream.*"
+  -TestFilter "Open3DBroadcast.*"
 ```
 
 ## CI/CD Integration
 
-These scripts are used by the GitHub Actions workflows to build the Open3DStream plugin:
+These scripts are used by the GitHub Actions workflows to build the
+Open3DBroadcast plugin:
 
-- **unreal-plugin-ci.yml** - Builds plugin for CI validation
-- **unreal-plugin-agent-ci.yml** - Same as CI, triggered by agent workflows
-- **unreal-plugin-nightly.yml** - Nightly plugin builds
-- **unreal-plugin-release.yml** - Release builds with Shipping configuration
+- **open3dbroadcast-plugin-ci.yml** - Builds plugin for CI validation
+- **open3dbroadcast-plugin-test.yml** - Runs the automation test suite
+- **open3dbroadcast-plugin-nightly.yml** - Nightly plugin builds
+- **open3dbroadcast-plugin-release.yml** - Release builds with Shipping configuration
 
-All workflows package the Open3DStream plugin for easy distribution.
+All four call `Sync-O3DSCore.ps1` first, then package the plugin for
+distribution.
 
 See `.github/workflows/` for workflow definitions.
 
@@ -243,7 +203,7 @@ We provide a convenience workflow to open the Unreal Editor on a self-hosted mac
 - Workflow: `dev-open-ue-editor` (`.github/workflows/open-ue-editor.yml`)
 - Trigger: Manual (workflow_dispatch)
 - Inputs:
-  - `ue_path` (required): Absolute UE root (e.g., `C:\\Program Files\\Epic Games\\UE_5.6` or `/opt/Unreal/UE_5.6`)
+  - `ue_path` (required): Absolute UE root (e.g., `C:\\Program Files\\Epic Games\\UE_5.7` or `/opt/Unreal/UE_5.7`)
   - `project` (optional): Path to `.uproject` (default: `ProjectSandbox/ProjectSandbox.uproject`)
   - `map` (optional): Map to load (e.g., `/Game/Maps/Example`)
   - `extra_args` (optional): Editor CLI args (default: `-log`)
@@ -264,7 +224,6 @@ Usage:
 | Script | Windows | Linux/Mac |
 |--------|---------|-----------|
 | Setup-UE | ✅ | ❌ |
-| Link-PluginIntoSandbox | ✅ (`.ps1`) | ✅ (`.sh`) |
 | Build-Plugin | ✅ | ❌ |
 | Run-AutomationTests | ✅ | ❌ |
 | Run-Gauntlet | ✅ | ❌ |
@@ -288,12 +247,7 @@ Usage:
 ### "Plugin file not found"
 - Check plugin path is correct
 - Ensure you're running from repository root
-- Verify `plugins/unreal/Open3DStream/Open3DStream.uplugin` exists
-
-### "Link-PluginIntoSandbox fails"
-- Run PowerShell as Administrator (for junctions on Windows)
-- Check that ProjectSandbox directory exists
-- Remove existing Plugins directory if it's not a junction
+- Verify `ProjectSandbox/Plugins/Open3DBroadcast/Open3DBroadcast.uplugin` exists
 
 ### Test failures
 - Check test logs in ResultsDir
