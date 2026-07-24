@@ -98,7 +98,11 @@ drift silently when the crate graph changes.
 ## Refresh Workflow
 
 1. Check out the desired `livekit-ffi-ue` commit.
-2. Build for Win64: `cargo build --release --target x86_64-pc-windows-msvc`.
+2. Build for Win64:
+   `cargo build --release --features with_livekit --target x86_64-pc-windows-msvc`.
+   The `with_livekit` feature is required — it is what the shipped artifacts were
+   built with (see the provenance table above), and omitting it produces a
+   different DLL.
 3. Copy `livekit_ffi.dll`, `livekit_ffi.pdb`, `livekit_ffi.dll.lib`, and the
    generated header into the `bin/Win64/`, `lib/Win64/`, and `include/` layout
    used here.

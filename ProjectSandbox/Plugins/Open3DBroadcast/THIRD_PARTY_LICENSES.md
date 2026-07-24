@@ -9,6 +9,11 @@ Each entry links to the license text as it is shipped in this tree. Where a
 dependency has its own directory, the license text lives next to the binary it
 covers; that per-directory copy is authoritative, and this file is the index.
 
+**One exception:** `livekit_ffi` has **no shipped license text**, because none
+exists upstream to copy — the wrapper declares MIT but publishes no `LICENSE`
+file. Its row links to the per-binary notices instead. That gap is an open
+obligation, not an oversight in this index; see the note in §3.
+
 **Scope:** this covers artifacts shipped *inside the plugin*. Build-time-only
 dependencies that are not linked into any shipped binary are listed separately
 at the end, along with the evidence for that claim.
@@ -80,7 +85,7 @@ linked as separate libraries.
 | Opus | see note | BSD-3-Clause + royalty-free patent grants | [`ThirdParty/opus/COPYING`](ThirdParty/opus/COPYING) | `Open3DShared` |
 | NNG (nanomsg-next-gen) | 1.3.0 | MIT | [`Source/Open3DTransportNNG/ThirdParty/nng/LICENSE.txt`](Source/Open3DTransportNNG/ThirdParty/nng/LICENSE.txt) | `Open3DTransportNNG` |
 | moq-ffi | commit `567933e` | MIT | [`Source/Open3DTransportMoQ/ThirdParty/moq-ffi/LICENSE`](Source/Open3DTransportMoQ/ThirdParty/moq-ffi/LICENSE) | `Open3DTransportMoQ` |
-| livekit_ffi | see note | MIT (declared) | — | `Open3DTransportWebRTC` |
+| livekit_ffi | see note | MIT (**declared, but no upstream text exists** — see note) | [`THIRD_PARTY_NOTICES.md`](Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/THIRD_PARTY_NOTICES.md) | `Open3DTransportWebRTC` |
 
 ### Opus
 
