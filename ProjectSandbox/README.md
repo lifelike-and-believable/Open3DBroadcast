@@ -41,13 +41,18 @@ ProjectSandbox/
 │   ├── DefaultGame.ini
 │   └── DefaultEditor.ini
 ├── Content/                   # Project content (minimal)
-└── Plugins/                   # Plugin symlink (created by Link script)
-    └── Open3DStream/          # -> ../../plugins/unreal/Open3DStream
+└── Plugins/
+    └── Open3DBroadcast/       # The plugin, in-tree (no symlink needed)
 ```
 
-## Plugin Linking
+## Plugin Location
 
-The plugin is **not** copied into the project. Instead, a symbolic link (junction on Windows) is created:
+`Open3DBroadcast` lives directly at `ProjectSandbox/Plugins/Open3DBroadcast/`, so
+there is nothing to link — open the `.uproject` and it is found.
+
+> **Historical note:** this project previously symlinked a second plugin,
+> `Open3DStream`, in from `plugins/unreal/`. That tree was removed (issue #203);
+> `Open3DBroadcast` is now the only Unreal plugin in the repository.
 
 - **Windows**: Junction created with `mklink /J`
 - **Linux/Mac**: Symbolic link created with `ln -s`
@@ -113,9 +118,9 @@ See `.github/workflows/` for workflow configurations.
 
 If the plugin doesn't appear:
 
-1. Run the Link script again
-2. Verify the symlink exists: `ProjectSandbox/Plugins/Open3DStream`
-3. Check that it points to `plugins/unreal/Open3DStream`
+1. Verify `ProjectSandbox/Plugins/Open3DBroadcast/Open3DBroadcast.uplugin` exists
+2. Check the plugin is enabled: **Edit → Plugins** → search "Open3D Broadcast"
+3. Regenerate project files and rebuild
 
 ### Build Errors
 

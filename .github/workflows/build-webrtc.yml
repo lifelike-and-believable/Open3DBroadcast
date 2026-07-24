@@ -1,8 +1,14 @@
 name: Build native WebRTC libraries
 
+# NOTE: this helper produced prebuilt libdatachannel/WebRTC artifacts for the
+# plugins/unreal/Open3DStream tree, which was removed in #203. The shipping
+# WebRTC transport uses livekit_ffi instead, so nothing consumes its output
+# today. Kept (workflow_dispatch only, so it never runs on its own) in case
+# libdatachannel is revived; re-target the output path before relying on it.
+
 # This workflow builds Google WebRTC (libwebrtc) static libraries for desktop platforms
 # and uploads them as artifacts. Use the resulting libs/headers to populate
-# plugins/unreal/Open3DStream/ThirdParty/webrtc for Unreal builds that link the
+# a plugin ThirdParty/webrtc directory for Unreal builds that link the
 # native WebRTC stack (for data channels and future audio track support).
 
 on:

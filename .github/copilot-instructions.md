@@ -1,5 +1,5 @@
 
-# Copilot Coding Agent — Operating Instructions (Open3DStream / Unreal UE 5.6)
+# Copilot Coding Agent — Operating Instructions (Open3DBroadcast / Unreal UE 5.7)
 
 This file defines strict, testable rules so coding agents deliver high‑quality, deterministic work across the Open3DStream ecosystem (Unreal sender/receiver, DCC bridges, and utilities). Treat this as the single source of truth when planning work, writing code, and composing PRs.
 
@@ -8,9 +8,9 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 ## 0) Ground Rules (Read Me First)
 
 - **Source of truth:** This document. Any ambiguity must be resolved by updating this doc first, then implementing.
-- **UE API accuracy:** Verify all Unreal API signatures against **UE 5.6** documentation before use. Do not “best guess.” 
+- **UE API accuracy:** Verify all Unreal API signatures against **UE 5.7** documentation before use. Do not “best guess.” 
   - Reference Sources in order of preference:
-    - Unreal Engine 5.6 source code on GitHub: @lifelike-and-believable/UnrealEngine - Always use Github MCP server to access
+    - Unreal Engine 5.7 source code on GitHub: @lifelike-and-believable/UnrealEngine - Always use Github MCP server to access
     - "Unreal Engine C++ API Reference" + class name(s) (web search). 
     - https://dev.epicgames.com/documentation/en-us/unreal-engine/API (direct URL)
 - **Never Assume:** Always base decisions on actual APIs, build logs, etc. Always use Github MCP Server or Github CLI to interact with Github resources (logs, issues, PRs, repository access, etc)
@@ -109,7 +109,7 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 
 
 **Prohibited**
-- Calling Unreal APIs without verifying exact **UE 5.6** signatures in the official docs.
+- Calling Unreal APIs without verifying exact **UE 5.7** signatures in the official docs.
 - Blocking on the game thread.
 - Hard‑coding credentials/paths/ports in source control.
 - Reordering or deleting existing fields in a serialized schema (FlatBuffers/JSON/etc.).
