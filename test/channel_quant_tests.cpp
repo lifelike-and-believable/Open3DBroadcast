@@ -167,17 +167,17 @@ O3DS_TEST(ChooseScalarTierWithHysteresis_FreshChannelFromFullNeedsToClearContrac
 	// A "fresh" channel (no prior tier - see Transform::mLastTranslationTier's
 	// default of QuantTier::Full) is slightly more conservative on its very
 	// first evaluation than the stateless ChooseScalarTier: entering Byte
-	// specifically (not just some finer tier) needs to clear the tighter
-	// contractedByteRange (0.0085), not just byteRange (0.01) itself. A
-	// delta in between - comfortably "Byte territory" for the plain
-	// function, but not quite past Full's Byte-entry margin - settles into
-	// Half instead of Byte on this first call (it easily clears the more
-	// lenient contractedHalfRange), and only reaches Byte once the delta
-	// itself drops below contractedByteRange. This converges quickly for
-	// any genuinely continuous signal (the next frame's previousTier
+	// specifically (not just some smaller-range tier) needs to clear the
+	// tighter contractedByteRange (0.0085), not just byteRange (0.01)
+	// itself. A delta in between - comfortably "Byte territory" for the
+	// plain function, but not quite past Full's Byte-entry margin - settles
+	// into Half instead of Byte on this first call (it easily clears the
+	// more lenient contractedHalfRange), and only reaches Byte once the
+	// delta itself drops below contractedByteRange. This converges quickly
+	// for any genuinely continuous signal (the next frame's previousTier
 	// reflects whichever tier was just settled into) so it isn't a
 	// user-visible regression - see StaysInFullWithinLowerBand above for
-	// the "doesn't enter any finer tier at all yet" case.
+	// the "doesn't enter any smaller-range tier at all yet" case.
 	QuantRanges ranges;
 	ranges.byteRange = 0.01;
 	ranges.halfRange = 1.0;

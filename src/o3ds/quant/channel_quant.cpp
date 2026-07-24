@@ -91,25 +91,26 @@ namespace O3DS
 		const double contractedByteRange = ranges.byteRange * (1.0 - h);
 		const double contractedHalfRange = ranges.halfRange * (1.0 - h);
 
-		// Upgrades (finer -> coarser tier, i.e. away from Byte/Half toward
-		// Full) always happen immediately at the plain, unexpanded boundary
-		// - never later. QuantRanges::byteRange/halfRange are the max |delta|
-		// a tier can represent WITHOUT clamping (QuantizeByte/QuantizeHalf's
+		// Moving to a larger-range tier (Byte->Half, Half->Full) always
+		// happens immediately at the plain, unexpanded boundary - never
+		// later. QuantRanges::byteRange/halfRange are the max |delta| a
+		// tier can represent WITHOUT clamping (QuantizeByte/QuantizeHalf's
 		// documented precondition); letting a value that already exceeds a
 		// tier's range stay in that tier - which an earlier version of this
-		// function did, via an "expanded" upgrade threshold - would silently
-		// clamp it, trading a correctness violation for smoothness. Only
-		// downgrades (coarser -> finer tier) get the hysteresis margin
-		// (contractedByteRange/contractedHalfRange below), since those are
-		// what actually caused the flapping this function exists to prevent:
-		// once a value has crossed into a coarser tier, it shouldn't
-		// immediately drop back the moment it dips slightly below the
-		// boundary again, only once it's clearly settled back inside the
-		// finer tier's range. Full has nothing coarser to upgrade to, so
-		// these checks only apply when previousTier is Byte or Half - see
-		// that case below for why hoisting them above the switch entirely
-		// is wrong (it would preempt Full's own downgrade logic for any
-		// absDelta between byteRange and halfRange).
+		// function did, via an "expanded" threshold on this move - would
+		// silently clamp it, trading a correctness violation for smoothness.
+		// Only moves to a SMALLER-range tier (Half->Byte, Full->Half,
+		// Full->Byte) get the hysteresis margin (contractedByteRange/
+		// contractedHalfRange below), since those are what actually caused
+		// the flapping this function exists to prevent: once a value has
+		// moved to a larger-range tier, it shouldn't immediately move back
+		// the moment it dips slightly below the boundary again, only once
+		// it's clearly settled back inside the smaller tier's range. Full
+		// has no larger-range tier to move to, so the immediate-move checks
+		// only apply when previousTier is Byte or Half - see that case below
+		// for why hoisting them above the switch entirely is wrong (it would
+		// preempt Full's own move-to-smaller-range logic for any absDelta
+		// between byteRange and halfRange).
 		switch (previousTier)
 		{
 		case QuantTier::Byte:
@@ -138,10 +139,10 @@ namespace O3DS
 
 		case QuantTier::Full:
 		default:
-			// Full is already the safe ceiling - no upgrade check needed.
-			// Entering a finer tier needs to clear the relevant margin on
-			// the low side - a single big drop can go straight to Byte,
-			// matching ChooseScalarTier's own precedence.
+			// Full is already the safe ceiling - no immediate-move check
+			// needed. Moving to a smaller-range tier needs to clear the
+			// relevant margin on the low side - a single big drop can go
+			// straight to Byte, matching ChooseScalarTier's own precedence.
 			if (absDelta <= contractedByteRange)
 			{
 				return QuantTier::Byte;
