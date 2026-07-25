@@ -16,7 +16,7 @@ without pulling a WebRTC stack into the Unreal build.
 
 | Item | Value |
 | --- | --- |
-| Repository | https://github.com/lifelike-and-believable/livekit-ffi-ue (crate directory `livekit_ffi/`) |
+| Repository | https://github.com/lifelike-and-believable/livekit-ffi (crate directory `livekit_ffi/`) — **renamed from `livekit-ffi-ue`**, see below |
 | Release tag | **TBD — see "Provenance gap" below** |
 | Commit | **TBD — see "Provenance gap" below** |
 | Build host | GitHub Actions `windows-latest`, via `.github/workflows/build-ffi.yml` |
@@ -26,8 +26,11 @@ without pulling a WebRTC stack into the Unreal build.
 | WebRTC | `libwebrtc` 0.3.19 via `webrtc-sys` 0.3.16 (statically linked) |
 | Wrapper license | MIT (declared in `Cargo.toml`; see caveat under Licensing) |
 
-The build host and toolchain above were **recovered from the shipped binaries**
-and then confirmed against the upstream repository:
+Every value above was originally **recovered from the shipped binaries**, and has
+since been **confirmed by reading the upstream repository directly** — it is no
+longer a reconstruction.
+
+How it was originally recovered:
 
 - `livekit_ffi.pdb` embeds the compile-time source root
   `D:\a\livekit-ffi-ue\livekit-ffi-ue\livekit_ffi\target\release\...`. The
@@ -36,14 +39,35 @@ and then confirmed against the upstream repository:
 - `livekit_ffi.dll` embeds `rustc version 1.87.0` and per-crate registry paths
   under `C:\Users\runneradmin\.cargo\registry\src\index.crates.io-*`, which is
   what pins the dependency versions listed in `THIRD_PARTY_NOTICES.md`.
-- The upstream workflow, its pinned toolchain, and the `=0.7.24` livekit pin all
-  match those recovered values.
+
+What the upstream repository confirms, at `abfcd7b`:
+
+- `.github/workflows/build-ffi.yml` runs on `windows-latest`, installs
+  **Rust 1.87.0** for `x86_64-pc-windows-msvc`, and builds with
+  `cargo build --release --features with_livekit` under
+  `RUSTFLAGS: -C target-feature=+crt-static`.
+- `livekit_ffi/Cargo.toml` pins `livekit =0.7.24`, `livekit-api =0.4.9`,
+  `livekit-protocol =0.5.1` — matching the versions read out of the binary.
+
+### Repository rename
+
+The repository is now **`livekit-ffi`**; `livekit-ffi-ue` was its former name and
+still redirects. The PDB records the old name because that is what it was called
+when this DLL was built.
+
+Note that `livekit_ffi/Cargo.toml` still declares the stale URL:
+
+```toml
+repository = "https://github.com/lifelike-and-believable/livekit-ffi-ue"
+```
+
+Worth correcting upstream so the crate metadata matches reality.
 
 ### Provenance gap
 
 The upstream repository is identified, but the **exact release/commit these
 specific binaries came from is still unrecorded**, so the artifact cannot yet be
-reproduced from source. `livekit-ffi-ue` publishes per-release Windows assets
+reproduced from source. `livekit-ffi` publishes per-release Windows assets
 named `livekit-ffi-plugin-windows-x64-v*.zip` whose internal layout matches this
 directory, so the DLL here was most likely taken from one of those rather than
 built locally. To close the gap:
@@ -51,7 +75,7 @@ built locally. To close the gap:
 1. Download the candidate release assets and compare against the SHA256 values
    in the inventory below — a byte match identifies the release outright.
 2. Record the release tag, commit SHA, and workflow run URL in the table above.
-3. Add `livekit-ffi-ue` as a git submodule (as `ProjectSandbox/External/moq-ffi`
+3. Add `livekit-ffi` as a git submodule (as `ProjectSandbox/External/moq-ffi`
    already is for the MoQ transport), so the source is pinned alongside the
    binary rather than only referenced by name.
 4. Copy the upstream `LICENSE` into this directory once it exists (see below).
@@ -79,11 +103,18 @@ summarised in the plugin-level `THIRD_PARTY_LICENSES.md`.
 
 Two things to be aware of:
 
-- **The wrapper's MIT grant has no license text.** `livekit-ffi-ue` declares
-  `license = "MIT"` in `Cargo.toml` and repeats "MIT" in its README, but the
-  repository contains no `LICENSE` file — no copyright holder, no year, no
-  notice text. MIT requires the notice to travel with redistributions, so this
-  should be fixed upstream and the resulting file copied here as `LICENSE`.
+- **The wrapper's MIT grant has no license text.** Verified against the upstream
+  repository at `abfcd7b`: `livekit_ffi/Cargo.toml` declares `license = "MIT"`,
+  and the repository root contains **no `LICENSE` and no `COPYING` file** — no
+  copyright holder, no year, no notice text. MIT requires the notice to travel
+  with redistributions, and this plugin redistributes the DLL, so the gap is
+  live rather than theoretical.
+
+  **Fix:** add a `LICENSE` to the upstream repository — the sibling `moq-ffi`
+  wording (`Copyright (c) 2025 Lifelike & Believable Animation Design`) is the
+  obvious template, but confirm the holder and year rather than assuming — then
+  copy it here as `LICENSE` and drop this caveat from both this file and the
+  plugin-root `THIRD_PARTY_LICENSES.md`.
 - **The DLL is a combined work.** Because `livekit`, `livekit-api`, and
   `livekit-protocol` are Apache-2.0 and are statically linked (with LTO) into
   the shipped DLL, Apache-2.0 §4 attribution and NOTICE obligations attach to
@@ -91,13 +122,13 @@ Two things to be aware of:
 
 **The authoritative notice file should be generated at build time**, not
 maintained by hand. Add a `cargo about generate` (or `cargo deny`) step to the
-`livekit-ffi-ue` CI workflow and ship its output alongside the DLL; the
+`livekit-ffi` CI workflow and ship its output alongside the DLL; the
 hand-recovered list here is a stopgap derived from binary inspection and can
 drift silently when the crate graph changes.
 
 ## Refresh Workflow
 
-1. Check out the desired `livekit-ffi-ue` commit.
+1. Check out the desired `livekit-ffi` commit.
 2. Build for Win64:
    `cargo build --release --features with_livekit --target x86_64-pc-windows-msvc`.
    The `with_livekit` feature is required — it is what the shipped artifacts were
