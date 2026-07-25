@@ -11,8 +11,9 @@ covers; that per-directory copy is authoritative, and this file is the index.
 
 **One exception:** `livekit_ffi` has **no shipped license text**, because none
 exists upstream to copy — the wrapper declares MIT but publishes no `LICENSE`
-file. Its row links to the per-binary notices instead. That gap is an open
-obligation, not an oversight in this index; see the note in §3.
+file. This was verified directly against the upstream repository, not inferred.
+Its row links to the per-binary notices instead. That gap is an open obligation,
+not an oversight in this index; see the note in §3.
 
 **Scope:** this covers artifacts shipped *inside the plugin*. Build-time-only
 dependencies that are not linked into any shipped binary are listed separately
@@ -119,7 +120,7 @@ redistribution and are not optional.
 ### livekit_ffi
 
 `livekit_ffi.dll` is a statically linked Rust binary built from
-[`lifelike-and-believable/livekit-ffi-ue`](https://github.com/lifelike-and-believable/livekit-ffi-ue).
+[`lifelike-and-believable/livekit-ffi`](https://github.com/lifelike-and-believable/livekit-ffi).
 Full provenance, artifact hashes, and the recovered dependency graph are in
 [`Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/README.md`](Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/README.md),
 with the per-crate license inventory in
@@ -128,11 +129,13 @@ next to it.
 
 Two obligations attach that are **not** satisfied by the MIT declaration alone:
 
-1. **The upstream MIT grant has no license text.** `livekit-ffi-ue` declares
-   `license = "MIT"` in `Cargo.toml` but ships no `LICENSE` file — no copyright
-   holder, no year, no notice. MIT requires the notice to accompany
-   redistributions, so this must be fixed upstream and the file copied into the
-   `livekit_ffi/` directory before submission.
+1. **The upstream MIT grant has no license text.** Verified against the upstream
+   repository at `abfcd7b`: `livekit-ffi` declares `license = "MIT"` in
+   `Cargo.toml`, and its root contains **no `LICENSE` and no `COPYING`** — no
+   copyright holder, no year, no notice. MIT requires the notice to accompany
+   redistributions, and this plugin redistributes the DLL, so this must be fixed
+   upstream and the file copied into the `livekit_ffi/` directory before
+   submission.
 2. **The DLL is a combined work.** `livekit`, `livekit-api`, and
    `livekit-protocol` are Apache-2.0 and are statically linked into it with LTO,
    so Apache-2.0 §4 attribution and NOTICE obligations apply to the DLL itself.
@@ -221,6 +224,6 @@ DLLs). That is a stopgap, and it will drift silently the next time either DLL is
 rebuilt.
 
 The durable fix is to generate them: add a `cargo about generate` (or
-`cargo deny`) step to the `livekit-ffi-ue` and `moq-ffi` CI workflows and ship
+`cargo deny`) step to the `livekit-ffi` and `moq-ffi` CI workflows and ship
 the generated notice file with each binary drop, then copy it in as part of the
 refresh workflow documented in each directory's README.
