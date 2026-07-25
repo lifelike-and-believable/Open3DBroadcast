@@ -102,9 +102,22 @@ Unicode license and trademark notice.
 ## 2. Native components inside libwebrtc
 
 `webrtc-sys` does not compile libwebrtc from source here — it downloads a
-prebuilt static library (`webrtc-sdk/webrtc` @ `m137_release`, published under
-the `livekit/rust-sdks` release tag `webrtc-7af9351`). That static library is
-linked into `livekit_ffi.dll`, bringing **27 native components** with it.
+prebuilt static library. That library is linked into `livekit_ffi.dll`,
+bringing **27 native components** with it.
+
+The exact artifact is pinned in `webrtc-sys-build` 0.3.11 (the build dependency
+of `webrtc-sys` 0.3.16), read from the published crate source:
+
+| Item | Value |
+| --- | --- |
+| Pinned tag | `WEBRTC_TAG = "webrtc-ebd5a9f-2"` |
+| Download URL | `https://github.com/livekit/client-sdk-rust/releases/download/webrtc-ebd5a9f-2/webrtc-<os>-<arch>-<profile>.zip` |
+| Artifact for this DLL | `webrtc-windows-x64-release.zip` |
+
+> **Correction.** An earlier revision of this file recorded the artifact as
+> `webrtc-sdk/webrtc @ m137_release` under release tag `webrtc-7af9351`. That
+> was inferred rather than read from the pin, and it is wrong — the version
+> above is taken directly from `webrtc-sys-build` 0.3.11's source.
 
 The upstream Windows x64 artifact ships a generated `LICENSE.md` enumerating
 them: webrtc, abseil-cpp, boringssl, compiler-rt, crc32c, dav1d, **ffmpeg**,
@@ -119,9 +132,9 @@ clause. That grant is *not* part of BSD-3-Clause and must be reproduced
 alongside it.
 
 > **That upstream `LICENSE.md` is the authoritative per-build notice and is not
-> currently vendored into this repository.** It should be downloaded from the
-> matching `webrtc-sdk/webrtc` release and committed next to this file before
-> distribution. It is also platform-specific — the Linux/macOS builds use
+> currently vendored into this repository.** It should be taken from the
+> matching artifact (`webrtc-ebd5a9f-2`, above) and committed next to this file
+> before distribution. It is also platform-specific — the Linux/macOS builds use
 > different `gn` args and therefore a different component list, so each shipped
 > platform needs its own copy.
 
@@ -157,6 +170,23 @@ Why this matters:
 **This is a release blocker for commercial distribution and cannot be closed by
 documentation.** It needs either counsel sign-off on the LGPL and patent
 posture, or a libwebrtc build with the ffmpeg/H.264 components disabled.
+
+### Neither component is reachable from this plugin
+
+The `livekit_ffi` C ABI exposes **no video path at all** — "video" does not
+appear anywhere in `include/livekit_ffi.h`, and no source file in
+`Open3DTransportWebRTC` references video. This transport carries mocap over the
+data channel plus Opus audio. ffmpeg and OpenH264 arrive purely because the
+prebuilt libwebrtc was built with H.264 enabled.
+
+That does **not** reduce the obligation — LGPL attaches to distributing the
+bytes, not to executing them — but it does mean removing them costs zero
+functionality.
+
+**The chosen fix is to rebuild libwebrtc with H.264 disabled**, keeping the
+WebRTC transport intact. The mechanism, the one known risk, and step-by-step
+acceptance criteria are in
+[`docs/webrtc-codec-removal-plan.md`](../../../../../../../docs/webrtc-codec-removal-plan.md).
 
 ---
 

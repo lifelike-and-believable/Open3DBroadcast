@@ -39,6 +39,17 @@ the LGPL and patent posture, or a libwebrtc build with ffmpeg/H.264 disabled.
 Full evidence and reasoning:
 [`Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/THIRD_PARTY_NOTICES.md`](Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/THIRD_PARTY_NOTICES.md).
 
+**Neither component is reachable from this plugin.** The `livekit_ffi` C ABI has
+no video path whatsoever — this transport carries mocap over the data channel
+plus Opus audio. They arrive only because the prebuilt libwebrtc was built with
+H.264 enabled. That doesn't reduce the obligation (LGPL attaches to
+distribution, not execution), but it does mean removing them costs no
+functionality.
+
+**Chosen fix: rebuild libwebrtc with H.264 disabled**, keeping the WebRTC
+transport. Plan, mechanism, and acceptance criteria:
+[`docs/webrtc-codec-removal-plan.md`](../../../docs/webrtc-codec-removal-plan.md).
+
 `moq_ffi.dll` was checked for the same components and is clean.
 
 ---
