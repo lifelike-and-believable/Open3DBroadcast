@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!--
+    Open3D Broadcast Suite - plugin icon (source of truth).
+
+    Motif: an articulated joint chain whose end effector emits a signal -
+    "skeletal animation data, sent over a network", the two halves of what this
+    plugin does.
+
+    Authored as vector so it can be re-rendered at any size.
+    Icon128.png is GENERATED from this file by Build/Scripts/render-icon.py.
+    Edit the SVG and re-run that script; never hand-edit the PNG.
+
+    Design notes, because these were arrived at by looking at renders rather
+    than by taste, and re-deriving them later would waste time:
+
+      - The chain ZIGZAGS on purpose. An earlier draft used a straight two-bone
+        chain and it read as a lollipop stick, not a skeleton - a bend is what
+        makes it read as articulated.
+      - Only TWO arcs, kept small. Three large concentric arcs made the whole
+        mark read as a generic wi-fi glyph, with the skeleton reduced to its
+        stand. Shrinking them subordinates the signal to the armature.
+      - Onion-skin "echo" poses were tried as an alternative to arcs. They look
+        good at 128px and turn to smudge by 48px, so they were rejected: this
+        icon is shown small in Unreal's plugin browser and on a Fab card.
+      - All strokes are >= 7 units so they survive downsampling to 32px.
+  -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1B2340"/>
+      <stop offset="1" stop-color="#0B0E1A"/>
+    </linearGradient>
+    <linearGradient id="bone" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#CBD5E1"/>
+      <stop offset="1" stop-color="#F8FAFC"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="128" height="128" rx="26" fill="url(#tile)"/>
+  <!-- faint inner edge, so the dark tile doesn't dissolve on a dark listing card -->
+  <rect x="0.75" y="0.75" width="126.5" height="126.5" rx="25.25"
+        fill="none" stroke="#FFFFFF" stroke-opacity="0.10" stroke-width="1.5"/>
+
+  <!-- signal, emitted from the end effector -->
+  <g fill="none" stroke="#22D3EE" stroke-linecap="round" stroke-width="7">
+    <path d="M 84.07 25.89 A 19 19 0 0 1 92.07 47.87" stroke-opacity="0.95"/>
+    <path d="M 89.90 16.56 A 30 30 0 0 1 102.53 51.27" stroke-opacity="0.50"/>
+  </g>
+
+  <!-- bones, drawn beneath the joints -->
+  <g stroke="url(#bone)" stroke-width="8" stroke-linecap="round" fill="none">
+    <path d="M 36 100 L 66 85"/>
+    <path d="M 66 85 L 48 57"/>
+    <path d="M 48 57 L 74 42"/>
+  </g>
+
+  <!-- joints -->
+  <circle cx="36" cy="100" r="6.5" fill="#E2E8F0"/>
+  <circle cx="66" cy="85"  r="7"   fill="#E2E8F0"/>
+  <circle cx="48" cy="57"  r="7"   fill="#E2E8F0"/>
+
+  <!-- end effector: focal point, and origin of the signal -->
+  <circle cx="74" cy="42" r="11" fill="#0B0E1A"/>
+  <circle cx="74" cy="42" r="9.5" fill="#22D3EE"/>
+</svg>
