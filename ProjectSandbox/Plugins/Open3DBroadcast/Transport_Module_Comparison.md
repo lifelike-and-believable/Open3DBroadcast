@@ -2,7 +2,10 @@
 
 ## Executive Summary
 
-The Open3DStream project features **4 transport modules** in a modular architecture, each implementing the `IOpen3DSender` and `IOpen3DReceiver` interfaces. All modules support both motion capture data streaming and audio transmission, but differ significantly in their network topologies, threading models, and intended use cases.
+The Open3DBroadcast plugin features **5 transport modules** in a modular architecture, each implementing the `IOpen3DSender` and `IOpen3DReceiver` interfaces. All modules support both motion capture data streaming and audio transmission, but differ significantly in their network topologies, threading models, and intended use cases.
+
+> **Naming:** *Open3DBroadcast* is the Unreal Engine plugin. *Open3DStream* is the
+> streaming protocol and core C++ library (`o3ds`) it is built on.
 
 ---
 
@@ -14,6 +17,7 @@ The Open3DStream project features **4 transport modules** in a modular architect
 | **NNG** | `nng` | Advanced messaging patterns | Network (TCP) | NNG library (static) |
 | **Sockets** | `tcp`, `udp` | Direct peer-to-peer | Network (TCP/UDP) | Unreal Sockets subsystem |
 | **WebRTC** | `webrtc` | Cloud/NAT traversal | Network (WebRTC) | LiveKit FFI library |
+| **MoQ** | `moq` | Cloud/NAT traversal over QUIC | Network (QUIC/WebTransport, via relay) | moq-ffi library |
 
 ---
 
@@ -372,22 +376,81 @@ static void OnConnectionState(void* user, LkConnectionState state,
 
 ---
 
+### 3.5 **MoQ Transport**
+
+**Location**: `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportMoQ/`
+
+**Architecture**:
+- Media over QUIC (MoQ) transport, backed by the `moq-ffi` Rust library over Cloudflare's [moq-rs](https://github.com/cloudflare/moq-rs)
+- Data travels over **QUIC / WebTransport** to a **relay**, rather than peer-to-peer
+- Publish/subscribe model addressed by **track namespace + track name**
+- Relay-mediated connections traverse NAT the same way WebRTC does, without STUN/TURN
+
+**Key Classes**:
+- `FO3DMoQSender` (`MoQSender.h:45`)
+- `FO3DMoQReceiver` (`MoQReceiver.h:33`)
+- `FMoQSessionWrapper` — session lifecycle over the FFI boundary
+- `FMoQPublisherHandle` / `FMoQSubscriberHandle` — RAII handles for FFI objects
+- `FMoQAsyncDispatcher` (`MoQAsyncDispatcher.h:17`) — `FRunnable`, a shared dispatcher thread
+- `FMoQFfiSupport` — DLL load and export validation
+
+**Threading Model**:
+- **Dedicated dispatcher thread** (`FMoQAsyncDispatcher`, an `FRunnable` singleton) marshals async FFI work
+- FFI callbacks deliver connection-state and subscriber-data events
+- Handle types own FFI lifetime explicitly, so teardown ordering is enforced rather than incidental
+
+**Audio**:
+- Uses `FO3DMoQSenderAudioSink`, derived from the **shared `FO3DSenderAudioSinkBase`** — the same path as Loopback, NNG and Sockets
+- Encodes to **PCM16 or Opus** via `O3DAudio::FFrameEncoder`, then publishes on a separate audio track
+- Receiver subscribes to the audio track independently of the mocap track
+
+> Note: MoQ follows the standard audio path. **WebRTC is the outlier** here, because LiveKit performs Opus encoding internally behind its FFI.
+
+**Advantages**:
+- ✨ **NAT traversal without STUN/TURN** — outbound QUIC to a relay
+- ✨ **No per-session signalling service** — the relay is the rendezvous point
+- ✨ **Standard audio pipeline** — same encoder and codec options as the LAN transports
+- ✨ **Automatic reconnection** — configurable via `ReconnectDelaySeconds`
+
+**Limitations**:
+- ⚠️ **Relay dependency** — requires a reachable MoQ relay
+- ⚠️ **Platform limitation** — currently Win64 only; other platforms auto-disable the transport
+- ⚠️ **DLL dependency** — `moq_ffi.dll` runtime requirement
+- ⚠️ **Draft protocol** — MoQ is an evolving IETF draft, so relay interoperability tracks a specific draft revision
+
+**Use Cases**:
+- Remote streaming over the Internet where a relay is preferable to a full WebRTC stack
+- Cloud/WAN delivery via Cloudflare relays
+- Deployments wanting NAT traversal without LiveKit server infrastructure
+
+**Dependencies**:
+- `moq_ffi` library (DLL)
+- A MoQ relay endpoint
+
+---
+
 ## 4. Functional Parity Matrix
 
-| Feature | Loopback | NNG | TCP | UDP | WebRTC |
-|---------|----------|-----|-----|-----|--------|
-| **Core Interfaces** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Send SubjectList** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Audio Support** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Stats Reporting** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Backpressure Handling** | ✅ Queue | ✅ Queue | ✅ Queue | ⚠️ None | ✅ LiveKit |
-| **Reconnection** | N/A | ✅ Auto | ✅ Auto | N/A | ✅ Auto |
-| **Multiple Receivers** | ✅ Many | ✅ Pattern | ❌ Single | ✅ Broadcast | ✅ Room |
-| **Reliable Delivery** | ✅ | ✅ | ✅ | ❌ | ✅ |
-| **Ordered Delivery** | ✅ | ✅ | ✅ | ❌ | ✅ |
-| **NAT Traversal** | N/A | ❌ | ❌ | ❌ | ✅ |
-| **Cross-Process** | ❌ | ✅ | ✅ | ✅ | ✅ |
-| **Platform Support** | All | Win64 | All | All | Win64 |
+| Feature | Loopback | NNG | TCP | UDP | WebRTC | MoQ |
+|---------|----------|-----|-----|-----|--------|-----|
+| **Core Interfaces** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Send SubjectList** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Audio Support** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Stats Reporting** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Backpressure Handling** | ✅ Queue | ✅ Queue | ✅ Queue | ⚠️ None | ✅ LiveKit | ✅ Relay/QUIC |
+| **Reconnection** | N/A | ✅ Auto | ✅ Auto | N/A | ✅ Auto | ✅ Auto |
+| **Multiple Receivers** | ✅ Many | ✅ Pattern | ❌ Single | ✅ Broadcast | ✅ Room | ✅ Relay fan-out |
+| **Reliable Delivery** | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
+| **Ordered Delivery** | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
+| **NAT Traversal** | N/A | ❌ | ❌ | ❌ | ✅ | ✅ |
+| **Cross-Process** | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Platform Support** | All | Win64 | All | All | Win64 | Win64 |
+
+**Audio Support is universal.** The base `IOpen3DSender` and `IOpen3DReceiver`
+interfaces default `SupportsAudio()` to `false`, and every transport overrides it
+to `true` on **both** the sender and receiver side — twelve overrides, no
+exceptions. Audio is a plugin-level capability, not a property of any one
+transport.
 
 ---
 
@@ -401,22 +464,40 @@ static void OnConnectionState(void* user, LkConnectionState state,
 | **NNG** | PCM16, Opus (via `O3DAudio::FFrameEncoder`) | Sender | PCM16 |
 | **TCP** | PCM16, Opus (via `O3DAudio::FFrameEncoder`) | Sender | PCM16 |
 | **UDP** | PCM16, Opus (via `O3DAudio::FFrameEncoder`) | Sender | PCM16 |
+| **MoQ** | PCM16, Opus (via `O3DAudio::FFrameEncoder`) | Sender | PCM16 |
 | **WebRTC** | **Opus (LiveKit internal)** | **LiveKit FFI** | **PCM float→int16** |
+
+**WebRTC is the only outlier.** Every other transport — including MoQ — encodes
+on the sender through the shared `O3DAudio::FFrameEncoder` and exchanges PCM16 at
+the API boundary. WebRTC differs only because LiveKit performs Opus
+encode/decode internally behind its FFI.
 
 ### Audio Sink Implementations
 
 **Sender Side** (`IO3DSenderAudioSink`):
 - **Input**: PCM float (normalized -1.0 to 1.0)
-- **Loopback/NNG/Sockets**: Use `FO3DSenderAudioSinkBase` helper
+- **Loopback/NNG/Sockets/MoQ**: Use `FO3DSenderAudioSinkBase` helper
   - Encodes to PCM16 or Opus
   - Wraps in unified message format
   - Enqueues/sends through transport
+  - MoQ additionally publishes on a dedicated audio track (`FO3DMoQSenderAudioSink`)
 - **WebRTC**: Direct conversion to int16 + `lk_publish_audio_pcm_i16()`
 
 **Receiver Side** (`IO3DReceiverAudioSink`):
 - **Input**: PCM16 (via `O3DS::FAudioFrameMeta`)
 - **All transports**: Decode incoming audio frames
+- **MoQ**: Subscribes to the audio track independently of the mocap track
 - **WebRTC**: Receives pre-decoded PCM16 from LiveKit callback
+
+### Receive-side playback
+
+`O3DRemoteAudioComponent` (`Open3DReceiver/Public/O3DRemoteAudioComponent.h`)
+provides Unreal-side playback — volume/pitch, attenuation, submix sends, source
+effect chains, concurrency and spatialization.
+
+**It is transport-agnostic.** It lives in the `Open3DReceiver` module and
+contains no reference to any specific transport, so it applies equally to every
+transport in this document — it is not a WebRTC feature.
 
 ---
 
@@ -451,6 +532,12 @@ static void OnConnectionState(void* user, LkConnectionState state,
 - **Audio publish errors**: Log and return false
 - **Token expiration**: User must refresh token
 
+### MoQ
+- **Connection failures**: automatic reconnection after `ReconnectDelaySeconds`
+- **Relay unreachable**: session reports failure; publisher/subscriber handles torn down in order
+- **Subscribe failures**: retried on reconnect; mocap and audio tracks resubscribe independently
+- **Missing DLL/exports**: `FMoQFfiSupport` validates exports at load and disables the transport rather than failing later
+
 ---
 
 ## 7. Performance Characteristics
@@ -462,11 +549,14 @@ static void OnConnectionState(void* user, LkConnectionState state,
 | **TCP** | ~1-10ms LAN | High | Medium | Framing buffers + queue |
 | **UDP** | <1ms LAN | High | Low | Minimal (no buffering) |
 | **WebRTC** | 20-100ms+ | Medium | High | LiveKit internal |
+| **MoQ** | 20-100ms+ (relay RTT) | Medium | Medium | moq-ffi internal + track buffers |
 
 **Notes**:
 - Latency varies significantly with network conditions
 - WebRTC latency includes signaling, encoding, and jitter buffering
 - TCP/UDP latency depends on round-trip time (RTT)
+- MoQ latency is dominated by the client→relay→client path, so relay placement matters more than raw bandwidth
+- MoQ and WebRTC figures are indicative only; neither has been benchmarked in this repository
 
 ---
 
@@ -479,7 +569,10 @@ All transports include test files:
 | **Loopback** | `LoopbackAudioTests.cpp` | Audio roundtrip |
 | **NNG** | `NngTransportTests.cpp` | Connection patterns |
 | **Sockets** | `SocketsAudioTests.cpp` | TCP/UDP audio |
-| **WebRTC** | *(No test file found)* | Manual testing |
+| **WebRTC** | `WebRTCTransportTests.cpp`, `WebRTCPerSubjectTests.cpp` | Transport + per-subject routing |
+| **MoQ** | `MoQSenderTests.cpp`, `MoQReceiverTests.cpp`, `MoQSessionWrapperTests.cpp`, `MoQTrackNamespaceTests.cpp`, `MoQCloudflareRelayTests.cpp` | Session lifecycle, track naming, relay integration |
+
+MoQ currently has the broadest automation coverage of any transport.
 
 **Common Test Patterns**:
 - Initialize sender/receiver
@@ -557,6 +650,19 @@ ReceiverConfig.StreamId = "subject-name-filter";
 
 ---
 
+### MoQ
+```cpp
+FO3DTransportConfig Config;
+Config.Transport = "moq";
+Config.AdvancedParams.Add("relay_url", "https://relay.example.com");
+Config.AdvancedParams.Add("track_namespace", "mocap/session-1");
+Config.AdvancedParams.Add("track_name", "characterA");
+Config.AdvancedParams.Add("audio_namespace", "audio/session-1");
+Config.AdvancedParams.Add("delivery_mode", "datagram");
+```
+
+---
+
 ## 10. Key Differences Summary
 
 ### Threading Philosophy
@@ -565,6 +671,7 @@ ReceiverConfig.StreamId = "subject-name-filter";
 - **TCP**: Async send thread, sync receive with state machine
 - **UDP**: Fully synchronous
 - **WebRTC**: Event-driven FFI callbacks
+- **MoQ**: Dedicated dispatcher thread (`FMoQAsyncDispatcher`, an `FRunnable`) plus FFI callbacks
 
 ### Network Topology
 - **Loopback**: In-process only
@@ -572,6 +679,7 @@ ReceiverConfig.StreamId = "subject-name-filter";
 - **TCP**: 1:1 (sender accepts single receiver)
 - **UDP**: 1:N (broadcast capable)
 - **WebRTC**: N:M (room-based)
+- **MoQ**: N:M (relay fan-out, addressed by track namespace + name)
 
 ### Reliability Trade-offs
 - **Loopback**: Reliable, in-memory queues
@@ -579,12 +687,14 @@ ReceiverConfig.StreamId = "subject-name-filter";
 - **TCP**: Reliable, ordered, with framing overhead
 - **UDP**: **Unreliable**, low-latency, best-effort
 - **WebRTC**: Reliable with managed retry/jitter buffering
+- **MoQ**: Reliable, ordered within a track; QUIC handles loss recovery
 
 ### Platform Coverage
 - **Loopback**: ✅ All platforms
 - **NNG**: ⚠️ Win64 only (extensible to other platforms)
 - **TCP/UDP**: ✅ All platforms (Unreal Sockets abstraction)
 - **WebRTC**: ⚠️ Win64 only (extensible to other platforms)
+- **MoQ**: ⚠️ Win64 only (other platforms auto-disable the transport)
 
 ---
 
@@ -598,7 +708,8 @@ ReceiverConfig.StreamId = "subject-name-filter";
 | **One-to-many LAN** | NNG (Pub/Sub) or UDP (Broadcast) | Efficient distribution |
 | **Cloud/WAN** | WebRTC | NAT traversal, managed infrastructure |
 | **Development/debugging** | Loopback or TCP | Loopback for unit tests, TCP for integration |
-| **Firewall traversal** | WebRTC | STUN/TURN support |
+| **Firewall traversal** | WebRTC or MoQ | STUN/TURN, or outbound QUIC to a relay |
+| **Cloud/WAN without a LiveKit server** | MoQ | Relay-mediated; no signalling service to operate |
 | **Load balancing** | NNG (Push/Pull) | Automatic distribution across workers |
 
 ---
@@ -614,7 +725,7 @@ All modules follow consistent patterns for future enhancement:
 - ✅ Advanced params (key-value override mechanism)
 
 **Platform Expansion**:
-- NNG and WebRTC currently Win64-only but architecturally ready for Linux/Mac
+- NNG, WebRTC and MoQ currently Win64-only but architecturally ready for Linux/Mac
 - Build.cs files have placeholder platform detection
 
 **Protocol Versions**:
@@ -632,6 +743,7 @@ The Open3DTransport architecture demonstrates excellent **functional parity** ac
 - **TCP** offers reliable LAN streaming with broad platform support
 - **UDP** delivers ultra-low latency for local networks
 - **WebRTC** enables cloud-scale deployments with NAT traversal
+- **MoQ** delivers relay-mediated cloud streaming over QUIC without operating a signalling service
 
 All modules share 100% interface compatibility, making them **drop-in replacements** for each other, allowing developers to choose the optimal transport based on deployment requirements without changing application code.
 
@@ -640,12 +752,15 @@ All modules share 100% interface compatibility, making them **drop-in replacemen
 ## Document Metadata
 
 **Generated**: 2025-11-15
-**Codebase Version**: Based on commit `ec7551b`
+**Last revised**: 2026-07-25 — added the MoQ transport, corrected the audio and
+testing sections, and refreshed platform coverage.
+**Codebase Version**: originally commit `ec7551b`; revision verified against `2a953bc`
 **Modules Analyzed**:
 - Open3DTransportLoopback
 - Open3DTransportNNG
 - Open3DTransportSockets (TCP + UDP)
 - Open3DTransportWebRTC
+- Open3DTransportMoQ
 
 **File Locations Referenced**:
 - Core interfaces: `Source/Open3DSender/Public/`, `Source/Open3DReceiver/Public/`
