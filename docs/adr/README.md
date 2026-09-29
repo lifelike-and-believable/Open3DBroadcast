@@ -11,9 +11,9 @@ ADRs are written by the design agent (see [`docs/roadmap/plugin-hardening-and-fa
 | [0001](0001-platform-scope-first-fab-release.md) | Platform scope for the first Fab release | D1 | Accepted |
 | [0002](0002-webrtc-and-moq-in-first-fab-release.md) | WebRTC and MoQ in the first Fab release | D2 | Accepted |
 | [0003](0003-core-library-delivery-to-plugin.md) | How the o3ds core library reaches the plugin | D3 | Accepted |
-| [0004](0004-credentials-and-secret-transport-options.md) | Credentials and secret transport options | D6 | Proposed |
-| [0005](0005-wire-resync-and-loss-contract.md) | Wire-coding resync and loss contract | D7 | Proposed |
-| [0006](0006-test-module-layout-and-fakes.md) | Test module layout and fakes | D10 | Proposed |
+| [0004](0004-credentials-and-secret-transport-options.md) | Credentials and secret transport options | D6 | Accepted |
+| [0005](0005-wire-resync-and-loss-contract.md) | Wire-coding resync and loss contract | D7 | Accepted |
+| [0006](0006-test-module-layout-and-fakes.md) | Test module layout and fakes | D10 | Accepted |
 
 ## Conventions
 

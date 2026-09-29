@@ -1,6 +1,7 @@
 # 0005: Wire-coding resync and loss contract
 
-- **Status:** Proposed (pending maintainer sign-off)
+- **Status:** Accepted (maintainer sign-off 2026-09-29)
+- **Accepted with defaults:** Q2 (D1-era receivers are not kept compatible; D1 is unreleased and D8 will version the wire) and Q6 (no receiver keyframe request in v1; L2 stays deferred) were accepted as this ADR proposes. Needs-verification items stay open for the implementing WPs.
 - **Date:** 2026-09-29
 - **Plan decision:** D7 in [`plugin-hardening-and-fab-readiness.md`](../roadmap/plugin-hardening-and-fab-readiness.md) §3
 - **Related:** [`resilient-streaming-and-motion-prediction.md`](../roadmap/resilient-streaming-and-motion-prediction.md) (owns the schema fields and workstreams A, C, D); D5 (sender threading), D8 (protocol versioning, not decided here); ADR 0003 (core compiled as `Open3DStreamCore`); feeds WP-S3, WP-S4, WP-A4, WP-T1
@@ -186,11 +187,11 @@ Receiver, per subject within a stream (`frame_epoch`):
 ## Open questions for the maintainer
 
 1. ~~Is 1.0 s the right default full-sync interval, and should it vary per transport?~~ **Answered 2026-09-29:** 1.0 s is fine. It stays a single `FullSyncIntervalSeconds` property on the sender component (clamp 0.25 to 10 s), with no per-transport default.
-2. Accept that D1-era receivers break against new quantized senders, given D1 is unreleased and D8 will version it?
+2. **Accepted default:** yes. Original question: accept that D1-era receivers break against new quantized senders, given D1 is unreleased and D8 will version it?
 3. **needs-verification (NNG docs):** does an NNG pub socket drop messages for slow subscribers, and are pair and push delivery ordered and reliable over TCP?
 4. **needs-FFI-verification (livekit_ffi):** is LiveKit's reliable data channel ordered, and does the FFI expose a participant-joined event for the new-peer trigger?
 5. **needs-FFI-verification (moq-ffi):** in `MOQ_DELIVERY_STREAM`, are objects on one track delivered in order across groups through a relay? Until confirmed, MoQ is `Unreliable`.
-6. Should a receiver keyframe request (L2) be planned for bidirectional transports after v1?
+6. **Accepted default:** not in v1; L2 stays deferred. Original question: should a receiver keyframe request (L2) be planned for bidirectional transports after v1?
 
 ## References
 

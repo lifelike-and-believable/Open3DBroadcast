@@ -1,6 +1,7 @@
 # 0006: Test module layout and fakes
 
-- **Status:** Proposed (pending maintainer sign-off)
+- **Status:** Accepted (maintainer sign-off 2026-09-29)
+- **Accepted with defaults:** Q7 (a 15-minute test budget per non-draft PR on the self-hosted runner) was accepted as this ADR proposes. Needs-verification items stay open for the implementing WPs.
 - **Date:** 2026-09-29
 - **Plan decision:** D10 in [`plugin-hardening-and-fab-readiness.md`](../roadmap/plugin-hardening-and-fab-readiness.md) §3
 - **Related:** [ADR 0001](0001-platform-scope-first-fab-release.md) (module keys), [ADR 0002](0002-webrtc-and-moq-in-first-fab-release.md) (add-on plugin, exclusion manifest), [ADR 0003](0003-core-library-delivery-to-plugin.md) (`Open3DStreamCore`), [ADR 0004](0004-credentials-and-secret-transport-options.md), [ADR 0005](0005-wire-resync-and-loss-contract.md); feeds WP-T1, WP-T2, WP-F8, WP-F11 and every WP's Acceptance
@@ -147,7 +148,7 @@
 4. **needs-verification:** the UE 5.7 spelling of `EAutomationTestFlags` context and filter values.
 5. ~~Keep or retire Gauntlet?~~ **Answered 2026-09-29:** retire it. `Tests/Gauntlet/` and `Build/Scripts/Run-Gauntlet.ps1` are deleted in WP-F8, and the docs that mention them are updated. Whether `RunGauntlet -Config=` reads the JSON no longer matters.
 6. ~~**RCV-2:** last observed subject name or stream label?~~ **Answered 2026-09-29:** the stream label. The test is updated to assert the stream-label fallback, and the unused `LastObservedSubjectName` field is deleted.
-7. Is a 15-minute test budget on the self-hosted runner acceptable for every non-draft PR push?
+7. **Accepted default:** yes. Original question: is a 15-minute test budget on the self-hosted runner acceptable for every non-draft PR push?
 
 ## References
 

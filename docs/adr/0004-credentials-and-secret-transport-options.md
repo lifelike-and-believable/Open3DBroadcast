@@ -1,6 +1,7 @@
 # 0004: Credentials and secret transport options
 
-- **Status:** Proposed (pending maintainer sign-off)
+- **Status:** Accepted (maintainer sign-off 2026-09-29)
+- **Accepted with defaults:** the open choices below (Q3 to Q5) were accepted as this ADR proposes: no OS credential store in v1.x (R4 deferred), fixed env var names with an optional profile suffix, and plain `http://` token endpoints refused except on localhost. Needs-verification items stay open for the implementing WPs.
 - **Date:** 2026-09-29
 - **Plan decision:** D6 in [`plugin-hardening-and-fab-readiness.md`](../roadmap/plugin-hardening-and-fab-readiness.md) §3
 - **Related:** [ADR 0001](0001-platform-scope-first-fab-release.md) (Win64 only), [ADR 0002](0002-webrtc-and-moq-in-first-fab-release.md) (WebRTC becomes the `Open3DBroadcastWebRTC` add-on, WP-F11), D4 (transport abstraction, not yet decided); feeds WP-S9, WP-A1, WP-F11, WP-T2
@@ -133,9 +134,9 @@ Replace the string map with typed structs whose secret fields are `UPROPERTY(Tra
 
 1. **needs-verification:** do UE 5.7 LiveLink presets store the source `ConnectionString` verbatim in the preset asset? This ADR assumes yes.
 2. **needs-verification:** in UE 5.7, does `Config = EditorPerProjectUserSettings` write to `<Project>/Saved/Config/<Platform>Editor/EditorPerProjectUserSettings.ini` and never to a `Default*.ini` unless `DefaultConfig` is specified? (Confirmed only by third-party sources.)
-3. **needs-verification / choice:** is an OS credential store (R4) wanted for v1.x? It is Win64-only (acceptable under ADR 0001) and needs native `CredWrite`/`CredRead` code; no UE wrapper was found.
-4. Should the env var names be fixed per key (`O3DB_WEBRTC_TOKEN`) or include the profile (`O3DB_WEBRTC_TOKEN__<PROFILE>`)? This ADR proposes fixed names plus an optional profile suffix.
-5. Is refusing plain `http://` token endpoints (except localhost) acceptable, or should it be a warning plus an explicit "allow insecure" option for lab networks?
+3. **Accepted default:** no OS credential store in v1.x (R4 deferred). **needs-verification** for later: is an OS credential store (R4) wanted? It is Win64-only (acceptable under ADR 0001) and needs native `CredWrite`/`CredRead` code; no UE wrapper was found.
+4. **Accepted default:** fixed names plus an optional profile suffix. Original question: should the env var names be fixed per key (`O3DB_WEBRTC_TOKEN`) or include the profile (`O3DB_WEBRTC_TOKEN__<PROFILE>`)? This ADR proposes fixed names plus an optional profile suffix.
+5. **Accepted default:** refuse, except localhost. Original question: is refusing plain `http://` token endpoints (except localhost) acceptable, or should it be a warning plus an explicit "allow insecure" option for lab networks?
 
 ## References
 
