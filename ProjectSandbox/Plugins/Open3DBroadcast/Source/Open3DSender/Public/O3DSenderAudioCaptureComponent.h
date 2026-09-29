@@ -13,6 +13,8 @@ namespace Audio
     class FAudioCapture;
 }
 class IO3DSenderAudioSink;
+class FO3DSenderAudioCaptureRouter;
+struct FO3DSenderAudioProducerState;
 
 struct FO3DAudioCaptureDeleter
 {
@@ -90,13 +92,20 @@ public:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-    /** Bind a transport-provided audio sink. Passing nullptr disables capture delivery. */
+    /** Bind a transport-provided audio sink. Passing nullptr disables capture delivery. Game thread. */
     void SetAudioSink(const TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe>& InSink, const FString& InSubjectName);
 
-    /** Change capture mode and immediately restart capture resources. */
+    /** Change capture mode and immediately restart capture resources. Game thread. */
     void StartCaptureWithMode(EO3DSenderCaptureMode InMode);
 
-    /** Forward PCM frames from submix/mic capture. */
+    /**
+     * Republish the immutable parameter snapshot (sink, label, gain, target format) that the
+     * audio and capture threads read (WP-S5, SND-6). Call on the game thread after changing
+     * Config or CaptureMode directly. SetAudioSink and StartCaptureWithMode call it.
+     */
+    void RefreshCaptureParams();
+
+    /** Forward PCM frames as if captured. Any thread; never touches this UObject's properties. */
     void PushFrames(const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec);
 
     UFUNCTION(BlueprintCallable, Category = "Open3DStream|Audio")
@@ -115,19 +124,21 @@ private:
     void StartMicCaptureIfReady();
     void SyncConfigSourceFromMode();
 
-    void ProcessAndSubmitAudio(const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec);
-
-    mutable FCriticalSection SinkMutex;
+    // Game-thread state. Audio and capture threads never read these (SND-6): they read the
+    // immutable snapshot published through CaptureRouter.
     FString SubjectName;  // Audio stream label is derived from this
-    FO3DTransportAudioConfig ActiveAudioConfig;
     TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> AudioSink;
 
+    /** Holds the current parameter snapshot; shared with the submix tap and the mic callback. */
+    TSharedPtr<FO3DSenderAudioCaptureRouter, ESPMode::ThreadSafe> CaptureRouter;
+
+    /** Scratch for PushFrames callers (per-producer scratch, SND-6); guarded by its own lock. */
+    TSharedPtr<FO3DSenderAudioProducerState, ESPMode::ThreadSafe> ExternalProducer;
+
     TSharedPtr<ISubmixBufferListener, ESPMode::ThreadSafe> SubmixTap;
+    /** The submix the tap was registered on; always the one it is unregistered from (SND-7). */
+    TWeakObjectPtr<USoundSubmix> TappedSubmix;
     TUniquePtr<Audio::FAudioCapture, FO3DAudioCaptureDeleter> MicCapture;
-
-    TArray<float> WorkingBuffer;
-
-    double LastRejectedLogTime = 0.0;
 
     bool bMicStreamOpen = false;
     bool bMicStreamActive = false;
