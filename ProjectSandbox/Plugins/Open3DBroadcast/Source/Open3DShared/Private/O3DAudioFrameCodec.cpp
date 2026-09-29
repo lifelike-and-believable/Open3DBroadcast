@@ -281,6 +281,58 @@ namespace O3DAudio
 		return false;
 	}
 
+	FMultiStreamFrameDecoder::FMultiStreamFrameDecoder(int32 InMaxStreams)
+		: MaxStreams(FMath::Max(1, InMaxStreams))
+	{
+	}
+
+	FMultiStreamFrameDecoder::~FMultiStreamFrameDecoder() = default;
+
+	bool FMultiStreamFrameDecoder::Decode(O3DS::EUnifiedCodec Codec,
+		const O3DS::FAudioFrameMeta& Meta,
+		const uint8* Payload,
+		int32 PayloadSize,
+		TArray<int16>& OutPcm16)
+	{
+		const FString Key = Meta.SourceGuid.ToString(EGuidFormats::Digits) + TEXT("|") + Meta.StreamLabel;
+
+		TUniquePtr<FStream>* Found = Streams.Find(Key);
+		if (!Found)
+		{
+			while (Streams.Num() >= MaxStreams)
+			{
+				FString OldestKey;
+				uint64 OldestUse = MAX_uint64;
+				for (const TPair<FString, TUniquePtr<FStream>>& Pair : Streams)
+				{
+					if (Pair.Value->LastUse < OldestUse)
+					{
+						OldestUse = Pair.Value->LastUse;
+						OldestKey = Pair.Key;
+					}
+				}
+				Streams.Remove(OldestKey);
+			}
+			Found = &Streams.Add(Key, MakeUnique<FStream>());
+		}
+
+		FStream& Stream = **Found;
+		Stream.LastUse = ++UseCounter;
+		return Stream.Decoder.Decode(Codec, Meta, Payload, PayloadSize, OutPcm16);
+	}
+
+	void ConvertFloatToPcm16(const float* In, int32 NumSamples, int16* Out)
+	{
+		if (!In || !Out)
+		{
+			return;
+		}
+		for (int32 Index = 0; Index < NumSamples; ++Index)
+		{
+			Out[Index] = FloatToPcm16(In[Index]);
+		}
+	}
+
 	bool SerializeForTransport(const FEncodedFrame& Frame, TArray<uint8>& OutPayload)
 	{
 		if (Frame.Encoded.Num() <= 0)
