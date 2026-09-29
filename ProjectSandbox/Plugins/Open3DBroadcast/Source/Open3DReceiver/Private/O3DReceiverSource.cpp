@@ -93,6 +93,11 @@ private:
     TWeakPtr<FO3DReceiverSource> Owner;
 };
 
+TSharedRef<ISerializedFrameConsumer, ESPMode::ThreadSafe> FO3DReceiverSource::MakeSerializedConsumer(TWeakPtr<FO3DReceiverSource> Owner)
+{
+    return MakeShared<FSerializedConsumer>(MoveTemp(Owner));
+}
+
 /** Lightweight audio bridge that republishes transport frames onto the gameplay audio bus. */
 class FO3DReceiverSource::FAudioSink : public IO3DReceiverAudioSink
 {
@@ -357,7 +362,7 @@ bool FO3DReceiverSource::StartTransport()
         }
     }
 
-    ActiveConsumer = MakeShared<FSerializedConsumer>(TWeakPtr<FO3DReceiverSource>(AsShared()));
+    ActiveConsumer = MakeSerializedConsumer(TWeakPtr<FO3DReceiverSource>(AsShared()));
     ActiveReceiver->SetConsumer(ActiveConsumer);
     if (!ActiveReceiver->Start())
     {

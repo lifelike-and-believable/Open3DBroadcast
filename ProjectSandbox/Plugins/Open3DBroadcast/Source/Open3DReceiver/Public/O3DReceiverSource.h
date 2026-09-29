@@ -61,6 +61,10 @@ private:
     class FSerializedConsumer;
     class FAudioSink;
 
+    // Builds the consumer StartTransport() hands to the transport. Defined in the .cpp,
+    // where FSerializedConsumer is a complete type (tests call it through their accessor).
+    static TSharedRef<ISerializedFrameConsumer, ESPMode::ThreadSafe> MakeSerializedConsumer(TWeakPtr<FO3DReceiverSource> Owner);
+
     // ArrivalEpochUsOverride == 0 means "capture the arrival time now" (the top-level
     // call from the serialized consumer); a nonzero value is used when re-invoking
     // after the transport-thread -> game-thread AsyncTask hop below, so the gated

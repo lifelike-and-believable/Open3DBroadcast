@@ -88,7 +88,7 @@ struct FO3DReceiverCorrectnessTestAccessor
     /** The same consumer object StartTransport() hands to a real transport. */
     static TSharedRef<ISerializedFrameConsumer> MakeConsumer(const TSharedRef<FO3DReceiverSource>& Source)
     {
-        return MakeShared<FO3DReceiverSource::FSerializedConsumer>(TWeakPtr<FO3DReceiverSource>(Source));
+        return FO3DReceiverSource::MakeSerializedConsumer(TWeakPtr<FO3DReceiverSource>(Source));
     }
 };
 
