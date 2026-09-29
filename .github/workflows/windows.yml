@@ -92,6 +92,16 @@ jobs:
           cmake --build _o3ds_build --config Release && cmake --install _o3ds_build --config Release
         shell: cmd
 
+      # CORE-19: run the core unit tests in the configuration the plugin
+      # ships (MSVC Release) before packaging. The per-PR equivalent is the
+      # `msvc` job in core-tests.yml. The `fuzz` label (fallback fuzz
+      # runners, test/fuzz) is left to the Linux sanitizer build.
+      - name: Run core unit tests
+        run: |
+          cd _o3ds_build
+          ctest -C Release -LE fuzz --output-on-failure
+        shell: cmd
+
       # C2 prerequisite (roadmap doc, Phase C2's "Float determinism" risk
       # note): runs the same deterministic synthetic-corpus/predictor-chain
       # probe built on Linux CI, but compiled with MSVC here. Diff this

@@ -120,7 +120,7 @@ namespace O3DS
 	class TransformList
 	{
 	private:
-		TransformList(const TransformList &other)
+		TransformList(const TransformList &)
 		{}
 
 	public:
@@ -158,7 +158,7 @@ namespace O3DS
 
 		Transform* find(const std::string &name)
 		{
-			for (auto i = 0; i < mItems.size(); i++)
+			for (size_t i = 0; i < mItems.size(); i++)
 			{
 				if (mItems[i]->mName == name)
 					return mItems[i];

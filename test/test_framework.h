@@ -16,6 +16,10 @@
 // TestFailure, which main.cpp catches per-test so one failure doesn't abort
 // the rest of the suite; the process exits non-zero if any test failed,
 // which is all `ctest` needs to mark the test red.
+//
+// Each test also records its source file; `o3ds_core_tests --suite <name>`
+// runs only the tests from <name>.cpp, which is how test/CMakeLists.txt
+// registers one CTest entry per test file.
 #pragma once
 
 #include <functional>
@@ -34,7 +38,20 @@ namespace o3ds_test
 	{
 		std::string name;
 		std::function<void()> fn;
+		std::string suite; // source file name without directory or extension
 	};
+
+	inline std::string SuiteFromPath(const char* path)
+	{
+		std::string s(path);
+		const size_t slash = s.find_last_of("/\\");
+		if (slash != std::string::npos)
+			s = s.substr(slash + 1);
+		const size_t dot = s.rfind('.');
+		if (dot != std::string::npos)
+			s = s.substr(0, dot);
+		return s;
+	}
 
 	inline std::vector<TestCase>& registry()
 	{
@@ -44,9 +61,9 @@ namespace o3ds_test
 
 	struct Registrar
 	{
-		Registrar(const char* name, std::function<void()> fn)
+		Registrar(const char* name, std::function<void()> fn, const char* file)
 		{
-			registry().push_back(TestCase{ name, std::move(fn) });
+			registry().push_back(TestCase{ name, std::move(fn), SuiteFromPath(file) });
 		}
 	};
 }
@@ -56,7 +73,7 @@ namespace o3ds_test
 
 #define O3DS_TEST(name) \
 	static void O3DS_TEST_CONCAT(o3ds_test_fn_, name)(); \
-	static o3ds_test::Registrar O3DS_TEST_CONCAT(o3ds_test_reg_, name)(#name, O3DS_TEST_CONCAT(o3ds_test_fn_, name)); \
+	static o3ds_test::Registrar O3DS_TEST_CONCAT(o3ds_test_reg_, name)(#name, O3DS_TEST_CONCAT(o3ds_test_fn_, name), __FILE__); \
 	static void O3DS_TEST_CONCAT(o3ds_test_fn_, name)()
 
 #define O3DS_CHECK(cond) \
