@@ -30,6 +30,9 @@ public:
     void HandlePipeRemoved();
 
 private:
+    // Test-only access to ProcessReceivedPayload (TRB-37 demux test).
+    friend struct FO3DNngReceiverTestAccessor;
+
     struct FNngSocketWrapper;
 
     bool OpenSocket();
