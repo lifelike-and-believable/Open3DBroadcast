@@ -334,7 +334,8 @@ void FO3DWebRTCReceiver::OnAudioReceivedEx(void* user, const int16_t* pcm_interl
     Self->AtomicFramesReceived.IncrementExchange();
     Self->AtomicBytesReceived.AddExchange(static_cast<int64>(frames_per_channel * channels) * static_cast<int64>(sizeof(int16)));
 
-    if (Self->AudioSink.IsValid())
+    const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> SinkPinned = Self->GetAudioSinkForCallback();
+    if (SinkPinned.IsValid())
     {
         // IMPORTANT: Audio labeling strategy
         // - track_name: The subject identifier we set during track creation (e.g., "Quincy")
@@ -363,7 +364,7 @@ void FO3DWebRTCReceiver::OnAudioReceivedEx(void* user, const int16_t* pcm_interl
         const size_t TotalSamples = frames_per_channel * channels;
         const size_t NumBytes = TotalSamples * sizeof(int16);
 
-        Self->AudioSink->SubmitPcm16(Meta, reinterpret_cast<const uint8*>(pcm_interleaved), (int32)NumBytes);
+        SinkPinned->SubmitPcm16(Meta, reinterpret_cast<const uint8*>(pcm_interleaved), (int32)NumBytes);
     }
     else
     {
@@ -387,7 +388,8 @@ void FO3DWebRTCReceiver::OnAudioReceived(void* user, const int16_t* pcm_interlea
     Self->AtomicFramesReceived.IncrementExchange();
     Self->AtomicBytesReceived.AddExchange(static_cast<int64>(frames_per_channel * channels) * static_cast<int64>(sizeof(int16)));
 
-    if (Self->AudioSink.IsValid())
+    const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> SinkPinned = Self->GetAudioSinkForCallback();
+    if (SinkPinned.IsValid())
     {
         // Fill audio metadata
         O3DS::FAudioFrameMeta Meta;
@@ -400,7 +402,7 @@ void FO3DWebRTCReceiver::OnAudioReceived(void* user, const int16_t* pcm_interlea
         const size_t TotalSamples = frames_per_channel * channels;
         const size_t NumBytes = TotalSamples * sizeof(int16);
 
-        Self->AudioSink->SubmitPcm16(Meta, reinterpret_cast<const uint8*>(pcm_interleaved), (int32)NumBytes);
+        SinkPinned->SubmitPcm16(Meta, reinterpret_cast<const uint8*>(pcm_interleaved), (int32)NumBytes);
     }
     else
     {
@@ -416,6 +418,12 @@ void FO3DWebRTCReceiver::OnAudioReceived(void* user, const int16_t* pcm_interlea
 
 FO3DWebRTCReceiver::FO3DWebRTCReceiver()
 {
+}
+
+TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> FO3DWebRTCReceiver::GetAudioSinkForCallback() const
+{
+    FScopeLock SinkLock(&AudioSinkMutex);
+    return AudioSink;
 }
 
 FO3DWebRTCReceiver::~FO3DWebRTCReceiver()
@@ -571,7 +579,13 @@ void FO3DWebRTCReceiver::Stop()
     }
 
     Consumer.Reset();
-    AudioSink.Reset();
+    {
+        // lk_disconnect/lk_client_destroy above have returned, so no audio callback is running
+        // (livekit_ffi.h: "After lk_disconnect() or lk_client_destroy() returns, no further
+        // callbacks will be invoked").
+        FScopeLock SinkLock(&AudioSinkMutex);
+        AudioSink.Reset();
+    }
     {
         FScopeLock PendingLock(&PendingFramesMutex);
         PendingFramesBySubject.Reset();
@@ -753,7 +767,10 @@ FO3DTransportStats FO3DWebRTCReceiver::GetStats() const
 void FO3DWebRTCReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig)
 {
     FScopeLock Lock(&StateMutex);
-    AudioSink = Sink;
+    {
+        FScopeLock SinkLock(&AudioSinkMutex);
+        AudioSink = Sink;
+    }
     ActiveAudioConfig = AudioConfig;
 
     if (ClientHandle && bInitialized.Load())

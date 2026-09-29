@@ -8,6 +8,8 @@
 #include "livekit_ffi.h"
 #include "o3ds/model.h"
 #include "O3DPerformanceMetrics.h"
+#include "O3DAudioFrameCodec.h"
+#include "O3DFfiContextRegistry.h"
 #include <vector>
 
 using WebRTCUtils::FromAnsi;
@@ -127,6 +129,15 @@ namespace WebRTCOptions
     }
 }
 
+namespace
+{
+    TO3DFfiContextRegistry<FWebRTCSenderLink>& GetSenderLinkRegistry()
+    {
+        static TO3DFfiContextRegistry<FWebRTCSenderLink> Registry;
+        return Registry;
+    }
+}
+
 /**
  * Audio sink implementation for WebRTC sender using LiveKit FFI.
  *
@@ -134,20 +145,17 @@ namespace WebRTCOptions
  * Each StreamLabel gets its own dedicated audio track, preventing distortion from multiple
  * concurrent audio sources.
  *
- * Optimized with reusable PCM conversion buffer to avoid per-frame allocations.
- * This significantly reduces allocator pressure on the audio thread.
- *
- * Key Features:
- * - Per-subject audio isolation (no mixing distortion)
- * - Automatic track creation on first audio for each subject
- * - Thread-safe via AudioTracksMutex in parent sender
- * - Graceful fallback if track creation fails
+ * Lifetime (WP-S5, TRF-1): the sink holds the shared FWebRTCSenderLink, never the sender. Every
+ * submit enters the link's gate and keeps it for the track lookup and the publish call, so
+ * Stop() (which closes the gate first) cannot destroy a track or the client mid-publish.
+ * PCM conversion uses call-local scratch with round-to-nearest (TRF-40).
  */
 class FWebRTCSenderAudioSink final : public IO3DSenderAudioSink
 {
 public:
-    FWebRTCSenderAudioSink(FO3DWebRTCSender& InOwner)
-        : Owner(InOwner), PcmConversionBuffer()
+    explicit FWebRTCSenderAudioSink(TSharedRef<FWebRTCSenderLink, ESPMode::ThreadSafe> InLink)
+        : Link(MoveTemp(InLink))
+        , BoundEpoch(Link->Gate->GetEpoch())
     {
     }
 
@@ -158,7 +166,13 @@ public:
             return false;
         }
 
-        if (!Owner.ClientHandle || !Owner.bConnected.Load())
+        FO3DLifetimeGate::FReadScope Scope(*Link->Gate, BoundEpoch);
+        if (!Scope)
+        {
+            return false;
+        }
+
+        if (!Link->ClientHandle || !Link->bConnected.Load())
         {
             return false;
         }
@@ -171,21 +185,14 @@ public:
             return false;
         }
 
-        // Reuse buffer, allocate only if necessary (optimization to reduce per-frame allocations)
+        // Call-local scratch: a sink may be fed by several threads and labels (TRF-40).
+        // Typical size: 960 samples * 2 channels.
         const int32 TotalSamples = NumFrames * NumChannels;
-        if (PcmConversionBuffer.Num() < TotalSamples)
-        {
-            PcmConversionBuffer.SetNumUninitialized(TotalSamples);
-        }
+        TArray<int16, TInlineAllocator<2048>> PcmConversionBuffer;
+        PcmConversionBuffer.SetNumUninitialized(TotalSamples);
+        O3DAudio::ConvertFloatToPcm16(Interleaved, TotalSamples, PcmConversionBuffer.GetData());
 
-        // Convert float to int16 with clamping
-        for (int32 i = 0; i < TotalSamples; ++i)
-        {
-            float Sample = FMath::Clamp(Interleaved[i], -1.0f, 1.0f);
-            PcmConversionBuffer[i] = static_cast<int16>(Sample * 32767.0f);
-        }
-
-        // Publish to labeled audio track
+        // Publish to labeled audio track. Still inside the gate, so Track stays valid.
         LkResult Result = lk_audio_track_publish_pcm_i16(
             Track,
             PcmConversionBuffer.GetData(),
@@ -213,42 +220,35 @@ public:
     }
 
 private:
-    FO3DWebRTCSender& Owner;
-
-    // Reusable buffer for float->int16 conversion (optimization: avoid per-frame allocation)
-    // Typical size: 960 samples * 2 channels * 2 bytes = 3840 bytes
-    TArray<int16> PcmConversionBuffer;
+    TSharedRef<FWebRTCSenderLink, ESPMode::ThreadSafe> Link;
+    const uint64 BoundEpoch;
 
     /**
      * Gets existing audio track for StreamLabel, or creates one if it doesn't exist.
-     * Thread-safe via Owner.AudioTracksMutex.
-     *
-     * @param StreamLabel Subject name / track identifier
-     * @param NumChannels Audio channel count (1=mono, 2=stereo)
-     * @param SampleRate Audio sample rate in Hz (e.g., 48000)
-     * @return Pointer to audio track, or nullptr if creation failed
+     * Called inside the gate; the map itself is guarded by Link->AudioTracksMutex.
      */
     LkAudioTrackHandle* GetOrCreateAudioTrack(const FString& StreamLabel, int32 NumChannels, int32 SampleRate)
     {
-        FScopeLock Lock(&Owner.AudioTracksMutex);
+        FScopeLock Lock(&Link->AudioTracksMutex);
 
         // Check if track already exists for this subject
-        LkAudioTrackHandle* const* ExistingTrack = Owner.AudioTracks.Find(StreamLabel);
+        LkAudioTrackHandle* const* ExistingTrack = Link->AudioTracks.Find(StreamLabel);
         if (ExistingTrack && *ExistingTrack)
         {
             return *ExistingTrack;
         }
 
         // Create new track with configuration
+        const FTCHARToUTF8 TrackNameUtf8(*StreamLabel);
         LkAudioTrackConfig TrackConfig;
-        TrackConfig.track_name = TCHAR_TO_UTF8(*StreamLabel);
+        TrackConfig.track_name = TrackNameUtf8.Get();
         TrackConfig.sample_rate = SampleRate;
         TrackConfig.channels = NumChannels;
         TrackConfig.buffer_ms = 100; // 100ms buffer for smooth audio streaming
 
         LkAudioTrackHandle* NewTrack = nullptr;
         LkResult Result = lk_audio_track_create(
-            Owner.ClientHandle,
+            Link->ClientHandle,
             &TrackConfig,
             &NewTrack
         );
@@ -266,7 +266,7 @@ private:
         }
 
         // Store and return new track
-        Owner.AudioTracks.Add(StreamLabel, NewTrack);
+        Link->AudioTracks.Add(StreamLabel, NewTrack);
         UE_LOG(LogO3DWebRTCSender, Log,
             TEXT("Created audio track '%s' (ch=%d, sr=%d kHz, buf=100ms)"),
             *StreamLabel, NumChannels, SampleRate / 1000);
@@ -278,7 +278,7 @@ private:
 // PHASE 10: Check if we should drop frames due to FFI backpressure
 bool FO3DWebRTCSender::ShouldDropFrameDueToBackpressure() const
 {
-    int32 Pending = EstimatedPendingFrames.Load();
+    int32 Pending = Link->EstimatedPendingFrames.Load();
     return Pending > DefaultBackpressureThreshold;
 }
 
@@ -314,9 +314,9 @@ void FO3DWebRTCSender::UpdateFrameSendMetrics(int32 SubjectsInFrame)
     {
         LastBackpressureDecayTimeSeconds = NowSeconds;
 
-        int32 Current = EstimatedPendingFrames.Load();
+        int32 Current = Link->EstimatedPendingFrames.Load();
         int32 Decayed = FMath::Max(0, Current - DefaultBackpressureDecayRate);
-        EstimatedPendingFrames.Store(Decayed);
+        Link->EstimatedPendingFrames.Store(Decayed);
 
         // Debug logging
         if (Decayed > DefaultBackpressureThreshold * 0.8)  // Warn if >80% of threshold
@@ -331,8 +331,9 @@ void FO3DWebRTCSender::UpdateFrameSendMetrics(int32 SubjectsInFrame)
 // Static callback for connection state changes
 void FO3DWebRTCSender::OnConnectionState(void* user, LkConnectionState state, int32_t reason_code, const char* message)
 {
-    FO3DWebRTCSender* Self = reinterpret_cast<FO3DWebRTCSender*>(user);
-    if (!Self) return;
+    // `user` is an opaque token (WP-S5); it resolves to the shared link, never to the sender.
+    const TSharedPtr<FWebRTCSenderLink, ESPMode::ThreadSafe> Self = GetSenderLinkRegistry().Resolve(user);
+    if (!Self.IsValid()) return;
 
     // Update metrics for connection state
     bool bNewConnectedState = false;
@@ -372,13 +373,17 @@ void FO3DWebRTCSender::OnConnectionState(void* user, LkConnectionState state, in
 }
 
 FO3DWebRTCSender::FO3DWebRTCSender()
+    : Link(MakeShared<FWebRTCSenderLink, ESPMode::ThreadSafe>())
 {
     // LiveKit FFI DLL is loaded automatically via .lib linkage
+    LinkToken = GetSenderLinkRegistry().Register(Link);
 }
 
 FO3DWebRTCSender::~FO3DWebRTCSender()
 {
     Stop();
+    GetSenderLinkRegistry().Unregister(LinkToken);
+    LinkToken = nullptr;
 }
 
 bool FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
@@ -425,7 +430,7 @@ bool FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
     }
 
     // Set connection callback
-    LkResult Result = lk_set_connection_callback(ClientHandle, FO3DWebRTCSender::OnConnectionState, this);
+    LkResult Result = lk_set_connection_callback(ClientHandle, FO3DWebRTCSender::OnConnectionState, LinkToken);
     if (Result.code != 0)
     {
         UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to set connection callback: %s"), *FromAnsi(Result.message));
@@ -460,6 +465,10 @@ bool FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
     SerializerPool = MakeUnique<FSerializerPool>(10);
     UE_LOG(LogO3DWebRTCSender, Log, TEXT("WebRTC sender: serialization pool initialized (10 items pre-allocated)"));
 
+    // Publish the client handle to audio sinks, then open a new audio epoch (WP-S5).
+    Link->ClientHandle = ClientHandle;
+    Link->Gate->Open();
+
     bInitialized.Store(true);
 
     UE_LOG(LogO3DWebRTCSender, Log, TEXT("WebRTC sender initialized: URL=%s Audio=%s PreferLossy=%s"),
@@ -480,7 +489,7 @@ bool FO3DWebRTCSender::Start()
         return false;
     }
 
-    if (bConnected.Load())
+    if (Link->bConnected.Load())
     {
         #if !WITH_DEV_AUTOMATION_TESTS
         UE_LOG(LogO3DWebRTCSender, Verbose, TEXT("WebRTC sender already connected"));
@@ -528,6 +537,10 @@ void FO3DWebRTCSender::Stop()
 {
     FScopeLock Lock(&StateMutex);
 
+    // WP-S5 (TRF-1): mark the audio path invalid before any handle is destroyed. Close()
+    // returns once every publish already inside a sink has finished.
+    Link->Gate->Close();
+
     if (!ClientHandle)
     {
         return;
@@ -535,8 +548,8 @@ void FO3DWebRTCSender::Stop()
 
     // Clean up all audio tracks before disconnecting
     {
-        FScopeLock AudioLock(&AudioTracksMutex);
-        for (auto& TrackEntry : AudioTracks)
+        FScopeLock AudioLock(&Link->AudioTracksMutex);
+        for (auto& TrackEntry : Link->AudioTracks)
         {
             if (TrackEntry.Value)
             {
@@ -551,10 +564,10 @@ void FO3DWebRTCSender::Stop()
                 TrackEntry.Value = nullptr;
             }
         }
-        AudioTracks.Reset();
+        Link->AudioTracks.Reset();
     }
 
-    if (bConnected.Load())
+    if (Link->bConnected.Load())
     {
         LkResult Result = lk_disconnect(ClientHandle);
         if (Result.code != 0 && Result.message)
@@ -570,6 +583,7 @@ void FO3DWebRTCSender::Stop()
 
     lk_client_destroy(ClientHandle);
     ClientHandle = nullptr;
+    Link->ClientHandle = nullptr;
 
     // Reset token manager
     if (TokenManager.IsValid())
@@ -577,7 +591,7 @@ void FO3DWebRTCSender::Stop()
         TokenManager->Reset();
     }
 
-    bConnected.Store(false);
+    Link->bConnected.Store(false);
     bInitialized.Store(false);
     bWaitingForToken.Store(false);
 
@@ -586,7 +600,7 @@ void FO3DWebRTCSender::Stop()
 
 bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
 {
-    if (!bConnected.Load())
+    if (!Link->bConnected.Load())
     {
         static double LastDisconnectedWarningTime = 0.0;
         const double Now = FPlatformTime::Seconds();
@@ -609,7 +623,7 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
     {
         UE_LOG(LogO3DWebRTCSender, Warning,
             TEXT("WebRTC backpressure: dropping frame (pending=%d)"),
-            EstimatedPendingFrames.Load());
+            Link->EstimatedPendingFrames.Load());
         FO3DPerformanceMetrics::Get().RecordFrameDropped();
         {
             FScopeLock Lock(&StatsMutex);
@@ -794,7 +808,7 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
 
         // PHASE 10: Update backpressure tracking
         // Increment estimated pending frames (will be decremented by periodic decay)
-        int32 NewPendingCount = EstimatedPendingFrames.IncrementExchange();
+        int32 NewPendingCount = Link->EstimatedPendingFrames.IncrementExchange();
 
         // PHASE 12: Enhanced diagnostics - log queue buildup patterns
         // This helps diagnose the 4070 ms latency spike by showing when the FFI queue backs up
@@ -841,7 +855,7 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
 
 bool FO3DWebRTCSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double /*CaptureTimestampSec*/)
 {
-    if (!bConnected.Load())
+    if (!Link->bConnected.Load())
     {
         FO3DPerformanceMetrics::Get().RecordFrameDropped();
         FScopeLock Lock(&StatsMutex);
@@ -853,7 +867,7 @@ bool FO3DWebRTCSender::SendSerialized(const uint8* Data, int32 Len, const FStrin
     {
         UE_LOG(LogO3DWebRTCSender, Warning,
             TEXT("WebRTC backpressure: dropping frame (pending=%d)"),
-            EstimatedPendingFrames.Load());
+            Link->EstimatedPendingFrames.Load());
         FO3DPerformanceMetrics::Get().RecordFrameDropped();
         FScopeLock Lock(&StatsMutex);
         Stats.DroppedFrames++;
@@ -945,7 +959,7 @@ bool FO3DWebRTCSender::SendBytes(const uint8* Data, int32 Len, const FString& Su
     FO3DPerformanceMetrics::Get().RecordBytesSent(Len);
     FO3DPerformanceMetrics::Get().RecordTransportFrameSent(TEXT("WebRTC"), Len);
 
-    EstimatedPendingFrames.IncrementExchange();
+    Link->EstimatedPendingFrames.IncrementExchange();
 
     {
         FScopeLock Lock(&StatsMutex);
@@ -961,7 +975,7 @@ void FO3DWebRTCSender::Tick(float DeltaSeconds)
     // LiveKit FFI handles internal event processing
 
     // Check if we're waiting for initial token and it's now available
-    if (bInitialized.Load() && !bConnected.Load() && !bWaitingForToken.Load())
+    if (bInitialized.Load() && !Link->bConnected.Load() && !bWaitingForToken.Load())
     {
         FString CurrentToken;
         if (TokenManager.IsValid() && TokenManager->GetCurrentToken(CurrentToken) && !CurrentToken.IsEmpty())
@@ -977,7 +991,7 @@ void FO3DWebRTCSender::Tick(float DeltaSeconds)
     }
 
     // Check for token refresh if connected
-    if (bConnected.Load())
+    if (Link->bConnected.Load())
     {
         CheckTokenRefresh();
     }
@@ -1013,7 +1027,7 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DWebRTCSender::CreateAud
         }
     }
 
-    return MakeShared<FWebRTCSenderAudioSink, ESPMode::ThreadSafe>(*this);
+    return MakeShared<FWebRTCSenderAudioSink, ESPMode::ThreadSafe>(Link);
 }
 
 bool FO3DWebRTCSender::ParseConfig(const FO3DTransportConfig& Config)
