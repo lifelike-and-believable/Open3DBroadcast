@@ -1,6 +1,8 @@
 #include "SocketsUdpSender.h"
 
 #include "O3DSenderAudioSinkBase.h"
+#include "HAL/Runnable.h"
+#include "HAL/RunnableThread.h"
 #include "O3DAudioSerialization.h"
 #include "O3DUnifiedMessage.h"
 #include "O3DTransportTypes.h"
@@ -20,56 +22,73 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogSocketsUdpSender, Log, All);
 
-class FSocketsUdpSenderAudioSink final : public FO3DSenderAudioSinkBase
+/**
+ * UDP audio sink (WP-S5: TRB-10, TRB-11). Encodes with its own encoders on the calling thread
+ * and hands the unified message to the audio worker. Never touches the socket or the sender.
+ */
+class FSocketsUdpSenderAudioSink final : public FO3DGatedSenderAudioSink
 {
 public:
-	FSocketsUdpSenderAudioSink(TSharedPtr<FSocketsUdpSenderOwnerGuard, ESPMode::ThreadSafe> InOwnerGuard, FO3DTransportAudioConfig InConfig)
-		: FO3DSenderAudioSinkBase(MoveTemp(InConfig))
-		, OwnerGuard(MoveTemp(InOwnerGuard))
+	FSocketsUdpSenderAudioSink(TSharedRef<FSocketsUdpPublishState, ESPMode::ThreadSafe> InState, FO3DTransportAudioConfig InConfig, FO3DSinkAudioEncoder::FSettings InEncoderSettings)
+		: FO3DGatedSenderAudioSink(MoveTemp(InConfig), InState->Gate, MoveTemp(InEncoderSettings))
+		, State(MoveTemp(InState))
 	{
 	}
 
-	virtual bool OnSubmitPcmInternal(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
+protected:
+	virtual bool OnSubmitGated(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
 	{
-		if (!OwnerGuard.IsValid())
+		if (!State->bSocketReady.load())
 		{
 			return false;
 		}
 
-		// Holding this lock blocks the sender's destructor (which takes the
-		// same lock to null out Owner) until this call returns, so Owner is
-		// guaranteed valid for the duration of the call below.
-		FScopeLock Lock(&OwnerGuard->Lock);
-		if (!OwnerGuard->Owner)
+		TArray<uint8> Unified;
+		if (!GetEncoder().EncodeUnified(StreamLabel, State->LastSubject.Get(), Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Unified))
 		{
 			return false;
 		}
-		return OwnerGuard->Owner->ProcessCapturedAudio(StreamLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
+
+		const int64 Size = Unified.Num();
+		if (!State->AudioQueue.Enqueue(MoveTemp(Unified)))
+		{
+			return false;
+		}
+		State->AudioBytesQueued.fetch_add(Size);
+		return true;
 	}
 
 private:
-	TSharedPtr<FSocketsUdpSenderOwnerGuard, ESPMode::ThreadSafe> OwnerGuard;
+	TSharedRef<FSocketsUdpPublishState, ESPMode::ThreadSafe> State;
+};
+
+/** Audio send worker. Lifetime is nested inside the sender's: joined in Stop() and the destructor. */
+class FO3DSocketsUdpSender::FUdpAudioRunnable final : public FRunnable
+{
+public:
+	explicit FUdpAudioRunnable(FO3DSocketsUdpSender& InOwner)
+		: Owner(InOwner)
+	{
+	}
+
+	virtual uint32 Run() override
+	{
+		return Owner.RunAudioWorker();
+	}
+
+private:
+	FO3DSocketsUdpSender& Owner;
 };
 
 FO3DSocketsUdpSender::FO3DSocketsUdpSender()
+	: PublishState(MakeShared<FSocketsUdpPublishState, ESPMode::ThreadSafe>())
 {
-	OwnerGuard = MakeShared<FSocketsUdpSenderOwnerGuard, ESPMode::ThreadSafe>();
-	OwnerGuard->Owner = this;
 }
 
 FO3DSocketsUdpSender::~FO3DSocketsUdpSender()
 {
-	// Invalidate before tearing down anything else: any audio-thread call
-	// already inside FSocketsUdpSenderAudioSink::OnSubmitPcmInternal is
-	// holding OwnerGuard->Lock, so this blocks until that call returns, and
-	// every call after this point sees Owner == nullptr instead of touching
-	// a partially/fully destroyed sender.
-	if (OwnerGuard.IsValid())
-	{
-		FScopeLock Lock(&OwnerGuard->Lock);
-		OwnerGuard->Owner = nullptr;
-	}
-
+	// Stop() closes the audio gate first (waiting for in-flight submits), then joins the
+	// audio worker, then destroys the socket.
 	Stop();
 }
 
@@ -86,10 +105,8 @@ bool FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& Config)
 	RemotePort = 0;
 	StreamId = ActiveConfig.StreamId;
 	RemoteAddr.Reset();
-	{
-		FScopeLock Lock(&SubjectNameLock);
-		LastSubjectName.Reset();
-	}
+	PublishState->LastSubject.Reset();
+	PublishState->AudioBytesQueued.store(0);
 
 	ActiveAudioConfig = Config.Audio;
 	AudioSourceGuid = FGuid::NewGuid();
@@ -136,7 +153,7 @@ bool FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& Config)
 
 	// Note: Audio stream label is now automatically derived from StreamId
 
-	RefreshAudioEncoder();
+	PublishState->Gate->Open();
 
 	return true;
 }
@@ -144,22 +161,82 @@ bool FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& Config)
 bool FO3DSocketsUdpSender::Start()
 {
 	DestroySocket();
-	return CreateSocket();
+	PublishState->Gate->Open();
+	if (!CreateSocket())
+	{
+		return false;
+	}
+	StartAudioWorker();
+	return true;
 }
 
 void FO3DSocketsUdpSender::Stop()
 {
+	// WP-S5 ordering: close the audio gate (waits for in-flight submits), join the audio
+	// worker, destroy the socket, then drop anything still queued.
+	PublishState->Gate->Close();
+	StopAudioWorker();
 	DestroySocket();
+	PublishState->AudioQueue.Empty();
 	SocketSubsystem = nullptr;
+}
+
+void FO3DSocketsUdpSender::StartAudioWorker()
+{
+	if (AudioWorkerThread)
+	{
+		return;
+	}
+	bStopAudioWorker.store(false);
+	AudioWorker = new FUdpAudioRunnable(*this);
+	AudioWorkerThread = FRunnableThread::Create(AudioWorker, TEXT("O3D_UDP_Audio_Worker"));
+	if (!AudioWorkerThread)
+	{
+		delete AudioWorker;
+		AudioWorker = nullptr;
+	}
+}
+
+void FO3DSocketsUdpSender::StopAudioWorker()
+{
+	bStopAudioWorker.store(true);
+	PublishState->AudioQueue.Wake();
+	if (AudioWorkerThread)
+	{
+		AudioWorkerThread->WaitForCompletion();
+		delete AudioWorkerThread;
+		AudioWorkerThread = nullptr;
+	}
+	delete AudioWorker;
+	AudioWorker = nullptr;
+}
+
+uint32 FO3DSocketsUdpSender::RunAudioWorker()
+{
+	TArray<uint8> Bytes;
+	while (!bStopAudioWorker.load())
+	{
+		if (!PublishState->AudioQueue.Dequeue(Bytes))
+		{
+			PublishState->AudioQueue.WaitForWork(50);
+			continue;
+		}
+
+		FScopeLock Lock(&SocketLock);
+		if (Socket && RemoteAddr.IsValid())
+		{
+			SendPayload(Socket, RemoteAddr, Bytes.GetData(), Bytes.Num(), TEXT("audio"));
+		}
+	}
+	return 0;
 }
 
 bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
 {
 	// Guards Socket/RemoteAddr against a concurrent CreateSocket()/DestroySocket()
 	// from Start()/Stop() (which take the same lock), and against the audio
-	// thread's ProcessCapturedAudio()/SendEncodedAudio() call, which runs
-	// entirely inside this same lock (see FSocketsUdpSenderAudioSink above).
-	FScopeLock Lock(&OwnerGuard->Lock);
+	// worker's sends. The audio thread itself never takes this lock (WP-S5).
+	FScopeLock Lock(&SocketLock);
 
 	if (!Socket || !RemoteAddr.IsValid())
 	{
@@ -187,8 +264,7 @@ bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
 
 	if (!ObservedSubject.IsEmpty())
 	{
-		FScopeLock NameLock(&SubjectNameLock);
-		LastSubjectName = MoveTemp(ObservedSubject);
+		PublishState->LastSubject.Set(ObservedSubject);
 	}
 
 	if (!SendPayload(Socket, RemoteAddr, reinterpret_cast<const uint8*>(SerializationScratch.data()), BytesWritten, TEXT("data")))
@@ -210,11 +286,10 @@ bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
 
 bool FO3DSocketsUdpSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double /*CaptureTimestampSec*/)
 {
-	// Same OwnerGuard lock discipline as Send(SubjectList&) above - guards
+	// Same SocketLock discipline as Send(SubjectList&) above - guards
 	// Socket/RemoteAddr against a concurrent CreateSocket()/DestroySocket()
-	// from Start()/Stop(), and against the audio thread's
-	// ProcessCapturedAudio()/SendEncodedAudio() call.
-	FScopeLock Lock(&OwnerGuard->Lock);
+	// from Start()/Stop(), and against the audio worker's sends.
+	FScopeLock Lock(&SocketLock);
 
 	if (!Socket || !RemoteAddr.IsValid() || Len <= 0)
 	{
@@ -223,8 +298,7 @@ bool FO3DSocketsUdpSender::SendSerialized(const uint8* Data, int32 Len, const FS
 
 	if (!SubjectName.IsEmpty())
 	{
-		FScopeLock NameLock(&SubjectNameLock);
-		LastSubjectName = SubjectName;
+		PublishState->LastSubject.Set(SubjectName);
 	}
 
 	if (!SendPayload(Socket, RemoteAddr, Data, Len, TEXT("data")))
@@ -250,7 +324,9 @@ void FO3DSocketsUdpSender::Tick(float /*DeltaSeconds*/)
 FO3DTransportStats FO3DSocketsUdpSender::GetStats() const
 {
 	FScopeLock Lock(&StatsMutex);
-	return Stats;
+	FO3DTransportStats Copy = Stats;
+	Copy.BytesSent += PublishState->AudioBytesQueued.load();
+	return Copy;
 }
 
 bool FO3DSocketsUdpSender::SupportsAudio() const
@@ -270,9 +346,16 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DSocketsUdpSender::Creat
 	// Note: Audio stream label is now automatically derived from StreamId
 
 	ActiveAudioConfig = EffectiveConfig;
-	RefreshAudioEncoder();
 
-	return MakeShared<FSocketsUdpSenderAudioSink, ESPMode::ThreadSafe>(OwnerGuard, ActiveAudioConfig);
+	// Immutable snapshot for this sink's own encoders (TRB-11): nothing reconfigures them later.
+	const FString StreamFallback = ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId;
+	FO3DSinkAudioEncoder::FSettings EncoderSettings;
+	EncoderSettings.Config = ActiveAudioConfig;
+	EncoderSettings.DefaultStreamLabel = StreamFallback;
+	EncoderSettings.DefaultSubject = StreamFallback;
+	EncoderSettings.SourceGuid = AudioSourceGuid;
+
+	return MakeShared<FSocketsUdpSenderAudioSink, ESPMode::ThreadSafe>(PublishState, ActiveAudioConfig, MoveTemp(EncoderSettings));
 }
 
 bool FO3DSocketsUdpSender::ResolveRemoteAddress(const FString& Host, int32 Port)
@@ -340,7 +423,7 @@ bool FO3DSocketsUdpSender::CreateSocket()
 	// Same lock as Send()/DestroySocket(); FCriticalSection is recursive in
 	// UE so the DestroySocket() call below re-entering the lock on this
 	// thread is safe.
-	FScopeLock Lock(&OwnerGuard->Lock);
+	FScopeLock Lock(&SocketLock);
 
 	if (!SocketSubsystem || !RemoteAddr.IsValid())
 	{
@@ -371,15 +454,17 @@ bool FO3DSocketsUdpSender::CreateSocket()
 	UE_LOG(LogSocketsUdpSender, Log, TEXT("UDP sender targeting %s:%d (broadcast=%d, maxDatagram=%d, mtu=%d, sendBuf=%d)."),
 		*RemoteAddr->ToString(false), RemoteAddr->GetPort(), bAllowBroadcast ? 1 : 0, MaxDatagramBytes, MtuBytes, AppliedSize);
 
+	PublishState->bSocketReady.store(true);
 	return true;
 }
 
 void FO3DSocketsUdpSender::DestroySocket()
 {
 	// Same lock as Send()/CreateSocket(); recursive-safe when called from
-	// CreateSocket() above, and blocks until any in-flight audio-thread call
-	// (see FSocketsUdpSenderAudioSink) has finished reading Socket.
-	FScopeLock Lock(&OwnerGuard->Lock);
+	// CreateSocket() above, and blocks until any in-flight audio-worker send
+	// has finished reading Socket.
+	FScopeLock Lock(&SocketLock);
+	PublishState->bSocketReady.store(false);
 
 	if (Socket && SocketSubsystem)
 	{
@@ -456,71 +541,5 @@ bool FO3DSocketsUdpSender::SendFragmented(FSocket* InSocket, const TSharedPtr<FI
 		}
 	}
 
-	return true;
-}
-
-void FO3DSocketsUdpSender::RefreshAudioEncoder()
-{
-	// Note: Audio stream label is now automatically derived from StreamId
-	const FString StreamLabelFallback = ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId;
-	const FString SubjectFallback = ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId;
-
-	bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, StreamLabelFallback, SubjectFallback);
-}
-
-bool FO3DSocketsUdpSender::ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec)
-{
-	if (!bAudioEncoderInitialized || !Socket || !RemoteAddr.IsValid())
-	{
-		return false;
-	}
-
-	FString SubjectForAudio;
-	{
-		FScopeLock Lock(&SubjectNameLock);
-		SubjectForAudio = LastSubjectName;
-	}
-	if (SubjectForAudio.IsEmpty())
-	{
-		SubjectForAudio = ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId;
-	}
-
-	O3DAudio::FEncodedFrame Frame;
-	if (!AudioEncoder.BuildEncodedFrame(StreamLabel, SubjectForAudio, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Frame))
-	{
-		return false;
-	}
-
-	if (Frame.Meta.SubjectName.IsEmpty())
-	{
-		Frame.Meta.SubjectName = SubjectForAudio;
-	}
-	Frame.Meta.SourceGuid = AudioSourceGuid;
-
-	return SendEncodedAudio(Frame, TimestampSec);
-}
-
-bool FO3DSocketsUdpSender::SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, double TimestampSec)
-{
-	if (Frame.Encoded.Num() <= 0)
-	{
-		return false;
-	}
-
-	if (!O3DAudio::CreateUnifiedAudioMessage(Frame, TimestampSec, UnifiedAudioScratch))
-	{
-		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP sender failed to create unified audio message"));
-		return false;
-	}
-
-	if (!SendPayload(Socket, RemoteAddr, UnifiedAudioScratch.GetData(), UnifiedAudioScratch.Num(), TEXT("audio")))
-	{
-		return false;
-	}
-
-	{
-		FScopeLock Lock(&StatsMutex);
-		Stats.BytesSent += UnifiedAudioScratch.Num();
-	}
 	return true;
 }

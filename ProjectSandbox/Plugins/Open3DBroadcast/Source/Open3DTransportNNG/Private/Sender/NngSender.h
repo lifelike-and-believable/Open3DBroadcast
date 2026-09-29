@@ -3,17 +3,48 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Containers/Queue.h"
-#include "HAL/ThreadSafeCounter.h"
 #include "HAL/CriticalSection.h"
 
 #include "O3DSenderInterface.h"
 #include "Shared/NngHelpers.h"
 #include "O3DAudioFrameCodec.h"
+#include "O3DEncodedPayloadQueue.h"
+#include "O3DLifetimeGate.h"
+#include "O3DSinkAudioEncoder.h"
+
+#include <atomic>
+
+class FRunnableThread;
+
+/**
+ * Publish state shared between FO3DNngSender, its worker and its audio sinks
+ * (ADR 0007 addendum, WP-S5: TRB-10, TRB-12, TRB-35). No sender pointer, no socket.
+ */
+struct FNngSenderPublishState
+{
+    TSharedRef<FO3DLifetimeGate, ESPMode::ThreadSafe> Gate = MakeShared<FO3DLifetimeGate, ESPMode::ThreadSafe>();
+    /** Mocap and audio payloads for the worker; owns the worker's wake event. */
+    FO3DEncodedPayloadQueue SendQueue;
+    FO3DAudioSubjectSlot LastSubject;
+    std::atomic<int64> AudioDropped{0};
+};
+
+/**
+ * Context for the NNG pipe-notify callback, reached through an opaque token (TRF-12 pattern).
+ * Holds atomics only, so an NNG thread may drop the last reference.
+ */
+struct FNngSenderPipeContext
+{
+    std::atomic<int32> PipeCount{0};
+    std::atomic<bool> bConnected{false};
+    /** True for listening/pub sockets, which stay "connected" with no pipes. */
+    std::atomic<bool> bConnectedWithoutPipes{true};
+};
 
 class FO3DNngSender : public IOpen3DSender
 {
 public:
+    FO3DNngSender();
     virtual ~FO3DNngSender() override;
 
     virtual bool Initialize(const FO3DTransportConfig& Config) override;
@@ -26,23 +57,13 @@ public:
     virtual bool SupportsAudio() const override { return true; }
     virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
 
-    bool IsConnected() const { return bConnected.Load(); }
-
-    void HandlePipeAdded();
-    void HandlePipeRemoved();
+    bool IsConnected() const { return PipeContext->bConnected.load(); }
 
 private:
-    struct FQueuedPayload
-    {
-        TArray<uint8> Bytes;
-    };
-
     struct FNngSocketWrapper;
     class FNngSenderRunnable;
-    class FNngSenderAudioSink;
 
     friend class FNngSenderRunnable;
-    friend class FNngSenderAudioSink;
 
     bool OpenSocket();
     void CloseSocket();
@@ -53,9 +74,7 @@ private:
     bool EnqueuePayload(const uint8* Data, int32 Size);
     void DrainQueue();
     void HandleSendError(int ErrorCode);
-    void RefreshAudioEncoder();
-    bool ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec);
-    bool SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, double TimestampSec);
+    FString ResolveAudioSubjectFallback() const;
 
     mutable FCriticalSection StateMutex;
     mutable FCriticalSection StatsMutex;
@@ -65,28 +84,20 @@ private:
     FO3DTransportConfig ActiveConfig;
     FO3DTransportAudioConfig ActiveAudioConfig;
     FGuid AudioSourceGuid;
-    bool bAudioEncoderInitialized = false;
-    O3DAudio::FFrameEncoder AudioEncoder;
-    TArray<uint8> UnifiedAudioScratch;
 
     TAtomic<bool> bInitialized{ false };
     TAtomic<bool> bRunning{ false };
     TAtomic<bool> bStopWorker{ false };
-    TAtomic<bool> bConnected{ false };
 
     FNngSocketWrapper* Socket = nullptr;
 
     FNngSenderRunnable* Worker = nullptr;
     FRunnableThread* WorkerThread = nullptr;
-    FEvent* WakeEvent = nullptr;
 
-    TQueue<FQueuedPayload, EQueueMode::Mpsc> Queue;
-    TAtomic<uint64> QueueBytes{ 0 };
-
-    mutable FCriticalSection SubjectNameLock;
-    FString LastSubjectName;
-
-    FThreadSafeCounter PipeCount;
+    TSharedRef<FNngSenderPublishState, ESPMode::ThreadSafe> PublishState;
+    TSharedRef<FNngSenderPipeContext, ESPMode::ThreadSafe> PipeContext;
+    /** Opaque nng_pipe_notify user data; resolves to PipeContext until the destructor. */
+    void* PipeToken = nullptr;
 
     double LastErrorLogTimestamp = 0.0;
     double LastBackoffAttemptTime = 0.0;
