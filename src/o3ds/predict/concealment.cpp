@@ -174,6 +174,7 @@ namespace O3DS
 		mLastReal = sample;
 		mHasHistory = true;
 		mConcealing = false;
+		mRenderAheadDue = true;
 
 		if (endingConcealment)
 		{
@@ -262,6 +263,11 @@ namespace O3DS
 	{
 		if (!mHasHistory || mConfig.renderAheadSeconds <= 0.0) return false;
 
+		// RCV-10: the target depends only on the newest real frame, so a
+		// second call before the next real frame would produce the same
+		// future pose again. Produce it once per real frame.
+		if (!mRenderAheadDue) return false;
+
 		const double target = mLastReal.t + mConfig.renderAheadSeconds;
 		PoseSample predicted;
 		if (!mPredictor->Predict(target, predicted))
@@ -274,6 +280,7 @@ namespace O3DS
 		}
 
 		outPose = predicted;
+		mRenderAheadDue = false;
 		++mMetrics.renderAheadFrameCount;
 		return true;
 	}
@@ -290,6 +297,7 @@ namespace O3DS
 		mCorrectionBase = PoseSample();
 		mLastOutput = PoseSample();
 		mHasLastOutput = false;
+		mRenderAheadDue = false;
 		// Metrics deliberately persist across Reset() - they're a
 		// session-level HUD signal (C1.d), not per-topology-epoch state.
 	}

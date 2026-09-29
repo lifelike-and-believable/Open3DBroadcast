@@ -13,6 +13,7 @@
 #include "Sockets.h"
 
 #include "O3DTransportTypes.h"
+#include "O3DUnifiedMessage.h"
 #include "SerializedFrameConsumerRegistry.h"
 
 #include "o3ds/model.h"
@@ -318,6 +319,48 @@ bool FO3DNngQueueLimitTest::RunTest(const FString& Parameters)
 
 	const FO3DTransportStats SenderStats = Sender.GetStats();
 	TestEqual(TEXT("Dropped frame recorded"), static_cast<int64>(SenderStats.DroppedFrames), static_cast<int64>(1));
+
+	return true;
+}
+
+struct FO3DNngReceiverTestAccessor
+{
+	static bool ProcessReceivedPayload(FO3DNngReceiver& Receiver, const TArray<uint8>& Bytes)
+	{
+		return Receiver.ProcessReceivedPayload(Bytes.GetData(), Bytes.Num());
+	}
+};
+
+// TRB-37: a unified-wrapped mocap frame reaches the consumer without the 20-byte
+// unified header, and a raw (legacy) frame reaches it unchanged. No sockets: the
+// demux is driven directly.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DNngReceiverUnifiedMocapTest, "Open3DBroadcast.Transport.NNG.Demux.UnifiedMocapStripsHeader", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FO3DNngReceiverUnifiedMocapTest::RunTest(const FString& Parameters)
+{
+	O3DS::SubjectList SubjectList;
+	PopulateSubjectList(SubjectList, TEXT("NNGDemuxSubject"), 2);
+	std::vector<char> Wire;
+	SubjectList.Serialize(Wire, 1.0);
+	TArray<uint8> Raw;
+	Raw.Append(reinterpret_cast<const uint8*>(Wire.data()), static_cast<int32>(Wire.size()));
+
+	TArray<uint8> Unified;
+	TestTrue(TEXT("Unified message built"), O3DS::CreateUnifiedMessage(O3DS::EUnifiedKind::Mocap, O3DS::EUnifiedCodec::O3DS, Raw.GetData(), Raw.Num(), 1.0, Unified));
+
+	FO3DNngReceiver Receiver;
+	TSharedPtr<FTestFrameConsumer, ESPMode::ThreadSafe> FrameConsumer = MakeShared<FTestFrameConsumer, ESPMode::ThreadSafe>();
+	Receiver.SetConsumer(FrameConsumer);
+
+	TestTrue(TEXT("Unified mocap accepted"), FO3DNngReceiverTestAccessor::ProcessReceivedPayload(Receiver, Unified));
+	TestTrue(TEXT("Consumer invoked for unified mocap"), FrameConsumer->WasInvoked());
+	TestTrue(TEXT("Unified header stripped"), FrameConsumer->GetPayload() == Raw);
+
+	O3DS::SubjectList Parsed;
+	TestTrue(TEXT("Stripped payload parses"), Parsed.Parse(reinterpret_cast<const char*>(FrameConsumer->GetPayload().GetData()), FrameConsumer->GetPayload().Num()));
+
+	FrameConsumer->Reset();
+	TestTrue(TEXT("Raw mocap accepted"), FO3DNngReceiverTestAccessor::ProcessReceivedPayload(Receiver, Raw));
+	TestTrue(TEXT("Raw payload passed through unchanged"), FrameConsumer->GetPayload() == Raw);
 
 	return true;
 }

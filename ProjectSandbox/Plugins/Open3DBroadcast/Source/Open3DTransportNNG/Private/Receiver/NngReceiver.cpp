@@ -505,12 +505,18 @@ bool FO3DNngReceiver::ProcessReceivedPayload(const uint8* Data, int32 Size)
         }
         else if (Header.GetKind() == O3DS::EUnifiedKind::Mocap)
         {
-            // Route mocap data to the frame consumer
+            // Route mocap data to the frame consumer. TRB-37: hand over only the
+            // payload after the 20-byte unified header, as the TCP and UDP receivers
+            // do; the consumer expects a bare O3DS frame.
+            if (!PayloadPtr || PayloadSize <= 0)
+            {
+                return false;
+            }
             if (TSharedPtr<ISerializedFrameConsumer> ConsumerPinned = Consumer.Pin())
             {
                 TArray<uint8> Payload;
-                Payload.SetNumUninitialized(Size);
-                FMemory::Memcpy(Payload.GetData(), Data, Size);
+                Payload.SetNumUninitialized(PayloadSize);
+                FMemory::Memcpy(Payload.GetData(), PayloadPtr, PayloadSize);
                 ConsumerPinned->SubmitFrame(Options.StreamId, Payload, FPlatformTime::Seconds());
                 return true;
             }
