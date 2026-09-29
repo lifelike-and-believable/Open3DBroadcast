@@ -86,7 +86,32 @@ jobs:
 
       - name: Run tests (ctest, ASan/UBSan active)
         working-directory: build
-        run: ctest --output-on-failure
+        # -LE fuzz: the fallback fuzz runners have their own step below.
+        run: ctest -LE fuzz --output-on-failure
+
+      # WP-T1: deterministic fallback fuzz runners (test/fuzz,
+      # fuzz_replay_main.cpp) - each fuzz target fed 20,000 fixed-seed
+      # mutations of its seed corpus, under the same ASan/UBSan build.
+      # Expected to FAIL on develop until WP-S1 and WP-S2 merge: the parse
+      # and peek_meta runners hit CORE-1 (CalcMatrices matrix index in
+      # model.cpp) and udp_reassembly hits a use-after-free in
+      # UdpMapper::getFrame (and CORE-2 behind it). continue-on-error until
+      # then; make this step required (remove continue-on-error) once both
+      # have merged. A failing runner saves its input as
+      # build/test/fuzz/o3ds-fuzz-crash-<target>.bin (uploaded below).
+      - name: Run fallback fuzz runners (ctest -L fuzz)
+        id: fuzz_fallback
+        continue-on-error: true
+        working-directory: build
+        run: ctest -L fuzz --output-on-failure
+
+      - name: Upload fallback fuzz crash inputs
+        if: steps.fuzz_fallback.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-fallback-crashes
+          path: build/test/fuzz/o3ds-fuzz-crash-*.bin
+          if-no-files-found: ignore
 
       # C2 prerequisite (roadmap doc, Phase C2's "Float determinism" risk
       # note): runs the same deterministic synthetic-corpus/predictor-chain
@@ -98,3 +123,219 @@ jobs:
       # - just surfaces the numbers.
       - name: Run Determinism Probe (C2 prototype)
         run: build/apps/DeterminismProbe/DeterminismProbe
+
+  fuzz:
+    # WP-T1: coverage-guided libFuzzer run of every target in test/fuzz
+    # (Parse, the update and residual paths, PeekMeta, UDP reassembly,
+    # ReorderGate) for 60 s each, with ASan/UBSan. Pinned to ubuntu-24.04
+    # so the clang-18 / libclang-rt-18-dev package names stay valid.
+    name: Fuzz (Clang libFuzzer, 60 s per target)
+    runs-on: ubuntu-24.04
+    # Expected to FAIL on develop until WP-S1 and WP-S2 merge (CORE-1 in
+    # the parse targets; the UdpMapper::getFrame use-after-free and CORE-2
+    # in udp_reassembly). Remove continue-on-error once both have merged.
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Init required submodules
+        run: git submodule update --init thirdparty/flatbuffers thirdparty/crccpp thirdparty/nng
+
+      - name: Install build tools
+        # libclang-rt-18-dev carries the libFuzzer and sanitizer runtimes.
+        run: sudo apt-get update && sudo apt-get install -y ninja-build clang-18 libclang-rt-18-dev
+
+      # Dependencies are built with the default compiler, exactly as in the
+      # `test` job; only O3DS itself needs the fuzzing instrumentation.
+      - name: Build & install NNG
+        working-directory: thirdparty/nng
+        run: |
+          cmake -B build -G Ninja -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/usr" \
+            -DCMAKE_BUILD_TYPE=Release -DNNG_TESTS=OFF -DNNG_ENABLE_TLS=OFF
+          cmake --build build
+          cmake --install build
+
+      - name: Build & install CRCpp
+        working-directory: thirdparty/crccpp
+        run: |
+          cmake -B build -G Ninja -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/usr"
+          cmake --build build
+          cmake --install build
+
+      - name: Build & install FlatBuffers
+        working-directory: thirdparty/flatbuffers
+        run: |
+          # See the same step in the `test` job for why these are disabled.
+          cmake -B build -G Ninja -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/usr" \
+            -DCMAKE_BUILD_TYPE=Release -DFLATBUFFERS_BUILD_TESTS=OFF \
+            -DCMAKE_CXX_FLAGS="-Wno-stringop-overflow -Wno-stringop-overread -Wno-array-bounds -Wno-restrict"
+          cmake --build build
+          cmake --install build
+
+      - name: Configure fuzz targets
+        run: |
+          cmake -B build-fuzz -G Ninja \
+            -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/usr" \
+            -DO3DS_DISABLE_WEBRTC=ON \
+            -DO3DS_BUILD_TESTS=OFF \
+            -DO3DS_BUILD_FUZZERS=ON
+
+      - name: Build fuzz targets and seed corpora
+        run: |
+          cmake --build build-fuzz
+          cmake --build build-fuzz --target o3ds_fuzz_corpus
+
+      - name: Run each fuzz target for 60 s
+        shell: bash
+        run: |
+          mkdir -p fuzz-artifacts
+          failed=""
+          for target in parse parse_update residual peek_meta udp_reassembly reorder_gate; do
+            echo "::group::o3ds_fuzz_$target"
+            if ! build-fuzz/test/fuzz/o3ds_fuzz_$target "build-fuzz/test/fuzz/corpus/$target" \
+                -max_total_time=60 -print_final_stats=1 \
+                -artifact_prefix="fuzz-artifacts/$target-"; then
+              failed="$failed $target"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::fuzz targets with findings:$failed (inputs are in the fuzz-crashes artifact)"
+            exit 1
+          fi
+
+      - name: Upload fuzz crash inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: fuzz-artifacts/
+          if-no-files-found: ignore
+
+  warnings:
+    # CORE-20 warning ratchet. -Wall -Wextra is on for O3DS's own code (the
+    # core library minus the legacy connectors, the tests and the fuzz
+    # targets; see o3ds_enable_warnings in CMakeLists.txt). This job counts
+    # the unique warnings of a clean GCC build and fails if the count rises
+    # above test/warning-baseline.txt; lower the baseline when warnings are
+    # fixed. Pinned to ubuntu-24.04 so a runner-image GCC upgrade can't
+    # move the count on its own.
+    name: Warning ratchet (GCC -Wall -Wextra)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Init required submodules
+        run: git submodule update --init thirdparty/flatbuffers thirdparty/crccpp thirdparty/nng
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Build & install NNG
+        working-directory: thirdparty/nng
+        run: |
+          cmake -B build -G Ninja -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/usr" \
+            -DCMAKE_BUILD_TYPE=Release -DNNG_TESTS=OFF -DNNG_ENABLE_TLS=OFF
+          cmake --build build
+          cmake --install build
+
+      - name: Build & install CRCpp
+        working-directory: thirdparty/crccpp
+        run: |
+          cmake -B build -G Ninja -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/usr"
+          cmake --build build
+          cmake --install build
+
+      - name: Build & install FlatBuffers
+        working-directory: thirdparty/flatbuffers
+        run: |
+          # See the same step in the `test` job for why these are disabled.
+          cmake -B build -G Ninja -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/usr" \
+            -DCMAKE_BUILD_TYPE=Release -DFLATBUFFERS_BUILD_TESTS=OFF \
+            -DCMAKE_CXX_FLAGS="-Wno-stringop-overflow -Wno-stringop-overread -Wno-array-bounds -Wno-restrict"
+          cmake --build build
+          cmake --install build
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/usr" \
+            -DO3DS_DISABLE_WEBRTC=ON \
+            -DO3DS_BUILD_TESTS=ON
+
+      - name: Build (clean, log captured)
+        shell: bash
+        run: cmake --build build 2>&1 | tee build-warnings.log
+
+      - name: Check warning count against baseline
+        shell: bash
+        run: test/check_warning_baseline.sh build-warnings.log test/warning-baseline.txt "$GITHUB_WORKSPACE"
+
+  msvc:
+    # CORE-19: the plugin ships the core library built with MSVC in Release,
+    # so the unit tests run in that configuration too, on every PR.
+    # windows.yml also builds the core with MSVC (and now runs the tests
+    # there as well), but only for release tags on the self-hosted UE
+    # runner, so it can't be the PR gate.
+    name: Build & test (Windows, MSVC Release)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Init required submodules
+        run: git submodule update --init thirdparty/flatbuffers thirdparty/crccpp thirdparty/nng
+
+      # Puts cl.exe, INCLUDE/LIB and Visual Studio's bundled CMake and Ninja
+      # on PATH. Every configure below also names cl explicitly, because
+      # windows-latest has Strawberry Perl's MinGW gcc on PATH, which CMake
+      # would otherwise pick (see the comment in windows.yml).
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build & install NNG
+        working-directory: thirdparty/nng
+        shell: cmd
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DNNG_TESTS=OFF -DNNG_ENABLE_TLS=OFF -DCMAKE_INSTALL_PREFIX=%RUNNER_TEMP%/usr || exit /b 1
+          cmake --build build || exit /b 1
+          cmake --install build || exit /b 1
+
+      - name: Build & install CRCpp
+        working-directory: thirdparty/crccpp
+        shell: cmd
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%RUNNER_TEMP%/usr || exit /b 1
+          cmake --build build || exit /b 1
+          cmake --install build || exit /b 1
+
+      - name: Build & install FlatBuffers
+        working-directory: thirdparty/flatbuffers
+        shell: cmd
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DFLATBUFFERS_BUILD_TESTS=OFF -DCMAKE_INSTALL_PREFIX=%RUNNER_TEMP%/usr || exit /b 1
+          cmake --build build || exit /b 1
+          cmake --install build || exit /b 1
+
+      - name: Configure core library + tests
+        shell: cmd
+        run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=%RUNNER_TEMP%/usr -DO3DS_DISABLE_WEBRTC=ON -DO3DS_BUILD_TESTS=ON
+
+      - name: Build
+        shell: cmd
+        run: cmake --build build
+
+      - name: Run unit tests (ctest, not the fuzz label)
+        working-directory: build
+        shell: cmd
+        run: ctest -LE fuzz --output-on-failure

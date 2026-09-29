@@ -1,0 +1,5 @@
+# Maximum number of unique compiler warnings allowed in a clean GCC build
+# (-Wall -Wextra on O3DS's own code; see CORE-20 and the `warnings` job in
+# .github/workflows/core-tests.yml, which runs test/check_warning_baseline.sh).
+# Only ever lower this number. Measured with GCC 13.3 (ubuntu-24.04).
+16
