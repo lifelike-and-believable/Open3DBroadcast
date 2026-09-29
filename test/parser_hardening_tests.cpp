@@ -657,7 +657,8 @@ ExerciseMoves()
 	O3DS_CHECK_EQ(c.mItems[0]->mName, std::string("one"));
 	O3DS_CHECK_EQ(b.size(), (size_t)0);
 
-	c = std::move(c); // self-move must not free the items
+	T& alias = c; // through a reference, so -Wself-move doesn't flag the intended self-move
+	c = std::move(alias); // self-move must not free the items
 	O3DS_CHECK_EQ(c.size(), (size_t)1);
 }
 
