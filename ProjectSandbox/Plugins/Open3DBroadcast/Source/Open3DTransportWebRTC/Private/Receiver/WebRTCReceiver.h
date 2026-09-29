@@ -55,7 +55,13 @@ private:
 
     // Consumer
     TSharedPtr<ISerializedFrameConsumer> Consumer;
+    // WP-S5 (RCV-1): written on the game thread, copied by LiveKit audio callbacks. Guarded by
+    // AudioSinkMutex only (never StateMutex, which Stop() holds while lk_disconnect waits for
+    // callbacks to finish). The sink's destructor does no FFI or UObject work, so a callback
+    // thread may drop the last reference.
     TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
+    mutable FCriticalSection AudioSinkMutex;
+    TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> GetAudioSinkForCallback() const;
 
     // Per-subject frame buffering
     // With multiple labeled senders, we buffer frames per subject to avoid data loss

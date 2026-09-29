@@ -4,9 +4,14 @@
 #include "O3DSenderInterface.h"
 #include "../Shared/SocketsTransportCommon.h"
 #include "O3DAudioFrameCodec.h"
+#include "O3DEncodedPayloadQueue.h"
+#include "O3DLifetimeGate.h"
+#include "O3DSinkAudioEncoder.h"
 
 #include "HAL/CriticalSection.h"
 #include "HAL/ThreadSafeCounter.h"
+
+#include <atomic>
 
 #include <vector>
 
@@ -15,18 +20,21 @@ class ISocketSubsystem;
 class FInternetAddr;
 class FSocketsUdpSenderAudioSink;
 class FO3DSocketsUdpSender;
+class FRunnableThread;
 
 /**
- * Shared between FO3DSocketsUdpSender and any audio sinks it hands out.
- * The audio capture component can keep a sink alive (via its own TSharedPtr)
- * independently of the sender's own lifetime, so the sink must never touch
- * the sender through a raw pointer/reference without first confirming under
- * this lock that the sender hasn't been torn down.
+ * Publish state shared between FO3DSocketsUdpSender, its audio worker and the audio sinks it
+ * hands out (ADR 0007 addendum, WP-S5: TRB-10, TRB-11). Holds no socket and no sender pointer.
+ * Audio threads encode into sink-local scratch and push datagram payloads here; the audio
+ * worker sends them, so the audio thread never takes the socket lock or calls SendTo.
  */
-struct FSocketsUdpSenderOwnerGuard
+struct FSocketsUdpPublishState
 {
-	FCriticalSection Lock;
-	FO3DSocketsUdpSender* Owner = nullptr;
+	TSharedRef<FO3DLifetimeGate, ESPMode::ThreadSafe> Gate = MakeShared<FO3DLifetimeGate, ESPMode::ThreadSafe>();
+	FO3DEncodedPayloadQueue AudioQueue{1024 * 1024};
+	FO3DAudioSubjectSlot LastSubject;
+	std::atomic<bool> bSocketReady{false};
+	std::atomic<int64> AudioBytesQueued{0};
 };
 
 /**
@@ -56,12 +64,12 @@ private:
 	bool SendPayload(FSocket* InSocket, const TSharedPtr<FInternetAddr>& InAddr, const uint8* Data, int32 Size, const TCHAR* Context);
 	bool SendDatagram(FSocket* InSocket, const TSharedPtr<FInternetAddr>& InAddr, const uint8* Data, int32 Size, const TCHAR* Context);
 	bool SendFragmented(FSocket* InSocket, const TSharedPtr<FInternetAddr>& InAddr, const uint8* Data, int32 Size, const TCHAR* Context);
-	void RefreshAudioEncoder();
-	bool ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec);
-	bool SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, double TimestampSec);
+	void StartAudioWorker();
+	void StopAudioWorker();
+	uint32 RunAudioWorker();
 
 private:
-	friend class FSocketsUdpSenderAudioSink;
+	class FUdpAudioRunnable;
 
 	FO3DTransportConfig ActiveConfig;
 	FO3DTransportStats Stats;
@@ -81,16 +89,18 @@ private:
 	int32 MtuBytes = 1200;
 	FGuid AudioSourceGuid;
 
-	bool bAudioEncoderInitialized = false;
-	O3DAudio::FFrameEncoder AudioEncoder;
-	TArray<uint8> UnifiedAudioScratch;
-
 	FThreadSafeCounter MessageCounter;
-	mutable FCriticalSection SubjectNameLock;
-	FString LastSubjectName;
 
 	std::vector<char> SerializationScratch;
 	std::vector<char> FragmentScratch;
 
-	TSharedPtr<FSocketsUdpSenderOwnerGuard, ESPMode::ThreadSafe> OwnerGuard;
+	/** Guards Socket/RemoteAddr and the fragment scratch between the game thread and the audio worker. Never taken on the audio thread. */
+	FCriticalSection SocketLock;
+
+	/** Audio worker: drains PublishState->AudioQueue. Joined in Stop() before the socket is destroyed. */
+	FUdpAudioRunnable* AudioWorker = nullptr;
+	FRunnableThread* AudioWorkerThread = nullptr;
+	std::atomic<bool> bStopAudioWorker{false};
+
+	TSharedRef<FSocketsUdpPublishState, ESPMode::ThreadSafe> PublishState;
 };

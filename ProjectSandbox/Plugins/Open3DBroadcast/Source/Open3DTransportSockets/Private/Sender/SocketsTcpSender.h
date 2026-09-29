@@ -4,9 +4,12 @@
 #include "O3DSenderInterface.h"
 #include "../Shared/SocketsTransportCommon.h"
 #include "O3DAudioFrameCodec.h"
+#include "O3DEncodedPayloadQueue.h"
+#include "O3DLifetimeGate.h"
 
 #include "HAL/CriticalSection.h"
-#include "Containers/Queue.h"
+
+#include <atomic>
 
 #include <vector>
 
@@ -15,20 +18,28 @@ class ISocketSubsystem;
 class FInternetAddr;
 class FSocketsTcpSenderAudioSink;
 class FRunnableThread;
-class FEvent;
 class FO3DSocketsTcpSender;
 
 /**
- * Shared between FO3DSocketsTcpSender and any audio sinks it hands out.
- * The audio capture component can keep a sink alive (via its own TSharedPtr)
- * independently of the sender's own lifetime, so the sink must never touch
- * the sender through a raw pointer/reference without first confirming under
- * this lock that the sender hasn't been torn down.
+ * Publish state shared between FO3DSocketsTcpSender, its worker and the audio sinks it hands
+ * out (ADR 0007 addendum, WP-S5: TRB-10, TRB-12). The audio capture component can keep a
+ * sink alive after the sender is gone, so the sink holds this state and never the sender.
+ * It contains no socket, no sender pointer and nothing whose destructor does I/O, so any
+ * thread may drop the last reference.
  */
-struct FSocketsTcpSenderOwnerGuard
+struct FSocketsTcpPublishState
 {
-	FCriticalSection Lock;
-	FO3DSocketsTcpSender* Owner = nullptr;
+	/** Closed by Stop() before the socket and worker are torn down. */
+	TSharedRef<FO3DLifetimeGate, ESPMode::ThreadSafe> Gate = MakeShared<FO3DLifetimeGate, ESPMode::ThreadSafe>();
+
+	/** Framed payloads (mocap and audio) for the worker; owns the worker's wake event. */
+	FO3DEncodedPayloadQueue SendQueue;
+
+	/** Mirrors "a client is connected"; written by the game thread and the worker. */
+	std::atomic<bool> bClientConnected{false};
+
+	/** Bytes of audio accepted by sinks, folded into GetStats(). */
+	std::atomic<int64> AudioBytesQueued{0};
 };
 
 /**
@@ -52,11 +63,6 @@ public:
 	virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
 
 private:
-	struct FQueuedPayload
-	{
-		TArray<uint8> Bytes;
-	};
-
 	class FTcpSenderRunnable;
 
 	bool CreateListenSocket();
@@ -64,9 +70,6 @@ private:
 	bool SendBytes(const uint8* Data, int32 Len);
 	void TickAcceptClient();
 	bool SendFramed(FSocket* InSocket, const uint8* Data, int32 Size);
-	void RefreshAudioEncoder();
-	bool ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec);
-	bool SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, double TimestampSec);
 	TSharedPtr<FInternetAddr> CreateBindAddress(const FString& Host, int32 Port, bool& bOutValid);
 
 	// Async send worker
@@ -77,8 +80,6 @@ private:
 	void DrainQueue();
 
 private:
-	friend class FSocketsTcpSenderAudioSink;
-
 	FO3DTransportConfig ActiveConfig;
 	FO3DTransportStats Stats;
 	FO3DTransportAudioConfig ActiveAudioConfig;
@@ -86,7 +87,6 @@ private:
 	ISocketSubsystem* SocketSubsystem = nullptr;
 	FSocket* ListenSocket = nullptr;
 	FSocket* ClientSocket = nullptr;
-	TAtomic<bool> bConnected{false}; // Connection state for fast checks without lock
 
 	FString BindHost;
 	int32 BindPort = 0;
@@ -95,21 +95,18 @@ private:
 	FGuid AudioSourceGuid;
 
 	double LastAcceptPollTime = 0.0;
-	bool bAudioEncoderInitialized = false;
-	O3DAudio::FFrameEncoder AudioEncoder;
-	TArray<uint8> UnifiedAudioScratch;
 	mutable std::vector<char> SerializationScratch; // Reused buffer for mocap serialization to avoid per-frame allocations
 
-	// Async send queue
-	TQueue<FQueuedPayload, EQueueMode::Mpsc> SendQueue;
+	// Async send worker. The queue itself lives in PublishState so audio sinks can feed it.
 	FTcpSenderRunnable* Worker = nullptr;
 	FRunnableThread* WorkerThread = nullptr;
-	FEvent* WakeEvent = nullptr;
 	TAtomic<bool> bStopWorker{false};
-	TAtomic<uint64> QueueBytes{0};
-	uint64 MaxQueueBytes = 4 * 1024 * 1024; // 4MB default
+	static constexpr uint64 DefaultMaxQueueBytes = 4 * 1024 * 1024; // 4MB default
 
 	mutable FCriticalSection StatsMutex;
 
-	TSharedPtr<FSocketsTcpSenderOwnerGuard, ESPMode::ThreadSafe> OwnerGuard;
+	/** Guards ClientSocket/ListenSocket between the game thread and the worker. Never taken on the audio thread. */
+	FCriticalSection SocketLock;
+
+	TSharedRef<FSocketsTcpPublishState, ESPMode::ThreadSafe> PublishState;
 };

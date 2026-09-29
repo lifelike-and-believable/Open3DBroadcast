@@ -2,6 +2,7 @@
 #include "../Shared/SocketsTcpAudio.h"
 #include "../Shared/SocketsTcpTransport.h"
 #include "O3DSenderAudioSinkBase.h"
+#include "O3DSinkAudioEncoder.h"
 #include "O3DTransportTypes.h"
 #include "O3DUnifiedMessage.h"
 
@@ -44,56 +45,73 @@ private:
 	FO3DSocketsTcpSender& Owner;
 };
 
-class FSocketsTcpSenderAudioSink final : public FO3DSenderAudioSinkBase
+namespace
+{
+	/** Prefix a payload with the TCP frame header. Safe on any thread. */
+	TArray<uint8> MakeTcpFrame(const uint8* Data, int32 Size)
+	{
+		TArray<uint8> Framed;
+		const int32 HeaderSize = O3DSockets::Tcp::FrameHeaderSize;
+		Framed.SetNumUninitialized(HeaderSize + Size);
+		O3DSockets::Tcp::WriteFrameHeader(Framed.GetData(), Size);
+		FMemory::Memcpy(Framed.GetData() + HeaderSize, Data, Size);
+		return Framed;
+	}
+}
+
+/**
+ * TCP audio sink (WP-S5: TRB-10, TRB-11). Encodes on the calling (audio) thread with its own
+ * encoders and hands framed bytes to the worker through the shared queue. It never takes the
+ * socket lock and never references the sender.
+ */
+class FSocketsTcpSenderAudioSink final : public FO3DGatedSenderAudioSink
 {
 public:
-	FSocketsTcpSenderAudioSink(TSharedPtr<FSocketsTcpSenderOwnerGuard, ESPMode::ThreadSafe> InOwnerGuard, FO3DTransportAudioConfig InConfig)
-		: FO3DSenderAudioSinkBase(MoveTemp(InConfig))
-		, OwnerGuard(MoveTemp(InOwnerGuard))
+	FSocketsTcpSenderAudioSink(TSharedRef<FSocketsTcpPublishState, ESPMode::ThreadSafe> InState, FO3DTransportAudioConfig InConfig, FO3DSinkAudioEncoder::FSettings InEncoderSettings)
+		: FO3DGatedSenderAudioSink(MoveTemp(InConfig), InState->Gate, MoveTemp(InEncoderSettings))
+		, State(MoveTemp(InState))
 	{
 	}
 
-	virtual bool OnSubmitPcmInternal(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
+protected:
+	virtual bool OnSubmitGated(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
 	{
-		if (!OwnerGuard.IsValid())
+		if (!State->bClientConnected.load())
 		{
 			return false;
 		}
 
-		// Holding this lock blocks the sender's destructor (which takes the
-		// same lock to null out Owner) until this call returns, so Owner is
-		// guaranteed valid for the duration of the call below.
-		FScopeLock Lock(&OwnerGuard->Lock);
-		if (!OwnerGuard->Owner)
+		// Call-local scratch: a sink may be fed from more than one thread (TRF-40).
+		TArray<uint8> Unified;
+		if (!GetEncoder().EncodeUnified(StreamLabel, FString(), Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Unified))
 		{
 			return false;
 		}
-		return OwnerGuard->Owner->ProcessCapturedAudio(StreamLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
+
+		const int64 Size = Unified.Num();
+		if (!State->SendQueue.Enqueue(MakeTcpFrame(Unified.GetData(), Unified.Num())))
+		{
+			UE_LOG(LogSocketsTcpSender, Verbose, TEXT("TCP sender failed to enqueue audio frame"));
+			return false;
+		}
+		State->AudioBytesQueued.fetch_add(Size);
+		return true;
 	}
 
 private:
-	TSharedPtr<FSocketsTcpSenderOwnerGuard, ESPMode::ThreadSafe> OwnerGuard;
+	TSharedRef<FSocketsTcpPublishState, ESPMode::ThreadSafe> State;
 };
 
 FO3DSocketsTcpSender::FO3DSocketsTcpSender()
+	: PublishState(MakeShared<FSocketsTcpPublishState, ESPMode::ThreadSafe>())
 {
-	OwnerGuard = MakeShared<FSocketsTcpSenderOwnerGuard, ESPMode::ThreadSafe>();
-	OwnerGuard->Owner = this;
+	PublishState->SendQueue.SetMaxBytes(DefaultMaxQueueBytes);
 }
 
 FO3DSocketsTcpSender::~FO3DSocketsTcpSender()
 {
-	// Invalidate before tearing down anything else: any audio-thread call
-	// already inside FSocketsTcpSenderAudioSink::OnSubmitPcmInternal is
-	// holding OwnerGuard->Lock, so this blocks until that call returns, and
-	// every call after this point sees Owner == nullptr instead of touching
-	// a partially/fully destroyed sender.
-	if (OwnerGuard.IsValid())
-	{
-		FScopeLock Lock(&OwnerGuard->Lock);
-		OwnerGuard->Owner = nullptr;
-	}
-
+	// Stop() closes the audio gate first, so every audio-thread submit already inside a sink
+	// has returned before the worker and sockets go away.
 	Stop();
 }
 
@@ -108,6 +126,7 @@ bool FO3DSocketsTcpSender::Initialize(const FO3DTransportConfig& Config)
 	ActiveAudioConfig = Config.Audio;
 	// Note: Audio stream label is now automatically derived from StreamId
 	AudioSourceGuid = FGuid::NewGuid();
+	PublishState->AudioBytesQueued.store(0);
 
 	// Parse bind address from config
 	if (!O3DSockets::ParseHostPort(Config, BindHost, BindPort, TEXT("tcp")))
@@ -135,7 +154,7 @@ bool FO3DSocketsTcpSender::Initialize(const FO3DTransportConfig& Config)
 		return false;
 	}
 
-	RefreshAudioEncoder();
+	PublishState->Gate->Open();
 
 	return true;
 }
@@ -144,10 +163,7 @@ bool FO3DSocketsTcpSender::Start()
 {
 	DestroySocket();
 
-	if (!WakeEvent)
-	{
-		WakeEvent = FPlatformProcess::GetSynchEventFromPool(false);
-	}
+	PublishState->Gate->Open();
 
 	bStopWorker = false;
 	StartWorker();
@@ -157,19 +173,15 @@ bool FO3DSocketsTcpSender::Start()
 
 void FO3DSocketsTcpSender::Stop()
 {
+	// WP-S5 ordering: (1) close the audio gate, which waits for in-flight submits;
+	// (2) stop and join the worker; (3) destroy sockets; (4) drain. The wake event is owned
+	// by the shared queue, so a late Wake() can never hit a pooled event (TRB-12).
+	PublishState->Gate->Close();
+
 	bStopWorker = true;
-	if (WakeEvent)
-	{
-		WakeEvent->Trigger();
-	}
+	PublishState->SendQueue.Wake();
 
 	StopWorker();
-
-	if (WakeEvent)
-	{
-		FPlatformProcess::ReturnSynchEventToPool(WakeEvent);
-		WakeEvent = nullptr;
-	}
 
 	DestroySocket();
 	DrainQueue();
@@ -179,7 +191,7 @@ void FO3DSocketsTcpSender::Stop()
 bool FO3DSocketsTcpSender::Send(const O3DS::SubjectList& List)
 {
 	// Fast path: check connection state without locks
-	if (!bConnected.Load())
+	if (!PublishState->bClientConnected.load())
 	{
 		// No client connected yet
 		return false;
@@ -204,7 +216,7 @@ bool FO3DSocketsTcpSender::Send(const O3DS::SubjectList& List)
 
 bool FO3DSocketsTcpSender::SendSerialized(const uint8* Data, int32 Len, const FString& /*SubjectName*/, double /*CaptureTimestampSec*/)
 {
-	if (!bConnected.Load() || Len <= 0)
+	if (!PublishState->bClientConnected.load() || Len <= 0)
 	{
 		return false;
 	}
@@ -238,7 +250,9 @@ void FO3DSocketsTcpSender::Tick(float /*DeltaSeconds*/)
 FO3DTransportStats FO3DSocketsTcpSender::GetStats() const
 {
 	FScopeLock Lock(&StatsMutex);
-	return Stats;
+	FO3DTransportStats Copy = Stats;
+	Copy.BytesSent += PublishState->AudioBytesQueued.load();
+	return Copy;
 }
 
 bool FO3DSocketsTcpSender::SupportsAudio() const
@@ -260,9 +274,16 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DSocketsTcpSender::Creat
 	// Note: Audio stream label is now automatically derived from StreamId
 
 	ActiveAudioConfig = EffectiveConfig;
-	RefreshAudioEncoder();
 
-	return MakeShared<FSocketsTcpSenderAudioSink>(OwnerGuard, ActiveAudioConfig);
+	// Immutable snapshot for this sink's own encoders (TRB-11): nothing reconfigures them later.
+	const FString StreamFallback = ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId;
+	FO3DSinkAudioEncoder::FSettings EncoderSettings;
+	EncoderSettings.Config = ActiveAudioConfig;
+	EncoderSettings.DefaultStreamLabel = StreamFallback;
+	EncoderSettings.DefaultSubject = StreamFallback;
+	EncoderSettings.SourceGuid = AudioSourceGuid;
+
+	return MakeShared<FSocketsTcpSenderAudioSink, ESPMode::ThreadSafe>(PublishState, ActiveAudioConfig, MoveTemp(EncoderSettings));
 }
 
 bool FO3DSocketsTcpSender::CreateListenSocket()
@@ -312,14 +333,14 @@ void FO3DSocketsTcpSender::DestroySocket()
 {
 	// Same lock as TickAcceptClient()/RunWorker(); blocks until any in-flight
 	// worker-thread send finishes before ClientSocket is torn down.
-	FScopeLock Lock(&OwnerGuard->Lock);
+	FScopeLock Lock(&SocketLock);
 
 	if (ClientSocket && SocketSubsystem)
 	{
 		SocketSubsystem->DestroySocket(ClientSocket);
 	}
 	ClientSocket = nullptr;
-	bConnected = false;
+	PublishState->bClientConnected.store(false);
 
 	if (ListenSocket && SocketSubsystem)
 	{
@@ -344,7 +365,7 @@ void FO3DSocketsTcpSender::TickAcceptClient()
 
 	// Same lock as DestroySocket()/RunWorker(); guards the ClientSocket
 	// read-then-write below against a concurrent worker-thread send/teardown.
-	FScopeLock Lock(&OwnerGuard->Lock);
+	FScopeLock Lock(&SocketLock);
 
 	if (ClientSocket)
 	{
@@ -366,7 +387,7 @@ void FO3DSocketsTcpSender::TickAcceptClient()
 		Accepted->SetNoDelay(true);
 
 		ClientSocket = Accepted;
-		bConnected = true; // Set connection state for fast checks in Send()
+		PublishState->bClientConnected.store(true); // Fast check in Send() and audio sinks
 		UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP sender accepted client %s (sendBuf=%d, TCP_NODELAY=true)"), *PeerAddr->ToString(true), AppliedSize);
 	}
 }
@@ -386,65 +407,6 @@ bool FO3DSocketsTcpSender::SendFramed(FSocket* InSocket, const uint8* Data, int3
 		return false;
 	}
 
-	return true;
-}
-
-void FO3DSocketsTcpSender::RefreshAudioEncoder()
-{
-	// Note: Audio stream label is now automatically derived from StreamId
-	const FString StreamLabelFallback = ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId;
-	const FString SubjectFallback = ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId;
-
-	bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, StreamLabelFallback, SubjectFallback);
-}
-
-bool FO3DSocketsTcpSender::ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec)
-{
-	if (!bAudioEncoderInitialized || !ClientSocket)
-	{
-		return false;
-	}
-
-	const FString SubjectForAudio = ActiveConfig.StreamId.IsEmpty() ? StreamId : ActiveConfig.StreamId;
-
-	O3DAudio::FEncodedFrame Frame;
-	if (!AudioEncoder.BuildEncodedFrame(StreamLabel, SubjectForAudio, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Frame))
-	{
-		return false;
-	}
-
-	if (Frame.Meta.SubjectName.IsEmpty())
-	{
-		Frame.Meta.SubjectName = SubjectForAudio;
-	}
-	Frame.Meta.SourceGuid = AudioSourceGuid;
-
-	return SendEncodedAudio(Frame, TimestampSec);
-}
-
-bool FO3DSocketsTcpSender::SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, double TimestampSec)
-{
-	if (!ClientSocket || Frame.Encoded.Num() <= 0)
-	{
-		return false;
-	}
-
-	if (!O3DAudio::CreateUnifiedAudioMessage(Frame, TimestampSec, UnifiedAudioScratch))
-	{
-		UE_LOG(LogSocketsTcpSender, Warning, TEXT("TCP sender failed to create unified audio message"));
-		return false;
-	}
-
-	if (!EnqueuePayload(UnifiedAudioScratch.GetData(), UnifiedAudioScratch.Num()))
-	{
-		UE_LOG(LogSocketsTcpSender, Verbose, TEXT("TCP sender failed to enqueue audio frame"));
-		return false;
-	}
-
-	{
-		FScopeLock Lock(&StatsMutex);
-		Stats.BytesSent += UnifiedAudioScratch.Num();
-	}
 	return true;
 }
 
@@ -501,26 +463,20 @@ void FO3DSocketsTcpSender::StopWorker()
 
 uint32 FO3DSocketsTcpSender::RunWorker()
 {
+	TArray<uint8> Bytes;
 	while (!bStopWorker.Load())
 	{
-		FQueuedPayload Payload;
-		if (!SendQueue.Dequeue(Payload))
+		if (!PublishState->SendQueue.Dequeue(Bytes))
 		{
-			if (WakeEvent)
-			{
-				WakeEvent->Wait(50);
-			}
+			PublishState->SendQueue.WaitForWork(50);
 			continue;
 		}
 
-		const uint64 PayloadSize = static_cast<uint64>(Payload.Bytes.Num());
-		const uint64 Current = QueueBytes.Load();
-		QueueBytes.Store(Current > PayloadSize ? Current - PayloadSize : 0);
-
 		// Same lock as TickAcceptClient()/DestroySocket(); held for the whole
 		// send so a concurrent accept/teardown on the game thread can't touch
-		// ClientSocket (or free the underlying FSocket) mid-send.
-		FScopeLock Lock(&OwnerGuard->Lock);
+		// ClientSocket (or free the underlying FSocket) mid-send. The audio
+		// thread never takes this lock (WP-S5, TRB-10).
+		FScopeLock Lock(&SocketLock);
 
 		FSocket* ActiveSocket = ClientSocket;
 		if (!ActiveSocket)
@@ -530,7 +486,7 @@ uint32 FO3DSocketsTcpSender::RunWorker()
 			continue;
 		}
 
-		if (!SendFramed(ActiveSocket, Payload.Bytes.GetData(), Payload.Bytes.Num()))
+		if (!SendFramed(ActiveSocket, Bytes.GetData(), Bytes.Num()))
 		{
 			// Send failed - drop client and wait for reconnect
 			UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP send failed, dropping client."));
@@ -539,7 +495,7 @@ uint32 FO3DSocketsTcpSender::RunWorker()
 				SocketSubsystem->DestroySocket(ClientSocket);
 			}
 			ClientSocket = nullptr;
-			bConnected = false; // Update connection state
+			PublishState->bClientConnected.store(false); // Update connection state
 
 			FScopeLock StatsLock(&StatsMutex);
 			Stats.DroppedFrames++;
@@ -557,42 +513,12 @@ bool FO3DSocketsTcpSender::EnqueuePayload(const uint8* Data, int32 Size)
 		return false;
 	}
 
-	// Prepare framed message (header + payload)
-	const int32 HeaderSize = O3DSockets::Tcp::FrameHeaderSize;
-	const int32 TotalSize = HeaderSize + Size;
-
-	const uint64 Pending = QueueBytes.Load();
-	if (MaxQueueBytes > 0 && Pending + static_cast<uint64>(TotalSize) > MaxQueueBytes)
-	{
-		return false;
-	}
-
-	FQueuedPayload Payload;
-	Payload.Bytes.SetNumUninitialized(TotalSize);
-
-	// Write header
-	O3DSockets::Tcp::WriteFrameHeader(Payload.Bytes.GetData(), Size);
-
-	// Copy payload
-	FMemory::Memcpy(Payload.Bytes.GetData() + HeaderSize, Data, Size);
-
-	SendQueue.Enqueue(MoveTemp(Payload));
-	QueueBytes.Store(Pending + static_cast<uint64>(TotalSize));
-
-	if (WakeEvent)
-	{
-		WakeEvent->Trigger();
-	}
-
-	return true;
+	// Framed message (header + payload). The shared queue enforces the byte cap atomically
+	// and wakes the worker.
+	return PublishState->SendQueue.Enqueue(MakeTcpFrame(Data, Size));
 }
 
 void FO3DSocketsTcpSender::DrainQueue()
 {
-	FQueuedPayload Payload;
-	while (SendQueue.Dequeue(Payload))
-	{
-		// release payload
-	}
-	QueueBytes.Store(0);
+	PublishState->SendQueue.Empty();
 }

@@ -47,7 +47,7 @@ private:
 
     TWeakPtr<ISerializedFrameConsumer> Consumer;
     TWeakPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
-    O3DAudio::FFrameDecoder AudioDecoder;
+    O3DAudio::FMultiStreamFrameDecoder AudioDecoder; // SHR-15: one decoder per (SourceGuid, StreamLabel)
     TArray<int16> DecodedPcmScratch;
 
     FNngSocketWrapper* Socket = nullptr;

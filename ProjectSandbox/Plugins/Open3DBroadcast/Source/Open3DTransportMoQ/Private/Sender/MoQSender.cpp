@@ -47,6 +47,7 @@ private:
 };
 
 FO3DMoQSender::FO3DMoQSender()
+	: AudioState(MakeShared<FMoQSenderAudioState, ESPMode::ThreadSafe>())
 {
 	CachedState = MOQ_STATE_DISCONNECTED;
 }
@@ -126,11 +127,13 @@ bool FO3DMoQSender::Initialize(const FO3DTransportConfig& Config)
 	ActiveConfig = Config;
 	ActiveAudioConfig = Config.Audio;
 	AudioSourceGuid = FGuid::NewGuid();
-	RefreshAudioEncoder();
-	
+	bAudioRequested = false;
+
 	ResetStats();
 	PendingQueueBytes = 0;
 	DrainQueue();
+	AudioState->AudioQueue.Empty();
+	AudioState->AudioDropped.store(0);
 
 	CachedState = MOQ_STATE_DISCONNECTED;
 	bConnectInFlight = false;
@@ -139,12 +142,10 @@ bool FO3DMoQSender::Initialize(const FO3DTransportConfig& Config)
 	LastErrorLogTimeSeconds = 0.0;
 	LastDropLogTimeSeconds = 0.0;
 	
-	{
-		FScopeLock Lock(&SubjectNameLock);
-		LastSubjectName.Reset();
-	}
+	AudioState->LastSubject.Reset();
 
 	bInitialized = true;
+	AudioState->Gate->Open();
 	return true;
 }
 
@@ -165,6 +166,8 @@ bool FO3DMoQSender::Start()
 	{
 		ConnectionDelegateHandle = Session->OnConnectionStateChanged().AddRaw(this, &FO3DMoQSender::HandleConnectionStateChanged);
 	}
+
+	AudioState->Gate->Open();
 
 	StartWorker();
 	if (WorkerThread == nullptr)
@@ -187,6 +190,10 @@ bool FO3DMoQSender::Start()
 
 void FO3DMoQSender::Stop()
 {
+	// WP-S5 ordering: close the audio gate first (waits for in-flight submits), then stop the
+	// worker, then release publishers and the session.
+	AudioState->Gate->Close();
+
 	if (!bInitialized && !bRunning)
 	{
 		return;
@@ -196,6 +203,7 @@ void FO3DMoQSender::Stop()
 
 	StopWorker();
 	DrainQueue();
+	DrainAudioQueue(/*bPublish=*/false);
 	DestroyPublisher();
 	DestroyAudioPublisher();
 
@@ -253,7 +261,7 @@ void FO3DMoQSender::HandleConnectionStateChanged(MoqConnectionState NewState)
 		UE_LOG(LogO3DMoQSender, Log, TEXT("Connected to MoQ relay %s"), *Options.RelayUrl);
 		EnsurePublisher();
 		// Audio publisher is created on-demand when CreateAudioSink is called
-		if (bAudioEncoderInitialized)
+		if (bAudioRequested)
 		{
 			EnsureAudioPublisher();
 		}
@@ -340,8 +348,7 @@ bool FO3DMoQSender::SendBytes(const uint8* Data, int32 Len, const FString& Subje
 {
 	if (!SubjectName.IsEmpty())
 	{
-		FScopeLock Lock(&SubjectNameLock);
-		LastSubjectName = SubjectName;
+		AudioState->LastSubject.Set(SubjectName);
 	}
 
 	TArray<uint8> Payload;
@@ -385,6 +392,7 @@ FO3DTransportStats FO3DMoQSender::GetStats() const
 {
 	FScopeLock Lock(&StatsMutex);
 	FO3DTransportStats Copy = Stats;
+	Copy.DroppedFrames += AudioState->AudioDropped.load();
 	if (LatencyStats.Samples > 0)
 	{
 		Copy.AverageLatencyMs = LatencyStats.TotalLatencyMs / static_cast<double>(LatencyStats.Samples);
@@ -608,15 +616,15 @@ uint32 FO3DMoQSender::RunWorker()
 {
 	while (!bWorkerStopRequested)
 	{
-		if (WakeEvent != nullptr)
-		{
-			WakeEvent->Wait();
-		}
+		// Shared wake event: mocap enqueues and audio sinks both trigger it.
+		AudioState->AudioQueue.WaitForWork(100);
 
 		if (bWorkerStopRequested)
 		{
 			break;
 		}
+
+		DrainAudioQueue(/*bPublish=*/true);
 
 		// Process all queued payloads - each may go to mocap or audio track
 		while (true)
@@ -655,11 +663,6 @@ void FO3DMoQSender::StartWorker()
 		return;
 	}
 
-	if (WakeEvent == nullptr)
-	{
-		WakeEvent = FPlatformProcess::GetSynchEventFromPool(false);
-	}
-
 	bWorkerStopRequested = false;
 	WorkerRunnable = MakeUnique<FSendWorker>(*this);
 	WorkerThread = FRunnableThread::Create(WorkerRunnable.Get(), TEXT("MoQSenderWorker"), 0, TPri_AboveNormal);
@@ -674,37 +677,40 @@ void FO3DMoQSender::StopWorker()
 {
 	if (WorkerThread == nullptr)
 	{
-		if (WakeEvent != nullptr)
-		{
-			FPlatformProcess::ReturnSynchEventToPool(WakeEvent);
-			WakeEvent = nullptr;
-		}
 		return;
 	}
 
 	bWorkerStopRequested = true;
-	if (WakeEvent != nullptr)
-	{
-		WakeEvent->Trigger();
-	}
+	AudioState->AudioQueue.Wake();
 
 	WorkerThread->WaitForCompletion();
 	delete WorkerThread;
 	WorkerThread = nullptr;
 	WorkerRunnable.Reset();
-
-	if (WakeEvent != nullptr)
-	{
-		FPlatformProcess::ReturnSynchEventToPool(WakeEvent);
-		WakeEvent = nullptr;
-	}
 }
 
 void FO3DMoQSender::WakeWorker()
 {
-	if (WakeEvent != nullptr)
+	AudioState->AudioQueue.Wake();
+}
+
+void FO3DMoQSender::DrainAudioQueue(bool bPublish)
+{
+	TArray<uint8> Bytes;
+	while (AudioState->AudioQueue.Dequeue(Bytes))
 	{
-		WakeEvent->Trigger();
+		if (!bPublish || !IsAudioPublisherReady())
+		{
+			FScopeLock StatsLock(&StatsMutex);
+			Stats.DroppedFrames++;
+			continue;
+		}
+
+		FPendingPayload Payload;
+		Payload.Data = MoveTemp(Bytes);
+		Payload.EnqueueTimestampSeconds = FPlatformTime::Seconds();
+		Payload.bIsAudio = true;
+		PublishPayload(Payload);
 	}
 }
 
@@ -732,7 +738,7 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DMoQSender::CreateAudioS
 	EffectiveConfig.SampleRate = FMath::Max(EffectiveConfig.SampleRate, 1);
 
 	ActiveAudioConfig = EffectiveConfig;
-	RefreshAudioEncoder();
+	bAudioRequested = true;
 
 	// Ensure audio publisher is created if connected
 	if (CachedState.Load() == MOQ_STATE_CONNECTED)
@@ -740,10 +746,24 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DMoQSender::CreateAudioS
 		EnsureAudioPublisher();
 	}
 
-	return MakeShared<FO3DMoQSenderAudioSink, ESPMode::ThreadSafe>(*this, EffectiveConfig);
+	// Immutable snapshot for this sink's own encoders (TRF-10): one encoder per sink and
+	// label, never reconfigured while in use.
+	const FString SubjectFallback = ResolveAudioSubjectFallback();
+	FO3DSinkAudioEncoder::FSettings EncoderSettings;
+	EncoderSettings.Config = EffectiveConfig;
+	EncoderSettings.DefaultStreamLabel = SubjectFallback;
+	EncoderSettings.DefaultSubject = SubjectFallback;
+	EncoderSettings.SourceGuid = AudioSourceGuid;
+
+	UE_LOG(LogO3DMoQSender, Log, TEXT("MoQ audio sink created (codec=%s, channels=%d, rate=%d)"),
+		O3DAudio::SelectCodec(EffectiveConfig) == O3DS::EUnifiedCodec::Opus ? TEXT("Opus") : TEXT("PCM16"),
+		EffectiveConfig.NumChannels,
+		EffectiveConfig.SampleRate);
+
+	return MakeShared<FO3DMoQSenderAudioSink, ESPMode::ThreadSafe>(AudioState, EffectiveConfig, MoveTemp(EncoderSettings));
 }
 
-void FO3DMoQSender::RefreshAudioEncoder()
+FString FO3DMoQSender::ResolveAudioSubjectFallback() const
 {
 	FString SubjectFallback = ActiveConfig.StreamId;
 	if (SubjectFallback.IsEmpty())
@@ -754,80 +774,5 @@ void FO3DMoQSender::RefreshAudioEncoder()
 	{
 		SubjectFallback = TEXT("moq");
 	}
-
-	bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, SubjectFallback, SubjectFallback);
-	
-	if (bAudioEncoderInitialized)
-	{
-		UE_LOG(LogO3DMoQSender, Log, TEXT("MoQ audio encoder initialized (codec=%s, channels=%d, rate=%d)"),
-			AudioEncoder.GetActiveCodec() == O3DS::EUnifiedCodec::Opus ? TEXT("Opus") : TEXT("PCM16"),
-			ActiveAudioConfig.NumChannels,
-			ActiveAudioConfig.SampleRate);
-	}
-}
-
-bool FO3DMoQSender::ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec)
-{
-	if (!bInitialized || !bRunning || !bAudioEncoderInitialized)
-	{
-		return false;
-	}
-
-	FString SubjectForAudio;
-	{
-		FScopeLock Lock(&SubjectNameLock);
-		SubjectForAudio = LastSubjectName;
-	}
-	if (SubjectForAudio.IsEmpty())
-	{
-		SubjectForAudio = ActiveConfig.StreamId;
-	}
-	if (SubjectForAudio.IsEmpty())
-	{
-		SubjectForAudio = Options.TrackName;
-	}
-	if (SubjectForAudio.IsEmpty())
-	{
-		SubjectForAudio = TEXT("moq");
-	}
-
-	O3DAudio::FEncodedFrame Frame;
-	if (!AudioEncoder.BuildEncodedFrame(StreamLabel, SubjectForAudio, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Frame))
-	{
-		return false;
-	}
-
-	if (Frame.Meta.SubjectName.IsEmpty())
-	{
-		Frame.Meta.SubjectName = SubjectForAudio;
-	}
-	Frame.Meta.SourceGuid = AudioSourceGuid;
-
-	return SendEncodedAudio(Frame, TimestampSec);
-}
-
-bool FO3DMoQSender::SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, double TimestampSec)
-{
-	if (!bInitialized || !bRunning || Frame.Encoded.Num() <= 0)
-	{
-		return false;
-	}
-
-	// Serialize the encoded frame with metadata for transport
-	// This allows the receiver to properly decode the audio data
-	TArray<uint8> AudioPayload;
-	if (!O3DAudio::SerializeForTransport(Frame, AudioPayload))
-	{
-		UE_LOG(LogO3DMoQSender, Warning, TEXT("Failed to serialize audio frame for transport"));
-		return false;
-	}
-
-	if (!EnqueuePayload(MoveTemp(AudioPayload), TimestampSec, /*bIsAudio=*/true))
-	{
-		FScopeLock StatsLock(&StatsMutex);
-		Stats.DroppedFrames++;
-		return false;
-	}
-
-	return true;
+	return SubjectFallback;
 }

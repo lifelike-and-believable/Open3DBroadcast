@@ -11,6 +11,7 @@
 #include "Misc/ScopeLock.h"
 #include "O3DAudioFrameCodec.h"
 #include "O3DSenderAudioSinkBase.h"
+#include "O3DFfiContextRegistry.h"
 #include "O3DUnifiedMessage.h"
 #include "O3DPerformanceMetrics.h"
 
@@ -35,48 +36,74 @@ namespace
     constexpr uint64 kMaxQueueBytes = 512ull * 1024ull * 1024ull;
 }
 
-/**
- * Audio sink implementation for NNG sender that forwards captured audio through the configured codec.
- */
-class FO3DNngSender::FNngSenderAudioSink final : public FO3DSenderAudioSinkBase
-{
-public:
-    explicit FNngSenderAudioSink(FO3DNngSender& InOwner, const FO3DTransportAudioConfig& InAudioConfig)
-        : FO3DSenderAudioSinkBase(InAudioConfig)
-        , Owner(InOwner)
-    {
-    }
-
-    virtual bool OnSubmitPcmInternal(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
-    {
-        return Owner.ProcessCapturedAudio(StreamLabel, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec);
-    }
-
-private:
-    FO3DNngSender& Owner;
-};
-
 namespace
 {
+    TO3DFfiContextRegistry<FNngSenderPipeContext>& GetPipeContextRegistry()
+    {
+        static TO3DFfiContextRegistry<FNngSenderPipeContext> Registry;
+        return Registry;
+    }
 
+    /** NNG pipe callback. `Context` is an opaque token, never a sender pointer (WP-S5). */
     static void SenderPipeCallback(nng_pipe /*Pipe*/, nng_pipe_ev Event, void* Context)
     {
-        FO3DNngSender* Sender = static_cast<FO3DNngSender*>(Context);
-        if (!Sender)
+        const TSharedPtr<FNngSenderPipeContext, ESPMode::ThreadSafe> Pipe = GetPipeContextRegistry().Resolve(Context);
+        if (!Pipe.IsValid())
         {
             return;
         }
 
         if (Event == NNG_PIPE_EV_ADD_POST)
         {
-            Sender->HandlePipeAdded();
+            const int32 Count = Pipe->PipeCount.fetch_add(1) + 1;
+            Pipe->bConnected.store(true);
+            UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender connection established (pipe count=%d)"), Count);
         }
         else if (Event == NNG_PIPE_EV_REM_POST)
         {
-            Sender->HandlePipeRemoved();
+            const int32 Count = Pipe->PipeCount.fetch_sub(1) - 1;
+            if (Count <= 0)
+            {
+                Pipe->bConnected.store(Pipe->bConnectedWithoutPipes.load());
+            }
+            UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender connection lost (pipe count=%d)"), FMath::Max(0, Count));
         }
     }
 }
+
+/**
+ * NNG audio sink (WP-S5: TRB-35, TRB-10, TRB-11). Encodes with its own encoders and hands the
+ * unified message to the worker through the shared queue. Never references the sender.
+ */
+class FNngSenderAudioSink final : public FO3DGatedSenderAudioSink
+{
+public:
+    FNngSenderAudioSink(TSharedRef<FNngSenderPublishState, ESPMode::ThreadSafe> InState, const FO3DTransportAudioConfig& InAudioConfig, FO3DSinkAudioEncoder::FSettings InEncoderSettings)
+        : FO3DGatedSenderAudioSink(InAudioConfig, InState->Gate, MoveTemp(InEncoderSettings))
+        , State(MoveTemp(InState))
+    {
+    }
+
+protected:
+    virtual bool OnSubmitGated(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
+    {
+        TArray<uint8> Unified;
+        if (!GetEncoder().EncodeUnified(StreamLabel, State->LastSubject.Get(), Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Unified))
+        {
+            return false;
+        }
+
+        if (!State->SendQueue.Enqueue(MoveTemp(Unified)))
+        {
+            State->AudioDropped.fetch_add(1);
+            return false;
+        }
+        return true;
+    }
+
+private:
+    TSharedRef<FNngSenderPublishState, ESPMode::ThreadSafe> State;
+};
 
 class FO3DNngSender::FNngSenderRunnable final : public FRunnable
 {
@@ -114,33 +141,11 @@ struct FO3DNngSender::FNngSocketWrapper
     }
 };
 
-void FO3DNngSender::HandlePipeAdded()
+FO3DNngSender::FO3DNngSender()
+    : PublishState(MakeShared<FNngSenderPublishState, ESPMode::ThreadSafe>())
+    , PipeContext(MakeShared<FNngSenderPipeContext, ESPMode::ThreadSafe>())
 {
-    const int32 Count = PipeCount.Increment();
-    bConnected = true;
-    BackoffAttempt = 0;
-    UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender CONNECTION ESTABLISHED to %s (pipe count=%d)"), *Options.CanonicalUri, Count);
-}
-
-void FO3DNngSender::HandlePipeRemoved()
-{
-    const int32 Count = PipeCount.Decrement();
-    if (Count <= 0)
-    {
-        if (Options.Mode == O3DNNG::ENngMode::Pair && !Options.bListen)
-        {
-            bConnected = false;
-        }
-        else if (Options.Mode == O3DNNG::ENngMode::Push)
-        {
-            bConnected = false;
-        }
-        else
-        {
-            bConnected = true; // listening sockets remain available
-        }
-    }
-    UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender CONNECTION LOST from %s (pipe count=%d)"), *Options.CanonicalUri, FMath::Max(0, Count));
+    PipeToken = GetPipeContextRegistry().Register(PipeContext);
 }
 
 bool FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
@@ -159,27 +164,30 @@ bool FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
     ActiveAudioConfig = Config.Audio;
     // Note: Audio stream label is now automatically derived from StreamId
     AudioSourceGuid = FGuid::NewGuid();
-    RefreshAudioEncoder();
 
     Stats.Reset();
-    QueueBytes = 0;
-    PipeCount.Reset();
+    PublishState->SendQueue.SetMaxBytes(Options.MaxQueueBytes);
+    PublishState->AudioDropped.store(0);
+    PipeContext->PipeCount.store(0);
+    PipeContext->bConnectedWithoutPipes.store(!((Options.Mode == O3DNNG::ENngMode::Pair && !Options.bListen) || Options.Mode == O3DNNG::ENngMode::Push));
     BackoffAttempt = 0;
     LastBackoffAttemptTime = 0.0;
     LastErrorLogTimestamp = 0.0;
     LastBackpressureLogTimestamp = 0.0;
-    {
-        FScopeLock SubjectLock(&SubjectNameLock);
-        LastSubjectName.Reset();
-    }
+    PublishState->LastSubject.Reset();
 
     bInitialized = true;
+    PublishState->Gate->Open();
     return true;
 }
 
 FO3DNngSender::~FO3DNngSender()
 {
     Stop();
+    // nng_close() in Stop() has returned, so no pipe callback is running for this socket
+    // (needs-FFI-verification); a late one would resolve the token to nothing anyway.
+    GetPipeContextRegistry().Unregister(PipeToken);
+    PipeToken = nullptr;
 }
 
 bool FO3DNngSender::Start()
@@ -203,10 +211,7 @@ bool FO3DNngSender::Start()
         return false;
     }
 
-    if (!WakeEvent)
-    {
-        WakeEvent = FPlatformProcess::GetSynchEventFromPool(false);
-    }
+    PublishState->Gate->Open();
 
     bStopWorker = false;
     StartWorker();
@@ -230,30 +235,26 @@ void FO3DNngSender::Stop()
 {
     FScopeLock Lock(&StateMutex);
 
+    // WP-S5 ordering: close the audio gate (waits for in-flight submits), join the worker,
+    // close the socket, drain. The wake event belongs to the shared queue (TRB-12).
+    // The gate is closed even when not running so a sink never outlives Stop().
+    PublishState->Gate->Close();
+
     if (!bRunning.Load())
     {
         return;
     }
 
     bStopWorker = true;
-    if (WakeEvent)
-    {
-        WakeEvent->Trigger();
-    }
+    PublishState->SendQueue.Wake();
 
     StopWorker();
-
-    if (WakeEvent)
-    {
-        FPlatformProcess::ReturnSynchEventToPool(WakeEvent);
-        WakeEvent = nullptr;
-    }
 
     CloseSocket();
     DrainQueue();
 
     bRunning = false;
-    bConnected = false;
+    PipeContext->bConnected.store(false);
     UE_LOG(LogO3DNngSender, Log, TEXT("NNG sender stopped"));
 }
 
@@ -320,8 +321,7 @@ bool FO3DNngSender::SendBytes(const uint8* Data, int32 Len, const FString& Subje
 {
     if (!SubjectName.IsEmpty())
     {
-        FScopeLock SubjectLock(&SubjectNameLock);
-        LastSubjectName = SubjectName;
+        PublishState->LastSubject.Set(SubjectName);
     }
 
     if (!EnqueuePayload(Data, Len))
@@ -357,7 +357,7 @@ void FO3DNngSender::Tick(float /*DeltaSeconds*/)
                 if (OpenSocket())
                 {
                     BackoffAttempt = 0;
-                    bConnected = true;
+                    PipeContext->bConnected.store(true);
                 }
                 else
                 {
@@ -371,7 +371,9 @@ void FO3DNngSender::Tick(float /*DeltaSeconds*/)
 FO3DTransportStats FO3DNngSender::GetStats() const
 {
     FScopeLock Lock(&StatsMutex);
-    return Stats;
+    FO3DTransportStats Copy = Stats;
+    Copy.DroppedFrames += PublishState->AudioDropped.load();
+    return Copy;
 }
 
 bool FO3DNngSender::OpenSocket()
@@ -391,7 +393,7 @@ bool FO3DNngSender::OpenSocket()
         {
             Ret = nng_listen(NewSocket->Socket, AddressUtf8.Get(), nullptr, 0);
         }
-        bConnected = (Ret == 0);
+        PipeContext->bConnected.store(Ret == 0);
         break;
     case O3DNNG::ENngMode::Pair:
         Ret = nng_pair1_open(&NewSocket->Socket);
@@ -400,12 +402,12 @@ bool FO3DNngSender::OpenSocket()
             if (Options.bListen)
             {
                 Ret = nng_listen(NewSocket->Socket, AddressUtf8.Get(), nullptr, 0);
-                bConnected = (Ret == 0);
+                PipeContext->bConnected.store(Ret == 0);
             }
             else
             {
                 Ret = nng_dial(NewSocket->Socket, AddressUtf8.Get(), nullptr, NNG_FLAG_NONBLOCK);
-                bConnected = (Ret == 0);
+                PipeContext->bConnected.store(Ret == 0);
             }
         }
         break;
@@ -414,7 +416,7 @@ bool FO3DNngSender::OpenSocket()
         if (Ret == 0)
         {
             Ret = nng_dial(NewSocket->Socket, AddressUtf8.Get(), nullptr, NNG_FLAG_NONBLOCK);
-            bConnected = (Ret == 0);
+            PipeContext->bConnected.store(Ret == 0);
         }
         break;
     default:
@@ -436,13 +438,13 @@ bool FO3DNngSender::OpenSocket()
         return false;
     }
 
-    PipeCount.Reset();
-    int NotifyAdd = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_ADD_POST, SenderPipeCallback, this);
+    PipeContext->PipeCount.store(0);
+    int NotifyAdd = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_ADD_POST, SenderPipeCallback, PipeToken);
     if (NotifyAdd != 0)
     {
         UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender pipe notify add failed (%d) %s"), NotifyAdd, UTF8_TO_TCHAR(nng_strerror(NotifyAdd)));
     }
-    int NotifyRem = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_REM_POST, SenderPipeCallback, this);
+    int NotifyRem = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_REM_POST, SenderPipeCallback, PipeToken);
     if (NotifyRem != 0)
     {
         UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender pipe notify remove failed (%d) %s"), NotifyRem, UTF8_TO_TCHAR(nng_strerror(NotifyRem)));
@@ -508,21 +510,16 @@ void FO3DNngSender::StopWorker()
 
 uint32 FO3DNngSender::RunWorker()
 {
+    TArray<uint8> Bytes;
     while (!bStopWorker.Load())
     {
-        FQueuedPayload Payload;
-        if (!Queue.Dequeue(Payload))
+        if (!PublishState->SendQueue.Dequeue(Bytes))
         {
-            if (WakeEvent)
-            {
-                WakeEvent->Wait(50);
-            }
+            PublishState->SendQueue.WaitForWork(50);
             continue;
         }
 
-        const uint64 PayloadSize = static_cast<uint64>(Payload.Bytes.Num());
-        const uint64 Current = QueueBytes.Load();
-        QueueBytes.Store(Current > PayloadSize ? Current - PayloadSize : 0);
+        const uint64 PayloadSize = static_cast<uint64>(Bytes.Num());
 
         FNngSocketWrapper* ActiveSocket = Socket;
         if (!ActiveSocket)
@@ -532,15 +529,13 @@ uint32 FO3DNngSender::RunWorker()
             continue;
         }
 
-        const int Ret = nng_send(ActiveSocket->Socket, Payload.Bytes.GetData(), Payload.Bytes.Num(), NNG_FLAG_NONBLOCK);
+        const int Ret = nng_send(ActiveSocket->Socket, Bytes.GetData(), Bytes.Num(), NNG_FLAG_NONBLOCK);
         if (Ret == NNG_EAGAIN)
         {
             // Socket buffer full due to slow receiver/network - re-queue to retry later
             // This prevents blocking the worker thread on slow cloud connections
-            Queue.Enqueue(MoveTemp(Payload));
-            // Re-add the payload size back to queue counter since send failed
-            const uint64 PreviousCurrent = Current > PayloadSize ? Current - PayloadSize : 0;
-            QueueBytes.Store(PreviousCurrent + PayloadSize);
+            // (byte accounting is atomic inside the shared queue).
+            PublishState->SendQueue.Enqueue(MoveTemp(Bytes), /*bIgnoreCap=*/true);
             // Brief yield to avoid busy-spinning when consistently backed up
             FPlatformProcess::Sleep(0.001f);
             continue;
@@ -570,30 +565,18 @@ bool FO3DNngSender::EnqueuePayload(const uint8* Data, int32 Size)
         return false;
     }
 
-    const uint64 Pending = QueueBytes.Load();
-    if (Options.MaxQueueBytes > 0 && Pending + static_cast<uint64>(Size) > Options.MaxQueueBytes)
+    TArray<uint8> Bytes(Data, Size);
+    if (!PublishState->SendQueue.Enqueue(MoveTemp(Bytes)))
     {
         const double Now = FPlatformTime::Seconds();
         if (Now - LastBackpressureLogTimestamp > 0.5)
         {
             UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender queue full (pending=%llu / limit=%llu bytes). Dropping frame."),
-                Pending,
+                PublishState->SendQueue.GetPendingBytes(),
                 Options.MaxQueueBytes);
             LastBackpressureLogTimestamp = Now;
         }
         return false;
-    }
-
-    FQueuedPayload Payload;
-    Payload.Bytes.SetNumUninitialized(Size);
-    FMemory::Memcpy(Payload.Bytes.GetData(), Data, Size);
-
-    Queue.Enqueue(MoveTemp(Payload));
-    QueueBytes.Store(Pending + static_cast<uint64>(Size));
-
-    if (WakeEvent)
-    {
-        WakeEvent->Trigger();
     }
 
     return true;
@@ -601,12 +584,7 @@ bool FO3DNngSender::EnqueuePayload(const uint8* Data, int32 Size)
 
 void FO3DNngSender::DrainQueue()
 {
-    FQueuedPayload Payload;
-    while (Queue.Dequeue(Payload))
-    {
-        // release payload
-    }
-    QueueBytes.Store(0);
+    PublishState->SendQueue.Empty();
 }
 
 void FO3DNngSender::HandleSendError(int ErrorCode)
@@ -623,22 +601,22 @@ void FO3DNngSender::HandleSendError(int ErrorCode)
         CloseSocket();
         BackoffAttempt = FMath::Min(BackoffAttempt + 1, 10);
         LastBackoffAttemptTime = Now;
-        bConnected = false;
+        PipeContext->bConnected.store(false);
     }
     else if (Options.Mode == O3DNNG::ENngMode::Push)
     {
         CloseSocket();
         BackoffAttempt = FMath::Min(BackoffAttempt + 1, 10);
         LastBackoffAttemptTime = Now;
-        bConnected = false;
+        PipeContext->bConnected.store(false);
     }
     else if (Options.Mode == O3DNNG::ENngMode::Pair && Options.bListen)
     {
-        bConnected = true; // server remains available
+        PipeContext->bConnected.store(true); // server remains available
     }
     else if (Options.Mode == O3DNNG::ENngMode::Pub)
     {
-        bConnected = true; // publisher remains ready even if no subscribers
+        PipeContext->bConnected.store(true); // publisher remains ready even if no subscribers
     }
 }
 
@@ -656,12 +634,19 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DNngSender::CreateAudioS
     // Note: Audio stream label is now automatically derived from StreamId
 
     ActiveAudioConfig = EffectiveConfig;
-    RefreshAudioEncoder();
 
-    return MakeShared<FNngSenderAudioSink, ESPMode::ThreadSafe>(*this, EffectiveConfig);
+    // Immutable snapshot for this sink's own encoders (TRB-11): nothing reconfigures them later.
+    const FString SubjectFallback = ResolveAudioSubjectFallback();
+    FO3DSinkAudioEncoder::FSettings EncoderSettings;
+    EncoderSettings.Config = EffectiveConfig;
+    EncoderSettings.DefaultStreamLabel = SubjectFallback;
+    EncoderSettings.DefaultSubject = SubjectFallback;
+    EncoderSettings.SourceGuid = AudioSourceGuid;
+
+    return MakeShared<FNngSenderAudioSink, ESPMode::ThreadSafe>(PublishState, EffectiveConfig, MoveTemp(EncoderSettings));
 }
 
-void FO3DNngSender::RefreshAudioEncoder()
+FString FO3DNngSender::ResolveAudioSubjectFallback() const
 {
     FString SubjectFallback = ActiveConfig.StreamId;
     if (SubjectFallback.IsEmpty())
@@ -672,77 +657,5 @@ void FO3DNngSender::RefreshAudioEncoder()
     {
         SubjectFallback = TEXT("nng");
     }
-
-    // Note: Audio stream label is now automatically derived from StreamId (SubjectFallback)
-    bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, SubjectFallback, SubjectFallback);
+    return SubjectFallback;
 }
-
-bool FO3DNngSender::ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec)
-{
-    if (!bInitialized.Load() || !bRunning.Load() || !bAudioEncoderInitialized)
-    {
-        return false;
-    }
-
-    FString SubjectForAudio;
-    {
-        FScopeLock SubjectLock(&SubjectNameLock);
-        SubjectForAudio = LastSubjectName;
-    }
-    if (SubjectForAudio.IsEmpty())
-    {
-        SubjectForAudio = ActiveConfig.StreamId;
-    }
-    if (SubjectForAudio.IsEmpty())
-    {
-        SubjectForAudio = Options.StreamId;
-    }
-    if (SubjectForAudio.IsEmpty())
-    {
-        SubjectForAudio = TEXT("nng");
-    }
-
-    O3DAudio::FEncodedFrame Frame;
-    if (!AudioEncoder.BuildEncodedFrame(StreamLabel, SubjectForAudio, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Frame))
-    {
-        return false;
-    }
-
-    if (Frame.Meta.SubjectName.IsEmpty())
-    {
-        Frame.Meta.SubjectName = SubjectForAudio;
-    }
-    Frame.Meta.SourceGuid = AudioSourceGuid;
-
-    return SendEncodedAudio(Frame, TimestampSec);
-}
-
-bool FO3DNngSender::SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, double TimestampSec)
-{
-    if (!bInitialized.Load() || !bRunning.Load() || Frame.Encoded.Num() <= 0)
-    {
-        return false;
-    }
-
-    if (!O3DAudio::CreateUnifiedAudioMessage(Frame, TimestampSec, UnifiedAudioScratch))
-    {
-        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender failed to create unified audio message"));
-        return false;
-    }
-
-    if (!EnqueuePayload(UnifiedAudioScratch.GetData(), UnifiedAudioScratch.Num()))
-    {
-        FScopeLock StatsLock(&StatsMutex);
-        Stats.DroppedFrames++;
-        return false;
-    }
-
-    {
-        FScopeLock StatsLock(&StatsMutex);
-        Stats.FramesSent++;
-        Stats.BytesSent += UnifiedAudioScratch.Num();
-    }
-
-    return true;
-}
-
