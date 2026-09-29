@@ -73,6 +73,6 @@ private:
 	std::vector<char> CombinedScratch;
 
 	TUniquePtr<FFragmentState> FragmentState;
-	O3DAudio::FFrameDecoder AudioDecoder;
+	O3DAudio::FMultiStreamFrameDecoder AudioDecoder; // SHR-15: one decoder per (SourceGuid, StreamLabel)
 	TArray<int16> DecodedPcmScratch;
 };

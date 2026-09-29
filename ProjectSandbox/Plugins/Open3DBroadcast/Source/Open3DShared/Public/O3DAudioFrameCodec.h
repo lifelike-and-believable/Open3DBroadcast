@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Logging/LogMacros.h"
+#include "Templates/UniquePtr.h"
 
 #include "O3DTransportTypes.h"
 #include "O3DAudioOpus.h"
@@ -65,6 +66,8 @@ namespace O3DAudio
 
 	/**
 	 * Helper that converts encoded payloads back to PCM16 for playback/processing.
+	 * Holds one stateful Opus decoder, so it serves a single stream only; receivers use
+	 * FMultiStreamFrameDecoder below.
 	 */
 	class OPEN3DSHARED_API FFrameDecoder
 	{
@@ -83,6 +86,47 @@ namespace O3DAudio
 		int32 CachedNumChannels = 0;
 		bool bOpusReady = false;
 	};
+
+	/**
+	 * One FFrameDecoder per audio stream, keyed by (SourceGuid, StreamLabel) (SHR-15).
+	 * Opus decoding is stateful, so interleaving two publishers or two labels through one
+	 * decoder corrupts both. Same Decode() signature as FFrameDecoder. Not thread-safe:
+	 * owned and called by one receive thread (the thread that calls Poll()).
+	 */
+	class OPEN3DSHARED_API FMultiStreamFrameDecoder
+	{
+	public:
+		explicit FMultiStreamFrameDecoder(int32 InMaxStreams = 16);
+		~FMultiStreamFrameDecoder();
+		// Non-copyable: it owns stateful decoders. The explicit deletes also stop MSVC from
+		// instantiating a copy constructor for this exported class, which fails on the
+		// TMap of TUniquePtr (C2280).
+		FMultiStreamFrameDecoder(const FMultiStreamFrameDecoder&) = delete;
+		FMultiStreamFrameDecoder& operator=(const FMultiStreamFrameDecoder&) = delete;
+
+		bool Decode(O3DS::EUnifiedCodec Codec,
+			const O3DS::FAudioFrameMeta& Meta,
+			const uint8* Payload,
+			int32 PayloadSize,
+			TArray<int16>& OutPcm16);
+
+		int32 GetNumStreams() const { return Streams.Num(); }
+		void Reset() { Streams.Reset(); }
+
+	private:
+		struct FStream
+		{
+			FFrameDecoder Decoder;
+			uint64 LastUse = 0;
+		};
+
+		int32 MaxStreams = 16;
+		uint64 UseCounter = 0;
+		TMap<FString, TUniquePtr<FStream>> Streams;
+	};
+
+	/** Float [-1, 1] to PCM16 with clamping and round-to-nearest. */
+	OPEN3DSHARED_API void ConvertFloatToPcm16(const float* In, int32 NumSamples, int16* Out);
 
 	/** Serialise an encoded frame into the transport-neutral audio payload format. */
 	OPEN3DSHARED_API bool SerializeForTransport(const FEncodedFrame& Frame, TArray<uint8>& OutPayload);

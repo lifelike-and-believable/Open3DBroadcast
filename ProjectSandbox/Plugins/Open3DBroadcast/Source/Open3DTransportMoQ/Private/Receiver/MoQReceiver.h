@@ -115,7 +115,7 @@ private:
 
 	FO3DTransportConfig ActiveConfig;
 	FO3DTransportAudioConfig ActiveAudioConfig;
-	O3DAudio::FFrameDecoder AudioDecoder;
+	O3DAudio::FMultiStreamFrameDecoder AudioDecoder; // SHR-15: one decoder per (SourceGuid, StreamLabel)
 	TArray<int16> DecodedPcmScratch;
 
 	// Shared alive flag for safe callback handling - set to false during destruction

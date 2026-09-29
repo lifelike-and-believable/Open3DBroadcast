@@ -4,25 +4,31 @@
 #include "HAL/PlatformTime.h"
 #include "O3DSenderAudioSinkBase.h"
 
+#include <atomic>
+
 #include "o3ds/model.h"
 
 #include <vector>
 
-class FLoopbackSenderAudioSink final : public FO3DSenderAudioSinkBase
+/**
+ * Loopback audio sink (WP-S5, TRB-30). Holds the sender's lifetime gate, a weak channel
+ * reference and its own encoders; it never references the sender.
+ */
+class FLoopbackSenderAudioSink final : public FO3DGatedSenderAudioSink
 {
 public:
-    FLoopbackSenderAudioSink(FO3DLoopbackSender& InOwner,
+    FLoopbackSenderAudioSink(TSharedRef<FO3DLifetimeGate, ESPMode::ThreadSafe> InGate,
                              TWeakPtr<FO3DLoopbackChannel, ESPMode::ThreadSafe> InChannel,
                              FString InChannelKey,
-                             FO3DTransportAudioConfig InConfig)
-        : FO3DSenderAudioSinkBase(MoveTemp(InConfig))
-        , Owner(InOwner)
+                             FO3DTransportAudioConfig InConfig,
+                             FO3DSinkAudioEncoder::FSettings InEncoderSettings)
+        : FO3DGatedSenderAudioSink(MoveTemp(InConfig), MoveTemp(InGate), MoveTemp(InEncoderSettings))
         , Channel(MoveTemp(InChannel))
         , ChannelKey(MoveTemp(InChannelKey))
     {
     }
 
-    virtual bool OnSubmitPcmInternal(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
+    virtual bool OnSubmitGated(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
     {
         TSharedPtr<FO3DLoopbackChannel, ESPMode::ThreadSafe> PinnedChannel = Channel.Pin();
         if (!PinnedChannel.IsValid())
@@ -34,12 +40,12 @@ public:
         if (PendingAudio >= PinnedChannel->AudioCapacity)
         {
             const double Now = FPlatformTime::Seconds();
-            if (Now - LastDropLogTime > 1.0)
+            if (Now - LastDropLogTime.load() > 1.0)
             {
                 #if !WITH_DEV_AUTOMATION_TESTS
                 UE_LOG(LogO3DLoopbackTransport, Warning, TEXT("Loopback audio queue full for '%s'; dropping frame."), *ChannelKey);
                 #endif
-                LastDropLogTime = Now;
+                LastDropLogTime.store(Now);
             }
             return false;
         }
@@ -49,7 +55,7 @@ public:
         const FString LabelForPacket = StreamLabel.IsEmpty() ? ChannelKey : StreamLabel;
 
         O3DAudio::FEncodedFrame EncodedFrame;
-        if (!Owner.EncodeAudioFrame(LabelForPacket, SubjectForAudio, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, EncodedFrame))
+        if (!GetEncoder().Encode(LabelForPacket, SubjectForAudio, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, EncodedFrame))
         {
             return false;
         }
@@ -67,7 +73,7 @@ public:
         if (DebugLevel > 0)
         {
             const double Now = FPlatformTime::Seconds();
-            if (DebugLevel > 1 || Now - LastEnqueueLogTime > 0.25)
+            if (DebugLevel > 1 || Now - LastEnqueueLogTime.load() > 0.25)
             {
                 const int32 PendingNow = PinnedChannel->AudioPendingCount.load();
                 UE_LOG(LogO3DLoopbackTransport, Log, TEXT("Loopback audio enqueued channel='%s' label='%s' frames=%d channels=%d sr=%d pending=%d timestamp=%.3f"),
@@ -78,7 +84,7 @@ public:
                     SampleRate,
                     PendingNow,
                     TimestampSec);
-                LastEnqueueLogTime = Now;
+                LastEnqueueLogTime.store(Now);
             }
         }
 
@@ -91,12 +97,16 @@ public:
     }
 
 private:
-    FO3DLoopbackSender& Owner;
     TWeakPtr<FO3DLoopbackChannel, ESPMode::ThreadSafe> Channel;
-    FString ChannelKey;
-    double LastDropLogTime = 0.0;
-    double LastEnqueueLogTime = 0.0;
+    const FString ChannelKey;
+    std::atomic<double> LastDropLogTime{0.0};
+    std::atomic<double> LastEnqueueLogTime{0.0};
 };
+
+FO3DLoopbackSender::~FO3DLoopbackSender()
+{
+    AudioGate->Close();
+}
 
 bool FO3DLoopbackSender::Initialize(const FO3DTransportConfig& Config)
 {
@@ -108,7 +118,11 @@ bool FO3DLoopbackSender::Initialize(const FO3DTransportConfig& Config)
     bInitialized = Channel.IsValid();
     Stats.Reset();
     ActiveAudioConfig = Config.Audio;
-    bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, ChannelKey, ChannelKey);
+    AudioSourceGuid = FGuid::NewGuid();
+    if (bInitialized)
+    {
+        AudioGate->Open();
+    }
 
     if (!bInitialized)
     {
@@ -131,12 +145,18 @@ bool FO3DLoopbackSender::Initialize(const FO3DTransportConfig& Config)
 
 bool FO3DLoopbackSender::Start()
 {
+    if (bInitialized)
+    {
+        AudioGate->Open();
+    }
     return bInitialized;
 }
 
 void FO3DLoopbackSender::Stop()
 {
-    // No persistent state required; channel remains available for new instances.
+    // WP-S5: after this returns no audio sink created so far can enqueue again.
+    // The channel itself remains available for new instances.
+    AudioGate->Close();
 }
 
 bool FO3DLoopbackSender::Send(const O3DS::SubjectList& List)
@@ -245,25 +265,13 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DLoopbackSender::CreateA
     }
 
     ActiveAudioConfig = AudioConfig;
-    bAudioEncoderInitialized = AudioEncoder.Initialize(ActiveAudioConfig, ChannelKey, ChannelKey);
 
-    return MakeShared<FLoopbackSenderAudioSink, ESPMode::ThreadSafe>(*this, Channel, ChannelKey, ActiveAudioConfig);
-}
+    // Immutable snapshot for this sink's own encoders (TRB-11): nothing reconfigures them later.
+    FO3DSinkAudioEncoder::FSettings EncoderSettings;
+    EncoderSettings.Config = ActiveAudioConfig;
+    EncoderSettings.DefaultStreamLabel = ChannelKey;
+    EncoderSettings.DefaultSubject = ChannelKey;
+    EncoderSettings.SourceGuid = AudioSourceGuid;
 
-bool FO3DLoopbackSender::EncodeAudioFrame(const FString& StreamLabelOverride,
-    const FString& SubjectOverride,
-    const float* Interleaved,
-    int32 NumFrames,
-    int32 NumChannels,
-    int32 SampleRate,
-    double TimestampSec,
-    O3DAudio::FEncodedFrame& OutFrame)
-{
-    if (!bAudioEncoderInitialized)
-    {
-        return false;
-    }
-
-    const FString EffectiveSubject = SubjectOverride.IsEmpty() ? ChannelKey : SubjectOverride;
-    return AudioEncoder.BuildEncodedFrame(StreamLabelOverride, EffectiveSubject, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, OutFrame);
+    return MakeShared<FLoopbackSenderAudioSink, ESPMode::ThreadSafe>(AudioGate, Channel, ChannelKey, ActiveAudioConfig, MoveTemp(EncoderSettings));
 }

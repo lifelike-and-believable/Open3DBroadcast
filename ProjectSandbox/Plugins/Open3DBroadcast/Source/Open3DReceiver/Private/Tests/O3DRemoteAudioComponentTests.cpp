@@ -8,6 +8,7 @@
 #include "O3DAudioBus.h"
 
 #include "Misc/AutomationTest.h"
+#include "Async/TaskGraphInterfaces.h"
 #include "Sound/SoundWaveProcedural.h"
 
 struct FO3DRemoteAudioComponentTestAccessor
@@ -58,6 +59,16 @@ struct FO3DReceiverSourceTestAccessor
     static void CallFinalizeAudioMeta(const FO3DReceiverSource& Source, O3DS::FAudioFrameMeta& Meta)
     {
         Source.FinalizeAudioMeta(Meta);
+    }
+
+    static void SetSourceGuid(FO3DReceiverSource& Source, const FGuid& Guid)
+    {
+        Source.SourceGuid = Guid;
+    }
+
+    static TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> MakeAudioSink(const FO3DReceiverSource& Source)
+    {
+        return Source.MakeAudioSink();
     }
 };
 
@@ -169,6 +180,68 @@ bool FO3DReceiverSourceFinalizeAudioMetaTest::RunTest(const FString& Parameters)
     FO3DReceiverSourceTestAccessor::CallFinalizeAudioMeta(SourceWithoutSubject, FallbackMeta);
     TestEqual(TEXT("Stream id used when no subject observed"), FallbackMeta.SubjectName, Config.StreamId);
 
+    return true;
+}
+
+// WP-S5 (RCV-1): the receiver-side audio sink holds an immutable metadata snapshot, not the
+// source. It must keep working (and must not touch the source) after the source is destroyed,
+// when called from a non-game thread, and it must publish on the game thread only (SHR-10).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverAudioSinkLifetimeTest, "Open3DBroadcast.Receiver.Lifetime.AudioSinkOutlivesSource", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FO3DReceiverAudioSinkLifetimeTest::RunTest(const FString& Parameters)
+{
+    FO3DTransportConfig Config;
+    Config.StreamId = TEXT("wp_s5_stream");
+    Config.Audio.bEnableAudio = true;
+    Config.Audio.SampleRate = 44100;
+    Config.Audio.NumChannels = 2;
+    const FGuid ExpectedGuid = FGuid::NewGuid();
+
+    TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> Sink;
+    {
+        TSharedPtr<FO3DReceiverSource> Source = MakeShared<FO3DReceiverSource>();
+        FO3DReceiverSourceTestAccessor::SetActiveConfig(*Source, Config);
+        FO3DReceiverSourceTestAccessor::SetSourceGuid(*Source, ExpectedGuid);
+        Sink = FO3DReceiverSourceTestAccessor::MakeAudioSink(*Source);
+        // Changing the source afterwards must not affect the snapshot the sink holds.
+        FO3DTransportConfig Other;
+        Other.StreamId = TEXT("changed_after_start");
+        FO3DReceiverSourceTestAccessor::SetActiveConfig(*Source, Other);
+    } // source destroyed here, on the game thread
+    TestTrue(TEXT("Sink created"), Sink.IsValid());
+    if (!Sink.IsValid())
+    {
+        return false;
+    }
+
+    int32 Received = 0;
+    O3DS::FAudioFrameMeta LastMeta;
+    FDelegateHandle Handle = FO3DAudioBus::OnPcm16().AddLambda([&Received, &LastMeta](const O3DS::FAudioFrameMeta& Meta, const TArray<uint8>&)
+    {
+        check(IsInGameThread());
+        ++Received;
+        LastMeta = Meta;
+    });
+
+    // Submit from a background task, as a LiveKit or socket thread would, and let that task
+    // hold the last reference to the sink.
+    const int16 Pcm[4] = {1, 2, 3, 4};
+    FGraphEventRef Task = FFunctionGraphTask::CreateAndDispatchWhenReady([SinkCopy = Sink, &Pcm]() mutable
+    {
+        O3DS::FAudioFrameMeta Meta; // empty: every field comes from the snapshot
+        SinkCopy->SubmitPcm16(Meta, reinterpret_cast<const uint8*>(Pcm), sizeof(Pcm));
+        SinkCopy.Reset();
+    }, TStatId(), nullptr, ENamedThreads::AnyBackgroundThreadNormalTask);
+    Sink.Reset();
+    FTaskGraphInterface::Get().WaitUntilTaskCompletes(Task, ENamedThreads::GameThread);
+    FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+
+    FO3DAudioBus::OnPcm16().Remove(Handle);
+
+    TestEqual(TEXT("Frame published once on the game thread"), Received, 1);
+    TestTrue(TEXT("SourceGuid from snapshot"), LastMeta.SourceGuid == ExpectedGuid);
+    TestEqual(TEXT("Stream label from snapshot"), LastMeta.StreamLabel, FString(TEXT("wp_s5_stream")));
+    TestEqual(TEXT("Sample rate from snapshot"), LastMeta.SampleRate, 44100);
+    TestEqual(TEXT("Channels from snapshot"), LastMeta.NumChannels, 2);
     return true;
 }
 

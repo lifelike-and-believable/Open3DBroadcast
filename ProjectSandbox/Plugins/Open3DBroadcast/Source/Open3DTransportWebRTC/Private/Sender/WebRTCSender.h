@@ -2,6 +2,7 @@
 
 #include "O3DSenderInterface.h"
 #include "O3DTransportTypes.h"
+#include "O3DLifetimeGate.h"
 #include "HAL/CriticalSection.h"
 #include "Templates/Atomic.h"
 
@@ -15,6 +16,30 @@ DECLARE_LOG_CATEGORY_EXTERN(LogO3DWebRTCSender, Log, All);
 
 // Note: LiveKit FFI handles Opus encoding internally.
 // We only need to provide PCM16 audio via lk_publish_audio_pcm_i16().
+
+/**
+ * State shared between FO3DWebRTCSender, its audio sinks and the LiveKit connection callback
+ * (ADR 0007 addendum, WP-S5: TRF-1). Never holds a sender pointer.
+ *
+ * - Audio sinks enter Gate before touching ClientHandle or AudioTracks. Stop() closes the gate
+ *   (waiting for any publish in flight) before it destroys tracks and the client.
+ * - ClientHandle is written by the game thread only while the gate is closed.
+ * - The connection callback receives an opaque token that resolves to this object, so it can
+ *   never reach a destroyed sender. Its destructor does no FFI work.
+ */
+struct FWebRTCSenderLink
+{
+    TSharedRef<FO3DLifetimeGate, ESPMode::ThreadSafe> Gate = MakeShared<FO3DLifetimeGate, ESPMode::ThreadSafe>();
+    LkClientHandle* ClientHandle = nullptr;
+
+    // Per-subject audio tracks (labeled audio publishing), keyed by StreamLabel.
+    FCriticalSection AudioTracksMutex;
+    TMap<FString, LkAudioTrackHandle*> AudioTracks;
+
+    TAtomic<bool> bConnected{ false };
+    // PHASE 10: estimated frames waiting in the LiveKit FFI queue (reset on connect).
+    TAtomic<int32> EstimatedPendingFrames{ 0 };
+};
 
 /**
  * WebRTC transport sender implementation using LiveKit FFI.
@@ -38,8 +63,6 @@ public:
     virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
 
 private:
-    friend class FWebRTCSenderAudioSink;
-
     // Configuration
     FO3DTransportConfig ActiveConfig;
     FO3DTransportAudioConfig ActiveAudioConfig;
@@ -50,15 +73,15 @@ private:
     // LiveKit FFI client handle (opaque)
     LkClientHandle* ClientHandle = nullptr;
 
-    // Per-subject audio tracks (labeled audio publishing)
-    // Map from StreamLabel to audio track handle
-    TMap<FString, LkAudioTrackHandle*> AudioTracks;
-    mutable FCriticalSection AudioTracksMutex;
+    // WP-S5: audio tracks, connection flag and backpressure estimate live in Link, which audio
+    // sinks and the connection callback share instead of referencing this sender.
+    TSharedRef<FWebRTCSenderLink, ESPMode::ThreadSafe> Link;
+    /** Opaque user data for lk_set_connection_callback; resolves to Link until the destructor. */
+    void* LinkToken = nullptr;
 
     // State
     mutable FCriticalSection StateMutex;
     TAtomic<bool> bInitialized{ false };
-    TAtomic<bool> bConnected{ false };
 
     // Stats
     mutable FCriticalSection StatsMutex;
@@ -70,7 +93,6 @@ private:
     // PHASE 10: WebRTC FFI Backpressure Monitoring
     // Tracks estimated pending frames in the LiveKit FFI queue to detect and adapt to network slowdowns
     // This prevents latency spikes by dropping frames when the FFI buffer backs up
-    TAtomic<int32> EstimatedPendingFrames{ 0 };    // Estimated frames waiting in FFI queue
     TAtomic<int64> LastFrameSendTimeUs{ 0 };       // Last send time for frame rate calculation
     TAtomic<int32> RecentSendRateFps{ 30 };        // Moving average frame rate (FPS)
     double LastBackpressureDecayTimeSeconds = 0.0; // For periodic queue depth decay

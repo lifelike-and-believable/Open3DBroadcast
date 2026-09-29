@@ -2,11 +2,13 @@
 
 #include "O3DSenderInterface.h"
 #include "../Shared/LoopbackChannel.h"
-#include "O3DAudioFrameCodec.h"
+#include "O3DLifetimeGate.h"
 
 class FO3DLoopbackSender : public IOpen3DSender
 {
 public:
+    virtual ~FO3DLoopbackSender() override;
+
     virtual bool Initialize(const FO3DTransportConfig& Config) override;
     virtual bool Start() override;
     virtual void Stop() override;
@@ -18,26 +20,17 @@ public:
     virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
 
 private:
-    friend class FLoopbackSenderAudioSink;
-
     FString ChannelKey;
     int32 QueueCapacity = 64;
     int32 AudioQueueCapacity = 32;
     TSharedPtr<FO3DLoopbackChannel, ESPMode::ThreadSafe> Channel;
     bool bInitialized = false;
-    bool bAudioEncoderInitialized = false;
     FO3DTransportAudioConfig ActiveAudioConfig;
-    O3DAudio::FFrameEncoder AudioEncoder;
+    FGuid AudioSourceGuid;
     FO3DTransportStats Stats;
 
-    bool SendBytes(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec);
+    /** WP-S5: audio sinks hold this gate (never the sender); Stop() closes it before returning. */
+    TSharedRef<FO3DLifetimeGate, ESPMode::ThreadSafe> AudioGate = MakeShared<FO3DLifetimeGate, ESPMode::ThreadSafe>();
 
-    bool EncodeAudioFrame(const FString& StreamLabelOverride,
-        const FString& SubjectOverride,
-        const float* Interleaved,
-        int32 NumFrames,
-        int32 NumChannels,
-        int32 SampleRate,
-        double TimestampSec,
-        O3DAudio::FEncodedFrame& OutFrame);
+    bool SendBytes(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec);
 };

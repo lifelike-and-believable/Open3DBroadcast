@@ -83,6 +83,24 @@ public:
 
     virtual void SubmitFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds) override
     {
+        if (!IsInGameThread())
+        {
+            // WP-S5 (RCV-1): never pin the source on a transport or FFI thread, where it could
+            // become the last owner and run ~FO3DReceiverSource (and the transport's Stop())
+            // off the game thread. Hop with the weak reference and pin on the game thread.
+            const uint64 ArrivalEpochUs = O3DS::NowUtcMicros();
+            TWeakPtr<FO3DReceiverSource> WeakOwner = Owner;
+            TArray<uint8> BufferCopy(Buffer);
+            AsyncTask(ENamedThreads::GameThread, [WeakOwner, Subject, TimestampSeconds, ArrivalEpochUs, BufferCopy = MoveTemp(BufferCopy)]()
+            {
+                if (TSharedPtr<FO3DReceiverSource> OwnerPinned = WeakOwner.Pin())
+                {
+                    OwnerPinned->HandleSerializedFrame(Subject, BufferCopy, TimestampSeconds, ArrivalEpochUs);
+                }
+            });
+            return;
+        }
+
         if (TSharedPtr<FO3DReceiverSource> OwnerPinned = Owner.Pin())
         {
             OwnerPinned->HandleSerializedFrame(Subject, Buffer, TimestampSeconds);
@@ -98,12 +116,19 @@ TSharedRef<ISerializedFrameConsumer, ESPMode::ThreadSafe> FO3DReceiverSource::Ma
     return MakeShared<FSerializedConsumer>(MoveTemp(Owner));
 }
 
-/** Lightweight audio bridge that republishes transport frames onto the gameplay audio bus. */
+/**
+ * Lightweight audio bridge that republishes transport frames onto the gameplay audio bus.
+ *
+ * WP-S5 (RCV-1): may be called on any transport or FFI thread. It holds an immutable metadata
+ * snapshot and no reference to the source, and it hands data to the game thread by value
+ * (the audio bus is game-thread-only, SHR-10). Its destructor frees memory only, so any
+ * thread may drop the last reference.
+ */
 class FO3DReceiverSource::FAudioSink : public IO3DReceiverAudioSink
 {
 public:
-    explicit FAudioSink(TWeakPtr<FO3DReceiverSource> InOwner)
-        : Owner(MoveTemp(InOwner))
+    explicit FAudioSink(FAudioMetaDefaults InDefaults)
+        : Defaults(MoveTemp(InDefaults))
     {
     }
 
@@ -114,10 +139,9 @@ public:
             return;
         }
 
-        if (TSharedPtr<FO3DReceiverSource> OwnerPinned = Owner.Pin())
         {
             O3DS::FAudioFrameMeta MetaCopy = InMeta;
-            OwnerPinned->FinalizeAudioMeta(MetaCopy);
+            Defaults.Apply(MetaCopy);
 
             const bool bDebug = CVarO3DReceiverAudioDebug.GetValueOnAnyThread() != 0;
             TArray<uint8> Payload;
@@ -140,7 +164,7 @@ public:
     }
 
 private:
-    TWeakPtr<FO3DReceiverSource> Owner;
+    const FAudioMetaDefaults Defaults;
 };
 
 namespace
@@ -351,7 +375,7 @@ bool FO3DReceiverSource::StartTransport()
     {
         if (ActiveReceiver->SupportsAudio())
         {
-            ActiveAudioSink = MakeShared<FAudioSink>(TWeakPtr<FO3DReceiverSource>(AsShared()));
+            ActiveAudioSink = MakeAudioSink();
             ActiveReceiver->SetAudioSink(ActiveAudioSink, ActiveConfig.Audio);
             UE_LOG(LogO3DReceiverAudio, Log, TEXT("Audio sink bound for transport '%s'."),
                 *ActiveConfig.Transport);
@@ -1315,13 +1339,34 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
 /** Fill in missing audio metadata (subject name, defaults) before publishing to the bus. */
 void FO3DReceiverSource::FinalizeAudioMeta(O3DS::FAudioFrameMeta& Meta) const
 {
+    BuildAudioMetaDefaults().Apply(Meta);
+}
+
+TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> FO3DReceiverSource::MakeAudioSink() const
+{
+    return MakeShared<FAudioSink, ESPMode::ThreadSafe>(BuildAudioMetaDefaults());
+}
+
+FO3DReceiverSource::FAudioMetaDefaults FO3DReceiverSource::BuildAudioMetaDefaults() const
+{
+    FAudioMetaDefaults Defaults;
+    Defaults.SourceGuid = SourceGuid;
+    Defaults.bEnableAudio = ActiveConfig.Audio.bEnableAudio;
+    Defaults.StreamId = ActiveConfig.StreamId;
+    Defaults.SampleRate = ActiveConfig.Audio.SampleRate;
+    Defaults.NumChannels = ActiveConfig.Audio.NumChannels;
+    return Defaults;
+}
+
+void FO3DReceiverSource::FAudioMetaDefaults::Apply(O3DS::FAudioFrameMeta& Meta) const
+{
     Meta.SourceGuid = SourceGuid;
 
     // Audio stream label is now provided directly by WebRTC transport via per-subject audio callback (OnAudioReceivedEx)
     // which receives explicit subject labels from LiveKit FFI. No fallback logic needed.
-    if (ActiveConfig.Audio.bEnableAudio && Meta.StreamLabel.IsEmpty())
+    if (bEnableAudio && Meta.StreamLabel.IsEmpty())
     {
-        Meta.StreamLabel = ActiveConfig.StreamId.IsEmpty() ? TEXT("o3ds:mix") : ActiveConfig.StreamId;
+        Meta.StreamLabel = StreamId.IsEmpty() ? TEXT("o3ds:mix") : StreamId;
     }
 
     // With per-subject audio labels from the callback, audio is explicitly routed to the correct subject
@@ -1334,25 +1379,17 @@ void FO3DReceiverSource::FinalizeAudioMeta(O3DS::FAudioFrameMeta& Meta) const
     // Fallback for edge cases (but should not be needed with proper label routing)
     if (Meta.SubjectName.IsEmpty())
     {
-        const FString StreamId = ActiveConfig.StreamId;
-        if (!StreamId.IsEmpty())
-        {
-            Meta.SubjectName = StreamId;
-        }
-        else
-        {
-            Meta.SubjectName = TEXT("Open3DReceiver");
-        }
+        Meta.SubjectName = StreamId.IsEmpty() ? FString(TEXT("Open3DReceiver")) : StreamId;
     }
 
     if (Meta.SampleRate <= 0)
     {
-        Meta.SampleRate = (ActiveConfig.Audio.SampleRate > 0) ? ActiveConfig.Audio.SampleRate : 48000;
+        Meta.SampleRate = (SampleRate > 0) ? SampleRate : 48000;
     }
 
     if (Meta.NumChannels <= 0)
     {
-        Meta.NumChannels = (ActiveConfig.Audio.NumChannels > 0) ? ActiveConfig.Audio.NumChannels : 1;
+        Meta.NumChannels = (NumChannels > 0) ? NumChannels : 1;
     }
 
     if (Meta.TimestampSec <= 0.0)

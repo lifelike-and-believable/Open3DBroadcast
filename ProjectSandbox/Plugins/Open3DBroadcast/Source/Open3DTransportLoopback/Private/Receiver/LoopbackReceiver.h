@@ -29,7 +29,7 @@ private:
     FO3DTransportStats Stats;
     int64 LatencySamples = 0;
     double LastAudioDropLogTime = 0.0;
-    O3DAudio::FFrameDecoder AudioDecoder;
+    O3DAudio::FMultiStreamFrameDecoder AudioDecoder; // SHR-15: one decoder per (SourceGuid, StreamLabel)
     TArray<int16> DecodedPcmScratch;
 
     void AccumulateLatency(double LatencyMs);

@@ -13,8 +13,8 @@
 class FMoQSessionWrapper;
 class FMoQPublisherHandle;
 class FSendWorker;
-class FEvent;
 class FRunnableThread;
+struct FMoQSenderAudioState;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogO3DMoQSender, Log, All);
 
@@ -61,7 +61,6 @@ public:
 
 private:
 	friend class FSendWorker;
-	friend class FO3DMoQSenderAudioSink;
 
 	struct FPendingPayload
 	{
@@ -108,9 +107,8 @@ private:
 	void ResetStats();
 	
 	// Audio support (Phase 4)
-	void RefreshAudioEncoder();
-	bool ProcessCapturedAudio(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec);
-	bool SendEncodedAudio(const O3DAudio::FEncodedFrame& Frame, double TimestampSec);
+	FString ResolveAudioSubjectFallback() const;
+	void DrainAudioQueue(bool bPublish);
 
 	FMoQSenderOptions Options;
 	TSharedPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> Session;
@@ -122,7 +120,6 @@ private:
 	mutable FCriticalSection QueueMutex;
 	uint64 PendingQueueBytes = 0;
 
-	FEvent* WakeEvent = nullptr;
 	TUniquePtr<FSendWorker> WorkerRunnable;
 	FRunnableThread* WorkerThread = nullptr;
 	FThreadSafeBool bWorkerStopRequested = false;
@@ -147,9 +144,12 @@ private:
 	// Audio support (Phase 4)
 	FO3DTransportAudioConfig ActiveAudioConfig;
 	FGuid AudioSourceGuid;
-	bool bAudioEncoderInitialized = false;
-	O3DAudio::FFrameEncoder AudioEncoder;
-	
-	mutable FCriticalSection SubjectNameLock;
-	FString LastSubjectName;
+	/** Set once an audio sink has been handed out; creates the audio publisher on connect. Game thread only. */
+	bool bAudioRequested = false;
+
+	/**
+	 * WP-S5: shared with audio sinks (never the sender itself). Its queue's wake event is also
+	 * the worker's wake event, so no thread can trigger a pooled event after Stop() (TRB-12).
+	 */
+	TSharedRef<FMoQSenderAudioState, ESPMode::ThreadSafe> AudioState;
 };

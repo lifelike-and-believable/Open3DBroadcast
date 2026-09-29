@@ -9,6 +9,7 @@
 #include "Containers/StringConv.h"
 #include "HAL/UnrealMemory.h"
 #include "moq_ffi.h"
+#include "O3DFfiContextRegistry.h"
 
 namespace
 {
@@ -18,17 +19,38 @@ namespace
         Copy.TrimStartAndEndInline();
         return Copy;
     }
+
+    // WP-S5 (TRF-12): moq-ffi does not document that callbacks stop after moq_disconnect or
+    // *_destroy returns, so user_data is an opaque token resolved here, never an address.
+    TO3DFfiContextRegistry<FMoQConnectionContext>& GetConnectionRegistry()
+    {
+        static TO3DFfiContextRegistry<FMoQConnectionContext> Registry;
+        return Registry;
+    }
+}
+
+// Declared at namespace scope because FSubscriberBinding is private to the wrapper; only
+// this translation unit names the registry type.
+template <typename T>
+static TO3DFfiContextRegistry<T>& GetSubscriberRegistryFor()
+{
+    static TO3DFfiContextRegistry<T> Registry;
+    return Registry;
 }
 
 FMoQSessionWrapper::FMoQSessionWrapper()
+    : ConnectionContext(MakeShared<FMoQConnectionContext, ESPMode::ThreadSafe>())
 {
-    CurrentState = MOQ_STATE_DISCONNECTED;
+    ConnectionToken = GetConnectionRegistry().Register(ConnectionContext);
 }
 
 FMoQSessionWrapper::~FMoQSessionWrapper()
 {
     Disconnect();
     SessionHandle.Reset();
+    // After this, a late connection callback resolves the token to nothing.
+    GetConnectionRegistry().Unregister(ConnectionToken);
+    ConnectionToken = nullptr;
 }
 
 FMoQResult FMoQSessionWrapper::Initialize(const FString& InRelayUrl)
@@ -47,6 +69,7 @@ FMoQResult FMoQSessionWrapper::Initialize(const FString& InRelayUrl)
     {
         SelfWeak = AsShared();
     }
+    ConnectionContext->Wrapper = SelfWeak;
 
     return SessionHandle.EnsureCreated();
 }
@@ -89,7 +112,7 @@ FMoQResult FMoQSessionWrapper::Connect()
 
     // Reset any previous "expected disconnect" markers now that we're attempting
     // to bring the session back online.
-    bExpectingDisconnect.Store(false);
+    ConnectionContext->bExpectingDisconnect.Store(false);
 
     // Ensure dispatcher is initialized before connecting (callbacks may fire immediately)
     FMoQAsyncDispatcher::Get().Initialize();
@@ -100,8 +123,9 @@ FMoQResult FMoQSessionWrapper::Connect()
     // The Tokio runtime inside moq-ffi may block waiting for connection
     FString RelayUrlCopy = RelayUrl;
     TWeakPtr<FMoQSessionWrapper> WeakSelf = SelfWeak;
+    void* const Token = ConnectionToken;
     
-    AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [WeakSelf, RelayUrlCopy]()
+    AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [WeakSelf, RelayUrlCopy, Token]()
     {
         TSharedPtr<FMoQSessionWrapper> StrongThis = WeakSelf.Pin();
         if (!StrongThis.IsValid())
@@ -123,7 +147,7 @@ FMoQResult FMoQSessionWrapper::Connect()
                 StrongThis->SessionHandle.GetUnsafe(),
                 UrlUtf8.Get(),
                 &FMoQSessionWrapper::HandleConnectionStateThunk,
-                StrongThis.Get()
+                Token
             );
             
             UE_LOG(LogMoQBridge, Verbose, TEXT("moq_connect returned: code=%d"), (int)RawResult.code);
@@ -166,7 +190,7 @@ void FMoQSessionWrapper::Disconnect()
         return;
     }
 
-    bExpectingDisconnect.Store(true);
+    ConnectionContext->bExpectingDisconnect.Store(true);
 
     {
         FScopeLock Lock(&SessionHandle.GetMutex());
@@ -181,10 +205,15 @@ void FMoQSessionWrapper::Disconnect()
         }
     }
 
-    CurrentState = MOQ_STATE_DISCONNECTED;
+    ConnectionContext->CurrentState = MOQ_STATE_DISCONNECTED;
 
     {
+        // Unregister before freeing: a callback that arrives after this finds no binding.
         FScopeLock Lock(&SubscriberMutex);
+        for (TPair<MoqSubscriber*, FSubscriberEntry>& Pair : SubscriberBindings)
+        {
+            GetSubscriberRegistryFor<FSubscriberBinding>().Unregister(Pair.Value.Token);
+        }
         SubscriberBindings.Reset();
     }
 
@@ -193,12 +222,12 @@ void FMoQSessionWrapper::Disconnect()
         AnnouncedNamespaces.Reset();
     }
 
-    bExpectingDisconnect.Store(false);
+    ConnectionContext->bExpectingDisconnect.Store(false);
 }
 
 bool FMoQSessionWrapper::IsConnected() const
 {
-    return CurrentState.Load() == MOQ_STATE_CONNECTED;
+    return ConnectionContext->CurrentState.Load() == MOQ_STATE_CONNECTED;
 }
 
 FMoQResult FMoQSessionWrapper::AnnounceNamespace(const FString& Namespace)
@@ -297,8 +326,9 @@ FMoQResult FMoQSessionWrapper::Subscribe(const FMoQSubscriptionConfig& Config, T
         return FMoQResult::FromCode(EMoQErrorCode::NotConnected, TEXT("Cannot subscribe while disconnected"));
     }
 
-    TUniquePtr<FSubscriberBinding> Binding = MakeUnique<FSubscriberBinding>();
+    TSharedRef<FSubscriberBinding, ESPMode::ThreadSafe> Binding = MakeShared<FSubscriberBinding, ESPMode::ThreadSafe>();
     Binding->DataHandler = Config.OnData;
+    void* const BindingToken = GetSubscriberRegistryFor<FSubscriberBinding>().Register(Binding);
 
     FTCHARToUTF8 NamespaceUtf8(*NamespaceValue);
     FTCHARToUTF8 TrackUtf8(*TrackValue);
@@ -306,11 +336,13 @@ FMoQResult FMoQSessionWrapper::Subscribe(const FMoQSubscriptionConfig& Config, T
     MoqSubscriber* Subscriber = nullptr;
     {
         FScopeLock Lock(&SessionHandle.GetMutex());
-        Subscriber = moq_subscribe(SessionHandle.GetUnsafe(), NamespaceUtf8.Get(), TrackUtf8.Get(), &FMoQSessionWrapper::HandleSubscriberDataThunk, Binding.Get());
+        Subscriber = moq_subscribe(SessionHandle.GetUnsafe(), NamespaceUtf8.Get(), TrackUtf8.Get(), &FMoQSessionWrapper::HandleSubscriberDataThunk, BindingToken);
     }
 
     if (Subscriber == nullptr)
     {
+        GetSubscriberRegistryFor<FSubscriberBinding>().Unregister(BindingToken);
+
         FString ExtraMessage;
         if (const char* LastError = moq_last_error())
         {
@@ -327,7 +359,10 @@ FMoQResult FMoQSessionWrapper::Subscribe(const FMoQSubscriptionConfig& Config, T
 
     {
         FScopeLock Lock(&SubscriberMutex);
-        SubscriberBindings.Add(Subscriber, MoveTemp(Binding));
+        FSubscriberEntry Entry;
+        Entry.Binding = Binding;
+        Entry.Token = BindingToken;
+        SubscriberBindings.Add(Subscriber, MoveTemp(Entry));
     }
 
     TSharedPtr<FMoQSubscriberHandle> Handle = MakeShared<FMoQSubscriberHandle>(Subscriber);
@@ -397,22 +432,23 @@ void FMoQSessionWrapper::Unsubscribe(const TSharedPtr<FMoQSubscriberHandle>& Sub
 
 void FMoQSessionWrapper::HandleConnectionStateThunk(void* UserData, MoqConnectionState State)
 {
-    if (FMoQSessionWrapper* Wrapper = static_cast<FMoQSessionWrapper*>(UserData))
+    // Runs on a moq-ffi (Tokio) thread. Never pins the wrapper here: only the context.
+    if (const TSharedPtr<FMoQConnectionContext, ESPMode::ThreadSafe> Context = GetConnectionRegistry().Resolve(UserData))
     {
-        Wrapper->HandleConnectionStateInternal(State);
+        RecordConnectionState(*Context, State);
     }
 }
 
-void FMoQSessionWrapper::HandleConnectionStateInternal(MoqConnectionState State)
+bool FMoQSessionWrapper::RecordConnectionState(FMoQConnectionContext& Context, MoqConnectionState State)
 {
-    CurrentState = State;
-    
+    Context.CurrentState = State;
+
     // Log state transitions for debugging
     UE_LOG(LogMoQBridge, Log, TEXT("Connection state changed: %s"), *LexToString(State));
 
     const bool bUnexpectedDisconnect =
         (State == MOQ_STATE_DISCONNECTED || State == MOQ_STATE_FAILED) &&
-        !bExpectingDisconnect.Load();
+        !Context.bExpectingDisconnect.Load();
 
     if (bUnexpectedDisconnect)
     {
@@ -426,33 +462,38 @@ void FMoQSessionWrapper::HandleConnectionStateInternal(MoqConnectionState State)
         }
     }
 
-    // Try to get weak pointer, but handle case where this is called before TSharedFromThis is set up
-    TWeakPtr<FMoQSessionWrapper> WrapperWeak = SelfWeak;
+    TWeakPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> WrapperWeak = Context.Wrapper;
     if (!WrapperWeak.IsValid())
     {
-        UE_LOG(LogMoQBridge, VeryVerbose, TEXT("Connection state callback received without a valid self-reference (state=%s)."), *LexToString(State));
-        ConnectionStateDelegate.Broadcast(State);
-        return;
+        return false;
     }
 
+    // The wrapper is pinned only on the game thread, so its destructor (which calls into
+    // moq-ffi) never runs on an FFI thread.
     FMoQAsyncDispatcher::Get().EnqueueGameThreadTask([WrapperWeak, State]()
     {
-        if (const TSharedPtr<FMoQSessionWrapper> Pinned = WrapperWeak.Pin())
+        if (const TSharedPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> Pinned = WrapperWeak.Pin())
         {
             Pinned->ConnectionStateDelegate.Broadcast(State);
         }
     });
+    return true;
+}
+
+void FMoQSessionWrapper::HandleConnectionStateInternal(MoqConnectionState State)
+{
+    if (!RecordConnectionState(*ConnectionContext, State))
+    {
+        UE_LOG(LogMoQBridge, VeryVerbose, TEXT("Connection state callback received without a valid self-reference (state=%s)."), *LexToString(State));
+        ConnectionStateDelegate.Broadcast(State);
+    }
 }
 
 void FMoQSessionWrapper::HandleSubscriberDataThunk(void* UserData, const uint8_t* Data, size_t DataLen)
 {
-    if (UserData == nullptr)
-    {
-        return;
-    }
-
-    FSubscriberBinding* Binding = static_cast<FSubscriberBinding*>(UserData);
-    if (!Binding->DataHandler)
+    // Runs on a moq-ffi thread. UserData is an opaque token; an unregistered one resolves to null.
+    const TSharedPtr<FSubscriberBinding, ESPMode::ThreadSafe> Binding = GetSubscriberRegistryFor<FSubscriberBinding>().Resolve(UserData);
+    if (!Binding.IsValid() || !Binding->DataHandler)
     {
         return;
     }
@@ -481,5 +522,21 @@ void FMoQSessionWrapper::RemoveSubscriberBinding(MoqSubscriber* Subscriber)
     }
 
     FScopeLock Lock(&SubscriberMutex);
+    if (FSubscriberEntry* Entry = SubscriberBindings.Find(Subscriber))
+    {
+        GetSubscriberRegistryFor<FSubscriberBinding>().Unregister(Entry->Token);
+    }
     SubscriberBindings.Remove(Subscriber);
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+void FMoQSessionWrapper::InvokeSubscriberThunkForTest(const TFunction<void(const TArray64<uint8>&)>& Callback, const TArray64<uint8>& Payload)
+{
+    TSharedRef<FSubscriberBinding, ESPMode::ThreadSafe> Binding = MakeShared<FSubscriberBinding, ESPMode::ThreadSafe>();
+    Binding->DataHandler = Callback;
+    void* Token = GetSubscriberRegistryFor<FSubscriberBinding>().Register(Binding);
+    const uint8* DataPtr = Payload.Num() > 0 ? Payload.GetData() : nullptr;
+    HandleSubscriberDataThunk(Token, DataPtr, static_cast<size_t>(Payload.Num()));
+    GetSubscriberRegistryFor<FSubscriberBinding>().Unregister(Token);
+}
+#endif
