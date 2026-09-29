@@ -21,6 +21,8 @@
 #include "AudioCaptureCore.h"
 #include "O3DAudioFrameCodec.h"
 
+#include "o3ds/sender_sync.h"
+
 #define LOCTEXT_NAMESPACE "O3DSenderComponent"
 
 static TAutoConsoleVariable<int32> CVarO3DSenderDebugPose(
@@ -51,6 +53,35 @@ void FO3DSenderTransportControllerDeleter::operator()(FO3DSenderTransportControl
 void FO3DSenderCurveProcessorDeleter::operator()(FO3DSenderCurveProcessor* Ptr) const
 {
 	delete Ptr;
+}
+
+uint64 FO3DSenderEncodingSettings::GetFullSyncFingerprint() const
+{
+	uint64 Hash = 1469598103934665603ull;
+	auto Mix = [&Hash](uint64 Value)
+	{
+		Hash ^= Value;
+		Hash *= 1099511628211ull;
+	};
+	auto FloatBits = [](float Value) -> uint64
+	{
+		uint32 Bits = 0;
+		FMemory::Memcpy(&Bits, &Value, sizeof(Bits));
+		return (uint64)Bits;
+	};
+
+	Mix((uint64)Mode);
+	if (Mode == EO3DSenderEncodingMode::Residual)
+	{
+		Mix((uint64)ResidualPredictor);
+		Mix((uint64)(uint32)ResidualKeyframeIntervalFrames);
+	}
+	else if (Mode == EO3DSenderEncodingMode::Quantized)
+	{
+		Mix(FloatBits(QuantizationByteRange));
+		Mix(FloatBits(QuantizationHalfRange));
+	}
+	return Hash;
 }
 
 UO3DSenderComponent::~UO3DSenderComponent() = default;
@@ -169,6 +200,18 @@ void UO3DSenderComponent::StartCapture()
 		}
 	}
 
+	// SND-19: check the preconditions before creating the serializer or
+	// starting a transport (which may open sockets), so a failed start leaves
+	// nothing running.
+	LastStartCaptureError.Reset();
+	if (!TargetMesh.IsValid() && !bEnableAudio)
+	{
+		LastStartCaptureError = TEXT("No valid TargetMesh and audio is disabled.");
+		UE_LOG(LogO3DSenderComponent, Warning, TEXT("Sender capture not started on %s: %s"), *GetNameSafe(GetOwner()), *LastStartCaptureError);
+		NotifyOnScreen(FString::Printf(TEXT("O3D Sender: not started (%s)"), *LastStartCaptureError), FColor::Red, 4.0f);
+		return;
+	}
+
 	if (!Serializer)
 	{
 		Serializer = MakeUnique<FO3DSenderSerializer>();
@@ -222,7 +265,20 @@ void UO3DSenderComponent::StartCapture()
 	}
 	else
 	{
-		UE_LOG(LogO3DSenderComponent, Warning, TEXT("Sender capture failed to start (no valid skeletal mesh)."));
+		// Defensive (SND-19): the precondition check above should make this
+		// unreachable. Undo everything started above so no transport or
+		// serializer is left running while bIsCapturing is false, which
+		// StopCapture() would not clean up.
+		LastStartCaptureError = TEXT("No valid skeletal mesh.");
+		UE_LOG(LogO3DSenderComponent, Warning, TEXT("Sender capture failed to start on %s: %s"), *GetNameSafe(GetOwner()), *LastStartCaptureError);
+		NotifyOnScreen(FString::Printf(TEXT("O3D Sender: not started (%s)"), *LastStartCaptureError), FColor::Red, 4.0f);
+		if (Serializer)
+		{
+			Serializer->Detach(this);
+		}
+		UnbindFromTarget();
+		ResetSkeletonCache();
+		TeardownTransport();
 	}
 }
 
@@ -247,6 +303,11 @@ void UO3DSenderComponent::StopCapture()
 		Serializer->Detach(this);
 		Serializer->ClearAllCaches();
 	}
+
+	// SND-1: forget the cached skeleton so the next StartCapture() rebuilds
+	// the descriptor (and re-broadcasts OnDescriptorReady) even for the same
+	// mesh.
+	ResetSkeletonCache();
 
 	if (CurveProcessor.IsValid())
 	{
@@ -787,7 +848,14 @@ void UO3DSenderComponent::EnsureSubjectNameCached(const USkeletalMeshComponent* 
 
 	if (!PreviousName.IsEmpty() && !PreviousName.Equals(CachedSubjectName, ESearchCase::CaseSensitive))
 	{
+		// Rename (SND-1): the serializer starts the new name with a full sync
+		// because it has no state for it; frames carry their own descriptor.
+		// Re-broadcast for any other OnDescriptorReady listener.
 		PurgeSerializerCacheForSubject(PreviousName);
+		if (DescriptorCache.IsValid())
+		{
+			OnDescriptorReady.Broadcast(CachedSubjectName, DescriptorCache);
+		}
 	}
 }
 
@@ -852,6 +920,7 @@ void UO3DSenderComponent::RefreshSkeletonCache(USkeletalMeshComponent* SkelComp)
 	if (!Mesh)
 	{
 		DescriptorCache.Reset();
+		DescriptorSnapshot.Reset();
 		bDescriptorDirty = true;
 		return;
 	}
@@ -877,6 +946,7 @@ void UO3DSenderComponent::RefreshSkeletonCache(USkeletalMeshComponent* SkelComp)
 	const bool bChanged = (PreviousHash != NewHash) || (PreviousCount != DescriptorCache.BoneNames.Num());
 	DescriptorCache.Hash = NewHash;
 	bDescriptorDirty = bChanged;
+	DescriptorSnapshot = MakeShared<FO3DSSkeletonDescriptor>(DescriptorCache);
 
 	const bool bDebug = (CVarO3DSenderDebugPose.GetValueOnAnyThread() != 0);
 	if (bDebug)
@@ -893,6 +963,43 @@ void UO3DSenderComponent::RefreshSkeletonCache(USkeletalMeshComponent* SkelComp)
 	}
 }
 
+void UO3DSenderComponent::ResetSkeletonCache()
+{
+	CachedSkeletalMesh.Reset();
+	CachedSkeleton.Reset();
+	CachedSkeletalMeshName = NAME_None;
+	DescriptorCache.Reset();
+	DescriptorSnapshot.Reset();
+	bDescriptorDirty = false;
+}
+
+/** Snapshot the encoding properties for one frame (SND-14). */
+FO3DSenderEncodingSettings UO3DSenderComponent::BuildEncodingSettings() const
+{
+	FO3DSenderEncodingSettings Settings;
+	// Residual takes precedence when both are enabled (see bEnableQuantization).
+	if (bEnableResidualCoding)
+	{
+		Settings.Mode = EO3DSenderEncodingMode::Residual;
+	}
+	else if (bEnableQuantization)
+	{
+		Settings.Mode = EO3DSenderEncodingMode::Quantized;
+	}
+	else
+	{
+		Settings.Mode = EO3DSenderEncodingMode::Legacy;
+	}
+	Settings.ResidualPredictor = ResidualPredictor;
+	Settings.ResidualKeyframeIntervalFrames = ResidualKeyframeIntervalFrames;
+	Settings.ResidualDeltaThreshold = ResidualDeltaThreshold;
+	Settings.QuantizationByteRange = QuantizationByteRange;
+	Settings.QuantizationHalfRange = QuantizationHalfRange;
+	Settings.QuantizationDeltaThreshold = QuantizationDeltaThreshold;
+	Settings.FullSyncIntervalSeconds = FullSyncIntervalSeconds;
+	return Settings;
+}
+
 /** Build the runtime curve processing configuration from component-level settings. */
 FO3DSenderCurveConfig UO3DSenderComponent::BuildCurveConfig() const
 {
@@ -900,6 +1007,12 @@ FO3DSenderCurveConfig UO3DSenderComponent::BuildCurveConfig() const
 	Config.bClampMorphCurvesToUnit = bClampMorphCurvesToUnit;
 	Config.bDropNaNAndInfinity = bDropNaNAndInfinity;
 	Config.bEnableCurveFiltering = bEnableCurveFiltering;
+	// ADR 0005 (ii), SND-3: per-frame epsilon/delta filtering changes which
+	// curves a frame carries, which the residual and quantized encodings
+	// would have to answer with a full sync every time. Those encodings send
+	// every curve value on each update, so the filter is off there; include
+	// and exclude patterns still apply.
+	Config.bApplyValueFilters = bEnableCurveFiltering && !bEnableResidualCoding && !bEnableQuantization;
 	Config.CurveEpsilon = CurveEpsilon;
 	Config.CurveDeltaThreshold = CurveDeltaThreshold;
 	Config.IncludeCurvePatterns = &IncludeCurvePatterns;
@@ -908,30 +1021,14 @@ FO3DSenderCurveConfig UO3DSenderComponent::BuildCurveConfig() const
 	return Config;
 }
 
-/** Limits capture cadence to the configured rate while preserving first-frame responsiveness. */
+/**
+ * Limits capture cadence to the configured rate (SND-5). Accumulator-based with a 0.5 ms tolerance
+ * (O3DS::ConsumeCaptureBudget), so a tick rate equal to the capture rate captures every tick despite
+ * jitter. InOutLastCaptureTime holds the last capture slot; 0 means "capture now and anchor".
+ */
 bool UO3DSenderComponent::ConsumeCaptureBudget(double NowSeconds, double& InOutLastCaptureTime, float CaptureRateHz)
 {
-	if (CaptureRateHz <= 0.0f)
-	{
-		InOutLastCaptureTime = NowSeconds;
-		return true;
-	}
-
-	if (InOutLastCaptureTime <= 0.0)
-	{
-		InOutLastCaptureTime = NowSeconds;
-		return true;
-	}
-
-	const double ClampedRate = FMath::Max(1e-6f, CaptureRateHz);
-	const double MinDelta = 1.0 / ClampedRate;
-	if ((NowSeconds - InOutLastCaptureTime) < MinDelta)
-	{
-		return false;
-	}
-
-	InOutLastCaptureTime = NowSeconds;
-	return true;
+	return O3DS::ConsumeCaptureBudget(NowSeconds, InOutLastCaptureTime, (double)CaptureRateHz);
 }
 
 /** Validate capture preconditions (transport, target mesh, rate limiting) before emitting a frame. */
@@ -966,11 +1063,16 @@ FString UO3DSenderComponent::ResolveSubjectName(const USkeletalMeshComponent* Sk
 	return CachedSubjectName;
 }
 
-FO3DSPoseFrame UO3DSenderComponent::CreateFrameShell(const USkeletalMeshComponent* SkelComp)
+FO3DSPoseFrame UO3DSenderComponent::CreateFrameShell(const USkeletalMeshComponent* SkelComp, double CaptureTimeSec)
 {
 	FO3DSPoseFrame Frame;
 	Frame.Subject = ResolveSubjectName(SkelComp);
 	Frame.FrameIndex = ++FrameCounter;
+	// ADR 0005 (i): the frame carries the descriptor it was sampled against,
+	// so the serializer never depends on having seen OnDescriptorReady.
+	Frame.Descriptor = DescriptorSnapshot;
+	Frame.CaptureTimeSec = CaptureTimeSec;
+	Frame.Encoding = BuildEncodingSettings();
 	return Frame;
 }
 
@@ -1142,7 +1244,7 @@ void UO3DSenderComponent::HandleBoneTransformsFinalized()
 	const bool bDebugPose = (CVarO3DSenderDebugPose.GetValueOnAnyThread() != 0);
 	const bool bDebugCurves = (CVarO3DSenderDebugCurves.GetValueOnAnyThread() != 0);
 
-	FO3DSPoseFrame Frame = CreateFrameShell(SkelComp);
+	FO3DSPoseFrame Frame = CreateFrameShell(SkelComp, NowSeconds);
 	PopulatePoseFrameBones(SkelComp, Frame, bDebugPose);
 
 	const FO3DSenderCurveConfig CurveConfig = BuildCurveConfig();

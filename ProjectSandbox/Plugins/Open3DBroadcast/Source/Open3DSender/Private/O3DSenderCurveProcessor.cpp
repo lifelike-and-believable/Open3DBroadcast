@@ -9,6 +9,8 @@
 #include "O3DHelpers.h"
 #include "O3DSenderLogs.h"
 
+#include "o3ds/sender_sync.h"
+
 namespace
 {
     bool ShouldFilterByPatterns(const TArray<FString>* Patterns)
@@ -45,7 +47,7 @@ void FO3DSenderCurveProcessor::EnsureCurveCache(USkeletalMeshComponent* SkelComp
 {
     if (!bCurveCacheInitialized)
     {
-        RefreshCurveCache(SkelComp, Config);
+        RefreshCurveCache(SkelComp);
     }
 }
 
@@ -122,11 +124,14 @@ void FO3DSenderCurveProcessor::BuildFilteredCurves(const FO3DSenderCurveConfig& 
 
         if (Config.bDropNaNAndInfinity && !FMath::IsFinite(Value))
         {
+            // Treated as 0, as the property documents. Dropping the curve instead would change the
+            // curve list for this frame, which the residual and quantized encodings answer with a
+            // full sync (SND-3).
             if (Config.bLogFilteredCurves)
             {
-                UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Dropped curve %s (NaN/Inf)"), *NameString);
+                UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Curve %s is NaN/Inf; sending 0"), *NameString);
             }
-            continue;
+            Value = 0.0f;
         }
 
         if (Config.bClampMorphCurvesToUnit && MorphNameSet.Contains(Name))
@@ -156,24 +161,16 @@ void FO3DSenderCurveProcessor::BuildFilteredCurves(const FO3DSenderCurveConfig& 
                 continue;
             }
 
-            if (FMath::Abs(Value) < Config.CurveEpsilon)
+            if (Config.bApplyValueFilters)
             {
-                if (Config.bLogFilteredCurves)
-                {
-                    UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Filtered curve %s (epsilon %.6f) V=%.6f"), *NameString, Config.CurveEpsilon, Value);
-                }
-                continue;
-            }
-
-            const bool bHasLast = LastSentHasValue.IsValidIndex(Index) ? (LastSentHasValue[Index] != 0) : false;
-            if (bHasLast)
-            {
-                const float Last = LastSentCurveValues[Index];
-                if (FMath::Abs(Value - Last) < Config.CurveDeltaThreshold)
+                // SND-4: a curve returning to (near) zero is sent once as exactly 0, then suppressed.
+                const bool bHasLast = LastSentHasValue.IsValidIndex(Index) ? (LastSentHasValue[Index] != 0) : false;
+                const float Last = (bHasLast && LastSentCurveValues.IsValidIndex(Index)) ? LastSentCurveValues[Index] : 0.0f;
+                if (!O3DS::FilterCurveValue(Value, bHasLast, Last, Config.CurveEpsilon, Config.CurveDeltaThreshold))
                 {
                     if (Config.bLogFilteredCurves)
                     {
-                        UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Filtered curve %s (delta %.6f < %.6f) V=%.6f Last=%.6f"), *NameString, FMath::Abs(Value - Last), Config.CurveDeltaThreshold, Value, Last);
+                        UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Filtered curve %s (epsilon %.6f, delta %.6f) V=%.6f Last=%.6f"), *NameString, Config.CurveEpsilon, Config.CurveDeltaThreshold, Value, Last);
                     }
                     continue;
                 }
@@ -191,8 +188,11 @@ void FO3DSenderCurveProcessor::BuildFilteredCurves(const FO3DSenderCurveConfig& 
     }
 }
 
-void FO3DSenderCurveProcessor::RefreshCurveCache(USkeletalMeshComponent* SkelComp, const FO3DSenderCurveConfig& Config)
+void FO3DSenderCurveProcessor::RefreshCurveCache(USkeletalMeshComponent* SkelComp)
 {
+    // Every curve on the mesh and skeleton is cached. Include/exclude patterns are applied per frame
+    // in BuildFilteredCurves, only while bEnableCurveFiltering is on, so turning filtering off or
+    // editing the patterns at runtime takes effect on the next frame (SND-20).
     CurveNames.Reset();
     CurveValues.Reset();
     LastSentCurveValues.Reset();
@@ -243,25 +243,6 @@ void FO3DSenderCurveProcessor::RefreshCurveCache(USkeletalMeshComponent* SkelCom
         }
     }
 
-    if (ShouldFilterByPatterns(Config.IncludeCurvePatterns) || ShouldFilterByPatterns(Config.ExcludeCurvePatterns))
-    {
-        TArray<FName> Filtered;
-        Filtered.Reserve(CurveNames.Num());
-        for (const FName& Name : CurveNames)
-        {
-            if (IsCurveAllowedByPatterns(Name.ToString(), Config))
-            {
-                Filtered.Add(Name);
-            }
-        }
-        CurveNames = MoveTemp(Filtered);
-        CurveNameSet.Reset();
-        for (const FName& Name : CurveNames)
-        {
-            CurveNameSet.Add(Name);
-        }
-    }
-
     CurveNames.Sort([](const FName& A, const FName& B)
     {
         return FCString::Strcmp(*A.ToString(), *B.ToString()) < 0;
@@ -275,11 +256,6 @@ void FO3DSenderCurveProcessor::RefreshCurveCache(USkeletalMeshComponent* SkelCom
     PatternCache.Reset();
 
     bCurveCacheInitialized = true;
-}
-
-bool FO3DSenderCurveProcessor::IsCurveAllowedByPatterns(const FString& Name, const FO3DSenderCurveConfig& Config) const
-{
-    return EvaluatePatternForName(Name, Config);
 }
 
 void FO3DSenderCurveProcessor::UpdatePatternCacheIfNeeded(const FO3DSenderCurveConfig& Config)

@@ -73,23 +73,22 @@ namespace O3DS
 
 		void *mReference;
 
-		// D1 (roadmap doc §6/D1): rest-pose/bind-pose LOCAL translation
-		// anchor for legacy-mode quantization (Subject::SerializeUpdate/
-		// SubjectList::ParseUpdate's Byte/Half tiers - see quant/
-		// channel_quant.h). Deliberately NOT the last-SENT value (that
-		// would be a moving reference: one dropped packet on an unreliable
-		// transport permanently desyncs every later quantized delta,
-		// reintroducing exactly the history-divergence-under-loss problem
-		// D1 exists to avoid - see C2's own risk notes). Captured lazily,
-		// once, the first time quantization runs for this Transform, and
-		// held for this object's entire lifetime - it only "resets" when a
-		// topology change creates a brand-new Transform, matching "known
-		// from the skeleton descriptor" rather than per-frame state. A
-		// typical rigid skeleton's LOCAL (parent-relative, not world-space)
-		// translation stays near this anchor even during animation - only
-		// large local deviations (e.g. IK stretching, or a root bone whose
-		// local space is effectively world space) fall back to the Full
-		// tier, same safety net as today's deltaThreshold.
+		// D1 (roadmap doc §6/D1): LOCAL translation anchor for legacy-mode
+		// quantization (Subject::SerializeUpdate/SubjectList::ParseUpdate's
+		// Byte/Half tiers - see quant/channel_quant.h). It is the value sent
+		// in the most recent full sync, not the last-SENT update value (a
+		// moving reference would desync after one dropped update).
+		// Re-captured at EVERY full sync on both sides (ADR 0005 (vii)):
+		// Subject::Serialize() stores the float32-rounded translation it
+		// writes, and ParseSubject() stores the translation it parses, so the
+		// two always match after the same full sync, including for a
+		// receiver that joins mid-stream. Following the pose also keeps
+		// deltas small between periodic full syncs. Until
+		// SubjectUpdate.ref_seq exists (WP-A4a), a receiver that misses a
+		// full sync decodes quantized deltas against its older anchor until
+		// the next full sync reaches it. Large local deviations (e.g. IK
+		// stretching, or a root bone whose local space is effectively world
+		// space) fall back to the Full tier.
 		Vector3d mQuantAnchorTranslation = Vector3d(0.0, 0.0, 0.0);
 		bool     mQuantAnchorSet = false;
 
@@ -99,10 +98,9 @@ namespace O3DS
 		// side of a boundary before switching tiers again, instead of
 		// flapping every frame a value hovers near byteRange/halfRange (each
 		// tier reconstructs on a different rounding grid, so every flap is a
-		// visible jump on the receiver). Defaults to Full, the always-correct
-		// starting point - a fresh Transform (this object's whole lifetime,
-		// same "resets only on topology change" rule as mQuantAnchorSet
-		// above) has no prior tier to be biased toward.
+		// visible jump on the receiver). Sender-only state. Defaults to Full,
+		// the always-correct starting point - a fresh Transform has no prior
+		// tier to be biased toward.
 		QuantTier mLastTranslationTier = QuantTier::Full;
 		QuantTier mLastRotationTier = QuantTier::Full;
 	};
@@ -240,7 +238,7 @@ namespace O3DS
 		//! considered for adaptive quantization (Byte/Half tiers) instead of
 		//! always being sent at full float32 precision - see quant/
 		//! channel_quant.h. Translation quantizes a delta from this
-		//! Transform's rest-pose anchor (see Transform::
+		//! Transform's last-full-sync anchor (see Transform::
 		//! mQuantAnchorTranslation's own doc comment for why NOT a moving
 		//! last-sent reference); a Transform with no anchor yet (never gone
 		//! through a full Serialize()/ParseSubject()) always falls back to

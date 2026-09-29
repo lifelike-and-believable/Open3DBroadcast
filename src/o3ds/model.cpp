@@ -550,28 +550,23 @@ namespace O3DS
 			t->rotation >> rotation;
 			t->scale >> scale;
 
-			// D1 (roadmap doc §6/D1): anchor this transform's quantization
-			// reference ONCE, the first time it's ever sent - see Transform::
-			// mQuantAnchorTranslation's own doc comment for why a fixed
-			// anchor (not a moving last-sent value) is required for D1's
-			// quantized deltas to stay loss-safe. Deliberately NOT
-			// re-captured on every subsequent full sync: real senders in
-			// this codebase periodically re-send a full snapshot as a
-			// "keyframe" over the same best-effort connector as delta
-			// updates, with no ACK. If re-anchoring happened on every one of
-			// those and a single such packet were dropped, the sender would
-			// silently move on to a new anchor the receiver never saw,
-			// corrupting every quantized delta after it - exactly the
-			// history-divergence-under-loss failure D1 exists to avoid.
-			// Anchoring once and holding it for the Transform's entire
-			// logical lifetime (see ParseSubject's matching receive-side
-			// preservation-across-resync logic below) means a lost keyframe
-			// has no effect on anchor correctness at all.
-			if (!t->mQuantAnchorSet)
-			{
-				t->mQuantAnchorTranslation = t->translation.value;
-				t->mQuantAnchorSet = true;
-			}
+			// D1 quantization anchor, re-captured at EVERY full sync (ADR 0005
+			// (vii), WP-S3/SND-2). The receiver's ParseSubject() anchors each
+			// transform to the translation it parses from this same full sync,
+			// so both sides agree after every full sync, including a receiver
+			// that joined late. The anchor is the float32 value written on the
+			// wire (not the double held here), so sender and receiver compute
+			// quantized deltas against identical references even at large
+			// coordinates.
+			// Until SubjectUpdate.ref_seq lands (WP-A4a), a receiver that loses
+			// a full sync decodes quantized translation deltas against the
+			// previous anchor until the next full sync arrives; periodic full
+			// syncs bound that window.
+			t->mQuantAnchorTranslation = Vector3d(
+				(double)(float)t->translation.value.v[0],
+				(double)(float)t->translation.value.v[1],
+				(double)(float)t->translation.value.v[2]);
+			t->mQuantAnchorSet = true;
 
 			for (const auto component : t->transformOrder) {
 				if (component == O3DS::TTranslation) {
@@ -1377,29 +1372,10 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		// Get the nodes (transforms) for this subject
 		auto ovNodes = inSubject->nodes();
 
-		// D1 (roadmap doc §6/D1): outSubject->clear() below unconditionally
-		// deletes every existing Transform and rebuilds fresh ones - even
-		// when the topology hasn't actually changed, since a full resync
-		// happens periodically as a "keyframe" over the same connector as
-		// delta updates (see real senders in apps/, plugins/mobu, and the UE
-		// glue). A brand-new Transform object always starts with no
-		// quantization anchor, but re-capturing one here on every resync
-		// would defeat the whole point of the anchor being a FIXED
-		// reference (see Subject::Serialize's matching comment on the
-		// sender side) - a single dropped resync packet would silently
-		// desync sender/receiver anchors forever after. Snapshot the old
-		// anchors by name before clearing, and restore them onto the new
-		// Transform objects below instead of recapturing, for any
-		// transform whose identity (name) is unchanged across this resync.
-		// A genuinely new transform name (real topology change) has no
-		// entry here and gets a fresh anchor captured for the first time,
-		// same as before.
-		std::map<std::string, std::pair<Vector3d, bool>> preservedAnchors;
-		for (Transform* oldTransform : outSubject->mTransforms.mItems)
-		{
-			preservedAnchors[oldTransform->mName] =
-				std::make_pair(oldTransform->mQuantAnchorTranslation, oldTransform->mQuantAnchorSet);
-		}
+		// D1 quantization anchors are re-captured from this full sync (see
+		// the Component_Translation branch below): the sender re-anchors at
+		// every full sync too (Subject::Serialize, ADR 0005 (vii)), so no
+		// anchor is carried over from the transforms deleted here.
 
 		// Clear the subject and add the transforms
 		outSubject->clear();
@@ -1452,24 +1428,10 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 						*inTranslation >> outTransform->translation;
 						outTransform->transformOrder.push_back(O3DS::TTranslation);
 
-						// D1 (roadmap doc §6/D1): restore this transform's
-						// preserved anchor (same name, prior resync) rather
-						// than recapturing - see the preservedAnchors doc
-						// comment above for why. Only a transform with no
-						// preserved entry (or whose anchor was never set)
-						// gets a fresh one captured now, mirroring the
-						// sender's own "once" semantics in Serialize().
-						auto preserved = preservedAnchors.find(transformName);
-						if (preserved != preservedAnchors.end() && preserved->second.second)
-						{
-							outTransform->mQuantAnchorTranslation = preserved->second.first;
-							outTransform->mQuantAnchorSet = true;
-						}
-						else
-						{
-							outTransform->mQuantAnchorTranslation = outTransform->translation.value;
-							outTransform->mQuantAnchorSet = true;
-						}
+						// D1: anchor to the value this full sync carries,
+						// exactly as the sender did when it wrote it.
+						outTransform->mQuantAnchorTranslation = outTransform->translation.value;
+						outTransform->mQuantAnchorSet = true;
 					}
 					if (componentId == O3DS::Data::Component::Component_Rotation && inRotation != nullptr)
 					{

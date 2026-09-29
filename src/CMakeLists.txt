@@ -103,6 +103,7 @@ set(pub_headers
 	o3ds/o3ds.h
 	o3ds/getTime.h
 	o3ds/sequencing.h
+	o3ds/sender_sync.h
 	o3ds/reorder_gate.h
 	o3ds/receiver_streams.h
 	o3ds/capture.h
@@ -158,6 +159,7 @@ set(CORE_SOURCES
 	o3ds/o3ds.cpp
 	o3ds/getTime.cpp
 	o3ds/sequencing.cpp
+	o3ds/sender_sync.cpp
 	o3ds/reorder_gate.cpp
 	o3ds/receiver_streams.cpp
 	o3ds/capture.cpp
