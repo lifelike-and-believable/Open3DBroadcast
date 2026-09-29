@@ -160,6 +160,8 @@ Several WPs depend on these decisions. Each gets an ADR. The design agent should
 - Logs redact keys matching `*token*|*secret*|*key*`.
 - The token server is documented as a reference only, with no default secret (LIC-1).
 - **Findings:** SND-10, RCV-3, TRF-21, TRF-22, SHR-11.
+- **ADR:** [docs/adr/0004-credentials-and-secret-transport-options.md](../adr/0004-credentials-and-secret-transport-options.md) (Accepted)
+- **Decision:** transports declare secret option keys; secrets go to an exported `FO3DSecretStore` (session, then env var, then opt-in per-user editor settings, which is what `bPersistToken` means); assets and connection strings keep only a profile name; logs redact by key pattern; token endpoints need bearer auth and HTTPS except on localhost; no OS credential store in v1.x.
 
 **D7: Wire-coding resync and loss contract** (feeds WP-S3, WP-A4).
 - Decide the following:
@@ -169,12 +171,16 @@ Several WPs depend on these decisions. Each gets an ADR. The design agent should
   - (iv) The UE sender stamps `tx_seq` and `frame_epoch` so the reorder gate engages (SND-15, CORE-29).
   - (v) Whether scale is sent in updates (CORE-11).
 - Coordinate with the existing A, C and D workstreams in `resilient-streaming-and-motion-prediction.md`, which own the schema fields.
+- **ADR:** [docs/adr/0005-wire-resync-and-loss-contract.md](../adr/0005-wire-resync-and-loss-contract.md) (Accepted)
+- **Decision:** a core `StreamWriter` stamps `tx_seq`, `tx_wallclock_us` and `frame_epoch` on every frame; the descriptor travels with pose frames; full syncs on start, rename, descriptor change, new peer and every 1.0 s; both ends re-anchor quantization at each full sync; new append-only `SubjectUpdate.ref_seq`; residual only on transports reporting reliable ordered delivery; scale sent in updates; no receiver keyframe request in v1.
 
 **D8: Protocol versioning.** Add a FlatBuffers `file_identifier` and a wire protocol version. Bump `O3DS_VERSION_TAG`. Old readers must reject residual and quantized payloads rather than misapply them. Fix the endianness of the unified and audio headers. Start using `CHANGELOG.md` (with the "Schema/Protocol" section required by the repo rules). **Findings:** CORE-16, SHR-7, SHR-30, DOC-8.
 
 **D9: Editor module split.** Create an `Open3DBroadcastEditor` module (Type `Editor`), or one Editor module per side. Move all `IDetailCustomization`, Slate panels and PropertyEditor dependencies there. Transport modules register their editor panels through a small registration interface in that module. **Findings:** FAB-7, SND-34, TRB-45, TRB-46.
 
 **D10: Test module layout.** Create a dedicated test module (for example `Open3DBroadcastTests`, Type `DeveloperTool` or `UncookedOnly`) so tests don't ship in Runtime modules or invert layering. Also define a fake-FFI and fake-socket seam for the transports. **Findings:** SHR-4, UX-4, TRF-34, TRB-47.
+- **ADR:** [docs/adr/0006-test-module-layout-and-fakes.md](../adr/0006-test-module-layout-and-fakes.md) (Accepted)
+- **Decision:** an `Editor`-type `Open3DBroadcastTests` module (plus one for the WebRTC add-on), excluded from the Fab package; a transport conformance suite; fake transports, per-instance FFI function tables and socket-free parsers; `Open3DBroadcast.*` naming; network tests opt-in via `O3DB_NETWORK_TESTS=1`; Gauntlet retired; RCV-2 uses the stream-label fallback; PR CI runs the suite within 15 minutes.
 
 ---
 
