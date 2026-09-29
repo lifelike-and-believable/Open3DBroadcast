@@ -118,6 +118,7 @@ set(pub_headers
 	o3ds/predict/residual_codec.h
 	o3ds/quant/channel_quant.h
 	o3ds/model.h
+	o3ds/parse_limits.h
 	o3ds/base_connector.h
 	o3ds/nng_connector.h
 	o3ds/subscriber.h

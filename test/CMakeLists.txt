@@ -23,6 +23,7 @@ add_executable(o3ds_core_tests
 	model_residual_tests.cpp
 	channel_quant_tests.cpp
 	channel_quant_wire_tests.cpp
+	parser_hardening_tests.cpp
 )
 
 target_link_libraries(o3ds_core_tests PRIVATE open3dstreamstatic)

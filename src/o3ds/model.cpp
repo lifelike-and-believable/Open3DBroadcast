@@ -24,8 +24,11 @@ SOFTWARE.
 
 #include "model.h"
 #include "getTime.h"
+#include "parse_limits.h"
 #include "CRC.h"
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <iterator>
 #include <map>
 #include <sstream>
@@ -157,6 +160,157 @@ enum O3DS::Direction dir(O3DS::Data::Direction d)
 	return O3DS::Direction::None;
 }
 
+// Wire-value validation helpers (WP-S1, CORE-9). Everything read from a
+// buffer is untrusted: the CRC and the FlatBuffers Verifier only prove the
+// bytes are intact and structurally sound, not that the floats are finite.
+namespace
+{
+	bool Finite(double v) { return std::isfinite(v); }
+
+	template <typename T>
+	bool Finite3(const T& v) { return Finite(v.x()) && Finite(v.y()) && Finite(v.z()); }
+
+	template <typename T>
+	bool Finite4(const T& v) { return Finite3(v) && Finite(v.w()); }
+
+	bool MatrixIsFinite(const O3DS::Matrixd& m)
+	{
+		for (int u = 0; u < 4; u++)
+			for (int v = 0; v < 4; v++)
+				if (!Finite(m.m[u][v])) return false;
+		return true;
+	}
+
+	bool MatrixIsFinite(const O3DS::Data::Matrix& m)
+	{
+		return Finite(m.m00()) && Finite(m.m01()) && Finite(m.m02()) && Finite(m.m03())
+			&& Finite(m.m10()) && Finite(m.m11()) && Finite(m.m12()) && Finite(m.m13())
+			&& Finite(m.m20()) && Finite(m.m21()) && Finite(m.m22()) && Finite(m.m23())
+			&& Finite(m.m30()) && Finite(m.m31()) && Finite(m.m32()) && Finite(m.m33());
+	}
+
+	template <typename VectorT, typename Pred>
+	bool AllOf(const VectorT* vec, Pred pred)
+	{
+		if (vec == nullptr) return true;
+		for (auto item : *vec)
+			if (!pred(*item)) return false;
+		return true;
+	}
+
+	//! Returns false (with `error` set) if any float an update carries is
+	//! NaN or Inf. Covers the legacy and residual paths (both read the same
+	//! vectors) and the quantization ranges, which scale every Q8/Q16 delta.
+	bool ValidateUpdateFloats(const O3DS::Data::SubjectUpdate* inUpdate, std::string& error)
+	{
+		const bool ok =
+			AllOf(inUpdate->translations(), [](const O3DS::Data::TranslationUpdate& t) { return Finite3(t); })
+			&& AllOf(inUpdate->rotation(), [](const O3DS::Data::RotationUpdate& r) { return Finite4(r); })
+			&& AllOf(inUpdate->scale(), [](const O3DS::Data::ScaleUpdate& s) { return Finite3(s); })
+			&& AllOf(inUpdate->curves(), [](const O3DS::Data::CurveUpdate& c) { return Finite(c.value()); })
+			&& Finite(inUpdate->quant_byte_range())
+			&& Finite(inUpdate->quant_half_range());
+		if (!ok)
+			error = "Non-finite value in update";
+		return ok;
+	}
+
+	//! Checks one wire subject against ParseLimits, CORE-1 (matrix
+	//! components need matching matrices) and CORE-9 (finite values) before
+	//! ParseSubject() touches any existing state. Returns false with `error`
+	//! set on the first problem.
+	bool ValidateSubject(const O3DS::Data::Subject* inSubject, std::string& error)
+	{
+		const std::string subjectName = inSubject->name()->str();
+
+		auto inCurves = inSubject->curves();
+		if (inCurves != nullptr)
+		{
+			if (inCurves->size() > O3DS::ParseLimits::kMaxCurvesPerSubject)
+			{
+				error = "Too many curves in subject " + subjectName;
+				return false;
+			}
+			for (auto each : *inCurves)
+			{
+				if (each != nullptr && !Finite(each->value()))
+				{
+					error = "Non-finite curve value in subject " + subjectName;
+					return false;
+				}
+			}
+		}
+
+		auto ovNodes = inSubject->nodes();
+		if (ovNodes == nullptr)
+			return true;
+
+		if (ovNodes->size() > O3DS::ParseLimits::kMaxTransformsPerSubject)
+		{
+			error = "Too many transforms in subject " + subjectName;
+			return false;
+		}
+
+		for (auto inNode : *ovNodes)
+		{
+			if (inNode == nullptr)
+				continue;
+
+			auto inComponents = inNode->components();
+			auto inMatrix = inNode->matrix();
+			const size_t componentCount = inComponents ? inComponents->size() : 0;
+			const size_t matrixCount = inMatrix ? inMatrix->size() : 0;
+			if (componentCount > O3DS::ParseLimits::kMaxComponentsPerTransform
+				|| matrixCount > O3DS::ParseLimits::kMaxComponentsPerTransform)
+			{
+				error = "Too many components on a transform in subject " + subjectName;
+				return false;
+			}
+
+			// Only values ParseSubject actually applies are checked: TRS
+			// are copied only when their component is listed, matrices are
+			// always copied.
+			size_t matrixComponents = 0;
+			bool finite = true;
+			for (size_t c = 0; c < componentCount; c++)
+			{
+				const int8_t componentId = inComponents->Get((flatbuffers::uoffset_t)c);
+				if (componentId == O3DS::Data::Component::Component_Translation && inNode->translation())
+					finite = finite && Finite3(*inNode->translation());
+				if (componentId == O3DS::Data::Component::Component_Rotation && inNode->rotation())
+					finite = finite && Finite4(*inNode->rotation());
+				if (componentId == O3DS::Data::Component::Component_Scale && inNode->scale())
+					finite = finite && Finite3(*inNode->scale());
+				if (componentId == O3DS::Data::Component::Component_Matrix)
+					matrixComponents++;
+			}
+			finite = finite && AllOf(inMatrix, [](const O3DS::Data::Matrix& m) { return MatrixIsFinite(m); });
+			if (!finite)
+			{
+				error = "Non-finite transform value in subject " + subjectName;
+				return false;
+			}
+
+			// CORE-1: every matrix component must have a matrix to read.
+			if (matrixComponents > matrixCount)
+			{
+				error = "Matrix component without matching matrix in subject " + subjectName;
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	//! Wire index -> container index, or false if it is out of range.
+	//! Takes the wire's signed int as-is, so a negative index is rejected
+	//! rather than wrapping to a huge size_t (CORE-23).
+	bool ValidIndex(int id, size_t size)
+	{
+		return id >= 0 && (size_t)id < size;
+	}
+}
+
 namespace O3DS
 {
 
@@ -207,21 +361,18 @@ namespace O3DS
 		return false;
 	}
 
-	bool Subject::CalcMatrices()
+	bool Subject::CalcMatrices(bool computeWorldMatrices)
 	{
+		const size_t count = this->mTransforms.size();
+
+		// Local matrices
 		for (auto& transform : this->mTransforms)
 		{
 			transform->bWorldMatrix = false;
 			auto &m = transform->mMatrix;
 			m = Matrixd();
 
-			if(m.HasNan())
-			{
-				mError = "Matrix NAN";
-				return false;
-			}
-
-			int matrixId = 0;
+			size_t matrixId = 0;
 
 			for (auto op : transform->transformOrder)
 			{
@@ -239,22 +390,55 @@ namespace O3DS
 				}
 				if (op == O3DS::TMatrix)
 				{
+					// CORE-1: a matrix component with no matching entry in
+					// `matrices` used to read past the end of the vector.
+					if (matrixId >= transform->matrices.size())
+					{
+						mError = "Matrix component of " + transform->mName + " has no matching matrix";
+						return false;
+					}
 					m = transform->matrices[matrixId++].value * m;
 				}
 			}
+
+			// CORE-8: checked after the matrix is built (it used to run on
+			// the identity, so it could never fire), and for Inf as well as
+			// NaN.
+			if (!MatrixIsFinite(m))
+			{
+				mError = "Matrix NAN";
+				return false;
+			}
 		}
 
-		// Calculate world matrix
+		// Validate the hierarchy and solve world matrices in one pass
+		// (CORE-8). The previous iterate-until-stable loop was O(N * depth),
+		// which a reverse-ordered chain turns into O(N^2), and it silently
+		// returned true for a parent cycle that did not include the root.
 
-		// Find the root first
-		int rootCount = 0;	
-		for(auto transform : this->mTransforms) {
-			if (transform->mParentId == -1)
+		int rootCount = 0;
+		for (size_t transformId = 0; transformId < count; transformId++)
+		{
+			const auto transform = this->mTransforms[transformId];
+			const int parentId = transform->mParentId;
+			if (parentId == -1)
 			{
-				// No Parent - matrix is world matrix
-				transform->mWorldMatrix = transform->mMatrix;
-				transform->bWorldMatrix = true;
 				rootCount++;
+				continue;
+			}
+
+			if (parentId >= 0 && (size_t)parentId == transformId)
+			{
+				std::ostringstream oss;
+				oss << "ParentId of " << transform->mName << " points to self (" << transformId << ")";
+				mError = oss.str();
+				return false;
+			}
+
+			if (parentId < 0 || (size_t)parentId >= count)
+			{
+				mError = "Invalid Parent Id";
+				return false;
 			}
 		}
 
@@ -269,42 +453,61 @@ namespace O3DS
 			return false;
 		}
 
-		bool done = false;
-		while (!done)
+		// Every parent id is now in range and there is exactly one root.
+		// Walk each unresolved transform up to the nearest resolved ancestor
+		// (or the root), then resolve the walked path top-down. Each
+		// transform is resolved exactly once, so this is O(N) overall. A
+		// walk that reaches a transform already on the current path is a
+		// cycle.
+		enum : uint8_t { Unvisited = 0, OnPath = 1, Resolved = 2 };
+		std::vector<uint8_t> state(count, Unvisited);
+		std::vector<size_t> path;
+
+		for (size_t start = 0; start < count; start++)
 		{
-			// Assume we are done, and flag as not done when we do work
-			done = true;
-			for (int transformId = 0; transformId < this->mTransforms.size(); transformId++)
+			if (state[start] == Resolved)
+				continue;
+
+			path.clear();
+			size_t current = start;
+			while (true)
 			{
-				auto transform = this->mTransforms[transformId];
-				if (transform->bWorldMatrix) {
-					 continue;
-				}
-
-				if (transformId == transform->mParentId)
+				if (state[current] == Resolved)
+					break;
+				if (state[current] == OnPath)
 				{
-					std::ostringstream oss;
-					oss << "ParentId of " << transform->mName << " points to self (" << transformId << ")";
-					mError = oss.str();
+					mError = "Parent cycle found at " + this->mTransforms[current]->mName;
 					return false;
 				}
+				state[current] = OnPath;
+				path.push_back(current);
 
-				if (transform->mParentId < 0 || (size_t)transform->mParentId >= this->mTransforms.size())
+				const int parentId = this->mTransforms[current]->mParentId;
+				if (parentId == -1)
+					break;
+				current = (size_t)parentId;
+			}
+
+			// Resolve from the top of the walked path downward, so each
+			// transform's parent is resolved before the transform itself.
+			for (auto it = path.rbegin(); it != path.rend(); ++it)
+			{
+				auto transform = this->mTransforms[*it];
+				if (computeWorldMatrices)
 				{
-					mError = "Invalid Parent Id";
-					return false;
+					if (transform->mParentId == -1)
+					{
+						// No Parent - matrix is world matrix
+						transform->mWorldMatrix = transform->mMatrix;
+					}
+					else
+					{
+						auto parentTransform = this->mTransforms[(size_t)transform->mParentId];
+						transform->mWorldMatrix = transform->mMatrix * parentTransform->mWorldMatrix;
+					}
+					transform->bWorldMatrix = true;
 				}
-
-				auto& parentTransform = this->mTransforms.mItems[transform->mParentId];
-				if (!parentTransform->bWorldMatrix)
-				{
-					// Parent has not been calculated yet
-					continue;
-				}
-
-				transform->mWorldMatrix = transform->mMatrix * parentTransform->mWorldMatrix;
-				transform->bWorldMatrix = true;
-				done = false;
+				state[*it] = Resolved;
 			}
 		}
 
@@ -1007,12 +1210,25 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		auto root = GetSubjectList(data+8);
 
-		this->mTime = root->time();
+		// WP-S1 (CORE-9): reject a non-finite timestamp and over-limit
+		// counts before anything in this list is touched.
+		if (!Finite(root->time()))
+		{
+			mError = "Non-finite time";
+			return false;
+		}
 
 		auto subjects_data = root->subjects();
 		auto updates_data = root->updates();
 
-		auto ovSubjects = root->subjects();
+		if ((subjects_data && subjects_data->size() > ParseLimits::kMaxSubjects)
+			|| (updates_data && updates_data->size() > ParseLimits::kMaxSubjects))
+		{
+			mError = "Too many subjects in buffer";
+			return false;
+		}
+
+		this->mTime = root->time();
 
 		if (subjects_data)
 		{
@@ -1031,8 +1247,11 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			}
 			for (uint32_t i = 0; i < subjects_data->size(); i++)
 			{
-				// For each subject
+				// For each subject. ParseSubject reports a rejected subject
+				// through mError (its signature predates validation).
 				this->ParseSubject(subjects_data->Get(i), builder);
+				if (!mError.empty())
+					return false;
 			}
 		}
 
@@ -1052,11 +1271,13 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 					this->ParseUpdateResidual(inUpdate, builder);
 				else
 					this->ParseUpdate(inUpdate, builder);
+				if (!mError.empty())
+					return false;
 			}
 		}
 
 		for (auto subject : this->mItems) {
-			if(!subject->CalcMatrices()) {
+			if(!subject->CalcMatrices(mComputeWorldMatrices)) {
 				mError = subject->mError;
 				return false;
 			}
@@ -1077,10 +1298,23 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		std::string subjectName = inSubject->name()->str();
 
+		// WP-S1: validate the whole subject before touching existing state,
+		// so a rejected subject leaves the list as it was.
+		if (!ValidateSubject(inSubject, mError))
+			return;
+
 		// Check to see if this subject already exists
 		Subject *outSubject = this->findSubject(subjectName);
 		if (outSubject == nullptr)
 		{
+			// Cap subjects held across buffers too (Parse() with
+			// clearInactive=false keeps earlier ones).
+			if (this->mItems.size() >= ParseLimits::kMaxSubjects)
+			{
+				mError = "Too many subjects";
+				return;
+			}
+
 			// Add it
 			outSubject = this->addSubject(subjectName);
 		}
@@ -1208,6 +1442,9 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 					}
 					if (componentId == O3DS::Data::Component::Component_Matrix)
 					{
+						// ValidateSubject() above has already rejected a
+						// node with more matrix components than matrices
+						// (CORE-1), so CalcMatrices() has one for each.
 						outTransform->transformOrder.push_back(O3DS::TMatrix);
 					}
 				}
@@ -1236,6 +1473,11 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		// unconditionally is a crash waiting to happen.
 		if (inUpdate->name() == nullptr)
 			return;
+
+		// WP-S1 (CORE-9): reject the update before applying any of it.
+		if (!ValidateUpdateFloats(inUpdate, mError))
+			return;
+
 		std::string name = inUpdate->name()->str();
 		int id;
 
@@ -1244,16 +1486,18 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		if (!outSubject)
 			return;
 
-		// Update TRS
+		// Update TRS. CORE-23: every index is validated and an out-of-range
+		// one (negative or too large) skips just that entry, the same rule
+		// the quantized branches below always used.
+		const size_t transformCount = outSubject->mTransforms.size();
 
 		if (inUpdate->translations()) {
 			for (auto inTranslation : *inUpdate->translations())
 			{
 				id = inTranslation->i();
-				if (id < outSubject->mTransforms.size())
-					*inTranslation >> outSubject->mTransforms[id]->translation;
-				else
-					break;
+				if (!ValidIndex(id, transformCount))
+					continue;
+				*inTranslation >> outSubject->mTransforms[(size_t)id]->translation;
 			}
 		}
 
@@ -1273,9 +1517,9 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			for (auto inTranslation : *inUpdate->translations_q8())
 			{
 				id = inTranslation->i();
-				if (id < 0 || (size_t)id >= outSubject->mTransforms.size())
+				if (!ValidIndex(id, transformCount))
 					continue;
-				Transform* xf = outSubject->mTransforms[id];
+				Transform* xf = outSubject->mTransforms[(size_t)id];
 				if (!xf->mQuantAnchorSet)
 					continue;
 				xf->translation = O3DS::TransformTranslation(
@@ -1290,9 +1534,9 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			for (auto inTranslation : *inUpdate->translations_q16())
 			{
 				id = inTranslation->i();
-				if (id < 0 || (size_t)id >= outSubject->mTransforms.size())
+				if (!ValidIndex(id, transformCount))
 					continue;
-				Transform* xf = outSubject->mTransforms[id];
+				Transform* xf = outSubject->mTransforms[(size_t)id];
 				if (!xf->mQuantAnchorSet)
 					continue;
 				xf->translation = O3DS::TransformTranslation(
@@ -1306,10 +1550,9 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			for (auto inRotation : *inUpdate->rotation())
 			{
 				id = inRotation->i();
-				if (id < outSubject->mTransforms.size())
-					*inRotation >> outSubject->mTransforms[id]->rotation;
-				else
-					break;
+				if (!ValidIndex(id, transformCount))
+					continue;
+				*inRotation >> outSubject->mTransforms[(size_t)id]->rotation;
 			}
 		}
 
@@ -1319,7 +1562,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			for (auto inRotation : *inUpdate->rotations_q8())
 			{
 				id = inRotation->i();
-				if (id < 0 || (size_t)id >= outSubject->mTransforms.size())
+				if (!ValidIndex(id, transformCount))
 					continue;
 				SmallestThreeQ8 q;
 				q.droppedIndex = inRotation->dropped();
@@ -1327,7 +1570,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 				q.b = inRotation->b();
 				q.c = inRotation->c();
 				Quat decoded = DequantizeRotationByte(q);
-				outSubject->mTransforms[id]->rotation = O3DS::TransformRotation(
+				outSubject->mTransforms[(size_t)id]->rotation = O3DS::TransformRotation(
 					decoded.v[0], decoded.v[1], decoded.v[2], decoded.v[3]);
 			}
 		}
@@ -1336,7 +1579,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			for (auto inRotation : *inUpdate->rotations_q16())
 			{
 				id = inRotation->i();
-				if (id < 0 || (size_t)id >= outSubject->mTransforms.size())
+				if (!ValidIndex(id, transformCount))
 					continue;
 				SmallestThreeQ16 q;
 				q.droppedIndex = inRotation->dropped();
@@ -1344,7 +1587,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 				q.b = inRotation->b();
 				q.c = inRotation->c();
 				Quat decoded = DequantizeRotationHalf(q);
-				outSubject->mTransforms[id]->rotation = O3DS::TransformRotation(
+				outSubject->mTransforms[(size_t)id]->rotation = O3DS::TransformRotation(
 					decoded.v[0], decoded.v[1], decoded.v[2], decoded.v[3]);
 			}
 		}
@@ -1353,10 +1596,9 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			for (auto inScale : *inUpdate->scale())
 			{
 				id = inScale->i();
-				if (id < outSubject->mTransforms.size())
-					*inScale >> outSubject->mTransforms[id]->scale;
-				else
-					break;
+				if (!ValidIndex(id, transformCount))
+					continue;
+				*inScale >> outSubject->mTransforms[(size_t)id]->scale;
 			}
 		}
 
@@ -1364,11 +1606,9 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		if (inUpdate->curves()) {
 			for (auto inCurve : *inUpdate->curves()) {
 				id = inCurve->i();
-				if (id < outSubject->mCurveValues.size()) {
-					outSubject->mCurveValues[id] = inCurve->value();
-				} else {
-					// ignore out-of-range
-				}
+				if (!ValidIndex(id, outSubject->mCurveValues.size()))
+					continue;
+				outSubject->mCurveValues[(size_t)id] = inCurve->value();
 			}
 		}
 	}
@@ -1379,6 +1619,11 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 	{
 		if (inUpdate->name() == nullptr)
 			return;
+
+		// WP-S1 (CORE-9): reject before the decoder or any channel is touched.
+		if (!ValidateUpdateFloats(inUpdate, mError))
+			return;
+
 		std::string name = inUpdate->name()->str();
 
 		O3DS::Subject *outSubject = this->findSubject(name);
