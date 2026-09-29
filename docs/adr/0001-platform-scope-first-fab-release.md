@@ -5,7 +5,7 @@
 - **Plan decision:** D1 in [`plugin-hardening-and-fab-readiness.md`](../roadmap/plugin-hardening-and-fab-readiness.md) §3
 - **Related:** [ADR 0002](0002-webrtc-and-moq-in-first-fab-release.md) (D2), [ADR 0003](0003-core-library-delivery-to-plugin.md) (D3); feeds WP-F2, WP-F8, WP-F9, WP-D2
 
-**Recommendation in one line:** ship v1 as Win64 only, declared explicitly in the `.uplugin` for every module and for the plugin, with the Build.cs `throw`s replaced by descriptor-level exclusion and stub builds. Plan a tiered Mac/Linux expansion of the five binary-free modules as v1.1, once ADR 0003 has landed.
+**Recommendation in one line:** ship v1 as Win64 only, declared explicitly in the `.uplugin` for every module and for the plugin, with the Build.cs `throw`s replaced by descriptor-level exclusion and stub builds. Mac/Linux is **not planned for v1.1** (maintainer, 2026-09-29). The tiered expansion of the five binary-free modules (Option C) stays documented as a possible later release that ADR 0003 makes cheap.
 
 ## Context
 
@@ -71,7 +71,7 @@ Shared, Sender, Receiver, Loopback and Sockets get `["Win64", "Mac", "Linux"]`. 
 
 ## Decision
 
-**Adopt Option A for the first Fab release, and plan Option C as v1.1.** Option B is handled per transport in later ADRs.
+**Adopt Option A for the first Fab release.** Option C is kept as a documented, unscheduled future option; the maintainer decided on 2026-09-29 that v1.1 will not add Mac or Linux. Option B is handled per transport in later ADRs.
 
 **1. Descriptor (WP-F2).** Add the following to every entry in `Plugin/Open3DBroadcast.uplugin`:
 
@@ -138,7 +138,7 @@ Use the same shape for the new modules introduced by ADR 0003 (`Open3DStreamCore
   - Every new module (ADR 0003, D9, D10) must carry the same keys. The review agent checks this (a grep in WP-F8's package-content step).
   - The stub pattern for transports is folded into WP-A1's shared transport base, so the fourth copy is not written by hand.
 - **Enables:**
-  - v1.1 Option C, which **depends on ADR 0003**. With the core compiled from source, the five portable modules have no Win64-only binaries except Opus.
+  - A future Option C (not scheduled; not in v1.1), which **depends on ADR 0003**. With the core compiled from source, the five portable modules have no Win64-only binaries except Opus.
   - What a Mac/Linux expansion needs:
     1. ADR 0003 implemented.
     2. Opus solved off Win64: the engine's libOpus (FAB-10, **needs-verification**) or `O3D_WITH_OPUS=0` with the SHR-1 mislabelling fixed.
@@ -156,7 +156,7 @@ Use the same shape for the new modules introduced by ADR 0003 (`Open3DStreamCore
 4. **WP-F2d (transport stubs):** in `Open3DTransportNNG.Build.cs`, `Open3DTransportWebRTC.Build.cs` and `Open3DTransportMoQ.Build.cs`, replace the throws with the stub path. Add `#if O3D_WITH_TRANSPORT_*` to every TU under `Private/`, following `Open3DTransportMoQModule.cpp:710-727`. Delete the dead branches.
 5. **WP-F1 (after ADR 0003):** delete the platform branches in `Open3DSender.Build.cs:24-48` and `Open3DReceiver.Build.cs:24-48`.
 6. **WP-F9 / WP-D2:** update `Plugin/README.md:41-46`, USER_GUIDE and the listing text.
-7. **v1.1 (new WP, after ADR 0003 and WP-F8):** Option C. Widen five modules and add a Linux CI build.
+7. **Not scheduled:** Option C (widen five modules, add a Linux CI build). No WP is created until the maintainer asks for Mac or Linux support.
 
 ## Verification / acceptance
 
@@ -174,7 +174,7 @@ Use the same shape for the new modules introduced by ADR 0003 (`Open3DStreamCore
 4. **needs-verification (WP-F0):** which platforms does Fab's compile farm build a code plugin for, and must every platform in `SupportedTargetPlatforms` compile there?
 5. **needs-verification:** are `AudioCaptureCore`, `AudioMixer`, `LiveLink`, `LiveLinkAnimationCore` and `AnimGraphRuntime` available on Mac and Linux targets in 5.7 (needed for Option C)?
 6. ~~Do you want Receiver-on-Server (headless ingest) in a later release?~~ **Answered 2026-09-29:** not needed now, likely to stay that way, but must not be ruled out. See Decision §2 for the constraints that keep it open.
-7. Is Option C (Mac and Linux for the portable modules) wanted for v1.1, and is a Linux UE build agent available?
+7. ~~Is Option C wanted for v1.1?~~ **Answered 2026-09-29:** no Mac/Linux support in v1.1. Q5 only becomes relevant if that changes.
 
 ## References
 

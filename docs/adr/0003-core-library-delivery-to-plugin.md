@@ -3,7 +3,7 @@
 - **Status:** Proposed (pending maintainer sign-off)
 - **Date:** 2026-09-29
 - **Plan decision:** D3 in [`plugin-hardening-and-fab-readiness.md`](../roadmap/plugin-hardening-and-fab-readiness.md) §3
-- **Related:** [ADR 0001](0001-platform-scope-first-fab-release.md) (D1; this ADR is the prerequisite for its v1.1 Mac/Linux tier); issue #203; [`resilient-streaming-and-motion-prediction.md`](../roadmap/resilient-streaming-and-motion-prediction.md) §0.2; feeds WP-F1, WP-F2, WP-F3, WP-T1, WP-A7
+- **Related:** [ADR 0001](0001-platform-scope-first-fab-release.md) (D1; this ADR is the prerequisite for its unscheduled Mac/Linux option); issue #203; [`resilient-streaming-and-motion-prediction.md`](../roadmap/resilient-streaming-and-motion-prediction.md) §0.2; feeds WP-F1, WP-F2, WP-F3, WP-T1, WP-A7
 
 **Recommendation in one line:** compile the subset of `src/o3ds` that the plugin uses as a new UE module, `Open3DStreamCore`. Its sources are a **committed, script-generated mirror** of `src/o3ds`. `src/o3ds` stays the single source of truth, and a CI check on every PR fails if the mirror drifts. FlatBuffers becomes header-only, from the same pin as `flatc`. NNG and Opus stay prebuilt for v1.
 
@@ -63,7 +63,7 @@ The static lib that the plugin links today contains all of these (`src/CMakeList
 1. A clean clone and the Fab zip must build with only `RunUAT BuildPlugin`: no CMake, PowerShell or prebuilt core (WP-F1 acceptance).
 2. There is one source of truth for the core, and drift is caught by a machine, not by review (#203).
 3. The Linux CMake build and the 174 core tests keep working unchanged. The core stays engine-agnostic, so no UE macros go in `src/o3ds` (core-first principle, plan §0.2).
-4. Any platform UE targets can build it (unblocks ADR 0001's v1.1 tier).
+4. Any platform UE targets can build it (keeps ADR 0001's unscheduled Mac/Linux option open).
 5. No new consequential warnings under UE or Fab's toolchain.
 6. Small reviewable steps.
 
@@ -178,7 +178,7 @@ The static lib that the plugin links today contains all of these (`src/CMakeList
   - WP-F1 acceptance (a clean clone builds) becomes reachable.
   - Plugin CI loses the CMake prelude.
   - Core changes reach the plugin in the same PR, with CI proving the copy.
-  - ADR 0001's v1.1 tier needs no core binaries.
+  - ADR 0001's Mac/Linux option, if ever scheduled, needs no core binaries.
   - WP-F2 can delete the platform branches in the Sender and Receiver Build.cs files.
 - **Harder:**
   - Core PRs that touch mirrored files must also commit the regenerated mirror. CI tells you, but it is an extra step for contributors (documented in `CONTRIBUTING` or `.github/copilot-instructions.md` in the same PR).
@@ -229,7 +229,7 @@ The static lib that the plugin links today contains all of these (`src/CMakeList
 5. **needs-verification:** can `Open3DShared` use the engine's `libOpus` third-party module in UE 5.7 on Win64, Mac and Linux, and does its version expose the API `O3DAudioFrameCodec` uses?
 6. **needs-verification:** does the engine, or any commonly co-installed plugin, ship a different FlatBuffers version whose inline symbols could clash with ours in monolithic builds?
 7. ~~Is Python 3 acceptable as a required dev tool for core contributors?~~ **Answered 2026-09-29:** yes, Python 3 is fine for the sync script.
-8. Do you agree to adding `O3DS_API` annotations to `src/o3ds` headers, given the project wants the core to stay engine-agnostic? The macro is empty outside UE.
+8. ~~Do you agree to adding `O3DS_API` annotations to `src/o3ds` headers?~~ **Answered 2026-09-29:** yes.
 
 ## References
 

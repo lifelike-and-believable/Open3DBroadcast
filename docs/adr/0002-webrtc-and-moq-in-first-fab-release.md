@@ -140,13 +140,13 @@ The repo has previous libdatachannel work (`.github/workflows/build-libdatachann
    - **G4:** the relay test is out of the default test filter (UX-4).
 
    If a gate is still open at WP-F10, the maintainer decides between slipping v1 and excluding MoQ through the manifest. The default is no longer to drop it silently. The decision is recorded in the WP-F10 report.
-4. **Labelling (WP-F9).** The plugin stays `IsBetaVersion: false` and `IsExperimentalVersion: false`, because the default transports (Loopback, Sockets, NNG) are the supported path. MoQ is labelled per transport:
+4. **Labelling (WP-F9).** The **whole plugin is marked Beta for v1** (maintainer, 2026-09-29): `"IsBetaVersion": true` in `Open3DBroadcast.uplugin`, and the Fab listing says Beta. `IsExperimentalVersion` stays false. MoQ additionally carries its own Experimental label, so users can tell the two levels apart:
    - its display name in the transport picker becomes "MoQ (Experimental)";
    - it logs one Warning on first use naming the draft version ("MoQ transport draft-07; relays must speak draft-07");
    - it gets a USER_GUIDE section (there is none today) with the same wording;
    - the listing text says the same.
 
-   UE has no per-module "experimental" key as far as could be found (**needs-verification**, Q2). Whether the whole plugin should be Beta for v1 is a maintainer call (Q5).
+   UE has no per-module "experimental" key as far as could be found (**needs-verification**, Q2). The plugin-level Beta flag (Q5, answered) does not replace the per-transport MoQ label.
 5. **Licence index.** `THIRD_PARTY_LICENSES.md` in the Fab package must match the shipped binaries exactly (WP-F5 acceptance). The `fab-package` job:
    - assembles it from per-module fragments that already exist next to each binary (the `THIRD_PARTY_NOTICES.md` and LICENSE files under each module's `ThirdParty/`), plus the plugin-level entries;
    - fails if a shipped binary has no entry, or if an entry names a binary that is not shipped.
@@ -208,6 +208,8 @@ The repo has previous libdatachannel work (`.github/workflows/build-libdatachann
 
 ## Questions for counsel (legal; no conclusions given here)
 
+**Status (2026-09-29): all open.** The maintainer confirmed these are still unresolved. They block, respectively: publishing the WebRTC add-on before the codec-free rebuild (L1), MoQ's gate G3 (L2 to L4), and WebRTC returning to Fab (L5).
+
 - **L1.** Do the ffmpeg (LGPL-2.1) and OpenH264 contents of `livekit_ffi.dll` create obligations for the **GitHub** releases (`open3dbroadcast-plugin-release.yml` ships binaries) and for the **support-site add-on**, independently of Fab? Can the add-on be published before the codec-free rebuild, and with what notices?
 - **L2.** Where must the OpenSSL and SSLeay acknowledgements for AWS-LC appear: Fab listing, in-editor About, or the shipped notices file?
 - **L3.** Are the Unicode-3.0 (ICU) and `ring` notice sets complete as vendored?
@@ -220,11 +222,11 @@ The repo has previous libdatachannel work (`.github/workflows/build-libdatachann
 2. **needs-verification:** does UE 5.7's `.uplugin` schema have any per-module maturity flag? This ADR assumes it has none.
 3. **needs-verification (WP-F0):** does Fab accept a descriptor that differs from the public repo's (a derived, reduced module list)? Does Fab review compare against a public source?
 4. ~~Is a separate WebRTC plugin or SKU (B4) a direction you want?~~ **Answered 2026-09-29:** WebRTC should be downloadable separately, for example from the support site. Verified as feasible as a separate plugin; see Context.
-5. Should the whole plugin be marked `IsBetaVersion: true` for v1, given the number of P0 fixes landing just before submission?
+5. ~~Should the whole plugin be marked Beta for v1?~~ **Answered 2026-09-29:** yes. See Decision §4.
 6. ~~If a MoQ gate is still open near submission, slip v1 or ship without MoQ?~~ **Answered 2026-09-29:** MoQ ships, as Experimental, with Fab-ready licences. The gates are release requirements (Decision §3).
 7. **needs-verification:** what happens if a user edits the `.uplugin` of a Fab-installed plugin to add a module? Does the launcher's precompiled plugin rebuild, refuse, or get overwritten on update? This ADR assumes it isn't a supported path, which is why the add-on is a separate plugin.
 8. **needs-verification:** can a project-level plugin declare a dependency on a Fab-installed (engine-level) plugin and link against its exported modules? Does the Fab package ship the public headers and import libraries a source build of the add-on would need? How does the editor react to an add-on binary built against a different engine build ID?
-9. Will the support site host the add-on as a free download, and should the Fab listing link to it?
+9. ~~Will the support site host the add-on, and should the Fab listing link to it?~~ **Answered 2026-09-29:** yes to both. The add-on is a free download from the support site, and the Fab listing links to it. Whether the link can go live before the codec-free rebuild depends on counsel question L1.
 
 ## References
 
