@@ -21,6 +21,7 @@ set(O3DS_CORE_TEST_SOURCES
 	model_residual_tests.cpp
 	channel_quant_tests.cpp
 	channel_quant_wire_tests.cpp
+	parser_hardening_tests.cpp
 )
 
 add_executable(o3ds_core_tests
