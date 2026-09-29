@@ -5,7 +5,9 @@
 - **Plan decision:** D2 in [`plugin-hardening-and-fab-readiness.md`](../roadmap/plugin-hardening-and-fab-readiness.md) §3
 - **Related:** [ADR 0001](0001-platform-scope-first-fab-release.md) (D1), [`docs/webrtc-codec-removal-plan.md`](../webrtc-codec-removal-plan.md); feeds WP-F5, WP-F8, WP-F9, WP-S7, WP-S8, WP-D2
 
-**Recommendation in one line:** the Fab package leaves out `Open3DTransportWebRTC`, removed by the Fab packaging job, while the codec-free `livekit_ffi` rebuild proceeds in parallel and brings WebRTC back in a later update. MoQ ships in v1, labelled **Experimental**, but only if four named gates close before WP-F10. If they don't, it is removed by the same mechanism.
+**Recommendation in one line:** the Fab package leaves out `Open3DTransportWebRTC`, removed by the Fab packaging job. WebRTC is offered instead as a **separate add-on plugin (`Open3DBroadcastWebRTC`)** that users download from the support site and install next to the Fab plugin. The codec-free `livekit_ffi` rebuild proceeds in parallel. MoQ ships in v1, labelled **Experimental**, and its licence notices must be Fab-ready before submission.
+
+**Maintainer input (2026-09-29):** MoQ ships in v1 even as Experimental, provided every licence is Fab-ready. For WebRTC, the maintainer asked whether users could download the module on its own (for example from the support site) and add it to the plugin. The answer is in "WebRTC as a separate add-on plugin" below.
 
 This ADR covers the engineering choice only. The licensing questions are listed separately in "Questions for counsel" and are not answered here.
 
@@ -24,6 +26,39 @@ This ADR covers the engineering choice only. The licensing questions are listed 
 - No other module's Build.cs names `Open3DTransportWebRTC`. A grep of every `*.cs` outside the module finds nothing.
 - The only mentions of WebRTC or LiveKit in Shared, Sender and Receiver are comments and the stringly-typed token fields in `Plugin/Source/Open3DShared/Public/O3DTransportTypes.h:66-98` (SHR-36).
 - **So the module can be dropped from a package without touching other modules' code.**
+
+**WebRTC as a separate add-on plugin (verified against the code 2026-09-29).** Short answer: yes, the module's code is already self-contained enough to ship on its own, but **as its own plugin, not as a module added into the Fab-installed plugin.** There are three small blockers to fix first.
+
+What the code shows:
+- **Nothing depends on it.** No other module's Build.cs names `Open3DTransportWebRTC`, and no other module includes its headers (above).
+- **It uses only public, exported API from the other modules.** Everything it includes from Shared, Sender and Receiver lives in a `Public/` folder, and the classes and functions it calls carry the module export macros:
+  - the registries: `O3DTransport::RegisterSender`/`RegisterReceiver` (`Open3DSender/Public/O3DSenderRegistry.h:9`, `Open3DReceiver/Public/O3DReceiverRegistry.h:9`);
+  - the editor hooks: `O3DSender::RegisterTransportCustomization` (`O3DSenderTransportCustomization.h:28`) and `O3DReceiver::RegisterTransportCustomization` (`O3DReceiverTransportCustomization.h:24`);
+  - the interfaces `IOpen3DSender`, `IOpen3DReceiver` and their audio sinks (`OPEN3DSENDER_API`/`OPEN3DRECEIVER_API`);
+  - `SO3DTransportConfigPanelBase` (`OPEN3DRECEIVER_API`), `FSerializedFrameConsumerRegistry` and `FO3DPerformanceMetrics` (`OPEN3DSHARED_API`);
+  - `FO3DTransportConfig`, a plain header-only struct.
+- **It registers itself, and is looked up lazily.** It registers its factories and panels in `StartupModule` (`Open3DTransportWebRTCModule.cpp:614-708`). Sender and Receiver resolve transports by name only when capture or a LiveLink source starts (`O3DSenderTransportController.cpp:21`, `O3DReceiverSource.cpp:325`), and the pickers list names when they're shown (`O3DSenderComponentCustomization.cpp:389`, `O3DReceiverSourceFactory.cpp:392`). A transport that loads from another plugin therefore appears and works without Sender or Receiver knowing about it.
+
+Why it must be a separate plugin rather than a folder dropped into the installed plugin:
+- UE loads only the modules listed in a plugin's `.uplugin` (`Plugin/Open3DBroadcast.uplugin:21-62`). Adding one means editing the descriptor of a Fab-installed, precompiled plugin under the engine's `Plugins/Marketplace` folder. Every Fab update would overwrite the edit, and the user would have to rebuild the Fab plugin (**needs-verification**, Q7).
+- A separate plugin, `Open3DBroadcastWebRTC`, with its own `.uplugin` that declares `"Plugins": [{ "Name": "Open3DBroadcast", "Enabled": true }]`, can be installed in the project's `Plugins/` folder without touching the Fab install.
+
+Blockers to fix before the add-on can be built (all small, and all in scope of existing WPs):
+1. **The DLL lookup hard-codes the host plugin's name.** `FindPlugin(TEXT("Open3DBroadcast"))` at `Open3DTransportWebRTCModule.cpp:735` locates `livekit_ffi.dll` under the *main* plugin's folder. The add-on must look itself up instead (WP-F3; TRF-28 already asks to unify DLL loading).
+2. **Build.cs reaches into the main plugin's folders.** `Open3DTransportWebRTC.Build.cs:66-70` adds the plugin-root `ThirdParty/open3dstream/include` path (the path is also wrong, BUILD-1), and the core library arrives only indirectly, through Open3DSender's `PublicAdditionalLibraries` (`Open3DSender.Build.cs:47-48`). In another plugin, both break. Two fixes, and either is enough:
+   - depend on the `Open3DStreamCore` module from ADR 0003, whose public API is exported with `O3DS_API`; or
+   - delete the legacy `Send(const O3DS::SubjectList&)` path (`WebRTCSender.cpp:587`, TRF-4, TRF-19), after which the module only needs `O3DS::FAudioFrameMeta`, which lives in Shared's `O3DUnifiedMessage.h`.
+3. **Unloading is not safe across plugins.** The registries don't track live instances (SHR-13), and the module frees the DLL while instances may be alive (TRF-14). Both matter more once the transport lives in a plugin that can be disabled on its own (WP-A1, WP-F3).
+
+Also worth doing, though not blocking:
+- move the WebRTC build flags out of `Open3DShared.Build.cs:80-168` and the unused WebRTC console variables out of Shared (SHR-19);
+- move the LiveKit token fields out of `FO3DTransportConfig` (SHR-36);
+- give the transport interface a version number (D4, SHR-14), so the add-on can refuse to load against a mismatched main plugin instead of crashing.
+
+Distribution constraints:
+- **Binaries must match exactly.** A prebuilt add-on has to be compiled against the same engine version and the same Open3DBroadcast release, because it links against exported C++ classes and their vtables. The support site would publish one build per Open3DBroadcast release. The interface version makes a mismatch fail cleanly (**needs-verification**: how the editor treats a project plugin built against a different engine build ID, Q8).
+- **A source-only add-on needs a C++ toolchain.** It also needs the Fab-installed Open3DBroadcast to ship its public headers and import libraries (**needs-verification**, Q8).
+- **Licensing is unchanged by the channel.** Until the codec-free rebuild lands, publishing the add-on on a support site still distributes the ffmpeg and OpenH264 content of `livekit_ffi.dll`. That is counsel question L1.
 
 **MoQ.**
 - `moq_ffi.dll` was scanned and contains no ffmpeg or OpenH264 (`THIRD_PARTY_LICENSES.md:54`, `:170-171`; `Plugin/Source/Open3DTransportMoQ/ThirdParty/moq-ffi/THIRD_PARTY_NOTICES.md` §2 table, "ffmpeg / OpenH264: No"). There is no codec issue.
@@ -44,7 +79,7 @@ This ADR covers the engineering choice only. The licensing questions are listed 
 2. Don't block the first submission on the libwebrtc rebuild, which has an unknown duration.
 3. What ships must be honest: the listing, docs and UI describe exactly the transports in the package, and their maturity.
 4. The mechanism must be deterministic and checked by CI, with no manual steps at submission time.
-5. Keep one source tree. A second plugin or a fork is a cost that needs a reason.
+5. Keep one source tree. A second plugin or a fork is a cost that needs a reason. (The WebRTC add-on lives in this same repository, so this still holds.)
 
 ## Options considered
 
@@ -61,7 +96,7 @@ The ways to exclude it:
   - **Cons:** the Fab descriptor is derived, not hand-written, and the licence index must also be derived (see Decision). The GitHub build and the Fab build differ.
 - **B2. `Config/FilterPlugin.ini`.** As far as the review could tell, FilterPlugin *adds* non-standard folders to a package. It is not documented as excluding files under `Source/` (**needs-verification**, Q1). Even if it could, the module entry would remain in the descriptor. Rejected.
 - **B3. The build flag `O3D_WITH_TRANSPORT_WEBRTC=0`.** This controls compilation, not distribution. The DLL would still be in the source zip, and Fab's farm cannot set environment variables (BUILD-4). Rejected.
-- **B4. A separate plugin (`Open3DBroadcastWebRTC`), distributed outside Fab.** This is clean in the long term, but a second plugin needs the transport interfaces and a single registry exposed as a stable public API first. That is D4 and WP-A1. It is effectively a product decision (a second SKU). Deferred until D4 is decided.
+- **B4. A separate plugin (`Open3DBroadcastWebRTC`), distributed outside Fab.** The code check in Context shows the interfaces and registries it needs are already public and exported, so this doesn't have to wait for D4. It needs the three blockers listed there fixed. **Chosen (maintainer direction, 2026-09-29) as the way WebRTC reaches users while it is absent from Fab.** It complements B1: B1 keeps it out of the Fab package, and B4 distributes it separately.
 - **Cost / effort (B1):** S to M. **Risk:** low.
 
 ### Option C: ship WebRTC as-is with counsel sign-off
@@ -80,12 +115,13 @@ The repo has previous libdatachannel work (`.github/workflows/build-libdatachann
 - **M2. Leave MoQ out of v1** using B1's mechanism.
   - Pros: the smallest risk surface.
   - Cons: it drops a working transport and delays feedback.
-- **M3. MoQ as a separate optional plugin (FAB-12's first recommendation).** Same D4 prerequisite as B4. Deferred.
+- **M3. MoQ as a separate optional plugin (FAB-12's first recommendation).** Feasible by the same route as B4. Not needed, since MoQ ships in the main plugin.
 
 ## Decision
 
-1. **WebRTC: Option B1 for v1, with Option A in parallel.**
+1. **WebRTC: Option B1 for the Fab package, B4 for distribution, Option A in parallel.**
    - The Fab package has no `Open3DTransportWebRTC` module and no `livekit_ffi` files.
+   - WebRTC is published as the add-on plugin `Open3DBroadcastWebRTC`, built from the same repository, one build per Open3DBroadcast release, and downloadable from the support site. Before the codec-free DLL exists, publishing it is subject to counsel question L1.
    - WebRTC returns in a Fab update once all three hold:
      - (a) `check-no-video-codecs.sh` passes on the rebuilt DLL;
      - (b) the upstream licence text and generated notices exist (FAB-11);
@@ -94,7 +130,7 @@ The repo has previous libdatachannel work (`.github/workflows/build-libdatachann
 2. **Mechanism for B1.** The WP-F8 `fab-package` job reads a small, committed exclusion manifest (for example `Build/Fab/exclude-modules.txt` listing `Open3DTransportWebRTC`). It deletes the listed module folders from the staged copy and removes the matching `Modules[]` entries from the staged `.uplugin` with a JSON-aware tool that keeps the file's formatting (CI-5 notes that `ConvertTo-Json` rewrites it). Then it runs:
    - BuildPlugin on the staged tree;
    - `Build/Scripts/check-no-video-codecs.sh` on **the staged package**, as a required gate from day one. It passes because the only offending DLL is absent. This closes CI-8 for the Fab path now instead of waiting for Option A.
-3. **MoQ: Option M1.** MoQ ships in v1 as **Experimental** if all four gates are closed at WP-F10:
+3. **MoQ: Option M1.** MoQ ships in v1 as **Experimental** (maintainer decision, 2026-09-29). The four gates below are **release requirements for v1**, not conditions for dropping MoQ. G3 (licences Fab-ready) is mandatory:
    - **G1:** WP-S8 is merged, and the MoQ parts of WP-S5 (lifetime safety) are merged.
    - **G2:** FAB-4 for MoQ is done: the pdb is gone and `Open3DTransportMoQ.Build.cs:92-97` is removed.
    - **G3:** FAB-11 for MoQ is done:
@@ -103,7 +139,7 @@ The repo has previous libdatachannel work (`.github/workflows/build-libdatachann
      - counsel has decided where the OpenSSL/SSLeay acknowledgement appears.
    - **G4:** the relay test is out of the default test filter (UX-4).
 
-   If any gate is open at WP-F10, `Open3DTransportMoQ` is added to the exclusion manifest and v1 ships without it. The decision is recorded in the WP-F10 report.
+   If a gate is still open at WP-F10, the maintainer decides between slipping v1 and excluding MoQ through the manifest. The default is no longer to drop it silently. The decision is recorded in the WP-F10 report.
 4. **Labelling (WP-F9).** The plugin stays `IsBetaVersion: false` and `IsExperimentalVersion: false`, because the default transports (Loopback, Sockets, NNG) are the supported path. MoQ is labelled per transport:
    - its display name in the transport picker becomes "MoQ (Experimental)";
    - it logs one Warning on first use naming the draft version ("MoQ transport draft-07; relays must speak draft-07");
@@ -122,8 +158,8 @@ The repo has previous libdatachannel work (`.github/workflows/build-libdatachann
 | Loopback | yes | yes | stable (testing aid) |
 | Sockets (UDP/TCP) | yes | yes | stable |
 | NNG | yes | yes | stable |
-| MoQ | yes | yes, if G1 to G4 close | Experimental (draft-07) |
-| WebRTC (LiveKit) | yes | **no** | "Planned for a later update" in the listing |
+| MoQ | yes | yes (G1 to G4 are release requirements) | Experimental (draft-07) |
+| WebRTC (LiveKit) | yes | **no**; separate add-on plugin from the support site | "Available as a separate add-on" in the listing, subject to L1 |
 
 - `Plugin/USER_GUIDE.md` (50 WebRTC/LiveKit mentions), `Plugin/README.md` (6) and `Plugin/Transport_Module_Comparison.md` (58) get a short "Available in" line per transport. WebRTC sections say they apply to the GitHub build only. This is WP-D2.
 - The Fab listing names only shipped transports, states the MoQ draft version, and carries whatever acknowledgement text counsel requires (G3).
@@ -138,12 +174,12 @@ The repo has previous libdatachannel work (`.github/workflows/build-libdatachann
 - **Harder:**
   - There are two package variants. Every WP-F8 package assertion runs on the Fab variant.
   - Docs need edition notes.
-  - Users who need browser or LiveKit interop must use the GitHub build until Option A lands.
+  - Users who need browser or LiveKit interop install the separate add-on, which is a second artifact to build, version and support per release.
 - **Constrains:**
   - No module may take a hard dependency on `Open3DTransportWebRTC` or `Open3DTransportMoQ`. The review agent checks this in WP-A1.
   - D6 (credentials) should not hard-wire LiveKit fields into shared types (SHR-36), because the Fab edition won't have the transport that uses them.
 - **Enables:**
-  - B4 and M3 (separate plugins) after D4, if the maintainer later wants SKUs.
+  - The same add-on pattern for any future transport that can't ship on Fab (M3 for MoQ, if ever needed).
   - The same exclusion manifest serves any future experimental module.
 
 ## Implementation outline
@@ -154,7 +190,12 @@ The repo has previous libdatachannel work (`.github/workflows/build-libdatachann
 4. **WP-S8 and the MoQ part of WP-S5** (G1). **WP-T2:** take the relay test out of the default filter (G4).
 5. **WP-F9:** MoQ display name, first-use warning, and listing text.
 6. **WP-D2:** "Available in" notes, and a MoQ section in USER_GUIDE.
-7. **Parallel track (new WP under WP-F5, owner: FFI maintainer):** `webrtc-codec-removal-plan.md` steps 1 to 5. Once it passes, remove `Open3DTransportWebRTC` from the exclusion manifest in a separate PR, with counsel sign-off recorded.
+7. **WebRTC add-on plugin (new WP, after WP-F3 and ADR 0003's `Open3DStreamCore`):**
+   - Create `ProjectSandbox/Plugins/Open3DBroadcastWebRTC/` with its own `.uplugin` (plugin dependency on `Open3DBroadcast`, `PlatformAllowList: ["Win64"]` per ADR 0001). Move `Source/Open3DTransportWebRTC/` into it with `git mv`, keeping the module name.
+   - Fix the three blockers: the self-lookup at `Open3DTransportWebRTCModule.cpp:735`, the Build.cs dependency on `Open3DStreamCore` in place of the plugin-root paths, and unload safety.
+   - Add an interface-version check at `StartupModule`.
+   - CI builds and packages the add-on per release, runs the conformance suite (WP-T2) with both plugins enabled, and publishes the zip as a release asset for the support site. The main Fab package then needs no WebRTC exclusion step; the manifest from step 1 stays for any other module.
+8. **Parallel track (new WP under WP-F5, owner: FFI maintainer):** `webrtc-codec-removal-plan.md` steps 1 to 5. Once it passes, remove `Open3DTransportWebRTC` from the exclusion manifest in a separate PR, with counsel sign-off recorded.
 
 ## Verification / acceptance
 
@@ -162,11 +203,12 @@ The repo has previous libdatachannel work (`.github/workflows/build-libdatachann
 - `check-no-video-codecs.sh` exits 0 on the staged package in CI. A deliberately re-added `livekit_ffi.dll` turns the job red.
 - BuildPlugin passes on the staged tree (WP-F1 acceptance).
 - The licence index check passes, and fails if an entry is deleted.
-- If MoQ ships: the transport picker shows "MoQ (Experimental)"; the first MoQ start logs the Warning; the WP-F10 report lists G1 to G4 as closed with PR links.
+- MoQ: the transport picker shows "MoQ (Experimental)"; the first MoQ start logs the Warning; the WP-F10 report lists G1 to G4 as closed with PR links; the Fab licence index covers every component in `moq_ffi.dll` (G3).
+- WebRTC add-on: with only the Fab-packaged Open3DBroadcast plus the add-on installed in a clean UE 5.7 project, the transport pickers list WebRTC, a loopback-style conformance run passes, and disabling the add-on and restarting the editor leaves the main plugin working.
 
 ## Questions for counsel (legal; no conclusions given here)
 
-- **L1.** Do the ffmpeg (LGPL-2.1) and OpenH264 contents of `livekit_ffi.dll` create obligations for the **GitHub** releases (`open3dbroadcast-plugin-release.yml` ships binaries), independently of Fab?
+- **L1.** Do the ffmpeg (LGPL-2.1) and OpenH264 contents of `livekit_ffi.dll` create obligations for the **GitHub** releases (`open3dbroadcast-plugin-release.yml` ships binaries) and for the **support-site add-on**, independently of Fab? Can the add-on be published before the codec-free rebuild, and with what notices?
 - **L2.** Where must the OpenSSL and SSLeay acknowledgements for AWS-LC appear: Fab listing, in-editor About, or the shipped notices file?
 - **L3.** Are the Unicode-3.0 (ICU) and `ring` notice sets complete as vendored?
 - **L4.** Does shipping cryptography (AWS-LC in `moq_ffi.dll`; TLS inside `livekit_ffi.dll`) raise any export-classification or Fab declaration requirement?
@@ -177,9 +219,12 @@ The repo has previous libdatachannel work (`.github/workflows/build-libdatachann
 1. **needs-verification:** can `Config/FilterPlugin.ini` exclude files under `Source/` from a BuildPlugin package, or does it only add paths? This ADR assumes it only adds.
 2. **needs-verification:** does UE 5.7's `.uplugin` schema have any per-module maturity flag? This ADR assumes it has none.
 3. **needs-verification (WP-F0):** does Fab accept a descriptor that differs from the public repo's (a derived, reduced module list)? Does Fab review compare against a public source?
-4. Is a separate WebRTC plugin or SKU (B4) a direction you want once D4 lands, or should WebRTC return into the main plugin?
+4. ~~Is a separate WebRTC plugin or SKU (B4) a direction you want?~~ **Answered 2026-09-29:** WebRTC should be downloadable separately, for example from the support site. Verified as feasible as a separate plugin; see Context.
 5. Should the whole plugin be marked `IsBetaVersion: true` for v1, given the number of P0 fixes landing just before submission?
-6. If a MoQ gate is still open near submission, do you prefer to slip v1 or ship without MoQ? This ADR defaults to shipping without it.
+6. ~~If a MoQ gate is still open near submission, slip v1 or ship without MoQ?~~ **Answered 2026-09-29:** MoQ ships, as Experimental, with Fab-ready licences. The gates are release requirements (Decision §3).
+7. **needs-verification:** what happens if a user edits the `.uplugin` of a Fab-installed plugin to add a module? Does the launcher's precompiled plugin rebuild, refuse, or get overwritten on update? This ADR assumes it isn't a supported path, which is why the add-on is a separate plugin.
+8. **needs-verification:** can a project-level plugin declare a dependency on a Fab-installed (engine-level) plugin and link against its exported modules? Does the Fab package ship the public headers and import libraries a source build of the add-on would need? How does the editor react to an add-on binary built against a different engine build ID?
+9. Will the support site host the add-on as a free download, and should the Fab listing link to it?
 
 ## References
 

@@ -228,7 +228,7 @@ The static lib that the plugin links today contains all of these (`src/CMakeList
 4. **needs-verification:** how do BuildPlugin and the Fab zip handle symlinks? This matters only if A3 is preferred.
 5. **needs-verification:** can `Open3DShared` use the engine's `libOpus` third-party module in UE 5.7 on Win64, Mac and Linux, and does its version expose the API `O3DAudioFrameCodec` uses?
 6. **needs-verification:** does the engine, or any commonly co-installed plugin, ship a different FlatBuffers version whose inline symbols could clash with ours in monolithic builds?
-7. Is Python 3 acceptable as a required dev tool for core contributors? The alternative is a PowerShell 7 script, which also runs on the Linux runner.
+7. ~~Is Python 3 acceptable as a required dev tool for core contributors?~~ **Answered 2026-09-29:** yes, Python 3 is fine for the sync script.
 8. Do you agree to adding `O3DS_API` annotations to `src/o3ds` headers, given the project wants the core to stay engine-agnostic? The macro is empty outside UE.
 
 ## References

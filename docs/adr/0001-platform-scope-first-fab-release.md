@@ -97,7 +97,10 @@ Use the same shape for the new modules introduced by ADR 0003 (`Open3DStreamCore
 - In each Build.cs, the attribute becomes `[SupportedTargetTypes(TargetType.Editor, TargetType.Game, TargetType.Client)]`, so the descriptor and the rules agree.
 - Why Client is included: a Client target is a Game target without server code, and nothing in the plugin depends on the server.
 - Why Server is excluded: a dedicated server has no audio capture or rendering. The sender's pose sampling on a server and LiveLink on a server are untested.
-- Receiver-on-Server is a plausible later feature (Q6). When it comes, it gets its own descriptor entry and tests.
+- **Receiver-on-Server (Q6, answered 2026-09-29):** the maintainer does not need it now and expects that to stay the case, but does not want it ruled out. So v1 excludes Server, and the following constraints keep enabling it later a small change:
+  - Receiver runtime code must not take an unconditional dependency on client-only or editor-only engine modules. Editor code moves to the D9 Editor module, and audio playback (`UO3DRemoteAudioComponent`) stays optional at runtime.
+  - Enabling it later means removing `Server` from the Receiver's (and its transports') `TargetDenyList`, adding `TargetType.Server` to their `SupportedTargetTypes`, and adding a headless Server build and a test to CI. It gets its own WP when requested.
+  - Whether `LiveLink` and `LiveLinkInterface` are built for Server targets is **needs-verification** at that point.
 
 **3. Build.cs `throw`s become clean exclusion (WP-F2).** The descriptor is the primary mechanism. Build.cs only has to stay correct if a user edits the allow list.
 - **Open3DSender, Open3DReceiver:** once ADR 0003 lands, these modules link no binaries and the platform branch (`:24-48`) is deleted outright. If WP-F2 lands before WP-F1, leave the branch in place; the allow list makes it unreachable.
@@ -170,7 +173,7 @@ Use the same shape for the new modules introduced by ADR 0003 (`Open3DStreamCore
 3. **needs-verification:** does UBT still construct the `ModuleRules` (and so run the Build.cs) for a module excluded by `PlatformAllowList` or `TargetDenyList`? If it does, the stub path in step 4 is required and not only defensive.
 4. **needs-verification (WP-F0):** which platforms does Fab's compile farm build a code plugin for, and must every platform in `SupportedTargetPlatforms` compile there?
 5. **needs-verification:** are `AudioCaptureCore`, `AudioMixer`, `LiveLink`, `LiveLinkAnimationCore` and `AnimGraphRuntime` available on Mac and Linux targets in 5.7 (needed for Option C)?
-6. Do you want Receiver-on-Server (headless ingest) in a later release? If yes, that becomes its own WP with tests.
+6. ~~Do you want Receiver-on-Server (headless ingest) in a later release?~~ **Answered 2026-09-29:** not needed now, likely to stay that way, but must not be ruled out. See Decision §2 for the constraints that keep it open.
 7. Is Option C (Mac and Linux for the portable modules) wanted for v1.1, and is a Linux UE build agent available?
 
 ## References
