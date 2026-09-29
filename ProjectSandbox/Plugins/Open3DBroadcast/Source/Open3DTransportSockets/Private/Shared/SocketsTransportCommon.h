@@ -16,6 +16,8 @@ namespace O3DSockets
 	static constexpr TCHAR BroadcastOptionKey[] = TEXT("udp.broadcast");
 	static constexpr TCHAR MtuOptionKey[] = TEXT("udp.mtu");
 	static constexpr TCHAR MaxDatagramOptionKey[] = TEXT("udp.maxdatagram");
+	/** Receiver: largest reassembled UDP message accepted, in bytes. */
+	static constexpr TCHAR MaxFrameOptionKey[] = TEXT("udp.maxframe");
 
 	/** Trim and normalise a hostname for logging / URI generation. */
 	FString NormaliseHostname(const FString& Host);

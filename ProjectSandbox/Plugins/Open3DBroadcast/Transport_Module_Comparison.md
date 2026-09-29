@@ -256,8 +256,9 @@ All modules implement the same interfaces with identical method signatures:
 - **MTU awareness**: Default 1200 bytes (configurable)
 - **Max datagram**: 64KB default (configurable)
 - **Fragment header**: Sequence ID + fragment index + total fragments
-- **Reassembly**: `UdpMapper` tracks in-flight fragment sets
-- **Timeout**: Incomplete fragment sets are discarded
+- **Reassembly**: `UdpMapper` tracks in-flight fragment sets, keyed on (sender address, message id); at most 8 in flight and 4x `udp.maxframe` bytes in total, oldest evicted first
+- **Timeout**: Incomplete fragment sets are discarded after 500 ms, or as soon as a newer message from the same sender completes
+- **Poll bound**: each `Poll()` reads at most 1024 datagrams / 8 MiB; the rest stays in the socket buffer for the next poll
 
 **Configuration**:
 - `host` - Hostname/IP
@@ -266,6 +267,7 @@ All modules implement the same interfaces with identical method signatures:
 - `udp.broadcast` - Enable broadcast mode (default: false)
 - `udp.mtu` - MTU size in bytes (default: 1200)
 - `udp.maxdatagram` - Max datagram size before fragmentation (default: 64000)
+- `udp.maxframe` - Receiver: largest reassembled message accepted, in bytes (default: 4194304, max 52428800)
 
 **Broadcast Support** (`SocketsUdpSender.cpp:228-271`):
 - Special hostname handling: `*` or empty → `255.255.255.255`
