@@ -87,6 +87,14 @@
   and no longer reads component properties. Frames carry the descriptor and
   an `FO3DSenderEncodingSettings` snapshot; `SerializePoseFrame()` is public.
 
+### Build and CI
+
+- `Build/Scripts/Build-Plugin.ps1` now fails when `RunUAT BuildPlugin` fails, with UAT's exit code (CI-1).
+  It used to fall back to a ProjectSandbox UBT build and exit 0, so plugin CI
+  could report success for a plugin that does not build. The fallback is still
+  available for local troubleshooting behind the new `-AllowFallback` switch,
+  which no workflow passes.
+
 ### Schema/Protocol
 
 - No wire change. The 16-byte UDP fragment header is now read and written as explicit little-endian, which is byte-for-byte identical to what existing little-endian senders and receivers produce. The versioned `O3DF` header (ADR 0009, TRB-17) follows separately.

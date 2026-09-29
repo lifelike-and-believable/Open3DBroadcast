@@ -70,6 +70,9 @@ Builds an Unreal plugin using Unreal Automation Tool (UAT).
 - `-OutDir` - Output directory for packaged plugin (required)
 - `-TargetPlatforms` - Array of platforms to build (default: `@("Win64")`)
 - `-Configuration` - Build configuration: Development, Shipping, etc. (default: `Development`)
+- `-AllowFallback` - Local troubleshooting only. If `RunUAT BuildPlugin` fails, build ProjectSandbox with UBT and package from that instead. A fallback success does not mean the plugin package builds, so CI never passes this switch.
+
+**Exit code:** `0` only when `RunUAT BuildPlugin` succeeds. Otherwise the script exits with UAT's exit code, unless `-AllowFallback` is set.
 
 **Output:**
 - Packaged plugin in `OutDir`

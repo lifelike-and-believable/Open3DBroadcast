@@ -4,7 +4,12 @@ param(
   [string]$OutDir,
   [string[]]$TargetPlatforms = @("Win64"),
   [string]$Configuration = "Development",
-  [string[]]$AdditionalPluginDirectories = @()
+  [string[]]$AdditionalPluginDirectories = @(),
+  # Local troubleshooting only: when RunUAT BuildPlugin fails, build ProjectSandbox with
+  # UBT and package from that instead. That build compiles the plugin inside the project
+  # with different settings, so its success does not show that the plugin package
+  # builds. CI never passes this switch (CI-1).
+  [switch]$AllowFallback
 )
 
 function Get-DotNetHost([string]$EngineRoot) {
@@ -304,13 +309,22 @@ if ($AdditionalPluginDirectories -and $AdditionalPluginDirectories.Count -gt 0) 
 
 # Pass each UAT option as a single token so PowerShell doesn't split values with spaces
 & $UAT $uatArgs
+$uatExitCode = $LASTEXITCODE
+if ($null -eq $uatExitCode) { $uatExitCode = 1 }  # never report success without an exit code
 
-if ($LASTEXITCODE -eq 0) {
+if ($uatExitCode -eq 0) {
   Write-Host "[OK] Plugin build completed successfully"
   exit 0
 }
 
-Write-Warning "RunUAT BuildPlugin failed with exit code $LASTEXITCODE. Attempting project-driven fallback build..."
+if (-not $AllowFallback) {
+  # Fail with UAT's own exit code. The ::error:: line is a GitHub Actions annotation;
+  # elsewhere it is just a message.
+  Write-Host "::error::RunUAT BuildPlugin failed with exit code $uatExitCode. See the compiler errors above."
+  exit $uatExitCode
+}
+
+Write-Warning "RunUAT BuildPlugin failed with exit code $uatExitCode. -AllowFallback is set: attempting the project-driven fallback build. A fallback success does NOT mean the plugin package builds."
 
 try {
   Invoke-ProjectSandboxPackaging -EngineRoot $UEPath -PluginDescriptor $PluginUPluginPath -OutDir $OutDir -TargetPlatforms $TargetPlatforms -Configuration $Configuration -AdditionalPluginDirectories $AdditionalPluginDirectories
