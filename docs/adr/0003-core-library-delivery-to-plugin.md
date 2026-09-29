@@ -1,6 +1,6 @@
 # 0003: How the o3ds core library reaches the plugin
 
-- **Status:** Proposed (pending maintainer sign-off)
+- **Status:** Accepted (maintainer sign-off 2026-09-29)
 - **Date:** 2026-09-29
 - **Plan decision:** D3 in [`plugin-hardening-and-fab-readiness.md`](../roadmap/plugin-hardening-and-fab-readiness.md) §3
 - **Related:** [ADR 0001](0001-platform-scope-first-fab-release.md) (D1; this ADR is the prerequisite for its unscheduled Mac/Linux option); issue #203; [`resilient-streaming-and-motion-prediction.md`](../roadmap/resilient-streaming-and-motion-prediction.md) §0.2; feeds WP-F1, WP-F2, WP-F3, WP-T1, WP-A7

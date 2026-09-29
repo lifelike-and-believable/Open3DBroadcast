@@ -1,6 +1,6 @@
 # 0002: WebRTC and MoQ in the first Fab release
 
-- **Status:** Proposed (pending maintainer sign-off)
+- **Status:** Accepted (maintainer sign-off 2026-09-29)
 - **Date:** 2026-09-29
 - **Plan decision:** D2 in [`plugin-hardening-and-fab-readiness.md`](../roadmap/plugin-hardening-and-fab-readiness.md) §3
 - **Related:** [ADR 0001](0001-platform-scope-first-fab-release.md) (D1), [`docs/webrtc-codec-removal-plan.md`](../webrtc-codec-removal-plan.md); feeds WP-F5, WP-F8, WP-F9, WP-S7, WP-S8, WP-D2

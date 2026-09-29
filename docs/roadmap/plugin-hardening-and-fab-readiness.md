@@ -117,7 +117,8 @@ Several WPs depend on these decisions. Each gets an ADR. The design agent should
   - (b) Add Mac and Linux by building the core, NNG and Opus from source per platform.
 - **Recommendation:** (a) for v1, while the core stays portable (it already builds on Linux) so (b) remains a follow-up.
 - **Findings:** FAB-3, SND-11, RCV-30, TRB-41, TRF-27, SHR-21, FAB-8.
-- **ADR:** [docs/adr/0001-platform-scope-first-fab-release.md](../adr/0001-platform-scope-first-fab-release.md) (Proposed)
+- **ADR:** [docs/adr/0001-platform-scope-first-fab-release.md](../adr/0001-platform-scope-first-fab-release.md) (Accepted)
+- **Decision:** Win64 only for v1 and v1.1; every module gets `PlatformAllowList: ["Win64"]` and `TargetDenyList: ["Server","Program"]`; Build.cs throws become stub builds. Mac/Linux (option b, tiered) is unscheduled. Receiver-on-Server is not planned but must stay possible.
 
 **D2: WebRTC in the Fab SKU.**
 - **Options:**
@@ -127,7 +128,8 @@ Several WPs depend on these decisions. Each gets an ADR. The design agent should
 - **Recommendation:** (b) unblocks submission now; (a) proceeds in parallel.
 - **Also decide:** whether MoQ ships in v1. It is built on draft IETF protocols (FAB-12), so it should at least be marked Experimental.
 - **Findings:** FAB-1, FAB-11, FAB-12.
-- **ADR:** [docs/adr/0002-webrtc-and-moq-in-first-fab-release.md](../adr/0002-webrtc-and-moq-in-first-fab-release.md) (Proposed)
+- **ADR:** [docs/adr/0002-webrtc-and-moq-in-first-fab-release.md](../adr/0002-webrtc-and-moq-in-first-fab-release.md) (Accepted)
+- **Decision:** WebRTC is excluded from the Fab package and distributed as the free `Open3DBroadcastWebRTC` add-on plugin from the support site, linked from the Fab listing (WP-F11). The codec-free rebuild continues in parallel. MoQ ships in v1 as Experimental with Fab-ready licences. The whole plugin is marked Beta for v1. Counsel questions L1 to L5 are open.
 
 **D3: How the core library reaches the plugin.** Today `Sync-O3DSCore.ps1` builds a `.lib` that is gitignored, and the headers only install for one configuration (FAB-6, CORE-20, CORE-21).
 - **Options:**
@@ -136,7 +138,8 @@ Several WPs depend on these decisions. Each gets an ADR. The design agent should
 - **Recommendation:** (a). It removes the prebuilt-lib provenance question and builds for every platform, and it makes D1(b) possible later.
 - This decision also resolves roadmap §0.2 (core duplication, issue #203).
 - **Consequence to plan for:** core code compiled under UE's warning levels and MSVC settings. See CORE-20 (68 `-Wall -Wextra` warnings today).
-- **ADR:** [docs/adr/0003-core-library-delivery-to-plugin.md](../adr/0003-core-library-delivery-to-plugin.md) (Proposed)
+- **ADR:** [docs/adr/0003-core-library-delivery-to-plugin.md](../adr/0003-core-library-delivery-to-plugin.md) (Accepted)
+- **Decision:** compile the used `src/o3ds` subset as an `Open3DStreamCore` UE module, mirrored from `src/o3ds` by a Python 3 sync script with a CI drift check; add an `O3DS_API` export macro to the core. NNG and Opus stay prebuilt for v1.
 
 **D4: Transport abstraction home and shape** (feeds WP-A1).
 - Move `IOpen3DSender`, `IOpen3DReceiver` and a **single** registry into `Open3DShared`, or into a new `Open3DTransportCore` module.
@@ -191,7 +194,7 @@ M3  Architecture: WP-A1 (transport core) → WP-A2 (async sender) → WP-A3 (god
                           ▼
 M4  Usability & docs: WP-U1..U6, WP-D1..D4, WP-Q1 (cleanup batch)
                           ▼
-M5  Fab submission: WP-F10 (submission dry-run + listing)
+M5  Fab submission: WP-F10 (submission dry-run + listing); WP-F11 (WebRTC add-on) ships alongside
 ```
 
 - M1 and M2 run **in parallel**. They touch mostly different files (source versus Build.cs, uplugin, CI and ThirdParty). Where they overlap (Build.cs guards), WP-F2 goes first.
@@ -545,6 +548,31 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
 - Install into a clean UE 5.7 project from the zip, enable the plugin, open the sample map (WP-U5), and run the quick start (WP-D2).
 - File any gap as a new WP.
 
+#### WP-F11: WebRTC add-on plugin (`Open3DBroadcastWebRTC`)  ·  P1 · M · coding (after WP-F3 and WP-F1)
+- **Decision:** [ADR 0002](../adr/0002-webrtc-and-moq-in-first-fab-release.md), Decision §1 and Implementation outline step 7. Related findings (owned elsewhere): TRF-4, TRF-14, TRF-19, TRF-28, SHR-13, SHR-14, SHR-19, SHR-36, BUILD-1.
+- **Goal:** WebRTC reaches users as a separate plugin that installs next to the Fab-installed Open3DBroadcast, without editing the Fab install. The main plugin no longer contains the WebRTC module.
+- **Approach:**
+  - Create `ProjectSandbox/Plugins/Open3DBroadcastWebRTC/` with its own `.uplugin`: a plugin dependency on `Open3DBroadcast`, `PlatformAllowList: ["Win64"]` and `TargetDenyList: ["Server","Program"]` per ADR 0001, `IsBetaVersion: true`, and the same `EngineVersion`.
+  - Move `Source/Open3DTransportWebRTC/` into it with `git mv`, keeping the module name and history. Remove the module's entry from `Open3DBroadcast.uplugin`, and move WebRTC's licence files and notices with it.
+  - Fix the three blockers recorded in ADR 0002:
+    1. The DLL lookup must find the add-on's own plugin, not `FindPlugin(TEXT("Open3DBroadcast"))` (`Open3DTransportWebRTCModule.cpp:735`). Unify DLL loading at the same time (TRF-28).
+    2. Build.cs depends on the `Open3DStreamCore` module (ADR 0003) instead of plugin-root `ThirdParty` paths and the core library coming indirectly through Open3DSender (`Open3DTransportWebRTC.Build.cs:66-70`, BUILD-1). Alternatively, delete the legacy `Send(const O3DS::SubjectList&)` path (TRF-4, TRF-19) so no core dependency remains.
+    3. Unload safety: don't register factories if the DLL failed to load; drain live instances before `FreeDllHandle` (TRF-14). Rely on WP-A1's instance tracking (SHR-13) when it lands.
+  - Add a transport-interface version constant to the main plugin (the minimal form of SHR-14). The add-on checks it in `StartupModule`, and refuses to register with a clear log message on a mismatch.
+  - Move the WebRTC-only build flags and console variables out of `Open3DShared` into the add-on (SHR-19). Leave the LiveKit fields in `FO3DTransportConfig` until D6 and WP-A1 replace them (SHR-36).
+  - CI builds the add-on for each release against the matching Open3DBroadcast package and publishes it as a release asset for the support site. The Fab listing text links to the support-site download (with WP-F9).
+  - The WebRTC docs move with the add-on. The main USER_GUIDE says WebRTC is available as a free add-on and links to the download (with WP-D2).
+- **Acceptance:**
+  - `Open3DBroadcast` alone builds and packages with no WebRTC module or `livekit_ffi` files, and passes `check-no-video-codecs.sh`.
+  - In a clean UE 5.7 project, the Fab-style package plus the add-on in the project's `Plugins/` folder:
+    - lists WebRTC in the sender and receiver transport pickers;
+    - passes the WP-T2 conformance suite with both plugins enabled;
+    - keeps the main plugin working after the add-on is disabled and the editor restarted.
+  - An add-on built against a different interface version logs the mismatch and does not register or crash.
+  - The needs-verification items Q7 and Q8 in ADR 0002 are answered in the PR. They cover installing next to a Fab-installed plugin, and whether the Fab package ships the headers and import libraries a source build needs.
+- **Blocked on counsel:** publishing the add-on (and making the listing link live) before the codec-free `livekit_ffi` rebuild depends on L1 in ADR 0002. The code work does not wait for it.
+- **Depends on:** WP-F3, WP-F1 (`Open3DStreamCore`), WP-F2 (descriptor keys). It benefits from WP-S7 landing first.
+
 ### M3: Architecture
 
 #### WP-A1: Transport core consolidation  ·  P2 · L · design (D4) then coding (split into 5+ PRs)
@@ -747,7 +775,7 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
 | Core safety | coding A | WP-T1 → WP-S1 → WP-S2 |
 | Sender and receiver correctness | coding B | WP-T2 (after D10) → WP-S3 (after D7) → WP-S4 |
 | Transport safety | coding C | WP-S6 (TCP) → WP-S5 (after its design note) |
-| Build and Fab | coding D | WP-F0 (design) → WP-F8 (CI truth) → WP-F3 → WP-F4 → WP-F2 (after D1) → WP-F1 (after D3) |
+| Build and Fab | coding D | WP-F0 (design) → WP-F8 (CI truth) → WP-F3 → WP-F4 → WP-F2 (after D1) → WP-F1 (after D3) → WP-F11 |
 | Review | review | Reviews every PR against §7. Keeps the §8 coverage table current. |
 
 ---
@@ -800,6 +828,7 @@ Every finding ID in `docs/review/2026-09-plugin-review/` is assigned to exactly 
 | WP-F7 | FAB-7, SND-34, TRB-45, TRB-46, SND-35 |
 | WP-F8 | CI-1, CI-2, CI-3, CI-4, CI-5, CI-6, CI-8, CI-9 |
 | WP-F9 | FAB-12, FAB-13, FAB-14, UX-5 |
+| WP-F11 | (no owned findings; implements ADR 0002, see its related findings) |
 | WP-A1 | SHR-9, SHR-12, SHR-13, SHR-14, SHR-16, SHR-24, SHR-35, SHR-36, SND-23, RCV-27, RCV-28, TRB-26, TRB-27, TRB-38, TRF-32, TRF-38 |
 | WP-A2 | SND-8, SND-9, SND-12, SND-17, SND-18, SND-29, CORE-7, CORE-18, TRB-20 |
 | WP-A3 | SND-22, RCV-29, SHR-38, RCV-11, RCV-12, RCV-13 |
