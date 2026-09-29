@@ -207,14 +207,16 @@ namespace o3ds_fuzz
 		}
 
 		// One fuzz_udp_reassembly record per datagram: the real 16-byte
-		// fragment header plus lenMode 0 ("honest" payload length, bytes
-		// copied from CanonicalKeyframe() - see fuzz_udp_reassembly.cpp).
-		void AppendUdpRecord(Bytes& out, uint32_t id, uint32_t seq, uint32_t bufSz, uint32_t fragSize)
+		// fragment header, lenMode 0 ("honest" payload length, bytes copied
+		// from CanonicalKeyframe()) and the control byte (sender and clock
+		// step) - see fuzz_udp_reassembly.cpp.
+		void AppendUdpRecord(Bytes& out, uint32_t id, uint32_t seq, uint32_t bufSz, uint32_t fragSize, uint8_t ctl = 0)
 		{
 			const uint32_t header[4] = { id, seq, bufSz, fragSize };
 			const uint8_t* p = reinterpret_cast<const uint8_t*>(header);
 			out.insert(out.end(), p, p + sizeof(header));
 			out.push_back(0);
+			out.push_back(ctl);
 		}
 
 		std::vector<Bytes> UdpSeeds()
@@ -248,6 +250,24 @@ namespace o3ds_fuzz
 			Bytes single;
 			AppendUdpRecord(single, 5, 0, bufSz, bufSz);
 			seeds.push_back(single);
+
+			// The same message id from two senders at once (ctl bits 0-1).
+			Bytes twoSources;
+			for (uint32_t s = 0; s < frames; ++s)
+			{
+				AppendUdpRecord(twoSources, 6, s, bufSz, fragSize, 0);
+				AppendUdpRecord(twoSources, 6, s, bufSz, fragSize, 1);
+			}
+			seeds.push_back(twoSources);
+
+			// A message whose middle fragment arrives after the 100 ms
+			// timeout (ctl bits 2-7: 63 * 4 = 252 ms clock step), then a
+			// complete retransmission under a new id.
+			Bytes expired;
+			for (uint32_t s = 0; s < frames; ++s)
+				AppendUdpRecord(expired, 7, s, bufSz, fragSize, s == frames / 2 ? (uint8_t)(63 << 2) : 0);
+			for (uint32_t s = 0; s < frames; ++s) AppendUdpRecord(expired, 8, s, bufSz, fragSize);
+			seeds.push_back(expired);
 
 			return seeds;
 		}
