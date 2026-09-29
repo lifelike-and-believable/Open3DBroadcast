@@ -52,7 +52,8 @@ namespace O3DS
 		uint64_t tx_wallclock_us = 0; //!< SubjectList.tx_wallclock_us
 		uint32_t frame_epoch = 0;     //!< SubjectList.frame_epoch
 		double time = 0.0;            //!< SubjectList.time, the sender's content clock
-		uint64_t stream_key = 0;      //!< see StreamKeyForNames()
+		uint64_t stream_key = 0;      //!< StreamKeyForNames(subject_names)
+		std::vector<std::string> subject_names; //!< named subjects and updates, in wire order
 	};
 
 	//! Reads PacketMeta from a framed wire buffer (8-byte flags and CRC
@@ -64,15 +65,9 @@ namespace O3DS
 	//! rejected.
 	bool PeekPacketMeta(const char* data, size_t len, PacketMeta& out);
 
-	//! Identifies the sender stream a packet belongs to when several
-	//! senders share one channel. The wire has no sender id, so the key is
-	//! a 64-bit FNV-1a hash of the sorted, de-duplicated subject names the
-	//! packet carries (full subjects and updates together). Senders on one
-	//! channel must already use distinct subject names, or LiveLink could
-	//! not tell their subjects apart. A sender that sends a stable set of
-	//! subjects keeps one key across restarts, so ReorderGate's
-	//! frame_epoch handling still sees the restart. A packet with no named
-	//! subjects gets key 0.
+	//! A 64-bit FNV-1a hash of the sorted, de-duplicated subject names, used
+	//! as the key of a new sender stream (see ReceiverStreamTable::
+	//! ResolveKey). Returns 0 for no names, and never 0 otherwise.
 	uint64_t StreamKeyForNames(std::vector<std::string> names);
 
 	//! 64-bit FNV-1a over the transform count and, per transform, its
@@ -134,8 +129,20 @@ namespace O3DS
 		double lastSeenS = 0.0;
 	};
 
-	//! Owns one ReceiverStream per stream key, bounded in number. Not
+	//! Owns one ReceiverStream per sender stream, bounded in number. Not
 	//! thread-safe; confine it to one thread, like ReorderGate.
+	//!
+	//! The wire has no sender id, so a packet is assigned to a stream by
+	//! the subject names it carries. Senders sharing one channel must
+	//! already use distinct subject names, or LiveLink could not tell their
+	//! subjects apart. A packet joins the stream that already owns one of
+	//! its subjects (first match in wire order); otherwise it starts a new
+	//! stream keyed by StreamKeyForNames(). A sender that adds or drops a
+	//! subject therefore stays on one stream, and one that restarts keeps
+	//! its stream, so ReorderGate's frame_epoch handling still sees the
+	//! restart. Limitation: a sender that splits its subjects over separate
+	//! packets that share one tx_seq counter would look like several streams
+	//! with gaps; no current sender does that.
 	class ReceiverStreamTable
 	{
 	public:
@@ -145,12 +152,19 @@ namespace O3DS
 		//! SubjectList::mComputeWorldMatrices.
 		explicit ReceiverStreamTable(size_t maxStreams = kDefaultMaxStreams, bool computeWorldMatrices = true);
 
+		//! The key of the stream a packet with these subject names belongs
+		//! to: the stream owning the first already-known name, otherwise
+		//! StreamKeyForNames(subjectNames).
+		uint64_t ResolveKey(const std::vector<std::string>& subjectNames) const;
+
 		//! Returns the stream for `key`, creating it if needed, and marks it
-		//! seen at `nowS`. When the table is full, the least recently seen
-		//! stream is dropped first, so hostile input cannot grow it without
-		//! bound. A reference stays valid until that stream is dropped by
-		//! Acquire(), PruneIdle() or Clear().
-		ReceiverStream& Acquire(uint64_t key, double nowS);
+		//! seen at `nowS`. `subjectNames`, when given, become owned by this
+		//! stream (names already owned by another stream are left there).
+		//! When the table is full, the least recently seen stream is dropped
+		//! first, so hostile input cannot grow it without bound; the number
+		//! of owned names is bounded the same way. A reference stays valid
+		//! until that stream is dropped by Acquire(), PruneIdle() or Clear().
+		ReceiverStream& Acquire(uint64_t key, double nowS, const std::vector<std::string>* subjectNames = nullptr);
 
 		//! Returns the stream for `key`, or nullptr. Does not mark it seen.
 		ReceiverStream* Find(uint64_t key);
@@ -159,7 +173,7 @@ namespace O3DS
 		//! many were dropped.
 		size_t PruneIdle(double nowS, double idleSeconds);
 
-		void Clear() { mStreams.clear(); }
+		void Clear() { mStreams.clear(); mSubjectOwner.clear(); }
 		size_t Size() const { return mStreams.size(); }
 
 		//! Visits every stream in key order. `fn` must not add or remove
@@ -167,9 +181,12 @@ namespace O3DS
 		void ForEach(const std::function<void(uint64_t key, ReceiverStream& stream)>& fn);
 
 	private:
+		void Erase(std::map<uint64_t, std::unique_ptr<ReceiverStream>>::iterator it);
+
 		size_t mMaxStreams;
 		bool mComputeWorldMatrices;
 		std::map<uint64_t, std::unique_ptr<ReceiverStream>> mStreams;
+		std::map<std::string, uint64_t> mSubjectOwner; // subject name -> owning stream key
 	};
 }
 

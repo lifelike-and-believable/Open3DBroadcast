@@ -166,8 +166,8 @@ namespace
 				++parseFailures;
 				return;
 			}
-			ReceiverStream& stream = streams.Acquire(meta.stream_key, nowS);
-			const uint64_t key = meta.stream_key;
+			const uint64_t key = streams.ResolveKey(meta.subject_names);
+			ReceiverStream& stream = streams.Acquire(key, nowS, &meta.subject_names);
 			if (meta.tx_seq == 0)
 			{
 				if (stream.legacy.Check(meta.time, nowS, LegacyOrderingConfig()) != LegacyOrdering::Decision::Apply)
@@ -531,6 +531,41 @@ O3DS_TEST(ReceiverReplay_FullDescriptorFromOneSenderKeepsTheOtherSendersSubjects
 	O3DS_CHECK(std::abs(bob->mTransforms[1]->translation.value.v[0] - 7.0) < 1e-6);
 }
 
+O3DS_TEST(ReceiverReplay_SenderThatAddsAndDropsSubjectsStaysOnOneStream)
+{
+	// A multi-subject sender streams {A, B}, then adds C with a full sync,
+	// then drops B and continues with deltas. All of it is one stream, so
+	// the deltas after the drop still find A and C.
+	SubjectList ab;
+	BuildChain(ab, "A", { "Hips", "Spine" });
+	BuildChain(ab, "B", { "Hips", "Spine" });
+	SubjectList abc;
+	BuildChain(abc, "A", { "Hips", "Spine" });
+	BuildChain(abc, "B", { "Hips", "Spine" });
+	BuildChain(abc, "C", { "Hips", "Spine" });
+	SubjectList ac;
+	BuildChain(ac, "A", { "Hips", "Spine" });
+	BuildChain(ac, "C", { "Hips", "Spine" });
+
+	std::vector<std::vector<char>> packets;
+	packets.push_back(SerializeFull(ab, 1.0, 1, 9));
+	packets.push_back(SerializeFull(abc, 1.1, 2, 9));
+	ac.findSubject("C")->mTransforms[1]->translation.value = Vector3d(3.0, 0.0, 0.0);
+	packets.push_back(SerializeDelta(ac, 1.2, 3, 9));
+
+	CoreReceiver receiver;
+	for (Frame& frame : RecordAndReplay(packets))
+		receiver.Receive(std::move(frame));
+
+	O3DS_CHECK_EQ(receiver.streams.Size(), (size_t)1);
+	O3DS_CHECK_EQ(receiver.pushedSubjects.size(), (size_t)7); // 2 + 3 + 2
+	O3DS_CHECK_EQ(receiver.pushedSubjects[5], std::string("A"));
+	O3DS_CHECK_EQ(receiver.pushedSubjects[6], std::string("C"));
+	ReceiverStream* stream = receiver.streams.Find(StreamKeyForNames({ "A", "B" }));
+	O3DS_CHECK(stream != nullptr);
+	O3DS_CHECK(std::abs(stream->subjects.findSubject("C")->mTransforms[1]->translation.value.v[0] - 3.0) < 1e-6);
+}
+
 // ---------------------------------------------------------------------------
 // ReceiverStreamTable bounds
 // ---------------------------------------------------------------------------
@@ -546,6 +581,33 @@ O3DS_TEST(ReceiverStreamTable_EvictsLeastRecentlySeenWhenFull)
 	O3DS_CHECK(table.Find(1) != nullptr);
 	O3DS_CHECK(table.Find(2) == nullptr);
 	O3DS_CHECK(table.Find(3) != nullptr);
+}
+
+O3DS_TEST(ReceiverStreamTable_ResolveKeyFollowsOwnedNamesAndForgetsDroppedStreams)
+{
+	ReceiverStreamTable table(2);
+	const std::vector<std::string> alice = { "Alice" };
+	const std::vector<std::string> bob = { "Bob" };
+	const uint64_t keyA = table.ResolveKey(alice);
+	O3DS_CHECK_EQ(keyA, StreamKeyForNames(alice));
+	table.Acquire(keyA, 1.0, &alice);
+
+	// A packet naming a new subject first and a known one second joins the
+	// known one's stream.
+	O3DS_CHECK_EQ(table.ResolveKey({ "Carol", "Alice" }), keyA);
+
+	const uint64_t keyB = table.ResolveKey(bob);
+	O3DS_CHECK(keyB != keyA);
+	table.Acquire(keyB, 2.0, &bob);
+
+	// A third stream evicts Alice's (least recently seen) and her name with it.
+	const std::vector<std::string> dave = { "Dave" };
+	table.Acquire(table.ResolveKey(dave), 3.0, &dave);
+	O3DS_CHECK(table.Find(keyA) == nullptr);
+	O3DS_CHECK_EQ(table.ResolveKey({ "Carol", "Alice" }), StreamKeyForNames({ "Carol", "Alice" }));
+
+	O3DS_CHECK_EQ(table.PruneIdle(10.0, 5.0), (size_t)2);
+	O3DS_CHECK_EQ(table.ResolveKey(bob), StreamKeyForNames(bob));
 }
 
 O3DS_TEST(ReceiverStreamTable_PruneIdleAndWorldMatrixFlag)
@@ -576,6 +638,8 @@ O3DS_TEST(PeekPacketMeta_RejectsBadInputAndReadsFields)
 	O3DS_CHECK_EQ(meta.frame_epoch, (uint32_t)42);
 	O3DS_CHECK(meta.time == 2.5);
 	O3DS_CHECK_EQ(meta.stream_key, StreamKeyForNames({ "Alice" }));
+	O3DS_CHECK_EQ(meta.subject_names.size(), (size_t)1);
+	O3DS_CHECK_EQ(meta.subject_names[0], std::string("Alice"));
 
 	// Non-finite content time is rejected before any ordering decision.
 	std::vector<char> nanBuf = SerializeFull(sender, std::nan(""), 8, 42);

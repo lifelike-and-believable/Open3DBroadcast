@@ -27,6 +27,7 @@ SOFTWARE.
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 
 namespace O3DS
 {
@@ -106,7 +107,8 @@ namespace O3DS
 		out.tx_wallclock_us = root->tx_wallclock_us();
 		out.frame_epoch = root->frame_epoch();
 		out.time = root->time();
-		out.stream_key = StreamKeyForNames(std::move(names));
+		out.stream_key = StreamKeyForNames(names);
+		out.subject_names = std::move(names);
 		return true;
 	}
 
@@ -193,32 +195,69 @@ namespace O3DS
 	{
 	}
 
-	ReceiverStream& ReceiverStreamTable::Acquire(uint64_t key, double nowS)
+	uint64_t ReceiverStreamTable::ResolveKey(const std::vector<std::string>& subjectNames) const
+	{
+		for (const std::string& name : subjectNames)
+		{
+			auto owner = mSubjectOwner.find(name);
+			if (owner != mSubjectOwner.end())
+				return owner->second;
+		}
+		return StreamKeyForNames(subjectNames);
+	}
+
+	ReceiverStream& ReceiverStreamTable::Acquire(uint64_t key, double nowS, const std::vector<std::string>* subjectNames)
 	{
 		auto found = mStreams.find(key);
-		if (found != mStreams.end())
+		if (found == mStreams.end())
 		{
-			found->second->lastSeenS = nowS;
-			return *found->second;
-		}
-
-		if (mStreams.size() >= mMaxStreams)
-		{
-			auto oldest = mStreams.begin();
-			for (auto it = mStreams.begin(); it != mStreams.end(); ++it)
+			if (mStreams.size() >= mMaxStreams)
 			{
-				if (it->second->lastSeenS < oldest->second->lastSeenS)
-					oldest = it;
+				auto oldest = mStreams.begin();
+				for (auto it = mStreams.begin(); it != mStreams.end(); ++it)
+				{
+					if (it->second->lastSeenS < oldest->second->lastSeenS)
+						oldest = it;
+				}
+				Erase(oldest);
 			}
-			mStreams.erase(oldest);
+
+			std::unique_ptr<ReceiverStream> stream(new ReceiverStream());
+			stream->subjects.mComputeWorldMatrices = mComputeWorldMatrices;
+			found = mStreams.emplace(key, std::move(stream)).first;
 		}
 
-		std::unique_ptr<ReceiverStream> stream(new ReceiverStream());
-		stream->subjects.mComputeWorldMatrices = mComputeWorldMatrices;
-		stream->lastSeenS = nowS;
-		ReceiverStream& ref = *stream;
-		mStreams.emplace(key, std::move(stream));
-		return ref;
+		found->second->lastSeenS = nowS;
+
+		if (subjectNames != nullptr)
+		{
+			// Bounded like the streams themselves: at most kMaxSubjects names
+			// per stream slot.
+			const size_t maxOwned = mMaxStreams * ParseLimits::kMaxSubjects;
+			for (const std::string& name : *subjectNames)
+			{
+				if (mSubjectOwner.find(name) != mSubjectOwner.end())
+					continue;
+				if (mSubjectOwner.size() >= maxOwned)
+					break;
+				mSubjectOwner.emplace(name, key);
+			}
+		}
+
+		return *found->second;
+	}
+
+	void ReceiverStreamTable::Erase(std::map<uint64_t, std::unique_ptr<ReceiverStream>>::iterator it)
+	{
+		const uint64_t key = it->first;
+		for (auto owner = mSubjectOwner.begin(); owner != mSubjectOwner.end();)
+		{
+			if (owner->second == key)
+				owner = mSubjectOwner.erase(owner);
+			else
+				++owner;
+		}
+		mStreams.erase(it);
 	}
 
 	ReceiverStream* ReceiverStreamTable::Find(uint64_t key)
@@ -234,7 +273,9 @@ namespace O3DS
 		{
 			if ((nowS - it->second->lastSeenS) > idleSeconds)
 			{
-				it = mStreams.erase(it);
+				auto next = std::next(it);
+				Erase(it);
+				it = next;
 				++removed;
 			}
 			else
