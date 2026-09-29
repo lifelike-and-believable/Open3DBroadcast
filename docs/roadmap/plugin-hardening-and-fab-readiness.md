@@ -150,8 +150,12 @@ Several WPs depend on these decisions. Each gets an ADR. The design agent should
   - **Interface version:** one integer.
   - **Typed secret and option handling:** see D6.
 - **Findings:** SHR-12/13/14/16/24/36/38, SND-23, RCV-28, TRB-38, TRF-32.
+- **ADR:** [docs/adr/0007-transport-abstraction-and-registry.md](../adr/0007-transport-abstraction-and-registry.md) (Accepted)
+- **Decision:** interfaces and one thread-safe registry move into `Open3DShared`; each transport registers one immutable descriptor (factories, capabilities including delivery guarantee and new-peer signal, typed option schema with secret keys); lookups return shared pointers; live instances are tracked and drained before unload; result type plus per-frame enum; exported `GetHostApiVersion()` for the WebRTC add-on; queue, worker, demux, audio-sink guard (redesigned so no lock is held across encode or send), host:port parsing, backoff and DLL loader written once; forwarding shims for one release; one transport per PR.
 
 **D5: Sender pipeline threading** (feeds WP-A2). The game thread samples into a pooled immutable frame. A per-sender worker (a `UE::Tasks` pipe or an `FRunnable` with an SPSC queue) owns the serializer and calls `SendSerialized`. The queue is bounded and drops the oldest frame when full. Decide the ownership of serializer state and how descriptor and keyframe requests reach the worker (see SND-1). **Findings:** SND-8, SND-9, SND-12, TRF-7.
+- **ADR:** [docs/adr/0008-sender-pipeline-threading.md](../adr/0008-sender-pipeline-threading.md) (Accepted)
+- **Decision:** the game thread samples into a pooled immutable frame (depth-2 queue, drop oldest); a per-sender `UE::Tasks` pipe owns curve filtering, serializer, `StreamWriter`, CRC and `SendSerialized` and never touches UObjects; capture ticks in `TG_PostUpdateWork` with the mesh as prerequisite; `FPlatformTime` is the shared clock; audio keeps its own path; StopCapture discards without waiting.
 
 **D6: Credentials model** (feeds WP-S9).
 - Secret option keys are declared by each transport customization.
@@ -175,8 +179,12 @@ Several WPs depend on these decisions. Each gets an ADR. The design agent should
 - **Decision:** a core `StreamWriter` stamps `tx_seq`, `tx_wallclock_us` and `frame_epoch` on every frame; the descriptor travels with pose frames; full syncs on start, rename, descriptor change, new peer and every 1.0 s; both ends re-anchor quantization at each full sync; new append-only `SubjectUpdate.ref_seq`; residual only on transports reporting reliable ordered delivery; scale sent in updates; no receiver keyframe request in v1.
 
 **D8: Protocol versioning.** Add a FlatBuffers `file_identifier` and a wire protocol version. Bump `O3DS_VERSION_TAG`. Old readers must reject residual and quantized payloads rather than misapply them. Fix the endianness of the unified and audio headers. Start using `CHANGELOG.md` (with the "Schema/Protocol" section required by the repo rules). **Findings:** CORE-16, SHR-7, SHR-30, DOC-8.
+- **ADR:** [docs/adr/0009-protocol-versioning.md](../adr/0009-protocol-versioning.md) (Accepted)
+- **Decision:** the frame header's first word becomes the minimum reader version (plain frames stay 1, residual and quantized frames use 2, so pre-D8 readers drop them); add `protocol_version` and `file_identifier "O3DS"` (checked on version-2 frames); all wire data little-endian including PCM; audio envelope v2 (`O3DU`, with sequence number); UDP fragment magic and version (`O3DF`); defined clock domains; length-prefixed name hash; protocol 2 and `O3DS_VERSION_TAG` 1.1.0; one root `CHANGELOG.md`; old/new compatibility test matrix.
 
 **D9: Editor module split.** Create an `Open3DBroadcastEditor` module (Type `Editor`), or one Editor module per side. Move all `IDetailCustomization`, Slate panels and PropertyEditor dependencies there. Transport modules register their editor panels through a small registration interface in that module. **Findings:** FAB-7, SND-34, TRB-45, TRB-46.
+- **ADR:** [docs/adr/0010-editor-module-split.md](../adr/0010-editor-module-split.md) (Accepted)
+- **Decision:** one `Open3DBroadcastEditor` module (Type Editor, `PostEngineInit`, Win64) that ships on Fab; runtime transports register only data (the ADR 0007 option schema) and the editor module builds generic, undoable panels from it; per-transport editor modules only as an opt-in escape hatch; the LiveLink source factory stays in Receiver and asks the editor module for its panel; TRB-45/SND-35 fixes implemented once; `o3d.ProfileGuide` deleted.
 
 **D10: Test module layout.** Create a dedicated test module (for example `Open3DBroadcastTests`, Type `DeveloperTool` or `UncookedOnly`) so tests don't ship in Runtime modules or invert layering. Also define a fake-FFI and fake-socket seam for the transports. **Findings:** SHR-4, UX-4, TRF-34, TRB-47.
 - **ADR:** [docs/adr/0006-test-module-layout-and-fakes.md](../adr/0006-test-module-layout-and-fakes.md) (Accepted)

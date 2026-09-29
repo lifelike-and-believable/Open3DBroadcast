@@ -14,6 +14,10 @@ ADRs are written by the design agent (see [`docs/roadmap/plugin-hardening-and-fa
 | [0004](0004-credentials-and-secret-transport-options.md) | Credentials and secret transport options | D6 | Accepted |
 | [0005](0005-wire-resync-and-loss-contract.md) | Wire-coding resync and loss contract | D7 | Accepted |
 | [0006](0006-test-module-layout-and-fakes.md) | Test module layout and fakes | D10 | Accepted |
+| [0007](0007-transport-abstraction-and-registry.md) | Transport abstraction, registry and shared transport building blocks | D4 | Accepted |
+| [0008](0008-sender-pipeline-threading.md) | Sender pipeline threading | D5 | Accepted |
+| [0009](0009-protocol-versioning.md) | Protocol versioning, byte order and wire compatibility | D8 | Accepted |
+| [0010](0010-editor-module-split.md) | Editor module split | D9 | Accepted |
 
 ## Conventions
 
