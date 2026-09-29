@@ -5,30 +5,44 @@
 #include "CoreMinimal.h"
 #include "O3DSenderAudioSinkBase.h"
 #include "O3DAudioFrameCodec.h"
+#include "O3DEncodedPayloadQueue.h"
 
-class FO3DMoQSender;
+#include <atomic>
+
+/**
+ * Publish state shared between FO3DMoQSender, its worker and its audio sinks
+ * (ADR 0007 addendum, WP-S5: TRF-1, TRF-10). Holds no sender pointer and no FFI handle.
+ */
+struct FMoQSenderAudioState
+{
+	TSharedRef<FO3DLifetimeGate, ESPMode::ThreadSafe> Gate = MakeShared<FO3DLifetimeGate, ESPMode::ThreadSafe>();
+	/** Serialized audio frames for the worker. Its wake event is also the worker's wake event. */
+	FO3DEncodedPayloadQueue AudioQueue{1024 * 1024};
+	FO3DAudioSubjectSlot LastSubject;
+	std::atomic<int64> AudioDropped{0};
+};
 
 /**
  * Audio sink implementation for MoQ sender.
- * 
- * Follows the NNG pattern: captures PCM audio, encodes to PCM16 or Opus,
- * and publishes via a dedicated audio MoQ track.
- * 
+ *
+ * Captures PCM audio, encodes to PCM16 or Opus with its own per-label encoders, and hands
+ * the serialized frame to the sender's worker, which publishes it on the audio MoQ track.
+ *
  * Threading:
  * - SubmitPcm() may be called from any thread (typically the audio capture thread)
- * - Internal encoder state is protected as needed
- * - Publishes audio through the owning sender's publish mechanism
+ * - It never references the sender; after the sender's Stop() it returns false
  */
-class FO3DMoQSenderAudioSink final : public FO3DSenderAudioSinkBase
+class FO3DMoQSenderAudioSink final : public FO3DGatedSenderAudioSink
 {
 public:
 	/**
-	 * Create an audio sink bound to a MoQ sender.
-	 * 
-	 * @param InOwner The owning sender instance (must outlive this sink)
+	 * Create an audio sink bound to a MoQ sender's shared audio state.
+	 *
+	 * @param InState Shared publish state (the sink keeps it alive; it holds no sender reference)
 	 * @param InAudioConfig Audio configuration (sample rate, channels, codec, etc.)
+	 * @param InEncoderSettings Immutable snapshot for this sink's encoders
 	 */
-	explicit FO3DMoQSenderAudioSink(FO3DMoQSender& InOwner, const FO3DTransportAudioConfig& InAudioConfig);
+	FO3DMoQSenderAudioSink(TSharedRef<FMoQSenderAudioState, ESPMode::ThreadSafe> InState, const FO3DTransportAudioConfig& InAudioConfig, FO3DSinkAudioEncoder::FSettings InEncoderSettings);
 
 	virtual ~FO3DMoQSenderAudioSink() = default;
 
@@ -48,7 +62,7 @@ protected:
 	 * @param TimestampSec Capture timestamp
 	 * @return true if audio was successfully published
 	 */
-	virtual bool OnSubmitPcmInternal(
+	virtual bool OnSubmitGated(
 		const FString& ResolvedStreamLabel,
 		const float* Interleaved,
 		int32 NumFrames,
@@ -57,5 +71,5 @@ protected:
 		double TimestampSec) override;
 
 private:
-	FO3DMoQSender& Owner;
+	TSharedRef<FMoQSenderAudioState, ESPMode::ThreadSafe> State;
 };

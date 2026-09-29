@@ -24,6 +24,22 @@ struct FMoQSubscriptionConfig
     TFunction<void(const TArray64<uint8>&)> OnData;
 };
 
+class FMoQSessionWrapper;
+
+/**
+ * State reachable from the moq_connect callback (WP-S5, TRF-12). The FFI receives an opaque
+ * token that resolves to this context, never the wrapper's address. It holds atomics and a
+ * weak wrapper reference only, so a Tokio thread can drop the last reference safely; the
+ * wrapper itself is only ever pinned on the game thread.
+ */
+struct FMoQConnectionContext
+{
+    TAtomic<MoqConnectionState> CurrentState{MOQ_STATE_DISCONNECTED};
+    TAtomic<bool> bExpectingDisconnect{false};
+    /** Set on the game thread in Initialize() before any connect; not changed afterwards. */
+    TWeakPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> Wrapper;
+};
+
 class FMoQSessionWrapper : public TSharedFromThis<FMoQSessionWrapper, ESPMode::ThreadSafe>
 {
 public:
@@ -50,15 +66,27 @@ public:
     void Unsubscribe(const TSharedPtr<FMoQSubscriberHandle>& SubscriberHandle);
 
 private:
+    /** Reached from moq_subscribe callbacks through an opaque token (TRF-12). */
     struct FSubscriberBinding
     {
         TFunction<void(const TArray64<uint8>&)> DataHandler;
     };
 
+    struct FSubscriberEntry
+    {
+        TSharedPtr<FSubscriberBinding, ESPMode::ThreadSafe> Binding;
+        void* Token = nullptr;
+    };
+
     static void HandleConnectionStateThunk(void* UserData, MoqConnectionState State);
+    /** Records the state and queues the delegate broadcast on the game thread. Returns false if no wrapper is bound. */
+    static bool RecordConnectionState(FMoQConnectionContext& Context, MoqConnectionState State);
     void HandleConnectionStateInternal(MoqConnectionState State);
 
     static void HandleSubscriberDataThunk(void* UserData, const uint8_t* Data, size_t DataLen);
+#if WITH_DEV_AUTOMATION_TESTS
+    static void InvokeSubscriberThunkForTest(const TFunction<void(const TArray64<uint8>&)>& Callback, const TArray64<uint8>& Payload);
+#endif
 
     bool ValidateInitialized(FString& OutReason) const;
     FMoQResult EnsureClientAvailable();
@@ -67,13 +95,15 @@ private:
     FMoQSessionHandle SessionHandle;
     FString RelayUrl;
     FThreadSafeBool bInitialized = false;
-    TAtomic<MoqConnectionState> CurrentState;
-    TAtomic<bool> bExpectingDisconnect{false};
+
+    TSharedRef<FMoQConnectionContext, ESPMode::ThreadSafe> ConnectionContext;
+    /** Opaque moq_connect user data; resolves to ConnectionContext until the destructor. */
+    void* ConnectionToken = nullptr;
 
     TSet<FString> AnnouncedNamespaces;
     mutable FCriticalSection NamespaceMutex;
 
-    TMap<MoqSubscriber*, TUniquePtr<FSubscriberBinding>> SubscriberBindings;
+    TMap<MoqSubscriber*, FSubscriberEntry> SubscriberBindings;
     mutable FCriticalSection SubscriberMutex;
 
     FMoQConnectionStateDelegate ConnectionStateDelegate;
@@ -94,10 +124,25 @@ public:
 
     static void InvokeSubscriberCallback(const TFunction<void(const TArray64<uint8>&)>& Callback, const TArray64<uint8>& Payload)
     {
-        FMoQSessionWrapper::FSubscriberBinding Binding;
-        Binding.DataHandler = Callback;
+        FMoQSessionWrapper::InvokeSubscriberThunkForTest(Callback, Payload);
+    }
+
+    /** Fires the raw FFI subscriber thunk with an arbitrary user_data value (a stale or unknown token). */
+    static void InvokeSubscriberThunkWithToken(void* Token, const TArray64<uint8>& Payload)
+    {
         const uint8* DataPtr = Payload.Num() > 0 ? Payload.GetData() : nullptr;
-        FMoQSessionWrapper::HandleSubscriberDataThunk(&Binding, DataPtr, static_cast<size_t>(Payload.Num()));
+        FMoQSessionWrapper::HandleSubscriberDataThunk(Token, DataPtr, static_cast<size_t>(Payload.Num()));
+    }
+
+    /** Fires the raw FFI connection thunk with an arbitrary user_data value. */
+    static void InvokeConnectionThunkWithToken(void* Token, MoqConnectionState State)
+    {
+        FMoQSessionWrapper::HandleConnectionStateThunk(Token, State);
+    }
+
+    static void* GetConnectionToken(const FMoQSessionWrapper& Wrapper)
+    {
+        return Wrapper.ConnectionToken;
     }
 };
 #endif
