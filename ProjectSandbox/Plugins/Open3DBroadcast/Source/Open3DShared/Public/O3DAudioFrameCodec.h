@@ -98,6 +98,11 @@ namespace O3DAudio
 	public:
 		explicit FMultiStreamFrameDecoder(int32 InMaxStreams = 16);
 		~FMultiStreamFrameDecoder();
+		// Non-copyable: it owns stateful decoders. The explicit deletes also stop MSVC from
+		// instantiating a copy constructor for this exported class, which fails on the
+		// TMap of TUniquePtr (C2280).
+		FMultiStreamFrameDecoder(const FMultiStreamFrameDecoder&) = delete;
+		FMultiStreamFrameDecoder& operator=(const FMultiStreamFrameDecoder&) = delete;
 
 		bool Decode(O3DS::EUnifiedCodec Codec,
 			const O3DS::FAudioFrameMeta& Meta,
