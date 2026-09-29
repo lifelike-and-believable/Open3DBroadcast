@@ -18,6 +18,7 @@ add_executable(o3ds_core_tests
 	pose_predictor_tests.cpp
 	concealment_tests.cpp
 	udp_fragment_tests.cpp
+	udp_reassembly_hardening_tests.cpp
 	residual_codec_tests.cpp
 	model_residual_tests.cpp
 	channel_quant_tests.cpp

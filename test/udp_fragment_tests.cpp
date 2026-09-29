@@ -1,8 +1,8 @@
 // Acceptance tests for src/o3ds/udp_fragment.h's UdpCombiner reassembly,
 // covering the short-final-fragment hardening fix (a malformed last fragment
 // must not be accepted with fewer bytes than the reassembled buffer expects -
-// UdpCombiner's mBuffer is malloc'd, not zeroed, so accepting it would let
-// isComplete()/getFrame() hand back uninitialized memory to the caller).
+// accepting it would let isComplete()/getFrame() hand back bytes that no
+// fragment ever wrote).
 #include "test_framework.h"
 
 #include "o3ds/udp_fragment.h"
@@ -12,15 +12,14 @@
 
 namespace
 {
-	// Builds a valid, well-formed fragment for a given (id, seq, bufSz,
-	// fragSize, payload) using the same HEADERSIZE=16 layout addFragment()
-	// expects: four little/native-endian uint32_t's (id, seq, bufSz,
-	// fragSize) followed by the payload bytes.
+	// Builds a fragment for a given (id, seq, bufSz, fragSize, payload)
+	// using the 16-byte little-endian header addFragment() expects: four
+	// uint32's (id, seq, bufSz, fragSize) followed by the payload bytes.
 	std::vector<char> MakeFragment(uint32_t id, uint32_t seq, uint32_t bufSz, uint32_t fragSize, const char* payload, size_t payloadLen)
 	{
-		std::vector<char> out;
-		uint32_t heading[4] = { id, seq, bufSz, fragSize };
-		out.insert(out.end(), (char*)heading, (char*)heading + 16);
+		std::vector<char> out(kUdpFragmentHeaderSize);
+		UdpFragmentHeader header = { id, seq, bufSz, fragSize };
+		writeUdpFragmentHeader(header, out.data());
 		out.insert(out.end(), payload, payload + payloadLen);
 		return out;
 	}
@@ -42,7 +41,7 @@ O3DS_TEST(UdpFragment_RoundTrip_ReassemblesExactly)
 
 	O3DS_CHECK(combiner.isComplete());
 	O3DS_CHECK_EQ(combiner.mBufferSize, msgLen);
-	O3DS_CHECK(memcmp(combiner.mBuffer, msg, msgLen) == 0);
+	O3DS_CHECK(memcmp(combiner.mBuffer.data(), msg, msgLen) == 0);
 }
 
 O3DS_TEST(UdpFragment_ShortFinalFragment_IsRejected)
@@ -75,7 +74,7 @@ O3DS_TEST(UdpFragment_ExactFinalFragment_IsAccepted)
 	O3DS_CHECK(combiner.addFragment(f1.data(), f1.size()));
 	O3DS_CHECK(combiner.addFragment(f2.data(), f2.size()));
 	O3DS_CHECK(combiner.isComplete());
-	O3DS_CHECK(memcmp(combiner.mBuffer, "0123456789abcdefghijklmno", 25) == 0);
+	O3DS_CHECK(memcmp(combiner.mBuffer.data(), "0123456789abcdefghijklmno", 25) == 0);
 }
 
 O3DS_TEST(UdpFragment_ShortNonFinalFragment_IsRejected)
