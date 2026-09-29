@@ -117,6 +117,7 @@ Several WPs depend on these decisions. Each gets an ADR. The design agent should
   - (b) Add Mac and Linux by building the core, NNG and Opus from source per platform.
 - **Recommendation:** (a) for v1, while the core stays portable (it already builds on Linux) so (b) remains a follow-up.
 - **Findings:** FAB-3, SND-11, RCV-30, TRB-41, TRF-27, SHR-21, FAB-8.
+- **ADR:** [docs/adr/0001-platform-scope-first-fab-release.md](../adr/0001-platform-scope-first-fab-release.md) (Proposed)
 
 **D2: WebRTC in the Fab SKU.**
 - **Options:**
@@ -126,6 +127,7 @@ Several WPs depend on these decisions. Each gets an ADR. The design agent should
 - **Recommendation:** (b) unblocks submission now; (a) proceeds in parallel.
 - **Also decide:** whether MoQ ships in v1. It is built on draft IETF protocols (FAB-12), so it should at least be marked Experimental.
 - **Findings:** FAB-1, FAB-11, FAB-12.
+- **ADR:** [docs/adr/0002-webrtc-and-moq-in-first-fab-release.md](../adr/0002-webrtc-and-moq-in-first-fab-release.md) (Proposed)
 
 **D3: How the core library reaches the plugin.** Today `Sync-O3DSCore.ps1` builds a `.lib` that is gitignored, and the headers only install for one configuration (FAB-6, CORE-20, CORE-21).
 - **Options:**
@@ -134,6 +136,7 @@ Several WPs depend on these decisions. Each gets an ADR. The design agent should
 - **Recommendation:** (a). It removes the prebuilt-lib provenance question and builds for every platform, and it makes D1(b) possible later.
 - This decision also resolves roadmap §0.2 (core duplication, issue #203).
 - **Consequence to plan for:** core code compiled under UE's warning levels and MSVC settings. See CORE-20 (68 `-Wall -Wextra` warnings today).
+- **ADR:** [docs/adr/0003-core-library-delivery-to-plugin.md](../adr/0003-core-library-delivery-to-plugin.md) (Proposed)
 
 **D4: Transport abstraction home and shape** (feeds WP-A1).
 - Move `IOpen3DSender`, `IOpen3DReceiver` and a **single** registry into `Open3DShared`, or into a new `Open3DTransportCore` module.
