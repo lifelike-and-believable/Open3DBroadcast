@@ -150,7 +150,10 @@ if(O3DS_WITH_WEBRTC)
     list(APPEND pub_headers o3ds/webrtc_connector.h)
 endif()	
 
-set(SOURCES 
+# Model, wire format and the pure-logic modules the UE plugin vendors.
+# Compiled with warnings enabled (CORE-20, see o3ds_enable_warnings in the
+# top-level CMakeLists.txt).
+set(CORE_SOURCES
 	o3ds/o3ds.cpp
 	o3ds/getTime.cpp
 	o3ds/sequencing.cpp
@@ -167,6 +170,16 @@ set(SOURCES
 	o3ds/predict/residual_codec.cpp
 	o3ds/quant/channel_quant.cpp
 	o3ds/model.cpp
+	o3ds/context.cpp
+	o3ds/math.cpp
+	o3ds/udp_fragment.cpp
+	o3ds/o3ds_version.cpp
+)
+
+# Legacy connectors and parsers the UE plugin doesn't use (CORE-27). Same
+# target for now; left at the default warning level until they move to
+# their own target.
+set(LEGACY_SOURCES
 	o3ds/base_connector.cpp
 	o3ds/nng_connector.cpp
 	o3ds/subscriber.cpp
@@ -179,22 +192,22 @@ set(SOURCES
 	o3ds/request.cpp
 	o3ds/pipeline.cpp
 	o3ds/async_pipeline.cpp
-	o3ds/context.cpp
-	o3ds/math.cpp
 	o3ds/tcp.cpp
-	o3ds/udp_fragment.cpp
 	o3ds/socket_exception.cpp
 	o3ds/socket_util.cpp
 	o3ds/udp.cpp
 	o3ds/socket_address.cpp
 	o3ds/binary_stream.cpp
-	o3ds/xsens_parser.cpp	
-	o3ds/o3ds_version.cpp	
+	o3ds/xsens_parser.cpp
 )
 
 if(O3DS_WITH_WEBRTC)
-    list(APPEND SOURCES o3ds/webrtc_connector.cpp)
+    list(APPEND LEGACY_SOURCES o3ds/webrtc_connector.cpp)
 endif()
+
+set(SOURCES ${CORE_SOURCES} ${LEGACY_SOURCES})
+
+set_source_files_properties(${CORE_SOURCES} PROPERTIES COMPILE_OPTIONS "${O3DS_WARNING_FLAGS}")
 	
 if(WIN32)
 set(xtralibs wsock32 ws2_32)
