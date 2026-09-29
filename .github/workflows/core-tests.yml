@@ -92,16 +92,10 @@ jobs:
       # WP-T1: deterministic fallback fuzz runners (test/fuzz,
       # fuzz_replay_main.cpp) - each fuzz target fed 20,000 fixed-seed
       # mutations of its seed corpus, under the same ASan/UBSan build.
-      # Expected to FAIL on develop until WP-S1 and WP-S2 merge: the parse
-      # and peek_meta runners hit CORE-1 (CalcMatrices matrix index in
-      # model.cpp) and udp_reassembly hits a use-after-free in
-      # UdpMapper::getFrame (and CORE-2 behind it). continue-on-error until
-      # then; make this step required (remove continue-on-error) once both
-      # have merged. A failing runner saves its input as
+      # A failing runner saves its input as
       # build/test/fuzz/o3ds-fuzz-crash-<target>.bin (uploaded below).
       - name: Run fallback fuzz runners (ctest -L fuzz)
         id: fuzz_fallback
-        continue-on-error: true
         working-directory: build
         run: ctest -L fuzz --output-on-failure
 
@@ -131,10 +125,6 @@ jobs:
     # so the clang-18 / libclang-rt-18-dev package names stay valid.
     name: Fuzz (Clang libFuzzer, 60 s per target)
     runs-on: ubuntu-24.04
-    # Expected to FAIL on develop until WP-S1 and WP-S2 merge (CORE-1 in
-    # the parse targets; the UdpMapper::getFrame use-after-free and CORE-2
-    # in udp_reassembly). Remove continue-on-error once both have merged.
-    continue-on-error: true
 
     steps:
       - name: Checkout

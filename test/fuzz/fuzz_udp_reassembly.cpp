@@ -48,7 +48,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
 {
 	const std::vector<char>& message = o3ds_fuzz::CanonicalKeyframe();
 
-	UdpMapper mapper;
+	// Smaller than the defaults so the per-message, in-flight and total-byte
+	// limits are all reachable within kMaxDatagrams records, and so each run
+	// doesn't zero-fill 4 MiB buffers. The limit logic is the same code
+	// whatever the numbers are.
+	UdpReassemblyConfig smallConfig;
+	smallConfig.maxMessageSize = 256 * 1024;
+	smallConfig.maxInFlightMessages = 4;
+	smallConfig.maxTotalBytes = 512 * 1024;
+	UdpMapper mapper(smallConfig);
 	const UdpReassemblyConfig& config = mapper.config();
 	UdpCombiner combiner(config.maxMessageSize);
 	uint64_t nowMs = 0;
