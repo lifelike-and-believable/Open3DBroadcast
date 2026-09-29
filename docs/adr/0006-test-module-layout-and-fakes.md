@@ -90,7 +90,7 @@
    - Prefix `Open3DBroadcast.<Area>.<Unit>.<Case>`. Area is one of `Core` (UE-compiled core round trips, ADR 0003), `Shared`, `Sender`, `Receiver`, `Transport.<Name>`, `Conformance.<Name>` or `Network.<Name>`.
    - Flags: pure-logic tests use the application-wide context and `EngineFilter`; world and editor tests use `EditorContext`. The UE 5.7 spelling of these flags (plain enum or `EAutomationTestFlags_ApplicationContextMask`) is **needs-verification** (Q4).
    - The filter everywhere is the plain prefix `Open3DBroadcast`, not `Open3DBroadcast.*` (CI-3).
-   - Fix the Gauntlet filter by **retiring** `Tests/Gauntlet/` and `Run-Gauntlet.ps1`. Nothing calls them, `Run-AutomationTests.ps1` covers the same ground, and whether `RunGauntlet -Config=` reads this JSON at all is unverified (Q5). The README and `copilot-instructions.md:34`, `:152` are updated.
+   - Fix the Gauntlet filter by **retiring** `Tests/Gauntlet/` and `Run-Gauntlet.ps1`. Nothing calls them, `Run-AutomationTests.ps1` covers the same ground,. The maintainer confirmed retirement (Q5). The README and `copilot-instructions.md:34`, `:152` are updated.
 6. **Network-dependent tests.** Tests that need the internet or an external server live under `Open3DBroadcast.Network.*`, are complex tests, and **register no instances unless `O3DB_NETWORK_TESTS=1`**. They are therefore absent from every default run and from the Session Frontend. Endpoints come only from env vars (`O3D_MOQ_RELAY_URL`, `O3DB_LIVEKIT_URL`); the hard-coded public relay default is removed (`MoQCloudflareRelayTests.cpp:30`). A missing endpoint with the flag set is a test failure, not a pass.
 7. **Core and UE split (core-first).**
    - **CTest (Linux, every PR; MSVC job per WP-T1):** parsers and fuzz targets, UDP reassembly, `ReorderGate`, `StreamWriter` and the ADR 0005 receiver state machine, residual and quantization loss and mid-join tests, capture and replay.
@@ -118,7 +118,7 @@
 - **Easier:** every M1 WP has a place for real tests and a fake to drive them; the WP-S5 lifetime races become reproducible with scripted FFI callbacks; the add-on proves compatibility with the same suite (WP-F11 acceptance).
 - **Harder:** transports route FFI calls through a table (a mechanical change to about 40 call sites), and some private helpers get a `Testing` header. The test module depends on every transport, so it builds last.
 - **Constrains:** new transports must ship a conformance profile (the `HasProfile` test enforces it). WP-A1's shared base classes keep the FFI-table injection point.
-- **RCV-2:** the intended behaviour must be decided before the test moves (Q6).
+- **RCV-2:** decided (Q6): `FinalizeAudioMeta` falls back to the stream label. The test is rewritten to assert that when it moves, and `LastObservedSubjectName` is deleted.
 
 ## Implementation outline
 
@@ -145,8 +145,8 @@
 2. **needs-verification:** can a module's `Internal/` headers be included by another module in the same plugin in UE 5.7? If yes, the `Public/Testing/` headers move there.
 3. **needs-verification:** can a test implement `ILiveLinkClient` in UE 5.7 (pure-virtual surface), or must receiver tests use the real client?
 4. **needs-verification:** the UE 5.7 spelling of `EAutomationTestFlags` context and filter values.
-5. **needs-verification:** does `RunUAT RunGauntlet -Config=<json name>` consume `Tests/Gauntlet/Open3DStreamTests.json` at all? If the maintainer wants Gauntlet kept, it needs a C# test node instead of retirement.
-6. **RCV-2:** should `FinalizeAudioMeta` fall back to the last observed subject name (restore the behaviour) or to the stream label (update the test and delete `LastObservedSubjectName`)? Recommendation: the stream label, because it matches the current code and the per-stream audio routing.
+5. ~~Keep or retire Gauntlet?~~ **Answered 2026-09-29:** retire it. `Tests/Gauntlet/` and `Build/Scripts/Run-Gauntlet.ps1` are deleted in WP-F8, and the docs that mention them are updated. Whether `RunGauntlet -Config=` reads the JSON no longer matters.
+6. ~~**RCV-2:** last observed subject name or stream label?~~ **Answered 2026-09-29:** the stream label. The test is updated to assert the stream-label fallback, and the unused `LastObservedSubjectName` field is deleted.
 7. Is a 15-minute test budget on the self-hosted runner acceptable for every non-draft PR push?
 
 ## References

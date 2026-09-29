@@ -185,7 +185,7 @@ Receiver, per subject within a stream (`frame_epoch`):
 
 ## Open questions for the maintainer
 
-1. Is 1.0 s the right default full-sync interval, and should it be exposed per transport (for example shorter on UDP)?
+1. ~~Is 1.0 s the right default full-sync interval, and should it vary per transport?~~ **Answered 2026-09-29:** 1.0 s is fine. It stays a single `FullSyncIntervalSeconds` property on the sender component (clamp 0.25 to 10 s), with no per-transport default.
 2. Accept that D1-era receivers break against new quantized senders, given D1 is unreleased and D8 will version it?
 3. **needs-verification (NNG docs):** does an NNG pub socket drop messages for slow subscribers, and are pair and push delivery ordered and reliable over TCP?
 4. **needs-FFI-verification (livekit_ffi):** is LiveKit's reliable data channel ordered, and does the FFI expose a participant-joined event for the new-peer trigger?
