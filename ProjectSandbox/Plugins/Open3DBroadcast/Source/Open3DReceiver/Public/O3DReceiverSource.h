@@ -58,6 +58,28 @@ private:
     class FSerializedConsumer;
     class FAudioSink;
 
+    /**
+     * Immutable audio metadata defaults, snapshotted on the game thread when the transport
+     * starts (WP-S5, RCV-1). The audio sink holds a copy instead of a back-reference to this
+     * source, so an FFI or network thread never reads source state or pins the source.
+     */
+    struct FAudioMetaDefaults
+    {
+        FGuid SourceGuid;
+        bool bEnableAudio = false;
+        FString StreamId;
+        int32 SampleRate = 0;
+        int32 NumChannels = 0;
+
+        /** Fill missing fields of Meta. Safe on any thread. */
+        void Apply(O3DS::FAudioFrameMeta& Meta) const;
+    };
+
+    FAudioMetaDefaults BuildAudioMetaDefaults() const;
+
+    /** Audio sink handed to the transport; holds a snapshot of the defaults above, never this source. */
+    TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> MakeAudioSink() const;
+
     // ArrivalEpochUsOverride == 0 means "capture the arrival time now" (the top-level
     // call from the serialized consumer); a nonzero value is used when re-invoking
     // after the transport-thread -> game-thread AsyncTask hop below, so the gated
