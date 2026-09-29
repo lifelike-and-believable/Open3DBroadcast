@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 
+#include "o3ds/sender_sync.h"
+
 #include <vector>
 
 class UO3DSenderComponent;
@@ -23,8 +25,8 @@ struct FO3DSSkeletonDescriptor;
 struct FO3DSPoseFrame;
 
 /**
- * Lightweight broadcaster-side serializer. Owns descriptor/curve caches per subject and surfaces both
- * raw SubjectList objects and serialized FlatBuffer payloads to downstream listeners.
+ * Lightweight broadcaster-side serializer. Owns per-subject encoding state and surfaces serialized
+ * FlatBuffer payloads to downstream listeners.
  */
 class OPEN3DSENDER_API FO3DSenderSerializer
 {
@@ -58,49 +60,65 @@ public:
 	/** Returns the number of cached subjects (primarily for diagnostics/tests). */
 	int32 GetCacheCount() const { return SubjectState.Num(); }
 
+	/**
+	 * Serialize one sampled frame and broadcast the bytes through OnSerializedFrame. Names, parents
+	 * and encoding settings come from the frame itself (FO3DSPoseFrame::Descriptor and ::Encoding,
+	 * ADR 0005 (i)), so this never reads the attached component. A frame whose descriptor is
+	 * missing, or whose bone count differs from the descriptor, is dropped with a rate-limited
+	 * warning and never padded. Called from the component's OnPoseFrameReady; public so tests can
+	 * drive it directly.
+	 */
+	void SerializePoseFrame(const FString& Subject, const FO3DSPoseFrame& Frame);
+
+	/** Per-subject counters (primarily for diagnostics/tests). */
+	struct FSubjectStats
+	{
+		uint64 FramesSerialized = 0;
+		uint64 FullSyncsSent = 0;
+		uint64 DroppedFrames = 0;
+	};
+	FSubjectStats GetSubjectStats(const FString& Subject) const;
+
 private:
-	void OnDescriptorReady(const FString& Subject, const struct FO3DSSkeletonDescriptor& Descriptor);
 	void OnPoseFrameReady(const FString& Subject, const struct FO3DSPoseFrame& Frame);
 
 	struct FSubjectCache
 	{
-		uint64 SkeletonHash = 0;
-		TArray<FName> BoneNames;
-		TArray<int32> ParentIndices;
-		TArray<FName> CurveNames;
-		TMap<FName, int32> CurveIndex;
-		bool bDescriptorSent = false;
+		/** Descriptor hash the persistent Subject's transforms were last built from. */
+		uint64 BuiltSkeletonHash = 0;
+		/** Full-sync policy for the residual and quantized encodings (ADR 0005 (ii)). */
+		O3DS::FullSyncTracker SyncTracker;
 
 		uint64 FramesSerialized = 0;
 		uint64 BytesSerialized = 0;
+		uint64 FullSyncsSent = 0;
 		uint64 DroppedFrames = 0;
+		uint64 DroppedSinceLastWarning = 0;
+		double LastDropWarningTime = -1.0e9;
 		FString LastError;
 	};
 
 	TMap<FString, FSubjectCache> SubjectState;
 	UO3DSenderComponent* Component = nullptr;
 
-	// C2 (roadmap doc §5/C2): persistent per-subject state for delta/
-	// residual transmission (o3ds.Sender.Residual.Enabled). Unlike the
-	// legacy path - which allocates a fresh O3DS::SubjectList/Subject
-	// every single frame, since a full Serialize() snapshot needs no
-	// state to carry over - residual coding fundamentally requires a
-	// predictor's history (and the legacy TransformComponent delta
-	// tracking SerializeUpdateResidual falls back to) to survive across
-	// frames, so one SubjectList persists for the serializer's lifetime,
-	// holding one O3DS::Subject per subject name. Lazily created on first
-	// use; untouched (and irrelevant) while residual mode is disabled.
+	// C2/D1: persistent per-subject state for the residual and quantized
+	// encodings. Unlike the legacy path - which allocates a fresh
+	// O3DS::SubjectList/Subject every frame, since a full Serialize()
+	// snapshot needs no state to carry over - residual coding needs the
+	// predictor's history, and both encodings need the per-channel last-sent
+	// values and quantization anchors, to survive across frames. One
+	// SubjectList persists for the serializer's lifetime, holding one
+	// O3DS::Subject per subject name. Lazily created on first use.
 	TSharedPtr<O3DS::SubjectList> PersistentSubjects;
 
-	void BuildOrUpdateCache(const FString& Subject, const struct FO3DSSkeletonDescriptor& Descriptor);
-	void EnsureCurveIndex(FSubjectCache& Cache);
-	void SerializeFrame(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame);
+	void DropFrame(const FString& Subject, FSubjectCache& Cache, const FString& Reason);
 	void SerializeFrameLegacy(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache);
-	void SerializeFrameResidual(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache);
-	void SerializeFrameQuantized(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache);
+	void SerializeFramePersistent(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache);
 	void BroadcastSerializedBuffer(const FString& Subject, const std::vector<char>& Buffer, double Now, FSubjectCache& Cache);
-	void BuildSubjectFromDescriptor(const FString& SubjectName, const FO3DSSkeletonDescriptor& Descriptor, O3DS::Subject& OutSubject);
-	void FillFrameValues(const FO3DSPoseFrame& Frame, O3DS::Subject& InOutSubject);
+	static void BuildSubjectFromDescriptor(const FString& SubjectName, const FO3DSSkeletonDescriptor& Descriptor, O3DS::Subject& OutSubject);
+	static void FillFrameValues(const FO3DSPoseFrame& Frame, O3DS::Subject& InOutSubject);
+	static void FillCurves(const FO3DSPoseFrame& Frame, O3DS::Subject& InOutSubject);
+	static uint64 HashCurveNames(const TArray<FName>& Names);
 	void DumpStatsInstance() const;
 
 	static TArray<FO3DSenderSerializer*> GInstances;

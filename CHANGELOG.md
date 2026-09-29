@@ -29,6 +29,16 @@
   subject twice, and the copy constructor silently produced an empty list
   (CORE-17, partial).
 
+- Quantization anchors are re-captured at every full sync on both ends
+  (ADR 0005 (vii), WP-S3). `Subject::Serialize()` stores the float32 value it
+  writes and `ParseSubject()` stores the value it parses. The old
+  anchor-once rule only held for receivers that parse with
+  `clearInactive=false`, so senders and receivers could disagree after a
+  resync, and a receiver that joined late always did.
+- New `src/o3ds/sender_sync.h`: `ConsumeCaptureBudget` (accumulator capture
+  rate limiter), `FilterCurveValue` (curve epsilon/delta filter) and
+  `FullSyncTracker` (per-subject full-sync policy), used by the UE sender.
+
 ### Fixed
 
 - UDP fragment reassembly (`src/o3ds/udp_fragment.*`, WP-S2) is hardened against hostile or malformed datagrams: fragments that disagree with a message's first fragment are rejected (previously a heap overflow), in-flight state is bounded (8 messages, 16 MiB by default) with age-based expiry, message ids use wrapping comparison, messages are keyed per sender, rejected fragments no longer yield empty frames, and a use-after-free in `UdpMapper::getFrame` is gone.
@@ -42,11 +52,59 @@
 - The sender audio capture component hands its audio and capture threads an immutable parameter snapshot, and each producer has its own scratch buffer; they no longer read the component (SND-6). The submix listener is unregistered from the submix it was registered on, and registering it again first removes the old registration (SND-7).
 - `FO3DAudioBus` is game-thread-only and checks it; publishing with no listener returns early (SHR-10).
 
+- UE sender (WP-S3): bone names and parents are correct after Stop/Start,
+  after a details-panel edit during PIE, and after a subject rename. Each
+  frame now carries its skeleton descriptor, and a frame whose bone count
+  does not match it is dropped with a rate-limited warning instead of being
+  padded with empty names and parent 0 (SND-1).
+- UE sender: quantized translations stay correct across full syncs,
+  including for receivers that join mid-stream (SND-2).
+- UE sender: in residual and quantized modes, curve values no longer land on
+  the wrong curve names when the curve set changes at the same count, and
+  per-frame curve filtering no longer forces a full sync every frame
+  (SND-3).
+- UE sender: a curve that returns to zero is sent once as 0, so receivers no
+  longer hold its last non-zero value (SND-4).
+- UE sender: at a tick rate close to `CaptureRateHz` (default 60 Hz) the
+  sender now captures every tick instead of about half of them (SND-5).
+- UE sender: changing the encoding mode, residual predictor, keyframe
+  interval or quantization ranges during capture takes effect on the next
+  frame with a full sync (SND-14).
+- UE sender: `StartCapture()` with no valid mesh and audio disabled no
+  longer leaves a transport and serializer running. The reason is available
+  from the new `GetLastStartCaptureError()` (SND-19).
+- UE sender: curve include/exclude patterns are ignored while curve
+  filtering is disabled, and pattern edits apply on the next frame
+  (SND-20).
+
 ### Changed
 
 - The largest reassembled UDP message the receiver accepts drops from 50 MiB to 4 MiB by default; set the new `udp.maxframe` receiver option to raise it (up to 50 MiB).
 - Core API: `UdpMapper::addFragment` now takes `(sourceKey, data, size, nowMs)`, and `UdpMapper` takes an optional `UdpReassemblyConfig`.
 
+- UE sender: new `FullSyncIntervalSeconds` property (default 1.0 s, 0.25 to
+  10 s). In residual and quantized modes a full skeleton and pose is sent at
+  least this often, and also on start, rename, and any change to the
+  skeleton, the curve list or the encoding settings (SND-13, ADR 0005 (ii)).
+- UE sender: per-frame curve epsilon/delta filtering is off in residual and
+  quantized modes; include/exclude patterns still apply.
+- UE sender: a NaN or Inf curve value is sent as 0 when "Drop NaN and
+  Infinity" is on, as the property describes. It used to drop the curve for
+  that frame.
+- UE sender: `FO3DSenderSerializer` no longer listens to `OnDescriptorReady`
+  and no longer reads component properties. Frames carry the descriptor and
+  an `FO3DSenderEncodingSettings` snapshot; `SerializePoseFrame()` is public.
+
 ### Schema/Protocol
 
 - No wire change. The 16-byte UDP fragment header is now read and written as explicit little-endian, which is byte-for-byte identical to what existing little-endian senders and receivers produce. The versioned `O3DF` header (ADR 0009, TRB-17) follows separately.
+
+- No schema change. Behaviour change for D1 quantization: both ends now
+  re-anchor at every full sync, and the UE sender sends a full sync at
+  least once per `FullSyncIntervalSeconds`. A receiver built before this
+  change that parses with `clearInactive=false` keeps its old anchors and
+  misdecodes quantized translations after the first periodic full sync.
+  D1 has not been released, and ADR 0009 versions the wire. Until
+  `SubjectUpdate.ref_seq` lands (WP-A4a), a receiver that misses a full sync
+  decodes quantized translations against its previous anchor until the next
+  full sync reaches it.

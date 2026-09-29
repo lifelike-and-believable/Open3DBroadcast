@@ -246,15 +246,13 @@ O3DS_TEST(D1_RotationQuantization_RoundTripsViaByteAndHalfTiers)
 	O3DS_CHECK(angleDelta(s->mTransforms[1]->rotation.value, r->mTransforms[1]->rotation.value) < rad(0.1));
 }
 
-O3DS_TEST(D1_RepeatedFullSync_PreservesOriginalAnchor_NotVulnerableToLostKeyframe)
+O3DS_TEST(D1_RepeatedFullSync_ReanchorsBothSides)
 {
-	// Regression (adversarial review): the anchor must be captured ONCE and
-	// held for a Transform's entire logical lifetime, NOT re-captured on
-	// every full sync. Real senders in this codebase periodically re-send a
-	// full snapshot as a "keyframe" over the same best-effort connector as
-	// delta updates, with no ACK - if a keyframe re-anchored and one such
-	// packet were dropped, the sender would silently move to a new anchor
-	// the receiver never learned, corrupting every quantized delta after it.
+	// ADR 0005 (vii), WP-S3/SND-2: sender and receiver both re-anchor at
+	// every full sync. This replaced the earlier "anchor once, forever"
+	// rule, under which a receiver that joined late (or a sender that
+	// rebuilt its Transform objects) ended up with a different anchor from
+	// the other side.
 	SubjectList sender;
 	BuildSkeleton(sender, "Actor");
 	SubjectList receiver;
@@ -265,34 +263,33 @@ O3DS_TEST(D1_RepeatedFullSync_PreservesOriginalAnchor_NotVulnerableToLostKeyfram
 	sender.mQuantRanges.halfRange = 1.0;
 
 	Subject* s = sender.findSubject("Actor");
-	s->mTransforms[0]->translation.value = Vector3d(50.0, 0.0, 0.0); // drive far from the original anchor
+	s->mTransforms[0]->translation.value = Vector3d(50.0, 0.0, 0.0);
 
-	// A second full sync of the SAME topology must NOT move the anchor -
-	// same transform name, so the original (0,0,0) anchor is preserved.
+	// Second full sync of the same topology: both sides now anchor at 50.0.
 	FullSync(sender, receiver);
 
-	// A small move from here (50.005) is only "small" relative to the
-	// ORIGINAL anchor if measured as 50.005 - 50.0 = 0.005; measured against
-	// the (correctly preserved) 0.0 anchor, the delta is 50.005 - far
-	// outside halfRange, so this MUST fall back to Full, not Byte/Half.
+	// A small move from the new anchor is small again, so it goes out on the
+	// Byte tier and decodes correctly against the receiver's new anchor.
 	s->mTransforms[0]->translation.value = Vector3d(50.005, 0.0, 0.0);
 
 	size_t count = 0;
 	std::vector<char> buf;
 	O3DS_CHECK(sender.SerializeUpdate(buf, count, 1.0e-6) > 0);
-	O3DS_CHECK(TranslationTierForIndex(buf, 0) == WireTier::Full);
+	O3DS_CHECK(TranslationTierForIndex(buf, 0) == WireTier::Byte);
 
 	O3DS_CHECK(receiver.Parse(buf.data(), buf.size()));
 	Subject* r = receiver.findSubject("Actor");
-	O3DS_CHECK(NearlyEqual(r->mTransforms[0]->translation.value.v[0], 50.005, 1.0e-4));
+	const double tol = (0.01 / 127.0) + 1.0e-6;
+	O3DS_CHECK(NearlyEqual(r->mTransforms[0]->translation.value.v[0], 50.005, tol));
 }
 
-O3DS_TEST(D1_DroppedKeyframeResync_DoesNotCorruptSubsequentQuantizedDeltas)
+O3DS_TEST(D1_LostFullSync_RecoversAtNextDeliveredFullSync)
 {
-	// The actual loss-safety guarantee D1 exists for: simulate a periodic
-	// full "keyframe" resync that never reaches the receiver (dropped
-	// packet) - subsequent quantized delta updates must still decode
-	// correctly, because the anchor never moved on the sender's side either.
+	// With re-anchoring at every full sync, a lost full sync leaves the
+	// receiver on the previous anchor until the next full sync reaches it
+	// (SubjectUpdate.ref_seq, WP-A4a, will let the receiver drop those
+	// updates instead). The sender's periodic full sync (ADR 0005 (ii))
+	// bounds that window; this checks the recovery.
 	SubjectList sender;
 	BuildSkeleton(sender, "Actor");
 	SubjectList receiver;
@@ -303,19 +300,17 @@ O3DS_TEST(D1_DroppedKeyframeResync_DoesNotCorruptSubsequentQuantizedDeltas)
 	sender.mQuantRanges.halfRange = 1.0;
 
 	Subject* s = sender.findSubject("Actor");
-	s->mTransforms[0]->translation.value = Vector3d(0.003, 0.0, 0.0);
+	s->mTransforms[0]->translation.value = Vector3d(0.3, 0.0, 0.0);
 
-	// Sender performs a periodic keyframe resync (e.g. every N frames) -
-	// simulate it being LOST by only calling sender.Serialize() (as a real
-	// sender would, unconditionally) WITHOUT feeding the bytes to the
-	// receiver's Parse().
-	std::vector<char> droppedKeyframe;
-	O3DS_CHECK(sender.Serialize(droppedKeyframe) > 0);
-	(void)droppedKeyframe; // deliberately never delivered to receiver
+	std::vector<char> droppedFullSync;
+	O3DS_CHECK(sender.Serialize(droppedFullSync) > 0);
+	(void)droppedFullSync; // never delivered
 
-	// A subsequent quantized delta update must still decode correctly on
-	// the receiver, since the sender's anchor was untouched by the dropped
-	// keyframe (captured once, at the very first FullSync above).
+	// The next periodic full sync is delivered.
+	s->mTransforms[0]->translation.value = Vector3d(0.31, 0.0, 0.0);
+	FullSync(sender, receiver);
+
+	s->mTransforms[0]->translation.value = Vector3d(0.313, 0.0, 0.0);
 	size_t count = 0;
 	std::vector<char> buf;
 	O3DS_CHECK(sender.SerializeUpdate(buf, count, 1.0e-6) > 0);
@@ -323,8 +318,8 @@ O3DS_TEST(D1_DroppedKeyframeResync_DoesNotCorruptSubsequentQuantizedDeltas)
 	O3DS_CHECK(receiver.Parse(buf.data(), buf.size()));
 
 	Subject* r = receiver.findSubject("Actor");
-	const double tol = (0.01 / 127.0) + 1.0e-9;
-	O3DS_CHECK(NearlyEqual(r->mTransforms[0]->translation.value.v[0], 0.003, tol));
+	const double tol = (0.01 / 127.0) + 1.0e-6;
+	O3DS_CHECK(NearlyEqual(r->mTransforms[0]->translation.value.v[0], 0.313, tol));
 }
 
 O3DS_TEST(D1_NoAnchorYet_FallsBackToFullWithoutCrashing)

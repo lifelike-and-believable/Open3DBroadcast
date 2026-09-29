@@ -69,6 +69,38 @@ struct OPEN3DSENDER_API FO3DSSkeletonDescriptor
 	bool IsValid() const { return BoneNames.Num() > 0 && BoneNames.Num() == ParentIndices.Num(); }
 };
 
+/** Wire encoding chosen for a frame. Residual takes precedence over quantized when both are enabled. */
+enum class EO3DSenderEncodingMode : uint8
+{
+	Legacy,
+	Residual,
+	Quantized
+};
+
+/**
+ * Immutable snapshot of the encoding settings a frame is serialized with (SND-14). The component
+ * copies its properties into this on the game thread for every sampled frame, so one frame is always
+ * encoded with one consistent set of settings, and the serializer never reads component properties.
+ */
+struct OPEN3DSENDER_API FO3DSenderEncodingSettings
+{
+	EO3DSenderEncodingMode Mode = EO3DSenderEncodingMode::Legacy;
+	EO3DSenderResidualPredictor ResidualPredictor = EO3DSenderResidualPredictor::Linear;
+	int32 ResidualKeyframeIntervalFrames = 300;
+	float ResidualDeltaThreshold = 0.0001f;
+	float QuantizationByteRange = 0.01f;
+	float QuantizationHalfRange = 1.0f;
+	float QuantizationDeltaThreshold = 0.0001f;
+	float FullSyncIntervalSeconds = 1.0f;
+
+	/**
+	 * Fingerprint of the settings that need a fresh full sync (and, in residual mode, a fresh
+	 * encoder) when they change: mode, residual predictor and keyframe interval, quantization
+	 * ranges. Delta thresholds and the full-sync interval apply from the next frame without one.
+	 */
+	uint64 GetFullSyncFingerprint() const;
+};
+
 /** Per-frame pose payload containing bone transforms and curve values for a single subject. */
 USTRUCT()
 struct OPEN3DSENDER_API FO3DSPoseFrame
@@ -90,6 +122,19 @@ struct OPEN3DSENDER_API FO3DSPoseFrame
 	UPROPERTY()
 	TArray<float> CurveValues;
 
+	/**
+	 * Skeleton descriptor the bones were sampled against (ADR 0005 (i), pull-based descriptor
+	 * delivery). The serializer builds names and parents from this and drops the frame when it is
+	 * missing or its bone count differs from BoneLocalTransforms. Shared and immutable.
+	 */
+	TSharedPtr<const FO3DSSkeletonDescriptor> Descriptor;
+
+	/** Sampling time on the sender clock (FPlatformTime::Seconds()); drives the periodic full sync. */
+	double CaptureTimeSec = 0.0;
+
+	/** Encoding settings this frame is serialized with. */
+	FO3DSenderEncodingSettings Encoding;
+
 	void Reset()
 	{
 		Subject.Reset();
@@ -97,6 +142,9 @@ struct OPEN3DSENDER_API FO3DSPoseFrame
 		BoneLocalTransforms.Reset();
 		CurveNames.Reset();
 		CurveValues.Reset();
+		Descriptor.Reset();
+		CaptureTimeSec = 0.0;
+		Encoding = FO3DSenderEncodingSettings();
 	}
 };
 
@@ -213,10 +261,12 @@ public:
 	bool bLogFilteredCurves = false;
 
 	/** Enable delta/residual transmission (roadmap doc §5/C2) instead of a full snapshot every
-	 *  frame. Only safe on reliable/ordered transports (TCP, WebRTC reliable channel, MoQ reliable
-	 *  streams) - residual coding's predictor history can silently diverge from the receiver's if a
-	 *  packet is dropped, and there is no automatic transport-reliability gate yet. Does not compose
-	 *  with quantization below - if both are enabled, Residual takes precedence. */
+	 *  frame. Only safe on reliable, ordered transports (TCP, NNG pair or push, WebRTC reliable
+	 *  channel): residual coding's predictor history diverges from the receiver's if a packet is
+	 *  dropped. There is no automatic transport-reliability gate yet (ADR 0005 (iii)). A full sync
+	 *  every FullSyncIntervalSeconds resets the encoder and bounds how long a divergence lasts.
+	 *  Per-frame curve epsilon/delta filtering is off in this mode. Does not compose with
+	 *  quantization below - if both are enabled, Residual takes precedence. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Residual")
 	bool bEnableResidualCoding = false;
 
@@ -234,14 +284,17 @@ public:
 	float ResidualDeltaThreshold = 0.0001f;
 
 	/** Enable adaptive variable-bit channel quantization (roadmap doc §6/D1) on the legacy
-	 *  delta-threshold path instead of a full snapshot every frame. Unlike Residual, this is
-	 *  stateless-across-loss and safe on unreliable transports too. Does not compose with Residual
-	 *  above yet - if both are enabled, Residual takes precedence and this is ignored. */
+	 *  delta-threshold path instead of a full snapshot every frame. Translations are quantized
+	 *  relative to the last full sync, which both ends re-anchor to. On a lossy transport a receiver
+	 *  that joins late or misses a full sync recovers at the next full sync (every
+	 *  FullSyncIntervalSeconds). Per-frame curve epsilon/delta filtering is off in this mode. Does
+	 *  not compose with Residual above yet - if both are enabled, Residual takes precedence and this
+	 *  is ignored. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Quantization")
 	bool bEnableQuantization = false;
 
-	/** Max |delta| (from a transform's rest-pose anchor, in the transform's own local-space units)
-	 *  representable at the 8-bit quantization tier. */
+	/** Max |delta| (from a transform's translation at the last full sync, in the transform's own
+	 *  local-space units) representable at the 8-bit quantization tier. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Quantization", meta = (EditCondition = "bEnableQuantization", ClampMin = "0.0"))
 	float QuantizationByteRange = 0.01f;
 
@@ -255,6 +308,18 @@ public:
 	 *  precisely to encode a channel that already cleared this. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Quantization", meta = (EditCondition = "bEnableQuantization", ClampMin = "0.0"))
 	float QuantizationDeltaThreshold = 0.0001f;
+
+	/** With residual coding or quantization on, send a full skeleton descriptor and pose at least
+	 *  this often (ADR 0005 (ii)), so receivers that join late or lost a packet recover within this
+	 *  interval. A full sync is also sent on start, on a subject rename, and whenever the skeleton,
+	 *  the curve list or the encoding settings change. The legacy encoding sends a full pose every
+	 *  frame and ignores this. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Encoding", meta = (ClampMin = "0.25", ClampMax = "10.0", UIMin = "0.25", UIMax = "10.0", Units = "s"))
+	float FullSyncIntervalSeconds = 1.0f;
+
+	/** Why the last StartCapture() call did not start capture, or empty if it did. */
+	UFUNCTION(BlueprintPure, Category = "Open3DStream|Sender")
+	FString GetLastStartCaptureError() const { return LastStartCaptureError; }
 
 	FOnO3DDescriptorReady OnDescriptorReady;
 	FOnO3DPoseFrameReady OnPoseFrameReady;
@@ -286,6 +351,8 @@ private:
 	FString BuildSubjectName(const USkeletalMeshComponent* SkelComp) const;
 	FString SanitizeSubjectName(const FString& Raw) const;
 	FO3DSenderCurveConfig BuildCurveConfig() const;
+	FO3DSenderEncodingSettings BuildEncodingSettings() const;
+	void ResetSkeletonCache();
 
 	uint64 ComputeDescriptorHash(const TArray<FName>& InNames, const TArray<int32>& InParents) const;
 	TWeakObjectPtr<USkeleton> CachedSkeleton;
@@ -293,7 +360,10 @@ private:
 	FName CachedSkeletalMeshName = NAME_None;
 
 	FO3DSSkeletonDescriptor DescriptorCache;
+	/** Immutable copy of DescriptorCache attached to every sampled frame (ADR 0005 (i)). */
+	TSharedPtr<const FO3DSSkeletonDescriptor> DescriptorSnapshot;
 	bool bDescriptorDirty = false;
+	FString LastStartCaptureError;
 
 	FString CachedSubjectName;
 	FString LastSubjectSourceValue;
@@ -343,7 +413,7 @@ public:
 private:
 	bool CanCaptureThisFrame(double NowSeconds, USkeletalMeshComponent*& OutMesh);
 	FString ResolveSubjectName(const USkeletalMeshComponent* SkelComp);
-	FO3DSPoseFrame CreateFrameShell(const USkeletalMeshComponent* SkelComp);
+	FO3DSPoseFrame CreateFrameShell(const USkeletalMeshComponent* SkelComp, double CaptureTimeSec);
 	void PopulatePoseFrameBones(const USkeletalMeshComponent* SkelComp, FO3DSPoseFrame& Frame, bool bDebugPose);
 	void PopulatePoseFrameCurves(USkeletalMeshComponent* SkelComp, const FO3DSenderCurveConfig& CurveConfig, FO3DSPoseFrame& Frame, bool bDebugCurves);
 	FO3DSenderAudioCaptureConfig BuildAudioCaptureConfig() const;
@@ -365,9 +435,10 @@ private:
 		TArray<FTransform>& OutLocalTransforms,
 		TArray<int32>* OutResolvedParents);
 
-#if defined(WITH_AUTOMATION_TESTS) && WITH_AUTOMATION_TESTS
+	// Test-only white-box access. Unconditional: befriending an undefined struct is harmless, and the
+	// test files use WITH_DEV_AUTOMATION_TESTS, which can be on when WITH_AUTOMATION_TESTS is not.
 	friend struct FO3DSenderComponentTestHelper;
-#endif
+	friend struct FO3DSenderWireTestAccess;
 
 	void EnsureValidTransportName();
 
