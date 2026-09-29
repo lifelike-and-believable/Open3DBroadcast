@@ -56,6 +56,15 @@ namespace O3DS
 		mConfig.max_slew_rate = ClampSlewRate(mConfig.max_slew_rate);
 	}
 
+	ClockOffsetEstimator::Sample ClockOffsetEstimator::Unusable(uint64_t local_recv_us)
+	{
+		Sample result;
+		result.mapped_presentation_time_us = local_recv_us;
+		result.offset_estimate_us = 0;
+		result.excess_delay_us = 0;
+		return result;
+	}
+
 	ClockOffsetEstimator::Sample ClockOffsetEstimator::Observe(uint64_t tx_wallclock_us, uint64_t local_recv_us)
 	{
 		Sample result;
@@ -63,12 +72,20 @@ namespace O3DS
 		// Legacy/unset timestamp: fall back to local receive time and leave
 		// the estimator's state untouched (see class doc comment).
 		if (tx_wallclock_us == 0)
-		{
-			result.mapped_presentation_time_us = local_recv_us;
-			result.offset_estimate_us = 0;
-			result.excess_delay_us = 0;
-			return result;
-		}
+			return Unusable(local_recv_us);
+
+		// CORE-26: both timestamps come from the wire or a local clock and
+		// may be hostile. Treat a pair that is implausibly far apart, or a
+		// value too large for signed arithmetic, exactly like the legacy
+		// "no timestamp" case above, so the signed arithmetic below can never
+		// overflow. The difference is taken in unsigned arithmetic first.
+		if (tx_wallclock_us > kMaxTimestampUs || local_recv_us > kMaxTimestampUs)
+			return Unusable(local_recv_us);
+		const uint64_t distance_us = (local_recv_us >= tx_wallclock_us)
+			? local_recv_us - tx_wallclock_us
+			: tx_wallclock_us - local_recv_us;
+		if (distance_us > kMaxAbsOffsetUs)
+			return Unusable(local_recv_us);
 
 		const int64_t offset_us = (int64_t)local_recv_us - (int64_t)tx_wallclock_us;
 
@@ -108,7 +125,10 @@ namespace O3DS
 			delta = std::max(-max_step, std::min(max_step, delta));
 			mEstimateUs += delta;
 		}
-		mLastTxWallclockUs = tx_wallclock_us;
+		// Keep the newest timestamp seen: after a backward step the next
+		// forward sample must not be granted slew budget for the time
+		// between the regressed sample and itself (CORE-26).
+		mLastTxWallclockUs = std::max(mLastTxWallclockUs, tx_wallclock_us);
 
 		result.offset_estimate_us = (int64_t)std::llround(mEstimateUs);
 		result.excess_delay_us = offset_us - target_us;

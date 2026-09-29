@@ -27,6 +27,7 @@ SOFTWARE.
 
 #include <vector>
 #include <string>
+#include <utility>
 
 #include "math.h"
 #include "context.h"
@@ -222,7 +223,15 @@ namespace O3DS
 			return mTransforms.mItems.size();
 		}
 
-		bool CalcMatrices();
+		//! Builds every transform's local matrix (mMatrix) from its
+		//! transformOrder, validates the hierarchy (exactly one root, parent
+		//! ids in range, no self-parenting, no parent cycles) and, when
+		//! computeWorldMatrices is true, solves mWorldMatrix in one O(N) pass.
+		//! Returns false with mError set on a matrix component that has no
+		//! matching entry in `matrices`, a non-finite local matrix, or an
+		//! invalid hierarchy. With computeWorldMatrices false, every
+		//! transform's bWorldMatrix is left false.
+		bool CalcMatrices(bool computeWorldMatrices = true);
 
 		flatbuffers::Offset<O3DS::Data::Subject> Serialize(flatbuffers::FlatBufferBuilder& builder);
 
@@ -309,10 +318,42 @@ namespace O3DS
 			, mDeltaThreshold(std::numeric_limits<double>::min())
 		{}
 
-		SubjectList(const SubjectList &other)
-			: mTime(0.0)
-			, mDeltaThreshold(std::numeric_limits<double>::min())
-		{}
+		// mItems owns its Subject pointers, so a member-wise copy would
+		// delete every subject twice (CORE-17). SubjectList is move-only.
+		SubjectList(const SubjectList &other) = delete;
+		SubjectList& operator=(const SubjectList &other) = delete;
+
+		SubjectList(SubjectList &&other) noexcept
+			: mItems(std::move(other.mItems))
+			, mTime(other.mTime)
+			, mDeltaThreshold(other.mDeltaThreshold)
+			, mError(std::move(other.mError))
+			, mQuantizationEnabled(other.mQuantizationEnabled)
+			, mQuantRanges(other.mQuantRanges)
+			, mComputeWorldMatrices(other.mComputeWorldMatrices)
+		{
+			other.mItems.clear();
+		}
+
+		SubjectList& operator=(SubjectList &&other) noexcept
+		{
+			if (this != &other)
+			{
+				for (auto i : mItems)
+				{
+					delete i;
+				}
+				mItems = std::move(other.mItems);
+				other.mItems.clear();
+				mTime = other.mTime;
+				mDeltaThreshold = other.mDeltaThreshold;
+				mError = std::move(other.mError);
+				mQuantizationEnabled = other.mQuantizationEnabled;
+				mQuantRanges = other.mQuantRanges;
+				mComputeWorldMatrices = other.mComputeWorldMatrices;
+			}
+			return *this;
+		}
 
 		virtual ~SubjectList()
 		{
@@ -366,6 +407,13 @@ namespace O3DS
 		// mQuantizationEnabled is true.
 		bool mQuantizationEnabled = false;
 		QuantRanges mQuantRanges;
+
+		//! When true (the default, and the behaviour before this flag
+		//! existed), Parse() also solves every transform's mWorldMatrix. The
+		//! UE receiver only consumes local TRS, so it can turn this off and
+		//! skip the per-transform matrix products. Hierarchy validation and
+		//! local matrices (mMatrix) run either way.
+		bool mComputeWorldMatrices = true;
 
 		//! Encode all of the items in the subject list as binary data.
 		//! tx_seq/tx_wallclock_us/frame_epoch are optional (0 == unset, the

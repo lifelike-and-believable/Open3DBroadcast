@@ -60,7 +60,11 @@ namespace O3DS
 	//! is treated as "no timestamp available": Observe() returns
 	//! local_recv_us as the mapped time and leaves all internal state
 	//! untouched, rather than feeding a huge phantom "offset" (now minus the
-	//! Unix epoch) into the window.
+	//! Unix epoch) into the window. A pair of timestamps more than
+	//! kMaxAbsOffsetUs apart, or either one above kMaxTimestampUs, is treated
+	//! the same way: such values cannot come from two real clocks, and
+	//! rejecting them keeps every signed computation here overflow-free
+	//! on hostile input.
 	class ClockOffsetEstimator
 	{
 	public:
@@ -80,6 +84,15 @@ namespace O3DS
 			                                            //!< floor (jitter indicator); always >= 0
 		};
 
+		//! Largest |local_recv_us - tx_wallclock_us| accepted: one day. Real
+		//! clock skew plus network delay is orders of magnitude smaller.
+		static constexpr uint64_t kMaxAbsOffsetUs = 86400ull * 1000000ull;
+
+		//! Largest timestamp accepted (about 146,000 years after the Unix
+		//! epoch). Half of INT64_MAX, so sums and differences of accepted
+		//! values and offsets fit in int64_t.
+		static constexpr uint64_t kMaxTimestampUs = (uint64_t)INT64_MAX / 2;
+
 		ClockOffsetEstimator();
 		explicit ClockOffsetEstimator(const Config& config);
 
@@ -89,6 +102,9 @@ namespace O3DS
 		Sample Observe(uint64_t tx_wallclock_us, uint64_t local_recv_us);
 
 	private:
+		//! The Sample returned when a frame carries no usable timestamp.
+		static Sample Unusable(uint64_t local_recv_us);
+
 		struct WindowEntry
 		{
 			uint64_t tx_wallclock_us;
