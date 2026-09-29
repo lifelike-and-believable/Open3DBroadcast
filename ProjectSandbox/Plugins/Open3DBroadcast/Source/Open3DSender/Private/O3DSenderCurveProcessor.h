@@ -42,9 +42,7 @@ public:
     const TArray<float>& GetCurveValues() const { return CurveValues; }
 
 private:
-#if defined(WITH_AUTOMATION_TESTS) && WITH_AUTOMATION_TESTS
-    friend struct FO3DSenderWireTestAccess;
-#endif
+    friend struct FO3DSenderWireTestAccess; // test-only white-box access (see O3DSenderComponent.h)
 
     void RefreshCurveCache(USkeletalMeshComponent* SkelComp);
     void UpdatePatternCacheIfNeeded(const FO3DSenderCurveConfig& Config);
