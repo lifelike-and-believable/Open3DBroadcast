@@ -187,7 +187,11 @@ namespace O3DS
 		//! place.
 		//!
 		//! Returns false (outPose untouched) when render-ahead is disabled
-		//! (renderAheadSeconds <= 0) or there's no real-frame history yet.
+		//! (renderAheadSeconds <= 0), there's no real-frame history yet, or
+		//! a render-ahead pose was already produced for the newest real
+		//! frame. It returns true at most once per ObserveRealFrame(), so a
+		//! caller polling every tick pushes one future frame per real frame
+		//! instead of the same one repeatedly (RCV-10).
 		bool TryRenderAhead(PoseSample& outPose);
 
 		const ConcealmentMetrics& Metrics() const { return mMetrics; }
@@ -209,6 +213,8 @@ namespace O3DS
 
 		PoseSample mLastOutput;
 		bool mHasLastOutput = false;
+
+		bool mRenderAheadDue = false; //!< set by ObserveRealFrame, cleared once TryRenderAhead produces a pose
 
 		void RecordRecovery(const PoseSample& real);
 	};

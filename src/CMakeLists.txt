@@ -104,6 +104,7 @@ set(pub_headers
 	o3ds/getTime.h
 	o3ds/sequencing.h
 	o3ds/reorder_gate.h
+	o3ds/receiver_streams.h
 	o3ds/capture.h
 	o3ds/channel_model.h
 	o3ds/replay.h
@@ -158,6 +159,7 @@ set(CORE_SOURCES
 	o3ds/getTime.cpp
 	o3ds/sequencing.cpp
 	o3ds/reorder_gate.cpp
+	o3ds/receiver_streams.cpp
 	o3ds/capture.cpp
 	o3ds/channel_model.cpp
 	o3ds/replay.cpp

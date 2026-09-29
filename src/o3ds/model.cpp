@@ -253,8 +253,13 @@ namespace
 
 		for (auto inNode : *ovNodes)
 		{
+			// RCV-14: nodes are addressed by index (parent ids), so a node
+			// cannot be dropped without shifting every later parent id.
 			if (inNode == nullptr)
-				continue;
+			{
+				error = "Null transform in subject " + subjectName;
+				return false;
+			}
 
 			auto inComponents = inNode->components();
 			auto inMatrix = inNode->matrix();
@@ -300,6 +305,12 @@ namespace
 		}
 
 		return true;
+	}
+
+	//! RCV-14: placeholder name for a node the wire sent without a name.
+	std::string UnnamedTransformName(size_t index)
+	{
+		return std::string(O3DS::kUnnamedTransformPrefix) + std::to_string(index);
 	}
 
 	//! Wire index -> container index, or false if it is out of range.
@@ -1169,9 +1180,29 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		return true;
 	}
 
-	bool SubjectList::Parse(const char *data, size_t len, TransformBuilder *builder, bool clearInactive)
+	bool SubjectList::Parse(const char *data, size_t len, TransformBuilder *builder, bool clearInactive,
+		std::vector<ParsedSubjectInfo>* outTouched)
 	{
 		mError = "";
+		if (outTouched)
+			outTouched->clear();
+
+		// Records a subject this packet applied data to (RCV-5). A full
+		// descriptor wins over an update for the same subject in one packet.
+		auto markTouched = [outTouched](const std::string& name, bool full)
+		{
+			if (outTouched == nullptr)
+				return;
+			for (ParsedSubjectInfo& info : *outTouched)
+			{
+				if (info.name == name)
+				{
+					info.fullDescriptor = info.fullDescriptor || full;
+					return;
+				}
+			}
+			outTouched->push_back(ParsedSubjectInfo{ name, full });
+		};
 
 		// Header is 8 bytes (flags + CRC) followed by the FlatBuffers payload;
 		// reject anything too short before doing any arithmetic on len or
@@ -1249,9 +1280,13 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			{
 				// For each subject. ParseSubject reports a rejected subject
 				// through mError (its signature predates validation).
-				this->ParseSubject(subjects_data->Get(i), builder);
+				auto inSubject = subjects_data->Get(i);
+				this->ParseSubject(inSubject, builder);
 				if (!mError.empty())
 					return false;
+				// ParseSubject skips a nameless subject without an error.
+				if (inSubject->name() != nullptr)
+					markTouched(inSubject->name()->str(), true);
 			}
 		}
 
@@ -1267,12 +1302,15 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 				// same SubjectList are fine - this is a per-update, not
 				// per-buffer, decision.
 				auto inUpdate = updates_data->Get(i);
-				if (inUpdate->predictor_id() != 0)
-					this->ParseUpdateResidual(inUpdate, builder);
-				else
-					this->ParseUpdate(inUpdate, builder);
+				const bool applied = (inUpdate->predictor_id() != 0)
+					? this->ParseUpdateResidual(inUpdate, builder)
+					: this->ParseUpdate(inUpdate, builder);
 				if (!mError.empty())
 					return false;
+				// An update for an unknown subject, or one that could not
+				// be decoded, is skipped and not reported.
+				if (applied)
+					markTouched(inUpdate->name()->str(), false);
 			}
 		}
 
@@ -1384,13 +1422,14 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		for (int n = 0; n < (int)ovNodes->size(); n++)
 		{
+			// ValidateSubject() has rejected a null node.
 			auto inNode = ovNodes->Get(n);
-			if (inNode == nullptr)
-				continue;
 
+			// RCV-14: a nameless node used to be skipped, which shifted the
+			// index of every later node, so their parent ids (indices into
+			// the wire's node list) pointed at the wrong transform. Keep the
+			// node and give it a placeholder name, so indices stay aligned.
 			auto inName = inNode->name();
-			if (inName == nullptr)
-				continue;
 
 			auto inTranslation = inNode->translation();
 			auto inRotation = inNode->rotation();
@@ -1398,7 +1437,9 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			auto inMatrix = inNode->matrix();
 			auto inComponents = inNode->components();
 
-			std::string transformName = inName->str();
+			std::string transformName = (inName != nullptr)
+				? inName->str()
+				: UnnamedTransformName(static_cast<size_t>(n));
 			Transform *outTransform = outSubject->addTransform(transformName, inNode->parent());
 
 			// Add the components to the transform stack in the order they are defined.
@@ -1462,7 +1503,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		}
 	}
 
-	void SubjectList::ParseUpdate(
+	bool SubjectList::ParseUpdate(
 		const O3DS::Data::SubjectUpdate *inUpdate,
 		TransformBuilder *builder)
 	{
@@ -1472,11 +1513,11 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		// is untrusted network input, so dereferencing them
 		// unconditionally is a crash waiting to happen.
 		if (inUpdate->name() == nullptr)
-			return;
+			return false;
 
 		// WP-S1 (CORE-9): reject the update before applying any of it.
 		if (!ValidateUpdateFloats(inUpdate, mError))
-			return;
+			return false;
 
 		std::string name = inUpdate->name()->str();
 		int id;
@@ -1484,7 +1525,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		// Find the subject to update, by name
 		O3DS::Subject *outSubject = this->findSubject(name);
 		if (!outSubject)
-			return;
+			return false;
 
 		// Update TRS. CORE-23: every index is validated and an out-of-range
 		// one (negative or too large) skips just that entry, the same rule
@@ -1611,24 +1652,25 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 				outSubject->mCurveValues[(size_t)id] = inCurve->value();
 			}
 		}
+		return true;
 	}
 
-	void SubjectList::ParseUpdateResidual(
+	bool SubjectList::ParseUpdateResidual(
 		const O3DS::Data::SubjectUpdate *inUpdate,
 		TransformBuilder *builder)
 	{
 		if (inUpdate->name() == nullptr)
-			return;
+			return false;
 
 		// WP-S1 (CORE-9): reject before the decoder or any channel is touched.
 		if (!ValidateUpdateFloats(inUpdate, mError))
-			return;
+			return false;
 
 		std::string name = inUpdate->name()->str();
 
 		O3DS::Subject *outSubject = this->findSubject(name);
 		if (!outSubject)
-			return;
+			return false;
 
 		const ResidualPredictorId wireId = static_cast<ResidualPredictorId>(inUpdate->predictor_id());
 
@@ -1641,7 +1683,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		// than construct one, matching ParseSubject's "skip what we can't
 		// parse" posture for untrusted input.
 		if (wireId != ResidualPredictorId::Hold && wireId != ResidualPredictorId::Linear && wireId != ResidualPredictorId::Quadratic)
-			return;
+			return false;
 
 		O3DS::ResidualDecoder* decoder = outSubject->GetResidualDecoder();
 		if (!decoder || decoder->Id() != wireId)
@@ -1740,6 +1782,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		// carried-over ones) - same full-state Observe() contract
 		// ResidualEncoder::BeginFrame() already relies on.
 		decoder->EndFrame(outSubject->ToPoseSample(this->mTime, 0));
+		return true;
 	}
 
 

@@ -307,6 +307,22 @@ namespace O3DS
 		std::unique_ptr<ResidualDecoder> mResidualDecoder;
 	};
 
+	//! Prefix of the placeholder name SubjectList::Parse() gives a transform
+	//! that arrived without a name, followed by its index in the subject
+	//! (for example "o3ds_unnamed_3"). The transform is kept rather than
+	//! dropped so that later parent ids stay aligned (RCV-14).
+	constexpr const char* kUnnamedTransformPrefix = "o3ds_unnamed_";
+
+	//! One subject that a SubjectList::Parse() call applied data to.
+	//! fullDescriptor is true when the packet carried a full Subject for it
+	//! (topology, names and curve list), false when it carried only an
+	//! update for a subject that already existed.
+	struct ParsedSubjectInfo
+	{
+		std::string name;
+		bool fullDescriptor = false;
+	};
+
 	/*! \class SubjectList model.h o3ds/model.h */
 	//!  A collection of subjects.
 	class SubjectList
@@ -438,7 +454,16 @@ namespace O3DS
 			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0);
 
 		//! Populate or update the subject list with the binary data provided (created by Serialize)
-		bool Parse(const char *data, size_t len, TransformBuilder* = nullptr, bool clearInactive = true);
+		//!
+		//! outTouched (WP-S4, RCV-5), when non-null, is cleared and then
+		//! receives each subject this packet applied data to, in first-seen
+		//! order and without duplicates. Subjects already in the list that
+		//! the packet did not mention are not reported, so a receiver can
+		//! publish only what was actually sent. An update naming a subject
+		//! that does not exist is ignored and not reported. On failure the
+		//! contents of outTouched are unspecified.
+		bool Parse(const char *data, size_t len, TransformBuilder* = nullptr, bool clearInactive = true,
+			std::vector<ParsedSubjectInfo>* outTouched = nullptr);
 
 		//! Extract just the transmit-sequencing metadata (tx_seq/
 		//! tx_wallclock_us/frame_epoch) from a wire buffer, without doing a
@@ -455,7 +480,10 @@ namespace O3DS
 
 		void ParseSubject(const O3DS::Data::Subject*, TransformBuilder* = nullptr);
 
-		void ParseUpdate(const O3DS::Data::SubjectUpdate*, TransformBuilder* = nullptr);
+		//! Returns true when the update was applied to an existing subject;
+		//! false when it was skipped (no name, unknown subject) or rejected
+		//! (mError set).
+		bool ParseUpdate(const O3DS::Data::SubjectUpdate*, TransformBuilder* = nullptr);
 
 		//! Residual-coded counterpart to ParseUpdate() (roadmap doc §5/C2).
 		//! Dispatched automatically from Parse() based on the wire's own
@@ -467,7 +495,8 @@ namespace O3DS
 		//! BeginFrame() safely falls back to a zero/identity reference
 		//! regardless of what is_keyframe says (see ResidualDecoder's own
 		//! doc comment).
-		void ParseUpdateResidual(const O3DS::Data::SubjectUpdate*, TransformBuilder* = nullptr);
+		//! Same return contract as ParseUpdate().
+		bool ParseUpdateResidual(const O3DS::Data::SubjectUpdate*, TransformBuilder* = nullptr);
 
 		//! Change distance threshold below which O3DS skips transmitting a transform update.
 		void SetDeltaThreshold(double newThreshold) { mDeltaThreshold = newThreshold; }
