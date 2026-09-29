@@ -6,6 +6,9 @@
 #include "O3DAudioFrameCodec.h"
 
 #include "Templates/UniquePtr.h"
+#include "Templates/SharedPointer.h"
+
+#include <vector>
 
 #include "HAL/CriticalSection.h"
 
@@ -57,11 +60,17 @@ private:
 	bool bAllowBroadcast = false;
 	int32 MaxDatagramBytes = 64000;
 	int32 MtuBytes = 1200;
+	int32 MaxFrameBytes = 0;
 
 	TWeakPtr<ISerializedFrameConsumer> Consumer;
 	TWeakPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
 
+	/** Sized to the largest possible UDP datagram, independent of udp.maxdatagram (TRB-23). */
 	TArray<uint8> ReceiveBuffer;
+	/** Reused across datagrams to avoid per-datagram allocation (TRB-19). */
+	TSharedPtr<FInternetAddr> RecvAddr;
+	TArray<uint8> FrameScratch;
+	std::vector<char> CombinedScratch;
 
 	TUniquePtr<FFragmentState> FragmentState;
 	O3DAudio::FFrameDecoder AudioDecoder;
