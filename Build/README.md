@@ -12,25 +12,26 @@ Build/
 ## Plugins Overview
 
 ### Open3DBroadcast Plugin
-Located at `ProjectSandbox/Plugins/Open3DBroadcast/`, this plugin vendors the o3ds core library's headers and compiled static library under `ThirdParty/open3dstream/`. As of the fix for issues #203/#204, that vendored tree is no longer git-committed - it's rebuilt from source on every CI run (see `Sync-O3DSCore.ps1` below) using the same root `CMakeLists.txt` recipe `.github/workflows/windows.yml` uses to produce release zips.
+Located at `ProjectSandbox/Plugins/Open3DBroadcast/`. Everything it compiles or links is committed under its `Source/` folder, so a clean clone builds with `RunUAT BuildPlugin` alone: no CMake, no PowerShell pre-build step and no prebuilt core library (WP-F1, ADR 0003). The o3ds core is compiled by the plugin's `Open3DStreamCore` module from a generated copy of `src/o3ds` (see `sync_o3ds_core.py` below). Opus and NNG stay prebuilt Win64 libraries under `Source/`. `Config/FilterPlugin.ini` adds only the root documentation and licences to the package (FAB-2).
 
-## Building O3DS Core From Source
+## The o3ds core in the plugin
 
-#### `Sync-O3DSCore.ps1`
-Builds the o3ds core library (and its NNG/CML/CRCpp/FlatBuffers dependencies) from source, then copies the compiled static library and `src/o3ds` headers/source directly into the Open3DBroadcast plugin's `ThirdParty/open3dstream/` tree. Run this before building the plugin itself - all four `open3dbroadcast-plugin-*.yml` CI workflows call it automatically.
+#### `sync_o3ds_core.py`
+Generates the plugin's copy of the o3ds core (docs/adr/0003-core-library-delivery-to-plugin.md). Python 3.8+, standard library only; needs the `thirdparty/flatbuffers` and `thirdparty/crccpp` submodules.
 
-**Usage:**
-```powershell
-.\Build\Scripts\Sync-O3DSCore.ps1
+```bash
+git submodule update --init thirdparty/flatbuffers thirdparty/crccpp
+python3 Build/Scripts/sync_o3ds_core.py           # rewrite the copy
+python3 Build/Scripts/sync_o3ds_core.py --check   # compare only (CI)
 ```
 
-**Parameters:**
-- `-RepoRoot` - Path to the repository root (default: inferred from script location)
-- `-BuildDir` - Scratch directory for CMake build trees (default: `<RepoRoot>/_o3ds_build`, already covered by the repo root `.gitignore`)
-- `-Configuration` - CMake build configuration (default: `Release`)
-- `-PluginRoot` - Path to the Open3DBroadcast plugin root (default: `<RepoRoot>/ProjectSandbox/Plugins/Open3DBroadcast`)
+- **Input:** `Build/o3ds-core-manifest.txt` lists the core headers that plugin code includes. The script adds the `.cpp` next to each header and follows `#include` lines to the full closure.
+- **Output:** `ProjectSandbox/Plugins/Open3DBroadcast/Source/ThirdParty/Open3DStreamCore/`: the closure (byte-for-byte copies of `src/o3ds` files), `src/o3ds_generated.h`, the FlatBuffers runtime headers and CRC++'s `CRC.h` from the submodule pins, their licences under `LICENSES/`, and `SYNC_STAMP.txt` (O3DS_VERSION_TAG, FlatBuffers version, submodule pins, manifest and content hashes). It also writes one `Source/Open3DStreamCore/Private/Core/O3DSCore_<file>.cpp` per mirrored `.cpp`; each includes the mirrored file between `O3DSCoreSourceBegin.h` and `O3DSCoreSourceEnd.h`, which switch compiler warnings off for the core. The copy sits outside the module folder because UBT compiles every `.cpp` in a module folder.
+- **Checks (both modes, exit `1`):** a quoted include in a core file must resolve to `src/o3ds`, `src/o3ds_generated.h`, FlatBuffers or `CRC.h`; an angle-bracket include must be a standard header (no `<windows.h>`); no `throw`/`try`/`catch`/`dynamic_cast`/`typeid` in core files (the module is built without exceptions and RTTI); every `o3ds/`, `flatbuffers/` or `o3ds_generated.h` include in plugin sources is in the copy; the submodule checkouts match their pins. `--check` also fails on any file that differs (line endings ignored), is missing or is extra. Exit `2` means bad input (missing submodule or manifest).
+- **CI:** `core-tests.yml` runs `--check` on every PR ("Plugin core mirror in sync"), and its Linux test job fails when the committed `src/o3ds_generated.h` differs from what the pinned `flatc` generates from `src/o3ds.fbs`.
+- **Workflow:** change `src/`, run the script, commit both. Never edit the copy or the `O3DSCore_*.cpp` files by hand. A class or function with an out-of-line definition that the plugin uses needs `O3DS_API` (`src/o3ds/o3ds_export.h`); the module defines it as `OPEN3DSTREAMCORE_API`.
 
-**Note**: Headers are copied directly from `src/o3ds`, not from the CMake install tree - `src/CMakeLists.txt`'s `PUBLIC_HEADER` install rule does not actually install any headers (verified empirically). Only the compiled library and the flatc-generated `o3ds_generated.h` come from the CMake install output.
+`Sync-O3DSCore.ps1`, which built the core with CMake and copied a static library into the plugin before every UE build, has been removed.
 
 ## Scripts
 
@@ -89,10 +90,10 @@ Runs `RunUAT BuildPlugin` on the contents of the Fab source zip (see "Fab source
   -UEPath "C:\Program Files\Epic Games\UE_5.7" `
   -Zip "Artifacts\Fab" `
   -WorkDir "Artifacts\FabBuild" `
-  -CoreSourcePluginDir "$PWD\ProjectSandbox\Plugins\Open3DBroadcast"
+  -RequireStandalone
 ```
 
-Until WP-F1 lands, the zip does not build on its own: the o3ds core library and headers under `ThirdParty/open3dstream/` are outputs of `Sync-O3DSCore.ps1`, not tracked files. The script copies them in from `-CoreSourcePluginDir` and emits a warning saying the zip is not yet submittable. `-RequireStandalone` makes that a failure; switch CI to it once WP-F1 is merged.
+Nothing is added to the extracted zip before BuildPlugin: since WP-F1 the zip builds on its own, exactly as Fab's farm receives it. `-RequireStandalone` (passed by CI and the nightly) first checks that the zip holds `Source/Open3DStreamCore` and its core copy in `Source/ThirdParty/Open3DStreamCore`, and no prebuilt `open3dstreamstatic`/`flatbuffers.lib`, and fails with that reason instead of a compiler error.
 
 #### `Build-FlagCombinations.ps1`
 Runs `Build-Plugin.ps1` once per transport build-flag combination (WP-F2, TRB-24, TRF-27): each of `O3D_WITH_TRANSPORT_SOCKETS`, `_NNG`, `_WEBRTC` and `_MOQ` set to `0` on its own (`no-sockets`, `no-nng`, `no-webrtc`, `no-moq`), then all four at once (`loopback-only`). The flags are described in the plugin README, "Build flags". Every combination runs even after a failure; the script exits `1` if any failed and prints a summary. The nightly workflow runs it with `-StrictIncludes -FailOnWarnings`; it is not part of PR CI because each combination takes as long as the PR build.
@@ -213,7 +214,7 @@ The Fab listing gets a source-only zip, different from the GitHub build (ADR 000
 
 - `Build/Fab/exclude-modules.txt` lists modules left out of it: `Open3DTransportWebRTC` (ADR 0002; WebRTC ships as a separate add-on) and `Open3DBroadcastTests` (ADR 0006; skipped with a notice until that module exists).
 - `Build/Fab/exclude-files.txt` lists files left out, as globs: the module-level `Source/*/*.md` READMEs and USER_GUIDEs, which stay in the repository for people reading the code. It has no `.pdb`, `.py` or developer-note rule on purpose: those fail the tree check below instead (see [Debug symbols](#debug-symbols); developer notes and scripts live in `docs/dev/<Module>/`).
-- `Build/Scripts/fab-package.py` (Python 3.8+, standard library) takes the files git tracks under the plugin folder, applies both lists, removes the excluded modules' entries from the staged `.uplugin` without reformatting it, and writes a zip with one top-level `Open3DBroadcast/` folder and fixed timestamps (the same commit gives the same bytes). It then reopens the zip and fails if it finds an excluded module (folder or `.uplugin` entry), a `livekit` file while WebRTC is excluded, `.pdb`/`.py` files, `Binaries/` or `Intermediate/`, a Markdown file other than the root `README.md`, `USER_GUIDE.md`, `THIRD_PARTY_LICENSES.md`, `Transport_Module_Comparison.md` or anything under a `ThirdParty/` folder, a listed module without its `Build.cs`, a module without a `PlatformAllowList` (or one naming a platform the plugin's `SupportedTargetPlatforms` does not list; ADR 0001), or a missing `Resources/Icon128.png`. Before any exclusion it also checks the tracked tree, including excluded modules, and fails if git tracks a `.pdb` (FAB-4) or a `.py`/`.pyc` anywhere under the plugin, or a Markdown file under `Source/` other than a `README.md` or `USER_GUIDE.md` outside `ThirdParty/` (HYG-1).
+- `Build/Scripts/fab-package.py` (Python 3.8+, standard library) takes the files git tracks under the plugin folder, applies both lists, removes the excluded modules' entries from the staged `.uplugin` without reformatting it, and writes a zip with one top-level `Open3DBroadcast/` folder and fixed timestamps (the same commit gives the same bytes). It then reopens the zip and fails if it finds an excluded module (folder or `.uplugin` entry), a `livekit` file while WebRTC is excluded, `.pdb`/`.py` files, `Binaries/` or `Intermediate/`, a Markdown file other than the root `README.md`, `USER_GUIDE.md`, `THIRD_PARTY_LICENSES.md`, `Transport_Module_Comparison.md` or anything under a `ThirdParty/` folder, a listed module without its `Build.cs`, a module without a `PlatformAllowList` (or one naming a platform the plugin's `SupportedTargetPlatforms` does not list; ADR 0001), a missing `Resources/Icon128.png`, `Config/FilterPlugin.ini` or `Source/ThirdParty/Open3DStreamCore/SYNC_STAMP.txt`, a prebuilt `open3dstreamstatic` or `flatbuffers.lib` (WP-F1), or a top-level file or folder outside `Binaries`, `Config`, `Content`, `Resources`, `Shaders` and `Source` that `Config/FilterPlugin.ini` does not list, since BuildPlugin would leave it out (FAB-2). Before any exclusion it also checks the tracked tree, including excluded modules, and fails if git tracks a `.pdb` (FAB-4) or a `.py`/`.pyc` anywhere under the plugin, or a Markdown file under `Source/` other than a `README.md` or `USER_GUIDE.md` outside `ThirdParty/` (HYG-1).
 
 ```bash
 python3 Build/Scripts/fab-package.py --out-dir Artifacts/Fab
@@ -267,16 +268,16 @@ python3 Build/Scripts/check-copyright-headers.py
 | `open3dbroadcast-plugin-nightly.yml` | 03:00 UTC daily, manual | Same checks as CI with a Shipping `-Configuration`, plus network tests when the `O3D_MOQ_RELAY_URL` secret is set, the transport flag-combination builds (`Build-FlagCombinations.ps1`; the manual run can skip them with `run_flag_builds`), and the Linux exclusion check (`Test-LinuxExclusion.ps1`, skipped while the runner has no Linux toolchain) |
 | `open3dbroadcast-plugin-test.yml` | Manual only | Build any branch and optionally run the tests (with or without network tests) |
 | `open3dbroadcast-plugin-release.yml` | `open3dbroadcast-v*.*.*` tags, manual | Shipping build, GitHub release of the Win64 binaries (UE 5.7 only) |
-| `core-tests.yml` | Every PR and push | o3ds core under CTest with ASan/UBSan, fuzzing, warning ratchet (GitHub-hosted) |
+| `core-tests.yml` | Every PR and push | o3ds core under CTest with ASan/UBSan, fuzzing, warning ratchet, MSVC build, `o3ds_generated.h` against `flatc`, and `sync_o3ds_core.py --check` on the plugin's core copy (GitHub-hosted) |
 | `o3ds-webrtc-windows-native.yaml` | Manual only | libwebrtc from source (up to 6 hours); nothing consumes its output |
 
-All UE jobs call `Sync-O3DSCore.ps1` first.
+No UE job has a pre-build step: the plugin compiles the o3ds core from source (WP-F1). The PR CI job also checks out without submodules, so it builds exactly what a clean clone has.
 
 ### Which PR jobs run, and when (CI-9)
 
 - **Every PR commit, drafts included:** the path filter, the Fab source zip job, the copyright header check and `core-tests.yml`. They run on GitHub-hosted runners and take a few minutes.
 - **Non-draft PRs, pushes to develop/main and manual runs:** the "UE build and tests" job on the single self-hosted `[self-hosted, ue5, windows]` runner. Drafts skip it so unfinished work does not hold the runner. To get the UE result for a draft, mark it ready for review, or run the workflow by hand on the branch (Actions > Open3DBroadcast Plugin CI > Run workflow).
-- **Path filter:** all plugin CI jobs are skipped when a PR touches nothing the plugin build depends on. The filter covers `Build/**`, the plugin, `ProjectSandbox/` project files, the workflow files, and everything `Sync-O3DSCore.ps1` compiles: `src/**`, `thirdparty/**`, `CMakeLists.txt`, `*.cmake`, `apps/**`, `plugins/mobu/**`, `.gitmodules`.
+- **Path filter:** all plugin CI jobs are skipped when a PR touches nothing the plugin build depends on. The filter covers `Build/**`, the plugin, `ProjectSandbox/` project files and the workflow files. The plugin build reads nothing else: a `src/o3ds` change reaches it only with the re-synced core copy inside the plugin, which `core-tests.yml` checks.
 
 ### What turns the UE job red
 
