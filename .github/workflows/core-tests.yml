@@ -84,6 +84,18 @@ jobs:
       - name: Build
         run: cmake --build build
 
+      # ADR 0003 (CORE-21): the committed src/o3ds_generated.h, which the UE
+      # plugin compiles through its core mirror, must be what flatc from the
+      # pinned thirdparty/flatbuffers makes of src/o3ds.fbs. The build above
+      # has just regenerated it into build/src/_generated with that flatc.
+      # Line endings are ignored (the committed file has CRLF).
+      - name: Check src/o3ds_generated.h matches src/o3ds.fbs
+        run: |
+          if ! diff --strip-trailing-cr -q build/src/_generated/o3ds_generated.h src/o3ds_generated.h; then
+            echo "::error file=src/o3ds_generated.h::src/o3ds_generated.h differs from what flatc (thirdparty/flatbuffers pin) generates from src/o3ds.fbs. Regenerate it with flatc --cpp -o src src/o3ds.fbs, then run python3 Build/Scripts/sync_o3ds_core.py."
+            exit 1
+          fi
+
       - name: Run tests (ctest, ASan/UBSan active)
         working-directory: build
         # -LE fuzz: the fallback fuzz runners have their own step below.
@@ -117,6 +129,28 @@ jobs:
       # - just surfaces the numbers.
       - name: Run Determinism Probe (C2 prototype)
         run: build/apps/DeterminismProbe/DeterminismProbe
+
+  plugin-core-mirror:
+    # ADR 0003 (WP-F1): the Open3DBroadcast plugin compiles a generated copy of
+    # the part of src/o3ds it uses (plus o3ds_generated.h, the FlatBuffers
+    # runtime headers and CRC.h) from
+    # ProjectSandbox/Plugins/Open3DBroadcast/Source/ThirdParty/Open3DStreamCore.
+    # This fails when that copy, or the generated O3DSCore_*.cpp units, differ
+    # from what Build/Scripts/sync_o3ds_core.py makes of src/ and the submodule
+    # pins: a core change without a re-sync, or a hand edit of the copy.
+    name: Plugin core mirror in sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Init required submodules
+        run: git submodule update --init thirdparty/flatbuffers thirdparty/crccpp
+
+      - name: Check the mirror (sync_o3ds_core.py --check)
+        run: python3 Build/Scripts/sync_o3ds_core.py --check
 
   fuzz:
     # WP-T1: coverage-guided libFuzzer run of every target in test/fuzz

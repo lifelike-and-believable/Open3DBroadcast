@@ -20,18 +20,18 @@ public class Open3DShared : ModuleRules
         // No bEnableExceptions: this module has no try/catch and includes no C++ third-party
         // headers (opus.h is C). See BUILD-5.
 
-        var PluginRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", ".."));
+        // Open3DShared does not use the Open3DStream core (the Open3DStreamCore module). The core
+        // include paths and libraries that used to be here existed only for tests, which now live
+        // in Open3DBroadcastTests (WP-T2, SHR-4, SHR-20).
 
-        // Open3DShared does not use the Open3DStream core. The core include paths and libraries
-        // that used to be here existed only for tests, which now live in Open3DBroadcastTests
-        // (WP-T2, SHR-4, SHR-20). Open3DSender and Open3DReceiver add the core themselves.
-
-        // Opus library and headers
+        // Opus library and headers, under Source/ThirdParty/opus so that BuildPlugin and the Fab
+        // zip carry them without a FilterPlugin.ini entry (WP-F1, FAB-2).
         bool bWithOpus = false;
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
-            var OpusIncludeDir = Path.Combine(PluginRoot, "ThirdParty", "opus", "include");
-            var OpusLib = Path.Combine(PluginRoot, "ThirdParty", "opus", "lib", "Win64", "opus.lib");
+            var OpusDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "ThirdParty", "opus"));
+            var OpusIncludeDir = Path.Combine(OpusDir, "include");
+            var OpusLib = Path.Combine(OpusDir, "lib", "Win64", "opus.lib");
             if (File.Exists(OpusLib))
             {
                 PublicSystemIncludePaths.Add(OpusIncludeDir);

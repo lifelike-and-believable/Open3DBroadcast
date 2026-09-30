@@ -11,7 +11,7 @@
 	"DocsURL": "https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcast/USER_GUIDE.md",
 	"MarketplaceURL": "",
 	"SupportURL": "https://github.com/lifelike-and-believable/Open3DBroadcast/issues",
-	"CanContainContent": true,
+	"CanContainContent": false,
 	"IsBetaVersion": true,
 	"IsExperimentalVersion": false,
 	"Installed": false,
@@ -20,6 +20,13 @@
 	],
 	"SupportedTargetPlatforms": [ "Win64" ],
 	"Modules": [
+		{
+			"Name": "Open3DStreamCore",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [ "Win64" ],
+			"TargetDenyList": [ "Server", "Program" ]
+		},
 		{
 			"Name": "Open3DShared",
 			"Type": "Runtime",

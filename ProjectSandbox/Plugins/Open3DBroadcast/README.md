@@ -20,6 +20,7 @@ A modular, self-contained Unreal Engine plugin for Open3DStream broadcasting and
 
 ### Core Modules
 
+- **Open3DStreamCore**: The Open3DStream core library (serialization, sequencing, reordering, prediction), compiled from source. See "Third-Party Dependencies" below.
 - **Open3DShared**: Shared utilities and base classes used by all modules
 - **Open3DSender**: Captures and streams skeletal animation data
 - **Open3DReceiver**: Receives and applies animation data to characters
@@ -38,28 +39,35 @@ A modular, self-contained Unreal Engine plugin for Open3DStream broadcasting and
 
 ## Third-Party Dependencies
 
-All third-party libraries are pre-compiled and included in the plugin:
+Everything the plugin compiles or links is under `Source/`, so `RunUAT BuildPlugin` and the Fab source package need nothing else. `Config/FilterPlugin.ini` only adds the documentation and licence files at the plugin root to the package.
 
-### Plugin-Level Dependencies (ThirdParty/)
+### Shared (`Source/ThirdParty/`)
 
-- **open3dstream** (v1.0): Core Open3DStream protocol implementation
-- **flatbuffers** (v24.3.25): Efficient serialization library
-- **opus** (v1.5.2): High-quality audio codec for WebRTC
+- **Open3DStreamCore** (source): the part of the Open3DStream core (`src/o3ds` in the repository) that the plugin uses, the generated `o3ds_generated.h`, the FlatBuffers 2.0.6 runtime headers and CRC++'s `CRC.h`. The `Open3DStreamCore` module compiles it. It is a generated copy: see "Open3DStreamCore: the core compiled from source" below.
+- **opus** (prebuilt Win64 library): audio codec used by `Open3DShared`. Version and provenance are in `THIRD_PARTY_LICENSES.md`.
 
 ### Module-Level Dependencies
 
-- **nng** (in Open3DTransportNNG): Messaging library for pub/sub patterns
+- **nng** (prebuilt Win64 library, in `Source/Open3DTransportNNG/ThirdParty/`): messaging library for the NNG transport
+- **moq-ffi** (DLL, in `Source/Open3DTransportMoQ/ThirdParty/`) and **livekit_ffi** (DLL, in `Source/Open3DTransportWebRTC/ThirdParty/`)
 
 ### Platform Support
 
-Currently includes pre-compiled libraries for:
-- **Win64**: Full support for all modules
-
-Additional platforms can be added by compiling libraries for the target platform and placing them in the appropriate `lib/<Platform>/` directories.
+The prebuilt libraries (Opus, NNG, the MoQ and LiveKit DLLs) exist for **Win64** only, and every module is limited to Win64 (see "Platforms and target types" below). The core itself is plain C++17 source with no platform code.
 
 ## Building
 
-The plugin builds directly with Unreal Engine's build system (UAT). No pre-build steps are required.
+The plugin builds directly with Unreal Engine's build system (UAT). No pre-build steps, CMake or scripts are required: a clean clone builds with `RunUAT BuildPlugin` alone.
+
+### Open3DStreamCore: the core compiled from source
+
+`Open3DStreamCore` compiles the Open3DStream core from `Source/ThirdParty/Open3DStreamCore/` (ADR 0003, `docs/adr/0003-core-library-delivery-to-plugin.md`). That folder, and the `Source/Open3DStreamCore/Private/Core/O3DSCore_*.cpp` files that compile it, are generated from `src/` in the repository by `Build/Scripts/sync_o3ds_core.py`. Do not edit them by hand:
+
+1. Change the core in `src/o3ds/` (or `src/o3ds.fbs`, then regenerate `src/o3ds_generated.h` with `flatc --cpp -o src src/o3ds.fbs`).
+2. Run `python3 Build/Scripts/sync_o3ds_core.py` (needs `git submodule update --init thirdparty/flatbuffers thirdparty/crccpp`).
+3. Commit both. CI (`core-tests.yml`) runs the script with `--check` and fails when the copy differs.
+
+A new core header that plugin code includes must be listed in `Build/o3ds-core-manifest.txt`. The module is built without exceptions and RTTI, and the core's own compiler warnings are switched off in the plugin build (the core CI checks them). Core classes and functions defined in a `.cpp` and used by other modules carry `O3DS_API` (`src/o3ds/o3ds_export.h`), which the module defines as its export macro.
 
 ### Local Development
 
@@ -72,7 +80,7 @@ The plugin builds directly with Unreal Engine's build system (UAT). No pre-build
 Use the Unreal Automation Tool (UAT) to package the plugin:
 
 ```powershell
-& "C:\Program Files\Epic Games\UE_5.6\Engine\Build\BatchFiles\RunUAT.bat" BuildPlugin `
+& "C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\RunUAT.bat" BuildPlugin `
   -Plugin="ProjectSandbox\Plugins\Open3DBroadcast\Open3DBroadcast.uplugin" `
   -Package="Output\Open3DBroadcast" `
   -TargetPlatforms=Win64 `
@@ -83,7 +91,7 @@ Or use the provided build script:
 
 ```powershell
 .\Build\Scripts\Build-Plugin.ps1 `
-  -UEPath "C:\Program Files\Epic Games\UE_5.6" `
+  -UEPath "C:\Program Files\Epic Games\UE_5.7" `
   -PluginUPluginPath "ProjectSandbox\Plugins\Open3DBroadcast\Open3DBroadcast.uplugin" `
   -OutDir "Output\Open3DBroadcast" `
   -TargetPlatforms @("Win64") `
@@ -138,16 +146,16 @@ If your own module depends on an Open3DBroadcast module, add that dependency onl
 
 ## Updating Third-Party Libraries
 
-To update third-party libraries:
+The core, FlatBuffers and CRC++ are updated through `src/` and the submodule pins, then `Build/Scripts/sync_o3ds_core.py` (see "Open3DStreamCore" above). To update a prebuilt library:
 
 1. Build the new version for your target platform(s)
-2. Replace the libraries in `ThirdParty/<library>/lib/<Platform>/`
-3. Update headers in `ThirdParty/<library>/include/` if needed
-4. Update version information in `ThirdParty/README.md`
+2. Replace the library in `Source/ThirdParty/<library>/lib/<Platform>/` (Opus) or `Source/<Module>/ThirdParty/<library>/` (NNG, moq-ffi, livekit_ffi)
+3. Update the headers next to it if needed
+4. Update version information in `Source/ThirdParty/README.md` or the library's own README, and in `THIRD_PARTY_LICENSES.md`
 5. Test the plugin builds and runs correctly
 6. Commit the updated libraries
 
-**Note**: All third-party libraries should be committed to the repository to maintain the self-contained nature of the plugin.
+**Note**: Every third-party file the build needs is committed under `Source/`, so the plugin stays self-contained. Keep new ones there too: files elsewhere in the plugin folder are packaged only if `Config/FilterPlugin.ini` lists them.
 
 ## MoQ Draft-07 Hotfix & Fallback
 

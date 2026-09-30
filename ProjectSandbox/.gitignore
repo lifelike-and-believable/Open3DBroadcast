@@ -26,17 +26,8 @@ Plugins/Open3DBroadcast/**
 !Plugins/Open3DBroadcast/Resources/**
 !Plugins/Open3DBroadcast/Source/
 !Plugins/Open3DBroadcast/Source/**
-!Plugins/Open3DBroadcast/ThirdParty/
-!Plugins/Open3DBroadcast/ThirdParty/**
-
-# Fix #203/#204: o3ds core (compiled lib + vendored headers/schema) is built
-# from source by Build/Scripts/Sync-O3DSCore.ps1 in CI, not committed.
-Plugins/Open3DBroadcast/ThirdParty/open3dstream/include/o3ds/
-Plugins/Open3DBroadcast/ThirdParty/open3dstream/include/o3ds.fbs
-Plugins/Open3DBroadcast/ThirdParty/open3dstream/include/o3ds_generated.h
-Plugins/Open3DBroadcast/ThirdParty/open3dstream/include/core/
-Plugins/Open3DBroadcast/ThirdParty/open3dstream/include/receiver/
-Plugins/Open3DBroadcast/ThirdParty/open3dstream/lib/
+!Plugins/Open3DBroadcast/Config/
+!Plugins/Open3DBroadcast/Config/**
 
 # FAB-4 (WP-F3): debug symbols never live in the plugin tree. They are published
 # as release assets (see Build/README.md, "Debug symbols"); fab-package.py fails

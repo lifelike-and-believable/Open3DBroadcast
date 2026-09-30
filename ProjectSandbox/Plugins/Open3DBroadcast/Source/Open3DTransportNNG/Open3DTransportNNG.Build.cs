@@ -27,9 +27,13 @@ public class Open3DTransportNNG : ModuleRules
             return;
         }
 
-        // /EHsc: the sources compile the o3ds core headers, which the core library is built
-        // against with exceptions on (BUILD-5).
+        // /EHsc: kept from when the o3ds core was a prebuilt library built with exceptions on. The
+        // core is now the Open3DStreamCore module, built without exceptions (BUILD-5).
         bEnableExceptions = true;
+
+        // NngSender.cpp uses the o3ds core (docs/adr/0003, WP-F1). NNG itself stays a prebuilt
+        // Win64 library in ThirdParty/nng (ADR 0003, decision 8).
+        PrivateDependencyModuleNames.Add("Open3DStreamCore");
 
         var moduleThirdPartyRoot = Path.Combine(ModuleDirectory, "ThirdParty", "nng");
 
