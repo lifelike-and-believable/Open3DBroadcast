@@ -139,6 +139,22 @@
   cannot catch a Rust panic, which moq-ffi already converts into an error
   result (TRF-39).
 
+- Loopback: `SendSerialized()` and `Send()` return false before `Start()` and
+  after `Stop()`. They used to queue frames on an initialized sender that was
+  not running. Its stats counters are now updated under a lock, so concurrent
+  senders no longer lose updates or make `GetStats()` go backwards (WP-T2
+  conformance suite).
+- UDP: `Start()` after `Stop()` works again without `Initialize()`, as it does
+  for TCP. `Stop()` cleared the socket subsystem, so the restart failed
+  (WP-T2 conformance suite).
+- WebRTC: an address with a port, such as `127.0.0.1:7880`, now gets `ws://`
+  like the bare host. Only the host part is compared with the localhost list,
+  which also accepts `[::1]`. It used to get `wss://`
+  (`Open3DBroadcast.Transport.WebRTC.Token.SenderAutoFetchConnects`).
+- Receiver: the unused `LastObservedSubjectName` field is removed. Audio
+  metadata falls back to the stream label, which is what
+  `FinalizeAudioMeta` already did (RCV-2, ADR 0006 Q6).
+
 ### Changed
 
 - The largest reassembled UDP message the receiver accepts drops from 50 MiB to 4 MiB by default; set the new `udp.maxframe` receiver option to raise it (up to 50 MiB).
@@ -175,6 +191,53 @@
 - MoQ: every moq-ffi call goes through a per-instance function table,
   `FMoQFfiApi` (ADR 0006 option F2). The session wrapper, sender and
   receiver accept a table at construction, which the new fake-FFI tests use.
+
+### Tests
+
+- UE automation tests moved out of the Runtime modules into a new editor-only
+  module, `Open3DBroadcastTests` (Type `Editor`, Win64; ADR 0006, WP-T2). The
+  Fab package leaves it out (`Build/Fab/exclude-modules.txt`). WebRTC tests
+  stay in their module until the WebRTC add-on gets its own test module
+  (WP-F11).
+- Tests reach private code only through exported `Public/Testing/*.h`
+  headers: `O3DSenderTesting.h`, `O3DReceiverTesting.h`, `SocketsTesting.h`,
+  `NngTesting.h` and `MoQTesting.h` (`CreateSenderForTest`,
+  `CreateReceiverForTest`, the `FMoQTestSession` façade). They compile only
+  with `WITH_DEV_AUTOMATION_TESTS`. `MoQFfiApi.h` moved to the MoQ module's
+  `Public` folder.
+- Open3DShared no longer adds the core include paths and libraries "for
+  tests" or the Open3DSender include path (SHR-4, SHR-20).
+- New transport conformance suite,
+  `Open3DBroadcast.Conformance.<Transport>.<Case>`, over every registered
+  transport: lifecycle, sends rejected when not running, backpressure,
+  concurrent sends, monotonic stats, byte-exact round trip of recorded
+  frames, and callbacks after destroy (fake FFI). Profiles exist for Fake,
+  Loopback, TCP, UDP, NNG and MoQ. A registered transport without a profile
+  gets a failing `HasProfile` test. It replaces three placeholders that
+  asserted `TestTrue(..., true)` (SHR-5).
+- New fakes: `FO3DFakeSender`, `FO3DFakeReceiver` and
+  `FO3DFakeTransportScope`, which registers them under a unique name per
+  test. The fake moq-ffi table now routes published data to subscribers.
+- New Shared parser tests for the unified envelope and the audio frame
+  formats (SHR-6).
+- Test names follow `Open3DBroadcast.<Area>.<Unit>.<Case>`; the
+  `Open3DBroadcast.Open3DTransport*`, `O3DSender`, `O3DShared` and
+  `O3DReceiver` prefixes are gone. Every test file uses
+  `WITH_DEV_AUTOMATION_TESTS`. Run everything with the filter
+  `Open3DBroadcast`.
+- Relay tests moved to `Open3DBroadcast.Network.MoQ.*`. They register only
+  when `O3DB_NETWORK_TESTS=1`, take the relay from `O3D_MOQ_RELAY_URL` only,
+  and fail when it is unset. The hard-coded public relay is gone (UX-4).
+- Fixed tests: `FinalizeAudioMeta` asserts the stream-label fallback (RCV-2);
+  `BackpressureByteLimit` runs a started sender and overflows the byte cap
+  (TRF-34); the MoQ `SupportsAudio` and `CreateAudioSink` tests assert the
+  audio support that shipped; the TCP audio round trip expects the submitted
+  stream label, with the StreamId only as the fallback for an empty label;
+  `AudioSinkOutlivesSource` marks the frame format as unknown before
+  expecting the snapshot's rate and channels.
+- Gauntlet is retired: `Tests/Gauntlet/` and `Build/Scripts/Run-Gauntlet.ps1`
+  are deleted (ADR 0006 Q5). Nothing called them, and their filter matched no
+  test.
 
 ### Build and CI
 
