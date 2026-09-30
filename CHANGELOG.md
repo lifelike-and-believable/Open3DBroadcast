@@ -161,6 +161,47 @@
   (TRB-36, found by the new NNG conformance round-trip test). `NNG_OPT_SENDTIMEO` is
   unchanged and still has no effect; the rest of TRB-36 stays with WP-S11.
 
+- Audio codec (WP-S10). A frame's codec label now always matches its payload.
+  When Opus is compiled out (every platform but Win64 with `opus.lib`), cannot
+  run at the stream's format (for example 44.1 kHz or more than 2 channels), or
+  fails, the frame is sent as PCM16 and labelled PCM16. It used to be labelled
+  Opus while carrying PCM16 (SHR-1).
+- Opus is now actually used when selected. Capture buffers of any size are
+  collected into exact 20 ms Opus frames, so one buffer yields zero or more
+  packets, each stamped with the capture time of its first sample. The first
+  encode error no longer switches the stream to PCM16 for good: failures are
+  counted and logged at Warning (throttled), the packet is sent as PCM16, the
+  encoder is recreated after 3 failures in a row, and a failed initialisation
+  is retried (SHR-2).
+- Opus: encoder settings (rate, channels, frame duration) are validated,
+  `opus_encoder_ctl` results are checked, the encoder's packet buffer is the
+  4000 bytes libOpus recommends, and the decoder accepts 120 ms packets
+  (SHR-31).
+- Audio parsing range-checks untrusted metadata: 1 to 8 channels (1 or 2 for
+  Opus), a known sample rate (Opus rates for Opus), a finite timestamp, and
+  stream label and subject names of at most 256 bytes (SHR-8).
+- Performance metrics: transport counters live in heap entries that never
+  move, so registering a new transport name no longer invalidates pointers
+  other threads write through (a use-after-free). Rolling averages and peaks
+  use compare-exchange, so concurrent updates are not lost and a peak never
+  goes down. `o3d.DumpMetrics` copies the counters and logs without holding a
+  lock (SHR-3, SHR-17, SHR-26).
+- UE sender: the audio stream label is the pose subject name (sanitized, or
+  generated as World/Actor/Component), and it follows renames. It used to be
+  the raw `SubjectName`, or `o3ds:audio` when that was empty (SND-16).
+- UE sender: audio resampling keeps its state across capture buffers, so the
+  output length no longer drifts and there is no discontinuity at buffer
+  boundaries, and it low-pass filters (8th-order Butterworth at 0.45 x the
+  output rate) before downsampling instead of aliasing (SND-21).
+- UE sender: the submix tap is registered only while an audio sink is bound,
+  so a disabled or unbound audio path no longer processes every audio buffer
+  (SND-28).
+- Audio send path allocates and copies less: PCM16 is converted straight into
+  the frame, Opus packets are encoded into a reused buffer, the unified
+  envelope is written in place in front of the audio payload, decode scratch
+  buffers keep their allocation, and the audio bus no longer copies each
+  frame (SHR-18).
+
 ### Changed
 
 - The largest reassembled UDP message the receiver accepts drops from 50 MiB to 4 MiB by default; set the new `udp.maxframe` receiver option to raise it (up to 50 MiB).
@@ -197,6 +238,33 @@
 - MoQ: every moq-ffi call goes through a per-instance function table,
   `FMoQFfiApi` (ADR 0006 option F2). The session wrapper, sender and
   receiver accept a table at construction, which the new fake-FFI tests use.
+
+- Shared audio API (WP-S10): `O3DAudio::FFrameEncoder::BuildEncodedFrame` is
+  replaced by `EncodeBuffer`, which appends zero or more frames.
+  `FO3DSinkAudioEncoder::Encode` now returns `TArray<O3DAudio::FEncodedFrame>`
+  and `EncodeUnified` returns `TArray<TArray<uint8>>`; each message carries its
+  own frame's timestamp.
+- `FO3DOnAudioPcm16` (the audio bus delegate) passes `TConstArrayView<uint8>`
+  instead of `const TArray<uint8>&`. The view is valid only during the
+  broadcast; listeners that keep the bytes must copy them.
+- `O3DAudio::DeserializePcm16Frame` and `DeserializeEncodedAudioFrame` take an
+  optional `EAudioParseError*` that says why a buffer was rejected. New
+  `ValidateAudioMeta`, `IsSupportedSampleRate` and
+  `SerializeEncodedAudioFrameAfterPrefix`; new `O3DS::WriteUnifiedHeaderInPlace`.
+- `FO3DPerformanceMetrics`: transports get a stable handle with
+  `AcquireTransportMetrics(FName)` and update it without a lock (the MoQ, NNG
+  and WebRTC senders now do). `GetOrCreateTransportMetrics` and
+  `GetAllTransportMetrics` are removed; use `AcquireTransportMetrics`,
+  `FindTransportMetrics` (returns a shared pointer) and
+  `GetTransportMetricsSnapshot`. `GetAllocationRecords` returns a copy. The
+  metric fields are `std::atomic`, and the unused `LastCaptureTime` and
+  `LastApplyTime` fields are removed.
+- `FO3DAudioOpusEncoder` and `FO3DAudioOpusDecoder` are no longer copyable.
+  New `GetFrameSizeSamples`, `GetLookaheadSamples` and
+  `FO3DAudioOpusDecoder::DecodeLost` (packet-loss concealment).
+- New `FO3DAudioResampler` (Open3DShared), used by the sender's capture path.
+- `EO3DSenderAudioSource::GameAndMic` was never implemented; it is now hidden
+  in the editor. The capture source always follows the capture mode.
 
 ### Credentials (WP-S9, ADR 0004)
 
@@ -271,6 +339,23 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
 - Gauntlet is retired: `Tests/Gauntlet/` and `Build/Scripts/Run-Gauntlet.ps1`
   are deleted (ADR 0006 Q5). Nothing called them, and their filter matched no
   test.
+
+- WP-S10 audio and metrics tests:
+  `Open3DBroadcast.Shared.Audio.Encoder.OpusFraming512` and `.OpusFraming1024`
+  (512- and 1024-frame buffers produce exact Opus packets that decode to a
+  continuous stream, or labelled PCM16 without Opus),
+  `.OpusUnavailableSendsLabelledPcm16`, `.SinkEncoderUnifiedMessages`,
+  `Open3DBroadcast.Shared.Audio.Opus.SettingsValidation`,
+  `Open3DBroadcast.Shared.Audio.Resampler.ChunkInvariantNoDrift` and
+  `.AntiAliasing`, `Open3DBroadcast.Shared.Parsers.AudioMeta.RejectsOutOfRange`
+  and `.RandomBytes`, `Open3DBroadcast.Shared.Metrics.ConcurrentRegistrationAndUpdates`
+  and `.AtomicMaxAndAverage`, `Open3DBroadcast.Sender.Audio.StreamLabelMatchesSubject`
+  and `.ResampledBuffersAddUp`.
+- `Open3DBroadcast.Shared.Audio.Opus.RoundTrip` compensates for the encoder
+  lookahead and requires an SNR above 20 dB and an average error below 0.02
+  (it used to compare phase-shifted samples against a 0.15 average error). A
+  decoded frame-count mismatch is now an error, and the debug dumps are gone
+  (SHR-32).
 
 ### Build and CI
 
