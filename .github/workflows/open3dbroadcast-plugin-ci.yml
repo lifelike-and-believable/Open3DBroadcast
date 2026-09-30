@@ -1,9 +1,9 @@
 name: Open3DBroadcast Plugin CI
 
 # Which jobs run when (CI-9; details in Build/README.md, "CI"):
-#   - Every PR commit, drafts included: "Detect plugin-relevant changes" and
-#     "Fab source zip" (GitHub-hosted, a minute or two). core-tests.yml also
-#     runs on every PR.
+#   - Every PR commit, drafts included: "Detect plugin-relevant changes",
+#     "Fab source zip" and "Copyright headers" (GitHub-hosted, a minute or
+#     two). core-tests.yml also runs on every PR.
 #   - Non-draft PRs, pushes to develop/main and manual runs: "UE build and
 #     tests" on the single self-hosted UE runner. Drafts skip it so work in
 #     progress does not queue the runner; mark the PR ready for review, or
@@ -75,6 +75,21 @@ jobs:
     needs: changes
     if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/open3dbroadcast-fab-package.yml
+
+  # FAB-5 (WP-F4): every first-party .h/.cpp/.cs under the plugin's Source/
+  # starts with the copyright header. A separate job, so a missing header
+  # does not stop the Fab zip from being built and tested.
+  copyright-headers:
+    name: Copyright headers
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Check copyright headers
+        run: python3 Build/Scripts/check-copyright-headers.py
 
   build-and-test:
     name: UE build and tests

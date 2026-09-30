@@ -63,6 +63,7 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 - **Configs:** No hard‑coded credentials, ports, or absolute paths. Use project settings or env vars (see §8).
 - **Docs & examples:** Update code comments and the README/CHANGELOG when behavior or schema changes.
 - **File handling:** When renaming or moving files, please rename or move the existing file, do no delete and recreate.
+- **Copyright header:** Every plugin `.h/.cpp/.cs` under `Source/` (outside `ThirdParty/`, not generated) starts with `// Copyright Lifelike & Believable. All Rights Reserved.` and a blank line; CI runs `Build/Scripts/check-copyright-headers.py` (see `Build/README.md`).
 
 ## 3) Coding Rules - Design Patterns to Follow / Avoid
 - **Follow**

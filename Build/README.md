@@ -215,11 +215,29 @@ Debug symbols (`.pdb`) for the plugin's prebuilt third-party DLLs (`moq_ffi.dll`
   They match the DLLs currently in the tree (hashes in the two ThirdParty READMEs). They should be attached to the next release as described above.
 - **Using them.** Put the `.pdb` next to the DLL (in the plugin's `Source/<Module>/ThirdParty/<lib>/bin/Win64/...` folder, or next to the staged copy in a packaged game) or add its folder to the debugger's symbol path.
 
+## Copyright headers
+
+Every `.h`, `.cpp` and `.cs` file under the plugin's `Source/` starts with this line, followed by a blank line (FAB-5, FAB-9, WP-F4):
+
+```cpp
+// Copyright Lifelike & Believable. All Rights Reserved.
+```
+
+No year, as in Epic's own headers. In headers, `#pragma once` comes after the blank line. New files need the line too.
+
+- **Not covered:** anything under a `ThirdParty/` directory (vendored nng, moq-ffi, livekit_ffi headers keep their own notices) and generated files (`*.generated.h`, `*_generated.h`, `*.gen.cpp`, or a file whose first ten lines say `@generated`, `automatically generated`, `auto-generated` or `DO NOT EDIT`).
+- **Third-party code outside `ThirdParty/`:** keep its original notice and add the file to `Build/Fab/copyright-allowlist.txt`, one line per file: the path relative to the plugin root, then the reason (licence and origin). The list is empty today.
+- **Check:** `Build/Scripts/check-copyright-headers.py` (Python 3.8+, standard library) reads the files git tracks under `Source/`, ignores a leading UTF-8 BOM and accepts LF or CRLF. It exits `0` when every checked file has the header, `1` when a file does not (it lists each file and its first line) or an allowlist entry names a file git does not track, and `2` for bad input. `-v` also lists the skipped ThirdParty files.
+
+```bash
+python3 Build/Scripts/check-copyright-headers.py
+```
+
 ## CI/CD Integration
 
 | Workflow | Runs on | What it does |
 |---|---|---|
-| `open3dbroadcast-plugin-ci.yml` | PRs to develop/main, pushes to develop/main, manual | Path filter, Fab source zip, and on the UE runner: BuildPlugin (fails on plugin warnings), UE automation tests against that package, strict build, BuildPlugin on the Fab zip |
+| `open3dbroadcast-plugin-ci.yml` | PRs to develop/main, pushes to develop/main, manual | Path filter, Fab source zip, copyright header check, and on the UE runner: BuildPlugin (fails on plugin warnings), UE automation tests against that package, strict build, BuildPlugin on the Fab zip |
 | `open3dbroadcast-fab-package.yml` | Called by CI and nightly, or manual | `fab-package.py`, then `check-no-video-codecs.sh` on every packaged binary (required), then uploads `Open3DBroadcast-Fab-Source-<sha>` |
 | `open3dbroadcast-plugin-nightly.yml` | 03:00 UTC daily, manual | Same checks as CI with a Shipping `-Configuration`, plus network tests when the `O3D_MOQ_RELAY_URL` secret is set |
 | `open3dbroadcast-plugin-test.yml` | Manual only | Build any branch and optionally run the tests (with or without network tests) |
@@ -231,7 +249,7 @@ All UE jobs call `Sync-O3DSCore.ps1` first.
 
 ### Which PR jobs run, and when (CI-9)
 
-- **Every PR commit, drafts included:** the path filter, the Fab source zip job and `core-tests.yml`. They run on GitHub-hosted runners and take a few minutes.
+- **Every PR commit, drafts included:** the path filter, the Fab source zip job, the copyright header check and `core-tests.yml`. They run on GitHub-hosted runners and take a few minutes.
 - **Non-draft PRs, pushes to develop/main and manual runs:** the "UE build and tests" job on the single self-hosted `[self-hosted, ue5, windows]` runner. Drafts skip it so unfinished work does not hold the runner. To get the UE result for a draft, mark it ready for review, or run the workflow by hand on the branch (Actions > Open3DBroadcast Plugin CI > Run workflow).
 - **Path filter:** all plugin CI jobs are skipped when a PR touches nothing the plugin build depends on. The filter covers `Build/**`, the plugin, `ProjectSandbox/` project files, the workflow files, and everything `Sync-O3DSCore.ps1` compiles: `src/**`, `thirdparty/**`, `CMakeLists.txt`, `*.cmake`, `apps/**`, `plugins/mobu/**`, `.gitmodules`.
 
@@ -242,7 +260,7 @@ All UE jobs call `Sync-O3DSCore.ps1` first.
 3. The strict build (`-StrictIncludes`, no PCH, no unity) fails or warns.
 4. BuildPlugin on the Fab zip fails or warns, or an editor DLL is missing from its output.
 
-The Fab zip job is red when a package check or the codec gate fails.
+The Fab zip job is red when a package check or the codec gate fails. The "Copyright headers" job is red when `check-copyright-headers.py` fails; it is a separate job, so it does not stop the Fab zip from being built.
 
 See `.github/workflows/` for workflow definitions.
 
@@ -283,7 +301,7 @@ Usage:
 
 - **Windows**: PowerShell 5.1+ (or PowerShell Core 7+)
 - **Unreal Engine**: 5.7 (the plugin's `EngineVersion`)
-- **Python**: 3.8+ for `fab-package.py`
+- **Python**: 3.8+ for `fab-package.py` and `check-copyright-headers.py`
 - **Visual Studio**: 2022 (for building)
 - **Git**: For repository operations
 
