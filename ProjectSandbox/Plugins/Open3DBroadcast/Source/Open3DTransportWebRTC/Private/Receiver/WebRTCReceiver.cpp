@@ -1,4 +1,5 @@
 #include "WebRTCReceiver.h"
+#include "O3DRedact.h"
 #include "../Shared/WebRTCUtils.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
@@ -384,7 +385,7 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
 
     bInitialized.Store(true);
 
-    UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver initialized: URL=%s"), *RoomUrl);
+    UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver initialized: URL=%s"), *O3DRedact::Url(RoomUrl));
 
     return true;
 }
@@ -599,6 +600,8 @@ bool FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& Config)
         TokenConfig.Identity = WebRTCUtils::MakeParticipantIdentity(TEXT("receiver"));
         TokenConfig.Role = EO3DTokenRole::Subscriber;
         TokenConfig.RefreshLeadTimeSec = Config.TokenRefreshLeadTimeSec;
+        // Declared secret, resolved into Config.Secrets by the component or source (ADR 0004).
+        TokenConfig.EndpointAuth = WebRTCUtils::FindSecret(Config.Secrets, WebRTCUtils::TokenEndpointAuthOptionKey);
 
         if (TokenConfig.EndpointUrl.IsEmpty())
         {
@@ -613,7 +616,7 @@ bool FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& Config)
         }
 
         UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("Token auto-fetch enabled: endpoint=%s, room=%s, identity=%s"),
-            *TokenConfig.EndpointUrl, *TokenConfig.RoomName, *TokenConfig.Identity);
+            *O3DRedact::Url(TokenConfig.EndpointUrl), *TokenConfig.RoomName, *TokenConfig.Identity);
     }
     else
     {

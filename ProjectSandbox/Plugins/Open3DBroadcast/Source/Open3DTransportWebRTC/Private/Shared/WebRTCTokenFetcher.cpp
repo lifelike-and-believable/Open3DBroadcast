@@ -6,6 +6,8 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonReader.h"
 #include "Logging/LogMacros.h"
+#include "O3DHelpers.h"
+#include "O3DRedact.h"
 
 FO3DTokenFetcher::FO3DTokenFetcher()
 	: State(MakeShared<FState, ESPMode::ThreadSafe>())
@@ -27,6 +29,23 @@ void FO3DTokenFetcher::FetchTokenAsync(const FO3DTokenFetchRequest& Request, TFu
 		FO3DTokenResult Result;
 		Result.bSuccess = false;
 		Result.ErrorMessage = TEXT("Endpoint URL is empty");
+
+		if (OnComplete)
+		{
+			OnComplete(Result);
+		}
+		return;
+	}
+
+	// Credentials never travel over plain HTTP except to this machine (ADR 0004 item 6).
+	if (!O3DHelpers::IsHttpsOrLoopbackHttpUrl(Request.EndpointUrl))
+	{
+		FO3DTokenResult Result;
+		Result.bSuccess = false;
+		Result.ErrorMessage = FString::Printf(
+			TEXT("Token endpoint %s refused: use https:// (plain http:// is allowed only for localhost, 127.0.0.1 and ::1)"),
+			*O3DRedact::Url(Request.EndpointUrl));
+		UE_LOG(LogO3DWebRTCTokenManager, Error, TEXT("Token fetch failed: %s"), *Result.ErrorMessage);
 
 		if (OnComplete)
 		{
@@ -60,6 +79,11 @@ void FO3DTokenFetcher::ExecuteFetchWithRetry(const FStateWeak& WeakState, uint64
 	HttpRequest->SetVerb(TEXT("POST"));
 	HttpRequest->SetURL(Request.EndpointUrl);
 	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+	if (!Request.AuthBearer.IsEmpty())
+	{
+		// The endpoint must authenticate its callers (ADR 0004 item 6). The value is never logged.
+		HttpRequest->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bearer %s"), *Request.AuthBearer));
+	}
 	HttpRequest->SetTimeout(Request.TimeoutSeconds);
 
 	// Build request body
@@ -68,12 +92,12 @@ void FO3DTokenFetcher::ExecuteFetchWithRetry(const FStateWeak& WeakState, uint64
 
 	if (RetryAttempt == 0)
 	{
-		UE_LOG(LogO3DWebRTCTokenManager, Verbose, TEXT("Sending token fetch request to: %s"), *Request.EndpointUrl);
+		UE_LOG(LogO3DWebRTCTokenManager, Verbose, TEXT("Sending token fetch request to: %s"), *O3DRedact::Url(Request.EndpointUrl));
 	}
 	else
 	{
 		UE_LOG(LogO3DWebRTCTokenManager, Warning, TEXT("Retrying token fetch (attempt %d/%d) to: %s"),
-			RetryAttempt, Request.MaxRetries, *Request.EndpointUrl);
+			RetryAttempt, Request.MaxRetries, *O3DRedact::Url(Request.EndpointUrl));
 	}
 
 	// The delegate holds the state weakly (TRF-24). It never touches the fetcher object.
@@ -115,8 +139,13 @@ void FO3DTokenFetcher::ExecuteFetchWithRetry(const FStateWeak& WeakState, uint64
 
 			if (ResponseCode < 200 || ResponseCode >= 300)
 			{
+				// The body is not logged: it may echo credentials (TRF-22). Status and length only.
 				Result.bSuccess = false;
-				Result.ErrorMessage = FString::Printf(TEXT("HTTP error %d: %s"), ResponseCode, *Resp->GetContentAsString());
+				Result.ErrorMessage = FString::Printf(TEXT("HTTP error %d (%d byte response)"), ResponseCode, Resp->GetContent().Num());
+				if (ResponseCode == 401 || ResponseCode == 403)
+				{
+					Result.ErrorMessage += TEXT(": the token endpoint rejected the request; check the token endpoint credential");
+				}
 				UE_LOG(LogO3DWebRTCTokenManager, Warning, TEXT("Token fetch failed: %s"), *Result.ErrorMessage);
 			}
 			else
@@ -236,7 +265,7 @@ void FO3DTokenFetcher::CancelPendingRequests()
 
 FString FO3DTokenFetcher::BuildRequestBody(const FO3DTokenFetchRequest& Request)
 {
-	// Build JSON request body
+	// Build JSON request body: room, identity and role, as a request only.
 	TSharedPtr<FJsonObject> JsonObject = MakeShareable(new FJsonObject());
 
 	// Required fields
@@ -255,46 +284,8 @@ FString FO3DTokenFetcher::BuildRequestBody(const FO3DTokenFetchRequest& Request)
 		JsonObject->SetStringField(TEXT("role"), Request.Role);
 	}
 
-	// Grants object
-	TSharedPtr<FJsonObject> GrantsObject = MakeShareable(new FJsonObject());
-
-	// Default grants based on role
-	if (Request.Role.Equals(TEXT("publisher"), ESearchCase::IgnoreCase))
-	{
-		GrantsObject->SetBoolField(TEXT("roomCreate"), true);
-		GrantsObject->SetBoolField(TEXT("canPublish"), true);
-		GrantsObject->SetBoolField(TEXT("canSubscribe"), false);
-	}
-	else if (Request.Role.Equals(TEXT("subscriber"), ESearchCase::IgnoreCase))
-	{
-		GrantsObject->SetBoolField(TEXT("roomCreate"), false);
-		GrantsObject->SetBoolField(TEXT("canPublish"), false);
-		GrantsObject->SetBoolField(TEXT("canSubscribe"), true);
-	}
-
-	// Additional grants (can override defaults)
-	for (const auto& Grant : Request.AdditionalGrants)
-	{
-		const FString& Key = Grant.Key;
-		const FString& Value = Grant.Value;
-
-		// Try to parse as boolean
-		if (Value.Equals(TEXT("true"), ESearchCase::IgnoreCase))
-		{
-			GrantsObject->SetBoolField(Key, true);
-		}
-		else if (Value.Equals(TEXT("false"), ESearchCase::IgnoreCase))
-		{
-			GrantsObject->SetBoolField(Key, false);
-		}
-		else
-		{
-			// Store as string
-			GrantsObject->SetStringField(Key, Value);
-		}
-	}
-
-	JsonObject->SetObjectField(TEXT("grants"), GrantsObject);
+	// No grants: the endpoint decides them from the authenticated caller, and a client that
+	// could choose its own grants could mint a publisher token (ADR 0004 item 6, TRF-22).
 
 	// Serialize to string
 	FString OutputString;
@@ -373,7 +364,8 @@ FO3DTokenResult FO3DTokenFetcher::ParseResponse(FHttpResponsePtr Response)
 	{
 		Result.bSuccess = false;
 		Result.ErrorMessage = TEXT("Failed to parse JSON response");
-		UE_LOG(LogO3DWebRTCTokenManager, Verbose, TEXT("Response body: %s"), *ResponseBody);
+		// The body is not logged: it may contain the token.
+		UE_LOG(LogO3DWebRTCTokenManager, Verbose, TEXT("Unparseable token response (%d characters)"), ResponseBody.Len());
 		return Result;
 	}
 

@@ -11,10 +11,12 @@
 #include "O3DTransportConfigPanelBase.h"
 #include "O3DSenderComponent.h"
 #include "O3DReceiverSourceSettings.h"
+#include "O3DSecretStore.h"
 
 #if WITH_EDITOR
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SNumericEntryBox.h"
@@ -29,18 +31,41 @@ DEFINE_LOG_CATEGORY(LogO3DWebRTCReceiver);
 
 namespace WebRTCConfig
 {
+	/** Registered transport name; the secret store and the credential profile option are keyed by it. */
+	static constexpr TCHAR TransportName[] = TEXT("WebRTC");
+
 	static constexpr TCHAR UrlOptionKey[] = TEXT("webrtc.url");
-	static constexpr TCHAR TokenOptionKey[] = TEXT("webrtc.token");
+	static constexpr const TCHAR* TokenOptionKey = WebRTCUtils::TokenOptionKey;
+	static constexpr const TCHAR* TokenEndpointAuthKey = WebRTCUtils::TokenEndpointAuthOptionKey;
 	static constexpr TCHAR UseAutoTokenFetchKey[] = TEXT("webrtc.useAutoTokenFetch");
 	static constexpr TCHAR TokenEndpointUrlKey[] = TEXT("webrtc.tokenEndpointUrl");
 	static constexpr TCHAR TokenRefreshLeadTimeKey[] = TEXT("webrtc.tokenRefreshLeadTimeSec");
 	// LiveKit room requested from the token endpoint; must match on sender and receiver (TRF-25).
 	static constexpr const TCHAR* RoomOptionKey = WebRTCUtils::RoomOptionKey;
-	
+
 	// Token refresh lead time constants
 	static constexpr int32 MinTokenRefreshLeadTimeSec = 60;     // 1 minute
 	static constexpr int32 MaxTokenRefreshLeadTimeSec = 3600;   // 1 hour
 	static constexpr int32 DefaultTokenRefreshLeadTimeSec = 300; // 5 minutes
+
+	/** Non-secret option selecting the credential profile ("webrtc.credentialProfile"). */
+	static FString GetCredentialProfileKey()
+	{
+		return FO3DSecretStore::MakeCredentialProfileOptionKey(TransportName);
+	}
+
+	/** Secret keys and their environment variables (ADR 0004 item 1). */
+	static void DeclareSecrets(TArray<FString>& OutKeys, TMap<FString, FString>& OutEnvVars)
+	{
+		OutKeys = { FString(TokenOptionKey), FString(TokenEndpointAuthKey) };
+		OutEnvVars.Add(TokenOptionKey, WebRTCUtils::TokenEnvVar);
+		OutEnvVars.Add(TokenEndpointAuthKey, WebRTCUtils::TokenEndpointAuthEnvVar);
+	}
+
+	static FString GetEnvVarForKey(const TCHAR* Key)
+	{
+		return FCString::Strcmp(Key, TokenOptionKey) == 0 ? FString(WebRTCUtils::TokenEnvVar) : FString(WebRTCUtils::TokenEndpointAuthEnvVar);
+	}
 
 	// Sender config helpers
 	static FString GetSenderOption(const UO3DSenderComponent* Component, const TCHAR* Key)
@@ -78,6 +103,268 @@ namespace WebRTCConfig
 }
 
 #if WITH_EDITOR
+namespace WebRTCSecretsUI
+{
+	/**
+	 * How a secret field reads status and writes values, so one widget serves the sender component
+	 * and the receiver settings object. None of these returns a secret value.
+	 */
+	struct FSecretBinding
+	{
+		TFunction<FO3DSecretStatus()> GetStatus;
+		TFunction<void(const FString& /*Value*/, EO3DSecretPersistence)> Set;
+		TFunction<bool(EO3DSecretPersistence)> SetPersistence;
+		TFunction<void()> Clear;
+	};
+
+	DECLARE_DELEGATE_OneParam(FOnSecretCommitted, ETextCommit::Type);
+
+	/**
+	 * A password box that always opens empty (ADR 0004 item 5), a Clear button, a "Remember on
+	 * this machine" checkbox and a status line saying where the current value comes from.
+	 * Committing an empty box does nothing; Clear removes the value.
+	 */
+	class SWebRTCSecretField : public SCompoundWidget
+	{
+	public:
+		SLATE_BEGIN_ARGS(SWebRTCSecretField) {}
+			SLATE_ARGUMENT(FText, Label)
+			SLATE_ARGUMENT(FText, LabelToolTip)
+			SLATE_ARGUMENT(FText, HintText)
+			SLATE_EVENT(FOnSecretCommitted, OnCommitted)
+		SLATE_END_ARGS()
+
+		void Construct(const FArguments& InArgs, FSecretBinding InBinding)
+		{
+			Binding = MoveTemp(InBinding);
+			OnCommitted = InArgs._OnCommitted;
+			bRemember = Binding.GetStatus ? Binding.GetStatus().bRemembered : false;
+
+			ChildSlot
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(InArgs._Label)
+					.ToolTipText(InArgs._LabelToolTip)
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(0.f, 4.f, 0.f, 2.f)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot()
+					.FillWidth(1.f)
+					[
+						SAssignNew(ValueTextBox, SEditableTextBox)
+						.Text(FText::GetEmpty())
+						.IsPassword(true)
+						.HintText(InArgs._HintText)
+						.OnTextCommitted(this, &SWebRTCSecretField::HandleCommitted)
+					]
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.Padding(4.f, 0.f, 0.f, 0.f)
+					[
+						SNew(SButton)
+						.Text(LOCTEXT("SecretClear", "Clear"))
+						.ToolTipText(LOCTEXT("SecretClearTooltip", "Forget the value for this session and on this machine. An environment variable still applies."))
+						.OnClicked(this, &SWebRTCSecretField::HandleClearClicked)
+					]
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(0.f, 0.f, 0.f, 2.f)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					[
+						SNew(SCheckBox)
+						.IsChecked(this, &SWebRTCSecretField::GetRememberState)
+						.OnCheckStateChanged(this, &SWebRTCSecretField::HandleRememberChanged)
+						.ToolTipText(LOCTEXT("SecretRememberTooltip", "Keep the value in your per-user editor settings under Saved/Config on this machine. It is never written to the level, the Blueprint, the project ini or a LiveLink preset."))
+					]
+					+ SHorizontalBox::Slot()
+					.Padding(4.f, 0.f, 0.f, 0.f)
+					.VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("SecretRememberLabel", "Remember on this machine"))
+					]
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(0.f, 0.f, 0.f, 8.f)
+				[
+					SNew(STextBlock)
+					.Text(this, &SWebRTCSecretField::GetStatusText)
+				]
+			];
+		}
+
+	private:
+		void HandleCommitted(const FText& NewText, ETextCommit::Type CommitType)
+		{
+			const FString Value = NewText.ToString().TrimStartAndEnd();
+			if (Value.IsEmpty())
+			{
+				// The box opens empty; leaving it empty keeps the current value. Clear removes it.
+				return;
+			}
+
+			if (Binding.Set)
+			{
+				Binding.Set(Value, bRemember ? EO3DSecretPersistence::RememberOnThisMachine : EO3DSecretPersistence::Session);
+			}
+			if (ValueTextBox.IsValid())
+			{
+				ValueTextBox->SetText(FText::GetEmpty());
+			}
+			OnCommitted.ExecuteIfBound(CommitType);
+		}
+
+		FReply HandleClearClicked()
+		{
+			if (Binding.Clear)
+			{
+				Binding.Clear();
+			}
+			bRemember = false;
+			if (ValueTextBox.IsValid())
+			{
+				ValueTextBox->SetText(FText::GetEmpty());
+			}
+			OnCommitted.ExecuteIfBound(ETextCommit::Default);
+			return FReply::Handled();
+		}
+
+		ECheckBoxState GetRememberState() const
+		{
+			return bRemember ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+		}
+
+		void HandleRememberChanged(ECheckBoxState NewState)
+		{
+			bRemember = (NewState == ECheckBoxState::Checked);
+			// Moves a value set this session; unchecking also forgets a remembered copy.
+			if (Binding.SetPersistence)
+			{
+				Binding.SetPersistence(bRemember ? EO3DSecretPersistence::RememberOnThisMachine : EO3DSecretPersistence::Session);
+			}
+		}
+
+		FText GetStatusText() const
+		{
+			const FO3DSecretStatus Status = Binding.GetStatus ? Binding.GetStatus() : FO3DSecretStatus();
+			switch (Status.Source)
+			{
+			case EO3DSecretSource::Session:
+				return Status.bRemembered
+					? LOCTEXT("SecretStatusSessionRemembered", "Set for this session and remembered on this machine")
+					: LOCTEXT("SecretStatusSession", "Set for this session (gone after restart)");
+			case EO3DSecretSource::Environment:
+				return FText::Format(LOCTEXT("SecretStatusEnv", "From environment variable {0}"), FText::FromString(Status.EnvVarName));
+			case EO3DSecretSource::UserSettings:
+				return LOCTEXT("SecretStatusRemembered", "Remembered on this machine");
+			default:
+				return LOCTEXT("SecretStatusNotSet", "Not set");
+			}
+		}
+
+		FSecretBinding Binding;
+		FOnSecretCommitted OnCommitted;
+		TSharedPtr<SEditableTextBox> ValueTextBox;
+		bool bRemember = false;
+	};
+
+	static FSecretBinding MakeSenderBinding(UO3DSenderComponent* Component, const TCHAR* Key)
+	{
+		const TWeakObjectPtr<UO3DSenderComponent> Weak(Component);
+		const FString KeyString(Key);
+
+		FSecretBinding Binding;
+		Binding.GetStatus = [Weak, KeyString]()
+		{
+			const UO3DSenderComponent* Pinned = Weak.Get();
+			return Pinned ? Pinned->GetTransportSecretStatus(KeyString) : FO3DSecretStatus();
+		};
+		Binding.Set = [Weak, KeyString](const FString& Value, EO3DSecretPersistence Persistence)
+		{
+			if (UO3DSenderComponent* Pinned = Weak.Get())
+			{
+				Pinned->SetTransportSecret(KeyString, Value, Persistence);
+			}
+		};
+		Binding.SetPersistence = [Weak, KeyString](EO3DSecretPersistence Persistence)
+		{
+			UO3DSenderComponent* Pinned = Weak.Get();
+			return Pinned ? Pinned->SetTransportSecretPersistence(KeyString, Persistence) : false;
+		};
+		Binding.Clear = [Weak, KeyString]()
+		{
+			if (UO3DSenderComponent* Pinned = Weak.Get())
+			{
+				Pinned->ClearTransportSecret(KeyString);
+			}
+		};
+		return Binding;
+	}
+
+	static FSecretBinding MakeReceiverBinding(UO3DReceiverSettingsObject* SettingsObject, const TCHAR* Key)
+	{
+		const TWeakObjectPtr<UO3DReceiverSettingsObject> Weak(SettingsObject);
+		const FString KeyString(Key);
+		const FString EnvVar = WebRTCConfig::GetEnvVarForKey(Key);
+
+		// Receiver secrets are keyed by the transport and the profile the settings select.
+		auto Profile = [Weak]()
+		{
+			const UO3DReceiverSettingsObject* Pinned = Weak.Get();
+			return Pinned ? O3DReceiver::GetCredentialProfile(Pinned->Settings) : FString(FO3DSecretStore::DefaultProfile());
+		};
+
+		FSecretBinding Binding;
+		Binding.GetStatus = [Profile, KeyString, EnvVar]()
+		{
+			return FO3DSecretStore::Get().Describe(WebRTCConfig::TransportName, Profile(), KeyString, EnvVar);
+		};
+		Binding.Set = [Profile, KeyString](const FString& Value, EO3DSecretPersistence Persistence)
+		{
+			FO3DSecretStore::Get().Set(WebRTCConfig::TransportName, Profile(), KeyString, Value, Persistence);
+		};
+		Binding.SetPersistence = [Profile, KeyString](EO3DSecretPersistence Persistence)
+		{
+			return FO3DSecretStore::Get().SetPersistence(WebRTCConfig::TransportName, Profile(), KeyString, Persistence);
+		};
+		Binding.Clear = [Profile, KeyString]()
+		{
+			FO3DSecretStore::Get().Clear(WebRTCConfig::TransportName, Profile(), KeyString);
+		};
+		return Binding;
+	}
+
+	static FText GetTokenLabelToolTip()
+	{
+		return FText::Format(LOCTEXT("WebRTCTokenTooltip", "LiveKit JWT access token, used when Auto Token Fetch is off. Kept out of the level, Blueprint, ini and LiveLink presets. Can also come from the {0} environment variable."),
+			FText::FromString(WebRTCUtils::TokenEnvVar));
+	}
+
+	static FText GetEndpointAuthLabelToolTip()
+	{
+		return FText::Format(LOCTEXT("WebRTCEndpointAuthTooltip", "Credential for your token endpoint, sent as 'Authorization: Bearer <value>'. The endpoint must authenticate callers and decide their grants. Can also come from the {0} environment variable."),
+			FText::FromString(WebRTCUtils::TokenEndpointAuthEnvVar));
+	}
+
+	static FText GetMissingTokenWarning()
+	{
+		return FText::Format(LOCTEXT("WebRTCMissingToken", "No access token is set. Enter one above, set {0}, or enable Auto Token Fetch."),
+			FText::FromString(WebRTCUtils::TokenEnvVar));
+	}
+}
+
 namespace WebRTCSender
 {
 	class SWebRTCSenderSettingsPanel : public SCompoundWidget
@@ -94,11 +381,11 @@ namespace WebRTCSender
 			OnConfigChanged = InArgs._OnConfigChanged;
 
 			const FString InitialUrl = ResolveUrlValue();
-			const FString InitialToken = ResolveTokenValue();
 			const bool bInitialUseAutoFetch = ResolveUseAutoTokenFetch();
 			const FString InitialTokenEndpoint = ResolveTokenEndpointUrl();
 			const int32 InitialRefreshLeadTime = ResolveTokenRefreshLeadTime();
 			const FString InitialRoom = ResolveRoomValue();
+			const FString InitialProfile = ResolveProfileValue();
 
 			ChildSlot
 			[
@@ -145,27 +432,47 @@ namespace WebRTCSender
 				.AutoHeight()
 				[
 					SNew(STextBlock)
-					.Text(LOCTEXT("WebRTCTokenLabel", "Access Token"))
-					.ToolTipText(LOCTEXT("WebRTCTokenTooltip", "LiveKit JWT access token (only used when Auto Token Fetch is disabled)"))
-					.Visibility_Lambda([this]() { return GetUseAutoTokenFetch() ? EVisibility::Collapsed : EVisibility::Visible; })
+					.Text(LOCTEXT("WebRTCProfileLabel", "Credential Profile"))
+					.ToolTipText(LOCTEXT("WebRTCProfileTooltip", "Names the stored credentials this component uses (saved with the component; the credentials are not). Leave empty for 'default'."))
 				]
 				+ SVerticalBox::Slot()
 				.AutoHeight()
 				.Padding(0.f, 4.f, 0.f, 8.f)
 				[
-					SAssignNew(TokenTextBox, SEditableTextBox)
-					.Text(FText::FromString(InitialToken))
-					.OnTextCommitted(this, &SWebRTCSenderSettingsPanel::HandleTokenCommitted)
-					.HintText(LOCTEXT("WebRTCTokenHint", "LiveKit access token"))
-					.IsPassword(true)
+					SNew(SEditableTextBox)
+					.Text(FText::FromString(InitialProfile))
+					.OnTextCommitted(this, &SWebRTCSenderSettingsPanel::HandleProfileCommitted)
+					.HintText(LOCTEXT("WebRTCProfileHint", "default"))
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(SBox)
 					.Visibility_Lambda([this]() { return GetUseAutoTokenFetch() ? EVisibility::Collapsed : EVisibility::Visible; })
+					[
+						SNew(WebRTCSecretsUI::SWebRTCSecretField, WebRTCSecretsUI::MakeSenderBinding(SenderComponent, WebRTCConfig::TokenOptionKey))
+						.Label(LOCTEXT("WebRTCTokenLabel", "Access Token"))
+						.LabelToolTip(WebRTCSecretsUI::GetTokenLabelToolTip())
+						.HintText(LOCTEXT("WebRTCTokenHint", "Paste a LiveKit access token"))
+						.OnCommitted(WebRTCSecretsUI::FOnSecretCommitted::CreateSP(this, &SWebRTCSenderSettingsPanel::HandleSecretCommitted))
+					]
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(0.f, 0.f, 0.f, 8.f)
+				[
+					SNew(STextBlock)
+					.Text(WebRTCSecretsUI::GetMissingTokenWarning())
+					.ColorAndOpacity(FLinearColor(1.f, 0.75f, 0.2f))
+					.AutoWrapText(true)
+					.Visibility_Lambda([this]() { return IsTokenMissing() ? EVisibility::Visible : EVisibility::Collapsed; })
 				]
 				+ SVerticalBox::Slot()
 				.AutoHeight()
 				[
 					SNew(STextBlock)
 					.Text(LOCTEXT("WebRTCTokenEndpointLabel", "Token Endpoint URL"))
-					.ToolTipText(LOCTEXT("WebRTCTokenEndpointTooltip", "The HTTP/HTTPS endpoint that generates JWT tokens (e.g., https://myserver.com/token). The server should accept POST requests with room, identity, and role parameters."))
+					.ToolTipText(LOCTEXT("WebRTCTokenEndpointTooltip", "The HTTPS endpoint that issues LiveKit tokens (e.g., https://myserver.com/token). It receives room, identity and role, must authenticate the caller and decides the grants. Plain http:// is accepted only for localhost, 127.0.0.1 and ::1."))
 					.Visibility_Lambda([this]() { return GetUseAutoTokenFetch() ? EVisibility::Visible : EVisibility::Collapsed; })
 				]
 				+ SVerticalBox::Slot()
@@ -177,6 +484,19 @@ namespace WebRTCSender
 					.OnTextCommitted(this, &SWebRTCSenderSettingsPanel::HandleTokenEndpointCommitted)
 					.HintText(LOCTEXT("WebRTCTokenEndpointHint", "https://myserver.com/token"))
 					.Visibility_Lambda([this]() { return GetUseAutoTokenFetch() ? EVisibility::Visible : EVisibility::Collapsed; })
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(SBox)
+					.Visibility_Lambda([this]() { return GetUseAutoTokenFetch() ? EVisibility::Visible : EVisibility::Collapsed; })
+					[
+						SNew(WebRTCSecretsUI::SWebRTCSecretField, WebRTCSecretsUI::MakeSenderBinding(SenderComponent, WebRTCConfig::TokenEndpointAuthKey))
+						.Label(LOCTEXT("WebRTCEndpointAuthLabel", "Token Endpoint Credential"))
+						.LabelToolTip(WebRTCSecretsUI::GetEndpointAuthLabelToolTip())
+						.HintText(LOCTEXT("WebRTCEndpointAuthHint", "Bearer credential for your token endpoint"))
+						.OnCommitted(WebRTCSecretsUI::FOnSecretCommitted::CreateSP(this, &SWebRTCSenderSettingsPanel::HandleSecretCommitted))
+					]
 				]
 				+ SVerticalBox::Slot()
 				.AutoHeight()
@@ -235,20 +555,15 @@ namespace WebRTCSender
 			SenderComponent->SetTransportOption(WebRTCConfig::UrlOptionKey, Sanitized);
 		}
 
-		FString ResolveTokenValue() const
+		FString ResolveProfileValue() const
 		{
-			return SenderComponent ? SenderComponent->GetTransportOption(WebRTCConfig::TokenOptionKey) : FString();
+			return SenderComponent ? SenderComponent->GetTransportOption(WebRTCConfig::GetCredentialProfileKey()) : FString();
 		}
 
-		void SetTokenValue(const FString& NewValue)
+		bool IsTokenMissing() const
 		{
-			if (!SenderComponent)
-			{
-				return;
-			}
-
-			const FString Sanitized = NewValue.TrimStartAndEnd();
-			SenderComponent->SetTransportOption(WebRTCConfig::TokenOptionKey, Sanitized);
+			return !GetUseAutoTokenFetch() && SenderComponent
+				&& SenderComponent->GetTransportSecretStatus(WebRTCConfig::TokenOptionKey).Source == EO3DSecretSource::None;
 		}
 
 		bool ResolveUseAutoTokenFetch() const
@@ -310,6 +625,20 @@ namespace WebRTCSender
 			NotifyConfigChanged();
 		}
 
+		void HandleProfileCommitted(const FText& NewText, ETextCommit::Type CommitType)
+		{
+			if (SenderComponent)
+			{
+				SenderComponent->SetTransportOption(WebRTCConfig::GetCredentialProfileKey(), NewText.ToString().TrimStartAndEnd());
+			}
+			NotifyConfigChanged();
+		}
+
+		void HandleSecretCommitted(ETextCommit::Type CommitType)
+		{
+			NotifyConfigChanged();
+		}
+
 		int32 ResolveTokenRefreshLeadTime() const
 		{
 			if (!SenderComponent)
@@ -332,12 +661,6 @@ namespace WebRTCSender
 		void HandleUrlCommitted(const FText& NewText, ETextCommit::Type CommitType)
 		{
 			SetUrlValue(NewText.ToString());
-			NotifyConfigChanged();
-		}
-
-		void HandleTokenCommitted(const FText& NewText, ETextCommit::Type CommitType)
-		{
-			SetTokenValue(NewText.ToString());
 			NotifyConfigChanged();
 		}
 
@@ -372,7 +695,6 @@ namespace WebRTCSender
 		FSimpleDelegate OnConfigChanged;
 		TSharedPtr<SEditableTextBox> RoomTextBox;
 		TSharedPtr<SEditableTextBox> UrlTextBox;
-		TSharedPtr<SEditableTextBox> TokenTextBox;
 		TSharedPtr<SCheckBox> UseAutoTokenFetchCheckBox;
 		TSharedPtr<SEditableTextBox> TokenEndpointTextBox;
 		TSharedPtr<SSpinBox<int32>> TokenRefreshLeadTimeSpinBox;
@@ -398,11 +720,11 @@ namespace WebRTCReceiver
 			SetOnSubmit(InArgs._OnSubmit);
 
 			const FString InitialUrl = GetUrlValue();
-			const FString InitialToken = GetTokenValue();
 			const bool bInitialUseAutoFetch = GetUseAutoTokenFetch();
 			const FString InitialTokenEndpoint = GetTokenEndpointUrl();
 			const int32 InitialRefreshLeadTime = GetTokenRefreshLeadTime();
 			const FString InitialRoom = GetRoomValue();
+			const FString InitialProfile = SettingsObject ? WebRTCConfig::GetReceiverOption(SettingsObject->Settings, *WebRTCConfig::GetCredentialProfileKey()) : FString();
 
 			TSharedRef<SVerticalBox> PanelContent = SNew(SVerticalBox);
 
@@ -451,21 +773,43 @@ namespace WebRTCReceiver
 				.AutoHeight()
 				[
 					SNew(STextBlock)
-					.Text(LOCTEXT("WebRTCReceiverTokenLabel", "Access Token"))
-					.ToolTipText(LOCTEXT("WebRTCReceiverTokenTooltip", "LiveKit JWT access token (only used when Auto Token Fetch is disabled)"))
-					.Visibility_Lambda([this]() { return GetUseAutoTokenFetchState() ? EVisibility::Collapsed : EVisibility::Visible; })
+					.Text(LOCTEXT("WebRTCReceiverProfileLabel", "Credential Profile"))
+					.ToolTipText(LOCTEXT("WebRTCReceiverProfileTooltip", "Names the stored credentials this source uses (saved with the source settings; the credentials are not). Leave empty for 'default'."))
 				];
 
 			PanelContent->AddSlot()
 				.AutoHeight()
 				.Padding(0.f, 4.f, 0.f, 8.f)
 				[
-					SAssignNew(TokenTextBox, SEditableTextBox)
-					.Text(FText::FromString(InitialToken))
-					.OnTextCommitted(this, &SWebRTCReceiverSettingsPanel::HandleTokenCommitted)
-					.HintText(LOCTEXT("WebRTCReceiverTokenHint", "LiveKit access token"))
-					.IsPassword(true)
+					SNew(SEditableTextBox)
+					.Text(FText::FromString(InitialProfile))
+					.OnTextCommitted(this, &SWebRTCReceiverSettingsPanel::HandleProfileCommitted)
+					.HintText(LOCTEXT("WebRTCReceiverProfileHint", "default"))
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				[
+					SNew(SBox)
 					.Visibility_Lambda([this]() { return GetUseAutoTokenFetchState() ? EVisibility::Collapsed : EVisibility::Visible; })
+					[
+						SNew(WebRTCSecretsUI::SWebRTCSecretField, WebRTCSecretsUI::MakeReceiverBinding(SettingsObject, WebRTCConfig::TokenOptionKey))
+						.Label(LOCTEXT("WebRTCReceiverTokenLabel", "Access Token"))
+						.LabelToolTip(WebRTCSecretsUI::GetTokenLabelToolTip())
+						.HintText(LOCTEXT("WebRTCReceiverTokenHint", "Paste a LiveKit access token"))
+						.OnCommitted(WebRTCSecretsUI::FOnSecretCommitted::CreateSP(this, &SWebRTCReceiverSettingsPanel::HandleSecretCommitted))
+					]
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				.Padding(0.f, 0.f, 0.f, 8.f)
+				[
+					SNew(STextBlock)
+					.Text(WebRTCSecretsUI::GetMissingTokenWarning())
+					.ColorAndOpacity(FLinearColor(1.f, 0.75f, 0.2f))
+					.AutoWrapText(true)
+					.Visibility_Lambda([this]() { return IsTokenMissing() ? EVisibility::Visible : EVisibility::Collapsed; })
 				];
 
 			PanelContent->AddSlot()
@@ -473,7 +817,7 @@ namespace WebRTCReceiver
 				[
 					SNew(STextBlock)
 					.Text(LOCTEXT("WebRTCReceiverTokenEndpointLabel", "Token Endpoint URL"))
-					.ToolTipText(LOCTEXT("WebRTCReceiverTokenEndpointTooltip", "The HTTP/HTTPS endpoint that generates JWT tokens (e.g., https://myserver.com/token). The server should accept POST requests with room, identity, and role parameters."))
+					.ToolTipText(LOCTEXT("WebRTCReceiverTokenEndpointTooltip", "The HTTPS endpoint that issues LiveKit tokens (e.g., https://myserver.com/token). It receives room, identity and role, must authenticate the caller and decides the grants. Plain http:// is accepted only for localhost, 127.0.0.1 and ::1."))
 					.Visibility_Lambda([this]() { return GetUseAutoTokenFetchState() ? EVisibility::Visible : EVisibility::Collapsed; })
 				];
 
@@ -486,6 +830,20 @@ namespace WebRTCReceiver
 					.OnTextCommitted(this, &SWebRTCReceiverSettingsPanel::HandleTokenEndpointCommitted)
 					.HintText(LOCTEXT("WebRTCReceiverTokenEndpointHint", "https://myserver.com/token"))
 					.Visibility_Lambda([this]() { return GetUseAutoTokenFetchState() ? EVisibility::Visible : EVisibility::Collapsed; })
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				[
+					SNew(SBox)
+					.Visibility_Lambda([this]() { return GetUseAutoTokenFetchState() ? EVisibility::Visible : EVisibility::Collapsed; })
+					[
+						SNew(WebRTCSecretsUI::SWebRTCSecretField, WebRTCSecretsUI::MakeReceiverBinding(SettingsObject, WebRTCConfig::TokenEndpointAuthKey))
+						.Label(LOCTEXT("WebRTCReceiverEndpointAuthLabel", "Token Endpoint Credential"))
+						.LabelToolTip(WebRTCSecretsUI::GetEndpointAuthLabelToolTip())
+						.HintText(LOCTEXT("WebRTCReceiverEndpointAuthHint", "Bearer credential for your token endpoint"))
+						.OnCommitted(WebRTCSecretsUI::FOnSecretCommitted::CreateSP(this, &SWebRTCReceiverSettingsPanel::HandleSecretCommitted))
+					]
 				];
 
 			PanelContent->AddSlot()
@@ -553,24 +911,15 @@ namespace WebRTCReceiver
 			WebRTCConfig::SetReceiverOption(SettingsObject, WebRTCConfig::UrlOptionKey, Value.TrimStartAndEnd());
 		}
 
-		FString GetTokenValue() const
+		bool IsTokenMissing() const
 		{
-			if (!SettingsObject)
+			if (GetUseAutoTokenFetchState() || !SettingsObject)
 			{
-				return FString();
+				return false;
 			}
-
-			if (const FString* Existing = SettingsObject->Settings.TransportOptions.Find(WebRTCConfig::TokenOptionKey))
-			{
-				return *Existing;
-			}
-
-			return FString();
-		}
-
-		void SetTokenValue(const FString& Value)
-		{
-			WebRTCConfig::SetReceiverOption(SettingsObject, WebRTCConfig::TokenOptionKey, Value.TrimStartAndEnd());
+			const FO3DSecretStatus Status = FO3DSecretStore::Get().Describe(WebRTCConfig::TransportName,
+				O3DReceiver::GetCredentialProfile(SettingsObject->Settings), WebRTCConfig::TokenOptionKey, WebRTCUtils::TokenEnvVar);
+			return Status.Source == EO3DSecretSource::None;
 		}
 
 		bool GetUseAutoTokenFetch() const
@@ -630,6 +979,17 @@ namespace WebRTCReceiver
 			SubmitFromTextCommit(CommitType);
 		}
 
+		void HandleProfileCommitted(const FText& NewText, ETextCommit::Type CommitType)
+		{
+			WebRTCConfig::SetReceiverOption(SettingsObject, *WebRTCConfig::GetCredentialProfileKey(), NewText.ToString().TrimStartAndEnd());
+			SubmitFromTextCommit(CommitType);
+		}
+
+		void HandleSecretCommitted(ETextCommit::Type CommitType)
+		{
+			SubmitFromTextCommit(CommitType);
+		}
+
 		int32 GetTokenRefreshLeadTime() const
 		{
 			if (!SettingsObject)
@@ -654,12 +1014,6 @@ namespace WebRTCReceiver
 			SubmitFromTextCommit(CommitType);
 		}
 
-		void HandleTokenCommitted(const FText& NewText, ETextCommit::Type CommitType)
-		{
-			SetTokenValue(NewText.ToString());
-			SubmitFromTextCommit(CommitType);
-		}
-
 		void HandleUseAutoTokenFetchChanged(ECheckBoxState NewState)
 		{
 			const bool bNewValue = (NewState == ECheckBoxState::Checked);
@@ -681,7 +1035,6 @@ namespace WebRTCReceiver
 		UO3DReceiverSettingsObject* SettingsObject = nullptr;
 		TSharedPtr<SEditableTextBox> RoomTextBox;
 		TSharedPtr<SEditableTextBox> UrlTextBox;
-		TSharedPtr<SEditableTextBox> TokenTextBox;
 		TSharedPtr<SCheckBox> UseAutoTokenFetchCheckBox;
 		TSharedPtr<SEditableTextBox> TokenEndpointTextBox;
 		TSharedPtr<SSpinBox<int32>> TokenRefreshLeadTimeSpinBox;
@@ -698,26 +1051,27 @@ public:
 		LoadLiveKitFFI();
 
 		// Register WebRTC sender factory
-		O3DTransport::RegisterSender(TEXT("WebRTC"), []() { return MakeShared<FO3DWebRTCSender>(); });
+		O3DTransport::RegisterSender(WebRTCConfig::TransportName, []() { return MakeShared<FO3DWebRTCSender>(); });
 
 		// Register WebRTC receiver factory
-		O3DTransport::RegisterReceiver(TEXT("WebRTC"), []() { return MakeShared<FO3DWebRTCReceiver>(); });
+		O3DTransport::RegisterReceiver(WebRTCConfig::TransportName, []() { return MakeShared<FO3DWebRTCReceiver>(); });
 
 		// Register WebRTC sender customization
 		FO3DSenderTransportCustomization SenderCustomization;
+		WebRTCConfig::DeclareSecrets(SenderCustomization.SecretOptionKeys, SenderCustomization.SecretEnvVars);
 		SenderCustomization.ConfigureTransport = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
 		{
-			Config.Transport = TEXT("WebRTC");
+			Config.Transport = WebRTCConfig::TransportName;
 
 			const FString UrlValue = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::UrlOptionKey);
-			const FString TokenValue = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::TokenOptionKey);
 			const FString UseAutoTokenFetchStr = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::UseAutoTokenFetchKey);
 			const FString TokenEndpointUrlValue = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::TokenEndpointUrlKey);
 			const FString TokenRefreshLeadTimeStr = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::TokenRefreshLeadTimeKey);
 			const FString RoomValue = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::RoomOptionKey);
 
 			Config.Uri = UrlValue;
-			Config.Token = TokenValue;
+			// Resolved from the secret store by the component (ADR 0004); never in AdvancedParams.
+			Config.Token = WebRTCUtils::FindSecret(Config.Secrets, WebRTCConfig::TokenOptionKey);
 			Config.Role = TEXT("publisher");
 
 			// Configure auto-fetch fields
@@ -726,7 +1080,6 @@ public:
 			Config.TokenRefreshLeadTimeSec = TokenRefreshLeadTimeStr.IsEmpty() ? WebRTCConfig::DefaultTokenRefreshLeadTimeSec : FCString::Atoi(*TokenRefreshLeadTimeStr);
 
 			Config.AdvancedParams.Add(WebRTCConfig::UrlOptionKey, UrlValue);
-			Config.AdvancedParams.Add(WebRTCConfig::TokenOptionKey, TokenValue);
 			Config.AdvancedParams.Add(WebRTCConfig::RoomOptionKey, RoomValue.TrimStartAndEnd());
 		};
 
@@ -743,23 +1096,24 @@ public:
 				.OnConfigChanged(OnConfigChanged);
 		};
 #endif // WITH_EDITOR
-		O3DSender::RegisterTransportCustomization(TEXT("WebRTC"), MoveTemp(SenderCustomization));
+		O3DSender::RegisterTransportCustomization(WebRTCConfig::TransportName, MoveTemp(SenderCustomization));
 
 		// Register WebRTC receiver customization
 		FO3DReceiverTransportCustomization ReceiverCustomization;
+		WebRTCConfig::DeclareSecrets(ReceiverCustomization.SecretOptionKeys, ReceiverCustomization.SecretEnvVars);
 		ReceiverCustomization.ConfigureTransport = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
 		{
-			Config.Transport = TEXT("WebRTC");
+			Config.Transport = WebRTCConfig::TransportName;
 
 			const FString UrlValue = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::UrlOptionKey);
-			const FString TokenValue = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::TokenOptionKey);
 			const FString UseAutoTokenFetchStr = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::UseAutoTokenFetchKey);
 			const FString TokenEndpointUrlValue = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::TokenEndpointUrlKey);
 			const FString TokenRefreshLeadTimeStr = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::TokenRefreshLeadTimeKey);
 			const FString RoomValue = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::RoomOptionKey);
 
 			Config.Uri = UrlValue;
-			Config.Token = TokenValue;
+			// Resolved from the secret store by the source (ADR 0004); never in AdvancedParams.
+			Config.Token = WebRTCUtils::FindSecret(Config.Secrets, WebRTCConfig::TokenOptionKey);
 			Config.StreamId = TEXT("WebRTCStream");
 			Config.Role = TEXT("subscriber");
 
@@ -769,7 +1123,6 @@ public:
 			Config.TokenRefreshLeadTimeSec = TokenRefreshLeadTimeStr.IsEmpty() ? WebRTCConfig::DefaultTokenRefreshLeadTimeSec : FCString::Atoi(*TokenRefreshLeadTimeStr);
 
 			Config.AdvancedParams.Add(WebRTCConfig::UrlOptionKey, UrlValue);
-			Config.AdvancedParams.Add(WebRTCConfig::TokenOptionKey, TokenValue);
 			Config.AdvancedParams.Add(WebRTCConfig::RoomOptionKey, RoomValue.TrimStartAndEnd());
 
 			Config.Audio.bEnableAudio = Settings.bEnableAudio;
@@ -790,7 +1143,7 @@ public:
 				.OnSubmit(OnSubmit);
 		};
 #endif // WITH_EDITOR
-		O3DReceiver::RegisterTransportCustomization(TEXT("WebRTC"), MoveTemp(ReceiverCustomization));
+		O3DReceiver::RegisterTransportCustomization(WebRTCConfig::TransportName, MoveTemp(ReceiverCustomization));
 
 		UE_LOG(LogO3DWebRTCSender, Log, TEXT("Open3D WebRTC transport module started (LiveKit FFI backend)"));
 	}
@@ -798,12 +1151,12 @@ public:
 	virtual void ShutdownModule() override
 	{
 		// Unregister transport customizations
-		O3DSender::UnregisterTransportCustomization(TEXT("WebRTC"));
-		O3DReceiver::UnregisterTransportCustomization(TEXT("WebRTC"));
+		O3DSender::UnregisterTransportCustomization(WebRTCConfig::TransportName);
+		O3DReceiver::UnregisterTransportCustomization(WebRTCConfig::TransportName);
 
 		// Unregister transport factories
-		O3DTransport::UnregisterSender(TEXT("WebRTC"));
-		O3DTransport::UnregisterReceiver(TEXT("WebRTC"));
+		O3DTransport::UnregisterSender(WebRTCConfig::TransportName);
+		O3DTransport::UnregisterReceiver(WebRTCConfig::TransportName);
 
 		// Unload the LiveKit FFI DLL
 		UnloadLiveKitFFI();
