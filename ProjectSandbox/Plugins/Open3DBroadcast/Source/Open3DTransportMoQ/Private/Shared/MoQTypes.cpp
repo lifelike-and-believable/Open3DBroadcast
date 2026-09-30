@@ -1,6 +1,7 @@
 #include "Shared/MoQTypes.h"
 
 #include "Containers/StringView.h"
+#include "Shared/MoQFfiApi.h"
 
 DEFINE_LOG_CATEGORY(LogMoQBridge);
 
@@ -28,13 +29,13 @@ FMoQResult FMoQResult::Ok()
     return FMoQResult{EMoQErrorCode::Ok, FString(), MOQ_OK};
 }
 
-FMoQResult FMoQResult::FromResult(const MoqResult& Result)
+FMoQResult FMoQResult::FromResult(const MoqResult& Result, const FMoQFfiApi& Api)
 {
     const EMoQErrorCode Code = ToMoQErrorCode(Result.code);
     FString Message;
     if (Result.message != nullptr)
     {
-        Message = MakeStringCopyAndFree(Result.message);
+        Message = MoQFfi::CopyAndFreeString(Api, Result.message);
     }
     else
     {
@@ -101,16 +102,4 @@ FString LexToString(MoqConnectionState State)
     case MOQ_STATE_FAILED: return TEXT("Failed");
     default: return TEXT("Unknown");
     }
-}
-
-FString MakeStringCopyAndFree(const char* FfiString)
-{
-    if (FfiString == nullptr)
-    {
-        return FString();
-    }
-
-    const FString Result = UTF8_TO_TCHAR(FfiString);
-    moq_free_str(FfiString);
-    return Result;
 }

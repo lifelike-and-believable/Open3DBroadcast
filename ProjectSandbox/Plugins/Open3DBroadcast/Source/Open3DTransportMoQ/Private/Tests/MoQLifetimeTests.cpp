@@ -2,10 +2,9 @@
 //
 // WP-S5 tests for MoQ (TRF-1, TRF-10, TRF-12).
 //
-// There is no fake moq-ffi seam yet (FMoQFfiApi arrives with WP-T2c, ADR 0006 F2), and Start()
-// would try to reach a relay, so the stress test cycles Initialize/CreateAudioSink/Stop without
-// Start(). That covers the sink, gate, per-sink encoders and the shared audio queue, but not the
-// publish worker; WP-T2c extends it to Start() with a fake FFI table.
+// InitStopWithAudio cycles Initialize/CreateAudioSink/Stop without Start(). WP-S8 adds
+// Open3DBroadcast.Transport.MoQ.Lifetime.StartStopWithAudio (MoQFunctionalTests.cpp), which runs
+// Start() through the fake FFI table so the publish worker is covered too.
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -15,6 +14,7 @@
 #include "Shared/MoQAsyncDispatcher.h"
 #include "Shared/MoQSessionWrapper.h"
 #include "Testing/O3DLifetimeTestUtils.h"
+#include "Tests/MoQFakeFfi.h"
 
 #include <atomic>
 
@@ -56,22 +56,27 @@ bool FMoQStaleCallbackTokenTest::RunTest(const FString& Parameters)
 	FMoQSessionWrapperTestHelper::InvokeSubscriberThunkWithToken(nullptr, Payload);
 
 	// A connection callback that arrives after the wrapper is destroyed must do nothing.
+	// WP-S8: tokens are per connect attempt, so the session connects through the fake FFI
+	// (the connect is held, as if it never returned) to get one.
+	TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	Fake->bHoldBlockingWork = true;
 	std::atomic<int32> DelegateCalls{0};
 	void* StaleToken = nullptr;
 	{
-		TSharedRef<FMoQSessionWrapper> Session = MakeShared<FMoQSessionWrapper>();
+		TSharedRef<FMoQSessionWrapper, ESPMode::ThreadSafe> Session = MakeShared<FMoQSessionWrapper, ESPMode::ThreadSafe>(Fake->MakeApi());
 		TestTrue(TEXT("Initialize should succeed"), Session->Initialize(TEXT("https://127.0.0.1:4443")).IsOk());
 		Session->OnConnectionStateChanged().AddLambda([&DelegateCalls](MoqConnectionState) { DelegateCalls.fetch_add(1); });
+		TestTrue(TEXT("Connect should start"), Session->Connect().IsOk());
 		StaleToken = FMoQSessionWrapperTestHelper::GetConnectionToken(*Session);
 		TestNotNull(TEXT("Session registered a connection token"), StaleToken);
 	}
 
 	FMoQSessionWrapperTestHelper::InvokeConnectionThunkWithToken(StaleToken, MOQ_STATE_CONNECTED);
-	if (FTaskGraphInterface::IsRunning())
-	{
-		FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
-	}
+	// The held connect finally returns after its session is gone: it must not report anything.
+	Fake->RunHeldWork();
+	MoQFakeTest::Pump();
 	TestEqual(TEXT("Late connection callback reached no delegate"), DelegateCalls.load(), 0);
+	TestTrue(TEXT("The abandoned client was destroyed"), Fake->IsClientDestroyed(1));
 	return true;
 }
 

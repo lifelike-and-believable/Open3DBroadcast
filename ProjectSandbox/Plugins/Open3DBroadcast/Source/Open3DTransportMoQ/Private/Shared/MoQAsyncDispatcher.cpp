@@ -1,13 +1,6 @@
 #include "Shared/MoQAsyncDispatcher.h"
 
-#include "Async/Async.h"
-#include "HAL/PlatformProcess.h"
 #include "Shared/MoQTypes.h"
-
-namespace
-{
-    constexpr TCHAR DispatcherThreadName[] = TEXT("MoQAsyncDispatcher");
-}
 
 FMoQAsyncDispatcher& FMoQAsyncDispatcher::Get()
 {
@@ -17,106 +10,76 @@ FMoQAsyncDispatcher& FMoQAsyncDispatcher::Get()
 
 void FMoQAsyncDispatcher::Initialize()
 {
-    FScopeLock Lock(&InitMutex);
-    if (WorkerThread != nullptr)
+    check(IsInGameThread());
+
     {
-        return;
+        FWriteScopeLock Lock(AcceptLock);
+        bAccepting.Store(true);
     }
 
-    if (TaskEvent == nullptr)
+    if (!TickerHandle.IsValid())
     {
-        TaskEvent = FPlatformProcess::GetSynchEventFromPool(false);
-    }
-
-    bStopRequested = false;
-    WorkerThread = FRunnableThread::Create(this, DispatcherThreadName, 0, TPri_AboveNormal);
-    if (WorkerThread == nullptr)
-    {
-        UE_LOG(LogMoQBridge, Error, TEXT("Failed to create MoQ async dispatcher thread"));
-        bStopRequested = true;
-        FPlatformProcess::ReturnSynchEventToPool(TaskEvent);
-        TaskEvent = nullptr;
+        TickerHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([](float /*DeltaTime*/)
+        {
+            FMoQAsyncDispatcher::Get().DrainOnGameThread();
+            return true;
+        }));
     }
 }
 
 void FMoQAsyncDispatcher::Shutdown()
 {
-    FScopeLock Lock(&InitMutex);
-    if (WorkerThread == nullptr)
+    check(IsInGameThread());
+
     {
-        if (TaskEvent != nullptr)
-        {
-            FPlatformProcess::ReturnSynchEventToPool(TaskEvent);
-            TaskEvent = nullptr;
-        }
-        return;
+        // After this block no thread is inside EnqueueGameThreadTask and later calls drop work.
+        FWriteScopeLock Lock(AcceptLock);
+        bAccepting.Store(false);
     }
 
-    bStopRequested = true;
-    if (TaskEvent != nullptr)
+    if (TickerHandle.IsValid())
     {
-        TaskEvent->Trigger();
+        FTSTicker::GetCoreTicker().RemoveTicker(TickerHandle);
+        TickerHandle = FTSTicker::FDelegateHandle();
     }
 
-    WorkerThread->WaitForCompletion();
-    delete WorkerThread;
-    WorkerThread = nullptr;
-
-    DrainQueue();
-
-    if (TaskEvent != nullptr)
+    // Discard, not run: the objects these tasks would update are being torn down.
+    TUniqueFunction<void()> Task;
+    int32 Discarded = 0;
+    while (TaskQueue.Dequeue(Task))
     {
-        FPlatformProcess::ReturnSynchEventToPool(TaskEvent);
-        TaskEvent = nullptr;
+        ++Discarded;
+    }
+    if (Discarded > 0)
+    {
+        UE_LOG(LogMoQBridge, Verbose, TEXT("MoQ dispatcher discarded %d task(s) at shutdown"), Discarded);
     }
 }
 
-void FMoQAsyncDispatcher::EnqueueGameThreadTask(TUniqueFunction<void()>&& Task)
+bool FMoQAsyncDispatcher::EnqueueGameThreadTask(TUniqueFunction<void()>&& Task)
 {
+    FReadScopeLock Lock(AcceptLock);
+    if (!bAccepting.Load())
+    {
+        return false;
+    }
     TaskQueue.Enqueue(MoveTemp(Task));
-
-    if (TaskEvent == nullptr)
-    {
-        Initialize();
-    }
-
-    if (TaskEvent != nullptr)
-    {
-        TaskEvent->Trigger();
-    }
+    return true;
 }
 
-uint32 FMoQAsyncDispatcher::Run()
+int32 FMoQAsyncDispatcher::DrainOnGameThread()
 {
-    while (!bStopRequested)
-    {
-        if (TaskEvent != nullptr)
-        {
-            TaskEvent->Wait();
-        }
+    check(IsInGameThread());
 
-        DrainQueue();
-    }
-
-    // Final drain to flush any remaining work
-    DrainQueue();
-    return 0;
-}
-
-void FMoQAsyncDispatcher::Stop()
-{
-    bStopRequested = true;
-    if (TaskEvent != nullptr)
-    {
-        TaskEvent->Trigger();
-    }
-}
-
-void FMoQAsyncDispatcher::DrainQueue()
-{
+    int32 Ran = 0;
     TUniqueFunction<void()> Task;
     while (TaskQueue.Dequeue(Task))
     {
-        AsyncTask(ENamedThreads::GameThread, MoveTemp(Task));
+        if (Task)
+        {
+            Task();
+        }
+        ++Ran;
     }
+    return Ran;
 }
