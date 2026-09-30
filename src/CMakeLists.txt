@@ -138,6 +138,7 @@ set(pub_headers
 	o3ds/math.h
 	o3ds/tcp.h
 	o3ds/udp_fragment.h
+	o3ds/tcp_stream_parser.h
 	o3ds/socket_exception.h
 	o3ds/socket_util.h
 	o3ds/udp.h
@@ -177,6 +178,7 @@ set(CORE_SOURCES
 	o3ds/context.cpp
 	o3ds/math.cpp
 	o3ds/udp_fragment.cpp
+	o3ds/tcp_stream_parser.cpp
 	o3ds/o3ds_version.cpp
 )
 

@@ -43,8 +43,15 @@ struct FSocketsTcpPublishState
 };
 
 /**
- * TCP sender - server mode (listens and accepts connections).
- * Adapted from UDP sender pattern for reliability.
+ * TCP sender - server mode (listens and accepts one receiver at a time).
+ *
+ * Threading (WP-S6):
+ * - Initialize/Start/Stop/Tick/CreateAudioSink: game thread.
+ * - Send/SendSerialized: any thread; they only enqueue.
+ * - The worker thread owns the client socket: it accepts, sends (handling partial sends and
+ *   EWOULDBLOCK), writes keepalives and notices a closed peer. The game thread touches the
+ *   sockets only while the worker is not running, so no socket lock is needed and the game
+ *   thread never waits on a send.
  */
 class FO3DSocketsTcpSender : public IOpen3DSender
 {
@@ -62,22 +69,37 @@ public:
 	virtual bool SupportsAudio() const override;
 	virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
 
+	/** True while a receiver is connected. Any thread. */
+	bool HasClient() const { return PublishState->bClientConnected.load(); }
+
+	/** Bytes waiting in the send queue. Any thread; for tests and diagnostics. */
+	uint64 GetPendingQueueBytes() const { return PublishState->SendQueue.GetPendingBytes(); }
+
+	/** Times a send could not complete at once (partial send or EWOULDBLOCK). For tests and diagnostics. */
+	int64 GetSendWaitCount() const { return SendWaitCount.load(); }
+
 private:
 	class FTcpSenderRunnable;
 
 	bool CreateListenSocket();
 	void DestroySocket();
 	bool SendBytes(const uint8* Data, int32 Len);
-	void TickAcceptClient();
-	bool SendFramed(FSocket* InSocket, const uint8* Data, int32 Size);
 	TSharedPtr<FInternetAddr> CreateBindAddress(const FString& Host, int32 Port, bool& bOutValid);
 
 	// Async send worker
-	void StartWorker();
+	bool StartWorker();
 	void StopWorker();
 	uint32 RunWorker();
 	bool EnqueuePayload(const uint8* Data, int32 Size);
 	void DrainQueue();
+
+	// Worker thread only.
+	bool TryAcceptClient();
+	void DropClient(const TCHAR* Reason);
+	bool IsPeerClosed();
+	void DropQueuedWithoutClient();
+	bool DequeueNextFrame(TArray<uint8>& OutItem, int32& OutOffset, double Now);
+	void AddDroppedFrames(int64 Count);
 
 private:
 	FO3DTransportConfig ActiveConfig;
@@ -86,6 +108,7 @@ private:
 
 	ISocketSubsystem* SocketSubsystem = nullptr;
 	FSocket* ListenSocket = nullptr;
+	/** Owned by the worker while it runs. */
 	FSocket* ClientSocket = nullptr;
 
 	FString BindHost;
@@ -94,19 +117,25 @@ private:
 
 	FGuid AudioSourceGuid;
 
-	double LastAcceptPollTime = 0.0;
 	mutable std::vector<char> SerializationScratch; // Reused buffer for mocap serialization to avoid per-frame allocations
 
 	// Async send worker. The queue itself lives in PublishState so audio sinks can feed it.
 	FTcpSenderRunnable* Worker = nullptr;
 	FRunnableThread* WorkerThread = nullptr;
 	TAtomic<bool> bStopWorker{false};
-	static constexpr uint64 DefaultMaxQueueBytes = 4 * 1024 * 1024; // 4MB default
+
+	// Limits read in Initialize() (see SocketsTcpTransport.h for keys and defaults).
+	uint64 MaxQueueBytes = 0;
+	double MaxQueueAgeSeconds = 0.0;
+	double StallTimeoutSeconds = 0.0;
+	double KeepaliveIntervalSeconds = 0.0;
+
+	/** Prebuilt keepalive frame (TRB-6). */
+	TArray<uint8> KeepaliveFrame;
+
+	std::atomic<int64> SendWaitCount{0};
 
 	mutable FCriticalSection StatsMutex;
-
-	/** Guards ClientSocket/ListenSocket between the game thread and the worker. Never taken on the audio thread. */
-	FCriticalSection SocketLock;
 
 	TSharedRef<FSocketsTcpPublishState, ESPMode::ThreadSafe> PublishState;
 };

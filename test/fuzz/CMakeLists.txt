@@ -23,6 +23,7 @@ set(O3DS_FUZZ_TARGETS
 	peek_meta
 	udp_reassembly
 	reorder_gate
+	tcp_stream
 )
 
 add_library(o3ds_fuzz_support STATIC fuzz_support.h fuzz_support.cpp)

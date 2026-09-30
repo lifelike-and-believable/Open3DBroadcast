@@ -24,6 +24,7 @@ set(O3DS_CORE_TEST_SOURCES
 	parser_hardening_tests.cpp
 	receiver_correctness_tests.cpp
 	sender_wire_tests.cpp
+	tcp_stream_parser_tests.cpp
 )
 
 add_executable(o3ds_core_tests

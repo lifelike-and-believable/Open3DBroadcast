@@ -17,9 +17,11 @@ DEFINE_LOG_CATEGORY_STATIC(LogSocketsTcpReceiver, Log, All);
 
 namespace
 {
-	constexpr double InitialBackoffSeconds = 0.5;
-	constexpr double MaxBackoffSeconds = 5.0;
-	constexpr int32 MaxPayloadSizeBytes = 50 * 1024 * 1024; // 50 MiB safety cap
+	/** Bytes requested from the socket per Recv call. */
+	constexpr int32 RecvChunkBytes = 64 * 1024;
+	/** Work bounds per Poll() so a burst cannot hold the game thread (TRB-18); the rest stays in the socket buffer. */
+	constexpr int32 MaxFramesPerPoll = 256;
+	constexpr int64 MaxBytesPerPoll = 8 * 1024 * 1024;
 }
 
 FO3DSocketsTcpReceiver::FO3DSocketsTcpReceiver() = default;
@@ -66,8 +68,18 @@ bool FO3DSocketsTcpReceiver::Initialize(const FO3DTransportConfig& Config)
 		return false;
 	}
 
-	// Read connection timeout setting (defaults to 5.0 seconds)
-	ConnectionTimeoutSeconds = FMath::Max(0.5, O3DSockets::GetIntOption(Config, O3DSockets::TimeoutOptionKey, 5));
+	namespace Tcp = O3DSockets::Tcp;
+
+	// Idle timeout: no data (frames or keepalives) for this long forces a reconnect.
+	ConnectionTimeoutSeconds = FMath::Max(0.5, static_cast<double>(O3DSockets::GetIntOption(Config, O3DSockets::TimeoutOptionKey, 5)));
+	// TRB-5: a connect that has not completed after this long is abandoned and retried.
+	ConnectTimeoutSeconds = FMath::Max(0.5, static_cast<double>(O3DSockets::GetIntOption(Config, Tcp::ConnectTimeoutOptionKey, Tcp::DefaultConnectTimeoutSeconds)));
+	// TRB-4: exponential reconnect backoff.
+	InitialBackoffSeconds = FMath::Clamp(O3DSockets::GetIntOption(Config, Tcp::BackoffOptionKey, Tcp::DefaultBackoffMs), 10, 60000) / 1000.0;
+	MaxBackoffSeconds = FMath::Max(InitialBackoffSeconds, FMath::Clamp(O3DSockets::GetIntOption(Config, Tcp::MaxBackoffOptionKey, Tcp::DefaultMaxBackoffMs), 10, 600000) / 1000.0);
+	// TRB-9: largest accepted frame.
+	const int32 MaxFrameBytes = FMath::Clamp(O3DSockets::GetIntOption(Config, Tcp::MaxFrameOptionKey, Tcp::DefaultMaxFrameBytes), Tcp::MinFrameBytes, Tcp::MaxFrameBytesLimit);
+	Parser.setMaxPayloadBytes(static_cast<size_t>(MaxFrameBytes));
 
 	return true;
 }
@@ -80,18 +92,33 @@ void FO3DSocketsTcpReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsum
 bool FO3DSocketsTcpReceiver::Start()
 {
 	DisconnectSocket();
-	return ConnectToServer();
+
+	// TRB-13: Stop() keeps SocketSubsystem, but fetch it again in case Initialize() was skipped.
+	if (!SocketSubsystem)
+	{
+		SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+	}
+	if (!SocketSubsystem || RemotePort <= 0)
+	{
+		UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("TCP receiver cannot start: not initialized."));
+		return false;
+	}
+
+	ConnectBackoffAttempt = 0;
+	ConnectCount = 0;
+	bRunning = ConnectToServer();
+	return bRunning;
 }
 
 void FO3DSocketsTcpReceiver::Stop()
 {
+	bRunning = false;
 	DisconnectSocket();
-	SocketSubsystem = nullptr;
 }
 
 int32 FO3DSocketsTcpReceiver::Poll()
 {
-	if (!SocketSubsystem)
+	if (!bRunning || !SocketSubsystem)
 	{
 		return 0;
 	}
@@ -99,38 +126,119 @@ int32 FO3DSocketsTcpReceiver::Poll()
 	TickConnection();
 
 	int32 FramesProcessed = 0;
+	int64 BytesRead = 0;
 
 	if (Socket && State == EState::Connected)
 	{
-		// Pre-allocate Frame buffer outside loop to avoid repeated allocations
-		// Reuse the same buffer for all 16 iterations
-		if (PayloadExtractBuffer.Num() == 0)
+		if (!ReadAvailable(FramesProcessed, BytesRead))
 		{
-			PayloadExtractBuffer.Reserve(512 * 1024); // Reserve but don't allocate yet
+			UE_LOG(LogSocketsTcpReceiver, Log, TEXT("TCP connection to %s:%d closed by peer, will reconnect"), *RemoteHost, RemotePort);
+			ReportParserStats();
+			DisconnectSocket();
 		}
-
-		// Batch-process frames like NNG does (improves throughput during bursts)
-		while (FramesProcessed < 16)
+		else
 		{
-			if (!ReadFramed(Socket, State, ReceiveBuffer, BytesBuffered, ExpectedPayloadSize, PayloadExtractBuffer))
-			{
-				break; // No more complete frames available
-			}
-
-			if (PayloadExtractBuffer.Num() > 0)
-			{
-				LastDataReceiveTime = FPlatformTime::Seconds();
-
-				// Process received payload through unified demultiplexer
-				if (ProcessReceivedPayload(PayloadExtractBuffer.GetData(), PayloadExtractBuffer.Num()))
-				{
-					++FramesProcessed;
-				}
-			}
+			ReportParserStats();
 		}
 	}
 
 	return FramesProcessed;
+}
+
+bool FO3DSocketsTcpReceiver::ReadAvailable(int32& InOutFramesProcessed, int64& InOutBytesRead)
+{
+	// TRB-1: pop every complete frame already buffered before reading more, and read only
+	// when nothing complete is left.
+	while (InOutFramesProcessed < MaxFramesPerPoll && InOutBytesRead < MaxBytesPerPoll)
+	{
+		if (!Socket)
+		{
+			return true; // A consumer stopped this receiver from inside SubmitFrame.
+		}
+
+		const uint8_t* Payload = nullptr;
+		size_t PayloadSize = 0;
+		if (Parser.next(Payload, PayloadSize))
+		{
+			LastDataReceiveTime = FPlatformTime::Seconds();
+			if (!bReceivedOnThisConnection)
+			{
+				// The connection carries data: only now does the backoff start over (TRB-4).
+				bReceivedOnThisConnection = true;
+				ConnectBackoffAttempt = 0;
+			}
+			if (ProcessReceivedPayload(Payload, static_cast<int32>(PayloadSize)))
+			{
+				++InOutFramesProcessed;
+			}
+			continue;
+		}
+
+		uint8* Destination = Parser.prepareWrite(RecvChunkBytes);
+		int32 Read = 0;
+		const bool bOk = Socket->Recv(Destination, RecvChunkBytes, Read);
+		if (bOk && Read > 0)
+		{
+			Parser.commitWrite(static_cast<size_t>(Read));
+			InOutBytesRead += Read;
+			continue;
+		}
+
+		if (!bOk)
+		{
+			const ESocketErrors Error = SocketSubsystem->GetLastErrorCode();
+			if (Error != SE_EWOULDBLOCK && Error != SE_NO_ERROR)
+			{
+				return false; // Reset, aborted or another hard error.
+			}
+		}
+
+		// Nothing read. A stream socket that reports readable but then yields no bytes has
+		// reached end of stream (the sender closed or restarted) or failed. The error code is
+		// not used here: after an orderly close it can still hold a stale EWOULDBLOCK. The
+		// second Recv means a byte arriving between the two calls is not mistaken for a close.
+		if (Socket->Wait(ESocketWaitConditions::WaitForRead, FTimespan::Zero()))
+		{
+			Read = 0;
+			Destination = Parser.prepareWrite(RecvChunkBytes);
+			if (Socket->Recv(Destination, RecvChunkBytes, Read) && Read > 0)
+			{
+				Parser.commitWrite(static_cast<size_t>(Read));
+				InOutBytesRead += Read;
+				continue;
+			}
+			return false;
+		}
+		break;
+	}
+
+	return true;
+}
+
+void FO3DSocketsTcpReceiver::ReportParserStats()
+{
+	const O3DS::TcpStreamParserStats& ParserStats = Parser.stats();
+	if (ParserStats.rejectedFrames > ReportedRejectedFrames)
+	{
+		Stats.DroppedFrames += static_cast<int64>(ParserStats.rejectedFrames - ReportedRejectedFrames);
+		ReportedRejectedFrames = ParserStats.rejectedFrames;
+	}
+
+	if (ParserStats.discardedBytes > ReportedDiscardedBytes)
+	{
+		const uint64 NewBytes = ParserStats.discardedBytes - ReportedDiscardedBytes;
+		ReportedDiscardedBytes = ParserStats.discardedBytes;
+		if (!bWarnedResyncThisConnection)
+		{
+			bWarnedResyncThisConnection = true;
+			UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("TCP stream from %s:%d lost framing: skipped %llu bytes to the next frame header (rejected frames so far: %llu, tcp.maxframe=%llu). Further resyncs on this connection are logged at Verbose."),
+				*RemoteHost, RemotePort, static_cast<unsigned long long>(NewBytes), static_cast<unsigned long long>(ParserStats.rejectedFrames), static_cast<unsigned long long>(Parser.maxPayloadBytes()));
+		}
+		else
+		{
+			UE_LOG(LogSocketsTcpReceiver, Verbose, TEXT("TCP stream resync: skipped %llu bytes"), static_cast<unsigned long long>(NewBytes));
+		}
+	}
 }
 
 FO3DTransportStats FO3DSocketsTcpReceiver::GetStats() const
@@ -213,22 +321,23 @@ bool FO3DSocketsTcpReceiver::ConnectToServer()
 	Addr->SetPort(RemotePort);
 
 	State = EState::Connecting;
-	BytesBuffered = 0;
-	ExpectedPayloadSize = 0;
-
-	// Pre-allocate receive buffer to avoid frequent reallocations
-	// Start with 256KB, will grow as needed (typical mocap frame ~50KB, audio ~2-12KB)
-	if (ReceiveBuffer.Num() < 256 * 1024)
-	{
-		ReceiveBuffer.SetNum(256 * 1024);
-	}
 
 	Socket->Connect(*Addr);
-	LastConnectAttempt = FPlatformTime::Seconds();
-	LastDataReceiveTime = FPlatformTime::Seconds();
-	ConnectBackoffAttempt = 0;
+	const double Now = FPlatformTime::Seconds();
+	LastConnectAttempt = Now;
+	ConnectStartTime = Now;
+	LastDataReceiveTime = Now;
+	// TRB-4: the attempt counter is not reset here. It is reset only once a connection
+	// delivers data, so an unreachable or immediately-closing sender backs off to the maximum.
 
-	UE_LOG(LogSocketsTcpReceiver, Log, TEXT("TCP receiver connecting to %s:%d (recvBuf=%d, TCP_NODELAY=true)"), *RemoteHost, RemotePort, AppliedSize);
+	if (ConnectBackoffAttempt == 0)
+	{
+		UE_LOG(LogSocketsTcpReceiver, Log, TEXT("TCP receiver connecting to %s:%d (recvBuf=%d, TCP_NODELAY=true)"), *RemoteHost, RemotePort, AppliedSize);
+	}
+	else
+	{
+		UE_LOG(LogSocketsTcpReceiver, Verbose, TEXT("TCP receiver reconnect attempt %d to %s:%d"), ConnectBackoffAttempt, *RemoteHost, RemotePort);
+	}
 	return true;
 }
 
@@ -240,21 +349,28 @@ void FO3DSocketsTcpReceiver::DisconnectSocket()
 	}
 	Socket = nullptr;
 	State = EState::Disconnected;
-	BytesBuffered = 0;
-	ExpectedPayloadSize = 0;
-	ReceiveBuffer.Reset();
+	// A new connection starts on a frame boundary; never splice bytes from the old one.
+	Parser.reset();
+	bWarnedResyncThisConnection = false;
+	bReceivedOnThisConnection = false;
+}
+
+double FO3DSocketsTcpReceiver::GetBackoffSeconds() const
+{
+	const int32 Exponent = FMath::Clamp(ConnectBackoffAttempt, 0, 16);
+	return FMath::Min(MaxBackoffSeconds, InitialBackoffSeconds * FMath::Pow(2.0, static_cast<double>(Exponent)));
 }
 
 void FO3DSocketsTcpReceiver::TickConnection()
 {
+	const double Now = FPlatformTime::Seconds();
+
 	if (!Socket)
 	{
-		// Need to reconnect
-		const double Now = FPlatformTime::Seconds();
-		const double BackoffSeconds = FMath::Min(MaxBackoffSeconds, InitialBackoffSeconds * FMath::Pow(2.0, static_cast<double>(FMath::Clamp(ConnectBackoffAttempt, 0, 8))));
-		if ((Now - LastConnectAttempt) >= BackoffSeconds)
+		// Reconnect after an exponentially growing delay (TRB-4). The first retry after a
+		// dropped connection waits InitialBackoffSeconds.
+		if ((Now - LastConnectAttempt) >= GetBackoffSeconds())
 		{
-			LastConnectAttempt = Now;
 			++ConnectBackoffAttempt;
 			ConnectToServer();
 		}
@@ -267,12 +383,20 @@ void FO3DSocketsTcpReceiver::TickConnection()
 		if (ConnState == SCS_Connected)
 		{
 			State = EState::Connected;
-			ConnectBackoffAttempt = 0;
+			LastDataReceiveTime = Now;
+			++ConnectCount;
 			UE_LOG(LogSocketsTcpReceiver, Log, TEXT("TCP receiver connected to %s:%d"), *RemoteHost, RemotePort);
 		}
 		else if (ConnState == SCS_ConnectionError)
 		{
-			UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("TCP connection error, will retry"));
+			UE_LOG(LogSocketsTcpReceiver, Verbose, TEXT("TCP connection error, will retry"));
+			DisconnectSocket();
+		}
+		else if ((Now - ConnectStartTime) > ConnectTimeoutSeconds)
+		{
+			// TRB-5: a SYN that is never answered (firewall, wrong subnet) must not leave the
+			// receiver in Connecting forever.
+			UE_LOG(LogSocketsTcpReceiver, Verbose, TEXT("TCP connect to %s:%d timed out after %.1fs, will retry"), *RemoteHost, RemotePort, Now - ConnectStartTime);
 			DisconnectSocket();
 		}
 	}
@@ -284,122 +408,14 @@ void FO3DSocketsTcpReceiver::TickConnection()
 			UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("TCP connection lost, will reconnect"));
 			DisconnectSocket();
 		}
-		else
+		else if ((Now - LastDataReceiveTime) > ConnectionTimeoutSeconds)
 		{
-			// Check for timeout - if no data received for too long, assume stale connection
-			const double Now = FPlatformTime::Seconds();
-			if ((Now - LastDataReceiveTime) > ConnectionTimeoutSeconds)
-			{
-				UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("TCP connection timeout (no data for %.1fs), forcing reconnect"), Now - LastDataReceiveTime);
-				DisconnectSocket();
-			}
+			// No frames and no keepalives: treat the connection as dead. A sender that is only
+			// idle sends keepalives (TRB-6).
+			UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("TCP connection timeout (no data for %.1fs), forcing reconnect"), Now - LastDataReceiveTime);
+			DisconnectSocket();
 		}
 	}
-}
-
-bool FO3DSocketsTcpReceiver::ReadFramed(FSocket* InSocket, EState& InState, TArray<uint8>& Buffer, int32& InOutBytesBuffered, int32& InOutExpectedPayloadSize, TArray<uint8>& OutFrame)
-{
-	if (!InSocket || InState != EState::Connected)
-	{
-		return false;
-	}
-
-	// Ensure buffer has space
-	const int32 HeaderSize = O3DSockets::Tcp::FrameHeaderSize;
-	const int32 MinBufferSize = FMath::Max(HeaderSize, InOutExpectedPayloadSize + HeaderSize);
-	if (Buffer.Num() < MinBufferSize)
-	{
-		Buffer.SetNum(MinBufferSize);
-	}
-
-	// Try to read more data
-	int32 BytesRead = 0;
-	const int32 SpaceAvailable = Buffer.Num() - InOutBytesBuffered;
-	if (SpaceAvailable > 0)
-	{
-		if (!InSocket->Recv(Buffer.GetData() + InOutBytesBuffered, SpaceAvailable, BytesRead))
-		{
-			const ESocketErrors Error = SocketSubsystem ? SocketSubsystem->GetLastErrorCode() : SE_NO_ERROR;
-			if (Error != SE_EWOULDBLOCK && Error != SE_NO_ERROR)
-			{
-				return false; // Connection error
-			}
-			BytesRead = 0;
-		}
-
-		if (BytesRead == 0)
-		{
-			return false; // No data available or connection closed
-		}
-
-		InOutBytesBuffered += BytesRead;
-	}
-
-	// Parse header if we have enough data
-	if (InOutExpectedPayloadSize == 0 && InOutBytesBuffered >= HeaderSize)
-	{
-		// Check magic
-		if (!O3DSockets::Tcp::MatchesMagic(Buffer.GetData()))
-		{
-			// Resync - search for magic without discarding all data
-			// Scan forward byte-by-byte to find valid frame header
-			bool bFoundMagic = false;
-			for (int32 Offset = 1; Offset <= InOutBytesBuffered - HeaderSize; ++Offset)
-			{
-				if (O3DSockets::Tcp::MatchesMagic(Buffer.GetData() + Offset))
-				{
-					// Found magic at this offset - shift buffer and continue
-					FMemory::Memmove(Buffer.GetData(), Buffer.GetData() + Offset, InOutBytesBuffered - Offset);
-					InOutBytesBuffered -= Offset;
-					bFoundMagic = true;
-					break;
-				}
-			}
-
-			if (!bFoundMagic)
-			{
-				// No magic found in current buffer - discard oldest byte and try again next poll
-				FMemory::Memmove(Buffer.GetData(), Buffer.GetData() + 1, InOutBytesBuffered - 1);
-				InOutBytesBuffered--;
-				return false;
-			}
-		}
-
-		InOutExpectedPayloadSize = static_cast<int32>(O3DSockets::Tcp::DecodePayloadSize(Buffer.GetData()));
-		if (InOutExpectedPayloadSize <= 0 || InOutExpectedPayloadSize > MaxPayloadSizeBytes)
-		{
-			UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("Invalid frame size %d"), InOutExpectedPayloadSize);
-			// Skip this byte and try next position
-			FMemory::Memmove(Buffer.GetData(), Buffer.GetData() + 1, InOutBytesBuffered - 1);
-			InOutBytesBuffered--;
-			InOutExpectedPayloadSize = 0;
-			return false;
-		}
-
-		// Ensure buffer can hold header + payload (use reserved space to avoid reallocations)
-		const int32 RequiredSize = HeaderSize + InOutExpectedPayloadSize;
-		if (Buffer.Num() < RequiredSize)
-		{
-			// Grow buffer with some headroom to reduce future reallocations
-			Buffer.SetNum(FMath::Max(RequiredSize, 512 * 1024)); // 512KB growth increment
-		}
-	}
-
-	// Check if we have complete frame
-	if (InOutExpectedPayloadSize > 0 && InOutBytesBuffered >= HeaderSize + InOutExpectedPayloadSize)
-	{
-		// Extract payload
-		OutFrame.Reset(InOutExpectedPayloadSize);
-		OutFrame.SetNumUninitialized(InOutExpectedPayloadSize);
-		FMemory::Memcpy(OutFrame.GetData(), Buffer.GetData() + HeaderSize, InOutExpectedPayloadSize);
-
-		// Reset for next frame
-		InOutBytesBuffered = 0;
-		InOutExpectedPayloadSize = 0;
-		return true;
-	}
-
-	return false;
 }
 
 bool FO3DSocketsTcpReceiver::ProcessReceivedPayload(const uint8* Data, int32 Size)
@@ -416,6 +432,13 @@ bool FO3DSocketsTcpReceiver::ProcessReceivedPayload(const uint8* Data, int32 Siz
 
 	if (O3DS::ParseUnifiedMessage(Data, Size, Header, PayloadPtr, PayloadSize))
 	{
+		if (PayloadSize == 0)
+		{
+			// Sender keepalive: an envelope with no payload (TRB-6). ReadAvailable() already
+			// refreshed the idle timer; nothing else to do.
+			return false;
+		}
+
 		// Unified message - route by kind
 		if (Header.GetKind() == O3DS::EUnifiedKind::Audio)
 		{

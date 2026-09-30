@@ -4,6 +4,7 @@
 
 #include "o3ds/model.h"
 #include "o3ds/predict/quat_math.h"
+#include "o3ds/tcp_stream_parser.h"
 
 #include "CRC.h"
 
@@ -286,12 +287,64 @@ namespace o3ds_fuzz
 			seeds.push_back(Bytes{ 15, 50, 16, 0x01, 0xe8, 0x03, 0, 0, 0, 0, 0, 0, 0x04, 1, 0x01, 3, 0, 0, 0, 0, 0, 0, 0 });
 			return seeds;
 		}
+
+		// fuzz_tcp_stream.cpp: a max-payload selector byte, then one
+		// [u16 length][bytes] record per socket read. Frames carry the
+		// canonical keyframe so the Parse() stage sees real data.
+		Bytes TcpFrame(const std::vector<char>& payload)
+		{
+			Bytes out(kTcpFrameHeaderSize + payload.size());
+			writeTcpFrameHeader(out.data(), (uint32_t)payload.size());
+			std::memcpy(out.data() + kTcpFrameHeaderSize, payload.data(), payload.size());
+			return out;
+		}
+
+		std::vector<Bytes> TcpStreamSeeds()
+		{
+			const Bytes frame = TcpFrame(CanonicalKeyframe());
+			const uint8_t maxSel = 0xff; // 16336 bytes, enough for the keyframe
+			std::vector<Bytes> seeds;
+
+			// Three frames in one read.
+			Bytes three;
+			for (int i = 0; i < 3; ++i) three.insert(three.end(), frame.begin(), frame.end());
+			Bytes oneRead{ maxSel };
+			AppendRecord(oneRead, three.data(), three.size());
+			seeds.push_back(oneRead);
+
+			// The same bytes in 7-byte reads, so headers split across reads.
+			Bytes splitReads{ maxSel };
+			for (size_t pos = 0; pos < three.size(); pos += 7)
+				AppendRecord(splitReads, three.data() + pos, std::min<size_t>(7, three.size() - pos));
+			seeds.push_back(splitReads);
+
+			// Garbage (including a partial magic), then a frame.
+			Bytes garbage;
+			for (int i = 0; i < 300; ++i) garbage.push_back((uint8_t)(i * 37));
+			garbage.insert(garbage.end(), kTcpFrameMagic, kTcpFrameMagic + 6);
+			garbage.insert(garbage.end(), frame.begin(), frame.end());
+			Bytes garbageSeed{ maxSel };
+			AppendRecord(garbageSeed, garbage.data(), garbage.size());
+			seeds.push_back(garbageSeed);
+
+			// An oversize header (max payload 16 + 4 * 64 = 272), then a small frame.
+			Bytes oversize(kTcpFrameHeaderSize);
+			writeTcpFrameHeader(oversize.data(), 100000);
+			const std::vector<char> small(200, 'x');
+			const Bytes smallFrame = TcpFrame(small);
+			oversize.insert(oversize.end(), smallFrame.begin(), smallFrame.end());
+			Bytes oversizeSeed{ 4 };
+			AppendRecord(oversizeSeed, oversize.data(), oversize.size());
+			seeds.push_back(oversizeSeed);
+
+			return seeds;
+		}
 	}
 
 	const std::vector<std::string>& TargetNames()
 	{
 		static const std::vector<std::string> names = {
-			"parse", "parse_update", "residual", "peek_meta", "udp_reassembly", "reorder_gate"
+			"parse", "parse_update", "residual", "peek_meta", "udp_reassembly", "reorder_gate", "tcp_stream"
 		};
 		return names;
 	}
@@ -304,6 +357,7 @@ namespace o3ds_fuzz
 		if (target == "peek_meta") return PeekMetaSeeds();
 		if (target == "udp_reassembly") return UdpSeeds();
 		if (target == "reorder_gate") return ReorderGateSeeds();
+		if (target == "tcp_stream") return TcpStreamSeeds();
 		return {};
 	}
 

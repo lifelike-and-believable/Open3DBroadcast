@@ -39,6 +39,11 @@
   rate limiter), `FilterCurveValue` (curve epsilon/delta filter) and
   `FullSyncTracker` (per-subject full-sync policy), used by the UE sender.
 
+- New `src/o3ds/tcp_stream_parser.h`: `TcpStreamParser`, the TCP stream
+  frame parser the UE Sockets receiver uses, moved out of the socket code so
+  it runs under CTest and the fuzz harness (WP-S6, ADR 0006). New tests in
+  `test/tcp_stream_parser_tests.cpp` and a `tcp_stream` fuzz target.
+
 ### Fixed
 
 - UDP fragment reassembly (`src/o3ds/udp_fragment.*`, WP-S2) is hardened against hostile or malformed datagrams: fragments that disagree with a message's first fragment are rejected (previously a heap overflow), in-flight state is bounded (8 messages, 16 MiB by default) with age-based expiry, message ids use wrapping comparison, messages are keyed per sender, rejected fragments no longer yield empty frames, and a use-after-free in `UdpMapper::getFrame` is gone.
@@ -94,6 +99,14 @@
   filtering is disabled, and pattern edits apply on the next frame
   (SND-20).
 
+- TCP receiver (WP-S6): every frame in a read is delivered. The receiver used to keep only the first complete frame and discard the bytes after it, so frames were lost whenever TCP coalesced them, for example during a burst or with audio and mocap interleaved (TRB-1). Frames already buffered are delivered before the socket is read again.
+- TCP receiver: after garbage or a bad header it skips to the next frame header in one pass instead of dropping one byte per poll (TRB-8). A header announcing a frame above `tcp.maxframe` is rejected and counted in `DroppedFrames`, and the buffer grows only as bytes arrive and shrinks after a large frame (TRB-9).
+- TCP receiver: the reconnect backoff now grows from 0.5 s to 5 s. It was reset on every attempt and stayed at 0.5 s (TRB-4). It resets once a connection delivers data. A connect that is still pending after `tcp.connecttimeout` seconds is abandoned and retried, so an unanswered connect no longer leaves the receiver in the connecting state forever (TRB-5). A sender that closes or restarts is noticed on the next poll instead of after the idle timeout.
+- TCP sender: a partial send or a full socket buffer no longer drops the client. The worker waits for space and finishes the frame, and drops the client only on a socket error or when a frame makes no progress for `tcp.stalltimeout` (TRB-2). A frame is never left half-written on a connection that stays open.
+- TCP sender: accepting, sending and closed-peer detection moved to the worker thread, which owns the client socket. The game thread no longer takes a socket lock that the worker held during sends. A receiver that closes its connection is noticed within about 250 ms, so a reconnecting receiver no longer waits in the listen backlog until a send fails (TRB-6).
+- TCP sender: an idle sender writes a keepalive every second, so receivers no longer reconnect every `tcp.timeout` seconds while nothing is being sent (TRB-6).
+- TCP sender: `Start()` creates the listen socket before starting the worker, so a failed bind or listen no longer leaves a worker thread running. `Stop()` keeps the socket subsystem, so `Stop()` then `Start()` works without `Initialize()`. The TCP receiver behaves the same way (TRB-13).
+- TCP transport: `tcp.timeout` set in the receiver's transport options now reaches the receiver. It was stored but never passed on.
 - MoQ (WP-S8): after a dropped connection and a reconnect, the sender
   announces its namespaces again. Each connect attempt now uses a new
   moq-ffi client, and the session's announce cache belongs to that client,
@@ -150,6 +163,10 @@
   and no longer reads component properties. Frames carry the descriptor and
   an `FO3DSenderEncodingSettings` snapshot; `SerializePoseFrame()` is public.
 
+- TCP transport options (documented in `Transport_Module_Comparison.md`): new receiver options `tcp.connecttimeout` (default 5 s), `tcp.maxframe` (default 4 MiB, up to 50 MiB), `tcp.backoff` (default 500 ms) and `tcp.maxbackoff` (default 5000 ms); new sender options `tcp.maxqueue` (default 4 MiB, the old fixed cap), `tcp.maxqueueage` (default 1000 ms), `tcp.stalltimeout` (default 2000 ms) and `tcp.keepalive` (default 1000 ms) (TRB-9, TRB-14).
+- The largest TCP frame the receiver accepts drops from 50 MiB to 4 MiB by default; raise it with `tcp.maxframe`.
+- TCP sender: frames that waited in the send queue longer than `tcp.maxqueueage` are dropped before sending and counted in `DroppedFrames`, so a slow link no longer builds up seconds of stale mocap (TRB-14). Set it to 0 to keep every frame. The queue byte accounting uses the atomic queue from WP-S5 (TRB-3); WP-A1 replaces it with the shared `FO3DSendQueue`.
+- TCP receiver: each `Poll()` handles up to 256 frames or 8 MiB, up from 16 frames.
 - MoQ: new `connect_timeout` (alias `moq.connect_timeout`) transport option,
   in seconds, default 15, clamped to 1-120 (WP-S8).
 - MoQ: library validation checks every moq-ffi export the module binds,
@@ -168,6 +185,8 @@
   which no workflow passes.
 
 ### Schema/Protocol
+
+- No change to the TCP frame format (14-byte magic, little-endian length, payload; ADR 0009 item 6). The TCP sender now also writes a keepalive frame when idle: its payload is a 20-byte unified-envelope header (`O3DA`, version 1, kind Audio, payload size 0). Receivers built before this change parse it as an audio message, reject the empty payload without logging, and count it as received data, so it also stops their idle reconnects. Current receivers recognise it and ignore it. No other sender produces an audio envelope with an empty payload. Set `tcp.keepalive` to 0 to turn it off, for example for a third-party receiver that does not accept it. Protocol version and `O3DS_VERSION_TAG` are unchanged.
 
 - No wire change. The 16-byte UDP fragment header is now read and written as explicit little-endian, which is byte-for-byte identical to what existing little-endian senders and receivers produce. The versioned `O3DF` header (ADR 0009, TRB-17) follows separately.
 
