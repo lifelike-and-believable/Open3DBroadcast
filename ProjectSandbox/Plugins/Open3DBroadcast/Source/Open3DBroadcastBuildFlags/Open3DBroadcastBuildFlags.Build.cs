@@ -25,8 +25,10 @@ public class Open3DBroadcastBuildFlags : ModuleRules
 ///
 ///   O3D_WITH_TRANSPORT_SOCKETS  (default 1)
 ///   O3D_WITH_TRANSPORT_NNG      (default 1; forced to 0 on every platform except Win64)
-///   O3D_WITH_TRANSPORT_WEBRTC   (default 1; forced to 0 on every platform except Win64)
 ///   O3D_WITH_TRANSPORT_MOQ      (default 1; forced to 0 on every platform except Win64)
+///
+/// O3D_WITH_TRANSPORT_WEBRTC is not here: the WebRTC transport lives in the Open3DBroadcastWebRTC
+/// add-on plugin, whose Open3DTransportWebRTC.Build.cs reads it (WP-F11, SHR-19).
 ///
 /// A transport switched off still has its module entry in the .uplugin, so UBT still builds it.
 /// Its Build.cs then adds only Core, and every translation unit of the module is wrapped in
@@ -42,7 +44,6 @@ internal static class O3DBuildFlags
     {
         public bool WithSockets;
         public bool WithNNG;
-        public bool WithWebRTC;
         public bool WithMoQ;
     }
 
@@ -59,17 +60,15 @@ internal static class O3DBuildFlags
     };
 
     /// <summary>
-    /// Flags that selected code which has been removed (BUILD-4): libdatachannel is gone, LiveKit is
-    /// the only WebRTC backend, and no source reads O3D_ENABLE_LEGACY. They are ignored.
+    /// Flags that selected code which has been removed (BUILD-4): no source reads O3D_ENABLE_LEGACY.
+    /// They are ignored. The removed WebRTC backend flags are reported by the add-on (WP-F11).
     /// </summary>
     private static readonly string[] IgnoredFlags =
     {
-        "O3D_WEBRTC_BACKEND_LIVEKIT",
-        "O3D_WEBRTC_BACKEND_LIBDC",
         "O3D_ENABLE_LEGACY"
     };
 
-    /// <summary>NNG, WebRTC and MoQ link prebuilt binaries that exist for Win64 only (ADR 0001).</summary>
+    /// <summary>NNG and MoQ link prebuilt binaries that exist for Win64 only (ADR 0001).</summary>
     public static bool HasPrebuiltTransportBinaries(ReadOnlyTargetRules Target)
     {
         return Target.Platform == UnrealTargetPlatform.Win64;
@@ -83,7 +82,6 @@ internal static class O3DBuildFlags
         Settings Result = new Settings();
         Result.WithSockets = ReadBool("O3D_WITH_TRANSPORT_SOCKETS", true);
         Result.WithNNG = ReadBool("O3D_WITH_TRANSPORT_NNG", true) && bBinaries;
-        Result.WithWebRTC = ReadBool("O3D_WITH_TRANSPORT_WEBRTC", true) && bBinaries;
         Result.WithMoQ = ReadBool("O3D_WITH_TRANSPORT_MOQ", true) && bBinaries;
         return Result;
     }
@@ -144,7 +142,6 @@ internal static class O3DBuildFlags
         Settings Flags = Get(Target);
         Rules.PublicDefinitions.Add($"O3D_WITH_TRANSPORT_SOCKETS={(Flags.WithSockets ? 1 : 0)}");
         Rules.PublicDefinitions.Add($"O3D_WITH_TRANSPORT_NNG={(Flags.WithNNG ? 1 : 0)}");
-        Rules.PublicDefinitions.Add($"O3D_WITH_TRANSPORT_WEBRTC={(Flags.WithWebRTC ? 1 : 0)}");
         Rules.PublicDefinitions.Add($"O3D_WITH_TRANSPORT_MOQ={(Flags.WithMoQ ? 1 : 0)}");
     }
 
@@ -162,6 +159,5 @@ internal static class O3DBuildFlags
 
     public static bool IsSocketsEnabled(ReadOnlyTargetRules Target) => Get(Target).WithSockets;
     public static bool IsNNGEnabled(ReadOnlyTargetRules Target) => Get(Target).WithNNG;
-    public static bool IsWebRtcEnabled(ReadOnlyTargetRules Target) => Get(Target).WithWebRTC;
     public static bool IsMoQEnabled(ReadOnlyTargetRules Target) => Get(Target).WithMoQ;
 }

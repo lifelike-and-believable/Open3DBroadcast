@@ -4,7 +4,8 @@
 // Open3DBroadcast.Generic.Concurrency.MultipleSends, .Performance.Backpressure and
 // .Stats.ConsistencyUnderLoad). One test per registered transport and case:
 // Open3DBroadcast.Conformance.<Transport>.<Case>. Profiles are registered by
-// O3DConformanceProfiles.cpp (built-in transports) and, from WP-F11, by the WebRTC add-on.
+// O3DConformanceProfiles.cpp (built-in transports) and, once it has a test module, by the WebRTC
+// add-on plugin (WP-T2e).
 //
 // Everything is offline: 127.0.0.1 sockets on ephemeral ports or a fake FFI table. Waits poll a
 // condition against a deadline and never sleep.

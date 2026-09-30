@@ -121,8 +121,8 @@ namespace O3DTests
 	/**
 	 * Records that a transport's profile lives in another module that is not built yet, with the
 	 * work package that adds it. The suite then emits no HasProfile failure for that name. Used
-	 * for WebRTC until WP-F11 creates Open3DBroadcastWebRTCTests, which registers the profile
-	 * and removes the deferral.
+	 * for WebRTC, which the Open3DBroadcastWebRTC add-on registers, until an add-on test module
+	 * registers its profile and removes the deferral (ADR 0006, WP-T2e).
 	 */
 	OPEN3DBROADCASTTESTS_API void DeferConformanceProfile(FName Transport, const FString& Reason);
 	OPEN3DBROADCASTTESTS_API void UndeferConformanceProfile(FName Transport);

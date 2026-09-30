@@ -1,0 +1,62 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
+#pragma once
+
+#include "Containers/UnrealString.h"
+#include "CoreTypes.h"
+
+/**
+ * Version of the transport interface that Open3DBroadcast exports to transport modules in other
+ * plugins, such as the Open3DBroadcastWebRTC add-on (ADR 0007 item 2, ADR 0002, WP-F11; the
+ * minimal form of SHR-14).
+ *
+ * The interface is every exported type and function an add-on transport uses: IOpen3DSender and
+ * IOpen3DReceiver (with their audio sinks), the sender and receiver registries and transport
+ * customizations, FO3DTransportConfig, FO3DTransportOptionSchema, FO3DFfiLibrary,
+ * FO3DSecretStore and ISerializedFrameConsumer.
+ *
+ * Bump rule: increase the number in the same PR as any change to one of those types that alters
+ * a class layout, a virtual function table, an exported function signature or a documented
+ * threading rule. An add-on compares the value it was compiled with against
+ * O3DTransport::GetHostApiVersion() in StartupModule and registers nothing on a mismatch, so a
+ * stale add-on logs an error instead of crashing.
+ *
+ * History:
+ *   1  WP-F11: first version (the interface as of the add-on split).
+ */
+#define O3D_TRANSPORT_API_VERSION 1
+
+namespace O3DTransport
+{
+	/**
+	 * O3D_TRANSPORT_API_VERSION as compiled into the loaded Open3DShared module, as opposed to the
+	 * value compiled into the caller. The name and signature of this function never change, so an
+	 * add-on built against any version can call it. Any thread.
+	 */
+	OPEN3DSHARED_API int32 GetHostApiVersion();
+
+	/**
+	 * The check an add-on transport runs in StartupModule before it registers anything. Inline, so
+	 * the logic is compiled into the add-on and does not depend on the host build it meets.
+	 *
+	 * @param AddOnName      Plugin name for the message, e.g. "Open3DBroadcastWebRTC".
+	 * @param AddOnVersion   O3D_TRANSPORT_API_VERSION as the add-on saw it at compile time.
+	 * @param HostVersion    GetHostApiVersion() of the loaded Open3DBroadcast.
+	 * @param OutError       Empty on success; otherwise a message for an Error log line.
+	 * @return true when the versions are equal. Any difference, older or newer, is a mismatch:
+	 *         the add-on links against exported C++ classes whose layout must match exactly.
+	 */
+	inline bool CheckApiVersion(const FString& AddOnName, int32 AddOnVersion, int32 HostVersion, FString& OutError)
+	{
+		if (AddOnVersion == HostVersion)
+		{
+			OutError.Reset();
+			return true;
+		}
+		OutError = FString::Printf(
+			TEXT("%s was built for Open3DBroadcast transport API version %d, but the loaded Open3DBroadcast provides version %d. ")
+			TEXT("%s registers nothing. Install the %s build made for this Open3DBroadcast release."),
+			*AddOnName, AddOnVersion, HostVersion, *AddOnName, *AddOnName);
+		return false;
+	}
+}

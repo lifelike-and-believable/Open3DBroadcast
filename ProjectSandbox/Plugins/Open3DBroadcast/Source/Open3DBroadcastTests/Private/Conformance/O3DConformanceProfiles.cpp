@@ -2,8 +2,10 @@
 //
 // Offline conformance profiles for the transports in this plugin (ADR 0006 §4, WP-T2).
 // Every fixture uses 127.0.0.1 and an ephemeral port, a unique loopback channel, or the fake
-// moq-ffi table. The WebRTC profile belongs to the add-on's test module (WP-F11); until that
-// exists the WebRTC name is recorded as deferred so it gets no HasProfile failure.
+// moq-ffi table. WebRTC is registered by the Open3DBroadcastWebRTC add-on plugin (WP-F11); its
+// profile belongs to an add-on test module (ADR 0006, WP-T2e). Until that exists the WebRTC name
+// is recorded as deferred, so running the suite with the add-on enabled gives no HasProfile
+// failure. Without the add-on the name is never registered and the deferral has no effect.
 
 #include "Conformance/O3DConformanceProfiles.h"
 
@@ -402,7 +404,7 @@ namespace O3DTests
 		}
 #endif
 
-		DeferConformanceProfile(WebRtcName, TEXT("WP-F11: the WebRTC profile (fake LiveKit FFI) lives in the add-on's Open3DBroadcastWebRTCTests module."));
+		DeferConformanceProfile(WebRtcName, TEXT("WP-T2e: the WebRTC transport comes from the Open3DBroadcastWebRTC add-on; its offline profile (fake LiveKit FFI) belongs to an add-on test module that does not exist yet."));
 	}
 
 	void UnregisterBuiltInConformanceProfiles()
