@@ -37,45 +37,45 @@ namespace
  */
 namespace SocketsSchema
 {
-	static FO3DTransportOptionField MakeText(const TCHAR* Key, FText DisplayName, FText Tooltip, const TCHAR* Default)
+	static FO3DTransportOptionField MakeText(const TCHAR* InKey, FText InDisplayName, FText InTooltip, const TCHAR* InDefault)
 	{
 		FO3DTransportOptionField Field;
-		Field.Key = Key;
-		Field.DisplayName = MoveTemp(DisplayName);
-		Field.Tooltip = MoveTemp(Tooltip);
+		Field.Key = InKey;
+		Field.DisplayName = MoveTemp(InDisplayName);
+		Field.Tooltip = MoveTemp(InTooltip);
 		Field.Type = EO3DTransportOptionType::String;
-		Field.Default = Default;
+		Field.Default = InDefault;
 		return Field;
 	}
 
-	static FO3DTransportOptionField MakeInt(const TCHAR* Key, FText DisplayName, FText Tooltip, int32 Default, int32 Min, int32 Max)
+	static FO3DTransportOptionField MakeInt(const TCHAR* InKey, FText InDisplayName, FText InTooltip, int32 InDefault, int32 InMin, int32 InMax)
 	{
 		FO3DTransportOptionField Field;
-		Field.Key = Key;
-		Field.DisplayName = MoveTemp(DisplayName);
-		Field.Tooltip = MoveTemp(Tooltip);
+		Field.Key = InKey;
+		Field.DisplayName = MoveTemp(InDisplayName);
+		Field.Tooltip = MoveTemp(InTooltip);
 		Field.Type = EO3DTransportOptionType::Int;
-		Field.Default = FString::FromInt(Default);
-		Field.Min = Min;
-		Field.Max = Max;
+		Field.Default = FString::FromInt(InDefault);
+		Field.Min = InMin;
+		Field.Max = InMax;
 		return Field;
 	}
 
-	static FO3DTransportOptionField MakeBool(const TCHAR* Key, FText DisplayName, FText Tooltip)
+	static FO3DTransportOptionField MakeBool(const TCHAR* InKey, FText InDisplayName, FText InTooltip)
 	{
 		FO3DTransportOptionField Field;
-		Field.Key = Key;
-		Field.DisplayName = MoveTemp(DisplayName);
-		Field.Tooltip = MoveTemp(Tooltip);
+		Field.Key = InKey;
+		Field.DisplayName = MoveTemp(InDisplayName);
+		Field.Tooltip = MoveTemp(InTooltip);
 		Field.Type = EO3DTransportOptionType::Bool;
 		Field.Default = TEXT("false");
 		return Field;
 	}
 
-	static FO3DTransportOptionField MakePort(int32 Default)
+	static FO3DTransportOptionField MakePort(int32 InDefault)
 	{
 		return MakeInt(O3DSockets::PortOptionKey, LOCTEXT("PortLabel", "Port"),
-			LOCTEXT("PortTooltip", "TCP or UDP port. The audio stream uses the next port unless audio.port is set."), Default, 1, 65535);
+			LOCTEXT("PortTooltip", "TCP or UDP port. The audio stream uses the next port unless audio.port is set."), InDefault, 1, 65535);
 	}
 
 	static void AddUdpSizeFields(FO3DTransportOptionSchema& Schema)
