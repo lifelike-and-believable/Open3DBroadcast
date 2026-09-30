@@ -90,12 +90,12 @@ Or use the provided build script:
 
 The plugin has automated GitHub Actions workflows for:
 
-- **CI** (`open3dbroadcast-plugin-ci.yml`): Validates PRs and commits
-- **Tests** (`open3dbroadcast-plugin-test.yml`): Runs on feature branches
+- **CI** (`open3dbroadcast-plugin-ci.yml`): Builds the plugin, runs the automation tests and checks the Fab source package on PRs and commits
+- **Tests** (`open3dbroadcast-plugin-test.yml`): Manual build and test of any branch
 - **Nightly** (`open3dbroadcast-plugin-nightly.yml`): Daily comprehensive builds
 - **Release** (`open3dbroadcast-plugin-release.yml`): Creates releases for version tags
 
-See [.github/workflows/README.md](../../.github/workflows/README.md) for details.
+See [Build/README.md](../../../Build/README.md#cicd-integration) for details.
 
 ## Build Configuration
 
