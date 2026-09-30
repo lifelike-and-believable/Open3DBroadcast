@@ -85,16 +85,7 @@ public class Open3DSender : ModuleRules
             "AudioMixer"
         });
 
-        if (Target.bBuildEditor)
-        {
-            PrivateDependencyModuleNames.AddRange(new string[]
-            {
-                "Slate",
-                "SlateCore",
-                "PropertyEditor",
-                "EditorStyle",
-                "InputCore"
-            });
-        }
+        // No editor or Slate dependencies: the Details customization is in Open3DBroadcastEditor
+        // (ADR 0010, WP-F7). Build/Scripts/check-runtime-editor-deps.py enforces this in CI.
     }
 }

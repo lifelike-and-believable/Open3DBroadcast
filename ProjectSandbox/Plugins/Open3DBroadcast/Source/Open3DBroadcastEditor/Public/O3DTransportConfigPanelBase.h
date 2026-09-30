@@ -9,10 +9,10 @@
 class SBox;
 
 /**
- * Base panel used by transport-specific LiveLink configuration widgets to ensure
- * consistent sizing and submission behavior across transports.
+ * Base panel for transport configuration widgets: consistent sizing, and submit on Enter (the
+ * LiveLink panel creates the source). Moved from Open3DReceiver to the editor module (ADR 0010).
  */
-class OPEN3DRECEIVER_API SO3DTransportConfigPanelBase : public SCompoundWidget
+class OPEN3DBROADCASTEDITOR_API SO3DTransportConfigPanelBase : public SCompoundWidget
 {
 public:
     static constexpr float DefaultPanelWidth = 360.f;

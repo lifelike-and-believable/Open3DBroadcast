@@ -77,6 +77,12 @@
 			"TargetDenyList": [ "Server", "Program" ]
 		},
 		{
+			"Name": "Open3DBroadcastEditor",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit",
+			"PlatformAllowList": [ "Win64" ]
+		},
+		{
 			"Name": "Open3DBroadcastTests",
 			"Type": "Editor",
 			"LoadingPhase": "Default",

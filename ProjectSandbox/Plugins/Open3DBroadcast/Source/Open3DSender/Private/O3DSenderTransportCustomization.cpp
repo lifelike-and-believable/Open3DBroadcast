@@ -57,3 +57,18 @@ bool O3DSender::GetTransportSecretDeclaration(FName TransportName, TArray<FStrin
     OutSecretEnvVars = Customization->SecretEnvVars;
     return true;
 }
+
+bool O3DSender::GetTransportOptionSchema(FName TransportName, FO3DTransportOptionSchema& OutSchema)
+{
+    OutSchema.Reset();
+
+    FScopeLock Lock(&GSenderCustomizationMutex);
+    const FO3DSenderTransportCustomization* Customization = GSenderCustomizations.Find(TransportName);
+    if (!Customization)
+    {
+        return false;
+    }
+
+    OutSchema = Customization->OptionSchema;
+    return true;
+}

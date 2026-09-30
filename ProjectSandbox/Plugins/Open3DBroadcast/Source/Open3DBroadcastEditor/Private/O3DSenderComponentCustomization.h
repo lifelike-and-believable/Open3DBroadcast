@@ -2,8 +2,6 @@
 
 #pragma once
 
-#if WITH_EDITOR
-
 #include "IDetailCustomization.h"
 #include "Templates/SharedPointer.h"
 #include "UObject/WeakObjectPtr.h"
@@ -31,7 +29,6 @@ private:
 
     void HandleTransportSelectionChanged(TSharedPtr<FName> NewSelection, ESelectInfo::Type SelectInfo);
     void HandleTransportPropertyChanged();
-    void HandleTransportConfigChanged();
     void RefreshTransportOptions();
     void RefreshTransportCustomization();
     void SyncTransportComboSelection();
@@ -50,6 +47,7 @@ private:
     TSharedPtr<IPropertyHandle> TransportNameHandle;
     TSharedPtr<SComboBox<TSharedPtr<FName>>> TransportComboBox;
     TArray<TSharedPtr<FName>> TransportOptions;
+    /** Transport the current options panel was built for; the panel is rebuilt only when it changes. */
+    FName BuiltPanelTransport = NAME_None;
+    TWeakObjectPtr<UO3DSenderComponent> BuiltPanelComponent;
 };
-
-#endif // WITH_EDITOR

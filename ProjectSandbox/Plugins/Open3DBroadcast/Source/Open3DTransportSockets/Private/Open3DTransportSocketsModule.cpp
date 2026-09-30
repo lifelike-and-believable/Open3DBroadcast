@@ -11,6 +11,7 @@
 #include "O3DReceiverRegistry.h"
 #include "O3DReceiverTransportCustomization.h"
 #include "O3DReceiverSourceSettings.h"
+#include "O3DTransportOptionSchema.h"
 #include "Sender/SocketsTcpSender.h"
 #include "Receiver/SocketsTcpReceiver.h"
 #include "Sender/SocketsUdpSender.h"
@@ -20,16 +21,114 @@
 
 #include "Logging/LogMacros.h"
 
-#if WITH_EDITOR
-#include "Shared/SocketsTransportEditorWidgets.h"
-#endif // WITH_EDITOR
-
 DEFINE_LOG_CATEGORY_STATIC(LogOpen3DTransportSocketsModule, Log, All);
+
+#define LOCTEXT_NAMESPACE "Open3DTransportSockets"
 
 namespace
 {
 	constexpr TCHAR SocketsTcpName[] = TEXT("TCP");
 	constexpr TCHAR SocketsUdpName[] = TEXT("UDP");
+}
+
+/**
+ * Option schemas (ADR 0010 §4). The editor module renders them; the defaults are the ones
+ * O3DSocketsConfig::Configure* apply when a key is unset, shown as hints and never written.
+ */
+namespace SocketsSchema
+{
+	static FO3DTransportOptionField MakeText(const TCHAR* Key, FText DisplayName, FText Tooltip, const TCHAR* Default)
+	{
+		FO3DTransportOptionField Field;
+		Field.Key = Key;
+		Field.DisplayName = MoveTemp(DisplayName);
+		Field.Tooltip = MoveTemp(Tooltip);
+		Field.Type = EO3DTransportOptionType::String;
+		Field.Default = Default;
+		return Field;
+	}
+
+	static FO3DTransportOptionField MakeInt(const TCHAR* Key, FText DisplayName, FText Tooltip, int32 Default, int32 Min, int32 Max)
+	{
+		FO3DTransportOptionField Field;
+		Field.Key = Key;
+		Field.DisplayName = MoveTemp(DisplayName);
+		Field.Tooltip = MoveTemp(Tooltip);
+		Field.Type = EO3DTransportOptionType::Int;
+		Field.Default = FString::FromInt(Default);
+		Field.Min = Min;
+		Field.Max = Max;
+		return Field;
+	}
+
+	static FO3DTransportOptionField MakeBool(const TCHAR* Key, FText DisplayName, FText Tooltip)
+	{
+		FO3DTransportOptionField Field;
+		Field.Key = Key;
+		Field.DisplayName = MoveTemp(DisplayName);
+		Field.Tooltip = MoveTemp(Tooltip);
+		Field.Type = EO3DTransportOptionType::Bool;
+		Field.Default = TEXT("false");
+		return Field;
+	}
+
+	static FO3DTransportOptionField MakePort(int32 Default)
+	{
+		return MakeInt(O3DSockets::PortOptionKey, LOCTEXT("PortLabel", "Port"),
+			LOCTEXT("PortTooltip", "TCP or UDP port. The audio stream uses the next port unless audio.port is set."), Default, 1, 65535);
+	}
+
+	static void AddUdpSizeFields(FO3DTransportOptionSchema& Schema)
+	{
+		Schema.Add(MakeInt(O3DSockets::MtuOptionKey, LOCTEXT("UdpMtuLabel", "MTU"),
+			LOCTEXT("UdpMtuTooltip", "Largest datagram payload sent before a frame is split into fragments."), 1200, 256, 65507));
+		Schema.Add(MakeInt(O3DSockets::MaxDatagramOptionKey, LOCTEXT("UdpMaxDatagramLabel", "Max Datagram Bytes"),
+			LOCTEXT("UdpMaxDatagramTooltip", "Largest datagram accepted. Keep it at least as large as the MTU."), 64000, 512, 65507));
+	}
+
+	static FO3DTransportOptionSchema MakeTcpSender()
+	{
+		FO3DTransportOptionSchema Schema;
+		Schema.Add(MakeText(O3DSockets::BindOptionKey, LOCTEXT("TcpSenderBindLabel", "Bind Address"),
+			LOCTEXT("TcpSenderBindTooltip", "Local address the sender listens on for receivers. 0.0.0.0 listens on every interface."), TEXT("0.0.0.0")));
+		Schema.Add(MakePort(O3DSocketsConfig::DefaultTcpPort));
+		return Schema;
+	}
+
+	static FO3DTransportOptionSchema MakeUdpSender()
+	{
+		FO3DTransportOptionSchema Schema;
+		Schema.Add(MakeText(O3DSockets::HostOptionKey, LOCTEXT("UdpSenderHostLabel", "Destination Host"),
+			LOCTEXT("UdpSenderHostTooltip", "Address the datagrams are sent to."), TEXT("127.0.0.1")));
+		Schema.Add(MakePort(O3DSocketsConfig::DefaultUdpPort));
+		Schema.Add(MakeBool(O3DSockets::BroadcastOptionKey, LOCTEXT("UdpSenderBroadcastLabel", "Enable UDP Broadcast"),
+			LOCTEXT("UdpSenderBroadcastTooltip", "Allow sending to a broadcast address.")));
+		AddUdpSizeFields(Schema);
+		return Schema;
+	}
+
+	static FO3DTransportOptionSchema MakeTcpReceiver()
+	{
+		FO3DTransportOptionSchema Schema;
+		Schema.Add(MakeText(O3DSockets::HostOptionKey, LOCTEXT("TcpReceiverHostLabel", "Remote Host"),
+			LOCTEXT("TcpReceiverHostTooltip", "Address of the TCP sender to connect to."), TEXT("127.0.0.1")));
+		Schema.Add(MakePort(O3DSocketsConfig::DefaultTcpPort));
+		Schema.Add(MakeInt(O3DSockets::TimeoutOptionKey, LOCTEXT("TcpReceiverTimeoutLabel", "Connection Timeout (seconds)"),
+			LOCTEXT("TcpReceiverTimeoutTooltip", "Reconnect if no data received for this many seconds (1-60)"), 5, 1, 60));
+		return Schema;
+	}
+
+	static FO3DTransportOptionSchema MakeUdpReceiver()
+	{
+		FO3DTransportOptionSchema Schema;
+		Schema.Add(MakeText(O3DSockets::HostOptionKey, LOCTEXT("UdpReceiverBindLabel", "Bind Address"),
+			LOCTEXT("UdpReceiverBindTooltip", "Local address the receiver listens on. 0.0.0.0 listens on every interface."), TEXT("0.0.0.0")));
+		Schema.Add(MakePort(O3DSocketsConfig::DefaultUdpPort));
+		Schema.Add(MakeBool(O3DSockets::BroadcastOptionKey, LOCTEXT("UdpReceiverBroadcastLabel", "Accept Broadcast Packets"),
+			LOCTEXT("UdpReceiverBroadcastTooltip", "Receive datagrams sent to a broadcast address.")));
+		AddUdpSizeFields(Schema);
+		return Schema;
+	}
 }
 
 class FOpen3DTransportSocketsModule : public IModuleInterface
@@ -48,12 +147,7 @@ public:
 		{
 			O3DSocketsConfig::ConfigureTcpSender(SenderComponent, Config, SocketsTcpName);
 		};
-#if WITH_EDITOR
-		TcpSenderCustomization.BuildTransportWidget = [](UO3DSenderComponent* SenderComponent, FSimpleDelegate OnConfigChanged) -> TSharedPtr<SWidget>
-		{
-			return SenderComponent ? SocketsEditor::Sender::BuildTcpSenderSettingsPanel(SenderComponent, OnConfigChanged) : nullptr;
-		};
-#endif // WITH_EDITOR
+		TcpSenderCustomization.OptionSchema = SocketsSchema::MakeTcpSender();
 		O3DSender::RegisterTransportCustomization(SocketsTcpName, MoveTemp(TcpSenderCustomization));
 
 		FO3DSenderTransportCustomization UdpSenderCustomization;
@@ -61,12 +155,7 @@ public:
 		{
 			O3DSocketsConfig::ConfigureUdpSender(SenderComponent, Config);
 		};
-#if WITH_EDITOR
-		UdpSenderCustomization.BuildTransportWidget = [](UO3DSenderComponent* SenderComponent, FSimpleDelegate OnConfigChanged) -> TSharedPtr<SWidget>
-		{
-			return SenderComponent ? SocketsEditor::Sender::BuildUdpSenderSettingsPanel(SenderComponent, OnConfigChanged) : nullptr;
-		};
-#endif // WITH_EDITOR
+		UdpSenderCustomization.OptionSchema = SocketsSchema::MakeUdpSender();
 		O3DSender::RegisterTransportCustomization(SocketsUdpName, MoveTemp(UdpSenderCustomization));
 
 		FO3DReceiverTransportCustomization TcpReceiverCustomization;
@@ -74,12 +163,7 @@ public:
 		{
 			O3DSocketsConfig::ConfigureTcpReceiver(Settings, Config, SocketsTcpName);
 		};
-#if WITH_EDITOR
-		TcpReceiverCustomization.BuildTransportWidget = [](UO3DReceiverSettingsObject* SettingsObject, FSimpleDelegate OnSubmit) -> TSharedPtr<SO3DTransportConfigPanelBase>
-		{
-			return SocketsEditor::Receiver::BuildTcpReceiverSettingsPanel(SettingsObject, OnSubmit);
-		};
-#endif // WITH_EDITOR
+		TcpReceiverCustomization.OptionSchema = SocketsSchema::MakeTcpReceiver();
 		O3DReceiver::RegisterTransportCustomization(SocketsTcpName, MoveTemp(TcpReceiverCustomization));
 
 		FO3DReceiverTransportCustomization UdpReceiverCustomization;
@@ -87,12 +171,7 @@ public:
 		{
 			O3DSocketsConfig::ConfigureUdpReceiver(Settings, Config);
 		};
-#if WITH_EDITOR
-		UdpReceiverCustomization.BuildTransportWidget = [](UO3DReceiverSettingsObject* SettingsObject, FSimpleDelegate OnSubmit) -> TSharedPtr<SO3DTransportConfigPanelBase>
-		{
-			return SocketsEditor::Receiver::BuildUdpReceiverSettingsPanel(SettingsObject, OnSubmit);
-		};
-#endif // WITH_EDITOR
+		UdpReceiverCustomization.OptionSchema = SocketsSchema::MakeUdpReceiver();
 		O3DReceiver::RegisterTransportCustomization(SocketsUdpName, MoveTemp(UdpReceiverCustomization));
 
 		UE_LOG(LogOpen3DTransportSocketsModule, Log, TEXT("Open3D sockets transport module started."));
@@ -114,6 +193,8 @@ public:
 		UE_LOG(LogOpen3DTransportSocketsModule, Log, TEXT("Open3D sockets transport module shut down."));
 	}
 };
+
+#undef LOCTEXT_NAMESPACE
 
 #else // O3D_WITH_TRANSPORT_SOCKETS
 

@@ -3,12 +3,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Delegates/Delegate.h"
+#include "O3DTransportOptionSchema.h"
+#include "Templates/Function.h"
 
-class UO3DReceiverSettingsObject;
 struct FO3DReceiverSourceConfig;
 struct FO3DTransportConfig;
-class SO3DTransportConfigPanelBase;
 
 struct FO3DReceiverTransportCustomization
 {
@@ -27,9 +26,13 @@ struct FO3DReceiverTransportCustomization
      */
     TMap<FString, FString> SecretEnvVars;
 
-#if WITH_EDITOR
-    TFunction<TSharedPtr<SO3DTransportConfigPanelBase>(UO3DReceiverSettingsObject*, FSimpleDelegate /*OnSubmit*/)> BuildTransportWidget;
-#endif // WITH_EDITOR
+    /**
+     * The options this transport reads from FO3DReceiverSourceConfig::TransportOptions, as data.
+     * The Open3DBroadcastEditor module builds the LiveLink creation panel rows from it (ADR 0010
+     * §4). Every Secret entry's key must also be in SecretOptionKeys. Same layout in every build
+     * configuration: this struct has no WITH_EDITOR members (SND-34).
+     */
+    FO3DTransportOptionSchema OptionSchema;
 };
 
 namespace O3DReceiver
@@ -45,6 +48,12 @@ namespace O3DReceiver
      * customization.
      */
     OPEN3DRECEIVER_API bool GetTransportSecretDeclaration(FName TransportName, TArray<FString>& OutSecretKeys, TMap<FString, FString>& OutSecretEnvVars);
+
+    /**
+     * Copies the option schema of a registered transport under the registry lock. Returns false,
+     * with an empty output, when the transport has no customization.
+     */
+    OPEN3DRECEIVER_API bool GetTransportOptionSchema(FName TransportName, FO3DTransportOptionSchema& OutSchema);
 
     /** True when Key is a declared secret option key of TransportName. */
     OPEN3DRECEIVER_API bool IsSecretOptionKey(FName TransportName, const FString& Key);

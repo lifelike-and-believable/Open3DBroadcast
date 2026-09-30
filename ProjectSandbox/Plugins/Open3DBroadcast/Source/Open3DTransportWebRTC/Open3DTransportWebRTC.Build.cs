@@ -80,14 +80,8 @@ public class Open3DTransportWebRTC : ModuleRules
             "Open3DReceiver"
         });
 
-        if (Target.bBuildEditor)
-        {
-            PrivateDependencyModuleNames.AddRange(new string[]
-            {
-                "Slate",
-                "SlateCore",
-                "AppFramework"
-            });
-        }
+        // No editor or Slate dependencies: the settings panel is built by Open3DBroadcastEditor from
+        // this transport's option schema (ADR 0010, WP-F7). Build/Scripts/check-runtime-editor-deps.py
+        // enforces this in CI.
     }
 }

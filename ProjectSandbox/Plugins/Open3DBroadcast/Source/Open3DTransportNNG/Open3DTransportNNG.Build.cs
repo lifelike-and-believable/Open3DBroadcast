@@ -58,21 +58,14 @@ public class Open3DTransportNNG : ModuleRules
             "Open3DShared",
             "Open3DSender",
             "Open3DReceiver",
-            "InputCore",
-            "ApplicationCore",
-            "HTTP",
+            "HTTP", // FGenericPlatformHttp::UrlEncode/UrlDecode in NngHelpers.cpp
             "Sockets",
             "Networking"
         });
 
-        if (Target.bBuildEditor)
-        {
-            PrivateDependencyModuleNames.AddRange(new string[]
-            {
-                "Slate",
-                "SlateCore",
-                "AppFramework"
-            });
-        }
+        // InputCore and ApplicationCore were listed for the old Slate panels only (TRB-46).
+        // No editor or Slate dependencies: the settings panel is built by Open3DBroadcastEditor from
+        // this transport's option schema (ADR 0010, WP-F7). Build/Scripts/check-runtime-editor-deps.py
+        // enforces this in CI.
     }
 }
