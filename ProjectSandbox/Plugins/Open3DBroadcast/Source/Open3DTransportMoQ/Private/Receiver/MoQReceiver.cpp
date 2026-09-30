@@ -1,4 +1,5 @@
 #include "Receiver/MoQReceiver.h"
+#include "O3DRedact.h"
 
 #include "HAL/PlatformTime.h"
 #include "Math/UnrealMathUtility.h"
@@ -76,7 +77,7 @@ bool FO3DMoQReceiver::ParseOptions(const FO3DTransportConfig& Config, FString& O
 	}
 
 	UE_LOG(LogO3DMoQReceiver, Log, TEXT("MoQ receiver configured: Relay=%s MocapTrack=%s/%s AudioTrack=%s/%s StreamId=%s"),
-		*Options.RelayUrl,
+		*O3DRedact::Url(Options.RelayUrl),
 		*Options.MocapNamespace,
 		*Options.TrackName,
 		*Options.AudioNamespace,
@@ -279,7 +280,7 @@ void FO3DMoQReceiver::ScheduleSubscribeRetry(FSubscribeRetryState& Retry, double
 void FO3DMoQReceiver::HandleConnectTimeout(double Now)
 {
 	UE_LOG(LogO3DMoQReceiver, Warning, TEXT("MoQ connect to %s did not complete within %.1f s; retrying on a new client"),
-		*Options.RelayUrl, Options.ConnectTimeoutSeconds);
+		*O3DRedact::Url(Options.RelayUrl), Options.ConnectTimeoutSeconds);
 
 	if (Session.IsValid())
 	{
@@ -302,7 +303,7 @@ void FO3DMoQReceiver::HandleConnectionStateChanged(MoqConnectionState NewState)
 	case MOQ_STATE_CONNECTED:
 		bConnectInFlight = false;
 		ConsecutiveFailures = 0;
-		UE_LOG(LogO3DMoQReceiver, Log, TEXT("Connected to MoQ relay %s"), *Options.RelayUrl);
+		UE_LOG(LogO3DMoQReceiver, Log, TEXT("Connected to MoQ relay %s"), *O3DRedact::Url(Options.RelayUrl));
 		// A new connection gets an immediate subscribe; retries after that back off (TRF-20).
 		MocapSubscribeRetry.Reset();
 		AudioSubscribeRetry.Reset();

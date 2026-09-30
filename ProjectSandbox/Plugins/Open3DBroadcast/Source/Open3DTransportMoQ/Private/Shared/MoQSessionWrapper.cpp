@@ -1,4 +1,5 @@
 #include "Shared/MoQSessionWrapper.h"
+#include "O3DRedact.h"
 
 #include "Misc/ScopeLock.h"
 #include "Shared/MoQAsyncDispatcher.h"
@@ -184,7 +185,7 @@ FMoQResult FMoQSessionWrapper::Connect()
         ConnectionContext->LastConnectError.Reset();
     }
 
-    UE_LOG(LogMoQBridge, Log, TEXT("Attempting to connect to: %s (attempt %llu)"), *RelayUrl, AttemptId);
+    UE_LOG(LogMoQBridge, Log, TEXT("Attempting to connect to: %s (attempt %llu)"), *O3DRedact::Url(RelayUrl), AttemptId);
 
     if (!Api->LaunchBlocking)
     {

@@ -1,5 +1,6 @@
 // Copyright (c) Open3DStream Contributors
 #include "Receiver/NngReceiver.h"
+#include "O3DRedact.h"
 
 #include "Logging/LogMacros.h"
 #include "HAL/PlatformTime.h"
@@ -143,7 +144,7 @@ bool FO3DNngReceiver::Start()
     const bool bOpened = OpenSocket();
     bRunning = true;
 
-    UE_LOG(LogO3DNngReceiver, Log, TEXT("NNG receiver started uri=%s"), *Options.CanonicalUri);
+    UE_LOG(LogO3DNngReceiver, Log, TEXT("NNG receiver started uri=%s"), *O3DRedact::Url(Options.CanonicalUri));
     return bOpened || !Options.bListen;
 }
 
