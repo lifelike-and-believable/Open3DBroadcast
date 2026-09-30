@@ -1,0 +1,26 @@
+From e35ddbdc474a6c2a825058412b8e49847b6a932a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 30 Sep 2026 11:53:04 +0000
+Subject: [PATCH] Red-gate: failing assertion to prove the test step fails CI
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01U4132WYr464Upa8vLBAqsc
+---
+ .../Open3DBroadcastTests/Private/Core/CoreSerializationTests.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DBroadcastTests/Private/Core/CoreSerializationTests.cpp b/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DBroadcastTests/Private/Core/CoreSerializationTests.cpp
+index 29eb777..e3291d1 100644
+--- a/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DBroadcastTests/Private/Core/CoreSerializationTests.cpp
++++ b/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DBroadcastTests/Private/Core/CoreSerializationTests.cpp
+@@ -136,6 +136,7 @@ bool FO3DCoreEmptySubjectListTest::RunTest(const FString& Parameters)
+ 	O3DS::SubjectList Parsed;
+ 	TestTrue(TEXT("Empty list parses"), O3DCoreSerializationTests::Parse(Parsed, Buffer));
+ 	TestEqual(TEXT("No subjects"), static_cast<int32>(Parsed.mItems.size()), 0);
++	TestTrue(TEXT("Red-gate: this test must fail CI"), false);
+ 	return true;
+ }
+ 
+-- 
+2.43.0
+
