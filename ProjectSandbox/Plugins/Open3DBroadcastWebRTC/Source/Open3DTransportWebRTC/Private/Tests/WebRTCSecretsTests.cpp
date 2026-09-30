@@ -1,6 +1,6 @@
 // Copyright (c) Open3DStream Contributors
 
-#if O3D_WITH_TRANSPORT_WEBRTC // Whole file: without the transport the module is a stub (O3DBuildFlags).
+#if O3D_WITH_TRANSPORT_WEBRTC // Whole file: without the transport the module is a stub (O3DWebRtcBuildFlags).
 
 //
 // WP-S9 (ADR 0004 items 1, 6 and 7) for the WebRTC transport: the customizations declare the

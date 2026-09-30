@@ -7,6 +7,7 @@
 #include "O3DFfiLibrary.h"
 #include "Sender/WebRTCSender.h"
 #include "Receiver/WebRTCReceiver.h"
+#include "Shared/WebRTCAddOn.h"
 #include "Shared/WebRTCUtils.h"
 #include "O3DSenderRegistry.h"
 #include "O3DReceiverRegistry.h"
@@ -16,6 +17,7 @@
 #include "O3DReceiverSourceSettings.h"
 #include "O3DSecretStore.h"
 #include "O3DTransportOptionSchema.h"
+#include "Transport/O3DTransportApiVersion.h"
 
 DEFINE_LOG_CATEGORY(LogO3DWebRTCSender);
 DEFINE_LOG_CATEGORY(LogO3DWebRTCReceiver);
@@ -167,15 +169,28 @@ class FOpen3DTransportWebRTCModule : public IModuleInterface
 public:
 	virtual void StartupModule() override
 	{
-		// livekit_ffi.dll is delay-loaded, so it must be loaded from the plugin before the first
-		// call. Without it the transport is not registered at all: a factory would otherwise
-		// hand out instances whose first FFI call fails on delay-load (TRF-14).
-		Library = MakeShared<FO3DFfiLibrary, ESPMode::ThreadSafe>(MakeLiveKitLibraryDesc());
-		if (!Library->Load())
+		// This module ships in the Open3DBroadcastWebRTC add-on and links against Open3DBroadcast's
+		// exported transport interface. Check the interface version before anything else, so an
+		// add-on built for another Open3DBroadcast release registers nothing instead of crashing
+		// (ADR 0002, ADR 0007 item 2, WP-F11).
+		FString VersionError;
+		if (!O3DWebRTCAddOn::CheckHostApiVersion(O3DTransport::GetHostApiVersion(), VersionError))
 		{
-			UE_LOG(LogO3DWebRTCSender, Error, TEXT("WebRTC transport not registered: %s"), *Library->GetStatusMessage());
+			UE_LOG(LogO3DWebRTCSender, Error, TEXT("WebRTC transport not registered: %s"), *VersionError);
 			return;
 		}
+
+		// livekit_ffi.dll is delay-loaded, so it must be loaded from this add-on's own plugin
+		// folder before the first call (ADR 0002 blocker 1, TRF-28). Without it the transport is
+		// not registered at all: a factory would otherwise hand out instances whose first FFI
+		// call fails on delay-load (TRF-14).
+		TSharedRef<FO3DFfiLibrary, ESPMode::ThreadSafe> NewLibrary = MakeShared<FO3DFfiLibrary, ESPMode::ThreadSafe>(O3DWebRTCAddOn::MakeLiveKitLibraryDesc());
+		if (!NewLibrary->Load())
+		{
+			UE_LOG(LogO3DWebRTCSender, Error, TEXT("WebRTC transport not registered: %s"), *NewLibrary->GetStatusMessage());
+			return;
+		}
+		Library = NewLibrary;
 
 		// Every instance is tracked so ShutdownModule can stop it before unloading livekit_ffi.
 		const TSharedRef<FO3DFfiLibrary, ESPMode::ThreadSafe> LibraryRef = Library.ToSharedRef();
@@ -255,6 +270,13 @@ public:
 
 	virtual void ShutdownModule() override
 	{
+		if (!Library.IsValid())
+		{
+			// StartupModule registered nothing (version mismatch or livekit_ffi missing), so there
+			// is nothing to unregister, and a registration under this name belongs to someone else.
+			return;
+		}
+
 		// Unregister transport customizations
 		O3DSender::UnregisterTransportCustomization(WebRTCConfig::TransportName);
 		O3DReceiver::UnregisterTransportCustomization(WebRTCConfig::TransportName);
@@ -264,34 +286,22 @@ public:
 		O3DTransport::UnregisterReceiver(WebRTCConfig::TransportName);
 
 		// TRF-14: stop instances that outlive the module (components, LiveLink sources), then
-		// unload. FO3DFfiLibrary keeps the DLL loaded if an instance is still referenced.
-		if (Library.IsValid())
-		{
-			Library->StopLiveInstances();
-			Library->Unload();
-		}
+		// unload. FO3DFfiLibrary keeps the DLL loaded if an instance is still referenced. The
+		// factories were unregistered above, so no new instance can appear in between.
+		Library->StopLiveInstances();
+		Library->Unload();
+		Library.Reset();
 
 		UE_LOG(LogO3DWebRTCSender, Log, TEXT("Open3D WebRTC transport module shut down"));
 	}
 
 private:
-	/** livekit_ffi and the instances created from it. The registered factories hold a reference too. */
-	TSharedPtr<FO3DFfiLibrary, ESPMode::ThreadSafe> Library;
-
 	/**
-	 * Location of livekit_ffi relative to the plugin that ships this module. WP-F11 moves the
-	 * module to the Open3DBroadcastWebRTC add-on and changes OwningPluginName with it.
+	 * livekit_ffi and the instances created from it. Set only once the transport is registered,
+	 * so ShutdownModule knows whether there is anything to undo. The registered factories hold a
+	 * reference too.
 	 */
-	static FO3DFfiLibraryDesc MakeLiveKitLibraryDesc()
-	{
-		FO3DFfiLibraryDesc Desc;
-		Desc.DisplayName = TEXT("LiveKit FFI");
-		Desc.OwningPluginName = TEXT("Open3DBroadcast");
-		// Win64 only: O3D_WITH_TRANSPORT_WEBRTC is 0 on every other platform, so this file then
-		// compiles to the stub module below (ADR 0001).
-		Desc.RelativePath = TEXT("Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/bin/Win64/livekit_ffi.dll");
-		return Desc;
-	}
+	TSharedPtr<FO3DFfiLibrary, ESPMode::ThreadSafe> Library;
 };
 
 #else // O3D_WITH_TRANSPORT_WEBRTC
@@ -301,7 +311,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogOpen3DTransportWebRTCModule, Log, All);
 /**
  * Stub module, compiled when O3D_WITH_TRANSPORT_WEBRTC is 0: the transport was switched off with that
  * environment variable, or the target platform has no prebuilt livekit_ffi
- * (O3DBuildFlags in Open3DBroadcastBuildFlags.Build.cs). It registers nothing.
+ * (O3DWebRtcBuildFlags in Open3DTransportWebRTC.Build.cs). It registers nothing.
  */
 class FOpen3DTransportWebRTCModule : public IModuleInterface
 {

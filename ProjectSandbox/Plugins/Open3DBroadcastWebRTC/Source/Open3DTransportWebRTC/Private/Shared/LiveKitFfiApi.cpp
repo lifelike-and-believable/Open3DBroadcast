@@ -1,6 +1,6 @@
 // Copyright (c) Open3DStream Contributors
 
-#if O3D_WITH_TRANSPORT_WEBRTC // Whole file: without the transport the module is a stub (O3DBuildFlags).
+#if O3D_WITH_TRANSPORT_WEBRTC // Whole file: without the transport the module is a stub (O3DWebRtcBuildFlags).
 
 #include "LiveKitFfiApi.h"
 #include "WebRTCUtils.h"
