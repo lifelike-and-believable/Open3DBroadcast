@@ -367,13 +367,9 @@ void FO3DSenderComponentCustomization::HandleTransportSelectionChanged(TSharedPt
 void FO3DSenderComponentCustomization::HandleTransportPropertyChanged()
 {
     UE_LOG(LogO3DSenderDetails, Verbose, TEXT("HandleTransportPropertyChanged"));
+    // UO3DSenderComponent::PostEditChangeProperty clears the options inside the property-edit
+    // transaction, so undoing the transport change restores them (SND-35).
     RefreshTransportOptions();
-
-    if (UO3DSenderComponent* Component = ResolveEditingComponent())
-    {
-        Component->ClearTransportOptions();
-    }
-
     RefreshTransportCustomization();
 }
 
@@ -390,21 +386,9 @@ void FO3DSenderComponentCustomization::RefreshTransportOptions()
         TransportOptions.Add(MakeShared<FName>(Name));
     }
 
-    FName CurrentSelection = GetSelectedTransportName();
-
-    if (CurrentSelection.IsNone() && TransportOptions.Num() > 0)
-    {
-        CurrentSelection = *TransportOptions[0];
-        if (TransportNameHandle.IsValid())
-        {
-            FName ExistingValue = NAME_None;
-            const bool bHasValue = (TransportNameHandle->GetValue(ExistingValue) == FPropertyAccess::Success);
-            if (!bHasValue || ExistingValue.IsNone())
-            {
-                TransportNameHandle->SetValue(CurrentSelection);
-            }
-        }
-    }
+    // Read only: opening the Details panel must not change the component (TRB-45). A None
+    // transport shows "Select Transport" until the user picks one.
+    const FName CurrentSelection = GetSelectedTransportName();
 
     if (CurrentSelection != NAME_None)
     {

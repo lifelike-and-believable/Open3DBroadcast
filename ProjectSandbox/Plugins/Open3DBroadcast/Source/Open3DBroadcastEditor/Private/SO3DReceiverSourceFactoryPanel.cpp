@@ -13,6 +13,7 @@
 #include "O3DTransportOptionTarget.h"
 #include "PropertyEditorModule.h"
 #include "SO3DTransportOptionsPanel.h"
+#include "ScopedTransaction.h"
 #include "UObject/Package.h"
 #include "UObject/UnrealType.h"
 #include "Widgets/Input/SButton.h"
@@ -36,11 +37,26 @@ void SO3DReceiverSourceFactoryPanel::Construct(const FArguments& InArgs)
 {
 	OnSourceCreated = InArgs._OnSourceCreated;
 
-	SourceSettingsObject = TStrongObjectPtr<UO3DReceiverSettingsObject>(DuplicateObject<UO3DReceiverSettingsObject>(GetMutableDefault<UO3DReceiverSettingsObject>(), GetTransientPackage()));
-	if (!SourceSettingsObject.IsValid())
+	// The panel's own copy of the defaults. RF_Transactional so transport and option edits in the
+	// panel can be undone. Nothing is saved until Create Source.
+	UO3DReceiverSettingsObject* Copy = DuplicateObject<UO3DReceiverSettingsObject>(GetMutableDefault<UO3DReceiverSettingsObject>(), GetTransientPackage());
+	if (!Copy)
 	{
-		SourceSettingsObject = TStrongObjectPtr<UO3DReceiverSettingsObject>(NewObject<UO3DReceiverSettingsObject>(GetTransientPackage()));
+		Copy = NewObject<UO3DReceiverSettingsObject>(GetTransientPackage());
 	}
+	Copy->SetFlags(RF_Transactional);
+
+	// An ini with no transport gets the first registered one. This changes only the panel's copy.
+	if (Copy->Settings.TransportName.IsNone())
+	{
+		TArray<FName> RegisteredTransports;
+		O3DReceiver::GetRegisteredTransportNames(RegisteredTransports);
+		if (RegisteredTransports.Num() > 0)
+		{
+			Copy->Settings.TransportName = RegisteredTransports[0];
+		}
+	}
+	SourceSettingsObject = TStrongObjectPtr<UO3DReceiverSettingsObject>(Copy);
 
 	RefreshTransportOptions();
 	RefreshAudioCodecOptions();
@@ -322,7 +338,8 @@ void SO3DReceiverSourceFactoryPanel::SyncAudioCodecSelection()
 
 void SO3DReceiverSourceFactoryPanel::HandleAudioCodecSelectionChanged(TSharedPtr<FName> NewSelection, ESelectInfo::Type SelectInfo)
 {
-	if (!SourceSettingsObject.IsValid())
+	// Direct is SyncAudioCodecSelection mirroring the stored value, not a user edit.
+	if (!SourceSettingsObject.IsValid() || SelectInfo == ESelectInfo::Direct)
 	{
 		return;
 	}
@@ -330,6 +347,7 @@ void SO3DReceiverSourceFactoryPanel::HandleAudioCodecSelectionChanged(TSharedPtr
 	const FName SelectedCodec = (NewSelection.IsValid() ? *NewSelection : NAME_None);
 	if (SourceSettingsObject->Settings.AudioCodec != SelectedCodec)
 	{
+		const FScopedTransaction Transaction(LOCTEXT("ReceiverChangeAudioCodec", "Change Receiver Audio Codec"));
 		SourceSettingsObject->Modify();
 		SourceSettingsObject->Settings.AudioCodec = SelectedCodec;
 	}
@@ -381,16 +399,9 @@ void SO3DReceiverSourceFactoryPanel::RefreshTransportOptions()
 		TransportOptions.Add(MakeShared<FName>(Name));
 	}
 
-	FName CurrentSelection = GetCurrentTransportName();
-	if (CurrentSelection.IsNone() && TransportOptions.Num() > 0)
-	{
-		CurrentSelection = *TransportOptions[0];
-		if (SourceSettingsObject.IsValid())
-		{
-			SourceSettingsObject->Settings.TransportName = CurrentSelection;
-		}
-	}
-
+	// Read only (TRB-45): a transport that is no longer registered stays listed so the current
+	// choice is visible.
+	const FName CurrentSelection = GetCurrentTransportName();
 	if (CurrentSelection != NAME_None)
 	{
 		const bool bAlreadyIncluded = TransportOptions.ContainsByPredicate([&CurrentSelection](const TSharedPtr<FName>& Option)
@@ -456,13 +467,17 @@ void SO3DReceiverSourceFactoryPanel::SyncTransportSelection()
 
 void SO3DReceiverSourceFactoryPanel::HandleTransportSelectionChanged(TSharedPtr<FName> NewSelection, ESelectInfo::Type SelectInfo)
 {
-	if (!SourceSettingsObject.IsValid() || !NewSelection.IsValid())
+	// Direct is SyncTransportSelection mirroring the stored value, not a user edit.
+	if (!SourceSettingsObject.IsValid() || !NewSelection.IsValid() || SelectInfo == ESelectInfo::Direct)
 	{
 		return;
 	}
 
 	if (SourceSettingsObject->Settings.TransportName != *NewSelection)
 	{
+		// One undoable edit. The options are cleared because most keys ("host", "port") are not
+		// namespaced by transport yet; ADR 0007 item 8 (WP-A1) namespaces them and drops the clear.
+		const FScopedTransaction Transaction(LOCTEXT("ReceiverChangeTransport", "Change Receiver Transport"));
 		SourceSettingsObject->Modify();
 		SourceSettingsObject->Settings.TransportName = *NewSelection;
 		SourceSettingsObject->Settings.TransportOptions.Empty();

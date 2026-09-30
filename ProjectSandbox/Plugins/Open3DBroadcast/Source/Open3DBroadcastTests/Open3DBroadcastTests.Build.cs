@@ -32,13 +32,17 @@ public class Open3DBroadcastTests : ModuleRules
             "Open3DReceiver"
         });
 
+        // Open3DBroadcastEditor and UnrealEd: the WP-F7 panel tests build SO3DTransportOptionsPanel
+        // and check the editor's transaction buffer (ADR 0010 §8).
         List<string> PrivateModules = new List<string>
         {
             "Sockets",
             "Networking",
             "LiveLinkInterface",
             "Slate",
-            "SlateCore"
+            "SlateCore",
+            "UnrealEd",
+            "Open3DBroadcastEditor"
         };
         // Loopback has no Testing header: its tests create it through the registry by name.
 
