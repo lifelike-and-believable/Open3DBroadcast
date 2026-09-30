@@ -47,16 +47,42 @@ private:
 
 namespace
 {
-	/** Prefix a payload with the TCP frame header. Safe on any thread. */
-	TArray<uint8> MakeTcpFrame(const uint8* Data, int32 Size)
+	/**
+	 * Each queue item is [enqueue time as a double][TCP frame header][payload]. The time lets
+	 * the worker drop frames that waited longer than tcp.maxqueueage (TRB-14) without a second
+	 * queue type; the prefix is stripped before sending and never goes on the wire.
+	 */
+	constexpr int32 QueueItemPrefixBytes = static_cast<int32>(sizeof(double));
+
+	/** Build a queue item for a payload. Safe on any thread. */
+	TArray<uint8> MakeQueuedFrame(const uint8* Data, int32 Size)
 	{
-		TArray<uint8> Framed;
+		TArray<uint8> Item;
 		const int32 HeaderSize = O3DSockets::Tcp::FrameHeaderSize;
-		Framed.SetNumUninitialized(HeaderSize + Size);
-		O3DSockets::Tcp::WriteFrameHeader(Framed.GetData(), Size);
-		FMemory::Memcpy(Framed.GetData() + HeaderSize, Data, Size);
-		return Framed;
+		Item.SetNumUninitialized(QueueItemPrefixBytes + HeaderSize + Size);
+		const double Now = FPlatformTime::Seconds();
+		FMemory::Memcpy(Item.GetData(), &Now, sizeof(double));
+		O3DSockets::Tcp::WriteFrameHeader(Item.GetData() + QueueItemPrefixBytes, Size);
+		FMemory::Memcpy(Item.GetData() + QueueItemPrefixBytes + HeaderSize, Data, Size);
+		return Item;
 	}
+
+	double ReadEnqueueTime(const TArray<uint8>& Item)
+	{
+		double Time = 0.0;
+		if (Item.Num() >= QueueItemPrefixBytes)
+		{
+			FMemory::Memcpy(&Time, Item.GetData(), sizeof(double));
+		}
+		return Time;
+	}
+
+	/** Worker waits: short, so Stop() never waits long for the join. */
+	constexpr uint32 AcceptPollMs = 10;
+	constexpr uint32 MaxIdleWaitMs = 50;
+	constexpr double WriteWaitSeconds = 0.010;
+	/** How often an idle worker checks whether the receiver closed the connection (TRB-6). */
+	constexpr double PeerCheckIntervalSeconds = 0.25;
 }
 
 /**
@@ -89,7 +115,7 @@ protected:
 		}
 
 		const int64 Size = Unified.Num();
-		if (!State->SendQueue.Enqueue(MakeTcpFrame(Unified.GetData(), Unified.Num())))
+		if (!State->SendQueue.Enqueue(MakeQueuedFrame(Unified.GetData(), Unified.Num())))
 		{
 			UE_LOG(LogSocketsTcpSender, Verbose, TEXT("TCP sender failed to enqueue audio frame"));
 			return false;
@@ -103,9 +129,11 @@ private:
 };
 
 FO3DSocketsTcpSender::FO3DSocketsTcpSender()
-	: PublishState(MakeShared<FSocketsTcpPublishState, ESPMode::ThreadSafe>())
+	: KeepaliveFrame(O3DSockets::Tcp::MakeKeepaliveFrame())
+	, PublishState(MakeShared<FSocketsTcpPublishState, ESPMode::ThreadSafe>())
 {
-	PublishState->SendQueue.SetMaxBytes(DefaultMaxQueueBytes);
+	MaxQueueBytes = static_cast<uint64>(O3DSockets::Tcp::DefaultMaxQueueBytes);
+	PublishState->SendQueue.SetMaxBytes(MaxQueueBytes);
 }
 
 FO3DSocketsTcpSender::~FO3DSocketsTcpSender()
@@ -127,6 +155,7 @@ bool FO3DSocketsTcpSender::Initialize(const FO3DTransportConfig& Config)
 	// Note: Audio stream label is now automatically derived from StreamId
 	AudioSourceGuid = FGuid::NewGuid();
 	PublishState->AudioBytesQueued.store(0);
+	SendWaitCount.store(0);
 
 	// Parse bind address from config
 	if (!O3DSockets::ParseHostPort(Config, BindHost, BindPort, TEXT("tcp")))
@@ -154,6 +183,17 @@ bool FO3DSocketsTcpSender::Initialize(const FO3DTransportConfig& Config)
 		return false;
 	}
 
+	namespace Tcp = O3DSockets::Tcp;
+
+	// TRB-14: configurable queue cap and age limit.
+	MaxQueueBytes = static_cast<uint64>(FMath::Max(O3DSockets::GetIntOption(Config, Tcp::MaxQueueOptionKey, Tcp::DefaultMaxQueueBytes), Tcp::MinQueueBytes));
+	PublishState->SendQueue.SetMaxBytes(MaxQueueBytes);
+	MaxQueueAgeSeconds = FMath::Max(0, O3DSockets::GetIntOption(Config, Tcp::MaxQueueAgeOptionKey, Tcp::DefaultMaxQueueAgeMs)) / 1000.0;
+	// TRB-2: how long a frame may make no progress before the client is dropped.
+	StallTimeoutSeconds = FMath::Max(O3DSockets::GetIntOption(Config, Tcp::StallTimeoutOptionKey, Tcp::DefaultStallTimeoutMs), Tcp::MinStallTimeoutMs) / 1000.0;
+	// TRB-6: keepalive interval while idle.
+	KeepaliveIntervalSeconds = FMath::Max(0, O3DSockets::GetIntOption(Config, Tcp::KeepaliveOptionKey, Tcp::DefaultKeepaliveMs)) / 1000.0;
+
 	PublishState->Gate->Open();
 
 	return true;
@@ -161,14 +201,44 @@ bool FO3DSocketsTcpSender::Initialize(const FO3DTransportConfig& Config)
 
 bool FO3DSocketsTcpSender::Start()
 {
+	// Restart: stop a running worker before touching the sockets it owns.
+	if (WorkerThread)
+	{
+		bStopWorker = true;
+		PublishState->SendQueue.Wake();
+		StopWorker();
+	}
 	DestroySocket();
+	DrainQueue();
+
+	// TRB-13: Stop() keeps SocketSubsystem; fetch it again only if Initialize() never ran.
+	if (!SocketSubsystem)
+	{
+		SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+	}
+	if (!SocketSubsystem || BindPort <= 0)
+	{
+		UE_LOG(LogSocketsTcpSender, Warning, TEXT("TCP sender cannot start: not initialized."));
+		return false;
+	}
+
+	// TRB-13: create the listen socket first, and start the worker only if that worked, so a
+	// failed Start() leaves no thread running.
+	if (!CreateListenSocket())
+	{
+		return false;
+	}
 
 	PublishState->Gate->Open();
 
 	bStopWorker = false;
-	StartWorker();
-
-	return CreateListenSocket();
+	if (!StartWorker())
+	{
+		UE_LOG(LogSocketsTcpSender, Warning, TEXT("TCP sender could not start its worker thread."));
+		DestroySocket();
+		return false;
+	}
+	return true;
 }
 
 void FO3DSocketsTcpSender::Stop()
@@ -185,7 +255,7 @@ void FO3DSocketsTcpSender::Stop()
 
 	DestroySocket();
 	DrainQueue();
-	SocketSubsystem = nullptr;
+	// SocketSubsystem is kept so Start() works again without Initialize() (TRB-13).
 }
 
 bool FO3DSocketsTcpSender::Send(const O3DS::SubjectList& List)
@@ -244,7 +314,8 @@ bool FO3DSocketsTcpSender::SendBytes(const uint8* Data, int32 Len)
 
 void FO3DSocketsTcpSender::Tick(float /*DeltaSeconds*/)
 {
-	TickAcceptClient();
+	// Accepting, sending, keepalives and peer-close detection all run on the worker (WP-S6),
+	// so the game thread never waits on a socket or on the worker.
 }
 
 FO3DTransportStats FO3DSocketsTcpSender::GetStats() const
@@ -331,9 +402,9 @@ bool FO3DSocketsTcpSender::CreateListenSocket()
 
 void FO3DSocketsTcpSender::DestroySocket()
 {
-	// Same lock as TickAcceptClient()/RunWorker(); blocks until any in-flight
-	// worker-thread send finishes before ClientSocket is torn down.
-	FScopeLock Lock(&SocketLock);
+	// Called only while the worker is not running (Start/Stop join it first), so the sockets
+	// have no other user.
+	check(WorkerThread == nullptr);
 
 	if (ClientSocket && SocketSubsystem)
 	{
@@ -349,65 +420,115 @@ void FO3DSocketsTcpSender::DestroySocket()
 	ListenSocket = nullptr;
 }
 
-void FO3DSocketsTcpSender::TickAcceptClient()
+bool FO3DSocketsTcpSender::TryAcceptClient()
 {
-	if (!ListenSocket)
+	if (!ListenSocket || !SocketSubsystem)
 	{
-		return;
-	}
-
-	const double Now = FPlatformTime::Seconds();
-	if (Now - LastAcceptPollTime < 0.01) // Poll every 10ms
-	{
-		return;
-	}
-	LastAcceptPollTime = Now;
-
-	// Same lock as DestroySocket()/RunWorker(); guards the ClientSocket
-	// read-then-write below against a concurrent worker-thread send/teardown.
-	FScopeLock Lock(&SocketLock);
-
-	if (ClientSocket)
-	{
-		return; // Already have a client
+		return false;
 	}
 
 	TSharedRef<FInternetAddr> PeerAddr = SocketSubsystem->CreateInternetAddr();
 	FSocket* Accepted = ListenSocket->Accept(*PeerAddr, TEXT("O3DS_TCP_CLIENT"));
-	if (Accepted)
+	if (!Accepted)
 	{
-		Accepted->SetNonBlocking(true);
+		return false;
+	}
 
-		// Configure socket buffers for better performance
-		int32 SendBufferSize = 2 * 1024 * 1024; // 2MB (match UDP)
-		int32 AppliedSize = 0;
-		Accepted->SetSendBufferSize(SendBufferSize, AppliedSize);
+	Accepted->SetNonBlocking(true);
 
-		// Disable Nagle's algorithm for low-latency transmission (critical for audio)
-		Accepted->SetNoDelay(true);
+	// Configure socket buffers for better performance
+	int32 SendBufferSize = 2 * 1024 * 1024; // 2MB (match UDP)
+	int32 AppliedSize = 0;
+	Accepted->SetSendBufferSize(SendBufferSize, AppliedSize);
 
-		ClientSocket = Accepted;
-		PublishState->bClientConnected.store(true); // Fast check in Send() and audio sinks
-		UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP sender accepted client %s (sendBuf=%d, TCP_NODELAY=true)"), *PeerAddr->ToString(true), AppliedSize);
+	// Disable Nagle's algorithm for low-latency transmission (critical for audio)
+	Accepted->SetNoDelay(true);
+
+	ClientSocket = Accepted;
+	PublishState->bClientConnected.store(true); // Fast check in Send() and audio sinks
+	UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP sender accepted client %s (sendBuf=%d, TCP_NODELAY=true)"), *PeerAddr->ToString(true), AppliedSize);
+	return true;
+}
+
+void FO3DSocketsTcpSender::DropClient(const TCHAR* Reason)
+{
+	UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP sender dropping client: %s"), Reason);
+	if (ClientSocket && SocketSubsystem)
+	{
+		SocketSubsystem->DestroySocket(ClientSocket);
+	}
+	ClientSocket = nullptr;
+	PublishState->bClientConnected.store(false);
+}
+
+bool FO3DSocketsTcpSender::IsPeerClosed()
+{
+	// The receiver never sends, so a readable client socket means the peer closed or reset
+	// the connection (or sent something we ignore). Without this, a dead client is noticed
+	// only when a send fails, and a reconnecting receiver waits in the backlog (TRB-6).
+	if (!ClientSocket->Wait(ESocketWaitConditions::WaitForRead, FTimespan::Zero()))
+	{
+		return false;
+	}
+
+	constexpr int32 ScratchBytes = 256;
+	uint8 Scratch[ScratchBytes];
+	int32 Read = 0;
+	if (ClientSocket->Recv(Scratch, ScratchBytes, Read) && Read > 0)
+	{
+		return false; // Unexpected data from the receiver; discarded.
+	}
+	return true;
+}
+
+void FO3DSocketsTcpSender::AddDroppedFrames(int64 Count)
+{
+	if (Count > 0)
+	{
+		FScopeLock StatsLock(&StatsMutex);
+		Stats.DroppedFrames += Count;
 	}
 }
 
-bool FO3DSocketsTcpSender::SendFramed(FSocket* InSocket, const uint8* Data, int32 Size)
+void FO3DSocketsTcpSender::DropQueuedWithoutClient()
 {
-	if (!InSocket || !Data || Size <= 0)
+	TArray<uint8> Discard;
+	int64 Dropped = 0;
+	while (PublishState->SendQueue.Dequeue(Discard))
 	{
-		return false;
+		++Dropped;
+	}
+	AddDroppedFrames(Dropped);
+}
+
+bool FO3DSocketsTcpSender::DequeueNextFrame(TArray<uint8>& OutItem, int32& OutOffset, double Now)
+{
+	int64 Expired = 0;
+	bool bFound = false;
+	while (PublishState->SendQueue.Dequeue(OutItem))
+	{
+		// TRB-14: a frame that waited longer than the age limit is stale for realtime use.
+		// It is dropped whole before any byte of it is sent.
+		if (MaxQueueAgeSeconds > 0.0 && (Now - ReadEnqueueTime(OutItem)) > MaxQueueAgeSeconds)
+		{
+			++Expired;
+			continue;
+		}
+		OutOffset = QueueItemPrefixBytes;
+		bFound = true;
+		break;
 	}
 
-	// Data already includes frame header (added by EnqueuePayload)
-	// Send the complete framed message in a single call
-	int32 BytesSent = 0;
-	if (!InSocket->Send(Data, Size, BytesSent) || BytesSent != Size)
+	if (Expired > 0)
 	{
-		return false;
+		AddDroppedFrames(Expired);
+		UE_LOG(LogSocketsTcpSender, Verbose, TEXT("TCP sender dropped %lld frames older than %.0f ms"), Expired, MaxQueueAgeSeconds * 1000.0);
 	}
-
-	return true;
+	if (!bFound)
+	{
+		OutItem.Reset();
+	}
+	return bFound;
 }
 
 TSharedPtr<FInternetAddr> FO3DSocketsTcpSender::CreateBindAddress(const FString& Host, int32 Port, bool& bOutValid)
@@ -435,13 +556,20 @@ TSharedPtr<FInternetAddr> FO3DSocketsTcpSender::CreateBindAddress(const FString&
 	return Addr;
 }
 
-void FO3DSocketsTcpSender::StartWorker()
+bool FO3DSocketsTcpSender::StartWorker()
 {
 	if (!WorkerThread)
 	{
 		Worker = new FTcpSenderRunnable(*this);
 		WorkerThread = FRunnableThread::Create(Worker, TEXT("O3D_TCP_Sender_Worker"));
+		if (!WorkerThread)
+		{
+			delete Worker;
+			Worker = nullptr;
+			return false;
+		}
 	}
+	return true;
 }
 
 void FO3DSocketsTcpSender::StopWorker()
@@ -463,44 +591,122 @@ void FO3DSocketsTcpSender::StopWorker()
 
 uint32 FO3DSocketsTcpSender::RunWorker()
 {
-	TArray<uint8> Bytes;
+	// The frame being written. Once its first byte is on the wire it is either finished or
+	// the client is dropped, so the receiver never sees half a frame followed by another
+	// frame (TRB-2).
+	TArray<uint8> Pending;
+	int32 PendingOffset = 0;
+	bool bPendingIsKeepalive = false;
+
+	double LastSendTime = FPlatformTime::Seconds();
+	double LastProgressTime = LastSendTime;
+	double LastPeerCheckTime = LastSendTime;
+
+	auto ResetPending = [&Pending, &PendingOffset, &bPendingIsKeepalive]()
+	{
+		Pending.Reset();
+		PendingOffset = 0;
+		bPendingIsKeepalive = false;
+	};
+
+	auto DropClientAndPending = [this, &Pending, &bPendingIsKeepalive, &ResetPending](const TCHAR* Reason)
+	{
+		if (Pending.Num() > 0 && !bPendingIsKeepalive)
+		{
+			AddDroppedFrames(1);
+		}
+		ResetPending();
+		DropClient(Reason);
+	};
+
 	while (!bStopWorker.Load())
 	{
-		if (!PublishState->SendQueue.Dequeue(Bytes))
-		{
-			PublishState->SendQueue.WaitForWork(50);
-			continue;
-		}
+		double Now = FPlatformTime::Seconds();
 
-		// Same lock as TickAcceptClient()/DestroySocket(); held for the whole
-		// send so a concurrent accept/teardown on the game thread can't touch
-		// ClientSocket (or free the underlying FSocket) mid-send. The audio
-		// thread never takes this lock (WP-S5, TRB-10).
-		FScopeLock Lock(&SocketLock);
-
-		FSocket* ActiveSocket = ClientSocket;
-		if (!ActiveSocket)
+		if (!ClientSocket)
 		{
-			FScopeLock StatsLock(&StatsMutex);
-			Stats.DroppedFrames++;
-			continue;
-		}
-
-		if (!SendFramed(ActiveSocket, Bytes.GetData(), Bytes.Num()))
-		{
-			// Send failed - drop client and wait for reconnect
-			UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP send failed, dropping client."));
-			if (ClientSocket && SocketSubsystem)
+			// Frames queued just before the client went away have nowhere to go.
+			DropQueuedWithoutClient();
+			if (!TryAcceptClient())
 			{
-				SocketSubsystem->DestroySocket(ClientSocket);
+				PublishState->SendQueue.WaitForWork(AcceptPollMs);
+				continue;
 			}
-			ClientSocket = nullptr;
-			PublishState->bClientConnected.store(false); // Update connection state
-
-			FScopeLock StatsLock(&StatsMutex);
-			Stats.DroppedFrames++;
+			LastSendTime = LastProgressTime = LastPeerCheckTime = FPlatformTime::Seconds();
 			continue;
 		}
+
+		if (Pending.Num() == 0)
+		{
+			if (DequeueNextFrame(Pending, PendingOffset, Now))
+			{
+				bPendingIsKeepalive = false;
+			}
+			else if (KeepaliveIntervalSeconds > 0.0 && (Now - LastSendTime) >= KeepaliveIntervalSeconds)
+			{
+				Pending = KeepaliveFrame;
+				PendingOffset = 0;
+				bPendingIsKeepalive = true;
+			}
+			else
+			{
+				if ((Now - LastPeerCheckTime) >= PeerCheckIntervalSeconds)
+				{
+					LastPeerCheckTime = Now;
+					if (IsPeerClosed())
+					{
+						DropClientAndPending(TEXT("closed by receiver"));
+						continue;
+					}
+				}
+
+				uint32 WaitMs = MaxIdleWaitMs;
+				if (KeepaliveIntervalSeconds > 0.0)
+				{
+					const double UntilKeepalive = KeepaliveIntervalSeconds - (Now - LastSendTime);
+					WaitMs = static_cast<uint32>(FMath::Clamp(UntilKeepalive * 1000.0, 1.0, static_cast<double>(MaxIdleWaitMs)));
+				}
+				PublishState->SendQueue.WaitForWork(WaitMs);
+				continue;
+			}
+			LastProgressTime = Now;
+		}
+
+		const int32 Remaining = Pending.Num() - PendingOffset;
+		int32 Sent = 0;
+		const bool bOk = ClientSocket->Send(Pending.GetData() + PendingOffset, Remaining, Sent);
+		Now = FPlatformTime::Seconds();
+		if (bOk && Sent > 0)
+		{
+			PendingOffset += Sent;
+			LastProgressTime = Now;
+			if (PendingOffset >= Pending.Num())
+			{
+				ResetPending();
+				LastSendTime = Now;
+				continue;
+			}
+		}
+		else if (!bOk)
+		{
+			const ESocketErrors Error = SocketSubsystem->GetLastErrorCode();
+			if (Error != SE_EWOULDBLOCK && Error != SE_ENOBUFS)
+			{
+				DropClientAndPending(TEXT("send failed"));
+				continue;
+			}
+		}
+
+		// Partial send or EWOULDBLOCK: the kernel send buffer is full because the receiver
+		// reads slower than we write. Wait for space, and give up on the client only if the
+		// frame makes no progress for tcp.stalltimeout (TRB-2).
+		SendWaitCount.fetch_add(1);
+		if ((Now - LastProgressTime) > StallTimeoutSeconds)
+		{
+			DropClientAndPending(TEXT("send stalled"));
+			continue;
+		}
+		ClientSocket->Wait(ESocketWaitConditions::WaitForWrite, FTimespan::FromSeconds(WriteWaitSeconds));
 	}
 
 	return 0;
@@ -513,9 +719,9 @@ bool FO3DSocketsTcpSender::EnqueuePayload(const uint8* Data, int32 Size)
 		return false;
 	}
 
-	// Framed message (header + payload). The shared queue enforces the byte cap atomically
-	// and wakes the worker.
-	return PublishState->SendQueue.Enqueue(MakeTcpFrame(Data, Size));
+	// Framed message (time prefix + header + payload). The shared queue enforces the byte cap
+	// atomically and wakes the worker (TRB-3). Over the cap, the new frame is dropped whole.
+	return PublishState->SendQueue.Enqueue(MakeQueuedFrame(Data, Size));
 }
 
 void FO3DSocketsTcpSender::DrainQueue()
