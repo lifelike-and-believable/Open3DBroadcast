@@ -18,9 +18,23 @@ DEFINE_LOG_CATEGORY(LogO3DMoQReceiver);
 using namespace MoQHelpers;
 
 FO3DMoQReceiver::FO3DMoQReceiver()
+	// The cycle counter differs per instance and per run, so many receivers do not retry in lockstep.
+	: FO3DMoQReceiver(FMoQFfiApi::GetProduction(), nullptr, FPlatformTime::Cycles64())
+{
+}
+
+FO3DMoQReceiver::FO3DMoQReceiver(FMoQFfiApiRef InApi, TFunction<double()> InClock, uint64 InJitterSeed)
+	: Api(MoveTemp(InApi))
+	, Clock(MoveTemp(InClock))
+	, JitterSeed(InJitterSeed)
 {
 	CachedState = MOQ_STATE_DISCONNECTED;
 	AliveFlag = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(true);
+}
+
+double FO3DMoQReceiver::NowSeconds() const
+{
+	return Clock ? Clock() : FPlatformTime::Seconds();
 }
 
 FO3DMoQReceiver::~FO3DMoQReceiver()
@@ -52,6 +66,8 @@ bool FO3DMoQReceiver::ParseOptions(const FO3DTransportConfig& Config, FString& O
 		OutError = TEXT("Unable to derive track namespace/name");
 		return false;
 	}
+
+	Options.ConnectTimeoutSeconds = ResolveConnectTimeoutSeconds(Config);
 
 	Options.StreamId = Config.StreamId;
 	if (Options.StreamId.IsEmpty())
@@ -87,7 +103,7 @@ bool FO3DMoQReceiver::Initialize(const FO3DTransportConfig& Config)
 
 	if (!Session.IsValid())
 	{
-		Session = MakeShared<FMoQSessionWrapper>();
+		Session = MakeShared<FMoQSessionWrapper, ESPMode::ThreadSafe>(Api);
 	}
 
 	const FMoQResult InitResult = Session->Initialize(Options.RelayUrl);
@@ -120,7 +136,10 @@ bool FO3DMoQReceiver::Initialize(const FO3DTransportConfig& Config)
 	bAudioSubscribed = false;
 	ConsecutiveFailures = 0;
 	LastConnectAttemptTimeSeconds = 0.0;
+	NextConnectAttemptTimeSeconds = 0.0;
 	LastSubscribeAttemptTimeSeconds = 0.0;
+	MocapSubscribeRetry.Reset();
+	AudioSubscribeRetry.Reset();
 	LastErrorLogTimeSeconds = 0.0;
 
 	bInitialized = true;
@@ -227,19 +246,51 @@ bool FO3DMoQReceiver::AttemptConnect()
 		return true;
 	}
 
+	const double Now = NowSeconds();
 	bConnectInFlight = true;
-	LastConnectAttemptTimeSeconds = FPlatformTime::Seconds();
+	LastConnectAttemptTimeSeconds = Now;
 
+	// Each attempt runs on a fresh client and ends in CONNECTED or FAILED (TRF-11); Poll()
+	// abandons it if neither arrives within Options.ConnectTimeoutSeconds.
 	const FMoQResult Result = Session->Connect();
 	if (!Result.IsOk())
 	{
 		bConnectInFlight = false;
 		ConsecutiveFailures++;
+		ScheduleReconnect(Now);
 		UE_LOG(LogO3DMoQReceiver, Warning, TEXT("moq_connect failed: %s"), *Result.Message);
 		return false;
 	}
 
 	return true;
+}
+
+void FO3DMoQReceiver::ScheduleReconnect(double Now)
+{
+	NextConnectAttemptTimeSeconds = Now + ComputeBackoffDelaySeconds(ConsecutiveFailures, JitterSeed);
+}
+
+void FO3DMoQReceiver::ScheduleSubscribeRetry(FSubscribeRetryState& Retry, double Now, uint64 SeedSalt)
+{
+	++Retry.ConsecutiveFailures;
+	Retry.NextAttemptTimeSeconds = Now + ComputeBackoffDelaySeconds(Retry.ConsecutiveFailures, JitterSeed ^ SeedSalt);
+}
+
+void FO3DMoQReceiver::HandleConnectTimeout(double Now)
+{
+	UE_LOG(LogO3DMoQReceiver, Warning, TEXT("MoQ connect to %s did not complete within %.1f s; retrying on a new client"),
+		*Options.RelayUrl, Options.ConnectTimeoutSeconds);
+
+	if (Session.IsValid())
+	{
+		Session->AbandonConnect();
+	}
+	bConnectInFlight = false;
+	CachedState = MOQ_STATE_FAILED;
+	ConsecutiveFailures++;
+	DestroySubscriber();
+	DestroyAudioSubscriber();
+	ScheduleReconnect(Now);
 }
 
 void FO3DMoQReceiver::HandleConnectionStateChanged(MoqConnectionState NewState)
@@ -252,6 +303,9 @@ void FO3DMoQReceiver::HandleConnectionStateChanged(MoqConnectionState NewState)
 		bConnectInFlight = false;
 		ConsecutiveFailures = 0;
 		UE_LOG(LogO3DMoQReceiver, Log, TEXT("Connected to MoQ relay %s"), *Options.RelayUrl);
+		// A new connection gets an immediate subscribe; retries after that back off (TRF-20).
+		MocapSubscribeRetry.Reset();
+		AudioSubscribeRetry.Reset();
 		// Subscribe to mocap track
 		AttemptSubscribe();
 		// Subscribe to audio track if audio sink is configured
@@ -276,6 +330,7 @@ void FO3DMoQReceiver::HandleConnectionStateChanged(MoqConnectionState NewState)
 		DestroyAudioSubscriber();
 		bMocapSubscribed = false;
 		bAudioSubscribed = false;
+		ScheduleReconnect(NowSeconds());
 		break;
 
 	default:
@@ -295,7 +350,7 @@ bool FO3DMoQReceiver::AttemptSubscribe()
 		return true;
 	}
 
-	LastSubscribeAttemptTimeSeconds = FPlatformTime::Seconds();
+	LastSubscribeAttemptTimeSeconds = NowSeconds();
 
 	FMoQSubscriptionConfig SubscriptionConfig;
 	SubscriptionConfig.Namespace = Options.MocapNamespace;
@@ -317,16 +372,18 @@ bool FO3DMoQReceiver::AttemptSubscribe()
 	const FMoQResult Result = Session->Subscribe(SubscriptionConfig, NewSubscriber);
 	if (!Result.IsOk())
 	{
-		const double Now = FPlatformTime::Seconds();
+		const double Now = NowSeconds();
+		ScheduleSubscribeRetry(MocapSubscribeRetry, Now, /*SeedSalt=*/0x6D6F636170ull);
 		if ((Now - LastErrorLogTimeSeconds) >= kErrorLogIntervalSeconds)
 		{
 			LastErrorLogTimeSeconds = Now;
-			UE_LOG(LogO3DMoQReceiver, Warning, TEXT("Failed to subscribe to mocap track %s/%s: %s"),
-				*Options.MocapNamespace, *Options.TrackName, *Result.Message);
+			UE_LOG(LogO3DMoQReceiver, Warning, TEXT("Failed to subscribe to mocap track %s/%s (retry in %.2f s): %s"),
+				*Options.MocapNamespace, *Options.TrackName, MocapSubscribeRetry.NextAttemptTimeSeconds - Now, *Result.Message);
 		}
 		return false;
 	}
 
+	MocapSubscribeRetry.Reset();
 	MocapSubscriberHandle = NewSubscriber;
 	bMocapSubscribed = true;
 	UE_LOG(LogO3DMoQReceiver, Log, TEXT("Subscribed to MoQ mocap track: %s/%s"), *Options.MocapNamespace, *Options.TrackName);
@@ -365,16 +422,18 @@ bool FO3DMoQReceiver::AttemptAudioSubscribe()
 	const FMoQResult Result = Session->Subscribe(SubscriptionConfig, NewSubscriber);
 	if (!Result.IsOk())
 	{
-		const double Now = FPlatformTime::Seconds();
+		const double Now = NowSeconds();
+		ScheduleSubscribeRetry(AudioSubscribeRetry, Now, /*SeedSalt=*/0x617564696Full);
 		if ((Now - LastErrorLogTimeSeconds) >= kErrorLogIntervalSeconds)
 		{
 			LastErrorLogTimeSeconds = Now;
-			UE_LOG(LogO3DMoQReceiver, Warning, TEXT("Failed to subscribe to audio track %s/%s: %s"),
-				*Options.AudioNamespace, *Options.TrackName, *Result.Message);
+			UE_LOG(LogO3DMoQReceiver, Warning, TEXT("Failed to subscribe to audio track %s/%s (retry in %.2f s): %s"),
+				*Options.AudioNamespace, *Options.TrackName, AudioSubscribeRetry.NextAttemptTimeSeconds - Now, *Result.Message);
 		}
 		return false;
 	}
 
+	AudioSubscribeRetry.Reset();
 	AudioSubscriberHandle = NewSubscriber;
 	bAudioSubscribed = true;
 	UE_LOG(LogO3DMoQReceiver, Log, TEXT("Subscribed to MoQ audio track: %s/%s"), *Options.AudioNamespace, *Options.TrackName);
@@ -470,25 +529,31 @@ int32 FO3DMoQReceiver::Poll()
 		return 0;
 	}
 
+	const double Now = NowSeconds();
+	if (bConnectInFlight && CachedState.Load() != MOQ_STATE_CONNECTED
+		&& (Now - LastConnectAttemptTimeSeconds) >= Options.ConnectTimeoutSeconds)
+	{
+		HandleConnectTimeout(Now);
+	}
+
 	// Check for reconnection needs
 	const MoqConnectionState State = CachedState.Load();
 	if ((State == MOQ_STATE_DISCONNECTED || State == MOQ_STATE_FAILED) && !bConnectInFlight)
 	{
-		const double Now = FPlatformTime::Seconds();
-		const double ReconnectDelay = ComputeReconnectDelaySeconds(ConsecutiveFailures);
-		if ((Now - LastConnectAttemptTimeSeconds) >= ReconnectDelay)
+		if (Now >= NextConnectAttemptTimeSeconds)
 		{
 			AttemptConnect();
 		}
 		return 0;
 	}
 
-	// Check if we need to resubscribe
-	if (State == MOQ_STATE_CONNECTED && !bMocapSubscribed)
+	// Resubscribe with backoff (TRF-20): moq_subscribe is synchronous, so a track that is not
+	// announced yet must not be retried every Poll().
+	if (State == MOQ_STATE_CONNECTED && !bMocapSubscribed && Now >= MocapSubscribeRetry.NextAttemptTimeSeconds)
 	{
 		AttemptSubscribe();
 	}
-	if (State == MOQ_STATE_CONNECTED && !bAudioSubscribed && AudioSink.IsValid())
+	if (State == MOQ_STATE_CONNECTED && !bAudioSubscribed && AudioSink.IsValid() && Now >= AudioSubscribeRetry.NextAttemptTimeSeconds)
 	{
 		AttemptAudioSubscribe();
 	}
@@ -578,8 +643,14 @@ bool FO3DMoQReceiver::ProcessAudioPayload(const FReceivedPayload& Payload)
 		return true;
 	}
 
-	// Determine codec from audio config (matches sender's encoder config)
-	O3DS::EUnifiedCodec Codec = O3DAudio::SelectCodec(ActiveAudioConfig);
+	// TRF-37: decode with the codec the sender wrote into the frame header. The local config
+	// may differ from the sender's, which used to make every frame fail to deserialize.
+	O3DS::EUnifiedCodec Codec = O3DS::EUnifiedCodec::PCM16;
+	if (!TryGetAudioCodecFromFrame(Payload.Data.GetData(), Payload.Data.Num(), Codec))
+	{
+		UE_LOG(LogO3DMoQReceiver, Warning, TEXT("MoQ receiver got an audio frame with an unknown header (payload=%d)."), Payload.Data.Num());
+		return false;
+	}
 
 	// Deserialize the encoded audio frame (produced by O3DAudio::SerializeForTransport on sender)
 	O3DAudio::FEncodedAudioFrame EncodedFrame;

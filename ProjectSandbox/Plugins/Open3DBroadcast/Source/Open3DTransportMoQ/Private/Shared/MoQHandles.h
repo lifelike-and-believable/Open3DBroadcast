@@ -1,62 +1,68 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Shared/MoQFfiApi.h"
 #include "Shared/MoQTypes.h"
 
 #include "Templates/Function.h"
 
-/** RAII wrapper for the MoQ client session handle */
+/**
+ * Owns one MoqClient for its whole life (WP-S8). The client is created in the constructor and
+ * destroyed in the destructor, so the pointer never changes while the handle exists and FFI
+ * calls need no lock here (moq-ffi documents its client calls as thread-safe).
+ *
+ * Each connect attempt gets a fresh handle (TRF-8, TRF-11): an abandoned attempt keeps its own
+ * handle alive until its blocking moq_connect returns, and publishers and subscribers keep a
+ * reference to the handle they were created from, so a client is never destroyed while an FFI
+ * call or a child object still uses it.
+ */
 class FMoQSessionHandle
 {
 public:
-    FMoQSessionHandle();
+    explicit FMoQSessionHandle(FMoQFfiApiRef InApi);
     ~FMoQSessionHandle();
-
-    FMoQSessionHandle(FMoQSessionHandle&& Other) noexcept;
-    FMoQSessionHandle& operator=(FMoQSessionHandle&& Other) noexcept;
 
     FMoQSessionHandle(const FMoQSessionHandle&) = delete;
     FMoQSessionHandle& operator=(const FMoQSessionHandle&) = delete;
+    FMoQSessionHandle(FMoQSessionHandle&&) = delete;
+    FMoQSessionHandle& operator=(FMoQSessionHandle&&) = delete;
 
-    /** Lazily create the underlying session if needed */
-    FMoQResult EnsureCreated();
+    /** @return true if moq_client_create returned a client */
+    bool IsValid() const { return Client != nullptr; }
 
-    /** Destroy the underlying session (safe to call multiple times) */
-    void Reset();
-
-    /** @return true if the underlying session handle is valid */
-    bool IsValid() const;
-
-    /** Direct access to the raw pointer (callers should synchronize externally) */
-    FORCEINLINE MoqClient* GetUnsafe() const { return Client; }
-
-    /** Provides access to the mutex guarding the underlying pointer */
-    FORCEINLINE FCriticalSection& GetMutex() const { return Mutex; }
+    FORCEINLINE MoqClient* Get() const { return Client; }
+    FORCEINLINE const FMoQFfiApi& GetApi() const { return *Api; }
 
 private:
+    FMoQFfiApiRef Api;
     MoqClient* Client = nullptr;
-    mutable FCriticalSection Mutex;
 };
+
+using FMoQClientRef = TSharedPtr<FMoQSessionHandle, ESPMode::ThreadSafe>;
 
 /** RAII wrapper for MoQ publisher handles */
 class FMoQPublisherHandle
 {
 public:
     FMoQPublisherHandle() = default;
-    explicit FMoQPublisherHandle(MoqPublisher* InPublisher);
+    FMoQPublisherHandle(FMoQClientRef InClient, MoqPublisher* InPublisher);
     ~FMoQPublisherHandle();
-
-    FMoQPublisherHandle(FMoQPublisherHandle&& Other) noexcept;
-    FMoQPublisherHandle& operator=(FMoQPublisherHandle&& Other) noexcept;
 
     FMoQPublisherHandle(const FMoQPublisherHandle&) = delete;
     FMoQPublisherHandle& operator=(const FMoQPublisherHandle&) = delete;
+    FMoQPublisherHandle(FMoQPublisherHandle&&) = delete;
+    FMoQPublisherHandle& operator=(FMoQPublisherHandle&&) = delete;
 
-    void Reset(MoqPublisher* InPublisher = nullptr);
+    /** Destroys the publisher (safe to call more than once). */
+    void Reset();
     bool IsValid() const { return Publisher != nullptr; }
     FORCEINLINE MoqPublisher* Get() const { return Publisher; }
 
+    /** Publishes through the table of the client this publisher belongs to. */
+    FMoQResult Publish(const uint8* Data, int64 NumBytes, MoqDeliveryMode DeliveryMode) const;
+
 private:
+    FMoQClientRef Client;
     MoqPublisher* Publisher = nullptr;
 };
 
@@ -65,22 +71,23 @@ class FMoQSubscriberHandle
 {
 public:
     FMoQSubscriberHandle() = default;
-    explicit FMoQSubscriberHandle(MoqSubscriber* InSubscriber);
+    FMoQSubscriberHandle(FMoQClientRef InClient, MoqSubscriber* InSubscriber);
     ~FMoQSubscriberHandle();
-
-    FMoQSubscriberHandle(FMoQSubscriberHandle&& Other) noexcept;
-    FMoQSubscriberHandle& operator=(FMoQSubscriberHandle&& Other) noexcept;
 
     FMoQSubscriberHandle(const FMoQSubscriberHandle&) = delete;
     FMoQSubscriberHandle& operator=(const FMoQSubscriberHandle&) = delete;
+    FMoQSubscriberHandle(FMoQSubscriberHandle&&) = delete;
+    FMoQSubscriberHandle& operator=(FMoQSubscriberHandle&&) = delete;
 
-    void Reset(MoqSubscriber* InSubscriber = nullptr);
+    /** Destroys the subscriber (safe to call more than once). */
+    void Reset();
     bool IsValid() const { return Subscriber != nullptr; }
     FORCEINLINE MoqSubscriber* Get() const { return Subscriber; }
 
     void SetOnBeforeDestroy(TFunction<void()>&& Callback) { OnBeforeDestroy = MoveTemp(Callback); }
 
 private:
+    FMoQClientRef Client;
     MoqSubscriber* Subscriber = nullptr;
     TFunction<void()> OnBeforeDestroy;
 };

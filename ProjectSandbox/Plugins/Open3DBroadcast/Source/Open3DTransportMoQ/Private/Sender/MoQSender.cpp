@@ -47,9 +47,23 @@ private:
 };
 
 FO3DMoQSender::FO3DMoQSender()
-	: AudioState(MakeShared<FMoQSenderAudioState, ESPMode::ThreadSafe>())
+	// The cycle counter differs per instance and per run, so many senders do not retry in lockstep.
+	: FO3DMoQSender(FMoQFfiApi::GetProduction(), nullptr, FPlatformTime::Cycles64())
+{
+}
+
+FO3DMoQSender::FO3DMoQSender(FMoQFfiApiRef InApi, TFunction<double()> InClock, uint64 InJitterSeed)
+	: Api(MoveTemp(InApi))
+	, Clock(MoveTemp(InClock))
+	, JitterSeed(InJitterSeed)
+	, AudioState(MakeShared<FMoQSenderAudioState, ESPMode::ThreadSafe>())
 {
 	CachedState = MOQ_STATE_DISCONNECTED;
+}
+
+double FO3DMoQSender::NowSeconds() const
+{
+	return Clock ? Clock() : FPlatformTime::Seconds();
 }
 
 FO3DMoQSender::~FO3DMoQSender()
@@ -79,15 +93,17 @@ bool FO3DMoQSender::ParseOptions(const FO3DTransportConfig& Config, FString& Out
 
 	Options.DeliveryMode = ResolveDeliveryMode(Config);
 	Options.MaxQueueBytes = ResolveQueueBytes(Config);
+	Options.ConnectTimeoutSeconds = ResolveConnectTimeoutSeconds(Config);
 
-	UE_LOG(LogO3DMoQSender, Log, TEXT("MoQ sender configured: Relay=%s MocapTrack=%s/%s AudioTrack=%s/%s Mode=%s Queue=%llu bytes"),
+	UE_LOG(LogO3DMoQSender, Log, TEXT("MoQ sender configured: Relay=%s MocapTrack=%s/%s AudioTrack=%s/%s Mode=%s Queue=%llu bytes ConnectTimeout=%.1fs"),
 		*Options.RelayUrl,
 		*Options.MocapNamespace,
 		*Options.TrackName,
 		*Options.AudioNamespace,
 		*Options.TrackName,
 		Options.DeliveryMode == MOQ_DELIVERY_STREAM ? TEXT("stream") : TEXT("datagram"),
-		Options.MaxQueueBytes);
+		Options.MaxQueueBytes,
+		Options.ConnectTimeoutSeconds);
 
 	return true;
 }
@@ -109,7 +125,7 @@ bool FO3DMoQSender::Initialize(const FO3DTransportConfig& Config)
 
 	if (!Session.IsValid())
 	{
-		Session = MakeShared<FMoQSessionWrapper>();
+		Session = MakeShared<FMoQSessionWrapper, ESPMode::ThreadSafe>(Api);
 	}
 
 	const FMoQResult InitResult = Session->Initialize(Options.RelayUrl);
@@ -139,6 +155,7 @@ bool FO3DMoQSender::Initialize(const FO3DTransportConfig& Config)
 	bConnectInFlight = false;
 	ConsecutiveFailures = 0;
 	LastConnectAttemptTimeSeconds = 0.0;
+	NextConnectAttemptTimeSeconds = 0.0;
 	LastErrorLogTimeSeconds = 0.0;
 	LastDropLogTimeSeconds = 0.0;
 	
@@ -234,19 +251,45 @@ bool FO3DMoQSender::AttemptConnect()
 		return true;
 	}
 
+	const double Now = NowSeconds();
 	bConnectInFlight = true;
-	LastConnectAttemptTimeSeconds = FPlatformTime::Seconds();
+	LastConnectAttemptTimeSeconds = Now;
 
+	// Each attempt runs on a fresh client and ends in CONNECTED or FAILED (TRF-11); Tick()
+	// abandons it if neither arrives within Options.ConnectTimeoutSeconds.
 	const FMoQResult Result = Session->Connect();
 	if (!Result.IsOk())
 	{
 		bConnectInFlight = false;
 		ConsecutiveFailures++;
+		ScheduleReconnect(Now);
 		UE_LOG(LogO3DMoQSender, Warning, TEXT("moq_connect failed: %s"), *Result.Message);
 		return false;
 	}
 
 	return true;
+}
+
+void FO3DMoQSender::ScheduleReconnect(double Now)
+{
+	NextConnectAttemptTimeSeconds = Now + ComputeBackoffDelaySeconds(ConsecutiveFailures, JitterSeed);
+}
+
+void FO3DMoQSender::HandleConnectTimeout(double Now)
+{
+	UE_LOG(LogO3DMoQSender, Warning, TEXT("MoQ connect to %s did not complete within %.1f s; retrying on a new client"),
+		*Options.RelayUrl, Options.ConnectTimeoutSeconds);
+
+	if (Session.IsValid())
+	{
+		Session->AbandonConnect();
+	}
+	bConnectInFlight = false;
+	CachedState = MOQ_STATE_FAILED;
+	ConsecutiveFailures++;
+	DestroyPublisher();
+	DestroyAudioPublisher();
+	ScheduleReconnect(Now);
 }
 
 void FO3DMoQSender::HandleConnectionStateChanged(MoqConnectionState NewState)
@@ -279,8 +322,11 @@ void FO3DMoQSender::HandleConnectionStateChanged(MoqConnectionState NewState)
 		{
 			ConsecutiveFailures++;
 		}
+		// The session drops its announce cache with the connection (TRF-8), so the publishers
+		// created on reconnect announce their namespaces again.
 		DestroyPublisher();
 		DestroyAudioPublisher();
+		ScheduleReconnect(NowSeconds());
 		break;
 
 	default:
@@ -377,14 +423,18 @@ void FO3DMoQSender::Tick(float /*DeltaSeconds*/)
 		return;
 	}
 
-	const MoqConnectionState State = CachedState.Load();
-	if ((State == MOQ_STATE_DISCONNECTED || State == MOQ_STATE_FAILED) && !bConnectInFlight)
+	const double Now = NowSeconds();
+	if (bConnectInFlight && CachedState.Load() != MOQ_STATE_CONNECTED
+		&& (Now - LastConnectAttemptTimeSeconds) >= Options.ConnectTimeoutSeconds)
 	{
-		const double Now = FPlatformTime::Seconds();
-		if ((Now - LastConnectAttemptTimeSeconds) >= ComputeReconnectDelaySeconds(ConsecutiveFailures))
-		{
-			AttemptConnect();
-		}
+		HandleConnectTimeout(Now);
+	}
+
+	const MoqConnectionState State = CachedState.Load();
+	if ((State == MOQ_STATE_DISCONNECTED || State == MOQ_STATE_FAILED) && !bConnectInFlight
+		&& Now >= NextConnectAttemptTimeSeconds)
+	{
+		AttemptConnect();
 	}
 }
 
@@ -411,7 +461,7 @@ bool FO3DMoQSender::IsPublisherReady() const
 	{
 		return false;
 	}
-	return MocapPublisherHandle.IsValid();
+	return GetPublisher(/*bAudio=*/false).IsValid();
 }
 
 bool FO3DMoQSender::IsAudioPublisherReady() const
@@ -424,7 +474,13 @@ bool FO3DMoQSender::IsAudioPublisherReady() const
 	{
 		return false;
 	}
-	return AudioPublisherHandle.IsValid();
+	return GetPublisher(/*bAudio=*/true).IsValid();
+}
+
+TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> FO3DMoQSender::GetPublisher(bool bAudio) const
+{
+	FScopeLock Lock(&PublisherMutex);
+	return bAudio ? AudioPublisherHandle : MocapPublisherHandle;
 }
 
 bool FO3DMoQSender::EnsurePublisher()
@@ -434,7 +490,7 @@ bool FO3DMoQSender::EnsurePublisher()
 		return false;
 	}
 
-	if (MocapPublisherHandle.IsValid())
+	if (GetPublisher(/*bAudio=*/false).IsValid())
 	{
 		return true;
 	}
@@ -457,7 +513,10 @@ bool FO3DMoQSender::EnsurePublisher()
 		return false;
 	}
 
-	MocapPublisherHandle = NewPublisher;
+	{
+		FScopeLock Lock(&PublisherMutex);
+		MocapPublisherHandle = NewPublisher;
+	}
 	UE_LOG(LogO3DMoQSender, Log, TEXT("MoQ mocap track announced: %s/%s"), *Options.MocapNamespace, *Options.TrackName);
 	return true;
 }
@@ -469,7 +528,7 @@ bool FO3DMoQSender::EnsureAudioPublisher()
 		return false;
 	}
 
-	if (AudioPublisherHandle.IsValid())
+	if (GetPublisher(/*bAudio=*/true).IsValid())
 	{
 		return true;
 	}
@@ -493,19 +552,36 @@ bool FO3DMoQSender::EnsureAudioPublisher()
 		return false;
 	}
 
-	AudioPublisherHandle = NewPublisher;
+	{
+		FScopeLock Lock(&PublisherMutex);
+		AudioPublisherHandle = NewPublisher;
+	}
 	UE_LOG(LogO3DMoQSender, Log, TEXT("MoQ audio track announced: %s/%s"), *Options.AudioNamespace, *Options.TrackName);
 	return true;
 }
 
 void FO3DMoQSender::DestroyPublisher()
 {
-	MocapPublisherHandle.Reset();
+	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> Old;
+	{
+		FScopeLock Lock(&PublisherMutex);
+		Old = MoveTemp(MocapPublisherHandle);
+		MocapPublisherHandle.Reset();
+	}
+	// Released outside the lock. If the worker is mid-publish it holds a snapshot, and the
+	// publisher is destroyed when that snapshot goes out of scope.
+	Old.Reset();
 }
 
 void FO3DMoQSender::DestroyAudioPublisher()
 {
-	AudioPublisherHandle.Reset();
+	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> Old;
+	{
+		FScopeLock Lock(&PublisherMutex);
+		Old = MoveTemp(AudioPublisherHandle);
+		AudioPublisherHandle.Reset();
+	}
+	Old.Reset();
 }
 
 bool FO3DMoQSender::EnqueuePayload(TArray<uint8>&& Data, double CaptureTimestampSec, bool bIsAudio)
@@ -565,28 +641,19 @@ void FO3DMoQSender::DrainQueue()
 
 bool FO3DMoQSender::PublishPayload(const FPendingPayload& Payload)
 {
-	// Select appropriate publisher based on payload type
-	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> Publisher = 
-		Payload.bIsAudio ? AudioPublisherHandle : MocapPublisherHandle;
-	
-	if (!Publisher.IsValid())
-	{
-		return false;
-	}
-
-	MoqPublisher* RawPublisher = Publisher->Get();
-	if (RawPublisher == nullptr)
+	// TRF-9: publish on a snapshot taken under PublisherMutex, never on the shared member.
+	const TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> Publisher = GetPublisher(Payload.bIsAudio);
+	if (!Publisher.IsValid() || !Publisher->IsValid())
 	{
 		return false;
 	}
 
 	// Audio uses stream mode for reliability; mocap uses configured mode
 	MoqDeliveryMode DeliveryMode = Payload.bIsAudio ? MOQ_DELIVERY_STREAM : Options.DeliveryMode;
-	
-	const MoqResult Result = moq_publish_data(RawPublisher, Payload.Data.GetData(), Payload.Data.Num(), DeliveryMode);
-	if (Result.code != MOQ_OK)
+
+	const FMoQResult Wrapped = Publisher->Publish(Payload.Data.GetData(), Payload.Data.Num(), DeliveryMode);
+	if (!Wrapped.IsOk())
 	{
-		const FMoQResult Wrapped = FMoQResult::FromResult(Result);
 		const double Now = FPlatformTime::Seconds();
 		if ((Now - LastErrorLogTimeSeconds) >= kErrorLogIntervalSeconds)
 		{

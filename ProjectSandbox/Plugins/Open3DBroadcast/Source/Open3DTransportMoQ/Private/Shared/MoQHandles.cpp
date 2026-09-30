@@ -1,81 +1,31 @@
 #include "Shared/MoQHandles.h"
 
-#include "Misc/ScopeLock.h"
-#include "moq_ffi.h"
-
-FMoQSessionHandle::FMoQSessionHandle()
+FMoQSessionHandle::FMoQSessionHandle(FMoQFfiApiRef InApi)
+    : Api(MoveTemp(InApi))
 {
-    EnsureCreated();
+    if (Api->ClientCreate)
+    {
+        Client = Api->ClientCreate();
+    }
+
+    if (Client == nullptr)
+    {
+        UE_LOG(LogMoQBridge, Error, TEXT("moq_client_create returned null"));
+    }
 }
 
 FMoQSessionHandle::~FMoQSessionHandle()
 {
-    Reset();
-}
-
-FMoQSessionHandle::FMoQSessionHandle(FMoQSessionHandle&& Other) noexcept
-{
-    FScopeLock Lock(&Other.Mutex);
-    Client = Other.Client;
-    Other.Client = nullptr;
-}
-
-FMoQSessionHandle& FMoQSessionHandle::operator=(FMoQSessionHandle&& Other) noexcept
-{
-    if (this != &Other)
+    if (Client != nullptr && Api->ClientDestroy)
     {
-        Reset();
-        FScopeLock Lock(&Other.Mutex);
-        Client = Other.Client;
-        Other.Client = nullptr;
+        Api->ClientDestroy(Client);
     }
-    return *this;
+    Client = nullptr;
 }
 
-FMoQResult FMoQSessionHandle::EnsureCreated()
-{
-    FScopeLock Lock(&Mutex);
-    if (Client != nullptr)
-    {
-        return FMoQResult::Ok();
-    }
-
-    Client = moq_client_create();
-    if (Client == nullptr)
-    {
-        UE_LOG(LogMoQBridge, Error, TEXT("moq_client_create returned null"));
-        return FMoQResult::FromCode(EMoQErrorCode::Internal, TEXT("Failed to create MoQ client handle"));
-    }
-
-    return FMoQResult::Ok();
-}
-
-void FMoQSessionHandle::Reset()
-{
-    MoqClient* OldClient = nullptr;
-    {
-        FScopeLock Lock(&Mutex);
-        if (Client != nullptr)
-        {
-            OldClient = Client;
-            Client = nullptr;
-        }
-    }
-
-    if (OldClient != nullptr)
-    {
-        moq_client_destroy(OldClient);
-    }
-}
-
-bool FMoQSessionHandle::IsValid() const
-{
-    FScopeLock Lock(&Mutex);
-    return Client != nullptr;
-}
-
-FMoQPublisherHandle::FMoQPublisherHandle(MoqPublisher* InPublisher)
-    : Publisher(InPublisher)
+FMoQPublisherHandle::FMoQPublisherHandle(FMoQClientRef InClient, MoqPublisher* InPublisher)
+    : Client(MoveTemp(InClient))
+    , Publisher(InPublisher)
 {
 }
 
@@ -84,34 +34,38 @@ FMoQPublisherHandle::~FMoQPublisherHandle()
     Reset();
 }
 
-FMoQPublisherHandle::FMoQPublisherHandle(FMoQPublisherHandle&& Other) noexcept
+void FMoQPublisherHandle::Reset()
 {
-    Publisher = Other.Publisher;
-    Other.Publisher = nullptr;
-}
-
-FMoQPublisherHandle& FMoQPublisherHandle::operator=(FMoQPublisherHandle&& Other) noexcept
-{
-    if (this != &Other)
+    if (Publisher != nullptr && Client.IsValid() && Client->GetApi().PublisherDestroy)
     {
-        Reset();
-        Publisher = Other.Publisher;
-        Other.Publisher = nullptr;
+        Client->GetApi().PublisherDestroy(Publisher);
     }
-    return *this;
+    Publisher = nullptr;
+    // Released after the publisher, so the client outlives every publisher created from it.
+    Client.Reset();
 }
 
-void FMoQPublisherHandle::Reset(MoqPublisher* InPublisher)
+FMoQResult FMoQPublisherHandle::Publish(const uint8* Data, int64 NumBytes, MoqDeliveryMode DeliveryMode) const
 {
-    if (Publisher != nullptr)
+    if (Publisher == nullptr || !Client.IsValid() || !Client->GetApi().PublishData)
     {
-        moq_publisher_destroy(Publisher);
+        return FMoQResult::FromCode(EMoQErrorCode::NotConnected, TEXT("Publisher is not valid"));
     }
-    Publisher = InPublisher;
+
+    const FMoQFfiApi& Api = Client->GetApi();
+    const MoqResult Raw = Api.PublishData(Publisher, Data, static_cast<size_t>(NumBytes), DeliveryMode);
+    if (Raw.code == MOQ_OK)
+    {
+        // An OK result may still carry a message owned by moq-ffi; free it.
+        MoQFfi::CopyAndFreeString(Api, Raw.message);
+        return FMoQResult::Ok();
+    }
+    return FMoQResult::FromResult(Raw, Api);
 }
 
-FMoQSubscriberHandle::FMoQSubscriberHandle(MoqSubscriber* InSubscriber)
-    : Subscriber(InSubscriber)
+FMoQSubscriberHandle::FMoQSubscriberHandle(FMoQClientRef InClient, MoqSubscriber* InSubscriber)
+    : Client(MoveTemp(InClient))
+    , Subscriber(InSubscriber)
 {
 }
 
@@ -120,32 +74,19 @@ FMoQSubscriberHandle::~FMoQSubscriberHandle()
     Reset();
 }
 
-FMoQSubscriberHandle::FMoQSubscriberHandle(FMoQSubscriberHandle&& Other) noexcept
-{
-    Subscriber = Other.Subscriber;
-    Other.Subscriber = nullptr;
-}
-
-FMoQSubscriberHandle& FMoQSubscriberHandle::operator=(FMoQSubscriberHandle&& Other) noexcept
-{
-    if (this != &Other)
-    {
-        Reset();
-        Subscriber = Other.Subscriber;
-        Other.Subscriber = nullptr;
-    }
-    return *this;
-}
-
-void FMoQSubscriberHandle::Reset(MoqSubscriber* InSubscriber)
+void FMoQSubscriberHandle::Reset()
 {
     if (Subscriber != nullptr)
     {
-        moq_subscriber_destroy(Subscriber);
+        if (Client.IsValid() && Client->GetApi().SubscriberDestroy)
+        {
+            Client->GetApi().SubscriberDestroy(Subscriber);
+        }
         if (OnBeforeDestroy)
         {
             OnBeforeDestroy();
         }
     }
-    Subscriber = InSubscriber;
+    Subscriber = nullptr;
+    Client.Reset();
 }

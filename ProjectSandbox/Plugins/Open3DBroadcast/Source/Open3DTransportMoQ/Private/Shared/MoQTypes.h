@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "moq_ffi.h"
 
+struct FMoQFfiApi;
+
 /** Global log category for shared MoQ bridge components */
 DECLARE_LOG_CATEGORY_EXTERN(LogMoQBridge, Log, All);
 
@@ -40,13 +42,11 @@ struct FMoQResult
     }
 
     static FMoQResult Ok();
-    static FMoQResult FromResult(const MoqResult& Result);
+    /** Converts an FFI result; frees Result.message through Api.FreeStr (it is owned by moq-ffi). */
+    static FMoQResult FromResult(const MoqResult& Result, const FMoQFfiApi& Api);
     static FMoQResult FromCode(EMoQErrorCode InCode, FString InMessage, MoqResultCode InRawCode = MOQ_ERROR_INTERNAL);
 };
 
 EMoQErrorCode ToMoQErrorCode(MoqResultCode InCode);
 FString LexToString(EMoQErrorCode InCode);
 FString LexToString(MoqConnectionState State);
-
-/** Utility to sanitize nullptr strings returned from the FFI */
-FString MakeStringCopyAndFree(const char* FfiString);

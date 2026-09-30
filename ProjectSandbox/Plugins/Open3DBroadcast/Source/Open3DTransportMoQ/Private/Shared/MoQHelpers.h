@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "O3DTransportTypes.h"
+#include "O3DUnifiedMessage.h"
 #include "moq_ffi.h"
 
 /**
@@ -39,6 +40,10 @@ namespace MoQHelpers
 	static constexpr TCHAR kKeyQueueBytes[] = TEXT("queue_bytes");
 	static constexpr TCHAR kKeyQueueBytesAlt[] = TEXT("moq.queue_bytes");
 	static constexpr TCHAR kKeyQueueBytesAlt2[] = TEXT("moq.qbytes");
+
+	/** Configuration key for the connect timeout in seconds (WP-S8, TRF-11) */
+	static constexpr TCHAR kKeyConnectTimeout[] = TEXT("connect_timeout");
+	static constexpr TCHAR kKeyConnectTimeoutAlt[] = TEXT("moq.connect_timeout");
 	
 	// ─────────────────────────────────────────────────────────────────────────
 	// Queue Size Limits
@@ -63,6 +68,17 @@ namespace MoQHelpers
 	/** Maximum reconnect delay in seconds */
 	constexpr double kMaxReconnectDelaySeconds = 10.0;
 	
+	/** Share of a backoff delay removed by jitter: delays fall in [(1 - J) * base, base] */
+	constexpr double kBackoffJitterFraction = 0.25;
+
+	/**
+	 * Default connect timeout in seconds. moq-ffi gives up after 30 s on its own; the transport
+	 * abandons an attempt sooner and retries on a fresh client.
+	 */
+	constexpr double kDefaultConnectTimeoutSeconds = 15.0;
+	constexpr double kMinConnectTimeoutSeconds = 1.0;
+	constexpr double kMaxConnectTimeoutSeconds = 120.0;
+
 	/** Interval between error log messages to avoid spam */
 	constexpr double kErrorLogIntervalSeconds = 5.0;
 	
@@ -187,4 +203,34 @@ namespace MoQHelpers
 	 * @return Delay in seconds before next reconnect attempt
 	 */
 	double ComputeReconnectDelaySeconds(int32 ConsecutiveFailures);
+
+	/**
+	 * Capped exponential backoff with deterministic jitter (WP-S8, TRF-11, TRF-20).
+	 * The base delay is ComputeReconnectDelaySeconds(ConsecutiveFailures); jitter removes up to
+	 * kBackoffJitterFraction of it. The jitter is a hash of (JitterSeed, ConsecutiveFailures),
+	 * so a given seed always yields the same schedule, and different seeds spread instances out.
+	 *
+	 * @return Delay in [(1 - kBackoffJitterFraction) * base, base]
+	 */
+	double ComputeBackoffDelaySeconds(int32 ConsecutiveFailures, uint64 JitterSeed);
+
+	/** Jitter unit in [0, 1) derived from the seed and the failure count. */
+	double ComputeJitterUnit(uint64 JitterSeed, int32 ConsecutiveFailures);
+
+	/**
+	 * Resolve the connect timeout in seconds from config.
+	 * Checks connect_timeout > moq.connect_timeout, defaults to kDefaultConnectTimeoutSeconds,
+	 * clamped to [kMinConnectTimeoutSeconds, kMaxConnectTimeoutSeconds].
+	 */
+	double ResolveConnectTimeoutSeconds(const FO3DTransportConfig& Config);
+
+	/**
+	 * Read the codec of a serialized audio frame from its own header (WP-S8, TRF-37), so the
+	 * receiver decodes what the sender actually sent instead of guessing from local config.
+	 * Layout (O3DAudioSerialization): version 1 is a PCM16 frame; version 2 is an encoded frame
+	 * whose third byte is the EUnifiedCodec value (only Opus is written that way today).
+	 *
+	 * @return false if the header is too short, the version is unknown or the codec is not audio
+	 */
+	bool TryGetAudioCodecFromFrame(const uint8* Payload, int32 PayloadSize, O3DS::EUnifiedCodec& OutCodec);
 }

@@ -14,12 +14,11 @@
 
 namespace
 {
+    // WP-S8: the dispatcher is drained by a core ticker on the game thread; tests drain it
+    // directly instead of sleeping.
     void PumpGameThreadTasks()
     {
-        if (FTaskGraphInterface::IsRunning())
-        {
-            FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
-        }
+        FMoQAsyncDispatcher::Get().DrainOnGameThread();
     }
 }
 
@@ -80,12 +79,7 @@ bool FMoQDispatcherRunsOnGameThreadTest::RunTest(const FString& Parameters)
         bCompleted = true;
     });
 
-    const double StartTime = FPlatformTime::Seconds();
-    while (!bCompleted.load() && (FPlatformTime::Seconds() - StartTime) < 2.0)
-    {
-        FPlatformProcess::Sleep(0.01f);
-        PumpGameThreadTasks();
-    }
+    PumpGameThreadTasks();
 
     TestTrue(TEXT("Dispatcher should complete queued work"), bCompleted.load());
     TestTrue(TEXT("Work should execute on game thread"), bOnGameThread.load());
@@ -112,12 +106,7 @@ bool FMoQSessionConnectionDispatchTest::RunTest(const FString& Parameters)
 
     FMoQSessionWrapperTestHelper::InvokeConnectionState(*Session, MOQ_STATE_CONNECTED);
 
-    const double StartTime = FPlatformTime::Seconds();
-    while (!bDelegateCalled.load() && (FPlatformTime::Seconds() - StartTime) < 2.0)
-    {
-        FPlatformProcess::Sleep(0.01f);
-        PumpGameThreadTasks();
-    }
+    PumpGameThreadTasks();
 
     TestTrue(TEXT("Connection delegate should be invoked"), bDelegateCalled.load());
     TestTrue(TEXT("Connection delegate should execute on the game thread"), bDelegateOnGameThread.load());
@@ -151,12 +140,7 @@ bool FMoQSessionSubscriberDispatchTest::RunTest(const FString& Parameters)
 
     FMoQSessionWrapperTestHelper::InvokeSubscriberCallback(Handler, Payload);
 
-    const double StartTime = FPlatformTime::Seconds();
-    while (!bPayloadReceived.load() && (FPlatformTime::Seconds() - StartTime) < 2.0)
-    {
-        FPlatformProcess::Sleep(0.01f);
-        PumpGameThreadTasks();
-    }
+    PumpGameThreadTasks();
 
     TestTrue(TEXT("Subscriber callback should be invoked"), bPayloadReceived.load());
     TestTrue(TEXT("Subscriber callback should execute on the game thread"), bOnGameThread.load());
