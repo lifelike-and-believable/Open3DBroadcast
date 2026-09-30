@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "LiveLinkSourceFactory.h"
+#include "O3DReceiverSourceSettings.h"
 #include "Types/SlateEnums.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/DeclarativeSyntaxSupport.h"
@@ -12,7 +13,6 @@
 
 class IDetailsView;
 class SBox;
-class UO3DReceiverSettingsObject;
 struct FPropertyAndParent;
 struct FPropertyChangedEvent;
 

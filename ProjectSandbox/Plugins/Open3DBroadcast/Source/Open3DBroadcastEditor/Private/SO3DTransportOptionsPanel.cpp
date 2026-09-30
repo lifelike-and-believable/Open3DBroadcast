@@ -102,7 +102,7 @@ TSharedRef<SWidget> SO3DTransportOptionsPanel::BuildFieldWidget(int32 FieldIndex
 			.MaxSliderValue(MaxValue)
 			.Value(TAttribute<TOptional<int32>>::CreateSP(this, &SO3DTransportOptionsPanel::GetIntValue, FieldIndex))
 			.UndeterminedString(GetHintText(FieldIndex))
-			.OnValueCommitted(TSlateDelegates<int32>::FOnValueCommitted::CreateSP(this, &SO3DTransportOptionsPanel::HandleIntCommitted, FieldIndex))
+			.OnValueCommitted(this, &SO3DTransportOptionsPanel::HandleIntCommitted, FieldIndex)
 			.ToolTipText(Field.Tooltip);
 	}
 
