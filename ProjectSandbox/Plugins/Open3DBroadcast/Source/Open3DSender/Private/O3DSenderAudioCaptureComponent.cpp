@@ -4,6 +4,7 @@
 #include "AudioMixerDevice.h"
 #include "AudioCaptureCore.h"
 #include "ISubmixBufferListener.h"
+#include "O3DAudioResampler.h"
 #include "O3DSenderInterface.h"
 #include "O3DSenderLogs.h"
 #include "Misc/ScopeLock.h"
@@ -58,7 +59,13 @@ private:
 /** Per-producer scratch and log throttles (SND-6): one per submix tap, mic stream or PushFrames caller. */
 struct FO3DSenderAudioProducerState
 {
+    /** Gain and channel mix at the input rate. */
+    TArray<float> MixBuffer;
+    /** Resampled output. */
     TArray<float> WorkingBuffer;
+    /** Stateful per-stream resampler with anti-aliasing (SND-21). */
+    FO3DAudioResampler Resampler;
+    bool bResamplerInUse = false;
     double LastRejectedLogTime = 0.0;
     double LastNoSinkLogTime = 0.0;
     double LastSubmitLogTime = 0.0;
@@ -96,84 +103,78 @@ namespace
 
         const float LocalGain = Params->Gain;
         const FString& LocalLabel = Params->Label;
-        TArray<float>& WorkingBuffer = Producer.WorkingBuffer;
 
         const int32 OutChannels = FMath::Max(1, Params->OutChannels);
         const int32 OutSampleRate = FMath::Max(1, Params->OutSampleRate);
         const bool bNeedsGain = !FMath::IsNearlyEqual(LocalGain, 1.0f);
         const bool bNeedsChannelMix = NumChannels != OutChannels;
         const bool bNeedsResample = SampleRate != OutSampleRate;
+        const int32 InChannels = NumChannels;
 
-        if (!bNeedsGain && !bNeedsChannelMix && !bNeedsResample)
+        // The buffer handed to the sink. Without gain, mixing or resampling that is the
+        // caller's buffer itself, with no copy.
+        const float* Samples = Interleaved;
+
+        // 1. Gain and channel mix, at the input rate.
+        if (bNeedsGain || bNeedsChannelMix)
         {
-            WorkingBuffer.SetNumUninitialized(NumFrames * NumChannels);
-            FMemory::Memcpy(WorkingBuffer.GetData(), Interleaved, WorkingBuffer.Num() * sizeof(float));
-        }
-        else
-        {
-            const double Ratio = static_cast<double>(OutSampleRate) / static_cast<double>(SampleRate);
-            const int32 OutFrames = bNeedsResample ? FMath::Max(1, static_cast<int32>(FMath::RoundToDouble(NumFrames * Ratio))) : NumFrames;
-            WorkingBuffer.SetNumUninitialized(OutFrames * OutChannels);
-
-            auto SampleAt = [&](double FrameIndex, int32 Channel) -> float
+            TArray<float>& MixBuffer = Producer.MixBuffer;
+            MixBuffer.SetNumUninitialized(NumFrames * OutChannels, EAllowShrinking::No);
+            for (int32 Frame = 0; Frame < NumFrames; ++Frame)
             {
-                const double SrcPos = FrameIndex;
-                const int32 Index0 = FMath::Clamp(static_cast<int32>(FMath::FloorToDouble(SrcPos)), 0, NumFrames - 1);
-                const int32 Index1 = FMath::Clamp(Index0 + 1, 0, NumFrames - 1);
-                const float Alpha = static_cast<float>(SrcPos - static_cast<double>(Index0));
-                const int32 SrcChannel = FMath::Clamp(Channel, 0, NumChannels - 1);
-                const int32 Base0 = Index0 * NumChannels + SrcChannel;
-                const int32 Base1 = Index1 * NumChannels + SrcChannel;
-                const float S0 = Interleaved[Base0];
-                const float S1 = Interleaved[Base1];
-                return FMath::Lerp(S0, S1, Alpha);
-            };
-
-            for (int32 OutFrame = 0; OutFrame < OutFrames; ++OutFrame)
-            {
-                const double SrcFrame = bNeedsResample ? (static_cast<double>(OutFrame) / Ratio) : static_cast<double>(OutFrame);
+                const float* In = Interleaved + Frame * InChannels;
+                float* Out = MixBuffer.GetData() + Frame * OutChannels;
                 for (int32 OutChannel = 0; OutChannel < OutChannels; ++OutChannel)
                 {
                     float Sample;
-                    if (OutChannels == NumChannels)
+                    if (OutChannels == InChannels)
                     {
-                        Sample = SampleAt(SrcFrame, OutChannel);
+                        Sample = In[OutChannel];
                     }
                     else if (OutChannels == 1)
                     {
                         float Acc = 0.0f;
-                        for (int32 C = 0; C < NumChannels; ++C)
+                        for (int32 C = 0; C < InChannels; ++C)
                         {
-                            Acc += SampleAt(SrcFrame, C);
+                            Acc += In[C];
                         }
-                        Sample = Acc / static_cast<float>(NumChannels);
+                        Sample = Acc / static_cast<float>(InChannels);
                     }
                     else
                     {
-                        const int32 SourceChannel = (NumChannels == 1) ? 0 : FMath::Min(OutChannel, NumChannels - 1);
-                        Sample = SampleAt(SrcFrame, SourceChannel);
+                        Sample = In[(InChannels == 1) ? 0 : FMath::Min(OutChannel, InChannels - 1)];
                     }
-
-                    if (bNeedsGain)
-                    {
-                        Sample *= LocalGain;
-                    }
-
-                    WorkingBuffer[OutFrame * OutChannels + OutChannel] = Sample;
+                    Out[OutChannel] = bNeedsGain ? Sample * LocalGain : Sample;
                 }
             }
-
-            NumFrames = OutFrames;
+            Samples = MixBuffer.GetData();
             NumChannels = OutChannels;
-            SampleRate = OutSampleRate;
         }
 
-        if ((!bNeedsChannelMix && !bNeedsResample) && bNeedsGain)
+        // 2. Sample-rate conversion (SND-21): stateful across buffers, so there is no drift and
+        // no click at buffer boundaries, and low-pass filtered before downsampling.
+        if (bNeedsResample)
         {
-            for (float& Value : WorkingBuffer)
+            FO3DAudioResampler& Resampler = Producer.Resampler;
+            Resampler.Configure(SampleRate, OutSampleRate, NumChannels);
+            Producer.bResamplerInUse = true;
+
+            double FirstFrameOffsetSec = 0.0;
+            const int32 OutFrames = Resampler.Process(Samples, NumFrames, Producer.WorkingBuffer, FirstFrameOffsetSec);
+            if (OutFrames <= 0)
             {
-                Value *= LocalGain;
+                return;
             }
+            Samples = Producer.WorkingBuffer.GetData();
+            NumFrames = OutFrames;
+            SampleRate = OutSampleRate;
+            TimestampSec += FirstFrameOffsetSec;
+        }
+        else if (Producer.bResamplerInUse)
+        {
+            // The stream stopped needing conversion; start clean if it needs it again.
+            Producer.Resampler.Reset();
+            Producer.bResamplerInUse = false;
         }
 
         const bool bDebug = CVarO3DSenderAudioDebug.GetValueOnAnyThread() != 0;
@@ -194,7 +195,7 @@ namespace
             }
         }
 
-        const bool bAccepted = Params->Sink->SubmitPcm(LocalLabel, WorkingBuffer.GetData(), NumFrames, NumChannels, SampleRate, TimestampSec);
+        const bool bAccepted = Params->Sink->SubmitPcm(LocalLabel, Samples, NumFrames, NumChannels, SampleRate, TimestampSec);
         if (!bAccepted && CVarO3DSenderAudioWarnFailures.GetValueOnAnyThread() != 0)
         {
             const double Now = FPlatformTime::Seconds();
@@ -344,6 +345,17 @@ void UO3DSenderAudioCaptureComponent::SetAudioSink(const TSharedPtr<IO3DSenderAu
     SubjectName = InSubjectName;
     RefreshCaptureParams();
 
+    // SND-28: the submix tap runs only while a sink is bound. Before BeginPlay there is nothing
+    // to stop, and BeginPlay registers the tap itself if a sink is bound by then.
+    if (!AudioSink.IsValid())
+    {
+        TeardownSubmixTap();
+    }
+    else if (!SubmixTap.IsValid() && HasBegunPlay())
+    {
+        RebuildSubmixTap();
+    }
+
     Audio::FAudioCapture* MicCaptureRaw = MicCapture.Get();
     bool bShouldStartMic = false;
     bool bShouldStopMic = false;
@@ -383,6 +395,16 @@ void UO3DSenderAudioCaptureComponent::SetAudioSink(const TSharedPtr<IO3DSenderAu
         MicCaptureRaw->StopStream();
         bMicStreamActive = false;
     }
+}
+
+void UO3DSenderAudioCaptureComponent::SetStreamLabel(const FString& InSubjectName)
+{
+    if (SubjectName.Equals(InSubjectName, ESearchCase::CaseSensitive))
+    {
+        return;
+    }
+    SubjectName = InSubjectName;
+    RefreshCaptureParams();
 }
 
 void UO3DSenderAudioCaptureComponent::StartCaptureWithMode(EO3DSenderCaptureMode InMode)
@@ -494,7 +516,8 @@ void UO3DSenderAudioCaptureComponent::RebuildSubmixTap()
     // Idempotent (SND-7): never register a second listener while one is registered.
     TeardownSubmixTap();
 
-    if (CaptureMode != EO3DSenderCaptureMode::Mix)
+    // SND-28: no tap without a sink; SetAudioSink registers it when one is bound.
+    if (CaptureMode != EO3DSenderCaptureMode::Mix || !AudioSink.IsValid())
     {
         return;
     }

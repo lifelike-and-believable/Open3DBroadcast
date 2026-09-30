@@ -26,7 +26,8 @@ enum class EO3DSenderAudioSource : uint8
 {
     GameSubmix UMETA(DisplayName = "Game Submix"),
     Microphone UMETA(DisplayName = "Microphone"),
-    GameAndMic UMETA(DisplayName = "Game + Mic")
+    /** Not implemented (SND-21): hidden, and never selected. Source always follows the capture mode. Kept so saved data still loads. */
+    GameAndMic UMETA(Hidden, DisplayName = "Game + Mic (not implemented)")
 };
 
 UENUM(BlueprintType)
@@ -92,8 +93,18 @@ public:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-    /** Bind a transport-provided audio sink. Passing nullptr disables capture delivery. Game thread. */
+    /**
+     * Bind a transport-provided audio sink. Passing nullptr disables capture delivery and stops
+     * the submix tap and the microphone stream; binding a sink starts them again (SND-28).
+     * Game thread.
+     */
     void SetAudioSink(const TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe>& InSink, const FString& InSubjectName);
+
+    /**
+     * Change the audio stream label (the pose subject name, SND-16) without rebinding the sink.
+     * Game thread.
+     */
+    void SetStreamLabel(const FString& InSubjectName);
 
     /** Change capture mode and immediately restart capture resources. Game thread. */
     void StartCaptureWithMode(EO3DSenderCaptureMode InMode);

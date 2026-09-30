@@ -536,8 +536,13 @@ void UO3DSenderComponent::UpdateAudioCaptureBinding()
 		AudioSink = TransportController->GetAudioSink();
 	}
 
-	// Pass SubjectName to audio capture component so audio stream label matches mocap subject
-	AudioCaptureComponent->SetAudioSink(AudioSink, SubjectName);
+	// SND-16: the audio stream label is the resolved pose subject name (sanitized, or generated
+	// from World/Actor/Component when SubjectName is empty), the same name pose frames carry.
+	// With no mesh and no SubjectName there is no pose subject; the capture component then
+	// uses its default label.
+	USkeletalMeshComponent* Mesh = TargetMesh.Get();
+	const FString AudioLabel = (Mesh || !SubjectName.IsEmpty()) ? ResolveSubjectName(Mesh) : FString();
+	AudioCaptureComponent->SetAudioSink(AudioSink, AudioLabel);
 
 	if (!AudioSink.IsValid())
 	{
@@ -975,6 +980,12 @@ void UO3DSenderComponent::EnsureSubjectNameCached(const USkeletalMeshComponent* 
 	CachedSubjectName = BuildSubjectName(SkelComp);
 	CachedSubjectMeshForName = Mesh;
 	LastSubjectSourceValue = SubjectName;
+
+	// SND-16: keep the audio stream label equal to the pose subject name.
+	if (AudioCaptureComponent && bEnableAudio && !PreviousName.Equals(CachedSubjectName, ESearchCase::CaseSensitive))
+	{
+		AudioCaptureComponent->SetStreamLabel(CachedSubjectName);
+	}
 
 	if (!PreviousName.IsEmpty() && !PreviousName.Equals(CachedSubjectName, ESearchCase::CaseSensitive))
 	{
