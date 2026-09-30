@@ -1,5 +1,5 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
-
+// Copyright (c) Open3DStream Contributors
+//
 // WP-S7 functional tests for the WebRTC transport (TRF-2, TRF-3, TRF-4, TRF-16, TRF-23, TRF-31).
 //
 // The sender and receiver are constructed with a fake LiveKit function table (FLkFfiApi,

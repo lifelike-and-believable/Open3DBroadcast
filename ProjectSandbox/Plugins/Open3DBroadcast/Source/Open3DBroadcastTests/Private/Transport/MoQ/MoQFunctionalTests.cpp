@@ -1,5 +1,5 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
-
+// Copyright (c) Open3DStream Contributors
+//
 // WP-S8 tests for MoQ (TRF-8, TRF-9, TRF-11, TRF-13, TRF-20, TRF-29, TRF-37, TRF-39).
 //
 // Everything runs through the fake moq-ffi table (MoQFakeFfi.h, ADR 0006 F2): no relay, no

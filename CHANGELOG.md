@@ -468,9 +468,10 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
 - Copyright headers (WP-F4: FAB-5, FAB-9). The rights holder is Lifelike &
   Believable. Every `.h`, `.cpp` and `.cs` file under the plugin's `Source/`,
   other than `ThirdParty/` and generated files, now starts with
-  `// Copyright Lifelike & Believable. All Rights Reserved.` It replaces
-  `// Copyright (c) Open3DStream Contributors` where that was present, and
-  is new in the files that had no header. The change is comment-only. The new
+  a copyright line. The 97 files that had none now start with
+  `// Copyright Lifelike & Believable. All Rights Reserved.` The 117 files
+  that carried `// Copyright (c) Open3DStream Contributors` keep it
+  unchanged. The change is comment-only. The new
   `Build/Scripts/check-copyright-headers.py` enforces it in a "Copyright
   headers" job of plugin CI on every PR, drafts included. Third-party code
   outside `ThirdParty/` goes in `Build/Fab/copyright-allowlist.txt` with a

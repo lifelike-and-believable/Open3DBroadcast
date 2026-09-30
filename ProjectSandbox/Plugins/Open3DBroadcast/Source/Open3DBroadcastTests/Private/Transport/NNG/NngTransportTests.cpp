@@ -1,5 +1,5 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
-
+// Copyright (c) Open3DStream Contributors
+//
 // NNG pub/sub on 127.0.0.1 and the receive demux. The transport is reached through
 // Testing/NngTesting.h (WP-T2).
 // Option keys are spelled out: they are the user-facing names persisted in settings

@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright (c) Open3DStream Contributors
 
 #include "Testing/O3DSenderTesting.h"
 

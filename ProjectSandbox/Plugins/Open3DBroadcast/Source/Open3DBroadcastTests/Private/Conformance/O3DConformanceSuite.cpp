@@ -1,5 +1,5 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
-
+// Copyright (c) Open3DStream Contributors
+//
 // Transport conformance suite (ADR 0006 §4, WP-T2; replaces the SHR-5 placeholders
 // Open3DBroadcast.Generic.Concurrency.MultipleSends, .Performance.Backpressure and
 // .Stats.ConsistencyUnderLoad). One test per registered transport and case:

@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright (c) Open3DStream Contributors
 
 #include "O3DConformance.h"
 

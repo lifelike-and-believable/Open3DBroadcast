@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright (c) Open3DStream Contributors
 
 #include "Sender/NngSender.h"
 #include "O3DRedact.h"

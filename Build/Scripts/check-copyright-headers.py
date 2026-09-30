@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Check that every first-party plugin source file starts with the copyright header.
+"""Check that every first-party plugin source file starts with a copyright header.
 
 The rule (FAB-5, FAB-9, WP-F4): every git-tracked .h, .cpp and .cs file under
-ProjectSandbox/Plugins/Open3DBroadcast/Source/ starts with exactly
+ProjectSandbox/Plugins/Open3DBroadcast/Source/ starts with one of
 
     // Copyright Lifelike & Believable. All Rights Reserved.
+    // Copyright (c) Open3DStream Contributors
 
-followed by a blank line (or the end of the file). A leading UTF-8 BOM is
-ignored. Line endings may be LF or CRLF.
+New files use the first, followed by a blank line (or the end of the file).
+Files that already carried the Open3DStream Contributors notice keep it, as
+the maintainer decided; what follows that line is not checked. A leading
+UTF-8 BOM is ignored. Line endings may be LF or CRLF.
 
 Not checked:
   - anything under a ThirdParty/ directory (vendored libraries keep their own
@@ -31,6 +34,8 @@ import subprocess
 import sys
 
 HEADER = "// Copyright Lifelike & Believable. All Rights Reserved."
+# Kept on files that already carried it (maintainer decision, WP-F4). Don't use it for new files.
+OPEN3DSTREAM_HEADER = "// Copyright (c) Open3DStream Contributors"
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 DEFAULT_PLUGIN_DIR = os.path.join(REPO_ROOT, "ProjectSandbox", "Plugins", "Open3DBroadcast")
@@ -99,6 +104,8 @@ def header_problem(data):
     text = data.decode("utf-8", errors="replace")
     lines = text.split("\n", 2)
     first = lines[0].rstrip("\r")
+    if first == OPEN3DSTREAM_HEADER:
+        return None
     if first != HEADER:
         return "first line is {!r}".format(first[:80]) if first else "first line is empty"
     if len(lines) > 1 and lines[1].rstrip("\r").strip():
@@ -159,7 +166,7 @@ def main():
         print("")
         print("{} file(s) do not start with the header line".format(len(offenders)))
         print("  {}".format(HEADER))
-        print("followed by a blank line:")
+        print("followed by a blank line (or, on files that already had it, {!r}):".format(OPEN3DSTREAM_HEADER))
         for rel, problem in offenders:
             print("  {}: {}".format(rel, problem))
             if in_actions:

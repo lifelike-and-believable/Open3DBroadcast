@@ -1,5 +1,5 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
-
+// Copyright (c) Open3DStream Contributors
+//
 // WP-S5 tests for the WebRTC sender (TRF-1, TRF-40).
 //
 // This stress test uses the real LiveKit library: it cycles Initialize (which creates a real

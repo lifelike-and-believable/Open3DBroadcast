@@ -217,17 +217,19 @@ Debug symbols (`.pdb`) for the plugin's prebuilt third-party DLLs (`moq_ffi.dll`
 
 ## Copyright headers
 
-Every `.h`, `.cpp` and `.cs` file under the plugin's `Source/` starts with this line, followed by a blank line (FAB-5, FAB-9, WP-F4):
+Every `.h`, `.cpp` and `.cs` file under the plugin's `Source/` starts with a copyright line (FAB-5, FAB-9, WP-F4). New files, and files that had no notice, use this one, followed by a blank line:
 
 ```cpp
 // Copyright Lifelike & Believable. All Rights Reserved.
 ```
 
-No year, as in Epic's own headers. In headers, `#pragma once` comes after the blank line. New files need the line too.
+No year, as in Epic's own headers. In headers, `#pragma once` comes after the blank line.
+
+Files that already carried `// Copyright (c) Open3DStream Contributors` keep that line unchanged; the maintainer decided not to replace it. Don't add it to new files.
 
 - **Not covered:** anything under a `ThirdParty/` directory (vendored nng, moq-ffi, livekit_ffi headers keep their own notices) and generated files (`*.generated.h`, `*_generated.h`, `*.gen.cpp`, or a file whose first ten lines say `@generated`, `automatically generated`, `auto-generated` or `DO NOT EDIT`).
 - **Third-party code outside `ThirdParty/`:** keep its original notice and add the file to `Build/Fab/copyright-allowlist.txt`, one line per file: the path relative to the plugin root, then the reason (licence and origin). The list is empty today.
-- **Check:** `Build/Scripts/check-copyright-headers.py` (Python 3.8+, standard library) reads the files git tracks under `Source/`, ignores a leading UTF-8 BOM and accepts LF or CRLF. It exits `0` when every checked file has the header, `1` when a file does not (it lists each file and its first line) or an allowlist entry names a file git does not track, and `2` for bad input. `-v` also lists the skipped ThirdParty files.
+- **Check:** `Build/Scripts/check-copyright-headers.py` (Python 3.8+, standard library) reads the files git tracks under `Source/`, ignores a leading UTF-8 BOM and accepts LF or CRLF. It exits `0` when every checked file starts with one of the two lines, `1` when a file does not (it lists each file and its first line) or an allowlist entry names a file git does not track, and `2` for bad input. `-v` also lists the skipped ThirdParty files.
 
 ```bash
 python3 Build/Scripts/check-copyright-headers.py

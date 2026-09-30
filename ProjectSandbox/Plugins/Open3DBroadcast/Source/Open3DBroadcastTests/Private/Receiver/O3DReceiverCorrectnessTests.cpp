@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright (c) Open3DStream Contributors
 
 // WP-S4 receiver correctness: UE glue tests for FO3DReceiverSource.
 //

@@ -1,5 +1,5 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
-
+// Copyright (c) Open3DStream Contributors
+//
 // WP-S10 (SHR-3, SHR-17, SHR-26): transport metrics have stable addresses and are updated
 // through per-transport handles without a lock; readers get snapshots; rolling averages and
 // peaks are updated with compare-exchange so concurrent updates are not lost.

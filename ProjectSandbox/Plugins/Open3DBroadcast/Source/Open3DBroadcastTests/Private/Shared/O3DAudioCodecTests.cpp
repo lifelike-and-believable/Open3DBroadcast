@@ -1,5 +1,5 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
-
+// Copyright (c) Open3DStream Contributors
+//
 // WP-S10: audio codec correctness.
 // - SHR-1: a frame's codec label always matches its payload; Opus that is unavailable (compiled
 //   out, or not possible at the stream's format) yields PCM16 labelled PCM16.
