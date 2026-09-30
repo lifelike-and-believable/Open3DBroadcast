@@ -3,11 +3,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Delegates/Delegate.h"
+#include "O3DTransportOptionSchema.h"
+#include "Templates/Function.h"
 
 class UO3DSenderComponent;
 struct FO3DTransportConfig;
-class SWidget;
 
 struct FO3DSenderTransportCustomization
 {
@@ -27,13 +27,13 @@ struct FO3DSenderTransportCustomization
      */
     TMap<FString, FString> SecretEnvVars;
 
-#if WITH_EDITOR
     /**
-     * Build an editor widget that edits transport-specific options. The provided delegate should be
-     * executed whenever the widget mutates component state so previews can refresh.
+     * The options this transport reads from UO3DSenderComponent::TransportOptions, as data. The
+     * Open3DBroadcastEditor module builds the Details panel rows from it (ADR 0010 §4). Every
+     * Secret entry's key must also be in SecretOptionKeys. Same layout in every build
+     * configuration: this struct has no WITH_EDITOR members (SND-34).
      */
-    TFunction<TSharedPtr<SWidget>(UO3DSenderComponent*, FSimpleDelegate /*OnConfigChanged*/)> BuildTransportWidget;
-#endif // WITH_EDITOR
+    FO3DTransportOptionSchema OptionSchema;
 };
 
 namespace O3DSender
@@ -49,4 +49,10 @@ namespace O3DSender
      * customization.
      */
     OPEN3DSENDER_API bool GetTransportSecretDeclaration(FName TransportName, TArray<FString>& OutSecretKeys, TMap<FString, FString>& OutSecretEnvVars);
+
+    /**
+     * Copies the option schema of a registered transport under the registry lock. Returns false,
+     * with an empty output, when the transport has no customization.
+     */
+    OPEN3DSENDER_API bool GetTransportOptionSchema(FName TransportName, FO3DTransportOptionSchema& OutSchema);
 }

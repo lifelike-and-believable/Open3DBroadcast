@@ -37,23 +37,15 @@ public class Open3DReceiver : ModuleRules
         // LiveLink (ULiveLinkPreset in O3DReceiverSource.cpp) and LiveLinkAnimationCore are not
         // needed by the public headers. AudioMixer was listed but never used (RCV-30): the remote
         // audio component uses USoundWaveProcedural and UAudioComponent from Engine.
+        // No Slate, SlateCore, PropertyEditor or InputCore: the LiveLink creation panel is built by
+        // Open3DBroadcastEditor through O3DReceiver::SetSourceFactoryPanelBuilder (ADR 0010 §3,
+        // WP-F7). Build/Scripts/check-runtime-editor-deps.py enforces this in CI.
         PrivateDependencyModuleNames.AddRange(new string[]
         {
             "Projects",
             "LiveLink",
-            "LiveLinkAnimationCore",
-            "Slate",
-            "SlateCore"
+            "LiveLinkAnimationCore"
         });
-
-        if (Target.bBuildEditor)
-        {
-            PrivateDependencyModuleNames.AddRange(new string[]
-            {
-                "PropertyEditor",
-                "InputCore"
-            });
-        }
 
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {

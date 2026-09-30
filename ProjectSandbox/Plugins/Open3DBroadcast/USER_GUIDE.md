@@ -206,6 +206,16 @@ UO3DSenderComponent* Sender = CreateDefaultSubobject<UO3DSenderComponent>(TEXT("
 
 #### Transport Configuration
 
+The **Transport** group of the Details panel (and the LiveLink **Add Source** panel on the receiver side) shows one row per option the selected transport declares. How the rows behave:
+
+- An empty row uses the transport's default, which the row shows as grey hint text. Opening the panel never writes a default into the component or the source settings, so selecting an actor does not mark the level as changed.
+- A value is written when you commit it: Enter, moving focus away, or releasing a number box after dragging. Dragging a number does not write on every step.
+- Each committed value is one undo step (**Ctrl+Z**). Changing the transport is one undo step too; the options of the previous transport are cleared with it, and undo brings them back.
+- Credential rows (for example the WebRTC access token) open empty, show where the current value comes from, and never store the value in the level, the Blueprint or a LiveLink preset. They are not undo steps.
+- NNG shows **Mode** and **Role** as two rows. An empty role uses the usual role for the mode.
+
+The panels are part of the `Open3DBroadcastEditor` module, which loads only in the editor.
+
 Configure transports using **Transport Options** (key-value pairs):
 
 **Common Options:**

@@ -63,6 +63,21 @@ bool O3DReceiver::GetTransportSecretDeclaration(FName TransportName, TArray<FStr
     return true;
 }
 
+bool O3DReceiver::GetTransportOptionSchema(FName TransportName, FO3DTransportOptionSchema& OutSchema)
+{
+    OutSchema.Reset();
+
+    FScopeLock Lock(&GReceiverCustomizationMutex);
+    const FO3DReceiverTransportCustomization* Customization = GReceiverCustomizations.Find(TransportName);
+    if (!Customization)
+    {
+        return false;
+    }
+
+    OutSchema = Customization->OptionSchema;
+    return true;
+}
+
 bool O3DReceiver::IsSecretOptionKey(FName TransportName, const FString& Key)
 {
     TArray<FString> SecretKeys;

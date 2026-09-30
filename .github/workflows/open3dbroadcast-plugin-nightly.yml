@@ -15,6 +15,11 @@ on:
         required: false
         default: true
         type: boolean
+      run_shipping_game:
+        description: "Package ProjectSandbox as a Win64 Shipping game (WP-F7; a full cook)"
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -39,8 +44,8 @@ jobs:
     # Run even if the Fab zip job failed; the Fab steps check its result.
     if: ${{ !cancelled() }}
     runs-on: [ self-hosted, ue5, windows ]
-    # 120 minutes plus the five flag-combination builds (WP-F2).
-    timeout-minutes: 210
+    # 120 minutes plus the five flag-combination builds (WP-F2) and the Shipping game package (WP-F7).
+    timeout-minutes: 270
 
     steps:
       - name: Checkout repository
@@ -167,6 +172,18 @@ jobs:
         shell: powershell
         run: |
           & .\Build\Scripts\Test-LinuxExclusion.ps1 -UEPath "$env:UE_ROOT"
+
+      # WP-F7 acceptance (ADR 0010): a packaged Win64 Shipping game with the plugin enabled builds,
+      # with no Open3DBroadcast editor module in it. A full cook of ProjectSandbox, so nightly and
+      # manual runs only, never pull requests (one shared UE runner).
+      - name: Shipping game build
+        if: ${{ !cancelled() && (github.event_name == 'schedule' || inputs.run_shipping_game) }}
+        timeout-minutes: 60
+        shell: powershell
+        run: |
+          & .\Build\Scripts\Build-ShippingGame.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -ArchiveDir (Join-Path $env:RUNNER_TEMP 'ShippingGame')
 
       - name: Download Fab source zip
         if: ${{ !cancelled() && needs.fab-package.result == 'success' }}

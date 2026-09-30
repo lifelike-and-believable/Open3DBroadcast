@@ -10,7 +10,7 @@
 #include "O3DReceiverRegistry.h"
 #include "O3DSenderTransportCustomization.h"
 #include "O3DReceiverTransportCustomization.h"
-#include "O3DTransportConfigPanelBase.h"
+#include "O3DTransportOptionSchema.h"
 #include "O3DTransportTypes.h"
 #include "Shared/NngHelpers.h"
 #include "Sender/NngSender.h"
@@ -18,16 +18,6 @@
 
 #include "O3DSenderComponent.h"
 #include "O3DReceiverSourceSettings.h"
-
-#if WITH_EDITOR
-#include "Widgets/SCompoundWidget.h"
-#include "Widgets/SBoxPanel.h"
-#include "Widgets/Input/SEditableTextBox.h"
-#include "Widgets/Input/SSpinBox.h"
-#include "Widgets/Input/SComboBox.h"
-#include "Widgets/Text/STextBlock.h"
-#include "Widgets/Layout/SBox.h"
-#endif // WITH_EDITOR
 
 DEFINE_LOG_CATEGORY_STATIC(LogOpen3DTransportNNGModule, Log, All);
 
@@ -88,736 +78,132 @@ namespace NNGReceiverConfig
 		}
 		return FString();
 	}
-
-	static void SetOption(UO3DReceiverSettingsObject* SettingsObject, const TCHAR* Key, const FString& Value)
-	{
-		if (!SettingsObject)
-		{
-			return;
-		}
-
-		SettingsObject->Modify();
-		if (Value.IsEmpty())
-		{
-			SettingsObject->Settings.TransportOptions.Remove(Key);
-		}
-		else
-		{
-			SettingsObject->Settings.TransportOptions.Add(Key, Value);
-		}
-	}
 }
 
-#if WITH_EDITOR
-namespace NNGSender
+/**
+ * Option schemas (ADR 0010 §4). The editor module renders them. Host and port have no single
+ * default: ConfigureTransport picks them from the mode and role (NngHelpers, TRB-40), so the
+ * tooltips say what an empty value means. The old combined mode+role list is two fields now
+ * (ADR 0010 open question 5).
+ */
+namespace NNGSchema
 {
-	struct FModeOption
+	static constexpr int64 BytesPerMiB = 1024ll * 1024ll;
+
+	static FO3DTransportOptionField MakeHost()
 	{
-		FString Label;
-		FString Mode;
-		FString Role;
-	};
-
-	static TSharedPtr<FModeOption> FindMatchingMode(const TArray<TSharedPtr<FModeOption>>& Options, const FString& ModeString, const FString& RoleString)
-	{
-		for (const TSharedPtr<FModeOption>& Entry : Options)
-		{
-			if (!Entry.IsValid())
-			{
-				continue;
-			}
-
-			if (Entry->Mode.Equals(ModeString, ESearchCase::IgnoreCase))
-			{
-				if (Entry->Role.IsEmpty() || RoleString.IsEmpty() || Entry->Role.Equals(RoleString, ESearchCase::IgnoreCase))
-				{
-					return Entry;
-				}
-			}
-		}
-
-		return Options.Num() > 0 ? Options[0] : nullptr;
+		FO3DTransportOptionField Field;
+		Field.Key = O3DNNG::HostOptionKey;
+		Field.DisplayName = LOCTEXT("NNGHostLabel", "Host");
+		Field.Tooltip = LOCTEXT("NNGHostTooltip", "Address to listen on or dial. Empty: 0.0.0.0 when the mode listens, 127.0.0.1 when it dials.");
+		Field.Type = EO3DTransportOptionType::String;
+		Field.Hint = LOCTEXT("NNGHostHint", "auto: from the mode");
+		return Field;
 	}
 
-	class SNngSenderSettingsPanel : public SCompoundWidget
+	static FO3DTransportOptionField MakePort()
 	{
-	public:
-		SLATE_BEGIN_ARGS(SNngSenderSettingsPanel) {}
-			SLATE_ARGUMENT(UO3DSenderComponent*, SenderComponent)
-			SLATE_ARGUMENT(FSimpleDelegate, OnConfigChanged)
-		SLATE_END_ARGS()
-
-		void Construct(const FArguments& InArgs)
-		{
-			SenderComponent = InArgs._SenderComponent;
-			OnConfigChanged = InArgs._OnConfigChanged;
-
-			BuildModeOptions();
-
-			const FString ModeValue = SenderComponent ? SenderComponent->GetTransportOption(O3DNNG::ModeOptionKey) : FString(TEXT("pub"));
-			const FString RoleValue = SenderComponent ? SenderComponent->GetTransportOption(O3DNNG::RoleOptionKey) : FString(TEXT("server"));
-			SelectedMode = FindMatchingMode(ModeOptions, ModeValue.IsEmpty() ? TEXT("pub") : ModeValue, RoleValue);
-			if (!SelectedMode.IsValid() && ModeOptions.Num() > 0)
-			{
-				SelectedMode = ModeOptions[0];
-			}
-
-			const FString InitialHost = ResolveHostValue();
-			if (InitialHost.IsEmpty())
-			{
-				SetHostValue(NNGTransportCommon::ResolveDefaultHost(CurrentModeIsListen()));
-			}
-
-			const int32 InitialPort = ResolvePortValue();
-			if (InitialPort <= 0)
-			{
-				SetPortValue(NNGTransportCommon::ResolveDefaultPort(CurrentMode()));
-			}
-
-			const int32 InitialQueueMb = ResolveQueueValueMb();
-			if (InitialQueueMb <= 0)
-			{
-				SetQueueValueMb(4);
-			}
-
-			ChildSlot
-			[
-				SNew(SVerticalBox)
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("NNGSenderHostLabel", "Host"))
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.f, 4.f, 0.f, 8.f)
-				[
-					SAssignNew(HostTextBox, SEditableTextBox)
-					.Text(FText::FromString(ResolveHostValue()))
-					.OnTextCommitted(this, &SNngSenderSettingsPanel::HandleHostCommitted)
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("NNGSenderPortLabel", "Port"))
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.f, 4.f, 0.f, 8.f)
-				[
-					SAssignNew(PortSpinBox, SSpinBox<int32>)
-					.MinValue(1)
-					.MaxValue(65535)
-					.Value(ResolvePortValue())
-					.OnValueChanged(this, &SNngSenderSettingsPanel::HandlePortChanged)
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("NNGSenderModeLabel", "Mode"))
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.f, 4.f, 0.f, 8.f)
-				[
-					SAssignNew(ModeComboBox, SComboBox<TSharedPtr<FModeOption>>)
-					.OptionsSource(&ModeOptions)
-					.InitiallySelectedItem(SelectedMode)
-					.OnSelectionChanged(this, &SNngSenderSettingsPanel::HandleModeChanged)
-					.OnGenerateWidget_Lambda([](TSharedPtr<FModeOption> Option)
-					{
-						return SNew(STextBlock).Text(Option.IsValid() ? FText::FromString(Option->Label) : FText::GetEmpty());
-					})
-					[
-						SNew(STextBlock)
-						.Text(this, &SNngSenderSettingsPanel::GetCurrentModeLabel)
-					]
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("NNGSenderQueueLabel", "Queue Capacity (MiB)"))
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.f, 4.f, 0.f, 0.f)
-				[
-					SAssignNew(QueueSpinBox, SSpinBox<int32>)
-					.MinValue(1)
-					.MaxValue(512)
-					.Value(ResolveQueueValueMb())
-					.OnValueChanged(this, &SNngSenderSettingsPanel::HandleQueueChanged)
-				]
-			];
-		}
-
-	private:
-		void BuildModeOptions()
-		{
-			ModeOptions.Reset();
-			ModeOptions.Add(MakeShared<FModeOption>(FModeOption{ TEXT("Publisher (listen)"), TEXT("pub"), TEXT("server") }));
-			ModeOptions.Add(MakeShared<FModeOption>(FModeOption{ TEXT("Pair (server listen)"), TEXT("pair"), TEXT("server") }));
-			ModeOptions.Add(MakeShared<FModeOption>(FModeOption{ TEXT("Pair (client dial)"), TEXT("pair"), TEXT("client") }));
-			ModeOptions.Add(MakeShared<FModeOption>(FModeOption{ TEXT("Push (dial)"), TEXT("push"), TEXT("client") }));
-			ModeOptions.Add(MakeShared<FModeOption>(FModeOption{ TEXT("Push (listen)"), TEXT("push"), TEXT("server") }));
-		}
-
-		FString ResolveHostValue() const
-		{
-			return SenderComponent ? SenderComponent->GetTransportOption(O3DNNG::HostOptionKey) : FString();
-		}
-
-		void SetHostValue(const FString& NewValue)
-		{
-			if (!SenderComponent)
-			{
-				return;
-			}
-
-			const FString Sanitized = NewValue.TrimStartAndEnd();
-			SenderComponent->SetTransportOption(O3DNNG::HostOptionKey, Sanitized);
-		}
-
-		int32 ResolvePortValue() const
-		{
-			if (!SenderComponent)
-			{
-				return 0;
-			}
-
-			const FString PortString = SenderComponent->GetTransportOption(O3DNNG::PortOptionKey);
-			if (PortString.IsEmpty())
-			{
-				return 0;
-			}
-
-			return FCString::Atoi(*PortString);
-		}
-
-		void SetPortValue(int32 NewPort)
-		{
-			if (!SenderComponent)
-			{
-				return;
-			}
-
-			const int32 ClampedPort = FMath::Clamp(NewPort, 1, 65535);
-			SenderComponent->SetTransportOption(O3DNNG::PortOptionKey, FString::FromInt(ClampedPort));
-		}
-
-		int32 ResolveQueueValueMb() const
-		{
-			if (!SenderComponent)
-			{
-				return 4;
-			}
-
-			const FString Stored = SenderComponent->GetTransportOption(O3DNNG::QueueOptionKey);
-			const uint64 Bytes = Stored.IsEmpty() ? NNGTransportCommon::DefaultQueueBytes : NNGSenderConfig::ParseQueueBytes(Stored);
-			const uint64 Mb = Bytes / (1024ull * 1024ull);
-			return Mb > 0 ? static_cast<int32>(Mb) : 4;
-		}
-
-		void SetQueueValueMb(int32 NewValue)
-		{
-			if (!SenderComponent)
-			{
-				return;
-			}
-
-			const int32 Clamped = FMath::Clamp(NewValue, 1, 512);
-			const uint64 Bytes = static_cast<uint64>(Clamped) * 1024ull * 1024ull;
-			SenderComponent->SetTransportOption(O3DNNG::QueueOptionKey, NNGTransportCommon::UInt64ToString(Bytes));
-		}
-
-		O3DNNG::ENngMode CurrentMode() const
-		{
-			if (SelectedMode.IsValid())
-			{
-				return O3DNNG::ModeFromString(SelectedMode->Mode, O3DNNG::ENngMode::Pub);
-			}
-			return O3DNNG::ENngMode::Pub;
-		}
-
-		bool CurrentModeIsListen() const
-		{
-			if (!SelectedMode.IsValid())
-			{
-				return true;
-			}
-
-			const O3DNNG::ENngRole Role = O3DNNG::ResolveRole(CurrentMode(), O3DNNG::RoleFromString(SelectedMode->Role), /*bSender=*/true);
-			return O3DNNG::IsListenRole(Role);
-		}
-
-		void HandleHostCommitted(const FText& NewText, ETextCommit::Type CommitType)
-		{
-			const FString Sanitized = NewText.ToString().TrimStartAndEnd();
-			if (Sanitized.IsEmpty())
-			{
-				SetHostValue(NNGTransportCommon::ResolveDefaultHost(CurrentModeIsListen()));
-				if (HostTextBox.IsValid())
-				{
-					HostTextBox->SetText(FText::FromString(ResolveHostValue()));
-				}
-			}
-			else
-			{
-				SetHostValue(Sanitized);
-			}
-
-			NotifyConfigChanged();
-		}
-
-		void HandlePortChanged(int32 NewValue)
-		{
-			SetPortValue(NewValue);
-			NotifyConfigChanged();
-		}
-
-		void HandleQueueChanged(int32 NewValue)
-		{
-			SetQueueValueMb(NewValue);
-			NotifyConfigChanged();
-		}
-
-		void HandleModeChanged(TSharedPtr<FModeOption> NewSelection, ESelectInfo::Type SelectionType)
-		{
-			if (!SenderComponent)
-			{
-				return;
-			}
-
-			if (!NewSelection.IsValid())
-			{
-				return;
-			}
-
-			SelectedMode = NewSelection;
-
-			SenderComponent->SetTransportOption(O3DNNG::ModeOptionKey, SelectedMode->Mode);
-			if (!SelectedMode->Role.IsEmpty())
-			{
-				SenderComponent->SetTransportOption(O3DNNG::RoleOptionKey, SelectedMode->Role);
-			}
-
-			if (ResolveHostValue().IsEmpty())
-			{
-				SetHostValue(NNGTransportCommon::ResolveDefaultHost(CurrentModeIsListen()));
-				if (HostTextBox.IsValid())
-				{
-					HostTextBox->SetText(FText::FromString(ResolveHostValue()));
-				}
-			}
-
-			if (ResolvePortValue() <= 0)
-			{
-				SetPortValue(NNGTransportCommon::ResolveDefaultPort(CurrentMode()));
-				if (PortSpinBox.IsValid())
-				{
-					PortSpinBox->SetValue(ResolvePortValue());
-				}
-			}
-
-			NotifyConfigChanged();
-		}
-
-		FText GetCurrentModeLabel() const
-		{
-			return SelectedMode.IsValid() ? FText::FromString(SelectedMode->Label) : FText::GetEmpty();
-		}
-
-		void NotifyConfigChanged()
-		{
-			if (OnConfigChanged.IsBound())
-			{
-				OnConfigChanged.Execute();
-			}
-		}
-
-		UO3DSenderComponent* SenderComponent = nullptr;
-		FSimpleDelegate OnConfigChanged;
-		TArray<TSharedPtr<FModeOption>> ModeOptions;
-		TSharedPtr<FModeOption> SelectedMode;
-		TSharedPtr<SEditableTextBox> HostTextBox;
-		TSharedPtr<SSpinBox<int32>> PortSpinBox;
-		TSharedPtr<SSpinBox<int32>> QueueSpinBox;
-		TSharedPtr<SComboBox<TSharedPtr<FModeOption>>> ModeComboBox;
-	};
-}
-
-namespace NNGReceiver
-{
-	struct FModeOption
-	{
-		FString Label;
-		FString Mode;
-		FString Role;
-	};
-
-	static TSharedPtr<FModeOption> FindMatchingMode(const TArray<TSharedPtr<FModeOption>>& Options, const FString& ModeString, const FString& RoleString)
-	{
-		for (const TSharedPtr<FModeOption>& Entry : Options)
-		{
-			if (!Entry.IsValid())
-			{
-				continue;
-			}
-
-			if (Entry->Mode.Equals(ModeString, ESearchCase::IgnoreCase))
-			{
-				if (Entry->Role.IsEmpty() || RoleString.IsEmpty() || Entry->Role.Equals(RoleString, ESearchCase::IgnoreCase))
-				{
-					return Entry;
-				}
-			}
-		}
-		return Options.Num() > 0 ? Options[0] : nullptr;
+		FO3DTransportOptionField Field;
+		Field.Key = O3DNNG::PortOptionKey;
+		Field.DisplayName = LOCTEXT("NNGPortLabel", "Port");
+		Field.Tooltip = LOCTEXT("NNGPortTooltip", "TCP port. Empty: 6000 for Pub/Sub, 7000 for Pair, 8000 for Push/Pull.");
+		Field.Type = EO3DTransportOptionType::Int;
+		Field.Hint = LOCTEXT("NNGPortHint", "auto: from the mode");
+		Field.Min = 1;
+		Field.Max = 65535;
+		return Field;
 	}
 
-	class SNngReceiverSettingsPanel : public SO3DTransportConfigPanelBase
+	static FO3DTransportOptionEnumValue MakeChoice(const TCHAR* Value, FText DisplayName)
 	{
-	public:
-		SLATE_BEGIN_ARGS(SNngReceiverSettingsPanel)
-			: _PanelWidthOverride(SO3DTransportConfigPanelBase::DefaultPanelWidth)
-		{}
-			SLATE_ARGUMENT(UO3DReceiverSettingsObject*, SettingsObject)
-			SLATE_ARGUMENT(float, PanelWidthOverride)
-			SLATE_EVENT(FSimpleDelegate, OnSubmit)
-		SLATE_END_ARGS()
+		FO3DTransportOptionEnumValue Choice;
+		Choice.Value = Value;
+		Choice.DisplayName = MoveTemp(DisplayName);
+		return Choice;
+	}
 
-		void Construct(const FArguments& InArgs)
+	/** Role row, shown only for the modes that can either listen or dial. */
+	static FO3DTransportOptionField MakeRole(const TCHAR* DefaultMode, const TCHAR* ModeA, const TCHAR* ModeB)
+	{
+		FO3DTransportOptionField Field;
+		Field.Key = O3DNNG::RoleOptionKey;
+		Field.DisplayName = LOCTEXT("NNGRoleLabel", "Role");
+		Field.Tooltip = LOCTEXT("NNGRoleTooltip", "Whether this end listens (server) or dials (client). Default: the usual role for the mode, so a default sender and a default receiver connect.");
+		Field.Type = EO3DTransportOptionType::Enum;
+		Field.EnumValues.Add(MakeChoice(TEXT(""), LOCTEXT("NNGRoleDefault", "Default for the mode")));
+		Field.EnumValues.Add(MakeChoice(TEXT("server"), LOCTEXT("NNGRoleServer", "Listen (server)")));
+		Field.EnumValues.Add(MakeChoice(TEXT("client"), LOCTEXT("NNGRoleClient", "Dial (client)")));
+		const FString ModeKey = O3DNNG::ModeOptionKey;
+		const FString ModeWhenUnset = DefaultMode;
+		const FString FirstMode = ModeA;
+		const FString SecondMode = ModeB;
+		Field.VisibleWhen = [ModeKey, ModeWhenUnset, FirstMode, SecondMode](const TMap<FString, FString>& Options)
 		{
-			SettingsObject = InArgs._SettingsObject;
-			SetOnSubmit(InArgs._OnSubmit);
-			BuildModeOptions();
+			const FString Mode = O3DTransportOptions::GetOption(Options, ModeKey, ModeWhenUnset);
+			return Mode.Equals(FirstMode, ESearchCase::IgnoreCase) || Mode.Equals(SecondMode, ESearchCase::IgnoreCase);
+		};
+		return Field;
+	}
 
-			const FString ModeValue = GetOption(O3DNNG::ModeOptionKey, TEXT("sub"));
-			// No stored role selects the first entry for the mode, which is the default role.
-			const FString RoleValue = GetOption(O3DNNG::RoleOptionKey);
-			SelectedMode = FindMatchingMode(ModeOptions, ModeValue, RoleValue);
-			if (!SelectedMode.IsValid() && ModeOptions.Num() > 0)
-			{
-				SelectedMode = ModeOptions[0];
-				SetModeOption(SelectedMode);
-			}
+	static FO3DTransportOptionSchema MakeSender()
+	{
+		FO3DTransportOptionField Mode;
+		Mode.Key = O3DNNG::ModeOptionKey;
+		Mode.DisplayName = LOCTEXT("NNGModeLabel", "Mode");
+		Mode.Tooltip = LOCTEXT("NNGSenderModeTooltip", "NNG protocol. Match it on the receiver: Publisher with Subscriber, Pair with Pair, Push with Pull.");
+		Mode.Type = EO3DTransportOptionType::Enum;
+		Mode.Default = TEXT("pub");
+		Mode.EnumValues.Add(MakeChoice(TEXT("pub"), LOCTEXT("NNGModePub", "Publisher")));
+		Mode.EnumValues.Add(MakeChoice(TEXT("pair"), LOCTEXT("NNGModePair", "Pair")));
+		Mode.EnumValues.Add(MakeChoice(TEXT("push"), LOCTEXT("NNGModePush", "Push")));
 
-			if (GetHostValue().IsEmpty())
-			{
-				SetHostValue(NNGTransportCommon::ResolveDefaultHost(ModeIsListen()));
-			}
+		FO3DTransportOptionField Queue;
+		Queue.Key = O3DNNG::QueueOptionKey;
+		Queue.DisplayName = LOCTEXT("NNGSenderQueueLabel", "Queue Capacity (MiB)");
+		Queue.Tooltip = LOCTEXT("NNGSenderQueueTooltip", "Bytes the sender queues for a slow receiver before it drops frames. Stored in bytes.");
+		Queue.Type = EO3DTransportOptionType::Int;
+		Queue.Default = NNGTransportCommon::UInt64ToString(NNGTransportCommon::DefaultQueueBytes);
+		Queue.StoredUnitScale = BytesPerMiB;
+		Queue.Min = 1;
+		Queue.Max = 512;
 
-			if (GetPortValue() <= 0)
-			{
-				SetPortValue(NNGTransportCommon::ResolveDefaultPort(CurrentMode()));
-			}
+		FO3DTransportOptionSchema Schema;
+		Schema.Add(MakeHost());
+		Schema.Add(MakePort());
+		Schema.Add(MoveTemp(Mode));
+		Schema.Add(MakeRole(TEXT("pub"), TEXT("pair"), TEXT("push")));
+		Schema.Add(MoveTemp(Queue));
+		return Schema;
+	}
 
-			if (!SelectedMode.IsValid())
-			{
-				SelectedMode = ModeOptions.Num() > 0 ? ModeOptions[0] : nullptr;
-			}
+	static FO3DTransportOptionSchema MakeReceiver()
+	{
+		FO3DTransportOptionField Mode;
+		Mode.Key = O3DNNG::ModeOptionKey;
+		Mode.DisplayName = LOCTEXT("NNGModeLabel", "Mode");
+		Mode.Tooltip = LOCTEXT("NNGReceiverModeTooltip", "NNG protocol. Match it on the sender: Subscriber with Publisher, Pair with Pair, Pull with Push.");
+		Mode.Type = EO3DTransportOptionType::Enum;
+		Mode.Default = TEXT("sub");
+		Mode.EnumValues.Add(MakeChoice(TEXT("sub"), LOCTEXT("NNGModeSub", "Subscriber")));
+		Mode.EnumValues.Add(MakeChoice(TEXT("pair"), LOCTEXT("NNGModePair", "Pair")));
+		Mode.EnumValues.Add(MakeChoice(TEXT("pull"), LOCTEXT("NNGModePull", "Pull")));
 
-			TSharedRef<SVerticalBox> PanelContent = SNew(SVerticalBox);
+		FO3DTransportOptionField Topic;
+		Topic.Key = O3DNNG::TopicOptionKey;
+		Topic.DisplayName = LOCTEXT("NNGReceiverTopicLabel", "Subscription Topic");
+		Topic.Tooltip = LOCTEXT("NNGReceiverTopicTooltip", "Subscriber mode only. Empty subscribes to everything.");
+		Topic.Type = EO3DTransportOptionType::String;
+		Topic.VisibleWhen = O3DTransportOptions::VisibleWhenEquals(O3DNNG::ModeOptionKey, TEXT("sub"), TEXT("sub"));
 
-			PanelContent->AddSlot()
-				.AutoHeight()
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("NNGReceiverHostLabel", "Host"))
-				];
-
-			PanelContent->AddSlot()
-				.AutoHeight()
-				.Padding(0.f, 4.f, 0.f, 8.f)
-				[
-					SAssignNew(HostTextBox, SEditableTextBox)
-					.Text(FText::FromString(GetHostValue()))
-					.OnTextCommitted(this, &SNngReceiverSettingsPanel::HandleHostCommitted)
-				];
-
-			PanelContent->AddSlot()
-				.AutoHeight()
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("NNGReceiverPortLabel", "Port"))
-				];
-
-			PanelContent->AddSlot()
-				.AutoHeight()
-				.Padding(0.f, 4.f, 0.f, 8.f)
-				[
-					SAssignNew(PortSpinBox, SSpinBox<int32>)
-					.MinValue(1)
-					.MaxValue(65535)
-					.Value(GetPortValue())
-					.OnValueChanged(this, &SNngReceiverSettingsPanel::HandlePortChanged)
-					.OnValueCommitted(this, &SNngReceiverSettingsPanel::HandlePortCommitted)
-				];
-
-			PanelContent->AddSlot()
-				.AutoHeight()
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("NNGReceiverModeLabel", "Mode"))
-				];
-
-			PanelContent->AddSlot()
-				.AutoHeight()
-				.Padding(0.f, 4.f, 0.f, 8.f)
-				[
-					SAssignNew(ModeComboBox, SComboBox<TSharedPtr<FModeOption>>)
-					.OptionsSource(&ModeOptions)
-					.InitiallySelectedItem(SelectedMode)
-					.OnSelectionChanged(this, &SNngReceiverSettingsPanel::HandleModeChanged)
-					.OnGenerateWidget_Lambda([](TSharedPtr<FModeOption> Option)
-					{
-						return SNew(STextBlock).Text(Option.IsValid() ? FText::FromString(Option->Label) : FText::GetEmpty());
-					})
-					[
-						SNew(STextBlock)
-						.Text(this, &SNngReceiverSettingsPanel::GetCurrentModeLabel)
-					]
-				];
-
-			PanelContent->AddSlot()
-				.AutoHeight()
-				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("NNGReceiverTopicLabel", "Subscription Topic"))
-				];
-
-			PanelContent->AddSlot()
-				.AutoHeight()
-				.Padding(0.f, 4.f, 0.f, 0.f)
-				[
-					SAssignNew(TopicTextBox, SEditableTextBox)
-					.Text(FText::FromString(GetTopicValue()))
-					.OnTextCommitted(this, &SNngReceiverSettingsPanel::HandleTopicCommitted)
-					.IsEnabled(this, &SNngReceiverSettingsPanel::IsTopicEnabled)
-				];
-
-			BuildPanel(PanelContent, InArgs._PanelWidthOverride);
-		}
-
-	private:
-		void BuildModeOptions()
-		{
-			ModeOptions.Reset();
-			ModeOptions.Add(MakeShared<FModeOption>(FModeOption{ TEXT("Subscriber (dial)"), TEXT("sub"), TEXT("client") }));
-			ModeOptions.Add(MakeShared<FModeOption>(FModeOption{ TEXT("Pair (client dial)"), TEXT("pair"), TEXT("client") }));
-			ModeOptions.Add(MakeShared<FModeOption>(FModeOption{ TEXT("Pair (server listen)"), TEXT("pair"), TEXT("server") }));
-			ModeOptions.Add(MakeShared<FModeOption>(FModeOption{ TEXT("Pull (server listen)"), TEXT("pull"), TEXT("server") }));
-			ModeOptions.Add(MakeShared<FModeOption>(FModeOption{ TEXT("Pull (client dial)"), TEXT("pull"), TEXT("client") }));
-		}
-
-		FString GetOption(const TCHAR* Key, const TCHAR* DefaultValue = TEXT("")) const
-		{
-			if (!SettingsObject)
-			{
-				return FString(DefaultValue);
-			}
-
-			if (const FString* Existing = SettingsObject->Settings.TransportOptions.Find(Key))
-			{
-				return *Existing;
-			}
-			return FString(DefaultValue);
-		}
-
-		void SetOption(const TCHAR* Key, const FString& Value)
-		{
-			if (!SettingsObject)
-			{
-				return;
-			}
-
-			SettingsObject->Modify();
-			if (Value.IsEmpty())
-			{
-				SettingsObject->Settings.TransportOptions.Remove(Key);
-			}
-			else
-			{
-				SettingsObject->Settings.TransportOptions.Add(Key, Value);
-			}
-		}
-
-		FString GetHostValue() const
-		{
-			return GetOption(O3DNNG::HostOptionKey);
-		}
-
-		void SetHostValue(const FString& Value)
-		{
-			SetOption(O3DNNG::HostOptionKey, Value.TrimStartAndEnd());
-		}
-
-		int32 GetPortValue() const
-		{
-			const FString PortString = GetOption(O3DNNG::PortOptionKey);
-			return PortString.IsEmpty() ? 0 : FCString::Atoi(*PortString);
-		}
-
-		void SetPortValue(int32 NewPort)
-		{
-			const int32 Clamped = FMath::Clamp(NewPort, 1, 65535);
-			SetOption(O3DNNG::PortOptionKey, FString::FromInt(Clamped));
-		}
-
-		FString GetTopicValue() const
-		{
-			return GetOption(O3DNNG::TopicOptionKey);
-		}
-
-		void SetTopicValue(const FString& Value)
-		{
-			if (Value.TrimStartAndEnd().IsEmpty())
-			{
-				SetOption(O3DNNG::TopicOptionKey, FString());
-			}
-			else
-			{
-				SetOption(O3DNNG::TopicOptionKey, Value.TrimStartAndEnd());
-			}
-		}
-
-		O3DNNG::ENngMode CurrentMode() const
-		{
-			if (SelectedMode.IsValid())
-			{
-				return O3DNNG::ModeFromString(SelectedMode->Mode, O3DNNG::ENngMode::Sub);
-			}
-			return O3DNNG::ENngMode::Sub;
-		}
-
-		bool ModeIsListen() const
-		{
-			if (!SelectedMode.IsValid())
-			{
-				return false;
-			}
-
-			const O3DNNG::ENngRole Role = O3DNNG::ResolveRole(CurrentMode(), O3DNNG::RoleFromString(SelectedMode->Role), /*bSender=*/false);
-			return O3DNNG::IsListenRole(Role);
-		}
-
-		void HandleHostCommitted(const FText& NewText, ETextCommit::Type CommitType)
-		{
-			const FString Sanitized = NewText.ToString().TrimStartAndEnd();
-			if (Sanitized.IsEmpty())
-			{
-				SetHostValue(NNGTransportCommon::ResolveDefaultHost(ModeIsListen()));
-				if (HostTextBox.IsValid())
-				{
-					HostTextBox->SetText(FText::FromString(GetHostValue()));
-				}
-			}
-			else
-			{
-				SetHostValue(Sanitized);
-			}
-
-			SubmitFromTextCommit(CommitType);
-		}
-
-		void HandlePortChanged(int32 NewValue)
-		{
-			SetPortValue(NewValue);
-		}
-
-		void HandlePortCommitted(int32 NewValue, ETextCommit::Type CommitType)
-		{
-			HandlePortChanged(NewValue);
-			SubmitFromTextCommit(CommitType);
-		}
-
-		void HandleTopicCommitted(const FText& NewText, ETextCommit::Type CommitType)
-		{
-			SetTopicValue(NewText.ToString());
-			SubmitFromTextCommit(CommitType);
-		}
-
-		void HandleModeChanged(TSharedPtr<FModeOption> NewSelection, ESelectInfo::Type SelectionType)
-		{
-			if (!NewSelection.IsValid())
-			{
-				return;
-			}
-
-			SelectedMode = NewSelection;
-			SetModeOption(SelectedMode);
-
-			if (GetHostValue().IsEmpty())
-			{
-				SetHostValue(NNGTransportCommon::ResolveDefaultHost(ModeIsListen()));
-				if (HostTextBox.IsValid())
-				{
-					HostTextBox->SetText(FText::FromString(GetHostValue()));
-				}
-			}
-
-			if (GetPortValue() <= 0)
-			{
-				SetPortValue(NNGTransportCommon::ResolveDefaultPort(CurrentMode()));
-				if (PortSpinBox.IsValid())
-				{
-					PortSpinBox->SetValue(GetPortValue());
-				}
-			}
-
-			if (TopicTextBox.IsValid())
-			{
-				TopicTextBox->SetEnabled(IsTopicEnabled());
-				if (!IsTopicEnabled())
-				{
-					SetTopicValue(FString());
-					TopicTextBox->SetText(FText::GetEmpty());
-				}
-			}
-		}
-
-		void SetModeOption(const TSharedPtr<FModeOption>& Option)
-		{
-			if (!Option.IsValid())
-			{
-				return;
-			}
-
-			SetOption(O3DNNG::ModeOptionKey, Option->Mode);
-			if (!Option->Role.IsEmpty())
-			{
-				SetOption(O3DNNG::RoleOptionKey, Option->Role);
-			}
-			else
-			{
-				SetOption(O3DNNG::RoleOptionKey, FString());
-			}
-		}
-
-		FText GetCurrentModeLabel() const
-		{
-			return SelectedMode.IsValid() ? FText::FromString(SelectedMode->Label) : FText::GetEmpty();
-		}
-
-		bool IsTopicEnabled() const
-		{
-			return CurrentMode() == O3DNNG::ENngMode::Sub;
-		}
-
-		UO3DReceiverSettingsObject* SettingsObject = nullptr;
-		TArray<TSharedPtr<FModeOption>> ModeOptions;
-		TSharedPtr<FModeOption> SelectedMode;
-		TSharedPtr<SEditableTextBox> HostTextBox;
-		TSharedPtr<SEditableTextBox> TopicTextBox;
-		TSharedPtr<SSpinBox<int32>> PortSpinBox;
-		TSharedPtr<SComboBox<TSharedPtr<FModeOption>>> ModeComboBox;
-	};
+		FO3DTransportOptionSchema Schema;
+		Schema.Add(MakeHost());
+		Schema.Add(MakePort());
+		Schema.Add(MoveTemp(Mode));
+		Schema.Add(MakeRole(TEXT("sub"), TEXT("pair"), TEXT("pull")));
+		Schema.Add(MoveTemp(Topic));
+		return Schema;
+	}
 }
-#endif // WITH_EDITOR
 
 class FOpen3DTransportNNGModule : public IModuleInterface
 {
@@ -882,19 +268,7 @@ public:
 				Config.Role = O3DNNG::RoleToString(Role);
 			}
 		};
-#if WITH_EDITOR
-		SenderCustomization.BuildTransportWidget = [](UO3DSenderComponent* SenderComponent, FSimpleDelegate OnConfigChanged) -> TSharedPtr<SWidget>
-		{
-			if (!SenderComponent)
-			{
-				return nullptr;
-			}
-
-			return SNew(NNGSender::SNngSenderSettingsPanel)
-				.SenderComponent(SenderComponent)
-				.OnConfigChanged(OnConfigChanged);
-		};
-#endif // WITH_EDITOR
+		SenderCustomization.OptionSchema = NNGSchema::MakeSender();
 		O3DSender::RegisterTransportCustomization(TEXT("NNG"), MoveTemp(SenderCustomization));
 
 		FO3DReceiverTransportCustomization ReceiverCustomization;
@@ -973,20 +347,7 @@ public:
 				Config.Role = O3DNNG::RoleToString(Role);
 			}
 		};
-#if WITH_EDITOR
-		ReceiverCustomization.BuildTransportWidget = [](UO3DReceiverSettingsObject* SettingsObject, FSimpleDelegate OnSubmit) -> TSharedPtr<SO3DTransportConfigPanelBase>
-		{
-			if (!SettingsObject)
-			{
-				return nullptr;
-			}
-
-			return SNew(NNGReceiver::SNngReceiverSettingsPanel)
-			.SettingsObject(SettingsObject)
-			.PanelWidthOverride(SO3DTransportConfigPanelBase::DefaultPanelWidth)
-			.OnSubmit(OnSubmit);
-		};
-#endif // WITH_EDITOR
+		ReceiverCustomization.OptionSchema = NNGSchema::MakeReceiver();
 
 		O3DReceiver::RegisterTransportCustomization(TEXT("NNG"), MoveTemp(ReceiverCustomization));
 

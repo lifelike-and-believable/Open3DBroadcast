@@ -85,16 +85,8 @@ public class Open3DTransportMoQ : ModuleRules
             "Networking"    // For network utilities
         });
 
-        // Editor-only dependencies
-        if (Target.bBuildEditor)
-        {
-            PrivateDependencyModuleNames.AddRange(new string[]
-            {
-                "Slate",
-                "SlateCore",
-                "AppFramework",
-                "InputCore" // EKeys symbols used by SComboBox/SListView's key-handling (see Open3DTransportNNG, the other module using SComboBox directly)
-            });
-        }
+        // No editor or Slate dependencies: the settings panel is built by Open3DBroadcastEditor from
+        // this transport's option schema (ADR 0010, WP-F7). Build/Scripts/check-runtime-editor-deps.py
+        // enforces this in CI.
     }
 }

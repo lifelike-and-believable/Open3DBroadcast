@@ -2,8 +2,6 @@
 
 #include "O3DSenderComponentCustomization.h"
 
-#if WITH_EDITOR
-
 #include "DetailCategoryBuilder.h"
 #include "IDetailGroup.h"
 #include "DetailLayoutBuilder.h"
@@ -19,6 +17,8 @@
 
 #include "O3DSenderComponent.h"
 #include "O3DSenderTransportCustomization.h"
+#include "O3DTransportOptionTarget.h"
+#include "SO3DTransportOptionsPanel.h"
 
 #define LOCTEXT_NAMESPACE "O3DSenderComponentCustomization"
 DEFINE_LOG_CATEGORY_STATIC(LogO3DSenderDetails, Log, All);
@@ -53,6 +53,9 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
         }
     }
     WeakComponent.Reset();
+    // The container below is new, so the transport panel must be built again.
+    BuiltPanelTransport = NAME_None;
+    BuiltPanelComponent.Reset();
     for (const TWeakObjectPtr<UObject>& WeakObj : Objects)
     {
         if (UO3DSenderComponent* Candidate = Cast<UO3DSenderComponent>(WeakObj.Get()))
@@ -364,19 +367,9 @@ void FO3DSenderComponentCustomization::HandleTransportSelectionChanged(TSharedPt
 void FO3DSenderComponentCustomization::HandleTransportPropertyChanged()
 {
     UE_LOG(LogO3DSenderDetails, Verbose, TEXT("HandleTransportPropertyChanged"));
+    // UO3DSenderComponent::PostEditChangeProperty clears the options inside the property-edit
+    // transaction, so undoing the transport change restores them (SND-35).
     RefreshTransportOptions();
-
-    if (UO3DSenderComponent* Component = ResolveEditingComponent())
-    {
-        Component->ClearTransportOptions();
-    }
-
-    RefreshTransportCustomization();
-}
-
-void FO3DSenderComponentCustomization::HandleTransportConfigChanged()
-{
-    UE_LOG(LogO3DSenderDetails, Verbose, TEXT("HandleTransportConfigChanged"));
     RefreshTransportCustomization();
 }
 
@@ -393,21 +386,9 @@ void FO3DSenderComponentCustomization::RefreshTransportOptions()
         TransportOptions.Add(MakeShared<FName>(Name));
     }
 
-    FName CurrentSelection = GetSelectedTransportName();
-
-    if (CurrentSelection.IsNone() && TransportOptions.Num() > 0)
-    {
-        CurrentSelection = *TransportOptions[0];
-        if (TransportNameHandle.IsValid())
-        {
-            FName ExistingValue = NAME_None;
-            const bool bHasValue = (TransportNameHandle->GetValue(ExistingValue) == FPropertyAccess::Success);
-            if (!bHasValue || ExistingValue.IsNone())
-            {
-                TransportNameHandle->SetValue(CurrentSelection);
-            }
-        }
-    }
+    // Read only: opening the Details panel must not change the component (TRB-45). A None
+    // transport shows "Select Transport" until the user picks one.
+    const FName CurrentSelection = GetSelectedTransportName();
 
     if (CurrentSelection != NAME_None)
     {
@@ -455,38 +436,46 @@ void FO3DSenderComponentCustomization::RefreshTransportCustomization()
         return;
     }
 
-    TransportCustomizationContainer->SetContent(SNullWidget::NullWidget);
-
     UO3DSenderComponent* Component = ResolveEditingComponent();
-    if (!Component)
+    const FName TransportName = GetSelectedTransportName();
+
+    // The panel reads its values through bound attributes, so an option commit needs no rebuild.
+    // It is rebuilt only for another transport or another component.
+    if (Component && TransportName == BuiltPanelTransport && BuiltPanelComponent.Get() == Component)
     {
-        UE_LOG(LogO3DSenderDetails, Verbose, TEXT("No valid component while refreshing transport customization; clearing widget"));
-        TransportCustomizationContainer->SetContent(SNullWidget::NullWidget);
+        UE_LOG(LogO3DSenderDetails, VeryVerbose, TEXT("RefreshTransportCustomization: panel for %s is current"), *TransportName.ToString());
         return;
     }
 
-    const FName TransportName = GetSelectedTransportName();
+    TransportCustomizationContainer->SetContent(SNullWidget::NullWidget);
+    BuiltPanelTransport = NAME_None;
+    BuiltPanelComponent.Reset();
+
+    if (!Component)
+    {
+        UE_LOG(LogO3DSenderDetails, Verbose, TEXT("No valid component while refreshing transport customization; clearing widget"));
+        return;
+    }
+
     if (TransportName.IsNone())
     {
         UE_LOG(LogO3DSenderDetails, Verbose, TEXT("No transport selected; skipping customization widget"));
         return;
     }
 
-    if (const FO3DSenderTransportCustomization* Customization = O3DSender::FindTransportCustomization(TransportName))
+    // ADR 0010 §4: the transport declares its options as data; one generic panel renders them.
+    FO3DTransportOptionSchema Schema;
+    if (O3DSender::GetTransportOptionSchema(TransportName, Schema) && Schema.Num() > 0)
     {
-#if WITH_EDITOR
-        if (Customization && Customization->BuildTransportWidget)
-        {
-            FSimpleDelegate OnConfigChanged = FSimpleDelegate::CreateSP(AsSharedCustomization(), &FO3DSenderComponentCustomization::HandleTransportConfigChanged);
-            if (TSharedPtr<SWidget> CustomWidget = Customization->BuildTransportWidget(Component, OnConfigChanged))
-            {
-                UE_LOG(LogO3DSenderDetails, Verbose, TEXT("Built transport widget for %s"), *TransportName.ToString());
-                TransportCustomizationContainer->SetContent(CustomWidget.ToSharedRef());
-                UE_LOG(LogO3DSenderDetails, Verbose, TEXT("RefreshTransportCustomization end (custom widget)"));
-                return;
-            }
-        }
-#endif // WITH_EDITOR
+        TransportCustomizationContainer->SetContent(
+            SNew(SO3DTransportOptionsPanel)
+            .Target(MakeShared<FO3DSenderOptionTarget>(Component))
+            .Schema(MoveTemp(Schema))
+        );
+        BuiltPanelTransport = TransportName;
+        BuiltPanelComponent = Component;
+        UE_LOG(LogO3DSenderDetails, Verbose, TEXT("RefreshTransportCustomization end (options panel for %s)"), *TransportName.ToString());
+        return;
     }
 
     TransportCustomizationContainer->SetContent(
@@ -655,5 +644,3 @@ UO3DSenderComponent* FO3DSenderComponentCustomization::ResolveEditingComponent()
 }
 
 #undef LOCTEXT_NAMESPACE
-
-#endif // WITH_EDITOR

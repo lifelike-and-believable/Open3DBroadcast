@@ -33,6 +33,10 @@ A modular, self-contained Unreal Engine plugin for Open3DStream broadcasting and
 - **Open3DTransportWebRTC**: WebRTC-based streaming with audio support
 - **Open3DTransportMoQ** (Experimental): Media over QUIC (draft-07) through a MoQ relay
 
+### Editor Module
+
+- **Open3DBroadcastEditor** (editor only, Win64, included in the Fab package): the Sender component's Details panel, the Receiver's LiveLink "Add Source" panel, and one transport settings panel built from each transport's declared options (ADR 0010). The runtime modules above contain no editor or Slate code, which CI checks (`Build/Scripts/check-runtime-editor-deps.py`).
+
 ### Test Module
 
 - **Open3DBroadcastTests** (editor only, Win64, left out of the Fab package): the `Open3DBroadcast.*` automation tests, fake transports and the transport conformance suite (ADR 0006). Internet tests (`Open3DBroadcast.Network.*`) register only when `O3DB_NETWORK_TESTS=1`.
