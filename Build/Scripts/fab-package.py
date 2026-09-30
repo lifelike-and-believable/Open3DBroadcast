@@ -2,8 +2,9 @@
 """Build the Fab source-only zip of the Open3DBroadcast plugin and check it.
 
 The package is made from the files git tracks under the plugin folder, so
-nothing that is gitignored or generated (Binaries/, Intermediate/, the core
-library that Sync-O3DSCore.ps1 builds) can reach it. Then:
+nothing that is gitignored or generated (Binaries/, Intermediate/) can reach
+it. The o3ds core is part of that tree: the Open3DStreamCore module compiles
+the mirror in Source/ThirdParty/Open3DStreamCore (WP-F1, ADR 0003). Then:
 
 1. Modules listed in Build/Fab/exclude-modules.txt are removed: their
    Source/<Module>/ folder is dropped and their entry is removed from the
@@ -65,7 +66,20 @@ FORBIDDEN_TOP_DIRS = ["Binaries", "Intermediate", "Saved", "DerivedDataCache"]
 # Markdown allowed in the package: end-user docs at the plugin root and
 # anything under a ThirdParty/ folder (licences and notices).
 ALLOWED_ROOT_MARKDOWN = {"README.md", "USER_GUIDE.md", "THIRD_PARTY_LICENSES.md", "Transport_Module_Comparison.md"}
-REQUIRED_FILES = ["Resources/Icon128.png"]
+REQUIRED_FILES = [
+    "Resources/Icon128.png",
+    # The o3ds core compiled from source (WP-F1, ADR 0003) and the FilterPlugin.ini that
+    # tells BuildPlugin to package the root documents (FAB-2).
+    "Source/ThirdParty/Open3DStreamCore/SYNC_STAMP.txt",
+    "Config/FilterPlugin.ini",
+]
+# Top-level folders BuildPlugin packages without a FilterPlugin.ini entry. Anything
+# else at the top level must match a Config/FilterPlugin.ini rule, or BuildPlugin
+# leaves it out of the package it compiles (FAB-2).
+STANDARD_TOP_DIRS = {"Binaries", "Config", "Content", "Resources", "Shaders", "Source"}
+FILTER_PLUGIN_INI = "Config/FilterPlugin.ini"
+# Prebuilt core libraries that WP-F1 replaced with the Open3DStreamCore module.
+FORBIDDEN_NAME_SUBSTRINGS = ["open3dstreamstatic", "flatbuffers.lib"]
 # Extra name checks tied to an excluded module (ADR 0002 verification).
 FORBIDDEN_NAME_SUBSTRINGS_BY_MODULE = {"Open3DTransportWebRTC": ["livekit"]}
 BINARY_SUFFIXES = (".dll", ".so", ".dylib")
@@ -324,6 +338,51 @@ def check_tree(files):
     return errors
 
 
+def filter_plugin_rules(text):
+    """Regexes for the [FilterPlugin] entries of a FilterPlugin.ini ('...', '*' and '?' wildcards)."""
+    rules = []
+    in_section = False
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith(";"):
+            continue
+        if line.startswith("["):
+            in_section = line.lower() == "[filterplugin]"
+            continue
+        if not in_section:
+            continue
+        out = []
+        i = 0
+        pattern = line.lstrip("/")
+        while i < len(pattern):
+            if pattern.startswith("...", i):
+                out.append(".*")
+                i += 3
+            elif pattern[i] == "*":
+                out.append("[^/]*")
+                i += 1
+            elif pattern[i] == "?":
+                out.append("[^/]")
+                i += 1
+            else:
+                out.append(re.escape(pattern[i]))
+                i += 1
+        rules.append(re.compile("^" + "".join(out) + "$", re.IGNORECASE))
+    return rules
+
+
+def check_top_level(rels, uplugin_rel, filter_text):
+    """Top-level entries outside the standard folders must be listed in FilterPlugin.ini (FAB-2)."""
+    rules = filter_plugin_rules(filter_text) if filter_text is not None else []
+    unlisted = sorted(r for r in rels
+                      if r != uplugin_rel and r.split("/")[0] not in STANDARD_TOP_DIRS
+                      and not any(p.match(r) for p in rules))
+    if unlisted:
+        return [f"files outside {', '.join(sorted(STANDARD_TOP_DIRS))} that {FILTER_PLUGIN_INI} does not list, "
+                f"so BuildPlugin would not package them (FAB-2): {unlisted[:10]}"]
+    return []
+
+
 def check_platforms(desc, uplugin_rel):
     """Platform declarations required by ADR 0001 (FAB-3, WP-F2).
 
@@ -374,6 +433,10 @@ def check_package(zip_path, plugin_name, excluded_modules):
                 errors.append(f"{uplugin_rel} is not valid JSON: {e}")
         if uplugin_rel in relset and not modules:
             errors.append(f"{uplugin_rel} lists no modules")
+        filter_text = None
+        if FILTER_PLUGIN_INI in relset:
+            filter_text = z.read(root + FILTER_PLUGIN_INI).decode("utf-8-sig", errors="replace")
+        errors.extend(check_top_level(rels, uplugin_rel, filter_text))
 
     for m in modules:
         if m in excluded_modules:
@@ -405,6 +468,11 @@ def check_package(zip_path, plugin_name, excluded_modules):
     if dev_docs:
         errors.append("developer documents in the package (add an exclude-files.txt rule, "
                       f"move them out of the plugin, or allow them in fab-package.py): {dev_docs}")
+
+    prebuilt = [r for r in rels if any(s in r.lower() for s in FORBIDDEN_NAME_SUBSTRINGS)]
+    if prebuilt:
+        errors.append("prebuilt o3ds core or FlatBuffers libraries in the package; the core is compiled "
+                      f"from source by Open3DStreamCore (WP-F1): {prebuilt}")
 
     for req in REQUIRED_FILES:
         if req not in relset:

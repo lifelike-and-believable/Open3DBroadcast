@@ -12,9 +12,12 @@ public class Open3DTransportLoopback : ModuleRules
 
         O3DBuildFlags.Apply(Target, this);
 
-        // /EHsc: LoopbackSender.cpp compiles the o3ds core headers, which the core library is
-        // built against with exceptions on (BUILD-5).
+        // /EHsc: kept from when the o3ds core was a prebuilt library built with exceptions on. The
+        // core is now the Open3DStreamCore module, built without exceptions (BUILD-5).
         bEnableExceptions = true;
+
+        // LoopbackSender.cpp uses the o3ds core (docs/adr/0003, WP-F1).
+        PrivateDependencyModuleNames.Add("Open3DStreamCore");
 
         // The module has no Public/ headers, so every dependency is private (SHR-20).
         PrivateDependencyModuleNames.AddRange(new string[]

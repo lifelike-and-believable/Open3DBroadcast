@@ -13,48 +13,15 @@ public class Open3DReceiver : ModuleRules
 
         O3DBuildFlags.Apply(Target, this);
 
-        // /EHsc: this module compiles the o3ds core and FlatBuffers headers and links
-        // open3dstreamstatic.lib, which is built with exceptions on (BUILD-5).
+        // /EHsc: kept from when this module linked the prebuilt open3dstreamstatic.lib, which was
+        // built with exceptions on. The core is now the Open3DStreamCore module, built without
+        // exceptions (BUILD-5).
         bEnableExceptions = true;
 
-        var PluginRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", ".."));
-
-        // Open3DStream headers and library
-        var Open3DStreamIncludeDir = Path.Combine(PluginRoot, "ThirdParty", "open3dstream", "include");
-        PublicSystemIncludePaths.Add(Open3DStreamIncludeDir); // Third-party headers: system include (BUILD-3)
-
-        // Flatbuffers headers
-        var FlatbuffersIncludeDir = Path.Combine(PluginRoot, "ThirdParty", "flatbuffers", "include");
-        PublicSystemIncludePaths.Add(FlatbuffersIncludeDir);
-
-        string platformSubdir;
-        if (Target.Platform == UnrealTargetPlatform.Win64)
-        {
-            platformSubdir = "Win64";
-        }
-        else
-        {
-            // Not reached while the .uplugin keeps "PlatformAllowList": [ "Win64" ] on this module:
-            // UBT then leaves the module out of other platforms' targets (ADR 0001). WP-F1 compiles
-            // the core from source and deletes this branch.
-            throw new BuildException($"Open3DReceiver has prebuilt o3ds libraries for Win64 only, but was configured for {Target.Platform}. Keep \"PlatformAllowList\": [ \"Win64\" ] on its entry in Open3DBroadcast.uplugin.");
-        }
-
-        // Link libraries
-        var Open3DStreamLib = Path.Combine(PluginRoot, "ThirdParty", "open3dstream", "lib", platformSubdir, "open3dstreamstatic.lib");
-        var FlatbuffersLib = Path.Combine(PluginRoot, "ThirdParty", "flatbuffers", "lib", platformSubdir, "flatbuffers.lib");
-
-        if (!File.Exists(Open3DStreamLib))
-        {
-            throw new BuildException($"Missing required library 'open3dstreamstatic.lib' at '{Open3DStreamLib}'.");
-        }
-        if (!File.Exists(FlatbuffersLib))
-        {
-            throw new BuildException($"Missing required library 'flatbuffers.lib' at '{FlatbuffersLib}'.");
-        }
-
-        PublicAdditionalLibraries.Add(Open3DStreamLib);
-        PublicAdditionalLibraries.Add(FlatbuffersLib);
+        // The o3ds core, FlatBuffers and o3ds_generated.h come from the Open3DStreamCore module,
+        // compiled from source in this plugin (docs/adr/0003, WP-F1). Public: O3DReceiverSource.h
+        // includes core headers and has core types as members.
+        PublicDependencyModuleNames.Add("Open3DStreamCore");
 
         // Public, checked against Public/ (SHR-20): UObject types (CoreUObject, Engine), the LiveLink
         // source, factory and settings base classes (LiveLinkInterface), and Shared's transport types.

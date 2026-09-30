@@ -23,9 +23,13 @@ public class Open3DTransportSockets : ModuleRules
             return;
         }
 
-        // /EHsc: the sources compile the o3ds core headers, which the core library is built
-        // against with exceptions on (BUILD-5).
+        // /EHsc: kept from when the o3ds core was a prebuilt library built with exceptions on. The
+        // core is now the Open3DStreamCore module, built without exceptions (BUILD-5).
         bEnableExceptions = true;
+
+        // The TCP/UDP framing (tcp_stream_parser, udp_fragment) and model code come from the o3ds
+        // core (docs/adr/0003, WP-F1).
+        PrivateDependencyModuleNames.Add("Open3DStreamCore");
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
