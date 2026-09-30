@@ -98,7 +98,7 @@ bool FO3DSharedSecretsRedactValueTest::RunTest(const FString& Parameters)
 {
 	const TCHAR* const SensitiveKeys[] =
 	{
-		TEXT("webrtc.token"), TEXT("x.Secret"), TEXT("PASSWORD"), TEXT("db.passwd"), TEXT("tokenEndpointAuth"),
+		TEXT("example.token"), TEXT("x.Secret"), TEXT("PASSWORD"), TEXT("db.passwd"), TEXT("tokenEndpointAuth"),
 		TEXT("my.credential"), TEXT("jwt"), TEXT("x.apikey"), TEXT("X_API_KEY"), TEXT("tls.key"), TEXT("client_key"),
 	};
 	for (const TCHAR* Key : SensitiveKeys)
@@ -107,7 +107,7 @@ bool FO3DSharedSecretsRedactValueTest::RunTest(const FString& Parameters)
 		TestEqual(FString::Printf(TEXT("'%s' value redacted"), Key), O3DRedact::Value(Key, TEXT("v")), FString(O3DRedact::Marker()));
 	}
 
-	const TCHAR* const PlainKeys[] = { TEXT("webrtc.url"), TEXT("udp.maxdatagram"), TEXT("moq.relay"), TEXT("keyframe"), TEXT("") };
+	const TCHAR* const PlainKeys[] = { TEXT("example.url"), TEXT("udp.maxdatagram"), TEXT("moq.relay"), TEXT("keyframe"), TEXT("") };
 	for (const TCHAR* Key : PlainKeys)
 	{
 		TestFalse(FString::Printf(TEXT("'%s' is not sensitive"), Key), O3DRedact::IsSensitiveKey(Key));
@@ -269,7 +269,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSharedSecretsNamingTest, "Open3DBroadcast.S
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FO3DSharedSecretsNamingTest::RunTest(const FString& Parameters)
 {
-	TestEqual(TEXT("Profile option key"), FO3DSecretStore::MakeCredentialProfileOptionKey(TEXT("WebRTC")), FString(TEXT("webrtc.credentialProfile")));
+	TestEqual(TEXT("Profile option key"), FO3DSecretStore::MakeCredentialProfileOptionKey(TEXT("ExampleTransport")), FString(TEXT("exampletransport.credentialProfile")));
 	TestEqual(TEXT("Blank profile"), FO3DSecretStore::NormalizeProfile(TEXT("  ")), FString(TEXT("default")));
 	TestEqual(TEXT("Trimmed profile"), FO3DSecretStore::NormalizeProfile(TEXT(" stage ")), FString(TEXT("stage")));
 

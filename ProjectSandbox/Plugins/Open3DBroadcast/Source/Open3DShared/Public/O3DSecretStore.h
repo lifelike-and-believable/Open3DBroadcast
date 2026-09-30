@@ -21,7 +21,7 @@
  * Resolution order when a transport starts:
  *   1. Session (R1): the value set in this process. Lost on restart.
  *   2. Environment (R2): the declared variable with the profile suffix
- *      (e.g. O3DB_WEBRTC_TOKEN__STAGE for profile "stage"), then the plain name.
+ *      (e.g. O3DB_EXAMPLE_TOKEN__STAGE for profile "stage"), then the plain name.
  *   3. User settings (R3): the per-user EditorPerProjectUserSettings file under Saved/, only in
  *      editor builds and only for values the user chose to remember on this machine.
  *

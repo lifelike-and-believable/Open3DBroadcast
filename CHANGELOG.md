@@ -176,6 +176,33 @@
   `FMoQFfiApi` (ADR 0006 option F2). The session wrapper, sender and
   receiver accept a table at construction, which the new fake-FFI tests use.
 
+### Credentials (WP-S9, ADR 0004)
+
+Transport credentials are no longer saved with levels, Blueprints, `GameUserSettings.ini` or LiveLink connection strings and presets, and are no longer logged (SND-10, RCV-3, TRF-21, TRF-22, SHR-11, LIC-1).
+
+- Each transport customization declares its secret option keys (`SecretOptionKeys`) and, optionally, an environment variable per key (`SecretEnvVars`). WebRTC declares `webrtc.token` and the new `webrtc.tokenEndpointAuth`.
+- A secret is resolved when the transport starts, in this order: the value set in this session (editor panel, or the new Blueprint node **Set Transport Secret**), then an environment variable, then a value remembered on this machine (editor only). The variables are `O3DB_WEBRTC_TOKEN` and `O3DB_WEBRTC_TOKEN_ENDPOINT_AUTH`; for a credential profile other than `default`, `<NAME>__<PROFILE>` is tried first.
+- New `<transport>.credentialProfile` option (for WebRTC, `webrtc.credentialProfile`, default `default`). It is saved with the component or source and selects which stored credentials apply.
+- "Remember on this machine" stores the value in the per-user `EditorPerProjectUserSettings.ini` under `Saved/Config`, Base64-encoded but not encrypted. It is never written to the project's `Config/` folder and is not available in packaged games.
+- WebRTC panels: the Access Token and the new Token Endpoint Credential are password fields that open empty. Each shows where its value comes from ("Not set", "Set for this session", "Remembered on this machine", "From environment variable ..."), with a **Clear** button and a "Remember on this machine" checkbox. A warning appears when Auto Token Fetch is off and no token is available. There is a new Credential Profile field.
+- New `UO3DCredentialLibrary` with `SetTransportSecret` and `ClearTransportSecret` for Blueprints and C++ in packaged games. There is no getter.
+- New C++ API in Open3DShared: `FO3DSecretStore`, `O3DRedact::Value`, `O3DRedact::Url` and `O3DHelpers::IsHttpsOrLoopbackHttpUrl`; `FO3DTransportConfig::Secrets` carries resolved secrets to the transport. `UO3DSenderComponent` gains `SetTransportSecret`, `ClearTransportSecret`, `SetTransportSecretPersistence`, `GetTransportSecretStatus`, `IsTransportSecretKey` and `GetCredentialProfile`. Open3DShared now contains a `UCLASS` and runs UHT.
+- `FO3DTransportConfig::ToDebugString()` prints secrets as key and `<set>` only, redacts values whose key looks sensitive (`token`, `secret`, `password`, `auth`, `apikey` and similar), and prints URLs without query values, user-info or fragment.
+- MoQ relay, NNG, WebRTC and receiver source URLs are logged through `O3DRedact::Url`. The WebRTC token fetcher no longer logs response bodies; it logs the status code and response length.
+- WebRTC token requests send `Authorization: Bearer <value>` when `webrtc.tokenEndpointAuth` resolves, and no longer send a `grants` object. The token endpoint must authenticate callers and decide grants itself; see "Token endpoint requirements" in the WebRTC `USER_GUIDE.md`.
+- `Tests/mock-token-server.py` (WebRTC module) exits unless `API_SECRET` is set, ignores grants sent by the client, rejects roles other than `publisher` and `subscriber`, and computes token times in UTC (TRF-35).
+- `FO3DTransportConfig::bPersistToken` is deprecated. Nothing reads or sets it; WP-A1 removes it.
+
+**Breaking changes**
+
+- **Migration warning and resave.** When a level, Blueprint, `GameUserSettings.ini` or LiveLink connection string saved by an older version still contains a declared secret, it is moved into this session's store and removed from the loaded data, and one Warning names the asset or source and the key (never the value). The file on disk still contains the secret until you resave the asset or recreate the LiveLink source. Nothing is saved automatically. Migration only happens when the transport module is loaded.
+- **Tokens no longer survive an editor restart by default.** Tick "Remember on this machine", set an environment variable, or use Auto Token Fetch.
+- **Plain `http://` token endpoints are refused** unless the host is `localhost`, `127.0.0.1` or `::1`. Use `https://` for any other host.
+- **Token endpoints no longer receive `grants`.** A token server that relied on client-sent grants must decide them from the caller's role or identity.
+- **The mock token server needs `API_SECRET`.** It no longer defaults to `test-secret`.
+- `UO3DSenderComponent::GetTransportOption` returns an empty string for a declared secret key, and `SetTransportOption` stores such a key in the secret store instead of `TransportOptions`. `webrtc.token` is no longer copied into `FO3DTransportConfig::AdvancedParams`; read it from `Secrets` (or `Token`, filled by the WebRTC customization).
+- `FO3DTokenFetchRequest::AdditionalGrants` is removed.
+
 ### Build and CI
 
 - `Build/Scripts/Build-Plugin.ps1` now fails when `RunUAT BuildPlugin` fails, with UAT's exit code (CI-1).
