@@ -232,7 +232,7 @@
   `BackpressureByteLimit` runs a started sender and overflows the byte cap
   (TRF-34); the MoQ `SupportsAudio` and `CreateAudioSink` tests assert the
   audio support that shipped; the TCP audio round trip expects the submitted
-  stream label, with the StreamId only as the fallback for an empty label;
+  stream label, as the Loopback audio test does;
   `AudioSinkOutlivesSource` marks the frame format as unknown before
   expecting the snapshot's rate and channels.
 - Gauntlet is retired: `Tests/Gauntlet/` and `Build/Scripts/Run-Gauntlet.ps1`

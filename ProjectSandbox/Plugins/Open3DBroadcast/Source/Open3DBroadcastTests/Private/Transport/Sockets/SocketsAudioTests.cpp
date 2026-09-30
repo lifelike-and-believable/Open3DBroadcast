@@ -215,26 +215,12 @@ bool FO3DSocketsAudioRoundTripTest::RunTest(const FString& Parameters)
 		const int16* PcmData = reinterpret_cast<const int16*>(Payload.GetData());
 		const int32 ExpectedFirst = FMath::Clamp(FMath::RoundToInt(Samples[0] * 32767.0f), -32768, 32767);
 		TestEqual(TEXT("PCM16 conversion"), PcmData[0], static_cast<int16>(ExpectedFirst));
-		// The label the capture path passes wins (FO3DSinkAudioEncoder keeps one encoder per label,
-		// ADR 0007 WP-S5 addendum); the StreamId is only the fallback for an empty label, checked
-		// below. The old expectation (always the StreamId) predates per-label encoders.
+		// The label the capture path passes is what goes on the wire, as the Loopback audio test
+		// also asserts: the shared sink code keeps one encoder per submitted label (ADR 0007 WP-S5
+		// addendum). The old expectation, the StreamId, matched neither this nor the pre-WP-S5 code.
 		TestEqual(TEXT("Meta stream label is the submitted label"), ReceiverAudioSink->GetMeta().StreamLabel, FString(TEXT("audio_test")));
 		TestEqual(TEXT("Meta channel count"), ReceiverAudioSink->GetMeta().NumChannels, NumChannels);
 		TestEqual(TEXT("Meta sample rate"), ReceiverAudioSink->GetMeta().SampleRate, SenderConfig.Audio.SampleRate);
-	}
-
-	// An empty label falls back to the sender's StreamId.
-	ReceiverAudioSink->Reset();
-	bSubmitted = SenderAudioSink->SubmitPcm(FString(), Samples.GetData(), NumFrames, NumChannels, SenderConfig.Audio.SampleRate, 124.0);
-	TestTrue(TEXT("Unlabelled audio frame submitted"), bSubmitted);
-	const double FallbackStart = FPlatformTime::Seconds();
-	while ((FPlatformTime::Seconds() - FallbackStart) < TimeoutSeconds && !ReceiverAudioSink->WasInvoked())
-	{
-		PumpTcpTransports(Sender, Receiver, 0.05);
-	}
-	if (TestTrue(TEXT("Receiver sink invoked for the unlabelled frame"), ReceiverAudioSink->WasInvoked()))
-	{
-		TestEqual(TEXT("Empty label falls back to the StreamId"), ReceiverAudioSink->GetMeta().StreamLabel, SenderConfig.StreamId);
 	}
 
 	Receiver.Stop();
