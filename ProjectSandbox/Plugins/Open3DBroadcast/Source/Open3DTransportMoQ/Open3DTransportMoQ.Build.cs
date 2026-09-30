@@ -71,7 +71,7 @@ public class Open3DTransportMoQ : ModuleRules
             throw new BuildException($"Missing required MoQ FFI include directory at '{moqFfiIncludePath}'. " +
                                    $"See ThirdParty/moq-ffi/README.md for setup instructions.");
         }
-        PublicIncludePaths.Add(moqFfiIncludePath);
+        PublicSystemIncludePaths.Add(moqFfiIncludePath); // Third-party headers: system include (BUILD-3)
 
         // MoQ FFI DLL/shared library - use delay-load to allow custom path loading
         if (Target.Platform == UnrealTargetPlatform.Win64)
@@ -112,7 +112,7 @@ public class Open3DTransportMoQ : ModuleRules
         string o3dsIncludePath = Path.Combine(pluginThirdPartyDir, "open3dstream", "include");
         if (Directory.Exists(o3dsIncludePath))
         {
-            PublicIncludePaths.Add(o3dsIncludePath);
+            PublicSystemIncludePaths.Add(o3dsIncludePath); // Third-party headers: system include (BUILD-3)
         }
 
         // Public dependencies

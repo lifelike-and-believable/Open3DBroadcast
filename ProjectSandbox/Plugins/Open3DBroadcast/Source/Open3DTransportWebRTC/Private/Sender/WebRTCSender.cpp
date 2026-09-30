@@ -5,7 +5,9 @@
 #include "HAL/PlatformProcess.h"
 #include "Logging/LogMacros.h"
 #include "Containers/StringConv.h"
+THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
+THIRD_PARTY_INCLUDES_END
 #include "O3DPerformanceMetrics.h"
 #include "O3DAudioFrameCodec.h"
 #include "O3DFfiContextRegistry.h"

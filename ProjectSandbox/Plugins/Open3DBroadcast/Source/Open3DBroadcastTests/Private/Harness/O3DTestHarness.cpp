@@ -14,9 +14,11 @@
 #include "SocketSubsystem.h"
 #include "Sockets.h"
 
+THIRD_PARTY_INCLUDES_START
 #include "o3ds/capture.h"
 #include "o3ds/model.h"
 #include "o3ds/replay.h"
+THIRD_PARTY_INCLUDES_END
 
 #include <sstream>
 #include <string>

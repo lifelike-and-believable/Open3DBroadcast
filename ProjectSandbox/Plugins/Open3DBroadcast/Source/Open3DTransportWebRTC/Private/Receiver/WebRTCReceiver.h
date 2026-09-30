@@ -8,7 +8,9 @@
 #include <atomic>
 
 // Include LiveKit FFI for callback types
+THIRD_PARTY_INCLUDES_START
 #include "livekit_ffi.h"
+THIRD_PARTY_INCLUDES_END
 
 // Per-instance LiveKit function table (ADR 0006 F2)
 #include "../Shared/LiveKitFfiApi.h"

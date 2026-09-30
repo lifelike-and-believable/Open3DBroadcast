@@ -6,7 +6,9 @@
 #include "Math/NumericLimits.h"
 #include "Containers/StringConv.h"
 #include "O3DFfiContextRegistry.h"
+THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
+THIRD_PARTY_INCLUDES_END
 
 namespace
 {

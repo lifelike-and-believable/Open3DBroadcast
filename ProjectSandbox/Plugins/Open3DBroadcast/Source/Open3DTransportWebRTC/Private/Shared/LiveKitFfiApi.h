@@ -3,7 +3,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+THIRD_PARTY_INCLUDES_START
 #include "livekit_ffi.h"
+THIRD_PARTY_INCLUDES_END
 
 /**
  * Per-instance LiveKit FFI function table (ADR 0006 option F2, WP-S7).

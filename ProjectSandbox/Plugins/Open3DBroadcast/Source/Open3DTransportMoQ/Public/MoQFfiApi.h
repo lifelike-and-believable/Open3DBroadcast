@@ -5,7 +5,9 @@
 #include "CoreMinimal.h"
 #include "Templates/Function.h"
 #include "Templates/SharedPointer.h"
+THIRD_PARTY_INCLUDES_START
 #include "moq_ffi.h"
+THIRD_PARTY_INCLUDES_END
 
 /**
  * Per-instance moq-ffi function table (ADR 0006 option F2, WP-S8).

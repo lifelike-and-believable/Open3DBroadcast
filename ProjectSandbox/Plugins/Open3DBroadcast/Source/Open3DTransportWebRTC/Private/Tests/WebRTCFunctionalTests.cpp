@@ -22,7 +22,9 @@
 
 #include "O3DTransportTypes.h"
 #include "SerializedFrameConsumerRegistry.h"
+THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
+THIRD_PARTY_INCLUDES_END
 
 #include <string>
 #include <vector>
