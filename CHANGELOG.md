@@ -483,6 +483,64 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   ProjectSandbox game for Linux when the runner has the Linux toolchain and
   skips with a notice otherwise. PR CI is unchanged.
 
+### Packaging layout: the core compiled from source (WP-F1, ADR 0003)
+
+- **A clean clone builds with `RunUAT BuildPlugin` alone** (FAB-2, FAB-6).
+  The o3ds core is no longer a prebuilt `open3dstreamstatic.lib` produced by
+  `Sync-O3DSCore.ps1` before every build. A new `Open3DStreamCore` module
+  (listed first in the `.uplugin`, Win64, no Server/Program) compiles it from
+  `Source/ThirdParty/Open3DStreamCore/`, a committed copy of the part of
+  `src/o3ds` the plugin uses, plus `o3ds_generated.h`, the FlatBuffers 2.0.6
+  runtime headers and CRC++'s `CRC.h`. `flatbuffers.lib` is no longer
+  linked; the plugin never needed it.
+- **The copy is generated and checked.** `Build/Scripts/sync_o3ds_core.py`
+  writes it from the headers in `Build/o3ds-core-manifest.txt` and their
+  include closure, with a `SYNC_STAMP.txt` (pins, versions, hashes).
+  `core-tests.yml` runs it with `--check` on every PR, so a core change
+  without a re-sync, or a hand edit of the copy, fails CI (#203). The same
+  workflow now also fails when the committed `src/o3ds_generated.h` differs
+  from what the pinned `flatc` generates from `src/o3ds.fbs` (CORE-21). The
+  module `static_assert`s FlatBuffers 2.0.6.
+- **Core warnings.** Each core `.cpp` is compiled through a generated
+  `Private/Core/O3DSCore_*.cpp` that switches compiler warnings off for the
+  core, which has its own warning checks in `core-tests.yml`. The module is
+  built without PCH, unity, exceptions or RTTI.
+- **Core source changes (`src/o3ds`).** New `o3ds_export.h` with `O3DS_API`
+  (empty in the CMake build; `OPEN3DSTREAMCORE_API` in the plugin) on the
+  classes and functions the plugin uses across modules.
+  `ReceiverStreamTable` declares its copy operations deleted and its moves
+  defaulted, which MSVC needs for an exported class that owns
+  `std::unique_ptr`s. `GetTime()` uses `std::chrono::steady_clock` instead of
+  `<windows.h>`/`clock_gettime`. `src/CMakeLists.txt`: `FATAL` is now
+  `FATAL_ERROR`, and the duplicated `o3ds_version.h` entry is gone.
+- **Build.cs.** Sender and Receiver depend publicly on `Open3DStreamCore`;
+  Loopback, Sockets, NNG, WebRTC, MoQ and the test module privately. The
+  `ThirdParty/open3dstream` and `ThirdParty/flatbuffers` include paths and
+  libraries, the missing-library `throw`s and the Sender/Receiver
+  `BuildException` on non-Win64 platforms are gone; `PlatformAllowList`
+  still limits every module to Win64 (ADR 0001).
+- **Everything the build needs is under `Source/`.** The plugin-root
+  `ThirdParty/` is gone: `open3dstream/` (its licences are now in the
+  copy's `LICENSES/`; the CML licence is dropped because nothing links CML),
+  `flatbuffers/` (the library and the compiler-only headers, SHR-23) and the
+  orphaned `Include/` Opus headers (SHR-23) are deleted, and `opus/` moved
+  to `Source/ThirdParty/opus/`. NNG stays a prebuilt library in its module.
+- **`Config/FilterPlugin.ini`** lists the root `README.md`, `USER_GUIDE.md`,
+  `Transport_Module_Comparison.md`, `LICENSE` and `THIRD_PARTY_LICENSES.md`,
+  which BuildPlugin used to leave out of the package (FAB-2).
+- **`CanContainContent` is `false`**: the plugin has no `Content/` folder
+  (HYG-2). WP-U5 sets it back when it adds sample content.
+- **CI.** The plugin CI, nightly, test and release workflows no longer
+  install CMake, set up MSVC or run `Sync-O3DSCore.ps1`, which is deleted.
+  The PR CI UE job checks out without submodules, and its path filter no
+  longer lists `src/`, `thirdparty/`, `apps/` or CMake files.
+  `Build-FabZip.ps1` no longer copies a core into the extracted Fab zip;
+  CI passes `-RequireStandalone`, which checks the zip holds the core module
+  and its copy. `fab-package.py` fails on a top-level file or folder that is
+  neither standard nor listed in `FilterPlugin.ini`, on a prebuilt core or
+  FlatBuffers library, and when the core copy or `FilterPlugin.ini` is
+  missing.
+
 ### Tests
 
 - UE automation tests moved out of the Runtime modules into a new editor-only

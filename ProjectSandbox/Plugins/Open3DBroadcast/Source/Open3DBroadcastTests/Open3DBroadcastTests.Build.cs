@@ -16,9 +16,12 @@ public class Open3DBroadcastTests : ModuleRules
         // Same O3D_* definitions as the modules under test.
         O3DBuildFlags.Apply(Target, this);
 
-        // /EHsc: the tests compile the o3ds core and FlatBuffers headers, like the Sender and
-        // Receiver modules (BUILD-5).
+        // /EHsc: kept from when the o3ds core was a prebuilt library built with exceptions on. The
+        // core is now the Open3DStreamCore module, built without exceptions (BUILD-5).
         bEnableExceptions = true;
+
+        // The tests call the o3ds core directly (model, capture, replay; docs/adr/0003, WP-F1).
+        PrivateDependencyModuleNames.Add("Open3DStreamCore");
 
         // Public: the harness headers (conformance registry, fakes, fixtures) expose these types,
         // and the WebRTC add-on test module (WP-F11) builds on them.

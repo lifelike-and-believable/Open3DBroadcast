@@ -27,8 +27,8 @@ public class Open3DTransportMoQ : ModuleRules
             return;
         }
 
-        // /EHsc: the sources compile the o3ds core headers, which the core library is built
-        // against with exceptions on (BUILD-5).
+        // /EHsc: kept from when the o3ds core was a prebuilt library built with exceptions on. The
+        // core is now the Open3DStreamCore module, built without exceptions (BUILD-5).
         bEnableExceptions = true;
 
         // Module-level ThirdParty directory (MoQ FFI). IsMoQEnabled is true only for Win64; the
@@ -69,10 +69,9 @@ public class Open3DTransportMoQ : ModuleRules
         // No moq_ffi.pdb here: debug symbols are not staged into packaged games and are
         // not kept in the plugin tree (FAB-4). See Build/README.md, "Debug symbols".
 
-        // The o3ds core headers (O3DS::SubjectList, audio types) come from Open3DSender and
-        // Open3DReceiver, which add them as public system includes. The block that used to add
-        // <PluginDirectory>/../../ThirdParty/open3dstream/include here pointed outside the plugin
-        // and was skipped because that directory does not exist (BUILD-1).
+        // The o3ds core (O3DS::SubjectList) comes from the Open3DStreamCore module, compiled from
+        // source in this plugin (docs/adr/0003, WP-F1).
+        PrivateDependencyModuleNames.Add("Open3DStreamCore");
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
