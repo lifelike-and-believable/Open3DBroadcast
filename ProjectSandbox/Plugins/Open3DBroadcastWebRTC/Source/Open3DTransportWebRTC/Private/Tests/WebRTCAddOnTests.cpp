@@ -22,15 +22,15 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCAddOnApiVersionTest, "Open3DBroadcast.Tr
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCAddOnApiVersionTest::RunTest(const FString& Parameters)
 {
-	const int32 Host = O3DTransport::GetHostApiVersion();
+	const int32 HostVersion = O3DTransport::GetHostApiVersion();
 	FString Error;
 
-	TestTrue(TEXT("This add-on build matches the loaded Open3DBroadcast"), O3DWebRTCAddOn::CheckHostApiVersion(Host, Error));
+	TestTrue(TEXT("This add-on build matches the loaded Open3DBroadcast"), O3DWebRTCAddOn::CheckHostApiVersion(HostVersion, Error));
 	TestTrue(TEXT("No message on a match"), Error.IsEmpty());
 
-	TestFalse(TEXT("A newer host is refused"), O3DWebRTCAddOn::CheckHostApiVersion(Host + 1, Error));
+	TestFalse(TEXT("A newer host is refused"), O3DWebRTCAddOn::CheckHostApiVersion(HostVersion + 1, Error));
 	TestTrue(TEXT("The message names the add-on"), Error.Contains(O3DWebRTCAddOn::PluginName));
-	TestFalse(TEXT("An older host is refused"), O3DWebRTCAddOn::CheckHostApiVersion(Host - 1, Error));
+	TestFalse(TEXT("An older host is refused"), O3DWebRTCAddOn::CheckHostApiVersion(HostVersion - 1, Error));
 	TestFalse(TEXT("The refusal has a message"), Error.IsEmpty());
 	return true;
 }
@@ -42,19 +42,19 @@ bool FWebRTCAddOnLibraryLocationTest::RunTest(const FString& Parameters)
 	const FO3DFfiLibraryDesc Desc = O3DWebRTCAddOn::MakeLiveKitLibraryDesc();
 	TestEqual(TEXT("livekit_ffi is looked up in the add-on plugin"), Desc.OwningPluginName, FString(O3DWebRTCAddOn::PluginName));
 
-	const TSharedPtr<IPlugin> AddOn = IPluginManager::Get().FindPlugin(O3DWebRTCAddOn::PluginName);
-	if (!TestTrue(TEXT("The add-on plugin is known to the plugin manager"), AddOn.IsValid()))
+	const TSharedPtr<IPlugin> AddOnPlugin = IPluginManager::Get().FindPlugin(O3DWebRTCAddOn::PluginName);
+	if (!TestTrue(TEXT("The add-on plugin is known to the plugin manager"), AddOnPlugin.IsValid()))
 	{
 		return false;
 	}
-	const FString DllPath = FPaths::Combine(FPaths::ConvertRelativePathToFull(AddOn->GetBaseDir()), Desc.RelativePath);
-	TestTrue(FString::Printf(TEXT("livekit_ffi.dll exists at %s"), *DllPath), FPaths::FileExists(DllPath));
+	const FString DllPath = FPaths::Combine(FPaths::ConvertRelativePathToFull(AddOnPlugin->GetBaseDir()), Desc.RelativePath);
+	TestTrue(*FString::Printf(TEXT("livekit_ffi.dll exists at %s"), *DllPath), FPaths::FileExists(DllPath));
 
 	// The main plugin no longer carries the DLL (ADR 0002 Decision 1).
-	const TSharedPtr<IPlugin> Host = IPluginManager::Get().FindPlugin(TEXT("Open3DBroadcast"));
-	if (TestTrue(TEXT("Open3DBroadcast is loaded"), Host.IsValid()))
+	const TSharedPtr<IPlugin> HostPlugin = IPluginManager::Get().FindPlugin(TEXT("Open3DBroadcast"));
+	if (TestTrue(TEXT("Open3DBroadcast is loaded"), HostPlugin.IsValid()))
 	{
-		const FString HostPath = FPaths::Combine(FPaths::ConvertRelativePathToFull(Host->GetBaseDir()), Desc.RelativePath);
+		const FString HostPath = FPaths::Combine(FPaths::ConvertRelativePathToFull(HostPlugin->GetBaseDir()), Desc.RelativePath);
 		TestFalse(TEXT("Open3DBroadcast has no livekit_ffi.dll"), FPaths::FileExists(HostPath));
 	}
 	return true;
@@ -66,9 +66,9 @@ bool FWebRTCAddOnRegisteredTest::RunTest(const FString& Parameters)
 {
 	// With a matching host and livekit_ffi present, StartupModule registered both factories, so
 	// the sender and receiver pickers list WebRTC (WP-F11 acceptance).
-	const FName WebRTC(TEXT("WebRTC"));
-	TestTrue(TEXT("WebRTC sender is registered"), O3DTransport::GetRegisteredSenders().Contains(WebRTC));
-	TestTrue(TEXT("WebRTC receiver is registered"), O3DTransport::GetRegisteredReceivers().Contains(WebRTC));
+	const FName TransportName(TEXT("WebRTC"));
+	TestTrue(TEXT("WebRTC sender is registered"), O3DTransport::GetRegisteredSenders().Contains(TransportName));
+	TestTrue(TEXT("WebRTC receiver is registered"), O3DTransport::GetRegisteredReceivers().Contains(TransportName));
 	return true;
 }
 
