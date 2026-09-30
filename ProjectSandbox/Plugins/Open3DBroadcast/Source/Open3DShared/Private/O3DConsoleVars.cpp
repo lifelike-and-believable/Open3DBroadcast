@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // Definitions for centralized O3D console variables
 
 #include "O3DConsoleVars.h"

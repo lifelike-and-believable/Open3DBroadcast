@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "Receiver/MoQReceiver.h"
 #include "O3DRedact.h"
 

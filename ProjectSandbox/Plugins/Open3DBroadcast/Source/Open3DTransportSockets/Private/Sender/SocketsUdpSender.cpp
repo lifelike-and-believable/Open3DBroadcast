@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "SocketsUdpSender.h"
 
 #include "O3DSenderAudioSinkBase.h"

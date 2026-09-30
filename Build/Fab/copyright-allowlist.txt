@@ -1,0 +1,14 @@
+# Plugin source files that keep a third-party copyright notice instead of the
+# plugin header (FAB-5, WP-F4). Read by Build/Scripts/check-copyright-headers.py.
+#
+# Only for genuine third-party code (copied or vendored from elsewhere) that
+# is not under a ThirdParty/ directory; ThirdParty/ trees and generated files
+# are skipped without an entry here.
+#
+# One file per line: the path relative to the plugin root, whitespace, then
+# the reason (required), e.g.
+#   Source/SomeModule/Private/Foo.cpp  zlib licence, copied from <project> <version>
+# Blank lines and lines starting with '#' are ignored. An entry for a file git
+# does not track fails the check.
+#
+# No entries: every .h/.cpp/.cs outside ThirdParty/ is first-party.

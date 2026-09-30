@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "SocketsTransportConfig.h"
 
 namespace O3DSocketsConfig

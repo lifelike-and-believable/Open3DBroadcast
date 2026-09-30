@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "CoreMinimal.h"
 
 #if WITH_DEV_AUTOMATION_TESTS

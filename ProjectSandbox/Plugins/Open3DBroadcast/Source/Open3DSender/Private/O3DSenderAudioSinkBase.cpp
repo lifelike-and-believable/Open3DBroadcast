@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "O3DSenderAudioSinkBase.h"
 
 bool FO3DSenderAudioSinkBase::SubmitPcm(const FString& StreamLabel,

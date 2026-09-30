@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "SocketsTransportEditorWidgets.h"
 
 #if WITH_EDITOR

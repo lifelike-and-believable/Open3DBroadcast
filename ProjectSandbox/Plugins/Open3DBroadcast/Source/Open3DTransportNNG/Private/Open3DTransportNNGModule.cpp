@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 

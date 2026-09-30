@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "O3DPerformanceMetrics.h"
 #include "HAL/IConsoleManager.h"
 #include "Logging/LogMacros.h"

@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "SocketsTcpAudio.h"
 
 #include "O3DAudioSerialization.h"

@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #pragma once
 
 #include "O3DReceiverInterface.h"

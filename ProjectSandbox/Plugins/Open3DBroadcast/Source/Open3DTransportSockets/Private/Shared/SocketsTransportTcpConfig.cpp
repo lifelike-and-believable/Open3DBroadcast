@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "SocketsTransportConfig.h"
 
 #include "O3DReceiverSourceSettings.h"
