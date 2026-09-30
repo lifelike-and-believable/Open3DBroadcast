@@ -17,7 +17,7 @@
 #include "O3DAudioOpus.h"
 #include "O3DAudioSerialization.h"
 #include "O3DSinkAudioEncoder.h"
-#include "O3DTransportTypes.h"
+#include "Transport/O3DTransportTypes.h"
 #include "O3DUnifiedMessage.h"
 
 #include <cmath>

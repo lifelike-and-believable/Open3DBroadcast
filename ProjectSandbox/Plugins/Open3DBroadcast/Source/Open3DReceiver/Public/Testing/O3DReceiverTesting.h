@@ -14,7 +14,7 @@
 
 #include "O3DReceiverSource.h"
 #include "O3DRemoteAudioComponent.h"
-#include "SerializedFrameConsumerRegistry.h"
+#include "Transport/O3DSerializedFrameConsumer.h"
 #include "Sound/SoundWaveProcedural.h"
 
 struct FO3DRemoteAudioComponentTestAccessor

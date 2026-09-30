@@ -4,10 +4,10 @@
 
 #include "SocketsUdpReceiver.h"
 
-#include "O3DTransportTypes.h"
+#include "Transport/O3DTransportTypes.h"
 #include "O3DAudioSerialization.h"
 #include "O3DUnifiedMessage.h"
-#include "SerializedFrameConsumerRegistry.h"
+#include "Transport/O3DSerializedFrameConsumer.h"
 
 #include "Sockets.h"
 #include "SocketSubsystem.h"

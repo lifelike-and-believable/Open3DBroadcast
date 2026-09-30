@@ -8,7 +8,7 @@
 #include "Templates/SharedPointer.h"
 #include "Templates/UniquePtr.h"
 #include "Containers/Queue.h"
-#include "O3DSenderInterface.h"
+#include "Transport/O3DSenderInterface.h"
 #include "O3DAudioFrameCodec.h"
 #include "O3DPerformanceMetrics.h"
 #include "MoQFfiApi.h"

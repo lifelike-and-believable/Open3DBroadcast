@@ -7,6 +7,7 @@
 #include "O3DSecretStore.h"
 #include "O3DSenderComponent.h"
 #include "ScopedTransaction.h"
+#include "Transport/O3DTransportRegistry.h"
 #include "UObject/Object.h"
 
 #define LOCTEXT_NAMESPACE "O3DTransportOptionTarget"
@@ -170,7 +171,7 @@ FO3DSecretStatus FO3DReceiverOptionTarget::GetSecretStatus(const FString& Key) c
 
 	TArray<FString> SecretKeys;
 	TMap<FString, FString> SecretEnvVars;
-	O3DReceiver::GetTransportSecretDeclaration(FName(*Transport), SecretKeys, SecretEnvVars);
+	FO3DTransportRegistry::Get().GetSecretDeclaration(FName(*Transport), EO3DTransportRole::Receiver, SecretKeys, SecretEnvVars);
 	const FString* EnvVar = SecretEnvVars.Find(Key);
 	return FO3DSecretStore::Get().Describe(Transport, Profile, Key, EnvVar ? *EnvVar : FString());
 }

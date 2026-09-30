@@ -6,7 +6,7 @@
 #include "Logging/LogMacros.h"
 #include "Templates/UniquePtr.h"
 
-#include "O3DTransportTypes.h"
+#include "Transport/O3DTransportTypes.h"
 #include "O3DAudioOpus.h"
 #include "O3DAudioSerialization.h"
 

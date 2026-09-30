@@ -19,10 +19,9 @@
 #include "HAL/Runnable.h"
 #include "HAL/RunnableThread.h"
 #include "Misc/AutomationTest.h"
-#include "O3DReceiverRegistry.h"
-#include "O3DSenderRegistry.h"
 #include "O3DTestFakes.h"
 #include "O3DTestHarness.h"
+#include "Transport/O3DTransportRegistry.h"
 
 #include <atomic>
 
@@ -523,11 +522,11 @@ namespace O3DConformanceSuite
 	TArray<FName> GetTransportNames()
 	{
 		TSet<FName> Names;
-		for (const FName& Name : O3DTransport::GetRegisteredSenders())
+		for (const FName& Name : FO3DTransportRegistry::Get().GetNames(EO3DTransportRole::Sender))
 		{
 			Names.Add(Name);
 		}
-		for (const FName& Name : O3DTransport::GetRegisteredReceivers())
+		for (const FName& Name : FO3DTransportRegistry::Get().GetNames(EO3DTransportRole::Receiver))
 		{
 			Names.Add(Name);
 		}

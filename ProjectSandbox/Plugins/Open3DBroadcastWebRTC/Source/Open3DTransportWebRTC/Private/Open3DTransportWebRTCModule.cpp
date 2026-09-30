@@ -9,15 +9,12 @@
 #include "Receiver/WebRTCReceiver.h"
 #include "Shared/WebRTCAddOn.h"
 #include "Shared/WebRTCUtils.h"
-#include "O3DSenderRegistry.h"
-#include "O3DReceiverRegistry.h"
-#include "O3DSenderTransportCustomization.h"
-#include "O3DReceiverTransportCustomization.h"
 #include "O3DSenderComponent.h"
 #include "O3DReceiverSourceSettings.h"
 #include "O3DSecretStore.h"
 #include "O3DTransportOptionSchema.h"
 #include "Transport/O3DTransportApiVersion.h"
+#include "Transport/O3DTransportRegistry.h"
 
 DEFINE_LOG_CATEGORY(LogO3DWebRTCSender);
 DEFINE_LOG_CATEGORY(LogO3DWebRTCReceiver);
@@ -192,21 +189,26 @@ public:
 		}
 		Library = NewLibrary;
 
+		// One descriptor for the transport name (ADR 0007 item 4, WP-A1): factories, configure
+		// functions, secret declarations and option schemas.
+		FO3DTransportDescriptor Descriptor;
+		Descriptor.Name = WebRTCConfig::TransportName;
+		Descriptor.OwningModule = TEXT("Open3DTransportWebRTC");
+
 		// Every instance is tracked so ShutdownModule can stop it before unloading livekit_ffi.
 		const TSharedRef<FO3DFfiLibrary, ESPMode::ThreadSafe> LibraryRef = Library.ToSharedRef();
-		O3DTransport::RegisterSender(WebRTCConfig::TransportName, [LibraryRef]() -> TSharedPtr<IOpen3DSender>
+		Descriptor.CreateSender = [LibraryRef]() -> TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe>
 		{
 			return LibraryRef->TrackInstance(MakeShared<FO3DWebRTCSender, ESPMode::ThreadSafe>());
-		});
-		O3DTransport::RegisterReceiver(WebRTCConfig::TransportName, [LibraryRef]() -> TSharedPtr<IOpen3DReceiver>
+		};
+		Descriptor.CreateReceiver = [LibraryRef]() -> TSharedPtr<IOpen3DReceiver, ESPMode::ThreadSafe>
 		{
 			return LibraryRef->TrackInstance(MakeShared<FO3DWebRTCReceiver, ESPMode::ThreadSafe>());
-		});
+		};
 
-		// Register WebRTC sender customization
-		FO3DSenderTransportCustomization SenderCustomization;
-		WebRTCConfig::DeclareSecrets(SenderCustomization.SecretOptionKeys, SenderCustomization.SecretEnvVars);
-		SenderCustomization.ConfigureTransport = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
+		// Sender side
+		WebRTCConfig::DeclareSecrets(Descriptor.SenderOptions.SecretOptionKeys, Descriptor.SenderOptions.SecretEnvVars);
+		Descriptor.ConfigureSender = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
 		{
 			Config.Transport = WebRTCConfig::TransportName;
 
@@ -229,13 +231,11 @@ public:
 			Config.AdvancedParams.Add(WebRTCConfig::UrlOptionKey, UrlValue);
 			Config.AdvancedParams.Add(WebRTCConfig::RoomOptionKey, RoomValue.TrimStartAndEnd());
 		};
-		SenderCustomization.OptionSchema = WebRTCSchema::Make();
-		O3DSender::RegisterTransportCustomization(WebRTCConfig::TransportName, MoveTemp(SenderCustomization));
+		Descriptor.SenderOptions.OptionSchema = WebRTCSchema::Make();
 
-		// Register WebRTC receiver customization
-		FO3DReceiverTransportCustomization ReceiverCustomization;
-		WebRTCConfig::DeclareSecrets(ReceiverCustomization.SecretOptionKeys, ReceiverCustomization.SecretEnvVars);
-		ReceiverCustomization.ConfigureTransport = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
+		// Receiver side
+		WebRTCConfig::DeclareSecrets(Descriptor.ReceiverOptions.SecretOptionKeys, Descriptor.ReceiverOptions.SecretEnvVars);
+		Descriptor.ConfigureReceiver = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
 		{
 			Config.Transport = WebRTCConfig::TransportName;
 
@@ -262,8 +262,16 @@ public:
 			Config.Audio.bEnableAudio = Settings.bEnableAudio;
 			// Note: Audio stream label is now automatically derived from StreamId
 		};
-		ReceiverCustomization.OptionSchema = WebRTCSchema::Make();
-		O3DReceiver::RegisterTransportCustomization(WebRTCConfig::TransportName, MoveTemp(ReceiverCustomization));
+		Descriptor.ReceiverOptions.OptionSchema = WebRTCSchema::Make();
+
+		Registration = FO3DTransportRegistry::Get().Register(MoveTemp(Descriptor));
+		if (!Registration.IsValid())
+		{
+			// The registry logged why (for example the name is already taken). The library stays
+			// loaded so ShutdownModule unloads it as usual.
+			UE_LOG(LogO3DWebRTCSender, Error, TEXT("WebRTC transport not registered; see the previous message."));
+			return;
+		}
 
 		UE_LOG(LogO3DWebRTCSender, Log, TEXT("Open3D WebRTC transport module started (LiveKit FFI backend)"));
 	}
@@ -277,13 +285,8 @@ public:
 			return;
 		}
 
-		// Unregister transport customizations
-		O3DSender::UnregisterTransportCustomization(WebRTCConfig::TransportName);
-		O3DReceiver::UnregisterTransportCustomization(WebRTCConfig::TransportName);
-
-		// Unregister transport factories
-		O3DTransport::UnregisterSender(WebRTCConfig::TransportName);
-		O3DTransport::UnregisterReceiver(WebRTCConfig::TransportName);
+		// Unregister the transport. The handle only removes this module's own registration.
+		Registration.Reset();
 
 		// TRF-14: stop instances that outlive the module (components, LiveLink sources), then
 		// unload. FO3DFfiLibrary keeps the DLL loaded if an instance is still referenced. The
@@ -302,6 +305,9 @@ private:
 	 * reference too.
 	 */
 	TSharedPtr<FO3DFfiLibrary, ESPMode::ThreadSafe> Library;
+
+	/** The one registration of "WebRTC" (ADR 0007 item 4, WP-A1). */
+	FO3DTransportRegistration Registration;
 };
 
 #else // O3D_WITH_TRANSPORT_WEBRTC

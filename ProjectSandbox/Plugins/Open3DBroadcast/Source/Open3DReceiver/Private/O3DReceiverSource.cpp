@@ -6,7 +6,7 @@
 #include "LiveLinkTypes.h"
 #include "LiveLinkPreset.h"
 #include "LiveLinkSubjectSettings.h"
-#include "SerializedFrameConsumerRegistry.h"
+#include "Transport/O3DSerializedFrameConsumer.h"
 #include "Roles/LiveLinkAnimationTypes.h"
 #include "Roles/LiveLinkAnimationRole.h"
 #include "HAL/PlatformTime.h"
@@ -17,8 +17,8 @@
 
 #include "O3DHelpers.h"
 #include "O3DRedact.h"
-#include "O3DReceiverRegistry.h"
 #include "O3DReceiverTransportCustomization.h"
+#include "Transport/O3DTransportRegistry.h"
 #include "O3DAudioBus.h"
 #include "O3DAudioFrameCodec.h"
 #include "O3DPerformanceMetrics.h"
@@ -359,7 +359,7 @@ bool FO3DReceiverSource::StartTransport()
     }
 
     const FName TransportName(*ActiveConfig.Transport);
-    ActiveReceiver = O3DTransport::CreateReceiver(TransportName);
+    ActiveReceiver = FO3DTransportRegistry::Get().CreateReceiver(TransportName);
     if (!ActiveReceiver.IsValid())
     {
         UE_LOG(LogO3DReceiverSource, Warning, TEXT("No receiver registered for transport '%s'."), *ActiveConfig.Transport);
@@ -460,8 +460,7 @@ void FO3DReceiverSource::EnsureValidTransportName()
         return;
     }
 
-    TArray<FName> RegisteredTransports;
-    O3DReceiver::GetRegisteredTransportNames(RegisteredTransports);
+    const TArray<FName> RegisteredTransports = FO3DTransportRegistry::Get().GetNames(EO3DTransportRole::Receiver);
     if (RegisteredTransports.Num() > 0)
     {
         SourceSettings.TransportName = RegisteredTransports[0];
@@ -512,7 +511,7 @@ FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
     // secret store into Config.Secrets (ADR 0004 item 4).
     TArray<FString> SecretKeys;
     TMap<FString, FString> SecretEnvVars;
-    O3DReceiver::GetTransportSecretDeclaration(TransportName, SecretKeys, SecretEnvVars);
+    FO3DTransportRegistry::Get().GetSecretDeclaration(TransportName, EO3DTransportRole::Receiver, SecretKeys, SecretEnvVars);
     for (const TPair<FString, FString>& Option : SourceSettings.TransportOptions)
     {
         if (!SecretKeys.Contains(Option.Key))
@@ -524,12 +523,12 @@ FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
 
     if (!Config.Transport.IsEmpty())
     {
-        if (const FO3DReceiverTransportCustomization* Customization = O3DReceiver::FindTransportCustomization(TransportName))
+        // The descriptor is a shared, immutable snapshot, so the function stays valid while it
+        // runs even if the transport unregisters meanwhile (RCV-27).
+        const FO3DTransportDescriptorPtr Descriptor = FO3DTransportRegistry::Get().Find(TransportName);
+        if (Descriptor.IsValid() && Descriptor->ConfigureReceiver)
         {
-            if (Customization && Customization->ConfigureTransport)
-            {
-                Customization->ConfigureTransport(SourceSettings, Config);
-            }
+            Descriptor->ConfigureReceiver(SourceSettings, Config);
         }
     }
 

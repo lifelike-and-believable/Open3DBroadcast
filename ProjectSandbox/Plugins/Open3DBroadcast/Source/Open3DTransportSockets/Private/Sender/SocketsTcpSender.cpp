@@ -7,7 +7,7 @@
 #include "../Shared/SocketsTcpTransport.h"
 #include "O3DSenderAudioSinkBase.h"
 #include "O3DSinkAudioEncoder.h"
-#include "O3DTransportTypes.h"
+#include "Transport/O3DTransportTypes.h"
 #include "O3DUnifiedMessage.h"
 
 #include "Sockets.h"

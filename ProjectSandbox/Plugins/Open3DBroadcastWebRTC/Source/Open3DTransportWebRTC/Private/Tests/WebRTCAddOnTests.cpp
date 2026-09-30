@@ -14,9 +14,8 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
 
-#include "O3DReceiverRegistry.h"
-#include "O3DSenderRegistry.h"
 #include "Transport/O3DTransportApiVersion.h"
+#include "Transport/O3DTransportRegistry.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCAddOnApiVersionTest, "Open3DBroadcast.Transport.WebRTC.AddOn.ApiVersionCheck",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -64,11 +63,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCAddOnRegisteredTest, "Open3DBroadcast.Tr
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCAddOnRegisteredTest::RunTest(const FString& Parameters)
 {
-	// With a matching host and livekit_ffi present, StartupModule registered both factories, so
-	// the sender and receiver pickers list WebRTC (WP-F11 acceptance).
+	// With a matching host and livekit_ffi present, StartupModule registered one descriptor with
+	// both factories, so the sender and receiver pickers list WebRTC (WP-F11 acceptance).
 	const FName TransportName(TEXT("WebRTC"));
-	TestTrue(TEXT("WebRTC sender is registered"), O3DTransport::GetRegisteredSenders().Contains(TransportName));
-	TestTrue(TEXT("WebRTC receiver is registered"), O3DTransport::GetRegisteredReceivers().Contains(TransportName));
+	TestTrue(TEXT("WebRTC sender is registered"), FO3DTransportRegistry::Get().GetNames(EO3DTransportRole::Sender).Contains(TransportName));
+	TestTrue(TEXT("WebRTC receiver is registered"), FO3DTransportRegistry::Get().GetNames(EO3DTransportRole::Receiver).Contains(TransportName));
 	return true;
 }
 

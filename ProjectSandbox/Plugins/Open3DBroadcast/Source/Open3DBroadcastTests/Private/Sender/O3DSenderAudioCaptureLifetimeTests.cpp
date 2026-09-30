@@ -9,7 +9,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "O3DSenderAudioCaptureComponent.h"
-#include "O3DSenderInterface.h"
+#include "Transport/O3DSenderInterface.h"
 
 #include "Misc/AutomationTest.h"
 #include "O3DTestHarness.h"

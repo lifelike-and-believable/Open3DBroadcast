@@ -6,12 +6,9 @@
 
 #if O3D_WITH_TRANSPORT_NNG
 
-#include "O3DSenderRegistry.h"
-#include "O3DReceiverRegistry.h"
-#include "O3DSenderTransportCustomization.h"
-#include "O3DReceiverTransportCustomization.h"
 #include "O3DTransportOptionSchema.h"
-#include "O3DTransportTypes.h"
+#include "Transport/O3DTransportRegistry.h"
+#include "Transport/O3DTransportTypes.h"
 #include "Shared/NngHelpers.h"
 #include "Sender/NngSender.h"
 #include "Receiver/NngReceiver.h"
@@ -210,11 +207,14 @@ class FOpen3DTransportNNGModule : public IModuleInterface
 public:
 	virtual void StartupModule() override
 	{
-		O3DTransport::RegisterSender(TEXT("NNG"), []() { return MakeShared<FO3DNngSender>(); });
-		O3DTransport::RegisterReceiver(TEXT("NNG"), []() { return MakeShared<FO3DNngReceiver>(); });
+		// One descriptor for the transport name (ADR 0007 item 4, WP-A1).
+		FO3DTransportDescriptor Descriptor;
+		Descriptor.Name = TEXT("NNG");
+		Descriptor.OwningModule = TEXT("Open3DTransportNNG");
+		Descriptor.CreateSender = []() { return MakeShared<FO3DNngSender>(); };
+		Descriptor.CreateReceiver = []() { return MakeShared<FO3DNngReceiver>(); };
 
-		FO3DSenderTransportCustomization SenderCustomization;
-		SenderCustomization.ConfigureTransport = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
+		Descriptor.ConfigureSender = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
 		{
 			Config.Transport = TEXT("NNG");
 
@@ -268,11 +268,9 @@ public:
 				Config.Role = O3DNNG::RoleToString(Role);
 			}
 		};
-		SenderCustomization.OptionSchema = NNGSchema::MakeSender();
-		O3DSender::RegisterTransportCustomization(TEXT("NNG"), MoveTemp(SenderCustomization));
+		Descriptor.SenderOptions.OptionSchema = NNGSchema::MakeSender();
 
-		FO3DReceiverTransportCustomization ReceiverCustomization;
-		ReceiverCustomization.ConfigureTransport = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
+		Descriptor.ConfigureReceiver = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
 		{
 			Config.Transport = TEXT("NNG");
 
@@ -347,22 +345,22 @@ public:
 				Config.Role = O3DNNG::RoleToString(Role);
 			}
 		};
-		ReceiverCustomization.OptionSchema = NNGSchema::MakeReceiver();
+		Descriptor.ReceiverOptions.OptionSchema = NNGSchema::MakeReceiver();
 
-		O3DReceiver::RegisterTransportCustomization(TEXT("NNG"), MoveTemp(ReceiverCustomization));
+		Registration = FO3DTransportRegistry::Get().Register(MoveTemp(Descriptor));
 
 		UE_LOG(LogOpen3DTransportNNGModule, Log, TEXT("Open3D NNG transport module started."));
 	}
 
 	virtual void ShutdownModule() override
 	{
-		O3DTransport::UnregisterSender(TEXT("NNG"));
-		O3DTransport::UnregisterReceiver(TEXT("NNG"));
-		O3DSender::UnregisterTransportCustomization(TEXT("NNG"));
-		O3DReceiver::UnregisterTransportCustomization(TEXT("NNG"));
+		Registration.Reset();
 
 		UE_LOG(LogOpen3DTransportNNGModule, Log, TEXT("Open3D NNG transport module shut down."));
 	}
+
+private:
+	FO3DTransportRegistration Registration;
 };
 
 #else // O3D_WITH_TRANSPORT_NNG

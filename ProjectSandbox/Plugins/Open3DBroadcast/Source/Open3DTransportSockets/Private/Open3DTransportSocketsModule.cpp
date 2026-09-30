@@ -5,13 +5,10 @@
 
 #if O3D_WITH_TRANSPORT_SOCKETS
 
-#include "O3DSenderRegistry.h"
-#include "O3DSenderTransportCustomization.h"
 #include "O3DSenderComponent.h"
-#include "O3DReceiverRegistry.h"
-#include "O3DReceiverTransportCustomization.h"
 #include "O3DReceiverSourceSettings.h"
 #include "O3DTransportOptionSchema.h"
+#include "Transport/O3DTransportRegistry.h"
 #include "Sender/SocketsTcpSender.h"
 #include "Receiver/SocketsTcpReceiver.h"
 #include "Sender/SocketsUdpSender.h"
@@ -136,62 +133,55 @@ class FOpen3DTransportSocketsModule : public IModuleInterface
 public:
 	virtual void StartupModule() override
 	{
-		O3DTransport::RegisterSender(SocketsTcpName, []() { return MakeShared<FO3DSocketsTcpSender>(); });
-		O3DTransport::RegisterReceiver(SocketsTcpName, []() { return MakeShared<FO3DSocketsTcpReceiver>(); });
-
-		O3DTransport::RegisterSender(SocketsUdpName, []() { return MakeShared<FO3DSocketsUdpSender>(); });
-		O3DTransport::RegisterReceiver(SocketsUdpName, []() { return MakeShared<FO3DSocketsUdpReceiver>(); });
-
-		FO3DSenderTransportCustomization TcpSenderCustomization;
-		TcpSenderCustomization.ConfigureTransport = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
+		// One descriptor per transport name (ADR 0007 item 4, WP-A1).
+		FO3DTransportDescriptor Tcp;
+		Tcp.Name = SocketsTcpName;
+		Tcp.OwningModule = TEXT("Open3DTransportSockets");
+		Tcp.CreateSender = []() { return MakeShared<FO3DSocketsTcpSender>(); };
+		Tcp.CreateReceiver = []() { return MakeShared<FO3DSocketsTcpReceiver>(); };
+		Tcp.ConfigureSender = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
 		{
 			O3DSocketsConfig::ConfigureTcpSender(SenderComponent, Config, SocketsTcpName);
 		};
-		TcpSenderCustomization.OptionSchema = SocketsSchema::MakeTcpSender();
-		O3DSender::RegisterTransportCustomization(SocketsTcpName, MoveTemp(TcpSenderCustomization));
-
-		FO3DSenderTransportCustomization UdpSenderCustomization;
-		UdpSenderCustomization.ConfigureTransport = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
-		{
-			O3DSocketsConfig::ConfigureUdpSender(SenderComponent, Config);
-		};
-		UdpSenderCustomization.OptionSchema = SocketsSchema::MakeUdpSender();
-		O3DSender::RegisterTransportCustomization(SocketsUdpName, MoveTemp(UdpSenderCustomization));
-
-		FO3DReceiverTransportCustomization TcpReceiverCustomization;
-		TcpReceiverCustomization.ConfigureTransport = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
+		Tcp.ConfigureReceiver = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
 		{
 			O3DSocketsConfig::ConfigureTcpReceiver(Settings, Config, SocketsTcpName);
 		};
-		TcpReceiverCustomization.OptionSchema = SocketsSchema::MakeTcpReceiver();
-		O3DReceiver::RegisterTransportCustomization(SocketsTcpName, MoveTemp(TcpReceiverCustomization));
+		Tcp.SenderOptions.OptionSchema = SocketsSchema::MakeTcpSender();
+		Tcp.ReceiverOptions.OptionSchema = SocketsSchema::MakeTcpReceiver();
+		TcpRegistration = FO3DTransportRegistry::Get().Register(MoveTemp(Tcp));
 
-		FO3DReceiverTransportCustomization UdpReceiverCustomization;
-		UdpReceiverCustomization.ConfigureTransport = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
+		FO3DTransportDescriptor Udp;
+		Udp.Name = SocketsUdpName;
+		Udp.OwningModule = TEXT("Open3DTransportSockets");
+		Udp.CreateSender = []() { return MakeShared<FO3DSocketsUdpSender>(); };
+		Udp.CreateReceiver = []() { return MakeShared<FO3DSocketsUdpReceiver>(); };
+		Udp.ConfigureSender = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
+		{
+			O3DSocketsConfig::ConfigureUdpSender(SenderComponent, Config);
+		};
+		Udp.ConfigureReceiver = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
 		{
 			O3DSocketsConfig::ConfigureUdpReceiver(Settings, Config);
 		};
-		UdpReceiverCustomization.OptionSchema = SocketsSchema::MakeUdpReceiver();
-		O3DReceiver::RegisterTransportCustomization(SocketsUdpName, MoveTemp(UdpReceiverCustomization));
+		Udp.SenderOptions.OptionSchema = SocketsSchema::MakeUdpSender();
+		Udp.ReceiverOptions.OptionSchema = SocketsSchema::MakeUdpReceiver();
+		UdpRegistration = FO3DTransportRegistry::Get().Register(MoveTemp(Udp));
 
 		UE_LOG(LogOpen3DTransportSocketsModule, Log, TEXT("Open3D sockets transport module started."));
 	}
 
 	virtual void ShutdownModule() override
 	{
-		O3DTransport::UnregisterSender(SocketsTcpName);
-		O3DTransport::UnregisterReceiver(SocketsTcpName);
-		O3DTransport::UnregisterSender(SocketsUdpName);
-		O3DTransport::UnregisterReceiver(SocketsUdpName);
-
-		O3DSender::UnregisterTransportCustomization(SocketsTcpName);
-		O3DSender::UnregisterTransportCustomization(SocketsUdpName);
-
-		O3DReceiver::UnregisterTransportCustomization(SocketsTcpName);
-		O3DReceiver::UnregisterTransportCustomization(SocketsUdpName);
+		TcpRegistration.Reset();
+		UdpRegistration.Reset();
 
 		UE_LOG(LogOpen3DTransportSocketsModule, Log, TEXT("Open3D sockets transport module shut down."));
 	}
+
+private:
+	FO3DTransportRegistration TcpRegistration;
+	FO3DTransportRegistration UdpRegistration;
 };
 
 #undef LOCTEXT_NAMESPACE

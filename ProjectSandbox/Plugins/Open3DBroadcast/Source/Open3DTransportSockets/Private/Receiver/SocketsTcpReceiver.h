@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "O3DReceiverInterface.h"
+#include "Transport/O3DReceiverInterface.h"
 #include "../Shared/SocketsTransportCommon.h"
 #include "O3DAudioFrameCodec.h"
 

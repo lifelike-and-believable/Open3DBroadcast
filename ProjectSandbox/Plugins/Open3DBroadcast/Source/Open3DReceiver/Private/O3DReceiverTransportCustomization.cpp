@@ -2,87 +2,153 @@
 
 #include "O3DReceiverTransportCustomization.h"
 
+#include "O3DReceiverLegacyTransportShims.h"
 #include "O3DReceiverLogs.h"
 #include "O3DReceiverSourceSettings.h"
 #include "O3DSecretStore.h"
 
 #include "HAL/CriticalSection.h"
 #include "Misc/ScopeLock.h"
+#include "Templates/UniquePtr.h"
 #include "UObject/Class.h"
+
+// ── Deprecated forwarding functions (ADR 0007 item 9, WP-A1 PR 1) ─────────────────────────
+// The receiver customization is now the receiver part (ConfigureReceiver, ReceiverOptions) of
+// the descriptor FO3DTransportRegistry keeps for each transport name.
 
 namespace
 {
-    FCriticalSection GReceiverCustomizationMutex;
-    TMap<FName, FO3DReceiverTransportCustomization> GReceiverCustomizations;
+    /**
+     * Backs the raw pointers FindTransportCustomization returns. Each item is a copy built from one
+     * descriptor; it is dropped when that descriptor is no longer the registered one, so a copy of
+     * a transport's functions never outlives the transport's registration (and its module).
+     */
+    struct FReceiverCustomizationCache
+    {
+        struct FItem
+        {
+            FO3DTransportDescriptorPtr Source;
+            TUniquePtr<FO3DReceiverTransportCustomization> Customization;
+        };
+
+        FCriticalSection Mutex;
+        TMap<FName, FItem> Items;
+        FDelegateHandle ChangedHandle;
+    };
+
+    FReceiverCustomizationCache& GetCache()
+    {
+        static FReceiverCustomizationCache Cache;
+        return Cache;
+    }
+
+    bool HasReceiverPart(const FO3DTransportDescriptor& Descriptor)
+    {
+        return static_cast<bool>(Descriptor.ConfigureReceiver) || !Descriptor.ReceiverOptions.IsEmpty();
+    }
+
+    void PurgeStaleItems()
+    {
+        FReceiverCustomizationCache& Cache = GetCache();
+        FScopeLock Lock(&Cache.Mutex);
+        for (auto It = Cache.Items.CreateIterator(); It; ++It)
+        {
+            if (FO3DTransportRegistry::Get().Find(It.Key()) != It.Value().Source)
+            {
+                It.RemoveCurrent();
+            }
+        }
+    }
+}
+
+void O3DReceiverLegacyShims::StartCustomizationCache()
+{
+    FReceiverCustomizationCache& Cache = GetCache();
+    FScopeLock Lock(&Cache.Mutex);
+    if (!Cache.ChangedHandle.IsValid())
+    {
+        Cache.ChangedHandle = FO3DTransportRegistry::Get().OnTransportsChanged().AddStatic(&PurgeStaleItems);
+    }
+}
+
+void O3DReceiverLegacyShims::StopCustomizationCache()
+{
+    FReceiverCustomizationCache& Cache = GetCache();
+    FScopeLock Lock(&Cache.Mutex);
+    if (Cache.ChangedHandle.IsValid())
+    {
+        FO3DTransportRegistry::Get().OnTransportsChanged().Remove(Cache.ChangedHandle);
+        Cache.ChangedHandle.Reset();
+    }
+    Cache.Items.Empty();
 }
 
 void O3DReceiver::RegisterTransportCustomization(FName TransportName, FO3DReceiverTransportCustomization&& Customization)
 {
-    FScopeLock Lock(&GReceiverCustomizationMutex);
-    GReceiverCustomizations.Add(TransportName, MoveTemp(Customization));
+    FO3DTransportRegistry::Get().EditLegacyDescriptor(TransportName, [&Customization](FO3DTransportDescriptor& Descriptor)
+    {
+        Descriptor.ConfigureReceiver = MoveTemp(Customization.ConfigureTransport);
+        Descriptor.ReceiverOptions.SecretOptionKeys = MoveTemp(Customization.SecretOptionKeys);
+        Descriptor.ReceiverOptions.SecretEnvVars = MoveTemp(Customization.SecretEnvVars);
+        Descriptor.ReceiverOptions.OptionSchema = MoveTemp(Customization.OptionSchema);
+    });
 }
 
 void O3DReceiver::UnregisterTransportCustomization(FName TransportName)
 {
-    FScopeLock Lock(&GReceiverCustomizationMutex);
-    GReceiverCustomizations.Remove(TransportName);
+    FO3DTransportRegistry::Get().EditLegacyDescriptor(TransportName, [](FO3DTransportDescriptor& Descriptor)
+    {
+        Descriptor.ConfigureReceiver = FO3DReceiverConfigureFunction();
+        Descriptor.ReceiverOptions = FO3DTransportRoleOptions();
+    });
 }
 
 const FO3DReceiverTransportCustomization* O3DReceiver::FindTransportCustomization(FName TransportName)
 {
-    FScopeLock Lock(&GReceiverCustomizationMutex);
-    return GReceiverCustomizations.Find(TransportName);
+    const FO3DTransportDescriptorPtr Descriptor = FO3DTransportRegistry::Get().Find(TransportName);
+    if (!Descriptor.IsValid() || !HasReceiverPart(*Descriptor))
+    {
+        return nullptr;
+    }
+
+    FReceiverCustomizationCache& Cache = GetCache();
+    FScopeLock Lock(&Cache.Mutex);
+    FReceiverCustomizationCache::FItem& Item = Cache.Items.FindOrAdd(TransportName);
+    if (Item.Source != Descriptor || !Item.Customization.IsValid())
+    {
+        TUniquePtr<FO3DReceiverTransportCustomization> Copy = MakeUnique<FO3DReceiverTransportCustomization>();
+        Copy->ConfigureTransport = Descriptor->ConfigureReceiver;
+        Copy->SecretOptionKeys = Descriptor->ReceiverOptions.SecretOptionKeys;
+        Copy->SecretEnvVars = Descriptor->ReceiverOptions.SecretEnvVars;
+        Copy->OptionSchema = Descriptor->ReceiverOptions.OptionSchema;
+        Item.Source = Descriptor;
+        Item.Customization = MoveTemp(Copy);
+    }
+    return Item.Customization.Get();
 }
 
 void O3DReceiver::GetRegisteredTransportNames(TArray<FName>& OutNames)
 {
-    TArray<FName> LocalNames;
-    {
-        FScopeLock Lock(&GReceiverCustomizationMutex);
-        GReceiverCustomizations.GetKeys(LocalNames);
-    }
-
-    LocalNames.Sort(FNameLexicalLess());
-    OutNames = MoveTemp(LocalNames);
+    OutNames = FO3DTransportRegistry::Get().GetNames(EO3DTransportRole::Receiver);
 }
 
 bool O3DReceiver::GetTransportSecretDeclaration(FName TransportName, TArray<FString>& OutSecretKeys, TMap<FString, FString>& OutSecretEnvVars)
 {
-    OutSecretKeys.Reset();
-    OutSecretEnvVars.Reset();
-
-    FScopeLock Lock(&GReceiverCustomizationMutex);
-    const FO3DReceiverTransportCustomization* Customization = GReceiverCustomizations.Find(TransportName);
-    if (!Customization)
-    {
-        return false;
-    }
-
-    OutSecretKeys = Customization->SecretOptionKeys;
-    OutSecretEnvVars = Customization->SecretEnvVars;
-    return true;
+    return FO3DTransportRegistry::Get().GetSecretDeclaration(TransportName, EO3DTransportRole::Receiver, OutSecretKeys, OutSecretEnvVars);
 }
 
 bool O3DReceiver::GetTransportOptionSchema(FName TransportName, FO3DTransportOptionSchema& OutSchema)
 {
-    OutSchema.Reset();
-
-    FScopeLock Lock(&GReceiverCustomizationMutex);
-    const FO3DReceiverTransportCustomization* Customization = GReceiverCustomizations.Find(TransportName);
-    if (!Customization)
-    {
-        return false;
-    }
-
-    OutSchema = Customization->OptionSchema;
-    return true;
+    return FO3DTransportRegistry::Get().GetOptionSchema(TransportName, EO3DTransportRole::Receiver, OutSchema);
 }
+
+// ── Receiver secret helpers ─────────────────────────────────────────────────────────────
 
 bool O3DReceiver::IsSecretOptionKey(FName TransportName, const FString& Key)
 {
     TArray<FString> SecretKeys;
     TMap<FString, FString> SecretEnvVars;
-    GetTransportSecretDeclaration(TransportName, SecretKeys, SecretEnvVars);
+    FO3DTransportRegistry::Get().GetSecretDeclaration(TransportName, EO3DTransportRole::Receiver, SecretKeys, SecretEnvVars);
     return SecretKeys.Contains(Key);
 }
 
@@ -97,7 +163,7 @@ TArray<FString> O3DReceiver::StripSecretOptions(FO3DReceiverSourceConfig& Settin
 {
     TArray<FString> SecretKeys;
     TMap<FString, FString> SecretEnvVars;
-    GetTransportSecretDeclaration(Settings.TransportName, SecretKeys, SecretEnvVars);
+    FO3DTransportRegistry::Get().GetSecretDeclaration(Settings.TransportName, EO3DTransportRole::Receiver, SecretKeys, SecretEnvVars);
 
     TArray<FString> Removed;
     for (const FString& Key : SecretKeys)
@@ -114,7 +180,7 @@ int32 O3DReceiver::MigrateLegacySecretOptions(FO3DReceiverSourceConfig& Settings
 {
     TArray<FString> SecretKeys;
     TMap<FString, FString> SecretEnvVars;
-    if (!GetTransportSecretDeclaration(Settings.TransportName, SecretKeys, SecretEnvVars))
+    if (!FO3DTransportRegistry::Get().GetSecretDeclaration(Settings.TransportName, EO3DTransportRole::Receiver, SecretKeys, SecretEnvVars))
     {
         return 0;
     }
@@ -166,7 +232,7 @@ void O3DReceiver::ResolveSecrets(const FO3DReceiverSourceConfig& Settings, TMap<
 {
     TArray<FString> SecretKeys;
     TMap<FString, FString> SecretEnvVars;
-    if (!GetTransportSecretDeclaration(Settings.TransportName, SecretKeys, SecretEnvVars))
+    if (!FO3DTransportRegistry::Get().GetSecretDeclaration(Settings.TransportName, EO3DTransportRole::Receiver, SecretKeys, SecretEnvVars))
     {
         return;
     }

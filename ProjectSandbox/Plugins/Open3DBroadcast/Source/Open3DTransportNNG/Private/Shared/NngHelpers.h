@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "O3DTransportTypes.h"
+#include "Transport/O3DTransportTypes.h"
 
 namespace O3DNNG
 {

@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 
-#include "O3DTransportTypes.h"
+#include "Transport/O3DTransportTypes.h"
 
 class IOpen3DSender;
 class IO3DSenderAudioSink;
