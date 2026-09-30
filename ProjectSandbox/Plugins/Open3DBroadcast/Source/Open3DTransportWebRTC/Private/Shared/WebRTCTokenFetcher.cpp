@@ -1,15 +1,14 @@
 #include "WebRTCTokenFetcher.h"
-#include "WebRTCTokenManager.h"
 #include "HttpModule.h"
 #include "Interfaces/IHttpResponse.h"
+#include "Misc/DateTime.h"
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonReader.h"
 #include "Logging/LogMacros.h"
-#include "Engine/World.h"
-#include "TimerManager.h"
 
 FO3DTokenFetcher::FO3DTokenFetcher()
+	: State(MakeShared<FState, ESPMode::ThreadSafe>())
 {
 }
 
@@ -24,11 +23,11 @@ void FO3DTokenFetcher::FetchTokenAsync(const FO3DTokenFetchRequest& Request, TFu
 	if (Request.EndpointUrl.IsEmpty())
 	{
 		UE_LOG(LogO3DWebRTCTokenManager, Error, TEXT("Token fetch failed: Endpoint URL is empty"));
-		
+
 		FO3DTokenResult Result;
 		Result.bSuccess = false;
 		Result.ErrorMessage = TEXT("Endpoint URL is empty");
-		
+
 		if (OnComplete)
 		{
 			OnComplete(Result);
@@ -36,22 +35,35 @@ void FO3DTokenFetcher::FetchTokenAsync(const FO3DTokenFetchRequest& Request, TFu
 		return;
 	}
 
+	uint64 Epoch = 0;
+	{
+		FScopeLock Lock(&State->Mutex);
+		Epoch = State->Epoch;
+	}
+
 	// Start fetch with retry logic (attempt 0 is the initial attempt)
-	ExecuteFetchWithRetry(Request, OnComplete, 0);
+	ExecuteFetchWithRetry(FStateWeak(State), Epoch, Request, MoveTemp(OnComplete), 0);
 }
 
-void FO3DTokenFetcher::ExecuteFetchWithRetry(const FO3DTokenFetchRequest& Request, TFunction<void(const FO3DTokenResult&)> OnComplete, int32 RetryAttempt)
+void FO3DTokenFetcher::ExecuteFetchWithRetry(const FStateWeak& WeakState, uint64 Epoch, const FO3DTokenFetchRequest& Request,
+	TFunction<void(const FO3DTokenResult&)> OnComplete, int32 RetryAttempt)
 {
+	const TSharedPtr<FState, ESPMode::ThreadSafe> Pinned = WeakState.Pin();
+	if (!Pinned.IsValid())
+	{
+		return;
+	}
+
 	// Create HTTP request
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
-	
+
 	HttpRequest->SetVerb(TEXT("POST"));
 	HttpRequest->SetURL(Request.EndpointUrl);
 	HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
 	HttpRequest->SetTimeout(Request.TimeoutSeconds);
 
 	// Build request body
-	FString RequestBody = BuildRequestBody(Request);
+	const FString RequestBody = BuildRequestBody(Request);
 	HttpRequest->SetContentAsString(RequestBody);
 
 	if (RetryAttempt == 0)
@@ -60,16 +72,27 @@ void FO3DTokenFetcher::ExecuteFetchWithRetry(const FO3DTokenFetchRequest& Reques
 	}
 	else
 	{
-		UE_LOG(LogO3DWebRTCTokenManager, Warning, TEXT("Retrying token fetch (attempt %d/%d) to: %s"), 
+		UE_LOG(LogO3DWebRTCTokenManager, Warning, TEXT("Retrying token fetch (attempt %d/%d) to: %s"),
 			RetryAttempt, Request.MaxRetries, *Request.EndpointUrl);
 	}
-	UE_LOG(LogO3DWebRTCTokenManager, Verbose, TEXT("Request body: %s"), *RequestBody);
 
-	// Bind completion callback with retry context
-	HttpRequest->OnProcessRequestComplete().BindLambda([this, Request, OnComplete, RetryAttempt](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bSuccess)
+	// The delegate holds the state weakly (TRF-24). It never touches the fetcher object.
+	HttpRequest->OnProcessRequestComplete().BindLambda([WeakState, Epoch, Request, OnComplete, RetryAttempt](FHttpRequestPtr Req, FHttpResponsePtr Resp, bool bSuccess)
 	{
-		// Remove from active requests
-		ActiveRequests.Remove(Req);
+		const TSharedPtr<FState, ESPMode::ThreadSafe> Shared = WeakState.Pin();
+		if (!Shared.IsValid())
+		{
+			return;
+		}
+
+		{
+			FScopeLock Lock(&Shared->Mutex);
+			Shared->ActiveRequests.Remove(Req);
+			if (Shared->Epoch != Epoch)
+			{
+				return; // cancelled
+			}
+		}
 
 		FO3DTokenResult Result;
 		int32 ResponseCode = 0;
@@ -89,7 +112,7 @@ void FO3DTokenFetcher::ExecuteFetchWithRetry(const FO3DTokenFetchRequest& Reques
 		else
 		{
 			ResponseCode = Resp->GetResponseCode();
-			
+
 			if (ResponseCode < 200 || ResponseCode >= 300)
 			{
 				Result.bSuccess = false;
@@ -100,7 +123,7 @@ void FO3DTokenFetcher::ExecuteFetchWithRetry(const FO3DTokenFetchRequest& Reques
 			{
 				// Parse response
 				Result = ParseResponse(Resp);
-				
+
 				if (Result.bSuccess)
 				{
 					UE_LOG(LogO3DWebRTCTokenManager, Log, TEXT("Token fetched successfully (expires at: %lld)"), Result.ExpiresAt);
@@ -115,109 +138,118 @@ void FO3DTokenFetcher::ExecuteFetchWithRetry(const FO3DTokenFetchRequest& Reques
 		// Check if we should retry
 		if (!Result.bSuccess && IsRetryableError(Result, ResponseCode) && RetryAttempt < Request.MaxRetries)
 		{
-			// Calculate backoff delay
 			const float DelaySeconds = CalculateBackoffDelay(RetryAttempt);
-			
 			UE_LOG(LogO3DWebRTCTokenManager, Log, TEXT("Will retry after %.1f seconds..."), DelaySeconds);
-			
-			// Schedule retry using timer
-			FTimerHandle RetryTimer;
-			FTimerDelegate RetryDelegate = FTimerDelegate::CreateLambda([this, Request, OnComplete, RetryAttempt]()
-			{
-				ExecuteFetchWithRetry(Request, OnComplete, RetryAttempt + 1);
-			});
-			
-			// Get timer manager from the world
-			UWorld* World = GWorld.GetReference();
-			if (World)
-			{
-				World->GetTimerManager().SetTimer(RetryTimer, RetryDelegate, DelaySeconds, false);
-				ActiveRetryTimers.Add(RetryTimer);
-			}
-			else
-			{
-				// Fallback: immediate retry if no timer manager available
-				UE_LOG(LogO3DWebRTCTokenManager, Warning, TEXT("Timer manager not available, retrying immediately"));
-				ExecuteFetchWithRetry(Request, OnComplete, RetryAttempt + 1);
-			}
-		}
-		else
-		{
-			// No more retries or success - invoke completion callback
-			if (!Result.bSuccess && RetryAttempt >= Request.MaxRetries)
-			{
-				UE_LOG(LogO3DWebRTCTokenManager, Error, TEXT("Token fetch failed after %d attempts: %s"), 
-					RetryAttempt + 1, *Result.ErrorMessage);
-			}
-			
-			if (OnComplete)
-			{
-				OnComplete(Result);
-			}
-		}
-	});
 
-	// Send request
-	if (!HttpRequest->ProcessRequest())
-	{
-		UE_LOG(LogO3DWebRTCTokenManager, Error, TEXT("Failed to initiate HTTP request"));
-		
-		FO3DTokenResult Result;
-		Result.bSuccess = false;
-		Result.ErrorMessage = TEXT("Failed to initiate HTTP request");
-		
+			// Core ticker instead of a world timer: independent of GWorld and PIE (TRF-24).
+			// The ticker delegate runs once (returns false) and holds the state weakly.
+			FScopeLock Lock(&Shared->Mutex);
+			if (Shared->Epoch != Epoch)
+			{
+				return;
+			}
+			const FTSTicker::FDelegateHandle Handle = FTSTicker::GetCoreTicker().AddTicker(
+				FTickerDelegate::CreateLambda([WeakState, Epoch, Request, OnComplete, RetryAttempt](float /*DeltaTime*/)
+				{
+					ExecuteFetchWithRetry(WeakState, Epoch, Request, OnComplete, RetryAttempt + 1);
+					return false;
+				}),
+				DelaySeconds);
+			Shared->RetryTickers.Add(Handle);
+			return;
+		}
+
+		if (!Result.bSuccess && RetryAttempt >= Request.MaxRetries)
+		{
+			UE_LOG(LogO3DWebRTCTokenManager, Error, TEXT("Token fetch failed after %d attempts: %s"),
+				RetryAttempt + 1, *Result.ErrorMessage);
+		}
+
 		if (OnComplete)
 		{
 			OnComplete(Result);
 		}
-		return;
+	});
+
+	{
+		FScopeLock Lock(&Pinned->Mutex);
+		if (Pinned->Epoch != Epoch)
+		{
+			// Cancelled while this retry was pending.
+			HttpRequest->OnProcessRequestComplete().Unbind();
+			return;
+		}
+		Pinned->ActiveRequests.Add(HttpRequest);
 	}
 
-	// Track active request
-	ActiveRequests.Add(HttpRequest);
+	// Send request
+	if (!HttpRequest->ProcessRequest())
+	{
+		// Unbind first so a delegate fired by the failed request cannot report a second result.
+		HttpRequest->OnProcessRequestComplete().Unbind();
+		{
+			FScopeLock Lock(&Pinned->Mutex);
+			Pinned->ActiveRequests.Remove(HttpRequest);
+		}
+
+		UE_LOG(LogO3DWebRTCTokenManager, Error, TEXT("Failed to initiate HTTP request"));
+
+		FO3DTokenResult Result;
+		Result.bSuccess = false;
+		Result.ErrorMessage = TEXT("Failed to initiate HTTP request");
+
+		if (OnComplete)
+		{
+			OnComplete(Result);
+		}
+	}
 }
 
 void FO3DTokenFetcher::CancelPendingRequests()
 {
-	for (FHttpRequestPtr& Request : ActiveRequests)
+	TArray<FHttpRequestPtr> Requests;
+	TArray<FTSTicker::FDelegateHandle> Tickers;
 	{
-		if (Request.IsValid() && Request->GetStatus() == EHttpRequestStatus::Processing)
+		FScopeLock Lock(&State->Mutex);
+		++State->Epoch;
+		Requests = MoveTemp(State->ActiveRequests);
+		State->ActiveRequests.Reset();
+		Tickers = MoveTemp(State->RetryTickers);
+		State->RetryTickers.Reset();
+	}
+
+	for (FTSTicker::FDelegateHandle& Handle : Tickers)
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(Handle);
+	}
+
+	for (FHttpRequestPtr& Request : Requests)
+	{
+		if (Request.IsValid())
 		{
+			// Unbind before cancelling: CancelRequest may still fire the delegate (TRF-24).
+			Request->OnProcessRequestComplete().Unbind();
 			Request->CancelRequest();
 		}
 	}
-	
-	ActiveRequests.Empty();
-	
-	// Clear any pending retry timers
-	UWorld* World = GWorld.GetReference();
-	if (World)
-	{
-		for (FTimerHandle& TimerHandle : ActiveRetryTimers)
-		{
-			World->GetTimerManager().ClearTimer(TimerHandle);
-		}
-	}
-	
-	ActiveRetryTimers.Empty();
 }
 
-FString FO3DTokenFetcher::BuildRequestBody(const FO3DTokenFetchRequest& Request) const
+FString FO3DTokenFetcher::BuildRequestBody(const FO3DTokenFetchRequest& Request)
 {
 	// Build JSON request body
 	TSharedPtr<FJsonObject> JsonObject = MakeShareable(new FJsonObject());
-	
+
 	// Required fields
 	if (!Request.RoomName.IsEmpty())
 	{
 		JsonObject->SetStringField(TEXT("room"), Request.RoomName);
 	}
-	
+
 	if (!Request.Identity.IsEmpty())
 	{
 		JsonObject->SetStringField(TEXT("identity"), Request.Identity);
 	}
-	
+
 	if (!Request.Role.IsEmpty())
 	{
 		JsonObject->SetStringField(TEXT("role"), Request.Role);
@@ -225,7 +257,7 @@ FString FO3DTokenFetcher::BuildRequestBody(const FO3DTokenFetchRequest& Request)
 
 	// Grants object
 	TSharedPtr<FJsonObject> GrantsObject = MakeShareable(new FJsonObject());
-	
+
 	// Default grants based on role
 	if (Request.Role.Equals(TEXT("publisher"), ESearchCase::IgnoreCase))
 	{
@@ -239,13 +271,13 @@ FString FO3DTokenFetcher::BuildRequestBody(const FO3DTokenFetchRequest& Request)
 		GrantsObject->SetBoolField(TEXT("canPublish"), false);
 		GrantsObject->SetBoolField(TEXT("canSubscribe"), true);
 	}
-	
+
 	// Additional grants (can override defaults)
 	for (const auto& Grant : Request.AdditionalGrants)
 	{
 		const FString& Key = Grant.Key;
 		const FString& Value = Grant.Value;
-		
+
 		// Try to parse as boolean
 		if (Value.Equals(TEXT("true"), ESearchCase::IgnoreCase))
 		{
@@ -261,13 +293,13 @@ FString FO3DTokenFetcher::BuildRequestBody(const FO3DTokenFetchRequest& Request)
 			GrantsObject->SetStringField(Key, Value);
 		}
 	}
-	
+
 	JsonObject->SetObjectField(TEXT("grants"), GrantsObject);
 
 	// Serialize to string
 	FString OutputString;
 	TSharedRef<TJsonWriter<>> JsonWriter = TJsonWriterFactory<>::Create(&OutputString);
-	
+
 	if (FJsonSerializer::Serialize(JsonObject.ToSharedRef(), JsonWriter))
 	{
 		return OutputString;
@@ -277,7 +309,7 @@ FString FO3DTokenFetcher::BuildRequestBody(const FO3DTokenFetchRequest& Request)
 	return TEXT("{}");
 }
 
-float FO3DTokenFetcher::CalculateBackoffDelay(int32 RetryAttempt) const
+float FO3DTokenFetcher::CalculateBackoffDelay(int32 RetryAttempt)
 {
 	// Exponential backoff: 1s, 2s, 4s, 8s, 16s
 	// Formula: delay = 2^RetryAttempt seconds, capped at 16 seconds
@@ -287,7 +319,7 @@ float FO3DTokenFetcher::CalculateBackoffDelay(int32 RetryAttempt) const
 	return static_cast<float>(Delay);
 }
 
-bool FO3DTokenFetcher::IsRetryableError(const FO3DTokenResult& Result, int32 ResponseCode) const
+bool FO3DTokenFetcher::IsRetryableError(const FO3DTokenResult& Result, int32 ResponseCode)
 {
 	// Retry on network errors and timeouts (no response code)
 	if (Result.ErrorMessage.Contains(TEXT("network error"), ESearchCase::IgnoreCase) ||
@@ -295,28 +327,28 @@ bool FO3DTokenFetcher::IsRetryableError(const FO3DTokenResult& Result, int32 Res
 	{
 		return true;
 	}
-	
+
 	// Check HTTP response code for retryable errors
 	// HTTP 5xx server errors are retryable
 	if (ResponseCode >= 500 && ResponseCode < 600)
 	{
 		return true;
 	}
-	
+
 	// HTTP 429 (Too Many Requests) is also retryable
 	if (ResponseCode == 429)
 	{
 		return true;
 	}
-	
+
 	// Don't retry client errors (4xx) or other errors
 	return false;
 }
 
-FO3DTokenResult FO3DTokenFetcher::ParseResponse(FHttpResponsePtr Response) const
+FO3DTokenResult FO3DTokenFetcher::ParseResponse(FHttpResponsePtr Response)
 {
 	FO3DTokenResult Result;
-	
+
 	if (!Response.IsValid())
 	{
 		Result.bSuccess = false;
@@ -325,7 +357,7 @@ FO3DTokenResult FO3DTokenFetcher::ParseResponse(FHttpResponsePtr Response) const
 	}
 
 	const FString ResponseBody = Response->GetContentAsString();
-	
+
 	if (ResponseBody.IsEmpty())
 	{
 		Result.bSuccess = false;
@@ -336,7 +368,7 @@ FO3DTokenResult FO3DTokenFetcher::ParseResponse(FHttpResponsePtr Response) const
 	// Parse JSON
 	TSharedPtr<FJsonObject> JsonObject;
 	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(ResponseBody);
-	
+
 	if (!FJsonSerializer::Deserialize(JsonReader, JsonObject) || !JsonObject.IsValid())
 	{
 		Result.bSuccess = false;
