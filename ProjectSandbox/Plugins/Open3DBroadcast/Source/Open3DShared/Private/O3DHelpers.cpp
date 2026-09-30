@@ -174,7 +174,7 @@ namespace O3DHelpers
             }
         }
 
-        int32 AtIdx;
+        int32 AtIdx = INDEX_NONE;
         if (Authority.FindLastChar('@', AtIdx))
         {
             Authority.RightChopInline(AtIdx + 1);
@@ -183,12 +183,13 @@ namespace O3DHelpers
         FString Host = Authority;
         if (Host.StartsWith(TEXT("[")))
         {
-            int32 CloseIdx;
+            int32 CloseIdx = INDEX_NONE;
             Host = Host.FindChar(']', CloseIdx) ? Host.Mid(1, CloseIdx - 1) : FString();
         }
         else
         {
-            int32 FirstColon, LastColon;
+            int32 FirstColon = INDEX_NONE;
+            int32 LastColon = INDEX_NONE;
             if (Host.FindChar(':', FirstColon) && Host.FindLastChar(':', LastColon) && FirstColon == LastColon)
             {
                 Host.LeftInline(FirstColon); // host:port
