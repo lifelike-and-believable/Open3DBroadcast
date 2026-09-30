@@ -7,6 +7,7 @@
 #include "O3DTransportConfigPanelBase.h"
 
 #include "UObject/UnrealType.h"
+#include "UObject/Package.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/SNullWidget.h"
 
