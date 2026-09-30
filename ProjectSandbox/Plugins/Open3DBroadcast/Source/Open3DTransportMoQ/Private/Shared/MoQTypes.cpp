@@ -1,5 +1,7 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
+#if O3D_WITH_TRANSPORT_MOQ // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "Shared/MoQTypes.h"
 
 #include "Containers/StringView.h"
@@ -105,3 +107,5 @@ FString LexToString(MoqConnectionState State)
     default: return TEXT("Unknown");
     }
 }
+
+#endif // O3D_WITH_TRANSPORT_MOQ

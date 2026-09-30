@@ -379,6 +379,66 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `linux.yml` and `doc.yml` use `actions/checkout@v4`; `doc.yml` installs
   `breathe` and deploys with `GITHUB_TOKEN`.
 
+### Platforms and build flags (WP-F2, ADR 0001)
+
+- **The plugin declares Win64 as its only platform.** Every module entry in
+  `Open3DBroadcast.uplugin` has `"PlatformAllowList": [ "Win64" ]` and the
+  plugin has `"SupportedTargetPlatforms": [ "Win64" ]` (FAB-3, SND-11,
+  RCV-30, TRB-41, SHR-21). A target for another platform is meant to leave
+  the modules out instead of failing in their `Build.cs`; this has not been
+  verified on a Linux target yet (see `Build/README.md`, "Platforms").
+- **Target types (FAB-8).** The runtime modules support Editor, Game and
+  Client targets: `[SupportedTargetTypes]` now lists Client, and the
+  `.uplugin` entries have `"TargetDenyList": [ "Server", "Program" ]`.
+  Server was and stays excluded; the plugin README says why.
+- **No more platform `throw`s in NNG, WebRTC and MoQ.** Their transport flag
+  is forced to 0 on any platform other than Win64 and the module builds as a
+  stub (TRB-41, TRF-27). The dead Linux/Mac branches in
+  `Open3DTransportMoQ.Build.cs` and `MoQFfiSupport.cpp`, and the
+  `#error "Unsupported platform"` in the WebRTC module, are gone (BUILD-2).
+  Open3DSender and Open3DReceiver still stop with a `BuildException` on
+  other platforms, now with a message pointing at the allow list, until
+  WP-F1 compiles the core from source.
+- **Transport flags now leave the transport out (TRB-24, TRF-27).**
+  With `O3D_WITH_TRANSPORT_SOCKETS`, `_NNG`, `_WEBRTC` or `_MOQ` set to 0,
+  every source file of that module is inside `#if O3D_WITH_TRANSPORT_<X>`
+  and the module compiles to a stub that registers nothing. It used to
+  return early from `Build.cs` and then fail to compile its sources.
+- **`O3DBuildFlags` moved** from `Open3DShared.Build.cs` to
+  `Source/Open3DBroadcastBuildFlags/Open3DBroadcastBuildFlags.Build.cs`
+  and no longer caches anything, so each target in one UBT run gets its own
+  platform decision (SHR-22, BUILD-4).
+- **Removed flags.** `O3D_BUILD_SENDER=0` and `O3D_BUILD_RECEIVER=0` now
+  fail with a clear message; they always failed the build before, because
+  both modules are always built. `O3D_WEBRTC_BACKEND_LIVEKIT`,
+  `O3D_WEBRTC_BACKEND_LIBDC` and `O3D_ENABLE_LEGACY` are ignored, and their
+  preprocessor definitions are gone (no source read them) (BUILD-4).
+- **Exceptions only where needed (BUILD-5).** `bEnableExceptions` is set in
+  the modules that compile the o3ds core headers (Sender, Receiver,
+  Loopback, enabled transports, tests), not in Open3DShared or in a
+  transport stub. RTTI stays off.
+- **Dependencies (SHR-20, RCV-30).** The transports' public dependencies are
+  `Core` only; the rest are private. Open3DReceiver's `LiveLink` and
+  `LiveLinkAnimationCore` are private, and its unused `AudioMixer`
+  dependency is removed. Open3DShared keeps `CoreUObject` and `Engine`
+  public because `O3DCredentialLibrary.h` declares a
+  `UBlueprintFunctionLibrary`.
+- **Paths (BUILD-1).** The WebRTC and MoQ `Build.cs` no longer add
+  `<PluginDirectory>/../../ThirdParty/open3dstream/include`, which pointed
+  outside the plugin and was never found; the o3ds headers come from
+  Open3DSender and Open3DReceiver.
+- The empty umbrella header `Open3DShared/Public/O3DTransportRegistry.h`,
+  which tried to include Sender and Receiver headers from the base module,
+  is deleted (SHR-4 layering).
+- Open3DShared prints a build warning when it is built without Opus
+  (SHR-21).
+- CI: `fab-package.py` fails when a module has no `PlatformAllowList` or the
+  plugin has no `SupportedTargetPlatforms`. The nightly workflow builds each
+  transport flag combination (`Build/Scripts/Build-FlagCombinations.ps1`)
+  and runs `Build/Scripts/Test-LinuxExclusion.ps1`, which builds the
+  ProjectSandbox game for Linux when the runner has the Linux toolchain and
+  skips with a notice otherwise. PR CI is unchanged.
+
 ### Tests
 
 - UE automation tests moved out of the Runtime modules into a new editor-only
@@ -508,6 +568,22 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   headers" job of plugin CI on every PR, drafts included. Third-party code
   outside `ThirdParty/` goes in `Build/Fab/copyright-allowlist.txt` with a
   reason; the list is empty.
+
+### Plugin descriptor (WP-F9)
+
+- The plugin is marked Beta (`"IsBetaVersion": true`, ADR 0002). The MoQ
+  transport is Experimental: UE has no per-module maturity key, so the
+  descriptor `Description`, the plugin README and the USER_GUIDE say so and
+  name the draft (draft-ietf-moq-transport-07) (FAB-12).
+- The plugin's display name (`FriendlyName`) is now **Open3DBroadcast**,
+  matching the plugin, README and USER_GUIDE names. It was "Open3D
+  Broadcast Suite" (UX-5, partial).
+- `SupportURL` points at this repository's GitHub issues instead of
+  open3dstream.com (FAB-13). `DocsURL` points at `USER_GUIDE.md` on the
+  `develop` branch; the old link used a `main` branch that does not exist
+  (FAB-14).
+- README and USER_GUIDE state the requirements: Unreal Engine 5.7, Win64
+  only, editor and game targets (DOC-6, partial).
 
 ### Schema/Protocol
 

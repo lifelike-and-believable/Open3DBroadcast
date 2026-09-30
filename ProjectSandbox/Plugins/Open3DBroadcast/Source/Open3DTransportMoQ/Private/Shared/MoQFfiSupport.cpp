@@ -1,5 +1,7 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
+#if O3D_WITH_TRANSPORT_MOQ // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "Shared/MoQFfiSupport.h"
 #include "MoQFfiApi.h"
 
@@ -16,15 +18,9 @@ FO3DFfiLibraryDesc FMoQFfiSupport::MakeLibraryDesc()
 	FO3DFfiLibraryDesc Desc;
 	Desc.DisplayName = TEXT("MoQ FFI");
 	Desc.OwningPluginName = MoQFfiSupportPrivate::OwningPluginName;
-#if PLATFORM_WINDOWS
+	// Win64 only: O3D_WITH_TRANSPORT_MOQ is 0 on every other platform, so this file is then
+	// compiled out (ADR 0001). The Linux and Mac paths named binaries that do not exist (BUILD-2).
 	Desc.RelativePath = TEXT("Source/Open3DTransportMoQ/ThirdParty/moq-ffi/bin/Win64/Release/moq_ffi.dll");
-#elif PLATFORM_LINUX
-	Desc.RelativePath = TEXT("Source/Open3DTransportMoQ/ThirdParty/moq-ffi/bin/Linux/Release/libmoq_ffi.so");
-#elif PLATFORM_MAC
-	Desc.RelativePath = TEXT("Source/Open3DTransportMoQ/ThirdParty/moq-ffi/bin/Mac/Release/libmoq_ffi.dylib");
-#else
-	#error "Unsupported platform for MoQ FFI"
-#endif
 	return Desc;
 }
 
@@ -91,3 +87,5 @@ bool FMoQFfiSupport::ValidateLibrary(const FO3DFfiLibrary& Library, FString& Out
 	UE_LOG(LogMoQFfiSupport, Log, TEXT("MoQ FFI version: %s"), *Version);
 	return true;
 }
+
+#endif // O3D_WITH_TRANSPORT_MOQ

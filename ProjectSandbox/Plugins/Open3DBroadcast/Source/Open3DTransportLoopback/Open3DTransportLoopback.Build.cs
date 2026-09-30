@@ -1,9 +1,9 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
 using UnrealBuildTool;
-//using O3DBroadcastBuild;
 
-[SupportedTargetTypes(TargetType.Game, TargetType.Editor)]
+// Editor, Game and Client; Server and Program are excluded (ADR 0001, FAB-8).
+[SupportedTargetTypes(TargetType.Editor, TargetType.Game, TargetType.Client)]
 public class Open3DTransportLoopback : ModuleRules
 {
     public Open3DTransportLoopback(ReadOnlyTargetRules Target) : base(Target)
@@ -12,20 +12,16 @@ public class Open3DTransportLoopback : ModuleRules
 
         O3DBuildFlags.Apply(Target, this);
 
-        if (!O3DBuildFlags.IsSenderEnabled(Target) || !O3DBuildFlags.IsReceiverEnabled(Target))
-        {
-            return;
-        }
+        // /EHsc: LoopbackSender.cpp compiles the o3ds core headers, which the core library is
+        // built against with exceptions on (BUILD-5).
+        bEnableExceptions = true;
 
-        PublicDependencyModuleNames.AddRange(new string[]
+        // The module has no Public/ headers, so every dependency is private (SHR-20).
+        PrivateDependencyModuleNames.AddRange(new string[]
         {
             "Core",
             "CoreUObject",
-            "Engine"
-        });
-
-        PrivateDependencyModuleNames.AddRange(new string[]
-        {
+            "Engine",
             "Open3DShared",
             "Open3DSender",
             "Open3DReceiver"

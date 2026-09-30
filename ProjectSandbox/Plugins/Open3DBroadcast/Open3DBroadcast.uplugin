@@ -3,61 +3,78 @@
 	"EngineVersion": "5.7.0",
 	"Version": 1,
 	"VersionName": "1.0",
-	"FriendlyName": "Open3D Broadcast Suite",
-	"Description": "Modular sender, receiver, and transport implementation for Open3DStream",
+	"FriendlyName": "Open3DBroadcast",
+	"Description": "Streams skeletal animation, curves and audio between Unreal Engine instances in the Open3DStream format, over pluggable network transports. Beta. Unreal Engine 5.7, Win64 only. The MoQ transport is Experimental: it implements draft-ietf-moq-transport-07, and MoQ relays must speak draft-07.",
 	"Category": "Animation",
 	"CreatedBy": "Open3DStream Contributors",
 	"CreatedByURL": "https://open3dstream.com/",
-	"DocsURL": "https://github.com/lifelike-and-believable/Open3DBroadcast/blob/main/ProjectSandbox/Plugins/Open3DBroadcast/USER_GUIDE.md",
+	"DocsURL": "https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcast/USER_GUIDE.md",
 	"MarketplaceURL": "",
-	"SupportURL": "https://open3dstream.com/",
+	"SupportURL": "https://github.com/lifelike-and-believable/Open3DBroadcast/issues",
 	"CanContainContent": true,
-	"IsBetaVersion": false,
+	"IsBetaVersion": true,
 	"IsExperimentalVersion": false,
 	"Installed": false,
 	"Plugins": [
 		{ "Name": "LiveLink", "Enabled": true }
 	],
+	"SupportedTargetPlatforms": [ "Win64" ],
 	"Modules": [
 		{
 			"Name": "Open3DShared",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [ "Win64" ],
+			"TargetDenyList": [ "Server", "Program" ]
 		},
 		{
 			"Name": "Open3DSender",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [ "Win64" ],
+			"TargetDenyList": [ "Server", "Program" ]
 		},
 		{
 			"Name": "Open3DReceiver",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [ "Win64" ],
+			"TargetDenyList": [ "Server", "Program" ]
 		},
 		{
 			"Name": "Open3DTransportLoopback",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [ "Win64" ],
+			"TargetDenyList": [ "Server", "Program" ]
 		},
 		{
 			"Name": "Open3DTransportSockets",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [ "Win64" ],
+			"TargetDenyList": [ "Server", "Program" ]
 		},
 		{
 			"Name": "Open3DTransportNNG",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [ "Win64" ],
+			"TargetDenyList": [ "Server", "Program" ]
 		},
 		{
 			"Name": "Open3DTransportWebRTC",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [ "Win64" ],
+			"TargetDenyList": [ "Server", "Program" ]
 		},
 		{
 			"Name": "Open3DTransportMoQ",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [ "Win64" ],
+			"TargetDenyList": [ "Server", "Program" ]
 		},
 		{
 			"Name": "Open3DBroadcastTests",

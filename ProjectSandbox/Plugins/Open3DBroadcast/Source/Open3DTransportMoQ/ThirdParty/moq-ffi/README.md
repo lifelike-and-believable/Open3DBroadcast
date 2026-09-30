@@ -14,7 +14,7 @@ This directory contains the prebuilt **moq-ffi** package used by the `Open3DTran
 | Build Profile | `cargo build --release --features with_moq_draft07` on Win64/MSVC |
 | Drop Date | 2025-11-24 |
 
-Only Win64 artifacts are currently shipped. Linux/macOS placeholders exist so future drops have well-known paths, but those platforms will automatically disable MoQ (see `O3D_WITH_TRANSPORT_MOQ.md`).
+Only Win64 artifacts are shipped, and the module is Win64-only (`PlatformAllowList` in `Open3DBroadcast.uplugin`, ADR 0001). If the module is ever configured for another platform, `O3D_WITH_TRANSPORT_MOQ` is forced to 0 and it builds as a stub. `Open3DTransportMoQ.Build.cs` has no Linux or macOS paths (BUILD-2); add them together with the binaries.
 
 ## Artifact Inventory (Win64)
 
@@ -44,6 +44,6 @@ Only Win64 artifacts are currently shipped. Linux/macOS placeholders exist so fu
 
 - **Build Failure:** `Open3DTransportMoQ.Build.cs` throws if the `.lib` or DLL is missing. Re-run step 4.
 - **Runtime Failure:** Check `LogMoQFfiSupport` output. If validation fails, confirm the hashes match the table above and that the DLL exports match the current header.
-- **Platform Support:** Only Win64 binaries are available today. Linux/macOS builds will see `O3D_WITH_TRANSPORT_MOQ` auto-disable until we vendor matching artifacts.
+- **Platform Support:** Only Win64 binaries are available today. The module is not built for other platforms (see above).
 
 For deeper debugging guidance (panic handling, async dispatcher expectations, Cloudflare relay integration, etc.) consult the documentation in `ProjectSandbox/External/moq-ffi`.

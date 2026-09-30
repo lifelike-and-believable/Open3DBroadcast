@@ -1,5 +1,7 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
+#if O3D_WITH_TRANSPORT_MOQ // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "Shared/MoQHandles.h"
 
 FMoQSessionHandle::FMoQSessionHandle(FMoQFfiApiRef InApi)
@@ -92,3 +94,5 @@ void FMoQSubscriberHandle::Reset()
     Subscriber = nullptr;
     Client.Reset();
 }
+
+#endif // O3D_WITH_TRANSPORT_MOQ

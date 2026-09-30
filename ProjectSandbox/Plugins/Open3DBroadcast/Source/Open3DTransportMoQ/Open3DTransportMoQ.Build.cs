@@ -3,7 +3,8 @@
 using UnrealBuildTool;
 using System.IO;
 
-[SupportedTargetTypes(TargetType.Game, TargetType.Editor)]
+// Editor, Game and Client; Server and Program are excluded (ADR 0001, FAB-8).
+[SupportedTargetTypes(TargetType.Editor, TargetType.Game, TargetType.Client)]
 public class Open3DTransportMoQ : ModuleRules
 {
     public Open3DTransportMoQ(ReadOnlyTargetRules Target) : base(Target)
@@ -12,61 +13,38 @@ public class Open3DTransportMoQ : ModuleRules
 
         O3DBuildFlags.Apply(Target, this);
 
-        // Check if MoQ transport is enabled
+        // Public/ headers (MoQFfiApi.h, Testing/MoQTesting.h) need Core and moq_ffi.h; the
+        // consumer (Open3DBroadcastTests) brings the Sender and Receiver headers (SHR-20).
+        PublicDependencyModuleNames.Add("Core");
+
+        // O3DBuildFlags turns MoQ off on every platform without a prebuilt moq_ffi (Win64 only), so
+        // a target for another platform gets the stub instead of a build error. The .uplugin's
+        // PlatformAllowList normally keeps the module out of such targets anyway.
         if (!O3DBuildFlags.IsMoQEnabled(Target))
         {
+            // Stub module: every translation unit is inside #if O3D_WITH_TRANSPORT_MOQ (TRF-27).
+            O3DBuildFlags.ReportDisabledTransport(Target, "Open3DTransportMoQ", "O3D_WITH_TRANSPORT_MOQ");
             return;
         }
 
-        // Determine platform subdirectory
-        string platformSubdir;
-        if (Target.Platform == UnrealTargetPlatform.Win64)
-        {
-            platformSubdir = "Win64";
-        }
-        else if (Target.Platform == UnrealTargetPlatform.Linux)
-        {
-            platformSubdir = "Linux";
-        }
-        else if (Target.Platform == UnrealTargetPlatform.Mac)
-        {
-            platformSubdir = "Mac";
-        }
-        else
-        {
-            throw new BuildException($"Open3DTransportMoQ does not define third-party binaries for platform {Target.Platform} yet.");
-        }
+        // /EHsc: the sources compile the o3ds core headers, which the core library is built
+        // against with exceptions on (BUILD-5).
+        bEnableExceptions = true;
 
-        // Plugin-level ThirdParty directory (for open3dstream core library)
-        string pluginThirdPartyDir = Path.Combine(PluginDirectory, "..", "..", "ThirdParty");
-
-        // Module-level ThirdParty directory (for MoQ FFI)
+        // Module-level ThirdParty directory (MoQ FFI). IsMoQEnabled is true only for Win64; the
+        // Linux and Mac branches that pointed at binaries that do not exist are gone (BUILD-2).
         string moduleThirdPartyDir = Path.Combine(ModuleDirectory, "ThirdParty");
 
-        // MoQ FFI library path
-        string moqFfiLibPath = "";
-        if (Target.Platform == UnrealTargetPlatform.Win64)
-        {
-            moqFfiLibPath = Path.Combine(moduleThirdPartyDir, "moq-ffi", "lib", platformSubdir, "Release", "moq_ffi.dll.lib");
-        }
-        else if (Target.Platform == UnrealTargetPlatform.Linux)
-        {
-            moqFfiLibPath = Path.Combine(moduleThirdPartyDir, "moq-ffi", "lib", platformSubdir, "Release", "libmoq_ffi.so");
-        }
-        else if (Target.Platform == UnrealTargetPlatform.Mac)
-        {
-            moqFfiLibPath = Path.Combine(moduleThirdPartyDir, "moq-ffi", "lib", platformSubdir, "Release", "libmoq_ffi.dylib");
-        }
-
+        // MoQ FFI import library
+        string moqFfiLibPath = Path.Combine(moduleThirdPartyDir, "moq-ffi", "lib", "Win64", "Release", "moq_ffi.dll.lib");
         if (!File.Exists(moqFfiLibPath))
         {
             throw new BuildException($"Missing required MoQ FFI library at '{moqFfiLibPath}'. " +
-                                   $"Please ensure moq-ffi binaries are built for {Target.Platform}. " +
                                    $"See ThirdParty/moq-ffi/README.md for instructions.");
         }
         PublicAdditionalLibraries.Add(moqFfiLibPath);
 
-        // MoQ FFI include path
+        // MoQ FFI include path (public: MoQFfiApi.h includes moq_ffi.h)
         string moqFfiIncludePath = Path.Combine(moduleThirdPartyDir, "moq-ffi", "include");
         if (!Directory.Exists(moqFfiIncludePath))
         {
@@ -75,60 +53,32 @@ public class Open3DTransportMoQ : ModuleRules
         }
         PublicSystemIncludePaths.Add(moqFfiIncludePath); // Third-party headers: system include (BUILD-3)
 
-        // MoQ FFI DLL/shared library - use delay-load to allow custom path loading
-        if (Target.Platform == UnrealTargetPlatform.Win64)
+        // MoQ FFI DLL
+        string moqFfiDllPath = Path.Combine(moduleThirdPartyDir, "moq-ffi", "bin", "Win64", "Release", "moq_ffi.dll");
+        if (!File.Exists(moqFfiDllPath))
         {
-            string moqFfiDllPath = Path.Combine(moduleThirdPartyDir, "moq-ffi", "bin", platformSubdir, "Release", "moq_ffi.dll");
-            if (!File.Exists(moqFfiDllPath))
-            {
-                throw new BuildException($"Missing required MoQ FFI DLL at '{moqFfiDllPath}'. " +
-                                       $"See ThirdParty/moq-ffi/README.md for setup instructions.");
-            }
-            
-            // Delay-loaded: the module loads it from the plugin through FO3DFfiLibrary (Open3DShared) first
-            PublicDelayLoadDLLs.Add("moq_ffi.dll");
-            
-            // Register the DLL as a runtime dependency for packaging
-            RuntimeDependencies.Add(moqFfiDllPath);
-            // No moq_ffi.pdb here: debug symbols are not staged into packaged games and are
-            // not kept in the plugin tree (FAB-4). See Build/README.md, "Debug symbols".
-        }
-        else if (Target.Platform == UnrealTargetPlatform.Linux)
-        {
-            string moqFfiSoPath = Path.Combine(moduleThirdPartyDir, "moq-ffi", "bin", platformSubdir, "Release", "libmoq_ffi.so");
-            if (File.Exists(moqFfiSoPath))
-            {
-                RuntimeDependencies.Add(moqFfiSoPath);
-            }
-        }
-        else if (Target.Platform == UnrealTargetPlatform.Mac)
-        {
-            string moqFfiDylibPath = Path.Combine(moduleThirdPartyDir, "moq-ffi", "bin", platformSubdir, "Release", "libmoq_ffi.dylib");
-            if (File.Exists(moqFfiDylibPath))
-            {
-                RuntimeDependencies.Add(moqFfiDylibPath);
-            }
+            throw new BuildException($"Missing required MoQ FFI DLL at '{moqFfiDllPath}'. " +
+                                   $"See ThirdParty/moq-ffi/README.md for setup instructions.");
         }
 
-        // Open3DStream core library includes (for O3DS::SubjectList and audio types)
-        string o3dsIncludePath = Path.Combine(pluginThirdPartyDir, "open3dstream", "include");
-        if (Directory.Exists(o3dsIncludePath))
-        {
-            PublicSystemIncludePaths.Add(o3dsIncludePath); // Third-party headers: system include (BUILD-3)
-        }
+        // Delay-loaded: the module loads it from the plugin through FO3DFfiLibrary (Open3DShared) first
+        PublicDelayLoadDLLs.Add("moq_ffi.dll");
 
-        // Public dependencies
-        PublicDependencyModuleNames.AddRange(new string[]
-        {
-            "Core",
-            "CoreUObject",
-            "Engine"
-            // No "Projects": moq_ffi is located and loaded by FO3DFfiLibrary in Open3DShared (TRF-28).
-        });
+        // Register the DLL as a runtime dependency for packaging
+        RuntimeDependencies.Add(moqFfiDllPath);
+        // No moq_ffi.pdb here: debug symbols are not staged into packaged games and are
+        // not kept in the plugin tree (FAB-4). See Build/README.md, "Debug symbols".
 
-        // Private dependencies
+        // The o3ds core headers (O3DS::SubjectList, audio types) come from Open3DSender and
+        // Open3DReceiver, which add them as public system includes. The block that used to add
+        // <PluginDirectory>/../../ThirdParty/open3dstream/include here pointed outside the plugin
+        // and was skipped because that directory does not exist (BUILD-1).
+
         PrivateDependencyModuleNames.AddRange(new string[]
         {
+            "CoreUObject",
+            "Engine",
+            // No "Projects": moq_ffi is located and loaded by FO3DFfiLibrary in Open3DShared (TRF-28).
             "Open3DShared",
             "Open3DSender",
             "Open3DReceiver",

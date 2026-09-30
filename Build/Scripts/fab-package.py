@@ -324,6 +324,31 @@ def check_tree(files):
     return errors
 
 
+def check_platforms(desc, uplugin_rel):
+    """Platform declarations required by ADR 0001 (FAB-3, WP-F2).
+
+    The plugin has a non-empty SupportedTargetPlatforms, and every module has a
+    non-empty PlatformAllowList that names only platforms the plugin supports,
+    so a target for any other platform leaves the module out instead of
+    building it.
+    """
+    errors = []
+    supported = desc.get("SupportedTargetPlatforms")
+    if not isinstance(supported, list) or not supported:
+        errors.append(f"{uplugin_rel} has no SupportedTargetPlatforms (ADR 0001)")
+        supported = []
+    for m in desc.get("Modules", []):
+        allow = m.get("PlatformAllowList")
+        if not isinstance(allow, list) or not allow:
+            errors.append(f"module {m.get('Name')} has no PlatformAllowList in {uplugin_rel} (ADR 0001)")
+            continue
+        extra = [p for p in allow if supported and p not in supported]
+        if extra:
+            errors.append(f"module {m.get('Name')} allows {extra}, which SupportedTargetPlatforms "
+                          f"{supported} does not list (ADR 0001)")
+    return errors
+
+
 def check_package(zip_path, plugin_name, excluded_modules):
     """Return a list of problems found in the zip. Empty means it passes."""
     errors = []
@@ -344,6 +369,7 @@ def check_package(zip_path, plugin_name, excluded_modules):
             try:
                 desc = json.loads(z.read(root + uplugin_rel).decode("utf-8-sig"))
                 modules = [m.get("Name") for m in desc.get("Modules", [])]
+                errors.extend(check_platforms(desc, uplugin_rel))
             except (ValueError, UnicodeDecodeError) as e:
                 errors.append(f"{uplugin_rel} is not valid JSON: {e}")
         if uplugin_rel in relset and not modules:

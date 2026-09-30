@@ -1,4 +1,7 @@
 // Copyright (c) Open3DStream Contributors
+
+#if O3D_WITH_TRANSPORT_WEBRTC // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 //
 // WP-S9 (ADR 0004 items 1, 6 and 7) for the WebRTC transport: the customizations declare the
 // secret keys, the token reaches Config.Token only from Config.Secrets (never AdvancedParams), the
@@ -152,3 +155,5 @@ bool FWebRTCSecretsEndpointPolicyTest::RunTest(const FString& Parameters)
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
+
+#endif // O3D_WITH_TRANSPORT_WEBRTC

@@ -1,5 +1,7 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
+#if O3D_WITH_TRANSPORT_WEBRTC // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "WebRTCTokenFetcher.h"
 #include "HttpModule.h"
 #include "Interfaces/IHttpResponse.h"
@@ -404,3 +406,5 @@ FO3DTokenResult FO3DTokenFetcher::ParseResponse(FHttpResponsePtr Response)
 
 	return Result;
 }
+
+#endif // O3D_WITH_TRANSPORT_WEBRTC

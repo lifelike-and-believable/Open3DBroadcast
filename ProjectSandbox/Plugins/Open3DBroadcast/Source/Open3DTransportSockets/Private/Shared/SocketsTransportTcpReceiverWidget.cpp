@@ -1,5 +1,7 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
+#if O3D_WITH_TRANSPORT_SOCKETS // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "SocketsTransportEditorWidgets.h"
 
 #if WITH_EDITOR
@@ -257,3 +259,5 @@ TSharedPtr<SO3DTransportConfigPanelBase> BuildTcpReceiverSettingsPanel(UO3DRecei
 #undef LOCTEXT_NAMESPACE
 
 #endif // WITH_EDITOR
+
+#endif // O3D_WITH_TRANSPORT_SOCKETS

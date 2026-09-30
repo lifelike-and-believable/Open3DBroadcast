@@ -1,17 +1,21 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
 using UnrealBuildTool;
-//using O3DBroadcastBuild;
 using System.IO;
 
-[SupportedTargetTypes(TargetType.Game, TargetType.Editor)]
+// Editor, Game and Client; Server and Program are excluded (ADR 0001, FAB-8).
+[SupportedTargetTypes(TargetType.Editor, TargetType.Game, TargetType.Client)]
 public class Open3DSender : ModuleRules
 {
     public Open3DSender(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        O3DBuildFlags.Apply(Target, this, bRequireSender: true);
+        O3DBuildFlags.Apply(Target, this);
+
+        // /EHsc: this module compiles the o3ds core and FlatBuffers headers and links
+        // open3dstreamstatic.lib, which is built with exceptions on (BUILD-5).
+        bEnableExceptions = true;
 
         var PluginRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", ".."));
 
@@ -30,7 +34,10 @@ public class Open3DSender : ModuleRules
         }
         else
         {
-            throw new BuildException($"Open3DSender does not define third-party binaries for platform {Target.Platform} yet.");
+            // Not reached while the .uplugin keeps "PlatformAllowList": [ "Win64" ] on this module:
+            // UBT then leaves the module out of other platforms' targets (ADR 0001). WP-F1 compiles
+            // the core from source and deletes this branch.
+            throw new BuildException($"Open3DSender has prebuilt o3ds libraries for Win64 only, but was configured for {Target.Platform}. Keep \"PlatformAllowList\": [ \"Win64\" ] on its entry in Open3DBroadcast.uplugin.");
         }
 
         // Link libraries

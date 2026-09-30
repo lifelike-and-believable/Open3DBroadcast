@@ -220,6 +220,13 @@ if ($env:GITHUB_STEP_SUMMARY) {
 
 if ($problems.Count -gt 0) {
   foreach ($p in $problems) { Write-Failure $p }
+  # The log is only in the uploaded artifact otherwise; print its end so a startup
+  # failure or crash can be diagnosed from the job log alone.
+  if (Test-Path -LiteralPath $LogPath) {
+    Write-Host "----- Last 150 lines of $LogPath -----"
+    Get-Content -LiteralPath $LogPath -Tail 150 | ForEach-Object { Write-Host $_ }
+    Write-Host "----- End of $LogPath -----"
+  }
   exit 1
 }
 

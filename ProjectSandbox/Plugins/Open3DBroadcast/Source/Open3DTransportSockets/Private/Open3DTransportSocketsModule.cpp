@@ -1,6 +1,9 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
 #include "Modules/ModuleManager.h"
+#include "Logging/LogMacros.h"
+
+#if O3D_WITH_TRANSPORT_SOCKETS
 
 #include "O3DSenderRegistry.h"
 #include "O3DSenderTransportCustomization.h"
@@ -111,5 +114,27 @@ public:
 		UE_LOG(LogOpen3DTransportSocketsModule, Log, TEXT("Open3D sockets transport module shut down."));
 	}
 };
+
+#else // O3D_WITH_TRANSPORT_SOCKETS
+
+DEFINE_LOG_CATEGORY_STATIC(LogOpen3DTransportSocketsModule, Log, All);
+
+/**
+ * Stub module, compiled when O3D_WITH_TRANSPORT_SOCKETS is 0: the transport was switched off with
+ * that environment variable
+ * (O3DBuildFlags in Open3DBroadcastBuildFlags.Build.cs). It registers nothing.
+ */
+class FOpen3DTransportSocketsModule : public IModuleInterface
+{
+public:
+	virtual void StartupModule() override
+	{
+		UE_LOG(LogOpen3DTransportSocketsModule, Display, TEXT("Open3D sockets transport is not available in this build (O3D_WITH_TRANSPORT_SOCKETS=0)."));
+	}
+
+	virtual void ShutdownModule() override {}
+};
+
+#endif // O3D_WITH_TRANSPORT_SOCKETS
 
 IMPLEMENT_MODULE(FOpen3DTransportSocketsModule, Open3DTransportSockets)

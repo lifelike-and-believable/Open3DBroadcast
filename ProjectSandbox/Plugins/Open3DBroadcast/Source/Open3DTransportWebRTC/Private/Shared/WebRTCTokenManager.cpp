@@ -1,5 +1,7 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
+#if O3D_WITH_TRANSPORT_WEBRTC // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "WebRTCTokenManager.h"
 #include "WebRTCTokenFetcher.h"
 #include "Misc/Base64.h"
@@ -424,3 +426,5 @@ void FO3DTokenManager::OnTokenFetchComplete(const TSharedRef<FState, ESPMode::Th
 		}
 	}
 }
+
+#endif // O3D_WITH_TRANSPORT_WEBRTC

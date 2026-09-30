@@ -1,5 +1,7 @@
 // Copyright (c) Open3DStream Contributors
 
+#if O3D_WITH_TRANSPORT_SOCKETS // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "Testing/SocketsTesting.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -53,3 +55,5 @@ namespace O3DSocketsTesting
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
+
+#endif // O3D_WITH_TRANSPORT_SOCKETS

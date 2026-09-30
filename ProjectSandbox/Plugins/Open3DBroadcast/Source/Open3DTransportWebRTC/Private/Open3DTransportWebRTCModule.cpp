@@ -1,6 +1,9 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
 #include "Modules/ModuleManager.h"
+#include "Logging/LogMacros.h"
+
+#if O3D_WITH_TRANSPORT_WEBRTC
 #include "O3DFfiLibrary.h"
 #include "Sender/WebRTCSender.h"
 #include "Receiver/WebRTCReceiver.h"
@@ -1195,14 +1198,34 @@ private:
 		FO3DFfiLibraryDesc Desc;
 		Desc.DisplayName = TEXT("LiveKit FFI");
 		Desc.OwningPluginName = TEXT("Open3DBroadcast");
-#if PLATFORM_WINDOWS
+		// Win64 only: O3D_WITH_TRANSPORT_WEBRTC is 0 on every other platform, so this file then
+		// compiles to the stub module below (ADR 0001).
 		Desc.RelativePath = TEXT("Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/bin/Win64/livekit_ffi.dll");
-#else
-#error "Unsupported platform for LiveKit FFI"
-#endif
 		return Desc;
 	}
 };
+
+#else // O3D_WITH_TRANSPORT_WEBRTC
+
+DEFINE_LOG_CATEGORY_STATIC(LogOpen3DTransportWebRTCModule, Log, All);
+
+/**
+ * Stub module, compiled when O3D_WITH_TRANSPORT_WEBRTC is 0: the transport was switched off with that
+ * environment variable, or the target platform has no prebuilt livekit_ffi
+ * (O3DBuildFlags in Open3DBroadcastBuildFlags.Build.cs). It registers nothing.
+ */
+class FOpen3DTransportWebRTCModule : public IModuleInterface
+{
+public:
+	virtual void StartupModule() override
+	{
+		UE_LOG(LogOpen3DTransportWebRTCModule, Display, TEXT("Open3D WebRTC transport is not available in this build (O3D_WITH_TRANSPORT_WEBRTC=0)."));
+	}
+
+	virtual void ShutdownModule() override {}
+};
+
+#endif // O3D_WITH_TRANSPORT_WEBRTC
 
 IMPLEMENT_MODULE(FOpen3DTransportWebRTCModule, Open3DTransportWebRTC)
 
