@@ -379,6 +379,50 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `linux.yml` and `doc.yml` use `actions/checkout@v4`; `doc.yml` installs
   `breathe` and deploys with `GITHUB_TOKEN`.
 
+### Editor module split (WP-F7, ADR 0010)
+
+- **New `Open3DBroadcastEditor` module** (Type `Editor`, `PostEngineInit`,
+  Win64; ships in the Fab package). It owns the `UO3DSenderComponent`
+  Details customization, the LiveLink "Add Source" panel of the receiver and
+  one generic transport settings panel (`SO3DTransportOptionsPanel`). The
+  runtime modules (Shared, Sender, Receiver and every transport) no longer
+  depend on `Slate`, `SlateCore`, `PropertyEditor`, `EditorStyle`,
+  `AppFramework`, `ApplicationCore` or `InputCore` (FAB-7, SND-34, TRB-46).
+- **Transports declare their options as data.** `FO3DSenderTransportCustomization`
+  and `FO3DReceiverTransportCustomization` lose the `WITH_EDITOR`
+  `BuildTransportWidget` member and gain `OptionSchema`
+  (`FO3DTransportOptionSchema`, `Open3DShared/Public/O3DTransportOptionSchema.h`),
+  read with `O3DSender::GetTransportOptionSchema` /
+  `O3DReceiver::GetTransportOptionSchema`. Source change for any code that
+  set `BuildTransportWidget`: declare the fields in `OptionSchema` instead.
+  The per-transport Slate panels of Loopback, Sockets, NNG, MoQ and WebRTC
+  are deleted.
+- `SO3DTransportConfigPanelBase` moves from Open3DReceiver
+  (`OPEN3DRECEIVER_API`) to Open3DBroadcastEditor
+  (`OPEN3DBROADCASTEDITOR_API`). `UO3DReceiverSourceFactory` stays in
+  Open3DReceiver; its creation panel comes from
+  `O3DReceiver::SetSourceFactoryPanelBuilder`, which the editor module sets.
+- **Panel behaviour (TRB-45, SND-35).** Opening a panel no longer writes
+  defaults into the component or source settings; defaults show as hints.
+  Values are written on commit only, not on every spin-box drag step. Each
+  commit is one undo step, and changing the sender's or receiver's transport
+  is one undo step together with the option clear. The panels hold their
+  object weakly. A user's port that equals the other Sockets protocol's
+  default is no longer reset. NNG shows Mode and Role as two fields; an
+  empty Role uses the default role for the mode.
+- Switching transports still clears the option map, because most keys
+  (`host`, `port`, `channel`) are not namespaced per transport yet. ADR 0007
+  item 8 (WP-A1) namespaces them and removes the clear.
+- CI: `Build/Scripts/check-runtime-editor-deps.py` fails when a runtime
+  module's `Build.cs` names an editor-only module or its sources include an
+  editor-only header; it runs in the new "Runtime modules free of editor
+  code" PR job. The nightly packages ProjectSandbox as a Win64 Shipping game
+  (`Build/Scripts/Build-ShippingGame.ps1`).
+- Tests: `Open3DBroadcast.Editor.OptionsPanel.*` (construction does not
+  modify the object, one commit is one undoable transaction, secrets never
+  enter the option map, a missing object is harmless, every registered
+  transport's schema is well formed and its panel opens clean).
+
 ### Platforms and build flags (WP-F2, ADR 0001)
 
 - **The plugin declares Win64 as its only platform.** Every module entry in

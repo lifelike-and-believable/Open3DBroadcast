@@ -117,6 +117,17 @@ Checks the second WP-F2 acceptance item: a game target that also targets Linux b
 
 Without `LINUX_MULTIARCH_ROOT` it prints a notice and exits `0`, unless `-Require` is given.
 
+#### `Build-ShippingGame.ps1`
+Checks the WP-F7 acceptance item "a packaged Shipping game builds" (ADR 0010). It builds `ProjectSandboxEditor` (Development, needed to cook), then runs `RunUAT BuildCookRun` for the ProjectSandbox game with the plugin enabled: Win64, Shipping, build, cook, stage, pak and archive. It fails if BuildCookRun fails (UBT refuses to build `UnrealEd` and other editor-only engine modules into a game target, so a runtime module that still depends on one fails here), if no executable was archived, or if UBT compiled `Open3DBroadcastEditor` or `Open3DBroadcastTests` for the Shipping game target. See [Shipping game build](#shipping-game-build).
+
+```powershell
+.\Build\Scripts\Build-ShippingGame.ps1 `
+  -UEPath "C:\Program Files\Epic Games\UE_5.7" `
+  -ArchiveDir "$PWD\Artifacts\ShippingGame"
+```
+
+Run `Sync-O3DSCore.ps1` first, as for any build of the plugin. `-ProjectFile` selects another `.uproject` that enables the plugin.
+
 ---
 
 ### Testing
@@ -258,13 +269,42 @@ Files that already carried `// Copyright (c) Open3DStream Contributors` keep tha
 python3 Build/Scripts/check-copyright-headers.py
 ```
 
+## Runtime modules without editor code
+
+Editor UI lives in Editor-type modules: `Open3DBroadcastEditor` (Details customization, LiveLink creation panel, transport settings panels; ships in the Fab package) and `Open3DBroadcastTests` (ADR 0010, WP-F7). The runtime modules (every `.uplugin` entry whose `Type` is `Runtime` or another runtime type) must not use editor or Slate code, so that a packaged game builds and the Server option of ADR 0001 stays open.
+
+- **Rule:** a runtime module's `Build.cs` names none of `UnrealEd`, `PropertyEditor`, `Slate`, `SlateCore`, `EditorStyle`, `ToolMenus`, `AppFramework` and the other editor modules listed in the script, anywhere in the file (a `Target.bBuildEditor` block included). Its sources include no editor-only header (`Editor.h`, `ScopedTransaction.h`, `PropertyEditorModule.h`, `IDetailCustomization.h`, `Widgets/...`, `Framework/Application/...`, and the others listed in the script), `WITH_EDITOR`-guarded or not. `InputCore` is allowed; it is a runtime module.
+- **Transport settings:** a transport describes its options as data (`FO3DTransportOptionSchema`, `Open3DShared/Public/O3DTransportOptionSchema.h`) in its sender and receiver customizations. `Open3DBroadcastEditor` builds the panel from it. A transport module never builds widgets.
+- **Check:** `Build/Scripts/check-runtime-editor-deps.py` (Python 3.8+, standard library) reads the `.uplugin`, then each runtime module's `Build.cs` string literals (comments ignored) and `#include` lines (ThirdParty skipped). It exits `0` with no violation, `1` with one or more (each printed as `path:line`), and `2` for bad input. `--self-test` runs it against a generated clean plugin and a generated bad one. A line that must stay can carry `o3d-allow-editor-dependency: <reason>`; nothing uses that today.
+
+```bash
+python3 Build/Scripts/check-runtime-editor-deps.py --self-test
+python3 Build/Scripts/check-runtime-editor-deps.py
+```
+
+## Shipping game build
+
+`Build-ShippingGame.ps1` (see [Scripts](#build-shippinggameps1)) packages ProjectSandbox as a Win64 Shipping game. It takes as long as a full cook, so it runs in the nightly workflow and by hand, not on pull requests: PR CI has one shared self-hosted UE runner. The manual command, on a machine with UE 5.7 and the o3ds core built:
+
+```powershell
+.\Build\Scripts\Sync-O3DSCore.ps1
+.\Build\Scripts\Build-ShippingGame.ps1 -UEPath "C:\Program Files\Epic Games\UE_5.7"
+```
+
+The same without the script:
+
+```powershell
+& "C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat" ProjectSandboxEditor Win64 Development "-Project=$PWD\ProjectSandbox\ProjectSandbox.uproject" -WaitMutex
+& "C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\RunUAT.bat" BuildCookRun "-project=$PWD\ProjectSandbox\ProjectSandbox.uproject" -noP4 -unattended -utf8output -platform=Win64 -clientconfig=Shipping -build -nocompileeditor -cook -stage -pak -archive "-archivedirectory=$PWD\Artifacts\ShippingGame"
+```
+
 ## CI/CD Integration
 
 | Workflow | Runs on | What it does |
 |---|---|---|
-| `open3dbroadcast-plugin-ci.yml` | PRs to develop/main, pushes to develop/main, manual | Path filter, Fab source zip, copyright header check, and on the UE runner: BuildPlugin (fails on plugin warnings), UE automation tests against that package, strict build, BuildPlugin on the Fab zip |
+| `open3dbroadcast-plugin-ci.yml` | PRs to develop/main, pushes to develop/main, manual | Path filter, Fab source zip, copyright header check, runtime-modules-without-editor-code check, and on the UE runner: BuildPlugin (fails on plugin warnings), UE automation tests against that package, strict build, BuildPlugin on the Fab zip |
 | `open3dbroadcast-fab-package.yml` | Called by CI and nightly, or manual | `fab-package.py`, then `check-no-video-codecs.sh` on every packaged binary (required), then uploads `Open3DBroadcast-Fab-Source-<sha>` |
-| `open3dbroadcast-plugin-nightly.yml` | 03:00 UTC daily, manual | Same checks as CI with a Shipping `-Configuration`, plus network tests when the `O3D_MOQ_RELAY_URL` secret is set, the transport flag-combination builds (`Build-FlagCombinations.ps1`; the manual run can skip them with `run_flag_builds`), and the Linux exclusion check (`Test-LinuxExclusion.ps1`, skipped while the runner has no Linux toolchain) |
+| `open3dbroadcast-plugin-nightly.yml` | 03:00 UTC daily, manual | Same checks as CI with a Shipping `-Configuration`, plus network tests when the `O3D_MOQ_RELAY_URL` secret is set, the transport flag-combination builds (`Build-FlagCombinations.ps1`; the manual run can skip them with `run_flag_builds`), the Linux exclusion check (`Test-LinuxExclusion.ps1`, skipped while the runner has no Linux toolchain), and the Win64 Shipping game package (`Build-ShippingGame.ps1`; the manual run can skip it with `run_shipping_game`) |
 | `open3dbroadcast-plugin-test.yml` | Manual only | Build any branch and optionally run the tests (with or without network tests) |
 | `open3dbroadcast-plugin-release.yml` | `open3dbroadcast-v*.*.*` tags, manual | Shipping build, GitHub release of the Win64 binaries (UE 5.7 only) |
 | `core-tests.yml` | Every PR and push | o3ds core under CTest with ASan/UBSan, fuzzing, warning ratchet (GitHub-hosted) |
@@ -274,7 +314,7 @@ All UE jobs call `Sync-O3DSCore.ps1` first.
 
 ### Which PR jobs run, and when (CI-9)
 
-- **Every PR commit, drafts included:** the path filter, the Fab source zip job, the copyright header check and `core-tests.yml`. They run on GitHub-hosted runners and take a few minutes.
+- **Every PR commit, drafts included:** the path filter, the Fab source zip job, the copyright header check, the runtime-modules-without-editor-code check and `core-tests.yml`. They run on GitHub-hosted runners and take a few minutes.
 - **Non-draft PRs, pushes to develop/main and manual runs:** the "UE build and tests" job on the single self-hosted `[self-hosted, ue5, windows]` runner. Drafts skip it so unfinished work does not hold the runner. To get the UE result for a draft, mark it ready for review, or run the workflow by hand on the branch (Actions > Open3DBroadcast Plugin CI > Run workflow).
 - **Path filter:** all plugin CI jobs are skipped when a PR touches nothing the plugin build depends on. The filter covers `Build/**`, the plugin, `ProjectSandbox/` project files, the workflow files, and everything `Sync-O3DSCore.ps1` compiles: `src/**`, `thirdparty/**`, `CMakeLists.txt`, `*.cmake`, `apps/**`, `plugins/mobu/**`, `.gitmodules`.
 
@@ -285,7 +325,7 @@ All UE jobs call `Sync-O3DSCore.ps1` first.
 3. The strict build (`-StrictIncludes`, no PCH, no unity) fails or warns.
 4. BuildPlugin on the Fab zip fails or warns, or an editor DLL is missing from its output.
 
-The Fab zip job is red when a package check or the codec gate fails. The "Copyright headers" job is red when `check-copyright-headers.py` fails; it is a separate job, so it does not stop the Fab zip from being built.
+The Fab zip job is red when a package check or the codec gate fails. The "Copyright headers" job is red when `check-copyright-headers.py` fails, and the "Runtime modules free of editor code" job when `check-runtime-editor-deps.py` or its self-test fails; they are separate jobs, so they do not stop the Fab zip from being built.
 
 See `.github/workflows/` for workflow definitions.
 
@@ -340,7 +380,7 @@ Record the result in the PR. The check has not been run yet.
 
 - **Windows**: PowerShell 5.1+ (or PowerShell Core 7+)
 - **Unreal Engine**: 5.7 (the plugin's `EngineVersion`)
-- **Python**: 3.8+ for `fab-package.py` and `check-copyright-headers.py`
+- **Python**: 3.8+ for `fab-package.py`, `check-copyright-headers.py` and `check-runtime-editor-deps.py`
 - **Visual Studio**: 2022 (for building)
 - **Git**: For repository operations
 
