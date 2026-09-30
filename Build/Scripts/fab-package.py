@@ -12,8 +12,10 @@ library that Sync-O3DSCore.ps1 builds) can reach it. Then:
 2. Files matching Build/Fab/exclude-files.txt are dropped.
 3. The zip is written with a single top-level folder named after the plugin
    and fixed timestamps, so the same input gives the same bytes.
-4. The zip is opened again and checked (see check_package). Any problem
-   fails the script with exit code 1.
+4. The zip is opened again and checked (see check_package). The tracked
+   tree is also checked before any exclusion (see check_tree), so a
+   committed .pdb fails even where a rule would leave it out of the zip.
+   Any problem fails the script with exit code 1.
 
 Outputs in --out-dir:
   <zip-name>              the package
@@ -47,6 +49,10 @@ ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
 
 # Checked on the finished zip regardless of exclude-files.txt.
 FORBIDDEN_FILE_GLOBS = ["**/*.pdb", "**/*.py", "**/*.pyc"]
+# Checked on every git-tracked file under the plugin, before any exclusion, so
+# neither exclude-files.txt nor an excluded module can hide one (FAB-4, WP-F3).
+# Debug symbols belong in a release asset, not the tree (Build/README.md).
+FORBIDDEN_TREE_GLOBS = ["**/*.pdb"]
 FORBIDDEN_TOP_DIRS = ["Binaries", "Intermediate", "Saved", "DerivedDataCache"]
 # Markdown allowed in the package: end-user docs at the plugin root and
 # anything under a ThirdParty/ folder (licences and notices).
@@ -226,8 +232,10 @@ def stage(plugin_dir, stage_root, excluded_modules, exclude_globs):
         raise InputError(f"no .uplugin in {plugin_dir}")
 
     files = git_tracked_files(plugin_dir)
+    tree_errors = check_tree(files)
     present_modules = {p.split("/")[1] for p in files if p.startswith("Source/") and p.count("/") >= 2}
-    report = {"removed_modules": [], "absent_modules": [], "excluded_files": []}
+    report = {"removed_modules": [], "absent_modules": [], "excluded_files": [],
+              "tree_errors": tree_errors}
     for m in excluded_modules:
         (report["removed_modules"] if m in present_modules else report["absent_modules"]).append(m)
 
@@ -271,6 +279,21 @@ def write_zip(stage_dir, plugin_name, files, zip_path):
             info.external_attr = 0o644 << 16
             with open(os.path.join(stage_dir, rel), "rb") as f:
                 z.writestr(info, f.read())
+
+
+def check_tree(files):
+    """Return problems in the tracked plugin tree itself, before any exclusion.
+
+    A file matching FORBIDDEN_TREE_GLOBS fails the job even when an
+    exclude-files.txt rule or an excluded module would keep it out of the zip:
+    it must not be committed at all.
+    """
+    forbidden = [glob_to_regex(g) for g in FORBIDDEN_TREE_GLOBS]
+    bad = [rel for rel in files if any(p.match(rel) for p in forbidden)]
+    if not bad:
+        return []
+    return ["debug symbols are tracked in the plugin tree; remove them and publish them as a "
+            f"release asset instead (Build/README.md, \"Debug symbols\"): {bad}"]
 
 
 def check_package(zip_path, plugin_name, excluded_modules):
@@ -379,7 +402,7 @@ def main(argv=None):
         print(f"  - {rel}")
     print(f"Zip:              {zip_path} ({os.path.getsize(zip_path)} bytes)")
 
-    errors = check_package(zip_path, plugin_name, excluded_modules)
+    errors = report["tree_errors"] + check_package(zip_path, plugin_name, excluded_modules)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as s:

@@ -4,7 +4,9 @@
 
 #include "CoreMinimal.h"
 
+THIRD_PARTY_INCLUDES_START
 #include "o3ds/sender_sync.h"
+THIRD_PARTY_INCLUDES_END
 
 #include <vector>
 

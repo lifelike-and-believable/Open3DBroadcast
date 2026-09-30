@@ -64,7 +64,6 @@ namespace
 		Api.lk_send_data_ex = &::lk_send_data_ex;
 		Api.lk_set_default_data_labels = &::lk_set_default_data_labels;
 		Api.lk_set_log_level = &::lk_set_log_level;
-		Api.bUsesLinkedLibrary = true;
 		return Api;
 	}
 }

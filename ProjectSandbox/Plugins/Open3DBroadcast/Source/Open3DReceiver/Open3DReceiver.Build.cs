@@ -15,7 +15,7 @@ public class Open3DReceiver : ModuleRules
 
         // Open3DStream headers and library
         var Open3DStreamIncludeDir = Path.Combine(PluginRoot, "ThirdParty", "open3dstream", "include");
-        PublicIncludePaths.Add(Open3DStreamIncludeDir);
+        PublicSystemIncludePaths.Add(Open3DStreamIncludeDir); // Third-party headers: system include (BUILD-3)
 
         // Flatbuffers headers
         var FlatbuffersIncludeDir = Path.Combine(PluginRoot, "ThirdParty", "flatbuffers", "include");

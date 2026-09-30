@@ -12,7 +12,9 @@
 #include "HAL/PlatformTime.h"
 #include "Logging/LogMacros.h"
 
+THIRD_PARTY_INCLUDES_START
 #include "o3ds/udp_fragment.h"
+THIRD_PARTY_INCLUDES_END
 
 #include <vector>
 

@@ -12,7 +12,9 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "MoQFfiApi.h"
+THIRD_PARTY_INCLUDES_START
 #include "moq_ffi.h"
+THIRD_PARTY_INCLUDES_END
 #include "O3DReceiverInterface.h"
 #include "O3DSenderInterface.h"
 #include "O3DTransportTypes.h"

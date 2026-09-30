@@ -9,7 +9,9 @@
 #include "O3DSenderRegistry.h"
 #include "O3DTestHarness.h"
 
+THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
+THIRD_PARTY_INCLUDES_END
 
 #include <vector>
 

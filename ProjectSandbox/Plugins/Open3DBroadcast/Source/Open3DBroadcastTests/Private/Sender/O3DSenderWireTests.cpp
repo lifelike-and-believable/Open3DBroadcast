@@ -19,7 +19,9 @@
 #include "O3DHelpers.h"
 #include "UObject/Package.h"
 
+THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
+THIRD_PARTY_INCLUDES_END
 
 #include <string>
 

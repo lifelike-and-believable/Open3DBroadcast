@@ -71,7 +71,7 @@ public class Open3DTransportMoQ : ModuleRules
             throw new BuildException($"Missing required MoQ FFI include directory at '{moqFfiIncludePath}'. " +
                                    $"See ThirdParty/moq-ffi/README.md for setup instructions.");
         }
-        PublicIncludePaths.Add(moqFfiIncludePath);
+        PublicSystemIncludePaths.Add(moqFfiIncludePath); // Third-party headers: system include (BUILD-3)
 
         // MoQ FFI DLL/shared library - use delay-load to allow custom path loading
         if (Target.Platform == UnrealTargetPlatform.Win64)
@@ -83,18 +83,13 @@ public class Open3DTransportMoQ : ModuleRules
                                        $"See ThirdParty/moq-ffi/README.md for setup instructions.");
             }
             
-            // Delay load to allow custom loading logic in MoQFfiSupport
+            // Delay-loaded: the module loads it from the plugin through FO3DFfiLibrary (Open3DShared) first
             PublicDelayLoadDLLs.Add("moq_ffi.dll");
             
             // Register the DLL as a runtime dependency for packaging
             RuntimeDependencies.Add(moqFfiDllPath);
-
-            // Also copy PDB if available for debugging
-            string moqFfiPdbPath = Path.Combine(moduleThirdPartyDir, "moq-ffi", "bin", platformSubdir, "Release", "moq_ffi.pdb");
-            if (File.Exists(moqFfiPdbPath))
-            {
-                RuntimeDependencies.Add(moqFfiPdbPath);
-            }
+            // No moq_ffi.pdb here: debug symbols are not staged into packaged games and are
+            // not kept in the plugin tree (FAB-4). See Build/README.md, "Debug symbols".
         }
         else if (Target.Platform == UnrealTargetPlatform.Linux)
         {
@@ -117,7 +112,7 @@ public class Open3DTransportMoQ : ModuleRules
         string o3dsIncludePath = Path.Combine(pluginThirdPartyDir, "open3dstream", "include");
         if (Directory.Exists(o3dsIncludePath))
         {
-            PublicIncludePaths.Add(o3dsIncludePath);
+            PublicSystemIncludePaths.Add(o3dsIncludePath); // Third-party headers: system include (BUILD-3)
         }
 
         // Public dependencies
@@ -125,8 +120,8 @@ public class Open3DTransportMoQ : ModuleRules
         {
             "Core",
             "CoreUObject",
-            "Engine",
-            "Projects" // For IPluginManager (DLL loading)
+            "Engine"
+            // No "Projects": moq_ffi is located and loaded by FO3DFfiLibrary in Open3DShared (TRF-28).
         });
 
         // Private dependencies

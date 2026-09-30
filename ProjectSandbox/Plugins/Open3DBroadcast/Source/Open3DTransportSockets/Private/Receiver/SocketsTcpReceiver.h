@@ -5,7 +5,9 @@
 #include "../Shared/SocketsTransportCommon.h"
 #include "O3DAudioFrameCodec.h"
 
+THIRD_PARTY_INCLUDES_START
 #include "o3ds/tcp_stream_parser.h"
+THIRD_PARTY_INCLUDES_END
 
 class FSocket;
 class ISocketSubsystem;
