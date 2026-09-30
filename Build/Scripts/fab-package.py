@@ -14,7 +14,8 @@ library that Sync-O3DSCore.ps1 builds) can reach it. Then:
    and fixed timestamps, so the same input gives the same bytes.
 4. The zip is opened again and checked (see check_package). The tracked
    tree is also checked before any exclusion (see check_tree), so a
-   committed .pdb fails even where a rule would leave it out of the zip.
+   committed .pdb, a Python script, or a developer note under Source/
+   fails even where a rule would leave it out of the zip.
    Any problem fails the script with exit code 1.
 
 Outputs in --out-dir:
@@ -53,6 +54,13 @@ FORBIDDEN_FILE_GLOBS = ["**/*.pdb", "**/*.py", "**/*.pyc"]
 # neither exclude-files.txt nor an excluded module can hide one (FAB-4, WP-F3).
 # Debug symbols belong in a release asset, not the tree (Build/README.md).
 FORBIDDEN_TREE_GLOBS = ["**/*.pdb"]
+# Also checked on the whole tracked tree (HYG-1, WP-F6): scripts and test
+# helpers such as a mock server live in docs/dev/, not in the plugin.
+FORBIDDEN_TREE_SCRIPT_GLOBS = ["**/*.py", "**/*.pyc"]
+# Markdown allowed under Source/ outside a ThirdParty/ folder: a module's
+# user-facing README.md or USER_GUIDE.md. Planning, review and analysis notes
+# go to docs/dev/<Module>/ (HYG-1, WP-F6).
+ALLOWED_SOURCE_MARKDOWN = {"README.md", "USER_GUIDE.md"}
 FORBIDDEN_TOP_DIRS = ["Binaries", "Intermediate", "Saved", "DerivedDataCache"]
 # Markdown allowed in the package: end-user docs at the plugin root and
 # anything under a ThirdParty/ folder (licences and notices).
@@ -284,16 +292,36 @@ def write_zip(stage_dir, plugin_name, files, zip_path):
 def check_tree(files):
     """Return problems in the tracked plugin tree itself, before any exclusion.
 
-    A file matching FORBIDDEN_TREE_GLOBS fails the job even when an
-    exclude-files.txt rule or an excluded module would keep it out of the zip:
-    it must not be committed at all.
+    A file reported here fails the job even when an exclude-files.txt rule or
+    an excluded module would keep it out of the zip: it must not be committed
+    under the plugin at all.
+    - FORBIDDEN_TREE_GLOBS: debug symbols (FAB-4).
+    - FORBIDDEN_TREE_SCRIPT_GLOBS: Python scripts (HYG-1).
+    - Markdown under Source/, outside a ThirdParty/ folder, whose name is not
+      in ALLOWED_SOURCE_MARKDOWN: developer notes (HYG-1).
     """
+    errors = []
     forbidden = [glob_to_regex(g) for g in FORBIDDEN_TREE_GLOBS]
     bad = [rel for rel in files if any(p.match(rel) for p in forbidden)]
-    if not bad:
-        return []
-    return ["debug symbols are tracked in the plugin tree; remove them and publish them as a "
-            f"release asset instead (Build/README.md, \"Debug symbols\"): {bad}"]
+    if bad:
+        errors.append("debug symbols are tracked in the plugin tree; remove them and publish them as a "
+                      f"release asset instead (Build/README.md, \"Debug symbols\"): {bad}")
+
+    scripts = [glob_to_regex(g) for g in FORBIDDEN_TREE_SCRIPT_GLOBS]
+    bad = [rel for rel in files if any(p.match(rel) for p in scripts)]
+    if bad:
+        errors.append("scripts are tracked in the plugin tree; move them to docs/dev/<Module>/ "
+                      f"(HYG-1): {bad}")
+
+    bad = [rel for rel in files
+           if rel.startswith("Source/") and rel.lower().endswith(".md")
+           and "/ThirdParty/" not in rel
+           and rel.rsplit("/", 1)[-1] not in ALLOWED_SOURCE_MARKDOWN]
+    if bad:
+        errors.append("developer documents are tracked under Source/; move them to docs/dev/<Module>/ "
+                      f"(only {', '.join(sorted(ALLOWED_SOURCE_MARKDOWN))} may live there, "
+                      f"plus anything under ThirdParty/; HYG-1): {bad}")
+    return errors
 
 
 def check_platforms(desc, uplugin_rel):

@@ -274,22 +274,10 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
 
 ## Packaging for Release
 
-The project includes a `package.py` script that creates release packages with proper directory structure:
-
-```bash
-python package.py
-```
-
-This creates a zip file with the following structure:
-
-```text
-UE_5.4/Plugins/Open3DStream/
-UE_5.5/Plugins/Open3DStream/
-lib/
-include/
-```
-
-Users can extract the entire version folder (e.g., `UE_5.5`) to their project root, and it will automatically merge with their project's `Plugins` directory.
+The Unreal plugin's Fab source package is built by `Build/Scripts/fab-package.py`
+(run in CI by `open3dbroadcast-fab-package.yml`); see [Build/README.md](Build/README.md).
+The core library's release archives are built by the `O3DS windows` and `O3DS linux`
+workflows (`.github/workflows/windows.yml`, `linux.yml`).
 
 ## Building Plugins
 

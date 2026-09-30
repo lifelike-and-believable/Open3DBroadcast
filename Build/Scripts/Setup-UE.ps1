@@ -1,4 +1,4 @@
-param([string]$UEPath = "C:\Program Files\Epic Games\UE_5.4")
+param([string]$UEPath = "C:\Program Files\Epic Games\UE_5.7")
 
 # Trim accidental quotes that may be passed from CI or shell wrappers
 $UEPath = $UEPath.Trim('"', "'")

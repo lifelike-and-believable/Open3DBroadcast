@@ -7,16 +7,16 @@
 # script or developer document is still in the package, so a new file of
 # that kind needs a rule here or a move out of the plugin.
 
-# Debug symbols have no rule here on purpose (FAB-4, WP-F3): a committed .pdb
-# must fail the job, not be silently left out. fab-package.py checks the
-# tracked tree for them before any exclusion.
+# Some files have no rule here on purpose: fab-package.py checks the tracked
+# tree before any exclusion and fails the job, so they must not be committed
+# under the plugin at all.
+# - Debug symbols (.pdb; FAB-4, WP-F3): published as release assets.
+# - Scripts (.py, .pyc) and developer notes under Source/ (anything but a
+#   README.md or USER_GUIDE.md outside ThirdParty/; HYG-1, WP-F6): these live
+#   in docs/dev/<Module>/ in the repository.
 
-# Scripts and test helpers (for example a mock token server).
-**/*.py
-**/*.pyc
-Source/*/Tests/**
-
-# Module-level developer notes: planning, review and analysis documents.
-# End-user documentation lives at the plugin root; third-party notices under
-# ThirdParty/ are kept.
+# Module READMEs and USER_GUIDEs under Source/ stay in the repository for
+# people reading the code. The package's end-user documentation is the
+# plugin-root README.md, USER_GUIDE.md and Transport_Module_Comparison.md;
+# third-party notices under ThirdParty/ are kept.
 Source/*/*.md

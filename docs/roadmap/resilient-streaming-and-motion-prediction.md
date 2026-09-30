@@ -57,7 +57,7 @@ This maps directly onto the protocol that already exists: a full `Subject` descr
 - UE send path: `Open3DSender/` (`O3DSenderComponent`, `O3DSenderSerializer`).
 - UE receive path: `Open3DReceiver/O3DReceiverSource.cpp` (`HandleSerializedFrame`, `BuildSubjectPose`) — a LiveLink source that pushes static/frame data into `ILiveLinkClient`.
 - Transports: `Open3DTransport{Sockets,NNG,WebRTC,MoQ,Loopback}`, behind `IOpen3DSender` / `IOpen3DReceiver` and the `ISerializedFrameConsumer` registry (`Open3DShared`).
-- Telemetry: `O3DPerformanceMetrics` (`Open3DShared`) + its `o3d.ProfileGuide` HUD.
+- Telemetry: `O3DPerformanceMetrics` (`Open3DShared`) + its `o3d.DumpMetrics` console command.
 - Relay: `apps/Repeater/` (engine-agnostic, C++).
 
 ---
@@ -175,7 +175,7 @@ The real sub-problem behind §2.5. Pure math → **put it in core and unit-test 
 - **Verify against the target UE version:** exact API to set frame `WorldTime`/`SceneTime` on `FLiveLinkFrameDataStruct` and the `BufferSettings` fields — confirm in the LiveLink source, don't assume.
 
 #### A2.d — Metrics / HUD (`O3DPerformanceMetrics`)
-- Per source, surface: latency estimate (caveated per A2.b), jitter (spread of `offset` around the rolling min), loss % and reorder rate (from `gate.Stats()`), duplicate/stale drops, and current gate buffer occupancy. Wire into the existing `o3d.ProfileGuide` HUD.
+- Per source, surface: latency estimate (caveated per A2.b), jitter (spread of `offset` around the rolling min), loss % and reorder rate (from `gate.Stats()`), duplicate/stale drops, and current gate buffer occupancy. Report them through the existing `o3d.DumpMetrics` console command.
 - Use the atomic-safe update pattern from the Shared metrics fix (#215) — don't reintroduce the `Load()`→compute→`Store()` RMW races for the new counters.
 
 #### A2 — Acceptance

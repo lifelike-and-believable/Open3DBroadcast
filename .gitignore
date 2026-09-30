@@ -17,6 +17,7 @@ Binaries
 Intermediate
 lib
 /vsbuild
+/usr/
 
 # Secrets
 *.pem

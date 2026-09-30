@@ -275,7 +275,7 @@ Config.TokenRefreshLeadTimeSec = 300;     // 5 minutes
 
 1. Start mock server:
    ```bash
-   cd ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportWebRTC/Tests
+   cd docs/dev/Open3DTransportWebRTC/Tests
    python mock-token-server.py
    ```
 

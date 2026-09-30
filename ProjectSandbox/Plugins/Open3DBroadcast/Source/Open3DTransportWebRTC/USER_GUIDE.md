@@ -112,7 +112,7 @@ The access token (`webrtc.token`) and the token endpoint credential (`webrtc.tok
    - Your backend service that generates LiveKit JWTs
    - Endpoint should accept POST requests to `/token`
    - Example: `https://your-server.com/token`
-   - See `Tests/mock-token-server.py` for reference implementation
+   - See `docs/dev/Open3DTransportWebRTC/Tests/mock-token-server.py` in the Open3DBroadcast repository for a reference implementation
 
 2. **Configure in Unreal Editor**
    - Select your O3DSenderComponent or open LiveLink source settings
@@ -133,7 +133,7 @@ The access token (`webrtc.token`) and the token endpoint credential (`webrtc.tok
 
 **Token endpoint requirements:**
 
-The endpoint described here is a reference contract. `Tests/mock-token-server.py` implements it for local testing only. A real endpoint holds your LiveKit API secret, so anyone who can call it can join your rooms. It must:
+The endpoint described here is a reference contract. `docs/dev/Open3DTransportWebRTC/Tests/mock-token-server.py` in the Open3DBroadcast repository implements it for local testing only. A real endpoint holds your LiveKit API secret, so anyone who can call it can join your rooms. It must:
 - **Authenticate every caller.** The plugin sends `Authorization: Bearer <value>` from the `webrtc.tokenEndpointAuth` secret. An endpoint that answers without checking the caller hands out LiveKit tokens to anyone who can reach it.
 - **Decide the grants itself** from the authenticated caller. The client sends room, identity and role as a request only; it does not send grants, and the endpoint must not accept grants from a client (a client that picks its own grants can publish).
 - **Use HTTPS.** The plugin refuses a plain `http://` endpoint unless the host is `localhost`, `127.0.0.1` or `::1`.

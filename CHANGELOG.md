@@ -347,6 +347,38 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
 - New tests `Open3DBroadcast.Shared.FfiLibrary.*` cover path lookup, load
   failures and the shutdown sequence with a live (fake) transport instance.
 
+### Developer material out of the plugin (WP-F6)
+
+- Planning, review and analysis notes move from the plugin's `Source/` to
+  `docs/dev/<Module>/` (HYG-1): five MoQ documents and three WebRTC
+  documents. The WebRTC mock token server and its README move to
+  `docs/dev/Open3DTransportWebRTC/Tests/`; run it from there
+  (`docs/testing/webrtc-manual-test.md` is updated). The module READMEs and
+  the WebRTC USER_GUIDE stay in `Source/`.
+- The root-level `MOQ_TRANSPORT_IMPLEMENTATION_PLAN.md`,
+  `MOQ_PLAN_SUMMARY.txt` and `PRODUCTION_READINESS_JWT_TOKEN_AUTO_FETCH.md`
+  move to `docs/dev/` (HYG-4).
+- `fab-package.py` fails when git tracks a `.py`/`.pyc` anywhere under the
+  plugin, or a Markdown file under `Source/` other than a `README.md` or
+  `USER_GUIDE.md` outside `ThirdParty/`, including in an excluded module.
+  The `.py`, `.pyc` and `Source/*/Tests/**` exclude rules are gone.
+- The `o3d.ProfileGuide` console command is removed. It printed internal
+  investigation notes at Warning level (SHR-27). `o3d.DumpMetrics` and
+  `o3d.ResetMetrics` are unchanged.
+- The NNG README no longer contains a public IP address; the repeater
+  example uses `<repeater-host>` (TRB-44, IP part).
+- ProjectSandbox opens `ReceiverTest` in the editor instead of the missing
+  `O3DBroadcastMap`, its `.uproject` is strict JSON, its `.gitignore` no
+  longer ignores the tracked `Content/`, and `.ignore` drops the old
+  `Open3DStream` paths (HYG-3).
+- Deleted, as nothing uses them (CI-7): `package.py`, `o3ds.nsi`,
+  `usr/UE_5.4` and `usr/UE_5.5` plugin stubs, `scripts/test_package_layout.py`,
+  `build.bat`, `build_env.bat`, `build_doc.bat`, `thirdparty/build.bat`,
+  `update_protocol.bat`, and the `create-webrtc-audio-issues.yml` workflow
+  with its script. `Setup-UE.ps1` defaults to UE 5.7; `windows.yml`,
+  `linux.yml` and `doc.yml` use `actions/checkout@v4`; `doc.yml` installs
+  `breathe` and deploys with `GITHUB_TOKEN`.
+
 ### Platforms and build flags (WP-F2, ADR 0001)
 
 - **The plugin declares Win64 as its only platform.** Every module entry in
