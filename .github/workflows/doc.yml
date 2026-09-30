@@ -1,34 +1,46 @@
 name: Documentation
 
+# Builds the core library API reference (Doxygen XML -> Sphinx via breathe
+# and exhale, see sphinx/conf.py) and publishes it to the gh-pages branch.
+# Manual only.
+
 on:
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
-      uses: actions/checkout@v2
-      
+      uses: actions/checkout@v4
+
     - name: Install Apps
-      run: sudo apt-get -y install doxygen graphviz python3-pip
-      
+      run: sudo apt-get update && sudo apt-get -y install doxygen graphviz
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+
     - name: pip
-      run: sudo pip3 install exhale sphinx-rtd-theme sphinx
-      
+      run: python -m pip install breathe exhale sphinx-rtd-theme sphinx
+
     - name: Doxygen
-      run: doxygen 
-      
+      run: doxygen
+
     - name: Sphinx
       run: sphinx-build -b html sphinx doc
-      
+
     - name: Create .nojekyll
       run: touch doc/.nojekyll
       shell: bash
-        
+
     - name: Deploy to GitHub Pages
-      uses: JamesIves/github-pages-deploy-action@3.7.1
+      uses: JamesIves/github-pages-deploy-action@v4
       with:
-        github_token: ${{ inputs.github_token }}
+        token: ${{ secrets.GITHUB_TOKEN }}
         branch: gh-pages
         folder: doc
