@@ -9,21 +9,24 @@
 namespace
 {
 #if O3D_WITH_OPUS
-	int32 CalculateMaxPacketBytes(const FO3DAudioOpusEncoder::FSettings& Settings)
-	{
-		const int32 FrameSizeSamples = (Settings.SampleRate / 1000) * Settings.FrameSizeMs;
-		// 1275 bytes per RFC6716 section 5.1, plus small overhead margin.
-		const int32 Base = 1275;
-		const int32 Safety = 8;
-		return FMath::Max(Base + Safety, (FrameSizeSamples * Settings.NumChannels) / 4);
-	}
-
 	int32 CalculateMaxFrameSamples(const FO3DAudioOpusDecoder::FSettings& Settings)
 	{
+		// Opus packets carry at most 120 ms (RFC 6716 section 3.2.5).
 		const int32 ClampedFrameMs = FMath::Clamp(Settings.FrameSizeMs, 10, 120);
 		return (Settings.SampleRate / 1000) * ClampedFrameMs;
 	}
 #endif
+}
+
+bool FO3DAudioOpusEncoder::IsSupportedSampleRate(int32 SampleRate)
+{
+	return SampleRate == 8000 || SampleRate == 12000 || SampleRate == 16000 || SampleRate == 24000 || SampleRate == 48000;
+}
+
+bool FO3DAudioOpusEncoder::IsSupportedFrameSizeMs(int32 FrameSizeMs)
+{
+	// 2.5 ms is also legal Opus but cannot be expressed in whole milliseconds.
+	return FrameSizeMs == 5 || FrameSizeMs == 10 || FrameSizeMs == 20 || FrameSizeMs == 40 || FrameSizeMs == 60;
 }
 
 FO3DAudioOpusEncoder::FO3DAudioOpusEncoder() = default;
@@ -41,9 +44,19 @@ bool FO3DAudioOpusEncoder::Initialize(const FSettings& InSettings, FString& OutE
 	OutError = TEXT("Opus support disabled at build time.");
 	return false;
 #else
-	if (Settings.SampleRate <= 0 || Settings.NumChannels <= 0)
+	if (!IsSupportedSampleRate(Settings.SampleRate))
 	{
-		OutError = TEXT("Invalid Opus encoder settings.");
+		OutError = FString::Printf(TEXT("Opus cannot encode at %d Hz (use 8000, 12000, 16000, 24000 or 48000)."), Settings.SampleRate);
+		return false;
+	}
+	if (Settings.NumChannels < 1 || Settings.NumChannels > 2)
+	{
+		OutError = FString::Printf(TEXT("Opus encodes 1 or 2 channels, not %d."), Settings.NumChannels);
+		return false;
+	}
+	if (!IsSupportedFrameSizeMs(Settings.FrameSizeMs))
+	{
+		OutError = FString::Printf(TEXT("%d ms is not an Opus frame duration (use 5, 10, 20, 40 or 60)."), Settings.FrameSizeMs);
 		return false;
 	}
 
@@ -56,12 +69,40 @@ bool FO3DAudioOpusEncoder::Initialize(const FSettings& InSettings, FString& OutE
 		return false;
 	}
 
-	const opus_int32 BitrateBps = Settings.BitrateKbps > 0 ? static_cast<opus_int32>(Settings.BitrateKbps * 1000) : OPUS_AUTO;
-	opus_encoder_ctl(Encoder, OPUS_SET_BITRATE(BitrateBps));
-	opus_encoder_ctl(Encoder, OPUS_SET_VBR(Settings.bUseVariableBitrate ? 1 : 0));
-	opus_encoder_ctl(Encoder, OPUS_SET_COMPLEXITY(FMath::Clamp(Settings.Complexity, 0, 10)));
+	// SHR-31: a rejected ctl is an initialisation failure, not a silent default.
+	const opus_int32 BitrateBps = Settings.BitrateKbps > 0 ? static_cast<opus_int32>(Settings.BitrateKbps) * 1000 : OPUS_AUTO;
+	int CtlResult = opus_encoder_ctl(Encoder, OPUS_SET_BITRATE(BitrateBps));
+	if (CtlResult != OPUS_OK)
+	{
+		OutError = FString::Printf(TEXT("OPUS_SET_BITRATE(%d) failed (%d)"), static_cast<int32>(BitrateBps), CtlResult);
+		Reset();
+		return false;
+	}
+	CtlResult = opus_encoder_ctl(Encoder, OPUS_SET_VBR(Settings.bUseVariableBitrate ? 1 : 0));
+	if (CtlResult != OPUS_OK)
+	{
+		OutError = FString::Printf(TEXT("OPUS_SET_VBR failed (%d)"), CtlResult);
+		Reset();
+		return false;
+	}
+	CtlResult = opus_encoder_ctl(Encoder, OPUS_SET_COMPLEXITY(FMath::Clamp(Settings.Complexity, 0, 10)));
+	if (CtlResult != OPUS_OK)
+	{
+		OutError = FString::Printf(TEXT("OPUS_SET_COMPLEXITY failed (%d)"), CtlResult);
+		Reset();
+		return false;
+	}
+	opus_int32 Lookahead = 0;
+	CtlResult = opus_encoder_ctl(Encoder, OPUS_GET_LOOKAHEAD(&Lookahead));
+	if (CtlResult != OPUS_OK)
+	{
+		OutError = FString::Printf(TEXT("OPUS_GET_LOOKAHEAD failed (%d)"), CtlResult);
+		Reset();
+		return false;
+	}
 
-	MaxPacketBytes = CalculateMaxPacketBytes(Settings);
+	LookaheadSamples = static_cast<int32>(Lookahead);
+	FrameSizeSamples = Settings.SampleRate / 1000 * Settings.FrameSizeMs;
 	return true;
 #endif
 }
@@ -77,7 +118,8 @@ void FO3DAudioOpusEncoder::Reset()
 #else
 	Encoder = nullptr;
 #endif
-	MaxPacketBytes = 0;
+	FrameSizeSamples = 0;
+	LookaheadSamples = 0;
 }
 
 bool FO3DAudioOpusEncoder::Encode(const float* InterleavedPCM, int32 NumFrames, TArray<uint8>& OutPayload, int32& OutFramesEncoded)
@@ -87,12 +129,12 @@ bool FO3DAudioOpusEncoder::Encode(const float* InterleavedPCM, int32 NumFrames, 
 #if !O3D_WITH_OPUS
 	return false;
 #else
-	if (!Encoder || !InterleavedPCM || NumFrames <= 0)
+	if (!Encoder || !InterleavedPCM || NumFrames <= 0 || NumFrames != FrameSizeSamples)
 	{
 		return false;
 	}
 
-	OutPayload.SetNumUninitialized(MaxPacketBytes);
+	OutPayload.SetNumUninitialized(MaxPacketBytes, EAllowShrinking::No);
 
 	const int EncodedBytes = opus_encode_float(Encoder,
 		InterleavedPCM,
@@ -102,12 +144,12 @@ bool FO3DAudioOpusEncoder::Encode(const float* InterleavedPCM, int32 NumFrames, 
 
 	if (EncodedBytes < 0)
 	{
-		OutPayload.Reset();
+		OutPayload.SetNum(0, EAllowShrinking::No);
 		return false;
 	}
 
 	OutFramesEncoded = NumFrames;
-	OutPayload.SetNum(EncodedBytes, EAllowShrinking::Yes);
+	OutPayload.SetNum(EncodedBytes, EAllowShrinking::No);
 	return true;
 #endif
 }
@@ -127,9 +169,9 @@ bool FO3DAudioOpusDecoder::Initialize(const FSettings& InSettings, FString& OutE
 	OutError = TEXT("Opus support disabled at build time.");
 	return false;
 #else
-	if (Settings.SampleRate <= 0 || Settings.NumChannels <= 0)
+	if (!FO3DAudioOpusEncoder::IsSupportedSampleRate(Settings.SampleRate) || Settings.NumChannels < 1 || Settings.NumChannels > 2)
 	{
-		OutError = TEXT("Invalid Opus decoder settings.");
+		OutError = FString::Printf(TEXT("Invalid Opus decoder settings (%d Hz, %d channels)."), Settings.SampleRate, Settings.NumChannels);
 		return false;
 	}
 
@@ -180,7 +222,7 @@ bool FO3DAudioOpusDecoder::Decode(const uint8* EncodedData, int32 NumBytes, TArr
 		return false;
 	}
 
-	OutPcm16.SetNumUninitialized(FrameCapacity * Channels);
+	OutPcm16.SetNumUninitialized(FrameCapacity * Channels, EAllowShrinking::No);
 
 	const int DecodedFrames = opus_decode(Decoder,
 		reinterpret_cast<const unsigned char*>(EncodedData),
@@ -191,12 +233,47 @@ bool FO3DAudioOpusDecoder::Decode(const uint8* EncodedData, int32 NumBytes, TArr
 
 	if (DecodedFrames < 0)
 	{
-		OutPcm16.Reset();
+		OutPcm16.SetNum(0, EAllowShrinking::No);
 		return false;
 	}
 
 	OutFramesDecoded = DecodedFrames;
-	OutPcm16.SetNum(DecodedFrames * Channels, EAllowShrinking::Yes);
+	OutPcm16.SetNum(DecodedFrames * Channels, EAllowShrinking::No);
+	return true;
+#endif
+}
+
+bool FO3DAudioOpusDecoder::DecodeLost(int32 NumFrames, TArray<int16>& OutPcm16, int32& OutFramesDecoded)
+{
+	OutFramesDecoded = 0;
+
+#if !O3D_WITH_OPUS
+	return false;
+#else
+	if (!Decoder || NumFrames <= 0 || NumFrames > MaxFrameSizeSamples)
+	{
+		return false;
+	}
+
+	const int32 Channels = Settings.NumChannels;
+	OutPcm16.SetNumUninitialized(NumFrames * Channels, EAllowShrinking::No);
+
+	// A null packet asks libOpus for concealment of NumFrames frames.
+	const int DecodedFrames = opus_decode(Decoder,
+		nullptr,
+		0,
+		reinterpret_cast<opus_int16*>(OutPcm16.GetData()),
+		NumFrames,
+		0);
+
+	if (DecodedFrames < 0)
+	{
+		OutPcm16.SetNum(0, EAllowShrinking::No);
+		return false;
+	}
+
+	OutFramesDecoded = DecodedFrames;
+	OutPcm16.SetNum(DecodedFrames * Channels, EAllowShrinking::No);
 	return true;
 #endif
 }
