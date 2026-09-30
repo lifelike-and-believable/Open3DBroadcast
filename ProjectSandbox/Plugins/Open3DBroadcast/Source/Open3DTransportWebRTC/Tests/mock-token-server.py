@@ -15,6 +15,9 @@ Environment Variables:
     API_KEY: Expected API key for authentication (optional)
     API_SECRET: Secret for signing JWTs (default: "test-secret")
     TOKEN_TTL: Token lifetime in seconds (default: 3600)
+    LIVEKIT_API_KEY: JWT issuer (iss). A real LiveKit server, including
+        `livekit-server --dev` (key "devkey", secret "secret"), only accepts
+        tokens whose issuer is one of its API keys (default: "mock-token-server")
 """
 
 import argparse
@@ -30,6 +33,7 @@ app = Flask(__name__)
 API_KEY = os.environ.get('API_KEY', '')
 API_SECRET = os.environ.get('API_SECRET', 'test-secret')
 TOKEN_TTL = int(os.environ.get('TOKEN_TTL', '3600'))  # 1 hour default
+TOKEN_ISSUER = os.environ.get('LIVEKIT_API_KEY', 'mock-token-server')
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -74,7 +78,7 @@ def generate_token():
     # Build JWT payload (LiveKit-compatible format)
     payload = {
         'exp': expiry_timestamp,
-        'iss': 'mock-token-server',
+        'iss': TOKEN_ISSUER,
         'sub': identity,
         'nbf': int(now.timestamp()),
         'video': {
