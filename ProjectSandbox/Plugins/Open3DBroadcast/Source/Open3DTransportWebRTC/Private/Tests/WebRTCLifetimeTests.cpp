@@ -2,11 +2,11 @@
 //
 // WP-S5 tests for the WebRTC sender (TRF-1, TRF-40).
 //
-// There is no fake LiveKit seam yet (FLkFfiApi arrives with WP-F11/WP-T2e, ADR 0006 F2), and
-// Start() would try to reach a LiveKit server, so the stress test cycles Initialize (which
-// creates a real LiveKit client handle), CreateAudioSink and Stop without connecting. Sinks
-// reject PCM while disconnected, but every submit still enters the gate and races Stop(),
-// which destroys the client. Publishing into live tracks during Stop() needs the fake seam.
+// This stress test uses the real LiveKit library: it cycles Initialize (which creates a real
+// LiveKit client handle), CreateAudioSink and Stop without connecting. Sinks reject PCM while
+// disconnected, but every submit still enters the gate and races Stop(), which destroys the
+// client. WP-S7 added the FLkFfiApi seam (ADR 0006 F2, see WebRTCFunctionalTests.cpp); a
+// variant that publishes into live fake tracks during Stop() is left to WP-T2.
 
 #if WITH_DEV_AUTOMATION_TESTS
 
