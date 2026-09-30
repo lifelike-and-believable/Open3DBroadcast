@@ -2,8 +2,9 @@ name: Open3DBroadcast Plugin CI
 
 # Which jobs run when (CI-9; details in Build/README.md, "CI"):
 #   - Every PR commit, drafts included: "Detect plugin-relevant changes",
-#     "Fab source zip" and "Copyright headers" (GitHub-hosted, a minute or
-#     two). core-tests.yml also runs on every PR.
+#     "Fab source zip", "Copyright headers" and "Runtime modules free of
+#     editor code" (GitHub-hosted, a minute or two). core-tests.yml also
+#     runs on every PR.
 #   - Non-draft PRs, pushes to develop/main and manual runs: "UE build and
 #     tests" on the single self-hosted UE runner. Drafts skip it so work in
 #     progress does not queue the runner; mark the PR ready for review, or
@@ -90,6 +91,22 @@ jobs:
         uses: actions/checkout@v4
       - name: Check copyright headers
         run: python3 Build/Scripts/check-copyright-headers.py
+
+  # WP-F7 (ADR 0010; FAB-7, SND-34, TRB-46): runtime modules name no editor-only or Slate module
+  # in their Build.cs and include no editor-only header. Editor UI lives in Open3DBroadcastEditor.
+  runtime-editor-deps:
+    name: Runtime modules free of editor code
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Self-test the check
+        run: python3 Build/Scripts/check-runtime-editor-deps.py --self-test
+      - name: Check runtime modules
+        run: python3 Build/Scripts/check-runtime-editor-deps.py
 
   build-and-test:
     name: UE build and tests
