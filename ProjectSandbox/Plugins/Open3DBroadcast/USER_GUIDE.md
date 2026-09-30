@@ -1076,7 +1076,7 @@ UE_LOG(LogTemp, Log, TEXT("Sent %lld frames, %lld bytes, avg latency %.2f ms"),
 
 3. **Check backend availability:**
    - Plugin built with LiveKit support
-   - Check build configuration: `O3D_WEBRTC_BACKEND_LIVEKIT=true`
+   - Check that `O3D_WITH_TRANSPORT_WEBRTC` was not set to `0` when the plugin was built
 
 4. **TURN server:**
    - May need TURN server for NAT traversal
