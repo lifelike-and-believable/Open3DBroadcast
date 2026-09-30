@@ -16,6 +16,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "Open3DBroadcastWebRTC",
+			"Enabled": true
+		},
+		{
 			"Name": "LiveLink",
 			"Enabled": true
 		}
