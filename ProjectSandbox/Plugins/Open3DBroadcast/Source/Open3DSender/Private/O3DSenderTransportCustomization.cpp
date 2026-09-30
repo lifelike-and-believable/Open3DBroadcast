@@ -40,3 +40,20 @@ void O3DSender::GetRegisteredTransportNames(TArray<FName>& OutNames)
     LocalNames.Sort(FNameLexicalLess());
     OutNames = MoveTemp(LocalNames);
 }
+
+bool O3DSender::GetTransportSecretDeclaration(FName TransportName, TArray<FString>& OutSecretKeys, TMap<FString, FString>& OutSecretEnvVars)
+{
+    OutSecretKeys.Reset();
+    OutSecretEnvVars.Reset();
+
+    FScopeLock Lock(&GSenderCustomizationMutex);
+    const FO3DSenderTransportCustomization* Customization = GSenderCustomizations.Find(TransportName);
+    if (!Customization)
+    {
+        return false;
+    }
+
+    OutSecretKeys = Customization->SecretOptionKeys;
+    OutSecretEnvVars = Customization->SecretEnvVars;
+    return true;
+}

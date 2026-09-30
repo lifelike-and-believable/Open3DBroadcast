@@ -4,6 +4,7 @@
 
 #include "O3DReceiverSource.h"
 #include "O3DReceiverSourceSettings.h"
+#include "O3DReceiverTransportCustomization.h"
 #include "O3DTransportConfigPanelBase.h"
 
 #include "UObject/UnrealType.h"
@@ -186,10 +187,12 @@ private:
             return FReply::Handled();
         }
 
-        const FO3DReceiverSourceConfig& Settings = SourceSettingsObject->Settings;
+        // Declared secret keys never reach the connection string or GameUserSettings.ini
+        // (ADR 0004 item 4); the source resolves them from FO3DSecretStore when it starts.
+        FO3DReceiverSourceConfig Settings = SourceSettingsObject->Settings;
+        O3DReceiver::MigrateLegacySecretOptions(Settings, TEXT("the receiver source settings"));
 
-        FString ConnectionString;
-        FO3DReceiverSourceConfig::StaticStruct()->ExportText(ConnectionString, &Settings, nullptr, nullptr, PPF_None, nullptr);
+        FString ConnectionString = O3DReceiver::ExportConnectionString(Settings);
 
         UO3DReceiverSettingsObject* MutableDefaults = GetMutableDefault<UO3DReceiverSettingsObject>();
         MutableDefaults->Settings = Settings;
@@ -547,11 +550,16 @@ TSharedPtr<SWidget> UO3DReceiverSourceFactory::BuildCreationPanel(FOnLiveLinkSou
 
 TSharedPtr<ILiveLinkSource> UO3DReceiverSourceFactory::CreateSource(const FString& ConnectionString) const
 {
-    FO3DReceiverSourceConfig Settings = GetDefault<UO3DReceiverSettingsObject>()->Settings;
+    // Migration (ADR 0004 item 4): an older GameUserSettings.ini or LiveLink connection string
+    // may still carry a secret option. Move it to the session store and drop it here.
+    UO3DReceiverSettingsObject* MutableDefaults = GetMutableDefault<UO3DReceiverSettingsObject>();
+    O3DReceiver::MigrateLegacySecretOptions(MutableDefaults->Settings, TEXT("GameUserSettings.ini ([/Script/Open3DReceiver.O3DReceiverSettingsObject])"));
+    FO3DReceiverSourceConfig Settings = MutableDefaults->Settings;
 
     if (!ConnectionString.IsEmpty())
     {
         FO3DReceiverSourceConfig::StaticStruct()->ImportText(*ConnectionString, &Settings, nullptr, PPF_None, GLog, ReceiverConnectionImportName);
+        O3DReceiver::MigrateLegacySecretOptions(Settings, TEXT("a LiveLink connection string (for example a saved LiveLink preset)"));
     }
 
     TSharedPtr<FO3DReceiverSource> NewSource = MakeShared<FO3DReceiverSource>(Settings);

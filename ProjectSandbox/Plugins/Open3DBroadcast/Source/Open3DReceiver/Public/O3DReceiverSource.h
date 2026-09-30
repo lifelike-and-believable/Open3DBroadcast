@@ -57,6 +57,7 @@ public:
 private:
     friend struct FO3DReceiverSourceTestAccessor;
     friend struct FO3DReceiverCorrectnessTestAccessor;
+    friend struct FO3DReceiverSecretsTestAccess;
 
     class FSerializedConsumer;
     class FAudioSink;
