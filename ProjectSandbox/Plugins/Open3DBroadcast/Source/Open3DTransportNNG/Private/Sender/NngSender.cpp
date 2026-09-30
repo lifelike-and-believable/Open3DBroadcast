@@ -15,7 +15,9 @@
 #include "O3DUnifiedMessage.h"
 #include "O3DPerformanceMetrics.h"
 
+THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
+THIRD_PARTY_INCLUDES_END
 
 #include <vector>
 
@@ -23,10 +25,12 @@
 #define NNG_STATIC_LIB 1
 #endif
 
+THIRD_PARTY_INCLUDES_START
 #include <nng/nng.h>
 #include <nng/protocol/pair1/pair.h>
 #include <nng/protocol/pipeline0/push.h>
 #include <nng/protocol/pubsub0/pub.h>
+THIRD_PARTY_INCLUDES_END
 
 DEFINE_LOG_CATEGORY_STATIC(LogO3DNngSender, Log, All);
 

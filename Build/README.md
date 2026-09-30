@@ -189,8 +189,8 @@ Tests that need the internet register only when `O3DB_NETWORK_TESTS=1` is set in
 The Fab listing gets a source-only zip, different from the GitHub build (ADR 0002).
 
 - `Build/Fab/exclude-modules.txt` lists modules left out of it: `Open3DTransportWebRTC` (ADR 0002; WebRTC ships as a separate add-on) and `Open3DBroadcastTests` (ADR 0006; skipped with a notice until that module exists).
-- `Build/Fab/exclude-files.txt` lists files left out, as globs: `.pdb`, `.py`, `Source/*/Tests/**` and module-level `Source/*/*.md` developer notes.
-- `Build/Scripts/fab-package.py` (Python 3.8+, standard library) takes the files git tracks under the plugin folder, applies both lists, removes the excluded modules' entries from the staged `.uplugin` without reformatting it, and writes a zip with one top-level `Open3DBroadcast/` folder and fixed timestamps (the same commit gives the same bytes). It then reopens the zip and fails if it finds an excluded module (folder or `.uplugin` entry), a `livekit` file while WebRTC is excluded, `.pdb`/`.py` files, `Binaries/` or `Intermediate/`, a Markdown file other than the root `README.md`, `USER_GUIDE.md`, `THIRD_PARTY_LICENSES.md`, `Transport_Module_Comparison.md` or anything under a `ThirdParty/` folder, a listed module without its `Build.cs`, or a missing `Resources/Icon128.png`.
+- `Build/Fab/exclude-files.txt` lists files left out, as globs: `.py`, `Source/*/Tests/**` and module-level `Source/*/*.md` developer notes. It has no `.pdb` rule on purpose (see [Debug symbols](#debug-symbols)).
+- `Build/Scripts/fab-package.py` (Python 3.8+, standard library) takes the files git tracks under the plugin folder, applies both lists, removes the excluded modules' entries from the staged `.uplugin` without reformatting it, and writes a zip with one top-level `Open3DBroadcast/` folder and fixed timestamps (the same commit gives the same bytes). It then reopens the zip and fails if it finds an excluded module (folder or `.uplugin` entry), a `livekit` file while WebRTC is excluded, `.pdb`/`.py` files, `Binaries/` or `Intermediate/`, a Markdown file other than the root `README.md`, `USER_GUIDE.md`, `THIRD_PARTY_LICENSES.md`, `Transport_Module_Comparison.md` or anything under a `ThirdParty/` folder, a listed module without its `Build.cs`, or a missing `Resources/Icon128.png`. Before any exclusion it also fails if git tracks a `.pdb` anywhere under the plugin, including in an excluded module (FAB-4).
 
 ```bash
 python3 Build/Scripts/fab-package.py --out-dir Artifacts/Fab
@@ -198,6 +198,22 @@ Build/Scripts/check-no-video-codecs.sh $(cat Artifacts/Fab/binaries.txt)
 ```
 
 Then `Build-FabZip.ps1` (above) runs BuildPlugin on the zip's contents.
+
+### Debug symbols
+
+Debug symbols (`.pdb`) for the plugin's prebuilt third-party DLLs (`moq_ffi.dll`, `livekit_ffi.dll`) are not kept in the plugin tree and are not staged into packaged games (FAB-4, WP-F3).
+
+- **Enforcement.** `ProjectSandbox/.gitignore` ignores `*.pdb` under the plugin, and `fab-package.py` fails the Fab zip job if one is tracked anyway (it checks the tracked tree before any exclusion, so neither an exclude rule nor an excluded module hides it). No `Build.cs` lists a `.pdb` in `RuntimeDependencies`.
+- **Where the symbols go (intended process).** When a third-party DLL is refreshed, the person doing the refresh keeps the matching `.pdb` out of the commit and attaches it to the next plugin GitHub release (`open3dbroadcast-v*`) as an extra asset, zipped per library and version, for example `moq_ffi-<upstream-commit>-Win64-symbols.zip`. The SHA256 of the `.pdb` stays in the artifact table of the library's `ThirdParty/<lib>/README.md`, so a downloaded file can be matched to the DLL. The release workflow does not attach these assets automatically yet; until it does, the maintainer uploads them by hand. There is no symbol server.
+- **Symbols that were removed.** The two `.pdb` files that used to be committed are still in git history. They were last present at commit `6b49517c5bbc8f32a23bb6e79166429af7a26e17`:
+
+  ```bash
+  git show 6b49517c5bbc8f32a23bb6e79166429af7a26e17:ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportMoQ/ThirdParty/moq-ffi/bin/Win64/Release/moq_ffi.pdb > moq_ffi.pdb
+  git show 6b49517c5bbc8f32a23bb6e79166429af7a26e17:ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/bin/Win64/livekit_ffi.pdb > livekit_ffi.pdb
+  ```
+
+  They match the DLLs currently in the tree (hashes in the two ThirdParty READMEs). They should be attached to the next release as described above.
+- **Using them.** Put the `.pdb` next to the DLL (in the plugin's `Source/<Module>/ThirdParty/<lib>/bin/Win64/...` folder, or next to the staged copy in a packaged game) or add its folder to the debugger's symbol path.
 
 ## CI/CD Integration
 

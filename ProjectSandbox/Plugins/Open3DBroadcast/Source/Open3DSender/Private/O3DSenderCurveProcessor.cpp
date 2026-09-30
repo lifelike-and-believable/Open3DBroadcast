@@ -9,7 +9,9 @@
 #include "O3DHelpers.h"
 #include "O3DSenderLogs.h"
 
+THIRD_PARTY_INCLUDES_START
 #include "o3ds/sender_sync.h"
+THIRD_PARTY_INCLUDES_END
 
 namespace
 {

@@ -35,6 +35,11 @@ Plugins/Open3DBroadcast/ThirdParty/open3dstream/include/core/
 Plugins/Open3DBroadcast/ThirdParty/open3dstream/include/receiver/
 Plugins/Open3DBroadcast/ThirdParty/open3dstream/lib/
 
+# FAB-4 (WP-F3): debug symbols never live in the plugin tree. They are published
+# as release assets (see Build/README.md, "Debug symbols"); fab-package.py fails
+# if one is tracked anyway.
+Plugins/Open3DBroadcast/**/*.pdb
+
 Plugins/Open3DStream/
 
 # Visual Studio

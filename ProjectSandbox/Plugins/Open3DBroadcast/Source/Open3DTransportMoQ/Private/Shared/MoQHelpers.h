@@ -5,7 +5,9 @@
 #include "CoreMinimal.h"
 #include "O3DTransportTypes.h"
 #include "O3DUnifiedMessage.h"
+THIRD_PARTY_INCLUDES_START
 #include "moq_ffi.h"
+THIRD_PARTY_INCLUDES_END
 
 /**
  * Shared helper functions and constants for MoQ transport.

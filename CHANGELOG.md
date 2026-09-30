@@ -251,6 +251,34 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
 - `UO3DSenderComponent::GetTransportOption` returns an empty string for a declared secret key, and `SetTransportOption` stores such a key in the secret store instead of `TransportOptions`. `webrtc.token` is no longer copied into `FO3DTransportConfig::AdvancedParams`; read it from `Secrets` (or `Token`, filled by the WebRTC customization).
 - `FO3DTokenFetchRequest::AdditionalGrants` is removed.
 
+### Binaries, symbols and DLL loading (WP-F3)
+
+- The committed `moq_ffi.pdb` and `livekit_ffi.pdb` are removed from the
+  plugin, and `Open3DTransportMoQ.Build.cs` no longer stages `moq_ffi.pdb`
+  into packaged games (FAB-4). Symbols go to release assets; see
+  "Debug symbols" in `Build/README.md`, which also shows how to get the
+  removed files from git history. `fab-package.py` now fails when git tracks
+  a `.pdb` anywhere under the plugin, including in an excluded module; the
+  `**/*.pdb` exclude rule that used to drop them silently is gone.
+- New `FO3DFfiLibrary` in Open3DShared (`O3DFfiLibrary.h`, ADR 0007 item 7).
+  The MoQ and WebRTC modules load `moq_ffi.dll` and `livekit_ffi.dll` through
+  it; the three separate loaders are gone, including the WebRTC receiver's,
+  which probed two paths that do not exist (TRF-28). The DLL locations are
+  unchanged.
+- WebRTC no longer registers its transport (factories and editor panels) when
+  `livekit_ffi.dll` fails to load. It used to register anyway, and the first
+  LiveKit call then failed on delay-load (TRF-14). MoQ already behaved this
+  way.
+- Module shutdown in MoQ and WebRTC stops every live transport instance
+  before unloading the FFI DLL. If a component or LiveLink source still holds
+  an instance after that, the DLL stays loaded until process exit instead of
+  being freed under it, and a warning names the count (TRF-14).
+- Third-party includes (o3ds core, moq_ffi, livekit_ffi, nng, opus) are
+  wrapped in `THIRD_PARTY_INCLUDES_START`/`END`, and the o3ds, moq_ffi and
+  livekit_ffi include directories are `PublicSystemIncludePaths` (BUILD-3).
+- New tests `Open3DBroadcast.Shared.FfiLibrary.*` cover path lookup, load
+  failures and the shutdown sequence with a live (fake) transport instance.
+
 ### Tests
 
 - UE automation tests moved out of the Runtime modules into a new editor-only
@@ -334,7 +362,8 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   builds a zip from the git-tracked plugin files without the modules in
   `Build/Fab/exclude-modules.txt` (WebRTC, and the future
   `Open3DBroadcastTests`) or the files in `Build/Fab/exclude-files.txt`
-  (`.pdb`, `.py`, module-level developer notes), and checks its contents. PR
+  (`.py`, module-level developer notes; a tracked `.pdb` fails the job, see
+  WP-F3 above), and checks its contents. PR
   CI uploads it as `Open3DBroadcast-Fab-Source-<sha>` and runs BuildPlugin on
   its contents. Until WP-F1, that build copies in the o3ds core library built
   for the same commit and reports that the zip does not build on its own.

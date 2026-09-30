@@ -20,8 +20,8 @@ Only Win64 artifacts are currently shipped. Linux/macOS placeholders exist so fu
 
 | Relative Path | Description | SHA256 |
 | --- | --- | --- |
-| `bin/Win64/Release/moq_ffi.dll` | Runtime DLL loaded by `FMoQFfiSupport` | `EF248AABDD4F9329C6F874261E6BF2CC9DCF62170CD95CD2F3C79BEC4B1237EF` |
-| `bin/Win64/Release/moq_ffi.pdb` | Debug symbols for crash triage | `66F612E8344037D10D0F2D8107F3AF0C4F9F426D0903578DAE4C3DF39E06A318` |
+| `bin/Win64/Release/moq_ffi.dll` | Runtime DLL loaded by the module through `FO3DFfiLibrary` (Open3DShared) | `EF248AABDD4F9329C6F874261E6BF2CC9DCF62170CD95CD2F3C79BEC4B1237EF` |
+| `moq_ffi.pdb` (not in the tree; release asset, see `Build/README.md`, "Debug symbols") | Debug symbols for crash triage | `66F612E8344037D10D0F2D8107F3AF0C4F9F426D0903578DAE4C3DF39E06A318` |
 | `lib/Win64/Release/moq_ffi.dll.lib` | Import library linked at build time | `B3377B79C3DB3D3047C2FA352C1B10D3C87AA548378407A01299CB4A4A277B1A` |
 | `include/moq_ffi.h` | C API header emitted by `cbindgen` | (text file, not hashed—see upstream repo) |
 
@@ -35,9 +35,9 @@ Only Win64 artifacts are currently shipped. Linux/macOS placeholders exist so fu
    cargo build --release --features with_moq_draft07
    pwsh ../tools/package-plugin.ps1 -CrateDir . -OutDir ../../artifacts/plugin-windows-x64
    ```
-4. Copy the packaged contents into this directory, preserving the `include/`, `lib/<Platform>/Release/`, and `bin/<Platform>/Release/` layout.
+4. Copy the packaged contents into this directory, preserving the `include/`, `lib/<Platform>/Release/`, and `bin/<Platform>/Release/` layout. Do not commit `moq_ffi.pdb`: record its SHA256 below and attach it to the next release (`Build/README.md`, "Debug symbols"). CI fails if a `.pdb` is tracked.
 5. Update the table above with the new commit SHA, build flags, and **SHA256 hashes** for each binary.
-6. Run the Unreal build once to ensure `Open3DTransportMoQ.Build.cs` can locate the new files and that `FMoQFfiSupport` loads them at runtime.
+6. Run the Unreal build once to ensure `Open3DTransportMoQ.Build.cs` can locate the new files and that the module loads and validates them at runtime (`FMoQFfiSupport::ValidateLibrary`).
 7. Commit the updated binaries and this README together.
 
 ## Troubleshooting Checklist

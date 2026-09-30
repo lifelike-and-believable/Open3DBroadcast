@@ -1,7 +1,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+THIRD_PARTY_INCLUDES_START
 #include "moq_ffi.h"
+THIRD_PARTY_INCLUDES_END
 
 struct FMoQFfiApi;
 

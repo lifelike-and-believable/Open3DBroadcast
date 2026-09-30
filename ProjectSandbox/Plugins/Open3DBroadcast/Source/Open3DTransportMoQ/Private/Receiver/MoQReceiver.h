@@ -8,7 +8,9 @@
 #include "O3DReceiverInterface.h"
 #include "O3DAudioFrameCodec.h"
 #include "MoQFfiApi.h"
+THIRD_PARTY_INCLUDES_START
 #include "moq_ffi.h"
+THIRD_PARTY_INCLUDES_END
 
 class ISerializedFrameConsumer;
 class FMoQSessionWrapper;

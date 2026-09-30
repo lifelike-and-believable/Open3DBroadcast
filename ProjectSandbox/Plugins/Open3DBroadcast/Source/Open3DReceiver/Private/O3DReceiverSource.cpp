@@ -23,9 +23,11 @@
 #include "O3DAudioFrameCodec.h"
 #include "O3DPerformanceMetrics.h"
 
+THIRD_PARTY_INCLUDES_START
 #include "o3ds_generated.h"
 #include "o3ds/sequencing.h"
 #include "o3ds/predict/linear_predictor.h"
+THIRD_PARTY_INCLUDES_END
 
 #include <utility>
 

@@ -11,11 +11,13 @@
 #include "O3DReceiverSourceSettings.h"
 #include "O3DUnifiedMessage.h"
 
+THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
 #include "o3ds/reorder_gate.h"
 #include "o3ds/clock_offset.h"
 #include "o3ds/receiver_streams.h"
 #include "o3ds/predict/concealment.h"
+THIRD_PARTY_INCLUDES_END
 
 #include <atomic>
 #include <vector>

@@ -3,7 +3,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+THIRD_PARTY_INCLUDES_START
 #include "livekit_ffi.h"
+THIRD_PARTY_INCLUDES_END
 
 /**
  * Per-instance LiveKit FFI function table (ADR 0006 option F2, WP-S7).
@@ -42,9 +44,6 @@ struct FLkFfiApi
 	LkResult (*lk_send_data_ex)(LkClientHandle*, const uint8_t* bytes, size_t len, LkReliability reliability, int32_t ordered, const char* label) = nullptr;
 	LkResult (*lk_set_default_data_labels)(LkClientHandle*, const char* reliable_label, const char* lossy_label) = nullptr;
 	LkResult (*lk_set_log_level)(LkClientHandle*, LkLogLevel level) = nullptr;
-
-	/** True only for the table returned by GetLinkedLkFfiApi(); gates DLL loading helpers. */
-	bool bUsesLinkedLibrary = false;
 
 	/** True when every function pointer is set. Transports refuse to initialize otherwise. */
 	bool IsComplete() const;
