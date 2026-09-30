@@ -84,7 +84,14 @@ if ($PluginPackageDir) {
   }
   $hostPlugins = Join-Path $HostProjectDir "Plugins"
   New-Item -ItemType Directory -Force -Path $hostPlugins | Out-Null
-  Copy-Item -LiteralPath $PluginPackageDir -Destination (Join-Path $hostPlugins $pluginName) -Recurse
+  $hostPluginDir = Join-Path $hostPlugins $pluginName
+  Copy-Item -LiteralPath $PluginPackageDir -Destination $hostPluginDir -Recurse
+  # BuildPlugin normally deletes its HostProject folder from the package. If one is left
+  # over it holds a second copy of the plugin, which the editor would also discover.
+  $leftover = Join-Path $hostPluginDir "HostProject"
+  if (Test-Path -LiteralPath $leftover) {
+    Remove-Item -LiteralPath $leftover -Recurse -Force
+  }
 
   $entries = @(@{ Name = $pluginName; Enabled = $true })
   foreach ($p in $HostProjectPlugins) { $entries += @{ Name = $p; Enabled = $true } }
