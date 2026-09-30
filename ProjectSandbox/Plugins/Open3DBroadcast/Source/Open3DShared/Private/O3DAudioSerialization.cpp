@@ -2,6 +2,8 @@
 
 #include "O3DAudioSerialization.h"
 
+#include "O3DAudioOpus.h"
+
 namespace
 {
     constexpr uint8 AudioPayloadVersion = 1;
@@ -84,300 +86,273 @@ namespace
 
 namespace O3DAudio
 {
-    bool SerializePcm16Frame(const O3DS::FAudioFrameMeta& Meta, const uint8* PCM16Data, int32 NumBytes, TArray<uint8>& OutPayload)
+    namespace
     {
-        if (PCM16Data == nullptr || NumBytes <= 0 || (NumBytes % static_cast<int32>(sizeof(int16)) != 0))
+        constexpr int32 Pcm16HeaderSize = 1 /*Version*/ + 1 /*Flags*/ + 2 /*Channels*/ + 4 /*SampleRate*/ + 8 /*Timestamp*/ + 16 /*Guid*/ + 2 /*LabelSize*/ + 2 /*SubjectSize*/ + 4 /*PCMBytes*/;
+        constexpr int32 EncodedHeaderSize = 1 /*Version*/ + 1 /*Flags*/ + 1 /*Codec*/ + 1 /*Reserved*/ + 2 /*Channels*/ + 4 /*SampleRate*/ + 8 /*Timestamp*/ + 16 /*Guid*/ + 2 /*LabelSize*/ + 2 /*SubjectSize*/ + 4 /*PayloadBytes*/;
+
+        bool Fail(EAudioParseError* OutError, EAudioParseError Error)
         {
+            if (OutError)
+            {
+                *OutError = Error;
+            }
             return false;
         }
 
-        FTCHARToUTF8 LabelUtf8(*Meta.StreamLabel);
-        FTCHARToUTF8 SubjectUtf8(*Meta.SubjectName);
-
-        const int32 LabelLength = LabelUtf8.Length();
-        const int32 SubjectLength = SubjectUtf8.Length();
-        if (LabelLength > MAX_uint16 || SubjectLength > MAX_uint16)
+        FString ReadUtf8Name(const uint8* Data, int32 NumBytes)
         {
-            return false;
+            if (NumBytes <= 0)
+            {
+                return FString();
+            }
+            FUTF8ToTCHAR Converted(reinterpret_cast<const ANSICHAR*>(Data), NumBytes);
+            return FString(Converted.Length(), Converted.Get());
         }
 
-        const uint16 LabelSize = static_cast<uint16>(LabelLength);
-        const uint16 SubjectSize = static_cast<uint16>(SubjectLength);
-
-        constexpr int32 HeaderSize = 1 /*Version*/ + 1 /*Flags*/ + 2 /*Channels*/ + 4 /*SampleRate*/ + 8 /*Timestamp*/ + 16 /*Guid*/ + 2 /*LabelSize*/ + 2 /*SubjectSize*/ + 4 /*PCMBytes*/;
-        const int32 TotalSize = HeaderSize + LabelSize + SubjectSize + NumBytes;
-        OutPayload.SetNumUninitialized(TotalSize);
-
-        int32 Offset = 0;
-        OutPayload[Offset++] = AudioPayloadVersion;
-        OutPayload[Offset++] = 0; // Flags (reserved)
-        WriteUInt16LE(OutPayload, Offset, static_cast<uint16>(ClampToUInt16Range(Meta.NumChannels)));
-        WriteUInt32LE(OutPayload, Offset, static_cast<uint32>(Meta.SampleRate));
-        WriteDoubleLE(OutPayload, Offset, Meta.TimestampSec);
-        WriteGuidLE(OutPayload, Offset, Meta.SourceGuid);
-        WriteUInt16LE(OutPayload, Offset, LabelSize);
-        WriteUInt16LE(OutPayload, Offset, SubjectSize);
-        WriteUInt32LE(OutPayload, Offset, static_cast<uint32>(NumBytes));
-
-        if (LabelSize > 0)
+        /**
+         * Writes the PCM16 layout (version 1) or the encoded layout (version 2) after PrefixBytes
+         * reserved bytes. The two layouts differ only in their first bytes.
+         */
+        bool SerializeAudioImpl(O3DS::EUnifiedCodec Codec, const O3DS::FAudioFrameMeta& Meta, const uint8* Data, int32 NumBytes, int32 PrefixBytes, TArray<uint8>& OutBuffer)
         {
-            FMemory::Memcpy(OutPayload.GetData() + Offset, LabelUtf8.Get(), LabelSize);
-            Offset += LabelSize;
-        }
-
-        if (SubjectSize > 0)
-        {
-            FMemory::Memcpy(OutPayload.GetData() + Offset, SubjectUtf8.Get(), SubjectSize);
-            Offset += SubjectSize;
-        }
-
-        FMemory::Memcpy(OutPayload.GetData() + Offset, PCM16Data, NumBytes);
-        Offset += NumBytes;
-
-        check(Offset == TotalSize);
-        return true;
-    }
-
-    bool DeserializePcm16Frame(const uint8* Payload, int32 PayloadSize, FPcm16Frame& OutFrame)
-    {
-        if (!Payload || PayloadSize <= 0)
-        {
-            return false;
-        }
-
-        constexpr int32 HeaderSize = 1 + 1 + 2 + 4 + 8 + 16 + 2 + 2 + 4;
-        if (PayloadSize < HeaderSize)
-        {
-            return false;
-        }
-
-        int32 Offset = 0;
-        const uint8 Version = Payload[Offset++];
-        if (Version != AudioPayloadVersion)
-        {
-            return false;
-        }
-
-        Offset++; // Flags (unused)
-
-        const uint16 NumChannels = ReadUInt16LE(Payload + Offset);
-        Offset += 2;
-        const uint32 SampleRate = ReadUInt32LE(Payload + Offset);
-        Offset += 4;
-        const double TimestampSec = ReadDoubleLE(Payload + Offset);
-        Offset += 8;
-        const FGuid SourceGuid = ReadGuidLE(Payload + Offset);
-        Offset += 16;
-        const uint16 LabelSize = ReadUInt16LE(Payload + Offset);
-        Offset += 2;
-        const uint16 SubjectSize = ReadUInt16LE(Payload + Offset);
-        Offset += 2;
-        const uint32 PCMByteCount = ReadUInt32LE(Payload + Offset);
-        Offset += 4;
-
-        if (static_cast<int64>(HeaderSize) + LabelSize + SubjectSize + PCMByteCount > PayloadSize)
-        {
-            return false;
-        }
-
-        FString StreamLabel;
-        if (LabelSize > 0)
-        {
-            FUTF8ToTCHAR Converted(reinterpret_cast<const ANSICHAR*>(Payload + Offset), LabelSize);
-            StreamLabel = FString(Converted.Length(), Converted.Get());
-            Offset += LabelSize;
-        }
-
-        FString SubjectName;
-        if (SubjectSize > 0)
-        {
-            FUTF8ToTCHAR Converted(reinterpret_cast<const ANSICHAR*>(Payload + Offset), SubjectSize);
-            SubjectName = FString(Converted.Length(), Converted.Get());
-            Offset += SubjectSize;
-        }
-
-        if (PCMByteCount == 0 || (PCMByteCount % static_cast<uint32>(sizeof(int16)) != 0))
-        {
-            return false;
-        }
-
-        const uint8* PCMPtr = Payload + Offset;
-        OutFrame.PCM16.Reset();
-        OutFrame.PCM16.AddUninitialized(static_cast<int32>(PCMByteCount));
-        FMemory::Memcpy(OutFrame.PCM16.GetData(), PCMPtr, PCMByteCount);
-
-        OutFrame.Meta.SourceGuid = SourceGuid;
-        OutFrame.Meta.StreamLabel = MoveTemp(StreamLabel);
-        OutFrame.Meta.SubjectName = MoveTemp(SubjectName);
-        OutFrame.Meta.NumChannels = static_cast<int32>(NumChannels);
-        OutFrame.Meta.SampleRate = static_cast<int32>(SampleRate);
-        OutFrame.Meta.TimestampSec = TimestampSec;
-
-        return true;
-    }
-
-    bool SerializeEncodedAudioFrame(O3DS::EUnifiedCodec Codec, const O3DS::FAudioFrameMeta& Meta, const uint8* EncodedData, int32 NumBytes, TArray<uint8>& OutPayload)
-    {
-        if (!EncodedData || NumBytes <= 0)
-        {
-            return false;
-        }
-
-        if (Codec == O3DS::EUnifiedCodec::PCM16)
-        {
-            return SerializePcm16Frame(Meta, EncodedData, NumBytes, OutPayload);
-        }
-
-        FTCHARToUTF8 LabelUtf8(*Meta.StreamLabel);
-        FTCHARToUTF8 SubjectUtf8(*Meta.SubjectName);
-
-        const int32 LabelLength = LabelUtf8.Length();
-        const int32 SubjectLength = SubjectUtf8.Length();
-        if (LabelLength > MAX_uint16 || SubjectLength > MAX_uint16)
-        {
-            return false;
-        }
-
-        const uint16 LabelSize = static_cast<uint16>(LabelLength);
-        const uint16 SubjectSize = static_cast<uint16>(SubjectLength);
-
-        constexpr int32 HeaderSize = 1 /*Version*/ + 1 /*Flags*/ + 1 /*Codec*/ + 1 /*Reserved*/ + 2 /*Channels*/ + 4 /*SampleRate*/ + 8 /*Timestamp*/ + 16 /*Guid*/ + 2 /*LabelSize*/ + 2 /*SubjectSize*/ + 4 /*PayloadBytes*/;
-        const int32 TotalSize = HeaderSize + LabelSize + SubjectSize + NumBytes;
-        OutPayload.SetNumUninitialized(TotalSize);
-
-        int32 Offset = 0;
-        OutPayload[Offset++] = EncodedAudioPayloadVersion;
-        OutPayload[Offset++] = PayloadFlagEncoded;
-        OutPayload[Offset++] = static_cast<uint8>(Codec);
-        OutPayload[Offset++] = 0; // Reserved byte for alignment / future use
-        WriteUInt16LE(OutPayload, Offset, static_cast<uint16>(ClampToUInt16Range(Meta.NumChannels)));
-        WriteUInt32LE(OutPayload, Offset, static_cast<uint32>(Meta.SampleRate));
-        WriteDoubleLE(OutPayload, Offset, Meta.TimestampSec);
-        WriteGuidLE(OutPayload, Offset, Meta.SourceGuid);
-        WriteUInt16LE(OutPayload, Offset, LabelSize);
-        WriteUInt16LE(OutPayload, Offset, SubjectSize);
-        WriteUInt32LE(OutPayload, Offset, static_cast<uint32>(NumBytes));
-
-        if (LabelSize > 0)
-        {
-            FMemory::Memcpy(OutPayload.GetData() + Offset, LabelUtf8.Get(), LabelSize);
-            Offset += LabelSize;
-        }
-
-        if (SubjectSize > 0)
-        {
-            FMemory::Memcpy(OutPayload.GetData() + Offset, SubjectUtf8.Get(), SubjectSize);
-            Offset += SubjectSize;
-        }
-
-        FMemory::Memcpy(OutPayload.GetData() + Offset, EncodedData, NumBytes);
-        Offset += NumBytes;
-
-        check(Offset == TotalSize);
-        return true;
-    }
-
-    bool DeserializeEncodedAudioFrame(O3DS::EUnifiedCodec Codec, const uint8* Payload, int32 PayloadSize, FEncodedAudioFrame& OutFrame)
-    {
-        if (!Payload || PayloadSize <= 0)
-        {
-            return false;
-        }
-
-        if (Codec == O3DS::EUnifiedCodec::PCM16)
-        {
-            FPcm16Frame PcmFrame;
-            if (!DeserializePcm16Frame(Payload, PayloadSize, PcmFrame))
+            const bool bPcm16Layout = (Codec == O3DS::EUnifiedCodec::PCM16);
+            if (!Data || NumBytes <= 0 || PrefixBytes < 0)
+            {
+                return false;
+            }
+            if (bPcm16Layout && (NumBytes % static_cast<int32>(sizeof(int16)) != 0))
             {
                 return false;
             }
 
-            OutFrame.Codec = Codec;
-            OutFrame.Meta = MoveTemp(PcmFrame.Meta);
-            OutFrame.Payload = MoveTemp(PcmFrame.PCM16);
+            FTCHARToUTF8 LabelUtf8(*Meta.StreamLabel);
+            FTCHARToUTF8 SubjectUtf8(*Meta.SubjectName);
+
+            const int32 LabelLength = LabelUtf8.Length();
+            const int32 SubjectLength = SubjectUtf8.Length();
+            // The receiver rejects longer names (SHR-8), so do not send them.
+            if (LabelLength > MaxNameBytes || SubjectLength > MaxNameBytes)
+            {
+                return false;
+            }
+
+            const uint16 LabelSize = static_cast<uint16>(LabelLength);
+            const uint16 SubjectSize = static_cast<uint16>(SubjectLength);
+
+            const int32 HeaderSize = bPcm16Layout ? Pcm16HeaderSize : EncodedHeaderSize;
+            const int64 TotalSize64 = static_cast<int64>(PrefixBytes) + HeaderSize + LabelSize + SubjectSize + NumBytes;
+            if (TotalSize64 > MAX_int32)
+            {
+                return false;
+            }
+            const int32 TotalSize = static_cast<int32>(TotalSize64);
+            OutBuffer.SetNumUninitialized(TotalSize);
+
+            int32 Offset = PrefixBytes;
+            if (bPcm16Layout)
+            {
+                OutBuffer[Offset++] = AudioPayloadVersion;
+                OutBuffer[Offset++] = 0; // Flags (reserved)
+            }
+            else
+            {
+                OutBuffer[Offset++] = EncodedAudioPayloadVersion;
+                OutBuffer[Offset++] = PayloadFlagEncoded;
+                OutBuffer[Offset++] = static_cast<uint8>(Codec);
+                OutBuffer[Offset++] = 0; // Reserved byte for alignment / future use
+            }
+            WriteUInt16LE(OutBuffer, Offset, static_cast<uint16>(ClampToUInt16Range(Meta.NumChannels)));
+            WriteUInt32LE(OutBuffer, Offset, static_cast<uint32>(Meta.SampleRate));
+            WriteDoubleLE(OutBuffer, Offset, Meta.TimestampSec);
+            WriteGuidLE(OutBuffer, Offset, Meta.SourceGuid);
+            WriteUInt16LE(OutBuffer, Offset, LabelSize);
+            WriteUInt16LE(OutBuffer, Offset, SubjectSize);
+            WriteUInt32LE(OutBuffer, Offset, static_cast<uint32>(NumBytes));
+
+            if (LabelSize > 0)
+            {
+                FMemory::Memcpy(OutBuffer.GetData() + Offset, LabelUtf8.Get(), LabelSize);
+                Offset += LabelSize;
+            }
+
+            if (SubjectSize > 0)
+            {
+                FMemory::Memcpy(OutBuffer.GetData() + Offset, SubjectUtf8.Get(), SubjectSize);
+                Offset += SubjectSize;
+            }
+
+            FMemory::Memcpy(OutBuffer.GetData() + Offset, Data, NumBytes);
+            Offset += NumBytes;
+
+            check(Offset == TotalSize);
             return true;
         }
 
-        constexpr int32 HeaderSize = 1 + 1 + 1 + 1 + 2 + 4 + 8 + 16 + 2 + 2 + 4;
-        if (PayloadSize < HeaderSize)
+        /** Parses either layout and range-checks every field before it is used (SHR-8). */
+        bool DeserializeAudioImpl(O3DS::EUnifiedCodec Codec, const uint8* Payload, int32 PayloadSize, O3DS::FAudioFrameMeta& OutMeta, TArray<uint8>& OutData, EAudioParseError* OutError)
         {
-            return false;
-        }
+            const bool bPcm16Layout = (Codec == O3DS::EUnifiedCodec::PCM16);
+            const int32 HeaderSize = bPcm16Layout ? Pcm16HeaderSize : EncodedHeaderSize;
+            if (OutError)
+            {
+                *OutError = EAudioParseError::None;
+            }
+            if (!Payload || PayloadSize < HeaderSize)
+            {
+                return Fail(OutError, EAudioParseError::Truncated);
+            }
 
-        int32 Offset = 0;
-        const uint8 Version = Payload[Offset++];
-        if (Version != EncodedAudioPayloadVersion)
-        {
-            return false;
-        }
+            int32 Offset = 0;
+            const uint8 Version = Payload[Offset++];
+            if (bPcm16Layout)
+            {
+                if (Version != AudioPayloadVersion)
+                {
+                    return Fail(OutError, EAudioParseError::BadVersion);
+                }
+                Offset++; // Flags (unused)
+            }
+            else
+            {
+                if (Version != EncodedAudioPayloadVersion)
+                {
+                    return Fail(OutError, EAudioParseError::BadVersion);
+                }
+                const uint8 Flags = Payload[Offset++];
+                const uint8 CodecByte = Payload[Offset++];
+                Offset++; // Reserved
+                if ((Flags & PayloadFlagEncoded) == 0)
+                {
+                    return Fail(OutError, EAudioParseError::BadVersion);
+                }
+                if (CodecByte != static_cast<uint8>(Codec))
+                {
+                    return Fail(OutError, EAudioParseError::CodecMismatch);
+                }
+            }
 
-        const uint8 Flags = Payload[Offset++];
-        const uint8 CodecByte = Payload[Offset++];
-        Offset++; // Reserved
+            const uint16 NumChannels = ReadUInt16LE(Payload + Offset);
+            Offset += 2;
+            const uint32 SampleRate = ReadUInt32LE(Payload + Offset);
+            Offset += 4;
+            const double TimestampSec = ReadDoubleLE(Payload + Offset);
+            Offset += 8;
+            const FGuid SourceGuid = ReadGuidLE(Payload + Offset);
+            Offset += 16;
+            const uint16 LabelSize = ReadUInt16LE(Payload + Offset);
+            Offset += 2;
+            const uint16 SubjectSize = ReadUInt16LE(Payload + Offset);
+            Offset += 2;
+            const uint32 DataBytes = ReadUInt32LE(Payload + Offset);
+            Offset += 4;
 
-        if ((Flags & PayloadFlagEncoded) == 0)
-        {
-            return false;
-        }
+            if (static_cast<int64>(HeaderSize) + LabelSize + SubjectSize + DataBytes > PayloadSize)
+            {
+                return Fail(OutError, EAudioParseError::Truncated);
+            }
+            if (LabelSize > MaxNameBytes || SubjectSize > MaxNameBytes)
+            {
+                return Fail(OutError, EAudioParseError::NameTooLong);
+            }
+            if (DataBytes == 0 || (bPcm16Layout && (DataBytes % static_cast<uint32>(sizeof(int16)) != 0)))
+            {
+                return Fail(OutError, EAudioParseError::BadPayloadSize);
+            }
+            if (SampleRate > static_cast<uint32>(MAX_int32))
+            {
+                return Fail(OutError, EAudioParseError::BadSampleRate);
+            }
 
-        if (CodecByte != static_cast<uint8>(Codec))
-        {
-            return false;
-        }
+            O3DS::FAudioFrameMeta Meta;
+            Meta.SourceGuid = SourceGuid;
+            Meta.NumChannels = static_cast<int32>(NumChannels);
+            Meta.SampleRate = static_cast<int32>(SampleRate);
+            Meta.TimestampSec = TimestampSec;
+            const EAudioParseError MetaError = ValidateAudioMeta(Codec, Meta);
+            if (MetaError != EAudioParseError::None)
+            {
+                return Fail(OutError, MetaError);
+            }
 
-        const uint16 NumChannels = ReadUInt16LE(Payload + Offset);
-        Offset += 2;
-        const uint32 SampleRate = ReadUInt32LE(Payload + Offset);
-        Offset += 4;
-        const double TimestampSec = ReadDoubleLE(Payload + Offset);
-        Offset += 8;
-        const FGuid SourceGuid = ReadGuidLE(Payload + Offset);
-        Offset += 16;
-        const uint16 LabelSize = ReadUInt16LE(Payload + Offset);
-        Offset += 2;
-        const uint16 SubjectSize = ReadUInt16LE(Payload + Offset);
-        Offset += 2;
-        const uint32 PayloadBytes = ReadUInt32LE(Payload + Offset);
-        Offset += 4;
-
-        if (static_cast<int64>(HeaderSize) + LabelSize + SubjectSize + PayloadBytes > PayloadSize)
-        {
-            return false;
-        }
-
-        FString StreamLabel;
-        if (LabelSize > 0)
-        {
-            FUTF8ToTCHAR Converted(reinterpret_cast<const ANSICHAR*>(Payload + Offset), LabelSize);
-            StreamLabel = FString(Converted.Length(), Converted.Get());
+            Meta.StreamLabel = ReadUtf8Name(Payload + Offset, LabelSize);
             Offset += LabelSize;
-        }
-
-        FString SubjectName;
-        if (SubjectSize > 0)
-        {
-            FUTF8ToTCHAR Converted(reinterpret_cast<const ANSICHAR*>(Payload + Offset), SubjectSize);
-            SubjectName = FString(Converted.Length(), Converted.Get());
+            Meta.SubjectName = ReadUtf8Name(Payload + Offset, SubjectSize);
             Offset += SubjectSize;
-        }
 
-        if (PayloadBytes == 0)
+            OutData.Reset();
+            OutData.Append(Payload + Offset, static_cast<int32>(DataBytes));
+            OutMeta = MoveTemp(Meta);
+            return true;
+        }
+    }
+
+    bool IsSupportedSampleRate(int32 SampleRate)
+    {
+        switch (SampleRate)
+        {
+        case 8000:
+        case 11025:
+        case 12000:
+        case 16000:
+        case 22050:
+        case 24000:
+        case 32000:
+        case 44100:
+        case 48000:
+        case 88200:
+        case 96000:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    EAudioParseError ValidateAudioMeta(O3DS::EUnifiedCodec Codec, const O3DS::FAudioFrameMeta& Meta)
+    {
+        const bool bOpus = (Codec == O3DS::EUnifiedCodec::Opus);
+        if (Meta.NumChannels < 1 || Meta.NumChannels > (bOpus ? 2 : MaxChannels))
+        {
+            return EAudioParseError::BadChannelCount;
+        }
+        if (!IsSupportedSampleRate(Meta.SampleRate) || (bOpus && !FO3DAudioOpusEncoder::IsSupportedSampleRate(Meta.SampleRate)))
+        {
+            return EAudioParseError::BadSampleRate;
+        }
+        if (!FMath::IsFinite(Meta.TimestampSec))
+        {
+            return EAudioParseError::BadTimestamp;
+        }
+        return EAudioParseError::None;
+    }
+
+    bool SerializePcm16Frame(const O3DS::FAudioFrameMeta& Meta, const uint8* PCM16Data, int32 NumBytes, TArray<uint8>& OutPayload)
+    {
+        return SerializeAudioImpl(O3DS::EUnifiedCodec::PCM16, Meta, PCM16Data, NumBytes, 0, OutPayload);
+    }
+
+    bool DeserializePcm16Frame(const uint8* Payload, int32 PayloadSize, FPcm16Frame& OutFrame, EAudioParseError* OutError)
+    {
+        return DeserializeAudioImpl(O3DS::EUnifiedCodec::PCM16, Payload, PayloadSize, OutFrame.Meta, OutFrame.PCM16, OutError);
+    }
+
+    bool SerializeEncodedAudioFrame(O3DS::EUnifiedCodec Codec, const O3DS::FAudioFrameMeta& Meta, const uint8* EncodedData, int32 NumBytes, TArray<uint8>& OutPayload)
+    {
+        return SerializeAudioImpl(Codec, Meta, EncodedData, NumBytes, 0, OutPayload);
+    }
+
+    bool SerializeEncodedAudioFrameAfterPrefix(O3DS::EUnifiedCodec Codec, const O3DS::FAudioFrameMeta& Meta, const uint8* EncodedData, int32 NumBytes, int32 PrefixBytes, TArray<uint8>& OutBuffer)
+    {
+        return SerializeAudioImpl(Codec, Meta, EncodedData, NumBytes, PrefixBytes, OutBuffer);
+    }
+
+    bool DeserializeEncodedAudioFrame(O3DS::EUnifiedCodec Codec, const uint8* Payload, int32 PayloadSize, FEncodedAudioFrame& OutFrame, EAudioParseError* OutError)
+    {
+        if (!DeserializeAudioImpl(Codec, Payload, PayloadSize, OutFrame.Meta, OutFrame.Payload, OutError))
         {
             return false;
         }
-
-        OutFrame.Payload.Reset();
-        OutFrame.Payload.AddUninitialized(static_cast<int32>(PayloadBytes));
-        FMemory::Memcpy(OutFrame.Payload.GetData(), Payload + Offset, PayloadBytes);
-
         OutFrame.Codec = Codec;
-        OutFrame.Meta.SourceGuid = SourceGuid;
-        OutFrame.Meta.StreamLabel = MoveTemp(StreamLabel);
-        OutFrame.Meta.SubjectName = MoveTemp(SubjectName);
-        OutFrame.Meta.NumChannels = static_cast<int32>(NumChannels);
-        OutFrame.Meta.SampleRate = static_cast<int32>(SampleRate);
-        OutFrame.Meta.TimestampSec = TimestampSec;
-
         return true;
     }
 }
