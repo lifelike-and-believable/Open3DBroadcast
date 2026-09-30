@@ -44,7 +44,7 @@ namespace
 
 namespace
 {
-    TO3DFfiContextRegistry<FNngSenderPipeContext>& GetPipeContextRegistry()
+    TO3DFfiContextRegistry<FNngSenderPipeContext>& GetSenderPipeContextRegistry()
     {
         static TO3DFfiContextRegistry<FNngSenderPipeContext> Registry;
         return Registry;
@@ -53,7 +53,7 @@ namespace
     /** NNG pipe callback. `Context` is an opaque token, never a sender pointer (WP-S5). */
     static void SenderPipeCallback(nng_pipe /*Pipe*/, nng_pipe_ev Event, void* Context)
     {
-        const TSharedPtr<FNngSenderPipeContext, ESPMode::ThreadSafe> Pipe = GetPipeContextRegistry().Resolve(Context);
+        const TSharedPtr<FNngSenderPipeContext, ESPMode::ThreadSafe> Pipe = GetSenderPipeContextRegistry().Resolve(Context);
         if (!Pipe.IsValid())
         {
             return;
@@ -157,7 +157,7 @@ FO3DNngSender::FO3DNngSender()
     , PipeContext(MakeShared<FNngSenderPipeContext, ESPMode::ThreadSafe>())
     , TransportMetrics(FO3DPerformanceMetrics::Get().AcquireTransportMetrics(TEXT("NNG")))
 {
-    PipeToken = GetPipeContextRegistry().Register(PipeContext);
+    PipeToken = GetSenderPipeContextRegistry().Register(PipeContext);
 }
 
 bool FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
@@ -207,7 +207,7 @@ FO3DNngSender::~FO3DNngSender()
     Stop();
     // nng_close() in Stop() has returned, so no pipe callback is running for this socket
     // (needs-FFI-verification); a late one would resolve the token to nothing anyway.
-    GetPipeContextRegistry().Unregister(PipeToken);
+    GetSenderPipeContextRegistry().Unregister(PipeToken);
     PipeToken = nullptr;
 }
 

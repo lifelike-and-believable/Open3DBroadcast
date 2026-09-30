@@ -8,7 +8,7 @@
 **How to enforce:**
 - Project file is already configured: `.uproject` has `"EngineAssociation": "5.7"`
 - When building, use: 
-"C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat" ProjectSandboxEditor Win64 Development -Project="e:\OtherProjects\Open3DStream\ProjectSandbox\ProjectSandbox.uproject"
+"C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat" ProjectSandboxEditor Win64 Development "-Project=<repo root>\ProjectSandbox\ProjectSandbox.uproject" -WaitMutex
 
 **Target.cs files must have:**
 ```cpp

@@ -84,9 +84,19 @@ docker run --rm open3dstream-repeater:local tcp://0.0.0.0:7000 tcp://0.0.0.0:700
 
 **Installation from Source:**
  
-1. Copy the `ProjectSandbox/Plugins/Open3DBroadcast` folder to your project's `Plugins` directory
-2. Build the native libraries (see Building the Library above)
-3. Enable the plugin in your project settings
+1. Copy the `ProjectSandbox/Plugins/Open3DBroadcast` folder (and `Open3DBroadcastWebRTC` if you want WebRTC) to your project's `Plugins` directory
+2. Enable the plugin in your project settings and build your editor target. No CMake step is needed: the plugin compiles the o3ds core from source, and its prebuilt third-party libraries are committed under `Source/`.
+
+**Building and running ProjectSandbox locally (Windows, UE 5.7):**
+
+ProjectSandbox has both plugins in-tree and enables them. From the repository root, with the editor closed:
+
+```powershell
+& "C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat" ProjectSandboxEditor Win64 Development "-Project=$PWD\ProjectSandbox\ProjectSandbox.uproject" -WaitMutex
+& "C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe" "$PWD\ProjectSandbox\ProjectSandbox.uproject"
+```
+
+Alternatively open `ProjectSandbox/ProjectSandbox.uproject` in Rider or Visual Studio and build `ProjectSandboxEditor`. Packaging, automation tests and CI builds are described in [Build/README.md](Build/README.md).
 
 **Usage:**
  
