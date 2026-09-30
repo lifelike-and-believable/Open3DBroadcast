@@ -1,0 +1,30 @@
+# Seed headers of the o3ds core that the Open3DBroadcast plugin compiles from
+# source (docs/adr/0003-core-library-delivery-to-plugin.md, WP-F1).
+#
+# Read by Build/Scripts/sync_o3ds_core.py. The script starts from these
+# headers, adds the .cpp next to each header, follows their #include lines,
+# and mirrors the whole closure into
+#   ProjectSandbox/Plugins/Open3DBroadcast/Source/ThirdParty/Open3DStreamCore/
+# together with src/o3ds_generated.h, the FlatBuffers runtime headers and
+# CRCpp's CRC.h from the pinned submodules.
+#
+# One path per line, relative to src/. Blank lines and '#' comments are
+# ignored. List every core header that a plugin source file includes
+# directly; the script fails if a plugin file includes an o3ds header that
+# the closure does not contain. Headers reached only through other headers
+# need no line.
+
+o3ds/model.h
+o3ds/sequencing.h
+o3ds/sender_sync.h
+o3ds/reorder_gate.h
+o3ds/clock_offset.h
+o3ds/receiver_streams.h
+o3ds/udp_fragment.h
+o3ds/tcp_stream_parser.h
+o3ds/predict/concealment.h
+o3ds/predict/linear_predictor.h
+
+# Used by the automation tests (Open3DBroadcastTests) for capture/replay.
+o3ds/capture.h
+o3ds/replay.h

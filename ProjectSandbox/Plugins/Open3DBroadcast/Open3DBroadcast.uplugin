@@ -21,6 +21,13 @@
 	"SupportedTargetPlatforms": [ "Win64" ],
 	"Modules": [
 		{
+			"Name": "Open3DStreamCore",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [ "Win64" ],
+			"TargetDenyList": [ "Server", "Program" ]
+		},
+		{
 			"Name": "Open3DShared",
 			"Type": "Runtime",
 			"LoadingPhase": "Default",
