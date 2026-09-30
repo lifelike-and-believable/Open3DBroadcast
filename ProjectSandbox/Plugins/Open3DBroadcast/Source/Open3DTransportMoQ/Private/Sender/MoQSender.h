@@ -8,6 +8,7 @@
 #include "Containers/Queue.h"
 #include "O3DSenderInterface.h"
 #include "O3DAudioFrameCodec.h"
+#include "Shared/MoQFfiApi.h"
 #include "moq_ffi.h"
 
 class FMoQSessionWrapper;
@@ -45,8 +46,17 @@ DECLARE_LOG_CATEGORY_EXTERN(LogO3DMoQSender, Log, All);
 class FO3DMoQSender : public IOpen3DSender
 {
 public:
+	/** Uses the production moq-ffi table and the platform clock. */
 	FO3DMoQSender();
+	/**
+	 * Uses the given moq-ffi table (tests pass a fake, ADR 0006 F2), a clock in seconds for
+	 * reconnect and timeout decisions (null = FPlatformTime::Seconds) and a backoff jitter seed.
+	 */
+	FO3DMoQSender(FMoQFfiApiRef InApi, TFunction<double()> InClock, uint64 InJitterSeed);
 	virtual ~FO3DMoQSender();
+
+	FO3DMoQSender(const FO3DMoQSender&) = delete;
+	FO3DMoQSender& operator=(const FO3DMoQSender&) = delete;
 
 	// IOpen3DSender interface
 	virtual bool Initialize(const FO3DTransportConfig& Config) override;
@@ -84,11 +94,20 @@ private:
 		FString TrackName;           // e.g., "character1"
 		MoqDeliveryMode DeliveryMode = MOQ_DELIVERY_STREAM;
 		uint64 MaxQueueBytes = 8ull * 1024ull * 1024ull;
+		/** Abandon a connect attempt that has not completed after this long (TRF-11). */
+		double ConnectTimeoutSeconds = 15.0;
 	};
 
 	bool ParseOptions(const FO3DTransportConfig& Config, FString& OutError);
 	bool AttemptConnect();
 	void HandleConnectionStateChanged(MoqConnectionState NewState);
+	/** Game thread: gives up on an in-flight connect that exceeded ConnectTimeoutSeconds. */
+	void HandleConnectTimeout(double Now);
+	/** Game thread: schedules the next connect attempt using capped, jittered backoff. */
+	void ScheduleReconnect(double Now);
+	double NowSeconds() const;
+	/** Snapshot of a publisher handle; any thread (TRF-9). */
+	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> GetPublisher(bool bAudio) const;
 	void StartWorker();
 	void StopWorker();
 	void WakeWorker();
@@ -111,9 +130,17 @@ private:
 	void DrainAudioQueue(bool bPublish);
 
 	FMoQSenderOptions Options;
+	FMoQFfiApiRef Api;
+	TFunction<double()> Clock;
+	uint64 JitterSeed = 0;
 	TSharedPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> Session;
+	/**
+	 * TRF-9: written on the game thread, read by the worker. Both sides go through
+	 * PublisherMutex, and the worker publishes on a snapshot, never on the member itself.
+	 */
 	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> MocapPublisherHandle;
 	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> AudioPublisherHandle;
+	mutable FCriticalSection PublisherMutex;
 	FDelegateHandle ConnectionDelegateHandle;
 
 	TQueue<TUniquePtr<FPendingPayload>, EQueueMode::Mpsc> SendQueue;
@@ -135,6 +162,8 @@ private:
 	FThreadSafeBool bConnectInFlight = false;
 	int32 ConsecutiveFailures = 0;
 	double LastConnectAttemptTimeSeconds = 0.0;
+	/** Earliest time (NowSeconds) for the next connect attempt; game thread only. */
+	double NextConnectAttemptTimeSeconds = 0.0;
 
 	double LastErrorLogTimeSeconds = 0.0;
 	double LastDropLogTimeSeconds = 0.0;
