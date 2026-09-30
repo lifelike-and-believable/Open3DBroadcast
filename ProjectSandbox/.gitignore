@@ -7,7 +7,10 @@ Build/
 DerivedDataCache/
 Intermediate/
 Saved/
-Content/
+# Content/ is tracked (sandbox maps and assets); only UE's per-user folders
+# under it are ignored.
+Content/Developers/
+Content/Collections/
 
 # Plugin symlink (created by Link script)
 Plugins/*
