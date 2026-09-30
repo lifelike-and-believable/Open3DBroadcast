@@ -20,7 +20,21 @@ Where:
 - `host`: IP address or hostname
 - `port`: TCP port number
 - `mode`: `pub`, `sub`, `push`, `pull`, `pair` (default: `pub`)
-- `role`: `server`, `client` (default: `server` for pub, `client` for sub)
+- `role`: `server` (listen) or `client` (dial). Supported roles, with the default first:
+
+| Side | Mode | Roles |
+|---|---|---|
+| Sender | `pub` | `server` only |
+| Sender | `pair` | `server`, `client` |
+| Sender | `push` | `client`, `server` |
+| Receiver | `sub` | `client` only |
+| Receiver | `pair` | `client`, `server` |
+| Receiver | `pull` | `server`, `client` |
+
+With default roles, one side of every pair listens and the other dials. A role a mode does
+not support falls back to the default. With no `host` option, the host comes from the URI,
+then its `?host=` query, then the stream id; the last resort is `0.0.0.0` for a listening
+socket and `127.0.0.1` for a dialing one.
 
 ### Example Configurations
 
@@ -53,14 +67,16 @@ If you see "NNG sender queue full" warnings and no animation on the receiver:
 
 ### High Latency / Cloud Connections
 
-The sender uses non-blocking sends with automatic retry to handle high-latency cloud connections gracefully:
-- Frames are re-queued if the socket buffer is full, rather than being dropped
-- The worker thread never blocks on network I/O
-- A 30-second send timeout prevents indefinite hangs on dead connections
+The sender never blocks on network I/O. A worker thread owns the socket and sends with
+`NNG_FLAG_NONBLOCK`:
+- When no peer is ready or NNG's send buffer (1024 messages) is full, the oldest queued frame
+  is dropped and counted in `DroppedFrames`. Frames are never re-queued, so a receiver that
+  reconnects gets current data, not a stale backlog.
+- There is no send timeout, because a non-blocking send never waits.
+- A dialing socket is reconnected by NNG in the background.
 
-If you still see frame drops with high latency:
-- Increase the `MaxQueueBytes` setting (default 4MB)
-- Consider increasing the repeater's buffer size (`main.cpp` line ~47)
+If you see frame drops with high latency:
+- Increase the sender's "Queue Capacity (MiB)" (option `nng.qmax`, in bytes; default 4 MiB)
 
 ## Performance Notes
 

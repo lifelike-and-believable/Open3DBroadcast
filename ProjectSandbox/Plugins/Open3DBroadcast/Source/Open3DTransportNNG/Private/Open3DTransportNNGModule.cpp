@@ -33,25 +33,15 @@ namespace NNGTransportCommon
 {
 	static constexpr uint64 DefaultQueueBytes = 4ull * 1024ull * 1024ull;
 
+	// Defaults live in NngHelpers so the panels, ConfigureTransport and the parser agree (TRB-40).
 	static int32 ResolveDefaultPort(O3DNNG::ENngMode Mode)
 	{
-		switch (Mode)
-		{
-		case O3DNNG::ENngMode::Pair:
-			return 7000;
-		case O3DNNG::ENngMode::Push:
-		case O3DNNG::ENngMode::Pull:
-			return 8000;
-		case O3DNNG::ENngMode::Sub:
-		case O3DNNG::ENngMode::Pub:
-		default:
-			return 6000;
-		}
+		return O3DNNG::GetDefaultPort(Mode);
 	}
 
 	static FString ResolveDefaultHost(bool bListen)
 	{
-		return bListen ? FString(TEXT("0.0.0.0")) : FString(TEXT("127.0.0.1"));
+		return O3DNNG::GetDefaultHost(bListen);
 	}
 
 	static FString UInt64ToString(uint64 Value)
@@ -269,6 +259,7 @@ namespace NNGSender
 			ModeOptions.Add(MakeShared<FModeOption>(FModeOption{ TEXT("Pair (server listen)"), TEXT("pair"), TEXT("server") }));
 			ModeOptions.Add(MakeShared<FModeOption>(FModeOption{ TEXT("Pair (client dial)"), TEXT("pair"), TEXT("client") }));
 			ModeOptions.Add(MakeShared<FModeOption>(FModeOption{ TEXT("Push (dial)"), TEXT("push"), TEXT("client") }));
+			ModeOptions.Add(MakeShared<FModeOption>(FModeOption{ TEXT("Push (listen)"), TEXT("push"), TEXT("server") }));
 		}
 
 		FString ResolveHostValue() const
@@ -355,16 +346,8 @@ namespace NNGSender
 				return true;
 			}
 
-			const O3DNNG::ENngMode Mode = CurrentMode();
-			if (Mode == O3DNNG::ENngMode::Push)
-			{
-				return false;
-			}
-			if (Mode == O3DNNG::ENngMode::Pair)
-			{
-				return !SelectedMode->Role.Equals(TEXT("client"), ESearchCase::IgnoreCase);
-			}
-			return true;
+			const O3DNNG::ENngRole Role = O3DNNG::ResolveRole(CurrentMode(), O3DNNG::RoleFromString(SelectedMode->Role), /*bSender=*/true);
+			return O3DNNG::IsListenRole(Role);
 		}
 
 		void HandleHostCommitted(const FText& NewText, ETextCommit::Type CommitType)
@@ -510,7 +493,8 @@ namespace NNGReceiver
 			BuildModeOptions();
 
 			const FString ModeValue = GetOption(O3DNNG::ModeOptionKey, TEXT("sub"));
-			const FString RoleValue = GetOption(O3DNNG::RoleOptionKey, TEXT("client"));
+			// No stored role selects the first entry for the mode, which is the default role.
+			const FString RoleValue = GetOption(O3DNNG::RoleOptionKey);
 			SelectedMode = FindMatchingMode(ModeOptions, ModeValue, RoleValue);
 			if (!SelectedMode.IsValid() && ModeOptions.Num() > 0)
 			{
@@ -713,12 +697,8 @@ namespace NNGReceiver
 				return false;
 			}
 
-			const O3DNNG::ENngMode Mode = CurrentMode();
-			if (Mode == O3DNNG::ENngMode::Pair || Mode == O3DNNG::ENngMode::Pull)
-			{
-				return !SelectedMode->Role.Equals(TEXT("client"), ESearchCase::IgnoreCase);
-			}
-			return false;
+			const O3DNNG::ENngRole Role = O3DNNG::ResolveRole(CurrentMode(), O3DNNG::RoleFromString(SelectedMode->Role), /*bSender=*/false);
+			return O3DNNG::IsListenRole(Role);
 		}
 
 		void HandleHostCommitted(const FText& NewText, ETextCommit::Type CommitType)
@@ -851,8 +831,8 @@ public:
 			const FString ModeString = NNGSenderConfig::GetOption(SenderComponent, O3DNNG::ModeOptionKey);
 			const FString RoleString = NNGSenderConfig::GetOption(SenderComponent, O3DNNG::RoleOptionKey);
 			const O3DNNG::ENngMode Mode = O3DNNG::ModeFromString(ModeString, O3DNNG::ENngMode::Pub);
-			const O3DNNG::ENngRole Role = O3DNNG::RoleFromString(RoleString, (Mode == O3DNNG::ENngMode::Push) ? O3DNNG::ENngRole::Client : O3DNNG::ENngRole::Server);
-			const bool bListen = (Mode == O3DNNG::ENngMode::Push) ? false : (Mode == O3DNNG::ENngMode::Pair ? Role != O3DNNG::ENngRole::Client : true);
+			const O3DNNG::ENngRole Role = O3DNNG::ResolveRole(Mode, O3DNNG::RoleFromString(RoleString), /*bSender=*/true);
+			const bool bListen = O3DNNG::IsListenRole(Role);
 
 			FString Host = NNGSenderConfig::GetOption(SenderComponent, O3DNNG::HostOptionKey);
 			if (Host.IsEmpty())
@@ -925,9 +905,9 @@ public:
 			const FString TopicString = NNGReceiverConfig::GetOption(Settings, O3DNNG::TopicOptionKey);
 
 			const O3DNNG::ENngMode Mode = O3DNNG::ModeFromString(ModeString, O3DNNG::ENngMode::Sub);
-			const O3DNNG::ENngRole DefaultRole = (Mode == O3DNNG::ENngMode::Pull || Mode == O3DNNG::ENngMode::Pair) ? O3DNNG::ENngRole::Server : O3DNNG::ENngRole::Client;
-			const O3DNNG::ENngRole Role = O3DNNG::RoleFromString(RoleString, DefaultRole);
-			const bool bListen = (Mode == O3DNNG::ENngMode::Pair || Mode == O3DNNG::ENngMode::Pull) ? (Role == O3DNNG::ENngRole::Server) : false;
+			// TRB-40: Pair defaults to dial here and to listen on the sender, so default ends connect.
+			const O3DNNG::ENngRole Role = O3DNNG::ResolveRole(Mode, O3DNNG::RoleFromString(RoleString), /*bSender=*/false);
+			const bool bListen = O3DNNG::IsListenRole(Role);
 
 			FString Host = HostValue;
 			if (Host.IsEmpty())

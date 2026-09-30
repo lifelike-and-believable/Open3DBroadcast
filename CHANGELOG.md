@@ -158,8 +158,34 @@
 - NNG: the send and receive buffers are now set as message counts (1024), which is what
   NNG expects. The sender passed a byte count with the wrong type, so the call failed
   silently and a pub socket kept its small default queue, dropping frames from any burst
-  (TRB-36, found by the new NNG conformance round-trip test). `NNG_OPT_SENDTIMEO` is
-  unchanged and still has no effect; the rest of TRB-36 stays with WP-S11.
+  (TRB-36, found by the new NNG conformance round-trip test).
+- NNG fixes (WP-S11):
+  - Sender: a worker thread owns the socket while the sender runs. `Start()` opens it
+    before the worker exists, the worker closes and reopens it, and `Stop()` closes it
+    after joining the worker. `Tick()` no longer reopens it from the game thread, which
+    could free the socket while the worker was sending (TRB-33). `Initialize()` now stops
+    a running sender first.
+  - Sender: when NNG returns `NNG_EAGAIN` (no peer ready, or its send buffer is full) the
+    oldest queued frame is dropped and counted in `DroppedFrames`. It used to be put back
+    at the tail of the queue, which reordered frames, spun the worker while no peer was
+    connected and replayed a stale backlog on reconnect (TRB-34).
+  - Sender: `NNG_OPT_SENDTIMEO` is no longer set. Every send is non-blocking, so the
+    30-second timeout never applied (TRB-36).
+  - A host in the `Uri`, its `?host=` query or the stream id is used when the `host`
+    option is empty. The default host used to win every time (TRB-39).
+  - Mode and role defaults and allowed combinations live in one place (`NngHelpers`).
+    Pair defaults to listen on the sender and dial on the receiver; the receiver module
+    used to make both ends listen. The receiver's "Pull (client dial)" now dials, and
+    the sender has a new "Push (listen)" choice; push and pull used to be forced to dial
+    and listen (TRB-40).
+  - Receiver: `NNG_OPT_RECVMAXSZ` is set to the 50 MiB cap, so NNG's smaller default no
+    longer drops large frames before `Poll()` sees them. An audio frame is counted once in
+    `FramesReceived`, not twice. Pipe callbacks get an opaque token instead of the
+    receiver's address. A dialing socket reads as connected only after a pipe event, not
+    right after the non-blocking dial (TRB-42).
+  - Open, listen, dial, parse and send failures, and a full send queue, are logged at
+    Warning (rate-limited where they repeat). Drops while no peer is ready are logged at
+    Log, at most every 2 s. Connection changes are logged at Log (TRB-43).
 
 ### Changed
 
@@ -281,6 +307,12 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   test. The fake moq-ffi table now routes published data to subscribers.
 - New Shared parser tests for the unified envelope and the audio frame
   formats (SHR-6).
+- NNG (WP-S11): one localhost integration test per mode and role pair,
+  `Open3DBroadcast.Transport.NNG.ModeRole.*` (pub/sub, pair both ways,
+  push/pull both ways), with default settings apart from the role. They use
+  127.0.0.1 and an OS-chosen port, and run in the default filter. New option
+  parser tests (`Options.UriHostHonoured`, `Options.DefaultRoles`) and
+  `Demux.AudioNotCountedTwice`.
 - Test names follow `Open3DBroadcast.<Area>.<Unit>.<Case>`; the
   `Open3DBroadcast.Open3DTransport*`, `O3DSender`, `O3DShared` and
   `O3DReceiver` prefixes are gone. Every test file uses
