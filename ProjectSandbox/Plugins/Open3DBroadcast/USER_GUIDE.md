@@ -21,6 +21,13 @@
 
 The **Open3DBroadcast Plugin** is a comprehensive Unreal Engine plugin for streaming skeletal animation data and audio in real-time. It enables you to capture motion from skeletal meshes in one Unreal Engine instance and receive it in another (or the same) instance using various network transports.
 
+### Requirements and Status
+
+- **Unreal Engine:** 5.7. Other engine versions are not supported.
+- **Platform:** Win64 (Windows 64-bit) only, for editor and game targets. Server and Program targets are not supported.
+- **Status:** Beta. The MoQ transport (`Open3DTransportMoQ`) is Experimental: it implements draft-ietf-moq-transport-07, MoQ relays must speak draft-07, and its options and behaviour can change between releases.
+- **Support:** [GitHub Issues](https://github.com/lifelike-and-believable/Open3DBroadcast/issues)
+
 ### Key Features
 
 - **Real-time skeletal animation streaming** at configurable frame rates
@@ -46,7 +53,7 @@ The **Open3DBroadcast Plugin** is a comprehensive Unreal Engine plugin for strea
 1. Copy the `Open3DBroadcast` plugin folder to your project's `Plugins/` directory
 2. Open your Unreal Engine project
 3. Go to **Edit → Plugins** and search for "Open3D"
-4. Enable the **Open3D Broadcast Suite** plugin
+4. Enable the **Open3DBroadcast** plugin (it is marked Beta)
 5. Restart the editor when prompted
 
 ### Your First Stream (5 Minutes)

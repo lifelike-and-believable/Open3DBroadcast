@@ -2,6 +2,13 @@
 
 A modular, self-contained Unreal Engine plugin for Open3DStream broadcasting and receiving, designed for easy distribution via Unreal Marketplace and Fab.
 
+## Requirements and status
+
+- **Unreal Engine:** 5.7. Other engine versions are not supported.
+- **Platform:** Win64 (Windows 64-bit) only, for editor and game targets. Server and Program targets are not supported.
+- **Status:** Beta. The MoQ transport (`Open3DTransportMoQ`) is Experimental: it implements draft-ietf-moq-transport-07, MoQ relays must speak draft-07, and its options and behaviour can change between releases.
+- **Support:** [GitHub Issues](https://github.com/lifelike-and-believable/Open3DBroadcast/issues)
+
 ## Features
 
 - **Modular Architecture**: Separate sender, receiver, and transport modules
@@ -23,6 +30,7 @@ A modular, self-contained Unreal Engine plugin for Open3DStream broadcasting and
 - **Open3DTransportSockets**: TCP/UDP socket transport
 - **Open3DTransportNNG**: NNG (nanomsg-next-generation) messaging
 - **Open3DTransportWebRTC**: WebRTC-based streaming with audio support
+- **Open3DTransportMoQ** (Experimental): Media over QUIC (draft-07) through a MoQ relay
 
 ### Test Module
 
@@ -157,7 +165,7 @@ This plugin is part of the Open3DStream project. See the main repository README 
 ## Support
 
 For issues specific to this plugin:
-- Check the [GitHub Issues](https://github.com/lifelike-and-believable/Open3DStream/issues)
+- Check the [GitHub Issues](https://github.com/lifelike-and-believable/Open3DBroadcast/issues)
 - Review the [workflows documentation](../../.github/workflows/README.md)
 
 For Unreal Engine integration questions:

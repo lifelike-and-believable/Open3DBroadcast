@@ -537,6 +537,22 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   outside `ThirdParty/` goes in `Build/Fab/copyright-allowlist.txt` with a
   reason; the list is empty.
 
+### Plugin descriptor (WP-F9)
+
+- The plugin is marked Beta (`"IsBetaVersion": true`, ADR 0002). The MoQ
+  transport is Experimental: UE has no per-module maturity key, so the
+  descriptor `Description`, the plugin README and the USER_GUIDE say so and
+  name the draft (draft-ietf-moq-transport-07) (FAB-12).
+- The plugin's display name (`FriendlyName`) is now **Open3DBroadcast**,
+  matching the plugin, README and USER_GUIDE names. It was "Open3D
+  Broadcast Suite" (UX-5, partial).
+- `SupportURL` points at this repository's GitHub issues instead of
+  open3dstream.com (FAB-13). `DocsURL` points at `USER_GUIDE.md` on the
+  `develop` branch; the old link used a `main` branch that does not exist
+  (FAB-14).
+- README and USER_GUIDE state the requirements: Unreal Engine 5.7, Win64
+  only, editor and game targets (DOC-6, partial).
+
 ### Schema/Protocol
 
 - No change to the TCP frame format (14-byte magic, little-endian length, payload; ADR 0009 item 6). The TCP sender now also writes a keepalive frame when idle: its payload is a 20-byte unified-envelope header (`O3DA`, version 1, kind Audio, payload size 0). Receivers built before this change parse it as an audio message, reject the empty payload without logging, and count it as received data, so it also stops their idle reconnects. Current receivers recognise it and ignore it. No other sender produces an audio envelope with an empty payload. Set `tcp.keepalive` to 0 to turn it off, for example for a third-party receiver that does not accept it. Protocol version and `O3DS_VERSION_TAG` are unchanged.
