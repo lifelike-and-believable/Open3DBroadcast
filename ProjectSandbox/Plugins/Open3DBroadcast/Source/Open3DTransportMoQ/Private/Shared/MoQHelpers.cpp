@@ -225,4 +225,71 @@ namespace MoQHelpers
 		const double Delay = 0.5 * FMath::Pow(2.0, static_cast<double>(Attempts));
 		return FMath::Clamp(Delay, kMinReconnectDelaySeconds, kMaxReconnectDelaySeconds);
 	}
+
+	double ComputeJitterUnit(uint64 JitterSeed, int32 ConsecutiveFailures)
+	{
+		// splitmix64 finaliser: cheap, stateless and well mixed.
+		uint64 X = JitterSeed + 0x9E3779B97F4A7C15ull * (static_cast<uint64>(FMath::Max(ConsecutiveFailures, 0)) + 1ull);
+		X = (X ^ (X >> 30)) * 0xBF58476D1CE4E5B9ull;
+		X = (X ^ (X >> 27)) * 0x94D049BB133111EBull;
+		X = X ^ (X >> 31);
+		// Top 53 bits give a double in [0, 1).
+		return static_cast<double>(X >> 11) * (1.0 / 9007199254740992.0);
+	}
+
+	double ComputeBackoffDelaySeconds(int32 ConsecutiveFailures, uint64 JitterSeed)
+	{
+		const double Base = ComputeReconnectDelaySeconds(ConsecutiveFailures);
+		const double Unit = ComputeJitterUnit(JitterSeed, ConsecutiveFailures);
+		return Base * (1.0 - kBackoffJitterFraction * Unit);
+	}
+
+	double ResolveConnectTimeoutSeconds(const FO3DTransportConfig& Config)
+	{
+		FString Value = GetAdvancedOption(Config, kKeyConnectTimeout);
+		if (Value.IsEmpty())
+		{
+			Value = GetAdvancedOption(Config, kKeyConnectTimeoutAlt);
+		}
+
+		double Seconds = kDefaultConnectTimeoutSeconds;
+		if (!Value.IsEmpty() && Value.IsNumeric())
+		{
+			Seconds = FCString::Atod(*Value);
+		}
+
+		return FMath::Clamp(Seconds, kMinConnectTimeoutSeconds, kMaxConnectTimeoutSeconds);
+	}
+
+	bool TryGetAudioCodecFromFrame(const uint8* Payload, int32 PayloadSize, O3DS::EUnifiedCodec& OutCodec)
+	{
+		// Mirrors the private constants in Open3DShared's O3DAudioSerialization.cpp
+		// (AudioPayloadVersion = 1, EncodedAudioPayloadVersion = 2).
+		constexpr uint8 Pcm16FrameVersion = 1;
+		constexpr uint8 EncodedFrameVersion = 2;
+		constexpr int32 EncodedCodecOffset = 2;
+
+		if (Payload == nullptr || PayloadSize <= 0)
+		{
+			return false;
+		}
+
+		if (Payload[0] == Pcm16FrameVersion)
+		{
+			OutCodec = O3DS::EUnifiedCodec::PCM16;
+			return true;
+		}
+
+		if (Payload[0] == EncodedFrameVersion && PayloadSize > EncodedCodecOffset)
+		{
+			// PCM16 is always written as a version 1 frame, so version 2 carries Opus today.
+			if (Payload[EncodedCodecOffset] == static_cast<uint8>(O3DS::EUnifiedCodec::Opus))
+			{
+				OutCodec = O3DS::EUnifiedCodec::Opus;
+				return true;
+			}
+		}
+
+		return false;
+	}
 }

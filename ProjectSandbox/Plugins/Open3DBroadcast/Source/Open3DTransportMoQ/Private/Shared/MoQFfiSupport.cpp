@@ -2,6 +2,7 @@
 #include "HAL/PlatformProcess.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
+#include "Shared/MoQFfiApi.h"
 #include "moq_ffi.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogMoQFfiSupport, Log, All);
@@ -58,34 +59,25 @@ bool FMoQFfiSupport::LoadLibrary()
 		return false;
 	}
 
-	// Get version string if available and ensure we are using the Draft 07 build for Cloudflare compatibility
+	// TRF-29: moq_version is a required export (ValidateLibrary checked it), so an empty
+	// version here means the library returned null, which is a mismatch too. moq-ffi exports no
+	// structured ABI version; until it does, the Draft 07 marker in the version string is the
+	// only build check available (the shipped DLL reports "moq_ffi 0.1.0 (IETF Draft 07)").
 	const FString Version = GetVersion();
-	if (!Version.IsEmpty())
+	if (Version.IsEmpty() || !Version.Contains(TEXT("Draft 07")))
 	{
-		const bool bIsDraft07 = Version.Contains(TEXT("Draft 07"));
-		if (!bIsDraft07)
-		{
-			StatusMessage = FString::Printf(TEXT("MoQ FFI build mismatch (reported %s). Rebuild moq-ffi with --features with_moq_draft07."), *Version);
-			UE_LOG(LogMoQFfiSupport, Error, TEXT("%s"), *StatusMessage);
-			FPlatformProcess::FreeDllHandle(LibraryHandle);
-			LibraryHandle = nullptr;
-			return false;
-		}
+		StatusMessage = FString::Printf(TEXT("MoQ FFI build mismatch (reported '%s'). Rebuild moq-ffi with --features with_moq_draft07."), *Version);
+		UE_LOG(LogMoQFfiSupport, Error, TEXT("%s"), *StatusMessage);
+		FPlatformProcess::FreeDllHandle(LibraryHandle);
+		LibraryHandle = nullptr;
+		return false;
 	}
 
 	bIsLoaded = true;
 
-	if (!Version.IsEmpty())
-	{
-		StatusMessage = FString::Printf(TEXT("MoQ FFI library loaded successfully (version %s)"), *Version);
-		UE_LOG(LogMoQFfiSupport, Log, TEXT("Successfully loaded MoQ FFI library from: %s"), *LibraryPath);
-		UE_LOG(LogMoQFfiSupport, Log, TEXT("MoQ FFI version: %s"), *Version);
-	}
-	else
-	{
-		StatusMessage = TEXT("MoQ FFI library loaded successfully");
-		UE_LOG(LogMoQFfiSupport, Log, TEXT("Successfully loaded MoQ FFI library from: %s"), *LibraryPath);
-	}
+	StatusMessage = FString::Printf(TEXT("MoQ FFI library loaded successfully (version %s)"), *Version);
+	UE_LOG(LogMoQFfiSupport, Log, TEXT("Successfully loaded MoQ FFI library from: %s"), *LibraryPath);
+	UE_LOG(LogMoQFfiSupport, Log, TEXT("MoQ FFI version: %s"), *Version);
 
 	return true;
 }
@@ -132,8 +124,9 @@ FString FMoQFfiSupport::GetVersion()
 		}
 	}
 
-	// Fallback: version not available from library
-	return FString(TEXT("unknown"));
+	// Missing export or null result: report nothing rather than a placeholder that could be
+	// mistaken for a real version (TRF-29).
+	return FString();
 }
 
 FString FMoQFfiSupport::GetLibraryPath()
@@ -186,39 +179,20 @@ bool FMoQFfiSupport::ValidateLibrary()
 		return false;
 	}
 
-	// Check for essential exported functions
-	// These are the core functions we expect from moq_ffi.h
-	struct RequiredSymbol
-	{
-		const TCHAR* Name;
-		bool bOptional;
-	};
-
-	const RequiredSymbol RequiredSymbols[] = {
-		{ TEXT("moq_client_create"), false },
-		{ TEXT("moq_client_destroy"), false },
-		{ TEXT("moq_connect"), false },
-		{ TEXT("moq_disconnect"), false },
-		{ TEXT("moq_create_publisher"), false },
-		{ TEXT("moq_publisher_destroy"), false },
-		{ TEXT("moq_subscribe"), false },
-		{ TEXT("moq_subscriber_destroy"), false },
-		{ TEXT("moq_free_str"), false },
-		{ TEXT("moq_version"), true }, // Version function is optional
-	};
-
+	// TRF-29: validate exactly the exports this module binds (FMoQFfiApi), all required.
+	// A stale DLL missing any of them would otherwise pass here and fail later on delay-load.
 	bool bAllValid = true;
-	for (const RequiredSymbol& Symbol : RequiredSymbols)
+	for (const TCHAR* SymbolName : FMoQFfiApi::GetRequiredSymbolNames())
 	{
-		void* Proc = FPlatformProcess::GetDllExport(LibraryHandle, Symbol.Name);
-		if (Proc == nullptr && !Symbol.bOptional)
+		void* Proc = FPlatformProcess::GetDllExport(LibraryHandle, SymbolName);
+		if (Proc == nullptr)
 		{
-			UE_LOG(LogMoQFfiSupport, Error, TEXT("Required symbol '%s' not found in MoQ FFI library"), Symbol.Name);
+			UE_LOG(LogMoQFfiSupport, Error, TEXT("Required symbol '%s' not found in MoQ FFI library"), SymbolName);
 			bAllValid = false;
 		}
-		else if (Proc != nullptr)
+		else
 		{
-			UE_LOG(LogMoQFfiSupport, Verbose, TEXT("Found symbol: %s"), Symbol.Name);
+			UE_LOG(LogMoQFfiSupport, Verbose, TEXT("Found symbol: %s"), SymbolName);
 		}
 	}
 

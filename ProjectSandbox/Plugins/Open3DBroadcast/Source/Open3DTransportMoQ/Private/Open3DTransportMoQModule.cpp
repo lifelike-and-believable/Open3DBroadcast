@@ -4,6 +4,7 @@
 #if O3D_WITH_TRANSPORT_MOQ
 
 #include "Shared/MoQAsyncDispatcher.h"
+#include "Shared/MoQFfiApi.h"
 #include "Shared/MoQFfiSupport.h"
 #include "Shared/MoQHelpers.h"
 #include "Sender/MoQSender.h"
@@ -566,14 +567,14 @@ public:
 
 		// Initialize the MoQ FFI crypto provider - must be called before any TLS operations
 		// BUG-1 fix: Check return value of moq_init()
-		if (!moq_init())
+		if (!FMoQFfiApi::GetProduction()->Init())
 		{
 			UE_LOG(LogO3DMoQSender, Error, TEXT("Failed to initialize MoQ FFI crypto provider"));
 			FMoQFfiSupport::UnloadLibrary();
 			return;
 		}
 
-		// Ensure dispatcher is ready for wrapper usage
+		// Delivers FFI callbacks to the game thread. Nothing restarts it after ShutdownModule.
 		FMoQAsyncDispatcher::Get().Initialize();
 	
 		RegisterTransports();
@@ -583,12 +584,13 @@ public:
 
 	virtual void ShutdownModule() override
 	{
-		FMoQAsyncDispatcher::Get().Shutdown();
-
-		// Unregister transports
+		// TRF-13 ordering: stop handing out instances, then stop delivering FFI callbacks
+		// (queued ones are discarded and later ones dropped), then unload the library.
+		// Instances still owned elsewhere are the owners' to stop before this point.
 		UnregisterTransports();
 
-		// Unload the MoQ FFI library
+		FMoQAsyncDispatcher::Get().Shutdown();
+
 		FMoQFfiSupport::UnloadLibrary();
 
 		UE_LOG(LogO3DMoQSender, Log, TEXT("Open3D MoQ transport module shut down"));

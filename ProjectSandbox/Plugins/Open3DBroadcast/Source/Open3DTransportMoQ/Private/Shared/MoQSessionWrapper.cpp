@@ -1,14 +1,10 @@
 #include "Shared/MoQSessionWrapper.h"
 
-#include "Async/Async.h"
-#include "HAL/PlatformProcess.h"
 #include "Misc/ScopeLock.h"
 #include "Shared/MoQAsyncDispatcher.h"
 #include "Templates/SharedPointer.h"
-#include "Templates/UniquePtr.h"
 #include "Containers/StringConv.h"
 #include "HAL/UnrealMemory.h"
-#include "moq_ffi.h"
 #include "O3DFfiContextRegistry.h"
 
 namespace
@@ -22,10 +18,16 @@ namespace
 
     // WP-S5 (TRF-12): moq-ffi does not document that callbacks stop after moq_disconnect or
     // *_destroy returns, so user_data is an opaque token resolved here, never an address.
-    TO3DFfiContextRegistry<FMoQConnectionContext>& GetConnectionRegistry()
+    // WP-S8: one token per connect attempt, so an abandoned attempt's callbacks resolve to nothing.
+    TO3DFfiContextRegistry<FMoQConnectAttempt>& GetAttemptRegistry()
     {
-        static TO3DFfiContextRegistry<FMoQConnectionContext> Registry;
+        static TO3DFfiContextRegistry<FMoQConnectAttempt> Registry;
         return Registry;
+    }
+
+    bool IsTerminalConnectState(MoqConnectionState State)
+    {
+        return State == MOQ_STATE_CONNECTED || State == MOQ_STATE_FAILED;
     }
 }
 
@@ -39,18 +41,20 @@ static TO3DFfiContextRegistry<T>& GetSubscriberRegistryFor()
 }
 
 FMoQSessionWrapper::FMoQSessionWrapper()
-    : ConnectionContext(MakeShared<FMoQConnectionContext, ESPMode::ThreadSafe>())
+    : FMoQSessionWrapper(FMoQFfiApi::GetProduction())
 {
-    ConnectionToken = GetConnectionRegistry().Register(ConnectionContext);
+}
+
+FMoQSessionWrapper::FMoQSessionWrapper(FMoQFfiApiRef InApi)
+    : Api(MoveTemp(InApi))
+    , ConnectionContext(MakeShared<FMoQConnectionContext, ESPMode::ThreadSafe>())
+{
 }
 
 FMoQSessionWrapper::~FMoQSessionWrapper()
 {
+    // Disconnect() also unregisters the current attempt token, so late callbacks resolve to nothing.
     Disconnect();
-    SessionHandle.Reset();
-    // After this, a late connection callback resolves the token to nothing.
-    GetConnectionRegistry().Unregister(ConnectionToken);
-    ConnectionToken = nullptr;
 }
 
 FMoQResult FMoQSessionWrapper::Initialize(const FString& InRelayUrl)
@@ -62,7 +66,7 @@ FMoQResult FMoQSessionWrapper::Initialize(const FString& InRelayUrl)
     }
 
     RelayUrl = MoveTemp(Normalized);
-    AnnouncedNamespaces.Reset();
+    ClearAnnouncedNamespaces();
     bInitialized = true;
 
     if (!SelfWeak.IsValid())
@@ -71,12 +75,8 @@ FMoQResult FMoQSessionWrapper::Initialize(const FString& InRelayUrl)
     }
     ConnectionContext->Wrapper = SelfWeak;
 
-    return SessionHandle.EnsureCreated();
-}
-
-FMoQResult FMoQSessionWrapper::EnsureClientAvailable()
-{
-    return SessionHandle.EnsureCreated();
+    // No FFI call here: the client is created per connect attempt (WP-S8).
+    return FMoQResult::Ok();
 }
 
 bool FMoQSessionWrapper::ValidateInitialized(FString& OutReason) const
@@ -96,6 +96,53 @@ bool FMoQSessionWrapper::ValidateInitialized(FString& OutReason) const
     return true;
 }
 
+FMoQClientRef FMoQSessionWrapper::GetClient() const
+{
+    FScopeLock Lock(&ClientMutex);
+    return Client;
+}
+
+void FMoQSessionWrapper::InvalidateAttempt()
+{
+    {
+        FScopeLock Lock(&ConnectionContext->StateMutex);
+        ConnectionContext->ActiveAttemptId.store(0);
+    }
+
+    GetAttemptRegistry().Unregister(ActiveAttemptToken);
+    ActiveAttemptToken = nullptr;
+    ActiveAttempt.Reset();
+}
+
+void FMoQSessionWrapper::ReleaseClient(bool bDisconnect)
+{
+    FMoQClientRef Old;
+    {
+        FScopeLock Lock(&ClientMutex);
+        Old = MoveTemp(Client);
+        Client.Reset();
+    }
+
+    if (bDisconnect && Old.IsValid() && Old->IsValid() && Api->Disconnect)
+    {
+        // Callbacks from this client carry a token that is no longer registered, so the
+        // DISCONNECTED notification moq-ffi sends from inside this call is ignored.
+        const MoqResult RawResult = Api->Disconnect(Old->Get());
+        if (RawResult.code != MOQ_OK)
+        {
+            const FMoQResult Result = FMoQResult::FromResult(RawResult, *Api);
+            UE_LOG(LogMoQBridge, Warning, TEXT("moq_disconnect failed: %s"), *Result.Message);
+        }
+        else
+        {
+            MoQFfi::CopyAndFreeString(*Api, RawResult.message);
+        }
+    }
+
+    // Destroyed here unless an in-flight connect task, a publisher or a subscriber still holds it.
+    Old.Reset();
+}
+
 FMoQResult FMoQSessionWrapper::Connect()
 {
     FString Reason;
@@ -104,130 +151,182 @@ FMoQResult FMoQSessionWrapper::Connect()
         return FMoQResult::FromCode(EMoQErrorCode::InvalidArgument, MoveTemp(Reason));
     }
 
-    FMoQResult EnsureResult = EnsureClientAvailable();
-    if (!EnsureResult.IsOk())
+    // TRF-8/TRF-11: every attempt uses a fresh client. The previous attempt (if still running)
+    // becomes stale and closes its own client when its blocking moq_connect returns.
+    InvalidateAttempt();
+    ReleaseClient(/*bDisconnect=*/true);
+    ClearSubscriberBindings();
+    ClearAnnouncedNamespaces();
+
+    FMoQClientRef NewClient = MakeShared<FMoQSessionHandle, ESPMode::ThreadSafe>(Api);
+    if (!NewClient->IsValid())
     {
-        return EnsureResult;
+        return FMoQResult::FromCode(EMoQErrorCode::Internal, TEXT("Failed to create MoQ client handle"));
     }
 
-    // Reset any previous "expected disconnect" markers now that we're attempting
-    // to bring the session back online.
-    ConnectionContext->bExpectingDisconnect.Store(false);
-
-    // Ensure dispatcher is initialized before connecting (callbacks may fire immediately)
-    FMoQAsyncDispatcher::Get().Initialize();
-
-    UE_LOG(LogMoQBridge, Log, TEXT("Attempting to connect to: %s"), *RelayUrl);
-
-    // CRITICAL: Run moq_connect on background thread to avoid blocking game thread
-    // The Tokio runtime inside moq-ffi may block waiting for connection
-    FString RelayUrlCopy = RelayUrl;
-    TWeakPtr<FMoQSessionWrapper> WeakSelf = SelfWeak;
-    void* const Token = ConnectionToken;
-    
-    AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [WeakSelf, RelayUrlCopy, Token]()
     {
-        TSharedPtr<FMoQSessionWrapper> StrongThis = WeakSelf.Pin();
-        if (!StrongThis.IsValid())
-        {
-            return;
-        }
+        FScopeLock Lock(&ClientMutex);
+        Client = NewClient;
+    }
 
-        FTCHARToUTF8 UrlUtf8(*RelayUrlCopy);
-        MoqResult RawResult;
-        
-        // Call moq_connect - may block on Tokio runtime
-        try
-        {
-            FScopeLock Lock(&StrongThis->SessionHandle.GetMutex());
-            
-            UE_LOG(LogMoQBridge, Verbose, TEXT("Calling moq_connect (background thread) with URL: %s"), UTF8_TO_TCHAR(UrlUtf8.Get()));
-            
-            RawResult = moq_connect(
-                StrongThis->SessionHandle.GetUnsafe(),
-                UrlUtf8.Get(),
-                &FMoQSessionWrapper::HandleConnectionStateThunk,
-                Token
-            );
-            
-            UE_LOG(LogMoQBridge, Verbose, TEXT("moq_connect returned: code=%d"), (int)RawResult.code);
-        }
-        catch (...)
-        {
-            UE_LOG(LogMoQBridge, Error, TEXT("Exception caught during moq_connect - possible Rust panic"));
-            
-            if (const char* LastError = moq_last_error())
-            {
-                UE_LOG(LogMoQBridge, Error, TEXT("FFI Last Error: %s"), UTF8_TO_TCHAR(LastError));
-            }
-            return;
-        }
+    const uint64 AttemptId = ++NextAttemptId;
+    TSharedRef<FMoQConnectAttempt, ESPMode::ThreadSafe> Attempt = MakeShared<FMoQConnectAttempt, ESPMode::ThreadSafe>();
+    Attempt->AttemptId = AttemptId;
+    Attempt->Connection = ConnectionContext;
+    void* const Token = GetAttemptRegistry().Register(Attempt);
+    ActiveAttempt = Attempt;
+    ActiveAttemptToken = Token;
 
-        FMoQResult Wrapped = FMoQResult::FromResult(RawResult);
-        if (!Wrapped.IsOk())
+    {
+        FScopeLock Lock(&ConnectionContext->StateMutex);
+        ConnectionContext->ActiveAttemptId.store(AttemptId);
+        ConnectionContext->CurrentState = MOQ_STATE_CONNECTING;
+        ConnectionContext->LastConnectError.Reset();
+    }
+
+    UE_LOG(LogMoQBridge, Log, TEXT("Attempting to connect to: %s (attempt %llu)"), *RelayUrl, AttemptId);
+
+    if (!Api->LaunchBlocking)
+    {
+        InvalidateAttempt();
+        ReleaseClient(/*bDisconnect=*/false);
+        return FMoQResult::FromCode(EMoQErrorCode::Internal, TEXT("No executor for the blocking connect call"));
+    }
+
+    // moq_connect blocks (moq-ffi runs it under its runtime's block_on with its own timeout),
+    // so it never runs on the game thread. No lock is held across it.
+    FMoQFfiApiRef ApiRef = Api;
+    TSharedPtr<FMoQConnectAttempt, ESPMode::ThreadSafe> AttemptPtr = Attempt;
+    FString Url = RelayUrl;
+    Api->LaunchBlocking([ApiRef, NewClient, AttemptPtr, Token, Url]() mutable
+    {
+        RunConnectAttempt(*ApiRef, NewClient, *AttemptPtr, Token, Url);
+
+        // Hand the client reference back so moq_client_destroy runs on the game thread when this
+        // was the last reference. If the dispatcher is shut down the lambda (and the reference) is
+        // dropped right here instead.
+        FMoQClientRef ToRelease = MoveTemp(NewClient);
+        FMoQAsyncDispatcher::Get().EnqueueGameThreadTask([ToRelease = MoveTemp(ToRelease)]() mutable
         {
-            UE_LOG(LogMoQBridge, Error, TEXT("moq_connect failed: %s"), *Wrapped.Message);
-            
-            if (const char* LastError = moq_last_error())
-            {
-                UE_LOG(LogMoQBridge, Error, TEXT("Additional error info: %s"), UTF8_TO_TCHAR(LastError));
-            }
-        }
-        else
-        {
-            UE_LOG(LogMoQBridge, Log, TEXT("moq_connect succeeded"));
-        }
+            ToRelease.Reset();
+        });
     });
 
-    // Return immediately - connection state will be reported via callback
     return FMoQResult::FromCode(EMoQErrorCode::Ok, TEXT("Connection initiated (async)"));
+}
+
+void FMoQSessionWrapper::RunConnectAttempt(const FMoQFfiApi& Api, const FMoQClientRef& ClientRef, FMoQConnectAttempt& Attempt, void* Token, const FString& Url)
+{
+    // TRF-39: no try/catch here. A Rust panic is not a C++ exception; moq-ffi wraps every export
+    // in catch_unwind and reports panics through the MoqResult instead.
+    FTCHARToUTF8 UrlUtf8(*Url);
+    const MoqResult RawResult = Api.Connect
+        ? Api.Connect(ClientRef->Get(), UrlUtf8.Get(), &FMoQSessionWrapper::HandleConnectionStateThunk, Token)
+        : MoqResult{MOQ_ERROR_INTERNAL, nullptr};
+
+    const FMoQResult Wrapped = FMoQResult::FromResult(RawResult, Api);
+    // Same thread as the failing call, read at once: the only valid use of moq_last_error().
+    const FString LastError = Wrapped.IsOk() ? FString() : MoQFfi::CopyLastErrorOnThisThread(Api);
+
+    const TSharedPtr<FMoQConnectionContext, ESPMode::ThreadSafe> Connection = Attempt.Connection.Pin();
+    const bool bStale = !Connection.IsValid() || Connection->ActiveAttemptId.load() != Attempt.AttemptId;
+
+    if (!Wrapped.IsOk())
+    {
+        FString Detail = Wrapped.Message;
+        if (!LastError.IsEmpty() && LastError != Wrapped.Message)
+        {
+            Detail = FString::Printf(TEXT("%s (%s)"), *Wrapped.Message, *LastError);
+        }
+        UE_LOG(LogMoQBridge, Warning, TEXT("moq_connect failed (attempt %llu%s): %s"), Attempt.AttemptId, bStale ? TEXT(", abandoned") : TEXT(""), *Detail);
+
+        if (!bStale)
+        {
+            {
+                FScopeLock Lock(&Connection->StateMutex);
+                Connection->LastConnectError = Detail;
+            }
+            // TRF-11: moq-ffi does not report FAILED on every error path (for example a bad URL
+            // scheme), so publish a terminal state here if the callback did not.
+            if (!Attempt.bTerminalReported.load())
+            {
+                ReportAttemptState(Attempt, MOQ_STATE_FAILED);
+            }
+        }
+        return;
+    }
+
+    if (bStale)
+    {
+        // Connected after the attempt was abandoned (timeout, Disconnect or a newer Connect).
+        UE_LOG(LogMoQBridge, Log, TEXT("moq_connect attempt %llu completed after it was abandoned; closing it"), Attempt.AttemptId);
+        if (Api.Disconnect)
+        {
+            const MoqResult DisconnectResult = Api.Disconnect(ClientRef->Get());
+            MoQFfi::CopyAndFreeString(Api, DisconnectResult.message);
+        }
+        return;
+    }
+
+    if (!Attempt.bTerminalReported.load())
+    {
+        // OK without a CONNECTED callback: report it so the owner is not left waiting.
+        ReportAttemptState(Attempt, MOQ_STATE_CONNECTED);
+    }
+    UE_LOG(LogMoQBridge, Log, TEXT("moq_connect succeeded (attempt %llu)"), Attempt.AttemptId);
+}
+
+void FMoQSessionWrapper::AbandonConnect()
+{
+    InvalidateAttempt();
+    // The in-flight task still holds the client; it closes it when moq_connect returns.
+    ReleaseClient(/*bDisconnect=*/false);
+    ClearAnnouncedNamespaces();
+    {
+        FScopeLock Lock(&ConnectionContext->StateMutex);
+        ConnectionContext->CurrentState = MOQ_STATE_DISCONNECTED;
+    }
 }
 
 void FMoQSessionWrapper::Disconnect()
 {
-    if (!SessionHandle.IsValid())
+    InvalidateAttempt();
     {
-        return;
+        FScopeLock Lock(&ConnectionContext->StateMutex);
+        ConnectionContext->CurrentState = MOQ_STATE_DISCONNECTED;
     }
-
-    ConnectionContext->bExpectingDisconnect.Store(true);
-
-    {
-        FScopeLock Lock(&SessionHandle.GetMutex());
-        if (SessionHandle.GetUnsafe() != nullptr)
-        {
-            MoqResult RawResult = moq_disconnect(SessionHandle.GetUnsafe());
-            if (RawResult.code != MOQ_OK)
-            {
-                FMoQResult Result = FMoQResult::FromResult(RawResult);
-                UE_LOG(LogMoQBridge, Warning, TEXT("moq_disconnect failed: %s"), *Result.Message);
-            }
-        }
-    }
-
-    ConnectionContext->CurrentState = MOQ_STATE_DISCONNECTED;
-
-    {
-        // Unregister before freeing: a callback that arrives after this finds no binding.
-        FScopeLock Lock(&SubscriberMutex);
-        for (TPair<MoqSubscriber*, FSubscriberEntry>& Pair : SubscriberBindings)
-        {
-            GetSubscriberRegistryFor<FSubscriberBinding>().Unregister(Pair.Value.Token);
-        }
-        SubscriberBindings.Reset();
-    }
-
-    {
-        FScopeLock Lock(&NamespaceMutex);
-        AnnouncedNamespaces.Reset();
-    }
-
-    ConnectionContext->bExpectingDisconnect.Store(false);
+    ReleaseClient(/*bDisconnect=*/true);
+    ClearSubscriberBindings();
+    ClearAnnouncedNamespaces();
 }
 
 bool FMoQSessionWrapper::IsConnected() const
 {
     return ConnectionContext->CurrentState.Load() == MOQ_STATE_CONNECTED;
+}
+
+FString FMoQSessionWrapper::GetLastConnectError() const
+{
+    FScopeLock Lock(&ConnectionContext->StateMutex);
+    return ConnectionContext->LastConnectError;
+}
+
+void FMoQSessionWrapper::ClearAnnouncedNamespaces()
+{
+    FScopeLock Lock(&NamespaceMutex);
+    AnnouncedNamespaces.Reset();
+    AnnouncedClient = nullptr;
+}
+
+void FMoQSessionWrapper::ClearSubscriberBindings()
+{
+    // Unregister before freeing: a callback that arrives after this finds no binding.
+    FScopeLock Lock(&SubscriberMutex);
+    for (TPair<MoqSubscriber*, FSubscriberEntry>& Pair : SubscriberBindings)
+    {
+        GetSubscriberRegistryFor<FSubscriberBinding>().Unregister(Pair.Value.Token);
+    }
+    SubscriberBindings.Reset();
 }
 
 FMoQResult FMoQSessionWrapper::AnnounceNamespace(const FString& Namespace)
@@ -238,8 +337,25 @@ FMoQResult FMoQSessionWrapper::AnnounceNamespace(const FString& Namespace)
         return FMoQResult::FromCode(EMoQErrorCode::InvalidArgument, TEXT("Namespace cannot be empty"));
     }
 
+    return AnnounceOnClient(GetClient(), Normalized);
+}
+
+FMoQResult FMoQSessionWrapper::AnnounceOnClient(const FMoQClientRef& ClientRef, const FString& Normalized)
+{
+    if (!ClientRef.IsValid() || !ClientRef->IsValid())
     {
+        return FMoQResult::FromCode(EMoQErrorCode::NotConnected, TEXT("No MoQ client (not connected)"));
+    }
+
+    {
+        // TRF-8: the cache belongs to one client. After a reconnect (new client) every namespace
+        // is announced again, once.
         FScopeLock Lock(&NamespaceMutex);
+        if (AnnouncedClient != ClientRef.Get())
+        {
+            AnnouncedNamespaces.Reset();
+            AnnouncedClient = ClientRef.Get();
+        }
         if (AnnouncedNamespaces.Contains(Normalized))
         {
             return FMoQResult::Ok();
@@ -247,17 +363,18 @@ FMoQResult FMoQSessionWrapper::AnnounceNamespace(const FString& Namespace)
     }
 
     FTCHARToUTF8 NamespaceUtf8(*Normalized);
-    MoqResult RawResult;
-    {
-        FScopeLock Lock(&SessionHandle.GetMutex());
-        RawResult = moq_announce_namespace(SessionHandle.GetUnsafe(), NamespaceUtf8.Get());
-    }
+    const MoqResult RawResult = Api->AnnounceNamespace
+        ? Api->AnnounceNamespace(ClientRef->Get(), NamespaceUtf8.Get())
+        : MoqResult{MOQ_ERROR_INTERNAL, nullptr};
 
-    FMoQResult Wrapped = FMoQResult::FromResult(RawResult);
+    FMoQResult Wrapped = FMoQResult::FromResult(RawResult, *Api);
     if (Wrapped.IsOk())
     {
         FScopeLock Lock(&NamespaceMutex);
-        AnnouncedNamespaces.Add(Normalized);
+        if (AnnouncedClient == ClientRef.Get())
+        {
+            AnnouncedNamespaces.Add(Normalized);
+        }
     }
     else
     {
@@ -282,7 +399,8 @@ FMoQResult FMoQSessionWrapper::CreatePublisher(const FMoQPublisherConfig& Config
         return FMoQResult::FromCode(EMoQErrorCode::NotConnected, TEXT("Cannot create publisher when disconnected"));
     }
 
-    FMoQResult AnnounceResult = AnnounceNamespace(NamespaceValue);
+    const FMoQClientRef ClientRef = GetClient();
+    FMoQResult AnnounceResult = AnnounceOnClient(ClientRef, NamespaceValue);
     if (!AnnounceResult.IsOk())
     {
         return AnnounceResult;
@@ -291,18 +409,20 @@ FMoQResult FMoQSessionWrapper::CreatePublisher(const FMoQPublisherConfig& Config
     FTCHARToUTF8 NamespaceUtf8(*NamespaceValue);
     FTCHARToUTF8 TrackUtf8(*TrackValue);
 
-    MoqPublisher* Publisher = nullptr;
-    {
-        FScopeLock Lock(&SessionHandle.GetMutex());
-        Publisher = moq_create_publisher_ex(SessionHandle.GetUnsafe(), NamespaceUtf8.Get(), TrackUtf8.Get(), Config.DeliveryMode);
-    }
+    MoqPublisher* Publisher = Api->CreatePublisherEx
+        ? Api->CreatePublisherEx(ClientRef->Get(), NamespaceUtf8.Get(), TrackUtf8.Get(), Config.DeliveryMode)
+        : nullptr;
 
     if (Publisher == nullptr)
     {
-        return FMoQResult::FromCode(EMoQErrorCode::Internal, FString::Printf(TEXT("Failed to create publisher for %s/%s"), *NamespaceValue, *TrackValue));
+        // Null return is the failure signal; moq_last_error() on this thread explains it.
+        const FString LastError = MoQFfi::CopyLastErrorOnThisThread(*Api);
+        return FMoQResult::FromCode(EMoQErrorCode::Internal, LastError.IsEmpty()
+            ? FString::Printf(TEXT("Failed to create publisher for %s/%s"), *NamespaceValue, *TrackValue)
+            : FString::Printf(TEXT("Failed to create publisher for %s/%s (%s)"), *NamespaceValue, *TrackValue, *LastError));
     }
 
-    OutPublisher = MakeShared<FMoQPublisherHandle>(Publisher);
+    OutPublisher = MakeShared<FMoQPublisherHandle, ESPMode::ThreadSafe>(ClientRef, Publisher);
     return FMoQResult::Ok();
 }
 
@@ -326,6 +446,12 @@ FMoQResult FMoQSessionWrapper::Subscribe(const FMoQSubscriptionConfig& Config, T
         return FMoQResult::FromCode(EMoQErrorCode::NotConnected, TEXT("Cannot subscribe while disconnected"));
     }
 
+    const FMoQClientRef ClientRef = GetClient();
+    if (!ClientRef.IsValid() || !ClientRef->IsValid())
+    {
+        return FMoQResult::FromCode(EMoQErrorCode::NotConnected, TEXT("No MoQ client (not connected)"));
+    }
+
     TSharedRef<FSubscriberBinding, ESPMode::ThreadSafe> Binding = MakeShared<FSubscriberBinding, ESPMode::ThreadSafe>();
     Binding->DataHandler = Config.OnData;
     void* const BindingToken = GetSubscriberRegistryFor<FSubscriberBinding>().Register(Binding);
@@ -333,22 +459,16 @@ FMoQResult FMoQSessionWrapper::Subscribe(const FMoQSubscriptionConfig& Config, T
     FTCHARToUTF8 NamespaceUtf8(*NamespaceValue);
     FTCHARToUTF8 TrackUtf8(*TrackValue);
 
-    MoqSubscriber* Subscriber = nullptr;
-    {
-        FScopeLock Lock(&SessionHandle.GetMutex());
-        Subscriber = moq_subscribe(SessionHandle.GetUnsafe(), NamespaceUtf8.Get(), TrackUtf8.Get(), &FMoQSessionWrapper::HandleSubscriberDataThunk, BindingToken);
-    }
+    MoqSubscriber* Subscriber = Api->Subscribe
+        ? Api->Subscribe(ClientRef->Get(), NamespaceUtf8.Get(), TrackUtf8.Get(), &FMoQSessionWrapper::HandleSubscriberDataThunk, BindingToken)
+        : nullptr;
 
     if (Subscriber == nullptr)
     {
         GetSubscriberRegistryFor<FSubscriberBinding>().Unregister(BindingToken);
 
-        FString ExtraMessage;
-        if (const char* LastError = moq_last_error())
-        {
-            ExtraMessage = UTF8_TO_TCHAR(LastError);
-        }
-
+        // Null return is the failure signal; moq_last_error() on this thread explains it.
+        const FString ExtraMessage = MoQFfi::CopyLastErrorOnThisThread(*Api);
         if (!ExtraMessage.IsEmpty())
         {
             return FMoQResult::FromCode(EMoQErrorCode::Internal, FString::Printf(TEXT("Failed to subscribe to %s/%s (%s)"), *NamespaceValue, *TrackValue, *ExtraMessage));
@@ -365,11 +485,11 @@ FMoQResult FMoQSessionWrapper::Subscribe(const FMoQSubscriptionConfig& Config, T
         SubscriberBindings.Add(Subscriber, MoveTemp(Entry));
     }
 
-    TSharedPtr<FMoQSubscriberHandle> Handle = MakeShared<FMoQSubscriberHandle>(Subscriber);
-    TWeakPtr<FMoQSessionWrapper> WrapperWeak = SelfWeak;
+    TSharedPtr<FMoQSubscriberHandle> Handle = MakeShared<FMoQSubscriberHandle, ESPMode::ThreadSafe>(ClientRef, Subscriber);
+    TWeakPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> WrapperWeak = SelfWeak;
     Handle->SetOnBeforeDestroy([WrapperWeak, Subscriber]()
     {
-        if (const TSharedPtr<FMoQSessionWrapper> Pinned = WrapperWeak.Pin())
+        if (const TSharedPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> Pinned = WrapperWeak.Pin())
         {
             Pinned->RemoveSubscriberBinding(Subscriber);
         }
@@ -386,7 +506,10 @@ FMoQResult FMoQSessionWrapper::SubscribeAsync(const FMoQSubscriptionConfig& Conf
         return FMoQResult::FromCode(EMoQErrorCode::InvalidArgument, TEXT("Completion callback must be provided"));
     }
 
-    FMoQAsyncDispatcher::Get().Initialize();
+    if (!Api->LaunchBlocking)
+    {
+        return FMoQResult::FromCode(EMoQErrorCode::Internal, TEXT("No executor for the blocking subscribe call"));
+    }
 
     if (!SelfWeak.IsValid())
     {
@@ -394,11 +517,11 @@ FMoQResult FMoQSessionWrapper::SubscribeAsync(const FMoQSubscriptionConfig& Conf
     }
 
     const FMoQSubscriptionConfig ConfigCopy = Config;
-    TWeakPtr<FMoQSessionWrapper> WeakSelf = SelfWeak;
+    TWeakPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> WeakSelf = SelfWeak;
 
-    AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [WeakSelf, ConfigCopy, Completion = MoveTemp(Completion)]() mutable
+    Api->LaunchBlocking([WeakSelf, ConfigCopy, Completion = MoveTemp(Completion)]() mutable
     {
-        TSharedPtr<FMoQSessionWrapper> StrongThis = WeakSelf.Pin();
+        TSharedPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> StrongThis = WeakSelf.Pin();
         if (!StrongThis.IsValid())
         {
             FMoQAsyncDispatcher::Get().EnqueueGameThreadTask([Completion = MoveTemp(Completion)]() mutable
@@ -411,7 +534,8 @@ FMoQResult FMoQSessionWrapper::SubscribeAsync(const FMoQSubscriptionConfig& Conf
         TSharedPtr<FMoQSubscriberHandle> Subscriber;
         FMoQResult Result = StrongThis->Subscribe(ConfigCopy, Subscriber);
 
-        FMoQAsyncDispatcher::Get().EnqueueGameThreadTask([Completion = MoveTemp(Completion), Result = MoveTemp(Result), Subscriber]() mutable
+        // The session is released on the game thread along with the completion.
+        FMoQAsyncDispatcher::Get().EnqueueGameThreadTask([Completion = MoveTemp(Completion), Result = MoveTemp(Result), Subscriber, StrongThis]() mutable
         {
             Completion(Result, Subscriber);
         });
@@ -432,37 +556,48 @@ void FMoQSessionWrapper::Unsubscribe(const TSharedPtr<FMoQSubscriberHandle>& Sub
 
 void FMoQSessionWrapper::HandleConnectionStateThunk(void* UserData, MoqConnectionState State)
 {
-    // Runs on a moq-ffi (Tokio) thread. Never pins the wrapper here: only the context.
-    if (const TSharedPtr<FMoQConnectionContext, ESPMode::ThreadSafe> Context = GetConnectionRegistry().Resolve(UserData))
+    // Runs on a moq-ffi thread (for connect, the thread that called moq_connect). Never pins
+    // the wrapper here: only the attempt and its connection context.
+    if (const TSharedPtr<FMoQConnectAttempt, ESPMode::ThreadSafe> Attempt = GetAttemptRegistry().Resolve(UserData))
     {
-        RecordConnectionState(*Context, State);
+        ReportAttemptState(*Attempt, State);
     }
 }
 
-bool FMoQSessionWrapper::RecordConnectionState(FMoQConnectionContext& Context, MoqConnectionState State)
+bool FMoQSessionWrapper::ReportAttemptState(FMoQConnectAttempt& Attempt, MoqConnectionState State)
 {
-    Context.CurrentState = State;
-
-    // Log state transitions for debugging
-    UE_LOG(LogMoQBridge, Log, TEXT("Connection state changed: %s"), *LexToString(State));
-
-    const bool bUnexpectedDisconnect =
-        (State == MOQ_STATE_DISCONNECTED || State == MOQ_STATE_FAILED) &&
-        !Context.bExpectingDisconnect.Load();
-
-    if (bUnexpectedDisconnect)
+    const TSharedPtr<FMoQConnectionContext, ESPMode::ThreadSafe> Connection = Attempt.Connection.Pin();
+    if (!Connection.IsValid())
     {
-        if (const char* LastError = moq_last_error())
-        {
-            UE_LOG(LogMoQBridge, Warning, TEXT("Unexpected MoQ session state %s: %s"), *LexToString(State), UTF8_TO_TCHAR(LastError));
-        }
-        else
-        {
-            UE_LOG(LogMoQBridge, Warning, TEXT("Unexpected MoQ session state %s (no additional FFI error provided)"), *LexToString(State));
-        }
+        return false;
     }
 
-    TWeakPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> WrapperWeak = Context.Wrapper;
+    if (IsTerminalConnectState(State) && Attempt.bTerminalReported.exchange(true))
+    {
+        // CONNECTED or FAILED was already reported for this attempt.
+        return false;
+    }
+
+    {
+        FScopeLock Lock(&Connection->StateMutex);
+        if (Connection->ActiveAttemptId.load() != Attempt.AttemptId)
+        {
+            return false;
+        }
+        Connection->CurrentState = State;
+    }
+
+    UE_LOG(LogMoQBridge, Log, TEXT("Connection state changed: %s (attempt %llu)"), *LexToString(State), Attempt.AttemptId);
+
+    if (State == MOQ_STATE_DISCONNECTED || State == MOQ_STATE_FAILED)
+    {
+        // TRF-39: moq_last_error() is thread-local and this callback may run on a different
+        // thread from the call that failed, so it is not consulted here. RunConnectAttempt
+        // records connect errors on the failing thread (see GetLastConnectError()).
+        UE_LOG(LogMoQBridge, Warning, TEXT("MoQ session state %s (attempt %llu)"), *LexToString(State), Attempt.AttemptId);
+    }
+
+    TWeakPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> WrapperWeak = Connection->Wrapper;
     if (!WrapperWeak.IsValid())
     {
         return false;
@@ -470,22 +605,54 @@ bool FMoQSessionWrapper::RecordConnectionState(FMoQConnectionContext& Context, M
 
     // The wrapper is pinned only on the game thread, so its destructor (which calls into
     // moq-ffi) never runs on an FFI thread.
-    FMoQAsyncDispatcher::Get().EnqueueGameThreadTask([WrapperWeak, State]()
+    const uint64 AttemptId = Attempt.AttemptId;
+    return FMoQAsyncDispatcher::Get().EnqueueGameThreadTask([WrapperWeak, AttemptId, State]()
     {
         if (const TSharedPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> Pinned = WrapperWeak.Pin())
         {
-            Pinned->ConnectionStateDelegate.Broadcast(State);
+            Pinned->HandleConnectionStateOnGameThread(AttemptId, State);
         }
     });
-    return true;
+}
+
+void FMoQSessionWrapper::HandleConnectionStateOnGameThread(uint64 AttemptId, MoqConnectionState State)
+{
+    if (ConnectionContext->ActiveAttemptId.load() != AttemptId)
+    {
+        // Superseded between the FFI callback and now (Disconnect, timeout or a newer Connect).
+        return;
+    }
+
+    if (State == MOQ_STATE_DISCONNECTED || State == MOQ_STATE_FAILED)
+    {
+        // TRF-8: nothing announced on this connection survives it.
+        ClearAnnouncedNamespaces();
+    }
+
+    ConnectionStateDelegate.Broadcast(State);
 }
 
 void FMoQSessionWrapper::HandleConnectionStateInternal(MoqConnectionState State)
 {
-    if (!RecordConnectionState(*ConnectionContext, State))
+    const uint64 AttemptId = ConnectionContext->ActiveAttemptId.load();
     {
-        UE_LOG(LogMoQBridge, VeryVerbose, TEXT("Connection state callback received without a valid self-reference (state=%s)."), *LexToString(State));
-        ConnectionStateDelegate.Broadcast(State);
+        FScopeLock Lock(&ConnectionContext->StateMutex);
+        ConnectionContext->CurrentState = State;
+    }
+
+    const TWeakPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> WrapperWeak = ConnectionContext->Wrapper;
+    const bool bQueued = WrapperWeak.IsValid() && FMoQAsyncDispatcher::Get().EnqueueGameThreadTask([WrapperWeak, AttemptId, State]()
+    {
+        if (const TSharedPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> Pinned = WrapperWeak.Pin())
+        {
+            Pinned->HandleConnectionStateOnGameThread(AttemptId, State);
+        }
+    });
+
+    if (!bQueued)
+    {
+        UE_LOG(LogMoQBridge, VeryVerbose, TEXT("Connection state delivered directly (state=%s)."), *LexToString(State));
+        HandleConnectionStateOnGameThread(AttemptId, State);
     }
 }
 
