@@ -522,7 +522,7 @@ python mock-token-server.py --port 9000
    - Set `bUseAutoTokenFetch = true`
    - Set `TokenEndpointUrl`
    - Remove or clear `Token` field
-   - Optionally set `TokenApiKey` if endpoint requires it
+   - Set the `webrtc.tokenEndpointAuth` secret (or `O3DB_WEBRTC_TOKEN_ENDPOINT_AUTH`) to the credential the endpoint requires; it is sent as `Authorization: Bearer`. There is no `TokenApiKey` field (see USER_GUIDE.md, Credentials)
 
 ### For New Projects
 
