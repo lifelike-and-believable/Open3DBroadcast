@@ -1,7 +1,7 @@
 #include "Shared/MoQTypes.h"
 
 #include "Containers/StringView.h"
-#include "Shared/MoQFfiApi.h"
+#include "MoQFfiApi.h"
 
 DEFINE_LOG_CATEGORY(LogMoQBridge);
 

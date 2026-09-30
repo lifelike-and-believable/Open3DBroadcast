@@ -31,7 +31,7 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 
 
 ### Development Workflows
-- **Testing:** `Build/Scripts/Run-AutomationTests.ps1` and `Run-Gauntlet.ps1` for UE automation tests.
+- **Testing:** `Build/Scripts/Run-AutomationTests.ps1 -TestFilter Open3DBroadcast` runs the UE automation tests. They live in the editor-only `Open3DBroadcastTests` module (ADR 0006); Gauntlet was retired. Internet tests (`Open3DBroadcast.Network.*`) register only with `O3DB_NETWORK_TESTS=1`.
 - **C++ tests:** `test_curves.cpp` and `test_curve_comprehensive.cpp` validate FlatBuffers serialization round-trips.
 
 ---
@@ -149,6 +149,6 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 
 ## 6) Running Automation Tests
 - Use `Build/Scripts/Run-AutomationTests.ps1` to run UE automation tests locally.
-- Use `Build/Scripts/Run-Gauntlet.ps1` to run Gauntlet tests locally.
+- Tests go in `Source/Open3DBroadcastTests/Private/<Area>/`, never in a Runtime module, named `Open3DBroadcast.<Area>.<Unit>.<Case>` and wrapped in `#if WITH_DEV_AUTOMATION_TESTS`. White-box access goes through the owning module's `Public/Testing/*.h` header. A new transport registers a conformance profile (`O3DTests::RegisterConformanceProfile`) or `Open3DBroadcast.Conformance.<Transport>.HasProfile` fails.
 
 *End of instructions. Keep this file authoritative; update it before you code.*

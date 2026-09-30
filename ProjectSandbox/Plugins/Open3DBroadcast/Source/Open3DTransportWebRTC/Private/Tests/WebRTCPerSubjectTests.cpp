@@ -123,7 +123,7 @@ namespace WebRTCPerSubjectTestHelpers
  * Verifies Phase 1 implementation: Per-subject labeled data channels
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCPerSubjectDataChannelsTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.PerSubject.DataChannels",
+	"Open3DBroadcast.Transport.WebRTC.PerSubject.DataChannels",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCPerSubjectDataChannelsTest::RunTest(const FString& Parameters)
@@ -165,7 +165,7 @@ bool FWebRTCPerSubjectDataChannelsTest::RunTest(const FString& Parameters)
  * Verifies that data channel labels match subject names
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCDataChannelLabelingTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.PerSubject.ChannelLabeling",
+	"Open3DBroadcast.Transport.WebRTC.PerSubject.ChannelLabeling",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCDataChannelLabelingTest::RunTest(const FString& Parameters)
@@ -211,7 +211,7 @@ bool FWebRTCDataChannelLabelingTest::RunTest(const FString& Parameters)
  * Verifies Phase 2 implementation: Per-subject audio tracks
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCPerSubjectAudioTracksTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.PerSubject.AudioTracks",
+	"Open3DBroadcast.Transport.WebRTC.PerSubject.AudioTracks",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCPerSubjectAudioTracksTest::RunTest(const FString& Parameters)
@@ -276,7 +276,7 @@ bool FWebRTCPerSubjectAudioTracksTest::RunTest(const FString& Parameters)
  * Verifies thread-safety of per-subject audio track map
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCConcurrentPerSubjectAudioTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.PerSubject.ConcurrentAudio",
+	"Open3DBroadcast.Transport.WebRTC.PerSubject.ConcurrentAudio",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCConcurrentPerSubjectAudioTest::RunTest(const FString& Parameters)
@@ -352,7 +352,7 @@ bool FWebRTCConcurrentPerSubjectAudioTest::RunTest(const FString& Parameters)
  * Verifies that audio tracks are properly released
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCAudioTrackCleanupTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.PerSubject.AudioTrackCleanup",
+	"Open3DBroadcast.Transport.WebRTC.PerSubject.AudioTrackCleanup",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCAudioTrackCleanupTest::RunTest(const FString& Parameters)
@@ -451,7 +451,7 @@ public:
  * Test: Concurrent Send() calls from multiple threads (WebRTC implementation)
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCConcurrentSendTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.Concurrency.MultipleSends",
+	"Open3DBroadcast.Transport.WebRTC.Concurrency.MultipleSends",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCConcurrentSendTest::RunTest(const FString& Parameters)

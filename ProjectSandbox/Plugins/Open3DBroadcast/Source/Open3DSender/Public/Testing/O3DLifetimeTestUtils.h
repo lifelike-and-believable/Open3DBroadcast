@@ -3,7 +3,9 @@
 #pragma once
 
 // Test-only helpers for the WP-S5 lifetime stress tests. Compiled only with dev automation
-// tests; WP-T2 moves them into the Open3DBroadcastTests module (ADR 0006).
+// tests. Header-only. It stays in Open3DSender, not in Open3DBroadcastTests, because the WebRTC
+// tests still live in their Runtime module and cannot depend on an Editor test module; WP-F11
+// moves them to Open3DBroadcastWebRTCTests, after which this header can move too (ADR 0006).
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "CoreMinimal.h"
@@ -129,12 +131,13 @@ namespace O3DLifetimeTest
 
 	/**
 	 * Start and stop a sender StressCycles times while a fake audio thread submits PCM.
-	 * MakeSender creates a new sender; Configure initializes it and returns false on failure.
-	 * bStart=false runs Initialize/CreateAudioSink/Stop only (for transports that need a
-	 * network peer or an FFI connection to start).
+	 * MakeSender creates a new sender each cycle (a registry factory or a Testing header's create
+	 * function); MakeConfig returns the config for a cycle. bStart=false runs
+	 * Initialize/CreateAudioSink/Stop only (for transports that need a network peer or an FFI
+	 * connection to start).
 	 */
-	template <typename TSender, typename TMakeConfig>
-	FStressResult RunSenderStress(TMakeConfig&& MakeConfig, bool bStart, int32 Cycles = StressCycles)
+	template <typename TMakeSender, typename TMakeConfig>
+	FStressResult RunSenderStressWith(TMakeSender&& MakeSender, TMakeConfig&& MakeConfig, bool bStart, int32 Cycles = StressCycles)
 	{
 		FStressResult Result;
 		FFakeAudioThread AudioThread;
@@ -145,8 +148,13 @@ namespace O3DLifetimeTest
 		for (int32 Cycle = 0; Cycle < Cycles; ++Cycle)
 		{
 			++Result.CyclesRun;
-			TSharedPtr<TSender> Sender = MakeShared<TSender>();
+			TSharedPtr<IOpen3DSender> Sender = MakeSender();
 			const FO3DTransportConfig Config = MakeConfig(Cycle);
+			if (!Sender.IsValid())
+			{
+				++Result.StartFailures;
+				continue;
+			}
 			if (!Sender->Initialize(Config) || (bStart && !Sender->Start()))
 			{
 				++Result.StartFailures;
@@ -195,6 +203,14 @@ namespace O3DLifetimeTest
 		Result.Submitted = AudioThread.GetSubmitted();
 		Result.Accepted = AudioThread.GetAccepted();
 		return Result;
+	}
+
+	/** RunSenderStressWith for a concrete sender type the caller can construct directly. */
+	template <typename TSender, typename TMakeConfig>
+	FStressResult RunSenderStress(TMakeConfig&& MakeConfig, bool bStart, int32 Cycles = StressCycles)
+	{
+		return RunSenderStressWith([]() -> TSharedPtr<IOpen3DSender> { return MakeShared<TSender>(); },
+			Forward<TMakeConfig>(MakeConfig), bStart, Cycles);
 	}
 }
 

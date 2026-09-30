@@ -451,13 +451,16 @@ bool FO3DNngSender::OpenSocket()
         UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender pipe notify remove failed (%d) %s"), NotifyRem, UTF8_TO_TCHAR(nng_strerror(NotifyRem)));
     }
 
-    // Increase NNG's internal send buffer to handle cloud network latency
-    // This prevents NNG from hitting backpressure before our application queue does
-    int SetSendBufRet = nng_setopt_size(NewSocket->Socket, NNG_OPT_SENDBUF, Options.MaxQueueBytes);
+    // NNG's send buffer is an int counting messages (0-8192), not bytes (TRB-36). With the
+    // default depth, a pub socket drops whatever overflows a subscriber's per-pipe queue, so a
+    // burst of frames loses messages even on 127.0.0.1. The application queue (MaxQueueBytes)
+    // remains the byte limit and backpressure point.
+    constexpr int NngSendBufMessages = 1024;
+    const int SetSendBufRet = nng_socket_set_int(NewSocket->Socket, NNG_OPT_SENDBUF, NngSendBufMessages);
     if (SetSendBufRet != 0)
     {
-        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender set send buffer to %llu bytes (result: %d %s)"),
-            Options.MaxQueueBytes, SetSendBufRet, UTF8_TO_TCHAR(nng_strerror(SetSendBufRet)));
+        UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender could not set send buffer to %d messages (%d %s)"),
+            NngSendBufMessages, SetSendBufRet, UTF8_TO_TCHAR(nng_strerror(SetSendBufRet)));
     }
 
     // Set send timeout to prevent worker thread from blocking indefinitely on slow/dead connections

@@ -1,0 +1,17 @@
+# Modules left out of the Fab source package.
+#
+# Read by Build/Scripts/fab-package.py (the fab-package CI job). For each
+# name below the job deletes Source/<Module>/ from the staged copy of the
+# plugin and removes the module's entry from the staged .uplugin. GitHub
+# builds of the plugin are not affected.
+#
+# One module name per line. Blank lines and lines starting with '#' are
+# ignored. A listed module that does not exist in the plugin is reported and
+# skipped, so a name can be listed before the module lands.
+
+# ADR 0002: WebRTC ships as a separate add-on, not in the Fab package.
+# Remove this line only with the counsel sign-off that ADR requires.
+Open3DTransportWebRTC
+
+# ADR 0006: developer tests never ship to Fab users.
+Open3DBroadcastTests

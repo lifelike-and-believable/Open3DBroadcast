@@ -55,6 +55,7 @@ public:
     const FO3DReceiverSourceConfig& GetSourceSettings() const { return SourceSettings; }
 
 private:
+    // Test-only white-box access, defined in Public/Testing/O3DReceiverTesting.h (WP-T2).
     friend struct FO3DReceiverSourceTestAccessor;
     friend struct FO3DReceiverCorrectnessTestAccessor;
     friend struct FO3DReceiverSecretsTestAccess;
@@ -183,7 +184,6 @@ private:
     // Descriptor caches
     TMap<FName, uint64> SubjectSkeletonHashes;
     TMap<FName, uint64> SubjectCurveHashes;
-    FName LastObservedSubjectName;
 
     // Per-subject bone structure cache, so FName construction for bone names only runs
     // when the skeleton changes. Reused only while the fingerprint (bone count, names

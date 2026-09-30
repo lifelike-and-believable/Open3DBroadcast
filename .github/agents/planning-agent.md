@@ -65,7 +65,6 @@ Before creating a plan, the agent MUST research:
 #### C. Testing Infrastructure
 - **Identify relevant test frameworks**:
   - Unreal automation tests (`Build/Scripts/Run-AutomationTests.ps1`)
-  - Gauntlet tests (`Build/Scripts/Run-Gauntlet.ps1`)
   - C++ unit tests (e.g., `test_curves.cpp`)
 - **Understand test requirements**:
   - What test coverage is expected for this type of change

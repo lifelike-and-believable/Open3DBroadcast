@@ -2,27 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "Containers/BitArray.h"
+#include "O3DSenderCurveConfig.h"
 
 class USkeletalMeshComponent;
-
-/** Tunable curve filtering parameters shared between the sender component and processor. */
-struct FO3DSenderCurveConfig
-{
-    bool bClampMorphCurvesToUnit = true;
-    bool bDropNaNAndInfinity = true;
-    /** Master switch for include/exclude patterns and the value filters below (SND-20). */
-    bool bEnableCurveFiltering = false;
-    /**
-     * Apply the per-frame epsilon/delta value filters. Only meaningful with bEnableCurveFiltering;
-     * the component turns it off for the residual and quantized encodings (ADR 0005 (ii), SND-3).
-     */
-    bool bApplyValueFilters = false;
-    float CurveEpsilon = 0.0005f;
-    float CurveDeltaThreshold = 0.001f;
-    const TArray<FString>* IncludeCurvePatterns = nullptr;
-    const TArray<FString>* ExcludeCurvePatterns = nullptr;
-    bool bLogFilteredCurves = false;
-};
 
 /**
  * Helper that caches the available animation curves on a skeletal mesh component, collects per-frame
@@ -42,7 +24,8 @@ public:
     const TArray<float>& GetCurveValues() const { return CurveValues; }
 
 private:
-    friend struct FO3DSenderWireTestAccess; // test-only white-box access (see O3DSenderComponent.h)
+    // Test-only white-box access (Public/Testing/O3DSenderTesting.h). Unconditional on purpose.
+    friend class FO3DSenderCurveProcessorProbe;
 
     void RefreshCurveCache(USkeletalMeshComponent* SkelComp);
     void UpdatePatternCacheIfNeeded(const FO3DSenderCurveConfig& Config);
