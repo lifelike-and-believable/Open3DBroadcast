@@ -4,14 +4,21 @@ using UnrealBuildTool;
 using System;
 using System.IO;
 
-[SupportedTargetTypes(TargetType.Game, TargetType.Editor)]
+// Editor, Game and Client; Server and Program are excluded (ADR 0001, FAB-8). The .uplugin says
+// the same with "TargetDenyList": [ "Server", "Program" ].
+[SupportedTargetTypes(TargetType.Editor, TargetType.Game, TargetType.Client)]
 public class Open3DShared : ModuleRules
 {
     public Open3DShared(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
+        // O3DBuildFlags lives in Open3DBroadcastBuildFlags/Open3DBroadcastBuildFlags.Build.cs.
         O3DBuildFlags.Apply(Target, this);
+        O3DBuildFlags.ReportIgnoredFlags();
+
+        // No bEnableExceptions: this module has no try/catch and includes no C++ third-party
+        // headers (opus.h is C). See BUILD-5.
 
         var PluginRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", ".."));
 
@@ -32,8 +39,15 @@ public class Open3DShared : ModuleRules
                 bWithOpus = true;
             }
         }
+        if (!bWithOpus)
+        {
+            // SHR-21: say so at build time instead of switching Opus off silently.
+            Console.WriteLine($"Warning: Open3DShared is built without Opus for {Target.Platform} (O3D_WITH_OPUS=0): Opus audio encoding and decoding are unavailable.");
+        }
         PublicDefinitions.Add($"O3D_WITH_OPUS={(bWithOpus ? 1 : 0)}");
 
+        // Public, checked against Public/ (SHR-20): O3DCredentialLibrary.h declares a
+        // UBlueprintFunctionLibrary, which needs CoreUObject and Engine.
         PublicDependencyModuleNames.AddRange(new string[]
         {
             "Core",
@@ -47,123 +61,3 @@ public class Open3DShared : ModuleRules
         });
     }
 }
-
-internal static class O3DBuildFlags
-{
-    private sealed class Settings
-    {
-        public bool BuildSender = true;
-        public bool BuildReceiver = true;
-        public bool WithSockets = true;
-        public bool WithNNG = true;
-        public bool WithWebRTC = true;
-        public bool WithMoQ = true;
-        public bool WebRtcBackendLiveKit = true;
-        public bool WebRtcBackendLibDc = true;
-        public bool EnableLegacy = false;
-    }
-
-    private static Settings Cached;
-    private static readonly object CacheGuard = new object();
-
-    private static Settings Get(ReadOnlyTargetRules Target)
-    {
-        lock (CacheGuard)
-        {
-            if (Cached != null)
-            {
-                return Cached;
-            }
-
-            Settings Result = new Settings();
-
-            Result.BuildSender = ReadBool("O3D_BUILD_SENDER", Result.BuildSender);
-            Result.BuildReceiver = ReadBool("O3D_BUILD_RECEIVER", Result.BuildReceiver);
-            Result.WithSockets = ReadBool("O3D_WITH_TRANSPORT_SOCKETS", Result.WithSockets);
-            Result.WithNNG = ReadBool("O3D_WITH_TRANSPORT_NNG", Result.WithNNG);
-            Result.WithWebRTC = ReadBool("O3D_WITH_TRANSPORT_WEBRTC", Result.WithWebRTC);
-            Result.WithMoQ = ReadBool("O3D_WITH_TRANSPORT_MOQ", Result.WithMoQ);
-            if (Result.WithMoQ && Target.Platform != UnrealTargetPlatform.Win64)
-            {
-                System.Console.WriteLine("O3D_WITH_TRANSPORT_MOQ is only supported on Win64 (target platform: {0}). Disabling MoQ transport for this build.", Target.Platform);
-                Result.WithMoQ = false;
-            }
-            Result.WebRtcBackendLiveKit = ReadBool("O3D_WEBRTC_BACKEND_LIVEKIT", Result.WebRtcBackendLiveKit);
-            Result.WebRtcBackendLibDc = ReadBool("O3D_WEBRTC_BACKEND_LIBDC", Result.WebRtcBackendLibDc);
-            Result.EnableLegacy = ReadBool("O3D_ENABLE_LEGACY", Result.EnableLegacy);
-
-            if (!Result.WithWebRTC)
-            {
-                Result.WebRtcBackendLiveKit = false;
-                Result.WebRtcBackendLibDc = false;
-            }
-            else if (!Result.WebRtcBackendLiveKit && !Result.WebRtcBackendLibDc)
-            {
-                throw new BuildException("O3D_WITH_TRANSPORT_WEBRTC is enabled, but no WebRTC backend was requested. Set O3D_WEBRTC_BACKEND_LIVEKIT or O3D_WEBRTC_BACKEND_LIBDC to 1.");
-            }
-
-            Cached = Result;
-            return Result;
-        }
-    }
-
-    private static bool ReadBool(string EnvVar, bool DefaultValue)
-    {
-        string Raw = Environment.GetEnvironmentVariable(EnvVar);
-        if (string.IsNullOrEmpty(Raw))
-        {
-            return DefaultValue;
-        }
-
-        if (int.TryParse(Raw, out int Numeric))
-        {
-            return Numeric != 0;
-        }
-
-        if (bool.TryParse(Raw, out bool Logical))
-        {
-            return Logical;
-        }
-
-        throw new BuildException($"Environment variable {EnvVar} must be 0/1/true/false, but was '{Raw}'.");
-    }
-
-    public static void Apply(ReadOnlyTargetRules Target, ModuleRules Rules, bool bRequireSender = false, bool bRequireReceiver = false)
-    {
-        Settings Flags = Get(Target);
-
-        // Several O3DS modules rely on third-party code (FlatBuffers, libdatachannel, nng)
-        // that uses standard C++ exceptions. Ensure /EHsc is enabled so try/catch blocks
-        // compile successfully (prevents C4530).
-        Rules.bEnableExceptions = true;
-
-        Rules.PublicDefinitions.Add($"O3D_BUILD_SENDER={(Flags.BuildSender ? 1 : 0)}");
-        Rules.PublicDefinitions.Add($"O3D_BUILD_RECEIVER={(Flags.BuildReceiver ? 1 : 0)}");
-        Rules.PublicDefinitions.Add($"O3D_WITH_TRANSPORT_SOCKETS={(Flags.WithSockets ? 1 : 0)}");
-        Rules.PublicDefinitions.Add($"O3D_WITH_TRANSPORT_NNG={(Flags.WithNNG ? 1 : 0)}");
-        Rules.PublicDefinitions.Add($"O3D_WITH_TRANSPORT_WEBRTC={(Flags.WithWebRTC ? 1 : 0)}");
-        Rules.PublicDefinitions.Add($"O3D_WITH_TRANSPORT_MOQ={(Flags.WithMoQ ? 1 : 0)}");
-        Rules.PublicDefinitions.Add($"O3D_WEBRTC_BACKEND_LIVEKIT={(Flags.WebRtcBackendLiveKit ? 1 : 0)}");
-        Rules.PublicDefinitions.Add($"O3D_WEBRTC_BACKEND_LIBDC={(Flags.WebRtcBackendLibDc ? 1 : 0)}");
-        Rules.PublicDefinitions.Add($"O3D_ENABLE_LEGACY={(Flags.EnableLegacy ? 1 : 0)}");
-
-        if (bRequireSender && !Flags.BuildSender)
-        {
-            throw new BuildException("Open3DSender cannot be compiled when O3D_BUILD_SENDER=0.");
-        }
-
-        if (bRequireReceiver && !Flags.BuildReceiver)
-        {
-            throw new BuildException("Open3DReceiver cannot be compiled when O3D_BUILD_RECEIVER=0.");
-        }
-    }
-
-    public static bool IsSenderEnabled(ReadOnlyTargetRules Target) => Get(Target).BuildSender;
-    public static bool IsReceiverEnabled(ReadOnlyTargetRules Target) => Get(Target).BuildReceiver;
-    public static bool IsSocketsEnabled(ReadOnlyTargetRules Target) => Get(Target).WithSockets;
-    public static bool IsNNGEnabled(ReadOnlyTargetRules Target) => Get(Target).WithNNG;
-    public static bool IsWebRtcEnabled(ReadOnlyTargetRules Target) => Get(Target).WithWebRTC;
-    public static bool IsMoQEnabled(ReadOnlyTargetRules Target) => Get(Target).WithMoQ;
-    public static bool IsLegacyEnabled(ReadOnlyTargetRules Target) => Get(Target).EnableLegacy;
-}
-

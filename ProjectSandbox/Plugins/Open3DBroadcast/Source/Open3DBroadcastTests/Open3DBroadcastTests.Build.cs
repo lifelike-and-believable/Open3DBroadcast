@@ -13,13 +13,12 @@ public class Open3DBroadcastTests : ModuleRules
     {
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        // Same O3D_* definitions (and /EHsc) as the modules under test.
+        // Same O3D_* definitions as the modules under test.
         O3DBuildFlags.Apply(Target, this);
 
-        if (!O3DBuildFlags.IsSenderEnabled(Target) || !O3DBuildFlags.IsReceiverEnabled(Target))
-        {
-            return;
-        }
+        // /EHsc: the tests compile the o3ds core and FlatBuffers headers, like the Sender and
+        // Receiver modules (BUILD-5).
+        bEnableExceptions = true;
 
         // Public: the harness headers (conformance registry, fakes, fixtures) expose these types,
         // and the WebRTC add-on test module (WP-F11) builds on them.
