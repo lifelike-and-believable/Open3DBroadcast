@@ -85,6 +85,38 @@
   filtering is disabled, and pattern edits apply on the next frame
   (SND-20).
 
+- MoQ (WP-S8): after a dropped connection and a reconnect, the sender
+  announces its namespaces again. Each connect attempt now uses a new
+  moq-ffi client, and the session's announce cache belongs to that client,
+  so a reconnect used to skip the ANNOUNCE and publish on a namespace the
+  relay did not know (TRF-8).
+- MoQ: the send worker no longer copies publisher handles while the game
+  thread resets them. Both sides go through a lock, and the worker publishes
+  on its own snapshot (TRF-9).
+- MoQ: a connect attempt always ends. When `moq_connect` returns an error
+  without a FAILED callback, the session reports FAILED itself, and an
+  attempt that has not finished within the new `connect_timeout` option
+  (default 15 s) is abandoned and retried on a new client. The sender and
+  receiver used to stop retrying for good in both cases (TRF-11).
+  `moq_connect` also no longer holds a lock that `Disconnect()` needs, so
+  stopping during a slow connect no longer blocks the game thread.
+- MoQ: FFI callbacks reach the game thread through a queue drained by a
+  core ticker instead of a dedicated dispatcher thread. The module stops it
+  before unloading moq-ffi, drops callbacks that arrive afterwards, and no
+  longer restarts it lazily during shutdown (TRF-13).
+- MoQ receiver: a failed subscribe is retried with capped, jittered
+  exponential backoff instead of on every `Poll()` (TRF-20). Reconnects use
+  the same backoff with jitter.
+- MoQ receiver: audio is decoded with the codec written in each frame's
+  header. The receiver used its own codec setting, so every frame failed
+  when it differed from the sender's (TRF-37).
+- MoQ: `moq_last_error()` is read only on the thread of the call that
+  failed, right after it, and its text is kept with the connect error. The
+  connection callback no longer reads it, since that thread's value belongs
+  to a different call. The `catch (...)` around `moq_connect` is removed: it
+  cannot catch a Rust panic, which moq-ffi already converts into an error
+  result (TRF-39).
+
 ### Changed
 
 - The largest reassembled UDP message the receiver accepts drops from 50 MiB to 4 MiB by default; set the new `udp.maxframe` receiver option to raise it (up to 50 MiB).
@@ -106,6 +138,15 @@
 - UE sender: `FO3DSenderSerializer` no longer listens to `OnDescriptorReady`
   and no longer reads component properties. Frames carry the descriptor and
   an `FO3DSenderEncodingSettings` snapshot; `SerializePoseFrame()` is public.
+
+- MoQ: new `connect_timeout` (alias `moq.connect_timeout`) transport option,
+  in seconds, default 15, clamped to 1-120 (WP-S8).
+- MoQ: library validation checks every moq-ffi export the module binds,
+  and `moq_version` is required. A missing version used to be treated as
+  optional and then fail the Draft 07 check anyway (TRF-29).
+- MoQ: every moq-ffi call goes through a per-instance function table,
+  `FMoQFfiApi` (ADR 0006 option F2). The session wrapper, sender and
+  receiver accept a table at construction, which the new fake-FFI tests use.
 
 ### Build and CI
 
