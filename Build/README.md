@@ -260,7 +260,6 @@ Usage:
 | Setup-UE | ✅ | ❌ |
 | Build-Plugin | ✅ | ❌ |
 | Run-AutomationTests | ✅ | ❌ |
-| Run-Gauntlet | ✅ | ❌ |
 
 **Note:** Linux/Mac support can be added by creating bash equivalents of the PowerShell scripts.
 
@@ -303,4 +302,3 @@ When adding new scripts:
 - [Unreal Automation Tool (UAT)](https://docs.unrealengine.com/5.4/en-US/unreal-automation-tool-in-unreal-engine/)
 - [BuildPlugin Command](https://docs.unrealengine.com/5.4/en-US/using-the-buildplugin-command-in-unreal-engine/)
 - [Automation Testing](https://docs.unrealengine.com/5.4/en-US/automation-system-overview-in-unreal-engine/)
-- [Gauntlet Framework](https://docs.unrealengine.com/5.4/en-US/gauntlet-automation-framework-in-unreal-engine/)
