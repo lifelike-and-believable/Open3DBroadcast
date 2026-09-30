@@ -68,6 +68,9 @@ FLATBUFFERS_DIR = os.path.join(REPO_ROOT, "thirdparty", "flatbuffers")
 CRCPP_DIR = os.path.join(REPO_ROOT, "thirdparty", "crccpp")
 DEFAULT_MANIFEST = os.path.join(REPO_ROOT, "Build", "o3ds-core-manifest.txt")
 DEFAULT_PLUGIN_DIR = os.path.join(REPO_ROOT, "ProjectSandbox", "Plugins", "Open3DBroadcast")
+# Plugins that compile against Open3DBroadcast's core mirror without holding one (the WebRTC
+# add-on, WP-F11). Their core includes are checked against the mirror too.
+DEPENDENT_PLUGIN_DIRS = [os.path.join(REPO_ROOT, "ProjectSandbox", "Plugins", "Open3DBroadcastWebRTC")]
 
 # Relative to the plugin folder.
 MIRROR_REL = "Source/ThirdParty/Open3DStreamCore"
@@ -420,6 +423,9 @@ def main(argv=None):
     try:
         mirror, wrappers = build_outputs(os.path.abspath(args.manifest), errors)
         check_plugin_includes(os.path.abspath(args.plugin_dir), mirror, errors)
+        for dependent in DEPENDENT_PLUGIN_DIRS:
+            if os.path.isdir(dependent):
+                check_plugin_includes(dependent, mirror, errors)
     except InputError as e:
         print(f"::error::sync_o3ds_core: {e}")
         return 2
