@@ -169,6 +169,8 @@ jobs:
           Write-Host "Plugin directory: $pluginDir"
           Write-Host "Plugin file: $upluginPath"
 
+      # The default BuildPlugin configuration (unity build, PCHs), which is
+      # what Fab's build farm runs. Warnings in plugin sources fail it (CI-4).
       - name: Build Open3DBroadcast plugin (Win64)
         shell: powershell
         run: |
@@ -178,7 +180,8 @@ jobs:
             -PluginUPluginPath "${{ steps.paths.outputs.uplugin_path }}" `
             -OutDir "$pkg" `
             -TargetPlatforms @("Win64") `
-            -Configuration "Development"
+            -Configuration "Development" `
+            -FailOnWarnings
 
       - name: Package artifact
         uses: actions/upload-artifact@v4
@@ -186,6 +189,59 @@ jobs:
           name: Open3DBroadcast-Win64-${{ github.sha }}
           path: ${{ runner.temp }}/PluginPackage
           retention-days: 30
+
+      # CI-2/CI-3: UE automation tests against the package built above, in a
+      # throwaway host project (no ProjectSandbox compile, no stale
+      # binaries). Filter is the plain prefix from ADR 0006; tests that need
+      # the internet stay off (O3DB_NETWORK_TESTS=0).
+      - name: Run UE automation tests
+        id: tests
+        timeout-minutes: 20
+        shell: powershell
+        env:
+          O3DB_NETWORK_TESTS: '0'
+        run: |
+          & .\Build\Scripts\Run-AutomationTests.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -PluginPackageDir (Join-Path $env:RUNNER_TEMP 'PluginPackage') `
+            -HostProjectDir (Join-Path $env:RUNNER_TEMP 'TestHost') `
+            -ResultsDir "$PWD\Artifacts\AutomationTests" `
+            -TestFilter "Open3DBroadcast"
+
+      - name: Upload automation test report
+        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Open3DBroadcast-AutomationTests-${{ github.sha }}
+          path: Artifacts/AutomationTests
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # CI-4: one extra configuration that combines the strict checks:
+      # BuildPlugin -StrictIncludes (no PCH, no unity build) with warnings in
+      # plugin sources treated as errors. Its output is discarded.
+      - name: Strict build (non-unity, no PCH, warnings as errors)
+        shell: powershell
+        run: |
+          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackageStrict'
+          & .\Build\Scripts\Build-Plugin.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -PluginUPluginPath "${{ steps.paths.outputs.uplugin_path }}" `
+            -OutDir "$pkg" `
+            -TargetPlatforms @("Win64") `
+            -Configuration "Development" `
+            -StrictIncludes `
+            -FailOnWarnings
+
+      - name: Upload BuildPlugin logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Open3DBroadcast-BuildPluginLogs-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/*-BuildPlugin.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Post build completed comment
         if: github.event_name == 'pull_request' && github.event.pull_request.number != null && success()
