@@ -24,6 +24,13 @@ env:
   UE_ROOT: 'C:\Program Files\Epic Games\UE_5.7'
   PLUGIN_NAME: 'Open3DBroadcast'
   PLUGIN_PATH: 'ProjectSandbox/Plugins/Open3DBroadcast'
+  ADDON_NAME: 'Open3DBroadcastWebRTC'
+  ADDON_PATH: 'ProjectSandbox/Plugins/Open3DBroadcastWebRTC'
+  # WP-F11 / ADR 0002: the WebRTC add-on is built for every release, but attached to the GitHub
+  # release only when the repository variable O3D_PUBLISH_WEBRTC_ADDON is 'true'. Publishing it
+  # before the codec-free livekit_ffi rebuild waits on counsel question L1; until then it is a
+  # workflow artifact only.
+  PUBLISH_WEBRTC_ADDON: ${{ vars.O3D_PUBLISH_WEBRTC_ADDON == 'true' && 'true' || 'false' }}
 
 jobs:
   build-release:
@@ -112,15 +119,22 @@ jobs:
       - name: Update plugin descriptor version
         shell: powershell
         run: |
-          $uplugin = "${{ steps.paths.outputs.uplugin_path }}"
           $versionNumber = "${{ steps.version.outputs.number }}"
-          $content = Get-Content -Path $uplugin -Raw | ConvertFrom-Json
-          $content.VersionName = $versionNumber
-          if ($content.Version) {
-            $content.Version = [int]$content.Version + 1
+          # The WebRTC add-on carries the same version: it only works with the matching
+          # Open3DBroadcast release (ADR 0002).
+          $descriptors = @(
+            "${{ steps.paths.outputs.uplugin_path }}",
+            (Join-Path $PWD "${{ env.ADDON_PATH }}/${{ env.ADDON_NAME }}.uplugin")
+          )
+          foreach ($uplugin in $descriptors) {
+            $content = Get-Content -Path $uplugin -Raw | ConvertFrom-Json
+            $content.VersionName = $versionNumber
+            if ($content.Version) {
+              $content.Version = [int]$content.Version + 1
+            }
+            $content | ConvertTo-Json -Depth 10 | Set-Content -Path $uplugin -Encoding UTF8
+            Write-Host "Updated $uplugin to version $versionNumber"
           }
-          $content | ConvertTo-Json -Depth 10 | Set-Content -Path $uplugin -Encoding UTF8
-          Write-Host "Updated $uplugin to version $versionNumber"
 
       - name: Build Open3DBroadcast plugin (Win64, Shipping)
         shell: powershell
@@ -166,6 +180,29 @@ jobs:
           "name=$archiveName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Created archive $archiveName"
 
+      # WP-F11: the WebRTC add-on, built against the package above (editor binaries plus source;
+      # a project that packages a game with it compiles the add-on's game module from source).
+      - name: Build WebRTC add-on (Win64)
+        shell: powershell
+        run: |
+          & .\Build\Scripts\Build-WebRTCAddOn.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -HostPluginPackageDir (Join-Path $env:RUNNER_TEMP 'PluginPackage') `
+            -HostProjectDir (Join-Path $env:RUNNER_TEMP 'AddOnHost') `
+            -OutDir (Join-Path $env:RUNNER_TEMP "AddOnArchive/UE_${{ steps.restructure.outputs.ue_version }}/Plugins/${{ env.ADDON_NAME }}")
+
+      - name: Create WebRTC add-on archive
+        id: addon_archive
+        shell: powershell
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'AddOnArchive'
+          $archiveName = "${{ env.ADDON_NAME }}-Plugin-${{ steps.version.outputs.number }}-Win64.zip"
+          $archivePath = Join-Path $env:RUNNER_TEMP $archiveName
+          Compress-Archive -Path "$root/*" -DestinationPath $archivePath -CompressionLevel Optimal
+          "path=$archivePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "name=$archiveName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Created archive $archiveName (attached to the release: $env:PUBLISH_WEBRTC_ADDON)"
+
       - name: Generate release notes
         id: notes
         shell: powershell
@@ -190,7 +227,14 @@ jobs:
           - Open3DBroadcast plugin modules (Sender, Receiver, Shared, Transport implementations), compiled for Win64
           - Required Open3DStream core libraries and third-party dependencies
 
-          This is the GitHub build, which includes the WebRTC transport. It is not the Fab package.
+          This is the GitHub build. It is not the Fab package.
+
+          ### WebRTC (LiveKit) transport
+
+          WebRTC is a separate, free add-on plugin, Open3DBroadcastWebRTC, built for this release
+          only. When it is attached to this release, extract its
+          `UE_${{ steps.restructure.outputs.ue_version }}/Plugins/Open3DBroadcastWebRTC` folder into the
+          same project's `Plugins` directory, next to Open3DBroadcast.
           "@
           $notes | Out-File -FilePath "$env:RUNNER_TEMP\release_notes.md" -Encoding UTF8
 
@@ -200,7 +244,9 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Open3DBroadcast ${{ steps.version.outputs.number }}
           body_path: ${{ runner.temp }}/release_notes.md
-          files: ${{ steps.archive.outputs.path }}
+          files: |
+            ${{ steps.archive.outputs.path }}
+            ${{ env.PUBLISH_WEBRTC_ADDON == 'true' && steps.addon_archive.outputs.path || '' }}
           draft: false
           prerelease: false
           generate_release_notes: true
@@ -212,4 +258,11 @@ jobs:
         with:
           name: Open3DBroadcast-Release-${{ steps.version.outputs.number }}
           path: ${{ runner.temp }}/PluginPackage
+          retention-days: 90
+
+      - name: Upload WebRTC add-on artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Open3DBroadcastWebRTC-Release-${{ steps.version.outputs.number }}
+          path: ${{ steps.addon_archive.outputs.path }}
           retention-days: 90
