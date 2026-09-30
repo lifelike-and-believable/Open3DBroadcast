@@ -10,7 +10,9 @@
 #include "O3DAudioFrameCodec.h"
 #include "O3DPerformanceMetrics.h"
 #include "MoQFfiApi.h"
+THIRD_PARTY_INCLUDES_START
 #include "moq_ffi.h"
+THIRD_PARTY_INCLUDES_END
 
 class FMoQSessionWrapper;
 class FMoQPublisherHandle;

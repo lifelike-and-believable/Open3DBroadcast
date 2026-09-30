@@ -158,8 +158,34 @@
 - NNG: the send and receive buffers are now set as message counts (1024), which is what
   NNG expects. The sender passed a byte count with the wrong type, so the call failed
   silently and a pub socket kept its small default queue, dropping frames from any burst
-  (TRB-36, found by the new NNG conformance round-trip test). `NNG_OPT_SENDTIMEO` is
-  unchanged and still has no effect; the rest of TRB-36 stays with WP-S11.
+  (TRB-36, found by the new NNG conformance round-trip test).
+- NNG fixes (WP-S11):
+  - Sender: a worker thread owns the socket while the sender runs. `Start()` opens it
+    before the worker exists, the worker closes and reopens it, and `Stop()` closes it
+    after joining the worker. `Tick()` no longer reopens it from the game thread, which
+    could free the socket while the worker was sending (TRB-33). `Initialize()` now stops
+    a running sender first.
+  - Sender: when NNG returns `NNG_EAGAIN` (no peer ready, or its send buffer is full) the
+    oldest queued frame is dropped and counted in `DroppedFrames`. It used to be put back
+    at the tail of the queue, which reordered frames, spun the worker while no peer was
+    connected and replayed a stale backlog on reconnect (TRB-34).
+  - Sender: `NNG_OPT_SENDTIMEO` is no longer set. Every send is non-blocking, so the
+    30-second timeout never applied (TRB-36).
+  - A host in the `Uri`, its `?host=` query or the stream id is used when the `host`
+    option is empty. The default host used to win every time (TRB-39).
+  - Mode and role defaults and allowed combinations live in one place (`NngHelpers`).
+    Pair defaults to listen on the sender and dial on the receiver; the receiver module
+    used to make both ends listen. The receiver's "Pull (client dial)" now dials, and
+    the sender has a new "Push (listen)" choice; push and pull used to be forced to dial
+    and listen (TRB-40).
+  - Receiver: `NNG_OPT_RECVMAXSZ` is set to the 50 MiB cap, so NNG's smaller default no
+    longer drops large frames before `Poll()` sees them. An audio frame is counted once in
+    `FramesReceived`, not twice. Pipe callbacks get an opaque token instead of the
+    receiver's address. A dialing socket reads as connected only after a pipe event, not
+    right after the non-blocking dial (TRB-42).
+  - Open, listen, dial, parse and send failures, and a full send queue, are logged at
+    Warning (rate-limited where they repeat). Drops while no peer is ready are logged at
+    Log, at most every 2 s. Connection changes are logged at Log (TRB-43).
 
 - Audio codec (WP-S10). A frame's codec label now always matches its payload.
   When Opus is compiled out (every platform but Win64 with `opus.lib`), cannot
@@ -293,6 +319,34 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
 - `UO3DSenderComponent::GetTransportOption` returns an empty string for a declared secret key, and `SetTransportOption` stores such a key in the secret store instead of `TransportOptions`. `webrtc.token` is no longer copied into `FO3DTransportConfig::AdvancedParams`; read it from `Secrets` (or `Token`, filled by the WebRTC customization).
 - `FO3DTokenFetchRequest::AdditionalGrants` is removed.
 
+### Binaries, symbols and DLL loading (WP-F3)
+
+- The committed `moq_ffi.pdb` and `livekit_ffi.pdb` are removed from the
+  plugin, and `Open3DTransportMoQ.Build.cs` no longer stages `moq_ffi.pdb`
+  into packaged games (FAB-4). Symbols go to release assets; see
+  "Debug symbols" in `Build/README.md`, which also shows how to get the
+  removed files from git history. `fab-package.py` now fails when git tracks
+  a `.pdb` anywhere under the plugin, including in an excluded module; the
+  `**/*.pdb` exclude rule that used to drop them silently is gone.
+- New `FO3DFfiLibrary` in Open3DShared (`O3DFfiLibrary.h`, ADR 0007 item 7).
+  The MoQ and WebRTC modules load `moq_ffi.dll` and `livekit_ffi.dll` through
+  it; the three separate loaders are gone, including the WebRTC receiver's,
+  which probed two paths that do not exist (TRF-28). The DLL locations are
+  unchanged.
+- WebRTC no longer registers its transport (factories and editor panels) when
+  `livekit_ffi.dll` fails to load. It used to register anyway, and the first
+  LiveKit call then failed on delay-load (TRF-14). MoQ already behaved this
+  way.
+- Module shutdown in MoQ and WebRTC stops every live transport instance
+  before unloading the FFI DLL. If a component or LiveLink source still holds
+  an instance after that, the DLL stays loaded until process exit instead of
+  being freed under it, and a warning names the count (TRF-14).
+- Third-party includes (o3ds core, moq_ffi, livekit_ffi, nng, opus) are
+  wrapped in `THIRD_PARTY_INCLUDES_START`/`END`, and the o3ds, moq_ffi and
+  livekit_ffi include directories are `PublicSystemIncludePaths` (BUILD-3).
+- New tests `Open3DBroadcast.Shared.FfiLibrary.*` cover path lookup, load
+  failures and the shutdown sequence with a live (fake) transport instance.
+
 ### Tests
 
 - UE automation tests moved out of the Runtime modules into a new editor-only
@@ -321,6 +375,12 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   test. The fake moq-ffi table now routes published data to subscribers.
 - New Shared parser tests for the unified envelope and the audio frame
   formats (SHR-6).
+- NNG (WP-S11): one localhost integration test per mode and role pair,
+  `Open3DBroadcast.Transport.NNG.ModeRole.*` (pub/sub, pair both ways,
+  push/pull both ways), with default settings apart from the role. They use
+  127.0.0.1 and an OS-chosen port, and run in the default filter. New option
+  parser tests (`Options.UriHostHonoured`, `Options.DefaultRoles`) and
+  `Demux.AudioNotCountedTwice`.
 - Test names follow `Open3DBroadcast.<Area>.<Unit>.<Case>`; the
   `Open3DBroadcast.Open3DTransport*`, `O3DSender`, `O3DShared` and
   `O3DReceiver` prefixes are gone. Every test file uses
@@ -387,7 +447,8 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   builds a zip from the git-tracked plugin files without the modules in
   `Build/Fab/exclude-modules.txt` (WebRTC, and the future
   `Open3DBroadcastTests`) or the files in `Build/Fab/exclude-files.txt`
-  (`.pdb`, `.py`, module-level developer notes), and checks its contents. PR
+  (`.py`, module-level developer notes; a tracked `.pdb` fails the job, see
+  WP-F3 above), and checks its contents. PR
   CI uploads it as `Open3DBroadcast-Fab-Source-<sha>` and runs BuildPlugin on
   its contents. Until WP-F1, that build copies in the o3ds core library built
   for the same commit and reports that the zip does not build on its own.

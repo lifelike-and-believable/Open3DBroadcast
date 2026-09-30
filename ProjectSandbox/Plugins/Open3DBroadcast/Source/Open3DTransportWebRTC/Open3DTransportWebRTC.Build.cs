@@ -46,7 +46,7 @@ public class Open3DTransportWebRTC : ModuleRules
         {
             throw new BuildException($"Missing required LiveKit FFI include directory at '{livekitFfiIncludePath}'.");
         }
-        PublicIncludePaths.Add(livekitFfiIncludePath);
+        PublicSystemIncludePaths.Add(livekitFfiIncludePath); // Third-party headers: system include (BUILD-3)
 
         // LiveKit FFI DLL - use delay-load to allow custom path loading
         string livekitFfiDllPath = Path.Combine(moduleThirdPartyDir, "livekit_ffi", "bin", platformSubdir, "livekit_ffi.dll");
@@ -66,7 +66,7 @@ public class Open3DTransportWebRTC : ModuleRules
         string o3dsIncludePath = Path.Combine(pluginThirdPartyDir, "open3dstream", "include");
         if (Directory.Exists(o3dsIncludePath))
         {
-            PublicIncludePaths.Add(o3dsIncludePath);
+            PublicSystemIncludePaths.Add(o3dsIncludePath); // Third-party headers: system include (BUILD-3)
         }
 
         PublicDependencyModuleNames.AddRange(new string[]
@@ -74,7 +74,6 @@ public class Open3DTransportWebRTC : ModuleRules
             "Core",
             "CoreUObject",
             "Engine",
-            "Projects", // For IPluginManager
             "HTTP", // For HTTP token fetching
             "Json", // For JSON parsing
             "JsonUtilities" // For JSON serialization utilities

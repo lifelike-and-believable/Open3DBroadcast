@@ -66,6 +66,30 @@ namespace O3DNNG
     OPEN3DTRANSPORTNNG_API FString RoleToString(ENngRole Role);
     OPEN3DTRANSPORTNNG_API ENngRole RoleFromString(const FString& RoleString, ENngRole DefaultRole = ENngRole::None);
 
+    /**
+     * Mode and role rules, in one place (TRB-40). The module, the settings panels and the
+     * option parser all use these, so both ends agree on who listens and who dials.
+     *
+     *   Sender:   pub  -> server (listen) only
+     *             pair -> server (listen, default) or client (dial)
+     *             push -> client (dial, default) or server (listen)
+     *   Receiver: sub  -> client (dial) only
+     *             pair -> client (dial, default) or server (listen)
+     *             pull -> server (listen, default) or client (dial)
+     *
+     * With default roles, exactly one side of every mode pair listens.
+     */
+    OPEN3DTRANSPORTNNG_API bool IsModeSupported(ENngMode Mode, bool bSender);
+    OPEN3DTRANSPORTNNG_API ENngRole GetDefaultRole(ENngMode Mode, bool bSender);
+    OPEN3DTRANSPORTNNG_API bool IsRoleSupported(ENngMode Mode, ENngRole Role, bool bSender);
+    /** Requested if the mode supports it for this side, otherwise the default role. */
+    OPEN3DTRANSPORTNNG_API ENngRole ResolveRole(ENngMode Mode, ENngRole Requested, bool bSender);
+    inline bool IsListenRole(ENngRole Role) { return Role == ENngRole::Server; }
+    /** 0.0.0.0 for a listening socket, 127.0.0.1 for a dialing one. */
+    OPEN3DTRANSPORTNNG_API FString GetDefaultHost(bool bListen);
+    /** 6000 pub/sub, 7000 pair, 8000 push/pull. */
+    OPEN3DTRANSPORTNNG_API int32 GetDefaultPort(ENngMode Mode);
+
     OPEN3DTRANSPORTNNG_API FString BuildCanonicalUri(ENngMode Mode, const FString& Host, int32 Port, ENngRole Role, const FString& Topic);
     OPEN3DTRANSPORTNNG_API FString MakeStreamId(const FString& Host, int32 Port, const FString& Topic);
 

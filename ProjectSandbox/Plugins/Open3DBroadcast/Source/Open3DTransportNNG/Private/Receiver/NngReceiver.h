@@ -3,16 +3,31 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "HAL/ThreadSafeCounter.h"
 #include "Misc/ScopeLock.h"
 
 #include "O3DReceiverInterface.h"
 #include "Shared/NngHelpers.h"
 #include "O3DAudioFrameCodec.h"
 
+#include <atomic>
+
+/**
+ * Context for the receiver's NNG pipe-notify callback, reached through an opaque token
+ * (TRB-42, same pattern as the sender, TRF-12). Holds atomics only, so an NNG thread may drop
+ * the last reference and a late callback never touches the receiver.
+ */
+struct FNngReceiverPipeContext
+{
+    std::atomic<int32> PipeCount{0};
+    std::atomic<bool> bConnected{false};
+    /** True for a listening socket, which stays "connected" (ready) with no pipes. */
+    std::atomic<bool> bConnectedWithoutPipes{false};
+};
+
 class FO3DNngReceiver : public IOpen3DReceiver
 {
 public:
+    FO3DNngReceiver();
     virtual ~FO3DNngReceiver() override;
 
     virtual bool Initialize(const FO3DTransportConfig& Config) override;
@@ -24,10 +39,7 @@ public:
     virtual bool SupportsAudio() const override { return true; }
     virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
 
-    bool IsConnected() const { return bConnected.Load(); }
-
-    void HandlePipeAdded();
-    void HandlePipeRemoved();
+    bool IsConnected() const { return PipeContext->bConnected.load(); }
 
 private:
     // Test-only access to ProcessReceivedPayload (TRB-37 demux test); defined in
@@ -58,10 +70,12 @@ private:
 
     TAtomic<bool> bInitialized{ false };
     TAtomic<bool> bRunning{ false };
-    TAtomic<bool> bConnected{ false };
 
-    FThreadSafeCounter PipeCount;
+    TSharedRef<FNngReceiverPipeContext, ESPMode::ThreadSafe> PipeContext;
+    /** Opaque nng_pipe_notify user data; resolves to PipeContext until the destructor. */
+    void* PipeToken = nullptr;
 
+    // Game thread only (Start, Stop, Poll); pipe callbacks never touch these.
     double LastDialAttempt = 0.0;
     int32 BackoffAttempt = 0;
     double LastErrorLogTimestamp = 0.0;

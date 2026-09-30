@@ -3,7 +3,9 @@
 #include "Logging/LogMacros.h"
 
 #if O3D_WITH_OPUS
+THIRD_PARTY_INCLUDES_START
 #include "opus.h"
+THIRD_PARTY_INCLUDES_END
 #endif
 
 namespace

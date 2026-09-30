@@ -66,15 +66,22 @@ private:
 
     friend class FNngSenderRunnable;
 
+    // Socket ownership (TRB-33): exactly one thread touches Socket at a time. Start() opens it
+    // before the worker exists, the worker owns it (send, close, reopen) while it runs, and
+    // Stop() closes it after joining the worker. Tick() never touches it.
     bool OpenSocket();
     void CloseSocket();
+    /** Worker: reopens a closed socket after the backoff delay. Returns true if a socket is open. */
+    bool EnsureSocketOnWorker();
     bool SendBytes(const uint8* Data, int32 Len, const FString& SubjectName);
     void StartWorker();
     void StopWorker();
     uint32 RunWorker();
     bool EnqueuePayload(const uint8* Data, int32 Size);
     void DrainQueue();
+    /** Worker: counts and logs a failed nng_send; closes the socket if NNG reports it closed. */
     void HandleSendError(int ErrorCode);
+    void RecordSendDrop();
     FString ResolveAudioSubjectFallback() const;
 
     mutable FCriticalSection StateMutex;
@@ -103,8 +110,12 @@ private:
     /** This transport's counters, resolved once (SHR-3, SHR-17): no lock or lookup per frame. */
     const FO3DTransportMetricsRef TransportMetrics;
 
+    // Owned by whichever thread owns Socket (see above).
     double LastErrorLogTimestamp = 0.0;
+    double LastDropLogTimestamp = 0.0;
     double LastBackoffAttemptTime = 0.0;
     int32 BackoffAttempt = 0;
-    double LastBackpressureLogTimestamp = 0.0;
+    int64 DropsSinceLastLog = 0;
+    /** Written by any thread that calls Send/SendSerialized. */
+    std::atomic<double> LastBackpressureLogTimestamp{ 0.0 };
 };

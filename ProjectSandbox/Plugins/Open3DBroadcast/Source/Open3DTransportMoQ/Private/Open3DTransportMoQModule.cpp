@@ -6,6 +6,7 @@
 #include "Shared/MoQAsyncDispatcher.h"
 #include "MoQFfiApi.h"
 #include "Shared/MoQFfiSupport.h"
+#include "O3DFfiLibrary.h"
 #include "Shared/MoQHelpers.h"
 #include "Sender/MoQSender.h"
 #include "Receiver/MoQReceiver.h"
@@ -548,20 +549,28 @@ namespace MoQEditor
 /**
  * Open3DTransportMoQ Module
  *
- * Phase 4 status:
- * - Loads and validates the moq-ffi runtime
+ * - Loads and validates the moq-ffi runtime through FO3DFfiLibrary (TRF-28)
  * - Wires the async dispatcher used by the session wrapper
- * - Registers sender and receiver factories with audio support
+ * - Registers sender and receiver factories with audio support, only when the library loaded,
+ *   validated and initialized (TRF-14)
  */
 class FOpen3DTransportMoQModule : public IModuleInterface
 {
 public:
 	virtual void StartupModule() override
 	{
-		// Load the MoQ FFI DLL using the centralized support class
-		if (!FMoQFfiSupport::LoadLibrary())
+		Library = MakeShared<FO3DFfiLibrary, ESPMode::ThreadSafe>(FMoQFfiSupport::MakeLibraryDesc());
+		if (!Library->Load())
 		{
-			UE_LOG(LogO3DMoQSender, Error, TEXT("Failed to load MoQ FFI library: %s"), *FMoQFfiSupport::GetStatusMessage());
+			UE_LOG(LogO3DMoQSender, Error, TEXT("MoQ transport not registered: %s"), *Library->GetStatusMessage());
+			return;
+		}
+
+		FString ValidationError;
+		if (!FMoQFfiSupport::ValidateLibrary(*Library, ValidationError))
+		{
+			UE_LOG(LogO3DMoQSender, Error, TEXT("MoQ transport not registered: %s"), *ValidationError);
+			Library->Unload();
 			return;
 		}
 
@@ -569,52 +578,62 @@ public:
 		// BUG-1 fix: Check return value of moq_init()
 		if (!FMoQFfiApi::GetProduction()->Init())
 		{
-			UE_LOG(LogO3DMoQSender, Error, TEXT("Failed to initialize MoQ FFI crypto provider"));
-			FMoQFfiSupport::UnloadLibrary();
+			UE_LOG(LogO3DMoQSender, Error, TEXT("MoQ transport not registered: failed to initialize the MoQ FFI crypto provider"));
+			Library->Unload();
 			return;
 		}
 
 		// Delivers FFI callbacks to the game thread. Nothing restarts it after ShutdownModule.
 		FMoQAsyncDispatcher::Get().Initialize();
-	
-		RegisterTransports();
 
-		UE_LOG(LogO3DMoQSender, Log, TEXT("Open3D MoQ transport module started (Phase 4 - sender/receiver with audio support)"));
+		RegisterTransports(Library.ToSharedRef());
+
+		UE_LOG(LogO3DMoQSender, Log, TEXT("Open3D MoQ transport module started"));
 	}
 
 	virtual void ShutdownModule() override
 	{
-		// TRF-13 ordering: stop handing out instances, then stop delivering FFI callbacks
-		// (queued ones are discarded and later ones dropped), then unload the library.
-		// Instances still owned elsewhere are the owners' to stop before this point.
+		// TRF-13/TRF-14 ordering: stop handing out instances, stop the instances that are still
+		// alive (components or LiveLink sources may outlive this module), stop delivering FFI
+		// callbacks (queued ones are discarded and later ones dropped), then unload the library.
+		// FO3DFfiLibrary keeps the DLL loaded if an instance is still referenced after Stop().
 		UnregisterTransports();
+
+		if (Library.IsValid())
+		{
+			Library->StopLiveInstances();
+		}
 
 		FMoQAsyncDispatcher::Get().Shutdown();
 
-		FMoQFfiSupport::UnloadLibrary();
+		if (Library.IsValid())
+		{
+			Library->Unload();
+		}
 
 		UE_LOG(LogO3DMoQSender, Log, TEXT("Open3D MoQ transport module shut down"));
 	}
 
 private:
+	/** moq_ffi and the instances created from it. The registered factories hold a reference too. */
+	TSharedPtr<FO3DFfiLibrary, ESPMode::ThreadSafe> Library;
 
-	void RegisterTransports()
+	void RegisterTransports(const TSharedRef<FO3DFfiLibrary, ESPMode::ThreadSafe>& InLibrary)
 	{
-		// Register sender factory
+		// Every instance is tracked so ShutdownModule can stop it before unloading moq_ffi.
 		O3DTransport::RegisterSender(
 			TEXT("MoQ"),
-			[]() -> TSharedPtr<IOpen3DSender>
+			[InLibrary]() -> TSharedPtr<IOpen3DSender>
 			{
-				return MakeShared<FO3DMoQSender>();
+				return InLibrary->TrackInstance(MakeShared<FO3DMoQSender, ESPMode::ThreadSafe>());
 			}
 		);
 
-		// Register receiver factory
 		O3DTransport::RegisterReceiver(
 			TEXT("MoQ"),
-			[]() -> TSharedPtr<IOpen3DReceiver>
+			[InLibrary]() -> TSharedPtr<IOpen3DReceiver>
 			{
-				return MakeShared<FO3DMoQReceiver>();
+				return InLibrary->TrackInstance(MakeShared<FO3DMoQReceiver, ESPMode::ThreadSafe>());
 			}
 		);
 

@@ -194,6 +194,15 @@ namespace O3DConformanceProfiles
 		/** 64 KiB is the smallest queue the NNG sender accepts (kMinQueueBytes). */
 		virtual FO3DTransportConfig MakeBackpressureSenderConfig() override { return MakeConfig(true, 64 * 1024); }
 
+		virtual void AddExpectedMessages(FAutomationTestBase& Test, EO3DConformanceCase Case) override
+		{
+			if (Case == EO3DConformanceCase::SendBackpressure)
+			{
+				// A full queue is logged as a warning (TRB-43), at most once per 2 s per sender.
+				Test.AddExpectedError(TEXT("NNG sender queue full"), EAutomationExpectedMessageFlags::Contains, 1);
+			}
+		}
+
 	private:
 		FO3DTransportConfig MakeConfig(bool bSender, int32 MaxQueueBytes) const
 		{

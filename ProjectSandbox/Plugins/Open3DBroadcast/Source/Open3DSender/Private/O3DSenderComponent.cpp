@@ -22,7 +22,9 @@
 #include "AudioCaptureCore.h"
 #include "O3DAudioFrameCodec.h"
 
+THIRD_PARTY_INCLUDES_START
 #include "o3ds/sender_sync.h"
+THIRD_PARTY_INCLUDES_END
 
 #define LOCTEXT_NAMESPACE "O3DSenderComponent"
 

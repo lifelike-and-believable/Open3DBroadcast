@@ -1,72 +1,27 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "O3DFfiLibrary.h"
 
 /**
- * Static utility for loading and validating the moq_ffi.dll/.so/.dylib
- * at runtime. Provides version checking and diagnostic logging.
+ * moq-ffi specifics on top of the shared FO3DFfiLibrary loader (TRF-28): where moq_ffi lives in
+ * the plugin, and the checks that the loaded build is the one this module was written for.
  *
- * Usage:
- *   FMoQFfiSupport::LoadLibrary();  // Call once at module startup
- *   FMoQFfiSupport::UnloadLibrary(); // Call once at module shutdown
+ * Loading, unloading and live-instance tracking are FO3DFfiLibrary's job; the module owns the
+ * library object (see Open3DTransportMoQModule.cpp).
  */
 class FMoQFfiSupport
 {
 public:
-	/**
-	 * Load the MoQ FFI shared library (moq_ffi.dll on Windows).
-	 * Must be called before any MoQ FFI functions are used.
-	 *
-	 * @return true if loaded successfully, false otherwise
-	 */
-	static bool LoadLibrary();
+	/** Location of moq_ffi relative to the Open3DBroadcast plugin. */
+	static FO3DFfiLibraryDesc MakeLibraryDesc();
 
 	/**
-	 * Unload the MoQ FFI shared library.
-	 * Should be called during module shutdown.
+	 * Checks that every export this module binds is present and that the build is the Draft 07
+	 * one (TRF-29). Returns false and fills OutError on the first problem found.
 	 */
-	static void UnloadLibrary();
+	static bool ValidateLibrary(const FO3DFfiLibrary& Library, FString& OutError);
 
-	/**
-	 * Check if the MoQ FFI library is currently loaded.
-	 *
-	 * @return true if loaded, false otherwise
-	 */
-	static bool IsLoaded();
-
-	/**
-	 * Get the version string of the loaded MoQ FFI library.
-	 * Only valid if IsLoaded() returns true.
-	 *
-	 * @return Version string (e.g., "0.1.0") or empty if not loaded
-	 */
-	static FString GetVersion();
-
-	/**
-	 * Get the path to the loaded MoQ FFI library.
-	 * Only valid if IsLoaded() returns true.
-	 *
-	 * @return Full path to the loaded library or empty if not loaded
-	 */
-	static FString GetLibraryPath();
-
-	/**
-	 * Get a human-readable status message describing library load state.
-	 * Useful for diagnostic logging and error reporting.
-	 *
-	 * @return Status message
-	 */
-	static FString GetStatusMessage();
-
-private:
-	static void* LibraryHandle;
-	static FString LibraryPath;
-	static FString StatusMessage;
-	static bool bIsLoaded;
-
-	/** Construct the platform-specific path to the MoQ FFI library */
-	static FString ConstructLibraryPath();
-
-	/** Validate library after loading (check for required symbols, etc.) */
-	static bool ValidateLibrary();
+	/** moq_version() of the loaded library, or empty when not loaded or missing. */
+	static FString GetVersion(const FO3DFfiLibrary& Library);
 };

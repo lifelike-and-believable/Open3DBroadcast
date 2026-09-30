@@ -292,18 +292,14 @@ namespace O3DNNG
 
     bool PopulateHostPort(const FO3DTransportConfig& Config, const FString& DefaultHost, ENngMode Mode, FString& OutHost, int32& OutPort)
     {
-        FString Host = GetAdvancedOption(Config, HostOptionKey);
+        // TRB-39: "explicit" means the host option was set. DefaultHost is applied only at the
+        // end, so a host from the Uri, its ?host= query or the StreamId is honoured.
+        FString Host = NormaliseHost(GetAdvancedOption(Config, HostOptionKey));
         FString PortStr = GetAdvancedOption(Config, PortOptionKey);
-
-        if (Host.IsEmpty())
-        {
-            Host = DefaultHost;
-        }
+        PortStr.TrimStartAndEndInline();
 
         const bool bHostExplicit = !Host.IsEmpty();
         const bool bPortExplicit = !PortStr.IsEmpty();
-
-        Host = NormaliseHost(Host);
 
         if (bPortExplicit)
         {
@@ -387,23 +383,7 @@ namespace O3DNNG
 
         if (OutPort <= 0)
         {
-            switch (Mode)
-            {
-            case ENngMode::Pub:
-            case ENngMode::Sub:
-                OutPort = 6000;
-                break;
-            case ENngMode::Pair:
-                OutPort = 7000;
-                break;
-            case ENngMode::Push:
-            case ENngMode::Pull:
-                OutPort = 8000;
-                break;
-            default:
-                OutPort = 6000;
-                break;
-            }
+            OutPort = GetDefaultPort(Mode);
         }
 
         if (Host.IsEmpty())
@@ -504,6 +484,91 @@ namespace O3DNNG
         return DefaultRole;
     }
 
+    bool IsModeSupported(ENngMode Mode, bool bSender)
+    {
+        switch (Mode)
+        {
+        case ENngMode::Pub:
+        case ENngMode::Push:
+            return bSender;
+        case ENngMode::Sub:
+        case ENngMode::Pull:
+            return !bSender;
+        case ENngMode::Pair:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    ENngRole GetDefaultRole(ENngMode Mode, bool bSender)
+    {
+        switch (Mode)
+        {
+        case ENngMode::Pub:
+            return ENngRole::Server;
+        case ENngMode::Sub:
+            return ENngRole::Client;
+        case ENngMode::Pair:
+            // TRB-40: the sender listens and the receiver dials, so default Pair ends connect.
+            return bSender ? ENngRole::Server : ENngRole::Client;
+        case ENngMode::Push:
+            return ENngRole::Client;
+        case ENngMode::Pull:
+            return ENngRole::Server;
+        default:
+            return bSender ? ENngRole::Server : ENngRole::Client;
+        }
+    }
+
+    bool IsRoleSupported(ENngMode Mode, ENngRole Role, bool bSender)
+    {
+        if (!IsModeSupported(Mode, bSender) || Role == ENngRole::None)
+        {
+            return false;
+        }
+
+        switch (Mode)
+        {
+        case ENngMode::Pub:
+            return Role == ENngRole::Server;
+        case ENngMode::Sub:
+            return Role == ENngRole::Client;
+        case ENngMode::Pair:
+        case ENngMode::Push:
+        case ENngMode::Pull:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    ENngRole ResolveRole(ENngMode Mode, ENngRole Requested, bool bSender)
+    {
+        return IsRoleSupported(Mode, Requested, bSender) ? Requested : GetDefaultRole(Mode, bSender);
+    }
+
+    FString GetDefaultHost(bool bListen)
+    {
+        return bListen ? FString(TEXT("0.0.0.0")) : FString(TEXT("127.0.0.1"));
+    }
+
+    int32 GetDefaultPort(ENngMode Mode)
+    {
+        switch (Mode)
+        {
+        case ENngMode::Pair:
+            return 7000;
+        case ENngMode::Push:
+        case ENngMode::Pull:
+            return 8000;
+        case ENngMode::Pub:
+        case ENngMode::Sub:
+        default:
+            return 6000;
+        }
+    }
+
     FString BuildCanonicalUri(ENngMode Mode, const FString& Host, int32 Port, ENngRole Role, const FString& Topic)
     {
         const FString ModeSegment = ModeToString(Mode);
@@ -562,10 +627,27 @@ namespace O3DNNG
         }
 
         OutOptions.Mode = ModeFromString(ModeString, ENngMode::Pub);
+        if (!IsModeSupported(OutOptions.Mode, /*bSender=*/true))
+        {
+            OutError = TEXT("NNG sender does not support subscriber or pull modes");
+            return false;
+        }
+
+        // Role first: it decides whether the default host is a bind-all or a loopback address.
+        FString RoleString = GetAdvancedOption(Config, RoleOptionKey);
+        if (RoleString.IsEmpty())
+        {
+            if (const FString* RoleOverride = UriQuery.Find(TEXT("role")))
+            {
+                RoleString = *RoleOverride;
+            }
+        }
+        OutOptions.Role = ResolveRole(OutOptions.Mode, RoleFromString(RoleString, ENngRole::None), /*bSender=*/true);
+        OutOptions.bListen = IsListenRole(OutOptions.Role);
 
         FString Host;
         int32 Port = 0;
-        if (!PopulateHostPort(Config, TEXT("0.0.0.0"), OutOptions.Mode, Host, Port))
+        if (!PopulateHostPort(Config, GetDefaultHost(OutOptions.bListen), OutOptions.Mode, Host, Port))
         {
             OutError = TEXT("Failed to parse host/port for NNG sender");
             return false;
@@ -601,16 +683,6 @@ namespace O3DNNG
         }
         OutOptions.StreamId = MakeStreamId(Host, Port, Topic);
 
-        FString RoleString = GetAdvancedOption(Config, RoleOptionKey);
-        if (RoleString.IsEmpty())
-        {
-            if (const FString* RoleOverride = UriQuery.Find(TEXT("role")))
-            {
-                RoleString = *RoleOverride;
-            }
-        }
-        OutOptions.Role = RoleFromString(RoleString, OutOptions.Mode == ENngMode::Push ? ENngRole::Client : ENngRole::Server);
-
         uint64 QueueBytes = kDefaultQueueBytes;
         const FString QueueString = GetAdvancedOption(Config, QueueOptionKey);
         if (!QueueString.IsEmpty() && !ParseUInt64(QueueString, QueueBytes))
@@ -623,38 +695,6 @@ namespace O3DNNG
             QueueBytes = kDefaultQueueBytes;
         }
         OutOptions.MaxQueueBytes = QueueBytes;
-
-        if (OutOptions.Mode == ENngMode::Sub || OutOptions.Mode == ENngMode::Pull)
-        {
-            OutError = TEXT("NNG sender does not support subscriber or pull modes");
-            return false;
-        }
-
-        switch (OutOptions.Mode)
-        {
-        case ENngMode::Pub:
-            OutOptions.Role = ENngRole::Server;
-            OutOptions.bListen = true;
-            break;
-        case ENngMode::Push:
-            OutOptions.Role = ENngRole::Client;
-            OutOptions.bListen = false;
-            break;
-        case ENngMode::Pair:
-            if (OutOptions.Role == ENngRole::Server)
-            {
-                OutOptions.bListen = true;
-            }
-            else
-            {
-                OutOptions.bListen = false;
-            }
-            break;
-        default:
-            OutOptions.Role = ENngRole::Server;
-            OutOptions.bListen = true;
-            break;
-        }
 
         OutOptions.CanonicalUri = BuildCanonicalUri(OutOptions.Mode, OutOptions.Host, OutOptions.Port, OutOptions.Role, OutOptions.Topic);
         return true;
@@ -684,6 +724,23 @@ namespace O3DNNG
         }
 
         OutOptions.Mode = ModeFromString(ModeString, ENngMode::Sub);
+        if (!IsModeSupported(OutOptions.Mode, /*bSender=*/false))
+        {
+            OutError = TEXT("NNG receiver mode must be sub, pair, or pull");
+            return false;
+        }
+
+        // Role first: it decides whether the default host is a bind-all or a loopback address.
+        FString RoleString = GetAdvancedOption(Config, RoleOptionKey);
+        if (RoleString.IsEmpty())
+        {
+            if (const FString* RoleOverride = UriQuery.Find(TEXT("role")))
+            {
+                RoleString = *RoleOverride;
+            }
+        }
+        OutOptions.Role = ResolveRole(OutOptions.Mode, RoleFromString(RoleString, ENngRole::None), /*bSender=*/false);
+        OutOptions.bListen = IsListenRole(OutOptions.Role);
 
         FString Topic = GetAdvancedOption(Config, TopicOptionKey);
         Topic.TrimStartAndEndInline();
@@ -712,7 +769,7 @@ namespace O3DNNG
 
         FString Host;
         int32 Port = 0;
-        if (!PopulateHostPort(Config, TEXT("127.0.0.1"), OutOptions.Mode, Host, Port))
+        if (!PopulateHostPort(Config, GetDefaultHost(OutOptions.bListen), OutOptions.Mode, Host, Port))
         {
             OutError = TEXT("Failed to parse host/port for NNG receiver");
             return false;
@@ -722,51 +779,6 @@ namespace O3DNNG
         OutOptions.Port = Port;
         OutOptions.TcpAddress = BuildTcpAddress(Host, Port);
         OutOptions.StreamId = MakeStreamId(Host, Port, Topic);
-
-        ENngRole DefaultRole = ENngRole::Client;
-        switch (OutOptions.Mode)
-        {
-        case ENngMode::Pull:
-            DefaultRole = ENngRole::Server;
-            break;
-        case ENngMode::Pair:
-            DefaultRole = ENngRole::Client;
-            break;
-        case ENngMode::Sub:
-            DefaultRole = ENngRole::Client;
-            break;
-        default:
-            DefaultRole = ENngRole::Client;
-            break;
-        }
-
-        FString RoleString = GetAdvancedOption(Config, RoleOptionKey);
-        if (RoleString.IsEmpty())
-        {
-            if (const FString* RoleOverride = UriQuery.Find(TEXT("role")))
-            {
-                RoleString = *RoleOverride;
-            }
-        }
-        OutOptions.Role = RoleFromString(RoleString, DefaultRole);
-
-        switch (OutOptions.Mode)
-        {
-        case ENngMode::Sub:
-            OutOptions.Role = ENngRole::Client;
-            OutOptions.bListen = false;
-            break;
-        case ENngMode::Pull:
-            OutOptions.Role = ENngRole::Server;
-            OutOptions.bListen = true;
-            break;
-        case ENngMode::Pair:
-            OutOptions.bListen = (OutOptions.Role == ENngRole::Server);
-            break;
-        default:
-            OutError = TEXT("NNG receiver mode must be sub, pair, or pull");
-            return false;
-        }
 
         OutOptions.CanonicalUri = BuildCanonicalUri(OutOptions.Mode, OutOptions.Host, OutOptions.Port, OutOptions.Role, OutOptions.Topic);
         return true;
