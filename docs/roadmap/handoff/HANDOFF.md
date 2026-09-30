@@ -11,19 +11,22 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M0 Decisions (ADRs 0001–0010) | Done (#261–#263) |
 | M1 Safety and correctness: WP-S1..S11, WP-T1, WP-T2 | Done (#264–#279) |
 | M2 Fab-buildable package: WP-F1..F4, F6..F9, F11 | Done (#274–#286). **F0 and F5 wait on the maintainer** (see §5) |
-| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1** (see §2) |
+| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 merged (#289); PR 2 is next** (see §2) |
 | M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | Not started |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
 
-Recent merges on `develop`: F7 editor split (#285, dc686e0), F11 WebRTC add-on (#286, 5c9af51).
+Recent merges on `develop`: F7 editor split (#285, dc686e0), F11 WebRTC add-on (#286, 5c9af51), WP-A1 PR 1 transport registry (#289, d365c34).
 
 ## 2. The work in flight: WP-A1 (transport core consolidation)
 
 Design: `docs/adr/0007-transport-abstraction-and-registry.md`, section "Implementation outline". WP-A1 is a series of PRs; each must keep every transport working and the conformance suite green.
 
-1. **Interfaces and one registry** (SHR-12, SND-23, RCV-27, RCV-28, SHR-24). Branch `claude/wp-a1-1-registry`. Status at time of writing: being implemented; the maintainer authorised "merge on green". **Check its PR state first** (`gh pr list --head claude/wp-a1-1-registry --state all`).
-   - Moves `IOpen3DSender`, `IOpen3DReceiver` and a single thread-safe registry into `Open3DShared/Public/Transport/`. Each transport registers one descriptor (factories, config functions, the `FO3DTransportOptionSchema` from WP-F7).
-   - Old Sender/Receiver headers stay as forwarding shims for one release.
+1. **Interfaces and one registry** (SHR-12, SND-23, RCV-27, RCV-28, SHR-24). **Done: #289, merged as d365c34.**
+   - `IOpen3DSender`, `IOpen3DReceiver`, their audio sinks, `ISerializedFrameConsumer` and `FO3DTransportConfig` now live in `Open3DShared/Public/Transport/`, exported by Open3DShared.
+   - `FO3DTransportRegistry` (`Transport/O3DTransportRegistry.h`): each transport registers one immutable `FO3DTransportDescriptor` and holds a move-only `FO3DTransportRegistration`. `Find` returns `TSharedPtr<const FO3DTransportDescriptor>`; `GetNames(Role)` feeds the pickers from the same entries `CreateSender`/`CreateReceiver` use; `OnTransportsChanged` fires on every change. Duplicate names and API-version mismatches are refused.
+   - Old Sender/Receiver headers are deprecated forwarding shims (comments only, no `UE_DEPRECATED`), removed next minor release with an API-version bump. Register/unregister are documented as game-thread only but not yet `check`ed; step 2 can add that.
+   - Tests: `Open3DBroadcast.Shared.TransportRegistry.*` (7 cases).
+   - **Start here next: step 2.**
 2. **Lifetime** (SHR-13, TRF-14): live-instance lists, `OnTransportUnregistering`, drain before unload, `FO3DFfiLibrary`; WebRTC and MoQ modules adopt it.
 3. **Results, state, capabilities** (SHR-14): `FO3DTransportResult`, `EO3DSendResult`, `FO3DSendPayload`, connection state, `FO3DTransportCapabilities`, `SendSerialized` pure virtual. The interface version (`O3D_TRANSPORT_API_VERSION` = 1, `Open3DShared/Public/Transport/O3DTransportApiVersion.h`) already exists from WP-F11.
 4. **Shared building blocks, one transport per PR**, in order Loopback, TCP, UDP, NNG, MoQ, then WebRTC (in the add-on). Each PR deletes that transport's own queue, demux, sink and option-parsing copies and drops its Build.cs dependency on Open3DSender/Open3DReceiver.
