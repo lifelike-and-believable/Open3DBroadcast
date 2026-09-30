@@ -147,6 +147,6 @@ All moq-ffi calls go through `FMoQFfiApi` (`Public/MoQFfiApi.h`), a per-instance
 
 ## See Also
 
-- [MoQ Transport Implementation Plan](../../MOQ_TRANSPORT_IMPLEMENTATION_PLAN.md)
+- [MoQ Transport Implementation Plan](../../../../../docs/dev/Open3DTransportMoQ/MOQ_TRANSPORT_IMPLEMENTATION_PLAN.md) (developer planning notes, in the repository only)
 - [moq-ffi README](ThirdParty/moq-ffi/README.md)
 - [O3DAudio Framework](../Open3DShared/Public/O3DAudioFrameCodec.h)

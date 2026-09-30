@@ -17,7 +17,7 @@ real LiveKit server. They complement the fake-FFI automation tests
    is short on purpose so a refresh happens during the test:
 
    ```bash
-   cd ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportWebRTC/Tests
+   cd docs/dev/Open3DTransportWebRTC/Tests
    pip install flask pyjwt
    LIVEKIT_API_KEY=devkey API_SECRET=secret TOKEN_TTL=180 python mock-token-server.py --port 8080
    ```
