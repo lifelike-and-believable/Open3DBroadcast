@@ -1,8 +1,9 @@
 name: Open3DBroadcast Plugin CI
 
 # Which jobs run when (CI-9; details in Build/README.md, "CI"):
-#   - Every PR commit, drafts included: "Detect plugin-relevant changes"
-#     (GitHub-hosted, seconds). core-tests.yml also runs on every PR.
+#   - Every PR commit, drafts included: "Detect plugin-relevant changes" and
+#     "Fab source zip" (GitHub-hosted, a minute or two). core-tests.yml also
+#     runs on every PR.
 #   - Non-draft PRs, pushes to develop/main and manual runs: "UE build and
 #     tests" on the single self-hosted UE runner. Drafts skip it so work in
 #     progress does not queue the runner; mark the PR ready for review, or
@@ -67,13 +68,24 @@ jobs:
               - 'ProjectSandbox/Plugins/Open3DBroadcast/**'
               - '.gitmodules'
               - '.github/workflows/open3dbroadcast-plugin-ci.yml'
+              - '.github/workflows/open3dbroadcast-fab-package.yml'
+
+  fab-package:
+    name: Fab source zip
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.code == 'true'
+    uses: ./.github/workflows/open3dbroadcast-fab-package.yml
 
   build-and-test:
     name: UE build and tests
-    needs: changes
+    needs: [ changes, fab-package ]
+    # !cancelled() lets this job run when fab-package failed or was skipped;
+    # the Fab steps below check its result themselves.
     if: >-
-      (github.event_name == 'workflow_dispatch') ||
-      (needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false))
+      !cancelled() && needs.changes.result == 'success' && (
+        github.event_name == 'workflow_dispatch' ||
+        (needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false))
+      )
     runs-on: [ self-hosted, ue5, windows ]
     timeout-minutes: 90
 
@@ -233,6 +245,25 @@ jobs:
             -StrictIncludes `
             -FailOnWarnings
 
+      # CI-5: BuildPlugin on the contents of the Fab source zip made by the
+      # fab-package job. See Build-FabZip.ps1 for the WP-F1 gap it reports.
+      - name: Download Fab source zip
+        if: needs.fab-package.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: Open3DBroadcast-Fab-Source-${{ github.sha }}
+          path: ${{ runner.temp }}/FabZip
+
+      - name: Build the Fab source zip
+        if: needs.fab-package.result == 'success'
+        shell: powershell
+        run: |
+          & .\Build\Scripts\Build-FabZip.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -Zip (Join-Path $env:RUNNER_TEMP 'FabZip') `
+            -WorkDir (Join-Path $env:RUNNER_TEMP 'FabBuild') `
+            -CoreSourcePluginDir "${{ steps.paths.outputs.plugin_dir }}"
+
       - name: Upload BuildPlugin logs
         if: failure()
         uses: actions/upload-artifact@v4
@@ -240,6 +271,7 @@ jobs:
           name: Open3DBroadcast-BuildPluginLogs-${{ github.sha }}
           path: |
             ${{ runner.temp }}/*-BuildPlugin.log
+            ${{ runner.temp }}/FabBuild/*-BuildPlugin.log
           if-no-files-found: ignore
           retention-days: 14
 
