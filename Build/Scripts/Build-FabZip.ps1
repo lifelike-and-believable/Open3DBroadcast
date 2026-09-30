@@ -66,7 +66,9 @@ if ($RequireStandalone) {
     "Source\ThirdParty\Open3DStreamCore\o3ds_generated.h"
   )
   $absent = @($needed | Where-Object { !(Test-Path -LiteralPath (Join-Path $pluginDir $_)) })
-  $stale = @(Get-ChildItem -LiteralPath $pluginDir -Recurse -File -Include "open3dstreamstatic*", "flatbuffers.lib" -ErrorAction SilentlyContinue)
+  # Filter by name: Windows PowerShell 5.1 ignores -Include when combined with -LiteralPath.
+  $stale = @(Get-ChildItem -LiteralPath $pluginDir -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -like "open3dstreamstatic*" -or $_.Name -ieq "flatbuffers.lib" })
   if ($absent.Count -gt 0 -or $stale.Count -gt 0) {
     if ($absent.Count -gt 0) { Write-Failure "The Fab zip lacks $($absent -join ', '), so it cannot build on its own (WP-F1). Run Build/Scripts/sync_o3ds_core.py and commit the result." }
     if ($stale.Count -gt 0) { Write-Failure "The Fab zip contains prebuilt core libraries that WP-F1 replaced: $(($stale | ForEach-Object { $_.Name }) -join ', ')" }
