@@ -155,6 +155,12 @@
   metadata falls back to the stream label, which is what
   `FinalizeAudioMeta` already did (RCV-2, ADR 0006 Q6).
 
+- NNG: the send and receive buffers are now set as message counts (1024), which is what
+  NNG expects. The sender passed a byte count with the wrong type, so the call failed
+  silently and a pub socket kept its small default queue, dropping frames from any burst
+  (TRB-36, found by the new NNG conformance round-trip test). `NNG_OPT_SENDTIMEO` is
+  unchanged and still has no effect; the rest of TRB-36 stays with WP-S11.
+
 ### Changed
 
 - The largest reassembled UDP message the receiver accepts drops from 50 MiB to 4 MiB by default; set the new `udp.maxframe` receiver option to raise it (up to 50 MiB).
