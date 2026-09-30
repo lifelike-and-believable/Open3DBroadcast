@@ -14,6 +14,7 @@
 #include "PropertyEditorModule.h"
 #include "SO3DTransportOptionsPanel.h"
 #include "ScopedTransaction.h"
+#include "Transport/O3DTransportRegistry.h"
 #include "UObject/Package.h"
 #include "UObject/UnrealType.h"
 #include "Widgets/Input/SButton.h"
@@ -49,8 +50,7 @@ void SO3DReceiverSourceFactoryPanel::Construct(const FArguments& InArgs)
 	// An ini with no transport gets the first registered one. This changes only the panel's copy.
 	if (Copy->Settings.TransportName.IsNone())
 	{
-		TArray<FName> RegisteredTransports;
-		O3DReceiver::GetRegisteredTransportNames(RegisteredTransports);
+		const TArray<FName> RegisteredTransports = FO3DTransportRegistry::Get().GetNames(EO3DTransportRole::Receiver);
 		if (RegisteredTransports.Num() > 0)
 		{
 			Copy->Settings.TransportName = RegisteredTransports[0];
@@ -262,7 +262,7 @@ void SO3DReceiverSourceFactoryPanel::RefreshTransportCustomization()
 
 	// ADR 0010 §4: the transport declares its options as data; one generic panel renders them.
 	FO3DTransportOptionSchema Schema;
-	if (O3DReceiver::GetTransportOptionSchema(TransportName, Schema) && Schema.Num() > 0)
+	if (FO3DTransportRegistry::Get().GetOptionSchema(TransportName, EO3DTransportRole::Receiver, Schema) && Schema.Num() > 0)
 	{
 		TransportCustomizationContainer->SetContent(
 			SNew(SO3DTransportOptionsPanel)
@@ -391,8 +391,8 @@ void SO3DReceiverSourceFactoryPanel::RefreshTransportOptions()
 {
 	TransportOptions.Reset();
 
-	TArray<FName> RegisteredTransports;
-	O3DReceiver::GetRegisteredTransportNames(RegisteredTransports);
+	// Same list the source can instantiate: names with a receiver factory (RCV-28).
+	const TArray<FName> RegisteredTransports = FO3DTransportRegistry::Get().GetNames(EO3DTransportRole::Receiver);
 
 	for (const FName& Name : RegisteredTransports)
 	{

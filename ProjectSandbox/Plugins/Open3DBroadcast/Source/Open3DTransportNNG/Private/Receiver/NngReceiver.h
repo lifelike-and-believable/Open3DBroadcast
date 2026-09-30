@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "Misc/ScopeLock.h"
 
-#include "O3DReceiverInterface.h"
+#include "Transport/O3DReceiverInterface.h"
 #include "Shared/NngHelpers.h"
 #include "O3DAudioFrameCodec.h"
 

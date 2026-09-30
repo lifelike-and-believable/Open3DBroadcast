@@ -11,9 +11,10 @@
  * minimal form of SHR-14).
  *
  * The interface is every exported type and function an add-on transport uses: IOpen3DSender and
- * IOpen3DReceiver (with their audio sinks), the sender and receiver registries and transport
- * customizations, FO3DTransportConfig, FO3DTransportOptionSchema, FO3DFfiLibrary,
- * FO3DSecretStore and ISerializedFrameConsumer.
+ * IOpen3DReceiver (with their audio sinks), FO3DTransportRegistry and FO3DTransportDescriptor (and,
+ * until they are removed, the deprecated sender and receiver registries and transport
+ * customizations that forward to it), FO3DTransportConfig, FO3DTransportOptionSchema,
+ * FO3DFfiLibrary, FO3DSecretStore and ISerializedFrameConsumer.
  *
  * Bump rule: increase the number in the same PR as any change to one of those types that alters
  * a class layout, a virtual function table, an exported function signature or a documented
@@ -23,6 +24,13 @@
  *
  * History:
  *   1  WP-F11: first version (the interface as of the add-on split).
+ *      WP-A1 PR 1 moved IOpen3DSender, IOpen3DReceiver and ISerializedFrameConsumer into
+ *      Open3DShared without changing their layout or virtual function tables, and added
+ *      FO3DTransportRegistry beside forwarding shims for the old headers and functions. The
+ *      number stays 1 while the shims exist (ADR 0007 open question 5); the release that removes
+ *      them bumps it. An add-on must still be rebuilt against the release it loads into, because
+ *      the interface classes are now exported from Open3DShared instead of Open3DSender and
+ *      Open3DReceiver.
  */
 #define O3D_TRANSPORT_API_VERSION 1
 

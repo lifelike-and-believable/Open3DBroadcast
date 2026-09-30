@@ -15,7 +15,7 @@
 #include "Misc/AutomationTest.h"
 #include "O3DSenderAudioCaptureComponent.h"
 #include "O3DSenderComponent.h"
-#include "O3DSenderInterface.h"
+#include "Transport/O3DSenderInterface.h"
 #include "Testing/O3DSenderTesting.h"
 #include "UObject/Package.h"
 

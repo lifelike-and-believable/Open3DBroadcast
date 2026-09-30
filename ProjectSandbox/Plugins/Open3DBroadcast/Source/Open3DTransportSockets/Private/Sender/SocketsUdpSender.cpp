@@ -9,7 +9,7 @@
 #include "HAL/RunnableThread.h"
 #include "O3DAudioSerialization.h"
 #include "O3DUnifiedMessage.h"
-#include "O3DTransportTypes.h"
+#include "Transport/O3DTransportTypes.h"
 
 #include "Sockets.h"
 #include "SocketSubsystem.h"

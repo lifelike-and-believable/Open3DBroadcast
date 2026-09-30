@@ -13,7 +13,7 @@
 
 #if O3D_WITH_TRANSPORT_MOQ
 
-#include "O3DTransportTypes.h"
+#include "Transport/O3DTransportTypes.h"
 #include "Testing/MoQTesting.h"
 #include "Transport/MoQ/MoQFakeFfi.h"
 

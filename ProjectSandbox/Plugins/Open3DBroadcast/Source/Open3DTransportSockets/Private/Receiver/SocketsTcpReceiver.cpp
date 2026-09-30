@@ -5,10 +5,10 @@
 #include "SocketsTcpReceiver.h"
 #include "../Shared/SocketsTcpAudio.h"
 #include "../Shared/SocketsTcpTransport.h"
-#include "O3DTransportTypes.h"
+#include "Transport/O3DTransportTypes.h"
 #include "O3DUnifiedMessage.h"
 #include "O3DAudioSerialization.h"
-#include "SerializedFrameConsumerRegistry.h"
+#include "Transport/O3DSerializedFrameConsumer.h"
 
 #include "Sockets.h"
 #include "SocketSubsystem.h"

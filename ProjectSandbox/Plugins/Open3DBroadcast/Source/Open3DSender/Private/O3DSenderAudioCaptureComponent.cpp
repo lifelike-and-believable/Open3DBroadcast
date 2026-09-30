@@ -7,7 +7,7 @@
 #include "AudioCaptureCore.h"
 #include "ISubmixBufferListener.h"
 #include "O3DAudioResampler.h"
-#include "O3DSenderInterface.h"
+#include "Transport/O3DSenderInterface.h"
 #include "O3DSenderLogs.h"
 #include "Misc/ScopeLock.h"
 

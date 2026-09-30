@@ -7,7 +7,7 @@
 #include "Templates/UniquePtr.h"
 
 #include "O3DAudioFrameCodec.h"
-#include "O3DTransportTypes.h"
+#include "Transport/O3DTransportTypes.h"
 
 /**
  * Thread-safe "last observed subject" slot shared between a sender (writer, game or

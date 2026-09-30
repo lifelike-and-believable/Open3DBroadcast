@@ -2,9 +2,9 @@
 
 #include "O3DSenderTransportController.h"
 
-#include "O3DSenderInterface.h"
+#include "Transport/O3DSenderInterface.h"
 #include "O3DSenderLogs.h"
-#include "O3DSenderRegistry.h"
+#include "Transport/O3DTransportRegistry.h"
 
 FO3DSenderTransportController::FO3DSenderTransportController() = default;
 
@@ -20,7 +20,7 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
     }
 
     const FName SelectedTransportName(*ActiveConfig.Transport);
-    ActiveSender = O3DTransport::CreateSender(SelectedTransportName);
+    ActiveSender = FO3DTransportRegistry::Get().CreateSender(SelectedTransportName);
     if (!ActiveSender.IsValid())
     {
         UE_LOG(LogO3DSenderComponent, Warning, TEXT("No sender registered for transport '%s'."), *ActiveConfig.Transport);

@@ -18,9 +18,9 @@
 #include "Misc/ScopeExit.h"
 
 #include "O3DAudioFrameCodec.h"
-#include "O3DReceiverInterface.h"
-#include "O3DSenderInterface.h"
-#include "O3DTransportTypes.h"
+#include "Transport/O3DReceiverInterface.h"
+#include "Transport/O3DSenderInterface.h"
+#include "Transport/O3DTransportTypes.h"
 #include "O3DUnifiedMessage.h"
 
 #include <atomic>

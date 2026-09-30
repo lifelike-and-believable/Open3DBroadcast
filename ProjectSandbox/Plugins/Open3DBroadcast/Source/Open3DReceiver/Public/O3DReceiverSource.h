@@ -6,7 +6,7 @@
 #include "ILiveLinkSource.h"
 #include "Tickable.h"
 
-#include "O3DReceiverInterface.h"
+#include "Transport/O3DReceiverInterface.h"
 #include "O3DReceiverLogs.h"
 #include "O3DReceiverSourceSettings.h"
 #include "O3DUnifiedMessage.h"

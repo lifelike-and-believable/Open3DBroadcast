@@ -9,7 +9,7 @@
 
 #include "Misc/AutomationTest.h"
 
-#include "O3DTransportTypes.h"
+#include "Transport/O3DTransportTypes.h"
 
 THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"

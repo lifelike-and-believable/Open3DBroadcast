@@ -8,7 +8,7 @@
 #include "HAL/PlatformTime.h"
 #include "Math/UnrealMathUtility.h"
 #include "Misc/ScopeLock.h"
-#include "SerializedFrameConsumerRegistry.h"
+#include "Transport/O3DSerializedFrameConsumer.h"
 #include "Shared/MoQHandles.h"
 #include "Shared/MoQHelpers.h"
 #include "Shared/MoQSessionWrapper.h"

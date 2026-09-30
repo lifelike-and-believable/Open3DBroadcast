@@ -10,8 +10,8 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeLock.h"
 
-#include "O3DTransportTypes.h"
-#include "SerializedFrameConsumerRegistry.h"
+#include "Transport/O3DTransportTypes.h"
+#include "Transport/O3DSerializedFrameConsumer.h"
 
 #if O3D_WITH_TRANSPORT_MOQ
 

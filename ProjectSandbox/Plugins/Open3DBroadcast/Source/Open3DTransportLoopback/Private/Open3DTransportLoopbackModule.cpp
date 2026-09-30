@@ -4,14 +4,11 @@
 
 #include "Sender/LoopbackSender.h"
 #include "Receiver/LoopbackReceiver.h"
-#include "O3DSenderRegistry.h"
-#include "O3DReceiverRegistry.h"
-#include "O3DReceiverTransportCustomization.h"
 #include "O3DReceiverSourceSettings.h"
-#include "O3DSenderTransportCustomization.h"
 #include "O3DSenderComponent.h"
 #include "O3DTransportOptionSchema.h"
-#include "O3DTransportTypes.h"
+#include "Transport/O3DTransportRegistry.h"
+#include "Transport/O3DTransportTypes.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogOpen3DTransportLoopbackModule, Log, All);
 
@@ -70,11 +67,14 @@ class FOpen3DTransportLoopbackModule : public IModuleInterface
 public:
 	virtual void StartupModule() override
 	{
-		O3DTransport::RegisterSender(TEXT("Loopback"), []() { return MakeShared<FO3DLoopbackSender>(); });
-		O3DTransport::RegisterReceiver(TEXT("Loopback"), []() { return MakeShared<FO3DLoopbackReceiver>(); });
+		// One descriptor for the transport name (ADR 0007 item 4, WP-A1).
+		FO3DTransportDescriptor Loopback;
+		Loopback.Name = TEXT("Loopback");
+		Loopback.OwningModule = TEXT("Open3DTransportLoopback");
+		Loopback.CreateSender = []() { return MakeShared<FO3DLoopbackSender>(); };
+		Loopback.CreateReceiver = []() { return MakeShared<FO3DLoopbackReceiver>(); };
 
-		FO3DReceiverTransportCustomization LoopbackCustomization;
-		LoopbackCustomization.ConfigureTransport = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
+		Loopback.ConfigureReceiver = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
 		{
 			FString ChannelName;
 			if (const FString* Option = Settings.TransportOptions.Find(LoopbackReceiver::ChannelOptionKey))
@@ -91,11 +91,9 @@ public:
 			Config.Uri = FString::Printf(TEXT("loopback://%s?role=sub"), *ChannelName);
 			Config.AdvancedParams.Add(LoopbackReceiver::ChannelOptionKey, ChannelName);
 		};
-		LoopbackCustomization.OptionSchema = LoopbackSchema::MakeReceiverSchema();
-		O3DReceiver::RegisterTransportCustomization(TEXT("Loopback"), MoveTemp(LoopbackCustomization));
+		Loopback.ReceiverOptions.OptionSchema = LoopbackSchema::MakeReceiverSchema();
 
-		FO3DSenderTransportCustomization LoopbackSenderCustomization;
-		LoopbackSenderCustomization.ConfigureTransport = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
+		Loopback.ConfigureSender = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
 		{
 			FString ChannelName = SenderComponent ? SenderComponent->GetTransportOption(LoopbackSender::ChannelOptionKey) : FString();
 			if (ChannelName.IsEmpty())
@@ -113,21 +111,22 @@ public:
 			int32 QueueValue = QueueString.IsEmpty() ? LoopbackSender::DefaultQueue : FMath::Max(1, FCString::Atoi(*QueueString));
 			Config.AdvancedParams.Add(LoopbackSender::QueueOptionKey, FString::FromInt(QueueValue));
 		};
-		LoopbackSenderCustomization.OptionSchema = LoopbackSchema::MakeSenderSchema();
-		O3DSender::RegisterTransportCustomization(TEXT("Loopback"), MoveTemp(LoopbackSenderCustomization));
+		Loopback.SenderOptions.OptionSchema = LoopbackSchema::MakeSenderSchema();
+
+		Registration = FO3DTransportRegistry::Get().Register(MoveTemp(Loopback));
 
 		UE_LOG(LogOpen3DTransportLoopbackModule, Log, TEXT("Open3D loopback transport module started."));
 	}
 
 	virtual void ShutdownModule() override
 	{
-		O3DTransport::UnregisterSender(TEXT("Loopback"));
-		O3DTransport::UnregisterReceiver(TEXT("Loopback"));
-		O3DReceiver::UnregisterTransportCustomization(TEXT("Loopback"));
-		O3DSender::UnregisterTransportCustomization(TEXT("Loopback"));
+		Registration.Reset();
 
 		UE_LOG(LogOpen3DTransportLoopbackModule, Log, TEXT("Open3D loopback transport module shut down."));
 	}
+
+private:
+	FO3DTransportRegistration Registration;
 };
 
 IMPLEMENT_MODULE(FOpen3DTransportLoopbackModule, Open3DTransportLoopback)

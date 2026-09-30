@@ -9,7 +9,7 @@
 #include "HAL/PlatformTime.h"
 #include "Misc/ScopeLock.h"
 #include "O3DFfiContextRegistry.h"
-#include "SerializedFrameConsumerRegistry.h"
+#include "Transport/O3DSerializedFrameConsumer.h"
 #include "O3DUnifiedMessage.h"
 #include "O3DAudioFrameCodec.h"
 

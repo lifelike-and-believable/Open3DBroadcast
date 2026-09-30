@@ -10,8 +10,8 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "O3DReceiverInterface.h"
-#include "O3DSenderInterface.h"
+#include "Transport/O3DReceiverInterface.h"
+#include "Transport/O3DSenderInterface.h"
 
 namespace O3DSocketsTesting
 {

@@ -32,15 +32,13 @@ void FO3DLoopbackReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer
 
 bool FO3DLoopbackReceiver::Start()
 {
+    // FSerializedFrameConsumerRegistry, which this used to fall back to, was never populated and
+    // is gone (SHR-24); without SetConsumer the frames are dropped, as before.
     if (!Consumer.IsValid())
     {
-        Consumer = FSerializedFrameConsumerRegistry::Create();
-        if (!Consumer.IsValid())
-        {
-            #if !WITH_DEV_AUTOMATION_TESTS
-            UE_LOG(LogO3DLoopbackTransport, Warning, TEXT("No serialized frame consumer registered; loopback frames will be dropped."));
-            #endif  
-        }
+        #if !WITH_DEV_AUTOMATION_TESTS
+        UE_LOG(LogO3DLoopbackTransport, Warning, TEXT("No serialized frame consumer registered; loopback frames will be dropped."));
+        #endif
     }
     return bInitialized;
 }

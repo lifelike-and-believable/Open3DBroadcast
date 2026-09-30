@@ -16,9 +16,9 @@
 #include "Algo/Sort.h"
 
 #include "O3DSenderComponent.h"
-#include "O3DSenderTransportCustomization.h"
 #include "O3DTransportOptionTarget.h"
 #include "SO3DTransportOptionsPanel.h"
+#include "Transport/O3DTransportRegistry.h"
 
 #define LOCTEXT_NAMESPACE "O3DSenderComponentCustomization"
 DEFINE_LOG_CATEGORY_STATIC(LogO3DSenderDetails, Log, All);
@@ -378,8 +378,8 @@ void FO3DSenderComponentCustomization::RefreshTransportOptions()
     UE_LOG(LogO3DSenderDetails, Verbose, TEXT("RefreshTransportOptions begin"));
     TransportOptions.Reset();
 
-    TArray<FName> RegisteredTransports;
-    O3DSender::GetRegisteredTransportNames(RegisteredTransports);
+    // Same list the component can instantiate: names with a sender factory (RCV-28).
+    const TArray<FName> RegisteredTransports = FO3DTransportRegistry::Get().GetNames(EO3DTransportRole::Sender);
 
     for (const FName& Name : RegisteredTransports)
     {
@@ -465,7 +465,7 @@ void FO3DSenderComponentCustomization::RefreshTransportCustomization()
 
     // ADR 0010 §4: the transport declares its options as data; one generic panel renders them.
     FO3DTransportOptionSchema Schema;
-    if (O3DSender::GetTransportOptionSchema(TransportName, Schema) && Schema.Num() > 0)
+    if (FO3DTransportRegistry::Get().GetOptionSchema(TransportName, EO3DTransportRole::Sender, Schema) && Schema.Num() > 0)
     {
         TransportCustomizationContainer->SetContent(
             SNew(SO3DTransportOptionsPanel)

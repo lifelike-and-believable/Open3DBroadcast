@@ -17,9 +17,8 @@
 #include "Misc/AutomationTest.h"
 
 #include "O3DReceiverSourceSettings.h"
-#include "O3DReceiverTransportCustomization.h"
-#include "O3DSenderTransportCustomization.h"
-#include "O3DTransportTypes.h"
+#include "Transport/O3DTransportRegistry.h"
+#include "Transport/O3DTransportTypes.h"
 
 // Named namespace (not anonymous) so unity builds cannot collide with other test files.
 namespace WebRTCS9Test
@@ -47,35 +46,38 @@ bool FWebRTCSecretsDeclarationTest::RunTest(const FString& Parameters)
 {
 	const FString Token = TEXT("WEBRTC-CONFIG-TOKEN-1a2b3c");
 
+	FO3DTransportRegistry& Registry = FO3DTransportRegistry::Get();
+
 	TArray<FString> SenderKeys;
 	TMap<FString, FString> SenderEnvVars;
-	TestTrue(TEXT("Sender customization registered"), O3DSender::GetTransportSecretDeclaration(TEXT("WebRTC"), SenderKeys, SenderEnvVars));
+	TestTrue(TEXT("Sender customization registered"), Registry.GetSecretDeclaration(TEXT("WebRTC"), EO3DTransportRole::Sender, SenderKeys, SenderEnvVars));
 	TestTrue(TEXT("Sender declares webrtc.token"), SenderKeys.Contains(FString(WebRTCUtils::TokenOptionKey)));
 	TestTrue(TEXT("Sender declares webrtc.tokenEndpointAuth"), SenderKeys.Contains(FString(WebRTCUtils::TokenEndpointAuthOptionKey)));
 	TestEqual(TEXT("Token env var"), SenderEnvVars.FindRef(WebRTCUtils::TokenOptionKey), FString(WebRTCUtils::TokenEnvVar));
 
 	TArray<FString> ReceiverKeys;
 	TMap<FString, FString> ReceiverEnvVars;
-	TestTrue(TEXT("Receiver customization registered"), O3DReceiver::GetTransportSecretDeclaration(TEXT("WebRTC"), ReceiverKeys, ReceiverEnvVars));
+	TestTrue(TEXT("Receiver customization registered"), Registry.GetSecretDeclaration(TEXT("WebRTC"), EO3DTransportRole::Receiver, ReceiverKeys, ReceiverEnvVars));
 	TestTrue(TEXT("Receiver declares webrtc.token"), ReceiverKeys.Contains(FString(WebRTCUtils::TokenOptionKey)));
 	TestTrue(TEXT("Receiver declares webrtc.tokenEndpointAuth"), ReceiverKeys.Contains(FString(WebRTCUtils::TokenEndpointAuthOptionKey)));
 
-	if (const FO3DSenderTransportCustomization* Sender = O3DSender::FindTransportCustomization(TEXT("WebRTC")))
+	const FO3DTransportDescriptorPtr Descriptor = Registry.Find(TEXT("WebRTC"));
+	if (Descriptor.IsValid() && Descriptor->ConfigureSender)
 	{
 		FO3DTransportConfig Config;
 		Config.Secrets.Add(WebRTCUtils::TokenOptionKey, Token);
-		Sender->ConfigureTransport(nullptr, Config);
+		Descriptor->ConfigureSender(nullptr, Config);
 		TestEqual(TEXT("Sender: token taken from Config.Secrets"), Config.Token, Token);
 		TestFalse(TEXT("Sender: token not in AdvancedParams"), Config.AdvancedParams.Contains(WebRTCUtils::TokenOptionKey));
 	}
 
-	if (const FO3DReceiverTransportCustomization* Receiver = O3DReceiver::FindTransportCustomization(TEXT("WebRTC")))
+	if (Descriptor.IsValid() && Descriptor->ConfigureReceiver)
 	{
 		FO3DReceiverSourceConfig Settings;
 		Settings.TransportName = TEXT("WebRTC");
 		FO3DTransportConfig Config;
 		Config.Secrets.Add(WebRTCUtils::TokenOptionKey, Token);
-		Receiver->ConfigureTransport(Settings, Config);
+		Descriptor->ConfigureReceiver(Settings, Config);
 		TestEqual(TEXT("Receiver: token taken from Config.Secrets"), Config.Token, Token);
 		TestFalse(TEXT("Receiver: token not in AdvancedParams"), Config.AdvancedParams.Contains(WebRTCUtils::TokenOptionKey));
 	}

@@ -11,7 +11,7 @@
 #include "O3DHelpers.h"
 #include "O3DRedact.h"
 #include "O3DSecretStore.h"
-#include "O3DTransportTypes.h"
+#include "Transport/O3DTransportTypes.h"
 
 namespace O3DSecretsTestUtil
 {

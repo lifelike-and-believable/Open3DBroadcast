@@ -29,10 +29,10 @@
 #include "Sockets.h"
 #include "IPAddress.h"
 
-#include "O3DReceiverInterface.h"
-#include "O3DSenderInterface.h"
-#include "O3DTransportTypes.h"
-#include "SerializedFrameConsumerRegistry.h"
+#include "Transport/O3DReceiverInterface.h"
+#include "Transport/O3DSenderInterface.h"
+#include "Transport/O3DTransportTypes.h"
+#include "Transport/O3DSerializedFrameConsumer.h"
 
 namespace O3DSocketsTcpTests
 {

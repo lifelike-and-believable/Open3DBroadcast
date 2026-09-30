@@ -15,9 +15,9 @@
 THIRD_PARTY_INCLUDES_START
 #include "moq_ffi.h"
 THIRD_PARTY_INCLUDES_END
-#include "O3DReceiverInterface.h"
-#include "O3DSenderInterface.h"
-#include "O3DTransportTypes.h"
+#include "Transport/O3DReceiverInterface.h"
+#include "Transport/O3DSenderInterface.h"
+#include "Transport/O3DTransportTypes.h"
 #include "O3DUnifiedMessage.h"
 #include "Templates/Function.h"
 #include "Templates/SharedPointer.h"
