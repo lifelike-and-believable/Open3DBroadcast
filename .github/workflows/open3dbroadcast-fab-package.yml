@@ -9,10 +9,12 @@ name: Open3DBroadcast Fab package
 #   1. Build/Scripts/fab-package.py stages the git-tracked plugin files,
 #      removes the modules in Build/Fab/exclude-modules.txt and the files
 #      matching Build/Fab/exclude-files.txt, writes the zip and checks it
-#      (no excluded module, no pdb/py, no developer docs, no Binaries).
+#      (no excluded module, no WebRTC or livekit file anywhere in the plugin,
+#      no pdb/py, no developer docs, no Binaries).
 #   2. check-no-video-codecs.sh scans every binary in the staged package for
-#      ffmpeg/OpenH264 (CI-8). WebRTC's livekit_ffi.dll is excluded, so this
-#      is a required gate now.
+#      ffmpeg/OpenH264 (CI-8). WebRTC's livekit_ffi.dll is not in the plugin
+#      (it ships in the Open3DBroadcastWebRTC add-on, WP-F11), so this is a
+#      required gate.
 #   3. The zip and its manifest are uploaded as
 #      Open3DBroadcast-Fab-Source-<sha>.
 #
@@ -49,6 +51,11 @@ jobs:
             exit 0
           fi
           Build/Scripts/check-no-video-codecs.sh "${bins[@]}"
+
+      # WP-F11: the whole Open3DBroadcast plugin tree, not only the Fab package,
+      # is free of ffmpeg/OpenH264, because WebRTC lives in the add-on.
+      - name: Video codec gate on the plugin tree
+        run: Build/Scripts/check-no-video-codecs.sh
 
       - name: Upload Fab source zip
         uses: actions/upload-artifact@v4

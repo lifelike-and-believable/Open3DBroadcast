@@ -20,10 +20,11 @@ param(
   [switch]$FailOnWarnings
 )
 
+# O3D_WITH_TRANSPORT_WEBRTC is not here: WebRTC is the Open3DBroadcastWebRTC add-on plugin, which
+# reads that flag in its own Build.cs (WP-F11).
 $TransportFlags = @(
   "O3D_WITH_TRANSPORT_SOCKETS",
   "O3D_WITH_TRANSPORT_NNG",
-  "O3D_WITH_TRANSPORT_WEBRTC",
   "O3D_WITH_TRANSPORT_MOQ"
 )
 
@@ -31,7 +32,6 @@ $TransportFlags = @(
 $Combinations = [ordered]@{
   "no-sockets"    = @("O3D_WITH_TRANSPORT_SOCKETS")
   "no-nng"        = @("O3D_WITH_TRANSPORT_NNG")
-  "no-webrtc"     = @("O3D_WITH_TRANSPORT_WEBRTC")
   "no-moq"        = @("O3D_WITH_TRANSPORT_MOQ")
   "loopback-only" = $TransportFlags
 }

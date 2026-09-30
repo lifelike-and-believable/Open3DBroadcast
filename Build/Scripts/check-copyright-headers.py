@@ -2,7 +2,7 @@
 """Check that every first-party plugin source file starts with a copyright header.
 
 The rule (FAB-5, FAB-9, WP-F4): every git-tracked .h, .cpp and .cs file under
-ProjectSandbox/Plugins/Open3DBroadcast/Source/ starts with one of
+the Source/ folder of each plugin in this repository starts with one of
 
     // Copyright Lifelike & Believable. All Rights Reserved.
     // Copyright (c) Open3DStream Contributors
@@ -20,7 +20,11 @@ Not checked:
     "automatically generated", "auto-generated", "DO NOT EDIT");
   - files listed in Build/Fab/copyright-allowlist.txt (genuine third-party
     code outside a ThirdParty/ directory). Each entry needs a reason, and an
-    entry for a file git does not track is an error.
+    entry for a file git does not track in any checked plugin is an error.
+
+Plugins checked by default: ProjectSandbox/Plugins/Open3DBroadcast and the
+WebRTC add-on ProjectSandbox/Plugins/Open3DBroadcastWebRTC (WP-F11). Pass
+--plugin-dir (repeatable) to check others.
 
 Python 3.8 or later, standard library only. Exit codes: 0 every checked file
 has the header; 1 at least one file is missing it, or the allowlist has a
@@ -38,7 +42,10 @@ HEADER = "// Copyright Lifelike & Believable. All Rights Reserved."
 OPEN3DSTREAM_HEADER = "// Copyright (c) Open3DStream Contributors"
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-DEFAULT_PLUGIN_DIR = os.path.join(REPO_ROOT, "ProjectSandbox", "Plugins", "Open3DBroadcast")
+DEFAULT_PLUGIN_DIRS = [
+    os.path.join(REPO_ROOT, "ProjectSandbox", "Plugins", "Open3DBroadcast"),
+    os.path.join(REPO_ROOT, "ProjectSandbox", "Plugins", "Open3DBroadcastWebRTC"),
+]
 DEFAULT_ALLOWLIST = os.path.join(REPO_ROOT, "Build", "Fab", "copyright-allowlist.txt")
 
 EXTENSIONS = (".h", ".cpp", ".cs")
@@ -115,21 +122,45 @@ def header_problem(data):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--plugin-dir", default=DEFAULT_PLUGIN_DIR)
+    parser.add_argument("--plugin-dir", action="append", dest="plugin_dirs",
+                        help="plugin root to check; repeatable (default: Open3DBroadcast and Open3DBroadcastWebRTC)")
     parser.add_argument("--allowlist", default=DEFAULT_ALLOWLIST)
     parser.add_argument("-v", "--verbose", action="store_true", help="list every skipped file")
     args = parser.parse_args()
+    plugin_dirs = [os.path.abspath(d) for d in (args.plugin_dirs or DEFAULT_PLUGIN_DIRS)]
 
     try:
-        files = tracked_sources(args.plugin_dir)
         allowlist = read_allowlist(args.allowlist)
+        per_plugin = []
+        for plugin_dir in plugin_dirs:
+            files = tracked_sources(plugin_dir)
+            if not files:
+                raise InputError("git tracks no .h/.cpp/.cs files under {}/Source".format(plugin_dir))
+            per_plugin.append((plugin_dir, files))
     except InputError as e:
         print("error: {}".format(e), file=sys.stderr)
         return 2
-    if not files:
-        print("error: git tracks no .h/.cpp/.cs files under {}/Source".format(args.plugin_dir), file=sys.stderr)
-        return 2
 
+    in_actions = os.environ.get("GITHUB_ACTIONS") == "true"
+    failed = False
+    all_files = set()
+    for plugin_dir, files in per_plugin:
+        all_files.update(files)
+        if not check_plugin(plugin_dir, files, allowlist, args.verbose, in_actions):
+            failed = True
+
+    # An allowlist entry is relative to a plugin root; it is stale when no checked plugin tracks it.
+    stale = sorted(set(allowlist) - all_files)
+    for rel in stale:
+        print("allowlist entry for a file git does not track: {}".format(rel))
+    if failed or stale:
+        return 1
+    print("OK")
+    return 0
+
+
+def check_plugin(plugin_dir, files, allowlist, verbose, in_actions):
+    """Checks one plugin and prints its report. Returns True when every checked file passes."""
     checked = 0
     skipped = {"ThirdParty": [], "generated": [], "allowlist": []}
     offenders = []
@@ -140,7 +171,7 @@ def main():
         if rel in allowlist:
             skipped["allowlist"].append("{} ({})".format(rel, allowlist[rel]))
             continue
-        with open(os.path.join(args.plugin_dir, rel), "rb") as f:
+        with open(os.path.join(plugin_dir, rel), "rb") as f:
             data = f.read()
         if is_generated(rel, data.decode("utf-8", errors="replace")):
             skipped["generated"].append(rel)
@@ -150,31 +181,23 @@ def main():
         if problem:
             offenders.append((rel, problem))
 
-    stale = sorted(set(allowlist) - set(files))
-
-    print("Copyright header check: {} checked, {} ThirdParty, {} generated, {} allowlisted.".format(
-        checked, len(skipped["ThirdParty"]), len(skipped["generated"]), len(skipped["allowlist"])))
-    for kind in ("generated", "allowlist") + (("ThirdParty",) if args.verbose else ()):
+    plugin_rel = os.path.relpath(plugin_dir, REPO_ROOT).replace(os.sep, "/")
+    print("Copyright header check ({}): {} checked, {} ThirdParty, {} generated, {} allowlisted.".format(
+        plugin_rel, checked, len(skipped["ThirdParty"]), len(skipped["generated"]), len(skipped["allowlist"])))
+    for kind in ("generated", "allowlist") + (("ThirdParty",) if verbose else ()):
         for rel in skipped[kind]:
             print("  skipped ({}): {}".format(kind, rel))
 
-    in_actions = os.environ.get("GITHUB_ACTIONS") == "true"
-    plugin_rel = os.path.relpath(args.plugin_dir, REPO_ROOT).replace(os.sep, "/")
-    for rel in stale:
-        print("allowlist entry for a file git does not track: {}".format(rel))
     if offenders:
         print("")
         print("{} file(s) do not start with the header line".format(len(offenders)))
         print("  {}".format(HEADER))
         print("followed by a blank line (or, on files that already had it, {!r}):".format(OPEN3DSTREAM_HEADER))
         for rel, problem in offenders:
-            print("  {}: {}".format(rel, problem))
+            print("  {}/{}: {}".format(plugin_rel, rel, problem))
             if in_actions:
                 print("::error file={}/{},line=1::Missing copyright header ({})".format(plugin_rel, rel, problem))
-    if offenders or stale:
-        return 1
-    print("OK")
-    return 0
+    return not offenders
 
 
 if __name__ == "__main__":

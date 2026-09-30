@@ -6,22 +6,29 @@
 # which is what creates the obligation. See docs/webrtc-codec-removal-plan.md.
 #
 # CI: .github/workflows/open3dbroadcast-fab-package.yml runs this on every
-# binary in the Fab source package, as a required gate (CI-8, ADR 0002). It
-# passes there because the WebRTC module, and with it livekit_ffi.dll, is
-# excluded from that package (Build/Fab/exclude-modules.txt).
+# binary in the Fab source package, and again with no arguments on the main
+# plugin tree, both as required gates (CI-8, ADR 0002). They pass because the WebRTC module, and with it livekit_ffi.dll, is
+# not in the Open3DBroadcast plugin: it is the separate Open3DBroadcastWebRTC
+# add-on plugin (WP-F11).
 #
-# ⚠️ RUN WITH NO ARGUMENTS IT CURRENTLY FAILS BY DESIGN.
-# livekit_ffi.dll in the GitHub build still contains both. It will pass once
-# that DLL is rebuilt against a libwebrtc built with H.264 disabled (step 1-2
-# of the plan). Running it before then is how you verify the fix worked.
+# ⚠️ RUN ON THE ADD-ON IT CURRENTLY FAILS BY DESIGN:
+#   Build/Scripts/check-no-video-codecs.sh --addon
+# livekit_ffi.dll still contains both. It will pass once that DLL is rebuilt
+# against a libwebrtc built with H.264 disabled (step 1-2 of the plan).
+# Running it before then is how you verify the fix worked.
 #
-# Usage: Build/Scripts/check-no-video-codecs.sh [binary ...]
-#        (defaults to every vendored FFI binary in the plugin)
+# Usage: Build/Scripts/check-no-video-codecs.sh [--addon | binary ...]
+#        (no arguments: every vendored FFI binary in the Open3DBroadcast
+#        plugin; --addon: every one in the Open3DBroadcastWebRTC add-on)
 
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PLUGIN="$REPO_ROOT/ProjectSandbox/Plugins/Open3DBroadcast"
+if [ "${1:-}" = "--addon" ]; then
+	PLUGIN="$REPO_ROOT/ProjectSandbox/Plugins/Open3DBroadcastWebRTC"
+	shift
+fi
 
 # Substrings that indicate ffmpeg or OpenH264 code is linked in. Deliberately
 # not VP8/VP9/AV1: libvpx, dav1d and libaom are permissively licensed and are

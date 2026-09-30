@@ -50,7 +50,7 @@ If either file is missing these settings, add them immediately.
    - **NEVER assume method names or member names**
 
 2. **LiveKit FFI APIs**
-   - Header File: `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/include/livekit_ffi.h`
+   - Header File: `ProjectSandbox/Plugins/Open3DBroadcastWebRTC/Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/include/livekit_ffi.h`
    - **Source Code Reference:** `E:\OtherProjects\livekit-ffi-ue\livekit_ffi` (for detailed implementation and undocumented features)
    - Functions: `lk_audio_track_create()`, `lk_audio_track_publish_pcm_i16()`, `lk_send_data_ex()`, etc.
    - **Check exact parameter types and order**
@@ -166,12 +166,12 @@ ProjectSandbox/
 ├── Source/
 │   ├── ProjectSandbox.Target.cs        (Must have V6 + Unreal5_7)
 │   └── ProjectSandboxEditor.Target.cs  (Must have V6 + Unreal5_7)
-├── Plugins/Open3DBroadcast/
+├── Plugins/Open3DBroadcast/                 (main plugin; o3ds core in Source/ThirdParty/Open3DStreamCore)
+├── Plugins/Open3DBroadcastWebRTC/           (WebRTC add-on plugin, WP-F11)
 │   ├── Source/Open3DTransportWebRTC/
 │   │   ├── Private/Sender/WebRTCSender.h/cpp
 │   │   ├── Private/Receiver/WebRTCReceiver.h/cpp
 │   │   └── ThirdParty/
-│   │       ├── open3dstream/include/o3ds/model.h    (Data APIs)
 │   │       └── livekit_ffi/include/livekit_ffi.h    (WebRTC APIs)
 └── ProjectSandbox.uproject              ("EngineAssociation": "5.7")
 ```

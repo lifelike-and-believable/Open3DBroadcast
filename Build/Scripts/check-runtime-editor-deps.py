@@ -20,6 +20,10 @@ that marker today.
 Not checked: ThirdParty/ directories, and module directories that have no
 .uplugin entry (Open3DBroadcastBuildFlags only holds shared build rules).
 
+Plugins checked by default: ProjectSandbox/Plugins/Open3DBroadcast and the
+WebRTC add-on ProjectSandbox/Plugins/Open3DBroadcastWebRTC (WP-F11). Pass
+--plugin-dir (repeatable) to check others.
+
 Python 3.8 or later, standard library only. Exit codes: 0 no violation; 1 at
 least one violation; 2 bad input (no .uplugin, unreadable file). --self-test
 runs the check against small generated plugins, one clean and one with a bad
@@ -36,7 +40,10 @@ import sys
 import tempfile
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-DEFAULT_PLUGIN_DIR = os.path.join(REPO_ROOT, "ProjectSandbox", "Plugins", "Open3DBroadcast")
+DEFAULT_PLUGIN_DIRS = [
+    os.path.join(REPO_ROOT, "ProjectSandbox", "Plugins", "Open3DBroadcast"),
+    os.path.join(REPO_ROOT, "ProjectSandbox", "Plugins", "Open3DBroadcastWebRTC"),
+]
 
 # .uplugin module types that are built into games (UBT's ModuleHostType values).
 RUNTIME_TYPES = {
@@ -293,19 +300,23 @@ def self_test():
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--plugin-dir", default=DEFAULT_PLUGIN_DIR, help="plugin root (default: %(default)s)")
+    parser.add_argument("--plugin-dir", action="append", dest="plugin_dirs",
+                        help="plugin root; repeatable (default: Open3DBroadcast and Open3DBroadcastWebRTC)")
     parser.add_argument("--self-test", action="store_true", help="check the checker against generated fixtures")
     args = parser.parse_args(argv)
 
+    violations = []
     try:
         if args.self_test:
             return self_test()
-        violations, modules = check(os.path.abspath(args.plugin_dir))
+        for plugin_dir in args.plugin_dirs or DEFAULT_PLUGIN_DIRS:
+            found, modules = check(os.path.abspath(plugin_dir))
+            print("Checked runtime modules of {}: {}".format(os.path.basename(os.path.abspath(plugin_dir)), ", ".join(modules)))
+            violations.extend(found)
     except InputError as e:
         print("error: {}".format(e), file=sys.stderr)
         return 2
 
-    print("Checked runtime modules: {}".format(", ".join(modules)))
     if violations:
         for v in violations:
             print("::error::" + v)

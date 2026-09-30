@@ -6,6 +6,11 @@ nothing that is gitignored or generated (Binaries/, Intermediate/) can reach
 it. The o3ds core is part of that tree: the Open3DStreamCore module compiles
 the mirror in Source/ThirdParty/Open3DStreamCore (WP-F1, ADR 0003). Then:
 
+WebRTC is not in this plugin at all: it is the separate Open3DBroadcastWebRTC
+add-on plugin (ADR 0002, WP-F11). The tracked tree, its .uplugin and the
+package are checked for a WebRTC module or livekit file, and any hit fails the
+job, so no exclusion rule is needed or accepted for it.
+
 1. Modules listed in Build/Fab/exclude-modules.txt are removed: their
    Source/<Module>/ folder is dropped and their entry is removed from the
    staged .uplugin. The .uplugin edit is textual, so the rest of the file
@@ -80,8 +85,13 @@ STANDARD_TOP_DIRS = {"Binaries", "Config", "Content", "Resources", "Shaders", "S
 FILTER_PLUGIN_INI = "Config/FilterPlugin.ini"
 # Prebuilt core libraries that WP-F1 replaced with the Open3DStreamCore module.
 FORBIDDEN_NAME_SUBSTRINGS = ["open3dstreamstatic", "flatbuffers.lib"]
-# Extra name checks tied to an excluded module (ADR 0002 verification).
-FORBIDDEN_NAME_SUBSTRINGS_BY_MODULE = {"Open3DTransportWebRTC": ["livekit"]}
+# WebRTC ships only in the Open3DBroadcastWebRTC add-on plugin (ADR 0002, WP-F11). None of these
+# may appear in the main plugin's tracked tree, its .uplugin or the package; an exclusion rule
+# does not make them acceptable.
+ADDON_ONLY_MODULES = {"Open3DTransportWebRTC"}
+ADDON_ONLY_NAME_SUBSTRINGS = ["livekit"]
+ADDON_HINT = ("WebRTC ships only in the Open3DBroadcastWebRTC add-on "
+              "(ProjectSandbox/Plugins/Open3DBroadcastWebRTC; ADR 0002, WP-F11)")
 BINARY_SUFFIXES = (".dll", ".so", ".dylib")
 
 
@@ -285,6 +295,7 @@ def stage(plugin_dir, stage_root, excluded_modules, exclude_globs):
     with open(os.path.join(plugin_dir, uplugin_rel), encoding="utf-8-sig", newline="") as f:
         text = f.read()
     try:
+        report["tree_errors"].extend(check_addon_modules(json.loads(text), f"{uplugin_rel} (source tree)"))
         edited = remove_modules_from_uplugin(text, set(excluded_modules))
     except json.JSONDecodeError as e:
         raise InputError(f"{uplugin_rel} is not valid JSON: {e}")
@@ -313,6 +324,7 @@ def check_tree(files):
     - FORBIDDEN_TREE_SCRIPT_GLOBS: Python scripts (HYG-1).
     - Markdown under Source/, outside a ThirdParty/ folder, whose name is not
       in ALLOWED_SOURCE_MARKDOWN: developer notes (HYG-1).
+    - Anything of the WebRTC add-on (ADDON_ONLY_MODULES, ADDON_ONLY_NAME_SUBSTRINGS).
     """
     errors = []
     forbidden = [glob_to_regex(g) for g in FORBIDDEN_TREE_GLOBS]
@@ -335,7 +347,31 @@ def check_tree(files):
         errors.append("developer documents are tracked under Source/; move them to docs/dev/<Module>/ "
                       f"(only {', '.join(sorted(ALLOWED_SOURCE_MARKDOWN))} may live there, "
                       f"plus anything under ThirdParty/; HYG-1): {bad}")
+
+    errors.extend(check_addon_files(files, "tracked in the plugin tree"))
     return errors
+
+
+def check_addon_files(rels, where):
+    """Problems for WebRTC add-on files (module folders or livekit files) among rels."""
+    errors = []
+    for m in sorted(ADDON_ONLY_MODULES):
+        hits = [r for r in rels if r.startswith(f"Source/{m}/")]
+        if hits:
+            errors.append(f"module {m} is {where}; {ADDON_HINT}: {hits[:5]}")
+    for sub in ADDON_ONLY_NAME_SUBSTRINGS:
+        hits = [r for r in rels if sub in r.lower()]
+        if hits:
+            errors.append(f"'{sub}' files are {where}; {ADDON_HINT}: {hits[:5]}")
+    return errors
+
+
+def check_addon_modules(desc, where):
+    """Problems for WebRTC add-on modules listed in a plugin descriptor."""
+    listed = sorted(m.get("Name") for m in desc.get("Modules", []) if m.get("Name") in ADDON_ONLY_MODULES)
+    if listed:
+        return [f"{where} lists {', '.join(listed)}; {ADDON_HINT}"]
+    return []
 
 
 def filter_plugin_rules(text):
@@ -429,6 +465,7 @@ def check_package(zip_path, plugin_name, excluded_modules):
                 desc = json.loads(z.read(root + uplugin_rel).decode("utf-8-sig"))
                 modules = [m.get("Name") for m in desc.get("Modules", [])]
                 errors.extend(check_platforms(desc, uplugin_rel))
+                errors.extend(check_addon_modules(desc, f"{uplugin_rel} (package)"))
             except (ValueError, UnicodeDecodeError) as e:
                 errors.append(f"{uplugin_rel} is not valid JSON: {e}")
         if uplugin_rel in relset and not modules:
@@ -447,10 +484,7 @@ def check_package(zip_path, plugin_name, excluded_modules):
         leaked = [r for r in rels if r.startswith(f"Source/{m}/")]
         if leaked:
             errors.append(f"excluded module {m} has files in the package: {leaked[:5]}")
-        for sub in FORBIDDEN_NAME_SUBSTRINGS_BY_MODULE.get(m, []):
-            hits = [r for r in rels if sub in r.lower()]
-            if hits:
-                errors.append(f"'{sub}' files present although {m} is excluded: {hits[:5]}")
+    errors.extend(check_addon_files(rels, "in the package"))
 
     top_dirs = {r.split("/")[0] for r in rels if "/" in r}
     for d in FORBIDDEN_TOP_DIRS:

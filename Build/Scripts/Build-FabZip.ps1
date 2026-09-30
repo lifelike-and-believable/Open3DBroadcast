@@ -110,9 +110,12 @@ if (Test-Path -LiteralPath $excludeList) {
     }
   }
 }
+# WebRTC is the separate Open3DBroadcastWebRTC add-on (ADR 0002, WP-F11); nothing of it may be in
+# the main plugin's package.
 $livekit = @(Get-ChildItem -LiteralPath $package -Recurse -File -Filter "*livekit*" -ErrorAction SilentlyContinue)
-if ($livekit.Count -gt 0) {
-  $problems += "livekit files in the BuildPlugin output: $(($livekit | ForEach-Object { $_.Name }) -join ', ')"
+$webrtc = @(Get-ChildItem -LiteralPath $package -Recurse -File -Filter "*Open3DTransportWebRTC*" -ErrorAction SilentlyContinue)
+if ($livekit.Count -gt 0 -or $webrtc.Count -gt 0) {
+  $problems += "WebRTC add-on files in the BuildPlugin output: $((@($livekit) + @($webrtc) | Select-Object -First 5 | ForEach-Object { $_.Name }) -join ', ')"
 }
 
 if ($problems.Count -gt 0) {
