@@ -23,8 +23,8 @@
 #include "Misc/Base64.h"
 #include "Containers/StringConv.h"
 
-#include "O3DTransportTypes.h"
-#include "SerializedFrameConsumerRegistry.h"
+#include "Transport/O3DTransportTypes.h"
+#include "Transport/O3DSerializedFrameConsumer.h"
 THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
 THIRD_PARTY_INCLUDES_END

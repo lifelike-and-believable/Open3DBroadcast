@@ -19,9 +19,9 @@
 #include "SocketSubsystem.h"
 #include "Sockets.h"
 
-#include "O3DTransportTypes.h"
+#include "Transport/O3DTransportTypes.h"
 #include "O3DUnifiedMessage.h"
-#include "SerializedFrameConsumerRegistry.h"
+#include "Transport/O3DSerializedFrameConsumer.h"
 
 THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"

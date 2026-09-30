@@ -12,13 +12,10 @@
 #include "Shared/MoQHelpers.h"
 #include "Sender/MoQSender.h"
 #include "Receiver/MoQReceiver.h"
-#include "O3DSenderRegistry.h"
-#include "O3DReceiverRegistry.h"
-#include "O3DSenderTransportCustomization.h"
-#include "O3DReceiverTransportCustomization.h"
 #include "O3DSenderComponent.h"
 #include "O3DReceiverSourceSettings.h"
 #include "O3DTransportOptionSchema.h"
+#include "Transport/O3DTransportRegistry.h"
 
 #define LOCTEXT_NAMESPACE "Open3DTransportMoQ"
 
@@ -175,49 +172,28 @@ private:
 	/** moq_ffi and the instances created from it. The registered factories hold a reference too. */
 	TSharedPtr<FO3DFfiLibrary, ESPMode::ThreadSafe> Library;
 
+	/** The one registration of "MoQ" (ADR 0007 item 4, WP-A1); valid only while the library is loaded. */
+	FO3DTransportRegistration Registration;
+
 	void RegisterTransports(const TSharedRef<FO3DFfiLibrary, ESPMode::ThreadSafe>& InLibrary)
 	{
+		// One descriptor: factories, configure functions and option schemas. The pickers list the
+		// names that have a factory, so "MoQ" appears in both transport dropdowns from this alone.
+		FO3DTransportDescriptor Descriptor;
+		Descriptor.Name = TEXT("MoQ");
+		Descriptor.OwningModule = TEXT("Open3DTransportMoQ");
+
 		// Every instance is tracked so ShutdownModule can stop it before unloading moq_ffi.
-		O3DTransport::RegisterSender(
-			TEXT("MoQ"),
-			[InLibrary]() -> TSharedPtr<IOpen3DSender>
-			{
-				return InLibrary->TrackInstance(MakeShared<FO3DMoQSender, ESPMode::ThreadSafe>());
-			}
-		);
+		Descriptor.CreateSender = [InLibrary]() -> TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe>
+		{
+			return InLibrary->TrackInstance(MakeShared<FO3DMoQSender, ESPMode::ThreadSafe>());
+		};
+		Descriptor.CreateReceiver = [InLibrary]() -> TSharedPtr<IOpen3DReceiver, ESPMode::ThreadSafe>
+		{
+			return InLibrary->TrackInstance(MakeShared<FO3DMoQReceiver, ESPMode::ThreadSafe>());
+		};
 
-		O3DTransport::RegisterReceiver(
-			TEXT("MoQ"),
-			[InLibrary]() -> TSharedPtr<IOpen3DReceiver>
-			{
-				return InLibrary->TrackInstance(MakeShared<FO3DMoQReceiver, ESPMode::ThreadSafe>());
-			}
-		);
-
-		UE_LOG(LogO3DMoQSender, Verbose, TEXT("MoQ transport factories registered"));
-
-		RegisterTransportCustomizations();
-	}
-
-	void UnregisterTransports()
-	{
-		O3DTransport::UnregisterSender(TEXT("MoQ"));
-		O3DTransport::UnregisterReceiver(TEXT("MoQ"));
-		UE_LOG(LogO3DMoQSender, Verbose, TEXT("MoQ transport factories unregistered"));
-
-		UnregisterTransportCustomizations();
-	}
-
-	// Registers the customization each transport's editor UI is enumerated
-	// from (O3DSender::GetRegisteredTransportNames() / O3DReceiver's
-	// equivalent) - without this, "MoQ" is a working transport (factories
-	// above) but never appears in either the Sender component's or the
-	// Receiver LiveLink source's transport dropdown. The option schemas are
-	// what the editor module builds the settings panels from.
-	void RegisterTransportCustomizations()
-	{
-		FO3DSenderTransportCustomization SenderCustomization;
-		SenderCustomization.ConfigureTransport = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
+		Descriptor.ConfigureSender = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
 		{
 			// AdvancedParams (relay_url/track_namespace/track_name/delivery_mode/
 			// queue_bytes) are already copied generically from
@@ -233,11 +209,9 @@ private:
 				Config.StreamId = SenderComponent->SubjectName;
 			}
 		};
-		SenderCustomization.OptionSchema = MoQSchema::Make(/*bSender=*/true);
-		O3DSender::RegisterTransportCustomization(TEXT("MoQ"), MoveTemp(SenderCustomization));
+		Descriptor.SenderOptions.OptionSchema = MoQSchema::Make(/*bSender=*/true);
 
-		FO3DReceiverTransportCustomization ReceiverCustomization;
-		ReceiverCustomization.ConfigureTransport = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
+		Descriptor.ConfigureReceiver = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
 		{
 			// Deliberately does NOT set Config.Uri here (unlike the sender
 			// side): O3DReceiverSource::BuildTransportConfig() auto-fills
@@ -251,17 +225,16 @@ private:
 			// by MoQHelpers::ResolveRelayUrl, so Config.Uri isn't needed.
 			Config.Transport = TEXT("MoQ");
 		};
-		ReceiverCustomization.OptionSchema = MoQSchema::Make(/*bSender=*/false);
-		O3DReceiver::RegisterTransportCustomization(TEXT("MoQ"), MoveTemp(ReceiverCustomization));
+		Descriptor.ReceiverOptions.OptionSchema = MoQSchema::Make(/*bSender=*/false);
 
-		UE_LOG(LogO3DMoQSender, Verbose, TEXT("MoQ transport customizations registered"));
+		Registration = FO3DTransportRegistry::Get().Register(MoveTemp(Descriptor));
+		UE_LOG(LogO3DMoQSender, Verbose, TEXT("MoQ transport registered"));
 	}
 
-	void UnregisterTransportCustomizations()
+	void UnregisterTransports()
 	{
-		O3DSender::UnregisterTransportCustomization(TEXT("MoQ"));
-		O3DReceiver::UnregisterTransportCustomization(TEXT("MoQ"));
-		UE_LOG(LogO3DMoQSender, Verbose, TEXT("MoQ transport customizations unregistered"));
+		Registration.Reset();
+		UE_LOG(LogO3DMoQSender, Verbose, TEXT("MoQ transport unregistered"));
 	}
 };
 

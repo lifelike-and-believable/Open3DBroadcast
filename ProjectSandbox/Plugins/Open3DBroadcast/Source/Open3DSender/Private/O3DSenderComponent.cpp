@@ -4,11 +4,10 @@
 
 #include "O3DHelpers.h"
 #include "O3DSenderLogs.h"
-#include "O3DSenderRegistry.h"
 #include "O3DSenderSerializer.h"
-#include "O3DSenderTransportCustomization.h"
 #include "O3DSenderCurveProcessor.h"
 #include "O3DSenderTransportController.h"
+#include "Transport/O3DTransportRegistry.h"
 #include "Engine/Engine.h"
 #include "Engine/SkeletalMesh.h"
 #include "Animation/Skeleton.h"
@@ -398,7 +397,7 @@ FO3DTransportConfig UO3DSenderComponent::BuildTransportConfig() const
 	// secret store (session, environment, per-user settings) into Config.Secrets (ADR 0004).
 	TArray<FString> SecretKeys;
 	TMap<FString, FString> SecretEnvVars;
-	O3DSender::GetTransportSecretDeclaration(SelectedTransport, SecretKeys, SecretEnvVars);
+	FO3DTransportRegistry::Get().GetSecretDeclaration(SelectedTransport, EO3DTransportRole::Sender, SecretKeys, SecretEnvVars);
 	for (const TPair<FString, FString>& Option : TransportOptions)
 	{
 		if (!SecretKeys.Contains(Option.Key))
@@ -412,12 +411,12 @@ FO3DTransportConfig UO3DSenderComponent::BuildTransportConfig() const
 
 	if (!Config.Transport.IsEmpty())
 	{
-		if (const FO3DSenderTransportCustomization* Customization = O3DSender::FindTransportCustomization(SelectedTransport))
+		// The descriptor is a shared, immutable snapshot, so the function stays valid while it runs
+		// even if the transport unregisters meanwhile (RCV-27).
+		const FO3DTransportDescriptorPtr Descriptor = FO3DTransportRegistry::Get().Find(SelectedTransport);
+		if (Descriptor.IsValid() && Descriptor->ConfigureSender)
 		{
-			if (Customization && Customization->ConfigureTransport)
-			{
-				Customization->ConfigureTransport(this, Config);
-			}
+			Descriptor->ConfigureSender(this, Config);
 		}
 	}
 
@@ -787,7 +786,7 @@ bool UO3DSenderComponent::IsTransportSecretKey(const FString& Key) const
 {
 	TArray<FString> SecretKeys;
 	TMap<FString, FString> SecretEnvVars;
-	O3DSender::GetTransportSecretDeclaration(GetSelectedTransportName(), SecretKeys, SecretEnvVars);
+	FO3DTransportRegistry::Get().GetSecretDeclaration(GetSelectedTransportName(), EO3DTransportRole::Sender, SecretKeys, SecretEnvVars);
 	return SecretKeys.Contains(Key);
 }
 
@@ -831,7 +830,7 @@ FO3DSecretStatus UO3DSenderComponent::GetTransportSecretStatus(const FString& Ke
 {
 	TArray<FString> SecretKeys;
 	TMap<FString, FString> SecretEnvVars;
-	O3DSender::GetTransportSecretDeclaration(GetSelectedTransportName(), SecretKeys, SecretEnvVars);
+	FO3DTransportRegistry::Get().GetSecretDeclaration(GetSelectedTransportName(), EO3DTransportRole::Sender, SecretKeys, SecretEnvVars);
 	const FString* EnvVar = SecretEnvVars.Find(Key);
 	return FO3DSecretStore::Get().Describe(GetSelectedTransportName().ToString(), GetCredentialProfile(), Key, EnvVar ? *EnvVar : FString());
 }
@@ -845,7 +844,7 @@ int32 UO3DSenderComponent::MigrateLegacySecretOptions()
 
 	TArray<FString> SecretKeys;
 	TMap<FString, FString> SecretEnvVars;
-	if (!O3DSender::GetTransportSecretDeclaration(GetSelectedTransportName(), SecretKeys, SecretEnvVars))
+	if (!FO3DTransportRegistry::Get().GetSecretDeclaration(GetSelectedTransportName(), EO3DTransportRole::Sender, SecretKeys, SecretEnvVars))
 	{
 		return 0;
 	}
@@ -917,8 +916,7 @@ void UO3DSenderComponent::EnsureValidTransportName()
 		return;
 	}
 
-	TArray<FName> RegisteredTransports;
-	O3DSender::GetRegisteredTransportNames(RegisteredTransports);
+	const TArray<FName> RegisteredTransports = FO3DTransportRegistry::Get().GetNames(EO3DTransportRole::Sender);
 	if (RegisteredTransports.Num() > 0)
 	{
 		TransportName = RegisteredTransports[0];

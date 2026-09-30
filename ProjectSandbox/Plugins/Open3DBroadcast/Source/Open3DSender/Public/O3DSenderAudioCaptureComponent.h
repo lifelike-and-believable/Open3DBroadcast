@@ -6,7 +6,7 @@
 #include "Components/ActorComponent.h"
 #include "Sound/SoundSubmix.h"
 #include "Templates/UniquePtr.h"
-#include "O3DTransportTypes.h"
+#include "Transport/O3DTransportTypes.h"
 #include "O3DSenderAudioCaptureComponent.generated.h"
 
 class ISubmixBufferListener;

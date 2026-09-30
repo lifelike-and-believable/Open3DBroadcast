@@ -7,7 +7,7 @@
 #include "Templates/Atomic.h"
 #include "Templates/SharedPointer.h"
 #include "Containers/Queue.h"
-#include "O3DReceiverInterface.h"
+#include "Transport/O3DReceiverInterface.h"
 #include "O3DAudioFrameCodec.h"
 #include "MoQFfiApi.h"
 THIRD_PARTY_INCLUDES_START

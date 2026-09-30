@@ -5,8 +5,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/ScopeLock.h"
-#include "O3DReceiverRegistry.h"
-#include "O3DSenderRegistry.h"
+#include "Transport/O3DTransportRegistry.h"
 
 namespace
 {
@@ -33,12 +32,12 @@ FO3DConformanceFixture::~FO3DConformanceFixture() = default;
 
 TSharedPtr<IOpen3DSender> FO3DConformanceFixture::CreateSender()
 {
-	return O3DTransport::CreateSender(TransportName);
+	return FO3DTransportRegistry::Get().CreateSender(TransportName);
 }
 
 TSharedPtr<IOpen3DReceiver> FO3DConformanceFixture::CreateReceiver()
 {
-	return O3DTransport::CreateReceiver(TransportName);
+	return FO3DTransportRegistry::Get().CreateReceiver(TransportName);
 }
 
 bool FO3DConformanceFixture::RunDestroyWithCallbacksInFlight(FAutomationTestBase& Test)

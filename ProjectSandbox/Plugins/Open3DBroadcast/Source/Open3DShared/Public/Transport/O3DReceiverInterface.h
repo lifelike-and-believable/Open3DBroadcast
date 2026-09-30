@@ -5,13 +5,19 @@
 #include "CoreMinimal.h"
 #include "Templates/Function.h"
 #include "Templates/SharedPointer.h"
-#include "O3DTransportTypes.h"
+#include "Transport/O3DSerializedFrameConsumer.h"
+#include "Transport/O3DTransportTypes.h"
 #include "O3DUnifiedMessage.h"
 
-class ISerializedFrameConsumer;
+/*
+ * The receiver side of the transport interface (ADR 0007 items 1 and 3). Moved here from
+ * Open3DReceiver so transports and the Open3DBroadcastWebRTC add-on can depend on Open3DShared
+ * alone; the old "O3DReceiverInterface.h" forwards here for one release. The class layouts and
+ * virtual function tables are unchanged by the move (O3D_TRANSPORT_API_VERSION stays 1).
+ */
 
 /** Interface for audio sinks that transports can push PCM16 data into. */
-class OPEN3DRECEIVER_API IO3DReceiverAudioSink
+class OPEN3DSHARED_API IO3DReceiverAudioSink
 {
 public:
     virtual ~IO3DReceiverAudioSink() = default;
@@ -21,7 +27,7 @@ public:
 };
 
 /** Interface implemented by all transport receiver instances. */
-class OPEN3DRECEIVER_API IOpen3DReceiver
+class OPEN3DSHARED_API IOpen3DReceiver
 {
 public:
     virtual ~IOpen3DReceiver() = default;
@@ -43,4 +49,5 @@ public:
     virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& /*Sink*/, const FO3DTransportAudioConfig& /*AudioConfig*/) {}
 };
 
-using FO3DReceiverFactory = TFunction<TSharedPtr<IOpen3DReceiver>()>;
+/** Creates one receiver instance. Called on the game thread, outside any registry lock. */
+using FO3DReceiverFactory = TFunction<TSharedPtr<IOpen3DReceiver, ESPMode::ThreadSafe>()>;

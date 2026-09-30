@@ -2,9 +2,9 @@
 
 #pragma once
 
-#include "O3DReceiverInterface.h"
-#include "O3DTransportTypes.h"
-#include "SerializedFrameConsumerRegistry.h"
+#include "Transport/O3DReceiverInterface.h"
+#include "Transport/O3DTransportTypes.h"
+#include "Transport/O3DSerializedFrameConsumer.h"
 #include "HAL/CriticalSection.h"
 #include "Templates/Atomic.h"
 #include <atomic>

@@ -5,8 +5,6 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/ScopeLock.h"
-#include "O3DReceiverRegistry.h"
-#include "O3DSenderRegistry.h"
 #include "O3DTestHarness.h"
 
 THIRD_PARTY_INCLUDES_START
@@ -300,26 +298,30 @@ FO3DFakeTransportScope::FO3DFakeTransportScope()
 	const FO3DFakeLinkRef LinkForFactories = Link;
 	const TSharedRef<FCreated, ESPMode::ThreadSafe> CreatedForFactories = Created;
 
-	O3DTransport::RegisterSender(Name, [LinkForFactories, CreatedForFactories]() -> TSharedPtr<IOpen3DSender>
+	// One descriptor with both factories (ADR 0006 §3, ADR 0007 item 4).
+	FO3DTransportDescriptor Descriptor;
+	Descriptor.Name = Name;
+	Descriptor.OwningModule = TEXT("Open3DBroadcastTests");
+	Descriptor.CreateSender = [LinkForFactories, CreatedForFactories]() -> TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe>
 	{
 		TSharedRef<FO3DFakeSender> Sender = MakeShared<FO3DFakeSender>(LinkForFactories);
 		FScopeLock Lock(&CreatedForFactories->Mutex);
 		CreatedForFactories->Sender = Sender;
 		return Sender;
-	});
-	O3DTransport::RegisterReceiver(Name, [LinkForFactories, CreatedForFactories]() -> TSharedPtr<IOpen3DReceiver>
+	};
+	Descriptor.CreateReceiver = [LinkForFactories, CreatedForFactories]() -> TSharedPtr<IOpen3DReceiver, ESPMode::ThreadSafe>
 	{
 		TSharedRef<FO3DFakeReceiver> Receiver = MakeShared<FO3DFakeReceiver>(LinkForFactories);
 		FScopeLock Lock(&CreatedForFactories->Mutex);
 		CreatedForFactories->Receiver = Receiver;
 		return Receiver;
-	});
+	};
+	Registration = FO3DTransportRegistry::Get().Register(MoveTemp(Descriptor));
 }
 
 FO3DFakeTransportScope::~FO3DFakeTransportScope()
 {
-	O3DTransport::UnregisterSender(Name);
-	O3DTransport::UnregisterReceiver(Name);
+	Registration.Reset();
 }
 
 TSharedPtr<FO3DFakeSender> FO3DFakeTransportScope::GetLastSender() const

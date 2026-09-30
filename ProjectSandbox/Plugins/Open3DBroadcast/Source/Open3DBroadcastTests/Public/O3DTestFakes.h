@@ -13,9 +13,10 @@
 
 #include "Async/TaskGraphInterfaces.h"
 #include "HAL/CriticalSection.h"
-#include "O3DReceiverInterface.h"
-#include "O3DSenderInterface.h"
-#include "SerializedFrameConsumerRegistry.h"
+#include "Transport/O3DReceiverInterface.h"
+#include "Transport/O3DSenderInterface.h"
+#include "Transport/O3DSerializedFrameConsumer.h"
+#include "Transport/O3DTransportRegistry.h"
 
 #include <atomic>
 
@@ -143,7 +144,7 @@ private:
 };
 
 /**
- * Registers a linked fake sender and receiver with the transport registries under
+ * Registers a linked fake sender and receiver with FO3DTransportRegistry (one descriptor) under
  * O3DTestFake_<Guid> for the lifetime of the scope, and unregisters them in the destructor.
  * Game thread.
  */
@@ -176,6 +177,7 @@ private:
 	FName Name;
 	FO3DFakeLinkRef Link;
 	TSharedRef<FCreated, ESPMode::ThreadSafe> Created;
+	FO3DTransportRegistration Registration;
 };
 
 #endif // WITH_DEV_AUTOMATION_TESTS

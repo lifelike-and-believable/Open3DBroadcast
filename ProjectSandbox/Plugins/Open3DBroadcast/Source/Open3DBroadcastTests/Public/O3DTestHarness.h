@@ -11,7 +11,7 @@
 
 #include "HAL/CriticalSection.h"
 #include "Misc/AutomationTest.h"
-#include "SerializedFrameConsumerRegistry.h"
+#include "Transport/O3DSerializedFrameConsumer.h"
 #include "Templates/Function.h"
 
 /**

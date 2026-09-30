@@ -5,15 +5,22 @@
 #include "CoreMinimal.h"
 #include "Templates/Function.h"
 #include "Templates/SharedPointer.h"
-#include "O3DTransportTypes.h"
+#include "Transport/O3DTransportTypes.h"
 
 namespace O3DS
 {
     class SubjectList;
 }
 
+/*
+ * The sender side of the transport interface (ADR 0007 items 1 and 3). Moved here from
+ * Open3DSender so transports and the Open3DBroadcastWebRTC add-on can depend on Open3DShared
+ * alone; the old "O3DSenderInterface.h" forwards here for one release. The class layouts and
+ * virtual function tables are unchanged by the move (O3D_TRANSPORT_API_VERSION stays 1).
+ */
+
 /** Interface for audio sinks provided by transports that support PCM ingestion. */
-class OPEN3DSENDER_API IO3DSenderAudioSink
+class OPEN3DSHARED_API IO3DSenderAudioSink
 {
 public:
     virtual ~IO3DSenderAudioSink() = default;
@@ -26,7 +33,7 @@ public:
 };
 
 /** Interface implemented by all transport sender instances. */
-class OPEN3DSENDER_API IOpen3DSender
+class OPEN3DSHARED_API IOpen3DSender
 {
 public:
     virtual ~IOpen3DSender() = default;
@@ -43,7 +50,8 @@ public:
     /** Attempt to send a serialized SubjectList payload. Return false if backpressure drops it.
      *  Implementations call SubjectList::Serialize() (a full topology+value
      *  snapshot) internally - see SendSerialized() below for the path that
-     *  transmits whatever encoding the caller already chose instead. */
+     *  transmits whatever encoding the caller already chose instead.
+     *  Deprecated (ADR 0007 item 3): nothing on the frame path calls it; WP-A1 PR 5 removes it. */
     virtual bool Send(const O3DS::SubjectList& List) = 0;
 
     /** Send already-serialized FlatBuffer bytes directly, bypassing this
@@ -91,4 +99,5 @@ public:
     virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) { return nullptr; }
 };
 
-using FO3DSenderFactory = TFunction<TSharedPtr<IOpen3DSender>()>;
+/** Creates one sender instance. Called on the game thread, outside any registry lock. */
+using FO3DSenderFactory = TFunction<TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe>()>;

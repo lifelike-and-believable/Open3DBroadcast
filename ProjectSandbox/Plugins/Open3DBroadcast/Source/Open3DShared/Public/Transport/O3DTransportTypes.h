@@ -5,6 +5,18 @@
 #include "CoreMinimal.h"
 #include "O3DRedact.h"
 
+/**
+ * Plain transport types shared by IOpen3DSender, IOpen3DReceiver and the transport registry
+ * (ADR 0007 item 1). The old path "O3DTransportTypes.h" forwards here for one release.
+ */
+
+/** Which side of a transport a registry query is about (ADR 0007 item 4). */
+enum class EO3DTransportRole : uint8
+{
+	Sender,
+	Receiver,
+};
+
 /** Lightweight audio configuration shared between the sender component and transports. */ 
 struct FO3DTransportAudioConfig
 {

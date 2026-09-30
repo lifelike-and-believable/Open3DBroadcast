@@ -21,7 +21,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "HAL/PlatformTime.h"
-#include "SerializedFrameConsumerRegistry.h"
+#include "Transport/O3DSerializedFrameConsumer.h"
 
 THIRD_PARTY_INCLUDES_START
 #include "o3ds/capture.h"

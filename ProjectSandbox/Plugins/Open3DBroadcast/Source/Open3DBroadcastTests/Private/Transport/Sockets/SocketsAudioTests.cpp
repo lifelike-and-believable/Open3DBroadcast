@@ -16,8 +16,8 @@
 #include "SocketSubsystem.h"
 #include "Sockets.h"
 
-#include "O3DTransportTypes.h"
-#include "SerializedFrameConsumerRegistry.h"
+#include "Transport/O3DTransportTypes.h"
+#include "Transport/O3DSerializedFrameConsumer.h"
 
 namespace
 {

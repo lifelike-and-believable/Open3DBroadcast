@@ -351,14 +351,11 @@ bool FO3DWebRTCReceiver::Start()
         return false;
     }
 
-    // Create default consumer if not set
+    // FSerializedFrameConsumerRegistry, which this used to fall back to, was never populated and
+    // is gone (SHR-24); without SetConsumer the frames are dropped, as before.
     if (!Consumer.IsValid())
     {
-        Consumer = FSerializedFrameConsumerRegistry::Create();
-        if (!Consumer.IsValid())
-        {
-            UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("No serialized frame consumer registered; frames will be dropped"));
-        }
+        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("No serialized frame consumer registered; frames will be dropped"));
     }
 
     if (!SetupClientHandle())

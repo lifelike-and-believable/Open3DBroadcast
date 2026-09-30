@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "O3DSenderInterface.h"
+#include "Transport/O3DSenderInterface.h"
 #include "../Shared/LoopbackChannel.h"
 #include "O3DLifetimeGate.h"
 #include "HAL/CriticalSection.h"

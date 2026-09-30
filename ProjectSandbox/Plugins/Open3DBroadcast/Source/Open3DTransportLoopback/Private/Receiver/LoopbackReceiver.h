@@ -2,9 +2,9 @@
 
 #pragma once
 
-#include "O3DReceiverInterface.h"
+#include "Transport/O3DReceiverInterface.h"
 #include "../Shared/LoopbackChannel.h"
-#include "SerializedFrameConsumerRegistry.h"
+#include "Transport/O3DSerializedFrameConsumer.h"
 #include "O3DAudioFrameCodec.h"
 
 class FO3DLoopbackReceiver : public IOpen3DReceiver

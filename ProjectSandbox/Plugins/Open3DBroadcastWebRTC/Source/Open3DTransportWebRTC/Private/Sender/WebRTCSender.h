@@ -2,8 +2,8 @@
 
 #pragma once
 
-#include "O3DSenderInterface.h"
-#include "O3DTransportTypes.h"
+#include "Transport/O3DSenderInterface.h"
+#include "Transport/O3DTransportTypes.h"
 #include "O3DLifetimeGate.h"
 #include "O3DPerformanceMetrics.h"
 #include "HAL/CriticalSection.h"

@@ -4,7 +4,17 @@
 
 #include "CoreMinimal.h"
 
-/** Interface implemented by modules that want to consume serialized O3DS frames. */
+/**
+ * Interface implemented by whatever consumes the serialized O3DS frames a receiver delivers (the
+ * LiveLink receiver source, test recorders). ADR 0007 item 3.
+ *
+ * Threading: receivers call SubmitFrame from IOpen3DReceiver::Poll(), on the thread that calls
+ * Poll() (the game thread today).
+ *
+ * The unused FSerializedFrameConsumerRegistry that used to sit next to this interface was never
+ * populated and is gone (SHR-24). The old header "SerializedFrameConsumerRegistry.h" forwards here
+ * for one release.
+ */
 class OPEN3DSHARED_API ISerializedFrameConsumer : public TSharedFromThis<ISerializedFrameConsumer>
 {
 public:
@@ -18,23 +28,4 @@ public:
 	 * @param TimestampSeconds   Timestamp (seconds) associated with the captured frame.
 	 */
 	virtual void SubmitFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds) = 0;
-};
-
-using FSerializedFrameConsumerFactory = TFunction<TSharedPtr<ISerializedFrameConsumer>()>;
-
-/**
- * Registry used by transports to lazily create serialized frame consumers without
- * taking a static dependency on the consumer implementation module.
- */
-class OPEN3DSHARED_API FSerializedFrameConsumerRegistry
-{
-public:
-	/** Register a factory that will be used to create consumers on demand. */
-	static void RegisterFactory(FSerializedFrameConsumerFactory InFactory);
-
-	/** Clear the currently registered factory. */
-	static void ClearFactory();
-
-	/** Create a consumer using the currently registered factory if available. */
-	static TSharedPtr<ISerializedFrameConsumer> Create();
 };
