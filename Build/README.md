@@ -104,31 +104,6 @@ Runs Unreal's automation tests for the plugin.
 - `Results.xml` - Test results in XML format
 - Console output with test status
 
-#### `Run-Gauntlet.ps1`
-Runs Gauntlet integration tests.
-
-**Usage:**
-```powershell
-.\Build\Scripts\Run-Gauntlet.ps1 `
-  -UEPath "C:\Program Files\Epic Games\UE_5.7" `
-  -ProjectFile "ProjectSandbox\ProjectSandbox.uproject" `
-  -GauntletConfigs @("Open3DBroadcastTests") `
-  -OutputDir "Artifacts\Gauntlet" `
-  -NullRHI
-```
-
-**Parameters:**
-- `-UEPath` - Path to Unreal Engine (required)
-- `-ProjectFile` - Path to `.uproject` file (required)
-- `-GauntletConfigs` - Array of Gauntlet config names (required)
-- `-OutputDir` - Output directory for reports (default: `"Artifacts\Gauntlet"`)
-- `-NullRHI` - Switch to use NullRHI (headless mode)
-
-**Output:**
-- `Index.html` - Main report page
-- `TestReport.json` - Machine-readable results
-- Logs and screenshots
-
 ---
 
 ## Common Workflows
@@ -160,13 +135,6 @@ Runs Gauntlet integration tests.
   -UEPath "C:\Program Files\Epic Games\UE_5.7" `
   -ProjectFile "$PWD\ProjectSandbox\ProjectSandbox.uproject" `
   -TestFilter "Open3DBroadcast.*"
-
-# Run Gauntlet integration tests
-.\Build\Scripts\Run-Gauntlet.ps1 `
-  -UEPath "C:\Program Files\Epic Games\UE_5.7" `
-  -ProjectFile "$PWD\ProjectSandbox\ProjectSandbox.uproject" `
-  -GauntletConfigs @("Open3DBroadcastTests") `
-  -NullRHI
 ```
 
 ### Full Build and Test

@@ -349,6 +349,18 @@ bool FO3DNngReceiver::OpenSocket()
         }
         if (Ret == 0)
         {
+            // Receive buffer is an int counting messages (TRB-36). A sub socket drops messages
+            // that arrive while this queue is full, and Poll() drains it only once per tick.
+            constexpr int NngRecvBufMessages = 1024;
+            const int SetRecvBufRet = nng_socket_set_int(NewSocket->Socket, NNG_OPT_RECVBUF, NngRecvBufMessages);
+            if (SetRecvBufRet != 0)
+            {
+                UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver could not set receive buffer to %d messages (%d %s)"),
+                    NngRecvBufMessages, SetRecvBufRet, UTF8_TO_TCHAR(nng_strerror(SetRecvBufRet)));
+            }
+        }
+        if (Ret == 0)
+        {
             if (Options.bListen)
             {
                 Ret = nng_listen(NewSocket->Socket, AddressUtf8.Get(), nullptr, 0);

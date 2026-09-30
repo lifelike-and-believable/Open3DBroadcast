@@ -9,7 +9,6 @@ The QA Engineer Agent is responsible for building, maintaining, and continuously
 
 The QA Engineer Agent is an expert in:
 - **Unreal Engine 5.7 Automation Framework** and test patterns
-- **Gauntlet Framework** for cross-platform and extended testing
 - **C++ Unit Testing** (Google Test, standalone test executables)
 - **Test Coverage Analysis** and gap identification
 - **Test Architecture** and maintainable test design
@@ -214,51 +213,17 @@ if (!SomeComplexCondition())
 AddWarning(TEXT("Optional condition not met"));
 ```
 
-### 3. Gauntlet Framework Integration
+### 3. Test Module, Fakes and Conformance (ADR 0006)
 
-#### A. Gauntlet Test Configuration
-Create and maintain Gauntlet configurations in `Tests/Gauntlet/`:
+Gauntlet was retired (ADR 0006 Q5). UE tests live in the editor-only `Open3DBroadcastTests`
+module (`ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DBroadcastTests/Private/<Area>/`),
+never in a Runtime module:
 
-```json
-{
-  "ProjectName": "ProjectSandbox",
-  "ProjectPath": "ProjectSandbox/ProjectSandbox.uproject",
-  "TestName": "Open3DStreamFullSuite",
-  "Configuration": "Development",
-  "Platform": "Win64",
-  "Build": "Editor",
-  "RunTests": [
-    "Open3DStream.*"
-  ],
-  "ReportType": "Gauntlet.UnrealEngine",
-  "MaxDuration": 3600,
-  "Flags": [
-    "-unattended",
-    "-nullrhi",
-    "-nosplash",
-    "-nop4"
-  ]
-}
-```
-
-#### B. Gauntlet Test Categories
-Maintain separate configurations for different test scenarios:
-
-- **Smoke Tests** (`Open3DStreamSmoke.json`): Quick validation, < 5 minutes
-- **Full Suite** (`Open3DStreamFullSuite.json`): Comprehensive tests, < 30 minutes
-- **Performance** (`Open3DStreamPerformance.json`): Benchmarks, < 60 minutes
-- **Integration** (`Open3DStreamIntegration.json`): Cross-module tests, < 15 minutes
-
-#### C. Running Gauntlet Tests
-```powershell
-# Using provided script
-.\Build\Scripts\Run-Gauntlet.ps1 `
-  -UEPath "$env:UE_ROOT" `
-  -ProjectFile "$PWD\ProjectSandbox\ProjectSandbox.uproject" `
-  -GauntletConfigs @("Open3DStreamFullSuite") `
-  -OutputDir "$PWD\Artifacts\Gauntlet" `
-  -NullRHI
-```
+- Name tests `Open3DBroadcast.<Area>.<Unit>.<Case>` and wrap each file in `#if WITH_DEV_AUTOMATION_TESTS`.
+- Reach private code only through the owning module's `Public/Testing/*.h` header.
+- Use the fakes (`FO3DFakeSender`, `FO3DFakeReceiver`, `FO3DFakeTransportScope`, the fake moq-ffi table) instead of sockets to real servers.
+- A new transport registers a conformance profile with `O3DTests::RegisterConformanceProfile`; the suite then runs `Open3DBroadcast.Conformance.<Transport>.<Case>`.
+- Internet tests go under `Open3DBroadcast.Network.*` and register only when `O3DB_NETWORK_TESTS=1`.
 
 ### 4. C++ Unit Test Development
 
@@ -411,23 +376,16 @@ Configure tests for CI workflows:
       -TestFilter "Open3DStream.Smoke.*"
 ```
 
-**Nightly (Full Suite):**
+**Nightly (network tests included):**
 ```yaml
 - name: Run Full Test Suite
+  env:
+    O3DB_NETWORK_TESTS: "1"
   run: |
-    .\Build\Scripts\Run-Gauntlet.ps1 `
+    .\Build\Scripts\Run-AutomationTests.ps1 `
       -UEPath "$env:UE_ROOT" `
       -ProjectFile "$PWD\ProjectSandbox\ProjectSandbox.uproject" `
-      -GauntletConfigs @("Open3DStreamFullSuite") `
-      -NullRHI
-```
-
-**Pre-Release (Extended):**
-```yaml
-- name: Run Extended Tests
-  run: |
-    .\Build\Scripts\Run-Gauntlet.ps1 `
-      -GauntletConfigs @("Open3DStreamFullSuite", "Open3DStreamPerformance")
+      -TestFilter "Open3DBroadcast"
 ```
 
 #### B. Test Artifact Management
@@ -639,9 +597,8 @@ Generate clear test reports:
 
 #### A. Testing Tools
 - **Unreal Engine 5.7 Automation Framework**: In-engine testing
-- **Gauntlet**: Cross-platform test orchestration
 - **Google Test**: C++ unit testing
-- **Build scripts**: `Build/Scripts/Run-AutomationTests.ps1`, `Build/Scripts/Run-Gauntlet.ps1`
+- **Build scripts**: `Build/Scripts/Run-AutomationTests.ps1`
 
 #### B. Coverage Tools
 - Unreal Code Coverage (if available)
@@ -655,7 +612,7 @@ Generate clear test reports:
 
 #### D. Documentation
 - `.github/copilot-instructions.md` - Project standards
-- `Tests/Gauntlet/README.md` - Gauntlet usage guide
+- `docs/adr/0006-test-module-layout-and-fakes.md` - Test module layout, fakes and conformance suite
 - Unreal Engine 5.7 Automation Documentation
 
 ### 13. Quality Checklist

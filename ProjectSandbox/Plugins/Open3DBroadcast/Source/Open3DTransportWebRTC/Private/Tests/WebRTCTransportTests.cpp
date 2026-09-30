@@ -149,7 +149,7 @@ namespace
 // ============================================================================
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCConnectionInitializeTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.Connection.Initialize",
+	"Open3DBroadcast.Transport.WebRTC.Connection.Initialize",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCConnectionInitializeTest::RunTest(const FString& Parameters)
@@ -185,7 +185,7 @@ bool FWebRTCConnectionInitializeTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCConnectionDubleInitializeTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.Connection.DoubleInitialize",
+	"Open3DBroadcast.Transport.WebRTC.Connection.DoubleInitialize",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCConnectionDubleInitializeTest::RunTest(const FString& Parameters)
@@ -217,7 +217,7 @@ bool FWebRTCConnectionDubleInitializeTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCConnectionInvalidUrlTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.Connection.InvalidUrl",
+	"Open3DBroadcast.Transport.WebRTC.Connection.InvalidUrl",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCConnectionInvalidUrlTest::RunTest(const FString& Parameters)
@@ -254,7 +254,7 @@ bool FWebRTCConnectionInvalidUrlTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCConnectionEmptyTokenTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.Connection.EmptyToken",
+	"Open3DBroadcast.Transport.WebRTC.Connection.EmptyToken",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCConnectionEmptyTokenTest::RunTest(const FString& Parameters)
@@ -291,7 +291,7 @@ bool FWebRTCConnectionEmptyTokenTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCReceiverInitializeTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.Receiver.Initialize",
+	"Open3DBroadcast.Transport.WebRTC.Receiver.Initialize",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCReceiverInitializeTest::RunTest(const FString& Parameters)
@@ -319,7 +319,7 @@ bool FWebRTCReceiverInitializeTest::RunTest(const FString& Parameters)
 // ============================================================================
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCSendBeforeConnectedTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.DataTransfer.SendBeforeConnected",
+	"Open3DBroadcast.Transport.WebRTC.DataTransfer.SendBeforeConnected",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCSendBeforeConnectedTest::RunTest(const FString& Parameters)
@@ -356,7 +356,7 @@ bool FWebRTCSendBeforeConnectedTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCPayloadSizeValidationSmallTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.DataTransfer.PayloadSizeSmall",
+	"Open3DBroadcast.Transport.WebRTC.DataTransfer.PayloadSizeSmall",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCPayloadSizeValidationSmallTest::RunTest(const FString& Parameters)
@@ -391,7 +391,7 @@ bool FWebRTCPayloadSizeValidationSmallTest::RunTest(const FString& Parameters)
 // ============================================================================
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCAudioSinkCreationTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.Audio.SinkCreation",
+	"Open3DBroadcast.Transport.WebRTC.Audio.SinkCreation",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCAudioSinkCreationTest::RunTest(const FString& Parameters)
@@ -422,7 +422,7 @@ bool FWebRTCAudioSinkCreationTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCAudioBitrateClampTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.Audio.BitrateClamping",
+	"Open3DBroadcast.Transport.WebRTC.Audio.BitrateClamping",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCAudioBitrateClampTest::RunTest(const FString& Parameters)
@@ -450,7 +450,7 @@ bool FWebRTCAudioBitrateClampTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCAudioSubmitWithoutConnectionTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.Audio.SubmitWithoutConnection",
+	"Open3DBroadcast.Transport.WebRTC.Audio.SubmitWithoutConnection",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCAudioSubmitWithoutConnectionTest::RunTest(const FString& Parameters)
@@ -497,7 +497,7 @@ bool FWebRTCAudioSubmitWithoutConnectionTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCAudioClippingTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.Audio.Clipping",
+	"Open3DBroadcast.Transport.WebRTC.Audio.Clipping",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCAudioClippingTest::RunTest(const FString& Parameters)
@@ -547,7 +547,7 @@ bool FWebRTCAudioClippingTest::RunTest(const FString& Parameters)
 // ============================================================================
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCStatsResetTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.Stats.Reset",
+	"Open3DBroadcast.Transport.WebRTC.Stats.Reset",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCStatsResetTest::RunTest(const FString& Parameters)
@@ -573,7 +573,7 @@ bool FWebRTCStatsResetTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCMultipleStopCallsTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.Lifecycle.MultipleStopCalls",
+	"Open3DBroadcast.Transport.WebRTC.Lifecycle.MultipleStopCalls",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCMultipleStopCallsTest::RunTest(const FString& Parameters)
@@ -600,7 +600,7 @@ bool FWebRTCMultipleStopCallsTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCReceiverSetConsumerTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.Receiver.SetConsumer",
+	"Open3DBroadcast.Transport.WebRTC.Receiver.SetConsumer",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCReceiverSetConsumerTest::RunTest(const FString& Parameters)
@@ -627,7 +627,7 @@ bool FWebRTCReceiverSetConsumerTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCReceiverSetAudioSinkTest,
-	"Open3DBroadcast.Open3DTransportWebRTC.Receiver.SetAudioSink",
+	"Open3DBroadcast.Transport.WebRTC.Receiver.SetAudioSink",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebRTCReceiverSetAudioSinkTest::RunTest(const FString& Parameters)
@@ -656,6 +656,28 @@ bool FWebRTCReceiverSetAudioSinkTest::RunTest(const FString& Parameters)
 	Receiver.Stop();
 #endif
 
+	return true;
+}
+
+// WP-T2: the localhost rule compares the host only, so an address with a port (LiveKit's dev
+// default 127.0.0.1:7880) still gets ws://. Before this, "127.0.0.1:7880" became wss:// and
+// Open3DBroadcast.Transport.WebRTC.Token.SenderAutoFetchConnects failed.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCWebSocketSchemeTest,
+	"Open3DBroadcast.Transport.WebRTC.Utils.WebSocketSchemeByHost",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FWebRTCWebSocketSchemeTest::RunTest(const FString& Parameters)
+{
+	TestEqual(TEXT("Loopback IP"), WebRTCUtils::PrependWebSocketProtocol(TEXT("127.0.0.1")), FString(TEXT("ws://127.0.0.1")));
+	TestEqual(TEXT("Loopback IP with port"), WebRTCUtils::PrependWebSocketProtocol(TEXT("127.0.0.1:7880")), FString(TEXT("ws://127.0.0.1:7880")));
+	TestEqual(TEXT("localhost with port and path"), WebRTCUtils::PrependWebSocketProtocol(TEXT("localhost:7880/rtc")), FString(TEXT("ws://localhost:7880/rtc")));
+	TestEqual(TEXT("Any address"), WebRTCUtils::PrependWebSocketProtocol(TEXT("0.0.0.0:7880")), FString(TEXT("ws://0.0.0.0:7880")));
+	TestEqual(TEXT("IPv6 loopback with port"), WebRTCUtils::PrependWebSocketProtocol(TEXT("[::1]:7880")), FString(TEXT("ws://[::1]:7880")));
+	TestEqual(TEXT("Remote host"), WebRTCUtils::PrependWebSocketProtocol(TEXT("livekit.example.com")), FString(TEXT("wss://livekit.example.com")));
+	TestEqual(TEXT("Remote host with port"), WebRTCUtils::PrependWebSocketProtocol(TEXT("livekit.example.com:7880")), FString(TEXT("wss://livekit.example.com:7880")));
+	TestEqual(TEXT("A host that only starts like localhost"), WebRTCUtils::PrependWebSocketProtocol(TEXT("127.0.0.10:7880")), FString(TEXT("wss://127.0.0.10:7880")));
+	TestEqual(TEXT("Explicit scheme kept"), WebRTCUtils::PrependWebSocketProtocol(TEXT("wss://127.0.0.1:7880")), FString(TEXT("wss://127.0.0.1:7880")));
+	TestEqual(TEXT("Empty stays empty"), WebRTCUtils::PrependWebSocketProtocol(FString()), FString());
 	return true;
 }
 

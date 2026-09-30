@@ -1185,8 +1185,6 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
     const FString SubjectNameUtf8 = UTF8_TO_TCHAR(SubjectPtr->mName.c_str());
     const FName SubjectFName(*SubjectNameUtf8);
 
-    LastObservedSubjectName = SubjectFName;
-
     // RCV-4: the cached bone names and parents are reused only when the skeleton
     // fingerprint (bone count, names and parent ids) is unchanged and this packet did
     // not carry a full descriptor for the subject. Hashing the name bytes is cheap

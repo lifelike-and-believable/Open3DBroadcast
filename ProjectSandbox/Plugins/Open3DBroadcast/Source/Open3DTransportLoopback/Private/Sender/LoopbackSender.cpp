@@ -2,6 +2,7 @@
 
 #include "Logging/LogMacros.h"
 #include "HAL/PlatformTime.h"
+#include "Misc/ScopeLock.h"
 #include "O3DSenderAudioSinkBase.h"
 
 #include <atomic>
@@ -116,7 +117,10 @@ bool FO3DLoopbackSender::Initialize(const FO3DTransportConfig& Config)
 
     Channel = O3DLoopback::AcquireChannel(ChannelKey, QueueCapacity, AudioQueueCapacity);
     bInitialized = Channel.IsValid();
-    Stats.Reset();
+    {
+        FScopeLock StatsLock(&StatsMutex);
+        Stats.Reset();
+    }
     ActiveAudioConfig = Config.Audio;
     AudioSourceGuid = FGuid::NewGuid();
     if (bInitialized)
@@ -149,6 +153,7 @@ bool FO3DLoopbackSender::Start()
     {
         AudioGate->Open();
     }
+    bRunning.store(bInitialized);
     return bInitialized;
 }
 
@@ -157,18 +162,22 @@ void FO3DLoopbackSender::Stop()
     // WP-S5: after this returns no audio sink created so far can enqueue again.
     // The channel itself remains available for new instances.
     AudioGate->Close();
+    bRunning.store(false);
 }
 
 bool FO3DLoopbackSender::Send(const O3DS::SubjectList& List)
 {
-    if (!bInitialized || !Channel.IsValid())
+    if (!bInitialized || !bRunning.load() || !Channel.IsValid())
     {
         return false;
     }
 
     if (Channel->PendingCount.load() >= Channel->Capacity)
     {
-        Stats.DroppedFrames++;
+        {
+            FScopeLock StatsLock(&StatsMutex);
+            Stats.DroppedFrames++;
+        }
         UE_LOG(LogO3DLoopbackTransport, Verbose, TEXT("Loopback queue full for '%s'; dropping frame."), *ChannelKey);
         return false;
     }
@@ -194,14 +203,17 @@ bool FO3DLoopbackSender::Send(const O3DS::SubjectList& List)
 
 bool FO3DLoopbackSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec)
 {
-    if (!bInitialized || !Channel.IsValid() || Len <= 0)
+    if (!bInitialized || !bRunning.load() || !Channel.IsValid() || Len <= 0)
     {
         return false;
     }
 
     if (Channel->PendingCount.load() >= Channel->Capacity)
     {
-        Stats.DroppedFrames++;
+        {
+            FScopeLock StatsLock(&StatsMutex);
+            Stats.DroppedFrames++;
+        }
         UE_LOG(LogO3DLoopbackTransport, Verbose, TEXT("Loopback queue full for '%s'; dropping frame."), *ChannelKey);
         return false;
     }
@@ -227,8 +239,11 @@ bool FO3DLoopbackSender::SendBytes(const uint8* Data, int32 Len, const FString& 
     Channel->Queue.Enqueue(MoveTemp(Packet));
     Channel->PendingCount.fetch_add(1);
 
-    Stats.FramesSent++;
-    Stats.BytesSent += Len;
+    {
+        FScopeLock StatsLock(&StatsMutex);
+        Stats.FramesSent++;
+        Stats.BytesSent += Len;
+    }
 
     if (O3DLoopback::GetAudioDebugLevel() > 1)
     {
@@ -249,6 +264,7 @@ void FO3DLoopbackSender::Tick(float DeltaSeconds)
 
 FO3DTransportStats FO3DLoopbackSender::GetStats() const
 {
+    FScopeLock StatsLock(&StatsMutex);
     return Stats;
 }
 

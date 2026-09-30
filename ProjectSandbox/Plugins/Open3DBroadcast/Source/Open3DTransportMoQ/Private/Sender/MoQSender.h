@@ -8,7 +8,7 @@
 #include "Containers/Queue.h"
 #include "O3DSenderInterface.h"
 #include "O3DAudioFrameCodec.h"
-#include "Shared/MoQFfiApi.h"
+#include "MoQFfiApi.h"
 #include "moq_ffi.h"
 
 class FMoQSessionWrapper;

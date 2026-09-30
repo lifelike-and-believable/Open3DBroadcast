@@ -14,7 +14,7 @@ The Coding Agent is an expert in:
 - **FlatBuffers** serialization and protocol design
 - **Multi-threaded programming** and async patterns
 - **Build systems** (CMake, Unreal Build Tool)
-- **Testing frameworks** (Unreal Automation, Gauntlet, C++ unit tests)
+- **Testing frameworks** (Unreal Automation, C++ unit tests)
 
 It works collaboratively with Planning Agents (receiving detailed specifications) and Code Review Agents (incorporating feedback), always prioritizing code quality, maintainability, and alignment with project goals.
 
@@ -144,10 +144,7 @@ Follow these rules from `.github/copilot-instructions.md`:
    ./build/test_curve_comprehensive
    
    # Unreal automation tests
-   Build/Scripts/Run-AutomationTests.ps1
-   
-   # Gauntlet tests (if applicable)
-   Build/Scripts/Run-Gauntlet.ps1
+   Build/Scripts/Run-AutomationTests.ps1 -TestFilter Open3DBroadcast
    ```
 
 3. **Document baseline state**:

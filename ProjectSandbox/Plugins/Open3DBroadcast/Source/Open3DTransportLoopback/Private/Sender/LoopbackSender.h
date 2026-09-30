@@ -3,6 +3,9 @@
 #include "O3DSenderInterface.h"
 #include "../Shared/LoopbackChannel.h"
 #include "O3DLifetimeGate.h"
+#include "HAL/CriticalSection.h"
+
+#include <atomic>
 
 class FO3DLoopbackSender : public IOpen3DSender
 {
@@ -25,9 +28,13 @@ private:
     int32 AudioQueueCapacity = 32;
     TSharedPtr<FO3DLoopbackChannel, ESPMode::ThreadSafe> Channel;
     bool bInitialized = false;
+    /** Set by Start(), cleared by Stop(). Sends outside a session are rejected (ADR 0007 contract; WP-T2 conformance). */
+    std::atomic<bool> bRunning{false};
     FO3DTransportAudioConfig ActiveAudioConfig;
     FGuid AudioSourceGuid;
+    /** SendSerialized runs on any thread; counters change only under StatsMutex (WP-T2 conformance Stats.MonotonicUnderLoad). */
     FO3DTransportStats Stats;
+    mutable FCriticalSection StatsMutex;
 
     /** WP-S5: audio sinks hold this gate (never the sender); Stop() closes it before returning. */
     TSharedRef<FO3DLifetimeGate, ESPMode::ThreadSafe> AudioGate = MakeShared<FO3DLifetimeGate, ESPMode::ThreadSafe>();
