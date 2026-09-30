@@ -6,10 +6,9 @@
 #include "Logging/LogMacros.h"
 #include "Misc/Paths.h"
 #include "Math/NumericLimits.h"
-#include "livekit_ffi.h"
+#include "Containers/StringConv.h"
+#include "O3DFfiContextRegistry.h"
 #include "o3ds/model.h"
-
-using WebRTCUtils::FromAnsi;
 
 namespace
 {
@@ -25,6 +24,15 @@ namespace
     static constexpr size_t MaxIncomingDataPayloadBytes = 8 * 1024 * 1024; // 8 MB
     static_assert(MaxIncomingDataPayloadBytes <= static_cast<size_t>(TNumericLimits<int32>::Max()),
         "MaxIncomingDataPayloadBytes must fit within int32 for TArray allocation");
+
+    /** Label used for frames that arrive on the unlabeled fallback callback or with no label. */
+    static constexpr TCHAR DefaultSubjectLabel[] = TEXT("default");
+
+    TO3DFfiContextRegistry<FWebRTCReceiverLink>& GetReceiverLinkRegistry()
+    {
+        static TO3DFfiContextRegistry<FWebRTCReceiverLink> Registry;
+        return Registry;
+    }
 
     FString GetPluginBaseDir()
     {
@@ -77,21 +85,21 @@ namespace
         }
         else
         {
-            UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("LiveKit FFI DLL not found near plugin; relying on system loader."));
+            UE_LOG(LogO3DWebRTCReceiver, Verbose, TEXT("LiveKit FFI DLL not found near plugin; relying on the module's loader."));
         }
 #else
         // Non-Windows platforms rely on the runtime dependency staging provided by the build scripts.
 #endif
     }
 
-    void LogIfFailed(const LkResult& Result, const TCHAR* Context)
+    void LogIfFailed(const FLkFfiApi& Ffi, const LkResult& Result, const TCHAR* Context)
     {
         if (Result.code == 0)
         {
             return;
         }
 
-        const FString Message = FromAnsi(Result.message);
+        const FString Message = Ffi.TakeMessage(Result);
         if (Message.IsEmpty())
         {
             UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("%s failed (code=%d)"), Context, Result.code);
@@ -99,11 +107,6 @@ namespace
         else
         {
             UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("%s failed (code=%d): %s"), Context, Result.code, *Message);
-        }
-
-        if (Result.message)
-        {
-            lk_free_str(const_cast<char*>(Result.message));
         }
     }
 
@@ -127,51 +130,87 @@ namespace
         }
         return DefaultValue;
     }
+
+    /** Validates a data-callback payload before it is copied. */
+    bool IsAcceptablePayload(const uint8_t* Bytes, size_t Len)
+    {
+        if (!Bytes || Len == 0)
+        {
+            return false;
+        }
+
+        // SECURITY: `len` is peer-controlled. Reject payloads that would overflow the int32
+        // cast used for TArray allocation (or are simply unreasonably large).
+        if (Len > MaxIncomingDataPayloadBytes || Len > static_cast<size_t>(TNumericLimits<int32>::Max()))
+        {
+            UE_LOG(LogO3DWebRTCReceiver, Error,
+                TEXT("Rejecting oversized WebRTC data payload len=%zu (max=%zu)"),
+                Len, MaxIncomingDataPayloadBytes);
+            return false;
+        }
+        return true;
+    }
+}
+
+void FWebRTCReceiverLink::EnqueueFrame(const FString& SubjectLabel, const uint8* Bytes, int32 Len)
+{
+    FWebRTCReceiverPendingFrame Frame;
+    Frame.EnqueueTimeSeconds = FPlatformTime::Seconds();
+    Frame.Payload.SetNumUninitialized(Len);
+    FMemory::Memcpy(Frame.Payload.GetData(), Bytes, Len);
+
+    {
+        FScopeLock Lock(&PendingFramesMutex);
+        PendingFramesBySubject.FindOrAdd(SubjectLabel).Emplace(MoveTemp(Frame));
+    }
+
+    LastDataReceiveTime.store(FPlatformTime::Seconds());
+    bReconnectPending.Store(false);
+}
+
+void FWebRTCReceiverLink::RequestReconnect()
+{
+    if (!bReconnectPending.Exchange(true))
+    {
+        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("WebRTC receiver scheduling reconnect"));
+    }
 }
 
 // Static callback for connection state changes
 void FO3DWebRTCReceiver::OnConnectionState(void* user, LkConnectionState state, int32_t reason_code, const char* message)
 {
-    FO3DWebRTCReceiver* Self = reinterpret_cast<FO3DWebRTCReceiver*>(user);
-    if (!Self) return;
+    const TSharedPtr<FWebRTCReceiverLink, ESPMode::ThreadSafe> Self = GetReceiverLinkRegistry().Resolve(user);
+    if (!Self.IsValid()) return;
 
     switch (state)
     {
     case LkConnConnecting:
-        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("[DIAG] OnConnectionState: LkConnConnecting"));
         UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver connecting..."));
         break;
 
     case LkConnConnected:
-        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("[DIAG] OnConnectionState: LkConnConnected - data/audio callbacks should now fire"));
         UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver connected"));
         Self->bConnected.Store(true);
         Self->bPendingAudioFormatApply.Store(true);
         Self->bReconnectPending.Store(false);
-        {
-            FScopeLock DataLock(&Self->LastDataMutex);
-            Self->LastDataReceiveTime = FPlatformTime::Seconds();
-        }
+        Self->LastDataReceiveTime.store(FPlatformTime::Seconds());
         break;
 
     case LkConnReconnecting:
-        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("[DIAG] OnConnectionState: LkConnReconnecting"));
         UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("WebRTC receiver reconnecting..."));
         Self->bConnected.Store(false);
         break;
 
     case LkConnDisconnected:
-        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("[DIAG] OnConnectionState: LkConnDisconnected - %hs"), message);
-        UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver disconnected: %s"), *FromAnsi(message));
+        UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver disconnected: %s"), *WebRTCUtils::FromAnsi(message));
         Self->bConnected.Store(false);
-        Self->RequestReconnect(true);
+        Self->RequestReconnect();
         break;
 
     case LkConnFailed:
-        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("[DIAG] OnConnectionState: LkConnFailed (code=%d) - %hs"), reason_code, message);
-        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC receiver connection failed (code=%d): %s"), reason_code, *FromAnsi(message));
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC receiver connection failed (code=%d): %s"), reason_code, *WebRTCUtils::FromAnsi(message));
         Self->bConnected.Store(false);
-        Self->RequestReconnect(true);
+        Self->RequestReconnect();
         break;
     }
 }
@@ -179,256 +218,101 @@ void FO3DWebRTCReceiver::OnConnectionState(void* user, LkConnectionState state, 
 // Static callback for incoming data with label and reliability info
 void FO3DWebRTCReceiver::OnDataReceivedEx(void* user, const char* label, LkReliability reliability, const uint8_t* bytes, size_t len)
 {
-    // DIAGNOSTIC: Trace entry point to confirm callback is being invoked
-    static TAtomic<uint64> CallCount{ 0 };
-    uint64 ThisCallNumber = ++CallCount;
-
-    FO3DWebRTCReceiver* Self = reinterpret_cast<FO3DWebRTCReceiver*>(user);
-
-    // Log EVERY invocation, even with null/zero parameters (Verbose to avoid spam)
-    UE_LOG(LogO3DWebRTCReceiver, Verbose,
-        TEXT("[DIAG] OnDataReceivedEx INVOKED (call#%llu): label='%hs' len=%zu user=%p"),
-        ThisCallNumber, label ? label : "(NULL)", len, user);
-
-    if (!Self || !bytes || len == 0)
+    const TSharedPtr<FWebRTCReceiverLink, ESPMode::ThreadSafe> Self = GetReceiverLinkRegistry().Resolve(user);
+    if (!Self.IsValid() || !IsAcceptablePayload(bytes, len))
     {
-        UE_LOG(LogO3DWebRTCReceiver, Verbose,
-            TEXT("[DIAG] OnDataReceivedEx early-return: Self=%p bytes=%p len=%zu"),
-            Self, bytes, len);
         return;
     }
 
-    // ARCHITECTURE VERIFICATION: Log data reception with label (Verbose to avoid spam)
-    UE_LOG(LogO3DWebRTCReceiver, Verbose,
-        TEXT("[ARCH] OnDataReceivedEx ENTRY (call#%llu): label='%hs' len=%zu reliability=%s"),
-        ThisCallNumber, label ? label : "(NULL)", len,
-        reliability == LkReliable ? TEXT("Reliable") : TEXT("Lossy"));
-
-    // SECURITY: `len` is peer-controlled. Reject payloads that would overflow the int32
-    // cast used for TArray allocation (or are simply unreasonably large) before allocating
-    // or copying, to prevent a heap buffer overflow (allocation smaller than the Memcpy size).
-    if (len > MaxIncomingDataPayloadBytes || len > static_cast<size_t>(TNumericLimits<int32>::Max()))
+    // Labels are UTF-8 (the sender encodes them with FTCHARToUTF8): decode, don't widen (TRF-31).
+    FString SubjectLabel = WebRTCUtils::DecodeUtf8Label(label);
+    if (SubjectLabel.IsEmpty())
     {
-        UE_LOG(LogO3DWebRTCReceiver, Error,
-            TEXT("OnDataReceivedEx: rejecting oversized payload len=%zu (max=%zu) label='%hs'"),
-            len, MaxIncomingDataPayloadBytes, label ? label : "(NULL)");
-        return;
+        SubjectLabel = DefaultSubjectLabel;
     }
 
-    // Convert label to FString with caching (optimization: avoids repeated UTF8→UTF16 conversion)
-    FString SubjectLabel = Self->GetOrCacheSubjectLabel(label);
+    UE_LOG(LogO3DWebRTCReceiver, VeryVerbose, TEXT("OnDataReceivedEx label='%s' %d bytes (%s)"),
+        *SubjectLabel, static_cast<int32>(len), reliability == LkReliable ? TEXT("Reliable") : TEXT("Lossy"));
 
-    FO3DWebRTCReceiver::FPendingFrame Frame;
-    Frame.EnqueueTimeSeconds = FPlatformTime::Seconds();
-    Frame.ReserveForTypicalFrame();  // Pre-allocate to typical frame size (optimization)
-    Frame.Payload.AddUninitialized((int32)len);
-    FMemory::Memcpy(Frame.Payload.GetData(), bytes, len);
-
-    {
-        FScopeLock Lock(&Self->PendingFramesMutex);
-        TArray<FPendingFrame>& SubjectQueue = Self->PendingFramesBySubject.FindOrAdd(SubjectLabel);
-        SubjectQueue.Emplace(MoveTemp(Frame));
-
-        // ARCHITECTURE VERIFICATION: Log queue status after enqueue (Verbose to avoid spam)
-        UE_LOG(LogO3DWebRTCReceiver, Verbose,
-            TEXT("[ARCH] OnDataReceivedEx ENQUEUED: label='%s' %d bytes (QueueLen=%d)"),
-            *SubjectLabel, static_cast<int32>(len), SubjectQueue.Num());
-
-        UE_LOG(LogO3DWebRTCReceiver, Verbose,
-            TEXT("OnDataReceivedEx label='%s' %d bytes (Queue=%d, Reliability=%s)"),
-            *SubjectLabel, static_cast<int32>(len), SubjectQueue.Num(),
-            reliability == LkReliable ? TEXT("Reliable") : TEXT("Lossy"));
-    }
-
-    {
-        FScopeLock DataLock(&Self->LastDataMutex);
-        Self->LastDataReceiveTime = FPlatformTime::Seconds();
-    }
-
-    Self->bReconnectPending.Store(false);
+    Self->EnqueueFrame(SubjectLabel, bytes, static_cast<int32>(len));
 }
 
-// FALLBACK: Unlabeled data callback
-// This is registered if labeled channels don't work.
-// All data comes in via default/unnamed channel with no subject label.
+// FALLBACK: unlabeled data callback, registered only when lk_client_set_data_callback_ex fails.
 void FO3DWebRTCReceiver::OnDataReceived(void* user, const uint8_t* bytes, size_t len)
 {
-    static TAtomic<uint64> CallCount{ 0 };
-    uint64 ThisCallNumber = ++CallCount;
-
-    FO3DWebRTCReceiver* Self = reinterpret_cast<FO3DWebRTCReceiver*>(user);
-
-    // Log EVERY invocation
-    UE_LOG(LogO3DWebRTCReceiver, Verbose,
-        TEXT("[DIAG] OnDataReceived INVOKED (call#%llu): len=%zu user=%p (FALLBACK - UNLABELED CHANNEL)"),
-        ThisCallNumber, len, user);
-
-    if (!Self || !bytes || len == 0)
+    const TSharedPtr<FWebRTCReceiverLink, ESPMode::ThreadSafe> Self = GetReceiverLinkRegistry().Resolve(user);
+    if (!Self.IsValid() || !IsAcceptablePayload(bytes, len))
     {
-        UE_LOG(LogO3DWebRTCReceiver, Verbose,
-            TEXT("[DIAG] OnDataReceived early-return: Self=%p bytes=%p len=%zu"),
-            Self, bytes, len);
         return;
     }
 
-    // ARCHITECTURE VERIFICATION: Log data reception (no label, so use default)
-    UE_LOG(LogO3DWebRTCReceiver, Verbose,
-        TEXT("[ARCH] OnDataReceived ENTRY (call#%llu): len=%zu (received on DEFAULT/UNNAMED channel)"),
-        ThisCallNumber, len);
-
-    // SECURITY: `len` is peer-controlled. Reject payloads that would overflow the int32
-    // cast used for TArray allocation (or are simply unreasonably large) before allocating
-    // or copying, to prevent a heap buffer overflow (allocation smaller than the Memcpy size).
-    if (len > MaxIncomingDataPayloadBytes || len > static_cast<size_t>(TNumericLimits<int32>::Max()))
-    {
-        UE_LOG(LogO3DWebRTCReceiver, Error,
-            TEXT("OnDataReceived: rejecting oversized payload len=%zu (max=%zu)"),
-            len, MaxIncomingDataPayloadBytes);
-        return;
-    }
-
-    // Use default label since this is unlabeled channel
-    FString SubjectLabel = TEXT("default");
-
-    FO3DWebRTCReceiver::FPendingFrame Frame;
-    Frame.EnqueueTimeSeconds = FPlatformTime::Seconds();
-    Frame.ReserveForTypicalFrame();  // Pre-allocate to typical frame size (optimization)
-    Frame.Payload.AddUninitialized((int32)len);
-    FMemory::Memcpy(Frame.Payload.GetData(), bytes, len);
-
-    {
-        FScopeLock Lock(&Self->PendingFramesMutex);
-        TArray<FPendingFrame>& SubjectQueue = Self->PendingFramesBySubject.FindOrAdd(SubjectLabel);
-        SubjectQueue.Emplace(MoveTemp(Frame));
-
-        // ARCHITECTURE VERIFICATION: Log queue status
-        UE_LOG(LogO3DWebRTCReceiver, Verbose,
-            TEXT("[ARCH] OnDataReceived ENQUEUED: label='%s' %d bytes (QueueLen=%d)"),
-            *SubjectLabel, static_cast<int32>(len), SubjectQueue.Num());
-
-        UE_LOG(LogO3DWebRTCReceiver, Verbose,
-            TEXT("OnDataReceived %d bytes queued as '%s' (Queue=%d)"),
-            static_cast<int32>(len), *SubjectLabel, SubjectQueue.Num());
-    }
-
-    {
-        FScopeLock DataLock(&Self->LastDataMutex);
-        Self->LastDataReceiveTime = FPlatformTime::Seconds();
-    }
-
-    Self->bReconnectPending.Store(false);
+    Self->EnqueueFrame(DefaultSubjectLabel, bytes, static_cast<int32>(len));
 }
 
-// Static callback for incoming audio
-// NOTE: The current LiveKit FFI does not provide per-audio-track label information in the audio callback.
-// All audio is received in a single stream. When LiveKit FFI is updated to support
-// LkAudioCallbackEx with label information, audio can be routed per-subject like data channels.
-// For now, audio is delivered to the audio sink with StreamLabel set to a generic identifier.
-// New callback with per-subject audio identification (participant_name and track_name from LiveKit FFI)
+// Per-subject audio callback (participant_name and track_name from LiveKit FFI)
 void FO3DWebRTCReceiver::OnAudioReceivedEx(void* user, const int16_t* pcm_interleaved, size_t frames_per_channel, int32_t channels, int32_t sample_rate, const char* participant_name, const char* track_name)
 {
-    FO3DWebRTCReceiver* Self = reinterpret_cast<FO3DWebRTCReceiver*>(user);
-    if (!Self || !pcm_interleaved || frames_per_channel == 0 || channels <= 0 || sample_rate <= 0) return;
+    const TSharedPtr<FWebRTCReceiverLink, ESPMode::ThreadSafe> Self = GetReceiverLinkRegistry().Resolve(user);
+    if (!Self.IsValid() || !pcm_interleaved || frames_per_channel == 0 || channels <= 0 || sample_rate <= 0) return;
 
-    // Lock-free atomic updates for high-frequency stats (optimization: replace mutex with atomics)
-    Self->AtomicFramesReceived.IncrementExchange();
-    Self->AtomicBytesReceived.AddExchange(static_cast<int64>(frames_per_channel * channels) * static_cast<int64>(sizeof(int16)));
+    const size_t TotalSamples = frames_per_channel * static_cast<size_t>(channels);
+    const size_t NumBytes = TotalSamples * sizeof(int16);
+    if (NumBytes > MaxIncomingDataPayloadBytes)
+    {
+        return;
+    }
 
-    const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> SinkPinned = Self->GetAudioSinkForCallback();
+    Self->FramesReceived.IncrementExchange();
+    Self->BytesReceived.AddExchange(static_cast<int64>(NumBytes));
+
+    const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> SinkPinned = Self->GetAudioSink();
     if (SinkPinned.IsValid())
     {
-        // IMPORTANT: Audio labeling strategy
-        // - track_name: The subject identifier we set during track creation (e.g., "Quincy")
-        // - participant_name: The sender/participant publishing this audio
-        //
-        // LiveKit now correctly preserves the track_name we set during track creation.
-        // We use track_name to identify which subject's audio this is.
-        // This allows audio to be routed to the same subject as mocap data (which uses the same label).
-        FString SubjectLabel = track_name && *track_name
-            ? Self->GetOrCacheSubjectLabel(track_name)
-            : TEXT("audio_default");
-
-        UE_LOG(LogO3DWebRTCReceiver, Verbose,
-            TEXT("[DIAG] OnAudioReceivedEx: track='%hs' (subject='%s') from participant='%hs' frames=%zu channels=%d sample_rate=%d"),
-            track_name ? track_name : "(unknown)",
-            *SubjectLabel,
-            participant_name ? participant_name : "(unknown)",
-            frames_per_channel, channels, sample_rate);
-
-        // Fill audio metadata with track name as subject label (per-subject routing)
-        O3DS::FAudioFrameMeta Meta;
-        Meta.SampleRate = sample_rate;
-        Meta.NumChannels = channels;
-        Meta.StreamLabel = SubjectLabel;  // Track name identifies the subject
-
-        const size_t TotalSamples = frames_per_channel * channels;
-        const size_t NumBytes = TotalSamples * sizeof(int16);
-
-        SinkPinned->SubmitPcm16(Meta, reinterpret_cast<const uint8*>(pcm_interleaved), (int32)NumBytes);
-    }
-    else
-    {
-        const double Now = FPlatformTime::Seconds();
-        if (Now - Self->LastAudioDropLogTime > 1.0)
+        // track_name is the subject label the sender used when it created the track, so audio
+        // routes to the same subject as mocap data. Decoded as UTF-8 (TRF-31).
+        FString SubjectLabel = WebRTCUtils::DecodeUtf8Label(track_name);
+        if (SubjectLabel.IsEmpty())
         {
-            UE_LOG(LogO3DWebRTCReceiver, Verbose, TEXT("WebRTC audio frame discarded (no sink) - participant='%hs' track='%hs' frames=%d channels=%d sr=%d"),
-                participant_name ? participant_name : "(unknown)", track_name ? track_name : "(unknown)", (int32)frames_per_channel, channels, sample_rate);
-            Self->LastAudioDropLogTime = Now;
+            SubjectLabel = TEXT("audio_default");
         }
-    }
-}
 
-// Legacy callback (kept for backwards compatibility, but OnAudioReceivedEx should be used)
-void FO3DWebRTCReceiver::OnAudioReceived(void* user, const int16_t* pcm_interleaved, size_t frames_per_channel, int32_t channels, int32_t sample_rate)
-{
-    FO3DWebRTCReceiver* Self = reinterpret_cast<FO3DWebRTCReceiver*>(user);
-    if (!Self || !pcm_interleaved || frames_per_channel == 0 || channels <= 0 || sample_rate <= 0) return;
-
-    // Lock-free atomic updates for high-frequency stats (optimization: replace mutex with atomics)
-    Self->AtomicFramesReceived.IncrementExchange();
-    Self->AtomicBytesReceived.AddExchange(static_cast<int64>(frames_per_channel * channels) * static_cast<int64>(sizeof(int16)));
-
-    const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> SinkPinned = Self->GetAudioSinkForCallback();
-    if (SinkPinned.IsValid())
-    {
-        // Fill audio metadata
         O3DS::FAudioFrameMeta Meta;
         Meta.SampleRate = sample_rate;
         Meta.NumChannels = channels;
-        // Use a generic stream label since audio label routing is not yet available in LiveKit FFI
-        // This will be updated when lk_client_set_audio_callback_ex() becomes available
-        Meta.StreamLabel = TEXT("audio_default");
+        Meta.StreamLabel = SubjectLabel;
 
-        const size_t TotalSamples = frames_per_channel * channels;
-        const size_t NumBytes = TotalSamples * sizeof(int16);
-
-        SinkPinned->SubmitPcm16(Meta, reinterpret_cast<const uint8*>(pcm_interleaved), (int32)NumBytes);
+        SinkPinned->SubmitPcm16(Meta, reinterpret_cast<const uint8*>(pcm_interleaved), static_cast<int32>(NumBytes));
     }
     else
     {
         const double Now = FPlatformTime::Seconds();
-        if (Now - Self->LastAudioDropLogTime > 1.0)
+        double Last = Self->LastAudioDropLogTime.load();
+        if (Now - Last > 1.0 && Self->LastAudioDropLogTime.compare_exchange_strong(Last, Now))
         {
-            UE_LOG(LogO3DWebRTCReceiver, Verbose, TEXT("WebRTC audio frame discarded (no sink) - frames=%d channels=%d sr=%d"),
-                (int32)frames_per_channel, channels, sample_rate);
-            Self->LastAudioDropLogTime = Now;
+            UE_LOG(LogO3DWebRTCReceiver, Verbose, TEXT("WebRTC audio frame discarded (no sink) - participant='%s' track='%s' frames=%d channels=%d sr=%d"),
+                *WebRTCUtils::FromAnsi(participant_name), *WebRTCUtils::FromAnsi(track_name), (int32)frames_per_channel, channels, sample_rate);
         }
     }
 }
 
 FO3DWebRTCReceiver::FO3DWebRTCReceiver()
+    : FO3DWebRTCReceiver(GetLinkedLkFfiApi())
 {
 }
 
-TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> FO3DWebRTCReceiver::GetAudioSinkForCallback() const
+FO3DWebRTCReceiver::FO3DWebRTCReceiver(const FLkFfiApi& InFfi, FO3DTokenFetcherFactory InTokenFetcherFactory)
+    : Ffi(InFfi)
+    , TokenFetcherFactory(MoveTemp(InTokenFetcherFactory))
+    , Link(MakeShared<FWebRTCReceiverLink, ESPMode::ThreadSafe>())
 {
-    FScopeLock SinkLock(&AudioSinkMutex);
-    return AudioSink;
+    LinkToken = GetReceiverLinkRegistry().Register(Link);
 }
 
 FO3DWebRTCReceiver::~FO3DWebRTCReceiver()
 {
     Stop();
+    GetReceiverLinkRegistry().Unregister(LinkToken);
+    LinkToken = nullptr;
 }
 
 bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
@@ -459,39 +343,48 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
     return false;
 #endif
 
-    bConnected.Store(false);
+    if (!Ffi.IsComplete())
+    {
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC receiver: LiveKit function table is incomplete"));
+        return false;
+    }
 
-    UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("[DIAG] Initialize() called - starting setup"));
+    Link->bConnected.Store(false);
 
     if (!ParseConfig(Config))
     {
         return false;
     }
 
-    EnsureLiveKitFfiLoaded();
-
     ActiveAudioConfig = Config.Audio;
 
-    UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("[DIAG] About to call SetupClientHandle()"));
     if (!SetupClientHandle())
     {
-        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("[DIAG] SetupClientHandle() FAILED"));
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC receiver: failed to set up the LiveKit client"));
         return false;
     }
 
-    UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("[DIAG] SetupClientHandle() SUCCESS - callbacks should be registered"));
     ActiveConfig = Config;
-    Stats.Reset();
-    LatencySamples = 0;
-    LastAudioDropLogTime = 0.0;
     {
-        FScopeLock DataLock(&LastDataMutex);
-        LastDataReceiveTime = FPlatformTime::Seconds();
+        FScopeLock StatsLock(&StatsMutex);
+        Stats.Reset();
+        LatencySamples = 0;
     }
+    Link->FramesReceived.Store(0);
+    Link->BytesReceived.Store(0);
+    Link->LastAudioDropLogTime.store(0.0);
+    Link->LastDataReceiveTime.store(FPlatformTime::Seconds());
+
+    bConnectRequested = false;
+    bConnectIssued = false;
+    AppliedTokenGeneration = 0;
+    ObservedTokenGeneration = 0;
+    NextTokenFetchTime = 0.0;
+    NextConnectAttemptTime = 0.0;
+
     bInitialized.Store(true);
 
-    UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver initialized: URL=%s"),
-        *RoomUrl);
+    UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver initialized: URL=%s"), *RoomUrl);
 
     return true;
 }
@@ -512,26 +405,6 @@ bool FO3DWebRTCReceiver::Start()
         return false;
     }
 
-    if (bConnected.Load())
-    {
-        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("WebRTC receiver already connected"));
-        return true;
-    }
-
-    // Ensure we have a valid token
-    if (!EnsureTokenAvailable())
-    {
-        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Waiting for token before connecting..."));
-        // Will retry in Poll()
-        return true; // Return true to not fail startup, will connect when token available
-    }
-
-    if (Token.IsEmpty())
-    {
-        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Cannot connect: token is empty"));
-        return false;
-    }
-
     // Create default consumer if not set
     if (!Consumer.IsValid())
     {
@@ -547,127 +420,81 @@ bool FO3DWebRTCReceiver::Start()
         return false;
     }
 
-    if (!BeginConnect())
-    {
-        return false;
-    }
-
-    {
-        FScopeLock DataLock(&LastDataMutex);
-        LastDataReceiveTime = FPlatformTime::Seconds();
-    }
-
-    bReconnectPending.Store(false);
-    return true;
+    // "Connect requested" is tracked separately from the token (TRF-3). Without a token yet,
+    // Poll() connects as soon as the token manager has one.
+    bConnectRequested = true;
+    return UpdateConnection();
 }
 
 void FO3DWebRTCReceiver::Stop()
 {
     FScopeLock Lock(&StateMutex);
 
-    if (ClientHandle)
-    {
-        lk_client_set_data_callback_ex(ClientHandle, nullptr, nullptr);
-        lk_client_set_data_callback(ClientHandle, nullptr, nullptr);
-        lk_client_set_audio_callback_ex(ClientHandle, nullptr, nullptr);
-        lk_set_connection_callback(ClientHandle, nullptr, nullptr);
+    bConnectRequested = false;
+    bConnectIssued = false;
 
-        LogIfFailed(lk_disconnect(ClientHandle), TEXT("LiveKit disconnect"));
-
-        lk_client_destroy(ClientHandle);
-        ClientHandle = nullptr;
-    }
-
-    Consumer.Reset();
-    {
-        // lk_disconnect/lk_client_destroy above have returned, so no audio callback is running
-        // (livekit_ffi.h: "After lk_disconnect() or lk_client_destroy() returns, no further
-        // callbacks will be invoked").
-        FScopeLock SinkLock(&AudioSinkMutex);
-        AudioSink.Reset();
-    }
-    {
-        FScopeLock PendingLock(&PendingFramesMutex);
-        PendingFramesBySubject.Reset();
-    }
-
-    // Reset token manager
+    // Cancel any token fetch; its result is dropped (TRF-24).
     if (TokenManager.IsValid())
     {
         TokenManager->Reset();
     }
 
-    bConnected.Store(false);
+    DestroyClientHandle(TEXT("LiveKit disconnect"));
+
+    Consumer.Reset();
+    {
+        // lk_disconnect/lk_client_destroy above have returned, so no callback is running
+        // (livekit_ffi.h: "After lk_disconnect() or lk_client_destroy() returns, no further
+        // callbacks will be invoked"). A late callback would resolve Link through the registry,
+        // which is still safe.
+        FScopeLock SinkLock(&Link->AudioSinkMutex);
+        Link->AudioSink.Reset();
+    }
+    {
+        FScopeLock PendingLock(&Link->PendingFramesMutex);
+        Link->PendingFramesBySubject.Reset();
+    }
+
+    Link->bConnected.Store(false);
+    Link->bPendingAudioFormatApply.Store(false);
+    Link->bReconnectPending.Store(false);
     bInitialized.Store(false);
-    bPendingAudioFormatApply.Store(false);
-    bReconnectPending.Store(false);
-    bWaitingForToken.Store(false);
 
     UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver stopped"));
 }
 
 int32 FO3DWebRTCReceiver::Poll()
 {
-    // Process frames from each subject's queue with batch delivery
-    // Instead of keeping only the latest frame (which causes frame drops),
-    // we now process all queued frames to improve smoothness and reduce latency
-    TMap<FString, TArray<FPendingFrame>> AllFramesBySubject;
-
+    // Take every queued frame; frames are delivered in arrival order per subject.
+    TMap<FString, TArray<FWebRTCReceiverPendingFrame>> AllFramesBySubject;
     {
-        FScopeLock Lock(&PendingFramesMutex);
+        FScopeLock Lock(&Link->PendingFramesMutex);
+        AllFramesBySubject = MoveTemp(Link->PendingFramesBySubject);
+        Link->PendingFramesBySubject.Reset();
+    }
 
-        // ARCHITECTURE VERIFICATION: Log queue state at start of Poll (Verbose - fires every frame)
-        UE_LOG(LogO3DWebRTCReceiver, Verbose,
-            TEXT("[ARCH] Poll() START: %d subjects have pending frames"),
-            PendingFramesBySubject.Num());
-
-        int32 TotalQueuedFrames = 0;
-        for (auto& SubjectQueue : PendingFramesBySubject)
-        {
-            const FString& SubjectLabel = SubjectQueue.Key;
-            TArray<FPendingFrame>& Frames = SubjectQueue.Value;
-
-            if (Frames.Num() > 0)
-            {
-                // OPTIMIZATION: Process ALL queued frames, not just the latest
-                // This improves frame delivery consistency and reduces artificial latency
-                AllFramesBySubject.Add(SubjectLabel, MoveTemp(Frames));
-                TotalQueuedFrames += AllFramesBySubject[SubjectLabel].Num();
-
-                // ARCHITECTURE VERIFICATION: Log frame extraction per subject (Verbose)
-                UE_LOG(LogO3DWebRTCReceiver, Verbose,
-                    TEXT("[ARCH] Poll() DEQUEUED: subject='%s' frames=%d total_bytes=%d"),
-                    *SubjectLabel, AllFramesBySubject[SubjectLabel].Num(),
-                    AllFramesBySubject[SubjectLabel].Num() > 0 ? AllFramesBySubject[SubjectLabel].Last().Payload.Num() : 0);
-            }
-        }
+    // Snapshot the consumer under the state lock (TRF-15).
+    TSharedPtr<ISerializedFrameConsumer> ConsumerSnapshot;
+    {
+        FScopeLock Lock(&StateMutex);
+        ConsumerSnapshot = Consumer;
     }
 
     int32 FramesProcessed = 0;
     const double NowSeconds = FPlatformTime::Seconds();
 
-    // ARCHITECTURE VERIFICATION: Log consumer submission phase (Verbose)
-    UE_LOG(LogO3DWebRTCReceiver, Verbose,
-        TEXT("[ARCH] Poll() SUBMIT: processing frames from %d subjects"),
-        AllFramesBySubject.Num());
-
-    // Submit all queued frames from each subject to the consumer
-    if (Consumer.IsValid())
+    if (ConsumerSnapshot.IsValid())
     {
         for (auto& SubjectEntry : AllFramesBySubject)
         {
             const FString& SubjectLabel = SubjectEntry.Key;
-            TArray<FPendingFrame>& Frames = SubjectEntry.Value;
-
-            for (FPendingFrame& Frame : Frames)
+            for (FWebRTCReceiverPendingFrame& Frame : SubjectEntry.Value)
             {
                 const double ReceiveLatencyMs = FMath::Max(0.0, (NowSeconds - Frame.EnqueueTimeSeconds) * 1000.0);
 
-                // Update frame and byte stats with lock-free atomics (optimization)
-                AtomicFramesReceived.IncrementExchange();
-                AtomicBytesReceived.AddExchange(Frame.Payload.Num());
+                Link->FramesReceived.IncrementExchange();
+                Link->BytesReceived.AddExchange(Frame.Payload.Num());
 
-                // Latency tracking still uses mutex (calculated less frequently)
                 {
                     FScopeLock Lock(&StatsMutex);
                     Stats.MaxLatencyMs = FMath::Max(Stats.MaxLatencyMs, ReceiveLatencyMs);
@@ -677,73 +504,39 @@ int32 FO3DWebRTCReceiver::Poll()
                     LatencySamples = NewSampleCount;
                 }
 
-                // ARCHITECTURE VERIFICATION: Log frame submission (Verbose)
-                UE_LOG(LogO3DWebRTCReceiver, Verbose,
-                    TEXT("[ARCH] Poll() SUBMITTING: subject='%s' bytes=%d to consumer"),
-                    *SubjectLabel, Frame.Payload.Num());
-
-                // PHASE 13: Timestamp alignment fix
-                // LiveLink expects WorldTime to be "when to display" not "when it arrived"
-                // Using FPlatformTime::Seconds() (current time) instead of Frame.EnqueueTimeSeconds (arrival time)
-                // This prevents LiveLink from buffering frames as "old" data
-                const double SubmitTimeNow = FPlatformTime::Seconds();
-
-                // Submit frame to consumer with the subject label as the subject name
-                // Using current time (SubmitTimeNow) instead of old arrival time
-                Consumer->SubmitFrame(SubjectLabel, Frame.Payload, SubmitTimeNow);
+                // LiveLink expects WorldTime to be "when to display", so submit with the current
+                // time rather than the arrival time.
+                ConsumerSnapshot->SubmitFrame(SubjectLabel, Frame.Payload, FPlatformTime::Seconds());
                 FramesProcessed++;
-
-                // ARCHITECTURE VERIFICATION: Log successful submission (Verbose)
-                UE_LOG(LogO3DWebRTCReceiver, Verbose,
-                    TEXT("[ARCH] Poll() SUBMITTED: subject='%s' (FramesProcessed=%d)"),
-                    *SubjectLabel, FramesProcessed);
             }
         }
     }
     else
     {
-        // ARCHITECTURE VERIFICATION: Log no consumer case (Warning - error condition)
-        UE_LOG(LogO3DWebRTCReceiver, Warning,
-            TEXT("[ARCH] Poll() CONSUMER INVALID: %d frames dropped (no consumer registered)"),
-            FramesProcessed);
-    }
-
-    // ARCHITECTURE VERIFICATION: Log end of Poll (Verbose)
-    UE_LOG(LogO3DWebRTCReceiver, Verbose,
-        TEXT("[ARCH] Poll() END: Processed %d frames from %d subjects"),
-        FramesProcessed, PendingFramesBySubject.Num());
-
-    // Check if we're waiting for initial token and it's now available
-    if (bInitialized.Load() && !bConnected.Load() && !bWaitingForToken.Load())
-    {
-        FString CurrentToken;
-        if (TokenManager.IsValid() && TokenManager->GetCurrentToken(CurrentToken) && !CurrentToken.IsEmpty())
+        int32 Dropped = 0;
+        for (const auto& SubjectEntry : AllFramesBySubject)
         {
-            // Token is now available, retry connection
-            if (Token.IsEmpty() || Token != CurrentToken)
-            {
-                Token = CurrentToken;
-                UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("Token now available, attempting connection..."));
-                Start(); // Will use the newly fetched token
-            }
+            Dropped += SubjectEntry.Value.Num();
+        }
+        if (Dropped > 0)
+        {
+            UE_LOG(LogO3DWebRTCReceiver, Verbose, TEXT("Poll(): %d frames dropped (no consumer)"), Dropped);
+            FScopeLock Lock(&StatsMutex);
+            Stats.DroppedFrames += Dropped;
         }
     }
 
-    // Check for token refresh if connected
-    if (bConnected.Load())
     {
-        CheckTokenRefresh();
-    }
+        FScopeLock Lock(&StateMutex);
+        UpdateConnection();
 
-    double LastDataTime = 0.0;
-    {
-        FScopeLock DataLock(&LastDataMutex);
-        LastDataTime = LastDataReceiveTime;
-    }
-
-    if (NoDataReconnectTimeoutSec > 0.0 && (NowSeconds - LastDataTime) > NoDataReconnectTimeoutSec)
-    {
-        RequestReconnect();
+        // The no-data watchdog only applies once a connect has been issued; while waiting for a
+        // token there is nothing to reconnect.
+        if (bConnectIssued && NoDataReconnectTimeoutSec > 0.0 &&
+            (NowSeconds - Link->LastDataReceiveTime.load()) > NoDataReconnectTimeoutSec)
+        {
+            Link->RequestReconnect();
+        }
     }
 
     ApplyPendingAudioFormatIfNeeded();
@@ -755,12 +548,8 @@ int32 FO3DWebRTCReceiver::Poll()
 FO3DTransportStats FO3DWebRTCReceiver::GetStats() const
 {
     FScopeLock Lock(&StatsMutex);
-    // Sync atomic stats into the main stats struct for return (called less frequently)
-    Stats.FramesReceived = AtomicFramesReceived.Load();
-    Stats.FramesSent = AtomicFramesSent.Load();
-    Stats.BytesReceived = AtomicBytesReceived.Load();
-    Stats.BytesSent = AtomicBytesSent.Load();
-    Stats.DroppedFrames = AtomicDroppedFrames.Load();
+    Stats.FramesReceived = Link->FramesReceived.Load();
+    Stats.BytesReceived = Link->BytesReceived.Load();
     return Stats;
 }
 
@@ -768,26 +557,26 @@ void FO3DWebRTCReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ES
 {
     FScopeLock Lock(&StateMutex);
     {
-        FScopeLock SinkLock(&AudioSinkMutex);
-        AudioSink = Sink;
+        FScopeLock SinkLock(&Link->AudioSinkMutex);
+        Link->AudioSink = Sink;
     }
     ActiveAudioConfig = AudioConfig;
 
     if (ClientHandle && bInitialized.Load())
     {
-        LogIfFailed(lk_set_audio_output_format(ClientHandle, ActiveAudioConfig.SampleRate, ActiveAudioConfig.NumChannels),
+        LogIfFailed(Ffi, Ffi.lk_set_audio_output_format(ClientHandle, ActiveAudioConfig.SampleRate, ActiveAudioConfig.NumChannels),
             TEXT("LiveKit update audio output format"));
-        bPendingAudioFormatApply.Store(false);
+        Link->bPendingAudioFormatApply.Store(false);
     }
     else
     {
-        bPendingAudioFormatApply.Store(ActiveAudioConfig.bEnableAudio);
+        Link->bPendingAudioFormatApply.Store(ActiveAudioConfig.bEnableAudio);
     }
 }
 
 bool FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& Config)
 {
-    FString HostAddress = Config.Uri;
+    const FString HostAddress = Config.Uri;
     if (HostAddress.IsEmpty())
     {
         UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC host address not specified"));
@@ -797,21 +586,17 @@ bool FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& Config)
     // Automatically prepend the correct WebSocket protocol prefix
     RoomUrl = WebRTCUtils::PrependWebSocketProtocol(HostAddress);
 
-    // Use StreamId as subject name if provided, otherwise use a default
-    SubjectName = Config.StreamId.IsEmpty() ? TEXT("WebRTCStream") : Config.StreamId;
-
-    // Initialize token manager
-    TokenManager = MakeUnique<FO3DTokenManager>();
+    TokenManager = MakeUnique<FO3DTokenManager>(TokenFetcherFactory);
 
     FO3DTokenConfig TokenConfig;
-    
+
     if (Config.bUseAutoTokenFetch)
     {
-        // Auto-fetch mode
         TokenConfig.Mode = EO3DTokenMode::AutoFetch;
         TokenConfig.EndpointUrl = Config.TokenEndpointUrl;
-        TokenConfig.RoomName = Config.StreamId; // Use StreamId as room name
-        TokenConfig.Identity = FString::Printf(TEXT("receiver-%d"), FPlatformProcess::GetCurrentProcessId());
+        // Both sides read the room from `webrtc.room` (TRF-25); StreamId is not a room name.
+        TokenConfig.RoomName = WebRTCUtils::ResolveRoomName(Config.AdvancedParams);
+        TokenConfig.Identity = WebRTCUtils::MakeParticipantIdentity(TEXT("receiver"));
         TokenConfig.Role = EO3DTokenRole::Subscriber;
         TokenConfig.RefreshLeadTimeSec = Config.TokenRefreshLeadTimeSec;
 
@@ -821,12 +606,17 @@ bool FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& Config)
             return false;
         }
 
-        UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("Token auto-fetch enabled: endpoint=%s, room=%s"),
-            *TokenConfig.EndpointUrl, *TokenConfig.RoomName);
+        if (TokenConfig.RoomName.IsEmpty())
+        {
+            UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Auto-fetch enabled but no room set (transport option '%s')"), WebRTCUtils::RoomOptionKey);
+            return false;
+        }
+
+        UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("Token auto-fetch enabled: endpoint=%s, room=%s, identity=%s"),
+            *TokenConfig.EndpointUrl, *TokenConfig.RoomName, *TokenConfig.Identity);
     }
     else
     {
-        // Manual token mode
         TokenConfig.Mode = EO3DTokenMode::Manual;
         TokenConfig.ManualToken = Config.Token;
 
@@ -845,300 +635,225 @@ bool FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& Config)
         return false;
     }
 
-    // Get initial token if in manual mode
-    if (!Config.bUseAutoTokenFetch)
-    {
-        if (!TokenManager->GetCurrentToken(Token))
-        {
-            UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Failed to get initial token"));
-            return false;
-        }
-    }
-
     const double TimeoutSeconds = FMath::Clamp(ParseDoubleOption(Config.AdvancedParams, ReconnectTimeoutOptionKey, 2.0), 0.0, 300.0);
     NoDataReconnectTimeoutSec = TimeoutSeconds;
 
     return true;
 }
 
-bool FO3DWebRTCReceiver::EnsureTokenAvailable()
-{
-    // Check if we already have a valid token
-    if (TokenManager->GetCurrentToken(Token))
-    {
-        return true;
-    }
-
-    // Need to fetch token
-    if (!bWaitingForToken.Load())
-    {
-        bWaitingForToken.Store(true);
-        TokenFetchStartTime = FPlatformTime::Seconds();
-
-        UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("Fetching token..."));
-
-        // Initiate async token fetch
-        TokenManager->RefreshTokenAsync([this](const FO3DTokenResult& Result)
-        {
-            if (Result.bSuccess && !Result.Token.IsEmpty())
-            {
-                UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("Token fetched successfully"));
-                Token = Result.Token;
-                bWaitingForToken.Store(false);
-            }
-            else
-            {
-                UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Token fetch failed: %s"), *Result.ErrorMessage);
-                bWaitingForToken.Store(false);
-            }
-        });
-    }
-
-    // Check for timeout
-    const double Now = FPlatformTime::Seconds();
-    if (bWaitingForToken.Load() && (Now - TokenFetchStartTime > TokenFetchTimeoutSec))
-    {
-        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Token fetch timed out after %.1f seconds"), TokenFetchTimeoutSec);
-        bWaitingForToken.Store(false);
-        return false;
-    }
-
-    // Still waiting for token
-    return false;
-}
-
-void FO3DWebRTCReceiver::CheckTokenRefresh()
-{
-    if (!TokenManager.IsValid())
-    {
-        return;
-    }
-
-    // Check if token needs refresh
-    if (TokenManager->NeedsRefresh() && !bWaitingForToken.Load())
-    {
-        const int64 TimeUntilExpiry = TokenManager->GetTimeUntilExpiry();
-        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Token expiring soon (in %lld seconds), refreshing..."), TimeUntilExpiry);
-
-        bWaitingForToken.Store(true);
-
-        TokenManager->RefreshTokenAsync([this](const FO3DTokenResult& Result)
-        {
-            if (Result.bSuccess && !Result.Token.IsEmpty())
-            {
-                UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("Token refreshed successfully"));
-                Token = Result.Token;
-                
-                // TODO: Reconnect with new token if already connected
-                // For now, we rely on token having sufficient TTL
-            }
-            else
-            {
-                UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Token refresh failed: %s"), *Result.ErrorMessage);
-            }
-            
-            bWaitingForToken.Store(false);
-        });
-    }
-}
-
-FString FO3DWebRTCReceiver::GetOrCacheSubjectLabel(const char* RawLabel)
-{
-    // Handle null or empty label
-    if (!RawLabel || !*RawLabel)
-    {
-        return TEXT("default");
-    }
-
-    // Compute hash of the C-string
-    const uint32 Hash = FCrc::MemCrc32(RawLabel, static_cast<int32>(FCStringAnsi::Strlen(RawLabel)));
-
-    // Check cache (brief lock)
-    {
-        FScopeLock Lock(&LabelCacheMutex);
-        FString* CachedLabel = SubjectLabelCache.Find(Hash);
-        if (CachedLabel)
-        {
-            return *CachedLabel;
-        }
-    }
-
-    // Not in cache - convert and cache (avoid repeated UTF8→UTF16 conversion)
-    FString NewLabel(RawLabel);
-
-    {
-        FScopeLock Lock(&LabelCacheMutex);
-        // Double-check in case another thread added it
-        FString* CachedLabel = SubjectLabelCache.Find(Hash);
-        if (CachedLabel)
-        {
-            return *CachedLabel;
-        }
-        SubjectLabelCache.Add(Hash, NewLabel);
-    }
-
-    return NewLabel;
-}
-
 bool FO3DWebRTCReceiver::SetupClientHandle()
 {
-    EnsureLiveKitFfiLoaded();
-
     if (ClientHandle)
     {
         return true;
     }
 
-    ClientHandle = lk_client_create();
+    if (Ffi.bUsesLinkedLibrary)
+    {
+        EnsureLiveKitFfiLoaded();
+    }
+
+    ClientHandle = Ffi.lk_client_create();
     if (!ClientHandle)
     {
         UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Failed to create LiveKit client"));
         return false;
     }
 
-    LogIfFailed(lk_set_log_level(ClientHandle, LkLogInfo), TEXT("LiveKit set log level"));
+    LogIfFailed(Ffi, Ffi.lk_set_log_level(ClientHandle, LkLogInfo), TEXT("LiveKit set log level"));
 
-    LogIfFailed(lk_set_connection_callback(ClientHandle, FO3DWebRTCReceiver::OnConnectionState, this),
+    LogIfFailed(Ffi, Ffi.lk_set_connection_callback(ClientHandle, FO3DWebRTCReceiver::OnConnectionState, LinkToken),
         TEXT("LiveKit set connection callback"));
 
-    // DIAGNOSTIC: Log before and after data callback registration
-    UE_LOG(LogO3DWebRTCReceiver, Warning,
-        TEXT("[DIAG] Registering OnDataReceivedEx callback..."));
-    LkResult DataCallbackResult = lk_client_set_data_callback_ex(ClientHandle, FO3DWebRTCReceiver::OnDataReceivedEx, this);
-    if (DataCallbackResult.code == 0)
+    // Register exactly one data callback (TRF-16). The unlabeled callback is only a fallback for
+    // an FFI build without the labeled one; registering both could deliver each packet twice.
+    const LkResult DataCallbackResult = Ffi.lk_client_set_data_callback_ex(ClientHandle, FO3DWebRTCReceiver::OnDataReceivedEx, LinkToken);
+    if (DataCallbackResult.code != 0)
     {
-        UE_LOG(LogO3DWebRTCReceiver, Warning,
-            TEXT("[DIAG] OnDataReceivedEx callback registered successfully"));
-    }
-    else
-    {
-        UE_LOG(LogO3DWebRTCReceiver, Error,
-            TEXT("[DIAG] OnDataReceivedEx callback registration FAILED: code=%d"), DataCallbackResult.code);
-    }
-    LogIfFailed(DataCallbackResult, TEXT("LiveKit set extended data callback"));
-
-    // DIAGNOSTIC: If labeled callback registered successfully, that's good.
-    // But also register the UNLABELED callback as a fallback in case server
-    // sends data to default channel instead of labeled channels.
-    // This helps diagnose if the issue is "labeled channels not supported" vs "other"
-    if (DataCallbackResult.code == 0)
-    {
-        UE_LOG(LogO3DWebRTCReceiver, Warning,
-            TEXT("[DIAG] Also registering OnDataReceived fallback (unlabeled) callback for diagnostics..."));
-        LkResult FallbackResult = lk_client_set_data_callback(ClientHandle, FO3DWebRTCReceiver::OnDataReceived, this);
-        if (FallbackResult.code == 0)
-        {
-            UE_LOG(LogO3DWebRTCReceiver, Warning,
-                TEXT("[DIAG] OnDataReceived fallback callback also registered - will fire if data arrives on default channel"));
-        }
-        else
-        {
-            UE_LOG(LogO3DWebRTCReceiver, Warning,
-                TEXT("[DIAG] OnDataReceived fallback registration also failed: code=%d"), FallbackResult.code);
-        }
+        LogIfFailed(Ffi, DataCallbackResult, TEXT("LiveKit set extended data callback"));
+        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Falling back to the unlabeled data callback; all frames use the '%s' label"), DefaultSubjectLabel);
+        LogIfFailed(Ffi, Ffi.lk_client_set_data_callback(ClientHandle, FO3DWebRTCReceiver::OnDataReceived, LinkToken),
+            TEXT("LiveKit set data callback"));
     }
 
-    // Use new per-subject audio callback with label support
-    UE_LOG(LogO3DWebRTCReceiver, Warning,
-        TEXT("[DIAG] Registering OnAudioReceivedEx callback..."));
-    LkResult AudioCallbackResult = lk_client_set_audio_callback_ex(ClientHandle, FO3DWebRTCReceiver::OnAudioReceivedEx, this);
-    if (AudioCallbackResult.code == 0)
-    {
-        UE_LOG(LogO3DWebRTCReceiver, Warning,
-            TEXT("[DIAG] OnAudioReceivedEx callback registered successfully"));
-    }
-    else
-    {
-        UE_LOG(LogO3DWebRTCReceiver, Error,
-            TEXT("[DIAG] OnAudioReceivedEx callback registration FAILED: code=%d"), AudioCallbackResult.code);
-    }
-    LogIfFailed(AudioCallbackResult, TEXT("LiveKit set extended audio callback with per-subject labels"));
+    LogIfFailed(Ffi, Ffi.lk_client_set_audio_callback_ex(ClientHandle, FO3DWebRTCReceiver::OnAudioReceivedEx, LinkToken),
+        TEXT("LiveKit set extended audio callback"));
 
-    LogIfFailed(lk_set_default_data_labels(ClientHandle, "o3ds-rel", "o3ds-lossy"),
+    LogIfFailed(Ffi, Ffi.lk_set_default_data_labels(ClientHandle, "o3ds-rel", "o3ds-lossy"),
         TEXT("LiveKit set default data labels"));
 
     if (ActiveAudioConfig.bEnableAudio && ActiveAudioConfig.SampleRate > 0 && ActiveAudioConfig.NumChannels > 0)
     {
-        LogIfFailed(lk_set_audio_output_format(ClientHandle, ActiveAudioConfig.SampleRate, ActiveAudioConfig.NumChannels),
+        LogIfFailed(Ffi, Ffi.lk_set_audio_output_format(ClientHandle, ActiveAudioConfig.SampleRate, ActiveAudioConfig.NumChannels),
             TEXT("LiveKit set audio output format"));
     }
 
     return true;
 }
 
-bool FO3DWebRTCReceiver::BeginConnect()
+void FO3DWebRTCReceiver::DestroyClientHandle(const TCHAR* Context)
+{
+    if (!ClientHandle)
+    {
+        return;
+    }
+
+    LogIfFailed(Ffi, Ffi.lk_client_set_data_callback_ex(ClientHandle, nullptr, nullptr), TEXT("LiveKit clear extended data callback"));
+    LogIfFailed(Ffi, Ffi.lk_client_set_data_callback(ClientHandle, nullptr, nullptr), TEXT("LiveKit clear data callback"));
+    LogIfFailed(Ffi, Ffi.lk_client_set_audio_callback_ex(ClientHandle, nullptr, nullptr), TEXT("LiveKit clear audio callback"));
+    LogIfFailed(Ffi, Ffi.lk_set_connection_callback(ClientHandle, nullptr, nullptr), TEXT("LiveKit clear connection callback"));
+
+    LogIfFailed(Ffi, Ffi.lk_disconnect(ClientHandle), Context);
+
+    Ffi.lk_client_destroy(ClientHandle);
+    ClientHandle = nullptr;
+}
+
+bool FO3DWebRTCReceiver::BeginConnect(const FString& InToken, uint64 TokenGeneration)
 {
     if (!ClientHandle)
     {
         return false;
     }
 
-    UE_LOG(LogO3DWebRTCReceiver, Warning,
-        TEXT("[DIAG] BeginConnect: URL='%s' Token='%s' (first 20 chars)"),
-        *RoomUrl, *Token.Left(20));
-
-    LkResult Result = lk_connect_with_role_async(
-        ClientHandle,
-        TCHAR_TO_UTF8(*RoomUrl),
-        TCHAR_TO_UTF8(*Token),
-        LkRoleSubscriber);
+    // Converters live across the FFI call (TRF-2). The token is never logged.
+    const FTCHARToUTF8 UrlUtf8(*RoomUrl);
+    const FTCHARToUTF8 TokenUtf8(*InToken);
+    const LkResult Result = Ffi.lk_connect_with_role_async(ClientHandle, UrlUtf8.Get(), TokenUtf8.Get(), LkRoleSubscriber);
 
     if (Result.code != 0)
     {
-        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Failed to connect: %s"), *FromAnsi(Result.message));
-        if (Result.message)
-        {
-            lk_free_str(const_cast<char*>(Result.message));
-        }
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Failed to connect (code=%d): %s"), Result.code, *Ffi.TakeMessage(Result));
+        NextConnectAttemptTime = FPlatformTime::Seconds() + ConnectRetryIntervalSec;
         return false;
     }
 
-    UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("[DIAG] BeginConnect succeeded, awaiting async connection..."));
+    bConnectIssued = true;
+    AppliedTokenGeneration = TokenGeneration;
+    Link->LastDataReceiveTime.store(FPlatformTime::Seconds());
+    Link->bReconnectPending.Store(false);
+
     UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver connecting..."));
     return true;
 }
 
-void FO3DWebRTCReceiver::RequestReconnect(bool bForce)
+bool FO3DWebRTCReceiver::UpdateConnection()
 {
-    if (!bForce && NoDataReconnectTimeoutSec <= 0.0)
+    // Called with StateMutex held.
+    if (!bInitialized.Load() || !bConnectRequested || !TokenManager.IsValid() || !ClientHandle)
+    {
+        return true;
+    }
+
+    const double Now = FPlatformTime::Seconds();
+
+    FString CurrentToken;
+    uint64 Generation = 0;
+    const bool bHaveToken = TokenManager->GetCurrentToken(CurrentToken, &Generation);
+    if (Generation != ObservedTokenGeneration)
+    {
+        ObservedTokenGeneration = Generation;
+        NextTokenFetchTime = 0.0;
+    }
+
+    if (!bConnectIssued)
+    {
+        if (bHaveToken)
+        {
+            if (Now < NextConnectAttemptTime)
+            {
+                return true;
+            }
+            return BeginConnect(CurrentToken, Generation);
+        }
+
+        MaybeFetchToken(Now);
+        return true;
+    }
+
+    MaybeFetchToken(Now);
+    if (bHaveToken && Generation != AppliedTokenGeneration)
+    {
+        ApplyRefreshedToken(CurrentToken, Generation);
+    }
+    return true;
+}
+
+void FO3DWebRTCReceiver::MaybeFetchToken(double NowSeconds)
+{
+    if (!TokenManager->IsAutoFetch())
     {
         return;
     }
 
-    if (!bReconnectPending.Load())
+    if (TokenManager->IsRefreshInProgress())
     {
-        bReconnectPending.Store(true);
-        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("WebRTC receiver scheduling reconnect (force=%d)"), bForce ? 1 : 0);
+        // The fetch timeout is enforced here, where it is checked every poll (TRF-24).
+        if (NowSeconds - TokenFetchStartTime > TokenFetchTimeoutSec)
+        {
+            UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Token fetch timed out after %.1f seconds"), TokenFetchTimeoutSec);
+            TokenManager->CancelRefresh();
+            NextTokenFetchTime = NowSeconds + TokenFetchRetryIntervalSec;
+        }
+        return;
     }
+
+    if (NowSeconds < NextTokenFetchTime || !TokenManager->NeedsRefresh())
+    {
+        return;
+    }
+
+    UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("Fetching token..."));
+    TokenFetchStartTime = NowSeconds;
+    NextTokenFetchTime = NowSeconds + TokenFetchRetryIntervalSec;
+    TokenManager->RefreshTokenAsync();
+}
+
+void FO3DWebRTCReceiver::ApplyRefreshedToken(const FString& InToken, uint64 TokenGeneration)
+{
+    AppliedTokenGeneration = TokenGeneration;
+
+    const FTCHARToUTF8 TokenUtf8(*InToken);
+    const LkResult Result = Ffi.lk_refresh_token(ClientHandle, TokenUtf8.Get());
+    if (Result.code == 0)
+    {
+        UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("Applied refreshed LiveKit token"));
+        return;
+    }
+
+    // livekit_ffi.h: "If not supported, returns error; fallback is disconnect + reconnect."
+    // The reconnect path recreates the client and connects with the current token.
+    UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("lk_refresh_token failed (code=%d): %s. Reconnecting with the new token."),
+        Result.code, *Ffi.TakeMessage(Result));
+    Link->RequestReconnect();
 }
 
 void FO3DWebRTCReceiver::ProcessReconnectIfNeeded()
 {
-    if (!bReconnectPending.Load())
+    if (!Link->bReconnectPending.Load())
     {
         return;
     }
 
     FScopeLock Lock(&StateMutex);
-    if (!bReconnectPending.Load())
+    if (!Link->bReconnectPending.Exchange(false))
     {
         return;
     }
 
-    bReconnectPending.Store(false);
-
-    if (ClientHandle)
+    if (!bInitialized.Load() || !bConnectRequested)
     {
-        lk_client_set_data_callback_ex(ClientHandle, nullptr, nullptr);
-        lk_client_set_data_callback(ClientHandle, nullptr, nullptr);
-        lk_client_set_audio_callback_ex(ClientHandle, nullptr, nullptr);
-        lk_set_connection_callback(ClientHandle, nullptr, nullptr);
-        LogIfFailed(lk_disconnect(ClientHandle), TEXT("LiveKit reconnect disconnect"));
-        lk_client_destroy(ClientHandle);
-        ClientHandle = nullptr;
+        return;
     }
 
-    bConnected.Store(false);
+    DestroyClientHandle(TEXT("LiveKit reconnect disconnect"));
+    Link->bConnected.Store(false);
+    bConnectIssued = false;
+
+    {
+        FScopeLock PendingLock(&Link->PendingFramesMutex);
+        Link->PendingFramesBySubject.Reset();
+    }
 
     if (!SetupClientHandle())
     {
@@ -1146,54 +861,32 @@ void FO3DWebRTCReceiver::ProcessReconnectIfNeeded()
         return;
     }
 
-    if (!BeginConnect())
-    {
-        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC receiver failed to reconnect; will retry"));
-        bReconnectPending.Store(true);
-        return;
-    }
-
-    {
-        FScopeLock PendingLock(&PendingFramesMutex);
-        PendingFramesBySubject.Reset();
-    }
-
-    {
-        FScopeLock DataLock(&LastDataMutex);
-        LastDataReceiveTime = FPlatformTime::Seconds();
-    }
+    // Connect now if a token is available; otherwise UpdateConnection() connects once one is.
+    NextConnectAttemptTime = 0.0;
+    UpdateConnection();
 
     UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver reconnect initiated"));
 }
 
 void FO3DWebRTCReceiver::ApplyPendingAudioFormatIfNeeded()
 {
-    if (!bPendingAudioFormatApply.Load())
+    if (!Link->bPendingAudioFormatApply.Load())
     {
         return;
     }
 
-    LkClientHandle* LocalHandle = nullptr;
-    FO3DTransportAudioConfig AudioConfigCopy;
-    {
-        FScopeLock Lock(&StateMutex);
-        LocalHandle = ClientHandle;
-        AudioConfigCopy = ActiveAudioConfig;
-    }
-
-    if (!LocalHandle)
+    FScopeLock Lock(&StateMutex);
+    if (!ClientHandle)
     {
         return;
     }
 
-    if (AudioConfigCopy.bEnableAudio && AudioConfigCopy.SampleRate > 0 && AudioConfigCopy.NumChannels > 0)
+    if (ActiveAudioConfig.bEnableAudio && ActiveAudioConfig.SampleRate > 0 && ActiveAudioConfig.NumChannels > 0)
     {
-        LogIfFailed(lk_set_audio_output_format(LocalHandle, AudioConfigCopy.SampleRate, AudioConfigCopy.NumChannels),
+        LogIfFailed(Ffi, Ffi.lk_set_audio_output_format(ClientHandle, ActiveAudioConfig.SampleRate, ActiveAudioConfig.NumChannels),
             TEXT("LiveKit reapply audio output format"));
-        bPendingAudioFormatApply.Store(false);
-        return;
     }
 
-    // Audio disabled (or invalid config) – nothing to apply.
-    bPendingAudioFormatApply.Store(false);
+    // Audio disabled (or invalid config): nothing to apply.
+    Link->bPendingAudioFormatApply.Store(false);
 }
