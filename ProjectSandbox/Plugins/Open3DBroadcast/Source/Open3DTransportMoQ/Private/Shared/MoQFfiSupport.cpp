@@ -2,7 +2,7 @@
 #include "HAL/PlatformProcess.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
-#include "Shared/MoQFfiApi.h"
+#include "MoQFfiApi.h"
 #include "moq_ffi.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogMoQFfiSupport, Log, All);

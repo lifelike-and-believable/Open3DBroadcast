@@ -1,6 +1,6 @@
 // Copyright (c) Open3DStream Contributors
 
-#include "Shared/MoQFfiApi.h"
+#include "MoQFfiApi.h"
 
 #include "Async/Async.h"
 

@@ -63,6 +63,7 @@ namespace WebRTCUtils
      *
      * Examples:
      *   "127.0.0.1" → "ws://127.0.0.1"
+     *   "127.0.0.1:7880" → "ws://127.0.0.1:7880" (the port is ignored when classifying the host)
      *   "localhost" → "ws://localhost"
      *   "0.0.0.0" → "ws://0.0.0.0"
      *   "livkit.example.com" → "wss://livkit.example.com"
@@ -82,10 +83,27 @@ namespace WebRTCUtils
             return HostAddress;
         }
 
-        // Determine if this is a localhost connection
-        const bool bIsLocalhost = HostAddress.Equals(TEXT("127.0.0.1"), ESearchCase::IgnoreCase) ||
-                                  HostAddress.Equals(TEXT("0.0.0.0"), ESearchCase::IgnoreCase) ||
-                                  HostAddress.Equals(TEXT("localhost"), ESearchCase::IgnoreCase);
+        // Determine if this is a localhost connection. Compare the host part only: an address
+        // usually carries a port ("127.0.0.1:7880", LiveKit's dev default) and may carry a path.
+        FString Host = HostAddress;
+        int32 SeparatorIndex = INDEX_NONE;
+        if (Host.FindChar(TEXT('/'), SeparatorIndex))
+        {
+            Host.LeftInline(SeparatorIndex);
+        }
+        if (!Host.StartsWith(TEXT("[")) && Host.FindLastChar(TEXT(':'), SeparatorIndex))
+        {
+            Host.LeftInline(SeparatorIndex); // "host:port"; bracketed IPv6 keeps its colons
+        }
+        else if (Host.StartsWith(TEXT("[")) && Host.FindChar(TEXT(']'), SeparatorIndex))
+        {
+            Host.LeftInline(SeparatorIndex + 1); // "[::1]:7880" -> "[::1]"
+        }
+
+        const bool bIsLocalhost = Host.Equals(TEXT("127.0.0.1"), ESearchCase::IgnoreCase) ||
+                                  Host.Equals(TEXT("0.0.0.0"), ESearchCase::IgnoreCase) ||
+                                  Host.Equals(TEXT("localhost"), ESearchCase::IgnoreCase) ||
+                                  Host.Equals(TEXT("[::1]"), ESearchCase::IgnoreCase);
 
         // Use ws:// for localhost, wss:// for everything else
         const FString Protocol = bIsLocalhost ? TEXT("ws://") : TEXT("wss://");

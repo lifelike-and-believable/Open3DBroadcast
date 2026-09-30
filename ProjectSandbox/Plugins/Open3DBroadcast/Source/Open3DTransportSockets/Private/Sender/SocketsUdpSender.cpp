@@ -161,6 +161,12 @@ bool FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& Config)
 bool FO3DSocketsUdpSender::Start()
 {
 	DestroySocket();
+	// Stop() drops SocketSubsystem; fetch it again so Start() after Stop() works without
+	// Initialize(), as it does for TCP (TRB-13; WP-T2 conformance Lifecycle.RestartAfterStop).
+	if (!SocketSubsystem && RemoteAddr.IsValid())
+	{
+		SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+	}
 	PublishState->Gate->Open();
 	if (!CreateSocket())
 	{

@@ -4,7 +4,7 @@
 #if O3D_WITH_TRANSPORT_MOQ
 
 #include "Shared/MoQAsyncDispatcher.h"
-#include "Shared/MoQFfiApi.h"
+#include "MoQFfiApi.h"
 #include "Shared/MoQFfiSupport.h"
 #include "Shared/MoQHelpers.h"
 #include "Sender/MoQSender.h"

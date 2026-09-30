@@ -574,17 +574,15 @@ transport in this document — it is not a WebRTC feature.
 
 ## 8. Testing & Validation
 
-All transports include test files:
+Transport tests live in the editor-only `Open3DBroadcastTests` module (`Source/Open3DBroadcastTests/Private/Transport/<Name>/`, ADR 0006), except WebRTC, whose tests stay in its module until the add-on's test module exists (WP-F11). Every transport also runs the conformance suite, `Open3DBroadcast.Conformance.<Transport>.<Case>` (lifecycle, rejected sends, backpressure, concurrent sends, monotonic stats, byte-exact round trip).
 
 | Transport | Test File | Coverage |
 |-----------|-----------|----------|
-| **Loopback** | `LoopbackAudioTests.cpp` | Audio roundtrip |
-| **NNG** | `NngTransportTests.cpp` | Connection patterns |
+| **Loopback** | `LoopbackAudioTests.cpp`, `LoopbackLifetimeTests.cpp` | Audio roundtrip, start/stop lifetime |
+| **NNG** | `NngTransportTests.cpp`, `NngLifetimeTests.cpp` | Pub/sub round trip, queue limit, receive demux, start/stop lifetime |
 | **Sockets** | `SocketsAudioTests.cpp`, `SocketsLifetimeTests.cpp`, `SocketsTcpTransportTests.cpp` | TCP/UDP audio, start/stop lifetime, TCP burst, slow reader, reconnect, keepalive (framing parser: core `test/tcp_stream_parser_tests.cpp`) |
-| **WebRTC** | `WebRTCTransportTests.cpp`, `WebRTCPerSubjectTests.cpp` | Transport + per-subject routing |
-| **MoQ** | `MoQSenderTests.cpp`, `MoQReceiverTests.cpp`, `MoQSessionWrapperTests.cpp`, `MoQTrackNamespaceTests.cpp`, `MoQCloudflareRelayTests.cpp` | Session lifecycle, track naming, relay integration |
-
-MoQ currently has the broadest automation coverage of any transport.
+| **WebRTC** | `WebRTCTransportTests.cpp`, `WebRTCPerSubjectTests.cpp`, `WebRTCFunctionalTests.cpp` | Transport + per-subject routing, token fetch |
+| **MoQ** | `MoQSenderTests.cpp`, `MoQReceiverTests.cpp`, `MoQSessionWrapperTests.cpp`, `MoQTrackNamespaceTests.cpp`, `MoQFunctionalTests.cpp`, `MoQLifetimeTests.cpp` (fake moq-ffi); `Network/MoQ/MoQRelayNetworkTests.cpp` (real relay, opt-in) | Session lifecycle, track naming, reconnect and backoff, relay integration |
 
 **Common Test Patterns**:
 - Initialize sender/receiver

@@ -97,8 +97,7 @@ Run automation tests using the provided script:
 The CI/CD workflows use this sandbox project for:
 
 1. **Build Validation** - Ensures the plugin loads correctly
-2. **Automation Tests** - Runs headless tests (optional)
-3. **Gauntlet Tests** - Comprehensive integration tests (optional)
+2. **Automation Tests** - Runs the `Open3DBroadcast` automation tests from the editor-only `Open3DBroadcastTests` module headless
 
 See `.github/workflows/` for workflow configurations.
 

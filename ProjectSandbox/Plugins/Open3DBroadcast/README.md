@@ -24,6 +24,10 @@ A modular, self-contained Unreal Engine plugin for Open3DStream broadcasting and
 - **Open3DTransportNNG**: NNG (nanomsg-next-generation) messaging
 - **Open3DTransportWebRTC**: WebRTC-based streaming with audio support
 
+### Test Module
+
+- **Open3DBroadcastTests** (editor only, Win64, left out of the Fab package): the `Open3DBroadcast.*` automation tests, fake transports and the transport conformance suite (ADR 0006). Internet tests (`Open3DBroadcast.Network.*`) register only when `O3DB_NETWORK_TESTS=1`.
+
 ## Third-Party Dependencies
 
 All third-party libraries are pre-compiled and included in the plugin:

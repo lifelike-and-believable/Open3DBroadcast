@@ -143,7 +143,7 @@ Connection state changes are broadcast via delegates on the game thread.
 
 ## Testing Seam
 
-All moq-ffi calls go through `FMoQFfiApi` (`Private/Shared/MoQFfiApi.h`), a per-instance function table (ADR 0006, option F2). Production code uses `FMoQFfiApi::GetProduction()`. `FMoQSessionWrapper`, `FO3DMoQSender` and `FO3DMoQReceiver` each have a constructor that takes a table, and the sender and receiver also take a clock and a jitter seed, so tests run without a relay or sleeps (see `Private/Tests/MoQFakeFfi.h`).
+All moq-ffi calls go through `FMoQFfiApi` (`Public/MoQFfiApi.h`), a per-instance function table (ADR 0006, option F2). Production code uses `FMoQFfiApi::GetProduction()`. `FMoQSessionWrapper`, `FO3DMoQSender` and `FO3DMoQReceiver` each have a constructor that takes a table, and the sender and receiver also take a clock and a jitter seed, so tests run without a relay or sleeps. Tests live in the `Open3DBroadcastTests` module and reach the transport only through `Public/Testing/MoQTesting.h` (`CreateSenderForTest`, `CreateReceiverForTest`, the `FMoQTestSession` façade); the fake table is `Open3DBroadcastTests/Private/Transport/MoQ/MoQFakeFfi.h`.
 
 ## See Also
 

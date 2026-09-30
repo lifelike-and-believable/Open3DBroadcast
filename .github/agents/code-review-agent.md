@@ -241,7 +241,7 @@ Evaluate test quality and coverage:
 - [ ] Coverage is adequate (not necessarily 100%)
 
 **4. Test Framework Usage**
-- [ ] Correct framework used (C++ unit, Unreal automation, Gauntlet)
+- [ ] Correct framework used (C++ unit, Unreal automation in `Open3DBroadcastTests`)
 - [ ] Framework features used appropriately
 - [ ] Test helpers used where available
 - [ ] Mock objects used correctly

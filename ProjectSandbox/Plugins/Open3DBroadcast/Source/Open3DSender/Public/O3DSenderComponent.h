@@ -435,10 +435,9 @@ private:
 		TArray<FTransform>& OutLocalTransforms,
 		TArray<int32>* OutResolvedParents);
 
-	// Test-only white-box access. Unconditional: befriending an undefined struct is harmless, and the
-	// test files use WITH_DEV_AUTOMATION_TESTS, which can be on when WITH_AUTOMATION_TESTS is not.
-	friend struct FO3DSenderComponentTestHelper;
-	friend struct FO3DSenderWireTestAccess;
+	// Test-only white-box access, defined in Public/Testing/O3DSenderTesting.h (WP-T2). Unconditional:
+	// a friend declaration must not depend on WITH_DEV_AUTOMATION_TESTS.
+	friend struct FO3DSenderComponentTestAccess;
 
 	void EnsureValidTransportName();
 
