@@ -1,9 +1,20 @@
 name: Open3DBroadcast Plugin CI
 
+# Which jobs run when (CI-9; details in Build/README.md, "CI"):
+#   - Every PR commit, drafts included: "Detect plugin-relevant changes"
+#     (GitHub-hosted, seconds). core-tests.yml also runs on every PR.
+#   - Non-draft PRs, pushes to develop/main and manual runs: "UE build and
+#     tests" on the single self-hosted UE runner. Drafts skip it so work in
+#     progress does not queue the runner; mark the PR ready for review, or
+#     run this workflow by hand on the branch (Actions > Run workflow), to
+#     get the UE result for a draft.
+#   All jobs are skipped when a change touches nothing the plugin build
+#   depends on (see the path filter below).
+
 on:
   pull_request:
     branches: [ develop, main ]
-    types: [ opened, synchronize, ready_for_review ]
+    types: [ opened, synchronize, reopened, ready_for_review ]
   push:
     branches: [ develop, main ]
   workflow_dispatch:
@@ -24,7 +35,7 @@ env:
 
 jobs:
   changes:
-    name: Detect non-doc changes
+    name: Detect plugin-relevant changes
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.filter.outputs.code }}
@@ -33,25 +44,38 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Filter paths (docs vs code)
+      - name: Filter paths
         id: filter
         uses: dorny/paths-filter@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # The plugin compiles the o3ds core from source: Sync-O3DSCore.ps1
+          # configures and builds the root CMakeLists.txt, which pulls in
+          # src/, thirdparty/ (submodules), apps/ and plugins/mobu/. A change
+          # to any of them can break the plugin build.
           filters: |
             code:
               - 'Build/**'
+              - 'src/**'
+              - 'thirdparty/**'
+              - 'CMakeLists.txt'
+              - '*.cmake'
+              - 'apps/**'
+              - 'plugins/mobu/**'
               - 'ProjectSandbox/ProjectSandbox.uproject'
               - 'ProjectSandbox/Source/**'
               - 'ProjectSandbox/Plugins/Open3DBroadcast/**'
+              - '.gitmodules'
               - '.github/workflows/open3dbroadcast-plugin-ci.yml'
 
   build-and-test:
+    name: UE build and tests
     needs: changes
     if: >-
       (github.event_name == 'workflow_dispatch') ||
       (needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false))
     runs-on: [ self-hosted, ue5, windows ]
+    timeout-minutes: 90
 
     steps:
       - name: Checkout (full)
@@ -132,14 +156,14 @@ jobs:
         run: |
           $pluginDir = Join-Path $PWD "${{ env.PLUGIN_PATH }}"
           $upluginPath = Join-Path $pluginDir "${{ env.PLUGIN_NAME }}.uplugin"
-          
+
           if (!(Test-Path -LiteralPath $pluginDir)) {
             throw "Plugin directory not found: $pluginDir"
           }
           if (!(Test-Path -LiteralPath $upluginPath)) {
             throw "Plugin .uplugin file not found: $upluginPath"
           }
-          
+
           "plugin_dir=$pluginDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "uplugin_path=$upluginPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Plugin directory: $pluginDir"
