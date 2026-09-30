@@ -1,20 +1,25 @@
 // Copyright (c) Open3DStream Contributors
 //
-// Fake moq-ffi for WP-S8 tests (ADR 0006 option F2). It builds an FMoQFfiApi whose functions
-// act on per-instance state, so tests need no relay, no network and no global mutation.
-// WP-T2 moves this next to the conformance suite and generalises it.
+// Fake moq-ffi (ADR 0006 option F2). It builds an FMoQFfiApi whose functions act on
+// per-instance state, so tests need no relay, no network and no global mutation. The MoQ
+// transport is reached through Testing/MoQTesting.h (CreateSenderForTest and friends).
+//
+// WP-T2 generalised it for the conformance suite: publishers remember their namespace, track and
+// delivery mode, and moq_publish_data delivers the bytes to every live subscriber on the same
+// namespace and track, on the publishing thread, as a relay would. That gives the MoQ profile an
+// offline sender-to-receiver round trip.
 
 #pragma once
 
-#if WITH_DEV_AUTOMATION_TESTS
+#if WITH_DEV_AUTOMATION_TESTS && O3D_WITH_TRANSPORT_MOQ
 
 #include "CoreMinimal.h"
 #include "HAL/CriticalSection.h"
 #include "HAL/PlatformTLS.h"
 #include "HAL/UnrealMemory.h"
 #include "Misc/ScopeLock.h"
-#include "Shared/MoQAsyncDispatcher.h"
-#include "Shared/MoQFfiApi.h"
+#include "MoQFfiApi.h"
+#include "Testing/MoQTesting.h"
 
 #include <cstring>
 
@@ -42,6 +47,15 @@ public:
 		TArray<FString> Announced;
 	};
 
+	struct FPublisher
+	{
+		int32 ClientId = 0;
+		FString Namespace;
+		FString Track;
+		MoqDeliveryMode DeliveryMode = MOQ_DELIVERY_STREAM;
+		bool bDestroyed = false;
+	};
+
 	struct FSubscriber
 	{
 		int32 ClientId = 0;
@@ -62,6 +76,8 @@ public:
 	/** When true, LaunchBlocking stores the work instead of running it: a connect that never returns. */
 	bool bHoldBlockingWork = false;
 	bool bSubscribeFails = false;
+	/** When true (default), moq_publish_data hands the bytes to matching live subscribers. */
+	bool bRoutePublishedData = true;
 
 	FMoQFfiApiRef MakeApi()
 	{
@@ -129,7 +145,7 @@ public:
 			}
 			return MoqResult{MOQ_OK, nullptr};
 		};
-		Api->CreatePublisherEx = [Weak](MoqClient* Client, const char*, const char*, MoqDeliveryMode) -> MoqPublisher*
+		Api->CreatePublisherEx = [Weak](MoqClient* Client, const char* Namespace, const char* Track, MoqDeliveryMode DeliveryMode) -> MoqPublisher*
 		{
 			const TSharedPtr<FMoQFakeFfi, ESPMode::ThreadSafe> Self = Weak.Pin();
 			if (!Self.IsValid())
@@ -138,24 +154,59 @@ public:
 			}
 			FScopeLock Lock(&Self->Mutex);
 			++Self->PublishersCreated;
-			// Any unique non-null address works; the fake never dereferences it.
-			return reinterpret_cast<MoqPublisher*>(static_cast<UPTRINT>(0x1000 + Self->PublishersCreated));
+			FPublisher& Publisher = Self->Publishers.AddDefaulted_GetRef();
+			const FClient* Found = Self->FindClient(Client);
+			Publisher.ClientId = Found ? Found->Id : 0;
+			Publisher.Namespace = Namespace ? UTF8_TO_TCHAR(Namespace) : TEXT("");
+			Publisher.Track = Track ? UTF8_TO_TCHAR(Track) : TEXT("");
+			Publisher.DeliveryMode = DeliveryMode;
+			// 0x1000 + index + 1: unique, non-null and never dereferenced.
+			return reinterpret_cast<MoqPublisher*>(static_cast<UPTRINT>(0x1000 + Self->Publishers.Num()));
 		};
-		Api->PublisherDestroy = [Weak](MoqPublisher*)
+		Api->PublisherDestroy = [Weak](MoqPublisher* Publisher)
 		{
 			if (const TSharedPtr<FMoQFakeFfi, ESPMode::ThreadSafe> Self = Weak.Pin())
 			{
 				FScopeLock Lock(&Self->Mutex);
 				++Self->PublishersDestroyed;
+				const int32 Index = static_cast<int32>(reinterpret_cast<UPTRINT>(Publisher)) - 0x1001;
+				if (Self->Publishers.IsValidIndex(Index))
+				{
+					Self->Publishers[Index].bDestroyed = true;
+				}
 			}
 		};
-		Api->PublishData = [Weak](MoqPublisher*, const uint8_t*, size_t NumBytes, MoqDeliveryMode) -> MoqResult
+		Api->PublishData = [Weak](MoqPublisher* Publisher, const uint8_t* Data, size_t NumBytes, MoqDeliveryMode) -> MoqResult
 		{
-			if (const TSharedPtr<FMoQFakeFfi, ESPMode::ThreadSafe> Self = Weak.Pin())
+			const TSharedPtr<FMoQFakeFfi, ESPMode::ThreadSafe> Self = Weak.Pin();
+			if (!Self.IsValid())
+			{
+				return MoqResult{MOQ_OK, nullptr};
+			}
+
+			TArray<TPair<MoqDataCallback, void*>> Targets;
 			{
 				FScopeLock Lock(&Self->Mutex);
 				++Self->PublishCalls;
 				Self->PublishedBytes += static_cast<int64>(NumBytes);
+				const int32 Index = static_cast<int32>(reinterpret_cast<UPTRINT>(Publisher)) - 0x1001;
+				if (Self->bRoutePublishedData && Self->Publishers.IsValidIndex(Index))
+				{
+					const FPublisher& Source = Self->Publishers[Index];
+					for (const FSubscriber& Sub : Self->Subscribers)
+					{
+						if (!Sub.bDestroyed && Sub.Callback && Sub.Namespace == Source.Namespace && Sub.Track == Source.Track)
+						{
+							Targets.Emplace(Sub.Callback, Sub.UserData);
+						}
+					}
+				}
+			}
+			// Outside the lock, on the publishing thread, like a relay delivering to moq-ffi's
+			// own callback threads.
+			for (const TPair<MoqDataCallback, void*>& Target : Targets)
+			{
+				Target.Key(Target.Value, Data, NumBytes);
 			}
 			return MoqResult{MOQ_OK, nullptr};
 		};
@@ -361,9 +412,25 @@ public:
 	int32 GetBlockingLaunches() const { FScopeLock Lock(&Mutex); return BlockingLaunches; }
 	int32 GetHeldWorkCount() const { FScopeLock Lock(&Mutex); return HeldWork.Num(); }
 	int32 GetSubscribeCalls() const { FScopeLock Lock(&Mutex); return SubscribeCalls; }
+	/** "Namespace|Track" of every subscriber that has not been destroyed. */
+	TArray<FString> GetLiveSubscriptions() const
+	{
+		FScopeLock Lock(&Mutex);
+		TArray<FString> Out;
+		for (const FSubscriber& Sub : Subscribers)
+		{
+			if (!Sub.bDestroyed)
+			{
+				Out.Add(Sub.Namespace + TEXT("|") + Sub.Track);
+			}
+		}
+		return Out;
+	}
 	int32 GetPublishersCreated() const { FScopeLock Lock(&Mutex); return PublishersCreated; }
 	int32 GetPublishersDestroyed() const { FScopeLock Lock(&Mutex); return PublishersDestroyed; }
 	int32 GetPublishCalls() const { FScopeLock Lock(&Mutex); return PublishCalls; }
+	/** Every publisher created so far, including destroyed ones, in creation order. */
+	TArray<FPublisher> GetPublishers() const { FScopeLock Lock(&Mutex); return Publishers; }
 	int32 GetStringsAllocated() const { FScopeLock Lock(&Mutex); return StringsAllocated; }
 	int32 GetStringsFreed() const { FScopeLock Lock(&Mutex); return StringsFreed; }
 	int32 GetLastErrorCalls() const { FScopeLock Lock(&Mutex); return LastErrorCalls; }
@@ -475,6 +542,7 @@ private:
 	mutable FCriticalSection Mutex;
 	TArray<TUniquePtr<FClient>> Clients;
 	TArray<FSubscriber> Subscribers;
+	TArray<FPublisher> Publishers;
 	TArray<FString> AnnounceLog;
 	TArray<TUniqueFunction<void()>> HeldWork;
 	/** Per-thread last error; a returned pointer stays valid until that thread's next error. */
@@ -496,7 +564,7 @@ namespace MoQFakeTest
 	/** Delivers queued FFI callbacks on the game thread, as the dispatcher's ticker would. */
 	inline int32 Pump()
 	{
-		return FMoQAsyncDispatcher::Get().DrainOnGameThread();
+		return MoQTesting::PumpDispatcher();
 	}
 
 	/** A manual clock: tests advance it instead of sleeping. */
@@ -515,4 +583,4 @@ namespace MoQFakeTest
 	};
 }
 
-#endif // WITH_DEV_AUTOMATION_TESTS
+#endif // WITH_DEV_AUTOMATION_TESTS && O3D_WITH_TRANSPORT_MOQ
