@@ -5,12 +5,17 @@
 #include "../Shared/SocketsTransportCommon.h"
 #include "O3DAudioFrameCodec.h"
 
+#include "o3ds/tcp_stream_parser.h"
+
 class FSocket;
 class ISocketSubsystem;
 
 /**
  * TCP receiver - client mode (connects to sender).
- * Adapted from UDP receiver pattern for reliability.
+ *
+ * Everything runs on the thread that calls Poll() (the game thread): the socket is
+ * non-blocking and each Poll() does bounded work. Framing is parsed by the core
+ * O3DS::TcpStreamParser (WP-S6).
  */
 class FO3DSocketsTcpReceiver : public IOpen3DReceiver
 {
@@ -27,22 +32,29 @@ public:
 	virtual bool SupportsAudio() const override;
 	virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
 
+	/** True while a TCP connection to the sender is established. For tests and diagnostics. */
+	bool IsConnected() const { return Socket != nullptr && State == EState::Connected; }
+
+	/** Number of connections established since Start(). For tests and diagnostics. */
+	int32 GetConnectCount() const { return ConnectCount; }
+
 private:
 	enum class EState : uint8
 	{
 		Disconnected,
 		Connecting,
-		Connected,
-		ReadingHeader,
-		ReadingPayload
+		Connected
 	};
 
 	bool ConnectToServer();
 	void DisconnectSocket();
 	void TickConnection();
-	bool ReadFramed(FSocket* InSocket, EState& State, TArray<uint8>& Buffer, int32& InOutBytesBuffered, int32& InOutExpectedPayloadSize, TArray<uint8>& OutFrame);
+	/** Returns false when the peer closed the connection or it failed. */
+	bool ReadAvailable(int32& InOutFramesProcessed, int64& InOutBytesRead);
 	bool ProcessReceivedPayload(const uint8* Data, int32 Size);
 	bool ProcessAudioPayload(O3DS::EUnifiedCodec Codec, const uint8* Payload, int32 PayloadSize);
+	void ReportParserStats();
+	double GetBackoffSeconds() const;
 
 private:
 	FO3DTransportConfig ActiveConfig;
@@ -51,6 +63,7 @@ private:
 
 	ISocketSubsystem* SocketSubsystem = nullptr;
 	FSocket* Socket = nullptr;
+	bool bRunning = false;
 
 	FString RemoteHost;
 	int32 RemotePort = 0;
@@ -58,17 +71,24 @@ private:
 
 	EState State = EState::Disconnected;
 
-	TArray<uint8> ReceiveBuffer;
-	TArray<uint8> PayloadExtractBuffer; // Reused extraction buffer to avoid per-frame allocations
-	int32 BytesBuffered = 0;
-	int32 ExpectedPayloadSize = 0;
+	/** Socket-free framing (TRB-1, TRB-8, TRB-9). Reset on every new connection. */
+	O3DS::TcpStreamParser Parser;
+	uint64 ReportedDiscardedBytes = 0;
+	uint64 ReportedRejectedFrames = 0;
+	bool bWarnedResyncThisConnection = false;
 
 	double LastConnectAttempt = 0.0;
+	double ConnectStartTime = 0.0;
 	int32 ConnectBackoffAttempt = 0;
+	int32 ConnectCount = 0;
+	bool bReceivedOnThisConnection = false;
 
 	double LastDataReceiveTime = 0.0;
 
 	double ConnectionTimeoutSeconds = 5.0;
+	double ConnectTimeoutSeconds = 5.0;
+	double InitialBackoffSeconds = 0.5;
+	double MaxBackoffSeconds = 5.0;
 
 	TWeakPtr<ISerializedFrameConsumer> Consumer;
 	TWeakPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
