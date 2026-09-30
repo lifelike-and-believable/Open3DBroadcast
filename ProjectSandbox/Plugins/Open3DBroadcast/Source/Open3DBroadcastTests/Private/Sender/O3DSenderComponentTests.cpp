@@ -1,47 +1,37 @@
-#include "O3DSenderComponent.h"
+// Copyright (c) Open3DStream Contributors
+//
+// Sender component helpers (SND-5 rate limiter, bone-space conversion). White-box access through
+// Open3DSender/Public/Testing/O3DSenderTesting.h (WP-T2).
 
-#if defined(WITH_AUTOMATION_TESTS) && WITH_AUTOMATION_TESTS
+#include "O3DTestHarness.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+#include "Testing/O3DSenderTesting.h"
 
 #include "Misc/AutomationTest.h"
 
-struct FO3DSenderComponentTestHelper
-{
-	static bool ConsumeCaptureBudget(double NowSeconds, double& InOutLastCaptureTime, float CaptureRateHz)
-	{
-		return UO3DSenderComponent::ConsumeCaptureBudget(NowSeconds, InOutLastCaptureTime, CaptureRateHz);
-	}
 
-	static void BuildLocalBoneTransforms(const TArray<FTransform>& ComponentSpaceTransforms,
-		const TArray<int32>& CachedParentIndices,
-		int32 NumBones,
-		TFunctionRef<int32(int32)> ResolveFallbackParent,
-		TArray<FTransform>& OutLocalTransforms,
-		TArray<int32>* OutResolvedParents)
-	{
-		UO3DSenderComponent::BuildLocalBoneTransforms(ComponentSpaceTransforms, CachedParentIndices, NumBones, ResolveFallbackParent, OutLocalTransforms, OutResolvedParents);
-	}
-};
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderConsumeCaptureBudgetTest, "Open3DBroadcast.O3DSender.ConsumeCaptureBudget", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderConsumeCaptureBudgetTest, "Open3DBroadcast.Sender.Component.ConsumeCaptureBudget", O3DB_TEST_FLAGS)
 bool FO3DSenderConsumeCaptureBudgetTest::RunTest(const FString& Parameters)
 {
 	double LastCaptureTime = 0.0;
-	TestTrue(TEXT("Initial capture is permitted"), FO3DSenderComponentTestHelper::ConsumeCaptureBudget(10.0, LastCaptureTime, 60.0f));
+	TestTrue(TEXT("Initial capture is permitted"), FO3DSenderComponentTestAccess::ConsumeCaptureBudget(10.0, LastCaptureTime, 60.0f));
 	const double FirstStamp = LastCaptureTime;
 	TestEqual(TEXT("Timestamp updated on first capture"), LastCaptureTime, 10.0);
-	TestFalse(TEXT("Subsequent capture within rate budget is blocked"), FO3DSenderComponentTestHelper::ConsumeCaptureBudget(FirstStamp + 0.001, LastCaptureTime, 60.0f));
-	TestTrue(TEXT("Capture permitted after interval"), FO3DSenderComponentTestHelper::ConsumeCaptureBudget(FirstStamp + (1.0 / 60.0) + 0.001, LastCaptureTime, 60.0f));
+	TestFalse(TEXT("Subsequent capture within rate budget is blocked"), FO3DSenderComponentTestAccess::ConsumeCaptureBudget(FirstStamp + 0.001, LastCaptureTime, 60.0f));
+	TestTrue(TEXT("Capture permitted after interval"), FO3DSenderComponentTestAccess::ConsumeCaptureBudget(FirstStamp + (1.0 / 60.0) + 0.001, LastCaptureTime, 60.0f));
 
 	double NoRateLastTime = -1.0;
-	TestTrue(TEXT("Disabled rate limiter always allows capture"), FO3DSenderComponentTestHelper::ConsumeCaptureBudget(5.0, NoRateLastTime, 0.0f));
+	TestTrue(TEXT("Disabled rate limiter always allows capture"), FO3DSenderComponentTestAccess::ConsumeCaptureBudget(5.0, NoRateLastTime, 0.0f));
 	const double ZeroRateStamp = NoRateLastTime;
-	TestTrue(TEXT("Disabled limiter continues to allow immediate captures"), FO3DSenderComponentTestHelper::ConsumeCaptureBudget(ZeroRateStamp + 0.0001, NoRateLastTime, 0.0f));
-	TestTrue(TEXT("Negative rate behaves as disabled"), FO3DSenderComponentTestHelper::ConsumeCaptureBudget(NoRateLastTime + 0.0001, NoRateLastTime, -5.0f));
+	TestTrue(TEXT("Disabled limiter continues to allow immediate captures"), FO3DSenderComponentTestAccess::ConsumeCaptureBudget(ZeroRateStamp + 0.0001, NoRateLastTime, 0.0f));
+	TestTrue(TEXT("Negative rate behaves as disabled"), FO3DSenderComponentTestAccess::ConsumeCaptureBudget(NoRateLastTime + 0.0001, NoRateLastTime, -5.0f));
 
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderBuildLocalBoneTransformsTest, "Open3DBroadcast.Open3DSender.BuildLocalBoneTransforms", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderBuildLocalBoneTransformsTest, "Open3DBroadcast.Sender.Component.BuildLocalBoneTransforms", O3DB_TEST_FLAGS)
 bool FO3DSenderBuildLocalBoneTransformsTest::RunTest(const FString& Parameters)
 {
 	TArray<FTransform> ComponentSpace;
@@ -64,7 +54,7 @@ bool FO3DSenderBuildLocalBoneTransformsTest::RunTest(const FString& Parameters)
 		return INDEX_NONE;
 	};
 
-	FO3DSenderComponentTestHelper::BuildLocalBoneTransforms(ComponentSpace, CachedParents, ComponentSpace.Num(), NoFallback, LocalTransforms, &ResolvedParents);
+	FO3DSenderComponentTestAccess::BuildLocalBoneTransforms(ComponentSpace, CachedParents, ComponentSpace.Num(), NoFallback, LocalTransforms, &ResolvedParents);
 	TestEqual(TEXT("Local transform count matches"), LocalTransforms.Num(), 3);
 	TestEqual(TEXT("Resolved parent count matches"), ResolvedParents.Num(), 3);
 	TestEqual(TEXT("Root parent remains none"), ResolvedParents[0], INDEX_NONE);
@@ -81,7 +71,7 @@ bool FO3DSenderBuildLocalBoneTransformsTest::RunTest(const FString& Parameters)
 		return (BoneIndex == 1) ? 0 : INDEX_NONE;
 	};
 
-	FO3DSenderComponentTestHelper::BuildLocalBoneTransforms(ComponentSpace, CachedParentsWithGap, 2, ProvideFallback, LocalWithFallback, &ParentsWithFallback);
+	FO3DSenderComponentTestAccess::BuildLocalBoneTransforms(ComponentSpace, CachedParentsWithGap, 2, ProvideFallback, LocalWithFallback, &ParentsWithFallback);
 	TestEqual(TEXT("Fallback resolved parent"), ParentsWithFallback[1], 0);
 	TestTrue(TEXT("Fallback relative transform computed"), LocalWithFallback[1].GetTranslation().Equals(FVector(10.0f, 0.0f, 0.0f), 0.001f));
 

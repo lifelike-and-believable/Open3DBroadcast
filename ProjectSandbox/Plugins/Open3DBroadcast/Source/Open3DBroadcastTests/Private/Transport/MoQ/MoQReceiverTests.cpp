@@ -1,12 +1,22 @@
+// Copyright (c) Open3DStream Contributors
+//
+// MoQ receiver unit tests. Every receiver is built on the fake moq-ffi table through
+// Testing/MoQTesting.h, so no test loads moq_ffi.dll or touches the network (WP-T2).
+
+#include "O3DTestHarness.h"
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "Misc/ScopeLock.h"
 
 #include "O3DTransportTypes.h"
-#include "Receiver/MoQReceiver.h"
 #include "SerializedFrameConsumerRegistry.h"
 
 #if O3D_WITH_TRANSPORT_MOQ
+
+#include "Testing/MoQTesting.h"
+#include "Transport/MoQ/MoQFakeFfi.h"
 
 // Mock consumer for testing
 class FMoQTestFrameConsumer : public ISerializedFrameConsumer
@@ -48,10 +58,12 @@ private:
 };
 
 // Test: Receiver requires URI
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverRequiresUriTest, "Open3DBroadcast.Open3DTransportMoQ.Receiver.RequiresUri", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverRequiresUriTest, "Open3DBroadcast.Transport.MoQ.Receiver.RequiresUri", O3DB_TEST_FLAGS)
 bool FMoQReceiverRequiresUriTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQReceiver Receiver;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DReceiver& Receiver = *ReceiverRef;
 	FO3DTransportConfig Config;
 	Config.Transport = TEXT("MoQ");
 
@@ -62,10 +74,12 @@ bool FMoQReceiverRequiresUriTest::RunTest(const FString& Parameters)
 }
 
 // Test: Receiver initializes with valid config
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverInitializeSuccessTest, "Open3DBroadcast.Open3DTransportMoQ.Receiver.Initialize", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverInitializeSuccessTest, "Open3DBroadcast.Transport.MoQ.Receiver.Initialize", O3DB_TEST_FLAGS)
 bool FMoQReceiverInitializeSuccessTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQReceiver Receiver;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DReceiver& Receiver = *ReceiverRef;
 	FO3DTransportConfig Config;
 	Config.Transport = TEXT("MoQ");
 	Config.Uri = TEXT("https://localhost:4443");
@@ -79,10 +93,12 @@ bool FMoQReceiverInitializeSuccessTest::RunTest(const FString& Parameters)
 }
 
 // Test: Stop is idempotent
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverStopIsIdempotentTest, "Open3DBroadcast.Open3DTransportMoQ.Receiver.StopIdempotent", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverStopIsIdempotentTest, "Open3DBroadcast.Transport.MoQ.Receiver.StopIdempotent", O3DB_TEST_FLAGS)
 bool FMoQReceiverStopIsIdempotentTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQReceiver Receiver;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DReceiver& Receiver = *ReceiverRef;
 	FO3DTransportConfig Config;
 	Config.Transport = TEXT("MoQ");
 	Config.Uri = TEXT("https://localhost:4443");
@@ -99,10 +115,12 @@ bool FMoQReceiverStopIsIdempotentTest::RunTest(const FString& Parameters)
 }
 
 // Test: Initialize can be called twice
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverInitializeCalledTwiceTest, "Open3DBroadcast.Open3DTransportMoQ.Receiver.InitializeTwice", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverInitializeCalledTwiceTest, "Open3DBroadcast.Transport.MoQ.Receiver.InitializeTwice", O3DB_TEST_FLAGS)
 bool FMoQReceiverInitializeCalledTwiceTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQReceiver Receiver;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DReceiver& Receiver = *ReceiverRef;
 	FO3DTransportConfig Config;
 	Config.Transport = TEXT("MoQ");
 	Config.Uri = TEXT("https://localhost:4443");
@@ -119,10 +137,12 @@ bool FMoQReceiverInitializeCalledTwiceTest::RunTest(const FString& Parameters)
 }
 
 // Test: GetStats before start
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverGetStatsBeforeStartTest, "Open3DBroadcast.Open3DTransportMoQ.Receiver.GetStatsBeforeStart", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverGetStatsBeforeStartTest, "Open3DBroadcast.Transport.MoQ.Receiver.GetStatsBeforeStart", O3DB_TEST_FLAGS)
 bool FMoQReceiverGetStatsBeforeStartTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQReceiver Receiver;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DReceiver& Receiver = *ReceiverRef;
 	FO3DTransportConfig Config;
 	Config.Transport = TEXT("MoQ");
 	Config.Uri = TEXT("https://localhost:4443");
@@ -140,10 +160,12 @@ bool FMoQReceiverGetStatsBeforeStartTest::RunTest(const FString& Parameters)
 }
 
 // Test: Advanced params parsing
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverAdvancedParamsTest, "Open3DBroadcast.Open3DTransportMoQ.Receiver.AdvancedParams", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverAdvancedParamsTest, "Open3DBroadcast.Transport.MoQ.Receiver.AdvancedParams", O3DB_TEST_FLAGS)
 bool FMoQReceiverAdvancedParamsTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQReceiver Receiver;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DReceiver& Receiver = *ReceiverRef;
 	FO3DTransportConfig Config;
 	Config.Transport = TEXT("MoQ");
 	Config.Uri = TEXT("https://localhost:4443");
@@ -156,21 +178,23 @@ bool FMoQReceiverAdvancedParamsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test: SupportsAudio returns false (Phase 4 not implemented)
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverSupportsAudioTest, "Open3DBroadcast.Open3DTransportMoQ.Receiver.SupportsAudio", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+// MoQ audio shipped (Phase 4, WP-S5/S8); this used to assert the old "not implemented" stub.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverSupportsAudioTest, "Open3DBroadcast.Transport.MoQ.Receiver.SupportsAudio", O3DB_TEST_FLAGS)
 bool FMoQReceiverSupportsAudioTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQReceiver Receiver;
-	// Audio is Phase 4, currently returns false
-	TestFalse(TEXT("SupportsAudio should return false (Phase 4 not implemented)"), Receiver.SupportsAudio());
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DReceiver> Receiver = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 1);
+	TestTrue(TEXT("The MoQ receiver advertises audio"), Receiver->SupportsAudio());
 	return true;
 }
 
 // Test: Start before Initialize fails
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverStartBeforeInitializeTest, "Open3DBroadcast.Open3DTransportMoQ.Receiver.StartBeforeInitialize", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverStartBeforeInitializeTest, "Open3DBroadcast.Transport.MoQ.Receiver.StartBeforeInitialize", O3DB_TEST_FLAGS)
 bool FMoQReceiverStartBeforeInitializeTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQReceiver Receiver;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DReceiver& Receiver = *ReceiverRef;
 
 	AddExpectedError(TEXT("MoQ receiver Start called before Initialize"), EAutomationExpectedMessageFlags::Contains, 1);
 
@@ -181,10 +205,12 @@ bool FMoQReceiverStartBeforeInitializeTest::RunTest(const FString& Parameters)
 }
 
 // Test: Poll before start returns 0
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverPollBeforeStartTest, "Open3DBroadcast.Open3DTransportMoQ.Receiver.PollBeforeStart", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverPollBeforeStartTest, "Open3DBroadcast.Transport.MoQ.Receiver.PollBeforeStart", O3DB_TEST_FLAGS)
 bool FMoQReceiverPollBeforeStartTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQReceiver Receiver;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DReceiver& Receiver = *ReceiverRef;
 	FO3DTransportConfig Config;
 	Config.Transport = TEXT("MoQ");
 	Config.Uri = TEXT("https://localhost:4443");
@@ -200,10 +226,12 @@ bool FMoQReceiverPollBeforeStartTest::RunTest(const FString& Parameters)
 }
 
 // Test: SetConsumer works correctly
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverSetConsumerTest, "Open3DBroadcast.Open3DTransportMoQ.Receiver.SetConsumer", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverSetConsumerTest, "Open3DBroadcast.Transport.MoQ.Receiver.SetConsumer", O3DB_TEST_FLAGS)
 bool FMoQReceiverSetConsumerTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQReceiver Receiver;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DReceiver& Receiver = *ReceiverRef;
 	FO3DTransportConfig Config;
 	Config.Transport = TEXT("MoQ");
 	Config.Uri = TEXT("https://localhost:4443");
@@ -220,11 +248,13 @@ bool FMoQReceiverSetConsumerTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Test: SetAudioSink does not crash (Phase 4 stub)
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverSetAudioSinkTest, "Open3DBroadcast.Open3DTransportMoQ.Receiver.SetAudioSink", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+// Test: clearing the audio sink with nullptr is safe
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverSetAudioSinkTest, "Open3DBroadcast.Transport.MoQ.Receiver.SetAudioSink", O3DB_TEST_FLAGS)
 bool FMoQReceiverSetAudioSinkTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQReceiver Receiver;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DReceiver& Receiver = *ReceiverRef;
 	FO3DTransportConfig Config;
 	Config.Transport = TEXT("MoQ");
 	Config.Uri = TEXT("https://localhost:4443");
@@ -232,7 +262,7 @@ bool FMoQReceiverSetAudioSinkTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("Initialize should succeed"), Receiver.Initialize(Config));
 
-	// SetAudioSink with nullptr should not crash (Phase 4 stub)
+	// SetAudioSink with nullptr disables audio delivery and must not crash
 	FO3DTransportAudioConfig AudioConfig;
 	Receiver.SetAudioSink(nullptr, AudioConfig);
 
@@ -241,12 +271,14 @@ bool FMoQReceiverSetAudioSinkTest::RunTest(const FString& Parameters)
 }
 
 // Test: Alternative relay URL options
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverRelayUrlOptionsTest, "Open3DBroadcast.Open3DTransportMoQ.Receiver.RelayUrlOptions", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverRelayUrlOptionsTest, "Open3DBroadcast.Transport.MoQ.Receiver.RelayUrlOptions", O3DB_TEST_FLAGS)
 bool FMoQReceiverRelayUrlOptionsTest::RunTest(const FString& Parameters)
 {
 	// Test with relay_url advanced param
 	{
-		FO3DMoQReceiver Receiver;
+		const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+		const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 1);
+		IOpen3DReceiver& Receiver = *ReceiverRef;
 		FO3DTransportConfig Config;
 		Config.Transport = TEXT("MoQ");
 		Config.StreamId = TEXT("test/relay");
@@ -258,7 +290,9 @@ bool FMoQReceiverRelayUrlOptionsTest::RunTest(const FString& Parameters)
 
 	// Test with moq.relay advanced param
 	{
-		FO3DMoQReceiver Receiver;
+		const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+		const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 1);
+		IOpen3DReceiver& Receiver = *ReceiverRef;
 		FO3DTransportConfig Config;
 		Config.Transport = TEXT("MoQ");
 		Config.StreamId = TEXT("test/relay2");
@@ -272,10 +306,12 @@ bool FMoQReceiverRelayUrlOptionsTest::RunTest(const FString& Parameters)
 }
 
 // Test: Stats reset on Initialize
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverStatsResetOnInitTest, "Open3DBroadcast.Open3DTransportMoQ.Receiver.StatsResetOnInit", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverStatsResetOnInitTest, "Open3DBroadcast.Transport.MoQ.Receiver.StatsResetOnInit", O3DB_TEST_FLAGS)
 bool FMoQReceiverStatsResetOnInitTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQReceiver Receiver;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DReceiver& Receiver = *ReceiverRef;
 	FO3DTransportConfig Config;
 	Config.Transport = TEXT("MoQ");
 	Config.Uri = TEXT("https://localhost:4443");

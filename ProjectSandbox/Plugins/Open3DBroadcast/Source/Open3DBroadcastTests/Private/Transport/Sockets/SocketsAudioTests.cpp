@@ -1,8 +1,14 @@
-#if defined(WITH_AUTOMATION_TESTS) && WITH_AUTOMATION_TESTS
+// Copyright (c) Open3DStream Contributors
+//
+// TCP audio path on 127.0.0.1. The transport is reached through Testing/SocketsTesting.h (WP-T2).
+// Option keys are spelled out: they are the user-facing names persisted in settings
+// (SocketsTransportCommon.h, SocketsTcpTransport.h), so these tests also pin them.
 
-#include "../Sender/SocketsTcpSender.h"
-#include "../Receiver/SocketsTcpReceiver.h"
-#include "../Shared/SocketsTransportCommon.h"
+#include "O3DTestHarness.h"
+
+#if WITH_DEV_AUTOMATION_TESTS && O3D_WITH_TRANSPORT_SOCKETS
+
+#include "Testing/SocketsTesting.h"
 
 #include "Misc/AutomationTest.h"
 #include "HAL/PlatformProcess.h"
@@ -15,7 +21,7 @@
 
 namespace
 {
-	class FTestReceiverAudioSink final : public IO3DReceiverAudioSink
+	class FSocketsTestAudioSink final : public IO3DReceiverAudioSink
 	{
 	public:
 		virtual void SubmitPcm16(const O3DS::FAudioFrameMeta& InMeta, const uint8* Data, int32 NumBytes) override
@@ -51,7 +57,7 @@ namespace
 		virtual void SubmitFrame(const FString&, const TArray<uint8>&, double) override {}
 	};
 
-	int32 FindAvailableTcpPort()
+	int32 FindAvailableAudioTestPort()
 	{
 		ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
 		if (!SocketSubsystem)
@@ -87,78 +93,76 @@ namespace
 		return Port;
 	}
 
-	void PumpTransports(FO3DSocketsTcpSender& Sender, FO3DSocketsTcpReceiver& Receiver, double DurationSeconds, double SleepSeconds = 0.001)
+	/** Polls and ticks both sides for DurationSeconds of wall time. Yields; never sleeps. */
+	void PumpTcpTransports(IOpen3DSender& Sender, IOpen3DReceiver& Receiver, double DurationSeconds)
 	{
 		const double Deadline = FPlatformTime::Seconds() + DurationSeconds;
 		while (FPlatformTime::Seconds() < Deadline)
 		{
 			Receiver.Poll();
 			Sender.Tick(0.0f);
-			if (SleepSeconds > 0.0)
-			{
-				FPlatformProcess::Sleep(SleepSeconds);
-			}
+			FPlatformProcess::YieldThread();
 		}
 	}
 
-	FO3DTransportConfig BuildSenderConfig(int32 DataPort, int32 AudioPort)
+	FO3DTransportConfig BuildTcpAudioSenderConfig(int32 DataPort, int32 AudioPort)
 	{
 		FO3DTransportConfig Config;
 		Config.Transport = TEXT("sockets.tcp");
 		Config.Role = TEXT("sender");
 		Config.Uri = FString::Printf(TEXT("tcp://127.0.0.1:%d"), DataPort);
 		Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), DataPort);
-		Config.AdvancedParams.Add(O3DSockets::BindOptionKey, TEXT("127.0.0.1"));
-		Config.AdvancedParams.Add(O3DSockets::PortOptionKey, FString::FromInt(DataPort));
-		Config.AdvancedParams.Add(O3DSockets::AudioBindOptionKey, TEXT("127.0.0.1"));
-		Config.AdvancedParams.Add(O3DSockets::AudioPortOptionKey, FString::FromInt(AudioPort));
+		Config.AdvancedParams.Add(TEXT("bind"), TEXT("127.0.0.1"));
+		Config.AdvancedParams.Add(TEXT("port"), FString::FromInt(DataPort));
+		Config.AdvancedParams.Add(TEXT("audio.bind"), TEXT("127.0.0.1"));
+		Config.AdvancedParams.Add(TEXT("audio.port"), FString::FromInt(AudioPort));
 
 		Config.Audio.bEnableAudio = true;
 		Config.Audio.SampleRate = 48000;
 		Config.Audio.NumChannels = 2;
-		// Note: Audio stream label is now automatically derived from StreamId
 		return Config;
 	}
 
-	FO3DTransportConfig BuildReceiverConfig(int32 DataPort, int32 AudioPort)
+	FO3DTransportConfig BuildTcpAudioReceiverConfig(int32 DataPort, int32 AudioPort)
 	{
 		FO3DTransportConfig Config;
 		Config.Transport = TEXT("sockets.tcp");
 		Config.Role = TEXT("receiver");
 		Config.Uri = FString::Printf(TEXT("tcp://127.0.0.1:%d"), DataPort);
 		Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), DataPort);
-		Config.AdvancedParams.Add(O3DSockets::HostOptionKey, TEXT("127.0.0.1"));
-		Config.AdvancedParams.Add(O3DSockets::PortOptionKey, FString::FromInt(DataPort));
-		Config.AdvancedParams.Add(O3DSockets::AudioHostOptionKey, TEXT("127.0.0.1"));
-		Config.AdvancedParams.Add(O3DSockets::AudioPortOptionKey, FString::FromInt(AudioPort));
+		Config.AdvancedParams.Add(TEXT("host"), TEXT("127.0.0.1"));
+		Config.AdvancedParams.Add(TEXT("port"), FString::FromInt(DataPort));
+		Config.AdvancedParams.Add(TEXT("audio.host"), TEXT("127.0.0.1"));
+		Config.AdvancedParams.Add(TEXT("audio.port"), FString::FromInt(AudioPort));
 
 		Config.Audio.bEnableAudio = true;
 		Config.Audio.SampleRate = 48000;
 		Config.Audio.NumChannels = 2;
-		// Note: Audio stream label is now automatically derived from StreamId
 		return Config;
 	}
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsAudioRoundTripTest, "Open3DBroadcast.Open3DTransportSockets.Audio.RoundTrip", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsAudioRoundTripTest, "Open3DBroadcast.Transport.Sockets.Tcp.AudioRoundTrip", O3DB_TEST_FLAGS)
 bool FO3DSocketsAudioRoundTripTest::RunTest(const FString& Parameters)
 {
-	const int32 DataPort = FindAvailableTcpPort();
+	const int32 DataPort = FindAvailableAudioTestPort();
 	TestTrue(TEXT("Data port allocated"), DataPort > 0);
 
 	int32 AudioPort = 0;
 	for (int32 Attempt = 0; Attempt < 5 && (AudioPort == 0 || AudioPort == DataPort); ++Attempt)
 	{
-		AudioPort = FindAvailableTcpPort();
+		AudioPort = FindAvailableAudioTestPort();
 	}
 	TestTrue(TEXT("Audio port allocated"), AudioPort > 0);
 	TestNotEqual(TEXT("Distinct ports"), DataPort, AudioPort);
 
-	FO3DTransportConfig SenderConfig = BuildSenderConfig(DataPort, AudioPort);
-	FO3DTransportConfig ReceiverConfig = BuildReceiverConfig(DataPort, AudioPort);
+	FO3DTransportConfig SenderConfig = BuildTcpAudioSenderConfig(DataPort, AudioPort);
+	FO3DTransportConfig ReceiverConfig = BuildTcpAudioReceiverConfig(DataPort, AudioPort);
 
-	FO3DSocketsTcpSender Sender;
-	FO3DSocketsTcpReceiver Receiver;
+	const TSharedRef<IOpen3DSender> SenderRef = O3DSocketsTesting::CreateTcpSender();
+	const TSharedRef<IOpen3DReceiver> ReceiverRef = O3DSocketsTesting::CreateTcpReceiver();
+	IOpen3DSender& Sender = *SenderRef;
+	IOpen3DReceiver& Receiver = *ReceiverRef;
 
 	TestTrue(TEXT("Sender initializes"), Sender.Initialize(SenderConfig));
 	TestTrue(TEXT("Receiver initializes"), Receiver.Initialize(ReceiverConfig));
@@ -166,7 +170,7 @@ bool FO3DSocketsAudioRoundTripTest::RunTest(const FString& Parameters)
 	TSharedPtr<FNullFrameConsumer> FrameConsumer = MakeShared<FNullFrameConsumer>();
 	Receiver.SetConsumer(FrameConsumer);
 
-	TSharedPtr<FTestReceiverAudioSink, ESPMode::ThreadSafe> ReceiverAudioSink = MakeShared<FTestReceiverAudioSink, ESPMode::ThreadSafe>();
+	TSharedPtr<FSocketsTestAudioSink, ESPMode::ThreadSafe> ReceiverAudioSink = MakeShared<FSocketsTestAudioSink, ESPMode::ThreadSafe>();
 	Receiver.SetAudioSink(ReceiverAudioSink, ReceiverConfig.Audio);
 
 	TestTrue(TEXT("Sender starts"), Sender.Start());
@@ -190,7 +194,7 @@ bool FO3DSocketsAudioRoundTripTest::RunTest(const FString& Parameters)
 
 	while ((FPlatformTime::Seconds() - StartTime) < TimeoutSeconds && !bSubmitted)
 	{
-		PumpTransports(Sender, Receiver, 0.05);
+		PumpTcpTransports(Sender, Receiver, 0.05);
 		bSubmitted = SenderAudioSink->SubmitPcm(TEXT("audio_test"), Samples.GetData(), NumFrames, NumChannels, SenderConfig.Audio.SampleRate, 123.45);
 	}
 	TestTrue(TEXT("Audio frame submitted"), bSubmitted);
@@ -198,7 +202,7 @@ bool FO3DSocketsAudioRoundTripTest::RunTest(const FString& Parameters)
 	const double ReceiveStart = FPlatformTime::Seconds();
 	while ((FPlatformTime::Seconds() - ReceiveStart) < TimeoutSeconds && !ReceiverAudioSink->WasInvoked())
 	{
-		PumpTransports(Sender, Receiver, 0.05);
+		PumpTcpTransports(Sender, Receiver, 0.05);
 	}
 
 	TestTrue(TEXT("Receiver sink invoked"), ReceiverAudioSink->WasInvoked());
@@ -211,10 +215,26 @@ bool FO3DSocketsAudioRoundTripTest::RunTest(const FString& Parameters)
 		const int16* PcmData = reinterpret_cast<const int16*>(Payload.GetData());
 		const int32 ExpectedFirst = FMath::Clamp(FMath::RoundToInt(Samples[0] * 32767.0f), -32768, 32767);
 		TestEqual(TEXT("PCM16 conversion"), PcmData[0], static_cast<int16>(ExpectedFirst));
-		// Note: Stream label is now automatically derived from StreamId
-		TestEqual(TEXT("Meta stream label matches StreamId"), ReceiverAudioSink->GetMeta().StreamLabel, SenderConfig.StreamId);
+		// The label the capture path passes wins (FO3DSinkAudioEncoder keeps one encoder per label,
+		// ADR 0007 WP-S5 addendum); the StreamId is only the fallback for an empty label, checked
+		// below. The old expectation (always the StreamId) predates per-label encoders.
+		TestEqual(TEXT("Meta stream label is the submitted label"), ReceiverAudioSink->GetMeta().StreamLabel, FString(TEXT("audio_test")));
 		TestEqual(TEXT("Meta channel count"), ReceiverAudioSink->GetMeta().NumChannels, NumChannels);
 		TestEqual(TEXT("Meta sample rate"), ReceiverAudioSink->GetMeta().SampleRate, SenderConfig.Audio.SampleRate);
+	}
+
+	// An empty label falls back to the sender's StreamId.
+	ReceiverAudioSink->Reset();
+	bSubmitted = SenderAudioSink->SubmitPcm(FString(), Samples.GetData(), NumFrames, NumChannels, SenderConfig.Audio.SampleRate, 124.0);
+	TestTrue(TEXT("Unlabelled audio frame submitted"), bSubmitted);
+	const double FallbackStart = FPlatformTime::Seconds();
+	while ((FPlatformTime::Seconds() - FallbackStart) < TimeoutSeconds && !ReceiverAudioSink->WasInvoked())
+	{
+		PumpTcpTransports(Sender, Receiver, 0.05);
+	}
+	if (TestTrue(TEXT("Receiver sink invoked for the unlabelled frame"), ReceiverAudioSink->WasInvoked()))
+	{
+		TestEqual(TEXT("Empty label falls back to the StreamId"), ReceiverAudioSink->GetMeta().StreamLabel, SenderConfig.StreamId);
 	}
 
 	Receiver.Stop();
@@ -222,22 +242,23 @@ bool FO3DSocketsAudioRoundTripTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsAudioQueueOverflowTest, "Open3DBroadcast.Open3DTransportSockets.Audio.QueueOverflow", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsAudioQueueOverflowTest, "Open3DBroadcast.Transport.Sockets.Tcp.AudioRejectedWithoutClient", O3DB_TEST_FLAGS)
 bool FO3DSocketsAudioQueueOverflowTest::RunTest(const FString& Parameters)
 {
-	const int32 DataPort = FindAvailableTcpPort();
+	const int32 DataPort = FindAvailableAudioTestPort();
 	TestTrue(TEXT("Data port allocated"), DataPort > 0);
 
 	int32 AudioPort = 0;
 	for (int32 Attempt = 0; Attempt < 5 && (AudioPort == 0 || AudioPort == DataPort); ++Attempt)
 	{
-		AudioPort = FindAvailableTcpPort();
+		AudioPort = FindAvailableAudioTestPort();
 	}
 	TestTrue(TEXT("Audio port allocated"), AudioPort > 0);
 	TestNotEqual(TEXT("Ports differ"), DataPort, AudioPort);
 
-	FO3DTransportConfig SenderConfig = BuildSenderConfig(DataPort, AudioPort);
-	FO3DSocketsTcpSender Sender;
+	FO3DTransportConfig SenderConfig = BuildTcpAudioSenderConfig(DataPort, AudioPort);
+	const TSharedRef<IOpen3DSender> SenderRef = O3DSocketsTesting::CreateTcpSender();
+	IOpen3DSender& Sender = *SenderRef;
 
 	TestTrue(TEXT("Sender initializes"), Sender.Initialize(SenderConfig));
 	TestTrue(TEXT("Sender starts"), Sender.Start());
@@ -246,13 +267,12 @@ bool FO3DSocketsAudioQueueOverflowTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Audio sink created"), SenderAudioSink.IsValid());
 
 	const float SampleValue = 0.25f;
-	// Note: Stream label is now automatically derived from StreamId
 	const bool bFrameAccepted = SenderAudioSink->SubmitPcm(SenderConfig.StreamId, &SampleValue, 1, 1, SenderConfig.Audio.SampleRate, 0.0);
-	TestFalse(TEXT("Frame dropped without receiver connection"), bFrameAccepted);
+	TestFalse(TEXT("Frame rejected while no receiver is connected"), bFrameAccepted);
 
 	Sender.Stop();
 	return true;
 }
 
-#endif // WITH_AUTOMATION_TESTS
+#endif // WITH_DEV_AUTOMATION_TESTS && O3D_WITH_TRANSPORT_SOCKETS
 

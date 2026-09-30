@@ -1,78 +1,22 @@
 // Copyright (c) Open3DStream Contributors
+//
+// Remote audio component and receiver-source audio glue. White-box access goes through
+// Open3DReceiver/Public/Testing/O3DReceiverTesting.h (WP-T2).
 
-#include "O3DRemoteAudioComponent.h"
-#include "O3DReceiverSource.h"
+#include "O3DTestHarness.h"
 
-#if defined(WITH_DEV_AUTOMATION_TESTS) && WITH_DEV_AUTOMATION_TESTS
+#if WITH_DEV_AUTOMATION_TESTS
 
 #include "O3DAudioBus.h"
+#include "O3DReceiverSource.h"
+#include "O3DRemoteAudioComponent.h"
+#include "Testing/O3DReceiverTesting.h"
 
 #include "Misc/AutomationTest.h"
 #include "Async/TaskGraphInterfaces.h"
 #include "Sound/SoundWaveProcedural.h"
 
-struct FO3DRemoteAudioComponentTestAccessor
-{
-    static void CallEnsureSoundWave(UO3DRemoteAudioComponent* Component, int32 NumChannels, int32 SampleRate)
-    {
-        Component->EnsureSoundWave(NumChannels, SampleRate);
-    }
-
-    static void CallOnAudioPcm16(UO3DRemoteAudioComponent* Component, const O3DS::FAudioFrameMeta& Meta, const TArray<uint8>& PCM16Bytes)
-    {
-        Component->OnAudioPcm16(Meta, PCM16Bytes);
-    }
-
-    static bool CallMatchesFilter(const UO3DRemoteAudioComponent* Component, const FString& Subject, const FString& Stream)
-    {
-        return Component->MatchesFilter(Subject, Stream);
-    }
-
-    static USoundWaveProcedural* GetSoundWave(const UO3DRemoteAudioComponent* Component)
-    {
-        return Component->SoundWave;
-    }
-
-    static int32 GetCurrentChannels(const UO3DRemoteAudioComponent* Component)
-    {
-        return Component->CurrentChannels;
-    }
-
-    static int32 GetCurrentSampleRate(const UO3DRemoteAudioComponent* Component)
-    {
-        return Component->CurrentSampleRate;
-    }
-};
-
-struct FO3DReceiverSourceTestAccessor
-{
-    static void SetActiveConfig(FO3DReceiverSource& Source, const FO3DTransportConfig& Config)
-    {
-        Source.ActiveConfig = Config;
-    }
-
-    static void SetLastObservedSubjectName(FO3DReceiverSource& Source, const FName& SubjectName)
-    {
-        Source.LastObservedSubjectName = SubjectName;
-    }
-
-    static void CallFinalizeAudioMeta(const FO3DReceiverSource& Source, O3DS::FAudioFrameMeta& Meta)
-    {
-        Source.FinalizeAudioMeta(Meta);
-    }
-
-    static void SetSourceGuid(FO3DReceiverSource& Source, const FGuid& Guid)
-    {
-        Source.SourceGuid = Guid;
-    }
-
-    static TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> MakeAudioSink(const FO3DReceiverSource& Source)
-    {
-        return Source.MakeAudioSink();
-    }
-};
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DRemoteAudioComponentFilterTest, "Open3DBroadcast.Open3DReceiver.RemoteAudioComponent.Filtering", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DRemoteAudioComponentFilterTest, "Open3DBroadcast.Receiver.RemoteAudioComponent.Filtering", O3DB_TEST_FLAGS)
 bool FO3DRemoteAudioComponentFilterTest::RunTest(const FString& Parameters)
 {
     UO3DRemoteAudioComponent* Component = NewObject<UO3DRemoteAudioComponent>();
@@ -93,7 +37,7 @@ bool FO3DRemoteAudioComponentFilterTest::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DRemoteAudioComponentAudioQueueTest, "Open3DBroadcast.O3DReceiver.RemoteAudioComponent.AudioQueue", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DRemoteAudioComponentAudioQueueTest, "Open3DBroadcast.Receiver.RemoteAudioComponent.AudioQueue", O3DB_TEST_FLAGS)
 bool FO3DRemoteAudioComponentAudioQueueTest::RunTest(const FString& Parameters)
 {
     UO3DRemoteAudioComponent* Component = NewObject<UO3DRemoteAudioComponent>();
@@ -141,7 +85,11 @@ bool FO3DRemoteAudioComponentAudioQueueTest::RunTest(const FString& Parameters)
 
 
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverSourceFinalizeAudioMetaTest, "Open3DBroadcast.Open3DReceiver.Source.FinalizeAudioMeta", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+// RCV-2 (decided in ADR 0006 Q6): FinalizeAudioMeta falls back to the stream label, never to the
+// last subject seen on the mocap stream. An empty label becomes the channel's StreamId (or
+// "o3ds:mix" without one) and an empty subject becomes that label. The unused
+// LastObservedSubjectName field is gone.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverSourceFinalizeAudioMetaTest, "Open3DBroadcast.Receiver.Source.FinalizeAudioMetaStreamLabelFallback", O3DB_TEST_FLAGS)
 bool FO3DReceiverSourceFinalizeAudioMetaTest::RunTest(const FString& Parameters)
 {
     FO3DTransportConfig Config;
@@ -152,33 +100,51 @@ bool FO3DReceiverSourceFinalizeAudioMetaTest::RunTest(const FString& Parameters)
 
     FO3DReceiverSource Source;
     FO3DReceiverSourceTestAccessor::SetActiveConfig(Source, Config);
-    FO3DReceiverSourceTestAccessor::SetLastObservedSubjectName(Source, FName(TEXT("Quinn")));
 
+    // Nothing set: label and subject both fall back to the StreamId; format from the config.
     O3DS::FAudioFrameMeta Meta;
     Meta.SampleRate = 0;
     Meta.NumChannels = 0;
     FO3DReceiverSourceTestAccessor::CallFinalizeAudioMeta(Source, Meta);
+    TestEqual(TEXT("Empty label falls back to the StreamId"), Meta.StreamLabel, Config.StreamId);
+    TestEqual(TEXT("Empty subject falls back to the stream label"), Meta.SubjectName, Config.StreamId);
+    TestEqual(TEXT("Sample rate from the config"), Meta.SampleRate, Config.Audio.SampleRate);
+    TestEqual(TEXT("Channel count from the config"), Meta.NumChannels, Config.Audio.NumChannels);
 
-    TestEqual(TEXT("Observed subject applied"), Meta.SubjectName, FString(TEXT("Quinn")));
-    TestEqual(TEXT("Sample rate propagated"), Meta.SampleRate, Config.Audio.SampleRate);
-    TestEqual(TEXT("Channel count propagated"), Meta.NumChannels, Config.Audio.NumChannels);
+    // A label from the transport (for example a per-subject LiveKit track) names the subject.
+    O3DS::FAudioFrameMeta LabelledMeta;
+    LabelledMeta.StreamLabel = TEXT("Quinn");
+    FO3DReceiverSourceTestAccessor::CallFinalizeAudioMeta(Source, LabelledMeta);
+    TestEqual(TEXT("Explicit label kept"), LabelledMeta.StreamLabel, FString(TEXT("Quinn")));
+    TestEqual(TEXT("Subject follows the explicit label"), LabelledMeta.SubjectName, FString(TEXT("Quinn")));
 
-    O3DS::FAudioFrameMeta ChannelSubjectMeta;
-    ChannelSubjectMeta.SubjectName = Config.StreamId;
-    FO3DReceiverSourceTestAccessor::CallFinalizeAudioMeta(Source, ChannelSubjectMeta);
-    TestEqual(TEXT("Channel fallback replaced by subject"), ChannelSubjectMeta.SubjectName, FString(TEXT("Quinn")));
-
+    // An explicit subject is never overwritten.
     O3DS::FAudioFrameMeta ExplicitSubjectMeta;
     ExplicitSubjectMeta.SubjectName = TEXT("AlreadySet");
     FO3DReceiverSourceTestAccessor::CallFinalizeAudioMeta(Source, ExplicitSubjectMeta);
     TestEqual(TEXT("Explicit subject preserved"), ExplicitSubjectMeta.SubjectName, FString(TEXT("AlreadySet")));
+    TestEqual(TEXT("Label still falls back to the StreamId"), ExplicitSubjectMeta.StreamLabel, Config.StreamId);
 
-    FO3DReceiverSource SourceWithoutSubject;
-    FO3DReceiverSourceTestAccessor::SetActiveConfig(SourceWithoutSubject, Config);
+    // Without a StreamId the label is the mix label. (Before ADR 0006 Q6 this test expected the
+    // last mocap subject, "Quinn", as the subject, which the code no longer did.)
+    FO3DTransportConfig NoStream = Config;
+    NoStream.StreamId.Reset();
+    FO3DReceiverSource SourceWithoutStream;
+    FO3DReceiverSourceTestAccessor::SetActiveConfig(SourceWithoutStream, NoStream);
+    O3DS::FAudioFrameMeta MixMeta;
+    FO3DReceiverSourceTestAccessor::CallFinalizeAudioMeta(SourceWithoutStream, MixMeta);
+    TestEqual(TEXT("Without a StreamId the label is o3ds:mix"), MixMeta.StreamLabel, FString(TEXT("o3ds:mix")));
+    TestEqual(TEXT("...and the subject follows it"), MixMeta.SubjectName, FString(TEXT("o3ds:mix")));
 
-    O3DS::FAudioFrameMeta FallbackMeta;
-    FO3DReceiverSourceTestAccessor::CallFinalizeAudioMeta(SourceWithoutSubject, FallbackMeta);
-    TestEqual(TEXT("Stream id used when no subject observed"), FallbackMeta.SubjectName, Config.StreamId);
+    // With audio disabled no label is invented; the subject still falls back to the StreamId.
+    FO3DTransportConfig AudioOff = Config;
+    AudioOff.Audio.bEnableAudio = false;
+    FO3DReceiverSource SourceAudioOff;
+    FO3DReceiverSourceTestAccessor::SetActiveConfig(SourceAudioOff, AudioOff);
+    O3DS::FAudioFrameMeta OffMeta;
+    FO3DReceiverSourceTestAccessor::CallFinalizeAudioMeta(SourceAudioOff, OffMeta);
+    TestTrue(TEXT("No label invented with audio disabled"), OffMeta.StreamLabel.IsEmpty());
+    TestEqual(TEXT("Subject falls back to the StreamId"), OffMeta.SubjectName, Config.StreamId);
 
     return true;
 }
@@ -186,7 +152,7 @@ bool FO3DReceiverSourceFinalizeAudioMetaTest::RunTest(const FString& Parameters)
 // WP-S5 (RCV-1): the receiver-side audio sink holds an immutable metadata snapshot, not the
 // source. It must keep working (and must not touch the source) after the source is destroyed,
 // when called from a non-game thread, and it must publish on the game thread only (SHR-10).
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverAudioSinkLifetimeTest, "Open3DBroadcast.Receiver.Lifetime.AudioSinkOutlivesSource", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverAudioSinkLifetimeTest, "Open3DBroadcast.Receiver.Lifetime.AudioSinkOutlivesSource", O3DB_TEST_FLAGS)
 bool FO3DReceiverAudioSinkLifetimeTest::RunTest(const FString& Parameters)
 {
     FO3DTransportConfig Config;
@@ -227,7 +193,12 @@ bool FO3DReceiverAudioSinkLifetimeTest::RunTest(const FString& Parameters)
     const int16 Pcm[4] = {1, 2, 3, 4};
     FGraphEventRef Task = FFunctionGraphTask::CreateAndDispatchWhenReady([SinkCopy = Sink, &Pcm]() mutable
     {
-        O3DS::FAudioFrameMeta Meta; // empty: every field comes from the snapshot
+        // Unknown format: FAudioFrameMeta defaults to 1 channel at 48 kHz, and the snapshot
+        // fills only fields that are unset (<= 0), because a frame's own format describes the
+        // PCM it carries. Zero them so rate and channels come from the snapshot too.
+        O3DS::FAudioFrameMeta Meta;
+        Meta.SampleRate = 0;
+        Meta.NumChannels = 0;
         SinkCopy->SubmitPcm16(Meta, reinterpret_cast<const uint8*>(Pcm), sizeof(Pcm));
         SinkCopy.Reset();
     }, TStatId(), nullptr, ENamedThreads::AnyBackgroundThreadNormalTask);
@@ -245,4 +216,4 @@ bool FO3DReceiverAudioSinkLifetimeTest::RunTest(const FString& Parameters)
     return true;
 }
 
-#endif // WITH_AUTOMATION_TESTS
+#endif // WITH_DEV_AUTOMATION_TESTS

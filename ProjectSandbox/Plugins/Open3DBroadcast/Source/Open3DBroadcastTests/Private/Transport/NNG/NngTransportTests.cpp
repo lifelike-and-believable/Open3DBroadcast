@@ -1,8 +1,15 @@
-#if WITH_DEV_AUTOMATION_TESTS
+// Copyright (c) Open3DStream Contributors
+//
+// NNG pub/sub on 127.0.0.1 and the receive demux. The transport is reached through
+// Testing/NngTesting.h (WP-T2).
+// Option keys are spelled out: they are the user-facing names persisted in settings
+// (NngHelpers.h), so these tests also pin them.
 
-#include "Sender/NngSender.h"
-#include "Receiver/NngReceiver.h"
-#include "Shared/NngHelpers.h"
+#include "O3DTestHarness.h"
+
+#if WITH_DEV_AUTOMATION_TESTS && O3D_WITH_TRANSPORT_NNG
+
+#include "Testing/NngTesting.h"
 
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
@@ -53,7 +60,7 @@ namespace
 		double Timestamp = 0.0;
 	};
 
-	int32 FindAvailableTcpPort()
+	int32 FindAvailableNngPort()
 	{
 		ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
 		if (!SocketSubsystem)
@@ -89,49 +96,47 @@ namespace
 		return Port;
 	}
 
-	void PumpTransports(FO3DNngSender& Sender, FO3DNngReceiver& Receiver, double DurationSeconds, double SleepSeconds = 0.001)
+	/** Polls and ticks both sides for DurationSeconds of wall time. Yields; never sleeps. */
+	void PumpNngTransports(IOpen3DSender& Sender, IOpen3DReceiver& Receiver, double DurationSeconds)
 	{
 		const double Deadline = FPlatformTime::Seconds() + DurationSeconds;
 		while (FPlatformTime::Seconds() < Deadline)
 		{
 			Receiver.Poll();
 			Sender.Tick(0.0f);
-			if (SleepSeconds > 0.0)
-			{
-				FPlatformProcess::Sleep(SleepSeconds);
-			}
+			FPlatformProcess::YieldThread();
 		}
 	}
 
-	FO3DTransportConfig BuildSenderConfig(int32 Port, uint64 QueueLimitBytes = 0)
+	FO3DTransportConfig BuildNngSenderConfig(int32 Port, uint64 QueueLimitBytes = 0)
 	{
 		FO3DTransportConfig Config;
 		Config.Transport = TEXT("nng");
 		Config.Role = TEXT("sender");
 		Config.Uri = FString::Printf(TEXT("tcp://0.0.0.0:%d"), Port);
 		Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), Port);
-		Config.AdvancedParams.Add(O3DNNG::ModeOptionKey, TEXT("pub"));
-		Config.AdvancedParams.Add(O3DNNG::HostOptionKey, TEXT("0.0.0.0"));
-		Config.AdvancedParams.Add(O3DNNG::PortOptionKey, FString::FromInt(Port));
-		Config.AdvancedParams.Add(O3DNNG::RoleOptionKey, TEXT("server"));
+		Config.AdvancedParams.Add(TEXT("nng.mode"), TEXT("pub"));
+		Config.AdvancedParams.Add(TEXT("host"), TEXT("0.0.0.0"));
+		Config.AdvancedParams.Add(TEXT("port"), FString::FromInt(Port));
+		Config.AdvancedParams.Add(TEXT("nng.role"), TEXT("server"));
 		if (QueueLimitBytes > 0)
 		{
-			Config.AdvancedParams.Add(O3DNNG::QueueOptionKey, FString::Printf(TEXT("%llu"), QueueLimitBytes));
+			Config.AdvancedParams.Add(TEXT("nng.qmax"), FString::Printf(TEXT("%llu"), QueueLimitBytes));
 		}
 		return Config;
 	}
 
-	FO3DTransportConfig BuildReceiverConfig(int32 Port)
+	FO3DTransportConfig BuildNngReceiverConfig(int32 Port)
 	{
 		FO3DTransportConfig Config;
 		Config.Transport = TEXT("nng");
 		Config.Role = TEXT("receiver");
 		Config.Uri = FString::Printf(TEXT("tcp://127.0.0.1:%d"), Port);
 		Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), Port);
-		Config.AdvancedParams.Add(O3DNNG::ModeOptionKey, TEXT("sub"));
-		Config.AdvancedParams.Add(O3DNNG::HostOptionKey, TEXT("127.0.0.1"));
-		Config.AdvancedParams.Add(O3DNNG::PortOptionKey, FString::FromInt(Port));
-		Config.AdvancedParams.Add(O3DNNG::RoleOptionKey, TEXT("client"));
+		Config.AdvancedParams.Add(TEXT("nng.mode"), TEXT("sub"));
+		Config.AdvancedParams.Add(TEXT("host"), TEXT("127.0.0.1"));
+		Config.AdvancedParams.Add(TEXT("port"), FString::FromInt(Port));
+		Config.AdvancedParams.Add(TEXT("nng.role"), TEXT("client"));
 		return Config;
 	}
 
@@ -151,21 +156,23 @@ namespace
 	}
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DNngDataRoundTripTest, "Open3DBroadcast.Open3DTransportNNG.Data.RoundTrip", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DNngDataRoundTripTest, "Open3DBroadcast.Transport.NNG.Data.RoundTrip", O3DB_TEST_FLAGS)
 bool FO3DNngDataRoundTripTest::RunTest(const FString& Parameters)
 {
-	const int32 Port = FindAvailableTcpPort();
+	const int32 Port = FindAvailableNngPort();
 	TestTrue(TEXT("Data port allocated"), Port > 0);
 	if (Port <= 0)
 	{
 		return false;
 	}
 
-	FO3DTransportConfig SenderConfig = BuildSenderConfig(Port);
-	FO3DTransportConfig ReceiverConfig = BuildReceiverConfig(Port);
+	FO3DTransportConfig SenderConfig = BuildNngSenderConfig(Port);
+	FO3DTransportConfig ReceiverConfig = BuildNngReceiverConfig(Port);
 
-	FO3DNngSender Sender;
-	FO3DNngReceiver Receiver;
+	const TSharedRef<IOpen3DSender> SenderRef = O3DNngTesting::CreateSender();
+	const TSharedRef<IOpen3DReceiver> ReceiverRef = O3DNngTesting::CreateReceiver();
+	IOpen3DSender& Sender = *SenderRef;
+	IOpen3DReceiver& Receiver = *ReceiverRef;
 
 	const bool bSenderInitialized = Sender.Initialize(SenderConfig);
 	TestTrue(TEXT("Sender initializes"), bSenderInitialized);
@@ -181,17 +188,14 @@ bool FO3DNngDataRoundTripTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
+	// Each test uses its own ephemeral port, so no wait for TIME_WAIT is needed afterwards.
 	ON_SCOPE_EXIT
 	{
 		Sender.Stop();
-		// Allow time for socket cleanup and TIME_WAIT resolution for subsequent test runs
-		FPlatformProcess::Sleep(0.1);
 	};
 	ON_SCOPE_EXIT
 	{
 		Receiver.Stop();
-		// Allow time for socket cleanup and TIME_WAIT resolution for subsequent test runs
-		FPlatformProcess::Sleep(0.1);
 	};
 
 	TSharedPtr<FTestFrameConsumer, ESPMode::ThreadSafe> FrameConsumer = MakeShared<FTestFrameConsumer, ESPMode::ThreadSafe>();
@@ -218,7 +222,7 @@ bool FO3DNngDataRoundTripTest::RunTest(const FString& Parameters)
 	// 1. TCP connection to establish
 	// 2. NNG protocol handshake
 	// 3. Publisher to recognize the subscriber
-	PumpTransports(Sender, Receiver, 2.0);
+	PumpNngTransports(Sender, Receiver, 2.0);
 
 	static constexpr const TCHAR* SubjectLabel = TEXT("NNGSubject");
 	O3DS::SubjectList SubjectList;
@@ -231,7 +235,7 @@ bool FO3DNngDataRoundTripTest::RunTest(const FString& Parameters)
 	const double StartTime = FPlatformTime::Seconds();
 	while (!FrameConsumer->WasInvoked() && (FPlatformTime::Seconds() - StartTime) < TimeoutSeconds)
 	{
-		PumpTransports(Sender, Receiver, 0.05);
+		PumpNngTransports(Sender, Receiver, 0.05);
 	}
 
 	TestTrue(TEXT("Receiver consumed frame"), FrameConsumer->WasInvoked());
@@ -268,10 +272,10 @@ bool FO3DNngDataRoundTripTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DNngQueueLimitTest, "Open3DBroadcast.Open3DTransportNNG.Queue.Limit", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DNngQueueLimitTest, "Open3DBroadcast.Transport.NNG.Queue.Limit", O3DB_TEST_FLAGS)
 bool FO3DNngQueueLimitTest::RunTest(const FString& Parameters)
 {
-	const int32 Port = FindAvailableTcpPort();
+	const int32 Port = FindAvailableNngPort();
 	TestTrue(TEXT("Data port allocated"), Port > 0);
 	if (Port <= 0)
 	{
@@ -279,9 +283,10 @@ bool FO3DNngQueueLimitTest::RunTest(const FString& Parameters)
 	}
 
 	const uint64 QueueLimit = 64ull * 1024ull; // Minimum enforced queue size inside the sender.
-	FO3DTransportConfig SenderConfig = BuildSenderConfig(Port, QueueLimit);
+	FO3DTransportConfig SenderConfig = BuildNngSenderConfig(Port, QueueLimit);
 
-	FO3DNngSender Sender;
+	const TSharedRef<IOpen3DSender> SenderRef = O3DNngTesting::CreateSender();
+	IOpen3DSender& Sender = *SenderRef;
 	const bool bSenderInitialized = Sender.Initialize(SenderConfig);
 	TestTrue(TEXT("Sender initializes"), bSenderInitialized);
 	if (!bSenderInitialized)
@@ -300,8 +305,6 @@ bool FO3DNngQueueLimitTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
-
-	FPlatformProcess::Sleep(0.05); // allow worker thread to spin up
 
 	static constexpr int32 NumCurves = 8000;
 	O3DS::SubjectList PreviewList;
@@ -323,18 +326,10 @@ bool FO3DNngQueueLimitTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-struct FO3DNngReceiverTestAccessor
-{
-	static bool ProcessReceivedPayload(FO3DNngReceiver& Receiver, const TArray<uint8>& Bytes)
-	{
-		return Receiver.ProcessReceivedPayload(Bytes.GetData(), Bytes.Num());
-	}
-};
-
 // TRB-37: a unified-wrapped mocap frame reaches the consumer without the 20-byte
 // unified header, and a raw (legacy) frame reaches it unchanged. No sockets: the
 // demux is driven directly.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DNngReceiverUnifiedMocapTest, "Open3DBroadcast.Transport.NNG.Demux.UnifiedMocapStripsHeader", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DNngReceiverUnifiedMocapTest, "Open3DBroadcast.Transport.NNG.Demux.UnifiedMocapStripsHeader", O3DB_TEST_FLAGS)
 bool FO3DNngReceiverUnifiedMocapTest::RunTest(const FString& Parameters)
 {
 	O3DS::SubjectList SubjectList;
@@ -347,11 +342,11 @@ bool FO3DNngReceiverUnifiedMocapTest::RunTest(const FString& Parameters)
 	TArray<uint8> Unified;
 	TestTrue(TEXT("Unified message built"), O3DS::CreateUnifiedMessage(O3DS::EUnifiedKind::Mocap, O3DS::EUnifiedCodec::O3DS, Raw.GetData(), Raw.Num(), 1.0, Unified));
 
-	FO3DNngReceiver Receiver;
+	const TSharedRef<IOpen3DReceiver> Receiver = O3DNngTesting::CreateReceiver();
 	TSharedPtr<FTestFrameConsumer, ESPMode::ThreadSafe> FrameConsumer = MakeShared<FTestFrameConsumer, ESPMode::ThreadSafe>();
-	Receiver.SetConsumer(FrameConsumer);
+	Receiver->SetConsumer(FrameConsumer);
 
-	TestTrue(TEXT("Unified mocap accepted"), FO3DNngReceiverTestAccessor::ProcessReceivedPayload(Receiver, Unified));
+	TestTrue(TEXT("Unified mocap accepted"), O3DNngTesting::ProcessReceivedPayload(*Receiver, Unified));
 	TestTrue(TEXT("Consumer invoked for unified mocap"), FrameConsumer->WasInvoked());
 	TestTrue(TEXT("Unified header stripped"), FrameConsumer->GetPayload() == Raw);
 
@@ -359,10 +354,10 @@ bool FO3DNngReceiverUnifiedMocapTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Stripped payload parses"), Parsed.Parse(reinterpret_cast<const char*>(FrameConsumer->GetPayload().GetData()), FrameConsumer->GetPayload().Num()));
 
 	FrameConsumer->Reset();
-	TestTrue(TEXT("Raw mocap accepted"), FO3DNngReceiverTestAccessor::ProcessReceivedPayload(Receiver, Raw));
+	TestTrue(TEXT("Raw mocap accepted"), O3DNngTesting::ProcessReceivedPayload(*Receiver, Raw));
 	TestTrue(TEXT("Raw payload passed through unchanged"), FrameConsumer->GetPayload() == Raw);
 
 	return true;
 }
 
-#endif // WITH_DEV_AUTOMATION_TESTS
+#endif // WITH_DEV_AUTOMATION_TESTS && O3D_WITH_TRANSPORT_NNG

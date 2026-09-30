@@ -1,160 +1,151 @@
+// Copyright (c) Open3DStream Contributors
+//
+// MoQ session wrapper and dispatcher unit tests, through the FMoQTestSession façade in
+// Testing/MoQTesting.h (WP-T2). The wrapper itself stays private to the MoQ module.
+
+#include "O3DTestHarness.h"
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
 
-#include "HAL/PlatformProcess.h"
-#include "Async/TaskGraphInterfaces.h"
-#include "Shared/MoQAsyncDispatcher.h"
-#include "Shared/MoQSessionWrapper.h"
-#include "Shared/MoQTypes.h"
+#if O3D_WITH_TRANSPORT_MOQ
+
+#include "Testing/MoQTesting.h"
+#include "Transport/MoQ/MoQFakeFfi.h"
 
 #include <atomic>
 
-#if O3D_WITH_TRANSPORT_MOQ
-
-namespace
-{
-    // WP-S8: the dispatcher is drained by a core ticker on the game thread; tests drain it
-    // directly instead of sleeping.
-    void PumpGameThreadTasks()
-    {
-        FMoQAsyncDispatcher::Get().DrainOnGameThread();
-    }
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSessionInvalidUrlTest, "Open3DBroadcast.Open3DTransportMoQ.Session.InvalidUrl", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSessionInvalidUrlTest, "Open3DBroadcast.Transport.MoQ.Session.InvalidUrl", O3DB_TEST_FLAGS)
 bool FMoQSessionInvalidUrlTest::RunTest(const FString& Parameters)
 {
-    const TSharedPtr<FMoQSessionWrapper> Session = MakeShared<FMoQSessionWrapper>();
-    const FMoQResult Result = Session->Initialize(TEXT("   \t"));
-    TestEqual(TEXT("Empty URL should be rejected"), LexToString(Result.Code), LexToString(EMoQErrorCode::InvalidArgument));
-    return true;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	FMoQTestSession Session(Fake->MakeApi());
+	const FMoQTestResult Result = Session.Initialize(TEXT("   \t"));
+	TestEqual(TEXT("Empty URL should be rejected"), Result.Code, FString(TEXT("InvalidArgument")));
+	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSessionCreatePublisherWithoutConnectionTest, "Open3DBroadcast.Open3DTransportMoQ.Session.CreatePublisherWithoutConnection", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSessionCreatePublisherWithoutConnectionTest, "Open3DBroadcast.Transport.MoQ.Session.CreatePublisherWithoutConnection", O3DB_TEST_FLAGS)
 bool FMoQSessionCreatePublisherWithoutConnectionTest::RunTest(const FString& Parameters)
 {
-    const TSharedPtr<FMoQSessionWrapper> Session = MakeShared<FMoQSessionWrapper>();
-    TestTrue(TEXT("Initialize should succeed"), Session->Initialize(TEXT("https://localhost:4443")).IsOk());
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	FMoQTestSession Session(Fake->MakeApi());
+	TestTrue(TEXT("Initialize should succeed"), Session.Initialize(TEXT("https://localhost:4443")).IsOk());
 
-    FMoQPublisherConfig Config;
-    Config.Namespace = TEXT("mocap/test");
-    Config.TrackName = TEXT("character");
-    Config.DeliveryMode = MOQ_DELIVERY_STREAM;
-
-    TSharedPtr<FMoQPublisherHandle> Publisher;
-    const FMoQResult Result = Session->CreatePublisher(Config, Publisher);
-    TestEqual(TEXT("Expected not-connected error"), LexToString(Result.Code), LexToString(EMoQErrorCode::NotConnected));
-    TestFalse(TEXT("Publisher should not be created"), Publisher.IsValid());
-    return true;
+	bool bCreated = true;
+	const FMoQTestResult Result = Session.CreatePublisher(TEXT("mocap/test"), TEXT("character"), MOQ_DELIVERY_STREAM, bCreated);
+	TestEqual(TEXT("Expected not-connected error"), Result.Code, FString(TEXT("NotConnected")));
+	TestFalse(TEXT("Publisher should not be created"), bCreated);
+	TestEqual(TEXT("moq-ffi was not asked for a publisher"), Fake->GetPublishersCreated(), 0);
+	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSubscriptionRequiresCallbackTest, "Open3DBroadcast.Open3DTransportMoQ.Session.SubscribeRequiresCallback", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSubscriptionRequiresCallbackTest, "Open3DBroadcast.Transport.MoQ.Session.SubscribeRequiresCallback", O3DB_TEST_FLAGS)
 bool FMoQSubscriptionRequiresCallbackTest::RunTest(const FString& Parameters)
 {
-    const TSharedPtr<FMoQSessionWrapper> Session = MakeShared<FMoQSessionWrapper>();
-    TestTrue(TEXT("Initialize should succeed"), Session->Initialize(TEXT("https://localhost:4443")).IsOk());
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	FMoQTestSession Session(Fake->MakeApi());
+	TestTrue(TEXT("Initialize should succeed"), Session.Initialize(TEXT("https://localhost:4443")).IsOk());
 
-    FMoQSubscriptionConfig Config;
-    Config.Namespace = TEXT("mocap/test");
-    Config.TrackName = TEXT("character");
-
-    TSharedPtr<FMoQSubscriberHandle> Subscriber;
-    const FMoQResult Result = Session->Subscribe(Config, Subscriber);
-    TestEqual(TEXT("Missing callback should return invalid argument"), LexToString(Result.Code), LexToString(EMoQErrorCode::InvalidArgument));
-    TestFalse(TEXT("Subscriber handle should be invalid"), Subscriber.IsValid());
-    return true;
+	bool bCreated = true;
+	const FMoQTestResult Result = Session.Subscribe(TEXT("mocap/test"), TEXT("character"), nullptr, bCreated);
+	TestEqual(TEXT("Missing callback should return invalid argument"), Result.Code, FString(TEXT("InvalidArgument")));
+	TestFalse(TEXT("Subscriber handle should be invalid"), bCreated);
+	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQDispatcherRunsOnGameThreadTest, "Open3DBroadcast.Open3DTransportMoQ.Dispatcher.GameThread", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQDispatcherRunsOnGameThreadTest, "Open3DBroadcast.Transport.MoQ.Dispatcher.GameThread", O3DB_TEST_FLAGS)
 bool FMoQDispatcherRunsOnGameThreadTest::RunTest(const FString& Parameters)
 {
-    std::atomic<bool> bCompleted{false};
-    std::atomic<bool> bOnGameThread{false};
+	std::atomic<bool> bCompleted{false};
+	std::atomic<bool> bOnGameThread{false};
 
-    FMoQAsyncDispatcher::Get().Initialize();
-    FMoQAsyncDispatcher::Get().EnqueueGameThreadTask([&bCompleted, &bOnGameThread]()
-    {
-        bOnGameThread = IsInGameThread();
-        bCompleted = true;
-    });
+	MoQTesting::InitializeDispatcher();
+	MoQTesting::EnqueueOnDispatcher([&bCompleted, &bOnGameThread]()
+	{
+		bOnGameThread = IsInGameThread();
+		bCompleted = true;
+	});
 
-    PumpGameThreadTasks();
+	MoQTesting::PumpDispatcher();
 
-    TestTrue(TEXT("Dispatcher should complete queued work"), bCompleted.load());
-    TestTrue(TEXT("Work should execute on game thread"), bOnGameThread.load());
-    return true;
+	TestTrue(TEXT("Dispatcher should complete queued work"), bCompleted.load());
+	TestTrue(TEXT("Work should execute on game thread"), bOnGameThread.load());
+	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSessionConnectionDispatchTest, "Open3DBroadcast.Open3DTransportMoQ.Session.ConnectionDispatch", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSessionConnectionDispatchTest, "Open3DBroadcast.Transport.MoQ.Session.ConnectionDispatch", O3DB_TEST_FLAGS)
 bool FMoQSessionConnectionDispatchTest::RunTest(const FString& Parameters)
 {
-    FMoQAsyncDispatcher::Get().Initialize();
+	MoQTesting::InitializeDispatcher();
 
-    TSharedRef<FMoQSessionWrapper> Session = MakeShared<FMoQSessionWrapper>();
-    std::atomic<bool> bDelegateCalled{false};
-    std::atomic<bool> bDelegateOnGameThread{false};
+	// Declared before the session so they outlive its handler.
+	std::atomic<bool> bDelegateCalled{false};
+	std::atomic<bool> bDelegateOnGameThread{false};
 
-    Session->OnConnectionStateChanged().AddLambda([&bDelegateCalled, &bDelegateOnGameThread](MoqConnectionState State)
-    {
-        if (State == MOQ_STATE_CONNECTED)
-        {
-            bDelegateCalled = true;
-            bDelegateOnGameThread = IsInGameThread();
-        }
-    });
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	FMoQTestSession Session(Fake->MakeApi());
+	TestTrue(TEXT("Initialize should succeed"), Session.Initialize(TEXT("https://localhost:4443")).IsOk());
+	Session.AddConnectionStateHandler([&bDelegateCalled, &bDelegateOnGameThread](MoqConnectionState State)
+	{
+		if (State == MOQ_STATE_CONNECTED)
+		{
+			bDelegateCalled = true;
+			bDelegateOnGameThread = IsInGameThread();
+		}
+	});
 
-    FMoQSessionWrapperTestHelper::InvokeConnectionState(*Session, MOQ_STATE_CONNECTED);
+	Session.InvokeConnectionState(MOQ_STATE_CONNECTED);
+	MoQTesting::PumpDispatcher();
 
-    PumpGameThreadTasks();
-
-    TestTrue(TEXT("Connection delegate should be invoked"), bDelegateCalled.load());
-    TestTrue(TEXT("Connection delegate should execute on the game thread"), bDelegateOnGameThread.load());
-    return true;
+	TestTrue(TEXT("Connection delegate should be invoked"), bDelegateCalled.load());
+	TestTrue(TEXT("Connection delegate should execute on the game thread"), bDelegateOnGameThread.load());
+	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSessionSubscriberDispatchTest, "Open3DBroadcast.Open3DTransportMoQ.Session.SubscriberDispatch", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSessionSubscriberDispatchTest, "Open3DBroadcast.Transport.MoQ.Session.SubscriberDispatch", O3DB_TEST_FLAGS)
 bool FMoQSessionSubscriberDispatchTest::RunTest(const FString& Parameters)
 {
-    FMoQAsyncDispatcher::Get().Initialize();
+	MoQTesting::InitializeDispatcher();
 
-    std::atomic<bool> bPayloadReceived{false};
-    std::atomic<bool> bOnGameThread{false};
-    std::atomic<int64> PayloadSize{0};
+	std::atomic<bool> bPayloadReceived{false};
+	std::atomic<bool> bOnGameThread{false};
+	std::atomic<int64> PayloadSize{0};
 
-    TFunction<void(const TArray64<uint8>&)> Handler = [this, &bPayloadReceived, &bOnGameThread, &PayloadSize](const TArray64<uint8>& Payload)
-    {
-        bOnGameThread = IsInGameThread();
-        PayloadSize = Payload.Num();
-        bPayloadReceived = !Payload.IsEmpty();
-        if (Payload.IsEmpty())
-        {
-            AddError(TEXT("Payload should not be empty in positive-path dispatcher test"));
-        }
-    };
+	TFunction<void(const TArray64<uint8>&)> Handler = [this, &bPayloadReceived, &bOnGameThread, &PayloadSize](const TArray64<uint8>& Payload)
+	{
+		bOnGameThread = IsInGameThread();
+		PayloadSize = Payload.Num();
+		bPayloadReceived = !Payload.IsEmpty();
+		if (Payload.IsEmpty())
+		{
+			AddError(TEXT("Payload should not be empty in positive-path dispatcher test"));
+		}
+	};
 
-    TArray64<uint8> Payload;
-    Payload.Add(0x10);
-    Payload.Add(0x20);
-    Payload.Add(0x30);
+	TArray64<uint8> Payload;
+	Payload.Add(0x10);
+	Payload.Add(0x20);
+	Payload.Add(0x30);
 
-    FMoQSessionWrapperTestHelper::InvokeSubscriberCallback(Handler, Payload);
+	MoQTesting::InvokeSubscriberCallback(Handler, Payload);
+	MoQTesting::PumpDispatcher();
 
-    PumpGameThreadTasks();
-
-    TestTrue(TEXT("Subscriber callback should be invoked"), bPayloadReceived.load());
-    TestTrue(TEXT("Subscriber callback should execute on the game thread"), bOnGameThread.load());
-    TestEqual(TEXT("Payload size should round-trip"), PayloadSize.load(), static_cast<int64>(Payload.Num()));
-    return true;
+	TestTrue(TEXT("Subscriber callback should be invoked"), bPayloadReceived.load());
+	TestTrue(TEXT("Subscriber callback should execute on the game thread"), bOnGameThread.load());
+	TestEqual(TEXT("Payload size should round-trip"), PayloadSize.load(), static_cast<int64>(Payload.Num()));
+	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQResultFromCodeFallbackTest, "Open3DBroadcast.Open3DTransportMoQ.Result.Fallback", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQResultFromCodeFallbackTest, "Open3DBroadcast.Transport.MoQ.Result.Fallback", O3DB_TEST_FLAGS)
 bool FMoQResultFromCodeFallbackTest::RunTest(const FString& Parameters)
 {
-    const FMoQResult Result = FMoQResult::FromCode(EMoQErrorCode::Timeout, FString());
-    TestTrue(TEXT("Fallback message should not be empty"), !Result.Message.IsEmpty());
-    TestEqual(TEXT("Timeout should map correctly"), LexToString(Result.Code), LexToString(EMoQErrorCode::Timeout));
-    return true;
+	const FMoQTestResult Result = MoQTesting::MakeResultFromRawCode(MOQ_ERROR_TIMEOUT, FString());
+	TestTrue(TEXT("Fallback message should not be empty"), !Result.Message.IsEmpty());
+	TestEqual(TEXT("Timeout should map correctly"), Result.Code, FString(TEXT("Timeout")));
+	TestFalse(TEXT("A timeout is not OK"), Result.IsOk());
+	return true;
 }
 
 #endif // O3D_WITH_TRANSPORT_MOQ

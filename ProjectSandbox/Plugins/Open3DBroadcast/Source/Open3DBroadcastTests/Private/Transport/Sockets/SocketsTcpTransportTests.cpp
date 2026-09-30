@@ -11,15 +11,16 @@
 //   (TRB-13); the receiver notices the close and reconnects with backoff (TRB-4).
 // - IdleKeepalive: an idle sender keeps the receiver connected past its idle timeout (TRB-6).
 //
-// No fixed sleeps: every wait polls a condition against a deadline. WP-T2 moves these tests
-// to the Open3DBroadcastTests module.
+// No fixed sleeps: every wait polls a condition against a deadline. The transport is reached
+// through Testing/SocketsTesting.h (WP-T2).
+// Option keys are spelled out: they are the user-facing names persisted in settings
+// (SocketsTransportCommon.h, SocketsTcpTransport.h), so these tests also pin them.
 
-#if WITH_DEV_AUTOMATION_TESTS
+#include "O3DTestHarness.h"
 
-#include "../Sender/SocketsTcpSender.h"
-#include "../Receiver/SocketsTcpReceiver.h"
-#include "../Shared/SocketsTransportCommon.h"
-#include "../Shared/SocketsTcpTransport.h"
+#if WITH_DEV_AUTOMATION_TESTS && O3D_WITH_TRANSPORT_SOCKETS
+
+#include "Testing/SocketsTesting.h"
 
 #include "Misc/AutomationTest.h"
 #include "HAL/PlatformProcess.h"
@@ -28,6 +29,8 @@
 #include "Sockets.h"
 #include "IPAddress.h"
 
+#include "O3DReceiverInterface.h"
+#include "O3DSenderInterface.h"
 #include "O3DTransportTypes.h"
 #include "SerializedFrameConsumerRegistry.h"
 
@@ -81,8 +84,8 @@ namespace O3DSocketsTcpTests
 		Config.Role = bSender ? TEXT("sender") : TEXT("receiver");
 		Config.Uri = FString::Printf(TEXT("tcp://127.0.0.1:%d"), Port);
 		Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), Port);
-		Config.AdvancedParams.Add(bSender ? O3DSockets::BindOptionKey : O3DSockets::HostOptionKey, TEXT("127.0.0.1"));
-		Config.AdvancedParams.Add(O3DSockets::PortOptionKey, FString::FromInt(Port));
+		Config.AdvancedParams.Add(bSender ? TEXT("bind") : TEXT("host"), TEXT("127.0.0.1"));
+		Config.AdvancedParams.Add(TEXT("port"), FString::FromInt(Port));
 		for (const TPair<FString, FString>& Pair : Extra)
 		{
 			Config.AdvancedParams.Add(Pair.Key, Pair.Value);
@@ -123,7 +126,7 @@ namespace O3DSocketsTcpTests
 
 	/** Polls the receiver until Condition holds or the deadline passes. No fixed sleeps. */
 	template <typename TCondition>
-	bool PollUntil(FO3DSocketsTcpReceiver& Receiver, double TimeoutSeconds, TCondition&& Condition)
+	bool PollUntil(IOpen3DReceiver& Receiver, double TimeoutSeconds, TCondition&& Condition)
 	{
 		const double Deadline = FPlatformTime::Seconds() + TimeoutSeconds;
 		while (FPlatformTime::Seconds() < Deadline)
@@ -133,7 +136,7 @@ namespace O3DSocketsTcpTests
 			{
 				return true;
 			}
-			FPlatformProcess::Sleep(0.0f); // yield only
+			FPlatformProcess::YieldThread();
 		}
 		return Condition();
 	}
@@ -149,7 +152,7 @@ namespace O3DSocketsTcpTests
 			{
 				return true;
 			}
-			FPlatformProcess::Sleep(0.0f); // yield only
+			FPlatformProcess::YieldThread();
 		}
 		return Condition();
 	}
@@ -157,8 +160,10 @@ namespace O3DSocketsTcpTests
 	/** A connected sender/receiver pair on an ephemeral loopback port. */
 	struct FPair
 	{
-		FO3DSocketsTcpSender Sender;
-		FO3DSocketsTcpReceiver Receiver;
+		TSharedRef<IOpen3DSender> SenderRef = O3DSocketsTesting::CreateTcpSender();
+		TSharedRef<IOpen3DReceiver> ReceiverRef = O3DSocketsTesting::CreateTcpReceiver();
+		IOpen3DSender& Sender = *SenderRef;
+		IOpen3DReceiver& Receiver = *ReceiverRef;
 		TSharedPtr<FRecordingConsumer> Consumer = MakeShared<FRecordingConsumer>();
 
 		bool Setup(FAutomationTestBase& Test, const TMap<FString, FString>& SenderOptions, const TMap<FString, FString>& ReceiverOptions)
@@ -181,7 +186,7 @@ namespace O3DSocketsTcpTests
 			}
 			return Test.TestTrue(TEXT("Receiver connects"), PollUntil(Receiver, 10.0, [this]()
 			{
-				return Receiver.IsConnected() && Sender.HasClient();
+				return O3DSocketsTesting::TcpReceiverIsConnected(Receiver) && O3DSocketsTesting::TcpSenderHasClient(Sender);
 			}));
 		}
 
@@ -193,7 +198,7 @@ namespace O3DSocketsTcpTests
 	};
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsTcpBurstTest, "Open3DBroadcast.Transport.Sockets.Tcp.Burst1000", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsTcpBurstTest, "Open3DBroadcast.Transport.Sockets.Tcp.Burst1000", O3DB_TEST_FLAGS)
 bool FO3DSocketsTcpBurstTest::RunTest(const FString& Parameters)
 {
 	using namespace O3DSocketsTcpTests;
@@ -204,7 +209,7 @@ bool FO3DSocketsTcpBurstTest::RunTest(const FString& Parameters)
 
 	FPair Pair;
 	TMap<FString, FString> SenderOptions;
-	SenderOptions.Add(O3DSockets::Tcp::MaxQueueAgeOptionKey, TEXT("0"));
+	SenderOptions.Add(TEXT("tcp.maxqueueage"), TEXT("0"));
 	if (!Pair.Setup(*this, SenderOptions, {}))
 	{
 		return false;
@@ -227,11 +232,11 @@ bool FO3DSocketsTcpBurstTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Frames intact and in order (first mismatch)"), FindFirstMismatch(Pair.Consumer->Frames, FrameSize), static_cast<int32>(INDEX_NONE));
 	TestEqual(TEXT("Receiver dropped nothing"), Pair.Receiver.GetStats().DroppedFrames, static_cast<int64>(0));
 	TestEqual(TEXT("Sender dropped nothing"), Pair.Sender.GetStats().DroppedFrames, static_cast<int64>(0));
-	TestEqual(TEXT("One connection throughout"), Pair.Receiver.GetConnectCount(), 1);
+	TestEqual(TEXT("One connection throughout"), O3DSocketsTesting::TcpReceiverGetConnectCount(Pair.Receiver), 1);
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsTcpSlowReaderTest, "Open3DBroadcast.Transport.Sockets.Tcp.SlowReader", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsTcpSlowReaderTest, "Open3DBroadcast.Transport.Sockets.Tcp.SlowReader", O3DB_TEST_FLAGS)
 bool FO3DSocketsTcpSlowReaderTest::RunTest(const FString& Parameters)
 {
 	using namespace O3DSocketsTcpTests;
@@ -243,11 +248,11 @@ bool FO3DSocketsTcpSlowReaderTest::RunTest(const FString& Parameters)
 
 	FPair Pair;
 	TMap<FString, FString> SenderOptions;
-	SenderOptions.Add(O3DSockets::Tcp::MaxQueueOptionKey, FString::FromInt(128 * 1024 * 1024));
-	SenderOptions.Add(O3DSockets::Tcp::MaxQueueAgeOptionKey, TEXT("0"));
-	SenderOptions.Add(O3DSockets::Tcp::StallTimeoutOptionKey, TEXT("30000"));
+	SenderOptions.Add(TEXT("tcp.maxqueue"), FString::FromInt(128 * 1024 * 1024));
+	SenderOptions.Add(TEXT("tcp.maxqueueage"), TEXT("0"));
+	SenderOptions.Add(TEXT("tcp.stalltimeout"), TEXT("30000"));
 	TMap<FString, FString> ReceiverOptions;
-	ReceiverOptions.Add(O3DSockets::TimeoutOptionKey, TEXT("30"));
+	ReceiverOptions.Add(TEXT("tcp.timeout"), TEXT("30"));
 	if (!Pair.Setup(*this, SenderOptions, ReceiverOptions))
 	{
 		return false;
@@ -265,20 +270,20 @@ bool FO3DSocketsTcpSlowReaderTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Sender accepted every frame"), Rejected, 0);
 
 	// The receiver is not polled here, so it reads nothing until the sender is blocked.
-	TestTrue(TEXT("Sender hit a full send buffer"), WaitUntil(15.0, [&Pair]() { return Pair.Sender.GetSendWaitCount() > 0; }));
-	TestTrue(TEXT("Client kept while blocked"), Pair.Sender.HasClient());
+	TestTrue(TEXT("Sender hit a full send buffer"), WaitUntil(15.0, [&Pair]() { return O3DSocketsTesting::TcpSenderGetSendWaitCount(Pair.Sender) > 0; }));
+	TestTrue(TEXT("Client kept while blocked"), O3DSocketsTesting::TcpSenderHasClient(Pair.Sender));
 
 	PollUntil(Pair.Receiver, 60.0, [&Pair]() { return Pair.Consumer->Frames.Num() >= NumFrames; });
 
 	TestEqual(TEXT("Every frame received"), Pair.Consumer->Frames.Num(), NumFrames);
 	TestEqual(TEXT("Frames intact and in order (first mismatch)"), FindFirstMismatch(Pair.Consumer->Frames, FrameSize), static_cast<int32>(INDEX_NONE));
 	TestEqual(TEXT("Sender dropped nothing"), Pair.Sender.GetStats().DroppedFrames, static_cast<int64>(0));
-	TestEqual(TEXT("One connection throughout"), Pair.Receiver.GetConnectCount(), 1);
-	TestTrue(TEXT("Client still connected"), Pair.Sender.HasClient());
+	TestEqual(TEXT("One connection throughout"), O3DSocketsTesting::TcpReceiverGetConnectCount(Pair.Receiver), 1);
+	TestTrue(TEXT("Client still connected"), O3DSocketsTesting::TcpSenderHasClient(Pair.Sender));
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsTcpReconnectTest, "Open3DBroadcast.Transport.Sockets.Tcp.ReconnectAfterSenderRestart", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsTcpReconnectTest, "Open3DBroadcast.Transport.Sockets.Tcp.ReconnectAfterSenderRestart", O3DB_TEST_FLAGS)
 bool FO3DSocketsTcpReconnectTest::RunTest(const FString& Parameters)
 {
 	using namespace O3DSocketsTcpTests;
@@ -287,8 +292,8 @@ bool FO3DSocketsTcpReconnectTest::RunTest(const FString& Parameters)
 
 	FPair Pair;
 	TMap<FString, FString> ReceiverOptions;
-	ReceiverOptions.Add(O3DSockets::Tcp::BackoffOptionKey, TEXT("50"));
-	ReceiverOptions.Add(O3DSockets::Tcp::MaxBackoffOptionKey, TEXT("200"));
+	ReceiverOptions.Add(TEXT("tcp.backoff"), TEXT("50"));
+	ReceiverOptions.Add(TEXT("tcp.maxbackoff"), TEXT("200"));
 	if (!Pair.Setup(*this, {}, ReceiverOptions))
 	{
 		return false;
@@ -300,12 +305,12 @@ bool FO3DSocketsTcpReconnectTest::RunTest(const FString& Parameters)
 
 	// Restart the same sender without Initialize() (TRB-13).
 	Pair.Sender.Stop();
-	TestTrue(TEXT("Receiver notices the sender closed"), PollUntil(Pair.Receiver, 10.0, [&Pair]() { return !Pair.Receiver.IsConnected(); }));
+	TestTrue(TEXT("Receiver notices the sender closed"), PollUntil(Pair.Receiver, 10.0, [&Pair]() { return !O3DSocketsTesting::TcpReceiverIsConnected(Pair.Receiver); }));
 	TestTrue(TEXT("Sender restarts without Initialize"), Pair.Sender.Start());
 
 	TestTrue(TEXT("Receiver reconnects"), PollUntil(Pair.Receiver, 15.0, [&Pair]()
 	{
-		return Pair.Receiver.GetConnectCount() >= 2 && Pair.Receiver.IsConnected() && Pair.Sender.HasClient();
+		return O3DSocketsTesting::TcpReceiverGetConnectCount(Pair.Receiver) >= 2 && O3DSocketsTesting::TcpReceiverIsConnected(Pair.Receiver) && O3DSocketsTesting::TcpSenderHasClient(Pair.Sender);
 	}));
 
 	const TArray<uint8> Second = MakePayload(1, FrameSize);
@@ -317,7 +322,7 @@ bool FO3DSocketsTcpReconnectTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsTcpIdleKeepaliveTest, "Open3DBroadcast.Transport.Sockets.Tcp.IdleKeepalive", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsTcpIdleKeepaliveTest, "Open3DBroadcast.Transport.Sockets.Tcp.IdleKeepalive", O3DB_TEST_FLAGS)
 bool FO3DSocketsTcpIdleKeepaliveTest::RunTest(const FString& Parameters)
 {
 	using namespace O3DSocketsTcpTests;
@@ -326,9 +331,9 @@ bool FO3DSocketsTcpIdleKeepaliveTest::RunTest(const FString& Parameters)
 	// second. Keepalives every 100 ms keep the one connection alive and deliver no frames.
 	FPair Pair;
 	TMap<FString, FString> SenderOptions;
-	SenderOptions.Add(O3DSockets::Tcp::KeepaliveOptionKey, TEXT("100"));
+	SenderOptions.Add(TEXT("tcp.keepalive"), TEXT("100"));
 	TMap<FString, FString> ReceiverOptions;
-	ReceiverOptions.Add(O3DSockets::TimeoutOptionKey, TEXT("1"));
+	ReceiverOptions.Add(TEXT("tcp.timeout"), TEXT("1"));
 	if (!Pair.Setup(*this, SenderOptions, ReceiverOptions))
 	{
 		return false;
@@ -337,14 +342,14 @@ bool FO3DSocketsTcpIdleKeepaliveTest::RunTest(const FString& Parameters)
 	// Observe for three idle timeouts; the condition only turns true if the link flaps.
 	const bool bFlapped = PollUntil(Pair.Receiver, 3.0, [&Pair]()
 	{
-		return !Pair.Receiver.IsConnected() || Pair.Receiver.GetConnectCount() != 1;
+		return !O3DSocketsTesting::TcpReceiverIsConnected(Pair.Receiver) || O3DSocketsTesting::TcpReceiverGetConnectCount(Pair.Receiver) != 1;
 	});
 
 	TestFalse(TEXT("Connection stayed up while the sender was idle"), bFlapped);
-	TestEqual(TEXT("One connection throughout"), Pair.Receiver.GetConnectCount(), 1);
+	TestEqual(TEXT("One connection throughout"), O3DSocketsTesting::TcpReceiverGetConnectCount(Pair.Receiver), 1);
 	TestEqual(TEXT("Keepalives are not delivered as frames"), Pair.Consumer->Frames.Num(), 0);
 	TestEqual(TEXT("Keepalives are not counted as frames"), Pair.Receiver.GetStats().FramesReceived, static_cast<int64>(0));
 	return true;
 }
 
-#endif // WITH_DEV_AUTOMATION_TESTS
+#endif // WITH_DEV_AUTOMATION_TESTS && O3D_WITH_TRANSPORT_SOCKETS

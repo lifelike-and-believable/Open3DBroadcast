@@ -12,6 +12,7 @@
 #include "O3DSenderInterface.h"
 
 #include "Misc/AutomationTest.h"
+#include "O3DTestHarness.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/Runnable.h"
 #include "HAL/RunnableThread.h"
@@ -94,7 +95,7 @@ namespace
 	};
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderCaptureParamsLifetimeTest, "Open3DBroadcast.Sender.Lifetime.CaptureParamsSnapshot", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderCaptureParamsLifetimeTest, "Open3DBroadcast.Sender.Lifetime.CaptureParamsSnapshot", O3DB_TEST_FLAGS)
 bool FO3DSenderCaptureParamsLifetimeTest::RunTest(const FString& Parameters)
 {
 	UO3DSenderAudioCaptureComponent* Component = NewObject<UO3DSenderAudioCaptureComponent>();

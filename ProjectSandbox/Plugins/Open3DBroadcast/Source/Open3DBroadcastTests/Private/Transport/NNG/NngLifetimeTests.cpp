@@ -6,10 +6,14 @@
 // addresses, so this listens on 127.0.0.1 (no inproc/ipc support in the option parser).
 // Run under ASan to catch use-after-free.
 
-#if WITH_DEV_AUTOMATION_TESTS
+// Option keys are spelled out: they are the user-facing names persisted in settings
+// (NngHelpers.h), so these tests also pin them.
 
-#include "Sender/NngSender.h"
-#include "Shared/NngHelpers.h"
+#include "O3DTestHarness.h"
+
+#if WITH_DEV_AUTOMATION_TESTS && O3D_WITH_TRANSPORT_NNG
+
+#include "Testing/NngTesting.h"
 #include "Testing/O3DLifetimeTestUtils.h"
 
 #include "Misc/AutomationTest.h"
@@ -49,10 +53,12 @@ namespace
 	}
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DNngLifetimeStressTest, "Open3DBroadcast.Transport.NNG.Lifetime.StartStopWithAudio", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DNngLifetimeStressTest, "Open3DBroadcast.Transport.NNG.Lifetime.StartStopWithAudio", O3DB_TEST_FLAGS)
 bool FO3DNngLifetimeStressTest::RunTest(const FString& Parameters)
 {
-	const O3DLifetimeTest::FStressResult Result = O3DLifetimeTest::RunSenderStress<FO3DNngSender>([](int32)
+	const O3DLifetimeTest::FStressResult Result = O3DLifetimeTest::RunSenderStressWith(
+		[]() -> TSharedPtr<IOpen3DSender> { return O3DNngTesting::CreateSender(); },
+		[](int32)
 	{
 		// A fresh port per cycle so a lingering listener can never make Start() fail.
 		const int32 Port = FindFreeLoopbackTcpPort();
@@ -61,10 +67,10 @@ bool FO3DNngLifetimeStressTest::RunTest(const FString& Parameters)
 		Config.Role = TEXT("sender");
 		Config.Uri = FString::Printf(TEXT("tcp://127.0.0.1:%d"), Port);
 		Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), Port);
-		Config.AdvancedParams.Add(O3DNNG::ModeOptionKey, TEXT("pub"));
-		Config.AdvancedParams.Add(O3DNNG::HostOptionKey, TEXT("127.0.0.1"));
-		Config.AdvancedParams.Add(O3DNNG::PortOptionKey, FString::FromInt(Port));
-		Config.AdvancedParams.Add(O3DNNG::RoleOptionKey, TEXT("server"));
+		Config.AdvancedParams.Add(TEXT("nng.mode"), TEXT("pub"));
+		Config.AdvancedParams.Add(TEXT("host"), TEXT("127.0.0.1"));
+		Config.AdvancedParams.Add(TEXT("port"), FString::FromInt(Port));
+		Config.AdvancedParams.Add(TEXT("nng.role"), TEXT("server"));
 		Config.Audio.bEnableAudio = true;
 		Config.Audio.SampleRate = 48000;
 		Config.Audio.NumChannels = 1;
@@ -79,4 +85,4 @@ bool FO3DNngLifetimeStressTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-#endif // WITH_DEV_AUTOMATION_TESTS
+#endif // WITH_DEV_AUTOMATION_TESTS && O3D_WITH_TRANSPORT_NNG

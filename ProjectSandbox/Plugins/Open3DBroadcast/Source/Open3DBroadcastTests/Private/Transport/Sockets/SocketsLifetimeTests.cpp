@@ -5,12 +5,15 @@
 // destroyed while the audio thread still holds its sink. Run under ASan to catch
 // use-after-free. No network beyond the loopback interface.
 
-#if WITH_DEV_AUTOMATION_TESTS
+// Option keys are spelled out: they are the user-facing names persisted in settings
+// (SocketsTransportCommon.h, SocketsTcpTransport.h), so these tests also pin them.
 
-#include "../Sender/SocketsTcpSender.h"
-#include "../Sender/SocketsUdpSender.h"
-#include "../Shared/SocketsTransportCommon.h"
+#include "O3DTestHarness.h"
+
+#if WITH_DEV_AUTOMATION_TESTS && O3D_WITH_TRANSPORT_SOCKETS
+
 #include "Testing/O3DLifetimeTestUtils.h"
+#include "Testing/SocketsTesting.h"
 
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
@@ -67,8 +70,8 @@ namespace
 		Config.Role = TEXT("sender");
 		Config.Uri = FString::Printf(TEXT("%s://127.0.0.1:%d"), Scheme, Port);
 		Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), Port);
-		Config.AdvancedParams.Add(O3DSockets::BindOptionKey, TEXT("127.0.0.1"));
-		Config.AdvancedParams.Add(O3DSockets::PortOptionKey, FString::FromInt(Port));
+		Config.AdvancedParams.Add(TEXT("bind"), TEXT("127.0.0.1"));
+		Config.AdvancedParams.Add(TEXT("port"), FString::FromInt(Port));
 		Config.Audio.bEnableAudio = true;
 		Config.Audio.SampleRate = 48000;
 		Config.Audio.NumChannels = 1;
@@ -76,7 +79,7 @@ namespace
 	}
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsTcpLifetimeStressTest, "Open3DBroadcast.Transport.Sockets.Lifetime.TcpStartStopWithAudio", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsTcpLifetimeStressTest, "Open3DBroadcast.Transport.Sockets.Lifetime.TcpStartStopWithAudio", O3DB_TEST_FLAGS)
 bool FO3DSocketsTcpLifetimeStressTest::RunTest(const FString& Parameters)
 {
 	const int32 Port = FindFreeTcpPort();
@@ -88,7 +91,9 @@ bool FO3DSocketsTcpLifetimeStressTest::RunTest(const FString& Parameters)
 
 	// No client connects, so the sink rejects PCM (no peer), but every submit still runs the
 	// gate and races Stop(); that is the path TRB-10/TRB-12 were about.
-	const O3DLifetimeTest::FStressResult Result = O3DLifetimeTest::RunSenderStress<FO3DSocketsTcpSender>([Port](int32)
+	const O3DLifetimeTest::FStressResult Result = O3DLifetimeTest::RunSenderStressWith(
+		[]() -> TSharedPtr<IOpen3DSender> { return O3DSocketsTesting::CreateTcpSender(); },
+		[Port](int32)
 	{
 		return MakeSocketsConfig(TEXT("tcp"), Port);
 	}, /*bStart=*/true);
@@ -101,7 +106,7 @@ bool FO3DSocketsTcpLifetimeStressTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsUdpLifetimeStressTest, "Open3DBroadcast.Transport.Sockets.Lifetime.UdpStartStopWithAudio", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsUdpLifetimeStressTest, "Open3DBroadcast.Transport.Sockets.Lifetime.UdpStartStopWithAudio", O3DB_TEST_FLAGS)
 bool FO3DSocketsUdpLifetimeStressTest::RunTest(const FString& Parameters)
 {
 	// A bound UDP socket on 127.0.0.1 receives (and discards) the datagrams, so audio sends
@@ -118,7 +123,9 @@ bool FO3DSocketsUdpLifetimeStressTest::RunTest(const FString& Parameters)
 		ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(SinkSocket);
 	};
 
-	const O3DLifetimeTest::FStressResult Result = O3DLifetimeTest::RunSenderStress<FO3DSocketsUdpSender>([Port](int32)
+	const O3DLifetimeTest::FStressResult Result = O3DLifetimeTest::RunSenderStressWith(
+		[]() -> TSharedPtr<IOpen3DSender> { return O3DSocketsTesting::CreateUdpSender(); },
+		[Port](int32)
 	{
 		return MakeSocketsConfig(TEXT("udp"), Port);
 	}, /*bStart=*/true);
@@ -131,4 +138,4 @@ bool FO3DSocketsUdpLifetimeStressTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-#endif // WITH_DEV_AUTOMATION_TESTS
+#endif // WITH_DEV_AUTOMATION_TESTS && O3D_WITH_TRANSPORT_SOCKETS

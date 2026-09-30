@@ -7,6 +7,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "O3DTestHarness.h"
 #include "HAL/Event.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/Runnable.h"
@@ -65,7 +66,7 @@ namespace
 	};
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLifetimeGateCloseWaitsForReaderTest, "Open3DBroadcast.Shared.Lifetime.Gate.CloseWaitsForInFlightProducer", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLifetimeGateCloseWaitsForReaderTest, "Open3DBroadcast.Shared.Lifetime.Gate.CloseWaitsForInFlightProducer", O3DB_TEST_FLAGS)
 bool FO3DLifetimeGateCloseWaitsForReaderTest::RunTest(const FString& Parameters)
 {
 	FO3DLifetimeGate Gate;
@@ -128,7 +129,7 @@ bool FO3DLifetimeGateCloseWaitsForReaderTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLifetimeGateStressTest, "Open3DBroadcast.Shared.Lifetime.Gate.OpenCloseStress", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLifetimeGateStressTest, "Open3DBroadcast.Shared.Lifetime.Gate.OpenCloseStress", O3DB_TEST_FLAGS)
 bool FO3DLifetimeGateStressTest::RunTest(const FString& Parameters)
 {
 	// A producer thread hammers the gate while the game thread opens and closes it. Every time
@@ -177,7 +178,7 @@ bool FO3DLifetimeGateStressTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DEncodedPayloadQueueTest, "Open3DBroadcast.Shared.Lifetime.PayloadQueue.MpscAccounting", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DEncodedPayloadQueueTest, "Open3DBroadcast.Shared.Lifetime.PayloadQueue.MpscAccounting", O3DB_TEST_FLAGS)
 bool FO3DEncodedPayloadQueueTest::RunTest(const FString& Parameters)
 {
 	{
@@ -254,7 +255,7 @@ bool FO3DEncodedPayloadQueueTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DFfiContextRegistryTest, "Open3DBroadcast.Shared.Lifetime.FfiContextRegistry.StaleTokens", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DFfiContextRegistryTest, "Open3DBroadcast.Shared.Lifetime.FfiContextRegistry.StaleTokens", O3DB_TEST_FLAGS)
 bool FO3DFfiContextRegistryTest::RunTest(const FString& Parameters)
 {
 	TO3DFfiContextRegistry<FTestContext> Registry;
@@ -303,7 +304,7 @@ bool FO3DFfiContextRegistryTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DMultiStreamDecoderTest, "Open3DBroadcast.Shared.Lifetime.Decoder.OnePerStream", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DMultiStreamDecoderTest, "Open3DBroadcast.Shared.Lifetime.Decoder.OnePerStream", O3DB_TEST_FLAGS)
 bool FO3DMultiStreamDecoderTest::RunTest(const FString& Parameters)
 {
 	O3DAudio::FMultiStreamFrameDecoder Decoder(2);
@@ -329,7 +330,7 @@ bool FO3DMultiStreamDecoderTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSinkAudioEncoderTest, "Open3DBroadcast.Shared.Lifetime.Encoder.SnapshotAndLabels", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSinkAudioEncoderTest, "Open3DBroadcast.Shared.Lifetime.Encoder.SnapshotAndLabels", O3DB_TEST_FLAGS)
 bool FO3DSinkAudioEncoderTest::RunTest(const FString& Parameters)
 {
 	FO3DSinkAudioEncoder::FSettings Settings;
@@ -370,7 +371,7 @@ bool FO3DSinkAudioEncoderTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DAudioBusGameThreadTest, "Open3DBroadcast.Shared.Lifetime.AudioBus.GameThreadPublish", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DAudioBusGameThreadTest, "Open3DBroadcast.Shared.Lifetime.AudioBus.GameThreadPublish", O3DB_TEST_FLAGS)
 bool FO3DAudioBusGameThreadTest::RunTest(const FString& Parameters)
 {
 	// SHR-10: the bus is game-thread-only. Publishing with no listener is a no-op; with a

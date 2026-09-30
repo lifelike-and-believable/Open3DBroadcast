@@ -1,1447 +1,260 @@
-#if WITH_DEV_AUTOMATION_TESTS
+// Copyright (c) Open3DStream Contributors
+//
+// Open3DBroadcast.Network.MoQ.*: the MoQ transport against a real relay (ADR 0006 §6, UX-4,
+// TRF-34). Formerly MoQCloudflareRelayTests.cpp, whose Cloudflare.Basic test sat in the default
+// filter and fell back to a hard-coded public relay.
+//
+// These tests register no instances unless O3DB_NETWORK_TESTS=1, so they are absent from every
+// default run and from the Session Frontend. The relay comes only from O3D_MOQ_RELAY_URL; with
+// the flag set and no URL, every test fails instead of passing. They go through the registered
+// "MoQ" transport with the production moq-ffi, exactly as the sender component and the LiveLink
+// source do. The session-level relay checks of the old file are gone: the session layer is
+// covered offline by the fake-FFI tests (Transport/MoQ), and these end-to-end tests cover the
+// relay path. Waits poll a condition against a deadline; nothing sleeps.
 
-#include "CoreMinimal.h"
-#include "Misc/AutomationTest.h"
-#include "Misc/Guid.h"
+#include "O3DTestHarness.h"
+
+#if WITH_DEV_AUTOMATION_TESTS && O3D_WITH_TRANSPORT_MOQ
+
 #include "HAL/PlatformMisc.h"
-#include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
-#include "Containers/StringConv.h"
-#include "Containers/Ticker.h"
+#include "Misc/AutomationTest.h"
+#include "O3DReceiverRegistry.h"
+#include "O3DSenderRegistry.h"
+#include "Testing/MoQTesting.h"
 
-#include "O3DTransportTypes.h"
-#include "Sender/MoQSender.h"
-#include "Receiver/MoQReceiver.h"
-#include "SerializedFrameConsumerRegistry.h"
-#include "Shared/MoQFfiSupport.h"
-#include "Shared/MoQHandles.h"
-#include "Shared/MoQSessionWrapper.h"
-#include "Shared/MoQTypes.h"
-
-#include "o3ds/model.h"
-
-#include <string>
-#include <vector>
-
-#if O3D_WITH_TRANSPORT_MOQ
-
-namespace MoQTestHelpers
+namespace O3DNetworkMoQTests
 {
-static constexpr const TCHAR* kDefaultRelayUrl = TEXT("https://relay.cloudflare.mediaoverquic.com");
-static constexpr double kConnectionTimeout = 15.0;
-static constexpr double kOperationTimeout = 10.0;
-static constexpr double kSenderTimeout = 20.0;
-static constexpr double kTrackPropagationDelay = 0.5; // matches moq-ffi Cloudflare integration expectations
+	const FName MoQName(TEXT("MoQ"));
+	constexpr double ConnectAndDeliverTimeoutSeconds = 30.0;
+	constexpr double SendIntervalSeconds = 0.1;
 
-class FMoQSubscribeRetryController;
-
-FString ResolveRelayUrl()
-{
-	const FString EnvOverride = FPlatformMisc::GetEnvironmentVariable(TEXT("O3D_MOQ_RELAY_URL"));
-	if (!EnvOverride.IsEmpty())
+	FString GetRelayUrl()
 	{
-		return EnvOverride;
-	}
-	return kDefaultRelayUrl;
-}
-
-FString MakeUniqueNamespace(const FString& Prefix)
-{
-	const FString GuidString = FGuid::NewGuid().ToString(EGuidFormats::Digits);
-	return Prefix.IsEmpty() ? GuidString : FString::Printf(TEXT("%s/%s"), *Prefix, *GuidString);
-}
-
-void PopulateSubject(O3DS::SubjectList& List, const FString& SubjectName)
-{
-	const FTCHARToUTF8 SubjectUtf8(*SubjectName);
-	O3DS::Subject* Subject = List.addSubject(std::string(SubjectUtf8.Get(), SubjectUtf8.Length()));
-	Subject->addTransform("Root", -1);
-
-	static constexpr int32 CurveCount = 3;
-	const TCHAR* CurveNames[CurveCount] = { TEXT("Jaw_Open"), TEXT("EyeBlink_L"), TEXT("EyeBlink_R") };
-	for (int32 Index = 0; Index < CurveCount; ++Index)
-	{
-		const FTCHARToUTF8 CurveUtf8(CurveNames[Index]);
-		Subject->mCurveNames.emplace_back(CurveUtf8.Get(), CurveUtf8.Length());
-		Subject->mCurveValues.push_back(0.1f * static_cast<float>(Index + 1));
-	}
-}
-
-TArray<uint8> BuildSerializedPayload(const FString& SubjectName)
-{
-	O3DS::SubjectList Subjects;
-	PopulateSubject(Subjects, SubjectName);
-
-	std::vector<char> Buffer;
-	Subjects.Serialize(Buffer, FPlatformTime::Seconds());
-
-	TArray<uint8> Payload;
-	if (!Buffer.empty())
-	{
-		Payload.Append(reinterpret_cast<const uint8*>(Buffer.data()), static_cast<int32>(Buffer.size()));
-	}
-	return Payload;
-}
-
-struct FMoQSessionTestHarness : public TSharedFromThis<FMoQSessionTestHarness, ESPMode::ThreadSafe>
-{
-	FMoQSessionTestHarness(FString InRelayUrl, FString InLabel)
-		: RelayUrl(MoveTemp(InRelayUrl))
-		, Label(MoveTemp(InLabel))
-	{
+		return FPlatformMisc::GetEnvironmentVariable(TEXT("O3D_MOQ_RELAY_URL")).TrimStartAndEnd();
 	}
 
-	~FMoQSessionTestHarness()
+	/** A StreamId whose session part is unique, so parallel runs never share a namespace. */
+	FString MakeStreamId()
 	{
-		Disconnect();
+		return FString::Printf(TEXT("%s/actor"), *O3DTests::MakeUniqueName(TEXT("o3dbnet")));
 	}
 
-	bool Initialize(FAutomationTestBase& Test)
-	{
-		Session = MakeShared<FMoQSessionWrapper>();
-		const FMoQResult Result = Session->Initialize(RelayUrl);
-		if (!Test.TestTrue(*FString::Printf(TEXT("%s: session initializes"), *Label), Result.IsOk()))
-		{
-			return false;
-		}
-		InstallDelegate();
-		return true;
-	}
-
-	bool Connect(FAutomationTestBase& Test)
-	{
-		const FMoQResult Result = Session->Connect();
-		if (!Test.TestTrue(*FString::Printf(TEXT("%s: connect call succeeds"), *Label), Result.IsOk()))
-		{
-			return false;
-		}
-		return true;
-	}
-
-	void Disconnect()
-	{
-		if (!Session.IsValid())
-		{
-			return;
-		}
-
-		if (ConnectionHandle.IsValid())
-		{
-			Session->OnConnectionStateChanged().Remove(ConnectionHandle);
-			ConnectionHandle.Reset();
-		}
-
-		Session->Disconnect();
-		Session.Reset();
-		LastState = MOQ_STATE_DISCONNECTED;
-		bConnected = false;
-	}
-
-	void InstallDelegate()
-	{
-		TWeakPtr<FMoQSessionTestHarness, ESPMode::ThreadSafe> WeakHarness = AsShared();
-		ConnectionHandle = Session->OnConnectionStateChanged().AddLambda([WeakHarness](MoqConnectionState State)
-		{
-			if (const TSharedPtr<FMoQSessionTestHarness, ESPMode::ThreadSafe> Strong = WeakHarness.Pin())
-			{
-				Strong->LastState = State;
-				if (State == MOQ_STATE_CONNECTED)
-				{
-					Strong->bConnected = true;
-				}
-			}
-		});
-	}
-
-	const FString& GetLabel() const { return Label; }
-
-	FString RelayUrl;
-	FString Label;
-	TSharedPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> Session;
-	FDelegateHandle ConnectionHandle;
-	TAtomic<MoqConnectionState> LastState{MOQ_STATE_DISCONNECTED};
-	TAtomic<bool> bConnected{false};
-};
-
-struct FMoQPubSubState : public TSharedFromThis<FMoQPubSubState, ESPMode::ThreadSafe>
-{
-	TSharedPtr<FMoQPublisherHandle> Publisher;
-	TSharedPtr<FMoQSubscriberHandle> Subscriber;
-	TAtomic<bool> bPayloadReceived{false};
-	TAtomic<bool> bTrackPrimed{false};
-	TAtomic<bool> bSubscriberReady{false};
-	TAtomic<bool> bSubscribeFailed{false};
-	FString SubscribeFailureMessage;
-	TSharedPtr<FMoQSubscribeRetryController, ESPMode::ThreadSafe> SubscribeController;
-	FString Namespace;
-	FString TrackName;
-};
-
-struct FMoQSenderHarness : public TSharedFromThis<FMoQSenderHarness, ESPMode::ThreadSafe>
-{
-	~FMoQSenderHarness()
-	{
-		Shutdown();
-	}
-
-	bool Initialize(const FString& RelayUrl, const FString& Namespace, const FString& TrackName, FAutomationTestBase& Test)
+	FO3DTransportConfig MakeConfig(const FString& RelayUrl, const FString& StreamId, bool bSender)
 	{
 		FO3DTransportConfig Config;
 		Config.Transport = TEXT("MoQ");
+		Config.Role = bSender ? TEXT("sender") : TEXT("receiver");
 		Config.Uri = RelayUrl;
-		Config.StreamId = FString::Printf(TEXT("%s/%s"), *Namespace, *TrackName);
-		Config.AdvancedParams.Add(TEXT("track_namespace"), Namespace);
-		Config.AdvancedParams.Add(TEXT("track_name"), TrackName);
-		Config.AdvancedParams.Add(TEXT("relay_url"), RelayUrl);
-
-		if (!Sender.Initialize(Config))
-		{
-			Test.AddError(TEXT("Sender initialization failed"));
-			return false;
-		}
-
-		if (!Sender.Start())
-		{
-			Test.AddError(TEXT("Sender start failed"));
-			Sender.Stop();
-			return false;
-		}
-
-		bStarted = true;
-		return true;
+		Config.StreamId = StreamId;
+		return Config;
 	}
 
-	void Shutdown()
+	/** Runs FFI callbacks and upkeep; sends Payload on each sender at most every SendIntervalSeconds. */
+	struct FPump
 	{
-		if (bStarted)
+		TArray<TSharedPtr<IOpen3DSender>> Senders;
+		TArray<TArray<uint8>> Payloads;
+		TArray<TSharedPtr<IOpen3DReceiver>> Receivers;
+		double NextSend = 0.0;
+
+		void operator()()
 		{
-			Sender.Stop();
-			bStarted = false;
-		}
-	}
-
-	FO3DMoQSender Sender;
-	bool bStarted = false;
-};
-
-class FMoQSubscribeRetryController : public TSharedFromThis<FMoQSubscribeRetryController, ESPMode::ThreadSafe>
-{
-public:
-	FMoQSubscribeRetryController(
-		TSharedRef<FMoQSessionTestHarness, ESPMode::ThreadSafe> InHarness,
-		FString InNamespace,
-		FString InTrackName,
-		TSharedRef<FMoQPubSubState, ESPMode::ThreadSafe> InState,
-		int32 InMaxAttempts,
-		double InRetryDelaySeconds,
-		FAutomationTestBase* InTest)
-		: Harness(InHarness)
-		, NamespaceValue(MoveTemp(InNamespace))
-		, TrackValue(MoveTemp(InTrackName))
-		, PubSubState(InState)
-		, MaxAttempts(InMaxAttempts)
-		, RetryDelaySeconds(InRetryDelaySeconds)
-		, Test(InTest)
-	{
-	}
-
-	~FMoQSubscribeRetryController()
-	{
-		Stop();
-	}
-
-	void Start()
-	{
-		if (bRunning)
-		{
-			return;
-		}
-
-		bRunning = true;
-		Attempt = 0;
-		PubSubState->bSubscriberReady.Store(false);
-		PubSubState->bSubscribeFailed.Store(false);
-		PubSubState->SubscribeFailureMessage.Reset();
-		AttemptSubscribe();
-	}
-
-	void Stop()
-	{
-		bRunning = false;
-		if (RetryHandle.IsValid())
-		{
-			FTSTicker::GetCoreTicker().RemoveTicker(RetryHandle);
-			RetryHandle = FTSTicker::FDelegateHandle();
-		}
-	}
-
-private:
-	void AttemptSubscribe()
-	{
-		if (!bRunning)
-		{
-			return;
-		}
-
-		++Attempt;
-		PubSubState->Subscriber.Reset();
-		const TSharedPtr<FMoQSessionTestHarness, ESPMode::ThreadSafe> HarnessPtr = Harness.Pin();
-		if (!HarnessPtr.IsValid())
-		{
-			OnAttemptComplete(FMoQResult::FromCode(EMoQErrorCode::Internal, TEXT("Session harness destroyed before subscribe")), nullptr);
-			return;
-		}
-
-		FMoQSubscriptionConfig Config;
-		Config.Namespace = NamespaceValue;
-		Config.TrackName = TrackValue;
-		Config.OnData = [State = PubSubState](const TArray64<uint8>& Payload)
-		{
-			if (!Payload.IsEmpty())
+			MoQTesting::PumpDispatcher();
+			const double Now = FPlatformTime::Seconds();
+			const bool bSend = Now >= NextSend;
+			if (bSend)
 			{
-				State->bPayloadReceived.Store(true);
+				NextSend = Now + SendIntervalSeconds;
 			}
-		};
-
-		TWeakPtr<FMoQSubscribeRetryController, ESPMode::ThreadSafe> ControllerWeak = AsShared();
-		const FMoQResult ScheduleResult = HarnessPtr->Session->SubscribeAsync(Config,
-			[ControllerWeak](FMoQResult Result, TSharedPtr<FMoQSubscriberHandle> Subscriber)
+			for (int32 Index = 0; Index < Senders.Num(); ++Index)
 			{
-				if (const TSharedPtr<FMoQSubscribeRetryController, ESPMode::ThreadSafe> Strong = ControllerWeak.Pin())
+				Senders[Index]->Tick(0.0f);
+				if (bSend)
 				{
-					Strong->OnAttemptComplete(Result, Subscriber);
+					Senders[Index]->SendSerialized(Payloads[Index].GetData(), Payloads[Index].Num(), TEXT("actor"), Now);
 				}
-			});
-
-		if (!ScheduleResult.IsOk())
-		{
-			OnAttemptComplete(ScheduleResult, nullptr);
-		}
-	}
-
-	void OnAttemptComplete(FMoQResult Result, TSharedPtr<FMoQSubscriberHandle> Subscriber)
-	{
-		if (!bRunning)
-		{
-			return;
-		}
-
-		if (Result.IsOk() && Subscriber.IsValid())
-		{
-			PubSubState->Subscriber = Subscriber;
-			PubSubState->bSubscriberReady.Store(true);
-			PubSubState->bSubscribeFailed.Store(false);
-			if (Test)
-			{
-				Test->AddInfo(FString::Printf(TEXT("Subscriber creation succeeded after %d attempt(s)"), Attempt));
 			}
-			Stop();
-			return;
-		}
-
-		const FString Message = Result.Message.IsEmpty() ? TEXT("Unknown subscribe failure") : Result.Message;
-		if (Test)
-		{
-			Test->AddWarning(FString::Printf(TEXT("Subscriber attempt %d/%d failed: %s"), Attempt, MaxAttempts, *Message));
-		}
-
-		if (Attempt >= MaxAttempts)
-		{
-			PubSubState->bSubscribeFailed.Store(true);
-			PubSubState->SubscribeFailureMessage = Message;
-			Stop();
-			return;
-		}
-
-		ScheduleRetry();
-	}
-
-	void ScheduleRetry()
-	{
-		if (!bRunning)
-		{
-			return;
-		}
-
-		if (RetryDelaySeconds <= 0.0)
-		{
-			AttemptSubscribe();
-			return;
-		}
-
-		if (RetryHandle.IsValid())
-		{
-			FTSTicker::GetCoreTicker().RemoveTicker(RetryHandle);
-			RetryHandle = FTSTicker::FDelegateHandle();
-		}
-
-		RetryRemainingSeconds = RetryDelaySeconds;
-		TWeakPtr<FMoQSubscribeRetryController, ESPMode::ThreadSafe> ControllerWeak = AsShared();
-		RetryHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([ControllerWeak](float DeltaTime)
-		{
-			if (const TSharedPtr<FMoQSubscribeRetryController, ESPMode::ThreadSafe> Strong = ControllerWeak.Pin())
+			for (const TSharedPtr<IOpen3DReceiver>& Receiver : Receivers)
 			{
-				Strong->RetryRemainingSeconds -= DeltaTime;
-				if (Strong->RetryRemainingSeconds <= 0.0)
-				{
-					Strong->AttemptSubscribe();
-					Strong->RetryHandle = FTSTicker::FDelegateHandle();
-					return false;
-				}
-				return true;
-			}
-			return false;
-		}));
-	}
-
-	TWeakPtr<FMoQSessionTestHarness, ESPMode::ThreadSafe> Harness;
-	FString NamespaceValue;
-	FString TrackValue;
-	TSharedRef<FMoQPubSubState, ESPMode::ThreadSafe> PubSubState;
-	int32 MaxAttempts = 1;
-	double RetryDelaySeconds = 0.0;
-	FAutomationTestBase* Test = nullptr;
-	int32 Attempt = 0;
-	bool bRunning = false;
-	double RetryRemainingSeconds = 0.0;
-	FTSTicker::FDelegateHandle RetryHandle;
-};
-} // namespace MoQTestHelpers
-
-using namespace MoQTestHelpers;
-
-class FMoQSessionTeardownCommand : public IAutomationLatentCommand
-{
-public:
-	explicit FMoQSessionTeardownCommand(TSharedRef<FMoQSessionTestHarness, ESPMode::ThreadSafe> InHarness)
-		: Harness(MoveTemp(InHarness))
-	{
-	}
-
-	virtual bool Update() override
-	{
-		Harness->Disconnect();
-		return true;
-	}
-
-private:
-	TSharedRef<FMoQSessionTestHarness, ESPMode::ThreadSafe> Harness;
-};
-
-class FMoQCallLambdaLatentCommand : public IAutomationLatentCommand
-{
-public:
-	explicit FMoQCallLambdaLatentCommand(TFunction<void()> InAction)
-		: Action(MoveTemp(InAction))
-	{
-	}
-
-	virtual bool Update() override
-	{
-		if (Action)
-		{
-			Action();
-		}
-		return true;
-	}
-
-private:
-	TFunction<void()> Action;
-};
-
-class FWaitForMoQStateCommand : public IAutomationLatentCommand
-{
-public:
-	FWaitForMoQStateCommand(TSharedRef<FMoQSessionTestHarness, ESPMode::ThreadSafe> InHarness, MoqConnectionState InDesiredState, double InTimeoutSeconds, FAutomationTestBase* InTest, FString InStepLabel)
-		: Harness(MoveTemp(InHarness))
-		, DesiredState(InDesiredState)
-		, TimeoutSeconds(InTimeoutSeconds)
-		, Test(InTest)
-		, StepLabel(MoveTemp(InStepLabel))
-		, StartTime(FPlatformTime::Seconds())
-	{
-	}
-
-	virtual bool Update() override
-	{
-		const MoqConnectionState Current = Harness->LastState.Load();
-		if (Current == DesiredState)
-		{
-			return true;
-		}
-
-		if (Current == MOQ_STATE_FAILED)
-		{
-			if (Test)
-			{
-				Test->AddError(FString::Printf(TEXT("%s: session entered FAILED state while waiting for %s"), *StepLabel, *LexToString(DesiredState)));
-			}
-			return true;
-		}
-
-		if ((FPlatformTime::Seconds() - StartTime) >= TimeoutSeconds)
-		{
-			if (Test)
-			{
-				Test->AddError(FString::Printf(TEXT("%s: timed out waiting for %s (last=%s)"), *StepLabel, *LexToString(DesiredState), *LexToString(Current)));
-			}
-			return true;
-		}
-
-		return false;
-	}
-
-private:
-	TSharedRef<FMoQSessionTestHarness, ESPMode::ThreadSafe> Harness;
-	MoqConnectionState DesiredState;
-	double TimeoutSeconds;
-	FAutomationTestBase* Test = nullptr;
-	FString StepLabel;
-	const double StartTime;
-};
-
-class FWaitForPubSubPayloadCommand : public IAutomationLatentCommand
-{
-public:
-	FWaitForPubSubPayloadCommand(TSharedRef<FMoQPubSubState, ESPMode::ThreadSafe> InState, double InTimeoutSeconds, FAutomationTestBase* InTest, FString InStepLabel)
-		: PubSubState(MoveTemp(InState))
-		, TimeoutSeconds(InTimeoutSeconds)
-		, Test(InTest)
-		, StepLabel(MoveTemp(InStepLabel))
-		, StartTime(FPlatformTime::Seconds())
-	{
-	}
-
-	virtual bool Update() override
-	{
-		if (PubSubState->bPayloadReceived.Load())
-		{
-			return true;
-		}
-
-		if (PubSubState->bSubscribeFailed.Load())
-		{
-			if (Test)
-			{
-				const FString FailureMessage = PubSubState->SubscribeFailureMessage.IsEmpty() ? TEXT("Unknown subscribe failure") : PubSubState->SubscribeFailureMessage;
-				Test->AddError(FString::Printf(TEXT("%s: subscriber failed to initialize: %s"), *StepLabel, *FailureMessage));
-			}
-			return true;
-		}
-
-		if ((FPlatformTime::Seconds() - StartTime) >= TimeoutSeconds)
-		{
-			if (Test)
-			{
-				Test->AddError(FString::Printf(TEXT("%s: timed out waiting for subscriber payload"), *StepLabel));
-			}
-			return true;
-		}
-
-		return false;
-	}
-
-private:
-	TSharedRef<FMoQPubSubState, ESPMode::ThreadSafe> PubSubState;
-	double TimeoutSeconds;
-	FAutomationTestBase* Test = nullptr;
-	FString StepLabel;
-	const double StartTime;
-};
-
-class FMoQDelayLatentCommand : public IAutomationLatentCommand
-{
-public:
-	explicit FMoQDelayLatentCommand(double InSeconds)
-		: DurationSeconds(InSeconds)
-		, StartTime(FPlatformTime::Seconds())
-	{
-	}
-
-	virtual bool Update() override
-	{
-		return (FPlatformTime::Seconds() - StartTime) >= DurationSeconds;
-	}
-
-private:
-	double DurationSeconds = 0.0;
-	const double StartTime;
-};
-
-class FMoQSubscribeWithRetryCommand : public IAutomationLatentCommand
-{
-public:
-	FMoQSubscribeWithRetryCommand(
-		TSharedRef<FMoQSessionTestHarness, ESPMode::ThreadSafe> InHarness,
-		FString InNamespace,
-		FString InTrackName,
-		TSharedRef<FMoQPubSubState, ESPMode::ThreadSafe> InState,
-		int32 InMaxAttempts,
-		double InRetryDelaySeconds,
-		FAutomationTestBase* InTest)
-		: Harness(MoveTemp(InHarness))
-		, NamespaceValue(MoveTemp(InNamespace))
-		, TrackValue(MoveTemp(InTrackName))
-		, PubSubState(MoveTemp(InState))
-		, MaxAttempts(InMaxAttempts)
-		, RetryDelaySeconds(InRetryDelaySeconds)
-		, Test(InTest)
-	{
-	}
-
-	virtual bool Update() override
-	{
-		if (bStarted)
-		{
-			return true;
-		}
-
-		bStarted = true;
-		PubSubState->bPayloadReceived.Store(false);
-		PubSubState->bSubscriberReady.Store(false);
-		PubSubState->bSubscribeFailed.Store(false);
-		PubSubState->SubscribeFailureMessage.Reset();
-
-		PubSubState->SubscribeController = MakeShared<FMoQSubscribeRetryController, ESPMode::ThreadSafe>(
-			Harness,
-			NamespaceValue,
-			TrackValue,
-			PubSubState,
-			MaxAttempts,
-			RetryDelaySeconds,
-			Test);
-		PubSubState->SubscribeController->Start();
-		return true;
-	}
-
-private:
-	TSharedRef<FMoQSessionTestHarness, ESPMode::ThreadSafe> Harness;
-	FString NamespaceValue;
-	FString TrackValue;
-	TSharedRef<FMoQPubSubState, ESPMode::ThreadSafe> PubSubState;
-	int32 MaxAttempts = 1;
-	double RetryDelaySeconds = 0.0;
-	FAutomationTestBase* Test = nullptr;
-	bool bStarted = false;
-};
-
-class FWaitForSenderFramesCommand : public IAutomationLatentCommand
-{
-public:
-	FWaitForSenderFramesCommand(TSharedRef<FMoQSenderHarness, ESPMode::ThreadSafe> InHarness, int32 InMinimumFrames, double InTimeoutSeconds, FAutomationTestBase* InTest, FString InStepLabel)
-		: SenderHarness(MoveTemp(InHarness))
-		, MinimumFrames(InMinimumFrames)
-		, TimeoutSeconds(InTimeoutSeconds)
-		, Test(InTest)
-		, StepLabel(MoveTemp(InStepLabel))
-		, StartTime(FPlatformTime::Seconds())
-	{
-	}
-
-	virtual bool Update() override
-	{
-		SenderHarness->Sender.Tick(0.0f);
-		const FO3DTransportStats Stats = SenderHarness->Sender.GetStats();
-		if (Stats.FramesSent >= MinimumFrames)
-		{
-			return true;
-		}
-
-		if ((FPlatformTime::Seconds() - StartTime) >= TimeoutSeconds)
-		{
-			if (Test)
-			{
-				Test->AddError(FString::Printf(TEXT("%s: expected %d frames but only %lld sent (dropped=%lld)"), *StepLabel, MinimumFrames, Stats.FramesSent, Stats.DroppedFrames));
-			}
-			return true;
-		}
-
-		return false;
-	}
-
-private:
-	TSharedRef<FMoQSenderHarness, ESPMode::ThreadSafe> SenderHarness;
-	int32 MinimumFrames;
-	double TimeoutSeconds;
-	FAutomationTestBase* Test = nullptr;
-	FString StepLabel;
-	const double StartTime;
-};
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FMoQCloudflareRelayBasicTest,
-	"Open3DBroadcast.Open3DTransportMoQ.Cloudflare.Basic",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
-bool FMoQCloudflareRelayBasicTest::RunTest(const FString& Parameters)
-{
-	const FString RelayUrl = ResolveRelayUrl();
-	AddInfo(TEXT("Validating basic MoQ session bootstrap using moq_ffi.dll"));
-	AddInfo(FString::Printf(TEXT("Relay target: %s"), *RelayUrl));
-
-	if (!TestTrue(TEXT("MoQ FFI should already be loaded"), FMoQFfiSupport::IsLoaded()))
-	{
-		AddError(FString::Printf(TEXT("moq_ffi.dll unavailable: %s"), *FMoQFfiSupport::GetStatusMessage()));
-		return false;
-	}
-
-	TSharedPtr<FMoQSessionWrapper> Session = MakeShared<FMoQSessionWrapper>();
-	TestTrue(TEXT("Session wrapper instantiates"), Session.IsValid());
-
-	const FMoQResult InitResult = Session->Initialize(RelayUrl);
-	if (!TestTrue(TEXT("Initialize returns success"), InitResult.IsOk()))
-	{
-		AddError(FString::Printf(TEXT("Initialize failed: %s"), *InitResult.Message));
-		return false;
-	}
-
-	const FMoQResult ConnectResult = Session->Connect();
-	if (!TestTrue(TEXT("Connect() should enqueue async connection without crashing"), ConnectResult.IsOk()))
-	{
-		AddError(FString::Printf(TEXT("Connect failed immediately: %s"), *ConnectResult.Message));
-		Session->Disconnect();
-		return false;
-	}
-
-	Session->Disconnect();
-	AddInfo(TEXT("Session disconnected cleanly (no panic paths triggered)."));
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FMoQCloudflareRelayConnectivityTest,
-	"Open3DBroadcast.Open3DTransportMoQ.Cloudflare.Connectivity",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-
-bool FMoQCloudflareRelayConnectivityTest::RunTest(const FString& Parameters)
-{
-	if (!FMoQFfiSupport::IsLoaded())
-	{
-		AddError(TEXT("moq_ffi.dll must be loaded before running relay connectivity tests."));
-		return false;
-	}
-
-	const FString RelayUrl = ResolveRelayUrl();
-	AddInfo(FString::Printf(TEXT("Connecting to Cloudflare MoQ relay at %s"), *RelayUrl));
-	AddInfo(TEXT("Verifying outbound internet access via Cloudflare relay."));
-
-	TSharedRef<FMoQSessionTestHarness, ESPMode::ThreadSafe> Harness = MakeShared<FMoQSessionTestHarness, ESPMode::ThreadSafe>(RelayUrl, TEXT("Connectivity"));
-	if (!Harness->Initialize(*this))
-	{
-		return false;
-	}
-
-	if (!Harness->Connect(*this))
-	{
-		Harness->Disconnect();
-		return false;
-	}
-
-	ADD_LATENT_AUTOMATION_COMMAND(FWaitForMoQStateCommand(Harness, MOQ_STATE_CONNECTED, kConnectionTimeout, this, TEXT("Cloudflare connectivity")));
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([this, Harness]()
-	{
-		if (Harness->bConnected.Load())
-		{
-			AddInfo(TEXT("Outbound internet access confirmed (MoQ relay handshake succeeded)."));
-		}
-		else
-		{
-			AddWarning(TEXT("MoQ relay handshake did not complete. Ensure outbound internet access is available."));
-		}
-	}));
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQSessionTeardownCommand(Harness));
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FMoQCloudflareRelayPublishTest,
-	"Open3DBroadcast.Open3DTransportMoQ.Cloudflare.Publish",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-
-bool FMoQCloudflareRelayPublishTest::RunTest(const FString& Parameters)
-{
-	if (!FMoQFfiSupport::IsLoaded())
-	{
-		AddError(TEXT("moq_ffi.dll must be loaded for publish tests."));
-		return false;
-	}
-
-	const FString RelayUrl = ResolveRelayUrl();
-	const FString Namespace = MakeUniqueNamespace(TEXT("o3ds/automation/publish"));
-	const FString TrackName = TEXT("character");
-
-	TSharedRef<FMoQSessionTestHarness, ESPMode::ThreadSafe> Harness = MakeShared<FMoQSessionTestHarness, ESPMode::ThreadSafe>(RelayUrl, TEXT("Publish"));
-	if (!Harness->Initialize(*this))
-	{
-		return false;
-	}
-
-	if (!Harness->Connect(*this))
-	{
-		Harness->Disconnect();
-		return false;
-	}
-
-	ADD_LATENT_AUTOMATION_COMMAND(FWaitForMoQStateCommand(Harness, MOQ_STATE_CONNECTED, kConnectionTimeout, this, TEXT("Publish.Connect")));
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([this, Harness, Namespace, TrackName]()
-	{
-		const FMoQResult AnnounceResult = Harness->Session->AnnounceNamespace(Namespace);
-		TestTrue(TEXT("Namespace announcement succeeds"), AnnounceResult.IsOk());
-
-		FMoQPublisherConfig Config;
-		Config.Namespace = Namespace;
-		Config.TrackName = TrackName;
-		Config.DeliveryMode = MOQ_DELIVERY_STREAM;
-
-		TSharedPtr<FMoQPublisherHandle> Publisher;
-		const FMoQResult CreateResult = Harness->Session->CreatePublisher(Config, Publisher);
-		TestTrue(TEXT("Publisher creation succeeds"), CreateResult.IsOk());
-
-		if (Publisher.IsValid())
-		{
-			const TArray<uint8> Payload = BuildSerializedPayload(TEXT("PublishPayload"));
-			TestTrue(TEXT("Payload should not be empty"), Payload.Num() > 0);
-			if (!Payload.IsEmpty())
-			{
-				const MoqResult PublishResult = moq_publish_data(Publisher->Get(), Payload.GetData(), Payload.Num(), Config.DeliveryMode);
-				TestTrue(TEXT("moq_publish_data returns OK"), PublishResult.code == MOQ_OK);
-			}
-		}
-	}));
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQSessionTeardownCommand(Harness));
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FMoQCloudflareRelayPublishSubscribeTest,
-	"Open3DBroadcast.Open3DTransportMoQ.Cloudflare.PublishSubscribe",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-
-bool FMoQCloudflareRelayPublishSubscribeTest::RunTest(const FString& Parameters)
-{
-	if (!FMoQFfiSupport::IsLoaded())
-	{
-		AddError(TEXT("moq_ffi.dll must be loaded for publish/subscribe tests."));
-		return false;
-	}
-
-	const FString RelayUrl = ResolveRelayUrl();
-	const FString Namespace = MakeUniqueNamespace(TEXT("o3ds/automation/pubsub"));
-	const FString TrackName = TEXT("character");
-
-	TSharedRef<FMoQSessionTestHarness, ESPMode::ThreadSafe> PublisherHarness = MakeShared<FMoQSessionTestHarness, ESPMode::ThreadSafe>(RelayUrl, TEXT("PubSub-Publisher"));
-	TSharedRef<FMoQSessionTestHarness, ESPMode::ThreadSafe> SubscriberHarness = MakeShared<FMoQSessionTestHarness, ESPMode::ThreadSafe>(RelayUrl, TEXT("PubSub-Subscriber"));
-
-	if (!PublisherHarness->Initialize(*this) || !SubscriberHarness->Initialize(*this))
-	{
-		return false;
-	}
-
-	if (!PublisherHarness->Connect(*this) || !SubscriberHarness->Connect(*this))
-	{
-		PublisherHarness->Disconnect();
-		SubscriberHarness->Disconnect();
-		return false;
-	}
-
-	TSharedRef<FMoQPubSubState, ESPMode::ThreadSafe> PubSubState = MakeShared<FMoQPubSubState, ESPMode::ThreadSafe>();
-
-	ADD_LATENT_AUTOMATION_COMMAND(FWaitForMoQStateCommand(PublisherHarness, MOQ_STATE_CONNECTED, kConnectionTimeout, this, TEXT("PubSub.PublisherConnect")));
-	ADD_LATENT_AUTOMATION_COMMAND(FWaitForMoQStateCommand(SubscriberHarness, MOQ_STATE_CONNECTED, kConnectionTimeout, this, TEXT("PubSub.SubscriberConnect")));
-
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([this, PublisherHarness, Namespace, TrackName, PubSubState]()
-	{
-		PubSubState->Namespace = Namespace;
-		PubSubState->TrackName = TrackName;
-
-		const FMoQResult AnnounceResult = PublisherHarness->Session->AnnounceNamespace(Namespace);
-		TestTrue(TEXT("Publisher namespace announcement succeeds"), AnnounceResult.IsOk());
-
-		FMoQPublisherConfig Config;
-		Config.Namespace = Namespace;
-		Config.TrackName = TrackName;
-		Config.DeliveryMode = MOQ_DELIVERY_STREAM;
-
-		const FMoQResult CreateResult = PublisherHarness->Session->CreatePublisher(Config, PubSubState->Publisher);
-		TestTrue(TEXT("Publisher for pub/sub created"), CreateResult.IsOk());
-
-		if (!PubSubState->Publisher.IsValid())
-		{
-			AddError(TEXT("Publisher handle invalid before subscribe/publish"));
-			return;
-		}
-
-		const TArray<uint8> PrimePayload = BuildSerializedPayload(TEXT("PubSubPrime"));
-		TestTrue(TEXT("Prime payload should not be empty"), PrimePayload.Num() > 0);
-		if (!PrimePayload.IsEmpty())
-		{
-			const MoqResult PrimeResult = moq_publish_data(PubSubState->Publisher->Get(), PrimePayload.GetData(), PrimePayload.Num(), Config.DeliveryMode);
-			const bool bPrimeOk = (PrimeResult.code == MOQ_OK);
-			TestTrue(TEXT("Initial publish to prime track succeeds"), bPrimeOk);
-			if (bPrimeOk)
-			{
-				PubSubState->bTrackPrimed.Store(true);
-			}
-		}
-	}));
-
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQDelayLatentCommand(kTrackPropagationDelay));
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([this, PubSubState]()
-	{
-		TestTrue(TEXT("Track should be primed before subscribing"), PubSubState->bTrackPrimed.Load());
-	}));
-
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQSubscribeWithRetryCommand(SubscriberHarness, Namespace, TrackName, PubSubState, 3, 0.5, this));
-
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQDelayLatentCommand(0.25));
-
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([this, PubSubState]()
-	{
-		if (!PubSubState->Publisher.IsValid())
-		{
-			AddError(TEXT("Publisher handle invalid before publish"));
-			return;
-		}
-
-		FMoQPublisherConfig Config;
-		Config.Namespace = PubSubState->Namespace;
-		Config.TrackName = PubSubState->TrackName;
-		Config.DeliveryMode = MOQ_DELIVERY_STREAM;
-
-		const TArray<uint8> Payload = BuildSerializedPayload(TEXT("PubSubPayload"));
-		TestTrue(TEXT("Pub/Sub payload should not be empty"), Payload.Num() > 0);
-		if (!Payload.IsEmpty())
-		{
-			const MoqResult PublishResult = moq_publish_data(PubSubState->Publisher->Get(), Payload.GetData(), Payload.Num(), Config.DeliveryMode);
-			TestTrue(TEXT("Publish call succeeds"), PublishResult.code == MOQ_OK);
-		}
-	}));
-
-	ADD_LATENT_AUTOMATION_COMMAND(FWaitForPubSubPayloadCommand(PubSubState, kOperationTimeout, this, TEXT("PubSub.Payload")));
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([PubSubState]()
-	{
-		if (PubSubState->SubscribeController.IsValid())
-		{
-			PubSubState->SubscribeController->Stop();
-			PubSubState->SubscribeController.Reset();
-		}
-		PubSubState->Subscriber.Reset();
-		PubSubState->Publisher.Reset();
-	}));
-
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQSessionTeardownCommand(PublisherHarness));
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQSessionTeardownCommand(SubscriberHarness));
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FMoQCloudflareRelaySenderTest,
-	"Open3DBroadcast.Open3DTransportMoQ.Cloudflare.Sender",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-
-bool FMoQCloudflareRelaySenderTest::RunTest(const FString& Parameters)
-{
-	if (!FMoQFfiSupport::IsLoaded())
-	{
-		AddError(TEXT("moq_ffi.dll must be loaded for sender tests."));
-		return false;
-	}
-
-	const FString RelayUrl = ResolveRelayUrl();
-	const FString Namespace = MakeUniqueNamespace(TEXT("o3ds/automation/sender"));
-	const FString TrackName = TEXT("rig");
-
-	TSharedRef<FMoQSenderHarness, ESPMode::ThreadSafe> SenderHarness = MakeShared<FMoQSenderHarness, ESPMode::ThreadSafe>();
-	if (!SenderHarness->Initialize(RelayUrl, Namespace, TrackName, *this))
-	{
-		SenderHarness->Shutdown();
-		return false;
-	}
-
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([this, SenderHarness]()
-	{
-		O3DS::SubjectList Subjects;
-		PopulateSubject(Subjects, TEXT("SenderSubject"));
-		O3DS::Subject* Subject = Subjects.size() > 0 ? Subjects[0] : nullptr;
-
-		for (int32 Index = 0; Index < 5; ++Index)
-		{
-			if (Subject && !Subject->mCurveValues.empty())
-			{
-				Subject->mCurveValues[0] = 0.1f * static_cast<float>(Index);
-			}
-			TestTrue(TEXT("Sender should accept payload"), SenderHarness->Sender.Send(Subjects));
-		}
-	}));
-
-	ADD_LATENT_AUTOMATION_COMMAND(FWaitForSenderFramesCommand(SenderHarness, 2, kSenderTimeout, this, TEXT("Sender.Frames")));
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([SenderHarness]()
-	{
-		SenderHarness->Shutdown();
-	}));
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FMoQCloudflareRelayMultiPublisherTest,
-	"Open3DBroadcast.Open3DTransportMoQ.Cloudflare.MultiPublisher",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-
-bool FMoQCloudflareRelayMultiPublisherTest::RunTest(const FString& Parameters)
-{
-	if (!FMoQFfiSupport::IsLoaded())
-	{
-		AddError(TEXT("moq_ffi.dll must be loaded for multi-publisher tests."));
-		return false;
-	}
-
-	const FString RelayUrl = ResolveRelayUrl();
-	constexpr int32 PublisherCount = 3;
-	AddInfo(FString::Printf(TEXT("Spawning %d concurrent publishers against %s"), PublisherCount, *RelayUrl));
-
-	TArray<TSharedRef<FMoQSessionTestHarness, ESPMode::ThreadSafe>> Harnesses;
-	Harnesses.Reserve(PublisherCount);
-
-	for (int32 Index = 0; Index < PublisherCount; ++Index)
-	{
-		const FString Label = FString::Printf(TEXT("Multi-%d"), Index);
-		TSharedRef<FMoQSessionTestHarness, ESPMode::ThreadSafe> Harness = MakeShared<FMoQSessionTestHarness, ESPMode::ThreadSafe>(RelayUrl, Label);
-		if (!Harness->Initialize(*this))
-		{
-			return false;
-		}
-		if (!Harness->Connect(*this))
-		{
-			Harness->Disconnect();
-			return false;
-		}
-		Harnesses.Add(Harness);
-	}
-
-	for (int32 Index = 0; Index < Harnesses.Num(); ++Index)
-	{
-		ADD_LATENT_AUTOMATION_COMMAND(FWaitForMoQStateCommand(Harnesses[Index], MOQ_STATE_CONNECTED, kConnectionTimeout, this, FString::Printf(TEXT("Multi.Connect.%d"), Index)));
-	}
-
-	TSharedRef<TArray<TSharedPtr<FMoQPublisherHandle>>, ESPMode::ThreadSafe> Publishers = MakeShared<TArray<TSharedPtr<FMoQPublisherHandle>>, ESPMode::ThreadSafe>();
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([this, Harnesses, Publishers]()
-	{
-		Publishers->Reset();
-		for (int32 Index = 0; Index < Harnesses.Num(); ++Index)
-		{
-			const FString Namespace = MakeUniqueNamespace(FString::Printf(TEXT("o3ds/automation/multi/%d"), Index));
-			const FMoQResult AnnounceResult = Harnesses[Index]->Session->AnnounceNamespace(Namespace);
-			TestTrue(*FString::Printf(TEXT("Publisher %d announce"), Index), AnnounceResult.IsOk());
-
-			FMoQPublisherConfig Config;
-			Config.Namespace = Namespace;
-			Config.TrackName = TEXT("primary");
-			Config.DeliveryMode = MOQ_DELIVERY_STREAM;
-
-			TSharedPtr<FMoQPublisherHandle> Publisher;
-			const FMoQResult CreateResult = Harnesses[Index]->Session->CreatePublisher(Config, Publisher);
-			TestTrue(*FString::Printf(TEXT("Publisher %d created"), Index), CreateResult.IsOk());
-
-			if (Publisher.IsValid())
-			{
-				const TArray<uint8> Payload = BuildSerializedPayload(FString::Printf(TEXT("MultiPayload-%d"), Index));
-				if (!Payload.IsEmpty())
-				{
-					const MoqResult PublishResult = moq_publish_data(Publisher->Get(), Payload.GetData(), Payload.Num(), Config.DeliveryMode);
-					TestTrue(*FString::Printf(TEXT("Publisher %d send"), Index), PublishResult.code == MOQ_OK);
-				}
-				Publishers->Add(Publisher);
+				Receiver->Poll();
 			}
 		}
 
-		TestEqual(TEXT("Publisher handles"), Publishers->Num(), Harnesses.Num());
-	}));
-
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([Publishers]()
-	{
-		Publishers->Reset();
-	}));
-
-	for (const TSharedRef<FMoQSessionTestHarness, ESPMode::ThreadSafe>& Harness : Harnesses)
-	{
-		ADD_LATENT_AUTOMATION_COMMAND(FMoQSessionTeardownCommand(Harness));
-	}
-
-	return true;
-}
-
-// ==================== Receiver Tests ====================
-
-class FMoQReceiverHarness : public TSharedFromThis<FMoQReceiverHarness, ESPMode::ThreadSafe>
-{
-public:
-	~FMoQReceiverHarness()
-	{
-		Shutdown();
-	}
-
-	bool Initialize(const FString& RelayUrl, const FString& Namespace, const FString& TrackName, FAutomationTestBase& Test)
-	{
-		FO3DTransportConfig Config;
-		Config.Transport = TEXT("MoQ");
-		Config.Uri = RelayUrl;
-		Config.StreamId = FString::Printf(TEXT("%s/%s"), *Namespace, *TrackName);
-		Config.AdvancedParams.Add(TEXT("track_namespace"), Namespace);
-		Config.AdvancedParams.Add(TEXT("track_name"), TrackName);
-		Config.AdvancedParams.Add(TEXT("relay_url"), RelayUrl);
-
-		if (!Receiver.Initialize(Config))
+		void StopAll()
 		{
-			Test.AddError(TEXT("Receiver initialization failed"));
-			return false;
+			for (const TSharedPtr<IOpen3DReceiver>& Receiver : Receivers)
+			{
+				Receiver->Stop();
+			}
+			for (const TSharedPtr<IOpen3DSender>& Sender : Senders)
+			{
+				Sender->Stop();
+			}
+			MoQTesting::PumpDispatcher();
 		}
-
-		// Create test consumer
-		Consumer = MakeShared<FMoQTestConsumer>();
-		Receiver.SetConsumer(Consumer);
-
-		if (!Receiver.Start())
-		{
-			Test.AddError(TEXT("Receiver start failed"));
-			Receiver.Stop();
-			return false;
-		}
-
-		bStarted = true;
-		return true;
-	}
-
-	void Shutdown()
-	{
-		if (bStarted)
-		{
-			Receiver.Stop();
-			bStarted = false;
-		}
-	}
-
-	int32 Poll()
-	{
-		return Receiver.Poll();
-	}
-
-	int32 GetReceivedFrames() const
-	{
-		if (Consumer.IsValid())
-		{
-			return Consumer->GetReceivedFrames();
-		}
-		return 0;
-	}
-
-	FO3DTransportStats GetStats() const
-	{
-		return Receiver.GetStats();
-	}
-
-	// Test consumer that counts received frames
-	class FMoQTestConsumer : public ISerializedFrameConsumer
-	{
-	public:
-		virtual void SubmitFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds) override
-		{
-			FScopeLock Lock(&Mutex);
-			ReceivedFrames++;
-		}
-
-		int32 GetReceivedFrames() const
-		{
-			FScopeLock Lock(&Mutex);
-			return ReceivedFrames;
-		}
-
-	private:
-		mutable FCriticalSection Mutex;
-		int32 ReceivedFrames = 0;
 	};
 
-	FO3DMoQReceiver Receiver;
-	TSharedPtr<FMoQTestConsumer> Consumer;
-	bool bStarted = false;
-};
-
-class FWaitForReceiverFramesCommand : public IAutomationLatentCommand
-{
-public:
-	FWaitForReceiverFramesCommand(TSharedRef<FMoQReceiverHarness, ESPMode::ThreadSafe> InHarness, int32 InMinimumFrames, double InTimeoutSeconds, FAutomationTestBase* InTest, FString InStepLabel)
-		: ReceiverHarness(MoveTemp(InHarness))
-		, MinimumFrames(InMinimumFrames)
-		, TimeoutSeconds(InTimeoutSeconds)
-		, Test(InTest)
-		, StepLabel(MoveTemp(InStepLabel))
-		, StartTime(FPlatformTime::Seconds())
+	TSharedPtr<IOpen3DSender> StartSender(FAutomationTestBase& Test, const FO3DTransportConfig& Config)
 	{
-	}
-
-	virtual bool Update() override
-	{
-		// Poll the receiver
-		ReceiverHarness->Poll();
-
-		const int32 ReceivedFrames = ReceiverHarness->GetReceivedFrames();
-		if (ReceivedFrames >= MinimumFrames)
+		TSharedPtr<IOpen3DSender> Sender = O3DTransport::CreateSender(MoQName);
+		if (!Test.TestTrue(TEXT("MoQ sender registered"), Sender.IsValid())
+			|| !Test.TestTrue(TEXT("Sender initializes"), Sender->Initialize(Config))
+			|| !Test.TestTrue(TEXT("Sender starts"), Sender->Start()))
 		{
-			if (Test)
-			{
-				Test->AddInfo(FString::Printf(TEXT("%s: Received %d frames (target: %d)"), *StepLabel, ReceivedFrames, MinimumFrames));
-			}
-			return true;
+			return nullptr;
 		}
+		return Sender;
+	}
 
-		if ((FPlatformTime::Seconds() - StartTime) >= TimeoutSeconds)
+	TSharedPtr<IOpen3DReceiver> StartReceiver(FAutomationTestBase& Test, const FO3DTransportConfig& Config, const TSharedPtr<FO3DRecordingFrameConsumer>& Consumer)
+	{
+		TSharedPtr<IOpen3DReceiver> Receiver = O3DTransport::CreateReceiver(MoQName);
+		if (!Test.TestTrue(TEXT("MoQ receiver registered"), Receiver.IsValid())
+			|| !Test.TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(Config)))
 		{
-			if (Test)
-			{
-				const FO3DTransportStats Stats = ReceiverHarness->GetStats();
-				Test->AddWarning(FString::Printf(TEXT("%s: timed out waiting for frames (received=%d, expected=%d, dropped=%lld)"), 
-					*StepLabel, ReceivedFrames, MinimumFrames, Stats.DroppedFrames));
-			}
-			return true;
+			return nullptr;
 		}
-
-		return false;
-	}
-
-private:
-	TSharedRef<FMoQReceiverHarness, ESPMode::ThreadSafe> ReceiverHarness;
-	int32 MinimumFrames;
-	double TimeoutSeconds;
-	FAutomationTestBase* Test = nullptr;
-	FString StepLabel;
-	const double StartTime;
-};
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FMoQCloudflareRelayReceiverTest,
-	"Open3DBroadcast.Open3DTransportMoQ.Cloudflare.Receiver",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-
-bool FMoQCloudflareRelayReceiverTest::RunTest(const FString& Parameters)
-{
-	if (!FMoQFfiSupport::IsLoaded())
-	{
-		AddError(TEXT("moq_ffi.dll must be loaded for receiver tests."));
-		return false;
-	}
-
-	const FString RelayUrl = ResolveRelayUrl();
-	const FString Namespace = MakeUniqueNamespace(TEXT("o3ds/automation/receiver"));
-	const FString TrackName = TEXT("primary");
-
-	// Create publisher session to publish data
-	TSharedRef<FMoQSessionTestHarness, ESPMode::ThreadSafe> PublisherHarness = MakeShared<FMoQSessionTestHarness, ESPMode::ThreadSafe>(RelayUrl, TEXT("Receiver-Publisher"));
-	if (!PublisherHarness->Initialize(*this))
-	{
-		return false;
-	}
-	if (!PublisherHarness->Connect(*this))
-	{
-		PublisherHarness->Disconnect();
-		return false;
-	}
-
-	// Create receiver harness
-	TSharedRef<FMoQReceiverHarness, ESPMode::ThreadSafe> ReceiverHarness = MakeShared<FMoQReceiverHarness, ESPMode::ThreadSafe>();
-
-	TSharedRef<FMoQPubSubState, ESPMode::ThreadSafe> PubSubState = MakeShared<FMoQPubSubState, ESPMode::ThreadSafe>();
-
-	// Wait for publisher to connect
-	ADD_LATENT_AUTOMATION_COMMAND(FWaitForMoQStateCommand(PublisherHarness, MOQ_STATE_CONNECTED, kConnectionTimeout, this, TEXT("Receiver.PublisherConnect")));
-
-	// Setup publisher
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([this, PublisherHarness, Namespace, TrackName, PubSubState]()
-	{
-		PubSubState->Namespace = Namespace;
-		PubSubState->TrackName = TrackName;
-
-		const FMoQResult AnnounceResult = PublisherHarness->Session->AnnounceNamespace(Namespace);
-		TestTrue(TEXT("Publisher namespace announcement succeeds"), AnnounceResult.IsOk());
-
-		FMoQPublisherConfig Config;
-		Config.Namespace = Namespace;
-		Config.TrackName = TrackName;
-		Config.DeliveryMode = MOQ_DELIVERY_STREAM;
-
-		const FMoQResult CreateResult = PublisherHarness->Session->CreatePublisher(Config, PubSubState->Publisher);
-		TestTrue(TEXT("Publisher created"), CreateResult.IsOk());
-
-		// Prime the track with initial data
-		if (PubSubState->Publisher.IsValid())
+		Receiver->SetConsumer(Consumer);
+		if (!Test.TestTrue(TEXT("Receiver starts"), Receiver->Start()))
 		{
-			const TArray<uint8> PrimePayload = BuildSerializedPayload(TEXT("ReceiverPrime"));
-			if (!PrimePayload.IsEmpty())
-			{
-				const MoqResult PrimeResult = moq_publish_data(PubSubState->Publisher->Get(), PrimePayload.GetData(), PrimePayload.Num(), Config.DeliveryMode);
-				TestTrue(TEXT("Initial publish succeeds"), PrimeResult.code == MOQ_OK);
-			}
+			return nullptr;
 		}
-	}));
+		return Receiver;
+	}
 
-	// Wait for track to propagate
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQDelayLatentCommand(kTrackPropagationDelay));
-
-	// Initialize and start receiver
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([this, ReceiverHarness, RelayUrl, Namespace, TrackName]()
+	bool RunSenderPublishes(FAutomationTestBase& Test, const FString& RelayUrl)
 	{
-		const bool bInitialized = ReceiverHarness->Initialize(RelayUrl, Namespace, TrackName, *this);
-		TestTrue(TEXT("Receiver initialized and started"), bInitialized);
-	}));
-
-	// Wait for connection to establish
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQDelayLatentCommand(1.0));
-
-	// Publish frames and poll receiver
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([this, PubSubState]()
-	{
-		if (!PubSubState->Publisher.IsValid())
+		FPump Pump;
+		const TSharedPtr<IOpen3DSender> Sender = StartSender(Test, MakeConfig(RelayUrl, MakeStreamId(), true));
+		if (!Sender.IsValid())
 		{
-			AddError(TEXT("Publisher handle invalid"));
-			return;
+			return false;
 		}
+		Pump.Senders.Add(Sender);
+		Pump.Payloads.Add(O3DTests::MakeRecordedFrames(TEXT("actor"), 1)[0]);
 
-		FMoQPublisherConfig Config;
-		Config.Namespace = PubSubState->Namespace;
-		Config.TrackName = PubSubState->TrackName;
-		Config.DeliveryMode = MOQ_DELIVERY_STREAM;
+		const bool bPublished = O3DTests::PollUntil(ConnectAndDeliverTimeoutSeconds,
+			[&Sender]() { return Sender->GetStats().FramesSent >= 2; }, [&Pump]() { Pump(); });
+		const FO3DTransportStats Stats = Sender->GetStats();
+		Test.TestTrue(*FString::Printf(TEXT("The sender published at least two frames (sent=%lld dropped=%lld)"), Stats.FramesSent, Stats.DroppedFrames), bPublished);
+		Pump.StopAll();
+		return true;
+	}
 
-		// Send multiple frames
-		for (int32 Index = 0; Index < 5; ++Index)
+	bool RunSenderToReceiver(FAutomationTestBase& Test, const FString& RelayUrl)
+	{
+		const FString StreamId = MakeStreamId();
+		const TArray<uint8> Payload = O3DTests::MakeRecordedFrames(TEXT("actor"), 1)[0];
+		const TSharedPtr<FO3DRecordingFrameConsumer> Consumer = MakeShared<FO3DRecordingFrameConsumer>();
+
+		FPump Pump;
+		const TSharedPtr<IOpen3DSender> Sender = StartSender(Test, MakeConfig(RelayUrl, StreamId, true));
+		const TSharedPtr<IOpen3DReceiver> Receiver = StartReceiver(Test, MakeConfig(RelayUrl, StreamId, false), Consumer);
+		if (!Sender.IsValid() || !Receiver.IsValid())
 		{
-			const TArray<uint8> Payload = BuildSerializedPayload(FString::Printf(TEXT("ReceiverFrame-%d"), Index));
-			if (!Payload.IsEmpty())
+			return false;
+		}
+		Pump.Senders.Add(Sender);
+		Pump.Payloads.Add(Payload);
+		Pump.Receivers.Add(Receiver);
+
+		const bool bDelivered = O3DTests::PollUntil(ConnectAndDeliverTimeoutSeconds,
+			[&Consumer]() { return Consumer->Num() > 0; }, [&Pump]() { Pump(); });
+		Test.TestTrue(TEXT("A frame travelled sender -> relay -> receiver"), bDelivered);
+		if (bDelivered)
+		{
+			Test.TestTrue(TEXT("The frame arrived byte-exact"), Consumer->GetFrames()[0] == Payload);
+		}
+		Pump.StopAll();
+		return true;
+	}
+
+	bool RunTwoSendersSeparateNamespaces(FAutomationTestBase& Test, const FString& RelayUrl)
+	{
+		const FString StreamA = MakeStreamId();
+		const FString StreamB = MakeStreamId();
+		const TArray<uint8> PayloadA = O3DTests::MakeRecordedFrames(TEXT("ActorA"), 1)[0];
+		const TArray<uint8> PayloadB = O3DTests::MakeRecordedFrames(TEXT("ActorB"), 1)[0];
+		const TSharedPtr<FO3DRecordingFrameConsumer> ConsumerA = MakeShared<FO3DRecordingFrameConsumer>();
+		const TSharedPtr<FO3DRecordingFrameConsumer> ConsumerB = MakeShared<FO3DRecordingFrameConsumer>();
+
+		FPump Pump;
+		const TSharedPtr<IOpen3DSender> SenderA = StartSender(Test, MakeConfig(RelayUrl, StreamA, true));
+		const TSharedPtr<IOpen3DSender> SenderB = StartSender(Test, MakeConfig(RelayUrl, StreamB, true));
+		const TSharedPtr<IOpen3DReceiver> ReceiverA = StartReceiver(Test, MakeConfig(RelayUrl, StreamA, false), ConsumerA);
+		const TSharedPtr<IOpen3DReceiver> ReceiverB = StartReceiver(Test, MakeConfig(RelayUrl, StreamB, false), ConsumerB);
+		if (!SenderA.IsValid() || !SenderB.IsValid() || !ReceiverA.IsValid() || !ReceiverB.IsValid())
+		{
+			return false;
+		}
+		Pump.Senders = { SenderA, SenderB };
+		Pump.Payloads = { PayloadA, PayloadB };
+		Pump.Receivers = { ReceiverA, ReceiverB };
+
+		const bool bBoth = O3DTests::PollUntil(ConnectAndDeliverTimeoutSeconds,
+			[&ConsumerA, &ConsumerB]() { return ConsumerA->Num() > 0 && ConsumerB->Num() > 0; }, [&Pump]() { Pump(); });
+		Test.TestTrue(TEXT("Both receivers got frames"), bBoth);
+
+		auto OnlyOwn = [](const TSharedPtr<FO3DRecordingFrameConsumer>& Consumer, const TArray<uint8>& Own)
+		{
+			for (const TArray<uint8>& Frame : Consumer->GetFrames())
 			{
-				const MoqResult PublishResult = moq_publish_data(PubSubState->Publisher->Get(), Payload.GetData(), Payload.Num(), Config.DeliveryMode);
-				if (PublishResult.code != MOQ_OK)
+				if (Frame != Own)
 				{
-					AddWarning(FString::Printf(TEXT("Publish frame %d failed"), Index));
+					return false;
 				}
 			}
-		}
-	}));
-
-	// Wait for receiver to receive frames (with polling)
-	ADD_LATENT_AUTOMATION_COMMAND(FWaitForReceiverFramesCommand(ReceiverHarness, 1, kOperationTimeout, this, TEXT("Receiver.Frames")));
-
-	// Cleanup
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([ReceiverHarness, PubSubState]()
-	{
-		ReceiverHarness->Shutdown();
-		PubSubState->Publisher.Reset();
-	}));
-
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQSessionTeardownCommand(PublisherHarness));
-	return true;
+			return true;
+		};
+		Test.TestTrue(TEXT("Receiver A got only sender A's frames"), OnlyOwn(ConsumerA, PayloadA));
+		Test.TestTrue(TEXT("Receiver B got only sender B's frames"), OnlyOwn(ConsumerB, PayloadB));
+		Pump.StopAll();
+		return true;
+	}
 }
 
-// End-to-end test: Sender -> Relay -> Receiver
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FMoQCloudflareRelaySenderReceiverE2ETest,
-	"Open3DBroadcast.Open3DTransportMoQ.Cloudflare.SenderReceiverE2E",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FO3DNetworkMoQTests, "Open3DBroadcast.Network.MoQ", O3DB_TEST_FLAGS)
 
-bool FMoQCloudflareRelaySenderReceiverE2ETest::RunTest(const FString& Parameters)
+void FO3DNetworkMoQTests::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
 {
-	if (!FMoQFfiSupport::IsLoaded())
+	if (!O3DTests::AreNetworkTestsEnabled())
 	{
-		AddError(TEXT("moq_ffi.dll must be loaded for E2E tests."));
+		return; // ADR 0006 §6: no instances without O3DB_NETWORK_TESTS=1
+	}
+	for (const TCHAR* Name : { TEXT("SenderPublishes"), TEXT("SenderToReceiver"), TEXT("TwoSendersSeparateNamespaces") })
+	{
+		OutBeautifiedNames.Add(Name);
+		OutTestCommands.Add(Name);
+	}
+}
+
+bool FO3DNetworkMoQTests::RunTest(const FString& Parameters)
+{
+	using namespace O3DNetworkMoQTests;
+
+	const FString RelayUrl = GetRelayUrl();
+	if (RelayUrl.IsEmpty())
+	{
+		AddError(TEXT("O3DB_NETWORK_TESTS=1 but O3D_MOQ_RELAY_URL is not set. Set it to the relay to test against; there is no default relay."));
 		return false;
 	}
+	AddInfo(FString::Printf(TEXT("Relay: %s"), *RelayUrl));
 
-	const FString RelayUrl = ResolveRelayUrl();
-	const FString Namespace = MakeUniqueNamespace(TEXT("o3ds/automation/e2e"));
-	const FString TrackName = TEXT("mocap");
-
-	AddInfo(FString::Printf(TEXT("E2E test: Sender -> %s -> Receiver"), *RelayUrl));
-
-	// Create sender and receiver harnesses
-	TSharedRef<FMoQSenderHarness, ESPMode::ThreadSafe> SenderHarness = MakeShared<FMoQSenderHarness, ESPMode::ThreadSafe>();
-	TSharedRef<FMoQReceiverHarness, ESPMode::ThreadSafe> ReceiverHarness = MakeShared<FMoQReceiverHarness, ESPMode::ThreadSafe>();
-
-	// Initialize sender
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([this, SenderHarness, RelayUrl, Namespace, TrackName]()
+	if (Parameters == TEXT("SenderPublishes"))
 	{
-		const bool bSenderOk = SenderHarness->Initialize(RelayUrl, Namespace, TrackName, *this);
-		if (!bSenderOk)
-		{
-			AddError(TEXT("Sender initialization failed"));
-		}
-	}));
-
-	// Wait for sender to connect and announce track
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQDelayLatentCommand(kTrackPropagationDelay + 1.0));
-
-	// Send initial frames to prime the track
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([this, SenderHarness]()
+		return RunSenderPublishes(*this, RelayUrl);
+	}
+	if (Parameters == TEXT("SenderToReceiver"))
 	{
-		O3DS::SubjectList Subjects;
-		PopulateSubject(Subjects, TEXT("E2ESubject"));
-		
-		for (int32 Index = 0; Index < 3; ++Index)
-		{
-			SenderHarness->Sender.Send(Subjects);
-		}
-	}));
-
-	// Wait for track to be primed
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQDelayLatentCommand(kTrackPropagationDelay));
-
-	// Initialize receiver
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([this, ReceiverHarness, RelayUrl, Namespace, TrackName]()
+		return RunSenderToReceiver(*this, RelayUrl);
+	}
+	if (Parameters == TEXT("TwoSendersSeparateNamespaces"))
 	{
-		const bool bReceiverOk = ReceiverHarness->Initialize(RelayUrl, Namespace, TrackName, *this);
-		if (!bReceiverOk)
-		{
-			AddWarning(TEXT("Receiver initialization failed - this is expected if the track is not yet available"));
-		}
-	}));
-
-	// Allow time for receiver to connect and subscribe
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQDelayLatentCommand(1.5));
-
-	// Send more frames and poll receiver
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([this, SenderHarness]()
-	{
-		O3DS::SubjectList Subjects;
-		PopulateSubject(Subjects, TEXT("E2ESubject"));
-		
-		for (int32 Index = 0; Index < 10; ++Index)
-		{
-			SenderHarness->Sender.Send(Subjects);
-			SenderHarness->Sender.Tick(0.016f);
-		}
-	}));
-
-	// Poll receiver and wait for frames
-	ADD_LATENT_AUTOMATION_COMMAND(FWaitForReceiverFramesCommand(ReceiverHarness, 1, kOperationTimeout, this, TEXT("E2E.ReceiverFrames")));
-
-	// Verify stats
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([this, SenderHarness, ReceiverHarness]()
-	{
-		const FO3DTransportStats SenderStats = SenderHarness->Sender.GetStats();
-		const FO3DTransportStats ReceiverStats = ReceiverHarness->GetStats();
-		
-		AddInfo(FString::Printf(TEXT("Sender: sent=%lld, dropped=%lld"), SenderStats.FramesSent, SenderStats.DroppedFrames));
-		AddInfo(FString::Printf(TEXT("Receiver: received=%lld, dropped=%lld"), ReceiverStats.FramesReceived, ReceiverStats.DroppedFrames));
-		
-		// We don't assert on exact counts since network conditions vary
-		// Just verify that the pipeline is working
-	}));
-
-	// Cleanup
-	ADD_LATENT_AUTOMATION_COMMAND(FMoQCallLambdaLatentCommand([SenderHarness, ReceiverHarness]()
-	{
-		ReceiverHarness->Shutdown();
-		SenderHarness->Shutdown();
-	}));
-
-	return true;
+		return RunTwoSendersSeparateNamespaces(*this, RelayUrl);
+	}
+	AddError(FString::Printf(TEXT("Unknown network test '%s'"), *Parameters));
+	return false;
 }
 
-#endif // O3D_WITH_TRANSPORT_MOQ
-
-#endif // WITH_DEV_AUTOMATION_TESTS
+#endif // WITH_DEV_AUTOMATION_TESTS && O3D_WITH_TRANSPORT_MOQ

@@ -5,26 +5,26 @@
 // Everything runs through the fake moq-ffi table (MoQFakeFfi.h, ADR 0006 F2): no relay, no
 // network, no sleeps. Blocking FFI calls run inline or are held by the fake, FFI callbacks are
 // delivered by draining the dispatcher on the game thread, and time comes from a manual clock.
+// The transport is reached only through Testing/MoQTesting.h (WP-T2).
+
+#include "O3DTestHarness.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+
+#if O3D_WITH_TRANSPORT_MOQ
+
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTLS.h"
 #include "O3DAudioSerialization.h"
 #include "O3DReceiverInterface.h"
 #include "O3DTransportTypes.h"
-#include "Receiver/MoQReceiver.h"
-#include "Sender/MoQSender.h"
-#include "Shared/MoQAsyncDispatcher.h"
-#include "Shared/MoQHelpers.h"
-#include "Shared/MoQSessionWrapper.h"
+#include "Testing/MoQTesting.h"
 #include "Testing/O3DLifetimeTestUtils.h"
-#include "Tests/MoQFakeFfi.h"
+#include "Transport/MoQ/MoQFakeFfi.h"
 
 #include <atomic>
-
-#if O3D_WITH_TRANSPORT_MOQ
 
 namespace
 {
@@ -81,61 +81,63 @@ namespace
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQBackoffJitterTest, "Open3DBroadcast.Transport.MoQ.Backoff.CappedJitter", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQBackoffJitterTest, "Open3DBroadcast.Transport.MoQ.Backoff.CappedJitter", O3DB_TEST_FLAGS)
 bool FMoQBackoffJitterTest::RunTest(const FString& Parameters)
 {
+	const FMoQTestBackoffLimits Limits = MoQTesting::GetBackoffLimits();
 	for (int32 Failures = 0; Failures <= 12; ++Failures)
 	{
-		const double Base = MoQHelpers::ComputeReconnectDelaySeconds(Failures);
+		const double Base = MoQTesting::ComputeReconnectDelaySeconds(Failures);
 		for (uint64 Seed = 0; Seed < 64; ++Seed)
 		{
-			const double Delay = MoQHelpers::ComputeBackoffDelaySeconds(Failures, Seed);
-			if (Delay < (1.0 - MoQHelpers::kBackoffJitterFraction) * Base - 1e-9 || Delay > Base + 1e-9)
+			const double Delay = MoQTesting::ComputeBackoffDelaySeconds(Failures, Seed);
+			if (Delay < (1.0 - Limits.BackoffJitterFraction) * Base - 1e-9 || Delay > Base + 1e-9)
 			{
 				AddError(FString::Printf(TEXT("Delay %f for %d failures (seed %llu) outside [%f, %f]"), Delay, Failures, Seed,
-					(1.0 - MoQHelpers::kBackoffJitterFraction) * Base, Base));
+					(1.0 - Limits.BackoffJitterFraction) * Base, Base));
 			}
-			TestEqual(TEXT("Same seed gives the same delay"), MoQHelpers::ComputeBackoffDelaySeconds(Failures, Seed), Delay);
+			TestEqual(TEXT("Same seed gives the same delay"), MoQTesting::ComputeBackoffDelaySeconds(Failures, Seed), Delay);
 		}
-		TestTrue(TEXT("Delay is capped"), Base <= MoQHelpers::kMaxReconnectDelaySeconds);
+		TestTrue(TEXT("Delay is capped"), Base <= Limits.MaxReconnectDelaySeconds);
 	}
 
-	TestTrue(TEXT("Backoff grows with failures"), MoQHelpers::ComputeReconnectDelaySeconds(3) > MoQHelpers::ComputeReconnectDelaySeconds(1));
-	TestEqual(TEXT("Backoff reaches the cap"), MoQHelpers::ComputeReconnectDelaySeconds(20), MoQHelpers::kMaxReconnectDelaySeconds);
+	TestTrue(TEXT("Backoff grows with failures"), MoQTesting::ComputeReconnectDelaySeconds(3) > MoQTesting::ComputeReconnectDelaySeconds(1));
+	TestEqual(TEXT("Backoff reaches the cap"), MoQTesting::ComputeReconnectDelaySeconds(20), Limits.MaxReconnectDelaySeconds);
 
 	bool bSeedsDiffer = false;
 	for (uint64 Seed = 1; Seed < 16 && !bSeedsDiffer; ++Seed)
 	{
-		bSeedsDiffer = MoQHelpers::ComputeBackoffDelaySeconds(4, Seed) != MoQHelpers::ComputeBackoffDelaySeconds(4, 0);
+		bSeedsDiffer = MoQTesting::ComputeBackoffDelaySeconds(4, Seed) != MoQTesting::ComputeBackoffDelaySeconds(4, 0);
 	}
 	TestTrue(TEXT("Different seeds spread retries out"), bSeedsDiffer);
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQConnectTimeoutOptionTest, "Open3DBroadcast.Transport.MoQ.Options.ConnectTimeout", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQConnectTimeoutOptionTest, "Open3DBroadcast.Transport.MoQ.Options.ConnectTimeout", O3DB_TEST_FLAGS)
 bool FMoQConnectTimeoutOptionTest::RunTest(const FString& Parameters)
 {
+	const FMoQTestBackoffLimits Limits = MoQTesting::GetBackoffLimits();
 	FO3DTransportConfig Config = MakeFakeConfig();
-	TestEqual(TEXT("Default"), MoQHelpers::ResolveConnectTimeoutSeconds(Config), MoQHelpers::kDefaultConnectTimeoutSeconds);
+	TestEqual(TEXT("Default"), MoQTesting::ResolveConnectTimeoutSeconds(Config), Limits.DefaultConnectTimeoutSeconds);
 
 	Config.AdvancedParams.Add(TEXT("connect_timeout"), TEXT("5"));
-	TestEqual(TEXT("connect_timeout"), MoQHelpers::ResolveConnectTimeoutSeconds(Config), 5.0);
+	TestEqual(TEXT("connect_timeout"), MoQTesting::ResolveConnectTimeoutSeconds(Config), 5.0);
 
 	Config.AdvancedParams.Reset();
 	Config.AdvancedParams.Add(TEXT("moq.connect_timeout"), TEXT("2.5"));
-	TestEqual(TEXT("moq.connect_timeout"), MoQHelpers::ResolveConnectTimeoutSeconds(Config), 2.5);
+	TestEqual(TEXT("moq.connect_timeout"), MoQTesting::ResolveConnectTimeoutSeconds(Config), 2.5);
 
 	Config.AdvancedParams.Reset();
 	Config.AdvancedParams.Add(TEXT("connect_timeout"), TEXT("0.01"));
-	TestEqual(TEXT("Clamped low"), MoQHelpers::ResolveConnectTimeoutSeconds(Config), MoQHelpers::kMinConnectTimeoutSeconds);
+	TestEqual(TEXT("Clamped low"), MoQTesting::ResolveConnectTimeoutSeconds(Config), Limits.MinConnectTimeoutSeconds);
 
 	Config.AdvancedParams.Reset();
 	Config.AdvancedParams.Add(TEXT("connect_timeout"), TEXT("100000"));
-	TestEqual(TEXT("Clamped high"), MoQHelpers::ResolveConnectTimeoutSeconds(Config), MoQHelpers::kMaxConnectTimeoutSeconds);
+	TestEqual(TEXT("Clamped high"), MoQTesting::ResolveConnectTimeoutSeconds(Config), Limits.MaxConnectTimeoutSeconds);
 
 	Config.AdvancedParams.Reset();
 	Config.AdvancedParams.Add(TEXT("connect_timeout"), TEXT("soon"));
-	TestEqual(TEXT("Garbage uses the default"), MoQHelpers::ResolveConnectTimeoutSeconds(Config), MoQHelpers::kDefaultConnectTimeoutSeconds);
+	TestEqual(TEXT("Garbage uses the default"), MoQTesting::ResolveConnectTimeoutSeconds(Config), Limits.DefaultConnectTimeoutSeconds);
 	return true;
 }
 
@@ -143,7 +145,7 @@ bool FMoQConnectTimeoutOptionTest::RunTest(const FString& Parameters)
 // TRF-8: disconnect, reconnect, re-announce
 // ─────────────────────────────────────────────────────────────────────────────
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderReconnectReannounceTest, "Open3DBroadcast.Transport.MoQ.Sender.ReconnectReannounces", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderReconnectReannounceTest, "Open3DBroadcast.Transport.MoQ.Sender.ReconnectReannounces", O3DB_TEST_FLAGS)
 bool FMoQSenderReconnectReannounceTest::RunTest(const FString& Parameters)
 {
 	// The unexpected disconnect below is logged once as a warning.
@@ -154,7 +156,8 @@ bool FMoQSenderReconnectReannounceTest::RunTest(const FString& Parameters)
 	const FO3DTransportConfig Config = MakeFakeConfig();
 
 	{
-		FO3DMoQSender Sender(Fake->MakeApi(), Clock.AsFunction(), /*JitterSeed=*/42);
+		const TSharedRef<IOpen3DSender> SenderRef = MoQTesting::CreateSenderForTest(Fake->MakeApi(), Clock.AsFunction(), /*JitterSeed=*/42);
+		IOpen3DSender& Sender = *SenderRef;
 		TestTrue(TEXT("Initialize"), Sender.Initialize(Config));
 		TestTrue(TEXT("Start"), Sender.Start());
 		MoQFakeTest::Pump(); // CONNECTING, CONNECTED -> mocap publisher
@@ -210,7 +213,7 @@ bool FMoQSenderReconnectReannounceTest::RunTest(const FString& Parameters)
 // TRF-11: a connect that never completes times out and is retried with backoff
 // ─────────────────────────────────────────────────────────────────────────────
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderConnectTimeoutTest, "Open3DBroadcast.Transport.MoQ.Sender.ConnectTimeoutRetriesWithBackoff", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderConnectTimeoutTest, "Open3DBroadcast.Transport.MoQ.Sender.ConnectTimeoutRetriesWithBackoff", O3DB_TEST_FLAGS)
 bool FMoQSenderConnectTimeoutTest::RunTest(const FString& Parameters)
 {
 	AddExpectedError(TEXT("did not complete within"), EAutomationExpectedMessageFlags::Contains, 2);
@@ -222,7 +225,8 @@ bool FMoQSenderConnectTimeoutTest::RunTest(const FString& Parameters)
 	Config.AdvancedParams.Add(TEXT("connect_timeout"), TEXT("5"));
 
 	{
-		FO3DMoQSender Sender(Fake->MakeApi(), Clock.AsFunction(), /*JitterSeed=*/7);
+		const TSharedRef<IOpen3DSender> SenderRef = MoQTesting::CreateSenderForTest(Fake->MakeApi(), Clock.AsFunction(), /*JitterSeed=*/7);
+		IOpen3DSender& Sender = *SenderRef;
 		TestTrue(TEXT("Initialize"), Sender.Initialize(Config));
 		TestTrue(TEXT("Start"), Sender.Start());
 		TestEqual(TEXT("First attempt launched"), Fake->GetBlockingLaunches(), 1);
@@ -276,7 +280,7 @@ bool FMoQSenderConnectTimeoutTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderConnectErrorWithoutCallbackTest, "Open3DBroadcast.Transport.MoQ.Sender.ConnectErrorWithoutCallbackRetries", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderConnectErrorWithoutCallbackTest, "Open3DBroadcast.Transport.MoQ.Sender.ConnectErrorWithoutCallbackRetries", O3DB_TEST_FLAGS)
 bool FMoQSenderConnectErrorWithoutCallbackTest::RunTest(const FString& Parameters)
 {
 	AddExpectedError(TEXT("moq_connect failed"), EAutomationExpectedMessageFlags::Contains, 2);
@@ -289,7 +293,8 @@ bool FMoQSenderConnectErrorWithoutCallbackTest::RunTest(const FString& Parameter
 	MoQFakeTest::FManualClock Clock;
 
 	{
-		FO3DMoQSender Sender(Fake->MakeApi(), Clock.AsFunction(), /*JitterSeed=*/3);
+		const TSharedRef<IOpen3DSender> SenderRef = MoQTesting::CreateSenderForTest(Fake->MakeApi(), Clock.AsFunction(), /*JitterSeed=*/3);
+		IOpen3DSender& Sender = *SenderRef;
 		TestTrue(TEXT("Initialize"), Sender.Initialize(MakeFakeConfig()));
 		TestTrue(TEXT("Start"), Sender.Start());
 		MoQFakeTest::Pump(); // FAILED synthesised by the session
@@ -319,7 +324,7 @@ bool FMoQSenderConnectErrorWithoutCallbackTest::RunTest(const FString& Parameter
 // TRF-39: moq_last_error is thread-local and read only right after a failing call
 // ─────────────────────────────────────────────────────────────────────────────
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQLastErrorHandlingTest, "Open3DBroadcast.Transport.MoQ.Session.LastErrorHandling", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQLastErrorHandlingTest, "Open3DBroadcast.Transport.MoQ.Session.LastErrorHandling", O3DB_TEST_FLAGS)
 bool FMoQLastErrorHandlingTest::RunTest(const FString& Parameters)
 {
 	AddExpectedError(TEXT("moq_connect failed"), EAutomationExpectedMessageFlags::Contains, 1);
@@ -333,21 +338,21 @@ bool FMoQLastErrorHandlingTest::RunTest(const FString& Parameters)
 	int32 FailedCount = 0;
 	int32 ConnectedCount = 0;
 
-	TSharedRef<FMoQSessionWrapper, ESPMode::ThreadSafe> Session = MakeShared<FMoQSessionWrapper, ESPMode::ThreadSafe>(Fake->MakeApi());
-	TestTrue(TEXT("Initialize"), Session->Initialize(TEXT("https://fake.relay.invalid:443")).IsOk());
+	FMoQTestSession Session(Fake->MakeApi());
+	TestTrue(TEXT("Initialize"), Session.Initialize(TEXT("https://fake.relay.invalid:443")).IsOk());
 
-	Session->OnConnectionStateChanged().AddLambda([&FailedCount, &ConnectedCount](MoqConnectionState State)
+	Session.AddConnectionStateHandler([&FailedCount, &ConnectedCount](MoqConnectionState State)
 	{
 		FailedCount += (State == MOQ_STATE_FAILED) ? 1 : 0;
 		ConnectedCount += (State == MOQ_STATE_CONNECTED) ? 1 : 0;
 	});
 
 	// The blocking connect runs inline here, so the failing call and the error read share a thread.
-	TestTrue(TEXT("Connect starts"), Session->Connect().IsOk());
+	TestTrue(TEXT("Connect starts"), Session.Connect().IsOk());
 	MoQFakeTest::Pump();
 	TestEqual(TEXT("A terminal FAILED was reported"), FailedCount, 1);
 
-	const FString ConnectError = Session->GetLastConnectError();
+	const FString ConnectError = Session.GetLastConnectError();
 	TestTrue(TEXT("Error keeps the result message"), ConnectError.Contains(TEXT("fake invalid argument")));
 	TestTrue(TEXT("Error keeps the thread-local detail"), ConnectError.Contains(TEXT("fake: invalid url scheme")));
 	TestEqual(TEXT("Result message freed once"), Fake->GetStringsFreed(), 1);
@@ -356,18 +361,15 @@ bool FMoQLastErrorHandlingTest::RunTest(const FString& Parameters)
 
 	// A connected session whose subscribe fails reads the error on the calling thread too.
 	Fake->ConnectBehavior = FMoQFakeFfi::EConnectBehavior::Succeed;
-	TestTrue(TEXT("Reconnect starts"), Session->Connect().IsOk());
+	TestTrue(TEXT("Reconnect starts"), Session.Connect().IsOk());
 	MoQFakeTest::Pump();
 	TestEqual(TEXT("Connected"), ConnectedCount, 1);
 	TestEqual(TEXT("Success reads no error"), Fake->GetLastErrorCalls(), 1);
 
 	Fake->bSubscribeFails = true;
-	FMoQSubscriptionConfig SubscribeConfig;
-	SubscribeConfig.Namespace = MocapNamespace;
-	SubscribeConfig.TrackName = TEXT("actor");
-	SubscribeConfig.OnData = [](const TArray64<uint8>&) {};
-	TSharedPtr<FMoQSubscriberHandle> Subscriber;
-	const FMoQResult SubscribeResult = Session->Subscribe(SubscribeConfig, Subscriber);
+	bool bSubscribed = false;
+	const FMoQTestResult SubscribeResult = Session.Subscribe(MocapNamespace, TEXT("actor"), [](const TArray64<uint8>&) {}, bSubscribed);
+	TestFalse(TEXT("No subscriber handle"), bSubscribed);
 	TestFalse(TEXT("Subscribe failed"), SubscribeResult.IsOk());
 	TestTrue(TEXT("Subscribe error carries moq_last_error"), SubscribeResult.Message.Contains(TEXT("fake: track not announced")));
 	TestEqual(TEXT("moq_last_error read for the null subscriber"), Fake->GetLastErrorCalls(), 2);
@@ -377,9 +379,9 @@ bool FMoQLastErrorHandlingTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Fake fired DISCONNECTED"), Fake->FireConnectionState(2, MOQ_STATE_DISCONNECTED));
 	MoQFakeTest::Pump();
 	TestEqual(TEXT("State callback read no thread-local error"), Fake->GetLastErrorCalls(), 2);
-	TestFalse(TEXT("Session reads disconnected"), Session->IsConnected());
+	TestFalse(TEXT("Session reads disconnected"), Session.IsConnected());
 
-	Session->Disconnect();
+	Session.Disconnect();
 	MoQFakeTest::Pump();
 	return true;
 }
@@ -388,7 +390,7 @@ bool FMoQLastErrorHandlingTest::RunTest(const FString& Parameters)
 // TRF-20: subscribe retries back off
 // ─────────────────────────────────────────────────────────────────────────────
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverSubscribeBackoffTest, "Open3DBroadcast.Transport.MoQ.Receiver.SubscribeRetryBackoff", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverSubscribeBackoffTest, "Open3DBroadcast.Transport.MoQ.Receiver.SubscribeRetryBackoff", O3DB_TEST_FLAGS)
 bool FMoQReceiverSubscribeBackoffTest::RunTest(const FString& Parameters)
 {
 	// Logged once; later failures fall inside the 5 s log rate limit of the manual clock.
@@ -399,7 +401,8 @@ bool FMoQReceiverSubscribeBackoffTest::RunTest(const FString& Parameters)
 	MoQFakeTest::FManualClock Clock;
 
 	{
-		FO3DMoQReceiver Receiver(Fake->MakeApi(), Clock.AsFunction(), /*JitterSeed=*/11);
+		const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), Clock.AsFunction(), /*JitterSeed=*/11);
+		IOpen3DReceiver& Receiver = *ReceiverRef;
 		TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeFakeConfig()));
 		TestTrue(TEXT("Start"), Receiver.Start());
 		MoQFakeTest::Pump(); // CONNECTED -> immediate subscribe, fails, next try in [0.75, 1.0] s
@@ -449,7 +452,7 @@ bool FMoQReceiverSubscribeBackoffTest::RunTest(const FString& Parameters)
 // TRF-37: the receiver decodes with the codec written in the frame
 // ─────────────────────────────────────────────────────────────────────────────
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverCodecFromFrameTest, "Open3DBroadcast.Transport.MoQ.Receiver.AudioCodecFromFrame", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverCodecFromFrameTest, "Open3DBroadcast.Transport.MoQ.Receiver.AudioCodecFromFrame", O3DB_TEST_FLAGS)
 bool FMoQReceiverCodecFromFrameTest::RunTest(const FString& Parameters)
 {
 	O3DS::FAudioFrameMeta Meta;
@@ -470,13 +473,13 @@ bool FMoQReceiverCodecFromFrameTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Serialize Opus-labelled frame"), O3DAudio::SerializeEncodedAudioFrame(O3DS::EUnifiedCodec::Opus, Meta, OpusBytes.GetData(), OpusBytes.Num(), OpusFrame));
 
 	O3DS::EUnifiedCodec Codec = O3DS::EUnifiedCodec::O3DS;
-	TestTrue(TEXT("PCM16 frame recognised"), MoQHelpers::TryGetAudioCodecFromFrame(PcmFrame.GetData(), PcmFrame.Num(), Codec));
+	TestTrue(TEXT("PCM16 frame recognised"), MoQTesting::TryGetAudioCodecFromFrame(PcmFrame.GetData(), PcmFrame.Num(), Codec));
 	TestTrue(TEXT("...as PCM16"), Codec == O3DS::EUnifiedCodec::PCM16);
-	TestTrue(TEXT("Opus frame recognised"), MoQHelpers::TryGetAudioCodecFromFrame(OpusFrame.GetData(), OpusFrame.Num(), Codec));
+	TestTrue(TEXT("Opus frame recognised"), MoQTesting::TryGetAudioCodecFromFrame(OpusFrame.GetData(), OpusFrame.Num(), Codec));
 	TestTrue(TEXT("...as Opus"), Codec == O3DS::EUnifiedCodec::Opus);
 	const uint8 Garbage[3] = {9, 9, 9};
-	TestFalse(TEXT("Unknown header rejected"), MoQHelpers::TryGetAudioCodecFromFrame(Garbage, 3, Codec));
-	TestFalse(TEXT("Empty payload rejected"), MoQHelpers::TryGetAudioCodecFromFrame(nullptr, 0, Codec));
+	TestFalse(TEXT("Unknown header rejected"), MoQTesting::TryGetAudioCodecFromFrame(Garbage, 3, Codec));
+	TestFalse(TEXT("Empty payload rejected"), MoQTesting::TryGetAudioCodecFromFrame(nullptr, 0, Codec));
 
 	// End to end: the receiver's local config says Opus, the sender sent PCM16. Before WP-S8
 	// the receiver decoded with its own config and dropped every frame.
@@ -487,7 +490,8 @@ bool FMoQReceiverCodecFromFrameTest::RunTest(const FString& Parameters)
 	TSharedRef<FRecordingAudioSink, ESPMode::ThreadSafe> Sink = MakeShared<FRecordingAudioSink, ESPMode::ThreadSafe>();
 
 	{
-		FO3DMoQReceiver Receiver(Fake->MakeApi(), Clock.AsFunction(), /*JitterSeed=*/5);
+		const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), Clock.AsFunction(), /*JitterSeed=*/5);
+		IOpen3DReceiver& Receiver = *ReceiverRef;
 		TestTrue(TEXT("Initialize"), Receiver.Initialize(Config));
 		Receiver.SetAudioSink(Sink, Config.Audio);
 		TestTrue(TEXT("Start"), Receiver.Start());
@@ -511,30 +515,29 @@ bool FMoQReceiverCodecFromFrameTest::RunTest(const FString& Parameters)
 // TRF-13: no work is accepted after the dispatcher shuts down
 // ─────────────────────────────────────────────────────────────────────────────
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQDispatcherShutdownTest, "Open3DBroadcast.Transport.MoQ.Dispatcher.NoWorkAfterShutdown", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQDispatcherShutdownTest, "Open3DBroadcast.Transport.MoQ.Dispatcher.NoWorkAfterShutdown", O3DB_TEST_FLAGS)
 bool FMoQDispatcherShutdownTest::RunTest(const FString& Parameters)
 {
-	FMoQAsyncDispatcher& Dispatcher = FMoQAsyncDispatcher::Get();
-	const bool bWasAccepting = Dispatcher.IsAcceptingTasks();
-	Dispatcher.Initialize();
-	Dispatcher.DrainOnGameThread();
+	const bool bWasAccepting = MoQTesting::IsDispatcherAccepting();
+	MoQTesting::InitializeDispatcher();
+	MoQTesting::PumpDispatcher();
 
 	int32 Ran = 0;
-	TestTrue(TEXT("Queued before shutdown"), Dispatcher.EnqueueGameThreadTask([&Ran]() { ++Ran; }));
-	Dispatcher.Shutdown();
+	TestTrue(TEXT("Queued before shutdown"), MoQTesting::EnqueueOnDispatcher([&Ran]() { ++Ran; }));
+	MoQTesting::ShutdownDispatcher();
 	TestEqual(TEXT("Queued work is discarded, not run, at shutdown"), Ran, 0);
-	TestFalse(TEXT("Rejected after shutdown"), Dispatcher.EnqueueGameThreadTask([&Ran]() { ++Ran; }));
-	TestFalse(TEXT("Not restarted lazily"), Dispatcher.IsAcceptingTasks());
-	TestEqual(TEXT("Nothing to drain"), Dispatcher.DrainOnGameThread(), 0);
+	TestFalse(TEXT("Rejected after shutdown"), MoQTesting::EnqueueOnDispatcher([&Ran]() { ++Ran; }));
+	TestFalse(TEXT("Not restarted lazily"), MoQTesting::IsDispatcherAccepting());
+	TestEqual(TEXT("Nothing to drain"), MoQTesting::PumpDispatcher(), 0);
 
 	// Restore the module's state for later tests.
-	Dispatcher.Initialize();
-	TestTrue(TEXT("Accepting again after Initialize"), Dispatcher.EnqueueGameThreadTask([&Ran]() { ++Ran; }));
-	Dispatcher.DrainOnGameThread();
+	MoQTesting::InitializeDispatcher();
+	TestTrue(TEXT("Accepting again after Initialize"), MoQTesting::EnqueueOnDispatcher([&Ran]() { ++Ran; }));
+	MoQTesting::PumpDispatcher();
 	TestEqual(TEXT("Runs after re-initialize"), Ran, 1);
 	if (!bWasAccepting)
 	{
-		Dispatcher.Shutdown();
+		MoQTesting::ShutdownDispatcher();
 	}
 	return true;
 }
@@ -543,7 +546,7 @@ bool FMoQDispatcherShutdownTest::RunTest(const FString& Parameters)
 // WP-S5 stress extended through Start() (TRF-9 publisher handles under the worker)
 // ─────────────────────────────────────────────────────────────────────────────
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQLifetimeStartStressTest, "Open3DBroadcast.Transport.MoQ.Lifetime.StartStopWithAudio", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQLifetimeStartStressTest, "Open3DBroadcast.Transport.MoQ.Lifetime.StartStopWithAudio", O3DB_TEST_FLAGS)
 bool FMoQLifetimeStartStressTest::RunTest(const FString& Parameters)
 {
 	TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
@@ -561,7 +564,7 @@ bool FMoQLifetimeStartStressTest::RunTest(const FString& Parameters)
 
 	for (int32 Cycle = 0; Cycle < O3DLifetimeTest::StressCycles; ++Cycle)
 	{
-		TSharedPtr<FO3DMoQSender> Sender = MakeShared<FO3DMoQSender>(Api, nullptr, static_cast<uint64>(Cycle));
+		TSharedPtr<IOpen3DSender> Sender = MoQTesting::CreateSenderForTest(Api, nullptr, static_cast<uint64>(Cycle));
 		if (!Sender->Initialize(Config) || !Sender->Start())
 		{
 			++StartFailures;

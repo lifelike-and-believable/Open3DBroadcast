@@ -3,11 +3,12 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "O3DTestHarness.h"
 #include "O3DAudioOpus.h"
 
 #if O3D_WITH_OPUS
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DAudioOpusRoundTripTest, "Open3DBroadcast.O3DShared.Audio.Opus.RoundTrip", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DAudioOpusRoundTripTest, "Open3DBroadcast.Shared.Audio.Opus.RoundTrip", O3DB_TEST_FLAGS)
 bool FO3DAudioOpusRoundTripTest::RunTest(const FString& Parameters)
 {
 	FO3DAudioOpusEncoder::FSettings EncoderSettings;

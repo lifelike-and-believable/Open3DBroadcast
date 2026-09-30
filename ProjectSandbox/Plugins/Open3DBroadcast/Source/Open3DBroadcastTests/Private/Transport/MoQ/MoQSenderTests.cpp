@@ -1,9 +1,15 @@
+// Copyright (c) Open3DStream Contributors
+//
+// MoQ sender unit tests. Every sender is built on the fake moq-ffi table through
+// Testing/MoQTesting.h, so no test loads moq_ffi.dll or touches the network (WP-T2).
+
+#include "O3DTestHarness.h"
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
 
 #include "O3DTransportTypes.h"
-#include "Sender/MoQSender.h"
 
 #include "o3ds/model.h"
 
@@ -11,6 +17,9 @@
 #include <vector>
 
 #if O3D_WITH_TRANSPORT_MOQ
+
+#include "Testing/MoQTesting.h"
+#include "Transport/MoQ/MoQFakeFfi.h"
 
 namespace MoQSenderTestHelpers
 {
@@ -24,10 +33,12 @@ namespace MoQSenderTestHelpers
 	}
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderRequiresUriTest, "Open3DBroadcast.Open3DTransportMoQ.Sender.RequiresUri", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderRequiresUriTest, "Open3DBroadcast.Transport.MoQ.Sender.RequiresUri", O3DB_TEST_FLAGS)
 bool FMoQSenderRequiresUriTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQSender Sender;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DSender> SenderRef = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DSender& Sender = *SenderRef;
 	FO3DTransportConfig Config;
 	Config.Transport = TEXT("MoQ");
 
@@ -37,10 +48,12 @@ bool FMoQSenderRequiresUriTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderInitializeSuccessTest, "Open3DBroadcast.Open3DTransportMoQ.Sender.Initialize", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderInitializeSuccessTest, "Open3DBroadcast.Transport.MoQ.Sender.Initialize", O3DB_TEST_FLAGS)
 bool FMoQSenderInitializeSuccessTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQSender Sender;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DSender> SenderRef = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DSender& Sender = *SenderRef;
 	FO3DTransportConfig Config;
 	Config.Transport = TEXT("MoQ");
 	Config.Uri = TEXT("https://localhost:4443");
@@ -53,10 +66,12 @@ bool FMoQSenderInitializeSuccessTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderStopIsIdempotentTest, "Open3DBroadcast.Open3DTransportMoQ.Sender.StopIdempotent", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderStopIsIdempotentTest, "Open3DBroadcast.Transport.MoQ.Sender.StopIdempotent", O3DB_TEST_FLAGS)
 bool FMoQSenderStopIsIdempotentTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQSender Sender;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DSender> SenderRef = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DSender& Sender = *SenderRef;
 	FO3DTransportConfig Config;
 	Config.Transport = TEXT("MoQ");
 	Config.Uri = TEXT("https://localhost:4443");
@@ -72,10 +87,12 @@ bool FMoQSenderStopIsIdempotentTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderInitializeCalledTwiceTest, "Open3DBroadcast.Open3DTransportMoQ.Sender.InitializeTwice", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderInitializeCalledTwiceTest, "Open3DBroadcast.Transport.MoQ.Sender.InitializeTwice", O3DB_TEST_FLAGS)
 bool FMoQSenderInitializeCalledTwiceTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQSender Sender;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DSender> SenderRef = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DSender& Sender = *SenderRef;
 	FO3DTransportConfig Config;
 	Config.Transport = TEXT("MoQ");
 	Config.Uri = TEXT("https://localhost:4443");
@@ -91,10 +108,12 @@ bool FMoQSenderInitializeCalledTwiceTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderGetStatsBeforeStartTest, "Open3DBroadcast.Open3DTransportMoQ.Sender.GetStatsBeforeStart", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderGetStatsBeforeStartTest, "Open3DBroadcast.Transport.MoQ.Sender.GetStatsBeforeStart", O3DB_TEST_FLAGS)
 bool FMoQSenderGetStatsBeforeStartTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQSender Sender;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DSender> SenderRef = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DSender& Sender = *SenderRef;
 	FO3DTransportConfig Config;
 	Config.Transport = TEXT("MoQ");
 	Config.Uri = TEXT("https://localhost:4443");
@@ -111,10 +130,12 @@ bool FMoQSenderGetStatsBeforeStartTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderAdvancedParamsTest, "Open3DBroadcast.Open3DTransportMoQ.Sender.AdvancedParams", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderAdvancedParamsTest, "Open3DBroadcast.Transport.MoQ.Sender.AdvancedParams", O3DB_TEST_FLAGS)
 bool FMoQSenderAdvancedParamsTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQSender Sender;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DSender> SenderRef = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DSender& Sender = *SenderRef;
 	FO3DTransportConfig Config;
 	Config.Transport = TEXT("MoQ");
 	Config.Uri = TEXT("https://localhost:4443");
@@ -128,19 +149,22 @@ bool FMoQSenderAdvancedParamsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderSupportsAudioTest, "Open3DBroadcast.Open3DTransportMoQ.Sender.SupportsAudio", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+// MoQ audio shipped (Phase 4, WP-S5/S8); this used to assert the old "not implemented" stub.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderSupportsAudioTest, "Open3DBroadcast.Transport.MoQ.Sender.SupportsAudio", O3DB_TEST_FLAGS)
 bool FMoQSenderSupportsAudioTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQSender Sender;
-	// Audio is Phase 4, currently returns false
-	TestFalse(TEXT("SupportsAudio should return false (Phase 4 not implemented)"), Sender.SupportsAudio());
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DSender> Sender = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
+	TestTrue(TEXT("The MoQ sender advertises audio"), Sender->SupportsAudio());
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderSendBeforeStartTest, "Open3DBroadcast.Open3DTransportMoQ.Sender.SendBeforeStart", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderSendBeforeStartTest, "Open3DBroadcast.Transport.MoQ.Sender.SendBeforeStart", O3DB_TEST_FLAGS)
 bool FMoQSenderSendBeforeStartTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQSender Sender;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DSender> SenderRef = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DSender& Sender = *SenderRef;
 	FO3DTransportConfig Config;
 	Config.Transport = TEXT("MoQ");
 	Config.Uri = TEXT("https://localhost:4443");
@@ -164,10 +188,12 @@ bool FMoQSenderSendBeforeStartTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderStartBeforeInitializeTest, "Open3DBroadcast.Open3DTransportMoQ.Sender.StartBeforeInitialize", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderStartBeforeInitializeTest, "Open3DBroadcast.Transport.MoQ.Sender.StartBeforeInitialize", O3DB_TEST_FLAGS)
 bool FMoQSenderStartBeforeInitializeTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQSender Sender;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DSender> SenderRef = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DSender& Sender = *SenderRef;
 
 	AddExpectedError(TEXT("MoQ sender Start called before Initialize"), EAutomationExpectedMessageFlags::Contains, 1);
 
@@ -177,10 +203,12 @@ bool FMoQSenderStartBeforeInitializeTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderTickBeforeStartTest, "Open3DBroadcast.Open3DTransportMoQ.Sender.TickBeforeStart", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderTickBeforeStartTest, "Open3DBroadcast.Transport.MoQ.Sender.TickBeforeStart", O3DB_TEST_FLAGS)
 bool FMoQSenderTickBeforeStartTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQSender Sender;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DSender> SenderRef = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
+	IOpen3DSender& Sender = *SenderRef;
 	FO3DTransportConfig Config;
 	Config.Transport = TEXT("MoQ");
 	Config.Uri = TEXT("https://localhost:4443");
@@ -195,19 +223,34 @@ bool FMoQSenderTickBeforeStartTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderCreateAudioSinkTest, "Open3DBroadcast.Open3DTransportMoQ.Sender.CreateAudioSink", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+// MoQ audio shipped (Phase 4, WP-S5/S8); this used to expect nullptr from the old stub. A sink
+// is handed out, and once the sender stops it rejects PCM (WP-S5 lifetime gate).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSenderCreateAudioSinkTest, "Open3DBroadcast.Transport.MoQ.Sender.CreateAudioSink", O3DB_TEST_FLAGS)
 bool FMoQSenderCreateAudioSinkTest::RunTest(const FString& Parameters)
 {
-	FO3DMoQSender Sender;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<IOpen3DSender> Sender = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
+
+	FO3DTransportConfig Config;
+	Config.Transport = TEXT("MoQ");
+	Config.Uri = TEXT("https://fake.relay.invalid:443");
+	Config.StreamId = TEXT("test/audiosink");
+	TestTrue(TEXT("Initialize should succeed"), Sender->Initialize(Config));
+
 	FO3DTransportAudioConfig AudioConfig;
 	AudioConfig.bEnableAudio = true;
 	AudioConfig.SampleRate = 48000;
 	AudioConfig.NumChannels = 1;
+	const TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> AudioSink = Sender->CreateAudioSink(AudioConfig);
+	if (!TestTrue(TEXT("CreateAudioSink returns a sink"), AudioSink.IsValid()))
+	{
+		return false;
+	}
 
-	// CreateAudioSink should return nullptr (Phase 4 not implemented)
-	const TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> AudioSink = Sender.CreateAudioSink(AudioConfig);
-	TestFalse(TEXT("CreateAudioSink should return nullptr (Phase 4 not implemented)"), AudioSink.IsValid());
-
+	Sender->Stop();
+	const float Samples[4] = { 0.1f, -0.1f, 0.2f, -0.2f };
+	TestFalse(TEXT("The sink rejects PCM after Stop"), AudioSink->SubmitPcm(TEXT("stopped"), Samples, 4, 1, 48000, 0.0));
+	MoQTesting::PumpDispatcher();
 	return true;
 }
 

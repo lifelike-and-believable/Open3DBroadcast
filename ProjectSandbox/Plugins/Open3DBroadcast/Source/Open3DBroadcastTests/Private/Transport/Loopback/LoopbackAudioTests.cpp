@@ -1,15 +1,24 @@
 // Copyright (c) Open3DStream Contributors
+//
+// Loopback audio path. The transport is created through the registry by its registered name,
+// so these tests need no access to the module's private classes (WP-T2).
+
+#include "O3DTestHarness.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "../Sender/LoopbackSender.h"
-#include "../Receiver/LoopbackReceiver.h"
+#include "O3DReceiverInterface.h"
+#include "O3DReceiverRegistry.h"
+#include "O3DSenderInterface.h"
+#include "O3DSenderRegistry.h"
 
 #include "Misc/AutomationTest.h"
 
 namespace
 {
-    class FTestReceiverAudioSink final : public IO3DReceiverAudioSink
+    const FName LoopbackTransportName(TEXT("Loopback"));
+
+    class FLoopbackTestAudioSink final : public IO3DReceiverAudioSink
     {
     public:
         virtual void SubmitPcm16(const O3DS::FAudioFrameMeta& InMeta, const uint8* Data, int32 NumBytes) override
@@ -35,7 +44,7 @@ namespace
     };
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLoopbackAudioRoundTripTest, "Open3DBroadcast.Open3DTransportLoopback.Audio.RoundTrip", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLoopbackAudioRoundTripTest, "Open3DBroadcast.Transport.Loopback.Audio.RoundTrip", O3DB_TEST_FLAGS)
 bool FO3DLoopbackAudioRoundTripTest::RunTest(const FString& Parameters)
 {
     FO3DTransportConfig Config;
@@ -45,8 +54,14 @@ bool FO3DLoopbackAudioRoundTripTest::RunTest(const FString& Parameters)
     Config.Audio.SampleRate = 48000;
     Config.Audio.NumChannels = 2;
 
-    FO3DLoopbackSender Sender;
-    FO3DLoopbackReceiver Receiver;
+    const TSharedPtr<IOpen3DSender> SenderPtr = O3DTransport::CreateSender(LoopbackTransportName);
+    const TSharedPtr<IOpen3DReceiver> ReceiverPtr = O3DTransport::CreateReceiver(LoopbackTransportName);
+    if (!TestTrue(TEXT("Loopback sender and receiver registered"), SenderPtr.IsValid() && ReceiverPtr.IsValid()))
+    {
+        return false;
+    }
+    IOpen3DSender& Sender = *SenderPtr;
+    IOpen3DReceiver& Receiver = *ReceiverPtr;
 
     TestTrue(TEXT("Sender initializes"), Sender.Initialize(Config));
     TestTrue(TEXT("Receiver initializes"), Receiver.Initialize(Config));
@@ -57,7 +72,7 @@ bool FO3DLoopbackAudioRoundTripTest::RunTest(const FString& Parameters)
     TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> SenderAudioSink = Sender.CreateAudioSink(Config.Audio);
     TestTrue(TEXT("Audio sink created"), SenderAudioSink.IsValid());
 
-    TSharedPtr<FTestReceiverAudioSink, ESPMode::ThreadSafe> ReceiverAudioSink = MakeShared<FTestReceiverAudioSink, ESPMode::ThreadSafe>();
+    TSharedPtr<FLoopbackTestAudioSink, ESPMode::ThreadSafe> ReceiverAudioSink = MakeShared<FLoopbackTestAudioSink, ESPMode::ThreadSafe>();
     Receiver.SetAudioSink(ReceiverAudioSink, Config.Audio);
 
     const int32 NumFrames = 4;
@@ -90,7 +105,7 @@ bool FO3DLoopbackAudioRoundTripTest::RunTest(const FString& Parameters)
     return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLoopbackAudioQueueOverflowTest, "Open3DBroadcast.Open3DTransportLoopback.Audio.QueueOverflow", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLoopbackAudioQueueOverflowTest, "Open3DBroadcast.Transport.Loopback.Audio.QueueOverflow", O3DB_TEST_FLAGS)
 bool FO3DLoopbackAudioQueueOverflowTest::RunTest(const FString& Parameters)
 {
     FO3DTransportConfig Config;
@@ -101,7 +116,12 @@ bool FO3DLoopbackAudioQueueOverflowTest::RunTest(const FString& Parameters)
     Config.Audio.NumChannels = 1;
     Config.AdvancedParams.Add(TEXT("loopback.maxaudioqueue"), TEXT("1"));
 
-    FO3DLoopbackSender Sender;
+    const TSharedPtr<IOpen3DSender> SenderPtr = O3DTransport::CreateSender(LoopbackTransportName);
+    if (!TestTrue(TEXT("Loopback sender registered"), SenderPtr.IsValid()))
+    {
+        return false;
+    }
+    IOpen3DSender& Sender = *SenderPtr;
     TestTrue(TEXT("Sender initializes"), Sender.Initialize(Config));
     TestTrue(TEXT("Sender starts"), Sender.Start());
 
@@ -118,4 +138,4 @@ bool FO3DLoopbackAudioQueueOverflowTest::RunTest(const FString& Parameters)
     return true;
 }
 
-#endif // WITH_AUTOMATION_TESTS
+#endif // WITH_DEV_AUTOMATION_TESTS

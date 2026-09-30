@@ -12,9 +12,12 @@
 // only touched subjects pushed), RCV-7 (subject created once), RCV-14 (a
 // nameless transform in the middle keeps parents correct).
 
-#include "O3DReceiverSource.h"
+#include "O3DTestHarness.h"
 
-#if defined(WITH_DEV_AUTOMATION_TESTS) && WITH_DEV_AUTOMATION_TESTS
+#if WITH_DEV_AUTOMATION_TESTS
+
+#include "O3DReceiverSource.h"
+#include "Testing/O3DReceiverTesting.h"
 
 #include "Misc/AutomationTest.h"
 #include "HAL/PlatformTime.h"
@@ -28,69 +31,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-
-struct FO3DReceiverCorrectnessTestAccessor
-{
-    struct FStaticPush
-    {
-        FName Subject;
-        TArray<FName> BoneNames;
-        TArray<int32> BoneParents;
-        TArray<FName> CurveNames;
-        bool bFirstPushThisSession = false;
-    };
-
-    struct FFramePush
-    {
-        FName Subject;
-        TArray<FTransform> Transforms;
-        TArray<float> Curves;
-    };
-
-    struct FRecorder
-    {
-        TArray<FStaticPush> Statics;
-        TArray<FFramePush> Frames;
-
-        int32 CountFrames(FName Subject) const
-        {
-            int32 Count = 0;
-            for (const FFramePush& Frame : Frames)
-            {
-                Count += (Frame.Subject == Subject) ? 1 : 0;
-            }
-            return Count;
-        }
-    };
-
-    static void BindRecorder(FO3DReceiverSource& Source, const TSharedRef<FRecorder>& Recorder)
-    {
-        Source.TestStaticPushHook = [Recorder](const FLiveLinkSubjectKey& Key, const TArray<FName>& BoneNames, const TArray<int32>& BoneParents, const TArray<FName>& CurveNames, bool bFirstPush)
-        {
-            FStaticPush Push;
-            Push.Subject = Key.SubjectName.Name;
-            Push.BoneNames = BoneNames;
-            Push.BoneParents = BoneParents;
-            Push.CurveNames = CurveNames;
-            Push.bFirstPushThisSession = bFirstPush;
-            Recorder->Statics.Add(MoveTemp(Push));
-        };
-        Source.TestFramePushHook = [Recorder](const FLiveLinkSubjectKey& Key, const TArray<FTransform>& Transforms, const TArray<float>& Curves, double)
-        {
-            FFramePush Push;
-            Push.Subject = Key.SubjectName.Name;
-            Push.Transforms = Transforms;
-            Push.Curves = Curves;
-            Recorder->Frames.Add(MoveTemp(Push));
-        };
-    }
-
-    /** The same consumer object StartTransport() hands to a real transport. */
-    static TSharedRef<ISerializedFrameConsumer> MakeConsumer(const TSharedRef<FO3DReceiverSource>& Source)
-    {
-        return FO3DReceiverSource::MakeSerializedConsumer(TWeakPtr<FO3DReceiverSource>(Source));
-    }
-};
 
 namespace O3DReceiverCorrectnessTests
 {
@@ -274,20 +214,20 @@ namespace O3DReceiverCorrectnessTests
 }
 
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverRenamedBonesLegacyTest, "Open3DBroadcast.Receiver.Correctness.RenamedBonesRepublished.Legacy", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverRenamedBonesLegacyTest, "Open3DBroadcast.Receiver.Correctness.RenamedBonesRepublished.Legacy", O3DB_TEST_FLAGS)
 bool FO3DReceiverRenamedBonesLegacyTest::RunTest(const FString& Parameters)
 {
     return O3DReceiverCorrectnessTests::RunRenamedBones(*this, false);
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverRenamedBonesGatedTest, "Open3DBroadcast.Receiver.Correctness.RenamedBonesRepublished.Gated", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverRenamedBonesGatedTest, "Open3DBroadcast.Receiver.Correctness.RenamedBonesRepublished.Gated", O3DB_TEST_FLAGS)
 bool FO3DReceiverRenamedBonesGatedTest::RunTest(const FString& Parameters)
 {
     return O3DReceiverCorrectnessTests::RunRenamedBones(*this, true);
 }
 
 // RCV-5: two gated senders with their own tx_seq spaces and epochs on one channel.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverTwoSendersTest, "Open3DBroadcast.Receiver.Correctness.TwoSendersOneChannel", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverTwoSendersTest, "Open3DBroadcast.Receiver.Correctness.TwoSendersOneChannel", O3DB_TEST_FLAGS)
 bool FO3DReceiverTwoSendersTest::RunTest(const FString& Parameters)
 {
     O3DS::SubjectList SenderA;
@@ -337,7 +277,7 @@ bool FO3DReceiverTwoSendersTest::RunTest(const FString& Parameters)
 }
 
 // RCV-5: an update that names one subject pushes only that subject.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverOnlyTouchedTest, "Open3DBroadcast.Receiver.Correctness.PushesOnlyTouchedSubjects", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverOnlyTouchedTest, "Open3DBroadcast.Receiver.Correctness.PushesOnlyTouchedSubjects", O3DB_TEST_FLAGS)
 bool FO3DReceiverOnlyTouchedTest::RunTest(const FString& Parameters)
 {
     // A multi-subject sender syncs A and B, then drops B and sends a delta for A.
@@ -364,7 +304,7 @@ bool FO3DReceiverOnlyTouchedTest::RunTest(const FString& Parameters)
 }
 
 // RCV-14: a nameless transform in the middle of a subject keeps parents correct.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverNullTransformParentsTest, "Open3DBroadcast.Receiver.Correctness.NullTransformKeepsParents", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverNullTransformParentsTest, "Open3DBroadcast.Receiver.Correctness.NullTransformKeepsParents", O3DB_TEST_FLAGS)
 bool FO3DReceiverNullTransformParentsTest::RunTest(const FString& Parameters)
 {
     O3DReceiverCorrectnessTests::FHarness Harness;

@@ -1,22 +1,29 @@
+// Copyright (c) Open3DStream Contributors
+//
+// MoQ track naming, delivery mode and send-queue limits, observed through the fake moq-ffi
+// table (WP-T2, TRF-34). These tests used to initialize a sender and assert TestTrue(true); they
+// now check what the transport actually announces, publishes and subscribes to.
+// Concurrent sends are covered by Open3DBroadcast.Conformance.MoQ.Send.ConcurrentFromFourThreads.
+
+#include "O3DTestHarness.h"
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
-#include "O3DTransportTypes.h"
-#include "Sender/MoQSender.h"
-#include "Receiver/MoQReceiver.h"
-#include "o3ds/model.h"
-
-#include "HAL/PlatformTime.h"
-#include "HAL/Runnable.h"
-#include "HAL/RunnableThread.h"
 
 #if O3D_WITH_TRANSPORT_MOQ
 
+#include "O3DTransportTypes.h"
+#include "Testing/MoQTesting.h"
+#include "Transport/MoQ/MoQFakeFfi.h"
+
+#include "o3ds/model.h"
+
+#include <string>
+#include <vector>
+
 namespace MoQTrackNamespaceTestHelpers
 {
-	/**
-	 * Create test config for MoQ tests
-	 */
 	FO3DTransportConfig CreateTestConfig(const FString& RelayUrl, const FString& StreamId)
 	{
 		FO3DTransportConfig Config;
@@ -26,415 +33,243 @@ namespace MoQTrackNamespaceTestHelpers
 		return Config;
 	}
 
-	/**
-	 * Create a SubjectList for testing
-	 */
-	O3DS::SubjectList CreateTestSubjectList(const FString& SubjectName)
+	O3DS::SubjectList CreateLargeSubjectList()
 	{
 		O3DS::SubjectList List;
-		const FTCHARToUTF8 SubjectUtf8(*SubjectName);
-		O3DS::Subject* Subject = List.addSubject(std::string(SubjectUtf8.Get(), SubjectUtf8.Length()));
-		Subject->addTransform("Root", -1);
-		Subject->addTransform("Spine", 0);
-		Subject->addTransform("Head", 1);
+		for (int32 SubjectIdx = 0; SubjectIdx < 10; ++SubjectIdx)
+		{
+			const FTCHARToUTF8 SubjectUtf8(*FString::Printf(TEXT("LargeSubject_%d"), SubjectIdx));
+			O3DS::Subject* Subject = List.addSubject(std::string(SubjectUtf8.Get(), SubjectUtf8.Length()));
+			for (int32 BoneIdx = 0; BoneIdx < 100; ++BoneIdx)
+			{
+				const FTCHARToUTF8 BoneUtf8(*FString::Printf(TEXT("Bone_%d"), BoneIdx));
+				Subject->addTransform(std::string(BoneUtf8.Get(), BoneUtf8.Length()), BoneIdx == 0 ? -1 : 0);
+			}
+		}
 		return List;
 	}
 
-	/**
-	 * Runnable for concurrent MoQ sends
-	 */
-	class FMoQConcurrentSendWorker : public FRunnable
+	/** Starts a fake-FFI sender (the connect succeeds inline) and asks for an audio sink. */
+	TSharedRef<IOpen3DSender> StartSender(const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe>& Fake, const FO3DTransportConfig& Config, TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe>& OutSink)
 	{
-	public:
-		FMoQConcurrentSendWorker(FO3DMoQSender* InSender, int32 InThreadId, int32 InNumSends)
-			: Sender(InSender)
-			, ThreadId(InThreadId)
-			, NumSends(InNumSends)
-		{
-		}
+		TSharedRef<IOpen3DSender> Sender = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
+		Sender->Initialize(Config);
+		Sender->Start();
+		MoQTesting::PumpDispatcher(); // CONNECTING, CONNECTED -> mocap publisher
 
-		virtual uint32 Run() override
-		{
-			for (int32 i = 0; i < NumSends; ++i)
-			{
-				const FString SubjectName = FString::Printf(TEXT("Thread%d_Subject%d"), ThreadId, i);
-				O3DS::SubjectList List = CreateTestSubjectList(SubjectName);
+		FO3DTransportAudioConfig Audio;
+		Audio.bEnableAudio = true;
+		Audio.SampleRate = 48000;
+		Audio.NumChannels = 1;
+		OutSink = Sender->CreateAudioSink(Audio); // connected, so the audio publisher is created now
+		MoQTesting::PumpDispatcher();
+		return Sender;
+	}
 
-				Sender->Send(List);
-				FPlatformProcess::Sleep(0.001f);
-			}
-			return 0;
-		}
-
-		FO3DMoQSender* Sender;
-		int32 ThreadId;
-		int32 NumSends;
-	};
+	const FMoQFakeFfi::FPublisher* FindPublisher(const TArray<FMoQFakeFfi::FPublisher>& Publishers, const FString& Namespace)
+	{
+		return Publishers.FindByPredicate([&Namespace](const FMoQFakeFfi::FPublisher& P) { return P.Namespace == Namespace; });
+	}
 }
 
-// ============================================================================
-// MOQ TRACK NAMESPACE TESTS
-// ============================================================================
-
-/**
- * Test: Separate mocap and audio track namespaces
- * Verifies that MoQ uses distinct track prefixes for data types
- */
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSeparateTrackNamespacesTest,
-	"Open3DBroadcast.Open3DTransportMoQ.TrackNamespaces.SeparateMocapAudio",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQSeparateTrackNamespacesTest, "Open3DBroadcast.Transport.MoQ.TrackNamespaces.SeparateMocapAudio", O3DB_TEST_FLAGS)
 bool FMoQSeparateTrackNamespacesTest::RunTest(const FString& Parameters)
 {
 	using namespace MoQTrackNamespaceTestHelpers;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> Sink;
+	{
+		const TSharedRef<IOpen3DSender> Sender = StartSender(Fake, CreateTestConfig(TEXT("https://fake.relay.invalid:443"), TEXT("session/testTrack")), Sink);
 
-	FO3DMoQSender Sender;
-	FO3DTransportConfig Config = CreateTestConfig(
-		TEXT("https://localhost:4443"),
-		TEXT("session/testTrack")
-	);
+		// StreamId "session/testTrack": namespaces mocap/session and audio/session, track testTrack.
+		TestTrue(TEXT("Mocap namespace announced"), Fake->GetAnnounced(1).Contains(TEXT("mocap/session")));
+		TestTrue(TEXT("Audio namespace announced"), Fake->GetAnnounced(1).Contains(TEXT("audio/session")));
 
-	TestTrue(TEXT("Initialize sender"), Sender.Initialize(Config));
-
-	// MoQ architecture uses:
-	// - "mocap/<session>/<track>" for motion capture data
-	// - "audio/<session>/<track>" for audio data
-	//
-	// This test verifies the architecture exists (actual track creation requires relay connection)
-
-	AddInfo(TEXT("MoQ uses separate track namespaces: mocap/* and audio/*"));
-	AddInfo(TEXT("See MoQSender.h:27-32 for track architecture documentation"));
-
-	Sender.Stop();
-
+		const TArray<FMoQFakeFfi::FPublisher> Publishers = Fake->GetPublishers();
+		const FMoQFakeFfi::FPublisher* Mocap = FindPublisher(Publishers, TEXT("mocap/session"));
+		const FMoQFakeFfi::FPublisher* Audio = FindPublisher(Publishers, TEXT("audio/session"));
+		if (TestNotNull(TEXT("Mocap publisher"), Mocap))
+		{
+			TestEqual(TEXT("Mocap track name"), Mocap->Track, FString(TEXT("testTrack")));
+		}
+		if (TestNotNull(TEXT("Audio publisher, separate from mocap"), Audio))
+		{
+			TestEqual(TEXT("Audio track name"), Audio->Track, FString(TEXT("testTrack")));
+		}
+		Sender->Stop();
+	}
+	MoQTesting::PumpDispatcher();
 	return true;
 }
 
-/**
- * Test: Advanced params for custom track naming
- * Verifies that track_namespace and track_name params work correctly
- */
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQCustomTrackNamingTest,
-	"Open3DBroadcast.Open3DTransportMoQ.TrackNamespaces.CustomNaming",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQCustomTrackNamingTest, "Open3DBroadcast.Transport.MoQ.TrackNamespaces.CustomNaming", O3DB_TEST_FLAGS)
 bool FMoQCustomTrackNamingTest::RunTest(const FString& Parameters)
 {
 	using namespace MoQTrackNamespaceTestHelpers;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	FO3DTransportConfig Config = CreateTestConfig(TEXT("https://fake.relay.invalid:443"), TEXT("session/track1"));
+	Config.AdvancedParams.Add(TEXT("track_namespace"), TEXT("mocap/customSession"));
+	Config.AdvancedParams.Add(TEXT("track_name"), TEXT("characterA"));
 
-	// Test 1: Custom mocap namespace
+	TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> Sink;
 	{
-		FO3DMoQSender Sender;
-		FO3DTransportConfig Config = CreateTestConfig(
-			TEXT("https://localhost:4443"),
-			TEXT("session/track1")
-		);
-		Config.AdvancedParams.Add(TEXT("track_namespace"), TEXT("mocap/customSession"));
-		Config.AdvancedParams.Add(TEXT("track_name"), TEXT("characterA"));
+		const TSharedRef<IOpen3DSender> Sender = StartSender(Fake, Config, Sink);
+		const TArray<FMoQFakeFfi::FPublisher> Publishers = Fake->GetPublishers();
 
-		TestTrue(TEXT("Initialize with custom track namespace"), Sender.Initialize(Config));
-		Sender.Stop();
+		// track_namespace overrides the StreamId session; the audio track swaps the mocap/ prefix.
+		const FMoQFakeFfi::FPublisher* Mocap = FindPublisher(Publishers, TEXT("mocap/customSession"));
+		const FMoQFakeFfi::FPublisher* Audio = FindPublisher(Publishers, TEXT("audio/customSession"));
+		if (TestNotNull(TEXT("Mocap publisher on the custom namespace"), Mocap))
+		{
+			TestEqual(TEXT("Custom track name"), Mocap->Track, FString(TEXT("characterA")));
+		}
+		if (TestNotNull(TEXT("Audio publisher on the matching audio namespace"), Audio))
+		{
+			TestEqual(TEXT("Audio uses the custom track name"), Audio->Track, FString(TEXT("characterA")));
+		}
+		Sender->Stop();
 	}
-
-	// Test 2: Custom audio namespace (Phase 4)
-	{
-		FO3DMoQSender Sender;
-		FO3DTransportConfig Config = CreateTestConfig(
-			TEXT("https://localhost:4443"),
-			TEXT("session/track2")
-		);
-		Config.AdvancedParams.Add(TEXT("audio_namespace"), TEXT("audio/customSession"));
-
-		TestTrue(TEXT("Initialize with custom audio namespace"), Sender.Initialize(Config));
-		Sender.Stop();
-	}
-
-	AddInfo(TEXT("Custom track naming via AdvancedParams verified"));
-
+	MoQTesting::PumpDispatcher();
 	return true;
 }
 
-/**
- * Test: Delivery mode configuration
- * Verifies that datagram vs stream delivery modes work
- */
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQDeliveryModeTest,
-	"Open3DBroadcast.Open3DTransportMoQ.TrackNamespaces.DeliveryMode",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQDeliveryModeTest, "Open3DBroadcast.Transport.MoQ.TrackNamespaces.DeliveryMode", O3DB_TEST_FLAGS)
 bool FMoQDeliveryModeTest::RunTest(const FString& Parameters)
 {
 	using namespace MoQTrackNamespaceTestHelpers;
 
-	// Test 1: Stream delivery (default)
+	for (const bool bDatagram : { false, true })
 	{
-		FO3DMoQSender Sender;
-		FO3DTransportConfig Config = CreateTestConfig(
-			TEXT("https://localhost:4443"),
-			TEXT("session/streamTrack")
-		);
+		const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+		FO3DTransportConfig Config = CreateTestConfig(TEXT("https://fake.relay.invalid:443"), TEXT("session/modeTrack"));
+		if (bDatagram)
+		{
+			Config.AdvancedParams.Add(TEXT("delivery_mode"), TEXT("datagram"));
+		}
 
-		TestTrue(TEXT("Initialize with default stream delivery"), Sender.Initialize(Config));
-		Sender.Stop();
+		TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> Sink;
+		const TSharedRef<IOpen3DSender> Sender = StartSender(Fake, Config, Sink);
+		const TArray<FMoQFakeFfi::FPublisher> Publishers = Fake->GetPublishers();
+		const FMoQFakeFfi::FPublisher* Mocap = FindPublisher(Publishers, TEXT("mocap/session"));
+		const FMoQFakeFfi::FPublisher* Audio = FindPublisher(Publishers, TEXT("audio/session"));
+		if (TestNotNull(TEXT("Mocap publisher"), Mocap))
+		{
+			TestTrue(bDatagram ? TEXT("delivery_mode=datagram publishes mocap as datagrams") : TEXT("Mocap defaults to stream delivery"),
+				Mocap->DeliveryMode == (bDatagram ? MOQ_DELIVERY_DATAGRAM : MOQ_DELIVERY_STREAM));
+		}
+		if (TestNotNull(TEXT("Audio publisher"), Audio))
+		{
+			TestTrue(TEXT("Audio always uses stream delivery"), Audio->DeliveryMode == MOQ_DELIVERY_STREAM);
+		}
+		Sender->Stop();
+		MoQTesting::PumpDispatcher();
 	}
-
-	// Test 2: Datagram delivery
-	{
-		FO3DMoQSender Sender;
-		FO3DTransportConfig Config = CreateTestConfig(
-			TEXT("https://localhost:4443"),
-			TEXT("session/datagramTrack")
-		);
-		Config.AdvancedParams.Add(TEXT("delivery_mode"), TEXT("datagram"));
-
-		TestTrue(TEXT("Initialize with datagram delivery mode"), Sender.Initialize(Config));
-		Sender.Stop();
-	}
-
-	AddInfo(TEXT("Delivery mode configuration verified"));
-
 	return true;
 }
 
-/**
- * Test: Concurrent sends to MoQ (thread-safety)
- * Verifies MoQ sender queue is thread-safe
- */
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQConcurrentSendTest,
-	"Open3DBroadcast.Open3DTransportMoQ.Concurrency.MultipleSends",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
-bool FMoQConcurrentSendTest::RunTest(const FString& Parameters)
-{
-	using namespace MoQTrackNamespaceTestHelpers;
-
-	FO3DMoQSender Sender;
-	FO3DTransportConfig Config = CreateTestConfig(
-		TEXT("https://localhost:4443"),
-		TEXT("session/concurrentTest")
-	);
-
-	TestTrue(TEXT("Initialize sender"), Sender.Initialize(Config));
-
-	// Create multiple threads sending concurrently
-	const int32 NumThreads = 4;
-	const int32 NumSendsPerThread = 10;
-
-	TArray<TUniquePtr<FMoQConcurrentSendWorker>> Workers;
-	TArray<FRunnableThread*> Threads;
-
-	FO3DTransportStats StatsBefore = Sender.GetStats();
-
-	for (int32 i = 0; i < NumThreads; ++i)
-	{
-		auto Worker = MakeUnique<FMoQConcurrentSendWorker>(&Sender, i, NumSendsPerThread);
-		FRunnableThread* Thread = FRunnableThread::Create(Worker.Get(), *FString::Printf(TEXT("MoQSendWorker_%d"), i));
-
-		Workers.Add(MoveTemp(Worker));
-		Threads.Add(Thread);
-	}
-
-	// Wait for all threads
-	for (FRunnableThread* Thread : Threads)
-	{
-		Thread->WaitForCompletion();
-		delete Thread;
-	}
-
-	FO3DTransportStats StatsAfter = Sender.GetStats();
-
-	// Verify no crashes
-	TestTrue(TEXT("Concurrent sends should not crash"), true);
-
-	// Stats should reflect the attempts (though frames may be dropped without connection)
-	AddInfo(FString::Printf(TEXT("Concurrent MoQ sends completed: %lld sent, %lld dropped"),
-		StatsAfter.FramesSent, StatsAfter.DroppedFrames));
-
-	Sender.Stop();
-
-	return true;
-}
-
-/**
- * Test: MoQ backpressure with byte-based queue limits
- * Verifies MoQ respects MaxQueueBytes limit
- */
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQBackpressureTest,
-	"Open3DBroadcast.Open3DTransportMoQ.Performance.BackpressureByteLimit",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
+// TRF-34: the old test sent on a sender that was never started and expected DroppedFrames > 0.
+// That path returns false before the queue and never touches Stats, so it could not pass, and it
+// never reached the byte cap. Here the sender runs (its connect is held, so nothing is published)
+// with the smallest queue the transport allows, and one frame larger than the cap is dropped.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQBackpressureTest, "Open3DBroadcast.Transport.MoQ.Sender.BackpressureByteLimit", O3DB_TEST_FLAGS)
 bool FMoQBackpressureTest::RunTest(const FString& Parameters)
 {
 	using namespace MoQTrackNamespaceTestHelpers;
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	Fake->bHoldBlockingWork = true;
 
-	FO3DMoQSender Sender;
-	FO3DTransportConfig Config = CreateTestConfig(
-		TEXT("https://localhost:4443"),
-		TEXT("session/backpressureTest")
-	);
+	const uint64 QueueBytes = MoQTesting::GetBackoffLimits().MinQueueBytes;
+	FO3DTransportConfig Config = CreateTestConfig(TEXT("https://fake.relay.invalid:443"), TEXT("session/backpressureTest"));
+	Config.AdvancedParams.Add(TEXT("queue_bytes"), FString::Printf(TEXT("%llu"), QueueBytes));
 
-	TestTrue(TEXT("Initialize sender"), Sender.Initialize(Config));
-
-	FO3DTransportStats StatsBefore = Sender.GetStats();
-
-	// Send many frames rapidly without connection to trigger backpressure
-	const int32 NumSends = 100;
-	for (int32 i = 0; i < NumSends; ++i)
 	{
-		O3DS::SubjectList List = CreateTestSubjectList(TEXT("TestSubject"));
-		Sender.Send(List);
+		const TSharedRef<IOpen3DSender> Sender = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
+		TestTrue(TEXT("Initialize sender"), Sender->Initialize(Config));
+		TestTrue(TEXT("Start sender (connect held)"), Sender->Start());
+
+		TArray<uint8> Small;
+		Small.Init(0x5A, 1024);
+		TestTrue(TEXT("A frame under the cap is queued"), Sender->SendSerialized(Small.GetData(), Small.Num(), TEXT("Subject"), 0.0));
+		const int64 DroppedBefore = Sender->GetStats().DroppedFrames;
+
+		TArray<uint8> Oversize;
+		Oversize.Init(0xA5, static_cast<int32>(QueueBytes) + 1);
+		TestFalse(TEXT("A frame over the byte cap is dropped"), Sender->SendSerialized(Oversize.GetData(), Oversize.Num(), TEXT("Subject"), 0.0));
+		TestTrue(TEXT("The drop is counted in Stats.DroppedFrames"), Sender->GetStats().DroppedFrames >= DroppedBefore + 1);
+
+		Sender->Stop();
 	}
-
-	FO3DTransportStats StatsAfter = Sender.GetStats();
-
-	// Without connection, queue should fill up and frames should be dropped
-	TestTrue(TEXT("Frames should be dropped due to backpressure"), StatsAfter.DroppedFrames > 0);
-
-	// Verify queue doesn't grow unbounded
-	AddInfo(FString::Printf(TEXT("Backpressure triggered: %lld frames dropped out of %d attempts"),
-		StatsAfter.DroppedFrames, NumSends));
-
-	Sender.Stop();
-
+	Fake->DiscardHeldWork();
+	MoQTesting::PumpDispatcher();
 	return true;
 }
 
-/**
- * Test: Large payload handling in MoQ
- * Verifies MoQ handles large subject lists
- */
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQLargePayloadTest,
-	"Open3DBroadcast.Open3DTransportMoQ.Serialization.LargePayload",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQLargePayloadTest, "Open3DBroadcast.Transport.MoQ.Serialization.LargePayload", O3DB_TEST_FLAGS)
 bool FMoQLargePayloadTest::RunTest(const FString& Parameters)
 {
 	using namespace MoQTrackNamespaceTestHelpers;
-
-	FO3DMoQSender Sender;
-	FO3DTransportConfig Config = CreateTestConfig(
-		TEXT("https://localhost:4443"),
-		TEXT("session/largePayloadTest")
-	);
-
-	TestTrue(TEXT("Initialize sender"), Sender.Initialize(Config));
-
-	// Create large subject list
-	O3DS::SubjectList LargeList;
-	for (int32 SubjectIdx = 0; SubjectIdx < 10; ++SubjectIdx)
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> Sink;
 	{
-		const FString SubjectName = FString::Printf(TEXT("LargeSubject_%d"), SubjectIdx);
-		const FTCHARToUTF8 SubjectUtf8(*SubjectName);
-		O3DS::Subject* Subject = LargeList.addSubject(std::string(SubjectUtf8.Get(), SubjectUtf8.Length()));
+		const TSharedRef<IOpen3DSender> Sender = StartSender(Fake, CreateTestConfig(TEXT("https://fake.relay.invalid:443"), TEXT("session/largePayloadTest")), Sink);
 
-		// Add 100 bones per subject
-		for (int32 BoneIdx = 0; BoneIdx < 100; ++BoneIdx)
-		{
-			const FString BoneName = FString::Printf(TEXT("Bone_%d"), BoneIdx);
-			const FTCHARToUTF8 BoneUtf8(*BoneName);
-			Subject->addTransform(std::string(BoneUtf8.Get(), BoneUtf8.Length()), (BoneIdx == 0) ? -1 : 0);
-		}
+		O3DS::SubjectList LargeList = CreateLargeSubjectList();
+		std::vector<char> Buffer;
+		LargeList.Serialize(Buffer, 1.0);
+		AddInfo(FString::Printf(TEXT("Large payload size: %d bytes"), static_cast<int32>(Buffer.size())));
+
+		TestTrue(TEXT("Large payload is queued"), Sender->SendSerialized(reinterpret_cast<const uint8*>(Buffer.data()), static_cast<int32>(Buffer.size()), TEXT("LargeSubject_0"), 1.0));
+		TestTrue(TEXT("The worker publishes it"), O3DTests::PollUntil(5.0, [&Fake]() { return Fake->GetPublishCalls() >= 1; }));
+		TestEqual(TEXT("Nothing dropped"), Sender->GetStats().DroppedFrames, static_cast<int64>(0));
+		Sender->Stop();
 	}
-
-	// Serialize to check size
-	std::vector<char> Buffer;
-	LargeList.Serialize(Buffer);
-	const int32 PayloadSize = Buffer.size();
-
-	AddInfo(FString::Printf(TEXT("Large payload size: %d bytes"), PayloadSize));
-	TestTrue(TEXT("Large payload should serialize"), PayloadSize > 0);
-
-	// Attempt to send (will fail without connection, but validates logic)
-	bool bSent = Sender.Send(LargeList);
-
-	// MoQ uses WebTransport/QUIC which handles large payloads via streaming
-	// So this should not crash even with large payloads
-	TestTrue(TEXT("Large payload send should not crash"), true);
-
-	Sender.Stop();
-
+	MoQTesting::PumpDispatcher();
 	return true;
 }
 
-/**
- * Test: MoQ receiver with multiple track subscriptions
- * Verifies receiver can handle mocap and audio tracks
- */
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverMultiTrackTest,
-	"Open3DBroadcast.Open3DTransportMoQ.Receiver.MultipleTrackSubscriptions",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverMultiTrackTest, "Open3DBroadcast.Transport.MoQ.Receiver.MultipleTrackSubscriptions", O3DB_TEST_FLAGS)
 bool FMoQReceiverMultiTrackTest::RunTest(const FString& Parameters)
 {
 	using namespace MoQTrackNamespaceTestHelpers;
 
-	FO3DMoQReceiver Receiver;
-	FO3DTransportConfig Config = CreateTestConfig(
-		TEXT("https://localhost:4443"),
-		TEXT("session/multiTrackTest")
-	);
+	class FNullAudioSink final : public IO3DReceiverAudioSink
+	{
+	public:
+		virtual void SubmitPcm16(const O3DS::FAudioFrameMeta&, const uint8*, int32) override {}
+	};
 
-	TestTrue(TEXT("Initialize receiver"), Receiver.Initialize(Config));
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const FO3DTransportConfig Config = CreateTestConfig(TEXT("https://fake.relay.invalid:443"), TEXT("session/multiTrackTest"));
+	const TSharedRef<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink = MakeShared<FNullAudioSink, ESPMode::ThreadSafe>();
+	{
+		const TSharedRef<IOpen3DReceiver> Receiver = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 1);
+		TestTrue(TEXT("Initialize receiver"), Receiver->Initialize(Config));
+		Receiver->SetAudioSink(AudioSink, Config.Audio);
+		TestTrue(TEXT("Start receiver"), Receiver->Start());
+		MoQTesting::PumpDispatcher(); // CONNECTED -> mocap and audio subscriptions
 
-	// Receiver should be prepared to subscribe to:
-	// 1. mocap/<session>/<track> - for motion capture data
-	// 2. audio/<session>/<track> - for audio data (Phase 4)
-
-	// Without connection, we can't test actual subscription,
-	// but verify initialization doesn't crash with multi-track setup
-
-	TestTrue(TEXT("Receiver initialization with multi-track capability"), true);
-
-	Receiver.Stop();
-
+		const TArray<FString> Subscriptions = Fake->GetLiveSubscriptions();
+		TestTrue(TEXT("Subscribed to the mocap track"), Subscriptions.Contains(TEXT("mocap/session|multiTrackTest")));
+		TestTrue(TEXT("Subscribed to the audio track"), Subscriptions.Contains(TEXT("audio/session|multiTrackTest")));
+		Receiver->Stop();
+	}
+	MoQTesting::PumpDispatcher();
 	return true;
 }
 
-/**
- * Test: MoQ relay URL variations
- * Verifies that different relay URL formats are handled
- */
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQRelayUrlVariationsTest,
-	"Open3DBroadcast.Open3DTransportMoQ.Configuration.RelayUrlVariations",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQRelayUrlVariationsTest, "Open3DBroadcast.Transport.MoQ.Configuration.RelayUrlVariations", O3DB_TEST_FLAGS)
 bool FMoQRelayUrlVariationsTest::RunTest(const FString& Parameters)
 {
 	using namespace MoQTrackNamespaceTestHelpers;
 
-	// Test 1: HTTPS URL
+	const TCHAR* Urls[] = { TEXT("https://relay.example.com:4443"), TEXT("http://localhost:4443"), TEXT("https://relay.example.com:8443") };
+	for (const TCHAR* Url : Urls)
 	{
-		FO3DMoQSender Sender;
-		FO3DTransportConfig Config = CreateTestConfig(
-			TEXT("https://relay.example.com:4443"),
-			TEXT("session/test")
-		);
-		TestTrue(TEXT("HTTPS relay URL should work"), Sender.Initialize(Config));
-		Sender.Stop();
+		const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+		const TSharedRef<IOpen3DSender> Sender = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
+		TestTrue(*FString::Printf(TEXT("Relay URL %s is accepted"), Url), Sender->Initialize(CreateTestConfig(Url, TEXT("session/test"))));
+		Sender->Stop();
 	}
-
-	// Test 2: HTTP URL (will be upgraded to HTTPS internally for WebTransport)
-	{
-		FO3DMoQSender Sender;
-		FO3DTransportConfig Config = CreateTestConfig(
-			TEXT("http://localhost:4443"),
-			TEXT("session/test")
-		);
-		TestTrue(TEXT("HTTP relay URL should be handled"), Sender.Initialize(Config));
-		Sender.Stop();
-	}
-
-	// Test 3: URL with port
-	{
-		FO3DMoQSender Sender;
-		FO3DTransportConfig Config = CreateTestConfig(
-			TEXT("https://relay.example.com:8443"),
-			TEXT("session/test")
-		);
-		TestTrue(TEXT("URL with custom port should work"), Sender.Initialize(Config));
-		Sender.Stop();
-	}
-
 	return true;
 }
 

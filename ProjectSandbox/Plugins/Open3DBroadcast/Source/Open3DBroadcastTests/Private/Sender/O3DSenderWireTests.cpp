@@ -5,13 +5,15 @@
 // descriptor and encoding settings, and its bytes are parsed by the real core SubjectList. No world,
 // mesh, transport or network is involved. The pure policy logic (rate limiter, curve filter,
 // full-sync tracker, anchor re-sync) is covered in more depth by test/sender_wire_tests.cpp (CTest).
-// These tests will move to the Open3DBroadcastTests module in WP-T2 (ADR 0006).
+// White-box access goes through Open3DSender/Public/Testing/O3DSenderTesting.h (WP-T2, ADR 0006).
 
-#include "O3DSenderComponent.h"
-#include "O3DSenderCurveProcessor.h"
-#include "O3DSenderSerializer.h"
+#include "O3DTestHarness.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
+
+#include "O3DSenderComponent.h"
+#include "O3DSenderSerializer.h"
+#include "Testing/O3DSenderTesting.h"
 
 #include "Misc/AutomationTest.h"
 #include "O3DHelpers.h"
@@ -21,47 +23,7 @@
 
 #include <string>
 
-/** White-box access for these tests (friend of UO3DSenderComponent and FO3DSenderCurveProcessor). */
-struct FO3DSenderWireTestAccess
-{
-	static bool ConsumeCaptureBudget(double NowSeconds, double& InOutLastCaptureTime, float CaptureRateHz)
-	{
-		return UO3DSenderComponent::ConsumeCaptureBudget(NowSeconds, InOutLastCaptureTime, CaptureRateHz);
-	}
-
-	static void SetCurves(FO3DSenderCurveProcessor& Processor, const TArray<FName>& Names, const TArray<float>& Values)
-	{
-		Processor.CurveNames = Names;
-		Processor.CurveValues = Values;
-		Processor.LastSentCurveValues.SetNumZeroed(Names.Num());
-		Processor.LastSentHasValue.SetNumZeroed(Names.Num());
-		Processor.CurveNameSet.Reset();
-		for (const FName& Name : Names)
-		{
-			Processor.CurveNameSet.Add(Name);
-		}
-		Processor.bCurveCacheInitialized = true;
-		++Processor.CurveRevision;
-	}
-
-	static void SetCurveValues(FO3DSenderCurveProcessor& Processor, const TArray<float>& Values)
-	{
-		Processor.CurveValues = Values;
-	}
-
-	static void SetDescriptor(UO3DSenderComponent& Component, const FO3DSSkeletonDescriptor& Descriptor)
-	{
-		Component.DescriptorCache = Descriptor;
-		Component.DescriptorSnapshot = MakeShared<FO3DSSkeletonDescriptor>(Descriptor);
-	}
-
-	static const FO3DSSkeletonDescriptor& GetDescriptorCache(const UO3DSenderComponent& Component) { return Component.DescriptorCache; }
-	static bool HasDescriptorSnapshot(const UO3DSenderComponent& Component) { return Component.DescriptorSnapshot.IsValid(); }
-	static void SetCapturing(UO3DSenderComponent& Component, bool bCapturing) { Component.bIsCapturing = bCapturing; }
-	static bool HasSerializer(const UO3DSenderComponent& Component) { return Component.Serializer.IsValid(); }
-	static void EnsureSubjectNameCached(UO3DSenderComponent& Component) { Component.EnsureSubjectNameCached(nullptr); }
-	static FO3DSPoseFrame CreateFrameShell(UO3DSenderComponent& Component, double CaptureTimeSec) { return Component.CreateFrameShell(nullptr, CaptureTimeSec); }
-};
+using FO3DSenderWireTestAccess = FO3DSenderComponentTestAccess;
 
 namespace O3DSenderWireTests
 {
@@ -199,7 +161,7 @@ namespace O3DSenderWireTests
 
 // SND-1: after Stop/Start (the serializer's caches are cleared), the first frame is a full sync
 // carrying the real bone names and parents, in every encoding.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderWireStopStartTest, "Open3DBroadcast.Sender.Wire.StopStartKeepsNamesAndParents", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderWireStopStartTest, "Open3DBroadcast.Sender.Wire.StopStartKeepsNamesAndParents", O3DB_TEST_FLAGS)
 bool FO3DSenderWireStopStartTest::RunTest(const FString& Parameters)
 {
 	using namespace O3DSenderWireTests;
@@ -247,7 +209,7 @@ bool FO3DSenderWireStopStartTest::RunTest(const FString& Parameters)
 
 // SND-1 / ADR 0005 (i): frames are dropped, never padded, when the descriptor is missing or does not
 // match the bone count.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderWireDropMismatchTest, "Open3DBroadcast.Sender.Wire.DropsFrameWithoutMatchingDescriptor", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderWireDropMismatchTest, "Open3DBroadcast.Sender.Wire.DropsFrameWithoutMatchingDescriptor", O3DB_TEST_FLAGS)
 bool FO3DSenderWireDropMismatchTest::RunTest(const FString& Parameters)
 {
 	using namespace O3DSenderWireTests;
@@ -275,7 +237,7 @@ bool FO3DSenderWireDropMismatchTest::RunTest(const FString& Parameters)
 }
 
 // SND-1: a subject rename starts the new name with a full sync carrying names and parents.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderWireRenameTest, "Open3DBroadcast.Sender.Wire.RenameSendsDescriptorUnderNewName", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderWireRenameTest, "Open3DBroadcast.Sender.Wire.RenameSendsDescriptorUnderNewName", O3DB_TEST_FLAGS)
 bool FO3DSenderWireRenameTest::RunTest(const FString& Parameters)
 {
 	using namespace O3DSenderWireTests;
@@ -322,7 +284,7 @@ bool FO3DSenderWireRenameTest::RunTest(const FString& Parameters)
 
 // SND-2 / SND-13: quantized full sync, updates, periodic resync, updates; every decoded translation is
 // within the quantization tolerance, for a receiver present from the start and one that joins late.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderWireQuantizedResyncTest, "Open3DBroadcast.Sender.Wire.QuantizedResyncStaysWithinTolerance", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderWireQuantizedResyncTest, "Open3DBroadcast.Sender.Wire.QuantizedResyncStaysWithinTolerance", O3DB_TEST_FLAGS)
 bool FO3DSenderWireQuantizedResyncTest::RunTest(const FString& Parameters)
 {
 	using namespace O3DSenderWireTests;
@@ -398,7 +360,7 @@ bool FO3DSenderWireQuantizedResyncTest::RunTest(const FString& Parameters)
 
 // SND-3: curves added, swapped (same count, different names) and removed in residual and quantized
 // modes. Each change resyncs exactly once and the receiver's names and values always match.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderWireCurveMembershipTest, "Open3DBroadcast.Sender.Wire.CurveMembershipChangeResyncs", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderWireCurveMembershipTest, "Open3DBroadcast.Sender.Wire.CurveMembershipChangeResyncs", O3DB_TEST_FLAGS)
 bool FO3DSenderWireCurveMembershipTest::RunTest(const FString& Parameters)
 {
 	using namespace O3DSenderWireTests;
@@ -451,7 +413,7 @@ bool FO3DSenderWireCurveMembershipTest::RunTest(const FString& Parameters)
 
 // SND-14: encoding setting changes take effect atomically: a mode, predictor, keyframe interval or
 // quantization range change forces exactly one full sync; a delta threshold change forces none.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderWireEncodingChangeTest, "Open3DBroadcast.Sender.Wire.EncodingChangeForcesFullSync", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderWireEncodingChangeTest, "Open3DBroadcast.Sender.Wire.EncodingChangeForcesFullSync", O3DB_TEST_FLAGS)
 bool FO3DSenderWireEncodingChangeTest::RunTest(const FString& Parameters)
 {
 	using namespace O3DSenderWireTests;
@@ -508,7 +470,7 @@ bool FO3DSenderWireEncodingChangeTest::RunTest(const FString& Parameters)
 }
 
 // SND-5: a 60 Hz tick with jitter and a 60 Hz capture rate captures about 60 frames per second.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderWireCaptureRateTest, "Open3DBroadcast.Sender.CaptureRate.Jittered60HzAcceptsAbout60PerSecond", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderWireCaptureRateTest, "Open3DBroadcast.Sender.CaptureRate.Jittered60HzAcceptsAbout60PerSecond", O3DB_TEST_FLAGS)
 bool FO3DSenderWireCaptureRateTest::RunTest(const FString& Parameters)
 {
 	using namespace O3DSenderWireTests;
@@ -530,7 +492,7 @@ bool FO3DSenderWireCaptureRateTest::RunTest(const FString& Parameters)
 
 // SND-4 and SND-20: the curve filter sends a return to zero once; patterns apply only while filtering is
 // enabled and pattern edits take effect on the next frame; value filters are off in persistent modes.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderWireCurveFilterTest, "Open3DBroadcast.Sender.CurveProcessor.ReturnToZeroAndPatterns", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderWireCurveFilterTest, "Open3DBroadcast.Sender.CurveProcessor.ReturnToZeroAndPatterns", O3DB_TEST_FLAGS)
 bool FO3DSenderWireCurveFilterTest::RunTest(const FString& Parameters)
 {
 	TArray<FString> Include;
@@ -549,12 +511,12 @@ bool FO3DSenderWireCurveFilterTest::RunTest(const FString& Parameters)
 
 	{
 		// Acceptance case: 0.8, 0, 0.
-		FO3DSenderCurveProcessor Processor;
-		FO3DSenderWireTestAccess::SetCurves(Processor, { TEXT("Smile") }, { 0.8f });
+		FO3DSenderCurveProcessorProbe Processor;
+		Processor.SetCurves({ TEXT("Smile") }, { 0.8f });
 		Processor.BuildFilteredCurves(Config, Names, Values);
 		TestTrue(TEXT("0.8 sent"), Names.Num() == 1 && Values.Num() == 1 && Values[0] == 0.8f);
 
-		FO3DSenderWireTestAccess::SetCurveValues(Processor, { 0.0f });
+		Processor.SetCurveValues({ 0.0f });
 		Processor.BuildFilteredCurves(Config, Names, Values);
 		TestTrue(TEXT("Return to 0 sent once"), Names.Num() == 1 && Values.Num() == 1 && Values[0] == 0.0f);
 
@@ -566,11 +528,11 @@ bool FO3DSenderWireCurveFilterTest::RunTest(const FString& Parameters)
 		// Persistent encodings: value filters off, so the curve list stays stable.
 		FO3DSenderCurveConfig Persistent = Config;
 		Persistent.bApplyValueFilters = false;
-		FO3DSenderCurveProcessor Processor;
-		FO3DSenderWireTestAccess::SetCurves(Processor, { TEXT("Smile") }, { 0.8f });
+		FO3DSenderCurveProcessorProbe Processor;
+		Processor.SetCurves({ TEXT("Smile") }, { 0.8f });
 		for (float Value : { 0.8f, 0.0f, 0.0f })
 		{
-			FO3DSenderWireTestAccess::SetCurveValues(Processor, { Value });
+			Processor.SetCurveValues({ Value });
 			Processor.BuildFilteredCurves(Persistent, Names, Values);
 			TestTrue(TEXT("Curve present every frame with value filters off"), Names.Num() == 1 && Values[0] == Value);
 		}
@@ -578,8 +540,8 @@ bool FO3DSenderWireCurveFilterTest::RunTest(const FString& Parameters)
 
 	{
 		// SND-20: patterns are ignored with filtering disabled, and edits apply on the next frame.
-		FO3DSenderCurveProcessor Processor;
-		FO3DSenderWireTestAccess::SetCurves(Processor, { TEXT("Blink"), TEXT("Smile") }, { 0.5f, 0.6f });
+		FO3DSenderCurveProcessorProbe Processor;
+		Processor.SetCurves({ TEXT("Blink"), TEXT("Smile") }, { 0.5f, 0.6f });
 		Exclude = { TEXT("Smile") };
 
 		FO3DSenderCurveConfig Disabled = Config;
@@ -603,7 +565,7 @@ bool FO3DSenderWireCurveFilterTest::RunTest(const FString& Parameters)
 // SND-1 / SND-19: component glue. StartCapture without a mesh or audio starts nothing and reports why;
 // StopCapture forgets the skeleton cache; a rename re-broadcasts the descriptor under the new name;
 // sampled frames carry the descriptor snapshot and encoding settings.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderWireComponentGlueTest, "Open3DBroadcast.Sender.Component.StartStopRenameGlue", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderWireComponentGlueTest, "Open3DBroadcast.Sender.Component.StartStopRenameGlue", O3DB_TEST_FLAGS)
 bool FO3DSenderWireComponentGlueTest::RunTest(const FString& Parameters)
 {
 	using namespace O3DSenderWireTests;
