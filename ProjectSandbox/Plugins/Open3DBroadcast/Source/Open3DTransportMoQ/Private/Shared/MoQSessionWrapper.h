@@ -9,7 +9,7 @@
 #include "Misc/ScopeLock.h"
 #include "Templates/Atomic.h"
 #include "Templates/Function.h"
-#include "Shared/MoQFfiApi.h"
+#include "MoQFfiApi.h"
 #include "Shared/MoQHandles.h"
 #include "Shared/MoQTypes.h"
 
@@ -178,47 +178,7 @@ private:
     FMoQConnectionStateDelegate ConnectionStateDelegate;
     TWeakPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> SelfWeak;
 
-    // Unconditional: a friend declaration must not depend on WITH_DEV_AUTOMATION_TESTS.
+    // Unconditional: a friend declaration must not depend on WITH_DEV_AUTOMATION_TESTS. Defined in
+    // Private/Testing/MoQTesting.cpp; tests reach it through Public/Testing/MoQTesting.h (WP-T2).
     friend class FMoQSessionWrapperTestHelper;
 };
-
-#if WITH_DEV_AUTOMATION_TESTS
-class FMoQSessionWrapperTestHelper
-{
-public:
-    static void InvokeConnectionState(FMoQSessionWrapper& Wrapper, MoqConnectionState State)
-    {
-        Wrapper.HandleConnectionStateInternal(State);
-    }
-
-    static void InvokeSubscriberCallback(const TFunction<void(const TArray64<uint8>&)>& Callback, const TArray64<uint8>& Payload)
-    {
-        FMoQSessionWrapper::InvokeSubscriberThunkForTest(Callback, Payload);
-    }
-
-    /** Fires the raw FFI subscriber thunk with an arbitrary user_data value (a stale or unknown token). */
-    static void InvokeSubscriberThunkWithToken(void* Token, const TArray64<uint8>& Payload)
-    {
-        const uint8* DataPtr = Payload.Num() > 0 ? Payload.GetData() : nullptr;
-        FMoQSessionWrapper::HandleSubscriberDataThunk(Token, DataPtr, static_cast<size_t>(Payload.Num()));
-    }
-
-    /** Fires the raw FFI connection thunk with an arbitrary user_data value. */
-    static void InvokeConnectionThunkWithToken(void* Token, MoqConnectionState State)
-    {
-        FMoQSessionWrapper::HandleConnectionStateThunk(Token, State);
-    }
-
-    /** Token of the current connect attempt (null when no attempt is current). */
-    static void* GetConnectionToken(const FMoQSessionWrapper& Wrapper)
-    {
-        return Wrapper.ActiveAttemptToken;
-    }
-
-    static int32 GetAnnouncedNamespaceCount(const FMoQSessionWrapper& Wrapper)
-    {
-        FScopeLock Lock(&Wrapper.NamespaceMutex);
-        return Wrapper.AnnouncedNamespaces.Num();
-    }
-};
-#endif

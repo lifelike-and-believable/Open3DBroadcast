@@ -19,7 +19,8 @@
  * user data, so a fake needs a capture to reach its own per-test state without globals.
  * The indirect call costs nothing measurable next to the FFI call it wraps.
  *
- * WP-T2 generalises this seam (and moves the test-construction helpers into a Testing header).
+ * The header is public so the Open3DBroadcastTests module can build a fake table; tests reach
+ * the transport through Testing/MoQTesting.h (WP-T2). Only this module calls GetProduction().
  */
 struct FMoQFfiApi
 {

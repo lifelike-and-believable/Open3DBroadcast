@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Shared/MoQFfiApi.h"
+#include "MoQFfiApi.h"
 #include "Shared/MoQTypes.h"
 
 #include "Templates/Function.h"

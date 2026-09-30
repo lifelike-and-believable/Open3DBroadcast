@@ -30,7 +30,8 @@ public:
     void HandlePipeRemoved();
 
 private:
-    // Test-only access to ProcessReceivedPayload (TRB-37 demux test).
+    // Test-only access to ProcessReceivedPayload (TRB-37 demux test); defined in
+    // Private/Testing/NngTesting.cpp. Unconditional: friends must not depend on test macros.
     friend struct FO3DNngReceiverTestAccessor;
 
     struct FNngSocketWrapper;
