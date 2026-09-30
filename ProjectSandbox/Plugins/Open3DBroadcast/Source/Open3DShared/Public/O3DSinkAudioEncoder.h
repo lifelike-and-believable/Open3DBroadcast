@@ -55,8 +55,11 @@ public:
 	FO3DSinkAudioEncoder& operator=(const FO3DSinkAudioEncoder&) = delete;
 
 	/**
-	 * Encode one buffer. SubjectOverride may be empty (the snapshot default is used).
-	 * OutFrame.Meta.SourceGuid is always the snapshot's SourceGuid.
+	 * Encode one capture buffer into zero or more frames (OutFrames is reset first). Opus
+	 * buffers samples until a whole Opus frame is available (SHR-2), so a call may return no
+	 * frame and still succeed. SubjectOverride may be empty (the snapshot default is used).
+	 * Every frame's Meta.SourceGuid is the snapshot's SourceGuid. Returns false only when the
+	 * input is rejected.
 	 */
 	bool Encode(const FString& StreamLabel,
 		const FString& SubjectOverride,
@@ -65,9 +68,12 @@ public:
 		int32 NumChannels,
 		int32 SampleRate,
 		double TimestampSec,
-		O3DAudio::FEncodedFrame& OutFrame);
+		TArray<O3DAudio::FEncodedFrame>& OutFrames);
 
-	/** Encode and wrap in the unified envelope (TCP, UDP, NNG wire format). */
+	/**
+	 * Encode and wrap each resulting frame in the unified envelope (TCP, UDP, NNG wire format).
+	 * OutMessages is reset first; each message carries its own frame's timestamp.
+	 */
 	bool EncodeUnified(const FString& StreamLabel,
 		const FString& SubjectOverride,
 		const float* Interleaved,
@@ -75,7 +81,7 @@ public:
 		int32 NumChannels,
 		int32 SampleRate,
 		double TimestampSec,
-		TArray<uint8>& OutMessage);
+		TArray<TArray<uint8>>& OutMessages);
 
 	const FSettings& GetSettings() const { return Settings; }
 

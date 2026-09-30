@@ -404,13 +404,18 @@ bool FO3DNngDemuxAudioCountTest::RunTest(const FString& Parameters)
 
 	TArray<float> Pcm;
 	Pcm.Init(0.25f, 480);
-	O3DAudio::FEncodedFrame Frame;
-	if (!TestTrue(TEXT("Frame encodes"), Encoder.BuildEncodedFrame(FString(), FString(), Pcm.GetData(), Pcm.Num(), 1, 48000, 1.0, Frame)))
+	TArray<O3DAudio::FEncodedFrame> Frames;
+	if (!TestTrue(TEXT("Frame encodes"), Encoder.EncodeBuffer(FString(), FString(), Pcm.GetData(), Pcm.Num(), 1, 48000, 1.0, Frames)))
+	{
+		return false;
+	}
+	// PCM16 emits one frame per buffer.
+	if (!TestEqual(TEXT("One PCM16 frame"), Frames.Num(), 1))
 	{
 		return false;
 	}
 	TArray<uint8> Message;
-	if (!TestTrue(TEXT("Unified audio message built"), O3DAudio::CreateUnifiedAudioMessage(Frame, 1.0, Message)))
+	if (!TestTrue(TEXT("Unified audio message built"), O3DAudio::CreateUnifiedAudioMessage(Frames[0], 1.0, Message)))
 	{
 		return false;
 	}

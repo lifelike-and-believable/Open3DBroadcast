@@ -11,6 +11,9 @@
 
 #include "O3DAudioSerialization.h"
 #include "O3DUnifiedMessage.h"
+#include "Math/RandomStream.h"
+
+#include <limits>
 
 namespace O3DSharedParserTests
 {
@@ -21,7 +24,7 @@ namespace O3DSharedParserTests
 		Meta.StreamLabel = TEXT("o3ds:mix/hero");
 		Meta.SubjectName = TEXT("Héro"); // non-ASCII: UTF-8 on the wire
 		Meta.NumChannels = 2;
-		Meta.SampleRate = 44100;
+		Meta.SampleRate = 48000; // valid for Opus too (SHR-8 checks the rate per codec)
 		Meta.TimestampSec = 12.5;
 		return Meta;
 	}
@@ -187,6 +190,204 @@ bool FO3DSharedEncodedFrameTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("PCM16 via the encoded API"), O3DAudio::SerializeEncodedAudioFrame(O3DS::EUnifiedCodec::PCM16, Meta, reinterpret_cast<const uint8*>(Pcm), sizeof(Pcm), PcmWire));
 	O3DAudio::FEncodedAudioFrame PcmFrame;
 	TestTrue(TEXT("PCM16 back via the encoded API"), O3DAudio::DeserializeEncodedAudioFrame(O3DS::EUnifiedCodec::PCM16, PcmWire.GetData(), PcmWire.Num(), PcmFrame) && PcmFrame.Payload.Num() == sizeof(Pcm));
+	return true;
+}
+
+namespace O3DSharedParserTests
+{
+	void PatchU16(TArray<uint8>& Wire, int32 Offset, uint16 Value)
+	{
+		Wire[Offset] = static_cast<uint8>(Value & 0xFF);
+		Wire[Offset + 1] = static_cast<uint8>(Value >> 8);
+	}
+
+	void PatchU32(TArray<uint8>& Wire, int32 Offset, uint32 Value)
+	{
+		for (int32 Byte = 0; Byte < 4; ++Byte)
+		{
+			Wire[Offset + Byte] = static_cast<uint8>((Value >> (8 * Byte)) & 0xFF);
+		}
+	}
+
+	void PatchDouble(TArray<uint8>& Wire, int32 Offset, double Value)
+	{
+		FMemory::Memcpy(Wire.GetData() + Offset, &Value, sizeof(double)); // the wire is little-endian, like the hosts under test
+	}
+
+	// Field offsets. PCM16 layout: version, flags, channels(2), rate(4), timestamp(8), guid(16),
+	// label size(2), subject size(2), data bytes(4). The encoded layout adds codec and reserved
+	// bytes after the flags, so its fields sit two bytes later.
+	constexpr int32 Pcm16ChannelsOffset = 2;
+	constexpr int32 Pcm16RateOffset = 4;
+	constexpr int32 Pcm16TimestampOffset = 8;
+	constexpr int32 Pcm16LabelSizeOffset = 32;
+	constexpr int32 Pcm16DataBytesOffset = 36;
+	constexpr int32 EncodedFieldShift = 2;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSharedAudioMetaValidationTest, "Open3DBroadcast.Shared.Parsers.AudioMeta.RejectsOutOfRange", O3DB_TEST_FLAGS)
+bool FO3DSharedAudioMetaValidationTest::RunTest(const FString& Parameters)
+{
+	using namespace O3DSharedParserTests;
+	using O3DAudio::EAudioParseError;
+
+	// SHR-8: channel count, sample rate, timestamp and name lengths from the wire are
+	// range-checked before use, and the parser says why it rejected a buffer.
+	const O3DS::FAudioFrameMeta Meta = MakeMeta();
+	const int16 Samples[4] = { 1, -1, 2, -2 };
+	const uint8 OpusBytes[6] = { 0xF8, 1, 2, 3, 4, 5 };
+
+	TArray<uint8> PcmWire;
+	TArray<uint8> OpusWire;
+	if (!TestTrue(TEXT("Serialize PCM16"), O3DAudio::SerializePcm16Frame(Meta, reinterpret_cast<const uint8*>(Samples), sizeof(Samples), PcmWire))
+		|| !TestTrue(TEXT("Serialize Opus"), O3DAudio::SerializeEncodedAudioFrame(O3DS::EUnifiedCodec::Opus, Meta, OpusBytes, sizeof(OpusBytes), OpusWire)))
+	{
+		return false;
+	}
+
+	auto ParsePcm = [](const TArray<uint8>& Wire)
+	{
+		O3DAudio::FPcm16Frame Frame;
+		EAudioParseError Error = EAudioParseError::None;
+		O3DAudio::DeserializePcm16Frame(Wire.GetData(), Wire.Num(), Frame, &Error);
+		return Error;
+	};
+	auto ParseOpus = [](const TArray<uint8>& Wire)
+	{
+		O3DAudio::FEncodedAudioFrame Frame;
+		EAudioParseError Error = EAudioParseError::None;
+		O3DAudio::DeserializeEncodedAudioFrame(O3DS::EUnifiedCodec::Opus, Wire.GetData(), Wire.Num(), Frame, &Error);
+		return Error;
+	};
+	auto Check = [this](const TCHAR* What, EAudioParseError Got, EAudioParseError Want)
+	{
+		TestEqual(What, static_cast<int32>(Got), static_cast<int32>(Want));
+	};
+
+	Check(TEXT("Valid PCM16 parses"), ParsePcm(PcmWire), EAudioParseError::None);
+	Check(TEXT("Valid Opus parses"), ParseOpus(OpusWire), EAudioParseError::None);
+
+	{
+		TArray<uint8> Wire = PcmWire;
+		PatchU16(Wire, Pcm16ChannelsOffset, 0);
+		Check(TEXT("PCM16 with 0 channels"), ParsePcm(Wire), EAudioParseError::BadChannelCount);
+		PatchU16(Wire, Pcm16ChannelsOffset, 9);
+		Check(TEXT("PCM16 with 9 channels"), ParsePcm(Wire), EAudioParseError::BadChannelCount);
+		PatchU16(Wire, Pcm16ChannelsOffset, 8);
+		Check(TEXT("PCM16 with 8 channels is accepted"), ParsePcm(Wire), EAudioParseError::None);
+	}
+	{
+		TArray<uint8> Wire = OpusWire;
+		PatchU16(Wire, Pcm16ChannelsOffset + EncodedFieldShift, 3);
+		Check(TEXT("Opus with 3 channels"), ParseOpus(Wire), EAudioParseError::BadChannelCount);
+	}
+	{
+		TArray<uint8> Wire = PcmWire;
+		PatchU32(Wire, Pcm16RateOffset, 12345);
+		Check(TEXT("PCM16 at 12345 Hz"), ParsePcm(Wire), EAudioParseError::BadSampleRate);
+		PatchU32(Wire, Pcm16RateOffset, 0xFFFFFFFFu);
+		Check(TEXT("PCM16 at 2^32-1 Hz (negative as int32)"), ParsePcm(Wire), EAudioParseError::BadSampleRate);
+		PatchU32(Wire, Pcm16RateOffset, 44100);
+		Check(TEXT("PCM16 at 44.1 kHz is accepted"), ParsePcm(Wire), EAudioParseError::None);
+	}
+	{
+		TArray<uint8> Wire = OpusWire;
+		PatchU32(Wire, Pcm16RateOffset + EncodedFieldShift, 44100);
+		Check(TEXT("Opus at 44.1 kHz"), ParseOpus(Wire), EAudioParseError::BadSampleRate);
+	}
+	{
+		TArray<uint8> Wire = PcmWire;
+		PatchDouble(Wire, Pcm16TimestampOffset, std::numeric_limits<double>::quiet_NaN());
+		Check(TEXT("NaN timestamp"), ParsePcm(Wire), EAudioParseError::BadTimestamp);
+		PatchDouble(Wire, Pcm16TimestampOffset, std::numeric_limits<double>::infinity());
+		Check(TEXT("Infinite timestamp"), ParsePcm(Wire), EAudioParseError::BadTimestamp);
+	}
+	{
+		TArray<uint8> Wire = OpusWire;
+		PatchDouble(Wire, Pcm16TimestampOffset + EncodedFieldShift, -std::numeric_limits<double>::infinity());
+		Check(TEXT("Opus with an infinite timestamp"), ParseOpus(Wire), EAudioParseError::BadTimestamp);
+	}
+
+	// Names: the sender refuses what the receiver would reject.
+	O3DS::FAudioFrameMeta LongMeta = Meta;
+	LongMeta.StreamLabel = FString::ChrN(O3DAudio::MaxNameBytes + 1, TEXT('a'));
+	TArray<uint8> Unused;
+	TestFalse(TEXT("A 257-byte label is not serialized"), O3DAudio::SerializePcm16Frame(LongMeta, reinterpret_cast<const uint8*>(Samples), sizeof(Samples), Unused));
+	LongMeta.StreamLabel = FString::ChrN(O3DAudio::MaxNameBytes, TEXT('a'));
+	TArray<uint8> LongWire;
+	TArray<int16> ManySamples;
+	ManySamples.SetNumZeroed(50);
+	if (TestTrue(TEXT("A 256-byte label is serialized"), O3DAudio::SerializePcm16Frame(LongMeta, reinterpret_cast<const uint8*>(ManySamples.GetData()), ManySamples.Num() * 2, LongWire)))
+	{
+		Check(TEXT("256-byte label parses"), ParsePcm(LongWire), EAudioParseError::None);
+		// Claim a 300-byte label and a 2-byte payload: still inside the buffer, but too long.
+		PatchU16(LongWire, Pcm16LabelSizeOffset, 300);
+		PatchU32(LongWire, Pcm16DataBytesOffset, 2);
+		Check(TEXT("A 300-byte label from the wire"), ParsePcm(LongWire), EAudioParseError::NameTooLong);
+	}
+
+	Check(TEXT("Truncated buffer"), ParsePcm(TArray<uint8>(PcmWire.GetData(), 10)), EAudioParseError::Truncated);
+	{
+		TArray<uint8> Wire = OpusWire;
+		Wire[2] = static_cast<uint8>(O3DS::EUnifiedCodec::PCM16);
+		Check(TEXT("Codec byte disagrees with the envelope"), ParseOpus(Wire), EAudioParseError::CodecMismatch);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSharedAudioParserFuzzTest, "Open3DBroadcast.Shared.Parsers.AudioMeta.RandomBytes", O3DB_TEST_FLAGS)
+bool FO3DSharedAudioParserFuzzTest::RunTest(const FString& Parameters)
+{
+	using namespace O3DSharedParserTests;
+
+	// Random buffers and random corruptions of valid ones never crash the parsers, and whatever
+	// they accept has in-range metadata (SHR-8). Fixed seed: deterministic.
+	FRandomStream Random(0x5A10);
+	const O3DS::FAudioFrameMeta Meta = MakeMeta();
+	const int16 Samples[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+	TArray<uint8> Valid;
+	TestTrue(TEXT("Serialize seed frame"), O3DAudio::SerializeEncodedAudioFrame(O3DS::EUnifiedCodec::PCM16, Meta, reinterpret_cast<const uint8*>(Samples), sizeof(Samples), Valid));
+
+	int32 Accepted = 0;
+	int32 AcceptedOutOfRange = 0;
+	for (int32 Iteration = 0; Iteration < 4000; ++Iteration)
+	{
+		TArray<uint8> Wire;
+		if (Iteration % 2 == 0)
+		{
+			Wire.SetNumUninitialized(Random.RandRange(0, 160));
+			for (uint8& Byte : Wire)
+			{
+				Byte = static_cast<uint8>(Random.RandRange(0, 255));
+			}
+			if (Wire.Num() > 0)
+			{
+				Wire[0] = static_cast<uint8>(Random.RandRange(1, 2)); // reach past the version check
+			}
+		}
+		else
+		{
+			Wire = Valid;
+			const int32 Flips = Random.RandRange(1, 4);
+			for (int32 Flip = 0; Flip < Flips; ++Flip)
+			{
+				const int32 Index = Random.RandRange(0, Wire.Num() - 1);
+				Wire[Index] = static_cast<uint8>(Wire[Index] ^ (1 << Random.RandRange(0, 7)));
+			}
+		}
+
+		for (const O3DS::EUnifiedCodec Codec : { O3DS::EUnifiedCodec::PCM16, O3DS::EUnifiedCodec::Opus })
+		{
+			O3DAudio::FEncodedAudioFrame Frame;
+			if (O3DAudio::DeserializeEncodedAudioFrame(Codec, Wire.GetData(), Wire.Num(), Frame))
+			{
+				++Accepted;
+				AcceptedOutOfRange += (O3DAudio::ValidateAudioMeta(Codec, Frame.Meta) != O3DAudio::EAudioParseError::None) ? 1 : 0;
+			}
+		}
+	}
+	AddInfo(FString::Printf(TEXT("%d of 8000 random parses accepted"), Accepted));
+	TestEqual(TEXT("Nothing accepted has out-of-range metadata"), AcceptedOutOfRange, 0);
 	return true;
 }
 

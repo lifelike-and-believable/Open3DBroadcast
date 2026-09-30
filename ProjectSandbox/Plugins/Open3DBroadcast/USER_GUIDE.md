@@ -572,8 +572,10 @@ Captures from microphone input. Useful for:
 
 #### Audio Stream Label
 
-- **Audio Stream Label**: Tag for audio frames (default: `o3ds:audio`)
-- Multiple senders can use different labels
+- The audio stream label is the sender's subject name: the sanitized **Subject Name**, or
+  the generated `World/Actor/Component` name when that is empty. It is the same name the
+  pose frames carry, and it follows renames. A sender with no skeletal mesh and no
+  Subject Name uses `o3ds:audio`.
 - Receivers can filter by label
 
 #### Audio Codec Selection
@@ -591,6 +593,9 @@ Captures from microphone input. Useful for:
 - Low latency (~20ms)
 - Excellent quality at 64 kbps
 - Use for: Internet, WebRTC
+- Needs a sample rate of 8, 12, 16, 24 or 48 kHz and 1 or 2 channels, and a build with
+  Opus (Win64 with `opus.lib`). Otherwise the sender sends PCM16, labelled PCM16, and logs
+  a warning.
 
 ### Audio Playback (Receiver)
 
@@ -768,7 +773,7 @@ Actor3 → O3DSender(Subject: "Prop1")      ┘
 | **bEnableAudio** | Bool | false | Enable audio streaming |
 | **AudioCaptureMode** | Enum | Mix | Mix (game) or Input (mic) |
 | **AudioInputDevice** | String | "" | Microphone device name |
-| **AudioStreamLabel** | String | "o3ds:audio" | Audio frame identifier |
+| (audio stream label) | - | subject name | Not a property: the resolved subject name (see Audio Stream Label) |
 | **AudioCodec** | Name | "PCM16" | Audio codec (PCM16/Opus) |
 
 #### Audio Capture Config

@@ -45,19 +45,25 @@ protected:
 			return false;
 		}
 
-		TArray<uint8> Unified;
-		if (!GetEncoder().EncodeUnified(StreamLabel, State->LastSubject.Get(), Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Unified))
+		// Opus may return zero or several packets per buffer (SHR-2).
+		TArray<TArray<uint8>> Messages;
+		if (!GetEncoder().EncodeUnified(StreamLabel, State->LastSubject.Get(), Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Messages))
 		{
 			return false;
 		}
 
-		const int64 Size = Unified.Num();
-		if (!State->AudioQueue.Enqueue(MoveTemp(Unified)))
+		bool bAllQueued = true;
+		for (TArray<uint8>& Unified : Messages)
 		{
-			return false;
+			const int64 Size = Unified.Num();
+			if (!State->AudioQueue.Enqueue(MoveTemp(Unified)))
+			{
+				bAllQueued = false;
+				continue;
+			}
+			State->AudioBytesQueued.fetch_add(Size);
 		}
-		State->AudioBytesQueued.fetch_add(Size);
-		return true;
+		return bAllQueued;
 	}
 
 private:

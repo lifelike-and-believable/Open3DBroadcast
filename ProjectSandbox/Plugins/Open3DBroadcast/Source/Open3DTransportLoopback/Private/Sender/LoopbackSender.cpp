@@ -57,20 +57,24 @@ public:
 
         const FString LabelForPacket = StreamLabel.IsEmpty() ? ChannelKey : StreamLabel;
 
-        O3DAudio::FEncodedFrame EncodedFrame;
-        if (!GetEncoder().Encode(LabelForPacket, SubjectForAudio, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, EncodedFrame))
+        // Opus may return zero or several packets per buffer (SHR-2).
+        TArray<O3DAudio::FEncodedFrame> EncodedFrames;
+        if (!GetEncoder().Encode(LabelForPacket, SubjectForAudio, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, EncodedFrames))
         {
             return false;
         }
 
-        FO3DLoopbackAudioPacket Packet;
-        Packet.Payload = MoveTemp(EncodedFrame.Encoded);
-        Packet.TimestampSeconds = TimestampSec;
-        Packet.Codec = EncodedFrame.Codec;
-        Packet.Meta = MoveTemp(EncodedFrame.Meta);
+        for (O3DAudio::FEncodedFrame& EncodedFrame : EncodedFrames)
+        {
+            FO3DLoopbackAudioPacket Packet;
+            Packet.Payload = MoveTemp(EncodedFrame.Encoded);
+            Packet.TimestampSeconds = EncodedFrame.Meta.TimestampSec;
+            Packet.Codec = EncodedFrame.Codec;
+            Packet.Meta = MoveTemp(EncodedFrame.Meta);
 
-        PinnedChannel->AudioQueue.Enqueue(MoveTemp(Packet));
-        PinnedChannel->AudioPendingCount.fetch_add(1);
+            PinnedChannel->AudioQueue.Enqueue(MoveTemp(Packet));
+            PinnedChannel->AudioPendingCount.fetch_add(1);
+        }
 
         const int32 DebugLevel = O3DLoopback::GetAudioDebugLevel();
         if (DebugLevel > 0)

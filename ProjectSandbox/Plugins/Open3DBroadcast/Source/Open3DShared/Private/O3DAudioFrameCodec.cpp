@@ -1,5 +1,9 @@
 #include "O3DAudioFrameCodec.h"
 
+#include "HAL/PlatformTime.h"
+
+#include <atomic>
+
 DEFINE_LOG_CATEGORY(LogO3DAudioCodec);
 
 namespace
@@ -9,6 +13,15 @@ namespace
 		const float Clamped = FMath::Clamp(Sample, -1.0f, 1.0f);
 		const int32 Scaled = FMath::RoundToInt(Clamped * 32767.0f);
 		return static_cast<int16>(FMath::Clamp(Scaled, -32768, 32767));
+	}
+
+	/** Process-wide throttle for Opus warnings, so a failing stream cannot flood the log. */
+	bool ShouldLogOpusWarning()
+	{
+		static std::atomic<double> LastLogTime{-1000.0};
+		const double Now = FPlatformTime::Seconds();
+		double Last = LastLogTime.load();
+		return Now - Last > 5.0 && LastLogTime.compare_exchange_strong(Last, Now);
 	}
 }
 
@@ -41,6 +54,9 @@ namespace O3DAudio
 		return O3DS::EUnifiedCodec::PCM16;
 	}
 
+	FFrameEncoder::FFrameEncoder() = default;
+	FFrameEncoder::~FFrameEncoder() = default;
+
 	bool FFrameEncoder::Initialize(const FO3DTransportAudioConfig& Config, const FString& InDefaultStreamLabel, const FString& InDefaultSubject)
 	{
 		AudioConfig = Config;
@@ -52,11 +68,31 @@ namespace O3DAudio
 			DefaultStreamLabel = DefaultSubject;
 		}
 
-		ActiveCodec = SelectCodec(AudioConfig);
+		RequestedCodec = SelectCodec(AudioConfig);
+#if !O3D_WITH_OPUS
+		// SHR-1: Opus is compiled out, so every frame is PCM16 and labelled PCM16.
+		if (RequestedCodec == O3DS::EUnifiedCodec::Opus)
+		{
+			static std::atomic<bool> bWarned{false};
+			if (!bWarned.exchange(true))
+			{
+				UE_LOG(LogO3DAudioCodec, Warning, TEXT("Opus audio was requested, but this build has no Opus support; sending PCM16."));
+			}
+			RequestedCodec = O3DS::EUnifiedCodec::PCM16;
+		}
+#endif
+
 		bInitialized = true;
 		bOpusReady = false;
-		PCM16Scratch.Reset();
-		PCM16ScratchCapacity = 0;
+		ConsecutiveOpusFailures = 0;
+		OpusInitRetryCountdown = 0;
+		OpusEncoder.Reset();
+		Pending.Reset();
+		PendingFrames = 0;
+		PendingChannels = 0;
+		PendingSampleRate = 0;
+		PendingStartTimestampSec = 0.0;
+		Stats = FStats();
 		return true;
 	}
 
@@ -65,74 +101,138 @@ namespace O3DAudio
 #if !O3D_WITH_OPUS
 		return false;
 #else
-		if (ActiveCodec != O3DS::EUnifiedCodec::Opus)
+		if (RequestedCodec != O3DS::EUnifiedCodec::Opus)
 		{
 			return false;
 		}
 
-		const int32 TargetSampleRate = SampleRate > 0 ? SampleRate : AudioConfig.SampleRate;
-		const int32 TargetChannels = NumChannels > 0 ? NumChannels : AudioConfig.NumChannels;
-
-		if (TargetSampleRate <= 0 || TargetChannels <= 0)
+		const bool bFormatMatches = bOpusReady
+			&& OpusEncoder.GetSettings().SampleRate == SampleRate
+			&& OpusEncoder.GetSettings().NumChannels == NumChannels;
+		if (bFormatMatches)
 		{
-			return false;
+			return true;
 		}
 
-		const bool bNeedsReinitialise = !bOpusReady
-			|| OpusEncoder.GetSettings().SampleRate != TargetSampleRate
-			|| OpusEncoder.GetSettings().NumChannels != TargetChannels;
-
-		if (!bNeedsReinitialise)
+		// A failed initialisation is retried after a while, not on every buffer.
+		if (OpusInitRetryCountdown > 0)
 		{
-			return bOpusReady;
+			--OpusInitRetryCountdown;
+			return false;
 		}
 
 		FString Error;
 		FO3DAudioOpusEncoder::FSettings Settings;
-		Settings.SampleRate = TargetSampleRate;
-		Settings.NumChannels = TargetChannels;
+		Settings.SampleRate = SampleRate;
+		Settings.NumChannels = NumChannels;
 		Settings.BitrateKbps = AudioConfig.BitrateKbps;
+		Settings.FrameSizeMs = OpusFrameSizeMs;
 		Settings.bUseVariableBitrate = true;
 
 		if (!OpusEncoder.Initialize(Settings, Error))
 		{
-			UE_LOG(LogO3DAudioCodec, Warning, TEXT("Opus encoder initialisation failed (%s); falling back to PCM16."), *Error);
+			++Stats.OpusInitFailures;
 			bOpusReady = false;
-			ActiveCodec = O3DS::EUnifiedCodec::PCM16;
+			OpusInitRetryCountdown = OpusInitRetryInterval;
+			if (ShouldLogOpusWarning())
+			{
+				UE_LOG(LogO3DAudioCodec, Warning, TEXT("Opus encoder initialisation failed (%s); sending PCM16 and retrying later (%llu failures so far)."),
+					*Error, Stats.OpusInitFailures);
+			}
 			return false;
 		}
 
 		bOpusReady = true;
+		ConsecutiveOpusFailures = 0;
+		Pending.SetNumUninitialized(OpusEncoder.GetFrameSizeSamples() * NumChannels, EAllowShrinking::No);
+		PendingFrames = 0;
+		PendingChannels = NumChannels;
+		PendingSampleRate = SampleRate;
 		return true;
 #endif
 	}
 
-	FString FFrameEncoder::ResolveStreamLabel(const FString& Override) const
+	const FString& FFrameEncoder::ResolveStreamLabel(const FString& Override) const
 	{
-		if (!Override.IsEmpty())
-		{
-			return Override;
-		}
-		return DefaultStreamLabel;
+		return Override.IsEmpty() ? DefaultStreamLabel : Override;
 	}
 
-	FString FFrameEncoder::ResolveSubject(const FString& Override) const
+	const FString& FFrameEncoder::ResolveSubject(const FString& Override) const
 	{
-		if (!Override.IsEmpty())
-		{
-			return Override;
-		}
-		return DefaultSubject;
+		return Override.IsEmpty() ? DefaultSubject : Override;
 	}
 
-	bool FFrameEncoder::BuildEncodedFrame(const FString& StreamLabelOverride,
+	void FFrameEncoder::EmitPcm16(const FString& Label, const FString& Subject, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec, TArray<FEncodedFrame>& OutFrames)
+	{
+		const int32 NumSamples = NumFrames * NumChannels;
+		FEncodedFrame& Frame = OutFrames.AddDefaulted_GetRef();
+		Frame.Codec = O3DS::EUnifiedCodec::PCM16;
+		Frame.Meta.StreamLabel = Label;
+		Frame.Meta.SubjectName = Subject;
+		Frame.Meta.SampleRate = SampleRate;
+		Frame.Meta.NumChannels = NumChannels;
+		Frame.Meta.TimestampSec = TimestampSec;
+
+		// SHR-18: convert straight into the frame's payload, no intermediate scratch.
+		Frame.Encoded.SetNumUninitialized(NumSamples * static_cast<int32>(sizeof(int16)));
+		ConvertFloatToPcm16(Interleaved, NumSamples, reinterpret_cast<int16*>(Frame.Encoded.GetData()));
+		++Stats.Pcm16Frames;
+	}
+
+	void FFrameEncoder::FlushPendingAsPcm16(const FString& Label, const FString& Subject, TArray<FEncodedFrame>& OutFrames)
+	{
+		if (PendingFrames > 0 && PendingChannels > 0 && PendingSampleRate > 0)
+		{
+			EmitPcm16(Label, Subject, Pending.GetData(), PendingFrames, PendingChannels, PendingSampleRate, PendingStartTimestampSec, OutFrames);
+		}
+		PendingFrames = 0;
+	}
+
+	void FFrameEncoder::EmitOpusPacket(const FString& Label, const FString& Subject, TArray<FEncodedFrame>& OutFrames)
+	{
+		int32 FramesEncoded = 0;
+		if (OpusEncoder.Encode(Pending.GetData(), PendingFrames, OpusPacketScratch, FramesEncoded) && OpusPacketScratch.Num() > 0)
+		{
+			FEncodedFrame& Frame = OutFrames.AddDefaulted_GetRef();
+			Frame.Meta.StreamLabel = Label;
+			Frame.Meta.SubjectName = Subject;
+			Frame.Meta.SampleRate = PendingSampleRate;
+			Frame.Meta.NumChannels = PendingChannels;
+			Frame.Meta.TimestampSec = PendingStartTimestampSec;
+			// One exact-size allocation for the payload that leaves with the frame.
+			Frame.Encoded.Append(OpusPacketScratch.GetData(), OpusPacketScratch.Num());
+			Frame.Codec = O3DS::EUnifiedCodec::Opus;
+			PendingFrames = 0;
+			ConsecutiveOpusFailures = 0;
+			++Stats.OpusPackets;
+			return;
+		}
+
+		// SHR-2: send this packet's samples as PCM16 (labelled PCM16), count the failure, and
+		// recreate the encoder after repeated failures. Opus stays requested.
+		++Stats.OpusEncodeFailures;
+		if (ShouldLogOpusWarning())
+		{
+			UE_LOG(LogO3DAudioCodec, Warning, TEXT("Opus encode failed for stream '%s'; sent this packet as PCM16 (%llu failures so far)."),
+				*Label, Stats.OpusEncodeFailures);
+		}
+		FlushPendingAsPcm16(Label, Subject, OutFrames);
+		if (++ConsecutiveOpusFailures >= OpusFailuresBeforeReinit)
+		{
+			OpusEncoder.Reset();
+			bOpusReady = false;
+			ConsecutiveOpusFailures = 0;
+		}
+	}
+
+	bool FFrameEncoder::EncodeBuffer(const FString& StreamLabelOverride,
 		const FString& SubjectOverride,
 		const float* Interleaved,
 		int32 NumFrames,
 		int32 NumChannels,
 		int32 SampleRate,
 		double TimestampSec,
-		FEncodedFrame& OutFrame)
+		TArray<FEncodedFrame>& OutFrames)
 	{
 		if (!bInitialized || !Interleaved || NumFrames <= 0)
 		{
@@ -141,59 +241,56 @@ namespace O3DAudio
 
 		const int32 EffectiveChannels = NumChannels > 0 ? NumChannels : FMath::Max(AudioConfig.NumChannels, 1);
 		const int32 EffectiveSampleRate = SampleRate > 0 ? SampleRate : FMath::Max(AudioConfig.SampleRate, 1);
-		const int32 NumSamples = EffectiveChannels * NumFrames;
-		if (NumSamples <= 0)
+		if (static_cast<int64>(EffectiveChannels) * NumFrames > MAX_int32 / static_cast<int32>(sizeof(int16)))
 		{
 			return false;
 		}
 
-		FEncodedFrame Frame;
-		Frame.Codec = ActiveCodec;
-		Frame.Meta.StreamLabel = ResolveStreamLabel(StreamLabelOverride);
-		Frame.Meta.SubjectName = ResolveSubject(SubjectOverride);
-		Frame.Meta.SampleRate = EffectiveSampleRate;
-		Frame.Meta.NumChannels = EffectiveChannels;
-		Frame.Meta.TimestampSec = TimestampSec;
+		const FString& Label = ResolveStreamLabel(StreamLabelOverride);
+		const FString& Subject = ResolveSubject(SubjectOverride);
 
-		if (ActiveCodec == O3DS::EUnifiedCodec::Opus && EnsureOpusEncoder(EffectiveSampleRate, EffectiveChannels))
+		// A format change ends the current packet: its samples go out as PCM16 rather than
+		// being mixed with samples of another format.
+		if (PendingFrames > 0 && (EffectiveChannels != PendingChannels || EffectiveSampleRate != PendingSampleRate))
 		{
-#if O3D_WITH_OPUS
-			TArray<uint8> Encoded;
-			int32 FramesEncoded = 0;
-			if (OpusEncoder.Encode(Interleaved, NumFrames, Encoded, FramesEncoded) && Encoded.Num() > 0)
+			FlushPendingAsPcm16(Label, Subject, OutFrames);
+		}
+
+		if (RequestedCodec == O3DS::EUnifiedCodec::Opus && EnsureOpusEncoder(EffectiveSampleRate, EffectiveChannels))
+		{
+			const int32 PacketFrames = OpusEncoder.GetFrameSizeSamples();
+			int32 Consumed = 0;
+			while (Consumed < NumFrames && bOpusReady)
 			{
-				Frame.Encoded = MoveTemp(Encoded);
-				OutFrame = MoveTemp(Frame);
-				return true;
+				if (PendingFrames == 0)
+				{
+					PendingStartTimestampSec = TimestampSec + static_cast<double>(Consumed) / static_cast<double>(EffectiveSampleRate);
+				}
+				const int32 Take = FMath::Min(PacketFrames - PendingFrames, NumFrames - Consumed);
+				FMemory::Memcpy(Pending.GetData() + PendingFrames * EffectiveChannels,
+					Interleaved + Consumed * EffectiveChannels,
+					static_cast<SIZE_T>(Take) * static_cast<SIZE_T>(EffectiveChannels) * sizeof(float));
+				PendingFrames += Take;
+				Consumed += Take;
+				if (PendingFrames == PacketFrames)
+				{
+					EmitOpusPacket(Label, Subject, OutFrames);
+				}
 			}
-			else
+
+			if (Consumed < NumFrames)
 			{
-				UE_LOG(LogO3DAudioCodec, Verbose, TEXT("Opus encode failure; reverting to PCM16 for this frame."));
-				ActiveCodec = O3DS::EUnifiedCodec::PCM16;
-				bOpusReady = false;
-				Frame.Codec = O3DS::EUnifiedCodec::PCM16;
+				// The encoder was dropped after repeated failures; the rest goes out as PCM16.
+				EmitPcm16(Label, Subject, Interleaved + Consumed * EffectiveChannels, NumFrames - Consumed, EffectiveChannels, EffectiveSampleRate,
+					TimestampSec + static_cast<double>(Consumed) / static_cast<double>(EffectiveSampleRate), OutFrames);
 			}
-#endif
+			return true;
 		}
 
-		// PCM16 path (default or Opus fallback)
-		const int32 DesiredCapacity = NumSamples + (NumSamples / 2);
-		if (PCM16ScratchCapacity < DesiredCapacity)
-		{
-			PCM16Scratch.Reserve(DesiredCapacity);
-			PCM16ScratchCapacity = DesiredCapacity;
-		}
-
-		PCM16Scratch.SetNumUninitialized(NumSamples);
-		for (int32 SampleIndex = 0; SampleIndex < NumSamples; ++SampleIndex)
-		{
-			PCM16Scratch[SampleIndex] = FloatToPcm16(Interleaved[SampleIndex]);
-		}
-
-		Frame.Encoded.SetNumUninitialized(NumSamples * sizeof(int16));
-		FMemory::Memcpy(Frame.Encoded.GetData(), PCM16Scratch.GetData(), Frame.Encoded.Num());
-
-		OutFrame = MoveTemp(Frame);
+		// PCM16 path: PCM16 requested, or Opus unavailable for this format right now. Samples
+		// still waiting for an Opus packet go first so nothing is lost or reordered.
+		FlushPendingAsPcm16(Label, Subject, OutFrames);
+		EmitPcm16(Label, Subject, Interleaved, NumFrames, EffectiveChannels, EffectiveSampleRate, TimestampSec, OutFrames);
 		return true;
 	}
 
@@ -221,7 +318,10 @@ namespace O3DAudio
 
 		if (!OpusDecoder.Initialize(Settings, Error))
 		{
-			UE_LOG(LogO3DAudioCodec, Warning, TEXT("Opus decoder initialisation failed (%s)."), *Error);
+			if (ShouldLogOpusWarning())
+			{
+				UE_LOG(LogO3DAudioCodec, Warning, TEXT("Opus decoder initialisation failed (%s)."), *Error);
+			}
 			bOpusReady = false;
 			return false;
 		}
@@ -252,7 +352,7 @@ namespace O3DAudio
 			}
 
 			const int32 NumSamples = PayloadSize / static_cast<int32>(sizeof(int16));
-			OutPcm16.SetNumUninitialized(NumSamples);
+			OutPcm16.SetNumUninitialized(NumSamples, EAllowShrinking::No);
 			FMemory::Memcpy(OutPcm16.GetData(), Payload, PayloadSize);
 			return true;
 		}
@@ -345,12 +445,14 @@ namespace O3DAudio
 
 	bool CreateUnifiedAudioMessage(const FEncodedFrame& Frame, double TimestampSec, TArray<uint8>& OutMessage)
 	{
-		TArray<uint8> Payload;
-		if (!SerializeForTransport(Frame, Payload))
+		// SHR-18: serialize the audio payload after a reserved envelope header, then fill the
+		// header in place, instead of building the payload and copying it into a second buffer.
+		if (Frame.Encoded.Num() <= 0
+			|| !SerializeEncodedAudioFrameAfterPrefix(Frame.Codec, Frame.Meta, Frame.Encoded.GetData(), Frame.Encoded.Num(), O3DS::UnifiedWireHeaderSize, OutMessage))
 		{
 			return false;
 		}
 
-		return O3DS::CreateUnifiedMessage(O3DS::EUnifiedKind::Audio, Frame.Codec, Payload.GetData(), Payload.Num(), TimestampSec, OutMessage);
+		return O3DS::WriteUnifiedHeaderInPlace(O3DS::EUnifiedKind::Audio, Frame.Codec, TimestampSec, OutMessage);
 	}
 }

@@ -232,6 +232,7 @@ FO3DWebRTCSender::FO3DWebRTCSender(const FLkFfiApi& InFfi, FO3DTokenFetcherFacto
     : Ffi(InFfi)
     , TokenFetcherFactory(MoveTemp(InTokenFetcherFactory))
     , Link(MakeShared<FWebRTCSenderLink, ESPMode::ThreadSafe>(InFfi))
+    , TransportMetrics(FO3DPerformanceMetrics::Get().AcquireTransportMetrics(TEXT("WebRTC")))
 {
     LinkToken = GetSenderLinkRegistry().Register(Link);
 }
@@ -546,7 +547,7 @@ bool FO3DWebRTCSender::SendBytes(const uint8* Data, int32 Len, const FString& Su
     }
 
     FO3DPerformanceMetrics::Get().RecordBytesSent(Len);
-    FO3DPerformanceMetrics::Get().RecordTransportFrameSent(TEXT("WebRTC"), Len);
+    TransportMetrics->RecordFrameSent(static_cast<uint64>(Len));
 
     {
         FScopeLock Lock(&StatsMutex);

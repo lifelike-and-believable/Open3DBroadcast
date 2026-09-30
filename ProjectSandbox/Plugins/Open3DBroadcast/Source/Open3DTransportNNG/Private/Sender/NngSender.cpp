@@ -91,18 +91,23 @@ public:
 protected:
     virtual bool OnSubmitGated(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
     {
-        TArray<uint8> Unified;
-        if (!GetEncoder().EncodeUnified(StreamLabel, State->LastSubject.Get(), Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Unified))
+        // Opus may return zero or several packets per buffer (SHR-2).
+        TArray<TArray<uint8>> Messages;
+        if (!GetEncoder().EncodeUnified(StreamLabel, State->LastSubject.Get(), Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Messages))
         {
             return false;
         }
 
-        if (!State->SendQueue.Enqueue(MoveTemp(Unified)))
+        bool bAllQueued = true;
+        for (TArray<uint8>& Unified : Messages)
         {
-            State->AudioDropped.fetch_add(1);
-            return false;
+            if (!State->SendQueue.Enqueue(MoveTemp(Unified)))
+            {
+                State->AudioDropped.fetch_add(1);
+                bAllQueued = false;
+            }
         }
-        return true;
+        return bAllQueued;
     }
 
 private:
@@ -148,6 +153,7 @@ struct FO3DNngSender::FNngSocketWrapper
 FO3DNngSender::FO3DNngSender()
     : PublishState(MakeShared<FNngSenderPublishState, ESPMode::ThreadSafe>())
     , PipeContext(MakeShared<FNngSenderPipeContext, ESPMode::ThreadSafe>())
+    , TransportMetrics(FO3DPerformanceMetrics::Get().AcquireTransportMetrics(TEXT("NNG")))
 {
     PipeToken = GetPipeContextRegistry().Register(PipeContext);
 }
@@ -352,7 +358,7 @@ bool FO3DNngSender::SendBytes(const uint8* Data, int32 Len, const FString& Subje
 
     // Record successful send metrics
     FO3DPerformanceMetrics::Get().RecordBytesSent(Len);
-    FO3DPerformanceMetrics::Get().RecordTransportFrameSent(TEXT("NNG"), Len);
+    TransportMetrics->RecordFrameSent(static_cast<uint64>(Len));
 
     return true;
 }

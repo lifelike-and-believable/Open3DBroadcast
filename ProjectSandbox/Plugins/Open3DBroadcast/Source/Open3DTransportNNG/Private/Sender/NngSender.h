@@ -10,6 +10,7 @@
 #include "O3DAudioFrameCodec.h"
 #include "O3DEncodedPayloadQueue.h"
 #include "O3DLifetimeGate.h"
+#include "O3DPerformanceMetrics.h"
 #include "O3DSinkAudioEncoder.h"
 
 #include <atomic>
@@ -105,6 +106,9 @@ private:
     TSharedRef<FNngSenderPipeContext, ESPMode::ThreadSafe> PipeContext;
     /** Opaque nng_pipe_notify user data; resolves to PipeContext until the destructor. */
     void* PipeToken = nullptr;
+
+    /** This transport's counters, resolved once (SHR-3, SHR-17): no lock or lookup per frame. */
+    const FO3DTransportMetricsRef TransportMetrics;
 
     // Owned by whichever thread owns Socket (see above).
     double LastErrorLogTimestamp = 0.0;

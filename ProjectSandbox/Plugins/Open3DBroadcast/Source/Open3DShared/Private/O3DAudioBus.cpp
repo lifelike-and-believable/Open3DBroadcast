@@ -21,11 +21,6 @@ void FO3DAudioBus::PublishPcm16(const O3DS::FAudioFrameMeta& Meta, const uint8* 
         return;
     }
 
-    TArray<uint8> Copy;
-    if (NumBytes > 0 && Data)
-    {
-        Copy.Append(Data, NumBytes);
-    }
-
-    OnPcm16().Broadcast(Meta, Copy);
+    const TConstArrayView<uint8> Bytes = (NumBytes > 0 && Data) ? TConstArrayView<uint8>(Data, NumBytes) : TConstArrayView<uint8>();
+    GO3DAudioBusDelegate.Broadcast(Meta, Bytes);
 }

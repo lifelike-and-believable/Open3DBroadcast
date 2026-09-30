@@ -235,7 +235,7 @@ void UO3DRemoteAudioComponent::OnAudioFrame(const FString& StreamLabel, const FS
     }
 }
 
-void UO3DRemoteAudioComponent::OnAudioPcm16(const O3DS::FAudioFrameMeta& Meta, const TArray<uint8>& PCM16Bytes)
+void UO3DRemoteAudioComponent::OnAudioPcm16(const O3DS::FAudioFrameMeta& Meta, TConstArrayView<uint8> PCM16Bytes)
 {
     const FString& StreamLabel = Meta.StreamLabel;
     const FString& SubjectName = Meta.SubjectName;

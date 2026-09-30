@@ -117,22 +117,29 @@ namespace O3DS
         return true;
     }
 
-    /** Create a unified message by wrapping a payload with the proper header. */
-    inline bool CreateUnifiedMessage(EUnifiedKind Kind, EUnifiedCodec Codec, const uint8* PayloadData, int32 PayloadSize, double TimestampSec, TArray<uint8>& OutMessage)
+    /** Size of the unified envelope header on the wire. */
+    constexpr int32 UnifiedWireHeaderSize = 20;
+
+    /** Largest payload the unified envelope wraps (safety limit). */
+    constexpr int32 UnifiedMaxPayloadSize = 50 * 1024 * 1024;
+
+    /**
+     * Write the unified envelope header into the first UnifiedWireHeaderSize bytes of a message
+     * whose payload has already been written after them. The payload size is taken from the
+     * buffer, so callers can serialize the payload in place without a second copy (SHR-18).
+     */
+    inline bool WriteUnifiedHeaderInPlace(EUnifiedKind Kind, EUnifiedCodec Codec, double TimestampSec, TArray<uint8>& InOutMessage)
     {
-        constexpr int32 WireHeaderSize = 20;
-        if (!PayloadData || PayloadSize <= 0 || PayloadSize > 50 * 1024 * 1024) // 50 MB safety limit
+        const int32 PayloadSize = InOutMessage.Num() - UnifiedWireHeaderSize;
+        if (PayloadSize <= 0 || PayloadSize > UnifiedMaxPayloadSize)
         {
             return false;
         }
 
-        const int32 TotalSize = WireHeaderSize + PayloadSize;
-        OutMessage.SetNumUninitialized(TotalSize);
-
         // Convert timestamp to microseconds
         const uint64 TimestampUs = static_cast<uint64>(TimestampSec * 1000000.0);
 
-        uint8* WritePtr = OutMessage.GetData();
+        uint8* WritePtr = InOutMessage.GetData();
 
         // Write magic number (big-endian)
         WriteBE32(WritePtr + 0, FUnifiedHeader::MagicValueBE());
@@ -148,10 +155,19 @@ namespace O3DS
 
         // Write payload size (big-endian)
         WriteBE32(WritePtr + 16, static_cast<uint32>(PayloadSize));
-
-        // Copy payload
-        FMemory::Memcpy(WritePtr + WireHeaderSize, PayloadData, PayloadSize);
-
         return true;
+    }
+
+    /** Create a unified message by wrapping a payload with the proper header. */
+    inline bool CreateUnifiedMessage(EUnifiedKind Kind, EUnifiedCodec Codec, const uint8* PayloadData, int32 PayloadSize, double TimestampSec, TArray<uint8>& OutMessage)
+    {
+        if (!PayloadData || PayloadSize <= 0 || PayloadSize > UnifiedMaxPayloadSize)
+        {
+            return false;
+        }
+
+        OutMessage.SetNumUninitialized(UnifiedWireHeaderSize + PayloadSize);
+        FMemory::Memcpy(OutMessage.GetData() + UnifiedWireHeaderSize, PayloadData, PayloadSize);
+        return WriteUnifiedHeaderInPlace(Kind, Codec, TimestampSec, OutMessage);
     }
 }
