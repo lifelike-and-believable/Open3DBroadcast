@@ -1,0 +1,21 @@
+# Files left out of the Fab source package, as glob patterns relative to the
+# plugin root (forward slashes). '*' matches within one path segment, '**'
+# matches any number of segments.
+#
+# Read by Build/Scripts/fab-package.py. The package-content assertions in
+# that script run after these rules and fail the job if a debug symbol,
+# script or developer document is still in the package, so a new file of
+# that kind needs a rule here or a move out of the plugin.
+
+# Debug symbols (FAB-4).
+**/*.pdb
+
+# Scripts and test helpers (for example a mock token server).
+**/*.py
+**/*.pyc
+Source/*/Tests/**
+
+# Module-level developer notes: planning, review and analysis documents.
+# End-user documentation lives at the plugin root; third-party notices under
+# ThirdParty/ are kept.
+Source/*/*.md

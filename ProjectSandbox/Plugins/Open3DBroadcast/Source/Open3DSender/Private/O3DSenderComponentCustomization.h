@@ -8,6 +8,7 @@
 #include "Templates/SharedPointer.h"
 #include "UObject/WeakObjectPtr.h"
 #include "Widgets/SWidget.h"
+#include "Widgets/Input/SComboBox.h"
 
 class UO3DSenderComponent;
 class IDetailLayoutBuilder;
@@ -47,7 +48,7 @@ private:
     TSharedPtr<SBox> TransportCustomizationContainer;
     TSharedPtr<IPropertyHandle> AutoCreateTransportHandle;
     TSharedPtr<IPropertyHandle> TransportNameHandle;
-    TSharedPtr<class SComboBox<TSharedPtr<FName>>> TransportComboBox;
+    TSharedPtr<SComboBox<TSharedPtr<FName>>> TransportComboBox;
     TArray<TSharedPtr<FName>> TransportOptions;
 };
 

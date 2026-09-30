@@ -71,9 +71,9 @@ Run automation tests using the provided script:
 
 ```powershell
 .\Build\Scripts\Run-AutomationTests.ps1 `
-  -UEPath "C:\Program Files\Epic Games\UE_5.4" `
+  -UEPath "C:\Program Files\Epic Games\UE_5.7" `
   -ProjectFile "$PWD\ProjectSandbox\ProjectSandbox.uproject" `
-  -TestFilter "Open3DStream.*"
+  -TestFilter "Open3DBroadcast"
 ```
 
 ### Manual Testing

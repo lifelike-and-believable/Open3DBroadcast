@@ -252,6 +252,46 @@
   could report success for a plugin that does not build. The fallback is still
   available for local troubleshooting behind the new `-AllowFallback` switch,
   which no workflow passes.
+- Plugin PR CI runs the UE automation tests (CI-2). They run on the
+  self-hosted UE runner after BuildPlugin, against the package that build
+  produced, with the filter `Open3DBroadcast` and `O3DB_NETWORK_TESTS=0`. The
+  manual Plugin Tests workflow compared a boolean input with the string
+  `'true'`, so its tests never ran; that is fixed, and the workflow no longer
+  runs on pushes to feature branches.
+- `Build/Scripts/Run-AutomationTests.ps1` reads the automation report (CI-3).
+  It fails when a test fails, no test runs, the report is missing or
+  unreadable, or the editor exits non-zero. It used to pass whenever the
+  editor exited 0. The new `-PluginPackageDir` option runs the tests in a
+  throwaway host project that holds only a BuildPlugin package. The nightly
+  uses it, so it now tests the binaries it just built instead of a
+  ProjectSandbox it never compiled.
+- Compiler warnings in plugin sources fail the plugin build (CI-4), through
+  the new `-FailOnWarnings` switch of `Build-Plugin.ps1`. PR CI and the
+  nightly also run one strict build: BuildPlugin `-StrictIncludes` (no
+  precompiled headers, no unity build) with warnings as errors. The two
+  existing warnings, uses of the deprecated `EKeys::Virtual_Accept` in the
+  receiver's editor UI, now use `EKeys::Virtual_Gamepad_Accept.GetVirtualKey()`.
+- New Fab source package job (CI-5, ADR 0002). `Build/Scripts/fab-package.py`
+  builds a zip from the git-tracked plugin files without the modules in
+  `Build/Fab/exclude-modules.txt` (WebRTC, and the future
+  `Open3DBroadcastTests`) or the files in `Build/Fab/exclude-files.txt`
+  (`.pdb`, `.py`, module-level developer notes), and checks its contents. PR
+  CI uploads it as `Open3DBroadcast-Fab-Source-<sha>` and runs BuildPlugin on
+  its contents. Until WP-F1, that build copies in the o3ds core library built
+  for the same commit and reports that the zip does not build on its own.
+- `check-no-video-codecs.sh` runs on every binary in the Fab package as a
+  required step (CI-8).
+- The release notes say the plugin is built for UE 5.7 and Win64 only. They
+  used to claim compatibility with UE 5.6 and later.
+- The libwebrtc source build (`o3ds-webrtc-windows-native.yaml`, up to six
+  hours) runs only when started by hand (CI-6). It ran on every push and PR
+  to develop, on the same runner pool as the UE plugin CI.
+- Plugin CI's path filter includes the o3ds core and everything else
+  `Sync-O3DSCore.ps1` compiles (`src/`, `thirdparty/`, `CMakeLists.txt`,
+  `apps/`, `plugins/mobu/`). Core-only PRs used to skip the UE build.
+- Draft PRs (CI-9): the GitHub-hosted jobs (path filter, Fab package,
+  core tests) run on every commit; the UE build and tests run once the PR is
+  ready for review, or on a manual run. See `Build/README.md`.
 
 ### Schema/Protocol
 

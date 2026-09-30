@@ -9,8 +9,57 @@ param(
   # UBT and package from that instead. That build compiles the plugin inside the project
   # with different settings, so its success does not show that the plugin package
   # builds. CI never passes this switch (CI-1).
-  [switch]$AllowFallback
+  [switch]$AllowFallback,
+  # Pass -StrictIncludes to BuildPlugin: no precompiled headers and no unity build, so
+  # every source file must include what it uses (CI-4).
+  [switch]$StrictIncludes,
+  # Fail when the compiler reports a warning in a file under this plugin, even if
+  # BuildPlugin succeeds (CI-4). Warnings located in engine headers are not counted.
+  [switch]$FailOnWarnings
 )
+
+# Returns the unique compiler warnings in $LogPath whose file is inside the plugin.
+# BuildPlugin compiles a copy of the plugin at <Package>\HostProject\Plugins\<Name>, so
+# the plugin is recognised by the Plugins\<Name>\ path segment. MSVC and clang message
+# formats are matched.
+function Get-PluginWarnings {
+  param([string]$LogPath, [string]$PluginName)
+
+  $inPlugin = '[\\/]Plugins[\\/]' + [regex]::Escape($PluginName) + '[\\/](?<rest>.+)$'
+  $formats = @(
+    # C:\...\File.cpp(53,46): warning C4996: message
+    '^\s*(?<file>\S.*?)\((?<line>\d+)(,\d+)?\)\s*:\s*warning\s+(?<code>[A-Z]+\d+)\s*:\s*(?<msg>.*)$',
+    # /.../File.cpp:53:46: warning: message [-Wflag]
+    '^\s*(?<file>\S.*?):(?<line>\d+):(\d+:)?\s*warning:\s*(?<msg>.*?)(\s*\[(?<code>-W[^\]]+)\])?$'
+  )
+  $seen = @{}
+  $warnings = @()
+  if (!(Test-Path -LiteralPath $LogPath)) { return $warnings }
+  foreach ($line in Get-Content -LiteralPath $LogPath) {
+    foreach ($format in $formats) {
+      $m = [regex]::Match($line, $format)
+      if (-not $m.Success) { continue }
+      $p = [regex]::Match($m.Groups['file'].Value, $inPlugin)
+      if ($p.Success) {
+        $rest = $p.Groups['rest'].Value -replace '\\', '/'
+        # BuildPlugin compiles the editor and game targets, so one warning can appear
+        # several times.
+        $key = "$rest|$($m.Groups['line'].Value)|$($m.Groups['code'].Value)"
+        if (-not $seen.ContainsKey($key)) {
+          $seen[$key] = $true
+          $warnings += [pscustomobject]@{
+            File    = $rest
+            Line    = $m.Groups['line'].Value
+            Code    = $m.Groups['code'].Value
+            Message = $m.Groups['msg'].Value
+          }
+        }
+      }
+      break
+    }
+  }
+  return $warnings
+}
 
 function Get-DotNetHost([string]$EngineRoot) {
   $dotNetRoot = Join-Path $EngineRoot "Engine\Binaries\ThirdParty\DotNet"
@@ -307,12 +356,46 @@ if ($AdditionalPluginDirectories -and $AdditionalPluginDirectories.Count -gt 0) 
   $uatArgs += "-AdditionalPluginDirectories=$pluginDirs"
 }
 
+if ($StrictIncludes) {
+  $uatArgs += "-StrictIncludes"
+}
+
+# UAT's output is also written to a log next to the package (not inside it), so the
+# warnings can be scanned afterwards and the log can be uploaded.
+$uatLog = Join-Path (Split-Path -Parent $OutDir) ((Split-Path -Leaf $OutDir) + "-BuildPlugin.log")
+Write-Host "  UAT log: $uatLog"
+
 # Pass each UAT option as a single token so PowerShell doesn't split values with spaces
-& $UAT $uatArgs
+& $UAT $uatArgs | Tee-Object -FilePath $uatLog
 $uatExitCode = $LASTEXITCODE
 if ($null -eq $uatExitCode) { $uatExitCode = 1 }  # never report success without an exit code
 
 if ($uatExitCode -eq 0) {
+  if ($FailOnWarnings) {
+    $pluginName = [IO.Path]::GetFileNameWithoutExtension($PluginUPluginPath)
+    $warnings = @(Get-PluginWarnings -LogPath $uatLog -PluginName $pluginName)
+    if ($warnings.Count -gt 0) {
+      # Annotate the repository file when the plugin being built is inside the checkout.
+      $annotateRoot = $null
+      if ($env:GITHUB_WORKSPACE) {
+        $workspace = (Resolve-Path -LiteralPath $env:GITHUB_WORKSPACE).Path.TrimEnd('\', '/')
+        $pluginDirectory = Split-Path -Parent $PluginUPluginPath
+        if ($pluginDirectory.StartsWith($workspace + '\', [StringComparison]::OrdinalIgnoreCase)) {
+          $annotateRoot = $pluginDirectory.Substring($workspace.Length + 1) -replace '\\', '/'
+        }
+      }
+      foreach ($w in $warnings) {
+        if ($annotateRoot) {
+          Write-Host "::error file=$annotateRoot/$($w.File),line=$($w.Line)::$($w.Code) $($w.Message)"
+        } else {
+          Write-Host "::error::$($w.File)($($w.Line)): $($w.Code) $($w.Message)"
+        }
+      }
+      Write-Host "::error::BuildPlugin succeeded, but the compiler reported $($warnings.Count) warning(s) in $pluginName sources. -FailOnWarnings treats them as errors."
+      exit 1
+    }
+    Write-Host "[OK] No compiler warnings in $pluginName sources"
+  }
   Write-Host "[OK] Plugin build completed successfully"
   exit 0
 }
