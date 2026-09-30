@@ -4,21 +4,19 @@ param(
   [string]$Zip,
   # Scratch folder: the zip is extracted to <WorkDir>\Stage and packaged to <WorkDir>\Package.
   [string]$WorkDir,
-  # Plugin folder of the checkout whose ThirdParty\open3dstream was filled by
-  # Sync-O3DSCore.ps1. Used only while the zip cannot build on its own (see below).
-  [string]$CoreSourcePluginDir,
-  # Fail instead of copying the core library in. Set this once WP-F1 lands.
+  # Before BuildPlugin, check that the zip holds everything it needs to build on its own:
+  # the Open3DStreamCore module and its core mirror, and no leftover prebuilt core
+  # (WP-F1). CI passes it. BuildPlugin would fail without these files anyway; the check
+  # says why in one line.
   [switch]$RequireStandalone
 )
 
 # Runs RunUAT BuildPlugin on the contents of the Fab source zip, the way Fab's build
 # farm would, then checks the resulting binaries (CI-5).
 #
-# WP-F1 gap: the zip holds only git-tracked files, and the o3ds core library and headers
-# (ThirdParty\open3dstream\lib and \include) are build outputs of Sync-O3DSCore.ps1, so
-# the zip alone does not build yet. Until WP-F1 compiles the core as a module, this
-# script copies the core built for the same commit into the extracted tree and emits a
-# warning annotation saying so. -RequireStandalone turns that into a failure.
+# Nothing is added to the extracted zip: since WP-F1 the o3ds core is compiled from the
+# mirror in Source\ThirdParty\Open3DStreamCore by the Open3DStreamCore module, so the zip
+# builds exactly as Fab's farm receives it.
 #
 # Exit codes: 0 built and checked; 1 BuildPlugin failed, a warning was reported in plugin
 # sources, or a check failed; 2 bad arguments.
@@ -60,27 +58,21 @@ $pluginDir = $descriptors[0].DirectoryName
 $pluginName = $descriptors[0].BaseName
 Write-Host "Extracted $Zip -> $pluginDir"
 
-# --- WP-F1 gap (see the header comment) ---
-$coreParts = @("ThirdParty\open3dstream\lib", "ThirdParty\open3dstream\include")
-$missing = @($coreParts | Where-Object { !(Test-Path -LiteralPath (Join-Path $pluginDir $_)) })
-if ($missing.Count -gt 0) {
-  if ($RequireStandalone) {
-    Write-Failure "The Fab zip does not contain $($missing -join ', '), so it cannot build on its own (WP-F1)."
+# --- Self-contained (WP-F1) ---
+if ($RequireStandalone) {
+  $needed = @(
+    "Source\Open3DStreamCore\Open3DStreamCore.Build.cs",
+    "Source\ThirdParty\Open3DStreamCore\SYNC_STAMP.txt",
+    "Source\ThirdParty\Open3DStreamCore\o3ds_generated.h"
+  )
+  $absent = @($needed | Where-Object { !(Test-Path -LiteralPath (Join-Path $pluginDir $_)) })
+  $stale = @(Get-ChildItem -LiteralPath $pluginDir -Recurse -File -Include "open3dstreamstatic*", "flatbuffers.lib" -ErrorAction SilentlyContinue)
+  if ($absent.Count -gt 0 -or $stale.Count -gt 0) {
+    if ($absent.Count -gt 0) { Write-Failure "The Fab zip lacks $($absent -join ', '), so it cannot build on its own (WP-F1). Run Build/Scripts/sync_o3ds_core.py and commit the result." }
+    if ($stale.Count -gt 0) { Write-Failure "The Fab zip contains prebuilt core libraries that WP-F1 replaced: $(($stale | ForEach-Object { $_.Name }) -join ', ')" }
     exit 1
   }
-  if ([string]::IsNullOrWhiteSpace($CoreSourcePluginDir)) {
-    Write-Failure "The Fab zip lacks $($missing -join ', ') and no -CoreSourcePluginDir was given to copy them from."
-    exit 2
-  }
-  foreach ($part in $missing) {
-    $src = Join-Path $CoreSourcePluginDir $part
-    if (!(Test-Path -LiteralPath $src)) {
-      Write-Failure "$src not found. Run Build/Scripts/Sync-O3DSCore.ps1 first."
-      exit 2
-    }
-    Copy-Item -LiteralPath $src -Destination (Join-Path $pluginDir $part) -Recurse
-  }
-  Write-Host "::warning title=Fab zip does not build on its own (WP-F1)::The zip has no $($missing -join ' or '). This check copied the core built by Sync-O3DSCore.ps1 for this commit into the extracted tree before BuildPlugin. Fab's build farm cannot do that, so the zip is not yet submittable. WP-F1 removes this step."
+  Write-Host "[OK] The zip holds the Open3DStreamCore module and its core mirror; nothing is added before BuildPlugin."
 }
 
 # --- BuildPlugin, failing on warnings in plugin sources ---

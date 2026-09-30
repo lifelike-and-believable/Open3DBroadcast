@@ -45,31 +45,6 @@ jobs:
         run: |
           & .\Build\Scripts\Setup-UE.ps1 -UEPath "${{ env.UE_ROOT }}"
 
-      - name: Install CMake
-        shell: powershell
-        run: choco install cmake -y --installargs 'ADD_CMAKE_TO_PATH=System'
-
-      # Same toolchain windows.yml uses to build the o3ds release zip - see
-      # that workflow's own comment on why -G "Visual Studio 17 2022" isn't
-      # used here (no full VS IDE install for vswhere to find on this runner).
-      - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      # Fix #203/#204: build o3ds from source instead of linking a
-      # git-committed prebuilt open3dstreamstatic.lib. See
-      # Build/Scripts/Sync-O3DSCore.ps1 for the full recipe. Must run before
-      # "Verify required libraries" below, which now checks the freshly-built
-      # library rather than a committed one.
-      - name: Build o3ds core from source
-        shell: pwsh
-        run: |
-          & .\Build\Scripts\Sync-O3DSCore.ps1
-        env:
-          CC: cl
-          CXX: cl
-
       - name: Resolve plugin paths
         id: paths
         shell: powershell
@@ -109,15 +84,13 @@ jobs:
         run: |
           $pluginDir = "${{ steps.paths.outputs.plugin_dir }}"
           
-          # Check core libraries at plugin ThirdParty root
+          # The o3ds core is compiled from source (Open3DStreamCore, WP-F1), so
+          # its mirror must be present; Opus and NNG are prebuilt libraries.
           $requiredLibs = @(
-            @{ Path = "ThirdParty/open3dstream/lib/Win64/open3dstreamstatic.lib"; Name = "open3dstream" },
-            @{ Path = "ThirdParty/flatbuffers/lib/Win64/flatbuffers.lib"; Name = "flatbuffers" },
-            @{ Path = "ThirdParty/opus/lib/Win64/opus.lib"; Name = "opus" }
+            @{ Path = "Source/ThirdParty/Open3DStreamCore/SYNC_STAMP.txt"; Name = "o3ds core mirror" },
+            @{ Path = "Source/ThirdParty/opus/lib/Win64/opus.lib"; Name = "opus" },
+            @{ Path = "Source/Open3DTransportNNG/ThirdParty/nng/lib/Win64/nng.lib"; Name = "nng" }
           )
-          
-          # Check NNG in module-specific location
-          $requiredLibs += @{ Path = "Source/Open3DTransportNNG/ThirdParty/nng/lib/Win64/nng.lib"; Name = "nng" }
           
           $missing = @()
           foreach ($lib in $requiredLibs) {
