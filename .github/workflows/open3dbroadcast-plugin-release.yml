@@ -167,12 +167,13 @@ jobs:
           $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
           $restructured = Join-Path $env:RUNNER_TEMP 'PluginArchive'
 
+          # The engine version comes from UE_ROOT; there is no fallback, so the
+          # archive and notes cannot name a version the build did not use.
           $ueVersionMatch = [regex]::Match($env:UE_ROOT, 'UE_(\d+\.\d+)')
-          if ($ueVersionMatch.Success) {
-            $ueVersion = $ueVersionMatch.Groups[1].Value
-          } else {
-            $ueVersion = '5.6'
+          if (-not $ueVersionMatch.Success) {
+            throw "Cannot read the engine version from UE_ROOT '$env:UE_ROOT'."
           }
+          $ueVersion = $ueVersionMatch.Groups[1].Value
 
           $targetPath = Join-Path $restructured "UE_$ueVersion/Plugins/Open3DBroadcast"
           New-Item -ItemType Directory -Force -Path $targetPath | Out-Null
@@ -202,20 +203,21 @@ jobs:
           ### Installation
 
           1. Download the attached archive.
-          2. Extract the `UE_X.X/Plugins/Open3DBroadcast` folder that matches your Unreal Engine version.
+          2. Extract the `UE_${{ steps.restructure.outputs.ue_version }}/Plugins/Open3DBroadcast` folder.
           3. Copy the folder into your project's `Plugins` directory.
           4. Restart Unreal Editor and enable **Open3DBroadcast**.
 
           ### Compatibility
 
-          - **Unreal Engine**: Built with ${{ steps.restructure.outputs.ue_version }} (compatible with UE 5.6+)
-          - **Platform**: Windows (Win64)
+          - **Unreal Engine**: ${{ steps.restructure.outputs.ue_version }} only. The binaries are built for this engine version and do not load in other versions.
+          - **Platform**: Windows (Win64) only.
 
           ### Contents
 
-          - Open3DBroadcast plugin modules (Sender, Receiver, Shared, Transport implementations)
+          - Open3DBroadcast plugin modules (Sender, Receiver, Shared, Transport implementations), compiled for Win64
           - Required Open3DStream core libraries and third-party dependencies
-          - Host project with plugin pre-mounted for quick validation
+
+          This is the GitHub build, which includes the WebRTC transport. It is not the Fab package.
           "@
           $notes | Out-File -FilePath "$env:RUNNER_TEMP\release_notes.md" -Encoding UTF8
 

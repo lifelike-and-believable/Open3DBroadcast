@@ -1,15 +1,19 @@
 name: Open3DBroadcast Plugin Tests
 
+# Manual build-and-test of any branch on the UE runner. PR CI
+# (open3dbroadcast-plugin-ci.yml) already builds and tests every non-draft
+# PR, so this no longer runs on push: a push to a feature branch with an open
+# PR used to queue the single UE runner twice.
 on:
-  push:
-    branches:
-      - feature/**
-      - bugfix/**
-      - hotfix/**
   workflow_dispatch:
     inputs:
       run_editor_tests:
         description: "Run Unreal automation tests after packaging"
+        required: false
+        default: true
+        type: boolean
+      network_tests:
+        description: "Also run tests that need the internet (O3DB_NETWORK_TESTS=1)"
         required: false
         default: false
         type: boolean
@@ -28,35 +32,9 @@ env:
   PLUGIN_PATH: 'ProjectSandbox/Plugins/Open3DBroadcast'
 
 jobs:
-  changes:
-    name: Detect non-doc changes
-    runs-on: ubuntu-latest
-    outputs:
-      code: ${{ steps.filter.outputs.code }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Filter paths (docs vs code)
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          filters: |
-            code:
-              - 'Build/**'
-              - 'ProjectSandbox/ProjectSandbox.uproject'
-              - 'ProjectSandbox/Source/**'
-              - 'ProjectSandbox/Plugins/Open3DBroadcast/**'
-              - '.github/workflows/open3dbroadcast-plugin-test.yml'
-
   build-test:
-    needs: changes
-    if: >-
-      (github.event_name == 'workflow_dispatch') ||
-      (needs.changes.outputs.code == 'true')
     runs-on: [ self-hosted, ue5, windows ]
+    timeout-minutes: 90
 
     steps:
       - name: Checkout (full)
@@ -134,18 +112,24 @@ jobs:
           path: ${{ runner.temp }}/PluginPackage
           retention-days: 14
 
+      # CI-2: inputs.run_editor_tests is a boolean. The old condition compared
+      # it with the string 'true', which is always false, so tests never ran.
       - name: Run Unreal automation tests
-        if: inputs.run_editor_tests == 'true'
+        if: ${{ inputs.run_editor_tests }}
+        timeout-minutes: 20
         shell: powershell
+        env:
+          O3DB_NETWORK_TESTS: ${{ inputs.network_tests && '1' || '0' }}
         run: |
           & .\Build\Scripts\Run-AutomationTests.ps1 `
             -UEPath "$env:UE_ROOT" `
-            -ProjectFile "$PWD\ProjectSandbox\ProjectSandbox.uproject" `
+            -PluginPackageDir (Join-Path $env:RUNNER_TEMP 'PluginPackage') `
+            -HostProjectDir (Join-Path $env:RUNNER_TEMP 'TestHost') `
             -ResultsDir "$PWD\Artifacts\AutomationTests" `
-            -TestFilter "Open3DBroadcast.*"
+            -TestFilter "Open3DBroadcast"
 
       - name: Upload automation test logs
-        if: inputs.run_editor_tests == 'true'
+        if: ${{ !cancelled() && inputs.run_editor_tests }}
         uses: actions/upload-artifact@v4
         with:
           name: Open3DBroadcast-AutomationLogs-${{ github.sha }}

@@ -25,8 +25,16 @@ env:
   PLUGIN_PATH: 'ProjectSandbox/Plugins/Open3DBroadcast'
 
 jobs:
+  fab-package:
+    name: Fab source zip
+    uses: ./.github/workflows/open3dbroadcast-fab-package.yml
+
   nightly-build:
+    needs: fab-package
+    # Run even if the Fab zip job failed; the Fab steps check its result.
+    if: ${{ !cancelled() }}
     runs-on: [ self-hosted, ue5, windows ]
+    timeout-minutes: 120
 
     steps:
       - name: Checkout repository
@@ -95,7 +103,8 @@ jobs:
             -PluginUPluginPath "${{ steps.paths.outputs.uplugin_path }}" `
             -OutDir "$pkg" `
             -TargetPlatforms @("Win64") `
-            -Configuration "Shipping"
+            -Configuration "Shipping" `
+            -FailOnWarnings
 
       - name: Upload plugin package
         uses: actions/upload-artifact@v4
@@ -104,22 +113,78 @@ jobs:
           path: ${{ runner.temp }}/PluginPackage
           retention-days: 21
 
+      # CI-3: the tests load the binaries BuildPlugin produced above, in a
+      # throwaway host project. They used to run in ProjectSandbox, which
+      # the nightly never compiled, so they saw stale or missing binaries.
+      # Schedule runs have no inputs, so the condition checks the event.
+      # Network tests (ADR 0006) run when the endpoint secrets are set.
       - name: Run Unreal automation tests
-        if: inputs.run_editor_tests != 'false'
+        id: tests
+        if: ${{ github.event_name == 'schedule' || inputs.run_editor_tests }}
+        timeout-minutes: 30
         shell: powershell
+        env:
+          O3DB_NETWORK_TESTS: ${{ secrets.O3D_MOQ_RELAY_URL != '' && '1' || '0' }}
+          O3D_MOQ_RELAY_URL: ${{ secrets.O3D_MOQ_RELAY_URL }}
+          O3DB_LIVEKIT_URL: ${{ secrets.O3DB_LIVEKIT_URL }}
         run: |
           & .\Build\Scripts\Run-AutomationTests.ps1 `
             -UEPath "$env:UE_ROOT" `
-            -ProjectFile "$PWD\ProjectSandbox\ProjectSandbox.uproject" `
+            -PluginPackageDir (Join-Path $env:RUNNER_TEMP 'PluginPackage') `
+            -HostProjectDir (Join-Path $env:RUNNER_TEMP 'TestHost') `
             -ResultsDir "$PWD\Artifacts\NightlyAutomation" `
-            -TestFilter "Open3DBroadcast.*"
+            -TestFilter "Open3DBroadcast"
 
       - name: Upload automation artifacts
-        if: inputs.run_editor_tests != 'false'
+        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
         uses: actions/upload-artifact@v4
         with:
           name: Open3DBroadcast-NightlyTests-${{ github.sha }}
           path: Artifacts/NightlyAutomation
+          if-no-files-found: ignore
+          retention-days: 21
+
+      # CI-4: the strict configuration also runs on pull requests; kept here
+      # so a direct push that skipped PR CI is still covered overnight.
+      - name: Strict build (non-unity, no PCH, warnings as errors)
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: |
+          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackageStrict'
+          & .\Build\Scripts\Build-Plugin.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -PluginUPluginPath "${{ steps.paths.outputs.uplugin_path }}" `
+            -OutDir "$pkg" `
+            -TargetPlatforms @("Win64") `
+            -Configuration "Development" `
+            -StrictIncludes `
+            -FailOnWarnings
+
+      - name: Download Fab source zip
+        if: ${{ !cancelled() && needs.fab-package.result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: Open3DBroadcast-Fab-Source-${{ github.sha }}
+          path: ${{ runner.temp }}/FabZip
+
+      - name: Build the Fab source zip
+        if: ${{ !cancelled() && needs.fab-package.result == 'success' }}
+        shell: powershell
+        run: |
+          & .\Build\Scripts\Build-FabZip.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -Zip (Join-Path $env:RUNNER_TEMP 'FabZip') `
+            -WorkDir (Join-Path $env:RUNNER_TEMP 'FabBuild') `
+            -CoreSourcePluginDir "${{ steps.paths.outputs.plugin_dir }}"
+
+      - name: Upload BuildPlugin logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Open3DBroadcast-NightlyBuildPluginLogs-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/*-BuildPlugin.log
+            ${{ runner.temp }}/FabBuild/*-BuildPlugin.log
           if-no-files-found: ignore
           retention-days: 21
 

@@ -1,11 +1,12 @@
 name: o3ds build webrtc static (windows self-hosted)
 
+# Manual only (CI-6). This builds Google's libwebrtc from source (up to six
+# hours) on the self-hosted Windows pool that the UE plugin CI also uses, and
+# nothing in the repository consumes its output: the WebRTC transport links
+# livekit_ffi. It used to run on every push and PR to develop and could hold
+# the UE runner for hours.
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [ develop ]
-  push:
-    branches: [ develop ]
 
 permissions:
   contents: read

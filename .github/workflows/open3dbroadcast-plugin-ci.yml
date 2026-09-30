@@ -1,9 +1,21 @@
 name: Open3DBroadcast Plugin CI
 
+# Which jobs run when (CI-9; details in Build/README.md, "CI"):
+#   - Every PR commit, drafts included: "Detect plugin-relevant changes" and
+#     "Fab source zip" (GitHub-hosted, a minute or two). core-tests.yml also
+#     runs on every PR.
+#   - Non-draft PRs, pushes to develop/main and manual runs: "UE build and
+#     tests" on the single self-hosted UE runner. Drafts skip it so work in
+#     progress does not queue the runner; mark the PR ready for review, or
+#     run this workflow by hand on the branch (Actions > Run workflow), to
+#     get the UE result for a draft.
+#   All jobs are skipped when a change touches nothing the plugin build
+#   depends on (see the path filter below).
+
 on:
   pull_request:
     branches: [ develop, main ]
-    types: [ opened, synchronize, ready_for_review ]
+    types: [ opened, synchronize, reopened, ready_for_review ]
   push:
     branches: [ develop, main ]
   workflow_dispatch:
@@ -24,7 +36,7 @@ env:
 
 jobs:
   changes:
-    name: Detect non-doc changes
+    name: Detect plugin-relevant changes
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.filter.outputs.code }}
@@ -33,25 +45,49 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Filter paths (docs vs code)
+      - name: Filter paths
         id: filter
         uses: dorny/paths-filter@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # The plugin compiles the o3ds core from source: Sync-O3DSCore.ps1
+          # configures and builds the root CMakeLists.txt, which pulls in
+          # src/, thirdparty/ (submodules), apps/ and plugins/mobu/. A change
+          # to any of them can break the plugin build.
           filters: |
             code:
               - 'Build/**'
+              - 'src/**'
+              - 'thirdparty/**'
+              - 'CMakeLists.txt'
+              - '*.cmake'
+              - 'apps/**'
+              - 'plugins/mobu/**'
               - 'ProjectSandbox/ProjectSandbox.uproject'
               - 'ProjectSandbox/Source/**'
               - 'ProjectSandbox/Plugins/Open3DBroadcast/**'
+              - '.gitmodules'
               - '.github/workflows/open3dbroadcast-plugin-ci.yml'
+              - '.github/workflows/open3dbroadcast-fab-package.yml'
+
+  fab-package:
+    name: Fab source zip
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.code == 'true'
+    uses: ./.github/workflows/open3dbroadcast-fab-package.yml
 
   build-and-test:
-    needs: changes
+    name: UE build and tests
+    needs: [ changes, fab-package ]
+    # !cancelled() lets this job run when fab-package failed or was skipped;
+    # the Fab steps below check its result themselves.
     if: >-
-      (github.event_name == 'workflow_dispatch') ||
-      (needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false))
+      !cancelled() && needs.changes.result == 'success' && (
+        github.event_name == 'workflow_dispatch' ||
+        (needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false))
+      )
     runs-on: [ self-hosted, ue5, windows ]
+    timeout-minutes: 90
 
     steps:
       - name: Checkout (full)
@@ -132,19 +168,21 @@ jobs:
         run: |
           $pluginDir = Join-Path $PWD "${{ env.PLUGIN_PATH }}"
           $upluginPath = Join-Path $pluginDir "${{ env.PLUGIN_NAME }}.uplugin"
-          
+
           if (!(Test-Path -LiteralPath $pluginDir)) {
             throw "Plugin directory not found: $pluginDir"
           }
           if (!(Test-Path -LiteralPath $upluginPath)) {
             throw "Plugin .uplugin file not found: $upluginPath"
           }
-          
+
           "plugin_dir=$pluginDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "uplugin_path=$upluginPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Plugin directory: $pluginDir"
           Write-Host "Plugin file: $upluginPath"
 
+      # The default BuildPlugin configuration (unity build, PCHs), which is
+      # what Fab's build farm runs. Warnings in plugin sources fail it (CI-4).
       - name: Build Open3DBroadcast plugin (Win64)
         shell: powershell
         run: |
@@ -154,7 +192,8 @@ jobs:
             -PluginUPluginPath "${{ steps.paths.outputs.uplugin_path }}" `
             -OutDir "$pkg" `
             -TargetPlatforms @("Win64") `
-            -Configuration "Development"
+            -Configuration "Development" `
+            -FailOnWarnings
 
       - name: Package artifact
         uses: actions/upload-artifact@v4
@@ -162,6 +201,79 @@ jobs:
           name: Open3DBroadcast-Win64-${{ github.sha }}
           path: ${{ runner.temp }}/PluginPackage
           retention-days: 30
+
+      # CI-2/CI-3: UE automation tests against the package built above, in a
+      # throwaway host project (no ProjectSandbox compile, no stale
+      # binaries). Filter is the plain prefix from ADR 0006; tests that need
+      # the internet stay off (O3DB_NETWORK_TESTS=0).
+      - name: Run UE automation tests
+        id: tests
+        timeout-minutes: 20
+        shell: powershell
+        env:
+          O3DB_NETWORK_TESTS: '0'
+        run: |
+          & .\Build\Scripts\Run-AutomationTests.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -PluginPackageDir (Join-Path $env:RUNNER_TEMP 'PluginPackage') `
+            -HostProjectDir (Join-Path $env:RUNNER_TEMP 'TestHost') `
+            -ResultsDir "$PWD\Artifacts\AutomationTests" `
+            -TestFilter "Open3DBroadcast"
+
+      - name: Upload automation test report
+        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Open3DBroadcast-AutomationTests-${{ github.sha }}
+          path: Artifacts/AutomationTests
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # CI-4: one extra configuration that combines the strict checks:
+      # BuildPlugin -StrictIncludes (no PCH, no unity build) with warnings in
+      # plugin sources treated as errors. Its output is discarded.
+      - name: Strict build (non-unity, no PCH, warnings as errors)
+        shell: powershell
+        run: |
+          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackageStrict'
+          & .\Build\Scripts\Build-Plugin.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -PluginUPluginPath "${{ steps.paths.outputs.uplugin_path }}" `
+            -OutDir "$pkg" `
+            -TargetPlatforms @("Win64") `
+            -Configuration "Development" `
+            -StrictIncludes `
+            -FailOnWarnings
+
+      # CI-5: BuildPlugin on the contents of the Fab source zip made by the
+      # fab-package job. See Build-FabZip.ps1 for the WP-F1 gap it reports.
+      - name: Download Fab source zip
+        if: needs.fab-package.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: Open3DBroadcast-Fab-Source-${{ github.sha }}
+          path: ${{ runner.temp }}/FabZip
+
+      - name: Build the Fab source zip
+        if: needs.fab-package.result == 'success'
+        shell: powershell
+        run: |
+          & .\Build\Scripts\Build-FabZip.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -Zip (Join-Path $env:RUNNER_TEMP 'FabZip') `
+            -WorkDir (Join-Path $env:RUNNER_TEMP 'FabBuild') `
+            -CoreSourcePluginDir "${{ steps.paths.outputs.plugin_dir }}"
+
+      - name: Upload BuildPlugin logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Open3DBroadcast-BuildPluginLogs-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/*-BuildPlugin.log
+            ${{ runner.temp }}/FabBuild/*-BuildPlugin.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Post build completed comment
         if: github.event_name == 'pull_request' && github.event.pull_request.number != null && success()

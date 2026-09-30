@@ -8,6 +8,7 @@
 #include "O3DTransportConfigPanelBase.h"
 
 #include "UObject/UnrealType.h"
+#include "UObject/Package.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/SNullWidget.h"
 
@@ -208,7 +209,7 @@ private:
     virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override
     {
         const FKey Key = InKeyEvent.GetKey();
-        if (Key == EKeys::Enter || Key == EKeys::Virtual_Accept)
+        if (Key == EKeys::Enter || Key == EKeys::Virtual_Gamepad_Accept.GetVirtualKey())
         {
             return OnCreateClicked();
         }

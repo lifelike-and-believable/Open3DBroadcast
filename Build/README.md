@@ -71,38 +71,69 @@ Builds an Unreal plugin using Unreal Automation Tool (UAT).
 - `-TargetPlatforms` - Array of platforms to build (default: `@("Win64")`)
 - `-Configuration` - Build configuration: Development, Shipping, etc. (default: `Development`)
 - `-AllowFallback` - Local troubleshooting only. If `RunUAT BuildPlugin` fails, build ProjectSandbox with UBT and package from that instead. A fallback success does not mean the plugin package builds, so CI never passes this switch.
+- `-StrictIncludes` - Passes BuildPlugin's `-StrictIncludes`: no precompiled headers and no unity build, so every source file has to include what it uses.
+- `-FailOnWarnings` - Fails the script (exit code `1`) when the compiler reports a warning in a file under `Plugins/<Plugin>/`, even though BuildPlugin succeeded. Warnings located in engine headers are not counted. In GitHub Actions each warning becomes an error annotation on the source line.
 
-**Exit code:** `0` only when `RunUAT BuildPlugin` succeeds. Otherwise the script exits with UAT's exit code, unless `-AllowFallback` is set.
+**Exit code:** `0` only when `RunUAT BuildPlugin` succeeds (and, with `-FailOnWarnings`, no plugin warning was reported). Otherwise the script exits with UAT's exit code, or `1` for warnings, unless `-AllowFallback` is set.
 
 **Output:**
 - Packaged plugin in `OutDir`
+- UAT's output in `<OutDir>-BuildPlugin.log`, next to the package
 - Ready to install in other Unreal projects
+
+#### `Build-FabZip.ps1`
+Runs `RunUAT BuildPlugin` on the contents of the Fab source zip (see "Fab source package" below), with `-FailOnWarnings`, then checks that every module in the zip's `.uplugin` produced an editor DLL and that no excluded module or `livekit` file reached the output.
+
+```powershell
+.\Build\Scripts\Build-FabZip.ps1 `
+  -UEPath "C:\Program Files\Epic Games\UE_5.7" `
+  -Zip "Artifacts\Fab" `
+  -WorkDir "Artifacts\FabBuild" `
+  -CoreSourcePluginDir "$PWD\ProjectSandbox\Plugins\Open3DBroadcast"
+```
+
+Until WP-F1 lands, the zip does not build on its own: the o3ds core library and headers under `ThirdParty/open3dstream/` are outputs of `Sync-O3DSCore.ps1`, not tracked files. The script copies them in from `-CoreSourcePluginDir` and emits a warning saying the zip is not yet submittable. `-RequireStandalone` makes that a failure; switch CI to it once WP-F1 is merged.
 
 ---
 
 ### Testing
 
 #### `Run-AutomationTests.ps1`
-Runs Unreal's automation tests for the plugin.
+Runs Unreal's automation tests for the plugin and decides pass or fail from the automation report, not from the editor's exit code alone.
 
 **Usage:**
 ```powershell
+# Against a BuildPlugin package (what CI does): the script creates a throwaway host
+# project that contains only this package, so nothing is compiled and the tests load
+# exactly these binaries.
+.\Build\Scripts\Run-AutomationTests.ps1 `
+  -UEPath "C:\Program Files\Epic Games\UE_5.7" `
+  -PluginPackageDir "Artifacts\Win64" `
+  -TestFilter "Open3DBroadcast" `
+  -ResultsDir "Artifacts\Tests"
+
+# Against a project whose editor binaries are already built
 .\Build\Scripts\Run-AutomationTests.ps1 `
   -UEPath "C:\Program Files\Epic Games\UE_5.7" `
   -ProjectFile "ProjectSandbox\ProjectSandbox.uproject" `
-  -TestFilter "Open3DBroadcast.*" `
-  -ResultsDir "Artifacts\Tests"
+  -TestFilter "Open3DBroadcast"
 ```
 
 **Parameters:**
 - `-UEPath` - Path to Unreal Engine (required)
-- `-ProjectFile` - Path to `.uproject` file (required)
-- `-TestFilter` - Test filter pattern (default: `"*"`)
+- `-ProjectFile` or `-PluginPackageDir` - exactly one of them (required)
+- `-HostProjectDir` - Where the throwaway host project is created with `-PluginPackageDir` (default: a temp folder; deleted and recreated each run)
+- `-TestFilter` - Name prefix passed to `Automation RunTests` (default: `Open3DBroadcast`). Use a plain prefix: a trailing `.*` is not a wildcard there, so the script strips it with a warning.
 - `-ResultsDir` - Output directory for test results (default: `"Artifacts\Tests"`)
 
-**Output:**
-- `Results.xml` - Test results in XML format
-- Console output with test status
+Tests that need the internet register only when `O3DB_NETWORK_TESTS=1` is set in the environment (ADR 0006). CI sets it to `0` on pull requests.
+
+**Exit code:** `0` when the editor exited cleanly and every test in the report passed (skipped tests are listed but allowed). `1` when the editor exited non-zero, `index.json` is missing or unreadable, no test ran, or any test is `Fail`, `NotRun` or `InProcess` (still running when the editor exited, usually a crash). `2` for bad arguments.
+
+**Output (in `<ResultsDir>\<filter>\`):**
+- `index.json` - The automation report
+- `Automation.log` - The editor log
+- Failed tests and their first error are printed as GitHub error annotations and added to the job summary
 
 ---
 
@@ -134,7 +165,7 @@ Runs Unreal's automation tests for the plugin.
 .\Build\Scripts\Run-AutomationTests.ps1 `
   -UEPath "C:\Program Files\Epic Games\UE_5.7" `
   -ProjectFile "$PWD\ProjectSandbox\ProjectSandbox.uproject" `
-  -TestFilter "Open3DBroadcast.*"
+  -TestFilter "Open3DBroadcast"
 ```
 
 ### Full Build and Test
@@ -145,25 +176,57 @@ Runs Unreal's automation tests for the plugin.
 .\Build\Scripts\Build-Plugin.ps1 `
   -UEPath "C:\Program Files\Epic Games\UE_5.7" `
   -PluginUPluginPath "$PWD\ProjectSandbox\Plugins\Open3DBroadcast\Open3DBroadcast.uplugin" `
-  -OutDir "$PWD\Artifacts\Win64"
+  -OutDir "$PWD\Artifacts\Win64" `
+  -FailOnWarnings
 .\Build\Scripts\Run-AutomationTests.ps1 `
   -UEPath "C:\Program Files\Epic Games\UE_5.7" `
-  -ProjectFile "$PWD\ProjectSandbox\ProjectSandbox.uproject" `
-  -TestFilter "Open3DBroadcast.*"
+  -PluginPackageDir "$PWD\Artifacts\Win64" `
+  -TestFilter "Open3DBroadcast"
 ```
+
+## Fab source package
+
+The Fab listing gets a source-only zip, different from the GitHub build (ADR 0002).
+
+- `Build/Fab/exclude-modules.txt` lists modules left out of it: `Open3DTransportWebRTC` (ADR 0002; WebRTC ships as a separate add-on) and `Open3DBroadcastTests` (ADR 0006; skipped with a notice until that module exists).
+- `Build/Fab/exclude-files.txt` lists files left out, as globs: `.pdb`, `.py`, `Source/*/Tests/**` and module-level `Source/*/*.md` developer notes.
+- `Build/Scripts/fab-package.py` (Python 3.8+, standard library) takes the files git tracks under the plugin folder, applies both lists, removes the excluded modules' entries from the staged `.uplugin` without reformatting it, and writes a zip with one top-level `Open3DBroadcast/` folder and fixed timestamps (the same commit gives the same bytes). It then reopens the zip and fails if it finds an excluded module (folder or `.uplugin` entry), a `livekit` file while WebRTC is excluded, `.pdb`/`.py` files, `Binaries/` or `Intermediate/`, a Markdown file other than the root `README.md`, `USER_GUIDE.md`, `THIRD_PARTY_LICENSES.md`, `Transport_Module_Comparison.md` or anything under a `ThirdParty/` folder, a listed module without its `Build.cs`, or a missing `Resources/Icon128.png`.
+
+```bash
+python3 Build/Scripts/fab-package.py --out-dir Artifacts/Fab
+Build/Scripts/check-no-video-codecs.sh $(cat Artifacts/Fab/binaries.txt)
+```
+
+Then `Build-FabZip.ps1` (above) runs BuildPlugin on the zip's contents.
 
 ## CI/CD Integration
 
-These scripts are used by the GitHub Actions workflows to build the
-Open3DBroadcast plugin:
+| Workflow | Runs on | What it does |
+|---|---|---|
+| `open3dbroadcast-plugin-ci.yml` | PRs to develop/main, pushes to develop/main, manual | Path filter, Fab source zip, and on the UE runner: BuildPlugin (fails on plugin warnings), UE automation tests against that package, strict build, BuildPlugin on the Fab zip |
+| `open3dbroadcast-fab-package.yml` | Called by CI and nightly, or manual | `fab-package.py`, then `check-no-video-codecs.sh` on every packaged binary (required), then uploads `Open3DBroadcast-Fab-Source-<sha>` |
+| `open3dbroadcast-plugin-nightly.yml` | 03:00 UTC daily, manual | Same checks as CI with a Shipping `-Configuration`, plus network tests when the `O3D_MOQ_RELAY_URL` secret is set |
+| `open3dbroadcast-plugin-test.yml` | Manual only | Build any branch and optionally run the tests (with or without network tests) |
+| `open3dbroadcast-plugin-release.yml` | `open3dbroadcast-v*.*.*` tags, manual | Shipping build, GitHub release of the Win64 binaries (UE 5.7 only) |
+| `core-tests.yml` | Every PR and push | o3ds core under CTest with ASan/UBSan, fuzzing, warning ratchet (GitHub-hosted) |
+| `o3ds-webrtc-windows-native.yaml` | Manual only | libwebrtc from source (up to 6 hours); nothing consumes its output |
 
-- **open3dbroadcast-plugin-ci.yml** - Builds plugin for CI validation
-- **open3dbroadcast-plugin-test.yml** - Runs the automation test suite
-- **open3dbroadcast-plugin-nightly.yml** - Nightly plugin builds
-- **open3dbroadcast-plugin-release.yml** - Release builds with Shipping configuration
+All UE jobs call `Sync-O3DSCore.ps1` first.
 
-All four call `Sync-O3DSCore.ps1` first, then package the plugin for
-distribution.
+### Which PR jobs run, and when (CI-9)
+
+- **Every PR commit, drafts included:** the path filter, the Fab source zip job and `core-tests.yml`. They run on GitHub-hosted runners and take a few minutes.
+- **Non-draft PRs, pushes to develop/main and manual runs:** the "UE build and tests" job on the single self-hosted `[self-hosted, ue5, windows]` runner. Drafts skip it so unfinished work does not hold the runner. To get the UE result for a draft, mark it ready for review, or run the workflow by hand on the branch (Actions > Open3DBroadcast Plugin CI > Run workflow).
+- **Path filter:** all plugin CI jobs are skipped when a PR touches nothing the plugin build depends on. The filter covers `Build/**`, the plugin, `ProjectSandbox/` project files, the workflow files, and everything `Sync-O3DSCore.ps1` compiles: `src/**`, `thirdparty/**`, `CMakeLists.txt`, `*.cmake`, `apps/**`, `plugins/mobu/**`, `.gitmodules`.
+
+### What turns the UE job red
+
+1. BuildPlugin fails, or the compiler reports a warning in a plugin source file (`-FailOnWarnings`).
+2. Any automation test fails, no test runs, or no report is written (`Run-AutomationTests.ps1`). The step has a 20-minute timeout; ADR 0006 sets a 15-minute test budget per PR.
+3. The strict build (`-StrictIncludes`, no PCH, no unity) fails or warns.
+4. BuildPlugin on the Fab zip fails or warns, or an editor DLL is missing from its output.
+
+The Fab zip job is red when a package check or the codec gate fails.
 
 See `.github/workflows/` for workflow definitions.
 
@@ -197,14 +260,14 @@ Usage:
 | Setup-UE | ✅ | ❌ |
 | Build-Plugin | ✅ | ❌ |
 | Run-AutomationTests | ✅ | ❌ |
-| Run-Gauntlet | ✅ | ❌ |
 
 **Note:** Linux/Mac support can be added by creating bash equivalents of the PowerShell scripts.
 
 ## Requirements
 
 - **Windows**: PowerShell 5.1+ (or PowerShell Core 7+)
-- **Unreal Engine**: 5.4 or later
+- **Unreal Engine**: 5.7 (the plugin's `EngineVersion`)
+- **Python**: 3.8+ for `fab-package.py`
 - **Visual Studio**: 2022 (for building)
 - **Git**: For repository operations
 
@@ -239,4 +302,3 @@ When adding new scripts:
 - [Unreal Automation Tool (UAT)](https://docs.unrealengine.com/5.4/en-US/unreal-automation-tool-in-unreal-engine/)
 - [BuildPlugin Command](https://docs.unrealengine.com/5.4/en-US/using-the-buildplugin-command-in-unreal-engine/)
 - [Automation Testing](https://docs.unrealengine.com/5.4/en-US/automation-system-overview-in-unreal-engine/)
-- [Gauntlet Framework](https://docs.unrealengine.com/5.4/en-US/gauntlet-automation-framework-in-unreal-engine/)
