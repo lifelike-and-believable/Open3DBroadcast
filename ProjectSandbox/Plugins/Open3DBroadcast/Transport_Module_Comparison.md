@@ -2,7 +2,10 @@
 
 ## Executive Summary
 
-The Open3DBroadcast plugin features **5 transport modules** in a modular architecture, each implementing the `IOpen3DSender` and `IOpen3DReceiver` interfaces. All modules support both motion capture data streaming and audio transmission, but differ significantly in their network topologies, threading models, and intended use cases.
+Open3DBroadcast has **5 transport modules** in a modular architecture: Loopback, NNG, Sockets and MoQ ship in the Open3DBroadcast plugin, and WebRTC ships in the free **Open3DBroadcastWebRTC** add-on plugin, installed next to it (ADR 0002, WP-F11). Each implements the `IOpen3DSender` and `IOpen3DReceiver` interfaces. All modules support both motion capture data streaming and audio transmission, but differ significantly in their network topologies, threading models, and intended use cases.
+
+> **Available in:** every WebRTC section below applies only when the Open3DBroadcastWebRTC
+> add-on is installed. The other transports are always present.
 
 > **Naming:** *Open3DBroadcast* is the Unreal Engine plugin. *Open3DStream* is the
 > streaming protocol and core C++ library (`o3ds`) it is built on.
@@ -16,7 +19,7 @@ The Open3DBroadcast plugin features **5 transport modules** in a modular archite
 | **Loopback** | `loopback` | In-process testing/validation | None (in-memory) | None |
 | **NNG** | `nng` | Advanced messaging patterns | Network (TCP) | NNG library (static) |
 | **Sockets** | `tcp`, `udp` | Direct peer-to-peer | Network (TCP/UDP) | Unreal Sockets subsystem |
-| **WebRTC** | `webrtc` | Cloud/NAT traversal | Network (WebRTC) | LiveKit FFI library |
+| **WebRTC** (add-on) | `webrtc` | Cloud/NAT traversal | Network (WebRTC) | LiveKit FFI library |
 | **MoQ** | `moq` | Cloud/NAT traversal over QUIC | Network (QUIC/WebTransport, via relay) | moq-ffi library |
 
 ---
@@ -308,9 +311,9 @@ While idle for `tcp.keepalive` ms the sender writes a keepalive frame whose payl
 
 ---
 
-### 3.4 **WebRTC Transport**
+### 3.4 **WebRTC Transport** (Open3DBroadcastWebRTC add-on)
 
-**Location**: `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportWebRTC/`
+**Location**: `ProjectSandbox/Plugins/Open3DBroadcastWebRTC/Source/Open3DTransportWebRTC/` (the add-on plugin)
 
 **Architecture**:
 - Based on [LiveKit FFI](https://github.com/livekit/client-sdk-rust) library

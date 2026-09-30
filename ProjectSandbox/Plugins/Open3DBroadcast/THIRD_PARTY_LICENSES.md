@@ -9,49 +9,19 @@ Each entry links to the license text as it is shipped in this tree. Where a
 dependency has its own directory, the license text lives next to the binary it
 covers; that per-directory copy is authoritative, and this file is the index.
 
-**One exception:** `livekit_ffi` has **no shipped license text**, because none
-exists upstream to copy — the wrapper declares MIT but publishes no `LICENSE`
-file. This was verified directly against the upstream repository, not inferred.
-Its row links to the per-binary notices instead. That gap is an open obligation,
-not an oversight in this index; see the note in §3.
-
 **Scope:** this covers artifacts shipped *inside the plugin*. Build-time-only
 dependencies that are not linked into any shipped binary are listed separately
 at the end, along with the evidence for that claim.
 
 ---
 
-## ⚠️ Unresolved blocker: copyleft code in `livekit_ffi.dll`
+## WebRTC is not in this plugin
 
-**`livekit_ffi.dll` statically links ffmpeg and OpenH264.** This was verified by
-symbol inspection of the exact DLL committed to this repository — `libavcodec`,
-`libavutil`, `avcodec_send_packet`, `avcodec_receive_frame`, `ffmpeg.org`, and
-`OpenH264` / `WelsEnc` are all present in the binary. They arrive transitively
-through `webrtc-sys`, which links a prebuilt libwebrtc containing 27 native
-components.
-
-ffmpeg is copyleft. Even under the LGPL-2.1 configuration this build is believed
-to use, static linking plausibly triggers LGPL §6 relinking obligations — an
-obligation that attribution alone does not discharge. OpenH264 additionally
-raises H.264 patent-licensing questions distinct from copyright.
-
-**This cannot be closed by documentation.** It needs either counsel sign-off on
-the LGPL and patent posture, or a libwebrtc build with ffmpeg/H.264 disabled.
-Full evidence and reasoning:
-[`Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/THIRD_PARTY_NOTICES.md`](Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/THIRD_PARTY_NOTICES.md).
-
-**Neither component is reachable from this plugin.** The `livekit_ffi` C ABI has
-no video path whatsoever — this transport carries mocap over the data channel
-plus Opus audio. They arrive only because the prebuilt libwebrtc was built with
-H.264 enabled. That doesn't reduce the obligation (LGPL attaches to
-distribution, not execution), but it does mean removing them costs no
-functionality.
-
-**Chosen fix: rebuild libwebrtc with H.264 disabled**, keeping the WebRTC
-transport. Plan, mechanism, and acceptance criteria:
-[`docs/webrtc-codec-removal-plan.md`](../../../docs/webrtc-codec-removal-plan.md).
-
-`moq_ffi.dll` was checked for the same components and is clean.
+The WebRTC transport and its `livekit_ffi.dll` are the separate
+**Open3DBroadcastWebRTC** add-on plugin (ADR 0002, WP-F11), which has its own
+`THIRD_PARTY_LICENSES.md`. That DLL statically links ffmpeg and OpenH264 (an
+unresolved blocker described there); nothing in this plugin does, and CI checks
+every binary here for them (`Build/Scripts/check-no-video-codecs.sh`).
 
 ---
 
@@ -95,7 +65,6 @@ CML is no longer listed: nothing in the plugin uses it.
 | Opus | see note | BSD-3-Clause + royalty-free patent grants | [`Source/ThirdParty/opus/COPYING`](Source/ThirdParty/opus/COPYING) | `Open3DShared` |
 | NNG (nanomsg-next-gen) | 1.3.0 | MIT | [`Source/Open3DTransportNNG/ThirdParty/nng/LICENSE.txt`](Source/Open3DTransportNNG/ThirdParty/nng/LICENSE.txt) | `Open3DTransportNNG` |
 | moq-ffi | commit `567933e` | MIT | [`Source/Open3DTransportMoQ/ThirdParty/moq-ffi/LICENSE`](Source/Open3DTransportMoQ/ThirdParty/moq-ffi/LICENSE) | `Open3DTransportMoQ` |
-| livekit_ffi | see note | MIT (**declared, but no upstream text exists** — see note) | [`THIRD_PARTY_NOTICES.md`](Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/THIRD_PARTY_NOTICES.md) | `Open3DTransportWebRTC` |
 
 ### Opus
 
@@ -114,31 +83,6 @@ redistribution and are not optional.
 > vendored copy is needed at all, or whether `Open3DShared` should link the
 > engine's, is worth resolving before submission — it would remove a dependency
 > with unknown provenance from the shipping tree entirely.
-
-### livekit_ffi
-
-`livekit_ffi.dll` is a statically linked Rust binary built from
-[`lifelike-and-believable/livekit-ffi`](https://github.com/lifelike-and-believable/livekit-ffi).
-Full provenance, artifact hashes, and the recovered dependency graph are in
-[`Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/README.md`](Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/README.md),
-with the per-crate license inventory in
-[`THIRD_PARTY_NOTICES.md`](Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/THIRD_PARTY_NOTICES.md)
-next to it.
-
-Two obligations attach that are **not** satisfied by the MIT declaration alone:
-
-1. **The upstream MIT grant has no license text.** Verified against the upstream
-   repository at `abfcd7b`: `livekit-ffi` declares `license = "MIT"` in
-   `Cargo.toml`, and its root contains **no `LICENSE` and no `COPYING`** — no
-   copyright holder, no year, no notice. MIT requires the notice to accompany
-   redistributions, and this plugin redistributes the DLL, so this must be fixed
-   upstream and the file copied into the `livekit_ffi/` directory before
-   submission.
-2. **The DLL is a combined work.** `livekit`, `livekit-api`, and
-   `livekit-protocol` are Apache-2.0 and are statically linked into it with LTO,
-   so Apache-2.0 §4 attribution and NOTICE obligations apply to the DLL itself.
-   Google's libwebrtc (BSD-3-Clause, plus its own bundled third-party code) is
-   also linked in via `webrtc-sys`.
 
 ### moq-ffi
 
@@ -165,8 +109,8 @@ Two items need attention before submission, both detailed in the notices file:
    present in the shipped DLL; needs its own attribution entry
    (`Apache-2.0 OR ISC OR MIT`, © The mlkem-native project authors).
 
-Unlike `livekit_ffi.dll`, this binary was scanned and contains **no** ffmpeg or
-OpenH264 — the copyleft blocker above is scoped to the WebRTC transport alone.
+Unlike `livekit_ffi.dll` in the WebRTC add-on, this binary was scanned and
+contains **no** ffmpeg or OpenH264.
 
 ---
 
@@ -202,8 +146,9 @@ election if it shipped. It does not, and this was verified rather than assumed:
 
 - Every binary in the plugin tree was scanned for `mbedtls_*` symbols —
   `flatbuffers.lib` (since removed), `opus.lib`, `nng.lib`, `moq_ffi.dll`,
-  `moq_ffi.dll.lib`, `livekit_ffi.dll`, `livekit_ffi.dll.lib`. **All seven
-  contain zero matches.** The o3ds core, FlatBuffers and CRC++ now ship as
+  `moq_ffi.dll.lib`, and the WebRTC add-on's `livekit_ffi.dll` and
+  `livekit_ffi.dll.lib` (scanned while they were still in this plugin).
+  **All seven contain zero matches.** The o3ds core, FlatBuffers and CRC++ now ship as
   source (§1, §2) and contain no Mbed TLS code.
 - `nng.lib` does export the `nng_tls_config_*` / `nng_tls_engine_*` API surface,
   but that is NNG's engine-agnostic TLS *interface*. No TLS engine is registered
@@ -219,8 +164,8 @@ must be elected explicitly before shipping.
 
 ## Maintaining this file
 
-The two Rust FFI notice files are currently **hand-recovered from binary
-inspection** (crate versions were read out of the registry paths embedded in the
+The Rust FFI notice files (moq-ffi here, livekit_ffi in the WebRTC add-on)
+are currently **hand-recovered from binary inspection** (crate versions were read out of the registry paths embedded in the
 DLLs). That is a stopgap, and it will drift silently the next time either DLL is
 rebuilt.
 

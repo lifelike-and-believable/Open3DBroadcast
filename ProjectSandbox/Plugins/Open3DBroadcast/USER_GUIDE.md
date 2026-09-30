@@ -26,13 +26,14 @@ The **Open3DBroadcast Plugin** is a comprehensive Unreal Engine plugin for strea
 - **Unreal Engine:** 5.7. Other engine versions are not supported.
 - **Platform:** Win64 (Windows 64-bit) only, for editor and game targets. Server and Program targets are not supported.
 - **Status:** Beta. The MoQ transport (`Open3DTransportMoQ`) is Experimental: it implements draft-ietf-moq-transport-07, MoQ relays must speak draft-07, and its options and behaviour can change between releases.
+- **WebRTC (LiveKit):** not part of this plugin. It is available as a free add-on plugin, **Open3DBroadcastWebRTC**, that you install next to Open3DBroadcast. Download: **[DOWNLOAD LINK PLACEHOLDER: support-site URL for Open3DBroadcastWebRTC, to be added before release]**. See [WebRTC Transport (free add-on)](#webrtc-transport-free-add-on).
 - **Support:** [GitHub Issues](https://github.com/lifelike-and-believable/Open3DBroadcast/issues)
 
 ### Key Features
 
 - **Real-time skeletal animation streaming** at configurable frame rates
 - **Audio capture and streaming** from game audio or microphone
-- **Multiple transport options**: Loopback (testing), Sockets (TCP/UDP), NNG (pub/sub), WebRTC (cloud-ready)
+- **Multiple transport options**: Loopback (testing), Sockets (TCP/UDP), NNG (pub/sub), MoQ (Experimental); WebRTC (cloud-ready) with the free Open3DBroadcastWebRTC add-on
 - **LiveLink integration** for seamless animation retargeting
 - **Curve and morph target support** for facial animation
 - **Production-ready** with comprehensive error handling and statistics
@@ -146,14 +147,15 @@ Each sender broadcasts data for a **subject** - a named stream of animation data
 
 ### Transport Modules
 
-The plugin provides 4 transport modules:
+The plugin provides these transport modules. WebRTC comes from the free Open3DBroadcastWebRTC add-on plugin:
 
-| Transport | Best For | Network | Audio | Latency |
-|-----------|----------|---------|-------|---------|
-| **Loopback** | Testing, local development | None (in-process) | Yes | Ultra-low |
-| **Sockets** | LAN, direct P2P | TCP/UDP | No (V1) | Low |
-| **NNG** | Advanced messaging patterns | TCP/IPC/WebSocket | No (V1) | Low-Medium |
-| **WebRTC** | Internet, NAT traversal, cloud | WebRTC/TURN | Yes | Medium |
+| Transport | Best For | Network | Audio | Latency | Available in |
+|-----------|----------|---------|-------|---------|--------------|
+| **Loopback** | Testing, local development | None (in-process) | Yes | Ultra-low | Open3DBroadcast |
+| **Sockets** | LAN, direct P2P | TCP/UDP | No (V1) | Low | Open3DBroadcast |
+| **NNG** | Advanced messaging patterns | TCP/IPC/WebSocket | No (V1) | Low-Medium | Open3DBroadcast |
+| **MoQ** (Experimental) | Relay-based streaming (draft-07) | QUIC | Yes | Medium | Open3DBroadcast |
+| **WebRTC** | Internet, NAT traversal, cloud | WebRTC/TURN | Yes | Medium | Open3DBroadcastWebRTC add-on |
 
 ### Unified Message Format
 
@@ -333,16 +335,8 @@ Transport Options:
 ```
 
 #### WebRTC (LiveKit)
-```
-Transport Name: webrtc
-Transport Options:
-  - uri: wss://your-livekit-server.com
-  - token: <your_jwt_token>
-  - stream_id: my_room
-  - role: receiver
-Enable Audio: ✓
-Audio Codec: Opus
-```
+
+Needs the free Open3DBroadcastWebRTC add-on; its USER_GUIDE covers the source settings. See [WebRTC Transport (free add-on)](#webrtc-transport-free-add-on).
 
 ### Applying Animation to Characters
 
@@ -479,65 +473,24 @@ Transport Options:
 - Cross-platform IPC needed
 - Scalability is important
 
-### WebRTC Transport
+### WebRTC Transport (free add-on)
 
-**Purpose:** Cloud-ready streaming with NAT traversal and audio support
+**Purpose:** Cloud-ready streaming through a LiveKit server, with NAT traversal and audio support.
 
-**Sender Configuration (LiveKit):**
-```
-Transport Name: webrtc
-Transport Options:
-  - uri: wss://livekit.yourserver.com
-  - token: <sender_jwt_token>
-  - stream_id: room_name
-  - role: sender
-  - backend: livekit            # Optional: explicit backend
-Audio Settings:
-  - Enable Audio: ✓
-  - Audio Codec: Opus
-  - Sample Rate: 48000
-  - Bitrate Kbps: 64
-```
+WebRTC is **not included in Open3DBroadcast**. It is a separate, free add-on plugin, **Open3DBroadcastWebRTC**, which adds "WebRTC" to the sender and receiver transport pickers.
 
-**Receiver Configuration (LiveKit):**
-```
-Transport Name: webrtc
-Transport Options:
-  - uri: wss://livekit.yourserver.com
-  - token: <receiver_jwt_token>
-  - stream_id: room_name
-  - role: receiver
-  - backend: livekit
-Audio Settings:
-  - Enable Audio: ✓
-  - Audio Codec: Opus
-```
+- **Download:** **[DOWNLOAD LINK PLACEHOLDER: support-site URL for Open3DBroadcastWebRTC, to be added before release]**
+- **Install:** copy the `Open3DBroadcastWebRTC` folder into your project's `Plugins/` folder, next to (or in addition to) your Open3DBroadcast install, enable **Open3DBroadcast WebRTC** in **Edit → Plugins**, and restart the editor. Nothing inside the Open3DBroadcast folder changes, so updating Open3DBroadcast does not remove it.
+- **Versions must match:** each add-on build works only with the Open3DBroadcast release it was built for. With another release it registers nothing and logs `WebRTC transport not registered: Open3DBroadcastWebRTC was built for Open3DBroadcast transport API version N, ...`. Download the add-on build for your Open3DBroadcast version.
+- **Removing it:** disable the add-on (or delete its folder) and restart. Every other transport keeps working. Components and LiveLink sources set to WebRTC keep their settings and report that the transport is not registered.
 
-**Characteristics:**
-- Works across the internet
-- NAT/firewall traversal via TURN
-- Supports audio streaming
-- Higher latency than local transports
-- Requires signaling server (LiveKit)
-
-**LiveKit Setup:**
-
-1. **Self-Hosted:** Deploy LiveKit server following their docs
-2. **Cloud:** Use LiveKit Cloud service
-3. **Generate Tokens:** Use LiveKit API to generate JWT tokens with appropriate permissions
-
-**Token Requirements:**
-- Sender: Needs publish permissions
-- Receiver: Needs subscribe permissions
-- Both: Must have same room name in token claims
+The add-on's own [USER_GUIDE](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcastWebRTC/USER_GUIDE.md) (also in the add-on's folder) covers LiveKit setup, credentials and automatic token fetch, audio, and WebRTC troubleshooting.
 
 **Use When:**
 - Remote collaboration over internet
 - NAT traversal required
 - Audio streaming needed
 - Multiple participants in a room
-
-**See Also:** [Source/Open3DTransportWebRTC/USER_GUIDE.md](Source/Open3DTransportWebRTC/USER_GUIDE.md) for detailed WebRTC documentation.
 
 ---
 
@@ -851,14 +804,8 @@ Actor3 → O3DSender(Subject: "Prop1")      ┘
 | `nng.timeout` | number | Optional: timeout (ms) |
 
 #### WebRTC
-| Key | Value | Description |
-|-----|-------|-------------|
-| `role` | `sender`/`receiver` | Required: endpoint role |
-| `uri` | `wss://host` | Required: LiveKit server URL |
-| `token` | JWT string | Required: authentication token |
-| `stream_id` | string | Required: room name |
-| `backend` | `livekit`/`libdc` | Optional: explicit backend |
-| `webrtc.ice_server` | URL | Optional: custom TURN server |
+
+Provided by the Open3DBroadcastWebRTC add-on; its USER_GUIDE lists the `webrtc.*` options. See [WebRTC Transport (free add-on)](#webrtc-transport-free-add-on).
 
 ---
 
@@ -917,7 +864,7 @@ Transport Options:
 - Minimize network hops
 - QoS prioritization for animation traffic
 
-**WebRTC Tuning:**
+**WebRTC Tuning (Open3DBroadcastWebRTC add-on):**
 ```
 webrtc.max_bitrate: 5000000    # 5 Mbps cap
 webrtc.min_bitrate: 500000     # 500 Kbps floor
@@ -1075,31 +1022,11 @@ UE_LOG(LogTemp, Log, TEXT("Sent %lld frames, %lld bytes, avg latency %.2f ms"),
    UE_LOG(LogTemp, Warning, TEXT("Dropped %lld frames"), Stats.DroppedFrames);
    ```
 
-#### "WebRTC connection fails"
+#### "WebRTC is not in the transport list" or "WebRTC connection fails"
 
-**Symptoms:** WebRTC transport shows errors or won't connect
-
-**Solutions:**
-1. **Verify server URL:**
-   - Must be `wss://` (secure WebSocket)
-   - Server must be accessible
-   - Check firewall rules
-
-2. **Verify JWT token:**
-   - Token must be valid (not expired)
-   - Token must have correct room name
-   - Sender needs publish permission
-   - Receiver needs subscribe permission
-
-3. **Check backend availability:**
-   - Plugin built with LiveKit support
-   - Check that `O3D_WITH_TRANSPORT_WEBRTC` was not set to `0` when the plugin was built
-
-4. **TURN server:**
-   - May need TURN server for NAT traversal
-   - Check LiveKit server TURN configuration
-
-See [WebRTC-specific troubleshooting](Source/Open3DTransportWebRTC/USER_GUIDE.md) for more details.
+1. **Is the add-on installed and enabled?** WebRTC comes from the free Open3DBroadcastWebRTC add-on ([WebRTC Transport (free add-on)](#webrtc-transport-free-add-on)). Without it, "WebRTC" is not in the transport pickers.
+2. **Does the add-on match your Open3DBroadcast release?** Search the Output Log for `WebRTC transport not registered`. The message says whether the transport API version differs (install the matching add-on build) or `livekit_ffi.dll` could not be loaded.
+3. **Connection problems** (server URL, tokens, TURN): see the troubleshooting section of the add-on's USER_GUIDE.
 
 ### Debug Logging
 
@@ -1110,15 +1037,19 @@ Enable verbose logging for troubleshooting:
 log LogO3DSender Verbose
 log LogO3DReceiver Verbose
 log LogO3DTransportSockets Verbose
-log LogO3DTransportWebRTC Verbose
+log LogO3DWebRTCSender Verbose
+log LogO3DWebRTCReceiver Verbose
 ```
+
+The two `LogO3DWebRTC*` categories exist only when the Open3DBroadcastWebRTC add-on is installed.
 
 **In DefaultEngine.ini:**
 ```ini
 [Core.Log]
 LogO3DSender=Verbose
 LogO3DReceiver=Verbose
-LogO3DTransportWebRTC=Verbose
+LogO3DWebRTCSender=Verbose
+LogO3DWebRTCReceiver=Verbose
 ```
 
 ---
@@ -1266,7 +1197,7 @@ Before deploying to production:
 
 - **Plugin README**: [README.md](README.md) - Installation and build info
 - **Transport Comparison**: [Transport_Module_Comparison.md](Transport_Module_Comparison.md) - Detailed transport comparison
-- **WebRTC Guide**: [Source/Open3DTransportWebRTC/USER_GUIDE.md](Source/Open3DTransportWebRTC/USER_GUIDE.md) - WebRTC-specific setup
+- **WebRTC Guide**: [Open3DBroadcastWebRTC USER_GUIDE](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcastWebRTC/USER_GUIDE.md) - setup of the free WebRTC add-on
 
 ### Support
 

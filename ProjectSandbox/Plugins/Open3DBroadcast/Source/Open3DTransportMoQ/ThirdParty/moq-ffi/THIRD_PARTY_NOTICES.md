@@ -153,8 +153,9 @@ prebuilt binaries rather than being compiled from source at plugin build time.
 
 `moq_ffi.dll` was scanned for the copyleft components that are present in
 `livekit_ffi.dll` (ffmpeg, OpenH264) and contains **none of them**. The MoQ
-transport does not carry the unresolved blocker described in
-`../../../Open3DTransportWebRTC/ThirdParty/livekit_ffi/THIRD_PARTY_NOTICES.md`.
+transport does not carry the unresolved blocker described in the WebRTC
+add-on's `Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/THIRD_PARTY_NOTICES.md`
+(the Open3DBroadcastWebRTC plugin; WebRTC is not part of Open3DBroadcast).
 
 ---
 

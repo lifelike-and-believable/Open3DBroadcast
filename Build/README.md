@@ -14,6 +14,9 @@ Build/
 ### Open3DBroadcast Plugin
 Located at `ProjectSandbox/Plugins/Open3DBroadcast/`. Everything it compiles or links is committed under its `Source/` folder, so a clean clone builds with `RunUAT BuildPlugin` alone: no CMake, no PowerShell pre-build step and no prebuilt core library (WP-F1, ADR 0003). The o3ds core is compiled by the plugin's `Open3DStreamCore` module from a generated copy of `src/o3ds` (see `sync_o3ds_core.py` below). Opus and NNG stay prebuilt Win64 libraries under `Source/`. `Config/FilterPlugin.ini` adds only the root documentation and licences to the package (FAB-2).
 
+### Open3DBroadcastWebRTC add-on
+Located at `ProjectSandbox/Plugins/Open3DBroadcastWebRTC/` (WP-F11, ADR 0002). It holds the WebRTC transport (`Open3DTransportWebRTC`) and `livekit_ffi`, which are not in Open3DBroadcast at all, and depends on Open3DBroadcast through its `.uplugin`. `RunUAT BuildPlugin` cannot build it alone (its host project would lack Open3DBroadcast); `Build-WebRTCAddOn.ps1` builds it against an Open3DBroadcast package. ProjectSandbox enables both plugins. The copyright and runtime-editor-deps checks cover both plugins; `fab-package.py` fails if any WebRTC module or livekit file appears in Open3DBroadcast.
+
 ## The o3ds core in the plugin
 
 #### `sync_o3ds_core.py`
@@ -83,7 +86,7 @@ Builds an Unreal plugin using Unreal Automation Tool (UAT).
 - Ready to install in other Unreal projects
 
 #### `Build-FabZip.ps1`
-Runs `RunUAT BuildPlugin` on the contents of the Fab source zip (see "Fab source package" below), with `-FailOnWarnings`, then checks that every module in the zip's `.uplugin` produced an editor DLL and that no excluded module or `livekit` file reached the output.
+Runs `RunUAT BuildPlugin` on the contents of the Fab source zip (see "Fab source package" below), with `-FailOnWarnings`, then checks that every module in the zip's `.uplugin` produced an editor DLL and that no excluded module and nothing of the WebRTC add-on (`livekit` or `Open3DTransportWebRTC` files) reached the output.
 
 ```powershell
 .\Build\Scripts\Build-FabZip.ps1 `
@@ -96,7 +99,7 @@ Runs `RunUAT BuildPlugin` on the contents of the Fab source zip (see "Fab source
 Nothing is added to the extracted zip before BuildPlugin: since WP-F1 the zip builds on its own, exactly as Fab's farm receives it. `-RequireStandalone` (passed by CI and the nightly) first checks that the zip holds `Source/Open3DStreamCore` and its core copy in `Source/ThirdParty/Open3DStreamCore`, and no prebuilt `open3dstreamstatic`/`flatbuffers.lib`, and fails with that reason instead of a compiler error.
 
 #### `Build-FlagCombinations.ps1`
-Runs `Build-Plugin.ps1` once per transport build-flag combination (WP-F2, TRB-24, TRF-27): each of `O3D_WITH_TRANSPORT_SOCKETS`, `_NNG`, `_WEBRTC` and `_MOQ` set to `0` on its own (`no-sockets`, `no-nng`, `no-webrtc`, `no-moq`), then all four at once (`loopback-only`). The flags are described in the plugin README, "Build flags". Every combination runs even after a failure; the script exits `1` if any failed and prints a summary. The nightly workflow runs it with `-StrictIncludes -FailOnWarnings`; it is not part of PR CI because each combination takes as long as the PR build.
+Runs `Build-Plugin.ps1` once per transport build-flag combination (WP-F2, TRB-24, TRF-27): each of `O3D_WITH_TRANSPORT_SOCKETS`, `_NNG` and `_MOQ` set to `0` on its own (`no-sockets`, `no-nng`, `no-moq`), then all three at once (`loopback-only`). `O3D_WITH_TRANSPORT_WEBRTC` belongs to the WebRTC add-on and is not part of this matrix. The flags are described in the plugin README, "Build flags". Every combination runs even after a failure; the script exits `1` if any failed and prints a summary. The nightly workflow runs it with `-StrictIncludes -FailOnWarnings`; it is not part of PR CI because each combination takes as long as the PR build.
 
 ```powershell
 .\Build\Scripts\Build-FlagCombinations.ps1 `
@@ -107,7 +110,7 @@ Runs `Build-Plugin.ps1` once per transport build-flag combination (WP-F2, TRB-24
   -StrictIncludes -FailOnWarnings
 ```
 
-`-Only` takes one or more combination names; without it all five run. Packages and logs go to `<OutRoot>\<name>` and `<OutRoot>\<name>-BuildPlugin.log`.
+`-Only` takes one or more combination names; without it all four run. Packages and logs go to `<OutRoot>\<name>` and `<OutRoot>\<name>-BuildPlugin.log`.
 
 #### `Test-LinuxExclusion.ps1`
 Checks the second WP-F2 acceptance item: a game target that also targets Linux builds, with the plugin's modules left out. It builds the ProjectSandbox game target (which enables the plugin) for Linux through `Engine\Build\BatchFiles\Build.bat`, then fails if UBT wrote an intermediate folder for any `Open3D*` module under the plugin. See [Platforms](#platforms) for what it needs.
@@ -127,7 +130,23 @@ Checks the WP-F7 acceptance item "a packaged Shipping game builds" (ADR 0010). I
   -ArchiveDir "$PWD\Artifacts\ShippingGame"
 ```
 
-Run `Sync-O3DSCore.ps1` first, as for any build of the plugin. `-ProjectFile` selects another `.uproject` that enables the plugin.
+`-ProjectFile` selects another `.uproject` that enables the plugin. ProjectSandbox also enables the WebRTC add-on, so the Shipping game includes it.
+
+#### `Build-WebRTCAddOn.ps1`
+Builds the Open3DBroadcastWebRTC add-on against a built Open3DBroadcast package (WP-F11). It creates a throwaway host project with the package in `Plugins/Open3DBroadcast` and the add-on source in `Plugins/Open3DBroadcastWebRTC`, enables both and LiveLink, runs `Build.bat UnrealEditor Win64 <Configuration> -Project=<host>`, and stages the add-on folder (no `Intermediate/`, no `.pdb`) in `-OutDir`. The package has no intermediate files, so UBT may recompile Open3DBroadcast inside the host copy; the add-on compiles against the package's public headers either way.
+
+```powershell
+.\Build\Scripts\Build-WebRTCAddOn.ps1 `
+  -UEPath "C:\Program Files\Epic Games\UE_5.7" `
+  -HostPluginPackageDir "$PWD\Artifacts\Open3DBroadcast" `
+  -HostProjectDir "$PWD\Artifacts\AddOnHost" `
+  -OutDir "$PWD\Artifacts\AddOnPackage\Open3DBroadcastWebRTC" `
+  -StrictIncludes -FailOnWarnings
+```
+
+- `-StrictIncludes` adds `-NoPCH -NoSharedPCH -DisableUnity`; `-FailOnWarnings` fails on a compiler warning in an add-on source file.
+- UBT's output goes to `<HostProjectDir>-UBT.log`. Exit `0` built and staged, `1` build failure or warning, `2` bad arguments.
+- Afterwards `Run-AutomationTests.ps1 -ProjectFile <HostProjectDir>\O3DWebRTCHost.uproject` runs the tests with both plugins enabled.
 
 ---
 
@@ -223,20 +242,22 @@ Tests that need the internet register only when `O3DB_NETWORK_TESTS=1` is set in
 
 The Fab listing gets a source-only zip, different from the GitHub build (ADR 0002).
 
-- `Build/Fab/exclude-modules.txt` lists modules left out of it: `Open3DTransportWebRTC` (ADR 0002; WebRTC ships as a separate add-on) and `Open3DBroadcastTests` (ADR 0006; skipped with a notice until that module exists).
+- `Build/Fab/exclude-modules.txt` lists modules left out of it: `Open3DBroadcastTests` (ADR 0006). WebRTC is not listed: since WP-F11 it is not in the plugin at all but in the Open3DBroadcastWebRTC add-on (ADR 0002).
 - `Build/Fab/exclude-files.txt` lists files left out, as globs: the module-level `Source/*/*.md` READMEs and USER_GUIDEs, which stay in the repository for people reading the code. It has no `.pdb`, `.py` or developer-note rule on purpose: those fail the tree check below instead (see [Debug symbols](#debug-symbols); developer notes and scripts live in `docs/dev/<Module>/`).
-- `Build/Scripts/fab-package.py` (Python 3.8+, standard library) takes the files git tracks under the plugin folder, applies both lists, removes the excluded modules' entries from the staged `.uplugin` without reformatting it, and writes a zip with one top-level `Open3DBroadcast/` folder and fixed timestamps (the same commit gives the same bytes). It then reopens the zip and fails if it finds an excluded module (folder or `.uplugin` entry), a `livekit` file while WebRTC is excluded, `.pdb`/`.py` files, `Binaries/` or `Intermediate/`, a Markdown file other than the root `README.md`, `USER_GUIDE.md`, `THIRD_PARTY_LICENSES.md`, `Transport_Module_Comparison.md` or anything under a `ThirdParty/` folder, a listed module without its `Build.cs`, a module without a `PlatformAllowList` (or one naming a platform the plugin's `SupportedTargetPlatforms` does not list; ADR 0001), a missing `Resources/Icon128.png`, `Config/FilterPlugin.ini` or `Source/ThirdParty/Open3DStreamCore/SYNC_STAMP.txt`, a prebuilt `open3dstreamstatic` or `flatbuffers.lib` (WP-F1), or a top-level file or folder outside `Binaries`, `Config`, `Content`, `Resources`, `Shaders` and `Source` that `Config/FilterPlugin.ini` does not list, since BuildPlugin would leave it out (FAB-2). Before any exclusion it also checks the tracked tree, including excluded modules, and fails if git tracks a `.pdb` (FAB-4) or a `.py`/`.pyc` anywhere under the plugin, or a Markdown file under `Source/` other than a `README.md` or `USER_GUIDE.md` outside `ThirdParty/` (HYG-1).
+- `Build/Scripts/fab-package.py` (Python 3.8+, standard library) takes the files git tracks under the plugin folder, applies both lists, removes the excluded modules' entries from the staged `.uplugin` without reformatting it, and writes a zip with one top-level `Open3DBroadcast/` folder and fixed timestamps (the same commit gives the same bytes). It then reopens the zip and fails if it finds an excluded module (folder or `.uplugin` entry), anything of the WebRTC add-on (an `Open3DTransportWebRTC` folder or `.uplugin` entry, or a file with `livekit` in its path), `.pdb`/`.py` files, `Binaries/` or `Intermediate/`, a Markdown file other than the root `README.md`, `USER_GUIDE.md`, `THIRD_PARTY_LICENSES.md`, `Transport_Module_Comparison.md` or anything under a `ThirdParty/` folder, a listed module without its `Build.cs`, a module without a `PlatformAllowList` (or one naming a platform the plugin's `SupportedTargetPlatforms` does not list; ADR 0001), a missing `Resources/Icon128.png`, `Config/FilterPlugin.ini` or `Source/ThirdParty/Open3DStreamCore/SYNC_STAMP.txt`, a prebuilt `open3dstreamstatic` or `flatbuffers.lib` (WP-F1), or a top-level file or folder outside `Binaries`, `Config`, `Content`, `Resources`, `Shaders` and `Source` that `Config/FilterPlugin.ini` does not list, since BuildPlugin would leave it out (FAB-2). Before any exclusion it also checks the tracked tree, including excluded modules, and fails if git tracks a `.pdb` (FAB-4) or a `.py`/`.pyc` anywhere under the plugin, a Markdown file under `Source/` other than a `README.md` or `USER_GUIDE.md` outside `ThirdParty/` (HYG-1), or anything of the WebRTC add-on (WP-F11); the source `.uplugin` must not list `Open3DTransportWebRTC` either. No exclusion rule makes WebRTC files acceptable.
 
 ```bash
 python3 Build/Scripts/fab-package.py --out-dir Artifacts/Fab
 Build/Scripts/check-no-video-codecs.sh $(cat Artifacts/Fab/binaries.txt)
+Build/Scripts/check-no-video-codecs.sh            # the whole Open3DBroadcast tree; passes
+Build/Scripts/check-no-video-codecs.sh --addon    # the WebRTC add-on; fails by design until the codec-free rebuild
 ```
 
 Then `Build-FabZip.ps1` (above) runs BuildPlugin on the zip's contents.
 
 ### Debug symbols
 
-Debug symbols (`.pdb`) for the plugin's prebuilt third-party DLLs (`moq_ffi.dll`, `livekit_ffi.dll`) are not kept in the plugin tree and are not staged into packaged games (FAB-4, WP-F3).
+Debug symbols (`.pdb`) for the prebuilt third-party DLLs (`moq_ffi.dll`; `livekit_ffi.dll` in the WebRTC add-on) are not kept in the plugin trees and are not staged into packaged games (FAB-4, WP-F3).
 
 - **Enforcement.** `ProjectSandbox/.gitignore` ignores `*.pdb` under the plugin, and `fab-package.py` fails the Fab zip job if one is tracked anyway (it checks the tracked tree before any exclusion, so neither an exclude rule nor an excluded module hides it). No `Build.cs` lists a `.pdb` in `RuntimeDependencies`.
 - **Where the symbols go (intended process).** When a third-party DLL is refreshed, the person doing the refresh keeps the matching `.pdb` out of the commit and attaches it to the next plugin GitHub release (`open3dbroadcast-v*`) as an extra asset, zipped per library and version, for example `moq_ffi-<upstream-commit>-Win64-symbols.zip`. The SHA256 of the `.pdb` stays in the artifact table of the library's `ThirdParty/<lib>/README.md`, so a downloaded file can be matched to the DLL. The release workflow does not attach these assets automatically yet; until it does, the maintainer uploads them by hand. There is no symbol server.
@@ -252,7 +273,7 @@ Debug symbols (`.pdb`) for the plugin's prebuilt third-party DLLs (`moq_ffi.dll`
 
 ## Copyright headers
 
-Every `.h`, `.cpp` and `.cs` file under the plugin's `Source/` starts with a copyright line (FAB-5, FAB-9, WP-F4). New files, and files that had no notice, use this one, followed by a blank line:
+Every `.h`, `.cpp` and `.cs` file under `Source/` of both plugins (Open3DBroadcast and the Open3DBroadcastWebRTC add-on) starts with a copyright line (FAB-5, FAB-9, WP-F4). New files, and files that had no notice, use this one, followed by a blank line:
 
 ```cpp
 // Copyright Lifelike & Believable. All Rights Reserved.
@@ -264,7 +285,7 @@ Files that already carried `// Copyright (c) Open3DStream Contributors` keep tha
 
 - **Not covered:** anything under a `ThirdParty/` directory (vendored nng, moq-ffi, livekit_ffi headers keep their own notices) and generated files (`*.generated.h`, `*_generated.h`, `*.gen.cpp`, or a file whose first ten lines say `@generated`, `automatically generated`, `auto-generated` or `DO NOT EDIT`).
 - **Third-party code outside `ThirdParty/`:** keep its original notice and add the file to `Build/Fab/copyright-allowlist.txt`, one line per file: the path relative to the plugin root, then the reason (licence and origin). The list is empty today.
-- **Check:** `Build/Scripts/check-copyright-headers.py` (Python 3.8+, standard library) reads the files git tracks under `Source/`, ignores a leading UTF-8 BOM and accepts LF or CRLF. It exits `0` when every checked file starts with one of the two lines, `1` when a file does not (it lists each file and its first line) or an allowlist entry names a file git does not track, and `2` for bad input. `-v` also lists the skipped ThirdParty files.
+- **Check:** `Build/Scripts/check-copyright-headers.py` (Python 3.8+, standard library) reads the files git tracks under each plugin's `Source/` (both plugins by default; `--plugin-dir` is repeatable), ignores a leading UTF-8 BOM and accepts LF or CRLF. It exits `0` when every checked file starts with one of the two lines, `1` when a file does not (it lists each file and its first line) or an allowlist entry names a file git does not track, and `2` for bad input. `-v` also lists the skipped ThirdParty files.
 
 ```bash
 python3 Build/Scripts/check-copyright-headers.py
@@ -276,7 +297,7 @@ Editor UI lives in Editor-type modules: `Open3DBroadcastEditor` (Details customi
 
 - **Rule:** a runtime module's `Build.cs` names none of `UnrealEd`, `PropertyEditor`, `Slate`, `SlateCore`, `EditorStyle`, `ToolMenus`, `AppFramework` and the other editor modules listed in the script, anywhere in the file (a `Target.bBuildEditor` block included). Its sources include no editor-only header (`Editor.h`, `ScopedTransaction.h`, `PropertyEditorModule.h`, `IDetailCustomization.h`, `Widgets/...`, `Framework/Application/...`, and the others listed in the script), `WITH_EDITOR`-guarded or not. `InputCore` is allowed; it is a runtime module.
 - **Transport settings:** a transport describes its options as data (`FO3DTransportOptionSchema`, `Open3DShared/Public/O3DTransportOptionSchema.h`) in its sender and receiver customizations. `Open3DBroadcastEditor` builds the panel from it. A transport module never builds widgets.
-- **Check:** `Build/Scripts/check-runtime-editor-deps.py` (Python 3.8+, standard library) reads the `.uplugin`, then each runtime module's `Build.cs` string literals (comments ignored) and `#include` lines (ThirdParty skipped). It exits `0` with no violation, `1` with one or more (each printed as `path:line`), and `2` for bad input. `--self-test` runs it against a generated clean plugin and a generated bad one. A line that must stay can carry `o3d-allow-editor-dependency: <reason>`; nothing uses that today.
+- **Check:** `Build/Scripts/check-runtime-editor-deps.py` (Python 3.8+, standard library) checks both plugins by default (`--plugin-dir` is repeatable). It reads each `.uplugin`, then each runtime module's `Build.cs` string literals (comments ignored) and `#include` lines (ThirdParty skipped). It exits `0` with no violation, `1` with one or more (each printed as `path:line`), and `2` for bad input. `--self-test` runs it against a generated clean plugin and a generated bad one. A line that must stay can carry `o3d-allow-editor-dependency: <reason>`; nothing uses that today.
 
 ```bash
 python3 Build/Scripts/check-runtime-editor-deps.py --self-test
@@ -303,11 +324,11 @@ The same without the script:
 
 | Workflow | Runs on | What it does |
 |---|---|---|
-| `open3dbroadcast-plugin-ci.yml` | PRs to develop/main, pushes to develop/main, manual | Path filter, Fab source zip, copyright header check, runtime-modules-without-editor-code check, and on the UE runner: BuildPlugin (fails on plugin warnings), UE automation tests against that package, strict build, BuildPlugin on the Fab zip |
-| `open3dbroadcast-fab-package.yml` | Called by CI and nightly, or manual | `fab-package.py`, then `check-no-video-codecs.sh` on every packaged binary (required), then uploads `Open3DBroadcast-Fab-Source-<sha>` |
-| `open3dbroadcast-plugin-nightly.yml` | 03:00 UTC daily, manual | Same checks as CI with a Shipping `-Configuration`, plus network tests when the `O3D_MOQ_RELAY_URL` secret is set, the transport flag-combination builds (`Build-FlagCombinations.ps1`; the manual run can skip them with `run_flag_builds`), the Linux exclusion check (`Test-LinuxExclusion.ps1`, skipped while the runner has no Linux toolchain), and the Win64 Shipping game package (`Build-ShippingGame.ps1`; the manual run can skip it with `run_shipping_game`) |
+| `open3dbroadcast-plugin-ci.yml` | PRs to develop/main, pushes to develop/main, manual | Path filter, Fab source zip, copyright header check, runtime-modules-without-editor-code check, and on the UE runner: BuildPlugin (fails on plugin warnings), UE automation tests against that package, the WebRTC add-on built against that package (strict, warnings as errors; uploaded as `Open3DBroadcastWebRTC-Win64-<sha>`) and the tests again with both plugins, strict build, BuildPlugin on the Fab zip |
+| `open3dbroadcast-fab-package.yml` | Called by CI and nightly, or manual | `fab-package.py`, then `check-no-video-codecs.sh` on every packaged binary and on the plugin tree (required), then uploads `Open3DBroadcast-Fab-Source-<sha>` |
+| `open3dbroadcast-plugin-nightly.yml` | 03:00 UTC daily, manual | Same checks as CI with a Shipping `-Configuration` (including the WebRTC add-on build and both-plugin test run), plus network tests when the `O3D_MOQ_RELAY_URL` secret is set, the transport flag-combination builds (`Build-FlagCombinations.ps1`; the manual run can skip them with `run_flag_builds`), the Linux exclusion check (`Test-LinuxExclusion.ps1`, skipped while the runner has no Linux toolchain), and the Win64 Shipping game package (`Build-ShippingGame.ps1`; the manual run can skip it with `run_shipping_game`) |
 | `open3dbroadcast-plugin-test.yml` | Manual only | Build any branch and optionally run the tests (with or without network tests) |
-| `open3dbroadcast-plugin-release.yml` | `open3dbroadcast-v*.*.*` tags, manual | Shipping build, GitHub release of the Win64 binaries (UE 5.7 only) |
+| `open3dbroadcast-plugin-release.yml` | `open3dbroadcast-v*.*.*` tags, manual | Shipping build, GitHub release of the Win64 binaries (UE 5.7 only). Also builds the WebRTC add-on with the same version; it is attached to the release only when the repository variable `O3D_PUBLISH_WEBRTC_ADDON` is `true` (counsel question L1, ADR 0002), otherwise it stays a workflow artifact |
 | `core-tests.yml` | Every PR and push | o3ds core under CTest with ASan/UBSan, fuzzing, warning ratchet, MSVC build, `o3ds_generated.h` against `flatc`, and `sync_o3ds_core.py --check` on the plugin's core copy (GitHub-hosted) |
 | `o3ds-webrtc-windows-native.yaml` | Manual only | libwebrtc from source (up to 6 hours); nothing consumes its output |
 
@@ -317,14 +338,15 @@ No UE job has a pre-build step: the plugin compiles the o3ds core from source (W
 
 - **Every PR commit, drafts included:** the path filter, the Fab source zip job, the copyright header check, the runtime-modules-without-editor-code check and `core-tests.yml`. They run on GitHub-hosted runners and take a few minutes.
 - **Non-draft PRs, pushes to develop/main and manual runs:** the "UE build and tests" job on the single self-hosted `[self-hosted, ue5, windows]` runner. Drafts skip it so unfinished work does not hold the runner. To get the UE result for a draft, mark it ready for review, or run the workflow by hand on the branch (Actions > Open3DBroadcast Plugin CI > Run workflow).
-- **Path filter:** all plugin CI jobs are skipped when a PR touches nothing the plugin build depends on. The filter covers `Build/**`, the plugin, `ProjectSandbox/` project files and the workflow files. The plugin build reads nothing else: a `src/o3ds` change reaches it only with the re-synced core copy inside the plugin, which `core-tests.yml` checks.
+- **Path filter:** all plugin CI jobs are skipped when a PR touches nothing the plugin build depends on. The filter covers `Build/**`, both plugins (`Open3DBroadcast` and `Open3DBroadcastWebRTC`), `ProjectSandbox/` project files and the workflow files. The plugin build reads nothing else: a `src/o3ds` change reaches it only with the re-synced core copy inside the plugin, which `core-tests.yml` checks.
 
 ### What turns the UE job red
 
 1. BuildPlugin fails, or the compiler reports a warning in a plugin source file (`-FailOnWarnings`).
 2. Any automation test fails, no test runs, or no report is written (`Run-AutomationTests.ps1`). The step has a 20-minute timeout; ADR 0006 sets a 15-minute test budget per PR.
-3. The strict build (`-StrictIncludes`, no PCH, no unity) fails or warns.
-4. BuildPlugin on the Fab zip fails or warns, or an editor DLL is missing from its output.
+3. The WebRTC add-on does not build against the package, warns (strict, `-FailOnWarnings`), or a test fails in the run with both plugins enabled.
+4. The strict build (`-StrictIncludes`, no PCH, no unity) fails or warns.
+5. BuildPlugin on the Fab zip fails or warns, or an editor DLL is missing from its output.
 
 The Fab zip job is red when a package check or the codec gate fails. The "Copyright headers" job is red when `check-copyright-headers.py` fails, and the "Runtime modules free of editor code" job when `check-runtime-editor-deps.py` or its self-test fails; they are separate jobs, so they do not stop the Fab zip from being built.
 
@@ -357,7 +379,7 @@ Usage:
 
 The plugin is Win64 only (ADR 0001). `Open3DBroadcast.uplugin` declares it: `"SupportedTargetPlatforms": [ "Win64" ]` for the plugin, and `"PlatformAllowList": [ "Win64" ]` on every module, so a target for another platform leaves the modules out instead of running their `Build.cs` and failing. The runtime modules also have `"TargetDenyList": [ "Server", "Program" ]` (see the plugin README, "Platforms and target types"). `fab-package.py` fails when a module entry has no `PlatformAllowList`.
 
-The `Build.cs` files no longer throw for other platforms, except Open3DSender and Open3DReceiver, which link Win64-only prebuilt core libraries until WP-F1; the allow list keeps them out of other targets. NNG, WebRTC and MoQ build as stubs on any platform without their prebuilt binaries.
+The `Build.cs` files no longer throw for other platforms, except Open3DSender and Open3DReceiver, which link Win64-only prebuilt core libraries until WP-F1; the allow list keeps them out of other targets. NNG, MoQ and the WebRTC add-on's module build as stubs on any platform without their prebuilt binaries.
 
 **Linux check.** The acceptance item "a game target that also targets Linux configures without error, with the plugin excluded on Linux" needs UBT to build a Linux target, which on Windows needs Epic's Linux cross-compile toolchain (`LINUX_MULTIARCH_ROOT`) and an engine with the Linux target platform installed. The nightly runs the check when `LINUX_MULTIARCH_ROOT` is set on the runner and otherwise skips it with a notice; whether the runner has the toolchain is not known. To run it by hand on a machine that has both:
 

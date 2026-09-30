@@ -176,6 +176,7 @@ WebRTC backends are now unified behind a connector interface:
 
 ### WebRTC (Unreal plugin)
 
+- The Unreal WebRTC transport is the separate **Open3DBroadcastWebRTC** add-on plugin, not part of Open3DBroadcast: [README](ProjectSandbox/Plugins/Open3DBroadcastWebRTC/README.md), [User Guide](ProjectSandbox/Plugins/Open3DBroadcastWebRTC/USER_GUIDE.md) (ADR 0002, WP-F11)
 - [Unreal WebRTC implementation notes](WEBRTC_UNREAL_IMPLEMENTATION.md)
 - [libdatachannel Integration](LIBDATACHANNEL_INTEGRATION.md)
 - [Issue #15](https://github.com/lifelike-and-believable/Open3DStream/issues/15) - Implementation roadmap

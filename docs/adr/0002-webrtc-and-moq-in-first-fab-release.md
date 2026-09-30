@@ -228,6 +228,10 @@ The repo has previous libdatachannel work (`.github/workflows/build-libdatachann
 8. **needs-verification:** can a project-level plugin declare a dependency on a Fab-installed (engine-level) plugin and link against its exported modules? Does the Fab package ship the public headers and import libraries a source build of the add-on would need? How does the editor react to an add-on binary built against a different engine build ID?
 9. ~~Will the support site host the add-on, and should the Fab listing link to it?~~ **Answered 2026-09-29:** yes to both. The add-on is a free download from the support site, and the Fab listing links to it. Whether the link can go live before the codec-free rebuild depends on counsel question L1.
 
+## Implementation note (WP-F11, 2026-09-30)
+
+Implemented as the plugin `ProjectSandbox/Plugins/Open3DBroadcastWebRTC/`. Open3DBroadcast no longer contains the WebRTC module or any livekit file, so `Build/Fab/exclude-modules.txt` no longer lists it (Implementation outline step 7); `fab-package.py` instead fails if either reappears. The three blockers are fixed (DLL lookup in the add-on's own plugin, `Open3DStreamCore` dependency, register nothing on failure and drain before unload), and the interface version is `O3D_TRANSPORT_API_VERSION` in `Open3DShared/Public/Transport/O3DTransportApiVersion.h`. Paths in this ADR that start `Plugin/Source/Open3DTransportWebRTC/` now live under the add-on. Q7 and Q8 are discussed in the WP-F11 pull request; they stay needs-verification until checked against a real Fab install.
+
 ## References
 
 - Findings: FAB-1, FAB-11, FAB-12; also FAB-4, CI-5, CI-8, UX-4, TRF-34, SHR-23, SHR-36, BUILD-4.

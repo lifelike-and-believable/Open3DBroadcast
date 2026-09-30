@@ -379,6 +379,69 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `linux.yml` and `doc.yml` use `actions/checkout@v4`; `doc.yml` installs
   `breathe` and deploys with `GITHUB_TOKEN`.
 
+### WebRTC becomes the Open3DBroadcastWebRTC add-on plugin (WP-F11, ADR 0002)
+
+- **WebRTC is no longer part of Open3DBroadcast.** The `Open3DTransportWebRTC`
+  module (same module name), `livekit_ffi` and their notices moved to a new
+  plugin, `ProjectSandbox/Plugins/Open3DBroadcastWebRTC/` (Beta, Win64,
+  Server and Program excluded, plugin dependency on Open3DBroadcast). It is a
+  free add-on installed in a project's `Plugins/` folder next to
+  Open3DBroadcast, including a Fab-installed one. Open3DBroadcast alone
+  contains no WebRTC module and no livekit file, so its whole tree passes
+  `check-no-video-codecs.sh`.
+- **Upgrade:** projects that use the WebRTC transport must also install
+  Open3DBroadcastWebRTC (the build made for the same Open3DBroadcast
+  release) and enable it. Components and LiveLink sources keep their WebRTC
+  settings; without the add-on they report that the transport is not
+  registered. ProjectSandbox enables both plugins.
+- **Transport API version.** New
+  `Open3DShared/Public/Transport/O3DTransportApiVersion.h`:
+  `O3D_TRANSPORT_API_VERSION` (1), the exported
+  `O3DTransport::GetHostApiVersion()` and the inline
+  `O3DTransport::CheckApiVersion()` (ADR 0007 item 2, minimal SHR-14). The
+  add-on checks it first in `StartupModule` and, on a mismatch, logs
+  `WebRTC transport not registered: Open3DBroadcastWebRTC was built for
+  Open3DBroadcast transport API version ...` and registers nothing. Raise the
+  number with any change to the exported transport interface.
+- **Add-on blockers from ADR 0002 fixed.** `livekit_ffi.dll` is loaded from
+  the add-on's own plugin folder through `FO3DFfiLibrary` (TRF-28); the
+  module's `Build.cs` uses the `Open3DStreamCore` module and no path into
+  Open3DBroadcast (BUILD-1); if the version check or the DLL load fails
+  nothing is registered, and shutdown stops live instances before the DLL is
+  freed and undoes only what startup did (TRF-14).
+- **Build flags and console variables (SHR-19).** `O3D_WITH_TRANSPORT_WEBRTC`
+  is read by the add-on's own `O3DWebRtcBuildFlags`, no longer by
+  Open3DBroadcast's `O3DBuildFlags`; the add-on also reports the ignored
+  `O3D_WEBRTC_BACKEND_*` flags. The ten unused WebRTC console variables
+  (`o3ds.WebRTC.*`, `o3ds.Broadcast.WebRTC.*`) and both copies of
+  `O3DConsoleVars.h` are removed from Open3DShared; nothing read them. The
+  LiveKit fields of `FO3DTransportConfig` stay until WP-A1 (SHR-36).
+- **Tests.** The WebRTC tests moved with the module (still
+  `Open3DBroadcast.Transport.WebRTC.*`), plus
+  `Open3DBroadcast.Transport.WebRTC.AddOn.*` (version check, livekit_ffi
+  found in the add-on and not in Open3DBroadcast, transport registered) and
+  `Open3DBroadcast.Shared.TransportApiVersion.*`. `Open3DBroadcastTests` does
+  not depend on the add-on. The WebRTC conformance profile is still deferred
+  (now to WP-T2e).
+- **Scripts and CI.** `Build/Fab/exclude-modules.txt` no longer lists WebRTC;
+  `fab-package.py` instead fails if a WebRTC module folder, `.uplugin` entry
+  or livekit file appears anywhere in Open3DBroadcast. The Fab workflow also
+  runs `check-no-video-codecs.sh` on the plugin tree (`--addon` scans the
+  add-on, which still fails by design). The copyright-header and
+  runtime-editor-deps checks cover both plugins. New
+  `Build/Scripts/Build-WebRTCAddOn.ps1` builds the add-on against an
+  Open3DBroadcast package; PR CI and the nightly run it after the
+  main-plugin tests, upload the add-on
+  (`Open3DBroadcastWebRTC-Win64-<sha>`) and run every test again with both
+  plugins enabled. The release workflow builds it with the same version and
+  attaches it to the release only when `O3D_PUBLISH_WEBRTC_ADDON` is `true`
+  (counsel question L1). The flag-combination nightly drops `no-webrtc`.
+- **Docs.** The WebRTC user guide moved to the add-on (`USER_GUIDE.md`, with
+  installation, version matching and removal), which also has a README and
+  its own `THIRD_PARTY_LICENSES.md` with the livekit_ffi entries. The main
+  USER_GUIDE and README say WebRTC is a free add-on, with a download-link
+  placeholder until the support-site URL exists.
+
 ### Editor module split (WP-F7, ADR 0010)
 
 - **New `Open3DBroadcastEditor` module** (Type `Editor`, `PostEngineInit`,
