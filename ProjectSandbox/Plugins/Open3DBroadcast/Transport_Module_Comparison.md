@@ -200,30 +200,39 @@ All modules implement the same interfaces with identical method signatures:
 
 **Threading Model**:
 - **Sender**: Async worker thread
-  - Listen socket on main thread
-  - Background send thread with MPSC queue
-  - Frame-based protocol (4-byte length header + payload)
-  - Single client connection (new client disconnects old)
-- **Receiver**: Synchronous with state machine
-  - Connection state machine (`EState` enum: `SocketsTcpReceiver.h:31-38`)
-  - States: Disconnected → Connecting → Connected → ReadingHeader → ReadingPayload
-  - Automatic reconnection with exponential backoff
-  - Buffered reads with progressive framing
+  - The listen socket is created on the game thread in `Start()`; the worker is started only if bind and listen succeed
+  - The worker owns the client socket: it accepts, sends from an MPSC queue, writes keepalives and notices a closed receiver. The game thread never waits on a send
+  - Partial sends and `EWOULDBLOCK` are retried until the frame is written; the client is dropped only on a socket error or after `tcp.stalltimeout` without progress. Frames are dropped whole, never partly written
+  - One client at a time; the next receiver is accepted as soon as the current one closes (checked every 250 ms while idle)
+- **Receiver**: Synchronous, polled on the game thread
+  - Connection states: Disconnected → Connecting → Connected
+  - Framing is parsed by the core `O3DS::TcpStreamParser` (`src/o3ds/tcp_stream_parser.h`): every complete frame in a read is delivered, resync after garbage is one pass, and lengths above `tcp.maxframe` are rejected without allocating them
+  - Each `Poll()` handles at most 256 frames or 8 MiB; the rest stays in the socket buffer
+  - Reconnects with exponential backoff (`tcp.backoff` doubling up to `tcp.maxbackoff`); the backoff resets only after a connection delivers data
 
 **Connection Model**:
 - **Sender** = Server (listens for connections)
 - **Receiver** = Client (connects to sender)
 
-**Framing Protocol** (`SocketsTcpSender.cpp:SendFramed`):
+**Framing Protocol** (`src/o3ds/tcp_stream_parser.h`):
 ```
-[4 bytes: payload size (little-endian)] [N bytes: payload]
+[14 bytes: magic 00 FF 03 FE "O3DS-START"] [4 bytes: payload size (little-endian)] [N bytes: payload]
 ```
+While idle for `tcp.keepalive` ms the sender writes a keepalive frame whose payload is a 20-byte unified-envelope header (kind Audio, payload size 0). Receivers ignore it as data but it resets their idle timer. Receivers built before WP-S6 also ignore it silently.
 
 **Configuration**:
 - `host` - Hostname/IP
 - `port` - Port number
-- `tcp.timeout` - Connection timeout seconds (default: 5.0)
 - `bind` - Bind address for sender
+- `tcp.timeout` - Receiver: seconds without any data (frames or keepalives) before it reconnects (default: 5)
+- `tcp.connecttimeout` - Receiver: seconds a connect may stay pending before it is abandoned and retried (default: 5)
+- `tcp.maxframe` - Receiver: largest frame payload accepted, in bytes (default: 4194304, min 1024, max 52428800)
+- `tcp.backoff` - Receiver: first reconnect delay in ms, doubled after each failed attempt (default: 500)
+- `tcp.maxbackoff` - Receiver: longest reconnect delay in ms (default: 5000)
+- `tcp.maxqueue` - Sender: send queue cap in bytes; a frame that does not fit is dropped (default: 4194304, min 65536)
+- `tcp.maxqueueage` - Sender: frames that waited longer than this many ms are dropped before sending; 0 disables (default: 1000)
+- `tcp.stalltimeout` - Sender: ms a frame may make no progress on a full socket before the client is dropped (default: 2000, min 100)
+- `tcp.keepalive` - Sender: ms of idleness before a keepalive is sent; 0 disables (default: 1000). Keep it below the receiver's `tcp.timeout`
 
 **Audio Support**:
 - ✅ Full support with unified messaging
@@ -517,10 +526,11 @@ transport in this document — it is not a WebRTC feature.
 - **Socket errors**: Graceful socket closure on Stop()
 
 ### TCP
-- **Connection loss**: Receiver auto-reconnects with backoff
-- **Send errors**: Drop frame, close client, wait for new connection
-- **Framing errors**: Reset state machine, reconnect
-- **Queue overflow**: Drop with backpressure stats
+- **Connection loss**: Receiver auto-reconnects with exponential backoff; a pending connect times out after `tcp.connecttimeout`
+- **Slow receiver**: Sender waits for socket space; drops the client only after `tcp.stalltimeout` without progress
+- **Send errors**: Drop the frame in progress, close the client, wait for a new connection
+- **Framing errors**: Skip to the next frame magic in one pass; oversize frames are counted in `DroppedFrames`
+- **Queue overflow**: New frames dropped whole and counted; frames older than `tcp.maxqueueage` dropped before sending
 
 ### UDP
 - **Packet loss**: Silent drop (unreliable transport)
@@ -570,7 +580,7 @@ All transports include test files:
 |-----------|-----------|----------|
 | **Loopback** | `LoopbackAudioTests.cpp` | Audio roundtrip |
 | **NNG** | `NngTransportTests.cpp` | Connection patterns |
-| **Sockets** | `SocketsAudioTests.cpp` | TCP/UDP audio |
+| **Sockets** | `SocketsAudioTests.cpp`, `SocketsLifetimeTests.cpp`, `SocketsTcpTransportTests.cpp` | TCP/UDP audio, start/stop lifetime, TCP burst, slow reader, reconnect, keepalive (framing parser: core `test/tcp_stream_parser_tests.cpp`) |
 | **WebRTC** | `WebRTCTransportTests.cpp`, `WebRTCPerSubjectTests.cpp` | Transport + per-subject routing |
 | **MoQ** | `MoQSenderTests.cpp`, `MoQReceiverTests.cpp`, `MoQSessionWrapperTests.cpp`, `MoQTrackNamespaceTests.cpp`, `MoQCloudflareRelayTests.cpp` | Session lifecycle, track naming, relay integration |
 

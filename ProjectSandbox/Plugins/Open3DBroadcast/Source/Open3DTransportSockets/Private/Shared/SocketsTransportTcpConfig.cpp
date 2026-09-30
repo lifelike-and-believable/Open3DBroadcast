@@ -3,6 +3,29 @@
 #include "O3DReceiverSourceSettings.h"
 #include "O3DSenderComponent.h"
 #include "SocketsTransportCommon.h"
+#include "SocketsTcpTransport.h"
+
+namespace
+{
+	/** Sender-side tcp.* advanced options passed through to the transport (WP-S6). */
+	const TCHAR* const TcpSenderAdvancedKeys[] =
+	{
+		O3DSockets::Tcp::MaxQueueOptionKey,
+		O3DSockets::Tcp::MaxQueueAgeOptionKey,
+		O3DSockets::Tcp::StallTimeoutOptionKey,
+		O3DSockets::Tcp::KeepaliveOptionKey,
+	};
+
+	/** Receiver-side tcp.* advanced options passed through to the transport. */
+	const TCHAR* const TcpReceiverAdvancedKeys[] =
+	{
+		O3DSockets::TimeoutOptionKey,
+		O3DSockets::Tcp::ConnectTimeoutOptionKey,
+		O3DSockets::Tcp::MaxFrameOptionKey,
+		O3DSockets::Tcp::BackoffOptionKey,
+		O3DSockets::Tcp::MaxBackoffOptionKey,
+	};
+}
 
 namespace O3DSocketsConfig
 {
@@ -21,6 +44,16 @@ namespace O3DSocketsConfig
 		Config.StreamId = O3DSockets::ComposeStreamId(BindHost, Port);
 		Config.AdvancedParams.Add(O3DSockets::BindOptionKey, BindHost);
 		Config.AdvancedParams.Add(O3DSockets::PortOptionKey, FString::FromInt(Port));
+
+		// Only keys the user set are passed; the transport applies its defaults otherwise.
+		for (const TCHAR* Key : TcpSenderAdvancedKeys)
+		{
+			const FString Value = SenderComponent ? SenderComponent->GetTransportOption(Key) : FString();
+			if (!Value.IsEmpty())
+			{
+				Config.AdvancedParams.Add(Key, Value);
+			}
+		}
 
 		if (Config.Audio.bEnableAudio)
 		{
@@ -51,6 +84,17 @@ namespace O3DSocketsConfig
 		Config.StreamId = O3DSockets::ComposeStreamId(Host, Port);
 		Config.AdvancedParams.Add(O3DSockets::HostOptionKey, Host);
 		Config.AdvancedParams.Add(O3DSockets::PortOptionKey, FString::FromInt(Port));
+
+		// tcp.timeout (set by the receiver widget) and the WP-S6 limits used to stop here and
+		// never reached the transport.
+		for (const TCHAR* Key : TcpReceiverAdvancedKeys)
+		{
+			const FString* Value = Settings.TransportOptions.Find(Key);
+			if (Value && !Value->IsEmpty())
+			{
+				Config.AdvancedParams.Add(Key, *Value);
+			}
+		}
 
 		if (Config.Audio.bEnableAudio)
 		{
