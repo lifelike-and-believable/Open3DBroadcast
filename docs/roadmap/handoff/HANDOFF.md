@@ -85,6 +85,7 @@ With UE 5.7 installed locally you can also run the real build and tests: `Build/
 8. `TStrongObjectPtr<T>` members need the complete type in the header.
 9. `TSlateDelegates<int32>::FOnValueCommitted` does not exist in 5.7; use the SLATE_EVENT shorthand `.OnValueCommitted(this, &Method, Payload)`.
 10. Windows PowerShell 5.1 ignores `-Include` together with `-LiteralPath`; filter with `Where-Object`.
+11. Helpers in anonymous namespaces need names unique within their module: unity builds merge a module's .cpp files, and CI's strict build (non-unity) will not catch a collision. A local `ProjectSandboxEditor` build does (see #287, `GetPipeContextRegistry` in NNG).
 
 ## 5. Waiting on the maintainer
 
