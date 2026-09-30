@@ -1,18 +1,51 @@
-# Open3DTransportWebRTC - User Guide
+# Open3DBroadcast WebRTC add-on - User Guide
 
-A comprehensive guide to configuring, using, and troubleshooting the WebRTC transport module for Open3DStream.
+A comprehensive guide to installing, configuring, using, and troubleshooting the WebRTC (LiveKit) transport for Open3DBroadcast. The transport is the free **Open3DBroadcastWebRTC** add-on plugin; it is not part of Open3DBroadcast itself.
 
 ## Table of Contents
 
-1. [Quick Start](#quick-start)
-2. [Configuration Guide](#configuration-guide)
+1. [Requirements and Installation](#requirements-and-installation)
+2. [Quick Start](#quick-start)
+3. [Configuration Guide](#configuration-guide)
    - [Credentials](#credentials)
    - [Automatic Token Fetch](#automatic-token-fetch-recommended)
-3. [Audio Configuration](#audio-configuration)
-4. [Platform Support](#platform-support)
-5. [Troubleshooting](#troubleshooting)
-6. [Performance Tuning](#performance-tuning)
-7. [FAQ](#faq)
+4. [Audio Configuration](#audio-configuration)
+5. [Platform Support](#platform-support)
+6. [Troubleshooting](#troubleshooting)
+7. [Performance Tuning](#performance-tuning)
+8. [FAQ](#faq)
+
+---
+
+## Requirements and Installation
+
+- **Open3DBroadcast:** required, installed from Fab or from a GitHub release. The add-on must be the build made for your Open3DBroadcast release (see [Version matching](#version-matching)).
+- **Unreal Engine:** 5.7. **Platform:** Win64 only, for editor and game targets. Server and Program targets are not supported.
+- **Status:** Beta, like Open3DBroadcast.
+- **Download:** **[DOWNLOAD LINK PLACEHOLDER: support-site URL for Open3DBroadcastWebRTC, to be added before release]**
+
+### Installing
+
+1. Install Open3DBroadcast first (from Fab, or by copying it into your project's `Plugins/` folder).
+2. Copy the `Open3DBroadcastWebRTC` folder into your **project's** `Plugins/` folder. Do not copy anything into the Open3DBroadcast folder: the add-on is a plugin of its own, so a Fab update of Open3DBroadcast leaves it in place.
+3. Open the project, go to **Edit → Plugins**, enable **Open3DBroadcast WebRTC** (Beta) and restart the editor.
+4. "WebRTC" now appears in the transport list of the Open3D sender component and of the Open3DBroadcast LiveLink source.
+
+The add-on contains the WebRTC transport module (`Open3DTransportWebRTC`) and its LiveKit client library (`livekit_ffi.dll`). Its settings panel is drawn by Open3DBroadcast's editor module from the options the transport declares, so it looks and behaves like every other transport panel.
+
+### Version matching
+
+The add-on links against Open3DBroadcast's C++ transport interface, which carries a version number (`O3D_TRANSPORT_API_VERSION`). At startup the add-on compares the number it was built with against the installed Open3DBroadcast. If they differ it registers nothing, and the Output Log shows one error:
+
+```
+LogO3DWebRTCSender: Error: WebRTC transport not registered: Open3DBroadcastWebRTC was built for Open3DBroadcast transport API version 1, but the loaded Open3DBroadcast provides version 2. Open3DBroadcastWebRTC registers nothing. Install the Open3DBroadcastWebRTC build made for this Open3DBroadcast release.
+```
+
+Download the add-on build that matches your Open3DBroadcast version. Every other transport keeps working in the meantime.
+
+### Removing the add-on
+
+Disable **Open3DBroadcast WebRTC** in **Edit → Plugins** (or delete its folder) and restart. Open3DBroadcast and its other transports keep working. Senders and LiveLink sources that were set to WebRTC keep their settings and report that the transport is not registered until you pick another transport or reinstall the add-on.
 
 ---
 
@@ -240,19 +273,11 @@ Authorization: Bearer <endpoint credential>
 ## Platform Support
 
 ### Current Status
-- ✅ **Windows 64-bit** (Fully supported)
-- ⏳ **Linux 64-bit** (Planned, binaries needed)
-- ⏳ **macOS 64-bit** (Planned, binaries needed)
-
-### Checking Platform
-```
-Windows: Any Windows 10/11 x64 system
-Linux: Will fail with clear error message if attempted
-macOS: Will fail with clear error message if attempted
-```
+- ✅ **Windows 64-bit** (supported)
+- Linux and macOS: not supported. `livekit_ffi` exists for Win64 only, and the plugin's module is limited to Win64 (`PlatformAllowList`), so targets for other platforms leave it out.
 
 ### Alternative Transports
-If WebRTC is not available for your platform:
+These are part of Open3DBroadcast itself. If WebRTC is not available for your platform:
 - **NNG:** Flexible topology, good latency, LAN-ready
 - **TCP:** Low-latency 1:1 streaming
 - **UDP:** Ultra-low latency for LAN only
@@ -261,6 +286,15 @@ If WebRTC is not available for your platform:
 ---
 
 ## Troubleshooting
+
+### WebRTC Is Missing From the Transport List
+
+Search the Output Log for `WebRTC transport not registered`:
+- **"... was built for Open3DBroadcast transport API version ..."**: the add-on does not match your Open3DBroadcast release. Install the matching add-on build ([Version matching](#version-matching)).
+- **"LiveKit FFI: library not found at ..."** or **"failed to load ..."**: `livekit_ffi.dll` is missing from `Open3DBroadcastWebRTC/Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/bin/Win64/`. Reinstall the add-on folder unchanged.
+- **No such line**: check that **Open3DBroadcast WebRTC** is enabled in **Edit → Plugins**. A developer build made with `O3D_WITH_TRANSPORT_WEBRTC=0` logs `Open3D WebRTC transport is not available in this build` instead.
+
+Log categories for this add-on: `LogO3DWebRTCSender` and `LogO3DWebRTCReceiver` (for example `log LogO3DWebRTCSender Verbose`).
 
 ### Connection Failures
 
@@ -477,11 +511,6 @@ Stats.MaxLatencyMs       // Peak latency observed
 ## Additional Resources
 
 - **LiveKit Documentation:** https://docs.livekit.io
-- **Open3DStream Documentation:** See parent README
-- **Report Issues:** GitHub issues in Open3DStream repository
-
----
-
-**Last Updated:** 2025-11-15
-**Version:** 1.0
+- **Open3DBroadcast User Guide:** `USER_GUIDE.md` in the Open3DBroadcast plugin folder
+- **Report Issues:** [GitHub Issues](https://github.com/lifelike-and-believable/Open3DBroadcast/issues)
 

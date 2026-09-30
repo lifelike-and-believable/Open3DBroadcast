@@ -70,13 +70,6 @@
 			"TargetDenyList": [ "Server", "Program" ]
 		},
 		{
-			"Name": "Open3DTransportWebRTC",
-			"Type": "Runtime",
-			"LoadingPhase": "Default",
-			"PlatformAllowList": [ "Win64" ],
-			"TargetDenyList": [ "Server", "Program" ]
-		},
-		{
 			"Name": "Open3DTransportMoQ",
 			"Type": "Runtime",
 			"LoadingPhase": "Default",

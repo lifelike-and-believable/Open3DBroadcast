@@ -8,10 +8,10 @@
 # One module name per line. Blank lines and lines starting with '#' are
 # ignored. A listed module that does not exist in the plugin is reported and
 # skipped, so a name can be listed before the module lands.
-
-# ADR 0002: WebRTC ships as a separate add-on, not in the Fab package.
-# Remove this line only with the counsel sign-off that ADR requires.
-Open3DTransportWebRTC
+#
+# WebRTC is not listed: since WP-F11 it is not part of this plugin at all but
+# the separate Open3DBroadcastWebRTC add-on (ADR 0002). fab-package.py fails
+# if a WebRTC module or livekit file appears in the plugin, listed or not.
 
 # ADR 0006: developer tests never ship to Fab users.
 Open3DBroadcastTests

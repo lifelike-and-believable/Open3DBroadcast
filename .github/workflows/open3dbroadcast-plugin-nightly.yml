@@ -11,7 +11,7 @@ on:
         default: true
         type: boolean
       run_flag_builds:
-        description: "Build each O3D_WITH_TRANSPORT_* combination (five extra BuildPlugin runs)"
+        description: "Build each O3D_WITH_TRANSPORT_* combination (four extra BuildPlugin runs)"
         required: false
         default: true
         type: boolean
@@ -44,8 +44,9 @@ jobs:
     # Run even if the Fab zip job failed; the Fab steps check its result.
     if: ${{ !cancelled() }}
     runs-on: [ self-hosted, ue5, windows ]
-    # 120 minutes plus the five flag-combination builds (WP-F2) and the Shipping game package (WP-F7).
-    timeout-minutes: 270
+    # 120 minutes plus the flag-combination builds (WP-F2), the Shipping game package (WP-F7) and
+    # the WebRTC add-on build and tests (WP-F11).
+    timeout-minutes: 300
 
     steps:
       - name: Checkout repository
@@ -129,6 +130,45 @@ jobs:
         with:
           name: Open3DBroadcast-NightlyTests-${{ github.sha }}
           path: Artifacts/NightlyAutomation
+          if-no-files-found: ignore
+          retention-days: 21
+
+      # WP-F11: the Open3DBroadcastWebRTC add-on built against tonight's package, and every test
+      # again with both plugins enabled.
+      - name: Build WebRTC add-on against the package
+        id: addon
+        if: ${{ !cancelled() && (github.event_name == 'schedule' || inputs.run_editor_tests) }}
+        shell: powershell
+        run: |
+          & .\Build\Scripts\Build-WebRTCAddOn.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -HostPluginPackageDir (Join-Path $env:RUNNER_TEMP 'PluginPackage') `
+            -HostProjectDir (Join-Path $env:RUNNER_TEMP 'AddOnHost') `
+            -OutDir (Join-Path $env:RUNNER_TEMP 'AddOnPackage\Open3DBroadcastWebRTC') `
+            -FailOnWarnings
+
+      - name: Run Unreal automation tests with the WebRTC add-on
+        id: addon-tests
+        if: ${{ !cancelled() && steps.addon.outcome == 'success' }}
+        timeout-minutes: 30
+        shell: powershell
+        env:
+          O3DB_NETWORK_TESTS: ${{ secrets.O3D_MOQ_RELAY_URL != '' && '1' || '0' }}
+          O3D_MOQ_RELAY_URL: ${{ secrets.O3D_MOQ_RELAY_URL }}
+          O3DB_LIVEKIT_URL: ${{ secrets.O3DB_LIVEKIT_URL }}
+        run: |
+          & .\Build\Scripts\Run-AutomationTests.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -ProjectFile (Join-Path $env:RUNNER_TEMP 'AddOnHost\O3DWebRTCHost.uproject') `
+            -ResultsDir "$PWD\Artifacts\NightlyAutomationWithAddOn" `
+            -TestFilter "Open3DBroadcast"
+
+      - name: Upload automation artifacts (with add-on)
+        if: ${{ !cancelled() && steps.addon-tests.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Open3DBroadcast-NightlyTestsWithAddOn-${{ github.sha }}
+          path: Artifacts/NightlyAutomationWithAddOn
           if-no-files-found: ignore
           retention-days: 21
 

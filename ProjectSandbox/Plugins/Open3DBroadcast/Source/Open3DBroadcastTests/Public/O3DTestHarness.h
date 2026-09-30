@@ -2,8 +2,8 @@
 
 #pragma once
 
-// Shared fixtures for Open3DBroadcast automation tests (ADR 0006, WP-T2). Exported so the WebRTC
-// add-on's test module (WP-F11) can reuse them.
+// Shared fixtures for Open3DBroadcast automation tests (ADR 0006, WP-T2). Exported so an add-on
+// plugin's test module (for example Open3DBroadcastWebRTC's) can reuse them.
 
 #include "CoreMinimal.h"
 

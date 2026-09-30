@@ -29,10 +29,26 @@ Plugins/Open3DBroadcast/**
 !Plugins/Open3DBroadcast/Config/
 !Plugins/Open3DBroadcast/Config/**
 
+# The WebRTC add-on plugin (WP-F11, ADR 0002): same layout, same rules.
+!Plugins/Open3DBroadcastWebRTC/
+Plugins/Open3DBroadcastWebRTC/**
+!Plugins/Open3DBroadcastWebRTC/Open3DBroadcastWebRTC.uplugin
+!Plugins/Open3DBroadcastWebRTC/README.md
+!Plugins/Open3DBroadcastWebRTC/USER_GUIDE.md
+!Plugins/Open3DBroadcastWebRTC/LICENSE
+!Plugins/Open3DBroadcastWebRTC/THIRD_PARTY_LICENSES.md
+!Plugins/Open3DBroadcastWebRTC/Resources/
+!Plugins/Open3DBroadcastWebRTC/Resources/**
+!Plugins/Open3DBroadcastWebRTC/Source/
+!Plugins/Open3DBroadcastWebRTC/Source/**
+!Plugins/Open3DBroadcastWebRTC/Config/
+!Plugins/Open3DBroadcastWebRTC/Config/**
+
 # FAB-4 (WP-F3): debug symbols never live in the plugin tree. They are published
 # as release assets (see Build/README.md, "Debug symbols"); fab-package.py fails
 # if one is tracked anyway.
 Plugins/Open3DBroadcast/**/*.pdb
+Plugins/Open3DBroadcastWebRTC/**/*.pdb
 
 Plugins/Open3DStream/
 

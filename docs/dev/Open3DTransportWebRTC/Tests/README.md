@@ -8,7 +8,7 @@ This directory contains testing utilities for the WebRTC transport module.
 
 `mock-token-server.py` is a simple HTTP server that generates JWT tokens for testing the token auto-fetch functionality. It mimics the behavior of a LiveKit token generator without requiring a full LiveKit server deployment.
 
-It is a reference for the request and response contract, not a production token service. A real token endpoint must authenticate its callers and decide their grants itself; see "Token endpoint requirements" in `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportWebRTC/USER_GUIDE.md`.
+It is a reference for the request and response contract, not a production token service. A real token endpoint must authenticate its callers and decide their grants itself; see "Token endpoint requirements" in `ProjectSandbox/Plugins/Open3DBroadcastWebRTC/USER_GUIDE.md`.
 
 ### Quick Start
 

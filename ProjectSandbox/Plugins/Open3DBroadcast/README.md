@@ -7,12 +7,13 @@ A modular, self-contained Unreal Engine plugin for Open3DStream broadcasting and
 - **Unreal Engine:** 5.7. Other engine versions are not supported.
 - **Platform:** Win64 (Windows 64-bit) only, for editor and game targets. Server and Program targets are not supported.
 - **Status:** Beta. The MoQ transport (`Open3DTransportMoQ`) is Experimental: it implements draft-ietf-moq-transport-07, MoQ relays must speak draft-07, and its options and behaviour can change between releases.
+- **WebRTC (LiveKit):** not part of this plugin. It is the free add-on plugin **Open3DBroadcastWebRTC** (`ProjectSandbox/Plugins/Open3DBroadcastWebRTC/` in the repository), installed next to this one. Download: **[DOWNLOAD LINK PLACEHOLDER: support-site URL for Open3DBroadcastWebRTC, to be added before release]**.
 - **Support:** [GitHub Issues](https://github.com/lifelike-and-believable/Open3DBroadcast/issues)
 
 ## Features
 
 - **Modular Architecture**: Separate sender, receiver, and transport modules
-- **Multiple Transport Options**: Loopback, Sockets, NNG, WebRTC
+- **Multiple Transport Options**: Loopback, Sockets, NNG, MoQ (Experimental); WebRTC with the free Open3DBroadcastWebRTC add-on
 - **Self-Contained**: All third-party dependencies included
 - **Marketplace Ready**: No external dependencies or pre-build steps required
 
@@ -30,8 +31,9 @@ A modular, self-contained Unreal Engine plugin for Open3DStream broadcasting and
 - **Open3DTransportLoopback**: In-process loopback for testing
 - **Open3DTransportSockets**: TCP/UDP socket transport
 - **Open3DTransportNNG**: NNG (nanomsg-next-generation) messaging
-- **Open3DTransportWebRTC**: WebRTC-based streaming with audio support
 - **Open3DTransportMoQ** (Experimental): Media over QUIC (draft-07) through a MoQ relay
+
+WebRTC (`Open3DTransportWebRTC`) is the separate Open3DBroadcastWebRTC add-on plugin (ADR 0002, WP-F11). It registers through the same public transport registries as the modules above and checks `O3D_TRANSPORT_API_VERSION` (`Open3DShared/Public/Transport/O3DTransportApiVersion.h`) before it does. Raise that number in the same change as any edit to the exported transport interface; the header says which types it covers.
 
 ### Editor Module
 
@@ -53,11 +55,11 @@ Everything the plugin compiles or links is under `Source/`, so `RunUAT BuildPlug
 ### Module-Level Dependencies
 
 - **nng** (prebuilt Win64 library, in `Source/Open3DTransportNNG/ThirdParty/`): messaging library for the NNG transport
-- **moq-ffi** (DLL, in `Source/Open3DTransportMoQ/ThirdParty/`) and **livekit_ffi** (DLL, in `Source/Open3DTransportWebRTC/ThirdParty/`)
+- **moq-ffi** (DLL, in `Source/Open3DTransportMoQ/ThirdParty/`). `livekit_ffi` belongs to the WebRTC add-on and is not in this plugin.
 
 ### Platform Support
 
-The prebuilt libraries (Opus, NNG, the MoQ and LiveKit DLLs) exist for **Win64** only, and every module is limited to Win64 (see "Platforms and target types" below). The core itself is plain C++17 source with no platform code.
+The prebuilt libraries (Opus, NNG, the MoQ DLL) exist for **Win64** only, and every module is limited to Win64 (see "Platforms and target types" below). The core itself is plain C++17 source with no platform code.
 
 ## Building
 
@@ -131,12 +133,11 @@ Developer builds can switch transports off with environment variables, set befor
 |----------|-------------|---------|
 | `O3D_WITH_TRANSPORT_SOCKETS` | TCP/UDP sockets transport | `1` |
 | `O3D_WITH_TRANSPORT_NNG` | NNG transport | `1` on Win64, always `0` elsewhere |
-| `O3D_WITH_TRANSPORT_WEBRTC` | WebRTC (LiveKit) transport | `1` on Win64, always `0` elsewhere |
 | `O3D_WITH_TRANSPORT_MOQ` | MoQ transport | `1` on Win64, always `0` elsewhere |
 
 A transport that is off is still a module of the plugin, but it compiles to a stub that registers nothing and logs `Open3D <name> transport is not available in this build` at startup. The flags are read by `O3DBuildFlags` in `Source/Open3DBroadcastBuildFlags/Open3DBroadcastBuildFlags.Build.cs`, again for every target, so one UBT run can build targets with different results. The nightly workflow builds each combination (`Build/Scripts/Build-FlagCombinations.ps1`).
 
-Open3DSender and Open3DReceiver are always built. `O3D_BUILD_SENDER=0` and `O3D_BUILD_RECEIVER=0` are rejected with a build error: they never produced a working build. `O3D_WEBRTC_BACKEND_LIVEKIT`, `O3D_WEBRTC_BACKEND_LIBDC` and `O3D_ENABLE_LEGACY` are no longer read.
+Open3DSender and Open3DReceiver are always built. `O3D_BUILD_SENDER=0` and `O3D_BUILD_RECEIVER=0` are rejected with a build error: they never produced a working build. `O3D_ENABLE_LEGACY` is no longer read. `O3D_WITH_TRANSPORT_WEBRTC` belongs to the Open3DBroadcastWebRTC add-on (see its README).
 
 ### Platforms and target types
 
@@ -153,7 +154,7 @@ If your own module depends on an Open3DBroadcast module, add that dependency onl
 The core, FlatBuffers and CRC++ are updated through `src/` and the submodule pins, then `Build/Scripts/sync_o3ds_core.py` (see "Open3DStreamCore" above). To update a prebuilt library:
 
 1. Build the new version for your target platform(s)
-2. Replace the library in `Source/ThirdParty/<library>/lib/<Platform>/` (Opus) or `Source/<Module>/ThirdParty/<library>/` (NNG, moq-ffi, livekit_ffi)
+2. Replace the library in `Source/ThirdParty/<library>/lib/<Platform>/` (Opus) or `Source/<Module>/ThirdParty/<library>/` (NNG, moq-ffi; livekit_ffi is in the WebRTC add-on)
 3. Update the headers next to it if needed
 4. Update version information in `Source/ThirdParty/README.md` or the library's own README, and in `THIRD_PARTY_LICENSES.md`
 5. Test the plugin builds and runs correctly

@@ -24,7 +24,7 @@ public class Open3DBroadcastTests : ModuleRules
         PrivateDependencyModuleNames.Add("Open3DStreamCore");
 
         // Public: the harness headers (conformance registry, fakes, fixtures) expose these types,
-        // and the WebRTC add-on test module (WP-F11) builds on them.
+        // and an add-on test module (ADR 0006) can build on them.
         PublicDependencyModuleNames.AddRange(new string[]
         {
             "Core",
@@ -61,8 +61,8 @@ public class Open3DBroadcastTests : ModuleRules
         {
             PrivateModules.Add("Open3DTransportMoQ");
         }
-        // Open3DTransportWebRTC is deliberately absent: its tests stay in that module until WP-F11
-        // moves them to the add-on's Open3DBroadcastWebRTCTests module.
+        // No WebRTC: that transport is the Open3DBroadcastWebRTC add-on plugin (WP-F11), whose
+        // tests live with it. This module must build and pass without the add-on.
 
         PrivateDependencyModuleNames.AddRange(PrivateModules);
     }

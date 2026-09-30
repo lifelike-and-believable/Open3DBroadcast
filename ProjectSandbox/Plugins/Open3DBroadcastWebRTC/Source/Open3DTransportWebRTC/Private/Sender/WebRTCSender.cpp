@@ -1,6 +1,6 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
-#if O3D_WITH_TRANSPORT_WEBRTC // Whole file: without the transport the module is a stub (O3DBuildFlags).
+#if O3D_WITH_TRANSPORT_WEBRTC // Whole file: without the transport the module is a stub (O3DWebRtcBuildFlags).
 
 #include "WebRTCSender.h"
 #include "O3DRedact.h"

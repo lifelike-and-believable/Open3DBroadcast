@@ -22,4 +22,4 @@ Libraries used by one module live in that module's own `ThirdParty/` folder:
 
 - `Source/Open3DTransportNNG/ThirdParty/nng/`: NNG, prebuilt Win64 static library.
 - `Source/Open3DTransportMoQ/ThirdParty/moq-ffi/`: MoQ FFI DLL.
-- `Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/`: LiveKit FFI DLL.
+- The LiveKit FFI DLL used by WebRTC is not in this plugin: it ships in the Open3DBroadcastWebRTC add-on, under `Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/` there (WP-F11).

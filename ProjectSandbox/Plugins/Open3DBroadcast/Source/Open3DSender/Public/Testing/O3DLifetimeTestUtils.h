@@ -4,8 +4,8 @@
 
 // Test-only helpers for the WP-S5 lifetime stress tests. Compiled only with dev automation
 // tests. Header-only. It stays in Open3DSender, not in Open3DBroadcastTests, because the WebRTC
-// tests still live in their Runtime module and cannot depend on an Editor test module; WP-F11
-// moves them to Open3DBroadcastWebRTCTests, after which this header can move too (ADR 0006).
+// add-on's tests (Open3DBroadcastWebRTC plugin, WP-F11) live in its Runtime module and include
+// it, and the Fab package has no Open3DBroadcastTests to depend on (ADR 0006).
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "CoreMinimal.h"

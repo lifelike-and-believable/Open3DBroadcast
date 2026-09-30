@@ -9,7 +9,9 @@ name: Open3DBroadcast Plugin CI
 #     tests" on the single self-hosted UE runner. Drafts skip it so work in
 #     progress does not queue the runner; mark the PR ready for review, or
 #     run this workflow by hand on the branch (Actions > Run workflow), to
-#     get the UE result for a draft.
+#     get the UE result for a draft. That job builds Open3DBroadcast,
+#     tests it alone, then builds the Open3DBroadcastWebRTC add-on against
+#     that package and tests both plugins together (WP-F11).
 #   All jobs are skipped when a change touches nothing the plugin build
 #   depends on (see the path filter below).
 
@@ -62,6 +64,7 @@ jobs:
               - 'ProjectSandbox/ProjectSandbox.uproject'
               - 'ProjectSandbox/Source/**'
               - 'ProjectSandbox/Plugins/Open3DBroadcast/**'
+              - 'ProjectSandbox/Plugins/Open3DBroadcastWebRTC/**'
               - '.github/workflows/open3dbroadcast-plugin-ci.yml'
               - '.github/workflows/open3dbroadcast-fab-package.yml'
 
@@ -113,7 +116,8 @@ jobs:
         (needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false))
       )
     runs-on: [ self-hosted, ue5, windows ]
-    timeout-minutes: 90
+    # 90 minutes plus the WebRTC add-on build and its test run (WP-F11).
+    timeout-minutes: 120
 
     steps:
       # No submodules and no pre-build step: BuildPlugin runs on the checkout
@@ -214,6 +218,56 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      # WP-F11 (ADR 0002): the Open3DBroadcastWebRTC add-on, built against the package above in a
+      # throwaway host project that has both plugins in Plugins/, the way a user installs them.
+      # Strict (no PCH, no unity build) and warnings as errors (CI-4). The run above, with the
+      # main plugin alone, is the "works without the add-on" check.
+      - name: Build WebRTC add-on against the package
+        id: addon
+        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
+        shell: powershell
+        run: |
+          & .\Build\Scripts\Build-WebRTCAddOn.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -HostPluginPackageDir (Join-Path $env:RUNNER_TEMP 'PluginPackage') `
+            -HostProjectDir (Join-Path $env:RUNNER_TEMP 'AddOnHost') `
+            -OutDir (Join-Path $env:RUNNER_TEMP 'AddOnPackage\Open3DBroadcastWebRTC') `
+            -StrictIncludes `
+            -FailOnWarnings
+
+      - name: Upload WebRTC add-on artifact
+        if: ${{ !cancelled() && steps.addon.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Open3DBroadcastWebRTC-Win64-${{ github.sha }}
+          path: ${{ runner.temp }}/AddOnPackage
+          retention-days: 30
+
+      # Every Open3DBroadcast test again, plus the add-on's own, with both plugins enabled
+      # (WP-F11 acceptance; the conformance suite then also lists WebRTC).
+      - name: Run UE automation tests with the WebRTC add-on
+        id: addon-tests
+        if: ${{ !cancelled() && steps.addon.outcome == 'success' }}
+        timeout-minutes: 20
+        shell: powershell
+        env:
+          O3DB_NETWORK_TESTS: '0'
+        run: |
+          & .\Build\Scripts\Run-AutomationTests.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -ProjectFile (Join-Path $env:RUNNER_TEMP 'AddOnHost\O3DWebRTCHost.uproject') `
+            -ResultsDir "$PWD\Artifacts\AutomationTestsWithAddOn" `
+            -TestFilter "Open3DBroadcast"
+
+      - name: Upload automation test report (with add-on)
+        if: ${{ !cancelled() && steps.addon-tests.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Open3DBroadcast-AutomationTestsWithAddOn-${{ github.sha }}
+          path: Artifacts/AutomationTestsWithAddOn
+          if-no-files-found: ignore
+          retention-days: 14
+
       # CI-4: one extra configuration that combines the strict checks:
       # BuildPlugin -StrictIncludes (no PCH, no unity build) with warnings in
       # plugin sources treated as errors. Its output is discarded.
@@ -257,6 +311,7 @@ jobs:
           path: |
             ${{ runner.temp }}/*-BuildPlugin.log
             ${{ runner.temp }}/FabBuild/*-BuildPlugin.log
+            ${{ runner.temp }}/AddOnHost-UBT.log
           if-no-files-found: ignore
           retention-days: 14
 

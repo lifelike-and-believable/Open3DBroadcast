@@ -10,7 +10,7 @@ namespace O3DTests
 {
 	/**
 	 * Registers the offline profiles for Fake, Loopback, TCP, UDP, NNG and MoQ (those compiled
-	 * in), and records the WebRTC deferral to WP-F11. Called from StartupModule.
+	 * in), and records the deferral for the add-on WebRTC transport (WP-T2e). Called from StartupModule.
 	 */
 	void RegisterBuiltInConformanceProfiles();
 	void UnregisterBuiltInConformanceProfiles();
