@@ -1,5 +1,5 @@
-// Copyright (c) Open3DStream Contributors
-//
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // Remote audio component and receiver-source audio glue. White-box access goes through
 // Open3DReceiver/Public/Testing/O3DReceiverTesting.h (WP-T2).
 

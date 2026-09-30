@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "O3DAudioFrameCodec.h"
 
 #include "HAL/PlatformTime.h"

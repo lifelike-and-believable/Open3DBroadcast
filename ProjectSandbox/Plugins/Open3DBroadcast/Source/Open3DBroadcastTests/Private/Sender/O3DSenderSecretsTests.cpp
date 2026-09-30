@@ -1,5 +1,5 @@
-// Copyright (c) Open3DStream Contributors
-//
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // WP-S9 (ADR 0004): the sender component never saves a secret transport option. A secret set
 // through SetTransportOption goes to FO3DSecretStore, is resolved into FO3DTransportConfig::Secrets,
 // and appears in none of the serialized component bytes or the saved package file. A legacy

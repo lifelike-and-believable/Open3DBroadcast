@@ -1,5 +1,5 @@
-// Copyright (c) Open3DStream Contributors
-//
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // WP-S5 tests for MoQ (TRF-1, TRF-10, TRF-12).
 //
 // InitStopWithAudio cycles Initialize/CreateAudioSink/Stop without Start(). WP-S8 adds

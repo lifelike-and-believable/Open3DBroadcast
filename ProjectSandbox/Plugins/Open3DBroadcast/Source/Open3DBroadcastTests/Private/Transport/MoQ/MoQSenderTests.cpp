@@ -1,5 +1,5 @@
-// Copyright (c) Open3DStream Contributors
-//
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // MoQ sender unit tests. Every sender is built on the fake moq-ffi table through
 // Testing/MoQTesting.h, so no test loads moq_ffi.dll or touches the network (WP-T2).
 

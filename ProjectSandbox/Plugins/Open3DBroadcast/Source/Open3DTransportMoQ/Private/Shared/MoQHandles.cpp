@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "Shared/MoQHandles.h"
 
 FMoQSessionHandle::FMoQSessionHandle(FMoQFfiApiRef InApi)

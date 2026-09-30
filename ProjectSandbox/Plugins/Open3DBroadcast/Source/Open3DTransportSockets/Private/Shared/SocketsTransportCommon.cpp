@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "SocketsTransportCommon.h"
 
 #include "O3DTransportTypes.h"

@@ -1,5 +1,5 @@
-// Copyright (c) Open3DStream Contributors
-//
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // Open3DBroadcast.Core.*: the core library compiled into the editor serializes and parses back
 // (ADR 0006 §7: a UE build of the core, not a re-test of its arithmetic, which CTest covers).
 // Formerly Open3DShared/Private/Tests/GenericTransportTests.cpp. Its three transport placeholders

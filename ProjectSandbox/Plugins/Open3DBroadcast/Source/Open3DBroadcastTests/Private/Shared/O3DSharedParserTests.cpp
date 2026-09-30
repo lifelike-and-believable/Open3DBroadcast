@@ -1,5 +1,5 @@
-// Copyright (c) Open3DStream Contributors
-//
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // SHR-6 (WP-T2): direct tests for the Shared parsers that read untrusted network bytes: the
 // unified message envelope (O3DUnifiedMessage.h) and the audio frame format
 // (O3DAudioSerialization.h). Every truncation of a valid buffer must be rejected, and a round

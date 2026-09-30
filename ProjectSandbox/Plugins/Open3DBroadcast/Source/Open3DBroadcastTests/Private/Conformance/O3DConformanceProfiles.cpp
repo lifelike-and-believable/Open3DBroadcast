@@ -1,5 +1,5 @@
-// Copyright (c) Open3DStream Contributors
-//
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // Offline conformance profiles for the transports in this plugin (ADR 0006 §4, WP-T2).
 // Every fixture uses 127.0.0.1 and an ephemeral port, a unique loopback channel, or the fake
 // moq-ffi table. The WebRTC profile belongs to the add-on's test module (WP-F11); until that

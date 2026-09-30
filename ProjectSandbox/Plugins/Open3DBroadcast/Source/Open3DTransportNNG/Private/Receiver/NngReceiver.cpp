@@ -1,4 +1,5 @@
-// Copyright (c) Open3DStream Contributors
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "Receiver/NngReceiver.h"
 #include "O3DRedact.h"
 

@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "O3DSenderTransportController.h"
 
 #include "O3DSenderInterface.h"

@@ -1,5 +1,5 @@
-// Copyright (c) Open3DStream Contributors
-//
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // WP-S10 sender audio:
 // - SND-16: the audio stream label is the pose subject name (sanitized or generated), and it
 //   follows the subject name when that changes.

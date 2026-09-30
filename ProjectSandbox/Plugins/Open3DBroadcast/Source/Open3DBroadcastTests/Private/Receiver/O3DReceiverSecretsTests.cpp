@@ -1,5 +1,5 @@
-// Copyright (c) Open3DStream Contributors
-//
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // WP-S9 (ADR 0004): a receiver secret never reaches the LiveLink connection string or the
 // GameUserSettings.ini text, is resolved into FO3DTransportConfig::Secrets when the source builds
 // its transport config, and a legacy connection string that still carries one is migrated with a

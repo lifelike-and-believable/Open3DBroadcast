@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 using UnrealBuildTool;
 using System;
 using System.IO;

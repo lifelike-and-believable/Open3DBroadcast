@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "LoopbackSender.h"
 
 #include "Logging/LogMacros.h"

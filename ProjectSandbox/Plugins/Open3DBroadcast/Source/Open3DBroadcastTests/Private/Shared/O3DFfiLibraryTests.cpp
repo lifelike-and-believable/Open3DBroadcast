@@ -1,5 +1,5 @@
-// Copyright (c) Open3DStream Contributors
-//
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // WP-F3 (TRF-14, TRF-28): FO3DFfiLibrary, the shared FFI DLL loader the MoQ and WebRTC modules
 // use. The platform calls are faked (FO3DFfiLibraryOps), so these tests need no DLL and check
 // the decisions: where the library is looked for, that nothing is loaded when the file is

@@ -1,5 +1,5 @@
-// Copyright (c) Open3DStream Contributors
-//
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // WP-S11 (TRB-39, TRB-40, TRB-42, TRB-34): NNG option parsing, and one localhost integration test
 // per mode and role pair. Every socket uses 127.0.0.1 and a port the OS picked a moment earlier
 // (O3DTests::FindFreeLoopbackPort), so nothing needs an external network and the tests are not

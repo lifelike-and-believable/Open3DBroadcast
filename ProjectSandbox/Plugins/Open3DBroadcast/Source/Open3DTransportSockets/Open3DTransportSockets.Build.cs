@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 using UnrealBuildTool;
 using System.Collections.Generic;
 //using O3DBroadcastBuild;

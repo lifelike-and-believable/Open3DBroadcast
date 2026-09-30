@@ -1,5 +1,5 @@
-// Copyright (c) Open3DStream Contributors
-//
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // WP-S9 (ADR 0004 items 1, 6 and 7) for the WebRTC transport: the customizations declare the
 // secret keys, the token reaches Config.Token only from Config.Secrets (never AdvancedParams), the
 // token request carries no grants and sends the endpoint credential as a bearer header, and plain

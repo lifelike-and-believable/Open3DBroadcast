@@ -1,5 +1,5 @@
-// Copyright (c) Open3DStream Contributors
-//
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // WP-S5: unit tests for the lifetime primitives in Open3DShared (ADR 0007 addendum).
 // Covers TRF-1/TRB-10/TRB-12 (gate, hand-off queue), TRF-12 (FFI tokens), SHR-15 (per-stream
 // decoders), TRB-11/TRF-10 (per-sink encoders) and SHR-10 (audio bus threading).

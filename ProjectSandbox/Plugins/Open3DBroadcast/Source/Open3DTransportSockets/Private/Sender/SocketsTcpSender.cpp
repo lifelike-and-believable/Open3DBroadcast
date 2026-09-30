@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "SocketsTcpSender.h"
 #include "../Shared/SocketsTcpAudio.h"
 #include "../Shared/SocketsTcpTransport.h"

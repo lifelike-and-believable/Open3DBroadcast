@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "WebRTCTokenManager.h"
 #include "WebRTCTokenFetcher.h"
 #include "Misc/Base64.h"

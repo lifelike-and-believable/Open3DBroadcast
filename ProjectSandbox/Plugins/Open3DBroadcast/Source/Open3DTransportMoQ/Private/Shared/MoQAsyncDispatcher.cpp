@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "Shared/MoQAsyncDispatcher.h"
 
 #include "Shared/MoQTypes.h"

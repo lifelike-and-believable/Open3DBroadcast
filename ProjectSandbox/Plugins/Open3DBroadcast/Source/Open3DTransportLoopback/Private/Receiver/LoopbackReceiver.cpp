@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "LoopbackReceiver.h"
 
 #include "HAL/PlatformTime.h"

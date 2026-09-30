@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "LoopbackChannel.h"
 
 #include "HAL/CriticalSection.h"

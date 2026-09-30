@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "WebRTCTokenFetcher.h"
 #include "HttpModule.h"
 #include "Interfaces/IHttpResponse.h"

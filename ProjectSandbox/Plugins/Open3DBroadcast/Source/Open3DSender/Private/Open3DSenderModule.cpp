@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "Modules/ModuleManager.h"
 #include "O3DSenderLogs.h"
 

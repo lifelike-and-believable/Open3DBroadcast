@@ -1,4 +1,4 @@
-// Copyright (c) Open3DStream Contributors
+// Copyright Lifelike & Believable. All Rights Reserved.
 
 #include "Testing/MoQTesting.h"
 

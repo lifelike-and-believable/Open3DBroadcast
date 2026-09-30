@@ -1,5 +1,5 @@
-// Copyright (c) Open3DStream Contributors
-//
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // MoQ track naming, delivery mode and send-queue limits, observed through the fake moq-ffi
 // table (WP-T2, TRF-34). These tests used to initialize a sender and assert TestTrue(true); they
 // now check what the transport actually announces, publishes and subscribes to.

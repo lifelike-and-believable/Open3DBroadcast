@@ -1,5 +1,5 @@
-// Copyright (c) Open3DStream Contributors
-//
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // WP-S5 acceptance (TRB-35, TRB-11, TRB-12, NNG pipe-callback tokens): start/stop the NNG
 // sender 1,000 times while a fake audio thread submits PCM, including cycles where the sender
 // is destroyed while the audio thread still holds its sink. The NNG helpers only build tcp://

@@ -1,5 +1,5 @@
-// Copyright (c) Open3DStream Contributors
-//
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // MoQ session wrapper and dispatcher unit tests, through the FMoQTestSession façade in
 // Testing/MoQTesting.h (WP-T2). The wrapper itself stays private to the MoQ module.
 

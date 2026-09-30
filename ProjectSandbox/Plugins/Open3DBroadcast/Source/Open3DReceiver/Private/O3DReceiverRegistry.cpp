@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "O3DReceiverRegistry.h"
 
 #include "Algo/Sort.h"

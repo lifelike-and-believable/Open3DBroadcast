@@ -1,5 +1,5 @@
-// Copyright (c) Open3DStream Contributors
-//
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // Fake moq-ffi (ADR 0006 option F2). It builds an FMoQFfiApi whose functions act on
 // per-instance state, so tests need no relay, no network and no global mutation. The MoQ
 // transport is reached through Testing/MoQTesting.h (CreateSenderForTest and friends).

@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "WebRTCReceiver.h"
 #include "O3DRedact.h"
 #include "../Shared/WebRTCUtils.h"

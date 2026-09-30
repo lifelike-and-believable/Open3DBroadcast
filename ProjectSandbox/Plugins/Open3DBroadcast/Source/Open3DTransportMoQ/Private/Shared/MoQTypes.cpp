@@ -1,3 +1,5 @@
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 #include "Shared/MoQTypes.h"
 
 #include "Containers/StringView.h"

@@ -1,5 +1,5 @@
-// Copyright (c) Open3DStream Contributors
-//
+// Copyright Lifelike & Believable. All Rights Reserved.
+
 // WP-S3 sender wire-correctness tests (findings SND-1, SND-2, SND-3, SND-4, SND-5, SND-13, SND-14,
 // SND-19, SND-20; ADR 0005). The serializer is driven directly with frames that carry their own
 // descriptor and encoding settings, and its bytes are parsed by the real core SubjectList. No world,
