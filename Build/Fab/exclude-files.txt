@@ -7,8 +7,9 @@
 # script or developer document is still in the package, so a new file of
 # that kind needs a rule here or a move out of the plugin.
 
-# Debug symbols (FAB-4).
-**/*.pdb
+# Debug symbols have no rule here on purpose (FAB-4, WP-F3): a committed .pdb
+# must fail the job, not be silently left out. fab-package.py checks the
+# tracked tree for them before any exclusion.
 
 # Scripts and test helpers (for example a mock token server).
 **/*.py

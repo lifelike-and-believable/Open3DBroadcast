@@ -85,7 +85,7 @@ built locally. To close the gap:
 | Relative Path | Description | SHA256 |
 | --- | --- | --- |
 | `bin/Win64/livekit_ffi.dll` | Runtime DLL loaded by the WebRTC transport | `E102555EA3BF1B27FFE220AF220786E0FF652D7D4656D257394BDB276ED16DFE` |
-| `bin/Win64/livekit_ffi.pdb` | Debug symbols for crash triage | `257A21CD4300987A043CD5C1A8D9E734C2B949009141BE10E866699E02C952C1` |
+| `livekit_ffi.pdb` (not in the tree; release asset, see `Build/README.md`, "Debug symbols") | Debug symbols for crash triage | `257A21CD4300987A043CD5C1A8D9E734C2B949009141BE10E866699E02C952C1` |
 | `lib/Win64/livekit_ffi.dll.lib` | Import library linked at build time | `30A6A5DB6D21E4D39F586AF5F267252367438B8712E49C9BB7D2B194DD041DFD` |
 | `include/livekit_ffi.h` | C API header | (text file, not hashed) |
 
@@ -134,15 +134,16 @@ drift silently when the crate graph changes.
    The `with_livekit` feature is required — it is what the shipped artifacts were
    built with (see the provenance table above), and omitting it produces a
    different DLL.
-3. Copy `livekit_ffi.dll`, `livekit_ffi.pdb`, `livekit_ffi.dll.lib`, and the
-   generated header into the `bin/Win64/`, `lib/Win64/`, and `include/` layout
-   used here.
+3. Copy `livekit_ffi.dll`, `livekit_ffi.dll.lib`, and the generated header into
+   the `bin/Win64/`, `lib/Win64/`, and `include/` layout used here. Do not commit
+   `livekit_ffi.pdb`: record its SHA256 below and attach it to the next release
+   (`Build/README.md`, "Debug symbols"). CI fails if a `.pdb` is tracked.
 4. Update the provenance table (commit, toolchain, SDK versions) **and** the
    SHA256 column above.
 5. Regenerate `THIRD_PARTY_NOTICES.md` from the new build's crate graph.
 6. Run an Unreal build to confirm `Open3DTransportWebRTC.Build.cs` resolves the
    new files and that the DLL loads at runtime.
-7. Commit the binaries, this README, and the notices file together.
+7. Commit the DLL and import library, this README, and the notices file together.
 
 ## Troubleshooting
 

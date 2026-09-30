@@ -88,13 +88,8 @@ public class Open3DTransportMoQ : ModuleRules
             
             // Register the DLL as a runtime dependency for packaging
             RuntimeDependencies.Add(moqFfiDllPath);
-
-            // Also copy PDB if available for debugging
-            string moqFfiPdbPath = Path.Combine(moduleThirdPartyDir, "moq-ffi", "bin", platformSubdir, "Release", "moq_ffi.pdb");
-            if (File.Exists(moqFfiPdbPath))
-            {
-                RuntimeDependencies.Add(moqFfiPdbPath);
-            }
+            // No moq_ffi.pdb here: debug symbols are not staged into packaged games and are
+            // not kept in the plugin tree (FAB-4). See Build/README.md, "Debug symbols".
         }
         else if (Target.Platform == UnrealTargetPlatform.Linux)
         {
