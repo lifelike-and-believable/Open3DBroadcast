@@ -1,6 +1,6 @@
 # Third-Party Licenses
 
-The Open3D Broadcast Suite plugin redistributes third-party code, both as source
+The Open3DBroadcast plugin redistributes third-party code, both as source
 and as prebuilt binaries. This file is the consolidated inventory of everything
 that ships inside the plugin folder and the license obligations that attach to
 redistributing it.
@@ -59,7 +59,7 @@ transport. Plan, mechanism, and acceptance criteria:
 
 | Component | License | Text |
 | --- | --- | --- |
-| Open3D Broadcast Suite (all `Source/` modules) | MIT | [`LICENSE`](LICENSE) |
+| Open3DBroadcast (all `Source/` modules) | MIT | [`LICENSE`](LICENSE) |
 | Open3DStream core (`o3ds`) | MIT | [`ThirdParty/open3dstream/LICENSE`](ThirdParty/open3dstream/LICENSE) |
 
 Both are MIT, © 2020–2024 Alastair Macleod.
