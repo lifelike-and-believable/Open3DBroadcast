@@ -25,6 +25,7 @@ SOFTWARE.
 #ifndef O3DS_PREDICT_CONCEALMENT_H
 #define O3DS_PREDICT_CONCEALMENT_H
 
+#include "../o3ds_export.h"
 #include <cstdint>
 #include <memory>
 
@@ -38,7 +39,7 @@ namespace O3DS
 	//! across the two samples (see predictor implementations' doc comments
 	//! on the topology-stability contract). `outTime`/`outSeq` are stamped
 	//! directly onto the result rather than interpolated.
-	PoseSample BlendPoseSample(const PoseSample& from, const PoseSample& to, double alpha, double outTime, uint64_t outSeq);
+	O3DS_API PoseSample BlendPoseSample(const PoseSample& from, const PoseSample& to, double alpha, double outTime, uint64_t outSeq);
 
 	//! Tunables for ConcealmentEngine (roadmap doc, §5/C1). All defaults are
 	//! conservative starting points per C1's "Open decisions" - expose as
@@ -134,7 +135,7 @@ namespace O3DS
 	//! as today).
 	//!
 	//! Not thread-safe; matches IPosePredictor's own single-thread contract.
-	class ConcealmentEngine
+	class O3DS_API ConcealmentEngine
 	{
 	public:
 		explicit ConcealmentEngine(std::unique_ptr<IPosePredictor> predictor, const ConcealmentConfig& config = ConcealmentConfig());

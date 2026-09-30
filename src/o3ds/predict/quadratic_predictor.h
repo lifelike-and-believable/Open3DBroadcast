@@ -25,6 +25,7 @@ SOFTWARE.
 #ifndef O3DS_PREDICT_QUADRATIC_PREDICTOR_H
 #define O3DS_PREDICT_QUADRATIC_PREDICTOR_H
 
+#include "../o3ds_export.h"
 #include "pose_predictor.h"
 #include "sample_ring.h"
 
@@ -51,7 +52,7 @@ namespace O3DS
 	//!
 	//! Needs 3 samples with distinct timestamps; Predict() returns false
 	//! otherwise (caller should hold).
-	class QuadraticPredictor : public IPosePredictor
+	class O3DS_API QuadraticPredictor : public IPosePredictor
 	{
 	public:
 		uint32_t Version() const override { return 2; }

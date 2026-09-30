@@ -25,6 +25,7 @@ SOFTWARE.
 #ifndef O3DS_PREDICT_HOLD_PREDICTOR_H
 #define O3DS_PREDICT_HOLD_PREDICTOR_H
 
+#include "../o3ds_export.h"
 #include "pose_predictor.h"
 #include "sample_ring.h"
 
@@ -35,7 +36,7 @@ namespace O3DS
 	//! behavior, and the universal fallback every other predictor degrades
 	//! to when it lacks enough history. Needs 1 sample; Predict() returns
 	//! false before the first Observe().
-	class HoldPredictor : public IPosePredictor
+	class O3DS_API HoldPredictor : public IPosePredictor
 	{
 	public:
 		uint32_t Version() const override { return 0; }

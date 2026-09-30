@@ -25,6 +25,7 @@ SOFTWARE.
 #ifndef O3DS_PREDICT_RESIDUAL_CODEC_H
 #define O3DS_PREDICT_RESIDUAL_CODEC_H
 
+#include "../o3ds_export.h"
 #include <cstdint>
 #include <memory>
 
@@ -53,7 +54,7 @@ namespace O3DS
 	//! Constructs the predictor matching a wire tag, or nullptr for None
 	//! (the caller should not construct a codec at all in that case - see
 	//! ResidualEncoder's own constructor comment).
-	std::unique_ptr<IPosePredictor> MakePredictorForId(ResidualPredictorId id);
+	O3DS_API std::unique_ptr<IPosePredictor> MakePredictorForId(ResidualPredictorId id);
 
 	//! Sender-side residual coding on top of any IPosePredictor (roadmap
 	//! doc §5/C2). One instance per subject, mirroring the per-subject
@@ -84,7 +85,7 @@ namespace O3DS
 	//! only equals actual when both sides computed the identical
 	//! prediction). Observing reconstructedPose instead keeps the two
 	//! sides' predictor state bit-for-bit in lockstep by construction.
-	class ResidualEncoder
+	class O3DS_API ResidualEncoder
 	{
 	public:
 		//! `id` must not be ResidualPredictorId::None - legacy mode means
@@ -163,7 +164,7 @@ namespace O3DS
 	//! caller is responsible for (re)constructing a matching decoder
 	//! whenever the wire's predictor_id changes (see model.cpp's
 	//! ParseUpdateResidual for the concrete policy).
-	class ResidualDecoder
+	class O3DS_API ResidualDecoder
 	{
 	public:
 		explicit ResidualDecoder(ResidualPredictorId id);

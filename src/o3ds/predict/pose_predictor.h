@@ -25,6 +25,7 @@ SOFTWARE.
 #ifndef O3DS_PREDICT_POSE_PREDICTOR_H
 #define O3DS_PREDICT_POSE_PREDICTOR_H
 
+#include "../o3ds_export.h"
 #include <cstdint>
 #include <vector>
 
@@ -53,7 +54,7 @@ namespace O3DS
 	//! for a pose at an arbitrary time via Predict(). Implementations are
 	//! pure-math and allocation-light after warm-up (see each
 	//! implementation's own doc comment for its required history depth).
-	class IPosePredictor
+	class O3DS_API IPosePredictor
 	{
 	public:
 		virtual ~IPosePredictor() = default;

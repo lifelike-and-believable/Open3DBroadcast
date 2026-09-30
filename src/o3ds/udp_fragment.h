@@ -25,6 +25,7 @@ SOFTWARE.
 #ifndef O3DS_UDP_FRAGMENT_H
 #define O3DS_UDP_FRAGMENT_H
 
+#include "o3ds_export.h"
 #include <vector>
 #include <cstdint>
 #include <cstddef>
@@ -51,17 +52,17 @@ struct UdpFragmentHeader
 };
 
 // Writes the 16-byte little-endian header to out (no alignment requirement).
-void writeUdpFragmentHeader(const UdpFragmentHeader& header, char* out);
+O3DS_API void writeUdpFragmentHeader(const UdpFragmentHeader& header, char* out);
 
 // Reads the 16-byte little-endian header from data (no alignment
 // requirement). Returns false if sz < kUdpFragmentHeaderSize.
-bool readUdpFragmentHeader(const char* data, size_t sz, UdpFragmentHeader& out);
+O3DS_API bool readUdpFragmentHeader(const char* data, size_t sz, UdpFragmentHeader& out);
 
 // Serial-number comparison (RFC 1982 style) for wrapping 32-bit message ids:
 // true if a is "before" b, treating the id space as a circle.
-bool udpMessageIdLess(uint32_t a, uint32_t b);
+O3DS_API bool udpMessageIdLess(uint32_t a, uint32_t b);
 
-class UdpFragmenter
+class O3DS_API UdpFragmenter
 {
 public:
 
@@ -90,7 +91,7 @@ static const uint64_t kUdpDefaultMessageTimeoutMs = 100;
 // Reassembles one message. The first accepted fragment locks the message's
 // total size, fragment size and fragment count; any later fragment that
 // disagrees is rejected. Owns its buffer via std::vector (rule of zero).
-class UdpCombiner
+class O3DS_API UdpCombiner
 {
 public:
 	explicit UdpCombiner(size_t maxMessageSize = kUdpDefaultMaxMessageSize);
@@ -146,7 +147,7 @@ struct UdpReassemblyStats
 // address). Time is passed in explicitly (monotonic milliseconds) so the
 // behaviour is deterministic and testable; no clock is read internally.
 // Not thread-safe.
-class UdpMapper
+class O3DS_API UdpMapper
 {
 public:
 	UdpMapper();

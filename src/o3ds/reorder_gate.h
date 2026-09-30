@@ -25,6 +25,7 @@ SOFTWARE.
 #ifndef OPEN3D_STREAM_REORDER_GATE_H
 #define OPEN3D_STREAM_REORDER_GATE_H
 
+#include "o3ds_export.h"
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -87,7 +88,7 @@ namespace O3DS
 	//! Config::reset_backjump is used only as a fallback for streams that
 	//! never set frame_epoch (legacy senders): once a stream has shown a
 	//! non-zero epoch, the backjump heuristic is not consulted again for it.
-	class ReorderGate
+	class O3DS_API ReorderGate
 	{
 	public:
 		struct Config

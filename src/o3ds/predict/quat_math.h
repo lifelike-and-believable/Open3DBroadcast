@@ -25,6 +25,7 @@ SOFTWARE.
 #ifndef O3DS_PREDICT_QUAT_MATH_H
 #define O3DS_PREDICT_QUAT_MATH_H
 
+#include "../o3ds_export.h"
 #include "../math.h"
 
 namespace O3DS
@@ -37,14 +38,14 @@ namespace O3DS
 
 	//! Hamilton product: applying (a*b) to a vector is equivalent to
 	//! applying b first, then a.
-	Quat QuatMultiply(const Quat& a, const Quat& b);
+	O3DS_API Quat QuatMultiply(const Quat& a, const Quat& b);
 
 	//! (x,y,z,w) -> (-x,-y,-z,w); the inverse of a unit quaternion.
-	Quat QuatConjugate(const Quat& q);
+	O3DS_API Quat QuatConjugate(const Quat& q);
 
 	//! Returns q / |q|; falls back to the identity quaternion if |q| is
 	//! degenerate (near zero) rather than dividing by ~0.
-	Quat QuatNormalize(const Quat& q);
+	O3DS_API Quat QuatNormalize(const Quat& q);
 
 	//! Decomposes a unit quaternion into an axis (unit vector) and angle
 	//! (radians, [0, pi] - always the shortest-path magnitude, since q and
@@ -52,19 +53,19 @@ namespace O3DS
 	//! before decomposing). Returns false (axis/angle left untouched) if q
 	//! is within epsilon of the identity - there's no well-defined axis for
 	//! a near-zero rotation.
-	bool QuatToAxisAngle(const Quat& q, Vector3d& outAxis, double& outAngleRad);
+	O3DS_API bool QuatToAxisAngle(const Quat& q, Vector3d& outAxis, double& outAngleRad);
 
 	//! Builds a unit quaternion representing a rotation of angleRad radians
 	//! about axis (which need not be pre-normalized). Returns the identity
 	//! quaternion if axis is near-zero-length.
-	Quat QuatFromAxisAngle(const Vector3d& axis, double angleRad);
+	O3DS_API Quat QuatFromAxisAngle(const Vector3d& axis, double angleRad);
 
 	//! Shortest-path interpolation between two unit quaternions: decomposes
 	//! the delta rotation q1*conj(q0) into axis-angle, scales the angle by
 	//! alpha (0 = q0, 1 = q1), and reapplies - equivalent to slerp for unit
 	//! quaternions. Returns q0 unchanged if the delta is near-identity
 	//! (undefined axis). Not clamped: alpha outside [0,1] extrapolates.
-	Quat QuatSlerpShortestPath(const Quat& q0, const Quat& q1, double alpha);
+	O3DS_API Quat QuatSlerpShortestPath(const Quat& q0, const Quat& q1, double alpha);
 }
 
 #endif

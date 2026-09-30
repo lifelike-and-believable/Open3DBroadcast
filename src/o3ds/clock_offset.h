@@ -25,6 +25,7 @@ SOFTWARE.
 #ifndef OPEN3D_STREAM_CLOCK_OFFSET_H
 #define OPEN3D_STREAM_CLOCK_OFFSET_H
 
+#include "o3ds_export.h"
 #include <cstdint>
 #include <deque>
 
@@ -65,7 +66,7 @@ namespace O3DS
 	//! the same way: such values cannot come from two real clocks, and
 	//! rejecting them keeps every signed computation here overflow-free
 	//! on hostile input.
-	class ClockOffsetEstimator
+	class O3DS_API ClockOffsetEstimator
 	{
 	public:
 		struct Config

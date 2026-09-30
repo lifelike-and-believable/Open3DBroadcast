@@ -24,31 +24,14 @@ SOFTWARE.
 
 #include "getTime.h"
 
-#ifdef _WIN32
-#include <windows.h>
+#include <chrono>
 
+// std::chrono::steady_clock is monotonic on every platform (MSVC implements it
+// with QueryPerformanceCounter, libstdc++ and libc++ with CLOCK_MONOTONIC), so
+// the core needs no <windows.h> or POSIX clock branch (docs/adr/0003,
+// decision 4).
 double GetTime()
 {
-	LARGE_INTEGER StartTime;
-	LARGE_INTEGER Freq;
-
-	QueryPerformanceCounter(&StartTime);
-	QueryPerformanceFrequency(&Freq);
-
-	return (double)StartTime.QuadPart / (double)Freq.QuadPart;
+	using Seconds = std::chrono::duration<double>;
+	return std::chrono::duration_cast<Seconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
-
-#else
-
-#include <time.h>
-
-double GetTime()
-{
-
-	timespec time1;
-	clock_gettime(CLOCK_MONOTONIC, &time1);
-
-	return (double)time1.tv_sec + (double)time1.tv_nsec * 1e-9f;
-}
-
-#endif

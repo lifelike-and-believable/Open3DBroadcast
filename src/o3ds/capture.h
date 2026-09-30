@@ -25,6 +25,7 @@ SOFTWARE.
 #ifndef OPEN3D_STREAM_CAPTURE_H
 #define OPEN3D_STREAM_CAPTURE_H
 
+#include "o3ds_export.h"
 #include <cstdint>
 #include <istream>
 #include <ostream>
@@ -82,13 +83,13 @@ namespace O3DS
 	//! WriteCaptureRecord calls on the same stream. Returns false if
 	//! `info.source_desc` exceeds 65535 bytes (its wire length prefix is a
 	//! uint16) or the stream write fails.
-	bool WriteCaptureHeader(std::ostream& out, const CaptureHeaderInfo& info);
+	O3DS_API bool WriteCaptureHeader(std::ostream& out, const CaptureHeaderInfo& info);
 
 	//! Appends one record. Returns false if `record.wire_bytes.size()`
 	//! exceeds kCaptureMaxWireLen (a byte count that large should never be
 	//! reached by a real O3DS frame; this is a guard, not a realistic
 	//! capture) or the stream write fails.
-	bool WriteCaptureRecord(std::ostream& out, const CaptureRecord& record);
+	O3DS_API bool WriteCaptureRecord(std::ostream& out, const CaptureRecord& record);
 
 	//! Reads and validates the header: magic, and format_version (v1
 	//! readers accept only format_version == 1; a future version may
@@ -98,7 +99,7 @@ namespace O3DS
 	//! std::istringstream both satisfy this; a non-seekable stream is not
 	//! supported. Returns false on any validation failure or short read;
 	//! `outInfo` is left default-constructed in that case.
-	bool ReadCaptureHeader(std::istream& in, CaptureHeaderInfo& outInfo);
+	O3DS_API bool ReadCaptureHeader(std::istream& in, CaptureHeaderInfo& outInfo);
 
 	//! Reads the next record. Returns false when there isn't a complete
 	//! record left to read - this covers BOTH a clean end-of-capture and a
@@ -107,7 +108,7 @@ namespace O3DS
 	//! successfully captured. Never throws or reads out of bounds on
 	//! malformed/truncated/adversarial input. `outRecord` is left
 	//! unspecified (do not use) when this returns false.
-	bool ReadCaptureRecord(std::istream& in, CaptureRecord& outRecord);
+	O3DS_API bool ReadCaptureRecord(std::istream& in, CaptureRecord& outRecord);
 }
 
 #endif

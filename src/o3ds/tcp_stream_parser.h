@@ -25,6 +25,7 @@ SOFTWARE.
 #ifndef OPEN3D_STREAM_TCP_STREAM_PARSER_H
 #define OPEN3D_STREAM_TCP_STREAM_PARSER_H
 
+#include "o3ds_export.h"
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -45,10 +46,10 @@ namespace O3DS
 	static const size_t kTcpMaxPayloadLimit = 50u * 1024u * 1024u;
 
 	//! The frame magic: 00 FF 03 FE "O3DS-START".
-	extern const uint8_t kTcpFrameMagic[kTcpFrameMagicSize];
+	extern O3DS_API const uint8_t kTcpFrameMagic[kTcpFrameMagicSize];
 
 	//! Writes the 18-byte frame header for a payload of `payloadSize` bytes.
-	void writeTcpFrameHeader(uint8_t* out, uint32_t payloadSize);
+	O3DS_API void writeTcpFrameHeader(uint8_t* out, uint32_t payloadSize);
 
 	struct TcpStreamParserStats
 	{
@@ -76,7 +77,7 @@ namespace O3DS
 	//! frame, the buffer is shrunk back to a small retained size.
 	//!
 	//! Not thread-safe: confine one instance to one thread.
-	class TcpStreamParser
+	class O3DS_API TcpStreamParser
 	{
 	public:
 		//! Buffer capacity kept between frames; larger buffers are released.

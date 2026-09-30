@@ -25,6 +25,7 @@ SOFTWARE.
 #ifndef O3DS_PREDICT_LINEAR_PREDICTOR_H
 #define O3DS_PREDICT_LINEAR_PREDICTOR_H
 
+#include "../o3ds_export.h"
 #include "pose_predictor.h"
 #include "sample_ring.h"
 
@@ -36,7 +37,7 @@ namespace O3DS
 	//! applied to q1, then renormalized (roadmap doc §2.6). Needs 2 samples
 	//! with distinct timestamps; Predict() returns false otherwise (caller
 	//! should hold).
-	class LinearPredictor : public IPosePredictor
+	class O3DS_API LinearPredictor : public IPosePredictor
 	{
 	public:
 		uint32_t Version() const override { return 1; }

@@ -25,6 +25,7 @@ SOFTWARE.
 #ifndef O3DS_QUANT_CHANNEL_QUANT_H
 #define O3DS_QUANT_CHANNEL_QUANT_H
 
+#include "../o3ds_export.h"
 #include <cstdint>
 #include "../predict/quat_math.h"
 
@@ -94,7 +95,7 @@ namespace O3DS
 	//! absDelta always yields the same tier, regardless of what was chosen
 	//! last time - see ChooseScalarTierWithHysteresis below for a
 	//! flap-resistant alternative driven by a per-channel previous tier.
-	QuantTier ChooseScalarTier(double absDelta, const QuantRanges& ranges);
+	O3DS_API QuantTier ChooseScalarTier(double absDelta, const QuantRanges& ranges);
 
 	//! Hysteresis-aware tier selection for a channel whose previously-chosen
 	//! tier is known. Moving to a larger-range tier (Byte->Half, Half->Full,
@@ -111,18 +112,18 @@ namespace O3DS
 	//! back to Full
 	//! too) - hysteresis then applies normally from there and converges
 	//! within one call.
-	QuantTier ChooseScalarTierWithHysteresis(double absDelta, const QuantRanges& ranges, QuantTier previousTier);
+	O3DS_API QuantTier ChooseScalarTierWithHysteresis(double absDelta, const QuantRanges& ranges, QuantTier previousTier);
 
 	//! Quantizes delta (already known to satisfy |delta| <= range - callers
 	//! choose range via ChooseScalarTier first) to a signed 8-bit code.
 	//! Clamps defensively if called with an out-of-range delta rather than
 	//! wrapping/overflowing.
-	int8_t QuantizeByte(double delta, double range);
-	double DequantizeByte(int8_t code, double range);
+	O3DS_API int8_t QuantizeByte(double delta, double range);
+	O3DS_API double DequantizeByte(int8_t code, double range);
 
 	//! 16-bit counterpart of QuantizeByte/DequantizeByte.
-	int16_t QuantizeHalf(double delta, double range);
-	double DequantizeHalf(int16_t code, double range);
+	O3DS_API int16_t QuantizeHalf(double delta, double range);
+	O3DS_API double DequantizeHalf(int16_t code, double range);
 
 	//! Smallest-three quaternion quantization: drops the largest-magnitude
 	//! component (reconstructed on decode from the unit-length constraint),
@@ -144,11 +145,11 @@ namespace O3DS
 		int16_t a = 0, b = 0, c = 0;
 	};
 
-	SmallestThreeQ8 QuantizeRotationByte(const Quat& q);
-	Quat DequantizeRotationByte(const SmallestThreeQ8& q);
+	O3DS_API SmallestThreeQ8 QuantizeRotationByte(const Quat& q);
+	O3DS_API Quat DequantizeRotationByte(const SmallestThreeQ8& q);
 
-	SmallestThreeQ16 QuantizeRotationHalf(const Quat& q);
-	Quat DequantizeRotationHalf(const SmallestThreeQ16& q);
+	O3DS_API SmallestThreeQ16 QuantizeRotationHalf(const Quat& q);
+	O3DS_API Quat DequantizeRotationHalf(const SmallestThreeQ16& q);
 }
 
 #endif

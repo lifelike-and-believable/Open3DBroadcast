@@ -25,13 +25,14 @@ SOFTWARE.
 #ifndef O3DS_MATRIX_H
 #define O3DS_MATRIX_H
 
+#include "o3ds_export.h"
 #include <cmath>
 
 namespace O3DS
 {
 	using std::sqrt;
 
-	double rad(double deg);
+	O3DS_API double rad(double deg);
 
 	/*! \class Vector4 math.h o3ds\math.h */
 	//! A templated type 3D vector4 

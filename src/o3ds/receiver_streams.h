@@ -31,6 +31,7 @@ SOFTWARE.
 // provides the skeleton fingerprint the receiver uses to decide when bone
 // names must be republished (RCV-4).
 
+#include "o3ds_export.h"
 #include "model.h"
 #include "reorder_gate.h"
 #include "clock_offset.h"
@@ -63,18 +64,18 @@ namespace O3DS
 	//! SubjectList::PeekMeta it does not check the CRC; Parse() does.
 	//! Returns false, with `out` reset to defaults, when the buffer is
 	//! rejected.
-	bool PeekPacketMeta(const char* data, size_t len, PacketMeta& out);
+	O3DS_API bool PeekPacketMeta(const char* data, size_t len, PacketMeta& out);
 
 	//! A 64-bit FNV-1a hash of the sorted, de-duplicated subject names, used
 	//! as the key of a new sender stream (see ReceiverStreamTable::
 	//! ResolveKey). Returns 0 for no names, and never 0 otherwise.
-	uint64_t StreamKeyForNames(std::vector<std::string> names);
+	O3DS_API uint64_t StreamKeyForNames(std::vector<std::string> names);
 
 	//! 64-bit FNV-1a over the transform count and, per transform, its
 	//! name (length-prefixed) and parent id (RCV-4). Two skeletons with the
 	//! same hierarchy but different bone names get different fingerprints.
 	//! A null transform pointer contributes a fixed marker.
-	uint64_t SkeletonFingerprint(const Subject& subject);
+	O3DS_API uint64_t SkeletonFingerprint(const Subject& subject);
 
 	//! Tuning for LegacyOrdering. The defaults match the UE receiver's
 	//! console variables.
@@ -91,7 +92,7 @@ namespace O3DS
 	//! state (ADR 0005 (ix)). A reset here only forgets the last applied
 	//! time; it does not touch the stream's ReorderGate, clock estimator
 	//! or any concealment state (RCV-34).
-	class LegacyOrdering
+	class O3DS_API LegacyOrdering
 	{
 	public:
 		enum class Decision
@@ -143,7 +144,7 @@ namespace O3DS
 	//! restart. Limitation: a sender that splits its subjects over separate
 	//! packets that share one tx_seq counter would look like several streams
 	//! with gaps; no current sender does that.
-	class ReceiverStreamTable
+	class O3DS_API ReceiverStreamTable
 	{
 	public:
 		static constexpr size_t kDefaultMaxStreams = 64;
@@ -151,6 +152,15 @@ namespace O3DS
 		//! `computeWorldMatrices` is copied into each new stream's
 		//! SubjectList::mComputeWorldMatrices.
 		explicit ReceiverStreamTable(size_t maxStreams = kDefaultMaxStreams, bool computeWorldMatrices = true);
+
+		// Move-only: the streams are owned through std::unique_ptr. Declared
+		// explicitly because an O3DS_API class gets every member instantiated
+		// by MSVC, and the implicit copy constructor of a std::map of
+		// std::unique_ptr does not compile (see o3ds_export.h).
+		ReceiverStreamTable(const ReceiverStreamTable&) = delete;
+		ReceiverStreamTable& operator=(const ReceiverStreamTable&) = delete;
+		ReceiverStreamTable(ReceiverStreamTable&&) = default;
+		ReceiverStreamTable& operator=(ReceiverStreamTable&&) = default;
 
 		//! The key of the stream a packet with these subject names belongs
 		//! to: the stream owning the first already-known name, otherwise

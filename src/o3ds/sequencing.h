@@ -25,6 +25,7 @@ SOFTWARE.
 #ifndef OPEN3D_STREAM_SEQUENCING_H
 #define OPEN3D_STREAM_SEQUENCING_H
 
+#include "o3ds_export.h"
 #include <atomic>
 #include <cstdint>
 
@@ -65,7 +66,7 @@ namespace O3DS
 	//! can jump under NTP adjustment - it is transmitted for latency/
 	//! staleness estimation only. Frame *ordering* must never depend on it;
 	//! use tx_seq for that.
-	uint64_t NowUtcMicros();
+	O3DS_API uint64_t NowUtcMicros();
 
 	//! Generates a value for SubjectList.frame_epoch. Call this ONCE per
 	//! publisher session (e.g. alongside SequenceCounter::Reset(), when a
@@ -87,7 +88,7 @@ namespace O3DS
 	//! sequence happens to climb back above the old one before the gate
 	//! would otherwise flag it as stale. A future revision could use a
 	//! persisted counter instead if this proves insufficient in practice.
-	uint32_t NewSessionEpoch();
+	O3DS_API uint32_t NewSessionEpoch();
 }
 
 #endif

@@ -35,6 +35,7 @@ SOFTWARE.
 //     persistent (residual/quantized) encodings (SND-1/2/3/13/14,
 //     ADR 0005 (ii)).
 
+#include "o3ds_export.h"
 #include <cstdint>
 
 namespace O3DS
@@ -59,7 +60,7 @@ namespace O3DS
 	//! `inOutLastSlot <= 0` means "no capture yet": the call captures and
 	//! anchors to `nowSeconds`. `rateHz <= 0` (or NaN) disables limiting: every
 	//! call captures and `inOutLastSlot` tracks `nowSeconds`.
-	bool ConsumeCaptureBudget(double nowSeconds, double& inOutLastSlot, double rateHz,
+	O3DS_API bool ConsumeCaptureBudget(double nowSeconds, double& inOutLastSlot, double rateHz,
 		double toleranceSeconds = kCaptureRateToleranceSeconds);
 
 	//! Per-curve send filter for the legacy (full-snapshot) encoding (SND-4).
@@ -74,7 +75,7 @@ namespace O3DS
 	//!
 	//! The caller records `inOutValue` as the new last-sent value whenever this
 	//! returns true.
-	bool FilterCurveValue(float& inOutValue, bool hasLastSent, float lastSent,
+	O3DS_API bool FilterCurveValue(float& inOutValue, bool hasLastSent, float lastSent,
 		float epsilon, float deltaThreshold);
 
 	//! Inputs describing one frame of one subject, for FullSyncTracker.
@@ -102,7 +103,7 @@ namespace O3DS
 	//! the periodic interval elapsed since the last full sync (or the clock
 	//! went backwards), or RequestFullSync() was called (for example a
 	//! transport reporting a new peer).
-	class FullSyncTracker
+	class O3DS_API FullSyncTracker
 	{
 	public:
 		enum Reason : uint32_t

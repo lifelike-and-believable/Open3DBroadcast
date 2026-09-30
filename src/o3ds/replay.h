@@ -25,6 +25,7 @@ SOFTWARE.
 #ifndef OPEN3D_STREAM_REPLAY_H
 #define OPEN3D_STREAM_REPLAY_H
 
+#include "o3ds_export.h"
 #include "capture.h"
 #include "reorder_gate.h" // O3DS::Frame
 
@@ -74,7 +75,7 @@ namespace O3DS
 	//! Requires `in` to be seekable if `config.loop` is true (needs to
 	//! rewind to the start); a non-seekable stream with loop=false works
 	//! for a single pass.
-	bool ReplayCapture(std::istream& in, const ReplayConfig& config,
+	O3DS_API bool ReplayCapture(std::istream& in, const ReplayConfig& config,
 		const ReplaySink& sink, CaptureHeaderInfo* outHeader = nullptr);
 }
 

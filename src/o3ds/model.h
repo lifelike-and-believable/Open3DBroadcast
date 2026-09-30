@@ -25,6 +25,7 @@ SOFTWARE.
 #ifndef OPEN3D_STREAM_MODEL_H
 #define OPEN3D_STREAM_MODEL_H
 
+#include "o3ds_export.h"
 #include <vector>
 #include <string>
 #include <utility>
@@ -41,7 +42,7 @@ namespace O3DS
 {
 	/*! \class Transform model.h o3ds/model.h */
 	//! Defines a single transform with name and parent id reference
-	class Transform
+	class O3DS_API Transform
 	{
 	public:
 		Transform(const std::string& name, int parentId, void *ref = nullptr);
@@ -169,7 +170,7 @@ namespace O3DS
 	/*! \class Subject model.h o3ds/model.h
 	 *  The subject can also have a SubjectInfo reference for implementation specific data */
 	//! A collection of transforms, with a name
-	class Subject
+	class O3DS_API Subject
 	{
 	public:
 		Subject(void *info = nullptr) 
@@ -323,7 +324,7 @@ namespace O3DS
 
 	/*! \class SubjectList model.h o3ds/model.h */
 	//!  A collection of subjects.
-	class SubjectList
+	class O3DS_API SubjectList
 	{
 	public:
 
@@ -501,7 +502,7 @@ namespace O3DS
 
 	};
 
-	void finalize(flatbuffers::FlatBufferBuilder& builder, std::vector<char>& outbuf, std::uint32_t flags);
+	O3DS_API void finalize(flatbuffers::FlatBufferBuilder& builder, std::vector<char>& outbuf, std::uint32_t flags);
 
 
 } // O3DS
