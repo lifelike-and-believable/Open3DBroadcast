@@ -74,7 +74,6 @@ public class Open3DTransportWebRTC : ModuleRules
             "Core",
             "CoreUObject",
             "Engine",
-            "Projects", // For IPluginManager
             "HTTP", // For HTTP token fetching
             "Json", // For JSON parsing
             "JsonUtilities" // For JSON serialization utilities

@@ -83,7 +83,7 @@ public class Open3DTransportMoQ : ModuleRules
                                        $"See ThirdParty/moq-ffi/README.md for setup instructions.");
             }
             
-            // Delay load to allow custom loading logic in MoQFfiSupport
+            // Delay-loaded: the module loads it from the plugin through FO3DFfiLibrary (Open3DShared) first
             PublicDelayLoadDLLs.Add("moq_ffi.dll");
             
             // Register the DLL as a runtime dependency for packaging
@@ -120,8 +120,8 @@ public class Open3DTransportMoQ : ModuleRules
         {
             "Core",
             "CoreUObject",
-            "Engine",
-            "Projects" // For IPluginManager (DLL loading)
+            "Engine"
+            // No "Projects": moq_ffi is located and loaded by FO3DFfiLibrary in Open3DShared (TRF-28).
         });
 
         // Private dependencies

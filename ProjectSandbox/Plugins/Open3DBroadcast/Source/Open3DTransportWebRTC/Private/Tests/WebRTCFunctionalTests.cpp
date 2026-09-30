@@ -286,7 +286,6 @@ namespace WebRTCS7Test
 		Api.lk_send_data_ex = &Fake_send_data_ex;
 		Api.lk_set_default_data_labels = &Fake_set_default_data_labels;
 		Api.lk_set_log_level = &Fake_set_log_level;
-		Api.bUsesLinkedLibrary = false;
 		return Api;
 	}
 

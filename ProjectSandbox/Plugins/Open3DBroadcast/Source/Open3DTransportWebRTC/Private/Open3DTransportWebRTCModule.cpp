@@ -1,6 +1,5 @@
 #include "Modules/ModuleManager.h"
-#include "Interfaces/IPluginManager.h"
-#include "HAL/PlatformProcess.h"
+#include "O3DFfiLibrary.h"
 #include "Sender/WebRTCSender.h"
 #include "Receiver/WebRTCReceiver.h"
 #include "Shared/WebRTCUtils.h"
@@ -1047,14 +1046,26 @@ class FOpen3DTransportWebRTCModule : public IModuleInterface
 public:
 	virtual void StartupModule() override
 	{
-		// Load the LiveKit FFI DLL from the plugin's ThirdParty directory
-		LoadLiveKitFFI();
+		// livekit_ffi.dll is delay-loaded, so it must be loaded from the plugin before the first
+		// call. Without it the transport is not registered at all: a factory would otherwise
+		// hand out instances whose first FFI call fails on delay-load (TRF-14).
+		Library = MakeShared<FO3DFfiLibrary, ESPMode::ThreadSafe>(MakeLiveKitLibraryDesc());
+		if (!Library->Load())
+		{
+			UE_LOG(LogO3DWebRTCSender, Error, TEXT("WebRTC transport not registered: %s"), *Library->GetStatusMessage());
+			return;
+		}
 
-		// Register WebRTC sender factory
-		O3DTransport::RegisterSender(WebRTCConfig::TransportName, []() { return MakeShared<FO3DWebRTCSender>(); });
-
-		// Register WebRTC receiver factory
-		O3DTransport::RegisterReceiver(WebRTCConfig::TransportName, []() { return MakeShared<FO3DWebRTCReceiver>(); });
+		// Every instance is tracked so ShutdownModule can stop it before unloading livekit_ffi.
+		const TSharedRef<FO3DFfiLibrary, ESPMode::ThreadSafe> LibraryRef = Library.ToSharedRef();
+		O3DTransport::RegisterSender(WebRTCConfig::TransportName, [LibraryRef]() -> TSharedPtr<IOpen3DSender>
+		{
+			return LibraryRef->TrackInstance(MakeShared<FO3DWebRTCSender, ESPMode::ThreadSafe>());
+		});
+		O3DTransport::RegisterReceiver(WebRTCConfig::TransportName, [LibraryRef]() -> TSharedPtr<IOpen3DReceiver>
+		{
+			return LibraryRef->TrackInstance(MakeShared<FO3DWebRTCReceiver, ESPMode::ThreadSafe>());
+		});
 
 		// Register WebRTC sender customization
 		FO3DSenderTransportCustomization SenderCustomization;
@@ -1158,67 +1169,36 @@ public:
 		O3DTransport::UnregisterSender(WebRTCConfig::TransportName);
 		O3DTransport::UnregisterReceiver(WebRTCConfig::TransportName);
 
-		// Unload the LiveKit FFI DLL
-		UnloadLiveKitFFI();
+		// TRF-14: stop instances that outlive the module (components, LiveLink sources), then
+		// unload. FO3DFfiLibrary keeps the DLL loaded if an instance is still referenced.
+		if (Library.IsValid())
+		{
+			Library->StopLiveInstances();
+			Library->Unload();
+		}
 
 		UE_LOG(LogO3DWebRTCSender, Log, TEXT("Open3D WebRTC transport module shut down"));
 	}
 
 private:
-	void* LiveKitFFIHandle = nullptr;
+	/** livekit_ffi and the instances created from it. The registered factories hold a reference too. */
+	TSharedPtr<FO3DFfiLibrary, ESPMode::ThreadSafe> Library;
 
-	void LoadLiveKitFFI()
+	/**
+	 * Location of livekit_ffi relative to the plugin that ships this module. WP-F11 moves the
+	 * module to the Open3DBroadcastWebRTC add-on and changes OwningPluginName with it.
+	 */
+	static FO3DFfiLibraryDesc MakeLiveKitLibraryDesc()
 	{
-		// Get the plugin base directory
-		TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Open3DBroadcast"));
-		if (!Plugin.IsValid())
-		{
-			UE_LOG(LogO3DWebRTCSender, Error, TEXT("Failed to find Open3DBroadcast plugin"));
-			return;
-		}
-
-		// Construct path to the DLL in ThirdParty/livekit_ffi/bin/Win64/
-		FString DLLPath = FPaths::Combine(
-			Plugin->GetBaseDir(),
-			TEXT("Source"),
-			TEXT("Open3DTransportWebRTC"),
-			TEXT("ThirdParty"),
-			TEXT("livekit_ffi"),
-			TEXT("bin"),
+		FO3DFfiLibraryDesc Desc;
+		Desc.DisplayName = TEXT("LiveKit FFI");
+		Desc.OwningPluginName = TEXT("Open3DBroadcast");
 #if PLATFORM_WINDOWS
-			TEXT("Win64")
+		Desc.RelativePath = TEXT("Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/bin/Win64/livekit_ffi.dll");
 #else
 #error "Unsupported platform for LiveKit FFI"
 #endif
-		);
-
-		DLLPath = FPaths::Combine(DLLPath, TEXT("livekit_ffi.dll"));
-
-		if (!FPaths::FileExists(DLLPath))
-		{
-			UE_LOG(LogO3DWebRTCSender, Error, TEXT("LiveKit FFI DLL not found at: %s"), *DLLPath);
-			return;
-		}
-
-		// Load the DLL
-		LiveKitFFIHandle = FPlatformProcess::GetDllHandle(*DLLPath);
-		if (LiveKitFFIHandle == nullptr)
-		{
-			UE_LOG(LogO3DWebRTCSender, Error, TEXT("Failed to load LiveKit FFI DLL from: %s"), *DLLPath);
-			return;
-		}
-
-		UE_LOG(LogO3DWebRTCSender, Log, TEXT("Successfully loaded LiveKit FFI DLL from: %s"), *DLLPath);
-	}
-
-	void UnloadLiveKitFFI()
-	{
-		if (LiveKitFFIHandle != nullptr)
-		{
-			FPlatformProcess::FreeDllHandle(LiveKitFFIHandle);
-			LiveKitFFIHandle = nullptr;
-			UE_LOG(LogO3DWebRTCSender, Log, TEXT("LiveKit FFI DLL unloaded"));
-		}
+		return Desc;
 	}
 };
 

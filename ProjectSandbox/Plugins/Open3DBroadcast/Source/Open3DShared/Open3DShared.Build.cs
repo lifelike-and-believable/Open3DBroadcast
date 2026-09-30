@@ -39,7 +39,10 @@ public class Open3DShared : ModuleRules
             "Engine"
         });
 
-        PrivateDependencyModuleNames.AddRange(new string[] {});
+        PrivateDependencyModuleNames.AddRange(new string[]
+        {
+            "Projects" // IPluginManager: FO3DFfiLibrary finds FFI DLLs relative to the owning plugin (TRF-28)
+        });
     }
 }
 

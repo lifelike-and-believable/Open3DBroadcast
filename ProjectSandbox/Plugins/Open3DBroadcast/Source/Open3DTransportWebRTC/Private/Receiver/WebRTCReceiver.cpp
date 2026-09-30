@@ -1,11 +1,8 @@
 #include "WebRTCReceiver.h"
 #include "O3DRedact.h"
 #include "../Shared/WebRTCUtils.h"
-#include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
-#include "Interfaces/IPluginManager.h"
 #include "Logging/LogMacros.h"
-#include "Misc/Paths.h"
 #include "Math/NumericLimits.h"
 #include "Containers/StringConv.h"
 #include "O3DFfiContextRegistry.h"
@@ -33,64 +30,6 @@ namespace
     {
         static TO3DFfiContextRegistry<FWebRTCReceiverLink> Registry;
         return Registry;
-    }
-
-    FString GetPluginBaseDir()
-    {
-        if (TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Open3DBroadcast")))
-        {
-            return Plugin->GetBaseDir();
-        }
-        return FString();
-    }
-
-    static void* GLiveKitFfiHandle = nullptr;
-
-    void EnsureLiveKitFfiLoaded()
-    {
-#if PLATFORM_WINDOWS
-        if (GLiveKitFfiHandle)
-        {
-            return;
-        }
-
-        const FString PluginBaseDir = GetPluginBaseDir();
-        if (PluginBaseDir.IsEmpty())
-        {
-            UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Unable to locate Open3DBroadcast plugin directory while loading LiveKit FFI."));
-        }
-
-        const FString DllName = TEXT("livekit_ffi.dll");
-        FString CandidatePath;
-        if (!PluginBaseDir.IsEmpty())
-        {
-            CandidatePath = FPaths::Combine(PluginBaseDir, TEXT("Binaries"), TEXT("Win64"), DllName);
-            if (!FPaths::FileExists(CandidatePath))
-            {
-                CandidatePath = FPaths::Combine(PluginBaseDir, TEXT("ThirdParty"), TEXT("livekit_ffi"), TEXT("bin"), TEXT("Win64"), TEXT("Release"), DllName);
-            }
-        }
-
-        if (!CandidatePath.IsEmpty() && FPaths::FileExists(CandidatePath))
-        {
-            void* Handle = FPlatformProcess::GetDllHandle(*CandidatePath);
-            if (Handle)
-            {
-                GLiveKitFfiHandle = Handle;
-                UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("LiveKit FFI loaded from %s"), *CandidatePath);
-            }
-            else
-            {
-                UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Failed to load LiveKit FFI from %s"), *CandidatePath);
-            }
-        }
-        else
-        {
-            UE_LOG(LogO3DWebRTCReceiver, Verbose, TEXT("LiveKit FFI DLL not found near plugin; relying on the module's loader."));
-        }
-#else
-        // Non-Windows platforms rely on the runtime dependency staging provided by the build scripts.
-#endif
     }
 
     void LogIfFailed(const FLkFfiApi& Ffi, const LkResult& Result, const TCHAR* Context)
@@ -651,11 +590,7 @@ bool FO3DWebRTCReceiver::SetupClientHandle()
         return true;
     }
 
-    if (Ffi.bUsesLinkedLibrary)
-    {
-        EnsureLiveKitFfiLoaded();
-    }
-
+    // livekit_ffi.dll was loaded by the module before this transport was registered (TRF-28).
     ClientHandle = Ffi.lk_client_create();
     if (!ClientHandle)
     {

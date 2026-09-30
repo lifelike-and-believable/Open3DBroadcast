@@ -194,7 +194,7 @@ $env:O3D_WITH_TRANSPORT_MOQ = "1"
 1. Check that `O3D_WITH_TRANSPORT_MOQ=1` (or unset)
 2. Rebuild the plugin with correct flag
 3. Check Output Log for "MoQ transport module started" message
-4. Verify no errors during `FMoQFfiSupport::LoadLibrary()`
+4. Verify the log shows no "MoQ transport not registered" error (library load and validation)
 
 ## See Also
 

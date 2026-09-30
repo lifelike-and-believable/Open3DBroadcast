@@ -1,120 +1,35 @@
 #include "Shared/MoQFfiSupport.h"
-#include "HAL/PlatformProcess.h"
-#include "Interfaces/IPluginManager.h"
-#include "Misc/Paths.h"
 #include "MoQFfiApi.h"
-#include "moq_ffi.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogMoQFfiSupport, Log, All);
 
-// Static member initialization
-void* FMoQFfiSupport::LibraryHandle = nullptr;
-FString FMoQFfiSupport::LibraryPath = TEXT("");
-FString FMoQFfiSupport::StatusMessage = TEXT("Not loaded");
-bool FMoQFfiSupport::bIsLoaded = false;
-
-bool FMoQFfiSupport::LoadLibrary()
+namespace MoQFfiSupportPrivate
 {
-	if (bIsLoaded)
-	{
-		UE_LOG(LogMoQFfiSupport, Warning, TEXT("MoQ FFI library already loaded"));
-		return true;
-	}
-
-	// Construct path to the library
-	LibraryPath = ConstructLibraryPath();
-	if (LibraryPath.IsEmpty())
-	{
-		StatusMessage = TEXT("Failed to construct library path");
-		UE_LOG(LogMoQFfiSupport, Error, TEXT("%s"), *StatusMessage);
-		return false;
-	}
-
-	// Check if file exists
-	if (!FPaths::FileExists(LibraryPath))
-	{
-		StatusMessage = FString::Printf(TEXT("MoQ FFI library not found at: %s"), *LibraryPath);
-		UE_LOG(LogMoQFfiSupport, Error, TEXT("%s"), *StatusMessage);
-		UE_LOG(LogMoQFfiSupport, Error, TEXT("Please ensure moq-ffi binaries are built for your platform."));
-		UE_LOG(LogMoQFfiSupport, Error, TEXT("See ThirdParty/moq-ffi/README.md for build instructions."));
-		return false;
-	}
-
-	// Load the library
-	LibraryHandle = FPlatformProcess::GetDllHandle(*LibraryPath);
-	if (LibraryHandle == nullptr)
-	{
-		StatusMessage = FString::Printf(TEXT("Failed to load MoQ FFI library from: %s"), *LibraryPath);
-		UE_LOG(LogMoQFfiSupport, Error, TEXT("%s"), *StatusMessage);
-		return false;
-	}
-
-	// Validate the library
-	if (!ValidateLibrary())
-	{
-		StatusMessage = TEXT("MoQ FFI library loaded but validation failed");
-		UE_LOG(LogMoQFfiSupport, Error, TEXT("%s"), *StatusMessage);
-		FPlatformProcess::FreeDllHandle(LibraryHandle);
-		LibraryHandle = nullptr;
-		return false;
-	}
-
-	// TRF-29: moq_version is a required export (ValidateLibrary checked it), so an empty
-	// version here means the library returned null, which is a mismatch too. moq-ffi exports no
-	// structured ABI version; until it does, the Draft 07 marker in the version string is the
-	// only build check available (the shipped DLL reports "moq_ffi 0.1.0 (IETF Draft 07)").
-	const FString Version = GetVersion();
-	if (Version.IsEmpty() || !Version.Contains(TEXT("Draft 07")))
-	{
-		StatusMessage = FString::Printf(TEXT("MoQ FFI build mismatch (reported '%s'). Rebuild moq-ffi with --features with_moq_draft07."), *Version);
-		UE_LOG(LogMoQFfiSupport, Error, TEXT("%s"), *StatusMessage);
-		FPlatformProcess::FreeDllHandle(LibraryHandle);
-		LibraryHandle = nullptr;
-		return false;
-	}
-
-	bIsLoaded = true;
-
-	StatusMessage = FString::Printf(TEXT("MoQ FFI library loaded successfully (version %s)"), *Version);
-	UE_LOG(LogMoQFfiSupport, Log, TEXT("Successfully loaded MoQ FFI library from: %s"), *LibraryPath);
-	UE_LOG(LogMoQFfiSupport, Log, TEXT("MoQ FFI version: %s"), *Version);
-
-	return true;
+	/** Plugin that ships moq_ffi. The path below is relative to its base directory. */
+	static constexpr TCHAR OwningPluginName[] = TEXT("Open3DBroadcast");
 }
 
-void FMoQFfiSupport::UnloadLibrary()
+FO3DFfiLibraryDesc FMoQFfiSupport::MakeLibraryDesc()
 {
-	if (!bIsLoaded || LibraryHandle == nullptr)
-	{
-		return;
-	}
-
-	FPlatformProcess::FreeDllHandle(LibraryHandle);
-	LibraryHandle = nullptr;
-	bIsLoaded = false;
-	StatusMessage = TEXT("Library unloaded");
-
-	UE_LOG(LogMoQFfiSupport, Log, TEXT("MoQ FFI library unloaded"));
+	FO3DFfiLibraryDesc Desc;
+	Desc.DisplayName = TEXT("MoQ FFI");
+	Desc.OwningPluginName = MoQFfiSupportPrivate::OwningPluginName;
+#if PLATFORM_WINDOWS
+	Desc.RelativePath = TEXT("Source/Open3DTransportMoQ/ThirdParty/moq-ffi/bin/Win64/Release/moq_ffi.dll");
+#elif PLATFORM_LINUX
+	Desc.RelativePath = TEXT("Source/Open3DTransportMoQ/ThirdParty/moq-ffi/bin/Linux/Release/libmoq_ffi.so");
+#elif PLATFORM_MAC
+	Desc.RelativePath = TEXT("Source/Open3DTransportMoQ/ThirdParty/moq-ffi/bin/Mac/Release/libmoq_ffi.dylib");
+#else
+	#error "Unsupported platform for MoQ FFI"
+#endif
+	return Desc;
 }
 
-bool FMoQFfiSupport::IsLoaded()
+FString FMoQFfiSupport::GetVersion(const FO3DFfiLibrary& Library)
 {
-	return bIsLoaded;
-}
-
-FString FMoQFfiSupport::GetVersion()
-{
-	if (LibraryHandle == nullptr)
-	{
-		return FString();
-	}
-
-	// Try to get version from FFI library
-	// Note: This assumes moq_ffi exports a version function
-	// If not available, we'll need to track version in our vendored README
-	typedef const char* (*FnGetVersion)();
-	FnGetVersion GetVersionFunc = (FnGetVersion)FPlatformProcess::GetDllExport(LibraryHandle, TEXT("moq_version"));
-	
+	using FnGetVersion = const char* (*)();
+	const FnGetVersion GetVersionFunc = reinterpret_cast<FnGetVersion>(Library.GetExport(TEXT("moq_version")));
 	if (GetVersionFunc != nullptr)
 	{
 		const char* VersionCStr = GetVersionFunc();
@@ -129,53 +44,11 @@ FString FMoQFfiSupport::GetVersion()
 	return FString();
 }
 
-FString FMoQFfiSupport::GetLibraryPath()
+bool FMoQFfiSupport::ValidateLibrary(const FO3DFfiLibrary& Library, FString& OutError)
 {
-	return LibraryPath;
-}
-
-FString FMoQFfiSupport::GetStatusMessage()
-{
-	return StatusMessage;
-}
-
-FString FMoQFfiSupport::ConstructLibraryPath()
-{
-	// Get the plugin base directory
-	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Open3DBroadcast"));
-	if (!Plugin.IsValid())
+	if (!Library.IsLoaded())
 	{
-		UE_LOG(LogMoQFfiSupport, Error, TEXT("Failed to find Open3DBroadcast plugin"));
-		return FString();
-	}
-
-	// Construct path to the library in ThirdParty/moq-ffi/bin/<Platform>/Release/
-	FString Path = FPaths::Combine(
-		Plugin->GetBaseDir(),
-		TEXT("Source"),
-		TEXT("Open3DTransportMoQ"),
-		TEXT("ThirdParty"),
-		TEXT("moq-ffi"),
-		TEXT("bin")
-	);
-
-#if PLATFORM_WINDOWS
-	Path = FPaths::Combine(Path, TEXT("Win64"), TEXT("Release"), TEXT("moq_ffi.dll"));
-#elif PLATFORM_LINUX
-	Path = FPaths::Combine(Path, TEXT("Linux"), TEXT("Release"), TEXT("libmoq_ffi.so"));
-#elif PLATFORM_MAC
-	Path = FPaths::Combine(Path, TEXT("Mac"), TEXT("Release"), TEXT("libmoq_ffi.dylib"));
-#else
-	#error "Unsupported platform for MoQ FFI"
-#endif
-
-	return FPaths::ConvertRelativePathToFull(Path);
-}
-
-bool FMoQFfiSupport::ValidateLibrary()
-{
-	if (LibraryHandle == nullptr)
-	{
+		OutError = TEXT("MoQ FFI library is not loaded");
 		return false;
 	}
 
@@ -184,8 +57,7 @@ bool FMoQFfiSupport::ValidateLibrary()
 	bool bAllValid = true;
 	for (const TCHAR* SymbolName : FMoQFfiApi::GetRequiredSymbolNames())
 	{
-		void* Proc = FPlatformProcess::GetDllExport(LibraryHandle, SymbolName);
-		if (Proc == nullptr)
+		if (Library.GetExport(SymbolName) == nullptr)
 		{
 			UE_LOG(LogMoQFfiSupport, Error, TEXT("Required symbol '%s' not found in MoQ FFI library"), SymbolName);
 			bAllValid = false;
@@ -198,10 +70,22 @@ bool FMoQFfiSupport::ValidateLibrary()
 
 	if (!bAllValid)
 	{
-		UE_LOG(LogMoQFfiSupport, Error, TEXT("MoQ FFI library validation failed - missing required symbols"));
-		UE_LOG(LogMoQFfiSupport, Error, TEXT("Library may be outdated or corrupted. Try refreshing from upstream."));
-		UE_LOG(LogMoQFfiSupport, Error, TEXT("See ThirdParty/moq-ffi/README.md for refresh instructions."));
+		OutError = FString::Printf(TEXT("MoQ FFI library at %s is missing required symbols. It may be outdated or corrupted; see ThirdParty/moq-ffi/README.md for refresh instructions."),
+			*Library.GetLibraryPath());
+		return false;
 	}
 
-	return bAllValid;
+	// TRF-29: moq_version is a required export (checked above), so an empty version here means
+	// the library returned null, which is a mismatch too. moq-ffi exports no structured ABI
+	// version; until it does, the Draft 07 marker in the version string is the only build check
+	// available (the shipped DLL reports "moq_ffi 0.1.0 (IETF Draft 07)").
+	const FString Version = GetVersion(Library);
+	if (Version.IsEmpty() || !Version.Contains(TEXT("Draft 07")))
+	{
+		OutError = FString::Printf(TEXT("MoQ FFI build mismatch (reported '%s'). Rebuild moq-ffi with --features with_moq_draft07."), *Version);
+		return false;
+	}
+
+	UE_LOG(LogMoQFfiSupport, Log, TEXT("MoQ FFI version: %s"), *Version);
+	return true;
 }

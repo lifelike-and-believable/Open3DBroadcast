@@ -43,9 +43,6 @@ struct FLkFfiApi
 	LkResult (*lk_set_default_data_labels)(LkClientHandle*, const char* reliable_label, const char* lossy_label) = nullptr;
 	LkResult (*lk_set_log_level)(LkClientHandle*, LkLogLevel level) = nullptr;
 
-	/** True only for the table returned by GetLinkedLkFfiApi(); gates DLL loading helpers. */
-	bool bUsesLinkedLibrary = false;
-
 	/** True when every function pointer is set. Transports refuse to initialize otherwise. */
 	bool IsComplete() const;
 
