@@ -131,7 +131,7 @@ private:
      */
     static bool ReportAttemptState(FMoQConnectAttempt& Attempt, MoqConnectionState State);
     /** Body of the background connect task. */
-    static void RunConnectAttempt(const FMoQFfiApi& Api, const FMoQClientRef& Client, FMoQConnectAttempt& Attempt, void* Token, const FString& Url);
+    static void RunConnectAttempt(const FMoQFfiApi& InApi, const FMoQClientRef& InClient, FMoQConnectAttempt& Attempt, void* Token, const FString& Url);
     /** Game thread: applies a state change of attempt AttemptId (0 = no attempt) and broadcasts it. */
     void HandleConnectionStateOnGameThread(uint64 AttemptId, MoqConnectionState State);
     /** Test entry point: records State for the current attempt and dispatches it. */

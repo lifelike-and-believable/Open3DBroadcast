@@ -215,18 +215,18 @@ FMoQResult FMoQSessionWrapper::Connect()
     return FMoQResult::FromCode(EMoQErrorCode::Ok, TEXT("Connection initiated (async)"));
 }
 
-void FMoQSessionWrapper::RunConnectAttempt(const FMoQFfiApi& Api, const FMoQClientRef& ClientRef, FMoQConnectAttempt& Attempt, void* Token, const FString& Url)
+void FMoQSessionWrapper::RunConnectAttempt(const FMoQFfiApi& InApi, const FMoQClientRef& InClient, FMoQConnectAttempt& Attempt, void* Token, const FString& Url)
 {
     // TRF-39: no try/catch here. A Rust panic is not a C++ exception; moq-ffi wraps every export
     // in catch_unwind and reports panics through the MoqResult instead.
     FTCHARToUTF8 UrlUtf8(*Url);
-    const MoqResult RawResult = Api.Connect
-        ? Api.Connect(ClientRef->Get(), UrlUtf8.Get(), &FMoQSessionWrapper::HandleConnectionStateThunk, Token)
+    const MoqResult RawResult = InApi.Connect
+        ? InApi.Connect(InClient->Get(), UrlUtf8.Get(), &FMoQSessionWrapper::HandleConnectionStateThunk, Token)
         : MoqResult{MOQ_ERROR_INTERNAL, nullptr};
 
-    const FMoQResult Wrapped = FMoQResult::FromResult(RawResult, Api);
+    const FMoQResult Wrapped = FMoQResult::FromResult(RawResult, InApi);
     // Same thread as the failing call, read at once: the only valid use of moq_last_error().
-    const FString LastError = Wrapped.IsOk() ? FString() : MoQFfi::CopyLastErrorOnThisThread(Api);
+    const FString LastError = Wrapped.IsOk() ? FString() : MoQFfi::CopyLastErrorOnThisThread(InApi);
 
     const TSharedPtr<FMoQConnectionContext, ESPMode::ThreadSafe> Connection = Attempt.Connection.Pin();
     const bool bStale = !Connection.IsValid() || Connection->ActiveAttemptId.load() != Attempt.AttemptId;
@@ -260,10 +260,10 @@ void FMoQSessionWrapper::RunConnectAttempt(const FMoQFfiApi& Api, const FMoQClie
     {
         // Connected after the attempt was abandoned (timeout, Disconnect or a newer Connect).
         UE_LOG(LogMoQBridge, Log, TEXT("moq_connect attempt %llu completed after it was abandoned; closing it"), Attempt.AttemptId);
-        if (Api.Disconnect)
+        if (InApi.Disconnect)
         {
-            const MoqResult DisconnectResult = Api.Disconnect(ClientRef->Get());
-            MoQFfi::CopyAndFreeString(Api, DisconnectResult.message);
+            const MoqResult DisconnectResult = InApi.Disconnect(InClient->Get());
+            MoQFfi::CopyAndFreeString(InApi, DisconnectResult.message);
         }
         return;
     }
