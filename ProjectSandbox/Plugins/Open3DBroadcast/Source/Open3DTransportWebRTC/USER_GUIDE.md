@@ -146,14 +146,14 @@ Content-Type: application/json
 ### Room Configuration
 
 **Room Name**
-- Encoded in JWT token
+- Manual token mode: encoded in the JWT token
+- Auto Token Fetch: set the **Room** field (transport option `webrtc.room`) to the same value on the sender and the receiver. It is required; the transport does not start without it
 - Multiple senders/receivers can join same room
 - Different rooms are isolated (no crosstalk)
 
 **Identity**
 - Unique identifier for this participant in the room
-- Used for display and tracking
-- Example: "Sender1", "Receiver_Studio_A"
+- Auto Token Fetch generates one per sender or receiver instance (`sender-<pid>-<id>`, `receiver-<pid>-<id>`), so several in one editor do not replace each other
 
 ---
 

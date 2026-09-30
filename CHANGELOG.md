@@ -59,6 +59,15 @@
 - The receiver's audio sink holds a snapshot of the audio defaults instead of a back-reference to the LiveLink source, and a frame delivered off the game thread is forwarded to the game thread before the source is pinned (RCV-1). The WebRTC receiver reads its audio sink under a dedicated lock.
 - The sender audio capture component hands its audio and capture threads an immutable parameter snapshot, and each producer has its own scratch buffer; they no longer read the component (SND-6). The submix listener is unregistered from the submix it was registered on, and registering it again first removes the old registration (SND-7).
 - `FO3DAudioBus` is game-thread-only and checks it; publishing with no listener returns early (SHR-10).
+- WebRTC (WP-S7): auto-fetch token mode now connects. The transport tracks a pending connect separately from the token and connects on the next `Tick()`/`Poll()` after the token arrives (TRF-3). Fetch results are stored by the token manager and read on the game thread; the HTTP callback no longer writes transport members (TRF-15).
+- WebRTC: refreshed tokens are passed to LiveKit with `lk_refresh_token`. If the receiver's refresh call fails it reconnects with the new token; the sender keeps its session and uses the new token on its next connect (TRF-23). An expired token is logged once instead of every frame.
+- WebRTC: token fetch callbacks and retries hold the fetcher's state weakly instead of `this`, retries use the core ticker instead of the `GWorld` timer manager, completion delegates are unbound before a request is cancelled, and the 30 s fetch timeout is enforced (TRF-24).
+- WebRTC sender: `Send(SubjectList)` serializes the caller's list once. It no longer copies the caller's transform pointers into a pooled subject, which could delete them twice on a failed send (TRF-4). The serializer pool is gone (TRF-19).
+- WebRTC sender: the estimated pending-frame counter no longer drops frames or logs warnings on a healthy link. A send fails only when `lk_send_data_ex` reports an error (TRF-5).
+- WebRTC: audio track names, data channel labels, URLs and tokens are converted to UTF-8 with a converter that lives until the LiveKit call returns (TRF-2). The receiver decodes labels and track names as UTF-8, so non-ASCII subject names match on both sides, and the CRC-keyed label cache is removed (TRF-31).
+- WebRTC receiver: only the labeled data callback is registered. The unlabeled callback is registered only if the labeled one cannot be, so a packet is no longer queued twice or under a phantom `default` subject (TRF-16).
+- WebRTC receiver: LiveKit callbacks receive an opaque registry token instead of the receiver's address, and the state they touch moved into a separate object. This removes the WP-S5 exception for the receiver. The receiver no longer logs part of the token.
+- WebRTC: each sender and receiver uses its own LiveKit identity (`sender-<pid>-<id>`, `receiver-<pid>-<id>`), so two in one process no longer disconnect each other (TRF-25).
 
 - UE sender (WP-S3): bone names and parents are correct after Stop/Start,
   after a details-panel edit during PIE, and after a subject rename. Each
@@ -93,6 +102,8 @@
 - Core API: new `src/o3ds/receiver_streams.h` with `PeekPacketMeta`, `SkeletonFingerprint`, `LegacyOrdering` and `ReceiverStreamTable`, the UE-independent receiver state used by `FO3DReceiverSource`.
 - Core API: `ConcealmentEngine::TryRenderAhead()` returns true at most once per `ObserveRealFrame()`.
 - Receiver: legacy (no `tx_seq`) timestamp ordering now runs before the packet is parsed, so a dropped duplicate or out-of-order frame no longer changes parse state. A packet that fails verification is rejected before either path.
+- WebRTC: new `webrtc.room` option, shown as **Room** in the sender and receiver panels. Auto-fetch mode requests tokens for this room on both sides and fails to initialize when it is empty. `StreamId` is no longer used as the room name, so existing auto-fetch setups must set a room (TRF-25).
+- WebRTC: the transports call LiveKit through a per-instance function table (`FLkFfiApi`, ADR 0006 option F2) and take an optional token fetcher factory, so tests can run them against a fake. The mock token server takes a `LIVEKIT_API_KEY` issuer so its tokens work with `livekit-server --dev`. Manual test steps are in `docs/testing/webrtc-manual-test.md`.
 
 - UE sender: new `FullSyncIntervalSeconds` property (default 1.0 s, 0.25 to
   10 s). In residual and quantized modes a full skeleton and pose is sent at

@@ -3,6 +3,7 @@
 #include "HAL/PlatformProcess.h"
 #include "Sender/WebRTCSender.h"
 #include "Receiver/WebRTCReceiver.h"
+#include "Shared/WebRTCUtils.h"
 #include "O3DSenderRegistry.h"
 #include "O3DReceiverRegistry.h"
 #include "O3DSenderTransportCustomization.h"
@@ -33,6 +34,8 @@ namespace WebRTCConfig
 	static constexpr TCHAR UseAutoTokenFetchKey[] = TEXT("webrtc.useAutoTokenFetch");
 	static constexpr TCHAR TokenEndpointUrlKey[] = TEXT("webrtc.tokenEndpointUrl");
 	static constexpr TCHAR TokenRefreshLeadTimeKey[] = TEXT("webrtc.tokenRefreshLeadTimeSec");
+	// LiveKit room requested from the token endpoint; must match on sender and receiver (TRF-25).
+	static constexpr const TCHAR* RoomOptionKey = WebRTCUtils::RoomOptionKey;
 	
 	// Token refresh lead time constants
 	static constexpr int32 MinTokenRefreshLeadTimeSec = 60;     // 1 minute
@@ -95,6 +98,7 @@ namespace WebRTCSender
 			const bool bInitialUseAutoFetch = ResolveUseAutoTokenFetch();
 			const FString InitialTokenEndpoint = ResolveTokenEndpointUrl();
 			const int32 InitialRefreshLeadTime = ResolveTokenRefreshLeadTime();
+			const FString InitialRoom = ResolveRoomValue();
 
 			ChildSlot
 			[
@@ -172,6 +176,24 @@ namespace WebRTCSender
 					.Text(FText::FromString(InitialTokenEndpoint))
 					.OnTextCommitted(this, &SWebRTCSenderSettingsPanel::HandleTokenEndpointCommitted)
 					.HintText(LOCTEXT("WebRTCTokenEndpointHint", "https://myserver.com/token"))
+					.Visibility_Lambda([this]() { return GetUseAutoTokenFetch() ? EVisibility::Visible : EVisibility::Collapsed; })
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("WebRTCRoomLabel", "Room"))
+					.ToolTipText(LOCTEXT("WebRTCRoomTooltip", "LiveKit room requested from the token endpoint. Use the same room on the sender and the receiver. Required for Auto Token Fetch."))
+					.Visibility_Lambda([this]() { return GetUseAutoTokenFetch() ? EVisibility::Visible : EVisibility::Collapsed; })
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(0.f, 4.f, 0.f, 8.f)
+				[
+					SAssignNew(RoomTextBox, SEditableTextBox)
+					.Text(FText::FromString(InitialRoom))
+					.OnTextCommitted(this, &SWebRTCSenderSettingsPanel::HandleRoomCommitted)
+					.HintText(LOCTEXT("WebRTCRoomHint", "e.g., my-stage"))
 					.Visibility_Lambda([this]() { return GetUseAutoTokenFetch() ? EVisibility::Visible : EVisibility::Collapsed; })
 				]
 				+ SVerticalBox::Slot()
@@ -268,6 +290,26 @@ namespace WebRTCSender
 			SenderComponent->SetTransportOption(WebRTCConfig::TokenEndpointUrlKey, Sanitized);
 		}
 
+		FString ResolveRoomValue() const
+		{
+			return SenderComponent ? SenderComponent->GetTransportOption(WebRTCConfig::RoomOptionKey) : FString();
+		}
+
+		void SetRoomValue(const FString& NewValue)
+		{
+			if (!SenderComponent)
+			{
+				return;
+			}
+			SenderComponent->SetTransportOption(WebRTCConfig::RoomOptionKey, NewValue.TrimStartAndEnd());
+		}
+
+		void HandleRoomCommitted(const FText& NewText, ETextCommit::Type CommitType)
+		{
+			SetRoomValue(NewText.ToString());
+			NotifyConfigChanged();
+		}
+
 		int32 ResolveTokenRefreshLeadTime() const
 		{
 			if (!SenderComponent)
@@ -328,6 +370,7 @@ namespace WebRTCSender
 
 		UO3DSenderComponent* SenderComponent = nullptr;
 		FSimpleDelegate OnConfigChanged;
+		TSharedPtr<SEditableTextBox> RoomTextBox;
 		TSharedPtr<SEditableTextBox> UrlTextBox;
 		TSharedPtr<SEditableTextBox> TokenTextBox;
 		TSharedPtr<SCheckBox> UseAutoTokenFetchCheckBox;
@@ -359,6 +402,7 @@ namespace WebRTCReceiver
 			const bool bInitialUseAutoFetch = GetUseAutoTokenFetch();
 			const FString InitialTokenEndpoint = GetTokenEndpointUrl();
 			const int32 InitialRefreshLeadTime = GetTokenRefreshLeadTime();
+			const FString InitialRoom = GetRoomValue();
 
 			TSharedRef<SVerticalBox> PanelContent = SNew(SVerticalBox);
 
@@ -441,6 +485,26 @@ namespace WebRTCReceiver
 					.Text(FText::FromString(InitialTokenEndpoint))
 					.OnTextCommitted(this, &SWebRTCReceiverSettingsPanel::HandleTokenEndpointCommitted)
 					.HintText(LOCTEXT("WebRTCReceiverTokenEndpointHint", "https://myserver.com/token"))
+					.Visibility_Lambda([this]() { return GetUseAutoTokenFetchState() ? EVisibility::Visible : EVisibility::Collapsed; })
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("WebRTCReceiverRoomLabel", "Room"))
+					.ToolTipText(LOCTEXT("WebRTCReceiverRoomTooltip", "LiveKit room requested from the token endpoint. Use the same room on the sender and the receiver. Required for Auto Token Fetch."))
+					.Visibility_Lambda([this]() { return GetUseAutoTokenFetchState() ? EVisibility::Visible : EVisibility::Collapsed; })
+				];
+
+			PanelContent->AddSlot()
+				.AutoHeight()
+				.Padding(0.f, 4.f, 0.f, 8.f)
+				[
+					SAssignNew(RoomTextBox, SEditableTextBox)
+					.Text(FText::FromString(InitialRoom))
+					.OnTextCommitted(this, &SWebRTCReceiverSettingsPanel::HandleRoomCommitted)
+					.HintText(LOCTEXT("WebRTCReceiverRoomHint", "e.g., my-stage"))
 					.Visibility_Lambda([this]() { return GetUseAutoTokenFetchState() ? EVisibility::Visible : EVisibility::Collapsed; })
 				];
 
@@ -550,6 +614,22 @@ namespace WebRTCReceiver
 			WebRTCConfig::SetReceiverOption(SettingsObject, WebRTCConfig::TokenEndpointUrlKey, Value.TrimStartAndEnd());
 		}
 
+		FString GetRoomValue() const
+		{
+			return SettingsObject ? WebRTCConfig::GetReceiverOption(SettingsObject->Settings, WebRTCConfig::RoomOptionKey) : FString();
+		}
+
+		void SetRoomValue(const FString& Value)
+		{
+			WebRTCConfig::SetReceiverOption(SettingsObject, WebRTCConfig::RoomOptionKey, Value.TrimStartAndEnd());
+		}
+
+		void HandleRoomCommitted(const FText& NewText, ETextCommit::Type CommitType)
+		{
+			SetRoomValue(NewText.ToString());
+			SubmitFromTextCommit(CommitType);
+		}
+
 		int32 GetTokenRefreshLeadTime() const
 		{
 			if (!SettingsObject)
@@ -599,6 +679,7 @@ namespace WebRTCReceiver
 		}
 
 		UO3DReceiverSettingsObject* SettingsObject = nullptr;
+		TSharedPtr<SEditableTextBox> RoomTextBox;
 		TSharedPtr<SEditableTextBox> UrlTextBox;
 		TSharedPtr<SEditableTextBox> TokenTextBox;
 		TSharedPtr<SCheckBox> UseAutoTokenFetchCheckBox;
@@ -633,6 +714,7 @@ public:
 			const FString UseAutoTokenFetchStr = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::UseAutoTokenFetchKey);
 			const FString TokenEndpointUrlValue = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::TokenEndpointUrlKey);
 			const FString TokenRefreshLeadTimeStr = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::TokenRefreshLeadTimeKey);
+			const FString RoomValue = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::RoomOptionKey);
 
 			Config.Uri = UrlValue;
 			Config.Token = TokenValue;
@@ -645,6 +727,7 @@ public:
 
 			Config.AdvancedParams.Add(WebRTCConfig::UrlOptionKey, UrlValue);
 			Config.AdvancedParams.Add(WebRTCConfig::TokenOptionKey, TokenValue);
+			Config.AdvancedParams.Add(WebRTCConfig::RoomOptionKey, RoomValue.TrimStartAndEnd());
 		};
 
 #if WITH_EDITOR
@@ -673,6 +756,7 @@ public:
 			const FString UseAutoTokenFetchStr = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::UseAutoTokenFetchKey);
 			const FString TokenEndpointUrlValue = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::TokenEndpointUrlKey);
 			const FString TokenRefreshLeadTimeStr = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::TokenRefreshLeadTimeKey);
+			const FString RoomValue = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::RoomOptionKey);
 
 			Config.Uri = UrlValue;
 			Config.Token = TokenValue;
@@ -686,6 +770,7 @@ public:
 
 			Config.AdvancedParams.Add(WebRTCConfig::UrlOptionKey, UrlValue);
 			Config.AdvancedParams.Add(WebRTCConfig::TokenOptionKey, TokenValue);
+			Config.AdvancedParams.Add(WebRTCConfig::RoomOptionKey, RoomValue.TrimStartAndEnd());
 
 			Config.Audio.bEnableAudio = Settings.bEnableAudio;
 			// Note: Audio stream label is now automatically derived from StreamId

@@ -1,13 +1,54 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/PlatformProcess.h"
+#include "Misc/Guid.h"
+#include "Containers/StringConv.h"
 
 namespace WebRTCUtils
 {
-    // Convert C-string to FString
+    /** Transport option naming the LiveKit room both sides join in auto-fetch mode (TRF-25). */
+    static constexpr TCHAR RoomOptionKey[] = TEXT("webrtc.room");
+
+    // Convert a UTF-8 C string (LiveKit messages, labels, track names) to FString.
     inline FString FromAnsi(const char* S)
     {
         return S ? FString(UTF8_TO_TCHAR(S)) : FString();
+    }
+
+    /**
+     * Decodes a UTF-8 label from LiveKit (data channel label or audio track name). The sender
+     * encodes labels with FTCHARToUTF8, so this is the inverse (TRF-31). Returns an empty
+     * string for null or empty input.
+     */
+    inline FString DecodeUtf8Label(const char* Utf8)
+    {
+        if (!Utf8 || !*Utf8)
+        {
+            return FString();
+        }
+        const FUTF8ToTCHAR Converter(Utf8);
+        return FString(Converter.Length(), Converter.Get());
+    }
+
+    /** Returns the trimmed `webrtc.room` option, or an empty string when it is not set. */
+    inline FString ResolveRoomName(const TMap<FString, FString>& AdvancedParams)
+    {
+        if (const FString* Value = AdvancedParams.Find(RoomOptionKey))
+        {
+            return Value->TrimStartAndEnd();
+        }
+        return FString();
+    }
+
+    /**
+     * Builds a LiveKit participant identity that is unique per transport instance, so two
+     * senders (or receivers) in one process never share one (TRF-25: DUPLICATE_IDENTITY).
+     */
+    inline FString MakeParticipantIdentity(const TCHAR* Prefix)
+    {
+        return FString::Printf(TEXT("%s-%u-%s"), Prefix, FPlatformProcess::GetCurrentProcessId(),
+            *FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12));
     }
 
     /**
