@@ -1,5 +1,7 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
+#if O3D_WITH_TRANSPORT_MOQ // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "Sender/MoQSender.h"
 #include "O3DRedact.h"
 #include "Sender/MoQSenderAudioSink.h"
@@ -849,3 +851,5 @@ FString FO3DMoQSender::ResolveAudioSubjectFallback() const
 	}
 	return SubjectFallback;
 }
+
+#endif // O3D_WITH_TRANSPORT_MOQ

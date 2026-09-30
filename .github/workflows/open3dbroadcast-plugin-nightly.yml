@@ -10,6 +10,11 @@ on:
         required: false
         default: true
         type: boolean
+      run_flag_builds:
+        description: "Build each O3D_WITH_TRANSPORT_* combination (five extra BuildPlugin runs)"
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -34,7 +39,8 @@ jobs:
     # Run even if the Fab zip job failed; the Fab steps check its result.
     if: ${{ !cancelled() }}
     runs-on: [ self-hosted, ue5, windows ]
-    timeout-minutes: 120
+    # 120 minutes plus the five flag-combination builds (WP-F2).
+    timeout-minutes: 210
 
     steps:
       - name: Checkout repository
@@ -160,6 +166,31 @@ jobs:
             -StrictIncludes `
             -FailOnWarnings
 
+      # WP-F2 (TRB-24, TRF-27): the plugin must build with each transport switched off. One
+      # BuildPlugin run per combination (see Build/Scripts/Build-FlagCombinations.ps1), strict
+      # and with warnings as errors. Nightly only: each run takes as long as the PR build and
+      # there is one UE runner.
+      - name: Flag-combination builds
+        if: ${{ !cancelled() && (github.event_name == 'schedule' || inputs.run_flag_builds) }}
+        shell: powershell
+        run: |
+          & .\Build\Scripts\Build-FlagCombinations.ps1 `
+            -UEPath "$env:UE_ROOT" `
+            -PluginUPluginPath "${{ steps.paths.outputs.uplugin_path }}" `
+            -OutRoot (Join-Path $env:RUNNER_TEMP 'FlagBuilds') `
+            -Configuration "Development" `
+            -StrictIncludes `
+            -FailOnWarnings
+
+      # WP-F2 acceptance: a Linux game target with the plugin enabled builds, and the plugin's
+      # modules are left out. Needs the Linux cross-compile toolchain (LINUX_MULTIARCH_ROOT) on
+      # the runner; without it the script prints a notice and the step passes.
+      - name: Linux target excludes the plugin
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: |
+          & .\Build\Scripts\Test-LinuxExclusion.ps1 -UEPath "$env:UE_ROOT"
+
       - name: Download Fab source zip
         if: ${{ !cancelled() && needs.fab-package.result == 'success' }}
         uses: actions/download-artifact@v4
@@ -185,6 +216,7 @@ jobs:
           path: |
             ${{ runner.temp }}/*-BuildPlugin.log
             ${{ runner.temp }}/FabBuild/*-BuildPlugin.log
+            ${{ runner.temp }}/FlagBuilds/*-BuildPlugin.log
           if-no-files-found: ignore
           retention-days: 21
 

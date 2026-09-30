@@ -1,5 +1,7 @@
 // Copyright (c) Open3DStream Contributors
 
+#if O3D_WITH_TRANSPORT_NNG // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "Sender/NngSender.h"
 #include "O3DRedact.h"
 
@@ -684,3 +686,5 @@ FString FO3DNngSender::ResolveAudioSubjectFallback() const
     }
     return SubjectFallback;
 }
+
+#endif // O3D_WITH_TRANSPORT_NNG

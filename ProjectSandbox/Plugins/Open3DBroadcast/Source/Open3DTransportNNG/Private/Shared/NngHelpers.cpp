@@ -1,5 +1,7 @@
 // Copyright (c) Open3DStream Contributors
 
+#if O3D_WITH_TRANSPORT_NNG // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "Shared/NngHelpers.h"
 
 #include "GenericPlatform/GenericPlatformHttp.h"
@@ -784,3 +786,5 @@ namespace O3DNNG
         return true;
     }
 }
+
+#endif // O3D_WITH_TRANSPORT_NNG

@@ -1,4 +1,7 @@
 // Copyright (c) Open3DStream Contributors
+
+#if O3D_WITH_TRANSPORT_NNG // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "Receiver/NngReceiver.h"
 #include "O3DRedact.h"
 
@@ -600,3 +603,5 @@ bool FO3DNngReceiver::ProcessAudioPayload(O3DS::EUnifiedCodec Codec, const uint8
     // Counted once, by Poll() (TRB-42).
     return true;
 }
+
+#endif // O3D_WITH_TRANSPORT_NNG

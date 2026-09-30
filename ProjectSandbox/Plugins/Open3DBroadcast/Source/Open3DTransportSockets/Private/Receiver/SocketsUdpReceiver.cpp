@@ -1,5 +1,7 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
+#if O3D_WITH_TRANSPORT_SOCKETS // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "SocketsUdpReceiver.h"
 
 #include "O3DTransportTypes.h"
@@ -540,3 +542,5 @@ bool FO3DSocketsUdpReceiver::ProcessAudioPayload(O3DS::EUnifiedCodec Codec, cons
 
 	return true;
 }
+
+#endif // O3D_WITH_TRANSPORT_SOCKETS

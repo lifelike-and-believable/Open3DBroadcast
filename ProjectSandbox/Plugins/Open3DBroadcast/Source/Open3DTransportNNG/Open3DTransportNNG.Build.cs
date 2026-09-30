@@ -1,10 +1,10 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
 using UnrealBuildTool;
-//using O3DBroadcastBuild;
 using System.IO;
 
-[SupportedTargetTypes(TargetType.Game, TargetType.Editor)]
+// Editor, Game and Client; Server and Program are excluded (ADR 0001, FAB-8).
+[SupportedTargetTypes(TargetType.Editor, TargetType.Game, TargetType.Client)]
 public class Open3DTransportNNG : ModuleRules
 {
     public Open3DTransportNNG(ReadOnlyTargetRules Target) : base(Target)
@@ -13,20 +13,23 @@ public class Open3DTransportNNG : ModuleRules
 
         O3DBuildFlags.Apply(Target, this);
 
+        // Public/Testing/NngTesting.h needs only Core; its consumer (Open3DBroadcastTests) brings
+        // the Sender and Receiver headers it includes (SHR-20).
+        PublicDependencyModuleNames.Add("Core");
+
+        // O3DBuildFlags turns NNG off on every platform without a prebuilt nng.lib (Win64 only),
+        // so a target for another platform gets the stub instead of a build error (FAB-3, TRB-41).
+        // The .uplugin's PlatformAllowList normally keeps the module out of such targets anyway.
         if (!O3DBuildFlags.IsNNGEnabled(Target))
         {
+            // Stub module: every translation unit is inside #if O3D_WITH_TRANSPORT_NNG (TRB-24).
+            O3DBuildFlags.ReportDisabledTransport(Target, "Open3DTransportNNG", "O3D_WITH_TRANSPORT_NNG");
             return;
         }
 
-        string platformSubdir;
-        if (Target.Platform == UnrealTargetPlatform.Win64)
-        {
-            platformSubdir = "Win64";
-        }
-        else
-        {
-            throw new BuildException($"Open3DTransportNNG does not define third-party binaries for platform {Target.Platform} yet.");
-        }
+        // /EHsc: the sources compile the o3ds core headers, which the core library is built
+        // against with exceptions on (BUILD-5).
+        bEnableExceptions = true;
 
         var moduleThirdPartyRoot = Path.Combine(ModuleDirectory, "ThirdParty", "nng");
 
@@ -38,8 +41,8 @@ public class Open3DTransportNNG : ModuleRules
         }
         PublicSystemIncludePaths.Add(nngIncludeDir);
 
-        // NNG library
-        var nngLibPath = Path.Combine(moduleThirdPartyRoot, "lib", platformSubdir, "nng.lib");
+        // NNG library (IsNNGEnabled is true only for Win64)
+        var nngLibPath = Path.Combine(moduleThirdPartyRoot, "lib", "Win64", "nng.lib");
         if (!File.Exists(nngLibPath))
         {
             throw new BuildException($"Missing required Open3DTransportNNG library 'nng.lib' at '{nngLibPath}'.");
@@ -48,15 +51,10 @@ public class Open3DTransportNNG : ModuleRules
 
         PublicDefinitions.Add("NNG_STATIC_LIB");
 
-        PublicDependencyModuleNames.AddRange(new string[]
-        {
-            "Core",
-            "CoreUObject",
-            "Engine"
-        });
-
         PrivateDependencyModuleNames.AddRange(new string[]
         {
+            "CoreUObject",
+            "Engine",
             "Open3DShared",
             "Open3DSender",
             "Open3DReceiver",

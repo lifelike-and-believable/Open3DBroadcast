@@ -1,5 +1,7 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
+#if O3D_WITH_TRANSPORT_SOCKETS // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "SocketsTcpAudio.h"
 
 #include "O3DAudioSerialization.h"
@@ -24,3 +26,5 @@ namespace O3DSockets::Tcp
 		return true;
 	}
 }
+
+#endif // O3D_WITH_TRANSPORT_SOCKETS

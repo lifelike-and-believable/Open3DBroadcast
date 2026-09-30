@@ -1,5 +1,7 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
+#if O3D_WITH_TRANSPORT_MOQ // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "Shared/MoQSessionWrapper.h"
 #include "O3DRedact.h"
 
@@ -710,3 +712,5 @@ void FMoQSessionWrapper::InvokeSubscriberThunkForTest(const TFunction<void(const
     GetSubscriberRegistryFor<FSubscriberBinding>().Unregister(Token);
 }
 #endif
+
+#endif // O3D_WITH_TRANSPORT_MOQ

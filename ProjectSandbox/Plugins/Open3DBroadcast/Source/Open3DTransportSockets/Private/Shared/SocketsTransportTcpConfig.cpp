@@ -1,5 +1,7 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
+#if O3D_WITH_TRANSPORT_SOCKETS // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "SocketsTransportConfig.h"
 
 #include "O3DReceiverSourceSettings.h"
@@ -114,3 +116,4 @@ namespace O3DSocketsConfig
 	}
 }
 
+#endif // O3D_WITH_TRANSPORT_SOCKETS

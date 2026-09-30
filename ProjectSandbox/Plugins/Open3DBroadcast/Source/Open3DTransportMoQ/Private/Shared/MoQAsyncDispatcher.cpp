@@ -1,5 +1,7 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
+#if O3D_WITH_TRANSPORT_MOQ // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "Shared/MoQAsyncDispatcher.h"
 
 #include "Shared/MoQTypes.h"
@@ -85,3 +87,5 @@ int32 FMoQAsyncDispatcher::DrainOnGameThread()
     }
     return Ran;
 }
+
+#endif // O3D_WITH_TRANSPORT_MOQ

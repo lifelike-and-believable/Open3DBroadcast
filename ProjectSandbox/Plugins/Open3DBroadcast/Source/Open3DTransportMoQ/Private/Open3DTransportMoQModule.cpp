@@ -732,16 +732,19 @@ private:
 
 #else // O3D_WITH_TRANSPORT_MOQ
 
+DEFINE_LOG_CATEGORY_STATIC(LogOpen3DTransportMoQModule, Log, All);
+
 /**
- * Stub module compiled when O3D_WITH_TRANSPORT_MOQ=0 so builds can exclude
- * the transport without pulling in third-party dependencies.
+ * Stub module, compiled when O3D_WITH_TRANSPORT_MOQ is 0: the transport was switched off with that
+ * environment variable, or the target platform has no prebuilt moq_ffi
+ * (O3DBuildFlags in Open3DBroadcastBuildFlags.Build.cs). It registers nothing.
  */
 class FOpen3DTransportMoQModule : public IModuleInterface
 {
 public:
 	virtual void StartupModule() override
 	{
-		UE_LOG(LogTemp, Display, TEXT("Open3D MoQ transport disabled at build time (O3D_WITH_TRANSPORT_MOQ=0)."));
+		UE_LOG(LogOpen3DTransportMoQModule, Display, TEXT("Open3D MoQ transport is not available in this build (O3D_WITH_TRANSPORT_MOQ=0)."));
 	}
 
 	virtual void ShutdownModule() override {}

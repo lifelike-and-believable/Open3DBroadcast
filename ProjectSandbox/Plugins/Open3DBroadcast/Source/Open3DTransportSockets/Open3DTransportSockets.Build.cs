@@ -1,10 +1,9 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
 using UnrealBuildTool;
-using System.Collections.Generic;
-//using O3DBroadcastBuild;
 
-[SupportedTargetTypes(TargetType.Game, TargetType.Editor)]
+// Editor, Game and Client; Server and Program are excluded (ADR 0001, FAB-8).
+[SupportedTargetTypes(TargetType.Editor, TargetType.Game, TargetType.Client)]
 public class Open3DTransportSockets : ModuleRules
 {
     public Open3DTransportSockets(ReadOnlyTargetRules Target) : base(Target)
@@ -13,36 +12,31 @@ public class Open3DTransportSockets : ModuleRules
 
         O3DBuildFlags.Apply(Target, this);
 
+        // Public/Testing/SocketsTesting.h needs only Core; its consumer (Open3DBroadcastTests)
+        // brings the Sender and Receiver headers it includes (SHR-20).
+        PublicDependencyModuleNames.Add("Core");
+
         if (!O3DBuildFlags.IsSocketsEnabled(Target))
         {
+            // Stub module: every translation unit is inside #if O3D_WITH_TRANSPORT_SOCKETS (TRB-24).
+            O3DBuildFlags.ReportDisabledTransport(Target, "Open3DTransportSockets", "O3D_WITH_TRANSPORT_SOCKETS");
             return;
         }
 
-        PublicDependencyModuleNames.AddRange(new string[]
+        // /EHsc: the sources compile the o3ds core headers, which the core library is built
+        // against with exceptions on (BUILD-5).
+        bEnableExceptions = true;
+
+        PrivateDependencyModuleNames.AddRange(new string[]
         {
-            "Core",
             "CoreUObject",
             "Engine",
             "Sockets",
-            "Networking"
+            "Networking",
+            "Open3DShared",
+            "Open3DSender",
+            "Open3DReceiver"
         });
-
-        List<string> PrivateModules = new List<string>
-        {
-            "Open3DShared"
-        };
-
-        if (O3DBuildFlags.IsSenderEnabled(Target))
-        {
-            PrivateModules.Add("Open3DSender");
-        }
-
-        if (O3DBuildFlags.IsReceiverEnabled(Target))
-        {
-            PrivateModules.Add("Open3DReceiver");
-        }
-
-        PrivateDependencyModuleNames.AddRange(PrivateModules);
 
         if (Target.bBuildEditor)
         {

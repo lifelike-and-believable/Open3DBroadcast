@@ -111,19 +111,30 @@ See [Build/README.md](../../../Build/README.md#cicd-integration) for details.
 
 ## Build Configuration
 
-The plugin supports build-time configuration via environment variables:
+### Build flags
+
+Developer builds can switch transports off with environment variables, set before running UBT or `RunUAT BuildPlugin`. Values are `0`/`1` or `true`/`false`.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `O3D_BUILD_SENDER` | Build sender module | `true` |
-| `O3D_BUILD_RECEIVER` | Build receiver module | `true` |
-| `O3D_WITH_TRANSPORT_SOCKETS` | Enable sockets transport | `true` |
-| `O3D_WITH_TRANSPORT_NNG` | Enable NNG transport | `true` |
-| `O3D_WITH_TRANSPORT_WEBRTC` | Enable WebRTC transport | `true` |
-| `O3D_WEBRTC_BACKEND_LIVEKIT` | Enable LiveKit WebRTC backend | `true` |
-| `O3D_WEBRTC_BACKEND_LIBDC` | Enable libdatachannel backend | `true` |
+| `O3D_WITH_TRANSPORT_SOCKETS` | TCP/UDP sockets transport | `1` |
+| `O3D_WITH_TRANSPORT_NNG` | NNG transport | `1` on Win64, always `0` elsewhere |
+| `O3D_WITH_TRANSPORT_WEBRTC` | WebRTC (LiveKit) transport | `1` on Win64, always `0` elsewhere |
+| `O3D_WITH_TRANSPORT_MOQ` | MoQ transport | `1` on Win64, always `0` elsewhere |
 
-Set these before building to customize which modules are included.
+A transport that is off is still a module of the plugin, but it compiles to a stub that registers nothing and logs `Open3D <name> transport is not available in this build` at startup. The flags are read by `O3DBuildFlags` in `Source/Open3DBroadcastBuildFlags/Open3DBroadcastBuildFlags.Build.cs`, again for every target, so one UBT run can build targets with different results. The nightly workflow builds each combination (`Build/Scripts/Build-FlagCombinations.ps1`).
+
+Open3DSender and Open3DReceiver are always built. `O3D_BUILD_SENDER=0` and `O3D_BUILD_RECEIVER=0` are rejected with a build error: they never produced a working build. `O3D_WEBRTC_BACKEND_LIVEKIT`, `O3D_WEBRTC_BACKEND_LIBDC` and `O3D_ENABLE_LEGACY` are no longer read.
+
+### Platforms and target types
+
+Every module entry in `Open3DBroadcast.uplugin` has `"PlatformAllowList": [ "Win64" ]`, and the plugin has `"SupportedTargetPlatforms": [ "Win64" ]` (ADR 0001, `docs/adr/0001-platform-scope-first-fab-release.md`). The runtime modules also have `"TargetDenyList": [ "Server", "Program" ]`, matching `[SupportedTargetTypes(TargetType.Editor, TargetType.Game, TargetType.Client)]` in their `Build.cs`:
+
+- **Editor, Game and Client** targets are supported. A Client target is a Game target without server code, and nothing in the plugin needs the server.
+- **Server** is not supported in v1: a dedicated server has no audio capture, and sending or receiving (LiveLink) on a server is untested. ADR 0001 (decision 2) lists what enabling the receiver on Server later takes.
+- **Program** targets are excluded.
+
+If your own module depends on an Open3DBroadcast module, add that dependency only for Win64 (for example `if (Target.Platform == UnrealTargetPlatform.Win64)` in your `Build.cs`); otherwise your module will reference a module that is not built for the other platforms.
 
 ## Updating Third-Party Libraries
 

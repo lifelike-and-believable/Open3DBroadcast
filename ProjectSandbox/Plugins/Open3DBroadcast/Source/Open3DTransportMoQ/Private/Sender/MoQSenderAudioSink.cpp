@@ -1,5 +1,7 @@
 // Copyright (c) Open3DStream Contributors
 
+#if O3D_WITH_TRANSPORT_MOQ // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "Sender/MoQSenderAudioSink.h"
 
 FO3DMoQSenderAudioSink::FO3DMoQSenderAudioSink(TSharedRef<FMoQSenderAudioState, ESPMode::ThreadSafe> InState, const FO3DTransportAudioConfig& InAudioConfig, FO3DSinkAudioEncoder::FSettings InEncoderSettings)
@@ -48,3 +50,5 @@ bool FO3DMoQSenderAudioSink::OnSubmitGated(
 	}
 	return bAllQueued;
 }
+
+#endif // O3D_WITH_TRANSPORT_MOQ

@@ -1,10 +1,10 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
 using UnrealBuildTool;
-//using O3DBroadcastBuild;
 using System.IO;
 
-[SupportedTargetTypes(TargetType.Game, TargetType.Editor)]
+// Editor, Game and Client; Server and Program are excluded (ADR 0001, FAB-8).
+[SupportedTargetTypes(TargetType.Editor, TargetType.Game, TargetType.Client)]
 public class Open3DTransportWebRTC : ModuleRules
 {
     public Open3DTransportWebRTC(ReadOnlyTargetRules Target) : base(Target)
@@ -13,29 +13,28 @@ public class Open3DTransportWebRTC : ModuleRules
 
         O3DBuildFlags.Apply(Target, this);
 
+        // The module has no Public/ headers (SHR-20).
+        PublicDependencyModuleNames.Add("Core");
+
+        // O3DBuildFlags turns WebRTC off on every platform without a prebuilt livekit_ffi (Win64
+        // only), so a target for another platform gets the stub instead of a build error (FAB-3,
+        // TRF-27). The .uplugin's PlatformAllowList normally keeps the module out of such targets.
         if (!O3DBuildFlags.IsWebRtcEnabled(Target))
         {
+            // Stub module: every translation unit is inside #if O3D_WITH_TRANSPORT_WEBRTC (TRF-27).
+            O3DBuildFlags.ReportDisabledTransport(Target, "Open3DTransportWebRTC", "O3D_WITH_TRANSPORT_WEBRTC");
             return;
         }
 
-        string platformSubdir;
-        if (Target.Platform == UnrealTargetPlatform.Win64)
-        {
-            platformSubdir = "Win64";
-        }
-        else
-        {
-            throw new BuildException($"Open3DTransportWebRTC does not define third-party binaries for platform {Target.Platform} yet.");
-        }
+        // /EHsc: the sources compile the o3ds core headers, which the core library is built
+        // against with exceptions on (BUILD-5).
+        bEnableExceptions = true;
 
-        // Plugin-level ThirdParty directory
-        string pluginThirdPartyDir = Path.Combine(PluginDirectory, "..", "..", "ThirdParty");
-
-        // Module-level ThirdParty directory (for LiveKit FFI)
+        // Module-level ThirdParty directory (LiveKit FFI). IsWebRtcEnabled is true only for Win64.
         string moduleThirdPartyDir = Path.Combine(ModuleDirectory, "ThirdParty");
 
         // LiveKit FFI library
-        string livekitFfiLibPath = Path.Combine(moduleThirdPartyDir, "livekit_ffi", "lib", platformSubdir, "livekit_ffi.dll.lib");
+        string livekitFfiLibPath = Path.Combine(moduleThirdPartyDir, "livekit_ffi", "lib", "Win64", "livekit_ffi.dll.lib");
         if (!File.Exists(livekitFfiLibPath))
         {
             throw new BuildException($"Missing required LiveKit FFI library at '{livekitFfiLibPath}'.");
@@ -51,7 +50,7 @@ public class Open3DTransportWebRTC : ModuleRules
         PublicSystemIncludePaths.Add(livekitFfiIncludePath); // Third-party headers: system include (BUILD-3)
 
         // LiveKit FFI DLL - use delay-load to allow custom path loading
-        string livekitFfiDllPath = Path.Combine(moduleThirdPartyDir, "livekit_ffi", "bin", platformSubdir, "livekit_ffi.dll");
+        string livekitFfiDllPath = Path.Combine(moduleThirdPartyDir, "livekit_ffi", "bin", "Win64", "livekit_ffi.dll");
         if (!File.Exists(livekitFfiDllPath))
         {
             throw new BuildException($"Missing required LiveKit FFI DLL at '{livekitFfiDllPath}'.");
@@ -64,25 +63,18 @@ public class Open3DTransportWebRTC : ModuleRules
         // Note: Opus library NOT needed - LiveKit FFI handles Opus encoding/decoding internally.
         // We only provide/receive PCM16 audio at the API boundary.
 
-        // Open3DStream core library includes (for O3DS::SubjectList and O3DS::FAudioFrameMeta)
-        string o3dsIncludePath = Path.Combine(pluginThirdPartyDir, "open3dstream", "include");
-        if (Directory.Exists(o3dsIncludePath))
-        {
-            PublicSystemIncludePaths.Add(o3dsIncludePath); // Third-party headers: system include (BUILD-3)
-        }
+        // The o3ds core headers (O3DS::SubjectList, audio types) come from Open3DSender and
+        // Open3DReceiver, which add them as public system includes. The block that used to add
+        // <PluginDirectory>/../../ThirdParty/open3dstream/include here pointed outside the plugin
+        // and was skipped because that directory does not exist (BUILD-1).
 
-        PublicDependencyModuleNames.AddRange(new string[]
+        PrivateDependencyModuleNames.AddRange(new string[]
         {
-            "Core",
             "CoreUObject",
             "Engine",
             "HTTP", // For HTTP token fetching
             "Json", // For JSON parsing
-            "JsonUtilities" // For JSON serialization utilities
-        });
-
-        PrivateDependencyModuleNames.AddRange(new string[]
-        {
+            "JsonUtilities", // For JSON serialization utilities
             "Open3DShared",
             "Open3DSender",
             "Open3DReceiver"
