@@ -379,6 +379,61 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `linux.yml` and `doc.yml` use `actions/checkout@v4`; `doc.yml` installs
   `breathe` and deploys with `GITHUB_TOKEN`.
 
+### One transport registry (WP-A1 PR 1, ADR 0007 step 1)
+
+- **Interfaces moved to Open3DShared.** `IOpen3DSender`, `IOpen3DReceiver`,
+  their audio sinks, `ISerializedFrameConsumer` and `FO3DTransportConfig` now
+  live in `Open3DShared/Public/Transport/` (`O3DSenderInterface.h`,
+  `O3DReceiverInterface.h`, `O3DSerializedFrameConsumer.h`,
+  `O3DTransportTypes.h`) and are exported by Open3DShared. Class layouts and
+  virtual function tables are unchanged.
+- **One registry (SHR-12, SND-23, RCV-28).** New
+  `Transport/O3DTransportRegistry.h`: a transport registers one immutable
+  `FO3DTransportDescriptor` (sender and receiver factories, the configure
+  functions, and per-role secret keys and option schema, which is the WP-F7
+  `FO3DTransportOptionSchema`) with `FO3DTransportRegistry::Get().Register()`
+  and keeps the returned `FO3DTransportRegistration`, whose destructor
+  unregisters. A second registration under a taken name is refused (it used
+  to override silently), and so is a descriptor built for another
+  `O3D_TRANSPORT_API_VERSION`. `OnTransportsChanged` fires after each change.
+  Every transport (TCP, UDP, NNG, MoQ, Loopback, and WebRTC in the add-on)
+  now registers once instead of four times.
+- **Pickers match what can be created (RCV-28).** The sender component's and
+  the LiveLink source's transport lists, the Details panel and the "Add
+  Source" panel list exactly the names that have a factory for that role,
+  from the same entries `CreateSender` and `CreateReceiver` use. A transport
+  that registered only a customization is no longer listed.
+- **No pointer into the registry (RCV-27).** `Find()` returns a
+  `TSharedPtr<const FO3DTransportDescriptor>` that stays valid after the
+  transport unregisters; the component and source call the configure
+  function through it, outside the lock.
+- **Deleted:** `FSerializedFrameConsumerRegistry` and
+  `SerializedFrameConsumerRegistry.cpp`, which nothing ever populated
+  (SHR-24). The Loopback and WebRTC receivers no longer fall back to it; a
+  receiver without `SetConsumer` drops frames as before.
+- **Deprecated, removed in the next minor release** (with an
+  `O3D_TRANSPORT_API_VERSION` bump): `O3DSenderInterface.h`,
+  `O3DReceiverInterface.h`, `O3DSenderRegistry.h`, `O3DReceiverRegistry.h`,
+  `O3DSenderTransportCustomization.h`, the customization part of
+  `O3DReceiverTransportCustomization.h`, `Open3DShared/Public/O3DTransportTypes.h`
+  and `SerializedFrameConsumerRegistry.h`. They are forwarding shims:
+  `O3DTransport::RegisterSender`/`RegisterReceiver` and
+  `O3DSender::`/`O3DReceiver::RegisterTransportCustomization` each fill part
+  of one legacy descriptor, so an out-of-tree transport still compiles and
+  registers. `FindTransportCustomization` returns a copy that stays valid
+  until the transport registers again or unregisters. The receiver secret
+  helpers in `O3DReceiverTransportCustomization.h` (`IsSecretOptionKey`,
+  `ResolveSecrets`, ...) are not deprecated.
+- **Compatibility.** `O3D_TRANSPORT_API_VERSION` stays 1 while the shims
+  exist. The interface classes are now exported by Open3DShared instead of
+  Open3DSender and Open3DReceiver, so the WebRTC add-on (or any out-of-tree
+  transport) must be rebuilt against this release, as for every release.
+- **Tests.** New `Open3DBroadcast.Shared.TransportRegistry.*` (register and
+  unregister, invalid descriptors, duplicate names, a lookup that survives
+  unregister, concurrent lookups while registering, picker list equals the
+  creatable set, deprecated functions forward). The fake transports and the
+  conformance suite use the new registry.
+
 ### WebRTC becomes the Open3DBroadcastWebRTC add-on plugin (WP-F11, ADR 0002)
 
 - **WebRTC is no longer part of Open3DBroadcast.** The `Open3DTransportWebRTC`
