@@ -1,5 +1,7 @@
 // Copyright (c) Open3DStream Contributors
 
+#if O3D_WITH_TRANSPORT_MOQ // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "Testing/MoQTesting.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -282,3 +284,5 @@ namespace MoQTesting
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
+
+#endif // O3D_WITH_TRANSPORT_MOQ

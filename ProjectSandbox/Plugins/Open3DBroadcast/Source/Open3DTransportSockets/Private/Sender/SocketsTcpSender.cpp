@@ -1,5 +1,7 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
+#if O3D_WITH_TRANSPORT_SOCKETS // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "SocketsTcpSender.h"
 #include "../Shared/SocketsTcpAudio.h"
 #include "../Shared/SocketsTcpTransport.h"
@@ -738,3 +740,5 @@ void FO3DSocketsTcpSender::DrainQueue()
 {
 	PublishState->SendQueue.Empty();
 }
+
+#endif // O3D_WITH_TRANSPORT_SOCKETS

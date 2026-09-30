@@ -1,5 +1,7 @@
 // Copyright (c) Open3DStream Contributors
 
+#if O3D_WITH_TRANSPORT_MOQ // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "Shared/MoQHelpers.h"
 #include "Math/UnrealMathUtility.h"
 
@@ -293,3 +295,5 @@ namespace MoQHelpers
 		return false;
 	}
 }
+
+#endif // O3D_WITH_TRANSPORT_MOQ

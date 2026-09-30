@@ -1,5 +1,7 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
+#if O3D_WITH_TRANSPORT_WEBRTC // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "WebRTCReceiver.h"
 #include "O3DRedact.h"
 #include "../Shared/WebRTCUtils.h"
@@ -832,3 +834,5 @@ void FO3DWebRTCReceiver::ApplyPendingAudioFormatIfNeeded()
     // Audio disabled (or invalid config): nothing to apply.
     Link->bPendingAudioFormatApply.Store(false);
 }
+
+#endif // O3D_WITH_TRANSPORT_WEBRTC

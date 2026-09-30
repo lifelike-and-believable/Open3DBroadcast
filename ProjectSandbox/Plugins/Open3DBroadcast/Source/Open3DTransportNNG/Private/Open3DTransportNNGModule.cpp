@@ -2,8 +2,10 @@
 
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
+#include "Logging/LogMacros.h"
 
-#include "O3DTransportRegistry.h"
+#if O3D_WITH_TRANSPORT_NNG
+
 #include "O3DSenderRegistry.h"
 #include "O3DReceiverRegistry.h"
 #include "O3DSenderTransportCustomization.h"
@@ -1001,6 +1003,28 @@ public:
 		UE_LOG(LogOpen3DTransportNNGModule, Log, TEXT("Open3D NNG transport module shut down."));
 	}
 };
+
+#else // O3D_WITH_TRANSPORT_NNG
+
+DEFINE_LOG_CATEGORY_STATIC(LogOpen3DTransportNNGModule, Log, All);
+
+/**
+ * Stub module, compiled when O3D_WITH_TRANSPORT_NNG is 0: the transport was switched off with that
+ * environment variable, or the target platform has no prebuilt nng.lib
+ * (O3DBuildFlags in Open3DBroadcastBuildFlags.Build.cs). It registers nothing.
+ */
+class FOpen3DTransportNNGModule : public IModuleInterface
+{
+public:
+	virtual void StartupModule() override
+	{
+		UE_LOG(LogOpen3DTransportNNGModule, Display, TEXT("Open3D NNG transport is not available in this build (O3D_WITH_TRANSPORT_NNG=0)."));
+	}
+
+	virtual void ShutdownModule() override {}
+};
+
+#endif // O3D_WITH_TRANSPORT_NNG
 
 IMPLEMENT_MODULE(FOpen3DTransportNNGModule, Open3DTransportNNG)
 

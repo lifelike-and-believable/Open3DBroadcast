@@ -1,5 +1,7 @@
 // Copyright (c) Open3DStream Contributors
 
+#if O3D_WITH_TRANSPORT_MOQ // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "MoQFfiApi.h"
 
 #include "Async/Async.h"
@@ -92,3 +94,5 @@ namespace MoQFfi
 		return Result;
 	}
 }
+
+#endif // O3D_WITH_TRANSPORT_MOQ

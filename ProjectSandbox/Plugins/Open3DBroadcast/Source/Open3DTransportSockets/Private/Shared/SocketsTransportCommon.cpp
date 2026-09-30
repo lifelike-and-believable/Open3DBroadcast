@@ -1,5 +1,7 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
+#if O3D_WITH_TRANSPORT_SOCKETS // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "SocketsTransportCommon.h"
 
 #include "O3DTransportTypes.h"
@@ -202,3 +204,5 @@ namespace O3DSockets
 		return FString::Printf(TEXT("%s:%d"), *Host, Port);
 	}
 }
+
+#endif // O3D_WITH_TRANSPORT_SOCKETS

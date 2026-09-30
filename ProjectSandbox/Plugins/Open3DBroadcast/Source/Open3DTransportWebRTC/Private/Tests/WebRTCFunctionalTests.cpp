@@ -1,4 +1,7 @@
 // Copyright (c) Open3DStream Contributors
+
+#if O3D_WITH_TRANSPORT_WEBRTC // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 //
 // WP-S7 functional tests for the WebRTC transport (TRF-2, TRF-3, TRF-4, TRF-16, TRF-23, TRF-31).
 //
@@ -989,3 +992,5 @@ bool FWebRTCS7LateCallbackAfterDestroyTest::RunTest(const FString& Parameters)
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
+
+#endif // O3D_WITH_TRANSPORT_WEBRTC

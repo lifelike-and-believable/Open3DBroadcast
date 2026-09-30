@@ -1,5 +1,7 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
+#if O3D_WITH_TRANSPORT_SOCKETS // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "SocketsUdpSender.h"
 
 #include "O3DSenderAudioSinkBase.h"
@@ -559,3 +561,5 @@ bool FO3DSocketsUdpSender::SendFragmented(FSocket* InSocket, const TSharedPtr<FI
 
 	return true;
 }
+
+#endif // O3D_WITH_TRANSPORT_SOCKETS

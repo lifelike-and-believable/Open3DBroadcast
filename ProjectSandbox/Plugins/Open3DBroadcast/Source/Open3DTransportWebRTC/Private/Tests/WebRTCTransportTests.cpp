@@ -1,5 +1,7 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
+#if O3D_WITH_TRANSPORT_WEBRTC // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "../Sender/WebRTCSender.h"
@@ -686,3 +688,5 @@ bool FWebRTCWebSocketSchemeTest::RunTest(const FString& Parameters)
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
+
+#endif // O3D_WITH_TRANSPORT_WEBRTC

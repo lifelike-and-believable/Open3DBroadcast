@@ -1,5 +1,7 @@
 // Copyright (c) Open3DStream Contributors
 
+#if O3D_WITH_TRANSPORT_NNG // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "Testing/NngTesting.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -69,3 +71,5 @@ namespace O3DNngTesting
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
+
+#endif // O3D_WITH_TRANSPORT_NNG

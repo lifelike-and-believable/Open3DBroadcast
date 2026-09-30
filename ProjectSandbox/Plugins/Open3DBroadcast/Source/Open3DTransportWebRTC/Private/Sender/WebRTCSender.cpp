@@ -1,5 +1,7 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
+#if O3D_WITH_TRANSPORT_WEBRTC // Whole file: without the transport the module is a stub (O3DBuildFlags).
+
 #include "WebRTCSender.h"
 #include "O3DRedact.h"
 #include "../Shared/WebRTCUtils.h"
@@ -776,3 +778,5 @@ bool FO3DWebRTCSender::ParseConfig(const FO3DTransportConfig& Config)
 
     return true;
 }
+
+#endif // O3D_WITH_TRANSPORT_WEBRTC
