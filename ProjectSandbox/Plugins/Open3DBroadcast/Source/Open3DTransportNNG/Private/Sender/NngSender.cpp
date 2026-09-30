@@ -5,7 +5,6 @@
 
 #include "Logging/LogMacros.h"
 #include "HAL/Event.h"
-#include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "HAL/Runnable.h"
 #include "HAL/RunnableThread.h"
@@ -58,7 +57,7 @@ namespace
         {
             const int32 Count = Pipe->PipeCount.fetch_add(1) + 1;
             Pipe->bConnected.store(true);
-            UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender connection established (pipe count=%d)"), Count);
+            UE_LOG(LogO3DNngSender, Log, TEXT("NNG sender connection established (pipe count=%d)"), Count);
         }
         else if (Event == NNG_PIPE_EV_REM_POST)
         {
@@ -67,7 +66,7 @@ namespace
             {
                 Pipe->bConnected.store(Pipe->bConnectedWithoutPipes.load());
             }
-            UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender connection lost (pipe count=%d)"), FMath::Max(0, Count));
+            UE_LOG(LogO3DNngSender, Log, TEXT("NNG sender connection lost (pipe count=%d)"), FMath::Max(0, Count));
         }
     }
 }
@@ -151,10 +150,13 @@ FO3DNngSender::FO3DNngSender()
 
 bool FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
 {
+    // The worker reads Options and owns the socket; neither may change under it (TRB-33).
+    Stop();
+
     FString Error;
     if (!O3DNNG::ParseSenderOptions(Config, Options, Error))
     {
-        UE_LOG(LogO3DNngSender, Verbose, TEXT("Failed to parse NNG sender config: %s"), *Error);
+        UE_LOG(LogO3DNngSender, Warning, TEXT("Failed to parse NNG sender config: %s"), *Error);
         return false;
     }
 
@@ -166,15 +168,21 @@ bool FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
     // Note: Audio stream label is now automatically derived from StreamId
     AudioSourceGuid = FGuid::NewGuid();
 
-    Stats.Reset();
+    {
+        FScopeLock StatsLock(&StatsMutex);
+        Stats.Reset();
+    }
     PublishState->SendQueue.SetMaxBytes(Options.MaxQueueBytes);
     PublishState->AudioDropped.store(0);
     PipeContext->PipeCount.store(0);
-    PipeContext->bConnectedWithoutPipes.store(!((Options.Mode == O3DNNG::ENngMode::Pair && !Options.bListen) || Options.Mode == O3DNNG::ENngMode::Push));
+    // A listening socket is ready without peers; a dialing one only once a pipe exists.
+    PipeContext->bConnectedWithoutPipes.store(Options.bListen);
     BackoffAttempt = 0;
     LastBackoffAttemptTime = 0.0;
     LastErrorLogTimestamp = 0.0;
-    LastBackpressureLogTimestamp = 0.0;
+    LastDropLogTimestamp = 0.0;
+    DropsSinceLastLog = 0;
+    LastBackpressureLogTimestamp.store(0.0);
     PublishState->LastSubject.Reset();
 
     bInitialized = true;
@@ -195,7 +203,7 @@ bool FO3DNngSender::Start()
 {
     if (!bInitialized.Load())
     {
-        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender Start called before Initialize"));
+        UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender Start called before Initialize"));
         return false;
     }
 
@@ -206,9 +214,13 @@ bool FO3DNngSender::Start()
         return true;
     }
 
+    // The worker does not exist yet, so this thread owns the socket here (TRB-33).
+    BackoffAttempt = 0;
+    LastBackoffAttemptTime = 0.0;
     const bool bOpened = OpenSocket();
     if (!bOpened && Options.bListen)
     {
+        // OpenSocket logged the reason (for example, the port is in use).
         return false;
     }
 
@@ -218,18 +230,18 @@ bool FO3DNngSender::Start()
     StartWorker();
     bRunning = true;
 
-    UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender STARTED - Mode=%s Role=%s URI=%s (queue=%llu bytes)"),
+    UE_LOG(LogO3DNngSender, Log, TEXT("NNG sender started - Mode=%s Role=%s URI=%s (queue=%llu bytes)"),
         *O3DNNG::ModeToString(Options.Mode),
         *O3DNNG::RoleToString(Options.Role),
         *O3DRedact::Url(Options.CanonicalUri),
         Options.MaxQueueBytes);
 
-    if (!bOpened && !Options.bListen)
+    if (!bOpened)
     {
-        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender will attempt to connect to %s with exponential backoff (check host/port)"), *O3DRedact::Url(Options.CanonicalUri));
+        UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender could not dial %s yet; retrying with backoff (check host/port)"), *O3DRedact::Url(Options.CanonicalUri));
     }
 
-    return bOpened || !Options.bListen;
+    return true;
 }
 
 void FO3DNngSender::Stop()
@@ -251,6 +263,7 @@ void FO3DNngSender::Stop()
 
     StopWorker();
 
+    // The worker has exited, so this thread owns the socket again (TRB-33).
     CloseSocket();
     DrainQueue();
 
@@ -276,7 +289,7 @@ bool FO3DNngSender::Send(const O3DS::SubjectList& List)
     int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(Buffer, TimestampSeconds);
     if (BytesWritten <= 0)
     {
-        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender failed to serialize subject list"));
+        UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender failed to serialize subject list"));
         FO3DPerformanceMetrics::Get().RecordSerializationError();
         return false;
     }
@@ -342,31 +355,8 @@ bool FO3DNngSender::SendBytes(const uint8* Data, int32 Len, const FString& Subje
 
 void FO3DNngSender::Tick(float /*DeltaSeconds*/)
 {
-    if (!bRunning.Load())
-    {
-        return;
-    }
-
-    if ((Options.Mode == O3DNNG::ENngMode::Pair && !Options.bListen) || Options.Mode == O3DNNG::ENngMode::Push)
-    {
-        if (!Socket)
-        {
-            const double Now = FPlatformTime::Seconds();
-            const double Delay = FMath::Min(5.0, FMath::Pow(2.0, static_cast<double>(FMath::Clamp(BackoffAttempt, 0, 6))) * 0.1);
-            if (Now - LastBackoffAttemptTime >= Delay)
-            {
-                if (OpenSocket())
-                {
-                    BackoffAttempt = 0;
-                    PipeContext->bConnected.store(true);
-                }
-                else
-                {
-                    LastBackoffAttemptTime = Now;
-                }
-            }
-        }
-    }
+    // Nothing to do on the game thread: the worker owns the socket and reconnects it (TRB-33).
+    // A dialer also reconnects by itself inside NNG after a dropped connection.
 }
 
 FO3DTransportStats FO3DNngSender::GetStats() const
@@ -384,95 +374,89 @@ bool FO3DNngSender::OpenSocket()
     FNngSocketWrapper* NewSocket = new FNngSocketWrapper();
     int Ret = 0;
 
-    const FTCHARToUTF8 AddressUtf8(*Options.TcpAddress);
-
     switch (Options.Mode)
     {
     case O3DNNG::ENngMode::Pub:
         Ret = nng_pub0_open(&NewSocket->Socket);
-        if (Ret == 0)
-        {
-            Ret = nng_listen(NewSocket->Socket, AddressUtf8.Get(), nullptr, 0);
-        }
-        PipeContext->bConnected.store(Ret == 0);
         break;
     case O3DNNG::ENngMode::Pair:
         Ret = nng_pair1_open(&NewSocket->Socket);
-        if (Ret == 0)
-        {
-            if (Options.bListen)
-            {
-                Ret = nng_listen(NewSocket->Socket, AddressUtf8.Get(), nullptr, 0);
-                PipeContext->bConnected.store(Ret == 0);
-            }
-            else
-            {
-                Ret = nng_dial(NewSocket->Socket, AddressUtf8.Get(), nullptr, NNG_FLAG_NONBLOCK);
-                PipeContext->bConnected.store(Ret == 0);
-            }
-        }
         break;
     case O3DNNG::ENngMode::Push:
         Ret = nng_push0_open(&NewSocket->Socket);
-        if (Ret == 0)
-        {
-            Ret = nng_dial(NewSocket->Socket, AddressUtf8.Get(), nullptr, NNG_FLAG_NONBLOCK);
-            PipeContext->bConnected.store(Ret == 0);
-        }
         break;
     default:
-        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender unsupported mode"));
+        UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender unsupported mode %s"), *O3DNNG::ModeToString(Options.Mode));
         delete NewSocket;
         return false;
+    }
+
+    if (Ret == 0)
+    {
+        // Options and pipe notifications are set before listen/dial, so the first pipe event
+        // cannot be missed and "connected" comes only from pipe events for a dialer (TRB-42).
+        PipeContext->PipeCount.store(0);
+        PipeContext->bConnected.store(false);
+
+        const int NotifyAdd = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_ADD_POST, SenderPipeCallback, PipeToken);
+        if (NotifyAdd != 0)
+        {
+            UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender pipe notify add failed (%d) %s"), NotifyAdd, UTF8_TO_TCHAR(nng_strerror(NotifyAdd)));
+        }
+        const int NotifyRem = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_REM_POST, SenderPipeCallback, PipeToken);
+        if (NotifyRem != 0)
+        {
+            UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender pipe notify remove failed (%d) %s"), NotifyRem, UTF8_TO_TCHAR(nng_strerror(NotifyRem)));
+        }
+
+        // NNG's send buffer is an int counting messages (0-8192), not bytes (TRB-36). With the
+        // default depth, a pub socket drops whatever overflows a subscriber's per-pipe queue, so a
+        // burst of frames loses messages even on 127.0.0.1. The application queue (MaxQueueBytes)
+        // remains the byte limit and backpressure point.
+        constexpr int NngSendBufMessages = 1024;
+        const int SetSendBufRet = nng_socket_set_int(NewSocket->Socket, NNG_OPT_SENDBUF, NngSendBufMessages);
+        if (SetSendBufRet != 0)
+        {
+            UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender could not set send buffer to %d messages (%d %s)"),
+                NngSendBufMessages, SetSendBufRet, UTF8_TO_TCHAR(nng_strerror(SetSendBufRet)));
+        }
+
+        // No NNG_OPT_SENDTIMEO (TRB-36): every nng_send below uses NNG_FLAG_NONBLOCK, which
+        // returns NNG_EAGAIN at once instead of waiting, so a send timeout would never apply.
+
+        const FTCHARToUTF8 AddressUtf8(*Options.TcpAddress);
+        if (Options.bListen)
+        {
+            Ret = nng_listen(NewSocket->Socket, AddressUtf8.Get(), nullptr, 0);
+        }
+        else
+        {
+            // Non-blocking dial: NNG keeps retrying in the background and reconnects a dropped
+            // connection by itself, so the worker only reopens the socket if this call fails.
+            Ret = nng_dial(NewSocket->Socket, AddressUtf8.Get(), nullptr, NNG_FLAG_NONBLOCK);
+        }
     }
 
     if (Ret != 0)
     {
-        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender socket open failed (%d) %s"), Ret, UTF8_TO_TCHAR(nng_strerror(Ret)));
+        UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender could not %s %s (%d) %s"),
+            Options.bListen ? TEXT("listen on") : TEXT("dial"),
+            *O3DRedact::Url(Options.CanonicalUri), Ret, UTF8_TO_TCHAR(nng_strerror(Ret)));
         delete NewSocket;
         Socket = nullptr;
-        if ((Options.Mode == O3DNNG::ENngMode::Pair && !Options.bListen) || Options.Mode == O3DNNG::ENngMode::Push)
-        {
-            LastBackoffAttemptTime = FPlatformTime::Seconds();
-            BackoffAttempt++;
-        }
+        LastBackoffAttemptTime = FPlatformTime::Seconds();
+        BackoffAttempt = FMath::Min(BackoffAttempt + 1, 10);
         return false;
     }
 
-    PipeContext->PipeCount.store(0);
-    int NotifyAdd = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_ADD_POST, SenderPipeCallback, PipeToken);
-    if (NotifyAdd != 0)
+    if (Options.bListen)
     {
-        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender pipe notify add failed (%d) %s"), NotifyAdd, UTF8_TO_TCHAR(nng_strerror(NotifyAdd)));
-    }
-    int NotifyRem = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_REM_POST, SenderPipeCallback, PipeToken);
-    if (NotifyRem != 0)
-    {
-        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender pipe notify remove failed (%d) %s"), NotifyRem, UTF8_TO_TCHAR(nng_strerror(NotifyRem)));
-    }
-
-    // NNG's send buffer is an int counting messages (0-8192), not bytes (TRB-36). With the
-    // default depth, a pub socket drops whatever overflows a subscriber's per-pipe queue, so a
-    // burst of frames loses messages even on 127.0.0.1. The application queue (MaxQueueBytes)
-    // remains the byte limit and backpressure point.
-    constexpr int NngSendBufMessages = 1024;
-    const int SetSendBufRet = nng_socket_set_int(NewSocket->Socket, NNG_OPT_SENDBUF, NngSendBufMessages);
-    if (SetSendBufRet != 0)
-    {
-        UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender could not set send buffer to %d messages (%d %s)"),
-            NngSendBufMessages, SetSendBufRet, UTF8_TO_TCHAR(nng_strerror(SetSendBufRet)));
-    }
-
-    // Set send timeout to prevent worker thread from blocking indefinitely on slow/dead connections
-    // 30 second timeout allows for slow cloud links while preventing permanent hangs
-    int SetTimeoutRet = nng_setopt_ms(NewSocket->Socket, NNG_OPT_SENDTIMEO, 30000);
-    if (SetTimeoutRet != 0)
-    {
-        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender set send timeout (result: %d %s)"),
-            SetTimeoutRet, UTF8_TO_TCHAR(nng_strerror(SetTimeoutRet)));
+        // A listener is ready to accept peers; pipe events only track how many there are.
+        PipeContext->bConnected.store(true);
     }
 
     Socket = NewSocket;
+    BackoffAttempt = 0;
     LastBackoffAttemptTime = FPlatformTime::Seconds();
     return true;
 }
@@ -484,6 +468,23 @@ void FO3DNngSender::CloseSocket()
         delete Socket;
         Socket = nullptr;
     }
+}
+
+bool FO3DNngSender::EnsureSocketOnWorker()
+{
+    if (Socket)
+    {
+        return true;
+    }
+
+    const double Now = FPlatformTime::Seconds();
+    const double Delay = FMath::Min(5.0, FMath::Pow(2.0, static_cast<double>(FMath::Clamp(BackoffAttempt, 0, 6))) * 0.1);
+    if (Now - LastBackoffAttemptTime < Delay)
+    {
+        return false;
+    }
+
+    return OpenSocket();
 }
 
 void FO3DNngSender::StartWorker()
@@ -517,37 +518,34 @@ uint32 FO3DNngSender::RunWorker()
     TArray<uint8> Bytes;
     while (!bStopWorker.Load())
     {
+        // The worker is the only thread that opens, closes or reopens the socket while
+        // running (TRB-33).
+        EnsureSocketOnWorker();
+
         if (!PublishState->SendQueue.Dequeue(Bytes))
         {
             PublishState->SendQueue.WaitForWork(50);
             continue;
         }
 
-        const uint64 PayloadSize = static_cast<uint64>(Bytes.Num());
-
-        FNngSocketWrapper* ActiveSocket = Socket;
-        if (!ActiveSocket)
+        if (!Socket)
         {
-            FScopeLock StatsLock(&StatsMutex);
-            Stats.DroppedFrames++;
+            RecordSendDrop();
             continue;
         }
 
-        const int Ret = nng_send(ActiveSocket->Socket, Bytes.GetData(), Bytes.Num(), NNG_FLAG_NONBLOCK);
+        const uint64 PayloadSize = static_cast<uint64>(Bytes.Num());
+        const int Ret = nng_send(Socket->Socket, Bytes.GetData(), Bytes.Num(), NNG_FLAG_NONBLOCK);
         if (Ret == NNG_EAGAIN)
         {
-            // Socket buffer full due to slow receiver/network - re-queue to retry later
-            // This prevents blocking the worker thread on slow cloud connections
-            // (byte accounting is atomic inside the shared queue).
-            PublishState->SendQueue.Enqueue(MoveTemp(Bytes), /*bIgnoreCap=*/true);
-            // Brief yield to avoid busy-spinning when consistently backed up
-            FPlatformProcess::Sleep(0.001f);
+            // No peer ready, or NNG's own send buffer is full (TRB-34). This payload is the
+            // oldest one queued: drop it and count it. It is never put back at the tail, which
+            // would reorder frames, busy-spin while no peer exists and replay a stale backlog.
+            RecordSendDrop();
             continue;
         }
         if (Ret != 0)
         {
-            FScopeLock StatsLock(&StatsMutex);
-            Stats.DroppedFrames++;
             HandleSendError(Ret);
             continue;
         }
@@ -562,6 +560,26 @@ uint32 FO3DNngSender::RunWorker()
     return 0;
 }
 
+void FO3DNngSender::RecordSendDrop()
+{
+    {
+        FScopeLock StatsLock(&StatsMutex);
+        Stats.DroppedFrames++;
+    }
+
+    // Dropping while no peer is connected is expected (a dialer before its first connection),
+    // so this is a rate-limited Log line, not a warning.
+    ++DropsSinceLastLog;
+    const double Now = FPlatformTime::Seconds();
+    if (Now - LastDropLogTimestamp > 2.0)
+    {
+        UE_LOG(LogO3DNngSender, Log, TEXT("NNG sender dropped %lld frame(s): no peer ready or NNG send buffer full (%s)"),
+            DropsSinceLastLog, *O3DRedact::Url(Options.CanonicalUri));
+        LastDropLogTimestamp = Now;
+        DropsSinceLastLog = 0;
+    }
+}
+
 bool FO3DNngSender::EnqueuePayload(const uint8* Data, int32 Size)
 {
     if (Size <= 0 || Data == nullptr)
@@ -572,13 +590,14 @@ bool FO3DNngSender::EnqueuePayload(const uint8* Data, int32 Size)
     TArray<uint8> Bytes(Data, Size);
     if (!PublishState->SendQueue.Enqueue(MoveTemp(Bytes)))
     {
+        // Any sending thread may get here; the compare-exchange lets one of them log (TRB-43).
         const double Now = FPlatformTime::Seconds();
-        if (Now - LastBackpressureLogTimestamp > 0.5)
+        double Last = LastBackpressureLogTimestamp.load();
+        if (Now - Last > 2.0 && LastBackpressureLogTimestamp.compare_exchange_strong(Last, Now))
         {
-            UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender queue full (pending=%llu / limit=%llu bytes). Dropping frame."),
+            UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender queue full (pending=%llu / limit=%llu bytes). Dropping frame."),
                 PublishState->SendQueue.GetPendingBytes(),
                 Options.MaxQueueBytes);
-            LastBackpressureLogTimestamp = Now;
         }
         return false;
     }
@@ -593,34 +612,26 @@ void FO3DNngSender::DrainQueue()
 
 void FO3DNngSender::HandleSendError(int ErrorCode)
 {
-    const double Now = FPlatformTime::Seconds();
-    if (Now - LastErrorLogTimestamp > 0.25)
     {
-        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender send failed (%d) %s"), ErrorCode, UTF8_TO_TCHAR(nng_strerror(ErrorCode)));
+        FScopeLock StatsLock(&StatsMutex);
+        Stats.DroppedFrames++;
+    }
+
+    const double Now = FPlatformTime::Seconds();
+    if (Now - LastErrorLogTimestamp > 2.0)
+    {
+        UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender send failed (%d) %s"), ErrorCode, UTF8_TO_TCHAR(nng_strerror(ErrorCode)));
         LastErrorLogTimestamp = Now;
     }
 
-    if (Options.Mode == O3DNNG::ENngMode::Pair && !Options.bListen)
+    if (ErrorCode == NNG_ECLOSED)
     {
+        // The socket is unusable. Close it here, on the worker, and let EnsureSocketOnWorker
+        // reopen it after the backoff delay.
         CloseSocket();
-        BackoffAttempt = FMath::Min(BackoffAttempt + 1, 10);
-        LastBackoffAttemptTime = Now;
         PipeContext->bConnected.store(false);
-    }
-    else if (Options.Mode == O3DNNG::ENngMode::Push)
-    {
-        CloseSocket();
-        BackoffAttempt = FMath::Min(BackoffAttempt + 1, 10);
         LastBackoffAttemptTime = Now;
-        PipeContext->bConnected.store(false);
-    }
-    else if (Options.Mode == O3DNNG::ENngMode::Pair && Options.bListen)
-    {
-        PipeContext->bConnected.store(true); // server remains available
-    }
-    else if (Options.Mode == O3DNNG::ENngMode::Pub)
-    {
-        PipeContext->bConnected.store(true); // publisher remains ready even if no subscribers
+        BackoffAttempt = FMath::Min(BackoffAttempt + 1, 10);
     }
 }
 

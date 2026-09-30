@@ -317,6 +317,9 @@ bool FO3DNngQueueLimitTest::RunTest(const FString& Parameters)
 	O3DS::SubjectList LargeList;
 	PopulateSubjectList(LargeList, TEXT("LargeSubject"), NumCurves);
 
+	// The drop is logged as a warning (TRB-43).
+	AddExpectedError(TEXT("NNG sender queue full"), EAutomationExpectedMessageFlags::Contains, 1);
+
 	const bool bSendQueued = Sender.Send(LargeList);
 	TestFalse(TEXT("Large payload rejected due to queue limit"), bSendQueued);
 
