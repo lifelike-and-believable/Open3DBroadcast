@@ -1,0 +1,61 @@
+name: Open3DBroadcast Fab package
+
+# Builds the Fab source-only zip of the plugin on a GitHub-hosted runner and
+# checks what is in it (CI-5, ADR 0002). Cheap, so it runs on every PR,
+# drafts included. Called by open3dbroadcast-plugin-ci.yml and the nightly;
+# can also be run by hand.
+#
+# What it does:
+#   1. Build/Scripts/fab-package.py stages the git-tracked plugin files,
+#      removes the modules in Build/Fab/exclude-modules.txt and the files
+#      matching Build/Fab/exclude-files.txt, writes the zip and checks it
+#      (no excluded module, no pdb/py, no developer docs, no Binaries).
+#   2. check-no-video-codecs.sh scans every binary in the staged package for
+#      ffmpeg/OpenH264 (CI-8). WebRTC's livekit_ffi.dll is excluded, so this
+#      is a required gate now.
+#   3. The zip and its manifest are uploaded as
+#      Open3DBroadcast-Fab-Source-<sha>.
+#
+# BuildPlugin on the zip's contents runs on the self-hosted UE runner, in the
+# calling workflow ("Build the Fab source zip" step), because it needs UE.
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fab-package:
+    name: Fab source zip
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and check the Fab source zip
+        run: |
+          python3 Build/Scripts/fab-package.py \
+            --out-dir "$RUNNER_TEMP/fab" \
+            --zip-name "Open3DBroadcast-Fab-Source-${GITHUB_SHA::12}.zip"
+
+      - name: Video codec gate on the packaged binaries
+        run: |
+          mapfile -t bins < "$RUNNER_TEMP/fab/binaries.txt"
+          if [ "${#bins[@]}" -eq 0 ]; then
+            echo "The package contains no .dll/.so/.dylib; nothing to scan."
+            exit 0
+          fi
+          Build/Scripts/check-no-video-codecs.sh "${bins[@]}"
+
+      - name: Upload Fab source zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Open3DBroadcast-Fab-Source-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/fab/*.zip
+            ${{ runner.temp }}/fab/*.manifest.txt
+          if-no-files-found: error
+          retention-days: 30

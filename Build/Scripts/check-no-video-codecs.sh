@@ -5,11 +5,15 @@
 # path at all - but both are copyleft/patent-encumbered and we ship the bytes,
 # which is what creates the obligation. See docs/webrtc-codec-removal-plan.md.
 #
-# ⚠️ THIS SCRIPT CURRENTLY FAILS BY DESIGN.
-# livekit_ffi.dll still contains both. It will pass once that DLL is rebuilt
-# against a libwebrtc built with H.264 disabled (step 1-2 of the plan). Wire it
-# into CI at that point - step 5 - so a future SDK bump can't silently
-# reintroduce them. Running it before then is how you verify the fix worked.
+# CI: .github/workflows/open3dbroadcast-fab-package.yml runs this on every
+# binary in the Fab source package, as a required gate (CI-8, ADR 0002). It
+# passes there because the WebRTC module, and with it livekit_ffi.dll, is
+# excluded from that package (Build/Fab/exclude-modules.txt).
+#
+# ⚠️ RUN WITH NO ARGUMENTS IT CURRENTLY FAILS BY DESIGN.
+# livekit_ffi.dll in the GitHub build still contains both. It will pass once
+# that DLL is rebuilt against a libwebrtc built with H.264 disabled (step 1-2
+# of the plan). Running it before then is how you verify the fix worked.
 #
 # Usage: Build/Scripts/check-no-video-codecs.sh [binary ...]
 #        (defaults to every vendored FFI binary in the plugin)
