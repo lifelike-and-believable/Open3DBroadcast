@@ -3,6 +3,7 @@
 #include "O3DSenderInterface.h"
 #include "O3DTransportTypes.h"
 #include "O3DLifetimeGate.h"
+#include "O3DPerformanceMetrics.h"
 #include "HAL/CriticalSection.h"
 #include "Templates/Atomic.h"
 
@@ -119,6 +120,9 @@ private:
     TSharedRef<FWebRTCSenderLink, ESPMode::ThreadSafe> Link;
     /** Opaque user data for lk_set_connection_callback; resolves to Link until the destructor. */
     void* LinkToken = nullptr;
+
+    /** This transport's counters, resolved once (SHR-3, SHR-17): no lock or lookup per frame. */
+    const FO3DTransportMetricsRef TransportMetrics;
 
     // State
     mutable FCriticalSection StateMutex;

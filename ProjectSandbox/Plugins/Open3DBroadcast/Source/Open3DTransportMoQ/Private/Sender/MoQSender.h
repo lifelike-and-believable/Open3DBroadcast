@@ -8,6 +8,7 @@
 #include "Containers/Queue.h"
 #include "O3DSenderInterface.h"
 #include "O3DAudioFrameCodec.h"
+#include "O3DPerformanceMetrics.h"
 #include "MoQFfiApi.h"
 #include "moq_ffi.h"
 
@@ -181,4 +182,7 @@ private:
 	 * the worker's wake event, so no thread can trigger a pooled event after Stop() (TRB-12).
 	 */
 	TSharedRef<FMoQSenderAudioState, ESPMode::ThreadSafe> AudioState;
+
+	/** This transport's counters, resolved once (SHR-3, SHR-17): no lock or lookup per frame. */
+	const FO3DTransportMetricsRef TransportMetrics;
 };

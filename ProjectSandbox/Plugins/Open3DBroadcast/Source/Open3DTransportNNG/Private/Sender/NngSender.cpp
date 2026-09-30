@@ -150,6 +150,7 @@ struct FO3DNngSender::FNngSocketWrapper
 FO3DNngSender::FO3DNngSender()
     : PublishState(MakeShared<FNngSenderPublishState, ESPMode::ThreadSafe>())
     , PipeContext(MakeShared<FNngSenderPipeContext, ESPMode::ThreadSafe>())
+    , TransportMetrics(FO3DPerformanceMetrics::Get().AcquireTransportMetrics(TEXT("NNG")))
 {
     PipeToken = GetPipeContextRegistry().Register(PipeContext);
 }
@@ -340,7 +341,7 @@ bool FO3DNngSender::SendBytes(const uint8* Data, int32 Len, const FString& Subje
 
     // Record successful send metrics
     FO3DPerformanceMetrics::Get().RecordBytesSent(Len);
-    FO3DPerformanceMetrics::Get().RecordTransportFrameSent(TEXT("NNG"), Len);
+    TransportMetrics->RecordFrameSent(static_cast<uint64>(Len));
 
     return true;
 }

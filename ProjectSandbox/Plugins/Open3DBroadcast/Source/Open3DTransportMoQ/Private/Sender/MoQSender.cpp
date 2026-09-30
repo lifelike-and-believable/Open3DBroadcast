@@ -58,6 +58,7 @@ FO3DMoQSender::FO3DMoQSender(FMoQFfiApiRef InApi, TFunction<double()> InClock, u
 	, Clock(MoveTemp(InClock))
 	, JitterSeed(InJitterSeed)
 	, AudioState(MakeShared<FMoQSenderAudioState, ESPMode::ThreadSafe>())
+	, TransportMetrics(FO3DPerformanceMetrics::Get().AcquireTransportMetrics(TEXT("MoQ")))
 {
 	CachedState = MOQ_STATE_DISCONNECTED;
 }
@@ -413,7 +414,7 @@ bool FO3DMoQSender::SendBytes(const uint8* Data, int32 Len, const FString& Subje
 	}
 
 	FO3DPerformanceMetrics::Get().RecordBytesSent(Len);
-	FO3DPerformanceMetrics::Get().RecordTransportFrameSent(TEXT("MoQ"), Len);
+	TransportMetrics->RecordFrameSent(static_cast<uint64>(Len));
 	return true;
 }
 
