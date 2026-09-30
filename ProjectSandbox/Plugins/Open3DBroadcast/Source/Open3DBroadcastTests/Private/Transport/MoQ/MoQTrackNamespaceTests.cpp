@@ -175,6 +175,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQBackpressureTest, "Open3DBroadcast.Transpor
 bool FMoQBackpressureTest::RunTest(const FString& Parameters)
 {
 	using namespace MoQTrackNamespaceTestHelpers;
+	// The first drop is logged as a warning (rate limited to one per 2 s).
+	AddExpectedError(TEXT("MoQ sender queue overflow"), EAutomationExpectedMessageFlags::Contains, 1);
+
 	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
 	Fake->bHoldBlockingWork = true;
 

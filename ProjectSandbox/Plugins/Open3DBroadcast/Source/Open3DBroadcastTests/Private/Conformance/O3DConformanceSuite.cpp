@@ -618,6 +618,7 @@ bool FO3DConformanceSuite::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
+	Fixture->AddExpectedMessages(*this, Case);
 	RunCase(*this, Case, Profile, *Fixture);
 	Fixture.Reset();
 	return true;

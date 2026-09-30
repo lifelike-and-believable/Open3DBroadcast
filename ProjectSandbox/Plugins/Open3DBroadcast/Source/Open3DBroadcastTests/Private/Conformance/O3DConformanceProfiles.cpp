@@ -256,6 +256,15 @@ namespace O3DConformanceProfiles
 			MoQTesting::PumpDispatcher();
 		}
 
+		virtual void AddExpectedMessages(FAutomationTestBase& Test, EO3DConformanceCase Case) override
+		{
+			if (Case == EO3DConformanceCase::SendBackpressure)
+			{
+				// The first drop of each sender is logged as a warning (rate limited to one per 2 s).
+				Test.AddExpectedError(TEXT("MoQ sender queue overflow"), EAutomationExpectedMessageFlags::Contains, 1);
+			}
+		}
+
 		virtual bool RunDestroyWithCallbacksInFlight(FAutomationTestBase& Test) override
 		{
 			// The connect never returns while the sender lives; it returns (and fires its

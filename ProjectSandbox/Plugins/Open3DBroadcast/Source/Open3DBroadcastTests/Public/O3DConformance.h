@@ -77,6 +77,13 @@ public:
 	/** LifetimeDestroyWithCallbacksInFlight. Only fixtures with a fake FFI implement it. */
 	virtual bool RunDestroyWithCallbacksInFlight(FAutomationTestBase& Test);
 
+	/**
+	 * Registers the warnings and errors the transport is expected to log during Case (with
+	 * FAutomationTestBase::AddExpectedError), so a documented log line is not reported as a test
+	 * failure. Called before the case runs. Default: none.
+	 */
+	virtual void AddExpectedMessages(FAutomationTestBase& Test, EO3DConformanceCase Case) {}
+
 private:
 	FName TransportName;
 };
