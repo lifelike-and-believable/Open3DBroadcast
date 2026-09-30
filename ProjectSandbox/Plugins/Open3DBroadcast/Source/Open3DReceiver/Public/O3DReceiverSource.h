@@ -58,6 +58,7 @@ private:
     // Test-only white-box access, defined in Public/Testing/O3DReceiverTesting.h (WP-T2).
     friend struct FO3DReceiverSourceTestAccessor;
     friend struct FO3DReceiverCorrectnessTestAccessor;
+    friend struct FO3DReceiverSecretsTestAccess;
 
     class FSerializedConsumer;
     class FAudioSink;

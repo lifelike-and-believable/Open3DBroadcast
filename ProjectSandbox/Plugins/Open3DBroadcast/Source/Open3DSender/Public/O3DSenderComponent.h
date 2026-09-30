@@ -8,6 +8,7 @@
 #include "O3DSenderInterface.h"
 #include "O3DSenderLogs.h"
 #include "O3DTransportTypes.h"
+#include "O3DSecretStore.h"
 #include "O3DSenderAudioCaptureComponent.h"
 #include "Templates/UniquePtr.h"
 #include "Templates/Function.h"
@@ -204,7 +205,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Transport", meta = (HideInDetailPanel))
 	FName TransportName = TEXT("loopback");
 
-	/** Transport-provided key/value overrides populated by modular transport UIs. Hidden from the generic details panel. */
+	/**
+	 * Transport-provided key/value overrides populated by modular transport UIs. Hidden from the generic details panel.
+	 * Saved with the asset, so it never holds a secret: keys the transport declares secret go to FO3DSecretStore
+	 * instead (ADR 0004). "<transport>.credentialProfile" selects which stored secret applies.
+	 */
 	UPROPERTY(VisibleAnywhere, Category = "Open3DStream|Sender|Transport", meta = (HideInDetailPanel))
 	TMap<FString, FString> TransportOptions;
 
@@ -394,11 +399,36 @@ private:
 	void UpdateAudioCaptureBinding();
 
 public:
-	/** Retrieve a transport option by key (case-sensitive). Returns empty string if missing. */
+	/**
+	 * Retrieve a transport option by key (case-sensitive). Returns empty string if missing.
+	 * Always empty for a key the active transport declares secret (ADR 0004).
+	 */
 	FString GetTransportOption(const FString& Key) const;
 
-	/** Set or update a transport option. Passing an empty value removes the key. */
+	/**
+	 * Set or update a transport option. Passing an empty value removes the key.
+	 * A key the active transport declares secret is routed to FO3DSecretStore for this session
+	 * (no Modify(), never stored in TransportOptions); an empty value then clears it.
+	 */
 	void SetTransportOption(const FString& Key, const FString& Value);
+
+	/** True when the active transport's customization declares Key as a secret option. */
+	bool IsTransportSecretKey(const FString& Key) const;
+
+	/** Credential profile selected by "<transport>.credentialProfile"; "default" when unset. */
+	FString GetCredentialProfile() const;
+
+	/** Stores a secret for the active transport and profile. An empty value clears it. */
+	void SetTransportSecret(const FString& Key, const FString& Value, EO3DSecretPersistence Persistence = EO3DSecretPersistence::Session);
+
+	/** Moves an existing session secret to or from the per-user "remember on this machine" store. */
+	bool SetTransportSecretPersistence(const FString& Key, EO3DSecretPersistence Persistence);
+
+	/** Clears the session secret and any remembered copy. An environment variable still applies. */
+	void ClearTransportSecret(const FString& Key);
+
+	/** Where a secret for the active transport and profile would resolve from. Never returns the value. */
+	FO3DSecretStatus GetTransportSecretStatus(const FString& Key) const;
 
 	/** Remove all transport options (used when switching transports). */
 	void ClearTransportOptions();
@@ -435,9 +465,22 @@ private:
 		TArray<FTransform>& OutLocalTransforms,
 		TArray<int32>* OutResolvedParents);
 
-	// Test-only white-box access, defined in Public/Testing/O3DSenderTesting.h (WP-T2). Unconditional:
-	// a friend declaration must not depend on WITH_DEV_AUTOMATION_TESTS.
+	// Test-only white-box access, defined in Public/Testing/O3DSenderTesting.h (WP-T2) and in the
+	// Open3DBroadcastTests secrets tests (WP-S9). Unconditional: a friend declaration must not
+	// depend on WITH_DEV_AUTOMATION_TESTS.
 	friend struct FO3DSenderComponentTestAccess;
+	friend struct FO3DSenderSecretsTestAccess;
+
+	/**
+	 * Migration (ADR 0004 item 4): moves any declared secret key found in loaded TransportOptions
+	 * into the session store, removes it from the map and logs one Warning naming this component's
+	 * package (never the value). Does not mark the package dirty or save it. Returns the number of
+	 * keys moved.
+	 */
+	int32 MigrateLegacySecretOptions();
+
+	/** Transport name the options and secrets belong to (TransportName, or the default when None). */
+	FName GetSelectedTransportName() const;
 
 	void EnsureValidTransportName();
 

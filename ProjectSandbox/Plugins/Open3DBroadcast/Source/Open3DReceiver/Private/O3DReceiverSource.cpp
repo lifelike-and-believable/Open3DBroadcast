@@ -16,6 +16,7 @@
 #include "Misc/QualifiedFrameTime.h"
 
 #include "O3DHelpers.h"
+#include "O3DRedact.h"
 #include "O3DReceiverRegistry.h"
 #include "O3DReceiverTransportCustomization.h"
 #include "O3DAudioBus.h"
@@ -405,17 +406,17 @@ bool FO3DReceiverSource::StartTransport()
 
     if (!ActiveConfig.Uri.IsEmpty())
     {
-        SourceMachineName = FText::FromString(ActiveConfig.Uri);
+        SourceMachineName = FText::FromString(O3DRedact::Url(ActiveConfig.Uri));
     }
     else if (!ActiveConfig.StreamId.IsEmpty())
     {
-        SourceMachineName = FText::FromString(ActiveConfig.StreamId);
+        SourceMachineName = FText::FromString(O3DRedact::Url(ActiveConfig.StreamId));
     }
 
     UE_LOG(LogO3DReceiverSource, Log, TEXT("Receiver transport '%s' started (Uri=%s, StreamId=%s)."),
         *ActiveConfig.Transport,
-        *ActiveConfig.Uri,
-        *ActiveConfig.StreamId);
+        *O3DRedact::Url(ActiveConfig.Uri),
+        *O3DRedact::Url(ActiveConfig.StreamId));
 
     SourceStatus = FText::Format(LOCTEXT("StatusReceivingFmt", "Receiving via {0}"), FText::FromString(ActiveConfig.Transport));
     ResetStreamState();
@@ -483,8 +484,6 @@ FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
     Config.Transport = TransportName.ToString();
     Config.Role = TEXT("receiver");
 
-    Config.bPersistToken = false;
-
     Config.Audio.bEnableAudio = SourceSettings.bEnableAudio;
     if (Config.Audio.bEnableAudio)
     {
@@ -507,10 +506,19 @@ FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
         Config.Audio.AdvancedParams.Remove(TEXT("codec"));
     }
 
+    // Declared secret keys are never copied into AdvancedParams; they are resolved from the
+    // secret store into Config.Secrets (ADR 0004 item 4).
+    TArray<FString> SecretKeys;
+    TMap<FString, FString> SecretEnvVars;
+    O3DReceiver::GetTransportSecretDeclaration(TransportName, SecretKeys, SecretEnvVars);
     for (const TPair<FString, FString>& Option : SourceSettings.TransportOptions)
     {
-        Config.AdvancedParams.Add(Option.Key, Option.Value);
+        if (!SecretKeys.Contains(Option.Key))
+        {
+            Config.AdvancedParams.Add(Option.Key, Option.Value);
+        }
     }
+    O3DReceiver::ResolveSecrets(SourceSettings, Config.Secrets);
 
     if (!Config.Transport.IsEmpty())
     {

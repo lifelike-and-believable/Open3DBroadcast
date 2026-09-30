@@ -40,8 +40,17 @@ struct FO3DTokenConfig
 	/** Manual token (used when Mode == Manual) */
 	FString ManualToken;
 
-	/** Token endpoint URL for auto-fetch (used when Mode == AutoFetch) */
+	/**
+	 * Token endpoint URL for auto-fetch (used when Mode == AutoFetch). Must be https://, or
+	 * http:// to localhost, 127.0.0.1 or ::1; anything else is refused (ADR 0004 item 6).
+	 */
 	FString EndpointUrl;
+
+	/**
+	 * Credential for the token endpoint, sent as "Authorization: Bearer <value>" when not empty.
+	 * Comes from the `webrtc.tokenEndpointAuth` secret. Never logged.
+	 */
+	FString EndpointAuth;
 
 	/** Room name for token generation */
 	FString RoomName;
@@ -97,8 +106,12 @@ struct FO3DTokenFetchRequest
 	/** Maximum number of retry attempts (default: 5) */
 	int32 MaxRetries = 5;
 
-	/** Additional grants for token generation (optional) */
-	TMap<FString, FString> AdditionalGrants;
+	/**
+	 * Sent as "Authorization: Bearer <value>" when not empty. Never logged.
+	 * The request carries no grants: the endpoint decides them from the authenticated caller
+	 * (ADR 0004 item 6, TRF-22).
+	 */
+	FString AuthBearer;
 };
 
 /**

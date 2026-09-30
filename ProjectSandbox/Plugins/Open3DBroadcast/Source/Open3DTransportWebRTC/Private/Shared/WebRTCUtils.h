@@ -10,6 +10,26 @@ namespace WebRTCUtils
     /** Transport option naming the LiveKit room both sides join in auto-fetch mode (TRF-25). */
     static constexpr TCHAR RoomOptionKey[] = TEXT("webrtc.room");
 
+    /**
+     * Secret option keys (ADR 0004). Declared in the customizations' SecretOptionKeys, so their
+     * values live in FO3DSecretStore and reach the transport only through FO3DTransportConfig::Secrets.
+     */
+    /** LiveKit access token for manual token mode. */
+    static constexpr TCHAR TokenOptionKey[] = TEXT("webrtc.token");
+    /** Credential sent as "Authorization: Bearer <value>" to the token endpoint in auto-fetch mode. */
+    static constexpr TCHAR TokenEndpointAuthOptionKey[] = TEXT("webrtc.tokenEndpointAuth");
+
+    /** Environment variables for the secret keys; a non-default profile first tries "<NAME>__<PROFILE>". */
+    static constexpr TCHAR TokenEnvVar[] = TEXT("O3DB_WEBRTC_TOKEN");
+    static constexpr TCHAR TokenEndpointAuthEnvVar[] = TEXT("O3DB_WEBRTC_TOKEN_ENDPOINT_AUTH");
+
+    /** Returns the resolved secret for Key, or an empty string. */
+    inline FString FindSecret(const TMap<FString, FString>& Secrets, const TCHAR* Key)
+    {
+        const FString* Value = Secrets.Find(Key);
+        return Value ? *Value : FString();
+    }
+
     // Convert a UTF-8 C string (LiveKit messages, labels, track names) to FString.
     inline FString FromAnsi(const char* S)
     {

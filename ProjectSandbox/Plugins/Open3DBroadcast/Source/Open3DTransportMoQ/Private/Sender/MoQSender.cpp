@@ -1,4 +1,5 @@
 #include "Sender/MoQSender.h"
+#include "O3DRedact.h"
 #include "Sender/MoQSenderAudioSink.h"
 
 #include "HAL/Event.h"
@@ -96,7 +97,7 @@ bool FO3DMoQSender::ParseOptions(const FO3DTransportConfig& Config, FString& Out
 	Options.ConnectTimeoutSeconds = ResolveConnectTimeoutSeconds(Config);
 
 	UE_LOG(LogO3DMoQSender, Log, TEXT("MoQ sender configured: Relay=%s MocapTrack=%s/%s AudioTrack=%s/%s Mode=%s Queue=%llu bytes ConnectTimeout=%.1fs"),
-		*Options.RelayUrl,
+		*O3DRedact::Url(Options.RelayUrl),
 		*Options.MocapNamespace,
 		*Options.TrackName,
 		*Options.AudioNamespace,
@@ -278,7 +279,7 @@ void FO3DMoQSender::ScheduleReconnect(double Now)
 void FO3DMoQSender::HandleConnectTimeout(double Now)
 {
 	UE_LOG(LogO3DMoQSender, Warning, TEXT("MoQ connect to %s did not complete within %.1f s; retrying on a new client"),
-		*Options.RelayUrl, Options.ConnectTimeoutSeconds);
+		*O3DRedact::Url(Options.RelayUrl), Options.ConnectTimeoutSeconds);
 
 	if (Session.IsValid())
 	{
@@ -301,7 +302,7 @@ void FO3DMoQSender::HandleConnectionStateChanged(MoqConnectionState NewState)
 	case MOQ_STATE_CONNECTED:
 		bConnectInFlight = false;
 		ConsecutiveFailures = 0;
-		UE_LOG(LogO3DMoQSender, Log, TEXT("Connected to MoQ relay %s"), *Options.RelayUrl);
+		UE_LOG(LogO3DMoQSender, Log, TEXT("Connected to MoQ relay %s"), *O3DRedact::Url(Options.RelayUrl));
 		EnsurePublisher();
 		// Audio publisher is created on-demand when CreateAudioSink is called
 		if (bAudioRequested)

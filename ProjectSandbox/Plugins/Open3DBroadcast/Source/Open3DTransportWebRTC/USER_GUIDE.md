@@ -6,6 +6,7 @@ A comprehensive guide to configuring, using, and troubleshooting the WebRTC tran
 
 1. [Quick Start](#quick-start)
 2. [Configuration Guide](#configuration-guide)
+   - [Credentials](#credentials)
    - [Automatic Token Fetch](#automatic-token-fetch-recommended)
 3. [Audio Configuration](#audio-configuration)
 4. [Platform Support](#platform-support)
@@ -36,6 +37,7 @@ The WebRTC transport allows you to stream motion capture data and audio to/from 
    URL: wss://your-server.com
    Token: <JWT token from step 2>
    ```
+   The token is a credential. It is kept out of the level, the Blueprint, the ini files and LiveLink presets; see [Credentials](#credentials).
 
 4. **Enable Audio (Optional)**
    - Check "Enable Audio" in transport settings
@@ -79,6 +81,21 @@ The WebRTC transport allows you to stream motion capture data and audio to/from 
 - When expired: Connection fails with authentication error
 - **Solution:** Use automatic token fetch (recommended) or manually refresh tokens
 
+### Credentials
+
+The access token (`webrtc.token`) and the token endpoint credential (`webrtc.tokenEndpointAuth`) are secret options. The plugin never writes them to a level, a Blueprint, `GameUserSettings.ini`, a LiveLink connection string or preset, or a log.
+
+**Where the value comes from**, in this order:
+1. **This session:** the value typed into the password field in the editor, or set at runtime with the Blueprint node **Set Transport Secret** (`UO3DCredentialLibrary::SetTransportSecret`). It is gone after a restart.
+2. **Environment variable:** `O3DB_WEBRTC_TOKEN` for the token, `O3DB_WEBRTC_TOKEN_ENDPOINT_AUTH` for the endpoint credential. With a credential profile other than `default`, `<NAME>__<PROFILE>` is tried first (for profile `stage`: `O3DB_WEBRTC_TOKEN__STAGE`). This works in packaged games and on render nodes.
+3. **Remembered on this machine** (editor only): tick **Remember on this machine** next to the field. The value is stored in your per-user editor settings under `Saved/Config` (Base64-encoded, not encrypted), never in the project's `Config/` folder.
+
+**In the editor panel**, each secret field opens empty. The line below it says where the current value comes from: "Not set", "Set for this session", "Remembered on this machine" or "From environment variable ...". **Clear** forgets the session value and the remembered copy; an environment variable still applies. With Auto Token Fetch off, a warning appears when no token is available.
+
+**Credential Profile** (`webrtc.credentialProfile`, default `default`) is saved with the component or source. It names which stored credentials to use, so two senders can use different tokens without either token being saved.
+
+**Upgrading older projects:** a level, Blueprint, `GameUserSettings.ini` or LiveLink preset saved by an older version may still contain a token. When it is loaded, the token is moved into this session's store and removed from the loaded data, and one warning names the asset or source (never the value). Resave the asset, or recreate the LiveLink source, so the token is removed from disk.
+
 ### Automatic Token Fetch (Recommended)
 
 **New in v1.0.5:** Automatically fetch JWT tokens from your token server instead of manual entry.
@@ -102,26 +119,34 @@ The WebRTC transport allows you to stream motion capture data and audio to/from 
    - Choose "WebRTC" as transport
    - Check "Use Auto Token Fetch"
    - Enter "Token Endpoint URL": `https://your-server.com/token`
+   - Enter the "Token Endpoint Credential" your endpoint expects, or set `O3DB_WEBRTC_TOKEN_ENDPOINT_AUTH` (see [Credentials](#credentials))
+   - Set "Room" to the same value on the sender and the receiver
    - Set "Token Refresh Lead Time": 300 seconds (5 minutes recommended)
 
 3. **How It Works**
    - On startup: Unreal fetches token from your endpoint
-   - Request includes: room name, identity, role (publisher/subscriber)
+   - Request includes: room name, identity, role (publisher/subscriber), and `Authorization: Bearer <endpoint credential>` when one is set
+   - The request carries no grants; your server decides them
    - Your server generates and signs JWT using stored LiveKit credentials
    - Token automatically refreshes before expiration
    - No manual token management required
 
-**Token Server Requirements:**
+**Token endpoint requirements:**
+
+The endpoint described here is a reference contract. `Tests/mock-token-server.py` implements it for local testing only. A real endpoint holds your LiveKit API secret, so anyone who can call it can join your rooms. It must:
+- **Authenticate every caller.** The plugin sends `Authorization: Bearer <value>` from the `webrtc.tokenEndpointAuth` secret. An endpoint that answers without checking the caller hands out LiveKit tokens to anyone who can reach it.
+- **Decide the grants itself** from the authenticated caller. The client sends room, identity and role as a request only; it does not send grants, and the endpoint must not accept grants from a client (a client that picks its own grants can publish).
+- **Use HTTPS.** The plugin refuses a plain `http://` endpoint unless the host is `localhost`, `127.0.0.1` or `::1`.
+- Keep the LiveKit API key and secret on the server.
 - Accept POST with JSON: `{room, identity, role}`
 - Return JSON: `{token, expiresAt}` or `{token, ttl}`
-- Store LiveKit API key/secret securely on server
-- Support HTTPS for production
 
 **Example Token Server Request/Response:**
 ```json
 // Request
 POST https://your-server.com/token
 Content-Type: application/json
+Authorization: Bearer <endpoint credential>
 {
   "room": "MyRoom",
   "identity": "sender-12345",
@@ -137,7 +162,9 @@ Content-Type: application/json
 ```
 
 **Troubleshooting Auto Fetch:**
-- Check logs: `LogO3DWebRTCTokenManager` for fetch status
+- Check logs: `LogO3DWebRTCTokenManager` for fetch status. Logs show the endpoint without its query string and never show the response body or the token
+- "refused: use https://": the endpoint is plain `http://` on a host other than localhost
+- HTTP 401 or 403: the endpoint rejected the credential; check the Token Endpoint Credential or `O3DB_WEBRTC_TOKEN_ENDPOINT_AUTH`
 - Verify endpoint URL is correct and accessible
 - Ensure server returns valid JSON with "token" field
 - Check network firewall allows HTTPS to your server

@@ -1,6 +1,7 @@
 // Copyright (c) Open3DStream Contributors
 
 #include "Sender/NngSender.h"
+#include "O3DRedact.h"
 
 #include "Logging/LogMacros.h"
 #include "HAL/Event.h"
@@ -220,12 +221,12 @@ bool FO3DNngSender::Start()
     UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender STARTED - Mode=%s Role=%s URI=%s (queue=%llu bytes)"),
         *O3DNNG::ModeToString(Options.Mode),
         *O3DNNG::RoleToString(Options.Role),
-        *Options.CanonicalUri,
+        *O3DRedact::Url(Options.CanonicalUri),
         Options.MaxQueueBytes);
 
     if (!bOpened && !Options.bListen)
     {
-        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender will attempt to connect to %s with exponential backoff (check host/port)"), *Options.CanonicalUri);
+        UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender will attempt to connect to %s with exponential backoff (check host/port)"), *O3DRedact::Url(Options.CanonicalUri));
     }
 
     return bOpened || !Options.bListen;

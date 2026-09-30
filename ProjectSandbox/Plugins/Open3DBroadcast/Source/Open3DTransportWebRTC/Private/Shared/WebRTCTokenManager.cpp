@@ -6,6 +6,8 @@
 #include "Serialization/JsonSerializer.h"
 #include "HAL/PlatformTime.h"
 #include "Logging/LogMacros.h"
+#include "O3DHelpers.h"
+#include "O3DRedact.h"
 
 DEFINE_LOG_CATEGORY(LogO3DWebRTCTokenManager);
 
@@ -59,6 +61,15 @@ bool FO3DTokenManager::Initialize(const FO3DTokenConfig& InConfig)
 			return false;
 		}
 
+		// Credentials never travel over plain HTTP except to this machine (ADR 0004 item 6).
+		if (!O3DHelpers::IsHttpsOrLoopbackHttpUrl(InConfig.EndpointUrl))
+		{
+			UE_LOG(LogO3DWebRTCTokenManager, Error,
+				TEXT("Token endpoint %s refused: use https:// (plain http:// is allowed only for localhost, 127.0.0.1 and ::1)"),
+				*O3DRedact::Url(InConfig.EndpointUrl));
+			return false;
+		}
+
 		if (InConfig.RoomName.IsEmpty())
 		{
 			UE_LOG(LogO3DWebRTCTokenManager, Error, TEXT("Auto-fetch mode but no room name provided"));
@@ -79,7 +90,8 @@ bool FO3DTokenManager::Initialize(const FO3DTokenConfig& InConfig)
 			TokenFetcher = MakeShared<FO3DTokenFetcher, ESPMode::ThreadSafe>();
 		}
 
-		UE_LOG(LogO3DWebRTCTokenManager, Log, TEXT("Token manager initialized (Auto-fetch mode, endpoint: %s)"), *InConfig.EndpointUrl);
+		UE_LOG(LogO3DWebRTCTokenManager, Log, TEXT("Token manager initialized (Auto-fetch mode, endpoint: %s, endpoint auth: %s)"),
+			*O3DRedact::Url(InConfig.EndpointUrl), InConfig.EndpointAuth.IsEmpty() ? TEXT("none") : TEXT("set"));
 		return true;
 	}
 
@@ -207,6 +219,7 @@ void FO3DTokenManager::RefreshTokenAsync(TFunction<void(const FO3DTokenResult&)>
 			Request.RoomName = State->Config.RoomName;
 			Request.Identity = State->Config.Identity;
 			Request.Role = State->Config.Role == EO3DTokenRole::Publisher ? TEXT("publisher") : TEXT("subscriber");
+			Request.AuthBearer = State->Config.EndpointAuth;
 		}
 	}
 
@@ -228,7 +241,7 @@ void FO3DTokenManager::RefreshTokenAsync(TFunction<void(const FO3DTokenResult&)>
 	}
 
 	UE_LOG(LogO3DWebRTCTokenManager, Log, TEXT("Fetching token from endpoint: %s (room: %s, identity: %s, role: %s)"),
-		*Request.EndpointUrl, *Request.RoomName, *Request.Identity, *Request.Role);
+		*O3DRedact::Url(Request.EndpointUrl), *Request.RoomName, *Request.Identity, *Request.Role);
 
 	// The callback holds the state weakly and never the manager (TRF-24).
 	const TWeakPtr<FState, ESPMode::ThreadSafe> WeakState = State;
