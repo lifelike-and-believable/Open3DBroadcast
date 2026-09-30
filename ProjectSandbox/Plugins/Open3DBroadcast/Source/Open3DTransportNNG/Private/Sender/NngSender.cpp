@@ -88,18 +88,23 @@ public:
 protected:
     virtual bool OnSubmitGated(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
     {
-        TArray<uint8> Unified;
-        if (!GetEncoder().EncodeUnified(StreamLabel, State->LastSubject.Get(), Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Unified))
+        // Opus may return zero or several packets per buffer (SHR-2).
+        TArray<TArray<uint8>> Messages;
+        if (!GetEncoder().EncodeUnified(StreamLabel, State->LastSubject.Get(), Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Messages))
         {
             return false;
         }
 
-        if (!State->SendQueue.Enqueue(MoveTemp(Unified)))
+        bool bAllQueued = true;
+        for (TArray<uint8>& Unified : Messages)
         {
-            State->AudioDropped.fetch_add(1);
-            return false;
+            if (!State->SendQueue.Enqueue(MoveTemp(Unified)))
+            {
+                State->AudioDropped.fetch_add(1);
+                bAllQueued = false;
+            }
         }
-        return true;
+        return bAllQueued;
     }
 
 private:

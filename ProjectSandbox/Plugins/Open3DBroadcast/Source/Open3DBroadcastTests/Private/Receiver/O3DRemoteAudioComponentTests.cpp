@@ -181,7 +181,7 @@ bool FO3DReceiverAudioSinkLifetimeTest::RunTest(const FString& Parameters)
 
     int32 Received = 0;
     O3DS::FAudioFrameMeta LastMeta;
-    FDelegateHandle Handle = FO3DAudioBus::OnPcm16().AddLambda([&Received, &LastMeta](const O3DS::FAudioFrameMeta& Meta, const TArray<uint8>&)
+    FDelegateHandle Handle = FO3DAudioBus::OnPcm16().AddLambda([&Received, &LastMeta](const O3DS::FAudioFrameMeta& Meta, TConstArrayView<uint8>)
     {
         check(IsInGameThread());
         ++Received;

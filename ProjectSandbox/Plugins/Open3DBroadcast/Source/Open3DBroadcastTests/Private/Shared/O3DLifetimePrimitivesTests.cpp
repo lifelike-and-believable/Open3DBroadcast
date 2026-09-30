@@ -344,22 +344,26 @@ bool FO3DSinkAudioEncoderTest::RunTest(const FString& Parameters)
 	FO3DSinkAudioEncoder Encoder(Settings);
 
 	const float Pcm[4] = {0.5f, -0.5f, 1.5f, -1.5f};
-	O3DAudio::FEncodedFrame Frame;
-	TestTrue(TEXT("Encode label A"), Encoder.Encode(TEXT("a"), FString(), Pcm, 4, 1, 48000, 1.0, Frame));
-	TestTrue(TEXT("Snapshot SourceGuid stamped"), Frame.Meta.SourceGuid == Settings.SourceGuid);
-	TestEqual(TEXT("Default subject used"), Frame.Meta.SubjectName, FString(TEXT("default_subject")));
-	TestEqual(TEXT("Label kept"), Frame.Meta.StreamLabel, FString(TEXT("a")));
-	TestEqual(TEXT("PCM16 bytes"), Frame.Encoded.Num(), 8);
+	TArray<O3DAudio::FEncodedFrame> Frames;
+	TestTrue(TEXT("Encode label A"), Encoder.Encode(TEXT("a"), FString(), Pcm, 4, 1, 48000, 1.0, Frames));
+	if (!TestEqual(TEXT("PCM16 gives one frame per buffer"), Frames.Num(), 1))
+	{
+		return false;
+	}
+	TestTrue(TEXT("Snapshot SourceGuid stamped"), Frames[0].Meta.SourceGuid == Settings.SourceGuid);
+	TestEqual(TEXT("Default subject used"), Frames[0].Meta.SubjectName, FString(TEXT("default_subject")));
+	TestEqual(TEXT("Label kept"), Frames[0].Meta.StreamLabel, FString(TEXT("a")));
+	TestEqual(TEXT("PCM16 bytes"), Frames[0].Encoded.Num(), 8);
 
-	TestTrue(TEXT("Encode label B with subject"), Encoder.Encode(TEXT("b"), TEXT("hero"), Pcm, 4, 1, 48000, 2.0, Frame));
-	TestEqual(TEXT("Subject override used"), Frame.Meta.SubjectName, FString(TEXT("hero")));
-	TestTrue(TEXT("Encode label C evicts the oldest encoder"), Encoder.Encode(TEXT("c"), FString(), Pcm, 4, 1, 48000, 3.0, Frame));
+	TestTrue(TEXT("Encode label B with subject"), Encoder.Encode(TEXT("b"), TEXT("hero"), Pcm, 4, 1, 48000, 2.0, Frames));
+	TestTrue(TEXT("Subject override used"), Frames.Num() == 1 && Frames[0].Meta.SubjectName == TEXT("hero"));
+	TestTrue(TEXT("Encode label C evicts the oldest encoder"), Encoder.Encode(TEXT("c"), FString(), Pcm, 4, 1, 48000, 3.0, Frames));
 
 	// Two threads, two labels, one sink: must not corrupt each other (TRF-40/TRF-10).
 	std::atomic<int32> Failures{0};
 	{
-		FTestThread T1([&]() { O3DAudio::FEncodedFrame F; for (int32 I = 0; I < 2000; ++I) { if (!Encoder.Encode(TEXT("x"), FString(), Pcm, 4, 1, 48000, I, F) || F.Meta.StreamLabel != TEXT("x")) { Failures.fetch_add(1); } } });
-		FTestThread T2([&]() { O3DAudio::FEncodedFrame F; for (int32 I = 0; I < 2000; ++I) { if (!Encoder.Encode(TEXT("y"), FString(), Pcm, 4, 1, 48000, I, F) || F.Meta.StreamLabel != TEXT("y")) { Failures.fetch_add(1); } } });
+		FTestThread T1([&]() { TArray<O3DAudio::FEncodedFrame> F; for (int32 I = 0; I < 2000; ++I) { if (!Encoder.Encode(TEXT("x"), FString(), Pcm, 4, 1, 48000, I, F) || F.Num() != 1 || F[0].Meta.StreamLabel != TEXT("x")) { Failures.fetch_add(1); } } });
+		FTestThread T2([&]() { TArray<O3DAudio::FEncodedFrame> F; for (int32 I = 0; I < 2000; ++I) { if (!Encoder.Encode(TEXT("y"), FString(), Pcm, 4, 1, 48000, I, F) || F.Num() != 1 || F[0].Meta.StreamLabel != TEXT("y")) { Failures.fetch_add(1); } } });
 	}
 	TestEqual(TEXT("Concurrent encodes on one sink stay consistent"), Failures.load(), 0);
 
@@ -381,7 +385,7 @@ bool FO3DAudioBusGameThreadTest::RunTest(const FString& Parameters)
 	const uint8 Bytes[4] = {1, 2, 3, 4};
 
 	int32 Calls = 0;
-	FDelegateHandle Handle = FO3DAudioBus::OnPcm16().AddLambda([&Calls](const O3DS::FAudioFrameMeta& InMeta, const TArray<uint8>& Data)
+	FDelegateHandle Handle = FO3DAudioBus::OnPcm16().AddLambda([&Calls](const O3DS::FAudioFrameMeta& InMeta, TConstArrayView<uint8> Data)
 	{
 		if (InMeta.StreamLabel == TEXT("bus_test") && Data.Num() == 4)
 		{

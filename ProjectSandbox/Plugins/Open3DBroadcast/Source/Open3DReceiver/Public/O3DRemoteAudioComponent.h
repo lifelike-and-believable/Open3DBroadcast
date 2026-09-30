@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/SceneComponent.h"
+#include "Containers/ArrayView.h"
 #include "LiveLinkTypes.h"
 #include "Engine/EngineTypes.h"
 #include "O3DRemoteAudioComponent.generated.h"
@@ -114,7 +115,7 @@ protected:
 
 private:
     void OnAudioFrame(const FString& StreamLabel, const FString& SubjectName, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate);
-    void OnAudioPcm16(const O3DS::FAudioFrameMeta& Meta, const TArray<uint8>& PCM16Bytes);
+    void OnAudioPcm16(const O3DS::FAudioFrameMeta& Meta, TConstArrayView<uint8> PCM16Bytes);
     bool MatchesFilter(const FString& InSubject, const FString& InStream) const;
     void EnsureSoundWave(int32 NumChannels, int32 SampleRate);
 

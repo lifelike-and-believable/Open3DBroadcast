@@ -107,21 +107,27 @@ protected:
 			return false;
 		}
 
-		// Call-local scratch: a sink may be fed from more than one thread (TRF-40).
-		TArray<uint8> Unified;
-		if (!GetEncoder().EncodeUnified(StreamLabel, FString(), Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Unified))
+		// Call-local scratch: a sink may be fed from more than one thread (TRF-40). Opus may
+		// return zero or several packets per buffer (SHR-2).
+		TArray<TArray<uint8>> Messages;
+		if (!GetEncoder().EncodeUnified(StreamLabel, FString(), Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Messages))
 		{
 			return false;
 		}
 
-		const int64 Size = Unified.Num();
-		if (!State->SendQueue.Enqueue(MakeQueuedFrame(Unified.GetData(), Unified.Num())))
+		bool bAllQueued = true;
+		for (const TArray<uint8>& Unified : Messages)
 		{
-			UE_LOG(LogSocketsTcpSender, Verbose, TEXT("TCP sender failed to enqueue audio frame"));
-			return false;
+			const int64 Size = Unified.Num();
+			if (!State->SendQueue.Enqueue(MakeQueuedFrame(Unified.GetData(), Unified.Num())))
+			{
+				UE_LOG(LogSocketsTcpSender, Verbose, TEXT("TCP sender failed to enqueue audio frame"));
+				bAllQueued = false;
+				continue;
+			}
+			State->AudioBytesQueued.fetch_add(Size);
 		}
-		State->AudioBytesQueued.fetch_add(Size);
-		return true;
+		return bAllQueued;
 	}
 
 private:

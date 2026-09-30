@@ -8,6 +8,7 @@
 // depends on Open3DReceiver. Compiled out without dev automation tests.
 
 #include "CoreMinimal.h"
+#include "Containers/ArrayView.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -23,7 +24,7 @@ struct FO3DRemoteAudioComponentTestAccessor
 		Component->EnsureSoundWave(NumChannels, SampleRate);
 	}
 
-	static void CallOnAudioPcm16(UO3DRemoteAudioComponent* Component, const O3DS::FAudioFrameMeta& Meta, const TArray<uint8>& PCM16Bytes)
+	static void CallOnAudioPcm16(UO3DRemoteAudioComponent* Component, const O3DS::FAudioFrameMeta& Meta, TConstArrayView<uint8> PCM16Bytes)
 	{
 		Component->OnAudioPcm16(Meta, PCM16Bytes);
 	}

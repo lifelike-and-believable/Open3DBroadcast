@@ -27,41 +27,103 @@ namespace O3DAudio
 	};
 
 	/**
-	 * Helper that converts interleaved float PCM into the configured codec (PCM16 or Opus) and
-	 * prepares metadata for transport.
+	 * Converts interleaved float PCM from one audio stream into the configured codec (PCM16 or
+	 * Opus) and prepares metadata for transport. Stateful: holds one Opus encoder and the
+	 * samples waiting to complete the next Opus packet, so use one instance per stream. Not
+	 * thread-safe.
+	 *
+	 * Codec labelling (SHR-1): a frame's Codec is set only after that frame was produced by that
+	 * codec. When Opus is compiled out, cannot run at the stream's format, or fails, frames are
+	 * PCM16 and labelled PCM16.
+	 *
+	 * Opus framing (SHR-2): capture buffers of any size are accumulated and emitted as packets of
+	 * exactly one Opus frame (SampleRate * FrameSizeMs / 1000 frames), so one call returns zero or
+	 * more frames. An Opus failure is counted and logged at Warning; it never disables Opus for
+	 * the rest of the stream (the encoder is recreated after repeated failures, and a failed
+	 * initialisation is retried).
 	 */
 	class OPEN3DSHARED_API FFrameEncoder
 	{
 	public:
+		/** Opus frame duration used for packets, in ms. */
+		static constexpr int32 OpusFrameSizeMs = 20;
+
+		/** Consecutive packet failures after which the Opus encoder is recreated. */
+		static constexpr int32 OpusFailuresBeforeReinit = 3;
+
+		/** Buffers submitted as PCM16 after a failed Opus initialisation before it is retried. */
+		static constexpr int32 OpusInitRetryInterval = 250;
+
+		struct FStats
+		{
+			uint64 OpusPackets = 0;
+			uint64 Pcm16Frames = 0;
+			uint64 OpusEncodeFailures = 0;
+			uint64 OpusInitFailures = 0;
+		};
+
+		FFrameEncoder();
+		~FFrameEncoder();
+		FFrameEncoder(const FFrameEncoder&) = delete;
+		FFrameEncoder& operator=(const FFrameEncoder&) = delete;
+
 		bool Initialize(const FO3DTransportAudioConfig& Config, const FString& InDefaultStreamLabel, const FString& InDefaultSubject);
 
-		bool BuildEncodedFrame(const FString& StreamLabelOverride,
+		/**
+		 * Encode one capture buffer and append the resulting frames (zero or more) to OutFrames.
+		 * TimestampSec is the capture time of the buffer's first frame; each emitted frame carries
+		 * the capture time of its own first frame. Returns false when the input is invalid or the
+		 * encoder is not initialised; true otherwise, including when the samples were only
+		 * buffered towards the next Opus packet.
+		 */
+		bool EncodeBuffer(const FString& StreamLabelOverride,
 			const FString& SubjectOverride,
 			const float* Interleaved,
 			int32 NumFrames,
 			int32 NumChannels,
 			int32 SampleRate,
 			double TimestampSec,
-			FEncodedFrame& OutFrame);
+			TArray<FEncodedFrame>& OutFrames);
 
 		const FO3DTransportAudioConfig& GetConfig() const { return AudioConfig; }
-		O3DS::EUnifiedCodec GetActiveCodec() const { return ActiveCodec; }
+
+		/** The codec the configuration asks for. */
+		O3DS::EUnifiedCodec GetRequestedCodec() const { return RequestedCodec; }
+
+		/** Frames per channel waiting for the next Opus packet. */
+		int32 GetPendingFrames() const { return PendingFrames; }
+
+		const FStats& GetStats() const { return Stats; }
 
 	private:
 		bool EnsureOpusEncoder(int32 SampleRate, int32 NumChannels);
-		FString ResolveStreamLabel(const FString& Override) const;
-		FString ResolveSubject(const FString& Override) const;
+		void EmitOpusPacket(const FString& Label, const FString& Subject, TArray<FEncodedFrame>& OutFrames);
+		void EmitPcm16(const FString& Label, const FString& Subject, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec, TArray<FEncodedFrame>& OutFrames);
+		void FlushPendingAsPcm16(const FString& Label, const FString& Subject, TArray<FEncodedFrame>& OutFrames);
+		const FString& ResolveStreamLabel(const FString& Override) const;
+		const FString& ResolveSubject(const FString& Override) const;
 
 		FO3DTransportAudioConfig AudioConfig;
 		FString DefaultStreamLabel;
 		FString DefaultSubject;
-		O3DS::EUnifiedCodec ActiveCodec = O3DS::EUnifiedCodec::PCM16;
+		O3DS::EUnifiedCodec RequestedCodec = O3DS::EUnifiedCodec::PCM16;
 
 		bool bInitialized = false;
 		bool bOpusReady = false;
+		int32 ConsecutiveOpusFailures = 0;
+		int32 OpusInitRetryCountdown = 0;
 		FO3DAudioOpusEncoder OpusEncoder;
-		TArray<int16> PCM16Scratch;
-		int32 PCM16ScratchCapacity = 0;
+		/** Encoded bytes of the last packet; keeps its allocation between packets (SHR-18). */
+		TArray<uint8> OpusPacketScratch;
+
+		/** Samples waiting for the next Opus packet, and their format and capture time. */
+		TArray<float> Pending;
+		int32 PendingFrames = 0;
+		int32 PendingChannels = 0;
+		int32 PendingSampleRate = 0;
+		double PendingStartTimestampSec = 0.0;
+
+		FStats Stats;
 	};
 
 	/**
@@ -72,6 +134,11 @@ namespace O3DAudio
 	class OPEN3DSHARED_API FFrameDecoder
 	{
 	public:
+		FFrameDecoder() = default;
+		// Non-copyable: it owns a stateful Opus decoder.
+		FFrameDecoder(const FFrameDecoder&) = delete;
+		FFrameDecoder& operator=(const FFrameDecoder&) = delete;
+
 		bool Decode(O3DS::EUnifiedCodec Codec,
 			const O3DS::FAudioFrameMeta& Meta,
 			const uint8* Payload,
@@ -131,7 +198,10 @@ namespace O3DAudio
 	/** Serialise an encoded frame into the transport-neutral audio payload format. */
 	OPEN3DSHARED_API bool SerializeForTransport(const FEncodedFrame& Frame, TArray<uint8>& OutPayload);
 
-	/** Wrap an encoded frame in the unified message envelope for network transports. */
+	/**
+	 * Wrap an encoded frame in the unified message envelope for network transports. The audio
+	 * payload is serialized straight after the envelope header in one buffer (SHR-18).
+	 */
 	OPEN3DSHARED_API bool CreateUnifiedAudioMessage(const FEncodedFrame& Frame, double TimestampSec, TArray<uint8>& OutMessage);
 }
 

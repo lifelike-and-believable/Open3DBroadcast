@@ -23,22 +23,28 @@ bool FO3DMoQSenderAudioSink::OnSubmitGated(
 {
 	// Runs inside the sender's lifetime gate (WP-S5). Encoding uses this sink's own encoders
 	// (TRF-10); the serialized frame goes to the worker through the shared queue.
-	O3DAudio::FEncodedFrame Frame;
-	if (!GetEncoder().Encode(ResolvedStreamLabel, State->LastSubject.Get(), Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Frame))
+	// Opus may return zero or several packets per buffer (SHR-2).
+	TArray<O3DAudio::FEncodedFrame> Frames;
+	if (!GetEncoder().Encode(ResolvedStreamLabel, State->LastSubject.Get(), Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Frames))
 	{
 		return false;
 	}
 
-	TArray<uint8> AudioPayload;
-	if (!O3DAudio::SerializeForTransport(Frame, AudioPayload))
+	bool bAllQueued = true;
+	for (const O3DAudio::FEncodedFrame& Frame : Frames)
 	{
-		return false;
-	}
+		TArray<uint8> AudioPayload;
+		if (!O3DAudio::SerializeForTransport(Frame, AudioPayload))
+		{
+			bAllQueued = false;
+			continue;
+		}
 
-	if (!State->AudioQueue.Enqueue(MoveTemp(AudioPayload)))
-	{
-		State->AudioDropped.fetch_add(1);
-		return false;
+		if (!State->AudioQueue.Enqueue(MoveTemp(AudioPayload)))
+		{
+			State->AudioDropped.fetch_add(1);
+			bAllQueued = false;
+		}
 	}
-	return true;
+	return bAllQueued;
 }

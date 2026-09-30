@@ -75,8 +75,9 @@ bool FO3DSinkAudioEncoder::Encode(const FString& StreamLabel,
 	int32 NumChannels,
 	int32 SampleRate,
 	double TimestampSec,
-	O3DAudio::FEncodedFrame& OutFrame)
+	TArray<O3DAudio::FEncodedFrame>& OutFrames)
 {
+	OutFrames.Reset();
 	if (!Interleaved || NumFrames <= 0)
 	{
 		return false;
@@ -92,16 +93,19 @@ bool FO3DSinkAudioEncoder::Encode(const FString& StreamLabel,
 	}
 	Stream->LastUse = ++UseCounter;
 
-	if (!Stream->Encoder.BuildEncodedFrame(StreamLabel, Subject, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, OutFrame))
+	if (!Stream->Encoder.EncodeBuffer(StreamLabel, Subject, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, OutFrames))
 	{
 		return false;
 	}
 
-	if (OutFrame.Meta.SubjectName.IsEmpty())
+	for (O3DAudio::FEncodedFrame& Frame : OutFrames)
 	{
-		OutFrame.Meta.SubjectName = Subject;
+		if (Frame.Meta.SubjectName.IsEmpty())
+		{
+			Frame.Meta.SubjectName = Subject;
+		}
+		Frame.Meta.SourceGuid = Settings.SourceGuid;
 	}
-	OutFrame.Meta.SourceGuid = Settings.SourceGuid;
 	return true;
 }
 
@@ -112,12 +116,24 @@ bool FO3DSinkAudioEncoder::EncodeUnified(const FString& StreamLabel,
 	int32 NumChannels,
 	int32 SampleRate,
 	double TimestampSec,
-	TArray<uint8>& OutMessage)
+	TArray<TArray<uint8>>& OutMessages)
 {
-	O3DAudio::FEncodedFrame Frame;
-	if (!Encode(StreamLabel, SubjectOverride, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Frame))
+	OutMessages.Reset();
+	TArray<O3DAudio::FEncodedFrame> Frames;
+	if (!Encode(StreamLabel, SubjectOverride, Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Frames))
 	{
 		return false;
 	}
-	return O3DAudio::CreateUnifiedAudioMessage(Frame, TimestampSec, OutMessage);
+
+	OutMessages.Reserve(Frames.Num());
+	for (const O3DAudio::FEncodedFrame& Frame : Frames)
+	{
+		TArray<uint8>& Message = OutMessages.AddDefaulted_GetRef();
+		if (!O3DAudio::CreateUnifiedAudioMessage(Frame, Frame.Meta.TimestampSec, Message))
+		{
+			OutMessages.Pop(EAllowShrinking::No);
+			return false;
+		}
+	}
+	return true;
 }
