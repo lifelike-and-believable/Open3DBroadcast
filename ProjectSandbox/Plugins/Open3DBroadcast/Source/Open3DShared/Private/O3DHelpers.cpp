@@ -149,6 +149,67 @@ namespace O3DHelpers
         return Out;
     }
 
+    bool IsHttpsOrLoopbackHttpUrl(const FString& InUrl)
+    {
+        const FString Trimmed = InUrl.TrimStartAndEnd();
+        static constexpr TCHAR HttpsPrefix[] = TEXT("https://");
+        static constexpr TCHAR HttpPrefix[] = TEXT("http://");
+
+        const bool bHttps = Trimmed.StartsWith(HttpsPrefix, ESearchCase::IgnoreCase);
+        const bool bHttp = !bHttps && Trimmed.StartsWith(HttpPrefix, ESearchCase::IgnoreCase);
+        if (!bHttps && !bHttp)
+        {
+            return false;
+        }
+
+        const int32 PrefixLen = bHttps ? UE_ARRAY_COUNT(HttpsPrefix) - 1 : UE_ARRAY_COUNT(HttpPrefix) - 1;
+        FString Authority = Trimmed.Mid(PrefixLen);
+        for (int32 i = 0; i < Authority.Len(); ++i)
+        {
+            const TCHAR C = Authority[i];
+            if (C == '/' || C == '?' || C == '#')
+            {
+                Authority.LeftInline(i);
+                break;
+            }
+        }
+
+        int32 AtIdx;
+        if (Authority.FindLastChar('@', AtIdx))
+        {
+            Authority.RightChopInline(AtIdx + 1);
+        }
+
+        FString Host = Authority;
+        if (Host.StartsWith(TEXT("[")))
+        {
+            int32 CloseIdx;
+            Host = Host.FindChar(']', CloseIdx) ? Host.Mid(1, CloseIdx - 1) : FString();
+        }
+        else
+        {
+            int32 FirstColon, LastColon;
+            if (Host.FindChar(':', FirstColon) && Host.FindLastChar(':', LastColon) && FirstColon == LastColon)
+            {
+                Host.LeftInline(FirstColon); // host:port
+            }
+        }
+
+        if (Host.IsEmpty())
+        {
+            return false;
+        }
+
+        if (bHttps)
+        {
+            return true;
+        }
+
+        return Host.Equals(TEXT("localhost"), ESearchCase::IgnoreCase)
+            || Host.Equals(TEXT("127.0.0.1"))
+            || Host.Equals(TEXT("::1"));
+    }
+
     uint64 Fnv1a64(const void* Data, SIZE_T Bytes, uint64 Seed)
     {
         uint64 H = Seed;

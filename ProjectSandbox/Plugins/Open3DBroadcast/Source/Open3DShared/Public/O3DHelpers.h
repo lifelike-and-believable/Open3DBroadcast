@@ -22,6 +22,11 @@ namespace O3DHelpers
     // Fix common tcp URL typo: tcp://host.port -> tcp://host:port (preserves query string if any)
     OPEN3DSHARED_API FString NormalizeTcpUrlHostPort(const FString& InUrl);
 
+    // True for https:// URLs, and for http:// URLs whose host is localhost, 127.0.0.1 or ::1.
+    // Every other URL (plain http:// to another host, other schemes, no scheme) is false.
+    // Used to refuse credential-bearing requests over plain HTTP (ADR 0004 item 6).
+    OPEN3DSHARED_API bool IsHttpsOrLoopbackHttpUrl(const FString& InUrl);
+
     // Hashing helpers (FNV-1a 64-bit)
     OPEN3DSHARED_API uint64 Fnv1a64(const void* Data, SIZE_T Bytes, uint64 Seed = 1469598103934665603ull);
     OPEN3DSHARED_API uint64 HashNames(const TArray<FName>& Names);
