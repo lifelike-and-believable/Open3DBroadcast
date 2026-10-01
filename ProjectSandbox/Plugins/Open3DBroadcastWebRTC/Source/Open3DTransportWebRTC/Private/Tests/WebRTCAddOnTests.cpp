@@ -40,6 +40,8 @@ bool FWebRTCAddOnLibraryLocationTest::RunTest(const FString& Parameters)
 {
 	const FO3DFfiLibraryDesc Desc = O3DWebRTCAddOn::MakeLiveKitLibraryDesc();
 	TestEqual(TEXT("livekit_ffi is looked up in the add-on plugin"), Desc.OwningPluginName, FString(O3DWebRTCAddOn::PluginName));
+	// WP-A1 PR 2: Unload() asks the transport registry about live "WebRTC" instances.
+	TestTrue(TEXT("livekit_ffi stays loaded while a WebRTC instance is live"), Desc.TransportNames.Contains(FName(TEXT("WebRTC"))));
 
 	const TSharedPtr<IPlugin> AddOnPlugin = IPluginManager::Get().FindPlugin(O3DWebRTCAddOn::PluginName);
 	if (!TestTrue(TEXT("The add-on plugin is known to the plugin manager"), AddOnPlugin.IsValid()))

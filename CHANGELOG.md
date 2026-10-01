@@ -434,6 +434,49 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   creatable set, deprecated functions forward). The fake transports and the
   conformance suite use the new registry.
 
+### Transport lifetime: drain on unregister (WP-A1 PR 2, ADR 0007 step 2)
+
+- **Live instances are tracked (SHR-13).** `FO3DTransportRegistry::CreateSender`
+  and `CreateReceiver` keep a weak reference to every instance they hand out,
+  per transport name. `GetNumLiveInstances(Name)` counts the ones still
+  referenced, including leaks left by an earlier unregister of that name.
+- **Unregistering drains the transport (TRF-14).** Resetting a
+  `FO3DTransportRegistration` (or the last deprecated unregister call of a
+  legacy entry) removes the name, so nothing new can be created, then
+  broadcasts the new `OnTransportUnregistering(FName)`. The sender component's
+  transport controller and the LiveLink receiver source subscribe while they
+  hold an instance: they stop it and release it, together with the audio
+  sink, control publisher, consumer and control sink that go with it. The
+  registry then stops anything still referenced (a receiver also loses its
+  consumer and control sink) and logs an Error naming the transport and its
+  module for what is left. A factory call that races its own unregister has
+  its new instance stopped and returns null.
+- **Module shutdown order.** Every transport module resets its registration
+  first (which drains), then frees its FFI handles. `FO3DFfiLibrary` no longer
+  tracks instances itself: its descriptor names its transports
+  (`FO3DFfiLibraryDesc::TransportNames`) and `Unload()` asks the registry,
+  keeping the DLL loaded until process exit while an instance of one of them
+  is still referenced. `TrackInstance` and `StopLiveInstances` are removed.
+  MoQ and the WebRTC add-on use the new order; TCP, UDP, NNG and Loopback have
+  no FFI handle and drain through their registration.
+- **Game thread only.** `Register`, unregistering and the deprecated register
+  functions now `check(IsInGameThread())`, as ADR 0007 item 4 requires.
+- **Compatibility.** `O3D_TRANSPORT_API_VERSION` is now 3:
+  `FO3DFfiLibrary` and `FO3DFfiLibraryDesc` changed layout and the add-on
+  constructs them, and the registry gained a documented drain contract. A
+  WebRTC add-on built for version 2 logs the mismatch and registers nothing;
+  rebuild it against this release. A transport that keeps its own references
+  to instances it created through the registry must release them on
+  `OnTransportUnregistering`, or it is reported as a leak.
+- **Tests.** New `Open3DBroadcast.Shared.TransportLifetime.*`: unregister with
+  no instances, unregister during a live session (stops and releases, no leak
+  logged), a leaked instance is stopped and reported, 200 register/unregister
+  cycles, an instance created during its own unregister is discarded, and the
+  sender component and receiver source releasing their instance when a fake
+  transport unregisters mid-session. `Open3DBroadcast.Shared.FfiLibrary.*`
+  now checks that a fake FFI library is not freed while the registry counts a
+  live instance, and is freed after a clean drain.
+
 ### WebRTC becomes the Open3DBroadcastWebRTC add-on plugin (WP-F11, ADR 0002)
 
 - **WebRTC is no longer part of Open3DBroadcast.** The `Open3DTransportWebRTC`

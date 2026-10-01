@@ -11,7 +11,7 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M0 Decisions (ADRs 0001–0010) | Done (#261–#263) |
 | M1 Safety and correctness: WP-S1..S11, WP-T1, WP-T2 | Done (#264–#279) |
 | M2 Fab-buildable package: WP-F1..F4, F6..F9, F11 | Done (#274–#286). **F0 and F5 wait on the maintainer** (see §5) |
-| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 merged (#289); PR 2 is next** (see §2) |
+| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289) and PR 2 (lifetime) done; PR 3 is next** (see §2) |
 | M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | Not started |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
 | WP-CTL control channel (D11, ADR 0011) | CTL-1..5 done (#290–#295); **CTL-6 (WebRTC add-on) and CTL-7 (docs) remain** (see §2b) |
@@ -25,14 +25,19 @@ Design: `docs/adr/0007-transport-abstraction-and-registry.md`, section "Implemen
 1. **Interfaces and one registry** (SHR-12, SND-23, RCV-27, RCV-28, SHR-24). **Done: #289, merged as d365c34.**
    - `IOpen3DSender`, `IOpen3DReceiver`, their audio sinks, `ISerializedFrameConsumer` and `FO3DTransportConfig` now live in `Open3DShared/Public/Transport/`, exported by Open3DShared.
    - `FO3DTransportRegistry` (`Transport/O3DTransportRegistry.h`): each transport registers one immutable `FO3DTransportDescriptor` and holds a move-only `FO3DTransportRegistration`. `Find` returns `TSharedPtr<const FO3DTransportDescriptor>`; `GetNames(Role)` feeds the pickers from the same entries `CreateSender`/`CreateReceiver` use; `OnTransportsChanged` fires on every change. Duplicate names and API-version mismatches are refused.
-   - Old Sender/Receiver headers are deprecated forwarding shims (comments only, no `UE_DEPRECATED`), removed next minor release with an API-version bump. Register/unregister are documented as game-thread only but not yet `check`ed; step 2 can add that.
+   - Old Sender/Receiver headers are deprecated forwarding shims (comments only, no `UE_DEPRECATED`), removed next minor release with an API-version bump. Register/unregister were documented as game-thread only; step 2 added the `check`.
    - Tests: `Open3DBroadcast.Shared.TransportRegistry.*` (7 cases).
-   - **Start here next: step 2.**
-2. **Lifetime** (SHR-13, TRF-14): live-instance lists, `OnTransportUnregistering`, drain before unload, `FO3DFfiLibrary`; WebRTC and MoQ modules adopt it.
-3. **Results, state, capabilities** (SHR-14): `FO3DTransportResult`, `EO3DSendResult`, `FO3DSendPayload`, connection state, `FO3DTransportCapabilities`, `SendSerialized` pure virtual. The interface version already exists (`Open3DShared/Public/Transport/O3DTransportApiVersion.h`); CTL-2 raised it from 1 to **2**. The result type should cover `SendControl` too, and `SupportsControl()` belongs in the capability query.
+2. **Lifetime** (SHR-13, TRF-14). **Done (WP-A1 PR 2).** Details in the ADR 0007 addendum "implementation notes (WP-A1 PR 2)".
+   - The registry keeps a live list of the instances `CreateSender`/`CreateReceiver` hand out; `GetNumLiveInstances(Name)` counts them, leaks included.
+   - Unregistering drains: the name goes, `OnTransportUnregistering(FName)` fires, the sender transport controller (through the component's `TeardownTransport`) and the receiver source stop and release their instance and its sinks, then the registry stops what is left and logs an Error naming the transport.
+   - `FO3DFfiLibrary` asks the registry (`FO3DFfiLibraryDesc::TransportNames`) instead of tracking instances; `TrackInstance`/`StopLiveInstances` are gone. MoQ and the WebRTC add-on reset their registration, then unload.
+   - Register/unregister `check(IsInGameThread())`. `O3D_TRANSPORT_API_VERSION` is now **3** (FFI library layout).
+   - Tests: `Open3DBroadcast.Shared.TransportLifetime.*` (7 cases) and the reworked `Open3DBroadcast.Shared.FfiLibrary.*`.
+   - **Start here next: step 3.**
+3. **Results, state, capabilities** (SHR-14): `FO3DTransportResult`, `EO3DSendResult`, `FO3DSendPayload`, connection state, `FO3DTransportCapabilities`, `SendSerialized` pure virtual. The interface version already exists (`Open3DShared/Public/Transport/O3DTransportApiVersion.h`); CTL-2 raised it from 1 to 2 and WP-A1 PR 2 to **3**. The result type should cover `SendControl` too, and `SupportsControl()` belongs in the capability query.
 4. **Shared building blocks, one transport per PR**, in order Loopback, TCP, UDP, NNG, MoQ, then WebRTC (in the add-on). Each PR deletes that transport's own queue, demux, sink and option-parsing copies and drops its Build.cs dependency on Open3DSender/Open3DReceiver. Control landed before this step, so each migration must also carry that transport's control path: the shared send queue needs the "control" item type that is never dropped for mocap (ADR 0007 item 7), and the shared demux should absorb `TryGetControlPayload` / `O3DTransport::DeliverControlEnvelope` (CTL-2/3).
 5. **Typed config and consumer API** (SHR-36, TRB-27, SHR-16, TRF-38): removes the LiveKit string fields from `FO3DTransportConfig`, deletes `Send(SubjectList)`.
-6. Next minor release: delete the shims and bump `O3D_TRANSPORT_API_VERSION` (to 3, or later if other steps bump it first).
+6. Next minor release: delete the shims and bump `O3D_TRANSPORT_API_VERSION` (to 4, or later if other steps bump it first).
 
 WP-A1 acceptance (roadmap): conformance suite green after each migration, net transport LOC goes down, no transport keeps its own queue/demux/sink. ADR 0007 "Verification / acceptance" lists the extra test cases.
 

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Delegates/IDelegateInstance.h"
 #include "ILiveLinkSource.h"
 #include "Tickable.h"
 
@@ -104,6 +105,12 @@ private:
     void ReportGateMetricsDelta();
     bool StartTransport();
     void StopTransport();
+    /**
+     * FO3DTransportRegistry::OnTransportUnregistering (ADR 0007 item 5, WP-A1 PR 2): when the
+     * active transport unregisters, stop it and release the receiver and every sink given to it.
+     * Subscribed only while a receiver is active. Game thread.
+     */
+    void HandleTransportUnregistering(FName TransportName);
     FO3DTransportConfig BuildTransportConfig() const;
     void UpdateConnectionLastActive();
     void RemoveInactiveSubjects();
@@ -212,6 +219,8 @@ private:
     TSharedPtr<IOpen3DReceiver> ActiveReceiver;
     TSharedPtr<ISerializedFrameConsumer> ActiveConsumer;
     TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> ActiveAudioSink;
+    /** OnTransportUnregistering subscription; valid while ActiveReceiver is set. */
+    FDelegateHandle TransportUnregisteringHandle;
 
     // Per-sender parse and ordering state (WP-S4, RCV-5). Several senders can share
     // one transport channel; each gets its own SubjectList, ReorderGate, clock
