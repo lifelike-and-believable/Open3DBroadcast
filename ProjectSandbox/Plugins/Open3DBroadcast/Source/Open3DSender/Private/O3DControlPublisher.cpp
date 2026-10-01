@@ -135,7 +135,10 @@ int32 FO3DControlPublisher::Tick(IOpen3DSender& Sender)
 	for (const O3DS::Control::OutgoingMessage& Message : Out)
 	{
 		const TConstArrayView<uint8> Payload(Message.bytes.data(), static_cast<int32>(Message.bytes.size()));
-		if (O3DS::WriteControlEnvelope(Payload, NowSeconds, Envelope) && Sender.SendControl(Envelope.GetData(), Envelope.Num()))
+		// Anything but Queued (not connected yet, queue full, ...) goes back to the core, which
+		// retries events until their TTL and repairs values with the next snapshot (ADR 0011).
+		if (O3DS::WriteControlEnvelope(Payload, NowSeconds, Envelope)
+			&& Sender.SendControl(Envelope.GetData(), Envelope.Num()) == EO3DSendResult::Queued)
 		{
 			++Accepted;
 		}

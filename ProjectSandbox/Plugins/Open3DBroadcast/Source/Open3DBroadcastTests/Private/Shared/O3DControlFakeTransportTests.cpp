@@ -65,7 +65,7 @@ namespace O3DControlFakeTransportTests
 			{
 				continue;
 			}
-			if (Sender.SendControl(Envelope.GetData(), Envelope.Num()))
+			if (Sender.SendControl(Envelope.GetData(), Envelope.Num()) == EO3DSendResult::Queued)
 			{
 				++Accepted;
 			}
@@ -95,11 +95,11 @@ bool FO3DControlFakeEndToEndTest::RunTest(const FString& Parameters)
 	FO3DTransportConfig Config;
 	Config.StreamId = TEXT("stage");
 	TestTrue(TEXT("Both advertise control"), Sender.SupportsControl() && Receiver.SupportsControl());
-	TestTrue(TEXT("Sender initializes"), Sender.Initialize(Config) && Sender.Start());
+	TestTrue(TEXT("Sender initializes"), Sender.Initialize(Config).IsOk() && Sender.Start().IsOk());
 	Receiver.Initialize(Config);
 	Receiver.SetConsumer(Consumer);
 	Receiver.SetControlSink(Sink);
-	TestTrue(TEXT("Receiver starts"), Receiver.Start());
+	TestTrue(TEXT("Receiver starts"), Receiver.Start().IsOk());
 
 	O3DS::Control::ControlPublisher Publisher("0a1b2c3d4e5f60718293a4b5c6d7e8f9", "BP_Stage");
 	Publisher.Start(1000);
@@ -111,12 +111,12 @@ bool FO3DControlFakeEndToEndTest::RunTest(const FString& Parameters)
 	const TArray<TArray<uint8>> Frames = O3DTests::MakeRecordedFrames(TEXT("Hero"), 5);
 	for (const TArray<uint8>& Frame : Frames)
 	{
-		Sender.SendSerialized(Frame.GetData(), Frame.Num(), TEXT("Hero"), 0.0);
+		Sender.SendSerialized(FO3DSendPayload::MakeCopy(Frame.GetData(), Frame.Num(), TEXT("Hero"), 0.0));
 	}
 	TestTrue(TEXT("Control accepted"), Flush(Publisher, Sender, 1.0) > 0);
 	for (const TArray<uint8>& Frame : Frames)
 	{
-		Sender.SendSerialized(Frame.GetData(), Frame.Num(), TEXT("Hero"), 0.0);
+		Sender.SendSerialized(FO3DSendPayload::MakeCopy(Frame.GetData(), Frame.Num(), TEXT("Hero"), 0.0));
 	}
 
 	const int32 FramesPolled = Receiver.Poll();
@@ -166,23 +166,23 @@ bool FO3DControlFakeContractTest::RunTest(const FString& Parameters)
 	TArray<uint8> Envelope;
 	O3DS::WriteControlEnvelope(Payload, 1.0, Envelope);
 
-	TestFalse(TEXT("Refused before Initialize"), Sender.SendControl(Envelope.GetData(), Envelope.Num()));
+	TestTrue(TEXT("NotRunning before Initialize"), Sender.SendControl(Envelope.GetData(), Envelope.Num()) == EO3DSendResult::NotRunning);
 	FO3DTransportConfig Config;
 	Sender.Initialize(Config);
-	TestFalse(TEXT("Refused before Start"), Sender.SendControl(Envelope.GetData(), Envelope.Num()));
+	TestTrue(TEXT("NotRunning before Start"), Sender.SendControl(Envelope.GetData(), Envelope.Num()) == EO3DSendResult::NotRunning);
 	Sender.Start();
-	TestTrue(TEXT("Accepted while running"), Sender.SendControl(Envelope.GetData(), Envelope.Num()));
+	TestTrue(TEXT("Queued while running"), Sender.SendControl(Envelope.GetData(), Envelope.Num()) == EO3DSendResult::Queued);
 
 	const TArray<TArray<uint8>> Frames = O3DTests::MakeRecordedFrames(TEXT("Hero"), 1);
-	TestFalse(TEXT("A mocap frame is not a control envelope"), Sender.SendControl(Frames[0].GetData(), Frames[0].Num()));
-	TestFalse(TEXT("Null refused"), Sender.SendControl(nullptr, 10));
+	TestTrue(TEXT("A mocap frame is not a control envelope (Invalid)"), Sender.SendControl(Frames[0].GetData(), Frames[0].Num()) == EO3DSendResult::Invalid);
+	TestTrue(TEXT("Null is Invalid"), Sender.SendControl(nullptr, 10) == EO3DSendResult::Invalid);
 
 	Sender.SetMaxQueued(1); // one already queued
-	TestFalse(TEXT("Refused when the queue is full (the publisher retries)"), Sender.SendControl(Envelope.GetData(), Envelope.Num()));
+	TestTrue(TEXT("DroppedBackpressure when the queue is full (the publisher retries)"), Sender.SendControl(Envelope.GetData(), Envelope.Num()) == EO3DSendResult::DroppedBackpressure);
 	TestEqual(TEXT("A refused control send is not a dropped frame"), Sender.GetStats().DroppedFrames, static_cast<int64>(0));
 
 	Sender.Stop();
-	TestFalse(TEXT("Refused after Stop"), Sender.SendControl(Envelope.GetData(), Envelope.Num()));
+	TestTrue(TEXT("NotRunning after Stop"), Sender.SendControl(Envelope.GetData(), Envelope.Num()) == EO3DSendResult::NotRunning);
 	TestEqual(TEXT("One accepted"), Sender.GetRecordedControl().Num(), 1);
 
 	// A malformed control envelope is dropped by the receiver, not passed to the frame consumer.

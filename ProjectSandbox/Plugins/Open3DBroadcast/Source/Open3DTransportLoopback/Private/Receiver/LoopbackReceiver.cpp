@@ -5,7 +5,7 @@
 #include "HAL/PlatformTime.h"
 #include "Logging/LogMacros.h"
 
-bool FO3DLoopbackReceiver::Initialize(const FO3DTransportConfig& Config)
+FO3DTransportResult FO3DLoopbackReceiver::Initialize(const FO3DTransportConfig& Config)
 {
     QueueCapacity = O3DLoopback::ResolveQueueCapacity(Config);
     AudioQueueCapacity = O3DLoopback::ResolveAudioQueueCapacity(Config);
@@ -20,9 +20,10 @@ bool FO3DLoopbackReceiver::Initialize(const FO3DTransportConfig& Config)
     if (!bInitialized)
     {
         UE_LOG(LogO3DLoopbackTransport, Warning, TEXT("Loopback receiver failed to acquire channel '%s'."), *ChannelKey);
+        return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, FString::Printf(TEXT("Loopback channel '%s' could not be acquired."), *ChannelKey));
     }
 
-    return bInitialized;
+    return FO3DTransportResult::Ok();
 }
 
 void FO3DLoopbackReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer)
@@ -30,17 +31,20 @@ void FO3DLoopbackReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer
     Consumer = InConsumer;
 }
 
-bool FO3DLoopbackReceiver::Start()
+FO3DTransportResult FO3DLoopbackReceiver::Start()
 {
-    // FSerializedFrameConsumerRegistry, which this used to fall back to, was never populated and
-    // is gone (SHR-24); without SetConsumer the frames are dropped, as before.
+    if (!bInitialized)
+    {
+        return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("Loopback receiver Start() before a successful Initialize()."));
+    }
+    // ADR 0007 item 3: a receiver without a consumer refuses to start (it used to start and drop
+    // every frame; FSerializedFrameConsumerRegistry, its old fallback, is gone, SHR-24).
     if (!Consumer.IsValid())
     {
-        #if !WITH_DEV_AUTOMATION_TESTS
-        UE_LOG(LogO3DLoopbackTransport, Warning, TEXT("No serialized frame consumer registered; loopback frames will be dropped."));
-        #endif
+        return FO3DTransportResult::Error(EO3DTransportError::NoConsumer, TEXT("Loopback receiver Start() without a frame consumer (SetConsumer)."));
     }
-    return bInitialized;
+    ConnectionState.Begin(EO3DConnectionState::Connected);
+    return FO3DTransportResult::Ok();
 }
 
 void FO3DLoopbackReceiver::Stop()
@@ -48,6 +52,7 @@ void FO3DLoopbackReceiver::Stop()
     Consumer.Reset();
     AudioSink.Reset();
     ControlSink.Reset();
+    ConnectionState.End(EO3DConnectionState::Idle);
 }
 
 int32 FO3DLoopbackReceiver::Poll()
@@ -158,12 +163,9 @@ int32 FO3DLoopbackReceiver::Poll()
 
 FO3DTransportStats FO3DLoopbackReceiver::GetStats() const
 {
-    return Stats;
-}
-
-bool FO3DLoopbackReceiver::SupportsAudio() const
-{
-    return true;
+    FO3DTransportStats Copy = Stats;
+    Copy.State = ConnectionState.Get();
+    return Copy;
 }
 
 void FO3DLoopbackReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig)

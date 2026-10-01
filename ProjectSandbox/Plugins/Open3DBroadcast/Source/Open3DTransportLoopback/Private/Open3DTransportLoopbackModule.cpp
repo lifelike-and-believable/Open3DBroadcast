@@ -73,6 +73,7 @@ public:
 		Loopback.OwningModule = TEXT("Open3DTransportLoopback");
 		Loopback.CreateSender = []() { return MakeShared<FO3DLoopbackSender>(); };
 		Loopback.CreateReceiver = []() { return MakeShared<FO3DLoopbackReceiver>(); };
+		Loopback.GetCapabilities = [](const FO3DTransportConfig& Config) { return O3DLoopback::GetCapabilities(Config); };
 
 		Loopback.ConfigureReceiver = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
 		{

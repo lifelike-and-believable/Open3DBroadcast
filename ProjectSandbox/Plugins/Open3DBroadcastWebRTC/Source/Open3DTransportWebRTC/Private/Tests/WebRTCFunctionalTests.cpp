@@ -25,6 +25,7 @@
 
 #include "Transport/O3DTransportTypes.h"
 #include "Transport/O3DSerializedFrameConsumer.h"
+#include "Transport/O3DTransportRegistry.h"
 THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
 THIRD_PARTY_INCLUDES_END
@@ -441,7 +442,7 @@ bool FWebRTCS7SenderAutoFetchConnectsTest::RunTest(const FString& Parameters)
 	const FFakeFetcherRef Fetcher = MakeShared<FFakeTokenFetcher, ESPMode::ThreadSafe>();
 	{
 		FO3DWebRTCSender Sender(FFakeLiveKit::MakeApi(), MakeFetcherFactory(Fetcher));
-		if (!TestTrue(TEXT("Initialize"), Sender.Initialize(MakeAutoFetchConfig())))
+		if (!TestTrue(TEXT("Initialize"), Sender.Initialize(MakeAutoFetchConfig()).IsOk()))
 		{
 			return false;
 		}
@@ -451,7 +452,7 @@ bool FWebRTCS7SenderAutoFetchConnectsTest::RunTest(const FString& Parameters)
 			return false;
 		}
 
-		TestTrue(TEXT("Start"), Sender.Start());
+		TestTrue(TEXT("Start"), Sender.Start().IsOk());
 		TestEqual(TEXT("One token request after Start"), Fetcher->Requests.Num(), 1);
 		TestEqual(TEXT("No connect before a token exists"), Client->ConnectTokens.Num(), 0);
 		if (Fetcher->Requests.Num() > 0)
@@ -498,7 +499,7 @@ bool FWebRTCS7ReceiverAutoFetchConnectsTest::RunTest(const FString& Parameters)
 	const FFakeFetcherRef Fetcher = MakeShared<FFakeTokenFetcher, ESPMode::ThreadSafe>();
 	{
 		FO3DWebRTCReceiver Receiver(FFakeLiveKit::MakeApi(), MakeFetcherFactory(Fetcher));
-		if (!TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeAutoFetchConfig())))
+		if (!TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeAutoFetchConfig()).IsOk()))
 		{
 			return false;
 		}
@@ -509,7 +510,7 @@ bool FWebRTCS7ReceiverAutoFetchConnectsTest::RunTest(const FString& Parameters)
 			return false;
 		}
 
-		TestTrue(TEXT("Start"), Receiver.Start());
+		TestTrue(TEXT("Start"), Receiver.Start().IsOk());
 		TestEqual(TEXT("One token request after Start"), Fetcher->Requests.Num(), 1);
 		TestEqual(TEXT("No connect before a token exists"), Client->ConnectTokens.Num(), 0);
 		if (Fetcher->Requests.Num() > 0)
@@ -551,8 +552,8 @@ bool FWebRTCS7IdentityUniqueTest::RunTest(const FString& Parameters)
 	{
 		FO3DWebRTCSender SenderA(FFakeLiveKit::MakeApi(), MakeFetcherFactory(FetcherA));
 		FO3DWebRTCSender SenderB(FFakeLiveKit::MakeApi(), MakeFetcherFactory(FetcherB));
-		TestTrue(TEXT("Initialize A"), SenderA.Initialize(MakeAutoFetchConfig()));
-		TestTrue(TEXT("Initialize B"), SenderB.Initialize(MakeAutoFetchConfig()));
+		TestTrue(TEXT("Initialize A"), SenderA.Initialize(MakeAutoFetchConfig()).IsOk());
+		TestTrue(TEXT("Initialize B"), SenderB.Initialize(MakeAutoFetchConfig()).IsOk());
 		SenderA.Start();
 		SenderB.Start();
 		if (FetcherA->Requests.Num() == 1 && FetcherB->Requests.Num() == 1)
@@ -570,7 +571,7 @@ bool FWebRTCS7IdentityUniqueTest::RunTest(const FString& Parameters)
 		FO3DTransportConfig Config = MakeAutoFetchConfig();
 		Config.AdvancedParams.Remove(WebRTCUtils::RoomOptionKey);
 		AddExpectedError(TEXT("no room set"), EAutomationExpectedMessageFlags::Contains, 1);
-		TestFalse(TEXT("Initialize without webrtc.room fails in auto-fetch mode"), NoRoom.Initialize(Config));
+		TestFalse(TEXT("Initialize without webrtc.room fails in auto-fetch mode"), NoRoom.Initialize(Config).IsOk());
 	}
 #else
 	AddInfo(TEXT("WebRTC transport is Win64-only; skipped."));
@@ -593,7 +594,7 @@ bool FWebRTCS7SenderRefreshTokenTest::RunTest(const FString& Parameters)
 	const FFakeFetcherRef Fetcher = MakeShared<FFakeTokenFetcher, ESPMode::ThreadSafe>();
 	{
 		FO3DWebRTCSender Sender(FFakeLiveKit::MakeApi(), MakeFetcherFactory(Fetcher));
-		if (!TestTrue(TEXT("Initialize"), Sender.Initialize(MakeAutoFetchConfig())))
+		if (!TestTrue(TEXT("Initialize"), Sender.Initialize(MakeAutoFetchConfig()).IsOk()))
 		{
 			return false;
 		}
@@ -640,7 +641,7 @@ bool FWebRTCS7ReceiverRefreshTokenTest::RunTest(const FString& Parameters)
 	const FFakeFetcherRef Fetcher = MakeShared<FFakeTokenFetcher, ESPMode::ThreadSafe>();
 	{
 		FO3DWebRTCReceiver Receiver(FFakeLiveKit::MakeApi(), MakeFetcherFactory(Fetcher));
-		if (!TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeAutoFetchConfig())))
+		if (!TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeAutoFetchConfig()).IsOk()))
 		{
 			return false;
 		}
@@ -684,7 +685,7 @@ bool FWebRTCS7ReceiverRefreshFallbackTest::RunTest(const FString& Parameters)
 	const FFakeFetcherRef Fetcher = MakeShared<FFakeTokenFetcher, ESPMode::ThreadSafe>();
 	{
 		FO3DWebRTCReceiver Receiver(FFakeLiveKit::MakeApi(), MakeFetcherFactory(Fetcher));
-		if (!TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeAutoFetchConfig())))
+		if (!TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeAutoFetchConfig()).IsOk()))
 		{
 			return false;
 		}
@@ -736,7 +737,7 @@ bool FWebRTCS7SendFailureNoDoubleFreeTest::RunTest(const FString& Parameters)
 	// checks that the caller's list still owns the same transforms and destructs normally.
 	FFakeLiveKit Fake;
 	FO3DWebRTCSender Sender(FFakeLiveKit::MakeApi());
-	if (!TestTrue(TEXT("Initialize"), Sender.Initialize(MakeManualConfig())))
+	if (!TestTrue(TEXT("Initialize"), Sender.Initialize(MakeManualConfig()).IsOk()))
 	{
 		return false;
 	}
@@ -806,7 +807,7 @@ bool FWebRTCS7OneDataCallbackTest::RunTest(const FString& Parameters)
 	FFakeLiveKit Fake;
 	{
 		FO3DWebRTCReceiver Receiver(FFakeLiveKit::MakeApi());
-		TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeManualConfig()));
+		TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeManualConfig()).IsOk());
 		FFakeClient* Client = Fake.LastClient();
 		if (TestNotNull(TEXT("Client created"), Client))
 		{
@@ -820,7 +821,7 @@ bool FWebRTCS7OneDataCallbackTest::RunTest(const FString& Parameters)
 	Fake.DataCallbackExResult = 401;
 	{
 		FO3DWebRTCReceiver Receiver(FFakeLiveKit::MakeApi());
-		TestTrue(TEXT("Initialize with fallback"), Receiver.Initialize(MakeManualConfig()));
+		TestTrue(TEXT("Initialize with fallback"), Receiver.Initialize(MakeManualConfig()).IsOk());
 		FFakeClient* Client = Fake.LastClient();
 		if (TestNotNull(TEXT("Client created"), Client))
 		{
@@ -859,7 +860,7 @@ bool FWebRTCS7Utf8LabelRoundTripTest::RunTest(const FString& Parameters)
 		Config.Audio.bEnableAudio = true;
 		Config.Audio.NumChannels = 1;
 		Config.Audio.SampleRate = 48000;
-		if (!TestTrue(TEXT("Sender initialize"), Sender.Initialize(Config)))
+		if (!TestTrue(TEXT("Sender initialize"), Sender.Initialize(Config).IsOk()))
 		{
 			return false;
 		}
@@ -868,7 +869,7 @@ bool FWebRTCS7Utf8LabelRoundTripTest::RunTest(const FString& Parameters)
 		Client->FireConnection(LkConnConnected);
 
 		const uint8 Payload[4] = { 1, 2, 3, 4 };
-		TestTrue(TEXT("SendSerialized"), Sender.SendSerialized(Payload, 4, Name, 0.0));
+		TestTrue(TEXT("SendSerialized"), Sender.SendSerialized(FO3DSendPayload::MakeCopy(Payload, 4, Name, 0.0)) == EO3DSendResult::Queued);
 		if (Client->SentLabelsUtf8.Num() == 1)
 		{
 			SentLabel = Client->SentLabelsUtf8[0];
@@ -895,7 +896,7 @@ bool FWebRTCS7Utf8LabelRoundTripTest::RunTest(const FString& Parameters)
 	// Receiver: the same bytes decode back to the original name.
 	{
 		FO3DWebRTCReceiver Receiver(FFakeLiveKit::MakeApi());
-		if (!TestTrue(TEXT("Receiver initialize"), Receiver.Initialize(MakeManualConfig())))
+		if (!TestTrue(TEXT("Receiver initialize"), Receiver.Initialize(MakeManualConfig()).IsOk()))
 		{
 			return false;
 		}
@@ -907,7 +908,7 @@ bool FWebRTCS7Utf8LabelRoundTripTest::RunTest(const FString& Parameters)
 		AudioConfig.NumChannels = 1;
 		AudioConfig.SampleRate = 48000;
 		Receiver.SetAudioSink(AudioSink, AudioConfig);
-		TestTrue(TEXT("Receiver start"), Receiver.Start());
+		TestTrue(TEXT("Receiver start"), Receiver.Start().IsOk());
 
 		FFakeClient* Client = Fake.LastClient();
 		if (!TestNotNull(TEXT("Receiver client"), Client) || !Client->DataCallbackEx || !Client->AudioCallbackEx)
@@ -961,7 +962,7 @@ bool FWebRTCS7LateCallbackAfterDestroyTest::RunTest(const FString& Parameters)
 	void* User = nullptr;
 	{
 		FO3DWebRTCReceiver Receiver(FFakeLiveKit::MakeApi());
-		TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeManualConfig()));
+		TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeManualConfig()).IsOk());
 		FFakeClient* Client = Fake.LastClient();
 		if (!TestNotNull(TEXT("Client"), Client))
 		{
@@ -987,6 +988,242 @@ bool FWebRTCS7LateCallbackAfterDestroyTest::RunTest(const FString& Parameters)
 	}
 #else
 	AddInfo(TEXT("WebRTC transport is Win64-only; skipped."));
+#endif
+	return true;
+}
+
+// ---------------------------------------------------------------------------------------------
+// WP-A1 PR 3 (ADR 0007 items 3 and 4): result codes, connection state and capabilities. The
+// WebRTC conformance profile waits for an add-on test module (WP-T2e), so these mirror the
+// conformance cases on the fake LiveKit table.
+// ---------------------------------------------------------------------------------------------
+
+namespace WebRTCA1Pr3Test
+{
+	/** Records connection-state callbacks and whether each ran on the game thread. */
+	struct FStateLog
+	{
+		TArray<EO3DConnectionState> States;
+		TArray<EO3DTransportError> Codes;
+		bool bAllOnGameThread = true;
+
+		FO3DConnectionStateCallback MakeCallback()
+		{
+			return [this](EO3DConnectionState State, const FO3DTransportResult& Reason)
+			{
+				States.Add(State);
+				Codes.Add(Reason.Code);
+				bAllOnGameThread &= IsInGameThread();
+			};
+		}
+	};
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCA1SendResultCodesTest,
+	"Open3DBroadcast.Transport.WebRTC.Results.SendResultCodes",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FWebRTCA1SendResultCodesTest::RunTest(const FString& Parameters)
+{
+#if PLATFORM_WINDOWS && PLATFORM_64BITS
+	using namespace WebRTCS7Test;
+	FFakeLiveKit Fake;
+	FO3DWebRTCSender Sender(FFakeLiveKit::MakeApi());
+	const uint8 Small[4] = { 1, 2, 3, 4 };
+
+	TestTrue(TEXT("SendSerialized before Initialize returns NotRunning"), Sender.SendSerialized(FO3DSendPayload::MakeCopy(Small, 4, TEXT("A"))) == EO3DSendResult::NotRunning);
+	if (!TestTrue(TEXT("Initialize"), Sender.Initialize(MakeManualConfig()).IsOk()))
+	{
+		return false;
+	}
+	TestTrue(TEXT("SendSerialized before Start returns NotRunning"), Sender.SendSerialized(FO3DSendPayload::MakeCopy(Small, 4, TEXT("A"))) == EO3DSendResult::NotRunning);
+	FFakeClient* Client = Fake.LastClient();
+	TestTrue(TEXT("Start"), Sender.Start().IsOk());
+	TestTrue(TEXT("SendSerialized before LiveKit connects returns NotConnected"), Sender.SendSerialized(FO3DSendPayload::MakeCopy(Small, 4, TEXT("A"))) == EO3DSendResult::NotConnected);
+	if (!TestNotNull(TEXT("Client created"), Client))
+	{
+		return false;
+	}
+	Client->FireConnection(LkConnConnected);
+
+	TestTrue(TEXT("A frame is Queued once connected"), Sender.SendSerialized(FO3DSendPayload::MakeCopy(Small, 4, TEXT("A"))) == EO3DSendResult::Queued);
+	TestTrue(TEXT("An empty payload is Invalid"), Sender.SendSerialized(FO3DSendPayload()) == EO3DSendResult::Invalid);
+
+	TArray<uint8> Oversize;
+	Oversize.SetNumZeroed(WebRTCUtils::ReliableMaxDataBytes + 1);
+	AddExpectedError(TEXT("exceeds maximum"), EAutomationExpectedMessageFlags::Contains, 1);
+	TestTrue(TEXT("A frame over the reliable data limit is TooLarge"), Sender.SendSerialized(FO3DSendPayload(MoveTemp(Oversize), TEXT("A"), 0.0)) == EO3DSendResult::TooLarge);
+	TestEqual(TEXT("The capability names the same limit"), Sender.GetCapabilities().MaxPayloadBytes, WebRTCUtils::ReliableMaxDataBytes);
+
+	Fake.SendDataResult = 201;
+	TestTrue(TEXT("An lk_send_data_ex refusal is DroppedBackpressure"), Sender.SendSerialized(FO3DSendPayload::MakeCopy(Small, 4, TEXT("A"))) == EO3DSendResult::DroppedBackpressure);
+	Fake.SendDataResult = 0;
+	TestTrue(TEXT("The refusal is counted as a send error"), Sender.GetStats().SendErrors >= 1);
+
+	Sender.Stop();
+	TestTrue(TEXT("SendSerialized after Stop returns NotRunning"), Sender.SendSerialized(FO3DSendPayload::MakeCopy(Small, 4, TEXT("A"))) == EO3DSendResult::NotRunning);
+	TestEqual(TEXT("Exactly one frame sent"), static_cast<int32>(Sender.GetStats().FramesSent), 1);
+#else
+	AddInfo(TEXT("WebRTC transport is Win64-only; skipped."));
+#endif
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCA1SenderStateTest,
+	"Open3DBroadcast.Transport.WebRTC.State.SenderTransitions",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FWebRTCA1SenderStateTest::RunTest(const FString& Parameters)
+{
+#if PLATFORM_WINDOWS && PLATFORM_64BITS
+	using namespace WebRTCS7Test;
+	using namespace WebRTCA1Pr3Test;
+	// The test fires LkConnFailed once; the sender logs that real failure at Error.
+	AddExpectedError(TEXT("WebRTC connection failed"), EAutomationExpectedMessageFlags::Contains, 1);
+	FFakeLiveKit Fake;
+	FStateLog Log;
+	{
+		FO3DWebRTCSender Sender(FFakeLiveKit::MakeApi());
+		Sender.SetStateChangedCallback(Log.MakeCallback());
+		TestTrue(TEXT("Idle before Start"), Sender.GetConnectionState() == EO3DConnectionState::Idle);
+		if (!TestTrue(TEXT("Initialize"), Sender.Initialize(MakeManualConfig()).IsOk()))
+		{
+			return false;
+		}
+		FFakeClient* Client = Fake.LastClient();
+		TestTrue(TEXT("Start"), Sender.Start().IsOk());
+		TestTrue(TEXT("Connecting after Start"), Sender.GetConnectionState() == EO3DConnectionState::Connecting);
+		if (!TestNotNull(TEXT("Client created"), Client))
+		{
+			return false;
+		}
+
+		// LiveKit reports on its own thread in production; the sender applies it in Tick.
+		Client->FireConnection(LkConnConnected);
+		TestTrue(TEXT("Not applied before Tick"), Sender.GetConnectionState() == EO3DConnectionState::Connecting);
+		Sender.Tick(0.0f);
+		TestTrue(TEXT("Connected after Tick"), Sender.GetConnectionState() == EO3DConnectionState::Connected);
+		TestTrue(TEXT("Stats.State follows"), Sender.GetStats().State == EO3DConnectionState::Connected);
+
+		Client->FireConnection(LkConnReconnecting);
+		Sender.Tick(0.0f);
+		TestTrue(TEXT("Reconnecting while LiveKit reconnects"), Sender.GetConnectionState() == EO3DConnectionState::Reconnecting);
+		Client->FireConnection(LkConnConnected);
+		Sender.Tick(0.0f);
+		TestTrue(TEXT("Connected again"), Sender.GetConnectionState() == EO3DConnectionState::Connected);
+
+		Client->FireConnection(LkConnFailed);
+		Sender.Tick(0.0f);
+		TestTrue(TEXT("Failed when LiveKit gives up"), Sender.GetConnectionState() == EO3DConnectionState::Failed);
+
+		Sender.Stop();
+		TestTrue(TEXT("Idle after Stop"), Sender.GetConnectionState() == EO3DConnectionState::Idle);
+		const int32 AfterStop = Log.States.Num();
+		Sender.Tick(0.0f);
+		TestEqual(TEXT("Nothing reported after Stop"), Log.States.Num(), AfterStop);
+	}
+
+	const TArray<EO3DConnectionState> Expected = {
+		EO3DConnectionState::Connecting, EO3DConnectionState::Connected, EO3DConnectionState::Reconnecting,
+		EO3DConnectionState::Connected, EO3DConnectionState::Failed, EO3DConnectionState::Idle };
+	TestTrue(TEXT("Every change reported once, in order"), Log.States == Expected);
+	TestTrue(TEXT("Every callback ran on the game thread"), Log.bAllOnGameThread);
+	if (Log.Codes.Num() == Expected.Num())
+	{
+		TestTrue(TEXT("The Failed change carries ConnectFailed"), Log.Codes[4] == EO3DTransportError::ConnectFailed);
+		TestTrue(TEXT("Connected carries no error"), Log.Codes[1] == EO3DTransportError::None);
+	}
+#else
+	AddInfo(TEXT("WebRTC transport is Win64-only; skipped."));
+#endif
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCA1ReceiverStateTest,
+	"Open3DBroadcast.Transport.WebRTC.State.ReceiverTransitions",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FWebRTCA1ReceiverStateTest::RunTest(const FString& Parameters)
+{
+#if PLATFORM_WINDOWS && PLATFORM_64BITS
+	using namespace WebRTCS7Test;
+	using namespace WebRTCA1Pr3Test;
+	FFakeLiveKit Fake;
+	FStateLog Log;
+	{
+		FO3DWebRTCReceiver Receiver(FFakeLiveKit::MakeApi());
+		Receiver.SetStateChangedCallback(Log.MakeCallback());
+		if (!TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeManualConfig()).IsOk()))
+		{
+			return false;
+		}
+		const FO3DTransportResult NoConsumer = Receiver.Start();
+		TestTrue(TEXT("Start without a consumer returns NoConsumer"), NoConsumer.Code == EO3DTransportError::NoConsumer);
+		TestTrue(TEXT("Still Idle"), Receiver.GetConnectionState() == EO3DConnectionState::Idle);
+
+		Receiver.SetConsumer(MakeShared<FRecordingConsumer>());
+		TestTrue(TEXT("Start"), Receiver.Start().IsOk());
+		TestTrue(TEXT("Connecting after Start"), Receiver.GetConnectionState() == EO3DConnectionState::Connecting);
+		FFakeClient* Client = Fake.LastClient();
+		if (!TestNotNull(TEXT("Client created"), Client))
+		{
+			return false;
+		}
+		Client->FireConnection(LkConnConnected);
+		Receiver.Poll();
+		TestTrue(TEXT("Connected after Poll"), Receiver.GetConnectionState() == EO3DConnectionState::Connected);
+
+		Client->FireConnection(LkConnReconnecting);
+		Receiver.Poll();
+		TestTrue(TEXT("Reconnecting while LiveKit reconnects"), Receiver.GetConnectionState() == EO3DConnectionState::Reconnecting);
+
+		Receiver.Stop();
+		TestTrue(TEXT("Idle after Stop"), Receiver.GetConnectionState() == EO3DConnectionState::Idle);
+	}
+	const TArray<EO3DConnectionState> Expected = {
+		EO3DConnectionState::Connecting, EO3DConnectionState::Connected, EO3DConnectionState::Reconnecting, EO3DConnectionState::Idle };
+	TestTrue(TEXT("Every change reported once, in order"), Log.States == Expected);
+	TestTrue(TEXT("Every callback ran on the game thread"), Log.bAllOnGameThread);
+#else
+	AddInfo(TEXT("WebRTC transport is Win64-only; skipped."));
+#endif
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCA1CapabilitiesTest,
+	"Open3DBroadcast.Transport.WebRTC.Capabilities.DeliveryFollowsPreferLossy",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FWebRTCA1CapabilitiesTest::RunTest(const FString& Parameters)
+{
+	// The descriptor's query (no instance needed): ADR 0005 (iii) values.
+	FO3DTransportConfig Reliable;
+	FO3DTransportConfig Lossy;
+	Lossy.AdvancedParams.Add(WebRTCUtils::PreferLossyOptionKey, TEXT("true"));
+	const FO3DTransportCapabilities ReliableCaps = WebRTCUtils::GetCapabilities(Reliable);
+	const FO3DTransportCapabilities LossyCaps = WebRTCUtils::GetCapabilities(Lossy);
+	TestTrue(TEXT("Reliable data channel: ReliableOrdered"), ReliableCaps.Delivery == EO3DDeliveryGuarantee::ReliableOrdered);
+	TestTrue(TEXT("webrtc.prefer_lossy: Unreliable"), LossyCaps.Delivery == EO3DDeliveryGuarantee::Unreliable);
+	TestTrue(TEXT("Control, audio both ways, bidirectional"), ReliableCaps.bControl && ReliableCaps.bAudioSend && ReliableCaps.bAudioReceive && ReliableCaps.bBidirectional);
+	TestFalse(TEXT("No new-peer signal yet (ADR 0005 Q4)"), ReliableCaps.bPeerJoinSignal);
+	TestEqual(TEXT("Payload limit"), ReliableCaps.MaxPayloadBytes, WebRTCUtils::ReliableMaxDataBytes);
+
+	FO3DTransportCapabilities Registered;
+	if (FO3DTransportRegistry::Get().GetCapabilities(TEXT("WebRTC"), Lossy, Registered))
+	{
+		TestTrue(TEXT("The registered descriptor reports the same values"), Registered == LossyCaps);
+	}
+
+#if PLATFORM_WINDOWS && PLATFORM_64BITS
+	using namespace WebRTCS7Test;
+	FFakeLiveKit Fake;
+	FO3DWebRTCSender Sender(FFakeLiveKit::MakeApi());
+	FO3DTransportConfig Config = MakeManualConfig();
+	Config.AdvancedParams.Add(WebRTCUtils::PreferLossyOptionKey, TEXT("true"));
+	TestTrue(TEXT("Initialize"), Sender.Initialize(Config).IsOk());
+	TestTrue(TEXT("The sender reports the descriptor's values for its config"), Sender.GetCapabilities() == LossyCaps);
+	TestTrue(TEXT("SupportsControl forwards to bControl"), Sender.SupportsControl());
+	TestTrue(TEXT("SupportsAudio forwards to bAudioSend"), Sender.SupportsAudio());
+	Sender.Stop();
+
+	FO3DWebRTCReceiver Receiver(FFakeLiveKit::MakeApi());
+	TestTrue(TEXT("The receiver reports ReliableOrdered"), Receiver.GetCapabilities() == ReliableCaps);
 #endif
 	return true;
 }

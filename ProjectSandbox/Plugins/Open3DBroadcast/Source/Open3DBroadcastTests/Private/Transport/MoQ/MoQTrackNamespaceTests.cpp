@@ -189,17 +189,18 @@ bool FMoQBackpressureTest::RunTest(const FString& Parameters)
 
 	{
 		const TSharedRef<IOpen3DSender> Sender = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
-		TestTrue(TEXT("Initialize sender"), Sender->Initialize(Config));
-		TestTrue(TEXT("Start sender (connect held)"), Sender->Start());
+		TestTrue(TEXT("Initialize sender"), Sender->Initialize(Config).IsOk());
+		TestTrue(TEXT("Start sender (connect held)"), Sender->Start().IsOk());
 
 		TArray<uint8> Small;
 		Small.Init(0x5A, 1024);
-		TestTrue(TEXT("A frame under the cap is queued"), Sender->SendSerialized(Small.GetData(), Small.Num(), TEXT("Subject"), 0.0));
+		TestTrue(TEXT("A frame under the cap is queued"), Sender->SendSerialized(FO3DSendPayload::MakeCopy(Small.GetData(), Small.Num(), TEXT("Subject"), 0.0)) == EO3DSendResult::Queued);
 		const int64 DroppedBefore = Sender->GetStats().DroppedFrames;
 
 		TArray<uint8> Oversize;
 		Oversize.Init(0xA5, static_cast<int32>(QueueBytes) + 1);
-		TestFalse(TEXT("A frame over the byte cap is dropped"), Sender->SendSerialized(Oversize.GetData(), Oversize.Num(), TEXT("Subject"), 0.0));
+		TestTrue(TEXT("A frame over the byte cap is dropped with DroppedBackpressure"),
+			Sender->SendSerialized(FO3DSendPayload::MakeCopy(Oversize.GetData(), Oversize.Num(), TEXT("Subject"), 0.0)) == EO3DSendResult::DroppedBackpressure);
 		TestTrue(TEXT("The drop is counted in Stats.DroppedFrames"), Sender->GetStats().DroppedFrames >= DroppedBefore + 1);
 
 		Sender->Stop();
@@ -223,7 +224,8 @@ bool FMoQLargePayloadTest::RunTest(const FString& Parameters)
 		LargeList.Serialize(Buffer, 1.0);
 		AddInfo(FString::Printf(TEXT("Large payload size: %d bytes"), static_cast<int32>(Buffer.size())));
 
-		TestTrue(TEXT("Large payload is queued"), Sender->SendSerialized(reinterpret_cast<const uint8*>(Buffer.data()), static_cast<int32>(Buffer.size()), TEXT("LargeSubject_0"), 1.0));
+		TestTrue(TEXT("Large payload is queued"),
+			Sender->SendSerialized(FO3DSendPayload::MakeCopy(reinterpret_cast<const uint8*>(Buffer.data()), static_cast<int32>(Buffer.size()), TEXT("LargeSubject_0"), 1.0)) == EO3DSendResult::Queued);
 		TestTrue(TEXT("The worker publishes it"), O3DTests::PollUntil(5.0, [&Fake]() { return Fake->GetPublishCalls() >= 1; }));
 		TestEqual(TEXT("Nothing dropped"), Sender->GetStats().DroppedFrames, static_cast<int64>(0));
 		Sender->Stop();
@@ -248,9 +250,12 @@ bool FMoQReceiverMultiTrackTest::RunTest(const FString& Parameters)
 	const TSharedRef<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink = MakeShared<FNullAudioSink, ESPMode::ThreadSafe>();
 	{
 		const TSharedRef<IOpen3DReceiver> Receiver = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 1);
-		TestTrue(TEXT("Initialize receiver"), Receiver->Initialize(Config));
+		TestTrue(TEXT("Initialize receiver"), Receiver->Initialize(Config).IsOk());
 		Receiver->SetAudioSink(AudioSink, Config.Audio);
-		TestTrue(TEXT("Start receiver"), Receiver->Start());
+		// The receiver holds its consumer weakly (until ADR 0007 step 5), so the test keeps it alive.
+		const TSharedRef<FO3DRecordingFrameConsumer> FrameConsumer = MakeShared<FO3DRecordingFrameConsumer>();
+		Receiver->SetConsumer(FrameConsumer);
+		TestTrue(TEXT("Start receiver"), Receiver->Start().IsOk());
 		MoQTesting::PumpDispatcher(); // CONNECTED -> mocap and audio subscriptions
 
 		const TArray<FString> Subscriptions = Fake->GetLiveSubscriptions();
@@ -272,7 +277,7 @@ bool FMoQRelayUrlVariationsTest::RunTest(const FString& Parameters)
 	{
 		const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
 		const TSharedRef<IOpen3DSender> Sender = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
-		TestTrue(*FString::Printf(TEXT("Relay URL %s is accepted"), Url), Sender->Initialize(CreateTestConfig(Url, TEXT("session/test"))));
+		TestTrue(*FString::Printf(TEXT("Relay URL %s is accepted"), Url), Sender->Initialize(CreateTestConfig(Url, TEXT("session/test"))).IsOk());
 		Sender->Stop();
 	}
 	return true;

@@ -86,7 +86,7 @@ FO3DSocketsUdpReceiver::~FO3DSocketsUdpReceiver()
 	Stop();
 }
 
-bool FO3DSocketsUdpReceiver::Initialize(const FO3DTransportConfig& Config)
+FO3DTransportResult FO3DSocketsUdpReceiver::Initialize(const FO3DTransportConfig& Config)
 {
 	Stop();
 
@@ -107,13 +107,14 @@ bool FO3DSocketsUdpReceiver::Initialize(const FO3DTransportConfig& Config)
 	if (!O3DSockets::ParseHostPort(Config, BindHost, BindPort, TEXT("udp")))
 	{
 		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP receiver requires udp://host:port URI or explicit host/port options."));
-		return false;
+		BindPort = 0;
+		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("UDP receiver requires a udp://host:port URI or explicit host/port options."));
 	}
 
 	if (BindPort <= 0)
 	{
 		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP receiver requires a valid port (got %d)."), BindPort);
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("UDP receiver requires a valid port (got %d)."), BindPort));
 	}
 
 	if (StreamId.IsEmpty())
@@ -128,11 +129,11 @@ bool FO3DSocketsUdpReceiver::Initialize(const FO3DTransportConfig& Config)
 	if (!SocketSubsystem)
 	{
 		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP receiver could not access socket subsystem."));
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("UDP receiver could not access the socket subsystem."));
 	}
 
 	ReceiveBuffer.Reset();
-	return true;
+	return FO3DTransportResult::Ok();
 }
 
 void FO3DSocketsUdpReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer)
@@ -140,10 +141,32 @@ void FO3DSocketsUdpReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsum
 	Consumer = InConsumer;
 }
 
-bool FO3DSocketsUdpReceiver::Start()
+FO3DTransportResult FO3DSocketsUdpReceiver::Start()
 {
 	DestroySocket();
-	return CreateSocket();
+	if (BindPort <= 0)
+	{
+		return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("UDP receiver Start() before a successful Initialize()."));
+	}
+	if (!Consumer.IsValid())
+	{
+		return FO3DTransportResult::Error(EO3DTransportError::NoConsumer, TEXT("UDP receiver Start() without a frame consumer (SetConsumer)."));
+	}
+	// Stop() drops SocketSubsystem; fetch it again so Start() after Stop() works without Initialize().
+	if (!SocketSubsystem)
+	{
+		SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+	}
+
+	const FO3DTransportResult Result = CreateSocket();
+	if (!Result.IsOk())
+	{
+		ConnectionState.End(EO3DConnectionState::Failed, Result);
+		return Result;
+	}
+	// Bound: datagrams from any sender are received from now on; UDP has no connection.
+	ConnectionState.Begin(EO3DConnectionState::Connected);
+	return Result;
 }
 
 void FO3DSocketsUdpReceiver::Stop()
@@ -154,6 +177,7 @@ void FO3DSocketsUdpReceiver::Stop()
 	ReceiveBuffer.Reset();
 	RecvAddr.Reset();
 	FragmentState = MakeUnique<FFragmentState>(MakeUdpReassemblyConfig(MaxFrameBytes));
+	ConnectionState.End(EO3DConnectionState::Idle);
 }
 
 int32 FO3DSocketsUdpReceiver::Poll()
@@ -225,12 +249,9 @@ int32 FO3DSocketsUdpReceiver::Poll()
 
 FO3DTransportStats FO3DSocketsUdpReceiver::GetStats() const
 {
-	return Stats;
-}
-
-bool FO3DSocketsUdpReceiver::SupportsAudio() const
-{
-	return true;
+	FO3DTransportStats Copy = Stats;
+	Copy.State = ConnectionState.Get();
+	return Copy;
 }
 
 void FO3DSocketsUdpReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig)
@@ -255,11 +276,11 @@ void FO3DSocketsUdpReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink
 	ActiveAudioConfig = EffectiveConfig;
 }
 
-bool FO3DSocketsUdpReceiver::CreateSocket()
+FO3DTransportResult FO3DSocketsUdpReceiver::CreateSocket()
 {
 	if (!SocketSubsystem)
 	{
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("UDP receiver has no socket subsystem."));
 	}
 
 	DestroySocket();
@@ -268,7 +289,7 @@ bool FO3DSocketsUdpReceiver::CreateSocket()
 	if (!Socket)
 	{
 		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("Failed to create UDP socket."));
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("Failed to create the UDP socket."));
 	}
 
 	Socket->SetReuseAddr(true);
@@ -307,16 +328,18 @@ bool FO3DSocketsUdpReceiver::CreateSocket()
 	{
 		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("Invalid UDP bind host '%s'."), *BindHost);
 		DestroySocket();
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("Invalid UDP bind host '%s'."), *BindHost));
 	}
 
 	BindAddr->SetPort(BindPort);
 
 	if (!Socket->Bind(*BindAddr))
 	{
+		const ESocketErrors Error = SocketSubsystem->GetLastErrorCode();
 		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("Failed to bind UDP socket to %s."), *BindAddr->ToString(true));
+		const FString Message = FString::Printf(TEXT("Failed to bind the UDP socket to %s (socket error %d)."), *BindAddr->ToString(true), static_cast<int32>(Error));
 		DestroySocket();
-		return false;
+		return FO3DTransportResult::Error(Error == SE_EADDRINUSE ? EO3DTransportError::AddressInUse : EO3DTransportError::ConnectFailed, Message);
 	}
 
 	int32 RequestedSize = 2 * 1024 * 1024;
@@ -330,7 +353,7 @@ bool FO3DSocketsUdpReceiver::CreateSocket()
 	UE_LOG(LogSocketsUdpReceiver, Log, TEXT("UDP receiver listening on %s:%d (broadcast=%d, recvBuf=%d)."),
 		*BindAddr->ToString(false), BindAddr->GetPort(), bAllowBroadcast ? 1 : 0, AppliedSize);
 
-	return true;
+	return FO3DTransportResult::Ok();
 }
 
 void FO3DSocketsUdpReceiver::DestroySocket()

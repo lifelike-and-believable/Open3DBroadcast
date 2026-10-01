@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 
 struct FO3DTransportConfig;
+struct FO3DTransportCapabilities;
 
 namespace O3DSockets
 {
@@ -47,4 +48,10 @@ namespace O3DSockets
 
 	/** Utility for generating a human readable stream id (host:port). */
 	FString ComposeStreamId(const FString& Host, int32 Port);
+
+	/** Capabilities of the TCP transport (ADR 0007 item 4); the same for every config. Any thread. */
+	FO3DTransportCapabilities GetTcpCapabilities(const FO3DTransportConfig& Config);
+
+	/** Capabilities of the UDP transport (ADR 0007 item 4); the same for every config. Any thread. */
+	FO3DTransportCapabilities GetUdpCapabilities(const FO3DTransportConfig& Config);
 }

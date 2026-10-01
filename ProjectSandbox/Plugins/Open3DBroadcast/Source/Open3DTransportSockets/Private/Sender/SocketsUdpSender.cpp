@@ -104,7 +104,7 @@ FO3DSocketsUdpSender::~FO3DSocketsUdpSender()
 	Stop();
 }
 
-bool FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& Config)
+FO3DTransportResult FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& Config)
 {
 	Stop();
 
@@ -129,13 +129,13 @@ bool FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& Config)
 	if (!O3DSockets::ParseHostPort(Config, RemoteHost, RemotePort, TEXT("udp")))
 	{
 		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP sender requires udp://host:port URI or explicit host/port options."));
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("UDP sender requires a udp://host:port URI or explicit host/port options."));
 	}
 
 	if (RemotePort <= 0)
 	{
 		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP sender requires a valid port (got %d)."), RemotePort);
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("UDP sender requires a valid port (got %d)."), RemotePort));
 	}
 
 	if (StreamId.IsEmpty())
@@ -154,23 +154,23 @@ bool FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& Config)
 	if (!SocketSubsystem)
 	{
 		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP sender could not access socket subsystem."));
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("UDP sender could not access the socket subsystem."));
 	}
 
 	if (!ResolveAddress(RemoteHost, RemotePort, RemoteAddr))
 	{
 		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP sender invalid host '%s'."), *RemoteHost);
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("UDP sender: invalid host '%s'."), *RemoteHost));
 	}
 
 	// Note: Audio stream label is now automatically derived from StreamId
 
 	PublishState->Gate->Open();
 
-	return true;
+	return FO3DTransportResult::Ok();
 }
 
-bool FO3DSocketsUdpSender::Start()
+FO3DTransportResult FO3DSocketsUdpSender::Start()
 {
 	DestroySocket();
 	// Stop() drops SocketSubsystem; fetch it again so Start() after Stop() works without
@@ -179,13 +179,20 @@ bool FO3DSocketsUdpSender::Start()
 	{
 		SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
 	}
-	PublishState->Gate->Open();
-	if (!CreateSocket())
+	if (!RemoteAddr.IsValid())
 	{
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("UDP sender Start() before a successful Initialize()."));
+	}
+	PublishState->Gate->Open();
+	const FO3DTransportResult Result = CreateSocket();
+	if (!Result.IsOk())
+	{
+		ConnectionState.End(EO3DConnectionState::Failed, Result);
+		return Result;
 	}
 	StartAudioWorker();
-	return true;
+	ConnectionState.Begin(EO3DConnectionState::Connected);
+	return Result;
 }
 
 void FO3DSocketsUdpSender::Stop()
@@ -197,6 +204,7 @@ void FO3DSocketsUdpSender::Stop()
 	DestroySocket();
 	PublishState->AudioQueue.Empty();
 	SocketSubsystem = nullptr;
+	ConnectionState.End(EO3DConnectionState::Idle);
 }
 
 void FO3DSocketsUdpSender::StartAudioWorker()
@@ -302,28 +310,36 @@ bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
 	return true;
 }
 
-bool FO3DSocketsUdpSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double /*CaptureTimestampSec*/)
+EO3DSendResult FO3DSocketsUdpSender::SendSerialized(FO3DSendPayload&& Payload)
 {
 	// Same SocketLock discipline as Send(SubjectList&) above - guards
 	// Socket/RemoteAddr against a concurrent CreateSocket()/DestroySocket()
 	// from Start()/Stop(), and against the audio worker's sends.
 	FScopeLock Lock(&SocketLock);
 
-	if (!Socket || !RemoteAddr.IsValid() || Len <= 0)
+	if (!Socket || !RemoteAddr.IsValid())
 	{
-		return false;
+		return EO3DSendResult::NotRunning;
+	}
+	const int32 Len = Payload.Bytes.Num();
+	if (Len <= 0)
+	{
+		return EO3DSendResult::Invalid;
 	}
 
-	if (!SubjectName.IsEmpty())
+	if (!Payload.Subject.IsEmpty())
 	{
-		PublishState->LastSubject.Set(SubjectName);
+		PublishState->LastSubject.Set(Payload.Subject);
 	}
 
-	if (!SendPayload(Socket, RemoteAddr, Data, Len, TEXT("data")))
+	// Sent on the caller's thread (TRB-20; the shared worker of WP-A1 step 4 moves it off).
+	if (!SendPayload(Socket, RemoteAddr, Payload.Bytes.GetData(), Len, TEXT("data")))
 	{
+		// The socket refused the datagram (send buffer full or a network error).
 		FScopeLock StatsLock(&StatsMutex);
 		Stats.DroppedFrames++;
-		return false;
+		Stats.SendErrors++;
+		return EO3DSendResult::DroppedBackpressure;
 	}
 
 	{
@@ -331,30 +347,39 @@ bool FO3DSocketsUdpSender::SendSerialized(const uint8* Data, int32 Len, const FS
 		Stats.FramesSent++;
 		Stats.BytesSent += Len;
 	}
-	return true;
+	return EO3DSendResult::Queued;
 }
 
 /**
  * Control (ADR 0011): one datagram, never fragmented. A control envelope is at most 1,100 bytes
- * (ADR 0011 item 4); if udp.maxdatagram is configured below that, control is refused rather than
- * fragmented. Sent on the caller's thread under SocketLock, as SendSerialized is. Not counted as a
- * frame. UDP is unreliable: the control publisher sends events redundantly and repairs values
- * with snapshots.
+ * (ADR 0011 item 4); if udp.maxdatagram is configured below that, control is refused (TooLarge)
+ * rather than fragmented. Sent on the caller's thread under SocketLock, as SendSerialized is. Not
+ * counted as a frame. UDP is unreliable: the control publisher sends events redundantly and
+ * repairs values with snapshots.
  */
-bool FO3DSocketsUdpSender::SendControl(const uint8* Envelope, int32 Len)
+EO3DSendResult FO3DSocketsUdpSender::SendControl(const uint8* Envelope, int32 Len)
 {
+	FScopeLock Lock(&SocketLock);
+	if (!Socket || !RemoteAddr.IsValid())
+	{
+		return EO3DSendResult::NotRunning;
+	}
 	TConstArrayView<uint8> Payload;
 	if (!O3DS::TryGetControlPayload(Envelope, Len, Payload))
 	{
-		return false;
+		return EO3DSendResult::Invalid;
 	}
-
-	FScopeLock Lock(&SocketLock);
-	if (!Socket || !RemoteAddr.IsValid() || Len > MaxDatagramBytes)
+	if (Len > MaxDatagramBytes)
 	{
-		return false;
+		return EO3DSendResult::TooLarge;
 	}
-	return SendDatagram(Socket, RemoteAddr, Envelope, Len, TEXT("control"));
+	if (!SendDatagram(Socket, RemoteAddr, Envelope, Len, TEXT("control")))
+	{
+		FScopeLock StatsLock(&StatsMutex);
+		Stats.SendErrors++;
+		return EO3DSendResult::DroppedBackpressure;
+	}
+	return EO3DSendResult::Queued;
 }
 
 void FO3DSocketsUdpSender::Tick(float /*DeltaSeconds*/)
@@ -364,15 +389,14 @@ void FO3DSocketsUdpSender::Tick(float /*DeltaSeconds*/)
 
 FO3DTransportStats FO3DSocketsUdpSender::GetStats() const
 {
-	FScopeLock Lock(&StatsMutex);
-	FO3DTransportStats Copy = Stats;
+	FO3DTransportStats Copy;
+	{
+		FScopeLock Lock(&StatsMutex);
+		Copy = Stats;
+	}
 	Copy.BytesSent += PublishState->AudioBytesQueued.load();
+	Copy.State = ConnectionState.Get();
 	return Copy;
-}
-
-bool FO3DSocketsUdpSender::SupportsAudio() const
-{
-	return true;
 }
 
 TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DSocketsUdpSender::CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig)
@@ -459,7 +483,7 @@ bool FO3DSocketsUdpSender::ResolveAddress(const FString& Host, int32 Port, TShar
 	return true;
 }
 
-bool FO3DSocketsUdpSender::CreateSocket()
+FO3DTransportResult FO3DSocketsUdpSender::CreateSocket()
 {
 	// Same lock as Send()/DestroySocket(); FCriticalSection is recursive in
 	// UE so the DestroySocket() call below re-entering the lock on this
@@ -468,7 +492,7 @@ bool FO3DSocketsUdpSender::CreateSocket()
 
 	if (!SocketSubsystem || !RemoteAddr.IsValid())
 	{
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("UDP sender Start() before a successful Initialize()."));
 	}
 
 	DestroySocket();
@@ -477,7 +501,7 @@ bool FO3DSocketsUdpSender::CreateSocket()
 	if (!Socket)
 	{
 		UE_LOG(LogSocketsUdpSender, Warning, TEXT("Failed to create UDP socket."));
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("Failed to create the UDP socket."));
 	}
 
 	Socket->SetReuseAddr(true);
@@ -496,7 +520,7 @@ bool FO3DSocketsUdpSender::CreateSocket()
 		*RemoteAddr->ToString(false), RemoteAddr->GetPort(), bAllowBroadcast ? 1 : 0, MaxDatagramBytes, MtuBytes, AppliedSize);
 
 	PublishState->bSocketReady.store(true);
-	return true;
+	return FO3DTransportResult::Ok();
 }
 
 void FO3DSocketsUdpSender::DestroySocket()

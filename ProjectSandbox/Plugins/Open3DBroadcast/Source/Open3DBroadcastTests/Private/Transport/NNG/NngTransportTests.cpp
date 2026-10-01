@@ -176,14 +176,14 @@ bool FO3DNngDataRoundTripTest::RunTest(const FString& Parameters)
 	IOpen3DSender& Sender = *SenderRef;
 	IOpen3DReceiver& Receiver = *ReceiverRef;
 
-	const bool bSenderInitialized = Sender.Initialize(SenderConfig);
+	const bool bSenderInitialized = Sender.Initialize(SenderConfig).IsOk();
 	TestTrue(TEXT("Sender initializes"), bSenderInitialized);
 	if (!bSenderInitialized)
 	{
 		return false;
 	}
 
-	const bool bReceiverInitialized = Receiver.Initialize(ReceiverConfig);
+	const bool bReceiverInitialized = Receiver.Initialize(ReceiverConfig).IsOk();
 	TestTrue(TEXT("Receiver initializes"), bReceiverInitialized);
 	if (!bReceiverInitialized)
 	{
@@ -203,14 +203,14 @@ bool FO3DNngDataRoundTripTest::RunTest(const FString& Parameters)
 	TSharedPtr<FTestFrameConsumer, ESPMode::ThreadSafe> FrameConsumer = MakeShared<FTestFrameConsumer, ESPMode::ThreadSafe>();
 	Receiver.SetConsumer(FrameConsumer);
 
-	const bool bReceiverStarted = Receiver.Start();
+	const bool bReceiverStarted = Receiver.Start().IsOk();
 	TestTrue(TEXT("Receiver starts"), bReceiverStarted);
 	if (!bReceiverStarted)
 	{
 		return false;
 	}
 
-	const bool bSenderStarted = Sender.Start();
+	const bool bSenderStarted = Sender.Start().IsOk();
 	TestTrue(TEXT("Sender starts"), bSenderStarted);
 	if (!bSenderStarted)
 	{
@@ -289,7 +289,7 @@ bool FO3DNngQueueLimitTest::RunTest(const FString& Parameters)
 
 	const TSharedRef<IOpen3DSender> SenderRef = O3DNngTesting::CreateSender();
 	IOpen3DSender& Sender = *SenderRef;
-	const bool bSenderInitialized = Sender.Initialize(SenderConfig);
+	const bool bSenderInitialized = Sender.Initialize(SenderConfig).IsOk();
 	TestTrue(TEXT("Sender initializes"), bSenderInitialized);
 	if (!bSenderInitialized)
 	{
@@ -301,7 +301,7 @@ bool FO3DNngQueueLimitTest::RunTest(const FString& Parameters)
 		Sender.Stop();
 	};
 
-	const bool bSenderStarted = Sender.Start();
+	const bool bSenderStarted = Sender.Start().IsOk();
 	TestTrue(TEXT("Sender starts"), bSenderStarted);
 	if (!bSenderStarted)
 	{

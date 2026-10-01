@@ -480,6 +480,26 @@ bool FO3DTransportRegistry::GetOptionSchema(FName Name, EO3DTransportRole Role, 
 	return true;
 }
 
+bool FO3DTransportRegistry::GetCapabilities(FName Name, const FO3DTransportConfig& Config, FO3DTransportCapabilities& OutCapabilities) const
+{
+	OutCapabilities = FO3DTransportCapabilities();
+
+	// The descriptor is pinned, so its function is called outside the lock (ADR 0007 item 4).
+	const FO3DTransportDescriptorPtr Descriptor = Find(Name);
+	if (!Descriptor.IsValid())
+	{
+		return false;
+	}
+
+	if (Descriptor->GetCapabilities)
+	{
+		OutCapabilities = Descriptor->GetCapabilities(Config);
+	}
+	OutCapabilities.bSend = Descriptor->HasRole(EO3DTransportRole::Sender);
+	OutCapabilities.bReceive = Descriptor->HasRole(EO3DTransportRole::Receiver);
+	return true;
+}
+
 TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe> FO3DTransportRegistry::CreateSender(FName Name) const
 {
 	// The descriptor is pinned, so the factory is called outside the lock and cannot be freed

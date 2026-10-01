@@ -8,6 +8,8 @@
 #include "Templates/SharedPointer.h"
 #include "Containers/Queue.h"
 #include "Transport/O3DReceiverInterface.h"
+#include "Transport/O3DConnectionState.h"
+#include "Shared/MoQHelpers.h"
 #include "O3DAudioFrameCodec.h"
 #include "MoQFfiApi.h"
 THIRD_PARTY_INCLUDES_START
@@ -54,15 +56,17 @@ public:
 	FO3DMoQReceiver& operator=(const FO3DMoQReceiver&) = delete;
 
 	// IOpen3DReceiver interface
-	virtual bool Initialize(const FO3DTransportConfig& Config) override;
+	virtual FO3DTransportResult Initialize(const FO3DTransportConfig& Config) override;
 	virtual void SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& Consumer) override;
-	virtual bool Start() override;
+	virtual FO3DTransportResult Start() override;
 	virtual void Stop() override;
 	virtual int32 Poll() override;
 	virtual FO3DTransportStats GetStats() const override;
-	virtual bool SupportsAudio() const override { return true; }
+	virtual FO3DTransportCapabilities GetCapabilities() const override { return MoQHelpers::GetCapabilities(FO3DTransportConfig()); }
+	/** As the sender: Connecting, Connected, Reconnecting from the relay session; changes arrive on the game thread. */
+	virtual EO3DConnectionState GetConnectionState() const override { return ConnectionState.Get(); }
+	virtual void SetStateChangedCallback(FO3DConnectionStateCallback Callback) override { ConnectionState.SetCallback(MoveTemp(Callback)); }
 	virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
-	virtual bool SupportsControl() const override { return true; }
 	virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink) override;
 
 private:
@@ -119,6 +123,8 @@ private:
 	void HandleConnectionStateChanged(MoqConnectionState NewState);
 	/** Game thread: gives up on an in-flight connect that exceeded ConnectTimeoutSeconds. */
 	void HandleConnectTimeout(double Now);
+	/** Reports a lost session: Reconnecting when it had been connected (game thread). */
+	void ReportSessionLost(const FString& Reason);
 	/** Game thread: schedules the next connect attempt using capped, jittered backoff. */
 	void ScheduleReconnect(double Now);
 	/** Game thread: records a failed subscribe and schedules the next try. */
@@ -195,4 +201,7 @@ private:
 	static constexpr int32 kMaxFramesPerPoll = 16;
 	/** Control payloads handled per Poll, on top of the frames, so a burst cannot stall it. */
 	static constexpr int32 kMaxControlPerPoll = 64;
+
+	/** ADR 0007 item 3. */
+	FO3DConnectionStateTracker ConnectionState;
 };

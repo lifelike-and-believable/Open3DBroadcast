@@ -213,6 +213,7 @@ public:
 		Descriptor.OwningModule = TEXT("Open3DTransportNNG");
 		Descriptor.CreateSender = []() { return MakeShared<FO3DNngSender>(); };
 		Descriptor.CreateReceiver = []() { return MakeShared<FO3DNngReceiver>(); };
+		Descriptor.GetCapabilities = [](const FO3DTransportConfig& Config) { return O3DNNG::GetCapabilities(Config); };
 
 		Descriptor.ConfigureSender = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
 		{

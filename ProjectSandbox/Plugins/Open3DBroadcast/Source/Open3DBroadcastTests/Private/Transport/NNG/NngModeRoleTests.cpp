@@ -97,8 +97,8 @@ namespace O3DNngModeRoleTests
 			Sender->Stop();
 		};
 
-		if (!Test.TestTrue(TEXT("Sender initializes"), Sender->Initialize(SenderConfig))
-			|| !Test.TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(ReceiverConfig)))
+		if (!Test.TestTrue(TEXT("Sender initializes"), Sender->Initialize(SenderConfig).IsOk())
+			|| !Test.TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(ReceiverConfig).IsOk()))
 		{
 			return false;
 		}
@@ -106,8 +106,8 @@ namespace O3DNngModeRoleTests
 
 		// The listening side starts first, so the dialing side's first attempt can succeed.
 		const bool bStarted = SenderEndpoint.bListen
-			? (Test.TestTrue(TEXT("Sender starts"), Sender->Start()) && Test.TestTrue(TEXT("Receiver starts"), Receiver->Start()))
-			: (Test.TestTrue(TEXT("Receiver starts"), Receiver->Start()) && Test.TestTrue(TEXT("Sender starts"), Sender->Start()));
+			? (Test.TestTrue(TEXT("Sender starts"), Sender->Start().IsOk()) && Test.TestTrue(TEXT("Receiver starts"), Receiver->Start().IsOk()))
+			: (Test.TestTrue(TEXT("Receiver starts"), Receiver->Start().IsOk()) && Test.TestTrue(TEXT("Sender starts"), Sender->Start().IsOk()));
 		if (!bStarted)
 		{
 			return false;
@@ -136,7 +136,7 @@ namespace O3DNngModeRoleTests
 				if (Now >= NextProbe)
 				{
 					NextProbe = Now + ProbeIntervalSeconds;
-					Sender->SendSerialized(Probe.GetData(), Probe.Num(), TEXT("probe"), Now);
+					Sender->SendSerialized(FO3DSendPayload::MakeCopy(Probe.GetData(), Probe.Num(), TEXT("probe"), Now));
 				}
 			});
 		if (!Test.TestTrue(TEXT("Sender and receiver exchange a probe frame"), bConnected))
@@ -153,7 +153,7 @@ namespace O3DNngModeRoleTests
 		{
 			const TArray<uint8>& Frame = Recorded[Index];
 			const bool bQueued = O3DTests::PollUntil(ConnectTimeoutSeconds,
-				[&Sender, &Frame, Index]() { return Sender->SendSerialized(Frame.GetData(), Frame.Num(), TEXT("NngModeRoleActor"), static_cast<double>(Index)); },
+				[&Sender, &Frame, Index]() { return Sender->SendSerialized(FO3DSendPayload::MakeCopy(Frame.GetData(), Frame.Num(), TEXT("NngModeRoleActor"), static_cast<double>(Index))) == EO3DSendResult::Queued; },
 				Pump);
 			if (!Test.TestTrue(*FString::Printf(TEXT("Frame %d accepted"), Index), bQueued))
 			{

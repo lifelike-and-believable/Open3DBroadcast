@@ -72,7 +72,7 @@ namespace O3DNetworkMoQTests
 				Senders[Index]->Tick(0.0f);
 				if (bSend)
 				{
-					Senders[Index]->SendSerialized(Payloads[Index].GetData(), Payloads[Index].Num(), TEXT("actor"), Now);
+					Senders[Index]->SendSerialized(FO3DSendPayload::MakeCopy(Payloads[Index].GetData(), Payloads[Index].Num(), TEXT("actor"), Now));
 				}
 			}
 			for (const TSharedPtr<IOpen3DReceiver>& Receiver : Receivers)
@@ -99,8 +99,8 @@ namespace O3DNetworkMoQTests
 	{
 		TSharedPtr<IOpen3DSender> Sender = O3DTransport::CreateSender(MoQName);
 		if (!Test.TestTrue(TEXT("MoQ sender registered"), Sender.IsValid())
-			|| !Test.TestTrue(TEXT("Sender initializes"), Sender->Initialize(Config))
-			|| !Test.TestTrue(TEXT("Sender starts"), Sender->Start()))
+			|| !Test.TestTrue(TEXT("Sender initializes"), Sender->Initialize(Config).IsOk())
+			|| !Test.TestTrue(TEXT("Sender starts"), Sender->Start().IsOk()))
 		{
 			return nullptr;
 		}
@@ -111,12 +111,12 @@ namespace O3DNetworkMoQTests
 	{
 		TSharedPtr<IOpen3DReceiver> Receiver = O3DTransport::CreateReceiver(MoQName);
 		if (!Test.TestTrue(TEXT("MoQ receiver registered"), Receiver.IsValid())
-			|| !Test.TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(Config)))
+			|| !Test.TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(Config).IsOk()))
 		{
 			return nullptr;
 		}
 		Receiver->SetConsumer(Consumer);
-		if (!Test.TestTrue(TEXT("Receiver starts"), Receiver->Start()))
+		if (!Test.TestTrue(TEXT("Receiver starts"), Receiver->Start().IsOk()))
 		{
 			return nullptr;
 		}

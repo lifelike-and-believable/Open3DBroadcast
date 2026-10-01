@@ -414,9 +414,10 @@ bool FO3DReceiverSource::StartTransport()
     // StopTransport removes the subscription, on every path that drops ActiveReceiver.
     TransportUnregisteringHandle = FO3DTransportRegistry::Get().OnTransportUnregistering().AddRaw(this, &FO3DReceiverSource::HandleTransportUnregistering);
 
-    if (!ActiveReceiver->Initialize(ActiveConfig))
+    const FO3DTransportResult InitResult = ActiveReceiver->Initialize(ActiveConfig);
+    if (!InitResult.IsOk())
     {
-        UE_LOG(LogO3DReceiverSource, Warning, TEXT("Failed to initialize transport '%s'."), *ActiveConfig.Transport);
+        UE_LOG(LogO3DReceiverSource, Warning, TEXT("Failed to initialize transport '%s': %s"), *ActiveConfig.Transport, *LexToString(InitResult));
         ActiveReceiver.Reset();
         StopTransport();
         return false;
@@ -451,9 +452,10 @@ bool FO3DReceiverSource::StartTransport()
         ActiveReceiver->SetControlSink(ActiveControlSink);
         ApplyControlConfig();
     }
-    if (!ActiveReceiver->Start())
+    const FO3DTransportResult StartResult = ActiveReceiver->Start();
+    if (!StartResult.IsOk())
     {
-        UE_LOG(LogO3DReceiverSource, Warning, TEXT("Failed to start transport '%s'."), *ActiveConfig.Transport);
+        UE_LOG(LogO3DReceiverSource, Warning, TEXT("Failed to start transport '%s': %s"), *ActiveConfig.Transport, *LexToString(StartResult));
         ActiveReceiver->Stop();
         ActiveReceiver->SetConsumer(nullptr);
         if (ActiveAudioSink.IsValid() && ActiveReceiver->SupportsAudio())

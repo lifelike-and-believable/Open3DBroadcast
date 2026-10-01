@@ -94,4 +94,7 @@ namespace O3DLoopback
 
     /** Returns the current debug level for loopback transport instrumentation. */
     int32 GetAudioDebugLevel();
+
+    /** Capabilities of the loopback transport (ADR 0007 item 4); the same for every config. Any thread. */
+    FO3DTransportCapabilities GetCapabilities(const FO3DTransportConfig& Config);
 }

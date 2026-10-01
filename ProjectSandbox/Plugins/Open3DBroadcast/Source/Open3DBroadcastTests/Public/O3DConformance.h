@@ -30,9 +30,9 @@ enum class EO3DConformanceCase : uint32
 	LifecycleRestartAfterStop = 1 << 1,
 	/** Receiver: Poll before Start and after Stop delivers nothing; Stop twice is safe. */
 	ReceiverLifecycle = 1 << 2,
-	/** SendSerialized before Initialize and before Start returns false and counts no frame. */
+	/** SendSerialized before Initialize and before Start returns NotRunning and counts no frame. */
 	SendRejectedWhenNotRunning = 1 << 3,
-	/** A full queue drops the frame, increments Stats.DroppedFrames and never blocks. */
+	/** A full queue drops the frame (DroppedBackpressure), increments Stats.DroppedFrames and never blocks. */
 	SendBackpressure = 1 << 4,
 	/** Four threads call SendSerialized at once; every call returns. */
 	SendConcurrent = 1 << 5,
@@ -48,10 +48,31 @@ enum class EO3DConformanceCase : uint32
 	 * reaches the consumer or counts as a sent frame. For transports that deliver reliably.
 	 */
 	ControlRoundTrip = 1 << 9,
-	/** Control: SendControl before Initialize, before Start and after Stop returns false and counts no frame. */
+	/**
+	 * Control: SendControl before Initialize, before Start and after Stop returns NotRunning,
+	 * bytes that are not a control envelope return Invalid, and no frame is counted.
+	 */
 	ControlRejectedWhenNotRunning = 1 << 10,
 	/** Control: Stop() while four threads call SendControl returns, every call returns, and later sends are refused. */
 	ControlStopWhileSending = 1 << 11,
+	/** Receiver: Start without a consumer fails with NoConsumer and leaves the state Idle (ADR 0007 Verification). */
+	ReceiverStartWithoutConsumer = 1 << 12,
+	/** An empty SendSerialized payload on a started sender returns Invalid and counts no frame. */
+	SendEmptyPayloadInvalid = 1 << 13,
+	/**
+	 * Sender and receiver GetCapabilities() match the profile's ExpectedCapabilities and the
+	 * registry descriptor's GetCapabilities for the same config; SupportsAudio and SupportsControl
+	 * forward to them (ADR 0007 item 4, WP-A1 PR 3).
+	 */
+	CapabilitiesMatch = 1 << 14,
+	/**
+	 * Connection state (ADR 0007 item 3): Idle before Start; Start and Stop report their changes
+	 * through the callback on the calling (game) thread before they return; nothing is reported
+	 * after Stop; the last callback always matches GetConnectionState() and Stats.State.
+	 */
+	ConnectionStateLifecycle = 1 << 15,
+	/** Connection state: a sender and receiver that exchanged a frame both reach Connected. */
+	ConnectionStateConnected = 1 << 16,
 };
 ENUM_CLASS_FLAGS(EO3DConformanceCase)
 
@@ -112,6 +133,12 @@ struct FO3DConformanceProfile
 
 	/** ControlStopWhileSending: start/stop cycles, each on a new sender (1 where a port lingers after close). */
 	int32 ControlStopCycles = 5;
+
+	/**
+	 * CapabilitiesMatch: what the transport's sender and receiver report for the fixture's configs
+	 * (the delivery guarantee of ADR 0005 (iii), audio and control support, the payload limit).
+	 */
+	FO3DTransportCapabilities ExpectedCapabilities;
 
 	/** Wall-clock limit for a sender and receiver to find each other on 127.0.0.1. */
 	double ConnectTimeoutSeconds = 10.0;

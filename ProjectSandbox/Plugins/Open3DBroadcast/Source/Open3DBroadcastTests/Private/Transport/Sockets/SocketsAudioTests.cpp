@@ -164,8 +164,8 @@ bool FO3DSocketsAudioRoundTripTest::RunTest(const FString& Parameters)
 	IOpen3DSender& Sender = *SenderRef;
 	IOpen3DReceiver& Receiver = *ReceiverRef;
 
-	TestTrue(TEXT("Sender initializes"), Sender.Initialize(SenderConfig));
-	TestTrue(TEXT("Receiver initializes"), Receiver.Initialize(ReceiverConfig));
+	TestTrue(TEXT("Sender initializes"), Sender.Initialize(SenderConfig).IsOk());
+	TestTrue(TEXT("Receiver initializes"), Receiver.Initialize(ReceiverConfig).IsOk());
 
 	TSharedPtr<FNullFrameConsumer> FrameConsumer = MakeShared<FNullFrameConsumer>();
 	Receiver.SetConsumer(FrameConsumer);
@@ -173,8 +173,8 @@ bool FO3DSocketsAudioRoundTripTest::RunTest(const FString& Parameters)
 	TSharedPtr<FSocketsTestAudioSink, ESPMode::ThreadSafe> ReceiverAudioSink = MakeShared<FSocketsTestAudioSink, ESPMode::ThreadSafe>();
 	Receiver.SetAudioSink(ReceiverAudioSink, ReceiverConfig.Audio);
 
-	TestTrue(TEXT("Sender starts"), Sender.Start());
-	TestTrue(TEXT("Receiver starts"), Receiver.Start());
+	TestTrue(TEXT("Sender starts"), Sender.Start().IsOk());
+	TestTrue(TEXT("Receiver starts"), Receiver.Start().IsOk());
 
 	TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> SenderAudioSink = Sender.CreateAudioSink(SenderConfig.Audio);
 	TestTrue(TEXT("Sender audio sink created"), SenderAudioSink.IsValid());
@@ -246,8 +246,8 @@ bool FO3DSocketsAudioQueueOverflowTest::RunTest(const FString& Parameters)
 	const TSharedRef<IOpen3DSender> SenderRef = O3DSocketsTesting::CreateTcpSender();
 	IOpen3DSender& Sender = *SenderRef;
 
-	TestTrue(TEXT("Sender initializes"), Sender.Initialize(SenderConfig));
-	TestTrue(TEXT("Sender starts"), Sender.Start());
+	TestTrue(TEXT("Sender initializes"), Sender.Initialize(SenderConfig).IsOk());
+	TestTrue(TEXT("Sender starts"), Sender.Start().IsOk());
 
 	TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> SenderAudioSink = Sender.CreateAudioSink(SenderConfig.Audio);
 	TestTrue(TEXT("Audio sink created"), SenderAudioSink.IsValid());

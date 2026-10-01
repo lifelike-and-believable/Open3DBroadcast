@@ -46,7 +46,7 @@ bool FMoQSenderRequiresUriTest::RunTest(const FString& Parameters)
 
 	AddExpectedError(TEXT("MoQ sender configuration invalid"), EAutomationExpectedMessageFlags::Contains, 1);
 
-	TestFalse(TEXT("Initialize should fail when relay URI is missing"), Sender.Initialize(Config));
+	TestFalse(TEXT("Initialize should fail when relay URI is missing"), Sender.Initialize(Config).IsOk());
 	return true;
 }
 
@@ -61,7 +61,7 @@ bool FMoQSenderInitializeSuccessTest::RunTest(const FString& Parameters)
 	Config.Uri = TEXT("https://localhost:4443");
 	Config.StreamId = TEXT("session/testTrack");
 
-	TestTrue(TEXT("Initialize should succeed with valid relay URI"), Sender.Initialize(Config));
+	TestTrue(TEXT("Initialize should succeed with valid relay URI"), Sender.Initialize(Config).IsOk());
 
 	// Ensure Stop is safe to call immediately after initialization.
 	Sender.Stop();
@@ -79,7 +79,7 @@ bool FMoQSenderStopIsIdempotentTest::RunTest(const FString& Parameters)
 	Config.Uri = TEXT("https://localhost:4443");
 	Config.StreamId = TEXT("test/idempotent");
 
-	TestTrue(TEXT("Initialize should succeed"), Sender.Initialize(Config));
+	TestTrue(TEXT("Initialize should succeed"), Sender.Initialize(Config).IsOk());
 
 	// Multiple Stop calls should not crash
 	Sender.Stop();
@@ -100,11 +100,11 @@ bool FMoQSenderInitializeCalledTwiceTest::RunTest(const FString& Parameters)
 	Config.Uri = TEXT("https://localhost:4443");
 	Config.StreamId = TEXT("test/reinit");
 
-	TestTrue(TEXT("First Initialize should succeed"), Sender.Initialize(Config));
+	TestTrue(TEXT("First Initialize should succeed"), Sender.Initialize(Config).IsOk());
 
 	// Calling Initialize again should succeed (replaces config)
 	Config.StreamId = TEXT("test/reinit2");
-	TestTrue(TEXT("Second Initialize should succeed"), Sender.Initialize(Config));
+	TestTrue(TEXT("Second Initialize should succeed"), Sender.Initialize(Config).IsOk());
 
 	Sender.Stop();
 	return true;
@@ -121,7 +121,7 @@ bool FMoQSenderGetStatsBeforeStartTest::RunTest(const FString& Parameters)
 	Config.Uri = TEXT("https://localhost:4443");
 	Config.StreamId = TEXT("test/stats");
 
-	TestTrue(TEXT("Initialize should succeed"), Sender.Initialize(Config));
+	TestTrue(TEXT("Initialize should succeed"), Sender.Initialize(Config).IsOk());
 
 	const FO3DTransportStats Stats = Sender.GetStats();
 	TestEqual(TEXT("FramesSent should be 0 before start"), Stats.FramesSent, static_cast<int64>(0));
@@ -146,7 +146,7 @@ bool FMoQSenderAdvancedParamsTest::RunTest(const FString& Parameters)
 	Config.AdvancedParams.Add(TEXT("track_name"), TEXT("customTrack"));
 	Config.AdvancedParams.Add(TEXT("delivery_mode"), TEXT("datagram"));
 
-	TestTrue(TEXT("Initialize with advanced params should succeed"), Sender.Initialize(Config));
+	TestTrue(TEXT("Initialize with advanced params should succeed"), Sender.Initialize(Config).IsOk());
 	Sender.Stop();
 	return true;
 }
@@ -172,7 +172,7 @@ bool FMoQSenderSendBeforeStartTest::RunTest(const FString& Parameters)
 	Config.Uri = TEXT("https://localhost:4443");
 	Config.StreamId = TEXT("test/sendbeforestart");
 
-	TestTrue(TEXT("Initialize should succeed"), Sender.Initialize(Config));
+	TestTrue(TEXT("Initialize should succeed"), Sender.Initialize(Config).IsOk());
 
 	// Create test subject
 	O3DS::SubjectList Subjects;
@@ -200,7 +200,7 @@ bool FMoQSenderStartBeforeInitializeTest::RunTest(const FString& Parameters)
 	AddExpectedError(TEXT("MoQ sender Start called before Initialize"), EAutomationExpectedMessageFlags::Contains, 1);
 
 	// Start without Initialize should fail
-	TestFalse(TEXT("Start before Initialize should return false"), Sender.Start());
+	TestFalse(TEXT("Start before Initialize should return false"), Sender.Start().IsOk());
 
 	return true;
 }
@@ -216,7 +216,7 @@ bool FMoQSenderTickBeforeStartTest::RunTest(const FString& Parameters)
 	Config.Uri = TEXT("https://localhost:4443");
 	Config.StreamId = TEXT("test/tick");
 
-	TestTrue(TEXT("Initialize should succeed"), Sender.Initialize(Config));
+	TestTrue(TEXT("Initialize should succeed"), Sender.Initialize(Config).IsOk());
 
 	// Tick before Start should not crash
 	Sender.Tick(0.016f);
@@ -237,7 +237,7 @@ bool FMoQSenderCreateAudioSinkTest::RunTest(const FString& Parameters)
 	Config.Transport = TEXT("MoQ");
 	Config.Uri = TEXT("https://fake.relay.invalid:443");
 	Config.StreamId = TEXT("test/audiosink");
-	TestTrue(TEXT("Initialize should succeed"), Sender->Initialize(Config));
+	TestTrue(TEXT("Initialize should succeed"), Sender->Initialize(Config).IsOk());
 
 	FO3DTransportAudioConfig AudioConfig;
 	AudioConfig.bEnableAudio = true;

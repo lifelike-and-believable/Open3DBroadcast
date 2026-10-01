@@ -28,7 +28,7 @@ bool FO3DLoopbackLifetimeStressTest::RunTest(const FString& Parameters)
     {
         return false;
     }
-    TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(ReceiverConfig));
+    TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(ReceiverConfig).IsOk());
 
     const O3DLifetimeTest::FStressResult Result = O3DLifetimeTest::RunSenderStressWith(
         []() { return O3DTransport::CreateSender(TEXT("Loopback")); },

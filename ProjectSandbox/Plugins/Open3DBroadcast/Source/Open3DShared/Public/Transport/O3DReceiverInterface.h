@@ -13,9 +13,11 @@
 /*
  * The receiver side of the transport interface (ADR 0007 items 1 and 3). Moved here from
  * Open3DReceiver so transports and the Open3DBroadcastWebRTC add-on can depend on Open3DShared
- * alone; the old "O3DReceiverInterface.h" forwards here for one release. The class layouts and
- * virtual function tables are unchanged by the move (O3D_TRANSPORT_API_VERSION stays 1).
- * The control channel (ADR 0011) then appended SupportsControl and SetControlSink (version 2).
+ * alone; the old "O3DReceiverInterface.h" forwards here for one release. The control channel
+ * (ADR 0011) appended SupportsControl and SetControlSink (version 2). WP-A1 PR 3 (version 4)
+ * replaced the bool results with FO3DTransportResult (Start without a consumer is NoConsumer) and
+ * added capabilities and connection state; SupportsAudio and SupportsControl became non-virtual
+ * forwarders to GetCapabilities().
  */
 
 /** Interface for audio sinks that transports can push PCM16 data into. */
@@ -74,34 +76,64 @@ class OPEN3DSHARED_API IOpen3DReceiver
 public:
     virtual ~IOpen3DReceiver() = default;
 
-    virtual bool Initialize(const FO3DTransportConfig& Config) = 0;
+    /**
+     * Validates Config and allocates what Start needs. Game thread; non-blocking. Leaves the
+     * connection state as it is. InvalidConfig when Config is unusable, ResourceUnavailable when
+     * a library or subsystem is missing.
+     */
+    virtual FO3DTransportResult Initialize(const FO3DTransportConfig& Config) = 0;
+
+    /** The frame consumer, called only from Poll(). Game thread, before Start; nullptr clears it. */
     virtual void SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& Consumer) = 0;
-    virtual bool Start() = 0;
-    virtual void Stop() = 0;
-
-    /** Poll available data and deliver to the previously configured sink. Returns processed frames. */
-    virtual int32 Poll() = 0;
-
-    virtual FO3DTransportStats GetStats() const = 0;
-
-    /** Whether this receiver advertises audio support. Default implementation returns false. */
-    virtual bool SupportsAudio() const { return false; }
-
-    /** Provide an audio sink for transports that support audio. Passing nullptr disables audio delivery. */
-    virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& /*Sink*/, const FO3DTransportAudioConfig& /*AudioConfig*/) {}
-
-    // Control channel (docs/adr/0011-control-channel.md, item 6). Appended after every existing
-    // virtual, so the earlier vtable slots keep their order (O3D_TRANSPORT_API_VERSION 2).
-
-    /** Whether this receiver delivers control payloads. Default false. Any thread. */
-    virtual bool SupportsControl() const { return false; }
 
     /**
-     * Provide the control sink. Game thread, before Start; nullptr disables control delivery.
+     * Begins receiving. Game thread; non-blocking. NotRunning without a successful Initialize,
+     * then NoConsumer without a consumer (SetConsumer); both leave the state as it is. Otherwise
+     * as IOpen3DSender::Start: the state moves to Failed when it cannot start, and to Connecting
+     * or Connected on success.
+     */
+    virtual FO3DTransportResult Start() = 0;
+
+    /** As IOpen3DSender::Stop: game thread, idempotent, non-blocking; the state moves to Idle. */
+    virtual void Stop() = 0;
+
+    /**
+     * Delivers what has arrived to the consumer, with bounded work. Game thread; the only place
+     * the frame consumer is called. Returns the number of frames delivered.
+     */
+    virtual int32 Poll() = 0;
+
+    /** Snapshot of the counters and connection state. Any thread; inexpensive. */
+    virtual FO3DTransportStats GetStats() const = 0;
+
+    /** As IOpen3DSender::GetCapabilities, for the config this receiver was initialized with. Any thread. */
+    virtual FO3DTransportCapabilities GetCapabilities() const = 0;
+
+    /** Current connection state. Any thread; lock-free. */
+    virtual EO3DConnectionState GetConnectionState() const = 0;
+
+    /** As IOpen3DSender::SetStateChangedCallback. Game thread, before Start. */
+    virtual void SetStateChangedCallback(FO3DConnectionStateCallback Callback) = 0;
+
+    /**
+     * Provide an audio sink, when GetCapabilities().bAudioReceive. Game thread; nullptr disables
+     * audio delivery. The sink may be called on any thread.
+     */
+    virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& /*Sink*/, const FO3DTransportAudioConfig& /*AudioConfig*/) {}
+
+    /**
+     * Provide the control sink (docs/adr/0011-control-channel.md, item 6), when
+     * GetCapabilities().bControl. Game thread, before Start; nullptr disables control delivery.
      * The receiver holds the sink strongly and releases it in Stop. A receiver delivers only
      * well-formed control envelopes to it and never passes control bytes to the frame consumer.
      */
     virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& /*Sink*/) {}
+
+    /** GetCapabilities().bAudioReceive. Kept for callers; deprecated, removed with the shims (ADR 0007 step 6). Any thread. */
+    bool SupportsAudio() const { return GetCapabilities().bAudioReceive; }
+
+    /** GetCapabilities().bControl (ADR 0011 item 6). Kept for callers; deprecated, removed with the shims (ADR 0007 step 6). Any thread. */
+    bool SupportsControl() const { return GetCapabilities().bControl; }
 };
 
 /** Creates one receiver instance. Called on the game thread, outside any registry lock. */

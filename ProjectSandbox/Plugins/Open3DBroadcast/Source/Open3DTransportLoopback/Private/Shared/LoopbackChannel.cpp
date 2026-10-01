@@ -39,6 +39,20 @@ namespace O3DLoopback
         return CVarO3DLoopbackAudioDebug.GetValueOnAnyThread();
     }
 
+    FO3DTransportCapabilities GetCapabilities(const FO3DTransportConfig& /*Config*/)
+    {
+        // In-process queues: nothing is lost or reordered except by a full queue, which the
+        // sender reports as DroppedBackpressure (ADR 0005 (iii): Loopback is ReliableOrdered).
+        FO3DTransportCapabilities Caps;
+        Caps.bSend = true;
+        Caps.bReceive = true;
+        Caps.bAudioSend = true;
+        Caps.bAudioReceive = true;
+        Caps.bControl = true;
+        Caps.Delivery = EO3DDeliveryGuarantee::ReliableOrdered;
+        return Caps;
+    }
+
     int32 ResolveQueueCapacity(const FO3DTransportConfig& Config)
     {
         int32 Capacity = 64;

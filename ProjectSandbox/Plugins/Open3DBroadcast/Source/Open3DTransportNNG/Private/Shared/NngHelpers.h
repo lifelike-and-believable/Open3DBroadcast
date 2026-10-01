@@ -95,4 +95,13 @@ namespace O3DNNG
 
     OPEN3DTRANSPORTNNG_API bool ParseSenderOptions(const FO3DTransportConfig& Config, FNngSenderOptions& OutOptions, FString& OutError);
     OPEN3DTRANSPORTNNG_API bool ParseReceiverOptions(const FO3DTransportConfig& Config, FNngReceiverOptions& OutOptions, FString& OutError);
+
+    /** The mode Config names (nng.mode, then the URI), as the option parsers read it; Pub when none. */
+    OPEN3DTRANSPORTNNG_API ENngMode ResolveConfiguredMode(const FO3DTransportConfig& Config);
+
+    /** Capabilities of an NNG socket in Mode (ADR 0007 item 4): pub/sub Unreliable, pair and push/pull ReliableOrdered. Any thread. */
+    OPEN3DTRANSPORTNNG_API FO3DTransportCapabilities GetCapabilitiesForMode(ENngMode Mode);
+
+    /** GetCapabilitiesForMode(ResolveConfiguredMode(Config)); the descriptor's capability query. Any thread. */
+    OPEN3DTRANSPORTNNG_API FO3DTransportCapabilities GetCapabilities(const FO3DTransportConfig& Config);
 }

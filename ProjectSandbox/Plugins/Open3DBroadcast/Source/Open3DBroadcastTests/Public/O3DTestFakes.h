@@ -15,6 +15,7 @@
 
 #include "Async/TaskGraphInterfaces.h"
 #include "HAL/CriticalSection.h"
+#include "Transport/O3DConnectionState.h"
 #include "Transport/O3DReceiverInterface.h"
 #include "Transport/O3DSenderInterface.h"
 #include "Transport/O3DSerializedFrameConsumer.h"
@@ -40,10 +41,14 @@ private:
 
 using FO3DFakeLinkRef = TSharedRef<FO3DFakeLink, ESPMode::ThreadSafe>;
 
+/** Capabilities of the fake transport (ADR 0007 item 4): in-order link, control, receiver audio. */
+OPEN3DBROADCASTTESTS_API FO3DTransportCapabilities GetFakeTransportCapabilities();
+
 /**
  * IOpen3DSender that follows the transport contract the conformance suite checks: sends are
- * rejected outside Initialize+Start, Stop is idempotent, counters only grow, and a full queue
- * drops the frame and counts it. Thread-safe.
+ * rejected outside Initialize+Start (NotRunning), Stop is idempotent, counters only grow, and a
+ * full queue drops the frame, counts it and returns DroppedBackpressure. Connected from Start to
+ * Stop. Thread-safe.
  */
 class OPEN3DBROADCASTTESTS_API FO3DFakeSender : public IOpen3DSender
 {
@@ -54,16 +59,24 @@ public:
 	FO3DFakeSender(const FO3DFakeSender&) = delete;
 	FO3DFakeSender& operator=(const FO3DFakeSender&) = delete;
 
-	virtual bool Initialize(const FO3DTransportConfig& Config) override;
-	virtual bool Start() override;
+	virtual FO3DTransportResult Initialize(const FO3DTransportConfig& Config) override;
+	virtual FO3DTransportResult Start() override;
 	virtual void Stop() override;
 	virtual bool Send(const O3DS::SubjectList& List) override;
-	virtual bool SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec) override;
+	virtual EO3DSendResult SendSerialized(FO3DSendPayload&& Payload) override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual FO3DTransportStats GetStats() const override;
-	virtual bool SupportsControl() const override { return true; }
-	/** Same running and backpressure rules as SendSerialized; not counted as a frame. */
-	virtual bool SendControl(const uint8* Envelope, int32 Len) override;
+	virtual FO3DTransportCapabilities GetCapabilities() const override { return GetFakeTransportCapabilities(); }
+	virtual EO3DConnectionState GetConnectionState() const override { return ConnectionState.Get(); }
+	virtual void SetStateChangedCallback(FO3DConnectionStateCallback Callback) override { ConnectionState.SetCallback(MoveTemp(Callback)); }
+	/** Same running and backpressure rules as SendSerialized (Invalid for bytes that are not a control envelope); not counted as a frame. */
+	virtual EO3DSendResult SendControl(const uint8* Envelope, int32 Len) override;
+
+	/**
+	 * Moves the connection state as a transport's worker or FFI thread would, on the calling
+	 * thread (ignored outside Start..Stop). For connection-state tests.
+	 */
+	void SimulateConnectionState(EO3DConnectionState State, const FO3DTransportResult& Reason = FO3DTransportResult()) { ConnectionState.Set(State, Reason); }
 
 	/**
 	 * Scripted backpressure: at most MaxQueued payloads may wait in the fake's queue; further
@@ -99,13 +112,15 @@ private:
 	std::atomic<int32> StartCalls{0};
 	std::atomic<int32> StopCalls{0};
 	std::atomic<int32> ControlCalls{0};
+	FO3DConnectionStateTracker ConnectionState;
 };
 
 /**
  * IOpen3DReceiver whose frames come from a test. Poll() delivers linked-sender frames and frames
  * queued with Enqueue() on the calling (game) thread. InjectNow() and InjectOnBackgroundThread()
  * call the consumer directly, which is how a transport's network thread would misbehave; they
- * exist to test consumers against that.
+ * exist to test consumers against that. Start without a consumer returns NoConsumer; Connected
+ * from Start to Stop.
  */
 class OPEN3DBROADCASTTESTS_API FO3DFakeReceiver : public IOpen3DReceiver
 {
@@ -116,15 +131,16 @@ public:
 	FO3DFakeReceiver(const FO3DFakeReceiver&) = delete;
 	FO3DFakeReceiver& operator=(const FO3DFakeReceiver&) = delete;
 
-	virtual bool Initialize(const FO3DTransportConfig& Config) override;
+	virtual FO3DTransportResult Initialize(const FO3DTransportConfig& Config) override;
 	virtual void SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer) override;
-	virtual bool Start() override;
+	virtual FO3DTransportResult Start() override;
 	virtual void Stop() override;
 	virtual int32 Poll() override;
 	virtual FO3DTransportStats GetStats() const override;
-	virtual bool SupportsAudio() const override { return true; }
+	virtual FO3DTransportCapabilities GetCapabilities() const override { return GetFakeTransportCapabilities(); }
+	virtual EO3DConnectionState GetConnectionState() const override { return ConnectionState.Get(); }
+	virtual void SetStateChangedCallback(FO3DConnectionStateCallback Callback) override { ConnectionState.SetCallback(MoveTemp(Callback)); }
 	virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
-	virtual bool SupportsControl() const override { return true; }
 	virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink) override;
 
 	/** Queues Bytes for the next Poll(). Any thread. */
@@ -161,6 +177,7 @@ private:
 	std::atomic<bool> bRunning{false};
 	std::atomic<int32> ControlDelivered{0};
 	std::atomic<int32> ControlRejected{0};
+	FO3DConnectionStateTracker ConnectionState;
 };
 
 /**

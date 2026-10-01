@@ -99,16 +99,16 @@ namespace O3DControlTransportTests
 
 		if (!Test.TestTrue(TEXT("Sender supports control"), Sender->SupportsControl())
 			|| !Test.TestTrue(TEXT("Receiver supports control"), Receiver->SupportsControl())
-			|| !Test.TestTrue(TEXT("Sender initializes"), Sender->Initialize(SenderConfig))
-			|| !Test.TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(ReceiverConfig)))
+			|| !Test.TestTrue(TEXT("Sender initializes"), Sender->Initialize(SenderConfig).IsOk())
+			|| !Test.TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(ReceiverConfig).IsOk()))
 		{
 			return false;
 		}
 		Receiver->SetConsumer(Consumer);
 		Receiver->SetControlSink(Sink);
 		const bool bStarted = bSenderFirst
-			? (Test.TestTrue(TEXT("Sender starts"), Sender->Start()) && Test.TestTrue(TEXT("Receiver starts"), Receiver->Start()))
-			: (Test.TestTrue(TEXT("Receiver starts"), Receiver->Start()) && Test.TestTrue(TEXT("Sender starts"), Sender->Start()));
+			? (Test.TestTrue(TEXT("Sender starts"), Sender->Start().IsOk()) && Test.TestTrue(TEXT("Receiver starts"), Receiver->Start().IsOk()))
+			: (Test.TestTrue(TEXT("Receiver starts"), Receiver->Start().IsOk()) && Test.TestTrue(TEXT("Sender starts"), Sender->Start().IsOk()));
 		if (!bStarted)
 		{
 			return false;
@@ -131,7 +131,7 @@ namespace O3DControlTransportTests
 				if (Now >= NextProbe)
 				{
 					NextProbe = Now + ProbeIntervalSeconds;
-					Sender->SendSerialized(Probe.GetData(), Probe.Num(), TEXT("probe"), Now);
+					Sender->SendSerialized(FO3DSendPayload::MakeCopy(Probe.GetData(), Probe.Num(), TEXT("probe"), Now));
 				}
 			});
 		if (!Test.TestTrue(TEXT("Sender and receiver exchange a probe frame"), bConnected))
@@ -146,7 +146,7 @@ namespace O3DControlTransportTests
 			if (bReliable)
 			{
 				const bool bQueued = O3DTests::PollUntil(TimeoutSeconds,
-					[&Sender, &Envelope]() { return Sender->SendControl(Envelope.GetData(), Envelope.Num()); }, Pump);
+					[&Sender, &Envelope]() { return Sender->SendControl(Envelope.GetData(), Envelope.Num()) == EO3DSendResult::Queued; }, Pump);
 				Test.TestTrue(*FString::Printf(TEXT("Control %d accepted"), Index), bQueued);
 			}
 			else
@@ -273,15 +273,15 @@ bool FO3DControlUdpNoFragmentTest::RunTest(const FString& Parameters)
 	const TSharedRef<IOpen3DSender> Sender = O3DSocketsTesting::CreateUdpSender();
 	ON_SCOPE_EXIT { Sender->Stop(); };
 	// udp.maxdatagram below the largest control envelope (1,096 bytes).
-	if (!TestTrue(TEXT("Initialize"), Sender->Initialize(MakeUdpConfig(true, Port, 512))) || !TestTrue(TEXT("Start"), Sender->Start()))
+	if (!TestTrue(TEXT("Initialize"), Sender->Initialize(MakeUdpConfig(true, Port, 512)).IsOk()) || !TestTrue(TEXT("Start"), Sender->Start().IsOk()))
 	{
 		return false;
 	}
 	const TArray<uint8> Large = MakeEnvelope(2); // largest payload
 	const TArray<uint8> Small = MakeEnvelope(0);
 	TestTrue(TEXT("The large envelope exceeds the configured datagram size"), Large.Num() > 512);
-	TestFalse(TEXT("An envelope larger than udp.maxdatagram is refused, not fragmented"), Sender->SendControl(Large.GetData(), Large.Num()));
-	TestTrue(TEXT("A small envelope is sent"), Sender->SendControl(Small.GetData(), Small.Num()));
+	TestTrue(TEXT("An envelope larger than udp.maxdatagram is refused with TooLarge, not fragmented"), Sender->SendControl(Large.GetData(), Large.Num()) == EO3DSendResult::TooLarge);
+	TestTrue(TEXT("A small envelope is sent"), Sender->SendControl(Small.GetData(), Small.Num()) == EO3DSendResult::Queued);
 	TestEqual(TEXT("Control is not counted as a frame"), Sender->GetStats().FramesSent, static_cast<int64>(0));
 	return true;
 }
@@ -320,23 +320,26 @@ bool FO3DControlLoopbackQueuesTest::RunTest(const FString& Parameters)
 
 	const TSharedRef<FO3DRecordingFrameConsumer> Consumer = MakeShared<FO3DRecordingFrameConsumer>();
 	const TSharedRef<FControlRecordingSink, ESPMode::ThreadSafe> Sink = MakeShared<FControlRecordingSink, ESPMode::ThreadSafe>();
-	TestTrue(TEXT("Sender initializes and starts"), Sender->Initialize(MakeConfig(true)) && Sender->Start());
-	TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(MakeConfig(false)));
+	TestTrue(TEXT("Sender initializes and starts"), Sender->Initialize(MakeConfig(true)).IsOk() && Sender->Start().IsOk());
+	TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(MakeConfig(false)).IsOk());
 	Receiver->SetConsumer(Consumer);
 	Receiver->SetControlSink(Sink);
-	TestTrue(TEXT("Receiver starts"), Receiver->Start());
+	TestTrue(TEXT("Receiver starts"), Receiver->Start().IsOk());
 
 	const TArray<TArray<uint8>> Frames = O3DTests::MakeRecordedFrames(TEXT("LoopbackControlActor"), 2);
-	TestTrue(TEXT("First frame fills the one-frame queue"), Sender->SendSerialized(Frames[0].GetData(), Frames[0].Num(), TEXT("A"), 0.0));
-	TestFalse(TEXT("Second frame is refused: the frame queue is full"), Sender->SendSerialized(Frames[1].GetData(), Frames[1].Num(), TEXT("A"), 0.0));
+	TestTrue(TEXT("First frame fills the one-frame queue"), Sender->SendSerialized(FO3DSendPayload::MakeCopy(Frames[0].GetData(), Frames[0].Num(), TEXT("A"), 0.0)) == EO3DSendResult::Queued);
+	TestTrue(TEXT("Second frame is refused with DroppedBackpressure: the frame queue is full"),
+		Sender->SendSerialized(FO3DSendPayload::MakeCopy(Frames[1].GetData(), Frames[1].Num(), TEXT("A"), 0.0)) == EO3DSendResult::DroppedBackpressure);
 
 	// Control is unaffected by the full frame queue, up to its own cap.
 	int32 Accepted = 0;
 	for (int32 Index = 0; Index < 2000; ++Index)
 	{
 		const TArray<uint8> Envelope = MakeEnvelope(Index % 2); // small envelopes
-		if (!Sender->SendControl(Envelope.GetData(), Envelope.Num()))
+		const EO3DSendResult Result = Sender->SendControl(Envelope.GetData(), Envelope.Num());
+		if (Result != EO3DSendResult::Queued)
 		{
+			TestTrue(TEXT("Control past its cap is refused with DroppedBackpressure"), Result == EO3DSendResult::DroppedBackpressure);
 			break;
 		}
 		++Accepted;
@@ -348,7 +351,7 @@ bool FO3DControlLoopbackQueuesTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("The consumer received only the frame"), Consumer->Num(), 1);
 
 	const TArray<uint8> Envelope = MakeEnvelope(0);
-	TestTrue(TEXT("Control is accepted again once drained"), Sender->SendControl(Envelope.GetData(), Envelope.Num()));
+	TestTrue(TEXT("Control is accepted again once drained"), Sender->SendControl(Envelope.GetData(), Envelope.Num()) == EO3DSendResult::Queued);
 	Receiver->Stop();
 	Receiver->Poll();
 	TestEqual(TEXT("Stop released the control sink: nothing more delivered"), Sink->Get().Num(), Accepted);

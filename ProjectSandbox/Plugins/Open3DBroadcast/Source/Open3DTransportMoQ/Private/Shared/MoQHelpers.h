@@ -200,6 +200,13 @@ namespace MoQHelpers
 	 * @return Delivery mode enum value
 	 */
 	MoqDeliveryMode ResolveDeliveryMode(const FO3DTransportConfig& Config);
+
+	/**
+	 * Capabilities of the MoQ transport (ADR 0007 item 4). Delivery is Unreliable in both delivery
+	 * modes until ordering across groups in stream mode is verified (ADR 0005 Q5). The same for
+	 * every config today. Any thread.
+	 */
+	FO3DTransportCapabilities GetCapabilities(const FO3DTransportConfig& Config);
 	
 	/**
 	 * Resolve the queue size in bytes from config.

@@ -102,11 +102,11 @@ FO3DNngReceiver::FO3DNngReceiver()
  * - Marks the receiver initialized (bInitialized = true).
  *
  * @param Config  Transport configuration to use for initialization.
- * @return true if initialization succeeded; false if option parsing failed.
+ * @return Ok, or InvalidConfig if option parsing failed.
  *
  * Thread-safety: Not thread-safe. Caller must ensure no concurrent access to the receiver while initializing.
  */
-bool FO3DNngReceiver::Initialize(const FO3DTransportConfig& Config)
+FO3DTransportResult FO3DNngReceiver::Initialize(const FO3DTransportConfig& Config)
 {
     Stop();
 
@@ -114,9 +114,11 @@ bool FO3DNngReceiver::Initialize(const FO3DTransportConfig& Config)
     if (!O3DNNG::ParseReceiverOptions(Config, Options, Error))
     {
         UE_LOG(LogO3DNngReceiver, Warning, TEXT("Failed to parse NNG receiver config: %s"), *Error);
-        return false;
+        bInitialized = false;
+        return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("NNG receiver config: %s"), *Error));
     }
 
+    CapabilityMode.store(Options.Mode);
     ActiveConfig = Config;
     ActiveConfig.Uri = Options.CanonicalUri;
     ActiveConfig.StreamId = Options.StreamId;
@@ -134,7 +136,7 @@ bool FO3DNngReceiver::Initialize(const FO3DTransportConfig& Config)
     LastErrorLogTimestamp = 0.0;
 
     bInitialized = true;
-    return true;
+    return FO3DTransportResult::Ok();
 }
 
 void FO3DNngReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer)
@@ -160,35 +162,49 @@ FO3DNngReceiver::~FO3DNngReceiver()
     PipeToken = nullptr;
 }
 
-bool FO3DNngReceiver::Start()
+FO3DTransportResult FO3DNngReceiver::Start()
 {
     if (!bInitialized.Load())
     {
         UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver Start called before Initialize"));
-        return false;
+        return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("NNG receiver Start() before a successful Initialize()."));
     }
 
     if (bRunning.Load())
     {
-        return true;
+        return FO3DTransportResult::Ok();
+    }
+
+    if (!Consumer.IsValid())
+    {
+        return FO3DTransportResult::Error(EO3DTransportError::NoConsumer, TEXT("NNG receiver Start() without a frame consumer (SetConsumer)."));
     }
 
     BackoffAttempt = 0;
     LastDialAttempt = 0.0;
 
-    const bool bOpened = OpenSocket();
+    int32 OpenError = 0;
+    const bool bOpened = OpenSocket(&OpenError);
     if (!bOpened && Options.bListen)
     {
         // OpenSocket logged the reason (for example, the port is in use).
-        return false;
+        const FO3DTransportResult Result = FO3DTransportResult::Error(
+            OpenError == NNG_EADDRINUSE ? EO3DTransportError::AddressInUse : EO3DTransportError::ConnectFailed,
+            FString::Printf(TEXT("NNG receiver could not listen on %s (%d %s)."), *O3DRedact::Url(Options.CanonicalUri), OpenError,
+                OpenError != 0 ? UTF8_TO_TCHAR(nng_strerror(OpenError)) : TEXT("")));
+        ConnectionState.End(EO3DConnectionState::Failed, Result);
+        return Result;
     }
     bRunning = true;
+    bSawPeer = false;
+    // No peer pipe yet; Poll reports the first one (a dialer keeps retrying in the background).
+    ConnectionState.Begin(EO3DConnectionState::Connecting);
 
     UE_LOG(LogO3DNngReceiver, Log, TEXT("NNG receiver started - Mode=%s Role=%s URI=%s"),
         *O3DNNG::ModeToString(Options.Mode),
         *O3DNNG::RoleToString(Options.Role),
         *O3DRedact::Url(Options.CanonicalUri));
-    return true;
+    return FO3DTransportResult::Ok();
 }
 
 void FO3DNngReceiver::Stop()
@@ -197,12 +213,14 @@ void FO3DNngReceiver::Stop()
     if (!bRunning.Load())
     {
         CloseSocket();
+        ConnectionState.End(EO3DConnectionState::Idle);
         return;
     }
 
     CloseSocket();
     bRunning = false;
     PipeContext->bConnected.store(false);
+    ConnectionState.End(EO3DConnectionState::Idle);
 }
 
 /**
@@ -231,6 +249,9 @@ int32 FO3DNngReceiver::Poll()
     {
         return 0;
     }
+
+    // Pipes are added and removed asynchronously by NNG, so checking before a reopen is enough.
+    UpdateConnectionState();
 
     if (!Options.bListen)
     {
@@ -310,8 +331,34 @@ int32 FO3DNngReceiver::Poll()
 
 FO3DTransportStats FO3DNngReceiver::GetStats() const
 {
-    FScopeLock Lock(&StatsMutex);
-    return Stats;
+    FO3DTransportStats Copy;
+    {
+        FScopeLock Lock(&StatsMutex);
+        Copy = Stats;
+    }
+    Copy.State = ConnectionState.Get();
+    return Copy;
+}
+
+void FO3DNngReceiver::UpdateConnectionState()
+{
+    // Pipe events arrive on NNG threads that hold only the pipe context, so Poll turns the pipe
+    // count into connection-state changes (ADR 0007 item 3), on the game thread.
+    const bool bHasPeer = Socket != nullptr && PipeContext->PipeCount.load() > 0;
+    if (bHasPeer == bSawPeer)
+    {
+        return;
+    }
+    bSawPeer = bHasPeer;
+    if (bHasPeer)
+    {
+        ConnectionState.Set(EO3DConnectionState::Connected);
+    }
+    else
+    {
+        ConnectionState.Set(EO3DConnectionState::Reconnecting,
+            FO3DTransportResult::Error(EO3DTransportError::ConnectFailed, TEXT("The last NNG peer disconnected.")));
+    }
 }
 
 /**
@@ -344,9 +391,13 @@ FO3DTransportStats FO3DNngReceiver::GetStats() const
  * - true  if the socket was successfully created, configured and attached to this receiver.
  * - false if any step failed or the mode is unsupported.
  */
-bool FO3DNngReceiver::OpenSocket()
+bool FO3DNngReceiver::OpenSocket(int32* OutNngError)
 {
     CloseSocket();
+    if (OutNngError)
+    {
+        *OutNngError = 0;
+    }
 
     FNngSocketWrapper* NewSocket = new FNngSocketWrapper();
     int Ret = 0;
@@ -435,6 +486,10 @@ bool FO3DNngReceiver::OpenSocket()
         UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver could not %s %s (%d) %s"),
             Options.bListen ? TEXT("listen on") : TEXT("dial"),
             *O3DRedact::Url(Options.CanonicalUri), Ret, UTF8_TO_TCHAR(nng_strerror(Ret)));
+        if (OutNngError)
+        {
+            *OutNngError = Ret;
+        }
         delete NewSocket;
         Socket = nullptr;
         if (!Options.bListen)

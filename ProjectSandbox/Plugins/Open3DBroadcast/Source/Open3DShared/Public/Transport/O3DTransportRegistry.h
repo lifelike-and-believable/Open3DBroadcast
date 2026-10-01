@@ -45,8 +45,12 @@
  * OnTransportsChanged and OnTransportUnregistering on the calling thread, and draining calls the
  * instances' Stop(), which is a game-thread call.
  *
- * Not yet here (later WP-A1 PRs): result types and capabilities (PR 3), and the typed options view
- * that replaces the component and source parameters of the configure functions (PR 5).
+ * Capabilities (ADR 0007 item 4, WP-A1 PR 3): a descriptor's GetCapabilities reports what the
+ * transport can do with a config (delivery guarantee, audio, control, payload limit); GetCapabilities
+ * on the registry calls it outside the lock.
+ *
+ * Not yet here (a later WP-A1 PR): the typed options view that replaces the component and source
+ * parameters of the configure functions (PR 5).
  */
 
 class UO3DSenderComponent;
@@ -62,6 +66,9 @@ using FO3DSenderConfigureFunction = TFunction<void(const UO3DSenderComponent*, F
 
 /** Receiver counterpart of FO3DSenderConfigureFunction; FO3DReceiverSourceConfig lives in Open3DReceiver. */
 using FO3DReceiverConfigureFunction = TFunction<void(const FO3DReceiverSourceConfig&, FO3DTransportConfig&)>;
+
+/** Capability query of a descriptor (ADR 0007 item 4). Any thread, outside the registry lock. */
+using FO3DCapabilitiesFunction = TFunction<FO3DTransportCapabilities(const FO3DTransportConfig&)>;
 
 /** The options one role of a transport reads from its namespaced option map. */
 struct FO3DTransportRoleOptions
@@ -124,6 +131,15 @@ struct FO3DTransportDescriptor
 
 	/** Optional. Fills the config from the receiver source settings before Initialize. */
 	FO3DReceiverConfigureFunction ConfigureReceiver;
+
+	/**
+	 * What the transport can do with a config (ADR 0007 item 4, WP-A1 PR 3), e.g. the delivery
+	 * guarantee of the NNG mode or WebRTC channel the config selects. Must return the values its
+	 * sender's and receiver's GetCapabilities() report for the same config. Called outside the
+	 * registry lock, on any thread; must not block. Optional: without it the registry reports
+	 * only bSend and bReceive (from the factories) and Delivery Unknown.
+	 */
+	FO3DCapabilitiesFunction GetCapabilities;
 
 	/** Declared sender options. */
 	FO3DTransportRoleOptions SenderOptions;
@@ -209,6 +225,13 @@ public:
 
 	/** Copies the option schema of Role for Name. Returns false, with an empty output, when Name is not registered. Any thread. */
 	bool GetOptionSchema(FName Name, EO3DTransportRole Role, FO3DTransportOptionSchema& OutSchema) const;
+
+	/**
+	 * The capabilities of Name for Config (FO3DTransportDescriptor::GetCapabilities, called
+	 * outside the lock). bSend and bReceive always reflect the registered factories. Returns
+	 * false, with default (empty) capabilities, when Name is not registered. Any thread.
+	 */
+	bool GetCapabilities(FName Name, const FO3DTransportConfig& Config, FO3DTransportCapabilities& OutCapabilities) const;
 
 	/**
 	 * A new sender from Name's factory (called outside the lock), or null with a Warning. The

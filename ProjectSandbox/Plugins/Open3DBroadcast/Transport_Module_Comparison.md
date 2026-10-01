@@ -28,27 +28,32 @@ Open3DBroadcast has **5 transport modules** in a modular architecture: Loopback,
 
 ### Common Interface (100% Parity)
 
-All modules implement the same interfaces with identical method signatures:
+All modules implement the same interfaces with identical method signatures
+(transport API version 4, WP-A1 PR 3; ADR 0007 items 3 and 4):
 
-**IOpen3DSender** (`Open3DSender/Public/O3DSenderInterface.h:27-55`):
-- `Initialize(Config)` - Resource allocation
-- `Start()` - Begin networking
+**IOpen3DSender** (`Open3DShared/Public/Transport/O3DSenderInterface.h`):
+- `Initialize(Config)` / `Start()` - return `FO3DTransportResult` (an error code such as `InvalidConfig`, `NotRunning` or `AddressInUse`, and a message)
 - `Stop()` - Cleanup (idempotent)
-- `Send(SubjectList)` - Send motion capture frame
+- `SendSerialized(FO3DSendPayload&&)` - Send one serialized frame; returns `EO3DSendResult` (`Queued`, `DroppedBackpressure`, `NotRunning`, `NotConnected`, `Invalid`, `TooLarge`)
+- `SendControl(Envelope, Len)` - Send one control envelope; returns `EO3DSendResult` (`Unsupported` by default)
 - `Tick(DeltaSeconds)` - Lightweight upkeep
-- `GetStats()` - Performance metrics
-- `SupportsAudio()` - Audio capability flag
+- `GetStats()` - Performance metrics, including the connection state
+- `GetCapabilities()` - `FO3DTransportCapabilities` (audio, control, delivery guarantee, payload limit)
+- `GetConnectionState()` / `SetStateChangedCallback()` - `Idle`, `Connecting`, `Connected`, `Reconnecting`, `Failed`
 - `CreateAudioSink(AudioConfig)` - Audio sink factory
 
-**IOpen3DReceiver** (`Open3DReceiver/Public/O3DReceiverInterface.h:22-42`):
-- `Initialize(Config)` - Resource allocation
+**IOpen3DReceiver** (`Open3DShared/Public/Transport/O3DReceiverInterface.h`):
+- `Initialize(Config)` / `Start()` - return `FO3DTransportResult`; `Start()` without a consumer is `NoConsumer`
 - `SetConsumer(Consumer)` - Frame consumer registration
-- `Start()` - Begin networking
 - `Stop()` - Cleanup
 - `Poll()` - Process incoming data
 - `GetStats()` - Performance metrics
-- `SupportsAudio()` - Audio capability flag
+- `GetCapabilities()`, `GetConnectionState()`, `SetStateChangedCallback()` - as on the sender
 - `SetAudioSink(Sink, AudioConfig)` - Audio sink registration
+
+The registry answers the same capability question before an instance exists:
+`FO3DTransportRegistry::GetCapabilities(Name, Config, Out)` (from the descriptor's
+`GetCapabilities`).
 
 **Audio Interfaces**:
 - `IO3DSenderAudioSink` - PCM float submission
@@ -461,15 +466,19 @@ static void OnConnectionState(void* user, LkConnectionState state,
 | **Cross-Process** | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Platform Support** | All | Win64 | All | All | Win64 | Win64 |
 
-**Audio Support is universal.** The base `IOpen3DSender` and `IOpen3DReceiver`
-interfaces default `SupportsAudio()` to `false`, and every transport overrides it
-to `true` on **both** the sender and receiver side — twelve overrides, no
+**Audio Support is universal.** Every transport reports `bAudioSend` and
+`bAudioReceive` in `GetCapabilities()` on **both** the sender and receiver side, no
 exceptions. Audio is a plugin-level capability, not a property of any one
-transport.
+transport. (`SupportsAudio()` still exists and forwards to `GetCapabilities()`.)
+
+**Delivery guarantee** (`FO3DTransportCapabilities::Delivery`, ADR 0005 (iii)):
+Loopback, TCP, NNG pair and push/pull, and WebRTC report `ReliableOrdered`; UDP,
+NNG pub/sub, MoQ and WebRTC with `webrtc.prefer_lossy` report `Unreliable`.
 
 **Control** (ADR 0011; USER_GUIDE "Control Channel") is a one-way stream of
-events and values from a sender to its receivers. `SupportsControl()` defaults
-to `false`; TCP, UDP, NNG, Loopback and MoQ override it on both sides. Every
+events and values from a sender to its receivers. Every transport reports
+`bControl` in `GetCapabilities()` on both sides (`SupportsControl()` forwards to it);
+`SendControl` returns `Unsupported` on a transport that does not override it. Every
 control message is a unified envelope of kind `Control` (2), at most 1,100
 bytes, so it is never fragmented. Control is never counted as a mocap frame.
 Delivery per transport:
