@@ -334,6 +334,29 @@ bool FO3DSocketsUdpSender::SendSerialized(const uint8* Data, int32 Len, const FS
 	return true;
 }
 
+/**
+ * Control (ADR 0011): one datagram, never fragmented. A control envelope is at most 1,100 bytes
+ * (ADR 0011 item 4); if udp.maxdatagram is configured below that, control is refused rather than
+ * fragmented. Sent on the caller's thread under SocketLock, as SendSerialized is. Not counted as a
+ * frame. UDP is unreliable: the control publisher sends events redundantly and repairs values
+ * with snapshots.
+ */
+bool FO3DSocketsUdpSender::SendControl(const uint8* Envelope, int32 Len)
+{
+	TConstArrayView<uint8> Payload;
+	if (!O3DS::TryGetControlPayload(Envelope, Len, Payload))
+	{
+		return false;
+	}
+
+	FScopeLock Lock(&SocketLock);
+	if (!Socket || !RemoteAddr.IsValid() || Len > MaxDatagramBytes)
+	{
+		return false;
+	}
+	return SendDatagram(Socket, RemoteAddr, Envelope, Len, TEXT("control"));
+}
+
 void FO3DSocketsUdpSender::Tick(float /*DeltaSeconds*/)
 {
 	// UDP sender currently has no periodic upkeep.

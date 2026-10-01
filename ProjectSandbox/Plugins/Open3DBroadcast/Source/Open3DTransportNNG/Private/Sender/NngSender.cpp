@@ -342,6 +342,22 @@ bool FO3DNngSender::SendSerialized(const uint8* Data, int32 Len, const FString& 
     return SendBytes(Data, Len, SubjectName);
 }
 
+/**
+ * Control (ADR 0011): the envelope rides the send queue in-band, as audio does, so the worker
+ * sends it in order with the frames around it. Not counted as a frame. Pair and push sockets
+ * deliver it reliably; a pub socket can drop it for a slow subscriber, which the control
+ * publisher's redundancy and snapshots cover (ADR 0005 Q3).
+ */
+bool FO3DNngSender::SendControl(const uint8* Envelope, int32 Len)
+{
+    TConstArrayView<uint8> Payload;
+    if (!bInitialized.Load() || !bRunning.Load() || !O3DS::TryGetControlPayload(Envelope, Len, Payload))
+    {
+        return false;
+    }
+    return EnqueuePayload(Envelope, Len);
+}
+
 /** Enqueue already-serialized bytes for transmission and record transport-level stats/subject bookkeeping. */
 bool FO3DNngSender::SendBytes(const uint8* Data, int32 Len, const FString& SubjectName)
 {
@@ -540,9 +556,16 @@ uint32 FO3DNngSender::RunWorker()
             continue;
         }
 
+        // Control envelopes (ADR 0011) share this queue but are never counted as frames.
+        TConstArrayView<uint8> ControlPayload;
+        const bool bIsControl = O3DS::TryGetControlPayload(Bytes.GetData(), Bytes.Num(), ControlPayload);
+
         if (!Socket)
         {
-            RecordSendDrop();
+            if (!bIsControl)
+            {
+                RecordSendDrop();
+            }
             continue;
         }
 
@@ -553,7 +576,10 @@ uint32 FO3DNngSender::RunWorker()
             // No peer ready, or NNG's own send buffer is full (TRB-34). This payload is the
             // oldest one queued: drop it and count it. It is never put back at the tail, which
             // would reorder frames, busy-spin while no peer exists and replay a stale backlog.
-            RecordSendDrop();
+            if (!bIsControl)
+            {
+                RecordSendDrop();
+            }
             continue;
         }
         if (Ret != 0)
@@ -562,6 +588,7 @@ uint32 FO3DNngSender::RunWorker()
             continue;
         }
 
+        if (!bIsControl)
         {
             FScopeLock StatsLock(&StatsMutex);
             Stats.FramesSent++;

@@ -52,8 +52,14 @@ struct FO3DLoopbackChannel
     int32 AudioCapacity;
     TQueue<FO3DLoopbackPacket, EQueueMode::Mpsc> Queue;
     TQueue<FO3DLoopbackAudioPacket, EQueueMode::Mpsc> AudioQueue;
+    /** Control envelopes (ADR 0011), independent of the frame and audio queues. */
+    TQueue<TArray<uint8>, EQueueMode::Mpsc> ControlQueue;
     std::atomic<int32> PendingCount;
     std::atomic<int32> AudioPendingCount;
+    std::atomic<int32> ControlPendingCount{0};
+
+    /** Control envelopes that may wait in ControlQueue; further sends are refused (the publisher retries). */
+    static constexpr int32 ControlCapacity = 1024;
 
     void SetLastSubjectName(const FString& InSubject)
     {

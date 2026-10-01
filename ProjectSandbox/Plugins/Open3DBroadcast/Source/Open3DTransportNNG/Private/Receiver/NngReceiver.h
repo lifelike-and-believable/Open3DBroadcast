@@ -38,6 +38,8 @@ public:
     virtual FO3DTransportStats GetStats() const override;
     virtual bool SupportsAudio() const override { return true; }
     virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
+    virtual bool SupportsControl() const override { return true; }
+    virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink) override { ControlSink = Sink; }
 
     bool IsConnected() const { return PipeContext->bConnected.load(); }
 
@@ -63,6 +65,8 @@ private:
 
     TWeakPtr<ISerializedFrameConsumer> Consumer;
     TWeakPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
+    /** Control payloads (ADR 0011). Held strongly, released in Stop; used only from Poll (game thread). */
+    TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe> ControlSink;
     O3DAudio::FMultiStreamFrameDecoder AudioDecoder; // SHR-15: one decoder per (SourceGuid, StreamLabel)
     TArray<int16> DecodedPcmScratch;
 

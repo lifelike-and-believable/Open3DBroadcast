@@ -73,6 +73,14 @@ namespace
 		return Item;
 	}
 
+	/** True when a queue item carries a control envelope (ADR 0011), which is never counted as a frame. */
+	bool IsControlItem(const TArray<uint8>& Item)
+	{
+		const int32 Offset = QueueItemPrefixBytes + O3DSockets::Tcp::FrameHeaderSize;
+		TConstArrayView<uint8> Payload;
+		return Item.Num() > Offset && O3DS::TryGetControlPayload(Item.GetData() + Offset, Item.Num() - Offset, Payload);
+	}
+
 	double ReadEnqueueTime(const TArray<uint8>& Item)
 	{
 		double Time = 0.0;
@@ -306,6 +314,21 @@ bool FO3DSocketsTcpSender::SendSerialized(const uint8* Data, int32 Len, const FS
 	return SendBytes(Data, Len);
 }
 
+/**
+ * Control (ADR 0011): the envelope rides the frame queue in-band, as audio does, and the worker
+ * sends it in order with the frames around it. Not counted as a frame. Refused without a client,
+ * like SendSerialized; the control publisher retries, and its snapshot reaches a late client.
+ */
+bool FO3DSocketsTcpSender::SendControl(const uint8* Envelope, int32 Len)
+{
+	TConstArrayView<uint8> Payload;
+	if (!PublishState->bClientConnected.load() || !O3DS::TryGetControlPayload(Envelope, Len, Payload))
+	{
+		return false;
+	}
+	return EnqueuePayload(Envelope, Len);
+}
+
 /** Enqueue already-serialized bytes for transmission and record transport-level stats. */
 bool FO3DSocketsTcpSender::SendBytes(const uint8* Data, int32 Len)
 {
@@ -508,7 +531,7 @@ void FO3DSocketsTcpSender::DropQueuedWithoutClient()
 	int64 Dropped = 0;
 	while (PublishState->SendQueue.Dequeue(Discard))
 	{
-		++Dropped;
+		Dropped += IsControlItem(Discard) ? 0 : 1;
 	}
 	AddDroppedFrames(Dropped);
 }
@@ -523,7 +546,7 @@ bool FO3DSocketsTcpSender::DequeueNextFrame(TArray<uint8>& OutItem, int32& OutOf
 		// It is dropped whole before any byte of it is sent.
 		if (MaxQueueAgeSeconds > 0.0 && (Now - ReadEnqueueTime(OutItem)) > MaxQueueAgeSeconds)
 		{
-			++Expired;
+			Expired += IsControlItem(OutItem) ? 0 : 1;
 			continue;
 		}
 		OutOffset = QueueItemPrefixBytes;

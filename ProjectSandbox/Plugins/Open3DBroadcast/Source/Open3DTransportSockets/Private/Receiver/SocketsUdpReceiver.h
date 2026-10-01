@@ -35,6 +35,8 @@ public:
 	virtual FO3DTransportStats GetStats() const override;
 	virtual bool SupportsAudio() const override;
 	virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
+	virtual bool SupportsControl() const override { return true; }
+	virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink) override { ControlSink = Sink; }
 
 private:
 	struct FFragmentState;
@@ -66,6 +68,8 @@ private:
 
 	TWeakPtr<ISerializedFrameConsumer> Consumer;
 	TWeakPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
+	/** Control payloads (ADR 0011). Held strongly, released in Stop; used only from Poll (game thread). */
+	TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe> ControlSink;
 
 	/** Sized to the largest possible UDP datagram, independent of udp.maxdatagram (TRB-23). */
 	TArray<uint8> ReceiveBuffer;

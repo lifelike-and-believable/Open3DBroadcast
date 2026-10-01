@@ -229,6 +229,23 @@ bool FO3DLoopbackSender::SendSerialized(const uint8* Data, int32 Len, const FStr
     return SendBytes(Data, Len, SubjectName.IsEmpty() ? ChannelKey : SubjectName, CaptureTimestampSec);
 }
 
+/** Control (ADR 0011): onto the channel's control queue, independent of frames and audio. Not counted as a frame. */
+bool FO3DLoopbackSender::SendControl(const uint8* Envelope, int32 Len)
+{
+    TConstArrayView<uint8> Payload;
+    if (!bInitialized || !bRunning.load() || !Channel.IsValid() || !O3DS::TryGetControlPayload(Envelope, Len, Payload))
+    {
+        return false;
+    }
+    if (Channel->ControlPendingCount.load() >= FO3DLoopbackChannel::ControlCapacity)
+    {
+        return false;
+    }
+    Channel->ControlQueue.Enqueue(TArray<uint8>(Envelope, Len));
+    Channel->ControlPendingCount.fetch_add(1);
+    return true;
+}
+
 /** Enqueue an already-serialized payload onto the loopback channel and record stats/subject bookkeeping.
  *  CaptureTimestampSec is the same value the caller already embedded in Data (Send()'s own
  *  FPlatformTime::Seconds() call, or FO3DSenderSerializer's `Now` via SendSerialized()) - reused here
