@@ -214,7 +214,7 @@ root_type ControlMessage;
 
 *Sender (`Open3DSender`)*
 - `FO3DControlPublisher` (`Open3DSender/Public/O3DControlPublisher.h`) wraps the core `ControlPublisher` (item 9). It owns the source id (a fresh GUID per instance, never serialized), stamps times on the sender clock (`FPlatformTime`, the clock `SubjectList.time` uses), wraps each message in a control envelope, and hands it to `IOpen3DSender::SendControl`, returning refused messages to the core for retry. It is public so it can be driven against a transport without a world.
-- On `UO3DSenderComponent` (`BlueprintCallable`, category `Open3DBroadcast|Sender|Control`; strings are `FString`, optional targets default to empty):
+- On `UO3DSenderComponent` (`BlueprintCallable`, category `Open3DStream|Sender|Control`; strings are `FString`, optional targets default to empty):
   - `FireControlEvent(EventName, Payload, TargetSubject) -> bool`
   - `SetControlValue(Key, Value, TargetSubject) -> bool` (allowed before capture; sent when the transport starts)
   - `ClearControlValue(Key, TargetSubject)`
