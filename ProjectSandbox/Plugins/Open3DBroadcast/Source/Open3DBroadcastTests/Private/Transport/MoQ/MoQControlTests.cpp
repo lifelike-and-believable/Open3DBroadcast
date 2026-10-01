@@ -185,7 +185,9 @@ bool FMoQControlSubscribeOnlyWithSinkTest::RunTest(const FString& Parameters)
 		const TSharedRef<IOpen3DReceiver> Receiver = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 3);
 		TestTrue(TEXT("Receiver supports control"), Receiver->SupportsControl());
 		TestTrue(TEXT("Initialize"), Receiver->Initialize(MakeConfig()).IsOk());
-		Receiver->SetConsumer(MakeShared<FMoQControlFrameCounter>()); // a receiver needs a consumer to start
+		// The receiver holds its consumer weakly (until ADR 0007 step 5), so the test keeps it alive.
+		const TSharedRef<FMoQControlFrameCounter> FrameConsumer = MakeShared<FMoQControlFrameCounter>();
+		Receiver->SetConsumer(FrameConsumer);
 		TestTrue(TEXT("Start"), Receiver->Start().IsOk());
 		MoQFakeTest::Pump(); // CONNECTED -> mocap subscription only
 		TestFalse(TEXT("No control subscription without a sink"), Fake->GetLiveSubscriptions().Contains(ControlSubscription));
@@ -203,7 +205,9 @@ bool FMoQControlSubscribeOnlyWithSinkTest::RunTest(const FString& Parameters)
 		const TSharedRef<IOpen3DReceiver> Receiver = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 4);
 		TestTrue(TEXT("Initialize"), Receiver->Initialize(MakeConfig()).IsOk());
 		Receiver->SetControlSink(Sink); // before Start, as the interface asks
-		Receiver->SetConsumer(MakeShared<FMoQControlFrameCounter>());
+		// The receiver holds its consumer weakly (until ADR 0007 step 5), so the test keeps it alive.
+		const TSharedRef<FMoQControlFrameCounter> FrameConsumer = MakeShared<FMoQControlFrameCounter>();
+		Receiver->SetConsumer(FrameConsumer);
 		TestTrue(TEXT("Start"), Receiver->Start().IsOk());
 		MoQFakeTest::Pump();
 		TestTrue(TEXT("A sink set before Start subscribes on connect"), Fake->GetLiveSubscriptions().Contains(ControlSubscription));

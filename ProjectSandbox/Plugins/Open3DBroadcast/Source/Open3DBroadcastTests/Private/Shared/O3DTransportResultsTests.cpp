@@ -18,7 +18,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "Async/TaskGraphInterfaces.h"
+#include "Async/Async.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/AutomationTest.h"
@@ -193,15 +193,19 @@ bool FO3DConnectionStateThreadTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Initialize"), Sender->Initialize(FO3DTransportConfig()).IsOk());
 	TestTrue(TEXT("Start"), Sender->Start().IsOk());
 
+	// A dedicated thread, as a transport worker is. (A task-graph task waited on from the game
+	// thread can be retracted and run inline on it, which would not test anything.)
 	const TWeakPtr<FO3DFakeSender> Weak = Sender;
-	FGraphEventRef Task = FFunctionGraphTask::CreateAndDispatchWhenReady([Weak]()
+	TFuture<bool> Worker = Async(EAsyncExecution::Thread, [Weak]()
 	{
+		const bool bOnGameThread = IsInGameThread();
 		if (const TSharedPtr<FO3DFakeSender> Pinned = Weak.Pin())
 		{
 			Pinned->SimulateConnectionState(EO3DConnectionState::Reconnecting, FO3DTransportResult::Error(EO3DTransportError::Timeout));
 		}
-	}, TStatId(), nullptr, ENamedThreads::AnyBackgroundThreadNormalTask);
-	FTaskGraphInterface::Get().WaitUntilTaskCompletes(Task, ENamedThreads::GameThread);
+		return bOnGameThread;
+	});
+	TestFalse(TEXT("The worker thread is not the game thread"), Worker.Get());
 	TestTrue(TEXT("The background change is visible at once"), Sender->GetConnectionState() == EO3DConnectionState::Reconnecting);
 	TestTrue(TEXT("Stats.State follows"), Sender->GetStats().State == EO3DConnectionState::Reconnecting);
 
@@ -348,7 +352,9 @@ bool FO3DTransportResultCodesTest::RunTest(const FString& Parameters)
 		TestTrue(*FString::Printf(TEXT("%s sender stays Idle"), Name), Sender->GetConnectionState() == EO3DConnectionState::Idle);
 		Sender->Stop();
 
-		Receiver->SetConsumer(MakeShared<FO3DRecordingFrameConsumer>());
+		// The receiver holds its consumer weakly (until ADR 0007 step 5), so the test keeps it alive.
+		const TSharedRef<FO3DRecordingFrameConsumer> FrameConsumer = MakeShared<FO3DRecordingFrameConsumer>();
+		Receiver->SetConsumer(FrameConsumer);
 		const FO3DTransportResult ReceiverResult = Receiver->Start();
 		TestTrue(*FString::Printf(TEXT("%s receiver Start before Initialize is NotRunning (got %s)"), Name, *LexToString(ReceiverResult)), ReceiverResult.Code == EO3DTransportError::NotRunning);
 		Receiver->Stop();

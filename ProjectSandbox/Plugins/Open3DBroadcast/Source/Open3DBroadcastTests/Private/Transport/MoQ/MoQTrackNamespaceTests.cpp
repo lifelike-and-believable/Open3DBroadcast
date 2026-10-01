@@ -252,7 +252,9 @@ bool FMoQReceiverMultiTrackTest::RunTest(const FString& Parameters)
 		const TSharedRef<IOpen3DReceiver> Receiver = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 1);
 		TestTrue(TEXT("Initialize receiver"), Receiver->Initialize(Config).IsOk());
 		Receiver->SetAudioSink(AudioSink, Config.Audio);
-		Receiver->SetConsumer(MakeShared<FO3DRecordingFrameConsumer>()); // a receiver needs a consumer to start
+		// The receiver holds its consumer weakly (until ADR 0007 step 5), so the test keeps it alive.
+		const TSharedRef<FO3DRecordingFrameConsumer> FrameConsumer = MakeShared<FO3DRecordingFrameConsumer>();
+		Receiver->SetConsumer(FrameConsumer);
 		TestTrue(TEXT("Start receiver"), Receiver->Start().IsOk());
 		MoQTesting::PumpDispatcher(); // CONNECTED -> mocap and audio subscriptions
 

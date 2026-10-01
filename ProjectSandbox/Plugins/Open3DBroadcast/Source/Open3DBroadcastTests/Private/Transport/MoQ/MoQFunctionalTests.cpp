@@ -408,7 +408,9 @@ bool FMoQReceiverSubscribeBackoffTest::RunTest(const FString& Parameters)
 		const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), Clock.AsFunction(), /*JitterSeed=*/11);
 		IOpen3DReceiver& Receiver = *ReceiverRef;
 		TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeFakeConfig()).IsOk());
-		Receiver.SetConsumer(MakeShared<FO3DRecordingFrameConsumer>()); // a receiver needs a consumer to start
+		// The receiver holds its consumer weakly (until ADR 0007 step 5), so the test keeps it alive.
+		const TSharedRef<FO3DRecordingFrameConsumer> FrameConsumer = MakeShared<FO3DRecordingFrameConsumer>();
+		Receiver.SetConsumer(FrameConsumer);
 		TestTrue(TEXT("Start"), Receiver.Start().IsOk());
 		MoQFakeTest::Pump(); // CONNECTED -> immediate subscribe, fails, next try in [0.75, 1.0] s
 		TestEqual(TEXT("Immediate subscribe on connect"), Fake->GetSubscribeCalls(), 1);
@@ -499,7 +501,9 @@ bool FMoQReceiverCodecFromFrameTest::RunTest(const FString& Parameters)
 		IOpen3DReceiver& Receiver = *ReceiverRef;
 		TestTrue(TEXT("Initialize"), Receiver.Initialize(Config).IsOk());
 		Receiver.SetAudioSink(Sink, Config.Audio);
-		Receiver.SetConsumer(MakeShared<FO3DRecordingFrameConsumer>()); // a receiver needs a consumer to start
+		// The receiver holds its consumer weakly (until ADR 0007 step 5), so the test keeps it alive.
+		const TSharedRef<FO3DRecordingFrameConsumer> FrameConsumer = MakeShared<FO3DRecordingFrameConsumer>();
+		Receiver.SetConsumer(FrameConsumer);
 		TestTrue(TEXT("Start"), Receiver.Start().IsOk());
 		MoQFakeTest::Pump(); // CONNECTED -> mocap and audio subscriptions
 

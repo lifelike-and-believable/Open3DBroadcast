@@ -1076,6 +1076,8 @@ bool FWebRTCA1SenderStateTest::RunTest(const FString& Parameters)
 #if PLATFORM_WINDOWS && PLATFORM_64BITS
 	using namespace WebRTCS7Test;
 	using namespace WebRTCA1Pr3Test;
+	// The test fires LkConnFailed once; the sender logs that real failure at Error.
+	AddExpectedError(TEXT("WebRTC connection failed"), EAutomationExpectedMessageFlags::Contains, 1);
 	FFakeLiveKit Fake;
 	FStateLog Log;
 	{
