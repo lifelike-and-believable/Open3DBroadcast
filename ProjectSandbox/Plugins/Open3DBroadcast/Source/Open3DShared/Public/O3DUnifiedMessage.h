@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Containers/ArrayView.h"
 
 namespace O3DS
 {
@@ -10,7 +11,10 @@ namespace O3DS
     enum class EUnifiedKind : uint8
     {
         Mocap = 0,
-        Audio = 1
+        Audio = 1,
+        /** Control channel (docs/adr/0011-control-channel.md). Old TCP, UDP and NNG receivers
+         *  ignore a kind they do not know. Always paired with EUnifiedCodec::O3DControl. */
+        Control = 2
     };
 
     /** Enumerates codecs carried within the unified envelope. */
@@ -18,7 +22,9 @@ namespace O3DS
     {
         O3DS = 0,
         Opus = 1,
-        PCM16 = 2
+        PCM16 = 2,
+        /** A ControlMessage FlatBuffer (src/o3ds_control.fbs, identifier "O3DC"). */
+        O3DControl = 3
     };
 
     /** Wire header shared by all Open3DStream unified messages (big-endian as laid out on the wire). */
@@ -158,6 +164,15 @@ namespace O3DS
         return true;
     }
 
+    /**
+     * Largest control payload (the ControlMessage inside the envelope). Equal to
+     * O3DS::ControlLimits::kMaxPayloadBytes, which O3DControlConvert.cpp checks with a
+     * static_assert: Open3DShared's public headers do not include the core. With the header,
+     * a control envelope stays within one UDP datagram and the WebRTC lossy limit (ADR 0011
+     * item 4), so it is never fragmented.
+     */
+    constexpr int32 UnifiedMaxControlPayloadSize = 1076;
+
     /** Create a unified message by wrapping a payload with the proper header. */
     inline bool CreateUnifiedMessage(EUnifiedKind Kind, EUnifiedCodec Codec, const uint8* PayloadData, int32 PayloadSize, double TimestampSec, TArray<uint8>& OutMessage)
     {
@@ -169,5 +184,49 @@ namespace O3DS
         OutMessage.SetNumUninitialized(UnifiedWireHeaderSize + PayloadSize);
         FMemory::Memcpy(OutMessage.GetData() + UnifiedWireHeaderSize, PayloadData, PayloadSize);
         return WriteUnifiedHeaderInPlace(Kind, Codec, TimestampSec, OutMessage);
+    }
+
+    /**
+     * Wrap one control payload (ControlPublisher output) in a control envelope for
+     * IOpen3DSender::SendControl. Refuses an empty payload, because TCP receivers read any
+     * zero-payload envelope as a keepalive, and a payload over UnifiedMaxControlPayloadSize.
+     * TimestampSec is the sender clock (ADR 0009 item 7); a negative or non-finite value is
+     * written as 0.
+     */
+    inline bool WriteControlEnvelope(TConstArrayView<uint8> Payload, double TimestampSec, TArray<uint8>& OutMessage)
+    {
+        OutMessage.Reset();
+        if (Payload.Num() <= 0 || Payload.Num() > UnifiedMaxControlPayloadSize)
+        {
+            return false;
+        }
+        const double SafeTimestampSec = (FMath::IsFinite(TimestampSec) && TimestampSec > 0.0) ? TimestampSec : 0.0;
+        return CreateUnifiedMessage(EUnifiedKind::Control, EUnifiedCodec::O3DControl, Payload.GetData(), Payload.Num(), SafeTimestampSec, OutMessage);
+    }
+
+    /**
+     * The one classifier every receive path uses for control (CTL-3, CTL-6). True when Data is a
+     * well-formed control envelope: kind Control, codec O3DControl, and a payload of 1 to
+     * UnifiedMaxControlPayloadSize bytes. OutPayload then views the bytes inside the envelope,
+     * valid as long as Data is. A buffer with kind Control that fails any other check is
+     * malformed and must be dropped, never treated as mocap.
+     */
+    inline bool TryGetControlPayload(const uint8* Data, int32 Size, TConstArrayView<uint8>& OutPayload)
+    {
+        OutPayload = TConstArrayView<uint8>();
+        FUnifiedHeader Header;
+        const uint8* PayloadPtr = nullptr;
+        int32 PayloadSize = 0;
+        if (!ParseUnifiedMessage(Data, Size, Header, PayloadPtr, PayloadSize))
+        {
+            return false;
+        }
+        if (Header.GetKind() != EUnifiedKind::Control || Header.GetCodec() != EUnifiedCodec::O3DControl
+            || PayloadSize <= 0 || PayloadSize > UnifiedMaxControlPayloadSize)
+        {
+            return false;
+        }
+        OutPayload = TConstArrayView<uint8>(PayloadPtr, PayloadSize);
+        return true;
     }
 }

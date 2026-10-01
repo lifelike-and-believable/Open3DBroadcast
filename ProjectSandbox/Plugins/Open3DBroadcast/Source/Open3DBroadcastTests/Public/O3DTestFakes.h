@@ -4,7 +4,9 @@
 
 // Fake transports for tests (ADR 0006 §3). FO3DFakeSender records what it is given and can
 // script backpressure; FO3DFakeReceiver lets a test deliver bytes to its consumer on a chosen
-// thread. FO3DFakeTransportScope registers both under a name that is unique to one test, so they
+// thread. Both carry control (ADR 0011) in-band: the sender pushes control envelopes through the
+// same link as frames, and the receiver classifies each item with O3DS::TryGetControlPayload,
+// the classifier real receivers use, so control never reaches the frame consumer. FO3DFakeTransportScope registers both under a name that is unique to one test, so they
 // never override or appear next to a real transport.
 
 #include "CoreMinimal.h"
@@ -59,6 +61,9 @@ public:
 	virtual bool SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec) override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual FO3DTransportStats GetStats() const override;
+	virtual bool SupportsControl() const override { return true; }
+	/** Same running and backpressure rules as SendSerialized; not counted as a frame. */
+	virtual bool SendControl(const uint8* Envelope, int32 Len) override;
 
 	/**
 	 * Scripted backpressure: at most MaxQueued payloads may wait in the fake's queue; further
@@ -71,6 +76,9 @@ public:
 
 	/** Every accepted payload, in order. */
 	TArray<TArray<uint8>> GetRecordedPayloads() const;
+	/** Every accepted control envelope, in order. */
+	TArray<TArray<uint8>> GetRecordedControl() const;
+	int32 GetControlCalls() const { return ControlCalls.load(); }
 	int32 GetSendCalls() const { return SendCalls.load(); }
 	int32 GetStartCalls() const { return StartCalls.load(); }
 	int32 GetStopCalls() const { return StopCalls.load(); }
@@ -82,6 +90,7 @@ private:
 	FO3DTransportConfig LastConfig;
 	FO3DTransportStats Stats;
 	TArray<TArray<uint8>> Recorded;
+	TArray<TArray<uint8>> RecordedControl;
 	int32 Queued = 0;
 	int32 MaxQueued = -1;
 	bool bInitialized = false;
@@ -89,6 +98,7 @@ private:
 	std::atomic<int32> SendCalls{0};
 	std::atomic<int32> StartCalls{0};
 	std::atomic<int32> StopCalls{0};
+	std::atomic<int32> ControlCalls{0};
 };
 
 /**
@@ -114,6 +124,8 @@ public:
 	virtual FO3DTransportStats GetStats() const override;
 	virtual bool SupportsAudio() const override { return true; }
 	virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
+	virtual bool SupportsControl() const override { return true; }
+	virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink) override;
 
 	/** Queues Bytes for the next Poll(). Any thread. */
 	void Enqueue(const TArray<uint8>& Bytes);
@@ -128,6 +140,11 @@ public:
 	bool InjectAudio(const O3DS::FAudioFrameMeta& Meta, const TArray<uint8>& Pcm16);
 
 	bool HasConsumer() const;
+	bool HasControlSink() const;
+	/** Control payloads handed to the control sink so far. */
+	int32 GetControlDelivered() const { return ControlDelivered.load(); }
+	/** Items whose envelope said Control but failed TryGetControlPayload; dropped. */
+	int32 GetControlRejected() const { return ControlRejected.load(); }
 
 private:
 	bool Deliver(const TArray<uint8>& Bytes);
@@ -136,11 +153,14 @@ private:
 	mutable FCriticalSection Mutex;
 	TSharedPtr<ISerializedFrameConsumer> Consumer;
 	TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
+	TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe> ControlSink;
 	TArray<TArray<uint8>> Queued;
 	FString StreamId;
 	FO3DTransportStats Stats;
 	bool bInitialized = false;
 	std::atomic<bool> bRunning{false};
+	std::atomic<int32> ControlDelivered{0};
+	std::atomic<int32> ControlRejected{0};
 };
 
 /**

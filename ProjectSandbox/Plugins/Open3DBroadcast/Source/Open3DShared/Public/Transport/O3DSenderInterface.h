@@ -17,6 +17,7 @@ namespace O3DS
  * Open3DSender so transports and the Open3DBroadcastWebRTC add-on can depend on Open3DShared
  * alone; the old "O3DSenderInterface.h" forwards here for one release. The class layouts and
  * virtual function tables are unchanged by the move (O3D_TRANSPORT_API_VERSION stays 1).
+ * The control channel (ADR 0011) then appended SupportsControl and SendControl (version 2).
  */
 
 /** Interface for audio sinks provided by transports that support PCM ingestion. */
@@ -97,6 +98,27 @@ public:
 
     /** Optional audio sink factory. Default returns nullptr (no audio support). */
     virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) { return nullptr; }
+
+    // Control channel (docs/adr/0011-control-channel.md, item 6). Appended after every existing
+    // virtual, so the earlier vtable slots keep their order (O3D_TRANSPORT_API_VERSION 2).
+
+    /** Whether this sender carries control messages. Default false. Any thread. */
+    virtual bool SupportsControl() const { return false; }
+
+    /**
+     * Send one control envelope (O3DS::WriteControlEnvelope output) to every receiver of this
+     * stream. Called on the game thread in v1; implementations must be thread-safe, must not
+     * block, and copy the bytes. Not routed through SendSerialized or the pose pipeline, so
+     * control is never dropped as an old pose or counted as a mocap frame. Returns false when
+     * the sender is not running, does not support control, the bytes are not a control
+     * envelope, or the transport's queue is full; the caller (ControlPublisher) retries.
+     * Default returns false.
+     */
+    virtual bool SendControl(const uint8* Envelope, int32 Len)
+    {
+        (void)Envelope; (void)Len;
+        return false;
+    }
 };
 
 /** Creates one sender instance. Called on the game thread, outside any registry lock. */

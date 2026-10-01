@@ -29,7 +29,7 @@ Two needs follow that a generic message bus would not cover. Cues should land cl
 - `EUnifiedKind` has `Mocap = 0` and `Audio = 1` (`Plugin/Source/Open3DShared/Public/O3DUnifiedMessage.h:10-14`), and `EUnifiedCodec` has `O3DS`, `Opus` and `PCM16` (`:17-22`).
 - The envelope is version 1 (`O3DA`, big-endian; `:24-51`, `:131-159`). Only audio is wrapped (`Plugin/Source/Open3DShared/Private/O3DAudioFrameCodec.cpp:458`).
 - ADR 0009 item 4 already says "zero-length payloads are allowed for a future control kind". ADR 0007 item 7 already gives `FO3DSendQueue` a "control" item type that "is never dropped for mocap".
-- Neither ADR has been implemented: there is no `src/o3ds/wire_format.h` and no `O3DS_PROTOCOL_VERSION` in `src/`. `O3DS_VERSION_TAG` is still `1.0.4` (`CMakeLists.txt:20`). `IOpen3DSender` and `IOpen3DReceiver` still live in Sender and Receiver (`Plugin/Source/Open3DSender/Public/O3DSenderInterface.h:29-92`, `Plugin/Source/Open3DReceiver/Public/O3DReceiverInterface.h:22-44`). `O3D_TRANSPORT_API_VERSION` is 1 (`Plugin/Source/Open3DShared/Public/Transport/O3DTransportApiVersion.h:27`).
+- Neither ADR has been implemented: there is no `src/o3ds/wire_format.h` and no `O3DS_PROTOCOL_VERSION` in `src/`. `O3DS_VERSION_TAG` is still `1.0.4` (`CMakeLists.txt:20`). WP-A1 PR 1 (#289) moved `IOpen3DSender`, `IOpen3DReceiver` and `ISerializedFrameConsumer` into `Plugin/Source/Open3DShared/Public/Transport/` with one registry (`O3DTransportRegistry.h`), leaving forwarding shims in Sender and Receiver. It kept `O3D_TRANSPORT_API_VERSION` at 1 because no layout changed (`O3DTransportApiVersion.h`, History).
 
 **How each transport moves non-mocap data today.**
 
@@ -170,15 +170,15 @@ root_type ControlMessage;
 - A new kind that old readers ignore is an "appended enum value": `O3DS_PROTOCOL_VERSION` +1 when that constant exists, and a minor bump of `O3DS_VERSION_TAG` (1.0.4 → 1.1.0, or the next minor if D8 ships first).
 - No mocap frame's `min_reader_version` changes.
 - `CHANGELOG.md` gets a **Schema/Protocol** entry: "control envelope kind 2 added; old TCP, UDP and NNG receivers ignore it; old WebRTC receivers log a warning per control message (see item 10); MoQ receivers that do not subscribe never see it."
-- The vtable changes in item 6 bump `O3D_TRANSPORT_API_VERSION` by one, and the WebRTC add-on is rebuilt (ADR 0007 item 2). Whichever of WP-CTL and WP-A1 PR 1 lands first takes 2; the other takes 3.
+- The vtable changes in item 6 bump `O3D_TRANSPORT_API_VERSION` from 1 to 2 (CTL-2), and the WebRTC add-on is rebuilt (ADR 0007 item 2). WP-A1 PR 1 landed at 1 with forwarding shims; removing those shims later takes 3.
 
-**6. Transport interface (pre-WP-A1 shape; folds into ADR 0007 item 3 later).**
+**6. Transport interface (on the WP-A1 PR 1 interfaces in `Open3DShared/Public/Transport/`; folds into ADR 0007 item 3's queue, capabilities and demux later).**
 
 | Addition | Called from | Contract |
 |---|---|---|
 | `IOpen3DSender::SupportsControl() const -> bool` | any thread | default `false` |
-| `IOpen3DSender::SendControl(const uint8* Data, int32 Len) -> bool` | game thread in v1; any thread allowed | thread-safe, never blocks, copies the bytes. Bytes are a complete control envelope. Returns false when not running, unsupported or full. Default returns false. **Not** routed through `SendSerialized` or the ADR 0008 pose pipe, so control is never dropped as an old pose and never counted as a mocap frame. |
-| `IO3DReceiverControlSink::SubmitControl(TConstArrayView<uint8> Envelope, const FString& StreamId, double ReceiveTimeSec)` | any thread (implementations must be thread-safe, like `IO3DReceiverAudioSink`) | view valid for the call only |
+| `IOpen3DSender::SendControl(const uint8* Envelope, int32 Len) -> bool` | game thread in v1; any thread allowed | thread-safe, never blocks, copies the bytes. Bytes are a complete control envelope. Returns false when not running, unsupported or full. Default returns false. **Not** routed through `SendSerialized` or the ADR 0008 pose pipe, so control is never dropped as an old pose and never counted as a mocap frame. |
+| `IO3DReceiverControlSink::SubmitControl(TConstArrayView<uint8> Payload, const FString& StreamId, double ReceiveTimeSec)` | any thread (implementations must be thread-safe, like `IO3DReceiverAudioSink`) | the **payload**: the ControlMessage bytes inside the envelope, already checked with `O3DS::TryGetControlPayload`, the one classifier every receive path uses; view valid for the call only |
 | `IOpen3DReceiver::SupportsControl() const -> bool`, `SetControlSink(TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>)` | game thread, before `Start` | the receiver holds the sink strongly and releases it in `Stop` (as ADR 0007 does for consumers) |
 
 - **After WP-A1:**
@@ -207,7 +207,10 @@ root_type ControlMessage;
 *Shared (`Open3DShared`)*
 - `FO3DControlValue` is a `USTRUCT(BlueprintType)` with `EO3DControlValueType Type` and one field per type. `UO3DControlValueLibrary` provides `Make*` and `As*` Blueprint functions.
 - `FO3DControlMeta` holds `SourceId`, `SourceName`, `StreamId`, `TargetSubject`, `SenderTimeSec` and `Seq`.
-- `FO3DControlBus` is game-thread-only, like `FO3DAudioBus` (SHR-10). It has `OnEvent`, `OnValueChanged` and `OnValueCleared` multicast delegates and a value cache keyed by `(SourceId, Key, Target)`, queried with `FindValue`.
+- `FO3DControlBus` is game-thread-only, like `FO3DAudioBus` (SHR-10). It has one `OnChange` multicast delegate carrying an `FO3DControlChange` (kind: value changed, value cleared or event), and a value cache keyed by `(SourceId, Key, Target)`, queried with `FindValue`. Keys, event names and targets are case-sensitive `FString`s throughout the engine side: `FName` compares case-insensitively and keeps its first-registered casing only in builds with editor data (`WITH_CASE_PRESERVING_NAME`), while core keys are case-sensitive. `FName` appears only as a convenience at the Blueprint boundary (CTL-4).
+- **Two receiver sources can hear one sender** (UDP multicast, one MoQ track, a duplicated LiveLink source). Each runs its own `ControlReceiver`, so the bus drops an event it has already published for `(SourceId, Epoch, EventId)`, and applies a value change or clear only when its `(Epoch, Version)` is newer than what it holds. `FO3DControlMeta` carries `Epoch`, `Version` and `EventId` for this.
+- `FO3DControlValue` stores rotations as `FQuat` (`BlueprintType` in 5.7): a rotator round trip is lossy, which would break exact comparison and the publisher's "same value is a no-op" coalescing. The value library offers rotator make and read helpers.
+- Conversions between the engine and core types live in `O3DControlConvert.h` (Shared). Only its `.cpp` includes the core, through a private `Open3DStreamCore` dependency, so Shared's public headers stay core-free. It also `static_assert`s that `O3DS::UnifiedMaxControlPayloadSize` equals `ControlLimits::kMaxPayloadBytes`.
 
 *Sender (`Open3DSender`)*
 - `FO3DControlPublisher` (Private) wraps the core `ControlPublisher` (item 9). It is owned by the component, ticked on the game thread, and calls `IOpen3DSender::SendControl`.

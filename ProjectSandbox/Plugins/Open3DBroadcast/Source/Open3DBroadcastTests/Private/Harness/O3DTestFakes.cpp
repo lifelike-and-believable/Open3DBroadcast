@@ -4,8 +4,10 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "HAL/PlatformTime.h"
 #include "Misc/ScopeLock.h"
 #include "O3DTestHarness.h"
+#include "O3DUnifiedMessage.h"
 
 THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
@@ -109,6 +111,33 @@ bool FO3DFakeSender::SendSerialized(const uint8* Data, int32 Len, const FString&
 	return true;
 }
 
+bool FO3DFakeSender::SendControl(const uint8* Envelope, int32 Len)
+{
+	ControlCalls.fetch_add(1);
+	TConstArrayView<uint8> Payload;
+	if (!bRunning.load() || Envelope == nullptr || Len <= 0 || !O3DS::TryGetControlPayload(Envelope, Len, Payload))
+	{
+		return false;
+	}
+
+	TArray<uint8> Bytes(Envelope, Len);
+	{
+		FScopeLock Lock(&Mutex);
+		if (MaxQueued >= 0 && Queued >= MaxQueued)
+		{
+			return false; // the caller retries; control is never counted as a dropped frame
+		}
+		++Queued;
+		RecordedControl.Add(Bytes);
+	}
+
+	if (Link.IsValid())
+	{
+		Link->Push(Bytes); // in-band, as TCP, UDP and NNG carry it
+	}
+	return true;
+}
+
 void FO3DFakeSender::Tick(float /*DeltaSeconds*/)
 {
 }
@@ -137,6 +166,12 @@ TArray<TArray<uint8>> FO3DFakeSender::GetRecordedPayloads() const
 {
 	FScopeLock Lock(&Mutex);
 	return Recorded;
+}
+
+TArray<TArray<uint8>> FO3DFakeSender::GetRecordedControl() const
+{
+	FScopeLock Lock(&Mutex);
+	return RecordedControl;
 }
 
 FO3DTransportConfig FO3DFakeSender::GetLastConfig() const
@@ -182,6 +217,8 @@ bool FO3DFakeReceiver::Start()
 void FO3DFakeReceiver::Stop()
 {
 	bRunning.store(false);
+	FScopeLock Lock(&Mutex);
+	ControlSink.Reset(); // the interface contract: released in Stop
 }
 
 int32 FO3DFakeReceiver::Poll()
@@ -220,6 +257,18 @@ void FO3DFakeReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPM
 {
 	FScopeLock Lock(&Mutex);
 	AudioSink = Sink;
+}
+
+void FO3DFakeReceiver::SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink)
+{
+	FScopeLock Lock(&Mutex);
+	ControlSink = Sink;
+}
+
+bool FO3DFakeReceiver::HasControlSink() const
+{
+	FScopeLock Lock(&Mutex);
+	return ControlSink.IsValid();
 }
 
 void FO3DFakeReceiver::Enqueue(const TArray<uint8>& Bytes)
@@ -268,6 +317,35 @@ bool FO3DFakeReceiver::HasConsumer() const
 
 bool FO3DFakeReceiver::Deliver(const TArray<uint8>& Bytes)
 {
+	// Control first: an envelope of kind Control goes to the control sink when well-formed and is
+	// dropped otherwise. It is never a frame.
+	O3DS::FUnifiedHeader Header;
+	const uint8* EnvelopePayload = nullptr;
+	int32 EnvelopePayloadSize = 0;
+	if (O3DS::ParseUnifiedMessage(Bytes.GetData(), Bytes.Num(), Header, EnvelopePayload, EnvelopePayloadSize)
+		&& Header.GetKind() == O3DS::EUnifiedKind::Control)
+	{
+		TConstArrayView<uint8> Payload;
+		if (!O3DS::TryGetControlPayload(Bytes.GetData(), Bytes.Num(), Payload))
+		{
+			ControlRejected.fetch_add(1);
+			return false;
+		}
+		TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe> Sink;
+		FString Stream;
+		{
+			FScopeLock Lock(&Mutex);
+			Sink = ControlSink;
+			Stream = StreamId;
+		}
+		if (Sink.IsValid())
+		{
+			Sink->SubmitControl(Payload, Stream, FPlatformTime::Seconds());
+			ControlDelivered.fetch_add(1);
+		}
+		return false;
+	}
+
 	TSharedPtr<ISerializedFrameConsumer> Target;
 	FString Stream;
 	{

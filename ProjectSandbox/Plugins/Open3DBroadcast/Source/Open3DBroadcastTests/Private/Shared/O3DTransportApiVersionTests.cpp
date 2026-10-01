@@ -15,6 +15,11 @@ bool FO3DTransportApiVersionHostTest::RunTest(const FString& Parameters)
 {
 	TestEqual(TEXT("GetHostApiVersion returns O3D_TRANSPORT_API_VERSION"), O3DTransport::GetHostApiVersion(), static_cast<int32>(O3D_TRANSPORT_API_VERSION));
 	TestTrue(TEXT("The version is positive"), O3DTransport::GetHostApiVersion() > 0);
+	// ADR 0011 (CTL-2) appended the control-channel virtuals to IOpen3DSender and IOpen3DReceiver,
+	// a vtable change that needs version 2 or later; an add-on built against version 1 must refuse.
+	TestTrue(TEXT("The control channel interface is version 2 or later"), O3DTransport::GetHostApiVersion() >= 2);
+	FString Error;
+	TestFalse(TEXT("An add-on built before the control channel is refused"), O3DTransport::CheckApiVersion(TEXT("OldAddOn"), 1, O3DTransport::GetHostApiVersion(), Error));
 	return true;
 }
 
