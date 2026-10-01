@@ -25,6 +25,9 @@ jobs:
   test:
     name: Build & test (Linux, ASan/UBSan)
     runs-on: ubuntu-latest
+    # Normal runs take about 3 minutes. The cap turns a hung step (seen on
+    # apt-get) into a failure instead of a check that stays in progress.
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -167,6 +170,9 @@ jobs:
     # so the clang-18 / libclang-rt-18-dev package names stay valid.
     name: Fuzz (Clang libFuzzer, 60 s per target)
     runs-on: ubuntu-24.04
+    # About 8 minutes today (60 s per target plus the build); raise this
+    # when targets are added.
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -258,6 +264,7 @@ jobs:
     # move the count on its own.
     name: Warning ratchet (GCC -Wall -Wextra)
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -318,6 +325,7 @@ jobs:
     # runner, so it can't be the PR gate.
     name: Build & test (Windows, MSVC Release)
     runs-on: windows-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
