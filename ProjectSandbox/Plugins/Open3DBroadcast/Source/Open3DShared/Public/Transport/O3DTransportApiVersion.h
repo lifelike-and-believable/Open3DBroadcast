@@ -40,10 +40,18 @@
  *      asks the registry for live instances (FO3DFfiLibraryDesc::TransportNames,
  *      FO3DFfiLibraryOps::CountLiveInstances) instead of tracking them, and TrackInstance and
  *      StopLiveInstances are gone. The add-on constructs FO3DFfiLibrary and inlines its
- *      descriptor, so an add-on built for 2 must not load. Removing the WP-A1 forwarding shims
+ *      descriptor, so an add-on built for 2 must not load.
+ *   4  WP-A1 PR 3 (ADR 0007 items 3 and 4; SHR-14): results, state and capabilities. Initialize
+ *      and Start return FO3DTransportResult; SendSerialized is pure virtual, takes an owned
+ *      FO3DSendPayload and returns EO3DSendResult, as SendControl does; IOpen3DSender and
+ *      IOpen3DReceiver gained GetCapabilities, GetConnectionState and SetStateChangedCallback, and
+ *      their SupportsAudio and SupportsControl are no longer virtual (they forward to
+ *      GetCapabilities). FO3DTransportStats gained State, SendErrors, ReceiveErrors, PendingFrames
+ *      and PendingBytes; FO3DTransportDescriptor gained GetCapabilities; receivers return
+ *      NoConsumer from Start without a consumer. Removing the WP-A1 forwarding shims (step 6)
  *      takes the next number.
  */
-#define O3D_TRANSPORT_API_VERSION 3
+#define O3D_TRANSPORT_API_VERSION 4
 
 namespace O3DTransport
 {

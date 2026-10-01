@@ -465,12 +465,15 @@ void UO3DSenderComponent::HandleSerializedFrameForward(const FString& Subject, c
 		return;
 	}
 
-	if (!SenderInstance->SendSerialized(Buffer.GetData(), Buffer.Num(), Subject, Timestamp))
+	// The delegate above got the bytes by reference; the transport takes its own copy
+	// (FO3DSendPayload owns its bytes, ADR 0007 item 3). The ADR 0008 pipeline will hand over
+	// the serializer's buffer instead.
+	const EO3DSendResult Result = SenderInstance->SendSerialized(FO3DSendPayload(TArray<uint8>(Buffer), Subject, Timestamp));
+	if (Result != EO3DSendResult::Queued)
 	{
-		// False can mean backpressure, a connection-state check, or simply
-		// an unimplemented SendSerialized() (the interface's default
-		// returns false/unsupported) - not backpressure specifically.
-		UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Transport '%s' dropped or does not support subject '%s' via SendSerialized()."), *TransportController->GetConfig().Transport, *Subject);
+		// Not retried: the next frame supersedes this one. DroppedBackpressure is counted in the
+		// transport's DroppedFrames; NotConnected is expected while a peer or session is missing.
+		UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Transport '%s' did not take subject '%s' (%s)."), *TransportController->GetConfig().Transport, *Subject, LexToString(Result));
 	}
 }
 

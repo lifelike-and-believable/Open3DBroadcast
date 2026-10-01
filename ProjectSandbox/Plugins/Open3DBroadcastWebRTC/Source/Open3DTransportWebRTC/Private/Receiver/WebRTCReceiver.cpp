@@ -189,6 +189,10 @@ void FO3DWebRTCReceiver::OnConnectionState(void* user, LkConnectionState state, 
     const TSharedPtr<FWebRTCReceiverLink, ESPMode::ThreadSafe> Self = GetReceiverLinkRegistry().Resolve(user);
     if (!Self.IsValid()) return;
 
+    // Read by Poll on the game thread (ADR 0007 item 3); the callback never reaches the receiver.
+    Self->LkReasonCode.store(static_cast<int32>(reason_code));
+    Self->LkState.store(static_cast<int32>(state));
+
     switch (state)
     {
     case LkConnConnecting:
@@ -334,14 +338,14 @@ FO3DWebRTCReceiver::~FO3DWebRTCReceiver()
     LinkToken = nullptr;
 }
 
-bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
+FO3DTransportResult FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
 {
     FScopeLock Lock(&StateMutex);
 
     if (bInitialized.Load())
     {
         UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("WebRTC receiver already initialized"));
-        return false;
+        return FO3DTransportResult::Error(EO3DTransportError::Internal, TEXT("WebRTC receiver is already initialized; Stop() it first."));
     }
 
     // Platform validation: WebRTC module currently supports Windows 64-bit only
@@ -359,20 +363,21 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
         TEXT("Unknown"),
 #endif
         (int32)(sizeof(void*) * 8));
-    return false;
+    return FO3DTransportResult::Error(EO3DTransportError::Unsupported, TEXT("The WebRTC transport needs Windows 64-bit."));
 #endif
 
     if (!Ffi.IsComplete())
     {
         UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC receiver: LiveKit function table is incomplete"));
-        return false;
+        return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("The LiveKit library is not loaded or is incomplete."));
     }
 
     Link->bConnected.Store(false);
 
-    if (!ParseConfig(Config))
+    const FO3DTransportResult ConfigResult = ParseConfig(Config);
+    if (!ConfigResult.IsOk())
     {
-        return false;
+        return ConfigResult;
     }
 
     ActiveAudioConfig = Config.Audio;
@@ -380,7 +385,7 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
     if (!SetupClientHandle())
     {
         UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC receiver: failed to set up the LiveKit client"));
-        return false;
+        return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("Failed to set up the LiveKit client."));
     }
 
     ActiveConfig = Config;
@@ -405,7 +410,7 @@ bool FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Config)
 
     UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver initialized: URL=%s"), *O3DRedact::Url(RoomUrl));
 
-    return true;
+    return FO3DTransportResult::Ok();
 }
 
 void FO3DWebRTCReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer)
@@ -414,32 +419,46 @@ void FO3DWebRTCReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer>&
     Consumer = InConsumer;
 }
 
-bool FO3DWebRTCReceiver::Start()
+FO3DTransportResult FO3DWebRTCReceiver::Start()
 {
     FScopeLock Lock(&StateMutex);
 
     if (!bInitialized.Load())
     {
         UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Cannot start WebRTC receiver: not initialized"));
-        return false;
+        return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("WebRTC receiver Start() before a successful Initialize()."));
     }
 
-    // FSerializedFrameConsumerRegistry, which this used to fall back to, was never populated and
-    // is gone (SHR-24); without SetConsumer the frames are dropped, as before.
+    // ADR 0007 item 3: a receiver without a consumer refuses to start (it used to start and drop
+    // every frame; FSerializedFrameConsumerRegistry, its old fallback, is gone, SHR-24).
     if (!Consumer.IsValid())
     {
-        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("No serialized frame consumer registered; frames will be dropped"));
+        return FO3DTransportResult::Error(EO3DTransportError::NoConsumer, TEXT("WebRTC receiver Start() without a frame consumer (SetConsumer)."));
     }
 
     if (!SetupClientHandle())
     {
-        return false;
+        const FO3DTransportResult Result = FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("Failed to set up the LiveKit client."));
+        ConnectionState.End(EO3DConnectionState::Failed, Result);
+        return Result;
     }
 
     // "Connect requested" is tracked separately from the token (TRF-3). Without a token yet,
     // Poll() connects as soon as the token manager has one.
     bConnectRequested = true;
-    return UpdateConnection();
+    AppliedLkState = -1;
+    bEverConnected = false;
+    Link->LkState.store(-1);
+    ConnectionState.Begin(EO3DConnectionState::Connecting);
+    if (!UpdateConnection())
+    {
+        const FO3DTransportResult Result = FO3DTransportResult::Error(EO3DTransportError::ConnectFailed,
+            FString::Printf(TEXT("LiveKit refused the connect to %s."), *O3DRedact::Url(RoomUrl)));
+        ConnectionState.End(EO3DConnectionState::Failed, Result);
+        bConnectRequested = false;
+        return Result;
+    }
+    return FO3DTransportResult::Ok();
 }
 
 void FO3DWebRTCReceiver::Stop()
@@ -448,6 +467,9 @@ void FO3DWebRTCReceiver::Stop()
 
     bConnectRequested = false;
     bConnectIssued = false;
+    // Poll applies LiveKit states only while connecting is requested, and the tracker ignores
+    // changes once its session ended, so no state callback runs after Stop.
+    ConnectionState.End(EO3DConnectionState::Idle);
 
     // Cancel any token fetch; its result is dropped (TRF-24).
     if (TokenManager.IsValid())
@@ -569,6 +591,10 @@ int32 FO3DWebRTCReceiver::Poll()
     {
         FScopeLock Lock(&StateMutex);
         UpdateConnection();
+        if (bConnectRequested)
+        {
+            UpdateConnectionState();
+        }
 
         // The no-data watchdog only applies once a connect has been issued; while waiting for a
         // token there is nothing to reconnect.
@@ -590,7 +616,44 @@ FO3DTransportStats FO3DWebRTCReceiver::GetStats() const
     FScopeLock Lock(&StatsMutex);
     Stats.FramesReceived = Link->FramesReceived.Load();
     Stats.BytesReceived = Link->BytesReceived.Load();
-    return Stats;
+    FO3DTransportStats Copy = Stats;
+    Copy.State = ConnectionState.Get();
+    return Copy;
+}
+
+void FO3DWebRTCReceiver::UpdateConnectionState()
+{
+    // Game thread (Poll), StateMutex held. LiveKit reports on its own threads, which reach only
+    // the shared link; the receiver reconnects by itself after a disconnect or failure.
+    const int32 LkState = Link->LkState.load();
+    if (LkState == AppliedLkState)
+    {
+        return;
+    }
+    AppliedLkState = LkState;
+
+    switch (LkState) // -1 (nothing reported yet) matches no case
+    {
+    case static_cast<int32>(LkConnConnecting):
+        ConnectionState.Set(bEverConnected ? EO3DConnectionState::Reconnecting : EO3DConnectionState::Connecting);
+        break;
+    case static_cast<int32>(LkConnConnected):
+        bEverConnected = true;
+        ConnectionState.Set(EO3DConnectionState::Connected);
+        break;
+    case static_cast<int32>(LkConnReconnecting):
+    case static_cast<int32>(LkConnDisconnected):
+    case static_cast<int32>(LkConnFailed):
+        if (bEverConnected)
+        {
+            ConnectionState.Set(EO3DConnectionState::Reconnecting,
+                FO3DTransportResult::Error(EO3DTransportError::ConnectFailed,
+                    FString::Printf(TEXT("LiveKit connection lost (state=%d, code=%d); reconnecting."), LkState, Link->LkReasonCode.load())));
+        }
+        break;
+    default:
+        break;
+    }
 }
 
 void FO3DWebRTCReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig)
@@ -626,13 +689,13 @@ void FO3DWebRTCReceiver::SetControlSink(const TSharedPtr<IO3DReceiverControlSink
     }
 }
 
-bool FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& Config)
+FO3DTransportResult FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& Config)
 {
     const FString HostAddress = Config.Uri;
     if (HostAddress.IsEmpty())
     {
         UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC host address not specified"));
-        return false;
+        return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("WebRTC receiver: no LiveKit server address."));
     }
 
     // Automatically prepend the correct WebSocket protocol prefix
@@ -657,13 +720,14 @@ bool FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& Config)
         if (TokenConfig.EndpointUrl.IsEmpty())
         {
             UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Auto-fetch enabled but no token endpoint URL provided"));
-            return false;
+            return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("WebRTC receiver: token auto-fetch is enabled but no token endpoint URL is set."));
         }
 
         if (TokenConfig.RoomName.IsEmpty())
         {
             UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Auto-fetch enabled but no room set (transport option '%s')"), WebRTCUtils::RoomOptionKey);
-            return false;
+            return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig,
+                FString::Printf(TEXT("WebRTC receiver: token auto-fetch is enabled but no room is set (transport option '%s')."), WebRTCUtils::RoomOptionKey));
         }
 
         UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("Token auto-fetch enabled: endpoint=%s, room=%s, identity=%s"),
@@ -677,7 +741,7 @@ bool FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& Config)
         if (TokenConfig.ManualToken.IsEmpty())
         {
             UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("WebRTC token not provided"));
-            return false;
+            return FO3DTransportResult::Error(EO3DTransportError::AuthFailed, TEXT("WebRTC receiver: no LiveKit token (manual token mode)."));
         }
 
         UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("Manual token mode"));
@@ -686,13 +750,13 @@ bool FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& Config)
     if (!TokenManager->Initialize(TokenConfig))
     {
         UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Failed to initialize token manager"));
-        return false;
+        return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("WebRTC receiver: the token settings were refused."));
     }
 
     const double TimeoutSeconds = FMath::Clamp(ParseDoubleOption(Config.AdvancedParams, ReconnectTimeoutOptionKey, 2.0), 0.0, 300.0);
     NoDataReconnectTimeoutSec = TimeoutSeconds;
 
-    return true;
+    return FO3DTransportResult::Ok();
 }
 
 bool FO3DWebRTCReceiver::SetupClientHandle()

@@ -117,7 +117,7 @@ FO3DLoopbackSender::~FO3DLoopbackSender()
     AudioGate->Close();
 }
 
-bool FO3DLoopbackSender::Initialize(const FO3DTransportConfig& Config)
+FO3DTransportResult FO3DLoopbackSender::Initialize(const FO3DTransportConfig& Config)
 {
     QueueCapacity = O3DLoopback::ResolveQueueCapacity(Config);
     AudioQueueCapacity = O3DLoopback::ResolveAudioQueueCapacity(Config);
@@ -152,17 +152,24 @@ bool FO3DLoopbackSender::Initialize(const FO3DTransportConfig& Config)
         }
     }
 
-    return bInitialized;
+    if (!bInitialized)
+    {
+        return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, FString::Printf(TEXT("Loopback channel '%s' could not be acquired."), *ChannelKey));
+    }
+    return FO3DTransportResult::Ok();
 }
 
-bool FO3DLoopbackSender::Start()
+FO3DTransportResult FO3DLoopbackSender::Start()
 {
-    if (bInitialized)
+    if (!bInitialized)
     {
-        AudioGate->Open();
+        return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("Loopback sender Start() before a successful Initialize()."));
     }
-    bRunning.store(bInitialized);
-    return bInitialized;
+    AudioGate->Open();
+    bRunning.store(true);
+    // The in-process channel needs no peer, so a started sender can deliver at once.
+    ConnectionState.Begin(EO3DConnectionState::Connected);
+    return FO3DTransportResult::Ok();
 }
 
 void FO3DLoopbackSender::Stop()
@@ -171,13 +178,14 @@ void FO3DLoopbackSender::Stop()
     // The channel itself remains available for new instances.
     AudioGate->Close();
     bRunning.store(false);
+    ConnectionState.End(EO3DConnectionState::Idle);
 }
 
-bool FO3DLoopbackSender::Send(const O3DS::SubjectList& List)
+EO3DSendResult FO3DLoopbackSender::CheckCanSend()
 {
     if (!bInitialized || !bRunning.load() || !Channel.IsValid())
     {
-        return false;
+        return EO3DSendResult::NotRunning;
     }
 
     if (Channel->PendingCount.load() >= Channel->Capacity)
@@ -187,6 +195,15 @@ bool FO3DLoopbackSender::Send(const O3DS::SubjectList& List)
             Stats.DroppedFrames++;
         }
         UE_LOG(LogO3DLoopbackTransport, Verbose, TEXT("Loopback queue full for '%s'; dropping frame."), *ChannelKey);
+        return EO3DSendResult::DroppedBackpressure;
+    }
+    return EO3DSendResult::Queued;
+}
+
+bool FO3DLoopbackSender::Send(const O3DS::SubjectList& List)
+{
+    if (CheckCanSend() != EO3DSendResult::Queued)
+    {
         return false;
     }
 
@@ -206,58 +223,66 @@ bool FO3DLoopbackSender::Send(const O3DS::SubjectList& List)
         return false;
     }
 
-    return SendBytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten, SubjectName, TimestampSeconds);
-}
-
-bool FO3DLoopbackSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec)
-{
-    if (!bInitialized || !bRunning.load() || !Channel.IsValid() || Len <= 0)
-    {
-        return false;
-    }
-
-    if (Channel->PendingCount.load() >= Channel->Capacity)
-    {
-        {
-            FScopeLock StatsLock(&StatsMutex);
-            Stats.DroppedFrames++;
-        }
-        UE_LOG(LogO3DLoopbackTransport, Verbose, TEXT("Loopback queue full for '%s'; dropping frame."), *ChannelKey);
-        return false;
-    }
-
-    return SendBytes(Data, Len, SubjectName.IsEmpty() ? ChannelKey : SubjectName, CaptureTimestampSec);
-}
-
-/** Control (ADR 0011): onto the channel's control queue, independent of frames and audio. Not counted as a frame. */
-bool FO3DLoopbackSender::SendControl(const uint8* Envelope, int32 Len)
-{
-    TConstArrayView<uint8> Payload;
-    if (!bInitialized || !bRunning.load() || !Channel.IsValid() || !O3DS::TryGetControlPayload(Envelope, Len, Payload))
-    {
-        return false;
-    }
-    if (Channel->ControlPendingCount.load() >= FO3DLoopbackChannel::ControlCapacity)
-    {
-        return false;
-    }
-    Channel->ControlQueue.Enqueue(TArray<uint8>(Envelope, Len));
-    Channel->ControlPendingCount.fetch_add(1);
+    EnqueueFrame(TArray<uint8>(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten), SubjectName, TimestampSeconds);
     return true;
 }
 
-/** Enqueue an already-serialized payload onto the loopback channel and record stats/subject bookkeeping.
- *  CaptureTimestampSec is the same value the caller already embedded in Data (Send()'s own
+EO3DSendResult FO3DLoopbackSender::SendSerialized(FO3DSendPayload&& Payload)
+{
+    if (!bInitialized || !bRunning.load() || !Channel.IsValid())
+    {
+        return EO3DSendResult::NotRunning;
+    }
+    if (Payload.Bytes.Num() <= 0)
+    {
+        return EO3DSendResult::Invalid;
+    }
+
+    const EO3DSendResult Check = CheckCanSend();
+    if (Check != EO3DSendResult::Queued)
+    {
+        return Check;
+    }
+
+    const FString SubjectName = Payload.Subject.IsEmpty() ? ChannelKey : MoveTemp(Payload.Subject);
+    EnqueueFrame(MoveTemp(Payload.Bytes), SubjectName, Payload.CaptureTimeSec);
+    return EO3DSendResult::Queued;
+}
+
+/** Control (ADR 0011): onto the channel's control queue, independent of frames and audio. Not counted as a frame. */
+EO3DSendResult FO3DLoopbackSender::SendControl(const uint8* Envelope, int32 Len)
+{
+    if (!bInitialized || !bRunning.load() || !Channel.IsValid())
+    {
+        return EO3DSendResult::NotRunning;
+    }
+    TConstArrayView<uint8> Payload;
+    if (!O3DS::TryGetControlPayload(Envelope, Len, Payload))
+    {
+        return EO3DSendResult::Invalid;
+    }
+    if (Channel->ControlPendingCount.load() >= FO3DLoopbackChannel::ControlCapacity)
+    {
+        return EO3DSendResult::DroppedBackpressure;
+    }
+    Channel->ControlQueue.Enqueue(TArray<uint8>(Envelope, Len));
+    Channel->ControlPendingCount.fetch_add(1);
+    return EO3DSendResult::Queued;
+}
+
+/** Moves an already-serialized payload onto the loopback channel and records stats/subject bookkeeping.
+ *  CaptureTimestampSec is the same value the caller already embedded in the bytes (Send()'s own
  *  FPlatformTime::Seconds() call, or FO3DSenderSerializer's `Now` via SendSerialized()) - reused here
  *  rather than sampling a fresh clock read, so the queued packet's local timestamp never drifts from
  *  what's actually encoded in the payload. */
-bool FO3DLoopbackSender::SendBytes(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec)
+void FO3DLoopbackSender::EnqueueFrame(TArray<uint8>&& Bytes, const FString& SubjectName, double CaptureTimestampSec)
 {
+    const int32 Len = Bytes.Num();
+
     FO3DLoopbackPacket Packet;
     Packet.Subject = SubjectName;
     Packet.TimestampSeconds = CaptureTimestampSec;
-    Packet.Payload.SetNumUninitialized(Len);
-    FMemory::Memcpy(Packet.Payload.GetData(), Data, Len);
+    Packet.Payload = MoveTemp(Bytes);
 
     Channel->SetLastSubjectName(SubjectName);
 
@@ -278,8 +303,6 @@ bool FO3DLoopbackSender::SendBytes(const uint8* Data, int32 Len, const FString& 
             Len,
             Channel->PendingCount.load());
     }
-
-    return true;
 }
 
 void FO3DLoopbackSender::Tick(float DeltaSeconds)
@@ -289,13 +312,17 @@ void FO3DLoopbackSender::Tick(float DeltaSeconds)
 
 FO3DTransportStats FO3DLoopbackSender::GetStats() const
 {
-    FScopeLock StatsLock(&StatsMutex);
-    return Stats;
-}
-
-bool FO3DLoopbackSender::SupportsAudio() const
-{
-    return true;
+    FO3DTransportStats Copy;
+    {
+        FScopeLock StatsLock(&StatsMutex);
+        Copy = Stats;
+    }
+    Copy.State = ConnectionState.Get();
+    if (Channel.IsValid())
+    {
+        Copy.PendingFrames = Channel->PendingCount.load();
+    }
+    return Copy;
 }
 
 TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DLoopbackSender::CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig)

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Transport/O3DSenderInterface.h"
+#include "Transport/O3DConnectionState.h"
 #include "Transport/O3DTransportTypes.h"
 #include "O3DLifetimeGate.h"
 #include "O3DPerformanceMetrics.h"
@@ -54,6 +55,15 @@ struct FWebRTCSenderLink
     TMap<FString, LkAudioTrackHandle*> AudioTracks;
 
     TAtomic<bool> bConnected{ false };
+
+    /**
+     * Latest LkConnectionState from the connection callback, -1 before the first one. The
+     * sender's Tick turns it into connection-state changes (ADR 0007 item 3), so the callback
+     * never reaches the sender or the state callback.
+     */
+    std::atomic<int32> LkState{ -1 };
+    /** reason_code of that callback. */
+    std::atomic<int32> LkReasonCode{ 0 };
 };
 
 /**
@@ -94,30 +104,42 @@ public:
     FO3DWebRTCSender& operator=(const FO3DWebRTCSender&) = delete;
 
     // IOpen3DSender interface
-    virtual bool Initialize(const FO3DTransportConfig& Config) override;
-    virtual bool Start() override;
+    virtual FO3DTransportResult Initialize(const FO3DTransportConfig& Config) override;
+    virtual FO3DTransportResult Start() override;
     virtual void Stop() override;
     /**
      * Serializes the whole list once and sends it under the first subject's name (TRF-4,
      * TRF-19). The normal pipeline uses SendSerialized; this path exists for the interface.
      */
     virtual bool Send(const O3DS::SubjectList& List) override;
-    virtual bool SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec) override;
+    /**
+     * NotRunning before Start or after Stop, NotConnected while LiveKit is not connected (both
+     * counted as dropped frames, as before), TooLarge above WebRTCUtils::ReliableMaxDataBytes,
+     * DroppedBackpressure when lk_send_data_ex refuses the message.
+     */
+    virtual EO3DSendResult SendSerialized(FO3DSendPayload&& Payload) override;
     virtual void Tick(float DeltaSeconds) override;
     virtual FO3DTransportStats GetStats() const override;
-    virtual bool SupportsAudio() const override { return true; }
+    /** WebRTCUtils::GetCapabilities for the initialized config (Unreliable with webrtc.prefer_lossy). */
+    virtual FO3DTransportCapabilities GetCapabilities() const override;
+    /**
+     * Connecting until LiveKit connects, Connected, Reconnecting while LiveKit reconnects, Failed
+     * when the room disconnects or the connect fails. LiveKit reports on its own threads; Tick
+     * (game thread) applies the change, so callbacks run on the game thread.
+     */
+    virtual EO3DConnectionState GetConnectionState() const override { return ConnectionState.Get(); }
+    virtual void SetStateChangedCallback(FO3DConnectionStateCallback Callback) override { ConnectionState.SetCallback(MoveTemp(Callback)); }
     virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
 
-    /** Control channel (docs/adr/0011-control-channel.md, CTL-6). */
-    virtual bool SupportsControl() const override { return true; }
     /**
-     * Sends one control envelope on the reliable, ordered data channel labelled `__o3d.ctl`
-     * (WebRTCUtils::ControlDataLabelUtf8). Refuses bytes that are not exactly one well-formed
-     * control envelope, an envelope over the 1,100-byte budget, and any call while not
-     * connected (before Start, after Stop, or while LiveKit reconnects); the control publisher
-     * retries. Never counted as a frame, a sent byte or a dropped frame.
+     * Control channel (docs/adr/0011-control-channel.md, CTL-6). Sends one control envelope on
+     * the reliable, ordered data channel labelled `__o3d.ctl` (WebRTCUtils::ControlDataLabelUtf8).
+     * NotRunning before Start or after Stop, Invalid for bytes that are not exactly one
+     * well-formed control envelope within the 1,100-byte budget, NotConnected while
+     * LiveKit is not connected (or reconnects), DroppedBackpressure when LiveKit refuses it; the
+     * control publisher retries. Never counted as a frame, a sent byte or a dropped frame.
      */
-    virtual bool SendControl(const uint8* Envelope, int32 Len) override;
+    virtual EO3DSendResult SendControl(const uint8* Envelope, int32 Len) override;
 
 private:
     /** Immutable after construction. */
@@ -150,7 +172,19 @@ private:
     mutable FCriticalSection StatsMutex;
     FO3DTransportStats Stats;
 
-    bool SendBytes(const uint8* Data, int32 Len, const FString& SubjectName);
+    EO3DSendResult SendBytes(const uint8* Data, int32 Len, const FString& SubjectName);
+
+    /** Set by a successful Start, cleared by Stop. Any thread. */
+    std::atomic<bool> bRunning{ false };
+    /** webrtc.prefer_lossy of the initialized config, for GetCapabilities on any thread. */
+    std::atomic<bool> bLossyCapabilities{ false };
+    /** ADR 0007 item 3. Changed on the game thread (Start, Stop, Tick). */
+    FO3DConnectionStateTracker ConnectionState;
+    /** Game thread: the Link->LkState value last applied, and whether LiveKit connected in this session. */
+    int32 AppliedLkState = -1;
+    bool bEverConnected = false;
+    /** Game thread (Tick): applies Link->LkState to ConnectionState. */
+    void UpdateConnectionState();
 
     /** Control has its own log throttle, so its failures never hide a mocap message. Any thread. */
     std::atomic<double> LastControlErrorLogTime{ 0.0 };
@@ -174,7 +208,7 @@ private:
     static constexpr double ConnectRetryIntervalSec = 5.0;
 
     // Helper methods
-    bool ParseConfig(const FO3DTransportConfig& Config);
+    FO3DTransportResult ParseConfig(const FO3DTransportConfig& Config);
     /** Drives token fetch, connect and token refresh. Game thread. Returns false if a connect call failed. */
     bool UpdateConnection();
     void MaybeFetchToken(double NowSeconds);

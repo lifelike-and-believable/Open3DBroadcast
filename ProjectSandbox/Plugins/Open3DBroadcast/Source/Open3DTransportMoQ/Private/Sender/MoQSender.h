@@ -9,6 +9,8 @@
 #include "Templates/UniquePtr.h"
 #include "Containers/Queue.h"
 #include "Transport/O3DSenderInterface.h"
+#include "Transport/O3DConnectionState.h"
+#include "Shared/MoQHelpers.h"
 #include "O3DAudioFrameCodec.h"
 #include "O3DPerformanceMetrics.h"
 #include "MoQFfiApi.h"
@@ -65,17 +67,22 @@ public:
 	FO3DMoQSender& operator=(const FO3DMoQSender&) = delete;
 
 	// IOpen3DSender interface
-	virtual bool Initialize(const FO3DTransportConfig& Config) override;
-	virtual bool Start() override;
+	virtual FO3DTransportResult Initialize(const FO3DTransportConfig& Config) override;
+	virtual FO3DTransportResult Start() override;
 	virtual void Stop() override;
 	virtual bool Send(const O3DS::SubjectList& List) override;
-	virtual bool SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec) override;
+	virtual EO3DSendResult SendSerialized(FO3DSendPayload&& Payload) override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual FO3DTransportStats GetStats() const override;
-	virtual bool SupportsAudio() const override { return true; }
+	virtual FO3DTransportCapabilities GetCapabilities() const override { return MoQHelpers::GetCapabilities(FO3DTransportConfig()); }
+	/**
+	 * Connecting until the relay session is up, Connected while it is, Reconnecting after it
+	 * dropped. Session changes arrive on the game thread (the session wrapper marshals them).
+	 */
+	virtual EO3DConnectionState GetConnectionState() const override { return ConnectionState.Get(); }
+	virtual void SetStateChangedCallback(FO3DConnectionStateCallback Callback) override { ConnectionState.SetCallback(MoveTemp(Callback)); }
 	virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
-	virtual bool SupportsControl() const override { return true; }
-	virtual bool SendControl(const uint8* Envelope, int32 Len) override;
+	virtual EO3DSendResult SendControl(const uint8* Envelope, int32 Len) override;
 
 private:
 	friend class FSendWorker;
@@ -139,7 +146,9 @@ private:
 	void DestroyAudioPublisher();
 	void DestroyControlPublisher();
 	bool EnqueuePayload(TArray<uint8>&& Data, double CaptureTimestampSec, ETrack Track = ETrack::Mocap);
-	bool SendBytes(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec);
+	EO3DSendResult SendBytes(TArray<uint8>&& Bytes, const FString& SubjectName, double CaptureTimestampSec);
+	/** Reports a lost session: Reconnecting when it had been connected (game thread). */
+	void ReportSessionLost(const FString& Reason);
 	bool DequeuePayload(TUniquePtr<FPendingPayload>& OutPayload);
 	void DrainQueue();
 	bool PublishPayload(const FPendingPayload& Payload);
@@ -209,4 +218,7 @@ private:
 
 	/** This transport's counters, resolved once (SHR-3, SHR-17): no lock or lookup per frame. */
 	const FO3DTransportMetricsRef TransportMetrics;
+
+	/** ADR 0007 item 3. */
+	FO3DConnectionStateTracker ConnectionState;
 };

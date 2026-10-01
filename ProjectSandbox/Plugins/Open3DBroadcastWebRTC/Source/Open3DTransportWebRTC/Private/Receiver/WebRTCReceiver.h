@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Transport/O3DReceiverInterface.h"
+#include "Transport/O3DConnectionState.h"
 #include "Transport/O3DTransportTypes.h"
 #include "Transport/O3DSerializedFrameConsumer.h"
 #include "HAL/CriticalSection.h"
@@ -19,6 +20,7 @@ THIRD_PARTY_INCLUDES_END
 
 // Token management
 #include "../Shared/WebRTCTokenManager.h"
+#include "../Shared/WebRTCUtils.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogO3DWebRTCReceiver, Log, All);
 
@@ -44,6 +46,10 @@ struct FWebRTCReceiverPendingFrame
 struct FWebRTCReceiverLink
 {
     TAtomic<bool> bConnected{ false };
+    /** Latest LkConnectionState from the connection callback, -1 before the first one; Poll applies it (ADR 0007 item 3). */
+    std::atomic<int32> LkState{ -1 };
+    /** reason_code of that callback. */
+    std::atomic<int32> LkReasonCode{ 0 };
     TAtomic<bool> bPendingAudioFormatApply{ false };
     TAtomic<bool> bReconnectPending{ false };
 
@@ -133,17 +139,23 @@ public:
     FO3DWebRTCReceiver& operator=(const FO3DWebRTCReceiver&) = delete;
 
     // IOpen3DReceiver interface
-    virtual bool Initialize(const FO3DTransportConfig& Config) override;
+    virtual FO3DTransportResult Initialize(const FO3DTransportConfig& Config) override;
     virtual void SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& Consumer) override;
-    virtual bool Start() override;
+    virtual FO3DTransportResult Start() override;
     virtual void Stop() override;
     virtual int32 Poll() override;
     virtual FO3DTransportStats GetStats() const override;
-    virtual bool SupportsAudio() const override { return true; }
+    /** WebRTCUtils::GetCapabilities; a receiver cannot tell whether the sender prefers lossy data, so it reports ReliableOrdered. */
+    virtual FO3DTransportCapabilities GetCapabilities() const override { return WebRTCUtils::GetCapabilities(FO3DTransportConfig()); }
+    /**
+     * Connecting until LiveKit connects, Connected, Reconnecting after a drop (the receiver
+     * reconnects by itself). LiveKit reports on its own threads; Poll (game thread) applies the
+     * change, so callbacks run on the game thread.
+     */
+    virtual EO3DConnectionState GetConnectionState() const override { return ConnectionState.Get(); }
+    virtual void SetStateChangedCallback(FO3DConnectionStateCallback Callback) override { ConnectionState.SetCallback(MoveTemp(Callback)); }
     virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
-    /** Control channel (docs/adr/0011-control-channel.md, CTL-6). */
-    virtual bool SupportsControl() const override { return true; }
-    /** Game thread, before Start. Held strongly until Stop (or a later call) releases it. */
+    /** Control channel (docs/adr/0011-control-channel.md, CTL-6). Game thread, before Start. Held strongly until Stop (or a later call) releases it. */
     virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink) override;
 
 private:
@@ -195,7 +207,15 @@ private:
     static constexpr double ConnectRetryIntervalSec = 5.0;
 
     // Helper methods
-    bool ParseConfig(const FO3DTransportConfig& Config);
+    FO3DTransportResult ParseConfig(const FO3DTransportConfig& Config);
+    /** Game thread (Poll), StateMutex held: applies Link->LkState to ConnectionState. */
+    void UpdateConnectionState();
+
+    /** ADR 0007 item 3. Changed on the game thread (Start, Stop, Poll). */
+    FO3DConnectionStateTracker ConnectionState;
+    /** Game thread: the Link->LkState value last applied, and whether LiveKit connected in this session. */
+    int32 AppliedLkState = -1;
+    bool bEverConnected = false;
     bool SetupClientHandle();
     void DestroyClientHandle(const TCHAR* Context);
     bool BeginConnect(const FString& InToken, uint64 TokenGeneration);

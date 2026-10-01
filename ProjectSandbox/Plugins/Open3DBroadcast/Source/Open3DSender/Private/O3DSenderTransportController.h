@@ -30,8 +30,12 @@ public:
     FO3DSenderTransportController(const FO3DSenderTransportController&) = delete;
     FO3DSenderTransportController& operator=(const FO3DSenderTransportController&) = delete;
 
+    /** Creates, initializes and starts the sender. On failure GetLastResult() says why. */
     bool Start(const FO3DTransportConfig& InConfig);
     void Stop();
+
+    /** Result of the last Start (Ok after a successful one; ADR 0007 item 3). */
+    const FO3DTransportResult& GetLastResult() const { return LastResult; }
 
     bool IsActive() const;
     const FO3DTransportConfig& GetConfig() const { return ActiveConfig; }
@@ -56,4 +60,5 @@ private:
     FName ActiveTransportName;
     FDelegateHandle UnregisteringHandle;
     TFunction<void()> OnTransportUnregisteringHandler;
+    FO3DTransportResult LastResult;
 };

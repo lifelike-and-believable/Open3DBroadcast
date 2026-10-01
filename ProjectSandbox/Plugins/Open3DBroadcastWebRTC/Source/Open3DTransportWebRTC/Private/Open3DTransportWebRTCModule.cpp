@@ -205,6 +205,8 @@ public:
 		{
 			return MakeShared<FO3DWebRTCReceiver, ESPMode::ThreadSafe>();
 		};
+		// Delivery depends on webrtc.prefer_lossy (ADR 0005 (iii), ADR 0007 item 4).
+		Descriptor.GetCapabilities = [](const FO3DTransportConfig& Config) { return WebRTCUtils::GetCapabilities(Config); };
 
 		// Sender side
 		WebRTCConfig::DeclareSecrets(Descriptor.SenderOptions.SecretOptionKeys, Descriptor.SenderOptions.SecretEnvVars);

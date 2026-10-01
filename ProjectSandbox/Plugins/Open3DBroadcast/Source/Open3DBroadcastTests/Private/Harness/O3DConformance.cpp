@@ -134,6 +134,11 @@ namespace O3DTests
 		case EO3DConformanceCase::ControlRoundTrip: return TEXT("Control.RoundTripBesideMocap");
 		case EO3DConformanceCase::ControlRejectedWhenNotRunning: return TEXT("Control.RejectedWhenNotRunning");
 		case EO3DConformanceCase::ControlStopWhileSending: return TEXT("Control.StopWhileFourThreadsSend");
+		case EO3DConformanceCase::ReceiverStartWithoutConsumer: return TEXT("Lifecycle.ReceiverStartWithoutConsumerFails");
+		case EO3DConformanceCase::SendEmptyPayloadInvalid: return TEXT("Send.EmptyPayloadIsInvalid");
+		case EO3DConformanceCase::CapabilitiesMatch: return TEXT("Capabilities.MatchProfileAndDescriptor");
+		case EO3DConformanceCase::ConnectionStateLifecycle: return TEXT("State.StartStopReportOnCallingThread");
+		case EO3DConformanceCase::ConnectionStateConnected: return TEXT("State.ConnectedAfterExchange");
 		default: return FString();
 		}
 	}
@@ -153,6 +158,11 @@ namespace O3DTests
 			EO3DConformanceCase::ControlRoundTrip,
 			EO3DConformanceCase::ControlRejectedWhenNotRunning,
 			EO3DConformanceCase::ControlStopWhileSending,
+			EO3DConformanceCase::ReceiverStartWithoutConsumer,
+			EO3DConformanceCase::SendEmptyPayloadInvalid,
+			EO3DConformanceCase::CapabilitiesMatch,
+			EO3DConformanceCase::ConnectionStateLifecycle,
+			EO3DConformanceCase::ConnectionStateConnected,
 		};
 	}
 }

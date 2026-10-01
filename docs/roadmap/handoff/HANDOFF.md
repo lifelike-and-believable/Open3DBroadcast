@@ -11,7 +11,7 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M0 Decisions (ADRs 0001–0010) | Done (#261–#263) |
 | M1 Safety and correctness: WP-S1..S11, WP-T1, WP-T2 | Done (#264–#279) |
 | M2 Fab-buildable package: WP-F1..F4, F6..F9, F11 | Done (#274–#286). **F0 and F5 wait on the maintainer** (see §5) |
-| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289) and PR 2 (lifetime) done; PR 3 is next** (see §2) |
+| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime) and PR 3 (results, state, capabilities) done; step 4 is next** (see §2) |
 | M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | Not started |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
 | WP-CTL control channel (D11, ADR 0011) | CTL-1..7 done (#290–#295, CTL-6, CTL-7); live-server checks remain (see §2b) |
@@ -33,11 +33,16 @@ Design: `docs/adr/0007-transport-abstraction-and-registry.md`, section "Implemen
    - `FO3DFfiLibrary` asks the registry (`FO3DFfiLibraryDesc::TransportNames`) instead of tracking instances; `TrackInstance`/`StopLiveInstances` are gone. MoQ and the WebRTC add-on reset their registration, then unload.
    - Register/unregister `check(IsInGameThread())`. `O3D_TRANSPORT_API_VERSION` is now **3** (FFI library layout).
    - Tests: `Open3DBroadcast.Shared.TransportLifetime.*` (7 cases) and the reworked `Open3DBroadcast.Shared.FfiLibrary.*`.
-   - **Start here next: step 3.**
-3. **Results, state, capabilities** (SHR-14): `FO3DTransportResult`, `EO3DSendResult`, `FO3DSendPayload`, connection state, `FO3DTransportCapabilities`, `SendSerialized` pure virtual. The interface version already exists (`Open3DShared/Public/Transport/O3DTransportApiVersion.h`); CTL-2 raised it from 1 to 2 and WP-A1 PR 2 to **3**. The result type should cover `SendControl` too, and `SupportsControl()` belongs in the capability query.
+3. **Results, state, capabilities** (SHR-14). **Done (WP-A1 PR 3).** Details and deviations from ADR 0007 item 3 in the ADR 0007 addendum "implementation notes (WP-A1 PR 3)".
+   - `Initialize`/`Start` return `FO3DTransportResult` (code and message; explicit `operator bool`). `SendSerialized(FO3DSendPayload&&)` is pure virtual and returns `EO3DSendResult`, as does `SendControl`. Same failure, same code on every transport (`NotRunning`, `InvalidConfig`, `NoConsumer`, `AddressInUse`, `NotConnected`, ...).
+   - `EO3DConnectionState` with `GetConnectionState()`/`SetStateChangedCallback()` on both interfaces, implemented by `FO3DConnectionStateTracker` (Open3DShared): lock-free reads, callback on the changing thread, nothing after `Stop`.
+   - `FO3DTransportCapabilities` on both interfaces and on the descriptor (`FO3DTransportRegistry::GetCapabilities`); it holds ADR 0005's delivery guarantee and ADR 0011's control flag. `SupportsAudio()`/`SupportsControl()` are non-virtual forwarders. `SetPeerJoinedCallback` is deferred to WP-A4b (`bPeerJoinSignal` false everywhere).
+   - `O3D_TRANSPORT_API_VERSION` is now **4**. `FO3DTransportStats` gained `State`, `SendErrors`, `ReceiveErrors`, `PendingFrames`, `PendingBytes` (mostly zero until step 4's shared queue fills them).
+   - Tests: `Open3DBroadcast.Shared.TransportResult.*`, `.ConnectionState.*`, `.TransportCapabilities.*`, `Open3DBroadcast.Transport.Results.*`, five new conformance cases, and the WebRTC add-on's `Results`/`State`/`Capabilities` tests.
+   - **Start here next: step 4.**
 4. **Shared building blocks, one transport per PR**, in order Loopback, TCP, UDP, NNG, MoQ, then WebRTC (in the add-on). Each PR deletes that transport's own queue, demux, sink and option-parsing copies and drops its Build.cs dependency on Open3DSender/Open3DReceiver. Control landed before this step, so each migration must also carry that transport's control path: the shared send queue needs the "control" item type that is never dropped for mocap (ADR 0007 item 7), and the shared demux should absorb `TryGetControlPayload` / `O3DTransport::DeliverControlEnvelope` (CTL-2/3).
 5. **Typed config and consumer API** (SHR-36, TRB-27, SHR-16, TRF-38): removes the LiveKit string fields from `FO3DTransportConfig`, deletes `Send(SubjectList)`.
-6. Next minor release: delete the shims and bump `O3D_TRANSPORT_API_VERSION` (to 4, or later if other steps bump it first).
+6. Next minor release: delete the shims and bump `O3D_TRANSPORT_API_VERSION` (to 5, or later if other steps bump it first; PR 3 took 4).
 
 WP-A1 acceptance (roadmap): conformance suite green after each migration, net transport LOC goes down, no transport keeps its own queue/demux/sink. ADR 0007 "Verification / acceptance" lists the extra test cases.
 

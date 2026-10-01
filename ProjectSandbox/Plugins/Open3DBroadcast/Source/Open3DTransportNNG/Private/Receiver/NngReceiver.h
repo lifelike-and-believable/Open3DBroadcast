@@ -6,6 +6,7 @@
 #include "Misc/ScopeLock.h"
 
 #include "Transport/O3DReceiverInterface.h"
+#include "Transport/O3DConnectionState.h"
 #include "Shared/NngHelpers.h"
 #include "O3DAudioFrameCodec.h"
 
@@ -30,15 +31,18 @@ public:
     FO3DNngReceiver();
     virtual ~FO3DNngReceiver() override;
 
-    virtual bool Initialize(const FO3DTransportConfig& Config) override;
+    virtual FO3DTransportResult Initialize(const FO3DTransportConfig& Config) override;
     virtual void SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer) override;
-    virtual bool Start() override;
+    virtual FO3DTransportResult Start() override;
     virtual void Stop() override;
     virtual int32 Poll() override;
     virtual FO3DTransportStats GetStats() const override;
-    virtual bool SupportsAudio() const override { return true; }
+    /** Depends on the mode the receiver was initialized with (sub: Unreliable; pair, pull: ReliableOrdered). */
+    virtual FO3DTransportCapabilities GetCapabilities() const override { return O3DNNG::GetCapabilitiesForMode(CapabilityMode.load()); }
+    /** Connecting until the first peer pipe exists, Connected while one does, Reconnecting after the last went away. Changes are reported from Poll (game thread). */
+    virtual EO3DConnectionState GetConnectionState() const override { return ConnectionState.Get(); }
+    virtual void SetStateChangedCallback(FO3DConnectionStateCallback Callback) override { ConnectionState.SetCallback(MoveTemp(Callback)); }
     virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
-    virtual bool SupportsControl() const override { return true; }
     virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink) override { ControlSink = Sink; }
 
     bool IsConnected() const { return PipeContext->bConnected.load(); }
@@ -50,8 +54,11 @@ private:
 
     struct FNngSocketWrapper;
 
-    bool OpenSocket();
+    /** OutNngError receives the NNG error code of a failed open, listen or dial. */
+    bool OpenSocket(int32* OutNngError = nullptr);
     void CloseSocket();
+    /** Poll (game thread): reports a change of "a peer pipe exists" to ConnectionState. */
+    void UpdateConnectionState();
     void HandleReceiveError(int ErrorCode);
     bool EnsureDialSocket();
     bool ProcessReceivedPayload(const uint8* Data, int32 Size);
@@ -84,5 +91,12 @@ private:
     int32 BackoffAttempt = 0;
     double LastErrorLogTimestamp = 0.0;
     constexpr static int32 FramesPerPoll = 16; // adjust to the polling budget you expect per tick
+
+    /** Mode the capabilities are reported for: Options.Mode as of the last Initialize. */
+    std::atomic<O3DNNG::ENngMode> CapabilityMode{ O3DNNG::ENngMode::Sub };
+    /** ADR 0007 item 3. */
+    FO3DConnectionStateTracker ConnectionState;
+    /** Game thread (Poll): whether a peer pipe existed at the last check. */
+    bool bSawPeer = false;
     
 };

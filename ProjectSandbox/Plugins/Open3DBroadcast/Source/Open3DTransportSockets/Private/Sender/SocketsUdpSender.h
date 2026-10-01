@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Transport/O3DSenderInterface.h"
+#include "Transport/O3DConnectionState.h"
 #include "../Shared/SocketsTransportCommon.h"
 #include "O3DAudioFrameCodec.h"
 #include "O3DEncodedPayloadQueue.h"
@@ -48,22 +49,24 @@ public:
 	FO3DSocketsUdpSender();
 	virtual ~FO3DSocketsUdpSender() override;
 
-	virtual bool Initialize(const FO3DTransportConfig& Config) override;
-	virtual bool Start() override;
+	virtual FO3DTransportResult Initialize(const FO3DTransportConfig& Config) override;
+	virtual FO3DTransportResult Start() override;
 	virtual void Stop() override;
 	virtual bool Send(const O3DS::SubjectList& List) override;
-	virtual bool SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec) override;
+	virtual EO3DSendResult SendSerialized(FO3DSendPayload&& Payload) override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual FO3DTransportStats GetStats() const override;
-	virtual bool SupportsAudio() const override;
+	virtual FO3DTransportCapabilities GetCapabilities() const override { return O3DSockets::GetUdpCapabilities(FO3DTransportConfig()); }
+	/** Connected from a successful Start (the socket exists) to Stop; UDP needs no peer. */
+	virtual EO3DConnectionState GetConnectionState() const override { return ConnectionState.Get(); }
+	virtual void SetStateChangedCallback(FO3DConnectionStateCallback Callback) override { ConnectionState.SetCallback(MoveTemp(Callback)); }
 	virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
-	virtual bool SupportsControl() const override { return true; }
-	virtual bool SendControl(const uint8* Envelope, int32 Len) override;
+	virtual EO3DSendResult SendControl(const uint8* Envelope, int32 Len) override;
 
 private:
 	bool ResolveRemoteAddress(const FString& Host, int32 Port);
 	bool ResolveAddress(const FString& Host, int32 Port, TSharedPtr<FInternetAddr>& OutAddr);
-	bool CreateSocket();
+	FO3DTransportResult CreateSocket();
 	void DestroySocket();
 	bool SendPayload(FSocket* InSocket, const TSharedPtr<FInternetAddr>& InAddr, const uint8* Data, int32 Size, const TCHAR* Context);
 	bool SendDatagram(FSocket* InSocket, const TSharedPtr<FInternetAddr>& InAddr, const uint8* Data, int32 Size, const TCHAR* Context);
@@ -105,6 +108,9 @@ private:
 	FUdpAudioRunnable* AudioWorker = nullptr;
 	FRunnableThread* AudioWorkerThread = nullptr;
 	std::atomic<bool> bStopAudioWorker{false};
+
+	/** ADR 0007 item 3. */
+	FO3DConnectionStateTracker ConnectionState;
 
 	TSharedRef<FSocketsUdpPublishState, ESPMode::ThreadSafe> PublishState;
 };

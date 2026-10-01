@@ -7,6 +7,7 @@
 #include "Misc/Guid.h"
 #include "Containers/StringConv.h"
 #include "O3DUnifiedMessage.h"
+#include "Transport/O3DTransportTypes.h"
 
 namespace WebRTCUtils
 {
@@ -54,6 +55,62 @@ namespace WebRTCUtils
             | (static_cast<uint32>(Bytes[2]) << 8) | static_cast<uint32>(Bytes[3]);
         return Magic == O3DS::FUnifiedHeader::MagicValueBE()
             && Bytes[5] == static_cast<uint8>(O3DS::EUnifiedKind::Control);
+    }
+
+    /** Sender option: send mocap on the lossy data channel when a frame fits it (ADR 0005 (iii)). */
+    static constexpr TCHAR PreferLossyOptionKey[] = TEXT("webrtc.prefer_lossy");
+
+    /** LiveKit data channel size guidance (livekit_ffi.h, lk_send_data_ex). */
+    static constexpr int32 LossyMaxDataBytes = 1300;
+    static constexpr int32 ReliableMaxDataBytes = 15000;
+
+    /** "1", "true" or "yes" (any case) is true, "0", "false" or "no" false, anything else DefaultValue. */
+    inline bool ParseBoolOption(const TMap<FString, FString>& Params, const TCHAR* Key, bool DefaultValue)
+    {
+        if (!Key)
+        {
+            return DefaultValue;
+        }
+
+        if (const FString* Value = Params.Find(Key))
+        {
+            if (Value->Equals(TEXT("1"), ESearchCase::IgnoreCase) ||
+                Value->Equals(TEXT("true"), ESearchCase::IgnoreCase) ||
+                Value->Equals(TEXT("yes"), ESearchCase::IgnoreCase))
+            {
+                return true;
+            }
+
+            if (Value->Equals(TEXT("0"), ESearchCase::IgnoreCase) ||
+                Value->Equals(TEXT("false"), ESearchCase::IgnoreCase) ||
+                Value->Equals(TEXT("no"), ESearchCase::IgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return DefaultValue;
+    }
+
+    /**
+     * Capabilities of the WebRTC transport for Config (ADR 0007 item 4). Delivery follows ADR 0005
+     * (iii): ReliableOrdered on the reliable data channel (pending ADR 0005 Q4), Unreliable when
+     * webrtc.prefer_lossy is set. A frame above ReliableMaxDataBytes is refused (TooLarge).
+     */
+    inline FO3DTransportCapabilities GetCapabilities(const FO3DTransportConfig& Config)
+    {
+        FO3DTransportCapabilities Caps;
+        Caps.bSend = true;
+        Caps.bReceive = true;
+        Caps.bAudioSend = true;
+        Caps.bAudioReceive = true;
+        Caps.bControl = true;
+        Caps.bBidirectional = true; // a LiveKit room carries data both ways; nothing uses it in v1
+        Caps.Delivery = ParseBoolOption(Config.AdvancedParams, PreferLossyOptionKey, /*DefaultValue=*/false)
+            ? EO3DDeliveryGuarantee::Unreliable
+            : EO3DDeliveryGuarantee::ReliableOrdered;
+        Caps.MaxPayloadBytes = ReliableMaxDataBytes;
+        return Caps;
     }
 
     /** Returns the resolved secret for Key, or an empty string. */

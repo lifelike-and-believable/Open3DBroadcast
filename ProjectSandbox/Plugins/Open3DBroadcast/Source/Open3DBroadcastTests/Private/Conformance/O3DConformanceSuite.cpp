@@ -23,6 +23,7 @@
 #include "O3DTestFakes.h"
 #include "O3DTestHarness.h"
 #include "O3DUnifiedMessage.h"
+#include "Transport/O3DConnectionState.h"
 #include "Transport/O3DTransportRegistry.h"
 
 #include <atomic>
@@ -53,7 +54,7 @@ namespace O3DConformanceSuite
 		{
 			for (int32 Index = 0; Index < Sends; ++Index)
 			{
-				if (Sender.SendSerialized(Payload.GetData(), Payload.Num(), TEXT("conformance"), static_cast<double>(Index)))
+				if (Sender.SendSerialized(FO3DSendPayload::MakeCopy(Payload.GetData(), Payload.Num(), TEXT("conformance"), static_cast<double>(Index))) == EO3DSendResult::Queued)
 				{
 					Accepted.fetch_add(1);
 				}
@@ -137,7 +138,7 @@ namespace O3DConformanceSuite
 			for (int32 Sent = 0; Sent < MaxControlSendsPerThread && !bStop.load(); ++Sent)
 			{
 				const double Start = FPlatformTime::Seconds();
-				const bool bAccepted = Sender.SendControl(Envelope.GetData(), Envelope.Num());
+				const bool bAccepted = Sender.SendControl(Envelope.GetData(), Envelope.Num()) == EO3DSendResult::Queued;
 				if (FPlatformTime::Seconds() - Start > MaxNonBlockingSendSeconds)
 				{
 					Blocked.fetch_add(1);
@@ -248,8 +249,8 @@ namespace O3DConformanceSuite
 		}
 		Pair.Probe = ProbeFrames[0];
 
-		if (!Test.TestTrue(TEXT("Sender initializes"), Pair.Sender->Initialize(SenderConfig))
-			|| !Test.TestTrue(TEXT("Receiver initializes"), Pair.Receiver->Initialize(Fixture.MakeReceiverConfig())))
+		if (!Test.TestTrue(TEXT("Sender initializes"), Pair.Sender->Initialize(SenderConfig).IsOk())
+			|| !Test.TestTrue(TEXT("Receiver initializes"), Pair.Receiver->Initialize(Fixture.MakeReceiverConfig()).IsOk()))
 		{
 			return false;
 		}
@@ -258,7 +259,7 @@ namespace O3DConformanceSuite
 		{
 			Pair.Receiver->SetControlSink(ControlSink); // before Start, as the interface requires
 		}
-		if (!Test.TestTrue(TEXT("Sender starts"), Pair.Sender->Start()) || !Test.TestTrue(TEXT("Receiver starts"), Pair.Receiver->Start()))
+		if (!Test.TestTrue(TEXT("Sender starts"), Pair.Sender->Start().IsOk()) || !Test.TestTrue(TEXT("Receiver starts"), Pair.Receiver->Start().IsOk()))
 		{
 			return false;
 		}
@@ -273,10 +274,74 @@ namespace O3DConformanceSuite
 				if (Now >= NextProbe)
 				{
 					NextProbe = Now + ProbeIntervalSeconds;
-					Pair.Sender->SendSerialized(Pair.Probe.GetData(), Pair.Probe.Num(), TEXT("probe"), Now);
+					Pair.Sender->SendSerialized(FO3DSendPayload::MakeCopy(Pair.Probe.GetData(), Pair.Probe.Num(), TEXT("probe"), Now));
 				}
 			});
 		return Test.TestTrue(TEXT("Sender and receiver exchange a probe frame"), bConnected);
+	}
+
+	/** Checks a send result with a message that names both values. */
+	void ExpectSendResult(FAutomationTestBase& Test, const TCHAR* What, EO3DSendResult Actual, EO3DSendResult Expected)
+	{
+		Test.TestTrue(*FString::Printf(TEXT("%s returns %s (got %s)"), What, LexToString(Expected), LexToString(Actual)), Actual == Expected);
+	}
+
+	/** Records every connection-state callback: the state, the reason and whether it ran on the game thread. Thread-safe. */
+	struct FStateRecorder : public TSharedFromThis<FStateRecorder, ESPMode::ThreadSafe>
+	{
+		struct FEntry
+		{
+			EO3DConnectionState State = EO3DConnectionState::Idle;
+			EO3DTransportError Code = EO3DTransportError::None;
+			bool bOnGameThread = false;
+		};
+
+		FO3DConnectionStateCallback MakeCallback()
+		{
+			// Weak, so a callback that outlives the test cannot touch a destroyed recorder.
+			const TWeakPtr<FStateRecorder, ESPMode::ThreadSafe> Weak = AsShared();
+			return [Weak](EO3DConnectionState State, const FO3DTransportResult& Reason)
+			{
+				if (const TSharedPtr<FStateRecorder, ESPMode::ThreadSafe> Pinned = Weak.Pin())
+				{
+					FScopeLock Lock(&Pinned->Mutex);
+					FEntry Entry;
+					Entry.State = State;
+					Entry.Code = Reason.Code;
+					Entry.bOnGameThread = IsInGameThread();
+					Pinned->Entries.Add(Entry);
+				}
+			};
+		}
+
+		TArray<FEntry> Get() const
+		{
+			FScopeLock Lock(&Mutex);
+			return Entries;
+		}
+
+		int32 Num() const
+		{
+			FScopeLock Lock(&Mutex);
+			return Entries.Num();
+		}
+
+		mutable FCriticalSection Mutex;
+		TArray<FEntry> Entries;
+	};
+
+	/** The last recorded state matches GetConnectionState() and GetStats().State. */
+	template <typename TInstance>
+	void ExpectStateConsistent(FAutomationTestBase& Test, const TCHAR* Who, const TInstance& Instance, const FStateRecorder& Recorder)
+	{
+		const EO3DConnectionState Now = Instance.GetConnectionState();
+		Test.TestTrue(*FString::Printf(TEXT("%s: Stats.State matches GetConnectionState (%s)"), Who, LexToString(Now)), Instance.GetStats().State == Now);
+		const TArray<FStateRecorder::FEntry> Entries = Recorder.Get();
+		if (Entries.Num() > 0)
+		{
+			Test.TestTrue(*FString::Printf(TEXT("%s: the last callback reported the current state (%s, last %s)"), Who, LexToString(Now), LexToString(Entries.Last().State)),
+				Entries.Last().State == Now);
+		}
 	}
 
 	// ── Cases ────────────────────────────────────────────────────────────────────────────
@@ -299,8 +364,8 @@ namespace O3DConformanceSuite
 		{
 			return false;
 		}
-		Test.TestTrue(TEXT("Initialize"), Sender->Initialize(Fixture.MakeSenderConfig()));
-		Test.TestTrue(TEXT("Start"), Sender->Start());
+		Test.TestTrue(TEXT("Initialize"), Sender->Initialize(Fixture.MakeSenderConfig()).IsOk());
+		Test.TestTrue(TEXT("Start"), Sender->Start().IsOk());
 		Fixture.Pump();
 		Sender->Stop();
 		Sender->Stop();
@@ -308,7 +373,7 @@ namespace O3DConformanceSuite
 
 		const TArray<uint8> Payload = MakePayload();
 		const FO3DTransportStats Before = Sender->GetStats();
-		Test.TestFalse(TEXT("SendSerialized after Stop is rejected"), Sender->SendSerialized(Payload.GetData(), Payload.Num(), TEXT("stopped"), 0.0));
+		ExpectSendResult(Test, TEXT("SendSerialized after Stop"), Sender->SendSerialized(FO3DSendPayload::MakeCopy(Payload.GetData(), Payload.Num(), TEXT("stopped"), 0.0)), EO3DSendResult::NotRunning);
 		Test.TestEqual(TEXT("No frame counted as sent after Stop"), Sender->GetStats().FramesSent, Before.FramesSent);
 		Sender.Reset();
 		Fixture.Pump();
@@ -323,19 +388,19 @@ namespace O3DConformanceSuite
 			return false;
 		}
 		const FO3DTransportConfig Config = Fixture.MakeSenderConfig();
-		Test.TestTrue(TEXT("Initialize"), Sender->Initialize(Config));
-		Test.TestTrue(TEXT("Start"), Sender->Start());
+		Test.TestTrue(TEXT("Initialize"), Sender->Initialize(Config).IsOk());
+		Test.TestTrue(TEXT("Start"), Sender->Start().IsOk());
 		Fixture.Pump();
 		Sender->Stop();
 		Fixture.Pump();
 
-		Test.TestTrue(TEXT("Start after Stop without Initialize"), Sender->Start());
+		Test.TestTrue(TEXT("Start after Stop without Initialize"), Sender->Start().IsOk());
 		Fixture.Pump();
 		Sender->Stop();
 		Fixture.Pump();
 
-		Test.TestTrue(TEXT("Initialize after Stop"), Sender->Initialize(Config));
-		Test.TestTrue(TEXT("Start after re-Initialize"), Sender->Start());
+		Test.TestTrue(TEXT("Initialize after Stop"), Sender->Initialize(Config).IsOk());
+		Test.TestTrue(TEXT("Start after re-Initialize"), Sender->Start().IsOk());
 		Fixture.Pump();
 		Sender->Stop();
 		Sender.Reset();
@@ -352,10 +417,10 @@ namespace O3DConformanceSuite
 		}
 		const TSharedPtr<FO3DRecordingFrameConsumer> Consumer = MakeShared<FO3DRecordingFrameConsumer>();
 		Receiver->Stop(); // before Initialize: harmless
-		Test.TestTrue(TEXT("Initialize"), Receiver->Initialize(Fixture.MakeReceiverConfig()));
+		Test.TestTrue(TEXT("Initialize"), Receiver->Initialize(Fixture.MakeReceiverConfig()).IsOk());
 		Receiver->SetConsumer(Consumer);
 		Test.TestEqual(TEXT("Poll before Start delivers nothing"), Receiver->Poll(), 0);
-		Test.TestTrue(TEXT("Start"), Receiver->Start());
+		Test.TestTrue(TEXT("Start"), Receiver->Start().IsOk());
 		Fixture.Pump();
 		Receiver->Poll();
 		Receiver->Stop();
@@ -376,9 +441,9 @@ namespace O3DConformanceSuite
 			return false;
 		}
 		const TArray<uint8> Payload = MakePayload();
-		Test.TestFalse(TEXT("SendSerialized before Initialize is rejected"), Sender->SendSerialized(Payload.GetData(), Payload.Num(), TEXT("early"), 0.0));
-		Test.TestTrue(TEXT("Initialize"), Sender->Initialize(Fixture.MakeSenderConfig()));
-		Test.TestFalse(TEXT("SendSerialized before Start is rejected"), Sender->SendSerialized(Payload.GetData(), Payload.Num(), TEXT("early"), 0.0));
+		ExpectSendResult(Test, TEXT("SendSerialized before Initialize"), Sender->SendSerialized(FO3DSendPayload::MakeCopy(Payload.GetData(), Payload.Num(), TEXT("early"), 0.0)), EO3DSendResult::NotRunning);
+		Test.TestTrue(TEXT("Initialize"), Sender->Initialize(Fixture.MakeSenderConfig()).IsOk());
+		ExpectSendResult(Test, TEXT("SendSerialized before Start"), Sender->SendSerialized(FO3DSendPayload::MakeCopy(Payload.GetData(), Payload.Num(), TEXT("early"), 0.0)), EO3DSendResult::NotRunning);
 		Test.TestEqual(TEXT("No frame counted as sent"), Sender->GetStats().FramesSent, static_cast<int64>(0));
 		Sender->Stop();
 		Sender.Reset();
@@ -407,8 +472,8 @@ namespace O3DConformanceSuite
 		{
 			Sender = Fixture.CreateSender();
 			if (!Test.TestTrue(TEXT("Sender created"), Sender.IsValid())
-				|| !Test.TestTrue(TEXT("Initialize"), Sender->Initialize(Fixture.MakeBackpressureSenderConfig()))
-				|| !Test.TestTrue(TEXT("Start"), Sender->Start()))
+				|| !Test.TestTrue(TEXT("Initialize"), Sender->Initialize(Fixture.MakeBackpressureSenderConfig()).IsOk())
+				|| !Test.TestTrue(TEXT("Start"), Sender->Start().IsOk()))
 			{
 				return false;
 			}
@@ -418,19 +483,27 @@ namespace O3DConformanceSuite
 		const TArray<uint8> Payload = MakePayloadOfSize(Profile.BackpressurePayloadBytes);
 		const FO3DTransportStats Before = Sender->GetStats();
 		int32 Rejected = 0;
+		int32 RejectedOther = 0;
+		EO3DSendResult FirstOther = EO3DSendResult::Queued;
 		double SlowestSend = 0.0;
 		for (int32 Index = 0; Index < FMath::Max(1, Profile.BackpressureSendCount); ++Index)
 		{
 			const double Start = FPlatformTime::Seconds();
-			if (!Sender->SendSerialized(Payload.GetData(), Payload.Num(), TEXT("backpressure"), Start))
+			const EO3DSendResult Result = Sender->SendSerialized(FO3DSendPayload::MakeCopy(Payload.GetData(), Payload.Num(), TEXT("backpressure"), Start));
+			if (Result == EO3DSendResult::DroppedBackpressure)
 			{
 				++Rejected;
+			}
+			else if (Result != EO3DSendResult::Queued && RejectedOther++ == 0)
+			{
+				FirstOther = Result;
 			}
 			SlowestSend = FMath::Max(SlowestSend, FPlatformTime::Seconds() - Start);
 		}
 		const FO3DTransportStats After = Sender->GetStats();
 
-		Test.TestTrue(TEXT("At least one send was dropped"), Rejected > 0);
+		Test.TestTrue(TEXT("At least one send was dropped with DroppedBackpressure"), Rejected > 0);
+		Test.TestEqual(*FString::Printf(TEXT("Every refused send returned DroppedBackpressure (first other result: %s)"), LexToString(FirstOther)), RejectedOther, 0);
 		Test.TestTrue(*FString::Printf(TEXT("DroppedFrames grew by the drops (%lld -> %lld, %d rejected)"), Before.DroppedFrames, After.DroppedFrames, Rejected),
 			After.DroppedFrames - Before.DroppedFrames >= Rejected && Rejected > 0);
 		Test.TestTrue(*FString::Printf(TEXT("No send blocked (slowest %.3f s)"), SlowestSend), SlowestSend < MaxNonBlockingSendSeconds);
@@ -449,8 +522,8 @@ namespace O3DConformanceSuite
 	{
 		TSharedPtr<IOpen3DSender> Sender = Fixture.CreateSender();
 		if (!Test.TestTrue(TEXT("Sender created"), Sender.IsValid())
-			|| !Test.TestTrue(TEXT("Initialize"), Sender->Initialize(Fixture.MakeSenderConfig()))
-			|| !Test.TestTrue(TEXT("Start"), Sender->Start()))
+			|| !Test.TestTrue(TEXT("Initialize"), Sender->Initialize(Fixture.MakeSenderConfig()).IsOk())
+			|| !Test.TestTrue(TEXT("Start"), Sender->Start().IsOk()))
 		{
 			return false;
 		}
@@ -549,7 +622,7 @@ namespace O3DConformanceSuite
 			// A transient full queue is backpressure, not loss: retry until accepted or the deadline.
 			const TArray<uint8>& Frame = Recorded[Index];
 			const bool bQueued = O3DTests::PollUntil(Profile.ConnectTimeoutSeconds,
-				[&Pair, &Frame, Index]() { return Pair.Sender->SendSerialized(Frame.GetData(), Frame.Num(), TEXT("ConformanceActor"), static_cast<double>(Index)); },
+				[&Pair, &Frame, Index]() { return Pair.Sender->SendSerialized(FO3DSendPayload::MakeCopy(Frame.GetData(), Frame.Num(), TEXT("ConformanceActor"), static_cast<double>(Index))) == EO3DSendResult::Queued; },
 				[&Pair]() { Pair.Pump(); });
 			if (!Test.TestTrue(*FString::Printf(TEXT("Frame %d accepted"), Index), bQueued))
 			{
@@ -597,8 +670,8 @@ namespace O3DConformanceSuite
 		{
 			return false;
 		}
-		if (!Test.TestTrue(TEXT("Sender supports control"), Pair.Sender->SupportsControl())
-			|| !Test.TestTrue(TEXT("Receiver supports control"), Pair.Receiver->SupportsControl()))
+		if (!Test.TestTrue(TEXT("Sender supports control"), Pair.Sender->GetCapabilities().bControl)
+			|| !Test.TestTrue(TEXT("Receiver supports control"), Pair.Receiver->GetCapabilities().bControl))
 		{
 			return false;
 		}
@@ -616,7 +689,7 @@ namespace O3DConformanceSuite
 		{
 			const TArray<uint8>& Frame = Recorded[Index];
 			const bool bFrameQueued = O3DTests::PollUntil(Profile.ConnectTimeoutSeconds,
-				[&Pair, &Frame, Index]() { return Pair.Sender->SendSerialized(Frame.GetData(), Frame.Num(), TEXT("ConformanceActor"), static_cast<double>(Index)); },
+				[&Pair, &Frame, Index]() { return Pair.Sender->SendSerialized(FO3DSendPayload::MakeCopy(Frame.GetData(), Frame.Num(), TEXT("ConformanceActor"), static_cast<double>(Index))) == EO3DSendResult::Queued; },
 				[&Pair]() { Pair.Pump(); });
 			if (!Test.TestTrue(*FString::Printf(TEXT("Frame %d accepted"), Index), bFrameQueued))
 			{
@@ -627,7 +700,7 @@ namespace O3DConformanceSuite
 				const int32 ControlIndex = SentControl.Num();
 				const TArray<uint8> Envelope = MakeControlEnvelope(ControlIndex);
 				const bool bControlQueued = O3DTests::PollUntil(Profile.ConnectTimeoutSeconds,
-					[&Pair, &Envelope]() { return Pair.Sender->SendControl(Envelope.GetData(), Envelope.Num()); },
+					[&Pair, &Envelope]() { return Pair.Sender->SendControl(Envelope.GetData(), Envelope.Num()) == EO3DSendResult::Queued; },
 					[&Pair]() { Pair.Pump(); });
 				if (!Test.TestTrue(*FString::Printf(TEXT("Control %d accepted"), ControlIndex), bControlQueued))
 				{
@@ -683,20 +756,20 @@ namespace O3DConformanceSuite
 	bool RunControlRejectedWhenNotRunning(FAutomationTestBase& Test, const FO3DConformanceProfile&, FO3DConformanceFixture& Fixture)
 	{
 		TSharedPtr<IOpen3DSender> Sender = Fixture.CreateSender();
-		if (!Test.TestTrue(TEXT("Sender created"), Sender.IsValid()) || !Test.TestTrue(TEXT("Sender supports control"), Sender->SupportsControl()))
+		if (!Test.TestTrue(TEXT("Sender created"), Sender.IsValid()) || !Test.TestTrue(TEXT("Sender supports control"), Sender->GetCapabilities().bControl))
 		{
 			return false;
 		}
 		const TArray<uint8> Envelope = MakeControlEnvelope(0);
-		Test.TestFalse(TEXT("SendControl before Initialize is rejected"), Sender->SendControl(Envelope.GetData(), Envelope.Num()));
-		Test.TestTrue(TEXT("Initialize"), Sender->Initialize(Fixture.MakeSenderConfig()));
-		Test.TestFalse(TEXT("SendControl before Start is rejected"), Sender->SendControl(Envelope.GetData(), Envelope.Num()));
-		Test.TestTrue(TEXT("Start"), Sender->Start());
+		ExpectSendResult(Test, TEXT("SendControl before Initialize"), Sender->SendControl(Envelope.GetData(), Envelope.Num()), EO3DSendResult::NotRunning);
+		Test.TestTrue(TEXT("Initialize"), Sender->Initialize(Fixture.MakeSenderConfig()).IsOk());
+		ExpectSendResult(Test, TEXT("SendControl before Start"), Sender->SendControl(Envelope.GetData(), Envelope.Num()), EO3DSendResult::NotRunning);
+		Test.TestTrue(TEXT("Start"), Sender->Start().IsOk());
 		Fixture.Pump();
-		Sender->Stop();
-		Test.TestFalse(TEXT("SendControl after Stop is rejected"), Sender->SendControl(Envelope.GetData(), Envelope.Num()));
 		const TArray<uint8> Frame = MakePayload();
-		Test.TestFalse(TEXT("Bytes that are not a control envelope are rejected"), Sender->SendControl(Frame.GetData(), Frame.Num()));
+		ExpectSendResult(Test, TEXT("SendControl with bytes that are not a control envelope"), Sender->SendControl(Frame.GetData(), Frame.Num()), EO3DSendResult::Invalid);
+		Sender->Stop();
+		ExpectSendResult(Test, TEXT("SendControl after Stop"), Sender->SendControl(Envelope.GetData(), Envelope.Num()), EO3DSendResult::NotRunning);
 		Test.TestEqual(TEXT("No frame counted as sent"), Sender->GetStats().FramesSent, static_cast<int64>(0));
 		Sender.Reset();
 		Fixture.Pump();
@@ -710,8 +783,8 @@ namespace O3DConformanceSuite
 		{
 			TSharedPtr<IOpen3DSender> Sender = Fixture.CreateSender();
 			if (!Test.TestTrue(TEXT("Sender created"), Sender.IsValid())
-				|| !Test.TestTrue(TEXT("Initialize"), Sender->Initialize(Fixture.MakeSenderConfig()))
-				|| !Test.TestTrue(TEXT("Start"), Sender->Start()))
+				|| !Test.TestTrue(TEXT("Initialize"), Sender->Initialize(Fixture.MakeSenderConfig()).IsOk())
+				|| !Test.TestTrue(TEXT("Start"), Sender->Start().IsOk()))
 			{
 				return false;
 			}
@@ -758,10 +831,213 @@ namespace O3DConformanceSuite
 			}
 			Test.TestTrue(TEXT("The send threads made calls"), Calls > 0);
 			Test.TestEqual(TEXT("No SendControl call blocked"), Blocked, 0);
-			Test.TestFalse(TEXT("SendControl after Stop is rejected"), Sender->SendControl(Envelope.GetData(), Envelope.Num()));
+			ExpectSendResult(Test, TEXT("SendControl after Stop"), Sender->SendControl(Envelope.GetData(), Envelope.Num()), EO3DSendResult::NotRunning);
 			Sender.Reset();
 			Fixture.Pump();
 		}
+		return true;
+	}
+
+	bool RunReceiverStartWithoutConsumer(FAutomationTestBase& Test, const FO3DConformanceProfile&, FO3DConformanceFixture& Fixture)
+	{
+		TSharedPtr<IOpen3DReceiver> Receiver = Fixture.CreateReceiver();
+		if (!Test.TestTrue(TEXT("Receiver created"), Receiver.IsValid()))
+		{
+			return false;
+		}
+		const FO3DTransportResult NotInitialized = Receiver->Start();
+		Test.TestTrue(*FString::Printf(TEXT("Start before Initialize returns NotRunning (got %s)"), *LexToString(NotInitialized)), NotInitialized.Code == EO3DTransportError::NotRunning);
+		Test.TestTrue(TEXT("Initialize"), Receiver->Initialize(Fixture.MakeReceiverConfig()).IsOk());
+		const FO3DTransportResult Result = Receiver->Start();
+		Test.TestTrue(*FString::Printf(TEXT("Start without a consumer returns NoConsumer (got %s)"), *LexToString(Result)), Result.Code == EO3DTransportError::NoConsumer);
+		Test.TestFalse(TEXT("The NoConsumer result is not Ok"), Result.IsOk());
+		Test.TestFalse(TEXT("NoConsumer carries a message"), Result.Message.IsEmpty());
+		Test.TestTrue(TEXT("The state stays Idle"), Receiver->GetConnectionState() == EO3DConnectionState::Idle);
+		Fixture.Pump();
+		Test.TestEqual(TEXT("Poll delivers nothing"), Receiver->Poll(), 0);
+
+		// A consumer set afterwards lets the same instance start.
+		const TSharedPtr<FO3DRecordingFrameConsumer> Consumer = MakeShared<FO3DRecordingFrameConsumer>();
+		Receiver->SetConsumer(Consumer);
+		Test.TestTrue(TEXT("Start with a consumer succeeds"), Receiver->Start().IsOk());
+		Fixture.Pump();
+		Receiver->Stop();
+		Receiver.Reset();
+		Fixture.Pump();
+		return true;
+	}
+
+	bool RunSendEmptyPayloadInvalid(FAutomationTestBase& Test, const FO3DConformanceProfile&, FO3DConformanceFixture& Fixture)
+	{
+		TSharedPtr<IOpen3DSender> Sender = Fixture.CreateSender();
+		if (!Test.TestTrue(TEXT("Sender created"), Sender.IsValid())
+			|| !Test.TestTrue(TEXT("Initialize"), Sender->Initialize(Fixture.MakeSenderConfig()).IsOk())
+			|| !Test.TestTrue(TEXT("Start"), Sender->Start().IsOk()))
+		{
+			return false;
+		}
+		Fixture.Pump();
+		const FO3DTransportStats Before = Sender->GetStats();
+		ExpectSendResult(Test, TEXT("SendSerialized with an empty payload"), Sender->SendSerialized(FO3DSendPayload()), EO3DSendResult::Invalid);
+		const FO3DTransportStats After = Sender->GetStats();
+		Test.TestEqual(TEXT("No frame counted as sent"), After.FramesSent, Before.FramesSent);
+		Test.TestEqual(TEXT("No frame counted as dropped"), After.DroppedFrames, Before.DroppedFrames);
+		Sender->Stop();
+		Sender.Reset();
+		Fixture.Pump();
+		return true;
+	}
+
+	FString DescribeCapabilities(const FO3DTransportCapabilities& Caps)
+	{
+		return FString::Printf(TEXT("[send=%d receive=%d audioSend=%d audioReceive=%d control=%d bidirectional=%d peerJoin=%d delivery=%s maxPayload=%d]"),
+			Caps.bSend ? 1 : 0, Caps.bReceive ? 1 : 0, Caps.bAudioSend ? 1 : 0, Caps.bAudioReceive ? 1 : 0, Caps.bControl ? 1 : 0,
+			Caps.bBidirectional ? 1 : 0, Caps.bPeerJoinSignal ? 1 : 0, LexToString(Caps.Delivery), Caps.MaxPayloadBytes);
+	}
+
+	void ExpectCapabilities(FAutomationTestBase& Test, const TCHAR* Who, const FO3DTransportCapabilities& Actual, const FO3DTransportCapabilities& Expected)
+	{
+		Test.TestTrue(*FString::Printf(TEXT("%s reports %s (expected %s)"), Who, *DescribeCapabilities(Actual), *DescribeCapabilities(Expected)), Actual == Expected);
+	}
+
+	bool RunCapabilitiesMatch(FAutomationTestBase& Test, const FO3DConformanceProfile& Profile, FO3DConformanceFixture& Fixture)
+	{
+		const FO3DTransportConfig SenderConfig = Fixture.MakeSenderConfig();
+		const FO3DTransportConfig ReceiverConfig = Fixture.MakeReceiverConfig();
+		const FO3DTransportCapabilities& Expected = Profile.ExpectedCapabilities;
+
+		TSharedPtr<IOpen3DSender> Sender = Fixture.CreateSender();
+		TSharedPtr<IOpen3DReceiver> Receiver = Fixture.CreateReceiver();
+		if (!Test.TestTrue(TEXT("Sender created"), Sender.IsValid()) || !Test.TestTrue(TEXT("Receiver created"), Receiver.IsValid()))
+		{
+			return false;
+		}
+		Test.TestTrue(TEXT("Sender initializes"), Sender->Initialize(SenderConfig).IsOk());
+		Test.TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(ReceiverConfig).IsOk());
+
+		ExpectCapabilities(Test, TEXT("Sender"), Sender->GetCapabilities(), Expected);
+		ExpectCapabilities(Test, TEXT("Receiver"), Receiver->GetCapabilities(), Expected);
+		// The deprecated queries forward to the capabilities (ADR 0011 item 6).
+		Test.TestTrue(TEXT("Sender SupportsControl() forwards to bControl"), Sender->SupportsControl() == Expected.bControl);
+		Test.TestTrue(TEXT("Sender SupportsAudio() forwards to bAudioSend"), Sender->SupportsAudio() == Expected.bAudioSend);
+		Test.TestTrue(TEXT("Receiver SupportsControl() forwards to bControl"), Receiver->SupportsControl() == Expected.bControl);
+		Test.TestTrue(TEXT("Receiver SupportsAudio() forwards to bAudioReceive"), Receiver->SupportsAudio() == Expected.bAudioReceive);
+
+		// The descriptor answers for a config without an instance (the details panel's question).
+		FO3DTransportCapabilities FromDescriptor;
+		if (FO3DTransportRegistry::Get().GetCapabilities(Fixture.GetTransportName(), SenderConfig, FromDescriptor))
+		{
+			ExpectCapabilities(Test, TEXT("The registered descriptor (sender config)"), FromDescriptor, Expected);
+			FO3DTransportRegistry::Get().GetCapabilities(Fixture.GetTransportName(), ReceiverConfig, FromDescriptor);
+			ExpectCapabilities(Test, TEXT("The registered descriptor (receiver config)"), FromDescriptor, Expected);
+		}
+		else
+		{
+			Test.AddInfo(FString::Printf(TEXT("'%s' is not registered in this run; only the instances were checked."), *Fixture.GetTransportName().ToString()));
+		}
+
+		Sender->Stop();
+		Receiver->Stop();
+		Sender.Reset();
+		Receiver.Reset();
+		Fixture.Pump();
+		return true;
+	}
+
+	/** Start and Stop one instance with a recorder, checking the ADR 0007 item 3 rules. */
+	template <typename TInstance, typename TStart>
+	void CheckStartStopStates(FAutomationTestBase& Test, const TCHAR* Who, TInstance& Instance, FO3DConformanceFixture& Fixture, TStart&& StartInstance)
+	{
+		const TSharedRef<FStateRecorder, ESPMode::ThreadSafe> Recorder = MakeShared<FStateRecorder, ESPMode::ThreadSafe>();
+		Instance.SetStateChangedCallback(Recorder->MakeCallback());
+		Test.TestTrue(*FString::Printf(TEXT("%s: Idle before Start"), Who), Instance.GetConnectionState() == EO3DConnectionState::Idle);
+		Test.TestTrue(*FString::Printf(TEXT("%s: Stats.State is Idle before Start"), Who), Instance.GetStats().State == EO3DConnectionState::Idle);
+
+		Test.TestTrue(*FString::Printf(TEXT("%s: Start"), Who), StartInstance().IsOk());
+		const EO3DConnectionState AfterStart = Instance.GetConnectionState();
+		const TArray<FStateRecorder::FEntry> StartEntries = Recorder->Get();
+		Test.TestTrue(*FString::Printf(TEXT("%s: Connecting or Connected after Start (got %s)"), Who, LexToString(AfterStart)),
+			AfterStart == EO3DConnectionState::Connecting || AfterStart == EO3DConnectionState::Connected);
+		if (Test.TestTrue(*FString::Printf(TEXT("%s: Start reported its change before returning"), Who), StartEntries.Num() > 0))
+		{
+			Test.TestTrue(*FString::Printf(TEXT("%s: the Start change ran on the calling (game) thread"), Who), StartEntries[0].bOnGameThread);
+			Test.TestTrue(*FString::Printf(TEXT("%s: the first change left Idle"), Who), StartEntries[0].State != EO3DConnectionState::Idle);
+		}
+		Fixture.Pump();
+		ExpectStateConsistent(Test, Who, Instance, *Recorder);
+
+		Instance.Stop();
+		const TArray<FStateRecorder::FEntry> StopEntries = Recorder->Get();
+		Test.TestTrue(*FString::Printf(TEXT("%s: Idle after Stop"), Who), Instance.GetConnectionState() == EO3DConnectionState::Idle);
+		if (Test.TestTrue(*FString::Printf(TEXT("%s: Stop reported its change before returning"), Who), StopEntries.Num() > StartEntries.Num()))
+		{
+			Test.TestTrue(*FString::Printf(TEXT("%s: Stop reported Idle"), Who), StopEntries.Last().State == EO3DConnectionState::Idle);
+			Test.TestTrue(*FString::Printf(TEXT("%s: the Stop change ran on the calling (game) thread"), Who), StopEntries.Last().bOnGameThread);
+		}
+
+		// Nothing is reported after Stop, whatever the transport's threads still do.
+		const double Until = FPlatformTime::Seconds() + 0.2;
+		while (FPlatformTime::Seconds() < Until)
+		{
+			Fixture.Pump();
+			FPlatformProcess::YieldThread();
+		}
+		Test.TestEqual(*FString::Printf(TEXT("%s: no callback after Stop returned"), Who), Recorder->Num(), StopEntries.Num());
+		Instance.Stop();
+		Test.TestEqual(*FString::Printf(TEXT("%s: a second Stop reports nothing"), Who), Recorder->Num(), StopEntries.Num());
+		ExpectStateConsistent(Test, Who, Instance, *Recorder);
+		Instance.SetStateChangedCallback(nullptr);
+	}
+
+	bool RunConnectionStateLifecycle(FAutomationTestBase& Test, const FO3DConformanceProfile&, FO3DConformanceFixture& Fixture)
+	{
+		{
+			TSharedPtr<IOpen3DSender> Sender = Fixture.CreateSender();
+			if (!Test.TestTrue(TEXT("Sender created"), Sender.IsValid())
+				|| !Test.TestTrue(TEXT("Sender initializes"), Sender->Initialize(Fixture.MakeSenderConfig()).IsOk()))
+			{
+				return false;
+			}
+			CheckStartStopStates(Test, TEXT("Sender"), *Sender, Fixture, [&Sender]() { return Sender->Start(); });
+			Sender.Reset();
+			Fixture.Pump();
+		}
+		{
+			TSharedPtr<IOpen3DReceiver> Receiver = Fixture.CreateReceiver();
+			if (!Test.TestTrue(TEXT("Receiver created"), Receiver.IsValid())
+				|| !Test.TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(Fixture.MakeReceiverConfig()).IsOk()))
+			{
+				return false;
+			}
+			const TSharedPtr<FO3DRecordingFrameConsumer> Consumer = MakeShared<FO3DRecordingFrameConsumer>();
+			Receiver->SetConsumer(Consumer);
+			CheckStartStopStates(Test, TEXT("Receiver"), *Receiver, Fixture, [&Receiver]() { return Receiver->Start(); });
+			Receiver.Reset();
+			Fixture.Pump();
+		}
+		return true;
+	}
+
+	bool RunConnectionStateConnected(FAutomationTestBase& Test, const FO3DConformanceProfile& Profile, FO3DConformanceFixture& Fixture)
+	{
+		FConnectedPair Pair;
+		if (!Connect(Test, Profile, Fixture, Fixture.MakeSenderConfig(), Pair))
+		{
+			return false;
+		}
+		// Peers are reported by the transport's own threads (an accept, a pipe event, an FFI
+		// callback) or by Poll and Tick, so allow for a few pumps.
+		const bool bBothConnected = O3DTests::PollUntil(Profile.ConnectTimeoutSeconds,
+			[&Pair]()
+			{
+				return Pair.Sender->GetConnectionState() == EO3DConnectionState::Connected
+					&& Pair.Receiver->GetConnectionState() == EO3DConnectionState::Connected;
+			},
+			[&Pair]() { Pair.Pump(); });
+		Test.TestTrue(*FString::Printf(TEXT("Sender (%s) and receiver (%s) are Connected after a frame went through"),
+			LexToString(Pair.Sender->GetConnectionState()), LexToString(Pair.Receiver->GetConnectionState())), bBothConnected);
+		Test.TestTrue(TEXT("Sender Stats.State is Connected"), Pair.Sender->GetStats().State == EO3DConnectionState::Connected);
+		Test.TestTrue(TEXT("Receiver Stats.State is Connected"), Pair.Receiver->GetStats().State == EO3DConnectionState::Connected);
 		return true;
 	}
 
@@ -781,6 +1057,11 @@ namespace O3DConformanceSuite
 		case EO3DConformanceCase::ControlRoundTrip: return RunControlRoundTrip(Test, Profile, Fixture);
 		case EO3DConformanceCase::ControlRejectedWhenNotRunning: return RunControlRejectedWhenNotRunning(Test, Profile, Fixture);
 		case EO3DConformanceCase::ControlStopWhileSending: return RunControlStopWhileSending(Test, Profile, Fixture);
+		case EO3DConformanceCase::ReceiverStartWithoutConsumer: return RunReceiverStartWithoutConsumer(Test, Profile, Fixture);
+		case EO3DConformanceCase::SendEmptyPayloadInvalid: return RunSendEmptyPayloadInvalid(Test, Profile, Fixture);
+		case EO3DConformanceCase::CapabilitiesMatch: return RunCapabilitiesMatch(Test, Profile, Fixture);
+		case EO3DConformanceCase::ConnectionStateLifecycle: return RunConnectionStateLifecycle(Test, Profile, Fixture);
+		case EO3DConformanceCase::ConnectionStateConnected: return RunConnectionStateConnected(Test, Profile, Fixture);
 		default:
 			Test.AddError(TEXT("Unknown conformance case"));
 			return false;

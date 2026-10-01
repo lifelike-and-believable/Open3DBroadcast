@@ -160,8 +160,8 @@ bool FMoQSenderReconnectReannounceTest::RunTest(const FString& Parameters)
 	{
 		const TSharedRef<IOpen3DSender> SenderRef = MoQTesting::CreateSenderForTest(Fake->MakeApi(), Clock.AsFunction(), /*JitterSeed=*/42);
 		IOpen3DSender& Sender = *SenderRef;
-		TestTrue(TEXT("Initialize"), Sender.Initialize(Config));
-		TestTrue(TEXT("Start"), Sender.Start());
+		TestTrue(TEXT("Initialize"), Sender.Initialize(Config).IsOk());
+		TestTrue(TEXT("Start"), Sender.Start().IsOk());
 		MoQFakeTest::Pump(); // CONNECTING, CONNECTED -> mocap publisher
 
 		TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> Sink = Sender.CreateAudioSink(Config.Audio);
@@ -231,8 +231,8 @@ bool FMoQSenderConnectTimeoutTest::RunTest(const FString& Parameters)
 	{
 		const TSharedRef<IOpen3DSender> SenderRef = MoQTesting::CreateSenderForTest(Fake->MakeApi(), Clock.AsFunction(), /*JitterSeed=*/7);
 		IOpen3DSender& Sender = *SenderRef;
-		TestTrue(TEXT("Initialize"), Sender.Initialize(Config));
-		TestTrue(TEXT("Start"), Sender.Start());
+		TestTrue(TEXT("Initialize"), Sender.Initialize(Config).IsOk());
+		TestTrue(TEXT("Start"), Sender.Start().IsOk());
 		TestEqual(TEXT("First attempt launched"), Fake->GetBlockingLaunches(), 1);
 
 		// Clock steps are exact binary fractions so the comparisons are exact.
@@ -299,8 +299,8 @@ bool FMoQSenderConnectErrorWithoutCallbackTest::RunTest(const FString& Parameter
 	{
 		const TSharedRef<IOpen3DSender> SenderRef = MoQTesting::CreateSenderForTest(Fake->MakeApi(), Clock.AsFunction(), /*JitterSeed=*/3);
 		IOpen3DSender& Sender = *SenderRef;
-		TestTrue(TEXT("Initialize"), Sender.Initialize(MakeFakeConfig()));
-		TestTrue(TEXT("Start"), Sender.Start());
+		TestTrue(TEXT("Initialize"), Sender.Initialize(MakeFakeConfig()).IsOk());
+		TestTrue(TEXT("Start"), Sender.Start().IsOk());
 		MoQFakeTest::Pump(); // FAILED synthesised by the session
 
 		Clock.Advance(1.0); // 1 failure: backoff at most 1.0 s
@@ -407,8 +407,9 @@ bool FMoQReceiverSubscribeBackoffTest::RunTest(const FString& Parameters)
 	{
 		const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), Clock.AsFunction(), /*JitterSeed=*/11);
 		IOpen3DReceiver& Receiver = *ReceiverRef;
-		TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeFakeConfig()));
-		TestTrue(TEXT("Start"), Receiver.Start());
+		TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeFakeConfig()).IsOk());
+		Receiver.SetConsumer(MakeShared<FO3DRecordingFrameConsumer>()); // a receiver needs a consumer to start
+		TestTrue(TEXT("Start"), Receiver.Start().IsOk());
 		MoQFakeTest::Pump(); // CONNECTED -> immediate subscribe, fails, next try in [0.75, 1.0] s
 		TestEqual(TEXT("Immediate subscribe on connect"), Fake->GetSubscribeCalls(), 1);
 
@@ -496,9 +497,10 @@ bool FMoQReceiverCodecFromFrameTest::RunTest(const FString& Parameters)
 	{
 		const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), Clock.AsFunction(), /*JitterSeed=*/5);
 		IOpen3DReceiver& Receiver = *ReceiverRef;
-		TestTrue(TEXT("Initialize"), Receiver.Initialize(Config));
+		TestTrue(TEXT("Initialize"), Receiver.Initialize(Config).IsOk());
 		Receiver.SetAudioSink(Sink, Config.Audio);
-		TestTrue(TEXT("Start"), Receiver.Start());
+		Receiver.SetConsumer(MakeShared<FO3DRecordingFrameConsumer>()); // a receiver needs a consumer to start
+		TestTrue(TEXT("Start"), Receiver.Start().IsOk());
 		MoQFakeTest::Pump(); // CONNECTED -> mocap and audio subscriptions
 
 		TestTrue(TEXT("Audio frame delivered to the audio subscription"), Fake->DeliverData(AudioNamespace, PcmFrame));
@@ -583,7 +585,7 @@ bool FMoQLifetimeStartStressTest::RunTest(const FString& Parameters)
 
 		for (int32 TickIndex = 0; TickIndex < 3; ++TickIndex)
 		{
-			Sender->SendSerialized(MocapBytes, static_cast<int32>(UE_ARRAY_COUNT(MocapBytes)), TEXT("actor"), static_cast<double>(TickIndex));
+			Sender->SendSerialized(FO3DSendPayload::MakeCopy(MocapBytes, static_cast<int32>(UE_ARRAY_COUNT(MocapBytes)), TEXT("actor"), static_cast<double>(TickIndex)));
 			Sender->Tick(0.0f);
 			FPlatformProcess::YieldThread();
 		}

@@ -7,6 +7,18 @@
 
 namespace MoQHelpers
 {
+	FO3DTransportCapabilities GetCapabilities(const FO3DTransportConfig& /*Config*/)
+	{
+		FO3DTransportCapabilities Caps;
+		Caps.bSend = true;
+		Caps.bReceive = true;
+		Caps.bAudioSend = true;
+		Caps.bAudioReceive = true;
+		Caps.bControl = true;
+		Caps.Delivery = EO3DDeliveryGuarantee::Unreliable;
+		return Caps;
+	}
+
 	FString GetAdvancedOption(const FO3DTransportConfig& Config, const TCHAR* Key)
 	{
 		for (const TPair<FString, FString>& Pair : Config.AdvancedParams)

@@ -114,12 +114,12 @@ bool FMoQControlTrackAnnouncedTest::RunTest(const FString& Parameters)
 		{
 			const TSharedRef<IOpen3DSender> Sender = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
 			TestTrue(TEXT("Sender supports control"), Sender->SupportsControl());
-			TestTrue(TEXT("Initialize"), Sender->Initialize(Config));
+			TestTrue(TEXT("Initialize"), Sender->Initialize(Config).IsOk());
 
 			const TArray<uint8> Envelope = MakeEnvelope(0);
-			TestFalse(TEXT("SendControl before Start is refused"), Sender->SendControl(Envelope.GetData(), Envelope.Num()));
+			TestTrue(TEXT("SendControl before Start returns NotRunning"), Sender->SendControl(Envelope.GetData(), Envelope.Num()) == EO3DSendResult::NotRunning);
 
-			TestTrue(TEXT("Start"), Sender->Start());
+			TestTrue(TEXT("Start"), Sender->Start().IsOk());
 			MoQFakeTest::Pump(); // CONNECTED -> mocap and control publishers, no SendControl needed
 
 			TestTrue(TEXT("Control namespace announced on connect"), Fake->GetAnnounced(1).Contains(ControlNamespace));
@@ -130,12 +130,12 @@ bool FMoQControlTrackAnnouncedTest::RunTest(const FString& Parameters)
 				TestEqual(TEXT("Control uses the stream's track name"), Control->Track, FString(TEXT("actor")));
 				TestTrue(TEXT("Control always uses stream delivery, whatever delivery_mode says"), Control->DeliveryMode == MOQ_DELIVERY_STREAM);
 			}
-			TestTrue(TEXT("SendControl accepted once the control track is announced"), Sender->SendControl(Envelope.GetData(), Envelope.Num()));
+			TestTrue(TEXT("SendControl accepted once the control track is announced"), Sender->SendControl(Envelope.GetData(), Envelope.Num()) == EO3DSendResult::Queued);
 			const TArray<uint8> NotControl = MakePayload(0);
-			TestFalse(TEXT("Bytes that are not a control envelope are refused"), Sender->SendControl(NotControl.GetData(), NotControl.Num()));
+			TestTrue(TEXT("Bytes that are not a control envelope are Invalid"), Sender->SendControl(NotControl.GetData(), NotControl.Num()) == EO3DSendResult::Invalid);
 
 			Sender->Stop();
-			TestFalse(TEXT("SendControl after Stop is refused"), Sender->SendControl(Envelope.GetData(), Envelope.Num()));
+			TestTrue(TEXT("SendControl after Stop returns NotRunning"), Sender->SendControl(Envelope.GetData(), Envelope.Num()) == EO3DSendResult::NotRunning);
 		}
 		MoQFakeTest::Pump();
 		TestEqual(TEXT("Every publisher destroyed"), Fake->GetPublishersDestroyed(), Fake->GetPublishersCreated());
@@ -161,8 +161,8 @@ bool FMoQControlCustomNamespaceTest::RunTest(const FString& Parameters)
 		Config.AdvancedParams.Add(TEXT("track_namespace"), Case.Key);
 		{
 			const TSharedRef<IOpen3DSender> Sender = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 2);
-			TestTrue(TEXT("Initialize"), Sender->Initialize(Config));
-			TestTrue(TEXT("Start"), Sender->Start());
+			TestTrue(TEXT("Initialize"), Sender->Initialize(Config).IsOk());
+			TestTrue(TEXT("Start"), Sender->Start().IsOk());
 			MoQFakeTest::Pump();
 			TestTrue(*FString::Printf(TEXT("track_namespace '%s' puts control on '%s'"), Case.Key, Case.Value),
 				Fake->GetAnnounced(1).Contains(FString(Case.Value)));
@@ -184,8 +184,9 @@ bool FMoQControlSubscribeOnlyWithSinkTest::RunTest(const FString& Parameters)
 	{
 		const TSharedRef<IOpen3DReceiver> Receiver = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 3);
 		TestTrue(TEXT("Receiver supports control"), Receiver->SupportsControl());
-		TestTrue(TEXT("Initialize"), Receiver->Initialize(MakeConfig()));
-		TestTrue(TEXT("Start"), Receiver->Start());
+		TestTrue(TEXT("Initialize"), Receiver->Initialize(MakeConfig()).IsOk());
+		Receiver->SetConsumer(MakeShared<FMoQControlFrameCounter>()); // a receiver needs a consumer to start
+		TestTrue(TEXT("Start"), Receiver->Start().IsOk());
 		MoQFakeTest::Pump(); // CONNECTED -> mocap subscription only
 		TestFalse(TEXT("No control subscription without a sink"), Fake->GetLiveSubscriptions().Contains(ControlSubscription));
 
@@ -200,9 +201,10 @@ bool FMoQControlSubscribeOnlyWithSinkTest::RunTest(const FString& Parameters)
 
 	{
 		const TSharedRef<IOpen3DReceiver> Receiver = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 4);
-		TestTrue(TEXT("Initialize"), Receiver->Initialize(MakeConfig()));
+		TestTrue(TEXT("Initialize"), Receiver->Initialize(MakeConfig()).IsOk());
 		Receiver->SetControlSink(Sink); // before Start, as the interface asks
-		TestTrue(TEXT("Start"), Receiver->Start());
+		Receiver->SetConsumer(MakeShared<FMoQControlFrameCounter>());
+		TestTrue(TEXT("Start"), Receiver->Start().IsOk());
 		MoQFakeTest::Pump();
 		TestTrue(TEXT("A sink set before Start subscribes on connect"), Fake->GetLiveSubscriptions().Contains(ControlSubscription));
 		Receiver->Stop();
@@ -225,19 +227,19 @@ bool FMoQControlRoundTripTest::RunTest(const FString& Parameters)
 	{
 		const TSharedRef<IOpen3DSender> Sender = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 5);
 		const TSharedRef<IOpen3DReceiver> Receiver = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 6);
-		TestTrue(TEXT("Sender initializes"), Sender->Initialize(MakeConfig()));
-		TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(MakeConfig()));
+		TestTrue(TEXT("Sender initializes"), Sender->Initialize(MakeConfig()).IsOk());
+		TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(MakeConfig()).IsOk());
 		Receiver->SetConsumer(Consumer);
 		Receiver->SetControlSink(Sink);
-		TestTrue(TEXT("Sender starts"), Sender->Start());
+		TestTrue(TEXT("Sender starts"), Sender->Start().IsOk());
 		MoQFakeTest::Pump(); // the sender announces first
-		TestTrue(TEXT("Receiver starts"), Receiver->Start());
+		TestTrue(TEXT("Receiver starts"), Receiver->Start().IsOk());
 		MoQFakeTest::Pump();
 
 		for (int32 Index = 0; Index < NumControl; ++Index)
 		{
 			const TArray<uint8> Envelope = MakeEnvelope(Index);
-			TestTrue(*FString::Printf(TEXT("Control %d accepted"), Index), Sender->SendControl(Envelope.GetData(), Envelope.Num()));
+			TestTrue(*FString::Printf(TEXT("Control %d accepted"), Index), Sender->SendControl(Envelope.GetData(), Envelope.Num()) == EO3DSendResult::Queued);
 		}
 
 		const bool bArrived = O3DTests::PollUntil(5.0,

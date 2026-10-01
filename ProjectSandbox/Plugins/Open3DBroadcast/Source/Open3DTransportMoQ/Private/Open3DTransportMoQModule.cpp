@@ -190,6 +190,7 @@ private:
 		{
 			return MakeShared<FO3DMoQReceiver, ESPMode::ThreadSafe>();
 		};
+		Descriptor.GetCapabilities = [](const FO3DTransportConfig& Config) { return MoQHelpers::GetCapabilities(Config); };
 
 		Descriptor.ConfigureSender = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
 		{

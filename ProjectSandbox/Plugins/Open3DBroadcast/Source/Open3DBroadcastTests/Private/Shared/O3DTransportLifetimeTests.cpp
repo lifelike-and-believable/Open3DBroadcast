@@ -244,7 +244,7 @@ bool FO3DTransportLifetimeLeakTest::RunTest(const FString& Parameters)
 	// The registry stopped both and took the sinks back from the receiver, but cannot release
 	// what the owner still references: that is the leak it reported.
 	TestEqual(TEXT("The leaked sender was stopped once"), FakeSender->GetStopCalls(), 1);
-	TestFalse(TEXT("The leaked sender no longer sends"), Sender->SendSerialized(reinterpret_cast<const uint8*>("x"), 1, TEXT("s"), 0.0));
+	TestTrue(TEXT("The leaked sender no longer sends (NotRunning)"), Sender->SendSerialized(FO3DSendPayload::MakeCopy(reinterpret_cast<const uint8*>("x"), 1, TEXT("s"), 0.0)) == EO3DSendResult::NotRunning);
 	TestFalse(TEXT("The leaked receiver's consumer was released"), FakeReceiver->HasConsumer());
 	TestFalse(TEXT("The leaked receiver's control sink was released"), FakeReceiver->HasControlSink());
 	TestEqual(TEXT("Both leaked instances are still counted after the unregister"), Registry->GetNumLiveInstances(Name), 2);

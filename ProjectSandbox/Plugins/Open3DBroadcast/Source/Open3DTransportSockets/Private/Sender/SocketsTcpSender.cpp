@@ -163,12 +163,15 @@ FO3DSocketsTcpSender::~FO3DSocketsTcpSender()
 	Stop();
 }
 
-bool FO3DSocketsTcpSender::Initialize(const FO3DTransportConfig& Config)
+FO3DTransportResult FO3DSocketsTcpSender::Initialize(const FO3DTransportConfig& Config)
 {
 	Stop();
 
 	ActiveConfig = Config;
-	Stats.Reset();
+	{
+		FScopeLock Lock(&StatsMutex);
+		Stats.Reset();
+	}
 	StreamId = ActiveConfig.StreamId;
 
 	ActiveAudioConfig = Config.Audio;
@@ -181,13 +184,14 @@ bool FO3DSocketsTcpSender::Initialize(const FO3DTransportConfig& Config)
 	if (!O3DSockets::ParseHostPort(Config, BindHost, BindPort, TEXT("tcp")))
 	{
 		UE_LOG(LogSocketsTcpSender, Warning, TEXT("TCP sender requires tcp://host:port URI or explicit host/port options."));
-		return false;
+		BindPort = 0;
+		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("TCP sender requires a tcp://host:port URI or explicit host/port options."));
 	}
 
 	if (BindPort <= 0)
 	{
 		UE_LOG(LogSocketsTcpSender, Warning, TEXT("TCP sender requires a valid port (got %d)."), BindPort);
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("TCP sender requires a valid port (got %d)."), BindPort));
 	}
 
 	if (StreamId.IsEmpty())
@@ -200,7 +204,7 @@ bool FO3DSocketsTcpSender::Initialize(const FO3DTransportConfig& Config)
 	if (!SocketSubsystem)
 	{
 		UE_LOG(LogSocketsTcpSender, Warning, TEXT("TCP sender could not access socket subsystem."));
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("TCP sender could not access the socket subsystem."));
 	}
 
 	namespace Tcp = O3DSockets::Tcp;
@@ -216,12 +220,13 @@ bool FO3DSocketsTcpSender::Initialize(const FO3DTransportConfig& Config)
 
 	PublishState->Gate->Open();
 
-	return true;
+	return FO3DTransportResult::Ok();
 }
 
-bool FO3DSocketsTcpSender::Start()
+FO3DTransportResult FO3DSocketsTcpSender::Start()
 {
 	// Restart: stop a running worker before touching the sockets it owns.
+	bRunning.store(false);
 	if (WorkerThread)
 	{
 		bStopWorker = true;
@@ -239,26 +244,34 @@ bool FO3DSocketsTcpSender::Start()
 	if (!SocketSubsystem || BindPort <= 0)
 	{
 		UE_LOG(LogSocketsTcpSender, Warning, TEXT("TCP sender cannot start: not initialized."));
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("TCP sender Start() before a successful Initialize()."));
 	}
 
 	// TRB-13: create the listen socket first, and start the worker only if that worked, so a
 	// failed Start() leaves no thread running.
-	if (!CreateListenSocket())
+	const FO3DTransportResult ListenResult = CreateListenSocket();
+	if (!ListenResult.IsOk())
 	{
-		return false;
+		ConnectionState.End(EO3DConnectionState::Failed, ListenResult);
+		return ListenResult;
 	}
 
 	PublishState->Gate->Open();
+
+	// Listening, no receiver yet. Before the worker starts, so its "Connected" on accept follows.
+	ConnectionState.Begin(EO3DConnectionState::Connecting);
 
 	bStopWorker = false;
 	if (!StartWorker())
 	{
 		UE_LOG(LogSocketsTcpSender, Warning, TEXT("TCP sender could not start its worker thread."));
 		DestroySocket();
-		return false;
+		const FO3DTransportResult Result = FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("TCP sender could not start its worker thread."));
+		ConnectionState.End(EO3DConnectionState::Failed, Result);
+		return Result;
 	}
-	return true;
+	bRunning.store(true);
+	return FO3DTransportResult::Ok();
 }
 
 void FO3DSocketsTcpSender::Stop()
@@ -266,6 +279,7 @@ void FO3DSocketsTcpSender::Stop()
 	// WP-S5 ordering: (1) close the audio gate, which waits for in-flight submits;
 	// (2) stop and join the worker; (3) destroy sockets; (4) drain. The wake event is owned
 	// by the shared queue, so a late Wake() can never hit a pooled event (TRB-12).
+	bRunning.store(false);
 	PublishState->Gate->Close();
 
 	bStopWorker = true;
@@ -276,14 +290,17 @@ void FO3DSocketsTcpSender::Stop()
 	DestroySocket();
 	DrainQueue();
 	// SocketSubsystem is kept so Start() works again without Initialize() (TRB-13).
+
+	// The worker has been joined, so nothing reports a change after this.
+	ConnectionState.End(EO3DConnectionState::Idle);
 }
 
 bool FO3DSocketsTcpSender::Send(const O3DS::SubjectList& List)
 {
 	// Fast path: check connection state without locks
-	if (!PublishState->bClientConnected.load())
+	if (!bRunning.load() || !PublishState->bClientConnected.load())
 	{
-		// No client connected yet
+		// Not started, or no client connected yet
 		return false;
 	}
 
@@ -301,42 +318,66 @@ bool FO3DSocketsTcpSender::Send(const O3DS::SubjectList& List)
 		return false;
 	}
 
-	return SendBytes(reinterpret_cast<const uint8*>(SerializationScratch.data()), BytesWritten);
+	return SendBytes(reinterpret_cast<const uint8*>(SerializationScratch.data()), BytesWritten) == EO3DSendResult::Queued;
 }
 
-bool FO3DSocketsTcpSender::SendSerialized(const uint8* Data, int32 Len, const FString& /*SubjectName*/, double /*CaptureTimestampSec*/)
+EO3DSendResult FO3DSocketsTcpSender::SendSerialized(FO3DSendPayload&& Payload)
 {
-	if (!PublishState->bClientConnected.load() || Len <= 0)
+	if (!bRunning.load())
 	{
-		return false;
+		return EO3DSendResult::NotRunning;
+	}
+	const int32 Len = Payload.Bytes.Num();
+	if (Len <= 0)
+	{
+		return EO3DSendResult::Invalid;
+	}
+	if (Len > O3DSockets::Tcp::MaxFrameBytesLimit)
+	{
+		return EO3DSendResult::TooLarge;
+	}
+	if (!PublishState->bClientConnected.load())
+	{
+		return EO3DSendResult::NotConnected;
 	}
 
-	return SendBytes(Data, Len);
+	// The frame is copied once more into the framed queue item (header and enqueue time in front);
+	// the shared send queue of WP-A1 step 4 takes the payload as it is.
+	return SendBytes(Payload.Bytes.GetData(), Len);
 }
 
 /**
  * Control (ADR 0011): the envelope rides the frame queue in-band, as audio does, and the worker
- * sends it in order with the frames around it. Not counted as a frame. Refused without a client,
- * like SendSerialized; the control publisher retries, and its snapshot reaches a late client.
+ * sends it in order with the frames around it. Not counted as a frame. Refused without a client
+ * (NotConnected), like SendSerialized; the control publisher retries, and its snapshot reaches a
+ * late client.
  */
-bool FO3DSocketsTcpSender::SendControl(const uint8* Envelope, int32 Len)
+EO3DSendResult FO3DSocketsTcpSender::SendControl(const uint8* Envelope, int32 Len)
 {
-	TConstArrayView<uint8> Payload;
-	if (!PublishState->bClientConnected.load() || !O3DS::TryGetControlPayload(Envelope, Len, Payload))
+	if (!bRunning.load())
 	{
-		return false;
+		return EO3DSendResult::NotRunning;
 	}
-	return EnqueuePayload(Envelope, Len);
+	TConstArrayView<uint8> Payload;
+	if (!O3DS::TryGetControlPayload(Envelope, Len, Payload))
+	{
+		return EO3DSendResult::Invalid;
+	}
+	if (!PublishState->bClientConnected.load())
+	{
+		return EO3DSendResult::NotConnected;
+	}
+	return EnqueuePayload(Envelope, Len) ? EO3DSendResult::Queued : EO3DSendResult::DroppedBackpressure;
 }
 
 /** Enqueue already-serialized bytes for transmission and record transport-level stats. */
-bool FO3DSocketsTcpSender::SendBytes(const uint8* Data, int32 Len)
+EO3DSendResult FO3DSocketsTcpSender::SendBytes(const uint8* Data, int32 Len)
 {
 	if (!EnqueuePayload(Data, Len))
 	{
 		FScopeLock Lock(&StatsMutex);
 		Stats.DroppedFrames++;
-		return false;
+		return EO3DSendResult::DroppedBackpressure;
 	}
 
 	{
@@ -344,7 +385,7 @@ bool FO3DSocketsTcpSender::SendBytes(const uint8* Data, int32 Len)
 		Stats.FramesSent++;
 		Stats.BytesSent += Len;
 	}
-	return true;
+	return EO3DSendResult::Queued;
 }
 
 void FO3DSocketsTcpSender::Tick(float /*DeltaSeconds*/)
@@ -355,15 +396,15 @@ void FO3DSocketsTcpSender::Tick(float /*DeltaSeconds*/)
 
 FO3DTransportStats FO3DSocketsTcpSender::GetStats() const
 {
-	FScopeLock Lock(&StatsMutex);
-	FO3DTransportStats Copy = Stats;
+	FO3DTransportStats Copy;
+	{
+		FScopeLock Lock(&StatsMutex);
+		Copy = Stats;
+	}
 	Copy.BytesSent += PublishState->AudioBytesQueued.load();
+	Copy.State = ConnectionState.Get();
+	Copy.PendingBytes = static_cast<int64>(PublishState->SendQueue.GetPendingBytes());
 	return Copy;
-}
-
-bool FO3DSocketsTcpSender::SupportsAudio() const
-{
-	return true;
 }
 
 TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DSocketsTcpSender::CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig)
@@ -392,11 +433,11 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DSocketsTcpSender::Creat
 	return MakeShared<FSocketsTcpSenderAudioSink, ESPMode::ThreadSafe>(PublishState, ActiveAudioConfig, MoveTemp(EncoderSettings));
 }
 
-bool FO3DSocketsTcpSender::CreateListenSocket()
+FO3DTransportResult FO3DSocketsTcpSender::CreateListenSocket()
 {
 	if (!SocketSubsystem)
 	{
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("TCP sender has no socket subsystem."));
 	}
 
 	bool bValid = false;
@@ -404,14 +445,14 @@ bool FO3DSocketsTcpSender::CreateListenSocket()
 	if (!bValid || !BindAddr.IsValid())
 	{
 		UE_LOG(LogSocketsTcpSender, Warning, TEXT("Invalid bind address %s:%d"), *BindHost, BindPort);
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("Invalid bind address %s:%d."), *BindHost, BindPort));
 	}
 
 	ListenSocket = SocketSubsystem->CreateSocket(NAME_Stream, TEXT("O3DS_TCP_LISTEN"), BindAddr->GetProtocolType());
 	if (!ListenSocket)
 	{
 		UE_LOG(LogSocketsTcpSender, Warning, TEXT("Failed to create listen socket."));
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("Failed to create the TCP listen socket."));
 	}
 
 	ListenSocket->SetReuseAddr(true);
@@ -419,20 +460,23 @@ bool FO3DSocketsTcpSender::CreateListenSocket()
 
 	if (!ListenSocket->Bind(*BindAddr))
 	{
+		const ESocketErrors Error = SocketSubsystem->GetLastErrorCode();
 		UE_LOG(LogSocketsTcpSender, Warning, TEXT("Bind failed on %s"), *BindAddr->ToString(true));
+		const FString Message = FString::Printf(TEXT("Bind failed on %s (socket error %d)."), *BindAddr->ToString(true), static_cast<int32>(Error));
 		DestroySocket();
-		return false;
+		return FO3DTransportResult::Error(Error == SE_EADDRINUSE ? EO3DTransportError::AddressInUse : EO3DTransportError::ConnectFailed, Message);
 	}
 
 	if (!ListenSocket->Listen(8))
 	{
 		UE_LOG(LogSocketsTcpSender, Warning, TEXT("Listen failed on %s"), *BindAddr->ToString(true));
+		const FString Message = FString::Printf(TEXT("Listen failed on %s."), *BindAddr->ToString(true));
 		DestroySocket();
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::ConnectFailed, Message);
 	}
 
 	UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP sender listening on %s"), *BindAddr->ToString(true));
-	return true;
+	return FO3DTransportResult::Ok();
 }
 
 void FO3DSocketsTcpSender::DestroySocket()
@@ -482,6 +526,7 @@ bool FO3DSocketsTcpSender::TryAcceptClient()
 	ClientSocket = Accepted;
 	PublishState->bClientConnected.store(true); // Fast check in Send() and audio sinks
 	UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP sender accepted client %s (sendBuf=%d, TCP_NODELAY=true)"), *PeerAddr->ToString(true), AppliedSize);
+	ConnectionState.Set(EO3DConnectionState::Connected); // on the worker thread (ADR 0007 item 3)
 	return true;
 }
 
@@ -494,6 +539,9 @@ void FO3DSocketsTcpSender::DropClient(const TCHAR* Reason)
 	}
 	ClientSocket = nullptr;
 	PublishState->bClientConnected.store(false);
+	// Still listening: the next receiver that connects is accepted (worker thread).
+	ConnectionState.Set(EO3DConnectionState::Reconnecting,
+		FO3DTransportResult::Error(EO3DTransportError::ConnectFailed, FString::Printf(TEXT("Receiver dropped: %s."), Reason)));
 }
 
 bool FO3DSocketsTcpSender::IsPeerClosed()

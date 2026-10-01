@@ -139,6 +139,7 @@ public:
 		Tcp.OwningModule = TEXT("Open3DTransportSockets");
 		Tcp.CreateSender = []() { return MakeShared<FO3DSocketsTcpSender>(); };
 		Tcp.CreateReceiver = []() { return MakeShared<FO3DSocketsTcpReceiver>(); };
+		Tcp.GetCapabilities = [](const FO3DTransportConfig& Config) { return O3DSockets::GetTcpCapabilities(Config); };
 		Tcp.ConfigureSender = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
 		{
 			O3DSocketsConfig::ConfigureTcpSender(SenderComponent, Config, SocketsTcpName);
@@ -156,6 +157,7 @@ public:
 		Udp.OwningModule = TEXT("Open3DTransportSockets");
 		Udp.CreateSender = []() { return MakeShared<FO3DSocketsUdpSender>(); };
 		Udp.CreateReceiver = []() { return MakeShared<FO3DSocketsUdpReceiver>(); };
+		Udp.GetCapabilities = [](const FO3DTransportConfig& Config) { return O3DSockets::GetUdpCapabilities(Config); };
 		Udp.ConfigureSender = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
 		{
 			O3DSocketsConfig::ConfigureUdpSender(SenderComponent, Config);

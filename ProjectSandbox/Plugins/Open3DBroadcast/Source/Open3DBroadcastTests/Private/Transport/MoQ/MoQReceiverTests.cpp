@@ -69,7 +69,7 @@ bool FMoQReceiverRequiresUriTest::RunTest(const FString& Parameters)
 
 	AddExpectedError(TEXT("MoQ receiver configuration invalid"), EAutomationExpectedMessageFlags::Contains, 1);
 
-	TestFalse(TEXT("Initialize should fail when relay URI is missing"), Receiver.Initialize(Config));
+	TestFalse(TEXT("Initialize should fail when relay URI is missing"), Receiver.Initialize(Config).IsOk());
 	return true;
 }
 
@@ -85,7 +85,7 @@ bool FMoQReceiverInitializeSuccessTest::RunTest(const FString& Parameters)
 	Config.Uri = TEXT("https://localhost:4443");
 	Config.StreamId = TEXT("session/testTrack");
 
-	TestTrue(TEXT("Initialize should succeed with valid relay URI"), Receiver.Initialize(Config));
+	TestTrue(TEXT("Initialize should succeed with valid relay URI"), Receiver.Initialize(Config).IsOk());
 
 	// Ensure Stop is safe to call immediately after initialization
 	Receiver.Stop();
@@ -104,7 +104,7 @@ bool FMoQReceiverStopIsIdempotentTest::RunTest(const FString& Parameters)
 	Config.Uri = TEXT("https://localhost:4443");
 	Config.StreamId = TEXT("test/idempotent");
 
-	TestTrue(TEXT("Initialize should succeed"), Receiver.Initialize(Config));
+	TestTrue(TEXT("Initialize should succeed"), Receiver.Initialize(Config).IsOk());
 
 	// Multiple Stop calls should not crash
 	Receiver.Stop();
@@ -126,11 +126,11 @@ bool FMoQReceiverInitializeCalledTwiceTest::RunTest(const FString& Parameters)
 	Config.Uri = TEXT("https://localhost:4443");
 	Config.StreamId = TEXT("test/reinit");
 
-	TestTrue(TEXT("First Initialize should succeed"), Receiver.Initialize(Config));
+	TestTrue(TEXT("First Initialize should succeed"), Receiver.Initialize(Config).IsOk());
 
 	// Calling Initialize again should succeed (replaces config)
 	Config.StreamId = TEXT("test/reinit2");
-	TestTrue(TEXT("Second Initialize should succeed"), Receiver.Initialize(Config));
+	TestTrue(TEXT("Second Initialize should succeed"), Receiver.Initialize(Config).IsOk());
 
 	Receiver.Stop();
 	return true;
@@ -148,7 +148,7 @@ bool FMoQReceiverGetStatsBeforeStartTest::RunTest(const FString& Parameters)
 	Config.Uri = TEXT("https://localhost:4443");
 	Config.StreamId = TEXT("test/stats");
 
-	TestTrue(TEXT("Initialize should succeed"), Receiver.Initialize(Config));
+	TestTrue(TEXT("Initialize should succeed"), Receiver.Initialize(Config).IsOk());
 
 	const FO3DTransportStats Stats = Receiver.GetStats();
 	TestEqual(TEXT("FramesReceived should be 0 before start"), Stats.FramesReceived, static_cast<int64>(0));
@@ -173,7 +173,7 @@ bool FMoQReceiverAdvancedParamsTest::RunTest(const FString& Parameters)
 	Config.AdvancedParams.Add(TEXT("track_namespace"), TEXT("mocap/custom"));
 	Config.AdvancedParams.Add(TEXT("track_name"), TEXT("customTrack"));
 
-	TestTrue(TEXT("Initialize with advanced params should succeed"), Receiver.Initialize(Config));
+	TestTrue(TEXT("Initialize with advanced params should succeed"), Receiver.Initialize(Config).IsOk());
 	Receiver.Stop();
 	return true;
 }
@@ -199,7 +199,7 @@ bool FMoQReceiverStartBeforeInitializeTest::RunTest(const FString& Parameters)
 	AddExpectedError(TEXT("MoQ receiver Start called before Initialize"), EAutomationExpectedMessageFlags::Contains, 1);
 
 	// Start without Initialize should fail
-	TestFalse(TEXT("Start before Initialize should return false"), Receiver.Start());
+	TestFalse(TEXT("Start before Initialize should return false"), Receiver.Start().IsOk());
 
 	return true;
 }
@@ -216,7 +216,7 @@ bool FMoQReceiverPollBeforeStartTest::RunTest(const FString& Parameters)
 	Config.Uri = TEXT("https://localhost:4443");
 	Config.StreamId = TEXT("test/poll");
 
-	TestTrue(TEXT("Initialize should succeed"), Receiver.Initialize(Config));
+	TestTrue(TEXT("Initialize should succeed"), Receiver.Initialize(Config).IsOk());
 
 	// Poll before Start should return 0
 	TestEqual(TEXT("Poll before Start should return 0"), Receiver.Poll(), 0);
@@ -237,7 +237,7 @@ bool FMoQReceiverSetConsumerTest::RunTest(const FString& Parameters)
 	Config.Uri = TEXT("https://localhost:4443");
 	Config.StreamId = TEXT("test/consumer");
 
-	TestTrue(TEXT("Initialize should succeed"), Receiver.Initialize(Config));
+	TestTrue(TEXT("Initialize should succeed"), Receiver.Initialize(Config).IsOk());
 
 	// Create and set consumer
 	TSharedPtr<FMoQTestFrameConsumer> Consumer = MakeShared<FMoQTestFrameConsumer>();
@@ -260,7 +260,7 @@ bool FMoQReceiverSetAudioSinkTest::RunTest(const FString& Parameters)
 	Config.Uri = TEXT("https://localhost:4443");
 	Config.StreamId = TEXT("test/audio");
 
-	TestTrue(TEXT("Initialize should succeed"), Receiver.Initialize(Config));
+	TestTrue(TEXT("Initialize should succeed"), Receiver.Initialize(Config).IsOk());
 
 	// SetAudioSink with nullptr disables audio delivery and must not crash
 	FO3DTransportAudioConfig AudioConfig;
@@ -284,7 +284,7 @@ bool FMoQReceiverRelayUrlOptionsTest::RunTest(const FString& Parameters)
 		Config.StreamId = TEXT("test/relay");
 		Config.AdvancedParams.Add(TEXT("relay_url"), TEXT("https://relay.example.com:4443"));
 
-		TestTrue(TEXT("Initialize with relay_url param should succeed"), Receiver.Initialize(Config));
+		TestTrue(TEXT("Initialize with relay_url param should succeed"), Receiver.Initialize(Config).IsOk());
 		Receiver.Stop();
 	}
 
@@ -298,7 +298,7 @@ bool FMoQReceiverRelayUrlOptionsTest::RunTest(const FString& Parameters)
 		Config.StreamId = TEXT("test/relay2");
 		Config.AdvancedParams.Add(TEXT("moq.relay"), TEXT("https://relay2.example.com:4443"));
 
-		TestTrue(TEXT("Initialize with moq.relay param should succeed"), Receiver.Initialize(Config));
+		TestTrue(TEXT("Initialize with moq.relay param should succeed"), Receiver.Initialize(Config).IsOk());
 		Receiver.Stop();
 	}
 
@@ -317,13 +317,13 @@ bool FMoQReceiverStatsResetOnInitTest::RunTest(const FString& Parameters)
 	Config.Uri = TEXT("https://localhost:4443");
 	Config.StreamId = TEXT("test/statsreset");
 
-	TestTrue(TEXT("First Initialize should succeed"), Receiver.Initialize(Config));
+	TestTrue(TEXT("First Initialize should succeed"), Receiver.Initialize(Config).IsOk());
 
 	// Get initial stats
 	FO3DTransportStats Stats1 = Receiver.GetStats();
 
 	// Reinitialize
-	TestTrue(TEXT("Second Initialize should succeed"), Receiver.Initialize(Config));
+	TestTrue(TEXT("Second Initialize should succeed"), Receiver.Initialize(Config).IsOk());
 
 	// Stats should be reset
 	FO3DTransportStats Stats2 = Receiver.GetStats();

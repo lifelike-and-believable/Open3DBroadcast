@@ -92,19 +92,19 @@ bool FO3DMoQReceiver::ParseOptions(const FO3DTransportConfig& Config, FString& O
 	return true;
 }
 
-bool FO3DMoQReceiver::Initialize(const FO3DTransportConfig& Config)
+FO3DTransportResult FO3DMoQReceiver::Initialize(const FO3DTransportConfig& Config)
 {
 	if (bRunning)
 	{
 		UE_LOG(LogO3DMoQReceiver, Warning, TEXT("MoQ receiver Initialize called while running"));
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::Internal, TEXT("MoQ receiver Initialize() while running; Stop() it first."));
 	}
 
 	FString Error;
 	if (!ParseOptions(Config, Error))
 	{
 		UE_LOG(LogO3DMoQReceiver, Error, TEXT("MoQ receiver configuration invalid: %s"), *Error);
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("MoQ receiver configuration invalid: %s"), *Error));
 	}
 
 	if (!Session.IsValid())
@@ -116,7 +116,7 @@ bool FO3DMoQReceiver::Initialize(const FO3DTransportConfig& Config)
 	if (!InitResult.IsOk())
 	{
 		UE_LOG(LogO3DMoQReceiver, Error, TEXT("Failed to initialize MoQ session: %s"), *InitResult.Message);
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, FString::Printf(TEXT("Failed to initialize the MoQ session: %s"), *InitResult.Message));
 	}
 
 	if (!ConnectionDelegateHandle.IsValid())
@@ -151,7 +151,7 @@ bool FO3DMoQReceiver::Initialize(const FO3DTransportConfig& Config)
 	LastErrorLogTimeSeconds = 0.0;
 
 	bInitialized = true;
-	return true;
+	return FO3DTransportResult::Ok();
 }
 
 void FO3DMoQReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer)
@@ -186,17 +186,22 @@ void FO3DMoQReceiver::SetControlSink(const TSharedPtr<IO3DReceiverControlSink, E
 	}
 }
 
-bool FO3DMoQReceiver::Start()
+FO3DTransportResult FO3DMoQReceiver::Start()
 {
 	if (!bInitialized)
 	{
 		UE_LOG(LogO3DMoQReceiver, Warning, TEXT("MoQ receiver Start called before Initialize"));
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("MoQ receiver Start() before a successful Initialize()."));
 	}
 
 	if (bRunning)
 	{
-		return true;
+		return FO3DTransportResult::Ok();
+	}
+
+	if (!Consumer.IsValid())
+	{
+		return FO3DTransportResult::Error(EO3DTransportError::NoConsumer, TEXT("MoQ receiver Start() without a frame consumer (SetConsumer)."));
 	}
 
 	if (!ConnectionDelegateHandle.IsValid() && Session.IsValid())
@@ -205,20 +210,25 @@ bool FO3DMoQReceiver::Start()
 	}
 
 	bRunning = true;
+	ConnectionState.Begin(EO3DConnectionState::Connecting);
 	if (!AttemptConnect())
 	{
 		UE_LOG(LogO3DMoQReceiver, Error, TEXT("Initial MoQ connection attempt failed"));
 		bRunning = false;
-		return false;
+		const FO3DTransportResult Result = FO3DTransportResult::Error(EO3DTransportError::ConnectFailed,
+			FString::Printf(TEXT("The first MoQ connection attempt to %s failed."), *O3DRedact::Url(Options.RelayUrl)));
+		ConnectionState.End(EO3DConnectionState::Failed, Result);
+		return Result;
 	}
 
-	return true;
+	return FO3DTransportResult::Ok();
 }
 
 void FO3DMoQReceiver::Stop()
 {
 	if (!bInitialized && !bRunning)
 	{
+		ConnectionState.End(EO3DConnectionState::Idle);
 		return;
 	}
 
@@ -257,6 +267,16 @@ void FO3DMoQReceiver::Stop()
 	bMocapSubscribed = false;
 	bAudioSubscribed = false;
 	bControlSubscribed = false;
+	ConnectionState.End(EO3DConnectionState::Idle);
+}
+
+void FO3DMoQReceiver::ReportSessionLost(const FString& Reason)
+{
+	// Before the first connection the receiver stays Connecting while it retries.
+	if (ConnectionState.Get() == EO3DConnectionState::Connected)
+	{
+		ConnectionState.Set(EO3DConnectionState::Reconnecting, FO3DTransportResult::Error(EO3DTransportError::ConnectFailed, Reason));
+	}
 }
 
 bool FO3DMoQReceiver::AttemptConnect()
@@ -317,6 +337,7 @@ void FO3DMoQReceiver::HandleConnectTimeout(double Now)
 	DestroyAudioSubscriber();
 	DestroyControlSubscriber();
 	ScheduleReconnect(Now);
+	ReportSessionLost(TEXT("The MoQ connect attempt timed out."));
 }
 
 void FO3DMoQReceiver::HandleConnectionStateChanged(MoqConnectionState NewState)
@@ -345,6 +366,7 @@ void FO3DMoQReceiver::HandleConnectionStateChanged(MoqConnectionState NewState)
 		{
 			AttemptControlSubscribe();
 		}
+		ConnectionState.Set(EO3DConnectionState::Connected);
 		break;
 
 	case MOQ_STATE_CONNECTING:
@@ -364,6 +386,7 @@ void FO3DMoQReceiver::HandleConnectionStateChanged(MoqConnectionState NewState)
 		bMocapSubscribed = false;
 		bAudioSubscribed = false;
 		ScheduleReconnect(NowSeconds());
+		ReportSessionLost(NewState == MOQ_STATE_FAILED ? TEXT("The MoQ session failed.") : TEXT("The MoQ session disconnected."));
 		break;
 
 	default:
@@ -798,6 +821,7 @@ FO3DTransportStats FO3DMoQReceiver::GetStats() const
 		Copy.AverageLatencyMs = LatencyStats.TotalLatencyMs / static_cast<double>(LatencyStats.Samples);
 		Copy.MaxLatencyMs = LatencyStats.MaxLatencyMs;
 	}
+	Copy.State = ConnectionState.Get();
 	return Copy;
 }
 

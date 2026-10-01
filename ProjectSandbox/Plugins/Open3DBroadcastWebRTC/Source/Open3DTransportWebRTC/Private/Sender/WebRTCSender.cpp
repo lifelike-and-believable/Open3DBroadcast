@@ -19,43 +19,12 @@ THIRD_PARTY_INCLUDES_END
 #include "O3DUnifiedMessage.h"
 #include <vector>
 
-namespace WebRTCOptions
-{
-    static constexpr TCHAR PreferLossyOptionKey[] = TEXT("webrtc.prefer_lossy");
-
-    static bool ParseBool(const TMap<FString, FString>& Params, const TCHAR* Key, bool DefaultValue)
-    {
-        if (!Key)
-        {
-            return DefaultValue;
-        }
-
-        if (const FString* Value = Params.Find(Key))
-        {
-            if (Value->Equals(TEXT("1"), ESearchCase::IgnoreCase) ||
-                Value->Equals(TEXT("true"), ESearchCase::IgnoreCase) ||
-                Value->Equals(TEXT("yes"), ESearchCase::IgnoreCase))
-            {
-                return true;
-            }
-
-            if (Value->Equals(TEXT("0"), ESearchCase::IgnoreCase) ||
-                Value->Equals(TEXT("false"), ESearchCase::IgnoreCase) ||
-                Value->Equals(TEXT("no"), ESearchCase::IgnoreCase))
-            {
-                return false;
-            }
-        }
-
-        return DefaultValue;
-    }
-}
-
 namespace
 {
-    // LiveKit data channel size guidance (livekit_ffi.h, lk_send_data_ex).
-    constexpr int32 LossyMaxBytes = 1300;
-    constexpr int32 ReliableMaxBytes = 15000;
+    // LiveKit data channel size guidance (livekit_ffi.h, lk_send_data_ex); shared with the
+    // capability query (WebRTCUtils::GetCapabilities).
+    constexpr int32 LossyMaxBytes = WebRTCUtils::LossyMaxDataBytes;
+    constexpr int32 ReliableMaxBytes = WebRTCUtils::ReliableMaxDataBytes;
 
     // ADR 0011 item 4: a control envelope fits the lossy limit too, so it never needs splitting.
     static_assert(WebRTCUtils::MaxControlEnvelopeBytes <= LossyMaxBytes, "Control envelopes must fit one LiveKit data message");
@@ -232,6 +201,8 @@ void FO3DWebRTCSender::OnConnectionState(void* user, LkConnectionState state, in
     }
 
     Self->bConnected.Store(bNewConnectedState);
+    Self->LkReasonCode.store(static_cast<int32>(reason_code));
+    Self->LkState.store(static_cast<int32>(state)); // read by the sender's Tick (ADR 0007 item 3)
     FO3DPerformanceMetrics::Get().SetTransportConnected(TEXT("WebRTC"), bNewConnectedState);
 }
 
@@ -256,14 +227,14 @@ FO3DWebRTCSender::~FO3DWebRTCSender()
     LinkToken = nullptr;
 }
 
-bool FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
+FO3DTransportResult FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
 {
     FScopeLock Lock(&StateMutex);
 
     if (bInitialized.Load())
     {
         UE_LOG(LogO3DWebRTCSender, Verbose, TEXT("WebRTC sender already initialized"));
-        return false;
+        return FO3DTransportResult::Error(EO3DTransportError::Internal, TEXT("WebRTC sender is already initialized; Stop() it first."));
     }
 
     // Platform validation: WebRTC module currently supports Windows 64-bit only
@@ -281,18 +252,19 @@ bool FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
         TEXT("Unknown"),
 #endif
         (int32)(sizeof(void*) * 8));
-    return false;
+    return FO3DTransportResult::Error(EO3DTransportError::Unsupported, TEXT("The WebRTC transport needs Windows 64-bit."));
 #endif
 
     if (!Ffi.IsComplete())
     {
         UE_LOG(LogO3DWebRTCSender, Error, TEXT("WebRTC sender: LiveKit function table is incomplete"));
-        return false;
+        return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("The LiveKit library is not loaded or is incomplete."));
     }
 
-    if (!ParseConfig(Config))
+    const FO3DTransportResult ConfigResult = ParseConfig(Config);
+    if (!ConfigResult.IsOk())
     {
-        return false;
+        return ConfigResult;
     }
 
     // Create LiveKit client handle
@@ -300,7 +272,7 @@ bool FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
     if (!ClientHandle)
     {
         UE_LOG(LogO3DWebRTCSender, Error, TEXT("Failed to create LiveKit client"));
-        return false;
+        return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("Failed to create the LiveKit client."));
     }
 
     // Set connection callback
@@ -347,23 +319,36 @@ bool FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Config)
         ActiveAudioConfig.bEnableAudio ? TEXT("true") : TEXT("false"),
         bPreferLossyData ? TEXT("true") : TEXT("false"));
 
-    return true;
+    return FO3DTransportResult::Ok();
 }
 
-bool FO3DWebRTCSender::Start()
+FO3DTransportResult FO3DWebRTCSender::Start()
 {
     FScopeLock Lock(&StateMutex);
 
     if (!bInitialized.Load())
     {
         UE_LOG(LogO3DWebRTCSender, Error, TEXT("Cannot start WebRTC sender: not initialized"));
-        return false;
+        return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("WebRTC sender Start() before a successful Initialize()."));
     }
 
     // "Connect requested" is tracked separately from the token (TRF-3). If no token is
     // available yet, Tick() connects as soon as the token manager has one.
     bConnectRequested = true;
-    return UpdateConnection();
+    AppliedLkState = -1;
+    bEverConnected = false;
+    Link->LkState.store(-1);
+    ConnectionState.Begin(EO3DConnectionState::Connecting);
+    if (!UpdateConnection())
+    {
+        const FO3DTransportResult Result = FO3DTransportResult::Error(EO3DTransportError::ConnectFailed,
+            FString::Printf(TEXT("LiveKit refused the connect to %s."), *O3DRedact::Url(RoomUrl)));
+        ConnectionState.End(EO3DConnectionState::Failed, Result);
+        bConnectRequested = false;
+        return Result;
+    }
+    bRunning.store(true);
+    return FO3DTransportResult::Ok();
 }
 
 void FO3DWebRTCSender::Stop()
@@ -374,8 +359,12 @@ void FO3DWebRTCSender::Stop()
     // returns once every publish already inside a sink has finished.
     Link->Gate->Close();
 
+    bRunning.store(false);
     bConnectRequested = false;
     bConnectIssued = false;
+    // Nothing reports a change after Stop: Tick translates LiveKit states only while connecting
+    // is requested, and the tracker ignores changes once its session ended.
+    ConnectionState.End(EO3DConnectionState::Idle);
 
     // Cancel any token fetch; its result is dropped (TRF-24).
     if (TokenManager.IsValid())
@@ -473,7 +462,7 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
         SubjectLabel = WebRTCUtils::DecodeUtf8Label(List.mItems[0]->mName.c_str());
     }
 
-    const bool bSucceeded = SendBytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten, SubjectLabel);
+    const bool bSucceeded = SendBytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten, SubjectLabel) == EO3DSendResult::Queued;
     if (!bSucceeded)
     {
         FScopeLock Lock(&StatsMutex);
@@ -482,35 +471,39 @@ bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
     return bSucceeded;
 }
 
-bool FO3DWebRTCSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double /*CaptureTimestampSec*/)
+EO3DSendResult FO3DWebRTCSender::SendSerialized(FO3DSendPayload&& Payload)
 {
     if (!Link->bConnected.Load())
     {
+        // Counted as dropped, as before: the pose pipeline keeps producing frames while LiveKit
+        // connects or reconnects.
         RecordDroppedFrame();
-        return false;
+        return bRunning.load() ? EO3DSendResult::NotConnected : EO3DSendResult::NotRunning;
     }
 
-    if (!Data || Len <= 0)
+    const int32 Len = Payload.Bytes.Num();
+    if (Len <= 0)
     {
-        return false;
+        return EO3DSendResult::Invalid;
     }
 
     FO3DPerformanceMetrics::Get().RecordFrameCaptured();
     FO3DPerformanceMetrics::Get().RecordBytesSerialized(Len);
 
-    const bool bSucceeded = SendBytes(Data, Len, SubjectName);
-    if (!bSucceeded)
+    // Sent on the caller's thread (TRF-5; the shared worker of WP-A1 step 4 moves it off).
+    const EO3DSendResult Result = SendBytes(Payload.Bytes.GetData(), Len, Payload.Subject);
+    if (Result != EO3DSendResult::Queued)
     {
         FScopeLock Lock(&StatsMutex);
         Stats.DroppedFrames++;
     }
 
-    return bSucceeded;
+    return Result;
 }
 
 /** Sends one serialized payload over a labeled LiveKit data channel. Backpressure is whatever
  *  lk_send_data_ex reports: the heuristic pending-frame estimator was removed (TRF-5). */
-bool FO3DWebRTCSender::SendBytes(const uint8* Data, int32 Len, const FString& SubjectName)
+EO3DSendResult FO3DWebRTCSender::SendBytes(const uint8* Data, int32 Len, const FString& SubjectName)
 {
     const bool bAllowLossy = bPreferLossyData;
     LkReliability Reliability = bAllowLossy ? LkLossy : LkReliable;
@@ -526,7 +519,7 @@ bool FO3DWebRTCSender::SendBytes(const uint8* Data, int32 Len, const FString& Su
             UE_LOG(LogO3DWebRTCSender, Error,
                 TEXT("Subject '%s' payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton"),
                 *SubjectName, Len, ReliableMaxBytes);
-            return false;
+            return EO3DSendResult::TooLarge;
         }
     }
     else if (!bAllowLossy && Len > ReliableMaxBytes)
@@ -534,7 +527,7 @@ bool FO3DWebRTCSender::SendBytes(const uint8* Data, int32 Len, const FString& Su
         UE_LOG(LogO3DWebRTCSender, Error,
             TEXT("Subject '%s' payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton"),
             *SubjectName, Len, ReliableMaxBytes);
-        return false;
+        return EO3DSendResult::TooLarge;
     }
 
     const FString SubjectLabel = SubjectName.IsEmpty() ? FString(TEXT("subject_0")) : SubjectName;
@@ -555,7 +548,12 @@ bool FO3DWebRTCSender::SendBytes(const uint8* Data, int32 Len, const FString& Su
         UE_LOG(LogO3DWebRTCSender, Verbose, TEXT("Failed to send subject '%s' (code=%d): %s"),
             *SubjectLabel, Result.code, *Ffi.TakeMessage(Result));
         FO3DPerformanceMetrics::Get().RecordTransportFrameDropped();
-        return false;
+        {
+            FScopeLock Lock(&StatsMutex);
+            Stats.SendErrors++;
+        }
+        // LiveKit refused the message (its data channel buffer is full, or the room is closing).
+        return EO3DSendResult::DroppedBackpressure;
     }
 
     FO3DPerformanceMetrics::Get().RecordBytesSent(Len);
@@ -567,7 +565,7 @@ bool FO3DWebRTCSender::SendBytes(const uint8* Data, int32 Len, const FString& Su
         Stats.BytesSent += Len;
     }
 
-    return true;
+    return EO3DSendResult::Queued;
 }
 
 /**
@@ -576,23 +574,29 @@ bool FO3DWebRTCSender::SendBytes(const uint8* Data, int32 Len, const FString& Su
  * always joins as a publisher (LkRolePublisher), so the "refuse while subscriber-only" rule has
  * no case to handle here.
  */
-bool FO3DWebRTCSender::SendControl(const uint8* Envelope, int32 Len)
+EO3DSendResult FO3DWebRTCSender::SendControl(const uint8* Envelope, int32 Len)
 {
-    // Exactly one well-formed control envelope within the budget; nothing trailing.
+    // The gate keeps ClientHandle alive for the call: Stop() closes it before destroying the
+    // client, and a closed gate (before Initialize, after Stop) refuses at once without blocking.
+    FO3DLifetimeGate::FReadScope Scope(*Link->Gate, Link->Gate->GetEpoch());
+    if (!Scope || !bRunning.load())
+    {
+        return EO3DSendResult::NotRunning;
+    }
+
+    // Exactly one well-formed control envelope within the budget; nothing trailing. A well-formed
+    // envelope always fits the 1,100-byte budget (ADR 0011 item 4), so oversize bytes are Invalid.
     TConstArrayView<uint8> Payload;
     if (!Envelope || Len <= 0 || Len > WebRTCUtils::MaxControlEnvelopeBytes
         || !O3DS::TryGetControlPayload(Envelope, Len, Payload)
         || Len != O3DS::UnifiedWireHeaderSize + Payload.Num())
     {
-        return false;
+        return EO3DSendResult::Invalid;
     }
 
-    // The gate keeps ClientHandle alive for the call: Stop() closes it before destroying the
-    // client, and a closed gate (before Initialize, after Stop) refuses at once without blocking.
-    FO3DLifetimeGate::FReadScope Scope(*Link->Gate, Link->Gate->GetEpoch());
-    if (!Scope || !Link->ClientHandle || !Link->bConnected.Load())
+    if (!Link->ClientHandle || !Link->bConnected.Load())
     {
-        return false;
+        return EO3DSendResult::NotConnected;
     }
 
     const LkResult Result = Ffi.lk_send_data_ex(
@@ -612,15 +616,19 @@ bool FO3DWebRTCSender::SendControl(const uint8* Envelope, int32 Len)
         {
             UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to send a control envelope (code=%d): %s"), Result.code, *Message);
         }
-        return false;
+        return EO3DSendResult::DroppedBackpressure;
     }
-    return true;
+    return EO3DSendResult::Queued;
 }
 
 void FO3DWebRTCSender::Tick(float DeltaSeconds)
 {
     FScopeLock Lock(&StateMutex);
     UpdateConnection();
+    if (bConnectRequested)
+    {
+        UpdateConnectionState();
+    }
 }
 
 bool FO3DWebRTCSender::UpdateConnection()
@@ -740,8 +748,62 @@ void FO3DWebRTCSender::ApplyRefreshedToken(const FString& InToken, uint64 TokenG
 
 FO3DTransportStats FO3DWebRTCSender::GetStats() const
 {
-    FScopeLock Lock(&StatsMutex);
-    return Stats;
+    FO3DTransportStats Copy;
+    {
+        FScopeLock Lock(&StatsMutex);
+        Copy = Stats;
+    }
+    Copy.State = ConnectionState.Get();
+    return Copy;
+}
+
+FO3DTransportCapabilities FO3DWebRTCSender::GetCapabilities() const
+{
+    FO3DTransportCapabilities Caps = WebRTCUtils::GetCapabilities(FO3DTransportConfig());
+    if (bLossyCapabilities.load())
+    {
+        Caps.Delivery = EO3DDeliveryGuarantee::Unreliable;
+    }
+    return Caps;
+}
+
+void FO3DWebRTCSender::UpdateConnectionState()
+{
+    // LiveKit reports connection changes on its own threads, which reach only the shared link;
+    // Tick turns the latest one into a connection-state change on the game thread.
+    const int32 LkState = Link->LkState.load();
+    if (LkState == AppliedLkState)
+    {
+        return;
+    }
+    AppliedLkState = LkState;
+
+    switch (LkState) // -1 (nothing reported yet) matches no case
+    {
+    case static_cast<int32>(LkConnConnecting):
+        ConnectionState.Set(bEverConnected ? EO3DConnectionState::Reconnecting : EO3DConnectionState::Connecting);
+        break;
+    case static_cast<int32>(LkConnConnected):
+        bEverConnected = true;
+        ConnectionState.Set(EO3DConnectionState::Connected);
+        break;
+    case static_cast<int32>(LkConnReconnecting):
+        ConnectionState.Set(EO3DConnectionState::Reconnecting,
+            FO3DTransportResult::Error(EO3DTransportError::ConnectFailed, TEXT("LiveKit is reconnecting.")));
+        break;
+    case static_cast<int32>(LkConnDisconnected):
+        // The sender does not reconnect a closed room by itself: Stop and Start to retry.
+        ConnectionState.Set(EO3DConnectionState::Failed,
+            FO3DTransportResult::Error(EO3DTransportError::ConnectFailed, TEXT("LiveKit disconnected.")));
+        break;
+    case static_cast<int32>(LkConnFailed):
+        ConnectionState.Set(EO3DConnectionState::Failed,
+            FO3DTransportResult::Error(EO3DTransportError::ConnectFailed,
+                FString::Printf(TEXT("LiveKit connection failed (code=%d)."), Link->LkReasonCode.load())));
+        break;
+    default:
+        break;
+    }
 }
 
 TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DWebRTCSender::CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig)
@@ -766,13 +828,13 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DWebRTCSender::CreateAud
     return MakeShared<FWebRTCSenderAudioSink, ESPMode::ThreadSafe>(Link);
 }
 
-bool FO3DWebRTCSender::ParseConfig(const FO3DTransportConfig& Config)
+FO3DTransportResult FO3DWebRTCSender::ParseConfig(const FO3DTransportConfig& Config)
 {
     const FString HostAddress = Config.Uri;
     if (HostAddress.IsEmpty())
     {
         UE_LOG(LogO3DWebRTCSender, Verbose, TEXT("WebRTC host address not specified"));
-        return false;
+        return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("WebRTC sender: no LiveKit server address."));
     }
 
     // Automatically prepend the correct WebSocket protocol prefix
@@ -797,13 +859,14 @@ bool FO3DWebRTCSender::ParseConfig(const FO3DTransportConfig& Config)
         if (TokenConfig.EndpointUrl.IsEmpty())
         {
             UE_LOG(LogO3DWebRTCSender, Error, TEXT("Auto-fetch enabled but no token endpoint URL provided"));
-            return false;
+            return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("WebRTC sender: token auto-fetch is enabled but no token endpoint URL is set."));
         }
 
         if (TokenConfig.RoomName.IsEmpty())
         {
             UE_LOG(LogO3DWebRTCSender, Error, TEXT("Auto-fetch enabled but no room set (transport option '%s')"), WebRTCUtils::RoomOptionKey);
-            return false;
+            return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig,
+                FString::Printf(TEXT("WebRTC sender: token auto-fetch is enabled but no room is set (transport option '%s')."), WebRTCUtils::RoomOptionKey));
         }
 
         UE_LOG(LogO3DWebRTCSender, Log, TEXT("Token auto-fetch enabled: endpoint=%s, room=%s, identity=%s"),
@@ -817,7 +880,7 @@ bool FO3DWebRTCSender::ParseConfig(const FO3DTransportConfig& Config)
         if (TokenConfig.ManualToken.IsEmpty())
         {
             UE_LOG(LogO3DWebRTCSender, Verbose, TEXT("WebRTC token not provided"));
-            return false;
+            return FO3DTransportResult::Error(EO3DTransportError::AuthFailed, TEXT("WebRTC sender: no LiveKit token (manual token mode)."));
         }
 
         UE_LOG(LogO3DWebRTCSender, Log, TEXT("Manual token mode"));
@@ -826,12 +889,13 @@ bool FO3DWebRTCSender::ParseConfig(const FO3DTransportConfig& Config)
     if (!TokenManager->Initialize(TokenConfig))
     {
         UE_LOG(LogO3DWebRTCSender, Error, TEXT("Failed to initialize token manager"));
-        return false;
+        return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("WebRTC sender: the token settings were refused."));
     }
 
-    bPreferLossyData = WebRTCOptions::ParseBool(Config.AdvancedParams, WebRTCOptions::PreferLossyOptionKey, /*DefaultValue=*/false);
+    bPreferLossyData = WebRTCUtils::ParseBoolOption(Config.AdvancedParams, WebRTCUtils::PreferLossyOptionKey, /*DefaultValue=*/false);
+    bLossyCapabilities.store(bPreferLossyData);
 
-    return true;
+    return FO3DTransportResult::Ok();
 }
 
 #endif // O3D_WITH_TRANSPORT_WEBRTC

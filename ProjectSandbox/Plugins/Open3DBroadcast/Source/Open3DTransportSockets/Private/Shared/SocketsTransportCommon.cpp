@@ -3,6 +3,7 @@
 #if O3D_WITH_TRANSPORT_SOCKETS // Whole file: without the transport the module is a stub (O3DBuildFlags).
 
 #include "SocketsTransportCommon.h"
+#include "SocketsTcpTransport.h"
 
 #include "Transport/O3DTransportTypes.h"
 
@@ -202,6 +203,35 @@ namespace O3DSockets
 			return FString();
 		}
 		return FString::Printf(TEXT("%s:%d"), *Host, Port);
+	}
+
+	FO3DTransportCapabilities GetTcpCapabilities(const FO3DTransportConfig& /*Config*/)
+	{
+		FO3DTransportCapabilities Caps;
+		Caps.bSend = true;
+		Caps.bReceive = true;
+		Caps.bAudioSend = true;
+		Caps.bAudioReceive = true;
+		Caps.bControl = true;
+		Caps.bBidirectional = true; // one stream socket per receiver; nothing reads the back direction in v1
+		Caps.Delivery = EO3DDeliveryGuarantee::ReliableOrdered; // ADR 0005 (iii)
+		Caps.MaxPayloadBytes = O3DSockets::Tcp::MaxFrameBytesLimit; // the frame header's hard limit
+		return Caps;
+	}
+
+	FO3DTransportCapabilities GetUdpCapabilities(const FO3DTransportConfig& /*Config*/)
+	{
+		FO3DTransportCapabilities Caps;
+		Caps.bSend = true;
+		Caps.bReceive = true;
+		Caps.bAudioSend = true;
+		Caps.bAudioReceive = true;
+		Caps.bControl = true;
+		Caps.Delivery = EO3DDeliveryGuarantee::Unreliable; // ADR 0005 (iii)
+		// Frames above udp.maxdatagram are fragmented; the limit that matters is the receiver's
+		// udp.maxframe, which the sender does not know, so the sender sets none of its own.
+		Caps.MaxPayloadBytes = 0;
+		return Caps;
 	}
 }
 

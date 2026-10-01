@@ -315,7 +315,7 @@ bool FO3DControlReceiverAlignmentTest::RunTest(const FString& Parameters)
 	const TArray<TArray<uint8>> Frames = O3DTests::MakeRecordedFrames(TEXT("Hero"), 1);
 	auto SendPose = [&Pair, &Frames]()
 	{
-		Pair.Sender->SendSerialized(Frames[0].GetData(), Frames[0].Num(), TEXT("Hero"), 0.0);
+		Pair.Sender->SendSerialized(FO3DSendPayload::MakeCopy(Frames[0].GetData(), Frames[0].Num(), TEXT("Hero"), 0.0));
 	};
 
 	FO3DControlPublisher Publisher(TEXT("Stage"));

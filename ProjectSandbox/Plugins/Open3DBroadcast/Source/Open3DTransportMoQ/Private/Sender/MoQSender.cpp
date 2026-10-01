@@ -120,19 +120,19 @@ bool FO3DMoQSender::ParseOptions(const FO3DTransportConfig& Config, FString& Out
 	return true;
 }
 
-bool FO3DMoQSender::Initialize(const FO3DTransportConfig& Config)
+FO3DTransportResult FO3DMoQSender::Initialize(const FO3DTransportConfig& Config)
 {
 	if (bRunning)
 	{
 		UE_LOG(LogO3DMoQSender, Warning, TEXT("MoQ sender Initialize called while running"));
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::Internal, TEXT("MoQ sender Initialize() while running; Stop() it first."));
 	}
 
 	FString Error;
 	if (!ParseOptions(Config, Error))
 	{
 		UE_LOG(LogO3DMoQSender, Error, TEXT("MoQ sender configuration invalid: %s"), *Error);
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("MoQ sender configuration invalid: %s"), *Error));
 	}
 
 	if (!Session.IsValid())
@@ -144,7 +144,7 @@ bool FO3DMoQSender::Initialize(const FO3DTransportConfig& Config)
 	if (!InitResult.IsOk())
 	{
 		UE_LOG(LogO3DMoQSender, Error, TEXT("Failed to initialize MoQ session: %s"), *InitResult.Message);
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, FString::Printf(TEXT("Failed to initialize the MoQ session: %s"), *InitResult.Message));
 	}
 
 	if (!ConnectionDelegateHandle.IsValid())
@@ -176,20 +176,20 @@ bool FO3DMoQSender::Initialize(const FO3DTransportConfig& Config)
 
 	bInitialized = true;
 	AudioState->Gate->Open();
-	return true;
+	return FO3DTransportResult::Ok();
 }
 
-bool FO3DMoQSender::Start()
+FO3DTransportResult FO3DMoQSender::Start()
 {
 	if (!bInitialized)
 	{
 		UE_LOG(LogO3DMoQSender, Warning, TEXT("MoQ sender Start called before Initialize"));
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("MoQ sender Start() before a successful Initialize()."));
 	}
 
 	if (bRunning)
 	{
-		return true;
+		return FO3DTransportResult::Ok();
 	}
 
 	if (!ConnectionDelegateHandle.IsValid() && Session.IsValid())
@@ -203,19 +203,27 @@ bool FO3DMoQSender::Start()
 	if (WorkerThread == nullptr)
 	{
 		UE_LOG(LogO3DMoQSender, Error, TEXT("Failed to start MoQ sender worker thread"));
-		return false;
+		const FO3DTransportResult Result = FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("Failed to start the MoQ sender worker thread."));
+		ConnectionState.End(EO3DConnectionState::Failed, Result);
+		return Result;
 	}
 
 	bRunning = true;
+	// Open the session before connecting: with a fake or fast FFI the CONNECTED state can arrive
+	// (on the game thread) before AttemptConnect returns.
+	ConnectionState.Begin(EO3DConnectionState::Connecting);
 	if (!AttemptConnect())
 	{
 		UE_LOG(LogO3DMoQSender, Error, TEXT("Initial MoQ connection attempt failed"));
 		bRunning = false;
 		StopWorker();
-		return false;
+		const FO3DTransportResult Result = FO3DTransportResult::Error(EO3DTransportError::ConnectFailed,
+			FString::Printf(TEXT("The first MoQ connection attempt to %s failed."), *O3DRedact::Url(Options.RelayUrl)));
+		ConnectionState.End(EO3DConnectionState::Failed, Result);
+		return Result;
 	}
 
-	return true;
+	return FO3DTransportResult::Ok();
 }
 
 void FO3DMoQSender::Stop()
@@ -226,6 +234,7 @@ void FO3DMoQSender::Stop()
 
 	if (!bInitialized && !bRunning)
 	{
+		ConnectionState.End(EO3DConnectionState::Idle);
 		return;
 	}
 
@@ -250,8 +259,17 @@ void FO3DMoQSender::Stop()
 
 	CachedState = MOQ_STATE_DISCONNECTED;
 	bConnectInFlight = false;
+	ConnectionState.End(EO3DConnectionState::Idle);
 }
 
+void FO3DMoQSender::ReportSessionLost(const FString& Reason)
+{
+	// Before the first connection the sender stays Connecting while it retries.
+	if (ConnectionState.Get() == EO3DConnectionState::Connected)
+	{
+		ConnectionState.Set(EO3DConnectionState::Reconnecting, FO3DTransportResult::Error(EO3DTransportError::ConnectFailed, Reason));
+	}
+}
 
 bool FO3DMoQSender::AttemptConnect()
 {
@@ -305,6 +323,7 @@ void FO3DMoQSender::HandleConnectTimeout(double Now)
 	DestroyAudioPublisher();
 	DestroyControlPublisher();
 	ScheduleReconnect(Now);
+	ReportSessionLost(TEXT("The MoQ connect attempt timed out."));
 }
 
 void FO3DMoQSender::HandleConnectionStateChanged(MoqConnectionState NewState)
@@ -327,6 +346,7 @@ void FO3DMoQSender::HandleConnectionStateChanged(MoqConnectionState NewState)
 		// subscribe to an announced track, and an event sent before it subscribes is lost.
 		EnsureControlPublisher();
 		WakeWorker();
+		ConnectionState.Set(EO3DConnectionState::Connected);
 		break;
 
 	case MOQ_STATE_CONNECTING:
@@ -346,6 +366,7 @@ void FO3DMoQSender::HandleConnectionStateChanged(MoqConnectionState NewState)
 		DestroyAudioPublisher();
 		DestroyControlPublisher();
 		ScheduleReconnect(NowSeconds());
+		ReportSessionLost(NewState == MOQ_STATE_FAILED ? TEXT("The MoQ session failed.") : TEXT("The MoQ session disconnected."));
 		break;
 
 	default:
@@ -382,74 +403,84 @@ bool FO3DMoQSender::Send(const O3DS::SubjectList& List)
 
 	FO3DPerformanceMetrics::Get().RecordBytesSerialized(BytesWritten);
 
-	return SendBytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten, ObservedSubject, TimestampSeconds);
+	TArray<uint8> Bytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten);
+	return SendBytes(MoveTemp(Bytes), ObservedSubject, TimestampSeconds) == EO3DSendResult::Queued;
 }
 
-bool FO3DMoQSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec)
+EO3DSendResult FO3DMoQSender::SendSerialized(FO3DSendPayload&& Payload)
 {
 	if (!bInitialized || !bRunning)
 	{
 		FO3DPerformanceMetrics::Get().RecordFrameDropped();
-		return false;
+		return EO3DSendResult::NotRunning;
 	}
 
+	const int32 Len = Payload.Bytes.Num();
 	if (Len <= 0)
 	{
-		return false;
+		return EO3DSendResult::Invalid;
 	}
 
 	FO3DPerformanceMetrics::Get().RecordFrameCaptured();
 	FO3DPerformanceMetrics::Get().RecordBytesSerialized(Len);
 
-	return SendBytes(Data, Len, SubjectName, CaptureTimestampSec);
+	// No NotConnected: frames queue while the session (re)connects and the worker publishes or
+	// drops them. The payload's bytes move into the queue without a copy.
+	return SendBytes(MoveTemp(Payload.Bytes), Payload.Subject, Payload.CaptureTimeSec);
 }
 
 /** Enqueue an already-serialized payload for the send worker and record transport-level stats/subject bookkeeping.
- *  CaptureTimestampSec is the same value the caller already embedded in Data (Send()'s own
+ *  CaptureTimestampSec is the same value the caller already embedded in Bytes (Send()'s own
  *  FPlatformTime::Seconds() call, or FO3DSenderSerializer's `Now` via SendSerialized()) - reused for
  *  EnqueuePayload()'s capture timestamp so the enqueue-to-publish latency measurement below reflects
  *  true frame-capture time rather than "whenever SendBytes() happened to run". */
-bool FO3DMoQSender::SendBytes(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec)
+EO3DSendResult FO3DMoQSender::SendBytes(TArray<uint8>&& Bytes, const FString& SubjectName, double CaptureTimestampSec)
 {
 	if (!SubjectName.IsEmpty())
 	{
 		AudioState->LastSubject.Set(SubjectName);
 	}
 
-	TArray<uint8> Payload;
-	Payload.SetNumUninitialized(Len);
-	FMemory::Memcpy(Payload.GetData(), Data, Len);
-
-	if (!EnqueuePayload(MoveTemp(Payload), CaptureTimestampSec, ETrack::Mocap))
+	const int32 Len = Bytes.Num();
+	if (!EnqueuePayload(MoveTemp(Bytes), CaptureTimestampSec, ETrack::Mocap))
 	{
 		FO3DPerformanceMetrics::Get().RecordTransportFrameDropped();
 		{
 			FScopeLock StatsLock(&StatsMutex);
 			Stats.DroppedFrames++;
 		}
-		return false;
+		return EO3DSendResult::DroppedBackpressure;
 	}
 
 	FO3DPerformanceMetrics::Get().RecordBytesSent(Len);
 	TransportMetrics->RecordFrameSent(static_cast<uint64>(Len));
-	return true;
+	return EO3DSendResult::Queued;
 }
 
 /**
  * Control (ADR 0011): the envelope goes out on its own track, through the same worker queue as
  * mocap, so it never blocks. It is not a frame: no frame, byte or drop counters move. Refused
- * (and retried by the control publisher) until the control track is announced. MoQ gives no
- * ordering across tracks, so control is not ordered against the frames around it.
+ * with NotConnected (and retried by the control publisher) until the control track is
+ * announced. MoQ gives no ordering across tracks, so control is not ordered against the frames
+ * around it.
  */
-bool FO3DMoQSender::SendControl(const uint8* Envelope, int32 Len)
+EO3DSendResult FO3DMoQSender::SendControl(const uint8* Envelope, int32 Len)
 {
-	TConstArrayView<uint8> Payload;
-	if (!bInitialized || !bRunning || !O3DS::TryGetControlPayload(Envelope, Len, Payload) || !IsControlPublisherReady())
+	if (!bInitialized || !bRunning)
 	{
-		return false;
+		return EO3DSendResult::NotRunning;
+	}
+	TConstArrayView<uint8> Payload;
+	if (!O3DS::TryGetControlPayload(Envelope, Len, Payload))
+	{
+		return EO3DSendResult::Invalid;
+	}
+	if (!IsControlPublisherReady())
+	{
+		return EO3DSendResult::NotConnected;
 	}
 	TArray<uint8> Bytes(Envelope, Len);
-	return EnqueuePayload(MoveTemp(Bytes), FPlatformTime::Seconds(), ETrack::Control);
+	return EnqueuePayload(MoveTemp(Bytes), FPlatformTime::Seconds(), ETrack::Control) ? EO3DSendResult::Queued : EO3DSendResult::DroppedBackpressure;
 }
 
 void FO3DMoQSender::Tick(float /*DeltaSeconds*/)
@@ -476,13 +507,21 @@ void FO3DMoQSender::Tick(float /*DeltaSeconds*/)
 
 FO3DTransportStats FO3DMoQSender::GetStats() const
 {
-	FScopeLock Lock(&StatsMutex);
-	FO3DTransportStats Copy = Stats;
-	Copy.DroppedFrames += AudioState->AudioDropped.load();
-	if (LatencyStats.Samples > 0)
+	FO3DTransportStats Copy;
 	{
-		Copy.AverageLatencyMs = LatencyStats.TotalLatencyMs / static_cast<double>(LatencyStats.Samples);
-		Copy.MaxLatencyMs = LatencyStats.MaxLatencyMs;
+		FScopeLock Lock(&StatsMutex);
+		Copy = Stats;
+		if (LatencyStats.Samples > 0)
+		{
+			Copy.AverageLatencyMs = LatencyStats.TotalLatencyMs / static_cast<double>(LatencyStats.Samples);
+			Copy.MaxLatencyMs = LatencyStats.MaxLatencyMs;
+		}
+	}
+	Copy.DroppedFrames += AudioState->AudioDropped.load();
+	Copy.State = ConnectionState.Get();
+	{
+		FScopeLock Lock(&QueueMutex);
+		Copy.PendingBytes = static_cast<int64>(PendingQueueBytes);
 	}
 	return Copy;
 }

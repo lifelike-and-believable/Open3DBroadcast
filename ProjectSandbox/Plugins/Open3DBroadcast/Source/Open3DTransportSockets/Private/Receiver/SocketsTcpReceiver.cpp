@@ -35,7 +35,7 @@ FO3DSocketsTcpReceiver::~FO3DSocketsTcpReceiver()
 	Stop();
 }
 
-bool FO3DSocketsTcpReceiver::Initialize(const FO3DTransportConfig& Config)
+FO3DTransportResult FO3DSocketsTcpReceiver::Initialize(const FO3DTransportConfig& Config)
 {
 	Stop();
 
@@ -48,13 +48,14 @@ bool FO3DSocketsTcpReceiver::Initialize(const FO3DTransportConfig& Config)
 	if (!O3DSockets::ParseHostPort(Config, RemoteHost, RemotePort, TEXT("tcp")))
 	{
 		UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("TCP receiver requires tcp://host:port URI or explicit host/port options."));
-		return false;
+		RemotePort = 0;
+		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("TCP receiver requires a tcp://host:port URI or explicit host/port options."));
 	}
 
 	if (RemotePort <= 0)
 	{
 		UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("TCP receiver requires a valid port (got %d)."), RemotePort);
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("TCP receiver requires a valid port (got %d)."), RemotePort));
 	}
 
 	if (StreamId.IsEmpty())
@@ -69,7 +70,7 @@ bool FO3DSocketsTcpReceiver::Initialize(const FO3DTransportConfig& Config)
 	if (!SocketSubsystem)
 	{
 		UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("TCP receiver could not access socket subsystem."));
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("TCP receiver could not access the socket subsystem."));
 	}
 
 	namespace Tcp = O3DSockets::Tcp;
@@ -85,7 +86,7 @@ bool FO3DSocketsTcpReceiver::Initialize(const FO3DTransportConfig& Config)
 	const int32 MaxFrameBytes = FMath::Clamp(O3DSockets::GetIntOption(Config, Tcp::MaxFrameOptionKey, Tcp::DefaultMaxFrameBytes), Tcp::MinFrameBytes, Tcp::MaxFrameBytesLimit);
 	Parser.setMaxPayloadBytes(static_cast<size_t>(MaxFrameBytes));
 
-	return true;
+	return FO3DTransportResult::Ok();
 }
 
 void FO3DSocketsTcpReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer)
@@ -93,8 +94,9 @@ void FO3DSocketsTcpReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsum
 	Consumer = InConsumer;
 }
 
-bool FO3DSocketsTcpReceiver::Start()
+FO3DTransportResult FO3DSocketsTcpReceiver::Start()
 {
+	bRunning = false;
 	DisconnectSocket();
 
 	// TRB-13: Stop() keeps SocketSubsystem, but fetch it again in case Initialize() was skipped.
@@ -105,13 +107,25 @@ bool FO3DSocketsTcpReceiver::Start()
 	if (!SocketSubsystem || RemotePort <= 0)
 	{
 		UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("TCP receiver cannot start: not initialized."));
-		return false;
+		return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("TCP receiver Start() before a successful Initialize()."));
+	}
+	if (!Consumer.IsValid())
+	{
+		return FO3DTransportResult::Error(EO3DTransportError::NoConsumer, TEXT("TCP receiver Start() without a frame consumer (SetConsumer)."));
 	}
 
 	ConnectBackoffAttempt = 0;
 	ConnectCount = 0;
-	bRunning = ConnectToServer();
-	return bRunning;
+	if (!ConnectToServer())
+	{
+		const FO3DTransportResult Result = FO3DTransportResult::Error(EO3DTransportError::ConnectFailed,
+			FString::Printf(TEXT("TCP receiver could not open a connection to %s:%d."), *RemoteHost, RemotePort));
+		ConnectionState.End(EO3DConnectionState::Failed, Result);
+		return Result;
+	}
+	bRunning = true;
+	ConnectionState.Begin(EO3DConnectionState::Connecting);
+	return FO3DTransportResult::Ok();
 }
 
 void FO3DSocketsTcpReceiver::Stop()
@@ -119,6 +133,7 @@ void FO3DSocketsTcpReceiver::Stop()
 	bRunning = false;
 	DisconnectSocket();
 	ControlSink.Reset();
+	ConnectionState.End(EO3DConnectionState::Idle);
 }
 
 int32 FO3DSocketsTcpReceiver::Poll()
@@ -248,12 +263,9 @@ void FO3DSocketsTcpReceiver::ReportParserStats()
 
 FO3DTransportStats FO3DSocketsTcpReceiver::GetStats() const
 {
-	return Stats;
-}
-
-bool FO3DSocketsTcpReceiver::SupportsAudio() const
-{
-	return true;
+	FO3DTransportStats Copy = Stats;
+	Copy.State = ConnectionState.Get();
+	return Copy;
 }
 
 void FO3DSocketsTcpReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig)
@@ -348,6 +360,12 @@ bool FO3DSocketsTcpReceiver::ConnectToServer()
 
 void FO3DSocketsTcpReceiver::DisconnectSocket()
 {
+	if (bRunning && State == EState::Connected)
+	{
+		// A live connection went away; Poll() reconnects with backoff (TRB-4).
+		ConnectionState.Set(EO3DConnectionState::Reconnecting,
+			FO3DTransportResult::Error(EO3DTransportError::ConnectFailed, FString::Printf(TEXT("Connection to %s:%d lost."), *RemoteHost, RemotePort)));
+	}
 	if (Socket && SocketSubsystem)
 	{
 		SocketSubsystem->DestroySocket(Socket);
@@ -391,6 +409,7 @@ void FO3DSocketsTcpReceiver::TickConnection()
 			LastDataReceiveTime = Now;
 			++ConnectCount;
 			UE_LOG(LogSocketsTcpReceiver, Log, TEXT("TCP receiver connected to %s:%d"), *RemoteHost, RemotePort);
+			ConnectionState.Set(EO3DConnectionState::Connected);
 		}
 		else if (ConnState == SCS_ConnectionError)
 		{

@@ -785,6 +785,52 @@ namespace O3DNNG
         OutOptions.CanonicalUri = BuildCanonicalUri(OutOptions.Mode, OutOptions.Host, OutOptions.Port, OutOptions.Role, OutOptions.Topic);
         return true;
     }
+
+    ENngMode ResolveConfiguredMode(const FO3DTransportConfig& Config)
+    {
+        // The same precedence ParseSenderOptions and ParseReceiverOptions use: option, URI
+        // query, URI path. Pub when nothing names a mode (the sender default).
+        FString UriHost;
+        int32 UriPort = 0;
+        FString UriPath;
+        TMap<FString, FString> UriQuery;
+        ExtractHostPortFromUri(Config.Uri, UriHost, UriPort, UriPath, UriQuery);
+
+        FString ModeString = GetAdvancedOption(Config, ModeOptionKey);
+        if (ModeString.IsEmpty())
+        {
+            if (const FString* ModeOverride = UriQuery.Find(TEXT("mode")))
+            {
+                ModeString = *ModeOverride;
+            }
+        }
+        if (ModeString.IsEmpty())
+        {
+            ModeString = ExtractModeFromUri(Config.Uri);
+        }
+        return ModeFromString(ModeString, ENngMode::Pub);
+    }
+
+    FO3DTransportCapabilities GetCapabilitiesForMode(ENngMode Mode)
+    {
+        FO3DTransportCapabilities Caps;
+        Caps.bSend = true;
+        Caps.bReceive = true;
+        Caps.bAudioSend = true;
+        Caps.bAudioReceive = true;
+        Caps.bControl = true;
+        // ADR 0005 (iii): pair and push/pull over TCP are reliable and ordered; a pub socket drops
+        // messages for a slow subscriber (needs-verification, ADR 0005 Q3).
+        const bool bPubSub = Mode == ENngMode::Pub || Mode == ENngMode::Sub;
+        Caps.Delivery = bPubSub ? EO3DDeliveryGuarantee::Unreliable : EO3DDeliveryGuarantee::ReliableOrdered;
+        Caps.bBidirectional = Mode == ENngMode::Pair;
+        return Caps;
+    }
+
+    FO3DTransportCapabilities GetCapabilities(const FO3DTransportConfig& Config)
+    {
+        return GetCapabilitiesForMode(ResolveConfiguredMode(Config));
+    }
 }
 
 #endif // O3D_WITH_TRANSPORT_NNG

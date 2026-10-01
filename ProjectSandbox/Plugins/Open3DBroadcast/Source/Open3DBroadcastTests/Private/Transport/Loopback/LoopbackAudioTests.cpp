@@ -63,11 +63,13 @@ bool FO3DLoopbackAudioRoundTripTest::RunTest(const FString& Parameters)
     IOpen3DSender& Sender = *SenderPtr;
     IOpen3DReceiver& Receiver = *ReceiverPtr;
 
-    TestTrue(TEXT("Sender initializes"), Sender.Initialize(Config));
-    TestTrue(TEXT("Receiver initializes"), Receiver.Initialize(Config));
+    TestTrue(TEXT("Sender initializes"), Sender.Initialize(Config).IsOk());
+    TestTrue(TEXT("Receiver initializes"), Receiver.Initialize(Config).IsOk());
 
-    TestTrue(TEXT("Sender starts"), Sender.Start());
-    TestTrue(TEXT("Receiver starts"), Receiver.Start());
+    // A receiver needs a frame consumer to start (ADR 0007 item 3), even for audio only.
+    Receiver.SetConsumer(MakeShared<FO3DRecordingFrameConsumer>());
+    TestTrue(TEXT("Sender starts"), Sender.Start().IsOk());
+    TestTrue(TEXT("Receiver starts"), Receiver.Start().IsOk());
 
     TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> SenderAudioSink = Sender.CreateAudioSink(Config.Audio);
     TestTrue(TEXT("Audio sink created"), SenderAudioSink.IsValid());
@@ -122,8 +124,8 @@ bool FO3DLoopbackAudioQueueOverflowTest::RunTest(const FString& Parameters)
         return false;
     }
     IOpen3DSender& Sender = *SenderPtr;
-    TestTrue(TEXT("Sender initializes"), Sender.Initialize(Config));
-    TestTrue(TEXT("Sender starts"), Sender.Start());
+    TestTrue(TEXT("Sender initializes"), Sender.Initialize(Config).IsOk());
+    TestTrue(TEXT("Sender starts"), Sender.Start().IsOk());
 
     TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> AudioSink = Sender.CreateAudioSink(Config.Audio);
     TestTrue(TEXT("Audio sink created"), AudioSink.IsValid());

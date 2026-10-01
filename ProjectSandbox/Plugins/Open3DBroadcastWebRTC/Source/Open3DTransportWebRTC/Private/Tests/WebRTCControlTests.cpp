@@ -439,12 +439,12 @@ namespace WebRTCCtl6Test
 	/** Initializes, starts and "connects" a sender on the fake. Returns its fake client. */
 	static FCtlFakeClient* CtlStartSender(FAutomationTestBase& Test, FCtlFakeLiveKit& Fake, FO3DWebRTCSender& Sender)
 	{
-		if (!Test.TestTrue(TEXT("Sender Initialize"), Sender.Initialize(CtlMakeConfig())))
+		if (!Test.TestTrue(TEXT("Sender Initialize"), Sender.Initialize(CtlMakeConfig()).IsOk()))
 		{
 			return nullptr;
 		}
 		FCtlFakeClient* Client = Fake.LastClient();
-		if (!Test.TestNotNull(TEXT("Sender client created"), Client) || !Test.TestTrue(TEXT("Sender Start"), Sender.Start()))
+		if (!Test.TestNotNull(TEXT("Sender client created"), Client) || !Test.TestTrue(TEXT("Sender Start"), Sender.Start().IsOk()))
 		{
 			return nullptr;
 		}
@@ -456,7 +456,7 @@ namespace WebRTCCtl6Test
 	static FCtlFakeClient* CtlStartReceiver(FAutomationTestBase& Test, FCtlFakeLiveKit& Fake, FO3DWebRTCReceiver& Receiver,
 		const TSharedPtr<ISerializedFrameConsumer>& Consumer, const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink)
 	{
-		if (!Test.TestTrue(TEXT("Receiver Initialize"), Receiver.Initialize(CtlMakeConfig())))
+		if (!Test.TestTrue(TEXT("Receiver Initialize"), Receiver.Initialize(CtlMakeConfig()).IsOk()))
 		{
 			return nullptr;
 		}
@@ -466,7 +466,7 @@ namespace WebRTCCtl6Test
 		{
 			Receiver.SetControlSink(Sink); // before Start, as the interface requires
 		}
-		if (!Test.TestNotNull(TEXT("Receiver client created"), Client) || !Test.TestTrue(TEXT("Receiver Start"), Receiver.Start()))
+		if (!Test.TestNotNull(TEXT("Receiver client created"), Client) || !Test.TestTrue(TEXT("Receiver Start"), Receiver.Start().IsOk()))
 		{
 			return nullptr;
 		}
@@ -521,13 +521,13 @@ bool FWebRTCCtl6RoundTripTest::RunTest(const FString& Parameters)
 		for (int32 Index = 0; Index < NumControl; ++Index)
 		{
 			const TArray<uint8> Frame = CtlMakeMocapBytes(Index);
-			TestTrue(*FString::Printf(TEXT("Mocap %d sent"), Index), Sender.SendSerialized(Frame.GetData(), Frame.Num(), TEXT("Alice"), 0.0));
+			TestTrue(*FString::Printf(TEXT("Mocap %d sent"), Index), Sender.SendSerialized(FO3DSendPayload::MakeCopy(Frame.GetData(), Frame.Num(), TEXT("Alice"), 0.0)) == EO3DSendResult::Queued);
 			MocapBytes += Frame.Num();
 			++MocapFrames;
 
 			const TArray<uint8> Payload = CtlMakePayload(Index, PayloadSizes[Index]);
 			const TArray<uint8> Envelope = CtlMakeEnvelope(Payload);
-			TestTrue(*FString::Printf(TEXT("Control %d accepted"), Index), Sender.SendControl(Envelope.GetData(), Envelope.Num()));
+			TestTrue(*FString::Printf(TEXT("Control %d accepted"), Index), Sender.SendControl(Envelope.GetData(), Envelope.Num()) == EO3DSendResult::Queued);
 			SentControl.Add(Payload);
 		}
 
@@ -721,49 +721,49 @@ bool FWebRTCCtl6SenderRefusalsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The largest control envelope fits the budget"), Largest.Num() > 0 && Largest.Num() <= WebRTCUtils::MaxControlEnvelopeBytes);
 
 	FO3DWebRTCSender Sender(FCtlFakeLiveKit::MakeApi());
-	TestFalse(TEXT("SendControl before Initialize is rejected"), Sender.SendControl(Largest.GetData(), Largest.Num()));
-	if (!TestTrue(TEXT("Initialize"), Sender.Initialize(CtlMakeConfig())))
+	TestTrue(TEXT("SendControl before Initialize returns NotRunning"), Sender.SendControl(Largest.GetData(), Largest.Num()) == EO3DSendResult::NotRunning);
+	if (!TestTrue(TEXT("Initialize"), Sender.Initialize(CtlMakeConfig()).IsOk()))
 	{
 		return false;
 	}
 	FCtlFakeClient* Client = Fake.LastClient();
-	TestFalse(TEXT("SendControl before Start is rejected"), Sender.SendControl(Largest.GetData(), Largest.Num()));
-	TestTrue(TEXT("Start"), Sender.Start());
-	TestFalse(TEXT("SendControl before LiveKit connects is rejected"), Sender.SendControl(Largest.GetData(), Largest.Num()));
+	TestTrue(TEXT("SendControl before Start returns NotRunning"), Sender.SendControl(Largest.GetData(), Largest.Num()) == EO3DSendResult::NotRunning);
+	TestTrue(TEXT("Start"), Sender.Start().IsOk());
+	TestTrue(TEXT("SendControl before LiveKit connects returns NotConnected"), Sender.SendControl(Largest.GetData(), Largest.Num()) == EO3DSendResult::NotConnected);
 	if (!TestNotNull(TEXT("Client created"), Client))
 	{
 		return false;
 	}
 	Client->FireConnection(LkConnConnected);
 
-	TestTrue(TEXT("The largest control envelope is sent"), Sender.SendControl(Largest.GetData(), Largest.Num()));
+	TestTrue(TEXT("The largest control envelope is sent"), Sender.SendControl(Largest.GetData(), Largest.Num()) == EO3DSendResult::Queued);
 
 	// Oversize: kind Control with one payload byte over the limit, and a payload far over it.
 	const TArray<uint8> OneOver = CtlMakePayload(2, O3DS::UnifiedMaxControlPayloadSize + 1);
 	TArray<uint8> OneOverEnvelope;
 	O3DS::CreateUnifiedMessage(O3DS::EUnifiedKind::Control, O3DS::EUnifiedCodec::O3DControl, OneOver.GetData(), OneOver.Num(), 1.0, OneOverEnvelope);
-	TestFalse(TEXT("A payload one byte over the limit is refused"), Sender.SendControl(OneOverEnvelope.GetData(), OneOverEnvelope.Num()));
+	TestTrue(TEXT("A payload one byte over the limit is not a control envelope (Invalid)"), Sender.SendControl(OneOverEnvelope.GetData(), OneOverEnvelope.Num()) == EO3DSendResult::Invalid);
 	const TArray<uint8> Huge = CtlMakePayload(3, 4000);
 	TArray<uint8> HugeEnvelope;
 	O3DS::CreateUnifiedMessage(O3DS::EUnifiedKind::Control, O3DS::EUnifiedCodec::O3DControl, Huge.GetData(), Huge.Num(), 1.0, HugeEnvelope);
-	TestFalse(TEXT("An envelope over 1,100 bytes is refused"), Sender.SendControl(HugeEnvelope.GetData(), HugeEnvelope.Num()));
+	TestTrue(TEXT("An envelope over 1,100 bytes is refused (Invalid)"), Sender.SendControl(HugeEnvelope.GetData(), HugeEnvelope.Num()) == EO3DSendResult::Invalid);
 	TestFalse(TEXT("WriteControlEnvelope refuses it too"), O3DS::WriteControlEnvelope(OneOver, 1.0, OneOverEnvelope));
 
 	// Not exactly one control envelope.
 	TArray<uint8> Trailing = Largest;
 	Trailing.Add(0);
-	TestFalse(TEXT("Trailing bytes are refused"), Sender.SendControl(Trailing.GetData(), Trailing.Num()));
+	TestTrue(TEXT("Trailing bytes are Invalid"), Sender.SendControl(Trailing.GetData(), Trailing.Num()) == EO3DSendResult::Invalid);
 	const TArray<uint8> Mocap = CtlMakeMocapBytes(0);
-	TestFalse(TEXT("Bytes that are not a control envelope are refused"), Sender.SendControl(Mocap.GetData(), Mocap.Num()));
-	TestFalse(TEXT("Null is refused"), Sender.SendControl(nullptr, 0));
+	TestTrue(TEXT("Bytes that are not a control envelope are Invalid"), Sender.SendControl(Mocap.GetData(), Mocap.Num()) == EO3DSendResult::Invalid);
+	TestTrue(TEXT("Null is Invalid"), Sender.SendControl(nullptr, 0) == EO3DSendResult::Invalid);
 
 	TestEqual(TEXT("Only the accepted envelope reached LiveKit"), Fake.GetSends().Num(), 1);
 
 	// An FFI failure is refused (the publisher retries) and logged once per throttle interval.
 	AddExpectedError(TEXT("Failed to send a control envelope"), EAutomationExpectedMessageFlags::Contains, 1);
 	Fake.SendDataResult.store(7);
-	TestFalse(TEXT("An lk_send_data_ex failure is refused"), Sender.SendControl(Largest.GetData(), Largest.Num()));
-	TestFalse(TEXT("A second failure is refused"), Sender.SendControl(Largest.GetData(), Largest.Num()));
+	TestTrue(TEXT("An lk_send_data_ex failure is refused (DroppedBackpressure)"), Sender.SendControl(Largest.GetData(), Largest.Num()) == EO3DSendResult::DroppedBackpressure);
+	TestTrue(TEXT("A second failure is refused"), Sender.SendControl(Largest.GetData(), Largest.Num()) == EO3DSendResult::DroppedBackpressure);
 	Fake.SendDataResult.store(0);
 
 	const FO3DTransportStats Stats = Sender.GetStats();
@@ -772,11 +772,11 @@ bool FWebRTCCtl6SenderRefusalsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("No frame counted as dropped"), Stats.DroppedFrames, static_cast<int64>(0));
 
 	Client->FireConnection(LkConnReconnecting);
-	TestFalse(TEXT("SendControl while LiveKit reconnects is rejected"), Sender.SendControl(Largest.GetData(), Largest.Num()));
+	TestTrue(TEXT("SendControl while LiveKit reconnects returns NotConnected"), Sender.SendControl(Largest.GetData(), Largest.Num()) == EO3DSendResult::NotConnected);
 	Client->FireConnection(LkConnConnected);
 
 	Sender.Stop();
-	TestFalse(TEXT("SendControl after Stop is rejected"), Sender.SendControl(Largest.GetData(), Largest.Num()));
+	TestTrue(TEXT("SendControl after Stop returns NotRunning"), Sender.SendControl(Largest.GetData(), Largest.Num()) == EO3DSendResult::NotRunning);
 	TestEqual(TEXT("No send after the client was destroyed"), Fake.SendsAfterDestroy.load(), 0);
 #else
 	AddInfo(TEXT("WebRTC transport is Win64-only; skipped."));
@@ -879,7 +879,7 @@ bool FWebRTCCtl6StopWhileSendingTest::RunTest(const FString& Parameters)
 			{
 				for (int32 Call = 0; Call < MaxCallsPerThread && !bStop.load(); ++Call)
 				{
-					if (Sender.SendControl(Envelope.GetData(), Envelope.Num()))
+					if (Sender.SendControl(Envelope.GetData(), Envelope.Num()) == EO3DSendResult::Queued)
 					{
 						Accepted.fetch_add(1);
 					}
@@ -904,7 +904,7 @@ bool FWebRTCCtl6StopWhileSendingTest::RunTest(const FString& Parameters)
 			Worker.Wait();
 		}
 		TestTrue(TEXT("The send threads made calls"), Calls.load() > 0);
-		TestFalse(TEXT("SendControl after Stop is rejected"), Sender.SendControl(Envelope.GetData(), Envelope.Num()));
+		TestTrue(TEXT("SendControl after Stop returns NotRunning"), Sender.SendControl(Envelope.GetData(), Envelope.Num()) == EO3DSendResult::NotRunning);
 		TestEqual(TEXT("Control is never counted as a frame"), Sender.GetStats().FramesSent, static_cast<int64>(0));
 	}
 	TestEqual(TEXT("No send reached a destroyed client"), Fake.SendsAfterDestroy.load(), 0);

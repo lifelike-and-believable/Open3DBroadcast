@@ -6,6 +6,7 @@
 #include "HAL/CriticalSection.h"
 
 #include "Transport/O3DSenderInterface.h"
+#include "Transport/O3DConnectionState.h"
 #include "Shared/NngHelpers.h"
 #include "O3DAudioFrameCodec.h"
 #include "O3DEncodedPayloadQueue.h"
@@ -48,17 +49,23 @@ public:
     FO3DNngSender();
     virtual ~FO3DNngSender() override;
 
-    virtual bool Initialize(const FO3DTransportConfig& Config) override;
-    virtual bool Start() override;
+    virtual FO3DTransportResult Initialize(const FO3DTransportConfig& Config) override;
+    virtual FO3DTransportResult Start() override;
     virtual void Stop() override;
     virtual bool Send(const O3DS::SubjectList& List) override;
-    virtual bool SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec) override;
+    virtual EO3DSendResult SendSerialized(FO3DSendPayload&& Payload) override;
     virtual void Tick(float DeltaSeconds) override;
     virtual FO3DTransportStats GetStats() const override;
-    virtual bool SupportsAudio() const override { return true; }
+    /** Depends on the mode the sender was initialized with (pub: Unreliable; pair, push: ReliableOrdered). */
+    virtual FO3DTransportCapabilities GetCapabilities() const override { return O3DNNG::GetCapabilitiesForMode(CapabilityMode.load()); }
+    /**
+     * Connecting until the first peer pipe exists, Connected while one does, Reconnecting after the
+     * last went away. The worker thread reports pipe changes, within one worker wait (50 ms).
+     */
+    virtual EO3DConnectionState GetConnectionState() const override { return ConnectionState.Get(); }
+    virtual void SetStateChangedCallback(FO3DConnectionStateCallback Callback) override { ConnectionState.SetCallback(MoveTemp(Callback)); }
     virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
-    virtual bool SupportsControl() const override { return true; }
-    virtual bool SendControl(const uint8* Envelope, int32 Len) override;
+    virtual EO3DSendResult SendControl(const uint8* Envelope, int32 Len) override;
 
     bool IsConnected() const { return PipeContext->bConnected.load(); }
 
@@ -71,11 +78,14 @@ private:
     // Socket ownership (TRB-33): exactly one thread touches Socket at a time. Start() opens it
     // before the worker exists, the worker owns it (send, close, reopen) while it runs, and
     // Stop() closes it after joining the worker. Tick() never touches it.
-    bool OpenSocket();
+    /** OutNngError receives the NNG error code of a failed open, listen or dial. */
+    bool OpenSocket(int32* OutNngError = nullptr);
     void CloseSocket();
     /** Worker: reopens a closed socket after the backoff delay. Returns true if a socket is open. */
     bool EnsureSocketOnWorker();
-    bool SendBytes(const uint8* Data, int32 Len, const FString& SubjectName);
+    /** Worker: reports a change of "a peer pipe exists" to ConnectionState. */
+    void UpdateConnectionStateOnWorker();
+    EO3DSendResult SendBytes(const uint8* Data, int32 Len, const FString& SubjectName);
     void StartWorker();
     void StopWorker();
     uint32 RunWorker();
@@ -120,4 +130,12 @@ private:
     int64 DropsSinceLastLog = 0;
     /** Written by any thread that calls Send/SendSerialized. */
     std::atomic<double> LastBackpressureLogTimestamp{ 0.0 };
+
+    /** Mode the capabilities are reported for: Options.Mode as of the last Initialize. */
+    std::atomic<O3DNNG::ENngMode> CapabilityMode{ O3DNNG::ENngMode::Pub };
+
+    /** ADR 0007 item 3. Peer changes are reported by the worker (UpdateConnectionStateOnWorker). */
+    FO3DConnectionStateTracker ConnectionState;
+    /** Worker only: whether a peer pipe existed at the last check. */
+    bool bWorkerSawPeer = false;
 };

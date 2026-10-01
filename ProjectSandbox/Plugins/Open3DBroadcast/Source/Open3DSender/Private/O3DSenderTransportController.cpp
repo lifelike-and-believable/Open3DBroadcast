@@ -23,6 +23,7 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
     if (ActiveConfig.Transport.IsEmpty())
     {
         UE_LOG(LogO3DSenderComponent, Warning, TEXT("No transport specified; skipping auto transport setup."));
+        LastResult = FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("No transport selected."));
         return false;
     }
 
@@ -31,6 +32,7 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
     if (!ActiveSender.IsValid())
     {
         UE_LOG(LogO3DSenderComponent, Warning, TEXT("No sender registered for transport '%s'."), *ActiveConfig.Transport);
+        LastResult = FO3DTransportResult::Error(EO3DTransportError::Unsupported, FString::Printf(TEXT("No sender is registered for transport '%s'."), *ActiveConfig.Transport));
         return false;
     }
 
@@ -39,17 +41,19 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
     ActiveTransportName = SelectedTransportName;
     UnregisteringHandle = FO3DTransportRegistry::Get().OnTransportUnregistering().AddRaw(this, &FO3DSenderTransportController::HandleTransportUnregistering);
 
-    if (!ActiveSender->Initialize(ActiveConfig))
+    LastResult = ActiveSender->Initialize(ActiveConfig);
+    if (!LastResult.IsOk())
     {
-        UE_LOG(LogO3DSenderComponent, Warning, TEXT("Failed to initialize sender transport '%s'."), *ActiveConfig.Transport);
+        UE_LOG(LogO3DSenderComponent, Warning, TEXT("Failed to initialize sender transport '%s': %s"), *ActiveConfig.Transport, *LexToString(LastResult));
         Unsubscribe();
         ActiveSender.Reset();
         return false;
     }
 
-    if (!ActiveSender->Start())
+    LastResult = ActiveSender->Start();
+    if (!LastResult.IsOk())
     {
-        UE_LOG(LogO3DSenderComponent, Warning, TEXT("Failed to start sender transport '%s'."), *ActiveConfig.Transport);
+        UE_LOG(LogO3DSenderComponent, Warning, TEXT("Failed to start sender transport '%s': %s"), *ActiveConfig.Transport, *LexToString(LastResult));
         Stop();
         return false;
     }

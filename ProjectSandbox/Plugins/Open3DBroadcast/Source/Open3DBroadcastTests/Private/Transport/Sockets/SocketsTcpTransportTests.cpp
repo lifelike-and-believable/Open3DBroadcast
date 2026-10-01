@@ -173,14 +173,14 @@ namespace O3DSocketsTcpTests
 			{
 				return false;
 			}
-			if (!Test.TestTrue(TEXT("Sender initializes"), Sender.Initialize(MakeConfig(true, Port, SenderOptions)))
-				|| !Test.TestTrue(TEXT("Receiver initializes"), Receiver.Initialize(MakeConfig(false, Port, ReceiverOptions))))
+			if (!Test.TestTrue(TEXT("Sender initializes"), Sender.Initialize(MakeConfig(true, Port, SenderOptions)).IsOk())
+				|| !Test.TestTrue(TEXT("Receiver initializes"), Receiver.Initialize(MakeConfig(false, Port, ReceiverOptions)).IsOk()))
 			{
 				return false;
 			}
 			Receiver.SetConsumer(Consumer);
-			if (!Test.TestTrue(TEXT("Sender starts"), Sender.Start())
-				|| !Test.TestTrue(TEXT("Receiver starts"), Receiver.Start()))
+			if (!Test.TestTrue(TEXT("Sender starts"), Sender.Start().IsOk())
+				|| !Test.TestTrue(TEXT("Receiver starts"), Receiver.Start().IsOk()))
 			{
 				return false;
 			}
@@ -219,7 +219,7 @@ bool FO3DSocketsTcpBurstTest::RunTest(const FString& Parameters)
 	for (int32 Index = 0; Index < NumFrames; ++Index)
 	{
 		const TArray<uint8> Payload = MakePayload(Index, FrameSize);
-		if (!Pair.Sender.SendSerialized(Payload.GetData(), Payload.Num(), TEXT("burst"), 0.0))
+		if (Pair.Sender.SendSerialized(FO3DSendPayload::MakeCopy(Payload.GetData(), Payload.Num(), TEXT("burst"), 0.0)) != EO3DSendResult::Queued)
 		{
 			++Rejected;
 		}
@@ -262,7 +262,7 @@ bool FO3DSocketsTcpSlowReaderTest::RunTest(const FString& Parameters)
 	for (int32 Index = 0; Index < NumFrames; ++Index)
 	{
 		const TArray<uint8> Payload = MakePayload(Index, FrameSize);
-		if (!Pair.Sender.SendSerialized(Payload.GetData(), Payload.Num(), TEXT("slow"), 0.0))
+		if (Pair.Sender.SendSerialized(FO3DSendPayload::MakeCopy(Payload.GetData(), Payload.Num(), TEXT("slow"), 0.0)) != EO3DSendResult::Queued)
 		{
 			++Rejected;
 		}
@@ -300,21 +300,31 @@ bool FO3DSocketsTcpReconnectTest::RunTest(const FString& Parameters)
 	}
 
 	const TArray<uint8> First = MakePayload(0, FrameSize);
-	TestTrue(TEXT("First frame queued"), Pair.Sender.SendSerialized(First.GetData(), First.Num(), TEXT("restart"), 0.0));
+	TestTrue(TEXT("First frame queued"), Pair.Sender.SendSerialized(FO3DSendPayload::MakeCopy(First.GetData(), First.Num(), TEXT("restart"), 0.0)) == EO3DSendResult::Queued);
 	TestTrue(TEXT("First frame received"), PollUntil(Pair.Receiver, 10.0, [&Pair]() { return Pair.Consumer->Frames.Num() >= 1; }));
+	// ADR 0007 item 3: both ends report the live connection.
+	TestTrue(TEXT("Sender state is Connected"), WaitUntil(5.0, [&Pair]() { return Pair.Sender.GetConnectionState() == EO3DConnectionState::Connected; }));
+	TestTrue(TEXT("Receiver state is Connected"), Pair.Receiver.GetConnectionState() == EO3DConnectionState::Connected);
 
 	// Restart the same sender without Initialize() (TRB-13).
 	Pair.Sender.Stop();
+	TestTrue(TEXT("Sender state is Idle after Stop"), Pair.Sender.GetConnectionState() == EO3DConnectionState::Idle);
+	TestTrue(TEXT("Sender NotRunning after Stop"), Pair.Sender.SendSerialized(FO3DSendPayload::MakeCopy(First.GetData(), First.Num(), TEXT("restart"), 0.0)) == EO3DSendResult::NotRunning);
 	TestTrue(TEXT("Receiver notices the sender closed"), PollUntil(Pair.Receiver, 10.0, [&Pair]() { return !O3DSocketsTesting::TcpReceiverIsConnected(Pair.Receiver); }));
-	TestTrue(TEXT("Sender restarts without Initialize"), Pair.Sender.Start());
+	TestTrue(TEXT("Receiver state is Reconnecting while the sender is gone"), Pair.Receiver.GetConnectionState() == EO3DConnectionState::Reconnecting);
+	TestTrue(TEXT("Sender restarts without Initialize"), Pair.Sender.Start().IsOk());
+	TestTrue(TEXT("Sender state is Connecting until the receiver is back"), Pair.Sender.GetConnectionState() == EO3DConnectionState::Connecting
+		|| Pair.Sender.GetConnectionState() == EO3DConnectionState::Connected);
 
 	TestTrue(TEXT("Receiver reconnects"), PollUntil(Pair.Receiver, 15.0, [&Pair]()
 	{
 		return O3DSocketsTesting::TcpReceiverGetConnectCount(Pair.Receiver) >= 2 && O3DSocketsTesting::TcpReceiverIsConnected(Pair.Receiver) && O3DSocketsTesting::TcpSenderHasClient(Pair.Sender);
 	}));
+	TestTrue(TEXT("Receiver state is Connected again"), Pair.Receiver.GetConnectionState() == EO3DConnectionState::Connected);
+	TestTrue(TEXT("Sender state is Connected again"), WaitUntil(5.0, [&Pair]() { return Pair.Sender.GetConnectionState() == EO3DConnectionState::Connected; }));
 
 	const TArray<uint8> Second = MakePayload(1, FrameSize);
-	TestTrue(TEXT("Second frame queued"), Pair.Sender.SendSerialized(Second.GetData(), Second.Num(), TEXT("restart"), 0.0));
+	TestTrue(TEXT("Second frame queued"), Pair.Sender.SendSerialized(FO3DSendPayload::MakeCopy(Second.GetData(), Second.Num(), TEXT("restart"), 0.0)) == EO3DSendResult::Queued);
 	TestTrue(TEXT("Second frame received"), PollUntil(Pair.Receiver, 10.0, [&Pair]() { return Pair.Consumer->Frames.Num() >= 2; }));
 
 	TestEqual(TEXT("Exactly two frames"), Pair.Consumer->Frames.Num(), 2);

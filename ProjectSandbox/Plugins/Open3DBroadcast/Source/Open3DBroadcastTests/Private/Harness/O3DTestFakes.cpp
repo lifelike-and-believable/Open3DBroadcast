@@ -31,6 +31,18 @@ TArray<TArray<uint8>> FO3DFakeLink::Drain()
 	return Out;
 }
 
+FO3DTransportCapabilities GetFakeTransportCapabilities()
+{
+	FO3DTransportCapabilities Caps;
+	Caps.bSend = true;
+	Caps.bReceive = true;
+	Caps.bAudioSend = false;
+	Caps.bAudioReceive = true;
+	Caps.bControl = true;
+	Caps.Delivery = EO3DDeliveryGuarantee::ReliableOrdered;
+	return Caps;
+}
+
 // ── FO3DFakeSender ───────────────────────────────────────────────────────────────────────
 
 FO3DFakeSender::FO3DFakeSender(TSharedPtr<FO3DFakeLink, ESPMode::ThreadSafe> InLink)
@@ -38,7 +50,7 @@ FO3DFakeSender::FO3DFakeSender(TSharedPtr<FO3DFakeLink, ESPMode::ThreadSafe> InL
 {
 }
 
-bool FO3DFakeSender::Initialize(const FO3DTransportConfig& Config)
+FO3DTransportResult FO3DFakeSender::Initialize(const FO3DTransportConfig& Config)
 {
 	FScopeLock Lock(&Mutex);
 	LastConfig = Config;
@@ -50,25 +62,30 @@ bool FO3DFakeSender::Initialize(const FO3DTransportConfig& Config)
 		MaxQueued = FCString::Atoi(**MaxQueuedValue);
 	}
 	bInitialized = true;
-	return true;
+	return FO3DTransportResult::Ok();
 }
 
-bool FO3DFakeSender::Start()
+FO3DTransportResult FO3DFakeSender::Start()
 {
 	StartCalls.fetch_add(1);
-	FScopeLock Lock(&Mutex);
-	if (!bInitialized)
 	{
-		return false;
+		FScopeLock Lock(&Mutex);
+		if (!bInitialized)
+		{
+			return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("Fake sender Start() before Initialize()."));
+		}
+		bRunning.store(true);
 	}
-	bRunning.store(true);
-	return true;
+	// Outside Mutex: the state callback must not run under a lock the sender's callers can take.
+	ConnectionState.Begin(EO3DConnectionState::Connected);
+	return FO3DTransportResult::Ok();
 }
 
 void FO3DFakeSender::Stop()
 {
 	StopCalls.fetch_add(1);
 	bRunning.store(false);
+	ConnectionState.End(EO3DConnectionState::Idle);
 }
 
 bool FO3DFakeSender::Send(const O3DS::SubjectList& List)
@@ -79,45 +96,53 @@ bool FO3DFakeSender::Send(const O3DS::SubjectList& List)
 	{
 		return false;
 	}
-	return SendSerialized(reinterpret_cast<const uint8*>(Buffer.data()), Bytes, FString(), 0.0);
+	return SendSerialized(FO3DSendPayload::MakeCopy(reinterpret_cast<const uint8*>(Buffer.data()), Bytes)) == EO3DSendResult::Queued;
 }
 
-bool FO3DFakeSender::SendSerialized(const uint8* Data, int32 Len, const FString& /*SubjectName*/, double /*CaptureTimestampSec*/)
+EO3DSendResult FO3DFakeSender::SendSerialized(FO3DSendPayload&& Payload)
 {
 	SendCalls.fetch_add(1);
-	if (!bRunning.load() || Data == nullptr || Len <= 0)
+	if (!bRunning.load())
 	{
-		return false;
+		return EO3DSendResult::NotRunning;
+	}
+	const int32 Len = Payload.Bytes.Num();
+	if (Len <= 0)
+	{
+		return EO3DSendResult::Invalid;
 	}
 
-	TArray<uint8> Payload(Data, Len);
 	{
 		FScopeLock Lock(&Mutex);
 		if (MaxQueued >= 0 && Queued >= MaxQueued)
 		{
 			++Stats.DroppedFrames;
-			return false;
+			return EO3DSendResult::DroppedBackpressure;
 		}
 		++Queued;
 		++Stats.FramesSent;
 		Stats.BytesSent += Len;
-		Recorded.Add(Payload);
+		Recorded.Add(Payload.Bytes);
 	}
 
 	if (Link.IsValid())
 	{
-		Link->Push(Payload);
+		Link->Push(Payload.Bytes);
 	}
-	return true;
+	return EO3DSendResult::Queued;
 }
 
-bool FO3DFakeSender::SendControl(const uint8* Envelope, int32 Len)
+EO3DSendResult FO3DFakeSender::SendControl(const uint8* Envelope, int32 Len)
 {
 	ControlCalls.fetch_add(1);
-	TConstArrayView<uint8> Payload;
-	if (!bRunning.load() || Envelope == nullptr || Len <= 0 || !O3DS::TryGetControlPayload(Envelope, Len, Payload))
+	if (!bRunning.load())
 	{
-		return false;
+		return EO3DSendResult::NotRunning;
+	}
+	TConstArrayView<uint8> Payload;
+	if (Envelope == nullptr || Len <= 0 || !O3DS::TryGetControlPayload(Envelope, Len, Payload))
+	{
+		return EO3DSendResult::Invalid;
 	}
 
 	TArray<uint8> Bytes(Envelope, Len);
@@ -125,7 +150,7 @@ bool FO3DFakeSender::SendControl(const uint8* Envelope, int32 Len)
 		FScopeLock Lock(&Mutex);
 		if (MaxQueued >= 0 && Queued >= MaxQueued)
 		{
-			return false; // the caller retries; control is never counted as a dropped frame
+			return EO3DSendResult::DroppedBackpressure; // the caller retries; control is never counted as a dropped frame
 		}
 		++Queued;
 		RecordedControl.Add(Bytes);
@@ -135,7 +160,7 @@ bool FO3DFakeSender::SendControl(const uint8* Envelope, int32 Len)
 	{
 		Link->Push(Bytes); // in-band, as TCP, UDP and NNG carry it
 	}
-	return true;
+	return EO3DSendResult::Queued;
 }
 
 void FO3DFakeSender::Tick(float /*DeltaSeconds*/)
@@ -144,8 +169,14 @@ void FO3DFakeSender::Tick(float /*DeltaSeconds*/)
 
 FO3DTransportStats FO3DFakeSender::GetStats() const
 {
-	FScopeLock Lock(&Mutex);
-	return Stats;
+	FO3DTransportStats Copy;
+	{
+		FScopeLock Lock(&Mutex);
+		Copy = Stats;
+		Copy.PendingFrames = Queued;
+	}
+	Copy.State = ConnectionState.Get();
+	return Copy;
 }
 
 void FO3DFakeSender::SetMaxQueued(int32 InMaxQueued)
@@ -187,14 +218,14 @@ FO3DFakeReceiver::FO3DFakeReceiver(TSharedPtr<FO3DFakeLink, ESPMode::ThreadSafe>
 {
 }
 
-bool FO3DFakeReceiver::Initialize(const FO3DTransportConfig& Config)
+FO3DTransportResult FO3DFakeReceiver::Initialize(const FO3DTransportConfig& Config)
 {
 	FScopeLock Lock(&Mutex);
 	StreamId = Config.StreamId;
 	Stats.Reset();
 	Queued.Reset();
 	bInitialized = true;
-	return true;
+	return FO3DTransportResult::Ok();
 }
 
 void FO3DFakeReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer)
@@ -203,22 +234,32 @@ void FO3DFakeReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& I
 	Consumer = InConsumer;
 }
 
-bool FO3DFakeReceiver::Start()
+FO3DTransportResult FO3DFakeReceiver::Start()
 {
-	FScopeLock Lock(&Mutex);
-	if (!bInitialized)
 	{
-		return false;
+		FScopeLock Lock(&Mutex);
+		if (!bInitialized)
+		{
+			return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("Fake receiver Start() before Initialize()."));
+		}
+		if (!Consumer.IsValid())
+		{
+			return FO3DTransportResult::Error(EO3DTransportError::NoConsumer, TEXT("Fake receiver Start() without a frame consumer."));
+		}
+		bRunning.store(true);
 	}
-	bRunning.store(true);
-	return true;
+	ConnectionState.Begin(EO3DConnectionState::Connected);
+	return FO3DTransportResult::Ok();
 }
 
 void FO3DFakeReceiver::Stop()
 {
 	bRunning.store(false);
-	FScopeLock Lock(&Mutex);
-	ControlSink.Reset(); // the interface contract: released in Stop
+	{
+		FScopeLock Lock(&Mutex);
+		ControlSink.Reset(); // the interface contract: released in Stop
+	}
+	ConnectionState.End(EO3DConnectionState::Idle);
 }
 
 int32 FO3DFakeReceiver::Poll()
@@ -249,8 +290,13 @@ int32 FO3DFakeReceiver::Poll()
 
 FO3DTransportStats FO3DFakeReceiver::GetStats() const
 {
-	FScopeLock Lock(&Mutex);
-	return Stats;
+	FO3DTransportStats Copy;
+	{
+		FScopeLock Lock(&Mutex);
+		Copy = Stats;
+	}
+	Copy.State = ConnectionState.Get();
+	return Copy;
 }
 
 void FO3DFakeReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& /*AudioConfig*/)
@@ -380,6 +426,7 @@ FO3DFakeTransportScope::FO3DFakeTransportScope()
 	FO3DTransportDescriptor Descriptor;
 	Descriptor.Name = Name;
 	Descriptor.OwningModule = TEXT("Open3DBroadcastTests");
+	Descriptor.GetCapabilities = [](const FO3DTransportConfig&) { return GetFakeTransportCapabilities(); };
 	Descriptor.CreateSender = [LinkForFactories, CreatedForFactories]() -> TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe>
 	{
 		TSharedRef<FO3DFakeSender> Sender = MakeShared<FO3DFakeSender>(LinkForFactories);

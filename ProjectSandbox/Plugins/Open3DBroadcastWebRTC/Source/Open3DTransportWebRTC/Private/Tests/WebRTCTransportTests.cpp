@@ -169,7 +169,7 @@ bool FWebRTCConnectionInitializeTest::RunTest(const FString& Parameters)
 
 	// Should successfully initialize even if server is unreachable
 	// (initialization is sync, but connection is async)
-	bool bResult = Sender.Initialize(Config);
+	bool bResult = Sender.Initialize(Config).IsOk();
 
 	// Note: On Windows 64-bit this should return true or fail with clear error
 	// On other platforms it should return false with clear message
@@ -204,10 +204,10 @@ bool FWebRTCConnectionDubleInitializeTest::RunTest(const FString& Parameters)
 	);
 
 #if PLATFORM_WINDOWS && PLATFORM_64BITS
-	bool bFirstInit = Sender.Initialize(Config);
+	bool bFirstInit = Sender.Initialize(Config).IsOk();
 	TestTrue(TEXT("First initialize should succeed"), bFirstInit);
 
-	bool bSecondInit = Sender.Initialize(Config);
+	bool bSecondInit = Sender.Initialize(Config).IsOk();
 	// Second initialization should fail - if it succeeds, test fails
 	if (bSecondInit)
 	{
@@ -235,7 +235,7 @@ bool FWebRTCConnectionInvalidUrlTest::RunTest(const FString& Parameters)
 	Config.Token = TEXT("test-token");
 
 #if PLATFORM_WINDOWS && PLATFORM_64BITS
-	bool bResult = Sender.Initialize(Config);
+	bool bResult = Sender.Initialize(Config).IsOk();
 	// Initialization should fail when URL is empty - if it does, test passes
 	if (bResult)
 	{
@@ -248,7 +248,7 @@ bool FWebRTCConnectionInvalidUrlTest::RunTest(const FString& Parameters)
 	FO3DTransportConfig TestConfig;
 	TestConfig.Uri = TEXT("");
 	TestConfig.Token = TEXT("test-token");
-	bool bResult = TestSender.Initialize(TestConfig);
+	bool bResult = TestSender.Initialize(TestConfig).IsOk();
 	if (bResult)
 	{
 		AddError(TEXT("Initialize should fail on non-Win64 platforms but succeeded"));
@@ -272,7 +272,7 @@ bool FWebRTCConnectionEmptyTokenTest::RunTest(const FString& Parameters)
 	Config.Token = TEXT("");  // Empty token
 
 #if PLATFORM_WINDOWS && PLATFORM_64BITS
-	bool bResult = Sender.Initialize(Config);
+	bool bResult = Sender.Initialize(Config).IsOk();
 	// Initialization should fail when token is empty - if it does, test passes
 	if (bResult)
 	{
@@ -285,7 +285,7 @@ bool FWebRTCConnectionEmptyTokenTest::RunTest(const FString& Parameters)
 	FO3DTransportConfig TestConfig;
 	TestConfig.Uri = TEXT("wss://test.livekit.example.com");
 	TestConfig.Token = TEXT("");
-	bool bResult = TestSender.Initialize(TestConfig);
+	bool bResult = TestSender.Initialize(TestConfig).IsOk();
 	if (bResult)
 	{
 		AddError(TEXT("Initialize should fail on non-Win64 platforms but succeeded"));
@@ -310,7 +310,7 @@ bool FWebRTCReceiverInitializeTest::RunTest(const FString& Parameters)
 	);
 
 #if PLATFORM_WINDOWS && PLATFORM_64BITS
-	bool bResult = Receiver.Initialize(Config);
+	bool bResult = Receiver.Initialize(Config).IsOk();
 	TestTrue(TEXT("Receiver should initialize on Win64"), bResult);
 
 	Receiver.Stop();

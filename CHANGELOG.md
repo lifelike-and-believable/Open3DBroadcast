@@ -478,6 +478,91 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   now checks that a fake FFI library is not freed while the registry counts a
   live instance, and is freed after a clean drain.
 
+### Results, connection state and capabilities (WP-A1 PR 3, ADR 0007 step 3)
+
+- **Results instead of bools (SHR-14).** `IOpen3DSender::Initialize`/`Start`
+  and `IOpen3DReceiver::Initialize`/`Start` return `FO3DTransportResult`: a
+  code (`InvalidConfig`, `NoConsumer`, `NotRunning`, `ResourceUnavailable`,
+  `AddressInUse`, `ConnectFailed`, `AuthFailed`, `Timeout`, `Unsupported`,
+  `Internal`) and a message. It converts to `bool` explicitly, so
+  `if (!Sender->Start())` still compiles. The same failure maps to the same
+  code on every transport: Start before a successful Initialize is
+  `NotRunning`, a config the transport cannot use is `InvalidConfig`, a
+  receiver started without a consumer is `NoConsumer` (it used to start and
+  drop every frame), a TCP or NNG port already bound is `AddressInUse`, and a
+  WebRTC config without a token source is `AuthFailed`. The sender component
+  and the LiveLink receiver source log the code and message.
+- **Send results.** `SendSerialized` takes one `FO3DSendPayload` (bytes,
+  subject, capture time, full-sync flag) by rvalue and returns
+  `EO3DSendResult`: `Queued`, `DroppedBackpressure`, `NotRunning`,
+  `NotConnected`, `Invalid` (empty or malformed), `TooLarge` (above the
+  transport's limit) or `Unsupported`. It is pure virtual. `SendControl`
+  returns the same enum (`Unsupported` by default); the control publisher
+  retries anything but `Queued`, as before. A TCP sender with no receiver
+  connected returns `NotConnected`. Only `DroppedBackpressure`, and the
+  not-running and not-connected cases where a transport counted them before,
+  move `DroppedFrames`.
+- **Connection state (ADR 0007 item 3).** New `EO3DConnectionState` (`Idle`,
+  `Connecting`, `Connected`, `Reconnecting`, `Failed`),
+  `GetConnectionState()` and `SetStateChangedCallback()` on both interfaces,
+  and `FO3DTransportStats::State`. Every in-tree transport keeps an
+  `FO3DConnectionStateTracker` (exported from Open3DShared): reads are
+  lock-free; a change runs the callback on the thread that made it, in order,
+  never two at once; after `Stop()` returns no late change from a worker or
+  FFI thread is applied or reported. TCP sender: `Connecting` while
+  listening, `Connected` with a receiver, `Reconnecting` when it leaves (worker
+  thread). NNG sender: by pipe count (worker thread). MoQ, WebRTC, TCP and NNG
+  receivers: on the game thread (session callbacks, `Tick` or `Poll`).
+  Loopback and UDP are `Connected` from `Start`. A failed `Start` leaves
+  `Failed`; a precondition failure (`NotRunning`, `NoConsumer`) leaves the
+  state unchanged. `FO3DTransportStats` also gained `SendErrors`,
+  `ReceiveErrors`, `PendingFrames` and `PendingBytes` (zero where a transport
+  does not count them yet).
+- **Capabilities (ADR 0007 item 4).** New `FO3DTransportCapabilities`
+  (`bSend`, `bReceive`, `bAudioSend`, `bAudioReceive`, `bControl`,
+  `bBidirectional`, `bPeerJoinSignal`, `Delivery`, `MaxPayloadBytes`) from
+  `GetCapabilities()` on both interfaces, and before any instance exists from
+  the descriptor's new `GetCapabilities(Config)` through
+  `FO3DTransportRegistry::GetCapabilities(Name, Config, Out)`. It absorbs ADR
+  0005's delivery guarantee (`EO3DDeliveryGuarantee`: Loopback, TCP, NNG
+  pair and push/pull, WebRTC `ReliableOrdered`; UDP, NNG pub/sub, MoQ and
+  WebRTC with `webrtc.prefer_lossy` `Unreliable`) and ADR 0011's
+  `SupportsControl`. `SupportsAudio()` and `SupportsControl()` remain as
+  non-virtual forwarders to `GetCapabilities()`.
+- **Upgrade note for add-on and out-of-tree transport authors.**
+  `O3D_TRANSPORT_API_VERSION` is now 4, and a transport built for 3 is
+  refused at registration. To port a transport:
+  1. Return `FO3DTransportResult::Ok()` or
+     `FO3DTransportResult::Error(Code, Message)` from `Initialize` and
+     `Start`; return `NoConsumer` from a receiver's `Start` when no consumer
+     is set (after the `NotRunning` check).
+  2. Replace `SendSerialized(const uint8*, int32, const FString&, double)`
+     with `EO3DSendResult SendSerialized(FO3DSendPayload&& Payload)`; take
+     ownership of `Payload.Bytes` instead of copying.
+  3. Return `EO3DSendResult` from `SendControl`.
+  4. Implement `GetCapabilities()`, `GetConnectionState()` and
+     `SetStateChangedCallback()` (an `FO3DConnectionStateTracker` member
+     does the last two), and remove any `SupportsAudio()` or
+     `SupportsControl()` override: they are no longer virtual.
+  5. Optionally fill `FO3DTransportDescriptor::GetCapabilities` so pickers
+     and the registry know the delivery guarantee before an instance exists.
+
+  The deprecated `Open3DSender`/`Open3DReceiver` forwarding headers and
+  register functions still compile; removing them moves to API version 5 or
+  later.
+- **Tests.** New `Open3DBroadcast.Shared.TransportResult.*`,
+  `Open3DBroadcast.Shared.ConnectionState.*` (tracker rules, callback thread),
+  `Open3DBroadcast.Shared.TransportCapabilities.*` (registry query, every
+  built-in transport's values, NNG per mode) and
+  `Open3DBroadcast.Transport.Results.*` (NotRunning, InvalidConfig and
+  NotConnected per transport). The conformance suite gained
+  ReceiverStartWithoutConsumer, SendEmptyPayloadInvalid, CapabilitiesMatch,
+  ConnectionStateLifecycle and ConnectionStateConnected, and every profile
+  states its expected capabilities. The TCP tests check the
+  Connecting/Connected/Reconnecting sequence; the WebRTC add-on tests check
+  its send results, state transitions and `prefer_lossy` delivery. Tests
+  that asserted bools now assert the exact result.
+
 ### WebRTC becomes the Open3DBroadcastWebRTC add-on plugin (WP-F11, ADR 0002)
 
 - **WebRTC is no longer part of Open3DBroadcast.** The `Open3DTransportWebRTC`

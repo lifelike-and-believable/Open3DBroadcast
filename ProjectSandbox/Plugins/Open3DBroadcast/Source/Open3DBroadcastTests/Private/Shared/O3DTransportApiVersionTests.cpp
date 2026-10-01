@@ -20,6 +20,10 @@ bool FO3DTransportApiVersionHostTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The control channel interface is version 2 or later"), O3DTransport::GetHostApiVersion() >= 2);
 	FString Error;
 	TestFalse(TEXT("An add-on built before the control channel is refused"), O3DTransport::CheckApiVersion(TEXT("OldAddOn"), 1, O3DTransport::GetHostApiVersion(), Error));
+	// WP-A1 PR 3 changed the interface classes' layouts and vtables (results, state, capabilities),
+	// so an add-on built against version 3 (WP-A1 PR 2) must refuse to load.
+	TestTrue(TEXT("The results/state/capabilities interface is version 4 or later"), O3DTransport::GetHostApiVersion() >= 4);
+	TestFalse(TEXT("An add-on built before results and capabilities is refused"), O3DTransport::CheckApiVersion(TEXT("OldAddOn"), 3, O3DTransport::GetHostApiVersion(), Error));
 	return true;
 }
 

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Transport/O3DSenderInterface.h"
+#include "Transport/O3DConnectionState.h"
 #include "../Shared/SocketsTransportCommon.h"
 #include "O3DAudioFrameCodec.h"
 #include "O3DEncodedPayloadQueue.h"
@@ -61,17 +62,18 @@ public:
 	FO3DSocketsTcpSender();
 	virtual ~FO3DSocketsTcpSender() override;
 
-	virtual bool Initialize(const FO3DTransportConfig& Config) override;
-	virtual bool Start() override;
+	virtual FO3DTransportResult Initialize(const FO3DTransportConfig& Config) override;
+	virtual FO3DTransportResult Start() override;
 	virtual void Stop() override;
 	virtual bool Send(const O3DS::SubjectList& List) override;
-	virtual bool SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec) override;
+	virtual EO3DSendResult SendSerialized(FO3DSendPayload&& Payload) override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual FO3DTransportStats GetStats() const override;
-	virtual bool SupportsAudio() const override;
+	virtual FO3DTransportCapabilities GetCapabilities() const override { return O3DSockets::GetTcpCapabilities(FO3DTransportConfig()); }
+	virtual EO3DConnectionState GetConnectionState() const override { return ConnectionState.Get(); }
+	virtual void SetStateChangedCallback(FO3DConnectionStateCallback Callback) override { ConnectionState.SetCallback(MoveTemp(Callback)); }
 	virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
-	virtual bool SupportsControl() const override { return true; }
-	virtual bool SendControl(const uint8* Envelope, int32 Len) override;
+	virtual EO3DSendResult SendControl(const uint8* Envelope, int32 Len) override;
 
 	/** True while a receiver is connected. Any thread. */
 	bool HasClient() const { return PublishState->bClientConnected.load(); }
@@ -85,9 +87,9 @@ public:
 private:
 	class FTcpSenderRunnable;
 
-	bool CreateListenSocket();
+	FO3DTransportResult CreateListenSocket();
 	void DestroySocket();
-	bool SendBytes(const uint8* Data, int32 Len);
+	EO3DSendResult SendBytes(const uint8* Data, int32 Len);
 	TSharedPtr<FInternetAddr> CreateBindAddress(const FString& Host, int32 Port, bool& bOutValid);
 
 	// Async send worker
@@ -140,6 +142,15 @@ private:
 	std::atomic<int64> SendWaitCount{0};
 
 	mutable FCriticalSection StatsMutex;
+
+	/** Set by a successful Start(), cleared by Stop(); sends outside a session return NotRunning. */
+	std::atomic<bool> bRunning{false};
+
+	/**
+	 * ADR 0007 item 3: Connecting while listening without a receiver, Connected while one is
+	 * connected (set by the worker on accept), Reconnecting after it went away.
+	 */
+	FO3DConnectionStateTracker ConnectionState;
 
 	TSharedRef<FSocketsTcpPublishState, ESPMode::ThreadSafe> PublishState;
 };

@@ -160,7 +160,7 @@ FO3DNngSender::FO3DNngSender()
     PipeToken = GetSenderPipeContextRegistry().Register(PipeContext);
 }
 
-bool FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
+FO3DTransportResult FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
 {
     // The worker reads Options and owns the socket; neither may change under it (TRB-33).
     Stop();
@@ -169,11 +169,13 @@ bool FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
     if (!O3DNNG::ParseSenderOptions(Config, Options, Error))
     {
         UE_LOG(LogO3DNngSender, Warning, TEXT("Failed to parse NNG sender config: %s"), *Error);
-        return false;
+        bInitialized = false;
+        return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("NNG sender config: %s"), *Error));
     }
 
     Options.MaxQueueBytes = FMath::Clamp<uint64>(Options.MaxQueueBytes, kMinQueueBytes, kMaxQueueBytes);
     UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender queue limit set to %llu bytes"), Options.MaxQueueBytes);
+    CapabilityMode.store(Options.Mode);
 
     ActiveConfig = Config;
     ActiveAudioConfig = Config.Audio;
@@ -199,7 +201,7 @@ bool FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
 
     bInitialized = true;
     PublishState->Gate->Open();
-    return true;
+    return FO3DTransportResult::Ok();
 }
 
 FO3DNngSender::~FO3DNngSender()
@@ -211,32 +213,43 @@ FO3DNngSender::~FO3DNngSender()
     PipeToken = nullptr;
 }
 
-bool FO3DNngSender::Start()
+FO3DTransportResult FO3DNngSender::Start()
 {
     if (!bInitialized.Load())
     {
         UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender Start called before Initialize"));
-        return false;
+        return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("NNG sender Start() before a successful Initialize()."));
     }
 
     FScopeLock Lock(&StateMutex);
 
     if (bRunning.Load())
     {
-        return true;
+        return FO3DTransportResult::Ok();
     }
 
     // The worker does not exist yet, so this thread owns the socket here (TRB-33).
     BackoffAttempt = 0;
     LastBackoffAttemptTime = 0.0;
-    const bool bOpened = OpenSocket();
+    int32 OpenError = 0;
+    const bool bOpened = OpenSocket(&OpenError);
     if (!bOpened && Options.bListen)
     {
         // OpenSocket logged the reason (for example, the port is in use).
-        return false;
+        const FO3DTransportResult Result = FO3DTransportResult::Error(
+            OpenError == NNG_EADDRINUSE ? EO3DTransportError::AddressInUse : EO3DTransportError::ConnectFailed,
+            FString::Printf(TEXT("NNG sender could not listen on %s (%d %s)."), *O3DRedact::Url(Options.CanonicalUri), OpenError,
+                OpenError != 0 ? UTF8_TO_TCHAR(nng_strerror(OpenError)) : TEXT("")));
+        ConnectionState.End(EO3DConnectionState::Failed, Result);
+        return Result;
     }
 
     PublishState->Gate->Open();
+
+    // No peer pipe yet; the worker reports the first one. A dialer that could not dial yet
+    // keeps retrying (below), so it is Connecting too.
+    bWorkerSawPeer = false;
+    ConnectionState.Begin(EO3DConnectionState::Connecting);
 
     bStopWorker = false;
     StartWorker();
@@ -253,7 +266,7 @@ bool FO3DNngSender::Start()
         UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender could not dial %s yet; retrying with backoff (check host/port)"), *O3DRedact::Url(Options.CanonicalUri));
     }
 
-    return true;
+    return FO3DTransportResult::Ok();
 }
 
 void FO3DNngSender::Stop()
@@ -267,6 +280,7 @@ void FO3DNngSender::Stop()
 
     if (!bRunning.Load())
     {
+        ConnectionState.End(EO3DConnectionState::Idle);
         return;
     }
 
@@ -281,6 +295,8 @@ void FO3DNngSender::Stop()
 
     bRunning = false;
     PipeContext->bConnected.store(false);
+    // The worker, the only thread that reports changes while running, has exited.
+    ConnectionState.End(EO3DConnectionState::Idle);
     UE_LOG(LogO3DNngSender, Log, TEXT("NNG sender stopped"));
 }
 
@@ -315,20 +331,21 @@ bool FO3DNngSender::Send(const O3DS::SubjectList& List)
         ObservedSubject = UTF8_TO_TCHAR(List.mItems[0]->mName.c_str());
     }
 
-    return SendBytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten, ObservedSubject);
+    return SendBytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten, ObservedSubject) == EO3DSendResult::Queued;
 }
 
-bool FO3DNngSender::SendSerialized(const uint8* Data, int32 Len, const FString& SubjectName, double /*CaptureTimestampSec*/)
+EO3DSendResult FO3DNngSender::SendSerialized(FO3DSendPayload&& Payload)
 {
     if (!bInitialized.Load() || !bRunning.Load())
     {
         FO3DPerformanceMetrics::Get().RecordFrameDropped();
-        return false;
+        return EO3DSendResult::NotRunning;
     }
 
+    const int32 Len = Payload.Bytes.Num();
     if (Len <= 0)
     {
-        return false;
+        return EO3DSendResult::Invalid;
     }
 
     // The caller (FO3DSenderSerializer) already serialized these bytes, not
@@ -339,7 +356,9 @@ bool FO3DNngSender::SendSerialized(const uint8* Data, int32 Len, const FString& 
     FO3DPerformanceMetrics::Get().RecordFrameCaptured();
     FO3DPerformanceMetrics::Get().RecordBytesSerialized(Len);
 
-    return SendBytes(Data, Len, SubjectName);
+    // No NotConnected: a frame queued before a peer exists is dropped and counted by the worker,
+    // as NNG itself would. The shared queue of WP-A1 step 4 takes Payload.Bytes without a copy.
+    return SendBytes(Payload.Bytes.GetData(), Len, Payload.Subject);
 }
 
 /**
@@ -348,18 +367,22 @@ bool FO3DNngSender::SendSerialized(const uint8* Data, int32 Len, const FString& 
  * deliver it reliably; a pub socket can drop it for a slow subscriber, which the control
  * publisher's redundancy and snapshots cover (ADR 0005 Q3).
  */
-bool FO3DNngSender::SendControl(const uint8* Envelope, int32 Len)
+EO3DSendResult FO3DNngSender::SendControl(const uint8* Envelope, int32 Len)
 {
-    TConstArrayView<uint8> Payload;
-    if (!bInitialized.Load() || !bRunning.Load() || !O3DS::TryGetControlPayload(Envelope, Len, Payload))
+    if (!bInitialized.Load() || !bRunning.Load())
     {
-        return false;
+        return EO3DSendResult::NotRunning;
     }
-    return EnqueuePayload(Envelope, Len);
+    TConstArrayView<uint8> Payload;
+    if (!O3DS::TryGetControlPayload(Envelope, Len, Payload))
+    {
+        return EO3DSendResult::Invalid;
+    }
+    return EnqueuePayload(Envelope, Len) ? EO3DSendResult::Queued : EO3DSendResult::DroppedBackpressure;
 }
 
 /** Enqueue already-serialized bytes for transmission and record transport-level stats/subject bookkeeping. */
-bool FO3DNngSender::SendBytes(const uint8* Data, int32 Len, const FString& SubjectName)
+EO3DSendResult FO3DNngSender::SendBytes(const uint8* Data, int32 Len, const FString& SubjectName)
 {
     if (!SubjectName.IsEmpty())
     {
@@ -371,14 +394,14 @@ bool FO3DNngSender::SendBytes(const uint8* Data, int32 Len, const FString& Subje
         FScopeLock StatsLock(&StatsMutex);
         Stats.DroppedFrames++;
         FO3DPerformanceMetrics::Get().RecordTransportFrameDropped();
-        return false;
+        return EO3DSendResult::DroppedBackpressure;
     }
 
     // Record successful send metrics
     FO3DPerformanceMetrics::Get().RecordBytesSent(Len);
     TransportMetrics->RecordFrameSent(static_cast<uint64>(Len));
 
-    return true;
+    return EO3DSendResult::Queued;
 }
 
 void FO3DNngSender::Tick(float /*DeltaSeconds*/)
@@ -389,15 +412,24 @@ void FO3DNngSender::Tick(float /*DeltaSeconds*/)
 
 FO3DTransportStats FO3DNngSender::GetStats() const
 {
-    FScopeLock Lock(&StatsMutex);
-    FO3DTransportStats Copy = Stats;
+    FO3DTransportStats Copy;
+    {
+        FScopeLock Lock(&StatsMutex);
+        Copy = Stats;
+    }
     Copy.DroppedFrames += PublishState->AudioDropped.load();
+    Copy.State = ConnectionState.Get();
+    Copy.PendingBytes = static_cast<int64>(PublishState->SendQueue.GetPendingBytes());
     return Copy;
 }
 
-bool FO3DNngSender::OpenSocket()
+bool FO3DNngSender::OpenSocket(int32* OutNngError)
 {
     CloseSocket();
+    if (OutNngError)
+    {
+        *OutNngError = 0;
+    }
 
     FNngSocketWrapper* NewSocket = new FNngSocketWrapper();
     int Ret = 0;
@@ -470,6 +502,10 @@ bool FO3DNngSender::OpenSocket()
         UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender could not %s %s (%d) %s"),
             Options.bListen ? TEXT("listen on") : TEXT("dial"),
             *O3DRedact::Url(Options.CanonicalUri), Ret, UTF8_TO_TCHAR(nng_strerror(Ret)));
+        if (OutNngError)
+        {
+            *OutNngError = Ret;
+        }
         delete NewSocket;
         Socket = nullptr;
         LastBackoffAttemptTime = FPlatformTime::Seconds();
@@ -549,6 +585,7 @@ uint32 FO3DNngSender::RunWorker()
         // The worker is the only thread that opens, closes or reopens the socket while
         // running (TRB-33).
         EnsureSocketOnWorker();
+        UpdateConnectionStateOnWorker();
 
         if (!PublishState->SendQueue.Dequeue(Bytes))
         {
@@ -597,6 +634,27 @@ uint32 FO3DNngSender::RunWorker()
     }
 
     return 0;
+}
+
+void FO3DNngSender::UpdateConnectionStateOnWorker()
+{
+    // Pipe events arrive on NNG threads that hold only the pipe context, so the worker turns
+    // the pipe count into connection-state changes (ADR 0007 item 3).
+    const bool bHasPeer = Socket != nullptr && PipeContext->PipeCount.load() > 0;
+    if (bHasPeer == bWorkerSawPeer)
+    {
+        return;
+    }
+    bWorkerSawPeer = bHasPeer;
+    if (bHasPeer)
+    {
+        ConnectionState.Set(EO3DConnectionState::Connected);
+    }
+    else
+    {
+        ConnectionState.Set(EO3DConnectionState::Reconnecting,
+            FO3DTransportResult::Error(EO3DTransportError::ConnectFailed, TEXT("The last NNG peer disconnected.")));
+    }
 }
 
 void FO3DNngSender::RecordSendDrop()
