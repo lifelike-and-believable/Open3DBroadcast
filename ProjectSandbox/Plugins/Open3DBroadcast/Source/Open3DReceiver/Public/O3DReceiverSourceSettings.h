@@ -26,19 +26,19 @@ struct FO3DReceiverSourceConfig
     GENERATED_BODY()
 
 public:
-    UPROPERTY(EditAnywhere, Category = "Open3DStream")
+    UPROPERTY(EditAnywhere, Category = "Open3DBroadcast")
     FName TransportName = TEXT("loopback");
 
     /** Enable audio playback for transports that support it. */
-    UPROPERTY(EditAnywhere, Category = "Open3DStream|Audio")
+    UPROPERTY(EditAnywhere, Category = "Open3DBroadcast|Audio")
     bool bEnableAudio = false;
 
     /** Preferred decoder codec; leave empty to use transport default. */
-    UPROPERTY(EditAnywhere, Category = "Open3DStream|Audio", meta = (EditCondition = "bEnableAudio", EditConditionHides))
+    UPROPERTY(EditAnywhere, Category = "Open3DBroadcast|Audio", meta = (EditCondition = "bEnableAudio", EditConditionHides))
     FName AudioCodec = NAME_None;
 
     /** Transport-specific key/value overrides populated by modular transport UIs. Hidden from the generic details panel. */
-    UPROPERTY(VisibleAnywhere, Category = "Open3DStream", meta = (HideInDetailPanel))
+    UPROPERTY(VisibleAnywhere, Category = "Open3DBroadcast", meta = (HideInDetailPanel))
     TMap<FString, FString> TransportOptions;
 };
 
@@ -49,7 +49,7 @@ class OPEN3DRECEIVER_API UO3DReceiverSettingsObject : public UObject
     GENERATED_BODY()
 
 public:
-    UPROPERTY(EditAnywhere, GlobalConfig, Category = "Open3DStream", Meta = (ShowOnlyInnerProperties))
+    UPROPERTY(EditAnywhere, GlobalConfig, Category = "Open3DBroadcast", Meta = (ShowOnlyInnerProperties))
     FO3DReceiverSourceConfig Settings;
 };
 
@@ -64,27 +64,27 @@ class OPEN3DRECEIVER_API UO3DReceiverSourceSettings : public ULiveLinkSourceSett
 
 public:
     /** Enable receiver-side concealment (predict/hold synthetic frames on a gap) for gated (A2) frames. */
-    UPROPERTY(EditAnywhere, Category = "Open3DStream|Concealment")
+    UPROPERTY(EditAnywhere, Category = "Open3DBroadcast|Concealment")
     bool bEnableConcealment = true;
 
     /** Gap since the last real frame (ms) beyond which concealment starts synthesizing, instead of
      *  leaving small gaps to LiveLink's own interpolation. */
-    UPROPERTY(EditAnywhere, Category = "Open3DStream|Concealment", meta = (EditCondition = "bEnableConcealment", ClampMin = "0.0"))
+    UPROPERTY(EditAnywhere, Category = "Open3DBroadcast|Concealment", meta = (EditCondition = "bEnableConcealment", ClampMin = "0.0"))
     float StarvationThresholdMs = 50.0f;
 
     /** Stop extrapolating and hold after this many ms of continuous concealment with no real frame. */
-    UPROPERTY(EditAnywhere, Category = "Open3DStream|Concealment", meta = (EditCondition = "bEnableConcealment", ClampMin = "0.0"))
+    UPROPERTY(EditAnywhere, Category = "Open3DBroadcast|Concealment", meta = (EditCondition = "bEnableConcealment", ClampMin = "0.0"))
     float MaxHorizonMs = 150.0f;
 
     /** Blend from the last synthesized pose toward the resumed real trajectory over this many ms
      *  after a gap recovers, instead of snapping. 0 disables correction blending. */
-    UPROPERTY(EditAnywhere, Category = "Open3DStream|Concealment", meta = (EditCondition = "bEnableConcealment", ClampMin = "0.0"))
+    UPROPERTY(EditAnywhere, Category = "Open3DBroadcast|Concealment", meta = (EditCondition = "bEnableConcealment", ClampMin = "0.0"))
     float CorrectionWindowMs = 100.0f;
 
     /** Latency-hiding horizon (ms, roadmap doc §5/C1.c) beyond the newest real frame to proactively
      *  predict toward, even with no gap. 0 (default) disables render-ahead entirely - it trades
      *  prediction accuracy for lower perceived latency, so it's opt-in. */
-    UPROPERTY(EditAnywhere, Category = "Open3DStream|Concealment", meta = (EditCondition = "bEnableConcealment", ClampMin = "0.0"))
+    UPROPERTY(EditAnywhere, Category = "Open3DBroadcast|Concealment", meta = (EditCondition = "bEnableConcealment", ClampMin = "0.0"))
     float RenderAheadMs = 0.0f;
 
     /**
@@ -92,6 +92,6 @@ public:
      * the runtime override, then Project Settings > Plugins > Open3DBroadcast Control. Enabled or
      * Disabled here wins over both, for projects that want control on only some sources.
      */
-    UPROPERTY(EditAnywhere, Category = "Open3DStream|Control")
+    UPROPERTY(EditAnywhere, Category = "Open3DBroadcast|Control")
     EO3DControlAcceptMode ControlAccept = EO3DControlAcceptMode::ProjectDefault;
 };

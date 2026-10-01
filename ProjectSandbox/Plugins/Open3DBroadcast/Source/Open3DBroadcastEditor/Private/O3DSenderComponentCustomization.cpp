@@ -84,12 +84,12 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
         UE_LOG(LogO3DSenderDetails, Warning, TEXT("CustomizeDetails could not resolve a valid sender component."));
     }
 
-    DetailBuilder.HideCategory(TEXT("Open3DStream|Sender"));
-    DetailBuilder.HideCategory(TEXT("Open3DStream|Sender|Transport"));
-    DetailBuilder.HideCategory(TEXT("Open3DStream|Sender|Audio"));
-    DetailBuilder.HideCategory(TEXT("Open3DStream|Audio"));
-    DetailBuilder.HideCategory(TEXT("Open3DStream|Sender|Curves"));
-    DetailBuilder.HideCategory(TEXT("Open3DStream|Sender|Curves|Filtering"));
+    DetailBuilder.HideCategory(TEXT("Open3DBroadcast|Sender"));
+    DetailBuilder.HideCategory(TEXT("Open3DBroadcast|Sender|Transport"));
+    DetailBuilder.HideCategory(TEXT("Open3DBroadcast|Sender|Audio"));
+    DetailBuilder.HideCategory(TEXT("Open3DBroadcast|Audio"));
+    DetailBuilder.HideCategory(TEXT("Open3DBroadcast|Sender|Curves"));
+    DetailBuilder.HideCategory(TEXT("Open3DBroadcast|Sender|Curves|Filtering"));
     DetailBuilder.HideCategory(TEXT("Audio"));
 
     TSharedPtr<IPropertyHandle> TargetMeshHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TargetMesh));
@@ -178,8 +178,8 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
 
     RefreshTransportOptions();
 
-    IDetailCategoryBuilder& RootCategory = DetailBuilder.EditCategory(TEXT("Open3DStream"));
-    RootCategory.SetDisplayName(LOCTEXT("RootCategoryLabel", "Open3DStream"));
+    IDetailCategoryBuilder& RootCategory = DetailBuilder.EditCategory(TEXT("Open3DBroadcast"));
+    RootCategory.SetDisplayName(LOCTEXT("RootCategoryLabel", "Open3DBroadcast"));
     RootCategory.SetSortOrder(0);
 
     IDetailGroup& SenderGroup = RootCategory.AddGroup(TEXT("Sender"), LOCTEXT("SenderGroupLabel", "Sender"), false, true);

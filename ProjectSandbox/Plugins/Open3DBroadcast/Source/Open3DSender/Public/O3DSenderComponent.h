@@ -160,7 +160,7 @@ DECLARE_MULTICAST_DELEGATE_TwoParams(FOnO3DPoseFrameReady, const FString& /*Subj
  * Captures skeletal pose data (and optionally audio) from an actor, serialises it into the
  * Open3DStream wire format, and forwards frames to a user-selectable transport implementation.
  */
-UCLASS(ClassGroup = (Open3DStream), meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (Open3DBroadcast), meta = (BlueprintSpawnableComponent))
 class OPEN3DSENDER_API UO3DSenderComponent : public UActorComponent
 {
 	GENERATED_BODY()
@@ -172,39 +172,39 @@ public:
 	virtual ~UO3DSenderComponent();
 
 	/** Start gathering pose/audio frames. Safe to call when already capturing. */
-	UFUNCTION(BlueprintCallable, meta = (CallInEditor), Category = "Open3DStream|Sender")
+	UFUNCTION(BlueprintCallable, meta = (CallInEditor), Category = "Open3DBroadcast|Sender")
 	void StartCapture();
 
 	/** Halt capture and detach from the active transport/audio sinks. */
-	UFUNCTION(BlueprintCallable, meta = (CallInEditor), Category = "Open3DStream|Sender")
+	UFUNCTION(BlueprintCallable, meta = (CallInEditor), Category = "Open3DBroadcast|Sender")
 	void StopCapture();
 
 	/** Convenience accessor mirroring internal capture state. */
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Sender")
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Sender")
 	bool IsCapturing() const { return bIsCapturing; }
 
 	/** Skeletal mesh that supplies bone transforms; auto-located from the owner if unset. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender")
 	TWeakObjectPtr<USkeletalMeshComponent> TargetMesh;
 
 	/** Subject identifier embedded in serialized frames for downstream routing. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender", meta = (DisplayName = "Subject Name"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender", meta = (DisplayName = "Subject Name"))
 	FString SubjectName;
 
 	/** Desired pose capture rate in Hz (final rate clamped by world tick). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender")
 	float CaptureRateHz = 60.0f;
 
 	/** Start capture automatically as soon as the component is registered / BeginPlay runs. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender")
 	bool bAutoStartCapture = true;
 
 	/** When true, the component will spawn and manage a transport instance automatically. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Transport")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Transport")
 	bool bAutoCreateTransport = false;
 
 	/** Name of the registered transport factory to use (loopback, sockets, webrtc, ...). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Transport", meta = (HideInDetailPanel))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Transport", meta = (HideInDetailPanel))
 	FName TransportName = TEXT("loopback");
 
 	/**
@@ -212,59 +212,59 @@ public:
 	 * Saved with the asset, so it never holds a secret: keys the transport declares secret go to FO3DSecretStore
 	 * instead (ADR 0004). "<transport>.credentialProfile" selects which stored secret applies.
 	 */
-	UPROPERTY(VisibleAnywhere, Category = "Open3DStream|Sender|Transport", meta = (HideInDetailPanel))
+	UPROPERTY(VisibleAnywhere, Category = "Open3DBroadcast|Sender|Transport", meta = (HideInDetailPanel))
 	TMap<FString, FString> TransportOptions;
 
 	/** Enable PCM capture and forwarding when the active transport supports it. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Audio")
 	bool bEnableAudio = false;
 
 	/** Select the audio capture source (game mix vs microphone). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio", meta = (EditCondition = "bEnableAudio"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Audio", meta = (EditCondition = "bEnableAudio"))
 	EO3DSenderCaptureMode AudioCaptureMode = EO3DSenderCaptureMode::Mix;
 
 	/** Friendly microphone name surfaced to users; resolved back to a device index at runtime. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio", meta = (GetOptions = "GetAvailableAudioInputDeviceOptions", EditCondition = "bEnableAudio", EditConditionHides))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Audio", meta = (GetOptions = "GetAvailableAudioInputDeviceOptions", EditCondition = "bEnableAudio", EditConditionHides))
 	FName AudioInputDevice;
 
 	/** Full audio capture configuration (sample rate, bitrate, gains, etc.). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio", meta = (EditCondition = "bEnableAudio", ShowOnlyInnerProperties))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Audio", meta = (EditCondition = "bEnableAudio", ShowOnlyInnerProperties))
 	FO3DSenderAudioCaptureConfig AudioCaptureConfig;
 
 	/** Preferred audio codec for transport delivery. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Audio", meta = (EditCondition = "bEnableAudio", GetOptions = "GetAvailableAudioCodecOptions"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Audio", meta = (EditCondition = "bEnableAudio", GetOptions = "GetAvailableAudioCodecOptions"))
 	FName AudioCodec = TEXT("PCM16");
 
 	/** Clamp morph target values to [0,1] before serialisation. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Curves")
 	bool bClampMorphCurvesToUnit = true;
 
 	/** Treat NaN/Inf curve values as 0 to prevent propagating bad data to receivers. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Curves")
 	bool bDropNaNAndInfinity = true;
 
 	/** Enable delta/regex filtering for animation curves prior to emission. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves|Filtering")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Curves|Filtering")
 	bool bEnableCurveFiltering = false;
 
 	/** Ignore curve delta magnitudes smaller than this epsilon. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves|Filtering", meta = (EditCondition = "bEnableCurveFiltering", ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Curves|Filtering", meta = (EditCondition = "bEnableCurveFiltering", ClampMin = "0.0"))
 	float CurveEpsilon = 0.0005f;
 
 	/** Emit a new value only when it changes by more than this threshold. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves|Filtering", meta = (EditCondition = "bEnableCurveFiltering", ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Curves|Filtering", meta = (EditCondition = "bEnableCurveFiltering", ClampMin = "0.0"))
 	float CurveDeltaThreshold = 0.001f;
 
 	/** Wildcard patterns that whitelist curves for emission. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves|Filtering", meta = (EditCondition = "bEnableCurveFiltering"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Curves|Filtering", meta = (EditCondition = "bEnableCurveFiltering"))
 	TArray<FString> IncludeCurvePatterns;
 
 	/** Wildcard patterns that blacklist curves from emission. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves|Filtering", meta = (EditCondition = "bEnableCurveFiltering"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Curves|Filtering", meta = (EditCondition = "bEnableCurveFiltering"))
 	TArray<FString> ExcludeCurvePatterns;
 
 	/** Emit verbose log entries when curves are filtered out. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Curves|Filtering")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Curves|Filtering")
 	bool bLogFilteredCurves = false;
 
 	/** Enable delta/residual transmission (roadmap doc §5/C2) instead of a full snapshot every
@@ -274,20 +274,20 @@ public:
 	 *  every FullSyncIntervalSeconds resets the encoder and bounds how long a divergence lasts.
 	 *  Per-frame curve epsilon/delta filtering is off in this mode. Does not compose with
 	 *  quantization below - if both are enabled, Residual takes precedence. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Residual")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Residual")
 	bool bEnableResidualCoding = false;
 
 	/** Predictor for residual coding. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Residual", meta = (EditCondition = "bEnableResidualCoding"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Residual", meta = (EditCondition = "bEnableResidualCoding"))
 	EO3DSenderResidualPredictor ResidualPredictor = EO3DSenderResidualPredictor::Linear;
 
 	/** Force a residual keyframe (absolute values, re-anchors drift) every N frames. 0 disables
 	 *  periodic keyframes (only the first frame / a topology change forces one). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Residual", meta = (EditCondition = "bEnableResidualCoding", ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Residual", meta = (EditCondition = "bEnableResidualCoding", ClampMin = "0"))
 	int32 ResidualKeyframeIntervalFrames = 300;
 
 	/** Per-channel residual magnitude below which a channel is omitted from the wire. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Residual", meta = (EditCondition = "bEnableResidualCoding", ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Residual", meta = (EditCondition = "bEnableResidualCoding", ClampMin = "0.0"))
 	float ResidualDeltaThreshold = 0.0001f;
 
 	/** Enable adaptive variable-bit channel quantization (roadmap doc §6/D1) on the legacy
@@ -297,23 +297,23 @@ public:
 	 *  FullSyncIntervalSeconds). Per-frame curve epsilon/delta filtering is off in this mode. Does
 	 *  not compose with Residual above yet - if both are enabled, Residual takes precedence and this
 	 *  is ignored. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Quantization")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Quantization")
 	bool bEnableQuantization = false;
 
 	/** Max |delta| (from a transform's translation at the last full sync, in the transform's own
 	 *  local-space units) representable at the 8-bit quantization tier. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Quantization", meta = (EditCondition = "bEnableQuantization", ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Quantization", meta = (EditCondition = "bEnableQuantization", ClampMin = "0.0"))
 	float QuantizationByteRange = 0.01f;
 
 	/** Max |delta| representable at the 16-bit quantization tier; beyond this a channel falls back
 	 *  to full float32 precision. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Quantization", meta = (EditCondition = "bEnableQuantization", ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Quantization", meta = (EditCondition = "bEnableQuantization", ClampMin = "0.0"))
 	float QuantizationHalfRange = 1.0f;
 
 	/** Per-channel magnitude below which a channel is omitted from the wire entirely - the same
 	 *  "send nothing" floor the legacy delta scheme already has; quantization only decides how
 	 *  precisely to encode a channel that already cleared this. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Quantization", meta = (EditCondition = "bEnableQuantization", ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Quantization", meta = (EditCondition = "bEnableQuantization", ClampMin = "0.0"))
 	float QuantizationDeltaThreshold = 0.0001f;
 
 	/** With residual coding or quantization on, send a full skeleton descriptor and pose at least
@@ -321,11 +321,11 @@ public:
 	 *  interval. A full sync is also sent on start, on a subject rename, and whenever the skeleton,
 	 *  the curve list or the encoding settings change. The legacy encoding sends a full pose every
 	 *  frame and ignores this. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Encoding", meta = (ClampMin = "0.25", ClampMax = "10.0", UIMin = "0.25", UIMax = "10.0", Units = "s"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Encoding", meta = (ClampMin = "0.25", ClampMax = "10.0", UIMin = "0.25", UIMax = "10.0", Units = "s"))
 	float FullSyncIntervalSeconds = 1.0f;
 
 	/** Why the last StartCapture() call did not start capture, or empty if it did. */
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Sender")
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Sender")
 	FString GetLastStartCaptureError() const { return LastStartCaptureError; }
 
 	// ── Control channel (docs/adr/0011-control-channel.md, item 8) ───────────────────────
@@ -338,7 +338,7 @@ public:
 	 * TargetSubject (optional) aims it at one character's subject. Needs a running transport;
 	 * returns false (and logs why) when the event cannot be sent.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Open3DStream|Sender|Control")
+	UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Sender|Control")
 	bool FireControlEvent(const FString& EventName, const FO3DControlValue& Payload, FString TargetSubject = FString(TEXT("")));
 
 	/**
@@ -346,19 +346,19 @@ public:
 	 * parameter. Receivers that join later get it too. May be called before capture starts; it is
 	 * sent when the transport starts. Setting the same value again sends nothing.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Open3DStream|Sender|Control")
+	UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Sender|Control")
 	bool SetControlValue(const FString& Key, const FO3DControlValue& Value, FString TargetSubject = FString(TEXT("")));
 
 	/** Remove a value from every receiver. */
-	UFUNCTION(BlueprintCallable, Category = "Open3DStream|Sender|Control")
+	UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Sender|Control")
 	void ClearControlValue(const FString& Key, FString TargetSubject = FString(TEXT("")));
 
 	/** Remove every value this sender set. */
-	UFUNCTION(BlueprintCallable, Category = "Open3DStream|Sender|Control")
+	UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Sender|Control")
 	void ClearAllControlValues();
 
 	/** The value this sender holds for Key, if it set one. */
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Sender|Control")
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Sender|Control")
 	bool GetControlValue(const FString& Key, const FString& TargetSubject, FO3DControlValue& OutValue) const;
 
 	/** This component's control source id (a fresh GUID per instance, never saved). */
@@ -368,19 +368,19 @@ public:
 	 * Start the transport for control alone when there is no skeletal mesh and audio is off, for
 	 * an actor that only sends cues and parameters (a stage or lighting controller).
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Control")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Control")
 	bool bAllowControlOnly = false;
 
 	/** How often the full set of values is re-sent, so late or lossy receivers catch up. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Control", meta = (ClampMin = "0.25", ClampMax = "10.0", UIMin = "0.25", UIMax = "10.0", Units = "s"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Control", meta = (ClampMin = "0.25", ClampMax = "10.0", UIMin = "0.25", UIMax = "10.0", Units = "s"))
 	float ControlSnapshotIntervalSeconds = 1.0f;
 
 	/** Copies of each event, on consecutive ticks; receivers drop duplicates. Covers loss on unreliable transports. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Control", meta = (ClampMin = "1", ClampMax = "5"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Control", meta = (ClampMin = "1", ClampMax = "5"))
 	int32 ControlEventRedundancy = 3;
 
 	/** Most times per second one value is re-sent while it keeps changing; the latest value always wins. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Control", meta = (ClampMin = "1.0", ClampMax = "120.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Control", meta = (ClampMin = "1.0", ClampMax = "120.0"))
 	float ControlMaxValueRateHz = 30.0f;
 
 	FOnO3DDescriptorReady OnDescriptorReady;
@@ -497,7 +497,7 @@ public:
 	/** Remove all transport options (used when switching transports). */
 	void ClearTransportOptions();
 
-	UFUNCTION(BlueprintCallable, Category = "Open3DStream|Sender|Audio")
+	UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Sender|Audio")
 	TArray<FName> GetAvailableAudioInputDeviceOptions() const;
 
 	UFUNCTION()
