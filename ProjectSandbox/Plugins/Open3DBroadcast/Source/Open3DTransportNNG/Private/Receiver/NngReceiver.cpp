@@ -33,7 +33,7 @@ namespace
     /** Largest message accepted. Also set as NNG_OPT_RECVMAXSZ, so NNG enforces it (TRB-42). */
     constexpr uint64 MaxPayloadBytes = 50ull * 1024ull * 1024ull;
 
-    TO3DFfiContextRegistry<FNngReceiverPipeContext>& GetPipeContextRegistry()
+    TO3DFfiContextRegistry<FNngReceiverPipeContext>& GetReceiverPipeContextRegistry()
     {
         static TO3DFfiContextRegistry<FNngReceiverPipeContext> Registry;
         return Registry;
@@ -42,7 +42,7 @@ namespace
     /** NNG pipe callback. `Context` is an opaque token, never a receiver pointer (TRB-42). */
     static void ReceiverPipeCallback(nng_pipe /*Pipe*/, nng_pipe_ev Event, void* Context)
     {
-        const TSharedPtr<FNngReceiverPipeContext, ESPMode::ThreadSafe> Pipe = GetPipeContextRegistry().Resolve(Context);
+        const TSharedPtr<FNngReceiverPipeContext, ESPMode::ThreadSafe> Pipe = GetReceiverPipeContextRegistry().Resolve(Context);
         if (!Pipe.IsValid())
         {
             return;
@@ -83,7 +83,7 @@ struct FO3DNngReceiver::FNngSocketWrapper
 FO3DNngReceiver::FO3DNngReceiver()
     : PipeContext(MakeShared<FNngReceiverPipeContext, ESPMode::ThreadSafe>())
 {
-    PipeToken = GetPipeContextRegistry().Register(PipeContext);
+    PipeToken = GetReceiverPipeContextRegistry().Register(PipeContext);
 }
 
 /**
@@ -156,7 +156,7 @@ FO3DNngReceiver::~FO3DNngReceiver()
 {
     Stop();
     // After nng_close() a late pipe callback resolves the token to nothing (TRB-42).
-    GetPipeContextRegistry().Unregister(PipeToken);
+    GetReceiverPipeContextRegistry().Unregister(PipeToken);
     PipeToken = nullptr;
 }
 
