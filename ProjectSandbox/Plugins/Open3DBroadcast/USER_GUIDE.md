@@ -847,7 +847,7 @@ A single value or event that cannot fit one control envelope is refused at the A
 | NNG | Yes | Same socket as frames. Pair and push/pull are reliable; pub/sub is treated as unreliable |
 | Loopback | Yes | Its own queue (up to 1,024 messages), independent of the frame and audio queues |
 | MoQ | Yes | Its own `control/<session>` track with stream delivery, announced on every connect. Not ordered against mocap |
-| WebRTC (add-on) | In progress (CTL-6) | Not yet: the transport reports no control support, so `FireControlEvent` returns false and values set with `SetControlValue` are kept on the sender but not sent |
+| WebRTC (add-on) | Yes | Reliable, ordered LiveKit data on the `__o3d.ctl` label. Refused while the sender is not connected (before Start, after Stop, while reconnecting); the publisher retries. Avoid a subject named `__o3d.ctl` |
 
 See the Control row in [Transport_Module_Comparison.md](Transport_Module_Comparison.md#4-functional-parity-matrix) for details. Event redundancy is 3 on every transport today, including the reliable ones; the extra copies are a few dozen bytes each.
 

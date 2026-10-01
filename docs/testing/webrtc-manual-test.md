@@ -1,7 +1,7 @@
 # WebRTC transport: manual test against a local LiveKit server (WP-S7)
 
-These steps check the WP-S7 fixes (TRF-2, 3, 4, 5, 15, 16, 19, 23, 24, 25, 31) end to end with a
-real LiveKit server. They complement the fake-FFI automation tests
+These steps check the WP-S7 fixes (TRF-2, 3, 4, 5, 15, 16, 19, 23, 24, 25, 31) and, in case 12,
+the control channel (CTL-6, ADR 0011) end to end with a real LiveKit server. They complement the fake-FFI automation tests
 (`Open3DBroadcast.Transport.WebRTC.*`), which need no server. Run them on Win64 in the editor.
 
 ## Setup
@@ -122,6 +122,41 @@ Record pass or fail and paste the relevant log lines for each case into the PR.
 
 - Start and stop PIE five times with audio enabled on both sides, in both token modes.
 - Expect: no crash, no `Failed to destroy audio track` warnings, and each run connects again.
+
+### 12. Control channel: events and values over WebRTC (CTL-6, ADR 0011)
+
+Control rides a reliable, ordered data channel labelled `__o3d.ctl`. The automation tests
+(`Open3DBroadcast.Transport.WebRTC.Control.*`) cover it against a fake FFI; this case checks it
+through a real LiveKit server and answers what the fake cannot: that two senders in one room stay
+apart (ADR 0011 Verification, WebRTC), and whether the real data channel keeps control in order
+(ADR 0011 open question 4).
+
+- Receiver side: enable control, either with **Accept Control** under Project Settings ›
+  Plugins › Open3DBroadcast Control or with `Set Control Receive Enabled (true)` on BeginPlay.
+  Add a `UO3DRemoteControlComponent` (Remote Control) to an actor in the receiving level and bind
+  `OnControlEvent` and `OnControlValueChanged` to a Print String of the name or key, the value and
+  the meta's `SourceId` and `SourceName`.
+- Sender side: use case 4's two senders (room `wp-s7`, different subject names). On one, call
+  `Fire Control Event` with `vfx.test` and an Int payload that you increase on every press (bind
+  it to a key); on the other, call `Set Control Value` with `env.fog_density` and a Double that a
+  timeline drives every tick.
+- Expect:
+  - every `vfx.test` press prints exactly once, with increasing payloads in the order fired;
+  - `env.fog_density` updates smoothly and ends at the sender's last value;
+  - the two senders print different `SourceId`s, and each key or event appears only under its
+    own sender;
+  - the LiveLink subjects animate as before, no LiveLink subject named `__o3d.ctl` appears, and
+    the receiver's frame counts match the senders' `FramesSent` (control is not counted);
+  - stopping and restarting one sender (PIE stop or a details-panel edit) shows no
+    `OnControlValueCleared` and no repeated `OnControlValueChanged` for an unchanged key.
+- Late joiner: start the receiver after the senders have set values. Expect the current values
+  within one snapshot interval (`ControlSnapshotIntervalSeconds`, 1 s by default) and no events
+  fired before the receiver joined.
+- Old receiver (optional): a receiver add-on built before CTL-6 hands control to its mocap path,
+  which rejects it. Expect its mocap unaffected and, with CTL-2 or later in the main plugin, at
+  most one malformed-frame warning per stream every 10 s while control flows (ADR 0011 item 10).
+- Record whether any event arrived out of order or twice. Either would mean the reliable data
+  channel is not ordered per sender, which ADR 0011 open question 4 assumes it is.
 
 ## Not covered here
 

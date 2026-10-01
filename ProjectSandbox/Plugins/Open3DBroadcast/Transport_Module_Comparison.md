@@ -450,7 +450,7 @@ static void OnConnectionState(void* user, LkConnectionState state,
 | **Core Interfaces** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Send SubjectList** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Audio Support** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Control (events and values)** | ✅ Own queue | ✅ In-band | ✅ In-band | ✅ In-band | ⏳ In progress (CTL-6) | ✅ `control/` track |
+| **Control (events and values)** | ✅ Own queue | ✅ In-band | ✅ In-band | ✅ In-band | ✅ `__o3d.ctl` data label | ✅ `control/` track |
 | **Stats Reporting** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Backpressure Handling** | ✅ Queue | ✅ Queue | ✅ Queue | ⚠️ None | ✅ LiveKit | ✅ Relay/QUIC |
 | **Reconnection** | N/A | ✅ Auto | ✅ Auto | N/A | ✅ Auto | ✅ Auto |
@@ -481,7 +481,7 @@ Delivery per transport:
 | **UDP** | One datagram per envelope, sent under the socket lock | Unreliable, unordered | Never fragmented; refused if `udp.maxdatagram` is below the envelope size. Events rely on redundant copies, values on snapshots |
 | **NNG** | Envelope on the same socket and queue as frames | Pair and push/pull: reliable, ordered. Pub/sub: treated as unreliable | Covered by tests in pub/sub, pair/pair and push/pull |
 | **MoQ** | Separate publisher on `control/<session>` (track name as for mocap), announced on every connect with stream delivery whatever `delivery_mode` says | Treated as unreliable; not ordered against mocap (MoQ orders nothing across tracks) | `SendControl` is refused until the control track exists. A custom `track_namespace` without a `mocap/` or `audio/` prefix gets `control/` prepended. Receivers subscribe whenever a control sink is set; failures log at Verbose. Control never moves a frame, byte or drop counter |
-| **WebRTC** (add-on) | In progress (CTL-6): planned as reliable, ordered data on the `__o3d.ctl` label | — | Until CTL-6 lands the transport reports no control support |
+| **WebRTC** (add-on) | Reliable, ordered LiveKit data on the `__o3d.ctl` label | Receiver queue capped at 1,024 envelopes, delivered on Poll | Refused while not connected; classified by envelope bytes, so plain mocap on `__o3d.ctl` stays mocap |
 
 **Redundancy:** each event is sent `ControlEventRedundancy` times (default 3,
 range 1–5) on consecutive sender ticks, on every transport, and receivers

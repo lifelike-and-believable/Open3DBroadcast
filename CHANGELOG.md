@@ -498,6 +498,41 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   USER_GUIDE and README say WebRTC is a free add-on, with a download-link
   placeholder until the support-site URL exists.
 
+### Control channel on WebRTC (CTL-6, ADR 0011)
+
+- The WebRTC add-on now carries control (events and values from
+  `UO3DSenderComponent`'s `FireControlEvent` / `SetControlValue`):
+  `SupportsControl()` is true on its sender and receiver. Built against
+  transport API version 2; the add-on's version check is unchanged.
+- **Sender.** `SendControl` sends each control envelope with
+  `lk_send_data_ex` on a data channel labelled `__o3d.ctl`, reliable and
+  ordered, never through `SendSerialized`. It refuses anything that is not
+  exactly one well-formed control envelope of at most 1,100 bytes, and any
+  call while not connected (before `Start`, after `Stop`, while LiveKit
+  reconnects); the control publisher retries. It enters the sender's
+  lifetime gate, so `Stop` never destroys the LiveKit client under a send.
+  Control never moves a frame, byte or drop counter, and its failures have
+  their own log throttle (one Warning per 2 s).
+- **Receiver.** The data callback checks for a control envelope (envelope
+  magic and kind Control) **before** the "label = subject" mocap path,
+  whatever the label, including the unlabeled fallback callback. A
+  well-formed envelope is queued (at most 1,024) and handed to the control
+  sink on the game thread in `Poll`; a malformed one, or one that arrives
+  with no sink, is dropped. Control never reaches the frame consumer and
+  moves no frame, byte or drop counter. Plain mocap bytes on a data channel
+  labelled `__o3d.ctl` (a subject with that name) are still mocap, as ADR
+  0011 requires. The sink is held strongly and released in `Stop`.
+- **Upgrade WebRTC receivers before using control:** a receiver built
+  before this release reads control as a malformed mocap frame and logs a
+  warning for it (ADR 0011 item 10).
+- **Tests.** `Open3DBroadcast.Transport.WebRTC.Control.*` (fake LiveKit
+  FFI): round trip interleaved with mocap, label classification, sender
+  refusals (oversize, not an envelope, not running, FFI failure), sink
+  released on `Stop`, and `Stop` while four threads send. They cover the
+  control conformance cases for WebRTC, whose conformance profile is still
+  deferred to an add-on test module (WP-T2e). Manual check: case 12 in
+  `docs/testing/webrtc-manual-test.md`.
+
 ### Editor module split (WP-F7, ADR 0010)
 
 - **New `Open3DBroadcastEditor` module** (Type `Editor`, `PostEngineInit`,
@@ -827,7 +862,7 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `OnControlValueChanged`, `OnControlValueCleared`) and the game-thread
   `FO3DControlBus`. Events and value changes are held to play with the
   matching mocap (`bAlignControlToMocap`, on by default).
-- Transports: TCP, UDP, NNG, Loopback and MoQ. WebRTC is in progress
+- Transports: TCP, UDP, NNG, Loopback, MoQ and, in the add-on, WebRTC
   (CTL-6).
 - Core: `src/o3ds_control.fbs`, `src/o3ds/control.{h,cpp}`
   (`ControlPublisher`, `ControlReceiver`, `ControlAligner`), limits in
@@ -837,7 +872,7 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
 
 ### Schema/Protocol
 
-- **Control envelope kind (ADR 0011).** New `EUnifiedKind::Control = 2`, always paired with the new `EUnifiedCodec::O3DControl = 3`; a reader drops any other codec with kind Control. The payload is a new FlatBuffers root, `O3DS.Control.ControlMessage` (`src/o3ds_control.fbs`, `file_identifier "O3DC"`, generated `src/o3ds_control_generated.h`), with its own `protocol_version` (1). Readers reject a higher version. The schema is append-only; a new value type is skipped and counted by older readers, not rejected. `SubjectList` (`src/o3ds.fbs`) is unchanged, and no mocap frame's reader requirements change. A control envelope is at most 1,100 bytes including its header and its payload is never empty, so it is never fragmented and never mistaken for the TCP keepalive. It rides envelope version 1 (`O3DA`). Compatibility: receivers built before this change ignore control silently on TCP, UDP and NNG, and never subscribe to the MoQ `control/<session>` track; their mocap is unaffected. A sender sends no control bytes unless gameplay calls the control API. WebRTC carries no control yet (CTL-6); old WebRTC receivers will log a (now throttled) warning per control message once it does, so update WebRTC receivers before using control there. `O3DS_VERSION_TAG` is unchanged (1.0.4).
+- **Control envelope kind (ADR 0011).** New `EUnifiedKind::Control = 2`, always paired with the new `EUnifiedCodec::O3DControl = 3`; a reader drops any other codec with kind Control. The payload is a new FlatBuffers root, `O3DS.Control.ControlMessage` (`src/o3ds_control.fbs`, `file_identifier "O3DC"`, generated `src/o3ds_control_generated.h`), with its own `protocol_version` (1). Readers reject a higher version. The schema is append-only; a new value type is skipped and counted by older readers, not rejected. `SubjectList` (`src/o3ds.fbs`) is unchanged, and no mocap frame's reader requirements change. A control envelope is at most 1,100 bytes including its header and its payload is never empty, so it is never fragmented and never mistaken for the TCP keepalive. It rides envelope version 1 (`O3DA`). Compatibility: receivers built before this change ignore control silently on TCP, UDP and NNG, and never subscribe to the MoQ `control/<session>` track; their mocap is unaffected. A sender sends no control bytes unless gameplay calls the control API. WebRTC carries control from CTL-6 on; WebRTC receivers built before CTL-6 log a (now throttled) warning per control message, so update WebRTC receivers before using control there. `O3DS_VERSION_TAG` is unchanged (1.0.4).
 - **`O3D_TRANSPORT_API_VERSION` 1 → 2 (add-on authors).** `IOpen3DSender` gains `SupportsControl()` and `SendControl(const uint8* Envelope, int32 Len)`; `IOpen3DReceiver` gains `SupportsControl()` and `SetControlSink(...)`, with the new `IO3DReceiverControlSink`. All are appended with defaults (`false`), so a transport that does not carry control needs no code change, but the virtual function tables changed: rebuild every out-of-tree transport and the Open3DBroadcastWebRTC add-on against this release. A transport built for version 1 is refused at registration. Removing the WP-A1 forwarding shims will take version 3.
 
 - No change to the TCP frame format (14-byte magic, little-endian length, payload; ADR 0009 item 6). The TCP sender now also writes a keepalive frame when idle: its payload is a 20-byte unified-envelope header (`O3DA`, version 1, kind Audio, payload size 0). Receivers built before this change parse it as an audio message, reject the empty payload without logging, and count it as received data, so it also stops their idle reconnects. Current receivers recognise it and ignore it. No other sender produces an audio envelope with an empty payload. Set `tcp.keepalive` to 0 to turn it off, for example for a third-party receiver that does not accept it. Protocol version and `O3DS_VERSION_TAG` are unchanged.

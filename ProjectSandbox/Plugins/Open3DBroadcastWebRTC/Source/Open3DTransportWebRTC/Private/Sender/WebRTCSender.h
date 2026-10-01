@@ -8,6 +8,7 @@
 #include "O3DPerformanceMetrics.h"
 #include "HAL/CriticalSection.h"
 #include "Templates/Atomic.h"
+#include <atomic>
 
 // Include LiveKit FFI for callback types
 THIRD_PARTY_INCLUDES_START
@@ -66,6 +67,8 @@ struct FWebRTCSenderLink
  * - Send and SendSerialized may be called from any thread. They read only Link->bConnected
  *   (atomic), ClientHandle (written on the game thread before the gate opens and after it
  *   closes) and Stats (StatsMutex).
+ * - SendControl may be called from any thread. Like the audio sinks it enters Link->Gate, so
+ *   Stop() cannot destroy the client during the send, and it touches no frame counter.
  * - LiveKit callbacks run on FFI threads and touch only the shared Link (atomics).
  * - Token fetch results never write sender members: FO3DTokenManager stores them under its own
  *   lock and Tick() reads them (TRF-3).
@@ -105,6 +108,17 @@ public:
     virtual bool SupportsAudio() const override { return true; }
     virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
 
+    /** Control channel (docs/adr/0011-control-channel.md, CTL-6). */
+    virtual bool SupportsControl() const override { return true; }
+    /**
+     * Sends one control envelope on the reliable, ordered data channel labelled `__o3d.ctl`
+     * (WebRTCUtils::ControlDataLabelUtf8). Refuses bytes that are not exactly one well-formed
+     * control envelope, an envelope over the 1,100-byte budget, and any call while not
+     * connected (before Start, after Stop, or while LiveKit reconnects); the control publisher
+     * retries. Never counted as a frame, a sent byte or a dropped frame.
+     */
+    virtual bool SendControl(const uint8* Envelope, int32 Len) override;
+
 private:
     /** Immutable after construction. */
     const FLkFfiApi Ffi;
@@ -137,6 +151,9 @@ private:
     FO3DTransportStats Stats;
 
     bool SendBytes(const uint8* Data, int32 Len, const FString& SubjectName);
+
+    /** Control has its own log throttle, so its failures never hide a mocap message. Any thread. */
+    std::atomic<double> LastControlErrorLogTime{ 0.0 };
     void RecordDroppedFrame();
 
     // Connection and token state (game thread only, TRF-3/TRF-15/TRF-23).

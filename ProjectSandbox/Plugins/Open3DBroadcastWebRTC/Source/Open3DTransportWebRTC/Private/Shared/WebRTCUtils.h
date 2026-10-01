@@ -6,6 +6,7 @@
 #include "HAL/PlatformProcess.h"
 #include "Misc/Guid.h"
 #include "Containers/StringConv.h"
+#include "O3DUnifiedMessage.h"
 
 namespace WebRTCUtils
 {
@@ -24,6 +25,36 @@ namespace WebRTCUtils
     /** Environment variables for the secret keys; a non-default profile first tries "<NAME>__<PROFILE>". */
     static constexpr TCHAR TokenEnvVar[] = TEXT("O3DB_WEBRTC_TOKEN");
     static constexpr TCHAR TokenEndpointAuthEnvVar[] = TEXT("O3DB_WEBRTC_TOKEN_ENDPOINT_AUTH");
+
+    /**
+     * Data channel label for control envelopes (docs/adr/0011-control-channel.md, item 7), UTF-8
+     * for lk_send_data_ex. The receiver classifies control by the envelope bytes, not by this
+     * label, so a subject that happens to have this name still reaches the mocap path.
+     */
+    static constexpr char ControlDataLabelUtf8[] = "__o3d.ctl";
+
+    /** ADR 0011 item 4: a control envelope, header included, is at most this many bytes. */
+    static constexpr int32 MaxControlEnvelopeBytes = 1100;
+    static_assert(O3DS::UnifiedWireHeaderSize + O3DS::UnifiedMaxControlPayloadSize <= MaxControlEnvelopeBytes,
+        "The largest control envelope must fit the ADR 0011 budget");
+
+    /**
+     * True when Bytes carry the unified envelope magic and kind Control (ADR 0011 item 7: checked
+     * before the data is treated as a subject's mocap, whatever the label). Such bytes are never
+     * mocap: a well-formed one goes to the control sink and a malformed one is dropped. A plain
+     * FlatBuffers frame can never match, because SubjectList data never starts with the magic.
+     */
+    inline bool IsControlKindEnvelope(const uint8* Bytes, size_t Len)
+    {
+        if (!Bytes || Len < static_cast<size_t>(O3DS::UnifiedWireHeaderSize))
+        {
+            return false;
+        }
+        const uint32 Magic = (static_cast<uint32>(Bytes[0]) << 24) | (static_cast<uint32>(Bytes[1]) << 16)
+            | (static_cast<uint32>(Bytes[2]) << 8) | static_cast<uint32>(Bytes[3]);
+        return Magic == O3DS::FUnifiedHeader::MagicValueBE()
+            && Bytes[5] == static_cast<uint8>(O3DS::EUnifiedKind::Control);
+    }
 
     /** Returns the resolved secret for Key, or an empty string. */
     inline FString FindSecret(const TMap<FString, FString>& Secrets, const TCHAR* Key)

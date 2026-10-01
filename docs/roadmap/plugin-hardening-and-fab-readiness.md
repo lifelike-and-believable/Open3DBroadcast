@@ -210,7 +210,7 @@ M1  Safety & correctness      │   M2  Fab-buildable package                  �
 M3  Architecture: WP-A1 (transport core) → WP-A2 (async sender) → WP-A3 (god classes)
                   WP-A4 (protocol), WP-A5 (connection lifecycle), WP-A6 (globals), WP-A7 (core API/legacy)
                           ▼
-    WP-CTL (control channel, D11): CTL-1..5 landed beside M3; CTL-7 (docs) done; CTL-6 follows WP-F11
+    WP-CTL (control channel, D11): CTL-1..7 landed beside M3 (CTL-6 after WP-F11)
                           ▼
 M4  Usability & docs: WP-U1..U6, WP-D1..D4, WP-Q1 (cleanup batch)
                           ▼
@@ -701,7 +701,7 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
   3. **CTL-3 In-band transports:** TCP, UDP, NNG, Loopback, with conformance cases. **Done (#293).**
   4. **CTL-4 Gameplay surface:** sender component API, receiver `FControlSink` with the alignment hold queue, `UO3DControlSettings`, `UO3DRemoteControlComponent`. **Done (#294).** The packaged Shipping test that confirms control can be enabled in Shipping (ADR 0011 open question 11) is not in CI yet; add it to the nightly Shipping build.
   5. **CTL-5 MoQ:** `control/<session>` track. **Done (#295).** The live-relay test case is still to write (needs a relay).
-  6. **CTL-6 WebRTC add-on:** `__o3d.ctl` send path and receive classification in `WebRTCSender.cpp`/`WebRTCReceiver.cpp`, tests, a manual test step. Open.
+  6. **CTL-6 WebRTC add-on:** `__o3d.ctl` send path and receive classification in `WebRTCSender.cpp`/`WebRTCReceiver.cpp`, tests, a manual test step. **Done.** Tests are `Open3DBroadcast.Transport.WebRTC.Control.*` in the add-on (fake LiveKit FFI); the WebRTC conformance profile itself stays deferred to WP-T2e, so those tests cover the control conformance cases for WebRTC. The live-server check is case 12 in `docs/testing/webrtc-manual-test.md` (it also answers ADR 0011 open question 4 on ordering).
   7. **CTL-7 Docs:** USER_GUIDE Control section, `Transport_Module_Comparison.md` row, CHANGELOG Schema/Protocol entry. **Done.** The wire layout goes into `docs/wire-format.md` when WP-D3 creates it.
 - **Acceptance:** ADR 0011 "Verification / acceptance": the core state, timing, load and fuzz cases in `core-tests.yml`; the control conformance cases pass for every transport whose `SupportsControl()` is true; control never changes mocap frame counts or content.
 - **Interaction with WP-A1:** control landed before WP-A1 steps 3–4. The shared send queue (ADR 0007 item 7, "control" items never dropped for mocap), the shared receive demux and the result type in WP-A1 must absorb each transport's control path as that transport migrates.
