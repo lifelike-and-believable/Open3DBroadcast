@@ -1,10 +1,10 @@
 # Open3DBroadcast: handoff to the next session
 
-Written 2026-09-30 by the cloud session that drove M1, M2 and the start of M3 of the plugin hardening roadmap. Updated 2026-10-01 with the control-channel work (ADR 0011, CTL-1..5) that landed afterwards. Read this first, then the files it points to.
+Written 2026-09-30 by the cloud session that drove M1, M2 and the start of M3 of the plugin hardening roadmap. Updated 2026-10-01 with the control-channel work (ADR 0011, CTL-1..5) that landed afterwards; ADR 0011 accepted and WP-CTL added to the roadmap the same day. Read this first, then the files it points to.
 
 ## 1. Where things stand
 
-The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisions are in `docs/adr/0001`–`0010`, all **Accepted**, plus `0011` (control channel), still **Proposed**; their open questions were accepted with the recommended defaults. Work is organised as work packages (WPs), one PR each (or a PR series for large ones), squash-merged into `develop`.
+The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisions are in `docs/adr/0001`–`0011`, all **Accepted**; their open questions were accepted with the recommended defaults. Work is organised as work packages (WPs), one PR each (or a PR series for large ones), squash-merged into `develop`.
 
 | Milestone | Status |
 |---|---|
@@ -14,7 +14,7 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 merged (#289); PR 2 is next** (see §2) |
 | M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | Not started |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
-| WP-CTL control channel (ADR 0011; not yet in the roadmap) | CTL-1..5 done (#290–#295); **CTL-6 (WebRTC add-on) and CTL-7 (docs) remain** (see §2b) |
+| WP-CTL control channel (D11, ADR 0011) | CTL-1..5 done (#290–#295); **CTL-6 (WebRTC add-on) and CTL-7 (docs) remain** (see §2b) |
 
 Recent merges on `develop`: F7 editor split (#285, dc686e0), F11 WebRTC add-on (#286, 5c9af51), WP-A1 PR 1 transport registry (#289, d365c34), NNG unity-build fix and README rewrite (#287), ADR 0011 (#290), CTL-1..5 (#291–#295, last de02b8d).
 
@@ -53,8 +53,9 @@ Done outside the cloud session, after the first version of this doc. Design: `do
 | **CTL-7 docs**: USER_GUIDE Control section, transport comparison row, CHANGELOG protocol entry | **Not started** |
 
 Open items:
-- ADR 0011 is still **Proposed**. If the implemented design is final, change its status to Accepted (and add WP-CTL to the roadmap, which doesn't list it yet).
+- ADR 0011 was accepted on 2026-10-01 (open questions with their defaults), and WP-CTL is in the roadmap as decision D11 with its own work package section.
 - Until CTL-6 lands, the WebRTC transport reports no control support; `SupportsControl()` gates the conformance cases, so CI stays green.
+- The packaged Shipping test ADR 0011 asks of CTL-4 (control enabled in a Shipping build through the project setting and the runtime call) is not in CI yet; the nightly Shipping build (`Build-ShippingGame.ps1`) is the natural place for it.
 - New-peer snapshots wait for ADR 0005 (vi); until then recovery is bounded by the snapshot interval.
 - CTL and WP-A1 overlap: see the notes on steps 3 and 4 in §2.
 
@@ -127,4 +128,4 @@ With UE 5.7 installed locally you can also run the real build and tests: `Build/
 - Rights holder: Lifelike & Believable. Open3DStream Contributors notices stay on files that had them.
 - FriendlyName "Open3DBroadcast"; the add-on is "Open3DBroadcast WebRTC". Whole plugin is Beta for v1; MoQ ships as Experimental.
 - WebRTC ships only as the separate free add-on, not in the Fab package.
-- v1 platform scope and the rest: see ADRs 0001–0010. ADR 0011 is the exception: still Proposed (§2b).
+- v1 platform scope and the rest: see ADRs 0001–0011.

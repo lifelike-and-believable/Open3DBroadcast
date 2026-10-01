@@ -18,7 +18,7 @@ ADRs are written by the design agent (see [`docs/roadmap/plugin-hardening-and-fa
 | [0008](0008-sender-pipeline-threading.md) | Sender pipeline threading | D5 | Accepted |
 | [0009](0009-protocol-versioning.md) | Protocol versioning, byte order and wire compatibility | D8 | Accepted |
 | [0010](0010-editor-module-split.md) | Editor module split | D9 | Accepted |
-| [0011](0011-control-channel.md) | Control channel for events and values | (new, WP-CTL) | Proposed |
+| [0011](0011-control-channel.md) | Control channel for events and values | D11 | Accepted |
 
 ## Conventions
 
