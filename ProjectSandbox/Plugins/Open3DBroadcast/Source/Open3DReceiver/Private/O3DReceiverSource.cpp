@@ -625,7 +625,27 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
     O3DS::PacketMeta Meta;
     if (!O3DS::PeekPacketMeta(reinterpret_cast<const char*>(Buffer.GetData()), (size_t)Buffer.Num(), Meta))
     {
-        UE_LOG(LogO3DReceiverSource, Warning, TEXT("Rejected malformed packet for subject '%s' (%d bytes)"), *Subject, Buffer.Num());
+        // Throttled: a peer sending bytes this build cannot read (for example control messages
+        // to a receiver that predates them, ADR 0011 item 10) must not flood the log.
+        const double NowSeconds = FPlatformTime::Seconds();
+        if (NowSeconds - LastMalformedWarningTime >= MalformedWarningIntervalSeconds)
+        {
+            if (SuppressedMalformedWarnings > 0)
+            {
+                UE_LOG(LogO3DReceiverSource, Warning, TEXT("Rejected malformed packet for subject '%s' (%d bytes); %d similar rejected since the last warning"),
+                    *Subject, Buffer.Num(), SuppressedMalformedWarnings);
+            }
+            else
+            {
+                UE_LOG(LogO3DReceiverSource, Warning, TEXT("Rejected malformed packet for subject '%s' (%d bytes)"), *Subject, Buffer.Num());
+            }
+            LastMalformedWarningTime = NowSeconds;
+            SuppressedMalformedWarnings = 0;
+        }
+        else
+        {
+            ++SuppressedMalformedWarnings;
+        }
         FO3DPerformanceMetrics::Get().RecordDeserializationError();
         return;
     }

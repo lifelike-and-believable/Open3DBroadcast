@@ -162,6 +162,14 @@ private:
 
     std::atomic<bool> bIsValid{true};
 
+    // Throttles "Rejected malformed packet" to one line per MalformedWarningIntervalSeconds,
+    // with a count of the lines suppressed since. One timestamp per source, not one per subject:
+    // the subject string can come from the network (a WebRTC data label), so a map keyed by it
+    // would grow without bound under hostile input. Game thread.
+    static constexpr double MalformedWarningIntervalSeconds = 10.0;
+    double LastMalformedWarningTime = -1.0e300;
+    int32 SuppressedMalformedWarnings = 0;
+
     // Transport state
     FO3DReceiverSourceConfig SourceSettings;
     FO3DTransportConfig ActiveConfig;

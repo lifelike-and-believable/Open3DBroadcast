@@ -31,8 +31,11 @@
  *      them bumps it. An add-on must still be rebuilt against the release it loads into, because
  *      the interface classes are now exported from Open3DShared instead of Open3DSender and
  *      Open3DReceiver.
+ *   2  ADR 0011 (CTL-2): the control channel appended SupportsControl and SendControl to
+ *      IOpen3DSender and SupportsControl and SetControlSink to IOpen3DReceiver, and added
+ *      IO3DReceiverControlSink. Removing the WP-A1 forwarding shims takes 3.
  */
-#define O3D_TRANSPORT_API_VERSION 1
+#define O3D_TRANSPORT_API_VERSION 2
 
 namespace O3DTransport
 {
