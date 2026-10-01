@@ -6,7 +6,7 @@
 	"FriendlyName": "Open3DBroadcast WebRTC",
 	"Description": "Free add-on for Open3DBroadcast: adds the WebRTC (LiveKit) transport. Install it next to Open3DBroadcast; it needs the matching Open3DBroadcast release. Beta. Unreal Engine 5.7, Win64 only.",
 	"Category": "Animation",
-	"CreatedBy": "Open3DStream Contributors",
+	"CreatedBy": "Lifelike & Believable and Open3DStream Contributors",
 	"CreatedByURL": "https://open3dstream.com/",
 	"DocsURL": "https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcastWebRTC/USER_GUIDE.md",
 	"MarketplaceURL": "",

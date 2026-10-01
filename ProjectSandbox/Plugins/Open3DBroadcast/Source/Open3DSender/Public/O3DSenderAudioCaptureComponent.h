@@ -44,28 +44,28 @@ struct FO3DSenderAudioCaptureConfig
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio", meta = (EditCondition = "false", EditConditionHides))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio", meta = (EditCondition = "false", EditConditionHides))
     EO3DSenderAudioSource Source = EO3DSenderAudioSource::GameSubmix;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
     USoundSubmix* SubmixToTap = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
     int32 SampleRate = 48000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
     int32 NumChannels = 1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
     int32 BitrateKbps = 64;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio", meta = (ClampMin = "-1"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio", meta = (ClampMin = "-1"))
     int32 DeviceIndex = -1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
     float GameGain = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
     float MicGain = 1.0f;
 };
 
@@ -73,7 +73,7 @@ struct FO3DSenderAudioCaptureConfig
  * Pure PCM audio capture component used by the broadcast sender. Captures either the master submix
  * or a microphone input and forwards frames to transport-provided sinks.
  */
-UCLASS(ClassGroup = (Open3DStream), meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (Open3DBroadcast), meta = (BlueprintSpawnableComponent))
 class OPEN3DSENDER_API UO3DSenderAudioCaptureComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -81,13 +81,13 @@ class OPEN3DSENDER_API UO3DSenderAudioCaptureComponent : public UActorComponent
 public:
     UO3DSenderAudioCaptureComponent();
 
-    UPROPERTY(EditAnywhere, Category = "Open3DStream|Audio")
+    UPROPERTY(EditAnywhere, Category = "Open3DBroadcast|Audio")
     EO3DSenderCaptureMode CaptureMode = EO3DSenderCaptureMode::Mix;
 
-    UPROPERTY(EditAnywhere, Category = "Open3DStream|Audio", meta = (GetOptions = "GetAvailableInputDeviceOptions", EditCondition = "CaptureMode == EO3DSenderCaptureMode::Input", EditConditionHides))
+    UPROPERTY(EditAnywhere, Category = "Open3DBroadcast|Audio", meta = (GetOptions = "GetAvailableInputDeviceOptions", EditCondition = "CaptureMode == EO3DSenderCaptureMode::Input", EditConditionHides))
     FName InputDeviceName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
     FO3DSenderAudioCaptureConfig Config;
 
     virtual void OnRegister() override;
@@ -121,7 +121,7 @@ public:
     /** Forward PCM frames as if captured. Any thread; never touches this UObject's properties. */
     void PushFrames(const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec);
 
-    UFUNCTION(BlueprintCallable, Category = "Open3DStream|Audio")
+    UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Audio")
     TArray<FName> GetAvailableInputDeviceOptions() const;
 
 #if WITH_EDITOR

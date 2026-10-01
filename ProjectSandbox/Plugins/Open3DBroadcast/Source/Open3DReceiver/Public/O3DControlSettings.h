@@ -76,14 +76,14 @@ public:
 	 * ClearControlReceiveOverride. A receiver source set to Enabled or Disabled keeps its own
 	 * setting. Takes effect from the next message; values arrive within one snapshot interval.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Open3DStream|Control")
+	UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Control")
 	static void SetControlReceiveEnabled(bool bEnabled);
 
 	/** Return to the project setting. */
-	UFUNCTION(BlueprintCallable, Category = "Open3DStream|Control")
+	UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Control")
 	static void ClearControlReceiveOverride();
 
 	/** Whether receiver sources set to Project Default accept control right now. */
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control")
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control")
 	static bool IsControlReceiveEnabled();
 };

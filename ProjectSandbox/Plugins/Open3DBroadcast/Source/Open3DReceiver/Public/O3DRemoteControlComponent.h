@@ -15,18 +15,18 @@ struct OPEN3DRECEIVER_API FO3DControlEntry
 {
 	GENERATED_BODY()
 
-	UPROPERTY(BlueprintReadOnly, Category = "Open3DStream|Control")
+	UPROPERTY(BlueprintReadOnly, Category = "Open3DBroadcast|Control")
 	FString Key;
 
 	/** The subject the value is aimed at; empty for the whole stream. */
-	UPROPERTY(BlueprintReadOnly, Category = "Open3DStream|Control")
+	UPROPERTY(BlueprintReadOnly, Category = "Open3DBroadcast|Control")
 	FString TargetSubject;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Open3DStream|Control")
+	UPROPERTY(BlueprintReadOnly, Category = "Open3DBroadcast|Control")
 	FO3DControlValue Value;
 
 	/** The sender it came from. */
-	UPROPERTY(BlueprintReadOnly, Category = "Open3DStream|Control")
+	UPROPERTY(BlueprintReadOnly, Category = "Open3DBroadcast|Control")
 	FString SourceId;
 };
 
@@ -45,7 +45,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FO3DOnRemoteControlValueCleared, co
  * Names, keys and targets are case-sensitive. Nothing here sets properties or runs commands by
  * itself: the project decides what each event and key means.
  */
-UCLASS(ClassGroup = (Open3DStream), meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (Open3DBroadcast), meta = (BlueprintSpawnableComponent))
 class OPEN3DRECEIVER_API UO3DRemoteControlComponent : public UActorComponent
 {
 	GENERATED_BODY()
@@ -54,46 +54,46 @@ public:
 	UO3DRemoteControlComponent();
 
 	/** Only changes received on this transport stream (the receiver source's stream id). Empty accepts every stream. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Control|Filter")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Control|Filter")
 	FString StreamIdFilter;
 
 	/** Only changes from senders with this name (the sender component's owner). Empty accepts every sender. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Control|Filter")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Control|Filter")
 	FString SourceNameFilter;
 
 	/** Only changes aimed at this subject (a character's LiveLink subject name). Empty accepts every target. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Control|Filter")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Control|Filter")
 	FString TargetSubjectFilter;
 
 	/** With a target filter set, also accept changes aimed at the whole stream (no target). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Control|Filter")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Control|Filter")
 	bool bIncludeUntargeted = true;
 
 	/** Only event names and keys starting with this, for example "vfx." or "env.". Empty accepts every name. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Control|Filter")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Control|Filter")
 	FString NamePrefixFilter;
 
 	/** A sender fired an event. */
-	UPROPERTY(BlueprintAssignable, Category = "Open3DStream|Control")
+	UPROPERTY(BlueprintAssignable, Category = "Open3DBroadcast|Control")
 	FO3DOnRemoteControlEvent OnControlEvent;
 
 	/** A sender set a value, or the value changed. */
-	UPROPERTY(BlueprintAssignable, Category = "Open3DStream|Control")
+	UPROPERTY(BlueprintAssignable, Category = "Open3DBroadcast|Control")
 	FO3DOnRemoteControlValueChanged OnControlValueChanged;
 
 	/** A sender cleared a value, or the sender went away. */
-	UPROPERTY(BlueprintAssignable, Category = "Open3DStream|Control")
+	UPROPERTY(BlueprintAssignable, Category = "Open3DBroadcast|Control")
 	FO3DOnRemoteControlValueCleared OnControlValueCleared;
 
 	/**
 	 * The current value of Key (aimed at TargetSubject, or at the whole stream when empty) from
 	 * the first sender that passes the source filter. False when no such value exists.
 	 */
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control")
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control")
 	bool GetControlValue(const FString& Key, const FString& TargetSubject, FO3DControlValue& OutValue) const;
 
 	/** Every current value from senders that pass the filters. */
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control")
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control")
 	TArray<FO3DControlEntry> GetAllControlValues() const;
 
 protected:

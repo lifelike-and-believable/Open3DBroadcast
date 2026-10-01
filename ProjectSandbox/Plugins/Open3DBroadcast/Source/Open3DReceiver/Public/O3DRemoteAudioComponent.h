@@ -32,7 +32,7 @@ enum class EO3DRemoteAudioMode : uint8
     Subject UMETA(DisplayName = "Subject (LiveLink)")
 };
 
-UCLASS(ClassGroup = (Open3DStream), meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (Open3DBroadcast), meta = (BlueprintSpawnableComponent))
 class OPEN3DRECEIVER_API UO3DRemoteAudioComponent : public USceneComponent
 {
     GENERATED_BODY()
@@ -41,29 +41,29 @@ public:
     UO3DRemoteAudioComponent();
 
     /** Select which remote audio stream to play. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
     EO3DRemoteAudioMode ReceiveMode = EO3DRemoteAudioMode::Mix;
 
     /** LiveLink Subject selector (visible only when ReceiveMode=Subject). */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio", meta = (EditCondition = "ReceiveMode == EO3DRemoteAudioMode::Subject", EditConditionHides))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio", meta = (EditCondition = "ReceiveMode == EO3DRemoteAudioMode::Subject", EditConditionHides))
     FLiveLinkSubjectName LiveLinkSubjectName;
 
     /** Output gain applied to incoming samples prior to playback. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
     float Gain = 1.0f;
 
     /** Quick access mixers at top. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio", meta = (DisplayName = "Volume Multiplier", ClampMin = "0.0", ToolTip = "Scales the overall output level of the audio component. 1.0 = original level."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio", meta = (DisplayName = "Volume Multiplier", ClampMin = "0.0", ToolTip = "Scales the overall output level of the audio component. 1.0 = original level."))
     float AC_VolumeMultiplier = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Audio", meta = (DisplayName = "Pitch Multiplier", ToolTip = "Scales playback pitch. 1.0 = original pitch."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio", meta = (DisplayName = "Pitch Multiplier", ToolTip = "Scales playback pitch. 1.0 = original pitch."))
     float AC_PitchMultiplier = 1.0f;
 
     /** Attachment for the internally-created UAudioComponent (SceneComponent). */
-    UPROPERTY(EditAnywhere, Category = "Open3DStream|Audio|Attachment", meta = (DisplayName = "Attach Parent", ToolTip = "Optional parent scene component to attach the internal UAudioComponent to. If unset, attaches to the Actor's RootComponent."))
+    UPROPERTY(EditAnywhere, Category = "Open3DBroadcast|Audio|Attachment", meta = (DisplayName = "Attach Parent", ToolTip = "Optional parent scene component to attach the internal UAudioComponent to. If unset, attaches to the Actor's RootComponent."))
     FComponentReference AC_AttachParent;
 
-    UPROPERTY(EditAnywhere, Category = "Open3DStream|Audio|Attachment", meta = (DisplayName = "Attach Socket Name", ToolTip = "Optional socket to use when attaching to the parent component."))
+    UPROPERTY(EditAnywhere, Category = "Open3DBroadcast|Audio|Attachment", meta = (DisplayName = "Attach Socket Name", ToolTip = "Optional socket to use when attaching to the parent component."))
     FName AC_AttachSocketName;
 
     /** AudioComponent configuration (applies to the auto-created component). */

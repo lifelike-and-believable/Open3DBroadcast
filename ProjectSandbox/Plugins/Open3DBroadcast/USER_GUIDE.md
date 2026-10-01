@@ -648,7 +648,7 @@ Keys, event names and target subjects are case-sensitive strings (`FString`). `e
 
 ### Sending from the Sender Component
 
-The control functions are on **O3D Sender Component**, under **Open3DStream | Sender | Control**:
+The control functions are on **O3D Sender Component**, under **Open3DBroadcast | Sender | Control**:
 
 | Function | What it does |
 |---|---|
