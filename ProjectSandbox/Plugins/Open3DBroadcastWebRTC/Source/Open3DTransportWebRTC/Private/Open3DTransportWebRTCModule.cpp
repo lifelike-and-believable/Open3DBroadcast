@@ -195,15 +195,15 @@ public:
 		Descriptor.Name = WebRTCConfig::TransportName;
 		Descriptor.OwningModule = TEXT("Open3DTransportWebRTC");
 
-		// Every instance is tracked so ShutdownModule can stop it before unloading livekit_ffi.
-		const TSharedRef<FO3DFfiLibrary, ESPMode::ThreadSafe> LibraryRef = Library.ToSharedRef();
-		Descriptor.CreateSender = [LibraryRef]() -> TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe>
+		// The registry tracks every instance it creates, so unregistering drains them before
+		// ShutdownModule unloads livekit_ffi (ADR 0007 item 5, WP-A1 PR 2).
+		Descriptor.CreateSender = []() -> TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe>
 		{
-			return LibraryRef->TrackInstance(MakeShared<FO3DWebRTCSender, ESPMode::ThreadSafe>());
+			return MakeShared<FO3DWebRTCSender, ESPMode::ThreadSafe>();
 		};
-		Descriptor.CreateReceiver = [LibraryRef]() -> TSharedPtr<IOpen3DReceiver, ESPMode::ThreadSafe>
+		Descriptor.CreateReceiver = []() -> TSharedPtr<IOpen3DReceiver, ESPMode::ThreadSafe>
 		{
-			return LibraryRef->TrackInstance(MakeShared<FO3DWebRTCReceiver, ESPMode::ThreadSafe>());
+			return MakeShared<FO3DWebRTCReceiver, ESPMode::ThreadSafe>();
 		};
 
 		// Sender side
@@ -285,13 +285,14 @@ public:
 			return;
 		}
 
-		// Unregister the transport. The handle only removes this module's own registration.
+		// Unregister the transport, which drains it (ADR 0007 item 5, WP-A1 PR 2; TRF-14): no new
+		// instances, the sender components and LiveLink sources stop and release theirs
+		// (OnTransportUnregistering), and the registry stops and reports any that are left. The
+		// handle only removes this module's own registration.
 		Registration.Reset();
 
-		// TRF-14: stop instances that outlive the module (components, LiveLink sources), then
-		// unload. FO3DFfiLibrary keeps the DLL loaded if an instance is still referenced. The
-		// factories were unregistered above, so no new instance can appear in between.
-		Library->StopLiveInstances();
+		// Then free the FFI handle. FO3DFfiLibrary keeps livekit_ffi loaded while the registry
+		// still counts a live WebRTC instance.
 		Library->Unload();
 		Library.Reset();
 
@@ -300,9 +301,8 @@ public:
 
 private:
 	/**
-	 * livekit_ffi and the instances created from it. Set only once the transport is registered,
-	 * so ShutdownModule knows whether there is anything to undo. The registered factories hold a
-	 * reference too.
+	 * livekit_ffi. Set once the library loaded, so ShutdownModule knows whether there is anything
+	 * to undo; unloaded there after the registration is reset (drained).
 	 */
 	TSharedPtr<FO3DFfiLibrary, ESPMode::ThreadSafe> Library;
 

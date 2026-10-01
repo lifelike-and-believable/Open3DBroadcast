@@ -18,6 +18,9 @@ namespace O3DWebRTCAddOn
 		// Win64 only: O3D_WITH_TRANSPORT_WEBRTC is 0 on every other platform, so this file then
 		// compiles to nothing (ADR 0001).
 		Desc.RelativePath = TEXT("Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/bin/Win64/livekit_ffi.dll");
+		// Unload() keeps livekit_ffi loaded while the registry still counts a live "WebRTC"
+		// instance (ADR 0007 item 5, WP-A1 PR 2).
+		Desc.TransportNames.Add(FName(TEXT("WebRTC")));
 		return Desc;
 	}
 

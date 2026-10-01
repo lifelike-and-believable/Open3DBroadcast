@@ -410,10 +410,15 @@ bool FO3DReceiverSource::StartTransport()
         return false;
     }
 
+    // The receiver is registry-tracked: release it when its transport unregisters (ADR 0007 item 5).
+    // StopTransport removes the subscription, on every path that drops ActiveReceiver.
+    TransportUnregisteringHandle = FO3DTransportRegistry::Get().OnTransportUnregistering().AddRaw(this, &FO3DReceiverSource::HandleTransportUnregistering);
+
     if (!ActiveReceiver->Initialize(ActiveConfig))
     {
         UE_LOG(LogO3DReceiverSource, Warning, TEXT("Failed to initialize transport '%s'."), *ActiveConfig.Transport);
         ActiveReceiver.Reset();
+        StopTransport();
         return false;
     }
 
@@ -459,6 +464,7 @@ bool FO3DReceiverSource::StartTransport()
         ActiveConsumer.Reset();
         ActiveAudioSink.Reset();
         ActiveControlSink.Reset();
+        StopTransport();
         return false;
     }
 
@@ -484,6 +490,13 @@ bool FO3DReceiverSource::StartTransport()
 /** Stop the active transport and clear subject/audio caches. */
 void FO3DReceiverSource::StopTransport()
 {
+    if (TransportUnregisteringHandle.IsValid())
+    {
+        // Safe during the registry's broadcast (UE defers the invocation-list compaction).
+        FO3DTransportRegistry::Get().OnTransportUnregistering().Remove(TransportUnregisteringHandle);
+        TransportUnregisteringHandle.Reset();
+    }
+
     if (ActiveReceiver.IsValid())
     {
         if (ActiveConfig.Audio.bEnableAudio && ActiveReceiver->SupportsAudio())
@@ -492,6 +505,12 @@ void FO3DReceiverSource::StopTransport()
         }
         ActiveReceiver->SetConsumer(nullptr);
         ActiveReceiver->Stop();
+        // A receiver releases its control sink in Stop (ADR 0011); clearing it as well keeps the
+        // sink from outliving the session with a receiver that does not.
+        if (ActiveControlSink.IsValid())
+        {
+            ActiveReceiver->SetControlSink(nullptr);
+        }
         ActiveReceiver.Reset();
     }
     ActiveAudioSink.Reset();
@@ -515,6 +534,18 @@ void FO3DReceiverSource::StopTransport()
     bLoggedActiveState = false;
     FrameCounter = 0;
     ResetStreamState();
+}
+
+void FO3DReceiverSource::HandleTransportUnregistering(FName TransportName)
+{
+    if (!ActiveReceiver.IsValid() || TransportName != FName(*ActiveConfig.Transport))
+    {
+        return;
+    }
+
+    UE_LOG(LogO3DReceiverSource, Warning, TEXT("Receiver transport '%s' is being unregistered (its module is shutting down); stopping and releasing the receiver."), *ActiveConfig.Transport);
+    StopTransport();
+    SourceStatus = FText::Format(LOCTEXT("StatusTransportUnregisteredFmt", "Transport {0} unloaded"), FText::FromString(ActiveConfig.Transport));
 }
 
 /** Ensure we always have a transport name for details panels that expose the source settings. */

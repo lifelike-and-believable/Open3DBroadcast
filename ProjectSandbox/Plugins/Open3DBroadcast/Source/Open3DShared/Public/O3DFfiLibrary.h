@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "HAL/CriticalSection.h"
 #include "Templates/Function.h"
 #include "Templates/SharedPointer.h"
 
@@ -21,6 +20,12 @@ struct FO3DFfiLibraryDesc
 	FString OwningPluginName;
 	/** Library file relative to the plugin base directory, with forward slashes. */
 	FString RelativePath;
+	/**
+	 * Registered transport names whose instances run code from this library, for example
+	 * {"MoQ"}. Unload() refuses to free the library while FO3DTransportRegistry reports a live
+	 * instance of any of them (ADR 0007 item 5, WP-A1 PR 2).
+	 */
+	TArray<FName> TransportNames;
 };
 
 /**
@@ -37,8 +42,16 @@ struct OPEN3DSHARED_API FO3DFfiLibraryOps
 	TFunction<void(void* Handle)> FreeDll;
 	/** Returns the exported symbol, or null when it is missing. */
 	TFunction<void*(void* Handle, const TCHAR* SymbolName)> GetExport;
+	/**
+	 * Live instances of one transport name. Unset counts as none. Tests point it at their own
+	 * FO3DTransportRegistry.
+	 */
+	TFunction<int32(FName TransportName)> CountLiveInstances;
 
-	/** IPluginManager, FPaths::FileExists and FPlatformProcess Get/Free/GetDllExport. */
+	/**
+	 * IPluginManager, FPaths::FileExists, FPlatformProcess Get/Free/GetDllExport and
+	 * FO3DTransportRegistry::Get().GetNumLiveInstances.
+	 */
 	static FO3DFfiLibraryOps MakePlatform();
 };
 
@@ -54,25 +67,26 @@ enum class EO3DFfiUnloadResult : uint8
 };
 
 /**
- * One FFI shared library used by a transport module, and the transport instances created from it
- * (TRF-14, TRF-28; ADR 0007 items 4, 5 and 7).
+ * One FFI shared library used by a transport module (TRF-14, TRF-28; ADR 0007 items 4, 5 and 7).
  *
  * Every FFI transport loads its library through this class, so path lookup, load-status
  * reporting and the unload rule are written once. Module use:
  *
- *   StartupModule:  construct, Load(); register factories only if Load() (and any
- *                   library-specific validation) succeeded. Factories wrap each new instance
- *                   in TrackInstance().
- *   ShutdownModule: unregister factories, StopLiveInstances(), then Unload().
+ *   StartupModule:  construct with Desc.TransportNames set, Load(); register the transport only
+ *                   if Load() (and any library-specific validation) succeeded.
+ *   ShutdownModule: reset the FO3DTransportRegistration first. That drains the transport: its
+ *                   owners stop and release their instances and the registry stops the rest
+ *                   (FO3DTransportRegistry, OnTransportUnregistering). Then Unload().
  *
- * Unload() refuses to free the library while any tracked instance is still referenced (for
- * example by a component or LiveLink source that outlives the module during editor exit). The
- * library then stays loaded until process exit, so code in the library that such an instance
- * may still run (its destructor, a late callback) stays mapped. The destructor never frees the
- * library; only Unload() does.
+ * The registry tracks the instances (WP-A1 PR 2); this class only asks it. Unload() refuses to
+ * free the library while the registry reports a live instance of one of Desc.TransportNames (for
+ * example one a component that did not release it still holds during editor exit). The library
+ * then stays loaded until process exit, so code in the library that such an instance may still
+ * run (its destructor, a late callback) stays mapped. The destructor never frees the library;
+ * only Unload() does.
  *
- * Threading: Load, Unload and StopLiveInstances run on the game thread (module startup and
- * shutdown). TrackInstance and GetNumLiveInstances may be called from any thread.
+ * Threading: Load and Unload run on the game thread (module startup and shutdown).
+ * GetNumLiveInstances may be called from any thread.
  */
 class OPEN3DSHARED_API FO3DFfiLibrary
 {
@@ -104,55 +118,22 @@ public:
 	const FO3DFfiLibraryDesc& GetDesc() const { return Desc; }
 
 	/**
-	 * Records Instance so StopLiveInstances() can stop it and Unload() can see it is still
-	 * referenced. Holds only a weak reference. InstanceType must have a Stop() method.
+	 * Instances of Desc.TransportNames that are still referenced somewhere, as the transport
+	 * registry counts them (including leaks left by an earlier unregister).
 	 */
-	template <typename InstanceType>
-	TSharedRef<InstanceType, ESPMode::ThreadSafe> TrackInstance(const TSharedRef<InstanceType, ESPMode::ThreadSafe>& Instance)
-	{
-		const TWeakPtr<InstanceType, ESPMode::ThreadSafe> Weak = Instance;
-		FLiveInstance Entry;
-		Entry.IsAlive = [Weak]() { return Weak.IsValid(); };
-		Entry.Stop = [Weak]()
-		{
-			if (const TSharedPtr<InstanceType, ESPMode::ThreadSafe> Pinned = Weak.Pin())
-			{
-				Pinned->Stop();
-			}
-		};
-		AddLiveInstance(MoveTemp(Entry));
-		return Instance;
-	}
-
-	/** Calls Stop() on every tracked instance that is still alive. Returns how many were stopped. */
-	int32 StopLiveInstances();
-
-	/** Tracked instances that are still referenced somewhere. Drops the ones that are gone. */
 	int32 GetNumLiveInstances() const;
 
 	/**
-	 * Frees the library unless a tracked instance is still referenced, in which case it logs a
-	 * Warning and keeps the library loaded until process exit.
+	 * Frees the library unless an instance of one of its transports is still referenced, in which
+	 * case it logs a Warning and keeps the library loaded until process exit. Call it after the
+	 * transport's registration is reset, so the drain has run.
 	 */
 	EO3DFfiUnloadResult Unload();
 
 private:
-	struct FLiveInstance
-	{
-		TFunction<bool()> IsAlive;
-		TFunction<void()> Stop;
-	};
-
-	void AddLiveInstance(FLiveInstance&& Entry);
-	/** Removes dead entries and returns the live count. Caller holds InstancesMutex. */
-	int32 PruneLocked() const;
-
 	FO3DFfiLibraryDesc Desc;
 	FO3DFfiLibraryOps Ops;
 	void* Handle = nullptr;
 	FString LibraryPath;
 	FString StatusMessage;
-
-	mutable FCriticalSection InstancesMutex;
-	mutable TArray<FLiveInstance> Instances;
 };

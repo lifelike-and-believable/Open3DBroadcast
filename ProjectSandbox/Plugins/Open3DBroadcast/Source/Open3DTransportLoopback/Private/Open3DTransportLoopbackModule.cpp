@@ -120,6 +120,9 @@ public:
 
 	virtual void ShutdownModule() override
 	{
+		// Unregistering drains the transport (ADR 0007 item 5, WP-A1 PR 2): sender components and
+		// LiveLink sources stop and release their instances, and the registry stops and reports any
+		// left, before this module's code goes away. There is no FFI handle to free afterwards.
 		Registration.Reset();
 
 		UE_LOG(LogOpen3DTransportLoopbackModule, Log, TEXT("Open3D loopback transport module shut down."));

@@ -28,7 +28,7 @@ The WebRTC (LiveKit) transport for Open3DBroadcast, as a separate, free plugin. 
   1. checks the transport API version (below) and stops if it differs;
   2. loads `livekit_ffi.dll` from **this** plugin's folder, through Open3DBroadcast's shared `FO3DFfiLibrary` loader, and stops if that fails;
   3. registers the "WebRTC" sender and receiver factories and their option schema.
-- At shutdown it unregisters them, stops every live WebRTC sender and receiver, and frees `livekit_ffi.dll` only if none is still referenced (TRF-14). If it registered nothing, it undoes nothing.
+- At shutdown it unregisters "WebRTC", which drains it: sender components and LiveLink sources stop and release their WebRTC instances, and the transport registry stops any left and reports them. Then it frees `livekit_ffi.dll`, only if the registry counts no WebRTC instance that is still referenced (TRF-14; ADR 0007 item 5). If it registered nothing, it undoes nothing.
 
 ### Transport API version
 

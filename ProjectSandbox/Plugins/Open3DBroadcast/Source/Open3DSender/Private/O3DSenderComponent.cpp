@@ -18,6 +18,7 @@
 #include "GameFramework/Actor.h"
 #include "HAL/IConsoleManager.h"
 #include "UObject/Package.h"
+#include "UObject/WeakObjectPtrTemplates.h"
 #include "AudioCaptureCore.h"
 #include "O3DAudioFrameCodec.h"
 
@@ -358,6 +359,17 @@ void UO3DSenderComponent::InitializeTransport()
 	{
 		TransportController.Reset(new FO3DSenderTransportController());
 	}
+
+	// If the transport unregisters while active (its module shuts down), drop everything that
+	// references the sender or its sinks before the controller releases the sender, so the
+	// registry's drain finds no live instance (ADR 0007 item 5, WP-A1 PR 2).
+	TransportController->SetOnTransportUnregistering([WeakThis = TWeakObjectPtr<UO3DSenderComponent>(this)]()
+	{
+		if (UO3DSenderComponent* Self = WeakThis.Get())
+		{
+			Self->TeardownTransport();
+		}
+	});
 
 	FO3DTransportConfig Config = BuildTransportConfig();
 	if (!TransportController->Start(Config))

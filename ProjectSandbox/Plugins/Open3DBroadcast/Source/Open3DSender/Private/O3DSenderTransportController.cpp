@@ -8,6 +8,13 @@
 
 FO3DSenderTransportController::FO3DSenderTransportController() = default;
 
+FO3DSenderTransportController::~FO3DSenderTransportController()
+{
+    // Only the subscription: the delegate must not call a destroyed controller. Releasing the
+    // sender is left to the members' destructors, as before.
+    Unsubscribe();
+}
+
 bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
 {
     Stop();
@@ -27,9 +34,15 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
         return false;
     }
 
+    // From here on the controller owns a registry-tracked instance: release it if the transport
+    // unregisters (ADR 0007 item 5).
+    ActiveTransportName = SelectedTransportName;
+    UnregisteringHandle = FO3DTransportRegistry::Get().OnTransportUnregistering().AddRaw(this, &FO3DSenderTransportController::HandleTransportUnregistering);
+
     if (!ActiveSender->Initialize(ActiveConfig))
     {
         UE_LOG(LogO3DSenderComponent, Warning, TEXT("Failed to initialize sender transport '%s'."), *ActiveConfig.Transport);
+        Unsubscribe();
         ActiveSender.Reset();
         return false;
     }
@@ -37,8 +50,7 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
     if (!ActiveSender->Start())
     {
         UE_LOG(LogO3DSenderComponent, Warning, TEXT("Failed to start sender transport '%s'."), *ActiveConfig.Transport);
-        ActiveSender->Stop();
-        ActiveSender.Reset();
+        Stop();
         return false;
     }
 
@@ -64,6 +76,8 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
 
 void FO3DSenderTransportController::Stop()
 {
+    Unsubscribe();
+
     if (AudioSink.IsValid())
     {
         AudioSink->OnCaptureStopped();
@@ -80,4 +94,36 @@ void FO3DSenderTransportController::Stop()
 bool FO3DSenderTransportController::IsActive() const
 {
     return ActiveSender.IsValid();
+}
+
+void FO3DSenderTransportController::HandleTransportUnregistering(FName TransportName)
+{
+    if (TransportName != ActiveTransportName || !ActiveSender.IsValid())
+    {
+        return;
+    }
+
+    UE_LOG(LogO3DSenderComponent, Warning, TEXT("Sender transport '%s' is being unregistered (its module is shutting down); stopping and releasing the sender."), *TransportName.ToString());
+
+    // The owner first drops what it holds (the audio capture's sink, the control publisher); it
+    // may call Stop() itself. Copied, because the handler may replace itself.
+    if (OnTransportUnregisteringHandler)
+    {
+        const TFunction<void()> Handler = OnTransportUnregisteringHandler;
+        Handler();
+    }
+
+    Stop();
+}
+
+void FO3DSenderTransportController::Unsubscribe()
+{
+    if (UnregisteringHandle.IsValid())
+    {
+        // Removing during the registry's broadcast is safe: UE multicast delegates defer the
+        // compaction of their invocation list until the broadcast ends.
+        FO3DTransportRegistry::Get().OnTransportUnregistering().Remove(UnregisteringHandle);
+        UnregisteringHandle.Reset();
+    }
+    ActiveTransportName = NAME_None;
 }

@@ -21,6 +21,8 @@ FO3DFfiLibraryDesc FMoQFfiSupport::MakeLibraryDesc()
 	// Win64 only: O3D_WITH_TRANSPORT_MOQ is 0 on every other platform, so this file is then
 	// compiled out (ADR 0001). The Linux and Mac paths named binaries that do not exist (BUILD-2).
 	Desc.RelativePath = TEXT("Source/Open3DTransportMoQ/ThirdParty/moq-ffi/bin/Win64/Release/moq_ffi.dll");
+	// Unload() keeps moq_ffi loaded while the registry still counts a live "MoQ" instance (WP-A1 PR 2).
+	Desc.TransportNames.Add(FName(TEXT("MoQ")));
 	return Desc;
 }
 

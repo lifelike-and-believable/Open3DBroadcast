@@ -140,23 +140,20 @@ public:
 		// Delivers FFI callbacks to the game thread. Nothing restarts it after ShutdownModule.
 		FMoQAsyncDispatcher::Get().Initialize();
 
-		RegisterTransports(Library.ToSharedRef());
+		RegisterTransports();
 
 		UE_LOG(LogO3DMoQSender, Log, TEXT("Open3D MoQ transport module started"));
 	}
 
 	virtual void ShutdownModule() override
 	{
-		// TRF-13/TRF-14 ordering: stop handing out instances, stop the instances that are still
-		// alive (components or LiveLink sources may outlive this module), stop delivering FFI
-		// callbacks (queued ones are discarded and later ones dropped), then unload the library.
-		// FO3DFfiLibrary keeps the DLL loaded if an instance is still referenced after Stop().
+		// TRF-13/TRF-14 ordering (ADR 0007 item 5, WP-A1 PR 2): unregister, which drains "MoQ":
+		// no new instances, the sender components and LiveLink sources stop and release theirs
+		// (OnTransportUnregistering), and the registry stops and reports any left. Then stop
+		// delivering FFI callbacks (queued ones are discarded and later ones dropped), then unload
+		// the library. FO3DFfiLibrary keeps the DLL loaded while the registry still counts a live
+		// MoQ instance.
 		UnregisterTransports();
-
-		if (Library.IsValid())
-		{
-			Library->StopLiveInstances();
-		}
 
 		FMoQAsyncDispatcher::Get().Shutdown();
 
@@ -169,13 +166,13 @@ public:
 	}
 
 private:
-	/** moq_ffi and the instances created from it. The registered factories hold a reference too. */
+	/** moq_ffi. Unloaded in ShutdownModule after the registration is reset (drained). */
 	TSharedPtr<FO3DFfiLibrary, ESPMode::ThreadSafe> Library;
 
 	/** The one registration of "MoQ" (ADR 0007 item 4, WP-A1); valid only while the library is loaded. */
 	FO3DTransportRegistration Registration;
 
-	void RegisterTransports(const TSharedRef<FO3DFfiLibrary, ESPMode::ThreadSafe>& InLibrary)
+	void RegisterTransports()
 	{
 		// One descriptor: factories, configure functions and option schemas. The pickers list the
 		// names that have a factory, so "MoQ" appears in both transport dropdowns from this alone.
@@ -183,14 +180,15 @@ private:
 		Descriptor.Name = TEXT("MoQ");
 		Descriptor.OwningModule = TEXT("Open3DTransportMoQ");
 
-		// Every instance is tracked so ShutdownModule can stop it before unloading moq_ffi.
-		Descriptor.CreateSender = [InLibrary]() -> TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe>
+		// The registry tracks every instance it creates, so unregistering drains them before
+		// ShutdownModule unloads moq_ffi (ADR 0007 item 5).
+		Descriptor.CreateSender = []() -> TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe>
 		{
-			return InLibrary->TrackInstance(MakeShared<FO3DMoQSender, ESPMode::ThreadSafe>());
+			return MakeShared<FO3DMoQSender, ESPMode::ThreadSafe>();
 		};
-		Descriptor.CreateReceiver = [InLibrary]() -> TSharedPtr<IOpen3DReceiver, ESPMode::ThreadSafe>
+		Descriptor.CreateReceiver = []() -> TSharedPtr<IOpen3DReceiver, ESPMode::ThreadSafe>
 		{
-			return InLibrary->TrackInstance(MakeShared<FO3DMoQReceiver, ESPMode::ThreadSafe>());
+			return MakeShared<FO3DMoQReceiver, ESPMode::ThreadSafe>();
 		};
 
 		Descriptor.ConfigureSender = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
@@ -231,6 +229,7 @@ private:
 		UE_LOG(LogO3DMoQSender, Verbose, TEXT("MoQ transport registered"));
 	}
 
+	/** Unregisters "MoQ"; the registry drains its live instances before this returns. */
 	void UnregisterTransports()
 	{
 		Registration.Reset();

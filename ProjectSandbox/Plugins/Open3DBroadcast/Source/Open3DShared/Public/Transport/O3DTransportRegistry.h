@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Delegates/Delegate.h"
+#include "Delegates/DelegateCombinations.h"
 #include "HAL/CriticalSection.h"
 #include "Templates/Function.h"
 #include "Templates/SharedPointer.h"
@@ -27,14 +28,25 @@
  * registry's map, so a descriptor stays valid for as long as the caller holds it, also after the
  * transport unregisters. Factories and configure functions are always called outside the lock.
  *
- * Threading: Find, GetNames, GetSecretDeclaration, GetOptionSchema, CreateSender and CreateReceiver
- * are safe on any thread (read lock). Register and unregister are meant for the game thread (module
- * startup and shutdown), because OnTransportsChanged is broadcast on the calling thread; the map
- * itself is protected by a write lock either way.
+ * Lifetime (ADR 0007 item 5, WP-A1 PR 2; SHR-13, TRF-14): CreateSender and CreateReceiver keep a
+ * weak reference to every instance they hand out, in a live list per transport name. Unregistering
+ * a transport drains it: the name leaves the registry (no new instances), OnTransportUnregistering
+ * is broadcast so the owners (the sender transport controller, the receiver source) stop and drop
+ * their instances, then the registry stops whatever is still referenced and, if anything still
+ * is, logs one Error naming the transport and the count. GetNumLiveInstances counts what is
+ * still referenced, also after the unregister, so FO3DFfiLibrary can refuse to free a DLL whose
+ * code a leaked instance still runs.
+ * A transport module's ShutdownModule therefore resets its registration first and frees its FFI
+ * handles after.
  *
- * Not yet here (later WP-A1 PRs): live-instance tracking and drain on unregister (PR 2), result
- * types and capabilities (PR 3), and the typed options view that replaces the component and
- * source parameters of the configure functions (PR 5).
+ * Threading: Find, GetNames, GetSecretDeclaration, GetOptionSchema, CreateSender, CreateReceiver
+ * and GetNumLiveInstances are safe on any thread (read lock). Register, unregister (resetting a
+ * registration) and EditLegacyDescriptor are game-thread only and check() it: they broadcast
+ * OnTransportsChanged and OnTransportUnregistering on the calling thread, and draining calls the
+ * instances' Stop(), which is a game-thread call.
+ *
+ * Not yet here (later WP-A1 PRs): result types and capabilities (PR 3), and the typed options view
+ * that replaces the component and source parameters of the configure functions (PR 5).
  */
 
 class UO3DSenderComponent;
@@ -138,6 +150,14 @@ struct FO3DTransportDescriptor
 	}
 };
 
+/**
+ * Broadcast with the transport name while that transport unregisters (ADR 0007 item 5). Game
+ * thread. Owners of an instance of that transport stop it and drop every reference to it, and to
+ * the sinks they gave it, before returning. Handlers may call the registry (Find, Create*), but
+ * the name is already gone, so no new instance of it can be created.
+ */
+DECLARE_MULTICAST_DELEGATE_OneParam(FO3DTransportUnregisteringDelegate, FName /*TransportName*/);
+
 using FO3DTransportDescriptorPtr = TSharedPtr<const FO3DTransportDescriptor, ESPMode::ThreadSafe>;
 using FO3DTransportDescriptorRef = TSharedRef<const FO3DTransportDescriptor, ESPMode::ThreadSafe>;
 
@@ -190,11 +210,22 @@ public:
 	/** Copies the option schema of Role for Name. Returns false, with an empty output, when Name is not registered. Any thread. */
 	bool GetOptionSchema(FName Name, EO3DTransportRole Role, FO3DTransportOptionSchema& OutSchema) const;
 
-	/** A new sender from Name's factory (called outside the lock), or null with a Warning. */
+	/**
+	 * A new sender from Name's factory (called outside the lock), or null with a Warning. The
+	 * registry keeps a weak reference to it in Name's live list. If Name unregisters while the
+	 * factory runs, the new instance is stopped and null is returned.
+	 */
 	TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe> CreateSender(FName Name) const;
 
-	/** A new receiver from Name's factory (called outside the lock), or null with a Warning. */
+	/** Receiver counterpart of CreateSender, with the same tracking. */
 	TSharedPtr<IOpen3DReceiver, ESPMode::ThreadSafe> CreateReceiver(FName Name) const;
+
+	/**
+	 * Instances of Name created through CreateSender or CreateReceiver that are still referenced
+	 * somewhere, including those left over from an earlier registration of Name that were still
+	 * referenced when it unregistered (leaks). Any thread.
+	 */
+	int32 GetNumLiveInstances(FName Name) const;
 
 	/**
 	 * Broadcast after every register and unregister, on the thread that made the change (the game
@@ -203,13 +234,22 @@ public:
 	FSimpleMulticastDelegate& OnTransportsChanged() { return TransportsChanged; }
 
 	/**
+	 * Broadcast while a transport unregisters, after its name has left the registry and before the
+	 * registry stops what is still alive (see FO3DTransportUnregisteringDelegate). Owners of
+	 * instances subscribe; the subscription must be removed before the subscriber is destroyed.
+	 * Game thread.
+	 */
+	FO3DTransportUnregisteringDelegate& OnTransportUnregistering() { return TransportUnregistering; }
+
+	/**
 	 * Support for the deprecated register functions (O3DTransport::RegisterSender,
 	 * O3DSender::RegisterTransportCustomization and their receiver counterparts), which each set
 	 * one part of a transport. Under the write lock, copies the legacy descriptor registered under
 	 * Name (or starts an empty one), lets Edit change the copy, and publishes it; an edit that
-	 * leaves no factory, configure function or declared option removes the entry. Refused, with a
-	 * Warning, when Name belongs to a Register() registration. Edit must not call the registry.
-	 * Removed with the shims in the next minor release. Game thread.
+	 * leaves no factory, configure function or declared option removes the entry, and drains it
+	 * like an unregister. Instances created from the entry stay tracked across edits. Refused,
+	 * with a Warning, when Name belongs to a Register() registration. Edit must not call the
+	 * registry. Removed with the shims in the next minor release. Game thread.
 	 */
 	void EditLegacyDescriptor(FName Name, TFunctionRef<void(FO3DTransportDescriptor&)> Edit);
 
@@ -219,20 +259,42 @@ public:
 private:
 	friend class FO3DTransportRegistration;
 
+	/** Weak references to the instances created from one entry. Defined in the .cpp. */
+	struct FLiveList;
+	using FLiveListPtr = TSharedPtr<FLiveList, ESPMode::ThreadSafe>;
+
 	struct FEntry
 	{
 		FO3DTransportDescriptorPtr Descriptor;
+		/** Instances created from this entry; carried over when a legacy edit replaces the descriptor. */
+		FLiveListPtr Live;
 		/** Identifies the Register() call that created the entry; 0 for a legacy entry. */
 		uint64 RegistrationId = 0;
 	};
 
-	/** Removes Name when it is still owned by RegistrationId. Called by FO3DTransportRegistration. */
+	/** Removes Name when it is still owned by RegistrationId, then drains it. Called by FO3DTransportRegistration. */
 	void Unregister(FName Name, uint64 RegistrationId);
+
+	/** Pins the descriptor and live list registered under Name (read lock). */
+	bool FindEntry(FName Name, FO3DTransportDescriptorPtr& OutDescriptor, FLiveListPtr& OutLive) const;
+
+	/**
+	 * Drain after Name left the map: closes Live, broadcasts OnTransportUnregistering, stops what is
+	 * still alive and logs one Error if any instance is still referenced; those stay counted by
+	 * GetNumLiveInstances. Game thread, no lock held.
+	 */
+	void Drain(FName Name, const FO3DTransportDescriptorPtr& Removed, const FLiveListPtr& Live);
 
 	mutable FRWLock Lock;
 	TMap<FName, FEntry> Entries;
+	/**
+	 * Live lists of unregistered entries that still had referenced instances (leaks), so
+	 * GetNumLiveInstances keeps counting them. Lists with nothing alive are dropped on the next drain.
+	 */
+	TArray<TPair<FName, FLiveListPtr>> Retired;
 	uint64 NextRegistrationId = 1;
 	FSimpleMulticastDelegate TransportsChanged;
+	FO3DTransportUnregisteringDelegate TransportUnregistering;
 };
 
 /**

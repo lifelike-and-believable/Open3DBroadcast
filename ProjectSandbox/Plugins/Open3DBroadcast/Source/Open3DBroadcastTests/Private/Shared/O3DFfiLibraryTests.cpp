@@ -3,20 +3,20 @@
 // WP-F3 (TRF-14, TRF-28): FO3DFfiLibrary, the shared FFI DLL loader the MoQ and WebRTC modules
 // use. The platform calls are faked (FO3DFfiLibraryOps), so these tests need no DLL and check
 // the decisions: where the library is looked for, that nothing is loaded when the file is
-// missing, and that module shutdown stops live instances and keeps the library loaded while an
-// instance is still referenced.
+// missing, and that module shutdown (unregister, which drains, then Unload) keeps the library
+// loaded while the transport registry still counts a referenced instance (WP-A1 PR 2, ADR 0007
+// item 5).
 
 #include "O3DTestHarness.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
-#include "Misc/Guid.h"
 #include "Misc/Paths.h"
 
 #include "O3DFfiLibrary.h"
-#include "O3DSenderRegistry.h"
 #include "O3DTestFakes.h"
+#include "Transport/O3DTransportRegistry.h"
 
 namespace O3DFfiLibraryTest
 {
@@ -146,47 +146,56 @@ bool FO3DFfiLibraryUnloadWithLiveInstanceTest::RunTest(const FString& Parameters
 {
 	using namespace O3DFfiLibraryTest;
 
-	// The KeptLoaded case logs a Warning by design.
-	AddExpectedError(TEXT("still referenced"), EAutomationExpectedMessageFlags::Contains, 1);
+	// By design: the registry reports the instance a component still holds after the unregister
+	// (Error), and Unload refuses while it is referenced (Warning).
+	AddExpectedError(TEXT("unregistered with 1 live instance"), EAutomationExpectedMessageFlags::Contains, 1);
+	AddExpectedError(TEXT("library left loaded until process exit"), EAutomationExpectedMessageFlags::Contains, 1);
+
+	// A private registry stands in for the process-wide one (WP-A1 PR 2: the registry tracks the
+	// instances, the library asks it).
+	const TSharedRef<FO3DTransportRegistry, ESPMode::ThreadSafe> Registry = MakeShared<FO3DTransportRegistry, ESPMode::ThreadSafe>();
+	const FName TransportName(TEXT("FfiLibraryTestTransport"));
 
 	FFakePlatform Platform;
-	const TSharedRef<FO3DFfiLibrary, ESPMode::ThreadSafe> Library =
-		MakeShared<FO3DFfiLibrary, ESPMode::ThreadSafe>(MakeDesc(), Platform.MakeOps());
-	if (!TestTrue(TEXT("Load succeeds"), Library->Load()))
+	FO3DFfiLibraryOps Ops = Platform.MakeOps();
+	Ops.CountLiveInstances = [Registry](FName Name) { return Registry->GetNumLiveInstances(Name); };
+	FO3DFfiLibraryDesc Desc = MakeDesc();
+	Desc.TransportNames.Add(TransportName);
+	FO3DFfiLibrary Library(Desc, MoveTemp(Ops));
+	if (!TestTrue(TEXT("Load succeeds"), Library.Load()))
 	{
 		return false;
 	}
 
-	// Register a factory the way the MoQ and WebRTC modules do, under a name unique to this test.
-	const FName TransportName(*FString::Printf(TEXT("%s_FfiLibrary_%s"), FO3DFakeTransportScope::GetNamePrefix(), *FGuid::NewGuid().ToString()));
-	O3DTransport::RegisterSender(TransportName, [Library]() -> TSharedPtr<IOpen3DSender>
-	{
-		return Library->TrackInstance(MakeShared<FO3DFakeSender, ESPMode::ThreadSafe>());
-	});
+	// Registered the way the MoQ and WebRTC modules do: only after the library loaded.
+	FO3DTransportDescriptor Descriptor;
+	Descriptor.Name = TransportName;
+	Descriptor.OwningModule = TEXT("Open3DBroadcastTests");
+	Descriptor.CreateSender = []() -> TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe> { return MakeShared<FO3DFakeSender, ESPMode::ThreadSafe>(); };
+	FO3DTransportRegistration Registration = Registry->Register(MoveTemp(Descriptor));
 
-	// One instance a component still holds, and one that was already released.
-	TSharedPtr<IOpen3DSender> Live = O3DTransport::CreateSender(TransportName);
+	// One instance an owner that did not subscribe still holds, and one that was already released.
+	TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe> Live = Registry->CreateSender(TransportName);
 	{
-		const TSharedPtr<IOpen3DSender> Released = O3DTransport::CreateSender(TransportName);
+		const TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe> Released = Registry->CreateSender(TransportName);
 		TestTrue(TEXT("Second instance created"), Released.IsValid());
 	}
 	if (!TestTrue(TEXT("Instance created through the registry"), Live.IsValid()))
 	{
-		O3DTransport::UnregisterSender(TransportName);
 		return false;
 	}
 	FO3DFakeSender* LiveFake = static_cast<FO3DFakeSender*>(Live.Get());
 	TestTrue(TEXT("Live instance starts"), Live->Initialize(FO3DTransportConfig()) && Live->Start());
-	TestEqual(TEXT("Only the referenced instance counts as live"), Library->GetNumLiveInstances(), 1);
+	TestEqual(TEXT("Only the referenced instance counts as live"), Library.GetNumLiveInstances(), 1);
 
-	// Module shutdown sequence (ShutdownModule in both FFI transport modules).
-	O3DTransport::UnregisterSender(TransportName);
-	TestFalse(TEXT("No new instances after unregister"), O3DTransport::CreateSender(TransportName).IsValid());
-	TestEqual(TEXT("StopLiveInstances stops the one live instance"), Library->StopLiveInstances(), 1);
-	TestEqual(TEXT("The live instance saw Stop()"), LiveFake->GetStopCalls(), 1);
-	TestTrue(TEXT("Unload refuses while the instance is referenced"), Library->Unload() == EO3DFfiUnloadResult::KeptLoaded);
+	// Module shutdown sequence (ShutdownModule in both FFI transport modules): unregister, which
+	// drains, then free the FFI handle.
+	Registration.Reset();
+	TestFalse(TEXT("No new instances after unregister"), Registry->IsRegistered(TransportName, EO3DTransportRole::Sender));
+	TestEqual(TEXT("The drain stopped the live instance"), LiveFake->GetStopCalls(), 1);
+	TestTrue(TEXT("Unload refuses while the instance is referenced"), Library.Unload() == EO3DFfiUnloadResult::KeptLoaded);
 	TestEqual(TEXT("FreeDll not called while referenced"), Platform.FreeCalls, 0);
-	TestTrue(TEXT("Library stays loaded"), Library->IsLoaded());
+	TestTrue(TEXT("Library stays loaded"), Library.IsLoaded());
 
 	// The owner can still use and stop its instance: the library it runs on is still mapped.
 	Live->Stop();
@@ -194,10 +203,72 @@ bool FO3DFfiLibraryUnloadWithLiveInstanceTest::RunTest(const FString& Parameters
 
 	// Once the last reference is gone, the library can be freed.
 	Live.Reset();
-	TestEqual(TEXT("No live instances left"), Library->GetNumLiveInstances(), 0);
-	TestEqual(TEXT("StopLiveInstances has nothing to stop"), Library->StopLiveInstances(), 0);
-	TestTrue(TEXT("Unload frees the library"), Library->Unload() == EO3DFfiUnloadResult::Unloaded);
+	TestEqual(TEXT("No live instances left"), Library.GetNumLiveInstances(), 0);
+	TestTrue(TEXT("Unload frees the library"), Library.Unload() == EO3DFfiUnloadResult::Unloaded);
 	TestEqual(TEXT("FreeDll called once"), Platform.FreeCalls, 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DFfiLibraryUnloadAfterDrainTest, "Open3DBroadcast.Shared.FfiLibrary.UnloadAfterCleanDrain", O3DB_TEST_FLAGS)
+bool FO3DFfiLibraryUnloadAfterDrainTest::RunTest(const FString& Parameters)
+{
+	using namespace O3DFfiLibraryTest;
+
+	// No AddExpectedError: the owner releases its instance on OnTransportUnregistering, so the
+	// drain reports no leak and the library is freed at once.
+	const TSharedRef<FO3DTransportRegistry, ESPMode::ThreadSafe> Registry = MakeShared<FO3DTransportRegistry, ESPMode::ThreadSafe>();
+	const FName TransportName(TEXT("FfiLibraryTestDrained"));
+
+	FFakePlatform Platform;
+	FO3DFfiLibraryOps Ops = Platform.MakeOps();
+	Ops.CountLiveInstances = [Registry](FName Name) { return Registry->GetNumLiveInstances(Name); };
+	FO3DFfiLibraryDesc Desc = MakeDesc();
+	Desc.TransportNames.Add(TransportName);
+	FO3DFfiLibrary Library(Desc, MoveTemp(Ops));
+	if (!TestTrue(TEXT("Load succeeds"), Library.Load()))
+	{
+		return false;
+	}
+
+	FO3DTransportDescriptor Descriptor;
+	Descriptor.Name = TransportName;
+	Descriptor.CreateReceiver = []() -> TSharedPtr<IOpen3DReceiver, ESPMode::ThreadSafe> { return MakeShared<FO3DFakeReceiver, ESPMode::ThreadSafe>(); };
+	FO3DTransportRegistration Registration = Registry->Register(MoveTemp(Descriptor));
+
+	TSharedPtr<IOpen3DReceiver, ESPMode::ThreadSafe> Owned = Registry->CreateReceiver(TransportName);
+	TestTrue(TEXT("Instance created"), Owned.IsValid());
+	const FDelegateHandle Handle = Registry->OnTransportUnregistering().AddLambda([&Owned, TransportName](FName Name)
+	{
+		if (Name == TransportName && Owned.IsValid())
+		{
+			Owned->Stop();
+			Owned.Reset();
+		}
+	});
+	TestEqual(TEXT("One live instance"), Library.GetNumLiveInstances(), 1);
+
+	Registration.Reset();
+	Registry->OnTransportUnregistering().Remove(Handle);
+
+	TestFalse(TEXT("The owner released its instance"), Owned.IsValid());
+	TestEqual(TEXT("Nothing live"), Library.GetNumLiveInstances(), 0);
+	TestTrue(TEXT("Unload frees the library"), Library.Unload() == EO3DFfiUnloadResult::Unloaded);
+	TestEqual(TEXT("FreeDll called once"), Platform.FreeCalls, 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DFfiLibraryNoTransportNamesTest, "Open3DBroadcast.Shared.FfiLibrary.UnloadWithoutTransportNamesCountsNothing", O3DB_TEST_FLAGS)
+bool FO3DFfiLibraryNoTransportNamesTest::RunTest(const FString& Parameters)
+{
+	using namespace O3DFfiLibraryTest;
+
+	// A library whose descriptor names no transport (or whose ops cannot count) has nothing to
+	// wait for; it is freed as before.
+	FFakePlatform Platform;
+	FO3DFfiLibrary Library(MakeDesc(), Platform.MakeOps());
+	TestTrue(TEXT("Load succeeds"), Library.Load());
+	TestEqual(TEXT("No transport names: nothing live"), Library.GetNumLiveInstances(), 0);
+	TestTrue(TEXT("Unload frees the library"), Library.Unload() == EO3DFfiUnloadResult::Unloaded);
 	return true;
 }
 

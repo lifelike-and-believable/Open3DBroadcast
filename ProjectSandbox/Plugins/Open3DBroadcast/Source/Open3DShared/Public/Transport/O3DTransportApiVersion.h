@@ -33,9 +33,17 @@
  *      Open3DReceiver.
  *   2  ADR 0011 (CTL-2): the control channel appended SupportsControl and SendControl to
  *      IOpen3DSender and SupportsControl and SetControlSink to IOpen3DReceiver, and added
- *      IO3DReceiverControlSink. Removing the WP-A1 forwarding shims takes 3.
+ *      IO3DReceiverControlSink.
+ *   3  WP-A1 PR 2 (ADR 0007 item 5, lifetime): the registry tracks the instances it creates and
+ *      drains a transport when it unregisters (OnTransportUnregistering, GetNumLiveInstances);
+ *      register and unregister now check() the game thread. FO3DFfiLibrary changed layout: it
+ *      asks the registry for live instances (FO3DFfiLibraryDesc::TransportNames,
+ *      FO3DFfiLibraryOps::CountLiveInstances) instead of tracking them, and TrackInstance and
+ *      StopLiveInstances are gone. The add-on constructs FO3DFfiLibrary and inlines its
+ *      descriptor, so an add-on built for 2 must not load. Removing the WP-A1 forwarding shims
+ *      takes the next number.
  */
-#define O3D_TRANSPORT_API_VERSION 2
+#define O3D_TRANSPORT_API_VERSION 3
 
 namespace O3DTransport
 {

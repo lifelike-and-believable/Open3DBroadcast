@@ -5,8 +5,8 @@
 #include "HAL/PlatformProcess.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
-#include "Misc/ScopeLock.h"
 #include "O3DSharedLogs.h"
+#include "Transport/O3DTransportRegistry.h"
 
 FO3DFfiLibraryOps FO3DFfiLibraryOps::MakePlatform()
 {
@@ -20,6 +20,7 @@ FO3DFfiLibraryOps FO3DFfiLibraryOps::MakePlatform()
 	Ops.LoadDll = [](const FString& Path) { return FPlatformProcess::GetDllHandle(*Path); };
 	Ops.FreeDll = [](void* InHandle) { FPlatformProcess::FreeDllHandle(InHandle); };
 	Ops.GetExport = [](void* InHandle, const TCHAR* SymbolName) { return FPlatformProcess::GetDllExport(InHandle, SymbolName); };
+	Ops.CountLiveInstances = [](FName TransportName) { return FO3DTransportRegistry::Get().GetNumLiveInstances(TransportName); };
 	return Ops;
 }
 
@@ -86,53 +87,18 @@ void* FO3DFfiLibrary::GetExport(const TCHAR* SymbolName) const
 	return Ops.GetExport(Handle, SymbolName);
 }
 
-void FO3DFfiLibrary::AddLiveInstance(FLiveInstance&& Entry)
-{
-	FScopeLock Lock(&InstancesMutex);
-	// Prune here too, so a long session that creates many short-lived instances does not grow
-	// the list without bound.
-	PruneLocked();
-	Instances.Add(MoveTemp(Entry));
-}
-
-int32 FO3DFfiLibrary::PruneLocked() const
-{
-	Instances.RemoveAll([](const FLiveInstance& Entry) { return !Entry.IsAlive(); });
-	return Instances.Num();
-}
-
 int32 FO3DFfiLibrary::GetNumLiveInstances() const
 {
-	FScopeLock Lock(&InstancesMutex);
-	return PruneLocked();
-}
-
-int32 FO3DFfiLibrary::StopLiveInstances()
-{
-	// Copy the entries and call Stop() outside the lock: Stop() may take the instance's own
-	// locks, wait for its worker, or drop the last reference (running its destructor).
-	TArray<FLiveInstance> Snapshot;
+	if (!Ops.CountLiveInstances)
 	{
-		FScopeLock Lock(&InstancesMutex);
-		PruneLocked();
-		Snapshot = Instances;
+		return 0;
 	}
-
-	int32 Stopped = 0;
-	for (const FLiveInstance& Entry : Snapshot)
+	int32 Count = 0;
+	for (const FName& TransportName : Desc.TransportNames)
 	{
-		if (Entry.IsAlive())
-		{
-			Entry.Stop();
-			++Stopped;
-		}
+		Count += Ops.CountLiveInstances(TransportName);
 	}
-
-	if (Stopped > 0)
-	{
-		UE_LOG(LogO3DShared, Log, TEXT("%s: stopped %d live transport instance(s) before unload"), *Desc.DisplayName, Stopped);
-	}
-	return Stopped;
+	return Count;
 }
 
 EO3DFfiUnloadResult FO3DFfiLibrary::Unload()
