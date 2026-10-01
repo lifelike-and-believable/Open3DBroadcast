@@ -207,9 +207,9 @@ void UO3DSenderComponent::StartCapture()
 	// starting a transport (which may open sockets), so a failed start leaves
 	// nothing running.
 	LastStartCaptureError.Reset();
-	if (!TargetMesh.IsValid() && !bEnableAudio)
+	if (!TargetMesh.IsValid() && !bEnableAudio && !bAllowControlOnly)
 	{
-		LastStartCaptureError = TEXT("No valid TargetMesh and audio is disabled.");
+		LastStartCaptureError = TEXT("No valid TargetMesh, audio is disabled and control-only is off.");
 		UE_LOG(LogO3DSenderComponent, Warning, TEXT("Sender capture not started on %s: %s"), *GetNameSafe(GetOwner()), *LastStartCaptureError);
 		NotifyOnScreen(FString::Printf(TEXT("O3D Sender: not started (%s)"), *LastStartCaptureError), FColor::Red, 4.0f);
 		return;
@@ -243,7 +243,7 @@ void UO3DSenderComponent::StartCapture()
 
 	BindToTarget();
 	const bool bHasValidMesh = TargetMesh.IsValid();
-	bIsCapturing = bHasValidMesh || bEnableAudio;
+	bIsCapturing = bHasValidMesh || bEnableAudio || bAllowControlOnly;
 	LastCaptureTime = 0.0;
 	FrameCounter = 0;
 
@@ -326,6 +326,10 @@ void UO3DSenderComponent::StopCapture()
 /** Stop ticking the active transport and release audio capture bindings. */
 void UO3DSenderComponent::TeardownTransport()
 {
+	if (ControlPublisher.IsValid())
+	{
+		ControlPublisher->Stop(); // values are kept for the next start
+	}
 	TeardownAudioCapture();
 	if (TransportController.IsValid())
 	{
@@ -375,6 +379,7 @@ void UO3DSenderComponent::InitializeTransport()
 	}
 
 	UpdateAudioCaptureBinding();
+	StartControl();
 	UE_LOG(LogO3DSenderComponent, Log, TEXT("Auto transport '%s' initialized."), *TransportController->GetConfig().Transport);
 }
 
@@ -1410,6 +1415,106 @@ void UO3DSenderComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 			SenderInstance->Tick(DeltaTime);
 		}
 	}
+
+	TickControl();
+}
+
+// ── Control channel (docs/adr/0011-control-channel.md, item 8) ───────────────────────────
+
+FO3DControlPublisher& UO3DSenderComponent::EnsureControlPublisher()
+{
+	if (!ControlPublisher.IsValid())
+	{
+		const AActor* Owner = GetOwner();
+		ControlPublisher = MakeUnique<FO3DControlPublisher>(Owner ? Owner->GetName() : GetName());
+	}
+	return *ControlPublisher;
+}
+
+FString UO3DSenderComponent::GetControlSourceId() const
+{
+	return const_cast<UO3DSenderComponent*>(this)->EnsureControlPublisher().GetSourceId();
+}
+
+void UO3DSenderComponent::StartControl()
+{
+	if (!TransportController.IsValid() || !TransportController->IsActive())
+	{
+		return;
+	}
+	const TSharedPtr<IOpen3DSender> SenderInstance = TransportController->GetSender();
+	if (!SenderInstance.IsValid() || !SenderInstance->SupportsControl())
+	{
+		return;
+	}
+	FO3DControlPublisher& Publisher = EnsureControlPublisher();
+	Publisher.SetConfig(ControlSnapshotIntervalSeconds, ControlEventRedundancy, ControlMaxValueRateHz);
+	Publisher.Start(); // sends a snapshot of any values set before capture started
+}
+
+void UO3DSenderComponent::TickControl()
+{
+	if (!ControlPublisher.IsValid() || !ControlPublisher->IsRunning() || !TransportController.IsValid())
+	{
+		return;
+	}
+	const TSharedPtr<IOpen3DSender> SenderInstance = TransportController->GetSender();
+	if (!SenderInstance.IsValid())
+	{
+		return;
+	}
+	// The subject this sender streams, exactly as it goes on the wire, so receivers can align
+	// control to its mocap. Empty for a control-only sender.
+	TArray<FString> Subjects;
+	if (!CachedSubjectName.IsEmpty())
+	{
+		Subjects.Add(CachedSubjectName);
+	}
+	ControlPublisher->SetMocapSubjects(Subjects);
+	ControlPublisher->SetConfig(ControlSnapshotIntervalSeconds, ControlEventRedundancy, ControlMaxValueRateHz);
+	ControlPublisher->Tick(*SenderInstance);
+}
+
+bool UO3DSenderComponent::FireControlEvent(const FString& EventName, const FO3DControlValue& Payload, FString TargetSubject)
+{
+	FString Error;
+	if (!EnsureControlPublisher().FireEvent(EventName, TargetSubject, Payload, &Error))
+	{
+		UE_LOG(LogO3DSenderComponent, Warning, TEXT("FireControlEvent('%s') on %s was not sent: %s"), *EventName, *GetNameSafe(GetOwner()), *Error);
+		return false;
+	}
+	return true;
+}
+
+bool UO3DSenderComponent::SetControlValue(const FString& Key, const FO3DControlValue& Value, FString TargetSubject)
+{
+	FString Error;
+	if (!EnsureControlPublisher().SetValue(Key, TargetSubject, Value, &Error))
+	{
+		UE_LOG(LogO3DSenderComponent, Warning, TEXT("SetControlValue('%s') on %s was refused: %s"), *Key, *GetNameSafe(GetOwner()), *Error);
+		return false;
+	}
+	return true;
+}
+
+void UO3DSenderComponent::ClearControlValue(const FString& Key, FString TargetSubject)
+{
+	EnsureControlPublisher().ClearValue(Key, TargetSubject);
+}
+
+void UO3DSenderComponent::ClearAllControlValues()
+{
+	EnsureControlPublisher().ClearAll();
+}
+
+bool UO3DSenderComponent::GetControlValue(const FString& Key, const FString& TargetSubject, FO3DControlValue& OutValue) const
+{
+	if (!ControlPublisher.IsValid())
+	{
+		OutValue = FO3DControlValue();
+		return false;
+	}
+	return ControlPublisher->FindValue(Key, TargetSubject, OutValue);
 }
 
 void UO3DSenderComponent::UpdateEditConditionHelpers()

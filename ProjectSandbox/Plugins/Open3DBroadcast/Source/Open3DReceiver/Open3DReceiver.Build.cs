@@ -31,7 +31,11 @@ public class Open3DReceiver : ModuleRules
             "CoreUObject",
             "Engine",
             "LiveLinkInterface",
-            "Open3DShared"
+            "Open3DShared",
+            // UO3DControlSettings (Public/O3DControlSettings.h) is a UDeveloperSettings: the
+            // project-wide control channel settings saved to DefaultGame.ini (ADR 0011 item 8).
+            // DeveloperSettings is a runtime module, so Shipping builds have it.
+            "DeveloperSettings"
         });
 
         // LiveLink (ULiveLinkPreset in O3DReceiverSource.cpp) and LiveLinkAnimationCore are not

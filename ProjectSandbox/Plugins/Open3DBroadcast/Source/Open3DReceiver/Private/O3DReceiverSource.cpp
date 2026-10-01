@@ -22,6 +22,9 @@
 #include "O3DAudioBus.h"
 #include "O3DAudioFrameCodec.h"
 #include "O3DPerformanceMetrics.h"
+#include "O3DControlBus.h"
+#include "O3DControlConvert.h"
+#include "O3DControlSettings.h"
 
 THIRD_PARTY_INCLUDES_START
 #include "o3ds_generated.h"
@@ -118,6 +121,45 @@ TSharedRef<ISerializedFrameConsumer, ESPMode::ThreadSafe> FO3DReceiverSource::Ma
 {
     return MakeShared<FSerializedConsumer>(MoveTemp(Owner));
 }
+
+/**
+ * Control sink handed to the transport (ADR 0011). May be called on any thread: a socket or NNG
+ * Poll on the game thread today, an FFI thread for MoQ and WebRTC later. Off the game thread it
+ * copies the payload (the view lives only for the call) and hops with a weak reference, pinning
+ * the source only on the game thread (WP-S5, RCV-1), as FSerializedConsumer does.
+ */
+class FO3DReceiverSource::FControlSink final : public IO3DReceiverControlSink
+{
+public:
+    explicit FControlSink(TWeakPtr<FO3DReceiverSource> InOwner)
+        : Owner(MoveTemp(InOwner))
+    {
+    }
+
+    virtual void SubmitControl(TConstArrayView<uint8> Payload, const FString& StreamId, double ReceiveTimeSec) override
+    {
+        TArray<uint8> Copy(Payload.GetData(), Payload.Num());
+        if (!IsInGameThread())
+        {
+            TWeakPtr<FO3DReceiverSource> WeakOwner = Owner;
+            AsyncTask(ENamedThreads::GameThread, [WeakOwner, StreamId, ReceiveTimeSec, Copy = MoveTemp(Copy)]()
+            {
+                if (TSharedPtr<FO3DReceiverSource> Pinned = WeakOwner.Pin())
+                {
+                    Pinned->HandleControlPayload(Copy, StreamId, ReceiveTimeSec);
+                }
+            });
+            return;
+        }
+        if (TSharedPtr<FO3DReceiverSource> Pinned = Owner.Pin())
+        {
+            Pinned->HandleControlPayload(Copy, StreamId, ReceiveTimeSec);
+        }
+    }
+
+private:
+    TWeakPtr<FO3DReceiverSource> Owner;
+};
 
 /**
  * Lightweight audio bridge that republishes transport frames onto the gameplay audio bus.
@@ -333,6 +375,8 @@ void FO3DReceiverSource::Tick(float DeltaTime)
     // comment.
     TickConcealment();
 
+    TickControl(NowS);
+
     if (TimeSinceLastActivityCheck >= ActivityCheckIntervalSeconds)
     {
         RemoveInactiveSubjects();
@@ -391,6 +435,17 @@ bool FO3DReceiverSource::StartTransport()
 
     ActiveConsumer = MakeSerializedConsumer(TWeakPtr<FO3DReceiverSource>(AsShared()));
     ActiveReceiver->SetConsumer(ActiveConsumer);
+
+    // Control (ADR 0011): the sink is always installed when the transport carries control;
+    // whether a payload is accepted is decided per message (IsControlEnabled), so turning
+    // control on at runtime needs no transport restart.
+    ActiveControlSink.Reset();
+    if (ActiveReceiver->SupportsControl())
+    {
+        ActiveControlSink = MakeShared<FControlSink, ESPMode::ThreadSafe>(TWeakPtr<FO3DReceiverSource>(AsShared()));
+        ActiveReceiver->SetControlSink(ActiveControlSink);
+        ApplyControlConfig();
+    }
     if (!ActiveReceiver->Start())
     {
         UE_LOG(LogO3DReceiverSource, Warning, TEXT("Failed to start transport '%s'."), *ActiveConfig.Transport);
@@ -403,6 +458,7 @@ bool FO3DReceiverSource::StartTransport()
         ActiveReceiver.Reset();
         ActiveConsumer.Reset();
         ActiveAudioSink.Reset();
+        ActiveControlSink.Reset();
         return false;
     }
 
@@ -440,6 +496,15 @@ void FO3DReceiverSource::StopTransport()
     }
     ActiveAudioSink.Reset();
     ActiveConsumer.Reset();
+    ActiveControlSink.Reset();
+
+    // Deliver what alignment was still holding: the changes are real, only their timing is lost.
+    std::vector<O3DS::Control::Change> Held;
+    ControlAligner.Flush(Held);
+    for (const O3DS::Control::Change& Change : Held)
+    {
+        PublishControlChange(Change);
+    }
     InitializedSubjects.Empty();
     SubjectSkeletonHashes.Empty();
     SubjectCurveHashes.Empty();
@@ -1522,6 +1587,155 @@ void FO3DReceiverSource::ResetStreamState()
     PrevConcealmentMetricsBySubject.Empty();
     bHasClockOffsetEstimate = false;
     LastClockOffsetEstimateUs = 0;
+}
+
+// ── Control channel (docs/adr/0011-control-channel.md, item 8) ─────────────────────────────
+
+bool FO3DReceiverSource::IsControlEnabled() const
+{
+    const UO3DReceiverSourceSettings* SourceSettingsObject = GetConcealmentSettings();
+    const EO3DControlAcceptMode PerSource = SourceSettingsObject ? SourceSettingsObject->ControlAccept : EO3DControlAcceptMode::ProjectDefault;
+    return UO3DControlSettings::IsReceiveEnabled(PerSource);
+}
+
+void FO3DReceiverSource::ApplyControlConfig()
+{
+    const UO3DControlSettings* Project = GetDefault<UO3DControlSettings>();
+    O3DS::Control::ReceiverConfig Config;
+    Config.max_keys_per_source = static_cast<size_t>(FMath::Clamp(Project->MaxControlKeysPerSource, 1, static_cast<int32>(O3DS::ControlLimits::kMaxKeysPerSource)));
+    Config.max_live_bytes_per_s = static_cast<double>(FMath::Max(Project->MaxControlLiveBytesPerSecond, 2048));
+    Config.max_snapshot_bytes_per_s = static_cast<double>(FMath::Max(Project->MaxControlSnapshotBytesPerSecond, 2048));
+    for (const FString& Prefix : Project->ControlAllowlist)
+    {
+        if (!Prefix.IsEmpty())
+        {
+            Config.allow_prefixes.push_back(O3DControl::ToUtf8(Prefix));
+        }
+    }
+    ControlReceiver.SetConfig(Config);
+    ControlAligner.SetMaxHold(FMath::Max(Project->MaxAlignmentHoldMs, 0) / 1000.0);
+}
+
+void FO3DReceiverSource::HandleControlPayload(const TArray<uint8>& Payload, const FString& /*StreamId*/, double /*ReceiveTimeSec*/)
+{
+    check(IsInGameThread());
+    if (!IsControlEnabled())
+    {
+        ++ControlPayloadsDroppedDisabled;
+        return;
+    }
+    bControlWasEnabled = true;
+
+    // Core clocks are this receiver's own FPlatformTime, taken now on the game thread.
+    const double NowS = FPlatformTime::Seconds();
+    std::vector<O3DS::Control::Change> Changes;
+    const O3DS::Control::ParseError Error = ControlReceiver.Submit(Payload.GetData(), static_cast<size_t>(Payload.Num()), NowS, Changes);
+    if (Error != O3DS::Control::ParseError::None)
+    {
+        UE_LOG(LogO3DReceiverSource, Verbose, TEXT("Rejected control message (%d bytes): %s"), Payload.Num(), UTF8_TO_TCHAR(O3DS::Control::ToString(Error)));
+        return;
+    }
+    for (O3DS::Control::Change& Change : Changes)
+    {
+        RouteControlChange(MoveTemp(Change), NowS);
+    }
+}
+
+void FO3DReceiverSource::RouteControlChange(O3DS::Control::Change&& Change, double NowS)
+{
+    ControlSourcesSeen.Add(O3DControl::FromUtf8(Change.source_id));
+    if (GetDefault<UO3DControlSettings>()->bAlignControlToMocap)
+    {
+        ControlAligner.Push(MoveTemp(Change), NowS);
+    }
+    else
+    {
+        PublishControlChange(Change);
+    }
+}
+
+void FO3DReceiverSource::PublishControlChange(const O3DS::Control::Change& Change) const
+{
+    FO3DControlBus::Publish(O3DControl::FromCore(Change, ActiveConfig.StreamId));
+}
+
+void FO3DReceiverSource::DiscardControlState()
+{
+    ControlReceiver.Reset();
+    std::vector<O3DS::Control::Change> Held;
+    ControlAligner.Flush(Held); // dropped, not published
+    for (const FString& SourceId : ControlSourcesSeen)
+    {
+        FO3DControlBus::ForgetSource(SourceId);
+    }
+    ControlSourcesSeen.Reset();
+    bControlWasEnabled = false;
+}
+
+bool FO3DReceiverSource::GetPresentedSenderTimeUs(const std::string& SourceId, uint64_t& OutUs)
+{
+    // Timecode mode presents frames by timecode, which this channel does not carry: no alignment.
+    const ELiveLinkSourceMode Mode = Settings ? Settings->Mode : ELiveLinkSourceMode::EngineTime;
+    if (Mode == ELiveLinkSourceMode::Timecode)
+    {
+        return false;
+    }
+
+    const std::vector<std::string>* Subjects = ControlReceiver.FindMocapSubjects(SourceId);
+    if (Subjects == nullptr || Subjects->empty())
+    {
+        return false; // a control-only sender
+    }
+    O3DS::ReceiverStream* Stream = Streams.Find(Streams.ResolveKey(*Subjects));
+    if (Stream == nullptr || FPlatformTime::Seconds() - Stream->lastSeenS > AlignmentStreamLivenessSeconds)
+    {
+        return false; // no mocap from that sender here, or it paused: never hold cues for a stream that is not moving
+    }
+
+    // SubjectList.time of the newest frame handed to LiveLink, on the sender's clock - the same
+    // clock the control publisher stamps (ADR 0011 item 9). In EngineTime mode LiveLink shows the
+    // buffer EngineTimeOffset seconds behind, so the pose on screen is that much older.
+    double PresentedS = Stream->subjects.mTime;
+    if (Mode == ELiveLinkSourceMode::EngineTime && Settings)
+    {
+        PresentedS -= static_cast<double>(Settings->BufferSettings.EngineTimeOffset);
+    }
+    OutUs = PresentedS > 0.0 ? static_cast<uint64_t>(PresentedS * 1.0e6) : 0;
+    return true;
+}
+
+void FO3DReceiverSource::TickControl(double NowS)
+{
+    if (!IsControlEnabled())
+    {
+        if (bControlWasEnabled)
+        {
+            DiscardControlState(); // silently: no Cleared delegates (ADR 0011 item 8)
+        }
+        return;
+    }
+
+    std::vector<O3DS::Control::Change> Changes;
+    ControlReceiver.Tick(NowS, Changes); // incomplete snapshots, quiet sources
+    for (O3DS::Control::Change& Change : Changes)
+    {
+        RouteControlChange(MoveTemp(Change), NowS);
+    }
+
+    std::vector<O3DS::Control::Change> Released;
+    if (GetDefault<UO3DControlSettings>()->bAlignControlToMocap)
+    {
+        ControlAligner.SetMaxHold(FMath::Max(GetDefault<UO3DControlSettings>()->MaxAlignmentHoldMs, 0) / 1000.0);
+        ControlAligner.Release(NowS, [this](const std::string& SourceId, uint64_t& OutUs) { return GetPresentedSenderTimeUs(SourceId, OutUs); }, Released);
+    }
+    else
+    {
+        ControlAligner.Flush(Released); // alignment turned off while changes were held
+    }
+    for (const O3DS::Control::Change& Change : Released)
+    {
+        PublishControlChange(Change);
+    }
 }
 
 #undef LOCTEXT_NAMESPACE

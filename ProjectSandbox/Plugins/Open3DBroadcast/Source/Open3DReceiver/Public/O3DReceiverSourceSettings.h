@@ -6,6 +6,19 @@
 #include "LiveLinkSourceSettings.h"
 #include "O3DReceiverSourceSettings.generated.h"
 
+/**
+ * Whether one receiver source accepts control messages (docs/adr/0011-control-channel.md,
+ * item 8). ProjectDefault follows the runtime override (UO3DControlLibrary) if one is set, and
+ * otherwise the project setting (UO3DControlSettings::bAcceptControl).
+ */
+UENUM(BlueprintType)
+enum class EO3DControlAcceptMode : uint8
+{
+    ProjectDefault UMETA(DisplayName = "Project Default"),
+    Enabled,
+    Disabled
+};
+
 /** User-facing configuration used to bootstrap receiver transports inside LiveLink. */
 USTRUCT(BlueprintType)
 struct FO3DReceiverSourceConfig
@@ -73,4 +86,12 @@ public:
      *  prediction accuracy for lower perceived latency, so it's opt-in. */
     UPROPERTY(EditAnywhere, Category = "Open3DStream|Concealment", meta = (EditCondition = "bEnableConcealment", ClampMin = "0.0"))
     float RenderAheadMs = 0.0f;
+
+    /**
+     * Whether this source accepts control messages (events and values). Project Default follows
+     * the runtime override, then Project Settings > Plugins > Open3DBroadcast Control. Enabled or
+     * Disabled here wins over both, for projects that want control on only some sources.
+     */
+    UPROPERTY(EditAnywhere, Category = "Open3DStream|Control")
+    EO3DControlAcceptMode ControlAccept = EO3DControlAcceptMode::ProjectDefault;
 };
