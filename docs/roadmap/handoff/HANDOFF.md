@@ -14,7 +14,7 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 merged (#289); PR 2 is next** (see §2) |
 | M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | Not started |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
-| WP-CTL control channel (D11, ADR 0011) | CTL-1..5 done (#290–#295); **CTL-6 (WebRTC add-on) and CTL-7 (docs) remain** (see §2b) |
+| WP-CTL control channel (D11, ADR 0011) | CTL-1..5 done (#290–#295) and CTL-6 done; **CTL-7 (docs) remains** (see §2b) |
 
 Recent merges on `develop`: F7 editor split (#285, dc686e0), F11 WebRTC add-on (#286, 5c9af51), WP-A1 PR 1 transport registry (#289, d365c34), NNG unity-build fix and README rewrite (#287), ADR 0011 (#290), CTL-1..5 (#291–#295, last de02b8d).
 
@@ -49,12 +49,12 @@ Done outside the cloud session, after the first version of this doc. Design: `do
 | CTL-3 TCP, UDP, NNG, Loopback | Done (#293) |
 | CTL-4 sender component API, receiver `FControlSink` with mocap alignment, `UO3DControlSettings`, `UO3DRemoteControlComponent` | Done (#294) |
 | CTL-5 MoQ (`control/<session>` track) | Done (#295). The live-relay test case is not written (needs a relay) |
-| **CTL-6 WebRTC add-on**: `__o3d.ctl` send path and receive classification, tests, manual test step | **Not started** |
+| CTL-6 WebRTC add-on: `__o3d.ctl` send path and receive classification, tests, manual test step | Done (CTL-6). Tests `Open3DBroadcast.Transport.WebRTC.Control.*` (fake FFI); manual case 12 in `docs/testing/webrtc-manual-test.md` not yet run against a live LiveKit server |
 | **CTL-7 docs**: USER_GUIDE Control section, transport comparison row, CHANGELOG protocol entry | **Not started** |
 
 Open items:
 - ADR 0011 was accepted on 2026-10-01 (open questions with their defaults), and WP-CTL is in the roadmap as decision D11 with its own work package section.
-- Until CTL-6 lands, the WebRTC transport reports no control support; `SupportsControl()` gates the conformance cases, so CI stays green.
+- The WebRTC transport supports control since CTL-6. Its conformance profile is still deferred (WP-T2e: no add-on test module), so the control conformance cases are mirrored in the add-on's `Open3DBroadcast.Transport.WebRTC.Control.*` tests; when WP-T2e adds the profile, give it the control cases too. ADR 0011 open question 4 (is the reliable LiveKit data channel ordered; does the callback expose the participant) is still unverified; the manual case 12 checks ordering, and `source_id` in the payload covers sender identity.
 - The packaged Shipping test ADR 0011 asks of CTL-4 (control enabled in a Shipping build through the project setting and the runtime call) is not in CI yet; the nightly Shipping build (`Build-ShippingGame.ps1`) is the natural place for it.
 - New-peer snapshots wait for ADR 0005 (vi); until then recovery is bounded by the snapshot interval.
 - CTL and WP-A1 overlap: see the notes on steps 3 and 4 in §2.

@@ -10,10 +10,11 @@ A comprehensive guide to installing, configuring, using, and troubleshooting the
    - [Credentials](#credentials)
    - [Automatic Token Fetch](#automatic-token-fetch-recommended)
 4. [Audio Configuration](#audio-configuration)
-5. [Platform Support](#platform-support)
-6. [Troubleshooting](#troubleshooting)
-7. [Performance Tuning](#performance-tuning)
-8. [FAQ](#faq)
+5. [Control Channel](#control-channel)
+6. [Platform Support](#platform-support)
+7. [Troubleshooting](#troubleshooting)
+8. [Performance Tuning](#performance-tuning)
+9. [FAQ](#faq)
 
 ---
 
@@ -267,6 +268,18 @@ Authorization: Bearer <endpoint credential>
 - Reduce skeleton complexity if data channel is saturated
 - Monitor network latency
 - Verify no audio sink configured (logs will show "frame discarded")
+
+---
+
+## Control Channel
+
+Control events and values (`Fire Control Event`, `Set Control Value` on the sender component; `UO3DRemoteControlComponent` on the receiving side) work over WebRTC like over the other transports. Receiving control is off by default; a project turns it on itself, with **Accept Control** under Project Settings › Plugins › Open3DBroadcast Control or with `Set Control Receive Enabled` at runtime.
+
+- Control travels on its own reliable, ordered LiveKit data channel labelled `__o3d.ctl`, next to the per-subject mocap channels. It is never counted as a frame, so frame, byte and drop statistics show mocap only.
+- Each control message is at most 1,100 bytes; larger ones are refused by the sender (the control publisher splits snapshots to fit).
+- Several senders can share one room: each sender's control carries its own source id, so receivers keep their events and values apart.
+- A subject literally named `__o3d.ctl` still streams as mocap; the receiver recognises control by its contents, not by the channel name. Avoid the name anyway, to keep logs readable.
+- **Update WebRTC receivers first.** A receiver built before control support (CTL-6) treats control messages as malformed mocap frames and logs warnings for them. Mocap is unaffected.
 
 ---
 

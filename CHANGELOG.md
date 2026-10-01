@@ -497,6 +497,41 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   USER_GUIDE and README say WebRTC is a free add-on, with a download-link
   placeholder until the support-site URL exists.
 
+### Control channel on WebRTC (CTL-6, ADR 0011)
+
+- The WebRTC add-on now carries control (events and values from
+  `UO3DSenderComponent`'s `FireControlEvent` / `SetControlValue`):
+  `SupportsControl()` is true on its sender and receiver. Built against
+  transport API version 2; the add-on's version check is unchanged.
+- **Sender.** `SendControl` sends each control envelope with
+  `lk_send_data_ex` on a data channel labelled `__o3d.ctl`, reliable and
+  ordered, never through `SendSerialized`. It refuses anything that is not
+  exactly one well-formed control envelope of at most 1,100 bytes, and any
+  call while not connected (before `Start`, after `Stop`, while LiveKit
+  reconnects); the control publisher retries. It enters the sender's
+  lifetime gate, so `Stop` never destroys the LiveKit client under a send.
+  Control never moves a frame, byte or drop counter, and its failures have
+  their own log throttle (one Warning per 2 s).
+- **Receiver.** The data callback checks for a control envelope (envelope
+  magic and kind Control) **before** the "label = subject" mocap path,
+  whatever the label, including the unlabeled fallback callback. A
+  well-formed envelope is queued (at most 1,024) and handed to the control
+  sink on the game thread in `Poll`; a malformed one, or one that arrives
+  with no sink, is dropped. Control never reaches the frame consumer and
+  moves no frame, byte or drop counter. Plain mocap bytes on a data channel
+  labelled `__o3d.ctl` (a subject with that name) are still mocap, as ADR
+  0011 requires. The sink is held strongly and released in `Stop`.
+- **Upgrade WebRTC receivers before using control:** a receiver built
+  before this release reads control as a malformed mocap frame and logs a
+  warning for it (ADR 0011 item 10).
+- **Tests.** `Open3DBroadcast.Transport.WebRTC.Control.*` (fake LiveKit
+  FFI): round trip interleaved with mocap, label classification, sender
+  refusals (oversize, not an envelope, not running, FFI failure), sink
+  released on `Stop`, and `Stop` while four threads send. They cover the
+  control conformance cases for WebRTC, whose conformance profile is still
+  deferred to an add-on test module (WP-T2e). Manual check: case 12 in
+  `docs/testing/webrtc-manual-test.md`.
+
 ### Editor module split (WP-F7, ADR 0010)
 
 - **New `Open3DBroadcastEditor` module** (Type `Editor`, `PostEngineInit`,

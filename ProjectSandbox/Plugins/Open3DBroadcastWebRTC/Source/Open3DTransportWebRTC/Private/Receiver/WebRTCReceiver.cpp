@@ -10,6 +10,7 @@
 #include "Math/NumericLimits.h"
 #include "Containers/StringConv.h"
 #include "O3DFfiContextRegistry.h"
+#include "O3DUnifiedMessage.h"
 THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
 THIRD_PARTY_INCLUDES_END
@@ -28,6 +29,12 @@ namespace
     static constexpr size_t MaxIncomingDataPayloadBytes = 8 * 1024 * 1024; // 8 MB
     static_assert(MaxIncomingDataPayloadBytes <= static_cast<size_t>(TNumericLimits<int32>::Max()),
         "MaxIncomingDataPayloadBytes must fit within int32 for TArray allocation");
+
+    /** Most control envelopes waiting for Poll(); the publisher's snapshots repair any dropped. */
+    static constexpr int32 MaxPendingControlEnvelopes = 1024;
+
+    /** Seconds between control drop logs (per receiver). */
+    static constexpr double ControlDropLogIntervalSec = 2.0;
 
     /** Label used for frames that arrive on the unlabeled fallback callback or with no label. */
     static constexpr TCHAR DefaultSubjectLabel[] = TEXT("default");
@@ -114,6 +121,60 @@ void FWebRTCReceiverLink::EnqueueFrame(const FString& SubjectLabel, const uint8*
     bReconnectPending.Store(false);
 }
 
+bool FWebRTCReceiverLink::ConsumeControl(const uint8* Bytes, size_t Len)
+{
+    if (!WebRTCUtils::IsControlKindEnvelope(Bytes, Len))
+    {
+        return false;
+    }
+
+    // Control traffic shows the link is alive (a control-only sender has no mocap), but it is not
+    // a frame: no frame or byte counter moves.
+    LastDataReceiveTime.store(FPlatformTime::Seconds());
+    bReconnectPending.Store(false);
+
+    if (!bControlWanted.Load())
+    {
+        LogControlDrop(TEXT("no control sink"));
+        return true;
+    }
+
+    // Len was bounded by IsAcceptablePayload, so the cast is safe. Only the envelope itself is
+    // kept: header plus payload, never trailing bytes.
+    TConstArrayView<uint8> Payload;
+    if (!O3DS::TryGetControlPayload(Bytes, static_cast<int32>(Len), Payload))
+    {
+        LogControlDrop(TEXT("malformed control envelope"));
+        return true;
+    }
+    const int32 EnvelopeBytes = O3DS::UnifiedWireHeaderSize + Payload.Num();
+
+    bool bQueued = false;
+    {
+        FScopeLock Lock(&PendingControlMutex);
+        if (PendingControl.Num() < MaxPendingControlEnvelopes)
+        {
+            PendingControl.Emplace(Bytes, EnvelopeBytes);
+            bQueued = true;
+        }
+    }
+    if (!bQueued)
+    {
+        LogControlDrop(TEXT("control queue full"));
+    }
+    return true;
+}
+
+void FWebRTCReceiverLink::LogControlDrop(const TCHAR* Reason)
+{
+    const double Now = FPlatformTime::Seconds();
+    double Last = LastControlDropLogTime.load();
+    if (Now - Last >= ControlDropLogIntervalSec && LastControlDropLogTime.compare_exchange_strong(Last, Now))
+    {
+        UE_LOG(LogO3DWebRTCReceiver, Verbose, TEXT("WebRTC control envelope dropped (%s)"), Reason);
+    }
+}
+
 void FWebRTCReceiverLink::RequestReconnect()
 {
     if (!bReconnectPending.Exchange(true))
@@ -170,6 +231,13 @@ void FO3DWebRTCReceiver::OnDataReceivedEx(void* user, const char* label, LkRelia
         return;
     }
 
+    // Control first (ADR 0011 item 7): enveloped control bytes never reach the "label = subject"
+    // mocap path, whatever their label. Plain bytes on the `__o3d.ctl` label stay mocap.
+    if (Self->ConsumeControl(bytes, len))
+    {
+        return;
+    }
+
     // Labels are UTF-8 (the sender encodes them with FTCHARToUTF8): decode, don't widen (TRF-31).
     FString SubjectLabel = WebRTCUtils::DecodeUtf8Label(label);
     if (SubjectLabel.IsEmpty())
@@ -188,6 +256,11 @@ void FO3DWebRTCReceiver::OnDataReceived(void* user, const uint8_t* bytes, size_t
 {
     const TSharedPtr<FWebRTCReceiverLink, ESPMode::ThreadSafe> Self = GetReceiverLinkRegistry().Resolve(user);
     if (!Self.IsValid() || !IsAcceptablePayload(bytes, len))
+    {
+        return;
+    }
+
+    if (Self->ConsumeControl(bytes, len))
     {
         return;
     }
@@ -385,6 +458,13 @@ void FO3DWebRTCReceiver::Stop()
     DestroyClientHandle(TEXT("LiveKit disconnect"));
 
     Consumer.Reset();
+    // The control sink is held strongly until here (ADR 0011 item 6).
+    ControlSink.Reset();
+    Link->bControlWanted.Store(false);
+    {
+        FScopeLock ControlLock(&Link->PendingControlMutex);
+        Link->PendingControl.Reset();
+    }
     {
         // lk_disconnect/lk_client_destroy above have returned, so no callback is running
         // (livekit_ffi.h: "After lk_disconnect() or lk_client_destroy() returns, no further
@@ -416,11 +496,22 @@ int32 FO3DWebRTCReceiver::Poll()
         Link->PendingFramesBySubject.Reset();
     }
 
-    // Snapshot the consumer under the state lock (TRF-15).
+    TArray<TArray<uint8>> ControlEnvelopes;
+    {
+        FScopeLock Lock(&Link->PendingControlMutex);
+        ControlEnvelopes = MoveTemp(Link->PendingControl);
+        Link->PendingControl.Reset();
+    }
+
+    // Snapshot the consumer and the control sink under the state lock (TRF-15).
     TSharedPtr<ISerializedFrameConsumer> ConsumerSnapshot;
+    TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe> ControlSinkSnapshot;
+    FString StreamIdSnapshot;
     {
         FScopeLock Lock(&StateMutex);
         ConsumerSnapshot = Consumer;
+        ControlSinkSnapshot = ControlSink;
+        StreamIdSnapshot = ActiveConfig.StreamId;
     }
 
     int32 FramesProcessed = 0;
@@ -469,6 +560,12 @@ int32 FO3DWebRTCReceiver::Poll()
         }
     }
 
+    // Control (ADR 0011): not a frame, so it is not counted in FramesProcessed or any stat.
+    for (const TArray<uint8>& Envelope : ControlEnvelopes)
+    {
+        O3DTransport::DeliverControlEnvelope(ControlSinkSnapshot, Envelope.GetData(), Envelope.Num(), StreamIdSnapshot);
+    }
+
     {
         FScopeLock Lock(&StateMutex);
         UpdateConnection();
@@ -514,6 +611,18 @@ void FO3DWebRTCReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ES
     else
     {
         Link->bPendingAudioFormatApply.Store(ActiveAudioConfig.bEnableAudio);
+    }
+}
+
+void FO3DWebRTCReceiver::SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink)
+{
+    FScopeLock Lock(&StateMutex);
+    ControlSink = Sink;
+    Link->bControlWanted.Store(Sink.IsValid());
+    if (!Sink.IsValid())
+    {
+        FScopeLock ControlLock(&Link->PendingControlMutex);
+        Link->PendingControl.Reset();
     }
 }
 
