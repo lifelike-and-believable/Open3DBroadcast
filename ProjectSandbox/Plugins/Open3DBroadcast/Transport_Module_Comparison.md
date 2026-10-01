@@ -450,6 +450,7 @@ static void OnConnectionState(void* user, LkConnectionState state,
 | **Core Interfaces** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Send SubjectList** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Audio Support** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Control (events and values)** | ✅ Own queue | ✅ In-band | ✅ In-band | ✅ In-band | ⏳ In progress (CTL-6) | ✅ `control/` track |
 | **Stats Reporting** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Backpressure Handling** | ✅ Queue | ✅ Queue | ✅ Queue | ⚠️ None | ✅ LiveKit | ✅ Relay/QUIC |
 | **Reconnection** | N/A | ✅ Auto | ✅ Auto | N/A | ✅ Auto | ✅ Auto |
@@ -465,6 +466,28 @@ interfaces default `SupportsAudio()` to `false`, and every transport overrides i
 to `true` on **both** the sender and receiver side — twelve overrides, no
 exceptions. Audio is a plugin-level capability, not a property of any one
 transport.
+
+**Control** (ADR 0011; USER_GUIDE "Control Channel") is a one-way stream of
+events and values from a sender to its receivers. `SupportsControl()` defaults
+to `false`; TCP, UDP, NNG, Loopback and MoQ override it on both sides. Every
+control message is a unified envelope of kind `Control` (2), at most 1,100
+bytes, so it is never fragmented. Control is never counted as a mocap frame.
+Delivery per transport:
+
+| Transport | Carriage | Delivery | Notes |
+|-----------|----------|----------|-------|
+| **Loopback** | `ControlQueue` on the in-process channel, beside the frame and audio queues | Reliable, ordered | Queue holds up to 1,024 envelopes; further sends are refused and the publisher retries |
+| **TCP** | Envelope in a TCP frame, on the same send queue as mocap and audio | Reliable, ordered with frames | `SendControl` is refused while no client is connected; events retry until their TTL, values are repaired by the next snapshot |
+| **UDP** | One datagram per envelope, sent under the socket lock | Unreliable, unordered | Never fragmented; refused if `udp.maxdatagram` is below the envelope size. Events rely on redundant copies, values on snapshots |
+| **NNG** | Envelope on the same socket and queue as frames | Pair and push/pull: reliable, ordered. Pub/sub: treated as unreliable | Covered by tests in pub/sub, pair/pair and push/pull |
+| **MoQ** | Separate publisher on `control/<session>` (track name as for mocap), announced on every connect with stream delivery whatever `delivery_mode` says | Treated as unreliable; not ordered against mocap (MoQ orders nothing across tracks) | `SendControl` is refused until the control track exists. A custom `track_namespace` without a `mocap/` or `audio/` prefix gets `control/` prepended. Receivers subscribe whenever a control sink is set; failures log at Verbose. Control never moves a frame, byte or drop counter |
+| **WebRTC** (add-on) | In progress (CTL-6): planned as reliable, ordered data on the `__o3d.ctl` label | — | Until CTL-6 lands the transport reports no control support |
+
+**Redundancy:** each event is sent `ControlEventRedundancy` times (default 3,
+range 1–5) on consecutive sender ticks, on every transport, and receivers
+de-duplicate by event id. **Values** are re-sent as a full snapshot every
+`ControlSnapshotIntervalSeconds` (default 1 s), so lossy links and late
+joiners converge within about one interval.
 
 ---
 

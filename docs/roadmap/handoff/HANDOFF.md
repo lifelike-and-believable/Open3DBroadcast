@@ -14,7 +14,7 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 merged (#289); PR 2 is next** (see §2) |
 | M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | Not started |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
-| WP-CTL control channel (D11, ADR 0011) | CTL-1..5 done (#290–#295); **CTL-6 (WebRTC add-on) and CTL-7 (docs) remain** (see §2b) |
+| WP-CTL control channel (D11, ADR 0011) | CTL-1..5 done (#290–#295), CTL-7 (docs) done; **CTL-6 (WebRTC add-on) remains** (see §2b) |
 
 Recent merges on `develop`: F7 editor split (#285, dc686e0), F11 WebRTC add-on (#286, 5c9af51), WP-A1 PR 1 transport registry (#289, d365c34), NNG unity-build fix and README rewrite (#287), ADR 0011 (#290), CTL-1..5 (#291–#295, last de02b8d).
 
@@ -50,7 +50,7 @@ Done outside the cloud session, after the first version of this doc. Design: `do
 | CTL-4 sender component API, receiver `FControlSink` with mocap alignment, `UO3DControlSettings`, `UO3DRemoteControlComponent` | Done (#294) |
 | CTL-5 MoQ (`control/<session>` track) | Done (#295). The live-relay test case is not written (needs a relay) |
 | **CTL-6 WebRTC add-on**: `__o3d.ctl` send path and receive classification, tests, manual test step | **Not started** |
-| **CTL-7 docs**: USER_GUIDE Control section, transport comparison row, CHANGELOG protocol entry | **Not started** |
+| CTL-7 docs: USER_GUIDE Control section, transport comparison row, CHANGELOG protocol entry | Done (CTL-7). The wire layout goes into `docs/wire-format.md` with WP-D3 |
 
 Open items:
 - ADR 0011 was accepted on 2026-10-01 (open questions with their defaults), and WP-CTL is in the roadmap as decision D11 with its own work package section.

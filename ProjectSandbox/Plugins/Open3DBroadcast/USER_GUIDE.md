@@ -9,11 +9,12 @@
 5. [Receiver Setup](#receiver-setup)
 6. [Transport Modules](#transport-modules)
 7. [Audio Streaming](#audio-streaming)
-8. [LiveLink Integration](#livelink-integration)
-9. [Configuration Reference](#configuration-reference)
-10. [Performance Tuning](#performance-tuning)
-11. [Troubleshooting](#troubleshooting)
-12. [Advanced Topics](#advanced-topics)
+8. [Control Channel](#control-channel)
+9. [LiveLink Integration](#livelink-integration)
+10. [Configuration Reference](#configuration-reference)
+11. [Performance Tuning](#performance-tuning)
+12. [Troubleshooting](#troubleshooting)
+13. [Advanced Topics](#advanced-topics)
 
 ---
 
@@ -170,8 +171,8 @@ All transports use a unified message format with a 20-byte header:
 ```
 
 - **Magic**: `0x4F334441` (identifies Open3D frames)
-- **Kind**: Mocap (skeletal data) or Audio
-- **Codec**: O3DS (FlatBuffers), PCM16, or Opus
+- **Kind**: Mocap (skeletal data), Audio, or Control (events and values; see [Control Channel](#control-channel))
+- **Codec**: O3DS (FlatBuffers), PCM16, Opus, or O3DControl (the control FlatBuffer, used only with kind Control)
 
 ---
 
@@ -618,6 +619,263 @@ Audio is routed through a centralized **Audio Bus** singleton:
 1. Use Opus instead of PCM16 (for network streams)
 2. Reduce audio buffer sizes (advanced)
 3. Use lower sample rate (32000 instead of 48000)
+
+---
+
+## Control Channel
+
+The control channel lets a sender trigger cues and change parameters on every client that receives its stream. Typical uses are VFX, lighting and audio cues, environment parameters such as fog density or time of day, and character parameters such as an emotion or a prop's visibility. Control travels on the same transport as the sender's mocap and audio. It is one-way: from the sender to its receivers. Design: [ADR 0011](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/docs/adr/0011-control-channel.md).
+
+Control costs nothing when you don't use it. A sender puts no control bytes on the wire until gameplay calls the control API.
+
+### Values and Events
+
+Control carries two kinds of message:
+
+| | Value | Event |
+|---|---|---|
+| What it is | Keyed state, for example `env.fog_density` = 0.3 | A one-off cue, for example `vfx.muzzle_flash` |
+| Identity | A key, plus an optional target subject | A name, plus an optional target subject |
+| Payload | One typed value | An optional typed value |
+| Rule | The last value set wins. Clearing removes the key | Delivered at most once |
+| Loss and late joiners | The sender re-sends all its values as a snapshot every `ControlSnapshotIntervalSeconds` (1 s by default). A client that joins late, or loses a message, has the current values within about one interval | Each event is sent `ControlEventRedundancy` times (3 by default) on consecutive ticks, and receivers drop the duplicates. An event older than 2 s is dropped, so a late joiner never sees old cues |
+
+The target subject is optional. Leave it empty to aim at the whole stream. Set it to a character's LiveLink subject name to aim at that character; receivers filter on it.
+
+Keys, event names and target subjects are case-sensitive strings (`FString`). `env.Fog` and `env.fog` are different keys.
+
+**Value types** (`EO3DControlValueType`): `None`, `Bool`, `Int` (64-bit), `Float` (double), `String`, `Name`, `Vector`, `Quat`, `Transform`, `Color` (`FLinearColor`) and `Bytes`. A value is an `FO3DControlValue`. In Blueprint, build one with the **Make Control Value (...)** nodes (Bool, Integer64, Float, String, Name, Vector, Rotator, Quat, Transform, Color, Bytes) and read one with **Control As Bool**, **Control As Int**, **Control As Float**, **Control As String**, **Control As Vector**, **Control As Rotator**, **Control As Quat**, **Control As Transform**, **Control As Color** and **Control As Bytes**. Each `As` node has a `Success` output. Rotations are stored as quaternions; the Rotator nodes convert.
+
+### Sending from the Sender Component
+
+The control functions are on **O3D Sender Component**, under **Open3DStream | Sender | Control**:
+
+| Function | What it does |
+|---|---|
+| `FireControlEvent(EventName, Payload, TargetSubject)` | Sends an event. Returns false and logs a warning when it cannot be sent: the transport is not running, the transport does not carry control, or the name or payload is invalid or too large |
+| `SetControlValue(Key, Value, TargetSubject)` | Sets a value. Allowed before capture starts; the value goes out when the transport starts. Setting the same value again sends nothing. Returns false and logs a warning when refused |
+| `ClearControlValue(Key, TargetSubject)` | Removes a value from every receiver |
+| `ClearAllControlValues()` | Removes every value this sender set |
+| `GetControlValue(Key, TargetSubject, OutValue)` | Returns the value this sender holds for a key |
+
+`TargetSubject` defaults to empty in Blueprint and C++.
+
+Properties, in the same category:
+
+| Property | Default | Description |
+|---|---|---|
+| `bAllowControlOnly` | false | Start the transport with no skeletal mesh and audio off, for an actor that only sends control. See [Control-only senders](#control-only-senders) |
+| `ControlSnapshotIntervalSeconds` | 1.0 | How often all values are re-sent (0.25 to 10 s) |
+| `ControlEventRedundancy` | 3 | Copies of each event, on consecutive ticks (1 to 5) |
+| `ControlMaxValueRateHz` | 30 | How often one value is re-sent at most while it keeps changing (1 to 120). The latest value always wins |
+
+**Blueprint example.** On a sender actor, call **Fire Control Event** with *Event Name* `vfx.muzzle_flash`, *Payload* from **Make Control Value (Name)** with `Rifle`, and *Target Subject* set to the character's subject name. To drive fog from a timeline, call **Set Control Value** every update with *Key* `env.fog_density` and **Make Control Value (Float)**.
+
+**C++ example:**
+
+```cpp
+#include "O3DSenderComponent.h"
+#include "O3DControlTypes.h"
+
+void AMyStageController::FireLightCue(int32 CueNumber)
+{
+    // Event: a lighting cue with an Int payload, aimed at the whole stream.
+    Sender->FireControlEvent(TEXT("light.cue"), FO3DControlValue::MakeInt(CueNumber));
+}
+
+void AMyStageController::SetFog(float Density)
+{
+    // Value: an environment parameter. Calling this every tick is fine (see Coalescing).
+    Sender->SetControlValue(TEXT("env.fog_density"), FO3DControlValue::MakeFloat(Density));
+}
+
+void AMyStageController::SetEmotion(const FString& Subject, const FString& Emotion)
+{
+    // Value aimed at one character.
+    Sender->SetControlValue(TEXT("char.emotion"), FO3DControlValue::MakeName(Emotion), Subject);
+}
+```
+
+The module that calls these needs `Open3DSender` and `Open3DShared` in its `Build.cs` dependencies.
+
+**Coalescing.** Several `SetControlValue` calls for the same key and target in one tick collapse to the last value, and all changes from one tick go out together. A parameter driven every frame therefore costs one entry per tick, and at most `ControlMaxValueRateHz` entries per second. Receivers that want smooth motion interpolate on their side.
+
+**Lifetime.** Control starts and stops with the sender's transport and ticks with the component. The values survive `StopCapture` and `StartCapture`: on start, the sender sends a snapshot at once, so remote lights and parameters don't blink when you edit the sender's Details panel (which restarts it). Events that were still waiting to be sent when the transport stopped are dropped.
+
+Each sender component has its own control source id, a fresh GUID per instance that is never saved. A duplicated actor gets its own id, so two senders never merge their values on a receiver.
+
+### Control-only Senders
+
+A stage, lighting or environment controller has no skeletal mesh. Add an **O3D Sender Component** to it, set the transport as usual, and tick `bAllowControlOnly`. `StartCapture` then starts the transport even with no target mesh and audio off. Such a sender streams no mocap, so receivers deliver its control on arrival (see [Alignment with mocap](#alignment-with-mocap)).
+
+### Enabling Control on a Client
+
+Receiving control is **off by default**. Control triggers gameplay, and UDP and NNG carry no authentication, so each client project decides whether to accept it. There are three ways to turn it on. The most specific one that is set wins:
+
+1. **Per receiver source:** **Control Accept** on the Open3D Receiver Source's settings (`UO3DReceiverSourceSettings::ControlAccept`): `Project Default` (the default), `Enabled` or `Disabled`. Use this when you run several receiver sources and want control on only some of them.
+2. **Runtime override:** `UO3DControlLibrary::SetControlReceiveEnabled(bool)` from Blueprint or C++. It overrides the project setting for the whole process until `ClearControlReceiveOverride()`. `IsControlReceiveEnabled()` reports the current state for sources set to Project Default. Use it from a menu, a login flow or your own config, at any time after startup, with no restart.
+3. **Project setting (the shipping default):** **Project Settings > Plugins > Open3DBroadcast Control > Accept Control**. It is saved to your project's `Config/DefaultGame.ini`, which is staged into packaged builds, so ticking it is all a project does to ship a client (including a Shipping build) with control on:
+
+   ```ini
+   [/Script/Open3DReceiver.O3DControlSettings]
+   bAcceptControl=True
+   ```
+
+Precedence: the per-source setting (unless it is Project Default), then the runtime override (if set), then the project setting.
+
+The decision is made for each message, on the game thread, so a change applies at once:
+- While control is off, the receiver drops control messages before parsing them.
+- Turning it off discards that source's control state silently. No **On Control Value Cleared** events fire.
+- Turning it on rebuilds the values from the next snapshot, within one snapshot interval.
+
+There is no console variable or command-line switch that turns control on.
+
+**Project settings** (`UO3DControlSettings`, in `DefaultGame.ini`):
+
+| Setting | Default | Description |
+|---|---|---|
+| `bAcceptControl` | false | Accept control on receiver sources set to Project Default |
+| `ControlAllowlist` | empty | Key and event-name prefixes to accept, for example `env.` or `vfx.`. Empty accepts every name. Case-sensitive |
+| `bAlignControlToMocap` | true | Hold events and value changes until the mocap they were sent with is shown |
+| `MaxAlignmentHoldMs` | 500 | Longest a change is held for alignment (0 to 5000 ms). After that it is delivered late, never dropped |
+| `MaxControlLiveBytesPerSecond` | 65536 | Byte budget per sender for live control messages (advanced) |
+| `MaxControlSnapshotBytesPerSecond` | 524288 | Separate byte budget per sender for snapshots, so live traffic cannot starve them (advanced) |
+| `MaxControlKeysPerSource` | 1024 | Most values (plus pending clears) kept per sender (1 to 1024, advanced) |
+
+`bAcceptControl`, `bAlignControlToMocap` and `MaxAlignmentHoldMs` apply at once. The allowlist and the limits are read when the receiver source starts; restart the source after changing them.
+
+The default byte budgets are twice what a sender produces at most, so a default receiver never rate-limits a well-behaved sender. Input over a budget, beyond the key cap, or outside the allowlist is dropped and counted.
+
+**Control never sets properties by reflection and never runs console commands.** The plugin hands you typed values and events; your Blueprint or C++ decides what each key and event name means. If you want a key to drive a property, write that mapping yourself, against your own list of allowed keys.
+
+### Receiving: O3D Remote Control Component
+
+Add **O3D Remote Control Component** (`UO3DRemoteControlComponent`) to any actor that should react to control, set its filters and bind its events. It listens from `BeginPlay` to `EndPlay`.
+
+**Filters** (all case-sensitive; empty accepts everything):
+
+| Property | Description |
+|---|---|
+| `StreamIdFilter` | Only changes received on this stream (the receiver source's stream id) |
+| `SourceNameFilter` | Only changes from this sender. The source name is the object name of the actor that owns the sender component |
+| `TargetSubjectFilter` | Only changes aimed at this subject (a character's LiveLink subject name) |
+| `bIncludeUntargeted` | With a target filter set, also accept changes aimed at the whole stream. Default true |
+| `NamePrefixFilter` | Only keys and event names starting with this, for example `vfx.` |
+
+**Events:**
+- **On Control Event** (`EventName`, `Value`, `Meta`): a sender fired an event.
+- **On Control Value Changed** (`Key`, `Value`, `Meta`): a sender set a value, or the value changed. A value that has not changed does not fire again when a snapshot repeats it.
+- **On Control Value Cleared** (`Key`, `Meta`): a sender cleared a value, or the sender went away. A sender that sends nothing for 30 s is dropped, and its values are reported as cleared.
+
+**Queries:**
+- `GetControlValue(Key, TargetSubject, OutValue)`: the current value of a key, from the first sender that passes `SourceNameFilter`.
+- `GetAllControlValues()`: every current value from senders that pass the filters, as `FO3DControlEntry` (`Key`, `TargetSubject`, `Value`, `SourceId`).
+
+`FO3DControlMeta` tells you where a change came from: `SourceId`, `SourceName`, `StreamId`, `TargetSubject`, `SenderTimeSec` (sender clock), `Epoch`, `Version` (values) and `EventId` (events).
+
+**Blueprint example.** On a light actor, add an O3D Remote Control Component with `NamePrefixFilter` = `light.`. Bind **On Control Event**, compare *Event Name* with `light.cue`, read the cue number with **Control As Int**, and play your cue.
+
+### C++: FO3DControlBus
+
+The component is built on `FO3DControlBus` (`O3DControlBus.h`, module `Open3DShared`), the control counterpart of the audio bus. Receiver sources publish to it, and you can listen to it directly. It is **game thread only**.
+
+```cpp
+#include "O3DControlBus.h"
+
+void UMyWeatherSubsystem::Start()
+{
+    Handle = FO3DControlBus::OnChange().AddUObject(this, &UMyWeatherSubsystem::OnControl);
+}
+
+void UMyWeatherSubsystem::OnControl(const FO3DControlChange& Change)
+{
+    // Change is valid only during the call; copy what you keep.
+    if (Change.Kind == FO3DControlChange::EKind::ValueChanged && Change.Name == TEXT("env.fog_density"))
+    {
+        bool bOk = false;
+        const double Density = UO3DControlValueLibrary::ControlAsFloat(Change.Value, bOk);
+        if (bOk)
+        {
+            ApplyFog(Density);
+        }
+    }
+}
+
+void UMyWeatherSubsystem::Stop()
+{
+    FO3DControlBus::OnChange().Remove(Handle);
+}
+```
+
+`FO3DControlChange` has `Kind` (`ValueChanged`, `ValueCleared` or `Event`), `Name` (the key or event name), `Value` and `Meta`. To read the current table, use `FO3DControlBus::GetSources()`, `GetValues(SourceId)` and `FindValue(SourceId, Key, Target)`. `FO3DControlBus::SetReceiveOverride` and `GetReceiveOverride` back the runtime enable functions above.
+
+Two receiver sources can hear the same sender (UDP multicast, one MoQ track, or a duplicated LiveLink source). The bus drops an event it has already published and ignores a value change that is not newer than the one it holds, so each change reaches listeners once.
+
+### Alignment with Mocap
+
+Each control message carries its sender time on the same clock as the sender's mocap frames. With `bAlignControlToMocap` on (the default), the receiver holds an event or value change until the pose LiveLink is showing for that sender's mocap stream has reached the change's sender time. A cue therefore plays with the motion it was fired against, not ahead of it by the receiver's buffering delay.
+
+Alignment never stalls control:
+- A change from a control-only sender, or from a sender whose mocap is not received here, is delivered at once.
+- A change whose mocap stream has had no packet for 200 ms (the performer's stream paused) is delivered at once.
+- A change held longer than `MaxAlignmentHoldMs` (500 ms by default) is delivered late, never dropped.
+- Changes from one sender are delivered in the order they were sent.
+- In LiveLink **Timecode** mode nothing is held, because control carries no timecode.
+
+Turn `bAlignControlToMocap` off to deliver changes as they arrive. That suits environment changes that need no lip-sync accuracy and should not wait.
+
+### Limits
+
+| Limit | Value |
+|---|---|
+| Control envelope on the wire | 1,100 bytes including its header. Control is never fragmented on any transport. Snapshots are split into parts to fit |
+| Key, event name, target subject | 128 bytes of UTF-8 each |
+| `String` and `Name` values, `Bytes` values | 512 bytes each |
+| Items (sets, clears, events) per message | 64 |
+| Values per sender | 1,024 |
+| Event time-to-live | 2 s |
+| Sender output | at most 32 KiB/s live and 256 KiB/s for snapshots, per sender component |
+
+A single value or event that cannot fit one control envelope is refused at the API: `SetControlValue` or `FireControlEvent` returns false and logs why. Doubles must be finite.
+
+### Transport Support
+
+| Transport | Control | Delivery |
+|---|---|---|
+| TCP | Yes | Reliable and ordered, in the same queue as frames. Refused while no receiver is connected |
+| UDP | Yes | Unreliable. One datagram per control message, never fragmented. Refused if `udp.maxdatagram` is below the envelope size |
+| NNG | Yes | Same socket as frames. Pair and push/pull are reliable; pub/sub is treated as unreliable |
+| Loopback | Yes | Its own queue (up to 1,024 messages), independent of the frame and audio queues |
+| MoQ | Yes | Its own `control/<session>` track with stream delivery, announced on every connect. Not ordered against mocap |
+| WebRTC (add-on) | In progress (CTL-6) | Not yet: the transport reports no control support, so `FireControlEvent` returns false and values set with `SetControlValue` are kept on the sender but not sent |
+
+See the Control row in [Transport_Module_Comparison.md](Transport_Module_Comparison.md#4-functional-parity-matrix) for details. Event redundancy is 3 on every transport today, including the reliable ones; the extra copies are a few dozen bytes each.
+
+**Older receivers.** A receiver built before the control channel ignores control silently on TCP, UDP and NNG, and never subscribes to the control track on MoQ. Its mocap is unaffected. Update every receiver before relying on control.
+
+### Control Troubleshooting
+
+**Nothing arrives on the client:**
+1. Check that control is enabled on the client: **Accept Control** in Project Settings, a `SetControlReceiveEnabled(true)` call, or **Control Accept** = `Enabled` on the receiver source. `IsControlReceiveEnabled()` tells you the process-wide state. A per-source `Disabled` beats everything else.
+2. Check the allowlist. A key or event name that matches no prefix in `ControlAllowlist` is dropped. The match is case-sensitive.
+3. Check the component's filters (`StreamIdFilter`, `SourceNameFilter`, `TargetSubjectFilter`, `NamePrefixFilter`). They are case-sensitive.
+4. Check that the transport carries control. WebRTC does not yet.
+5. On the sender, check the Output Log for `FireControlEvent(...) was not sent` or `SetControlValue(...) was refused`, with the reason.
+6. For a sender with no mesh and no audio, tick `bAllowControlOnly`, or `StartCapture` does not start the transport.
+
+**`FireControlEvent` returns false:** the transport is not running yet (events need a running transport; values do not), the transport does not carry control, or the name is empty, too long or the payload too large.
+
+**Values arrive but events don't:** events are not stored. An event fired before the client enabled control, connected or joined is never delivered; an event older than 2 s is dropped. Use a value for anything a late joiner must see.
+
+**Cues arrive late:** with alignment on, a cue waits for the matching pose, up to `MaxAlignmentHoldMs`. That delay is the pose's own buffering delay. Turn `bAlignControlToMocap` off for changes that should not wait.
+
+**Values flicker or reset:** this should not happen on a sender restart. Check that two sender components are not setting the same key on one stream, and that nothing calls `ClearAllControlValues` unexpectedly.
+
+**Logging:** the sender logs refused calls as warnings under `LogO3DSenderComponent`. The receiver logs rejected control messages at Verbose under `LogO3DReceiverSource`:
+
+```
+log LogO3DReceiverSource Verbose
+```
 
 ---
 
