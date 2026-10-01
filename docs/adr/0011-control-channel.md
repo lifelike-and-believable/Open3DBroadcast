@@ -184,7 +184,7 @@ root_type ControlMessage;
 
 - **After WP-A1:**
   - `SendControl` becomes `SendSerialized` with a payload kind of Control, which goes into `FO3DSendQueue` as a never-dropped control item;
-  - `SupportsControl` becomes `FO3DTransportCapabilities::bControl` (done in WP-A1 PR 3: `SupportsControl()` is now a non-virtual forwarder to it, and `SendControl` returns `EO3DSendResult` instead of `bool`, still as its own method until step 4);
+  - `SupportsControl` becomes `FO3DTransportCapabilities::bControl`;
   - `FO3DUnifiedReceiveDemux` routes Control to the sink, replacing the per-transport branches below.
 - **Backpressure:** today the TCP queue rejects the newest item when full (ADR 0007 Context). A refused control send is retried by the publisher on the next tick. Events retry until their TTL expires; values need no retry, because the next snapshot repairs them.
 
