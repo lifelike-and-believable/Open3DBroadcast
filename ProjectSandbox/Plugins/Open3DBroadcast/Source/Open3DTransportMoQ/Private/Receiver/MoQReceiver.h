@@ -29,6 +29,8 @@ DECLARE_LOG_CATEGORY_EXTERN(LogO3DMoQReceiver, Log, All);
  * Track Architecture:
  * - Mocap track: "mocap/<session>/<track>" - motion capture data
  * - Audio track: "audio/<session>/<track>" - audio data (separate subscription)
+ * - Control track: "control/<session>/<track>" - control envelopes (ADR 0011), subscribed
+ *   only while a control sink is set
  * 
  * Threading:
  * - Initialize(), Start(), Stop(), Poll() must be called from game thread
@@ -60,13 +62,24 @@ public:
 	virtual FO3DTransportStats GetStats() const override;
 	virtual bool SupportsAudio() const override { return true; }
 	virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
+	virtual bool SupportsControl() const override { return true; }
+	virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink) override;
 
 private:
+	/** The MoQ track a payload arrived on. */
+	enum class ETrack : uint8
+	{
+		Mocap,
+		Audio,
+		/** Control envelopes (ADR 0011): never counted as frames or dropped frames. */
+		Control,
+	};
+
 	struct FReceivedPayload
 	{
 		TArray<uint8> Data;
 		double ReceiveTimestampSeconds = 0.0;
-		bool bIsAudio = false;  // true if this payload came from audio track
+		ETrack Track = ETrack::Mocap;
 	};
 
 	struct FLatencyStats
@@ -81,6 +94,7 @@ private:
 		FString RelayUrl;
 		FString MocapNamespace;      // e.g., "mocap/session1"
 		FString AudioNamespace;      // e.g., "audio/session1"
+		FString ControlNamespace;    // e.g., "control/session1"
 		FString TrackName;           // e.g., "character1"
 		FString StreamId;
 		/** Abandon a connect attempt that has not completed after this long (TRF-11). */
@@ -112,10 +126,15 @@ private:
 	double NowSeconds() const;
 	bool AttemptSubscribe();
 	bool AttemptAudioSubscribe();
+	bool AttemptControlSubscribe();
 	void HandleMocapDataReceived(const TArray64<uint8>& Payload);
 	void HandleAudioDataReceived(const TArray64<uint8>& Payload);
+	void HandleControlDataReceived(const TArray64<uint8>& Payload);
+	/** Any thread: queues one payload for Poll. Returns false on queue overflow. */
+	bool EnqueueReceived(const TArray64<uint8>& Payload, ETrack Track);
 	void DestroySubscriber();
 	void DestroyAudioSubscriber();
+	void DestroyControlSubscriber();
 	bool ProcessReceivedPayload(const FReceivedPayload& Payload);
 	bool ProcessAudioPayload(const FReceivedPayload& Payload);
 	void ResetStats();
@@ -127,10 +146,13 @@ private:
 	TSharedPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> Session;
 	TSharedPtr<FMoQSubscriberHandle, ESPMode::ThreadSafe> MocapSubscriberHandle;
 	TSharedPtr<FMoQSubscriberHandle, ESPMode::ThreadSafe> AudioSubscriberHandle;
+	TSharedPtr<FMoQSubscriberHandle, ESPMode::ThreadSafe> ControlSubscriberHandle;
 	FDelegateHandle ConnectionDelegateHandle;
 
 	TWeakPtr<ISerializedFrameConsumer> Consumer;
 	TWeakPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
+	/** Control payloads (ADR 0011). Held strongly, released in Stop; used only from Poll (game thread). */
+	TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe> ControlSink;
 
 	TQueue<TUniquePtr<FReceivedPayload>, EQueueMode::Mpsc> ReceiveQueue;
 	mutable FCriticalSection QueueMutex;
@@ -145,6 +167,7 @@ private:
 	FThreadSafeBool bRunning = false;
 	FThreadSafeBool bMocapSubscribed = false;
 	FThreadSafeBool bAudioSubscribed = false;
+	FThreadSafeBool bControlSubscribed = false;
 
 	TAtomic<MoqConnectionState> CachedState;
 	FThreadSafeBool bConnectInFlight = false;
@@ -155,6 +178,7 @@ private:
 	double LastSubscribeAttemptTimeSeconds = 0.0;
 	FSubscribeRetryState MocapSubscribeRetry;
 	FSubscribeRetryState AudioSubscribeRetry;
+	FSubscribeRetryState ControlSubscribeRetry;
 	double LastErrorLogTimeSeconds = 0.0;
 
 	FO3DTransportConfig ActiveConfig;
@@ -169,4 +193,6 @@ private:
 
 	static constexpr double kErrorLogIntervalSeconds = 5.0;
 	static constexpr int32 kMaxFramesPerPoll = 16;
+	/** Control payloads handled per Poll, on top of the frames, so a burst cannot stall it. */
+	static constexpr int32 kMaxControlPerPoll = 64;
 };

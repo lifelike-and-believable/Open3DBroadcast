@@ -42,6 +42,8 @@ namespace
 
 	const FString MocapNamespace = TEXT("mocap/wp_s8");
 	const FString AudioNamespace = TEXT("audio/wp_s8");
+	/** ADR 0011 (CTL-5): the sender announces a control track on every connect. */
+	const FString ControlNamespace = TEXT("control/wp_s8");
 
 	bool HasDuplicates(const TArray<FString>& Values)
 	{
@@ -166,21 +168,22 @@ bool FMoQSenderReconnectReannounceTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Audio sink created"), Sink.IsValid());
 
 		TestEqual(TEXT("One client so far"), Fake->GetClientsCreated(), 1);
-		TestEqual(TEXT("Client 1 announced mocap and audio once each"), Fake->GetAnnounced(1).Num(), 2);
+		TestEqual(TEXT("Client 1 announced mocap, control and audio once each"), Fake->GetAnnounced(1).Num(), 3);
 		TestTrue(TEXT("Client 1 announced mocap"), Fake->GetAnnounced(1).Contains(MocapNamespace));
 		TestTrue(TEXT("Client 1 announced audio"), Fake->GetAnnounced(1).Contains(AudioNamespace));
+		TestTrue(TEXT("Client 1 announced control"), Fake->GetAnnounced(1).Contains(ControlNamespace));
 
 		// Ticking while connected must not announce again.
 		for (int32 Index = 0; Index < 5; ++Index)
 		{
 			Sender.Tick(0.0f);
 		}
-		TestEqual(TEXT("No extra announces while connected"), Fake->GetAnnounceLog().Num(), 2);
+		TestEqual(TEXT("No extra announces while connected"), Fake->GetAnnounceLog().Num(), 3);
 
 		// Unexpected drop reported by moq-ffi.
 		TestTrue(TEXT("Fake fired DISCONNECTED"), Fake->FireConnectionState(1, MOQ_STATE_DISCONNECTED));
 		MoQFakeTest::Pump();
-		TestEqual(TEXT("Both publishers released on disconnect"), Fake->GetPublishersDestroyed(), 2);
+		TestEqual(TEXT("All three publishers released on disconnect"), Fake->GetPublishersDestroyed(), 3);
 
 		// Base delay for zero failures is 0.5 s, jittered down to at least 0.375 s.
 		Clock.Advance(0.25);
@@ -195,9 +198,10 @@ bool FMoQSenderReconnectReannounceTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Reconnect used a new client"), Fake->GetClientsCreated(), 2);
 		TestTrue(TEXT("Client 2 re-announced mocap"), Fake->GetAnnounced(2).Contains(MocapNamespace));
 		TestTrue(TEXT("Client 2 re-announced audio"), Fake->GetAnnounced(2).Contains(AudioNamespace));
+		TestTrue(TEXT("Client 2 re-announced control"), Fake->GetAnnounced(2).Contains(ControlNamespace));
 		TestFalse(TEXT("Client 1 announced nothing twice"), HasDuplicates(Fake->GetAnnounced(1)));
 		TestFalse(TEXT("Client 2 announced nothing twice"), HasDuplicates(Fake->GetAnnounced(2)));
-		TestEqual(TEXT("Four announces in total"), Fake->GetAnnounceLog().Num(), 4);
+		TestEqual(TEXT("Six announces in total"), Fake->GetAnnounceLog().Num(), 6);
 		TestTrue(TEXT("The old client was destroyed"), Fake->IsClientDestroyed(1));
 
 		Sender.Stop();
@@ -270,7 +274,7 @@ bool FMoQSenderConnectTimeoutTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Nothing announced on abandoned client 1"), Fake->GetAnnounced(1).Num(), 0);
 		TestEqual(TEXT("Nothing announced on abandoned client 2"), Fake->GetAnnounced(2).Num(), 0);
 		TestTrue(TEXT("Current attempt announced mocap"), Fake->GetAnnounced(3).Contains(MocapNamespace));
-		TestEqual(TEXT("One publisher, on the current client"), Fake->GetPublishersCreated(), 1);
+		TestEqual(TEXT("Mocap and control publishers, on the current client only"), Fake->GetPublishersCreated(), 2);
 		TestTrue(TEXT("Abandoned client 1 destroyed"), Fake->IsClientDestroyed(1));
 		TestTrue(TEXT("Abandoned client 2 destroyed"), Fake->IsClientDestroyed(2));
 
@@ -309,7 +313,7 @@ bool FMoQSenderConnectErrorWithoutCallbackTest::RunTest(const FString& Parameter
 		Sender.Tick(0.0f);
 		TestEqual(TEXT("Retried again"), Fake->GetBlockingLaunches(), 3);
 		MoQFakeTest::Pump();
-		TestEqual(TEXT("Connected on the third attempt"), Fake->GetPublishersCreated(), 1);
+		TestEqual(TEXT("Connected on the third attempt (mocap and control publishers)"), Fake->GetPublishersCreated(), 2);
 
 		Sender.Stop();
 	}
@@ -611,7 +615,7 @@ bool FMoQLifetimeStartStressTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Every cycle produced a sink"), SinksCreated, O3DLifetimeTest::StressCycles);
 	TestEqual(TEXT("No sink accepts PCM after its sender stopped"), StaleSinkAccepted, 0);
 	TestEqual(TEXT("Every publisher destroyed"), Fake->GetPublishersDestroyed(), Fake->GetPublishersCreated());
-	TestEqual(TEXT("Mocap and audio publisher per cycle"), Fake->GetPublishersCreated(), 2 * O3DLifetimeTest::StressCycles);
+	TestEqual(TEXT("Mocap, control and audio publisher per cycle"), Fake->GetPublishersCreated(), 3 * O3DLifetimeTest::StressCycles);
 
 	int32 LiveClients = 0;
 	for (int32 ClientId = 1; ClientId <= Fake->GetClientsCreated(); ++ClientId)

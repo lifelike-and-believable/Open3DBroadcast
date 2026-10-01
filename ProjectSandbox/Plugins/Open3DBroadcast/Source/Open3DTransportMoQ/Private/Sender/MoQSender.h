@@ -33,6 +33,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogO3DMoQSender, Log, All);
  * Track Architecture:
  * - Mocap track: "mocap/<session>/<track>" - for motion capture data
  * - Audio track: "audio/<session>/<track>" - for audio data (separate publisher)
+ * - Control track: "control/<session>/<track>" - control envelopes (ADR 0011), stream delivery
  * 
  * This leverages MoQ's native support for multiple tracks, providing clean
  * separation between data types rather than multiplexing like NNG.
@@ -73,15 +74,26 @@ public:
 	virtual FO3DTransportStats GetStats() const override;
 	virtual bool SupportsAudio() const override { return true; }
 	virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
+	virtual bool SupportsControl() const override { return true; }
+	virtual bool SendControl(const uint8* Envelope, int32 Len) override;
 
 private:
 	friend class FSendWorker;
+
+	/** The MoQ track a queued payload is published on. */
+	enum class ETrack : uint8
+	{
+		Mocap,
+		Audio,
+		/** Control envelopes (ADR 0011): never counted as frames or dropped frames. */
+		Control,
+	};
 
 	struct FPendingPayload
 	{
 		TArray<uint8> Data;
 		double EnqueueTimestampSeconds = 0.0;
-		bool bIsAudio = false;  // true if this payload should go to audio track
+		ETrack Track = ETrack::Mocap;
 	};
 
 	struct FLatencyStats
@@ -96,6 +108,7 @@ private:
 		FString RelayUrl;
 		FString MocapNamespace;      // e.g., "mocap/session1"
 		FString AudioNamespace;      // e.g., "audio/session1"
+		FString ControlNamespace;    // e.g., "control/session1"
 		FString TrackName;           // e.g., "character1"
 		MoqDeliveryMode DeliveryMode = MOQ_DELIVERY_STREAM;
 		uint64 MaxQueueBytes = 8ull * 1024ull * 1024ull;
@@ -112,17 +125,20 @@ private:
 	void ScheduleReconnect(double Now);
 	double NowSeconds() const;
 	/** Snapshot of a publisher handle; any thread (TRF-9). */
-	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> GetPublisher(bool bAudio) const;
+	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> GetPublisher(ETrack Track) const;
 	void StartWorker();
 	void StopWorker();
 	void WakeWorker();
 	bool IsPublisherReady() const;
 	bool IsAudioPublisherReady() const;
+	bool IsControlPublisherReady() const;
 	bool EnsurePublisher();
 	bool EnsureAudioPublisher();
+	bool EnsureControlPublisher();
 	void DestroyPublisher();
 	void DestroyAudioPublisher();
-	bool EnqueuePayload(TArray<uint8>&& Data, double CaptureTimestampSec, bool bIsAudio = false);
+	void DestroyControlPublisher();
+	bool EnqueuePayload(TArray<uint8>&& Data, double CaptureTimestampSec, ETrack Track = ETrack::Mocap);
 	bool SendBytes(const uint8* Data, int32 Len, const FString& SubjectName, double CaptureTimestampSec);
 	bool DequeuePayload(TUniquePtr<FPendingPayload>& OutPayload);
 	void DrainQueue();
@@ -145,6 +161,8 @@ private:
 	 */
 	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> MocapPublisherHandle;
 	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> AudioPublisherHandle;
+	/** Control track (ADR 0011); created on every connect, so receivers can subscribe before the first cue. */
+	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> ControlPublisherHandle;
 	mutable FCriticalSection PublisherMutex;
 	FDelegateHandle ConnectionDelegateHandle;
 
@@ -171,6 +189,8 @@ private:
 	double NextConnectAttemptTimeSeconds = 0.0;
 
 	double LastErrorLogTimeSeconds = 0.0;
+	/** Control has its own throttle, so its failures never hide a mocap warning. */
+	double LastControlErrorLogTimeSeconds = 0.0;
 	double LastDropLogTimeSeconds = 0.0;
 
 	FO3DTransportConfig ActiveConfig;

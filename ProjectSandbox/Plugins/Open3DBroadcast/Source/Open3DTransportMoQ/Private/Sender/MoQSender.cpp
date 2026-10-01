@@ -15,6 +15,7 @@
 #include "Math/UnrealMathUtility.h"
 #include "Misc/ScopeLock.h"
 #include "O3DPerformanceMetrics.h"
+#include "O3DUnifiedMessage.h"
 #include "Shared/MoQHandles.h"
 #include "Shared/MoQHelpers.h"
 #include "Shared/MoQSessionWrapper.h"
@@ -91,6 +92,7 @@ bool FO3DMoQSender::ParseOptions(const FO3DTransportConfig& Config, FString& Out
 	// Build separate namespaces for mocap and audio tracks
 	Options.MocapNamespace = BuildDefaultMocapNamespace(Config);
 	Options.AudioNamespace = BuildDefaultAudioNamespace(Config);
+	Options.ControlNamespace = BuildDefaultControlNamespace(Config);
 	Options.TrackName = BuildDefaultTrackName(Config);
 	
 	if (Options.MocapNamespace.IsEmpty() || Options.TrackName.IsEmpty())
@@ -103,11 +105,13 @@ bool FO3DMoQSender::ParseOptions(const FO3DTransportConfig& Config, FString& Out
 	Options.MaxQueueBytes = ResolveQueueBytes(Config);
 	Options.ConnectTimeoutSeconds = ResolveConnectTimeoutSeconds(Config);
 
-	UE_LOG(LogO3DMoQSender, Log, TEXT("MoQ sender configured: Relay=%s MocapTrack=%s/%s AudioTrack=%s/%s Mode=%s Queue=%llu bytes ConnectTimeout=%.1fs"),
+	UE_LOG(LogO3DMoQSender, Log, TEXT("MoQ sender configured: Relay=%s MocapTrack=%s/%s AudioTrack=%s/%s ControlTrack=%s/%s Mode=%s Queue=%llu bytes ConnectTimeout=%.1fs"),
 		*O3DRedact::Url(Options.RelayUrl),
 		*Options.MocapNamespace,
 		*Options.TrackName,
 		*Options.AudioNamespace,
+		*Options.TrackName,
+		*Options.ControlNamespace,
 		*Options.TrackName,
 		Options.DeliveryMode == MOQ_DELIVERY_STREAM ? TEXT("stream") : TEXT("datagram"),
 		Options.MaxQueueBytes,
@@ -165,8 +169,9 @@ bool FO3DMoQSender::Initialize(const FO3DTransportConfig& Config)
 	LastConnectAttemptTimeSeconds = 0.0;
 	NextConnectAttemptTimeSeconds = 0.0;
 	LastErrorLogTimeSeconds = 0.0;
+	LastControlErrorLogTimeSeconds = 0.0;
 	LastDropLogTimeSeconds = 0.0;
-	
+
 	AudioState->LastSubject.Reset();
 
 	bInitialized = true;
@@ -231,6 +236,7 @@ void FO3DMoQSender::Stop()
 	DrainAudioQueue(/*bPublish=*/false);
 	DestroyPublisher();
 	DestroyAudioPublisher();
+	DestroyControlPublisher();
 
 	if (Session.IsValid())
 	{
@@ -297,6 +303,7 @@ void FO3DMoQSender::HandleConnectTimeout(double Now)
 	ConsecutiveFailures++;
 	DestroyPublisher();
 	DestroyAudioPublisher();
+	DestroyControlPublisher();
 	ScheduleReconnect(Now);
 }
 
@@ -316,6 +323,9 @@ void FO3DMoQSender::HandleConnectionStateChanged(MoqConnectionState NewState)
 		{
 			EnsureAudioPublisher();
 		}
+		// Control is announced on every connect, not on the first cue: a receiver can only
+		// subscribe to an announced track, and an event sent before it subscribes is lost.
+		EnsureControlPublisher();
 		WakeWorker();
 		break;
 
@@ -334,6 +344,7 @@ void FO3DMoQSender::HandleConnectionStateChanged(MoqConnectionState NewState)
 		// created on reconnect announce their namespaces again.
 		DestroyPublisher();
 		DestroyAudioPublisher();
+		DestroyControlPublisher();
 		ScheduleReconnect(NowSeconds());
 		break;
 
@@ -409,7 +420,7 @@ bool FO3DMoQSender::SendBytes(const uint8* Data, int32 Len, const FString& Subje
 	Payload.SetNumUninitialized(Len);
 	FMemory::Memcpy(Payload.GetData(), Data, Len);
 
-	if (!EnqueuePayload(MoveTemp(Payload), CaptureTimestampSec, /*bIsAudio=*/false))
+	if (!EnqueuePayload(MoveTemp(Payload), CaptureTimestampSec, ETrack::Mocap))
 	{
 		FO3DPerformanceMetrics::Get().RecordTransportFrameDropped();
 		{
@@ -422,6 +433,23 @@ bool FO3DMoQSender::SendBytes(const uint8* Data, int32 Len, const FString& Subje
 	FO3DPerformanceMetrics::Get().RecordBytesSent(Len);
 	TransportMetrics->RecordFrameSent(static_cast<uint64>(Len));
 	return true;
+}
+
+/**
+ * Control (ADR 0011): the envelope goes out on its own track, through the same worker queue as
+ * mocap, so it never blocks. It is not a frame: no frame, byte or drop counters move. Refused
+ * (and retried by the control publisher) until the control track is announced. MoQ gives no
+ * ordering across tracks, so control is not ordered against the frames around it.
+ */
+bool FO3DMoQSender::SendControl(const uint8* Envelope, int32 Len)
+{
+	TConstArrayView<uint8> Payload;
+	if (!bInitialized || !bRunning || !O3DS::TryGetControlPayload(Envelope, Len, Payload) || !IsControlPublisherReady())
+	{
+		return false;
+	}
+	TArray<uint8> Bytes(Envelope, Len);
+	return EnqueuePayload(MoveTemp(Bytes), FPlatformTime::Seconds(), ETrack::Control);
 }
 
 void FO3DMoQSender::Tick(float /*DeltaSeconds*/)
@@ -469,7 +497,7 @@ bool FO3DMoQSender::IsPublisherReady() const
 	{
 		return false;
 	}
-	return GetPublisher(/*bAudio=*/false).IsValid();
+	return GetPublisher(ETrack::Mocap).IsValid();
 }
 
 bool FO3DMoQSender::IsAudioPublisherReady() const
@@ -482,13 +510,34 @@ bool FO3DMoQSender::IsAudioPublisherReady() const
 	{
 		return false;
 	}
-	return GetPublisher(/*bAudio=*/true).IsValid();
+	return GetPublisher(ETrack::Audio).IsValid();
 }
 
-TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> FO3DMoQSender::GetPublisher(bool bAudio) const
+bool FO3DMoQSender::IsControlPublisherReady() const
+{
+	if (!bRunning)
+	{
+		return false;
+	}
+	if (CachedState.Load() != MOQ_STATE_CONNECTED)
+	{
+		return false;
+	}
+	return GetPublisher(ETrack::Control).IsValid();
+}
+
+TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> FO3DMoQSender::GetPublisher(ETrack Track) const
 {
 	FScopeLock Lock(&PublisherMutex);
-	return bAudio ? AudioPublisherHandle : MocapPublisherHandle;
+	switch (Track)
+	{
+	case ETrack::Audio:
+		return AudioPublisherHandle;
+	case ETrack::Control:
+		return ControlPublisherHandle;
+	default:
+		return MocapPublisherHandle;
+	}
 }
 
 bool FO3DMoQSender::EnsurePublisher()
@@ -498,7 +547,7 @@ bool FO3DMoQSender::EnsurePublisher()
 		return false;
 	}
 
-	if (GetPublisher(/*bAudio=*/false).IsValid())
+	if (GetPublisher(ETrack::Mocap).IsValid())
 	{
 		return true;
 	}
@@ -536,7 +585,7 @@ bool FO3DMoQSender::EnsureAudioPublisher()
 		return false;
 	}
 
-	if (GetPublisher(/*bAudio=*/true).IsValid())
+	if (GetPublisher(ETrack::Audio).IsValid())
 	{
 		return true;
 	}
@@ -568,6 +617,45 @@ bool FO3DMoQSender::EnsureAudioPublisher()
 	return true;
 }
 
+bool FO3DMoQSender::EnsureControlPublisher()
+{
+	if (!Session.IsValid())
+	{
+		return false;
+	}
+
+	if (GetPublisher(ETrack::Control).IsValid())
+	{
+		return true;
+	}
+
+	FMoQPublisherConfig Config;
+	Config.Namespace = Options.ControlNamespace;
+	Config.TrackName = Options.TrackName;
+	// Control uses stream mode whatever the mocap delivery mode: a cue must not be a datagram.
+	Config.DeliveryMode = MOQ_DELIVERY_STREAM;
+
+	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> NewPublisher;
+	const FMoQResult Result = Session->CreatePublisher(Config, NewPublisher);
+	if (!Result.IsOk())
+	{
+		const double Now = FPlatformTime::Seconds();
+		if ((Now - LastControlErrorLogTimeSeconds) >= kErrorLogIntervalSeconds)
+		{
+			LastControlErrorLogTimeSeconds = Now;
+			UE_LOG(LogO3DMoQSender, Warning, TEXT("Failed to create MoQ control publisher: %s"), *Result.Message);
+		}
+		return false;
+	}
+
+	{
+		FScopeLock Lock(&PublisherMutex);
+		ControlPublisherHandle = NewPublisher;
+	}
+	UE_LOG(LogO3DMoQSender, Log, TEXT("MoQ control track announced: %s/%s"), *Options.ControlNamespace, *Options.TrackName);
+	return true;
+}
+
 void FO3DMoQSender::DestroyPublisher()
 {
 	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> Old;
@@ -592,7 +680,26 @@ void FO3DMoQSender::DestroyAudioPublisher()
 	Old.Reset();
 }
 
-bool FO3DMoQSender::EnqueuePayload(TArray<uint8>&& Data, double CaptureTimestampSec, bool bIsAudio)
+void FO3DMoQSender::DestroyControlPublisher()
+{
+	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> Old;
+	{
+		FScopeLock Lock(&PublisherMutex);
+		Old = MoveTemp(ControlPublisherHandle);
+		ControlPublisherHandle.Reset();
+	}
+	Old.Reset();
+}
+
+namespace
+{
+	const TCHAR* MoQSenderTrackLabel(bool bAudio, bool bControl)
+	{
+		return bControl ? TEXT("control") : (bAudio ? TEXT("audio") : TEXT("mocap"));
+	}
+}
+
+bool FO3DMoQSender::EnqueuePayload(TArray<uint8>&& Data, double CaptureTimestampSec, ETrack Track)
 {
 	const uint64 PayloadBytes = Data.Num();
 
@@ -604,8 +711,8 @@ bool FO3DMoQSender::EnqueuePayload(TArray<uint8>&& Data, double CaptureTimestamp
 			if ((Now - LastDropLogTimeSeconds) >= kDropLogIntervalSeconds)
 			{
 				LastDropLogTimeSeconds = Now;
-				UE_LOG(LogO3DMoQSender, Warning, TEXT("MoQ sender queue overflow (limit=%llu bytes); dropping %s frame"), 
-					Options.MaxQueueBytes, bIsAudio ? TEXT("audio") : TEXT("mocap"));
+				UE_LOG(LogO3DMoQSender, Warning, TEXT("MoQ sender queue overflow (limit=%llu bytes); dropping %s frame"),
+					Options.MaxQueueBytes, MoQSenderTrackLabel(Track == ETrack::Audio, Track == ETrack::Control));
 			}
 			return false;
 		}
@@ -613,7 +720,7 @@ bool FO3DMoQSender::EnqueuePayload(TArray<uint8>&& Data, double CaptureTimestamp
 		TUniquePtr<FPendingPayload> Payload = MakeUnique<FPendingPayload>();
 		Payload->Data = MoveTemp(Data);
 		Payload->EnqueueTimestampSeconds = CaptureTimestampSec;
-		Payload->bIsAudio = bIsAudio;
+		Payload->Track = Track;
 		SendQueue.Enqueue(MoveTemp(Payload));
 		PendingQueueBytes += PayloadBytes;
 	}
@@ -641,8 +748,11 @@ void FO3DMoQSender::DrainQueue()
 	TUniquePtr<FPendingPayload> Payload;
 	while (DequeuePayload(Payload))
 	{
-		FScopeLock StatsLock(&StatsMutex);
-		Stats.DroppedFrames++;
+		if (Payload->Track != ETrack::Control) // control is never a frame (ADR 0011)
+		{
+			FScopeLock StatsLock(&StatsMutex);
+			Stats.DroppedFrames++;
+		}
 		Payload.Reset();
 	}
 }
@@ -650,29 +760,39 @@ void FO3DMoQSender::DrainQueue()
 bool FO3DMoQSender::PublishPayload(const FPendingPayload& Payload)
 {
 	// TRF-9: publish on a snapshot taken under PublisherMutex, never on the shared member.
-	const TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> Publisher = GetPublisher(Payload.bIsAudio);
+	const TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> Publisher = GetPublisher(Payload.Track);
 	if (!Publisher.IsValid() || !Publisher->IsValid())
 	{
 		return false;
 	}
 
-	// Audio uses stream mode for reliability; mocap uses configured mode
-	MoqDeliveryMode DeliveryMode = Payload.bIsAudio ? MOQ_DELIVERY_STREAM : Options.DeliveryMode;
+	// Audio and control use stream mode for reliability; mocap uses configured mode
+	const bool bControl = Payload.Track == ETrack::Control;
+	const MoqDeliveryMode DeliveryMode = Payload.Track == ETrack::Mocap ? Options.DeliveryMode : MOQ_DELIVERY_STREAM;
 
 	const FMoQResult Wrapped = Publisher->Publish(Payload.Data.GetData(), Payload.Data.Num(), DeliveryMode);
 	if (!Wrapped.IsOk())
 	{
 		const double Now = FPlatformTime::Seconds();
-		if ((Now - LastErrorLogTimeSeconds) >= kErrorLogIntervalSeconds)
+		double& LastLog = bControl ? LastControlErrorLogTimeSeconds : LastErrorLogTimeSeconds;
+		if ((Now - LastLog) >= kErrorLogIntervalSeconds)
 		{
-			LastErrorLogTimeSeconds = Now;
-			UE_LOG(LogO3DMoQSender, Warning, TEXT("moq_publish_data failed for %s: %s"), 
-				Payload.bIsAudio ? TEXT("audio") : TEXT("mocap"), *Wrapped.Message);
+			LastLog = Now;
+			UE_LOG(LogO3DMoQSender, Warning, TEXT("moq_publish_data failed for %s: %s"),
+				MoQSenderTrackLabel(Payload.Track == ETrack::Audio, bControl), *Wrapped.Message);
 		}
 
-		FScopeLock StatsLock(&StatsMutex);
-		Stats.DroppedFrames++;
+		if (!bControl) // control is never a frame (ADR 0011)
+		{
+			FScopeLock StatsLock(&StatsMutex);
+			Stats.DroppedFrames++;
+		}
 		return false;
+	}
+
+	if (bControl)
+	{
+		return true;
 	}
 
 	const double LatencyMs = (FPlatformTime::Seconds() - Payload.EnqueueTimestampSeconds) * 1000.0;
@@ -711,12 +831,16 @@ uint32 FO3DMoQSender::RunWorker()
 			}
 
 			// Check if appropriate publisher is ready
-			bool bPublisherReady = Payload->bIsAudio ? IsAudioPublisherReady() : IsPublisherReady();
+			const bool bPublisherReady = Payload->Track == ETrack::Audio ? IsAudioPublisherReady()
+				: (Payload->Track == ETrack::Control ? IsControlPublisherReady() : IsPublisherReady());
 			if (!bPublisherReady)
 			{
-				// Drop the payload if publisher not ready
-				FScopeLock StatsLock(&StatsMutex);
-				Stats.DroppedFrames++;
+				// Drop the payload if publisher not ready; control is never counted as a frame
+				if (Payload->Track != ETrack::Control)
+				{
+					FScopeLock StatsLock(&StatsMutex);
+					Stats.DroppedFrames++;
+				}
 				continue;
 			}
 
@@ -784,7 +908,7 @@ void FO3DMoQSender::DrainAudioQueue(bool bPublish)
 		FPendingPayload Payload;
 		Payload.Data = MoveTemp(Bytes);
 		Payload.EnqueueTimestampSeconds = FPlatformTime::Seconds();
-		Payload.bIsAudio = true;
+		Payload.Track = ETrack::Audio;
 		PublishPayload(Payload);
 	}
 }

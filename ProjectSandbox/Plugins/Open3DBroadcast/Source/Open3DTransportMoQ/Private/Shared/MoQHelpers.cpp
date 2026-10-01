@@ -132,6 +132,18 @@ namespace MoQHelpers
 		return BuildNamespaceWithPrefix(Config, kAudioNamespacePrefix);
 	}
 
+	FString BuildDefaultControlNamespace(const FO3DTransportConfig& Config)
+	{
+		const FString Namespace = BuildNamespaceWithPrefix(Config, kControlNamespacePrefix);
+		const FString Mocap = BuildDefaultMocapNamespace(Config);
+		if (Namespace != Mocap)
+		{
+			return Namespace;
+		}
+		// A custom namespace the prefix swap leaves unchanged: control must not ride the mocap track.
+		return SanitizeComponent(FString::Printf(TEXT("%s/%s"), kControlNamespacePrefix, *Mocap), true);
+	}
+
 	FString BuildDefaultTrackName(const FO3DTransportConfig& Config)
 	{
 		FString TrackName = GetAdvancedOption(Config, kKeyTrackName);
