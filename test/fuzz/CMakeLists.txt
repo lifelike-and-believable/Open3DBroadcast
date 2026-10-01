@@ -24,6 +24,7 @@ set(O3DS_FUZZ_TARGETS
 	udp_reassembly
 	reorder_gate
 	tcp_stream
+	control
 )
 
 add_library(o3ds_fuzz_support STATIC fuzz_support.h fuzz_support.cpp)

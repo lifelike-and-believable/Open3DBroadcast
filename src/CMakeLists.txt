@@ -97,7 +97,15 @@ add_custom_command(
     COMMAND flatbuffers::flatc -o ${CMAKE_CURRENT_BINARY_DIR}/_generated --cpp ${CMAKE_CURRENT_LIST_DIR}/o3ds.fbs
     DEPENDS ${CMAKE_CURRENT_LIST_DIR}/o3ds.fbs )
 
-add_custom_target(protocol DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/_generated/o3ds_generated.h)
+# Control channel payload (docs/adr/0011-control-channel.md).
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/_generated/o3ds_control_generated.h
+    COMMAND flatbuffers::flatc -o ${CMAKE_CURRENT_BINARY_DIR}/_generated --cpp ${CMAKE_CURRENT_LIST_DIR}/o3ds_control.fbs
+    DEPENDS ${CMAKE_CURRENT_LIST_DIR}/o3ds_control.fbs )
+
+add_custom_target(protocol DEPENDS
+	${CMAKE_CURRENT_BINARY_DIR}/_generated/o3ds_generated.h
+	${CMAKE_CURRENT_BINARY_DIR}/_generated/o3ds_control_generated.h)
 
 set(pub_headers			
 	o3ds/o3ds.h
@@ -121,6 +129,7 @@ set(pub_headers
 	o3ds/quant/channel_quant.h
 	o3ds/model.h
 	o3ds/parse_limits.h
+	o3ds/control.h
 	o3ds/base_connector.h
 	o3ds/nng_connector.h
 	o3ds/subscriber.h
@@ -175,6 +184,7 @@ set(CORE_SOURCES
 	o3ds/predict/residual_codec.cpp
 	o3ds/quant/channel_quant.cpp
 	o3ds/model.cpp
+	o3ds/control.cpp
 	o3ds/context.cpp
 	o3ds/math.cpp
 	o3ds/udp_fragment.cpp
@@ -263,4 +273,5 @@ install(TARGETS open3dstreamstatic
 	CONFIGURATIONS RelWithDebInfo)
 
 install(FILES 	${CMAKE_CURRENT_BINARY_DIR}/_generated/o3ds_generated.h
+		${CMAKE_CURRENT_BINARY_DIR}/_generated/o3ds_control_generated.h
 	DESTINATION include)

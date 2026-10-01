@@ -1,0 +1,82 @@
+// Control channel payload (docs/adr/0011-control-channel.md).
+//
+// Carried inside the unified envelope with kind Control (2). A separate root
+// from SubjectList on purpose: an old reader can never mistake one for the
+// other, and SubjectList's min_reader_version is unaffected.
+//
+// Append-only from day one: add fields at the end of a table and values at
+// the end of the union, never reorder or remove. Bump
+// O3DS::Control::kProtocolVersion only for changes an old reader would
+// misapply (ADR 0009 item 9).
+//
+// Limits on every string, vector and count are enforced by
+// O3DS::Control::Validate() (src/o3ds/control.h), not by this schema.
+
+namespace O3DS.ControlData;
+
+file_identifier "O3DC";
+
+struct Vec3 { x:double; y:double; z:double; }
+struct Quat { x:double; y:double; z:double; w:double; }
+struct Color { r:float; g:float; b:float; a:float; }
+
+table BoolV { v:bool; }
+table IntV { v:long; }
+table DoubleV { v:double; }
+table StringV { v:string; }
+table NameV { v:string; }
+table Vec3V { v:Vec3; }
+table QuatV { v:Quat; }
+table TransformV { t:Vec3; r:Quat; s:Vec3; }
+table ColorV { v:Color; }
+table BytesV { v:[ubyte]; }
+
+union Value { BoolV, IntV, DoubleV, StringV, NameV, Vec3V, QuatV, TransformV, ColorV, BytesV }
+
+// A keyed value. version is the seq of the message that first carried this
+// change; snapshots re-send the original version.
+table Entry {
+  key:string (required);
+  target:string;
+  value:Value;
+  version:ulong;
+}
+
+// Removal of a keyed value; version as for Entry.
+table Clear {
+  key:string (required);
+  target:string;
+  version:ulong;
+}
+
+// A fire-once event. event_id is unique per source and epoch; redundant
+// copies keep it. time_us is when the event was fired (sender clock); 0
+// means "the message's sender_time_us".
+table Event {
+  event_id:ulong;
+  name:string (required);
+  target:string;
+  value:Value;
+  ttl_ms:uint = 2000;
+  time_us:ulong;
+}
+
+table ControlMessage {
+  protocol_version:ushort = 1;
+  source_id:string (required);
+  source_name:string;
+  epoch:uint;
+  seq:ulong;
+  sender_time_us:ulong;
+  tx_wallclock_us:ulong;
+  mocap_subjects:[string];
+  set:[Entry];
+  clear:[Clear];
+  events:[Event];
+  snapshot_id:uint;
+  snapshot_part:ushort;
+  snapshot_parts:ushort;
+  snapshot_seq:ulong;
+}
+
+root_type ControlMessage;
