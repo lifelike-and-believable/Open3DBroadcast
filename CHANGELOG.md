@@ -230,6 +230,7 @@
 
 ### Changed
 
+- Editor categories renamed from Open3DStream to Open3DBroadcast; CreatedBy updated. The Details panel, Blueprint action menu and Add Component list now group the plugin's properties, functions and components under **Open3DBroadcast** (for example `Open3DBroadcast|Sender|Control`) instead of **Open3DStream**. Only display categories changed: property names, config sections and ini keys are the same, so saved levels, Blueprints, LiveLink presets and project settings load unchanged. The LiveLink source is still listed as "Open3DStream Receiver". Both `.uplugin` files now say `"CreatedBy": "Lifelike & Believable and Open3DStream Contributors"`; `CreatedByURL` is unchanged.
 - The largest reassembled UDP message the receiver accepts drops from 50 MiB to 4 MiB by default; set the new `udp.maxframe` receiver option to raise it (up to 50 MiB).
 - Core API: `UdpMapper::addFragment` now takes `(sourceKey, data, size, nowMs)`, and `UdpMapper` takes an optional `UdpReassemblyConfig`.
 - Core API: `SubjectList::Parse()` takes an optional `std::vector<ParsedSubjectInfo>*` that reports the subjects a packet touched and whether each got a full descriptor. `ParseUpdate()` and `ParseUpdateResidual()` return `bool` (applied or not) instead of `void`. A node with a null entry in a subject's node list is rejected.

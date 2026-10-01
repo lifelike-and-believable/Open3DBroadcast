@@ -39,34 +39,34 @@ struct OPEN3DSHARED_API FO3DControlValue
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Control")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Control")
 	EO3DControlValueType Type = EO3DControlValueType::None;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Control")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Control")
 	bool BoolValue = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Control")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Control")
 	int64 IntValue = 0;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Control")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Control")
 	double FloatValue = 0.0;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Control")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Control")
 	FString StringValue;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Control")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Control")
 	FVector VectorValue = FVector::ZeroVector;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Control")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Control")
 	FQuat QuatValue = FQuat::Identity;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Control")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Control")
 	FTransform TransformValue = FTransform::Identity;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Control")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Control")
 	FLinearColor ColorValue = FLinearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Control")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Control")
 	TArray<uint8> BytesValue;
 
 	static FO3DControlValue MakeBool(bool V);
@@ -95,35 +95,35 @@ struct OPEN3DSHARED_API FO3DControlMeta
 	GENERATED_BODY()
 
 	/** The sending component's id (one per sender component instance). */
-	UPROPERTY(BlueprintReadOnly, Category = "Open3DStream|Control")
+	UPROPERTY(BlueprintReadOnly, Category = "Open3DBroadcast|Control")
 	FString SourceId;
 
 	/** The sending component's display name. */
-	UPROPERTY(BlueprintReadOnly, Category = "Open3DStream|Control")
+	UPROPERTY(BlueprintReadOnly, Category = "Open3DBroadcast|Control")
 	FString SourceName;
 
 	/** The receiving transport's stream. */
-	UPROPERTY(BlueprintReadOnly, Category = "Open3DStream|Control")
+	UPROPERTY(BlueprintReadOnly, Category = "Open3DBroadcast|Control")
 	FString StreamId;
 
 	/** The subject the change is aimed at; empty for the whole stream. */
-	UPROPERTY(BlueprintReadOnly, Category = "Open3DStream|Control")
+	UPROPERTY(BlueprintReadOnly, Category = "Open3DBroadcast|Control")
 	FString TargetSubject;
 
 	/** When the change happened, in seconds on the sender's clock. */
-	UPROPERTY(BlueprintReadOnly, Category = "Open3DStream|Control")
+	UPROPERTY(BlueprintReadOnly, Category = "Open3DBroadcast|Control")
 	double SenderTimeSec = 0.0;
 
 	/** The sender's session; a higher epoch is a newer session of the same source. */
-	UPROPERTY(BlueprintReadOnly, Category = "Open3DStream|Control")
+	UPROPERTY(BlueprintReadOnly, Category = "Open3DBroadcast|Control")
 	int64 Epoch = 0;
 
 	/** Values: the version applied. Events: 0. */
-	UPROPERTY(BlueprintReadOnly, Category = "Open3DStream|Control")
+	UPROPERTY(BlueprintReadOnly, Category = "Open3DBroadcast|Control")
 	int64 Version = 0;
 
 	/** Events: the event's id within its source and epoch. Values: 0. */
-	UPROPERTY(BlueprintReadOnly, Category = "Open3DStream|Control")
+	UPROPERTY(BlueprintReadOnly, Category = "Open3DBroadcast|Control")
 	int64 EventId = 0;
 };
 
@@ -134,73 +134,73 @@ class OPEN3DSHARED_API UO3DControlValueLibrary : public UBlueprintFunctionLibrar
 	GENERATED_BODY()
 
 public:
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control", meta = (DisplayName = "Make Control Value (Bool)"))
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control", meta = (DisplayName = "Make Control Value (Bool)"))
 	static FO3DControlValue MakeControlBool(bool Value) { return FO3DControlValue::MakeBool(Value); }
 
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control", meta = (DisplayName = "Make Control Value (Integer64)"))
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control", meta = (DisplayName = "Make Control Value (Integer64)"))
 	static FO3DControlValue MakeControlInt(int64 Value) { return FO3DControlValue::MakeInt(Value); }
 
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control", meta = (DisplayName = "Make Control Value (Float)"))
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control", meta = (DisplayName = "Make Control Value (Float)"))
 	static FO3DControlValue MakeControlFloat(double Value) { return FO3DControlValue::MakeFloat(Value); }
 
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control", meta = (DisplayName = "Make Control Value (String)"))
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control", meta = (DisplayName = "Make Control Value (String)"))
 	static FO3DControlValue MakeControlString(const FString& Value) { return FO3DControlValue::MakeString(Value); }
 
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control", meta = (DisplayName = "Make Control Value (Name)"))
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control", meta = (DisplayName = "Make Control Value (Name)"))
 	static FO3DControlValue MakeControlName(const FString& Value) { return FO3DControlValue::MakeName(Value); }
 
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control", meta = (DisplayName = "Make Control Value (Vector)"))
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control", meta = (DisplayName = "Make Control Value (Vector)"))
 	static FO3DControlValue MakeControlVector(const FVector& Value) { return FO3DControlValue::MakeVector(Value); }
 
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control", meta = (DisplayName = "Make Control Value (Rotator)"))
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control", meta = (DisplayName = "Make Control Value (Rotator)"))
 	static FO3DControlValue MakeControlRotator(const FRotator& Value) { return FO3DControlValue::MakeQuat(Value.Quaternion()); }
 
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control", meta = (DisplayName = "Make Control Value (Quat)"))
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control", meta = (DisplayName = "Make Control Value (Quat)"))
 	static FO3DControlValue MakeControlQuat(const FQuat& Value) { return FO3DControlValue::MakeQuat(Value); }
 
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control", meta = (DisplayName = "Make Control Value (Transform)"))
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control", meta = (DisplayName = "Make Control Value (Transform)"))
 	static FO3DControlValue MakeControlTransform(const FTransform& Value) { return FO3DControlValue::MakeTransform(Value); }
 
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control", meta = (DisplayName = "Make Control Value (Color)"))
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control", meta = (DisplayName = "Make Control Value (Color)"))
 	static FO3DControlValue MakeControlColor(const FLinearColor& Value) { return FO3DControlValue::MakeColor(Value); }
 
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control", meta = (DisplayName = "Make Control Value (Bytes)"))
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control", meta = (DisplayName = "Make Control Value (Bytes)"))
 	static FO3DControlValue MakeControlBytes(const TArray<uint8>& Value) { return FO3DControlValue::MakeBytes(Value); }
 
 	/** True for Bool; also true for Int (non-zero is true). */
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control")
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control")
 	static bool ControlAsBool(const FO3DControlValue& Value, bool& bSuccess);
 
 	/** Int, or Float truncated toward zero. */
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control")
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control")
 	static int64 ControlAsInt(const FO3DControlValue& Value, bool& bSuccess);
 
 	/** Float, or Int converted. */
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control")
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control")
 	static double ControlAsFloat(const FO3DControlValue& Value, bool& bSuccess);
 
 	/** String or Name. */
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control")
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control")
 	static FString ControlAsString(const FO3DControlValue& Value, bool& bSuccess);
 
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control")
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control")
 	static FVector ControlAsVector(const FO3DControlValue& Value, bool& bSuccess);
 
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control")
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control")
 	static FRotator ControlAsRotator(const FO3DControlValue& Value, bool& bSuccess);
 
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control")
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control")
 	static FQuat ControlAsQuat(const FO3DControlValue& Value, bool& bSuccess);
 
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control")
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control")
 	static FTransform ControlAsTransform(const FO3DControlValue& Value, bool& bSuccess);
 
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control")
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control")
 	static FLinearColor ControlAsColor(const FO3DControlValue& Value, bool& bSuccess);
 
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control")
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control")
 	static TArray<uint8> ControlAsBytes(const FO3DControlValue& Value, bool& bSuccess);
 
-	UFUNCTION(BlueprintPure, Category = "Open3DStream|Control")
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Control")
 	static FString ControlValueToString(const FO3DControlValue& Value) { return Value.ToString(); }
 };

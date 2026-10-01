@@ -6,7 +6,7 @@
 	"FriendlyName": "Open3DBroadcast",
 	"Description": "Streams skeletal animation, curves and audio between Unreal Engine instances in the Open3DStream format, over pluggable network transports. Beta. Unreal Engine 5.7, Win64 only. The MoQ transport is Experimental: it implements draft-ietf-moq-transport-07, and MoQ relays must speak draft-07.",
 	"Category": "Animation",
-	"CreatedBy": "Open3DStream Contributors",
+	"CreatedBy": "Lifelike & Believable and Open3DStream Contributors",
 	"CreatedByURL": "https://open3dstream.com/",
 	"DocsURL": "https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcast/USER_GUIDE.md",
 	"MarketplaceURL": "",
