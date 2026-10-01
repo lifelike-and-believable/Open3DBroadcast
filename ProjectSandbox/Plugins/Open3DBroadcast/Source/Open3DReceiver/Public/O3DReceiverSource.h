@@ -17,6 +17,7 @@ THIRD_PARTY_INCLUDES_START
 #include "o3ds/clock_offset.h"
 #include "o3ds/receiver_streams.h"
 #include "o3ds/predict/concealment.h"
+#include "o3ds/control.h"
 THIRD_PARTY_INCLUDES_END
 
 #include <atomic>
@@ -64,6 +65,7 @@ private:
 
     class FSerializedConsumer;
     class FAudioSink;
+    class FControlSink;
 
     // Builds the consumer StartTransport() hands to the transport. Defined in the .cpp,
     // where FSerializedConsumer is a complete type (tests call it through their accessor).
@@ -137,6 +139,40 @@ private:
     void ReportConcealmentMetricsDelta();
 
     bool ParseSubjectListRaw(O3DS::SubjectList& List, const FString& Subject, const char* Data, size_t Len, std::vector<O3DS::ParsedSubjectInfo>& OutTouched);
+
+    // ── Control channel (docs/adr/0011-control-channel.md, item 8) ────────────────────
+    // Everything below is game thread only. The transport's control sink (FControlSink) hops
+    // here with a copy of the payload and a weak reference to this source.
+
+    /** Effective "accept control" for this source: per-source setting, runtime override, project setting. */
+    bool IsControlEnabled() const;
+    /** Applies UO3DControlSettings to the core receiver (limits, allowlist). */
+    void ApplyControlConfig();
+    /** One control payload from the transport. Dropped (and counted) while control is disabled. */
+    void HandleControlPayload(const TArray<uint8>& Payload, const FString& StreamId, double ReceiveTimeSec);
+    /** Prunes, releases aligned changes, and discards state after control is turned off. */
+    void TickControl(double NowS);
+    /** Holds a change for alignment, or publishes it to FO3DControlBus at once. */
+    void RouteControlChange(O3DS::Control::Change&& Change, double NowS);
+    void PublishControlChange(const O3DS::Control::Change& Change) const;
+    /** Forgets every control source this receiver has seen, without broadcasting. */
+    void DiscardControlState();
+    /**
+     * The sender time (sender clock, microseconds) of the pose LiveLink is presenting for the
+     * mocap stream of a control source, or false when that source has no live mocap stream on
+     * this receiver (its changes are then released at once).
+     */
+    bool GetPresentedSenderTimeUs(const std::string& SourceId, uint64_t& OutUs);
+
+    O3DS::Control::ControlReceiver ControlReceiver;
+    O3DS::Control::ControlAligner ControlAligner;
+    TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe> ActiveControlSink;
+    /** Source ids this receiver has published for, so they can be forgotten on the bus. */
+    TSet<FString> ControlSourcesSeen;
+    bool bControlWasEnabled = false;
+    uint64 ControlPayloadsDroppedDisabled = 0;
+    /** A mocap stream with no packet for this long counts as not live: control from its sender is not held. */
+    static constexpr double AlignmentStreamLivenessSeconds = 0.2;
     /** Publishes only the subjects the packet touched (RCV-5). Returns how many were processed. */
     int32 PublishTouchedSubjects(O3DS::SubjectList& List, const std::vector<O3DS::ParsedSubjectInfo>& Touched, double WorldTimeSecondsOverride);
     bool BuildSubjectPose(O3DS::Subject* SubjectPtr, TArray<FName>& OutBoneNames, TArray<int32>& OutBoneParents, TArray<FTransform>& OutBoneTransforms) const;

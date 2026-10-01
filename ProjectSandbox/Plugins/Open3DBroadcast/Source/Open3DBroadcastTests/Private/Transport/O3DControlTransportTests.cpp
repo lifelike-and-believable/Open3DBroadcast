@@ -36,7 +36,7 @@ namespace O3DControlTransportTests
 	constexpr double ProbeIntervalSeconds = 0.05;
 	constexpr int32 ControlCount = 6;
 
-	class FRecordingSink final : public IO3DReceiverControlSink
+	class FControlRecordingSink final : public IO3DReceiverControlSink
 	{
 	public:
 		virtual void SubmitControl(TConstArrayView<uint8> Payload, const FString& /*StreamId*/, double /*ReceiveTimeSec*/) override
@@ -90,7 +90,7 @@ namespace O3DControlTransportTests
 		const FO3DTransportConfig& SenderConfig, const FO3DTransportConfig& ReceiverConfig, bool bSenderFirst, bool bReliable)
 	{
 		const TSharedRef<FO3DRecordingFrameConsumer> Consumer = MakeShared<FO3DRecordingFrameConsumer>();
-		const TSharedRef<FRecordingSink, ESPMode::ThreadSafe> Sink = MakeShared<FRecordingSink, ESPMode::ThreadSafe>();
+		const TSharedRef<FControlRecordingSink, ESPMode::ThreadSafe> Sink = MakeShared<FControlRecordingSink, ESPMode::ThreadSafe>();
 		ON_SCOPE_EXIT
 		{
 			Receiver->Stop();
@@ -319,7 +319,7 @@ bool FO3DControlLoopbackQueuesTest::RunTest(const FString& Parameters)
 	};
 
 	const TSharedRef<FO3DRecordingFrameConsumer> Consumer = MakeShared<FO3DRecordingFrameConsumer>();
-	const TSharedRef<FRecordingSink, ESPMode::ThreadSafe> Sink = MakeShared<FRecordingSink, ESPMode::ThreadSafe>();
+	const TSharedRef<FControlRecordingSink, ESPMode::ThreadSafe> Sink = MakeShared<FControlRecordingSink, ESPMode::ThreadSafe>();
 	TestTrue(TEXT("Sender initializes and starts"), Sender->Initialize(MakeConfig(true)) && Sender->Start());
 	TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(MakeConfig(false)));
 	Receiver->SetConsumer(Consumer);

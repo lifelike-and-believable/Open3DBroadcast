@@ -199,28 +199,29 @@ root_type ControlMessage;
 | WebRTC | `lk_send_data_ex(..., LkReliable, ordered = 1, label = "__o3d.ctl")` (`livekit_ffi.h:337-343`) | `OnDataReceivedEx` checks for the envelope magic **before** `EnqueueFrame`; enveloped bytes go to a control queue drained in `Poll`, whatever their label | ReliableOrdered pending ADR 0005 Q4 |
 
 - The WebRTC sender refuses `SendControl` while it is a subscriber-only participant.
-- **Redundancy on Unreliable transports:** each event is sent three times (`ControlEventRedundancy`, default 3, clamp 1–5) on consecutive sender ticks. Receivers de-duplicate by `event_id`.
-- **Reliable transports** send each event once.
+- **Event redundancy:** each event is sent `ControlEventRedundancy` times (default 3, clamp 1–5) on consecutive sender ticks, and receivers de-duplicate by `event_id`. The default is 3 on every transport (CTL-4): no delivery-guarantee query exists yet to pick 1 for reliable transports, and the copies are a few dozen bytes each. Once ADR 0007's `FO3DTransportCapabilities` lands, reliable transports can default to 1.
 
 **8. UE surface.**
 
 *Shared (`Open3DShared`)*
 - `FO3DControlValue` is a `USTRUCT(BlueprintType)` with `EO3DControlValueType Type` and one field per type. `UO3DControlValueLibrary` provides `Make*` and `As*` Blueprint functions.
 - `FO3DControlMeta` holds `SourceId`, `SourceName`, `StreamId`, `TargetSubject`, `SenderTimeSec` and `Seq`.
-- `FO3DControlBus` is game-thread-only, like `FO3DAudioBus` (SHR-10). It has one `OnChange` multicast delegate carrying an `FO3DControlChange` (kind: value changed, value cleared or event), and a value cache keyed by `(SourceId, Key, Target)`, queried with `FindValue`. Keys, event names and targets are case-sensitive `FString`s throughout the engine side: `FName` compares case-insensitively and keeps its first-registered casing only in builds with editor data (`WITH_CASE_PRESERVING_NAME`), while core keys are case-sensitive. `FName` appears only as a convenience at the Blueprint boundary (CTL-4).
+- `FO3DControlBus` is game-thread-only, like `FO3DAudioBus` (SHR-10). It has one `OnChange` multicast delegate carrying an `FO3DControlChange` (kind: value changed, value cleared or event), and a value cache keyed by `(SourceId, Key, Target)`, queried with `FindValue`. Keys, event names and targets are case-sensitive `FString`s throughout the engine side: `FName` compares case-insensitively and keeps its first-registered casing only in builds with editor data (`WITH_CASE_PRESERVING_NAME`), while core keys are case-sensitive. The Blueprint functions take `FString` too (CTL-4): converting even once through `FName` could return an earlier-registered casing in a Shipping build.
 - **Two receiver sources can hear one sender** (UDP multicast, one MoQ track, a duplicated LiveLink source). Each runs its own `ControlReceiver`, so the bus drops an event it has already published for `(SourceId, Epoch, EventId)`, and applies a value change or clear only when its `(Epoch, Version)` is newer than what it holds. `FO3DControlMeta` carries `Epoch`, `Version` and `EventId` for this.
 - `FO3DControlValue` stores rotations as `FQuat` (`BlueprintType` in 5.7): a rotator round trip is lossy, which would break exact comparison and the publisher's "same value is a no-op" coalescing. The value library offers rotator make and read helpers.
 - Conversions between the engine and core types live in `O3DControlConvert.h` (Shared). Only its `.cpp` includes the core, through a private `Open3DStreamCore` dependency, so Shared's public headers stay core-free. It also `static_assert`s that `O3DS::UnifiedMaxControlPayloadSize` equals `ControlLimits::kMaxPayloadBytes`.
 
 *Sender (`Open3DSender`)*
-- `FO3DControlPublisher` (Private) wraps the core `ControlPublisher` (item 9). It is owned by the component, ticked on the game thread, and calls `IOpen3DSender::SendControl`.
-- On `UO3DSenderComponent` (`BlueprintCallable`, category `Open3DStream|Sender|Control`):
-  - `FireControlEvent(FName Name, FO3DControlValue Payload, FName TargetSubject) -> bool`
-  - `SetControlValue(FName Key, FO3DControlValue Value, FName TargetSubject) -> bool`
-  - `ClearControlValue(FName Key, FName TargetSubject)`
+- `FO3DControlPublisher` (`Open3DSender/Public/O3DControlPublisher.h`) wraps the core `ControlPublisher` (item 9). It owns the source id (a fresh GUID per instance, never serialized), stamps times on the sender clock (`FPlatformTime`, the clock `SubjectList.time` uses), wraps each message in a control envelope, and hands it to `IOpen3DSender::SendControl`, returning refused messages to the core for retry. It is public so it can be driven against a transport without a world.
+- On `UO3DSenderComponent` (`BlueprintCallable`, category `Open3DStream|Sender|Control`; strings are `FString`, optional targets default to empty):
+  - `FireControlEvent(EventName, Payload, TargetSubject) -> bool`
+  - `SetControlValue(Key, Value, TargetSubject) -> bool` (allowed before capture; sent when the transport starts)
+  - `ClearControlValue(Key, TargetSubject)`
   - `ClearAllControlValues()`
-  - `GetControlValue(...)`
-- New properties: `ControlSnapshotIntervalSeconds` (default = `FullSyncIntervalSeconds`, clamp 0.25–10 s), `ControlEventRedundancy` and `ControlMaxValueRateHz`.
+  - `GetControlValue(Key, TargetSubject, OutValue) -> bool`
+- New properties: `ControlSnapshotIntervalSeconds` (default 1 s, clamp 0.25–10 s), `ControlEventRedundancy` (default 3) and `ControlMaxValueRateHz` (default 30).
+- **Control-only senders:** `bAllowControlOnly` lets `StartCapture` start the transport with no skeletal mesh and audio off, for a stage, lighting or environment controller actor that only sends cues and parameters. Control starts and stops with the transport, and ticks with the component.
+- `mocap_subjects` is the component's resolved subject name, exactly as it goes on the wire, refreshed every tick, so receivers can find the matching stream.
 - The value table survives Stop and Start. On Start, a snapshot goes out at once, and receivers reconcile against it without flicker (item 9, *Epoch*).
 
 *Receiver (`Open3DReceiver`)*
@@ -285,10 +286,11 @@ root_type ControlMessage;
   - **Alignment:** an optional hold queue releases items once a caller-supplied "current mocap sender time" reaches their `sender_time_us`, with the cap from *Timing* below.
 - **Coalescing:** within one sender tick, repeated `SetControlValue` calls for the same `(key, target)` collapse to the last value. All changes from a tick go out as one message, or as more if the budget requires. A parameter driven every frame at 60 Hz therefore costs one entry per tick, not one message per call. `ControlMaxValueRateHz` (default 30, clamp 1–120) bounds how often a single key is re-sent, and the latest value always wins. Receivers that want smooth motion interpolate on their side.
 - **Timing:** `sender_time_us` uses the same sender clock as `SubjectList.time` and the audio envelope (ADR 0009 item 7). A receiver can therefore place a cue on the same timeline as the pose and audio it is showing.
-  - **Default: aligned (maintainer, 2026-09-30).** `bAlignControlToMocap` is **true**. Events and value changes are held until the matching mocap stream's mapped presentation time reaches their `sender_time_us`. This is the same mapping the source already computes for frames from the clock-offset estimator (`mapped_presentation_time_us`, `Plugin/Source/Open3DReceiver/Private/O3DReceiverSource.cpp:780-794`). A cue therefore plays with the motion it was fired against, not ahead of it by the receiver's reorder and jitter delay (A1 gate).
-  - **Finding the matching stream:** the receiver keeps one clock estimator per mocap stream, keyed by subject names (`ReceiverStream::clock` and `ReceiverStreamTable::ResolveKey`, `Plugin/Source/ThirdParty/Open3DStreamCore/o3ds/receiver_streams.h:123-177`). Each control message carries `mocap_subjects` (item 3), the subjects its sender streams, and the receiver resolves the stream from them. Several senders in one WebRTC room each align to their own stream.
+  - **Default: aligned (maintainer, 2026-09-30).** `bAlignControlToMocap` is **true**. Events and value changes are held until the pose LiveLink is presenting for the matching mocap stream has caught up with their `sender_time_us`. A cue therefore plays with the motion it was fired against, not ahead of it by the receiver's reorder and jitter delay (A1 gate).
+  - **Comparison on the sender's own clock (CTL-4).** `FO3DSenderSerializer` stamps `SubjectList.time` with the sender's `FPlatformTime::Seconds()` (`Plugin/Source/Open3DSender/Private/O3DSenderSerializer.cpp:354-355`), the clock the control publisher stamps `sender_time_us` with. The receiver compares the two directly: the presented time is the newest `SubjectList.time` parsed for the stream (`ReceiverStream::subjects.mTime`), minus `BufferSettings.EngineTimeOffset` when the source's LiveLink mode is `EngineTime` (LiveLink reads its buffer that far behind engine time; `LiveLinkSourceSettings.h:74`). No cross-host clock mapping is involved, so NTP steps and UTC skew do not matter, and the core aligner compares `sender_time_us` unchanged. LiveLink's continuously updated smoothing offsets (`EngineTimeClockOffset`, `SmoothEngineTimeOffset`) are not modelled; the cue-to-pose skew measurement in Verification covers them (**needs-verification**). In `Timecode` mode nothing is held, because this channel carries no timecode.
+  - **Finding the matching stream:** streams are keyed by subject names (`ReceiverStreamTable::ResolveKey`, `Plugin/Source/ThirdParty/Open3DStreamCore/o3ds/receiver_streams.h:123-177`). Each control message carries `mocap_subjects` (item 3), the subjects its sender streams, and the receiver resolves the stream from them. Several senders in one WebRTC room each align to their own stream.
   - **Never stall:**
-    - If no matching stream exists (a control-only sender, or mocap not yet received) or that stream has no clock estimate yet, the message is delivered at once and counted as unaligned.
+    - If no matching stream exists (a control-only sender, or mocap not yet received), or that stream has had no packet for 200 ms (`ReceiverStream::lastSeenS`; the performer's stream paused), the change is delivered at once and counted as unaligned.
     - A message held longer than `MaxAlignmentHoldMs` (default 500) is delivered late, never dropped.
     - Order within a source is preserved: a later message is never released before an earlier one.
   - **Opt-out:** `bAlignControlToMocap = false` delivers on arrival in `Poll`. This suits environment changes that need no lip-sync accuracy and should not wait.
@@ -331,7 +333,7 @@ WP-CTL, P1 · L. Each PR keeps all transports working and the conformance suite 
    - TCP and UDP (`Open3DTransportSockets/Private/{Sender,Receiver}/*`), NNG (`Open3DTransportNNG/Private/{Sender,Receiver}/*`) and Loopback (`LoopbackChannel.h`, `LoopbackSender.cpp`, `LoopbackReceiver.cpp`).
    - Conformance cases (Verification) and per-transport tests.
 4. **CTL-4 Gameplay surface.**
-   - `FO3DControlPublisher`, plus the functions and properties on `UO3DSenderComponent` (`O3DSenderComponent.h/.cpp`). The editor details customization shows the control section (`Open3DBroadcastEditor/Private/O3DSenderComponentCustomization.cpp`).
+   - `FO3DControlPublisher`, plus the functions and properties on `UO3DSenderComponent` (`O3DSenderComponent.h/.cpp`). The control properties appear through the default details layout (the sender customization hides only the categories it rebuilds itself).
    - `FControlSink` in `O3DReceiverSource.cpp`, including the alignment hold queue resolved through `ReceiverStreamTable::ResolveKey`.
    - `UO3DControlSettings` (new `Open3DReceiver/Public/O3DControlSettings.h`, plus `DeveloperSettings` in `Open3DReceiver.Build.cs`), `UO3DControlLibrary` with the runtime enable functions, and `ControlAccept` in `O3DReceiverSourceSettings.h`.
    - `UO3DRemoteControlComponent` (`Open3DReceiver/Public` and `Private`).

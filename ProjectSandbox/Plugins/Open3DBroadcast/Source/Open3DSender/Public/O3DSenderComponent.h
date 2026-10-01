@@ -10,6 +10,8 @@
 #include "Transport/O3DTransportTypes.h"
 #include "O3DSecretStore.h"
 #include "O3DSenderAudioCaptureComponent.h"
+#include "O3DControlPublisher.h"
+#include "O3DControlTypes.h"
 #include "Templates/UniquePtr.h"
 #include "Templates/Function.h"
 #include "O3DSenderComponent.generated.h"
@@ -326,6 +328,61 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Open3DStream|Sender")
 	FString GetLastStartCaptureError() const { return LastStartCaptureError; }
 
+	// ── Control channel (docs/adr/0011-control-channel.md, item 8) ───────────────────────
+	// Cues (events) and parameters (values) for remote clients, carried on this sender's stream.
+	// Names, keys and targets are case-sensitive strings. Receivers must accept control (it is off
+	// by default there) and use UO3DRemoteControlComponent to react.
+
+	/**
+	 * Fire an event on every receiver of this stream, for example a VFX, lighting or audio cue.
+	 * TargetSubject (optional) aims it at one character's subject. Needs a running transport;
+	 * returns false (and logs why) when the event cannot be sent.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Open3DStream|Sender|Control")
+	bool FireControlEvent(const FString& EventName, const FO3DControlValue& Payload, FString TargetSubject = FString(TEXT("")));
+
+	/**
+	 * Set a value on every receiver of this stream, for example an environment or character
+	 * parameter. Receivers that join later get it too. May be called before capture starts; it is
+	 * sent when the transport starts. Setting the same value again sends nothing.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Open3DStream|Sender|Control")
+	bool SetControlValue(const FString& Key, const FO3DControlValue& Value, FString TargetSubject = FString(TEXT("")));
+
+	/** Remove a value from every receiver. */
+	UFUNCTION(BlueprintCallable, Category = "Open3DStream|Sender|Control")
+	void ClearControlValue(const FString& Key, FString TargetSubject = FString(TEXT("")));
+
+	/** Remove every value this sender set. */
+	UFUNCTION(BlueprintCallable, Category = "Open3DStream|Sender|Control")
+	void ClearAllControlValues();
+
+	/** The value this sender holds for Key, if it set one. */
+	UFUNCTION(BlueprintPure, Category = "Open3DStream|Sender|Control")
+	bool GetControlValue(const FString& Key, const FString& TargetSubject, FO3DControlValue& OutValue) const;
+
+	/** This component's control source id (a fresh GUID per instance, never saved). */
+	FString GetControlSourceId() const;
+
+	/**
+	 * Start the transport for control alone when there is no skeletal mesh and audio is off, for
+	 * an actor that only sends cues and parameters (a stage or lighting controller).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Control")
+	bool bAllowControlOnly = false;
+
+	/** How often the full set of values is re-sent, so late or lossy receivers catch up. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Control", meta = (ClampMin = "0.25", ClampMax = "10.0", UIMin = "0.25", UIMax = "10.0", Units = "s"))
+	float ControlSnapshotIntervalSeconds = 1.0f;
+
+	/** Copies of each event, on consecutive ticks; receivers drop duplicates. Covers loss on unreliable transports. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Control", meta = (ClampMin = "1", ClampMax = "5"))
+	int32 ControlEventRedundancy = 3;
+
+	/** Most times per second one value is re-sent while it keeps changing; the latest value always wins. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DStream|Sender|Control", meta = (ClampMin = "1.0", ClampMax = "120.0"))
+	float ControlMaxValueRateHz = 30.0f;
+
 	FOnO3DDescriptorReady OnDescriptorReady;
 	FOnO3DPoseFrameReady OnPoseFrameReady;
 	FOnO3DSerializedFrame OnSerializedFrame;
@@ -385,6 +442,13 @@ private:
 	FDelegateHandle SubjectListHandle;
 
 	TUniquePtr<FO3DSenderTransportController, FO3DSenderTransportControllerDeleter> TransportController;
+
+	/** Control publisher (ADR 0011); created on first use. Not a UPROPERTY: a duplicated component gets its own. */
+	TUniquePtr<FO3DControlPublisher> ControlPublisher;
+	FO3DControlPublisher& EnsureControlPublisher();
+	/** Starts control on the running transport when it carries control. */
+	void StartControl();
+	void TickControl();
 	TUniquePtr<FO3DSenderCurveProcessor, FO3DSenderCurveProcessorDeleter> CurveProcessor;
 	UPROPERTY(Transient)
 	UO3DSenderAudioCaptureComponent* AudioCaptureComponent = nullptr;

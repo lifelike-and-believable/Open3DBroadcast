@@ -14,6 +14,7 @@
 
 #include "O3DReceiverSource.h"
 #include "O3DRemoteAudioComponent.h"
+#include "O3DRemoteControlComponent.h"
 #include "Transport/O3DSerializedFrameConsumer.h"
 #include "Sound/SoundWaveProcedural.h"
 
@@ -71,6 +72,20 @@ struct FO3DReceiverSourceTestAccessor
 	{
 		return Source.MakeAudioSink();
 	}
+
+	// Control channel (ADR 0011, CTL-4).
+	static bool StartTransport(FO3DReceiverSource& Source) { return Source.StartTransport(); }
+	static void StopTransport(FO3DReceiverSource& Source) { Source.StopTransport(); }
+	static uint64 GetControlPayloadsDroppedDisabled(const FO3DReceiverSource& Source) { return Source.ControlPayloadsDroppedDisabled; }
+	static const O3DS::Control::AlignerStats& GetAlignerStats(const FO3DReceiverSource& Source) { return Source.ControlAligner.GetStats(); }
+	static size_t GetHeldControlChanges(const FO3DReceiverSource& Source) { return Source.ControlAligner.NumHeld(); }
+};
+
+/** Binds a remote control component to the bus without a world (BeginPlay needs one). */
+struct FO3DRemoteControlComponentTestAccessor
+{
+	static void Bind(UO3DRemoteControlComponent& Component) { Component.Bind(); }
+	static void Unbind(UO3DRemoteControlComponent& Component) { Component.Unbind(); }
 };
 
 /** Records the LiveLink static and frame pushes of one FO3DReceiverSource (WP-S4 correctness tests). */
