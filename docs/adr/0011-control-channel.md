@@ -129,7 +129,8 @@ union Value { BoolV, IntV, DoubleV, StringV, NameV, Vec3V, QuatV, TransformV, Co
 
 table Entry  { key:string (required); target:string; value:Value; version:ulong; }
 table Clear  { key:string (required); target:string; version:ulong; }
-table Event  { event_id:ulong; name:string (required); target:string; value:Value; ttl_ms:uint = 2000; }
+table Event  { event_id:ulong; name:string (required); target:string; value:Value; ttl_ms:uint = 2000;
+               time_us:ulong; }   // fire time, sender clock; 0 = the message's sender_time_us
 
 table ControlMessage {
   protocol_version:ushort = 1;        // control protocol the writer speaks
@@ -150,11 +151,13 @@ table ControlMessage {
 }
 root_type ControlMessage;
 ```
-- `version` on `Entry` and `Clear` is the `seq` of the message that first carried that change. Snapshots re-send the original version, so a snapshot never overrides a newer live set.
+- `version` on `Entry` and `Clear` is the `seq` of the message that first carried that change. Snapshots re-send the original version, so a snapshot never overrides a newer live set. A value that has not gone out live yet (new, or changed and still waiting on the live budget or the per-key rate) goes out in the snapshot with the snapshot's capture point (`snapshot_seq`) as its version. Without that, a sender whose live budget never reaches some keys would never deliver them.
+- `Event.time_us` is when the event was fired. Redundant copies travel in later messages, so the TTL and alignment use the fire time, not the time of the message carrying the copy.
 - A snapshot is the table captured at one instant (`snapshot_seq`). The publisher copies the table once and splits that copy into parts, so parts never mix two states.
 - `source_id` is an `FGuid` that the component creates when it registers. It is `Transient` and never serialized, so a duplicated or copy-pasted actor gets its own id and two senders never merge state. This is the same per-instance approach audio uses (`FGuid::NewGuid()`, `Open3DTransportLoopback/Private/Sender/LoopbackSender.cpp:133`). Stop and Start keep the id; the epoch tells sessions apart.
 - `source_id` lives in the payload because LiveKit's data callback passes a label and reliability, not a participant (`livekit_ffi.h:94`). Several senders can share one room, relay or NNG bus.
-- Readers verify with the identifier. They reject `protocol_version` greater than they support, logging once per source, and ignore unknown union members and fields as FlatBuffers allows.
+- Readers verify with the identifier. They reject `protocol_version` greater than they support, logging once per source, and ignore unknown fields as FlatBuffers allows.
+- **New value types are append-only and do not need a protocol bump.** The generated verifier accepts an unknown union member. A reader marks that entry or event *unsupported*: it skips the item and counts it, and does not reject the message. A snapshot part still counts an unsupported entry's key as present, so the key is not mistaken for a lost clear. A reader never re-encodes a message holding an unsupported item.
 - `flatc --cpp` generates `src/o3ds_control_generated.h`. `Build/Scripts/sync_o3ds_core.py` handles only `o3ds_generated.h` by name (`:147`, `:336`), so it and `Build/o3ds-core-manifest.txt` are extended to cover the new header.
 
 **4. Envelope.**
@@ -221,7 +224,7 @@ root_type ControlMessage;
 - `FO3DReceiverSource::FControlSink` follows the `FAudioSink` pattern: an immutable snapshot, no back-reference, and a hop to the game thread by value. On the game thread the source runs the core `ControlReceiver` (item 9) and publishes the resulting changes to `FO3DControlBus`.
 - **Enabling control on a client (maintainer, 2026-09-30):** off by default, but a project must be able to enable it inside its own client, so that a Shipping build ships with it on. There are three layers, and the most specific one that is set wins.
   1. **Project setting (the shipping default).** `UO3DControlSettings : UDeveloperSettings`, `UCLASS(Config = Game, DefaultConfig)`, shown under Project Settings › Plugins › Open3DBroadcast Control.
-     - It holds `bAcceptControl` (default **false**), `ControlAllowlist` (key and event-name prefixes; empty means all), `MaxControlBytesPerSecond`, `MaxControlKeysPerSource` (default 1,024), `bAlignControlToMocap` (default **true**, item 9) and `MaxAlignmentHoldMs` (default 500).
+     - It holds `bAcceptControl` (default **false**), `ControlAllowlist` (key and event-name prefixes; empty means all), `MaxControlLiveBytesPerSecond` (default 64 KiB/s), `MaxControlSnapshotBytesPerSecond` (default 512 KiB/s), `MaxControlKeysPerSource` (default 1,024), `bAlignControlToMocap` (default **true**, item 9) and `MaxAlignmentHoldMs` (default 500).
      - It is saved to the project's `Config/DefaultGame.ini` under `[/Script/Open3DReceiver.O3DControlSettings]`. That file is staged into packaged builds, so ticking the box in the editor is all a project does to ship a Shipping client with control on.
      - The existing `UO3DReceiverSettingsObject` is not reused. It is `Config = GameUserSettings` (`Plugin/Source/Open3DReceiver/Public/O3DReceiverSourceSettings.h:33`), a per-user file the end user can edit, which is the wrong home for project policy.
      - Open3DReceiver gains a `DeveloperSettings` module dependency. That `UDeveloperSettings` is available in Shipping, and that `DefaultConfig` values load in a packaged Shipping build without a user `.ini`, is **needs-verification** against UE 5.7 (Q11).
@@ -242,7 +245,7 @@ root_type ControlMessage;
 - `ControlWriter`: builds `ControlMessage`s within the byte budget and splits a snapshot into parts. `ParseControl`: Verifier with the identifier, then the semantic limits below, all in `src/o3ds/parse_limits.h`:
   - entries + clears + events ≤ 64 per message;
   - string and bytes lengths as in items 1 and 2;
-  - `snapshot_part < snapshot_parts ≤ 256`;
+  - `snapshot_part < snapshot_parts ≤ 2048` (every entry fits a part on its own, so a full 1,024-key table always fits one snapshot);
   - non-finite doubles rejected.
 - `ControlPublisher` (sender state):
   - the table with versions, `seq` and epoch;
@@ -253,10 +256,13 @@ root_type ControlMessage;
   - **Values:**
     - A set or clear applies only if its `version` is greater than the stored version for that `(key, target)`.
     - A clear leaves a **tombstone** (the key and the clear's version), so a reordered older set that arrives after the clear is rejected. A tombstone is removed once a complete snapshot with `snapshot_seq` ≥ its version has been applied. Tombstones count toward the key cap.
+    - That snapshot's capture point becomes the source's **floor**. A set for a key that has neither a value nor a tombstone is rejected when it is at or below the floor, because the key was absent at capture. This keeps a very late retry of an old set from bringing back a cleared value after its tombstone is gone.
   - **Snapshots:**
     - Parts are collected by `snapshot_id`. Entries apply under the value rule as each part arrives.
-    - Once all parts are present, a key absent from the snapshot whose version is ≤ `snapshot_seq` is removed (Cleared), which catches lost clears.
-    - An incomplete snapshot is discarded after 2 × the interval.
+    - **Lost clears are repaired part by part.** Parts cover contiguous ranges of the table in `(key, target)` order, and `Validate` requires each part's entries to be strictly increasing; only the snapshot of an empty table has an empty part. So any part says which keys were absent at capture within its own range.
+    - On each part, the receiver removes (Cleared) every key in that range that the part lacks and whose version is ≤ `snapshot_seq`. Part 0 also covers everything before its first key, and the last part everything after its last key. The gap between two neighbouring parts is covered once both have arrived.
+    - A lost part therefore delays repair only for its own range, and a snapshot does not have to complete. Under 20 % loss many snapshots never complete (CTest: one of seven in a 7.5 s run), so repair that waited for a complete snapshot would stall.
+    - An incomplete snapshot is discarded when no new part has arrived for `incomplete_snapshot_timeout_s` (default 2 s). The timeout counts from the **last** part, not the first, because a large table paced at the publisher's snapshot cap can take several seconds to send.
   - **Epoch (no flicker on sender restart):**
     - A higher epoch does **not** clear the table. The table becomes *provisional*: it keeps its values and keeps delivering them.
     - The first complete snapshot of the new epoch reconciles. It emits Changed only for values that differ, emits Cleared only for keys it lacks, and adopts the snapshot's versions.
@@ -269,7 +275,9 @@ root_type ControlMessage;
   - **Limits:**
     - A per-source byte-rate bucket (not a message count) plus the key cap. Excess input is dropped and counted.
     - Snapshot parts draw from a **separate** budget, so live traffic can never starve snapshot completion.
-    - The publisher paces snapshot parts across the interval. Its worst case is the key cap of maximum-size entries spread over one interval, plus live changes at `ControlMaxValueRateHz` and events with redundancy. That worst case is computed in `parse_limits.h` and asserted ≤ the receiver's default budgets at compile time.
+    - **Sender worst case fits a default receiver by construction.** The publisher caps its own output at 32 KiB/s live and 256 KiB/s for snapshots (`ControlLimits::kPublisherMax*BytesPerS`). The receiver's default budgets are twice those (64 KiB/s and 512 KiB/s), each with a one-second burst. `static_assert`s in `parse_limits.h` hold the 2:1 relation.
+    - Within the live cap, clears and events go before value changes. Values over budget wait, coalesced, and a snapshot delivers any that are still waiting.
+    - Snapshot parts are spaced over half the interval and never faster than the snapshot cap. A new periodic snapshot starts only when the previous one has finished; a new-peer request replaces it.
   - **Time:** every clock is injected, so the CTest suites are deterministic.
   - **Alignment:** an optional hold queue releases items once a caller-supplied "current mocap sender time" reaches their `sender_time_us`, with the cap from *Timing* below.
 - **Coalescing:** within one sender tick, repeated `SetControlValue` calls for the same `(key, target)` collapse to the last value. All changes from a tick go out as one message, or as more if the budget requires. A parameter driven every frame at 60 Hz therefore costs one entry per tick, not one message per call. `ControlMaxValueRateHz` (default 30, clamp 1–120) bounds how often a single key is re-sent, and the latest value always wins. Receivers that want smooth motion interpolate on their side.
@@ -350,7 +358,7 @@ WP-CTL, P1 · L. Each PR keeps all transports working and the conformance suite 
   - a `ControlMessage` buffer fed to `SubjectList::Parse` is rejected, and so is a `SubjectList` buffer fed to `ParseControl`;
   - `protocol_version = 2` is rejected.
 - **State, using `channel_model` (as ADR 0005 Verification does):**
-  - 20 % loss with 100 keys and random set and clear traffic: after the last change, every receiver matches the sender within two snapshot intervals, and no key ever regresses to an older version;
+  - 20 % loss with 100 keys and random set and clear traffic, over 20 seeds: after the last change, every receiver matches the sender within six snapshot intervals, and no key ever regresses to an older version. Recovery is per snapshot part: each interval, a key whose last change was lost is repaired with probability 1 − p (p = part loss), so it stays wrong for k intervals with probability p^k (4 % for k = 2 at p = 0.2, 6×10⁻⁵ for k = 6). No one-way scheme can promise convergence within a fixed number of intervals on a lossy link;
   - reordering (window 8): no stale value applied, including a set reordered after its clear (tombstone);
   - a late joiner at t = 5 s gets the full table within one interval and **no** events sent before it joined;
   - a lost clear is repaired by the next complete snapshot;
@@ -360,7 +368,7 @@ WP-CTL, P1 · L. Each PR keeps all transports working and the conformance suite 
 - **Load:** a maximum-load sender (key cap of maximum-size entries, every key at `ControlMaxValueRateHz`, 10 events/s with redundancy 3) against a receiver with default settings completes every snapshot at 0 % loss and drops no live change.
 - **Events:**
   - on a lossless channel, an event with redundancy 3 is delivered exactly once;
-  - at 20 % loss and redundancy 3, delivery is at least 99 % over 10,000 events with zero duplicates (seeded);
+  - at 20 % loss and redundancy 3, delivery matches theory (1 − 0.2³ = 99.2 %; the bar is theory minus 4 standard deviations, 98.8 %) over 10,000 events for each of three seeds, with zero duplicates;
   - a TTL-expired event is dropped. The case runs with the receiver's wall clock skewed by ±1 hour and gives the same result;
   - the de-duplication ring survives wrap-around.
 - **Limits:** a flood of 10× the rate is capped at the bucket size and counted, and the key cap holds.
