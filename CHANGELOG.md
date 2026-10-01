@@ -545,8 +545,9 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
 
 - The WebRTC add-on now carries control (events and values from
   `UO3DSenderComponent`'s `FireControlEvent` / `SetControlValue`):
-  `SupportsControl()` is true on its sender and receiver. Built against
-  transport API version 2; the add-on's version check is unchanged.
+  `SupportsControl()` is true on its sender and receiver. It needs no
+  API change of its own; with WP-A1 PR 2 the add-on builds against
+  transport API version 3.
 - **Sender.** `SendControl` sends each control envelope with
   `lk_send_data_ex` on a data channel labelled `__o3d.ctl`, reliable and
   ordered, never through `SendSerialized`. It refuses anything that is not
