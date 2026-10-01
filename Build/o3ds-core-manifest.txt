@@ -25,6 +25,9 @@ o3ds/tcp_stream_parser.h
 o3ds/predict/concealment.h
 o3ds/predict/linear_predictor.h
 
+# Control channel codec and state machines (docs/adr/0011-control-channel.md).
+o3ds/control.h
+
 # Used by the automation tests (Open3DBroadcastTests) for capture/replay.
 o3ds/capture.h
 o3ds/replay.h

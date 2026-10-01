@@ -96,6 +96,14 @@ jobs:
             exit 1
           fi
 
+      # Same check for the control channel schema (docs/adr/0011-control-channel.md).
+      - name: Check src/o3ds_control_generated.h matches src/o3ds_control.fbs
+        run: |
+          if ! diff --strip-trailing-cr -q build/src/_generated/o3ds_control_generated.h src/o3ds_control_generated.h; then
+            echo "::error file=src/o3ds_control_generated.h::src/o3ds_control_generated.h differs from what flatc (thirdparty/flatbuffers pin) generates from src/o3ds_control.fbs. Regenerate it with flatc --cpp -o src src/o3ds_control.fbs, then run python3 Build/Scripts/sync_o3ds_core.py."
+            exit 1
+          fi
+
       - name: Run tests (ctest, ASan/UBSan active)
         working-directory: build
         # -LE fuzz: the fallback fuzz runners have their own step below.

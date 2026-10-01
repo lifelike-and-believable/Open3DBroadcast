@@ -2,6 +2,7 @@
 // fuzz_support.h for how the pieces fit together.
 #include "fuzz_support.h"
 
+#include "o3ds/control.h"
 #include "o3ds/model.h"
 #include "o3ds/predict/quat_math.h"
 #include "o3ds/tcp_stream_parser.h"
@@ -339,12 +340,75 @@ namespace o3ds_fuzz
 
 			return seeds;
 		}
+
+		// fuzz_control.cpp: a limits selector byte, then one [u16 length]
+		// record per control payload. Built from real ControlPublisher
+		// output: values of every type, targets, clears, events and a
+		// multi-part snapshot.
+		std::vector<Bytes> ControlSeeds()
+		{
+			using namespace O3DS::Control;
+			PublisherConfig config;
+			config.event_redundancy = 2;
+			ControlPublisher pub("0a1b2c3d4e5f60718293a4b5c6d7e8f9", "FuzzSender", config);
+			pub.SetMocapSubjects({ "Hero", "Sidekick" });
+			pub.Start(1000);
+
+			TransformValue transform;
+			transform.translation = { 1.0, 2.0, 3.0 };
+			pub.SetValue("env.fog_density", "", Value::MakeDouble(0.25));
+			pub.SetValue("env.sky_tint", "", Value::MakeColor({ 0.2f, 0.4f, 0.9f, 1.0f }));
+			pub.SetValue("char.emotion", "Hero", Value::MakeName("joy"));
+			pub.SetValue("char.prop_visible", "Hero", Value::MakeBool(true));
+			pub.SetValue("char.offset", "Sidekick", Value::MakeVector3({ 0.0, 10.0, 0.0 }));
+			pub.SetValue("char.aim", "Sidekick", Value::MakeQuat({ 0.0, 0.0, 0.0, 1.0 }));
+			pub.SetValue("scene.anchor", "", Value::MakeTransform(transform));
+			pub.SetValue("scene.take", "", Value::MakeInt(42));
+			pub.SetValue("scene.note", "", Value::MakeString("take two â slower"));
+			pub.SetValue("scene.blob", "", Value::MakeBytes({ 1, 2, 3, 4 }));
+			for (int k = 0; k < 40; ++k)
+				pub.SetValue("bulk." + std::to_string(k), "", Value::MakeString(std::string(60, (char)('a' + k % 26))));
+
+			std::vector<OutgoingMessage> out;
+			double now = 0.0;
+			auto tick = [&]()
+			{
+				pub.Tick(now, 1000000 + (uint64_t)(now * 1.0e6), 1700000000000000ull, out);
+				now += 1.0 / 60.0;
+			};
+			tick(); // live values, then the start-up snapshot
+			pub.FireEvent("vfx.muzzle_flash", "Hero", Value::MakeName("left_hand"), 1000000 + (uint64_t)(now * 1.0e6));
+			pub.FireEvent("light.cue", "", Value::MakeInt(12), 1000000 + (uint64_t)(now * 1.0e6), 500);
+			pub.ClearValue("scene.blob", "");
+			pub.SetValue("env.fog_density", "", Value::MakeDouble(0.5));
+			for (int k = 0; k < 40; ++k)
+				tick();
+
+			std::vector<Bytes> seeds;
+			Bytes all{ 0x37 };
+			for (const OutgoingMessage& m : out)
+			{
+				AppendRecord(all, m.bytes.data(), m.bytes.size());
+				Bytes single{ 0x00 };
+				AppendRecord(single, m.bytes.data(), m.bytes.size());
+				if (seeds.size() < 8)
+					seeds.push_back(single);
+			}
+			seeds.push_back(all);
+
+			// Reversed delivery order: clears before sets, parts out of order.
+			Bytes reversed{ 0xf3 };
+			for (auto it = out.rbegin(); it != out.rend(); ++it)
+				AppendRecord(reversed, it->bytes.data(), it->bytes.size());
+			seeds.push_back(reversed);
+			return seeds;
+		}
 	}
 
 	const std::vector<std::string>& TargetNames()
 	{
 		static const std::vector<std::string> names = {
-			"parse", "parse_update", "residual", "peek_meta", "udp_reassembly", "reorder_gate", "tcp_stream"
+			"parse", "parse_update", "residual", "peek_meta", "udp_reassembly", "reorder_gate", "tcp_stream", "control"
 		};
 		return names;
 	}
@@ -358,6 +422,7 @@ namespace o3ds_fuzz
 		if (target == "udp_reassembly") return UdpSeeds();
 		if (target == "reorder_gate") return ReorderGateSeeds();
 		if (target == "tcp_stream") return TcpStreamSeeds();
+		if (target == "control") return ControlSeeds();
 		return {};
 	}
 
