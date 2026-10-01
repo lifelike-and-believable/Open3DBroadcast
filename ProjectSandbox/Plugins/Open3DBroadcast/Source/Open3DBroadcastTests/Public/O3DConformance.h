@@ -42,6 +42,16 @@ enum class EO3DConformanceCase : uint32
 	RoundTripByteExact = 1 << 7,
 	/** Destroying the sender while FFI callbacks are still in flight is safe (fake FFI only). */
 	LifetimeDestroyWithCallbacksInFlight = 1 << 8,
+	/**
+	 * Control (ADR 0011): envelopes sent between mocap frames reach the control sink byte-exact
+	 * and in order; the frames still reach the consumer byte-exact and in order, and no control
+	 * reaches the consumer or counts as a sent frame. For transports that deliver reliably.
+	 */
+	ControlRoundTrip = 1 << 9,
+	/** Control: SendControl before Initialize, before Start and after Stop returns false and counts no frame. */
+	ControlRejectedWhenNotRunning = 1 << 10,
+	/** Control: Stop() while four threads call SendControl returns, every call returns, and later sends are refused. */
+	ControlStopWhileSending = 1 << 11,
 };
 ENUM_CLASS_FLAGS(EO3DConformanceCase)
 
@@ -99,6 +109,9 @@ struct FO3DConformanceProfile
 	int32 BackpressureSendCount = 1;
 	/** SendBackpressure: the queue only fills while a receiver is connected (TCP). */
 	bool bBackpressureNeedsPeer = false;
+
+	/** ControlStopWhileSending: start/stop cycles, each on a new sender (1 where a port lingers after close). */
+	int32 ControlStopCycles = 5;
 
 	/** Wall-clock limit for a sender and receiver to find each other on 127.0.0.1. */
 	double ConnectTimeoutSeconds = 10.0;

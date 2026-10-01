@@ -18,6 +18,8 @@ public:
     virtual FO3DTransportStats GetStats() const override;
     virtual bool SupportsAudio() const override;
     virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
+    virtual bool SupportsControl() const override { return true; }
+    virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink) override { ControlSink = Sink; }
 
 private:
     FString ChannelKey;
@@ -26,6 +28,8 @@ private:
     TSharedPtr<FO3DLoopbackChannel, ESPMode::ThreadSafe> Channel;
     TSharedPtr<ISerializedFrameConsumer> Consumer;
     TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
+    /** Control payloads (ADR 0011). Held strongly, released in Stop; called from Poll. */
+    TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe> ControlSink;
     FO3DTransportAudioConfig ActiveAudioConfig;
     bool bInitialized = false;
     FO3DTransportStats Stats;

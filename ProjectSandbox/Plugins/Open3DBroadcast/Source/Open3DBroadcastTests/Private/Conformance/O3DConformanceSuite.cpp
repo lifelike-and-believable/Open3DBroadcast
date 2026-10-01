@@ -19,8 +19,10 @@
 #include "HAL/Runnable.h"
 #include "HAL/RunnableThread.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/ScopeLock.h"
 #include "O3DTestFakes.h"
 #include "O3DTestHarness.h"
+#include "O3DUnifiedMessage.h"
 #include "Transport/O3DTransportRegistry.h"
 
 #include <atomic>
@@ -70,6 +72,89 @@ namespace O3DConformanceSuite
 		std::atomic<int32> Accepted{0};
 		std::atomic<int32> Rejected{0};
 		std::atomic<bool> bDone{false};
+	};
+
+	/** Records every control payload a receiver delivers. Thread-safe: transports may call it on any thread. */
+	class FRecordingControlSink final : public IO3DReceiverControlSink
+	{
+	public:
+		virtual void SubmitControl(TConstArrayView<uint8> Payload, const FString& /*StreamId*/, double /*ReceiveTimeSec*/) override
+		{
+			FScopeLock Lock(&Mutex);
+			Payloads.Emplace(Payload.GetData(), Payload.Num());
+		}
+		TArray<TArray<uint8>> Get() const
+		{
+			FScopeLock Lock(&Mutex);
+			return Payloads;
+		}
+		int32 Num() const
+		{
+			FScopeLock Lock(&Mutex);
+			return Payloads.Num();
+		}
+
+	private:
+		mutable FCriticalSection Mutex;
+		TArray<TArray<uint8>> Payloads;
+	};
+
+	/** A control payload whose bytes identify it; sizes vary up to the largest the envelope allows. */
+	TArray<uint8> MakeControlPayload(int32 Index)
+	{
+		const int32 Size = (Index % 3 == 2) ? O3DS::UnifiedMaxControlPayloadSize : 16 + Index * 37;
+		TArray<uint8> Payload;
+		Payload.SetNumUninitialized(Size);
+		for (int32 Byte = 0; Byte < Size; ++Byte)
+		{
+			Payload[Byte] = static_cast<uint8>((Index * 131 + Byte * 7 + 3) & 0xFF);
+		}
+		return Payload;
+	}
+
+	TArray<uint8> MakeControlEnvelope(int32 Index)
+	{
+		TArray<uint8> Envelope;
+		O3DS::WriteControlEnvelope(MakeControlPayload(Index), static_cast<double>(Index), Envelope);
+		return Envelope;
+	}
+
+	/** Upper bound on SendControl calls per worker, so a transport that records every send (the fake) stays small. */
+	constexpr int32 MaxControlSendsPerThread = 20000;
+
+	/** Calls SendControl in a loop until told to stop (or the cap), counting results. */
+	class FControlSendWorker final : public FRunnable
+	{
+	public:
+		FControlSendWorker(IOpen3DSender& InSender, TArray<uint8> InEnvelope)
+			: Sender(InSender)
+			, Envelope(MoveTemp(InEnvelope))
+		{
+		}
+
+		virtual uint32 Run() override
+		{
+			for (int32 Sent = 0; Sent < MaxControlSendsPerThread && !bStop.load(); ++Sent)
+			{
+				const double Start = FPlatformTime::Seconds();
+				const bool bAccepted = Sender.SendControl(Envelope.GetData(), Envelope.Num());
+				if (FPlatformTime::Seconds() - Start > MaxNonBlockingSendSeconds)
+				{
+					Blocked.fetch_add(1);
+				}
+				(bAccepted ? Accepted : Rejected).fetch_add(1);
+			}
+			return 0;
+		}
+
+		int32 Calls() const { return Accepted.load() + Rejected.load(); }
+
+		IOpen3DSender& Sender;
+		const TArray<uint8> Envelope;
+		std::atomic<bool> bStop{false};
+		std::atomic<int32> Accepted{0};
+		std::atomic<int32> Rejected{0};
+		std::atomic<int32> Blocked{0};
 	};
 
 	bool IsMonotonic(const FO3DTransportStats& Before, const FO3DTransportStats& After)
@@ -144,7 +229,8 @@ namespace O3DConformanceSuite
 	};
 
 	/** Starts both sides and sends probe frames until one arrives or the profile's timeout passes. */
-	bool Connect(FAutomationTestBase& Test, const FO3DConformanceProfile& Profile, FO3DConformanceFixture& Fixture, const FO3DTransportConfig& SenderConfig, FConnectedPair& Pair)
+	bool Connect(FAutomationTestBase& Test, const FO3DConformanceProfile& Profile, FO3DConformanceFixture& Fixture, const FO3DTransportConfig& SenderConfig, FConnectedPair& Pair,
+		const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& ControlSink = nullptr)
 	{
 		Pair.Fixture = &Fixture;
 		Pair.Sender = Fixture.CreateSender();
@@ -168,6 +254,10 @@ namespace O3DConformanceSuite
 			return false;
 		}
 		Pair.Receiver->SetConsumer(Pair.Consumer);
+		if (ControlSink.IsValid())
+		{
+			Pair.Receiver->SetControlSink(ControlSink); // before Start, as the interface requires
+		}
 		if (!Test.TestTrue(TEXT("Sender starts"), Pair.Sender->Start()) || !Test.TestTrue(TEXT("Receiver starts"), Pair.Receiver->Start()))
 		{
 			return false;
@@ -499,6 +589,176 @@ namespace O3DConformanceSuite
 		return true;
 	}
 
+	bool RunControlRoundTrip(FAutomationTestBase& Test, const FO3DConformanceProfile& Profile, FO3DConformanceFixture& Fixture)
+	{
+		const TSharedRef<FRecordingControlSink, ESPMode::ThreadSafe> Sink = MakeShared<FRecordingControlSink, ESPMode::ThreadSafe>();
+		FConnectedPair Pair;
+		if (!Connect(Test, Profile, Fixture, Fixture.MakeSenderConfig(), Pair, Sink))
+		{
+			return false;
+		}
+		if (!Test.TestTrue(TEXT("Sender supports control"), Pair.Sender->SupportsControl())
+			|| !Test.TestTrue(TEXT("Receiver supports control"), Pair.Receiver->SupportsControl()))
+		{
+			return false;
+		}
+
+		const TArray<TArray<uint8>> Recorded = O3DTests::MakeRecordedFrames(TEXT("ConformanceActor"), RoundTripFrames);
+		if (!Test.TestEqual(TEXT("Recorded frames built"), Recorded.Num(), RoundTripFrames))
+		{
+			return false;
+		}
+		const int64 FramesSentBefore = Pair.Sender->GetStats().FramesSent;
+
+		// A frame, then a control envelope after every second frame: control interleaved in-band.
+		TArray<TArray<uint8>> SentControl;
+		for (int32 Index = 0; Index < Recorded.Num(); ++Index)
+		{
+			const TArray<uint8>& Frame = Recorded[Index];
+			const bool bFrameQueued = O3DTests::PollUntil(Profile.ConnectTimeoutSeconds,
+				[&Pair, &Frame, Index]() { return Pair.Sender->SendSerialized(Frame.GetData(), Frame.Num(), TEXT("ConformanceActor"), static_cast<double>(Index)); },
+				[&Pair]() { Pair.Pump(); });
+			if (!Test.TestTrue(*FString::Printf(TEXT("Frame %d accepted"), Index), bFrameQueued))
+			{
+				return false;
+			}
+			if (Index % 2 == 0)
+			{
+				const int32 ControlIndex = SentControl.Num();
+				const TArray<uint8> Envelope = MakeControlEnvelope(ControlIndex);
+				const bool bControlQueued = O3DTests::PollUntil(Profile.ConnectTimeoutSeconds,
+					[&Pair, &Envelope]() { return Pair.Sender->SendControl(Envelope.GetData(), Envelope.Num()); },
+					[&Pair]() { Pair.Pump(); });
+				if (!Test.TestTrue(*FString::Printf(TEXT("Control %d accepted"), ControlIndex), bControlQueued))
+				{
+					return false;
+				}
+				SentControl.Add(MakeControlPayload(ControlIndex));
+			}
+		}
+
+		auto CollectNonProbe = [&Pair]()
+		{
+			TArray<TArray<uint8>> Out;
+			for (const TArray<uint8>& Frame : Pair.Consumer->GetFrames())
+			{
+				if (Frame != Pair.Probe)
+				{
+					Out.Add(Frame);
+				}
+			}
+			return Out;
+		};
+		O3DTests::PollUntil(Profile.ConnectTimeoutSeconds,
+			[&CollectNonProbe, &Sink, &SentControl]() { return CollectNonProbe().Num() >= RoundTripFrames && Sink->Num() >= SentControl.Num(); },
+			[&Pair]() { Pair.Pump(); });
+
+		const TArray<TArray<uint8>> Frames = CollectNonProbe();
+		Test.TestEqual(TEXT("Every frame arrived exactly once; no control reached the frame consumer"), Frames.Num(), RoundTripFrames);
+		bool bFramesExact = Frames.Num() == Recorded.Num();
+		for (int32 Index = 0; bFramesExact && Index < Frames.Num(); ++Index)
+		{
+			bFramesExact = Frames[Index] == Recorded[Index];
+		}
+		Test.TestTrue(TEXT("Frames byte-exact and in order"), bFramesExact);
+
+		const TArray<TArray<uint8>> Control = Sink->Get();
+		Test.TestEqual(TEXT("Every control payload arrived exactly once"), Control.Num(), SentControl.Num());
+		bool bControlExact = Control.Num() == SentControl.Num();
+		for (int32 Index = 0; bControlExact && Index < Control.Num(); ++Index)
+		{
+			bControlExact = Control[Index] == SentControl[Index];
+		}
+		Test.TestTrue(TEXT("Control payloads byte-exact and in order"), bControlExact);
+		Test.TestEqual(TEXT("Control is not counted as a sent frame"), Pair.Sender->GetStats().FramesSent - FramesSentBefore, static_cast<int64>(RoundTripFrames));
+		return true;
+	}
+
+	bool RunControlRejectedWhenNotRunning(FAutomationTestBase& Test, const FO3DConformanceProfile&, FO3DConformanceFixture& Fixture)
+	{
+		TSharedPtr<IOpen3DSender> Sender = Fixture.CreateSender();
+		if (!Test.TestTrue(TEXT("Sender created"), Sender.IsValid()) || !Test.TestTrue(TEXT("Sender supports control"), Sender->SupportsControl()))
+		{
+			return false;
+		}
+		const TArray<uint8> Envelope = MakeControlEnvelope(0);
+		Test.TestFalse(TEXT("SendControl before Initialize is rejected"), Sender->SendControl(Envelope.GetData(), Envelope.Num()));
+		Test.TestTrue(TEXT("Initialize"), Sender->Initialize(Fixture.MakeSenderConfig()));
+		Test.TestFalse(TEXT("SendControl before Start is rejected"), Sender->SendControl(Envelope.GetData(), Envelope.Num()));
+		Test.TestTrue(TEXT("Start"), Sender->Start());
+		Fixture.Pump();
+		Sender->Stop();
+		Test.TestFalse(TEXT("SendControl after Stop is rejected"), Sender->SendControl(Envelope.GetData(), Envelope.Num()));
+		const TArray<uint8> Frame = MakePayload();
+		Test.TestFalse(TEXT("Bytes that are not a control envelope are rejected"), Sender->SendControl(Frame.GetData(), Frame.Num()));
+		Test.TestEqual(TEXT("No frame counted as sent"), Sender->GetStats().FramesSent, static_cast<int64>(0));
+		Sender.Reset();
+		Fixture.Pump();
+		return true;
+	}
+
+	bool RunControlStopWhileSending(FAutomationTestBase& Test, const FO3DConformanceProfile& Profile, FO3DConformanceFixture& Fixture)
+	{
+		const TArray<uint8> Envelope = MakeControlEnvelope(1);
+		for (int32 Cycle = 0; Cycle < FMath::Max(1, Profile.ControlStopCycles); ++Cycle)
+		{
+			TSharedPtr<IOpen3DSender> Sender = Fixture.CreateSender();
+			if (!Test.TestTrue(TEXT("Sender created"), Sender.IsValid())
+				|| !Test.TestTrue(TEXT("Initialize"), Sender->Initialize(Fixture.MakeSenderConfig()))
+				|| !Test.TestTrue(TEXT("Start"), Sender->Start()))
+			{
+				return false;
+			}
+			Fixture.Pump();
+
+			TArray<TUniquePtr<FControlSendWorker>> Workers;
+			TArray<FRunnableThread*> Threads;
+			for (int32 Index = 0; Index < NumSendThreads; ++Index)
+			{
+				Workers.Add(MakeUnique<FControlSendWorker>(*Sender, Envelope));
+				Threads.Add(FRunnableThread::Create(Workers.Last().Get(), *FString::Printf(TEXT("O3DConformanceControl_%d"), Index)));
+			}
+
+			// Stop the transport once every thread is sending, so Stop overlaps the calls.
+			O3DTests::PollUntil(5.0,
+				[&Workers]()
+				{
+					for (const TUniquePtr<FControlSendWorker>& Worker : Workers)
+					{
+						if (Worker->Calls() < 10)
+						{
+							return false;
+						}
+					}
+					return true;
+				},
+				[&Fixture, &Sender]() { Fixture.Pump(); Sender->Tick(0.0f); });
+			const double StopStart = FPlatformTime::Seconds();
+			Sender->Stop();
+			Test.TestTrue(TEXT("Stop returns promptly while control sends are in flight"), FPlatformTime::Seconds() - StopStart < 5.0);
+
+			int32 Calls = 0;
+			int32 Blocked = 0;
+			for (int32 Index = 0; Index < Threads.Num(); ++Index)
+			{
+				Workers[Index]->bStop.store(true);
+				if (Threads[Index])
+				{
+					Threads[Index]->WaitForCompletion();
+					delete Threads[Index];
+				}
+				Calls += Workers[Index]->Accepted.load() + Workers[Index]->Rejected.load();
+				Blocked += Workers[Index]->Blocked.load();
+			}
+			Test.TestTrue(TEXT("The send threads made calls"), Calls > 0);
+			Test.TestEqual(TEXT("No SendControl call blocked"), Blocked, 0);
+			Test.TestFalse(TEXT("SendControl after Stop is rejected"), Sender->SendControl(Envelope.GetData(), Envelope.Num()));
+			Sender.Reset();
+			Fixture.Pump();
+		}
+		return true;
+	}
+
 	bool RunCase(FAutomationTestBase& Test, EO3DConformanceCase Case, const FO3DConformanceProfile& Profile, FO3DConformanceFixture& Fixture)
 	{
 		switch (Case)
@@ -512,6 +772,9 @@ namespace O3DConformanceSuite
 		case EO3DConformanceCase::StatsMonotonic: return RunConcurrentSends(Test, Fixture, /*bCheckMonotonic=*/true);
 		case EO3DConformanceCase::RoundTripByteExact: return RunRoundTrip(Test, Profile, Fixture);
 		case EO3DConformanceCase::LifetimeDestroyWithCallbacksInFlight: return Fixture.RunDestroyWithCallbacksInFlight(Test);
+		case EO3DConformanceCase::ControlRoundTrip: return RunControlRoundTrip(Test, Profile, Fixture);
+		case EO3DConformanceCase::ControlRejectedWhenNotRunning: return RunControlRejectedWhenNotRunning(Test, Profile, Fixture);
+		case EO3DConformanceCase::ControlStopWhileSending: return RunControlStopWhileSending(Test, Profile, Fixture);
 		default:
 			Test.AddError(TEXT("Unknown conformance case"));
 			return false;

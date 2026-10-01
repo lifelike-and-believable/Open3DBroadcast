@@ -23,6 +23,8 @@ public:
     virtual FO3DTransportStats GetStats() const override;
     virtual bool SupportsAudio() const override;
     virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
+    virtual bool SupportsControl() const override { return true; }
+    virtual bool SendControl(const uint8* Envelope, int32 Len) override;
 
 private:
     FString ChannelKey;

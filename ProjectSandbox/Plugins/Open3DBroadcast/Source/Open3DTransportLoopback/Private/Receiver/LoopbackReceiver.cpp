@@ -47,6 +47,7 @@ void FO3DLoopbackReceiver::Stop()
 {
     Consumer.Reset();
     AudioSink.Reset();
+    ControlSink.Reset();
 }
 
 int32 FO3DLoopbackReceiver::Poll()
@@ -59,6 +60,19 @@ int32 FO3DLoopbackReceiver::Poll()
     const int32 DebugLevel = O3DLoopback::GetAudioDebugLevel();
 
     int32 Processed = 0;
+
+    // Control (ADR 0011): delivered to the control sink; not counted as frames.
+    TArray<uint8> ControlEnvelope;
+    while (Channel->ControlQueue.Dequeue(ControlEnvelope))
+    {
+        Channel->ControlPendingCount.fetch_sub(1);
+        TConstArrayView<uint8> ControlPayload;
+        if (ControlSink.IsValid() && O3DS::TryGetControlPayload(ControlEnvelope.GetData(), ControlEnvelope.Num(), ControlPayload))
+        {
+            ControlSink->SubmitControl(ControlPayload, ChannelKey, FPlatformTime::Seconds());
+        }
+    }
+
     FO3DLoopbackPacket Packet;
 
     while (Channel->Queue.Dequeue(Packet))

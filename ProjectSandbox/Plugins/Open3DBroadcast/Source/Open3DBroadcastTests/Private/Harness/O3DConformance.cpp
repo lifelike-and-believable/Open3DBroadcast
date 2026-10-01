@@ -131,6 +131,9 @@ namespace O3DTests
 		case EO3DConformanceCase::StatsMonotonic: return TEXT("Stats.MonotonicUnderLoad");
 		case EO3DConformanceCase::RoundTripByteExact: return TEXT("RoundTrip.RecordedFramesByteExact");
 		case EO3DConformanceCase::LifetimeDestroyWithCallbacksInFlight: return TEXT("Lifetime.DestroyWithCallbacksInFlight");
+		case EO3DConformanceCase::ControlRoundTrip: return TEXT("Control.RoundTripBesideMocap");
+		case EO3DConformanceCase::ControlRejectedWhenNotRunning: return TEXT("Control.RejectedWhenNotRunning");
+		case EO3DConformanceCase::ControlStopWhileSending: return TEXT("Control.StopWhileFourThreadsSend");
 		default: return FString();
 		}
 	}
@@ -147,6 +150,9 @@ namespace O3DTests
 			EO3DConformanceCase::StatsMonotonic,
 			EO3DConformanceCase::RoundTripByteExact,
 			EO3DConformanceCase::LifetimeDestroyWithCallbacksInFlight,
+			EO3DConformanceCase::ControlRoundTrip,
+			EO3DConformanceCase::ControlRejectedWhenNotRunning,
+			EO3DConformanceCase::ControlStopWhileSending,
 		};
 	}
 }

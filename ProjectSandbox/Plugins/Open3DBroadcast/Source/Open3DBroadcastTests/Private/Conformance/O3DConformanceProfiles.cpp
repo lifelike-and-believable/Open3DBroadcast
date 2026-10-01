@@ -39,6 +39,12 @@ namespace O3DConformanceProfiles
 		| EO3DConformanceCase::SendConcurrent
 		| EO3DConformanceCase::StatsMonotonic;
 
+	/** Control channel cases (ADR 0011) for transports that carry control and deliver reliably. */
+	const EO3DConformanceCase ControlCases =
+		EO3DConformanceCase::ControlRoundTrip
+		| EO3DConformanceCase::ControlRejectedWhenNotRunning
+		| EO3DConformanceCase::ControlStopWhileSending;
+
 	// ── Fake (checks the harness and the fakes against the same contract) ──────────────────
 
 	class FFakeFixture final : public FO3DConformanceFixture
@@ -346,7 +352,7 @@ namespace O3DTests
 		{
 			FO3DConformanceProfile Profile;
 			Profile.MakeFixture = []() -> TUniquePtr<FO3DConformanceFixture> { return MakeUnique<FFakeFixture>(MakeUnique<FO3DFakeTransportScope>()); };
-			Profile.Cases = SenderAndReceiverCases | EO3DConformanceCase::SendBackpressure | EO3DConformanceCase::RoundTripByteExact;
+			Profile.Cases = SenderAndReceiverCases | EO3DConformanceCase::SendBackpressure | EO3DConformanceCase::RoundTripByteExact | ControlCases;
 			Profile.BackpressurePayloadBytes = 64;
 			Profile.BackpressureSendCount = 3;
 			Profile.bSelfRegistering = true;
@@ -356,7 +362,7 @@ namespace O3DTests
 		{
 			FO3DConformanceProfile Profile;
 			Profile.MakeFixture = []() -> TUniquePtr<FO3DConformanceFixture> { return MakeUnique<FLoopbackFixture>(); };
-			Profile.Cases = SenderAndReceiverCases | EO3DConformanceCase::SendBackpressure | EO3DConformanceCase::RoundTripByteExact;
+			Profile.Cases = SenderAndReceiverCases | EO3DConformanceCase::SendBackpressure | EO3DConformanceCase::RoundTripByteExact | ControlCases;
 			Profile.BackpressurePayloadBytes = 64;
 			Profile.BackpressureSendCount = 3;
 			RegisterConformanceProfile(LoopbackName, Profile);
@@ -366,16 +372,17 @@ namespace O3DTests
 		{
 			FO3DConformanceProfile Profile;
 			Profile.MakeFixture = []() -> TUniquePtr<FO3DConformanceFixture> { return MakeUnique<FTcpFixture>(); };
-			Profile.Cases = SenderAndReceiverCases | EO3DConformanceCase::SendBackpressure | EO3DConformanceCase::RoundTripByteExact;
+			Profile.Cases = SenderAndReceiverCases | EO3DConformanceCase::SendBackpressure | EO3DConformanceCase::RoundTripByteExact | ControlCases;
 			Profile.BackpressurePayloadBytes = 128 * 1024;
 			Profile.bBackpressureNeedsPeer = true; // without a client every send is rejected before the queue
 			RegisterConformanceProfile(TcpName, Profile);
 		}
 		{
-			// UDP: no send queue to fill and no delivery guarantee, so no backpressure or round trip.
+			// UDP: no send queue to fill and no delivery guarantee, so no backpressure or round trip
+			// (for frames or control; SocketsControlTests covers best-effort control delivery).
 			FO3DConformanceProfile Profile;
 			Profile.MakeFixture = []() -> TUniquePtr<FO3DConformanceFixture> { return MakeUnique<FUdpFixture>(); };
-			Profile.Cases = SenderAndReceiverCases;
+			Profile.Cases = SenderAndReceiverCases | EO3DConformanceCase::ControlRejectedWhenNotRunning | EO3DConformanceCase::ControlStopWhileSending;
 			RegisterConformanceProfile(UdpName, Profile);
 		}
 #endif
@@ -387,8 +394,9 @@ namespace O3DTests
 			FO3DConformanceProfile Profile;
 			Profile.MakeFixture = []() -> TUniquePtr<FO3DConformanceFixture> { return MakeUnique<FNngFixture>(); };
 			Profile.Cases = (SenderAndReceiverCases & ~EO3DConformanceCase::LifecycleRestartAfterStop)
-				| EO3DConformanceCase::SendBackpressure | EO3DConformanceCase::RoundTripByteExact;
+				| EO3DConformanceCase::SendBackpressure | EO3DConformanceCase::RoundTripByteExact | ControlCases;
 			Profile.BackpressurePayloadBytes = 128 * 1024;
+			Profile.ControlStopCycles = 1; // a closed listener can linger (see above), so one sender per test
 			RegisterConformanceProfile(NngName, Profile);
 		}
 #endif

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/PlatformTime.h"
 #include "Templates/Function.h"
 #include "Templates/SharedPointer.h"
 #include "Transport/O3DSerializedFrameConsumer.h"
@@ -45,6 +46,27 @@ public:
      */
     virtual void SubmitControl(TConstArrayView<uint8> Payload, const FString& StreamId, double ReceiveTimeSec) = 0;
 };
+
+namespace O3DTransport
+{
+	/**
+	 * For receivers that carry control in-band (TCP, UDP, NNG): called with a buffer whose envelope
+	 * kind is Control. Hands the payload to Sink when the envelope is well-formed
+	 * (O3DS::TryGetControlPayload) and drops it otherwise. Never passes the bytes to the frame
+	 * consumer. Returns true when the sink received the payload. Inline, so it adds nothing to the
+	 * exported interface.
+	 */
+	inline bool DeliverControlEnvelope(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink, const uint8* Data, int32 Size, const FString& StreamId)
+	{
+		TConstArrayView<uint8> Payload;
+		if (!Sink.IsValid() || !O3DS::TryGetControlPayload(Data, Size, Payload))
+		{
+			return false;
+		}
+		Sink->SubmitControl(Payload, StreamId, FPlatformTime::Seconds());
+		return true;
+	}
+}
 
 /** Interface implemented by all transport receiver instances. */
 class OPEN3DSHARED_API IOpen3DReceiver

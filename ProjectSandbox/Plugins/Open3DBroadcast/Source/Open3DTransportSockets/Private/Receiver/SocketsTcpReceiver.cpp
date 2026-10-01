@@ -118,6 +118,7 @@ void FO3DSocketsTcpReceiver::Stop()
 {
 	bRunning = false;
 	DisconnectSocket();
+	ControlSink.Reset();
 }
 
 int32 FO3DSocketsTcpReceiver::Poll()
@@ -444,6 +445,12 @@ bool FO3DSocketsTcpReceiver::ProcessReceivedPayload(const uint8* Data, int32 Siz
 		}
 
 		// Unified message - route by kind
+		if (Header.GetKind() == O3DS::EUnifiedKind::Control)
+		{
+			// ADR 0011: to the control sink if well-formed, otherwise dropped; never a frame.
+			O3DTransport::DeliverControlEnvelope(ControlSink, Data, Size, StreamId);
+			return false;
+		}
 		if (Header.GetKind() == O3DS::EUnifiedKind::Audio)
 		{
 			return ProcessAudioPayload(Header.GetCodec(), PayloadPtr, PayloadSize);
