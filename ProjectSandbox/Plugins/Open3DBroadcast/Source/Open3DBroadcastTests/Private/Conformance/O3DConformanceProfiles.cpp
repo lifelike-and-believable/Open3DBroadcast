@@ -406,7 +406,7 @@ namespace O3DTests
 			FO3DConformanceProfile Profile;
 			Profile.MakeFixture = []() -> TUniquePtr<FO3DConformanceFixture> { return MakeUnique<FMoQFixture>(); };
 			Profile.Cases = SenderAndReceiverCases | EO3DConformanceCase::SendBackpressure | EO3DConformanceCase::RoundTripByteExact
-				| EO3DConformanceCase::LifetimeDestroyWithCallbacksInFlight;
+				| EO3DConformanceCase::LifetimeDestroyWithCallbacksInFlight | ControlCases;
 			Profile.BackpressurePayloadBytes = 300 * 1024;
 			RegisterConformanceProfile(MoQName, Profile);
 		}

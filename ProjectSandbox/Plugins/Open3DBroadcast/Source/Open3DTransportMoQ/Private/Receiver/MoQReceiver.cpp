@@ -64,6 +64,7 @@ bool FO3DMoQReceiver::ParseOptions(const FO3DTransportConfig& Config, FString& O
 	// Build separate namespaces for mocap and audio tracks
 	Options.MocapNamespace = BuildDefaultMocapNamespace(Config);
 	Options.AudioNamespace = BuildDefaultAudioNamespace(Config);
+	Options.ControlNamespace = BuildDefaultControlNamespace(Config);
 	Options.TrackName = BuildDefaultTrackName(Config);
 	
 	if (Options.MocapNamespace.IsEmpty() || Options.TrackName.IsEmpty())
@@ -139,12 +140,14 @@ bool FO3DMoQReceiver::Initialize(const FO3DTransportConfig& Config)
 	bConnectInFlight = false;
 	bMocapSubscribed = false;
 	bAudioSubscribed = false;
+	bControlSubscribed = false;
 	ConsecutiveFailures = 0;
 	LastConnectAttemptTimeSeconds = 0.0;
 	NextConnectAttemptTimeSeconds = 0.0;
 	LastSubscribeAttemptTimeSeconds = 0.0;
 	MocapSubscribeRetry.Reset();
 	AudioSubscribeRetry.Reset();
+	ControlSubscribeRetry.Reset();
 	LastErrorLogTimeSeconds = 0.0;
 
 	bInitialized = true;
@@ -167,6 +170,19 @@ void FO3DMoQReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMo
 		{
 			AttemptAudioSubscribe();
 		}
+	}
+}
+
+void FO3DMoQReceiver::SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink)
+{
+	ControlSink = Sink;
+	if (!Sink.IsValid())
+	{
+		DestroyControlSubscriber();
+	}
+	else if (CachedState.Load() == MOQ_STATE_CONNECTED && !bControlSubscribed)
+	{
+		AttemptControlSubscribe();
 	}
 }
 
@@ -210,6 +226,8 @@ void FO3DMoQReceiver::Stop()
 
 	DestroySubscriber();
 	DestroyAudioSubscriber();
+	DestroyControlSubscriber();
+	ControlSink.Reset();
 
 	if (Session.IsValid())
 	{
@@ -225,6 +243,7 @@ void FO3DMoQReceiver::Stop()
 	TUniquePtr<FReceivedPayload> Payload;
 	while (ReceiveQueue.Dequeue(Payload))
 	{
+		if (Payload->Track != ETrack::Control) // control is never a frame (ADR 0011)
 		{
 			FScopeLock Lock(&StatsMutex);
 			Stats.DroppedFrames++;
@@ -237,6 +256,7 @@ void FO3DMoQReceiver::Stop()
 	bConnectInFlight = false;
 	bMocapSubscribed = false;
 	bAudioSubscribed = false;
+	bControlSubscribed = false;
 }
 
 bool FO3DMoQReceiver::AttemptConnect()
@@ -295,6 +315,7 @@ void FO3DMoQReceiver::HandleConnectTimeout(double Now)
 	ConsecutiveFailures++;
 	DestroySubscriber();
 	DestroyAudioSubscriber();
+	DestroyControlSubscriber();
 	ScheduleReconnect(Now);
 }
 
@@ -311,12 +332,18 @@ void FO3DMoQReceiver::HandleConnectionStateChanged(MoqConnectionState NewState)
 		// A new connection gets an immediate subscribe; retries after that back off (TRF-20).
 		MocapSubscribeRetry.Reset();
 		AudioSubscribeRetry.Reset();
+		ControlSubscribeRetry.Reset();
 		// Subscribe to mocap track
 		AttemptSubscribe();
 		// Subscribe to audio track if audio sink is configured
 		if (AudioSink.IsValid())
 		{
 			AttemptAudioSubscribe();
+		}
+		// Subscribe to the control track only while control is wanted (a sink is set)
+		if (ControlSink.IsValid())
+		{
+			AttemptControlSubscribe();
 		}
 		break;
 
@@ -333,6 +360,7 @@ void FO3DMoQReceiver::HandleConnectionStateChanged(MoqConnectionState NewState)
 		}
 		DestroySubscriber();
 		DestroyAudioSubscriber();
+		DestroyControlSubscriber();
 		bMocapSubscribed = false;
 		bAudioSubscribed = false;
 		ScheduleReconnect(NowSeconds());
@@ -392,6 +420,13 @@ bool FO3DMoQReceiver::AttemptSubscribe()
 	MocapSubscriberHandle = NewSubscriber;
 	bMocapSubscribed = true;
 	UE_LOG(LogO3DMoQReceiver, Log, TEXT("Subscribed to MoQ mocap track: %s/%s"), *Options.MocapNamespace, *Options.TrackName);
+
+	// The sender announces mocap and control together on connect, so a control subscribe that is
+	// backing off is retried now rather than leaving the first cues unheard.
+	if (ControlSink.IsValid() && !bControlSubscribed)
+	{
+		AttemptControlSubscribe();
+	}
 	return true;
 }
 
@@ -445,6 +480,75 @@ bool FO3DMoQReceiver::AttemptAudioSubscribe()
 	return true;
 }
 
+bool FO3DMoQReceiver::AttemptControlSubscribe()
+{
+	if (!Session.IsValid() || !Session->IsConnected() || !ControlSink.IsValid())
+	{
+		return false;
+	}
+
+	if (bControlSubscribed && ControlSubscriberHandle.IsValid())
+	{
+		return true;
+	}
+
+	FMoQSubscriptionConfig SubscriptionConfig;
+	SubscriptionConfig.Namespace = Options.ControlNamespace;
+	SubscriptionConfig.TrackName = Options.TrackName;
+
+	// Capture AliveFlag by value to safely handle callbacks
+	TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> AliveFlagCopy = AliveFlag;
+
+	SubscriptionConfig.OnData = [this, AliveFlagCopy](const TArray64<uint8>& Payload)
+	{
+		if (!AliveFlagCopy.IsValid() || !(*AliveFlagCopy))
+		{
+			return;
+		}
+		HandleControlDataReceived(Payload);
+	};
+
+	TSharedPtr<FMoQSubscriberHandle> NewSubscriber;
+	const FMoQResult Result = Session->Subscribe(SubscriptionConfig, NewSubscriber);
+	if (!Result.IsOk())
+	{
+		// Verbose, with no shared throttle: a sender without control (an older build) never
+		// announces the track, so this fails for as long as the stream runs.
+		const double Now = NowSeconds();
+		ScheduleSubscribeRetry(ControlSubscribeRetry, Now, /*SeedSalt=*/0x636F6E74726Full);
+		UE_LOG(LogO3DMoQReceiver, Verbose, TEXT("Failed to subscribe to control track %s/%s (retry in %.2f s): %s"),
+			*Options.ControlNamespace, *Options.TrackName, ControlSubscribeRetry.NextAttemptTimeSeconds - Now, *Result.Message);
+		return false;
+	}
+
+	ControlSubscribeRetry.Reset();
+	ControlSubscriberHandle = NewSubscriber;
+	bControlSubscribed = true;
+	UE_LOG(LogO3DMoQReceiver, Log, TEXT("Subscribed to MoQ control track: %s/%s"), *Options.ControlNamespace, *Options.TrackName);
+	return true;
+}
+
+bool FO3DMoQReceiver::EnqueueReceived(const TArray64<uint8>& Payload, ETrack Track)
+{
+	const uint64 PayloadBytes = static_cast<uint64>(Payload.Num());
+
+	FScopeLock Lock(&QueueMutex);
+	if ((PendingQueueBytes + PayloadBytes) > kMaxQueueBytes)
+	{
+		return false;
+	}
+
+	TUniquePtr<FReceivedPayload> ReceivedPayload = MakeUnique<FReceivedPayload>();
+	ReceivedPayload->Data.SetNumUninitialized(Payload.Num());
+	FMemory::Memcpy(ReceivedPayload->Data.GetData(), Payload.GetData(), Payload.Num());
+	ReceivedPayload->ReceiveTimestampSeconds = FPlatformTime::Seconds();
+	ReceivedPayload->Track = Track;
+
+	ReceiveQueue.Enqueue(MoveTemp(ReceivedPayload));
+	PendingQueueBytes += PayloadBytes;
+	return true;
+}
+
 void FO3DMoQReceiver::HandleMocapDataReceived(const TArray64<uint8>& Payload)
 {
 	if (!bRunning || Payload.IsEmpty())
@@ -452,28 +556,11 @@ void FO3DMoQReceiver::HandleMocapDataReceived(const TArray64<uint8>& Payload)
 		return;
 	}
 
-	const uint64 PayloadBytes = static_cast<uint64>(Payload.Num());
-
+	if (!EnqueueReceived(Payload, ETrack::Mocap))
 	{
-		FScopeLock Lock(&QueueMutex);
-		if ((PendingQueueBytes + PayloadBytes) > kMaxQueueBytes)
-		{
-			UE_LOG(LogO3DMoQReceiver, Verbose, TEXT("MoQ receiver queue overflow; dropping incoming mocap payload"));
-			{
-				FScopeLock StatsLock(&StatsMutex);
-				Stats.DroppedFrames++;
-			}
-			return;
-		}
-
-		TUniquePtr<FReceivedPayload> ReceivedPayload = MakeUnique<FReceivedPayload>();
-		ReceivedPayload->Data.SetNumUninitialized(Payload.Num());
-		FMemory::Memcpy(ReceivedPayload->Data.GetData(), Payload.GetData(), Payload.Num());
-		ReceivedPayload->ReceiveTimestampSeconds = FPlatformTime::Seconds();
-		ReceivedPayload->bIsAudio = false;
-
-		ReceiveQueue.Enqueue(MoveTemp(ReceivedPayload));
-		PendingQueueBytes += PayloadBytes;
+		UE_LOG(LogO3DMoQReceiver, Verbose, TEXT("MoQ receiver queue overflow; dropping incoming mocap payload"));
+		FScopeLock StatsLock(&StatsMutex);
+		Stats.DroppedFrames++;
 	}
 }
 
@@ -484,28 +571,25 @@ void FO3DMoQReceiver::HandleAudioDataReceived(const TArray64<uint8>& Payload)
 		return;
 	}
 
-	const uint64 PayloadBytes = static_cast<uint64>(Payload.Num());
-
+	if (!EnqueueReceived(Payload, ETrack::Audio))
 	{
-		FScopeLock Lock(&QueueMutex);
-		if ((PendingQueueBytes + PayloadBytes) > kMaxQueueBytes)
-		{
-			UE_LOG(LogO3DMoQReceiver, Verbose, TEXT("MoQ receiver queue overflow; dropping incoming audio payload"));
-			{
-				FScopeLock StatsLock(&StatsMutex);
-				Stats.DroppedFrames++;
-			}
-			return;
-		}
+		UE_LOG(LogO3DMoQReceiver, Verbose, TEXT("MoQ receiver queue overflow; dropping incoming audio payload"));
+		FScopeLock StatsLock(&StatsMutex);
+		Stats.DroppedFrames++;
+	}
+}
 
-		TUniquePtr<FReceivedPayload> ReceivedPayload = MakeUnique<FReceivedPayload>();
-		ReceivedPayload->Data.SetNumUninitialized(Payload.Num());
-		FMemory::Memcpy(ReceivedPayload->Data.GetData(), Payload.GetData(), Payload.Num());
-		ReceivedPayload->ReceiveTimestampSeconds = FPlatformTime::Seconds();
-		ReceivedPayload->bIsAudio = true;
+void FO3DMoQReceiver::HandleControlDataReceived(const TArray64<uint8>& Payload)
+{
+	if (!bRunning || Payload.IsEmpty())
+	{
+		return;
+	}
 
-		ReceiveQueue.Enqueue(MoveTemp(ReceivedPayload));
-		PendingQueueBytes += PayloadBytes;
+	// Never counted as a dropped frame; the control publisher's redundancy and snapshots repair it.
+	if (!EnqueueReceived(Payload, ETrack::Control))
+	{
+		UE_LOG(LogO3DMoQReceiver, Verbose, TEXT("MoQ receiver queue overflow; dropping incoming control payload"));
 	}
 }
 
@@ -525,6 +609,12 @@ void FO3DMoQReceiver::DestroyAudioSubscriber()
 		AudioSubscriberHandle.Reset();
 	}
 	bAudioSubscribed = false;
+}
+
+void FO3DMoQReceiver::DestroyControlSubscriber()
+{
+	ControlSubscriberHandle.Reset();
+	bControlSubscribed = false;
 }
 
 int32 FO3DMoQReceiver::Poll()
@@ -562,10 +652,15 @@ int32 FO3DMoQReceiver::Poll()
 	{
 		AttemptAudioSubscribe();
 	}
+	if (State == MOQ_STATE_CONNECTED && !bControlSubscribed && ControlSink.IsValid() && Now >= ControlSubscribeRetry.NextAttemptTimeSeconds)
+	{
+		AttemptControlSubscribe();
+	}
 
 	int32 FramesProcessed = 0;
+	int32 ControlProcessed = 0;
 
-	while (FramesProcessed < kMaxFramesPerPoll)
+	while (FramesProcessed < kMaxFramesPerPoll && ControlProcessed < kMaxControlPerPoll)
 	{
 		TUniquePtr<FReceivedPayload> Payload;
 		{
@@ -579,8 +674,16 @@ int32 FO3DMoQReceiver::Poll()
 				: 0;
 		}
 
+		if (Payload->Track == ETrack::Control)
+		{
+			// Not a frame: never reaches the frame consumer and moves no frame counter (ADR 0011).
+			++ControlProcessed;
+			O3DTransport::DeliverControlEnvelope(ControlSink, Payload->Data.GetData(), Payload->Data.Num(), Options.StreamId);
+			continue;
+		}
+
 		bool bProcessed = false;
-		if (Payload->bIsAudio)
+		if (Payload->Track == ETrack::Audio)
 		{
 			bProcessed = ProcessAudioPayload(*Payload);
 		}

@@ -195,7 +195,7 @@ root_type ControlMessage;
 | UDP | one datagram, never fragmented (≤ budget) | Control branch | Unreliable |
 | NNG | enveloped bytes on the same socket | Control branch | pair and push: ReliableOrdered; pub: Unreliable (ADR 0005 Q3) |
 | Loopback | new `ControlQueue` on `FO3DLoopbackChannel` beside `Queue` and `AudioQueue` | drained in `Poll` | ReliableOrdered |
-| MoQ | separate publisher on `control/<session>/<track>`, created lazily on the first `SendControl` with `moq_create_publisher_ex(..., MOQ_DELIVERY_STREAM)` (`moq_ffi.h:240-245`) | subscribe to the control track only when a control sink is set, using the audio subscribe and retry pattern (`MoQReceiver.cpp:398-411`) | Unreliable until ADR 0005 Q5 is answered |
+| MoQ | separate publisher on `control/<session>/<track>` with `MOQ_DELIVERY_STREAM` whatever `delivery_mode` says, created on every connect beside the mocap publisher (CTL-5: a receiver can subscribe only to an announced track, so a lazy publisher would lose the first cues). `SendControl` is refused until it exists, and the control publisher retries. A custom `track_namespace` without a `mocap/` or `audio/` prefix gets `control/` prepended, so control never shares the mocap track | subscribe to the control track whenever a control sink is set, using the audio subscribe and retry pattern; failures log at Verbose (an older sender never announces the track); a successful mocap subscribe retries a backing-off control subscribe at once | Unreliable and **unordered** until ADR 0005 Q5 is answered: MoQ orders nothing across tracks, so control is not ordered against mocap, and `event_id` and versions carry correctness |
 | WebRTC | `lk_send_data_ex(..., LkReliable, ordered = 1, label = "__o3d.ctl")` (`livekit_ffi.h:337-343`) | `OnDataReceivedEx` checks for the envelope magic **before** `EnqueueFrame`; enveloped bytes go to a control queue drained in `Poll`, whatever their label | ReliableOrdered pending ADR 0005 Q4 |
 
 - The WebRTC sender refuses `SendControl` while it is a subscriber-only participant.
@@ -235,7 +235,7 @@ root_type ControlMessage;
   2. **Runtime, from the client's own code.** `UO3DControlLibrary::SetControlReceiveEnabled(bool)`, `ClearControlReceiveOverride()` and `IsControlReceiveEnabled()` are `BlueprintCallable`, backed by `FO3DControlBus` in C++. They give a process-wide override of the project setting. A client can enable control from a menu, a login flow or its own config, after BeginPlay, with no restart.
   3. **Per source.** `UO3DReceiverSourceSettings::ControlAccept`, an `EO3DControlAcceptMode` of `ProjectDefault` (default), `Enabled` or `Disabled`, for projects that run several receiver sources and want control on only some of them. Whether LiveLink presets keep per-source settings in a packaged build is **needs-verification** (Q11). The project setting and the runtime call don't depend on it.
   - **Precedence:** per source (if not `ProjectDefault`), then the runtime override (if set), then the project setting.
-  - **When it applies:** the effective value is evaluated on the game thread for each message, so changes apply at once. While disabled, the sink drops messages before parsing them and counts them. Disabling also discards that source's control state silently, with no Cleared delegates. Enabling rebuilds the state from the next snapshot (≤ one interval), and the MoQ receiver subscribes to the control track only while control is enabled.
+  - **When it applies:** the effective value is evaluated on the game thread for each message, so changes apply at once. While disabled, the sink drops messages before parsing them and counts them. Disabling also discards that source's control state silently, with no Cleared delegates. Enabling rebuilds the state from the next snapshot (≤ one interval). The receiver source installs the control sink whenever the transport carries control (CTL-4), so a MoQ receiver subscribes to the control track even while control is disabled, and the sink drops what arrives; this keeps runtime enabling free of a resubscribe (CTL-5).
   - **Not provided:** no console variable or command-line switch turns control on. Enabling it is a decision the client's own code or project config makes.
 - `UO3DRemoteControlComponent` mirrors `UO3DRemoteAudioComponent`:
   - filters by `StreamId`, LiveLink subject and name prefix;
@@ -339,8 +339,8 @@ WP-CTL, P1 · L. Each PR keeps all transports working and the conformance suite 
    - `UO3DRemoteControlComponent` (`Open3DReceiver/Public` and `Private`).
    - The packaged Shipping test (Verification).
 5. **CTL-5 MoQ.**
-   - A `control/` namespace helper in `MoQHelpers.h/.cpp`, a lazy control publisher in `MoQSender`, and a control subscription in `MoQReceiver`.
-   - Tests in `Open3DBroadcastTests/Private/Transport/MoQ/` using `MoQFakeFfi.h`, and an opt-in relay case in `Network/MoQ/MoQRelayNetworkTests.cpp`.
+   - A `control/` namespace helper in `MoQHelpers.h/.cpp`, a control publisher created on connect in `MoQSender`, and a control subscription in `MoQReceiver`. Control never moves a frame, byte or drop counter on either side.
+   - Tests in `Open3DBroadcastTests/Private/Transport/MoQ/MoQControlTests.cpp` using `MoQFakeFfi.h`, and the control conformance cases on the MoQ profile. The opt-in relay case is not written yet: it needs a live relay (Verification, MoQ).
 6. **CTL-6 WebRTC add-on.**
    - Rebuild against the new API version. Add the `__o3d.ctl` send path and receive classification in `WebRTCSender.cpp` and `WebRTCReceiver.cpp`.
    - Tests in `Open3DBroadcastWebRTC/.../Private/Tests/`, and a manual step in `docs/testing/webrtc-manual-test.md`.
@@ -400,13 +400,13 @@ WP-CTL, P1 · L. Each PR keeps all transports working and the conformance suite 
   - UDP: no control datagram exceeds the budget;
   - NNG: pub, pair and push;
   - Loopback: three queues stay independent;
-  - MoQ (fake FFI): the control track is created lazily and subscribed only with a sink;
+  - MoQ (fake FFI): the control track is announced on connect with stream delivery, never shares the mocap namespace, and is subscribed only with a sink;
   - WebRTC (add-on tests): enveloped bytes on any label route to control, and raw mocap on `__o3d.ctl` still routes to mocap.
 - **Components:**
   - `UO3DSenderComponent` → Loopback → `FO3DReceiverSource` → `UO3DRemoteControlComponent`: events and values reach the Blueprint delegates on the game thread;
   - filters by stream, subject and prefix work;
   - **Enablement:**
-    - with the project default, nothing is delivered and no MoQ control track is subscribed;
+    - with the project default, nothing is delivered;
     - `SetControlReceiveEnabled(true)` at runtime delivers from the next message, and the values arrive within one snapshot interval;
     - `SetControlReceiveEnabled(false)` stops delivery at once with no Cleared delegates;
     - a per-source `Disabled` beats a runtime `true`, and a per-source `Enabled` beats a project `false`;

@@ -96,6 +96,9 @@ namespace MoQHelpers
 	
 	/** Default namespace prefix for audio tracks */
 	static constexpr TCHAR kAudioNamespacePrefix[] = TEXT("audio");
+
+	/** Default namespace prefix for control tracks (ADR 0011) */
+	static constexpr TCHAR kControlNamespacePrefix[] = TEXT("control");
 	
 	/** Default track name when none specified */
 	static constexpr TCHAR kDefaultTrackName[] = TEXT("primary");
@@ -160,6 +163,16 @@ namespace MoQHelpers
 	 * @return Namespace string (e.g., "audio/session1")
 	 */
 	FString BuildDefaultAudioNamespace(const FO3DTransportConfig& Config);
+
+	/**
+	 * Build the namespace for the control track (ADR 0011) from config.
+	 * Uses "control" prefix instead of "mocap". A custom namespace without a mocap/ or audio/
+	 * prefix gets "control/" prepended, so control never shares the mocap track.
+	 *
+	 * @param Config Transport configuration
+	 * @return Namespace string (e.g., "control/session1")
+	 */
+	FString BuildDefaultControlNamespace(const FO3DTransportConfig& Config);
 	
 	/**
 	 * Build a default track name from config.
