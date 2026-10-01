@@ -12,6 +12,7 @@
 #include "O3DSenderComponent.h"
 #include "O3DTestFakes.h"
 #include "O3DUnifiedMessage.h"
+#include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
 
 THIRD_PARTY_INCLUDES_START
