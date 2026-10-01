@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="VcsDirectoryMappings">
+    <mapping directory="" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/ProjectSandbox/External/moq-ffi" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/ProjectSandbox/External/moq-ffi/External/moq-rs" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/ProjectSandbox/External/moq-rs" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/thirdparty/cml" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/thirdparty/crccpp" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/thirdparty/flatbuffers" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/thirdparty/mbedtls" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/thirdparty/mbedtls/framework" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/thirdparty/mbedtls/tf-psa-crypto" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/thirdparty/mbedtls/tf-psa-crypto/framework" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/thirdparty/nng" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/thirdparty/nng/extern/nng-wolfssl" vcs="Git" />
+  </component>
+</project>
