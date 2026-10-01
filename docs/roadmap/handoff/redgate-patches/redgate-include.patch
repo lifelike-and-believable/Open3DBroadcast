@@ -1,0 +1,27 @@
+From 2f412cd4cfc7aac21bc61dac4901ec4ed8d8c60d Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 30 Sep 2026 11:53:04 +0000
+Subject: [PATCH] Red-gate: drop an include only the PCH provides, to prove the
+ strict build fails
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01U4132WYr464Upa8vLBAqsc
+---
+ .../Source/Open3DReceiver/Private/O3DReceiverSourceFactory.cpp   | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DReceiver/Private/O3DReceiverSourceFactory.cpp b/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DReceiver/Private/O3DReceiverSourceFactory.cpp
+index aa74303..6cdd752 100644
+--- a/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DReceiver/Private/O3DReceiverSourceFactory.cpp
++++ b/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DReceiver/Private/O3DReceiverSourceFactory.cpp
+@@ -8,7 +8,6 @@
+ #include "O3DTransportConfigPanelBase.h"
+ 
+ #include "UObject/UnrealType.h"
+-#include "UObject/Package.h"
+ #include "UObject/StrongObjectPtr.h"
+ #include "Widgets/SNullWidget.h"
+ 
+-- 
+2.43.0
+

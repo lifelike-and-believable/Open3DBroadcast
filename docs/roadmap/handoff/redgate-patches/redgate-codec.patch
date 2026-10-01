@@ -1,0 +1,27 @@
+From 31e075608a9837b879f09ce9e1cd4f8a4e00168e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 30 Sep 2026 11:53:04 +0000
+Subject: [PATCH] Red-gate: ship WebRTC in the Fab zip to prove the codec gate
+ fails
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01U4132WYr464Upa8vLBAqsc
+---
+ Build/Fab/exclude-modules.txt | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/Build/Fab/exclude-modules.txt b/Build/Fab/exclude-modules.txt
+index f5aca2a..9ef1e0e 100644
+--- a/Build/Fab/exclude-modules.txt
++++ b/Build/Fab/exclude-modules.txt
+@@ -11,7 +11,6 @@
+ 
+ # ADR 0002: WebRTC ships as a separate add-on, not in the Fab package.
+ # Remove this line only with the counsel sign-off that ADR requires.
+-Open3DTransportWebRTC
+ 
+ # ADR 0006: developer tests never ship to Fab users.
+ Open3DBroadcastTests
+-- 
+2.43.0
+

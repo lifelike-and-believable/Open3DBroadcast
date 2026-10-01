@@ -1,0 +1,23 @@
+From 43493d0f34b983425e3c68d4d952bf29bb26d3d2 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 30 Sep 2026 11:53:04 +0000
+Subject: [PATCH] Red-gate: dev notes inside a module's Private/ to prove the
+ Fab zip check fails
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01U4132WYr464Upa8vLBAqsc
+---
+ .../Open3DBroadcast/Source/Open3DShared/Private/DESIGN_NOTES.md  | 1 +
+ 1 file changed, 1 insertion(+)
+ create mode 100644 ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DShared/Private/DESIGN_NOTES.md
+
+diff --git a/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DShared/Private/DESIGN_NOTES.md b/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DShared/Private/DESIGN_NOTES.md
+new file mode 100644
+index 0000000..3e1eebc
+--- /dev/null
++++ b/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DShared/Private/DESIGN_NOTES.md
+@@ -0,0 +1 @@
++Red-gate: a developer note under Source/ must fail the Fab zip job.
+-- 
+2.43.0
+

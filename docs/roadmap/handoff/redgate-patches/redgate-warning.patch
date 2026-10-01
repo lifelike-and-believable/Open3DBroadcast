@@ -1,0 +1,29 @@
+From 46b87475a1f6e4e6c79386f7b9fd85a9e1294fd3 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 30 Sep 2026 11:53:04 +0000
+Subject: [PATCH] Red-gate: unused local to prove -FailOnWarnings fails the
+ build
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01U4132WYr464Upa8vLBAqsc
+---
+ .../Source/Open3DShared/Private/O3DAudioBus.cpp             | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DShared/Private/O3DAudioBus.cpp b/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DShared/Private/O3DAudioBus.cpp
+index 3699e69..b396775 100644
+--- a/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DShared/Private/O3DAudioBus.cpp
++++ b/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DShared/Private/O3DAudioBus.cpp
+@@ -29,3 +29,9 @@ void FO3DAudioBus::PublishPcm16(const O3DS::FAudioFrameMeta& Meta, const uint8*
+ 
+     OnPcm16().Broadcast(Meta, Copy);
+ }
++
++// Red-gate check (throwaway branch): an unused local must fail the build.
++void O3DRedGateWarning()
++{
++	int32 RedGateUnused = 42;
++}
+-- 
+2.43.0
+
