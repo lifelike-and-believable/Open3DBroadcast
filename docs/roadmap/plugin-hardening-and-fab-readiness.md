@@ -190,12 +190,16 @@ Several WPs depend on these decisions. Each gets an ADR. The design agent should
 - **ADR:** [docs/adr/0006-test-module-layout-and-fakes.md](../adr/0006-test-module-layout-and-fakes.md) (Accepted)
 - **Decision:** an `Editor`-type `Open3DBroadcastTests` module (plus one for the WebRTC add-on), excluded from the Fab package; a transport conformance suite; fake transports, per-instance FFI function tables and socket-free parsers; `Open3DBroadcast.*` naming; network tests opt-in via `O3DB_NETWORK_TESTS=1`; Gauntlet retired; RCV-2 uses the stream-label fallback; PR CI runs the suite within 15 minutes.
 
+**D11: Control channel for events and values** (feeds WP-CTL; added 2026-09-30, after the original plan). Let the sender trigger VFX, lighting and audio cues on remote clients and change environment and character parameters there. **Findings:** none (new feature).
+- **ADR:** [docs/adr/0011-control-channel.md](../adr/0011-control-channel.md) (Accepted)
+- **Decision:** a one-way sender-to-receivers control stream beside mocap and audio, as envelope kind `Control = 2` with its own FlatBuffers root (`src/o3ds_control.fbs`, `file_identifier "O3DC"`); keyed last-writer-wins **values** re-sent as periodic snapshots, and fire-once **events** with de-duplication, a TTL and redundant copies on unreliable transports; state machines in core with CTest and fuzzing; `FireControlEvent`/`SetControlValue` on the sender component, `FO3DControlBus` and `UO3DRemoteControlComponent` on receivers; cues held to align with mocap by default; receiving off by default, enabled by a project setting or a runtime call, allowlisted and rate-limited, never reflection or console commands; 1,100-byte envelope budget; `O3D_TRANSPORT_API_VERSION` 2.
+
 ---
 
 ## 4. Milestones and dependency graph
 
 ```
-M0  Decisions D1–D10 (ADRs) ──┬──────────────────────────────────────────────┐
+M0  Decisions D1–D11 (ADRs) ──┬──────────────────────────────────────────────┐
                               │                                              │
 M1  Safety & correctness      │   M2  Fab-buildable package                  │
     WP-S1..S10  (P0/P1)       │       WP-F0..F9  (P0/P1)                      │
@@ -205,6 +209,8 @@ M1  Safety & correctness      │   M2  Fab-buildable package                  �
                           ▼                   ▼
 M3  Architecture: WP-A1 (transport core) → WP-A2 (async sender) → WP-A3 (god classes)
                   WP-A4 (protocol), WP-A5 (connection lifecycle), WP-A6 (globals), WP-A7 (core API/legacy)
+                          ▼
+    WP-CTL (control channel, D11): CTL-1..5 landed beside M3; CTL-6 follows WP-F11, CTL-7 with WP-D2
                           ▼
 M4  Usability & docs: WP-U1..U6, WP-D1..D4, WP-Q1 (cleanup batch)
                           ▼
@@ -686,6 +692,21 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
   - Fix the `Context` copy constructor (CORE-24).
   - Remove dead code (CORE-25).
 
+#### WP-CTL: Control channel for events and values  ·  P1 · L · design (D11) then coding (7 PRs)
+- **Decision:** [ADR 0011](../adr/0011-control-channel.md), Implementation outline and Verification / acceptance. No owned findings (new feature).
+- **Goal:** from the sender, fire cues (events) and set parameters (values) on every receiver of a stream, on every transport, with loss recovery, late-joiner convergence and cue timing aligned to the mocap they were fired against.
+- **PR sequence and status:**
+  1. **CTL-1 Core:** `src/o3ds_control.fbs`, `src/o3ds/control.{h,cpp}` (codec, `ControlPublisher`, `ControlReceiver`), core mirror, CTest and `fuzz_control`. **Done (#291).**
+  2. **CTL-2 Shared and interfaces:** `EUnifiedKind::Control`, `WriteControlEnvelope`/`TryGetControlPayload`, `SupportsControl`/`SendControl`/`SetControlSink`, `FO3DControlBus`, fake-transport support; `O3D_TRANSPORT_API_VERSION` 1 → 2. **Done (#292).**
+  3. **CTL-3 In-band transports:** TCP, UDP, NNG, Loopback, with conformance cases. **Done (#293).**
+  4. **CTL-4 Gameplay surface:** sender component API, receiver `FControlSink` with the alignment hold queue, `UO3DControlSettings`, `UO3DRemoteControlComponent`. **Done (#294).** The packaged Shipping test that confirms control can be enabled in Shipping (ADR 0011 open question 11) is not in CI yet; add it to the nightly Shipping build.
+  5. **CTL-5 MoQ:** `control/<session>` track. **Done (#295).** The live-relay test case is still to write (needs a relay).
+  6. **CTL-6 WebRTC add-on:** `__o3d.ctl` send path and receive classification in `WebRTCSender.cpp`/`WebRTCReceiver.cpp`, tests, a manual test step. Open.
+  7. **CTL-7 Docs:** USER_GUIDE Control section, `Transport_Module_Comparison.md` row, CHANGELOG Schema/Protocol entry, wire layout in `docs/wire-format.md` once WP-D3 creates it. Open.
+- **Acceptance:** ADR 0011 "Verification / acceptance": the core state, timing, load and fuzz cases in `core-tests.yml`; the control conformance cases pass for every transport whose `SupportsControl()` is true; control never changes mocap frame counts or content.
+- **Interaction with WP-A1:** control landed before WP-A1 steps 3–4. The shared send queue (ADR 0007 item 7, "control" items never dropped for mocap), the shared receive demux and the result type in WP-A1 must absorb each transport's control path as that transport migrates.
+- **Depends on:** nothing unlanded for CTL-1..5. New-peer snapshots wait for ADR 0005 (vi); until then recovery is bounded by the snapshot interval. CTL-6 needs the add-on (WP-F11, done).
+
 ### M4: Usability and documentation
 
 #### WP-U1: Project settings  ·  P1 · M · coding
@@ -850,6 +871,7 @@ Every finding ID in `docs/review/2026-09-plugin-review/` is assigned to exactly 
 | WP-A5 | TRF-6, TRF-7, TRF-17, TRF-18, TRF-26, TRB-7, RCV-19 |
 | WP-A6 | SHR-19, SHR-25, SHR-34, SND-32, RCV-25, RCV-26, RCV-33 |
 | WP-A7 | CORE-17, CORE-24, CORE-25, CORE-27, CORE-28, CORE-30 |
+| WP-CTL | (no owned findings; implements ADR 0011) |
 | WP-U1 | UX-2, RCV-18 |
 | WP-U2 | SND-26, UX-3 |
 | WP-U3 | SND-24, SND-25, SND-27, SND-30, RCV-15, RCV-16, RCV-17, TRF-30 |
