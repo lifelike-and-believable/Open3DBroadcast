@@ -1,4 +1,5 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
+
 //
 // ADR 0011 (CTL-2): FO3DControlBus. Changes reach listeners and the value cache; a change heard
 // twice (two receiver sources on one sender) is published once; stale values never overwrite

@@ -1,4 +1,5 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
+
 //
 // ADR 0011 (CTL-2): the control path end to end through the fake transports, with the real core
 // on both ends: ControlPublisher -> WriteControlEnvelope -> IOpen3DSender::SendControl -> link ->
