@@ -55,6 +55,17 @@ struct FWebRTCReceiverLink
     TAtomic<int64> FramesReceived{ 0 };
     TAtomic<int64> BytesReceived{ 0 };
 
+    /**
+     * Control envelopes (ADR 0011) waiting for Poll(), in arrival order. Separate from the frame
+     * queues, so control never reaches the frame consumer or moves a frame counter.
+     */
+    FCriticalSection PendingControlMutex;
+    TArray<TArray<uint8>> PendingControl;
+    /** True while the receiver has a control sink; the data callback drops control otherwise. */
+    TAtomic<bool> bControlWanted{ false };
+    /** Rate limit for control drop logs, separate from every frame log; written from FFI threads. */
+    std::atomic<double> LastControlDropLogTime{ 0.0 };
+
     /** Per-subject frame queues, keyed by the decoded data channel label. */
     FCriticalSection PendingFramesMutex;
     TMap<FString, TArray<FWebRTCReceiverPendingFrame>> PendingFramesBySubject;
@@ -70,6 +81,14 @@ struct FWebRTCReceiverLink
     }
 
     void EnqueueFrame(const FString& SubjectLabel, const uint8* Bytes, int32 Len);
+    /**
+     * Data callback classification (ADR 0011 item 7), run before EnqueueFrame whatever the label.
+     * Returns false when the bytes are not a control-kind envelope (they are mocap). Returns true
+     * when they are, after queueing a well-formed envelope for Poll() or dropping it (no sink,
+     * malformed, queue full); either way the bytes must not be treated as mocap.
+     */
+    bool ConsumeControl(const uint8* Bytes, size_t Len);
+    void LogControlDrop(const TCHAR* Reason);
     void RequestReconnect();
 };
 
@@ -83,8 +102,12 @@ struct FWebRTCReceiverLink
  *   (ClientHandle, bConnectRequested, bConnectIssued, token generations, Consumer) is touched
  *   only there, under StateMutex.
  * - LiveKit callbacks run on FFI threads and touch only the shared Link: atomics, the pending
- *   frame queue (PendingFramesMutex) and the audio sink (AudioSinkMutex). They never take
- *   StateMutex, so Stop() may hold it while lk_disconnect waits for callbacks to finish.
+ *   frame queue (PendingFramesMutex), the pending control queue (PendingControlMutex) and the
+ *   audio sink (AudioSinkMutex). They never take StateMutex, so Stop() may hold it while
+ *   lk_disconnect waits for callbacks to finish.
+ * - Control (ADR 0011): the data callback classifies enveloped control bytes before the
+ *   "label = subject" mocap path and queues them; Poll() hands them to the control sink on the
+ *   game thread. The sink is set and released (in Stop) under StateMutex.
  * - Token fetch results never write receiver members: FO3DTokenManager stores them under its
  *   own lock and Poll() reads them (TRF-3).
  * - GetStats may be called from any thread.
@@ -118,6 +141,10 @@ public:
     virtual FO3DTransportStats GetStats() const override;
     virtual bool SupportsAudio() const override { return true; }
     virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
+    /** Control channel (docs/adr/0011-control-channel.md, CTL-6). */
+    virtual bool SupportsControl() const override { return true; }
+    /** Game thread, before Start. Held strongly until Stop (or a later call) releases it. */
+    virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink) override;
 
 private:
     /** Immutable after construction. */
@@ -143,6 +170,9 @@ private:
 
     // Consumer (game thread, under StateMutex)
     TSharedPtr<ISerializedFrameConsumer> Consumer;
+
+    /** Control sink (ADR 0011); game thread, under StateMutex; released in Stop. */
+    TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe> ControlSink;
 
     // Stats / diagnostics
     mutable FCriticalSection StatsMutex;

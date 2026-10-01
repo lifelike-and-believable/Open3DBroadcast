@@ -670,6 +670,12 @@ namespace O3DConformanceSuite
 			bControlExact = Control[Index] == SentControl[Index];
 		}
 		Test.TestTrue(TEXT("Control payloads byte-exact and in order"), bControlExact);
+		// A sender may count a frame on its worker thread after the bytes have already reached
+		// the receiver (NNG increments FramesSent once nng_send returns), so wait for the count
+		// to settle before checking that control was not counted.
+		O3DTests::PollUntil(Profile.ConnectTimeoutSeconds,
+			[&Pair, FramesSentBefore]() { return Pair.Sender->GetStats().FramesSent - FramesSentBefore >= static_cast<int64>(RoundTripFrames); },
+			[&Pair]() { Pair.Pump(); });
 		Test.TestEqual(TEXT("Control is not counted as a sent frame"), Pair.Sender->GetStats().FramesSent - FramesSentBefore, static_cast<int64>(RoundTripFrames));
 		return true;
 	}

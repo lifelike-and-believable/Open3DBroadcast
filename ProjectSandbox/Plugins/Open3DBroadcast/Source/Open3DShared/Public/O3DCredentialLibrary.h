@@ -28,10 +28,10 @@ public:
 	 * @param Key Secret option key declared by the transport.
 	 * @param Value The secret. Not stored on disk and not readable back.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Open3DStream|Credentials")
+	UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Credentials")
 	static void SetTransportSecret(FName TransportName, const FString& Profile, const FString& Key, const FString& Value);
 
 	/** Clears a transport secret (session value and any copy remembered on this machine). An environment variable still applies. */
-	UFUNCTION(BlueprintCallable, Category = "Open3DStream|Credentials")
+	UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Credentials")
 	static void ClearTransportSecret(FName TransportName, const FString& Profile, const FString& Key);
 };

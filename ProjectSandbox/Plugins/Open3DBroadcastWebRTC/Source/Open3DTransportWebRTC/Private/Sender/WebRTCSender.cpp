@@ -15,6 +15,8 @@ THIRD_PARTY_INCLUDES_END
 #include "O3DPerformanceMetrics.h"
 #include "O3DAudioFrameCodec.h"
 #include "O3DFfiContextRegistry.h"
+#include "O3DLifetimeGate.h"
+#include "O3DUnifiedMessage.h"
 #include <vector>
 
 namespace WebRTCOptions
@@ -54,6 +56,12 @@ namespace
     // LiveKit data channel size guidance (livekit_ffi.h, lk_send_data_ex).
     constexpr int32 LossyMaxBytes = 1300;
     constexpr int32 ReliableMaxBytes = 15000;
+
+    // ADR 0011 item 4: a control envelope fits the lossy limit too, so it never needs splitting.
+    static_assert(WebRTCUtils::MaxControlEnvelopeBytes <= LossyMaxBytes, "Control envelopes must fit one LiveKit data message");
+
+    /** Seconds between control send-failure warnings (per sender). */
+    constexpr double ControlErrorLogIntervalSec = 2.0;
 
     TO3DFfiContextRegistry<FWebRTCSenderLink>& GetSenderLinkRegistry()
     {
@@ -559,6 +567,53 @@ bool FO3DWebRTCSender::SendBytes(const uint8* Data, int32 Len, const FString& Su
         Stats.BytesSent += Len;
     }
 
+    return true;
+}
+
+/**
+ * Control (ADR 0011 item 7): reliable and ordered on the `__o3d.ctl` data channel, never through
+ * SendSerialized, so control is not a frame and moves no frame, byte or drop counter. The sender
+ * always joins as a publisher (LkRolePublisher), so the "refuse while subscriber-only" rule has
+ * no case to handle here.
+ */
+bool FO3DWebRTCSender::SendControl(const uint8* Envelope, int32 Len)
+{
+    // Exactly one well-formed control envelope within the budget; nothing trailing.
+    TConstArrayView<uint8> Payload;
+    if (!Envelope || Len <= 0 || Len > WebRTCUtils::MaxControlEnvelopeBytes
+        || !O3DS::TryGetControlPayload(Envelope, Len, Payload)
+        || Len != O3DS::UnifiedWireHeaderSize + Payload.Num())
+    {
+        return false;
+    }
+
+    // The gate keeps ClientHandle alive for the call: Stop() closes it before destroying the
+    // client, and a closed gate (before Initialize, after Stop) refuses at once without blocking.
+    FO3DLifetimeGate::FReadScope Scope(*Link->Gate, Link->Gate->GetEpoch());
+    if (!Scope || !Link->ClientHandle || !Link->bConnected.Load())
+    {
+        return false;
+    }
+
+    const LkResult Result = Ffi.lk_send_data_ex(
+        Link->ClientHandle,
+        Envelope,
+        static_cast<size_t>(Len),
+        LkReliable,
+        1, // ordered
+        WebRTCUtils::ControlDataLabelUtf8);
+
+    if (Result.code != 0)
+    {
+        const FString Message = Ffi.TakeMessage(Result);
+        const double Now = FPlatformTime::Seconds();
+        double Last = LastControlErrorLogTime.load();
+        if (Now - Last >= ControlErrorLogIntervalSec && LastControlErrorLogTime.compare_exchange_strong(Last, Now))
+        {
+            UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Failed to send a control envelope (code=%d): %s"), Result.code, *Message);
+        }
+        return false;
+    }
     return true;
 }
 
