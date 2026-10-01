@@ -1,10 +1,10 @@
 # Open3DBroadcast: handoff to the next session
 
-Written 2026-09-30 by the cloud session that drove M1, M2 and the start of M3 of the plugin hardening roadmap. Read this first, then the files it points to.
+Written 2026-09-30 by the cloud session that drove M1, M2 and the start of M3 of the plugin hardening roadmap. Updated 2026-10-01 with the control-channel work (ADR 0011, CTL-1..5) that landed afterwards. Read this first, then the files it points to.
 
 ## 1. Where things stand
 
-The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisions are in `docs/adr/0001`–`0010`, all **Accepted**; their open questions were accepted with the recommended defaults. Work is organised as work packages (WPs), one PR each (or a PR series for large ones), squash-merged into `develop`.
+The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisions are in `docs/adr/0001`–`0010`, all **Accepted**, plus `0011` (control channel), still **Proposed**; their open questions were accepted with the recommended defaults. Work is organised as work packages (WPs), one PR each (or a PR series for large ones), squash-merged into `develop`.
 
 | Milestone | Status |
 |---|---|
@@ -14,8 +14,9 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 merged (#289); PR 2 is next** (see §2) |
 | M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | Not started |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
+| WP-CTL control channel (ADR 0011; not yet in the roadmap) | CTL-1..5 done (#290–#295); **CTL-6 (WebRTC add-on) and CTL-7 (docs) remain** (see §2b) |
 
-Recent merges on `develop`: F7 editor split (#285, dc686e0), F11 WebRTC add-on (#286, 5c9af51), WP-A1 PR 1 transport registry (#289, d365c34).
+Recent merges on `develop`: F7 editor split (#285, dc686e0), F11 WebRTC add-on (#286, 5c9af51), WP-A1 PR 1 transport registry (#289, d365c34), NNG unity-build fix and README rewrite (#287), ADR 0011 (#290), CTL-1..5 (#291–#295, last de02b8d).
 
 ## 2. The work in flight: WP-A1 (transport core consolidation)
 
@@ -28,20 +29,42 @@ Design: `docs/adr/0007-transport-abstraction-and-registry.md`, section "Implemen
    - Tests: `Open3DBroadcast.Shared.TransportRegistry.*` (7 cases).
    - **Start here next: step 2.**
 2. **Lifetime** (SHR-13, TRF-14): live-instance lists, `OnTransportUnregistering`, drain before unload, `FO3DFfiLibrary`; WebRTC and MoQ modules adopt it.
-3. **Results, state, capabilities** (SHR-14): `FO3DTransportResult`, `EO3DSendResult`, `FO3DSendPayload`, connection state, `FO3DTransportCapabilities`, `SendSerialized` pure virtual. The interface version (`O3D_TRANSPORT_API_VERSION` = 1, `Open3DShared/Public/Transport/O3DTransportApiVersion.h`) already exists from WP-F11.
-4. **Shared building blocks, one transport per PR**, in order Loopback, TCP, UDP, NNG, MoQ, then WebRTC (in the add-on). Each PR deletes that transport's own queue, demux, sink and option-parsing copies and drops its Build.cs dependency on Open3DSender/Open3DReceiver.
+3. **Results, state, capabilities** (SHR-14): `FO3DTransportResult`, `EO3DSendResult`, `FO3DSendPayload`, connection state, `FO3DTransportCapabilities`, `SendSerialized` pure virtual. The interface version already exists (`Open3DShared/Public/Transport/O3DTransportApiVersion.h`); CTL-2 raised it from 1 to **2**. The result type should cover `SendControl` too, and `SupportsControl()` belongs in the capability query.
+4. **Shared building blocks, one transport per PR**, in order Loopback, TCP, UDP, NNG, MoQ, then WebRTC (in the add-on). Each PR deletes that transport's own queue, demux, sink and option-parsing copies and drops its Build.cs dependency on Open3DSender/Open3DReceiver. Control landed before this step, so each migration must also carry that transport's control path: the shared send queue needs the "control" item type that is never dropped for mocap (ADR 0007 item 7), and the shared demux should absorb `TryGetControlPayload` / `O3DTransport::DeliverControlEnvelope` (CTL-2/3).
 5. **Typed config and consumer API** (SHR-36, TRB-27, SHR-16, TRF-38): removes the LiveKit string fields from `FO3DTransportConfig`, deletes `Send(SubjectList)`.
-6. Next minor release: delete the shims and bump `O3D_TRANSPORT_API_VERSION`.
+6. Next minor release: delete the shims and bump `O3D_TRANSPORT_API_VERSION` (to 3, or later if other steps bump it first).
 
 WP-A1 acceptance (roadmap): conformance suite green after each migration, net transport LOC goes down, no transport keeps its own queue/demux/sink. ADR 0007 "Verification / acceptance" lists the extra test cases.
 
 After WP-A1, the M3 order in the roadmap is WP-A2 (async sender, ADR 0008) → WP-A3 (god classes); WP-A4 (protocol, ADR 0009), WP-A5, WP-A6, WP-A7 can go in parallel where files don't overlap.
+
+## 2b. Control channel (WP-CTL, ADR 0011)
+
+Done outside the cloud session, after the first version of this doc. Design: `docs/adr/0011-control-channel.md` ("Implementation outline" and "Verification / acceptance"). A one-way sender-to-receivers stream of **values** (keyed, last-writer-wins, periodic snapshots) and **events** (fire-once, de-duplicated, TTL, redundant copies), as envelope kind `Control = 2` with its own FlatBuffers root (`src/o3ds_control.fbs`, `"O3DC"`).
+
+| Step | Status |
+|---|---|
+| CTL-1 core: schema, codec, publisher/receiver state machines, CTest + fuzz | Done (#291) |
+| CTL-2 envelope kind, `SendControl`/`SetControlSink` on the interfaces, `FO3DControlBus`; API version 1 → 2 | Done (#292) |
+| CTL-3 TCP, UDP, NNG, Loopback | Done (#293) |
+| CTL-4 sender component API, receiver `FControlSink` with mocap alignment, `UO3DControlSettings`, `UO3DRemoteControlComponent` | Done (#294) |
+| CTL-5 MoQ (`control/<session>` track) | Done (#295). The live-relay test case is not written (needs a relay) |
+| **CTL-6 WebRTC add-on**: `__o3d.ctl` send path and receive classification, tests, manual test step | **Not started** |
+| **CTL-7 docs**: USER_GUIDE Control section, transport comparison row, CHANGELOG protocol entry | **Not started** |
+
+Open items:
+- ADR 0011 is still **Proposed**. If the implemented design is final, change its status to Accepted (and add WP-CTL to the roadmap, which doesn't list it yet).
+- Until CTL-6 lands, the WebRTC transport reports no control support; `SupportsControl()` gates the conformance cases, so CI stays green.
+- New-peer snapshots wait for ADR 0005 (vi); until then recovery is bounded by the snapshot interval.
+- CTL and WP-A1 overlap: see the notes on steps 3 and 4 in §2.
 
 ## 3. Repository map (what changed during M1/M2)
 
 - Main plugin: `ProjectSandbox/Plugins/Open3DBroadcast`. Modules: `Open3DShared`, `Open3DSender`, `Open3DReceiver`, the transports (`Open3DTransportSockets`, NNG, MoQ, Loopback), `Open3DStreamCore`, `Open3DBroadcastEditor` (editor-only UI, ADR 0010), `Open3DBroadcastTests` (editor-only, ADR 0006).
 - WebRTC add-on: `ProjectSandbox/Plugins/Open3DBroadcastWebRTC` (WP-F11, ADR 0002). Depends on Open3DBroadcast; checks the transport API version at startup. Publishing it waits on counsel question L1; the release workflow attaches it only when the repo variable `O3D_PUBLISH_WEBRTC_ADDON` is `true`.
 - The o3ds core (`src/o3ds`) is compiled inside the plugin from a generated copy in `Source/ThirdParty/Open3DStreamCore` (ADR 0003). After touching `src/o3ds`, `src/o3ds_generated.h` or the flatbuffers/crccpp pins: run `python3 Build/Scripts/sync_o3ds_core.py` and commit the result. Never edit the copy by hand.
+- Control channel: core in `src/o3ds/control.{h,cpp}` and `src/o3ds_control.fbs` (the second generated header is in the core manifest, so `sync_o3ds_core.py` mirrors it); UE types in `Open3DShared/Public/O3DControl*.h`; receiver-side `O3DControlSettings.h` and `O3DRemoteControlComponent.h` in `Open3DReceiver/Public`.
+- Rider IDE settings are committed under `.idea/`.
 - Rules for agents: `AGENTS.md` → `.github/copilot-instructions.md` (authoritative). `Build/README.md` documents every build script.
 
 ## 4. How to work in this repo
@@ -104,4 +127,4 @@ With UE 5.7 installed locally you can also run the real build and tests: `Build/
 - Rights holder: Lifelike & Believable. Open3DStream Contributors notices stay on files that had them.
 - FriendlyName "Open3DBroadcast"; the add-on is "Open3DBroadcast WebRTC". Whole plugin is Beta for v1; MoQ ships as Experimental.
 - WebRTC ships only as the separate free add-on, not in the Fab package.
-- v1 platform scope and the rest: see ADRs 0001–0010.
+- v1 platform scope and the rest: see ADRs 0001–0010. ADR 0011 is the exception: still Proposed (§2b).
