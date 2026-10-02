@@ -3,98 +3,44 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Transport/O3DTransportTypes.h"
-#include "O3DUnifiedMessage.h"
-
-#include "Containers/Queue.h"
-#include "HAL/CriticalSection.h"
-#include "Misc/ScopeLock.h"
 #include "Templates/SharedPointer.h"
-
-#include <atomic>
+#include "Transport/O3DSendQueue.h"
+#include "Transport/O3DTransportTypes.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogO3DLoopbackTransport, Log, All);
 
 /**
- * Internal data packet stored within the loopback channel queue.
+ * The loopback transport's in-process channel is one shared FO3DSendQueue per channel name
+ * (ADR 0007 item 7, WP-A1 step 4). Senders enqueue mocap, audio and control items; the receiver's
+ * Poll is the queue's single consumer and hands each item to its FO3DUnifiedReceiveDemux. Each
+ * kind has its own limit (ADR 0011: the three kinds stay independent), mocap refuses the newest
+ * frame when full (Loopback is ReliableOrdered), and nothing queued is ever discarded.
  */
-struct FO3DLoopbackPacket
-{
-    FString Subject;
-    TArray<uint8> Payload;
-    double TimestampSeconds = 0.0;
-};
-
-struct FO3DLoopbackAudioPacket
-{
-    O3DS::EUnifiedCodec Codec = O3DS::EUnifiedCodec::PCM16;
-    O3DS::FAudioFrameMeta Meta;
-    TArray<uint8> Payload;
-    double TimestampSeconds = 0.0;
-};
-
-/**
- * Shared channel state storing buffered packets between loopback senders and receivers.
- */
-struct FO3DLoopbackChannel
-{
-    FO3DLoopbackChannel(const FString& InName, int32 InCapacity, int32 InAudioCapacity)
-        : Name(InName)
-        , Capacity(FMath::Max(1, InCapacity))
-        , AudioCapacity(FMath::Max(1, InAudioCapacity))
-        , PendingCount(0)
-        , AudioPendingCount(0)
-    {
-    }
-
-    FString Name;
-    int32 Capacity;
-    int32 AudioCapacity;
-    TQueue<FO3DLoopbackPacket, EQueueMode::Mpsc> Queue;
-    TQueue<FO3DLoopbackAudioPacket, EQueueMode::Mpsc> AudioQueue;
-    /** Control envelopes (ADR 0011), independent of the frame and audio queues. */
-    TQueue<TArray<uint8>, EQueueMode::Mpsc> ControlQueue;
-    std::atomic<int32> PendingCount;
-    std::atomic<int32> AudioPendingCount;
-    std::atomic<int32> ControlPendingCount{0};
-
-    /** Control envelopes that may wait in ControlQueue; further sends are refused (the publisher retries). */
-    static constexpr int32 ControlCapacity = 1024;
-
-    void SetLastSubjectName(const FString& InSubject)
-    {
-        FScopeLock Lock(&MetadataMutex);
-        LastSubjectName = InSubject;
-    }
-
-    FString GetLastSubjectName() const
-    {
-        FScopeLock Lock(&MetadataMutex);
-        return LastSubjectName;
-    }
-
-private:
-    mutable FCriticalSection MetadataMutex;
-    FString LastSubjectName;
-};
-
 namespace O3DLoopback
 {
-    /** Determine the canonical channel key based on the supplied transport configuration. */
-    FString ResolveChannelKey(const FO3DTransportConfig& Config);
+	/** Option keys, as persisted in component and source settings. */
+	inline constexpr TCHAR ChannelOptionKey[] = TEXT("channel");
+	inline constexpr TCHAR QueueOptionKey[] = TEXT("loopback.maxqueue");
+	inline constexpr TCHAR AudioQueueOptionKey[] = TEXT("loopback.maxaudioqueue");
+	inline constexpr TCHAR DefaultChannel[] = TEXT("default");
+	inline constexpr int32 DefaultQueueCapacity = 64;
+	inline constexpr int32 DefaultAudioQueueCapacity = 32;
 
-    /** Determine the queue capacity using optional advanced parameters. */
-    int32 ResolveQueueCapacity(const FO3DTransportConfig& Config);
+	/** The canonical channel key of a config: StreamId, else Uri, else "loopback"; trimmed and lowercased. */
+	FString ResolveChannelKey(const FO3DTransportConfig& Config);
 
-    /** Determine the audio queue capacity using optional advanced parameters. */
-    int32 ResolveAudioQueueCapacity(const FO3DTransportConfig& Config);
+	/** Queue limits from the config's options (loopback.maxqueue, loopback.maxaudioqueue; legacy maxqueue, maxaudioqueue). */
+	FO3DSendQueueLimits ResolveQueueLimits(const FO3DTransportConfig& Config);
 
-    /** Retrieve or create the shared loopback channel for the supplied key. */
-    TSharedPtr<FO3DLoopbackChannel, ESPMode::ThreadSafe> AcquireChannel(const FString& ChannelKey, int32 Capacity, int32 AudioCapacity);
+	/**
+	 * The queue of ChannelKey, created on first use. The latest caller's limits apply to an
+	 * existing channel. A channel lives as long as a sender or receiver holds it.
+	 */
+	TSharedRef<FO3DSendQueue, ESPMode::ThreadSafe> AcquireChannel(const FString& ChannelKey, const FO3DSendQueueLimits& Limits);
 
-    /** Returns the current debug level for loopback transport instrumentation. */
-    int32 GetAudioDebugLevel();
+	/** The o3ds.Loopback.Audio.Debug console variable (0 off, 1 basic, 2 verbose). */
+	int32 GetAudioDebugLevel();
 
-    /** Capabilities of the loopback transport (ADR 0007 item 4); the same for every config. Any thread. */
-    FO3DTransportCapabilities GetCapabilities(const FO3DTransportConfig& Config);
+	/** Capabilities of the loopback transport (ADR 0007 item 4); the same for every config. Any thread. */
+	FO3DTransportCapabilities GetCapabilities(const FO3DTransportConfig& Config);
 }

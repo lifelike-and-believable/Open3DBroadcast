@@ -563,6 +563,77 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   its send results, state transitions and `prefer_lossy` delivery. Tests
   that asserted bools now assert the exact result.
 
+### Shared transport building blocks; Loopback migrated (WP-A1 PR 4a, ADR 0007 step 4)
+
+- **New in Open3DShared (`Public/Transport/`, exported):**
+  - `FO3DSendQueue` (`O3DSendQueue.h`): one bounded MPSC queue of typed items
+    (mocap, audio, control) with lock-free `fetch_add`/`fetch_sub` item and
+    byte accounting (TRB-3) and limits per kind, so no kind takes another's
+    room. Mocap either drops the oldest frames above a soft cap, with
+    producers refused at twice the cap (the ADR 0007 default), or refuses the
+    newest frame at the cap (for reliable transports). Audio and control are
+    never discarded to make room for mocap (ADR 0011); control has its own
+    cap (1,024 envelopes by default). An optional age limit discards stale
+    mocap and audio, never control (TRB-14).
+  - `FO3DTransportWorker` (`O3DTransportWorker.h`): a transport's background
+    thread that runs a body in a loop and wakes on an enqueue, `Wake()` or
+    `Stop()`; and `FO3DReconnectPolicy`: exponential backoff with jitter,
+    reset on success, optional attempt limit (TRB-4, TRF-6, TRF-20).
+  - `FO3DUnifiedReceiveDemux` (`O3DUnifiedReceiveDemux.h`): classifies a
+    received buffer once and routes mocap to the consumer, audio to the audio
+    sink (one Opus decoder per stream, SHR-15), control to the control sink
+    through `O3DS::TryGetControlPayload`, and counts keepalives, malformed,
+    oversize, unknown-kind and rejected-audio buffers (TRB-38, TRB-37). An
+    envelope whose header does not fit its buffer is now malformed, not
+    legacy raw mocap. It holds the consumer and sinks until `ReleaseSinks()`
+    (TRF-38).
+  - `FO3DAudioPublishState` and `FO3DQueuedSenderAudioSink`
+    (`O3DSenderAudioSinkBase.h`): the WP-S5 lifetime gate, the transport's
+    send queue and the last-subject slot, shared with the audio sinks, which
+    encode on the audio thread and enqueue audio items; a sink never
+    references its sender and never enqueues after `Stop()` or into a later
+    session. `FO3DSenderAudioSinkBase` and `FO3DGatedSenderAudioSink` moved
+    here from Open3DSender; `O3DSenderAudioSinkBase.h` in Open3DSender
+    forwards for one release.
+  - `O3DTransportOptions` (`O3DTransportOptions.h`): strict typed option
+    getters (`80abc` is no longer port 80) and `ParseHostPort` (scheme, path
+    and query tolerated, bracketed IPv6, ports 1 to 65535, optional default
+    port), plus `ResolveHostPort`, which resolves host names through the
+    socket subsystem on a worker thread (TRB-26).
+  - `O3DAudio::TryGetAudioPayloadCodec`: reads the codec of a bare audio
+    payload from its header, beside the shared audio (de)serializers (SHR-35).
+- **Removed:** `O3DHelpers::NormalizeTcpUrlHostPort`, which rewrote
+  `tcp://192.168.1.10` to `tcp://192.168.1:10` and had no callers (SHR-9).
+- **Loopback runs on the shared pieces.** Its channel is one
+  `FO3DSendQueue` (mocap refuses the newest frame when full, as before;
+  `loopback.maxqueue`, `loopback.maxaudioqueue` and the 1,024-envelope
+  control cap keep their meaning), the receiver's `Poll` feeds an
+  `FO3DUnifiedReceiveDemux`, and its audio sink is `FO3DQueuedSenderAudioSink`.
+  Mocap, audio and control now leave the channel in the order they were sent
+  (control used to be delivered before the frames of the same `Poll`); each
+  kind keeps its own limit. Audio travels through the channel as a unified
+  audio envelope, so Loopback exercises the network audio format, and the
+  receiver's `BytesReceived` counts the envelope. The sender's
+  `GetStats()` fills `PendingBytes`. The module no longer depends on
+  Open3DSender or Open3DReceiver: its configure functions read the channel
+  and queue options from the transport config. The queue option's tooltip
+  now says that a full channel refuses new frames, which is what it always
+  did. Net transport source lines: -311.
+- **API version stays 4.** Only standalone types were added and two classes
+  no add-on uses changed module; no interface layout, vtable or threading
+  rule changed.
+- **Tests.** New `Open3DBroadcast.Shared.SendQueue.*` (limits, both mocap
+  policies, control and audio never dropped for mocap, age limit, FIFO across
+  kinds, four producers against a live consumer),
+  `.TransportWorker.*`, `.ReconnectPolicy.*`, `.ReceiveDemux.*` (raw and
+  enveloped mocap, control, malformed, oversize, unknown, keepalive, audio,
+  sink release), `.AudioSinkBase.*` (wire formats, lifetime gate, 1,000
+  close cycles under a fake audio thread), `.HostPort.*` (IPv6 brackets,
+  missing and bad ports, bad hosts, resolution) and
+  `.TransportOptions.TypedGetters`; `Open3DBroadcast.Transport.Loopback.Audio.IndependentOfFrameQueue`
+  and `.Lifetime.StopWhileSending` (four send threads and an audio thread,
+  1,000 Stop cycles).
+
 ### WebRTC becomes the Open3DBroadcastWebRTC add-on plugin (WP-F11, ADR 0002)
 
 - **WebRTC is no longer part of Open3DBroadcast.** The `Open3DTransportWebRTC`

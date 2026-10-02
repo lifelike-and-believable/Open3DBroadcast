@@ -6,8 +6,8 @@
 //   - UDP delivers control as single datagrams (including the largest envelope, which must not be
 //     mistaken for a fragment) and refuses an envelope larger than udp.maxdatagram rather than
 //     fragmenting it.
-//   - Loopback keeps control in its own queue: a full frame queue does not block control, and the
-//     control queue has its own cap.
+//   - Loopback keeps control independent of frames: a full frame queue does not block control,
+//     and control has its own cap (since WP-A1 step 4, a per-kind limit of the shared FO3DSendQueue).
 // Everything runs on 127.0.0.1 or in process; nothing needs an external network.
 
 #include "O3DTestHarness.h"

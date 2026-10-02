@@ -82,6 +82,14 @@ namespace O3DAudio
     OPEN3DSHARED_API bool SerializeEncodedAudioFrameAfterPrefix(O3DS::EUnifiedCodec Codec, const O3DS::FAudioFrameMeta& Meta, const uint8* EncodedData, int32 NumBytes, int32 PrefixBytes, TArray<uint8>& OutBuffer);
 
     /**
+     * The codec of a serialized audio payload (no envelope), read from its header: a version 1
+     * payload is PCM16, a version 2 payload names its codec (Opus). For channels that carry no
+     * envelope, such as MoQ's audio track (TRF-37). Only peeks; DeserializeEncodedAudioFrame
+     * still validates the whole payload. False for anything else.
+     */
+    OPEN3DSHARED_API bool TryGetAudioPayloadCodec(const uint8* Payload, int32 PayloadSize, O3DS::EUnifiedCodec& OutCodec);
+
+    /**
      * Parse audio metadata and encoded payload for the supplied codec from a transport-neutral
      * wire buffer. Metadata is range-checked (SHR-8); OutError, when given, says why a buffer
      * was rejected.

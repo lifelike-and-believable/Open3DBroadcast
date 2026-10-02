@@ -7,179 +7,106 @@
 
 FO3DTransportResult FO3DLoopbackReceiver::Initialize(const FO3DTransportConfig& Config)
 {
-    QueueCapacity = O3DLoopback::ResolveQueueCapacity(Config);
-    AudioQueueCapacity = O3DLoopback::ResolveAudioQueueCapacity(Config);
-    ChannelKey = O3DLoopback::ResolveChannelKey(Config);
+	ChannelKey = O3DLoopback::ResolveChannelKey(Config);
+	Channel = O3DLoopback::AcquireChannel(ChannelKey, O3DLoopback::ResolveQueueLimits(Config));
+	bInitialized = true;
 
-    Channel = O3DLoopback::AcquireChannel(ChannelKey, QueueCapacity, AudioQueueCapacity);
-    bInitialized = Channel.IsValid();
-    Stats.Reset();
-    LatencySamples = 0;
-    LastAudioDropLogTime = 0.0;
+	FO3DReceiveDemuxSettings Settings = Demux.GetSettings();
+	Settings.StreamId = ChannelKey;
+	Demux.SetSettings(Settings);
+	Demux.ResetStats();
 
-    if (!bInitialized)
-    {
-        UE_LOG(LogO3DLoopbackTransport, Warning, TEXT("Loopback receiver failed to acquire channel '%s'."), *ChannelKey);
-        return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, FString::Printf(TEXT("Loopback channel '%s' could not be acquired."), *ChannelKey));
-    }
-
-    return FO3DTransportResult::Ok();
-}
-
-void FO3DLoopbackReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer)
-{
-    Consumer = InConsumer;
+	Stats.Reset();
+	LatencySamples = 0;
+	return FO3DTransportResult::Ok();
 }
 
 FO3DTransportResult FO3DLoopbackReceiver::Start()
 {
-    if (!bInitialized)
-    {
-        return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("Loopback receiver Start() before a successful Initialize()."));
-    }
-    // ADR 0007 item 3: a receiver without a consumer refuses to start (it used to start and drop
-    // every frame; FSerializedFrameConsumerRegistry, its old fallback, is gone, SHR-24).
-    if (!Consumer.IsValid())
-    {
-        return FO3DTransportResult::Error(EO3DTransportError::NoConsumer, TEXT("Loopback receiver Start() without a frame consumer (SetConsumer)."));
-    }
-    ConnectionState.Begin(EO3DConnectionState::Connected);
-    return FO3DTransportResult::Ok();
+	if (!bInitialized)
+	{
+		return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("Loopback receiver Start() before a successful Initialize()."));
+	}
+	// ADR 0007 item 3: a receiver without a consumer refuses to start (SHR-24).
+	if (!Demux.HasConsumer())
+	{
+		return FO3DTransportResult::Error(EO3DTransportError::NoConsumer, TEXT("Loopback receiver Start() without a frame consumer (SetConsumer)."));
+	}
+	ConnectionState.Begin(EO3DConnectionState::Connected);
+	return FO3DTransportResult::Ok();
 }
 
 void FO3DLoopbackReceiver::Stop()
 {
-    Consumer.Reset();
-    AudioSink.Reset();
-    ControlSink.Reset();
-    ConnectionState.End(EO3DConnectionState::Idle);
+	Demux.ReleaseSinks();
+	ConnectionState.End(EO3DConnectionState::Idle);
 }
 
 int32 FO3DLoopbackReceiver::Poll()
 {
-    if (!bInitialized || !Channel.IsValid())
-    {
-        return 0;
-    }
+	if (!bInitialized || !Channel.IsValid())
+	{
+		return 0;
+	}
 
-    const int32 DebugLevel = O3DLoopback::GetAudioDebugLevel();
+	const int32 DebugLevel = O3DLoopback::GetAudioDebugLevel();
+	int32 Processed = 0;
+	FO3DSendItem Item;
+	while (Channel->Dequeue(Item))
+	{
+		// LiveLink expects "when to display", so frames are stamped on arrival (as every transport does).
+		const double NowSeconds = FPlatformTime::Seconds();
+		switch (Item.Kind)
+		{
+		case EO3DSendItemKind::Mocap:
+			++Processed;
+			Stats.FramesReceived++;
+			Stats.BytesReceived += Item.Bytes.Num();
+			AccumulateLatency((NowSeconds - Item.CaptureTimeSec) * 1000.0);
+			Demux.DeliverMocap(Item.Subject, Item.Bytes, NowSeconds);
+			break;
 
-    int32 Processed = 0;
-
-    // Control (ADR 0011): delivered to the control sink; not counted as frames.
-    TArray<uint8> ControlEnvelope;
-    while (Channel->ControlQueue.Dequeue(ControlEnvelope))
-    {
-        Channel->ControlPendingCount.fetch_sub(1);
-        TConstArrayView<uint8> ControlPayload;
-        if (ControlSink.IsValid() && O3DS::TryGetControlPayload(ControlEnvelope.GetData(), ControlEnvelope.Num(), ControlPayload))
-        {
-            ControlSink->SubmitControl(ControlPayload, ChannelKey, FPlatformTime::Seconds());
-        }
-    }
-
-    FO3DLoopbackPacket Packet;
-
-    while (Channel->Queue.Dequeue(Packet))
-    {
-        Channel->PendingCount.fetch_sub(1);
-        ++Processed;
-
-        Stats.FramesReceived++;
-        Stats.BytesReceived += Packet.Payload.Num();
-
-        const double NowSeconds = FPlatformTime::Seconds();
-        const double LatencyMs = (NowSeconds - Packet.TimestampSeconds) * 1000.0;
-        AccumulateLatency(LatencyMs);
-
-        if (Consumer.IsValid())
-        {
-            // PHASE 13: Timestamp alignment fix (same as WebRTC/NNG/TCP/UDP)
-            // Use FPlatformTime::Seconds() instead of Packet.TimestampSeconds
-            // LiveLink expects "when to display" not "when this arrived in queue"
-            Consumer->SubmitFrame(Packet.Subject, Packet.Payload, FPlatformTime::Seconds());
-        }
-    }
-
-    int32 AudioProcessed = 0;
-    FO3DLoopbackAudioPacket AudioPacket;
-    while (Channel->AudioQueue.Dequeue(AudioPacket))
-    {
-        Channel->AudioPendingCount.fetch_sub(1);
-        ++AudioProcessed;
-        Stats.BytesReceived += AudioPacket.Payload.Num();
-
-        if (AudioSink.IsValid())
-        {
-            if (AudioPacket.Codec == O3DS::EUnifiedCodec::PCM16)
-            {
-                AudioSink->SubmitPcm16(AudioPacket.Meta, AudioPacket.Payload.GetData(), AudioPacket.Payload.Num());
-
-                if (DebugLevel > 0)
-                {
-                    static double LastAudioLogTime = 0.0;
-                    const double Now = FPlatformTime::Seconds();
-                    if (DebugLevel > 1 || Now - LastAudioLogTime > 0.25)
-                    {
-                        UE_LOG(LogO3DLoopbackTransport, Log, TEXT("Loopback audio dequeued channel='%s' label='%s' bytes=%d sr=%d ch=%d pending=%d"),
-                            *ChannelKey,
-                            *AudioPacket.Meta.StreamLabel,
-                            AudioPacket.Payload.Num(),
-                            AudioPacket.Meta.SampleRate,
-                            AudioPacket.Meta.NumChannels,
-                            Channel->AudioPendingCount.load());
-                        LastAudioLogTime = Now;
-                    }
-                }
-            }
-			else
+		case EO3DSendItemKind::Audio:
+		{
+			++Processed;
+			Stats.BytesReceived += Item.Bytes.Num();
+			const EO3DDemuxResult Result = Demux.ProcessMessage(Item.Bytes.GetData(), Item.Bytes.Num(), NowSeconds);
+			if (Result == EO3DDemuxResult::AudioRejected)
 			{
-				if (AudioDecoder.Decode(AudioPacket.Codec, AudioPacket.Meta, AudioPacket.Payload.GetData(), AudioPacket.Payload.Num(), DecodedPcmScratch) && DecodedPcmScratch.Num() > 0)
-				{
-					AudioSink->SubmitPcm16(AudioPacket.Meta, reinterpret_cast<const uint8*>(DecodedPcmScratch.GetData()), DecodedPcmScratch.Num() * sizeof(int16));
-				}
-				else
-				{
-					UE_LOG(LogO3DLoopbackTransport, Verbose, TEXT("Loopback audio decode failed for codec '%d'."), static_cast<int32>(AudioPacket.Codec));
-				}
+				Stats.ReceiveErrors++;
+				UE_LOG(LogO3DLoopbackTransport, Verbose, TEXT("Loopback audio frame rejected on '%s'."), *ChannelKey);
 			}
-        }
-        else
-        {
-            const double Now = FPlatformTime::Seconds();
-            if (Now - LastAudioDropLogTime > 1.0)
-            {
-                UE_LOG(LogO3DLoopbackTransport, Verbose, TEXT("Loopback audio frame discarded (no sink) for '%s'; label='%s' bytes=%d"),
-                    *ChannelKey,
-                    *AudioPacket.Meta.StreamLabel,
-                    AudioPacket.Payload.Num());
-                LastAudioDropLogTime = Now;
-            }
-        }
-    }
+			else if (DebugLevel > 0 && (DebugLevel > 1 || NowSeconds - LastAudioLogTime > 0.25))
+			{
+				UE_LOG(LogO3DLoopbackTransport, Log, TEXT("Loopback audio dequeued channel='%s' bytes=%d result=%s pending=%d"),
+					*ChannelKey, Item.Bytes.Num(), LexToString(Result), Channel->GetPendingItems(EO3DSendItemKind::Audio));
+				LastAudioLogTime = NowSeconds;
+			}
+			break;
+		}
 
-    return Processed + AudioProcessed;
+		case EO3DSendItemKind::Control:
+			// ADR 0011: to the control sink; not counted as a frame.
+			Demux.ProcessMessage(Item.Bytes.GetData(), Item.Bytes.Num(), NowSeconds);
+			break;
+		}
+	}
+	return Processed;
 }
 
 FO3DTransportStats FO3DLoopbackReceiver::GetStats() const
 {
-    FO3DTransportStats Copy = Stats;
-    Copy.State = ConnectionState.Get();
-    return Copy;
-}
-
-void FO3DLoopbackReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig)
-{
-    AudioSink = Sink;
-    ActiveAudioConfig = AudioConfig;
+	FO3DTransportStats Copy = Stats;
+	Copy.State = ConnectionState.Get();
+	return Copy;
 }
 
 void FO3DLoopbackReceiver::AccumulateLatency(double LatencyMs)
 {
-    Stats.MaxLatencyMs = FMath::Max(Stats.MaxLatencyMs, LatencyMs);
+	Stats.MaxLatencyMs = FMath::Max(Stats.MaxLatencyMs, LatencyMs);
 
-    const int64 NewSampleCount = LatencySamples + 1;
-    const double PreviousTotal = Stats.AverageLatencyMs * LatencySamples;
-    Stats.AverageLatencyMs = (PreviousTotal + LatencyMs) / FMath::Max<int64>(1, NewSampleCount);
-    LatencySamples = NewSampleCount;
+	const int64 NewSampleCount = LatencySamples + 1;
+	const double PreviousTotal = Stats.AverageLatencyMs * LatencySamples;
+	Stats.AverageLatencyMs = (PreviousTotal + LatencyMs) / FMath::Max<int64>(1, NewSampleCount);
+	LatencySamples = NewSampleCount;
 }

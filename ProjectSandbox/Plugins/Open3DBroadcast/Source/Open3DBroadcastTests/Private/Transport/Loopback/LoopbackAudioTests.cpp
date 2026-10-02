@@ -140,4 +140,50 @@ bool FO3DLoopbackAudioQueueOverflowTest::RunTest(const FString& Parameters)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLoopbackAudioIndependentTest, "Open3DBroadcast.Transport.Loopback.Audio.IndependentOfFrameQueue", O3DB_TEST_FLAGS)
+bool FO3DLoopbackAudioIndependentTest::RunTest(const FString& Parameters)
+{
+    // ADR 0011 / ADR 0007 item 7: the channel's kinds have their own limits, so a full frame
+    // queue never refuses audio, and audio is delivered with the frame in the order it was sent.
+    FO3DTransportConfig Config;
+    Config.Transport = TEXT("loopback");
+    Config.StreamId = O3DTests::MakeUniqueName(TEXT("audio_independent"));
+    Config.Audio.bEnableAudio = true;
+    Config.Audio.SampleRate = 48000;
+    Config.Audio.NumChannels = 1;
+    Config.AdvancedParams.Add(TEXT("loopback.maxqueue"), TEXT("1"));
+
+    const TSharedPtr<IOpen3DSender> Sender = O3DTransport::CreateSender(LoopbackTransportName);
+    const TSharedPtr<IOpen3DReceiver> Receiver = O3DTransport::CreateReceiver(LoopbackTransportName);
+    if (!TestTrue(TEXT("Loopback registered"), Sender.IsValid() && Receiver.IsValid()))
+    {
+        return false;
+    }
+    TestTrue(TEXT("Sender starts"), Sender->Initialize(Config).IsOk() && Sender->Start().IsOk());
+    TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(Config).IsOk());
+    const TSharedRef<FO3DRecordingFrameConsumer> Consumer = MakeShared<FO3DRecordingFrameConsumer>();
+    const TSharedRef<FLoopbackTestAudioSink, ESPMode::ThreadSafe> ReceiverSink = MakeShared<FLoopbackTestAudioSink, ESPMode::ThreadSafe>();
+    Receiver->SetConsumer(Consumer);
+    Receiver->SetAudioSink(ReceiverSink, Config.Audio);
+    TestTrue(TEXT("Receiver starts"), Receiver->Start().IsOk());
+
+    const uint8 Frame[4] = { 1, 2, 3, 4 };
+    TestTrue(TEXT("Frame fills the one-frame queue"), Sender->SendSerialized(FO3DSendPayload::MakeCopy(Frame, 4, TEXT("Hero"), 0.0)) == EO3DSendResult::Queued);
+    TestTrue(TEXT("Next frame refused"), Sender->SendSerialized(FO3DSendPayload::MakeCopy(Frame, 4, TEXT("Hero"), 0.0)) == EO3DSendResult::DroppedBackpressure);
+
+    const TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> AudioSink = Sender->CreateAudioSink(Config.Audio);
+    const float Samples[4] = { 0.1f, 0.2f, 0.3f, 0.4f };
+    TestTrue(TEXT("Audio accepted while the frame queue is full"), AudioSink.IsValid() && AudioSink->SubmitPcm(TEXT("voice"), Samples, 4, 1, 48000, 1.0));
+
+    TestEqual(TEXT("Poll delivers the frame and the audio"), Receiver->Poll(), 2);
+    TestEqual(TEXT("One frame"), Consumer->Num(), 1);
+    TestTrue(TEXT("Audio delivered"), ReceiverSink->WasInvoked());
+    TestEqual(TEXT("Audio carries the subject last sent"), ReceiverSink->GetMeta().SubjectName, FString(TEXT("Hero")));
+    TestEqual(TEXT("Sender counted the refused frame"), Sender->GetStats().DroppedFrames, static_cast<int64>(1));
+
+    Receiver->Stop();
+    Sender->Stop();
+    return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

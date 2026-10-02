@@ -25,9 +25,9 @@ public class Open3DTransportLoopback : ModuleRules
             "Core",
             "CoreUObject",
             "Engine",
-            "Open3DShared",
-            "Open3DSender",
-            "Open3DReceiver"
+            // Open3DShared only: the interfaces, registry, send queue, demux and audio sink base
+            // live there; no dependency on Open3DSender or Open3DReceiver (ADR 0007 step 4).
+            "Open3DShared"
         });
 
         // No editor or Slate dependencies: the settings panel is built by Open3DBroadcastEditor from

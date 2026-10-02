@@ -19,8 +19,8 @@ namespace O3DHelpers
     // Return URL without its query
     OPEN3DSHARED_API FString StripQuery(const FString& InUrl);
 
-    // Fix common tcp URL typo: tcp://host.port -> tcp://host:port (preserves query string if any)
-    OPEN3DSHARED_API FString NormalizeTcpUrlHostPort(const FString& InUrl);
+    // NormalizeTcpUrlHostPort was deleted (SHR-9: it rewrote tcp://192.168.1.10 to
+    // tcp://192.168.1:10). Parse endpoints with O3DTransportOptions::ParseHostPort.
 
     // True for https:// URLs, and for http:// URLs whose host is localhost, 127.0.0.1 or ::1.
     // Every other URL (plain http:// to another host, other schemes, no scheme) is false.

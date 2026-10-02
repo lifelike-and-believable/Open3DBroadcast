@@ -4,9 +4,9 @@
 
 #include "Sender/LoopbackSender.h"
 #include "Receiver/LoopbackReceiver.h"
-#include "O3DReceiverSourceSettings.h"
-#include "O3DSenderComponent.h"
+#include "Shared/LoopbackChannel.h"
 #include "O3DTransportOptionSchema.h"
+#include "Transport/O3DTransportOptions.h"
 #include "Transport/O3DTransportRegistry.h"
 #include "Transport/O3DTransportTypes.h"
 
@@ -14,51 +14,48 @@ DEFINE_LOG_CATEGORY_STATIC(LogOpen3DTransportLoopbackModule, Log, All);
 
 #define LOCTEXT_NAMESPACE "Open3DTransportLoopback"
 
-namespace LoopbackReceiver
-{
-	static constexpr TCHAR ChannelOptionKey[] = TEXT("channel");
-}
-
-namespace LoopbackSender
-{
-	static constexpr TCHAR ChannelOptionKey[] = TEXT("channel");
-	static constexpr TCHAR QueueOptionKey[] = TEXT("loopback.maxqueue");
-	static constexpr int32 DefaultQueue = 64;
-}
-
 namespace LoopbackSchema
 {
-	static constexpr TCHAR DefaultChannel[] = TEXT("default");
-
 	/** Channel name row, shared by both roles (ADR 0010 §4: the editor module renders it). */
-	static FO3DTransportOptionField MakeChannelField(const TCHAR* Key)
+	static FO3DTransportOptionField MakeChannelField()
 	{
 		FO3DTransportOptionField Field;
-		Field.Key = Key;
+		Field.Key = O3DLoopback::ChannelOptionKey;
 		Field.DisplayName = LOCTEXT("LoopbackChannelLabel", "Channel Name");
 		Field.Tooltip = LOCTEXT("LoopbackChannelTooltip", "In-process channel the sender publishes to and the receiver reads from. Empty uses 'default'.");
 		Field.Type = EO3DTransportOptionType::String;
-		Field.Default = DefaultChannel;
+		Field.Default = O3DLoopback::DefaultChannel;
 		return Field;
 	}
 
 	static FO3DTransportOptionSchema MakeReceiverSchema()
 	{
-		return { MakeChannelField(LoopbackReceiver::ChannelOptionKey) };
+		return { MakeChannelField() };
 	}
 
 	static FO3DTransportOptionSchema MakeSenderSchema()
 	{
 		FO3DTransportOptionField Queue;
-		Queue.Key = LoopbackSender::QueueOptionKey;
+		Queue.Key = O3DLoopback::QueueOptionKey;
 		Queue.DisplayName = LOCTEXT("LoopbackSenderQueueLabel", "Queue Capacity");
-		Queue.Tooltip = LOCTEXT("LoopbackSenderQueueTooltip", "Frames the loopback channel buffers before it drops the oldest.");
+		Queue.Tooltip = LOCTEXT("LoopbackSenderQueueTooltip", "Frames the loopback channel buffers; while it is full, new frames are refused (DroppedBackpressure).");
 		Queue.Type = EO3DTransportOptionType::Int;
-		Queue.Default = FString::FromInt(LoopbackSender::DefaultQueue);
+		Queue.Default = FString::FromInt(O3DLoopback::DefaultQueueCapacity);
 		Queue.Min = 1;
 		Queue.Max = 4096;
 
-		return { MakeChannelField(LoopbackSender::ChannelOptionKey), MoveTemp(Queue) };
+		return { MakeChannelField(), MoveTemp(Queue) };
+	}
+
+	/**
+	 * The channel option. The sender component and the receiver source copy their (non-secret)
+	 * transport options into Config.AdvancedParams before the configure function runs, so the
+	 * functions read only the config and this module needs neither Open3DSender nor
+	 * Open3DReceiver (ADR 0007 step 4).
+	 */
+	static FString ReadChannel(const FO3DTransportConfig& Config)
+	{
+		return O3DTransportOptions::GetString(Config.AdvancedParams, O3DLoopback::ChannelOptionKey, O3DLoopback::DefaultChannel);
 	}
 }
 
@@ -75,42 +72,28 @@ public:
 		Loopback.CreateReceiver = []() { return MakeShared<FO3DLoopbackReceiver>(); };
 		Loopback.GetCapabilities = [](const FO3DTransportConfig& Config) { return O3DLoopback::GetCapabilities(Config); };
 
-		Loopback.ConfigureReceiver = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
+		Loopback.ConfigureReceiver = [](const FO3DReceiverSourceConfig& /*Settings*/, FO3DTransportConfig& Config)
 		{
-			FString ChannelName;
-			if (const FString* Option = Settings.TransportOptions.Find(LoopbackReceiver::ChannelOptionKey))
-			{
-				ChannelName = *Option;
-			}
-			if (ChannelName.IsEmpty())
-			{
-				ChannelName = LoopbackSchema::DefaultChannel;
-			}
-
+			const FString ChannelName = LoopbackSchema::ReadChannel(Config);
 			Config.Transport = TEXT("Loopback");
 			Config.StreamId = ChannelName;
 			Config.Uri = FString::Printf(TEXT("loopback://%s?role=sub"), *ChannelName);
-			Config.AdvancedParams.Add(LoopbackReceiver::ChannelOptionKey, ChannelName);
+			Config.AdvancedParams.Add(O3DLoopback::ChannelOptionKey, ChannelName);
 		};
 		Loopback.ReceiverOptions.OptionSchema = LoopbackSchema::MakeReceiverSchema();
 
-		Loopback.ConfigureSender = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
+		Loopback.ConfigureSender = [](const UO3DSenderComponent* /*SenderComponent*/, FO3DTransportConfig& Config)
 		{
-			FString ChannelName = SenderComponent ? SenderComponent->GetTransportOption(LoopbackSender::ChannelOptionKey) : FString();
-			if (ChannelName.IsEmpty())
-			{
-				ChannelName = LoopbackSchema::DefaultChannel;
-			}
-
+			const FString ChannelName = LoopbackSchema::ReadChannel(Config);
 			Config.Transport = TEXT("Loopback");
 			Config.Role = TEXT("sender");
 			Config.StreamId = ChannelName;
 			Config.Uri = FString::Printf(TEXT("loopback://%s?role=pub"), *ChannelName);
-			Config.AdvancedParams.Add(LoopbackSender::ChannelOptionKey, ChannelName);
+			Config.AdvancedParams.Add(O3DLoopback::ChannelOptionKey, ChannelName);
 
-			FString QueueString = SenderComponent ? SenderComponent->GetTransportOption(LoopbackSender::QueueOptionKey) : FString();
-			int32 QueueValue = QueueString.IsEmpty() ? LoopbackSender::DefaultQueue : FMath::Max(1, FCString::Atoi(*QueueString));
-			Config.AdvancedParams.Add(LoopbackSender::QueueOptionKey, FString::FromInt(QueueValue));
+			int32 QueueValue = O3DTransportOptions::GetInt(Config.AdvancedParams, O3DLoopback::QueueOptionKey, O3DLoopback::DefaultQueueCapacity);
+			QueueValue = QueueValue > 0 ? QueueValue : O3DLoopback::DefaultQueueCapacity;
+			Config.AdvancedParams.Add(O3DLoopback::QueueOptionKey, FString::FromInt(QueueValue));
 		};
 		Loopback.SenderOptions.OptionSchema = LoopbackSchema::MakeSenderSchema();
 

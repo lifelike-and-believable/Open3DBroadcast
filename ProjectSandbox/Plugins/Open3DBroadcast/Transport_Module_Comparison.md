@@ -69,30 +69,30 @@ The registry answers the same capability question before an instance exists:
 
 **Architecture**:
 - In-process, shared-memory channel communication
-- Channel registry with ref-counted channel objects
-- Two separate queues: mocap data and audio
-- Lock-free MPSC (Multi-Producer Single-Consumer) queues
+- Channel registry with ref-counted channels; each channel is one shared `FO3DSendQueue` (Open3DShared, WP-A1 step 4) carrying mocap, audio and control items, each kind with its own limit
+- The receiver's `Poll` hands each item to the shared `FO3DUnifiedReceiveDemux`; the audio sink is the shared `FO3DQueuedSenderAudioSink`
+- Lock-free MPSC (Multi-Producer Single-Consumer) queue with atomic item and byte accounting
 
 **Key Classes**:
-- `FO3DLoopbackSender` (`LoopbackSender.h:7`)
-- `FO3DLoopbackReceiver` (`LoopbackReceiver.h:8`)
-- `FO3DLoopbackChannel` (`LoopbackChannel.h:37`) - Shared channel state
+- `FO3DLoopbackSender` (`Sender/LoopbackSender.h`)
+- `FO3DLoopbackReceiver` (`Receiver/LoopbackReceiver.h`)
+- `O3DLoopback::AcquireChannel` (`Shared/LoopbackChannel.h`) - the channel's shared queue
 
 **Threading Model**:
 - **Synchronous** - No background threads
 - Sender enqueues to shared channel on `Send()` call
 - Receiver dequeues on `Poll()` call
-- Thread-safe via atomic counters and MPSC queues
+- Thread-safe via atomic counters and an MPSC queue
 
 **Configuration** (`LoopbackChannel.cpp`):
 - `channel` - Channel key (default: URI or "default")
-- `loopback.queue` - Queue capacity (default: 64 frames)
-- `loopback.audioqueue` - Audio queue capacity (default: 32 frames)
+- `loopback.maxqueue` - Mocap frames the channel holds; a full channel refuses new frames (default: 64)
+- `loopback.maxaudioqueue` - Audio frames the channel holds (default: 32)
 
 **Audio Support**:
 - ✅ Full support with configurable codec
 - Uses `O3DAudio::FFrameEncoder`/`FFrameDecoder`
-- Separate audio queue with overflow protection
+- Audio has its own limit on the shared channel queue (overflow refuses the newest audio frame)
 - PCM16 and Opus codecs supported
 
 **Unique Characteristics**:
@@ -485,7 +485,7 @@ Delivery per transport:
 
 | Transport | Carriage | Delivery | Notes |
 |-----------|----------|----------|-------|
-| **Loopback** | `ControlQueue` on the in-process channel, beside the frame and audio queues | Reliable, ordered | Queue holds up to 1,024 envelopes; further sends are refused and the publisher retries |
+| **Loopback** | Control items on the channel's shared queue, in order with frames and audio, with a limit of their own | Reliable, ordered | Up to 1,024 envelopes wait; further sends are refused and the publisher retries. A full frame queue never refuses control |
 | **TCP** | Envelope in a TCP frame, on the same send queue as mocap and audio | Reliable, ordered with frames | `SendControl` is refused while no client is connected; events retry until their TTL, values are repaired by the next snapshot |
 | **UDP** | One datagram per envelope, sent under the socket lock | Unreliable, unordered | Never fragmented; refused if `udp.maxdatagram` is below the envelope size. Events rely on redundant copies, values on snapshots |
 | **NNG** | Envelope on the same socket and queue as frames | Pair and push/pull: reliable, ordered. Pub/sub: treated as unreliable | Covered by tests in pub/sub, pair/pair and push/pull |
