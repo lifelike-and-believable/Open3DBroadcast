@@ -50,6 +50,11 @@
  *      and PendingBytes; FO3DTransportDescriptor gained GetCapabilities; receivers return
  *      NoConsumer from Start without a consumer. Removing the WP-A1 forwarding shims (step 6)
  *      takes the next number.
+ *      WP-A1 PR 4a (step 4) stays at 4: it adds standalone types (FO3DSendQueue,
+ *      FO3DTransportWorker, FO3DReconnectPolicy, FO3DUnifiedReceiveDemux, FO3DAudioPublishState,
+ *      FO3DQueuedSenderAudioSink, O3DTransportOptions) and moves FO3DSenderAudioSinkBase and
+ *      FO3DGatedSenderAudioSink from Open3DSender to Open3DShared unchanged; no type above changes
+ *      layout, vtable or threading rule, and the add-on uses none of the moved classes.
  */
 #define O3D_TRANSPORT_API_VERSION 4
 

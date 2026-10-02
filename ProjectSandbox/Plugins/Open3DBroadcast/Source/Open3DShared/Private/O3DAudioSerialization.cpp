@@ -346,6 +346,30 @@ namespace O3DAudio
         return SerializeAudioImpl(Codec, Meta, EncodedData, NumBytes, PrefixBytes, OutBuffer);
     }
 
+    bool TryGetAudioPayloadCodec(const uint8* Payload, int32 PayloadSize, O3DS::EUnifiedCodec& OutCodec)
+    {
+        if (!Payload || PayloadSize <= 0)
+        {
+            return false;
+        }
+        if (Payload[0] == AudioPayloadVersion)
+        {
+            OutCodec = O3DS::EUnifiedCodec::PCM16;
+            return true;
+        }
+        // Encoded layout: version, flags, codec. PCM16 is always written as version 1, so a
+        // version 2 payload carries Opus.
+        constexpr int32 EncodedCodecOffset = 2;
+        if (Payload[0] == EncodedAudioPayloadVersion && PayloadSize > EncodedCodecOffset
+            && (Payload[1] & PayloadFlagEncoded) != 0
+            && Payload[EncodedCodecOffset] == static_cast<uint8>(O3DS::EUnifiedCodec::Opus))
+        {
+            OutCodec = O3DS::EUnifiedCodec::Opus;
+            return true;
+        }
+        return false;
+    }
+
     bool DeserializeEncodedAudioFrame(O3DS::EUnifiedCodec Codec, const uint8* Payload, int32 PayloadSize, FEncodedAudioFrame& OutFrame, EAudioParseError* OutError)
     {
         if (!DeserializeAudioImpl(Codec, Payload, PayloadSize, OutFrame.Meta, OutFrame.Payload, OutError))

@@ -58,6 +58,7 @@ public class Open3DShared : ModuleRules
         PrivateDependencyModuleNames.AddRange(new string[]
         {
             "Projects", // IPluginManager: FO3DFfiLibrary finds FFI DLLs relative to the owning plugin (TRF-28)
+            "Sockets", // O3DTransportOptions::ResolveHostPort resolves host names (TRB-26, WP-A1 step 4)
             // Private: only O3DControlConvert.cpp includes the core (o3ds/control.h); Open3DShared's
             // public headers stay free of it (docs/adr/0011-control-channel.md).
             "Open3DStreamCore"

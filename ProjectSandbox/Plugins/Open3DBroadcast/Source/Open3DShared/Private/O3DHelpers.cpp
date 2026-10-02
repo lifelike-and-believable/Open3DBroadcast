@@ -98,57 +98,6 @@ namespace O3DHelpers
         int32 QIdx; return InUrl.FindChar('?', QIdx) ? InUrl.Left(QIdx) : InUrl;
     }
 
-    FString NormalizeTcpUrlHostPort(const FString& InUrl)
-    {
-        FString Out = InUrl;
-        if (!Out.StartsWith(TEXT("tcp://"), ESearchCase::IgnoreCase))
-        {
-            return Out;
-        }
-
-        FString Base = Out;
-        FString QueryPart;
-        int32 QIdx;
-        if (Out.FindChar('?', QIdx))
-        {
-            Base = Out.Left(QIdx);
-            QueryPart = Out.Mid(QIdx);
-        }
-
-        const int32 SchemeLen = 6;
-        if (Base.Len() <= SchemeLen)
-        {
-            return Out;
-        }
-
-        const FString HostPort = Base.Mid(SchemeLen);
-        if (HostPort.Contains(TEXT(":")))
-        {
-            return Out;
-        }
-
-        int32 LastDotIdx;
-        if (HostPort.FindLastChar('.', LastDotIdx))
-        {
-            const FString PortStr = HostPort.Mid(LastDotIdx + 1);
-            bool bAllDigits = !PortStr.IsEmpty();
-            for (int32 i = 0; i < PortStr.Len(); ++i)
-            {
-                const TCHAR C = PortStr[i];
-                if (C < '0' || C > '9') { bAllDigits = false; break; }
-            }
-            if (bAllDigits)
-            {
-                const FString Before = Base.Left(SchemeLen + LastDotIdx);
-                const FString After = Base.Mid(SchemeLen + LastDotIdx + 1);
-                const FString FixedBase = Before + TEXT(":") + After;
-                return FixedBase + QueryPart;
-            }
-        }
-
-        return Out;
-    }
-
     bool IsHttpsOrLoopbackHttpUrl(const FString& InUrl)
     {
         const FString Trimmed = InUrl.TrimStartAndEnd();
