@@ -67,13 +67,17 @@ If you see "NNG sender queue full" warnings and no animation on the receiver:
 
 ### High Latency / Cloud Connections
 
-The sender never blocks on network I/O. A worker thread owns the socket and sends with
-`NNG_FLAG_NONBLOCK`:
+The sender never blocks on network I/O. Frames, audio and control go into one send queue, and a
+worker thread owns the socket and sends with `NNG_FLAG_NONBLOCK`:
+- The queue refuses a new frame once the waiting frames reach `nng.qmax` bytes; queued frames are
+  never discarded. Audio has a budget of the same size of its own, and control a cap of 1,024
+  envelopes, so neither is refused because frames are waiting.
 - When no peer is ready or NNG's send buffer (1024 messages) is full, the oldest queued frame
   is dropped and counted in `DroppedFrames`. Frames are never re-queued, so a receiver that
   reconnects gets current data, not a stale backlog.
 - There is no send timeout, because a non-blocking send never waits.
-- A dialing socket is reconnected by NNG in the background.
+- A dialing socket is reconnected by NNG in the background. The sender and receiver only reopen
+  a socket that failed to listen or dial, with a backoff of 0.1 s doubling to 5 s.
 
 If you see frame drops with high latency:
 - Increase the sender's "Queue Capacity (MiB)" (option `nng.qmax`, in bytes; default 4 MiB)

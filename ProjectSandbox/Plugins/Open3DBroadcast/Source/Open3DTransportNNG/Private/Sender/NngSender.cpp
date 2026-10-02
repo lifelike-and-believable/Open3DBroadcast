@@ -6,14 +6,10 @@
 #include "O3DRedact.h"
 
 #include "Logging/LogMacros.h"
-#include "HAL/Event.h"
+#include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
-#include "HAL/Runnable.h"
-#include "HAL/RunnableThread.h"
-#include "Misc/ScopeLock.h"
-#include "O3DAudioFrameCodec.h"
-#include "O3DSenderAudioSinkBase.h"
 #include "O3DFfiContextRegistry.h"
+#include "O3DSinkAudioEncoder.h"
 #include "O3DUnifiedMessage.h"
 #include "O3DPerformanceMetrics.h"
 
@@ -36,14 +32,24 @@ THIRD_PARTY_INCLUDES_END
 
 DEFINE_LOG_CATEGORY_STATIC(LogO3DNngSender, Log, All);
 
-namespace
+namespace O3DNngSenderPrivate
 {
-    constexpr uint64 kMinQueueBytes = 64ull * 1024ull;
-    constexpr uint64 kMaxQueueBytes = 512ull * 1024ull * 1024ull;
-}
+    constexpr uint64 MinQueueBytes = 64ull * 1024ull;
+    constexpr uint64 MaxQueueBytes = 512ull * 1024ull * 1024ull;
+    /** Idle wait of the worker; an Enqueue wakes it earlier. Also the pipe-state reporting delay. */
+    constexpr uint32 IdleWaitMs = 50;
+    constexpr uint32 PausedWaitMs = 5;
 
-namespace
-{
+    /** Reopening a socket that failed to open or was closed: 0.1 s doubling to 5 s, as before WP-A1 PR 4d. */
+    FO3DReconnectPolicySettings MakeReopenSettings()
+    {
+        FO3DReconnectPolicySettings Settings;
+        Settings.InitialDelaySeconds = 0.1;
+        Settings.MaxDelaySeconds = 5.0;
+        Settings.Multiplier = 2.0;
+        return Settings;
+    }
+
     TO3DFfiContextRegistry<FNngSenderPipeContext>& GetSenderPipeContextRegistry()
     {
         static TO3DFfiContextRegistry<FNngSenderPipeContext> Registry;
@@ -51,7 +57,7 @@ namespace
     }
 
     /** NNG pipe callback. `Context` is an opaque token, never a sender pointer (WP-S5). */
-    static void SenderPipeCallback(nng_pipe /*Pipe*/, nng_pipe_ev Event, void* Context)
+    void SenderPipeCallback(nng_pipe /*Pipe*/, nng_pipe_ev Event, void* Context)
     {
         const TSharedPtr<FNngSenderPipeContext, ESPMode::ThreadSafe> Pipe = GetSenderPipeContextRegistry().Resolve(Context);
         if (!Pipe.IsValid())
@@ -77,67 +83,6 @@ namespace
     }
 }
 
-/**
- * NNG audio sink (WP-S5: TRB-35, TRB-10, TRB-11). Encodes with its own encoders and hands the
- * unified message to the worker through the shared queue. Never references the sender.
- */
-class FNngSenderAudioSink final : public FO3DGatedSenderAudioSink
-{
-public:
-    FNngSenderAudioSink(TSharedRef<FNngSenderPublishState, ESPMode::ThreadSafe> InState, const FO3DTransportAudioConfig& InAudioConfig, FO3DSinkAudioEncoder::FSettings InEncoderSettings)
-        : FO3DGatedSenderAudioSink(InAudioConfig, InState->Gate, MoveTemp(InEncoderSettings))
-        , State(MoveTemp(InState))
-    {
-    }
-
-protected:
-    virtual bool OnSubmitGated(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
-    {
-        // Opus may return zero or several packets per buffer (SHR-2).
-        TArray<TArray<uint8>> Messages;
-        if (!GetEncoder().EncodeUnified(StreamLabel, State->LastSubject.Get(), Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Messages))
-        {
-            return false;
-        }
-
-        bool bAllQueued = true;
-        for (TArray<uint8>& Unified : Messages)
-        {
-            if (!State->SendQueue.Enqueue(MoveTemp(Unified)))
-            {
-                State->AudioDropped.fetch_add(1);
-                bAllQueued = false;
-            }
-        }
-        return bAllQueued;
-    }
-
-private:
-    TSharedRef<FNngSenderPublishState, ESPMode::ThreadSafe> State;
-};
-
-class FO3DNngSender::FNngSenderRunnable final : public FRunnable
-{
-public:
-    explicit FNngSenderRunnable(FO3DNngSender& InOwner)
-        : Owner(InOwner)
-    {
-    }
-
-    virtual uint32 Run() override
-    {
-        return Owner.RunWorker();
-    }
-
-    virtual void Stop() override
-    {
-        // Owner drives stop via atomics; nothing required here.
-    }
-
-private:
-    FO3DNngSender& Owner;
-};
-
 struct FO3DNngSender::FNngSocketWrapper
 {
     nng_socket Socket{ NNG_SOCKET_INITIALIZER };
@@ -153,11 +98,13 @@ struct FO3DNngSender::FNngSocketWrapper
 };
 
 FO3DNngSender::FO3DNngSender()
-    : PublishState(MakeShared<FNngSenderPublishState, ESPMode::ThreadSafe>())
+    : Queue(MakeShared<FO3DSendQueue, ESPMode::ThreadSafe>())
+    , PublishState(MakeShared<FO3DAudioPublishState, ESPMode::ThreadSafe>(Queue, EO3DAudioWireFormat::UnifiedEnvelope))
+    , ReopenPolicy(O3DNngSenderPrivate::MakeReopenSettings())
     , PipeContext(MakeShared<FNngSenderPipeContext, ESPMode::ThreadSafe>())
     , TransportMetrics(FO3DPerformanceMetrics::Get().AcquireTransportMetrics(TEXT("NNG")))
 {
-    PipeToken = GetSenderPipeContextRegistry().Register(PipeContext);
+    PipeToken = O3DNngSenderPrivate::GetSenderPipeContextRegistry().Register(PipeContext);
 }
 
 FO3DTransportResult FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
@@ -173,34 +120,40 @@ FO3DTransportResult FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
         return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("NNG sender config: %s"), *Error));
     }
 
-    Options.MaxQueueBytes = FMath::Clamp<uint64>(Options.MaxQueueBytes, kMinQueueBytes, kMaxQueueBytes);
+    Options.MaxQueueBytes = FMath::Clamp<uint64>(Options.MaxQueueBytes, O3DNngSenderPrivate::MinQueueBytes, O3DNngSenderPrivate::MaxQueueBytes);
     UE_LOG(LogO3DNngSender, Verbose, TEXT("NNG sender queue limit set to %llu bytes"), Options.MaxQueueBytes);
     CapabilityMode.store(Options.Mode);
+    QueueLimitBytes.store(Options.MaxQueueBytes);
+
+    // nng.qmax is the byte limit of frames and, separately, of audio, so neither can take the
+    // other's room; control keeps the queue's own cap (ADR 0007 item 7, ADR 0011). RefuseNewest:
+    // the queue never discards what it accepted (see the class comment).
+    FO3DSendQueueLimits Limits;
+    Limits.Mocap.MaxBytes = static_cast<int64>(Options.MaxQueueBytes);
+    Limits.MocapOverflow = EO3DMocapOverflow::RefuseNewest;
+    Limits.Audio.MaxBytes = static_cast<int64>(Options.MaxQueueBytes);
+    Queue->SetLimits(Limits);
 
     ActiveConfig = Config;
     ActiveAudioConfig = Config.Audio;
     // Note: Audio stream label is now automatically derived from StreamId
     AudioSourceGuid = FGuid::NewGuid();
 
-    {
-        FScopeLock StatsLock(&StatsMutex);
-        Stats.Reset();
-    }
-    PublishState->SendQueue.SetMaxBytes(Options.MaxQueueBytes);
-    PublishState->AudioDropped.store(0);
+    FramesSent.store(0);
+    BytesSent.store(0);
+    DroppedFrames.store(0);
+    SendErrors.store(0);
     PipeContext->PipeCount.store(0);
     // A listening socket is ready without peers; a dialing one only once a pipe exists.
     PipeContext->bConnectedWithoutPipes.store(Options.bListen);
-    BackoffAttempt = 0;
-    LastBackoffAttemptTime = 0.0;
     LastErrorLogTimestamp = 0.0;
     LastDropLogTimestamp = 0.0;
     DropsSinceLastLog = 0;
     LastBackpressureLogTimestamp.store(0.0);
-    PublishState->LastSubject.Reset();
+    PublishState->GetSubjectSlot().Reset();
 
     bInitialized = true;
-    PublishState->Gate->Open();
+    PublishState->Open();
     return FO3DTransportResult::Ok();
 }
 
@@ -209,33 +162,32 @@ FO3DNngSender::~FO3DNngSender()
     Stop();
     // nng_close() in Stop() has returned, so no pipe callback is running for this socket
     // (needs-FFI-verification); a late one would resolve the token to nothing anyway.
-    GetSenderPipeContextRegistry().Unregister(PipeToken);
+    O3DNngSenderPrivate::GetSenderPipeContextRegistry().Unregister(PipeToken);
     PipeToken = nullptr;
 }
 
 FO3DTransportResult FO3DNngSender::Start()
 {
-    if (!bInitialized.Load())
+    if (!bInitialized.load())
     {
         UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender Start called before Initialize"));
         return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("NNG sender Start() before a successful Initialize()."));
     }
 
-    FScopeLock Lock(&StateMutex);
-
-    if (bRunning.Load())
+    if (bRunning.load())
     {
         return FO3DTransportResult::Ok();
     }
 
-    // The worker does not exist yet, so this thread owns the socket here (TRB-33).
-    BackoffAttempt = 0;
-    LastBackoffAttemptTime = 0.0;
+    // The worker does not exist yet, so this thread owns the socket and the queue here (TRB-33).
+    DrainQueue();
+    ReopenPolicy = FO3DReconnectPolicy(O3DNngSenderPrivate::MakeReopenSettings());
     int32 OpenError = 0;
     const bool bOpened = OpenSocket(&OpenError);
     if (!bOpened && Options.bListen)
     {
-        // OpenSocket logged the reason (for example, the port is in use).
+        // OpenSocket logged the reason (for example, the port is in use). A listener must report
+        // this at once (ADR 0007 item 3), so it is opened here rather than on the worker.
         const FO3DTransportResult Result = FO3DTransportResult::Error(
             OpenError == NNG_EADDRINUSE ? EO3DTransportError::AddressInUse : EO3DTransportError::ConnectFailed,
             FString::Printf(TEXT("NNG sender could not listen on %s (%d %s)."), *O3DRedact::Url(Options.CanonicalUri), OpenError,
@@ -243,16 +195,26 @@ FO3DTransportResult FO3DNngSender::Start()
         ConnectionState.End(EO3DConnectionState::Failed, Result);
         return Result;
     }
+    if (!bOpened)
+    {
+        ReopenPolicy.OnFailure(FPlatformTime::Seconds());
+    }
 
-    PublishState->Gate->Open();
+    PublishState->Open();
 
     // No peer pipe yet; the worker reports the first one. A dialer that could not dial yet
     // keeps retrying (below), so it is Connecting too.
     bWorkerSawPeer = false;
     ConnectionState.Begin(EO3DConnectionState::Connecting);
 
-    bStopWorker = false;
-    StartWorker();
+    if (!Worker.Start(TEXT("O3D_NNG_Sender_Worker"), [this]() { return RunWorkerIteration(); }, Queue))
+    {
+        UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender could not start its worker thread."));
+        CloseSocket();
+        const FO3DTransportResult Result = FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("NNG sender could not start its worker thread."));
+        ConnectionState.End(EO3DConnectionState::Failed, Result);
+        return Result;
+    }
     bRunning = true;
 
     UE_LOG(LogO3DNngSender, Log, TEXT("NNG sender started - Mode=%s Role=%s URI=%s (queue=%llu bytes)"),
@@ -271,29 +233,24 @@ FO3DTransportResult FO3DNngSender::Start()
 
 void FO3DNngSender::Stop()
 {
-    FScopeLock Lock(&StateMutex);
+    // WP-S5 ordering: close the audio gate (waits for in-flight submits), join the worker (so no
+    // nng_send is in flight), close the socket, drain. The gate is closed even when not running so
+    // a sink never outlives Stop().
+    PublishState->Close();
 
-    // WP-S5 ordering: close the audio gate (waits for in-flight submits), join the worker,
-    // close the socket, drain. The wake event belongs to the shared queue (TRB-12).
-    // The gate is closed even when not running so a sink never outlives Stop().
-    PublishState->Gate->Close();
-
-    if (!bRunning.Load())
+    if (!bRunning.load())
     {
         ConnectionState.End(EO3DConnectionState::Idle);
         return;
     }
 
-    bStopWorker = true;
-    PublishState->SendQueue.Wake();
-
-    StopWorker();
+    bRunning = false;
+    Worker.Stop();
 
     // The worker has exited, so this thread owns the socket again (TRB-33).
     CloseSocket();
     DrainQueue();
 
-    bRunning = false;
     PipeContext->bConnected.store(false);
     // The worker, the only thread that reports changes while running, has exited.
     ConnectionState.End(EO3DConnectionState::Idle);
@@ -302,7 +259,7 @@ void FO3DNngSender::Stop()
 
 bool FO3DNngSender::Send(const O3DS::SubjectList& List)
 {
-    if (!bInitialized.Load() || !bRunning.Load())
+    if (!bInitialized.load() || !bRunning.load())
     {
         FO3DPerformanceMetrics::Get().RecordFrameDropped();
         return false;
@@ -314,7 +271,7 @@ bool FO3DNngSender::Send(const O3DS::SubjectList& List)
 
     std::vector<char> Buffer;
     const double TimestampSeconds = FPlatformTime::Seconds();
-    int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(Buffer, TimestampSeconds);
+    const int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(Buffer, TimestampSeconds);
     if (BytesWritten <= 0)
     {
         UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender failed to serialize subject list"));
@@ -331,19 +288,19 @@ bool FO3DNngSender::Send(const O3DS::SubjectList& List)
         ObservedSubject = UTF8_TO_TCHAR(List.mItems[0]->mName.c_str());
     }
 
-    return SendBytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten, ObservedSubject) == EO3DSendResult::Queued;
+    TArray<uint8> Bytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten);
+    return EnqueueFrame(MoveTemp(Bytes), MoveTemp(ObservedSubject), TimestampSeconds, /*bFullSync=*/false) == EO3DSendResult::Queued;
 }
 
 EO3DSendResult FO3DNngSender::SendSerialized(FO3DSendPayload&& Payload)
 {
-    if (!bInitialized.Load() || !bRunning.Load())
+    if (!bInitialized.load() || !bRunning.load())
     {
         FO3DPerformanceMetrics::Get().RecordFrameDropped();
         return EO3DSendResult::NotRunning;
     }
 
-    const int32 Len = Payload.Bytes.Num();
-    if (Len <= 0)
+    if (Payload.Bytes.Num() <= 0)
     {
         return EO3DSendResult::Invalid;
     }
@@ -354,22 +311,54 @@ EO3DSendResult FO3DNngSender::SendSerialized(FO3DSendPayload&& Payload)
     // normal per-frame pipeline; see O3DSenderSerializer.cpp), so recording
     // them here is not a double-count against anything.
     FO3DPerformanceMetrics::Get().RecordFrameCaptured();
-    FO3DPerformanceMetrics::Get().RecordBytesSerialized(Len);
+    FO3DPerformanceMetrics::Get().RecordBytesSerialized(Payload.Bytes.Num());
 
     // No NotConnected: a frame queued before a peer exists is dropped and counted by the worker,
-    // as NNG itself would. The shared queue of WP-A1 step 4 takes Payload.Bytes without a copy.
-    return SendBytes(Payload.Bytes.GetData(), Len, Payload.Subject);
+    // as NNG itself would. The queue takes Payload.Bytes without a copy.
+    return EnqueueFrame(MoveTemp(Payload.Bytes), MoveTemp(Payload.Subject), Payload.CaptureTimeSec, Payload.bFullSync);
+}
+
+EO3DSendResult FO3DNngSender::EnqueueFrame(TArray<uint8>&& Bytes, FString Subject, double CaptureTimeSec, bool bFullSync)
+{
+    // Audio frames carry the subject last sent (their metadata's SubjectName).
+    if (!Subject.IsEmpty())
+    {
+        PublishState->GetSubjectSlot().Set(Subject);
+    }
+
+    const int32 Len = Bytes.Num();
+    const EO3DSendResult Result = Queue->Enqueue(FO3DSendItem::MakeMocap(MoveTemp(Bytes), MoveTemp(Subject), CaptureTimeSec, bFullSync));
+    if (Result != EO3DSendResult::Queued)
+    {
+        DroppedFrames.fetch_add(1);
+        FO3DPerformanceMetrics::Get().RecordTransportFrameDropped();
+
+        // Any sending thread may get here; the compare-exchange lets one of them log (TRB-43).
+        const double Now = FPlatformTime::Seconds();
+        double Last = LastBackpressureLogTimestamp.load();
+        if (Now - Last > 2.0 && LastBackpressureLogTimestamp.compare_exchange_strong(Last, Now))
+        {
+            UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender queue full (pending=%lld / limit=%llu bytes). Dropping frame."),
+                Queue->GetStats().Mocap.PendingBytes, QueueLimitBytes.load());
+        }
+        return Result;
+    }
+
+    // Record successful send metrics
+    FO3DPerformanceMetrics::Get().RecordBytesSent(Len);
+    TransportMetrics->RecordFrameSent(static_cast<uint64>(Len));
+    return EO3DSendResult::Queued;
 }
 
 /**
- * Control (ADR 0011): the envelope rides the send queue in-band, as audio does, so the worker
- * sends it in order with the frames around it. Not counted as a frame. Pair and push sockets
+ * Control (ADR 0011): the envelope rides the send queue in-band, as audio does, with a cap of its
+ * own, and the worker sends it in queue order. Not counted as a frame. Pair and push sockets
  * deliver it reliably; a pub socket can drop it for a slow subscriber, which the control
  * publisher's redundancy and snapshots cover (ADR 0005 Q3).
  */
 EO3DSendResult FO3DNngSender::SendControl(const uint8* Envelope, int32 Len)
 {
-    if (!bInitialized.Load() || !bRunning.Load())
+    if (!bInitialized.load() || !bRunning.load())
     {
         return EO3DSendResult::NotRunning;
     }
@@ -378,48 +367,26 @@ EO3DSendResult FO3DNngSender::SendControl(const uint8* Envelope, int32 Len)
     {
         return EO3DSendResult::Invalid;
     }
-    return EnqueuePayload(Envelope, Len) ? EO3DSendResult::Queued : EO3DSendResult::DroppedBackpressure;
-}
-
-/** Enqueue already-serialized bytes for transmission and record transport-level stats/subject bookkeeping. */
-EO3DSendResult FO3DNngSender::SendBytes(const uint8* Data, int32 Len, const FString& SubjectName)
-{
-    if (!SubjectName.IsEmpty())
-    {
-        PublishState->LastSubject.Set(SubjectName);
-    }
-
-    if (!EnqueuePayload(Data, Len))
-    {
-        FScopeLock StatsLock(&StatsMutex);
-        Stats.DroppedFrames++;
-        FO3DPerformanceMetrics::Get().RecordTransportFrameDropped();
-        return EO3DSendResult::DroppedBackpressure;
-    }
-
-    // Record successful send metrics
-    FO3DPerformanceMetrics::Get().RecordBytesSent(Len);
-    TransportMetrics->RecordFrameSent(static_cast<uint64>(Len));
-
-    return EO3DSendResult::Queued;
+    return Queue->Enqueue(FO3DSendItem::MakeControl(TArray<uint8>(Envelope, Len)));
 }
 
 void FO3DNngSender::Tick(float /*DeltaSeconds*/)
 {
-    // Nothing to do on the game thread: the worker owns the socket and reconnects it (TRB-33).
+    // Nothing to do on the game thread: the worker owns the socket and reopens it (TRB-33).
     // A dialer also reconnects by itself inside NNG after a dropped connection.
 }
 
 FO3DTransportStats FO3DNngSender::GetStats() const
 {
+    const FO3DSendQueueStats QueueStats = Queue->GetStats();
     FO3DTransportStats Copy;
-    {
-        FScopeLock Lock(&StatsMutex);
-        Copy = Stats;
-    }
-    Copy.DroppedFrames += PublishState->AudioDropped.load();
+    Copy.FramesSent = FramesSent.load();
+    Copy.BytesSent = BytesSent.load();
+    Copy.DroppedFrames = DroppedFrames.load();
+    Copy.SendErrors = SendErrors.load();
+    Copy.PendingFrames = QueueStats.Mocap.PendingItems;
+    Copy.PendingBytes = QueueStats.GetPendingBytes();
     Copy.State = ConnectionState.Get();
-    Copy.PendingBytes = static_cast<int64>(PublishState->SendQueue.GetPendingBytes());
     return Copy;
 }
 
@@ -458,12 +425,12 @@ bool FO3DNngSender::OpenSocket(int32* OutNngError)
         PipeContext->PipeCount.store(0);
         PipeContext->bConnected.store(false);
 
-        const int NotifyAdd = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_ADD_POST, SenderPipeCallback, PipeToken);
+        const int NotifyAdd = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_ADD_POST, O3DNngSenderPrivate::SenderPipeCallback, PipeToken);
         if (NotifyAdd != 0)
         {
             UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender pipe notify add failed (%d) %s"), NotifyAdd, UTF8_TO_TCHAR(nng_strerror(NotifyAdd)));
         }
-        const int NotifyRem = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_REM_POST, SenderPipeCallback, PipeToken);
+        const int NotifyRem = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_REM_POST, O3DNngSenderPrivate::SenderPipeCallback, PipeToken);
         if (NotifyRem != 0)
         {
             UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender pipe notify remove failed (%d) %s"), NotifyRem, UTF8_TO_TCHAR(nng_strerror(NotifyRem)));
@@ -471,7 +438,7 @@ bool FO3DNngSender::OpenSocket(int32* OutNngError)
 
         // NNG's send buffer is an int counting messages (0-8192), not bytes (TRB-36). With the
         // default depth, a pub socket drops whatever overflows a subscriber's per-pipe queue, so a
-        // burst of frames loses messages even on 127.0.0.1. The application queue (MaxQueueBytes)
+        // burst of frames loses messages even on 127.0.0.1. The application queue (nng.qmax)
         // remains the byte limit and backpressure point.
         constexpr int NngSendBufMessages = 1024;
         const int SetSendBufRet = nng_socket_set_int(NewSocket->Socket, NNG_OPT_SENDBUF, NngSendBufMessages);
@@ -508,8 +475,6 @@ bool FO3DNngSender::OpenSocket(int32* OutNngError)
         }
         delete NewSocket;
         Socket = nullptr;
-        LastBackoffAttemptTime = FPlatformTime::Seconds();
-        BackoffAttempt = FMath::Min(BackoffAttempt + 1, 10);
         return false;
     }
 
@@ -520,8 +485,6 @@ bool FO3DNngSender::OpenSocket(int32* OutNngError)
     }
 
     Socket = NewSocket;
-    BackoffAttempt = 0;
-    LastBackoffAttemptTime = FPlatformTime::Seconds();
     return true;
 }
 
@@ -529,6 +492,7 @@ void FO3DNngSender::CloseSocket()
 {
     if (Socket)
     {
+        // nng_close: only the thread that owns the socket gets here, so no nng_send is in flight.
         delete Socket;
         Socket = nullptr;
     }
@@ -542,97 +506,78 @@ bool FO3DNngSender::EnsureSocketOnWorker()
     }
 
     const double Now = FPlatformTime::Seconds();
-    const double Delay = FMath::Min(5.0, FMath::Pow(2.0, static_cast<double>(FMath::Clamp(BackoffAttempt, 0, 6))) * 0.1);
-    if (Now - LastBackoffAttemptTime < Delay)
+    if (!ReopenPolicy.IsDue(Now))
     {
         return false;
     }
-
-    return OpenSocket();
+    if (OpenSocket())
+    {
+        ReopenPolicy.OnSuccess();
+        return true;
+    }
+    ReopenPolicy.OnFailure(Now);
+    return false;
 }
 
-void FO3DNngSender::StartWorker()
+uint32 FO3DNngSender::RunWorkerIteration()
 {
-    if (!WorkerThread)
-    {
-        Worker = new FNngSenderRunnable(*this);
-        WorkerThread = FRunnableThread::Create(Worker, TEXT("O3D_NNG_Sender_Worker"));
-    }
-}
+    using namespace O3DNngSenderPrivate;
 
-void FO3DNngSender::StopWorker()
-{
-    if (WorkerThread)
+    if (bWorkerPausedForTesting.load())
     {
-        WorkerThread->WaitForCompletion();
-        delete WorkerThread;
-        WorkerThread = nullptr;
-    }
-    if (Worker)
-    {
-        delete Worker;
-        Worker = nullptr;
+        PausedIterations.fetch_add(1);
+        return PausedWaitMs;
     }
 
-    bStopWorker = false;
-}
+    // The worker is the only thread that opens, closes or reopens the socket while running (TRB-33).
+    EnsureSocketOnWorker();
+    UpdateConnectionStateOnWorker();
 
-uint32 FO3DNngSender::RunWorker()
-{
-    TArray<uint8> Bytes;
-    while (!bStopWorker.Load())
+    FO3DSendItem Item;
+    if (!Queue->Dequeue(Item))
     {
-        // The worker is the only thread that opens, closes or reopens the socket while
-        // running (TRB-33).
-        EnsureSocketOnWorker();
-        UpdateConnectionStateOnWorker();
-
-        if (!PublishState->SendQueue.Dequeue(Bytes))
-        {
-            PublishState->SendQueue.WaitForWork(50);
-            continue;
-        }
-
-        // Control envelopes (ADR 0011) share this queue but are never counted as frames.
-        TConstArrayView<uint8> ControlPayload;
-        const bool bIsControl = O3DS::TryGetControlPayload(Bytes.GetData(), Bytes.Num(), ControlPayload);
-
-        if (!Socket)
-        {
-            if (!bIsControl)
-            {
-                RecordSendDrop();
-            }
-            continue;
-        }
-
-        const uint64 PayloadSize = static_cast<uint64>(Bytes.Num());
-        const int Ret = nng_send(Socket->Socket, Bytes.GetData(), Bytes.Num(), NNG_FLAG_NONBLOCK);
-        if (Ret == NNG_EAGAIN)
-        {
-            // No peer ready, or NNG's own send buffer is full (TRB-34). This payload is the
-            // oldest one queued: drop it and count it. It is never put back at the tail, which
-            // would reorder frames, busy-spin while no peer exists and replay a stale backlog.
-            if (!bIsControl)
-            {
-                RecordSendDrop();
-            }
-            continue;
-        }
-        if (Ret != 0)
-        {
-            HandleSendError(Ret);
-            continue;
-        }
-
-        if (!bIsControl)
-        {
-            FScopeLock StatsLock(&StatsMutex);
-            Stats.FramesSent++;
-            Stats.BytesSent += PayloadSize;
-        }
+        return IdleWaitMs;
     }
 
+    const bool bFrame = Item.Kind == EO3DSendItemKind::Mocap;
+    if (!Socket)
+    {
+        if (bFrame)
+        {
+            RecordSendDrop();
+        }
+        return 0;
+    }
+
+    const int32 PayloadSize = Item.Bytes.Num();
+    const int Ret = nng_send(Socket->Socket, Item.Bytes.GetData(), static_cast<size_t>(PayloadSize), NNG_FLAG_NONBLOCK);
+    if (Ret == NNG_EAGAIN)
+    {
+        // No peer ready, or NNG's own send buffer is full (TRB-34). This item is the oldest one
+        // queued: drop it. It is never put back at the tail, which would reorder frames,
+        // busy-spin while no peer exists and replay a stale backlog. Frames are counted.
+        if (bFrame)
+        {
+            RecordSendDrop();
+        }
+        return 0;
+    }
+    if (Ret != 0)
+    {
+        HandleSendError(Ret, bFrame);
+        return 0;
+    }
+
+    // Counted here, once nng_send took the message (the conformance round trip waits for it, #301).
+    if (bFrame)
+    {
+        FramesSent.fetch_add(1);
+        BytesSent.fetch_add(PayloadSize);
+    }
+    else if (Item.Kind == EO3DSendItemKind::Audio)
+    {
+        BytesSent.fetch_add(PayloadSize);
+    }
     return 0;
 }
 
@@ -657,12 +602,27 @@ void FO3DNngSender::UpdateConnectionStateOnWorker()
     }
 }
 
+void FO3DNngSender::SetWorkerPausedForTesting(bool bPaused)
+{
+    const int64 Before = PausedIterations.load();
+    bWorkerPausedForTesting.store(bPaused);
+    Queue->Wake();
+    if (!bPaused)
+    {
+        return;
+    }
+    // An iteration that started before the store may still dequeue; the next one sees the flag.
+    // Wait for that one, so a test's sends after this call stay queued.
+    const double Deadline = FPlatformTime::Seconds() + 5.0;
+    while (Worker.IsRunning() && PausedIterations.load() == Before && FPlatformTime::Seconds() < Deadline)
+    {
+        FPlatformProcess::YieldThread();
+    }
+}
+
 void FO3DNngSender::RecordSendDrop()
 {
-    {
-        FScopeLock StatsLock(&StatsMutex);
-        Stats.DroppedFrames++;
-    }
+    DroppedFrames.fetch_add(1);
 
     // Dropping while no peer is connected is expected (a dialer before its first connection),
     // so this is a rate-limited Log line, not a warning.
@@ -677,41 +637,19 @@ void FO3DNngSender::RecordSendDrop()
     }
 }
 
-bool FO3DNngSender::EnqueuePayload(const uint8* Data, int32 Size)
-{
-    if (Size <= 0 || Data == nullptr)
-    {
-        return false;
-    }
-
-    TArray<uint8> Bytes(Data, Size);
-    if (!PublishState->SendQueue.Enqueue(MoveTemp(Bytes)))
-    {
-        // Any sending thread may get here; the compare-exchange lets one of them log (TRB-43).
-        const double Now = FPlatformTime::Seconds();
-        double Last = LastBackpressureLogTimestamp.load();
-        if (Now - Last > 2.0 && LastBackpressureLogTimestamp.compare_exchange_strong(Last, Now))
-        {
-            UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender queue full (pending=%llu / limit=%llu bytes). Dropping frame."),
-                PublishState->SendQueue.GetPendingBytes(),
-                Options.MaxQueueBytes);
-        }
-        return false;
-    }
-
-    return true;
-}
-
 void FO3DNngSender::DrainQueue()
 {
-    PublishState->SendQueue.Empty();
+    // Only while the worker is not running: Empty() is a consumer-side call. Not counted as drops.
+    check(!Worker.IsRunning());
+    Queue->Empty();
 }
 
-void FO3DNngSender::HandleSendError(int ErrorCode)
+void FO3DNngSender::HandleSendError(int ErrorCode, bool bFrame)
 {
+    SendErrors.fetch_add(1);
+    if (bFrame)
     {
-        FScopeLock StatsLock(&StatsMutex);
-        Stats.DroppedFrames++;
+        DroppedFrames.fetch_add(1);
     }
 
     const double Now = FPlatformTime::Seconds();
@@ -724,11 +662,10 @@ void FO3DNngSender::HandleSendError(int ErrorCode)
     if (ErrorCode == NNG_ECLOSED)
     {
         // The socket is unusable. Close it here, on the worker, and let EnsureSocketOnWorker
-        // reopen it after the backoff delay.
+        // reopen it when the reopen policy allows.
         CloseSocket();
         PipeContext->bConnected.store(false);
-        LastBackoffAttemptTime = Now;
-        BackoffAttempt = FMath::Min(BackoffAttempt + 1, 10);
+        ReopenPolicy.OnFailure(Now);
     }
 }
 
@@ -755,7 +692,7 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DNngSender::CreateAudioS
     EncoderSettings.DefaultSubject = SubjectFallback;
     EncoderSettings.SourceGuid = AudioSourceGuid;
 
-    return MakeShared<FNngSenderAudioSink, ESPMode::ThreadSafe>(PublishState, EffectiveConfig, MoveTemp(EncoderSettings));
+    return MakeShared<FO3DQueuedSenderAudioSink, ESPMode::ThreadSafe>(PublishState, EffectiveConfig, MoveTemp(EncoderSettings));
 }
 
 FString FO3DNngSender::ResolveAudioSubjectFallback() const

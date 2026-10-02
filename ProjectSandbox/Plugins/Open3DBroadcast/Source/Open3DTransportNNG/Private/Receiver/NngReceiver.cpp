@@ -7,11 +7,7 @@
 
 #include "Logging/LogMacros.h"
 #include "HAL/PlatformTime.h"
-#include "Misc/ScopeLock.h"
 #include "O3DFfiContextRegistry.h"
-#include "Transport/O3DSerializedFrameConsumer.h"
-#include "O3DUnifiedMessage.h"
-#include "O3DAudioFrameCodec.h"
 
 #if !defined(NNG_STATIC_LIB)
 #define NNG_STATIC_LIB 1
@@ -26,12 +22,20 @@ THIRD_PARTY_INCLUDES_END
 
 DEFINE_LOG_CATEGORY_STATIC(LogO3DNngReceiver, Log, All);
 
-namespace
+namespace O3DNngReceiverPrivate
 {
-    constexpr double InitialBackoffSeconds = 0.1;
-    constexpr double MaxBackoffSeconds = 5.0;
     /** Largest message accepted. Also set as NNG_OPT_RECVMAXSZ, so NNG enforces it (TRB-42). */
     constexpr uint64 MaxPayloadBytes = 50ull * 1024ull * 1024ull;
+
+    /** Reopening a socket that failed to listen or dial: 0.1 s doubling to 5 s, as before WP-A1 PR 4d. */
+    FO3DReconnectPolicySettings MakeReopenSettings()
+    {
+        FO3DReconnectPolicySettings Settings;
+        Settings.InitialDelaySeconds = 0.1;
+        Settings.MaxDelaySeconds = 5.0;
+        Settings.Multiplier = 2.0;
+        return Settings;
+    }
 
     TO3DFfiContextRegistry<FNngReceiverPipeContext>& GetReceiverPipeContextRegistry()
     {
@@ -40,7 +44,7 @@ namespace
     }
 
     /** NNG pipe callback. `Context` is an opaque token, never a receiver pointer (TRB-42). */
-    static void ReceiverPipeCallback(nng_pipe /*Pipe*/, nng_pipe_ev Event, void* Context)
+    void ReceiverPipeCallback(nng_pipe /*Pipe*/, nng_pipe_ev Event, void* Context)
     {
         const TSharedPtr<FNngReceiverPipeContext, ESPMode::ThreadSafe> Pipe = GetReceiverPipeContextRegistry().Resolve(Context);
         if (!Pipe.IsValid())
@@ -82,30 +86,11 @@ struct FO3DNngReceiver::FNngSocketWrapper
 
 FO3DNngReceiver::FO3DNngReceiver()
     : PipeContext(MakeShared<FNngReceiverPipeContext, ESPMode::ThreadSafe>())
+    , ReopenPolicy(O3DNngReceiverPrivate::MakeReopenSettings())
 {
-    PipeToken = GetReceiverPipeContextRegistry().Register(PipeContext);
+    PipeToken = O3DNngReceiverPrivate::GetReceiverPipeContextRegistry().Register(PipeContext);
 }
 
-/**
- * Initialize the NNG receiver from a transport configuration.
- *
- * Parses receiver-specific options and prepares internal state for operation.
- *
- * - Calls Stop() to ensure any previous receiver state is torn down.
- * - Parses receiver options via O3DNNG::ParseReceiverOptions(Config, Options, Error).
- *   On parse failure a warning is logged (UE_LOG) and the method returns false.
- * - On success updates ActiveConfig from Config and overrides:
- *     - ActiveConfig.Uri = Options.CanonicalUri
- *     - ActiveConfig.StreamId = Options.StreamId
- * - Copies audio settings into ActiveAudioConfig (audio stream label is derived from StreamId).
- * - Resets runtime counters/state: Stats, pipe context, BackoffAttempt, LastDialAttempt, LastErrorLogTimestamp.
- * - Marks the receiver initialized (bInitialized = true).
- *
- * @param Config  Transport configuration to use for initialization.
- * @return Ok, or InvalidConfig if option parsing failed.
- *
- * Thread-safety: Not thread-safe. Caller must ensure no concurrent access to the receiver while initializing.
- */
 FO3DTransportResult FO3DNngReceiver::Initialize(const FO3DTransportConfig& Config)
 {
     Stop();
@@ -125,28 +110,28 @@ FO3DTransportResult FO3DNngReceiver::Initialize(const FO3DTransportConfig& Confi
     ActiveAudioConfig = Config.Audio;
     // Note: Audio stream label is now automatically derived from StreamId
 
-    {
-        FScopeLock Lock(&StatsMutex);
-        Stats.Reset();
-    }
+    // The consumer gets Options.StreamId as its stream, as before; messages above the receive
+    // limit NNG enforces are refused by the demux too.
+    FO3DReceiveDemuxSettings DemuxSettings = Demux.GetSettings();
+    DemuxSettings.StreamId = Options.StreamId;
+    DemuxSettings.MaxMessageBytes = static_cast<int32>(O3DNngReceiverPrivate::MaxPayloadBytes);
+    Demux.SetSettings(DemuxSettings);
+    Demux.ResetStats();
+
+    FramesReceived.store(0);
+    BytesReceived.store(0);
+    ReceiveErrors.store(0);
     PipeContext->PipeCount.store(0);
     PipeContext->bConnectedWithoutPipes.store(Options.bListen);
-    BackoffAttempt = 0;
-    LastDialAttempt = 0.0;
     LastErrorLogTimestamp = 0.0;
 
     bInitialized = true;
     return FO3DTransportResult::Ok();
 }
 
-void FO3DNngReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer)
-{
-    Consumer = InConsumer;
-}
-
 void FO3DNngReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig)
 {
-    AudioSink = Sink;
+    Demux.SetAudioSink(Sink);
     if (Sink.IsValid())
     {
         ActiveAudioConfig = AudioConfig;
@@ -158,30 +143,29 @@ FO3DNngReceiver::~FO3DNngReceiver()
 {
     Stop();
     // After nng_close() a late pipe callback resolves the token to nothing (TRB-42).
-    GetReceiverPipeContextRegistry().Unregister(PipeToken);
+    O3DNngReceiverPrivate::GetReceiverPipeContextRegistry().Unregister(PipeToken);
     PipeToken = nullptr;
 }
 
 FO3DTransportResult FO3DNngReceiver::Start()
 {
-    if (!bInitialized.Load())
+    if (!bInitialized.load())
     {
         UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver Start called before Initialize"));
         return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("NNG receiver Start() before a successful Initialize()."));
     }
 
-    if (bRunning.Load())
+    if (bRunning.load())
     {
         return FO3DTransportResult::Ok();
     }
 
-    if (!Consumer.IsValid())
+    if (!Demux.HasConsumer())
     {
         return FO3DTransportResult::Error(EO3DTransportError::NoConsumer, TEXT("NNG receiver Start() without a frame consumer (SetConsumer)."));
     }
 
-    BackoffAttempt = 0;
-    LastDialAttempt = 0.0;
+    ReopenPolicy.Reset();
 
     int32 OpenError = 0;
     const bool bOpened = OpenSocket(&OpenError);
@@ -194,6 +178,10 @@ FO3DTransportResult FO3DNngReceiver::Start()
                 OpenError != 0 ? UTF8_TO_TCHAR(nng_strerror(OpenError)) : TEXT("")));
         ConnectionState.End(EO3DConnectionState::Failed, Result);
         return Result;
+    }
+    if (!bOpened)
+    {
+        ReopenPolicy.OnFailure(FPlatformTime::Seconds());
     }
     bRunning = true;
     bSawPeer = false;
@@ -209,43 +197,26 @@ FO3DTransportResult FO3DNngReceiver::Start()
 
 void FO3DNngReceiver::Stop()
 {
-    ControlSink.Reset();
-    if (!bRunning.Load())
-    {
-        CloseSocket();
-        ConnectionState.End(EO3DConnectionState::Idle);
-        return;
-    }
-
     CloseSocket();
-    bRunning = false;
-    PipeContext->bConnected.store(false);
+    // The consumer and both sinks are released here, never called again after Stop (TRF-38).
+    Demux.ReleaseSinks();
+    if (bRunning.load())
+    {
+        bRunning = false;
+        PipeContext->bConnected.store(false);
+    }
     ConnectionState.End(EO3DConnectionState::Idle);
 }
 
 /**
- * Polls the NNG socket for incoming messages and processes up to FO3DNngReceiver::FramesPerPoll frames.
- *
- * Behavior:
- *  - Returns 0 immediately if the receiver is not running or if a required socket cannot be opened/dialed.
- *  - Ensures a dial or listen socket depending on Options.bListen (calls EnsureDialSocket() or OpenSocket()).
- *  - Receives messages using nng_recv with NNG_FLAG_NONBLOCK | NNG_FLAG_ALLOC.
- *    - If nng_recv returns NNG_EAGAIN or NNG_ETIMEDOUT, the poll loop stops (no more messages).
- *    - On other non-zero return values, HandleReceiveError(Ret) is called and the loop exits.
- *  - Zero-length messages are freed and skipped.
- *  - Messages exceeding MaxPayloadBytes are freed, counted as dropped (Stats.DroppedFrames++), and skipped.
- *    NNG_OPT_RECVMAXSZ is set to the same cap, so NNG normally rejects them first.
- *  - Valid messages are handed to ProcessReceivedPayload(...). The allocated buffer is freed with nng_free after processing.
- *    - If ProcessReceivedPayload returns true: increment FramesProcessed, increment Stats.FramesReceived, add to Stats.BytesReceived.
- *      This is the only place that counts a received frame, mocap or audio (TRB-42).
- *    - If it returns false: increment Stats.DroppedFrames.
- *  - All updates to Stats are performed under StatsMutex (FScopeLock).
- *
- * @return Number of frames successfully processed during this poll.
+ * Takes up to FramesPerPoll messages NNG already received (nng_recv, NNG_FLAG_NONBLOCK |
+ * NNG_FLAG_ALLOC) and routes each through the demux. Counts every message once (TRB-42): mocap in
+ * FramesReceived and BytesReceived, rejects (bad audio, malformed, too large) and receive errors
+ * in ReceiveErrors. Reopens a socket that failed to listen or dial when the policy allows.
  */
 int32 FO3DNngReceiver::Poll()
 {
-    if (!bRunning.Load())
+    if (!bRunning.load())
     {
         return 0;
     }
@@ -253,29 +224,14 @@ int32 FO3DNngReceiver::Poll()
     // Pipes are added and removed asynchronously by NNG, so checking before a reopen is enough.
     UpdateConnectionState();
 
-    if (!Options.bListen)
-    {
-        if (!EnsureDialSocket())
-        {
-            return 0;
-        }
-    }
-    else if (!Socket)
-    {
-        if (!OpenSocket())
-        {
-            return 0;
-        }
-    }
-
-    if (!Socket)
+    if (!EnsureSocket())
     {
         return 0;
     }
 
     int32 FramesProcessed = 0;
 
-    while (FramesProcessed < FO3DNngReceiver::FramesPerPoll)
+    while (FramesProcessed < FO3DNngReceiver::FramesPerPoll && Socket)
     {
         void* Buffer = nullptr;
         size_t Size = 0;
@@ -297,32 +253,35 @@ int32 FO3DNngReceiver::Poll()
             continue;
         }
 
-        if (Size > MaxPayloadBytes)
+        if (Size > O3DNngReceiverPrivate::MaxPayloadBytes)
         {
             UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver payload %llu bytes exceeds safety cap; dropping."), static_cast<unsigned long long>(Size));
             nng_free(Buffer, Size);
-            {
-                FScopeLock Lock(&StatsMutex);
-                Stats.DroppedFrames++;
-            }
+            ReceiveErrors.fetch_add(1);
             continue;
         }
 
-        // Process the payload (routes to mocap or audio based on unified header)
-        const bool bProcessed = ProcessReceivedPayload(static_cast<const uint8*>(Buffer), static_cast<int32>(Size));
+        EO3DDemuxResult Result = EO3DDemuxResult::Malformed;
+        ProcessReceivedPayload(static_cast<const uint8*>(Buffer), static_cast<int32>(Size), &Result);
         nng_free(Buffer, Size);
 
-        if (bProcessed)
+        switch (Result)
         {
-            FScopeLock Lock(&StatsMutex);
-            Stats.FramesReceived++;
-            Stats.BytesReceived += static_cast<int64>(Size);
+        case EO3DDemuxResult::Mocap:
+            FramesReceived.fetch_add(1);
+            BytesReceived.fetch_add(static_cast<int64>(Size));
             ++FramesProcessed;
-        }
-        else
-        {
-            FScopeLock Lock(&StatsMutex);
-            Stats.DroppedFrames++;
+            break;
+        case EO3DDemuxResult::Audio:
+            ++FramesProcessed;
+            break;
+        case EO3DDemuxResult::AudioRejected:
+        case EO3DDemuxResult::Malformed:
+        case EO3DDemuxResult::Oversize:
+            ReceiveErrors.fetch_add(1);
+            break;
+        default:
+            break; // control (to the control sink, not a frame), keepalives, unknown kinds
         }
     }
 
@@ -332,10 +291,9 @@ int32 FO3DNngReceiver::Poll()
 FO3DTransportStats FO3DNngReceiver::GetStats() const
 {
     FO3DTransportStats Copy;
-    {
-        FScopeLock Lock(&StatsMutex);
-        Copy = Stats;
-    }
+    Copy.FramesReceived = FramesReceived.load();
+    Copy.BytesReceived = BytesReceived.load();
+    Copy.ReceiveErrors = ReceiveErrors.load();
     Copy.State = ConnectionState.Get();
     return Copy;
 }
@@ -362,34 +320,10 @@ void FO3DNngReceiver::UpdateConnectionState()
 }
 
 /**
- * OpenSocket
- *
- * Initialize and open an NNG socket based on the current Options and attach it to this receiver.
- *
- * Behavior:
- * - Closes any prior socket before proceeding.
- * - Allocates a new FNngSocketWrapper and attempts to open the appropriate NNG socket for Options.Mode:
- *     - ENngMode::Sub  : open SUB socket and subscribe to Options.Topic (subscribe to all if Topic is empty).
- *     - ENngMode::Pair : open PAIR socket.
- *     - ENngMode::Pull : open PULL socket.
- *     - Other modes     : log a warning, free the temporary socket and return false.
- * - For listening endpoints (Options.bListen == true) calls nng_listen; otherwise calls nng_dial with NNG_FLAG_NONBLOCK.
- * - A listening socket counts as connected (ready) once it listens; a dialing socket only after
- *   its first pipe event (TRB-42).
- * - On any open/configure failure logs a warning, deletes the temporary socket, sets Socket to nullptr, and if dialing
- *   updates LastDialAttempt and increments BackoffAttempt.
- * - Before listen/dial resets the pipe context, registers pipe add/remove notifications and sets
- *   NNG_OPT_RECVMAXSZ; on success assigns the new socket to Socket and updates LastDialAttempt.
- *
- * Side effects / member modifications:
- * - Socket            : set to the newly allocated FNngSocketWrapper on success, left/nullified on failure.
- * - PipeContext       : reset; bConnected set to true if a listen succeeds.
- * - LastDialAttempt   : set to current FPlatformTime::Seconds() on success and on dial failure.
- * - BackoffAttempt    : incremented on dial failure when not listening.
- *
- * Return:
- * - true  if the socket was successfully created, configured and attached to this receiver.
- * - false if any step failed or the mode is unsupported.
+ * Opens the socket for Options.Mode (sub subscribes to Options.Topic, or to everything when it is
+ * empty), registers the pipe notifications and NNG_OPT_RECVMAXSZ before listen or dial, then
+ * listens, or dials with NNG_FLAG_NONBLOCK. A listening socket counts as ready once it listens; a
+ * dialing one only after its first pipe event (TRB-42).
  */
 bool FO3DNngReceiver::OpenSocket(int32* OutNngError)
 {
@@ -447,23 +381,23 @@ bool FO3DNngReceiver::OpenSocket(int32* OutNngError)
     {
         // TRB-42: without this, NNG applies its own default receive limit (1 MiB per the NNG
         // option docs) and drops a larger message before Poll() sees it, so the MaxPayloadBytes
-        // check below was unreachable. recv-size-max is a size_t byte count.
-        const int SetMaxSizeRet = nng_socket_set_size(NewSocket->Socket, NNG_OPT_RECVMAXSZ, static_cast<size_t>(MaxPayloadBytes));
+        // check in Poll was unreachable. recv-size-max is a size_t byte count.
+        const int SetMaxSizeRet = nng_socket_set_size(NewSocket->Socket, NNG_OPT_RECVMAXSZ, static_cast<size_t>(O3DNngReceiverPrivate::MaxPayloadBytes));
         if (SetMaxSizeRet != 0)
         {
             UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver could not set the maximum message size to %llu bytes (%d %s)"),
-                static_cast<unsigned long long>(MaxPayloadBytes), SetMaxSizeRet, UTF8_TO_TCHAR(nng_strerror(SetMaxSizeRet)));
+                static_cast<unsigned long long>(O3DNngReceiverPrivate::MaxPayloadBytes), SetMaxSizeRet, UTF8_TO_TCHAR(nng_strerror(SetMaxSizeRet)));
         }
 
         // Notifications are registered before listen/dial so the first pipe event is not missed.
         PipeContext->PipeCount.store(0);
         PipeContext->bConnected.store(false);
-        const int AddNotify = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_ADD_POST, ReceiverPipeCallback, PipeToken);
+        const int AddNotify = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_ADD_POST, O3DNngReceiverPrivate::ReceiverPipeCallback, PipeToken);
         if (AddNotify != 0)
         {
             UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver pipe notify add failed (%d) %s"), AddNotify, UTF8_TO_TCHAR(nng_strerror(AddNotify)));
         }
-        const int RemoveNotify = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_REM_POST, ReceiverPipeCallback, PipeToken);
+        const int RemoveNotify = nng_pipe_notify(NewSocket->Socket, NNG_PIPE_EV_REM_POST, O3DNngReceiverPrivate::ReceiverPipeCallback, PipeToken);
         if (RemoveNotify != 0)
         {
             UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver pipe notify remove failed (%d) %s"), RemoveNotify, UTF8_TO_TCHAR(nng_strerror(RemoveNotify)));
@@ -492,11 +426,6 @@ bool FO3DNngReceiver::OpenSocket(int32* OutNngError)
         }
         delete NewSocket;
         Socket = nullptr;
-        if (!Options.bListen)
-        {
-            LastDialAttempt = FPlatformTime::Seconds();
-            BackoffAttempt = FMath::Min(BackoffAttempt + 1, 10);
-        }
         return false;
     }
 
@@ -506,7 +435,6 @@ bool FO3DNngReceiver::OpenSocket(int32* OutNngError)
     }
 
     Socket = NewSocket;
-    LastDialAttempt = FPlatformTime::Seconds();
     return true;
 }
 
@@ -528,21 +456,18 @@ void FO3DNngReceiver::HandleReceiveError(int ErrorCode)
         LastErrorLogTimestamp = Now;
     }
 
-    {
-        FScopeLock Lock(&StatsMutex);
-        Stats.DroppedFrames++;
-    }
+    ReceiveErrors.fetch_add(1);
 
     if (!Options.bListen)
     {
+        // A dialer's socket is reopened by EnsureSocket when the policy allows.
         CloseSocket();
-        BackoffAttempt = FMath::Min(BackoffAttempt + 1, 10);
-        LastDialAttempt = Now;
+        ReopenPolicy.OnFailure(Now);
         PipeContext->bConnected.store(false);
     }
 }
 
-bool FO3DNngReceiver::EnsureDialSocket()
+bool FO3DNngReceiver::EnsureSocket()
 {
     if (Socket)
     {
@@ -550,120 +475,30 @@ bool FO3DNngReceiver::EnsureDialSocket()
     }
 
     const double Now = FPlatformTime::Seconds();
-    const double Delay = FMath::Min(MaxBackoffSeconds, InitialBackoffSeconds * FMath::Pow(2.0, static_cast<double>(FMath::Clamp(BackoffAttempt, 0, 8))));
-    if ((Now - LastDialAttempt) >= Delay)
-    {
-        if (OpenSocket())
-        {
-            BackoffAttempt = 0;
-            return true;
-        }
-
-        LastDialAttempt = Now;
-    }
-
-    return Socket != nullptr;
-}
-
-bool FO3DNngReceiver::ProcessReceivedPayload(const uint8* Data, int32 Size)
-{
-    if (!Data || Size <= 0)
+    if (!ReopenPolicy.IsDue(Now))
     {
         return false;
     }
-
-    // Try to parse as a unified message
-    O3DS::FUnifiedHeader Header;
-    const uint8* PayloadPtr = nullptr;
-    int32 PayloadSize = 0;
-
-    if (O3DS::ParseUnifiedMessage(Data, Size, Header, PayloadPtr, PayloadSize))
+    if (OpenSocket())
     {
-        // Successfully parsed unified header - route based on message kind
-        if (Header.GetKind() == O3DS::EUnifiedKind::Control)
-        {
-            // ADR 0011: to the control sink if well-formed, otherwise dropped; never a frame.
-            O3DTransport::DeliverControlEnvelope(ControlSink, Data, Size, Options.StreamId);
-            return false;
-        }
-        if (Header.GetKind() == O3DS::EUnifiedKind::Audio)
-        {
-            return ProcessAudioPayload(Header.GetCodec(), PayloadPtr, PayloadSize);
-        }
-        else if (Header.GetKind() == O3DS::EUnifiedKind::Mocap)
-        {
-            // Route mocap data to the frame consumer. TRB-37: hand over only the
-            // payload after the 20-byte unified header, as the TCP and UDP receivers
-            // do; the consumer expects a bare O3DS frame.
-            if (!PayloadPtr || PayloadSize <= 0)
-            {
-                return false;
-            }
-            if (TSharedPtr<ISerializedFrameConsumer> ConsumerPinned = Consumer.Pin())
-            {
-                TArray<uint8> Payload;
-                Payload.SetNumUninitialized(PayloadSize);
-                FMemory::Memcpy(Payload.GetData(), PayloadPtr, PayloadSize);
-                ConsumerPinned->SubmitFrame(Options.StreamId, Payload, FPlatformTime::Seconds());
-                return true;
-            }
-        }
+        ReopenPolicy.OnSuccess();
+        return true;
     }
-    else
-    {
-        // Not a unified message - assume it's raw mocap data for backward compatibility
-        if (TSharedPtr<ISerializedFrameConsumer> ConsumerPinned = Consumer.Pin())
-        {
-            TArray<uint8> Payload;
-            Payload.SetNumUninitialized(Size);
-            FMemory::Memcpy(Payload.GetData(), Data, Size);
-            ConsumerPinned->SubmitFrame(Options.StreamId, Payload, FPlatformTime::Seconds());
-            return true;
-        }
-    }
-
+    ReopenPolicy.OnFailure(Now);
     return false;
 }
 
-bool FO3DNngReceiver::ProcessAudioPayload(O3DS::EUnifiedCodec Codec, const uint8* Payload, int32 PayloadSize)
+bool FO3DNngReceiver::ProcessReceivedPayload(const uint8* Data, int32 Size, EO3DDemuxResult* OutResult)
 {
-    if (!Payload || PayloadSize <= 0)
+    // One classification for every message (ADR 0007 item 7): mocap to the consumer (without the
+    // unified header, TRB-37; raw legacy frames unchanged), audio to the audio sink, control to the
+    // control sink (ADR 0011); a damaged envelope is dropped, never passed on as mocap.
+    const EO3DDemuxResult Result = Demux.ProcessMessage(Data, Size, FPlatformTime::Seconds());
+    if (OutResult)
     {
-        return false;
+        *OutResult = Result;
     }
-
-    TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> SinkPinned = AudioSink.Pin();
-    if (!SinkPinned.IsValid())
-    {
-        // No audio sink configured - silently drop
-        return true;
-    }
-
-    O3DAudio::FEncodedAudioFrame EncodedFrame;
-    if (!O3DAudio::DeserializeEncodedAudioFrame(Codec, Payload, PayloadSize, EncodedFrame))
-    {
-        UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver failed to deserialize audio frame (payload=%d codec=%d)."), PayloadSize, static_cast<int32>(Codec));
-        return false;
-    }
-
-    if (Codec == O3DS::EUnifiedCodec::PCM16)
-    {
-        SinkPinned->SubmitPcm16(EncodedFrame.Meta, EncodedFrame.Payload.GetData(), EncodedFrame.Payload.Num());
-        // Counted once, by Poll() (TRB-42).
-        return true;
-    }
-
-    if (!AudioDecoder.Decode(Codec, EncodedFrame.Meta, EncodedFrame.Payload.GetData(), EncodedFrame.Payload.Num(), DecodedPcmScratch))
-    {
-        UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver failed to decode audio frame (codec=%d)."), static_cast<int32>(Codec));
-        return false;
-    }
-
-    SinkPinned->SubmitPcm16(EncodedFrame.Meta,
-        reinterpret_cast<const uint8*>(DecodedPcmScratch.GetData()),
-        DecodedPcmScratch.Num() * static_cast<int32>(sizeof(int16)));
-    // Counted once, by Poll() (TRB-42).
-    return true;
+    return Result == EO3DDemuxResult::Mocap || Result == EO3DDemuxResult::Audio;
 }
 
 #endif // O3D_WITH_TRANSPORT_NNG

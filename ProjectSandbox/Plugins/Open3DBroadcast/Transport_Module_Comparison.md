@@ -121,37 +121,35 @@ The registry answers the same capability question before an instance exists:
 **Architecture**:
 - Based on [NNG (Nanomsg-Next-Generation)](https://nng.nanomsg.org/) library
 - Multiple messaging patterns with flexible topology
-- Async worker thread for send operations
+- Shared transport blocks (ADR 0007 item 7, WP-A1 PR 4d): `FO3DSendQueue` + `FO3DTransportWorker` for sends, `FO3DUnifiedReceiveDemux` for receives
 - Pipe event callbacks for connection tracking
 
 **Key Classes**:
-- `FO3DNngSender` (`NngSender.h:13`)
-- `FO3DNngReceiver` (`NngReceiver.h:12`)
-- `FNngSenderRunnable` - Background send thread
+- `FO3DNngSender` (`NngSender.h`)
+- `FO3DNngReceiver` (`NngReceiver.h`)
 - `FNngSocketWrapper` - RAII socket management
 
-**Supported Messaging Patterns** (`NngHelpers.h:17-24`):
+**Supported Messaging Patterns** (`NngHelpers.h`):
 | Pattern | Sender Mode | Receiver Mode | Topology |
 |---------|------------|---------------|----------|
 | **Pub/Sub** | Pub (Publisher) | Sub (Subscriber) | 1:N broadcast with topic filtering |
 | **Pair** | Pair | Pair | 1:1 exclusive connection |
 | **Push/Pull** | Push | Pull | N:M load balancing |
 
-**Roles** (`NngHelpers.h:26-31`):
+**Roles** (`NngHelpers.h`):
 - **Server** - Listen/bind mode (accepts connections)
 - **Client** - Dial/connect mode (initiates connections)
 
 **Threading Model**:
-- **Sender**: Async worker thread (`FNngSenderRunnable`)
-  - Dedicated send thread with wake event
-  - MPSC queue for payload buffering
-  - Backpressure via queue byte limit (4MB default)
-  - Exponential backoff on errors
-- **Receiver**: Synchronous polling
-  - Non-blocking `nng_recv()` on `Poll()`
-  - Auto-reconnect with backoff for client mode
+- **Sender**: `SendSerialized`, `SendControl` and the audio sink only enqueue on one `FO3DSendQueue`; an `FO3DTransportWorker` owns the socket and calls `nng_send` with `NNG_FLAG_NONBLOCK`
+  - Frames: `RefuseNewest`, `nng.qmax` bytes (4 MiB default). The worker drops the oldest frame when NNG cannot take it (no peer, NNG send buffer full)
+  - Audio (`nng.qmax` bytes) and control (1,024 envelopes) have budgets of their own
+  - NNG redials dropped connections itself; `FO3DReconnectPolicy` (0.1 s to 5 s) only paces reopening a socket that failed or was closed
+- **Receiver**: Synchronous polling (NNG's own threads do the I/O)
+  - Non-blocking `nng_recv()` on `Poll()`, at most 16 messages per call
+  - Messages go to `FO3DUnifiedReceiveDemux` (consumer, audio sink, control sink)
 
-**Configuration** (`NngHelpers.h:10-15`):
+**Configuration** (`NngHelpers.h`; hosts and ports parsed strictly with `O3DTransportOptions`):
 - `nng.mode` - Messaging pattern: "pub", "sub", "pair", "push", "pull"
 - `nng.role` - Connection role: "server", "client"
 - `host` - Hostname or IP (IPv6 in brackets in URIs: `tcp://[::1]:17700`)
@@ -171,13 +169,13 @@ The registry answers the same capability question before an instance exists:
 - ✨ **Automatic pipe management** - Connection tracking via NNG callbacks
 - ✨ **Load balancing** - Push/Pull pattern distributes across receivers
 - ✨ **Queue-based backpressure** - Byte-based limits prevent memory exhaustion
-- ✨ **Exponential backoff** - Automatic reconnection with increasing delays
+- ✨ **Reconnection** - NNG redials dropped connections; failed sockets are reopened with backoff
 - ⚠️ **Platform limitation** - Currently Win64 only (`Open3DTransportNNG.Build.cs:20-27`)
 - ⚠️ **External dependency** - Requires NNG library
 
-**Connection State Tracking** (`NngSender.cpp:116-143`):
-- Pipe add/remove callbacks
-- Connection count maintained via `FThreadSafeCounter`
+**Connection State Tracking** (`NngSender.cpp`):
+- Pipe add/remove callbacks, through an opaque token
+- Pipe count in an atomic; the sender's worker and the receiver's `Poll` turn it into connection-state changes
 - Automatic reconnection for client-mode Pair/Push patterns
 
 **Use Cases**:
@@ -560,8 +558,9 @@ transport in this document — it is not a WebRTC feature.
 - **No network errors**: In-process only
 
 ### NNG
-- **Send errors**: Exponential backoff retry, queue backpressure
-- **Receive errors**: Auto-reconnect for client mode, backoff on errors
+- **Send errors**: Counted in `SendErrors` (and `DroppedFrames` for frames); a closed socket is reopened with backoff. No peer or a full NNG buffer drops the oldest frame
+- **Queue overflow**: The newest frame is refused (`DroppedBackpressure`); queued frames are never discarded
+- **Receive errors**: Counted in `ReceiveErrors`; a dialing socket is reopened with backoff
 - **Pipe events**: Track connection count for availability
 - **Socket errors**: Graceful socket closure on Stop()
 
@@ -621,7 +620,7 @@ Transport tests live in the editor-only `Open3DBroadcastTests` module (`Source/O
 | Transport | Test File | Coverage |
 |-----------|-----------|----------|
 | **Loopback** | `LoopbackAudioTests.cpp`, `LoopbackLifetimeTests.cpp` | Audio roundtrip, start/stop lifetime |
-| **NNG** | `NngTransportTests.cpp`, `NngLifetimeTests.cpp` | Pub/sub round trip, queue limit, receive demux, start/stop lifetime |
+| **NNG** | `NngTransportTests.cpp`, `NngLifetimeTests.cpp`, `NngModeRoleTests.cpp`, `NngSharedBlocksTests.cpp` | Pub/sub round trip, queue limit, receive demux, mode and role pairs, start/stop lifetime, refuse-newest under backpressure, audio and control independent of the frame budget, Stop under load |
 | **Sockets** | `SocketsAudioTests.cpp`, `SocketsLifetimeTests.cpp`, `SocketsTcpTransportTests.cpp`, `SocketsTcpSharedBlocksTests.cpp`, `SocketsUdpSharedBlocksTests.cpp` | TCP/UDP audio, start/stop lifetime, TCP burst, slow reader, reconnect, keepalive, audio and control independent of the frame budget (TCP and UDP), receiver backoff on its worker, UDP drop-oldest under backpressure, Stop under load (TCP and UDP) (framing parser: core `test/tcp_stream_parser_tests.cpp`) |
 | **WebRTC** | `WebRTCTransportTests.cpp`, `WebRTCPerSubjectTests.cpp`, `WebRTCFunctionalTests.cpp` | Transport + per-subject routing, token fetch |
 | **MoQ** | `MoQSenderTests.cpp`, `MoQReceiverTests.cpp`, `MoQSessionWrapperTests.cpp`, `MoQTrackNamespaceTests.cpp`, `MoQFunctionalTests.cpp`, `MoQLifetimeTests.cpp` (fake moq-ffi); `Network/MoQ/MoQRelayNetworkTests.cpp` (real relay, opt-in) | Session lifecycle, track naming, reconnect and backoff, relay integration |
@@ -719,7 +718,7 @@ Config.AdvancedParams.Add("delivery_mode", "datagram");
 
 ### Threading Philosophy
 - **Loopback**: Pure synchronous (no threads)
-- **NNG**: Async send thread, sync receive polling
+- **NNG**: Async send thread (shared `FO3DTransportWorker`), sync receive polling over NNG's own I/O threads
 - **TCP**: Async send thread and async receive thread (shared `FO3DTransportWorker`); delivery from `Poll`
 - **UDP**: Async send thread (shared `FO3DTransportWorker`), sync receive polling
 - **WebRTC**: Event-driven FFI callbacks

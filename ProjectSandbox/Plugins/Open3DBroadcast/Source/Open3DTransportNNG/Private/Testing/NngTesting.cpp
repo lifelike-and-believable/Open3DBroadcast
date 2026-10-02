@@ -36,6 +36,11 @@ namespace O3DNngTesting
 		return FO3DNngReceiverTestAccessor::ProcessReceivedPayload(static_cast<FO3DNngReceiver&>(Receiver), Bytes);
 	}
 
+	void SenderSetWorkerPaused(IOpen3DSender& Sender, bool bPaused)
+	{
+		static_cast<FO3DNngSender&>(Sender).SetWorkerPausedForTesting(bPaused);
+	}
+
 	bool ResolveEndpoint(const FO3DTransportConfig& Config, bool bSender, FResolvedEndpoint& OutEndpoint, FString& OutError)
 	{
 		OutEndpoint = FResolvedEndpoint();

@@ -3,12 +3,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Misc/ScopeLock.h"
 
 #include "Transport/O3DReceiverInterface.h"
 #include "Transport/O3DConnectionState.h"
+#include "Transport/O3DTransportWorker.h"
+#include "Transport/O3DUnifiedReceiveDemux.h"
 #include "Shared/NngHelpers.h"
-#include "O3DAudioFrameCodec.h"
 
 #include <atomic>
 
@@ -25,6 +25,16 @@ struct FNngReceiverPipeContext
     std::atomic<bool> bConnectedWithoutPipes{false};
 };
 
+/**
+ * NNG receiver on the shared transport blocks (ADR 0007 item 7, WP-A1 PR 4d).
+ *
+ * Poll() (game thread, at most FramesPerPoll messages per call) takes what NNG's own I/O threads
+ * already received (nng_recv with NNG_FLAG_NONBLOCK) and hands each message to the shared
+ * FO3DUnifiedReceiveDemux, which calls the consumer, the audio sink and the control sink. NNG does
+ * the socket I/O and the reconnecting of a dropped dialer on its own threads, so a transport
+ * worker would only add a second queue; reopening a socket that failed to dial is paced with
+ * FO3DReconnectPolicy.
+ */
 class FO3DNngReceiver : public IOpen3DReceiver
 {
 public:
@@ -32,7 +42,7 @@ public:
     virtual ~FO3DNngReceiver() override;
 
     virtual FO3DTransportResult Initialize(const FO3DTransportConfig& Config) override;
-    virtual void SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer) override;
+    virtual void SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer) override { Demux.SetConsumer(InConsumer); }
     virtual FO3DTransportResult Start() override;
     virtual void Stop() override;
     virtual int32 Poll() override;
@@ -43,7 +53,7 @@ public:
     virtual EO3DConnectionState GetConnectionState() const override { return ConnectionState.Get(); }
     virtual void SetStateChangedCallback(FO3DConnectionStateCallback Callback) override { ConnectionState.SetCallback(MoveTemp(Callback)); }
     virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
-    virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink) override { ControlSink = Sink; }
+    virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink) override { Demux.SetControlSink(Sink); }
 
     bool IsConnected() const { return PipeContext->bConnected.load(); }
 
@@ -60,37 +70,39 @@ private:
     /** Poll (game thread): reports a change of "a peer pipe exists" to ConnectionState. */
     void UpdateConnectionState();
     void HandleReceiveError(int ErrorCode);
-    bool EnsureDialSocket();
-    bool ProcessReceivedPayload(const uint8* Data, int32 Size);
-    bool ProcessAudioPayload(O3DS::EUnifiedCodec Codec, const uint8* Payload, int32 PayloadSize);
+    /** Reopens a missing socket when the reconnect policy allows. True if a socket is open. */
+    bool EnsureSocket();
+    /**
+     * One received message through the demux. True for mocap and audio. Counts nothing: Poll
+     * counts every message once, from OutResult (TRB-42).
+     */
+    bool ProcessReceivedPayload(const uint8* Data, int32 Size, EO3DDemuxResult* OutResult = nullptr);
 
     O3DNNG::FNngReceiverOptions Options;
-    FO3DTransportStats Stats;
-    mutable FCriticalSection StatsMutex;
     FO3DTransportConfig ActiveConfig;
     FO3DTransportAudioConfig ActiveAudioConfig;
 
-    TWeakPtr<ISerializedFrameConsumer> Consumer;
-    TWeakPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
-    /** Control payloads (ADR 0011). Held strongly, released in Stop; used only from Poll (game thread). */
-    TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe> ControlSink;
-    O3DAudio::FMultiStreamFrameDecoder AudioDecoder; // SHR-15: one decoder per (SourceGuid, StreamLabel)
-    TArray<int16> DecodedPcmScratch;
+    /** Holds the consumer, audio sink and control sink strongly; Stop() releases them (TRF-38, ADR 0011). */
+    FO3DUnifiedReceiveDemux Demux;
 
     FNngSocketWrapper* Socket = nullptr;
 
-    TAtomic<bool> bInitialized{ false };
-    TAtomic<bool> bRunning{ false };
+    std::atomic<bool> bInitialized{ false };
+    std::atomic<bool> bRunning{ false };
 
     TSharedRef<FNngReceiverPipeContext, ESPMode::ThreadSafe> PipeContext;
     /** Opaque nng_pipe_notify user data; resolves to PipeContext until the destructor. */
     void* PipeToken = nullptr;
 
     // Game thread only (Start, Stop, Poll); pipe callbacks never touch these.
-    double LastDialAttempt = 0.0;
-    int32 BackoffAttempt = 0;
+    FO3DReconnectPolicy ReopenPolicy;
     double LastErrorLogTimestamp = 0.0;
     constexpr static int32 FramesPerPoll = 16; // adjust to the polling budget you expect per tick
+
+    // Written on the game thread, read by GetStats on any thread.
+    std::atomic<int64> FramesReceived{ 0 };
+    std::atomic<int64> BytesReceived{ 0 };
+    std::atomic<int64> ReceiveErrors{ 0 };
 
     /** Mode the capabilities are reported for: Options.Mode as of the last Initialize. */
     std::atomic<O3DNNG::ENngMode> CapabilityMode{ O3DNNG::ENngMode::Sub };
@@ -98,5 +110,4 @@ private:
     FO3DConnectionStateTracker ConnectionState;
     /** Game thread (Poll): whether a peer pipe existed at the last check. */
     bool bSawPeer = false;
-    
 };

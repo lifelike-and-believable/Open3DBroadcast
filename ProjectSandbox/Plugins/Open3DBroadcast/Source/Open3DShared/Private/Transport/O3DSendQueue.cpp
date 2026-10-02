@@ -21,6 +21,25 @@ namespace O3DSendQueuePrivate
 		const T Max = TNumericLimits<T>::Max();
 		return SoftCap > Max / 2 ? Max : SoftCap * 2;
 	}
+
+	/**
+	 * Adds Amount to Counter only if the result stays within Max (0 = no limit). A compare-exchange
+	 * loop, so the counter never shows a value over its limit, not even transiently (TRB-3).
+	 */
+	template <typename T>
+	bool TryReserve(std::atomic<T>& Counter, T Amount, T Max)
+	{
+		T Current = Counter.load(std::memory_order_acquire);
+		do
+		{
+			if (Max > 0 && Current + Amount > Max)
+			{
+				return false;
+			}
+		}
+		while (!Counter.compare_exchange_weak(Current, Current + Amount, std::memory_order_acq_rel, std::memory_order_acquire));
+		return true;
+	}
 }
 
 FO3DSendQueue::FO3DSendQueue(const FO3DSendQueueLimits& InLimits)
@@ -79,13 +98,15 @@ EO3DSendResult FO3DSendQueue::Enqueue(FO3DSendItem&& Item)
 	const int32 MaxItems = O3DSendQueuePrivate::HardCap(State.MaxItems.load(std::memory_order_relaxed), bDoubles);
 	const int64 MaxBytes = O3DSendQueuePrivate::HardCap(State.MaxBytes.load(std::memory_order_relaxed), bDoubles);
 
-	// Reserve first, roll back on overflow: concurrent producers can neither overshoot nor lose a count (TRB-3).
-	const int32 PreviousItems = State.Items.fetch_add(1, std::memory_order_acq_rel);
-	const int64 PreviousBytes = State.Bytes.fetch_add(Size, std::memory_order_acq_rel);
-	if ((MaxItems > 0 && PreviousItems + 1 > MaxItems) || (MaxBytes > 0 && PreviousBytes + Size > MaxBytes))
+	// Reserve only what fits: concurrent producers can neither overshoot nor lose a count, and the
+	// pending counters never read above a limit, not even for a moment (TRB-3).
+	const bool bReservedItem = O3DSendQueuePrivate::TryReserve<int32>(State.Items, 1, MaxItems);
+	if (!bReservedItem || !O3DSendQueuePrivate::TryReserve<int64>(State.Bytes, Size, MaxBytes))
 	{
-		State.Items.fetch_sub(1, std::memory_order_acq_rel);
-		State.Bytes.fetch_sub(Size, std::memory_order_acq_rel);
+		if (bReservedItem)
+		{
+			State.Items.fetch_sub(1, std::memory_order_acq_rel);
+		}
 		State.Refused.fetch_add(1, std::memory_order_relaxed);
 		return EO3DSendResult::DroppedBackpressure;
 	}

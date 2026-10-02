@@ -11,7 +11,7 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M0 Decisions (ADRs 0001–0010) | Done (#261–#263) |
 | M1 Safety and correctness: WP-S1..S11, WP-T1, WP-T2 | Done (#264–#279) |
 | M2 Fab-buildable package: WP-F1..F4, F6..F9, F11 | Done (#274–#286). **F0 and F5 wait on the maintainer** (see §5) |
-| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime), PR 3 (results, state, capabilities), PR 4a (building blocks + Loopback), PR 4b (TCP) and PR 4c (UDP) done; step 4 continues with NNG (PR 4d)** (see §2) |
+| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime), PR 3 (results, state, capabilities), PR 4a (building blocks + Loopback), PR 4b (TCP), PR 4c (UDP) and PR 4d (NNG) done; step 4 continues with MoQ (PR 4e)** (see §2) |
 | M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | Not started |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
 | WP-CTL control channel (D11, ADR 0011) | CTL-1..7 done (#290–#295, CTL-6, CTL-7); live-server checks remain (see §2b) |
@@ -57,7 +57,13 @@ Design: `docs/adr/0007-transport-abstraction-and-registry.md`, section "Implemen
      - Config: `O3DSockets::ParseEndpoint` (strict, shared with TCP) and the configure functions read only the config. **`Open3DTransportSockets` no longer depends on Open3DSender/Open3DReceiver.**
      - `O3D_TRANSPORT_API_VERSION` stays **4**.
      - Tests: `Open3DBroadcast.Transport.Sockets.Udp.QueueDropsOldestUnderBackpressure`, `.AudioIndependentOfFrameQueue`, `.StopWhileSending` (1,000 cycles); `Open3DBroadcast.Shared.HostPort.IsIpLiteral`; `SocketsTesting.h` gained `UdpSenderSetWorkerPaused`.
-   - **Start here next: NNG (PR 4d).** Move NNG's send thread and `FO3DEncodedPayloadQueue` onto `FO3DTransportWorker` + `FO3DSendQueue` (pick the policy per mode: pub/sub is lossy, pair and push/pull report `ReliableOrdered`), its receive branches onto `FO3DUnifiedReceiveDemux`, its sink onto `FO3DQueuedSenderAudioSink` and its option parsing onto `O3DTransportOptions`; then drop Open3DSender/Open3DReceiver from `Open3DTransportNNG.Build.cs`.
+   - **NNG done (WP-A1 PR 4d).** Details in the ADR 0007 addendum "implementation notes (WP-A1 PR 4d)".
+     - Sender: frames, audio and control are items on one `FO3DSendQueue` (`RefuseNewest`, `nng.qmax` per kind; control 1,024) that an `FO3DTransportWorker` hands to `nng_send(NONBLOCK)`; `NNG_EAGAIN` still drops the oldest at the worker, so the policy is right for pub/sub and for pair/push. `FramesSent` is still counted after `nng_send` (#301), frames only. NNG keeps redialing dropped connections itself; `FO3DReconnectPolicy` only paces reopening a socket that failed or was closed. The sink is `FO3DQueuedSenderAudioSink`.
+     - Receiver: still `Poll`-driven (NNG's threads do the I/O); messages go to `FO3DUnifiedReceiveDemux`. Consumer held strongly, released in `Stop`. Rejects count in `ReceiveErrors`.
+     - Config: the NNG Uri shape is unchanged, but hosts, ports and `nng.qmax` are parsed strictly with `O3DTransportOptions`; the configure functions read only the config. **`Open3DTransportNNG` no longer depends on Open3DSender/Open3DReceiver.**
+     - `O3D_TRANSPORT_API_VERSION` stays **4**.
+     - Tests: `Open3DBroadcast.Transport.NNG.QueueRefusesNewestUnderBackpressure`, `.AudioIndependentOfFrameQueue`, `.StopWhileSending` (1,000 cycles, every 50th connected); `NngTesting.h` gained `SenderSetWorkerPaused`.
+   - **Start here next: MoQ (PR 4e).** Move MoQ's audio sink and its `FO3DEncodedPayloadQueue` onto `FO3DQueuedSenderAudioSink` and `FO3DSendQueue` (wire format `EO3DAudioWireFormat::AudioPayload`, MoQ's separate audio track), its receive paths onto `FO3DUnifiedReceiveDemux` (`DeliverMocap`, `DeliverAudioPayload`, `DeliverControlEnvelope`), and its option parsing onto `O3DTransportOptions`; check what `FMoQAsyncDispatcher` and the FFI callbacks need from `FO3DTransportWorker`, and drop any Open3DSender/Open3DReceiver use from `Open3DTransportMoQ`.
 5. **Typed config and consumer API** (SHR-36, TRB-27, SHR-16, TRF-38): removes the LiveKit string fields from `FO3DTransportConfig`, deletes `Send(SubjectList)`.
 6. Next minor release: delete the shims and bump `O3D_TRANSPORT_API_VERSION` (to 5, or later if other steps bump it first; PR 3 took 4).
 
@@ -143,6 +149,7 @@ With UE 5.7 installed locally you can also run the real build and tests: `Build/
 12. Never name a free function, local or helper after a UE global namespace (`Audio`, `UE`, `Chaos`, ...). MSVC reports C2872 "ambiguous symbol" when that namespace is visible in the module; `O3DSendQueueTests.cpp` had helpers called `Audio()` (#305; renamed `MocapItem`/`AudioItem`/`ControlItem`).
 13. The copyright line must be followed by a blank line; a bare `//` continuation line right after it fails `Build/Scripts/check-copyright-headers.py`. Run the script before pushing.
 14. A test that needs a transport's queue to back up must not rely on the network being slow: on loopback a worker drains faster than a test can fill. Pause the worker with a test hook instead (`O3DSocketsTesting::UdpSenderSetWorkerPaused`, WP-A1 PR 4c), so the drop policy is deterministic.
+15. A test pause hook must return only once the worker has seen the flag: an iteration that started before the flag was set can still dequeue the next item. `FO3DNngSender::SetWorkerPausedForTesting` waits for a paused iteration (WP-A1 PR 4d); `UdpSenderSetWorkerPaused` does not yet, so a UDP test should leave the queue empty for one worker wait before relying on it.
 
 ## 5. Waiting on the maintainer
 
