@@ -47,6 +47,14 @@ public:
 	/** Clears the session secret and any remembered copy. */
 	virtual void ClearSecret(const FString& Key) = 0;
 
+	/**
+	 * Restarts the object's running transport so it picks up an option whose schema entry has
+	 * bRestartOnChange (WP-A1 PR 5c). The panel calls it after such a commit changed the object.
+	 * Returns true when a transport was restarted. The default does nothing (nothing is running:
+	 * the receiver's settings object is only used to create a source).
+	 */
+	virtual bool RestartTransport() { return false; }
+
 	/** The stored value of Key; empty when unset or the object is gone. */
 	FString GetOption(const FString& Key) const;
 
@@ -80,6 +88,8 @@ public:
 	virtual void SetSecret(const FString& Key, const FString& Value, EO3DSecretPersistence Persistence) override;
 	virtual bool SetSecretPersistence(const FString& Key, EO3DSecretPersistence Persistence) override;
 	virtual void ClearSecret(const FString& Key) override;
+	/** Stops and starts capture, as a restart property does, while the component captures in a game world. */
+	virtual bool RestartTransport() override;
 
 protected:
 	virtual UObject* GetObject() const override;

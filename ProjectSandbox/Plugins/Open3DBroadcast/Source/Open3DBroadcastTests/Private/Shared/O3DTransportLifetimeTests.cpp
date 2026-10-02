@@ -97,7 +97,7 @@ namespace O3DTransportLifetimeTest
 			Receiver->SetConsumer(MakeShared<FO3DRecordingFrameConsumer>());
 			Receiver->SetControlSink(MakeShared<FCountingControlSink, ESPMode::ThreadSafe>());
 			FO3DTransportConfig Config;
-			Config.Transport = Name.ToString();
+			Config.Transport = Name;
 			return Sender->Initialize(Config) && Sender->Start() && Receiver->Initialize(Config) && Receiver->Start();
 		}
 

@@ -191,6 +191,7 @@ private:
 			// other transports and any code that inspects those fields directly
 			// instead of going through MoQHelpers::ResolveRelayUrl.
 			Config.Transport = TEXT("MoQ");
+			Config.Role = EO3DTransportRole::Sender;
 			// Options are the component's options (secrets excluded), so this is what
 			// SenderComponent->GetTransportOption(relay_url) returned before WP-A1 PR 4e.
 			Config.Uri = O3DTransportOptions::GetString(Options, MoQHelpers::kKeyRelayUrl);
@@ -217,6 +218,7 @@ private:
 			// relay_url is already read directly from Config.AdvancedParams
 			// by MoQHelpers::ResolveRelayUrl, so Config.Uri isn't needed.
 			Config.Transport = TEXT("MoQ");
+			Config.Role = EO3DTransportRole::Receiver;
 		};
 		Descriptor.ReceiverOptions.OptionSchema = MoQSchema::Make(/*bSender=*/false);
 

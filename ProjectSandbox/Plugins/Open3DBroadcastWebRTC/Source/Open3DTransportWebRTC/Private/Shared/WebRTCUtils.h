@@ -30,7 +30,7 @@ namespace WebRTCUtils
     static constexpr int32 DefaultTokenRefreshLeadTimeSec = 300;
 
     /**
-     * Secret option keys (ADR 0004). Declared in the customizations' SecretOptionKeys, so their
+     * Secret option keys (ADR 0004). Declared by the schema's Secret entries (WP-A1 PR 5c), so their
      * values live in FO3DSecretStore and reach the transport only through FO3DTransportConfig::Secrets.
      */
     /** LiveKit access token for manual token mode. */

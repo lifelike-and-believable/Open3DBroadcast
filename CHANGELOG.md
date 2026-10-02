@@ -684,6 +684,66 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Typed config, part 2: registered names, typed secrets, Float, restart-on-change, Validate (WP-A1 PR 5c, ADR 0007 step 5)
+
+This completes ADR 0007 item 8 and with it step 5. Saved data is unchanged: no saved property,
+option key or value changed, and nothing needs migrating.
+
+- **Interface version stays 5.** 5a, 5b and 5c ship in the same release (the last tag is v0.9.6,
+  which predates 5a), so one number covers them. The WebRTC add-on is built against the change.
+  Removing the deprecated shims (step 6) takes version 6.
+- **`FO3DTransportConfig::Transport` is an `FName` and `Role` an `EO3DTransportRole`** (TRB-27).
+  `Transport` holds the registered name ("TCP", "UDP", "NNG", "MoQ", "Loopback", "WebRTC") and
+  `Role` the side, `Sender` or `Receiver`. A new constructor takes both:
+  `FO3DTransportConfig Config(TEXT("TCP"), EO3DTransportRole::Sender)`. The sender component and the
+  receiver source build their configs with it, and every built-in transport's configure functions
+  set both. Before, the config carried free text: TCP's tests used "sockets.tcp", NNG put its
+  socket's listen or dial side in `Role`, and WebRTC "publisher" or "subscriber". Nothing read
+  `Role`; NNG's socket side stays where the transport reads it, the `nng.role` option. Source
+  change for transport code: `*Config.Transport` in a format string becomes
+  `*Config.Transport.ToString()`, `Transport.IsEmpty()` becomes `Transport.IsNone()`, and a role
+  string becomes `EO3DTransportRole::Sender` or `::Receiver` (`LexToString` gives "Sender" or
+  "Receiver").
+- **Secret schema entries carry their environment variable** (ADR 0004, ADR 0007 item 8). New
+  `FO3DTransportOptionField::SecretEnvVar`. A `Secret` entry now declares its key secret by itself;
+  `FO3DTransportRoleOptions::SecretOptionKeys` and `SecretEnvVars` are deprecated inputs that still
+  count. `FO3DTransportRegistry::GetSecretDeclaration` returns the union (new
+  `FO3DTransportRoleOptions::GetSecretDeclaration`), and an entry's variable wins over
+  `SecretEnvVars`. The WebRTC add-on declares `webrtc.token` (`O3DB_WEBRTC_TOKEN`) and
+  `webrtc.tokenEndpointAuth` (`O3DB_WEBRTC_TOKEN_ENDPOINT_AUTH`) in its schema entries only. The
+  keys, variables, store, persistence and redaction are exactly as before.
+- **`Float` options.** New `EO3DTransportOptionType::Float` (appended), a number stored as decimal
+  text. `Min` and `Max` are now `double` (they were `int32`; every int is exact, and assigning an
+  int still compiles) and bound a Float when `Max > Min`:
+  `FO3DTransportOptionsView::GetDouble` clamps the value, and the default, of a Float field to
+  them. The editor panels show a number box with that range and clamp what they write. No built-in
+  transport has a Float option yet.
+- **`bRestartOnChange`.** A schema entry can say that a running transport only picks up a change
+  when it restarts. The editor panel then restarts the sender's transport after such a commit (only
+  while the component captures in a game world, the way the component's own restart properties do)
+  and says so in the field's tooltip. New `IO3DOptionTarget::RestartTransport`. Every built-in field
+  leaves it off, so behaviour is unchanged.
+- **`Validate`.** A schema entry can carry `TFunction<bool(const FString& Value, FText& OutError)>`.
+  - The sender's transport controller and the receiver source check the options with
+    `O3DTransportOptions::ValidateOptions` before they create the transport. A refused value fails
+    the start with `InvalidConfig`, whose message names the key and the error (never the value).
+    New `UO3DSenderComponent::GetLastTransportResult()` returns it; the receiver shows it in the
+    source status.
+  - The editor panel shows the error under the row and does not write the value.
+  - Only set, visible values are checked; unset keys use their default. A value's type and range
+    are not rejected: they keep falling back to the default or being clamped, as before.
+  - No built-in transport declares a `Validate` yet.
+- **Removed: `FO3DSenderSerializer::OnSubjectListReady`** and its `FOnO3DSubjectListReady`
+  delegate type. Nothing broadcast or bound it.
+- **Tests.**
+  - New: `Open3DBroadcast.Shared.TypedConfig.ConfigCarriesTransportAndRole`,
+    `Open3DBroadcast.Shared.OptionSchema.SecretEntryCarriesEnvVar`, `.FloatHonoursMinAndMax` and
+    `.ValidateGivesInvalidConfig`, `Open3DBroadcast.Editor.OptionsPanel.RestartOnChangeRestartsTransport`,
+    `.ValidateShowsErrorAndRefuses` and `.FloatIsClampedToRange`, and
+    `Open3DBroadcast.Transport.WebRTC.Secrets.SchemaEntriesCarryEnvVars`.
+  - Existing tests that build a config now set the registered name and an `EO3DTransportRole` (for
+    example "TCP" instead of "sockets.tcp", "NNG" instead of "nng"). No assertion changed.
+
 ### Consumer API: SubmitFrame view and owned forms, Send(SubjectList) deleted (WP-A1 PR 5b, ADR 0007 step 5)
 
 - **Interface version stays 5.** 5a and 5b ship in the same release (no release has carried

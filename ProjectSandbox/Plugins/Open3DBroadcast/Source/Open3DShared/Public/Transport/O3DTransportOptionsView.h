@@ -67,6 +67,10 @@ public:
 	 * The schema-typed getters. A value that is set and parses wins; otherwise the schema's
 	 * Default (parsed the same way); otherwise "", 0, 0.0 or false. Parsing is the strict
 	 * O3DTransportOptions one (TryParseInt, TryParseDouble, GetBool's words).
+	 *
+	 * GetDouble of a Float field with a range (Max > Min) clamps the result, the value or the
+	 * default, to [Min, Max] (WP-A1 PR 5c). GetInt does not clamp: an Int range is in the editor's
+	 * shown unit (StoredUnitScale), and transports clamp their stored ints themselves.
 	 */
 	FString GetString(const FString& Key) const;
 	int32 GetInt(const FString& Key) const;

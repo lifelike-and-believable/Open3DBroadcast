@@ -4,6 +4,7 @@
 
 #include "Transport/O3DSenderInterface.h"
 #include "O3DSenderLogs.h"
+#include "Transport/O3DTransportOptions.h"
 #include "Transport/O3DTransportRegistry.h"
 
 FO3DSenderTransportController::FO3DSenderTransportController() = default;
@@ -20,19 +21,28 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
     Stop();
 
     ActiveConfig = InConfig;
-    if (ActiveConfig.Transport.IsEmpty())
+    if (ActiveConfig.Transport.IsNone())
     {
         UE_LOG(LogO3DSenderComponent, Warning, TEXT("No transport specified; skipping auto transport setup."));
         LastResult = FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("No transport selected."));
         return false;
     }
 
-    const FName SelectedTransportName(*ActiveConfig.Transport);
+    // The schema's Validate functions refuse the options before anything is created (WP-A1 PR 5c).
+    const FO3DTransportResult OptionsResult = O3DTransportOptions::ValidateOptions(ActiveConfig.GetOptions());
+    if (!OptionsResult.IsOk())
+    {
+        UE_LOG(LogO3DSenderComponent, Warning, TEXT("Sender transport '%s' not started: %s"), *ActiveConfig.Transport.ToString(), *LexToString(OptionsResult));
+        LastResult = OptionsResult;
+        return false;
+    }
+
+    const FName SelectedTransportName(ActiveConfig.Transport);
     ActiveSender = FO3DTransportRegistry::Get().CreateSender(SelectedTransportName);
     if (!ActiveSender.IsValid())
     {
-        UE_LOG(LogO3DSenderComponent, Warning, TEXT("No sender registered for transport '%s'."), *ActiveConfig.Transport);
-        LastResult = FO3DTransportResult::Error(EO3DTransportError::Unsupported, FString::Printf(TEXT("No sender is registered for transport '%s'."), *ActiveConfig.Transport));
+        UE_LOG(LogO3DSenderComponent, Warning, TEXT("No sender registered for transport '%s'."), *ActiveConfig.Transport.ToString());
+        LastResult = FO3DTransportResult::Error(EO3DTransportError::Unsupported, FString::Printf(TEXT("No sender is registered for transport '%s'."), *ActiveConfig.Transport.ToString()));
         return false;
     }
 
@@ -44,7 +54,7 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
     LastResult = ActiveSender->Initialize(ActiveConfig);
     if (!LastResult.IsOk())
     {
-        UE_LOG(LogO3DSenderComponent, Warning, TEXT("Failed to initialize sender transport '%s': %s"), *ActiveConfig.Transport, *LexToString(LastResult));
+        UE_LOG(LogO3DSenderComponent, Warning, TEXT("Failed to initialize sender transport '%s': %s"), *ActiveConfig.Transport.ToString(), *LexToString(LastResult));
         Unsubscribe();
         ActiveSender.Reset();
         return false;
@@ -53,7 +63,7 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
     LastResult = ActiveSender->Start();
     if (!LastResult.IsOk())
     {
-        UE_LOG(LogO3DSenderComponent, Warning, TEXT("Failed to start sender transport '%s': %s"), *ActiveConfig.Transport, *LexToString(LastResult));
+        UE_LOG(LogO3DSenderComponent, Warning, TEXT("Failed to start sender transport '%s': %s"), *ActiveConfig.Transport.ToString(), *LexToString(LastResult));
         Stop();
         return false;
     }
@@ -66,12 +76,12 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
             AudioSink = ActiveSender->CreateAudioSink(ActiveConfig.Audio);
             if (!AudioSink.IsValid())
             {
-                UE_LOG(LogO3DSenderComponent, Warning, TEXT("Transport '%s' reported audio support but failed to provide a sink."), *ActiveConfig.Transport);
+                UE_LOG(LogO3DSenderComponent, Warning, TEXT("Transport '%s' reported audio support but failed to provide a sink."), *ActiveConfig.Transport.ToString());
             }
         }
         else
         {
-            UE_LOG(LogO3DSenderComponent, Warning, TEXT("Transport '%s' does not support audio; ignoring audio configuration."), *ActiveConfig.Transport);
+            UE_LOG(LogO3DSenderComponent, Warning, TEXT("Transport '%s' does not support audio; ignoring audio configuration."), *ActiveConfig.Transport.ToString());
         }
     }
 

@@ -380,17 +380,16 @@ void UO3DSenderComponent::InitializeTransport()
 
 	UpdateAudioCaptureBinding();
 	StartControl();
-	UE_LOG(LogO3DSenderComponent, Log, TEXT("Auto transport '%s' initialized."), *TransportController->GetConfig().Transport);
+	UE_LOG(LogO3DSenderComponent, Log, TEXT("Auto transport '%s' initialized."), *TransportController->GetConfig().Transport.ToString());
 }
 
 FO3DTransportConfig UO3DSenderComponent::BuildTransportConfig() const
 {
-	FO3DTransportConfig Config;
 	const FO3DSenderAudioCaptureConfig CaptureConfig = BuildAudioCaptureConfig();
 
 	const FName SelectedTransport = GetSelectedTransportName();
-	Config.Transport = SelectedTransport.ToString();
-	Config.Role = TEXT("sender");
+	// The registered name and the side (TRB-27, WP-A1 PR 5c).
+	FO3DTransportConfig Config(SelectedTransport, EO3DTransportRole::Sender);
 	// The transport may use it as a default (MoQ: the stream id) without reading this component
 	// (WP-A1 PR 5a).
 	Config.SubjectName = SubjectName;
@@ -409,13 +408,13 @@ FO3DTransportConfig UO3DSenderComponent::BuildTransportConfig() const
 		}
 	}
 	Config.AdvancedParams = Options;
-	FO3DSecretStore::Get().ResolveAll(Config.Transport, GetCredentialProfile(), SecretKeys, SecretEnvVars, Config.Secrets);
+	FO3DSecretStore::Get().ResolveAll(Config.Transport.ToString(), GetCredentialProfile(), SecretKeys, SecretEnvVars, Config.Secrets);
 
 	Config.Audio = BuildTransportAudioConfig(CaptureConfig);
 
 	// The descriptor is a shared, immutable snapshot, so the function stays valid while it runs
 	// even if the transport unregisters meanwhile (RCV-27).
-	const FO3DTransportDescriptorPtr Descriptor = Config.Transport.IsEmpty() ? FO3DTransportDescriptorPtr() : FO3DTransportRegistry::Get().Find(SelectedTransport);
+	const FO3DTransportDescriptorPtr Descriptor = Config.Transport.IsNone() ? FO3DTransportDescriptorPtr() : FO3DTransportRegistry::Get().Find(SelectedTransport);
 	if (Descriptor.IsValid())
 	{
 		Config.OptionSchema = MakeShared<FO3DTransportOptionSchema>(Descriptor->SenderOptions.OptionSchema);
@@ -464,7 +463,7 @@ void UO3DSenderComponent::HandleSerializedFrameForward(const FString& Subject, c
 	{
 		// Not retried: the next frame supersedes this one. DroppedBackpressure is counted in the
 		// transport's DroppedFrames; NotConnected is expected while a peer or session is missing.
-		UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Transport '%s' did not take subject '%s' (%s)."), *TransportController->GetConfig().Transport, *Subject, LexToString(Result));
+		UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Transport '%s' did not take subject '%s' (%s)."), *TransportController->GetConfig().Transport.ToString(), *Subject, LexToString(Result));
 	}
 }
 
@@ -764,6 +763,11 @@ void UO3DSenderComponent::SetTransportOption(const FString& Key, const FString& 
 	{
 		TransportOptions.Add(Key, Value);
 	}
+}
+
+FO3DTransportResult UO3DSenderComponent::GetLastTransportResult() const
+{
+	return TransportController.IsValid() ? TransportController->GetLastResult() : FO3DTransportResult::Ok();
 }
 
 FName UO3DSenderComponent::GetSelectedTransportName() const

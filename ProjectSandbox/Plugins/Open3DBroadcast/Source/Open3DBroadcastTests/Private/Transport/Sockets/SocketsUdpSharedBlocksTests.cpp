@@ -46,8 +46,8 @@ namespace O3DSocketsUdpBlocksTests
 	FO3DTransportConfig MakeUdpConfig(bool bSender, int32 Port)
 	{
 		FO3DTransportConfig Config;
-		Config.Transport = TEXT("sockets.udp");
-		Config.Role = bSender ? TEXT("sender") : TEXT("receiver");
+		Config.Transport = TEXT("UDP");
+		Config.Role = bSender ? EO3DTransportRole::Sender : EO3DTransportRole::Receiver;
 		Config.Uri = FString::Printf(TEXT("udp://127.0.0.1:%d"), Port);
 		Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), Port);
 		Config.AdvancedParams.Add(TEXT("host"), TEXT("127.0.0.1"));

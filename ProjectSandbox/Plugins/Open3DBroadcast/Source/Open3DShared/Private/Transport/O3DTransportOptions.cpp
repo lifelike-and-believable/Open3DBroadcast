@@ -452,4 +452,56 @@ namespace O3DTransportOptions
 		OutAddress = Address;
 		return true;
 	}
+
+	bool ValidateOptionValue(const FO3DTransportOptionField& Field, const FString& Value, FText& OutError)
+	{
+		OutError = FText::GetEmpty();
+		const FString Trimmed = Value.TrimStartAndEnd();
+		if (!Field.Validate || Trimmed.IsEmpty() || Field.Type == EO3DTransportOptionType::Secret)
+		{
+			return true;
+		}
+
+		FText Error;
+		if (Field.Validate(Trimmed, Error))
+		{
+			return true;
+		}
+		OutError = Error.IsEmpty()
+			? NSLOCTEXT("O3DTransportOptions", "InvalidOptionValue", "This value is not valid for this option.")
+			: Error;
+		return false;
+	}
+
+	FO3DTransportResult ValidateOptions(const FO3DTransportOptionsView& Options)
+	{
+		const FO3DTransportOptionSchema* Schema = Options.GetSchema();
+		if (!Schema)
+		{
+			return FO3DTransportResult::Ok();
+		}
+
+		TArray<FString> Problems;
+		for (const FO3DTransportOptionField& Field : *Schema)
+		{
+			if (!Field.Validate || !Options.IsSet(Field.Key) || !Options.IsVisible(Field.Key))
+			{
+				continue;
+			}
+
+			FText Error;
+			if (!ValidateOptionValue(Field, *Options.Find(Field.Key), Error))
+			{
+				// The key and the validator's sentence, never the value: the message is logged, and
+				// a value pasted into the wrong field may be a credential (ADR 0004 item 7).
+				Problems.Add(FString::Printf(TEXT("Option '%s': %s"), *Field.Key, *Error.ToString()));
+			}
+		}
+
+		if (Problems.Num() == 0)
+		{
+			return FO3DTransportResult::Ok();
+		}
+		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Join(Problems, TEXT(" ")));
+	}
 }

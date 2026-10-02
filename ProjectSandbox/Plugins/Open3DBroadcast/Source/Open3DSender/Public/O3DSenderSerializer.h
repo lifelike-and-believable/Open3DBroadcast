@@ -18,10 +18,11 @@ namespace O3DS
 	class SubjectList;
 }
 
-/** Serialized frame event: Subject, Buffer (FlatBuffer bytes), Timestamp seconds. */
+/**
+ * Serialized frame event: Subject, Buffer (FlatBuffer bytes), Timestamp seconds. The only output
+ * of the serializer: the unused SubjectList event (OnSubjectListReady) was deleted in WP-A1 PR 5c.
+ */
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnO3DSerializedFrame, const FString& /*Subject*/, const TArray<uint8>& /*Buffer*/, double /*Timestamp*/);
-/** SubjectList event for transports that prefer direct access to the FlatBuffer object model. */
-DECLARE_MULTICAST_DELEGATE_TwoParams(FOnO3DSubjectListReady, const FString& /*Subject*/, const TSharedPtr<O3DS::SubjectList>& /*Payload*/);
 
 struct FO3DSSkeletonDescriptor;
 struct FO3DSPoseFrame;
@@ -44,8 +45,6 @@ public:
 
 	// Emitted after a SubjectList buffer is produced for a frame
 	FOnO3DSerializedFrame OnSerializedFrame;
-	// Emitted with a shared SubjectList prior to serialization
-	FOnO3DSubjectListReady OnSubjectListReady;
 
 	// Console hook to dump all serializer stats across live instances
 	static void DumpAllStats();

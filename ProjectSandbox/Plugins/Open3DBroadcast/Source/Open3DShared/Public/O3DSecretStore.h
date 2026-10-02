@@ -11,8 +11,10 @@
 /**
  * Credentials for transports (ADR 0004).
  *
- * A transport customization declares which of its option keys are secret (SecretOptionKeys) and,
- * optionally, an environment variable per key (SecretEnvVars). The value of a secret key is never
+ * A transport declares which of its option keys are secret, and optionally an environment
+ * variable per key: a Secret entry in its option schema with SecretEnvVar (WP-A1 PR 5c), or the
+ * older SecretOptionKeys and SecretEnvVars lists; FO3DTransportRegistry::GetSecretDeclaration
+ * merges both (FO3DTransportRoleOptions). The value of a secret key is never
  * written to TransportOptions, an asset, an ini file or a LiveLink connection string. It lives in
  * FO3DSecretStore, keyed by (transport, credential profile, option key). The credential profile
  * is an ordinary persisted option, "<transport>.credentialProfile" (default "default"), so an asset

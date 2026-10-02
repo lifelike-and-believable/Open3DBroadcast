@@ -48,7 +48,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLoopbackAudioRoundTripTest, "Open3DBroadcas
 bool FO3DLoopbackAudioRoundTripTest::RunTest(const FString& Parameters)
 {
     FO3DTransportConfig Config;
-    Config.Transport = TEXT("loopback");
+    Config.Transport = TEXT("Loopback");
     Config.StreamId = TEXT("audio_roundtrip_test");
     Config.Audio.bEnableAudio = true;
     Config.Audio.SampleRate = 48000;
@@ -111,7 +111,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLoopbackAudioQueueOverflowTest, "Open3DBroa
 bool FO3DLoopbackAudioQueueOverflowTest::RunTest(const FString& Parameters)
 {
     FO3DTransportConfig Config;
-    Config.Transport = TEXT("loopback");
+    Config.Transport = TEXT("Loopback");
     Config.StreamId = TEXT("audio_overflow_test");
     Config.Audio.bEnableAudio = true;
     Config.Audio.SampleRate = 44100;
@@ -146,7 +146,7 @@ bool FO3DLoopbackAudioIndependentTest::RunTest(const FString& Parameters)
     // ADR 0011 / ADR 0007 item 7: the channel's kinds have their own limits, so a full frame
     // queue never refuses audio, and audio is delivered with the frame in the order it was sent.
     FO3DTransportConfig Config;
-    Config.Transport = TEXT("loopback");
+    Config.Transport = TEXT("Loopback");
     Config.StreamId = O3DTests::MakeUniqueName(TEXT("audio_independent"));
     Config.Audio.bEnableAudio = true;
     Config.Audio.SampleRate = 48000;

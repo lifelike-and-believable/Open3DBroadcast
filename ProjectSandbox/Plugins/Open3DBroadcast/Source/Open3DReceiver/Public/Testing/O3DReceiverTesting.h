@@ -82,6 +82,10 @@ struct FO3DReceiverSourceTestAccessor
 
 	// Typed config (WP-A1 PR 5a): the config the source would start its transport with.
 	static FO3DTransportConfig BuildTransportConfig(const FO3DReceiverSource& Source) { return Source.BuildTransportConfig(); }
+
+	// Schema validation (WP-A1 PR 5c): what the last StartTransport() refused, and the status line.
+	static FO3DTransportResult GetLastTransportResult(const FO3DReceiverSource& Source) { return Source.LastTransportResult; }
+	static FText GetSourceStatus(const FO3DReceiverSource& Source) { return Source.SourceStatus; }
 };
 
 /** Binds a remote control component to the bus without a world (BeginPlay needs one). */

@@ -465,3 +465,46 @@ Docs (WP-D3): the threading tables above go into `docs/transports.md`.
   - `O3DTestFakes` lost its `Send` override.
 
   No assertion changed.
+
+## Addendum: implementation notes (WP-A1 PR 5c, 2026-10-02)
+
+- **Status:** item 8 is implemented, and with it step 5. Step 6 (removing the shims, with interface version 6) is next. Nothing here changes the Decision; it records how the rest of item 8 was implemented and where it deviates.
+- **TRB-27.** `FO3DTransportConfig::Transport` is an `FName` holding the registered name, and `Role` an `EO3DTransportRole` (the enum item 4 already uses for registry queries). A `(FName, EO3DTransportRole)` constructor keeps the hosts' change to one line; the sender component and the receiver source use it, and every built-in configure function sets both fields.
+  - The old strings were inconsistent and unread: TCP's tests used "sockets.tcp", NNG put its socket's listen or dial side in `Role` ("server" or "client"), WebRTC "publisher" or "subscriber", Loopback and Sockets "sender".
+  - No transport read `Role`. NNG reads its socket side from the `nng.role` option, which its configure function already writes, so nothing moved. WebRTC's token role is its own `EO3DTokenRole`.
+  - The change was mechanical. A script rewrote the patterns (`*X.Transport` to `*X.Transport.ToString()`, `IsEmpty()` to `IsNone()`, `FName(*X.Transport)` to `X.Transport`, role strings to the enum, "sockets.tcp" and "sockets.udp" to "TCP" and "UDP"). The rest was edited by hand: NNG's four role assignments, the receiver-side roles of Loopback, TCP, UDP and MoQ, and test configs that used "nng" or "loopback", now "NNG" and "Loopback". `FName` compares case-insensitively, so those last ones behaved the same before.
+- **Secret entries (ADR 0004 item 1).** `FO3DTransportOptionField::SecretEnvVar` is new. A `Secret` entry now declares its key secret by itself.
+  - *Deviation:* item 8 says the entry is "the typed form" of `SecretOptionKeys`, and ADR 0004 item 1 that the typed fields "replace this list". The lists stay as deprecated inputs, because the deprecated transport customizations (item 9, removed in step 6) and transports built against them fill only the lists. `FO3DTransportRoleOptions::GetSecretDeclaration` merges both: entries first (their variable wins), then listed keys no entry names, compared case-insensitively like the option maps.
+  - `FO3DTransportRegistry::GetSecretDeclaration` returns that merge. So do the deprecated `FindTransportCustomization` copies. Every consumer goes through it: the hosts' secret filtering, `ResolveAll` and `Describe`, the editor targets, `SwitchTransportOptions`, and the connection-string and PostLoad migrations. Store, resolution order, persistence and redaction are therefore unchanged.
+  - WebRTC now declares its two secrets in its schema only. Its resolved keys and variables are the ones it declared before (`Open3DBroadcast.Transport.WebRTC.Secrets.CustomizationsUseDeclaredSecrets`, unchanged, and the new `.SchemaEntriesCarryEnvVars`). No other transport has a secret.
+- **`Float`, `Min` and `Max`.** `Float` is appended to `EO3DTransportOptionType`, so the existing values keep their numbers. `Min` and `Max` became `double` and serve both Int and Float, so a Float range can be fractional (0.25 to 30) without a second pair of fields.
+  - Every `int32` is exact in a `double`, and the transports' `Min = 1` assignments compile unchanged.
+  - The panel's Int box uses the whole numbers inside the range (ceiling of `Min`, floor of `Max`).
+  - `FO3DTransportOptionsView::GetDouble` clamps a Float field's value, and its default, when `Max > Min`.
+  - `GetInt` does not clamp: an Int range is in the editor's shown unit (`StoredUnitScale`), and the transports clamp their stored ints themselves (for example the NNG queue size), so clamping there would change what they read.
+- **`bRestartOnChange`.** Default false, and no built-in field sets it, so behaviour is unchanged. When a commit through the panel changes such a field, the panel calls the new `IO3DOptionTarget::RestartTransport`, and the tooltip says so.
+  - The sender target stops and starts capture when the component captures in a game world, the sequence `PostEditChangeProperty` already uses for its restart properties.
+  - The receiver's target is the LiveLink "Add Source" settings object. Nothing runs there, so it keeps the default no-op.
+  - The editor module only: runtime code never restarts on an option change.
+- **`Validate`: shape and placement.** The shape is `TFunction<bool(const FString& Value, FText& OutError)>`, called with the trimmed stored text of a set value.
+  - *Why a function and not a pattern.* The checks transports need already exist as functions: `ParseHostPort`, `TryParsePort` and the WebRTC endpoint policy. A regex or a declarative rule would duplicate them, less precisely.
+  - It matches `VisibleWhen`, the other behavioural entry.
+  - It returns a sentence for the user (`FText`), which the panel shows under the row and the start result carries.
+  - Numeric ranges stay declarative (`Min`/`Max`), so a validator never repeats them.
+  - It sees one value, not the map: a rule that spans fields belongs in the transport's `Initialize`, which already returns `InvalidConfig`.
+  - *Where it runs.* `O3DTransportOptions::ValidateOptions(View)` runs it for every set, visible field. Unset keys use their default, and a hidden row is not in use. The sender's transport controller and the receiver source call it at start, on the config's options after the configure function ran (the values the transport would get), before anything is created. A refusal is `InvalidConfig`, and its message names the key and the validator's sentence, never the value: the message is logged, and a value pasted into the wrong field may be a credential.
+  - The panel runs the same check per commit and refuses the write.
+  - Configure time was not chosen: the configure function returns nothing, and a refusal there could not stop the host.
+  - *Not added:* rejecting a value whose type does not parse (Int, Float, Bool) or an unknown Enum value. Today such values fall back to the default or are accepted as aliases (NNG's mode names, TRB-26's strict parsing), and making them fail a start would change behaviour. No built-in field declares a `Validate` yet; transports can add them field by field.
+- **Smaller changes.** `FO3DSenderSerializer::OnSubjectListReady` and its delegate type are deleted; 5b left them neither broadcast nor bound. `UO3DSenderComponent::GetLastTransportResult` exposes the controller's last start result (C++ only, not a property).
+- **Interface version stays 5.** No tag after v0.9.6 (2026-07-25); 5a and 5b are still under Unreleased in the CHANGELOG, and the GitHub releases list v0.9.6 as the latest. So 5a, 5b and 5c are one version. The add-on is built against this change.
+- **Saved data.** Nothing saved changed layout. `FO3DTransportConfig` and the schema are not reflected and never saved. The sender component and `FO3DReceiverSourceConfig` keep their properties and option keys; `GetLastTransportResult` reads a non-property member that already existed. The receiver source's new `LastTransportResult` member is in a non-reflected class. The only saved values the change touches are those of `SecretOptionKeys` keys, and the merge leaves them secret. So no migration and no load test were needed; the existing saved-options tests (`...TypedConfig.SavedOptionsReachConfigureFunction`, `...WebRTC.TypedConfig.SavedOptionsReachTransport`) still cover that path unchanged.
+- **Verification.** New tests:
+  - `Open3DBroadcast.Shared.TypedConfig.ConfigCarriesTransportAndRole`: the constructor, the two hosts, and every built-in transport's configure functions.
+  - `Open3DBroadcast.Shared.OptionSchema.SecretEntryCarriesEnvVar`: the merge rules; a schema-only secret's variable resolved through the store with a fake environment; and on a component, that the key is kept out of the options and `AdvancedParams`, reaches `Secrets`, and is redacted in `ToDebugString`.
+  - `.FloatHonoursMinAndMax`.
+  - `.ValidateGivesInvalidConfig`: `ValidateOptions` itself, then the sender component and the receiver source, which create no instance while refused.
+  - `Open3DBroadcast.Editor.OptionsPanel.RestartOnChangeRestartsTransport`, `.ValidateShowsErrorAndRefuses` and `.FloatIsClampedToRange`.
+  - `Open3DBroadcast.Transport.WebRTC.Secrets.SchemaEntriesCarryEnvVars`.
+
+  Existing tests changed only where TRB-27 forced it: their configs set the registered name and an `EO3DTransportRole`, and log lines print `Transport.ToString()`. No assertion changed.

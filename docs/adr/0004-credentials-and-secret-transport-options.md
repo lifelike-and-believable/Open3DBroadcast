@@ -143,3 +143,17 @@ Replace the string map with typed structs whose secret fields are `UPROPERTY(Tra
 - Findings: SND-10, RCV-3, TRF-21, TRF-22, SHR-11, LIC-1, SHR-36; related TRF-35, HYG-1.
 - Files: `Plugin/Source/Open3DShared/Public/O3DTransportTypes.h`; `Plugin/Source/Open3DSender/Public/O3DSenderComponent.h`, `Private/O3DSenderComponent.cpp`; `Plugin/Source/Open3DSender/Public/O3DSenderTransportCustomization.h`; `Plugin/Source/Open3DReceiver/Public/O3DReceiverSourceSettings.h`, `O3DReceiverTransportCustomization.h`, `Private/O3DReceiverSourceFactory.cpp`; `Plugin/Source/Open3DTransportWebRTC/Private/Open3DTransportWebRTCModule.cpp`, `Private/Shared/WebRTCTokenFetcher.cpp`, `Tests/mock-token-server.py`; `Plugin/Source/Open3DTransportMoQ/ThirdParty/moq-ffi/include/moq_ffi.h`; `.github/copilot-instructions.md:63`, `:114`.
 - External (retrieved 2026-09-29, search snippets only; Epic's own config page was listed but not fetched): Tom Looman, "Adding 'Project Settings' to Unreal Engine (DeveloperSettings)", https://tomlooman.com/unreal-engine-developer-settings/ ; hzFishy, "Developer Settings", https://notes.hzfishy.fr/Unreal-Engine/Miscs/Types/Developer-Settings ; Epic, "Configuration Files in Unreal Engine", https://dev.epicgames.com/documentation/en-us/unreal-engine/configuration-files-in-unreal-engine .
+
+## Addendum: implementation note (WP-A1 PR 5c, 2026-10-02)
+
+- **Status:** item 1's "typed secret fields" exist. Nothing here changes the Decision.
+- **The typed form.** A `Secret` entry in a transport's option schema (ADR 0007 item 8) declares its key secret and carries its environment variable (`FO3DTransportOptionField::SecretEnvVar`). The WebRTC add-on declares `webrtc.token` (`O3DB_WEBRTC_TOKEN`) and `webrtc.tokenEndpointAuth` (`O3DB_WEBRTC_TOKEN_ENDPOINT_AUTH`) that way only.
+- **Deviation from "replace this list".** `SecretOptionKeys` and `SecretEnvVars` (now on `FO3DTransportRoleOptions`, and still on the deprecated customizations) are kept as deprecated inputs until the customizations are removed (WP-A1 step 6). `FO3DTransportRegistry::GetSecretDeclaration` returns the union of the entries and the lists, and an entry's variable wins over the list's. A key declared either way is secret.
+- **Semantics unchanged.** Every place that decides what is secret reads that one declaration:
+  - the hosts' copy of the options;
+  - `ResolveAll` and `Describe` (items 2 and 3);
+  - the editor's Secret rows (item 5);
+  - the PostLoad and connection-string migrations (item 4);
+  - switching transports (SND-35).
+
+  So items 2 to 8 behave as before: resolution order, profiles, persistence, redaction and the token endpoint rules. `Open3DBroadcast.Shared.OptionSchema.SecretEntryCarriesEnvVar` checks a schema-only secret end to end (variable, store, kept out of the options and `AdvancedParams`, redacted in `ToDebugString`).

@@ -76,6 +76,7 @@ public:
 		{
 			const FString ChannelName = LoopbackSchema::ReadChannel(Config);
 			Config.Transport = TEXT("Loopback");
+			Config.Role = EO3DTransportRole::Receiver;
 			Config.StreamId = ChannelName;
 			Config.Uri = FString::Printf(TEXT("loopback://%s?role=sub"), *ChannelName);
 			Config.AdvancedParams.Add(O3DLoopback::ChannelOptionKey, ChannelName);
@@ -86,7 +87,7 @@ public:
 		{
 			const FString ChannelName = LoopbackSchema::ReadChannel(Config);
 			Config.Transport = TEXT("Loopback");
-			Config.Role = TEXT("sender");
+			Config.Role = EO3DTransportRole::Sender;
 			Config.StreamId = ChannelName;
 			Config.Uri = FString::Printf(TEXT("loopback://%s?role=pub"), *ChannelName);
 			Config.AdvancedParams.Add(O3DLoopback::ChannelOptionKey, ChannelName);

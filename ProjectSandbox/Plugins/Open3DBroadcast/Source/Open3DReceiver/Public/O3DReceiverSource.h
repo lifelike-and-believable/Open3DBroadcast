@@ -198,6 +198,8 @@ private:
     FText SourceType;
     FText SourceMachineName;
     FText SourceStatus;
+    /** Why the last StartTransport() refused the options; Ok otherwise (WP-A1 PR 5c). */
+    FO3DTransportResult LastTransportResult;
 
     ILiveLinkClient* Client = nullptr;
     FGuid SourceGuid;

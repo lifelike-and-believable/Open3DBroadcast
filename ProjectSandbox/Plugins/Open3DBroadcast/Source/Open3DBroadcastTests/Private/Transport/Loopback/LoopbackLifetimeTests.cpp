@@ -87,7 +87,7 @@ bool FO3DLoopbackLifetimeStressTest::RunTest(const FString& Parameters)
     // A receiver keeps the channel alive across cycles, which is the case where the old
     // sink's weak channel pin still succeeds after its sender is gone.
     FO3DTransportConfig ReceiverConfig;
-    ReceiverConfig.Transport = TEXT("loopback");
+    ReceiverConfig.Transport = TEXT("Loopback");
     ReceiverConfig.StreamId = TEXT("wp_s5_lifetime");
     ReceiverConfig.Audio.bEnableAudio = true;
     const TSharedPtr<IOpen3DReceiver> Receiver = O3DTransport::CreateReceiver(TEXT("Loopback"));
@@ -102,7 +102,7 @@ bool FO3DLoopbackLifetimeStressTest::RunTest(const FString& Parameters)
         [](int32)
     {
         FO3DTransportConfig Config;
-        Config.Transport = TEXT("loopback");
+        Config.Transport = TEXT("Loopback");
         Config.StreamId = TEXT("wp_s5_lifetime");
         Config.Audio.bEnableAudio = true;
         Config.Audio.SampleRate = 48000;
@@ -142,7 +142,7 @@ bool FO3DLoopbackStopUnderLoadTest::RunTest(const FString& Parameters)
     for (int32 Cycle = 0; Cycle < O3DLifetimeTest::StressCycles; ++Cycle)
     {
         FO3DTransportConfig Config;
-        Config.Transport = TEXT("loopback");
+        Config.Transport = TEXT("Loopback");
         Config.StreamId = Channel;
         Config.Audio.bEnableAudio = true;
         Config.AdvancedParams.Add(TEXT("loopback.maxqueue"), TEXT("256"));

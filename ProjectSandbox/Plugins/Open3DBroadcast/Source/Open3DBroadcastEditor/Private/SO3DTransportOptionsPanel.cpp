@@ -8,6 +8,7 @@
 #include "O3DSecretStore.h"
 #include "O3DTransportOptionTarget.h"
 #include "SO3DSecretOptionField.h"
+#include "Transport/O3DTransportOptions.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
@@ -16,6 +17,20 @@
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "O3DTransportOptionsPanel"
+
+namespace O3DTransportOptionsPanelPrivate
+{
+	/** The whole-number bounds of an Int field's range (Min and Max are doubles since WP-A1 PR 5c). */
+	int32 IntRangeLow(const FO3DTransportOptionField& Field)
+	{
+		return static_cast<int32>(FMath::Clamp(FMath::CeilToDouble(Field.Min), static_cast<double>(MIN_int32), static_cast<double>(MAX_int32)));
+	}
+
+	int32 IntRangeHigh(const FO3DTransportOptionField& Field)
+	{
+		return static_cast<int32>(FMath::Clamp(FMath::FloorToDouble(Field.Max), static_cast<double>(MIN_int32), static_cast<double>(MAX_int32)));
+	}
+}
 
 void SO3DTransportOptionsPanel::Construct(const FArguments& InArgs)
 {
@@ -26,6 +41,7 @@ void SO3DTransportOptionsPanel::Construct(const FArguments& InArgs)
 
 	// Sized once: each SComboBox keeps a pointer to its entry's Items array.
 	EnumChoices.SetNum(Schema.Num());
+	FieldErrors.SetNum(Schema.Num());
 	for (int32 FieldIndex = 0; FieldIndex < Schema.Num(); ++FieldIndex)
 	{
 		if (Schema[FieldIndex].Type == EO3DTransportOptionType::Enum)
@@ -66,13 +82,24 @@ void SO3DTransportOptionsPanel::Construct(const FArguments& InArgs)
 				[
 					SNew(STextBlock)
 					.Text(Field.DisplayName)
-					.ToolTipText(Field.Tooltip)
+					.ToolTipText(GetFieldTooltipAt(FieldIndex))
 				]
 				+ SVerticalBox::Slot()
 				.AutoHeight()
 				.Padding(0.f, 4.f, 0.f, 0.f)
 				[
 					BuildFieldWidget(FieldIndex)
+				]
+				// Why the last value was refused (the field's Validate, WP-A1 PR 5c).
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(0.f, 2.f, 0.f, 0.f)
+				[
+					SNew(STextBlock)
+					.Text(TAttribute<FText>::CreateSP(this, &SO3DTransportOptionsPanel::GetFieldErrorText, FieldIndex))
+					.ColorAndOpacity(FLinearColor(1.f, 0.4f, 0.3f))
+					.AutoWrapText(true)
+					.Visibility(TAttribute<EVisibility>::CreateSP(this, &SO3DTransportOptionsPanel::GetFieldErrorVisibility, FieldIndex))
 				]
 			];
 	}
@@ -83,14 +110,15 @@ void SO3DTransportOptionsPanel::Construct(const FArguments& InArgs)
 TSharedRef<SWidget> SO3DTransportOptionsPanel::BuildFieldWidget(int32 FieldIndex)
 {
 	const FO3DTransportOptionField& Field = Schema[FieldIndex];
+	const FText Tooltip = GetFieldTooltipAt(FieldIndex);
 
 	switch (Field.Type)
 	{
 	case EO3DTransportOptionType::Int:
 	{
 		const bool bHasRange = Field.Max > Field.Min;
-		const TOptional<int32> MinValue = bHasRange ? TOptional<int32>(Field.Min) : TOptional<int32>();
-		const TOptional<int32> MaxValue = bHasRange ? TOptional<int32>(Field.Max) : TOptional<int32>();
+		const TOptional<int32> MinValue = bHasRange ? TOptional<int32>(O3DTransportOptionsPanelPrivate::IntRangeLow(Field)) : TOptional<int32>();
+		const TOptional<int32> MaxValue = bHasRange ? TOptional<int32>(O3DTransportOptionsPanelPrivate::IntRangeHigh(Field)) : TOptional<int32>();
 
 		// Writes on commit only: Enter, focus change, or the end of a spin drag (TRB-45). No
 		// OnValueChanged binding, so dragging does not write or restart anything per tick.
@@ -103,14 +131,33 @@ TSharedRef<SWidget> SO3DTransportOptionsPanel::BuildFieldWidget(int32 FieldIndex
 			.Value(TAttribute<TOptional<int32>>::CreateSP(this, &SO3DTransportOptionsPanel::GetIntValue, FieldIndex))
 			.UndeterminedString(GetHintText(FieldIndex))
 			.OnValueCommitted(this, &SO3DTransportOptionsPanel::HandleIntCommitted, FieldIndex)
-			.ToolTipText(Field.Tooltip);
+			.ToolTipText(Tooltip);
+	}
+
+	case EO3DTransportOptionType::Float:
+	{
+		const bool bHasRange = Field.Max > Field.Min;
+		const TOptional<double> MinValue = bHasRange ? TOptional<double>(Field.Min) : TOptional<double>();
+		const TOptional<double> MaxValue = bHasRange ? TOptional<double>(Field.Max) : TOptional<double>();
+
+		// Like the Int box: writes on commit only (TRB-45).
+		return SNew(SNumericEntryBox<double>)
+			.AllowSpin(bHasRange)
+			.MinValue(MinValue)
+			.MaxValue(MaxValue)
+			.MinSliderValue(MinValue)
+			.MaxSliderValue(MaxValue)
+			.Value(TAttribute<TOptional<double>>::CreateSP(this, &SO3DTransportOptionsPanel::GetFloatValue, FieldIndex))
+			.UndeterminedString(GetHintText(FieldIndex))
+			.OnValueCommitted(this, &SO3DTransportOptionsPanel::HandleFloatCommitted, FieldIndex)
+			.ToolTipText(Tooltip);
 	}
 
 	case EO3DTransportOptionType::Bool:
 		return SNew(SCheckBox)
 			.IsChecked(TAttribute<ECheckBoxState>::CreateSP(this, &SO3DTransportOptionsPanel::GetBoolValue, FieldIndex))
 			.OnCheckStateChanged(FOnCheckStateChanged::CreateSP(this, &SO3DTransportOptionsPanel::HandleBoolChanged, FieldIndex))
-			.ToolTipText(Field.Tooltip);
+			.ToolTipText(Tooltip);
 
 	case EO3DTransportOptionType::Enum:
 		return BuildEnumWidget(FieldIndex);
@@ -129,7 +176,7 @@ TSharedRef<SWidget> SO3DTransportOptionsPanel::BuildFieldWidget(int32 FieldIndex
 			.Text(TAttribute<FText>::CreateSP(this, &SO3DTransportOptionsPanel::GetTextValue, FieldIndex))
 			.HintText(GetHintText(FieldIndex))
 			.OnTextCommitted(FOnTextCommitted::CreateSP(this, &SO3DTransportOptionsPanel::HandleTextCommitted, FieldIndex))
-			.ToolTipText(Field.Tooltip);
+			.ToolTipText(Tooltip);
 	}
 }
 
@@ -163,7 +210,7 @@ TSharedRef<SWidget> SO3DTransportOptionsPanel::BuildEnumWidget(int32 FieldIndex)
 			return SNew(STextBlock).Text(Item.IsValid() ? Item->DisplayName : FText::GetEmpty());
 		})
 		.OnSelectionChanged(FEnumCombo::FOnSelectionChanged::CreateSP(this, &SO3DTransportOptionsPanel::HandleEnumChanged, FieldIndex))
-		.ToolTipText(Field.Tooltip)
+		.ToolTipText(GetFieldTooltipAt(FieldIndex))
 		[
 			SNew(STextBlock)
 			.Text(TAttribute<FText>::CreateSP(this, &SO3DTransportOptionsPanel::GetEnumText, FieldIndex))
@@ -189,6 +236,46 @@ void SO3DTransportOptionsPanel::CommitSecretValue(const FString& Key, const FStr
 	{
 		Target->SetSecret(Key, Trimmed, EO3DSecretPersistence::Session);
 	}
+}
+
+FText SO3DTransportOptionsPanel::GetFieldError(const FString& Key) const
+{
+	int32 FieldIndex = INDEX_NONE;
+	return FindField(Key, &FieldIndex) ? GetFieldErrorText(FieldIndex) : FText::GetEmpty();
+}
+
+FText SO3DTransportOptionsPanel::GetFieldTooltip(const FString& Key) const
+{
+	int32 FieldIndex = INDEX_NONE;
+	return FindField(Key, &FieldIndex) ? GetFieldTooltipAt(FieldIndex) : FText::GetEmpty();
+}
+
+FText SO3DTransportOptionsPanel::GetFieldTooltipAt(int32 FieldIndex) const
+{
+	if (!Schema.IsValidIndex(FieldIndex))
+	{
+		return FText::GetEmpty();
+	}
+
+	const FO3DTransportOptionField& Field = Schema[FieldIndex];
+	if (!Field.bRestartOnChange)
+	{
+		return Field.Tooltip;
+	}
+	const FText RestartNote = LOCTEXT("RestartOnChangeNote", "Changing this restarts a running transport.");
+	return Field.Tooltip.IsEmpty()
+		? RestartNote
+		: FText::Format(LOCTEXT("TooltipWithRestartNote", "{0}\n\n{1}"), Field.Tooltip, RestartNote);
+}
+
+FText SO3DTransportOptionsPanel::GetFieldErrorText(int32 FieldIndex) const
+{
+	return FieldErrors.IsValidIndex(FieldIndex) ? FieldErrors[FieldIndex] : FText::GetEmpty();
+}
+
+EVisibility SO3DTransportOptionsPanel::GetFieldErrorVisibility(int32 FieldIndex) const
+{
+	return GetFieldErrorText(FieldIndex).IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
 }
 
 int32 SO3DTransportOptionsPanel::GetNumVisibleFields() const
@@ -303,6 +390,13 @@ TOptional<int32> SO3DTransportOptionsPanel::GetIntValue(int32 FieldIndex) const
 	return Schema.IsValidIndex(FieldIndex) ? StoredToShown(Schema[FieldIndex], GetStoredValue(FieldIndex)) : TOptional<int32>();
 }
 
+TOptional<double> SO3DTransportOptionsPanel::GetFloatValue(int32 FieldIndex) const
+{
+	// Unset or not a number: no value, so the box shows the hint (as the Int box does).
+	double Value = 0.0;
+	return O3DTransportOptions::TryParseDouble(GetStoredValue(FieldIndex), Value) ? TOptional<double>(Value) : TOptional<double>();
+}
+
 ECheckBoxState SO3DTransportOptionsPanel::GetBoolValue(int32 FieldIndex) const
 {
 	FString Value = GetStoredValue(FieldIndex);
@@ -360,6 +454,17 @@ void SO3DTransportOptionsPanel::HandleIntCommitted(int32 NewValue, ETextCommit::
 	SubmitFromTextCommit(CommitType);
 }
 
+void SO3DTransportOptionsPanel::HandleFloatCommitted(double NewValue, ETextCommit::Type CommitType, int32 FieldIndex)
+{
+	if (CommitType == ETextCommit::OnCleared)
+	{
+		return;
+	}
+
+	CommitFieldAt(FieldIndex, FString::SanitizeFloat(NewValue));
+	SubmitFromTextCommit(CommitType);
+}
+
 void SO3DTransportOptionsPanel::HandleBoolChanged(ECheckBoxState NewState, int32 FieldIndex)
 {
 	CommitFieldAt(FieldIndex, NewState == ECheckBoxState::Checked ? TEXT("true") : TEXT("false"));
@@ -408,10 +513,29 @@ bool SO3DTransportOptionsPanel::CommitFieldAt(int32 FieldIndex, const FString& V
 		int64 Shown = FCString::Atoi64(*Trimmed);
 		if (Field.Max > Field.Min)
 		{
-			Shown = FMath::Clamp<int64>(Shown, Field.Min, Field.Max);
+			Shown = FMath::Clamp<int64>(Shown, O3DTransportOptionsPanelPrivate::IntRangeLow(Field), O3DTransportOptionsPanelPrivate::IntRangeHigh(Field));
 		}
 		const int64 Stored = Shown * FMath::Max<int64>(1, Field.StoredUnitScale);
 		return CommitStoredValue(FieldIndex, LexToString(Stored));
+	}
+
+	case EO3DTransportOptionType::Float:
+	{
+		if (Trimmed.IsEmpty())
+		{
+			// An empty box resets the option to the transport's default.
+			return CommitStoredValue(FieldIndex, FString());
+		}
+		double Value = 0.0;
+		if (!O3DTransportOptions::TryParseDouble(Trimmed, Value))
+		{
+			return false;
+		}
+		if (Field.Max > Field.Min)
+		{
+			Value = FMath::Clamp(Value, Field.Min, Field.Max);
+		}
+		return CommitStoredValue(FieldIndex, FString::SanitizeFloat(Value));
 	}
 
 	case EO3DTransportOptionType::Bool:
@@ -445,10 +569,25 @@ bool SO3DTransportOptionsPanel::CommitStoredValue(int32 FieldIndex, const FStrin
 		return false;
 	}
 
-	const bool bChanged = Target->CommitOption(Schema[FieldIndex].Key, StoredValue);
+	// The field's Validate decides before anything is written (WP-A1 PR 5c). An empty value
+	// resets to the default and is never refused.
+	const FO3DTransportOptionField& Field = Schema[FieldIndex];
+	FText Error;
+	if (!O3DTransportOptions::ValidateOptionValue(Field, StoredValue, Error))
+	{
+		FieldErrors[FieldIndex] = Error;
+		return false;
+	}
+	FieldErrors[FieldIndex] = FText::GetEmpty();
+
+	const bool bChanged = Target->CommitOption(Field.Key, StoredValue);
 	if (bChanged)
 	{
 		OnOptionCommitted.ExecuteIfBound();
+		if (Field.bRestartOnChange)
+		{
+			Target->RestartTransport();
+		}
 	}
 	return bChanged;
 }

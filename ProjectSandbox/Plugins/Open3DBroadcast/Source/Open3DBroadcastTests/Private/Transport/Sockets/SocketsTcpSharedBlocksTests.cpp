@@ -45,8 +45,8 @@ namespace O3DSocketsTcpBlocksTests
 	FO3DTransportConfig MakeTcpConfig(bool bSender, int32 Port, const TMap<FString, FString>& Extra)
 	{
 		FO3DTransportConfig Config;
-		Config.Transport = TEXT("sockets.tcp");
-		Config.Role = bSender ? TEXT("sender") : TEXT("receiver");
+		Config.Transport = TEXT("TCP");
+		Config.Role = bSender ? EO3DTransportRole::Sender : EO3DTransportRole::Receiver;
 		Config.Uri = FString::Printf(TEXT("tcp://127.0.0.1:%d"), Port);
 		Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), Port);
 		Config.AdvancedParams.Add(bSender ? TEXT("bind") : TEXT("host"), TEXT("127.0.0.1"));

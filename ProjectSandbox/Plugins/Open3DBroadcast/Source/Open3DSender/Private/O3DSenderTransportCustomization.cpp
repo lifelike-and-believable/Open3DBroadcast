@@ -152,8 +152,9 @@ const FO3DSenderTransportCustomization* O3DSender::FindTransportCustomization(FN
                 Configure(FO3DTransportOptionsView(Component ? Component->TransportOptions : NoOptions), Config);
             };
         }
-        Copy->SecretOptionKeys = Descriptor->SenderOptions.SecretOptionKeys;
-        Copy->SecretEnvVars = Descriptor->SenderOptions.SecretEnvVars;
+        // The merged declaration, so a transport that declares its secrets in its schema
+        // (WP-A1 PR 5c) still shows them through the deprecated customization.
+        Descriptor->SenderOptions.GetSecretDeclaration(Copy->SecretOptionKeys, Copy->SecretEnvVars);
         Copy->OptionSchema = Descriptor->SenderOptions.OptionSchema;
         Item.Source = Descriptor;
         Item.Customization = MoveTemp(Copy);

@@ -44,7 +44,7 @@ namespace O3DNetworkMoQTests
 	{
 		FO3DTransportConfig Config;
 		Config.Transport = TEXT("MoQ");
-		Config.Role = bSender ? TEXT("sender") : TEXT("receiver");
+		Config.Role = bSender ? EO3DTransportRole::Sender : EO3DTransportRole::Receiver;
 		Config.Uri = RelayUrl;
 		Config.StreamId = StreamId;
 		return Config;

@@ -26,6 +26,10 @@ class SWidget;
  * - Each commit is one undoable transaction (IO3DOptionTarget::CommitOption).
  * - Secret fields write to the secret store only, never to the option map or the undo buffer.
  * - The target is held weakly; once it is gone the rows are disabled and a line says so.
+ * - WP-A1 PR 5c: a value the field's Validate refuses is not written; its error shows under the
+ *   row until a value is accepted. After a change to a field with bRestartOnChange the panel asks
+ *   the target to restart its running transport (IO3DOptionTarget::RestartTransport), and the
+ *   field's tooltip says so. Float fields get a number box with the field's range.
  */
 class OPEN3DBROADCASTEDITOR_API SO3DTransportOptionsPanel : public SO3DTransportConfigPanelBase
 {
@@ -48,11 +52,19 @@ public:
 
 	/**
 	 * Commits Value for the field Key the way its widget does: text is trimmed, an Int is parsed,
-	 * clamped to the field's range and scaled to the stored unit, an Enum must be one of its
-	 * values. One transaction when the stored value changes. Returns true when it changed.
-	 * Public so tests can drive the panel without synthesizing Slate input.
+	 * clamped to the field's range and scaled to the stored unit, a Float is parsed and clamped to
+	 * its range, an Enum must be one of its values, and the field's Validate must accept the result
+	 * (otherwise nothing is written and GetFieldError says why). One transaction when the stored
+	 * value changes, then a restart request when the field has bRestartOnChange. Returns true when
+	 * it changed. Public so tests can drive the panel without synthesizing Slate input.
 	 */
 	bool CommitFieldValue(const FString& Key, const FString& Value);
+
+	/** The error shown under the field Key: why its last commit was refused, or empty. For tests. */
+	FText GetFieldError(const FString& Key) const;
+
+	/** The tooltip of the field Key, with the restart note when it has bRestartOnChange. For tests. */
+	FText GetFieldTooltip(const FString& Key) const;
 
 	/** Stores a secret for the Secret field Key, as its password box does. Never enters the option map. */
 	void CommitSecretValue(const FString& Key, const FString& Value);
@@ -85,11 +97,16 @@ private:
 
 	FText GetTextValue(int32 FieldIndex) const;
 	TOptional<int32> GetIntValue(int32 FieldIndex) const;
+	TOptional<double> GetFloatValue(int32 FieldIndex) const;
+	FText GetFieldTooltipAt(int32 FieldIndex) const;
+	FText GetFieldErrorText(int32 FieldIndex) const;
+	EVisibility GetFieldErrorVisibility(int32 FieldIndex) const;
 	ECheckBoxState GetBoolValue(int32 FieldIndex) const;
 	FText GetEnumText(int32 FieldIndex) const;
 
 	void HandleTextCommitted(const FText& NewText, ETextCommit::Type CommitType, int32 FieldIndex);
 	void HandleIntCommitted(int32 NewValue, ETextCommit::Type CommitType, int32 FieldIndex);
+	void HandleFloatCommitted(double NewValue, ETextCommit::Type CommitType, int32 FieldIndex);
 	void HandleBoolChanged(ECheckBoxState NewState, int32 FieldIndex);
 	void HandleEnumChanged(TSharedPtr<FO3DTransportOptionEnumValue> NewSelection, ESelectInfo::Type SelectInfo, int32 FieldIndex);
 	void HandleSecretCommitted(ETextCommit::Type CommitType);
@@ -102,5 +119,7 @@ private:
 	TSharedPtr<IO3DOptionTarget> Target;
 	FO3DTransportOptionSchema Schema;
 	TArray<FEnumChoices> EnumChoices;
+	/** Per field: why its last commit was refused (Validate), empty when accepted. */
+	TArray<FText> FieldErrors;
 	FSimpleDelegate OnOptionCommitted;
 };

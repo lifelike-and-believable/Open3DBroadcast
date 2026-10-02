@@ -60,7 +60,7 @@ namespace O3DControlReceiverTests
 			Sender = FO3DTransportRegistry::Get().CreateSender(FName(TEXT("Loopback")));
 			FO3DTransportConfig SenderConfig;
 			SenderConfig.Transport = TEXT("Loopback");
-			SenderConfig.Role = TEXT("sender");
+			SenderConfig.Role = EO3DTransportRole::Sender;
 			SenderConfig.StreamId = Channel;
 			SenderConfig.Uri = FString::Printf(TEXT("loopback://%s?role=pub"), *Channel);
 			if (!Test.TestTrue(TEXT("Loopback sender starts"), Sender.IsValid() && Sender->Initialize(SenderConfig) && Sender->Start()))

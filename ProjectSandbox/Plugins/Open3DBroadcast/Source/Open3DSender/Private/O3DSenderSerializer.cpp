@@ -354,10 +354,7 @@ void FO3DSenderSerializer::SerializeFrameLegacy(const FString& Subject, const FO
 	const double Now = FPlatformTime::Seconds();
 	SubjectListPtr->Serialize(Buffer, Now);
 
-	// Deliberately NOT broadcasting OnSubjectListReady here: the component's
-	// handler for it calls IOpen3DSender::Send(SubjectList&), so broadcasting
-	// both that and OnSerializedFrame below would send every legacy frame
-	// twice. Transports receive frames only through the bytes below (see
+	// Transports receive frames only through the bytes below (see
 	// UO3DSenderComponent::HandleSerializedFrameForward).
 	BroadcastSerializedBuffer(Subject, Buffer, Now, Cache);
 	Cache.FullSyncsSent++;
