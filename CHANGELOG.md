@@ -686,6 +686,11 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
 
 ### NNG on the shared transport blocks (WP-A1 PR 4d, ADR 0007 step 4)
 
+- **Fix: `FO3DSendQueue` pending counters never read above a limit.** `Enqueue` used to add to
+  the item and byte counters first and subtract again on overflow, so `GetStats` could briefly
+  report pending bytes over the cap (seen as an intermittent
+  `Open3DBroadcast.Shared.SendQueue.ConcurrentAccounting` failure). It now reserves with a
+  compare-exchange that only succeeds when the result fits. Admission and refusal are unchanged.
 - **Wire format unchanged.** Same NNG protocols (pub/sub, pair, push/pull), URL schemes
   (`nng+<mode>://`, `tcp://`), envelopes, option keys and defaults.
 - **Sender.** Frames, audio and control are items on one `FO3DSendQueue`, and an
