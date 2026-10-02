@@ -526,16 +526,16 @@ bool SO3DTransportOptionsPanel::CommitFieldAt(int32 FieldIndex, const FString& V
 			// An empty box resets the option to the transport's default.
 			return CommitStoredValue(FieldIndex, FString());
 		}
-		double Value = 0.0;
-		if (!O3DTransportOptions::TryParseDouble(Trimmed, Value))
+		double Parsed = 0.0;
+		if (!O3DTransportOptions::TryParseDouble(Trimmed, Parsed))
 		{
 			return false;
 		}
 		if (Field.Max > Field.Min)
 		{
-			Value = FMath::Clamp(Value, Field.Min, Field.Max);
+			Parsed = FMath::Clamp(Parsed, Field.Min, Field.Max);
 		}
-		return CommitStoredValue(FieldIndex, FString::SanitizeFloat(Value));
+		return CommitStoredValue(FieldIndex, FString::SanitizeFloat(Parsed));
 	}
 
 	case EO3DTransportOptionType::Bool:
