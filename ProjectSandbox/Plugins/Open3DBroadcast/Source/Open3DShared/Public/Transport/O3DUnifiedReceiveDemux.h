@@ -15,7 +15,8 @@
  *
  * Every receiver hands what arrived to one of these. It classifies a buffer once, by the unified
  * envelope header (ADR 0009), and routes it:
- * - mocap to the frame consumer (ISerializedFrameConsumer::SubmitFrame);
+ * - mocap to the frame consumer: ISerializedFrameConsumer::SubmitFrame with a view of the bytes
+ *   (no copy; WP-A1 PR 5b), or SubmitFrameOwned when the receiver hands over its own buffer;
  * - audio to the audio sink, decoding Opus with one decoder per (SourceGuid, StreamLabel)
  *   (O3DAudio::FMultiStreamFrameDecoder, LRU-capped; SHR-15);
  * - control to the control sink, only when O3DS::TryGetControlPayload accepts it (ADR 0011: a
@@ -125,8 +126,20 @@ public:
 	 */
 	EO3DDemuxResult ProcessMessage(const uint8* Data, int32 Size, double ReceiveTimeSec, const FString& Subject = FString());
 
-	/** Bytes already known to be one serialized mocap frame, delivered without a copy. */
-	EO3DDemuxResult DeliverMocap(const FString& Subject, const TArray<uint8>& Frame, double ReceiveTimeSec);
+	/**
+	 * Bytes already known to be one serialized mocap frame, valid only for the call. Delivered
+	 * with ISerializedFrameConsumer::SubmitFrame (the view form), without a copy. A TArray
+	 * converts, so a receiver that keeps its buffer may pass it as it is.
+	 */
+	EO3DDemuxResult DeliverMocap(const FString& Subject, TConstArrayView<uint8> Frame, double ReceiveTimeSec);
+
+	/**
+	 * One serialized mocap frame in a buffer the receiver gives up (a hand-off queue item).
+	 * Delivered with ISerializedFrameConsumer::SubmitFrameOwned, so the consumer can keep it
+	 * without a copy (WP-A1 PR 5b). Frame is left empty (moved from) when it was delivered; it is
+	 * untouched when there is no consumer or it is empty.
+	 */
+	EO3DDemuxResult DeliverMocapOwned(const FString& Subject, TArray<uint8>&& Frame, double ReceiveTimeSec);
 
 	/** A serialized audio payload (no envelope) whose codec the caller knows, e.g. from the envelope or track. */
 	EO3DDemuxResult DeliverAudioPayload(O3DS::EUnifiedCodec Codec, const uint8* Payload, int32 Size);
@@ -153,8 +166,6 @@ private:
 	TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe> ControlSink;
 	/** Rebuilt when MaxAudioStreams changes (the decoder map takes its cap at construction). */
 	TUniquePtr<O3DAudio::FMultiStreamFrameDecoder> AudioDecoder;
-	/** Reused for enveloped and raw mocap until ISerializedFrameConsumer takes a view (ADR 0007 step 5). */
-	TArray<uint8> MocapScratch;
 	TArray<int16> DecodedPcm;
 	FO3DReceiveDemuxStats Stats;
 };

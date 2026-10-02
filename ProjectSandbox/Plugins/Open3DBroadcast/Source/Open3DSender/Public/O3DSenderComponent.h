@@ -449,7 +449,6 @@ private:
 
 	FDelegateHandle BoneTransformsFinalizedHandle;
 	FDelegateHandle SerializerRelayHandle;
-	FDelegateHandle SubjectListHandle;
 
 	TUniquePtr<FO3DSenderTransportController, FO3DSenderTransportControllerDeleter> TransportController;
 
@@ -469,7 +468,6 @@ private:
 	void InitializeTransport();
 	FO3DTransportConfig BuildTransportConfig() const;
 	void HandleSerializedFrameForward(const FString& Subject, const TArray<uint8>& Buffer, double Timestamp);
-	void OnSubjectListReady(const FString& Subject, const TSharedPtr<O3DS::SubjectList>& Payload);
 	void UpdateAudioCaptureBinding();
 
 public:

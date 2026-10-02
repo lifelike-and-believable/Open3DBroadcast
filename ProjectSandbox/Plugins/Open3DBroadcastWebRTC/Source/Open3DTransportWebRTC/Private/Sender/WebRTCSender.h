@@ -108,11 +108,6 @@ public:
     virtual FO3DTransportResult Start() override;
     virtual void Stop() override;
     /**
-     * Serializes the whole list once and sends it under the first subject's name (TRF-4,
-     * TRF-19). The normal pipeline uses SendSerialized; this path exists for the interface.
-     */
-    virtual bool Send(const O3DS::SubjectList& List) override;
-    /**
      * NotRunning before Start or after Stop, NotConnected while LiveKit is not connected (both
      * counted as dropped frames, as before), TooLarge above WebRTCUtils::ReliableMaxDataBytes,
      * DroppedBackpressure when lk_send_data_ex refuses the message.

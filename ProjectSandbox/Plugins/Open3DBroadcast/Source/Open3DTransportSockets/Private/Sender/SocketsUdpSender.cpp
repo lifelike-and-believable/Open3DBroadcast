@@ -94,8 +94,6 @@ FO3DTransportResult FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& 
 
 	ActiveAudioConfig = Config.Audio;
 	AudioSourceGuid = FGuid::NewGuid();
-	SerializationScratch.clear();
-	SerializationScratch.reserve(512 * 1024);
 
 	FO3DHostPort Parsed;
 	if (!O3DSockets::ParseEndpoint(Config, TEXT("udp"), Parsed))
@@ -219,38 +217,6 @@ EO3DSendResult FO3DSocketsUdpSender::EnqueueFrame(FO3DSendItem&& Item)
 		DroppedFrames.fetch_add(1);
 	}
 	return Result;
-}
-
-bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
-{
-	if (!bRunning.load())
-	{
-		return false;
-	}
-
-	FString ObservedSubject;
-	if (!List.mItems.empty() && List.mItems[0])
-	{
-		ObservedSubject = UTF8_TO_TCHAR(List.mItems[0]->mName.c_str());
-	}
-
-	// Not thread-safe (the scratch buffer); Send(SubjectList) is the deprecated game-thread path.
-	SerializationScratch.clear();
-	const double Timestamp = FPlatformTime::Seconds();
-	const int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(SerializationScratch, Timestamp);
-	if (BytesWritten <= 0)
-	{
-		UE_LOG(LogSocketsUdpSender, Verbose, TEXT("UDP sender failed to serialize SubjectList."));
-		DroppedFrames.fetch_add(1);
-		return false;
-	}
-
-	if (!ObservedSubject.IsEmpty())
-	{
-		PublishState->GetSubjectSlot().Set(ObservedSubject);
-	}
-	TArray<uint8> Bytes(reinterpret_cast<const uint8*>(SerializationScratch.data()), BytesWritten);
-	return EnqueueFrame(FO3DSendItem::MakeMocap(MoveTemp(Bytes), MoveTemp(ObservedSubject), Timestamp)) == EO3DSendResult::Queued;
 }
 
 EO3DSendResult FO3DSocketsUdpSender::SendSerialized(FO3DSendPayload&& Payload)

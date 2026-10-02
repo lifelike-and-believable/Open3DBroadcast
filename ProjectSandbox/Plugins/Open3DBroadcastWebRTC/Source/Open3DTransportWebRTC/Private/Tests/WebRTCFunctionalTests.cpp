@@ -13,6 +13,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "../Sender/WebRTCSender.h"
+#include "WebRTCSubjectListTestUtils.h"
 #include "../Receiver/WebRTCReceiver.h"
 #include "../Shared/LiveKitFfiApi.h"
 #include "../Shared/WebRTCTokenManager.h"
@@ -349,7 +350,7 @@ namespace WebRTCS7Test
 	class FRecordingConsumer final : public ISerializedFrameConsumer
 	{
 	public:
-		virtual void SubmitFrame(const FString& InStreamId, const TArray<uint8>& InPayload, double InTimestamp) override
+		virtual void SubmitFrame(const FString& InStreamId, TConstArrayView<uint8> InPayload, double InTimestamp) override
 		{
 			StreamIds.Add(InStreamId);
 			PayloadSizes.Add(InPayload.Num());
@@ -756,7 +757,7 @@ bool FWebRTCS7SendFailureNoDoubleFreeTest::RunTest(const FString& Parameters)
 		const std::vector<O3DS::Transform*> Before = Subject->mTransforms.mItems;
 
 		AddExpectedError(TEXT("exceeds maximum"), EAutomationExpectedMessageFlags::Contains, 1);
-		TestFalse(TEXT("Oversized list is rejected"), Sender.Send(List));
+		TestFalse(TEXT("Oversized list is rejected"), WebRTCSubjectListTest::SendSubjectList(Sender, List));
 		TestEqual(TEXT("Caller keeps its subjects"), static_cast<int32>(List.mItems.size()), 1);
 		TestTrue(TEXT("Caller keeps the same transform pointers"), Subject->mTransforms.mItems == Before);
 		TestEqual(TEXT("Nothing reached LiveKit"), Client->SentSizes.Num(), 0);
@@ -771,11 +772,11 @@ bool FWebRTCS7SendFailureNoDoubleFreeTest::RunTest(const FString& Parameters)
 		const std::vector<O3DS::Transform*> Before = Subject->mTransforms.mItems;
 
 		Fake.SendDataResult = 201;
-		TestFalse(TEXT("lk_send_data_ex failure is reported"), Sender.Send(List));
+		TestFalse(TEXT("lk_send_data_ex failure is reported"), WebRTCSubjectListTest::SendSubjectList(Sender, List));
 		TestTrue(TEXT("Caller keeps the same transform pointers"), Subject->mTransforms.mItems == Before);
 
 		Fake.SendDataResult = 0;
-		TestTrue(TEXT("Send succeeds when LiveKit accepts"), Sender.Send(List));
+		TestTrue(TEXT("Send succeeds when LiveKit accepts"), WebRTCSubjectListTest::SendSubjectList(Sender, List));
 		TestTrue(TEXT("Caller still owns its transforms after success"), Subject->mTransforms.mItems == Before);
 		if (Client->SentLabelsUtf8.Num() == 1)
 		{

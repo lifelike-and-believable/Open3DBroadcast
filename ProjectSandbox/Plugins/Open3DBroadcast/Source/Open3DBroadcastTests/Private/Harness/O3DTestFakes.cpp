@@ -88,17 +88,6 @@ void FO3DFakeSender::Stop()
 	ConnectionState.End(EO3DConnectionState::Idle);
 }
 
-bool FO3DFakeSender::Send(const O3DS::SubjectList& List)
-{
-	std::vector<char> Buffer;
-	const int32 Bytes = const_cast<O3DS::SubjectList&>(List).Serialize(Buffer, 0.0);
-	if (Bytes <= 0)
-	{
-		return false;
-	}
-	return SendSerialized(FO3DSendPayload::MakeCopy(reinterpret_cast<const uint8*>(Buffer.data()), Bytes)) == EO3DSendResult::Queued;
-}
-
 EO3DSendResult FO3DFakeSender::SendSerialized(FO3DSendPayload&& Payload)
 {
 	SendCalls.fetch_add(1);

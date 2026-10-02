@@ -99,8 +99,9 @@ private:
     // after the transport-thread -> game-thread AsyncTask hop below, so the gated
     // path's Frame.local_recv_us reflects the frame's true wire-arrival instant, not
     // whenever the game thread got around to running the dispatched task.
-    void HandleSerializedFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds, uint64 ArrivalEpochUsOverride = 0);
-    void HandleLegacyFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds, const O3DS::PacketMeta& Meta, O3DS::ReceiverStream& Stream);
+    // Buffer is valid only for the call (the consumer's view form, WP-A1 PR 5b); a TArray converts.
+    void HandleSerializedFrame(const FString& Subject, TConstArrayView<uint8> Buffer, double TimestampSeconds, uint64 ArrivalEpochUsOverride = 0);
+    void HandleLegacyFrame(const FString& Subject, TConstArrayView<uint8> Buffer, double TimestampSeconds, const O3DS::PacketMeta& Meta, O3DS::ReceiverStream& Stream);
     void EmitGatedFrame(uint64 StreamKey, O3DS::Frame&& Frame);
     void ReportGateMetricsDelta();
     bool StartTransport();

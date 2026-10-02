@@ -232,6 +232,10 @@ The repo has previous libdatachannel work (`.github/workflows/build-libdatachann
 
 Implemented as the plugin `ProjectSandbox/Plugins/Open3DBroadcastWebRTC/`. Open3DBroadcast no longer contains the WebRTC module or any livekit file, so `Build/Fab/exclude-modules.txt` no longer lists it (Implementation outline step 7); `fab-package.py` instead fails if either reappears. The three blockers are fixed (DLL lookup in the add-on's own plugin, `Open3DStreamCore` dependency, register nothing on failure and drain before unload), and the interface version is `O3D_TRANSPORT_API_VERSION` in `Open3DShared/Public/Transport/O3DTransportApiVersion.h`. Paths in this ADR that start `Plugin/Source/Open3DTransportWebRTC/` now live under the add-on. Q7 and Q8 are discussed in the WP-F11 pull request; they stay needs-verification until checked against a real Fab install.
 
+## Implementation note (WP-A1 PR 5b, 2026-10-02)
+
+Blocker 2's second option happened as well: `IOpen3DSender::Send(const O3DS::SubjectList&)` is deleted (ADR 0007 addendum "WP-A1 PR 5b"). The WebRTC add-on's runtime code no longer includes an o3ds core header. It keeps the `Open3DStreamCore` dependency only because its tests build `O3DS::SubjectList`s, which the first option already made possible.
+
 ## References
 
 - Findings: FAB-1, FAB-11, FAB-12; also FAB-4, CI-5, CI-8, UX-4, TRF-34, SHR-23, SHR-36, BUILD-4.

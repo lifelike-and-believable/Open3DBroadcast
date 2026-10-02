@@ -11,7 +11,7 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M0 Decisions (ADRs 0001–0010) | Done (#261–#263) |
 | M1 Safety and correctness: WP-S1..S11, WP-T1, WP-T2 | Done (#264–#279) |
 | M2 Fab-buildable package: WP-F1..F4, F6..F9, F11 | Done (#274–#286). **F0 and F5 wait on the maintainer** (see §5) |
-| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime), PR 3 (results, state, capabilities), PR 4a (building blocks + Loopback), PR 4b (TCP), PR 4c (UDP), PR 4d (NNG), PR 4e (MoQ), PR 4f (WebRTC add-on) and PR 5a (typed config) done; step 5 continues with 5b (consumer API)** (see §2) |
+| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime), PR 3 (results, state, capabilities), PR 4a (building blocks + Loopback), PR 4b (TCP), PR 4c (UDP), PR 4d (NNG), PR 4e (MoQ), PR 4f (WebRTC add-on), PR 5a (typed config) and PR 5b (consumer API) done; step 5 continues with 5c (rest of item 8)** (see §2) |
 | M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | Not started |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
 | WP-CTL control channel (D11, ADR 0011) | CTL-1..7 done (#290–#295, CTL-6, CTL-7); live-server checks remain (see §2b) |
@@ -92,7 +92,18 @@ Design: `docs/adr/0007-transport-abstraction-and-registry.md`, section "Implemen
      - Saved data needed no migration: the config was never saved, and the `webrtc.*` keys already were the saved form.
      - `O3D_TRANSPORT_API_VERSION` is **5**.
      - Tests: `Open3DBroadcast.Shared.TransportOptionsView.*`, `.TransportOptions.SwitchKeepsOtherTransportsOptions`, `.TransportApiVersion.TypedConfigIsVersion5`, `Open3DBroadcast.Sender.TypedConfig.*`, `.Sender.TransportSwitch.*`, `Open3DBroadcast.Receiver.TypedConfig.*`, `.Receiver.TransportSwitch.*`, `Open3DBroadcast.Transport.WebRTC.TypedConfig.SavedOptionsReachTransport`.
-   - **Start here next: PR 5b, consumer API.** Per ADR 0007 step 5: `ISerializedFrameConsumer::SubmitFrame` gets its view and owned forms (the demux and every receiver hand frames through it; TRF-38 holding is already done), and `IOpen3DSender::Send(const O3DS::SubjectList&)` is deleted (callers use `SendSerialized`). Both change interfaces the add-on implements or calls, so 5b bumps `O3D_TRANSPORT_API_VERSION` to 6 unless it lands in the same release as 5a. Then 5c (above), then step 6 (shims), which takes the next number after that.
+   - **Consumer API done (WP-A1 PR 5b).** Details in the ADR 0007 addendum "implementation notes (WP-A1 PR 5b)".
+     - `ISerializedFrameConsumer::SubmitFrame(const FString&, TConstArrayView<uint8>, double)` (view, valid for the call) and `SubmitFrameOwned(..., TArray<uint8>&&, ...)` (owned; defaults to the view form). The subject stays a case-sensitive `FString`.
+     - The demux delivers mocap as a view (its scratch copy is gone); Loopback, MoQ and WebRTC hand over their queue items' buffers with `DeliverMocapOwned`. The LiveLink source implements both forms and moves an owned buffer across the game-thread hop.
+     - `IOpen3DSender::Send(SubjectList)` is deleted, with every implementation and the sender component's dead `OnSubjectListReady` handler. Tests use `O3DTests::SendSubjectList` / `WebRTCSubjectListTest::SendSubjectList`.
+     - `O3D_TRANSPORT_API_VERSION` stays **5**: 5a and 5b ship in the same release (no tag contains 5a).
+     - Tests: `Open3DBroadcast.Shared.FrameConsumer.*`, `Open3DBroadcast.Transport.Loopback.FrameReachesConsumerWithoutCopy`.
+   - **Start here next: PR 5c, the rest of ADR 0007 item 8.**
+     - TRB-27: `FO3DTransportConfig::Transport` as the registered `FName` and `Role` as `EO3DTransportRole`, with the registered names used everywhere.
+     - Secret schema entries carry their env var, so `SecretOptionKeys`/`SecretEnvVars` become derived from the schema (keep ADR 0004's behaviour exactly).
+     - The schema gains `Float`, `bRestartOnChange` and `Validate`.
+     - Whether 5c needs a new interface number depends on whether 5a/5b were released by then: check the tags and the CHANGELOG first, as 5b did.
+     - Cleanup candidate: `FO3DSenderSerializer::OnSubjectListReady` is now neither broadcast nor bound.
 5. **Typed config and consumer API** (SHR-36, TRB-27, SHR-16, TRF-38): removes the LiveKit string fields from `FO3DTransportConfig`, deletes `Send(SubjectList)`. Split into 5a (typed config, done, version 5), 5b (consumer API) and 5c (rest of item 8).
 6. Next minor release: delete the shims and bump `O3D_TRANSPORT_API_VERSION` to the next free number (PR 3 took 4 and PR 5a took 5, so 6 or later).
 
@@ -183,6 +194,7 @@ With UE 5.7 installed locally you can also run the real build and tests: `Build/
 17. A transport's existing tests may pin its own timing (MoQ's backoff jitter, connect timeout, subscribe retry on a manual clock). Before replacing such logic with a shared block, check that the shared block reproduces those exact values; if not, keep the transport's logic and say why, rather than editing the tests (WP-A1 PR 4e kept MoQ's backoff).
 18. A fake FFI used for a Stop test must keep the real library's callback contract. LiveKit promises no callback after the call that clears it (or `lk_client_destroy`) returns, so the WebRTC fakes hold a lock around each callback and take it in the setters (`WebRTCSharedBlocksTests.cpp`, WP-A1 PR 4f). A fake that calls back without it reports races the real library cannot produce, and can hide the ones it can.
 19. Before planning a saved-data migration, check what is actually serialized. `FO3DTransportConfig` is a plain struct built per start, so removing its LiveKit fields lost nothing; the saved form was the `webrtc.*` keys of a UPROPERTY option map (WP-A1 PR 5a). A new UPROPERTY loads with its default from older assets, ini files and `ImportText` strings, so adding one needs no migration either.
+20. When an interface gains a second form of a virtual, give it its own name (`SubmitFrameOwned`, not a second `SubmitFrame` overload). A derived class that overrides one overload hides the others, so a call through the derived type silently picks the wrong one or fails to compile (WP-A1 PR 5b).
 
 ## 5. Waiting on the maintainer
 

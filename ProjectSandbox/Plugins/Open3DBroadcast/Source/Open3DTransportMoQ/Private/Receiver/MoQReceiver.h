@@ -133,8 +133,12 @@ private:
 	void DestroySubscriber();
 	void DestroyAudioSubscriber();
 	void DestroyControlSubscriber();
-	/** Poll: routes one queued payload through the demux and counts it. True for a mocap frame. */
-	bool RouteReceived(const FO3DSendItem& Item);
+	/**
+	 * Poll: routes one queued payload through the demux and counts it. True for a mocap frame.
+	 * A mocap item's bytes are handed to the consumer (SubmitFrameOwned, WP-A1 PR 5b), so Item is
+	 * left without them.
+	 */
+	bool RouteReceived(FO3DSendItem& Item);
 	void ResetStats();
 
 	FMoQReceiverOptions Options;

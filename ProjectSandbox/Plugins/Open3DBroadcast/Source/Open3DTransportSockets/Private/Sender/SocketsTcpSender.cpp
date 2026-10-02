@@ -213,28 +213,6 @@ EO3DSendResult FO3DSocketsTcpSender::EnqueueFrame(FO3DSendItem&& Item, int32 Len
 	return Result;
 }
 
-bool FO3DSocketsTcpSender::Send(const O3DS::SubjectList& List)
-{
-	if (!bRunning.load() || !PublishState->IsPeerReady())
-	{
-		return false;
-	}
-
-	const double Timestamp = FPlatformTime::Seconds();
-	// Not thread-safe (the scratch buffer); Send(SubjectList) is the deprecated game-thread path.
-	SerializationScratch.clear();
-	const int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(SerializationScratch, Timestamp);
-	if (BytesWritten <= 0)
-	{
-		UE_LOG(LogSocketsTcpSender, Verbose, TEXT("TCP sender failed to serialize SubjectList."));
-		DroppedFrames.fetch_add(1);
-		return false;
-	}
-
-	TArray<uint8> Bytes(reinterpret_cast<const uint8*>(SerializationScratch.data()), BytesWritten);
-	return EnqueueFrame(FO3DSendItem::MakeMocap(MoveTemp(Bytes), FString(), Timestamp), BytesWritten) == EO3DSendResult::Queued;
-}
-
 EO3DSendResult FO3DSocketsTcpSender::SendSerialized(FO3DSendPayload&& Payload)
 {
 	if (!bRunning.load())

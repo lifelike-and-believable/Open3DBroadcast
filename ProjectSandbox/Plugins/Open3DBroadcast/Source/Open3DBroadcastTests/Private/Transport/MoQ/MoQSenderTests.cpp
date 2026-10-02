@@ -179,7 +179,7 @@ bool FMoQSenderSendBeforeStartTest::RunTest(const FString& Parameters)
 	MoQSenderTestHelpers::PopulateTestSubject(Subjects, TEXT("TestSubject"));
 
 	// Sending before Start should fail gracefully
-	TestFalse(TEXT("Send before Start should return false"), Sender.Send(Subjects));
+	TestFalse(TEXT("Send before Start should return false"), O3DTests::SendSubjectList(Sender, Subjects));
 
 	// Stats should reflect the dropped frame
 	const FO3DTransportStats Stats = Sender.GetStats();

@@ -35,10 +35,10 @@ namespace
 	class FTestFrameConsumer final : public ISerializedFrameConsumer
 	{
 	public:
-		virtual void SubmitFrame(const FString& InStreamId, const TArray<uint8>& InPayload, double InTimestamp) override
+		virtual void SubmitFrame(const FString& InStreamId, TConstArrayView<uint8> InPayload, double InTimestamp) override
 		{
 			StreamId = InStreamId;
-			Payload = InPayload;
+			Payload = TArray<uint8>(InPayload.GetData(), InPayload.Num());
 			Timestamp = InTimestamp;
 			bInvoked = true;
 		}
@@ -230,7 +230,7 @@ bool FO3DNngDataRoundTripTest::RunTest(const FString& Parameters)
 	O3DS::SubjectList SubjectList;
 	PopulateSubjectList(SubjectList, SubjectLabel, 8);
 
-	const bool bSendQueued = Sender.Send(SubjectList);
+	const bool bSendQueued = O3DTests::SendSubjectList(Sender, SubjectList);
 	TestTrue(TEXT("Sender queued frame"), bSendQueued);
 
 	const double TimeoutSeconds = 5.0;
@@ -322,7 +322,7 @@ bool FO3DNngQueueLimitTest::RunTest(const FString& Parameters)
 	// The drop is logged as a warning (TRB-43).
 	AddExpectedError(TEXT("NNG sender queue full"), EAutomationExpectedMessageFlags::Contains, 1);
 
-	const bool bSendQueued = Sender.Send(LargeList);
+	const bool bSendQueued = O3DTests::SendSubjectList(Sender, LargeList);
 	TestFalse(TEXT("Large payload rejected due to queue limit"), bSendQueued);
 
 	const FO3DTransportStats SenderStats = Sender.GetStats();

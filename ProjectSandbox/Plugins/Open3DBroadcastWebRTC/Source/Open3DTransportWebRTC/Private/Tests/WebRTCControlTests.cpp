@@ -337,11 +337,11 @@ namespace WebRTCCtl6Test
 	class FCtlRecordingConsumer final : public ISerializedFrameConsumer
 	{
 	public:
-		virtual void SubmitFrame(const FString& InStreamId, const TArray<uint8>& InPayload, double) override
+		virtual void SubmitFrame(const FString& InStreamId, TConstArrayView<uint8> InPayload, double) override
 		{
 			FScopeLock Lock(&Mutex);
 			Labels.Add(InStreamId);
-			Payloads.Add(InPayload);
+			Payloads.Emplace(InPayload.GetData(), InPayload.Num());
 		}
 
 		int32 Num() const

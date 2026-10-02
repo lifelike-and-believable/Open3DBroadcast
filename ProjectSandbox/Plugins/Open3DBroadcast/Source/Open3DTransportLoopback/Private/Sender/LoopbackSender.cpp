@@ -96,31 +96,6 @@ EO3DSendResult FO3DLoopbackSender::EnqueueFrame(TArray<uint8>&& Bytes, FString S
 	return Result;
 }
 
-bool FO3DLoopbackSender::Send(const O3DS::SubjectList& List)
-{
-	if (!bInitialized || !bRunning.load() || !Channel.IsValid())
-	{
-		return false;
-	}
-
-	FString SubjectName = ChannelKey;
-	if (!List.mItems.empty() && List.mItems[0])
-	{
-		SubjectName = UTF8_TO_TCHAR(List.mItems[0]->mName.c_str());
-	}
-
-	std::vector<char> Buffer;
-	const double TimestampSeconds = FPlatformTime::Seconds();
-	const int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(Buffer, TimestampSeconds);
-	if (BytesWritten <= 0)
-	{
-		UE_LOG(LogO3DLoopbackTransport, Warning, TEXT("Loopback sender failed to serialize subject '%s'."), *SubjectName);
-		return false;
-	}
-
-	return EnqueueFrame(TArray<uint8>(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten), MoveTemp(SubjectName), TimestampSeconds, false) == EO3DSendResult::Queued;
-}
-
 EO3DSendResult FO3DLoopbackSender::SendSerialized(FO3DSendPayload&& Payload)
 {
 	if (!bInitialized || !bRunning.load() || !Channel.IsValid())

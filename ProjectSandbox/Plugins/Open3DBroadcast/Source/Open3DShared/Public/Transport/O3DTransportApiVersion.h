@@ -63,6 +63,12 @@
  *      O3DTransportOptions getters take an FO3DTransportOptionsView (a plain map still converts),
  *      and TryParseBool is new. The deprecated customization shims keep their old signatures and
  *      adapt. Removing the shims (step 6) takes the next number.
+ *      WP-A1 PR 5b (ADR 0007 item 3, step 5; SHR-16) is part of 5, because no release carried 5
+ *      before it (the last tag, v0.9.6, predates 5a; 5a is still under Unreleased in the
+ *      CHANGELOG): ISerializedFrameConsumer::SubmitFrame takes a TConstArrayView<uint8> (the view
+ *      form) and gained SubmitFrameOwned (the owned form, defaulting to the view form);
+ *      IOpen3DSender::Send(const O3DS::SubjectList&) is deleted; FO3DUnifiedReceiveDemux::
+ *      DeliverMocap takes a view, DeliverMocapOwned is new, and its scratch buffer is gone.
  */
 #define O3D_TRANSPORT_API_VERSION 5
 

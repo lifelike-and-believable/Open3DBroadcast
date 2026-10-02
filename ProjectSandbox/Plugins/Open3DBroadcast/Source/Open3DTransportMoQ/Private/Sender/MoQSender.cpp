@@ -380,39 +380,6 @@ void FO3DMoQSender::HandleConnectionStateChanged(MoqConnectionState NewState)
 	}
 }
 
-bool FO3DMoQSender::Send(const O3DS::SubjectList& List)
-{
-	if (!bInitialized || !bRunning)
-	{
-		FO3DPerformanceMetrics::Get().RecordFrameDropped();
-		return false;
-	}
-
-	FO3DPerformanceMetrics::Get().RecordFrameCaptured();
-	FO3DPerformanceMetrics::Get().SetActiveSubjectCount(static_cast<int32>(List.mItems.size()));
-
-	// Capture subject name for audio association
-	FString ObservedSubject;
-	if (!List.mItems.empty() && List.mItems[0])
-	{
-		ObservedSubject = UTF8_TO_TCHAR(List.mItems[0]->mName.c_str());
-	}
-
-	std::vector<char> Buffer;
-	const double TimestampSeconds = FPlatformTime::Seconds();
-	int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(Buffer, TimestampSeconds);
-	if (BytesWritten <= 0)
-	{
-		FO3DPerformanceMetrics::Get().RecordSerializationError();
-		return false;
-	}
-
-	FO3DPerformanceMetrics::Get().RecordBytesSerialized(BytesWritten);
-
-	TArray<uint8> Bytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten);
-	return EnqueueFrame(MoveTemp(Bytes), MoveTemp(ObservedSubject), TimestampSeconds, /*bFullSync=*/false) == EO3DSendResult::Queued;
-}
-
 EO3DSendResult FO3DMoQSender::SendSerialized(FO3DSendPayload&& Payload)
 {
 	if (!bInitialized || !bRunning)

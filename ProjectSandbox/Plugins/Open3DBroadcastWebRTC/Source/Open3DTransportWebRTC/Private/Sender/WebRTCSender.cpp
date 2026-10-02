@@ -9,9 +9,6 @@
 #include "HAL/PlatformProcess.h"
 #include "Logging/LogMacros.h"
 #include "Containers/StringConv.h"
-THIRD_PARTY_INCLUDES_START
-#include "o3ds/model.h"
-THIRD_PARTY_INCLUDES_END
 #include "O3DPerformanceMetrics.h"
 #include "O3DAudioFrameCodec.h"
 #include "O3DFfiContextRegistry.h"
@@ -425,50 +422,6 @@ void FO3DWebRTCSender::RecordDroppedFrame()
     FO3DPerformanceMetrics::Get().RecordFrameDropped();
     FScopeLock Lock(&StatsMutex);
     Stats.DroppedFrames++;
-}
-
-bool FO3DWebRTCSender::Send(const O3DS::SubjectList& List)
-{
-    // TRF-4/TRF-19: the old per-subject pooled path pushed the caller's Transform pointers into
-    // a pooled Subject and could delete them on an early return. This path serializes the
-    // caller's list once, borrowing nothing, then sends the bytes like SendSerialized().
-    if (!Link->bConnected.Load())
-    {
-        RecordDroppedFrame();
-        return false;
-    }
-
-    FO3DPerformanceMetrics::Get().RecordFrameCaptured();
-    FO3DPerformanceMetrics::Get().SetActiveSubjectCount(static_cast<int32>(List.mItems.size()));
-
-    std::vector<char> Buffer;
-    const double TimestampSeconds = FPlatformTime::Seconds();
-    // SubjectList::Serialize is not const; the NNG sender uses the same cast.
-    const int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(Buffer, TimestampSeconds);
-    if (BytesWritten <= 0)
-    {
-        UE_LOG(LogO3DWebRTCSender, Verbose, TEXT("WebRTC sender failed to serialize subject list"));
-        FO3DPerformanceMetrics::Get().RecordSerializationError();
-        RecordDroppedFrame();
-        return false;
-    }
-
-    FO3DPerformanceMetrics::Get().RecordBytesSerialized(BytesWritten);
-
-    // Label: first subject's name, decoded from UTF-8 (TRF-31).
-    FString SubjectLabel;
-    if (!List.mItems.empty() && List.mItems[0])
-    {
-        SubjectLabel = WebRTCUtils::DecodeUtf8Label(List.mItems[0]->mName.c_str());
-    }
-
-    const bool bSucceeded = SendBytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten, SubjectLabel) == EO3DSendResult::Queued;
-    if (!bSucceeded)
-    {
-        FScopeLock Lock(&StatsMutex);
-        Stats.DroppedFrames++;
-    }
-    return bSucceeded;
 }
 
 EO3DSendResult FO3DWebRTCSender::SendSerialized(FO3DSendPayload&& Payload)

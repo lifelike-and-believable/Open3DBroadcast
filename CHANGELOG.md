@@ -684,6 +684,39 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Consumer API: SubmitFrame view and owned forms, Send(SubjectList) deleted (WP-A1 PR 5b, ADR 0007 step 5)
+
+- **Interface version stays 5.** 5a and 5b ship in the same release (no release has carried
+  version 5), so one number covers both. The WebRTC add-on is built against both in this change.
+- **`ISerializedFrameConsumer`** (SHR-16, ADR 0007 item 3):
+  - `SubmitFrame(const FString& Subject, TConstArrayView<uint8> Bytes, double TimestampSeconds)`
+    is the view form: the bytes belong to the caller and are valid only for the call.
+  - `SubmitFrameOwned(const FString& Subject, TArray<uint8>&& Bytes, double TimestampSeconds)` is
+    the owned form: the consumer may keep the buffer without a copy. Its default passes a view to
+    `SubmitFrame`, so a consumer that implements only the view form gets every frame.
+  - The subject stays a case-sensitive `FString` (not the `FName` the ADR sketched), like
+    `FO3DSendPayload::Subject`.
+  - Source change for a consumer: override `SubmitFrame` with `TConstArrayView<uint8>` instead of
+    `const TArray<uint8>&`, and copy the bytes if you keep them (`TArray<uint8>(Bytes.GetData(),
+    Bytes.Num())`); override `SubmitFrameOwned` too to keep a handed-over buffer without a copy.
+- **Receivers.** The demux hands mocap to the consumer as a view of the received message
+  (enveloped or raw) instead of copying it into a scratch buffer first, so TCP, UDP and NNG
+  deliver each frame without a copy. Loopback, MoQ and the WebRTC add-on already hold each frame
+  in its own buffer (their hand-off queue items) and give it away with the owned form. New
+  `FO3DUnifiedReceiveDemux::DeliverMocapOwned`; `DeliverMocap` takes a view (a TArray converts).
+- **LiveLink source.** Unchanged for users. It implements both forms; a frame that arrives off
+  the game thread is moved into the game-thread task when it comes in the owned form, and copied
+  once when it comes as a view.
+- **`IOpen3DSender::Send(const O3DS::SubjectList&)` is deleted**, with every transport's
+  implementation and the sender component's `OnSubjectListReady` handler, which nothing invoked
+  (the serializer never broadcasts it). Use `SendSerialized` with the serialized bytes. The
+  transport interface no longer mentions the o3ds core, and the WebRTC add-on's runtime code no
+  longer includes it; the add-on keeps the `Open3DStreamCore` dependency only for its tests.
+- **Tests.** New `Open3DBroadcast.Shared.FrameConsumer.ViewFormHasNoCopy`, `.OwnedFormMovesTheBuffer`,
+  `.ViewOnlyConsumerGetsOwnedFrames` and `Open3DBroadcast.Transport.Loopback.FrameReachesConsumerWithoutCopy`.
+  Existing consumer test doubles now override the view form; tests that sent a `SubjectList`
+  use a helper that serializes it and calls `SendSerialized`, as the deleted `Send` did.
+
 ### Typed config: options view, one configure signature, LiveKit fields removed (WP-A1 PR 5a, ADR 0007 step 5)
 
 - **Interface version 5.** `O3D_TRANSPORT_API_VERSION` is now 5: the descriptor's configure

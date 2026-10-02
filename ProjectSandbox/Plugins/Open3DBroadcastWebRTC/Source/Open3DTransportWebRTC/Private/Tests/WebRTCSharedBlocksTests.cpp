@@ -347,7 +347,7 @@ namespace WebRTCSharedBlocksTest
 	class FSbtRecordingConsumer final : public ISerializedFrameConsumer
 	{
 	public:
-		virtual void SubmitFrame(const FString& InSubject, const TArray<uint8>& InPayload, double) override
+		virtual void SubmitFrame(const FString& InSubject, TConstArrayView<uint8> InPayload, double) override
 		{
 			FScopeLock Lock(&Mutex);
 			Subjects.Add(InSubject);
