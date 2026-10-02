@@ -6,6 +6,7 @@
 
 #include "../Sender/WebRTCSender.h"
 #include "../Receiver/WebRTCReceiver.h"
+#include "../Shared/WebRTCUtils.h"
 
 #include "Misc/AutomationTest.h"
 #include "HAL/PlatformTime.h"
@@ -27,7 +28,7 @@ namespace WebRTCPerSubjectTestHelpers
 	{
 		FO3DTransportConfig Config;
 		Config.Uri = Url;
-		Config.Token = Token;
+		Config.Secrets.Add(WebRTCUtils::TokenOptionKey, Token);
 		Config.StreamId = TEXT("TestStream");
 		Config.Audio.bEnableAudio = bEnableAudio;
 		Config.Audio.BitrateKbps = 24;

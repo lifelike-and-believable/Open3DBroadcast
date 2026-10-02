@@ -14,7 +14,8 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "../Sender/WebRTCSender.h"
-#include "Testing/O3DLifetimeTestUtils.h"
+#include "../Shared/WebRTCUtils.h"
+#include "Testing/O3DTransportLifetimeTestUtils.h"
 
 #include "Misc/AutomationTest.h"
 
@@ -26,7 +27,7 @@ bool FWebRTCLifetimeStressTest::RunTest(const FString& Parameters)
 	{
 		FO3DTransportConfig Config;
 		Config.Uri = TEXT("ws://127.0.0.1:7880"); // never contacted: Start() is not called
-		Config.Token = TEXT("wp-s5-test-token");
+		Config.Secrets.Add(WebRTCUtils::TokenOptionKey, TEXT("wp-s5-test-token"));
 		Config.StreamId = TEXT("LifetimeStream");
 		Config.Audio.bEnableAudio = true;
 		Config.Audio.BitrateKbps = 24;

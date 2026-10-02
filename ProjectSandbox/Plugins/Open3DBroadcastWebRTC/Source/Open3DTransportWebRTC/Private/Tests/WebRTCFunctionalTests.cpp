@@ -381,10 +381,10 @@ namespace WebRTCS7Test
 	{
 		FO3DTransportConfig Config;
 		Config.Uri = TEXT("127.0.0.1:7880");
-		Config.bUseAutoTokenFetch = true;
+		Config.AdvancedParams.Add(WebRTCUtils::UseAutoTokenFetchOptionKey, TEXT("true"));
 		// Never contacted: the fake fetcher replaces HTTP.
-		Config.TokenEndpointUrl = TEXT("http://127.0.0.1:1/token");
-		Config.TokenRefreshLeadTimeSec = 300;
+		Config.AdvancedParams.Add(WebRTCUtils::TokenEndpointUrlOptionKey, TEXT("http://127.0.0.1:1/token"));
+		Config.AdvancedParams.Add(WebRTCUtils::TokenRefreshLeadTimeOptionKey, TEXT("300"));
 		Config.AdvancedParams.Add(WebRTCUtils::RoomOptionKey, TEXT("wp-s7-room"));
 		// Disable the receiver's no-data watchdog so tests stay deterministic.
 		Config.AdvancedParams.Add(TEXT("webrtc.reconnect_timeout"), TEXT("0"));
@@ -404,7 +404,7 @@ namespace WebRTCS7Test
 	{
 		FO3DTransportConfig Config;
 		Config.Uri = TEXT("127.0.0.1:7880");
-		Config.Token = MakeTestJwt();
+		Config.Secrets.Add(WebRTCUtils::TokenOptionKey, MakeTestJwt());
 		Config.AdvancedParams.Add(TEXT("webrtc.reconnect_timeout"), TEXT("0"));
 		return Config;
 	}

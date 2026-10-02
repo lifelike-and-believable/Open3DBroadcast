@@ -411,7 +411,7 @@ namespace WebRTCSharedBlocksTest
 	{
 		FO3DTransportConfig Config;
 		Config.Uri = TEXT("127.0.0.1:7880"); // only the fake sees it
-		Config.Token = SbtMakeTestJwt();
+		Config.Secrets.Add(WebRTCUtils::TokenOptionKey, SbtMakeTestJwt());
 		Config.StreamId = TEXT("sbt-stream");
 		// Disable the receiver's no-data watchdog so the tests stay deterministic.
 		Config.AdvancedParams.Add(TEXT("webrtc.reconnect_timeout"), TEXT("0"));

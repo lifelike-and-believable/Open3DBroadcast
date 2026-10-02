@@ -351,10 +351,12 @@ While idle for `tcp.keepalive` ms the sender writes a keepalive frame whose payl
 - **Signaling**: LiveKit server coordinates WebRTC peer connections
 - **NAT traversal**: Automatic STUN/TURN for firewall traversal
 
-**Configuration**:
-- `Uri` - LiveKit server URL (e.g., `wss://myserver.livekit.cloud`)
-- `Token` - JWT authentication token
+**Configuration** (options, read through the configure functions' `FO3DTransportOptionsView`; WP-A1 PR 5a):
+- `webrtc.url` - LiveKit server URL (e.g., `wss://myserver.livekit.cloud`); copied into `Config.Uri`
+- `webrtc.token` - JWT access token for manual mode; a secret (ADR 0004), so it reaches the transport only through `Config.Secrets`
+- `webrtc.useAutoTokenFetch`, `webrtc.tokenEndpointUrl`, `webrtc.tokenRefreshLeadTimeSec`, `webrtc.room` - auto-fetch settings; `webrtc.tokenEndpointAuth` is a secret
 - `StreamId` - Subject name filter (receiver only)
+- `FO3DTransportConfig` has no LiveKit fields any more (they were `Token`, `bUseAutoTokenFetch`, `TokenEndpointUrl`, `TokenRefreshLeadTimeSec`)
 
 **Audio Support**:
 - ✅ **Built-in Opus encoding** - LiveKit handles codec internally
@@ -698,12 +700,16 @@ ReceiverConfig.AdvancedParams.Add("port", "7000");
 FO3DTransportConfig SenderConfig;
 SenderConfig.Transport = "webrtc";
 SenderConfig.Uri = "wss://myserver.livekit.cloud";
-SenderConfig.Token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
+// The token is a secret (ADR 0004): the component or source resolves it into Secrets.
+SenderConfig.Secrets.Add("webrtc.token", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...");
 
 FO3DTransportConfig ReceiverConfig;
 ReceiverConfig.Transport = "webrtc";
 ReceiverConfig.Uri = "wss://myserver.livekit.cloud";
-ReceiverConfig.Token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
+// Auto-fetch instead of a token: options, as the panel writes them.
+ReceiverConfig.AdvancedParams.Add("webrtc.useAutoTokenFetch", "true");
+ReceiverConfig.AdvancedParams.Add("webrtc.tokenEndpointUrl", "https://tokens.example.com/token");
+ReceiverConfig.AdvancedParams.Add("webrtc.room", "stage");
 ReceiverConfig.StreamId = "subject-name-filter";
 ```
 

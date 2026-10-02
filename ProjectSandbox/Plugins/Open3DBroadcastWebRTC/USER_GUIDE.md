@@ -42,7 +42,7 @@ The add-on links against Open3DBroadcast's C++ transport interface, which carrie
 LogO3DWebRTCSender: Error: WebRTC transport not registered: Open3DBroadcastWebRTC was built for Open3DBroadcast transport API version 1, but the loaded Open3DBroadcast provides version 2. Open3DBroadcastWebRTC registers nothing. Install the Open3DBroadcastWebRTC build made for this Open3DBroadcast release.
 ```
 
-Download the add-on build that matches your Open3DBroadcast version. Every other transport keeps working in the meantime.
+Download the add-on build that matches your Open3DBroadcast version. Every other transport keeps working in the meantime. Updating both keeps your WebRTC settings: they are saved as the `webrtc.*` options of the sender or LiveLink source, and those did not change.
 
 ### Removing the add-on
 

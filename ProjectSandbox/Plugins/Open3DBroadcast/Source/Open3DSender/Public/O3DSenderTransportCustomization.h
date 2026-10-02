@@ -7,6 +7,10 @@
 // with FO3DTransportRegistry ("Transport/O3DTransportRegistry.h"). These functions forward to that
 // registry, so a transport built against the previous release keeps working. Removed in the next
 // minor release together with an O3D_TRANSPORT_API_VERSION bump.
+//
+// WP-A1 PR 5a: the descriptor's ConfigureSender takes an FO3DTransportOptionsView. A ConfigureTransport
+// set here keeps its component parameter: the shim wraps it, and the sender component hands it the
+// component it is configuring (null when the descriptor is called from anywhere else).
 
 #include "CoreMinimal.h"
 #include "O3DTransportOptionSchema.h"

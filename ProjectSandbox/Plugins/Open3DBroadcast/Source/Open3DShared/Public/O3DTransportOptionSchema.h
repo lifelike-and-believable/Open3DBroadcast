@@ -14,8 +14,10 @@
  * it, so runtime modules carry no Slate code. Nothing here depends on the editor or on Slate, and
  * no member changes with WITH_EDITOR.
  *
- * This is the subset of ADR 0007's schema that the WP-F7 panels need. WP-A1 moves it into the
- * transport descriptor and adds the typed accessors, Float, bRestartOnChange and Validate.
+ * This is the subset of ADR 0007's schema that the WP-F7 panels need. It lives in the transport
+ * descriptor (FO3DTransportRoleOptions::OptionSchema, WP-A1 PR 1), and FO3DTransportOptionsView
+ * (WP-A1 PR 5a) reads options with its defaults and VisibleWhen. Float, bRestartOnChange and
+ * Validate are not added yet.
  */
 
 /** The value type of one option, which selects its editor widget. */

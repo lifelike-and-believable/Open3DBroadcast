@@ -205,7 +205,7 @@ public:
 		Descriptor.CreateReceiver = []() { return MakeShared<FO3DNngReceiver>(); };
 		Descriptor.GetCapabilities = [](const FO3DTransportConfig& Config) { return O3DNNG::GetCapabilities(Config); };
 
-		Descriptor.ConfigureSender = [](const UO3DSenderComponent* /*SenderComponent*/, FO3DTransportConfig& Config)
+		Descriptor.ConfigureSender = [](const FO3DTransportOptionsView& /*Options*/, FO3DTransportConfig& Config)
 		{
 			Config.Transport = TEXT("NNG");
 
@@ -251,7 +251,7 @@ public:
 		};
 		Descriptor.SenderOptions.OptionSchema = NNGSchema::MakeSender();
 
-		Descriptor.ConfigureReceiver = [](const FO3DReceiverSourceConfig& /*Settings*/, FO3DTransportConfig& Config)
+		Descriptor.ConfigureReceiver = [](const FO3DTransportOptionsView& /*Options*/, FO3DTransportConfig& Config)
 		{
 			Config.Transport = TEXT("NNG");
 

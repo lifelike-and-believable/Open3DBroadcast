@@ -25,19 +25,19 @@ namespace WebRTCConfig
 	/** Registered transport name; the secret store and the credential profile option are keyed by it. */
 	static constexpr TCHAR TransportName[] = TEXT("WebRTC");
 
-	static constexpr TCHAR UrlOptionKey[] = TEXT("webrtc.url");
+	static constexpr const TCHAR* UrlOptionKey = WebRTCUtils::UrlOptionKey;
 	static constexpr const TCHAR* TokenOptionKey = WebRTCUtils::TokenOptionKey;
 	static constexpr const TCHAR* TokenEndpointAuthKey = WebRTCUtils::TokenEndpointAuthOptionKey;
-	static constexpr TCHAR UseAutoTokenFetchKey[] = TEXT("webrtc.useAutoTokenFetch");
-	static constexpr TCHAR TokenEndpointUrlKey[] = TEXT("webrtc.tokenEndpointUrl");
-	static constexpr TCHAR TokenRefreshLeadTimeKey[] = TEXT("webrtc.tokenRefreshLeadTimeSec");
+	static constexpr const TCHAR* UseAutoTokenFetchKey = WebRTCUtils::UseAutoTokenFetchOptionKey;
+	static constexpr const TCHAR* TokenEndpointUrlKey = WebRTCUtils::TokenEndpointUrlOptionKey;
+	static constexpr const TCHAR* TokenRefreshLeadTimeKey = WebRTCUtils::TokenRefreshLeadTimeOptionKey;
 	// LiveKit room requested from the token endpoint; must match on sender and receiver (TRF-25).
 	static constexpr const TCHAR* RoomOptionKey = WebRTCUtils::RoomOptionKey;
 
 	// Token refresh lead time constants
 	static constexpr int32 MinTokenRefreshLeadTimeSec = 60;     // 1 minute
 	static constexpr int32 MaxTokenRefreshLeadTimeSec = 3600;   // 1 hour
-	static constexpr int32 DefaultTokenRefreshLeadTimeSec = 300; // 5 minutes
+	static constexpr int32 DefaultTokenRefreshLeadTimeSec = WebRTCUtils::DefaultTokenRefreshLeadTimeSec; // 5 minutes
 
 	/** Non-secret option selecting the credential profile ("webrtc.credentialProfile"). */
 	static FString GetCredentialProfileKey()
@@ -54,24 +54,20 @@ namespace WebRTCConfig
 	}
 
 	/**
-	 * Fills the fields both roles share from Config.AdvancedParams, where the sender component and
-	 * the receiver source have already put the non-secret transport options (WP-A1 PR 4f: read
-	 * with O3DTransportOptions, so the add-on no longer reads the component or the source settings).
+	 * Fills the fields both roles share from the role's options (WP-A1 PR 5a: the configure
+	 * functions take an FO3DTransportOptionsView, so the add-on reads neither the sender component
+	 * nor the source settings). The token, auto-fetch, endpoint and refresh settings are no longer
+	 * config fields: the sender and receiver read them from the options and Config.Secrets
+	 * (WebRTCUtils::ReadTokenSettings), so nothing is copied here. The token stays in
+	 * Config.Secrets only (ADR 0004).
 	 */
-	static void ApplyCommonOptions(FO3DTransportConfig& Config)
+	static void ApplyCommonOptions(const FO3DTransportOptionsView& Options, FO3DTransportConfig& Config)
 	{
-		const FString UrlValue = O3DTransportOptions::GetString(Config.AdvancedParams, UrlOptionKey);
-		const FString RoomValue = O3DTransportOptions::GetString(Config.AdvancedParams, RoomOptionKey);
+		const FString UrlValue = O3DTransportOptions::GetString(Options, UrlOptionKey);
+		const FString RoomValue = O3DTransportOptions::GetString(Options, RoomOptionKey);
 
 		Config.Uri = UrlValue;
-		// Resolved from the secret store by the caller (ADR 0004); never in AdvancedParams.
-		Config.Token = WebRTCUtils::FindSecret(Config.Secrets, TokenOptionKey);
-
-		// Auto-fetch fields. A value that is not a boolean or an integer is the default.
-		Config.bUseAutoTokenFetch = O3DTransportOptions::GetBool(Config.AdvancedParams, UseAutoTokenFetchKey, /*Default=*/false);
-		Config.TokenEndpointUrl = O3DTransportOptions::GetString(Config.AdvancedParams, TokenEndpointUrlKey);
-		Config.TokenRefreshLeadTimeSec = O3DTransportOptions::GetInt(Config.AdvancedParams, TokenRefreshLeadTimeKey, DefaultTokenRefreshLeadTimeSec);
-
+		// Trimmed copies, as before WP-A1 PR 5a.
 		Config.AdvancedParams.Add(UrlOptionKey, UrlValue);
 		Config.AdvancedParams.Add(RoomOptionKey, RoomValue);
 	}
@@ -216,20 +212,20 @@ public:
 
 		// Sender side
 		WebRTCConfig::DeclareSecrets(Descriptor.SenderOptions.SecretOptionKeys, Descriptor.SenderOptions.SecretEnvVars);
-		Descriptor.ConfigureSender = [](const UO3DSenderComponent* /*SenderComponent*/, FO3DTransportConfig& Config)
+		Descriptor.ConfigureSender = [](const FO3DTransportOptionsView& Options, FO3DTransportConfig& Config)
 		{
 			Config.Transport = WebRTCConfig::TransportName;
-			WebRTCConfig::ApplyCommonOptions(Config);
+			WebRTCConfig::ApplyCommonOptions(Options, Config);
 			Config.Role = TEXT("publisher");
 		};
 		Descriptor.SenderOptions.OptionSchema = WebRTCSchema::Make();
 
 		// Receiver side
 		WebRTCConfig::DeclareSecrets(Descriptor.ReceiverOptions.SecretOptionKeys, Descriptor.ReceiverOptions.SecretEnvVars);
-		Descriptor.ConfigureReceiver = [](const FO3DReceiverSourceConfig& /*Settings*/, FO3DTransportConfig& Config)
+		Descriptor.ConfigureReceiver = [](const FO3DTransportOptionsView& Options, FO3DTransportConfig& Config)
 		{
 			Config.Transport = WebRTCConfig::TransportName;
-			WebRTCConfig::ApplyCommonOptions(Config);
+			WebRTCConfig::ApplyCommonOptions(Options, Config);
 			Config.StreamId = TEXT("WebRTCStream");
 			Config.Role = TEXT("subscriber");
 			// Config.Audio.bEnableAudio is set by the receiver source before this runs; the audio

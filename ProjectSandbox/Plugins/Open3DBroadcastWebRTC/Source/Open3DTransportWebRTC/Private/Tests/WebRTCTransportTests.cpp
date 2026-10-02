@@ -130,7 +130,7 @@ namespace
 	{
 		FO3DTransportConfig Config;
 		Config.Uri = Url;
-		Config.Token = Token;
+		Config.Secrets.Add(WebRTCUtils::TokenOptionKey, Token);
 		Config.StreamId = TEXT("TestStream");
 		Config.Audio.bEnableAudio = bEnableAudio;
 		Config.Audio.BitrateKbps = 24;
@@ -232,7 +232,7 @@ bool FWebRTCConnectionInvalidUrlTest::RunTest(const FString& Parameters)
 	FO3DWebRTCSender Sender;
 	FO3DTransportConfig Config;
 	Config.Uri = TEXT("");  // Empty URL
-	Config.Token = TEXT("test-token");
+	Config.Secrets.Add(WebRTCUtils::TokenOptionKey, TEXT("test-token"));
 
 #if PLATFORM_WINDOWS && PLATFORM_64BITS
 	bool bResult = Sender.Initialize(Config).IsOk();
@@ -247,7 +247,7 @@ bool FWebRTCConnectionInvalidUrlTest::RunTest(const FString& Parameters)
 	FO3DWebRTCSender TestSender;
 	FO3DTransportConfig TestConfig;
 	TestConfig.Uri = TEXT("");
-	TestConfig.Token = TEXT("test-token");
+	TestConfig.Secrets.Add(WebRTCUtils::TokenOptionKey, TEXT("test-token"));
 	bool bResult = TestSender.Initialize(TestConfig).IsOk();
 	if (bResult)
 	{
@@ -269,7 +269,7 @@ bool FWebRTCConnectionEmptyTokenTest::RunTest(const FString& Parameters)
 	FO3DWebRTCSender Sender;
 	FO3DTransportConfig Config;
 	Config.Uri = TEXT("wss://test.livekit.example.com");
-	Config.Token = TEXT("");  // Empty token
+	Config.Secrets.Add(WebRTCUtils::TokenOptionKey, TEXT(""));  // Empty token
 
 #if PLATFORM_WINDOWS && PLATFORM_64BITS
 	bool bResult = Sender.Initialize(Config).IsOk();
@@ -284,7 +284,7 @@ bool FWebRTCConnectionEmptyTokenTest::RunTest(const FString& Parameters)
 	FO3DWebRTCSender TestSender;
 	FO3DTransportConfig TestConfig;
 	TestConfig.Uri = TEXT("wss://test.livekit.example.com");
-	TestConfig.Token = TEXT("");
+	TestConfig.Secrets.Add(WebRTCUtils::TokenOptionKey, TEXT(""));
 	bool bResult = TestSender.Initialize(TestConfig).IsOk();
 	if (bResult)
 	{

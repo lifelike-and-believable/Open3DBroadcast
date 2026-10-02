@@ -475,12 +475,12 @@ void SO3DReceiverSourceFactoryPanel::HandleTransportSelectionChanged(TSharedPtr<
 
 	if (SourceSettingsObject->Settings.TransportName != *NewSelection)
 	{
-		// One undoable edit. The options are cleared because most keys ("host", "port") are not
-		// namespaced by transport yet; ADR 0007 item 8 (WP-A1) namespaces them and drops the clear.
+		// One undoable edit. SND-35 (WP-A1 PR 5a): the outgoing transport's options are put away
+		// and the incoming one's restored, not cleared ("host" and "port" mean different things to
+		// different transports, so one map cannot hold both).
 		const FScopedTransaction Transaction(LOCTEXT("ReceiverChangeTransport", "Change Receiver Transport"));
 		SourceSettingsObject->Modify();
-		SourceSettingsObject->Settings.TransportName = *NewSelection;
-		SourceSettingsObject->Settings.TransportOptions.Empty();
+		O3DReceiver::SwitchTransport(SourceSettingsObject->Settings, *NewSelection);
 
 		if (DetailsView.IsValid())
 		{

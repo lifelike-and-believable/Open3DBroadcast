@@ -397,7 +397,7 @@ namespace WebRTCCtl6Test
 	{
 		FO3DTransportConfig Config;
 		Config.Uri = TEXT("127.0.0.1:7880"); // only the fake sees it
-		Config.Token = CtlMakeTestJwt();
+		Config.Secrets.Add(WebRTCUtils::TokenOptionKey, CtlMakeTestJwt());
 		Config.StreamId = TEXT("ctl6-stream");
 		// Disable the receiver's no-data watchdog so tests stay deterministic.
 		Config.AdvancedParams.Add(TEXT("webrtc.reconnect_timeout"), TEXT("0"));

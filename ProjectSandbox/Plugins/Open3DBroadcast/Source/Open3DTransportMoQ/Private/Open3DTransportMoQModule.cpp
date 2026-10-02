@@ -12,9 +12,6 @@
 #include "Shared/MoQHelpers.h"
 #include "Sender/MoQSender.h"
 #include "Receiver/MoQReceiver.h"
-// Only for UO3DSenderComponent::SubjectName, the default stream id (WP-A1 PR 4e keeps this one
-// Open3DSender use until ADR 0007 step 5's typed config carries the subject).
-#include "O3DSenderComponent.h"
 #include "O3DTransportOptionSchema.h"
 #include "Transport/O3DTransportOptions.h"
 #include "Transport/O3DTransportRegistry.h"
@@ -184,7 +181,7 @@ private:
 		};
 		Descriptor.GetCapabilities = [](const FO3DTransportConfig& Config) { return MoQHelpers::GetCapabilities(Config); };
 
-		Descriptor.ConfigureSender = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
+		Descriptor.ConfigureSender = [](const FO3DTransportOptionsView& Options, FO3DTransportConfig& Config)
 		{
 			// AdvancedParams (relay_url/track_namespace/track_name/delivery_mode/
 			// queue_bytes) are already copied generically from
@@ -194,17 +191,20 @@ private:
 			// other transports and any code that inspects those fields directly
 			// instead of going through MoQHelpers::ResolveRelayUrl.
 			Config.Transport = TEXT("MoQ");
-			// AdvancedParams holds the component's options (secrets excluded), so this is what
+			// Options are the component's options (secrets excluded), so this is what
 			// SenderComponent->GetTransportOption(relay_url) returned before WP-A1 PR 4e.
-			Config.Uri = O3DTransportOptions::GetString(Config.AdvancedParams, MoQHelpers::kKeyRelayUrl);
-			if (Config.StreamId.IsEmpty() && SenderComponent)
+			Config.Uri = O3DTransportOptions::GetString(Options, MoQHelpers::kKeyRelayUrl);
+			// The default stream id (and so the default track name) is the sender's Subject Name,
+			// which the host now puts in the config (WP-A1 PR 5a), so MoQ no longer needs the
+			// component or Open3DSender. Empty when the component has none, as before.
+			if (Config.StreamId.IsEmpty())
 			{
-				Config.StreamId = SenderComponent->SubjectName;
+				Config.StreamId = Config.SubjectName;
 			}
 		};
 		Descriptor.SenderOptions.OptionSchema = MoQSchema::Make(/*bSender=*/true);
 
-		Descriptor.ConfigureReceiver = [](const FO3DReceiverSourceConfig& /*Settings*/, FO3DTransportConfig& Config)
+		Descriptor.ConfigureReceiver = [](const FO3DTransportOptionsView& /*Options*/, FO3DTransportConfig& Config)
 		{
 			// Deliberately does NOT set Config.Uri here (unlike the sender
 			// side): O3DReceiverSource::BuildTransportConfig() auto-fills

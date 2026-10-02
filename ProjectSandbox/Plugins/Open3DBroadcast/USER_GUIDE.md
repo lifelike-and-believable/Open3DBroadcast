@@ -219,6 +219,8 @@ The **Transport** group of the Details panel (and the LiveLink **Add Source** pa
 
 The panels are part of the `Open3DBroadcastEditor` module, which loads only in the editor.
 
+Switching a sender's or a LiveLink source's transport keeps the options you set for the previous one: switching back brings them back (TCP's `port` and UDP's `port` are kept apart). Credentials are never kept this way; they stay in the credential store. A LiveLink preset saves only the options of the transport its source uses.
+
 Configure transports using **Transport Options** (key-value pairs):
 
 **Common Options:**

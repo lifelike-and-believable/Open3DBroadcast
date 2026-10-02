@@ -7,6 +7,7 @@
 #include "O3DSenderTransportCustomization.h"
 
 #include "O3DSenderLegacyTransportShims.h"
+#include "O3DSenderComponent.h"
 
 #include "HAL/CriticalSection.h"
 #include "Misc/ScopeLock.h"
@@ -43,6 +44,22 @@ namespace
         return static_cast<bool>(Descriptor.ConfigureSender) || !Descriptor.SenderOptions.IsEmpty();
     }
 
+    /** The component the current ConfigureSender call is for (FScopedConfiguringComponent). */
+    thread_local const UO3DSenderComponent* GConfiguringSenderComponent = nullptr;
+
+    /** Wraps a deprecated component-taking configure function in the WP-A1 PR 5a signature. */
+    FO3DSenderConfigureFunction AdaptLegacyConfigure(TFunction<void(const UO3DSenderComponent*, FO3DTransportConfig&)>&& Legacy)
+    {
+        if (!Legacy)
+        {
+            return FO3DSenderConfigureFunction();
+        }
+        return [Legacy = MoveTemp(Legacy)](const FO3DTransportOptionsView& /*Options*/, FO3DTransportConfig& Config)
+        {
+            Legacy(GConfiguringSenderComponent, Config);
+        };
+    }
+
     void PurgeStaleItems()
     {
         FSenderCustomizationCache& Cache = GetCache();
@@ -55,6 +72,17 @@ namespace
             }
         }
     }
+}
+
+O3DSenderLegacyShims::FScopedConfiguringComponent::FScopedConfiguringComponent(const UO3DSenderComponent* Component)
+    : Previous(GConfiguringSenderComponent)
+{
+    GConfiguringSenderComponent = Component;
+}
+
+O3DSenderLegacyShims::FScopedConfiguringComponent::~FScopedConfiguringComponent()
+{
+    GConfiguringSenderComponent = Previous;
 }
 
 void O3DSenderLegacyShims::StartCustomizationCache()
@@ -83,7 +111,7 @@ void O3DSender::RegisterTransportCustomization(FName TransportName, FO3DSenderTr
 {
     FO3DTransportRegistry::Get().EditLegacyDescriptor(TransportName, [&Customization](FO3DTransportDescriptor& Descriptor)
     {
-        Descriptor.ConfigureSender = MoveTemp(Customization.ConfigureTransport);
+        Descriptor.ConfigureSender = AdaptLegacyConfigure(MoveTemp(Customization.ConfigureTransport));
         Descriptor.SenderOptions.SecretOptionKeys = MoveTemp(Customization.SecretOptionKeys);
         Descriptor.SenderOptions.SecretEnvVars = MoveTemp(Customization.SecretEnvVars);
         Descriptor.SenderOptions.OptionSchema = MoveTemp(Customization.OptionSchema);
@@ -113,7 +141,17 @@ const FO3DSenderTransportCustomization* O3DSender::FindTransportCustomization(FN
     if (Item.Source != Descriptor || !Item.Customization.IsValid())
     {
         TUniquePtr<FO3DSenderTransportCustomization> Copy = MakeUnique<FO3DSenderTransportCustomization>();
-        Copy->ConfigureTransport = Descriptor->ConfigureSender;
+        // The old signature over the new function: the view is the component's options, and a
+        // legacy function behind the adapter gets the component itself.
+        if (Descriptor->ConfigureSender)
+        {
+            Copy->ConfigureTransport = [Configure = Descriptor->ConfigureSender](const UO3DSenderComponent* Component, FO3DTransportConfig& Config)
+            {
+                const TMap<FString, FString> NoOptions;
+                const O3DSenderLegacyShims::FScopedConfiguringComponent Scope(Component);
+                Configure(FO3DTransportOptionsView(Component ? Component->TransportOptions : NoOptions), Config);
+            };
+        }
         Copy->SecretOptionKeys = Descriptor->SenderOptions.SecretOptionKeys;
         Copy->SecretEnvVars = Descriptor->SenderOptions.SecretEnvVars;
         Copy->OptionSchema = Descriptor->SenderOptions.OptionSchema;

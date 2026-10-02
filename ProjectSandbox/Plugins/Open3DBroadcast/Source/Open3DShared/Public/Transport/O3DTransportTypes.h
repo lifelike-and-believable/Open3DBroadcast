@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Templates/Function.h"
 #include "O3DRedact.h"
+#include "Transport/O3DTransportOptionsView.h"
 
 /**
  * Plain transport types shared by IOpen3DSender, IOpen3DReceiver and the transport registry
@@ -335,6 +336,12 @@ struct FO3DTransportAudioConfig
 /**
  * Canonical configuration parameters used by transport implementations. Values are intentionally
  * high-level; transports may choose to interpret/augment them as needed.
+ *
+ * WP-A1 PR 5a (ADR 0007 item 8, SHR-36): the LiveKit fields (Token, bUseAutoTokenFetch,
+ * TokenEndpointUrl, TokenRefreshLeadTimeSec), Backend and bPersistToken are gone. WebRTC declares
+ * them as options in its schema ("webrtc.useAutoTokenFetch", ...) and reads its token from Secrets.
+ * Not a USTRUCT and never saved, so removing fields loses no saved data: what users save is the
+ * option map of the sender component or receiver source.
  */
 struct FO3DTransportConfig
 {
@@ -344,9 +351,6 @@ struct FO3DTransportConfig
     /** Role specific to the transport (e.g. "sender"/"receiver", "pub"/"sub"). */
     FString Role;
 
-    /** Backend hint (e.g. "livekit", "libdc"). Optional. */
-    FString Backend;
-
     /** Canonical URI representation for the endpoint. */
     FString Uri;
 
@@ -354,17 +358,12 @@ struct FO3DTransportConfig
     FString StreamId;
 
     /**
-     * Authentication token for the transport, filled at runtime by the transport customization
-     * from Secrets. Never persisted and never logged. WP-A1 removes this LiveKit-specific field.
+     * The sender component's Subject Name; empty for a receiver (WP-A1 PR 5a). Set by the host
+     * before the configure function runs, so a transport can use it as a default without reading
+     * the component (MoQ: the default stream id, and so the default track name). Not parsed by
+     * any transport that reads StreamId (NNG reads a host, port and topic from StreamId).
      */
-    FString Token;
-
-    /**
-     * Deprecated (ADR 0004 item 3): read by nothing and no longer set by callers. Whether a
-     * secret is remembered is the EO3DSecretPersistence argument to FO3DSecretStore::Set, and
-     * there is no way to persist a secret into an asset or a project ini. WP-A1 removes it.
-     */
-    bool bPersistToken = false;
+    FString SubjectName;
 
     /**
      * Values of the option keys the transport customization declares secret, resolved from
@@ -374,34 +373,26 @@ struct FO3DTransportConfig
     TMap<FString, FString> Secrets;
 
     /**
-     * Enable automatic token fetching from a token generator endpoint.
-     * When true, Token field is ignored and tokens are fetched from TokenEndpointUrl.
-     * Default: false (use manual token)
+     * The role's option values (the namespaced option map, secrets excluded), as the host copied
+     * them before the configure function ran; the configure function may add to them. Keys are
+     * case-insensitive. Read them through GetOptions() or the O3DTransportOptions getters. The
+     * name is kept from before WP-A1 PR 5a so code and tests that fill a config directly still
+     * work.
      */
-    bool bUseAutoTokenFetch = false;
-
-    /**
-     * URL of the token generator endpoint (e.g., https://livekit.example.com/token).
-     * Only used when bUseAutoTokenFetch is true.
-     * Endpoint should respond to POST requests with JSON containing "token" field.
-     * 
-     * SECURITY NOTE: The token generator server should store LiveKit API credentials (API key/secret).
-     * The client only sends room, identity, and role information. The server generates and signs
-     * the JWT token using its stored credentials. This keeps LiveKit credentials secure on the server.
-     * The endpoint must authenticate the caller and decide the grants itself; the client sends no
-     * grants. Plain http:// is refused unless the host is localhost, 127.0.0.1 or ::1 (ADR 0004).
-     */
-    FString TokenEndpointUrl;
-
-    /**
-     * Seconds before token expiry to trigger automatic refresh.
-     * Default: 300 (5 minutes)
-     * Only applies when bUseAutoTokenFetch is true.
-     */
-    int32 TokenRefreshLeadTimeSec = 300;
-
-    /** Transport-specific advanced key/value overrides. Keys are case-insensitive. */
     TMap<FString, FString> AdvancedParams;
+
+    /**
+     * The schema the transport declared for this role (FO3DTransportRoleOptions::OptionSchema),
+     * shared with the registered descriptor, or null when the config was not built by a host.
+     * GetOptions() uses it for defaults and visibility.
+     */
+    TSharedPtr<const FO3DTransportOptionSchema> OptionSchema;
+
+    /** A view of AdvancedParams with OptionSchema. Valid while this config is alive and unchanged. */
+    FO3DTransportOptionsView GetOptions() const
+    {
+        return FO3DTransportOptionsView(AdvancedParams, OptionSchema.Get());
+    }
 
     /** Optional audio configuration shared with transports that support audio. */
     FO3DTransportAudioConfig Audio;
@@ -447,26 +438,13 @@ struct FO3DTransportConfig
             AudioSummary = TEXT("[Enabled=0]");
         }
 
-        FString TokenInfo;
-        if (bUseAutoTokenFetch)
-        {
-            TokenInfo = FString::Printf(TEXT("Auto-fetch(endpoint=%s)"),
-                TokenEndpointUrl.IsEmpty() ? TEXT("<empty>") : TEXT("<provided>"));
-        }
-        else
-        {
-            TokenInfo = Token.IsEmpty() ? TEXT("<empty>") : TEXT("<set>");
-        }
-
-        return FString::Printf(TEXT("[Transport=%s Role=%s Backend=%s Uri=%s StreamId=%s Advanced={%s} Secrets={%s} Token=%s Audio=%s]"),
+        return FString::Printf(TEXT("[Transport=%s Role=%s Uri=%s StreamId=%s Advanced={%s} Secrets={%s} Audio=%s]"),
             *Transport,
             *Role,
-            *Backend,
             *O3DRedact::Url(Uri),
             *O3DRedact::Url(StreamId),
             *ParamsSummary,
             *SecretsSummary,
-            *TokenInfo,
             *AudioSummary);
     }
 };

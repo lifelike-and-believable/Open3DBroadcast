@@ -132,7 +132,8 @@ bool FO3DSharedSecretsToDebugStringTest::RunTest(const FString& Parameters)
 	Config.AdvancedParams.Add(TEXT("x.apikey"), ApiKey);
 	Config.AdvancedParams.Add(TEXT("x.url"), FString::Printf(TEXT("https://h/?sig=%s"), *QueryToken));
 	Config.AdvancedParams.Add(TEXT("x.plain"), TEXT("visible-value"));
-	Config.Token = Legacy;
+	// WP-A1 PR 5a removed FO3DTransportConfig::Token; the check below still proves the debug
+	// string has no such value.
 
 	const FString Debug = Config.ToDebugString();
 	TestFalse(TEXT("Secret value absent"), Debug.Contains(SecretToken));

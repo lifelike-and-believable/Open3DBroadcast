@@ -287,7 +287,7 @@ bool FO3DTransportRegistryCopyTest::RunTest(const FString& Parameters)
 	const FName Name(TEXT("RegistryTestCopy"));
 
 	FO3DTransportDescriptor Descriptor = MakeDescriptor(Name, true, true);
-	Descriptor.ConfigureReceiver = [](const FO3DReceiverSourceConfig&, FO3DTransportConfig& Config)
+	Descriptor.ConfigureReceiver = [](const FO3DTransportOptionsView&, FO3DTransportConfig& Config)
 	{
 		Config.StreamId = TEXT("configured");
 	};

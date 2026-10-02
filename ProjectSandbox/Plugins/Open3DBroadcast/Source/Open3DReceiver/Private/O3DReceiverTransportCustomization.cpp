@@ -47,6 +47,31 @@ namespace
         return static_cast<bool>(Descriptor.ConfigureReceiver) || !Descriptor.ReceiverOptions.IsEmpty();
     }
 
+    /** The settings the current ConfigureReceiver call is for (FScopedConfiguringSettings). */
+    thread_local const FO3DReceiverSourceConfig* GConfiguringReceiverSettings = nullptr;
+
+    /** Wraps a deprecated settings-taking configure function in the WP-A1 PR 5a signature. */
+    FO3DReceiverConfigureFunction AdaptLegacyConfigure(TFunction<void(const FO3DReceiverSourceConfig&, FO3DTransportConfig&)>&& Legacy)
+    {
+        if (!Legacy)
+        {
+            return FO3DReceiverConfigureFunction();
+        }
+        return [Legacy = MoveTemp(Legacy)](const FO3DTransportOptionsView& Options, FO3DTransportConfig& Config)
+        {
+            if (GConfiguringReceiverSettings)
+            {
+                Legacy(*GConfiguringReceiverSettings, Config);
+                return;
+            }
+            // Called outside a receiver source: settings that carry only the options.
+            FO3DReceiverSourceConfig Settings;
+            Settings.TransportName = FName(*Config.Transport);
+            Settings.TransportOptions = Options.GetValues();
+            Legacy(Settings, Config);
+        };
+    }
+
     void PurgeStaleItems()
     {
         FReceiverCustomizationCache& Cache = GetCache();
@@ -59,6 +84,17 @@ namespace
             }
         }
     }
+}
+
+O3DReceiverLegacyShims::FScopedConfiguringSettings::FScopedConfiguringSettings(const FO3DReceiverSourceConfig& Settings)
+    : Previous(GConfiguringReceiverSettings)
+{
+    GConfiguringReceiverSettings = &Settings;
+}
+
+O3DReceiverLegacyShims::FScopedConfiguringSettings::~FScopedConfiguringSettings()
+{
+    GConfiguringReceiverSettings = Previous;
 }
 
 void O3DReceiverLegacyShims::StartCustomizationCache()
@@ -87,7 +123,7 @@ void O3DReceiver::RegisterTransportCustomization(FName TransportName, FO3DReceiv
 {
     FO3DTransportRegistry::Get().EditLegacyDescriptor(TransportName, [&Customization](FO3DTransportDescriptor& Descriptor)
     {
-        Descriptor.ConfigureReceiver = MoveTemp(Customization.ConfigureTransport);
+        Descriptor.ConfigureReceiver = AdaptLegacyConfigure(MoveTemp(Customization.ConfigureTransport));
         Descriptor.ReceiverOptions.SecretOptionKeys = MoveTemp(Customization.SecretOptionKeys);
         Descriptor.ReceiverOptions.SecretEnvVars = MoveTemp(Customization.SecretEnvVars);
         Descriptor.ReceiverOptions.OptionSchema = MoveTemp(Customization.OptionSchema);
@@ -117,7 +153,16 @@ const FO3DReceiverTransportCustomization* O3DReceiver::FindTransportCustomizatio
     if (Item.Source != Descriptor || !Item.Customization.IsValid())
     {
         TUniquePtr<FO3DReceiverTransportCustomization> Copy = MakeUnique<FO3DReceiverTransportCustomization>();
-        Copy->ConfigureTransport = Descriptor->ConfigureReceiver;
+        // The old signature over the new function: the view is the settings' options, and a
+        // legacy function behind the adapter gets the settings themselves.
+        if (Descriptor->ConfigureReceiver)
+        {
+            Copy->ConfigureTransport = [Configure = Descriptor->ConfigureReceiver](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
+            {
+                const O3DReceiverLegacyShims::FScopedConfiguringSettings Scope(Settings);
+                Configure(FO3DTransportOptionsView(Settings.TransportOptions), Config);
+            };
+        }
         Copy->SecretOptionKeys = Descriptor->ReceiverOptions.SecretOptionKeys;
         Copy->SecretEnvVars = Descriptor->ReceiverOptions.SecretEnvVars;
         Copy->OptionSchema = Descriptor->ReceiverOptions.OptionSchema;
@@ -222,6 +267,9 @@ FString O3DReceiver::ExportConnectionString(const FO3DReceiverSourceConfig& Sett
 {
     FO3DReceiverSourceConfig Persistable = Settings;
     StripSecretOptions(Persistable);
+    // A source runs one transport; the options put away for others stay in the project settings
+    // (SND-35) and are left out of the connection string a LiveLink preset saves.
+    Persistable.InactiveTransportOptions.Reset();
 
     FString ConnectionString;
     FO3DReceiverSourceConfig::StaticStruct()->ExportText(ConnectionString, &Persistable, nullptr, nullptr, PPF_None, nullptr);
@@ -238,4 +286,21 @@ void O3DReceiver::ResolveSecrets(const FO3DReceiverSourceConfig& Settings, TMap<
     }
 
     FO3DSecretStore::Get().ResolveAll(Settings.TransportName.ToString(), GetCredentialProfile(Settings), SecretKeys, SecretEnvVars, OutSecrets);
+}
+
+bool O3DReceiver::SwitchTransport(FO3DReceiverSourceConfig& Settings, FName NewTransport)
+{
+    if (Settings.TransportName == NewTransport)
+    {
+        return false;
+    }
+
+    TArray<FString> OutgoingSecretKeys;
+    TMap<FString, FString> OutgoingSecretEnvVars;
+    const bool bOutgoingRegistered = FO3DTransportRegistry::Get().GetSecretDeclaration(Settings.TransportName, EO3DTransportRole::Receiver, OutgoingSecretKeys, OutgoingSecretEnvVars);
+
+    const FName Outgoing = Settings.TransportName;
+    Settings.TransportName = NewTransport;
+    O3DTransportOptions::SwitchTransportOptions(Settings.TransportOptions, Settings.InactiveTransportOptions, Outgoing, NewTransport, OutgoingSecretKeys, bOutgoingRegistered);
+    return true;
 }
