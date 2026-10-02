@@ -26,9 +26,9 @@ namespace O3DControlFakeTransportTests
 	class FCountingConsumer final : public ISerializedFrameConsumer
 	{
 	public:
-		virtual void SubmitFrame(const FString& /*Subject*/, const TArray<uint8>& Buffer, double /*TimestampSeconds*/) override
+		virtual void SubmitFrame(const FString& /*Subject*/, TConstArrayView<uint8> Buffer, double /*TimestampSeconds*/) override
 		{
-			Frames.Add(Buffer);
+			Frames.Emplace(Buffer.GetData(), Buffer.Num());
 		}
 		TArray<TArray<uint8>> Frames;
 	};

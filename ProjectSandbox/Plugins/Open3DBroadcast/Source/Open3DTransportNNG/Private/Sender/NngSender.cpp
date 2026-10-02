@@ -257,41 +257,6 @@ void FO3DNngSender::Stop()
     UE_LOG(LogO3DNngSender, Log, TEXT("NNG sender stopped"));
 }
 
-bool FO3DNngSender::Send(const O3DS::SubjectList& List)
-{
-    if (!bInitialized.load() || !bRunning.load())
-    {
-        FO3DPerformanceMetrics::Get().RecordFrameDropped();
-        return false;
-    }
-
-    // Record frame capture attempt
-    FO3DPerformanceMetrics::Get().RecordFrameCaptured();
-    FO3DPerformanceMetrics::Get().SetActiveSubjectCount(static_cast<int32>(List.mItems.size()));
-
-    std::vector<char> Buffer;
-    const double TimestampSeconds = FPlatformTime::Seconds();
-    const int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(Buffer, TimestampSeconds);
-    if (BytesWritten <= 0)
-    {
-        UE_LOG(LogO3DNngSender, Warning, TEXT("NNG sender failed to serialize subject list"));
-        FO3DPerformanceMetrics::Get().RecordSerializationError();
-        return false;
-    }
-
-    // Record serialization metrics
-    FO3DPerformanceMetrics::Get().RecordBytesSerialized(BytesWritten);
-
-    FString ObservedSubject;
-    if (!List.mItems.empty() && List.mItems[0])
-    {
-        ObservedSubject = UTF8_TO_TCHAR(List.mItems[0]->mName.c_str());
-    }
-
-    TArray<uint8> Bytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten);
-    return EnqueueFrame(MoveTemp(Bytes), MoveTemp(ObservedSubject), TimestampSeconds, /*bFullSync=*/false) == EO3DSendResult::Queued;
-}
-
 EO3DSendResult FO3DNngSender::SendSerialized(FO3DSendPayload&& Payload)
 {
     if (!bInitialized.load() || !bRunning.load())
@@ -305,11 +270,9 @@ EO3DSendResult FO3DNngSender::SendSerialized(FO3DSendPayload&& Payload)
         return EO3DSendResult::Invalid;
     }
 
-    // The caller (FO3DSenderSerializer) already serialized these bytes, not
-    // Send(SubjectList&) - this IS the only place that records capture/
-    // serialization metrics for this frame (Send() is dormant in the
-    // normal per-frame pipeline; see O3DSenderSerializer.cpp), so recording
-    // them here is not a double-count against anything.
+    // The caller (FO3DSenderSerializer) already serialized these bytes. This is the only place
+    // that records capture and serialization metrics for this frame (Send(SubjectList) was
+    // deleted in WP-A1 PR 5b), so recording them here is not a double count.
     FO3DPerformanceMetrics::Get().RecordFrameCaptured();
     FO3DPerformanceMetrics::Get().RecordBytesSerialized(Payload.Bytes.Num());
 

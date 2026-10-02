@@ -5,6 +5,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "../Sender/WebRTCSender.h"
+#include "WebRTCSubjectListTestUtils.h"
 #include "../Receiver/WebRTCReceiver.h"
 #include "../Shared/WebRTCUtils.h"
 
@@ -28,10 +29,10 @@ namespace
 	class FTestFrameConsumer final : public ISerializedFrameConsumer
 	{
 	public:
-		virtual void SubmitFrame(const FString& InStreamId, const TArray<uint8>& InPayload, double InTimestamp) override
+		virtual void SubmitFrame(const FString& InStreamId, TConstArrayView<uint8> InPayload, double InTimestamp) override
 		{
 			FScopeLock Lock(&DataMutex);
-			ReceivedFrames.Add({InStreamId, InPayload, InTimestamp});
+			ReceivedFrames.Add({InStreamId, TArray<uint8>(InPayload.GetData(), InPayload.Num()), InTimestamp});
 		}
 
 		struct FReceivedFrame
@@ -344,7 +345,7 @@ bool FWebRTCSendBeforeConnectedTest::RunTest(const FString& Parameters)
 	O3DS::SubjectList List;
 
 	// Send should fail because we're not connected
-	bool bResult = Sender.Send(List);
+	bool bResult = WebRTCSubjectListTest::SendSubjectList(Sender, List);
 	// If Send() returns true (unexpected success), test fails
 	if (bResult)
 	{

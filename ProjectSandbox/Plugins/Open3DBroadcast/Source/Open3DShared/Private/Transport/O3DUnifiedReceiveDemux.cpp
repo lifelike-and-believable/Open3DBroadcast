@@ -72,9 +72,8 @@ EO3DDemuxResult FO3DUnifiedReceiveDemux::ProcessMessage(const uint8* Data, int32
 			++Stats.Malformed;
 			return EO3DDemuxResult::Malformed;
 		}
-		MocapScratch.Reset();
-		MocapScratch.Append(Data, Size);
-		return DeliverMocap(Subject, MocapScratch, ReceiveTimeSec);
+		// A view of the caller's buffer: no copy (WP-A1 PR 5b).
+		return DeliverMocap(Subject, TConstArrayView<uint8>(Data, Size), ReceiveTimeSec);
 	}
 
 	if (PayloadSize == 0)
@@ -86,9 +85,8 @@ EO3DDemuxResult FO3DUnifiedReceiveDemux::ProcessMessage(const uint8* Data, int32
 	switch (Header.GetKind())
 	{
 	case O3DS::EUnifiedKind::Mocap:
-		MocapScratch.Reset();
-		MocapScratch.Append(PayloadPtr, PayloadSize);
-		return DeliverMocap(Subject, MocapScratch, ReceiveTimeSec);
+		// The payload after the envelope header, as a view: no copy (WP-A1 PR 5b).
+		return DeliverMocap(Subject, TConstArrayView<uint8>(PayloadPtr, PayloadSize), ReceiveTimeSec);
 	case O3DS::EUnifiedKind::Audio:
 		return DeliverAudioPayload(Header.GetCodec(), PayloadPtr, PayloadSize);
 	case O3DS::EUnifiedKind::Control:
@@ -99,7 +97,7 @@ EO3DDemuxResult FO3DUnifiedReceiveDemux::ProcessMessage(const uint8* Data, int32
 	}
 }
 
-EO3DDemuxResult FO3DUnifiedReceiveDemux::DeliverMocap(const FString& Subject, const TArray<uint8>& Frame, double ReceiveTimeSec)
+EO3DDemuxResult FO3DUnifiedReceiveDemux::DeliverMocap(const FString& Subject, TConstArrayView<uint8> Frame, double ReceiveTimeSec)
 {
 	if (Frame.Num() <= 0)
 	{
@@ -112,6 +110,27 @@ EO3DDemuxResult FO3DUnifiedReceiveDemux::DeliverMocap(const FString& Subject, co
 	if (Consumer.IsValid())
 	{
 		Consumer->SubmitFrame(Subject.IsEmpty() ? Settings.StreamId : Subject, Frame, ReceiveTimeSec);
+	}
+	else
+	{
+		++Stats.MocapWithoutConsumer;
+	}
+	return EO3DDemuxResult::Mocap;
+}
+
+EO3DDemuxResult FO3DUnifiedReceiveDemux::DeliverMocapOwned(const FString& Subject, TArray<uint8>&& Frame, double ReceiveTimeSec)
+{
+	if (Frame.Num() <= 0)
+	{
+		++Stats.Malformed;
+		return EO3DDemuxResult::Malformed;
+	}
+
+	++Stats.Mocap;
+	Stats.MocapBytes += Frame.Num();
+	if (Consumer.IsValid())
+	{
+		Consumer->SubmitFrameOwned(Subject.IsEmpty() ? Settings.StreamId : Subject, MoveTemp(Frame), ReceiveTimeSec);
 	}
 	else
 	{

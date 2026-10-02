@@ -40,9 +40,9 @@ namespace O3DSocketsTcpTests
 	class FRecordingConsumer final : public ISerializedFrameConsumer
 	{
 	public:
-		virtual void SubmitFrame(const FString&, const TArray<uint8>& Buffer, double) override
+		virtual void SubmitFrame(const FString&, TConstArrayView<uint8> Buffer, double) override
 		{
-			Frames.Add(Buffer);
+			Frames.Emplace(Buffer.GetData(), Buffer.Num());
 		}
 
 		TArray<TArray<uint8>> Frames;

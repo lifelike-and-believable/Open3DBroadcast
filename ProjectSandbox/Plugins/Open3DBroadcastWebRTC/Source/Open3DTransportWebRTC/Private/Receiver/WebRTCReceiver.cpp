@@ -11,9 +11,6 @@
 #include "Containers/StringConv.h"
 #include "O3DFfiContextRegistry.h"
 #include "O3DUnifiedMessage.h"
-THIRD_PARTY_INCLUDES_START
-#include "o3ds/model.h"
-THIRD_PARTY_INCLUDES_END
 
 namespace
 {
@@ -522,7 +519,8 @@ int32 FO3DWebRTCReceiver::Poll()
 
         // The data label is the subject. LiveLink expects WorldTime to be "when to display", so
         // the frame is submitted with the current time rather than the arrival time.
-        Demux.DeliverMocap(Item.Subject, Item.Bytes, FPlatformTime::Seconds());
+        // The hand-off item owns the frame, so the consumer gets it without a copy (WP-A1 PR 5b).
+        Demux.DeliverMocapOwned(Item.Subject, MoveTemp(Item.Bytes), FPlatformTime::Seconds());
         FramesProcessed++;
     }
 

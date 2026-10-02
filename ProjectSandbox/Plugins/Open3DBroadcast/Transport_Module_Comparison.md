@@ -29,7 +29,8 @@ Open3DBroadcast has **5 transport modules** in a modular architecture: Loopback,
 ### Common Interface (100% Parity)
 
 All modules implement the same interfaces with identical method signatures
-(transport API version 4, WP-A1 PR 3; ADR 0007 items 3 and 4):
+(transport API version 5, WP-A1 PRs 3, 5a and 5b; ADR 0007 items 3 and 4). There is no
+`Send(SubjectList)` any more (deleted in WP-A1 PR 5b); senders take serialized frames only:
 
 **IOpen3DSender** (`Open3DShared/Public/Transport/O3DSenderInterface.h`):
 - `Initialize(Config)` / `Start()` - return `FO3DTransportResult` (an error code such as `InvalidConfig`, `NotRunning` or `AddressInUse`, and a message)
@@ -44,7 +45,7 @@ All modules implement the same interfaces with identical method signatures
 
 **IOpen3DReceiver** (`Open3DShared/Public/Transport/O3DReceiverInterface.h`):
 - `Initialize(Config)` / `Start()` - return `FO3DTransportResult`; `Start()` without a consumer is `NoConsumer`
-- `SetConsumer(Consumer)` - Frame consumer registration
+- `SetConsumer(Consumer)` - Frame consumer registration. The receiver calls the consumer's `SubmitFrame(Subject, TConstArrayView<uint8>, Time)` with a view of the received bytes (valid for the call), or `SubmitFrameOwned(Subject, TArray<uint8>&&, Time)` when it can give its own buffer away (Loopback, MoQ, WebRTC); the owned form defaults to the view form
 - `Stop()` - Cleanup
 - `Poll()` - Process incoming data
 - `GetStats()` - Performance metrics
@@ -80,7 +81,7 @@ The registry answers the same capability question before an instance exists:
 
 **Threading Model**:
 - **Synchronous** - No background threads
-- Sender enqueues to shared channel on `Send()` call
+- Sender enqueues to shared channel on `SendSerialized()` call; the frame's buffer reaches the consumer without a copy (`SubmitFrameOwned`)
 - Receiver dequeues on `Poll()` call
 - Thread-safe via atomic counters and an MPSC queue
 

@@ -54,7 +54,7 @@ namespace
 	class FNullFrameConsumer final : public ISerializedFrameConsumer
 	{
 	public:
-		virtual void SubmitFrame(const FString&, const TArray<uint8>&, double) override {}
+		virtual void SubmitFrame(const FString&, TConstArrayView<uint8>, double) override {}
 	};
 
 	int32 FindAvailableAudioTestPort()

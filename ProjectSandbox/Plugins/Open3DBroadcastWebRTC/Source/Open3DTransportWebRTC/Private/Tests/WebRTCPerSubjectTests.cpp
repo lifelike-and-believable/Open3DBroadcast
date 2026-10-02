@@ -5,6 +5,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "../Sender/WebRTCSender.h"
+#include "WebRTCSubjectListTestUtils.h"
 #include "../Receiver/WebRTCReceiver.h"
 #include "../Shared/WebRTCUtils.h"
 
@@ -150,7 +151,7 @@ bool FWebRTCPerSubjectDataChannelsTest::RunTest(const FString& Parameters)
 	O3DS::SubjectList MultiSubjects = CreateMultiSubjectList();
 
 	// Attempt to send (will fail without connection, but tests internal logic)
-	bool bSendResult = Sender.Send(MultiSubjects);
+	bool bSendResult = WebRTCSubjectListTest::SendSubjectList(Sender, MultiSubjects);
 
 	// Verify that sender processed the multi-subject list without crashing
 	// Note: Without actual server connection, we can't verify channel creation
@@ -437,7 +438,7 @@ public:
 			Subject->addTransform("Root", -1);
 			Subject->addTransform("Bone", 0);
 
-			bool bSent = Sender->Send(List);
+			bool bSent = WebRTCSubjectListTest::SendSubjectList(*Sender, List);
 			if (bSent)
 			{
 				SuccessfulSends++;

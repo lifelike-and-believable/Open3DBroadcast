@@ -88,23 +88,27 @@ public:
 
     virtual ~FSerializedConsumer() override = default;
 
-    virtual void SubmitFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds) override
+    /** View form (WP-A1 PR 5b): Buffer is valid only for this call; a hop copies it once. */
+    virtual void SubmitFrame(const FString& Subject, TConstArrayView<uint8> Buffer, double TimestampSeconds) override
     {
         if (!IsInGameThread())
         {
-            // WP-S5 (RCV-1): never pin the source on a transport or FFI thread, where it could
-            // become the last owner and run ~FO3DReceiverSource (and the transport's Stop())
-            // off the game thread. Hop with the weak reference and pin on the game thread.
-            const uint64 ArrivalEpochUs = O3DS::NowUtcMicros();
-            TWeakPtr<FO3DReceiverSource> WeakOwner = Owner;
-            TArray<uint8> BufferCopy(Buffer);
-            AsyncTask(ENamedThreads::GameThread, [WeakOwner, Subject, TimestampSeconds, ArrivalEpochUs, BufferCopy = MoveTemp(BufferCopy)]()
-            {
-                if (TSharedPtr<FO3DReceiverSource> OwnerPinned = WeakOwner.Pin())
-                {
-                    OwnerPinned->HandleSerializedFrame(Subject, BufferCopy, TimestampSeconds, ArrivalEpochUs);
-                }
-            });
+            HopToGameThread(Subject, TArray<uint8>(Buffer.GetData(), Buffer.Num()), TimestampSeconds);
+            return;
+        }
+
+        if (TSharedPtr<FO3DReceiverSource> OwnerPinned = Owner.Pin())
+        {
+            OwnerPinned->HandleSerializedFrame(Subject, Buffer, TimestampSeconds);
+        }
+    }
+
+    /** Owned form (WP-A1 PR 5b): a hop moves the buffer instead of copying it. */
+    virtual void SubmitFrameOwned(const FString& Subject, TArray<uint8>&& Buffer, double TimestampSeconds) override
+    {
+        if (!IsInGameThread())
+        {
+            HopToGameThread(Subject, MoveTemp(Buffer), TimestampSeconds);
             return;
         }
 
@@ -115,6 +119,22 @@ public:
     }
 
 private:
+    // WP-S5 (RCV-1): never pin the source on a transport or FFI thread, where it could become the
+    // last owner and run ~FO3DReceiverSource (and the transport's Stop()) off the game thread.
+    // Hop with the weak reference and pin on the game thread.
+    void HopToGameThread(const FString& Subject, TArray<uint8>&& Buffer, double TimestampSeconds) const
+    {
+        const uint64 ArrivalEpochUs = O3DS::NowUtcMicros();
+        TWeakPtr<FO3DReceiverSource> WeakOwner = Owner;
+        AsyncTask(ENamedThreads::GameThread, [WeakOwner, Subject, TimestampSeconds, ArrivalEpochUs, Bytes = MoveTemp(Buffer)]()
+        {
+            if (TSharedPtr<FO3DReceiverSource> OwnerPinned = WeakOwner.Pin())
+            {
+                OwnerPinned->HandleSerializedFrame(Subject, Bytes, TimestampSeconds, ArrivalEpochUs);
+            }
+        });
+    }
+
     TWeakPtr<FO3DReceiverSource> Owner;
 };
 
@@ -687,7 +707,7 @@ void FO3DReceiverSource::RemoveInactiveSubjects()
 /** Entry point from the serialized consumer; peeks sequencing metadata, then either
  *  routes through the A1 reorder gate (senders that set tx_seq) or falls back to the
  *  pre-A1 legacy dedup/reorder path unchanged (senders that don't). */
-void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds, uint64 ArrivalEpochUsOverride)
+void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, TConstArrayView<uint8> Buffer, double TimestampSeconds, uint64 ArrivalEpochUsOverride)
 {
     // Capture the true arrival instant exactly once, on whichever thread this frame
     // first arrived on - not after a possible transport-thread -> game-thread hop
@@ -707,7 +727,8 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
     if (!IsInGameThread())
     {
         TWeakPtr<FO3DReceiverSource> WeakSelf = AsShared();
-        TArray<uint8> BufferCopy(Buffer);
+        // Buffer is only valid for this call, so the hop takes a copy.
+        TArray<uint8> BufferCopy(Buffer.GetData(), Buffer.Num());
         AsyncTask(ENamedThreads::GameThread, [WeakSelf, Subject, TimestampSeconds, ArrivalEpochUs, BufferCopy = MoveTemp(BufferCopy)]() mutable
         {
             if (TSharedPtr<FO3DReceiverSource> Pinned = WeakSelf.Pin())
@@ -788,7 +809,7 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, const TAr
 /** Legacy (pre-A1) path for senders that don't set tx_seq: SubjectList.time-based
  *  dedup/reorder suppression first, then parse and apply. The ordering decision runs
  *  before Parse() so a dropped frame never changes parse state (ADR 0005 (ix)). */
-void FO3DReceiverSource::HandleLegacyFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds, const O3DS::PacketMeta& Meta, O3DS::ReceiverStream& Stream)
+void FO3DReceiverSource::HandleLegacyFrame(const FString& Subject, TConstArrayView<uint8> Buffer, double TimestampSeconds, const O3DS::PacketMeta& Meta, O3DS::ReceiverStream& Stream)
 {
     const double ParseStartWall = FPlatformTime::Seconds();
     const bool bDebugParse = CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0;

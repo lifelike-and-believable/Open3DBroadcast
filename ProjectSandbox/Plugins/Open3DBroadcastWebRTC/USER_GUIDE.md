@@ -338,7 +338,7 @@ Log categories for this add-on: `LogO3DWebRTCSender` and `LogO3DWebRTCReceiver` 
 ### Data Transfer Issues
 
 #### Frames Being Dropped
-**Symptoms:** Send() returns false, DroppedFrames counter increases
+**Symptoms:** frames are not sent (the transport's `SendSerialized` does not return `Queued`), DroppedFrames counter increases
 
 **Cause 1: Not Connected**
 - Verify `GetStats().bConnected` is true

@@ -442,3 +442,26 @@ Docs (WP-D3): the threading tables above go into `docs/transports.md`.
   - `WebRTCLifetimeTests` includes the moved header.
 
   New tests cover the view's getters, defaults and `VisibleWhen`, the config carrying the schema, `SwitchTransportOptions`, the sender and receiver hosts, the deprecated adapters, SND-35 on both roles, the WebRTC saved-options path and the version.
+
+## Addendum: implementation notes (WP-A1 PR 5b, 2026-10-02)
+
+- **Status:** step 5's consumer API is done; 5c (the rest of item 8) remains. Nothing here changes the Decision.
+- **Consumer forms (item 3, SHR-16).** `ISerializedFrameConsumer::SubmitFrame(const FString&, TConstArrayView<uint8>, double)` is the view form, valid for the call only, and pure virtual. `SubmitFrameOwned(const FString&, TArray<uint8>&&, double)` is the owned form. Its default forwards a view to `SubmitFrame`, as item 3 says, so a consumer that implements only the view form receives every frame; one that keeps frames overrides both. The owned form has its own name, as item 3 has it, so overriding one form never hides the other (C++ name hiding would, with two `SubmitFrame` overloads). A receiver calls exactly one form per frame. Threading is unchanged: both are called from `Poll()`.
+- **Subject type.** Item 3 sketched `FName Subject`. It stays `const FString&`, for the reason the PR 1 addendum gives for `FO3DSendPayload::Subject`: subject names are case-sensitive on the wire and in routing, and `FName` compares case-insensitively. LiveLink turns the string into its own subject key further on, as before.
+- **Which form each receiver uses.** `FO3DUnifiedReceiveDemux::ProcessMessage` hands the consumer a view of the payload where it lies in the received buffer. The reused `MocapScratch` buffer the PR 4a addendum mentions is gone, so TCP, UDP and NNG (and Loopback's audio and control path) deliver mocap without a copy. `DeliverMocap` takes a view. The new `DeliverMocapOwned` is used where the receiver already holds the frame in its own `TArray` and can give it away: Loopback, MoQ and WebRTC, whose `Poll` drains `FO3DSendQueue` hand-off items. Loopback therefore carries a frame from `SendSerialized` to the consumer in one allocation (`Open3DBroadcast.Transport.Loopback.FrameReachesConsumerWithoutCopy`).
+- **LiveLink source.** `FO3DReceiverSource`'s consumer implements both forms. On the game thread both go straight to `HandleSerializedFrame`, which now takes a view. Off the game thread the owned form moves the buffer into the game-thread task (no copy) and the view form copies it once, which is the copy the old code always made. `HandleSerializedFrame` still copies the bytes into the reorder gate's frame, as before; that copy belongs to the gate, not to this API.
+- **`Send(const O3DS::SubjectList&)` deleted (item 3).** Removed from `IOpen3DSender`, from the TCP, UDP, NNG, MoQ, Loopback and WebRTC senders and the test fake sender, together with the scratch buffers only it used. `UO3DSenderComponent::OnSubjectListReady`, the only caller, is removed; `FO3DSenderSerializer` never broadcast that delegate. The delegate itself stays on the serializer for now, unused. Tests that sent a `SubjectList` now use a helper that does what `Send` did: serialize, then `SendSerialized` under the first subject's name. That helper is `O3DTests::SendSubjectList`, and `WebRTCSubjectListTest::SendSubjectList` for the add-on, whose tests cannot use Open3DBroadcastTests.
+- **Core dependency (ADR 0002 blocker 2).** `O3DSenderInterface.h` no longer forward-declares `O3DS::SubjectList`, and the add-on's runtime code includes no o3ds core header. The add-on keeps `Open3DStreamCore` as a private dependency only because its tests build `SubjectList`s. Blocker 2 was already resolved in WP-F11 through that module, so this removes the reason, not the dependency; see the implementation note added to ADR 0002.
+- **Interface version stays 5.** These are interface changes (a pure virtual's signature, a new virtual, a removed virtual, the demux's layout and exports). But version 5 has not been released: the last tag is v0.9.6 (2026-07-25), no tag contains 5a's merge (c98c92c), and the CHANGELOG still lists 5a under Unreleased. So 5a and 5b form one version. The add-on is built against the new interfaces in the same change. Step 6 takes the next number.
+- **Verification.** New tests:
+  - `Open3DBroadcast.Shared.FrameConsumer.ViewFormHasNoCopy`: the consumer sees the payload's address inside the message, the raw buffer's own address, and a copy it took survives the caller reusing its buffer.
+  - `.OwnedFormMovesTheBuffer`: same allocation, the caller left empty, the view form not used.
+  - `.ViewOnlyConsumerGetsOwnedFrames`: the default bridge.
+  - `Open3DBroadcast.Transport.Loopback.FrameReachesConsumerWithoutCopy`.
+
+  Existing tests changed only where the interface forced it:
+  - The 12 consumer test doubles (8 in Open3DBroadcastTests, 4 in the add-on) override the view form, copying with `Emplace(GetData(), Num())` where they stored bytes.
+  - `MoQSenderTests`, `NngTransportTests`, `WebRTCPerSubjectTests`, `WebRTCTransportTests` and `WebRTCFunctionalTests` call the `SendSubjectList` helper instead of `Send`.
+  - `O3DTestFakes` lost its `Send` override.
+
+  No assertion changed.

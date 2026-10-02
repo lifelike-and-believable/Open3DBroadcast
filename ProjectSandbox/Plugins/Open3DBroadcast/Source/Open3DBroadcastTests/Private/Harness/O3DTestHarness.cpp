@@ -12,6 +12,7 @@
 #include "Misc/Guid.h"
 #include "Misc/ScopeLock.h"
 #include "SocketSubsystem.h"
+#include "Transport/O3DSenderInterface.h"
 #include "Sockets.h"
 
 THIRD_PARTY_INCLUDES_START
@@ -139,12 +140,33 @@ namespace O3DTests
 	{
 		return FPlatformMisc::GetEnvironmentVariable(TEXT("O3DB_NETWORK_TESTS")).TrimStartAndEnd() == TEXT("1");
 	}
+
+	bool SendSubjectList(IOpen3DSender& Sender, const O3DS::SubjectList& List)
+	{
+		std::vector<char> Buffer;
+		const double TimestampSeconds = FPlatformTime::Seconds();
+		// SubjectList::Serialize is not const (the transports' deleted Send used the same cast).
+		const int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(Buffer, TimestampSeconds);
+
+		FString Subject;
+		if (!List.mItems.empty() && List.mItems[0])
+		{
+			Subject = UTF8_TO_TCHAR(List.mItems[0]->mName.c_str());
+		}
+
+		TArray<uint8> Bytes;
+		if (BytesWritten > 0)
+		{
+			Bytes.Append(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten);
+		}
+		return Sender.SendSerialized(FO3DSendPayload(MoveTemp(Bytes), MoveTemp(Subject), TimestampSeconds)) == EO3DSendResult::Queued;
+	}
 }
 
-void FO3DRecordingFrameConsumer::SubmitFrame(const FString& /*Subject*/, const TArray<uint8>& Buffer, double /*TimestampSeconds*/)
+void FO3DRecordingFrameConsumer::SubmitFrame(const FString& /*Subject*/, TConstArrayView<uint8> Buffer, double /*TimestampSeconds*/)
 {
 	FScopeLock Lock(&Mutex);
-	Frames.Add(Buffer);
+	Frames.Emplace(Buffer.GetData(), Buffer.Num());
 	CallerThreads.Add(FPlatformTLS::GetCurrentThreadId());
 }
 

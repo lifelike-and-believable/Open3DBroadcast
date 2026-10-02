@@ -78,7 +78,7 @@ namespace MoQControlTests
 	class FMoQControlFrameCounter final : public ISerializedFrameConsumer
 	{
 	public:
-		virtual void SubmitFrame(const FString& /*Subject*/, const TArray<uint8>& /*Buffer*/, double /*TimestampSeconds*/) override
+		virtual void SubmitFrame(const FString& /*Subject*/, TConstArrayView<uint8> /*Buffer*/, double /*TimestampSeconds*/) override
 		{
 			FScopeLock Lock(&Mutex);
 			++Frames;

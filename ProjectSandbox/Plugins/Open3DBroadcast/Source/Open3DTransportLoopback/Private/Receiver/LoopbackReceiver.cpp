@@ -63,7 +63,8 @@ int32 FO3DLoopbackReceiver::Poll()
 			Stats.FramesReceived++;
 			Stats.BytesReceived += Item.Bytes.Num();
 			AccumulateLatency((NowSeconds - Item.CaptureTimeSec) * 1000.0);
-			Demux.DeliverMocap(Item.Subject, Item.Bytes, NowSeconds);
+			// The channel item owns the frame, so the consumer gets it without a copy (WP-A1 PR 5b).
+			Demux.DeliverMocapOwned(Item.Subject, MoveTemp(Item.Bytes), NowSeconds);
 			break;
 
 		case EO3DSendItemKind::Audio:

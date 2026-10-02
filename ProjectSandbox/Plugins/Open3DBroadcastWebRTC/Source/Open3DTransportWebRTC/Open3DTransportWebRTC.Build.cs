@@ -72,7 +72,7 @@ public class Open3DTransportWebRTC : ModuleRules
         // Note: Opus library NOT needed - LiveKit FFI handles Opus encoding/decoding internally.
         // We only provide/receive PCM16 audio at the API boundary.
 
-        // The o3ds core (O3DS::SubjectList, for IOpen3DSender::Send) comes from Open3DBroadcast's
+        // The o3ds core (O3DS::SubjectList) comes from Open3DBroadcast's
         // Open3DStreamCore module, whose API is exported with O3DS_API (ADR 0003, BUILD-1). No
         // path into the other plugin's folders is used, so this works wherever Open3DBroadcast is
         // installed.

@@ -134,11 +134,6 @@ void UO3DSenderComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 			Serializer->OnSerializedFrame.Remove(SerializerRelayHandle);
 			SerializerRelayHandle.Reset();
 		}
-		if (SubjectListHandle.IsValid())
-		{
-			Serializer->OnSubjectListReady.Remove(SubjectListHandle);
-			SubjectListHandle.Reset();
-		}
 		Serializer->ClearAllCaches();
 		Serializer.Reset();
 	}
@@ -228,10 +223,6 @@ void UO3DSenderComponent::StartCapture()
 		if (!SerializerRelayHandle.IsValid())
 		{
 			SerializerRelayHandle = Serializer->OnSerializedFrame.AddUObject(this, &UO3DSenderComponent::HandleSerializedFrameForward);
-		}
-		if (!SubjectListHandle.IsValid())
-		{
-			SubjectListHandle = Serializer->OnSubjectListReady.AddUObject(this, &UO3DSenderComponent::OnSubjectListReady);
 		}
 	}
 
@@ -382,10 +373,6 @@ void UO3DSenderComponent::InitializeTransport()
 	// start success here, so pose capture still runs for externally-managed transports and even
 	// when auto-transport creation fails.
 
-	if (!SubjectListHandle.IsValid())
-	{
-		SubjectListHandle = Serializer->OnSubjectListReady.AddUObject(this, &UO3DSenderComponent::OnSubjectListReady);
-	}
 	if (!SerializerRelayHandle.IsValid())
 	{
 		SerializerRelayHandle = Serializer->OnSerializedFrame.AddUObject(this, &UO3DSenderComponent::HandleSerializedFrameForward);
@@ -451,10 +438,9 @@ FO3DTransportConfig UO3DSenderComponent::BuildTransportConfig() const
  *  whether a frame is a full-sync snapshot or a delta/residual update and produces the
  *  final wire bytes itself, so every transport just transmits what it's given via
  *  IOpen3DSender::SendSerialized() rather than re-deriving bytes from a SubjectList
- *  object (see OnSubjectListReady() below, which this supersedes for the normal frame
- *  pipeline - kept in place, just no longer invoked by FO3DSenderSerializer, since a
- *  transport handed a live SubjectList would otherwise call its own Serialize() and
- *  silently discard whichever encoding was actually chosen upstream). */
+ *  object. (IOpen3DSender::Send(SubjectList) and the OnSubjectListReady handler that called
+ *  it were deleted in WP-A1 PR 5b: a transport handed a live SubjectList would call its own
+ *  Serialize() and discard whichever encoding was chosen upstream.) */
 void UO3DSenderComponent::HandleSerializedFrameForward(const FString& Subject, const TArray<uint8>& Buffer, double Timestamp)
 {
 	OnSerializedFrame.Broadcast(Subject, Buffer, Timestamp);
@@ -479,28 +465,6 @@ void UO3DSenderComponent::HandleSerializedFrameForward(const FString& Subject, c
 		// Not retried: the next frame supersedes this one. DroppedBackpressure is counted in the
 		// transport's DroppedFrames; NotConnected is expected while a peer or session is missing.
 		UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Transport '%s' did not take subject '%s' (%s)."), *TransportController->GetConfig().Transport, *Subject, LexToString(Result));
-	}
-}
-
-void UO3DSenderComponent::OnSubjectListReady(const FString& Subject, const TSharedPtr<O3DS::SubjectList>& Payload)
-{
-	// Not called by the normal frame pipeline (see HandleSerializedFrameForward's
-	// comment above) - retained for any caller that still wants to hand a
-	// transport a live SubjectList object directly.
-	if (!TransportController.IsValid() || !TransportController->IsActive() || !Payload.IsValid())
-	{
-		return;
-	}
-
-	TSharedPtr<IOpen3DSender> SenderInstance = TransportController->GetSender();
-	if (!SenderInstance.IsValid())
-	{
-		return;
-	}
-
-	if (!SenderInstance->Send(*Payload.Get()))
-	{
-		UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Transport '%s' reported backpressure while sending subject '%s'."), *TransportController->GetConfig().Transport, *Subject);
 	}
 }
 

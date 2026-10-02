@@ -42,7 +42,6 @@ public:
 	virtual FO3DTransportResult Initialize(const FO3DTransportConfig& Config) override;
 	virtual FO3DTransportResult Start() override;
 	virtual void Stop() override;
-	virtual bool Send(const O3DS::SubjectList& List) override;
 	virtual EO3DSendResult SendSerialized(FO3DSendPayload&& Payload) override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual FO3DTransportStats GetStats() const override;
@@ -95,7 +94,6 @@ private:
 
 	FGuid AudioSourceGuid;
 
-	mutable std::vector<char> SerializationScratch; // Reused buffer for Send(SubjectList)
 
 	/** Frames, audio and control for the worker (ADR 0007 item 7). */
 	const TSharedRef<FO3DSendQueue, ESPMode::ThreadSafe> Queue;

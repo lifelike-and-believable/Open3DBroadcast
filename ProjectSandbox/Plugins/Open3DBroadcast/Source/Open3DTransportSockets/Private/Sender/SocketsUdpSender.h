@@ -54,7 +54,6 @@ public:
 	virtual FO3DTransportResult Initialize(const FO3DTransportConfig& Config) override;
 	virtual FO3DTransportResult Start() override;
 	virtual void Stop() override;
-	virtual bool Send(const O3DS::SubjectList& List) override;
 	virtual EO3DSendResult SendSerialized(FO3DSendPayload&& Payload) override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual FO3DTransportStats GetStats() const override;
@@ -101,7 +100,6 @@ private:
 
 	/** Fragment message ids (worker thread). */
 	uint32 MessageCounter = 0;
-	std::vector<char> SerializationScratch; // Send(SubjectList), game thread
 	std::vector<char> FragmentScratch; // worker thread
 	FO3DReconnectPolicy ResolveBackoff; // worker thread
 

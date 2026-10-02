@@ -717,10 +717,11 @@ int32 FO3DMoQReceiver::Poll()
 	return FramesProcessed;
 }
 
-bool FO3DMoQReceiver::RouteReceived(const FO3DSendItem& Item)
+bool FO3DMoQReceiver::RouteReceived(FO3DSendItem& Item)
 {
 	// One classification for every track (ADR 0007 item 7). The wire format per track is
 	// unchanged: a bare O3DS frame, a bare audio payload, a control envelope.
+	const int32 NumBytes = Item.Bytes.Num();
 	EO3DDemuxResult Result = EO3DDemuxResult::Malformed;
 	switch (Item.Kind)
 	{
@@ -731,7 +732,8 @@ bool FO3DMoQReceiver::RouteReceived(const FO3DSendItem& Item)
 		Result = Demux.DeliverControlEnvelope(Item.Bytes.GetData(), Item.Bytes.Num(), Item.CaptureTimeSec);
 		break;
 	default:
-		Result = Demux.DeliverMocap(FString(), Item.Bytes, Item.CaptureTimeSec);
+		// The queue item owns the frame, so the consumer gets it without a copy (WP-A1 PR 5b).
+		Result = Demux.DeliverMocapOwned(FString(), MoveTemp(Item.Bytes), Item.CaptureTimeSec);
 		break;
 	}
 
@@ -741,7 +743,7 @@ bool FO3DMoQReceiver::RouteReceived(const FO3DSendItem& Item)
 	case EO3DDemuxResult::Mocap:
 	{
 		Stats.FramesReceived++;
-		Stats.BytesReceived += Item.Bytes.Num();
+		Stats.BytesReceived += NumBytes;
 		const double LatencyMs = (FPlatformTime::Seconds() - Item.CaptureTimeSec) * 1000.0;
 		LatencyStats.TotalLatencyMs += LatencyMs;
 		LatencyStats.Samples++;

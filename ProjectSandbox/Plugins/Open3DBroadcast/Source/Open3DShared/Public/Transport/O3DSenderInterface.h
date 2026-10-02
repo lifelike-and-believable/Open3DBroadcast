@@ -7,11 +7,6 @@
 #include "Templates/SharedPointer.h"
 #include "Transport/O3DTransportTypes.h"
 
-namespace O3DS
-{
-    class SubjectList;
-}
-
 /*
  * The sender side of the transport interface (ADR 0007 items 1 and 3). Moved here from
  * Open3DSender so transports and the Open3DBroadcastWebRTC add-on can depend on Open3DShared
@@ -67,11 +62,6 @@ public:
      * state to Idle; no state callback runs after Stop returns.
      */
     virtual void Stop() = 0;
-
-    /** Serializes List itself and sends it. Returns false if it was not accepted.
-     *  Deprecated (ADR 0007 item 3): nothing on the frame path calls it; WP-A1 step 5 removes it.
-     *  Use SendSerialized. */
-    virtual bool Send(const O3DS::SubjectList& List) = 0;
 
     /**
      * Sends one already-serialized frame. Any thread (the pose pipeline's worker once ADR 0008

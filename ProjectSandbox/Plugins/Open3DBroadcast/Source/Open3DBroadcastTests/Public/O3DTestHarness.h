@@ -22,6 +22,12 @@
  */
 #define O3DB_TEST_FLAGS (EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+class IOpen3DSender;
+namespace O3DS
+{
+	class SubjectList;
+}
+
 namespace O3DTests
 {
 	/**
@@ -49,6 +55,13 @@ namespace O3DTests
 
 	/** True when the environment variable O3DB_NETWORK_TESTS is "1" (ADR 0006 §6). */
 	OPEN3DBROADCASTTESTS_API bool AreNetworkTestsEnabled();
+
+	/**
+	 * What IOpen3DSender::Send(const O3DS::SubjectList&) did before WP-A1 PR 5b deleted it:
+	 * serializes List (now) and sends the bytes with SendSerialized under the first subject's
+	 * name. True when the transport queued it.
+	 */
+	OPEN3DBROADCASTTESTS_API bool SendSubjectList(IOpen3DSender& Sender, const O3DS::SubjectList& List);
 }
 
 /** Serialized-frame consumer that records every frame. Thread-safe. */
@@ -61,7 +74,7 @@ public:
 	FO3DRecordingFrameConsumer(const FO3DRecordingFrameConsumer&) = delete;
 	FO3DRecordingFrameConsumer& operator=(const FO3DRecordingFrameConsumer&) = delete;
 
-	virtual void SubmitFrame(const FString& Subject, const TArray<uint8>& Buffer, double TimestampSeconds) override;
+	virtual void SubmitFrame(const FString& Subject, TConstArrayView<uint8> Buffer, double TimestampSeconds) override;
 
 	int32 Num() const;
 	TArray<TArray<uint8>> GetFrames() const;
