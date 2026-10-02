@@ -3,9 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Transport/O3DTransportOptions.h"
-
-struct FO3DTransportConfig;
 
 THIRD_PARTY_INCLUDES_START
 #include "o3ds/tcp_stream_parser.h"
@@ -56,14 +53,6 @@ namespace O3DSockets::Tcp
 		// codec, flags, timestamp and payload size stay zero.
 		return Payload;
 	}
-
-	/**
-	 * The TCP endpoint of a config, parsed with O3DTransportOptions::ParseHostPort (strict port
-	 * 1-65535, bracketed IPv6; TRB-26). Same precedence as before WP-A1 PR 4b: a tcp:// URI, then
-	 * the host and port options, then a StreamId of the form host:port. The host is trimmed and
-	 * lowercased. Pure parsing, any thread; nothing is resolved here.
-	 */
-	bool ParseTcpEndpoint(const FO3DTransportConfig& Config, FO3DHostPort& OutEndpoint);
 
 	/** Receiver: payload bytes received and not yet handed to Poll; at least one tcp.maxframe frame always fits. */
 	inline constexpr int32 DefaultReceiveQueueBytes = 8 * 1024 * 1024;

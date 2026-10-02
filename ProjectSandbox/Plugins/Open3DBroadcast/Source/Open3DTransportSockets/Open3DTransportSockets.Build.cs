@@ -12,8 +12,8 @@ public class Open3DTransportSockets : ModuleRules
 
         O3DBuildFlags.Apply(Target, this);
 
-        // Public/Testing/SocketsTesting.h needs only Core; its consumer (Open3DBroadcastTests)
-        // brings the Sender and Receiver headers it includes (SHR-20).
+        // Public/Testing/SocketsTesting.h needs Core; the Transport/ interfaces it includes come
+        // from Open3DShared, which its consumer (Open3DBroadcastTests) depends on (SHR-20).
         PublicDependencyModuleNames.Add("Core");
 
         if (!O3DBuildFlags.IsSocketsEnabled(Target))
@@ -37,12 +37,10 @@ public class Open3DTransportSockets : ModuleRules
             "Engine",
             "Sockets",
             "Networking",
-            "Open3DShared",
-            // Only the UDP configure functions still read UO3DSenderComponent and
-            // FO3DReceiverSourceConfig; TCP reads its config alone since WP-A1 PR 4b. Both
-            // dependencies go with the UDP migration (WP-A1 PR 4c, ADR 0007 step 4).
-            "Open3DSender",
-            "Open3DReceiver"
+            // Open3DShared only: the interfaces, registry, send queue, worker, demux, audio sink
+            // and option parsing live there; no dependency on Open3DSender or Open3DReceiver
+            // (ADR 0007 step 4, WP-A1 PR 4c).
+            "Open3DShared"
         });
 
         // No editor or Slate dependencies: the settings panel is built by Open3DBroadcastEditor from

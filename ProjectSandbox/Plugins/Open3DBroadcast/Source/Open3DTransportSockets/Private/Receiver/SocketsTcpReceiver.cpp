@@ -63,7 +63,7 @@ FO3DTransportResult FO3DSocketsTcpReceiver::Initialize(const FO3DTransportConfig
 	StreamId = ActiveConfig.StreamId;
 	ActiveAudioConfig = Config.Audio;
 
-	if (!O3DSockets::Tcp::ParseTcpEndpoint(Config, RemoteEndpoint))
+	if (!O3DSockets::ParseEndpoint(Config, TEXT("tcp"), RemoteEndpoint))
 	{
 		UE_LOG(LogSocketsTcpReceiver, Warning, TEXT("TCP receiver requires tcp://host:port URI or explicit host/port options."));
 		RemoteEndpoint = FO3DHostPort();

@@ -684,6 +684,56 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### UDP on the shared transport blocks (WP-A1 PR 4c, ADR 0007 step 4)
+
+- **Wire format unchanged.** Same datagrams, the same fragment header and reassembly
+  (`o3ds/udp_fragment`), the same envelopes, option keys and defaults.
+- **Sender.** Frames, audio and control are items on one `FO3DSendQueue`, and an
+  `FO3DTransportWorker` sends each one (fragmenting above `udp.maxdatagram`), so no caller's
+  thread calls `SendTo` any more (TRB-20). UDP is Unreliable, so the frame policy is
+  `DropOldest`: while the worker is behind, at most 4 frames (16 MiB) wait and older ones are
+  discarded so the newest go out; callers are refused (`DroppedBackpressure`) only at twice that.
+  Changes:
+  - `SendSerialized` returns `Queued` instead of reporting the socket result. A failed `SendTo`
+    is counted afterwards in `DroppedFrames` and `SendErrors`.
+  - `FramesSent` and `BytesSent` count what was actually sent; audio adds the bytes sent, not
+    the bytes queued.
+  - `DroppedFrames` also counts frames the queue discarded as too old in the backlog.
+    `SendErrors`, `PendingFrames` and `PendingBytes` are filled.
+  - Audio has a 1 MiB budget and control a cap of 1,024 envelopes of their own, so neither is
+    refused or dropped because frames are waiting. Control is still one datagram per envelope
+    and still refused with `TooLarge` above `udp.maxdatagram`.
+  - A host name (`udp://mocap-pc.local:17800`) is resolved on the worker with
+    `O3DTransportOptions::ResolveHostPort`, retried with `FO3DReconnectPolicy`; the state is
+    `Connecting` until it resolves. It used to fail `Initialize` with `InvalidConfig`. IPv6
+    destinations work. An IP literal is still checked in `Initialize`.
+  - The audio sink is the shared `FO3DQueuedSenderAudioSink`; it refuses PCM while there is no
+    socket, as before.
+- **Receiver.** Still read by `Poll` on the game thread (ADR 0007 leaves UDP receive threading
+  open), with the same per-call bounds and reassembly. Complete messages go to
+  `FO3DUnifiedReceiveDemux`. Changes:
+  - The consumer is held strongly and released in `Stop` (TRF-38); it used to be held weakly.
+  - A damaged envelope (magic present, header does not fit) is dropped instead of being passed
+    on as raw mocap. Rejected audio, malformed and oversize messages count in `ReceiveErrors`.
+  - The bind address may be an IPv6 literal (`udp://[::]:17800`). A host name other than
+    `localhost` is still refused (`InvalidConfig`, now from `Start`), so binding never resolves
+    a name on the game thread.
+- **Options.** The endpoint is parsed with `O3DTransportOptions::ParseHostPort` (ports 1 to
+  65535 in digits only, bracketed IPv6) and every `udp.*` value with the strict getters, so
+  `17800abc` is no longer port 17800 and `udp.broadcast=yes` is no longer read as false without
+  notice. The UDP configure functions read the config only.
+- **Module dependencies.** `Open3DTransportSockets` no longer depends on Open3DSender or
+  Open3DReceiver, and none of its files includes their headers. `SocketsTransportConfigCommon.cpp`,
+  the `O3DSockets` option parsers and `BuildUdpUri` are deleted. Net lines under
+  `Open3DTransportSockets`: -441.
+- **API version stays 4.** `O3DTransportOptions::IsIpLiteral` is new; nothing the add-on uses
+  changed.
+- **Tests.** New `Open3DBroadcast.Transport.Sockets.Udp.QueueDropsOldestUnderBackpressure`,
+  `.AudioIndependentOfFrameQueue` and `.StopWhileSending` (four send threads and an audio thread,
+  1,000 Stop cycles), and `Open3DBroadcast.Shared.HostPort.IsIpLiteral`. `SocketsTesting.h`
+  gained `UdpSenderSetWorkerPaused`. The existing UDP, sockets and conformance tests are
+  unchanged.
+
 ### WebRTC becomes the Open3DBroadcastWebRTC add-on plugin (WP-F11, ADR 0002)
 
 - **WebRTC is no longer part of Open3DBroadcast.** The `Open3DTransportWebRTC`

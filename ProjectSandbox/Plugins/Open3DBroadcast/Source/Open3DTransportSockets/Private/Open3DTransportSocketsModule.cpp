@@ -5,8 +5,6 @@
 
 #if O3D_WITH_TRANSPORT_SOCKETS
 
-#include "O3DSenderComponent.h"
-#include "O3DReceiverSourceSettings.h"
 #include "O3DTransportOptionSchema.h"
 #include "Transport/O3DTransportRegistry.h"
 #include "Sender/SocketsTcpSender.h"
@@ -158,13 +156,13 @@ public:
 		Udp.CreateSender = []() { return MakeShared<FO3DSocketsUdpSender>(); };
 		Udp.CreateReceiver = []() { return MakeShared<FO3DSocketsUdpReceiver>(); };
 		Udp.GetCapabilities = [](const FO3DTransportConfig& Config) { return O3DSockets::GetUdpCapabilities(Config); };
-		Udp.ConfigureSender = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
+		Udp.ConfigureSender = [](const UO3DSenderComponent* /*SenderComponent*/, FO3DTransportConfig& Config)
 		{
-			O3DSocketsConfig::ConfigureUdpSender(SenderComponent, Config);
+			O3DSocketsConfig::ConfigureUdpSender(Config);
 		};
-		Udp.ConfigureReceiver = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
+		Udp.ConfigureReceiver = [](const FO3DReceiverSourceConfig& /*Settings*/, FO3DTransportConfig& Config)
 		{
-			O3DSocketsConfig::ConfigureUdpReceiver(Settings, Config);
+			O3DSocketsConfig::ConfigureUdpReceiver(Config);
 		};
 		Udp.SenderOptions.OptionSchema = SocketsSchema::MakeUdpSender();
 		Udp.ReceiverOptions.OptionSchema = SocketsSchema::MakeUdpReceiver();

@@ -31,6 +31,12 @@ namespace O3DSocketsTesting
 	OPEN3DTRANSPORTSOCKETS_API int32 TcpReceiverGetConnectCount(const IOpen3DReceiver& Receiver);
 	/** Consecutive failed connects counted by the receiver worker's backoff policy (WP-A1 PR 4b). */
 	OPEN3DTRANSPORTSOCKETS_API int32 TcpReceiverGetFailedConnectAttempts(const IOpen3DReceiver& Receiver);
+
+	/**
+	 * Requires CreateUdpSender(). While paused, the UDP sender's worker sends nothing, so a test
+	 * can fill the send queue and observe its drop policy (WP-A1 PR 4c).
+	 */
+	OPEN3DTRANSPORTSOCKETS_API void UdpSenderSetWorkerPaused(IOpen3DSender& Sender, bool bPaused);
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -5,13 +5,10 @@
 #include "SocketsUdpReceiver.h"
 
 #include "Transport/O3DTransportTypes.h"
-#include "O3DAudioSerialization.h"
 #include "O3DUnifiedMessage.h"
-#include "Transport/O3DSerializedFrameConsumer.h"
 
 #include "Sockets.h"
 #include "SocketSubsystem.h"
-#include "Interfaces/IPv4/IPv4Address.h"
 #include "IPAddress.h"
 #include "HAL/PlatformTime.h"
 #include "Logging/LogMacros.h"
@@ -92,38 +89,33 @@ FO3DTransportResult FO3DSocketsUdpReceiver::Initialize(const FO3DTransportConfig
 
 	ActiveConfig = Config;
 	Stats.Reset();
-	BindHost.Reset();
+	BindEndpoint = FO3DHostPort();
 	BindPort = 0;
 	StreamId = ActiveConfig.StreamId;
 	ActiveAudioConfig = Config.Audio;
-	bAllowBroadcast = O3DSockets::GetBoolOption(Config, O3DSockets::BroadcastOptionKey, false);
-	MaxDatagramBytes = FMath::Clamp(O3DSockets::GetIntOption(Config, O3DSockets::MaxDatagramOptionKey, 64000), 512, 65507);
-	MtuBytes = FMath::Clamp(O3DSockets::GetIntOption(Config, O3DSockets::MtuOptionKey, 1200), 256, MaxDatagramBytes);
-	MaxFrameBytes = FMath::Clamp(O3DSockets::GetIntOption(Config, O3DSockets::MaxFrameOptionKey, FReceiverConstants::DefaultMaxFrameBytes),
+	const TMap<FString, FString>& Options = Config.AdvancedParams;
+	bAllowBroadcast = O3DTransportOptions::GetBool(Options, O3DSockets::BroadcastOptionKey, false);
+	MaxDatagramBytes = O3DTransportOptions::GetInt(Options, O3DSockets::MaxDatagramOptionKey, 64000, 512, 65507);
+	MtuBytes = FMath::Clamp(O3DTransportOptions::GetInt(Options, O3DSockets::MtuOptionKey, 1200), 256, MaxDatagramBytes);
+	MaxFrameBytes = O3DTransportOptions::GetInt(Options, O3DSockets::MaxFrameOptionKey, FReceiverConstants::DefaultMaxFrameBytes,
 		FReceiverConstants::MaxUdpDatagramBytes, FReceiverConstants::MaxFrameBytesLimit);
 
 	FragmentState = MakeUnique<FFragmentState>(MakeUdpReassemblyConfig(MaxFrameBytes));
 
-	if (!O3DSockets::ParseHostPort(Config, BindHost, BindPort, TEXT("udp")))
+	FO3DHostPort Parsed;
+	if (!O3DSockets::ParseEndpoint(Config, TEXT("udp"), Parsed))
 	{
 		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP receiver requires udp://host:port URI or explicit host/port options."));
-		BindPort = 0;
 		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("UDP receiver requires a udp://host:port URI or explicit host/port options."));
 	}
-
-	if (BindPort <= 0)
-	{
-		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP receiver requires a valid port (got %d)."), BindPort);
-		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("UDP receiver requires a valid port (got %d)."), BindPort));
-	}
+	BindEndpoint = Parsed;
+	BindPort = Parsed.Port;
 
 	if (StreamId.IsEmpty())
 	{
-		StreamId = O3DSockets::ComposeStreamId(BindHost, BindPort);
+		StreamId = O3DSockets::ComposeStreamId(Parsed.Host, Parsed.Port);
 		ActiveConfig.StreamId = StreamId;
 	}
-
-	// Note: Audio stream label is now automatically derived from StreamId
 
 	SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
 	if (!SocketSubsystem)
@@ -132,13 +124,13 @@ FO3DTransportResult FO3DSocketsUdpReceiver::Initialize(const FO3DTransportConfig
 		return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("UDP receiver could not access the socket subsystem."));
 	}
 
+	FO3DReceiveDemuxSettings DemuxSettings = Demux.GetSettings();
+	DemuxSettings.StreamId = StreamId;
+	Demux.SetSettings(DemuxSettings);
+	Demux.ResetStats();
+
 	ReceiveBuffer.Reset();
 	return FO3DTransportResult::Ok();
-}
-
-void FO3DSocketsUdpReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer)
-{
-	Consumer = InConsumer;
 }
 
 FO3DTransportResult FO3DSocketsUdpReceiver::Start()
@@ -148,7 +140,7 @@ FO3DTransportResult FO3DSocketsUdpReceiver::Start()
 	{
 		return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("UDP receiver Start() before a successful Initialize()."));
 	}
-	if (!Consumer.IsValid())
+	if (!Demux.HasConsumer())
 	{
 		return FO3DTransportResult::Error(EO3DTransportError::NoConsumer, TEXT("UDP receiver Start() without a frame consumer (SetConsumer)."));
 	}
@@ -171,8 +163,8 @@ FO3DTransportResult FO3DSocketsUdpReceiver::Start()
 
 void FO3DSocketsUdpReceiver::Stop()
 {
-	ControlSink.Reset();
 	DestroySocket();
+	Demux.ReleaseSinks();
 	SocketSubsystem = nullptr;
 	ReceiveBuffer.Reset();
 	RecvAddr.Reset();
@@ -237,10 +229,29 @@ int32 FO3DSocketsUdpReceiver::Poll()
 			continue;
 		}
 
-		// Process received payload through unified demultiplexer
-		if (ProcessReceivedPayload(Frame.GetData(), Frame.Num()))
+		// One classification for every message (ADR 0007 item 7): mocap to the consumer, audio to
+		// the audio sink, control to the control sink; malformed input is counted and dropped.
+		switch (Demux.ProcessMessage(Frame.GetData(), Frame.Num(), FPlatformTime::Seconds()))
 		{
+		case EO3DDemuxResult::Mocap:
+			Stats.FramesReceived++;
+			Stats.BytesReceived += Frame.Num();
 			++FramesProcessed;
+			break;
+		case EO3DDemuxResult::Audio:
+			++FramesProcessed;
+			break;
+		case EO3DDemuxResult::AudioRejected:
+		case EO3DDemuxResult::Malformed:
+		case EO3DDemuxResult::Oversize:
+			Stats.ReceiveErrors++;
+			break;
+		default:
+			break; // control (not a frame), keepalives, unknown kinds
+		}
+		if (!Socket)
+		{
+			break; // A consumer stopped this receiver from inside SubmitFrame.
 		}
 	}
 
@@ -256,7 +267,7 @@ FO3DTransportStats FO3DSocketsUdpReceiver::GetStats() const
 
 void FO3DSocketsUdpReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig)
 {
-	AudioSink = Sink;
+	Demux.SetAudioSink(Sink);
 	if (!Sink.IsValid())
 	{
 		return;
@@ -285,7 +296,29 @@ FO3DTransportResult FO3DSocketsUdpReceiver::CreateSocket()
 
 	DestroySocket();
 
-	Socket = SocketSubsystem->CreateSocket(NAME_DGram, TEXT("O3DS_UDP_RECEIVER"), FNetworkProtocolTypes::IPv4);
+	// "" and "*" bind every interface, "localhost" is 127.0.0.1 (as before WP-A1 PR 4c); anything
+	// else must be an IP literal, so nothing resolves a name on the game thread (TRB-26).
+	FO3DHostPort BindTarget = BindEndpoint;
+	if (BindTarget.Host.IsEmpty() || BindTarget.Host == TEXT("*"))
+	{
+		BindTarget.Host = TEXT("0.0.0.0");
+		BindTarget.bIPv6 = false;
+	}
+	else if (BindTarget.Host.Equals(TEXT("localhost"), ESearchCase::IgnoreCase))
+	{
+		BindTarget.Host = TEXT("127.0.0.1");
+		BindTarget.bIPv6 = false;
+	}
+	TSharedPtr<FInternetAddr> BindAddrPtr;
+	if (!O3DTransportOptions::IsIpLiteral(BindTarget) || !O3DTransportOptions::ResolveHostPort(BindTarget, BindAddrPtr) || !BindAddrPtr.IsValid())
+	{
+		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("Invalid UDP bind host '%s'."), *BindEndpoint.Host);
+		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("Invalid UDP bind host '%s'."), *BindEndpoint.Host));
+	}
+	FInternetAddr& BindAddr = *BindAddrPtr;
+
+	// The socket's protocol follows the bind address, so an IPv6 bind works.
+	Socket = SocketSubsystem->CreateSocket(NAME_DGram, TEXT("O3DS_UDP_RECEIVER"), BindAddr.GetProtocolType());
 	if (!Socket)
 	{
 		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("Failed to create UDP socket."));
@@ -300,44 +333,11 @@ FO3DTransportResult FO3DSocketsUdpReceiver::CreateSocket()
 		Socket->SetBroadcast(true);
 	}
 
-	FString EffectiveHost = BindHost;
-	if (EffectiveHost.IsEmpty() || EffectiveHost == TEXT("*"))
-	{
-		EffectiveHost = TEXT("0.0.0.0");
-	}
-	else if (EffectiveHost.Equals(TEXT("localhost"), ESearchCase::IgnoreCase))
-	{
-		EffectiveHost = TEXT("127.0.0.1");
-	}
-
-	TSharedRef<FInternetAddr> BindAddr = SocketSubsystem->CreateInternetAddr();
-	bool bIsValid = false;
-	BindAddr->SetIp(*EffectiveHost, bIsValid);
-
-	if (!bIsValid)
-	{
-		FIPv4Address IPv4;
-		if (FIPv4Address::Parse(EffectiveHost, IPv4))
-		{
-			BindAddr->SetIp(IPv4.Value);
-			bIsValid = true;
-		}
-	}
-
-	if (!bIsValid)
-	{
-		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("Invalid UDP bind host '%s'."), *BindHost);
-		DestroySocket();
-		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("Invalid UDP bind host '%s'."), *BindHost));
-	}
-
-	BindAddr->SetPort(BindPort);
-
-	if (!Socket->Bind(*BindAddr))
+	if (!Socket->Bind(BindAddr))
 	{
 		const ESocketErrors Error = SocketSubsystem->GetLastErrorCode();
-		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("Failed to bind UDP socket to %s."), *BindAddr->ToString(true));
-		const FString Message = FString::Printf(TEXT("Failed to bind the UDP socket to %s (socket error %d)."), *BindAddr->ToString(true), static_cast<int32>(Error));
+		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("Failed to bind UDP socket to %s."), *BindAddr.ToString(true));
+		const FString Message = FString::Printf(TEXT("Failed to bind the UDP socket to %s (socket error %d)."), *BindAddr.ToString(true), static_cast<int32>(Error));
 		DestroySocket();
 		return FO3DTransportResult::Error(Error == SE_EADDRINUSE ? EO3DTransportError::AddressInUse : EO3DTransportError::ConnectFailed, Message);
 	}
@@ -347,11 +347,12 @@ FO3DTransportResult FO3DSocketsUdpReceiver::CreateSocket()
 	Socket->SetReceiveBufferSize(RequestedSize, AppliedSize);
 
 	ReceiveBuffer.SetNum(FReceiverConstants::MaxUdpDatagramBytes);
-	TSharedPtr<FInternetAddr> SenderAddrScratch = SocketSubsystem->CreateInternetAddr();
+	// Same protocol as the socket, so RecvFrom can fill it for an IPv6 bind too.
+	TSharedPtr<FInternetAddr> SenderAddrScratch = SocketSubsystem->CreateInternetAddr(BindAddr.GetProtocolType());
 	RecvAddr = SenderAddrScratch;
 
 	UE_LOG(LogSocketsUdpReceiver, Log, TEXT("UDP receiver listening on %s:%d (broadcast=%d, recvBuf=%d)."),
-		*BindAddr->ToString(false), BindAddr->GetPort(), bAllowBroadcast ? 1 : 0, AppliedSize);
+		*BindAddr.ToString(false), BindAddr.GetPort(), bAllowBroadcast ? 1 : 0, AppliedSize);
 
 	return FO3DTransportResult::Ok();
 }
@@ -476,101 +477,6 @@ bool FO3DSocketsUdpReceiver::IsFragmentPacket(const uint8* Data, int32 Bytes) co
 
 	const uint32 ActualPayload = static_cast<uint32>(Bytes - FReceiverConstants::FragmentHeaderSize);
 	return ActualPayload == ExpectedPayload;
-}
-
-bool FO3DSocketsUdpReceiver::ProcessReceivedPayload(const uint8* Data, int32 Size)
-{
-	if (!Data || Size <= 0)
-	{
-		return false;
-	}
-
-	// Try to parse as unified message
-	O3DS::FUnifiedHeader Header;
-	const uint8* PayloadPtr = nullptr;
-	int32 PayloadSize = 0;
-
-	if (O3DS::ParseUnifiedMessage(Data, Size, Header, PayloadPtr, PayloadSize))
-	{
-		// Unified message - route by kind
-		if (Header.GetKind() == O3DS::EUnifiedKind::Control)
-		{
-			// ADR 0011: to the control sink if well-formed, otherwise dropped; never a frame.
-			O3DTransport::DeliverControlEnvelope(ControlSink, Data, Size, StreamId);
-			return false;
-		}
-		if (Header.GetKind() == O3DS::EUnifiedKind::Audio)
-		{
-			return ProcessAudioPayload(Header.GetCodec(), PayloadPtr, PayloadSize);
-		}
-		else if (Header.GetKind() == O3DS::EUnifiedKind::Mocap)
-		{
-			// Route to frame consumer
-			if (TSharedPtr<ISerializedFrameConsumer> ConsumerPinned = Consumer.Pin())
-			{
-				TArray<uint8> PayloadCopy;
-				PayloadCopy.SetNumUninitialized(PayloadSize);
-				FMemory::Memcpy(PayloadCopy.GetData(), PayloadPtr, PayloadSize);
-				ConsumerPinned->SubmitFrame(StreamId, PayloadCopy, FPlatformTime::Seconds());
-			}
-			Stats.FramesReceived++;
-			Stats.BytesReceived += Size;
-			return true;
-		}
-	}
-	else
-	{
-		// Backward compatibility: treat non-unified messages as mocap data
-		if (TSharedPtr<ISerializedFrameConsumer> ConsumerPinned = Consumer.Pin())
-		{
-			TArray<uint8> PayloadCopy;
-			PayloadCopy.SetNumUninitialized(Size);
-			FMemory::Memcpy(PayloadCopy.GetData(), Data, Size);
-			ConsumerPinned->SubmitFrame(StreamId, PayloadCopy, FPlatformTime::Seconds());
-		}
-		Stats.FramesReceived++;
-		Stats.BytesReceived += Size;
-		return true;
-	}
-
-	return false;
-}
-
-bool FO3DSocketsUdpReceiver::ProcessAudioPayload(O3DS::EUnifiedCodec Codec, const uint8* Payload, int32 PayloadSize)
-{
-	if (!Payload || PayloadSize <= 0)
-	{
-		return false;
-	}
-
-	O3DAudio::FEncodedAudioFrame EncodedFrame;
-	if (!O3DAudio::DeserializeEncodedAudioFrame(Codec, Payload, PayloadSize, EncodedFrame))
-	{
-		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("Failed to deserialize UDP audio frame (payloadSize=%d codec=%d)."), PayloadSize, static_cast<int32>(Codec));
-		return false;
-	}
-
-	if (TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> SinkPinned = AudioSink.Pin())
-	{
-		if (Codec == O3DS::EUnifiedCodec::PCM16)
-		{
-			SinkPinned->SubmitPcm16(EncodedFrame.Meta, EncodedFrame.Payload.GetData(), EncodedFrame.Payload.Num());
-		}
-		else
-		{
-			if (!AudioDecoder.Decode(Codec, EncodedFrame.Meta, EncodedFrame.Payload.GetData(), EncodedFrame.Payload.Num(), DecodedPcmScratch))
-			{
-				UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("Failed to decode UDP audio frame (codec=%d)."), static_cast<int32>(Codec));
-				return false;
-			}
-
-			SinkPinned->SubmitPcm16(EncodedFrame.Meta,
-				reinterpret_cast<const uint8*>(DecodedPcmScratch.GetData()),
-				DecodedPcmScratch.Num() * sizeof(int16));
-		}
-	}
-
-	return true;
 }
 
 #endif // O3D_WITH_TRANSPORT_SOCKETS

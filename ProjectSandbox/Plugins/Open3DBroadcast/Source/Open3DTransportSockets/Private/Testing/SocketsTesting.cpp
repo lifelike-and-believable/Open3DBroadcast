@@ -57,6 +57,11 @@ namespace O3DSocketsTesting
 	{
 		return static_cast<const FO3DSocketsTcpReceiver&>(Receiver).GetFailedConnectAttempts();
 	}
+
+	void UdpSenderSetWorkerPaused(IOpen3DSender& Sender, bool bPaused)
+	{
+		static_cast<FO3DSocketsUdpSender&>(Sender).SetWorkerPausedForTesting(bPaused);
+	}
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
