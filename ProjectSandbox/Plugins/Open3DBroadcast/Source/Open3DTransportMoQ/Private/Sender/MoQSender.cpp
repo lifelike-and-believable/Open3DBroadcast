@@ -4,17 +4,14 @@
 
 #include "Sender/MoQSender.h"
 #include "O3DRedact.h"
-#include "Sender/MoQSenderAudioSink.h"
 
-#include "HAL/Event.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
-#include "HAL/Runnable.h"
-#include "HAL/RunnableThread.h"
-#include "HAL/UnrealMemory.h"
 #include "Math/UnrealMathUtility.h"
 #include "Misc/ScopeLock.h"
+#include "O3DAudioFrameCodec.h"
 #include "O3DPerformanceMetrics.h"
+#include "O3DSinkAudioEncoder.h"
 #include "O3DUnifiedMessage.h"
 #include "Shared/MoQHandles.h"
 #include "Shared/MoQHelpers.h"
@@ -32,27 +29,25 @@ DEFINE_LOG_CATEGORY(LogO3DMoQSender);
 // Use constants from MoQHelpers
 using namespace MoQHelpers;
 
-class FSendWorker : public FRunnable
+namespace O3DMoQSenderPrivate
 {
-public:
-	explicit FSendWorker(FO3DMoQSender& InOwner)
-		: Owner(InOwner)
+	/** Idle wait of the worker; an Enqueue wakes it earlier. */
+	constexpr uint32 IdleWaitMs = 100;
+	constexpr uint32 PausedWaitMs = 5;
+
+	const TCHAR* TrackLabel(EO3DSendItemKind Kind)
 	{
+		return Kind == EO3DSendItemKind::Control ? TEXT("control") : (Kind == EO3DSendItemKind::Audio ? TEXT("audio") : TEXT("mocap"));
 	}
 
-	virtual uint32 Run() override
+	/** True for at most one caller per Interval (any thread). */
+	bool ClaimLogSlot(std::atomic<double>& Last, double Interval)
 	{
-		return Owner.RunWorker();
+		const double Now = FPlatformTime::Seconds();
+		double Previous = Last.load();
+		return (Now - Previous) >= Interval && Last.compare_exchange_strong(Previous, Now);
 	}
-
-	virtual void Stop() override
-	{
-		// Owner coordinates stop via bWorkerStopRequested flag.
-	}
-
-private:
-	FO3DMoQSender& Owner;
-};
+}
 
 FO3DMoQSender::FO3DMoQSender()
 	// The cycle counter differs per instance and per run, so many senders do not retry in lockstep.
@@ -64,7 +59,9 @@ FO3DMoQSender::FO3DMoQSender(FMoQFfiApiRef InApi, TFunction<double()> InClock, u
 	: Api(MoveTemp(InApi))
 	, Clock(MoveTemp(InClock))
 	, JitterSeed(InJitterSeed)
-	, AudioState(MakeShared<FMoQSenderAudioState, ESPMode::ThreadSafe>())
+	, Queue(MakeShared<FO3DSendQueue, ESPMode::ThreadSafe>())
+	// The audio track carries bare audio payloads (O3DAudio::SerializeForTransport), not envelopes.
+	, PublishState(MakeShared<FO3DAudioPublishState, ESPMode::ThreadSafe>(Queue, EO3DAudioWireFormat::AudioPayload))
 	, TransportMetrics(FO3DPerformanceMetrics::Get().AcquireTransportMetrics(TEXT("MoQ")))
 {
 	CachedState = MOQ_STATE_DISCONNECTED;
@@ -78,6 +75,11 @@ double FO3DMoQSender::NowSeconds() const
 FO3DMoQSender::~FO3DMoQSender()
 {
 	Stop();
+}
+
+FO3DMoQSender::ETrack FO3DMoQSender::TrackOf(EO3DSendItemKind Kind)
+{
+	return Kind == EO3DSendItemKind::Audio ? ETrack::Audio : (Kind == EO3DSendItemKind::Control ? ETrack::Control : ETrack::Mocap);
 }
 
 bool FO3DMoQSender::ParseOptions(const FO3DTransportConfig& Config, FString& OutError)
@@ -94,7 +96,7 @@ bool FO3DMoQSender::ParseOptions(const FO3DTransportConfig& Config, FString& Out
 	Options.AudioNamespace = BuildDefaultAudioNamespace(Config);
 	Options.ControlNamespace = BuildDefaultControlNamespace(Config);
 	Options.TrackName = BuildDefaultTrackName(Config);
-	
+
 	if (Options.MocapNamespace.IsEmpty() || Options.TrackName.IsEmpty())
 	{
 		OutError = TEXT("Unable to derive track namespace/name");
@@ -157,11 +159,17 @@ FO3DTransportResult FO3DMoQSender::Initialize(const FO3DTransportConfig& Config)
 	AudioSourceGuid = FGuid::NewGuid();
 	bAudioRequested = false;
 
+	// queue_bytes is the byte limit of frames; audio and control have budgets of their own, so a
+	// full frame budget never refuses them (ADR 0007 item 7, ADR 0011). RefuseNewest: the queue
+	// never discards what it accepted (see the class comment).
+	FO3DSendQueueLimits Limits;
+	Limits.Mocap.MaxBytes = static_cast<int64>(Options.MaxQueueBytes);
+	Limits.MocapOverflow = EO3DMocapOverflow::RefuseNewest;
+	Limits.Audio.MaxBytes = AudioQueueBytes;
+	Queue->SetLimits(Limits);
+	// Not running, so no worker consumes the queue. Leftovers of a previous session are not counted.
+	Queue->Empty();
 	ResetStats();
-	PendingQueueBytes = 0;
-	DrainQueue();
-	AudioState->AudioQueue.Empty();
-	AudioState->AudioDropped.store(0);
 
 	CachedState = MOQ_STATE_DISCONNECTED;
 	bConnectInFlight = false;
@@ -172,10 +180,10 @@ FO3DTransportResult FO3DMoQSender::Initialize(const FO3DTransportConfig& Config)
 	LastControlErrorLogTimeSeconds = 0.0;
 	LastDropLogTimeSeconds = 0.0;
 
-	AudioState->LastSubject.Reset();
+	PublishState->GetSubjectSlot().Reset();
 
 	bInitialized = true;
-	AudioState->Gate->Open();
+	PublishState->Open();
 	return FO3DTransportResult::Ok();
 }
 
@@ -197,10 +205,9 @@ FO3DTransportResult FO3DMoQSender::Start()
 		ConnectionDelegateHandle = Session->OnConnectionStateChanged().AddRaw(this, &FO3DMoQSender::HandleConnectionStateChanged);
 	}
 
-	AudioState->Gate->Open();
+	PublishState->Open();
 
-	StartWorker();
-	if (WorkerThread == nullptr)
+	if (!Worker.Start(TEXT("MoQSenderWorker"), [this]() { return RunWorkerIteration(); }, Queue))
 	{
 		UE_LOG(LogO3DMoQSender, Error, TEXT("Failed to start MoQ sender worker thread"));
 		const FO3DTransportResult Result = FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("Failed to start the MoQ sender worker thread."));
@@ -216,7 +223,7 @@ FO3DTransportResult FO3DMoQSender::Start()
 	{
 		UE_LOG(LogO3DMoQSender, Error, TEXT("Initial MoQ connection attempt failed"));
 		bRunning = false;
-		StopWorker();
+		Worker.Stop();
 		const FO3DTransportResult Result = FO3DTransportResult::Error(EO3DTransportError::ConnectFailed,
 			FString::Printf(TEXT("The first MoQ connection attempt to %s failed."), *O3DRedact::Url(Options.RelayUrl)));
 		ConnectionState.End(EO3DConnectionState::Failed, Result);
@@ -230,7 +237,7 @@ void FO3DMoQSender::Stop()
 {
 	// WP-S5 ordering: close the audio gate first (waits for in-flight submits), then stop the
 	// worker, then release publishers and the session.
-	AudioState->Gate->Close();
+	PublishState->Close();
 
 	if (!bInitialized && !bRunning)
 	{
@@ -240,9 +247,8 @@ void FO3DMoQSender::Stop()
 
 	bRunning = false;
 
-	StopWorker();
+	Worker.Stop();
 	DrainQueue();
-	DrainAudioQueue(/*bPublish=*/false);
 	DestroyPublisher();
 	DestroyAudioPublisher();
 	DestroyControlPublisher();
@@ -345,7 +351,7 @@ void FO3DMoQSender::HandleConnectionStateChanged(MoqConnectionState NewState)
 		// Control is announced on every connect, not on the first cue: a receiver can only
 		// subscribe to an announced track, and an event sent before it subscribes is lost.
 		EnsureControlPublisher();
-		WakeWorker();
+		Queue->Wake();
 		ConnectionState.Set(EO3DConnectionState::Connected);
 		break;
 
@@ -404,7 +410,7 @@ bool FO3DMoQSender::Send(const O3DS::SubjectList& List)
 	FO3DPerformanceMetrics::Get().RecordBytesSerialized(BytesWritten);
 
 	TArray<uint8> Bytes(reinterpret_cast<const uint8*>(Buffer.data()), BytesWritten);
-	return SendBytes(MoveTemp(Bytes), ObservedSubject, TimestampSeconds) == EO3DSendResult::Queued;
+	return EnqueueFrame(MoveTemp(Bytes), MoveTemp(ObservedSubject), TimestampSeconds, /*bFullSync=*/false) == EO3DSendResult::Queued;
 }
 
 EO3DSendResult FO3DMoQSender::SendSerialized(FO3DSendPayload&& Payload)
@@ -426,30 +432,31 @@ EO3DSendResult FO3DMoQSender::SendSerialized(FO3DSendPayload&& Payload)
 
 	// No NotConnected: frames queue while the session (re)connects and the worker publishes or
 	// drops them. The payload's bytes move into the queue without a copy.
-	return SendBytes(MoveTemp(Payload.Bytes), Payload.Subject, Payload.CaptureTimeSec);
+	return EnqueueFrame(MoveTemp(Payload.Bytes), MoveTemp(Payload.Subject), Payload.CaptureTimeSec, Payload.bFullSync);
 }
 
-/** Enqueue an already-serialized payload for the send worker and record transport-level stats/subject bookkeeping.
- *  CaptureTimestampSec is the same value the caller already embedded in Bytes (Send()'s own
- *  FPlatformTime::Seconds() call, or FO3DSenderSerializer's `Now` via SendSerialized()) - reused for
- *  EnqueuePayload()'s capture timestamp so the enqueue-to-publish latency measurement below reflects
- *  true frame-capture time rather than "whenever SendBytes() happened to run". */
-EO3DSendResult FO3DMoQSender::SendBytes(TArray<uint8>&& Bytes, const FString& SubjectName, double CaptureTimestampSec)
+/**
+ * Enqueues an already-serialized frame for the worker. CaptureTimestampSec is the time the caller
+ * embedded in the bytes, so the enqueue-to-publish latency reflects true capture time.
+ */
+EO3DSendResult FO3DMoQSender::EnqueueFrame(TArray<uint8>&& Bytes, FString SubjectName, double CaptureTimestampSec, bool bFullSync)
 {
 	if (!SubjectName.IsEmpty())
 	{
-		AudioState->LastSubject.Set(SubjectName);
+		PublishState->GetSubjectSlot().Set(SubjectName);
 	}
 
 	const int32 Len = Bytes.Num();
-	if (!EnqueuePayload(MoveTemp(Bytes), CaptureTimestampSec, ETrack::Mocap))
+	const EO3DSendResult Result = Queue->Enqueue(FO3DSendItem::MakeMocap(MoveTemp(Bytes), MoveTemp(SubjectName), CaptureTimestampSec, bFullSync));
+	if (Result != EO3DSendResult::Queued)
 	{
 		FO3DPerformanceMetrics::Get().RecordTransportFrameDropped();
+		DroppedFrames.fetch_add(1);
+		if (O3DMoQSenderPrivate::ClaimLogSlot(LastDropLogTimeSeconds, kDropLogIntervalSeconds))
 		{
-			FScopeLock StatsLock(&StatsMutex);
-			Stats.DroppedFrames++;
+			UE_LOG(LogO3DMoQSender, Warning, TEXT("MoQ sender queue overflow (limit=%llu bytes); dropping mocap frame"), Options.MaxQueueBytes);
 		}
-		return EO3DSendResult::DroppedBackpressure;
+		return Result;
 	}
 
 	FO3DPerformanceMetrics::Get().RecordBytesSent(Len);
@@ -459,10 +466,10 @@ EO3DSendResult FO3DMoQSender::SendBytes(TArray<uint8>&& Bytes, const FString& Su
 
 /**
  * Control (ADR 0011): the envelope goes out on its own track, through the same worker queue as
- * mocap, so it never blocks. It is not a frame: no frame, byte or drop counters move. Refused
- * with NotConnected (and retried by the control publisher) until the control track is
- * announced. MoQ gives no ordering across tracks, so control is not ordered against the frames
- * around it.
+ * mocap but with a cap of its own, so it never blocks. It is not a frame: no frame, byte or drop
+ * counters move. Refused with NotConnected (and retried by the control publisher) until the
+ * control track is announced. MoQ gives no ordering across tracks, so control is not ordered
+ * against the frames around it.
  */
 EO3DSendResult FO3DMoQSender::SendControl(const uint8* Envelope, int32 Len)
 {
@@ -475,12 +482,11 @@ EO3DSendResult FO3DMoQSender::SendControl(const uint8* Envelope, int32 Len)
 	{
 		return EO3DSendResult::Invalid;
 	}
-	if (!IsControlPublisherReady())
+	if (!IsPublisherReady(ETrack::Control))
 	{
 		return EO3DSendResult::NotConnected;
 	}
-	TArray<uint8> Bytes(Envelope, Len);
-	return EnqueuePayload(MoveTemp(Bytes), FPlatformTime::Seconds(), ETrack::Control) ? EO3DSendResult::Queued : EO3DSendResult::DroppedBackpressure;
+	return Queue->Enqueue(FO3DSendItem::MakeControl(TArray<uint8>(Envelope, Len)));
 }
 
 void FO3DMoQSender::Tick(float /*DeltaSeconds*/)
@@ -507,62 +513,33 @@ void FO3DMoQSender::Tick(float /*DeltaSeconds*/)
 
 FO3DTransportStats FO3DMoQSender::GetStats() const
 {
+	const FO3DSendQueueStats QueueStats = Queue->GetStats();
 	FO3DTransportStats Copy;
+	Copy.FramesSent = FramesSent.load();
+	Copy.BytesSent = BytesSent.load();
+	Copy.DroppedFrames = DroppedFrames.load();
+	Copy.SendErrors = SendErrors.load();
+	Copy.PendingFrames = QueueStats.Mocap.PendingItems;
+	Copy.PendingBytes = QueueStats.GetPendingBytes();
 	{
-		FScopeLock Lock(&StatsMutex);
-		Copy = Stats;
+		FScopeLock Lock(&LatencyMutex);
 		if (LatencyStats.Samples > 0)
 		{
 			Copy.AverageLatencyMs = LatencyStats.TotalLatencyMs / static_cast<double>(LatencyStats.Samples);
 			Copy.MaxLatencyMs = LatencyStats.MaxLatencyMs;
 		}
 	}
-	Copy.DroppedFrames += AudioState->AudioDropped.load();
 	Copy.State = ConnectionState.Get();
-	{
-		FScopeLock Lock(&QueueMutex);
-		Copy.PendingBytes = static_cast<int64>(PendingQueueBytes);
-	}
 	return Copy;
 }
 
-bool FO3DMoQSender::IsPublisherReady() const
+bool FO3DMoQSender::IsPublisherReady(ETrack Track) const
 {
-	if (!bRunning)
+	if (!bRunning || CachedState.Load() != MOQ_STATE_CONNECTED)
 	{
 		return false;
 	}
-	if (CachedState.Load() != MOQ_STATE_CONNECTED)
-	{
-		return false;
-	}
-	return GetPublisher(ETrack::Mocap).IsValid();
-}
-
-bool FO3DMoQSender::IsAudioPublisherReady() const
-{
-	if (!bRunning)
-	{
-		return false;
-	}
-	if (CachedState.Load() != MOQ_STATE_CONNECTED)
-	{
-		return false;
-	}
-	return GetPublisher(ETrack::Audio).IsValid();
-}
-
-bool FO3DMoQSender::IsControlPublisherReady() const
-{
-	if (!bRunning)
-	{
-		return false;
-	}
-	if (CachedState.Load() != MOQ_STATE_CONNECTED)
-	{
-		return false;
-	}
-	return GetPublisher(ETrack::Control).IsValid();
+	return GetPublisher(Track).IsValid();
 }
 
 TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> FO3DMoQSender::GetPublisher(ETrack Track) const
@@ -730,232 +707,118 @@ void FO3DMoQSender::DestroyControlPublisher()
 	Old.Reset();
 }
 
-namespace
-{
-	const TCHAR* MoQSenderTrackLabel(bool bAudio, bool bControl)
-	{
-		return bControl ? TEXT("control") : (bAudio ? TEXT("audio") : TEXT("mocap"));
-	}
-}
-
-bool FO3DMoQSender::EnqueuePayload(TArray<uint8>&& Data, double CaptureTimestampSec, ETrack Track)
-{
-	const uint64 PayloadBytes = Data.Num();
-
-	{
-		FScopeLock Lock(&QueueMutex);
-		if ((PendingQueueBytes + PayloadBytes) > Options.MaxQueueBytes)
-		{
-			const double Now = FPlatformTime::Seconds();
-			if ((Now - LastDropLogTimeSeconds) >= kDropLogIntervalSeconds)
-			{
-				LastDropLogTimeSeconds = Now;
-				UE_LOG(LogO3DMoQSender, Warning, TEXT("MoQ sender queue overflow (limit=%llu bytes); dropping %s frame"),
-					Options.MaxQueueBytes, MoQSenderTrackLabel(Track == ETrack::Audio, Track == ETrack::Control));
-			}
-			return false;
-		}
-
-		TUniquePtr<FPendingPayload> Payload = MakeUnique<FPendingPayload>();
-		Payload->Data = MoveTemp(Data);
-		Payload->EnqueueTimestampSeconds = CaptureTimestampSec;
-		Payload->Track = Track;
-		SendQueue.Enqueue(MoveTemp(Payload));
-		PendingQueueBytes += PayloadBytes;
-	}
-
-	WakeWorker();
-	return true;
-}
-
-bool FO3DMoQSender::DequeuePayload(TUniquePtr<FPendingPayload>& OutPayload)
-{
-	FScopeLock Lock(&QueueMutex);
-	if (!SendQueue.Dequeue(OutPayload))
-	{
-		return false;
-	}
-
-	PendingQueueBytes = (PendingQueueBytes >= static_cast<uint64>(OutPayload->Data.Num()))
-		? (PendingQueueBytes - OutPayload->Data.Num())
-		: 0;
-	return true;
-}
-
 void FO3DMoQSender::DrainQueue()
 {
-	TUniquePtr<FPendingPayload> Payload;
-	while (DequeuePayload(Payload))
+	// Worker joined: this thread is the queue's only consumer. Frames discarded here count as
+	// dropped, as before WP-A1 PR 4e; audio and control do not (they are not frames).
+	check(!Worker.IsRunning());
+	DroppedFrames.fetch_add(Queue->Empty());
+}
+
+void FO3DMoQSender::SetWorkerPausedForTesting(bool bPaused)
+{
+	const int64 Before = PausedIterations.load();
+	bWorkerPausedForTesting.store(bPaused);
+	Queue->Wake();
+	if (!bPaused)
 	{
-		if (Payload->Track != ETrack::Control) // control is never a frame (ADR 0011)
-		{
-			FScopeLock StatsLock(&StatsMutex);
-			Stats.DroppedFrames++;
-		}
-		Payload.Reset();
+		return;
+	}
+	// An iteration that started before the store may still dequeue; the next one sees the flag.
+	const double Deadline = FPlatformTime::Seconds() + 5.0;
+	while (Worker.IsRunning() && PausedIterations.load() == Before && FPlatformTime::Seconds() < Deadline)
+	{
+		FPlatformProcess::YieldThread();
 	}
 }
 
-bool FO3DMoQSender::PublishPayload(const FPendingPayload& Payload)
+bool FO3DMoQSender::PublishItem(const FO3DSendItem& Item)
 {
+	const ETrack Track = TrackOf(Item.Kind);
 	// TRF-9: publish on a snapshot taken under PublisherMutex, never on the shared member.
-	const TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> Publisher = GetPublisher(Payload.Track);
+	const TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> Publisher = GetPublisher(Track);
 	if (!Publisher.IsValid() || !Publisher->IsValid())
 	{
 		return false;
 	}
 
-	// Audio and control use stream mode for reliability; mocap uses configured mode
-	const bool bControl = Payload.Track == ETrack::Control;
-	const MoqDeliveryMode DeliveryMode = Payload.Track == ETrack::Mocap ? Options.DeliveryMode : MOQ_DELIVERY_STREAM;
+	// Audio and control use stream mode for reliability; mocap uses the configured mode.
+	const bool bControl = Track == ETrack::Control;
+	const MoqDeliveryMode DeliveryMode = Track == ETrack::Mocap ? Options.DeliveryMode : MOQ_DELIVERY_STREAM;
 
-	const FMoQResult Wrapped = Publisher->Publish(Payload.Data.GetData(), Payload.Data.Num(), DeliveryMode);
+	const FMoQResult Wrapped = Publisher->Publish(Item.Bytes.GetData(), Item.Bytes.Num(), DeliveryMode);
 	if (!Wrapped.IsOk())
 	{
-		const double Now = FPlatformTime::Seconds();
-		double& LastLog = bControl ? LastControlErrorLogTimeSeconds : LastErrorLogTimeSeconds;
-		if ((Now - LastLog) >= kErrorLogIntervalSeconds)
+		SendErrors.fetch_add(1);
+		if (O3DMoQSenderPrivate::ClaimLogSlot(bControl ? LastControlErrorLogTimeSeconds : LastErrorLogTimeSeconds, kErrorLogIntervalSeconds))
 		{
-			LastLog = Now;
-			UE_LOG(LogO3DMoQSender, Warning, TEXT("moq_publish_data failed for %s: %s"),
-				MoQSenderTrackLabel(Payload.Track == ETrack::Audio, bControl), *Wrapped.Message);
+			UE_LOG(LogO3DMoQSender, Warning, TEXT("moq_publish_data failed for %s: %s"), O3DMoQSenderPrivate::TrackLabel(Item.Kind), *Wrapped.Message);
 		}
-
-		if (!bControl) // control is never a frame (ADR 0011)
+		if (Track == ETrack::Mocap)
 		{
-			FScopeLock StatsLock(&StatsMutex);
-			Stats.DroppedFrames++;
+			DroppedFrames.fetch_add(1);
 		}
 		return false;
 	}
 
+	if (Track == ETrack::Audio)
+	{
+		BytesSent.fetch_add(Item.Bytes.Num());
+		return true;
+	}
 	if (bControl)
 	{
 		return true;
 	}
 
-	const double LatencyMs = (FPlatformTime::Seconds() - Payload.EnqueueTimestampSeconds) * 1000.0;
-
-	FScopeLock StatsLock(&StatsMutex);
-	Stats.FramesSent++;
-	Stats.BytesSent += Payload.Data.Num();
+	FramesSent.fetch_add(1);
+	BytesSent.fetch_add(Item.Bytes.Num());
+	const double LatencyMs = (FPlatformTime::Seconds() - Item.CaptureTimeSec) * 1000.0;
+	FScopeLock Lock(&LatencyMutex);
 	LatencyStats.TotalLatencyMs += LatencyMs;
 	LatencyStats.Samples++;
 	LatencyStats.MaxLatencyMs = FMath::Max(LatencyStats.MaxLatencyMs, LatencyMs);
-
 	return true;
 }
 
-uint32 FO3DMoQSender::RunWorker()
+uint32 FO3DMoQSender::RunWorkerIteration()
 {
-	while (!bWorkerStopRequested)
+	using namespace O3DMoQSenderPrivate;
+
+	if (bWorkerPausedForTesting.load())
 	{
-		// Shared wake event: mocap enqueues and audio sinks both trigger it.
-		AudioState->AudioQueue.WaitForWork(100);
-
-		if (bWorkerStopRequested)
-		{
-			break;
-		}
-
-		DrainAudioQueue(/*bPublish=*/true);
-
-		// Process all queued payloads - each may go to mocap or audio track
-		while (true)
-		{
-			TUniquePtr<FPendingPayload> Payload;
-			if (!DequeuePayload(Payload))
-			{
-				break;
-			}
-
-			// Check if appropriate publisher is ready
-			const bool bPublisherReady = Payload->Track == ETrack::Audio ? IsAudioPublisherReady()
-				: (Payload->Track == ETrack::Control ? IsControlPublisherReady() : IsPublisherReady());
-			if (!bPublisherReady)
-			{
-				// Drop the payload if publisher not ready; control is never counted as a frame
-				if (Payload->Track != ETrack::Control)
-				{
-					FScopeLock StatsLock(&StatsMutex);
-					Stats.DroppedFrames++;
-				}
-				continue;
-			}
-
-			if (!PublishPayload(*Payload))
-			{
-				// PublishPayload already logs and updates stats on failure
-				continue;
-			}
-		}
+		PausedIterations.fetch_add(1);
+		return PausedWaitMs;
 	}
 
+	FO3DSendItem Item;
+	if (!Queue->Dequeue(Item))
+	{
+		return IdleWaitMs;
+	}
+
+	if (!IsPublisherReady(TrackOf(Item.Kind)))
+	{
+		// Not connected, or the track not announced yet: this item is the oldest queued and is
+		// dropped, so a reconnect never replays a stale backlog. Only frames are counted.
+		if (Item.Kind == EO3DSendItemKind::Mocap)
+		{
+			DroppedFrames.fetch_add(1);
+		}
+		return 0;
+	}
+
+	PublishItem(Item);
 	return 0;
-}
-
-void FO3DMoQSender::StartWorker()
-{
-	if (WorkerThread != nullptr)
-	{
-		return;
-	}
-
-	bWorkerStopRequested = false;
-	WorkerRunnable = MakeUnique<FSendWorker>(*this);
-	WorkerThread = FRunnableThread::Create(WorkerRunnable.Get(), TEXT("MoQSenderWorker"), 0, TPri_AboveNormal);
-	if (WorkerThread == nullptr)
-	{
-		WorkerRunnable.Reset();
-		bWorkerStopRequested = true;
-	}
-}
-
-void FO3DMoQSender::StopWorker()
-{
-	if (WorkerThread == nullptr)
-	{
-		return;
-	}
-
-	bWorkerStopRequested = true;
-	AudioState->AudioQueue.Wake();
-
-	WorkerThread->WaitForCompletion();
-	delete WorkerThread;
-	WorkerThread = nullptr;
-	WorkerRunnable.Reset();
-}
-
-void FO3DMoQSender::WakeWorker()
-{
-	AudioState->AudioQueue.Wake();
-}
-
-void FO3DMoQSender::DrainAudioQueue(bool bPublish)
-{
-	TArray<uint8> Bytes;
-	while (AudioState->AudioQueue.Dequeue(Bytes))
-	{
-		if (!bPublish || !IsAudioPublisherReady())
-		{
-			FScopeLock StatsLock(&StatsMutex);
-			Stats.DroppedFrames++;
-			continue;
-		}
-
-		FPendingPayload Payload;
-		Payload.Data = MoveTemp(Bytes);
-		Payload.EnqueueTimestampSeconds = FPlatformTime::Seconds();
-		Payload.Track = ETrack::Audio;
-		PublishPayload(Payload);
-	}
 }
 
 void FO3DMoQSender::ResetStats()
 {
-	FScopeLock Lock(&StatsMutex);
-	Stats.Reset();
+	FramesSent.store(0);
+	BytesSent.store(0);
+	DroppedFrames.store(0);
+	SendErrors.store(0);
+	FScopeLock Lock(&LatencyMutex);
 	LatencyStats = FLatencyStats();
 }
 
@@ -998,7 +861,8 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DMoQSender::CreateAudioS
 		EffectiveConfig.NumChannels,
 		EffectiveConfig.SampleRate);
 
-	return MakeShared<FO3DMoQSenderAudioSink, ESPMode::ThreadSafe>(AudioState, EffectiveConfig, MoveTemp(EncoderSettings));
+	// The shared sink (ADR 0007 item 7): gate, per-sink encoders, bare audio payloads on the queue.
+	return MakeShared<FO3DQueuedSenderAudioSink, ESPMode::ThreadSafe>(PublishState, EffectiveConfig, MoveTemp(EncoderSettings));
 }
 
 FString FO3DMoQSender::ResolveAudioSubjectFallback() const

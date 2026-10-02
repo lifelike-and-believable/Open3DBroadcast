@@ -409,8 +409,8 @@ static void OnConnectionState(void* user, LkConnectionState state,
 - Relay-mediated connections traverse NAT the same way WebRTC does, without STUN/TURN
 
 **Key Classes**:
-- `FO3DMoQSender` (`MoQSender.h:45`)
-- `FO3DMoQReceiver` (`MoQReceiver.h:33`)
+- `FO3DMoQSender` (`MoQSender.h`)
+- `FO3DMoQReceiver` (`MoQReceiver.h`)
 - `FMoQSessionWrapper` — session lifecycle over the FFI boundary
 - `FMoQPublisherHandle` / `FMoQSubscriberHandle` — RAII handles for FFI objects
 - `FMoQAsyncDispatcher` (`MoQAsyncDispatcher.h:17`) — `FRunnable`, a shared dispatcher thread
@@ -418,11 +418,14 @@ static void OnConnectionState(void* user, LkConnectionState state,
 
 **Threading Model**:
 - **Dedicated dispatcher thread** (`FMoQAsyncDispatcher`, an `FRunnable` singleton) marshals async FFI work
-- FFI callbacks deliver connection-state and subscriber-data events
+- FFI callbacks deliver connection-state and subscriber-data events, run on the game thread
+- **Sender** (shared transport blocks, WP-A1 PR 4e): `SendSerialized`, `SendControl` and the audio sink enqueue on one `FO3DSendQueue` (`RefuseNewest`, `queue_bytes` for frames, audio 1 MiB, control 1,024); an `FO3DTransportWorker` publishes each item on its track and drops items whose publisher is not ready
+- **Receiver**: data callbacks go to a bounded hand-off queue; `Poll` routes them through `FO3DUnifiedReceiveDemux`
+- **Reconnect**: MoQ's own jittered backoff and connect timeout, on the game thread (moq-ffi does not reconnect)
 - Handle types own FFI lifetime explicitly, so teardown ordering is enforced rather than incidental
 
 **Audio**:
-- Uses `FO3DMoQSenderAudioSink`, derived from the **shared `FO3DSenderAudioSinkBase`** — the same path as Loopback, NNG and Sockets
+- Uses the **shared `FO3DQueuedSenderAudioSink`** (bare audio payloads for the audio track) — the same sink as Loopback, NNG and Sockets
 - Encodes to **PCM16 or Opus** via `O3DAudio::FFrameEncoder`, then publishes on a separate audio track
 - Receiver subscribes to the audio track independently of the mocap track
 
@@ -529,7 +532,7 @@ encode/decode internally behind its FFI.
   - Encodes to PCM16 or Opus
   - Wraps in unified message format
   - Enqueues/sends through transport
-  - MoQ additionally publishes on a dedicated audio track (`FO3DMoQSenderAudioSink`)
+  - MoQ uses the same sink with bare audio payloads and publishes them on a dedicated audio track
 - **WebRTC**: Direct conversion to int16 + `lk_publish_audio_pcm_i16()`
 
 **Receiver Side** (`IO3DReceiverAudioSink`):
@@ -586,7 +589,8 @@ transport in this document — it is not a WebRTC feature.
 - **Token expiration**: User must refresh token
 
 ### MoQ
-- **Connection failures**: automatic reconnection after `ReconnectDelaySeconds`
+- **Connection failures**: automatic reconnection with capped, jittered backoff and a connect timeout
+- **Queue overflow**: the newest frame is refused (`DroppedBackpressure`); frames whose track is not ready are dropped at the worker
 - **Relay unreachable**: session reports failure; publisher/subscriber handles torn down in order
 - **Subscribe failures**: retried on reconnect; mocap and audio tracks resubscribe independently
 - **Missing DLL/exports**: `FMoQFfiSupport` validates exports at load and disables the transport rather than failing later
@@ -623,7 +627,7 @@ Transport tests live in the editor-only `Open3DBroadcastTests` module (`Source/O
 | **NNG** | `NngTransportTests.cpp`, `NngLifetimeTests.cpp`, `NngModeRoleTests.cpp`, `NngSharedBlocksTests.cpp` | Pub/sub round trip, queue limit, receive demux, mode and role pairs, start/stop lifetime, refuse-newest under backpressure, audio and control independent of the frame budget, Stop under load |
 | **Sockets** | `SocketsAudioTests.cpp`, `SocketsLifetimeTests.cpp`, `SocketsTcpTransportTests.cpp`, `SocketsTcpSharedBlocksTests.cpp`, `SocketsUdpSharedBlocksTests.cpp` | TCP/UDP audio, start/stop lifetime, TCP burst, slow reader, reconnect, keepalive, audio and control independent of the frame budget (TCP and UDP), receiver backoff on its worker, UDP drop-oldest under backpressure, Stop under load (TCP and UDP) (framing parser: core `test/tcp_stream_parser_tests.cpp`) |
 | **WebRTC** | `WebRTCTransportTests.cpp`, `WebRTCPerSubjectTests.cpp`, `WebRTCFunctionalTests.cpp` | Transport + per-subject routing, token fetch |
-| **MoQ** | `MoQSenderTests.cpp`, `MoQReceiverTests.cpp`, `MoQSessionWrapperTests.cpp`, `MoQTrackNamespaceTests.cpp`, `MoQFunctionalTests.cpp`, `MoQLifetimeTests.cpp` (fake moq-ffi); `Network/MoQ/MoQRelayNetworkTests.cpp` (real relay, opt-in) | Session lifecycle, track naming, reconnect and backoff, relay integration |
+| **MoQ** | `MoQSenderTests.cpp`, `MoQReceiverTests.cpp`, `MoQSessionWrapperTests.cpp`, `MoQTrackNamespaceTests.cpp`, `MoQFunctionalTests.cpp`, `MoQLifetimeTests.cpp`, `MoQControlTests.cpp`, `MoQSharedBlocksTests.cpp` (fake moq-ffi); `Network/MoQ/MoQRelayNetworkTests.cpp` (real relay, opt-in) | Session lifecycle, track naming, reconnect and backoff, control, refuse-newest under backpressure, audio and control independent of the frame budget, Stop under load, relay integration |
 
 **Common Test Patterns**:
 - Initialize sender/receiver
@@ -722,7 +726,7 @@ Config.AdvancedParams.Add("delivery_mode", "datagram");
 - **TCP**: Async send thread and async receive thread (shared `FO3DTransportWorker`); delivery from `Poll`
 - **UDP**: Async send thread (shared `FO3DTransportWorker`), sync receive polling
 - **WebRTC**: Event-driven FFI callbacks
-- **MoQ**: Dedicated dispatcher thread (`FMoQAsyncDispatcher`, an `FRunnable`) plus FFI callbacks
+- **MoQ**: Async send thread (shared `FO3DTransportWorker`), dispatcher thread (`FMoQAsyncDispatcher`) for FFI callbacks, delivery from `Poll`
 
 ### Network Topology
 - **Loopback**: In-process only

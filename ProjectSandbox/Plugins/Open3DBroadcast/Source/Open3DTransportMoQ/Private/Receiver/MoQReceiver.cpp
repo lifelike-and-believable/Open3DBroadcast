@@ -13,8 +13,6 @@
 #include "Shared/MoQHelpers.h"
 #include "Shared/MoQSessionWrapper.h"
 #include "Shared/MoQTypes.h"
-#include "O3DAudioFrameCodec.h"
-#include "O3DAudioSerialization.h"
 #include "O3DUnifiedMessage.h"
 
 DEFINE_LOG_CATEGORY(LogO3DMoQReceiver);
@@ -35,6 +33,14 @@ FO3DMoQReceiver::FO3DMoQReceiver(FMoQFfiApiRef InApi, TFunction<double()> InCloc
 {
 	CachedState = MOQ_STATE_DISCONNECTED;
 	AliveFlag = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(true);
+
+	// Hand-off limits, as before WP-A1 PR 4e (16 MiB), per kind now: a burst on one track cannot
+	// refuse another. Nothing queued is ever discarded.
+	FO3DSendQueueLimits Limits;
+	Limits.Mocap.MaxBytes = kMaxQueueBytes;
+	Limits.MocapOverflow = EO3DMocapOverflow::RefuseNewest;
+	Limits.Audio.MaxBytes = kMaxQueueBytes;
+	ReceiveQueue.SetLimits(Limits);
 }
 
 double FO3DMoQReceiver::NowSeconds() const
@@ -127,14 +133,15 @@ FO3DTransportResult FO3DMoQReceiver::Initialize(const FO3DTransportConfig& Confi
 	ActiveConfig = Config;
 	ActiveAudioConfig = Config.Audio;
 	ResetStats();
-	PendingQueueBytes = 0;
+
+	// The consumer gets Options.StreamId as its stream, as does the control sink (ADR 0011).
+	FO3DReceiveDemuxSettings DemuxSettings = Demux.GetSettings();
+	DemuxSettings.StreamId = Options.StreamId;
+	Demux.SetSettings(DemuxSettings);
+	Demux.ResetStats();
 
 	// Drain any stale payloads
-	TUniquePtr<FReceivedPayload> StalePayload;
-	while (ReceiveQueue.Dequeue(StalePayload))
-	{
-		StalePayload.Reset();
-	}
+	ReceiveQueue.Empty();
 
 	CachedState = MOQ_STATE_DISCONNECTED;
 	bConnectInFlight = false;
@@ -154,14 +161,9 @@ FO3DTransportResult FO3DMoQReceiver::Initialize(const FO3DTransportConfig& Confi
 	return FO3DTransportResult::Ok();
 }
 
-void FO3DMoQReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer)
-{
-	Consumer = InConsumer;
-}
-
 void FO3DMoQReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig)
 {
-	AudioSink = Sink;
+	Demux.SetAudioSink(Sink);
 	if (Sink.IsValid())
 	{
 		ActiveAudioConfig = AudioConfig;
@@ -175,7 +177,7 @@ void FO3DMoQReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMo
 
 void FO3DMoQReceiver::SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink)
 {
-	ControlSink = Sink;
+	Demux.SetControlSink(Sink);
 	if (!Sink.IsValid())
 	{
 		DestroyControlSubscriber();
@@ -199,7 +201,7 @@ FO3DTransportResult FO3DMoQReceiver::Start()
 		return FO3DTransportResult::Ok();
 	}
 
-	if (!Consumer.IsValid())
+	if (!Demux.HasConsumer())
 	{
 		return FO3DTransportResult::Error(EO3DTransportError::NoConsumer, TEXT("MoQ receiver Start() without a frame consumer (SetConsumer)."));
 	}
@@ -226,6 +228,9 @@ FO3DTransportResult FO3DMoQReceiver::Start()
 
 void FO3DMoQReceiver::Stop()
 {
+	// The consumer and both sinks are released here, never called again after Stop (TRF-38).
+	Demux.ReleaseSinks();
+
 	if (!bInitialized && !bRunning)
 	{
 		ConnectionState.End(EO3DConnectionState::Idle);
@@ -237,7 +242,6 @@ void FO3DMoQReceiver::Stop()
 	DestroySubscriber();
 	DestroyAudioSubscriber();
 	DestroyControlSubscriber();
-	ControlSink.Reset();
 
 	if (Session.IsValid())
 	{
@@ -249,18 +253,12 @@ void FO3DMoQReceiver::Stop()
 		Session->Disconnect();
 	}
 
-	// Drain the receive queue
-	TUniquePtr<FReceivedPayload> Payload;
-	while (ReceiveQueue.Dequeue(Payload))
+	// Drain the receive queue; frames left unread count as dropped (control is never a frame).
+	const int32 DrainedFrames = ReceiveQueue.Empty();
 	{
-		if (Payload->Track != ETrack::Control) // control is never a frame (ADR 0011)
-		{
-			FScopeLock Lock(&StatsMutex);
-			Stats.DroppedFrames++;
-		}
-		Payload.Reset();
+		FScopeLock Lock(&StatsMutex);
+		Stats.DroppedFrames += DrainedFrames;
 	}
-	PendingQueueBytes = 0;
 
 	CachedState = MOQ_STATE_DISCONNECTED;
 	bConnectInFlight = false;
@@ -357,12 +355,12 @@ void FO3DMoQReceiver::HandleConnectionStateChanged(MoqConnectionState NewState)
 		// Subscribe to mocap track
 		AttemptSubscribe();
 		// Subscribe to audio track if audio sink is configured
-		if (AudioSink.IsValid())
+		if (Demux.HasAudioSink())
 		{
 			AttemptAudioSubscribe();
 		}
 		// Subscribe to the control track only while control is wanted (a sink is set)
-		if (ControlSink.IsValid())
+		if (Demux.HasControlSink())
 		{
 			AttemptControlSubscribe();
 		}
@@ -446,7 +444,7 @@ bool FO3DMoQReceiver::AttemptSubscribe()
 
 	// The sender announces mocap and control together on connect, so a control subscribe that is
 	// backing off is retried now rather than leaving the first cues unheard.
-	if (ControlSink.IsValid() && !bControlSubscribed)
+	if (Demux.HasControlSink() && !bControlSubscribed)
 	{
 		AttemptControlSubscribe();
 	}
@@ -505,7 +503,7 @@ bool FO3DMoQReceiver::AttemptAudioSubscribe()
 
 bool FO3DMoQReceiver::AttemptControlSubscribe()
 {
-	if (!Session.IsValid() || !Session->IsConnected() || !ControlSink.IsValid())
+	if (!Session.IsValid() || !Session->IsConnected() || !Demux.HasControlSink())
 	{
 		return false;
 	}
@@ -551,25 +549,30 @@ bool FO3DMoQReceiver::AttemptControlSubscribe()
 	return true;
 }
 
-bool FO3DMoQReceiver::EnqueueReceived(const TArray64<uint8>& Payload, ETrack Track)
+bool FO3DMoQReceiver::EnqueueReceived(const TArray64<uint8>& Payload, EO3DSendItemKind Kind)
 {
-	const uint64 PayloadBytes = static_cast<uint64>(Payload.Num());
-
-	FScopeLock Lock(&QueueMutex);
-	if ((PendingQueueBytes + PayloadBytes) > kMaxQueueBytes)
+	if (Payload.Num() <= 0 || Payload.Num() > static_cast<int64>(MAX_int32))
 	{
 		return false;
 	}
 
-	TUniquePtr<FReceivedPayload> ReceivedPayload = MakeUnique<FReceivedPayload>();
-	ReceivedPayload->Data.SetNumUninitialized(Payload.Num());
-	FMemory::Memcpy(ReceivedPayload->Data.GetData(), Payload.GetData(), Payload.Num());
-	ReceivedPayload->ReceiveTimestampSeconds = FPlatformTime::Seconds();
-	ReceivedPayload->Track = Track;
-
-	ReceiveQueue.Enqueue(MoveTemp(ReceivedPayload));
-	PendingQueueBytes += PayloadBytes;
-	return true;
+	TArray<uint8> Bytes(Payload.GetData(), static_cast<int32>(Payload.Num()));
+	const double ReceiveTime = FPlatformTime::Seconds(); // the latency stats measure queue time
+	FO3DSendItem Item;
+	switch (Kind)
+	{
+	case EO3DSendItemKind::Audio:
+		Item = FO3DSendItem::MakeAudio(MoveTemp(Bytes), FString(), ReceiveTime);
+		break;
+	case EO3DSendItemKind::Control:
+		Item = FO3DSendItem::MakeControl(MoveTemp(Bytes));
+		Item.CaptureTimeSec = ReceiveTime;
+		break;
+	default:
+		Item = FO3DSendItem::MakeMocap(MoveTemp(Bytes), FString(), ReceiveTime);
+		break;
+	}
+	return ReceiveQueue.Enqueue(MoveTemp(Item)) == EO3DSendResult::Queued;
 }
 
 void FO3DMoQReceiver::HandleMocapDataReceived(const TArray64<uint8>& Payload)
@@ -579,7 +582,7 @@ void FO3DMoQReceiver::HandleMocapDataReceived(const TArray64<uint8>& Payload)
 		return;
 	}
 
-	if (!EnqueueReceived(Payload, ETrack::Mocap))
+	if (!EnqueueReceived(Payload, EO3DSendItemKind::Mocap))
 	{
 		UE_LOG(LogO3DMoQReceiver, Verbose, TEXT("MoQ receiver queue overflow; dropping incoming mocap payload"));
 		FScopeLock StatsLock(&StatsMutex);
@@ -594,7 +597,7 @@ void FO3DMoQReceiver::HandleAudioDataReceived(const TArray64<uint8>& Payload)
 		return;
 	}
 
-	if (!EnqueueReceived(Payload, ETrack::Audio))
+	if (!EnqueueReceived(Payload, EO3DSendItemKind::Audio))
 	{
 		UE_LOG(LogO3DMoQReceiver, Verbose, TEXT("MoQ receiver queue overflow; dropping incoming audio payload"));
 		FScopeLock StatsLock(&StatsMutex);
@@ -610,7 +613,7 @@ void FO3DMoQReceiver::HandleControlDataReceived(const TArray64<uint8>& Payload)
 	}
 
 	// Never counted as a dropped frame; the control publisher's redundancy and snapshots repair it.
-	if (!EnqueueReceived(Payload, ETrack::Control))
+	if (!EnqueueReceived(Payload, EO3DSendItemKind::Control))
 	{
 		UE_LOG(LogO3DMoQReceiver, Verbose, TEXT("MoQ receiver queue overflow; dropping incoming control payload"));
 	}
@@ -671,11 +674,11 @@ int32 FO3DMoQReceiver::Poll()
 	{
 		AttemptSubscribe();
 	}
-	if (State == MOQ_STATE_CONNECTED && !bAudioSubscribed && AudioSink.IsValid() && Now >= AudioSubscribeRetry.NextAttemptTimeSeconds)
+	if (State == MOQ_STATE_CONNECTED && !bAudioSubscribed && Demux.HasAudioSink() && Now >= AudioSubscribeRetry.NextAttemptTimeSeconds)
 	{
 		AttemptAudioSubscribe();
 	}
-	if (State == MOQ_STATE_CONNECTED && !bControlSubscribed && ControlSink.IsValid() && Now >= ControlSubscribeRetry.NextAttemptTimeSeconds)
+	if (State == MOQ_STATE_CONNECTED && !bControlSubscribed && Demux.HasControlSink() && Now >= ControlSubscribeRetry.NextAttemptTimeSeconds)
 	{
 		AttemptControlSubscribe();
 	}
@@ -685,131 +688,74 @@ int32 FO3DMoQReceiver::Poll()
 
 	while (FramesProcessed < kMaxFramesPerPoll && ControlProcessed < kMaxControlPerPoll)
 	{
-		TUniquePtr<FReceivedPayload> Payload;
+		FO3DSendItem Item;
+		if (!ReceiveQueue.Dequeue(Item))
 		{
-			FScopeLock Lock(&QueueMutex);
-			if (!ReceiveQueue.Dequeue(Payload))
-			{
-				break;
-			}
-			PendingQueueBytes = (PendingQueueBytes >= static_cast<uint64>(Payload->Data.Num()))
-				? (PendingQueueBytes - Payload->Data.Num())
-				: 0;
+			break;
 		}
 
-		if (Payload->Track == ETrack::Control)
+		if (Item.Kind == EO3DSendItemKind::Control)
 		{
 			// Not a frame: never reaches the frame consumer and moves no frame counter (ADR 0011).
 			++ControlProcessed;
-			O3DTransport::DeliverControlEnvelope(ControlSink, Payload->Data.GetData(), Payload->Data.Num(), Options.StreamId);
-			continue;
 		}
-
-		bool bProcessed = false;
-		if (Payload->Track == ETrack::Audio)
+		else if (Item.Kind == EO3DSendItemKind::Audio)
 		{
-			bProcessed = ProcessAudioPayload(*Payload);
+			++FramesProcessed; // bounds the work per Poll, as before; not counted as a received frame
 		}
 		else
 		{
-			bProcessed = ProcessReceivedPayload(*Payload);
-		}
-
-		if (bProcessed)
-		{
-			FScopeLock Lock(&StatsMutex);
-			Stats.FramesReceived++;
-			Stats.BytesReceived += Payload->Data.Num();
 			++FramesProcessed;
-
-			// Track latency
-			const double LatencyMs = (FPlatformTime::Seconds() - Payload->ReceiveTimestampSeconds) * 1000.0;
-			LatencyStats.TotalLatencyMs += LatencyMs;
-			LatencyStats.Samples++;
-			LatencyStats.MaxLatencyMs = FMath::Max(LatencyStats.MaxLatencyMs, LatencyMs);
 		}
-		else
+		RouteReceived(Item);
+		if (!bRunning)
 		{
-			FScopeLock Lock(&StatsMutex);
-			Stats.DroppedFrames++;
+			break; // a consumer or sink stopped this receiver
 		}
 	}
 
 	return FramesProcessed;
 }
 
-bool FO3DMoQReceiver::ProcessReceivedPayload(const FReceivedPayload& Payload)
+bool FO3DMoQReceiver::RouteReceived(const FO3DSendItem& Item)
 {
-	if (Payload.Data.IsEmpty())
+	// One classification for every track (ADR 0007 item 7). The wire format per track is
+	// unchanged: a bare O3DS frame, a bare audio payload, a control envelope.
+	EO3DDemuxResult Result = EO3DDemuxResult::Malformed;
+	switch (Item.Kind)
 	{
-		return false;
+	case EO3DSendItemKind::Audio:
+		Result = Demux.DeliverAudioPayload(Item.Bytes.GetData(), Item.Bytes.Num());
+		break;
+	case EO3DSendItemKind::Control:
+		Result = Demux.DeliverControlEnvelope(Item.Bytes.GetData(), Item.Bytes.Num(), Item.CaptureTimeSec);
+		break;
+	default:
+		Result = Demux.DeliverMocap(FString(), Item.Bytes, Item.CaptureTimeSec);
+		break;
 	}
 
-	TSharedPtr<ISerializedFrameConsumer> ConsumerPinned = Consumer.Pin();
-	if (!ConsumerPinned.IsValid())
+	FScopeLock Lock(&StatsMutex);
+	switch (Result)
 	{
-		return false;
-	}
-
-	// Submit the frame to the consumer
-	TArray<uint8> FrameData;
-	FrameData.SetNumUninitialized(Payload.Data.Num());
-	FMemory::Memcpy(FrameData.GetData(), Payload.Data.GetData(), Payload.Data.Num());
-	
-	ConsumerPinned->SubmitFrame(Options.StreamId, FrameData, Payload.ReceiveTimestampSeconds);
-	return true;
-}
-
-bool FO3DMoQReceiver::ProcessAudioPayload(const FReceivedPayload& Payload)
-{
-	if (Payload.Data.IsEmpty())
+	case EO3DDemuxResult::Mocap:
 	{
-		return false;
-	}
-
-	TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> SinkPinned = AudioSink.Pin();
-	if (!SinkPinned.IsValid())
-	{
-		// No audio sink configured - silently drop
+		Stats.FramesReceived++;
+		Stats.BytesReceived += Item.Bytes.Num();
+		const double LatencyMs = (FPlatformTime::Seconds() - Item.CaptureTimeSec) * 1000.0;
+		LatencyStats.TotalLatencyMs += LatencyMs;
+		LatencyStats.Samples++;
+		LatencyStats.MaxLatencyMs = FMath::Max(LatencyStats.MaxLatencyMs, LatencyMs);
 		return true;
 	}
-
-	// TRF-37: decode with the codec the sender wrote into the frame header. The local config
-	// may differ from the sender's, which used to make every frame fail to deserialize.
-	O3DS::EUnifiedCodec Codec = O3DS::EUnifiedCodec::PCM16;
-	if (!TryGetAudioCodecFromFrame(Payload.Data.GetData(), Payload.Data.Num(), Codec))
-	{
-		UE_LOG(LogO3DMoQReceiver, Warning, TEXT("MoQ receiver got an audio frame with an unknown header (payload=%d)."), Payload.Data.Num());
+	case EO3DDemuxResult::AudioRejected:
+	case EO3DDemuxResult::Malformed:
+	case EO3DDemuxResult::Oversize:
+		Stats.ReceiveErrors++;
 		return false;
+	default:
+		return false; // audio (to the sink), control (to the control sink)
 	}
-
-	// Deserialize the encoded audio frame (produced by O3DAudio::SerializeForTransport on sender)
-	O3DAudio::FEncodedAudioFrame EncodedFrame;
-	if (!O3DAudio::DeserializeEncodedAudioFrame(Codec, Payload.Data.GetData(), Payload.Data.Num(), EncodedFrame))
-	{
-		UE_LOG(LogO3DMoQReceiver, Warning, TEXT("MoQ receiver failed to deserialize audio frame (payload=%d codec=%d)."), 
-			Payload.Data.Num(), static_cast<int32>(Codec));
-		return false;
-	}
-
-	// PCM16 can be submitted directly
-	if (Codec == O3DS::EUnifiedCodec::PCM16)
-	{
-		SinkPinned->SubmitPcm16(EncodedFrame.Meta, EncodedFrame.Payload.GetData(), EncodedFrame.Payload.Num());
-		return true;
-	}
-
-	// Decode Opus (or other codecs) to PCM16
-	if (!AudioDecoder.Decode(Codec, EncodedFrame.Meta, EncodedFrame.Payload.GetData(), EncodedFrame.Payload.Num(), DecodedPcmScratch))
-	{
-		UE_LOG(LogO3DMoQReceiver, Warning, TEXT("MoQ receiver failed to decode audio frame (codec=%d)."), static_cast<int32>(Codec));
-		return false;
-	}
-
-	SinkPinned->SubmitPcm16(EncodedFrame.Meta,
-		reinterpret_cast<const uint8*>(DecodedPcmScratch.GetData()),
-		DecodedPcmScratch.Num() * sizeof(int16));
-	return true;
 }
 
 FO3DTransportStats FO3DMoQReceiver::GetStats() const

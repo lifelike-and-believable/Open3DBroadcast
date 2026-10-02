@@ -114,7 +114,8 @@ Examples:
 
 - **Game Thread**: Initialize(), Start(), Stop(), Tick(), Poll()
 - **Audio Thread**: SubmitPcm() (via audio sink)
-- **Worker Thread**: Actual network publishing (sender)
+- **Worker Thread**: Actual network publishing (sender). Frames, audio and control share one bounded send queue (`FO3DSendQueue`): a full frame budget (`queue_bytes`) refuses the newest frame, audio (1 MiB) and control (1,024 envelopes) have budgets of their own, and items whose track is not ready are dropped by the worker so a reconnect never replays a stale backlog
+- **Receive path**: data callbacks are queued for `Poll()`, which hands them to the shared receive demux (consumer, audio sink, control sink); the receiver holds its consumer until `Stop()`
 - **Connect**: `moq_connect` blocks, so it runs on a background task, never on the game thread
 - **moq-ffi Callbacks**: Connection and data callbacks are queued and delivered on the game thread by a core ticker (`FMoQAsyncDispatcher`). The module stops the dispatcher before it unloads moq-ffi; callbacks that arrive later are dropped.
 

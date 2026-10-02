@@ -14,7 +14,7 @@ public class Open3DTransportMoQ : ModuleRules
         O3DBuildFlags.Apply(Target, this);
 
         // Public/ headers (MoQFfiApi.h, Testing/MoQTesting.h) need Core and moq_ffi.h; the
-        // consumer (Open3DBroadcastTests) brings the Sender and Receiver headers (SHR-20).
+        // consumer (Open3DBroadcastTests) brings the Open3DShared transport headers (SHR-20).
         PublicDependencyModuleNames.Add("Core");
 
         // O3DBuildFlags turns MoQ off on every platform without a prebuilt moq_ffi (Win64 only), so
@@ -78,9 +78,12 @@ public class Open3DTransportMoQ : ModuleRules
             "CoreUObject",
             "Engine",
             // No "Projects": moq_ffi is located and loaded by FO3DFfiLibrary in Open3DShared (TRF-28).
+            // The transport blocks, option parsing and interfaces live in Open3DShared (ADR 0007
+            // step 4, WP-A1 PR 4e). No Open3DReceiver. Open3DSender stays for one field only:
+            // ConfigureSender defaults the stream id to UO3DSenderComponent::SubjectName, which no
+            // generic config field carries until ADR 0007 step 5's typed config.
             "Open3DShared",
             "Open3DSender",
-            "Open3DReceiver",
             "Sockets",      // For address resolution
             "Networking"    // For network utilities
         });
