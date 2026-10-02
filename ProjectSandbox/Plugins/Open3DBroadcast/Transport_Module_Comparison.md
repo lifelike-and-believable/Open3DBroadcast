@@ -154,8 +154,8 @@ The registry answers the same capability question before an instance exists:
 **Configuration** (`NngHelpers.h:10-15`):
 - `nng.mode` - Messaging pattern: "pub", "sub", "pair", "push", "pull"
 - `nng.role` - Connection role: "server", "client"
-- `host` - Hostname/IP
-- `port` - Port number
+- `host` - Hostname or IP (IPv6 in brackets in URIs: `tcp://[::1]:17700`)
+- `port` - Port number, 1 to 65535 (digits only)
 - `nng.qmax` - Max queue bytes (default: 4MB, range: 64KB-512MB)
 - `nng.topic` - Topic filter for pub/sub (UTF-8 prefix matching)
 
@@ -203,20 +203,22 @@ The registry answers the same capability question before an instance exists:
 #### 3.3.1 **TCP Implementation**
 
 **Key Classes**:
-- `FO3DSocketsTcpSender` (`SocketsTcpSender.h:24`)
-- `FO3DSocketsTcpReceiver` (`SocketsTcpReceiver.h:15`)
+- `FO3DSocketsTcpSender` (`Sender/SocketsTcpSender.h`)
+- `FO3DSocketsTcpReceiver` (`Receiver/SocketsTcpReceiver.h`)
+- Built on the shared transport blocks in Open3DShared (WP-A1 PR 4b): `FO3DSendQueue`, `FO3DTransportWorker`, `FO3DReconnectPolicy`, `FO3DUnifiedReceiveDemux`, `FO3DQueuedSenderAudioSink`, `O3DTransportOptions`
 
 **Threading Model**:
-- **Sender**: Async worker thread
-  - The listen socket is created on the game thread in `Start()`; the worker is started only if bind and listen succeed
-  - The worker owns the client socket: it accepts, sends from an MPSC queue, writes keepalives and notices a closed receiver. The game thread never waits on a send
+- **Sender**: Async worker thread (`FO3DTransportWorker`)
+  - The listen socket is created on the game thread in `Start()`; the worker is started only if bind and listen succeed. The bind address must be an IP address or a wildcard (`0.0.0.0`, `*`)
+  - The worker owns the client socket: it accepts, sends from the shared `FO3DSendQueue` (frames, audio and control in order, each written as one TCP frame), writes keepalives and notices a closed receiver. The game thread never waits on a send
   - Partial sends and `EWOULDBLOCK` are retried until the frame is written; the client is dropped only on a socket error or after `tcp.stalltimeout` without progress. Frames are dropped whole, never partly written
   - One client at a time; the next receiver is accepted as soon as the current one closes (checked every 250 ms while idle)
-- **Receiver**: Synchronous, polled on the game thread
-  - Connection states: Disconnected → Connecting → Connected
+- **Receiver**: Async worker thread (`FO3DTransportWorker`); `Poll()` on the game thread delivers
+  - The worker resolves the host (names included, never on the game thread), connects, reads and frames; connection states Connecting → Connected → Reconnecting are reported from it
   - Framing is parsed by the core `O3DS::TcpStreamParser` (`src/o3ds/tcp_stream_parser.h`): every complete frame in a read is delivered, resync after garbage is one pass, and lengths above `tcp.maxframe` are rejected without allocating them
-  - Each `Poll()` handles at most 256 frames or 8 MiB; the rest stays in the socket buffer
-  - Reconnects with exponential backoff (`tcp.backoff` doubling up to `tcp.maxbackoff`); the backoff resets only after a connection delivers data
+  - Payloads wait in a bounded hand-off queue (8 MiB, or one `tcp.maxframe` if larger); when it is full the worker stops reading, so TCP flow control holds the sender back
+  - Each `Poll()` handles at most 256 payloads or 8 MiB through `FO3DUnifiedReceiveDemux` (frames to the consumer, audio, control); the rest waits in the queue
+  - Reconnects with exponential backoff with ±20% jitter (`tcp.backoff` doubling up to `tcp.maxbackoff`, `FO3DReconnectPolicy`); the backoff resets only after a connection delivers data
 
 **Connection Model**:
 - **Sender** = Server (listens for connections)
@@ -229,16 +231,16 @@ The registry answers the same capability question before an instance exists:
 While idle for `tcp.keepalive` ms the sender writes a keepalive frame whose payload is a 20-byte unified-envelope header (kind Audio, payload size 0). Receivers ignore it as data but it resets their idle timer. Receivers built before WP-S6 also ignore it silently.
 
 **Configuration**:
-- `host` - Hostname/IP
-- `port` - Port number
+- `host` - Hostname or IP (IPv6 in brackets in URIs: `tcp://[::1]:17700`)
+- `port` - Port number, 1 to 65535 (digits only)
 - `bind` - Bind address for sender
 - `tcp.timeout` - Receiver: seconds without any data (frames or keepalives) before it reconnects (default: 5)
 - `tcp.connecttimeout` - Receiver: seconds a connect may stay pending before it is abandoned and retried (default: 5)
 - `tcp.maxframe` - Receiver: largest frame payload accepted, in bytes (default: 4194304, min 1024, max 52428800)
 - `tcp.backoff` - Receiver: first reconnect delay in ms, doubled after each failed attempt (default: 500)
 - `tcp.maxbackoff` - Receiver: longest reconnect delay in ms (default: 5000)
-- `tcp.maxqueue` - Sender: send queue cap in bytes; a frame that does not fit is dropped (default: 4194304, min 65536)
-- `tcp.maxqueueage` - Sender: frames that waited longer than this many ms are dropped before sending; 0 disables (default: 1000)
+- `tcp.maxqueue` - Sender: payload bytes of queued frames, and separately of queued audio; a frame that does not fit is refused (`DroppedBackpressure`). Control has its own cap of 1,024 envelopes (default: 4194304, min 65536)
+- `tcp.maxqueueage` - Sender: frames and audio that waited longer than this many ms are dropped before sending; control never expires; 0 disables (default: 1000)
 - `tcp.stalltimeout` - Sender: ms a frame may make no progress on a full socket before the client is dropped (default: 2000, min 100)
 - `tcp.keepalive` - Sender: ms of idleness before a keepalive is sent; 0 disables (default: 1000). Keep it below the receiver's `tcp.timeout`
 
@@ -278,8 +280,8 @@ While idle for `tcp.keepalive` ms the sender writes a keepalive frame whose payl
 - **Poll bound**: each `Poll()` reads at most 1024 datagrams / 8 MiB; the rest stays in the socket buffer for the next poll
 
 **Configuration**:
-- `host` - Hostname/IP
-- `port` - Port number
+- `host` - Hostname or IP (IPv6 in brackets in URIs: `tcp://[::1]:17700`)
+- `port` - Port number, 1 to 65535 (digits only)
 - `bind` - Bind address for receiver
 - `udp.broadcast` - Enable broadcast mode (default: false)
 - `udp.mtu` - MTU size in bytes (default: 1200)
@@ -486,7 +488,7 @@ Delivery per transport:
 | Transport | Carriage | Delivery | Notes |
 |-----------|----------|----------|-------|
 | **Loopback** | Control items on the channel's shared queue, in order with frames and audio, with a limit of their own | Reliable, ordered | Up to 1,024 envelopes wait; further sends are refused and the publisher retries. A full frame queue never refuses control |
-| **TCP** | Envelope in a TCP frame, on the same send queue as mocap and audio | Reliable, ordered with frames | `SendControl` is refused while no client is connected; events retry until their TTL, values are repaired by the next snapshot |
+| **TCP** | Envelope in a TCP frame, a control item on the shared send queue with mocap and audio, with a cap of its own | Reliable, ordered with frames | `SendControl` is refused while no client is connected; events retry until their TTL, values are repaired by the next snapshot. A full frame budget never refuses control |
 | **UDP** | One datagram per envelope, sent under the socket lock | Unreliable, unordered | Never fragmented; refused if `udp.maxdatagram` is below the envelope size. Events rely on redundant copies, values on snapshots |
 | **NNG** | Envelope on the same socket and queue as frames | Pair and push/pull: reliable, ordered. Pub/sub: treated as unreliable | Covered by tests in pub/sub, pair/pair and push/pull |
 | **MoQ** | Separate publisher on `control/<session>` (track name as for mocap), announced on every connect with stream delivery whatever `delivery_mode` says | Treated as unreliable; not ordered against mocap (MoQ orders nothing across tracks) | `SendControl` is refused until the control track exists. A custom `track_namespace` without a `mocap/` or `audio/` prefix gets `control/` prepended. Receivers subscribe whenever a control sink is set; failures log at Verbose. Control never moves a frame, byte or drop counter |
@@ -615,7 +617,7 @@ Transport tests live in the editor-only `Open3DBroadcastTests` module (`Source/O
 |-----------|-----------|----------|
 | **Loopback** | `LoopbackAudioTests.cpp`, `LoopbackLifetimeTests.cpp` | Audio roundtrip, start/stop lifetime |
 | **NNG** | `NngTransportTests.cpp`, `NngLifetimeTests.cpp` | Pub/sub round trip, queue limit, receive demux, start/stop lifetime |
-| **Sockets** | `SocketsAudioTests.cpp`, `SocketsLifetimeTests.cpp`, `SocketsTcpTransportTests.cpp` | TCP/UDP audio, start/stop lifetime, TCP burst, slow reader, reconnect, keepalive (framing parser: core `test/tcp_stream_parser_tests.cpp`) |
+| **Sockets** | `SocketsAudioTests.cpp`, `SocketsLifetimeTests.cpp`, `SocketsTcpTransportTests.cpp`, `SocketsTcpSharedBlocksTests.cpp` | TCP/UDP audio, start/stop lifetime, TCP burst, slow reader, reconnect, keepalive, audio and control independent of the frame budget, receiver backoff on its worker, Stop under load (framing parser: core `test/tcp_stream_parser_tests.cpp`) |
 | **WebRTC** | `WebRTCTransportTests.cpp`, `WebRTCPerSubjectTests.cpp`, `WebRTCFunctionalTests.cpp` | Transport + per-subject routing, token fetch |
 | **MoQ** | `MoQSenderTests.cpp`, `MoQReceiverTests.cpp`, `MoQSessionWrapperTests.cpp`, `MoQTrackNamespaceTests.cpp`, `MoQFunctionalTests.cpp`, `MoQLifetimeTests.cpp` (fake moq-ffi); `Network/MoQ/MoQRelayNetworkTests.cpp` (real relay, opt-in) | Session lifecycle, track naming, reconnect and backoff, relay integration |
 
@@ -713,7 +715,7 @@ Config.AdvancedParams.Add("delivery_mode", "datagram");
 ### Threading Philosophy
 - **Loopback**: Pure synchronous (no threads)
 - **NNG**: Async send thread, sync receive polling
-- **TCP**: Async send thread, sync receive with state machine
+- **TCP**: Async send thread and async receive thread (shared `FO3DTransportWorker`); delivery from `Poll`
 - **UDP**: Fully synchronous
 - **WebRTC**: Event-driven FFI callbacks
 - **MoQ**: Dedicated dispatcher thread (`FMoQAsyncDispatcher`, an `FRunnable`) plus FFI callbacks

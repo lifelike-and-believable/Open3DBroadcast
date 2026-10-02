@@ -5,56 +5,33 @@
 #include "CoreMinimal.h"
 #include "Transport/O3DSenderInterface.h"
 #include "Transport/O3DConnectionState.h"
+#include "Transport/O3DSendQueue.h"
+#include "Transport/O3DSenderAudioSinkBase.h"
+#include "Transport/O3DTransportOptions.h"
+#include "Transport/O3DTransportWorker.h"
 #include "../Shared/SocketsTransportCommon.h"
-#include "O3DAudioFrameCodec.h"
-#include "O3DEncodedPayloadQueue.h"
-#include "O3DLifetimeGate.h"
-
-#include "HAL/CriticalSection.h"
 
 #include <atomic>
-
 #include <vector>
 
 class FSocket;
 class ISocketSubsystem;
-class FInternetAddr;
-class FSocketsTcpSenderAudioSink;
-class FRunnableThread;
-class FO3DSocketsTcpSender;
-
-/**
- * Publish state shared between FO3DSocketsTcpSender, its worker and the audio sinks it hands
- * out (ADR 0007 addendum, WP-S5: TRB-10, TRB-12). The audio capture component can keep a
- * sink alive after the sender is gone, so the sink holds this state and never the sender.
- * It contains no socket, no sender pointer and nothing whose destructor does I/O, so any
- * thread may drop the last reference.
- */
-struct FSocketsTcpPublishState
-{
-	/** Closed by Stop() before the socket and worker are torn down. */
-	TSharedRef<FO3DLifetimeGate, ESPMode::ThreadSafe> Gate = MakeShared<FO3DLifetimeGate, ESPMode::ThreadSafe>();
-
-	/** Framed payloads (mocap and audio) for the worker; owns the worker's wake event. */
-	FO3DEncodedPayloadQueue SendQueue;
-
-	/** Mirrors "a client is connected"; written by the game thread and the worker. */
-	std::atomic<bool> bClientConnected{false};
-
-	/** Bytes of audio accepted by sinks, folded into GetStats(). */
-	std::atomic<int64> AudioBytesQueued{0};
-};
 
 /**
  * TCP sender - server mode (listens and accepts one receiver at a time).
  *
+ * Built on the shared transport blocks (ADR 0007 item 7, WP-A1 PR 4b): frames, audio and control
+ * are items on one FO3DSendQueue; the audio sinks are FO3DQueuedSenderAudioSink over an
+ * FO3DAudioPublishState that never references the sender; an FO3DTransportWorker owns the
+ * sockets and writes each item as one TCP frame (header from the core's tcp_stream_parser).
+ *
  * Threading (WP-S6):
- * - Initialize/Start/Stop/Tick/CreateAudioSink: game thread.
- * - Send/SendSerialized: any thread; they only enqueue.
- * - The worker thread owns the client socket: it accepts, sends (handling partial sends and
- *   EWOULDBLOCK), writes keepalives and notices a closed peer. The game thread touches the
- *   sockets only while the worker is not running, so no socket lock is needed and the game
- *   thread never waits on a send.
+ * - Initialize/Start/Stop/Tick/CreateAudioSink: game thread. Start creates and binds the listen
+ *   socket (the bind address must be an IP literal or a wildcard, so nothing resolves a name on
+ *   the game thread) and reports AddressInUse at once.
+ * - Send/SendSerialized/SendControl: any thread; they only enqueue.
+ * - The worker accepts, sends (partial sends, EWOULDBLOCK), writes keepalives and notices a
+ *   closed peer. The game thread touches the sockets only while the worker is not running.
  */
 class FO3DSocketsTcpSender : public IOpen3DSender
 {
@@ -76,40 +53,35 @@ public:
 	virtual EO3DSendResult SendControl(const uint8* Envelope, int32 Len) override;
 
 	/** True while a receiver is connected. Any thread. */
-	bool HasClient() const { return PublishState->bClientConnected.load(); }
+	bool HasClient() const { return PublishState->IsPeerReady(); }
 
-	/** Bytes waiting in the send queue. Any thread; for tests and diagnostics. */
-	uint64 GetPendingQueueBytes() const { return PublishState->SendQueue.GetPendingBytes(); }
+	/** Payload bytes waiting in the send queue. Any thread; for tests and diagnostics. */
+	uint64 GetPendingQueueBytes() const { return static_cast<uint64>(Queue->GetPendingBytes()); }
 
 	/** Times a send could not complete at once (partial send or EWOULDBLOCK). For tests and diagnostics. */
 	int64 GetSendWaitCount() const { return SendWaitCount.load(); }
 
 private:
-	class FTcpSenderRunnable;
-
 	FO3DTransportResult CreateListenSocket();
 	void DestroySocket();
-	EO3DSendResult SendBytes(const uint8* Data, int32 Len);
-	TSharedPtr<FInternetAddr> CreateBindAddress(const FString& Host, int32 Port, bool& bOutValid);
-
-	// Async send worker
-	bool StartWorker();
-	void StopWorker();
-	uint32 RunWorker();
-	bool EnqueuePayload(const uint8* Data, int32 Size);
-	void DrainQueue();
+	/** Enqueues one frame and counts it as sent or dropped. Any thread. */
+	EO3DSendResult EnqueueFrame(FO3DSendItem&& Item, int32 Len);
+	void ApplyQueueLimits();
 
 	// Worker thread only.
+	uint32 RunWorkerIteration();
 	bool TryAcceptClient();
 	void DropClient(const TCHAR* Reason);
 	bool IsPeerClosed();
 	void DropQueuedWithoutClient();
-	bool DequeueNextFrame(TArray<uint8>& OutItem, int32& OutOffset, double Now);
-	void AddDroppedFrames(int64 Count);
+	void SetPending(TArray<uint8>&& Payload, bool bKeepalive);
+	void ResetPending();
+	void DropClientAndPending(const TCHAR* Reason);
+	/** Sends the next bytes of the pending frame; false on a hard socket error. */
+	bool SendPendingBytes(int32& OutSent);
 
 private:
 	FO3DTransportConfig ActiveConfig;
-	FO3DTransportStats Stats;
 	FO3DTransportAudioConfig ActiveAudioConfig;
 
 	ISocketSubsystem* SocketSubsystem = nullptr;
@@ -117,40 +89,58 @@ private:
 	/** Owned by the worker while it runs. */
 	FSocket* ClientSocket = nullptr;
 
-	FString BindHost;
-	int32 BindPort = 0;
+	/** The listen endpoint (bind host and port). */
+	FO3DHostPort BindEndpoint;
 	FString StreamId;
 
 	FGuid AudioSourceGuid;
 
-	mutable std::vector<char> SerializationScratch; // Reused buffer for mocap serialization to avoid per-frame allocations
+	mutable std::vector<char> SerializationScratch; // Reused buffer for Send(SubjectList)
 
-	// Async send worker. The queue itself lives in PublishState so audio sinks can feed it.
-	FTcpSenderRunnable* Worker = nullptr;
-	FRunnableThread* WorkerThread = nullptr;
-	TAtomic<bool> bStopWorker{false};
+	/** Frames, audio and control for the worker (ADR 0007 item 7). */
+	const TSharedRef<FO3DSendQueue, ESPMode::ThreadSafe> Queue;
+	/** Shared with the audio sinks; its peer flag mirrors "a receiver is connected". */
+	const TSharedRef<FO3DAudioPublishState, ESPMode::ThreadSafe> PublishState;
+	FO3DTransportWorker Worker;
 
 	// Limits read in Initialize() (see SocketsTcpTransport.h for keys and defaults).
-	uint64 MaxQueueBytes = 0;
+	int64 MaxQueueBytes = 0;
 	double MaxQueueAgeSeconds = 0.0;
 	double StallTimeoutSeconds = 0.0;
 	double KeepaliveIntervalSeconds = 0.0;
 
-	/** Prebuilt keepalive frame (TRB-6). */
-	TArray<uint8> KeepaliveFrame;
+	/** Keepalive payload: a unified-envelope header with an empty payload (TRB-6). */
+	TArray<uint8> KeepalivePayload;
 
-	std::atomic<int64> SendWaitCount{0};
+	// The frame being written (worker thread). Once its first byte is on the wire it is either
+	// finished or the client is dropped, so the receiver never sees half a frame (TRB-2).
+	uint8 PendingHeader[32] = {};
+	TArray<uint8> PendingPayload;
+	int32 PendingOffset = 0;
+	int32 PendingTotal = 0;
+	bool bPendingIsKeepalive = false;
+	bool bPendingIsFrame = false;
+	double LastSendTime = 0.0;
+	double LastProgressTime = 0.0;
+	double LastPeerCheckTime = 0.0;
 
-	mutable FCriticalSection StatsMutex;
+	std::atomic<int64> SendWaitCount{ 0 };
+	std::atomic<int64> FramesSent{ 0 };
+	std::atomic<int64> BytesSent{ 0 };
+	/** Refused frames, frames dropped with a client, and frames lost to a stall. */
+	std::atomic<int64> DroppedFrames{ 0 };
+	/** Queue counters at Initialize, so GetStats reports this session only. */
+	int64 MocapDroppedBaseline = 0;
+	int64 AudioBytesBaseline = 0;
+	/** Frames discarded by Stop/Start drains: not counted as dropped (as before). */
+	std::atomic<int64> MocapDrained{ 0 };
 
 	/** Set by a successful Start(), cleared by Stop(); sends outside a session return NotRunning. */
-	std::atomic<bool> bRunning{false};
+	std::atomic<bool> bRunning{ false };
 
 	/**
 	 * ADR 0007 item 3: Connecting while listening without a receiver, Connected while one is
 	 * connected (set by the worker on accept), Reconnecting after it went away.
 	 */
 	FO3DConnectionStateTracker ConnectionState;
-
-	TSharedRef<FSocketsTcpPublishState, ESPMode::ThreadSafe> PublishState;
 };

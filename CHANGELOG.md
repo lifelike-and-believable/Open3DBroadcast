@@ -634,6 +634,56 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   and `.Lifetime.StopWhileSending` (four send threads and an audio thread,
   1,000 Stop cycles).
 
+### TCP on the shared transport blocks (WP-A1 PR 4b, ADR 0007 step 4)
+
+- **Wire format unchanged.** Same frame header, keepalive, envelopes, option keys and defaults.
+- **Sender.** Frames, audio and control are items on one `FO3DSendQueue`, and an
+  `FO3DTransportWorker` writes each one as a TCP frame (the header is written on the worker,
+  so the payload is no longer copied on the calling thread). TCP is ReliableOrdered, so a full
+  queue refuses the newest frame (`DroppedBackpressure`) and never discards a queued one.
+  Changes:
+  - `tcp.maxqueue` now bounds the payload bytes of frames and, separately, of audio. Control
+    has its own cap of 1,024 envelopes, so a full frame budget no longer refuses audio or control.
+  - `tcp.maxqueueage` discards stale frames and audio; control no longer expires there (its
+    TTL and snapshots handle staleness, ADR 0011).
+  - `DroppedFrames` counts frames only; audio discarded without a client is no longer counted.
+  - `PendingFrames` and `PendingBytes` are filled.
+  - The audio sink is the shared `FO3DQueuedSenderAudioSink`. It still refuses PCM while no
+    receiver is connected, through the new `FO3DAudioPublishState::SetPeerReady`.
+  - The bind address must be an IP address or a wildcard, so `Start` never resolves a name on
+    the game thread; a host name was never usable there.
+- **Receiver.** The socket moved to an `FO3DTransportWorker`. It resolves the host with
+  `O3DTransportOptions::ResolveHostPort`, so host names now work (`tcp://mocap-pc.local:17700`)
+  without blocking the game thread, and IPv6 senders are reachable (TRB-26). It connects,
+  reconnects with `FO3DReconnectPolicy`, reads and frames the stream. Payloads go through a
+  bounded hand-off queue (8 MiB, or one `tcp.maxframe` if larger) to `Poll`. When that queue is
+  full the worker stops reading, so TCP flow control holds the sender back. `Poll` feeds
+  `FO3DUnifiedReceiveDemux` with the same per-call bounds (256 payloads or 8 MiB). Changes:
+  - Connection state changes after `Start` are reported from the worker thread, as the TCP
+    sender's already were.
+  - The receiver connects even when nothing calls `Poll`.
+  - `Start` no longer fails with `ConnectFailed` for a host it cannot reach or resolve; it
+    keeps retrying with backoff. A malformed endpoint is still `InvalidConfig` at `Initialize`.
+  - The reconnect delay has ±20% jitter.
+  - The consumer is held strongly and released in `Stop` (TRF-38); it used to be held weakly.
+  - A damaged envelope (magic present, header does not fit) is dropped instead of being passed
+    on as raw mocap.
+  - `ReceiveErrors`, `PendingFrames` and `PendingBytes` are filled.
+- **Options.** The endpoint is parsed with `O3DTransportOptions::ParseHostPort` (ports 1 to
+  65535 in digits only, bracketed IPv6), and every `tcp.*` value with the strict getters, so
+  `8000abc` is no longer port 8000. The TCP configure functions read the config only.
+  `SocketsTcpAudio.*` and `O3DSockets::BuildTcpUri` are deleted. `Open3DTransportSockets`
+  still depends on Open3DSender and Open3DReceiver for UDP's configure functions; that goes
+  with the UDP migration (PR 4c). Net transport source lines: -195.
+- **API version stays 4.** `FO3DAudioPublishState` gained `SetPeerReady`/`IsPeerReady`; the
+  add-on does not use it.
+- **Tests.** New `Open3DBroadcast.Transport.Sockets.Tcp.AudioIndependentOfFrameQueue`,
+  `.ReceiverBacksOffWithoutSender` (the worker connects and backs off without `Poll`, and data
+  resets the backoff) and `.StopWhileSending` (four send threads and an audio thread, 1,000 Stop
+  cycles, 50 of them with a connected client). `SocketsTesting.h` gained
+  `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
+  unchanged.
+
 ### WebRTC becomes the Open3DBroadcastWebRTC add-on plugin (WP-F11, ADR 0002)
 
 - **WebRTC is no longer part of Open3DBroadcast.** The `Open3DTransportWebRTC`

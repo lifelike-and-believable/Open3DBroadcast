@@ -25,9 +25,6 @@ namespace O3DSockets
 	/** Trim and normalise a hostname for logging / URI generation. */
 	FString NormaliseHostname(const FString& Host);
 
-	/** Compose a canonical tcp://host:port URI. */
-	FString BuildTcpUri(const FString& Host, int32 Port);
-
 	/** Compose a canonical udp://host:port URI. */
 	FString BuildUdpUri(const FString& Host, int32 Port);
 
@@ -38,6 +35,9 @@ namespace O3DSockets
 
 	/** Parse host/port from a URI with the expected scheme (e.g., tcp or udp). */
 	bool ParseHostPort(const FString& Uri, const TCHAR* Scheme, FString& OutHost, int32& OutPort);
+
+	// The helpers below serve UDP; TCP uses O3DTransportOptions since WP-A1 PR 4b, and UDP moves
+	// to it in PR 4c.
 
 	/** Retrieve a case-insensitive advanced option value. */
 	FString GetOptionValue(const FO3DTransportConfig& Config, const FString& Key);

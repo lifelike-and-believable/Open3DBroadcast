@@ -83,7 +83,7 @@ bool FO3DQueuedSenderAudioSink::OnSubmitPcmInternal(const FString& ResolvedStrea
 {
 	// WP-S5: held for one encode and the hand-off only; never across a socket or FFI call.
 	FO3DLifetimeGate::FReadScope Scope(State->GetGate(), BoundEpoch);
-	if (!Scope)
+	if (!Scope || !State->IsPeerReady())
 	{
 		return false;
 	}

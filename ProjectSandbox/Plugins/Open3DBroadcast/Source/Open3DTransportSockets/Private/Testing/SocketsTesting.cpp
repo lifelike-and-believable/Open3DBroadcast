@@ -52,6 +52,11 @@ namespace O3DSocketsTesting
 	{
 		return static_cast<const FO3DSocketsTcpReceiver&>(Receiver).GetConnectCount();
 	}
+
+	int32 TcpReceiverGetFailedConnectAttempts(const IOpen3DReceiver& Receiver)
+	{
+		return static_cast<const FO3DSocketsTcpReceiver&>(Receiver).GetFailedConnectAttempts();
+	}
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

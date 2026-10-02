@@ -140,13 +140,13 @@ public:
 		Tcp.CreateSender = []() { return MakeShared<FO3DSocketsTcpSender>(); };
 		Tcp.CreateReceiver = []() { return MakeShared<FO3DSocketsTcpReceiver>(); };
 		Tcp.GetCapabilities = [](const FO3DTransportConfig& Config) { return O3DSockets::GetTcpCapabilities(Config); };
-		Tcp.ConfigureSender = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
+		Tcp.ConfigureSender = [](const UO3DSenderComponent* /*SenderComponent*/, FO3DTransportConfig& Config)
 		{
-			O3DSocketsConfig::ConfigureTcpSender(SenderComponent, Config, SocketsTcpName);
+			O3DSocketsConfig::ConfigureTcpSender(Config, SocketsTcpName);
 		};
-		Tcp.ConfigureReceiver = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
+		Tcp.ConfigureReceiver = [](const FO3DReceiverSourceConfig& /*Settings*/, FO3DTransportConfig& Config)
 		{
-			O3DSocketsConfig::ConfigureTcpReceiver(Settings, Config, SocketsTcpName);
+			O3DSocketsConfig::ConfigureTcpReceiver(Config, SocketsTcpName);
 		};
 		Tcp.SenderOptions.OptionSchema = SocketsSchema::MakeTcpSender();
 		Tcp.ReceiverOptions.OptionSchema = SocketsSchema::MakeTcpReceiver();
