@@ -4,17 +4,18 @@
 
 #include "CoreMinimal.h"
 #include "Templates/SharedPointer.h"
+#include "Transport/O3DTransportOptionsView.h"
 
 class FInternetAddr;
 
 /*
  * Shared option parsing for transports (ADR 0007 item 7, WP-A1 step 4; TRB-26, TRB-38, SHR-9).
  *
- * Typed getters over a transport's option map (FO3DTransportConfig::AdvancedParams, which the
- * sender component and receiver source fill from their TransportOptions before the descriptor's
- * configure function runs), and one strict host:port parser in place of the per-transport copies.
- * Keys are matched case-insensitively. Until step 5's FO3DTransportOptionsView, these take the
- * plain map.
+ * Typed getters over a transport's options, and one strict host:port parser in place of the
+ * per-transport copies. The getters take an FO3DTransportOptionsView (WP-A1 PR 5a), which a plain
+ * map converts to, so FO3DTransportConfig::AdvancedParams can be passed as it is. The caller's
+ * Default always wins over a schema default here; FO3DTransportOptionsView's own getters are the
+ * ones that use the schema's. Keys are matched case-insensitively.
  *
  * Threading: everything is a pure function and may be called on any thread, except
  * ResolveHostPort, which may block on DNS and therefore belongs on a transport worker, never on
@@ -38,10 +39,10 @@ struct FO3DHostPort
 namespace O3DTransportOptions
 {
 	/** The value of Key (case-insensitive), or null. */
-	OPEN3DSHARED_API const FString* Find(const TMap<FString, FString>& Options, const FString& Key);
+	OPEN3DSHARED_API const FString* Find(const FO3DTransportOptionsView& Options, const FString& Key);
 
 	/** The trimmed value of Key, or Default when absent or empty. */
-	OPEN3DSHARED_API FString GetString(const TMap<FString, FString>& Options, const FString& Key, const FString& Default = FString());
+	OPEN3DSHARED_API FString GetString(const FO3DTransportOptionsView& Options, const FString& Key, const FString& Default = FString());
 
 	/**
 	 * Strict integer parse: optional sign and decimal digits only, surrounding whitespace allowed,
@@ -50,16 +51,19 @@ namespace O3DTransportOptions
 	OPEN3DSHARED_API bool TryParseInt(const FString& Text, int64& OutValue);
 
 	/** Key as an integer clamped to [Min, Max]; Default (unclamped) when absent or not an integer. */
-	OPEN3DSHARED_API int32 GetInt(const TMap<FString, FString>& Options, const FString& Key, int32 Default, int32 Min = MIN_int32, int32 Max = MAX_int32);
+	OPEN3DSHARED_API int32 GetInt(const FO3DTransportOptionsView& Options, const FString& Key, int32 Default, int32 Min = MIN_int32, int32 Max = MAX_int32);
 
 	/** Strict decimal number ("1.5", "-2", "1e-3"); NaN and infinities fail. */
 	OPEN3DSHARED_API bool TryParseDouble(const FString& Text, double& OutValue);
 
 	/** Key as a number clamped to [Min, Max]; Default when absent or not a number. */
-	OPEN3DSHARED_API double GetDouble(const TMap<FString, FString>& Options, const FString& Key, double Default, double Min = TNumericLimits<double>::Lowest(), double Max = TNumericLimits<double>::Max());
+	OPEN3DSHARED_API double GetDouble(const FO3DTransportOptionsView& Options, const FString& Key, double Default, double Min = TNumericLimits<double>::Lowest(), double Max = TNumericLimits<double>::Max());
+
+	/** true/false, 1/0, yes/no, on/off (any case, surrounding whitespace allowed). False for anything else. */
+	OPEN3DSHARED_API bool TryParseBool(const FString& Text, bool& OutValue);
 
 	/** true/false, 1/0, yes/no, on/off (any case); Default when absent or anything else. */
-	OPEN3DSHARED_API bool GetBool(const TMap<FString, FString>& Options, const FString& Key, bool Default);
+	OPEN3DSHARED_API bool GetBool(const FO3DTransportOptionsView& Options, const FString& Key, bool Default);
 
 	/** Strict port: decimal digits only, 1 to 65535. */
 	OPEN3DSHARED_API bool TryParsePort(const FString& Text, int32& OutPort);

@@ -367,8 +367,9 @@ void FO3DSenderComponentCustomization::HandleTransportSelectionChanged(TSharedPt
 void FO3DSenderComponentCustomization::HandleTransportPropertyChanged()
 {
     UE_LOG(LogO3DSenderDetails, Verbose, TEXT("HandleTransportPropertyChanged"));
-    // UO3DSenderComponent::PostEditChangeProperty clears the options inside the property-edit
-    // transaction, so undoing the transport change restores them (SND-35).
+    // UO3DSenderComponent::PostEditChangeProperty puts the outgoing transport's options away and
+    // restores the incoming one's inside the property-edit transaction, so undoing the transport
+    // change restores both (SND-35, WP-A1 PR 5a).
     RefreshTransportOptions();
     RefreshTransportCustomization();
 }

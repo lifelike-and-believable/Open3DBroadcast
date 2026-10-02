@@ -89,13 +89,13 @@ FString FO3DHostPort::ToString() const
 
 namespace O3DTransportOptions
 {
-	const FString* Find(const TMap<FString, FString>& Options, const FString& Key)
+	const FString* Find(const FO3DTransportOptionsView& Options, const FString& Key)
 	{
 		// TMap<FString, ...> hashes and compares FString keys case-insensitively.
 		return Options.Find(Key);
 	}
 
-	FString GetString(const TMap<FString, FString>& Options, const FString& Key, const FString& Default)
+	FString GetString(const FO3DTransportOptionsView& Options, const FString& Key, const FString& Default)
 	{
 		const FString* Value = Find(Options, Key);
 		if (!Value)
@@ -144,7 +144,7 @@ namespace O3DTransportOptions
 		return true;
 	}
 
-	int32 GetInt(const TMap<FString, FString>& Options, const FString& Key, int32 Default, int32 Min, int32 Max)
+	int32 GetInt(const FO3DTransportOptionsView& Options, const FString& Key, int32 Default, int32 Min, int32 Max)
 	{
 		const FString* Value = Find(Options, Key);
 		int64 Parsed = 0;
@@ -210,7 +210,7 @@ namespace O3DTransportOptions
 		return true;
 	}
 
-	double GetDouble(const TMap<FString, FString>& Options, const FString& Key, double Default, double Min, double Max)
+	double GetDouble(const FO3DTransportOptionsView& Options, const FString& Key, double Default, double Min, double Max)
 	{
 		const FString* Value = Find(Options, Key);
 		double Parsed = 0.0;
@@ -221,25 +221,33 @@ namespace O3DTransportOptions
 		return FMath::Clamp(Parsed, Min, Max);
 	}
 
-	bool GetBool(const TMap<FString, FString>& Options, const FString& Key, bool Default)
+	bool TryParseBool(const FString& Text, bool& OutValue)
 	{
-		const FString* Value = Find(Options, Key);
-		if (!Value)
-		{
-			return Default;
-		}
-		const FString Trimmed = Value->TrimStartAndEnd();
+		const FString Trimmed = Text.TrimStartAndEnd();
 		if (Trimmed.Equals(TEXT("true"), ESearchCase::IgnoreCase) || Trimmed == TEXT("1")
 			|| Trimmed.Equals(TEXT("yes"), ESearchCase::IgnoreCase) || Trimmed.Equals(TEXT("on"), ESearchCase::IgnoreCase))
 		{
+			OutValue = true;
 			return true;
 		}
 		if (Trimmed.Equals(TEXT("false"), ESearchCase::IgnoreCase) || Trimmed == TEXT("0")
 			|| Trimmed.Equals(TEXT("no"), ESearchCase::IgnoreCase) || Trimmed.Equals(TEXT("off"), ESearchCase::IgnoreCase))
 		{
-			return false;
+			OutValue = false;
+			return true;
 		}
-		return Default;
+		return false;
+	}
+
+	bool GetBool(const FO3DTransportOptionsView& Options, const FString& Key, bool Default)
+	{
+		const FString* Value = Find(Options, Key);
+		bool Parsed = false;
+		if (!Value || !TryParseBool(*Value, Parsed))
+		{
+			return Default;
+		}
+		return Parsed;
 	}
 
 	bool TryParsePort(const FString& Text, int32& OutPort)

@@ -11,7 +11,7 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M0 Decisions (ADRs 0001–0010) | Done (#261–#263) |
 | M1 Safety and correctness: WP-S1..S11, WP-T1, WP-T2 | Done (#264–#279) |
 | M2 Fab-buildable package: WP-F1..F4, F6..F9, F11 | Done (#274–#286). **F0 and F5 wait on the maintainer** (see §5) |
-| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime), PR 3 (results, state, capabilities), PR 4a (building blocks + Loopback), PR 4b (TCP), PR 4c (UDP), PR 4d (NNG), PR 4e (MoQ) and PR 4f (WebRTC add-on) done, so step 4 is complete; next is step 5 (typed config)** (see §2) |
+| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime), PR 3 (results, state, capabilities), PR 4a (building blocks + Loopback), PR 4b (TCP), PR 4c (UDP), PR 4d (NNG), PR 4e (MoQ), PR 4f (WebRTC add-on) and PR 5a (typed config) done; step 5 continues with 5b (consumer API)** (see §2) |
 | M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | Not started |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
 | WP-CTL control channel (D11, ADR 0011) | CTL-1..7 done (#290–#295, CTL-6, CTL-7); live-server checks remain (see §2b) |
@@ -75,15 +75,26 @@ Design: `docs/adr/0007-transport-abstraction-and-registry.md`, section "Implemen
      - Config: `O3DTransportOptions` (strict booleans and numbers); the configure functions read only the config, so no runtime file includes an Open3DSender or Open3DReceiver header.
      - `O3D_TRANSPORT_API_VERSION` stays **4**.
      - Tests: `Open3DBroadcast.Transport.WebRTC.SharedBlocks.ReceiverQueuePolicy`, `.ReceiverAudioIndependentOfFrameQueue`, `.SenderAudioIndependentOfDataChannel`, `.SenderStopWhileSending`, `.ReceiverStopWhileReceiving` (200 cycles each), on a fake LiveKit.
-   - **Leftovers from step 4**, for step 5 or later:
-     - MoQ keeps Open3DSender for `UO3DSenderComponent::SubjectName` (its default stream id).
+   - **Leftovers from step 4:**
      - MoQ keeps its own backoff (jitter only downward, pinned by its tests); TCP and UDP use `FO3DReconnectPolicy`.
      - The WebRTC sender has no send queue (see above); revisit if `lk_send_data_ex` turns out to block.
-     - The WebRTC add-on's Build.cs keeps Open3DSender and Open3DReceiver for two test files (`WebRTCLifetimeTests.cpp`, `WebRTCSecretsTests.cpp`) until it has its own test module (WP-F11).
      - `UdpSenderSetWorkerPaused` does not wait for the worker to see the flag (pitfall 15).
-   - **Start here next: step 5, typed config and consumer API.** Per ADR 0007: option schemas per transport and `FO3DTransportOptionsView` replace `AdvancedParams` in the getters and the configure functions' old parameters; the LiveKit string fields leave `FO3DTransportConfig`; `SubmitFrame` gets its view and owned forms; `Send(SubjectList)` is deleted. Step 6 then removes the forwarding shims and bumps `O3D_TRANSPORT_API_VERSION` to 5, which needs the WebRTC add-on's version check and README updated in the same change.
-5. **Typed config and consumer API** (SHR-36, TRB-27, SHR-16, TRF-38): removes the LiveKit string fields from `FO3DTransportConfig`, deletes `Send(SubjectList)`.
-6. Next minor release: delete the shims and bump `O3D_TRANSPORT_API_VERSION` (to 5, or later if other steps bump it first; PR 3 took 4).
+     - (Closed by PR 5a: MoQ's Open3DSender dependency and the add-on's test-only Open3DSender/Open3DReceiver dependencies.)
+   - **Step 5 is split:** 5a typed config (done), 5b consumer API (`SubmitFrame` forms, delete `Send(SubjectList)`), 5c the rest of item 8 (TRB-27 `FName Transport`/`EO3DTransportRole Role`, Secret entries with their env var, schema `Float`/`bRestartOnChange`/`Validate`). Why: see the ADR 0007 addendum "implementation notes (WP-A1 PR 5a)".
+   - **Typed config done (WP-A1 PR 5a).** Details in the ADR 0007 addendum "implementation notes (WP-A1 PR 5a)".
+     - `FO3DTransportOptionsView` (non-owning; schema defaults, `VisibleWhen`); the `O3DTransportOptions` getters take it (a map converts).
+     - The configure functions are `void(const FO3DTransportOptionsView&, FO3DTransportConfig&)` for both roles. The deprecated customizations adapt and still get the component or the settings.
+     - `FO3DTransportConfig` lost `Token`, `bPersistToken`, `bUseAutoTokenFetch`, `TokenEndpointUrl`, `TokenRefreshLeadTimeSec`, `Backend`, and gained `SubjectName`, `OptionSchema` and `GetOptions()`. `AdvancedParams` kept its name.
+     - WebRTC reads its token settings from the options and `Secrets` (`WebRTCUtils::ReadTokenSettings`).
+     - MoQ takes `Config.SubjectName` and no longer depends on Open3DSender.
+     - The add-on depends only on Open3DShared (the lifetime test helpers moved there as `Testing/O3DTransportLifetimeTestUtils.h`).
+     - SND-35: switching transports keeps each transport's options in `InactiveTransportOptions` (sender component, receiver settings) instead of clearing. Keys are not renamed (TCP, UDP and NNG share `host`/`port`), secrets are never kept, and connection strings leave them out.
+     - Saved data needed no migration: the config was never saved, and the `webrtc.*` keys already were the saved form.
+     - `O3D_TRANSPORT_API_VERSION` is **5**.
+     - Tests: `Open3DBroadcast.Shared.TransportOptionsView.*`, `.TransportOptions.SwitchKeepsOtherTransportsOptions`, `.TransportApiVersion.TypedConfigIsVersion5`, `Open3DBroadcast.Sender.TypedConfig.*`, `.Sender.TransportSwitch.*`, `Open3DBroadcast.Receiver.TypedConfig.*`, `.Receiver.TransportSwitch.*`, `Open3DBroadcast.Transport.WebRTC.TypedConfig.SavedOptionsReachTransport`.
+   - **Start here next: PR 5b, consumer API.** Per ADR 0007 step 5: `ISerializedFrameConsumer::SubmitFrame` gets its view and owned forms (the demux and every receiver hand frames through it; TRF-38 holding is already done), and `IOpen3DSender::Send(const O3DS::SubjectList&)` is deleted (callers use `SendSerialized`). Both change interfaces the add-on implements or calls, so 5b bumps `O3D_TRANSPORT_API_VERSION` to 6 unless it lands in the same release as 5a. Then 5c (above), then step 6 (shims), which takes the next number after that.
+5. **Typed config and consumer API** (SHR-36, TRB-27, SHR-16, TRF-38): removes the LiveKit string fields from `FO3DTransportConfig`, deletes `Send(SubjectList)`. Split into 5a (typed config, done, version 5), 5b (consumer API) and 5c (rest of item 8).
+6. Next minor release: delete the shims and bump `O3D_TRANSPORT_API_VERSION` to the next free number (PR 3 took 4 and PR 5a took 5, so 6 or later).
 
 WP-A1 acceptance (roadmap): conformance suite green after each migration, net transport LOC goes down, no transport keeps its own queue/demux/sink. ADR 0007 "Verification / acceptance" lists the extra test cases.
 
@@ -171,6 +182,7 @@ With UE 5.7 installed locally you can also run the real build and tests: `Build/
 16. Never build a counter that reserves first and rolls back on overflow when another thread can read it: a reader sees the over-limit value for a moment. `FO3DSendQueue::Enqueue` did that and `Open3DBroadcast.Shared.SendQueue.ConcurrentAccounting` failed intermittently on #308; it now reserves with a compare-exchange that only succeeds when the result fits (af7cfcc). The same applies to any limit a test or `GetStats` observes.
 17. A transport's existing tests may pin its own timing (MoQ's backoff jitter, connect timeout, subscribe retry on a manual clock). Before replacing such logic with a shared block, check that the shared block reproduces those exact values; if not, keep the transport's logic and say why, rather than editing the tests (WP-A1 PR 4e kept MoQ's backoff).
 18. A fake FFI used for a Stop test must keep the real library's callback contract. LiveKit promises no callback after the call that clears it (or `lk_client_destroy`) returns, so the WebRTC fakes hold a lock around each callback and take it in the setters (`WebRTCSharedBlocksTests.cpp`, WP-A1 PR 4f). A fake that calls back without it reports races the real library cannot produce, and can hide the ones it can.
+19. Before planning a saved-data migration, check what is actually serialized. `FO3DTransportConfig` is a plain struct built per start, so removing its LiveKit fields lost nothing; the saved form was the `webrtc.*` keys of a UPROPERTY option map (WP-A1 PR 5a). A new UPROPERTY loads with its default from older assets, ini files and `ImportText` strings, so adding one needs no migration either.
 
 ## 5. Waiting on the maintainer
 

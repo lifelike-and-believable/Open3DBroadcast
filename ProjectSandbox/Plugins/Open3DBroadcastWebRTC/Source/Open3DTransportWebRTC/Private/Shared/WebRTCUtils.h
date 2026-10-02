@@ -16,6 +16,20 @@ namespace WebRTCUtils
     static constexpr TCHAR RoomOptionKey[] = TEXT("webrtc.room");
 
     /**
+     * Token and server options (WP-A1 PR 5a, ADR 0007 item 8: they replaced the LiveKit fields of
+     * FO3DTransportConfig, so both roles read them from the options like any other key).
+     */
+    /** LiveKit server URL; the configure functions copy it into FO3DTransportConfig::Uri. */
+    static constexpr TCHAR UrlOptionKey[] = TEXT("webrtc.url");
+    /** Fetch tokens from the token endpoint instead of using webrtc.token. Default false. */
+    static constexpr TCHAR UseAutoTokenFetchOptionKey[] = TEXT("webrtc.useAutoTokenFetch");
+    /** Token endpoint URL for auto-fetch. */
+    static constexpr TCHAR TokenEndpointUrlOptionKey[] = TEXT("webrtc.tokenEndpointUrl");
+    /** Seconds before a token expires to fetch the next one. Default 300. */
+    static constexpr TCHAR TokenRefreshLeadTimeOptionKey[] = TEXT("webrtc.tokenRefreshLeadTimeSec");
+    static constexpr int32 DefaultTokenRefreshLeadTimeSec = 300;
+
+    /**
      * Secret option keys (ADR 0004). Declared in the customizations' SecretOptionKeys, so their
      * values live in FO3DSecretStore and reach the transport only through FO3DTransportConfig::Secrets.
      */
@@ -121,6 +135,34 @@ namespace WebRTCUtils
     inline FString ResolveRoomName(const TMap<FString, FString>& AdvancedParams)
     {
         return O3DTransportOptions::GetString(AdvancedParams, RoomOptionKey);
+    }
+
+    /** How a sender or receiver gets its LiveKit token, read from one config. */
+    struct FTokenSettings
+    {
+        bool bAutoFetch = false;
+        /** Auto-fetch only. */
+        FString EndpointUrl;
+        int32 RefreshLeadTimeSec = DefaultTokenRefreshLeadTimeSec;
+        /** Manual mode only: the "webrtc.token" secret (ADR 0004), never an option. */
+        FString ManualToken;
+    };
+
+    /**
+     * Reads the token settings (WP-A1 PR 5a): the options webrtc.useAutoTokenFetch (strict
+     * boolean, default false), webrtc.tokenEndpointUrl and webrtc.tokenRefreshLeadTimeSec
+     * (strict integer, default 300) from Config.AdvancedParams, and the token from Config.Secrets.
+     * These used to be FO3DTransportConfig fields that ConfigureSender/ConfigureReceiver filled
+     * from the same options, with the same parsing.
+     */
+    inline FTokenSettings ReadTokenSettings(const FO3DTransportConfig& Config)
+    {
+        FTokenSettings Settings;
+        Settings.bAutoFetch = O3DTransportOptions::GetBool(Config.AdvancedParams, UseAutoTokenFetchOptionKey, /*Default=*/false);
+        Settings.EndpointUrl = O3DTransportOptions::GetString(Config.AdvancedParams, TokenEndpointUrlOptionKey);
+        Settings.RefreshLeadTimeSec = O3DTransportOptions::GetInt(Config.AdvancedParams, TokenRefreshLeadTimeOptionKey, DefaultTokenRefreshLeadTimeSec);
+        Settings.ManualToken = FindSecret(Config.Secrets, TokenOptionKey);
+        return Settings;
     }
 
     /**

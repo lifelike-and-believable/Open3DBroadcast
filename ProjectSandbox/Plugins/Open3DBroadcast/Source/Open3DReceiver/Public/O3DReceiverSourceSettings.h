@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "LiveLinkSourceSettings.h"
+#include "Transport/O3DTransportOptionSet.h"
 #include "O3DReceiverSourceSettings.generated.h"
 
 /**
@@ -40,6 +41,14 @@ public:
     /** Transport-specific key/value overrides populated by modular transport UIs. Hidden from the generic details panel. */
     UPROPERTY(VisibleAnywhere, Category = "Open3DBroadcast", meta = (HideInDetailPanel))
     TMap<FString, FString> TransportOptions;
+
+    /**
+     * The options of transports these settings used before, by transport name (SND-35, WP-A1 PR
+     * 5a). Changing the transport in the source panel puts TransportOptions here and switching
+     * back restores them. Never holds a secret (ADR 0004). Not shown in any panel.
+     */
+    UPROPERTY()
+    TMap<FName, FO3DTransportOptionSet> InactiveTransportOptions;
 };
 
 /** Global config object that exposes default receiver settings via the Project Settings UI. */

@@ -18,6 +18,7 @@
 #include "O3DHelpers.h"
 #include "O3DRedact.h"
 #include "O3DReceiverTransportCustomization.h"
+#include "O3DReceiverLegacyTransportShims.h"
 #include "Transport/O3DTransportRegistry.h"
 #include "O3DAudioBus.h"
 #include "O3DAudioFrameCodec.h"
@@ -610,23 +611,30 @@ FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
     TArray<FString> SecretKeys;
     TMap<FString, FString> SecretEnvVars;
     FO3DTransportRegistry::Get().GetSecretDeclaration(TransportName, EO3DTransportRole::Receiver, SecretKeys, SecretEnvVars);
+    TMap<FString, FString> Options;
     for (const TPair<FString, FString>& Option : SourceSettings.TransportOptions)
     {
         if (!SecretKeys.Contains(Option.Key))
         {
-            Config.AdvancedParams.Add(Option.Key, Option.Value);
+            Options.Add(Option.Key, Option.Value);
         }
     }
+    Config.AdvancedParams = Options;
     O3DReceiver::ResolveSecrets(SourceSettings, Config.Secrets);
 
-    if (!Config.Transport.IsEmpty())
+    // The descriptor is a shared, immutable snapshot, so the function stays valid while it runs
+    // even if the transport unregisters meanwhile (RCV-27).
+    const FO3DTransportDescriptorPtr Descriptor = Config.Transport.IsEmpty() ? FO3DTransportDescriptorPtr() : FO3DTransportRegistry::Get().Find(TransportName);
+    if (Descriptor.IsValid())
     {
-        // The descriptor is a shared, immutable snapshot, so the function stays valid while it
-        // runs even if the transport unregisters meanwhile (RCV-27).
-        const FO3DTransportDescriptorPtr Descriptor = FO3DTransportRegistry::Get().Find(TransportName);
-        if (Descriptor.IsValid() && Descriptor->ConfigureReceiver)
+        Config.OptionSchema = MakeShared<FO3DTransportOptionSchema>(Descriptor->ReceiverOptions.OptionSchema);
+        if (Descriptor->ConfigureReceiver)
         {
-            Descriptor->ConfigureReceiver(SourceSettings, Config);
+            // The view is over this function's own copy of the options (WP-A1 PR 5a); the scope
+            // hands a configure function registered through the deprecated customization these
+            // settings.
+            const O3DReceiverLegacyShims::FScopedConfiguringSettings LegacyScope(SourceSettings);
+            Descriptor->ConfigureReceiver(FO3DTransportOptionsView(Options, Config.OptionSchema.Get()), Config);
         }
     }
 

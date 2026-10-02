@@ -684,6 +684,62 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Typed config: options view, one configure signature, LiveKit fields removed (WP-A1 PR 5a, ADR 0007 step 5)
+
+- **Interface version 5.** `O3D_TRANSPORT_API_VERSION` is now 5: the descriptor's configure
+  functions, `FO3DTransportConfig`'s layout and the `O3DTransportOptions` getters changed. A
+  WebRTC add-on built for 4 registers nothing and logs the version error; install the add-on
+  build made for this release.
+- **`FO3DTransportOptionsView`** (`Transport/O3DTransportOptionsView.h`, new): read access to a
+  role's options with the transport's schema. `GetString`/`GetInt`/`GetDouble`/`GetBool` use the
+  schema's `Default` when a value is unset or does not parse, `IsVisible` evaluates `VisibleWhen`,
+  `FindField`, `IsSet`. A view does not own its data. The `O3DTransportOptions` getters take a view
+  (a plain map still converts, so calls with `AdvancedParams` compile unchanged and keep the
+  caller's default). New `O3DTransportOptions::TryParseBool`.
+- **Configure functions.** `FO3DTransportDescriptor::ConfigureSender` and `ConfigureReceiver` are
+  both `TFunction<void(const FO3DTransportOptionsView&, FO3DTransportConfig&)>`
+  (`FO3DTransportConfigureFunction`); they no longer receive the sender component or the receiver
+  source settings. Source change for a transport: take the view instead and read the options from
+  it (they are also in `Config.AdvancedParams`, as before). The deprecated
+  `RegisterTransportCustomization` functions keep their old signatures and still receive the
+  component or the settings through an adapter, until step 6 removes them.
+- **`FO3DTransportConfig`.** Removed: `Token`, `bPersistToken`, `bUseAutoTokenFetch`,
+  `TokenEndpointUrl`, `TokenRefreshLeadTimeSec` (SHR-36) and the unused `Backend`. Added:
+  `SubjectName` (the sender component's Subject Name, empty for a receiver), `OptionSchema` (the
+  role's schema, shared) and `GetOptions()`. `AdvancedParams` keeps its name and meaning. The
+  struct was never saved, so no saved data is affected; `ToDebugString` no longer prints a
+  `Token=` or `Backend=` part.
+- **WebRTC add-on.** The token settings are options again end to end: the sender and receiver read
+  `webrtc.useAutoTokenFetch`, `webrtc.tokenEndpointUrl` and `webrtc.tokenRefreshLeadTimeSec` from
+  the options and the token from `Config.Secrets` (`WebRTCUtils::ReadTokenSettings`), with the same
+  parsing and defaults as before. Keys, defaults and the editor panel are unchanged. Code that
+  built a config with `Config.Token = ...` puts the token in
+  `Config.Secrets.Add(TEXT("webrtc.token"), ...)` instead. The add-on no longer depends on
+  Open3DSender or Open3DReceiver.
+- **MoQ.** The default stream id (and so the default track name) is still the sender's Subject
+  Name, now read from `Config.SubjectName`; `Open3DTransportMoQ` no longer depends on Open3DSender.
+- **Switching transports keeps options (SND-35).** Changing a sender's or a receiver source's
+  transport no longer clears the options: the outgoing transport's options are kept (new saved
+  property `InactiveTransportOptions` on `UO3DSenderComponent` and `FO3DReceiverSourceConfig`) and
+  come back when you switch back. Option keys are not renamed. The kept options never hold a
+  secret, and a LiveLink connection string carries only the selected transport's options. Undo
+  restores both. New `O3DReceiver::SwitchTransport`.
+- **Saved data.** Nothing to migrate: the LiveKit values users saved were always the namespaced
+  `webrtc.*` keys of the component's or source's option map, which load and reach the transport
+  unchanged. Assets saved before this release load with no inactive options. The ADR 0004 legacy
+  secret migration is unchanged.
+- **Test helpers.** `Testing/O3DLifetimeTestUtils.h` moved to Open3DShared as
+  `Testing/O3DTransportLifetimeTestUtils.h`; Open3DSender keeps a forwarding header until step 6.
+- **Tests.** New `Open3DBroadcast.Shared.TransportOptionsView.TypedGettersAndDefaults`,
+  `.VisibleWhen`, `.ConfigCarriesSchema`, `Open3DBroadcast.Shared.TransportOptions.SwitchKeepsOtherTransportsOptions`,
+  `Open3DBroadcast.Shared.TransportApiVersion.TypedConfigIsVersion5`,
+  `Open3DBroadcast.Sender.TypedConfig.SavedOptionsReachConfigureFunction`,
+  `.DeprecatedConfigureGetsComponent`, `Open3DBroadcast.Sender.TransportSwitch.KeepsOtherTransportsOptions`,
+  `Open3DBroadcast.Receiver.TypedConfig.SavedOptionsReachConfigureFunction`,
+  `.DeprecatedConfigureGetsSettings`, `Open3DBroadcast.Receiver.TransportSwitch.KeepsOtherTransportsOptions`
+  and `Open3DBroadcast.Transport.WebRTC.TypedConfig.SavedOptionsReachTransport`. Existing tests were
+  changed only where they used a removed field or the old configure signature.
+
 ### WebRTC add-on on the shared transport blocks (WP-A1 PR 4f, ADR 0007 step 4)
 
 - **Wire format unchanged.** Same data-channel labels (the subject, `__o3d.ctl` for control),

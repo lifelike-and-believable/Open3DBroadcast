@@ -1,5 +1,8 @@
 # JWT Token Auto-Fetch Implementation
 
+> **WP-A1 PR 5a note (2026-10-02):** `FO3DTransportConfig` no longer has `Token`, `bUseAutoTokenFetch`, `TokenEndpointUrl` or `TokenRefreshLeadTimeSec`. They are the options `webrtc.useAutoTokenFetch`, `webrtc.tokenEndpointUrl` and `webrtc.tokenRefreshLeadTimeSec` (in `Config.AdvancedParams`) and the secret `webrtc.token` (in `Config.Secrets`), read by `WebRTCUtils::ReadTokenSettings`. The code samples below show the earlier fields; this document is kept as the design record.
+
+
 **Status:** ✅ Core Implementation Complete  
 **Date:** 2024-11-23  
 **Version:** 1.0

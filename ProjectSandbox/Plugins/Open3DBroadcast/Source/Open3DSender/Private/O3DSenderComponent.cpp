@@ -7,6 +7,7 @@
 #include "O3DSenderSerializer.h"
 #include "O3DSenderCurveProcessor.h"
 #include "O3DSenderTransportController.h"
+#include "O3DSenderLegacyTransportShims.h"
 #include "Transport/O3DTransportRegistry.h"
 #include "Engine/Engine.h"
 #include "Engine/SkeletalMesh.h"
@@ -403,37 +404,41 @@ FO3DTransportConfig UO3DSenderComponent::BuildTransportConfig() const
 	const FName SelectedTransport = GetSelectedTransportName();
 	Config.Transport = SelectedTransport.ToString();
 	Config.Role = TEXT("sender");
-	Config.AdvancedParams.Empty();
-	Config.Backend.Reset();
-	Config.Uri.Reset();
-	Config.StreamId.Reset();
-	Config.Token.Reset();
-	Config.Secrets.Reset();
+	// The transport may use it as a default (MoQ: the stream id) without reading this component
+	// (WP-A1 PR 5a).
+	Config.SubjectName = SubjectName;
 
-	// Declared secret keys are never copied into AdvancedParams; they are resolved from the
-	// secret store (session, environment, per-user settings) into Config.Secrets (ADR 0004).
+	// Declared secret keys are never copied into the options; they are resolved from the secret
+	// store (session, environment, per-user settings) into Config.Secrets (ADR 0004).
 	TArray<FString> SecretKeys;
 	TMap<FString, FString> SecretEnvVars;
 	FO3DTransportRegistry::Get().GetSecretDeclaration(SelectedTransport, EO3DTransportRole::Sender, SecretKeys, SecretEnvVars);
+	TMap<FString, FString> Options;
 	for (const TPair<FString, FString>& Option : TransportOptions)
 	{
 		if (!SecretKeys.Contains(Option.Key))
 		{
-			Config.AdvancedParams.Add(Option.Key, Option.Value);
+			Options.Add(Option.Key, Option.Value);
 		}
 	}
+	Config.AdvancedParams = Options;
 	FO3DSecretStore::Get().ResolveAll(Config.Transport, GetCredentialProfile(), SecretKeys, SecretEnvVars, Config.Secrets);
 
 	Config.Audio = BuildTransportAudioConfig(CaptureConfig);
 
-	if (!Config.Transport.IsEmpty())
+	// The descriptor is a shared, immutable snapshot, so the function stays valid while it runs
+	// even if the transport unregisters meanwhile (RCV-27).
+	const FO3DTransportDescriptorPtr Descriptor = Config.Transport.IsEmpty() ? FO3DTransportDescriptorPtr() : FO3DTransportRegistry::Get().Find(SelectedTransport);
+	if (Descriptor.IsValid())
 	{
-		// The descriptor is a shared, immutable snapshot, so the function stays valid while it runs
-		// even if the transport unregisters meanwhile (RCV-27).
-		const FO3DTransportDescriptorPtr Descriptor = FO3DTransportRegistry::Get().Find(SelectedTransport);
-		if (Descriptor.IsValid() && Descriptor->ConfigureSender)
+		Config.OptionSchema = MakeShared<FO3DTransportOptionSchema>(Descriptor->SenderOptions.OptionSchema);
+		if (Descriptor->ConfigureSender)
 		{
-			Descriptor->ConfigureSender(this, Config);
+			// The view is over this function's own copy, so it stays valid whatever the configure
+			// function adds to Config.AdvancedParams (WP-A1 PR 5a). The scope hands a configure
+			// function registered through the deprecated customization this component.
+			const O3DSenderLegacyShims::FScopedConfiguringComponent LegacyScope(this);
+			Descriptor->ConfigureSender(FO3DTransportOptionsView(Options, Config.OptionSchema.Get()), Config);
 		}
 	}
 
@@ -912,6 +917,23 @@ void UO3DSenderComponent::ClearTransportOptions()
 	TransportOptions.Empty();
 }
 
+void UO3DSenderComponent::SwitchTransportOptions(FName From, FName To)
+{
+	if (From == To)
+	{
+		return;
+	}
+	if (!HasAnyFlags(RF_ClassDefaultObject))
+	{
+		Modify();
+	}
+
+	TArray<FString> FromSecretKeys;
+	TMap<FString, FString> FromSecretEnvVars;
+	FO3DTransportRegistry::Get().GetSecretDeclaration(From, EO3DTransportRole::Sender, FromSecretKeys, FromSecretEnvVars);
+	O3DTransportOptions::SwitchTransportOptions(TransportOptions, InactiveTransportOptions, From, To, FromSecretKeys);
+}
+
 void UO3DSenderComponent::SetTransportName(FName InName)
 {
 	const FName NormalizedName = InName.IsNone() ? DefaultSenderTransportName : InName;
@@ -925,8 +947,10 @@ void UO3DSenderComponent::SetTransportName(FName InName)
 		Modify();
 	}
 
+	// SND-35: the outgoing transport's options are kept, and the incoming one's come back.
+	const FName Previous = GetSelectedTransportName();
 	TransportName = NormalizedName;
-	ClearTransportOptions();
+	SwitchTransportOptions(Previous, GetSelectedTransportName());
 }
 
 void UO3DSenderComponent::EnsureValidTransportName()
@@ -1538,6 +1562,16 @@ void UO3DSenderComponent::UpdateEditConditionHelpers()
 }
 
 #if WITH_EDITOR
+void UO3DSenderComponent::PreEditChange(FProperty* PropertyAboutToChange)
+{
+	Super::PreEditChange(PropertyAboutToChange);
+	// Remembered so PostEditChangeProperty knows whose options TransportOptions holds (SND-35).
+	if (PropertyAboutToChange && PropertyAboutToChange->GetFName() == GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TransportName))
+	{
+		TransportNameBeforeEdit = GetSelectedTransportName();
+	}
+}
+
 void UO3DSenderComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
@@ -1563,7 +1597,12 @@ void UO3DSenderComponent::PostEditChangeProperty(FPropertyChangedEvent& Property
 	if (Prop == GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TransportName))
 	{
 		EnsureValidTransportName();
-		ClearTransportOptions();
+		// SND-35 (WP-A1 PR 5a): the outgoing transport's options are put away, not cleared, inside
+		// the property-edit transaction, so undo restores both maps. Without a PreEditChange (an
+		// edit that did not come through the property system) there is no outgoing name, and the
+		// options are dropped as before.
+		SwitchTransportOptions(TransportNameBeforeEdit, GetSelectedTransportName());
+		TransportNameBeforeEdit = NAME_None;
 	}
 	else if (Prop == GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioCaptureMode))
 	{

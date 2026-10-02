@@ -9,6 +9,11 @@
 // transport built against the previous release keeps working, and are removed in the next minor
 // release together with an O3D_TRANSPORT_API_VERSION bump.
 //
+// WP-A1 PR 5a: the descriptor's ConfigureReceiver takes an FO3DTransportOptionsView. A
+// ConfigureTransport set here keeps its settings parameter: the shim wraps it, and the receiver
+// source hands it the settings it is configuring (settings carrying only the options when the
+// descriptor is called from anywhere else).
+//
 // The receiver secret helpers below them (IsSecretOptionKey onwards) are not deprecated.
 
 #include "CoreMinimal.h"
@@ -83,9 +88,21 @@ namespace O3DReceiver
      */
     OPEN3DRECEIVER_API int32 MigrateLegacySecretOptions(FO3DReceiverSourceConfig& Settings, const FString& SourceDescription);
 
-    /** Exports Settings as a LiveLink connection string with every declared secret key removed. */
+    /**
+     * Exports Settings as a LiveLink connection string with every declared secret key removed and
+     * without InactiveTransportOptions (the source uses only the selected transport's options).
+     */
     OPEN3DRECEIVER_API FString ExportConnectionString(const FO3DReceiverSourceConfig& Settings);
 
     /** Resolves Settings' declared secrets from FO3DSecretStore into OutSecrets (key -> value). */
     OPEN3DRECEIVER_API void ResolveSecrets(const FO3DReceiverSourceConfig& Settings, TMap<FString, FString>& OutSecrets);
+
+    /**
+     * Selects NewTransport and switches the options with it (SND-35,
+     * WP-A1 PR 5a): the outgoing transport's TransportOptions go to InactiveTransportOptions,
+     * without its declared secret keys, and the incoming transport's come back. Returns false and
+     * changes nothing when the transport is already selected. The caller records the change for
+     * undo (the owning object's Modify) first. Game thread.
+     */
+    OPEN3DRECEIVER_API bool SwitchTransport(FO3DReceiverSourceConfig& Settings, FName NewTransport);
 }

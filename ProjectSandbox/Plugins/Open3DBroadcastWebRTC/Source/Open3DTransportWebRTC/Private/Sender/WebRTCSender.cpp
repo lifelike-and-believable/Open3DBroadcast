@@ -848,16 +848,18 @@ FO3DTransportResult FO3DWebRTCSender::ParseConfig(const FO3DTransportConfig& Con
     TokenManager = MakeUnique<FO3DTokenManager>(TokenFetcherFactory);
 
     FO3DTokenConfig TokenConfig;
+    // From the options and Config.Secrets (WP-A1 PR 5a; they were FO3DTransportConfig fields).
+    const WebRTCUtils::FTokenSettings TokenSettings = WebRTCUtils::ReadTokenSettings(Config);
 
-    if (Config.bUseAutoTokenFetch)
+    if (TokenSettings.bAutoFetch)
     {
         TokenConfig.Mode = EO3DTokenMode::AutoFetch;
-        TokenConfig.EndpointUrl = Config.TokenEndpointUrl;
+        TokenConfig.EndpointUrl = TokenSettings.EndpointUrl;
         // Both sides read the room from `webrtc.room` (TRF-25); StreamId is not a room name.
         TokenConfig.RoomName = WebRTCUtils::ResolveRoomName(Config.AdvancedParams);
         TokenConfig.Identity = WebRTCUtils::MakeParticipantIdentity(TEXT("sender"));
         TokenConfig.Role = EO3DTokenRole::Publisher;
-        TokenConfig.RefreshLeadTimeSec = Config.TokenRefreshLeadTimeSec;
+        TokenConfig.RefreshLeadTimeSec = TokenSettings.RefreshLeadTimeSec;
         // Declared secret, resolved into Config.Secrets by the component or source (ADR 0004).
         TokenConfig.EndpointAuth = WebRTCUtils::FindSecret(Config.Secrets, WebRTCUtils::TokenEndpointAuthOptionKey);
 
@@ -880,7 +882,7 @@ FO3DTransportResult FO3DWebRTCSender::ParseConfig(const FO3DTransportConfig& Con
     else
     {
         TokenConfig.Mode = EO3DTokenMode::Manual;
-        TokenConfig.ManualToken = Config.Token;
+        TokenConfig.ManualToken = TokenSettings.ManualToken;
 
         if (TokenConfig.ManualToken.IsEmpty())
         {

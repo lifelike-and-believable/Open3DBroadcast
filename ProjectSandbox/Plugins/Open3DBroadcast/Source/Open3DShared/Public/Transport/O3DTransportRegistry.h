@@ -12,6 +12,7 @@
 #include "Transport/O3DReceiverInterface.h"
 #include "Transport/O3DSenderInterface.h"
 #include "Transport/O3DTransportApiVersion.h"
+#include "Transport/O3DTransportOptionsView.h"
 #include "Transport/O3DTransportTypes.h"
 
 /*
@@ -49,23 +50,27 @@
  * transport can do with a config (delivery guarantee, audio, control, payload limit); GetCapabilities
  * on the registry calls it outside the lock.
  *
- * Not yet here (a later WP-A1 PR): the typed options view that replaces the component and source
- * parameters of the configure functions (PR 5).
+ * Configure functions (ADR 0007 item 4, WP-A1 PR 5a): both roles take the role's options as an
+ * FO3DTransportOptionsView, not the sender component or the receiver source settings, so a
+ * transport module needs neither Open3DSender nor Open3DReceiver.
  */
 
-class UO3DSenderComponent;
-struct FO3DReceiverSourceConfig;
 class FO3DTransportRegistration;
 
 /**
- * Translates a sender component's settings into the transport config before Initialize. Called
- * on the game thread, outside the registry lock. The component type lives in Open3DSender and is
- * only forward-declared here; WP-A1 PR 5 replaces this parameter with FO3DTransportOptionsView.
+ * Fills the transport config from the role's options before Initialize (WP-A1 PR 5a). Called on
+ * the game thread, outside the registry lock, after the host has filled Transport, Role,
+ * SubjectName (sender), Audio, Secrets, AdvancedParams (a copy of the options) and OptionSchema.
+ * Options views the host's own copy of the option values with the role's schema; it stays valid
+ * while the function runs, whatever the function adds to Config.AdvancedParams.
  */
-using FO3DSenderConfigureFunction = TFunction<void(const UO3DSenderComponent*, FO3DTransportConfig&)>;
+using FO3DTransportConfigureFunction = TFunction<void(const FO3DTransportOptionsView& /*Options*/, FO3DTransportConfig& /*Config*/)>;
 
-/** Receiver counterpart of FO3DSenderConfigureFunction; FO3DReceiverSourceConfig lives in Open3DReceiver. */
-using FO3DReceiverConfigureFunction = TFunction<void(const FO3DReceiverSourceConfig&, FO3DTransportConfig&)>;
+/** The sender's configure function; same signature as the receiver's since WP-A1 PR 5a. */
+using FO3DSenderConfigureFunction = FO3DTransportConfigureFunction;
+
+/** The receiver's configure function; same signature as the sender's since WP-A1 PR 5a. */
+using FO3DReceiverConfigureFunction = FO3DTransportConfigureFunction;
 
 /** Capability query of a descriptor (ADR 0007 item 4). Any thread, outside the registry lock. */
 using FO3DCapabilitiesFunction = TFunction<FO3DTransportCapabilities(const FO3DTransportConfig&)>;
@@ -126,10 +131,10 @@ struct FO3DTransportDescriptor
 	/** Receiver factory. Optional; without it the transport is not listed for the Receiver role. */
 	FO3DReceiverFactory CreateReceiver;
 
-	/** Optional. Fills the config from the sender component before Initialize. */
+	/** Optional. Fills the config from the sender's options before Initialize. */
 	FO3DSenderConfigureFunction ConfigureSender;
 
-	/** Optional. Fills the config from the receiver source settings before Initialize. */
+	/** Optional. Fills the config from the receiver's options before Initialize. */
 	FO3DReceiverConfigureFunction ConfigureReceiver;
 
 	/**

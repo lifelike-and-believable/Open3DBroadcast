@@ -23,7 +23,7 @@ The WebRTC (LiveKit) transport for Open3DBroadcast, as a separate, free plugin. 
 ## How it plugs into Open3DBroadcast
 
 - The `.uplugin` declares a plugin dependency on `Open3DBroadcast`, so UE loads Open3DBroadcast first.
-- The module uses only exported, public API of Open3DBroadcast. The runtime code uses `Open3DShared` (including the shared transport blocks: `FO3DSendQueue` for the receiver's hand-off to `Poll`, `FO3DUnifiedReceiveDemux`, `O3DTransportOptions`; WP-A1 PR 4f) and `Open3DStreamCore` (for `O3DS::SubjectList`). `Open3DSender` and `Open3DReceiver` are linked only for two test files. Its `Build.cs` never reaches into Open3DBroadcast's folders, so it builds wherever Open3DBroadcast is installed.
+- The module uses only exported, public API of Open3DBroadcast. The runtime code uses `Open3DShared` (including the shared transport blocks: `FO3DSendQueue` for the receiver's hand-off to `Poll`, `FO3DUnifiedReceiveDemux`, `O3DTransportOptions`; WP-A1 PR 4f) and `Open3DStreamCore` (for `O3DS::SubjectList`). Since WP-A1 PR 5a it links neither `Open3DSender` nor `Open3DReceiver`, not even for its tests: the configure functions take an `FO3DTransportOptionsView`, and the test helpers it uses are in `Open3DShared`. Its `Build.cs` never reaches into Open3DBroadcast's folders, so it builds wherever Open3DBroadcast is installed.
 - Sending stays on the caller's thread: LiveKit's data channel buffers each message and refuses it when it cannot take it, and the refusal is returned at once. Audio is PCM16 to a LiveKit track per subject; LiveKit encodes and decodes Opus itself.
 - At startup it:
   1. checks the transport API version (below) and stops if it differs;
@@ -34,6 +34,8 @@ The WebRTC (LiveKit) transport for Open3DBroadcast, as a separate, free plugin. 
 ### Transport API version
 
 Open3DBroadcast defines `O3D_TRANSPORT_API_VERSION` in `Open3DShared/Public/Transport/O3DTransportApiVersion.h` and exports `O3DTransport::GetHostApiVersion()`. The add-on compares the value it was compiled with against the loaded Open3DBroadcast in `StartupModule`. On a mismatch it logs one error (`WebRTC transport not registered: Open3DBroadcastWebRTC was built for Open3DBroadcast transport API version ...`) and registers nothing, instead of calling into classes whose layout may have changed. Build and ship one add-on per Open3DBroadcast release.
+
+Version 5 (WP-A1 PR 5a) is the typed config: the configure functions take the options view, and `FO3DTransportConfig` has no LiveKit fields. The transport reads `webrtc.useAutoTokenFetch`, `webrtc.tokenEndpointUrl` and `webrtc.tokenRefreshLeadTimeSec` as options and the token from `Config.Secrets`. Option keys, defaults and saved settings are unchanged. An add-on built for version 4 does not load into it.
 
 ## Building
 

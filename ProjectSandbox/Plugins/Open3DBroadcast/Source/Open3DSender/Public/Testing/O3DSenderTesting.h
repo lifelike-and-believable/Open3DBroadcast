@@ -12,6 +12,7 @@
 #include "O3DSenderComponent.h"
 #include "O3DSenderCurveConfig.h"
 #include "Templates/UniquePtr.h"
+#include "UObject/UnrealType.h"
 
 class FO3DSenderCurveProcessor;
 
@@ -50,6 +51,20 @@ struct FO3DSenderComponentTestAccess
 	static FO3DSPoseFrame CreateFrameShell(UO3DSenderComponent& Component, double CaptureTimeSec) { return Component.CreateFrameShell(nullptr, CaptureTimeSec); }
 	static void SetAudioCaptureComponent(UO3DSenderComponent& Component, UO3DSenderAudioCaptureComponent* Capture) { Component.AudioCaptureComponent = Capture; }
 	static FString GetCachedSubjectName(const UO3DSenderComponent& Component) { return Component.CachedSubjectName; }
+
+	// Typed config and transport switching (WP-A1 PR 5a).
+	static FO3DTransportConfig BuildTransportConfig(const UO3DSenderComponent& Component) { return Component.BuildTransportConfig(); }
+#if WITH_EDITOR
+	/** What a Details-panel edit of TransportName does: PreEditChange, the change, PostEditChangeProperty. */
+	static void EditTransportName(UO3DSenderComponent& Component, FName NewName)
+	{
+		FProperty* Property = UO3DSenderComponent::StaticClass()->FindPropertyByName(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TransportName));
+		Component.PreEditChange(Property);
+		Component.TransportName = NewName;
+		FPropertyChangedEvent Event(Property, EPropertyChangeType::ValueSet);
+		Component.PostEditChangeProperty(Event);
+	}
+#endif
 };
 
 /**

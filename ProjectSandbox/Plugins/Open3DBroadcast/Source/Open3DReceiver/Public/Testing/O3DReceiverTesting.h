@@ -79,6 +79,9 @@ struct FO3DReceiverSourceTestAccessor
 	static uint64 GetControlPayloadsDroppedDisabled(const FO3DReceiverSource& Source) { return Source.ControlPayloadsDroppedDisabled; }
 	static const O3DS::Control::AlignerStats& GetAlignerStats(const FO3DReceiverSource& Source) { return Source.ControlAligner.GetStats(); }
 	static size_t GetHeldControlChanges(const FO3DReceiverSource& Source) { return Source.ControlAligner.NumHeld(); }
+
+	// Typed config (WP-A1 PR 5a): the config the source would start its transport with.
+	static FO3DTransportConfig BuildTransportConfig(const FO3DReceiverSource& Source) { return Source.BuildTransportConfig(); }
 };
 
 /** Binds a remote control component to the bus without a world (BeginPlay needs one). */

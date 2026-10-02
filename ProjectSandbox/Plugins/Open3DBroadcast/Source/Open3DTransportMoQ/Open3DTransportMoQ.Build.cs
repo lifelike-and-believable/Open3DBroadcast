@@ -78,12 +78,11 @@ public class Open3DTransportMoQ : ModuleRules
             "CoreUObject",
             "Engine",
             // No "Projects": moq_ffi is located and loaded by FO3DFfiLibrary in Open3DShared (TRF-28).
-            // The transport blocks, option parsing and interfaces live in Open3DShared (ADR 0007
-            // step 4, WP-A1 PR 4e). No Open3DReceiver. Open3DSender stays for one field only:
-            // ConfigureSender defaults the stream id to UO3DSenderComponent::SubjectName, which no
-            // generic config field carries until ADR 0007 step 5's typed config.
+            // The transport blocks, option parsing, the options view and the interfaces live in
+            // Open3DShared (ADR 0007 steps 4 and 5). No Open3DSender or Open3DReceiver: the
+            // sender's Subject Name, the default stream id, arrives in FO3DTransportConfig::
+            // SubjectName (WP-A1 PR 5a).
             "Open3DShared",
-            "Open3DSender",
             "Sockets",      // For address resolution
             "Networking"    // For network utilities
         });

@@ -55,8 +55,16 @@
  *      FO3DQueuedSenderAudioSink, O3DTransportOptions) and moves FO3DSenderAudioSinkBase and
  *      FO3DGatedSenderAudioSink from Open3DSender to Open3DShared unchanged; no type above changes
  *      layout, vtable or threading rule, and the add-on uses none of the moved classes.
+ *   5  WP-A1 PR 5a (ADR 0007 item 8, step 5; SHR-36, SND-35): typed config. The configure
+ *      functions of FO3DTransportDescriptor take (const FO3DTransportOptionsView&,
+ *      FO3DTransportConfig&) instead of the sender component or the receiver source settings.
+ *      FO3DTransportConfig lost Token, bPersistToken, bUseAutoTokenFetch, TokenEndpointUrl,
+ *      TokenRefreshLeadTimeSec and Backend, and gained SubjectName and OptionSchema. The
+ *      O3DTransportOptions getters take an FO3DTransportOptionsView (a plain map still converts),
+ *      and TryParseBool is new. The deprecated customization shims keep their old signatures and
+ *      adapt. Removing the shims (step 6) takes the next number.
  */
-#define O3D_TRANSPORT_API_VERSION 4
+#define O3D_TRANSPORT_API_VERSION 5
 
 namespace O3DTransport
 {

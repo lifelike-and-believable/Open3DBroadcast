@@ -72,7 +72,7 @@ public:
 		Loopback.CreateReceiver = []() { return MakeShared<FO3DLoopbackReceiver>(); };
 		Loopback.GetCapabilities = [](const FO3DTransportConfig& Config) { return O3DLoopback::GetCapabilities(Config); };
 
-		Loopback.ConfigureReceiver = [](const FO3DReceiverSourceConfig& /*Settings*/, FO3DTransportConfig& Config)
+		Loopback.ConfigureReceiver = [](const FO3DTransportOptionsView& /*Options*/, FO3DTransportConfig& Config)
 		{
 			const FString ChannelName = LoopbackSchema::ReadChannel(Config);
 			Config.Transport = TEXT("Loopback");
@@ -82,7 +82,7 @@ public:
 		};
 		Loopback.ReceiverOptions.OptionSchema = LoopbackSchema::MakeReceiverSchema();
 
-		Loopback.ConfigureSender = [](const UO3DSenderComponent* /*SenderComponent*/, FO3DTransportConfig& Config)
+		Loopback.ConfigureSender = [](const FO3DTransportOptionsView& /*Options*/, FO3DTransportConfig& Config)
 		{
 			const FString ChannelName = LoopbackSchema::ReadChannel(Config);
 			Config.Transport = TEXT("Loopback");

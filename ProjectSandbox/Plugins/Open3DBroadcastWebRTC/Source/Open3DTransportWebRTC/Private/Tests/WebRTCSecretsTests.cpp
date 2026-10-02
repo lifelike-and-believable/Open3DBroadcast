@@ -4,7 +4,7 @@
 
 //
 // WP-S9 (ADR 0004 items 1, 6 and 7) for the WebRTC transport: the customizations declare the
-// secret keys, the token reaches Config.Token only from Config.Secrets (never AdvancedParams), the
+// secret keys, the token reaches the transport only from Config.Secrets (never AdvancedParams), the
 // token request carries no grants and sends the endpoint credential as a bearer header, and plain
 // http:// endpoints other than localhost are refused. A fake token fetcher is used; no network.
 
@@ -16,7 +16,6 @@
 
 #include "Misc/AutomationTest.h"
 
-#include "O3DReceiverSourceSettings.h"
 #include "Transport/O3DTransportRegistry.h"
 #include "Transport/O3DTransportTypes.h"
 
@@ -66,19 +65,17 @@ bool FWebRTCSecretsDeclarationTest::RunTest(const FString& Parameters)
 	{
 		FO3DTransportConfig Config;
 		Config.Secrets.Add(WebRTCUtils::TokenOptionKey, Token);
-		Descriptor->ConfigureSender(nullptr, Config);
-		TestEqual(TEXT("Sender: token taken from Config.Secrets"), Config.Token, Token);
+		Descriptor->ConfigureSender(FO3DTransportOptionsView(), Config);
+		TestEqual(TEXT("Sender: token taken from Config.Secrets"), WebRTCUtils::ReadTokenSettings(Config).ManualToken, Token);
 		TestFalse(TEXT("Sender: token not in AdvancedParams"), Config.AdvancedParams.Contains(WebRTCUtils::TokenOptionKey));
 	}
 
 	if (Descriptor.IsValid() && Descriptor->ConfigureReceiver)
 	{
-		FO3DReceiverSourceConfig Settings;
-		Settings.TransportName = TEXT("WebRTC");
 		FO3DTransportConfig Config;
 		Config.Secrets.Add(WebRTCUtils::TokenOptionKey, Token);
-		Descriptor->ConfigureReceiver(Settings, Config);
-		TestEqual(TEXT("Receiver: token taken from Config.Secrets"), Config.Token, Token);
+		Descriptor->ConfigureReceiver(FO3DTransportOptionsView(), Config);
+		TestEqual(TEXT("Receiver: token taken from Config.Secrets"), WebRTCUtils::ReadTokenSettings(Config).ManualToken, Token);
 		TestFalse(TEXT("Receiver: token not in AdvancedParams"), Config.AdvancedParams.Contains(WebRTCUtils::TokenOptionKey));
 	}
 	return true;

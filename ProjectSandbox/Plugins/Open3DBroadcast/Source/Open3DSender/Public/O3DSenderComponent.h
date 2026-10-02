@@ -8,6 +8,7 @@
 #include "Transport/O3DSenderInterface.h"
 #include "O3DSenderLogs.h"
 #include "Transport/O3DTransportTypes.h"
+#include "Transport/O3DTransportOptionSet.h"
 #include "O3DSecretStore.h"
 #include "O3DSenderAudioCaptureComponent.h"
 #include "O3DControlPublisher.h"
@@ -214,6 +215,15 @@ public:
 	 */
 	UPROPERTY(VisibleAnywhere, Category = "Open3DBroadcast|Sender|Transport", meta = (HideInDetailPanel))
 	TMap<FString, FString> TransportOptions;
+
+	/**
+	 * The options of transports this component used before, by transport name (SND-35, WP-A1 PR 5a).
+	 * Switching away from a transport puts its TransportOptions here and switching back restores
+	 * them, so a switch no longer loses what the user set. Saved with the asset, so it never holds
+	 * a secret (ADR 0004): the outgoing transport's declared secret keys are dropped first.
+	 */
+	UPROPERTY()
+	TMap<FName, FO3DTransportOptionSet> InactiveTransportOptions;
 
 	/** Enable PCM capture and forwarding when the active transport supports it. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Audio")
@@ -494,8 +504,14 @@ public:
 	/** Where a secret for the active transport and profile would resolve from. Never returns the value. */
 	FO3DSecretStatus GetTransportSecretStatus(const FString& Key) const;
 
-	/** Remove all transport options (used when switching transports). */
+	/** Remove all transport options of the selected transport. */
 	void ClearTransportOptions();
+
+	/**
+	 * Puts the options of From away in InactiveTransportOptions and restores those of To (SND-35).
+	 * Records the change for undo. From's declared secret keys are never put away.
+	 */
+	void SwitchTransportOptions(FName From, FName To);
 
 	UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Sender|Audio")
 	TArray<FName> GetAvailableAudioInputDeviceOptions() const;
@@ -549,6 +565,10 @@ private:
 	void EnsureValidTransportName();
 
 #if WITH_EDITOR
+	virtual void PreEditChange(FProperty* PropertyAboutToChange) override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+
+	/** The selected transport before an edit of TransportName (PreEditChange); None otherwise. */
+	FName TransportNameBeforeEdit;
 #endif
 };
