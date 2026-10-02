@@ -330,10 +330,14 @@ bool FO3DTransportSchemaValidateTest::RunTest(const FString& Parameters)
 
 	// Sender component: the controller refuses, capture still runs (control-only here).
 	UO3DSenderComponent* Component = NewObject<UO3DSenderComponent>(GetTransientPackage());
+	// StartCapture only starts a transport when the component creates its own (as in the lifetime test).
+	Component->bAutoCreateTransport = true;
 	Component->bEnableAudio = false;
 	Component->bAllowControlOnly = true;
 	Component->SetTransportName(Name);
 	Component->SetTransportOption(Key, TEXT("bad"));
+	// Control-only capture has no mesh: each of the two StartCapture calls below says so.
+	AddExpectedError(TEXT("No TargetMesh set"), EAutomationExpectedMessageFlags::Contains, 2);
 	AddExpectedError(FString::Printf(TEXT("Sender transport '%s' not started"), *Name.ToString()), EAutomationExpectedMessageFlags::Contains, 1);
 	Component->StartCapture();
 	const FO3DTransportResult SenderResult = Component->GetLastTransportResult();
