@@ -260,16 +260,19 @@ While idle for `tcp.keepalive` ms the sender writes a keepalive frame whose payl
 #### 3.3.2 **UDP Implementation**
 
 **Key Classes**:
-- `FO3DSocketsUdpSender` (`SocketsUdpSender.h:21`)
-- `FO3DSocketsUdpReceiver` (`SocketsUdpReceiver.h:19`)
+- `FO3DSocketsUdpSender` (`SocketsUdpSender.h`)
+- `FO3DSocketsUdpReceiver` (`SocketsUdpReceiver.h`)
 
-**Threading Model**:
-- **Sender**: Synchronous (sends on `Send()` call)
-  - Direct socket write, no queuing
-  - Automatic fragmentation for large payloads
+**Threading Model** (shared transport blocks, ADR 0007 item 7, WP-A1 PR 4c):
+- **Sender**: `SendSerialized`, `SendControl` and the audio sink only enqueue on one `FO3DSendQueue`; an `FO3DTransportWorker` owns the socket and sends every item (TRB-20)
+  - Frames: `DropOldest`. While the worker is behind, at most 4 frames (16 MiB) wait and older ones are discarded so the newest are sent; callers are refused (`DroppedBackpressure`) only at twice that
+  - Audio (1 MiB) and control (1,024 envelopes) have budgets of their own and are never dropped for frames
+  - Automatic fragmentation for large payloads, on the worker
+  - A host name resolves on the worker (`O3DTransportOptions::ResolveHostPort`, retried with `FO3DReconnectPolicy`); the state is `Connecting` until then. An IP literal resolves in `Initialize`
 - **Receiver**: Synchronous polling
   - Non-blocking receive on `Poll()`
   - Fragment reassembly state machine
+  - Complete messages go to `FO3DUnifiedReceiveDemux` (consumer, audio sink, control sink)
 
 **Fragmentation System** (`o3ds/udp_fragment.h`):
 - **MTU awareness**: Default 1200 bytes (configurable)
@@ -280,7 +283,7 @@ While idle for `tcp.keepalive` ms the sender writes a keepalive frame whose payl
 - **Poll bound**: each `Poll()` reads at most 1024 datagrams / 8 MiB; the rest stays in the socket buffer for the next poll
 
 **Configuration**:
-- `host` - Hostname or IP (IPv6 in brackets in URIs: `tcp://[::1]:17700`)
+- `host` - Hostname or IP (IPv6 in brackets in URIs: `udp://[::1]:17800`); the receiver's bind host must be an IP address, `*`, empty or `localhost`
 - `port` - Port number, 1 to 65535 (digits only)
 - `bind` - Bind address for receiver
 - `udp.broadcast` - Enable broadcast mode (default: false)
@@ -288,7 +291,7 @@ While idle for `tcp.keepalive` ms the sender writes a keepalive frame whose payl
 - `udp.maxdatagram` - Max datagram size before fragmentation (default: 64000)
 - `udp.maxframe` - Receiver: largest reassembled message accepted, in bytes (default: 4194304, max 52428800)
 
-**Broadcast Support** (`SocketsUdpSender.cpp:228-271`):
+**Broadcast Support** (`SocketsUdpSender.cpp`):
 - Special hostname handling: `*` or empty → `255.255.255.255`
 - Automatically enables `SetBroadcast(true)` on socket
 - One-to-many distribution without explicit receiver addresses
@@ -489,7 +492,7 @@ Delivery per transport:
 |-----------|----------|----------|-------|
 | **Loopback** | Control items on the channel's shared queue, in order with frames and audio, with a limit of their own | Reliable, ordered | Up to 1,024 envelopes wait; further sends are refused and the publisher retries. A full frame queue never refuses control |
 | **TCP** | Envelope in a TCP frame, a control item on the shared send queue with mocap and audio, with a cap of its own | Reliable, ordered with frames | `SendControl` is refused while no client is connected; events retry until their TTL, values are repaired by the next snapshot. A full frame budget never refuses control |
-| **UDP** | One datagram per envelope, sent under the socket lock | Unreliable, unordered | Never fragmented; refused if `udp.maxdatagram` is below the envelope size. Events rely on redundant copies, values on snapshots |
+| **UDP** | One datagram per envelope, queued and sent by the worker | Unreliable, unordered | Never fragmented; refused if `udp.maxdatagram` is below the envelope size. Events rely on redundant copies, values on snapshots |
 | **NNG** | Envelope on the same socket and queue as frames | Pair and push/pull: reliable, ordered. Pub/sub: treated as unreliable | Covered by tests in pub/sub, pair/pair and push/pull |
 | **MoQ** | Separate publisher on `control/<session>` (track name as for mocap), announced on every connect with stream delivery whatever `delivery_mode` says | Treated as unreliable; not ordered against mocap (MoQ orders nothing across tracks) | `SendControl` is refused until the control track exists. A custom `track_namespace` without a `mocap/` or `audio/` prefix gets `control/` prepended. Receivers subscribe whenever a control sink is set; failures log at Verbose. Control never moves a frame, byte or drop counter |
 | **WebRTC** (add-on) | Reliable, ordered LiveKit data on the `__o3d.ctl` label | Receiver queue capped at 1,024 envelopes, delivered on Poll | Refused while not connected; classified by envelope bytes, so plain mocap on `__o3d.ctl` stays mocap |
@@ -572,8 +575,10 @@ transport in this document — it is not a WebRTC feature.
 ### UDP
 - **Packet loss**: Silent drop (unreliable transport)
 - **Fragment timeout**: Discard incomplete reassembly
-- **Send errors**: Log and continue (best-effort)
-- **No connection state**: Stateless operation
+- **Send errors**: Log, count in `DroppedFrames` and `SendErrors`, continue (best-effort)
+- **Queue overflow**: Oldest waiting frames dropped and counted; callers refused only at twice the soft cap
+- **No connection state**: Stateless operation (`Connecting` only while a host name resolves)
+- **Windows**: `WSAECONNRESET` from an ICMP port-unreachable only affects `recv`; the sender never reads, and the receiver ends that `Poll` and reads again on the next
 
 ### WebRTC
 - **Connection failures**: LiveKit automatic reconnection
@@ -596,7 +601,7 @@ transport in this document — it is not a WebRTC feature.
 | **Loopback** | <1ms | Unlimited | Minimal | Queue size × frame size |
 | **NNG** | ~1-5ms LAN | High | Low-Medium | 4MB queue default |
 | **TCP** | ~1-10ms LAN | High | Medium | Framing buffers + queue |
-| **UDP** | <1ms LAN | High | Low | Minimal (no buffering) |
+| **UDP** | <1ms LAN | High | Low | Up to 4 frames waiting (oldest dropped) |
 | **WebRTC** | 20-100ms+ | Medium | High | LiveKit internal |
 | **MoQ** | 20-100ms+ (relay RTT) | Medium | Medium | moq-ffi internal + track buffers |
 
@@ -617,7 +622,7 @@ Transport tests live in the editor-only `Open3DBroadcastTests` module (`Source/O
 |-----------|-----------|----------|
 | **Loopback** | `LoopbackAudioTests.cpp`, `LoopbackLifetimeTests.cpp` | Audio roundtrip, start/stop lifetime |
 | **NNG** | `NngTransportTests.cpp`, `NngLifetimeTests.cpp` | Pub/sub round trip, queue limit, receive demux, start/stop lifetime |
-| **Sockets** | `SocketsAudioTests.cpp`, `SocketsLifetimeTests.cpp`, `SocketsTcpTransportTests.cpp`, `SocketsTcpSharedBlocksTests.cpp` | TCP/UDP audio, start/stop lifetime, TCP burst, slow reader, reconnect, keepalive, audio and control independent of the frame budget, receiver backoff on its worker, Stop under load (framing parser: core `test/tcp_stream_parser_tests.cpp`) |
+| **Sockets** | `SocketsAudioTests.cpp`, `SocketsLifetimeTests.cpp`, `SocketsTcpTransportTests.cpp`, `SocketsTcpSharedBlocksTests.cpp`, `SocketsUdpSharedBlocksTests.cpp` | TCP/UDP audio, start/stop lifetime, TCP burst, slow reader, reconnect, keepalive, audio and control independent of the frame budget (TCP and UDP), receiver backoff on its worker, UDP drop-oldest under backpressure, Stop under load (TCP and UDP) (framing parser: core `test/tcp_stream_parser_tests.cpp`) |
 | **WebRTC** | `WebRTCTransportTests.cpp`, `WebRTCPerSubjectTests.cpp`, `WebRTCFunctionalTests.cpp` | Transport + per-subject routing, token fetch |
 | **MoQ** | `MoQSenderTests.cpp`, `MoQReceiverTests.cpp`, `MoQSessionWrapperTests.cpp`, `MoQTrackNamespaceTests.cpp`, `MoQFunctionalTests.cpp`, `MoQLifetimeTests.cpp` (fake moq-ffi); `Network/MoQ/MoQRelayNetworkTests.cpp` (real relay, opt-in) | Session lifecycle, track naming, reconnect and backoff, relay integration |
 
@@ -716,7 +721,7 @@ Config.AdvancedParams.Add("delivery_mode", "datagram");
 - **Loopback**: Pure synchronous (no threads)
 - **NNG**: Async send thread, sync receive polling
 - **TCP**: Async send thread and async receive thread (shared `FO3DTransportWorker`); delivery from `Poll`
-- **UDP**: Fully synchronous
+- **UDP**: Async send thread (shared `FO3DTransportWorker`), sync receive polling
 - **WebRTC**: Event-driven FFI callbacks
 - **MoQ**: Dedicated dispatcher thread (`FMoQAsyncDispatcher`, an `FRunnable`) plus FFI callbacks
 

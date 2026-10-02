@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Transport/O3DTransportOptions.h"
 
 struct FO3DTransportConfig;
 struct FO3DTransportCapabilities;
@@ -25,29 +26,22 @@ namespace O3DSockets
 	/** Trim and normalise a hostname for logging / URI generation. */
 	FString NormaliseHostname(const FString& Host);
 
-	/** Compose a canonical udp://host:port URI. */
-	FString BuildUdpUri(const FString& Host, int32 Port);
-
-	/**
-	 * Parse host/port from a transport config. If OverrideScheme is provided the URI must match it; otherwise any scheme is accepted.
-	 */
-	bool ParseHostPort(const FO3DTransportConfig& Config, FString& OutHost, int32& OutPort, const TCHAR* OverrideScheme = nullptr);
-
-	/** Parse host/port from a URI with the expected scheme (e.g., tcp or udp). */
-	bool ParseHostPort(const FString& Uri, const TCHAR* Scheme, FString& OutHost, int32& OutPort);
-
-	// The helpers below serve UDP; TCP uses O3DTransportOptions since WP-A1 PR 4b, and UDP moves
-	// to it in PR 4c.
-
-	/** Retrieve a case-insensitive advanced option value. */
-	FString GetOptionValue(const FO3DTransportConfig& Config, const FString& Key);
-
-	int32 GetIntOption(const FO3DTransportConfig& Config, const FString& Key, int32 DefaultValue);
-
-	bool GetBoolOption(const FO3DTransportConfig& Config, const FString& Key, bool DefaultValue);
-
 	/** Utility for generating a human readable stream id (host:port). */
 	FString ComposeStreamId(const FString& Host, int32 Port);
+
+	/** "<Scheme>://host:port", with brackets around an IPv6 host. */
+	FString MakeUri(const TCHAR* Scheme, const FString& Host, int32 Port);
+
+	/** A port option: 1 to 65535 in digits, otherwise Default (TRB-26: "80abc" is not port 80). */
+	int32 ReadPortOption(const FO3DTransportConfig& Config, const TCHAR* Key, int32 Default);
+
+	/**
+	 * The endpoint of a TCP or UDP config, parsed with O3DTransportOptions::ParseHostPort (strict
+	 * port 1-65535, bracketed IPv6; TRB-26). Precedence, as before WP-A1 step 4: a "<Scheme>://"
+	 * URI, then the host and port options, then a StreamId of the form host:port. The host is
+	 * trimmed and lowercased. Pure parsing, any thread; nothing is resolved here.
+	 */
+	bool ParseEndpoint(const FO3DTransportConfig& Config, const TCHAR* Scheme, FO3DHostPort& OutEndpoint);
 
 	/** Capabilities of the TCP transport (ADR 0007 item 4); the same for every config. Any thread. */
 	FO3DTransportCapabilities GetTcpCapabilities(const FO3DTransportConfig& Config);

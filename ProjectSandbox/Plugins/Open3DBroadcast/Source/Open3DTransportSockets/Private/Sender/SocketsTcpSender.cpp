@@ -35,25 +35,7 @@ namespace O3DSocketsTcpSenderPrivate
 	/** True for an IPv4 or IPv6 literal or a wildcard: binding to it resolves no name (no DNS on the game thread). */
 	bool IsBindableLiteral(const FO3DHostPort& Endpoint)
 	{
-		if (Endpoint.bIPv6 || Endpoint.Host.IsEmpty() || Endpoint.Host == TEXT("*"))
-		{
-			return true;
-		}
-		TArray<FString> Parts;
-		Endpoint.Host.ParseIntoArray(Parts, TEXT("."), /*InCullEmpty=*/false);
-		if (Parts.Num() != 4)
-		{
-			return false;
-		}
-		for (const FString& Part : Parts)
-		{
-			int64 Value = 0;
-			if (Part.IsEmpty() || Part.Len() > 3 || !O3DTransportOptions::TryParseInt(Part, Value) || Value < 0 || Value > 255 || !FChar::IsDigit(Part[0]))
-			{
-				return false;
-			}
-		}
-		return true;
+		return Endpoint.Host.IsEmpty() || Endpoint.Host == TEXT("*") || O3DTransportOptions::IsIpLiteral(Endpoint);
 	}
 }
 
@@ -107,7 +89,7 @@ FO3DTransportResult FO3DSocketsTcpSender::Initialize(const FO3DTransportConfig& 
 	ActiveAudioConfig = Config.Audio;
 	AudioSourceGuid = FGuid::NewGuid();
 
-	if (!O3DSockets::Tcp::ParseTcpEndpoint(Config, BindEndpoint))
+	if (!O3DSockets::ParseEndpoint(Config, TEXT("tcp"), BindEndpoint))
 	{
 		UE_LOG(LogSocketsTcpSender, Warning, TEXT("TCP sender requires tcp://host:port URI or explicit host/port options."));
 		BindEndpoint = FO3DHostPort();

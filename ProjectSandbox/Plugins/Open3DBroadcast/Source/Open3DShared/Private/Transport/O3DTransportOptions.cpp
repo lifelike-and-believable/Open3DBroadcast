@@ -392,6 +392,29 @@ namespace O3DTransportOptions
 		return true;
 	}
 
+	bool IsIpLiteral(const FO3DHostPort& Endpoint)
+	{
+		if (Endpoint.bIPv6)
+		{
+			return O3DTransportOptionsPrivate::IsValidIPv6Literal(Endpoint.Host);
+		}
+		TArray<FString> Parts;
+		Endpoint.Host.ParseIntoArray(Parts, TEXT("."), /*InCullEmpty=*/false);
+		if (Parts.Num() != 4)
+		{
+			return false;
+		}
+		for (const FString& Part : Parts)
+		{
+			int64 Value = 0;
+			if (Part.Len() > 3 || !O3DTransportOptionsPrivate::AllDigits(Part, 0) || !TryParseInt(Part, Value) || Value > 255)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 	bool ResolveHostPort(const FO3DHostPort& Endpoint, TSharedPtr<FInternetAddr>& OutAddress, FString* OutError)
 	{
 		using namespace O3DTransportOptionsPrivate;

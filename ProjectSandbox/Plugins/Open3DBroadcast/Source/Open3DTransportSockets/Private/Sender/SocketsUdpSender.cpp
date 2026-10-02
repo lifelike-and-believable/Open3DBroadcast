@@ -4,19 +4,14 @@
 
 #include "SocketsUdpSender.h"
 
-#include "O3DSenderAudioSinkBase.h"
-#include "HAL/Runnable.h"
-#include "HAL/RunnableThread.h"
-#include "O3DAudioSerialization.h"
+#include "O3DSinkAudioEncoder.h"
 #include "O3DUnifiedMessage.h"
 #include "Transport/O3DTransportTypes.h"
 
 #include "Sockets.h"
 #include "SocketSubsystem.h"
-#include "Interfaces/IPv4/IPv4Address.h"
 #include "IPAddress.h"
 #include "HAL/PlatformTime.h"
-#include "Misc/ScopeLock.h"
 #include "Logging/LogMacros.h"
 
 THIRD_PARTY_INCLUDES_START
@@ -28,79 +23,56 @@ THIRD_PARTY_INCLUDES_END
 
 DEFINE_LOG_CATEGORY_STATIC(LogSocketsUdpSender, Log, All);
 
-/**
- * UDP audio sink (WP-S5: TRB-10, TRB-11). Encodes with its own encoders on the calling thread
- * and hands the unified message to the audio worker. Never touches the socket or the sender.
- */
-class FSocketsUdpSenderAudioSink final : public FO3DGatedSenderAudioSink
+namespace O3DSocketsUdpSenderPrivate
 {
-public:
-	FSocketsUdpSenderAudioSink(TSharedRef<FSocketsUdpPublishState, ESPMode::ThreadSafe> InState, FO3DTransportAudioConfig InConfig, FO3DSinkAudioEncoder::FSettings InEncoderSettings)
-		: FO3DGatedSenderAudioSink(MoveTemp(InConfig), InState->Gate, MoveTemp(InEncoderSettings))
-		, State(MoveTemp(InState))
-	{
-	}
+	/** Idle wait of the worker; an Enqueue wakes it earlier. Short, so Stop() never waits long. */
+	constexpr uint32 IdleWaitMs = 50;
+	constexpr uint32 PausedWaitMs = 5;
+	/** Bytes in front of each fragment (core udp_fragment header). */
+	constexpr int32 FragmentHeaderSize = 16;
 
-protected:
-	virtual bool OnSubmitGated(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) override
+	/** "" and "*" send to the IPv4 broadcast address; "localhost" means 127.0.0.1 (as before WP-A1 PR 4c). */
+	FO3DHostPort ApplyHostRules(const FO3DHostPort& In, bool& bOutBroadcast)
 	{
-		if (!State->bSocketReady.load())
+		FO3DHostPort Out = In;
+		bOutBroadcast = false;
+		if (Out.Host.IsEmpty() || Out.Host == TEXT("*"))
 		{
-			return false;
+			Out.Host = TEXT("255.255.255.255");
+			Out.bIPv6 = false;
+			bOutBroadcast = true;
 		}
-
-		// Opus may return zero or several packets per buffer (SHR-2).
-		TArray<TArray<uint8>> Messages;
-		if (!GetEncoder().EncodeUnified(StreamLabel, State->LastSubject.Get(), Interleaved, NumFrames, NumChannels, SampleRate, TimestampSec, Messages))
+		else if (Out.Host.Equals(TEXT("localhost"), ESearchCase::IgnoreCase))
 		{
-			return false;
+			Out.Host = TEXT("127.0.0.1");
+			Out.bIPv6 = false;
 		}
-
-		bool bAllQueued = true;
-		for (TArray<uint8>& Unified : Messages)
-		{
-			const int64 Size = Unified.Num();
-			if (!State->AudioQueue.Enqueue(MoveTemp(Unified)))
-			{
-				bAllQueued = false;
-				continue;
-			}
-			State->AudioBytesQueued.fetch_add(Size);
-		}
-		return bAllQueued;
+		return Out;
 	}
-
-private:
-	TSharedRef<FSocketsUdpPublishState, ESPMode::ThreadSafe> State;
-};
-
-/** Audio send worker. Lifetime is nested inside the sender's: joined in Stop() and the destructor. */
-class FO3DSocketsUdpSender::FUdpAudioRunnable final : public FRunnable
-{
-public:
-	explicit FUdpAudioRunnable(FO3DSocketsUdpSender& InOwner)
-		: Owner(InOwner)
-	{
-	}
-
-	virtual uint32 Run() override
-	{
-		return Owner.RunAudioWorker();
-	}
-
-private:
-	FO3DSocketsUdpSender& Owner;
-};
+}
 
 FO3DSocketsUdpSender::FO3DSocketsUdpSender()
-	: PublishState(MakeShared<FSocketsUdpPublishState, ESPMode::ThreadSafe>())
+	: Queue(MakeShared<FO3DSendQueue, ESPMode::ThreadSafe>())
+	, PublishState(MakeShared<FO3DAudioPublishState, ESPMode::ThreadSafe>(Queue, EO3DAudioWireFormat::UnifiedEnvelope))
 {
+	// UDP is unreliable and fresh frames beat complete ones (ADR 0008 driver 4): drop the oldest
+	// frames while the worker is behind, refuse callers only at twice the soft cap. Audio and
+	// control have budgets of their own (ADR 0007 item 7, ADR 0011). No age limit: the drop policy
+	// already keeps the backlog at a few frames.
+	FO3DSendQueueLimits Limits;
+	Limits.Mocap.MaxItems = FrameQueueSoftCap;
+	Limits.Mocap.MaxBytes = FrameQueueSoftBytes;
+	Limits.MocapOverflow = EO3DMocapOverflow::DropOldest;
+	Limits.Audio.MaxBytes = AudioQueueBytes;
+	Queue->SetLimits(Limits);
+	// No socket yet: sinks refuse PCM until there is one (as the WP-S5 sink did).
+	PublishState->SetPeerReady(false);
 }
 
 FO3DSocketsUdpSender::~FO3DSocketsUdpSender()
 {
 	// Stop() closes the audio gate first (waiting for in-flight submits), then joins the
-	// audio worker, then destroys the socket.
+	// worker, then destroys the socket.
 	Stop();
 }
 
@@ -109,45 +81,42 @@ FO3DTransportResult FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& 
 	Stop();
 
 	ActiveConfig = Config;
-	{
-		FScopeLock Lock(&StatsMutex);
-		Stats.Reset();
-	}
-	RemoteHost.Reset();
-	RemotePort = 0;
-	StreamId = ActiveConfig.StreamId;
+	FramesSent.store(0);
+	BytesSent.store(0);
+	DroppedFrames.store(0);
+	SendErrors.store(0);
+	MocapDrained.store(0);
+	MocapDroppedBaseline = Queue->GetStats().Mocap.Dropped;
+	Endpoint = FO3DHostPort();
 	RemoteAddr.Reset();
-	PublishState->LastSubject.Reset();
-	PublishState->AudioBytesQueued.store(0);
+	StreamId = ActiveConfig.StreamId;
+	PublishState->GetSubjectSlot().Reset();
 
 	ActiveAudioConfig = Config.Audio;
 	AudioSourceGuid = FGuid::NewGuid();
 	SerializationScratch.clear();
 	SerializationScratch.reserve(512 * 1024);
-	FragmentScratch.clear();
 
-	if (!O3DSockets::ParseHostPort(Config, RemoteHost, RemotePort, TEXT("udp")))
+	FO3DHostPort Parsed;
+	if (!O3DSockets::ParseEndpoint(Config, TEXT("udp"), Parsed))
 	{
 		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP sender requires udp://host:port URI or explicit host/port options."));
 		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("UDP sender requires a udp://host:port URI or explicit host/port options."));
 	}
 
-	if (RemotePort <= 0)
-	{
-		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP sender requires a valid port (got %d)."), RemotePort);
-		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("UDP sender requires a valid port (got %d)."), RemotePort));
-	}
-
 	if (StreamId.IsEmpty())
 	{
-		StreamId = O3DSockets::ComposeStreamId(RemoteHost, RemotePort);
+		StreamId = O3DSockets::ComposeStreamId(Parsed.Host, Parsed.Port);
 		ActiveConfig.StreamId = StreamId;
 	}
 
-	bAllowBroadcast = O3DSockets::GetBoolOption(Config, O3DSockets::BroadcastOptionKey, false);
-	MaxDatagramBytes = FMath::Clamp(O3DSockets::GetIntOption(Config, O3DSockets::MaxDatagramOptionKey, 64000), 512, 65507);
-	MtuBytes = O3DSockets::GetIntOption(Config, O3DSockets::MtuOptionKey, 1200);
-	MtuBytes = FMath::Clamp(MtuBytes, 256, MaxDatagramBytes);
+	const TMap<FString, FString>& Options = Config.AdvancedParams;
+	bool bBroadcastHost = false;
+	Endpoint = O3DSocketsUdpSenderPrivate::ApplyHostRules(Parsed, bBroadcastHost);
+	bAllowBroadcast = bBroadcastHost || O3DTransportOptions::GetBool(Options, O3DSockets::BroadcastOptionKey, false);
+	MaxDatagramBytes = O3DTransportOptions::GetInt(Options, O3DSockets::MaxDatagramOptionKey, 64000, 512, 65507);
+	MtuBytes = FMath::Clamp(O3DTransportOptions::GetInt(Options, O3DSockets::MtuOptionKey, 1200), 256, MaxDatagramBytes);
+	FragmentScratch.clear();
 	FragmentScratch.reserve(MaxDatagramBytes);
 
 	SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
@@ -157,114 +126,104 @@ FO3DTransportResult FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& 
 		return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("UDP sender could not access the socket subsystem."));
 	}
 
-	if (!ResolveAddress(RemoteHost, RemotePort, RemoteAddr))
+	// An IP literal resolves here without DNS; a host name resolves on the worker (TRB-26).
+	if (O3DTransportOptions::IsIpLiteral(Endpoint))
 	{
-		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP sender invalid host '%s'."), *RemoteHost);
-		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("UDP sender: invalid host '%s'."), *RemoteHost));
+		FString Error;
+		if (!O3DTransportOptions::ResolveHostPort(Endpoint, RemoteAddr, &Error) || !RemoteAddr.IsValid())
+		{
+			UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP sender invalid host '%s'."), *Endpoint.Host);
+			RemoteAddr.Reset();
+			Endpoint = FO3DHostPort();
+			return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("UDP sender: invalid host '%s'."), *Parsed.Host));
+		}
 	}
 
-	// Note: Audio stream label is now automatically derived from StreamId
-
-	PublishState->Gate->Open();
-
+	PublishState->Open();
 	return FO3DTransportResult::Ok();
 }
 
 FO3DTransportResult FO3DSocketsUdpSender::Start()
 {
+	bRunning.store(false);
+	Worker.Stop();
 	DestroySocket();
-	// Stop() drops SocketSubsystem; fetch it again so Start() after Stop() works without
-	// Initialize(), as it does for TCP (TRB-13; WP-T2 conformance Lifecycle.RestartAfterStop).
-	if (!SocketSubsystem && RemoteAddr.IsValid())
-	{
-		SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
-	}
-	if (!RemoteAddr.IsValid())
+	DrainQueue();
+
+	if (Endpoint.Port <= 0)
 	{
 		return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("UDP sender Start() before a successful Initialize()."));
 	}
-	PublishState->Gate->Open();
-	const FO3DTransportResult Result = CreateSocket();
-	if (!Result.IsOk())
+	if (!SocketSubsystem)
 	{
+		SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+	}
+
+	PublishState->Open();
+	if (RemoteAddr.IsValid())
+	{
+		const FO3DTransportResult Result = OpenSocket(RemoteAddr);
+		if (!Result.IsOk())
+		{
+			ConnectionState.End(EO3DConnectionState::Failed, Result);
+			return Result;
+		}
+		// The socket exists: datagrams can go out at once; UDP has no connection.
+		ConnectionState.Begin(EO3DConnectionState::Connected);
+	}
+	else
+	{
+		// A host name: the worker resolves it, then opens the socket and reports Connected.
+		ConnectionState.Begin(EO3DConnectionState::Connecting);
+	}
+
+	ResolveBackoff = FO3DReconnectPolicy();
+	if (!Worker.Start(TEXT("O3D_UDP_Sender_Worker"), [this]() { return RunWorkerIteration(); }, Queue))
+	{
+		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP sender could not start its worker thread."));
+		DestroySocket();
+		const FO3DTransportResult Result = FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("UDP sender could not start its worker thread."));
 		ConnectionState.End(EO3DConnectionState::Failed, Result);
 		return Result;
 	}
-	StartAudioWorker();
-	ConnectionState.Begin(EO3DConnectionState::Connected);
-	return Result;
+	bRunning.store(true);
+	return FO3DTransportResult::Ok();
 }
 
 void FO3DSocketsUdpSender::Stop()
 {
-	// WP-S5 ordering: close the audio gate (waits for in-flight submits), join the audio
-	// worker, destroy the socket, then drop anything still queued.
-	PublishState->Gate->Close();
-	StopAudioWorker();
+	// WP-S5 ordering: close the audio gate (waits for in-flight submits), join the worker,
+	// destroy the socket, then drop anything still queued.
+	bRunning.store(false);
+	PublishState->Close();
+	Worker.Stop();
 	DestroySocket();
-	PublishState->AudioQueue.Empty();
-	SocketSubsystem = nullptr;
+	DrainQueue();
 	ConnectionState.End(EO3DConnectionState::Idle);
 }
 
-void FO3DSocketsUdpSender::StartAudioWorker()
+void FO3DSocketsUdpSender::DrainQueue()
 {
-	if (AudioWorkerThread)
-	{
-		return;
-	}
-	bStopAudioWorker.store(false);
-	AudioWorker = new FUdpAudioRunnable(*this);
-	AudioWorkerThread = FRunnableThread::Create(AudioWorker, TEXT("O3D_UDP_Audio_Worker"));
-	if (!AudioWorkerThread)
-	{
-		delete AudioWorker;
-		AudioWorker = nullptr;
-	}
+	// Worker joined, so this thread is the queue's only consumer. Empty() returns items of every
+	// kind; only the frames it discards are excluded from DroppedFrames.
+	const int64 DroppedBefore = Queue->GetStats().Mocap.Dropped;
+	Queue->Empty();
+	MocapDrained.fetch_add(Queue->GetStats().Mocap.Dropped - DroppedBefore);
 }
 
-void FO3DSocketsUdpSender::StopAudioWorker()
+EO3DSendResult FO3DSocketsUdpSender::EnqueueFrame(FO3DSendItem&& Item)
 {
-	bStopAudioWorker.store(true);
-	PublishState->AudioQueue.Wake();
-	if (AudioWorkerThread)
+	const EO3DSendResult Result = Queue->Enqueue(MoveTemp(Item));
+	if (Result == EO3DSendResult::DroppedBackpressure)
 	{
-		AudioWorkerThread->WaitForCompletion();
-		delete AudioWorkerThread;
-		AudioWorkerThread = nullptr;
+		DroppedFrames.fetch_add(1);
 	}
-	delete AudioWorker;
-	AudioWorker = nullptr;
-}
-
-uint32 FO3DSocketsUdpSender::RunAudioWorker()
-{
-	TArray<uint8> Bytes;
-	while (!bStopAudioWorker.load())
-	{
-		if (!PublishState->AudioQueue.Dequeue(Bytes))
-		{
-			PublishState->AudioQueue.WaitForWork(50);
-			continue;
-		}
-
-		FScopeLock Lock(&SocketLock);
-		if (Socket && RemoteAddr.IsValid())
-		{
-			SendPayload(Socket, RemoteAddr, Bytes.GetData(), Bytes.Num(), TEXT("audio"));
-		}
-	}
-	return 0;
+	return Result;
 }
 
 bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
 {
-	// Guards Socket/RemoteAddr against a concurrent CreateSocket()/DestroySocket()
-	// from Start()/Stop() (which take the same lock), and against the audio
-	// worker's sends. The audio thread itself never takes this lock (WP-S5).
-	FScopeLock Lock(&SocketLock);
-
-	if (!Socket || !RemoteAddr.IsValid())
+	if (!bRunning.load())
 	{
 		return false;
 	}
@@ -275,92 +234,56 @@ bool FO3DSocketsUdpSender::Send(const O3DS::SubjectList& List)
 		ObservedSubject = UTF8_TO_TCHAR(List.mItems[0]->mName.c_str());
 	}
 
+	// Not thread-safe (the scratch buffer); Send(SubjectList) is the deprecated game-thread path.
 	SerializationScratch.clear();
 	const double Timestamp = FPlatformTime::Seconds();
-	int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(SerializationScratch, Timestamp);
+	const int32 BytesWritten = const_cast<O3DS::SubjectList&>(List).Serialize(SerializationScratch, Timestamp);
 	if (BytesWritten <= 0)
 	{
 		UE_LOG(LogSocketsUdpSender, Verbose, TEXT("UDP sender failed to serialize SubjectList."));
-		{
-			FScopeLock StatsLock(&StatsMutex);
-			Stats.DroppedFrames++;
-		}
+		DroppedFrames.fetch_add(1);
 		return false;
 	}
 
 	if (!ObservedSubject.IsEmpty())
 	{
-		PublishState->LastSubject.Set(ObservedSubject);
+		PublishState->GetSubjectSlot().Set(ObservedSubject);
 	}
-
-	if (!SendPayload(Socket, RemoteAddr, reinterpret_cast<const uint8*>(SerializationScratch.data()), BytesWritten, TEXT("data")))
-	{
-		{
-			FScopeLock StatsLock(&StatsMutex);
-			Stats.DroppedFrames++;
-		}
-		return false;
-	}
-
-	{
-		FScopeLock StatsLock(&StatsMutex);
-		Stats.FramesSent++;
-		Stats.BytesSent += BytesWritten;
-	}
-	return true;
+	TArray<uint8> Bytes(reinterpret_cast<const uint8*>(SerializationScratch.data()), BytesWritten);
+	return EnqueueFrame(FO3DSendItem::MakeMocap(MoveTemp(Bytes), MoveTemp(ObservedSubject), Timestamp)) == EO3DSendResult::Queued;
 }
 
 EO3DSendResult FO3DSocketsUdpSender::SendSerialized(FO3DSendPayload&& Payload)
 {
-	// Same SocketLock discipline as Send(SubjectList&) above - guards
-	// Socket/RemoteAddr against a concurrent CreateSocket()/DestroySocket()
-	// from Start()/Stop(), and against the audio worker's sends.
-	FScopeLock Lock(&SocketLock);
-
-	if (!Socket || !RemoteAddr.IsValid())
+	if (!bRunning.load())
 	{
 		return EO3DSendResult::NotRunning;
 	}
-	const int32 Len = Payload.Bytes.Num();
-	if (Len <= 0)
+	if (Payload.Bytes.Num() <= 0)
 	{
 		return EO3DSendResult::Invalid;
 	}
 
+	// Audio frames carry the subject last sent (their metadata's SubjectName).
 	if (!Payload.Subject.IsEmpty())
 	{
-		PublishState->LastSubject.Set(Payload.Subject);
+		PublishState->GetSubjectSlot().Set(Payload.Subject);
 	}
 
-	// Sent on the caller's thread (TRB-20; the shared worker of WP-A1 step 4 moves it off).
-	if (!SendPayload(Socket, RemoteAddr, Payload.Bytes.GetData(), Len, TEXT("data")))
-	{
-		// The socket refused the datagram (send buffer full or a network error).
-		FScopeLock StatsLock(&StatsMutex);
-		Stats.DroppedFrames++;
-		Stats.SendErrors++;
-		return EO3DSendResult::DroppedBackpressure;
-	}
-
-	{
-		FScopeLock StatsLock(&StatsMutex);
-		Stats.FramesSent++;
-		Stats.BytesSent += Len;
-	}
-	return EO3DSendResult::Queued;
+	// Only enqueued: the worker sends it (TRB-20), fragmenting above udp.maxdatagram.
+	return EnqueueFrame(FO3DSendItem::MakeMocap(MoveTemp(Payload.Bytes), MoveTemp(Payload.Subject), Payload.CaptureTimeSec, Payload.bFullSync));
 }
 
 /**
  * Control (ADR 0011): one datagram, never fragmented. A control envelope is at most 1,100 bytes
  * (ADR 0011 item 4); if udp.maxdatagram is configured below that, control is refused (TooLarge)
- * rather than fragmented. Sent on the caller's thread under SocketLock, as SendSerialized is. Not
- * counted as a frame. UDP is unreliable: the control publisher sends events redundantly and
+ * rather than fragmented. Queued as a control item with a cap of its own and sent by the worker.
+ * Not counted as a frame. UDP is unreliable: the control publisher sends events redundantly and
  * repairs values with snapshots.
  */
 EO3DSendResult FO3DSocketsUdpSender::SendControl(const uint8* Envelope, int32 Len)
 {
-	FScopeLock Lock(&SocketLock);
-	if (!Socket || !RemoteAddr.IsValid())
+	if (!bRunning.load())
 	{
 		return EO3DSendResult::NotRunning;
 	}
@@ -373,28 +296,25 @@ EO3DSendResult FO3DSocketsUdpSender::SendControl(const uint8* Envelope, int32 Le
 	{
 		return EO3DSendResult::TooLarge;
 	}
-	if (!SendDatagram(Socket, RemoteAddr, Envelope, Len, TEXT("control")))
-	{
-		FScopeLock StatsLock(&StatsMutex);
-		Stats.SendErrors++;
-		return EO3DSendResult::DroppedBackpressure;
-	}
-	return EO3DSendResult::Queued;
+	return Queue->Enqueue(FO3DSendItem::MakeControl(TArray<uint8>(Envelope, Len)));
 }
 
 void FO3DSocketsUdpSender::Tick(float /*DeltaSeconds*/)
 {
-	// UDP sender currently has no periodic upkeep.
+	// Everything runs on the worker.
 }
 
 FO3DTransportStats FO3DSocketsUdpSender::GetStats() const
 {
+	const FO3DSendQueueStats QueueStats = Queue->GetStats();
 	FO3DTransportStats Copy;
-	{
-		FScopeLock Lock(&StatsMutex);
-		Copy = Stats;
-	}
-	Copy.BytesSent += PublishState->AudioBytesQueued.load();
+	Copy.FramesSent = FramesSent.load();
+	Copy.BytesSent = BytesSent.load();
+	// Frames refused or not sent, plus the oldest frames the queue dropped (not the drains of Stop and Start).
+	Copy.DroppedFrames = DroppedFrames.load() + FMath::Max<int64>(0, QueueStats.Mocap.Dropped - MocapDroppedBaseline - MocapDrained.load());
+	Copy.SendErrors = SendErrors.load();
+	Copy.PendingFrames = QueueStats.Mocap.PendingItems;
+	Copy.PendingBytes = QueueStats.GetPendingBytes();
 	Copy.State = ConnectionState.Get();
 	return Copy;
 }
@@ -406,10 +326,7 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DSocketsUdpSender::Creat
 	{
 		EffectiveConfig = AudioConfig;
 	}
-
 	EffectiveConfig.bEnableAudio = true;
-	// Note: Audio stream label is now automatically derived from StreamId
-
 	ActiveAudioConfig = EffectiveConfig;
 
 	// Immutable snapshot for this sink's own encoders (TRB-11): nothing reconfigures them later.
@@ -420,84 +337,18 @@ TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> FO3DSocketsUdpSender::Creat
 	EncoderSettings.DefaultSubject = StreamFallback;
 	EncoderSettings.SourceGuid = AudioSourceGuid;
 
-	return MakeShared<FSocketsUdpSenderAudioSink, ESPMode::ThreadSafe>(PublishState, ActiveAudioConfig, MoveTemp(EncoderSettings));
+	// The shared sink refuses PCM while there is no socket (the publish state's peer flag).
+	return MakeShared<FO3DQueuedSenderAudioSink, ESPMode::ThreadSafe>(PublishState, ActiveAudioConfig, MoveTemp(EncoderSettings));
 }
 
-bool FO3DSocketsUdpSender::ResolveRemoteAddress(const FString& Host, int32 Port)
+FO3DTransportResult FO3DSocketsUdpSender::OpenSocket(const TSharedPtr<FInternetAddr>& Addr)
 {
-	return ResolveAddress(Host, Port, RemoteAddr);
-}
-
-bool FO3DSocketsUdpSender::ResolveAddress(const FString& Host, int32 Port, TSharedPtr<FInternetAddr>& OutAddr)
-{
-	if (!SocketSubsystem)
-	{
-		return false;
-	}
-
-	FString EffectiveHost = Host;
-	bool bRequestedBroadcast = false;
-
-	if (EffectiveHost.IsEmpty() || EffectiveHost == TEXT("*"))
-	{
-		EffectiveHost = TEXT("255.255.255.255");
-		bRequestedBroadcast = true;
-	}
-	else if (EffectiveHost.Equals(TEXT("localhost"), ESearchCase::IgnoreCase))
-	{
-		EffectiveHost = TEXT("127.0.0.1");
-	}
-
-	TSharedPtr<FInternetAddr> Candidate = SocketSubsystem->CreateInternetAddr();
-	if (!Candidate.IsValid())
-	{
-		return false;
-	}
-
-	bool bIsValid = false;
-	Candidate->SetIp(*EffectiveHost, bIsValid);
-	if (!bIsValid)
-	{
-		FIPv4Address IPv4;
-		if (FIPv4Address::Parse(EffectiveHost, IPv4))
-		{
-			Candidate->SetIp(IPv4.Value);
-			bIsValid = true;
-		}
-	}
-
-	if (!bIsValid)
-	{
-		OutAddr.Reset();
-		return false;
-	}
-
-	Candidate->SetPort(Port);
-	OutAddr = Candidate;
-
-	if (bRequestedBroadcast)
-	{
-		bAllowBroadcast = true;
-	}
-
-	return true;
-}
-
-FO3DTransportResult FO3DSocketsUdpSender::CreateSocket()
-{
-	// Same lock as Send()/DestroySocket(); FCriticalSection is recursive in
-	// UE so the DestroySocket() call below re-entering the lock on this
-	// thread is safe.
-	FScopeLock Lock(&SocketLock);
-
-	if (!SocketSubsystem || !RemoteAddr.IsValid())
+	if (!SocketSubsystem || !Addr.IsValid())
 	{
 		return FO3DTransportResult::Error(EO3DTransportError::NotRunning, TEXT("UDP sender Start() before a successful Initialize()."));
 	}
 
-	DestroySocket();
-
-	Socket = SocketSubsystem->CreateSocket(NAME_DGram, TEXT("O3DS_UDP_SENDER"), RemoteAddr->GetProtocolType());
+	Socket = SocketSubsystem->CreateSocket(NAME_DGram, TEXT("O3DS_UDP_SENDER"), Addr->GetProtocolType());
 	if (!Socket)
 	{
 		UE_LOG(LogSocketsUdpSender, Warning, TEXT("Failed to create UDP socket."));
@@ -506,7 +357,6 @@ FO3DTransportResult FO3DSocketsUdpSender::CreateSocket()
 
 	Socket->SetReuseAddr(true);
 	Socket->SetNonBlocking(true);
-
 	if (bAllowBroadcast)
 	{
 		Socket->SetBroadcast(true);
@@ -517,20 +367,17 @@ FO3DTransportResult FO3DSocketsUdpSender::CreateSocket()
 	Socket->SetSendBufferSize(RequestedSize, AppliedSize);
 
 	UE_LOG(LogSocketsUdpSender, Log, TEXT("UDP sender targeting %s:%d (broadcast=%d, maxDatagram=%d, mtu=%d, sendBuf=%d)."),
-		*RemoteAddr->ToString(false), RemoteAddr->GetPort(), bAllowBroadcast ? 1 : 0, MaxDatagramBytes, MtuBytes, AppliedSize);
+		*Addr->ToString(false), Addr->GetPort(), bAllowBroadcast ? 1 : 0, MaxDatagramBytes, MtuBytes, AppliedSize);
 
-	PublishState->bSocketReady.store(true);
+	PublishState->SetPeerReady(true);
 	return FO3DTransportResult::Ok();
 }
 
 void FO3DSocketsUdpSender::DestroySocket()
 {
-	// Same lock as Send()/CreateSocket(); recursive-safe when called from
-	// CreateSocket() above, and blocks until any in-flight audio-worker send
-	// has finished reading Socket.
-	FScopeLock Lock(&SocketLock);
-	PublishState->bSocketReady.store(false);
-
+	// Only while the worker is not running (Start/Stop join it first), so nobody else uses the socket.
+	check(!Worker.IsRunning());
+	PublishState->SetPeerReady(false);
 	if (Socket && SocketSubsystem)
 	{
 		SocketSubsystem->DestroySocket(Socket);
@@ -538,74 +385,138 @@ void FO3DSocketsUdpSender::DestroySocket()
 	Socket = nullptr;
 }
 
-bool FO3DSocketsUdpSender::SendPayload(FSocket* InSocket, const TSharedPtr<FInternetAddr>& InAddr, const uint8* Data, int32 Size, const TCHAR* Context)
+uint32 FO3DSocketsUdpSender::RunWorkerIteration()
 {
-	if (!InSocket || !InAddr.IsValid())
+	using namespace O3DSocketsUdpSenderPrivate;
+
+	if (bWorkerPausedForTesting.load())
 	{
-		return false;
+		return PausedWaitMs;
 	}
 
-	if (Size <= MaxDatagramBytes)
+	if (!Socket)
 	{
-		return SendDatagram(InSocket, InAddr, Data, Size, Context);
+		// A host name: resolve it here, off the game thread, retrying with backoff (TRB-26).
+		const double Now = FPlatformTime::Seconds();
+		if (!ResolveBackoff.IsDue(Now))
+		{
+			return IdleWaitMs;
+		}
+		TSharedPtr<FInternetAddr> Addr;
+		FString Error;
+		if (!O3DTransportOptions::ResolveHostPort(Endpoint, Addr, &Error) || !Addr.IsValid())
+		{
+			UE_LOG(LogSocketsUdpSender, Verbose, TEXT("UDP sender could not resolve %s: %s"), *Endpoint.ToString(), *Error);
+			ResolveBackoff.OnFailure(Now);
+			return IdleWaitMs;
+		}
+		if (!OpenSocket(Addr).IsOk())
+		{
+			ResolveBackoff.OnFailure(Now);
+			return IdleWaitMs;
+		}
+		RemoteAddr = Addr;
+		ResolveBackoff.OnSuccess();
+		ConnectionState.Set(EO3DConnectionState::Connected); // on the worker thread (ADR 0007 item 3)
+		return 0;
 	}
 
-	return SendFragmented(InSocket, InAddr, Data, Size, Context);
+	FO3DSendItem Item;
+	// DropOldest: while more than FrameQueueSoftCap frames wait, Dequeue discards the oldest.
+	if (!Queue->Dequeue(Item))
+	{
+		return IdleWaitMs;
+	}
+
+	switch (Item.Kind)
+	{
+	case EO3DSendItemKind::Mocap:
+		if (SendPayload(Item.Bytes.GetData(), Item.Bytes.Num(), TEXT("data")))
+		{
+			FramesSent.fetch_add(1);
+			BytesSent.fetch_add(Item.Bytes.Num());
+		}
+		else
+		{
+			// The socket refused the datagram (send buffer full or a network error).
+			DroppedFrames.fetch_add(1);
+			SendErrors.fetch_add(1);
+		}
+		break;
+	case EO3DSendItemKind::Audio:
+		if (SendPayload(Item.Bytes.GetData(), Item.Bytes.Num(), TEXT("audio")))
+		{
+			BytesSent.fetch_add(Item.Bytes.Num());
+		}
+		else
+		{
+			SendErrors.fetch_add(1);
+		}
+		break;
+	case EO3DSendItemKind::Control:
+		// Never fragmented: SendControl refused anything above udp.maxdatagram.
+		if (!SendDatagram(Item.Bytes.GetData(), Item.Bytes.Num(), TEXT("control")))
+		{
+			SendErrors.fetch_add(1);
+		}
+		break;
+	}
+	return 0;
 }
 
-bool FO3DSocketsUdpSender::SendDatagram(FSocket* InSocket, const TSharedPtr<FInternetAddr>& InAddr, const uint8* Data, int32 Size, const TCHAR* Context)
+bool FO3DSocketsUdpSender::SendPayload(const uint8* Data, int32 Size, const TCHAR* Context)
 {
-	if (!InSocket || !InAddr.IsValid() || Data == nullptr || Size <= 0)
+	if (Size <= MaxDatagramBytes)
+	{
+		return SendDatagram(Data, Size, Context);
+	}
+	return SendFragmented(Data, Size, Context);
+}
+
+bool FO3DSocketsUdpSender::SendDatagram(const uint8* Data, int32 Size, const TCHAR* Context)
+{
+	if (!Socket || !RemoteAddr.IsValid() || Data == nullptr || Size <= 0)
 	{
 		return false;
 	}
 
-	int32 BytesSent = 0;
-	if (!InSocket->SendTo(Data, Size, BytesSent, *InAddr))
+	int32 BytesSentNow = 0;
+	if (!Socket->SendTo(Data, Size, BytesSentNow, *RemoteAddr))
 	{
 		const ESocketErrors Error = SocketSubsystem ? SocketSubsystem->GetLastErrorCode() : SE_NO_ERROR;
-		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP %s send failed (size=%d, error=%d)."), Context ? Context : TEXT("data"), Size, static_cast<int32>(Error));
+		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP %s send failed (size=%d, error=%d)."), Context, Size, static_cast<int32>(Error));
 		return false;
 	}
-
-	if (BytesSent != Size)
+	if (BytesSentNow != Size)
 	{
-		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP %s partial send (requested=%d, sent=%d)."), Context ? Context : TEXT("data"), Size, BytesSent);
+		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP %s partial send (requested=%d, sent=%d)."), Context, Size, BytesSentNow);
 		return false;
 	}
-
 	return true;
 }
 
-bool FO3DSocketsUdpSender::SendFragmented(FSocket* InSocket, const TSharedPtr<FInternetAddr>& InAddr, const uint8* Data, int32 Size, const TCHAR* Context)
+bool FO3DSocketsUdpSender::SendFragmented(const uint8* Data, int32 Size, const TCHAR* Context)
 {
-	if (!InSocket || !InAddr.IsValid() || Data == nullptr || Size <= 0)
+	using namespace O3DSocketsUdpSenderPrivate;
+	if (Data == nullptr || Size <= 0)
 	{
 		return false;
 	}
 
-	constexpr int32 FragmentHeaderSize = 16;
 	const int32 FragmentPayload = FMath::Clamp(MtuBytes - FragmentHeaderSize, 256, MaxDatagramBytes);
-	if (FragmentPayload <= 0)
-	{
-		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP fragmentation disabled due to invalid MTU (%d)."), MtuBytes);
-		return false;
-	}
-
 	UdpFragmenter Fragmenter(reinterpret_cast<const char*>(Data), static_cast<size_t>(Size), static_cast<size_t>(FragmentPayload));
-	const uint32 MessageId = static_cast<uint32>(MessageCounter.Increment());
+	const uint32 MessageId = ++MessageCounter;
 
 	for (uint32 Seq = 0; Seq < static_cast<uint32>(Fragmenter.mFrames); ++Seq)
 	{
 		FragmentScratch.clear();
 		Fragmenter.makeFragment(MessageId, Seq, FragmentScratch);
-		if (!SendDatagram(InSocket, InAddr, reinterpret_cast<const uint8*>(FragmentScratch.data()), static_cast<int32>(FragmentScratch.size()), Context))
+		if (!SendDatagram(reinterpret_cast<const uint8*>(FragmentScratch.data()), static_cast<int32>(FragmentScratch.size()), Context))
 		{
-			UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP %s fragment send failed (seq=%u/%llu)."), Context ? Context : TEXT("data"), Seq, static_cast<unsigned long long>(Fragmenter.mFrames));
+			UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP %s fragment send failed (seq=%u/%llu)."), Context, Seq, static_cast<unsigned long long>(Fragmenter.mFrames));
 			return false;
 		}
 	}
-
 	return true;
 }
 

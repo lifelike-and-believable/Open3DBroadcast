@@ -5,8 +5,9 @@
 #include "CoreMinimal.h"
 #include "Transport/O3DReceiverInterface.h"
 #include "Transport/O3DConnectionState.h"
+#include "Transport/O3DTransportOptions.h"
+#include "Transport/O3DUnifiedReceiveDemux.h"
 #include "../Shared/SocketsTransportCommon.h"
-#include "O3DAudioFrameCodec.h"
 
 #include "Templates/UniquePtr.h"
 #include "Templates/SharedPointer.h"
@@ -20,7 +21,12 @@ class ISocketSubsystem;
 class FInternetAddr;
 
 /**
- * UDP-based receiver implementation for the sockets transport module.
+ * UDP receiver. Poll() (game thread, bounded per call; TRB-18) reads datagrams, reassembles
+ * fragments with the core's udp_fragment (unchanged wire format) and hands each complete message
+ * to the shared FO3DUnifiedReceiveDemux (ADR 0007 item 7, WP-A1 PR 4c), which calls the consumer,
+ * the audio sink and the control sink. Receive-side threading stays on Poll (ADR 0007
+ * "Not decided here"). The bind address must be an IP literal or a wildcard, so binding resolves
+ * no name on the game thread.
  */
 class FO3DSocketsUdpReceiver : public IOpen3DReceiver
 {
@@ -29,7 +35,7 @@ public:
 	virtual ~FO3DSocketsUdpReceiver() override;
 
 	virtual FO3DTransportResult Initialize(const FO3DTransportConfig& Config) override;
-	virtual void SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& Consumer) override;
+	virtual void SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer) override { Demux.SetConsumer(InConsumer); }
 	virtual FO3DTransportResult Start() override;
 	virtual void Stop() override;
 	virtual int32 Poll() override;
@@ -39,7 +45,7 @@ public:
 	virtual EO3DConnectionState GetConnectionState() const override { return ConnectionState.Get(); }
 	virtual void SetStateChangedCallback(FO3DConnectionStateCallback Callback) override { ConnectionState.SetCallback(MoveTemp(Callback)); }
 	virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
-	virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink) override { ControlSink = Sink; }
+	virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink) override { Demux.SetControlSink(Sink); }
 
 private:
 	struct FFragmentState;
@@ -49,8 +55,6 @@ private:
 	bool ProcessDatagram(const uint8* Data, int32 Bytes, TArray<uint8>& OutFrame, TUniquePtr<FFragmentState>& InState);
 	bool HandleFragment(const uint8* Data, int32 Bytes, TArray<uint8>& OutFrame, TUniquePtr<FFragmentState>& InState);
 	bool IsFragmentPacket(const uint8* Data, int32 Bytes) const;
-	bool ProcessReceivedPayload(const uint8* Data, int32 Size);
-	bool ProcessAudioPayload(O3DS::EUnifiedCodec Codec, const uint8* Payload, int32 PayloadSize);
 
 private:
 	FO3DTransportConfig ActiveConfig;
@@ -60,7 +64,7 @@ private:
 	ISocketSubsystem* SocketSubsystem = nullptr;
 	FSocket* Socket = nullptr;
 
-	FString BindHost;
+	FO3DHostPort BindEndpoint;
 	int32 BindPort = 0;
 	FString StreamId;
 
@@ -69,10 +73,8 @@ private:
 	int32 MtuBytes = 1200;
 	int32 MaxFrameBytes = 0;
 
-	TWeakPtr<ISerializedFrameConsumer> Consumer;
-	TWeakPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
-	/** Control payloads (ADR 0011). Held strongly, released in Stop; used only from Poll (game thread). */
-	TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe> ControlSink;
+	/** Holds the consumer, audio sink and control sink strongly; Stop() releases them (TRF-38, ADR 0011). */
+	FO3DUnifiedReceiveDemux Demux;
 
 	/** Sized to the largest possible UDP datagram, independent of udp.maxdatagram (TRB-23). */
 	TArray<uint8> ReceiveBuffer;
@@ -82,8 +84,6 @@ private:
 	std::vector<char> CombinedScratch;
 
 	TUniquePtr<FFragmentState> FragmentState;
-	O3DAudio::FMultiStreamFrameDecoder AudioDecoder; // SHR-15: one decoder per (SourceGuid, StreamLabel)
-	TArray<int16> DecodedPcmScratch;
 	/** ADR 0007 item 3. */
 	FO3DConnectionStateTracker ConnectionState;
 };

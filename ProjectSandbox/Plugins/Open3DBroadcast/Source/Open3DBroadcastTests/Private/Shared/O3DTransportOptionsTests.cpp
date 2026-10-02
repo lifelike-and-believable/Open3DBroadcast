@@ -237,4 +237,24 @@ bool FO3DTransportOptionsGettersTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DHostPortIsIpLiteralTest, "Open3DBroadcast.Shared.HostPort.IsIpLiteral", O3DB_TEST_FLAGS)
+bool FO3DHostPortIsIpLiteralTest::RunTest(const FString& Parameters)
+{
+	auto IsLiteral = [](const TCHAR* Input)
+	{
+		FO3DHostPort Endpoint;
+		return O3DTransportOptions::ParseHostPort(Input, Endpoint, 9000) && O3DTransportOptions::IsIpLiteral(Endpoint);
+	};
+	TestTrue(TEXT("IPv4"), IsLiteral(TEXT("192.168.1.10")));
+	TestTrue(TEXT("IPv4 any-address"), IsLiteral(TEXT("0.0.0.0")));
+	TestTrue(TEXT("IPv6"), IsLiteral(TEXT("[::1]")));
+	TestFalse(TEXT("Host name"), IsLiteral(TEXT("localhost")));
+	TestFalse(TEXT("Dotted host name"), IsLiteral(TEXT("mocap.local")));
+	TestFalse(TEXT("Octet over 255"), IsLiteral(TEXT("192.168.1.256")));
+	TestFalse(TEXT("Three parts"), IsLiteral(TEXT("192.168.1")));
+	TestFalse(TEXT("Empty part"), IsLiteral(TEXT("192..1.1")));
+	TestFalse(TEXT("Wildcard"), IsLiteral(TEXT("*")));
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

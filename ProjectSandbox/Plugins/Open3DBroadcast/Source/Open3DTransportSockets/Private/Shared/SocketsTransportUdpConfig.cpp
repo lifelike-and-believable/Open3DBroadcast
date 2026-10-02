@@ -4,47 +4,60 @@
 
 #include "SocketsTransportConfig.h"
 
-#include "O3DReceiverSourceSettings.h"
-#include "O3DSenderComponent.h"
 #include "SocketsTransportCommon.h"
+#include "Transport/O3DTransportOptions.h"
+#include "Transport/O3DTransportTypes.h"
 
-namespace O3DSocketsConfig
+// The UDP configure functions read only the config, as the TCP ones do since WP-A1 PR 4b: the
+// sender component and the receiver source copy their (non-secret) options into
+// Config.AdvancedParams before the configure function runs, so nothing in Open3DTransportSockets
+// includes Open3DSender or Open3DReceiver (ADR 0007 step 4, WP-A1 PR 4c).
+
+namespace O3DSocketsUdpConfigPrivate
 {
-	void ConfigureUdpSender(const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
+	/** A positive integer option; Default when absent, not a number or not positive. */
+	int32 ReadPositiveInt(const FO3DTransportConfig& Config, const TCHAR* Key, int32 Default)
+	{
+		const int32 Value = O3DTransportOptions::GetInt(Config.AdvancedParams, Key, Default);
+		return Value > 0 ? Value : Default;
+	}
+
+	/** Host, port, broadcast and datagram sizes, normalised and written back (both roles). */
+	void ConfigureUdp(FO3DTransportConfig& Config, const TCHAR* DefaultHost)
 	{
 		Config.Transport = TEXT("UDP");
-		Config.Role = TEXT("sender");
 
-		const FString StoredHost = SenderComponent ? SenderComponent->GetTransportOption(O3DSockets::HostOptionKey) : FString();
-		const FString Host = StoredHost.IsEmpty() ? TEXT("127.0.0.1") : O3DSockets::NormaliseHostname(StoredHost);
+		const FString StoredHost = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::HostOptionKey);
+		const FString Host = StoredHost.IsEmpty() ? FString(DefaultHost) : O3DSockets::NormaliseHostname(StoredHost);
+		const int32 Port = O3DSockets::ReadPortOption(Config, O3DSockets::PortOptionKey, O3DSocketsConfig::DefaultUdpPort);
+		const bool bBroadcast = O3DTransportOptions::GetBool(Config.AdvancedParams, O3DSockets::BroadcastOptionKey, false);
+		const int32 Mtu = ReadPositiveInt(Config, O3DSockets::MtuOptionKey, 1200);
+		const int32 MaxDatagram = ReadPositiveInt(Config, O3DSockets::MaxDatagramOptionKey, 64000);
 
-		const FString StoredPort = SenderComponent ? SenderComponent->GetTransportOption(O3DSockets::PortOptionKey) : FString();
-		const int32 Port = ParsePositiveInt(StoredPort, DefaultUdpPort);
-
-		const FString BroadcastValue = SenderComponent ? SenderComponent->GetTransportOption(O3DSockets::BroadcastOptionKey) : FString();
-		const bool bBroadcast = ParseBoolOption(BroadcastValue, false);
-
-		const FString MtuValue = SenderComponent ? SenderComponent->GetTransportOption(O3DSockets::MtuOptionKey) : FString();
-		const int32 Mtu = ParsePositiveInt(MtuValue, 1200);
-
-		const FString DatagramValue = SenderComponent ? SenderComponent->GetTransportOption(O3DSockets::MaxDatagramOptionKey) : FString();
-		const int32 MaxDatagram = ParsePositiveInt(DatagramValue, 64000);
-
-		Config.Uri = O3DSockets::BuildUdpUri(Host, Port);
+		Config.Uri = O3DSockets::MakeUri(TEXT("udp"), Host, Port);
 		Config.StreamId = O3DSockets::ComposeStreamId(Host, Port);
 		Config.AdvancedParams.Add(O3DSockets::HostOptionKey, Host);
 		Config.AdvancedParams.Add(O3DSockets::PortOptionKey, FString::FromInt(Port));
 		Config.AdvancedParams.Add(O3DSockets::BroadcastOptionKey, bBroadcast ? TEXT("true") : TEXT("false"));
 		Config.AdvancedParams.Add(O3DSockets::MtuOptionKey, FString::FromInt(Mtu));
 		Config.AdvancedParams.Add(O3DSockets::MaxDatagramOptionKey, FString::FromInt(MaxDatagram));
+	}
+}
+
+namespace O3DSocketsConfig
+{
+	void ConfigureUdpSender(FO3DTransportConfig& Config)
+	{
+		O3DSocketsUdpConfigPrivate::ConfigureUdp(Config, TEXT("127.0.0.1"));
+		Config.Role = TEXT("sender");
 
 		if (Config.Audio.bEnableAudio)
 		{
-			const FString StoredAudioHost = SenderComponent ? SenderComponent->GetTransportOption(O3DSockets::AudioHostOptionKey) : FString();
+			const FString Host = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::HostOptionKey);
+			const int32 Port = O3DSockets::ReadPortOption(Config, O3DSockets::PortOptionKey, DefaultUdpPort);
+			const FString StoredAudioHost = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::AudioHostOptionKey);
 			const FString AudioHost = StoredAudioHost.IsEmpty() ? Host : O3DSockets::NormaliseHostname(StoredAudioHost);
-
-			const FString StoredAudioPort = SenderComponent ? SenderComponent->GetTransportOption(O3DSockets::AudioPortOptionKey) : FString();
-			const int32 AudioPort = ParsePositiveInt(StoredAudioPort, (Port > 0) ? Port + 1 : 0);
+			const int32 AudioPort = O3DSockets::ReadPortOption(Config, O3DSockets::AudioPortOptionKey, Port < 65535 ? Port + 1 : 0);
 			if (AudioPort > 0)
 			{
 				Config.AdvancedParams.Add(O3DSockets::AudioHostOptionKey, AudioHost);
@@ -53,40 +66,17 @@ namespace O3DSocketsConfig
 		}
 	}
 
-	void ConfigureUdpReceiver(const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
+	void ConfigureUdpReceiver(FO3DTransportConfig& Config)
 	{
-		Config.Transport = TEXT("UDP");
-
-		const FString* HostOption = Settings.TransportOptions.Find(O3DSockets::HostOptionKey);
-		const FString Host = HostOption ? O3DSockets::NormaliseHostname(*HostOption) : FString(TEXT("0.0.0.0"));
-
-		const FString* PortOption = Settings.TransportOptions.Find(O3DSockets::PortOptionKey);
-		const int32 Port = ParsePositiveInt(PortOption ? *PortOption : FString(), DefaultUdpPort);
-
-		const FString* BroadcastOption = Settings.TransportOptions.Find(O3DSockets::BroadcastOptionKey);
-		const bool bBroadcast = ParseBoolOption(BroadcastOption ? *BroadcastOption : FString(), false);
-
-		const FString* MtuOption = Settings.TransportOptions.Find(O3DSockets::MtuOptionKey);
-		const int32 Mtu = ParsePositiveInt(MtuOption ? *MtuOption : FString(), 1200);
-
-		const FString* DatagramOption = Settings.TransportOptions.Find(O3DSockets::MaxDatagramOptionKey);
-		const int32 MaxDatagram = ParsePositiveInt(DatagramOption ? *DatagramOption : FString(), 64000);
-
-		Config.Uri = O3DSockets::BuildUdpUri(Host, Port);
-		Config.StreamId = O3DSockets::ComposeStreamId(Host, Port);
-		Config.AdvancedParams.Add(O3DSockets::HostOptionKey, Host);
-		Config.AdvancedParams.Add(O3DSockets::PortOptionKey, FString::FromInt(Port));
-		Config.AdvancedParams.Add(O3DSockets::BroadcastOptionKey, bBroadcast ? TEXT("true") : TEXT("false"));
-		Config.AdvancedParams.Add(O3DSockets::MtuOptionKey, FString::FromInt(Mtu));
-		Config.AdvancedParams.Add(O3DSockets::MaxDatagramOptionKey, FString::FromInt(MaxDatagram));
+		O3DSocketsUdpConfigPrivate::ConfigureUdp(Config, TEXT("0.0.0.0"));
 
 		if (Config.Audio.bEnableAudio)
 		{
-			const FString* AudioBindOption = Settings.TransportOptions.Find(O3DSockets::AudioBindOptionKey);
-			const FString AudioBind = AudioBindOption ? O3DSockets::NormaliseHostname(*AudioBindOption) : Host;
-
-			const FString* AudioPortOption = Settings.TransportOptions.Find(O3DSockets::AudioPortOptionKey);
-			const int32 AudioPort = ParsePositiveInt(AudioPortOption ? *AudioPortOption : FString(), (Port > 0) ? Port + 1 : 0);
+			const FString Host = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::HostOptionKey);
+			const int32 Port = O3DSockets::ReadPortOption(Config, O3DSockets::PortOptionKey, DefaultUdpPort);
+			const FString StoredAudioBind = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::AudioBindOptionKey);
+			const FString AudioBind = StoredAudioBind.IsEmpty() ? Host : O3DSockets::NormaliseHostname(StoredAudioBind);
+			const int32 AudioPort = O3DSockets::ReadPortOption(Config, O3DSockets::AudioPortOptionKey, Port < 65535 ? Port + 1 : 0);
 			if (AudioPort > 0)
 			{
 				Config.AdvancedParams.Add(O3DSockets::AudioBindOptionKey, AudioBind);

@@ -86,4 +86,12 @@ namespace O3DTransportOptions
 	 * not resolve.
 	 */
 	OPEN3DSHARED_API bool ResolveHostPort(const FO3DHostPort& Endpoint, TSharedPtr<FInternetAddr>& OutAddress, FString* OutError = nullptr);
+
+	/**
+	 * True when Endpoint.Host is an IP literal: an IPv6 address (bIPv6) or a dotted-quad IPv4
+	 * address (four decimal parts 0 to 255). ResolveHostPort needs no DNS for these, so a caller on
+	 * the game thread may resolve them there (a listen or bind address). Wildcards ("*", empty) are
+	 * not literals. Any thread.
+	 */
+	OPEN3DSHARED_API bool IsIpLiteral(const FO3DHostPort& Endpoint);
 }
