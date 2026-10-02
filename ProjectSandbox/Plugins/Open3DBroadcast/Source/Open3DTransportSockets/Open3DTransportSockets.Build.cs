@@ -38,6 +38,9 @@ public class Open3DTransportSockets : ModuleRules
             "Sockets",
             "Networking",
             "Open3DShared",
+            // Only the UDP configure functions still read UO3DSenderComponent and
+            // FO3DReceiverSourceConfig; TCP reads its config alone since WP-A1 PR 4b. Both
+            // dependencies go with the UDP migration (WP-A1 PR 4c, ADR 0007 step 4).
             "Open3DSender",
             "Open3DReceiver"
         });

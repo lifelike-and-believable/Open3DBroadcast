@@ -84,11 +84,6 @@ namespace O3DSockets
 		return Result.ToLower();
 	}
 
-	FString BuildTcpUri(const FString& Host, int32 Port)
-	{
-		return FString::Printf(TEXT("tcp://%s:%d"), *NormaliseHostname(Host), Port);
-	}
-
 	FString BuildUdpUri(const FString& Host, int32 Port)
 	{
 		return FString::Printf(TEXT("udp://%s:%d"), *NormaliseHostname(Host), Port);

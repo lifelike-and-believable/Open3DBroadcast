@@ -4,69 +4,95 @@
 
 #include "SocketsTransportConfig.h"
 
-#include "O3DReceiverSourceSettings.h"
-#include "O3DSenderComponent.h"
 #include "SocketsTransportCommon.h"
 #include "SocketsTcpTransport.h"
+#include "Transport/O3DTransportOptions.h"
+#include "Transport/O3DTransportTypes.h"
 
-namespace
+// The TCP configure functions read only the config: the sender component and the receiver
+// source copy their (non-secret) transport options into Config.AdvancedParams before the
+// descriptor's configure function runs. So nothing here includes Open3DSender or Open3DReceiver
+// (ADR 0007 step 4, WP-A1 PR 4b). Every tcp.* option the user set is already in the map and
+// reaches the transport unchanged.
+
+namespace O3DSocketsTcpConfigPrivate
 {
-	/** Sender-side tcp.* advanced options passed through to the transport (WP-S6). */
-	const TCHAR* const TcpSenderAdvancedKeys[] =
+	/** A port option: 1 to 65535 in digits, otherwise Default (TRB-26: "80abc" is no longer port 80). */
+	int32 ReadPort(const FO3DTransportConfig& Config, const TCHAR* Key, int32 Default)
 	{
-		O3DSockets::Tcp::MaxQueueOptionKey,
-		O3DSockets::Tcp::MaxQueueAgeOptionKey,
-		O3DSockets::Tcp::StallTimeoutOptionKey,
-		O3DSockets::Tcp::KeepaliveOptionKey,
-	};
+		int32 Port = 0;
+		const FString Value = O3DTransportOptions::GetString(Config.AdvancedParams, Key);
+		return O3DTransportOptions::TryParsePort(Value, Port) ? Port : Default;
+	}
 
-	/** Receiver-side tcp.* advanced options passed through to the transport. */
-	const TCHAR* const TcpReceiverAdvancedKeys[] =
+	FString MakeTcpUri(const FString& Host, int32 Port)
 	{
-		O3DSockets::TimeoutOptionKey,
-		O3DSockets::Tcp::ConnectTimeoutOptionKey,
-		O3DSockets::Tcp::MaxFrameOptionKey,
-		O3DSockets::Tcp::BackoffOptionKey,
-		O3DSockets::Tcp::MaxBackoffOptionKey,
-	};
+		FO3DHostPort Endpoint;
+		Endpoint.Host = Host;
+		Endpoint.Port = Port;
+		Endpoint.bIPv6 = Host.Contains(TEXT(":"));
+		return FString::Printf(TEXT("tcp://%s"), *Endpoint.ToString());
+	}
+}
+
+namespace O3DSockets::Tcp
+{
+	bool ParseTcpEndpoint(const FO3DTransportConfig& Config, FO3DHostPort& OutEndpoint)
+	{
+		FO3DHostPort Endpoint;
+		bool bParsed = false;
+
+		const FString Uri = Config.Uri.TrimStartAndEnd();
+		if (Uri.StartsWith(TEXT("tcp://"), ESearchCase::IgnoreCase))
+		{
+			bParsed = O3DTransportOptions::ParseHostPort(Uri, Endpoint);
+		}
+		if (!bParsed)
+		{
+			const FString Host = O3DTransportOptions::GetString(Config.AdvancedParams, HostOptionKey);
+			int32 Port = 0;
+			if (!Host.IsEmpty() && O3DTransportOptions::TryParsePort(O3DTransportOptions::GetString(Config.AdvancedParams, PortOptionKey), Port))
+			{
+				bParsed = O3DTransportOptions::ParseHostPort(Host, Endpoint, Port);
+			}
+		}
+		if (!bParsed && !Config.StreamId.IsEmpty())
+		{
+			bParsed = O3DTransportOptions::ParseHostPort(Config.StreamId, Endpoint);
+		}
+		if (!bParsed)
+		{
+			return false;
+		}
+
+		Endpoint.Host = NormaliseHostname(Endpoint.Host);
+		OutEndpoint = MoveTemp(Endpoint);
+		return true;
+	}
 }
 
 namespace O3DSocketsConfig
 {
-	void ConfigureTcpSender(const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config, const TCHAR* TransportName)
+	void ConfigureTcpSender(FO3DTransportConfig& Config, const TCHAR* TransportName)
 	{
+		using namespace O3DSocketsTcpConfigPrivate;
 		Config.Transport = TransportName;
 		Config.Role = TEXT("sender");
 
-		const FString StoredBindHost = SenderComponent ? SenderComponent->GetTransportOption(O3DSockets::BindOptionKey) : FString();
-		const FString BindHost = StoredBindHost.IsEmpty() ? TEXT("0.0.0.0") : O3DSockets::NormaliseHostname(StoredBindHost);
+		const FString StoredBindHost = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::BindOptionKey);
+		const FString BindHost = StoredBindHost.IsEmpty() ? FString(TEXT("0.0.0.0")) : O3DSockets::NormaliseHostname(StoredBindHost);
+		const int32 Port = ReadPort(Config, O3DSockets::PortOptionKey, DefaultTcpPort);
 
-		const FString StoredPort = SenderComponent ? SenderComponent->GetTransportOption(O3DSockets::PortOptionKey) : FString();
-		const int32 Port = ParsePositiveInt(StoredPort, DefaultTcpPort);
-
-		Config.Uri = O3DSockets::BuildTcpUri(BindHost, Port);
+		Config.Uri = MakeTcpUri(BindHost, Port);
 		Config.StreamId = O3DSockets::ComposeStreamId(BindHost, Port);
 		Config.AdvancedParams.Add(O3DSockets::BindOptionKey, BindHost);
 		Config.AdvancedParams.Add(O3DSockets::PortOptionKey, FString::FromInt(Port));
 
-		// Only keys the user set are passed; the transport applies its defaults otherwise.
-		for (const TCHAR* Key : TcpSenderAdvancedKeys)
-		{
-			const FString Value = SenderComponent ? SenderComponent->GetTransportOption(Key) : FString();
-			if (!Value.IsEmpty())
-			{
-				Config.AdvancedParams.Add(Key, Value);
-			}
-		}
-
 		if (Config.Audio.bEnableAudio)
 		{
-			const FString StoredAudioBind = SenderComponent ? SenderComponent->GetTransportOption(O3DSockets::AudioBindOptionKey) : FString();
+			const FString StoredAudioBind = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::AudioBindOptionKey);
 			const FString AudioBind = StoredAudioBind.IsEmpty() ? BindHost : O3DSockets::NormaliseHostname(StoredAudioBind);
-
-			const FString StoredAudioPort = SenderComponent ? SenderComponent->GetTransportOption(O3DSockets::AudioPortOptionKey) : FString();
-			const int32 AudioPort = ParsePositiveInt(StoredAudioPort, (Port > 0) ? (Port + 1) : 0);
-
+			const int32 AudioPort = ReadPort(Config, O3DSockets::AudioPortOptionKey, Port < 65535 ? Port + 1 : 0);
 			if (AudioPort > 0)
 			{
 				Config.AdvancedParams.Add(O3DSockets::AudioBindOptionKey, AudioBind);
@@ -75,38 +101,25 @@ namespace O3DSocketsConfig
 		}
 	}
 
-	void ConfigureTcpReceiver(const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config, const TCHAR* TransportName)
+	void ConfigureTcpReceiver(FO3DTransportConfig& Config, const TCHAR* TransportName)
 	{
+		using namespace O3DSocketsTcpConfigPrivate;
 		Config.Transport = TransportName;
 
-		const FString* HostOption = Settings.TransportOptions.Find(O3DSockets::HostOptionKey);
-		const FString* PortOption = Settings.TransportOptions.Find(O3DSockets::PortOptionKey);
-		const FString Host = HostOption ? O3DSockets::NormaliseHostname(*HostOption) : FString(TEXT("127.0.0.1"));
-		const int32 Port = ParsePositiveInt(PortOption ? *PortOption : FString(), DefaultTcpPort);
+		const FString StoredHost = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::HostOptionKey);
+		const FString Host = StoredHost.IsEmpty() ? FString(TEXT("127.0.0.1")) : O3DSockets::NormaliseHostname(StoredHost);
+		const int32 Port = ReadPort(Config, O3DSockets::PortOptionKey, DefaultTcpPort);
 
-		Config.Uri = O3DSockets::BuildTcpUri(Host, Port);
+		Config.Uri = MakeTcpUri(Host, Port);
 		Config.StreamId = O3DSockets::ComposeStreamId(Host, Port);
 		Config.AdvancedParams.Add(O3DSockets::HostOptionKey, Host);
 		Config.AdvancedParams.Add(O3DSockets::PortOptionKey, FString::FromInt(Port));
 
-		// tcp.timeout (set by the receiver widget) and the WP-S6 limits used to stop here and
-		// never reached the transport.
-		for (const TCHAR* Key : TcpReceiverAdvancedKeys)
-		{
-			const FString* Value = Settings.TransportOptions.Find(Key);
-			if (Value && !Value->IsEmpty())
-			{
-				Config.AdvancedParams.Add(Key, *Value);
-			}
-		}
-
 		if (Config.Audio.bEnableAudio)
 		{
-			const FString* AudioHostOption = Settings.TransportOptions.Find(O3DSockets::AudioHostOptionKey);
-			const FString AudioHost = AudioHostOption ? O3DSockets::NormaliseHostname(*AudioHostOption) : Host;
-
-			const FString* AudioPortOption = Settings.TransportOptions.Find(O3DSockets::AudioPortOptionKey);
-			const int32 AudioPort = ParsePositiveInt(AudioPortOption ? *AudioPortOption : FString(), (Port > 0) ? Port + 1 : 0);
+			const FString StoredAudioHost = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::AudioHostOptionKey);
+			const FString AudioHost = StoredAudioHost.IsEmpty() ? Host : O3DSockets::NormaliseHostname(StoredAudioHost);
+			const int32 AudioPort = ReadPort(Config, O3DSockets::AudioPortOptionKey, Port < 65535 ? Port + 1 : 0);
 			if (AudioPort > 0)
 			{
 				Config.AdvancedParams.Add(O3DSockets::AudioHostOptionKey, AudioHost);

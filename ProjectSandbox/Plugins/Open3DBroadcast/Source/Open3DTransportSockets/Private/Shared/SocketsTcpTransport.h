@@ -3,6 +3,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Transport/O3DTransportOptions.h"
+
+struct FO3DTransportConfig;
 
 THIRD_PARTY_INCLUDES_START
 #include "o3ds/tcp_stream_parser.h"
@@ -25,13 +28,13 @@ namespace O3DSockets::Tcp
 		O3DS::writeTcpFrameHeader(Destination, static_cast<uint32>(PayloadSize));
 	}
 
-	/** Size of the unified-envelope keepalive payload (see MakeKeepaliveFrame). */
+	/** Size of the unified-envelope keepalive payload (see MakeKeepalivePayload). */
 	inline constexpr int32 KeepalivePayloadSize = 20;
 
 	/**
-	 * Builds the keepalive the sender writes when it has had nothing to send for tcp.keepalive
-	 * milliseconds (TRB-6). It is a normal TCP frame whose payload is a 20-byte unified-envelope
-	 * header (magic "O3DA", version 1) with kind Audio and a zero payload size.
+	 * The payload of the keepalive the sender writes when it has had nothing to send for
+	 * tcp.keepalive milliseconds (TRB-6), framed like any other payload. It is a 20-byte
+	 * unified-envelope header (magic "O3DA", version 1) with kind Audio and a zero payload size.
 	 *
 	 * No new wire format: receivers built before WP-S6 parse it as an audio message, reject the
 	 * empty audio payload without logging, and still count it as received data, so their idle
@@ -39,12 +42,11 @@ namespace O3DSockets::Tcp
 	 * produces an audio envelope with an empty payload otherwise (CreateUnifiedMessage rejects
 	 * one), so current receivers recognise it unambiguously.
 	 */
-	inline TArray<uint8> MakeKeepaliveFrame()
+	inline TArray<uint8> MakeKeepalivePayload()
 	{
-		TArray<uint8> Frame;
-		Frame.SetNumZeroed(FrameHeaderSize + KeepalivePayloadSize);
-		WriteFrameHeader(Frame.GetData(), KeepalivePayloadSize);
-		uint8* Envelope = Frame.GetData() + FrameHeaderSize;
+		TArray<uint8> Payload;
+		Payload.SetNumZeroed(KeepalivePayloadSize);
+		uint8* Envelope = Payload.GetData();
 		Envelope[0] = 'O';
 		Envelope[1] = '3';
 		Envelope[2] = 'D';
@@ -52,8 +54,19 @@ namespace O3DSockets::Tcp
 		Envelope[4] = 1; // envelope version
 		Envelope[5] = 1; // kind: Audio (O3DS::EUnifiedKind::Audio)
 		// codec, flags, timestamp and payload size stay zero.
-		return Frame;
+		return Payload;
 	}
+
+	/**
+	 * The TCP endpoint of a config, parsed with O3DTransportOptions::ParseHostPort (strict port
+	 * 1-65535, bracketed IPv6; TRB-26). Same precedence as before WP-A1 PR 4b: a tcp:// URI, then
+	 * the host and port options, then a StreamId of the form host:port. The host is trimmed and
+	 * lowercased. Pure parsing, any thread; nothing is resolved here.
+	 */
+	bool ParseTcpEndpoint(const FO3DTransportConfig& Config, FO3DHostPort& OutEndpoint);
+
+	/** Receiver: payload bytes received and not yet handed to Poll; at least one tcp.maxframe frame always fits. */
+	inline constexpr int32 DefaultReceiveQueueBytes = 8 * 1024 * 1024;
 
 	/** Advanced option keys and defaults for the TCP transport (documented in Transport_Module_Comparison.md). */
 	/** Receiver: seconds to wait for a connect to complete before retrying (TRB-5). */

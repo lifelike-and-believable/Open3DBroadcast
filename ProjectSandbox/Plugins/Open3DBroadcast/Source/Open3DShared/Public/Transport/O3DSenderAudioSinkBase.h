@@ -127,6 +127,10 @@ enum class EO3DAudioWireFormat : uint8
  * submit already inside the gate has left, and later submits fail fast, so a sink can never
  * enqueue after Stop() returned, nor into a later session (the gate epoch).
  *
+ * Peer gate: a transport that has nowhere to send audio yet (a TCP sender with no receiver
+ * connected) clears SetPeerReady, and sinks then refuse PCM without encoding it, as the WP-S5
+ * per-transport sinks did. It starts true, so transports without the notion never touch it.
+ *
  * Threading: Open, Close: the game thread (the sender's owner). Everything else: any thread.
  */
 class OPEN3DSHARED_API FO3DAudioPublishState
@@ -156,6 +160,10 @@ public:
 
 	EO3DAudioWireFormat GetWireFormat() const { return WireFormat; }
 
+	/** False while the transport has no peer to send audio to; sinks refuse PCM then. Any thread. */
+	void SetPeerReady(bool bReady) { bPeerReady.store(bReady, std::memory_order_release); }
+	bool IsPeerReady() const { return bPeerReady.load(std::memory_order_acquire); }
+
 	/** Audio bytes the sinks enqueued since the state was created. */
 	int64 GetAudioBytesQueued() const { return AudioBytesQueued.load(std::memory_order_relaxed); }
 	void AddAudioBytesQueued(int64 Bytes) { AudioBytesQueued.fetch_add(Bytes, std::memory_order_relaxed); }
@@ -166,6 +174,7 @@ private:
 	FO3DAudioSubjectSlot SubjectSlot;
 	const EO3DAudioWireFormat WireFormat;
 	std::atomic<int64> AudioBytesQueued{ 0 };
+	std::atomic<bool> bPeerReady{ true };
 };
 
 using FO3DAudioPublishStateRef = TSharedRef<FO3DAudioPublishState, ESPMode::ThreadSafe>;
@@ -174,7 +183,8 @@ using FO3DAudioPublishStateRef = TSharedRef<FO3DAudioPublishState, ESPMode::Thre
  * The shared sender audio sink (ADR 0007 item 7; TRB-10, TRB-11, TRB-30, TRB-35, TRF-1).
  *
  * SubmitPcm, on any thread: enter the publish state's gate in the epoch the sink was created in
- * (fails fast once the sender stopped or restarted), encode with the sink's own per-label
+ * (fails fast once the sender stopped or restarted), refuse when the state has no peer
+ * (IsPeerReady), encode with the sink's own per-label
  * encoders (FO3DSinkAudioEncoder; Opus may return zero or several frames per buffer), wrap each
  * frame (MakeAudioBytes) and enqueue it as an audio item. Returns false when the gate is closed,
  * encoding rejected the input, or the queue refused a frame (audio full: DroppedBackpressure).

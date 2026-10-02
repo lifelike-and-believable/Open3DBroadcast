@@ -29,6 +29,8 @@ namespace O3DSocketsTesting
 	OPEN3DTRANSPORTSOCKETS_API bool TcpReceiverIsConnected(const IOpen3DReceiver& Receiver);
 	/** Number of successful connects since Initialize (TRB-4). */
 	OPEN3DTRANSPORTSOCKETS_API int32 TcpReceiverGetConnectCount(const IOpen3DReceiver& Receiver);
+	/** Consecutive failed connects counted by the receiver worker's backoff policy (WP-A1 PR 4b). */
+	OPEN3DTRANSPORTSOCKETS_API int32 TcpReceiverGetFailedConnectAttempts(const IOpen3DReceiver& Receiver);
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -11,7 +11,7 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M0 Decisions (ADRs 0001–0010) | Done (#261–#263) |
 | M1 Safety and correctness: WP-S1..S11, WP-T1, WP-T2 | Done (#264–#279) |
 | M2 Fab-buildable package: WP-F1..F4, F6..F9, F11 | Done (#274–#286). **F0 and F5 wait on the maintainer** (see §5) |
-| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime), PR 3 (results, state, capabilities) and PR 4a (building blocks + Loopback) done; step 4 continues with TCP** (see §2) |
+| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime), PR 3 (results, state, capabilities), PR 4a (building blocks + Loopback) and PR 4b (TCP) done; step 4 continues with UDP** (see §2) |
 | M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | Not started |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
 | WP-CTL control channel (D11, ADR 0011) | CTL-1..7 done (#290–#295, CTL-6, CTL-7); live-server checks remain (see §2b) |
@@ -45,7 +45,13 @@ Design: `docs/adr/0007-transport-abstraction-and-registry.md`, section "Implemen
      - Loopback: one shared queue per channel (`RefuseNewest`), demux in `Poll`, the shared sink; no Open3DSender/Open3DReceiver dependency. Net transport lines -311.
      - `O3D_TRANSPORT_API_VERSION` stays **4** (standalone types only).
      - Tests: `Open3DBroadcast.Shared.SendQueue.*`, `.TransportWorker.*`, `.ReconnectPolicy.*`, `.ReceiveDemux.*`, `.AudioSinkBase.*`, `.HostPort.*`, `.TransportOptions.TypedGetters`; `Open3DBroadcast.Transport.Loopback.Audio.IndependentOfFrameQueue`, `.Lifetime.StopWhileSending`.
-   - **Start here next: TCP (PR 4b).** Replace `FSocketsTcpPublishState`'s `FO3DEncodedPayloadQueue` with `FO3DSendQueue` (frames, audio and control as items; the TCP framing moves to the worker; pick the mocap policy that keeps `ReliableOrdered` and state it), the worker loop with `FO3DTransportWorker`, the receive branches with `FO3DUnifiedReceiveDemux`, `O3DSockets::ParseHostPort`/`GetIntOption` with `O3DTransportOptions` (resolution on the worker), the receiver backoff with `FO3DReconnectPolicy`, and the sink with `FO3DQueuedSenderAudioSink`. UDP shares `Open3DTransportSockets`, so its Build.cs dependency on Open3DSender/Open3DReceiver goes only once UDP has migrated too.
+   - **TCP done (WP-A1 PR 4b).** Details in the ADR 0007 addendum "implementation notes (WP-A1 PR 4b)".
+     - Sender: frames, audio and control are items on one `FO3DSendQueue` (`RefuseNewest`, `tcp.maxqueue` per kind, `tcp.maxqueueage` for frames and audio); an `FO3DTransportWorker` writes each item as one TCP frame (header written on the worker, no copy); the sink is `FO3DQueuedSenderAudioSink`, refused without a client through the new `FO3DAudioPublishState::SetPeerReady`. The bind address must be an IP literal or a wildcard (no DNS on the game thread), as before.
+     - Receiver: an `FO3DTransportWorker` resolves (`ResolveHostPort`), connects, reconnects with `FO3DReconnectPolicy` (jitter added), reads and frames; payloads go through a bounded hand-off queue (8 MiB, at least one `tcp.maxframe`) to `Poll`, which feeds `FO3DUnifiedReceiveDemux`. A full hand-off queue stops reading, so TCP flow control holds the sender back. The receiver holds the consumer strongly and releases it in `Stop` (TRF-38).
+     - Config: `ParseTcpEndpoint` (strict, bracketed IPv6) and the configure functions read only the config. `SocketsTcpAudio.*` and `BuildTcpUri` are gone. The module still names Open3DSender/Open3DReceiver for UDP's configure functions.
+     - `O3D_TRANSPORT_API_VERSION` stays **4**.
+     - Tests: `Open3DBroadcast.Transport.Sockets.Tcp.AudioIndependentOfFrameQueue`, `.ReceiverBacksOffWithoutSender`, `.StopWhileSending` (1,000 cycles, 50 with a client); `SocketsTesting.h` gained `TcpReceiverGetFailedConnectAttempts`.
+   - **Start here next: UDP (PR 4c).** Move the UDP sends off the caller's thread onto an `FO3DTransportWorker` draining an `FO3DSendQueue` (TRB-20; the fragmenter runs on the worker), the receive branches onto `FO3DUnifiedReceiveDemux`, the option parsing onto `O3DTransportOptions`, and the sink onto `FO3DQueuedSenderAudioSink`. Then rewrite `ConfigureUdpSender`/`ConfigureUdpReceiver` to read the config, delete the remaining `O3DSockets` option helpers, and drop Open3DSender/Open3DReceiver from `Open3DTransportSockets.Build.cs`.
 5. **Typed config and consumer API** (SHR-36, TRB-27, SHR-16, TRF-38): removes the LiveKit string fields from `FO3DTransportConfig`, deletes `Send(SubjectList)`.
 6. Next minor release: delete the shims and bump `O3D_TRANSPORT_API_VERSION` (to 5, or later if other steps bump it first; PR 3 took 4).
 
@@ -128,6 +134,8 @@ With UE 5.7 installed locally you can also run the real build and tests: `Build/
 9. `TSlateDelegates<int32>::FOnValueCommitted` does not exist in 5.7; use the SLATE_EVENT shorthand `.OnValueCommitted(this, &Method, Payload)`.
 10. Windows PowerShell 5.1 ignores `-Include` together with `-LiteralPath`; filter with `Where-Object`.
 11. Helpers in anonymous namespaces need names unique within their module: unity builds merge a module's .cpp files, and CI's strict build (non-unity) will not catch a collision. A local `ProjectSandboxEditor` build does (see #287, `GetPipeContextRegistry` in NNG).
+12. Never name a free function, local or helper after a UE global namespace (`Audio`, `UE`, `Chaos`, ...). MSVC reports C2872 "ambiguous symbol" when that namespace is visible in the module; `O3DSendQueueTests.cpp` had helpers called `Audio()` (#305; renamed `MocapItem`/`AudioItem`/`ControlItem`).
+13. The copyright line must be followed by a blank line; a bare `//` continuation line right after it fails `Build/Scripts/check-copyright-headers.py`. Run the script before pushing.
 
 ## 5. Waiting on the maintainer
 
