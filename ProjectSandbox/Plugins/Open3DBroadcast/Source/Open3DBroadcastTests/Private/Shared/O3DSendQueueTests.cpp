@@ -29,9 +29,9 @@ namespace O3DSendQueueTests
 		return Bytes;
 	}
 
-	FO3DSendItem Mocap(int32 Size, uint8 Seed = 0) { return FO3DSendItem::MakeMocap(MakeBytes(Size, Seed), TEXT("Subject"), 0.0); }
-	FO3DSendItem Audio(int32 Size, uint8 Seed = 0) { return FO3DSendItem::MakeAudio(MakeBytes(Size, Seed), TEXT("Subject"), 0.0); }
-	FO3DSendItem Control(int32 Size, uint8 Seed = 0) { return FO3DSendItem::MakeControl(MakeBytes(Size, Seed)); }
+	FO3DSendItem MocapItem(int32 Size, uint8 Seed = 0) { return FO3DSendItem::MakeMocap(MakeBytes(Size, Seed), TEXT("Subject"), 0.0); }
+	FO3DSendItem AudioItem(int32 Size, uint8 Seed = 0) { return FO3DSendItem::MakeAudio(MakeBytes(Size, Seed), TEXT("Subject"), 0.0); }
+	FO3DSendItem ControlItem(int32 Size, uint8 Seed = 0) { return FO3DSendItem::MakeControl(MakeBytes(Size, Seed)); }
 
 	/** Runs a body on its own thread; joined by Join or the destructor. */
 	class FSendQueueTestThread final : public FRunnable
@@ -85,9 +85,9 @@ bool FO3DSendQueueRefuseNewestTest::RunTest(const FString& Parameters)
 	Limits.MocapOverflow = EO3DMocapOverflow::RefuseNewest;
 	FO3DSendQueue Queue(Limits);
 
-	TestTrue(TEXT("1st queued"), Queue.Enqueue(Mocap(10, 1)) == EO3DSendResult::Queued);
-	TestTrue(TEXT("2nd queued"), Queue.Enqueue(Mocap(10, 2)) == EO3DSendResult::Queued);
-	FO3DSendItem Third = Mocap(10, 3);
+	TestTrue(TEXT("1st queued"), Queue.Enqueue(MocapItem(10, 1)) == EO3DSendResult::Queued);
+	TestTrue(TEXT("2nd queued"), Queue.Enqueue(MocapItem(10, 2)) == EO3DSendResult::Queued);
+	FO3DSendItem Third = MocapItem(10, 3);
 	TestTrue(TEXT("3rd refused at the hard cap"), Queue.Enqueue(MoveTemp(Third)) == EO3DSendResult::DroppedBackpressure);
 	TestEqual(TEXT("A refused item is left untouched for a retry"), Third.Bytes.Num(), 10);
 
@@ -99,7 +99,7 @@ bool FO3DSendQueueRefuseNewestTest::RunTest(const FString& Parameters)
 	FO3DSendItem Out;
 	TestTrue(TEXT("Oldest first"), Queue.Dequeue(Out) && Out.Bytes[0] == 1);
 	TestTrue(TEXT("Nothing discarded with RefuseNewest"), Queue.Dequeue(Out) && Out.Bytes[0] == 2);
-	TestTrue(TEXT("Room again after a dequeue"), Queue.Enqueue(Mocap(10, 4)) == EO3DSendResult::Queued);
+	TestTrue(TEXT("Room again after a dequeue"), Queue.Enqueue(MocapItem(10, 4)) == EO3DSendResult::Queued);
 	TestEqual(TEXT("No drops"), Queue.GetStats().Mocap.Dropped, static_cast<int64>(0));
 	return true;
 }
@@ -112,10 +112,10 @@ bool FO3DSendQueueByteLimitTest::RunTest(const FString& Parameters)
 	Limits.Audio.MaxBytes = 100;
 	FO3DSendQueue Queue(Limits);
 
-	TestTrue(TEXT("60 bytes fit"), Queue.Enqueue(Audio(60)) == EO3DSendResult::Queued);
-	TestTrue(TEXT("41 more would exceed 100"), Queue.Enqueue(Audio(41)) == EO3DSendResult::DroppedBackpressure);
-	TestTrue(TEXT("40 more reach exactly 100"), Queue.Enqueue(Audio(40)) == EO3DSendResult::Queued);
-	TestTrue(TEXT("An item larger than the cap is always refused"), Queue.Enqueue(Audio(101)) == EO3DSendResult::DroppedBackpressure);
+	TestTrue(TEXT("60 bytes fit"), Queue.Enqueue(AudioItem(60)) == EO3DSendResult::Queued);
+	TestTrue(TEXT("41 more would exceed 100"), Queue.Enqueue(AudioItem(41)) == EO3DSendResult::DroppedBackpressure);
+	TestTrue(TEXT("40 more reach exactly 100"), Queue.Enqueue(AudioItem(40)) == EO3DSendResult::Queued);
+	TestTrue(TEXT("An item larger than the cap is always refused"), Queue.Enqueue(AudioItem(101)) == EO3DSendResult::DroppedBackpressure);
 	TestEqual(TEXT("Pending bytes never pass the cap"), Queue.GetStats().Audio.PendingBytes, static_cast<int64>(100));
 	TestEqual(TEXT("Refused audio"), Queue.GetStats().Audio.Refused, static_cast<int64>(2));
 	return true;
@@ -132,9 +132,9 @@ bool FO3DSendQueueDropOldestTest::RunTest(const FString& Parameters)
 
 	for (uint8 Index = 1; Index <= 4; ++Index)
 	{
-		TestTrue(*FString::Printf(TEXT("Frame %d accepted below the hard cap"), Index), Queue.Enqueue(Mocap(8, Index)) == EO3DSendResult::Queued);
+		TestTrue(*FString::Printf(TEXT("Frame %d accepted below the hard cap"), Index), Queue.Enqueue(MocapItem(8, Index)) == EO3DSendResult::Queued);
 	}
-	TestTrue(TEXT("5th refused at the hard cap (twice the soft cap)"), Queue.Enqueue(Mocap(8, 5)) == EO3DSendResult::DroppedBackpressure);
+	TestTrue(TEXT("5th refused at the hard cap (twice the soft cap)"), Queue.Enqueue(MocapItem(8, 5)) == EO3DSendResult::DroppedBackpressure);
 
 	FO3DSendItem Out;
 	TestTrue(TEXT("Dequeue returns a frame"), Queue.Dequeue(Out));
@@ -161,10 +161,10 @@ bool FO3DSendQueueControlNeverDroppedTest::RunTest(const FString& Parameters)
 		Limits.Mocap.MaxItems = 1;
 		Limits.MocapOverflow = EO3DMocapOverflow::RefuseNewest;
 		FO3DSendQueue Queue(Limits);
-		TestTrue(TEXT("Mocap fills its limit"), Queue.Enqueue(Mocap(4)) == EO3DSendResult::Queued);
-		TestTrue(TEXT("Mocap refused"), Queue.Enqueue(Mocap(4)) == EO3DSendResult::DroppedBackpressure);
-		TestTrue(TEXT("Control still accepted"), Queue.Enqueue(Control(4)) == EO3DSendResult::Queued);
-		TestTrue(TEXT("Audio still accepted"), Queue.Enqueue(Audio(4)) == EO3DSendResult::Queued);
+		TestTrue(TEXT("Mocap fills its limit"), Queue.Enqueue(MocapItem(4)) == EO3DSendResult::Queued);
+		TestTrue(TEXT("Mocap refused"), Queue.Enqueue(MocapItem(4)) == EO3DSendResult::DroppedBackpressure);
+		TestTrue(TEXT("Control still accepted"), Queue.Enqueue(ControlItem(4)) == EO3DSendResult::Queued);
+		TestTrue(TEXT("Audio still accepted"), Queue.Enqueue(AudioItem(4)) == EO3DSendResult::Queued);
 	}
 	{
 		// Eviction of old mocap never takes the control or audio items between the frames.
@@ -172,10 +172,10 @@ bool FO3DSendQueueControlNeverDroppedTest::RunTest(const FString& Parameters)
 		Limits.Mocap.MaxItems = 1;
 		Limits.MocapOverflow = EO3DMocapOverflow::DropOldest;
 		FO3DSendQueue Queue(Limits);
-		Queue.Enqueue(Mocap(4, 1));
-		Queue.Enqueue(Control(4, 10));
-		Queue.Enqueue(Audio(4, 20));
-		Queue.Enqueue(Mocap(4, 2));
+		Queue.Enqueue(MocapItem(4, 1));
+		Queue.Enqueue(ControlItem(4, 10));
+		Queue.Enqueue(AudioItem(4, 20));
+		Queue.Enqueue(MocapItem(4, 2));
 
 		TArray<EO3DSendItemKind> Kinds;
 		TArray<uint8> FirstBytes;
@@ -198,7 +198,7 @@ bool FO3DSendQueueControlNeverDroppedTest::RunTest(const FString& Parameters)
 		Limits.Control.MaxItems = 3;
 		FO3DSendQueue Queue(Limits);
 		int32 Accepted = 0;
-		while (Queue.Enqueue(Control(4)) == EO3DSendResult::Queued && Accepted < 100)
+		while (Queue.Enqueue(ControlItem(4)) == EO3DSendResult::Queued && Accepted < 100)
 		{
 			++Accepted;
 		}
@@ -215,9 +215,9 @@ bool FO3DSendQueueAgeLimitTest::RunTest(const FString& Parameters)
 	FO3DSendQueueLimits Limits;
 	Limits.MaxAgeSeconds = 0.5;
 	FO3DSendQueue Queue(Limits);
-	Queue.Enqueue(Mocap(4, 1));
-	Queue.Enqueue(Audio(4, 2));
-	Queue.Enqueue(Control(4, 3));
+	Queue.Enqueue(MocapItem(4, 1));
+	Queue.Enqueue(AudioItem(4, 2));
+	Queue.Enqueue(ControlItem(4, 3));
 
 	FO3DSendItem Out;
 	const double Later = FPlatformTime::Seconds() + 10.0;
@@ -226,7 +226,7 @@ bool FO3DSendQueueAgeLimitTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Expired mocap counted"), Queue.GetStats().Mocap.Dropped, static_cast<int64>(1));
 	TestEqual(TEXT("Expired audio counted"), Queue.GetStats().Audio.Dropped, static_cast<int64>(1));
 
-	Queue.Enqueue(Mocap(4, 4));
+	Queue.Enqueue(MocapItem(4, 4));
 	TestTrue(TEXT("A fresh frame is handed out"), Queue.Dequeue(Out) && Out.Bytes[0] == 4);
 	TestTrue(TEXT("Enqueue stamps the time"), Out.EnqueueTimeSec > 0.0);
 	return true;
@@ -239,7 +239,7 @@ bool FO3DSendQueueOrderTest::RunTest(const FString& Parameters)
 	FO3DSendQueue Queue;
 	for (uint8 Index = 0; Index < 30; ++Index)
 	{
-		FO3DSendItem Item = (Index % 3 == 0) ? Mocap(2, Index) : ((Index % 3 == 1) ? Audio(2, Index) : Control(2, Index));
+		FO3DSendItem Item = (Index % 3 == 0) ? MocapItem(2, Index) : ((Index % 3 == 1) ? AudioItem(2, Index) : ControlItem(2, Index));
 		Queue.Enqueue(MoveTemp(Item));
 	}
 	FO3DSendItem Out;
@@ -262,10 +262,10 @@ bool FO3DSendQueueEmptyAndLimitsTest::RunTest(const FString& Parameters)
 {
 	using namespace O3DSendQueueTests;
 	FO3DSendQueue Queue;
-	Queue.Enqueue(Mocap(4));
-	Queue.Enqueue(Mocap(4));
-	Queue.Enqueue(Audio(4));
-	Queue.Enqueue(Control(4));
+	Queue.Enqueue(MocapItem(4));
+	Queue.Enqueue(MocapItem(4));
+	Queue.Enqueue(AudioItem(4));
+	Queue.Enqueue(ControlItem(4));
 	TestEqual(TEXT("Empty reports the discarded frames"), Queue.Empty(), 2);
 	TestEqual(TEXT("Nothing pending"), Queue.GetStats().GetPendingItems(), 0);
 	TestEqual(TEXT("No pending bytes"), Queue.GetPendingBytes(), static_cast<int64>(0));
@@ -276,7 +276,7 @@ bool FO3DSendQueueEmptyAndLimitsTest::RunTest(const FString& Parameters)
 	Limits.MocapOverflow = EO3DMocapOverflow::RefuseNewest;
 	Queue.SetLimits(Limits);
 	TestEqual(TEXT("Limits read back"), Queue.GetLimits().Mocap.MaxItems, 1);
-	TestTrue(TEXT("New limit applies"), Queue.Enqueue(Mocap(4)) == EO3DSendResult::Queued && Queue.Enqueue(Mocap(4)) == EO3DSendResult::DroppedBackpressure);
+	TestTrue(TEXT("New limit applies"), Queue.Enqueue(MocapItem(4)) == EO3DSendResult::Queued && Queue.Enqueue(MocapItem(4)) == EO3DSendResult::DroppedBackpressure);
 
 	TestTrue(TEXT("An Enqueue wakes the consumer"), Queue.WaitForWork(0) || Queue.WaitForWork(1000));
 	Queue.Wake();
@@ -316,7 +316,7 @@ bool FO3DSendQueueConcurrentAccountingTest::RunTest(const FString& Parameters)
 				{
 					const int32 Size = 1 + ((Index * 7 + Producer * 13) % 200);
 					const int32 Kind = (Index + Producer) % 3;
-					FO3DSendItem Item = Kind == 0 ? Mocap(Size) : (Kind == 1 ? Audio(Size) : Control(Size));
+					FO3DSendItem Item = Kind == 0 ? MocapItem(Size) : (Kind == 1 ? AudioItem(Size) : ControlItem(Size));
 					if (Queue.Enqueue(MoveTemp(Item)) == EO3DSendResult::Queued)
 					{
 						AcceptedBytes.fetch_add(Size);
@@ -374,7 +374,7 @@ bool FO3DSendQueueConcurrentAccountingTest::RunTest(const FString& Parameters)
 				{
 					for (int32 Index = 0; Index < 1000; ++Index)
 					{
-						if (Queue.Enqueue(Mocap(16)) == EO3DSendResult::Queued)
+						if (Queue.Enqueue(MocapItem(16)) == EO3DSendResult::Queued)
 						{
 							Accepted.fetch_add(1);
 						}
