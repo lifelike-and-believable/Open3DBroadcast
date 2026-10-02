@@ -49,7 +49,7 @@ namespace O3DSocketsConfig
 	void ConfigureUdpSender(FO3DTransportConfig& Config)
 	{
 		O3DSocketsUdpConfigPrivate::ConfigureUdp(Config, TEXT("127.0.0.1"));
-		Config.Role = TEXT("sender");
+		Config.Role = EO3DTransportRole::Sender;
 
 		if (Config.Audio.bEnableAudio)
 		{
@@ -69,6 +69,7 @@ namespace O3DSocketsConfig
 	void ConfigureUdpReceiver(FO3DTransportConfig& Config)
 	{
 		O3DSocketsUdpConfigPrivate::ConfigureUdp(Config, TEXT("0.0.0.0"));
+		Config.Role = EO3DTransportRole::Receiver;
 
 		if (Config.Audio.bEnableAudio)
 		{

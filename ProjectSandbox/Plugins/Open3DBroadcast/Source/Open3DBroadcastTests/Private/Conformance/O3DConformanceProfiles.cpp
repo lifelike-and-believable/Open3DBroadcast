@@ -80,8 +80,8 @@ namespace O3DConformanceProfiles
 		virtual FO3DTransportConfig MakeSenderConfig() override
 		{
 			FO3DTransportConfig Config;
-			Config.Transport = GetTransportName().ToString();
-			Config.Role = TEXT("sender");
+			Config.Transport = GetTransportName();
+			Config.Role = EO3DTransportRole::Sender;
 			Config.StreamId = TEXT("fake");
 			return Config;
 		}
@@ -89,7 +89,7 @@ namespace O3DConformanceProfiles
 		virtual FO3DTransportConfig MakeReceiverConfig() override
 		{
 			FO3DTransportConfig Config = MakeSenderConfig();
-			Config.Role = TEXT("receiver");
+			Config.Role = EO3DTransportRole::Receiver;
 			return Config;
 		}
 
@@ -125,7 +125,7 @@ namespace O3DConformanceProfiles
 		{
 			FO3DTransportConfig Config;
 			Config.Transport = TEXT("Loopback");
-			Config.Role = bSender ? TEXT("sender") : TEXT("receiver");
+			Config.Role = bSender ? EO3DTransportRole::Sender : EO3DTransportRole::Receiver;
 			Config.StreamId = Channel;
 			Config.Uri = FString::Printf(TEXT("loopback://%s?role=%s"), *Channel, bSender ? TEXT("pub") : TEXT("sub"));
 			Config.AdvancedParams.Add(TEXT("channel"), Channel);
@@ -158,8 +158,8 @@ namespace O3DConformanceProfiles
 		FO3DTransportConfig MakeConfig(bool bSender, int32 MaxQueueBytes) const
 		{
 			FO3DTransportConfig Config;
-			Config.Transport = TEXT("sockets.tcp");
-			Config.Role = bSender ? TEXT("sender") : TEXT("receiver");
+			Config.Transport = TEXT("TCP");
+			Config.Role = bSender ? EO3DTransportRole::Sender : EO3DTransportRole::Receiver;
 			Config.Uri = FString::Printf(TEXT("tcp://127.0.0.1:%d"), Port);
 			Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), Port);
 			Config.AdvancedParams.Add(bSender ? TEXT("bind") : TEXT("host"), TEXT("127.0.0.1"));
@@ -195,8 +195,8 @@ namespace O3DConformanceProfiles
 		FO3DTransportConfig MakeConfig(bool bSender) const
 		{
 			FO3DTransportConfig Config;
-			Config.Transport = TEXT("sockets.udp");
-			Config.Role = bSender ? TEXT("sender") : TEXT("receiver");
+			Config.Transport = TEXT("UDP");
+			Config.Role = bSender ? EO3DTransportRole::Sender : EO3DTransportRole::Receiver;
 			Config.Uri = FString::Printf(TEXT("udp://127.0.0.1:%d"), Port);
 			Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), Port);
 			Config.AdvancedParams.Add(TEXT("host"), TEXT("127.0.0.1"));
@@ -236,8 +236,8 @@ namespace O3DConformanceProfiles
 		FO3DTransportConfig MakeConfig(bool bSender, int32 MaxQueueBytes) const
 		{
 			FO3DTransportConfig Config;
-			Config.Transport = TEXT("nng");
-			Config.Role = bSender ? TEXT("sender") : TEXT("receiver");
+			Config.Transport = TEXT("NNG");
+			Config.Role = bSender ? EO3DTransportRole::Sender : EO3DTransportRole::Receiver;
 			Config.Uri = FString::Printf(TEXT("tcp://127.0.0.1:%d"), Port);
 			Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), Port);
 			Config.AdvancedParams.Add(TEXT("nng.mode"), bSender ? TEXT("pub") : TEXT("sub"));

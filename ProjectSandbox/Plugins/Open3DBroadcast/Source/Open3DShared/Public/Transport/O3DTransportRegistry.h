@@ -75,25 +75,36 @@ using FO3DReceiverConfigureFunction = FO3DTransportConfigureFunction;
 /** Capability query of a descriptor (ADR 0007 item 4). Any thread, outside the registry lock. */
 using FO3DCapabilitiesFunction = TFunction<FO3DTransportCapabilities(const FO3DTransportConfig&)>;
 
-/** The options one role of a transport reads from its namespaced option map. */
+/**
+ * The options one role of a transport reads from its namespaced option map.
+ *
+ * Secrets (ADR 0004): a key is secret when the schema has a Secret entry for it (the typed form,
+ * ADR 0007 item 8, WP-A1 PR 5c) or when it is listed in SecretOptionKeys. Its environment
+ * variable is the entry's SecretEnvVar, else SecretEnvVars' value for it. GetSecretDeclaration
+ * returns the union, which is what the hosts, the editor and the secret store use. A secret key
+ * is never persisted, never logged, and reaches the transport only through
+ * FO3DTransportConfig::Secrets.
+ */
 struct FO3DTransportRoleOptions
 {
 	/**
-	 * Option keys whose values are credentials (ADR 0004). Never persisted, never logged; the
-	 * component or source resolves them from FO3DSecretStore into FO3DTransportConfig::Secrets.
+	 * Deprecated input since WP-A1 PR 5c: declare a secret with a Secret entry in OptionSchema
+	 * instead. Still honoured, merged with the schema's entries (for transports with no schema
+	 * row for a secret, and for the deprecated transport customizations).
 	 */
 	TArray<FString> SecretOptionKeys;
 
 	/**
-	 * Optional environment variable per secret key, e.g. {"<transport>.token", "O3DB_<TRANSPORT>_TOKEN"}.
-	 * A non-default credential profile first tries "<NAME>__<PROFILE>".
+	 * Deprecated input since WP-A1 PR 5c: put the name in the Secret entry's SecretEnvVar instead.
+	 * Still honoured for a key whose entry names none, e.g.
+	 * {"<transport>.token", "O3DB_<TRANSPORT>_TOKEN"}. A non-default credential profile first
+	 * tries "<NAME>__<PROFILE>".
 	 */
 	TMap<FString, FString> SecretEnvVars;
 
 	/**
 	 * The declared options, as data (ADR 0010 §4). The Open3DBroadcastEditor module builds the
-	 * Details and LiveLink panel rows from it. Every Secret entry's key must also be in
-	 * SecretOptionKeys.
+	 * Details and LiveLink panel rows from it. Its Secret entries declare the role's secrets.
 	 */
 	FO3DTransportOptionSchema OptionSchema;
 
@@ -101,6 +112,14 @@ struct FO3DTransportRoleOptions
 	{
 		return SecretOptionKeys.Num() == 0 && SecretEnvVars.Num() == 0 && OptionSchema.Num() == 0;
 	}
+
+	/**
+	 * The secret keys and their environment variables: the schema's Secret entries (in schema
+	 * order, with SecretEnvVar), then the SecretOptionKeys they do not already name (keys compared
+	 * case-insensitively, as the option maps do). An entry's SecretEnvVar wins over SecretEnvVars;
+	 * a key with neither has no environment variable.
+	 */
+	OPEN3DSHARED_API void GetSecretDeclaration(TArray<FString>& OutSecretKeys, TMap<FString, FString>& OutSecretEnvVars) const;
 };
 
 /**
@@ -223,8 +242,9 @@ public:
 	TArray<FName> GetNames(EO3DTransportRole Role) const;
 
 	/**
-	 * Copies the secret declaration of Role for Name. Returns false, with empty outputs, when Name
-	 * is not registered. Any thread.
+	 * Copies the secret declaration of Role for Name (FO3DTransportRoleOptions::
+	 * GetSecretDeclaration: the schema's Secret entries merged with SecretOptionKeys and
+	 * SecretEnvVars). Returns false, with empty outputs, when Name is not registered. Any thread.
 	 */
 	bool GetSecretDeclaration(FName Name, EO3DTransportRole Role, TArray<FString>& OutSecretKeys, TMap<FString, FString>& OutSecretEnvVars) const;
 

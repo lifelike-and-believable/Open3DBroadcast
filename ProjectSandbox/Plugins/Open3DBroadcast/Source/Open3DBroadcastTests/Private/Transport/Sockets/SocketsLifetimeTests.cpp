@@ -66,8 +66,9 @@ namespace
 	FO3DTransportConfig MakeSocketsConfig(const TCHAR* Scheme, int32 Port)
 	{
 		FO3DTransportConfig Config;
-		Config.Transport = FString::Printf(TEXT("sockets.%s"), Scheme);
-		Config.Role = TEXT("sender");
+		// The registered name, "TCP" or "UDP" (TRB-27).
+		Config.Transport = FName(*FString(Scheme).ToUpper());
+		Config.Role = EO3DTransportRole::Sender;
 		Config.Uri = FString::Printf(TEXT("%s://127.0.0.1:%d"), Scheme, Port);
 		Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), Port);
 		Config.AdvancedParams.Add(TEXT("bind"), TEXT("127.0.0.1"));

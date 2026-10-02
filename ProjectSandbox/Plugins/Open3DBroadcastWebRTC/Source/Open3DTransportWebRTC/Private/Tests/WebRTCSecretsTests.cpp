@@ -81,6 +81,48 @@ bool FWebRTCSecretsDeclarationTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// WP-A1 PR 5c (ADR 0007 item 8): the schema's Secret entries are WebRTC's whole secret declaration,
+// environment variables included; the deprecated lists are empty.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCSecretsSchemaEntriesTest, "Open3DBroadcast.Transport.WebRTC.Secrets.SchemaEntriesCarryEnvVars",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FWebRTCSecretsSchemaEntriesTest::RunTest(const FString& Parameters)
+{
+	const FO3DTransportDescriptorPtr Descriptor = FO3DTransportRegistry::Get().Find(TEXT("WebRTC"));
+	if (!TestTrue(TEXT("WebRTC registered"), Descriptor.IsValid()))
+	{
+		return false;
+	}
+
+	for (const EO3DTransportRole Role : { EO3DTransportRole::Sender, EO3DTransportRole::Receiver })
+	{
+		const FString Side = LexToString(Role);
+		const FO3DTransportRoleOptions& Options = Descriptor->GetRoleOptions(Role);
+		TestEqual(*(Side + TEXT(": no deprecated secret keys")), Options.SecretOptionKeys.Num(), 0);
+		TestEqual(*(Side + TEXT(": no deprecated env vars")), Options.SecretEnvVars.Num(), 0);
+
+		const FO3DTransportOptionField* Token = Options.OptionSchema.FindByPredicate([](const FO3DTransportOptionField& Field) { return Field.Key == WebRTCUtils::TokenOptionKey; });
+		const FO3DTransportOptionField* EndpointAuth = Options.OptionSchema.FindByPredicate([](const FO3DTransportOptionField& Field) { return Field.Key == WebRTCUtils::TokenEndpointAuthOptionKey; });
+		if (TestTrue(*(Side + TEXT(": token entry")), Token != nullptr))
+		{
+			TestTrue(*(Side + TEXT(": token entry is Secret")), Token->Type == EO3DTransportOptionType::Secret);
+			TestEqual(*(Side + TEXT(": token entry's env var")), Token->SecretEnvVar, FString(WebRTCUtils::TokenEnvVar));
+		}
+		if (TestTrue(*(Side + TEXT(": endpoint credential entry")), EndpointAuth != nullptr))
+		{
+			TestTrue(*(Side + TEXT(": endpoint credential entry is Secret")), EndpointAuth->Type == EO3DTransportOptionType::Secret);
+			TestEqual(*(Side + TEXT(": endpoint credential entry's env var")), EndpointAuth->SecretEnvVar, FString(WebRTCUtils::TokenEndpointAuthEnvVar));
+		}
+
+		// What the hosts and the secret store get: the same two keys and variables as before.
+		TArray<FString> Keys;
+		TMap<FString, FString> EnvVars;
+		FO3DTransportRegistry::Get().GetSecretDeclaration(TEXT("WebRTC"), Role, Keys, EnvVars);
+		TestEqual(*(Side + TEXT(": two secret keys")), Keys.Num(), 2);
+		TestEqual(*(Side + TEXT(": endpoint credential env var")), EnvVars.FindRef(WebRTCUtils::TokenEndpointAuthOptionKey), FString(WebRTCUtils::TokenEndpointAuthEnvVar));
+	}
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCSecretsRequestBodyTest, "Open3DBroadcast.Transport.WebRTC.Secrets.RequestBodyHasNoGrants",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCSecretsRequestBodyTest::RunTest(const FString& Parameters)

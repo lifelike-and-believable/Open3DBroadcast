@@ -460,10 +460,58 @@ bool FO3DTransportRegistry::GetSecretDeclaration(FName Name, EO3DTransportRole R
 		return false;
 	}
 
-	const FO3DTransportRoleOptions& Options = Descriptor->GetRoleOptions(Role);
-	OutSecretKeys = Options.SecretOptionKeys;
-	OutSecretEnvVars = Options.SecretEnvVars;
+	Descriptor->GetRoleOptions(Role).GetSecretDeclaration(OutSecretKeys, OutSecretEnvVars);
 	return true;
+}
+
+void FO3DTransportRoleOptions::GetSecretDeclaration(TArray<FString>& OutSecretKeys, TMap<FString, FString>& OutSecretEnvVars) const
+{
+	OutSecretKeys.Reset();
+	OutSecretEnvVars.Reset();
+
+	const auto ContainsKey = [&OutSecretKeys](const FString& Key)
+	{
+		return OutSecretKeys.ContainsByPredicate([&Key](const FString& Existing)
+		{
+			return Existing.Equals(Key, ESearchCase::IgnoreCase);
+		});
+	};
+
+	// The typed form first (WP-A1 PR 5c): each Secret entry carries its environment variable.
+	for (const FO3DTransportOptionField& Field : OptionSchema)
+	{
+		if (Field.Type != EO3DTransportOptionType::Secret || Field.Key.IsEmpty() || ContainsKey(Field.Key))
+		{
+			continue;
+		}
+		OutSecretKeys.Add(Field.Key);
+		FString EnvVar = Field.SecretEnvVar.TrimStartAndEnd();
+		if (EnvVar.IsEmpty())
+		{
+			if (const FString* Listed = SecretEnvVars.Find(Field.Key))
+			{
+				EnvVar = Listed->TrimStartAndEnd();
+			}
+		}
+		if (!EnvVar.IsEmpty())
+		{
+			OutSecretEnvVars.Add(Field.Key, EnvVar);
+		}
+	}
+
+	// The deprecated lists, for keys no Secret entry declares.
+	for (const FString& Key : SecretOptionKeys)
+	{
+		if (Key.IsEmpty() || ContainsKey(Key))
+		{
+			continue;
+		}
+		OutSecretKeys.Add(Key);
+		if (const FString* EnvVar = SecretEnvVars.Find(Key))
+		{
+			OutSecretEnvVars.Add(Key, *EnvVar);
+		}
+	}
 }
 
 bool FO3DTransportRegistry::GetOptionSchema(FName Name, EO3DTransportRole Role, FO3DTransportOptionSchema& OutSchema) const

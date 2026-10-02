@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Templates/SharedPointer.h"
 #include "Transport/O3DTransportOptionsView.h"
+#include "Transport/O3DTransportTypes.h"
 
 class FInternetAddr;
 
@@ -98,4 +99,24 @@ namespace O3DTransportOptions
 	 * not literals. Any thread.
 	 */
 	OPEN3DSHARED_API bool IsIpLiteral(const FO3DHostPort& Endpoint);
+
+	/**
+	 * Runs Field.Validate on Value (WP-A1 PR 5c). True when the field has no Validate, when Value
+	 * is empty or whitespace (an unset key uses the default), when the field is a Secret (its
+	 * value never enters an option map), or when Validate accepts the trimmed value. Otherwise
+	 * false, with OutError from Validate, or a generic sentence when Validate left it empty. Game
+	 * thread, like Validate itself.
+	 */
+	OPEN3DSHARED_API bool ValidateOptionValue(const FO3DTransportOptionField& Field, const FString& Value, FText& OutError);
+
+	/**
+	 * Checks the options a transport is about to start with (WP-A1 PR 5c): ValidateOptionValue for
+	 * every schema field that is set and visible (IsVisible). Keys the schema does not declare,
+	 * unset keys and hidden rows are not checked, and neither is a value's type or range: those
+	 * keep falling back to the default or being clamped, as before. Ok, or InvalidConfig whose
+	 * message names each refused key with its error ("Option 'port': ..."), never its value.
+	 * The sender's transport controller and the receiver source call it before they create the
+	 * transport. Game thread.
+	 */
+	OPEN3DSHARED_API FO3DTransportResult ValidateOptions(const FO3DTransportOptionsView& Options);
 }

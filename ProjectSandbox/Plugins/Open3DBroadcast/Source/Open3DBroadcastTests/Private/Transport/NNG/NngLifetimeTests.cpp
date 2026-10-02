@@ -63,8 +63,8 @@ bool FO3DNngLifetimeStressTest::RunTest(const FString& Parameters)
 		// A fresh port per cycle so a lingering listener can never make Start() fail.
 		const int32 Port = FindFreeLoopbackTcpPort();
 		FO3DTransportConfig Config;
-		Config.Transport = TEXT("nng");
-		Config.Role = TEXT("sender");
+		Config.Transport = TEXT("NNG");
+		Config.Role = EO3DTransportRole::Sender;
 		Config.Uri = FString::Printf(TEXT("tcp://127.0.0.1:%d"), Port);
 		Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), Port);
 		Config.AdvancedParams.Add(TEXT("nng.mode"), TEXT("pub"));

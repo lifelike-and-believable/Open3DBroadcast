@@ -66,7 +66,7 @@ namespace
             }
             // Called outside a receiver source: settings that carry only the options.
             FO3DReceiverSourceConfig Settings;
-            Settings.TransportName = FName(*Config.Transport);
+            Settings.TransportName = Config.Transport;
             Settings.TransportOptions = Options.GetValues();
             Legacy(Settings, Config);
         };
@@ -163,8 +163,9 @@ const FO3DReceiverTransportCustomization* O3DReceiver::FindTransportCustomizatio
                 Configure(FO3DTransportOptionsView(Settings.TransportOptions), Config);
             };
         }
-        Copy->SecretOptionKeys = Descriptor->ReceiverOptions.SecretOptionKeys;
-        Copy->SecretEnvVars = Descriptor->ReceiverOptions.SecretEnvVars;
+        // The merged declaration, so a transport that declares its secrets in its schema
+        // (WP-A1 PR 5c) still shows them through the deprecated customization.
+        Descriptor->ReceiverOptions.GetSecretDeclaration(Copy->SecretOptionKeys, Copy->SecretEnvVars);
         Copy->OptionSchema = Descriptor->ReceiverOptions.OptionSchema;
         Item.Source = Descriptor;
         Item.Customization = MoveTemp(Copy);

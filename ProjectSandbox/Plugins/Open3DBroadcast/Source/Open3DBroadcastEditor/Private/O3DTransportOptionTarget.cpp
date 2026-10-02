@@ -2,6 +2,7 @@
 
 #include "O3DTransportOptionTarget.h"
 
+#include "Engine/World.h"
 #include "O3DReceiverSourceSettings.h"
 #include "O3DReceiverTransportCustomization.h"
 #include "O3DSecretStore.h"
@@ -98,6 +99,26 @@ void FO3DSenderOptionTarget::ClearSecret(const FString& Key)
 	{
 		Component->ClearTransportSecret(Key);
 	}
+}
+
+bool FO3DSenderOptionTarget::RestartTransport()
+{
+	// The same condition and sequence as the component's restart properties
+	// (UO3DSenderComponent::PostEditChangeProperty): only a component that is capturing in a game
+	// world has a transport running. Anywhere else the option is used at the next start.
+	UO3DSenderComponent* Component = WeakComponent.Get();
+	if (!Component || !Component->IsCapturing())
+	{
+		return false;
+	}
+	const UWorld* World = Component->GetWorld();
+	if (!World || !World->IsGameWorld())
+	{
+		return false;
+	}
+	Component->StopCapture();
+	Component->StartCapture();
+	return true;
 }
 
 UObject* FO3DSenderOptionTarget::GetObject() const

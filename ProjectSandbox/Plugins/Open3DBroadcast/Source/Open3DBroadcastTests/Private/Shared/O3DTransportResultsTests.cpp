@@ -101,7 +101,7 @@ namespace O3DTransportResultsTests
 	FO3DTransportConfig MakeNngConfig(const TCHAR* Mode)
 	{
 		FO3DTransportConfig Config;
-		Config.Transport = TEXT("nng");
+		Config.Transport = TEXT("NNG");
 		Config.AdvancedParams.Add(TEXT("nng.mode"), Mode);
 		Config.AdvancedParams.Add(TEXT("host"), TEXT("127.0.0.1"));
 		Config.AdvancedParams.Add(TEXT("port"), TEXT("1"));
@@ -405,7 +405,7 @@ bool FO3DTransportResultCodesTest::RunTest(const FString& Parameters)
 	{
 		const int32 Port = O3DTests::FindFreeLoopbackPort(/*bTcp=*/true);
 		FO3DTransportConfig Config;
-		Config.Transport = TEXT("sockets.tcp");
+		Config.Transport = TEXT("TCP");
 		Config.Uri = FString::Printf(TEXT("tcp://127.0.0.1:%d"), Port);
 		Config.AdvancedParams.Add(TEXT("bind"), TEXT("127.0.0.1"));
 		Config.AdvancedParams.Add(TEXT("port"), FString::FromInt(Port));

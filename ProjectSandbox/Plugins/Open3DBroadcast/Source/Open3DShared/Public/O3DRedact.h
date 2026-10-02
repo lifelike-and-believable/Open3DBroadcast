@@ -10,7 +10,8 @@
  * Declared secret option keys are never logged at all; these helpers are the defence in depth
  * for everything else that reaches a log line or a debug string. The key pattern here is only
  * used to decide what a log shows. It is never used to decide what is persisted: persistence is
- * decided by the SecretOptionKeys a transport customization declares.
+ * decided by the secret keys a transport declares (FO3DTransportRegistry::GetSecretDeclaration:
+ * its schema's Secret entries and its SecretOptionKeys).
  */
 namespace O3DRedact
 {

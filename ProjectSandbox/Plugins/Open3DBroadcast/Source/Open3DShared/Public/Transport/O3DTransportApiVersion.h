@@ -69,6 +69,14 @@
  *      form) and gained SubmitFrameOwned (the owned form, defaulting to the view form);
  *      IOpen3DSender::Send(const O3DS::SubjectList&) is deleted; FO3DUnifiedReceiveDemux::
  *      DeliverMocap takes a view, DeliverMocapOwned is new, and its scratch buffer is gone.
+ *      WP-A1 PR 5c (ADR 0007 item 8, step 5; TRB-27) is part of 5 for the same reason (still no
+ *      tag after v0.9.6, 5a and 5b still under Unreleased): FO3DTransportConfig::Transport is an
+ *      FName and Role an EO3DTransportRole (with a (Transport, Role) constructor);
+ *      FO3DTransportOptionField gained SecretEnvVar, bRestartOnChange and Validate, its Min and
+ *      Max became doubles, and EO3DTransportOptionType gained Float (appended);
+ *      FO3DTransportRoleOptions gained GetSecretDeclaration (the registry's merge of Secret
+ *      entries with SecretOptionKeys and SecretEnvVars); O3DTransportOptions gained
+ *      ValidateOptionValue and ValidateOptions. Removing the shims (step 6) takes 6.
  */
 #define O3D_TRANSPORT_API_VERSION 5
 

@@ -45,14 +45,6 @@ namespace WebRTCConfig
 		return FO3DSecretStore::MakeCredentialProfileOptionKey(TransportName);
 	}
 
-	/** Secret keys and their environment variables (ADR 0004 item 1). */
-	static void DeclareSecrets(TArray<FString>& OutKeys, TMap<FString, FString>& OutEnvVars)
-	{
-		OutKeys = { FString(TokenOptionKey), FString(TokenEndpointAuthKey) };
-		OutEnvVars.Add(TokenOptionKey, WebRTCUtils::TokenEnvVar);
-		OutEnvVars.Add(TokenEndpointAuthKey, WebRTCUtils::TokenEndpointAuthEnvVar);
-	}
-
 	/**
 	 * Fills the fields both roles share from the role's options (WP-A1 PR 5a: the configure
 	 * functions take an FO3DTransportOptionsView, so the add-on reads neither the sender component
@@ -77,6 +69,8 @@ namespace WebRTCConfig
  * Option schema (ADR 0010 §4), the same for both roles; the editor module renders it. The two
  * secrets are Secret fields: the editor shows a password box that opens empty, a Clear button, a
  * "Remember on this machine" box and a status line, and writes to FO3DSecretStore only (ADR 0004).
+ * Their entries are the secret declaration, environment variable included (ADR 0004 item 1, ADR
+ * 0007 item 8, WP-A1 PR 5c); the add-on no longer fills SecretOptionKeys or SecretEnvVars.
  */
 namespace WebRTCSchema
 {
@@ -112,6 +106,7 @@ namespace WebRTCSchema
 		Token.Tooltip = FText::Format(LOCTEXT("WebRTCTokenTooltip", "LiveKit JWT access token, used when Auto Token Fetch is off. Kept out of the level, Blueprint, ini and LiveLink presets. Can also come from the {0} environment variable."),
 			FText::FromString(WebRTCUtils::TokenEnvVar));
 		Token.Type = EO3DTransportOptionType::Secret;
+		Token.SecretEnvVar = WebRTCUtils::TokenEnvVar;
 		Token.Hint = LOCTEXT("WebRTCTokenHint", "Paste a LiveKit access token");
 		Token.VisibleWhen = WhenManualToken;
 
@@ -129,6 +124,7 @@ namespace WebRTCSchema
 		EndpointAuth.Tooltip = FText::Format(LOCTEXT("WebRTCEndpointAuthTooltip", "Credential for your token endpoint, sent as 'Authorization: Bearer <value>'. The endpoint must authenticate callers and decide their grants. Can also come from the {0} environment variable."),
 			FText::FromString(WebRTCUtils::TokenEndpointAuthEnvVar));
 		EndpointAuth.Type = EO3DTransportOptionType::Secret;
+		EndpointAuth.SecretEnvVar = WebRTCUtils::TokenEndpointAuthEnvVar;
 		EndpointAuth.Hint = LOCTEXT("WebRTCEndpointAuthHint", "Bearer credential for your token endpoint");
 		EndpointAuth.VisibleWhen = WhenAutoFetch;
 
@@ -210,24 +206,22 @@ public:
 		// Delivery depends on webrtc.prefer_lossy (ADR 0005 (iii), ADR 0007 item 4).
 		Descriptor.GetCapabilities = [](const FO3DTransportConfig& Config) { return WebRTCUtils::GetCapabilities(Config); };
 
-		// Sender side
-		WebRTCConfig::DeclareSecrets(Descriptor.SenderOptions.SecretOptionKeys, Descriptor.SenderOptions.SecretEnvVars);
+		// Sender side. The schema's Secret entries declare the secrets (WP-A1 PR 5c).
 		Descriptor.ConfigureSender = [](const FO3DTransportOptionsView& Options, FO3DTransportConfig& Config)
 		{
 			Config.Transport = WebRTCConfig::TransportName;
 			WebRTCConfig::ApplyCommonOptions(Options, Config);
-			Config.Role = TEXT("publisher");
+			Config.Role = EO3DTransportRole::Sender;
 		};
 		Descriptor.SenderOptions.OptionSchema = WebRTCSchema::Make();
 
-		// Receiver side
-		WebRTCConfig::DeclareSecrets(Descriptor.ReceiverOptions.SecretOptionKeys, Descriptor.ReceiverOptions.SecretEnvVars);
+		// Receiver side. The schema's Secret entries declare the secrets (WP-A1 PR 5c).
 		Descriptor.ConfigureReceiver = [](const FO3DTransportOptionsView& Options, FO3DTransportConfig& Config)
 		{
 			Config.Transport = WebRTCConfig::TransportName;
 			WebRTCConfig::ApplyCommonOptions(Options, Config);
 			Config.StreamId = TEXT("WebRTCStream");
-			Config.Role = TEXT("subscriber");
+			Config.Role = EO3DTransportRole::Receiver;
 			// Config.Audio.bEnableAudio is set by the receiver source before this runs; the audio
 			// stream label is derived from StreamId.
 		};

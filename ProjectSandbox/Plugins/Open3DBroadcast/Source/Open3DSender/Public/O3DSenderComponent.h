@@ -338,6 +338,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Sender")
 	FString GetLastStartCaptureError() const { return LastStartCaptureError; }
 
+	/**
+	 * Result of the last automatic transport start (bAutoCreateTransport), for example
+	 * InvalidConfig when an option's Validate refused it (WP-A1 PR 5c). Ok before any start. C++
+	 * only; capture runs whether or not the transport started.
+	 */
+	FO3DTransportResult GetLastTransportResult() const;
+
 	// ── Control channel (docs/adr/0011-control-channel.md, item 8) ───────────────────────
 	// Cues (events) and parameters (values) for remote clients, carried on this sender's stream.
 	// Names, keys and targets are case-sensitive strings. Receivers must accept control (it is off

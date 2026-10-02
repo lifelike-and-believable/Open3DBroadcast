@@ -19,7 +19,7 @@ namespace O3DSocketsConfig
 	void ConfigureTcpSender(FO3DTransportConfig& Config, const TCHAR* TransportName)
 	{
 		Config.Transport = TransportName;
-		Config.Role = TEXT("sender");
+		Config.Role = EO3DTransportRole::Sender;
 
 		const FString StoredBindHost = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::BindOptionKey);
 		const FString BindHost = StoredBindHost.IsEmpty() ? FString(TEXT("0.0.0.0")) : O3DSockets::NormaliseHostname(StoredBindHost);
@@ -46,6 +46,7 @@ namespace O3DSocketsConfig
 	void ConfigureTcpReceiver(FO3DTransportConfig& Config, const TCHAR* TransportName)
 	{
 		Config.Transport = TransportName;
+		Config.Role = EO3DTransportRole::Receiver;
 
 		const FString StoredHost = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::HostOptionKey);
 		const FString Host = StoredHost.IsEmpty() ? FString(TEXT("127.0.0.1")) : O3DSockets::NormaliseHostname(StoredHost);

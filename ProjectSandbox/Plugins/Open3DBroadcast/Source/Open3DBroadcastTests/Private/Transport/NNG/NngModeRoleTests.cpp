@@ -38,8 +38,8 @@ namespace O3DNngModeRoleTests
 	FO3DTransportConfig MakeConfig(bool bSender, const TCHAR* Mode, const TCHAR* Role, int32 Port)
 	{
 		FO3DTransportConfig Config;
-		Config.Transport = TEXT("nng");
-		Config.Role = bSender ? TEXT("sender") : TEXT("receiver");
+		Config.Transport = TEXT("NNG");
+		Config.Role = bSender ? EO3DTransportRole::Sender : EO3DTransportRole::Receiver;
 		Config.AdvancedParams.Add(TEXT("nng.mode"), Mode);
 		Config.AdvancedParams.Add(TEXT("host"), TEXT("127.0.0.1"));
 		Config.AdvancedParams.Add(TEXT("port"), FString::FromInt(Port));

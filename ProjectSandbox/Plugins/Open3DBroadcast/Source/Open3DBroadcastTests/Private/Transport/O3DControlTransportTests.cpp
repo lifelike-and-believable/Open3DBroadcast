@@ -197,8 +197,8 @@ namespace O3DControlTransportTests
 	FO3DTransportConfig MakeNngConfig(bool bSender, const TCHAR* Mode, int32 Port)
 	{
 		FO3DTransportConfig Config;
-		Config.Transport = TEXT("nng");
-		Config.Role = bSender ? TEXT("sender") : TEXT("receiver");
+		Config.Transport = TEXT("NNG");
+		Config.Role = bSender ? EO3DTransportRole::Sender : EO3DTransportRole::Receiver;
 		Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), Port);
 		Config.AdvancedParams.Add(TEXT("nng.mode"), Mode);
 		Config.AdvancedParams.Add(TEXT("nng.role"), bSender ? TEXT("server") : TEXT("client"));
@@ -236,8 +236,8 @@ namespace O3DControlTransportTests
 	FO3DTransportConfig MakeUdpConfig(bool bSender, int32 Port, int32 MaxDatagramBytes = 0)
 	{
 		FO3DTransportConfig Config;
-		Config.Transport = TEXT("sockets.udp");
-		Config.Role = bSender ? TEXT("sender") : TEXT("receiver");
+		Config.Transport = TEXT("UDP");
+		Config.Role = bSender ? EO3DTransportRole::Sender : EO3DTransportRole::Receiver;
 		Config.Uri = FString::Printf(TEXT("udp://127.0.0.1:%d"), Port);
 		Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), Port);
 		Config.AdvancedParams.Add(TEXT("host"), TEXT("127.0.0.1"));
@@ -310,7 +310,7 @@ bool FO3DControlLoopbackQueuesTest::RunTest(const FString& Parameters)
 	{
 		FO3DTransportConfig Config;
 		Config.Transport = TEXT("Loopback");
-		Config.Role = bSender ? TEXT("sender") : TEXT("receiver");
+		Config.Role = bSender ? EO3DTransportRole::Sender : EO3DTransportRole::Receiver;
 		Config.StreamId = Channel;
 		Config.Uri = FString::Printf(TEXT("loopback://%s?role=%s"), *Channel, bSender ? TEXT("pub") : TEXT("sub"));
 		Config.AdvancedParams.Add(TEXT("channel"), Channel);

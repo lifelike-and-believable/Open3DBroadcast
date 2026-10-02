@@ -12,12 +12,18 @@
  * (ADR 0007 item 1). The old path "O3DTransportTypes.h" forwards here for one release.
  */
 
-/** Which side of a transport a registry query is about (ADR 0007 item 4). */
+/** Which side of a transport a registry query or a config is about (ADR 0007 items 4 and 8). */
 enum class EO3DTransportRole : uint8
 {
 	Sender,
 	Receiver,
 };
+
+/** "Sender" or "Receiver". */
+inline const TCHAR* LexToString(EO3DTransportRole Role)
+{
+	return Role == EO3DTransportRole::Receiver ? TEXT("Receiver") : TEXT("Sender");
+}
 
 /**
  * What a transport promises about delivery (ADR 0005 (iii)). Reported through
@@ -345,11 +351,28 @@ struct FO3DTransportAudioConfig
  */
 struct FO3DTransportConfig
 {
-    /** Canonical transport identifier (e.g. "sockets", "webrtc", "loopback"). */
-    FString Transport;
+    FO3DTransportConfig() = default;
 
-    /** Role specific to the transport (e.g. "sender"/"receiver", "pub"/"sub"). */
-    FString Role;
+    /** A config for the registered transport InTransport in role InRole (TRB-27). */
+    FO3DTransportConfig(FName InTransport, EO3DTransportRole InRole)
+        : Transport(InTransport)
+        , Role(InRole)
+    {
+    }
+
+    /**
+     * The registered transport name ("TCP", "UDP", "NNG", "MoQ", "Loopback", "WebRTC"), the same
+     * name the registry, the pickers and the secret store use (TRB-27, ADR 0007 item 8, WP-A1
+     * PR 5c). FName, so it compares case-insensitively, like the registry's lookups.
+     */
+    FName Transport;
+
+    /**
+     * Which side this config is for (TRB-27, WP-A1 PR 5c). The sender component sets Sender and
+     * the receiver source Receiver. Transport-specific roles (an NNG socket's listen or dial
+     * side) are options of their own ("nng.role"), not this field.
+     */
+    EO3DTransportRole Role = EO3DTransportRole::Sender;
 
     /** Canonical URI representation for the endpoint. */
     FString Uri;
@@ -439,8 +462,8 @@ struct FO3DTransportConfig
         }
 
         return FString::Printf(TEXT("[Transport=%s Role=%s Uri=%s StreamId=%s Advanced={%s} Secrets={%s} Audio=%s]"),
-            *Transport,
-            *Role,
+            *Transport.ToString(),
+            LexToString(Role),
             *O3DRedact::Url(Uri),
             *O3DRedact::Url(StreamId),
             *ParamsSummary,

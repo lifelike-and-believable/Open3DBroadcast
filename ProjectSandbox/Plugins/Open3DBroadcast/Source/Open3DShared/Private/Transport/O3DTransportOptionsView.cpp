@@ -71,6 +71,13 @@ double FO3DTransportOptionsView::GetDouble(const FString& Key) const
 	{
 		Default = 0.0;
 	}
+
+	// A Float field's range applies to the value and to the default alike (WP-A1 PR 5c).
+	const FO3DTransportOptionField* Field = FindField(Key);
+	if (Field && Field->Type == EO3DTransportOptionType::Float && Field->Max > Field->Min)
+	{
+		return O3DTransportOptions::GetDouble(*this, Key, FMath::Clamp(Default, Field->Min, Field->Max), Field->Min, Field->Max);
+	}
 	return O3DTransportOptions::GetDouble(*this, Key, Default);
 }
 

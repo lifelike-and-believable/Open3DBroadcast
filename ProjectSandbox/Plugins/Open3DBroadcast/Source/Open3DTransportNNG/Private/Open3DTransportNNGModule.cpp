@@ -236,7 +236,8 @@ public:
 			{
 				Config.Uri = ParsedOptions.CanonicalUri;
 				Config.StreamId = ParsedOptions.StreamId;
-				Config.Role = O3DNNG::RoleToString(ParsedOptions.Role);
+				// The NNG socket role (listen or dial side) is the "nng.role" option; Role is the side (TRB-27).
+				Config.Role = EO3DTransportRole::Sender;
 				Config.AdvancedParams.Add(O3DNNG::ModeOptionKey, O3DNNG::ModeToString(ParsedOptions.Mode));
 				Config.AdvancedParams.Add(O3DNNG::RoleOptionKey, O3DNNG::RoleToString(ParsedOptions.Role));
 				Config.AdvancedParams.Add(O3DNNG::QueueOptionKey, NNGTransportCommon::UInt64ToString(ParsedOptions.MaxQueueBytes));
@@ -246,7 +247,8 @@ public:
 				UE_LOG(LogOpen3DTransportNNGModule, Warning, TEXT("NNG sender configuration parse failed: %s"), *ErrorMessage);
 				Config.Uri = O3DNNG::BuildCanonicalUri(Mode, Host, Port, Role, FString());
 				Config.StreamId = O3DNNG::MakeStreamId(Host, Port, FString());
-				Config.Role = O3DNNG::RoleToString(Role);
+				// The NNG socket role (listen or dial side) is the "nng.role" option; Role is the side (TRB-27).
+				Config.Role = EO3DTransportRole::Sender;
 			}
 		};
 		Descriptor.SenderOptions.OptionSchema = NNGSchema::MakeSender();
@@ -296,7 +298,8 @@ public:
 			{
 				Config.Uri = ParsedOptions.CanonicalUri;
 				Config.StreamId = ParsedOptions.StreamId;
-				Config.Role = O3DNNG::RoleToString(ParsedOptions.Role);
+				// The NNG socket role (listen or dial side) is the "nng.role" option; Role is the side (TRB-27).
+				Config.Role = EO3DTransportRole::Receiver;
 				Config.AdvancedParams.Add(O3DNNG::ModeOptionKey, O3DNNG::ModeToString(ParsedOptions.Mode));
 				Config.AdvancedParams.Add(O3DNNG::RoleOptionKey, O3DNNG::RoleToString(ParsedOptions.Role));
 				if (Mode == O3DNNG::ENngMode::Sub && !ParsedOptions.Topic.IsEmpty())
@@ -313,7 +316,8 @@ public:
 				UE_LOG(LogOpen3DTransportNNGModule, Warning, TEXT("NNG receiver configuration parse failed: %s"), *ErrorMessage);
 				Config.Uri = O3DNNG::BuildCanonicalUri(Mode, Host, Port, Role, TrimmedTopic);
 				Config.StreamId = O3DNNG::MakeStreamId(Host, Port, TrimmedTopic);
-				Config.Role = O3DNNG::RoleToString(Role);
+				// The NNG socket role (listen or dial side) is the "nng.role" option; Role is the side (TRB-27).
+				Config.Role = EO3DTransportRole::Receiver;
 			}
 		};
 		Descriptor.ReceiverOptions.OptionSchema = NNGSchema::MakeReceiver();

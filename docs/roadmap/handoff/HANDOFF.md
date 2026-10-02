@@ -11,7 +11,7 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M0 Decisions (ADRs 0001–0010) | Done (#261–#263) |
 | M1 Safety and correctness: WP-S1..S11, WP-T1, WP-T2 | Done (#264–#279) |
 | M2 Fab-buildable package: WP-F1..F4, F6..F9, F11 | Done (#274–#286). **F0 and F5 wait on the maintainer** (see §5) |
-| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime), PR 3 (results, state, capabilities), PR 4a (building blocks + Loopback), PR 4b (TCP), PR 4c (UDP), PR 4d (NNG), PR 4e (MoQ), PR 4f (WebRTC add-on), PR 5a (typed config) and PR 5b (consumer API) done; step 5 continues with 5c (rest of item 8)** (see §2) |
+| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime), PR 3 (results, state, capabilities), PR 4a (building blocks + Loopback), PR 4b (TCP), PR 4c (UDP), PR 4d (NNG), PR 4e (MoQ), PR 4f (WebRTC add-on), PR 5a (typed config), PR 5b (consumer API) and PR 5c (rest of item 8) done, so step 5 is complete; next is step 6 (shim removal, interface version 6)** (see §2) |
 | M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | Not started |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
 | WP-CTL control channel (D11, ADR 0011) | CTL-1..7 done (#290–#295, CTL-6, CTL-7); live-server checks remain (see §2b) |
@@ -80,7 +80,7 @@ Design: `docs/adr/0007-transport-abstraction-and-registry.md`, section "Implemen
      - The WebRTC sender has no send queue (see above); revisit if `lk_send_data_ex` turns out to block.
      - `UdpSenderSetWorkerPaused` does not wait for the worker to see the flag (pitfall 15).
      - (Closed by PR 5a: MoQ's Open3DSender dependency and the add-on's test-only Open3DSender/Open3DReceiver dependencies.)
-   - **Step 5 is split:** 5a typed config (done), 5b consumer API (`SubmitFrame` forms, delete `Send(SubjectList)`), 5c the rest of item 8 (TRB-27 `FName Transport`/`EO3DTransportRole Role`, Secret entries with their env var, schema `Float`/`bRestartOnChange`/`Validate`). Why: see the ADR 0007 addendum "implementation notes (WP-A1 PR 5a)".
+   - **Step 5 is split:** 5a typed config (done), 5b consumer API (done; `SubmitFrame` forms, delete `Send(SubjectList)`), 5c (done) the rest of item 8 (TRB-27 `FName Transport`/`EO3DTransportRole Role`, Secret entries with their env var, schema `Float`/`bRestartOnChange`/`Validate`). Why: see the ADR 0007 addendum "implementation notes (WP-A1 PR 5a)".
    - **Typed config done (WP-A1 PR 5a).** Details in the ADR 0007 addendum "implementation notes (WP-A1 PR 5a)".
      - `FO3DTransportOptionsView` (non-owning; schema defaults, `VisibleWhen`); the `O3DTransportOptions` getters take it (a map converts).
      - The configure functions are `void(const FO3DTransportOptionsView&, FO3DTransportConfig&)` for both roles. The deprecated customizations adapt and still get the component or the settings.
@@ -98,14 +98,16 @@ Design: `docs/adr/0007-transport-abstraction-and-registry.md`, section "Implemen
      - `IOpen3DSender::Send(SubjectList)` is deleted, with every implementation and the sender component's dead `OnSubjectListReady` handler. Tests use `O3DTests::SendSubjectList` / `WebRTCSubjectListTest::SendSubjectList`.
      - `O3D_TRANSPORT_API_VERSION` stays **5**: 5a and 5b ship in the same release (no tag contains 5a).
      - Tests: `Open3DBroadcast.Shared.FrameConsumer.*`, `Open3DBroadcast.Transport.Loopback.FrameReachesConsumerWithoutCopy`.
-   - **Start here next: PR 5c, the rest of ADR 0007 item 8.**
-     - TRB-27: `FO3DTransportConfig::Transport` as the registered `FName` and `Role` as `EO3DTransportRole`, with the registered names used everywhere.
-     - Secret schema entries carry their env var, so `SecretOptionKeys`/`SecretEnvVars` become derived from the schema (keep ADR 0004's behaviour exactly).
-     - The schema gains `Float`, `bRestartOnChange` and `Validate`.
-     - Whether 5c needs a new interface number depends on whether 5a/5b were released by then: check the tags and the CHANGELOG first, as 5b did.
-     - Cleanup candidate: `FO3DSenderSerializer::OnSubjectListReady` is now neither broadcast nor bound.
-5. **Typed config and consumer API** (SHR-36, TRB-27, SHR-16, TRF-38): removes the LiveKit string fields from `FO3DTransportConfig`, deletes `Send(SubjectList)`. Split into 5a (typed config, done, version 5), 5b (consumer API) and 5c (rest of item 8).
-6. Next minor release: delete the shims and bump `O3D_TRANSPORT_API_VERSION` to the next free number (PR 3 took 4 and PR 5a took 5, so 6 or later).
+   - **Rest of item 8 done (WP-A1 PR 5c); step 5 is complete.** Details in the ADR 0007 addendum "implementation notes (WP-A1 PR 5c)" and the ADR 0004 addendum.
+     - TRB-27: `FO3DTransportConfig::Transport` is the registered `FName`, `Role` an `EO3DTransportRole`; constructor `FO3DTransportConfig(Name, Role)`. The hosts and every configure function set both; tests use "TCP"/"UDP"/"NNG"/"Loopback", not "sockets.tcp" or lower case. NNG's socket side stays in the `nng.role` option.
+     - Secrets: a `Secret` schema entry declares its key and carries `SecretEnvVar`. `SecretOptionKeys`/`SecretEnvVars` are deprecated inputs, merged by `FO3DTransportRoleOptions::GetSecretDeclaration` (entries first, entry's variable wins); the registry and the deprecated customization copies return the merge. WebRTC declares its secrets in the schema only. ADR 0004 behaviour unchanged.
+     - Schema: `Float` (appended), `Min`/`Max` now `double` (Int and Float; `GetDouble` clamps a Float), `bRestartOnChange` (panel calls `IO3DOptionTarget::RestartTransport`; the sender target restarts a capturing component in a game world), `Validate` (`TFunction<bool(const FString&, FText&)>`; `O3DTransportOptions::ValidateOptions` at the sender controller's and receiver source's start gives `InvalidConfig`; the panel shows the error and refuses the write). No built-in field uses the three yet.
+     - `UO3DSenderComponent::GetLastTransportResult()` (C++); `FO3DSenderSerializer::OnSubjectListReady` deleted.
+     - `O3D_TRANSPORT_API_VERSION` stays **5**: still no tag after v0.9.6, so 5a–5c are one release.
+     - Tests: `Open3DBroadcast.Shared.TypedConfig.ConfigCarriesTransportAndRole`, `Open3DBroadcast.Shared.OptionSchema.*`, `Open3DBroadcast.Editor.OptionsPanel.RestartOnChangeRestartsTransport`, `.ValidateShowsErrorAndRefuses`, `.FloatIsClampedToRange`, `Open3DBroadcast.Transport.WebRTC.Secrets.SchemaEntriesCarryEnvVars`.
+   - **Start here next: step 6, shim removal.** Delete the deprecated forwarding headers and functions (sender/receiver registries, transport customizations and their `FScopedConfiguring*` scopes, `FindTransportCustomization`), make `SecretOptionKeys`/`SecretEnvVars` go with them if nothing else fills them, and bump `O3D_TRANSPORT_API_VERSION` to **6** in the same PR (with the add-on's check). Candidates for transports to adopt now that the schema has them: `Validate` for host/port fields (`ParseHostPort`), `Float` for `webrtc.reconnect_timeout`, `bRestartOnChange` where a running transport ignores a change.
+5. **Typed config and consumer API** (SHR-36, TRB-27, SHR-16, TRF-38): removes the LiveKit string fields from `FO3DTransportConfig`, deletes `Send(SubjectList)`. Split into 5a (typed config), 5b (consumer API) and 5c (rest of item 8). **Done**, interface version 5.
+6. Next minor release: delete the shims and bump `O3D_TRANSPORT_API_VERSION` to the next free number, **6** (PR 3 took 4, PR 5a took 5, and 5b and 5c stayed in 5).
 
 WP-A1 acceptance (roadmap): conformance suite green after each migration, net transport LOC goes down, no transport keeps its own queue/demux/sink. ADR 0007 "Verification / acceptance" lists the extra test cases.
 

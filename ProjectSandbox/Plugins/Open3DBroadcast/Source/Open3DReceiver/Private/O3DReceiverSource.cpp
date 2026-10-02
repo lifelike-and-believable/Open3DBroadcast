@@ -19,6 +19,7 @@
 #include "O3DRedact.h"
 #include "O3DReceiverTransportCustomization.h"
 #include "O3DReceiverLegacyTransportShims.h"
+#include "Transport/O3DTransportOptions.h"
 #include "Transport/O3DTransportRegistry.h"
 #include "O3DAudioBus.h"
 #include "O3DAudioFrameCodec.h"
@@ -417,17 +418,26 @@ bool FO3DReceiverSource::StartTransport()
 
     EnsureValidTransportName();
     ActiveConfig = BuildTransportConfig();
-    if (ActiveConfig.Transport.IsEmpty())
+    if (ActiveConfig.Transport.IsNone())
     {
         UE_LOG(LogO3DReceiverSource, Warning, TEXT("No transport selected for receiver source."));
         return false;
     }
 
-    const FName TransportName(*ActiveConfig.Transport);
+    // The schema's Validate functions refuse the options before anything is created (WP-A1 PR 5c).
+    LastTransportResult = O3DTransportOptions::ValidateOptions(ActiveConfig.GetOptions());
+    if (!LastTransportResult.IsOk())
+    {
+        UE_LOG(LogO3DReceiverSource, Warning, TEXT("Receiver transport '%s' not started: %s"), *ActiveConfig.Transport.ToString(), *LexToString(LastTransportResult));
+        SourceStatus = FText::Format(LOCTEXT("StatusInvalidOptionsFmt", "Invalid options: {0}"), FText::FromString(LastTransportResult.Message));
+        return false;
+    }
+
+    const FName TransportName(ActiveConfig.Transport);
     ActiveReceiver = FO3DTransportRegistry::Get().CreateReceiver(TransportName);
     if (!ActiveReceiver.IsValid())
     {
-        UE_LOG(LogO3DReceiverSource, Warning, TEXT("No receiver registered for transport '%s'."), *ActiveConfig.Transport);
+        UE_LOG(LogO3DReceiverSource, Warning, TEXT("No receiver registered for transport '%s'."), *ActiveConfig.Transport.ToString());
         return false;
     }
 
@@ -438,7 +448,7 @@ bool FO3DReceiverSource::StartTransport()
     const FO3DTransportResult InitResult = ActiveReceiver->Initialize(ActiveConfig);
     if (!InitResult.IsOk())
     {
-        UE_LOG(LogO3DReceiverSource, Warning, TEXT("Failed to initialize transport '%s': %s"), *ActiveConfig.Transport, *LexToString(InitResult));
+        UE_LOG(LogO3DReceiverSource, Warning, TEXT("Failed to initialize transport '%s': %s"), *ActiveConfig.Transport.ToString(), *LexToString(InitResult));
         ActiveReceiver.Reset();
         StopTransport();
         return false;
@@ -452,11 +462,11 @@ bool FO3DReceiverSource::StartTransport()
             ActiveAudioSink = MakeAudioSink();
             ActiveReceiver->SetAudioSink(ActiveAudioSink, ActiveConfig.Audio);
             UE_LOG(LogO3DReceiverAudio, Log, TEXT("Audio sink bound for transport '%s'."),
-                *ActiveConfig.Transport);
+                *ActiveConfig.Transport.ToString());
         }
         else
         {
-            UE_LOG(LogO3DReceiverAudio, Warning, TEXT("Transport '%s' does not support audio; disabling audio for this source."), *ActiveConfig.Transport);
+            UE_LOG(LogO3DReceiverAudio, Warning, TEXT("Transport '%s' does not support audio; disabling audio for this source."), *ActiveConfig.Transport.ToString());
         }
     }
 
@@ -476,7 +486,7 @@ bool FO3DReceiverSource::StartTransport()
     const FO3DTransportResult StartResult = ActiveReceiver->Start();
     if (!StartResult.IsOk())
     {
-        UE_LOG(LogO3DReceiverSource, Warning, TEXT("Failed to start transport '%s': %s"), *ActiveConfig.Transport, *LexToString(StartResult));
+        UE_LOG(LogO3DReceiverSource, Warning, TEXT("Failed to start transport '%s': %s"), *ActiveConfig.Transport.ToString(), *LexToString(StartResult));
         ActiveReceiver->Stop();
         ActiveReceiver->SetConsumer(nullptr);
         if (ActiveAudioSink.IsValid() && ActiveReceiver->SupportsAudio())
@@ -501,11 +511,11 @@ bool FO3DReceiverSource::StartTransport()
     }
 
     UE_LOG(LogO3DReceiverSource, Log, TEXT("Receiver transport '%s' started (Uri=%s, StreamId=%s)."),
-        *ActiveConfig.Transport,
+        *ActiveConfig.Transport.ToString(),
         *O3DRedact::Url(ActiveConfig.Uri),
         *O3DRedact::Url(ActiveConfig.StreamId));
 
-    SourceStatus = FText::Format(LOCTEXT("StatusReceivingFmt", "Receiving via {0}"), FText::FromString(ActiveConfig.Transport));
+    SourceStatus = FText::Format(LOCTEXT("StatusReceivingFmt", "Receiving via {0}"), FText::FromName(ActiveConfig.Transport));
     ResetStreamState();
     return true;
 }
@@ -561,14 +571,14 @@ void FO3DReceiverSource::StopTransport()
 
 void FO3DReceiverSource::HandleTransportUnregistering(FName TransportName)
 {
-    if (!ActiveReceiver.IsValid() || TransportName != FName(*ActiveConfig.Transport))
+    if (!ActiveReceiver.IsValid() || TransportName != ActiveConfig.Transport)
     {
         return;
     }
 
-    UE_LOG(LogO3DReceiverSource, Warning, TEXT("Receiver transport '%s' is being unregistered (its module is shutting down); stopping and releasing the receiver."), *ActiveConfig.Transport);
+    UE_LOG(LogO3DReceiverSource, Warning, TEXT("Receiver transport '%s' is being unregistered (its module is shutting down); stopping and releasing the receiver."), *ActiveConfig.Transport.ToString());
     StopTransport();
-    SourceStatus = FText::Format(LOCTEXT("StatusTransportUnregisteredFmt", "Transport {0} unloaded"), FText::FromString(ActiveConfig.Transport));
+    SourceStatus = FText::Format(LOCTEXT("StatusTransportUnregisteredFmt", "Transport {0} unloaded"), FText::FromName(ActiveConfig.Transport));
 }
 
 /** Ensure we always have a transport name for details panels that expose the source settings. */
@@ -593,16 +603,14 @@ void FO3DReceiverSource::EnsureValidTransportName()
 /** Build a transport config from the user settings, applying customization hooks if present. */
 FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
 {
-    FO3DTransportConfig Config;
-
     FName TransportName = SourceSettings.TransportName;
     if (TransportName.IsNone())
     {
         TransportName = DefaultReceiverTransportName;
     }
 
-    Config.Transport = TransportName.ToString();
-    Config.Role = TEXT("receiver");
+    // The registered name and the side (TRB-27, WP-A1 PR 5c).
+    FO3DTransportConfig Config(TransportName, EO3DTransportRole::Receiver);
 
     Config.Audio.bEnableAudio = SourceSettings.bEnableAudio;
     if (Config.Audio.bEnableAudio)
@@ -644,7 +652,7 @@ FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
 
     // The descriptor is a shared, immutable snapshot, so the function stays valid while it runs
     // even if the transport unregisters meanwhile (RCV-27).
-    const FO3DTransportDescriptorPtr Descriptor = Config.Transport.IsEmpty() ? FO3DTransportDescriptorPtr() : FO3DTransportRegistry::Get().Find(TransportName);
+    const FO3DTransportDescriptorPtr Descriptor = Config.Transport.IsNone() ? FO3DTransportDescriptorPtr() : FO3DTransportRegistry::Get().Find(TransportName);
     if (Descriptor.IsValid())
     {
         Config.OptionSchema = MakeShared<FO3DTransportOptionSchema>(Descriptor->ReceiverOptions.OptionSchema);
@@ -741,7 +749,7 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, TConstArr
 
     if (!bLoggedActiveState)
     {
-        SourceStatus = FText::Format(LOCTEXT("StatusReceivingFmt", "Receiving via {0}"), FText::FromString(ActiveConfig.Transport));
+        SourceStatus = FText::Format(LOCTEXT("StatusReceivingFmt", "Receiving via {0}"), FText::FromName(ActiveConfig.Transport));
         bLoggedActiveState = true;
     }
 

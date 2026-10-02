@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Internationalization/Text.h"
 #include "Templates/Function.h"
 
 /**
@@ -14,16 +15,16 @@
  * it, so runtime modules carry no Slate code. Nothing here depends on the editor or on Slate, and
  * no member changes with WITH_EDITOR.
  *
- * This is the subset of ADR 0007's schema that the WP-F7 panels need. It lives in the transport
- * descriptor (FO3DTransportRoleOptions::OptionSchema, WP-A1 PR 1), and FO3DTransportOptionsView
- * (WP-A1 PR 5a) reads options with its defaults and VisibleWhen. Float, bRestartOnChange and
- * Validate are not added yet.
+ * It lives in the transport descriptor (FO3DTransportRoleOptions::OptionSchema, WP-A1 PR 1), and
+ * FO3DTransportOptionsView (WP-A1 PR 5a) reads options with its defaults, ranges and VisibleWhen.
+ * WP-A1 PR 5c completed ADR 0007 item 8: the Float type, Secret entries that carry their
+ * environment variable (SecretEnvVar), bRestartOnChange and Validate.
  */
 
 /** The value type of one option, which selects its editor widget. */
 enum class EO3DTransportOptionType : uint8
 {
-	/** Free text. */
+	/** Free text. Also the type of a key a transport reads but does not describe further. */
 	String,
 	/** Free text holding a URL. */
 	Url,
@@ -34,11 +35,18 @@ enum class EO3DTransportOptionType : uint8
 	/** One of FO3DTransportOptionField::EnumValues. */
 	Enum,
 	/**
-	 * A credential (ADR 0004). The key must also be in the customization's SecretOptionKeys. The
-	 * editor shows a password box that opens empty and writes to FO3DSecretStore, never to the
-	 * option map.
+	 * A credential (ADR 0004). The entry declares the key secret: FO3DTransportRegistry::
+	 * GetSecretDeclaration lists it, with the entry's SecretEnvVar, whether or not the key is also
+	 * in the role's SecretOptionKeys (WP-A1 PR 5c). The editor shows a password box that opens
+	 * empty and writes to FO3DSecretStore, never to the option map.
 	 */
 	Secret,
+	/**
+	 * A number stored as decimal text ("0.5", "30"), read with O3DTransportOptions::TryParseDouble.
+	 * Min and Max bound it when Max > Min (WP-A1 PR 5c). Appended last, so the values above keep
+	 * their numbers.
+	 */
+	Float,
 };
 
 /** One choice of an Enum option. */
@@ -70,9 +78,14 @@ struct FO3DTransportOptionField
 	 */
 	FText Hint;
 
-	/** Int only: inclusive range of the value the editor shows (after StoredUnitScale). */
-	int32 Min = 0;
-	int32 Max = 0;
+	/**
+	 * Int and Float: inclusive range, used when Max > Min. For an Int it is the value the editor
+	 * shows (after StoredUnitScale), and the editor uses the whole numbers inside it. A double
+	 * since WP-A1 PR 5c, so a Float can have a fractional range; every int32 is exact in a double.
+	 * FO3DTransportOptionsView::GetDouble clamps a Float to it; the editor clamps what it writes.
+	 */
+	double Min = 0.0;
+	double Max = 0.0;
 
 	/**
 	 * Int only: stored value = shown value * StoredUnitScale. For example 1048576 shows a byte
@@ -88,6 +101,32 @@ struct FO3DTransportOptionField
 	 * on the game thread whenever the panel repaints, so it must be cheap and must not block.
 	 */
 	TFunction<bool(const TMap<FString, FString>& /*Options*/)> VisibleWhen;
+
+	/**
+	 * Secret only: environment variable that supplies the secret, e.g. "O3DB_<TRANSPORT>_TOKEN"
+	 * (ADR 0004 item 3; a non-default credential profile first tries "<NAME>__<PROFILE>"). Empty
+	 * for none. This replaces the role's SecretEnvVars entry for the key (WP-A1 PR 5c); when both
+	 * name one, this one wins.
+	 */
+	FString SecretEnvVar;
+
+	/**
+	 * True when a running transport only picks up a change of this option when it restarts. The
+	 * editor panel then restarts the running transport after it commits a change (the sender
+	 * component while it captures in a game world; IO3DOptionTarget::RestartTransport) and says so
+	 * in the tooltip. False keeps today's behaviour: the value is used at the next start.
+	 */
+	bool bRestartOnChange = false;
+
+	/**
+	 * Optional check of a set value, beyond its type and range. Called with the trimmed stored
+	 * text (never empty: an unset key uses Default, which is not checked). Returns false, with
+	 * OutError saying what is wrong in a sentence a user can act on, to refuse it: the editor
+	 * panel then shows OutError under the row and does not write, and starting the transport
+	 * fails with EO3DTransportError::InvalidConfig (O3DTransportOptions::ValidateOptions). Called
+	 * on the game thread; must be cheap, must not block (no DNS) and must not read other options.
+	 */
+	TFunction<bool(const FString& /*Value*/, FText& /*OutError*/)> Validate;
 };
 
 /** The options of one transport role, in display order. */
