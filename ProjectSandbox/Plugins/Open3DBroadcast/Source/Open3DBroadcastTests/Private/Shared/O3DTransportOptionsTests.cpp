@@ -1,5 +1,5 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
-//
+
 // O3DTransportOptions (ADR 0007 item 7, WP-A1 step 4; TRB-26, SHR-9): the strict host:port parser,
 // hostname resolution and the typed option getters.
 

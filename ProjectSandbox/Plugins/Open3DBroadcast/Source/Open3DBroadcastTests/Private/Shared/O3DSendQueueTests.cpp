@@ -1,5 +1,5 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
-//
+
 // FO3DSendQueue (ADR 0007 item 7, WP-A1 step 4; TRB-3, TRB-14, ADR 0011): limits per kind, the
 // mocap drop policies, control and audio never dropped for mocap, the age limit, FIFO order across
 // kinds, and lock-free accounting under several producers and a concurrent consumer.
