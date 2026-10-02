@@ -14,7 +14,7 @@ public class Open3DTransportNNG : ModuleRules
         O3DBuildFlags.Apply(Target, this);
 
         // Public/Testing/NngTesting.h needs only Core; its consumer (Open3DBroadcastTests) brings
-        // the Sender and Receiver headers it includes (SHR-20).
+        // the Open3DShared transport headers it includes (SHR-20).
         PublicDependencyModuleNames.Add("Core");
 
         // O3DBuildFlags turns NNG off on every platform without a prebuilt nng.lib (Win64 only),
@@ -59,9 +59,9 @@ public class Open3DTransportNNG : ModuleRules
         {
             "CoreUObject",
             "Engine",
+            // The transport blocks, option parsing and interfaces live in Open3DShared; no
+            // dependency on Open3DSender or Open3DReceiver (ADR 0007 step 4, WP-A1 PR 4d).
             "Open3DShared",
-            "Open3DSender",
-            "Open3DReceiver",
             "HTTP", // FGenericPlatformHttp::UrlEncode/UrlDecode in NngHelpers.cpp
             "Sockets",
             "Networking"

@@ -684,6 +684,53 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### NNG on the shared transport blocks (WP-A1 PR 4d, ADR 0007 step 4)
+
+- **Wire format unchanged.** Same NNG protocols (pub/sub, pair, push/pull), URL schemes
+  (`nng+<mode>://`, `tcp://`), envelopes, option keys and defaults.
+- **Sender.** Frames, audio and control are items on one `FO3DSendQueue`, and an
+  `FO3DTransportWorker` hands each to `nng_send` with `NNG_FLAG_NONBLOCK`. The frame policy is
+  `RefuseNewest` with `nng.qmax` as the byte limit, in every mode, as before: a full queue refuses
+  the newest frame and never discards a queued one. The worker still drops the oldest frame when
+  NNG cannot take it at once (no peer, or NNG's send buffer full), so pub/sub stays lossy and the
+  queue holds no stale backlog. Changes:
+  - `nng.qmax` now bounds frames and, separately, audio; control has its own cap of 1,024
+    envelopes. Before, all three shared one byte cap, so a full frame queue refused audio and
+    control.
+  - `FramesSent` counts frames only; audio adds to `BytesSent`. Audio used to count as a frame.
+  - `DroppedFrames` counts frames only: audio refused by the queue or dropped at the worker is no
+    longer counted there. `SendErrors`, `PendingFrames` and `PendingBytes` are filled.
+  - The audio sink is the shared `FO3DQueuedSenderAudioSink`.
+  - Reopening a socket that failed to open, listen or dial, or that NNG reported closed, is paced
+    by `FO3DReconnectPolicy` (0.1 s doubling to 5 s, as before, now with ±20% jitter). NNG still
+    redials a dropped connection by itself; the two never run at once.
+- **Receiver.** Still read by `Poll` on the game thread: NNG's own threads do the socket I/O, so
+  `Poll` only takes what NNG already received. Each message goes to `FO3DUnifiedReceiveDemux`.
+  Changes:
+  - The consumer is held strongly and released in `Stop` (TRF-38); it used to be held weakly.
+  - A damaged envelope (magic present, header does not fit) is dropped instead of being passed on
+    as raw mocap.
+  - `FramesReceived` and `BytesReceived` count mocap only; audio used to count as a frame.
+  - Rejected audio, malformed and oversize messages and receive errors count in `ReceiveErrors`
+    instead of `DroppedFrames`; a control envelope is no longer counted as a dropped frame.
+  - A listening receiver whose socket failed to open is retried with the same backoff instead of
+    on every `Poll`.
+- **Options.** Hosts and ports go through `O3DTransportOptions` (ports 1 to 65535 in digits only,
+  bracketed IPv6), so `6000abc` is no longer port 6000: a malformed `host` or `port` option, Uri
+  authority, `?host=` or `?port=` is now `InvalidConfig` instead of being read as far as it parses.
+  `nng.qmax` must be digits (0 still means the default). A StreamId that is not `host:port` is
+  still ignored. The configure functions read the config only.
+- **Module dependencies.** `Open3DTransportNNG` no longer depends on Open3DSender or
+  Open3DReceiver, and none of its files includes their headers. The NNG publish state, audio sink
+  and `FO3DEncodedPayloadQueue` use, the receiver's demux branches and audio decoder, and the
+  module's own integer and host:port parsers are deleted. Net lines under `Open3DTransportNNG`:
+  -349.
+- **API version stays 4.** Nothing the add-on uses changed.
+- **Tests.** New `Open3DBroadcast.Transport.NNG.QueueRefusesNewestUnderBackpressure`,
+  `.AudioIndependentOfFrameQueue` and `.StopWhileSending` (four send threads and an audio thread,
+  1,000 Stop cycles, every 50th with a connected peer). `NngTesting.h` gained
+  `SenderSetWorkerPaused`. The existing NNG and conformance tests are unchanged.
+
 ### UDP on the shared transport blocks (WP-A1 PR 4c, ADR 0007 step 4)
 
 - **Wire format unchanged.** Same datagrams, the same fragment header and reassembly

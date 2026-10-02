@@ -5,133 +5,56 @@
 #include "Shared/NngHelpers.h"
 
 #include "GenericPlatform/GenericPlatformHttp.h"
+#include "Transport/O3DTransportOptions.h"
 
 namespace O3DNNG
 {
     constexpr uint64 kDefaultQueueBytes = 4ull * 1024ull * 1024ull;
 
-    bool ParseInt(const FString& Input, int32& OutValue)
+    /** What a Uri's authority (host[:port]) turned out to be. */
+    enum class ENngUriAuthority : uint8
     {
-        if (Input.IsEmpty())
-        {
-            return false;
-        }
-
-        TCHAR* EndPtr = nullptr;
-        const int32 Base = 10;
-        OutValue = FCString::Strtoi(*Input, &EndPtr, Base);
-        return EndPtr != nullptr && *EndPtr == TEXT('\0');
-    }
-
-    bool ParseUInt64(const FString& Input, uint64& OutValue)
-    {
-        if (Input.IsEmpty())
-        {
-            return false;
-        }
-
-        TCHAR* EndPtr = nullptr;
-        const int32 Base = 10;
-        OutValue = FCString::Strtoui64(*Input, &EndPtr, Base);
-        return EndPtr != nullptr && *EndPtr == TEXT('\0');
-    }
-
-    FString RemoveBrackets(const FString& Host)
-    {
-        if (Host.StartsWith(TEXT("[")) && Host.EndsWith(TEXT("]")))
-        {
-            return Host.Mid(1, Host.Len() - 2);
-        }
-        return Host;
-    }
-
-    bool ParseHostPortInternal(const FString& Input, FString& OutHost, int32& OutPort)
-    {
-        FString Working = Input;
-        Working.TrimStartAndEndInline();
-        if (Working.IsEmpty())
-        {
-            return false;
-        }
-
-        if (Working.StartsWith(TEXT("[")))
-        {
-            int32 ClosingIndex = 0;
-            if (!Working.FindChar(']', ClosingIndex))
-            {
-                return false;
-            }
-
-            FString HostPart = Working.Mid(1, ClosingIndex - 1);
-            const int32 ColonIndex = Working.Find(TEXT(":"), ESearchCase::CaseSensitive, ESearchDir::FromStart, ClosingIndex);
-            if (ColonIndex == INDEX_NONE)
-            {
-                return false;
-            }
-
-            FString PortPart = Working.Mid(ColonIndex + 1);
-            PortPart.TrimStartAndEndInline();
-            const int32 ParsedPort = FCString::Atoi(*PortPart);
-            if (ParsedPort <= 0)
-            {
-                return false;
-            }
-
-            OutHost = HostPart;
-            OutPort = ParsedPort;
-            return true;
-        }
-
-        int32 ColonIndex = INDEX_NONE;
-        if (!Working.FindLastChar(':', ColonIndex))
-        {
-            return false;
-        }
-
-        FString HostPart = Working.Left(ColonIndex);
-        FString PortPart = Working.Mid(ColonIndex + 1);
-
-        HostPart.TrimStartAndEndInline();
-        PortPart.TrimStartAndEndInline();
-
-        if (HostPart.IsEmpty() || PortPart.IsEmpty())
-        {
-            return false;
-        }
-
-        const int32 ParsedPort = FCString::Atoi(*PortPart);
-        if (ParsedPort <= 0)
-        {
-            return false;
-        }
-
-        OutHost = HostPart;
-        OutPort = ParsedPort;
-        return true;
-    }
-
-    FString NormaliseHost(const FString& Host)
-    {
-        FString Result = RemoveBrackets(Host);
-        Result.TrimStartAndEndInline();
-        return Result;
-    }
-
-    FString AddIpv6BracketsIfNeeded(const FString& Host)
-    {
-        const bool bHasColon = Host.Contains(TEXT(":"));
-        if (bHasColon && !Host.StartsWith(TEXT("[")))
-        {
-            return FString::Printf(TEXT("[%s]"), *Host);
-        }
-        return Host;
-    }
+        /** No Uri, or a Uri without a host ("nng+pub://"). */
+        Absent,
+        /** A host, with or without a port. */
+        Parsed,
+        /** Something O3DTransportOptions::ParseHostPort refuses ("host:80abc", "[::1", "a b"). */
+        Invalid,
+    };
 
     FString FormatHostForUri(const FString& Host)
     {
-        FString CleanHost = RemoveBrackets(Host);
-        CleanHost.TrimStartAndEndInline();
-        return AddIpv6BracketsIfNeeded(CleanHost);
+        FString CleanHost = Host.TrimStartAndEnd();
+        if (CleanHost.StartsWith(TEXT("[")) && CleanHost.EndsWith(TEXT("]")))
+        {
+            CleanHost = CleanHost.Mid(1, CleanHost.Len() - 2);
+        }
+        return CleanHost.Contains(TEXT(":")) ? FString::Printf(TEXT("[%s]"), *CleanHost) : CleanHost;
+    }
+
+    /**
+     * A host with an optional port, parsed with O3DTransportOptions::ParseHostPort (WP-A1 PR 4d,
+     * TRB-26): ports 1 to 65535 in digits only, bracketed IPv6. OutPort is 0 when Input has no
+     * port. False when Input is malformed.
+     */
+    bool ParseNngHostPort(const FString& Input, FString& OutHost, int32& OutPort)
+    {
+        FO3DHostPort Endpoint;
+        if (O3DTransportOptions::ParseHostPort(Input, Endpoint))
+        {
+            OutHost = Endpoint.Host;
+            OutPort = Endpoint.Port;
+            return true;
+        }
+        // A placeholder default port is accepted only when Input names no port at all: a port
+        // that is present but malformed fails both calls.
+        if (O3DTransportOptions::ParseHostPort(Input, Endpoint, /*DefaultPort=*/1))
+        {
+            OutHost = Endpoint.Host;
+            OutPort = 0;
+            return true;
+        }
+        return false;
     }
 
     void ParseQueryString(const FString& QueryString, TMap<FString, FString>& OutQuery)
@@ -162,26 +85,25 @@ namespace O3DNNG
         }
     }
 
-    bool ExtractHostPortFromUri(const FString& Uri, FString& OutHost, int32& OutPort, FString& OutPath, TMap<FString, FString>& OutQuery)
+    /** Splits "nng+mode://host:port/topic?query" into its parts. The scheme is read by ExtractModeFromUri. */
+    ENngUriAuthority ExtractHostPortFromUri(const FString& Uri, FString& OutHost, int32& OutPort, FString& OutPath, TMap<FString, FString>& OutQuery)
     {
         OutHost.Empty();
         OutPort = 0;
         OutPath.Empty();
         OutQuery.Reset();
 
-        if (Uri.IsEmpty())
+        FString Working = Uri.TrimStartAndEnd();
+        if (Working.IsEmpty())
         {
-            return false;
+            return ENngUriAuthority::Absent;
         }
 
-        FString Working = Uri;
-        FString QueryString;
         int32 QuestionIdx = INDEX_NONE;
         if (Working.FindChar('?', QuestionIdx))
         {
-            QueryString = Working.Mid(QuestionIdx + 1);
+            ParseQueryString(Working.Mid(QuestionIdx + 1), OutQuery);
             Working = Working.Left(QuestionIdx);
-            ParseQueryString(QueryString, OutQuery);
         }
 
         FString Scheme;
@@ -212,22 +134,9 @@ namespace O3DNNG
 
         if (Working.IsEmpty())
         {
-            return false;
+            return ENngUriAuthority::Absent;
         }
-
-        FString ParsedHost;
-        int32 ParsedPort = 0;
-        if (ParseHostPortInternal(Working, ParsedHost, ParsedPort))
-        {
-            OutHost = ParsedHost;
-            OutPort = ParsedPort;
-        }
-        else
-        {
-            OutHost = Working;
-        }
-
-        return true;
+        return ParseNngHostPort(Working, OutHost, OutPort) ? ENngUriAuthority::Parsed : ENngUriAuthority::Invalid;
     }
 
     FString ExtractTopicFromStreamId(const FString& StreamId)
@@ -280,105 +189,136 @@ namespace O3DNNG
         return FString();
     }
 
-    FString GetAdvancedOption(const FO3DTransportConfig& Config, const TCHAR* Key)
+    /** Option, then the Uri's ?mode= query, then the Uri scheme ("nng+sub://"). */
+    FString ReadModeString(const FO3DTransportConfig& Config, const TMap<FString, FString>& UriQuery)
     {
-        for (const TPair<FString, FString>& Pair : Config.AdvancedParams)
+        FString ModeString = O3DTransportOptions::GetString(Config.AdvancedParams, ModeOptionKey);
+        if (ModeString.IsEmpty())
         {
-            if (Pair.Key.Equals(Key, ESearchCase::IgnoreCase))
+            if (const FString* ModeOverride = UriQuery.Find(TEXT("mode")))
             {
-                return Pair.Value;
+                ModeString = ModeOverride->TrimStartAndEnd();
             }
         }
-        return FString();
+        if (ModeString.IsEmpty())
+        {
+            ModeString = ExtractModeFromUri(Config.Uri);
+        }
+        return ModeString;
     }
 
-    bool PopulateHostPort(const FO3DTransportConfig& Config, const FString& DefaultHost, ENngMode Mode, FString& OutHost, int32& OutPort)
+    /** Option, then the Uri's ?role= query. */
+    FString ReadRoleString(const FO3DTransportConfig& Config, const TMap<FString, FString>& UriQuery)
+    {
+        FString RoleString = O3DTransportOptions::GetString(Config.AdvancedParams, RoleOptionKey);
+        if (RoleString.IsEmpty())
+        {
+            if (const FString* RoleOverride = UriQuery.Find(TEXT("role")))
+            {
+                RoleString = RoleOverride->TrimStartAndEnd();
+            }
+        }
+        return RoleString;
+    }
+
+    bool PopulateHostPort(const FO3DTransportConfig& Config, const FString& DefaultHost, ENngMode Mode, FString& OutHost, int32& OutPort, FString& OutError)
     {
         // TRB-39: "explicit" means the host option was set. DefaultHost is applied only at the
         // end, so a host from the Uri, its ?host= query or the StreamId is honoured.
-        FString Host = NormaliseHost(GetAdvancedOption(Config, HostOptionKey));
-        FString PortStr = GetAdvancedOption(Config, PortOptionKey);
-        PortStr.TrimStartAndEndInline();
-
-        const bool bHostExplicit = !Host.IsEmpty();
-        const bool bPortExplicit = !PortStr.IsEmpty();
-
-        if (bPortExplicit)
+        // WP-A1 PR 4d: every host and port goes through O3DTransportOptions, so a malformed one is
+        // an error instead of being read as far as it parses ("6000abc" is not port 6000).
+        OutPort = 0;
+        FString Host;
+        const FString HostOption = O3DTransportOptions::GetString(Config.AdvancedParams, HostOptionKey);
+        if (!HostOption.IsEmpty())
         {
-            if (!ParseInt(PortStr, OutPort))
+            int32 IgnoredPort = 0;
+            if (!ParseNngHostPort(HostOption, Host, IgnoredPort) || IgnoredPort != 0)
             {
+                OutError = FString::Printf(TEXT("Invalid host option '%s'"), *HostOption);
                 return false;
             }
         }
+        const FString PortOption = O3DTransportOptions::GetString(Config.AdvancedParams, PortOptionKey);
+        if (!PortOption.IsEmpty() && !O3DTransportOptions::TryParsePort(PortOption, OutPort))
+        {
+            OutError = FString::Printf(TEXT("Invalid port option '%s' (1 to 65535)"), *PortOption);
+            return false;
+        }
+
+        const bool bHostExplicit = !Host.IsEmpty();
+        const bool bPortExplicit = OutPort > 0;
 
         FString UriHost;
         int32 UriPort = 0;
         FString UriPath;
         TMap<FString, FString> UriQuery;
-        const bool bParsedUri = ExtractHostPortFromUri(Config.Uri, UriHost, UriPort, UriPath, UriQuery);
-        if (bParsedUri)
+        const ENngUriAuthority UriAuthority = ExtractHostPortFromUri(Config.Uri, UriHost, UriPort, UriPath, UriQuery);
+        if (UriAuthority == ENngUriAuthority::Invalid)
         {
-            UriHost = NormaliseHost(UriHost);
+            OutError = FString::Printf(TEXT("Invalid host or port in Uri '%s'"), *Config.Uri);
+            return false;
+        }
 
-            if (!bHostExplicit && !UriHost.IsEmpty())
-            {
-                Host = UriHost;
-            }
+        if (!bHostExplicit && !UriHost.IsEmpty())
+        {
+            Host = UriHost;
+        }
+        if (!bPortExplicit && UriPort > 0)
+        {
+            OutPort = UriPort;
+        }
 
-            if (!bPortExplicit && UriPort > 0)
+        if (!bHostExplicit)
+        {
+            if (const FString* HostOverride = UriQuery.Find(TEXT("host")))
             {
-                OutPort = UriPort;
-            }
-
-            if (!bHostExplicit)
-            {
-                if (const FString* HostOverride = UriQuery.Find(TEXT("host")))
+                const FString QueryHost = HostOverride->TrimStartAndEnd();
+                if (!QueryHost.IsEmpty())
                 {
-                    const FString QueryHost = NormaliseHost(*HostOverride);
-                    if (!QueryHost.IsEmpty())
+                    int32 IgnoredPort = 0;
+                    if (!ParseNngHostPort(QueryHost, Host, IgnoredPort) || IgnoredPort != 0)
                     {
-                        Host = QueryHost;
-                    }
-                }
-            }
-
-            if (!bPortExplicit && OutPort <= 0)
-            {
-                if (const FString* PortOverride = UriQuery.Find(TEXT("port")))
-                {
-                    int32 ParsedPort = 0;
-                    if (ParseInt(*PortOverride, ParsedPort) && ParsedPort > 0)
-                    {
-                        OutPort = ParsedPort;
+                        OutError = FString::Printf(TEXT("Invalid ?host= in Uri '%s'"), *Config.Uri);
+                        return false;
                     }
                 }
             }
         }
 
-        if (!bHostExplicit || !bPortExplicit)
+        if (!bPortExplicit && OutPort <= 0)
         {
-            FString StreamIdHostPort = Config.StreamId;
-            if (!StreamIdHostPort.IsEmpty())
+            if (const FString* PortOverride = UriQuery.Find(TEXT("port")))
             {
-                int32 SlashIdx = INDEX_NONE;
-                if (StreamIdHostPort.FindChar('/', SlashIdx))
+                const FString QueryPort = PortOverride->TrimStartAndEnd();
+                if (!QueryPort.IsEmpty() && !O3DTransportOptions::TryParsePort(QueryPort, OutPort))
                 {
-                    StreamIdHostPort = StreamIdHostPort.Left(SlashIdx);
+                    OutError = FString::Printf(TEXT("Invalid ?port= in Uri '%s'"), *Config.Uri);
+                    return false;
                 }
+            }
+        }
 
-                FString ParsedHost;
-                int32 ParsedPort = 0;
-                if (ParseHostPortInternal(StreamIdHostPort, ParsedHost, ParsedPort))
+        if (Host.IsEmpty() || OutPort <= 0)
+        {
+            // The StreamId ("host:port" or "host:port/topic") fills what is still missing. It is a
+            // label as well, so one that is not an endpoint is ignored rather than refused.
+            FString StreamIdHostPort = Config.StreamId.TrimStartAndEnd();
+            int32 SlashIdx = INDEX_NONE;
+            if (StreamIdHostPort.FindChar('/', SlashIdx))
+            {
+                StreamIdHostPort = StreamIdHostPort.Left(SlashIdx);
+            }
+            FO3DHostPort StreamEndpoint;
+            if (!StreamIdHostPort.IsEmpty() && O3DTransportOptions::ParseHostPort(StreamIdHostPort, StreamEndpoint))
+            {
+                if (Host.IsEmpty())
                 {
-                    ParsedHost = NormaliseHost(ParsedHost);
-                    if (!bHostExplicit && !ParsedHost.IsEmpty())
-                    {
-                        Host = ParsedHost;
-                    }
-                    if (!bPortExplicit && ParsedPort > 0)
-                    {
-                        OutPort = ParsedPort;
-                    }
+                    Host = StreamEndpoint.Host;
+                }
+                if (OutPort <= 0)
+                {
+                    OutPort = StreamEndpoint.Port;
                 }
             }
         }
@@ -393,7 +333,7 @@ namespace O3DNNG
             Host = DefaultHost;
         }
 
-        OutHost = AddIpv6BracketsIfNeeded(Host);
+        OutHost = FormatHostForUri(Host);
         return true;
     }
 
@@ -605,30 +545,43 @@ namespace O3DNNG
         return StreamId;
     }
 
+    /** Option, then the Uri path ("nng+sub://host:port/topic"), then its ?topic=, then the StreamId. */
+    FString ReadTopic(const FO3DTransportConfig& Config, const FString& UriPath, const TMap<FString, FString>& UriQuery)
+    {
+        FString Topic = O3DTransportOptions::GetString(Config.AdvancedParams, TopicOptionKey);
+        if (Topic.IsEmpty())
+        {
+            Topic = ExtractTopicFromUriParts(UriPath, UriQuery);
+        }
+        if (Topic.IsEmpty())
+        {
+            Topic = ExtractTopicFromStreamId(Config.StreamId);
+        }
+        return Topic;
+    }
+
+    void SetTopic(const FString& Topic, FString& OutTopic, TArray<uint8>& OutTopicUtf8)
+    {
+        OutTopic = Topic;
+        OutTopicUtf8.Reset();
+        if (!Topic.IsEmpty())
+        {
+            const FTCHARToUTF8 TopicUtf8(*Topic);
+            OutTopicUtf8.Append(reinterpret_cast<const uint8*>(TopicUtf8.Get()), TopicUtf8.Length());
+        }
+    }
+
     bool ParseSenderOptions(const FO3DTransportConfig& Config, FNngSenderOptions& OutOptions, FString& OutError)
     {
         OutOptions = FNngSenderOptions();
 
-        FString DummyUriHost;
-        int32 DummyUriPort = 0;
-        FString DummyUriPath;
+        FString UriHost;
+        int32 UriPort = 0;
+        FString UriPath;
         TMap<FString, FString> UriQuery;
-        ExtractHostPortFromUri(Config.Uri, DummyUriHost, DummyUriPort, DummyUriPath, UriQuery);
+        ExtractHostPortFromUri(Config.Uri, UriHost, UriPort, UriPath, UriQuery);
 
-        FString ModeString = GetAdvancedOption(Config, ModeOptionKey);
-        if (ModeString.IsEmpty())
-        {
-            if (const FString* ModeOverride = UriQuery.Find(TEXT("mode")))
-            {
-                ModeString = *ModeOverride;
-            }
-        }
-        if (ModeString.IsEmpty())
-        {
-            ModeString = ExtractModeFromUri(Config.Uri);
-        }
-
-        OutOptions.Mode = ModeFromString(ModeString, ENngMode::Pub);
+        OutOptions.Mode = ModeFromString(ReadModeString(Config, UriQuery), ENngMode::Pub);
         if (!IsModeSupported(OutOptions.Mode, /*bSender=*/true))
         {
             OutError = TEXT("NNG sender does not support subscriber or pull modes");
@@ -636,65 +589,36 @@ namespace O3DNNG
         }
 
         // Role first: it decides whether the default host is a bind-all or a loopback address.
-        FString RoleString = GetAdvancedOption(Config, RoleOptionKey);
-        if (RoleString.IsEmpty())
-        {
-            if (const FString* RoleOverride = UriQuery.Find(TEXT("role")))
-            {
-                RoleString = *RoleOverride;
-            }
-        }
-        OutOptions.Role = ResolveRole(OutOptions.Mode, RoleFromString(RoleString, ENngRole::None), /*bSender=*/true);
+        OutOptions.Role = ResolveRole(OutOptions.Mode, RoleFromString(ReadRoleString(Config, UriQuery), ENngRole::None), /*bSender=*/true);
         OutOptions.bListen = IsListenRole(OutOptions.Role);
 
         FString Host;
         int32 Port = 0;
-        if (!PopulateHostPort(Config, GetDefaultHost(OutOptions.bListen), OutOptions.Mode, Host, Port))
+        FString HostPortError;
+        if (!PopulateHostPort(Config, GetDefaultHost(OutOptions.bListen), OutOptions.Mode, Host, Port, HostPortError))
         {
-            OutError = TEXT("Failed to parse host/port for NNG sender");
+            OutError = FString::Printf(TEXT("Failed to parse host/port for NNG sender: %s"), *HostPortError);
             return false;
-        }
-
-        FString Topic = GetAdvancedOption(Config, TopicOptionKey);
-        Topic.TrimStartAndEndInline();
-        if (Topic.IsEmpty())
-        {
-            Topic = ExtractTopicFromUriParts(DummyUriPath, UriQuery);
-        }
-        if (Topic.IsEmpty())
-        {
-            Topic = ExtractTopicFromStreamId(Config.StreamId);
         }
 
         OutOptions.Host = Host;
         OutOptions.Port = Port;
         OutOptions.TcpAddress = BuildTcpAddress(Host, Port);
-        OutOptions.Topic = Topic;
-        if (!Topic.IsEmpty())
-        {
-            const FTCHARToUTF8 TopicUtf8(*Topic);
-            OutOptions.TopicUtf8.SetNumUninitialized(TopicUtf8.Length());
-            if (TopicUtf8.Length() > 0)
-            {
-                FMemory::Memcpy(OutOptions.TopicUtf8.GetData(), TopicUtf8.Get(), TopicUtf8.Length());
-            }
-        }
-        else
-        {
-            OutOptions.TopicUtf8.Reset();
-        }
-        OutOptions.StreamId = MakeStreamId(Host, Port, Topic);
+        SetTopic(ReadTopic(Config, UriPath, UriQuery), OutOptions.Topic, OutOptions.TopicUtf8);
+        OutOptions.StreamId = MakeStreamId(Host, Port, OutOptions.Topic);
 
+        // nng.qmax: bytes, digits only. Absent or 0 means the default (as before WP-A1 PR 4d).
         uint64 QueueBytes = kDefaultQueueBytes;
-        const FString QueueString = GetAdvancedOption(Config, QueueOptionKey);
-        if (!QueueString.IsEmpty() && !ParseUInt64(QueueString, QueueBytes))
+        const FString QueueString = O3DTransportOptions::GetString(Config.AdvancedParams, QueueOptionKey);
+        if (!QueueString.IsEmpty())
         {
-            OutError = TEXT("Invalid queue size specified for NNG sender");
-            return false;
-        }
-        if (QueueBytes == 0)
-        {
-            QueueBytes = kDefaultQueueBytes;
+            int64 Parsed = 0;
+            if (!O3DTransportOptions::TryParseInt(QueueString, Parsed) || Parsed < 0)
+            {
+                OutError = TEXT("Invalid queue size specified for NNG sender");
+                return false;
+            }
+            QueueBytes = Parsed == 0 ? kDefaultQueueBytes : static_cast<uint64>(Parsed);
         }
         OutOptions.MaxQueueBytes = QueueBytes;
 
@@ -712,20 +636,7 @@ namespace O3DNNG
         TMap<FString, FString> UriQuery;
         ExtractHostPortFromUri(Config.Uri, UriHost, UriPort, UriPath, UriQuery);
 
-        FString ModeString = GetAdvancedOption(Config, ModeOptionKey);
-        if (ModeString.IsEmpty())
-        {
-            if (const FString* ModeOverride = UriQuery.Find(TEXT("mode")))
-            {
-                ModeString = *ModeOverride;
-            }
-        }
-        if (ModeString.IsEmpty())
-        {
-            ModeString = ExtractModeFromUri(Config.Uri);
-        }
-
-        OutOptions.Mode = ModeFromString(ModeString, ENngMode::Sub);
+        OutOptions.Mode = ModeFromString(ReadModeString(Config, UriQuery), ENngMode::Sub);
         if (!IsModeSupported(OutOptions.Mode, /*bSender=*/false))
         {
             OutError = TEXT("NNG receiver mode must be sub, pair, or pull");
@@ -733,54 +644,24 @@ namespace O3DNNG
         }
 
         // Role first: it decides whether the default host is a bind-all or a loopback address.
-        FString RoleString = GetAdvancedOption(Config, RoleOptionKey);
-        if (RoleString.IsEmpty())
-        {
-            if (const FString* RoleOverride = UriQuery.Find(TEXT("role")))
-            {
-                RoleString = *RoleOverride;
-            }
-        }
-        OutOptions.Role = ResolveRole(OutOptions.Mode, RoleFromString(RoleString, ENngRole::None), /*bSender=*/false);
+        OutOptions.Role = ResolveRole(OutOptions.Mode, RoleFromString(ReadRoleString(Config, UriQuery), ENngRole::None), /*bSender=*/false);
         OutOptions.bListen = IsListenRole(OutOptions.Role);
 
-        FString Topic = GetAdvancedOption(Config, TopicOptionKey);
-        Topic.TrimStartAndEndInline();
-        if (Topic.IsEmpty())
-        {
-            Topic = ExtractTopicFromUriParts(UriPath, UriQuery);
-        }
-        if (Topic.IsEmpty())
-        {
-            Topic = ExtractTopicFromStreamId(Config.StreamId);
-        }
-        OutOptions.Topic = Topic;
-        if (!Topic.IsEmpty())
-        {
-            const FTCHARToUTF8 TopicUtf8(*Topic);
-            OutOptions.TopicUtf8.SetNumUninitialized(TopicUtf8.Length());
-            if (TopicUtf8.Length() > 0)
-            {
-                FMemory::Memcpy(OutOptions.TopicUtf8.GetData(), TopicUtf8.Get(), TopicUtf8.Length());
-            }
-        }
-        else
-        {
-            OutOptions.TopicUtf8.Reset();
-        }
+        SetTopic(ReadTopic(Config, UriPath, UriQuery), OutOptions.Topic, OutOptions.TopicUtf8);
 
         FString Host;
         int32 Port = 0;
-        if (!PopulateHostPort(Config, GetDefaultHost(OutOptions.bListen), OutOptions.Mode, Host, Port))
+        FString HostPortError;
+        if (!PopulateHostPort(Config, GetDefaultHost(OutOptions.bListen), OutOptions.Mode, Host, Port, HostPortError))
         {
-            OutError = TEXT("Failed to parse host/port for NNG receiver");
+            OutError = FString::Printf(TEXT("Failed to parse host/port for NNG receiver: %s"), *HostPortError);
             return false;
         }
 
         OutOptions.Host = Host;
         OutOptions.Port = Port;
         OutOptions.TcpAddress = BuildTcpAddress(Host, Port);
-        OutOptions.StreamId = MakeStreamId(Host, Port, Topic);
+        OutOptions.StreamId = MakeStreamId(Host, Port, OutOptions.Topic);
 
         OutOptions.CanonicalUri = BuildCanonicalUri(OutOptions.Mode, OutOptions.Host, OutOptions.Port, OutOptions.Role, OutOptions.Topic);
         return true;
@@ -789,26 +670,13 @@ namespace O3DNNG
     ENngMode ResolveConfiguredMode(const FO3DTransportConfig& Config)
     {
         // The same precedence ParseSenderOptions and ParseReceiverOptions use: option, URI
-        // query, URI path. Pub when nothing names a mode (the sender default).
+        // query, URI scheme. Pub when nothing names a mode (the sender default).
         FString UriHost;
         int32 UriPort = 0;
         FString UriPath;
         TMap<FString, FString> UriQuery;
         ExtractHostPortFromUri(Config.Uri, UriHost, UriPort, UriPath, UriQuery);
-
-        FString ModeString = GetAdvancedOption(Config, ModeOptionKey);
-        if (ModeString.IsEmpty())
-        {
-            if (const FString* ModeOverride = UriQuery.Find(TEXT("mode")))
-            {
-                ModeString = *ModeOverride;
-            }
-        }
-        if (ModeString.IsEmpty())
-        {
-            ModeString = ExtractModeFromUri(Config.Uri);
-        }
-        return ModeFromString(ModeString, ENngMode::Pub);
+        return ModeFromString(ReadModeString(Config, UriQuery), ENngMode::Pub);
     }
 
     FO3DTransportCapabilities GetCapabilitiesForMode(ENngMode Mode)

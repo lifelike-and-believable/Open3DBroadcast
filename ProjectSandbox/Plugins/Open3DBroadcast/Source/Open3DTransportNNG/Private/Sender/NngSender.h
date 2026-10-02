@@ -3,33 +3,16 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "HAL/CriticalSection.h"
 
 #include "Transport/O3DSenderInterface.h"
 #include "Transport/O3DConnectionState.h"
+#include "Transport/O3DSendQueue.h"
+#include "Transport/O3DSenderAudioSinkBase.h"
+#include "Transport/O3DTransportWorker.h"
 #include "Shared/NngHelpers.h"
-#include "O3DAudioFrameCodec.h"
-#include "O3DEncodedPayloadQueue.h"
-#include "O3DLifetimeGate.h"
 #include "O3DPerformanceMetrics.h"
-#include "O3DSinkAudioEncoder.h"
 
 #include <atomic>
-
-class FRunnableThread;
-
-/**
- * Publish state shared between FO3DNngSender, its worker and its audio sinks
- * (ADR 0007 addendum, WP-S5: TRB-10, TRB-12, TRB-35). No sender pointer, no socket.
- */
-struct FNngSenderPublishState
-{
-    TSharedRef<FO3DLifetimeGate, ESPMode::ThreadSafe> Gate = MakeShared<FO3DLifetimeGate, ESPMode::ThreadSafe>();
-    /** Mocap and audio payloads for the worker; owns the worker's wake event. */
-    FO3DEncodedPayloadQueue SendQueue;
-    FO3DAudioSubjectSlot LastSubject;
-    std::atomic<int64> AudioDropped{0};
-};
 
 /**
  * Context for the NNG pipe-notify callback, reached through an opaque token (TRF-12 pattern).
@@ -43,6 +26,27 @@ struct FNngSenderPipeContext
     std::atomic<bool> bConnectedWithoutPipes{true};
 };
 
+/**
+ * NNG sender on the shared transport blocks (ADR 0007 item 7, WP-A1 PR 4d).
+ *
+ * SendSerialized, SendControl and the audio sinks (FO3DQueuedSenderAudioSink) only enqueue on one
+ * FO3DSendQueue; an FO3DTransportWorker owns the socket and hands each item to nng_send with
+ * NNG_FLAG_NONBLOCK, so no caller ever blocks on NNG (TRB-33, TRB-34).
+ *
+ * Queue policy: EO3DMocapOverflow::RefuseNewest with nng.qmax as the byte limit of frames and,
+ * separately, of audio; control has the queue's own cap. That is what the sender always did
+ * (a full queue refused the newest payload), and it is right for every mode: the worker never
+ * holds a backlog, because a frame NNG cannot take at once (no peer, or NNG's own send buffer
+ * full) is dropped at the worker, oldest first. So a slow peer already costs the oldest frames,
+ * and the application queue only fills when the worker itself falls behind.
+ *
+ * Reconnect: NNG redials a dropped connection by itself (NNG_OPT_RECONNMINT/MAXT, defaults). The
+ * worker's FO3DReconnectPolicy only paces reopening a socket that does not exist: an open, listen
+ * or dial that failed, or a socket NNG reported closed. The two never run at once.
+ *
+ * Threading: Initialize/Start/Stop/Tick/CreateAudioSink: game thread. Send, SendSerialized,
+ * SendControl, GetStats: any thread, never block.
+ */
 class FO3DNngSender : public IOpen3DSender
 {
 public:
@@ -69,11 +73,14 @@ public:
 
     bool IsConnected() const { return PipeContext->bConnected.load(); }
 
+    /**
+     * Test hook: while paused the worker sends nothing, so the queue policy can be observed.
+     * Pausing returns once the worker has seen the flag, so nothing enqueued afterwards is sent.
+     */
+    void SetWorkerPausedForTesting(bool bPaused);
+
 private:
     struct FNngSocketWrapper;
-    class FNngSenderRunnable;
-
-    friend class FNngSenderRunnable;
 
     // Socket ownership (TRB-33): exactly one thread touches Socket at a time. Start() opens it
     // before the worker exists, the worker owns it (send, close, reopen) while it runs, and
@@ -81,40 +88,42 @@ private:
     /** OutNngError receives the NNG error code of a failed open, listen or dial. */
     bool OpenSocket(int32* OutNngError = nullptr);
     void CloseSocket();
-    /** Worker: reopens a closed socket after the backoff delay. Returns true if a socket is open. */
+    /** Worker: reopens a missing socket when the reconnect policy allows. True if a socket is open. */
     bool EnsureSocketOnWorker();
     /** Worker: reports a change of "a peer pipe exists" to ConnectionState. */
     void UpdateConnectionStateOnWorker();
-    EO3DSendResult SendBytes(const uint8* Data, int32 Len, const FString& SubjectName);
-    void StartWorker();
-    void StopWorker();
-    uint32 RunWorker();
-    bool EnqueuePayload(const uint8* Data, int32 Size);
+    /** Enqueues a frame; counts and logs a refusal (TRB-43). */
+    EO3DSendResult EnqueueFrame(TArray<uint8>&& Bytes, FString Subject, double CaptureTimeSec, bool bFullSync);
+    /** Empties the queue (worker not running). */
     void DrainQueue();
-    /** Worker: counts and logs a failed nng_send; closes the socket if NNG reports it closed. */
-    void HandleSendError(int ErrorCode);
+
+    // Worker thread only.
+    uint32 RunWorkerIteration();
+    /** Counts and logs a failed nng_send; closes the socket if NNG reports it closed. */
+    void HandleSendError(int ErrorCode, bool bFrame);
     void RecordSendDrop();
     FString ResolveAudioSubjectFallback() const;
 
-    mutable FCriticalSection StateMutex;
-    mutable FCriticalSection StatsMutex;
-
     O3DNNG::FNngSenderOptions Options;
-    FO3DTransportStats Stats;
     FO3DTransportConfig ActiveConfig;
     FO3DTransportAudioConfig ActiveAudioConfig;
     FGuid AudioSourceGuid;
 
-    TAtomic<bool> bInitialized{ false };
-    TAtomic<bool> bRunning{ false };
-    TAtomic<bool> bStopWorker{ false };
+    std::atomic<bool> bInitialized{ false };
+    std::atomic<bool> bRunning{ false };
+    std::atomic<bool> bWorkerPausedForTesting{ false };
+    /** Worker iterations that saw bWorkerPausedForTesting; SetWorkerPausedForTesting waits on it. */
+    std::atomic<int64> PausedIterations{ 0 };
 
     FNngSocketWrapper* Socket = nullptr;
 
-    FNngSenderRunnable* Worker = nullptr;
-    FRunnableThread* WorkerThread = nullptr;
+    const TSharedRef<FO3DSendQueue, ESPMode::ThreadSafe> Queue;
+    /** Shared with the audio sinks. Its peer flag stays true: NNG drops audio for absent peers itself. */
+    const TSharedRef<FO3DAudioPublishState, ESPMode::ThreadSafe> PublishState;
+    FO3DTransportWorker Worker;
+    /** Worker (or Start, before the worker runs): paces reopening the socket. */
+    FO3DReconnectPolicy ReopenPolicy;
 
-    TSharedRef<FNngSenderPublishState, ESPMode::ThreadSafe> PublishState;
     TSharedRef<FNngSenderPipeContext, ESPMode::ThreadSafe> PipeContext;
     /** Opaque nng_pipe_notify user data; resolves to PipeContext until the destructor. */
     void* PipeToken = nullptr;
@@ -122,14 +131,20 @@ private:
     /** This transport's counters, resolved once (SHR-3, SHR-17): no lock or lookup per frame. */
     const FO3DTransportMetricsRef TransportMetrics;
 
+    std::atomic<int64> FramesSent{ 0 };
+    std::atomic<int64> BytesSent{ 0 };
+    /** Frames refused by the queue, dropped by the worker (no peer, NNG buffer full) or failed. */
+    std::atomic<int64> DroppedFrames{ 0 };
+    std::atomic<int64> SendErrors{ 0 };
+
     // Owned by whichever thread owns Socket (see above).
     double LastErrorLogTimestamp = 0.0;
     double LastDropLogTimestamp = 0.0;
-    double LastBackoffAttemptTime = 0.0;
-    int32 BackoffAttempt = 0;
     int64 DropsSinceLastLog = 0;
     /** Written by any thread that calls Send/SendSerialized. */
     std::atomic<double> LastBackpressureLogTimestamp{ 0.0 };
+    /** nng.qmax as of the last Initialize, for the log line. */
+    std::atomic<uint64> QueueLimitBytes{ 0 };
 
     /** Mode the capabilities are reported for: Options.Mode as of the last Initialize. */
     std::atomic<O3DNNG::ENngMode> CapabilityMode{ O3DNNG::ENngMode::Pub };

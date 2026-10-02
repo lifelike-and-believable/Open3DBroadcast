@@ -25,6 +25,12 @@ namespace O3DNngTesting
 	 */
 	OPEN3DTRANSPORTNNG_API bool ProcessReceivedPayload(IOpen3DReceiver& Receiver, const TArray<uint8>& Bytes);
 
+	/**
+	 * Pauses or resumes the sender's worker (WP-A1 PR 4d): while paused it sends nothing, so the
+	 * send queue's policy can be observed. Sender must come from CreateSender().
+	 */
+	OPEN3DTRANSPORTNNG_API void SenderSetWorkerPaused(IOpen3DSender& Sender, bool bPaused);
+
 	/** What the option parser made of a config (TRB-39, TRB-40). Strings as written in URIs. */
 	struct FResolvedEndpoint
 	{

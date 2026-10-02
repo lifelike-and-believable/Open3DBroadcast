@@ -7,14 +7,12 @@
 #if O3D_WITH_TRANSPORT_NNG
 
 #include "O3DTransportOptionSchema.h"
+#include "Transport/O3DTransportOptions.h"
 #include "Transport/O3DTransportRegistry.h"
 #include "Transport/O3DTransportTypes.h"
 #include "Shared/NngHelpers.h"
 #include "Sender/NngSender.h"
 #include "Receiver/NngReceiver.h"
-
-#include "O3DSenderComponent.h"
-#include "O3DReceiverSourceSettings.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogOpen3DTransportNNGModule, Log, All);
 
@@ -39,41 +37,33 @@ namespace NNGTransportCommon
 	{
 		return LexToString(Value);
 	}
-}
 
-namespace NNGSenderConfig
-{
-	static FString GetOption(const UO3DSenderComponent* Component, const TCHAR* Key)
+	/**
+	 * The configure functions read Config.AdvancedParams, which the sender component and the
+	 * receiver source fill from their transport options before calling them (WP-A1 PR 4d), so
+	 * this module needs neither Open3DSender nor Open3DReceiver.
+	 */
+	static FString GetOption(const FO3DTransportConfig& Config, const TCHAR* Key)
 	{
-		return Component ? Component->GetTransportOption(Key) : FString();
+		return O3DTransportOptions::GetString(Config.AdvancedParams, Key);
 	}
 
-	static uint64 ParseQueueBytes(const FString& InValue)
+	/** A port option: 1 to 65535 in digits, otherwise the mode's default (TRB-26: "80abc" is not port 80). */
+	static int32 ReadPort(const FO3DTransportConfig& Config, O3DNNG::ENngMode Mode)
 	{
-		if (InValue.IsEmpty())
-		{
-			return NNGTransportCommon::DefaultQueueBytes;
-		}
-
-		TCHAR* EndPtr = nullptr;
-		const uint64 Parsed = FCString::Strtoui64(*InValue, &EndPtr, 10);
-		if (EndPtr && *EndPtr == TEXT('\0') && Parsed > 0)
-		{
-			return Parsed;
-		}
-		return NNGTransportCommon::DefaultQueueBytes;
+		int32 Port = 0;
+		return O3DTransportOptions::TryParsePort(GetOption(Config, O3DNNG::PortOptionKey), Port) ? Port : ResolveDefaultPort(Mode);
 	}
-}
 
-namespace NNGReceiverConfig
-{
-	static FString GetOption(const FO3DReceiverSourceConfig& Settings, const TCHAR* Key)
+	/** nng.qmax in bytes: a positive integer, otherwise the default. */
+	static uint64 ReadQueueBytes(const FO3DTransportConfig& Config)
 	{
-		if (const FString* Existing = Settings.TransportOptions.Find(Key))
+		int64 Parsed = 0;
+		if (O3DTransportOptions::TryParseInt(GetOption(Config, O3DNNG::QueueOptionKey), Parsed) && Parsed > 0)
 		{
-			return *Existing;
+			return static_cast<uint64>(Parsed);
 		}
-		return FString();
+		return DefaultQueueBytes;
 	}
 }
 
@@ -215,34 +205,24 @@ public:
 		Descriptor.CreateReceiver = []() { return MakeShared<FO3DNngReceiver>(); };
 		Descriptor.GetCapabilities = [](const FO3DTransportConfig& Config) { return O3DNNG::GetCapabilities(Config); };
 
-		Descriptor.ConfigureSender = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
+		Descriptor.ConfigureSender = [](const UO3DSenderComponent* /*SenderComponent*/, FO3DTransportConfig& Config)
 		{
 			Config.Transport = TEXT("NNG");
 
-			const FString ModeString = NNGSenderConfig::GetOption(SenderComponent, O3DNNG::ModeOptionKey);
-			const FString RoleString = NNGSenderConfig::GetOption(SenderComponent, O3DNNG::RoleOptionKey);
+			const FString ModeString = NNGTransportCommon::GetOption(Config, O3DNNG::ModeOptionKey);
+			const FString RoleString = NNGTransportCommon::GetOption(Config, O3DNNG::RoleOptionKey);
 			const O3DNNG::ENngMode Mode = O3DNNG::ModeFromString(ModeString, O3DNNG::ENngMode::Pub);
 			const O3DNNG::ENngRole Role = O3DNNG::ResolveRole(Mode, O3DNNG::RoleFromString(RoleString), /*bSender=*/true);
 			const bool bListen = O3DNNG::IsListenRole(Role);
 
-			FString Host = NNGSenderConfig::GetOption(SenderComponent, O3DNNG::HostOptionKey);
+			FString Host = NNGTransportCommon::GetOption(Config, O3DNNG::HostOptionKey);
 			if (Host.IsEmpty())
 			{
 				Host = NNGTransportCommon::ResolveDefaultHost(bListen);
 			}
 
-			int32 Port = 0;
-			const FString PortString = NNGSenderConfig::GetOption(SenderComponent, O3DNNG::PortOptionKey);
-			if (!PortString.IsEmpty())
-			{
-				Port = FCString::Atoi(*PortString);
-			}
-			if (Port <= 0)
-			{
-				Port = NNGTransportCommon::ResolveDefaultPort(Mode);
-			}
-
-			const uint64 QueueBytes = NNGSenderConfig::ParseQueueBytes(NNGSenderConfig::GetOption(SenderComponent, O3DNNG::QueueOptionKey));
+			const int32 Port = NNGTransportCommon::ReadPort(Config, Mode);
+			const uint64 QueueBytes = NNGTransportCommon::ReadQueueBytes(Config);
 
 			Config.AdvancedParams.Add(O3DNNG::HostOptionKey, Host);
 			Config.AdvancedParams.Add(O3DNNG::PortOptionKey, FString::FromInt(Port));
@@ -271,15 +251,14 @@ public:
 		};
 		Descriptor.SenderOptions.OptionSchema = NNGSchema::MakeSender();
 
-		Descriptor.ConfigureReceiver = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
+		Descriptor.ConfigureReceiver = [](const FO3DReceiverSourceConfig& /*Settings*/, FO3DTransportConfig& Config)
 		{
 			Config.Transport = TEXT("NNG");
 
-			const FString ModeString = NNGReceiverConfig::GetOption(Settings, O3DNNG::ModeOptionKey);
-			const FString RoleString = NNGReceiverConfig::GetOption(Settings, O3DNNG::RoleOptionKey);
-			const FString HostValue = NNGReceiverConfig::GetOption(Settings, O3DNNG::HostOptionKey);
-			const FString PortString = NNGReceiverConfig::GetOption(Settings, O3DNNG::PortOptionKey);
-			const FString TopicString = NNGReceiverConfig::GetOption(Settings, O3DNNG::TopicOptionKey);
+			const FString ModeString = NNGTransportCommon::GetOption(Config, O3DNNG::ModeOptionKey);
+			const FString RoleString = NNGTransportCommon::GetOption(Config, O3DNNG::RoleOptionKey);
+			const FString HostValue = NNGTransportCommon::GetOption(Config, O3DNNG::HostOptionKey);
+			const FString TopicString = NNGTransportCommon::GetOption(Config, O3DNNG::TopicOptionKey);
 
 			const O3DNNG::ENngMode Mode = O3DNNG::ModeFromString(ModeString, O3DNNG::ENngMode::Sub);
 			// TRB-40: Pair defaults to dial here and to listen on the sender, so default ends connect.
@@ -292,15 +271,7 @@ public:
 				Host = NNGTransportCommon::ResolveDefaultHost(bListen);
 			}
 
-			int32 Port = 0;
-			if (!PortString.IsEmpty())
-			{
-				Port = FCString::Atoi(*PortString);
-			}
-			if (Port <= 0)
-			{
-				Port = NNGTransportCommon::ResolveDefaultPort(Mode);
-			}
+			const int32 Port = NNGTransportCommon::ReadPort(Config, Mode);
 
 			Config.AdvancedParams.Add(O3DNNG::HostOptionKey, Host);
 			Config.AdvancedParams.Add(O3DNNG::PortOptionKey, FString::FromInt(Port));
@@ -317,8 +288,7 @@ public:
 				Config.AdvancedParams.Remove(O3DNNG::TopicOptionKey);
 			}
 
-			Config.Audio.bEnableAudio = Settings.bEnableAudio;
-			// Note: Audio stream label is now automatically derived from StreamId
+			// Config.Audio.bEnableAudio was set by the receiver source from its settings.
 
 			O3DNNG::FNngReceiverOptions ParsedOptions;
 			FString ErrorMessage;
