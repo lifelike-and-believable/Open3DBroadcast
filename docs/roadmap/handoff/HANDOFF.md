@@ -11,7 +11,7 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M0 Decisions (ADRs 0001–0010) | Done (#261–#263) |
 | M1 Safety and correctness: WP-S1..S11, WP-T1, WP-T2 | Done (#264–#279) |
 | M2 Fab-buildable package: WP-F1..F4, F6..F9, F11 | Done (#274–#286). **F0 and F5 wait on the maintainer** (see §5) |
-| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime), PR 3 (results, state, capabilities), PR 4a (building blocks + Loopback), PR 4b (TCP), PR 4c (UDP) and PR 4d (NNG) done; step 4 continues with MoQ (PR 4e)** (see §2) |
+| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime), PR 3 (results, state, capabilities), PR 4a (building blocks + Loopback), PR 4b (TCP), PR 4c (UDP), PR 4d (NNG) and PR 4e (MoQ) done; step 4 continues with the WebRTC add-on (PR 4f)** (see §2) |
 | M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | Not started |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
 | WP-CTL control channel (D11, ADR 0011) | CTL-1..7 done (#290–#295, CTL-6, CTL-7); live-server checks remain (see §2b) |
@@ -63,7 +63,13 @@ Design: `docs/adr/0007-transport-abstraction-and-registry.md`, section "Implemen
      - Config: the NNG Uri shape is unchanged, but hosts, ports and `nng.qmax` are parsed strictly with `O3DTransportOptions`; the configure functions read only the config. **`Open3DTransportNNG` no longer depends on Open3DSender/Open3DReceiver.**
      - `O3D_TRANSPORT_API_VERSION` stays **4**.
      - Tests: `Open3DBroadcast.Transport.NNG.QueueRefusesNewestUnderBackpressure`, `.AudioIndependentOfFrameQueue`, `.StopWhileSending` (1,000 cycles, every 50th connected); `NngTesting.h` gained `SenderSetWorkerPaused`.
-   - **Start here next: MoQ (PR 4e).** Move MoQ's audio sink and its `FO3DEncodedPayloadQueue` onto `FO3DQueuedSenderAudioSink` and `FO3DSendQueue` (wire format `EO3DAudioWireFormat::AudioPayload`, MoQ's separate audio track), its receive paths onto `FO3DUnifiedReceiveDemux` (`DeliverMocap`, `DeliverAudioPayload`, `DeliverControlEnvelope`), and its option parsing onto `O3DTransportOptions`; check what `FMoQAsyncDispatcher` and the FFI callbacks need from `FO3DTransportWorker`, and drop any Open3DSender/Open3DReceiver use from `Open3DTransportMoQ`.
+   - **MoQ done (WP-A1 PR 4e).** Details in the ADR 0007 addendum "implementation notes (WP-A1 PR 4e)".
+     - Sender: frames, audio and control are items on one `FO3DSendQueue` (`RefuseNewest`, `queue_bytes` for frames, audio 1 MiB, control 1,024) that an `FO3DTransportWorker` publishes per track; items whose publisher is not ready are dropped at the worker. The sink is `FO3DQueuedSenderAudioSink` (`AudioPayload`). Reconnect stays MoQ's own (game thread, jitter only downward, pinned by tests); `FO3DReconnectPolicy` is not used.
+     - Receiver: data callbacks reach the game thread through the dispatcher, then an `FO3DSendQueue` hand-off that `Poll` drains into `FO3DUnifiedReceiveDemux`. Consumer held strongly, released in `Stop`.
+     - Config: `O3DTransportOptions` for every key, strict numbers. **`Open3DTransportMoQ` no longer depends on Open3DReceiver**; it keeps Open3DSender only for `UO3DSenderComponent::SubjectName` (the default stream id) until step 5.
+     - `O3D_TRANSPORT_API_VERSION` stays **4**.
+     - Tests: `Open3DBroadcast.Transport.MoQ.QueueRefusesNewestUnderBackpressure`, `.AudioIndependentOfFrameQueue`, `.StopWhileSending` (1,000 cycles), all on the fake moq-ffi; `MoQTesting.h` gained `SenderSetWorkerPaused`.
+   - **Start here next: the WebRTC add-on (PR 4f).** In `ProjectSandbox/Plugins/Open3DBroadcastWebRTC`, move the WebRTC sender's send path and audio sink onto `FO3DSendQueue` + `FO3DTransportWorker` + `FO3DQueuedSenderAudioSink` where LiveKit's FFI allows (it encodes Opus itself, so the audio path may stay special), the receiver's data, audio and control callbacks onto `FO3DUnifiedReceiveDemux` (`DeliverMocap`, `DeliverAudioFrame`, `DeliverControlEnvelope`), and its options onto `O3DTransportOptions`. The add-on builds against the published interface, so check `O3D_TRANSPORT_API_VERSION` before touching any shared type. Then step 4 is complete; the remaining Open3DSender uses (`SubjectName` in MoQ and any in WebRTC) go with step 5.
 5. **Typed config and consumer API** (SHR-36, TRB-27, SHR-16, TRF-38): removes the LiveKit string fields from `FO3DTransportConfig`, deletes `Send(SubjectList)`.
 6. Next minor release: delete the shims and bump `O3D_TRANSPORT_API_VERSION` (to 5, or later if other steps bump it first; PR 3 took 4).
 
@@ -150,6 +156,8 @@ With UE 5.7 installed locally you can also run the real build and tests: `Build/
 13. The copyright line must be followed by a blank line; a bare `//` continuation line right after it fails `Build/Scripts/check-copyright-headers.py`. Run the script before pushing.
 14. A test that needs a transport's queue to back up must not rely on the network being slow: on loopback a worker drains faster than a test can fill. Pause the worker with a test hook instead (`O3DSocketsTesting::UdpSenderSetWorkerPaused`, WP-A1 PR 4c), so the drop policy is deterministic.
 15. A test pause hook must return only once the worker has seen the flag: an iteration that started before the flag was set can still dequeue the next item. `FO3DNngSender::SetWorkerPausedForTesting` waits for a paused iteration (WP-A1 PR 4d); `UdpSenderSetWorkerPaused` does not yet, so a UDP test should leave the queue empty for one worker wait before relying on it.
+16. Never build a counter that reserves first and rolls back on overflow when another thread can read it: a reader sees the over-limit value for a moment. `FO3DSendQueue::Enqueue` did that and `Open3DBroadcast.Shared.SendQueue.ConcurrentAccounting` failed intermittently on #308; it now reserves with a compare-exchange that only succeeds when the result fits (af7cfcc). The same applies to any limit a test or `GetStats` observes.
+17. A transport's existing tests may pin its own timing (MoQ's backoff jitter, connect timeout, subscribe retry on a manual clock). Before replacing such logic with a shared block, check that the shared block reproduces those exact values; if not, keep the transport's logic and say why, rather than editing the tests (WP-A1 PR 4e kept MoQ's backoff).
 
 ## 5. Waiting on the maintainer
 

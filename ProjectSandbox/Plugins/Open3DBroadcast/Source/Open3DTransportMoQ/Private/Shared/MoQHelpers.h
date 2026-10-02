@@ -116,25 +116,9 @@ namespace MoQHelpers
 	// Helper Functions
 	// ─────────────────────────────────────────────────────────────────────────
 	
-	/**
-	 * Get an advanced option from the transport config.
-	 * Performs case-insensitive key matching and trims whitespace.
-	 * 
-	 * @param Config Transport configuration
-	 * @param Key Option key to look up
-	 * @return Option value or empty string if not found
-	 */
-	FString GetAdvancedOption(const FO3DTransportConfig& Config, const TCHAR* Key);
-	
-	/**
-	 * Parse a uint64 from a string.
-	 * 
-	 * @param Input String to parse
-	 * @param OutValue Parsed value on success
-	 * @return true if parsing succeeded
-	 */
-	bool ParseUInt64(const FString& Input, uint64& OutValue);
-	
+	// Options are read with O3DTransportOptions (Open3DShared): keys case-insensitive, values
+	// trimmed, numbers parsed strictly (WP-A1 PR 4e, TRB-26).
+
 	/**
 	 * Sanitize a string for use as a track namespace or name component.
 	 * Removes non-alphanumeric characters except underscore and dash.
@@ -211,6 +195,7 @@ namespace MoQHelpers
 	/**
 	 * Resolve the queue size in bytes from config.
 	 * Checks queue_bytes > moq.queue_bytes > moq.qbytes, defaults to 8MB.
+	 * Digits only (O3DTransportOptions::TryParseInt); anything else is the default.
 	 * Clamps to min/max limits.
 	 * 
 	 * @param Config Transport configuration
@@ -241,18 +226,11 @@ namespace MoQHelpers
 
 	/**
 	 * Resolve the connect timeout in seconds from config.
-	 * Checks connect_timeout > moq.connect_timeout, defaults to kDefaultConnectTimeoutSeconds,
-	 * clamped to [kMinConnectTimeoutSeconds, kMaxConnectTimeoutSeconds].
+	 * Checks connect_timeout > moq.connect_timeout (O3DTransportOptions::TryParseDouble), defaults
+	 * to kDefaultConnectTimeoutSeconds, clamped to [kMinConnectTimeoutSeconds, kMaxConnectTimeoutSeconds].
 	 */
 	double ResolveConnectTimeoutSeconds(const FO3DTransportConfig& Config);
 
-	/**
-	 * Read the codec of a serialized audio frame from its own header (WP-S8, TRF-37), so the
-	 * receiver decodes what the sender actually sent instead of guessing from local config.
-	 * Layout (O3DAudioSerialization): version 1 is a PCM16 frame; version 2 is an encoded frame
-	 * whose third byte is the EUnifiedCodec value (only Opus is written that way today).
-	 *
-	 * @return false if the header is too short, the version is unknown or the codec is not audio
-	 */
-	bool TryGetAudioCodecFromFrame(const uint8* Payload, int32 PayloadSize, O3DS::EUnifiedCodec& OutCodec);
+	// The codec of a received audio payload is read with O3DAudio::TryGetAudioPayloadCodec
+	// (Open3DShared), through the receive demux (WP-S8 TRF-37; WP-A1 PR 4e).
 }

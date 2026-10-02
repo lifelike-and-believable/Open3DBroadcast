@@ -9,8 +9,9 @@
 #include "Containers/Queue.h"
 #include "Transport/O3DReceiverInterface.h"
 #include "Transport/O3DConnectionState.h"
+#include "Transport/O3DSendQueue.h"
+#include "Transport/O3DUnifiedReceiveDemux.h"
 #include "Shared/MoQHelpers.h"
-#include "O3DAudioFrameCodec.h"
 #include "MoQFfiApi.h"
 THIRD_PARTY_INCLUDES_START
 #include "moq_ffi.h"
@@ -34,10 +35,17 @@ DECLARE_LOG_CATEGORY_EXTERN(LogO3DMoQReceiver, Log, All);
  * - Control track: "control/<session>/<track>" - control envelopes (ADR 0011), subscribed
  *   only while a control sink is set
  * 
+ * Shared transport blocks (ADR 0007 item 7, WP-A1 PR 4e): the session wrapper marshals moq-ffi's
+ * data callbacks to the game thread; each payload is put on a bounded hand-off queue (an
+ * FO3DSendQueue, one item kind per track) and Poll() routes up to kMaxFramesPerPoll of them
+ * through the shared FO3DUnifiedReceiveDemux: mocap as a bare frame (DeliverMocap), audio as a
+ * bare audio payload whose codec is read from its header (DeliverAudioPayload, TRF-37), control as
+ * an envelope (DeliverControlEnvelope). The demux holds the consumer and sinks until Stop.
+ *
  * Threading:
  * - Initialize(), Start(), Stop(), Poll() must be called from game thread
  * - SetConsumer(), SetAudioSink() should be called before Start()
- * - Data callbacks from moq-ffi may arrive on worker threads
+ * - Data callbacks from moq-ffi arrive on moq-ffi threads and are run on the game thread
  */
 class FO3DMoQReceiver : public IOpen3DReceiver
 {
@@ -57,7 +65,7 @@ public:
 
 	// IOpen3DReceiver interface
 	virtual FO3DTransportResult Initialize(const FO3DTransportConfig& Config) override;
-	virtual void SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& Consumer) override;
+	virtual void SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer) override { Demux.SetConsumer(InConsumer); }
 	virtual FO3DTransportResult Start() override;
 	virtual void Stop() override;
 	virtual int32 Poll() override;
@@ -70,22 +78,6 @@ public:
 	virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink) override;
 
 private:
-	/** The MoQ track a payload arrived on. */
-	enum class ETrack : uint8
-	{
-		Mocap,
-		Audio,
-		/** Control envelopes (ADR 0011): never counted as frames or dropped frames. */
-		Control,
-	};
-
-	struct FReceivedPayload
-	{
-		TArray<uint8> Data;
-		double ReceiveTimestampSeconds = 0.0;
-		ETrack Track = ETrack::Mocap;
-	};
-
 	struct FLatencyStats
 	{
 		double TotalLatencyMs = 0.0;
@@ -136,13 +128,13 @@ private:
 	void HandleMocapDataReceived(const TArray64<uint8>& Payload);
 	void HandleAudioDataReceived(const TArray64<uint8>& Payload);
 	void HandleControlDataReceived(const TArray64<uint8>& Payload);
-	/** Any thread: queues one payload for Poll. Returns false on queue overflow. */
-	bool EnqueueReceived(const TArray64<uint8>& Payload, ETrack Track);
+	/** Game thread (the dispatcher): queues one payload for Poll. Returns false when its kind is full. */
+	bool EnqueueReceived(const TArray64<uint8>& Payload, EO3DSendItemKind Kind);
 	void DestroySubscriber();
 	void DestroyAudioSubscriber();
 	void DestroyControlSubscriber();
-	bool ProcessReceivedPayload(const FReceivedPayload& Payload);
-	bool ProcessAudioPayload(const FReceivedPayload& Payload);
+	/** Poll: routes one queued payload through the demux and counts it. True for a mocap frame. */
+	bool RouteReceived(const FO3DSendItem& Item);
 	void ResetStats();
 
 	FMoQReceiverOptions Options;
@@ -155,15 +147,15 @@ private:
 	TSharedPtr<FMoQSubscriberHandle, ESPMode::ThreadSafe> ControlSubscriberHandle;
 	FDelegateHandle ConnectionDelegateHandle;
 
-	TWeakPtr<ISerializedFrameConsumer> Consumer;
-	TWeakPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink;
-	/** Control payloads (ADR 0011). Held strongly, released in Stop; used only from Poll (game thread). */
-	TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe> ControlSink;
+	/** Holds the consumer, audio sink and control sink strongly; Stop() releases them (TRF-38, ADR 0011). Game thread. */
+	FO3DUnifiedReceiveDemux Demux;
 
-	TQueue<TUniquePtr<FReceivedPayload>, EQueueMode::Mpsc> ReceiveQueue;
-	mutable FCriticalSection QueueMutex;
-	uint64 PendingQueueBytes = 0;
-	static constexpr uint64 kMaxQueueBytes = 16ull * 1024ull * 1024ull;
+	/**
+	 * Payloads waiting for Poll (game thread on both sides). Mocap and audio each up to
+	 * kMaxQueueBytes, control up to the queue's own cap; the newest is refused when full.
+	 */
+	FO3DSendQueue ReceiveQueue;
+	static constexpr int64 kMaxQueueBytes = 16ll * 1024ll * 1024ll;
 
 	FO3DTransportStats Stats;
 	mutable FCriticalSection StatsMutex;
@@ -190,8 +182,6 @@ private:
 	FO3DTransportConfig ActiveConfig;
 	/** Audio config from the source; the decode codec comes from each frame, not from here (TRF-37). */
 	FO3DTransportAudioConfig ActiveAudioConfig;
-	O3DAudio::FMultiStreamFrameDecoder AudioDecoder; // SHR-15: one decoder per (SourceGuid, StreamLabel)
-	TArray<int16> DecodedPcmScratch;
 
 	// Shared alive flag for safe callback handling - set to false during destruction
 	// This prevents use-after-free when callbacks are pending on the game thread

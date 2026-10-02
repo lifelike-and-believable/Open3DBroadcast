@@ -14,6 +14,7 @@
 #include "Shared/MoQSessionWrapper.h"
 #include "Shared/MoQTypes.h"
 #include "Misc/ScopeLock.h"
+#include "O3DAudioSerialization.h"
 
 /**
  * White-box access to FMoQSessionWrapper, which befriends this class. It lives here, inside the
@@ -274,7 +275,13 @@ namespace MoQTesting
 
 	bool TryGetAudioCodecFromFrame(const uint8* Payload, int32 PayloadSize, O3DS::EUnifiedCodec& OutCodec)
 	{
-		return MoQHelpers::TryGetAudioCodecFromFrame(Payload, PayloadSize, OutCodec);
+		// The receiver reads the codec with the shared helper, through the demux (WP-A1 PR 4e).
+		return O3DAudio::TryGetAudioPayloadCodec(Payload, PayloadSize, OutCodec);
+	}
+
+	void SenderSetWorkerPaused(IOpen3DSender& Sender, bool bPaused)
+	{
+		static_cast<FO3DMoQSender&>(Sender).SetWorkerPausedForTesting(bPaused);
 	}
 
 	FMoQTestResult MakeResultFromRawCode(MoqResultCode RawCode, const FString& Message)

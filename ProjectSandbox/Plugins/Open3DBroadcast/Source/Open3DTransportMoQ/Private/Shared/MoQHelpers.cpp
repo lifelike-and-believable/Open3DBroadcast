@@ -4,6 +4,7 @@
 
 #include "Shared/MoQHelpers.h"
 #include "Math/UnrealMathUtility.h"
+#include "Transport/O3DTransportOptions.h"
 
 namespace MoQHelpers
 {
@@ -19,30 +20,10 @@ namespace MoQHelpers
 		return Caps;
 	}
 
-	FString GetAdvancedOption(const FO3DTransportConfig& Config, const TCHAR* Key)
+	/** The trimmed value of Key (case-insensitive), or empty (O3DTransportOptions, WP-A1 PR 4e). */
+	static FString GetMoQOption(const FO3DTransportConfig& Config, const TCHAR* Key)
 	{
-		for (const TPair<FString, FString>& Pair : Config.AdvancedParams)
-		{
-			if (Pair.Key.Equals(Key, ESearchCase::IgnoreCase))
-			{
-				FString Value = Pair.Value;
-				Value.TrimStartAndEndInline();
-				return Value;
-			}
-		}
-		return FString();
-	}
-
-	bool ParseUInt64(const FString& Input, uint64& OutValue)
-	{
-		if (Input.IsEmpty())
-		{
-			return false;
-		}
-
-		TCHAR* EndPtr = nullptr;
-		OutValue = FCString::Strtoui64(*Input, &EndPtr, 10);
-		return EndPtr != nullptr && *EndPtr == TEXT('\0');
+		return O3DTransportOptions::GetString(Config.AdvancedParams, Key);
 	}
 
 	FString SanitizeComponent(const FString& Value, bool bAllowSlash)
@@ -79,15 +60,15 @@ namespace MoQHelpers
 
 	static FString BuildNamespaceWithPrefix(const FO3DTransportConfig& Config, const TCHAR* Prefix)
 	{
-		FString Namespace = GetAdvancedOption(Config, kKeyTrackNamespace);
+		FString Namespace = GetMoQOption(Config, kKeyTrackNamespace);
 		if (Namespace.IsEmpty())
 		{
-			Namespace = GetAdvancedOption(Config, kKeyTrackNamespaceAlt);
+			Namespace = GetMoQOption(Config, kKeyTrackNamespaceAlt);
 		}
 
 		if (Namespace.IsEmpty())
 		{
-			FString SessionId = GetAdvancedOption(Config, kKeySessionId);
+			FString SessionId = GetMoQOption(Config, kKeySessionId);
 			if (SessionId.IsEmpty())
 			{
 				SessionId = Config.StreamId;
@@ -158,10 +139,10 @@ namespace MoQHelpers
 
 	FString BuildDefaultTrackName(const FO3DTransportConfig& Config)
 	{
-		FString TrackName = GetAdvancedOption(Config, kKeyTrackName);
+		FString TrackName = GetMoQOption(Config, kKeyTrackName);
 		if (TrackName.IsEmpty())
 		{
-			TrackName = GetAdvancedOption(Config, kKeyTrackNameAlt);
+			TrackName = GetMoQOption(Config, kKeyTrackNameAlt);
 		}
 
 		if (TrackName.IsEmpty())
@@ -192,10 +173,10 @@ namespace MoQHelpers
 
 	FString ResolveRelayUrl(const FO3DTransportConfig& Config)
 	{
-		FString Relay = GetAdvancedOption(Config, kKeyRelayUrl);
+		FString Relay = GetMoQOption(Config, kKeyRelayUrl);
 		if (Relay.IsEmpty())
 		{
-			Relay = GetAdvancedOption(Config, kKeyRelayUrlAlt);
+			Relay = GetMoQOption(Config, kKeyRelayUrlAlt);
 		}
 		if (Relay.IsEmpty())
 		{
@@ -208,10 +189,10 @@ namespace MoQHelpers
 
 	MoqDeliveryMode ResolveDeliveryMode(const FO3DTransportConfig& Config)
 	{
-		FString Mode = GetAdvancedOption(Config, kKeyDeliveryMode);
+		FString Mode = GetMoQOption(Config, kKeyDeliveryMode);
 		if (Mode.IsEmpty())
 		{
-			Mode = GetAdvancedOption(Config, kKeyDeliveryModeAlt);
+			Mode = GetMoQOption(Config, kKeyDeliveryModeAlt);
 		}
 
 		if (Mode.Equals(TEXT("datagram"), ESearchCase::IgnoreCase))
@@ -225,20 +206,20 @@ namespace MoQHelpers
 	uint64 ResolveQueueBytes(const FO3DTransportConfig& Config)
 	{
 		uint64 QueueBytes = kDefaultQueueBytes;
-		FString QueueOverride = GetAdvancedOption(Config, kKeyQueueBytes);
+		FString QueueOverride = GetMoQOption(Config, kKeyQueueBytes);
 		if (QueueOverride.IsEmpty())
 		{
-			QueueOverride = GetAdvancedOption(Config, kKeyQueueBytesAlt);
+			QueueOverride = GetMoQOption(Config, kKeyQueueBytesAlt);
 		}
 		if (QueueOverride.IsEmpty())
 		{
-			QueueOverride = GetAdvancedOption(Config, kKeyQueueBytesAlt2);
+			QueueOverride = GetMoQOption(Config, kKeyQueueBytesAlt2);
 		}
 
-		uint64 Parsed = 0;
-		if (!QueueOverride.IsEmpty() && ParseUInt64(QueueOverride, Parsed))
+		int64 Parsed = 0;
+		if (!QueueOverride.IsEmpty() && O3DTransportOptions::TryParseInt(QueueOverride, Parsed) && Parsed >= 0)
 		{
-			QueueBytes = Parsed;
+			QueueBytes = static_cast<uint64>(Parsed);
 		}
 
 		QueueBytes = FMath::Clamp<uint64>(QueueBytes, kMinQueueBytes, kMaxQueueBytes);
@@ -272,51 +253,20 @@ namespace MoQHelpers
 
 	double ResolveConnectTimeoutSeconds(const FO3DTransportConfig& Config)
 	{
-		FString Value = GetAdvancedOption(Config, kKeyConnectTimeout);
+		FString Value = GetMoQOption(Config, kKeyConnectTimeout);
 		if (Value.IsEmpty())
 		{
-			Value = GetAdvancedOption(Config, kKeyConnectTimeoutAlt);
+			Value = GetMoQOption(Config, kKeyConnectTimeoutAlt);
 		}
 
 		double Seconds = kDefaultConnectTimeoutSeconds;
-		if (!Value.IsEmpty() && Value.IsNumeric())
+		double Parsed = 0.0;
+		if (!Value.IsEmpty() && O3DTransportOptions::TryParseDouble(Value, Parsed))
 		{
-			Seconds = FCString::Atod(*Value);
+			Seconds = Parsed;
 		}
 
 		return FMath::Clamp(Seconds, kMinConnectTimeoutSeconds, kMaxConnectTimeoutSeconds);
-	}
-
-	bool TryGetAudioCodecFromFrame(const uint8* Payload, int32 PayloadSize, O3DS::EUnifiedCodec& OutCodec)
-	{
-		// Mirrors the private constants in Open3DShared's O3DAudioSerialization.cpp
-		// (AudioPayloadVersion = 1, EncodedAudioPayloadVersion = 2).
-		constexpr uint8 Pcm16FrameVersion = 1;
-		constexpr uint8 EncodedFrameVersion = 2;
-		constexpr int32 EncodedCodecOffset = 2;
-
-		if (Payload == nullptr || PayloadSize <= 0)
-		{
-			return false;
-		}
-
-		if (Payload[0] == Pcm16FrameVersion)
-		{
-			OutCodec = O3DS::EUnifiedCodec::PCM16;
-			return true;
-		}
-
-		if (Payload[0] == EncodedFrameVersion && PayloadSize > EncodedCodecOffset)
-		{
-			// PCM16 is always written as a version 1 frame, so version 2 carries Opus today.
-			if (Payload[EncodedCodecOffset] == static_cast<uint8>(O3DS::EUnifiedCodec::Opus))
-			{
-				OutCodec = O3DS::EUnifiedCodec::Opus;
-				return true;
-			}
-		}
-
-		return false;
 	}
 }
 

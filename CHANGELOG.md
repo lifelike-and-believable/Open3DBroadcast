@@ -684,6 +684,51 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### MoQ on the shared transport blocks (WP-A1 PR 4e, ADR 0007 step 4)
+
+- **Wire format unchanged.** Same tracks (`mocap/`, `audio/`, `control/` namespaces, track name
+  as before), the same bytes on each (a bare O3DS frame, a bare audio payload, a control
+  envelope), relay URL handling, option keys and defaults.
+- **Sender.** Frames, audio and control are items on one `FO3DSendQueue`, and an
+  `FO3DTransportWorker` publishes each on its track. The frame policy is `RefuseNewest` with
+  `queue_bytes` as the byte limit, as before: a full queue refuses the newest frame and never
+  discards a queued one. The worker still drops an item whose publisher is not ready (not
+  connected, or the track not announced yet), so a reconnect never replays a stale backlog.
+  Changes:
+  - Control has its own cap of 1,024 envelopes; it used to share `queue_bytes` with the frames.
+    Audio keeps its own 1 MiB.
+  - The audio sink is the shared `FO3DQueuedSenderAudioSink` (bare audio payloads, as before).
+  - `FramesSent` counts frames only; audio adds to `BytesSent`. Audio used to count as a frame.
+  - `DroppedFrames` counts frames only: audio refused by its queue or dropped at the worker is no
+    longer counted there. `SendErrors` (failed publishes) and `PendingFrames` are filled.
+  - The worker thread runs at normal priority (it was above normal).
+  - Reconnecting is unchanged: driven from `Tick` and the session's state callbacks on the game
+    thread, with the existing jittered backoff and connect timeout. moq-ffi does not reconnect by
+    itself, so there is one loop; `FO3DReconnectPolicy` is not used (see the ADR addendum).
+- **Receiver.** moq-ffi's data callbacks still reach the game thread through the session's
+  dispatcher, then a bounded hand-off queue (an `FO3DSendQueue`, 16 MiB per kind) that `Poll`
+  drains into `FO3DUnifiedReceiveDemux` (`DeliverMocap`, `DeliverAudioPayload`,
+  `DeliverControlEnvelope`). Changes:
+  - The consumer is held strongly and released in `Stop` (TRF-38); it used to be held weakly.
+  - `FramesReceived`/`BytesReceived` count mocap only; audio used to count as a frame.
+  - Rejected audio and malformed control count in `ReceiveErrors`, not `DroppedFrames`.
+  - The hand-off limit is per kind (mocap, audio, control) instead of one shared 16 MiB.
+- **Options.** `queue_bytes` must be digits (anything else is the default, as before) and
+  `connect_timeout` a strict number (`O3DTransportOptions::TryParseInt`/`TryParseDouble`); keys
+  are read with `O3DTransportOptions::GetString`. `MoQHelpers::GetAdvancedOption`, `ParseUInt64`
+  and `TryGetAudioCodecFromFrame` are deleted (the receiver uses `O3DAudio::TryGetAudioPayloadCodec`).
+- **Module dependencies.** `Open3DTransportMoQ` no longer depends on Open3DReceiver. It keeps
+  Open3DSender for one field: `ConfigureSender` defaults the stream id to the sender component's
+  `SubjectName`, which no generic config field carries until ADR 0007 step 5. The relay URL is
+  read from the config. `FO3DMoQSenderAudioSink`, `FMoQSenderAudioState` and MoQ's
+  `FO3DEncodedPayloadQueue` use are deleted. Net lines under `Open3DTransportMoQ`: -386.
+- **API version stays 4.** Nothing the add-on uses changed.
+- **Tests.** New `Open3DBroadcast.Transport.MoQ.QueueRefusesNewestUnderBackpressure`,
+  `.AudioIndependentOfFrameQueue` and `.StopWhileSending` (four send threads and an audio thread,
+  1,000 Stop cycles, every one connected). All run on the fake moq-ffi; none needs a relay.
+  `MoQTesting.h` gained `SenderSetWorkerPaused`. The existing MoQ, network-gated relay and
+  conformance tests are unchanged.
+
 ### NNG on the shared transport blocks (WP-A1 PR 4d, ADR 0007 step 4)
 
 - **Fix: `FO3DSendQueue` pending counters never read above a limit.** `Enqueue` used to add to

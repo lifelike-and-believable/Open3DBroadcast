@@ -608,7 +608,7 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
      - `FO3DAudioSinkBase` with the WP-S5 owner guard and a per-stream decoder map.
      - Shared host:port parsing that resolves hostnames (TRB-26, SHR-9).
      - Shared audio (de)serializers (SHR-35).
-     - **Progress:** PR 4a added the blocks under ADR 0007's names (`FO3DSendQueue` + `FO3DTransportWorker`, `FO3DUnifiedReceiveDemux`, `FO3DAudioPublishState` + `FO3DQueuedSenderAudioSink`, `O3DTransportOptions`) and migrated Loopback; PR 4b migrated TCP; PR 4c migrated UDP and removed `Open3DTransportSockets`' Open3DSender/Open3DReceiver dependency; PR 4d migrated NNG and removed `Open3DTransportNNG`'s (ADR 0007 addenda "WP-A1 PR 4a" to "PR 4d"); MoQ (PR 4e) and WebRTC follow.
+     - **Progress:** PR 4a added the blocks under ADR 0007's names (`FO3DSendQueue` + `FO3DTransportWorker`, `FO3DUnifiedReceiveDemux`, `FO3DAudioPublishState` + `FO3DQueuedSenderAudioSink`, `O3DTransportOptions`) and migrated Loopback; PR 4b migrated TCP; PR 4c migrated UDP and removed `Open3DTransportSockets`' Open3DSender/Open3DReceiver dependency; PR 4d migrated NNG and removed `Open3DTransportNNG`'s; PR 4e migrated MoQ and removed its Open3DReceiver dependency (Open3DSender stays for `SubjectName` until step 5) (ADR 0007 addenda "WP-A1 PR 4a" to "PR 4e"); the WebRTC add-on (PR 4f) follows.
   5. Add a typed config in place of the stringly-typed LiveKit fields in `FO3DTransportConfig` (SHR-36). Normalise identity and role fields (TRB-27). Make the consumer API zero-copy, with a documented threading contract (SHR-16, TRF-38).
 - **Acceptance:**
   - The WP-T2 conformance suite passes for every transport after each migration.

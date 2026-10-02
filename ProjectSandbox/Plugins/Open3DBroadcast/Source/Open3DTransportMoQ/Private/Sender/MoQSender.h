@@ -3,53 +3,60 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/CriticalSection.h"
 #include "HAL/ThreadSafeBool.h"
 #include "Templates/Atomic.h"
 #include "Templates/SharedPointer.h"
-#include "Templates/UniquePtr.h"
-#include "Containers/Queue.h"
 #include "Transport/O3DSenderInterface.h"
 #include "Transport/O3DConnectionState.h"
+#include "Transport/O3DSendQueue.h"
+#include "Transport/O3DSenderAudioSinkBase.h"
+#include "Transport/O3DTransportWorker.h"
 #include "Shared/MoQHelpers.h"
-#include "O3DAudioFrameCodec.h"
 #include "O3DPerformanceMetrics.h"
 #include "MoQFfiApi.h"
 THIRD_PARTY_INCLUDES_START
 #include "moq_ffi.h"
 THIRD_PARTY_INCLUDES_END
 
+#include <atomic>
+
 class FMoQSessionWrapper;
 class FMoQPublisherHandle;
-class FSendWorker;
-class FRunnableThread;
-struct FMoQSenderAudioState;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogO3DMoQSender, Log, All);
 
 /**
  * MoQ Transport Sender Implementation
- * 
+ *
  * Connects to a MoQ relay as a publisher and sends mocap and audio data.
  * Uses the moq-ffi library for WebTransport/QUIC connectivity.
- * 
+ *
  * Track Architecture:
  * - Mocap track: "mocap/<session>/<track>" - for motion capture data
  * - Audio track: "audio/<session>/<track>" - for audio data (separate publisher)
  * - Control track: "control/<session>/<track>" - control envelopes (ADR 0011), stream delivery
- * 
- * This leverages MoQ's native support for multiple tracks, providing clean
- * separation between data types rather than multiplexing like NNG.
- * 
- * Audio Support (Phase 4):
- * - Audio is published on a separate MoQ track with "audio" namespace prefix
- * - PCM audio is encoded to PCM16 or Opus using O3DAudio framework
- * - Each track type has its own publisher for independent flow control
- * 
+ *
+ * Shared transport blocks (ADR 0007 item 7, WP-A1 PR 4e): SendSerialized, SendControl and the
+ * audio sinks (FO3DQueuedSenderAudioSink, bare audio payloads for the audio track) only enqueue on
+ * one FO3DSendQueue; an FO3DTransportWorker publishes each item on its track's publisher.
+ *
+ * Queue policy: EO3DMocapOverflow::RefuseNewest with queue_bytes as the frame byte limit, as
+ * before. The worker drops an item whose publisher is not ready (not connected, or the track not
+ * announced yet), oldest first, so the queue holds no stale backlog across a reconnect; the queue
+ * fills only when the worker itself falls behind the relay. Audio (1 MiB) and control (1,024
+ * envelopes) have budgets of their own.
+ *
+ * Reconnect: driven on the game thread from Tick() and the session's state callbacks (which the
+ * session wrapper marshals to the game thread), with MoQHelpers::ComputeBackoffDelaySeconds and a
+ * connect timeout. moq-ffi does not reconnect by itself (every attempt is a fresh client), so this
+ * is the only reconnect loop.
+ *
  * Threading:
- * - Initialize(), Start(), Stop(), Tick() must be called from game thread
- * - Send() may be called from any thread (typically frame capture thread)
- * - Audio SubmitPcm() may be called from audio capture thread
- * - Internal worker thread handles actual network publishing
+ * - Initialize(), Start(), Stop(), Tick(), CreateAudioSink() must be called from game thread
+ * - Send(), SendSerialized(), SendControl() may be called from any thread
+ * - Audio SubmitPcm() may be called from the audio capture thread
+ * - The worker thread publishes (moq_publish_data)
  */
 class FO3DMoQSender : public IOpen3DSender
 {
@@ -65,6 +72,9 @@ public:
 
 	FO3DMoQSender(const FO3DMoQSender&) = delete;
 	FO3DMoQSender& operator=(const FO3DMoQSender&) = delete;
+
+	/** Encoded audio frames that may wait for the worker (refused beyond it), as before WP-A1 PR 4e. */
+	static constexpr int64 AudioQueueBytes = 1024 * 1024;
 
 	// IOpen3DSender interface
 	virtual FO3DTransportResult Initialize(const FO3DTransportConfig& Config) override;
@@ -84,30 +94,20 @@ public:
 	virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
 	virtual EO3DSendResult SendControl(const uint8* Envelope, int32 Len) override;
 
-private:
-	friend class FSendWorker;
+	/**
+	 * Test hook: while paused the worker publishes nothing, so the queue policy can be observed.
+	 * Pausing returns once the worker has seen the flag (HANDOFF pitfall 15).
+	 */
+	void SetWorkerPausedForTesting(bool bPaused);
 
-	/** The MoQ track a queued payload is published on. */
+private:
+	/** The MoQ track an item is published on. */
 	enum class ETrack : uint8
 	{
 		Mocap,
 		Audio,
 		/** Control envelopes (ADR 0011): never counted as frames or dropped frames. */
 		Control,
-	};
-
-	struct FPendingPayload
-	{
-		TArray<uint8> Data;
-		double EnqueueTimestampSeconds = 0.0;
-		ETrack Track = ETrack::Mocap;
-	};
-
-	struct FLatencyStats
-	{
-		double TotalLatencyMs = 0.0;
-		double MaxLatencyMs = 0.0;
-		int64 Samples = 0;
 	};
 
 	struct FMoQSenderOptions
@@ -123,6 +123,8 @@ private:
 		double ConnectTimeoutSeconds = 15.0;
 	};
 
+	static ETrack TrackOf(EO3DSendItemKind Kind);
+
 	bool ParseOptions(const FO3DTransportConfig& Config, FString& OutError);
 	bool AttemptConnect();
 	void HandleConnectionStateChanged(MoqConnectionState NewState);
@@ -133,31 +135,25 @@ private:
 	double NowSeconds() const;
 	/** Snapshot of a publisher handle; any thread (TRF-9). */
 	TSharedPtr<FMoQPublisherHandle, ESPMode::ThreadSafe> GetPublisher(ETrack Track) const;
-	void StartWorker();
-	void StopWorker();
-	void WakeWorker();
-	bool IsPublisherReady() const;
-	bool IsAudioPublisherReady() const;
-	bool IsControlPublisherReady() const;
+	bool IsPublisherReady(ETrack Track) const;
 	bool EnsurePublisher();
 	bool EnsureAudioPublisher();
 	bool EnsureControlPublisher();
 	void DestroyPublisher();
 	void DestroyAudioPublisher();
 	void DestroyControlPublisher();
-	bool EnqueuePayload(TArray<uint8>&& Data, double CaptureTimestampSec, ETrack Track = ETrack::Mocap);
-	EO3DSendResult SendBytes(TArray<uint8>&& Bytes, const FString& SubjectName, double CaptureTimestampSec);
+	EO3DSendResult EnqueueFrame(TArray<uint8>&& Bytes, FString SubjectName, double CaptureTimestampSec, bool bFullSync);
 	/** Reports a lost session: Reconnecting when it had been connected (game thread). */
 	void ReportSessionLost(const FString& Reason);
-	bool DequeuePayload(TUniquePtr<FPendingPayload>& OutPayload);
+	/** Empties the queue (worker not running); frames discarded count as dropped, as before. */
 	void DrainQueue();
-	bool PublishPayload(const FPendingPayload& Payload);
-	uint32 RunWorker();
+	/** Worker thread. */
+	uint32 RunWorkerIteration();
+	/** Worker thread. */
+	bool PublishItem(const FO3DSendItem& Item);
 	void ResetStats();
-	
-	// Audio support (Phase 4)
+
 	FString ResolveAudioSubjectFallback() const;
-	void DrainAudioQueue(bool bPublish);
 
 	FMoQSenderOptions Options;
 	FMoQFfiApiRef Api;
@@ -175,17 +171,29 @@ private:
 	mutable FCriticalSection PublisherMutex;
 	FDelegateHandle ConnectionDelegateHandle;
 
-	TQueue<TUniquePtr<FPendingPayload>, EQueueMode::Mpsc> SendQueue;
-	mutable FCriticalSection QueueMutex;
-	uint64 PendingQueueBytes = 0;
+	const TSharedRef<FO3DSendQueue, ESPMode::ThreadSafe> Queue;
+	/** WP-S5 publish state shared with the audio sinks (never the sender itself). */
+	const TSharedRef<FO3DAudioPublishState, ESPMode::ThreadSafe> PublishState;
+	FO3DTransportWorker Worker;
+	std::atomic<bool> bWorkerPausedForTesting{ false };
+	/** Worker iterations that saw bWorkerPausedForTesting; SetWorkerPausedForTesting waits on it. */
+	std::atomic<int64> PausedIterations{ 0 };
 
-	TUniquePtr<FSendWorker> WorkerRunnable;
-	FRunnableThread* WorkerThread = nullptr;
-	FThreadSafeBool bWorkerStopRequested = false;
+	std::atomic<int64> FramesSent{ 0 };
+	std::atomic<int64> BytesSent{ 0 };
+	/** Frames refused by the queue, dropped by the worker (publisher not ready), failed, or drained by Stop. */
+	std::atomic<int64> DroppedFrames{ 0 };
+	std::atomic<int64> SendErrors{ 0 };
 
-	FO3DTransportStats Stats;
-	mutable FCriticalSection StatsMutex;
+	struct FLatencyStats
+	{
+		double TotalLatencyMs = 0.0;
+		double MaxLatencyMs = 0.0;
+		int64 Samples = 0;
+	};
+	/** Written by the worker, read by GetStats. */
 	FLatencyStats LatencyStats;
+	mutable FCriticalSection LatencyMutex;
 
 	FThreadSafeBool bInitialized = false;
 	FThreadSafeBool bRunning = false;
@@ -197,24 +205,19 @@ private:
 	/** Earliest time (NowSeconds) for the next connect attempt; game thread only. */
 	double NextConnectAttemptTimeSeconds = 0.0;
 
-	double LastErrorLogTimeSeconds = 0.0;
+	/** Publisher-creation failures (game thread) and mocap/audio publish failures (worker). */
+	std::atomic<double> LastErrorLogTimeSeconds{ 0.0 };
 	/** Control has its own throttle, so its failures never hide a mocap warning. */
-	double LastControlErrorLogTimeSeconds = 0.0;
-	double LastDropLogTimeSeconds = 0.0;
+	std::atomic<double> LastControlErrorLogTimeSeconds{ 0.0 };
+	/** Written by any thread that calls SendSerialized. */
+	std::atomic<double> LastDropLogTimeSeconds{ 0.0 };
 
 	FO3DTransportConfig ActiveConfig;
-	
-	// Audio support (Phase 4)
+
 	FO3DTransportAudioConfig ActiveAudioConfig;
 	FGuid AudioSourceGuid;
 	/** Set once an audio sink has been handed out; creates the audio publisher on connect. Game thread only. */
 	bool bAudioRequested = false;
-
-	/**
-	 * WP-S5: shared with audio sinks (never the sender itself). Its queue's wake event is also
-	 * the worker's wake event, so no thread can trigger a pooled event after Stop() (TRB-12).
-	 */
-	TSharedRef<FMoQSenderAudioState, ESPMode::ThreadSafe> AudioState;
 
 	/** This transport's counters, resolved once (SHR-3, SHR-17): no lock or lookup per frame. */
 	const FO3DTransportMetricsRef TransportMetrics;

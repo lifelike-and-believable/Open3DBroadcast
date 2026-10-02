@@ -119,6 +119,13 @@ namespace MoQTesting
 	OPEN3DTRANSPORTMOQ_API double ResolveConnectTimeoutSeconds(const FO3DTransportConfig& Config);
 	OPEN3DTRANSPORTMOQ_API bool TryGetAudioCodecFromFrame(const uint8* Payload, int32 PayloadSize, O3DS::EUnifiedCodec& OutCodec);
 
+	/**
+	 * Pauses or resumes the sender's worker (WP-A1 PR 4e): while paused it publishes nothing, so
+	 * the send queue's policy can be observed. Pausing returns once the worker has seen the flag.
+	 * Sender must come from CreateSenderForTest().
+	 */
+	OPEN3DTRANSPORTMOQ_API void SenderSetWorkerPaused(IOpen3DSender& Sender, bool bPaused);
+
 	/** FMoQResult::FromCode(ToMoQErrorCode(RawCode), Message), flattened. */
 	OPEN3DTRANSPORTMOQ_API FMoQTestResult MakeResultFromRawCode(MoqResultCode RawCode, const FString& Message);
 }

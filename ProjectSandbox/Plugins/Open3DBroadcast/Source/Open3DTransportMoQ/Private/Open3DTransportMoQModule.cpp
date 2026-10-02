@@ -12,22 +12,14 @@
 #include "Shared/MoQHelpers.h"
 #include "Sender/MoQSender.h"
 #include "Receiver/MoQReceiver.h"
+// Only for UO3DSenderComponent::SubjectName, the default stream id (WP-A1 PR 4e keeps this one
+// Open3DSender use until ADR 0007 step 5's typed config carries the subject).
 #include "O3DSenderComponent.h"
-#include "O3DReceiverSourceSettings.h"
 #include "O3DTransportOptionSchema.h"
+#include "Transport/O3DTransportOptions.h"
 #include "Transport/O3DTransportRegistry.h"
 
 #define LOCTEXT_NAMESPACE "Open3DTransportMoQ"
-
-namespace MoQConfig
-{
-	// Reads the sender component's option map with the MoQHelpers key set (relay_url,
-	// track_namespace, track_name, delivery_mode, queue_bytes - see MoQHelpers.h).
-	static FString GetSenderOption(const UO3DSenderComponent* Component, const TCHAR* Key)
-	{
-		return Component ? Component->GetTransportOption(Key) : FString();
-	}
-}
 
 /**
  * Option schemas (ADR 0010 §4), rendered by the editor module. Same fields for both roles: the
@@ -202,7 +194,9 @@ private:
 			// other transports and any code that inspects those fields directly
 			// instead of going through MoQHelpers::ResolveRelayUrl.
 			Config.Transport = TEXT("MoQ");
-			Config.Uri = MoQConfig::GetSenderOption(SenderComponent, MoQHelpers::kKeyRelayUrl);
+			// AdvancedParams holds the component's options (secrets excluded), so this is what
+			// SenderComponent->GetTransportOption(relay_url) returned before WP-A1 PR 4e.
+			Config.Uri = O3DTransportOptions::GetString(Config.AdvancedParams, MoQHelpers::kKeyRelayUrl);
 			if (Config.StreamId.IsEmpty() && SenderComponent)
 			{
 				Config.StreamId = SenderComponent->SubjectName;
@@ -210,7 +204,7 @@ private:
 		};
 		Descriptor.SenderOptions.OptionSchema = MoQSchema::Make(/*bSender=*/true);
 
-		Descriptor.ConfigureReceiver = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
+		Descriptor.ConfigureReceiver = [](const FO3DReceiverSourceConfig& /*Settings*/, FO3DTransportConfig& Config)
 		{
 			// Deliberately does NOT set Config.Uri here (unlike the sender
 			// side): O3DReceiverSource::BuildTransportConfig() auto-fills
