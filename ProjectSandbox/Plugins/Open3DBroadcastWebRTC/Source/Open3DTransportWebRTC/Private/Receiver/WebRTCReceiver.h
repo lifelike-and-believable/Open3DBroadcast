@@ -6,6 +6,8 @@
 #include "Transport/O3DConnectionState.h"
 #include "Transport/O3DTransportTypes.h"
 #include "Transport/O3DSerializedFrameConsumer.h"
+#include "Transport/O3DSendQueue.h"
+#include "Transport/O3DUnifiedReceiveDemux.h"
 #include "HAL/CriticalSection.h"
 #include "Templates/Atomic.h"
 #include <atomic>
@@ -27,13 +29,6 @@ DECLARE_LOG_CATEGORY_EXTERN(LogO3DWebRTCReceiver, Log, All);
 // Note: LiveKit FFI handles Opus decoding internally.
 // We receive PCM16 audio directly via the audio callback.
 
-/** One data-channel message waiting for Poll(). */
-struct FWebRTCReceiverPendingFrame
-{
-    TArray<uint8> Payload;
-    double EnqueueTimeSeconds = 0.0;
-};
-
 /**
  * State shared between FO3DWebRTCReceiver and its LiveKit callbacks (WP-S7, TRF-15; replaces the
  * WP-S5 `this` exception). Never holds a receiver pointer.
@@ -45,6 +40,8 @@ struct FWebRTCReceiverPendingFrame
  */
 struct FWebRTCReceiverLink
 {
+    FWebRTCReceiverLink();
+
     TAtomic<bool> bConnected{ false };
     /** Latest LkConnectionState from the connection callback, -1 before the first one; Poll applies it (ADR 0007 item 3). */
     std::atomic<int32> LkState{ -1 };
@@ -62,19 +59,26 @@ struct FWebRTCReceiverLink
     TAtomic<int64> BytesReceived{ 0 };
 
     /**
-     * Control envelopes (ADR 0011) waiting for Poll(), in arrival order. Separate from the frame
-     * queues, so control never reaches the frame consumer or moves a frame counter.
+     * Control envelopes (ADR 0011) waiting for Poll(), in arrival order: an FO3DSendQueue of
+     * control items (cap 1,024, the newest refused), filled on FFI threads and drained by Poll on
+     * the game thread (WP-A1 PR 4f). Separate from the frames, so control never reaches the frame
+     * consumer or moves a frame counter.
      */
-    FCriticalSection PendingControlMutex;
-    TArray<TArray<uint8>> PendingControl;
+    FO3DSendQueue ControlQueue;
     /** True while the receiver has a control sink; the data callback drops control otherwise. */
     TAtomic<bool> bControlWanted{ false };
     /** Rate limit for control drop logs, separate from every frame log; written from FFI threads. */
     std::atomic<double> LastControlDropLogTime{ 0.0 };
 
-    /** Per-subject frame queues, keyed by the decoded data channel label. */
-    FCriticalSection PendingFramesMutex;
-    TMap<FString, TArray<FWebRTCReceiverPendingFrame>> PendingFramesBySubject;
+    /**
+     * Data-channel frames waiting for Poll(), in arrival order, each with its decoded label as the
+     * subject: an FO3DSendQueue of mocap items (RefuseNewest, MaxPendingFrameBytes), filled on FFI
+     * threads and drained by Poll on the game thread (WP-A1 PR 4f; it used to be unbounded).
+     */
+    FO3DSendQueue FrameQueue;
+    /** Frames refused because FrameQueue was full; reported in DroppedFrames. */
+    std::atomic<int64> FramesRefused{ 0 };
+    static constexpr int64 MaxPendingFrameBytes = 16ll * 1024ll * 1024ll;
 
     /** Written on the game thread, copied by audio callbacks. Guarded by AudioSinkMutex only. */
     FCriticalSection AudioSinkMutex;
@@ -107,13 +111,13 @@ struct FWebRTCReceiverLink
  *   (FO3DReceiverSource::Tick and its start/stop paths). Connection and token state
  *   (ClientHandle, bConnectRequested, bConnectIssued, token generations, Consumer) is touched
  *   only there, under StateMutex.
- * - LiveKit callbacks run on FFI threads and touch only the shared Link: atomics, the pending
- *   frame queue (PendingFramesMutex), the pending control queue (PendingControlMutex) and the
- *   audio sink (AudioSinkMutex). They never take StateMutex, so Stop() may hold it while
+ * - LiveKit callbacks run on FFI threads and touch only the shared Link: atomics, the frame and
+ *   control queues (FO3DSendQueue: lock-free producers, Poll the only consumer) and the audio
+ *   sink (AudioSinkMutex). They never take StateMutex, so Stop() may hold it while
  *   lk_disconnect waits for callbacks to finish.
  * - Control (ADR 0011): the data callback classifies enveloped control bytes before the
- *   "label = subject" mocap path and queues them; Poll() hands them to the control sink on the
- *   game thread. The sink is set and released (in Stop) under StateMutex.
+ *   "label = subject" mocap path and queues them; Poll() hands them to the control sink through
+ *   the shared receive demux on the game thread. The sink is set and released (in Stop) there.
  * - Token fetch results never write receiver members: FO3DTokenManager stores them under its
  *   own lock and Poll() reads them (TRF-3).
  * - GetStats may be called from any thread.
@@ -180,11 +184,13 @@ private:
     mutable FCriticalSection StateMutex;
     TAtomic<bool> bInitialized{ false };
 
-    // Consumer (game thread, under StateMutex)
-    TSharedPtr<ISerializedFrameConsumer> Consumer;
-
-    /** Control sink (ADR 0011); game thread, under StateMutex; released in Stop. */
-    TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe> ControlSink;
+    /**
+     * Holds the consumer and the control sink strongly and delivers mocap (DeliverMocap, the data
+     * label as the subject) and control (DeliverControlEnvelope); Stop() releases them (TRF-38,
+     * ADR 0011). Game thread only. Audio does not go through it: LiveKit decodes Opus itself and
+     * hands PCM16 to the audio callback, which calls the audio sink directly on its thread.
+     */
+    FO3DUnifiedReceiveDemux Demux;
 
     // Stats / diagnostics
     mutable FCriticalSection StatsMutex;

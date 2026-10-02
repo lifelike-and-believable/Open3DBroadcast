@@ -23,7 +23,8 @@ The WebRTC (LiveKit) transport for Open3DBroadcast, as a separate, free plugin. 
 ## How it plugs into Open3DBroadcast
 
 - The `.uplugin` declares a plugin dependency on `Open3DBroadcast`, so UE loads Open3DBroadcast first.
-- The module uses only exported, public API of Open3DBroadcast: `Open3DShared`, `Open3DSender`, `Open3DReceiver` and `Open3DStreamCore` (for `O3DS::SubjectList`). Its `Build.cs` never reaches into Open3DBroadcast's folders, so it builds wherever Open3DBroadcast is installed.
+- The module uses only exported, public API of Open3DBroadcast. The runtime code uses `Open3DShared` (including the shared transport blocks: `FO3DSendQueue` for the receiver's hand-off to `Poll`, `FO3DUnifiedReceiveDemux`, `O3DTransportOptions`; WP-A1 PR 4f) and `Open3DStreamCore` (for `O3DS::SubjectList`). `Open3DSender` and `Open3DReceiver` are linked only for two test files. Its `Build.cs` never reaches into Open3DBroadcast's folders, so it builds wherever Open3DBroadcast is installed.
+- Sending stays on the caller's thread: LiveKit's data channel buffers each message and refuses it when it cannot take it, and the refusal is returned at once. Audio is PCM16 to a LiveKit track per subject; LiveKit encodes and decodes Opus itself.
 - At startup it:
   1. checks the transport API version (below) and stops if it differs;
   2. loads `livekit_ffi.dll` from **this** plugin's folder, through Open3DBroadcast's shared `FO3DFfiLibrary` loader, and stops if that fails;

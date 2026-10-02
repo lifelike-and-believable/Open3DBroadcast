@@ -11,7 +11,7 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M0 Decisions (ADRs 0001–0010) | Done (#261–#263) |
 | M1 Safety and correctness: WP-S1..S11, WP-T1, WP-T2 | Done (#264–#279) |
 | M2 Fab-buildable package: WP-F1..F4, F6..F9, F11 | Done (#274–#286). **F0 and F5 wait on the maintainer** (see §5) |
-| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime), PR 3 (results, state, capabilities), PR 4a (building blocks + Loopback), PR 4b (TCP), PR 4c (UDP), PR 4d (NNG) and PR 4e (MoQ) done; step 4 continues with the WebRTC add-on (PR 4f)** (see §2) |
+| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime), PR 3 (results, state, capabilities), PR 4a (building blocks + Loopback), PR 4b (TCP), PR 4c (UDP), PR 4d (NNG), PR 4e (MoQ) and PR 4f (WebRTC add-on) done, so step 4 is complete; next is step 5 (typed config)** (see §2) |
 | M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | Not started |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
 | WP-CTL control channel (D11, ADR 0011) | CTL-1..7 done (#290–#295, CTL-6, CTL-7); live-server checks remain (see §2b) |
@@ -69,7 +69,19 @@ Design: `docs/adr/0007-transport-abstraction-and-registry.md`, section "Implemen
      - Config: `O3DTransportOptions` for every key, strict numbers. **`Open3DTransportMoQ` no longer depends on Open3DReceiver**; it keeps Open3DSender only for `UO3DSenderComponent::SubjectName` (the default stream id) until step 5.
      - `O3D_TRANSPORT_API_VERSION` stays **4**.
      - Tests: `Open3DBroadcast.Transport.MoQ.QueueRefusesNewestUnderBackpressure`, `.AudioIndependentOfFrameQueue`, `.StopWhileSending` (1,000 cycles), all on the fake moq-ffi; `MoQTesting.h` gained `SenderSetWorkerPaused`.
-   - **Start here next: the WebRTC add-on (PR 4f).** In `ProjectSandbox/Plugins/Open3DBroadcastWebRTC`, move the WebRTC sender's send path and audio sink onto `FO3DSendQueue` + `FO3DTransportWorker` + `FO3DQueuedSenderAudioSink` where LiveKit's FFI allows (it encodes Opus itself, so the audio path may stay special), the receiver's data, audio and control callbacks onto `FO3DUnifiedReceiveDemux` (`DeliverMocap`, `DeliverAudioFrame`, `DeliverControlEnvelope`), and its options onto `O3DTransportOptions`. The add-on builds against the published interface, so check `O3D_TRANSPORT_API_VERSION` before touching any shared type. Then step 4 is complete; the remaining Open3DSender uses (`SubjectName` in MoQ and any in WebRTC) go with step 5.
+   - **WebRTC add-on done (WP-A1 PR 4f); step 4 is complete.** Details in the ADR 0007 addendum "implementation notes (WP-A1 PR 4f)".
+     - Receiver: frames and control go from LiveKit's data callback to `Poll` through two `FO3DSendQueue` hand-offs (frames `RefuseNewest` 16 MiB, newly bounded; control 1,024), and `Poll` delivers them through `FO3DUnifiedReceiveDemux`. Audio still goes straight from LiveKit's audio callback to the sink (LiveKit decodes Opus).
+     - Sender: unchanged and synchronous. LiveKit's data channel buffers and refuses, its refusal is the backpressure, and the add-on's tests pin synchronous results. The gated PCM16 audio sink stays (LiveKit encodes Opus). LiveKit reconnects by itself; `FO3DReconnectPolicy` is not used.
+     - Config: `O3DTransportOptions` (strict booleans and numbers); the configure functions read only the config, so no runtime file includes an Open3DSender or Open3DReceiver header.
+     - `O3D_TRANSPORT_API_VERSION` stays **4**.
+     - Tests: `Open3DBroadcast.Transport.WebRTC.SharedBlocks.ReceiverQueuePolicy`, `.ReceiverAudioIndependentOfFrameQueue`, `.SenderAudioIndependentOfDataChannel`, `.SenderStopWhileSending`, `.ReceiverStopWhileReceiving` (200 cycles each), on a fake LiveKit.
+   - **Leftovers from step 4**, for step 5 or later:
+     - MoQ keeps Open3DSender for `UO3DSenderComponent::SubjectName` (its default stream id).
+     - MoQ keeps its own backoff (jitter only downward, pinned by its tests); TCP and UDP use `FO3DReconnectPolicy`.
+     - The WebRTC sender has no send queue (see above); revisit if `lk_send_data_ex` turns out to block.
+     - The WebRTC add-on's Build.cs keeps Open3DSender and Open3DReceiver for two test files (`WebRTCLifetimeTests.cpp`, `WebRTCSecretsTests.cpp`) until it has its own test module (WP-F11).
+     - `UdpSenderSetWorkerPaused` does not wait for the worker to see the flag (pitfall 15).
+   - **Start here next: step 5, typed config and consumer API.** Per ADR 0007: option schemas per transport and `FO3DTransportOptionsView` replace `AdvancedParams` in the getters and the configure functions' old parameters; the LiveKit string fields leave `FO3DTransportConfig`; `SubmitFrame` gets its view and owned forms; `Send(SubjectList)` is deleted. Step 6 then removes the forwarding shims and bumps `O3D_TRANSPORT_API_VERSION` to 5, which needs the WebRTC add-on's version check and README updated in the same change.
 5. **Typed config and consumer API** (SHR-36, TRB-27, SHR-16, TRF-38): removes the LiveKit string fields from `FO3DTransportConfig`, deletes `Send(SubjectList)`.
 6. Next minor release: delete the shims and bump `O3D_TRANSPORT_API_VERSION` (to 5, or later if other steps bump it first; PR 3 took 4).
 
@@ -158,6 +170,7 @@ With UE 5.7 installed locally you can also run the real build and tests: `Build/
 15. A test pause hook must return only once the worker has seen the flag: an iteration that started before the flag was set can still dequeue the next item. `FO3DNngSender::SetWorkerPausedForTesting` waits for a paused iteration (WP-A1 PR 4d); `UdpSenderSetWorkerPaused` does not yet, so a UDP test should leave the queue empty for one worker wait before relying on it.
 16. Never build a counter that reserves first and rolls back on overflow when another thread can read it: a reader sees the over-limit value for a moment. `FO3DSendQueue::Enqueue` did that and `Open3DBroadcast.Shared.SendQueue.ConcurrentAccounting` failed intermittently on #308; it now reserves with a compare-exchange that only succeeds when the result fits (af7cfcc). The same applies to any limit a test or `GetStats` observes.
 17. A transport's existing tests may pin its own timing (MoQ's backoff jitter, connect timeout, subscribe retry on a manual clock). Before replacing such logic with a shared block, check that the shared block reproduces those exact values; if not, keep the transport's logic and say why, rather than editing the tests (WP-A1 PR 4e kept MoQ's backoff).
+18. A fake FFI used for a Stop test must keep the real library's callback contract. LiveKit promises no callback after the call that clears it (or `lk_client_destroy`) returns, so the WebRTC fakes hold a lock around each callback and take it in the setters (`WebRTCSharedBlocksTests.cpp`, WP-A1 PR 4f). A fake that calls back without it reports races the real library cannot produce, and can hide the ones it can.
 
 ## 5. Waiting on the maintainer
 

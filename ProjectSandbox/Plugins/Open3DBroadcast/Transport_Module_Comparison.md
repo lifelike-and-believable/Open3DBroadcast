@@ -330,8 +330,8 @@ While idle for `tcp.keepalive` ms the sender writes a keepalive frame whose payl
 - Opus encoding/decoding handled by LiveKit internally
 
 **Key Classes**:
-- `FO3DWebRTCSender` (`WebRTCSender.h:20`)
-- `FO3DWebRTCReceiver` (`WebRTCReceiver.h:21`)
+- `FO3DWebRTCSender` (`WebRTCSender.h`)
+- `FO3DWebRTCReceiver` (`WebRTCReceiver.h`)
 - `LkClientHandle` - Opaque LiveKit FFI handle
 
 **Threading Model**:
@@ -341,7 +341,9 @@ While idle for `tcp.keepalive` ms the sender writes a keepalive frame whose payl
   - `OnConnectionState` - Connection state changes
   - `OnDataReceived` - Incoming mocap data (receiver)
   - `OnAudioReceived` - Incoming PCM16 audio (receiver)
-- Synchronization via mutexes for state access
+- **Sender**: `SendSerialized` and `SendControl` hand each message to LiveKit on the caller's thread; LiveKit's refusal is the backpressure (`DroppedBackpressure`). No send queue or worker (WP-A1 PR 4f, ADR 0007 addendum)
+- **Receiver** (shared transport blocks, WP-A1 PR 4f): the data callback puts frames (`RefuseNewest`, 16 MiB) and control (1,024) on `FO3DSendQueue` hand-offs; `Poll` delivers them through `FO3DUnifiedReceiveDemux`. Audio goes from the audio callback straight to the sink
+- **Reconnect**: LiveKit's own (sender); the receiver's no-data watchdog recreates the client
 
 **Connection Model**:
 - **Room-based**: Both sender and receiver join a LiveKit room
@@ -584,6 +586,8 @@ transport in this document — it is not a WebRTC feature.
 
 ### WebRTC
 - **Connection failures**: LiveKit automatic reconnection
+- **Send refused by LiveKit**: `DroppedBackpressure`, counted in `DroppedFrames` and `SendErrors`
+- **Receiver backlog**: frames over 16 MiB waiting for `Poll` are refused and counted in `DroppedFrames`
 - **Network changes**: LiveKit ICE restart
 - **Audio publish errors**: Log and return false
 - **Token expiration**: User must refresh token
@@ -626,7 +630,7 @@ Transport tests live in the editor-only `Open3DBroadcastTests` module (`Source/O
 | **Loopback** | `LoopbackAudioTests.cpp`, `LoopbackLifetimeTests.cpp` | Audio roundtrip, start/stop lifetime |
 | **NNG** | `NngTransportTests.cpp`, `NngLifetimeTests.cpp`, `NngModeRoleTests.cpp`, `NngSharedBlocksTests.cpp` | Pub/sub round trip, queue limit, receive demux, mode and role pairs, start/stop lifetime, refuse-newest under backpressure, audio and control independent of the frame budget, Stop under load |
 | **Sockets** | `SocketsAudioTests.cpp`, `SocketsLifetimeTests.cpp`, `SocketsTcpTransportTests.cpp`, `SocketsTcpSharedBlocksTests.cpp`, `SocketsUdpSharedBlocksTests.cpp` | TCP/UDP audio, start/stop lifetime, TCP burst, slow reader, reconnect, keepalive, audio and control independent of the frame budget (TCP and UDP), receiver backoff on its worker, UDP drop-oldest under backpressure, Stop under load (TCP and UDP) (framing parser: core `test/tcp_stream_parser_tests.cpp`) |
-| **WebRTC** | `WebRTCTransportTests.cpp`, `WebRTCPerSubjectTests.cpp`, `WebRTCFunctionalTests.cpp` | Transport + per-subject routing, token fetch |
+| **WebRTC** | `WebRTCTransportTests.cpp`, `WebRTCPerSubjectTests.cpp`, `WebRTCFunctionalTests.cpp`, `WebRTCControlTests.cpp`, `WebRTCSharedBlocksTests.cpp` (fake LiveKit) | Transport + per-subject routing, token fetch, control, receiver hand-off limit and order, audio independent of the frame queue and the data channel, Stop under load |
 | **MoQ** | `MoQSenderTests.cpp`, `MoQReceiverTests.cpp`, `MoQSessionWrapperTests.cpp`, `MoQTrackNamespaceTests.cpp`, `MoQFunctionalTests.cpp`, `MoQLifetimeTests.cpp`, `MoQControlTests.cpp`, `MoQSharedBlocksTests.cpp` (fake moq-ffi); `Network/MoQ/MoQRelayNetworkTests.cpp` (real relay, opt-in) | Session lifecycle, track naming, reconnect and backoff, control, refuse-newest under backpressure, audio and control independent of the frame budget, Stop under load, relay integration |
 
 **Common Test Patterns**:
@@ -725,7 +729,7 @@ Config.AdvancedParams.Add("delivery_mode", "datagram");
 - **NNG**: Async send thread (shared `FO3DTransportWorker`), sync receive polling over NNG's own I/O threads
 - **TCP**: Async send thread and async receive thread (shared `FO3DTransportWorker`); delivery from `Poll`
 - **UDP**: Async send thread (shared `FO3DTransportWorker`), sync receive polling
-- **WebRTC**: Event-driven FFI callbacks
+- **WebRTC**: Event-driven FFI callbacks; sends on the caller's thread, receive hand-off to `Poll`
 - **MoQ**: Async send thread (shared `FO3DTransportWorker`), dispatcher thread (`FMoQAsyncDispatcher`) for FFI callbacks, delivery from `Poll`
 
 ### Network Topology

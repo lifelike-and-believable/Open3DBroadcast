@@ -490,7 +490,12 @@ EO3DSendResult FO3DWebRTCSender::SendSerialized(FO3DSendPayload&& Payload)
     FO3DPerformanceMetrics::Get().RecordFrameCaptured();
     FO3DPerformanceMetrics::Get().RecordBytesSerialized(Len);
 
-    // Sent on the caller's thread (TRF-5; the shared worker of WP-A1 step 4 moves it off).
+    // Handed to LiveKit on the caller's thread (TRF-5). LiveKit buffers the message in the data
+    // channel and refuses it when it cannot take it, and that refusal is the backpressure the
+    // caller sees at once (DroppedBackpressure, counted here). WP-A1 PR 4f keeps this rather than
+    // putting an FO3DSendQueue and worker in front: see the ADR 0007 addendum "implementation
+    // notes (WP-A1 PR 4f)". livekit_ffi.h does not say whether lk_send_data_ex can block
+    // (needs-FFI-verification).
     const EO3DSendResult Result = SendBytes(Payload.Bytes.GetData(), Len, Payload.Subject);
     if (Result != EO3DSendResult::Queued)
     {
@@ -892,7 +897,7 @@ FO3DTransportResult FO3DWebRTCSender::ParseConfig(const FO3DTransportConfig& Con
         return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("WebRTC sender: the token settings were refused."));
     }
 
-    bPreferLossyData = WebRTCUtils::ParseBoolOption(Config.AdvancedParams, WebRTCUtils::PreferLossyOptionKey, /*DefaultValue=*/false);
+    bPreferLossyData = O3DTransportOptions::GetBool(Config.AdvancedParams, WebRTCUtils::PreferLossyOptionKey, /*Default=*/false);
     bLossyCapabilities.store(bPreferLossyData);
 
     return FO3DTransportResult::Ok();

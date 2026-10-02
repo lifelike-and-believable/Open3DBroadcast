@@ -7,6 +7,7 @@
 #include "Misc/Guid.h"
 #include "Containers/StringConv.h"
 #include "O3DUnifiedMessage.h"
+#include "Transport/O3DTransportOptions.h"
 #include "Transport/O3DTransportTypes.h"
 
 namespace WebRTCUtils
@@ -64,33 +65,8 @@ namespace WebRTCUtils
     static constexpr int32 LossyMaxDataBytes = 1300;
     static constexpr int32 ReliableMaxDataBytes = 15000;
 
-    /** "1", "true" or "yes" (any case) is true, "0", "false" or "no" false, anything else DefaultValue. */
-    inline bool ParseBoolOption(const TMap<FString, FString>& Params, const TCHAR* Key, bool DefaultValue)
-    {
-        if (!Key)
-        {
-            return DefaultValue;
-        }
-
-        if (const FString* Value = Params.Find(Key))
-        {
-            if (Value->Equals(TEXT("1"), ESearchCase::IgnoreCase) ||
-                Value->Equals(TEXT("true"), ESearchCase::IgnoreCase) ||
-                Value->Equals(TEXT("yes"), ESearchCase::IgnoreCase))
-            {
-                return true;
-            }
-
-            if (Value->Equals(TEXT("0"), ESearchCase::IgnoreCase) ||
-                Value->Equals(TEXT("false"), ESearchCase::IgnoreCase) ||
-                Value->Equals(TEXT("no"), ESearchCase::IgnoreCase))
-            {
-                return false;
-            }
-        }
-
-        return DefaultValue;
-    }
+    // Options are read with O3DTransportOptions (Open3DShared, exported at O3D_TRANSPORT_API_VERSION
+    // 4): keys case-insensitive, values trimmed, booleans true/false, 1/0, yes/no, on/off (WP-A1 PR 4f).
 
     /**
      * Capabilities of the WebRTC transport for Config (ADR 0007 item 4). Delivery follows ADR 0005
@@ -106,7 +82,7 @@ namespace WebRTCUtils
         Caps.bAudioReceive = true;
         Caps.bControl = true;
         Caps.bBidirectional = true; // a LiveKit room carries data both ways; nothing uses it in v1
-        Caps.Delivery = ParseBoolOption(Config.AdvancedParams, PreferLossyOptionKey, /*DefaultValue=*/false)
+        Caps.Delivery = O3DTransportOptions::GetBool(Config.AdvancedParams, PreferLossyOptionKey, /*Default=*/false)
             ? EO3DDeliveryGuarantee::Unreliable
             : EO3DDeliveryGuarantee::ReliableOrdered;
         Caps.MaxPayloadBytes = ReliableMaxDataBytes;
@@ -144,11 +120,7 @@ namespace WebRTCUtils
     /** Returns the trimmed `webrtc.room` option, or an empty string when it is not set. */
     inline FString ResolveRoomName(const TMap<FString, FString>& AdvancedParams)
     {
-        if (const FString* Value = AdvancedParams.Find(RoomOptionKey))
-        {
-            return Value->TrimStartAndEnd();
-        }
-        return FString();
+        return O3DTransportOptions::GetString(AdvancedParams, RoomOptionKey);
     }
 
     /**

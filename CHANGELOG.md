@@ -684,6 +684,48 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### WebRTC add-on on the shared transport blocks (WP-A1 PR 4f, ADR 0007 step 4)
+
+- **Wire format unchanged.** Same data-channel labels (the subject, `__o3d.ctl` for control),
+  reliability (reliable by default, lossy with `webrtc.prefer_lossy`), ordered delivery, audio
+  tracks named after the subject, option keys and defaults.
+- **Receiver.** Frames and control go from LiveKit's data callback to `Poll` through two
+  `FO3DSendQueue` hand-offs instead of locked containers, and `Poll` delivers them through
+  `FO3DUnifiedReceiveDemux` (`DeliverMocap`, the label as the subject; `DeliverControlEnvelope`).
+  Audio is unchanged: LiveKit hands decoded PCM16 to the audio callback, which calls the audio
+  sink on LiveKit's thread. Changes:
+  - Frames waiting for `Poll` are now bounded at 16 MiB; a frame over that is refused and
+    counted in `DroppedFrames` (they used to queue without a limit). `PendingFrames` and
+    `PendingBytes` report what waits. Control keeps its cap of 1,024 envelopes.
+  - `Poll` delivers frames in arrival order across subjects; it used to deliver them grouped by
+    subject. Each subject's frames are still in order.
+  - The consumer and the control sink are held by the demux and released in `Stop`, as before.
+- **Sender.** Unchanged: `SendSerialized` and `SendControl` still hand each message to LiveKit on
+  the caller's thread, and LiveKit's refusal (`DroppedBackpressure`) is the backpressure. The
+  audio sink still publishes PCM16 to a LiveKit track per subject behind the lifetime gate.
+  Neither `FO3DSendQueue` nor `FO3DQueuedSenderAudioSink` fits (see the ADR addendum).
+- **Reconnect.** Unchanged: the sender relies on LiveKit's own reconnect; the receiver keeps its
+  no-data watchdog. `FO3DReconnectPolicy` is not used, so no second loop runs against LiveKit's.
+- **Options.** Read with `O3DTransportOptions` (keys case-insensitive, values trimmed):
+  - `webrtc.prefer_lossy` and `webrtc.useAutoTokenFetch` accept true/false, 1/0, yes/no and
+    on/off; `webrtc.useAutoTokenFetch` used to treat any non-zero number as true.
+  - `webrtc.reconnect_timeout` must be a number (it used to accept `2s` as 2); anything else is
+    the default, 2 s. `webrtc.tokenRefreshLeadTimeSec` must be an integer; anything else is the
+    default, 300 s.
+  - `webrtc.url` and `webrtc.room` are trimmed.
+  - `WebRTCUtils::ParseBoolOption` and the receiver's `ParseDoubleOption` are deleted.
+- **Module dependencies.** The runtime code includes only Open3DShared and Open3DStreamCore
+  headers: `ConfigureSender`/`ConfigureReceiver` read `Config.AdvancedParams`, not the sender
+  component or the source settings. `Open3DTransportWebRTC.Build.cs` keeps Open3DSender and
+  Open3DReceiver for two test files only. Net runtime lines in the add-on: -85 (153 added, 238 removed; tests not counted).
+- **API version stays 4.** The add-on uses `FO3DSendQueue`, `FO3DUnifiedReceiveDemux` and
+  `O3DTransportOptions`, exported since 4; nothing in Open3DBroadcast changed.
+- **Tests.** New `Open3DBroadcast.Transport.WebRTC.SharedBlocks.ReceiverQueuePolicy`,
+  `.ReceiverAudioIndependentOfFrameQueue`, `.SenderAudioIndependentOfDataChannel`,
+  `.SenderStopWhileSending` and `.ReceiverStopWhileReceiving` (200 cycles each), on a fake LiveKit
+  that, like the real one, makes no callback after the call that clears it has returned. None
+  needs a LiveKit server. The existing add-on tests are unchanged.
+
 ### MoQ on the shared transport blocks (WP-A1 PR 4e, ADR 0007 step 4)
 
 - **Wire format unchanged.** Same tracks (`mocap/`, `audio/`, `control/` namespaces, track name
