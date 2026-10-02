@@ -86,7 +86,12 @@ public class Open3DTransportWebRTC : ModuleRules
             "Json", // For JSON parsing
             "JsonUtilities", // For JSON serialization utilities
             "Projects", // IPluginManager: the add-on tests check where livekit_ffi is found (WP-F11)
+            // The runtime code uses only Open3DShared's exported API (WP-A1 PR 4f: send queue,
+            // receive demux, transport options), gated by O3D_TRANSPORT_API_VERSION.
             "Open3DShared",
+            // Needed only by the in-module tests: Tests/WebRTCLifetimeTests.cpp includes
+            // Testing/O3DLifetimeTestUtils.h (Open3DSender) and Tests/WebRTCSecretsTests.cpp
+            // includes O3DReceiverSourceSettings.h (Open3DReceiver). No runtime file includes them.
             "Open3DSender",
             "Open3DReceiver"
         });

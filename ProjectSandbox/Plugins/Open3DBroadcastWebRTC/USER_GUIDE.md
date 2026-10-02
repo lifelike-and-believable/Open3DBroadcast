@@ -353,6 +353,10 @@ Log categories for this add-on: `LogO3DWebRTCSender` and `LogO3DWebRTCReceiver` 
   3. Transport automatically switches to reliable channel for 1300-15000 byte payloads
   4. If payload > 15KB, frame is rejected (ERROR log)
 
+**Cause 3: Receiver Falling Behind**
+- On the receiver, frames wait for the next LiveLink update. When more than 16 MiB is waiting, new frames are refused and counted in the receiver's `DroppedFrames`
+- **Solutions:** keep the receiving editor or game ticking (a stalled game thread stops LiveLink updates), or lower the send rate
+
 #### Latency Higher Than Expected
 **Expected Range:** 20-100ms (mostly network RTT)
 - SFU adds ~5-10ms overhead

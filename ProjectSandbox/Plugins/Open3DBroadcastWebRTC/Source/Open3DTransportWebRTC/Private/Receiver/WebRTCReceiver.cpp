@@ -63,27 +63,6 @@ namespace
         }
     }
 
-    double ParseDoubleOption(const TMap<FString, FString>& Params, const TCHAR* Key, double DefaultValue)
-    {
-        if (!Key)
-        {
-            return DefaultValue;
-        }
-
-        if (const FString* Value = Params.Find(Key))
-        {
-            if (!Value->IsEmpty())
-            {
-                const double Parsed = FCString::Atod(**Value);
-                if (Parsed == 0.0 || FMath::IsFinite(Parsed))
-                {
-                    return Parsed;
-                }
-            }
-        }
-        return DefaultValue;
-    }
-
     /** Validates a data-callback payload before it is copied. */
     bool IsAcceptablePayload(const uint8_t* Bytes, size_t Len)
     {
@@ -105,19 +84,30 @@ namespace
     }
 }
 
+FWebRTCReceiverLink::FWebRTCReceiverLink()
+{
+    // Frames: a byte budget, the newest refused when it is full (they used to queue without a
+    // limit). Control: its own queue with the cap the receiver always had.
+    FO3DSendQueueLimits FrameLimits;
+    FrameLimits.Mocap.MaxBytes = MaxPendingFrameBytes;
+    FrameLimits.MocapOverflow = EO3DMocapOverflow::RefuseNewest;
+    FrameQueue.SetLimits(FrameLimits);
+
+    FO3DSendQueueLimits ControlLimits;
+    ControlLimits.Control.MaxItems = MaxPendingControlEnvelopes;
+    ControlQueue.SetLimits(ControlLimits);
+}
+
 void FWebRTCReceiverLink::EnqueueFrame(const FString& SubjectLabel, const uint8* Bytes, int32 Len)
 {
-    FWebRTCReceiverPendingFrame Frame;
-    Frame.EnqueueTimeSeconds = FPlatformTime::Seconds();
-    Frame.Payload.SetNumUninitialized(Len);
-    FMemory::Memcpy(Frame.Payload.GetData(), Bytes, Len);
-
+    const double Now = FPlatformTime::Seconds();
+    // The receive time rides in CaptureTimeSec; Poll measures the hand-off latency from it.
+    if (FrameQueue.Enqueue(FO3DSendItem::MakeMocap(TArray<uint8>(Bytes, Len), SubjectLabel, Now)) != EO3DSendResult::Queued)
     {
-        FScopeLock Lock(&PendingFramesMutex);
-        PendingFramesBySubject.FindOrAdd(SubjectLabel).Emplace(MoveTemp(Frame));
+        FramesRefused.fetch_add(1);
     }
 
-    LastDataReceiveTime.store(FPlatformTime::Seconds());
+    LastDataReceiveTime.store(Now);
     bReconnectPending.Store(false);
 }
 
@@ -149,16 +139,7 @@ bool FWebRTCReceiverLink::ConsumeControl(const uint8* Bytes, size_t Len)
     }
     const int32 EnvelopeBytes = O3DS::UnifiedWireHeaderSize + Payload.Num();
 
-    bool bQueued = false;
-    {
-        FScopeLock Lock(&PendingControlMutex);
-        if (PendingControl.Num() < MaxPendingControlEnvelopes)
-        {
-            PendingControl.Emplace(Bytes, EnvelopeBytes);
-            bQueued = true;
-        }
-    }
-    if (!bQueued)
+    if (ControlQueue.Enqueue(FO3DSendItem::MakeControl(TArray<uint8>(Bytes, EnvelopeBytes))) != EO3DSendResult::Queued)
     {
         LogControlDrop(TEXT("control queue full"));
     }
@@ -394,6 +375,12 @@ FO3DTransportResult FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Co
         Stats.Reset();
         LatencySamples = 0;
     }
+    // Control is delivered under the receiver's stream id (ADR 0011).
+    FO3DReceiveDemuxSettings DemuxSettings = Demux.GetSettings();
+    DemuxSettings.StreamId = Config.StreamId;
+    Demux.SetSettings(DemuxSettings);
+    Demux.ResetStats();
+    Link->FramesRefused.store(0);
     Link->FramesReceived.Store(0);
     Link->BytesReceived.Store(0);
     Link->LastAudioDropLogTime.store(0.0);
@@ -416,7 +403,7 @@ FO3DTransportResult FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Co
 void FO3DWebRTCReceiver::SetConsumer(const TSharedPtr<ISerializedFrameConsumer>& InConsumer)
 {
     FScopeLock Lock(&StateMutex);
-    Consumer = InConsumer;
+    Demux.SetConsumer(InConsumer);
 }
 
 FO3DTransportResult FO3DWebRTCReceiver::Start()
@@ -431,7 +418,7 @@ FO3DTransportResult FO3DWebRTCReceiver::Start()
 
     // ADR 0007 item 3: a receiver without a consumer refuses to start (it used to start and drop
     // every frame; FSerializedFrameConsumerRegistry, its old fallback, is gone, SHR-24).
-    if (!Consumer.IsValid())
+    if (!Demux.HasConsumer())
     {
         return FO3DTransportResult::Error(EO3DTransportError::NoConsumer, TEXT("WebRTC receiver Start() without a frame consumer (SetConsumer)."));
     }
@@ -479,14 +466,12 @@ void FO3DWebRTCReceiver::Stop()
 
     DestroyClientHandle(TEXT("LiveKit disconnect"));
 
-    Consumer.Reset();
-    // The control sink is held strongly until here (ADR 0011 item 6).
-    ControlSink.Reset();
+    // The consumer and the control sink are held strongly until here (TRF-38, ADR 0011 item 6).
+    Demux.ReleaseSinks();
     Link->bControlWanted.Store(false);
-    {
-        FScopeLock ControlLock(&Link->PendingControlMutex);
-        Link->PendingControl.Reset();
-    }
+    // lk_client_destroy has returned, so no data callback is filling the queues; this thread is
+    // their only consumer.
+    Link->ControlQueue.Empty();
     {
         // lk_disconnect/lk_client_destroy above have returned, so no callback is running
         // (livekit_ffi.h: "After lk_disconnect() or lk_client_destroy() returns, no further
@@ -495,10 +480,7 @@ void FO3DWebRTCReceiver::Stop()
         FScopeLock SinkLock(&Link->AudioSinkMutex);
         Link->AudioSink.Reset();
     }
-    {
-        FScopeLock PendingLock(&Link->PendingFramesMutex);
-        Link->PendingFramesBySubject.Reset();
-    }
+    Link->FrameQueue.Empty();
 
     Link->bConnected.Store(false);
     Link->bPendingAudioFormatApply.Store(false);
@@ -510,82 +492,53 @@ void FO3DWebRTCReceiver::Stop()
 
 int32 FO3DWebRTCReceiver::Poll()
 {
-    // Take every queued frame; frames are delivered in arrival order per subject.
-    TMap<FString, TArray<FWebRTCReceiverPendingFrame>> AllFramesBySubject;
-    {
-        FScopeLock Lock(&Link->PendingFramesMutex);
-        AllFramesBySubject = MoveTemp(Link->PendingFramesBySubject);
-        Link->PendingFramesBySubject.Reset();
-    }
-
-    TArray<TArray<uint8>> ControlEnvelopes;
-    {
-        FScopeLock Lock(&Link->PendingControlMutex);
-        ControlEnvelopes = MoveTemp(Link->PendingControl);
-        Link->PendingControl.Reset();
-    }
-
-    // Snapshot the consumer and the control sink under the state lock (TRF-15).
-    TSharedPtr<ISerializedFrameConsumer> ConsumerSnapshot;
-    TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe> ControlSinkSnapshot;
-    FString StreamIdSnapshot;
-    {
-        FScopeLock Lock(&StateMutex);
-        ConsumerSnapshot = Consumer;
-        ControlSinkSnapshot = ControlSink;
-        StreamIdSnapshot = ActiveConfig.StreamId;
-    }
-
+    // Game thread: the only consumer of the Link queues and the only user of the demux.
     int32 FramesProcessed = 0;
+    int64 DroppedWithoutConsumer = 0;
     const double NowSeconds = FPlatformTime::Seconds();
+    const bool bHaveConsumer = Demux.HasConsumer();
 
-    if (ConsumerSnapshot.IsValid())
+    // Every queued frame, in arrival order (so in order per subject).
+    FO3DSendItem Item;
+    while (Link->FrameQueue.Dequeue(Item))
     {
-        for (auto& SubjectEntry : AllFramesBySubject)
+        if (!bHaveConsumer)
         {
-            const FString& SubjectLabel = SubjectEntry.Key;
-            for (FWebRTCReceiverPendingFrame& Frame : SubjectEntry.Value)
-            {
-                const double ReceiveLatencyMs = FMath::Max(0.0, (NowSeconds - Frame.EnqueueTimeSeconds) * 1000.0);
-
-                Link->FramesReceived.IncrementExchange();
-                Link->BytesReceived.AddExchange(Frame.Payload.Num());
-
-                {
-                    FScopeLock Lock(&StatsMutex);
-                    Stats.MaxLatencyMs = FMath::Max(Stats.MaxLatencyMs, ReceiveLatencyMs);
-                    const int64 NewSampleCount = LatencySamples + 1;
-                    const double PreviousTotal = Stats.AverageLatencyMs * LatencySamples;
-                    Stats.AverageLatencyMs = (PreviousTotal + ReceiveLatencyMs) / FMath::Max<int64>(1, NewSampleCount);
-                    LatencySamples = NewSampleCount;
-                }
-
-                // LiveLink expects WorldTime to be "when to display", so submit with the current
-                // time rather than the arrival time.
-                ConsumerSnapshot->SubmitFrame(SubjectLabel, Frame.Payload, FPlatformTime::Seconds());
-                FramesProcessed++;
-            }
+            ++DroppedWithoutConsumer;
+            continue;
         }
-    }
-    else
-    {
-        int32 Dropped = 0;
-        for (const auto& SubjectEntry : AllFramesBySubject)
+
+        const double ReceiveLatencyMs = FMath::Max(0.0, (NowSeconds - Item.CaptureTimeSec) * 1000.0);
+        Link->FramesReceived.IncrementExchange();
+        Link->BytesReceived.AddExchange(Item.Bytes.Num());
         {
-            Dropped += SubjectEntry.Value.Num();
-        }
-        if (Dropped > 0)
-        {
-            UE_LOG(LogO3DWebRTCReceiver, Verbose, TEXT("Poll(): %d frames dropped (no consumer)"), Dropped);
             FScopeLock Lock(&StatsMutex);
-            Stats.DroppedFrames += Dropped;
+            Stats.MaxLatencyMs = FMath::Max(Stats.MaxLatencyMs, ReceiveLatencyMs);
+            const int64 NewSampleCount = LatencySamples + 1;
+            const double PreviousTotal = Stats.AverageLatencyMs * LatencySamples;
+            Stats.AverageLatencyMs = (PreviousTotal + ReceiveLatencyMs) / FMath::Max<int64>(1, NewSampleCount);
+            LatencySamples = NewSampleCount;
         }
+
+        // The data label is the subject. LiveLink expects WorldTime to be "when to display", so
+        // the frame is submitted with the current time rather than the arrival time.
+        Demux.DeliverMocap(Item.Subject, Item.Bytes, FPlatformTime::Seconds());
+        FramesProcessed++;
     }
 
-    // Control (ADR 0011): not a frame, so it is not counted in FramesProcessed or any stat.
-    for (const TArray<uint8>& Envelope : ControlEnvelopes)
+    if (DroppedWithoutConsumer > 0)
     {
-        O3DTransport::DeliverControlEnvelope(ControlSinkSnapshot, Envelope.GetData(), Envelope.Num(), StreamIdSnapshot);
+        UE_LOG(LogO3DWebRTCReceiver, Verbose, TEXT("Poll(): %lld frames dropped (no consumer)"), DroppedWithoutConsumer);
+        FScopeLock Lock(&StatsMutex);
+        Stats.DroppedFrames += DroppedWithoutConsumer;
+    }
+
+    // Control (ADR 0011): not a frame, so it is not counted in FramesProcessed or any frame stat.
+    // Only well-formed envelopes were queued; the demux delivers them to the control sink.
+    while (Link->ControlQueue.Dequeue(Item))
+    {
+        // Stamped with the delivery time, as before.
+        Demux.DeliverControlEnvelope(Item.Bytes.GetData(), Item.Bytes.Num(), FPlatformTime::Seconds());
     }
 
     {
@@ -617,6 +570,10 @@ FO3DTransportStats FO3DWebRTCReceiver::GetStats() const
     Stats.FramesReceived = Link->FramesReceived.Load();
     Stats.BytesReceived = Link->BytesReceived.Load();
     FO3DTransportStats Copy = Stats;
+    Copy.DroppedFrames += Link->FramesRefused.load();
+    // Frames waiting for Poll in the hand-off queue.
+    Copy.PendingFrames = Link->FrameQueue.GetPendingItems(EO3DSendItemKind::Mocap);
+    Copy.PendingBytes = Link->FrameQueue.GetPendingBytes();
     Copy.State = ConnectionState.Get();
     return Copy;
 }
@@ -680,12 +637,12 @@ void FO3DWebRTCReceiver::SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ES
 void FO3DWebRTCReceiver::SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink)
 {
     FScopeLock Lock(&StateMutex);
-    ControlSink = Sink;
+    Demux.SetControlSink(Sink);
     Link->bControlWanted.Store(Sink.IsValid());
     if (!Sink.IsValid())
     {
-        FScopeLock ControlLock(&Link->PendingControlMutex);
-        Link->PendingControl.Reset();
+        // Game thread, like Poll: the queue's only consumer.
+        Link->ControlQueue.Empty();
     }
 }
 
@@ -753,7 +710,8 @@ FO3DTransportResult FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& C
         return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("WebRTC receiver: the token settings were refused."));
     }
 
-    const double TimeoutSeconds = FMath::Clamp(ParseDoubleOption(Config.AdvancedParams, ReconnectTimeoutOptionKey, 2.0), 0.0, 300.0);
+    // Strict number (O3DTransportOptions, WP-A1 PR 4f); anything else is the default, 2 s.
+    const double TimeoutSeconds = O3DTransportOptions::GetDouble(Config.AdvancedParams, ReconnectTimeoutOptionKey, 2.0, 0.0, 300.0);
     NoDataReconnectTimeoutSec = TimeoutSeconds;
 
     return FO3DTransportResult::Ok();
@@ -964,10 +922,8 @@ void FO3DWebRTCReceiver::ProcessReconnectIfNeeded()
     Link->bConnected.Store(false);
     bConnectIssued = false;
 
-    {
-        FScopeLock PendingLock(&Link->PendingFramesMutex);
-        Link->PendingFramesBySubject.Reset();
-    }
+    // Game thread (Poll): frames of the old connection are discarded, pending control is kept.
+    Link->FrameQueue.Empty();
 
     if (!SetupClientHandle())
     {

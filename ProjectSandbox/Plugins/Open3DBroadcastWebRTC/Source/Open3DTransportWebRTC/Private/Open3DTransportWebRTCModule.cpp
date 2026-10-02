@@ -9,11 +9,10 @@
 #include "Receiver/WebRTCReceiver.h"
 #include "Shared/WebRTCAddOn.h"
 #include "Shared/WebRTCUtils.h"
-#include "O3DSenderComponent.h"
-#include "O3DReceiverSourceSettings.h"
 #include "O3DSecretStore.h"
 #include "O3DTransportOptionSchema.h"
 #include "Transport/O3DTransportApiVersion.h"
+#include "Transport/O3DTransportOptions.h"
 #include "Transport/O3DTransportRegistry.h"
 
 DEFINE_LOG_CATEGORY(LogO3DWebRTCSender);
@@ -54,20 +53,27 @@ namespace WebRTCConfig
 		OutEnvVars.Add(TokenEndpointAuthKey, WebRTCUtils::TokenEndpointAuthEnvVar);
 	}
 
-	// Sender config helpers
-	static FString GetSenderOption(const UO3DSenderComponent* Component, const TCHAR* Key)
+	/**
+	 * Fills the fields both roles share from Config.AdvancedParams, where the sender component and
+	 * the receiver source have already put the non-secret transport options (WP-A1 PR 4f: read
+	 * with O3DTransportOptions, so the add-on no longer reads the component or the source settings).
+	 */
+	static void ApplyCommonOptions(FO3DTransportConfig& Config)
 	{
-		return Component ? Component->GetTransportOption(Key) : FString();
-	}
+		const FString UrlValue = O3DTransportOptions::GetString(Config.AdvancedParams, UrlOptionKey);
+		const FString RoomValue = O3DTransportOptions::GetString(Config.AdvancedParams, RoomOptionKey);
 
-	// Receiver config helpers
-	static FString GetReceiverOption(const FO3DReceiverSourceConfig& Settings, const TCHAR* Key)
-	{
-		if (const FString* Existing = Settings.TransportOptions.Find(Key))
-		{
-			return *Existing;
-		}
-		return FString();
+		Config.Uri = UrlValue;
+		// Resolved from the secret store by the caller (ADR 0004); never in AdvancedParams.
+		Config.Token = WebRTCUtils::FindSecret(Config.Secrets, TokenOptionKey);
+
+		// Auto-fetch fields. A value that is not a boolean or an integer is the default.
+		Config.bUseAutoTokenFetch = O3DTransportOptions::GetBool(Config.AdvancedParams, UseAutoTokenFetchKey, /*Default=*/false);
+		Config.TokenEndpointUrl = O3DTransportOptions::GetString(Config.AdvancedParams, TokenEndpointUrlKey);
+		Config.TokenRefreshLeadTimeSec = O3DTransportOptions::GetInt(Config.AdvancedParams, TokenRefreshLeadTimeKey, DefaultTokenRefreshLeadTimeSec);
+
+		Config.AdvancedParams.Add(UrlOptionKey, UrlValue);
+		Config.AdvancedParams.Add(RoomOptionKey, RoomValue);
 	}
 }
 
@@ -210,59 +216,24 @@ public:
 
 		// Sender side
 		WebRTCConfig::DeclareSecrets(Descriptor.SenderOptions.SecretOptionKeys, Descriptor.SenderOptions.SecretEnvVars);
-		Descriptor.ConfigureSender = [](const UO3DSenderComponent* SenderComponent, FO3DTransportConfig& Config)
+		Descriptor.ConfigureSender = [](const UO3DSenderComponent* /*SenderComponent*/, FO3DTransportConfig& Config)
 		{
 			Config.Transport = WebRTCConfig::TransportName;
-
-			const FString UrlValue = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::UrlOptionKey);
-			const FString UseAutoTokenFetchStr = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::UseAutoTokenFetchKey);
-			const FString TokenEndpointUrlValue = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::TokenEndpointUrlKey);
-			const FString TokenRefreshLeadTimeStr = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::TokenRefreshLeadTimeKey);
-			const FString RoomValue = WebRTCConfig::GetSenderOption(SenderComponent, WebRTCConfig::RoomOptionKey);
-
-			Config.Uri = UrlValue;
-			// Resolved from the secret store by the component (ADR 0004); never in AdvancedParams.
-			Config.Token = WebRTCUtils::FindSecret(Config.Secrets, WebRTCConfig::TokenOptionKey);
+			WebRTCConfig::ApplyCommonOptions(Config);
 			Config.Role = TEXT("publisher");
-
-			// Configure auto-fetch fields
-			Config.bUseAutoTokenFetch = UseAutoTokenFetchStr.ToBool();
-			Config.TokenEndpointUrl = TokenEndpointUrlValue;
-			Config.TokenRefreshLeadTimeSec = TokenRefreshLeadTimeStr.IsEmpty() ? WebRTCConfig::DefaultTokenRefreshLeadTimeSec : FCString::Atoi(*TokenRefreshLeadTimeStr);
-
-			Config.AdvancedParams.Add(WebRTCConfig::UrlOptionKey, UrlValue);
-			Config.AdvancedParams.Add(WebRTCConfig::RoomOptionKey, RoomValue.TrimStartAndEnd());
 		};
 		Descriptor.SenderOptions.OptionSchema = WebRTCSchema::Make();
 
 		// Receiver side
 		WebRTCConfig::DeclareSecrets(Descriptor.ReceiverOptions.SecretOptionKeys, Descriptor.ReceiverOptions.SecretEnvVars);
-		Descriptor.ConfigureReceiver = [](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
+		Descriptor.ConfigureReceiver = [](const FO3DReceiverSourceConfig& /*Settings*/, FO3DTransportConfig& Config)
 		{
 			Config.Transport = WebRTCConfig::TransportName;
-
-			const FString UrlValue = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::UrlOptionKey);
-			const FString UseAutoTokenFetchStr = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::UseAutoTokenFetchKey);
-			const FString TokenEndpointUrlValue = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::TokenEndpointUrlKey);
-			const FString TokenRefreshLeadTimeStr = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::TokenRefreshLeadTimeKey);
-			const FString RoomValue = WebRTCConfig::GetReceiverOption(Settings, WebRTCConfig::RoomOptionKey);
-
-			Config.Uri = UrlValue;
-			// Resolved from the secret store by the source (ADR 0004); never in AdvancedParams.
-			Config.Token = WebRTCUtils::FindSecret(Config.Secrets, WebRTCConfig::TokenOptionKey);
+			WebRTCConfig::ApplyCommonOptions(Config);
 			Config.StreamId = TEXT("WebRTCStream");
 			Config.Role = TEXT("subscriber");
-
-			// Configure auto-fetch fields
-			Config.bUseAutoTokenFetch = UseAutoTokenFetchStr.ToBool();
-			Config.TokenEndpointUrl = TokenEndpointUrlValue;
-			Config.TokenRefreshLeadTimeSec = TokenRefreshLeadTimeStr.IsEmpty() ? WebRTCConfig::DefaultTokenRefreshLeadTimeSec : FCString::Atoi(*TokenRefreshLeadTimeStr);
-
-			Config.AdvancedParams.Add(WebRTCConfig::UrlOptionKey, UrlValue);
-			Config.AdvancedParams.Add(WebRTCConfig::RoomOptionKey, RoomValue.TrimStartAndEnd());
-
-			Config.Audio.bEnableAudio = Settings.bEnableAudio;
-			// Note: Audio stream label is now automatically derived from StreamId
+			// Config.Audio.bEnableAudio is set by the receiver source before this runs; the audio
+			// stream label is derived from StreamId.
 		};
 		Descriptor.ReceiverOptions.OptionSchema = WebRTCSchema::Make();
 
