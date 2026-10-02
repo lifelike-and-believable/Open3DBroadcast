@@ -205,7 +205,7 @@ bool FO3DTransportOptionsSwitchTest::RunTest(const FString& Parameters)
 	// What a pre-ADR 0004 asset could hold; never put away.
 	Active.Add(TEXT("switchtest.token"), TEXT("SECRET-VALUE"));
 
-	O3DTransportOptions::SwitchTransportOptions(Active, Inactive, Tcp, Udp, TcpSecrets);
+	O3DTransportOptions::SwitchTransportOptions(Active, Inactive, Tcp, Udp, TcpSecrets, true);
 	TestEqual(TEXT("The new transport starts empty (it has nothing put away)"), Active.Num(), 0);
 	TestTrue(TEXT("TCP's options are put away"), Inactive.Contains(Tcp));
 	if (const FO3DTransportOptionSet* Kept = Inactive.Find(Tcp))
@@ -217,22 +217,38 @@ bool FO3DTransportOptionsSwitchTest::RunTest(const FString& Parameters)
 
 	// UDP reads "port" too: it must not see TCP's.
 	Active.Add(TEXT("port"), TEXT("7000"));
-	O3DTransportOptions::SwitchTransportOptions(Active, Inactive, Udp, Tcp, TArray<FString>());
+	O3DTransportOptions::SwitchTransportOptions(Active, Inactive, Udp, Tcp, TArray<FString>(), true);
 	TestEqual(TEXT("Back on TCP: its host"), Active.FindRef(TEXT("host")), FString(TEXT("10.0.0.5")));
 	TestEqual(TEXT("Back on TCP: its port, not UDP's"), Active.FindRef(TEXT("port")), FString(TEXT("9100")));
 	TestFalse(TEXT("TCP is no longer put away"), Inactive.Contains(Tcp));
 	TestEqual(TEXT("UDP's port is put away"), Inactive.FindRef(Udp).Options.FindRef(TEXT("port")), FString(TEXT("7000")));
 
 	// Same transport: nothing changes.
-	O3DTransportOptions::SwitchTransportOptions(Active, Inactive, Tcp, Tcp, TcpSecrets);
+	O3DTransportOptions::SwitchTransportOptions(Active, Inactive, Tcp, Tcp, TcpSecrets, true);
 	TestEqual(TEXT("Same transport keeps the map"), Active.Num(), 2);
 	TestEqual(TEXT("Same transport keeps the others"), Inactive.Num(), 1);
 
 	// An empty map is not stored, so switching through unused transports leaves no entries.
 	TMap<FString, FString> Empty;
 	TMap<FName, FO3DTransportOptionSet> NoneKept;
-	O3DTransportOptions::SwitchTransportOptions(Empty, NoneKept, Tcp, Udp, TArray<FString>());
+	O3DTransportOptions::SwitchTransportOptions(Empty, NoneKept, Tcp, Udp, TArray<FString>(), true);
 	TestEqual(TEXT("Nothing put away for an empty map"), NoneKept.Num(), 0);
+
+	// An unregistered transport (say its plugin is not loaded): its secret keys are unknown, so
+	// nothing of it is put away, even a value that looks harmless (ADR 0004). Switching back to a
+	// transport that was put away still restores it.
+	const FName Unloaded(TEXT("SwitchTestUnloadedPlugin"));
+	TMap<FString, FString> UnloadedActive;
+	UnloadedActive.Add(TEXT("url"), TEXT("wss://example.invalid"));
+	UnloadedActive.Add(TEXT("pluginonly.token"), TEXT("SECRET-VALUE"));
+	TMap<FName, FO3DTransportOptionSet> UnloadedInactive;
+	FO3DTransportOptionSet TcpKept;
+	TcpKept.Options.Add(TEXT("host"), TEXT("10.0.0.7"));
+	UnloadedInactive.Add(Tcp, TcpKept);
+	O3DTransportOptions::SwitchTransportOptions(UnloadedActive, UnloadedInactive, Unloaded, Tcp, TArray<FString>(), false);
+	TestFalse(TEXT("An unregistered transport's options are not put away"), UnloadedInactive.Contains(Unloaded));
+	TestEqual(TEXT("The incoming transport is still restored"), UnloadedActive.FindRef(TEXT("host")), FString(TEXT("10.0.0.7")));
+	TestFalse(TEXT("No credential of the unregistered transport survives"), UnloadedActive.Contains(TEXT("pluginonly.token")));
 	return true;
 }
 

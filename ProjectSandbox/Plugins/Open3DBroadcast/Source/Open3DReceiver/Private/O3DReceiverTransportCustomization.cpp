@@ -297,10 +297,10 @@ bool O3DReceiver::SwitchTransport(FO3DReceiverSourceConfig& Settings, FName NewT
 
     TArray<FString> OutgoingSecretKeys;
     TMap<FString, FString> OutgoingSecretEnvVars;
-    FO3DTransportRegistry::Get().GetSecretDeclaration(Settings.TransportName, EO3DTransportRole::Receiver, OutgoingSecretKeys, OutgoingSecretEnvVars);
+    const bool bOutgoingRegistered = FO3DTransportRegistry::Get().GetSecretDeclaration(Settings.TransportName, EO3DTransportRole::Receiver, OutgoingSecretKeys, OutgoingSecretEnvVars);
 
     const FName Outgoing = Settings.TransportName;
     Settings.TransportName = NewTransport;
-    O3DTransportOptions::SwitchTransportOptions(Settings.TransportOptions, Settings.InactiveTransportOptions, Outgoing, NewTransport, OutgoingSecretKeys);
+    O3DTransportOptions::SwitchTransportOptions(Settings.TransportOptions, Settings.InactiveTransportOptions, Outgoing, NewTransport, OutgoingSecretKeys, bOutgoingRegistered);
     return true;
 }

@@ -155,7 +155,9 @@ bool FO3DReceiverTransportSwitchTest::RunTest(const FString& Parameters)
 {
 	using namespace O3DReceiverTypedConfigTest;
 	FScopedTypedReceiverTransport First;
-	const FName Second(*O3DTests::MakeUniqueName(TEXT("O3DTypedReceiverOther")));
+	// Both transports are registered: an unregistered one's options are never kept (ADR 0004).
+	FScopedTypedReceiverTransport Other;
+	const FName Second = Other.Name;
 
 	FO3DReceiverSourceConfig Settings;
 	Settings.TransportName = First.Name;

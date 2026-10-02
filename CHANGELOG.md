@@ -723,7 +723,9 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   property `InactiveTransportOptions` on `UO3DSenderComponent` and `FO3DReceiverSourceConfig`) and
   come back when you switch back. Option keys are not renamed. The kept options never hold a
   secret, and a LiveLink connection string carries only the selected transport's options. Undo
-  restores both. New `O3DReceiver::SwitchTransport`.
+  restores both. New `O3DReceiver::SwitchTransport`. Options of a transport that is not registered
+  when you switch away (for example its plugin is not loaded) are dropped, as before, because its
+  secret keys are unknown.
 - **Saved data.** Nothing to migrate: the LiveKit values users saved were always the namespaced
   `webrtc.*` keys of the component's or source's option map, which load and reach the transport
   unchanged. Assets saved before this release load with no inactive options. The ADR 0004 legacy

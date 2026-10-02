@@ -930,8 +930,8 @@ void UO3DSenderComponent::SwitchTransportOptions(FName From, FName To)
 
 	TArray<FString> FromSecretKeys;
 	TMap<FString, FString> FromSecretEnvVars;
-	FO3DTransportRegistry::Get().GetSecretDeclaration(From, EO3DTransportRole::Sender, FromSecretKeys, FromSecretEnvVars);
-	O3DTransportOptions::SwitchTransportOptions(TransportOptions, InactiveTransportOptions, From, To, FromSecretKeys);
+	const bool bFromRegistered = FO3DTransportRegistry::Get().GetSecretDeclaration(From, EO3DTransportRole::Sender, FromSecretKeys, FromSecretEnvVars);
+	O3DTransportOptions::SwitchTransportOptions(TransportOptions, InactiveTransportOptions, From, To, FromSecretKeys, bFromRegistered);
 }
 
 void UO3DSenderComponent::SetTransportName(FName InName)

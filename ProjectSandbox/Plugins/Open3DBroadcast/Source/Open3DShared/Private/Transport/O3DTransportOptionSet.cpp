@@ -3,7 +3,7 @@
 #include "Transport/O3DTransportOptionSet.h"
 
 void O3DTransportOptions::SwitchTransportOptions(TMap<FString, FString>& Active, TMap<FName, FO3DTransportOptionSet>& Inactive,
-	FName From, FName To, const TArray<FString>& FromSecretKeys)
+	FName From, FName To, const TArray<FString>& FromSecretKeys, bool bFromRegistered)
 {
 	if (From == To)
 	{
@@ -17,7 +17,8 @@ void O3DTransportOptions::SwitchTransportOptions(TMap<FString, FString>& Active,
 	}
 	if (!From.IsNone())
 	{
-		if (Active.Num() > 0)
+		// An unregistered transport's secret keys are unknown, so nothing of it is kept (ADR 0004).
+		if (Active.Num() > 0 && bFromRegistered)
 		{
 			Inactive.FindOrAdd(From).Options = MoveTemp(Active);
 		}

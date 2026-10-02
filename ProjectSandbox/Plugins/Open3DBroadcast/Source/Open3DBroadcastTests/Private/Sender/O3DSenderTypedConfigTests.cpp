@@ -181,7 +181,9 @@ bool FO3DSenderTransportSwitchTest::RunTest(const FString& Parameters)
 {
 	using namespace O3DSenderTypedConfigTest;
 	FScopedTypedTransport First;
-	const FName Second(*O3DTests::MakeUniqueName(TEXT("O3DTypedSenderOther")));
+	// Both transports are registered: an unregistered one's options are never kept (ADR 0004).
+	FScopedTypedTransport Other;
+	const FName Second = Other.Name;
 
 	UO3DSenderComponent* Component = NewObject<UO3DSenderComponent>(GetTransientPackage());
 	Component->SetTransportName(First.Name);

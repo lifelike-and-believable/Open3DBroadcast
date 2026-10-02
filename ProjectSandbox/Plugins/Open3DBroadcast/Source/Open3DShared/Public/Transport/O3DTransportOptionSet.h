@@ -31,6 +31,11 @@ namespace O3DTransportOptions
 	 * FromSecretKeys and only when it is not empty; Active then becomes what Inactive held for To,
 	 * which is removed from Inactive, or an empty map. Nothing happens when From equals To.
 	 *
+	 * bFromRegistered says whether From is a registered transport, so FromSecretKeys is its real
+	 * secret declaration. When it is false (for example its plugin is not loaded), which keys are
+	 * secrets is unknown, so From's options are dropped instead of put away, as before SND-35:
+	 * a credential must never reach Inactive, which is saved with the asset (ADR 0004).
+	 *
 	 * Option keys are not renamed. TCP, UDP and NNG all read "host" and "port", so the options of
 	 * two transports cannot share one map; keeping one map per transport keeps every documented
 	 * key, saved asset and Blueprint call as it is.
@@ -39,5 +44,5 @@ namespace O3DTransportOptions
 	 * Game thread.
 	 */
 	OPEN3DSHARED_API void SwitchTransportOptions(TMap<FString, FString>& Active, TMap<FName, FO3DTransportOptionSet>& Inactive,
-		FName From, FName To, const TArray<FString>& FromSecretKeys);
+		FName From, FName To, const TArray<FString>& FromSecretKeys, bool bFromRegistered);
 }
