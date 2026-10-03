@@ -203,8 +203,8 @@ Receiver, per subject within a stream (`frame_epoch`):
 ## Implementation notes (WP-A4, 2026-10-03)
 
 Item (iv), stamping, is implemented in #341: `O3DS::StreamWriter` in core and the UE
-serializer writing every frame through it. `ref_seq` and the per-subject `last_full_seq` come
-with the needs-keyframe decoding in the next PR. Where the implementation departs from the
+serializer writing every frame through it. Items (viii) and (ix), `ref_seq` and the receiver
+contract, are implemented in #342 (CORE-5, CORE-6). Where the implementation departs from the
 decision above, and why:
 
 - **One writer per subject, not one per serializer.** The receiver that shipped in the meantime
@@ -222,3 +222,26 @@ decision above, and why:
   writers, so the restarted counter is always in a strictly larger epoch and the gate sees a
   restart, which is what "the counter is not reset" was for. Within one writer the counter is
   never reset.
+- **Residual streams recover only at a full Subject (item (ix)).** The receiver state machine
+  above leaves NeedsKeyframe on "a residual keyframe with `ref_seq == R`". That is not safe
+  with the residual codec as built: a cadence keyframe (`ResidualKeyframeIntervalFrames`) sends
+  absolute values against a zero reference but does not reset the predictor history on either
+  end, so after a loss the decoder's history still lacks frames the encoder's has, and every
+  later prediction differs. A full Subject builds a fresh encoder on the sender and drops the
+  decoder on the receiver (`ResetSubjectForReuse`), so it is the one point where both ends
+  agree. The receiver therefore drops residual updates after a gap until the next full
+  Subject, and the sender sends one on the next frame after a full Subject or residual update
+  it did not deliver (refused for any reason, or no transport; a full Subject's seq is recorded
+  when it is written, so later updates name it whether or not it arrived). Network loss and a
+  receiver joining mid-stream still wait for the next periodic full Subject, until item (vi).
+- **A gap holds every subject of the stream.** `gap_before` is per stream, and with several
+  subjects on one stream the lost frame may have been another subject's, so every subject's
+  residual updates wait for their next full Subject. With the UE sender a stream carries one
+  subject, so this costs nothing there.
+- **`last_full_seq` is per subject inside each writer**, as decided, recorded only when the
+  full Subject was written; updates written before any full Subject carry `ref_seq` 0.
+- **`ResidualDecoder` without history refuses a non-keyframe update** (CORE-6) for every
+  stream, sequenced or not; it used to decode against a zero reference. An unsequenced
+  residual stream (parsed without a context) still has no safe resync point except a full
+  Subject: the decoder rebuilds history from later cadence keyframes, which does not match the
+  sender's. No current sender writes unsequenced residual frames.

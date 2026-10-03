@@ -10,6 +10,23 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Schema/Protocol
 
+- **`SubjectUpdate.ref_seq`** (ADR 0005 (viii), CORE-5): appended `ulong`, default 0. The
+  `tx_seq` of the full Subject an update is relative to; `O3DS::StreamWriter` sets it on every
+  update. A receiver that parses with a `ParseContext` drops an update whose `ref_seq` is set
+  and names a full Subject it did not apply (ADR 0005 (ix), below).
+  - Version: protocol stays **2** and `O3DS_VERSION_TAG` stays 1.1.0. Protocol 2 is "the
+    release that ships ADR 0005" (ADR 0009 item 2) and is not released yet, so this field is
+    part of it rather than a protocol 3.
+  - `min_reader_version`: unchanged. An update with `ref_seq` is stamped exactly as before (1
+    for a plain delta, 2 for residual or quantized content); a reader that ignores the field
+    applies the update as before.
+  - Compatibility: a reader without the field ignores it (old behaviour, no loss detection). A
+    new reader given an update with `ref_seq` 0, or parsing without a context, applies it as
+    before.
+  - Migration: regenerate `src/o3ds_generated.h` (`flatc --cpp -o src src/o3ds.fbs`) and sync
+    the core mirror; nothing else.
+  - Tests: `core.wire_format_tests` `Wire_RefSeqIsAppendedAndLeavesTheVersionStampAlone`.
+
 - **No compatibility with what came before protocol 2** (WP-A4 follow-up). There are no users of
   old receivers or senders, so what existed only for them is gone:
   - **Envelope v1 is not accepted.** Readers accept only envelope v2 (`O3DU`); the core's v1
@@ -159,6 +176,25 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
   quantization tooltips say these streams need protocol-2 receivers.
 
 ### Core library (`src/o3ds`)
+
+- **Resync contract on the receiver** (ADR 0005 (ix); CORE-5, CORE-6). `SubjectList::Parse`
+  takes an appended, defaulted `const ParseContext*` (`tx_seq`, `frame_epoch`, `gap_before`).
+  With a context for a sequenced frame:
+  - a new `frame_epoch` clears every subject's sync state;
+  - a full Subject records its `tx_seq` as the subject's sync reference (`Subject::mSyncRef`);
+  - an update whose `ref_seq` is set and differs from that reference is dropped;
+  - after `gap_before`, every subject's residual updates are dropped until its next full
+    Subject (`Subject::mAwaitingFullSync`).
+  Dropped updates are not errors: they are left out of `outTouched` and counted in
+  `SubjectList::mUpdatesDroppedUnsynced`. Without a context, or with `ref_seq` 0, updates
+  apply as before. `MakeParseContext` and `NoteFrameApplied` (`receiver_streams.h`) compute
+  `gap_before` per `ReceiverStream`.
+- **`ResidualDecoder::BeginFrame` returns `bool`** (CORE-6): false, and the update is dropped
+  and counted, when the update is not a keyframe and the decoder has no history to predict
+  from. It used to decode against a zero reference, which applied a wrong pose.
+- `StreamWriter::LastFullSeq`; `WriteUpdate` and `WriteResidual` set `ref_seq`.
+  `Subject::SerializeUpdate` and `SerializeUpdateResidual` (buffer and builder overloads) take
+  a trailing, defaulted `ref_seq`.
 
 - **`O3DS::StreamWriter`** (new `src/o3ds/stream_writer.h`; ADR 0005 (iv), WP-A4): one logical
   sender stream. Its `WriteFull`, `WriteUpdate` and `WriteResidual` stamp every frame with
@@ -444,6 +480,37 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
   frame (SHR-18).
 
 ### Changed
+
+- **Receivers hold a subject instead of applying an update they cannot decode correctly**
+  (ADR 0005 (ix); CORE-5, CORE-6). For sequenced frames (every UE sender since #341), an update
+  relative to a full Subject the receiver missed, or a residual update after a lost frame, is
+  dropped, and the subject is not pushed to LiveLink until its next full Subject (at most
+  `FullSyncIntervalSeconds`, 1 s by default; concealment or LiveLink's hold covers the gap).
+  Before, such updates were applied to the wrong anchors or residual history and the pose was
+  wrong until the next full Subject. A receiver that joins mid-stream also waits for a full
+  Subject. New receiver metric `UpdatesAwaitingFullSync` counts the dropped updates.
+  - Residual streams recover only at a full Subject, not at a residual cadence keyframe: a
+    cadence keyframe does not reset the predictor history on either end, so decoding from it
+    after a loss would still diverge (a deviation from ADR 0005 (ix), recorded in its
+    implementation notes).
+  - **The sender sends a full Subject on the next frame after a full Subject or residual update
+    it did not deliver** (refused by the transport for any reason, or serialized with no
+    transport attached; before, only a full Subject refused with `DroppedBackpressure` was
+    followed by one), so a hold caused by the sender lasts one frame instead of up to
+    `FullSyncIntervalSeconds`. A refused quantized update stays applicable across the gap and
+    changes nothing. Network loss and a receiver joining mid-stream still wait for the next
+    periodic full Subject (until the peer-joined trigger, ADR 0005 (vi)).
+  - Unsequenced residual streams (parsed without a context) have no safe resync point either
+    except a full Subject: the decoder refuses updates it has no history for, but rebuilds
+    history from later cadence keyframes, which does not match the sender. No current sender
+    writes unsequenced residual frames.
+  - Tests: core `resync_contract_tests` (missed full Subject, residual gap with the pose
+    matching the sender on every frame after the resync, new epoch, unset `ref_seq`, decoder
+    without history, gap detection); `Open3DBroadcast.Receiver.Correctness.
+    ResidualGapHoldsUntilFullSync` through the real receiver source;
+    `Open3DBroadcast.Sender.Pipeline.RefusedResidualUpdateForcesFullSync` and
+    `.UndeliveredFullSyncIsSentAgain`. The decoder tests
+    that asserted the zero-reference fallback now assert the drop.
 
 - **The UE sender stamps its frames** (SND-15, CORE-29; ADR 0005 (iv)). `FO3DSenderSerializer`
   writes every frame through a per-subject `O3DS::StreamWriter`, in the legacy, residual and

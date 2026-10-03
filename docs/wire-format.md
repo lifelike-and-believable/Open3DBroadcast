@@ -30,6 +30,11 @@ A mocap frame is an 8-byte header followed by a FlatBuffer (`src/o3ds.fbs`, root
   version 1, so readers from before protocol 2 still apply them. Writers also set
   `SubjectList.protocol_version` to the protocol they implement (2; 0 means a writer from
   before protocol 2). That field is for diagnostics and captures only.
+- **`SubjectUpdate.ref_seq`** is the `tx_seq` of the full Subject the update is relative to
+  (topology, curve list, quantization anchors, residual history); 0 is unset. A receiver
+  parsing sequenced frames with a `ParseContext` drops an update whose `ref_seq` names a full
+  Subject it did not apply, and residual updates after a sequence gap, until the subject's
+  next full Subject (ADR 0005 (ix)). It does not change `min_reader_version`.
 - **Readers** (`O3DS::CheckFrame`, used by `SubjectList::Parse`, `PeekMeta` and
   `PeekPacketMeta`) accept `min_reader_version` 1 to `O3DS_PROTOCOL_VERSION` with bytes 1-3
   zero, check the CRC, and verify the FlatBuffer (the `"O3DS"` identifier is required on
@@ -131,6 +136,9 @@ wire. A topology hash that ever goes on the wire must use this definition and bu
 | Envelope, fragment or audio header layout change | +1 | n/a (new magic or version byte) | minor |
 | Dropping support for an old frame or envelope version | no | n/a | major |
 
+- **Until a protocol version is first released, wire changes join it** instead of adding
+  another: protocol 2 is the release that ships ADR 0005 (ADR 0009 item 2), so
+  `SubjectUpdate.ref_seq` is part of protocol 2. The table applies once a version has shipped.
 - The schema is append-only: never reorder, remove or retype a field. Regenerate
   `src/o3ds_generated.h` with the pinned `flatc` (`flatc --cpp -o src src/o3ds.fbs`) and sync
   the plugin's core mirror (`python Build/Scripts/sync_o3ds_core.py`); CI checks both.

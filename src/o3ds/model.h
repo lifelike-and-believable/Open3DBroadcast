@@ -194,6 +194,16 @@ namespace O3DS
 		Context       mContext;
 		std::string   mError;
 
+		//! Receiver sync state (ADR 0005 (ix)), set by SubjectList::Parse()
+		//! only for sequenced frames (a ParseContext with tx_seq != 0).
+		//! mSyncRef is the tx_seq of the last full Subject applied (0 = none
+		//! in this epoch); an update whose ref_seq is set and differs is
+		//! dropped. mAwaitingFullSync is set by a sequence gap and blocks
+		//! residual updates until the next full Subject, which alone resets
+		//! both ends' residual history.
+		uint64_t      mSyncRef = 0;
+		bool          mAwaitingFullSync = false;
+
 		Transform* addTransform(const std::string& name, int parentId, TransformBuilder *builder = nullptr)
 		{
 			Transform *ret;
@@ -250,7 +260,10 @@ namespace O3DS
 		//! delta() as a simple, classical tier-selection rule. Default
 		//! nullptr (disabled) leaves the wire byte-for-byte identical to
 		//! before D1 existed.
-		flatbuffers::Offset<O3DS::Data::SubjectUpdate> SerializeUpdate(flatbuffers::FlatBufferBuilder& builder, size_t& count, double deltaThreshold, const QuantRanges* quantRanges = nullptr);
+		//! `refSeq` is written as SubjectUpdate.ref_seq: the tx_seq of the
+		//! full Subject this update is relative to (0 = unset; ADR 0005 (viii)).
+		flatbuffers::Offset<O3DS::Data::SubjectUpdate> SerializeUpdate(flatbuffers::FlatBufferBuilder& builder, size_t& count, double deltaThreshold, const QuantRanges* quantRanges = nullptr,
+			uint64_t refSeq = 0);
 
 		// C2 (roadmap doc §5/C2): opt-in per-subject residual coding. Both
 		// members are null by default (legacy mode, unaffected). Whichever
@@ -282,7 +295,8 @@ namespace O3DS
 		//! and, on Predict() success, the wire's implicit reference time -
 		//! callers should pass the same `t` as the enclosing
 		//! SubjectList::SerializeUpdateResidual()'s timestamp.
-		flatbuffers::Offset<O3DS::Data::SubjectUpdate> SerializeUpdateResidual(flatbuffers::FlatBufferBuilder& builder, size_t& count, double deltaThreshold, double t, uint64_t seq);
+		flatbuffers::Offset<O3DS::Data::SubjectUpdate> SerializeUpdateResidual(flatbuffers::FlatBufferBuilder& builder, size_t& count, double deltaThreshold, double t, uint64_t seq,
+			uint64_t refSeq = 0);
 
 		// Curves
 		flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<O3DS::Data::Curve>>> SerializeCurves(flatbuffers::FlatBufferBuilder& builder);
@@ -296,7 +310,7 @@ namespace O3DS
 			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0);
 
 		int SerializeUpdate(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp, const QuantRanges* quantRanges = nullptr,
-			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0);
+			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0, uint64_t ref_seq = 0);
 
 		//! Self-contained residual-coded variant of the vector<char> overload
 		//! above, mirroring it exactly (builds its own FlatBufferBuilder and
@@ -309,7 +323,7 @@ namespace O3DS
 		//! stamps through O3DS::StreamWriter (ADR 0005 (iv)); calling this
 		//! without a stamp is deprecated (CORE-29).
 		int SerializeUpdateResidual(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp, uint64_t seq = 0,
-			uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0);
+			uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0, uint64_t ref_seq = 0);
 
 	private:
 		std::unique_ptr<ResidualEncoder> mResidualEncoder;
@@ -330,6 +344,15 @@ namespace O3DS
 	{
 		std::string name;
 		bool fullDescriptor = false;
+	};
+
+	//! What a receiver knows about a sequenced frame before parsing it
+	//! (ADR 0005 (ix)); see MakeParseContext in receiver_streams.h.
+	struct ParseContext
+	{
+		uint64_t tx_seq = 0;      //!< SubjectList.tx_seq; 0 = unsequenced, no sync checks
+		uint32_t frame_epoch = 0; //!< SubjectList.frame_epoch
+		bool gap_before = false;  //!< a frame of this stream before this one was not applied
 	};
 
 	/*! \class SubjectList model.h o3ds/model.h */
@@ -445,6 +468,17 @@ namespace O3DS
 		//! local matrices (mMatrix) run either way.
 		bool mComputeWorldMatrices = true;
 
+		//! Updates Parse() dropped because their subject was not in sync
+		//! (ADR 0005 (ix)): ref_seq names a full Subject this list did not
+		//! apply, a residual update after a sequence gap, or a residual
+		//! update the decoder has no history for (CORE-6). Cumulative; a
+		//! dropped update is not an error and is not reported in outTouched.
+		uint64_t mUpdatesDroppedUnsynced = 0;
+
+		//! The frame_epoch the subjects' sync state belongs to.
+		uint32_t mSyncEpoch = 0;
+		bool mHaveSyncEpoch = false;
+
 		//! Encode all of the items in the subject list as binary data.
 		//! tx_seq/tx_wallclock_us/frame_epoch are optional (0 == unset, the
 		//! default); a receiver must treat 0 exactly like a sender that
@@ -475,8 +509,16 @@ namespace O3DS
 		//! publish only what was actually sent. An update naming a subject
 		//! that does not exist is ignored and not reported. On failure the
 		//! contents of outTouched are unspecified.
+		//!
+		//! context (ADR 0005 (ix)), when non-null with tx_seq != 0, applies
+		//! the resync contract: a new frame_epoch clears every subject's sync
+		//! state; a full Subject records its tx_seq as the subject's sync
+		//! ref; an update with ref_seq set is dropped unless it equals that
+		//! ref; after gap_before, residual updates are dropped until the next
+		//! full Subject. Without a context, or for an update with ref_seq 0,
+		//! updates apply as before.
 		bool Parse(const char *data, size_t len, TransformBuilder* = nullptr, bool clearInactive = true,
-			std::vector<ParsedSubjectInfo>* outTouched = nullptr);
+			std::vector<ParsedSubjectInfo>* outTouched = nullptr, const ParseContext* context = nullptr);
 
 		//! Extract just the transmit-sequencing metadata (tx_seq/
 		//! tx_wallclock_us/frame_epoch) from a wire buffer, without doing a
@@ -502,10 +544,9 @@ namespace O3DS
 		//! never need to know in advance whether an incoming stream uses
 		//! residual coding. (Re)constructs the named subject's
 		//! ResidualDecoder on first use or on a predictor_id change
-		//! mid-stream; a fresh decoder has no history, so its own
-		//! BeginFrame() safely falls back to a zero/identity reference
-		//! regardless of what is_keyframe says (see ResidualDecoder's own
-		//! doc comment).
+		//! mid-stream. A decoder without history cannot decode an update
+		//! that is not a keyframe; that update is dropped (CORE-6) and
+		//! counted in mUpdatesDroppedUnsynced.
 		//! Same return contract as ParseUpdate().
 		bool ParseUpdateResidual(const O3DS::Data::SubjectUpdate*, TransformBuilder* = nullptr);
 

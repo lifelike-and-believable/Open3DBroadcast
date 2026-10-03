@@ -42,13 +42,29 @@ namespace O3DS
 	int StreamWriter::WriteFull(Subject& subject, std::vector<char>& out, double timestamp)
 	{
 		const TxStamp stamp = Next();
-		return subject.Serialize(out, timestamp, stamp.tx_seq, stamp.tx_wallclock_us, stamp.frame_epoch);
+		const int size = subject.Serialize(out, timestamp, stamp.tx_seq, stamp.tx_wallclock_us, stamp.frame_epoch);
+		if (size > 0)
+		{
+			mLastFullSeq[subject.mName] = stamp.tx_seq;
+		}
+		return size;
 	}
 
 	int StreamWriter::WriteFull(SubjectList& list, std::vector<char>& out, double timestamp)
 	{
 		const TxStamp stamp = Next();
-		return list.Serialize(out, timestamp, stamp.tx_seq, stamp.tx_wallclock_us, stamp.frame_epoch);
+		const int size = list.Serialize(out, timestamp, stamp.tx_seq, stamp.tx_wallclock_us, stamp.frame_epoch);
+		if (size > 0)
+		{
+			for (Subject* subject : list.mItems)
+			{
+				if (subject != nullptr)
+				{
+					mLastFullSeq[subject->mName] = stamp.tx_seq;
+				}
+			}
+		}
+		return size;
 	}
 
 	int StreamWriter::WriteUpdate(Subject& subject, std::vector<char>& out, size_t& count, double deltaThreshold,
@@ -56,13 +72,19 @@ namespace O3DS
 	{
 		const TxStamp stamp = Next();
 		return subject.SerializeUpdate(out, count, deltaThreshold, timestamp, quantRanges,
-			stamp.tx_seq, stamp.tx_wallclock_us, stamp.frame_epoch);
+			stamp.tx_seq, stamp.tx_wallclock_us, stamp.frame_epoch, LastFullSeq(subject.mName));
 	}
 
 	int StreamWriter::WriteResidual(Subject& subject, std::vector<char>& out, size_t& count, double deltaThreshold, double timestamp)
 	{
 		const TxStamp stamp = Next();
 		return subject.SerializeUpdateResidual(out, count, deltaThreshold, timestamp,
-			stamp.tx_seq, stamp.tx_wallclock_us, stamp.frame_epoch);
+			stamp.tx_seq, stamp.tx_wallclock_us, stamp.frame_epoch, LastFullSeq(subject.mName));
+	}
+
+	uint64_t StreamWriter::LastFullSeq(const std::string& subjectName) const
+	{
+		const auto it = mLastFullSeq.find(subjectName);
+		return (it != mLastFullSeq.end()) ? it->second : 0;
 	}
 }

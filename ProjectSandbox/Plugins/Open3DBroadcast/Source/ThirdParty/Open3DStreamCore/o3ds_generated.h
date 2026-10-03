@@ -969,7 +969,8 @@ struct SubjectUpdate FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     VT_ROTATIONS_Q8 = 26,
     VT_ROTATIONS_Q16 = 28,
     VT_CURVES_Q8 = 30,
-    VT_CURVES_Q16 = 32
+    VT_CURVES_Q16 = 32,
+    VT_REF_SEQ = 34
   };
   const flatbuffers::String *name() const {
     return GetPointer<const flatbuffers::String *>(VT_NAME);
@@ -1016,6 +1017,9 @@ struct SubjectUpdate FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   const flatbuffers::Vector<const O3DS::Data::CurveUpdateQ16 *> *curves_q16() const {
     return GetPointer<const flatbuffers::Vector<const O3DS::Data::CurveUpdateQ16 *> *>(VT_CURVES_Q16);
   }
+  uint64_t ref_seq() const {
+    return GetField<uint64_t>(VT_REF_SEQ, 0);
+  }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_NAME) &&
@@ -1044,6 +1048,7 @@ struct SubjectUpdate FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            verifier.VerifyVector(curves_q8()) &&
            VerifyOffset(verifier, VT_CURVES_Q16) &&
            verifier.VerifyVector(curves_q16()) &&
+           VerifyField<uint64_t>(verifier, VT_REF_SEQ, 8) &&
            verifier.EndTable();
   }
 };
@@ -1097,6 +1102,9 @@ struct SubjectUpdateBuilder {
   void add_curves_q16(flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdateQ16 *>> curves_q16) {
     fbb_.AddOffset(SubjectUpdate::VT_CURVES_Q16, curves_q16);
   }
+  void add_ref_seq(uint64_t ref_seq) {
+    fbb_.AddElement<uint64_t>(SubjectUpdate::VT_REF_SEQ, ref_seq, 0);
+  }
   explicit SubjectUpdateBuilder(flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -1124,8 +1132,10 @@ inline flatbuffers::Offset<SubjectUpdate> CreateSubjectUpdate(
     flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::RotationUpdateQ8 *>> rotations_q8 = 0,
     flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::RotationUpdateQ16 *>> rotations_q16 = 0,
     flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdateQ8 *>> curves_q8 = 0,
-    flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdateQ16 *>> curves_q16 = 0) {
+    flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdateQ16 *>> curves_q16 = 0,
+    uint64_t ref_seq = 0) {
   SubjectUpdateBuilder builder_(_fbb);
+  builder_.add_ref_seq(ref_seq);
   builder_.add_curves_q16(curves_q16);
   builder_.add_curves_q8(curves_q8);
   builder_.add_rotations_q16(rotations_q16);
@@ -1160,7 +1170,8 @@ inline flatbuffers::Offset<SubjectUpdate> CreateSubjectUpdateDirect(
     const std::vector<O3DS::Data::RotationUpdateQ8> *rotations_q8 = nullptr,
     const std::vector<O3DS::Data::RotationUpdateQ16> *rotations_q16 = nullptr,
     const std::vector<O3DS::Data::CurveUpdateQ8> *curves_q8 = nullptr,
-    const std::vector<O3DS::Data::CurveUpdateQ16> *curves_q16 = nullptr) {
+    const std::vector<O3DS::Data::CurveUpdateQ16> *curves_q16 = nullptr,
+    uint64_t ref_seq = 0) {
   auto name__ = name ? _fbb.CreateString(name) : 0;
   auto translations__ = translations ? _fbb.CreateVectorOfStructs<O3DS::Data::TranslationUpdate>(*translations) : 0;
   auto rotation__ = rotation ? _fbb.CreateVectorOfStructs<O3DS::Data::RotationUpdate>(*rotation) : 0;
@@ -1188,7 +1199,8 @@ inline flatbuffers::Offset<SubjectUpdate> CreateSubjectUpdateDirect(
       rotations_q8__,
       rotations_q16__,
       curves_q8__,
-      curves_q16__);
+      curves_q16__,
+      ref_seq);
 }
 
 struct SubjectList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {

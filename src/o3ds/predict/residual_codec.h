@@ -173,14 +173,13 @@ namespace O3DS
 		//! channels (mirrors ResidualEncoder::BeginFrame(), frame-level
 		//! not channel-level). `incomingIsKeyframe`/`t` come straight off
 		//! the wire (SubjectUpdate::is_keyframe(), SubjectList::time()).
-		//! Falls back to a zero/identity reference (IsKeyframe() forced
-		//! true) when this decoder's own predictor lacks history yet
-		//! (e.g. just constructed, or Reset() since) even if the wire
-		//! said otherwise - same "insufficient history -> keyframe-like"
-		//! fallback contract as the encoder side, so a receiver that
-		//! joins mid-stream or just resynced degrades to one visibly
-		//! "off" frame rather than reading garbage.
-		void BeginFrame(bool incomingIsKeyframe, double t);
+		//! Returns false, with an empty Reference(), when the update is not
+		//! a keyframe and this decoder's own predictor lacks the history to
+		//! predict (just constructed, Reset() since, or joined mid-stream):
+		//! the residuals are relative to a prediction this decoder cannot
+		//! make, so the caller must drop the update and not call
+		//! EndFrame() (CORE-6; before, it decoded against a zero reference).
+		bool BeginFrame(bool incomingIsKeyframe, double t);
 
 		bool IsKeyframe() const { return mIsKeyframe; }
 		const PoseSample& Reference() const { return mReference; }

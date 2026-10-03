@@ -225,6 +225,7 @@ public:
 		// Deserialization
 		std::atomic<uint64> BytesDeserialized{ 0 };        // Total bytes deserialized
 		std::atomic<uint64> DeserializationErrors{ 0 };    // Deserialization failures
+		std::atomic<uint64> UpdatesAwaitingFullSync{ 0 };  // Updates dropped until the next full Subject: missed full sync, residual gap, or no residual history (ADR 0005 (ix))
 		std::atomic<uint64> InvalidPosesDropped{ 0 };      // Subjects skipped: a transform was not finite, had a zero rotation or was missing (RCV-13)
 
 		// Per-operation timing (to identify bottlenecks)
@@ -349,6 +350,7 @@ public:
 	FORCEINLINE void RecordBytesDeserialized(uint64 ByteCount) { ReceiverMetrics.BytesDeserialized += ByteCount; }
 	FORCEINLINE void RecordDeserializationError() { ++ReceiverMetrics.DeserializationErrors; }
 	FORCEINLINE void RecordInvalidPoseDropped() { ++ReceiverMetrics.InvalidPosesDropped; }
+	FORCEINLINE void RecordUpdatesAwaitingFullSync(uint64 Count) { ReceiverMetrics.UpdatesAwaitingFullSync += Count; }
 	FORCEINLINE void RecordSkeletonUpdate() { ++ReceiverMetrics.SkeletonUpdates; }
 	FORCEINLINE void RecordPoseUpdate() { ++ReceiverMetrics.PoseUpdates; }
 	FORCEINLINE void SetReceiverActiveSubjectCount(int32 Count) { ReceiverMetrics.ActiveSubjectCount.store(Count); }

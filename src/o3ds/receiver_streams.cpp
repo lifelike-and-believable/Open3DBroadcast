@@ -115,6 +115,27 @@ namespace O3DS
 		return true;
 	}
 
+	ParseContext MakeParseContext(const ReceiverStream& stream, uint64_t txSeq, uint32_t frameEpoch)
+	{
+		ParseContext context;
+		context.tx_seq = txSeq;
+		context.frame_epoch = frameEpoch;
+		context.gap_before = txSeq != 0 && stream.haveApplied && frameEpoch == stream.lastAppliedEpoch
+			&& txSeq != stream.lastAppliedSeq + 1;
+		return context;
+	}
+
+	void NoteFrameApplied(ReceiverStream& stream, uint64_t txSeq, uint32_t frameEpoch)
+	{
+		if (txSeq == 0)
+		{
+			return;
+		}
+		stream.lastAppliedSeq = txSeq;
+		stream.lastAppliedEpoch = frameEpoch;
+		stream.haveApplied = true;
+	}
+
 	uint64_t StreamKeyForNames(std::vector<std::string> names)
 	{
 		std::sort(names.begin(), names.end());

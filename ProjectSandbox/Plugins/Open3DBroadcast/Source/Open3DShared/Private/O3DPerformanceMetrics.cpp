@@ -123,6 +123,7 @@ void FO3DPerformanceMetrics::Reset()
 	ReceiverMetrics.BytesDeserialized.store(0);
 	ReceiverMetrics.DeserializationErrors.store(0);
 	ReceiverMetrics.InvalidPosesDropped.store(0);
+	ReceiverMetrics.UpdatesAwaitingFullSync.store(0);
 	ReceiverMetrics.AvgParseTimeMs.store(0.0);
 	ReceiverMetrics.AvgPoseExtractionTimeMs.store(0.0);
 	ReceiverMetrics.AvgLiveLinkPushTimeMs.store(0.0);
@@ -261,6 +262,7 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Skeleton Updates: %llu"), ReceiverMetrics.SkeletonUpdates.load());
 		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Pose Updates: %llu"), ReceiverMetrics.PoseUpdates.load());
 		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Deserialization Errors: %llu"), ReceiverMetrics.DeserializationErrors.load());
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Updates Awaiting Full Sync: %llu"), ReceiverMetrics.UpdatesAwaitingFullSync.load());
 		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Invalid Poses Dropped: %llu"), ReceiverMetrics.InvalidPosesDropped.load());
 		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT(""));
 
@@ -376,6 +378,7 @@ FString FO3DPerformanceMetrics::GetMetricsAsCSV() const
 	CSV += FString::Printf(TEXT("ReceiverFramesDropped,%llu\n"), ReceiverMetrics.FramesDropped.load());
 	CSV += FString::Printf(TEXT("ReceiverBytesDeserialized,%llu\n"), ReceiverMetrics.BytesDeserialized.load());
 	CSV += FString::Printf(TEXT("ReceiverInvalidPosesDropped,%llu\n"), ReceiverMetrics.InvalidPosesDropped.load());
+	CSV += FString::Printf(TEXT("ReceiverUpdatesAwaitingFullSync,%llu\n"), ReceiverMetrics.UpdatesAwaitingFullSync.load());
 	CSV += FString::Printf(TEXT("ReceiverDeserializationErrors,%llu\n"), ReceiverMetrics.DeserializationErrors.load());
 	CSV += FString::Printf(TEXT("ReceiverSkeletonUpdates,%llu\n"), ReceiverMetrics.SkeletonUpdates.load());
 	CSV += FString::Printf(TEXT("ReceiverPoseUpdates,%llu\n"), ReceiverMetrics.PoseUpdates.load());

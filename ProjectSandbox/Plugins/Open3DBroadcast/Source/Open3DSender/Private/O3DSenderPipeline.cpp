@@ -362,6 +362,7 @@ void FO3DSenderPipeline::SendLocked(const FO3DSPoseFrame& Frame, TArray<uint8>&&
 	if (!Sender.IsValid())
 	{
 		PayloadsWithoutTransport.fetch_add(1);
+		RequestFullSyncAfterUndelivered(Frame, bFullSync);
 		return;
 	}
 
@@ -383,15 +384,24 @@ void FO3DSenderPipeline::SendLocked(const FO3DSPoseFrame& Frame, TArray<uint8>&&
 	}
 
 	PayloadsRefused.fetch_add(1);
-	if (bFullSync && Result == EO3DSendResult::DroppedBackpressure)
-	{
-		// ADR 0008 item 2 / ADR 0007 item 3: a refused full sync must not leave the receivers
-		// with updates they cannot apply; the next frame of this subject is a full sync.
-		Serializer->RequestFullSync(Frame.Subject);
-	}
+	RequestFullSyncAfterUndelivered(Frame, bFullSync);
 	// Not retried: the next frame supersedes this one. DroppedBackpressure is counted in the
 	// transport's DroppedFrames; NotConnected is expected while a peer or session is missing.
 	UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Transport did not take subject '%s' (%s)."), *Frame.Subject, LexToString(Result));
+}
+
+void FO3DSenderPipeline::RequestFullSyncAfterUndelivered(const FO3DSPoseFrame& Frame, bool bFullSync)
+{
+	// ADR 0008 item 2 / ADR 0007 item 3 / ADR 0005 (ix): receivers hold a subject they cannot
+	// follow until its next full Subject, so send one on the next frame rather than after
+	// FullSyncIntervalSeconds when
+	// - a full sync was not delivered: later updates name it in ref_seq, and no receiver has it;
+	// - a residual update was not delivered: its tx_seq is a gap, and residual history breaks.
+	// A quantized update stays applicable across a gap.
+	if (bFullSync || Frame.Encoding.Mode == EO3DSenderEncodingMode::Residual)
+	{
+		Serializer->RequestFullSync(Frame.Subject);
+	}
 }
 
 void FO3DSenderPipeline::AttachSender(const TSharedPtr<IOpen3DSender>& InSender)

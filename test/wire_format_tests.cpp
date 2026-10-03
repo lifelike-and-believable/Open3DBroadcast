@@ -148,6 +148,28 @@ O3DS_TEST(Wire_PlainWritersStampVersionOneWithIdentifier)
 	O3DS_CHECK(WriterProtocol(single) == O3DS_PROTOCOL_VERSION);
 }
 
+O3DS_TEST(Wire_RefSeqIsAppendedAndLeavesTheVersionStampAlone)
+{
+	// ADR 0005 (viii): SubjectUpdate.ref_seq. A reader without it applies the
+	// update as before, so it does not raise min_reader_version; unset (0) it
+	// is not written at all.
+	SubjectList list;
+	BuildSkeleton(list, "Actor");
+	Subject* subject = list.findSubject("Actor");
+	subject->mTransforms[0]->translation.value = Vector3d(1.0, 0.0, 0.0);
+
+	size_t count = 0;
+	std::vector<char> stamped;
+	O3DS_CHECK(subject->SerializeUpdate(stamped, count, 1.0e-6, 1.5, nullptr, 9, 9, 3, /*ref_seq*/ 7) > 8);
+	O3DS_CHECK(FrameMinReader(stamped) == 1);
+	O3DS_CHECK(O3DS::Data::GetSubjectList(stamped.data() + 8)->updates()->Get(0)->ref_seq() == 7);
+
+	std::vector<char> unset;
+	O3DS_CHECK(subject->SerializeUpdate(unset, count, 1.0e-6, 1.5, nullptr, 9, 9, 3, /*ref_seq*/ 0) > 8);
+	O3DS_CHECK(O3DS::Data::GetSubjectList(unset.data() + 8)->updates()->Get(0)->ref_seq() == 0);
+	O3DS_CHECK(unset.size() < stamped.size()); // a default scalar is not stored
+}
+
 O3DS_TEST(Wire_QuantizedWriterStampsVersionTwoOnlyWhenItQuantizes)
 {
 	SubjectList sender;
