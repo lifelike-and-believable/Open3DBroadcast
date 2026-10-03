@@ -7,6 +7,7 @@
 #include "O3DSenderCurveProcessor.h"
 #include "O3DSenderPipeline.h"
 #include "O3DSenderPoseSampler.h"
+#include "O3DSenderAudioBinding.h"
 
 FO3DSenderCurveProcessorProbe::FO3DSenderCurveProcessorProbe()
 	: Filter(MakeUnique<FO3DSenderCurveFilter>())
@@ -259,6 +260,62 @@ const FO3DSSkeletonDescriptor& FO3DSenderPoseSamplerProbe::GetDescriptor() const
 bool FO3DSenderPoseSamplerProbe::HasDescriptorSnapshot() const
 {
 	return Sampler->HasDescriptorSnapshot();
+}
+
+namespace
+{
+	FO3DSenderAudioSettings ProbeAudioSettings(const FO3DSenderAudioBindingProbe& Probe)
+	{
+		FO3DSenderAudioSettings Settings;
+		Settings.bEnableAudio = Probe.bEnableAudio;
+		Settings.Mode = Probe.Mode;
+		Settings.InputDevice = Probe.InputDevice;
+		Settings.Codec = Probe.Codec;
+		Settings.CaptureConfig = Probe.CaptureConfig;
+		return Settings;
+	}
+}
+
+FO3DSenderAudioBindingProbe::FO3DSenderAudioBindingProbe()
+	: Binding(MakeUnique<FO3DSenderAudioBinding>())
+{
+}
+
+FO3DSenderAudioBindingProbe::~FO3DSenderAudioBindingProbe() = default;
+
+FO3DSenderAudioCaptureConfig FO3DSenderAudioBindingProbe::BuildCaptureConfig() const
+{
+	return FO3DSenderAudioBinding::BuildCaptureConfig(ProbeAudioSettings(*this));
+}
+
+FO3DTransportAudioConfig FO3DSenderAudioBindingProbe::BuildTransportConfig() const
+{
+	return FO3DSenderAudioBinding::BuildTransportConfig(ProbeAudioSettings(*this), BuildCaptureConfig());
+}
+
+void FO3DSenderAudioBindingProbe::SyncSource()
+{
+	FO3DSenderAudioBinding::SyncSource(Mode, InputDevice, CaptureConfig);
+}
+
+UO3DSenderAudioCaptureComponent* FO3DSenderAudioBindingProbe::FindOrCreateCaptureComponent(AActor* Owner, UO3DSenderAudioCaptureComponent* Current)
+{
+	return FO3DSenderAudioBinding::FindOrCreateCaptureComponent(Owner, Current);
+}
+
+void FO3DSenderAudioBindingProbe::AttachSink(UO3DSenderAudioCaptureComponent& Capture, const TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe>& Sink, const FString& Label, double NowSeconds)
+{
+	Binding->AttachSink(Capture, Sink, Label, FName(TEXT("probe")), NowSeconds);
+}
+
+void FO3DSenderAudioBindingProbe::Detach(UO3DSenderAudioCaptureComponent* Capture)
+{
+	Binding->Detach(Capture);
+}
+
+double FO3DSenderAudioBindingProbe::GetLastSinkWarningTime() const
+{
+	return Binding->GetLastSinkWarningTime();
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -8,6 +8,7 @@
 #include "O3DSenderCurveProcessor.h"
 #include "O3DSenderPipeline.h"
 #include "O3DSenderPoseSampler.h"
+#include "O3DSenderAudioBinding.h"
 #include "O3DSenderTransportController.h"
 #include "Transport/O3DTransportRegistry.h"
 #include "Engine/Engine.h"
@@ -57,6 +58,11 @@ void FO3DSenderTransportControllerDeleter::operator()(FO3DSenderTransportControl
 }
 
 void FO3DSenderPoseSamplerDeleter::operator()(FO3DSenderPoseSampler* Ptr) const
+{
+	delete Ptr;
+}
+
+void FO3DSenderAudioBindingDeleter::operator()(FO3DSenderAudioBinding* Ptr) const
 {
 	delete Ptr;
 }
@@ -114,6 +120,7 @@ UO3DSenderComponent::UO3DSenderComponent()
 	TransportController.Reset(new FO3DSenderTransportController());
 	CurveProcessor.Reset(new FO3DSenderCurveProcessor());
 	PoseSampler.Reset(new FO3DSenderPoseSampler());
+	AudioBinding.Reset(new FO3DSenderAudioBinding());
 	PoseSampler->SetCallbacks(
 		[this](const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor) { OnDescriptorReady.Broadcast(Subject, Descriptor); },
 		[this](const FString& PreviousName, const FString& NewName) { HandleSubjectNameChanged(PreviousName, NewName); });
@@ -438,7 +445,7 @@ FO3DTransportConfig UO3DSenderComponent::BuildTransportConfig() const
 	Config.AdvancedParams = Options;
 	FO3DSecretStore::Get().ResolveAll(Config.Transport.ToString(), GetCredentialProfile(), SecretKeys, SecretEnvVars, Config.Secrets);
 
-	Config.Audio = BuildTransportAudioConfig(CaptureConfig);
+	Config.Audio = FO3DSenderAudioBinding::BuildTransportConfig(GetAudioSettings(), CaptureConfig);
 
 	// The descriptor is a shared, immutable snapshot, so the function stays valid while it runs
 	// even if the transport unregisters meanwhile (RCV-27).
@@ -526,16 +533,14 @@ void UO3DSenderComponent::UpdateAudioCaptureBinding()
 		return;
 	}
 
-	EnsureAudioCaptureComponent();
+	AudioCaptureComponent = FO3DSenderAudioBinding::FindOrCreateCaptureComponent(GetOwner(), AudioCaptureComponent);
 	if (!AudioCaptureComponent)
 	{
 		return;
 	}
 
-	const FO3DSenderAudioCaptureConfig CaptureConfig = BuildAudioCaptureConfig();
-	FO3DTransportAudioConfig TransportAudioConfig = BuildTransportAudioConfig(CaptureConfig);
-
-	ConfigureAudioCaptureComponent(CaptureConfig, TransportAudioConfig);
+	const FO3DSenderAudioSettings Settings = GetAudioSettings();
+	FO3DSenderAudioBinding::Configure(*AudioCaptureComponent, Settings, FO3DSenderAudioBinding::BuildCaptureConfig(Settings));
 
 	TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> AudioSink;
 	if (TransportController.IsValid() && TransportController->IsActive())
@@ -549,170 +554,33 @@ void UO3DSenderComponent::UpdateAudioCaptureBinding()
 	// uses its default label.
 	USkeletalMeshComponent* Mesh = TargetMesh.Get();
 	const FString AudioLabel = (Mesh || !SubjectName.IsEmpty()) ? ResolveSubjectName(Mesh) : FString();
-	AudioCaptureComponent->SetAudioSink(AudioSink, AudioLabel);
+	AudioBinding->AttachSink(*AudioCaptureComponent, AudioSink, AudioLabel, TransportName, FPlatformTime::Seconds());
+}
 
-	if (!AudioSink.IsValid())
-	{
-		const double Now = FPlatformTime::Seconds();
-		if (Now - LastAudioSinkWarningTime > 2.0)
-		{
-			UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Audio capture enabled but no active transport sink (transport=%s)."), *TransportName.ToString());
-			LastAudioSinkWarningTime = Now;
-		}
-	}
-	else
-	{
-		LastAudioSinkWarningTime = 0.0;
-	}
+FO3DSenderAudioSettings UO3DSenderComponent::GetAudioSettings() const
+{
+	FO3DSenderAudioSettings Settings;
+	Settings.bEnableAudio = bEnableAudio;
+	Settings.Mode = AudioCaptureMode;
+	Settings.InputDevice = AudioInputDevice;
+	Settings.Codec = AudioCodec;
+	Settings.CaptureConfig = AudioCaptureConfig;
+	return Settings;
 }
 
 FO3DSenderAudioCaptureConfig UO3DSenderComponent::BuildAudioCaptureConfig() const
 {
-	FO3DSenderAudioCaptureConfig ConfigCopy = AudioCaptureConfig;
-	ConfigCopy.Source = (AudioCaptureMode == EO3DSenderCaptureMode::Mix)
-		? EO3DSenderAudioSource::GameSubmix
-		: EO3DSenderAudioSource::Microphone;
-
-	if (AudioCaptureMode == EO3DSenderCaptureMode::Input)
-	{
-		ConfigCopy.DeviceIndex = ResolveAudioDeviceIndex(AudioInputDevice);
-	}
-
-	return ConfigCopy;
-}
-
-FO3DTransportAudioConfig UO3DSenderComponent::BuildTransportAudioConfig(const FO3DSenderAudioCaptureConfig& CaptureConfig) const
-{
-	FO3DTransportAudioConfig AudioConfig;
-	AudioConfig.bEnableAudio = bEnableAudio;
-	if (!AudioConfig.bEnableAudio)
-	{
-		return AudioConfig;
-	}
-
-	AudioConfig.SampleRate = CaptureConfig.SampleRate;
-	AudioConfig.NumChannels = CaptureConfig.NumChannels;
-	AudioConfig.BitrateKbps = CaptureConfig.BitrateKbps;
-	AudioConfig.Mode = (AudioCaptureMode == EO3DSenderCaptureMode::Mix) ? TEXT("mix") : TEXT("input");
-	// Audio stream label is automatically derived from SubjectName for logical association on receiver side
-	if (AudioCaptureMode == EO3DSenderCaptureMode::Input)
-	{
-		AudioConfig.InputDevice = AudioInputDevice.IsNone() ? FString() : AudioInputDevice.ToString();
-	}
-	else
-	{
-		AudioConfig.InputDevice.Reset();
-	}
-
-	const FString CodecString = O3DAudio::SanitizeCodecString(AudioCodec.IsNone() ? FString() : AudioCodec.ToString());
-	AudioConfig.AdvancedParams.Empty();
-	AudioConfig.AdvancedParams.Add(TEXT("game_gain"), FString::SanitizeFloat(CaptureConfig.GameGain));
-	AudioConfig.AdvancedParams.Add(TEXT("mic_gain"), FString::SanitizeFloat(CaptureConfig.MicGain));
-	if (CaptureConfig.DeviceIndex >= 0)
-	{
-		AudioConfig.AdvancedParams.Add(TEXT("device_index"), FString::FromInt(CaptureConfig.DeviceIndex));
-	}
-	if (CaptureConfig.SubmixToTap)
-	{
-		AudioConfig.AdvancedParams.Add(TEXT("submix"), CaptureConfig.SubmixToTap->GetPathName());
-	}
-	if (!CodecString.IsEmpty())
-	{
-		AudioConfig.Codec = CodecString;
-		AudioConfig.AdvancedParams.Add(TEXT("codec"), CodecString);
-	}
-	else
-	{
-		AudioConfig.Codec.Reset();
-	}
-
-	return AudioConfig;
-}
-
-void UO3DSenderComponent::EnsureAudioCaptureComponent()
-{
-	if (HasAnyFlags(RF_ClassDefaultObject) || !bEnableAudio)
-	{
-		return;
-	}
-
-	if (AudioCaptureComponent)
-	{
-		if (!IsValid(AudioCaptureComponent) || AudioCaptureComponent->IsBeingDestroyed())
-		{
-			AudioCaptureComponent = nullptr;
-		}
-		else
-		{
-			return;
-		}
-	}
-
-	AActor* Owner = GetOwner();
-	if (!Owner)
-	{
-		return;
-	}
-
-	if (!AudioCaptureComponent)
-	{
-		AudioCaptureComponent = Owner->FindComponentByClass<UO3DSenderAudioCaptureComponent>();
-	}
-
-	if (AudioCaptureComponent && AudioCaptureComponent->GetOwner() != Owner)
-	{
-		AudioCaptureComponent = nullptr;
-	}
-
-	if (!AudioCaptureComponent)
-	{
-		AudioCaptureComponent = NewObject<UO3DSenderAudioCaptureComponent>(Owner, TEXT("O3DSenderAudioCapture"));
-		if (AudioCaptureComponent)
-		{
-			AudioCaptureComponent->SetFlags(RF_Transactional);
-			AudioCaptureComponent->OnComponentCreated();
-			AudioCaptureComponent->RegisterComponent();
-			Owner->AddInstanceComponent(AudioCaptureComponent);
-		}
-	}
-}
-
-void UO3DSenderComponent::ConfigureAudioCaptureComponent(const FO3DSenderAudioCaptureConfig& CaptureConfig, const FO3DTransportAudioConfig& TransportAudioConfig)
-{
-	if (!AudioCaptureComponent)
-	{
-		return;
-	}
-
-	AudioCaptureComponent->InputDeviceName = AudioInputDevice;
-	AudioCaptureComponent->Config = CaptureConfig;
-	// Audio stream label is automatically derived from SubjectName (no longer configurable per component)
-	AudioCaptureComponent->StartCaptureWithMode(AudioCaptureMode);
+	return FO3DSenderAudioBinding::BuildCaptureConfig(GetAudioSettings());
 }
 
 void UO3DSenderComponent::TeardownAudioCapture()
 {
-	if (AudioCaptureComponent)
-	{
-		AudioCaptureComponent->SetAudioSink(nullptr, FString());
-	}
-	LastAudioSinkWarningTime = 0.0;
+	AudioBinding->Detach(AudioCaptureComponent);
 }
 
 void UO3DSenderComponent::SyncAudioConfigSource()
 {
-	AudioCaptureConfig.Source = (AudioCaptureMode == EO3DSenderCaptureMode::Mix)
-		? EO3DSenderAudioSource::GameSubmix
-		: EO3DSenderAudioSource::Microphone;
-	if (AudioCaptureMode == EO3DSenderCaptureMode::Input)
-	{
-		AudioCaptureConfig.DeviceIndex = ResolveAudioDeviceIndex(AudioInputDevice);
-	}
-}
-
-int32 UO3DSenderComponent::ResolveAudioDeviceIndex(const FName& DeviceName) const
-{
-	return FO3DAudioInputDevices::Get().FindIndex(DeviceName);
+	FO3DSenderAudioBinding::SyncSource(AudioCaptureMode, AudioInputDevice, AudioCaptureConfig);
 }
 
 FString UO3DSenderComponent::GetTransportOption(const FString& Key) const
@@ -1443,7 +1311,7 @@ void UO3DSenderComponent::PostEditChangeProperty(FPropertyChangedEvent& Property
 	}
 	else if (Prop == GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioInputDevice))
 	{
-		AudioCaptureConfig.DeviceIndex = ResolveAudioDeviceIndex(AudioInputDevice);
+		AudioCaptureConfig.DeviceIndex = FO3DSenderAudioBinding::ResolveDeviceIndex(AudioInputDevice);
 	}
 
 	if (Prop == GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, SubjectName) ||
