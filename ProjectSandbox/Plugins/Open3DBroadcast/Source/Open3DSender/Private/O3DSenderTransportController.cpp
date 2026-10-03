@@ -4,6 +4,7 @@
 
 #include "Transport/O3DSenderInterface.h"
 #include "O3DSenderLogs.h"
+#include "O3DSenderPipeline.h"
 #include "Transport/O3DTransportOptions.h"
 #include "Transport/O3DTransportRegistry.h"
 
@@ -85,6 +86,12 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
         }
     }
 
+    // The pipeline's worker sends the pose frames from now on (WP-A2c).
+    if (Pipeline.IsValid())
+    {
+        Pipeline->AttachSender(ActiveSender);
+    }
+
     return true;
 }
 
@@ -96,6 +103,13 @@ void FO3DSenderTransportController::Stop()
     {
         AudioSink->OnCaptureStopped();
         AudioSink.Reset();
+    }
+
+    // Before the sender stops: waits for a frame the pipeline's worker is sending, after which the
+    // worker never calls this sender again (WP-A2c).
+    if (Pipeline.IsValid())
+    {
+        Pipeline->DetachSender();
     }
 
     if (ActiveSender.IsValid())

@@ -7,6 +7,7 @@
 #include "Containers/BitArray.h"
 #include "O3DSenderSerializer.h"
 #include "O3DSPoseFramePool.h"
+#include "O3DSenderPipelineStats.h"
 #include "Transport/O3DSenderInterface.h"
 #include "O3DSenderLogs.h"
 #include "Transport/O3DTransportTypes.h"
@@ -25,7 +26,7 @@ class USkeletalMesh;
 class USoundSubmix;
 class FO3DSenderTransportController;
 class FO3DSenderCurveProcessor;
-class FO3DSenderCurveFilter;
+class FO3DSenderPipeline;
 
 /** Smart-pointer deleter that keeps FO3DSenderTransportController implementation details private. */
 struct FO3DSenderTransportControllerDeleter
@@ -37,12 +38,6 @@ struct FO3DSenderTransportControllerDeleter
 struct FO3DSenderCurveProcessorDeleter
 {
 	void operator()(FO3DSenderCurveProcessor* Ptr) const;
-};
-
-/** Smart-pointer deleter for the curve filter (private to this module). */
-struct FO3DSenderCurveFilterDeleter
-{
-	void operator()(FO3DSenderCurveFilter* Ptr) const;
 };
 
 /** Predictor for residual/delta coding (roadmap doc §5/C2). Maps to O3DS::ResidualPredictorId
@@ -211,7 +206,12 @@ struct OPEN3DSENDER_API FO3DSPoseFrame
 
 /** Event emitted whenever the skeletal descriptor changes (usually first frame or mesh swap). */
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnO3DDescriptorReady, const FString& /*Subject*/, const FO3DSSkeletonDescriptor& /*Descriptor*/);
-/** Per-frame event carrying the captured pose prior to serialization. */
+/**
+ * Per-frame event carrying the captured pose prior to serialization, on the game thread. With
+ * o3d.Sender.AsyncPipeline on (the default since WP-A2c) curve filtering runs later on the worker,
+ * so the frame carries the raw sampled curves (CurveList, RawCurveValues) and CurveNames/
+ * CurveValues are empty; with it off the curves are filtered first, as before.
+ */
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnO3DPoseFrameReady, const FString& /*Subject*/, const FO3DSPoseFrame& /*Frame*/);
 
 /**
@@ -459,9 +459,24 @@ public:
 
 	FOnO3DDescriptorReady OnDescriptorReady;
 	FOnO3DPoseFrameReady OnPoseFrameReady;
+
+	/**
+	 * Fires after each frame is serialized, before it is sent. Since WP-A2c it fires on the sender
+	 * pipeline's worker thread while o3d.Sender.AsyncPipeline is on (the default), so a listener
+	 * must be thread-safe, must not touch UObjects and must not wait for the game thread; with it
+	 * off it fires on the game thread. Bind and unbind it only while capture is stopped. Kept for
+	 * one release (ADR 0008 open question 5), then removed if nothing uses it.
+	 */
 	FOnO3DSerializedFrame OnSerializedFrame;
 
-	FO3DSenderSerializer& GetSerializer() const { return *Serializer; }
+	/**
+	 * The serializer of this component's pose pipeline (created by the first StartCapture). The
+	 * pipeline's worker owns it: only its stats getters may be called while capture runs.
+	 */
+	FO3DSenderSerializer& GetSerializer() const;
+
+	/** Counters of the pose pipeline (queue, drops, worker time, capture-to-send latency); zero before the first StartCapture. Any thread. */
+	FO3DSenderPipelineStats GetPipelineStats() const;
 
 	FName GetTransportName() const { return TransportName; }
 	void SetTransportName(FName InName);
@@ -519,16 +534,17 @@ private:
 	double LastCaptureTime = 0.0;
 	uint64 FrameCounter = 0;
 
-	TUniquePtr<FO3DSenderSerializer> Serializer;
+	/**
+	 * The pose pipeline (ADR 0008 item 3, WP-A2c): frame pool, queue, curve filter, serializer and
+	 * the worker that sends. Created by the first StartCapture and kept across Stop/Start; a task
+	 * in flight holds its own reference, so releasing it never waits.
+	 */
+	TSharedPtr<FO3DSenderPipeline> Pipeline;
 
 	/** Settings snapshot copied onto every sampled frame (see UpdateEncodingSnapshot). */
 	FO3DSenderEncodingSettings EncodingSnapshot;
 
-	/** Sampled frames are taken from and returned to this pool (ADR 0008 item 4, SND-9). */
-	FO3DSPoseFramePool FramePool;
-
 	FDelegateHandle BoneTransformsFinalizedHandle;
-	FDelegateHandle SerializerRelayHandle;
 
 	/** The skeletal mesh this component's tick waits for (SetTickPrerequisiteMesh); unset when none. */
 	TWeakObjectPtr<USkeletalMeshComponent> TickPrerequisiteMesh;
@@ -546,10 +562,8 @@ private:
 	/** Starts control on the running transport when it carries control. */
 	void StartControl();
 	void TickControl();
-	/** Curve capture (game thread: reads the mesh). */
+	/** Curve capture (game thread: reads the mesh). Filtering is in the pipeline (WP-A2c). */
 	TUniquePtr<FO3DSenderCurveProcessor, FO3DSenderCurveProcessorDeleter> CurveProcessor;
-	/** Curve filtering, applied to the sampled frame after sampling (WP-A2a); never reads a UObject. */
-	TUniquePtr<FO3DSenderCurveFilter, FO3DSenderCurveFilterDeleter> CurveFilter;
 	UPROPERTY(Transient)
 	UO3DSenderAudioCaptureComponent* AudioCaptureComponent = nullptr;
 	double LastAudioSinkWarningTime = 0.0;
@@ -558,8 +572,9 @@ private:
 	void TeardownTransport();
 	void InitializeTransport();
 	FO3DTransportConfig BuildTransportConfig() const;
-	void HandleSerializedFrameForward(const FString& Subject, const TArray<uint8>& Buffer, double Timestamp);
 	void UpdateAudioCaptureBinding();
+	/** Stops the pipeline from calling into this component (listener) and from sending (sender). Waits for a frame being processed. */
+	void DetachPipeline();
 
 public:
 	/**
@@ -617,6 +632,17 @@ private:
 	void PopulatePoseFrameBones(const USkeletalMeshComponent* SkelComp, FO3DSPoseFrame& Frame, bool bDebugPose);
 	/** Samples raw curve values (no filtering) into Frame.CurveList / Frame.RawCurveValues. */
 	void PopulatePoseFrameCurves(USkeletalMeshComponent* SkelComp, FO3DSPoseFrame& Frame, bool bDebugCurves);
+	/** A pooled frame from the pipeline; null without a pipeline or when every frame is out. */
+	TUniquePtr<FO3DSPoseFrame> AcquirePoseFrame();
+	/**
+	 * Hands a sampled frame to the pipeline (WP-A2c) and fires OnPoseFrameReady on the game thread.
+	 * Asynchronous: the delegate sees the raw curves and the worker filters, serializes and sends.
+	 * Synchronous (o3d.Sender.AsyncPipeline 0 at StartCapture): filtered first, then the delegate,
+	 * then serialized and sent inside this call, as in WP-A2b.
+	 */
+	void DispatchSampledFrame(TUniquePtr<FO3DSPoseFrame>&& Frame);
+	/** Tests: waits (event with a timeout) until the pipeline's worker has nothing left. True without a pipeline. */
+	bool WaitForPipelineIdle(double TimeoutSeconds) const;
 	FO3DSenderAudioCaptureConfig BuildAudioCaptureConfig() const;
 	FO3DTransportAudioConfig BuildTransportAudioConfig(const FO3DSenderAudioCaptureConfig& CaptureConfig) const;
 	void EnsureAudioCaptureComponent();

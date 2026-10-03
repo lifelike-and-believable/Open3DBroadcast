@@ -10,6 +10,7 @@
 
 class IOpen3DSender;
 class IO3DSenderAudioSink;
+class FO3DSenderPipeline;
 
 /**
  * Owns the active sender transport instance for a capture component, encapsulating lifecycle
@@ -20,6 +21,11 @@ class IO3DSenderAudioSink;
  * transport unregisters (the transport module shuts down) it runs the owner's handler, which
  * tears down everything that references the sender or its sinks, and then stops and releases the
  * sender itself, so the registry finds no live instance. Game thread.
+ *
+ * The started sender is handed to the owner's pose pipeline (ADR 0008 implementation outline
+ * item 4, WP-A2c), whose worker calls SendSerialized. Stop detaches it from the pipeline first,
+ * which waits for a frame the worker is sending, and only then stops and releases it, so no
+ * SendSerialized is in flight when the transport stops.
  */
 class FO3DSenderTransportController
 {
@@ -49,6 +55,9 @@ public:
      */
     void SetOnTransportUnregistering(TFunction<void()> InHandler) { OnTransportUnregisteringHandler = MoveTemp(InHandler); }
 
+    /** The pose pipeline a started sender is attached to (null: none). Game thread, while stopped. */
+    void SetPipeline(const TSharedPtr<FO3DSenderPipeline>& InPipeline) { Pipeline = InPipeline; }
+
 private:
     void HandleTransportUnregistering(FName TransportName);
     void Unsubscribe();
@@ -61,4 +70,6 @@ private:
     FDelegateHandle UnregisteringHandle;
     TFunction<void()> OnTransportUnregisteringHandler;
     FO3DTransportResult LastResult;
+    /** Receives ActiveSender after a successful Start; detached in Stop before the sender stops. */
+    TSharedPtr<FO3DSenderPipeline> Pipeline;
 };

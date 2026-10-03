@@ -6,6 +6,7 @@
 #include "O3DSenderLogs.h"
 #include "O3DSenderSerializer.h"
 #include "O3DSenderCurveProcessor.h"
+#include "O3DSenderPipeline.h"
 #include "O3DSenderTransportController.h"
 #include "Transport/O3DTransportRegistry.h"
 #include "Engine/Engine.h"
@@ -17,6 +18,7 @@
 #include "Components/SkinnedMeshComponent.h"
 #include "GameFramework/Actor.h"
 #include "HAL/IConsoleManager.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "UObject/Package.h"
 #include "UObject/WeakObjectPtrTemplates.h"
 #include "AudioCaptureCore.h"
@@ -58,11 +60,6 @@ void FO3DSenderCurveProcessorDeleter::operator()(FO3DSenderCurveProcessor* Ptr) 
 	delete Ptr;
 }
 
-void FO3DSenderCurveFilterDeleter::operator()(FO3DSenderCurveFilter* Ptr) const
-{
-	delete Ptr;
-}
-
 uint64 FO3DSenderEncodingSettings::GetFullSyncFingerprint() const
 {
 	uint64 Hash = 1469598103934665603ull;
@@ -92,7 +89,12 @@ uint64 FO3DSenderEncodingSettings::GetFullSyncFingerprint() const
 	return Hash;
 }
 
-UO3DSenderComponent::~UO3DSenderComponent() = default;
+UO3DSenderComponent::~UO3DSenderComponent()
+{
+	// A task still in flight keeps the pipeline alive (WP-A2c); it must no longer reach this
+	// component's delegate or send through a transport this component is about to release.
+	DetachPipeline();
+}
 
 UO3DSenderComponent::UO3DSenderComponent()
 {
@@ -105,7 +107,6 @@ UO3DSenderComponent::UO3DSenderComponent()
 	EnsureValidTransportName();
 	TransportController.Reset(new FO3DSenderTransportController());
 	CurveProcessor.Reset(new FO3DSenderCurveProcessor());
-	CurveFilter.Reset(new FO3DSenderCurveFilter());
 	SyncAudioConfigSource();
 	LastSubjectSourceValue = SubjectName;
 }
@@ -135,16 +136,15 @@ void UO3DSenderComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	StopCapture();
 
-	if (Serializer)
+	// The pipeline (and its serializer) goes with the play session, as the serializer did before
+	// WP-A2c. A task still running holds its own reference and ends on its own; it no longer calls
+	// this component or the transport.
+	DetachPipeline();
+	if (TransportController.IsValid())
 	{
-		if (SerializerRelayHandle.IsValid())
-		{
-			Serializer->OnSerializedFrame.Remove(SerializerRelayHandle);
-			SerializerRelayHandle.Reset();
-		}
-		Serializer->ClearAllCaches();
-		Serializer.Reset();
+		TransportController->SetPipeline(nullptr);
 	}
+	Pipeline.Reset();
 
 	TeardownTransport();
 
@@ -220,29 +220,22 @@ void UO3DSenderComponent::StartCapture()
 		return;
 	}
 
-	if (!Serializer)
+	if (!Pipeline.IsValid())
 	{
-		Serializer = MakeUnique<FO3DSenderSerializer>();
+		Pipeline = MakeShared<FO3DSenderPipeline>();
 	}
 
-	if (Serializer)
-	{
-		// The serializer holds no pointer back to this component (SND-22, WP-A2a): sampled frames
-		// reach it through HandleBoneTransformsFinalized, and only while capturing.
-		Serializer->SetStatsLabel(GetPathName());
-		if (!SerializerRelayHandle.IsValid())
-		{
-			SerializerRelayHandle = Serializer->OnSerializedFrame.AddUObject(this, &UO3DSenderComponent::HandleSerializedFrameForward);
-		}
-	}
+	// The pipeline holds no pointer back to this component (SND-22, ADR 0008 item 2) except
+	// OnSerializedFrame's address, which StopCapture, EndPlay and the destructor remove, waiting for
+	// a frame the worker is processing. The mode (o3d.Sender.AsyncPipeline) is latched here; the
+	// Start item resets the curve filter, as this function did before WP-A2c.
+	Pipeline->SetStatsLabel(GetPathName());
+	Pipeline->SetSerializedFrameListener(&OnSerializedFrame);
+	Pipeline->Start(FO3DSenderPipeline::IsAsyncEnabledByConsole());
 
 	if (CurveProcessor.IsValid())
 	{
 		CurveProcessor->Reset();
-	}
-	if (CurveFilter.IsValid())
-	{
-		CurveFilter->Reset();
 	}
 
 	InitializeTransport();
@@ -282,9 +275,10 @@ void UO3DSenderComponent::StartCapture()
 		LastStartCaptureError = TEXT("No valid skeletal mesh.");
 		UE_LOG(LogO3DSenderComponent, Warning, TEXT("Sender capture failed to start on %s: %s"), *GetNameSafe(GetOwner()), *LastStartCaptureError);
 		NotifyOnScreen(FString::Printf(TEXT("O3D Sender: not started (%s)"), *LastStartCaptureError), FColor::Red, 4.0f);
-		if (Serializer)
+		if (Pipeline.IsValid())
 		{
-			Serializer->ClearAllCaches();
+			Pipeline->Stop();
+			Pipeline->SetSerializedFrameListener(nullptr);
 		}
 		UnbindFromTarget();
 		ResetSkeletonCache();
@@ -308,9 +302,13 @@ void UO3DSenderComponent::StopCapture()
 	// as a side effect, but this makes the invariant explicit regardless of transport state.
 	SetComponentTickEnabled(false);
 
-	if (Serializer)
+	// ADR 0008 item 10: queued frames are discarded and a Stop item clears the serializer caches
+	// and the curve filter; nothing waits for the network. Removing the listener waits for a frame
+	// the worker is processing, so OnSerializedFrame never fires after StopCapture returns.
+	if (Pipeline.IsValid())
 	{
-		Serializer->ClearAllCaches();
+		Pipeline->Stop();
+		Pipeline->SetSerializedFrameListener(nullptr);
 	}
 
 	// SND-1: forget the cached skeleton so the next StartCapture() rebuilds
@@ -322,11 +320,8 @@ void UO3DSenderComponent::StopCapture()
 	{
 		CurveProcessor->Reset();
 	}
-	if (CurveFilter.IsValid())
-	{
-		CurveFilter->Reset();
-	}
 
+	// Detaches the transport from the pipeline before stopping it (FO3DSenderTransportController::Stop).
 	TeardownTransport();
 
 	UE_LOG(LogO3DSenderComponent, Log, TEXT("Sender capture stopped on %s"), *GetNameSafe(TargetMesh.Get()));
@@ -359,7 +354,7 @@ void UO3DSenderComponent::InitializeTransport()
 		return;
 	}
 
-	if (!Serializer)
+	if (!Pipeline.IsValid())
 	{
 		return;
 	}
@@ -368,6 +363,8 @@ void UO3DSenderComponent::InitializeTransport()
 	{
 		TransportController.Reset(new FO3DSenderTransportController());
 	}
+	// The started sender is handed to the pipeline, whose worker sends the pose frames (WP-A2c).
+	TransportController->SetPipeline(Pipeline);
 
 	// If the transport unregisters while active (its module shuts down), drop everything that
 	// references the sender or its sinks before the controller releases the sender, so the
@@ -389,11 +386,6 @@ void UO3DSenderComponent::InitializeTransport()
 	// Note: tick enablement is driven by StartCapture() based on bIsCapturing, not by transport
 	// start success here, so pose capture still runs for externally-managed transports and even
 	// when auto-transport creation fails.
-
-	if (!SerializerRelayHandle.IsValid())
-	{
-		SerializerRelayHandle = Serializer->OnSerializedFrame.AddUObject(this, &UO3DSenderComponent::HandleSerializedFrameForward);
-	}
 
 	UpdateAudioCaptureBinding();
 	StartControl();
@@ -446,40 +438,36 @@ FO3DTransportConfig UO3DSenderComponent::BuildTransportConfig() const
 	return Config;
 }
 
-/** Forwards a frame's already-serialized bytes to both the active transport and this
- *  component's own public delegate. This is the sole per-frame transport dispatch
- *  point (C2, roadmap doc §5/C2): FO3DSenderSerializer decides once - not per-transport -
- *  whether a frame is a full-sync snapshot or a delta/residual update and produces the
- *  final wire bytes itself, so every transport just transmits what it's given via
- *  IOpen3DSender::SendSerialized() rather than re-deriving bytes from a SubjectList
- *  object. (IOpen3DSender::Send(SubjectList) and the OnSubjectListReady handler that called
- *  it were deleted in WP-A1 PR 5b: a transport handed a live SubjectList would call its own
- *  Serialize() and discard whichever encoding was chosen upstream.) */
-void UO3DSenderComponent::HandleSerializedFrameForward(const FString& Subject, const TArray<uint8>& Buffer, double Timestamp)
+/**
+ * Frames reach the transport through the pose pipeline (ADR 0008, WP-A2c): its worker serializes
+ * each frame once (full sync or delta/residual update, decided by FO3DSenderSerializer, not per
+ * transport), broadcasts OnSerializedFrame and hands the bytes to IOpen3DSender::SendSerialized.
+ * This replaces HandleSerializedFrameForward, which did the same on the game thread.
+ */
+FO3DSenderSerializer& UO3DSenderComponent::GetSerializer() const
 {
-	OnSerializedFrame.Broadcast(Subject, Buffer, Timestamp);
+	check(Pipeline.IsValid());
+	return Pipeline->GetSerializer();
+}
 
-	if (!TransportController.IsValid() || !TransportController->IsActive() || Buffer.Num() <= 0)
+FO3DSenderPipelineStats UO3DSenderComponent::GetPipelineStats() const
+{
+	return Pipeline.IsValid() ? Pipeline->GetStats() : FO3DSenderPipelineStats();
+}
+
+void UO3DSenderComponent::DetachPipeline()
+{
+	if (!Pipeline.IsValid())
 	{
 		return;
 	}
+	Pipeline->SetSerializedFrameListener(nullptr);
+	Pipeline->DetachSender();
+}
 
-	TSharedPtr<IOpen3DSender> SenderInstance = TransportController->GetSender();
-	if (!SenderInstance.IsValid())
-	{
-		return;
-	}
-
-	// The delegate above got the bytes by reference; the transport takes its own copy
-	// (FO3DSendPayload owns its bytes, ADR 0007 item 3). The ADR 0008 pipeline will hand over
-	// the serializer's buffer instead.
-	const EO3DSendResult Result = SenderInstance->SendSerialized(FO3DSendPayload(TArray<uint8>(Buffer), Subject, Timestamp));
-	if (Result != EO3DSendResult::Queued)
-	{
-		// Not retried: the next frame supersedes this one. DroppedBackpressure is counted in the
-		// transport's DroppedFrames; NotConnected is expected while a peer or session is missing.
-		UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Transport '%s' did not take subject '%s' (%s)."), *TransportController->GetConfig().Transport.ToString(), *Subject, LexToString(Result));
-	}
+bool UO3DSenderComponent::WaitForPipelineIdle(double TimeoutSeconds) const
+{
+	return !Pipeline.IsValid() || Pipeline->WaitForIdle(TimeoutSeconds);
 }
 
 TArray<FName> UO3DSenderComponent::GetAvailableAudioInputDeviceOptions() const
@@ -1083,9 +1071,10 @@ void UO3DSenderComponent::PurgeSerializerCacheForSubject(const FString& Subject)
 		return;
 	}
 
-	if (Serializer)
+	// In order with the frames already handed to the pipeline (WP-A2c).
+	if (Pipeline.IsValid())
 	{
-		Serializer->RemoveSubjectCache(Subject);
+		Pipeline->RemoveSubject(Subject);
 	}
 }
 
@@ -1470,14 +1459,43 @@ void UO3DSenderComponent::PopulatePoseFrameCurves(USkeletalMeshComponent* SkelCo
 	Frame.CurveList = CurveProcessor->GetCurveList();
 }
 
+TUniquePtr<FO3DSPoseFrame> UO3DSenderComponent::AcquirePoseFrame()
+{
+	return Pipeline.IsValid() ? Pipeline->AcquireFrame() : TUniquePtr<FO3DSPoseFrame>();
+}
+
+void UO3DSenderComponent::DispatchSampledFrame(TUniquePtr<FO3DSPoseFrame>&& Frame)
+{
+	if (!Frame.IsValid() || !Pipeline.IsValid())
+	{
+		return;
+	}
+
+	if (Pipeline->IsAsync())
+	{
+		// ADR 0008 item 1: the delegate gets the sampled frame (raw curves); the worker filters,
+		// serializes and sends it. The frame is not touched here after it is handed over.
+		OnPoseFrameReady.Broadcast(Frame->Subject, *Frame);
+		Pipeline->SubmitFrame(MoveTemp(Frame), false);
+		return;
+	}
+
+	// o3d.Sender.AsyncPipeline 0: the WP-A2b order on the game thread. Filter, then the delegate
+	// (filtered curves), then serialize and send inside SubmitFrame.
+	Pipeline->FilterFrameInline(*Frame);
+	OnPoseFrameReady.Broadcast(Frame->Subject, *Frame);
+	Pipeline->SubmitFrame(MoveTemp(Frame), true);
+}
+
 /**
- * Samples the skeletal mesh into a pooled frame, filters its curves, then serializes it (ADR 0008
- * item 1). WP-A2a keeps every step on the game thread, in this call; the WP-A2c pipeline moves the
- * filtering and serialization to a worker. Nothing after sampling reads this component: the
- * filter and the serializer work only from the frame and its settings snapshot.
+ * Samples the skeletal mesh into a pooled frame and hands it to the pose pipeline (ADR 0008 item
+ * 1). Only sampling runs here, on the game thread; filtering, serialization and the send run on the
+ * pipeline's worker (WP-A2c), or right after this in synchronous mode. Nothing after sampling reads
+ * this component: the filter and the serializer work only from the frame and its settings snapshot.
  */
 void UO3DSenderComponent::HandleBoneTransformsFinalized()
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE_STR("O3D.Sender.Sample");
 	USkeletalMeshComponent* SkelComp = nullptr;
 	const double NowSeconds = FPlatformTime::Seconds();
 	if (!CanCaptureThisFrame(NowSeconds, SkelComp))
@@ -1485,11 +1503,12 @@ void UO3DSenderComponent::HandleBoneTransformsFinalized()
 		return;
 	}
 
-	TUniquePtr<FO3DSPoseFrame> Frame = FramePool.Acquire();
+	TUniquePtr<FO3DSPoseFrame> Frame = AcquirePoseFrame();
 	if (!Frame.IsValid())
 	{
-		// Every pooled frame is out. Not reachable while capture is synchronous (one frame at a
-		// time); the sample is skipped rather than allocating past the pool's bound.
+		// Every pooled frame is out. The pool holds the queue depth plus two (ADR 0008 item 4) and
+		// the queue drops its oldest frame first, so this is not expected; the sample is skipped
+		// rather than allocating past the pool's bound.
 		UE_LOG(LogO3DSenderComponent, Verbose, TEXT("No free pose frame; sample skipped on %s"), *GetNameSafe(GetOwner()));
 		return;
 	}
@@ -1501,21 +1520,7 @@ void UO3DSenderComponent::HandleBoneTransformsFinalized()
 	PopulatePoseFrameBones(SkelComp, *Frame, bDebugPose);
 	PopulatePoseFrameCurves(SkelComp, *Frame, bDebugCurves);
 
-	if (!CurveFilter.IsValid())
-	{
-		CurveFilter.Reset(new FO3DSenderCurveFilter());
-	}
-	CurveFilter->FilterFrame(*Frame);
-
-	// Listeners still get the filtered curves, as before WP-A2a.
-	OnPoseFrameReady.Broadcast(Frame->Subject, *Frame);
-
-	if (Serializer)
-	{
-		Serializer->SerializePoseFrame(Frame->Subject, *Frame);
-	}
-
-	FramePool.Release(MoveTemp(Frame));
+	DispatchSampledFrame(MoveTemp(Frame));
 }
 
 /** Called every frame; forwards upkeep ticks to the live transport instance. */
