@@ -261,4 +261,21 @@ private:
 	TUniquePtr<FO3DSenderAudioBinding> Binding;
 };
 
+/** Calls FO3DSenderTransportSettings (a private class of this module, WP-A3 step 8). */
+class OPEN3DSENDER_API FO3DSenderTransportSettingsProbe
+{
+public:
+	using FOptions = TMap<FString, FString>;
+
+	static bool IsSecretKey(FName Transport, const FString& Key);
+	static FString GetOption(const FOptions& Options, FName Transport, const FString& Key);
+	/** Returns how many times the change was recorded for undo. */
+	static int32 SetOption(FOptions& Options, FName Transport, const FString& Key, const FString& Value);
+	static FString GetCredentialProfile(const FOptions& Options, FName Transport);
+	static TArray<FString> MigrateLegacySecrets(FOptions& Options, FName Transport);
+	static void SwitchOptions(FOptions& Active, TMap<FName, FO3DTransportOptionSet>& Inactive, FName From, FName To);
+	static void BuildConfigOptions(const FOptions& Options, FName Transport, FOptions& OutOptions, FOptions& OutSecrets);
+	static bool IsRestartProperty(FName Property);
+};
+
 #endif // WITH_DEV_AUTOMATION_TESTS

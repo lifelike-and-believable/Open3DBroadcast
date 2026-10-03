@@ -732,6 +732,19 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Sender transport options and secrets split out (WP-A3 step 8, SND-22)
+
+- `UO3DSenderComponent`'s transport option and credential handling moved into
+  `FO3DSenderTransportSettings` (private): option reads and writes that route declared secret keys
+  to the secret store (ADR 0004), the credential profile, moving secrets out of old saved data,
+  switching options between transports (SND-35), the options and secrets a transport config gets,
+  and which property edits restart capture in the editor. The option maps stay properties of the
+  component, which passes them in with a callback that records the change for undo, so `Modify()`
+  is called exactly where it was. Every `UFUNCTION` keeps its signature; output is unchanged.
+- **Tests.** New `Open3DBroadcast.Sender.TransportSettings.RoutesSecretsOutOfOptions` and
+  `.MigratesAndSwitchesOptions`, through the exported `FO3DSenderTransportSettingsProbe`. Existing
+  tests, including the secrets tests, are unchanged.
+
 ### Sender audio binding split out (WP-A3 step 7, SND-22)
 
 - `UO3DSenderComponent`'s audio binding moved into `FO3DSenderAudioBinding` (private): the capture
