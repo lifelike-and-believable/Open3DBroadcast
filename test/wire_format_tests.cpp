@@ -394,3 +394,36 @@ O3DS_TEST(Envelope_TimestampIsClampedNotUndefined)
 	O3DS_CHECK(Wire::EnvelopeTimestampUs(1.0e300) == UINT64_MAX);
 }
 
+O3DS_TEST(NameHash_LengthPrefixedAndCaseSensitive)
+{
+	// The same bytes split differently are different lists.
+	O3DS_CHECK(Wire::HashNames({ "ab", "c" }) != Wire::HashNames({ "a", "bc" }));
+	O3DS_CHECK(Wire::HashNames({ "abc" }) != Wire::HashNames({ "abc", "" }));
+	O3DS_CHECK(Wire::HashNames({}) != Wire::HashNames({ "" }));
+	// Case is a real change.
+	O3DS_CHECK(Wire::HashNames({ "Spine" }) != Wire::HashNames({ "spine" }));
+	O3DS_CHECK(Wire::HashNames({ "Root", "Spine" }) == Wire::HashNames({ "Root", "Spine" }));
+
+	// The incremental form is the same hash.
+	uint64_t h = Wire::HashNamesBegin(2);
+	h = Wire::HashNamesAdd(h, "Root", 4);
+	h = Wire::HashNamesAdd(h, "Spine", 5);
+	O3DS_CHECK(h == Wire::HashNames({ "Root", "Spine" }));
+
+	// Known value: FNV-1a 64 over 00 00 00 00 (an empty list).
+	uint64_t expected = Wire::kFnv64OffsetBasis;
+	for (int i = 0; i < 4; ++i)
+	{
+		expected ^= 0;
+		expected *= 1099511628211ull;
+	}
+	O3DS_CHECK(Wire::HashNamesBegin(0) == expected);
+
+	// Parents follow the names and are length-prefixed too.
+	const int32_t parentsA[2] = { -1, 0 };
+	const int32_t parentsB[2] = { -1, 1 };
+	const uint64_t names = Wire::HashNames({ "Root", "Spine" });
+	O3DS_CHECK(Wire::HashParents(names, parentsA, 2) != Wire::HashParents(names, parentsB, 2));
+	O3DS_CHECK(Wire::HashParents(names, parentsA, 1) != Wire::HashParents(names, parentsA, 2));
+}
+

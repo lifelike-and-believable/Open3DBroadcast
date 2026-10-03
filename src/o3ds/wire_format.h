@@ -9,6 +9,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 //! The wire protocol this build implements (ADR 0009 item 2). Readers accept
 //! frames whose min_reader_version is 1..O3DS_PROTOCOL_VERSION; writers stamp
@@ -149,5 +151,24 @@ namespace Wire
 	//! negative values become 0, values past the u64 range saturate (the
 	//! plain cast was undefined for them, SHR-30).
 	O3DS_API uint64_t EnvelopeTimestampUs(double seconds);
+
+	// ---- Name hashing (ADR 0009 item 8, SHR-33) ------------------------------
+	//
+	// 64-bit FNV-1a over the element count (u32 LE), then for each name its
+	// UTF-8 length (u32 LE) and exact UTF-8 bytes. Case is preserved. The
+	// length prefixes make {"ab","c"} and {"a","bc"} hash differently. Local
+	// today (change detection); a topology hash that goes on the wire must use
+	// this definition and bump the protocol version.
+
+	constexpr uint64_t kFnv64OffsetBasis = 1469598103934665603ull;
+
+	//! Starts a names hash for count names.
+	O3DS_API uint64_t HashNamesBegin(uint32_t count);
+	//! Adds one name (UTF-8, len bytes) to a names hash.
+	O3DS_API uint64_t HashNamesAdd(uint64_t hash, const char* utf8, uint32_t len);
+	//! HashNamesBegin, then HashNamesAdd for every name.
+	O3DS_API uint64_t HashNames(const std::vector<std::string>& names);
+	//! Continues a hash with parent indices: their count (u32 LE), then each as i32 LE.
+	O3DS_API uint64_t HashParents(uint64_t hash, const int32_t* parents, uint32_t count);
 }
 }

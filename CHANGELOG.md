@@ -2,6 +2,17 @@
 
 ### Schema/Protocol
 
+- **One name-hash definition, length-prefixed** (ADR 0009 item 8, WP-A4 PR 4; SHR-33). No wire
+  change: the hashes are local (topology and curve-name change detection on the sender and the
+  receiver). `O3DS::Wire::HashNames` in the core is 64-bit FNV-1a over the name count (u32 LE),
+  then each name's UTF-8 length (u32 LE) and bytes, case preserved;
+  `O3DS::Wire::HashParents` continues it with the parent count and each index (i32 LE).
+  `O3DHelpers::HashNames` and `HashNamesAndParents` call them. The old hash fed each name's
+  TCHAR bytes with no length or count, so `{"ab","c"}` and `{"a","bc"}` collided, and the
+  parents were hashed as raw host-order bytes. Hash values change; nothing persists them. A
+  topology hash that ever goes on the wire must use this definition and bump the protocol.
+  New `core.wire_format_tests` case `NameHash_LengthPrefixedAndCaseSensitive`.
+
 - **Unified envelope v2** (ADR 0009 item 4, WP-A4 PR 3; SHR-7, SHR-30). Wire protocol stays 2;
   this is an envelope layout change, so the envelope carries its own magic and version.
   - **Layout:** 24 bytes, little-endian: magic `O3DU`, version 2, kind, codec, flags 0, u64

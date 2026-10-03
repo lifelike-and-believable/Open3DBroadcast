@@ -59,8 +59,8 @@ public class Open3DShared : ModuleRules
         {
             "Projects", // IPluginManager: FO3DFfiLibrary finds FFI DLLs relative to the owning plugin (TRF-28)
             "Sockets", // O3DTransportOptions::ResolveHostPort resolves host names (TRB-26, WP-A1 step 4)
-            // Private: O3DControlConvert.cpp (o3ds/control.h) and O3DUnifiedMessage.cpp (the envelope
-            // codec, o3ds/wire_format.h) include the core; Open3DShared's public headers stay free
+            // Private: O3DControlConvert.cpp (o3ds/control.h), O3DUnifiedMessage.cpp (the envelope
+            // codec) and O3DHelpers.cpp (the name hash; both o3ds/wire_format.h) include the core; Open3DShared's public headers stay free
             // of it (docs/adr/0011-control-channel.md, docs/adr/0009-protocol-versioning.md).
             "Open3DStreamCore"
         });

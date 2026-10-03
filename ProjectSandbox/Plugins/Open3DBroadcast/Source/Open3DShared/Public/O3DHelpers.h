@@ -24,7 +24,9 @@ namespace O3DHelpers
     // Used to refuse credential-bearing requests over plain HTTP (ADR 0004 item 6).
     OPEN3DSHARED_API bool IsHttpsOrLoopbackHttpUrl(const FString& InUrl);
 
-    // Hashing helpers (FNV-1a 64-bit)
+    // Hashing helpers (FNV-1a 64-bit). HashNames and HashNamesAndParents use the core's
+    // length-prefixed UTF-8 definition (o3ds/wire_format.h, ADR 0009 item 8): local change
+    // detection only, never on the wire.
     OPEN3DSHARED_API uint64 Fnv1a64(const void* Data, SIZE_T Bytes, uint64 Seed = 1469598103934665603ull);
     OPEN3DSHARED_API uint64 HashNames(const TArray<FName>& Names);
     OPEN3DSHARED_API uint64 HashNamesAndParents(const TArray<FName>& Names, const TArray<int32>& Parents);
