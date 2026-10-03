@@ -3,7 +3,7 @@
 #if O3D_WITH_TRANSPORT_WEBRTC // Whole file: without the transport the module is a stub (O3DWebRtcBuildFlags).
 
 //
-// WP-S9 (ADR 0004 items 1, 6 and 7) for the WebRTC transport: the customizations declare the
+// WP-S9 (ADR 0004 items 1, 6 and 7) for the WebRTC transport: the descriptor declares the
 // secret keys, the token reaches the transport only from Config.Secrets (never AdvancedParams), the
 // token request carries no grants and sends the endpoint credential as a bearer header, and plain
 // http:// endpoints other than localhost are refused. A fake token fetcher is used; no network.
@@ -82,7 +82,7 @@ bool FWebRTCSecretsDeclarationTest::RunTest(const FString& Parameters)
 }
 
 // WP-A1 PR 5c (ADR 0007 item 8): the schema's Secret entries are WebRTC's whole secret declaration,
-// environment variables included; the deprecated lists are empty.
+// environment variables included.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCSecretsSchemaEntriesTest, "Open3DBroadcast.Transport.WebRTC.Secrets.SchemaEntriesCarryEnvVars",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCSecretsSchemaEntriesTest::RunTest(const FString& Parameters)
@@ -97,8 +97,6 @@ bool FWebRTCSecretsSchemaEntriesTest::RunTest(const FString& Parameters)
 	{
 		const FString Side = LexToString(Role);
 		const FO3DTransportRoleOptions& Options = Descriptor->GetRoleOptions(Role);
-		TestEqual(*(Side + TEXT(": no deprecated secret keys")), Options.SecretOptionKeys.Num(), 0);
-		TestEqual(*(Side + TEXT(": no deprecated env vars")), Options.SecretEnvVars.Num(), 0);
 
 		const FO3DTransportOptionField* Token = Options.OptionSchema.FindByPredicate([](const FO3DTransportOptionField& Field) { return Field.Key == WebRTCUtils::TokenOptionKey; });
 		const FO3DTransportOptionField* EndpointAuth = Options.OptionSchema.FindByPredicate([](const FO3DTransportOptionField& Field) { return Field.Key == WebRTCUtils::TokenEndpointAuthOptionKey; });

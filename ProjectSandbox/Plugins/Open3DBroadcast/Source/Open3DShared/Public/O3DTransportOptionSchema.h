@@ -36,9 +36,9 @@ enum class EO3DTransportOptionType : uint8
 	Enum,
 	/**
 	 * A credential (ADR 0004). The entry declares the key secret: FO3DTransportRegistry::
-	 * GetSecretDeclaration lists it, with the entry's SecretEnvVar, whether or not the key is also
-	 * in the role's SecretOptionKeys (WP-A1 PR 5c). The editor shows a password box that opens
-	 * empty and writes to FO3DSecretStore, never to the option map.
+	 * GetSecretDeclaration lists it, with the entry's SecretEnvVar; it is the only way to declare
+	 * a secret since WP-A1 step 6. The editor shows a password box that opens empty and writes to
+	 * FO3DSecretStore, never to the option map.
 	 */
 	Secret,
 	/**
@@ -105,8 +105,7 @@ struct FO3DTransportOptionField
 	/**
 	 * Secret only: environment variable that supplies the secret, e.g. "O3DB_<TRANSPORT>_TOKEN"
 	 * (ADR 0004 item 3; a non-default credential profile first tries "<NAME>__<PROFILE>"). Empty
-	 * for none. This replaces the role's SecretEnvVars entry for the key (WP-A1 PR 5c); when both
-	 * name one, this one wins.
+	 * for none (WP-A1 PR 5c).
 	 */
 	FString SecretEnvVar;
 

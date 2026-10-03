@@ -15,8 +15,7 @@
 
 /*
  * Sender audio sinks (ADR 0007 item 7 and its WP-S5 addendum). Moved here from Open3DSender in
- * WP-A1 step 4, so transports depend on Open3DShared alone; "O3DSenderAudioSinkBase.h" in
- * Open3DSender forwards here for one release.
+ * WP-A1 step 4, so transports depend on Open3DShared alone.
  *
  * - FO3DSenderAudioSinkBase validates a submission and normalises its stream label.
  * - FO3DQueuedSenderAudioSink is the shared sink a migrated transport hands out: it holds the

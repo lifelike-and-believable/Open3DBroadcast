@@ -4,7 +4,6 @@
 // - The options saved in the source settings (project settings, LiveLink presets) reach the
 //   transport's configure function through an FO3DTransportOptionsView with the schema; secrets
 //   never do (ADR 0004).
-// - A configure function registered through the deprecated customization still gets the settings.
 // - O3DReceiver::SwitchTransport keeps the other transport's options (SND-35), never puts a
 //   secret away, and the connection string carries only the selected transport's options.
 // Test-only transport names and keys under the process-wide registry; no transport module, no network.
@@ -19,6 +18,7 @@
 #include "O3DReceiverSourceSettings.h"
 #include "O3DReceiverTransportCustomization.h"
 #include "O3DSecretStore.h"
+#include "O3DTestFakes.h"
 #include "Testing/O3DReceiverTesting.h"
 #include "Transport/O3DTransportRegistry.h"
 
@@ -29,16 +29,19 @@ namespace O3DReceiverTypedConfigTest
 		int32 Calls = 0;
 		TMap<FString, FString> Values;
 		bool bHadSchema = false;
-		FString LegacyTransportName;
 	};
 
-	/** A legacy-edited descriptor for a unique name: schema, one secret key, new-signature ConfigureReceiver. */
+	/**
+	 * Registers a descriptor for a unique name: a fake receiver factory, a schema with a Secret
+	 * entry, and ConfigureReceiver. Unregisters it and clears the secret on exit.
+	 */
 	struct FScopedTypedReceiverTransport
 	{
 		FName Name;
 		FString UrlKey;
 		FString SecretKey;
 		TSharedRef<FSeen> Seen = MakeShared<FSeen>();
+		FO3DTransportRegistration Registration;
 
 		FScopedTypedReceiverTransport()
 			: Name(*O3DTests::MakeUniqueName(TEXT("O3DTypedReceiver")))
@@ -53,32 +56,36 @@ namespace O3DReceiverTypedConfigTest
 			Url.Type = EO3DTransportOptionType::Url;
 			Url.Default = TEXT("wss://default.invalid");
 			Schema.Add(Url);
+			FO3DTransportOptionField Secret;
+			Secret.Key = SecretKey;
+			Secret.Type = EO3DTransportOptionType::Secret;
+			Schema.Add(Secret);
 
 			const TSharedRef<FSeen> Record = Seen;
 			const FString UrlOption = UrlKey;
-			FO3DTransportRegistry::Get().EditLegacyDescriptor(Name, [&](FO3DTransportDescriptor& Descriptor)
+			FO3DTransportDescriptor Descriptor;
+			Descriptor.Name = Name;
+			Descriptor.OwningModule = TEXT("Open3DBroadcastTests");
+			Descriptor.CreateReceiver = []() -> TSharedPtr<IOpen3DReceiver, ESPMode::ThreadSafe> { return MakeShared<FO3DFakeReceiver, ESPMode::ThreadSafe>(); };
+			Descriptor.ReceiverOptions.OptionSchema = Schema;
+			Descriptor.ConfigureReceiver = [Record, UrlOption](const FO3DTransportOptionsView& Options, FO3DTransportConfig& Config)
 			{
-				Descriptor.ReceiverOptions.SecretOptionKeys.Add(SecretKey);
-				Descriptor.ReceiverOptions.OptionSchema = Schema;
-				Descriptor.ConfigureReceiver = [Record, UrlOption](const FO3DTransportOptionsView& Options, FO3DTransportConfig& Config)
-				{
-					++Record->Calls;
-					Record->Values = Options.GetValues();
-					Record->bHadSchema = Options.GetSchema() != nullptr;
-					Config.Uri = Options.GetString(UrlOption);
-				};
-			});
+				++Record->Calls;
+				Record->Values = Options.GetValues();
+				Record->bHadSchema = Options.GetSchema() != nullptr;
+				Config.Uri = Options.GetString(UrlOption);
+			};
+			Registration = FO3DTransportRegistry::Get().Register(MoveTemp(Descriptor));
 		}
 
 		~FScopedTypedReceiverTransport()
 		{
 			FO3DSecretStore::Get().Clear(Name.ToString(), TEXT("default"), SecretKey);
-			FO3DTransportRegistry::Get().EditLegacyDescriptor(Name, [](FO3DTransportDescriptor& Descriptor)
-			{
-				Descriptor.ConfigureReceiver = FO3DReceiverConfigureFunction();
-				Descriptor.ReceiverOptions = FO3DTransportRoleOptions();
-			});
+			Registration.Reset();
 		}
+
+		FScopedTypedReceiverTransport(const FScopedTypedReceiverTransport&) = delete;
+		FScopedTypedReceiverTransport& operator=(const FScopedTypedReceiverTransport&) = delete;
 	};
 }
 
@@ -110,43 +117,6 @@ bool FO3DReceiverTypedConfigSavedOptionsTest::RunTest(const FString& Parameters)
 	Settings.TransportOptions.Reset();
 	const TSharedRef<FO3DReceiverSource> Defaulted = MakeShared<FO3DReceiverSource>(Settings);
 	TestEqual(TEXT("Schema default through the view"), FO3DReceiverSourceTestAccessor::BuildTransportConfig(*Defaulted).Uri, FString(TEXT("wss://default.invalid")));
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverTypedConfigLegacyTest, "Open3DBroadcast.Receiver.TypedConfig.DeprecatedConfigureGetsSettings", O3DB_TEST_FLAGS)
-bool FO3DReceiverTypedConfigLegacyTest::RunTest(const FString& Parameters)
-{
-	const FName Name(*O3DTests::MakeUniqueName(TEXT("O3DTypedReceiverLegacy")));
-	const TSharedRef<O3DReceiverTypedConfigTest::FSeen> Seen = MakeShared<O3DReceiverTypedConfigTest::FSeen>();
-
-	FO3DReceiverTransportCustomization Customization;
-	Customization.ConfigureTransport = [Seen](const FO3DReceiverSourceConfig& Settings, FO3DTransportConfig& Config)
-	{
-		++Seen->Calls;
-		Seen->LegacyTransportName = Settings.TransportName.ToString();
-		Config.StreamId = Settings.TransportOptions.FindRef(TEXT("legacy.stream"));
-	};
-	O3DReceiver::RegisterTransportCustomization(Name, MoveTemp(Customization));
-
-	FO3DReceiverSourceConfig Settings;
-	Settings.TransportName = Name;
-	Settings.TransportOptions.Add(TEXT("legacy.stream"), TEXT("from-settings"));
-	const TSharedRef<FO3DReceiverSource> Source = MakeShared<FO3DReceiverSource>(Settings);
-	const FO3DTransportConfig Config = FO3DReceiverSourceTestAccessor::BuildTransportConfig(*Source);
-	TestEqual(TEXT("The legacy function ran once"), Seen->Calls, 1);
-	TestEqual(TEXT("It got the settings being configured"), Seen->LegacyTransportName, Name.ToString());
-	TestEqual(TEXT("It could read the settings' options"), Config.StreamId, FString(TEXT("from-settings")));
-
-	// The deprecated find hands back a settings-taking function over the new one.
-	const FO3DReceiverTransportCustomization* Found = O3DReceiver::FindTransportCustomization(Name);
-	if (TestNotNull(TEXT("Deprecated find returns the receiver part"), Found) && TestTrue(TEXT("With a configure function"), static_cast<bool>(Found->ConfigureTransport)))
-	{
-		FO3DTransportConfig Direct;
-		Found->ConfigureTransport(Settings, Direct);
-		TestEqual(TEXT("The found function reaches the registered one"), Direct.StreamId, FString(TEXT("from-settings")));
-	}
-
-	O3DReceiver::UnregisterTransportCustomization(Name);
 	return true;
 }
 

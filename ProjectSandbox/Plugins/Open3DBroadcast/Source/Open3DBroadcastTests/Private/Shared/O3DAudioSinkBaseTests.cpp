@@ -13,7 +13,7 @@
 #include "Misc/AutomationTest.h"
 #include "O3DAudioSerialization.h"
 #include "O3DUnifiedMessage.h"
-#include "Testing/O3DLifetimeTestUtils.h"
+#include "Testing/O3DTransportLifetimeTestUtils.h"
 #include "Transport/O3DSenderAudioSinkBase.h"
 #include "Transport/O3DSendQueue.h"
 

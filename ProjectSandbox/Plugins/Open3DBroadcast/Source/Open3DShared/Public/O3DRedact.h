@@ -11,7 +11,7 @@
  * for everything else that reaches a log line or a debug string. The key pattern here is only
  * used to decide what a log shows. It is never used to decide what is persisted: persistence is
  * decided by the secret keys a transport declares (FO3DTransportRegistry::GetSecretDeclaration:
- * its schema's Secret entries and its SecretOptionKeys).
+ * its schema's Secret entries).
  */
 namespace O3DRedact
 {

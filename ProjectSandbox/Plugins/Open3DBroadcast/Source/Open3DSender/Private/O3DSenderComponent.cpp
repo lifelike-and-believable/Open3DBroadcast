@@ -7,7 +7,6 @@
 #include "O3DSenderSerializer.h"
 #include "O3DSenderCurveProcessor.h"
 #include "O3DSenderTransportController.h"
-#include "O3DSenderLegacyTransportShims.h"
 #include "Transport/O3DTransportRegistry.h"
 #include "Engine/Engine.h"
 #include "Engine/SkeletalMesh.h"
@@ -421,9 +420,7 @@ FO3DTransportConfig UO3DSenderComponent::BuildTransportConfig() const
 		if (Descriptor->ConfigureSender)
 		{
 			// The view is over this function's own copy, so it stays valid whatever the configure
-			// function adds to Config.AdvancedParams (WP-A1 PR 5a). The scope hands a configure
-			// function registered through the deprecated customization this component.
-			const O3DSenderLegacyShims::FScopedConfiguringComponent LegacyScope(this);
+			// function adds to Config.AdvancedParams (WP-A1 PR 5a).
 			Descriptor->ConfigureSender(FO3DTransportOptionsView(Options, Config.OptionSchema.Get()), Config);
 		}
 	}
@@ -1450,7 +1447,7 @@ void UO3DSenderComponent::StartControl()
 		return;
 	}
 	const TSharedPtr<IOpen3DSender> SenderInstance = TransportController->GetSender();
-	if (!SenderInstance.IsValid() || !SenderInstance->SupportsControl())
+	if (!SenderInstance.IsValid() || !SenderInstance->GetCapabilities().bControl)
 	{
 		return;
 	}

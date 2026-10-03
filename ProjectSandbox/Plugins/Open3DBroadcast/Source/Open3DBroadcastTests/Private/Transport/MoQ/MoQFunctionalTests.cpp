@@ -21,7 +21,7 @@
 #include "Transport/O3DReceiverInterface.h"
 #include "Transport/O3DTransportTypes.h"
 #include "Testing/MoQTesting.h"
-#include "Testing/O3DLifetimeTestUtils.h"
+#include "Testing/O3DTransportLifetimeTestUtils.h"
 #include "Transport/MoQ/MoQFakeFfi.h"
 
 #include <atomic>

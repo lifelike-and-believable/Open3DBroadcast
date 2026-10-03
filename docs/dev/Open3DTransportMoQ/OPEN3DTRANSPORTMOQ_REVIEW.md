@@ -77,7 +77,7 @@ The implementation follows a clean layered architecture that separates concerns 
 | Facade | `FMoQSessionWrapper` abstracts FFI complexity | ✅ Excellent |
 | Observer | Connection state delegate broadcasting | ✅ Good |
 | Producer-Consumer | Send/receive queues in Sender/Receiver | ✅ Good |
-| Factory | Transport registration via `O3DTransport::RegisterSender/Receiver` | ✅ Standard |
+| Factory | Transport registration via one `FO3DTransportDescriptor` in `FO3DTransportRegistry` | ✅ Standard |
 
 ### 1.3 Areas for Improvement
 

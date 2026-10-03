@@ -917,11 +917,6 @@ namespace O3DConformanceSuite
 
 		ExpectCapabilities(Test, TEXT("Sender"), Sender->GetCapabilities(), Expected);
 		ExpectCapabilities(Test, TEXT("Receiver"), Receiver->GetCapabilities(), Expected);
-		// The deprecated queries forward to the capabilities (ADR 0011 item 6).
-		Test.TestTrue(TEXT("Sender SupportsControl() forwards to bControl"), Sender->SupportsControl() == Expected.bControl);
-		Test.TestTrue(TEXT("Sender SupportsAudio() forwards to bAudioSend"), Sender->SupportsAudio() == Expected.bAudioSend);
-		Test.TestTrue(TEXT("Receiver SupportsControl() forwards to bControl"), Receiver->SupportsControl() == Expected.bControl);
-		Test.TestTrue(TEXT("Receiver SupportsAudio() forwards to bAudioReceive"), Receiver->SupportsAudio() == Expected.bAudioReceive);
 
 		// The descriptor answers for a config without an instance (the details panel's question).
 		FO3DTransportCapabilities FromDescriptor;

@@ -16,17 +16,6 @@
 
 namespace O3DTransportRegistryPrivate
 {
-	/** A legacy descriptor with nothing left in it is removed rather than kept as an empty entry. */
-	static bool IsEmptyLegacyDescriptor(const FO3DTransportDescriptor& Descriptor)
-	{
-		return !Descriptor.CreateSender
-			&& !Descriptor.CreateReceiver
-			&& !Descriptor.ConfigureSender
-			&& !Descriptor.ConfigureReceiver
-			&& Descriptor.SenderOptions.IsEmpty()
-			&& Descriptor.ReceiverOptions.IsEmpty();
-	}
-
 	static const TCHAR* RoleName(EO3DTransportRole Role)
 	{
 		return Role == EO3DTransportRole::Sender ? TEXT("sender") : TEXT("receiver");
@@ -264,7 +253,7 @@ void FO3DTransportRegistry::Drain(FName Name, const FO3DTransportDescriptorPtr& 
 	{
 		Receiver->Stop();
 		Receiver->SetConsumer(nullptr);
-		if (Receiver->SupportsControl())
+		if (Receiver->GetCapabilities().bControl)
 		{
 			Receiver->SetControlSink(nullptr);
 		}
@@ -341,83 +330,6 @@ int32 FO3DTransportRegistry::GetNumLiveInstances(FName Name) const
 	return Count;
 }
 
-void FO3DTransportRegistry::EditLegacyDescriptor(FName Name, TFunctionRef<void(FO3DTransportDescriptor&)> Edit)
-{
-	// Game thread only, like Register: removing an entry drains it.
-	check(IsInGameThread());
-
-	if (Name.IsNone())
-	{
-		UE_LOG(LogO3DShared, Warning, TEXT("Attempted to register a transport part with None name."));
-		return;
-	}
-
-	FO3DTransportDescriptorPtr Replaced;
-	FLiveListPtr RemovedLive;
-	bool bChanged = false;
-	bool bRefused = false;
-	{
-		FWriteScopeLock WriteLock(Lock);
-		FEntry* Entry = Entries.Find(Name);
-		if (Entry != nullptr && Entry->RegistrationId != 0)
-		{
-			bRefused = true;
-		}
-		else
-		{
-			FO3DTransportDescriptor Copy;
-			if (Entry != nullptr && Entry->Descriptor.IsValid())
-			{
-				Copy = *Entry->Descriptor;
-			}
-			Copy.Name = Name;
-			Edit(Copy);
-
-			if (O3DTransportRegistryPrivate::IsEmptyLegacyDescriptor(Copy))
-			{
-				if (Entry != nullptr)
-				{
-					Replaced = Entry->Descriptor;
-					RemovedLive = Entry->Live;
-					Entries.Remove(Name);
-					bChanged = true;
-				}
-			}
-			else
-			{
-				FEntry& Target = Entry != nullptr ? *Entry : Entries.Add(Name);
-				Replaced = Target.Descriptor;
-				Target.Descriptor = MakeShared<FO3DTransportDescriptor, ESPMode::ThreadSafe>(MoveTemp(Copy));
-				if (!Target.Live.IsValid())
-				{
-					// Instances made from earlier versions of this legacy entry stay in the same list.
-					Target.Live = MakeShared<FLiveList, ESPMode::ThreadSafe>();
-				}
-				Target.RegistrationId = 0;
-				bChanged = true;
-			}
-		}
-	}
-
-	if (bRefused)
-	{
-		UE_LOG(LogO3DShared, Warning,
-			TEXT("Deprecated transport registration call for '%s' ignored: that name is registered with a descriptor (FO3DTransportRegistry::Register)."),
-			*Name.ToString());
-		return;
-	}
-
-	if (RemovedLive.IsValid())
-	{
-		Drain(Name, Replaced, RemovedLive);
-	}
-
-	if (bChanged)
-	{
-		TransportsChanged.Broadcast();
-	}
-}
-
 FO3DTransportDescriptorPtr FO3DTransportRegistry::Find(FName Name) const
 {
 	FReadScopeLock ReadLock(Lock);
@@ -477,7 +389,7 @@ void FO3DTransportRoleOptions::GetSecretDeclaration(TArray<FString>& OutSecretKe
 		});
 	};
 
-	// The typed form first (WP-A1 PR 5c): each Secret entry carries its environment variable.
+	// Each Secret entry declares its key and carries its environment variable (ADR 0007 item 8).
 	for (const FO3DTransportOptionField& Field : OptionSchema)
 	{
 		if (Field.Type != EO3DTransportOptionType::Secret || Field.Key.IsEmpty() || ContainsKey(Field.Key))
@@ -485,33 +397,13 @@ void FO3DTransportRoleOptions::GetSecretDeclaration(TArray<FString>& OutSecretKe
 			continue;
 		}
 		OutSecretKeys.Add(Field.Key);
-		FString EnvVar = Field.SecretEnvVar.TrimStartAndEnd();
-		if (EnvVar.IsEmpty())
-		{
-			if (const FString* Listed = SecretEnvVars.Find(Field.Key))
-			{
-				EnvVar = Listed->TrimStartAndEnd();
-			}
-		}
+		const FString EnvVar = Field.SecretEnvVar.TrimStartAndEnd();
 		if (!EnvVar.IsEmpty())
 		{
 			OutSecretEnvVars.Add(Field.Key, EnvVar);
 		}
 	}
 
-	// The deprecated lists, for keys no Secret entry declares.
-	for (const FString& Key : SecretOptionKeys)
-	{
-		if (Key.IsEmpty() || ContainsKey(Key))
-		{
-			continue;
-		}
-		OutSecretKeys.Add(Key);
-		if (const FString* EnvVar = SecretEnvVars.Find(Key))
-		{
-			OutSecretEnvVars.Add(Key, *EnvVar);
-		}
-	}
 }
 
 bool FO3DTransportRegistry::GetOptionSchema(FName Name, EO3DTransportRole Role, FO3DTransportOptionSchema& OutSchema) const

@@ -19,8 +19,7 @@
 #include "HAL/PlatformMisc.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/AutomationTest.h"
-#include "O3DReceiverRegistry.h"
-#include "O3DSenderRegistry.h"
+#include "Transport/O3DTransportRegistry.h"
 #include "Testing/MoQTesting.h"
 
 namespace O3DNetworkMoQTests
@@ -97,7 +96,7 @@ namespace O3DNetworkMoQTests
 
 	TSharedPtr<IOpen3DSender> StartSender(FAutomationTestBase& Test, const FO3DTransportConfig& Config)
 	{
-		TSharedPtr<IOpen3DSender> Sender = O3DTransport::CreateSender(MoQName);
+		TSharedPtr<IOpen3DSender> Sender = FO3DTransportRegistry::Get().CreateSender(MoQName);
 		if (!Test.TestTrue(TEXT("MoQ sender registered"), Sender.IsValid())
 			|| !Test.TestTrue(TEXT("Sender initializes"), Sender->Initialize(Config).IsOk())
 			|| !Test.TestTrue(TEXT("Sender starts"), Sender->Start().IsOk()))
@@ -109,7 +108,7 @@ namespace O3DNetworkMoQTests
 
 	TSharedPtr<IOpen3DReceiver> StartReceiver(FAutomationTestBase& Test, const FO3DTransportConfig& Config, const TSharedPtr<FO3DRecordingFrameConsumer>& Consumer)
 	{
-		TSharedPtr<IOpen3DReceiver> Receiver = O3DTransport::CreateReceiver(MoQName);
+		TSharedPtr<IOpen3DReceiver> Receiver = FO3DTransportRegistry::Get().CreateReceiver(MoQName);
 		if (!Test.TestTrue(TEXT("MoQ receiver registered"), Receiver.IsValid())
 			|| !Test.TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(Config).IsOk()))
 		{

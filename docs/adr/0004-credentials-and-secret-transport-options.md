@@ -157,3 +157,8 @@ Replace the string map with typed structs whose secret fields are `UPROPERTY(Tra
   - switching transports (SND-35).
 
   So items 2 to 8 behave as before: resolution order, profiles, persistence, redaction and the token endpoint rules. `Open3DBroadcast.Shared.OptionSchema.SecretEntryCarriesEnvVar` checks a schema-only secret end to end (variable, store, kept out of the options and `AdvancedParams`, redacted in `ToDebugString`).
+
+## Addendum: implementation note (WP-A1 step 6, 2026-10-03)
+
+- **Status:** item 1's list is gone. `SecretOptionKeys` and `SecretEnvVars` (on `FO3DTransportRoleOptions` and on the deprecated customizations) were removed with the WP-A1 shims; see the ADR 0007 addendum "implementation notes (WP-A1 step 6)" for the maintainer's decision to remove them in this unreleased cycle. Nothing in the repository filled them after WebRTC moved to schema entries in PR 5c.
+- **The declaration now.** A `Secret` entry in a transport's option schema declares the key, and its `SecretEnvVar` names the environment variable. `FO3DTransportRegistry::GetSecretDeclaration` lists exactly those entries. Items 2 to 8 read that declaration, so their behaviour is unchanged. That covers the store, resolution order, profiles, persistence, redaction, the token endpoint rules, and the migration of secrets found in saved data (item 4).

@@ -8,9 +8,8 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "O3DReceiverRegistry.h"
-#include "O3DSenderRegistry.h"
-#include "Testing/O3DLifetimeTestUtils.h"
+#include "Transport/O3DTransportRegistry.h"
+#include "Testing/O3DTransportLifetimeTestUtils.h"
 
 #include "HAL/CriticalSection.h"
 #include "HAL/PlatformProcess.h"
@@ -90,7 +89,7 @@ bool FO3DLoopbackLifetimeStressTest::RunTest(const FString& Parameters)
     ReceiverConfig.Transport = TEXT("Loopback");
     ReceiverConfig.StreamId = TEXT("wp_s5_lifetime");
     ReceiverConfig.Audio.bEnableAudio = true;
-    const TSharedPtr<IOpen3DReceiver> Receiver = O3DTransport::CreateReceiver(TEXT("Loopback"));
+    const TSharedPtr<IOpen3DReceiver> Receiver = FO3DTransportRegistry::Get().CreateReceiver(TEXT("Loopback"));
     if (!TestTrue(TEXT("Loopback receiver registered"), Receiver.IsValid()))
     {
         return false;
@@ -98,7 +97,7 @@ bool FO3DLoopbackLifetimeStressTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(ReceiverConfig).IsOk());
 
     const O3DLifetimeTest::FStressResult Result = O3DLifetimeTest::RunSenderStressWith(
-        []() { return O3DTransport::CreateSender(TEXT("Loopback")); },
+        []() { return FO3DTransportRegistry::Get().CreateSender(TEXT("Loopback")); },
         [](int32)
     {
         FO3DTransportConfig Config;
@@ -148,7 +147,7 @@ bool FO3DLoopbackStopUnderLoadTest::RunTest(const FString& Parameters)
         Config.AdvancedParams.Add(TEXT("loopback.maxqueue"), TEXT("256"));
         Config.AdvancedParams.Add(TEXT("loopback.maxaudioqueue"), TEXT("256"));
 
-        TSharedPtr<IOpen3DSender> Sender = O3DTransport::CreateSender(TEXT("Loopback"));
+        TSharedPtr<IOpen3DSender> Sender = FO3DTransportRegistry::Get().CreateSender(TEXT("Loopback"));
         if (!Sender.IsValid() || !Sender->Initialize(Config).IsOk() || !Sender->Start().IsOk())
         {
             ++StartFailures;

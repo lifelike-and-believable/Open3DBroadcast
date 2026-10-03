@@ -684,6 +684,102 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Deprecated transport shims removed (WP-A1 step 6, ADR 0007 item 9)
+
+This completes WP-A1. Runtime behaviour is unchanged. Saved data needs nothing: no property or
+option key changed.
+
+- **Interface version stays 5.** ADR 0007 kept the shims for one release. The maintainer decided to
+  remove them now instead, because no release has carried them (the last tag, v0.9.6, predates
+  5a, and no tag contains c98c92c) and no third-party add-on or project builds from this
+  codebase. Step 6 therefore joins version 5, with 5a, 5b and 5c.
+
+#### Removed
+
+Each deleted API, with what to use instead:
+
+- **Sender registry** (`Open3DSender/Public/O3DSenderRegistry.h`):
+  - `O3DTransport::RegisterSender` and `UnregisterSender`: register one `FO3DTransportDescriptor`
+    with `FO3DTransportRegistry::Get().Register(...)` and keep the returned
+    `FO3DTransportRegistration`.
+  - `O3DTransport::CreateSender`: `FO3DTransportRegistry::Get().CreateSender(Name)`.
+  - `O3DTransport::GetRegisteredSenders`: `FO3DTransportRegistry::Get().GetNames(EO3DTransportRole::Sender)`.
+- **Receiver registry** (`Open3DReceiver/Public/O3DReceiverRegistry.h`): `RegisterReceiver`,
+  `UnregisterReceiver`, `CreateReceiver` and `GetRegisteredReceivers`. The replacements are the same
+  as for the sender registry, with `EO3DTransportRole::Receiver`.
+- **Sender transport customization** (`Open3DSender/Public/O3DSenderTransportCustomization.h`):
+  - `FO3DSenderTransportCustomization`, `O3DSender::RegisterTransportCustomization` and
+    `UnregisterTransportCustomization`: set `FO3DTransportDescriptor::ConfigureSender` and
+    `SenderOptions` on the registered descriptor.
+  - `O3DSender::FindTransportCustomization`: `FO3DTransportRegistry::Get().Find(Name)`.
+  - `O3DSender::GetRegisteredTransportNames`: `GetNames(EO3DTransportRole::Sender)`.
+  - `O3DSender::GetTransportSecretDeclaration`:
+    `FO3DTransportRegistry::Get().GetSecretDeclaration(Name, EO3DTransportRole::Sender, ...)`.
+  - `O3DSender::GetTransportOptionSchema`:
+    `FO3DTransportRegistry::Get().GetOptionSchema(Name, EO3DTransportRole::Sender, ...)`.
+- **Receiver transport customization:**
+  - Removed from `O3DReceiverTransportCustomization.h`: `FO3DReceiverTransportCustomization`,
+    `O3DReceiver::RegisterTransportCustomization`, `UnregisterTransportCustomization`,
+    `FindTransportCustomization`, `GetRegisteredTransportNames`, `GetTransportSecretDeclaration`
+    and `GetTransportOptionSchema`. The replacements are the same as for the sender, with
+    `ConfigureReceiver`, `ReceiverOptions` and the Receiver role.
+  - The receiver's secret and switching helpers stay in that header: `IsSecretOptionKey`,
+    `GetCredentialProfile`, `StripSecretOptions`, `MigrateLegacySecretOptions`,
+    `ExportConnectionString`, `ResolveSecrets` and `SwitchTransport`.
+- **The legacy configure scopes.** `O3DSenderLegacyShims` (`FScopedConfiguringComponent`) and
+  `O3DReceiverLegacyShims` (`FScopedConfiguringSettings`) are removed, together with the
+  customization caches the modules started. A configure function gets the options view only (WP-A1
+  PR 5a), so it no longer receives the component or the settings.
+- **`FO3DTransportRegistry::EditLegacyDescriptor`**, the path the deprecated functions used to edit
+  one part of a factory-less descriptor. Register one complete descriptor instead. Every registered
+  entry now comes from `Register`.
+- **`FO3DTransportRoleOptions::SecretOptionKeys` and `SecretEnvVars`.** Declare each secret with a
+  `Secret` entry in the role's `OptionSchema`, and put its environment variable in the entry's
+  `SecretEnvVar` (WP-A1 PR 5c). `GetSecretDeclaration` now lists exactly those entries. Nothing in
+  the repository filled the lists any more. ADR 0004 behaviour is unchanged: the store, resolution,
+  persistence, redaction, and the migration of secrets found in saved data.
+- **`IOpen3DSender::SupportsAudio`/`SupportsControl` and `IOpen3DReceiver::SupportsAudio`/`SupportsControl`:**
+  - sender: `GetCapabilities().bAudioSend` and `GetCapabilities().bControl`;
+  - receiver: `GetCapabilities().bAudioReceive` and `GetCapabilities().bControl`.
+- **Forwarding headers.** Include the Open3DShared path instead:
+
+  | Removed header | Use instead |
+  |---|---|
+  | `Open3DSender/Public/O3DSenderInterface.h` | `Transport/O3DSenderInterface.h` |
+  | `Open3DReceiver/Public/O3DReceiverInterface.h` | `Transport/O3DReceiverInterface.h` |
+  | `Open3DSender/Public/O3DSenderAudioSinkBase.h` | `Transport/O3DSenderAudioSinkBase.h` |
+  | `Open3DSender/Public/Testing/O3DLifetimeTestUtils.h` | `Testing/O3DTransportLifetimeTestUtils.h` |
+  | `Open3DShared/Public/O3DTransportTypes.h` | `Transport/O3DTransportTypes.h` |
+  | `Open3DShared/Public/SerializedFrameConsumerRegistry.h` | `Transport/O3DSerializedFrameConsumer.h` |
+
+#### Tests
+
+- **Deleted**, because they tested only removed API:
+  - `Open3DBroadcast.Shared.TransportRegistry.DeprecatedFunctionsForward`
+  - `Open3DBroadcast.Sender.TypedConfig.DeprecatedConfigureGetsComponent`
+  - `Open3DBroadcast.Receiver.TypedConfig.DeprecatedConfigureGetsSettings`
+- **Assertions removed** that covered only removed API:
+  - In `DuplicateNameKeepsFirst`: the legacy edit of a handle-owned name.
+  - In `PickersListCreatableSet`: the options-only legacy entry. `Register` refuses such a
+    descriptor, and `RejectsInvalidDescriptors` covers that.
+  - In the conformance `CapabilitiesMatch` case (`Open3DBroadcast.Conformance.<Transport>.CapabilitiesMatch`) and
+    `Open3DBroadcast.Transport.WebRTC.Capabilities.DeliveryFollowsPreferLossy`: the "SupportsX forwards
+    to GetCapabilities" checks. The capabilities themselves are still asserted.
+  - In `WebRTC.Secrets.SchemaEntriesCarryEnvVars`: the "deprecated lists are empty" checks.
+  - In `Shared.OptionSchema.SecretEntryCarriesEnvVar`: the merge-with-lists rules. They became
+    schema-only rules: each key once, and an entry's variable.
+- **Moved to `FO3DTransportRegistry::Register`, with their assertions unchanged.** These tests
+  used the shims only as setup: they now register one descriptor with a fake factory, and declare
+  their secrets with `Secret` entries.
+  - the typed-config and transport-switch tests (sender and receiver);
+  - the WP-S9 secrets tests (sender and receiver);
+  - the options-panel tests;
+  - `MakeDescriptor` in the registry tests.
+- **Moved to the current API, with their assertions unchanged:**
+  - The Loopback, MoQ relay and lifetime tests call `FO3DTransportRegistry::Get().CreateSender`
+    and `CreateReceiver`, and include the Open3DShared headers.
+  - Tests that asked `SupportsAudio()`/`SupportsControl()` ask `GetCapabilities()`.
+
 ### Typed config, part 2: registered names, typed secrets, Float, restart-on-change, Validate (WP-A1 PR 5c, ADR 0007 step 5)
 
 This completes ADR 0007 item 8 and with it step 5. Saved data is unchanged: no saved property,
@@ -691,7 +787,7 @@ option key or value changed, and nothing needs migrating.
 
 - **Interface version stays 5.** 5a, 5b and 5c ship in the same release (the last tag is v0.9.6,
   which predates 5a), so one number covers them. The WebRTC add-on is built against the change.
-  Removing the deprecated shims (step 6) takes version 6.
+  Removing the deprecated shims (step 6) joined version 5 as well (see the step 6 entry).
 - **`FO3DTransportConfig::Transport` is an `FName` and `Role` an `EO3DTransportRole`** (TRB-27).
   `Transport` holds the registered name ("TCP", "UDP", "NNG", "MoQ", "Loopback", "WebRTC") and
   `Role` the side, `Sender` or `Receiver`. A new constructor takes both:

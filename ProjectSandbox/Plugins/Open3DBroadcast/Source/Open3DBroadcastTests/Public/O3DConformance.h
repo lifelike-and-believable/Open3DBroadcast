@@ -61,8 +61,7 @@ enum class EO3DConformanceCase : uint32
 	SendEmptyPayloadInvalid = 1 << 13,
 	/**
 	 * Sender and receiver GetCapabilities() match the profile's ExpectedCapabilities and the
-	 * registry descriptor's GetCapabilities for the same config; SupportsAudio and SupportsControl
-	 * forward to them (ADR 0007 item 4, WP-A1 PR 3).
+	 * registry descriptor's GetCapabilities for the same config (ADR 0007 item 4, WP-A1 PR 3).
 	 */
 	CapabilitiesMatch = 1 << 14,
 	/**

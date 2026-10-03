@@ -70,7 +70,7 @@ namespace WebRTCConfig
  * secrets are Secret fields: the editor shows a password box that opens empty, a Clear button, a
  * "Remember on this machine" box and a status line, and writes to FO3DSecretStore only (ADR 0004).
  * Their entries are the secret declaration, environment variable included (ADR 0004 item 1, ADR
- * 0007 item 8, WP-A1 PR 5c); the add-on no longer fills SecretOptionKeys or SecretEnvVars.
+ * 0007 item 8, WP-A1 PR 5c).
  */
 namespace WebRTCSchema
 {

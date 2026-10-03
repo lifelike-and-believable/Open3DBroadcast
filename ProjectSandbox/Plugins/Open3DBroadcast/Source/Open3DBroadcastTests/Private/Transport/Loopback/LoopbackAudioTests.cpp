@@ -8,9 +8,8 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Transport/O3DReceiverInterface.h"
-#include "O3DReceiverRegistry.h"
 #include "Transport/O3DSenderInterface.h"
-#include "O3DSenderRegistry.h"
+#include "Transport/O3DTransportRegistry.h"
 
 #include "Misc/AutomationTest.h"
 
@@ -54,8 +53,8 @@ bool FO3DLoopbackAudioRoundTripTest::RunTest(const FString& Parameters)
     Config.Audio.SampleRate = 48000;
     Config.Audio.NumChannels = 2;
 
-    const TSharedPtr<IOpen3DSender> SenderPtr = O3DTransport::CreateSender(LoopbackTransportName);
-    const TSharedPtr<IOpen3DReceiver> ReceiverPtr = O3DTransport::CreateReceiver(LoopbackTransportName);
+    const TSharedPtr<IOpen3DSender> SenderPtr = FO3DTransportRegistry::Get().CreateSender(LoopbackTransportName);
+    const TSharedPtr<IOpen3DReceiver> ReceiverPtr = FO3DTransportRegistry::Get().CreateReceiver(LoopbackTransportName);
     if (!TestTrue(TEXT("Loopback sender and receiver registered"), SenderPtr.IsValid() && ReceiverPtr.IsValid()))
     {
         return false;
@@ -118,7 +117,7 @@ bool FO3DLoopbackAudioQueueOverflowTest::RunTest(const FString& Parameters)
     Config.Audio.NumChannels = 1;
     Config.AdvancedParams.Add(TEXT("loopback.maxaudioqueue"), TEXT("1"));
 
-    const TSharedPtr<IOpen3DSender> SenderPtr = O3DTransport::CreateSender(LoopbackTransportName);
+    const TSharedPtr<IOpen3DSender> SenderPtr = FO3DTransportRegistry::Get().CreateSender(LoopbackTransportName);
     if (!TestTrue(TEXT("Loopback sender registered"), SenderPtr.IsValid()))
     {
         return false;
@@ -153,8 +152,8 @@ bool FO3DLoopbackAudioIndependentTest::RunTest(const FString& Parameters)
     Config.Audio.NumChannels = 1;
     Config.AdvancedParams.Add(TEXT("loopback.maxqueue"), TEXT("1"));
 
-    const TSharedPtr<IOpen3DSender> Sender = O3DTransport::CreateSender(LoopbackTransportName);
-    const TSharedPtr<IOpen3DReceiver> Receiver = O3DTransport::CreateReceiver(LoopbackTransportName);
+    const TSharedPtr<IOpen3DSender> Sender = FO3DTransportRegistry::Get().CreateSender(LoopbackTransportName);
+    const TSharedPtr<IOpen3DReceiver> Receiver = FO3DTransportRegistry::Get().CreateReceiver(LoopbackTransportName);
     if (!TestTrue(TEXT("Loopback registered"), Sender.IsValid() && Receiver.IsValid()))
     {
         return false;

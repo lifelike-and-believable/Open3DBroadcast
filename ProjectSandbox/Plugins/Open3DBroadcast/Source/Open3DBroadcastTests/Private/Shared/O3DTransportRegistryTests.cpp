@@ -8,7 +8,7 @@
 //   unregisters (no pointer into the registry's map, RCV-27).
 // - Lookups on worker threads while the game thread registers and unregisters stay consistent.
 // - The picker list for a role is exactly the set of names that role can instantiate (RCV-28).
-// - The deprecated register functions still work and merge into one descriptor.
+// (WP-A1 step 6 removed the deprecated register functions and their test.)
 //
 // Most cases use a private registry (MakeShared), so they never touch the process-wide one the
 // transports register with. No network.
@@ -24,8 +24,6 @@
 #include "Misc/AutomationTest.h"
 #include "Templates/UniquePtr.h"
 
-#include "O3DSenderRegistry.h"
-#include "O3DSenderTransportCustomization.h"
 #include "O3DTestFakes.h"
 #include "Transport/O3DTransportRegistry.h"
 
@@ -50,7 +48,7 @@ namespace O3DTransportRegistryTest
 		return []() -> TSharedPtr<IOpen3DReceiver, ESPMode::ThreadSafe> { return MakeShared<FO3DFakeReceiver>(); };
 	}
 
-	/** A descriptor named Name with the factories asked for and one sender option. */
+	/** A descriptor named Name with the factories asked for and one sender option, a secret. */
 	FO3DTransportDescriptor MakeDescriptor(FName Name, bool bSender, bool bReceiver)
 	{
 		FO3DTransportDescriptor Descriptor;
@@ -64,12 +62,12 @@ namespace O3DTransportRegistryTest
 		{
 			Descriptor.CreateReceiver = MakeReceiverFactory();
 		}
+		// A Secret entry declares the secret key.
 		FO3DTransportOptionField Field;
-		Field.Key = TEXT("o3dregistrytest.host");
-		Field.DisplayName = FText::FromString(TEXT("Host"));
-		Field.Default = TEXT("127.0.0.1");
+		Field.Key = TEXT("o3dregistrytest.token");
+		Field.DisplayName = FText::FromString(TEXT("Token"));
+		Field.Type = EO3DTransportOptionType::Secret;
 		Descriptor.SenderOptions.OptionSchema.Add(Field);
-		Descriptor.SenderOptions.SecretOptionKeys.Add(TEXT("o3dregistrytest.token"));
 		return Descriptor;
 	}
 
@@ -244,7 +242,6 @@ bool FO3DTransportRegistryDuplicateTest::RunTest(const FString& Parameters)
 	using namespace O3DTransportRegistryTest;
 
 	AddExpectedError(TEXT("a transport with that name is already registered"), EAutomationExpectedMessageFlags::Contains, 1);
-	AddExpectedError(TEXT("Deprecated transport registration call for 'RegistryTestDup' ignored"), EAutomationExpectedMessageFlags::Contains, 1);
 
 	const FRegistryRef Registry = MakeRegistry();
 	const FName Name(TEXT("RegistryTestDup"));
@@ -257,13 +254,6 @@ bool FO3DTransportRegistryDuplicateTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Second registration under the same name is refused"), Second.IsValid());
 	TestTrue(TEXT("The first descriptor keeps the name"), Registry->Find(Name) == FirstDescriptor);
 	TestFalse(TEXT("The refused descriptor's receiver factory is not visible"), Registry->IsRegistered(Name, EO3DTransportRole::Receiver));
-
-	// The deprecated register path cannot change a descriptor owned by a handle.
-	Registry->EditLegacyDescriptor(Name, [](FO3DTransportDescriptor& Descriptor)
-	{
-		Descriptor.CreateReceiver = O3DTransportRegistryTest::MakeReceiverFactory();
-	});
-	TestTrue(TEXT("A legacy edit of a handle-owned name changes nothing"), Registry->Find(Name) == FirstDescriptor);
 
 	// Once the first registration goes, the name is free again, and the old handle cannot remove
 	// the new registration.
@@ -409,23 +399,17 @@ bool FO3DTransportRegistryPickerTest::RunTest(const FString& Parameters)
 	const FName SenderOnly(TEXT("RegistryTestSenderOnly"));
 	const FName ReceiverOnly(TEXT("RegistryTestReceiverOnly"));
 	const FName Both(TEXT("RegistryTestBoth"));
-	const FName OptionsOnly(TEXT("RegistryTestOptionsOnly"));
 
 	FO3DTransportRegistration A = Registry->Register(MakeDescriptor(SenderOnly, true, false));
 	FO3DTransportRegistration B = Registry->Register(MakeDescriptor(ReceiverOnly, false, true));
 	FO3DTransportRegistration C = Registry->Register(MakeDescriptor(Both, true, true));
-	// What a transport that only called the deprecated RegisterTransportCustomization leaves behind:
-	// options without a factory. It used to appear in the picker without being creatable (RCV-28).
-	Registry->EditLegacyDescriptor(OptionsOnly, [](FO3DTransportDescriptor& Descriptor)
-	{
-		Descriptor.SenderOptions.SecretOptionKeys.Add(TEXT("o3dregistrytest.token"));
-	});
-	TestTrue(TEXT("The options-only entry exists"), Registry->Find(OptionsOnly).IsValid());
+	// Every entry has a factory: Register refuses a descriptor without one
+	// (RejectsInvalidDescriptors), so an options-only entry (RCV-28) cannot exist.
 
-	const TArray<FName> AllNames = { SenderOnly, ReceiverOnly, Both, OptionsOnly };
+	const TArray<FName> AllNames = { SenderOnly, ReceiverOnly, Both };
 	// CreateSender/CreateReceiver log a Warning for each name without that factory.
-	AddExpectedError(TEXT("No sender factory registered for transport"), EAutomationExpectedMessageFlags::Contains, 2);
-	AddExpectedError(TEXT("No receiver factory registered for transport"), EAutomationExpectedMessageFlags::Contains, 2);
+	AddExpectedError(TEXT("No sender factory registered for transport"), EAutomationExpectedMessageFlags::Contains, 1);
+	AddExpectedError(TEXT("No receiver factory registered for transport"), EAutomationExpectedMessageFlags::Contains, 1);
 
 	for (const EO3DTransportRole Role : { EO3DTransportRole::Sender, EO3DTransportRole::Receiver })
 	{
@@ -433,7 +417,6 @@ bool FO3DTransportRegistryPickerTest::RunTest(const FString& Parameters)
 		const TArray<FName> Listed = Registry->GetNames(Role);
 		const TArray<FName> Creatable = GetCreatableNames(*Registry, AllNames, Role);
 		TestTrue(*FString::Printf(TEXT("%s picker list equals the creatable set"), RoleName), Listed == Creatable);
-		TestFalse(*FString::Printf(TEXT("%s picker omits the options-only entry"), RoleName), Listed.Contains(OptionsOnly));
 	}
 	TestTrue(TEXT("Sender picker"), Registry->GetNames(EO3DTransportRole::Sender) == TArray<FName>{ Both, SenderOnly });
 	TestTrue(TEXT("Receiver picker"), Registry->GetNames(EO3DTransportRole::Receiver) == TArray<FName>{ Both, ReceiverOnly });
@@ -450,59 +433,6 @@ bool FO3DTransportRegistryPickerTest::RunTest(const FString& Parameters)
 	}
 	TestTrue(TEXT("Loopback is listed for senders"), FO3DTransportRegistry::Get().GetNames(EO3DTransportRole::Sender).Contains(FName(TEXT("Loopback"))));
 	TestTrue(TEXT("Loopback is listed for receivers"), FO3DTransportRegistry::Get().GetNames(EO3DTransportRole::Receiver).Contains(FName(TEXT("Loopback"))));
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DTransportRegistryLegacyTest, "Open3DBroadcast.Shared.TransportRegistry.DeprecatedFunctionsForward", O3DB_TEST_FLAGS)
-bool FO3DTransportRegistryLegacyTest::RunTest(const FString& Parameters)
-{
-	using namespace O3DTransportRegistryTest;
-
-	// Uses the process-wide registry, because that is what the deprecated functions forward to,
-	// under a name unique to this run.
-	const FName Name(*O3DTests::MakeUniqueName(TEXT("O3DRegistryLegacy")));
-	FO3DTransportRegistry& Registry = FO3DTransportRegistry::Get();
-
-	O3DTransport::RegisterSender(Name, MakeSenderFactory());
-	FO3DSenderTransportCustomization Customization;
-	Customization.ConfigureTransport = [](const UO3DSenderComponent*, FO3DTransportConfig& Config)
-	{
-		Config.StreamId = TEXT("legacy-configured");
-	};
-	Customization.SecretOptionKeys.Add(TEXT("o3dregistrylegacy.token"));
-	O3DSender::RegisterTransportCustomization(Name, MoveTemp(Customization));
-
-	// The two calls built one descriptor.
-	const FO3DTransportDescriptorPtr Descriptor = Registry.Find(Name);
-	if (!TestTrue(TEXT("One descriptor for the name"), Descriptor.IsValid()))
-	{
-		O3DTransport::UnregisterSender(Name);
-		O3DSender::UnregisterTransportCustomization(Name);
-		return false;
-	}
-	TestTrue(TEXT("It has the factory"), static_cast<bool>(Descriptor->CreateSender));
-	TestTrue(TEXT("It has the configure function"), static_cast<bool>(Descriptor->ConfigureSender));
-	TestTrue(TEXT("It has the secret key"), Descriptor->SenderOptions.SecretOptionKeys.Contains(TEXT("o3dregistrylegacy.token")));
-	TestTrue(TEXT("Listed through the deprecated list function"), O3DTransport::GetRegisteredSenders().Contains(Name));
-	TestTrue(TEXT("Listed through the registry"), Registry.GetNames(EO3DTransportRole::Sender).Contains(Name));
-	TestTrue(TEXT("Created through the deprecated create function"), O3DTransport::CreateSender(Name).IsValid());
-
-	const FO3DSenderTransportCustomization* Found = O3DSender::FindTransportCustomization(Name);
-	if (TestNotNull(TEXT("Deprecated find returns the sender part"), Found))
-	{
-		FO3DTransportConfig Config;
-		Found->ConfigureTransport(nullptr, Config);
-		TestEqual(TEXT("Its configure function is the registered one"), Config.StreamId, FString(TEXT("legacy-configured")));
-	}
-
-	// Removing the factory keeps the entry (it still has options) but takes it out of the picker.
-	O3DTransport::UnregisterSender(Name);
-	TestTrue(TEXT("Entry kept while it has a configure function"), Registry.Find(Name).IsValid());
-	TestFalse(TEXT("Not listed without a factory"), Registry.GetNames(EO3DTransportRole::Sender).Contains(Name));
-
-	O3DSender::UnregisterTransportCustomization(Name);
-	TestFalse(TEXT("Entry removed once empty"), Registry.Find(Name).IsValid());
-	TestNull(TEXT("Deprecated find returns null afterwards"), O3DSender::FindTransportCustomization(Name));
 	return true;
 }
 

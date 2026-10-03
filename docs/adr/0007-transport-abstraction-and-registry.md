@@ -508,3 +508,59 @@ Docs (WP-D3): the threading tables above go into `docs/transports.md`.
   - `Open3DBroadcast.Transport.WebRTC.Secrets.SchemaEntriesCarryEnvVars`.
 
   Existing tests changed only where TRB-27 forced it: their configs set the registered name and an `EO3DTransportRole`, and log lines print `Transport.ToString()`. No assertion changed.
+
+## Addendum: implementation notes (WP-A1 step 6, 2026-10-03)
+
+- **Status:** the migration shims of item 9 are removed. WP-A1 is complete. The only deviation is the timing below; the rest of the Decision is unchanged.
+- **Deviation from item 9 and open question 5: removed now, not one release later.** Item 9 keeps the shims for one release and deletes them in the release after. Open question 5's accepted default is "removed in the next minor release with an API version bump".
+  - The maintainer decided, through the coordinator, on 2026-10-03, to remove them in the current, unreleased cycle. Their stated reasons: no release has shipped the shims, and "there are no third-party add-ons or projects building from this codebase".
+  - So nobody is left for the shims to serve. The only add-on, Open3DBroadcastWebRTC, lives in this repository and is built against the change.
+- **Interface version stays 5.** The bump rule exists so that an add-on built against another version refuses to load. Version 5 has not been released:
+  - the last tag is v0.9.6 (2026-07-25), and the GitHub releases list it as the latest;
+  - no tag contains 5a's merge, c98c92c (`git tag --contains c98c92c` prints nothing);
+  - the CHANGELOG lists 5a, 5b and 5c under Unreleased.
+
+  As with 5b and 5c, step 6 joins version 5. Open question 5's "with an API version bump" is therefore not needed: no released interface changes.
+- **Removed, each with its replacement** (the full list, with header paths, is the CHANGELOG's "Removed" section):
+  - `O3DTransport::RegisterSender`, `UnregisterSender`, `CreateSender`, `GetRegisteredSenders`, and the receiver counterparts. Use `FO3DTransportRegistry::Register` with one descriptor, then `CreateSender`/`CreateReceiver` and `GetNames(Role)`.
+  - `FO3DSenderTransportCustomization` and `FO3DReceiverTransportCustomization`, with these functions:
+    - `RegisterTransportCustomization` and `UnregisterTransportCustomization`;
+    - `FindTransportCustomization` (and the caches behind its raw pointers);
+    - `GetRegisteredTransportNames`, `GetTransportSecretDeclaration` and `GetTransportOptionSchema`.
+
+    Use the descriptor's `ConfigureSender`/`ConfigureReceiver` and `SenderOptions`/`ReceiverOptions`, and the registry's `Find`, `GetNames`, `GetSecretDeclaration` and `GetOptionSchema`. The receiver's secret and switching helpers keep their header, `O3DReceiverTransportCustomization.h`.
+  - `O3DSenderLegacyShims::FScopedConfiguringComponent` and `O3DReceiverLegacyShims::FScopedConfiguringSettings`, the thread-local scopes that handed a legacy configure function the component or settings. Configure functions take only the options view (PR 5a).
+  - `FO3DTransportRegistry::EditLegacyDescriptor`. Its only users were the shims and tests that used it as setup. Every registry entry now comes from `Register`, so an entry always has a factory, and the "legacy entry" state, the options-only entry (RCV-28), no longer exists.
+  - `FO3DTransportRoleOptions::SecretOptionKeys` and `SecretEnvVars`. After PR 5c moved WebRTC to `Secret` schema entries, only the customizations and tests filled them. A `Secret` entry and its `SecretEnvVar` are now the only declaration (ADR 0004 item 1's "typed secret fields replace this list", completed). `GetSecretDeclaration` lists the entries in schema order, each key once.
+  - `SupportsAudio()` and `SupportsControl()` on both interfaces, the non-virtual forwarders PR 3 kept. Use `GetCapabilities()`: `bAudioSend` or `bAudioReceive`, and `bControl`.
+  - The forwarding headers:
+    - `Open3DSender/Public/O3DSenderInterface.h`, `O3DSenderAudioSinkBase.h` and `Testing/O3DLifetimeTestUtils.h`;
+    - `Open3DReceiver/Public/O3DReceiverInterface.h`;
+    - `Open3DShared/Public/O3DTransportTypes.h` and `SerializedFrameConsumerRegistry.h`.
+- **No behaviour change.** Every in-repo caller was migrated first, and each migration is mechanical (same function behind a new name). The hosts' configure call is the same, minus the scope. ADR 0004 is unaffected:
+  - every secret decision already went through `GetSecretDeclaration`;
+  - the store, resolution order, persistence and redaction are unchanged;
+  - the migration of secrets found in saved data (`MigrateLegacySecretOptions`, PostLoad, connection strings) still works, because it reads that same declaration.
+- **Saved data:** none of the removed types was a UPROPERTY or saved anywhere, and no option key changed.
+- **Tests.**
+  - Deleted, because they tested only removed API:
+    - `Open3DBroadcast.Shared.TransportRegistry.DeprecatedFunctionsForward`
+    - `Open3DBroadcast.Sender.TypedConfig.DeprecatedConfigureGetsComponent`
+    - `Open3DBroadcast.Receiver.TypedConfig.DeprecatedConfigureGetsSettings`
+  - Assertions about removed API were dropped from tests that otherwise stay:
+    - the legacy edit in `DuplicateNameKeepsFirst`;
+    - the options-only entry in `PickersListCreatableSet`, which `RejectsInvalidDescriptors` now covers;
+    - the "SupportsX forwards" checks in the conformance `CapabilitiesMatch` case and in `WebRTC.Capabilities.DeliveryFollowsPreferLossy`, whose capabilities are still asserted;
+    - the "deprecated lists are empty" checks in `WebRTC.Secrets.SchemaEntriesCarryEnvVars`;
+    - the merge-with-lists rules in `Shared.OptionSchema.SecretEntryCarriesEnvVar`, now schema-only rules.
+  - Tests that used the shims as setup now register a descriptor with a fake factory, and declare their secrets with `Secret` entries. Their assertions are unchanged. They are:
+    - the sender and receiver typed-config and transport-switch tests;
+    - the WP-S9 secrets tests;
+    - the options-panel tests;
+    - the registry tests' `MakeDescriptor`.
+  - No new test was needed: no behaviour path that something still relies on was removed.
+- **What is left after WP-A1** (HANDOFF §2):
+  - MoQ's own reconnect backoff;
+  - the synchronous WebRTC sender;
+  - the UDP pause hook not waiting for the worker;
+  - schema features no built-in transport uses yet: `Validate` for host/port fields, `Float` for `webrtc.reconnect_timeout`, and `bRestartOnChange`.

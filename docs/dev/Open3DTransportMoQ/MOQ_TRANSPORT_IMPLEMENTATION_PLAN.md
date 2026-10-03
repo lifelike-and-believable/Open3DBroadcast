@@ -1164,7 +1164,7 @@ moq-relay-ietf/                            [Deployed separately]
 
 **If audio sync fails:**
 - Ship without audio initially, add in follow-up PR
-- Audio is optional (SupportsAudio() = false is valid)
+- Audio is optional (`GetCapabilities().bAudioSend = false` is valid)
 
 **If standards compliance is blocking:**
 - Ship with best-effort MoQ compatibility

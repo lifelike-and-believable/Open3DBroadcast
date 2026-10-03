@@ -3,9 +3,8 @@
 // WP-A1 PR 5c (ADR 0007 item 8, the rest of step 5; TRB-27, ADR 0004):
 // - FO3DTransportConfig carries the registered transport name (FName) and the side
 //   (EO3DTransportRole); the hosts and the built-in transports' configure functions set both.
-// - A Secret schema entry declares its key secret and carries its environment variable; the
-//   deprecated SecretOptionKeys and SecretEnvVars still count. Redaction and persistence are as
-//   ADR 0004 says.
+// - A Secret schema entry declares its key secret and carries its environment variable (the only
+//   secret declaration since WP-A1 step 6). Redaction and persistence are as ADR 0004 says.
 // - A Float field's Min and Max bound FO3DTransportOptionsView::GetDouble.
 // - A field's Validate refuses options with InvalidConfig, before the sender component or the
 //   receiver source creates the transport.
@@ -145,7 +144,7 @@ bool FO3DTransportSchemaSecretEnvVarTest::RunTest(const FString& Parameters)
 {
 	using namespace O3DTransportSchemaTest;
 
-	// The declaration: Secret entries first, with their env var; the deprecated lists after.
+	// The declaration: the Secret entries, in schema order, each key once, with their env var.
 	{
 		FO3DTransportRoleOptions Options;
 		FO3DTransportOptionField Token = MakeField(TEXT("schematest.token"), EO3DTransportOptionType::Secret);
@@ -154,23 +153,20 @@ bool FO3DTransportSchemaSecretEnvVarTest::RunTest(const FString& Parameters)
 		FO3DTransportOptionField Other = MakeField(TEXT("schematest.other"), EO3DTransportOptionType::Secret);
 		Options.OptionSchema.Add(Other);
 		Options.OptionSchema.Add(MakeField(TEXT("schematest.url"), EO3DTransportOptionType::Url));
-		// Deprecated inputs: a duplicate in another case, an env var the entry overrides, a key of their own.
-		Options.SecretOptionKeys = { TEXT("SchemaTest.Token"), TEXT("schematest.legacy") };
-		Options.SecretEnvVars.Add(TEXT("schematest.token"), TEXT("O3DB_SCHEMATEST_OLD"));
-		Options.SecretEnvVars.Add(TEXT("schematest.other"), TEXT("O3DB_SCHEMATEST_OTHER"));
-		Options.SecretEnvVars.Add(TEXT("schematest.legacy"), TEXT("O3DB_SCHEMATEST_LEGACY"));
+		// A second entry for the first key, in another case: counted once, the first entry's variable kept.
+		FO3DTransportOptionField Duplicate = MakeField(TEXT("SchemaTest.Token"), EO3DTransportOptionType::Secret);
+		Duplicate.SecretEnvVar = TEXT("O3DB_SCHEMATEST_OLD");
+		Options.OptionSchema.Add(Duplicate);
 
 		TArray<FString> Keys;
 		TMap<FString, FString> EnvVars;
 		Options.GetSecretDeclaration(Keys, EnvVars);
-		TestEqual(TEXT("Three secret keys (the duplicate counted once)"), Keys.Num(), 3);
+		TestEqual(TEXT("Two secret keys (the duplicate counted once)"), Keys.Num(), 2);
 		TestTrue(TEXT("The entry's key"), Keys.Contains(TEXT("schematest.token")));
 		TestTrue(TEXT("The second entry's key"), Keys.Contains(TEXT("schematest.other")));
-		TestTrue(TEXT("The deprecated list's own key"), Keys.Contains(TEXT("schematest.legacy")));
 		TestFalse(TEXT("A non-Secret entry is not secret"), Keys.Contains(TEXT("schematest.url")));
-		TestEqual(TEXT("The entry's env var wins"), EnvVars.FindRef(TEXT("schematest.token")), FString(TEXT("O3DB_SCHEMATEST_TOKEN")));
-		TestEqual(TEXT("An entry without one falls back to SecretEnvVars"), EnvVars.FindRef(TEXT("schematest.other")), FString(TEXT("O3DB_SCHEMATEST_OTHER")));
-		TestEqual(TEXT("The deprecated key keeps its env var"), EnvVars.FindRef(TEXT("schematest.legacy")), FString(TEXT("O3DB_SCHEMATEST_LEGACY")));
+		TestEqual(TEXT("The entry's env var"), EnvVars.FindRef(TEXT("schematest.token")), FString(TEXT("O3DB_SCHEMATEST_TOKEN")));
+		TestFalse(TEXT("An entry without one has no env var"), EnvVars.Contains(TEXT("schematest.other")));
 	}
 
 	// Through the registry, with only a schema entry: the env var resolves from the entry.

@@ -6,8 +6,8 @@
 // tests. Header-only. It lives in Open3DShared, not in Open3DBroadcastTests, because the WebRTC
 // add-on's tests (Open3DBroadcastWebRTC plugin, WP-F11) live in its Runtime module and include
 // it, and the Fab package has no Open3DBroadcastTests to depend on (ADR 0006). It uses only
-// Open3DShared types; WP-A1 PR 5a moved it here from Open3DSender (which keeps a forwarding
-// header, Testing/O3DLifetimeTestUtils.h), so the add-on needs no Open3DSender dependency.
+// Open3DShared types; WP-A1 PR 5a moved it here from Open3DSender, so the add-on needs no
+// Open3DSender dependency.
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "CoreMinimal.h"
