@@ -124,17 +124,23 @@ jobs:
         run: |
           git fetch --no-tags --depth=1 origin "$BASELINE"
           git worktree add --detach "$RUNNER_TEMP/baseline" "$BASELINE"
-          cmake -S "$RUNNER_TEMP/baseline/src" -B "$RUNNER_TEMP/baseline-build" -G Ninja             -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/usr"             -DO3DS_DISABLE_WEBRTC=ON -DO3DS_VERSION_TAG=1.0.4
+          cmake -S "$RUNNER_TEMP/baseline/src" -B "$RUNNER_TEMP/baseline-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/usr" \
+            -DO3DS_DISABLE_WEBRTC=ON -DO3DS_VERSION_TAG=1.0.4
           cmake --build "$RUNNER_TEMP/baseline-build" --target open3dstreamstatic
-          g++ -std=c++17 -O2 -DCRCPP_USE_NAMESPACE -DNNG_STATIC_LIB             -I"$RUNNER_TEMP/baseline/src" -I"$RUNNER_TEMP/baseline-build/_generated" -I"$RUNNER_TEMP/usr/include"             test/compat/compat_tool.cpp "$RUNNER_TEMP/baseline-build/libopen3dstreamstatic.a"             -L"$RUNNER_TEMP/usr/lib" -lnng -lpthread -o "$RUNNER_TEMP/compat_tool_baseline"
+          g++ -std=c++17 -O2 -DCRCPP_USE_NAMESPACE -DNNG_STATIC_LIB \
+            -I"$RUNNER_TEMP/baseline/src" -I"$RUNNER_TEMP/baseline-build/_generated" -I"$RUNNER_TEMP/usr/include" \
+            test/compat/compat_tool.cpp "$RUNNER_TEMP/baseline-build/libopen3dstreamstatic.a" \
+            -L"$RUNNER_TEMP/usr/lib" -lnng -lpthread -o "$RUNNER_TEMP/compat_tool_baseline"
           mkdir -p "$RUNNER_TEMP/frames"
           build/test/o3ds_compat_tool write "$RUNNER_TEMP/frames"
           "$RUNNER_TEMP/compat_tool_baseline" read "$RUNNER_TEMP/frames" | tee "$RUNNER_TEMP/old-reader.txt"
-          printf 'full ok
-delta ok
-quantized rejected: Invalid data structure
-residual rejected: Invalid data structure
-' > "$RUNNER_TEMP/expected.txt"
+          {
+            echo "full ok"
+            echo "delta ok"
+            echo "quantized rejected: Invalid data structure"
+            echo "residual rejected: Invalid data structure"
+          } > "$RUNNER_TEMP/expected.txt"
           if ! diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/old-reader.txt"; then
             echo "::error::The baseline reader did not read this writer's frames as ADR 0009 item 11 requires (plain frames parsed, quantized and residual rejected)."
             exit 1
