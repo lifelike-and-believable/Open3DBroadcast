@@ -21,8 +21,8 @@
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "UObject/Package.h"
 #include "UObject/WeakObjectPtrTemplates.h"
-#include "AudioCaptureCore.h"
 #include "O3DAudioFrameCodec.h"
+#include "O3DAudioInputDevices.h"
 
 THIRD_PARTY_INCLUDES_START
 #include "o3ds/sender_sync.h"
@@ -238,7 +238,16 @@ void UO3DSenderComponent::StartCapture()
 		CurveProcessor->Reset();
 	}
 
+	// ADR 0008 item 8 (SND-18): enumerate the capture devices once per start, before the device
+	// index is resolved (transport config and capture config both read the cache).
+	if (bEnableAudio && AudioCaptureMode == EO3DSenderCaptureMode::Input)
+	{
+		FO3DAudioInputDevices::Get().Refresh();
+	}
+
 	InitializeTransport();
+	// Configures the capture component and opens the device once per start (SND-18), then binds
+	// the started transport's sink, if any.
 	UpdateAudioCaptureBinding();
 
 	BindToTarget();
@@ -385,9 +394,9 @@ void UO3DSenderComponent::InitializeTransport()
 
 	// Note: tick enablement is driven by StartCapture() based on bIsCapturing, not by transport
 	// start success here, so pose capture still runs for externally-managed transports and even
-	// when auto-transport creation fails.
+	// when auto-transport creation fails. StartCapture binds the audio sink right after this
+	// returns; binding it here as well opened the capture device twice per start (SND-18).
 
-	UpdateAudioCaptureBinding();
 	StartControl();
 	UE_LOG(LogO3DSenderComponent, Log, TEXT("Auto transport '%s' initialized."), *TransportController->GetConfig().Transport.ToString());
 }
@@ -472,17 +481,13 @@ bool UO3DSenderComponent::WaitForPipelineIdle(double TimeoutSeconds) const
 
 TArray<FName> UO3DSenderComponent::GetAvailableAudioInputDeviceOptions() const
 {
-	TArray<FName> Options;
-	Audio::FAudioCapture Temp;
-	TArray<Audio::FCaptureDeviceInfo> Devices;
-	if (Temp.GetCaptureDevicesAvailable(Devices) > 0)
-	{
-		for (const Audio::FCaptureDeviceInfo& Info : Devices)
-		{
-			Options.Add(FName(*Info.DeviceName));
-		}
-	}
-	return Options;
+	// The cached list (ADR 0008 item 8): a GetOptions callback never enumerates.
+	return FO3DAudioInputDevices::Get().GetNames();
+}
+
+void UO3DSenderComponent::RefreshAudioInputDevices()
+{
+	FO3DAudioInputDevices::Get().Refresh();
 }
 
 TArray<FName> UO3DSenderComponent::GetAvailableAudioCodecOptions() const
@@ -697,25 +702,7 @@ void UO3DSenderComponent::SyncAudioConfigSource()
 
 int32 UO3DSenderComponent::ResolveAudioDeviceIndex(const FName& DeviceName) const
 {
-	if (DeviceName.IsNone())
-	{
-		return -1;
-	}
-
-	Audio::FAudioCapture Temp;
-	TArray<Audio::FCaptureDeviceInfo> Devices;
-	if (Temp.GetCaptureDevicesAvailable(Devices) > 0)
-	{
-		for (int32 Index = 0; Index < Devices.Num(); ++Index)
-		{
-			if (Devices[Index].DeviceName.Equals(DeviceName.ToString(), ESearchCase::IgnoreCase))
-			{
-				return Index;
-			}
-		}
-	}
-
-	return -1;
+	return FO3DAudioInputDevices::Get().FindIndex(DeviceName);
 }
 
 FString UO3DSenderComponent::GetTransportOption(const FString& Key) const

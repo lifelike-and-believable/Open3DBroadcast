@@ -684,6 +684,51 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Sender audio on the sender clock; capture devices enumerated once per start (WP-A2d, ADR 0008 outline item 5)
+
+Fourth step of the asynchronous sender (WP-A2). Audio still does not go through the pose pipeline.
+The interface version (`O3D_TRANSPORT_API_VERSION`) stays 5: the transport interface did not
+change.
+
+- **One clock for pose and audio (SND-17, ADR 0008 item 7, ADR 0009 item 7).** Audio timestamps
+  used to be on the audio source's own clock: the mixer's `AudioClock` (seconds since audio
+  rendering started) for the submix tap, the device's stream time for the microphone. They are now
+  on the sender clock (`FPlatformTime::Seconds()`), the clock pose frames are stamped with, so a
+  receiver can line audio up with the pose. Each capture stream maps its clock with
+  `FO3DAudioClockMapper` (new public header): the offset is set by the first buffer, follows
+  device drift through a low-pass filter (5 s time constant), and is reset when the source clock
+  jumps by more than 100 ms (at once when it goes backwards or gets ahead of the sender clock;
+  after 0.5 s when it falls behind, so one late callback does not move the stamps). The stamp
+  includes the mean delivery delay (about one buffer) as a constant bias. **Behaviour change:** the
+  audio envelope's `timestamp_us` now carries sender-clock time; receivers did not use it to align
+  anything yet. `UO3DSenderAudioCaptureComponent::PushFrames` passes its timestamp through
+  unchanged; callers give it on the sender clock.
+- **Capture devices enumerated once per start (SND-18, ADR 0008 item 8).** Device enumeration used
+  to run on construction, load, register, `BeginPlay` and twice per `StartCapture`, and every time
+  the Details panel asked for the device list. It now runs into one cached list
+  (`FO3DAudioInputDevices`, new public header): once per `StartCapture` that captures from an input
+  device, once in the editor after engine init, and on request
+  (`UO3DSenderComponent::RefreshAudioInputDevices`, Blueprint-callable, or the console command
+  `o3d.Sender.Audio.RefreshDevices`, which also logs the list). The device pickers and the
+  name-to-index lookups read the cache. After plugging in a microphone while the editor is open,
+  refresh to see it in the picker.
+- **The capture device is opened once per start.** `StartCapture` used to configure the audio
+  capture component twice (once after the transport started, once more after), closing and opening
+  the microphone each time, and a capture component created during play opened the default device
+  in its `BeginPlay` as well. It now opens the device once per start; the capture component's
+  `BeginPlay` opens it only when a sink is already bound, and binding a sink later opens it if
+  nothing has tried to since the capture last started (a failed open is not retried until the next
+  start).
+- **Tests.** New `Open3DBroadcast.Sender.AudioClock.MapsOntoSenderClock`, `.DriftDoesNotAccumulate`,
+  `.JitterBarelyMovesStamps`, `.DiscontinuitiesReset` (a hitch, a restarted and a leaping source
+  clock, a lasting offset change; stamps never go backwards), and
+  `Open3DBroadcast.Sender.AudioDevices.LookupsReadTheCache`, `.StartEnumeratesAndOpensOnce` (a
+  fake device list; one enumeration and one device open per Input start, none in Mix) and
+  `.SinkBindOpensAtMostOnce` (in a game world: binding and rebinding a sink after a start, or on a
+  standalone capture component, opens the device at most once). Existing
+  tests are unchanged, except that a port helper in `SocketsLifetimeTests.cpp` was renamed: the
+  new files regrouped the unity build and its name collided with another file's.
+
 ### Sender pose pipeline: serialization and sends leave the game thread (WP-A2c, ADR 0008 outline item 4)
 
 Third step of the asynchronous sender (WP-A2). The interface version (`O3D_TRANSPORT_API_VERSION`)
