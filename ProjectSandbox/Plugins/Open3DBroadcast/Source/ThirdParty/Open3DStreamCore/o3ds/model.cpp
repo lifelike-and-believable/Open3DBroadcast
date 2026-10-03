@@ -688,7 +688,8 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		return s;
 	}
 
-	flatbuffers::Offset<O3DS::Data::SubjectUpdate> Subject::SerializeUpdate(flatbuffers::FlatBufferBuilder& builder, size_t &count, double deltaThreshold, const QuantRanges* quantRanges)
+	flatbuffers::Offset<O3DS::Data::SubjectUpdate> Subject::SerializeUpdate(flatbuffers::FlatBufferBuilder& builder, size_t &count, double deltaThreshold, const QuantRanges* quantRanges,
+		uint64_t refSeq)
 	{
 		auto oSubjectName = builder.CreateString(this->mName);
 
@@ -861,16 +862,17 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		return CreateSubjectUpdate(builder, oSubjectName, tr, ro, sc, cu,
 			/*predictor_id*/0, /*is_keyframe*/false,
 			byteRangeOut, halfRangeOut,
-			trQ8, trQ16, roQ8, roQ16, /*curves_q8*/0, /*curves_q16*/0);
+			trQ8, trQ16, roQ8, roQ16, /*curves_q8*/0, /*curves_q16*/0, refSeq);
 	}
 
-	flatbuffers::Offset<O3DS::Data::SubjectUpdate> Subject::SerializeUpdateResidual(flatbuffers::FlatBufferBuilder& builder, size_t& count, double deltaThreshold, double t, uint64_t seq)
+	flatbuffers::Offset<O3DS::Data::SubjectUpdate> Subject::SerializeUpdateResidual(flatbuffers::FlatBufferBuilder& builder, size_t& count, double deltaThreshold, double t, uint64_t seq,
+		uint64_t refSeq)
 	{
 		if (!mResidualEncoder)
 		{
 			// No encoder configured for this subject - behave exactly like
 			// the legacy path (predictor_id defaults to 0/None on the wire).
-			return SerializeUpdate(builder, count, deltaThreshold);
+			return SerializeUpdate(builder, count, deltaThreshold, nullptr, refSeq);
 		}
 
 		const PoseSample actual = ToPoseSample(t, seq);
@@ -997,7 +999,10 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		auto cu = builder.CreateVectorOfStructs(curveUpdates);
 
 		return CreateSubjectUpdate(builder, oSubjectName, tr, ro, sc, cu,
-			static_cast<uint32_t>(mResidualEncoder->Id()), isKeyframe);
+			static_cast<uint32_t>(mResidualEncoder->Id()), isKeyframe,
+			/*quant_byte_range*/0.0f, /*quant_half_range*/0.0f,
+			/*translations_q8*/0, /*translations_q16*/0, /*rotations_q8*/0, /*rotations_q16*/0,
+			/*curves_q8*/0, /*curves_q16*/0, refSeq);
 	}
 
 	int Subject::Serialize(std::vector<char> &outbuf, double timestamp,
@@ -1021,7 +1026,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 	}
 
 	int Subject::SerializeUpdate(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp, const QuantRanges* quantRanges,
-		uint64_t tx_seq, uint64_t tx_wallclock_us, uint32_t frame_epoch)
+		uint64_t tx_seq, uint64_t tx_wallclock_us, uint32_t frame_epoch, uint64_t ref_seq)
 	{
 		if (timestamp == 0.0)
 		{
@@ -1031,7 +1036,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		flatbuffers::FlatBufferBuilder& builder = ReusableBuilder();
 
 		std::vector<flatbuffers::Offset<O3DS::Data::SubjectUpdate>> outSubjectUpdates;
-		outSubjectUpdates.push_back(this->SerializeUpdate(builder, count, deltaThreshold, quantRanges));
+		outSubjectUpdates.push_back(this->SerializeUpdate(builder, count, deltaThreshold, quantRanges, ref_seq));
 
 		auto ovSubjectUpdates = builder.CreateVector(outSubjectUpdates);
 
@@ -1043,7 +1048,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 	}
 
 	int Subject::SerializeUpdateResidual(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp, uint64_t seq,
-		uint64_t tx_wallclock_us, uint32_t frame_epoch)
+		uint64_t tx_wallclock_us, uint32_t frame_epoch, uint64_t ref_seq)
 	{
 		if (timestamp == 0.0)
 		{
@@ -1053,7 +1058,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		flatbuffers::FlatBufferBuilder& builder = ReusableBuilder();
 
 		std::vector<flatbuffers::Offset<O3DS::Data::SubjectUpdate>> outSubjectUpdates;
-		outSubjectUpdates.push_back(this->SerializeUpdateResidual(builder, count, deltaThreshold, timestamp, seq));
+		outSubjectUpdates.push_back(this->SerializeUpdateResidual(builder, count, deltaThreshold, timestamp, seq, ref_seq));
 
 		auto ovSubjectUpdates = builder.CreateVector(outSubjectUpdates);
 
@@ -1242,7 +1247,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 	}
 
 	bool SubjectList::Parse(const char *data, size_t len, TransformBuilder *builder, bool clearInactive,
-		std::vector<ParsedSubjectInfo>* outTouched)
+		std::vector<ParsedSubjectInfo>* outTouched, const ParseContext* context)
 	{
 		mError = "";
 		if (outTouched)
@@ -1304,6 +1309,35 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		}
 
 		this->mTime = root->time();
+
+		// ADR 0005 (ix): sync state applies to sequenced frames only.
+		const bool sequenced = (context != nullptr && context->tx_seq != 0);
+		if (sequenced)
+		{
+			// A new session: no full Subject of the old epoch is a valid
+			// reference any more.
+			if (!mHaveSyncEpoch || context->frame_epoch != mSyncEpoch)
+			{
+				mHaveSyncEpoch = true;
+				mSyncEpoch = context->frame_epoch;
+				for (Subject* subject : this->mItems)
+				{
+					subject->mSyncRef = 0;
+					subject->mAwaitingFullSync = false;
+				}
+			}
+			// A frame of this stream was lost: residual history may differ
+			// from the sender's for any subject, so residual updates wait
+			// for a full Subject (a residual keyframe does not reset the
+			// predictor history on either end).
+			if (context->gap_before)
+			{
+				for (Subject* subject : this->mItems)
+				{
+					subject->mAwaitingFullSync = true;
+				}
+			}
+		}
 
 		if (subjects_data)
 		{
@@ -1373,7 +1407,17 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 				}
 				// ParseSubject skips a nameless subject without an error.
 				if (inSubject->name() != nullptr)
+				{
 					markTouched(inSubject->name()->str(), true);
+					if (sequenced)
+					{
+						if (Subject* parsed = this->findSubject(inSubject->name()->str()))
+						{
+							parsed->mSyncRef = context->tx_seq;
+							parsed->mAwaitingFullSync = false;
+						}
+					}
+				}
 			}
 			deleteSpare();
 		}
@@ -1390,6 +1434,22 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 				// same SubjectList are fine - this is a per-update, not
 				// per-buffer, decision.
 				auto inUpdate = updates_data->Get(i);
+				// ADR 0005 (ix): an update relative to a full Subject this
+				// list did not apply, or a residual update after a gap, is
+				// dropped, not an error. ref_seq 0 (unset) applies as before.
+				if (sequenced && inUpdate->ref_seq() != 0 && inUpdate->name() != nullptr)
+				{
+					if (const Subject* target = this->findSubject(inUpdate->name()->str()))
+					{
+						const bool refMatches = (inUpdate->ref_seq() == target->mSyncRef);
+						const bool residualBlocked = (inUpdate->predictor_id() != 0) && target->mAwaitingFullSync;
+						if (!refMatches || residualBlocked)
+						{
+							++mUpdatesDroppedUnsynced;
+							continue;
+						}
+					}
+				}
 				const bool applied = (inUpdate->predictor_id() != 0)
 					? this->ParseUpdateResidual(inUpdate, builder)
 					: this->ParseUpdate(inUpdate, builder);
@@ -1785,15 +1845,21 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			// First residual frame for this subject, or the sender
 			// switched predictors mid-stream - (re)construct a matching
 			// decoder. It has no history yet, so BeginFrame() below
-			// safely falls back to a zero/identity reference regardless
-			// of what is_keyframe says (see ResidualDecoder's own doc
-			// comment), same fallback contract as a fresh encoder.
+			// accepts only a keyframe (CORE-6).
 			auto newDecoder = std::make_unique<ResidualDecoder>(wireId);
 			decoder = newDecoder.get();
 			outSubject->SetResidualDecoder(std::move(newDecoder));
 		}
 
-		decoder->BeginFrame(inUpdate->is_keyframe(), this->mTime);
+		if (!decoder->BeginFrame(inUpdate->is_keyframe(), this->mTime))
+		{
+			// CORE-6: no history to predict from (a fresh decoder, or a
+			// receiver that joined mid-stream) and the update is not a
+			// keyframe. Reconstructing against a zero reference would apply
+			// garbage; drop it and wait for a keyframe or a full Subject.
+			++mUpdatesDroppedUnsynced;
+			return false;
+		}
 		const PoseSample& reference = decoder->Reference();
 
 		const size_t refTransCount = reference.translations.size();

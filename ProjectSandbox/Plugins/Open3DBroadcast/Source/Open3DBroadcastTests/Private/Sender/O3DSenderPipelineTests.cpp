@@ -376,6 +376,50 @@ bool FO3DSenderPipelineRefusedFullSyncTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ADR 0005 (ix): a residual update the transport refuses leaves a sequence gap, and a receiver
+// holds the subject until the next full Subject, so the next frame is one. A refused quantized
+// update stays applicable across the gap and changes nothing.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderPipelineRefusedResidualTest, "Open3DBroadcast.Sender.Pipeline.RefusedResidualUpdateForcesFullSync", O3DB_TEST_FLAGS)
+bool FO3DSenderPipelineRefusedResidualTest::RunTest(const FString& Parameters)
+{
+	using namespace O3DSenderPipelineTests;
+	const TSharedPtr<const FO3DSSkeletonDescriptor> Descriptor = MakeThreeBoneDescriptor();
+
+	for (const EO3DSenderEncodingMode Mode : { EO3DSenderEncodingMode::Residual, EO3DSenderEncodingMode::Quantized })
+	{
+		const bool bResidual = (Mode == EO3DSenderEncodingMode::Residual);
+		const TCHAR* ModeName = bResidual ? TEXT("Residual") : TEXT("Quantized");
+		const FString Subject = ModeName;
+		FO3DSenderPipelineProbe Probe;
+		Probe.Start(false);
+		const TSharedRef<FScriptedSender> Transport = MakeShared<FScriptedSender>();
+		Probe.AttachSender(Transport);
+
+		for (int32 Index = 0; Index < 4; ++Index)
+		{
+			// Frame 1, the first update, is refused.
+			Transport->SetRefuseNext(Index == 1 ? 1 : 0);
+			TUniquePtr<FO3DSPoseFrame> Frame = MakeProbeFrame(Probe, Subject, Descriptor, 10.0 + Index / 60.0);
+			if (Frame.IsValid())
+			{
+				Frame->Encoding.Mode = Mode;
+			}
+			Probe.SubmitFrame(MoveTemp(Frame));
+			TestTrue(TEXT("Drained"), Probe.WaitForIdle(WaitTimeoutSeconds));
+		}
+
+		const TArray<FRecordedPayload> Sent = Transport->GetRecorded();
+		if (TestEqual(*FString::Printf(TEXT("%s: four payloads"), ModeName), Sent.Num(), 4))
+		{
+			TestTrue(*FString::Printf(TEXT("%s: a full sync, then the refused update"), ModeName), Sent[0].bFullSync && !Sent[1].bFullSync);
+			TestEqual(*FString::Printf(TEXT("%s: the frame after the refused update is a full sync only in residual mode"), ModeName), Sent[2].bFullSync, bResidual);
+			TestFalse(*FString::Printf(TEXT("%s: then updates again"), ModeName), Sent[3].bFullSync);
+		}
+		Probe.DetachSender();
+	}
+	return true;
+}
+
 // ADR 0008 item 10: Stop discards the frames still waiting (it does not wait for them or the
 // network), and control items keep their place: the first frame after Stop and Start is a full sync.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderPipelineStopDiscardsTest, "Open3DBroadcast.Sender.Pipeline.StopDiscardsQueuedFrames", O3DB_TEST_FLAGS)

@@ -101,13 +101,13 @@ namespace O3DS
 	{
 	}
 
-	void ResidualDecoder::BeginFrame(bool incomingIsKeyframe, double t)
+	bool ResidualDecoder::BeginFrame(bool incomingIsKeyframe, double t)
 	{
 		if (incomingIsKeyframe)
 		{
 			mIsKeyframe = true;
 			mReference = PoseSample();
-			return;
+			return true;
 		}
 
 		PoseSample predicted;
@@ -115,16 +115,17 @@ namespace O3DS
 		{
 			// Sender thought a residual was safe, but this decoder's own
 			// history doesn't support a prediction yet (e.g. just Reset(),
-			// or joined mid-stream) - fall back to a zero/identity
-			// reference for this one frame rather than reconstructing
-			// against garbage. The next real keyframe re-anchors it.
-			mIsKeyframe = true;
+			// or joined mid-stream). The residuals are relative to the
+			// sender's prediction, so no reference here decodes them
+			// (CORE-6): the caller drops the update.
+			mIsKeyframe = false;
 			mReference = PoseSample();
-			return;
+			return false;
 		}
 
 		mIsKeyframe = false;
 		mReference = predicted;
+		return true;
 	}
 
 	void ResidualDecoder::EndFrame(const PoseSample& fullyReconstructedPose)

@@ -193,6 +193,13 @@ table SubjectUpdate {
   rotations_q16:[RotationUpdateQ16];
   curves_q8:[CurveUpdateQ8];
   curves_q16:[CurveUpdateQ16];
+
+  // Appended (D7, ADR 0005 (viii)): tx_seq of the SubjectList whose full
+  // Subject this update is relative to (topology, curve list, quantization
+  // anchors, residual history). A receiver applies the update only when it
+  // applied that full Subject (ADR 0005 (ix)). 0 = unset: the reader
+  // behaves exactly as before this field existed.
+  ref_seq:ulong = 0;
 }
 
 table SubjectList {

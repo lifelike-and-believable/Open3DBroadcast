@@ -132,7 +132,22 @@ namespace O3DS
 		LegacyOrdering legacy;
 		ReorderStats reportedGateStats; //!< last gate stats reported to metrics, for deltas
 		double lastSeenS = 0.0;
+		//! The last sequenced frame applied (parsed) on this stream, for
+		//! MakeParseContext's gap detection (ADR 0005 (ix)).
+		uint64_t lastAppliedSeq = 0;
+		uint32_t lastAppliedEpoch = 0;
+		bool haveApplied = false;
 	};
+
+	//! The ParseContext for a sequenced frame (tx_seq, frame_epoch) about to
+	//! be parsed on `stream`: gap_before is true when the stream applied a
+	//! frame of the same epoch and this one does not directly follow it,
+	//! whether the frames between were lost, refused by the gate, or not
+	//! parsed. Call before Parse(), and NoteFrameApplied() after it succeeds.
+	O3DS_API ParseContext MakeParseContext(const ReceiverStream& stream, uint64_t txSeq, uint32_t frameEpoch);
+
+	//! Records that the sequenced frame (tx_seq, frame_epoch) was parsed.
+	O3DS_API void NoteFrameApplied(ReceiverStream& stream, uint64_t txSeq, uint32_t frameEpoch);
 
 	//! Owns one ReceiverStream per sender stream, bounded in number. Not
 	//! thread-safe; confine it to one thread, like ReorderGate.

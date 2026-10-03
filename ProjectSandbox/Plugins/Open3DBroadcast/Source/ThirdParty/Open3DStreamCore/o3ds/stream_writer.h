@@ -17,6 +17,10 @@
 //   a counter shared by several subjects would look like loss on each.
 // - tx_wallclock_us is UTC at the write (NowUtcMicros), for latency and clock
 //   offset estimates only; ordering uses tx_seq.
+// - Every update carries ref_seq, the tx_seq of the subject's last full
+//   Subject written by this writer (ADR 0005 (viii)), so a receiver that
+//   missed that full Subject drops the update instead of applying it to the
+//   wrong topology, anchors or residual history.
 //
 // Not thread-safe: one writer per stream, used by one thread at a time (the
 // UE sender's pipeline worker).
@@ -26,6 +30,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <string>
 #include <vector>
 
 namespace O3DS
@@ -58,18 +64,24 @@ namespace O3DS
 		//! session first when none was started.
 		TxStamp Next();
 
-		//! A full Subject (descriptor and values).
+		//! A full Subject (descriptor and values). Its tx_seq becomes the
+		//! subject's ref_seq for later updates.
 		int WriteFull(Subject& subject, std::vector<char>& out, double timestamp);
 		//! Every subject of a list, in full.
 		int WriteFull(SubjectList& list, std::vector<char>& out, double timestamp);
-		//! A delta update (quantized when quantRanges is given).
+		//! A delta update (quantized when quantRanges is given), with ref_seq.
 		int WriteUpdate(Subject& subject, std::vector<char>& out, size_t& count, double deltaThreshold,
 			double timestamp, const QuantRanges* quantRanges = nullptr);
-		//! A residual update (the subject has a ResidualEncoder).
+		//! A residual update (the subject has a ResidualEncoder), with ref_seq.
 		int WriteResidual(Subject& subject, std::vector<char>& out, size_t& count, double deltaThreshold, double timestamp);
+
+		//! The tx_seq of the last full Subject written for this subject name;
+		//! 0 when none was (its updates then carry ref_seq 0, unset).
+		uint64_t LastFullSeq(const std::string& subjectName) const;
 
 	private:
 		uint64_t mNextSeq = 1;
 		uint32_t mEpoch = 0;
+		std::map<std::string, uint64_t> mLastFullSeq;
 	};
 }

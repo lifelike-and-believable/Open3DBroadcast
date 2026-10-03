@@ -24,6 +24,7 @@ namespace O3DS
     class SubjectList;
     struct Frame;
     struct LegacyOrderingConfig;
+    struct ParseContext;
     struct ParsedSubjectInfo;
     struct ReceiverStream;
     namespace Control
@@ -152,7 +153,8 @@ private:
      *  see GetSettingsClass()) to access concealment config; null before InitializeSettings() runs. */
     const class UO3DReceiverSourceSettings* GetConcealmentSettings() const;
 
-    bool ParseSubjectListRaw(O3DS::SubjectList& List, const FString& Subject, const char* Data, size_t Len, std::vector<O3DS::ParsedSubjectInfo>& OutTouched);
+    bool ParseSubjectListRaw(O3DS::SubjectList& List, const FString& Subject, const char* Data, size_t Len, std::vector<O3DS::ParsedSubjectInfo>& OutTouched,
+        const O3DS::ParseContext* Context = nullptr);
 
     // ── Control channel (docs/adr/0011-control-channel.md, item 8) ────────────────────
     // Everything below is game thread only. The transport's control sink (FControlSink) hops

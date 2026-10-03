@@ -725,11 +725,30 @@ void FO3DReceiverSource::ApplyReleasedFrame(O3DS::ReceiverStream& Stream, const 
 
     const double ParseStartWall = FPlatformTime::Seconds();
 
+    // ADR 0005 (ix): a gated frame is parsed with its sequence context, so an update the stream
+    // cannot apply correctly (its full Subject was missed, or residual history broke at a gap) is
+    // dropped and the subject is not pushed until the next full Subject. A frame skipped above, or
+    // one that fails to parse, is not noted as applied, so the next frame sees the gap.
+    O3DS::ParseContext Context;
+    if (GatedFrame != nullptr)
+    {
+        Context = O3DS::MakeParseContext(Stream, GatedFrame->seq, GatedFrame->epoch);
+    }
+    const uint64 DroppedBefore = Stream.subjects.mUpdatesDroppedUnsynced;
+
     std::vector<O3DS::ParsedSubjectInfo> Touched;
-    if (!ParseSubjectListRaw(Stream.subjects, Label, Data, Len, Touched))
+    if (!ParseSubjectListRaw(Stream.subjects, Label, Data, Len, Touched, GatedFrame != nullptr ? &Context : nullptr))
     {
         FO3DPerformanceMetrics::Get().RecordDeserializationError();
         return;
+    }
+    if (GatedFrame != nullptr)
+    {
+        O3DS::NoteFrameApplied(Stream, GatedFrame->seq, GatedFrame->epoch);
+    }
+    if (Stream.subjects.mUpdatesDroppedUnsynced > DroppedBefore)
+    {
+        FO3DPerformanceMetrics::Get().RecordUpdatesAwaitingFullSync(Stream.subjects.mUpdatesDroppedUnsynced - DroppedBefore);
     }
     const double ParseTimeMs = (FPlatformTime::Seconds() - ParseStartWall) * 1000.0;
     FO3DPerformanceMetrics::Get().RecordParseTimeMs(ParseTimeMs);
@@ -824,9 +843,10 @@ const UO3DReceiverSourceSettings* FO3DReceiverSource::GetConcealmentSettings() c
     return Cast<UO3DReceiverSourceSettings>(Settings);
 }
 
-bool FO3DReceiverSource::ParseSubjectListRaw(O3DS::SubjectList& List, const FString& Subject, const char* Data, size_t Len, std::vector<O3DS::ParsedSubjectInfo>& OutTouched)
+bool FO3DReceiverSource::ParseSubjectListRaw(O3DS::SubjectList& List, const FString& Subject, const char* Data, size_t Len, std::vector<O3DS::ParsedSubjectInfo>& OutTouched,
+    const O3DS::ParseContext* Context)
 {
-    if (!List.Parse(Data, Len, nullptr, true, &OutTouched))
+    if (!List.Parse(Data, Len, nullptr, true, &OutTouched, Context))
     {
         UE_LOG(LogO3DReceiverSource, Warning, TEXT("Parse failed for subject '%s' (%d bytes): %s"), *Subject, (int32)Len, UTF8_TO_TCHAR(List.mError.c_str()));
         return false;

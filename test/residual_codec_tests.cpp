@@ -158,12 +158,17 @@ O3DS_TEST(ResidualDecoder_MirrorsEncoder_RoundTripReconstructsActualValue)
 	}
 }
 
-O3DS_TEST(ResidualDecoder_InsufficientHistory_FallsBackToKeyframeEvenIfWireSaysResidual)
+O3DS_TEST(ResidualDecoder_InsufficientHistory_RefusesAResidualUpdate)
 {
+	// CORE-6: no history at all, and the wire says residual. The residuals
+	// are relative to a prediction this decoder cannot make, so BeginFrame()
+	// refuses the update instead of decoding against a zero reference.
 	ResidualDecoder decoder(ResidualPredictorId::Linear);
-	// No BeginFrame()/EndFrame() yet - decoder has no history at all.
-	decoder.BeginFrame(/*incomingIsKeyframe*/ false, 0.5);
-	O3DS_CHECK(decoder.IsKeyframe()); // forced true despite the wire claiming residual mode
+	O3DS_CHECK(!decoder.BeginFrame(/*incomingIsKeyframe*/ false, 0.5));
+	O3DS_CHECK(decoder.Reference().translations.empty());
+	// A keyframe is always decodable.
+	O3DS_CHECK(decoder.BeginFrame(/*incomingIsKeyframe*/ true, 0.5));
+	O3DS_CHECK(decoder.IsKeyframe());
 }
 
 O3DS_TEST(ResidualDecoder_Reset_ClearsHistoryAndForcesKeyframeAgain)
@@ -180,7 +185,8 @@ O3DS_TEST(ResidualDecoder_Reset_ClearsHistoryAndForcesKeyframeAgain)
 	decoder.EndFrame(MakeSample(0.04, 3, 10.0, 2.0));
 
 	decoder.Reset();
-	decoder.BeginFrame(false, 0.06); // wire claims residual, but history was just cleared
+	O3DS_CHECK(!decoder.BeginFrame(false, 0.06)); // wire claims residual, but history was just cleared
+	O3DS_CHECK(decoder.BeginFrame(true, 0.06));
 	O3DS_CHECK(decoder.IsKeyframe());
 }
 
