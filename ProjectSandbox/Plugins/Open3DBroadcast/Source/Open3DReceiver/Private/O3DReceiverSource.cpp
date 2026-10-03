@@ -2,6 +2,7 @@
 
 #include "O3DReceiverSource.h"
 
+#include "O3DLiveLinkPublisher.h"
 #include "O3DReceiverFrameDecoder.h"
 
 #include "ILiveLinkClient.h"
@@ -317,6 +318,7 @@ FO3DReceiverSource::FO3DReceiverSource(const FO3DReceiverSourceConfig& InSetting
     , SourceStatus(LOCTEXT("SourceStatus", "Inactive"))
     , SourceSettings(InSettings)
     , FrameDecoder(MakeUnique<FO3DReceiverFrameDecoder>())
+    , Publisher(MakeUnique<FO3DLiveLinkPublisher>())
 {
     EnsureValidTransportName();
 }
@@ -330,6 +332,7 @@ void FO3DReceiverSource::ReceiveClient(ILiveLinkClient* InClient, FGuid InSource
 {
     Client = InClient;
     SourceGuid = InSourceGuid;
+    Publisher->SetClient(InClient, InSourceGuid);
     bIsValid = true;
 
     SourceMachineName = LOCTEXT("SourceHostUnknown", "-");
@@ -549,15 +552,11 @@ void FO3DReceiverSource::StopTransport()
     {
         PublishControlChange(Change);
     }
-    InitializedSubjects.Empty();
-    SubjectSkeletonHashes.Empty();
-    SubjectCurveHashes.Empty();
-    SubjectLastUpdateTime.Empty();
+    Publisher->Reset();
     // RCV-5/RCV-34: cached bone names from the previous session must not survive a
     // restart, like the other per-subject maps above.
     FrameDecoder->Reset();
     bLoggedActiveState = false;
-    FrameCounter = 0;
     ResetStreamState();
 }
 
@@ -675,26 +674,12 @@ void FO3DReceiverSource::UpdateConnectionLastActive()
 void FO3DReceiverSource::RemoveInactiveSubjects()
 {
     const double Now = FPlatformTime::Seconds();
-    for (auto It = SubjectLastUpdateTime.CreateIterator(); It; ++It)
+    Publisher->RemoveInactiveSubjects(Now, InactivityThresholdSeconds, [this](FName Subject)
     {
-        if ((Now - It.Value()) > InactivityThresholdSeconds)
-        {
-            const FLiveLinkSubjectName SubjectName(It.Key());
-            const FLiveLinkSubjectKey SubjectKey(SourceGuid, SubjectName);
-            if (Client)
-            {
-                Client->RemoveSubject_AnyThread(SubjectKey);
-            }
-            UE_LOG(LogO3DReceiverSource, Verbose, TEXT("Removed inactive subject %s"), *It.Key().ToString());
-            FrameDecoder->ForgetSubject(It.Key());
-            SubjectSkeletonHashes.Remove(It.Key());
-            SubjectCurveHashes.Remove(It.Key());
-            InitializedSubjects.Remove(It.Key());
-            SubjectConcealment.Remove(It.Key());  // C1: drop the per-subject predictor/state too
-            PrevConcealmentMetricsBySubject.Remove(It.Key());
-            It.RemoveCurrent();
-        }
-    }
+        FrameDecoder->ForgetSubject(Subject);
+        SubjectConcealment.Remove(Subject);  // C1: drop the per-subject predictor/state too
+        PrevConcealmentMetricsBySubject.Remove(Subject);
+    });
 
     // Senders that went quiet: drop their parse and ordering state too, so a
     // restarted sender starts clean and the table does not keep dead streams.
@@ -862,7 +847,7 @@ void FO3DReceiverSource::HandleLegacyFrame(const FString& Subject, TConstArrayVi
     }
 
     // Update active subject count
-    FO3DPerformanceMetrics::Get().SetReceiverActiveSubjectCount(SubjectLastUpdateTime.Num());
+    FO3DPerformanceMetrics::Get().SetReceiverActiveSubjectCount(Publisher->GetActiveSubjectCount());
 
     // Record total frame processing time
     const double TotalProcessingTimeMs = (FPlatformTime::Seconds() - ParseStartWall) * 1000.0;
@@ -950,7 +935,7 @@ void FO3DReceiverSource::EmitGatedFrame(uint64 StreamKey, O3DS::Frame&& Frame)
         FO3DPerformanceMetrics::Get().RecordPoseUpdate();
     }
 
-    FO3DPerformanceMetrics::Get().SetReceiverActiveSubjectCount(SubjectLastUpdateTime.Num());
+    FO3DPerformanceMetrics::Get().SetReceiverActiveSubjectCount(Publisher->GetActiveSubjectCount());
 
     const double TotalProcessingTimeMs = (FPlatformTime::Seconds() - ParseStartWall) * 1000.0;
     FO3DPerformanceMetrics::Get().RecordTotalProcessingTimeMs(TotalProcessingTimeMs);
@@ -1100,12 +1085,10 @@ void FO3DReceiverSource::TickConcealment()
             continue;
         }
 
-        const FLiveLinkSubjectKey SubjectKey(SourceGuid, FLiveLinkSubjectName(Pair.Key));
-        const uint64* CurveHashPtr = SubjectCurveHashes.Find(Pair.Key);
         // No static-data re-push: a synthesized frame never changes topology
         // (bTopologyChanged already reset the engine above when that
         // happens), so the already-registered skeleton/curve names apply.
-        PushSubjectFrameData(SubjectKey, BoneTransforms, TArray<FName>(), CurveValues, Predicted.t, Predicted.t, CurveHashPtr ? *CurveHashPtr : 0);
+        Publisher->PublishSyntheticFrame(Pair.Key, BoneTransforms, CurveValues, Predicted.t);
     }
 
     ReportConcealmentMetricsDelta();
@@ -1204,7 +1187,20 @@ O3DS::LegacyOrderingConfig FO3DReceiverSource::GetLegacyOrderingConfig() const
 
 bool FO3DReceiverSource::CanPublish() const
 {
-    return Client != nullptr || (TestStaticPushHook && TestFramePushHook);
+    return Publisher->CanPublish();
+}
+
+void FO3DReceiverSource::SetSourceGuid(const FGuid& InSourceGuid)
+{
+    SourceGuid = InSourceGuid;
+    Publisher->SetSourceGuid(InSourceGuid);
+}
+
+void FO3DReceiverSource::SetTestPushHooks(
+    TFunction<void(const FLiveLinkSubjectKey&, const TArray<FName>&, const TArray<int32>&, const TArray<FName>&, bool)> StaticHook,
+    TFunction<void(const FLiveLinkSubjectKey&, const TArray<FTransform>&, const TArray<float>&, double)> FrameHook)
+{
+    Publisher->SetTestHooks(MoveTemp(StaticHook), MoveTemp(FrameHook));
 }
 
 /** Build LiveLink static/frame data and push it to the client for a single parsed subject. */
@@ -1223,58 +1219,14 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
         return;
     }
     const FName SubjectFName = Decoded.SubjectName;
-    const TArray<FName>& BoneNames = *Decoded.BoneNames;
-    const TArray<int32>& BoneParents = *Decoded.BoneParents;
     const TArray<FTransform>& BoneTransforms = *Decoded.BoneTransforms;
     const TArray<FName>& CurveNames = *Decoded.CurveNames;
     const TArray<float>& CurveValues = *Decoded.CurveValues;
 
-    const FLiveLinkSubjectName SubjectName(SubjectFName);
-    const FLiveLinkSubjectKey SubjectKey(SourceGuid, SubjectName);
-
-    // Hashes for the LiveLink update check, computed by the decoder when the names changed.
-    const uint64 SkeletonHash = Decoded.SkeletonHash;
-    const uint64 CurveHash = Decoded.CurveHash;
-
-    const uint64* ExistingSkeletonHash = SubjectSkeletonHashes.Find(SubjectFName);
-    const uint64* ExistingCurveHash = SubjectCurveHashes.Find(SubjectFName);
-    const bool bNeedStaticUpdate = (!ExistingSkeletonHash || *ExistingSkeletonHash != SkeletonHash) || (!ExistingCurveHash || *ExistingCurveHash != CurveHash);
-
-    double LiveLinkPushTimeMs = 0.0;
     const double LiveLinkStartTime = FPlatformTime::Seconds();
 
-    // Measure static data push separately to identify which operation blocks
-    if (!InitializedSubjects.Contains(SubjectFName) || bNeedStaticUpdate)
-    {
-        const double StaticStartTime = FPlatformTime::Seconds();
-        PushSubjectStaticData(SubjectKey, BoneNames, BoneParents, CurveNames, SkeletonHash, !InitializedSubjects.Contains(SubjectFName));
-        const double StaticTimeMs = (FPlatformTime::Seconds() - StaticStartTime) * 1000.0;
-
-        // Log if static push is slow (potential blocking point)
-        if (StaticTimeMs > 5.0)
-        {
-            UE_LOG(LogO3DReceiverSource, Warning,
-                TEXT("PushSubjectStaticData took %.2f ms (subject='%s', may indicate LiveLink client blocking)"),
-                StaticTimeMs, *SubjectFName.ToString());
-        }
-
-        InitializedSubjects.Add(SubjectFName);
-        SubjectSkeletonHashes.Add(SubjectFName, SkeletonHash);
-        SubjectCurveHashes.Add(SubjectFName, CurveHash);
-
-        if (!ExistingSkeletonHash)
-        {
-            UE_LOG(LogO3DReceiverSource, Log, TEXT("Created subject '%s'"), *SubjectFName.ToString());
-        }
-        else if (bNeedStaticUpdate)
-        {
-            UE_LOG(LogO3DReceiverSource, Log, TEXT("Static data updated for subject '%s'"), *SubjectFName.ToString());
-        }
-    }
-    else
-    {
-        SubjectCurveHashes[SubjectFName] = CurveHash;
-    }
+    // Static data when the subject is new this session or its names changed (FO3DLiveLinkPublisher).
+    const bool bNeedStaticUpdate = Publisher->PublishStatic(Decoded);
 
     // C1: feed the real frame into this subject's concealment engine before
     // pushing it - only for the gated (A2) path, where WorldTimeSecondsOverride
@@ -1286,22 +1238,10 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
         ObserveConcealmentRealFrame(SubjectFName, WorldTimeSecondsOverride, BoneTransforms, CurveValues, bNeedStaticUpdate);
     }
 
-    const double FrameStartTime = FPlatformTime::Seconds();
-    PushSubjectFrameData(SubjectKey, BoneTransforms, CurveNames, CurveValues, SubjectListTime, WorldTimeSecondsOverride, CurveHash);
-    const double FrameTimeMs = (FPlatformTime::Seconds() - FrameStartTime) * 1000.0;
+    Publisher->PublishFrame(SubjectFName, BoneTransforms, CurveNames, CurveValues, SubjectListTime, WorldTimeSecondsOverride, Decoded.CurveHash);
 
-    // Log if frame push is slow (primary blocking suspect)
-    if (FrameTimeMs > 5.0)
-    {
-        UE_LOG(LogO3DReceiverSource, Warning,
-            TEXT("PushSubjectFrameData took %.2f ms (subject='%s', PRIMARY SUSPECT for latency)"),
-            FrameTimeMs, *SubjectFName.ToString());
-    }
-
-    LiveLinkPushTimeMs = (FPlatformTime::Seconds() - LiveLinkStartTime) * 1000.0;
+    const double LiveLinkPushTimeMs = (FPlatformTime::Seconds() - LiveLinkStartTime) * 1000.0;
     FO3DPerformanceMetrics::Get().RecordLiveLinkPushTimeMs(LiveLinkPushTimeMs);
-
-    SubjectLastUpdateTime.Add(SubjectFName, FPlatformTime::Seconds());
 }
 
 /** Fill in missing audio metadata (subject name, defaults) before publishing to the bus. */
@@ -1364,88 +1304,6 @@ void FO3DReceiverSource::FAudioMetaDefaults::Apply(O3DS::FAudioFrameMeta& Meta) 
     {
         Meta.TimestampSec = FPlatformTime::Seconds();
     }
-}
-
-void FO3DReceiverSource::PushSubjectStaticData(const FLiveLinkSubjectKey& SubjectKey, const TArray<FName>& BoneNames, const TArray<int32>& BoneParents, const TArray<FName>& CurveNames, uint64 DescriptorHash, bool bFirstPushThisSession)
-{
-    if (TestStaticPushHook)
-    {
-        TestStaticPushHook(SubjectKey, BoneNames, BoneParents, CurveNames, bFirstPushThisSession);
-        return;
-    }
-
-    if (!Client)
-    {
-        return;
-    }
-
-    // RCV-7: create the LiveLink subject only on the first push of this session, and
-    // only if LiveLink doesn't already have it (for example from a previous transport
-    // session or a preset the user loaded). Calling CreateSubject again for an
-    // existing subject either fails with a warning or replaces the user's
-    // per-subject settings (preprocessors, interpolation, translators). Later
-    // hierarchy or curve changes re-push static data only.
-    if (bFirstPushThisSession && Client->GetSubjectSettings(SubjectKey) == nullptr)
-    {
-        // Create a settings object to allow subject-level configuration of preprocessors, interpolation, and translators
-        ULiveLinkSubjectSettings* SubjectSettings = NewObject<ULiveLinkSubjectSettings>();
-        if (SubjectSettings)
-        {
-            SubjectSettings->Initialize(SubjectKey);
-            // CRITICAL: Set the role on the settings object so ValidateProcessors() won't clear preprocessors/interpolation/translators
-            SubjectSettings->Role = ULiveLinkAnimationRole::StaticClass();
-        }
-
-        FLiveLinkSubjectPreset Preset;
-        Preset.Key = SubjectKey;
-        Preset.Role = ULiveLinkAnimationRole::StaticClass();
-        Preset.Settings = SubjectSettings;
-        Preset.bEnabled = true;
-        Client->CreateSubject(Preset);
-    }
-
-    FLiveLinkStaticDataStruct StaticDataStruct;
-    StaticDataStruct.InitializeWith(FLiveLinkSkeletonStaticData::StaticStruct(), nullptr);
-    FLiveLinkSkeletonStaticData* SkeletonData = StaticDataStruct.Cast<FLiveLinkSkeletonStaticData>();
-
-    SkeletonData->SetBoneNames(BoneNames);
-    SkeletonData->SetBoneParents(BoneParents);
-    SkeletonData->PropertyNames = CurveNames;
-
-    Client->PushSubjectStaticData_AnyThread(SubjectKey, ULiveLinkAnimationRole::StaticClass(), MoveTemp(StaticDataStruct));
-}
-
-void FO3DReceiverSource::PushSubjectFrameData(const FLiveLinkSubjectKey& SubjectKey, const TArray<FTransform>& BoneTransforms, const TArray<FName>& CurveNames, const TArray<float>& CurveValues, double TimestampSeconds, double WorldTimeSecondsOverride, uint64 CurveHash)
-{
-    if (TestFramePushHook)
-    {
-        TestFramePushHook(SubjectKey, BoneTransforms, CurveValues, (WorldTimeSecondsOverride >= 0.0) ? WorldTimeSecondsOverride : FPlatformTime::Seconds());
-        return;
-    }
-
-    if (!Client)
-    {
-        return;
-    }
-
-    (void)CurveNames;
-
-    FLiveLinkFrameDataStruct FrameDataStruct(FLiveLinkAnimationFrameData::StaticStruct());
-    FLiveLinkAnimationFrameData& FrameData = *FrameDataStruct.Cast<FLiveLinkAnimationFrameData>();
-    FLiveLinkBaseFrameData& BaseFrameData = FrameData;
-
-    FrameData.Transforms = BoneTransforms;
-    BaseFrameData.PropertyValues = CurveValues;
-    // A2.c: use the sender-clock-mapped presentation time when available (gated
-    // path), falling back to today's apply-time stamp for legacy/ungated frames.
-    BaseFrameData.WorldTime = (WorldTimeSecondsOverride >= 0.0) ? WorldTimeSecondsOverride : FPlatformTime::Seconds();
-    BaseFrameData.MetaData.SceneTime = FQualifiedFrameTime();
-    BaseFrameData.MetaData.StringMetaData.Add(TEXT("CurveHash"), FString::Printf(TEXT("0x%016llx"), static_cast<unsigned long long>(CurveHash)));
-    BaseFrameData.MetaData.StringMetaData.Add(TEXT("SubjectListTime"), FString::Printf(TEXT("%.6f"), TimestampSeconds));
-
-    FrameData.FrameId = FrameCounter++;
-
-    Client->PushSubjectFrameData_AnyThread(SubjectKey, MoveTemp(FrameDataStruct));
 }
 
 void FO3DReceiverSource::ResetStreamState()

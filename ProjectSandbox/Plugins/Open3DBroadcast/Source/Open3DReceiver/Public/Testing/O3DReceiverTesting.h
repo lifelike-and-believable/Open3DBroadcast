@@ -65,7 +65,7 @@ struct FO3DReceiverSourceTestAccessor
 
 	static void SetSourceGuid(FO3DReceiverSource& Source, const FGuid& Guid)
 	{
-		Source.SourceGuid = Guid;
+		Source.SetSourceGuid(Guid);
 	}
 
 	static TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> MakeAudioSink(const FO3DReceiverSource& Source)
@@ -132,7 +132,7 @@ struct FO3DReceiverCorrectnessTestAccessor
 
 	static void BindRecorder(FO3DReceiverSource& Source, const TSharedRef<FRecorder>& Recorder)
 	{
-		Source.TestStaticPushHook = [Recorder](const FLiveLinkSubjectKey& Key, const TArray<FName>& BoneNames, const TArray<int32>& BoneParents, const TArray<FName>& CurveNames, bool bFirstPush)
+		auto StaticHook = [Recorder](const FLiveLinkSubjectKey& Key, const TArray<FName>& BoneNames, const TArray<int32>& BoneParents, const TArray<FName>& CurveNames, bool bFirstPush)
 		{
 			FStaticPush Push;
 			Push.Subject = Key.SubjectName.Name;
@@ -142,7 +142,7 @@ struct FO3DReceiverCorrectnessTestAccessor
 			Push.bFirstPushThisSession = bFirstPush;
 			Recorder->Statics.Add(MoveTemp(Push));
 		};
-		Source.TestFramePushHook = [Recorder](const FLiveLinkSubjectKey& Key, const TArray<FTransform>& Transforms, const TArray<float>& Curves, double)
+		auto FrameHook = [Recorder](const FLiveLinkSubjectKey& Key, const TArray<FTransform>& Transforms, const TArray<float>& Curves, double)
 		{
 			FFramePush Push;
 			Push.Subject = Key.SubjectName.Name;
@@ -150,6 +150,7 @@ struct FO3DReceiverCorrectnessTestAccessor
 			Push.Curves = Curves;
 			Recorder->Frames.Add(MoveTemp(Push));
 		};
+		Source.SetTestPushHooks(MoveTemp(StaticHook), MoveTemp(FrameHook));
 	}
 
 	/** The same consumer object StartTransport() hands to a real transport. */
@@ -199,6 +200,52 @@ private:
 	TUniquePtr<FO3DReceiverFrameDecoder> Decoder;
 	/** Kept so parsed subjects persist across Decode calls, like a receiver stream's list. */
 	TUniquePtr<O3DS::SubjectList> List;
+};
+
+class FO3DLiveLinkPublisher;
+
+/**
+ * Owns one FO3DLiveLinkPublisher (a private class of this module, WP-A3) with recording test hooks
+ * bound, for its unit tests. Bone and curve hashes are computed here as the frame decoder does.
+ */
+class OPEN3DRECEIVER_API FO3DLiveLinkPublisherProbe
+{
+public:
+	struct FStaticPush
+	{
+		FName Subject;
+		TArray<FName> CurveNames;
+		bool bFirstPushThisSession = false;
+	};
+
+	struct FFramePush
+	{
+		FName Subject;
+		int32 NumTransforms = 0;
+		double WorldTime = 0.0;
+	};
+
+	explicit FO3DLiveLinkPublisherProbe(bool bBindHooks = true);
+	~FO3DLiveLinkPublisherProbe();
+
+	FO3DLiveLinkPublisherProbe(const FO3DLiveLinkPublisherProbe&) = delete;
+	FO3DLiveLinkPublisherProbe& operator=(const FO3DLiveLinkPublisherProbe&) = delete;
+
+	bool CanPublish() const;
+	/** PublishStatic for a subject with these names; returns whether the topology changed. */
+	bool PublishStatic(FName Subject, const TArray<FName>& BoneNames, const TArray<int32>& BoneParents, const TArray<FName>& CurveNames);
+	void PublishFrame(FName Subject, int32 NumTransforms, double WorldTime);
+	void PublishSyntheticFrame(FName Subject, int32 NumTransforms, double Time);
+	/** Subjects removed, in the order the publisher reported them. */
+	TArray<FName> RemoveInactiveSubjects(double NowSeconds, double ThresholdSeconds);
+	int32 GetActiveSubjectCount() const;
+	void Reset();
+
+	TArray<FStaticPush> Statics;
+	TArray<FFramePush> Frames;
+
+private:
+	TUniquePtr<FO3DLiveLinkPublisher> Publisher;
 };
 
 #endif // WITH_DEV_AUTOMATION_TESTS
