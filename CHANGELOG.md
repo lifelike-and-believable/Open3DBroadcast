@@ -732,6 +732,18 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Sender audio binding split out (WP-A3 step 7, SND-22)
+
+- `UO3DSenderComponent`'s audio binding moved into `FO3DSenderAudioBinding` (private): the capture
+  and transport audio configs built from the audio properties, keeping the capture config's source
+  and device index in step with the mode, finding or creating the audio capture component, and
+  handing it the transport's sink with the throttled "no sink" log. The capture component stays a
+  property of the sender component; no `UPROPERTY` or `UFUNCTION` moved. Output is unchanged
+  (the transport audio config the binding update built and never used is no longer built).
+- **Tests.** New `Open3DBroadcast.Sender.AudioBinding.BuildsConfigsFromProperties` and
+  `.FindsCaptureAndBindsSink`, through the exported `FO3DSenderAudioBindingProbe`. Existing tests
+  are unchanged.
+
 ### Sender pose sampler split out (WP-A3 step 6, SND-22)
 
 - `UO3DSenderComponent`'s pose sampling moved into `FO3DSenderPoseSampler` (private): the skeleton

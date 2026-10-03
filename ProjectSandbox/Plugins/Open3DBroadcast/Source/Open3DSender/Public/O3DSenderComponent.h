@@ -28,6 +28,8 @@ class FO3DSenderTransportController;
 class FO3DSenderCurveProcessor;
 class FO3DSenderPipeline;
 class FO3DSenderPoseSampler;
+class FO3DSenderAudioBinding;
+struct FO3DSenderAudioSettings;
 
 /** Smart-pointer deleter that keeps FO3DSenderTransportController implementation details private. */
 struct FO3DSenderTransportControllerDeleter
@@ -45,6 +47,12 @@ struct FO3DSenderCurveProcessorDeleter
 struct FO3DSenderPoseSamplerDeleter
 {
 	void operator()(FO3DSenderPoseSampler* Ptr) const;
+};
+
+/** Smart-pointer deleter that keeps FO3DSenderAudioBinding private (WP-A3). */
+struct FO3DSenderAudioBindingDeleter
+{
+	void operator()(FO3DSenderAudioBinding* Ptr) const;
 };
 
 /** Predictor for residual/delta coding (roadmap doc §5/C2). Maps to O3DS::ResidualPredictorId
@@ -562,7 +570,8 @@ private:
 	TUniquePtr<FO3DSenderCurveProcessor, FO3DSenderCurveProcessorDeleter> CurveProcessor;
 	UPROPERTY(Transient)
 	UO3DSenderAudioCaptureComponent* AudioCaptureComponent = nullptr;
-	double LastAudioSinkWarningTime = 0.0;
+	/** Audio capture to transport binding (WP-A3 step 7). Always set (created by the constructor). */
+	TUniquePtr<FO3DSenderAudioBinding, FO3DSenderAudioBindingDeleter> AudioBinding;
 
 	void UpdateEditConditionHelpers();
 	void TeardownTransport();
@@ -649,14 +658,11 @@ private:
 	void DispatchSampledFrame(TUniquePtr<FO3DSPoseFrame>&& Frame);
 	/** Tests: waits (event with a timeout) until the pipeline's worker has nothing left. True without a pipeline. */
 	bool WaitForPipelineIdle(double TimeoutSeconds) const;
+	/** The audio properties as one value, for FO3DSenderAudioBinding. */
+	FO3DSenderAudioSettings GetAudioSettings() const;
 	FO3DSenderAudioCaptureConfig BuildAudioCaptureConfig() const;
-	FO3DTransportAudioConfig BuildTransportAudioConfig(const FO3DSenderAudioCaptureConfig& CaptureConfig) const;
-	void EnsureAudioCaptureComponent();
-	void ConfigureAudioCaptureComponent(const FO3DSenderAudioCaptureConfig& CaptureConfig, const FO3DTransportAudioConfig& TransportAudioConfig);
 	void TeardownAudioCapture();
 	void SyncAudioConfigSource();
-	/** The cached index of a device name (ADR 0008 item 8); never enumerates. */
-	int32 ResolveAudioDeviceIndex(const FName& DeviceName) const;
 	void EnsureSubjectNameCached(const USkeletalMeshComponent* SkelComp);
 	void InvalidateSubjectNameCache();
 	void PurgeSerializerCacheForSubject(const FString& Subject);

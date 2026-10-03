@@ -228,4 +228,37 @@ private:
 	TUniquePtr<FO3DSenderPoseSampler> Sampler;
 };
 
+class FO3DSenderAudioBinding;
+
+/** Owns one FO3DSenderAudioBinding (a private class of this module, WP-A3 step 7). */
+class OPEN3DSENDER_API FO3DSenderAudioBindingProbe
+{
+public:
+	FO3DSenderAudioBindingProbe();
+	~FO3DSenderAudioBindingProbe();
+
+	FO3DSenderAudioBindingProbe(const FO3DSenderAudioBindingProbe&) = delete;
+	FO3DSenderAudioBindingProbe& operator=(const FO3DSenderAudioBindingProbe&) = delete;
+
+	// The audio properties the binding reads (FO3DSenderAudioSettings).
+	bool bEnableAudio = true;
+	EO3DSenderCaptureMode Mode = EO3DSenderCaptureMode::Mix;
+	FName InputDevice;
+	FName Codec;
+	FO3DSenderAudioCaptureConfig CaptureConfig;
+
+	FO3DSenderAudioCaptureConfig BuildCaptureConfig() const;
+	/** Built from BuildCaptureConfig(), as the component builds the transport config. */
+	FO3DTransportAudioConfig BuildTransportConfig() const;
+	/** SyncSource applied to CaptureConfig. */
+	void SyncSource();
+	static UO3DSenderAudioCaptureComponent* FindOrCreateCaptureComponent(AActor* Owner, UO3DSenderAudioCaptureComponent* Current);
+	void AttachSink(UO3DSenderAudioCaptureComponent& Capture, const TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe>& Sink, const FString& Label, double NowSeconds);
+	void Detach(UO3DSenderAudioCaptureComponent* Capture);
+	double GetLastSinkWarningTime() const;
+
+private:
+	TUniquePtr<FO3DSenderAudioBinding> Binding;
+};
+
 #endif // WITH_DEV_AUTOMATION_TESTS
