@@ -31,8 +31,8 @@ struct FO3DSenderPipelineStats
 	/**
 	 * Sequence number of the last payload handed to the transport, starting at 1 and stamped on
 	 * the worker at send time, so the payloads that are sent are numbered without a gap whatever
-	 * the queue dropped. Not on the wire yet: O3DS::StreamWriter (ADR 0005, WP-A4a) will stamp
-	 * tx_seq at the same point.
+	 * the queue dropped. Counts every subject's payloads together; the tx_seq on the wire is
+	 * counted per subject by the serializer's O3DS::StreamWriter (ADR 0005 (iv)).
 	 */
 	uint64 LastSendSequence = 0;
 	/** Pose frames waiting in the queue now, and the most that ever waited (never above the depth). */

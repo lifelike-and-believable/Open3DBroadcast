@@ -160,6 +160,15 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Core library (`src/o3ds`)
 
+- **`O3DS::StreamWriter`** (new `src/o3ds/stream_writer.h`; ADR 0005 (iv), WP-A4): one logical
+  sender stream. Its `WriteFull`, `WriteUpdate` and `WriteResidual` stamp every frame with
+  `tx_seq` (one counter per writer, not reset by `StartSession`), `tx_wallclock_us` (UTC at the
+  write) and `frame_epoch`. Each session takes `max(NewSessionEpoch(), last epoch issued in the
+  process + 1)`, so a writer created or restarted within the same second as another still gets
+  a strictly larger epoch. `Subject::Serialize` and `Subject::SerializeUpdate` take the same
+  trailing, defaulted stamp parameters, and `Subject::SerializeUpdateResidual` takes
+  `tx_wallclock_us` and `frame_epoch` after its `seq`; unstamped calls still write 0 (unset).
+
 - **Faster Serialize and Parse (WP-A2e, ADR 0008 outline item 6; CORE-7,
   CORE-18).** For one 250-bone, 250-curve subject (MSVC Release, the new
   `o3ds_core_bench`), a full Serialize went from about 500 µs to 96 µs, Parse
@@ -435,6 +444,18 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
   frame (SHR-18).
 
 ### Changed
+
+- **The UE sender stamps its frames** (SND-15, CORE-29; ADR 0005 (iv)). `FO3DSenderSerializer`
+  writes every frame through a per-subject `O3DS::StreamWriter`, in the legacy, residual and
+  quantized encodings, so frames carry `tx_seq`, `tx_wallclock_us` and `frame_epoch`. Receivers
+  now take UE senders' frames through the reorder gate (reordering, duplicate drop), map their
+  clock from `tx_wallclock_us`, and can conceal starved subjects; before, only the legacy
+  timestamp check ran. The counter is per subject because a receiver keys streams by subject
+  names and each frame carries one subject. Stop clears a subject's writer with its cache; the
+  next frame starts a newer epoch, which the gate takes as a restart. A payload serialized while
+  no transport is attached is not sent, so the receiver sees that `tx_seq` as lost. Test:
+  `Open3DBroadcast.Sender.Wire.FramesTakeTheGatedPath`; `LegacyReuseKeepsBytes` now builds its
+  expected frame with the same stamp and checks the per-subject numbering.
 
 - Editor categories renamed from Open3DStream to Open3DBroadcast; CreatedBy updated. The Details panel, Blueprint action menu and Add Component list now group the plugin's properties, functions and components under **Open3DBroadcast** (for example `Open3DBroadcast|Sender|Control`) instead of **Open3DStream**. Only display categories changed: property names, config sections and ini keys are the same, so saved levels, Blueprints, LiveLink presets and project settings load unchanged. The LiveLink source is still listed as "Open3DStream Receiver". Both `.uplugin` files now say `"CreatedBy": "Lifelike & Believable and Open3DStream Contributors"`; `CreatedByURL` is unchanged.
 - The largest reassembled UDP message the receiver accepts drops from 50 MiB to 4 MiB by default; set the new `udp.maxframe` receiver option to raise it (up to 50 MiB).

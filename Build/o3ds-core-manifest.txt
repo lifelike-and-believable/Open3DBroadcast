@@ -17,6 +17,7 @@
 o3ds/model.h
 o3ds/sequencing.h
 o3ds/sender_sync.h
+o3ds/stream_writer.h
 o3ds/reorder_gate.h
 o3ds/clock_offset.h
 o3ds/receiver_streams.h

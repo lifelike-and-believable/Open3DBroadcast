@@ -288,9 +288,15 @@ namespace O3DS
 		flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<O3DS::Data::Curve>>> SerializeCurves(flatbuffers::FlatBufferBuilder& builder);
 		flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> SerializeCurveUpdates(flatbuffers::FlatBufferBuilder& builder, size_t &count);
 
-		int Serialize(std::vector<char>& outbuf, double timestamp);
+		//! The tx_* fields stamp the frame (SubjectList.tx_seq etc.; 0 = unset).
+		//! A sender stamps through O3DS::StreamWriter (ADR 0005 (iv)); calling
+		//! these without a stamp is deprecated (CORE-29): the frame goes out
+		//! unsequenced and a receiver cannot gate, order or conceal it.
+		int Serialize(std::vector<char>& outbuf, double timestamp,
+			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0);
 
-		int SerializeUpdate(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp, const QuantRanges* quantRanges = nullptr);
+		int SerializeUpdate(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp, const QuantRanges* quantRanges = nullptr,
+			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0);
 
 		//! Self-contained residual-coded variant of the vector<char> overload
 		//! above, mirroring it exactly (builds its own FlatBufferBuilder and
@@ -298,9 +304,12 @@ namespace O3DS
 		//! rather than requiring a caller-owned builder/SubjectList like the
 		//! offset-returning overload above does) - the natural entry point
 		//! for a sender that serializes one subject's frame at a time (see
-		//! UE glue in Open3DSender). `seq` defaults to 0 (unset); pass a real
-		//! tx_seq if this subject's frames flow through A1 sequencing.
-		int SerializeUpdateResidual(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp, uint64_t seq = 0);
+		//! UE glue in Open3DSender). `seq` is the frame's tx_seq (0 = unset);
+		//! with tx_wallclock_us and frame_epoch it stamps the frame. A sender
+		//! stamps through O3DS::StreamWriter (ADR 0005 (iv)); calling this
+		//! without a stamp is deprecated (CORE-29).
+		int SerializeUpdateResidual(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp, uint64_t seq = 0,
+			uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0);
 
 	private:
 		std::unique_ptr<ResidualEncoder> mResidualEncoder;
@@ -439,10 +448,9 @@ namespace O3DS
 		//! Encode all of the items in the subject list as binary data.
 		//! tx_seq/tx_wallclock_us/frame_epoch are optional (0 == unset, the
 		//! default); a receiver must treat 0 exactly like a sender that
-		//! predates these fields. See src/o3ds/sequencing.h for generating
-		//! them - callers own a SequenceCounter per outbound stream, this
-		//! function does not generate them itself, it only writes what it's
-		//! given onto the wire.
+		//! predates these fields. This function only writes what it is given;
+		//! a sender stamps through O3DS::StreamWriter (ADR 0005 (iv)), and
+		//! calling it without a stamp is deprecated (CORE-29).
 		int Serialize(std::vector<char> &outbuf, double timestamp = 0.0,
 			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0);
 

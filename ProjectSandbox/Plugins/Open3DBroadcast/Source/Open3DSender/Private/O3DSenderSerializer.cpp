@@ -444,7 +444,7 @@ void FO3DSenderSerializer::SerializeFrameLegacy(const FString& Subject, const FO
 	const double Timestamp = Frame.CaptureTimeSec;
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE_STR("O3D.Sender.Serializer.Core");
-		Cache.LegacySubjects->Serialize(Buffer, Timestamp);
+		Cache.Writer.WriteFull(*Cache.LegacySubjects, Buffer, Timestamp);
 	}
 
 	// Transports receive frames only through the bytes below (the sender pipeline hands OutBytes
@@ -551,7 +551,7 @@ bool FO3DSenderSerializer::SerializeFramePersistent(const FString& Subject, cons
 			SubjectObject->SetResidualEncoder(nullptr);
 		}
 
-		SubjectObject->Serialize(Buffer, Timestamp);
+		Cache.Writer.WriteFull(*SubjectObject, Buffer, Timestamp);
 		Cache.SyncTracker.MarkFullSent(SyncInputs);
 		Cache.FullSyncsSent++;
 	}
@@ -572,7 +572,7 @@ bool FO3DSenderSerializer::SerializeFramePersistent(const FString& Subject, cons
 		if (bResidual)
 		{
 			const double DeltaThreshold = (double)FMath::Max(0.0f, Settings.ResidualDeltaThreshold);
-			SubjectObject->SerializeUpdateResidual(Buffer, Count, DeltaThreshold, Timestamp);
+			Cache.Writer.WriteResidual(*SubjectObject, Buffer, Count, DeltaThreshold, Timestamp);
 		}
 		else
 		{
@@ -580,7 +580,7 @@ bool FO3DSenderSerializer::SerializeFramePersistent(const FString& Subject, cons
 			Ranges.byteRange = (double)FMath::Max(0.0f, Settings.QuantizationByteRange);
 			Ranges.halfRange = (double)FMath::Max(0.0f, Settings.QuantizationHalfRange);
 			const double DeltaThreshold = (double)FMath::Max(0.0f, Settings.QuantizationDeltaThreshold);
-			SubjectObject->SerializeUpdate(Buffer, Count, DeltaThreshold, Timestamp, &Ranges);
+			Cache.Writer.WriteUpdate(*SubjectObject, Buffer, Count, DeltaThreshold, Timestamp, &Ranges);
 		}
 	}
 

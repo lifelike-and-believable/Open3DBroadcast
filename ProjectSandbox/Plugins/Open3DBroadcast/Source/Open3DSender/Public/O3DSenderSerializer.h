@@ -7,6 +7,7 @@
 
 THIRD_PARTY_INCLUDES_START
 #include "o3ds/sender_sync.h"
+#include "o3ds/stream_writer.h"
 THIRD_PARTY_INCLUDES_END
 
 #include <vector>
@@ -113,6 +114,13 @@ private:
 		uint64 BuiltSkeletonHash = 0;
 		/** Full-sync policy for the residual and quantized encodings (ADR 0005 (ii)). */
 		O3DS::FullSyncTracker SyncTracker;
+		/**
+		 * Stamps every frame of this subject with tx_seq, tx_wallclock_us and frame_epoch (ADR 0005
+		 * (iv), SND-15). One per subject because a receiver keys streams by subject names and each
+		 * frame carries one subject. Dropped with the cache (Stop, removal); the next writer starts
+		 * in a strictly larger epoch (process-wide), so the receiver sees a restart.
+		 */
+		O3DS::StreamWriter Writer;
 
 		uint64 FramesSerialized = 0;
 		uint64 BytesSerialized = 0;
