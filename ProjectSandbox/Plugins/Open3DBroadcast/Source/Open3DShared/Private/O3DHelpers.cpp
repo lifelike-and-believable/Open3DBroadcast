@@ -68,36 +68,6 @@ namespace O3DHelpers
         return Match(*Text, *Pattern);
     }
 
-    void UrlSplitQuery(const FString& InUrl, FString& OutBase, TMap<FString, FString>& OutQuery)
-    {
-        OutBase = InUrl;
-        OutQuery.Reset();
-        int32 QIdx;
-        if (InUrl.FindChar('?', QIdx))
-        {
-            OutBase = InUrl.Left(QIdx);
-            const FString Qs = InUrl.Mid(QIdx + 1);
-            TArray<FString> Pairs; Qs.ParseIntoArray(Pairs, TEXT("&"), true);
-            for (const FString& P : Pairs)
-            {
-                FString K, V;
-                if (P.Split(TEXT("="), &K, &V))
-                {
-                    OutQuery.Add(K.ToLower(), V.ToLower());
-                }
-                else if (!P.IsEmpty())
-                {
-                    OutQuery.Add(P.ToLower(), TEXT(""));
-                }
-            }
-        }
-    }
-
-    FString StripQuery(const FString& InUrl)
-    {
-        int32 QIdx; return InUrl.FindChar('?', QIdx) ? InUrl.Left(QIdx) : InUrl;
-    }
-
     bool IsHttpsOrLoopbackHttpUrl(const FString& InUrl)
     {
         const FString Trimmed = InUrl.TrimStartAndEnd();

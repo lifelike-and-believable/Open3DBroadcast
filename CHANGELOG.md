@@ -732,6 +732,35 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Metrics, helpers and a console command cleaned up (WP-A6 PR 2: SHR-25, SHR-34, SND-32)
+
+- **`o3d.DumpMetrics` logs at `Display`** instead of `Warning` (about 60 lines of informational
+  output), and so does `o3d.ResetMetrics` (SHR-25).
+- **`o3d.ResetMetrics` clears everything**: the receiver's per-operation timings (parse, pose
+  extraction, LiveLink push, total) and active subject count were left behind (SHR-25).
+- **Metrics that nothing recorded are gone** (SHR-25), so the dump no longer prints zeros for
+  them. **API removal for C++ users:** `FSenderMetrics::FramesQueued`, `SerializationErrors`,
+  `AvgSerializationTimeMs`, `ActiveSubjectCount`, `AllocationCount`, `AllocationBytes` and
+  `FrameIntervalMs`; `FReceiverMetrics::AvgDeserializationTimeMs`;
+  `FO3DTransportMetrics::AvgPacketLossPercent`, `AvgLatencyMs` and `AvgBandwidthMbps`;
+  `RecordFrameQueued`, `RecordSerializationError`, `RecordAllocation`, `SetActiveSubjectCount`,
+  `UpdateFrameInterval`, `RecordAllocationsForContext`, `GetAllocationRecords` and
+  `FAllocationRecord`; and the unused `O3D_RECORD_*` / `O3D_SET_SUBJECT_COUNT` macros. The CSV
+  row `FramesQueued` is gone.
+- **`SkeletonUpdates` is recorded now**: one per static data push (a subject new to LiveLink, or
+  with new bone or curve names). The dump shows sender `Transport Frames Dropped`.
+- **`GetMetricsAsCSV` covers more**: transport rows (`Transport.<name>.FramesSent` and the other
+  counters), the per-operation timings, the peak receive-to-apply latency, deserialization
+  errors, skeleton and pose updates, and sender transport drops.
+- **Unused URL helpers deleted** (SHR-34): `O3DHelpers::UrlSplitQuery` (which lowercased query
+  values), `O3DHelpers::StripQuery`, and the `O3DSHelpers` compatibility namespace.
+  `SanitizeSubjectName`'s comment now says what it does (spaces become `_`, every other character
+  outside `[-._A-Za-z0-9/]`, tabs included, is dropped); its behaviour is unchanged.
+- **`o3ds.Sender.DumpStats` is registered for the module's lifetime** (SND-32): the first
+  serializer registered it and nothing unregistered it, which left a delegate into unloaded code
+  after a module unload. The command now exists from module load.
+- **Tests.** New `Open3DBroadcast.Shared.Metrics.ResetClearsEverythingAndCsvListsTransports`.
+
 ### Quieter receiver logs; receive-to-apply latency (WP-A6 PR 1: RCV-25, RCV-26, RCV-33)
 
 - **`o3ds.Receiver.DebugParse` defaults to 0** (was 1), so the receiver's per-packet parse logs

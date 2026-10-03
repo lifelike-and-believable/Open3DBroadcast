@@ -7,7 +7,6 @@
 #include "Containers/Map.h"
 #include "HAL/CriticalSection.h"
 #include "HAL/PlatformTime.h"
-#include "Misc/DateTime.h"
 #include "Templates/SharedPointer.h"
 #include "UObject/NameTypes.h"
 
@@ -71,11 +70,6 @@ struct FO3DTransportMetrics
 	// Queue depth (for async transports)
 	std::atomic<int32> PendingFrames{ 0 };             // Frames waiting to send
 	std::atomic<int32> MaxPendingFrames{ 0 };          // Peak queue depth
-
-	// Network stats
-	std::atomic<double> AvgPacketLossPercent{ 0.0 };   // Estimated packet loss
-	std::atomic<double> AvgLatencyMs{ 0.0 };           // Network latency estimate
-	std::atomic<double> AvgBandwidthMbps{ 0.0 };       // Estimated bandwidth usage
 
 	// Errors
 	std::atomic<uint64> SendErrors{ 0 };
@@ -204,27 +198,18 @@ public:
 	{
 		// Frame production
 		std::atomic<uint64> FramesCaptured{ 0 };           // Total frames captured from component
-		std::atomic<uint64> FramesQueued{ 0 };             // Total frames queued to transport
 		std::atomic<uint64> FramesDropped{ 0 };            // Frames dropped due to backpressure
 
 		// Serialization
 		std::atomic<uint64> BytesSerialized{ 0 };          // Total bytes serialized
-		std::atomic<uint64> SerializationErrors{ 0 };      // Serialization failures
-		std::atomic<double> AvgSerializationTimeMs{ 0.0 }; // Rolling average serialization latency
 
 		// Transport send
 		std::atomic<uint64> BytesSent{ 0 };                // Total bytes sent to network/transport
 		std::atomic<uint64> TransportFramesDropped{ 0 };   // Frames dropped by transport layer
-		std::atomic<int32> ActiveSubjectCount{ 0 };        // Current number of subjects being broadcast
-
-		// Allocations
-		std::atomic<uint64> AllocationCount{ 0 };          // Number of allocations in send path
-		std::atomic<uint64> AllocationBytes{ 0 };          // Total bytes allocated in send path
 
 		// FPlatformTime::Seconds() when the metrics were last reset. Atomic because the console
 		// command may reset while other threads read it (SHR-26).
 		std::atomic<double> MetricsStartSeconds{ FPlatformTime::Seconds() };
-		std::atomic<double> FrameIntervalMs{ 33.33 };  // Estimated frame interval (updated dynamically)
 	};
 
 	/**
@@ -241,7 +226,6 @@ public:
 		std::atomic<uint64> BytesDeserialized{ 0 };        // Total bytes deserialized
 		std::atomic<uint64> DeserializationErrors{ 0 };    // Deserialization failures
 		std::atomic<uint64> InvalidPosesDropped{ 0 };      // Subjects skipped: a transform was not finite, had a zero rotation or was missing (RCV-13)
-		std::atomic<double> AvgDeserializationTimeMs{ 0.0 }; // Rolling average deserialization latency
 
 		// Per-operation timing (to identify bottlenecks)
 		std::atomic<double> AvgParseTimeMs{ 0.0 };         // Rolling avg: FlatBuffer parse time
@@ -250,7 +234,7 @@ public:
 		std::atomic<double> AvgTotalProcessingTimeMs{ 0.0 }; // Rolling avg: total per-frame processing
 
 		// LiveLink updates
-		std::atomic<uint64> SkeletonUpdates{ 0 };          // Number of skeleton hierarchy updates
+		std::atomic<uint64> SkeletonUpdates{ 0 };          // Static data pushes: a subject new to LiveLink or with new bone or curve names
 		std::atomic<uint64> PoseUpdates{ 0 };              // Number of pose frame updates
 		std::atomic<int32> ActiveSubjectCount{ 0 };        // Current number of subjects being received
 
@@ -310,18 +294,6 @@ public:
 	/** Transport-specific metrics (see FO3DTransportMetrics). */
 	using FTransportMetrics = FO3DTransportMetrics;
 
-	/**
-	 * Allocation tracking (for memory profiling)
-	 */
-	struct FAllocationRecord
-	{
-		FString Context;           // Where allocation occurred (e.g. "WebRTCSender::Send()")
-		uint64 AllocationCount = 0;
-		uint64 TotalBytes = 0;
-		double AvgAllocationSizeBytes = 0.0;
-		FDateTime LastUpdated = FDateTime::Now();
-	};
-
 	// =====================================================================
 	// PUBLIC API
 	// =====================================================================
@@ -354,7 +326,7 @@ public:
 	/** Dump all metrics to log/console */
 	void DumpMetrics() const;
 
-	/** Dump metrics in CSV format for external analysis */
+	/** The metrics as "Metric,Value" CSV rows, transports included, for external analysis */
 	FString GetMetricsAsCSV() const;
 
 	// =====================================================================
@@ -362,19 +334,10 @@ public:
 	// =====================================================================
 
 	FORCEINLINE void RecordFrameCaptured() { ++SenderMetrics.FramesCaptured; }
-	FORCEINLINE void RecordFrameQueued() { ++SenderMetrics.FramesQueued; }
 	FORCEINLINE void RecordFrameDropped() { ++SenderMetrics.FramesDropped; }
 	FORCEINLINE void RecordBytesSerialized(uint64 ByteCount) { SenderMetrics.BytesSerialized += ByteCount; }
-	FORCEINLINE void RecordSerializationError() { ++SenderMetrics.SerializationErrors; }
 	FORCEINLINE void RecordBytesSent(uint64 ByteCount) { SenderMetrics.BytesSent += ByteCount; }
 	FORCEINLINE void RecordTransportFrameDropped() { ++SenderMetrics.TransportFramesDropped; }
-	FORCEINLINE void RecordAllocation(uint64 ByteCount)
-	{
-		++SenderMetrics.AllocationCount;
-		SenderMetrics.AllocationBytes += ByteCount;
-	}
-	FORCEINLINE void SetActiveSubjectCount(int32 Count) { SenderMetrics.ActiveSubjectCount.store(Count); }
-	FORCEINLINE void UpdateFrameInterval(double IntervalMs) { SenderMetrics.FrameIntervalMs.store(IntervalMs, std::memory_order_relaxed); }
 
 	// =====================================================================
 	// RECEIVER SIDE API
@@ -457,16 +420,6 @@ public:
 	/** Record pipe count (for NNG) */
 	void SetTransportPipeCount(FName TransportName, int32 PipeCount) { AcquireTransportMetrics(TransportName)->SetPipeCount(PipeCount); }
 
-	// =====================================================================
-	// ALLOCATION TRACKING
-	// =====================================================================
-
-	/** Record allocation for profiling */
-	void RecordAllocationsForContext(const FString& Context, uint64 Count, uint64 TotalBytes);
-
-	/** Copy of the allocation records, taken under the lock. */
-	TArray<FAllocationRecord> GetAllocationRecords() const;
-
 private:
 	FO3DPerformanceMetrics() = default;
 	~FO3DPerformanceMetrics() = default;
@@ -479,30 +432,4 @@ private:
 	FSenderMetrics SenderMetrics;
 	FReceiverMetrics ReceiverMetrics;
 	FO3DTransportMetricsRegistry TransportRegistry;
-	TArray<FAllocationRecord> AllocationRecords;
-
-	// Guards AllocationRecords only. Counters are atomics; transports have their own registry lock.
-	mutable FCriticalSection MetricsMutex;
 };
-
-// =====================================================================
-// CONVENIENCE MACROS (for easy instrumentation)
-// =====================================================================
-
-#define O3D_RECORD_FRAME_CAPTURED() \
-	FO3DPerformanceMetrics::Get().RecordFrameCaptured()
-
-#define O3D_RECORD_FRAME_QUEUED() \
-	FO3DPerformanceMetrics::Get().RecordFrameQueued()
-
-#define O3D_RECORD_BYTES_SERIALIZED(ByteCount) \
-	FO3DPerformanceMetrics::Get().RecordBytesSerialized(ByteCount)
-
-#define O3D_RECORD_BYTES_SENT(ByteCount) \
-	FO3DPerformanceMetrics::Get().RecordBytesSent(ByteCount)
-
-#define O3D_SET_SUBJECT_COUNT(Count) \
-	FO3DPerformanceMetrics::Get().SetActiveSubjectCount(Count)
-
-#define O3D_RECORD_ALLOCATION(ByteCount) \
-	FO3DPerformanceMetrics::Get().RecordAllocation(ByteCount)

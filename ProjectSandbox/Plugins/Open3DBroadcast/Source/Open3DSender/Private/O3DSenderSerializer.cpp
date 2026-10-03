@@ -74,6 +74,13 @@ namespace
 
 TArray<FO3DSenderSerializer*> FO3DSenderSerializer::GInstances;
 
+// Registered when the module loads and unregistered when it unloads (SND-32): it used to be
+// registered by the first serializer and never unregistered, leaving a delegate into unloaded code.
+static FAutoConsoleCommand GO3DSenderDumpStatsCommand(
+	TEXT("o3ds.Sender.DumpStats"),
+	TEXT("Dump per-subject serialization stats to the log"),
+	FConsoleCommandDelegate::CreateStatic(&FO3DSenderSerializer::DumpAllStats));
+
 /**
  * Registers the instance for o3ds.Sender.DumpStats. The serializer used to do this, and subscribe to
  * the component's OnPoseFrameReady, in Attach(UO3DSenderComponent*); it now holds no component
@@ -82,19 +89,6 @@ TArray<FO3DSenderSerializer*> FO3DSenderSerializer::GInstances;
  */
 FO3DSenderSerializer::FO3DSenderSerializer()
 {
-	// Registered once, the first time a serializer is created, as Attach() did. A function-local
-	// static, so two first constructions cannot register it twice.
-	static const bool bRegisteredCmd = []()
-	{
-		IConsoleManager::Get().RegisterConsoleCommand(
-			TEXT("o3ds.Sender.DumpStats"),
-			TEXT("Dump per-subject serialization stats to the log"),
-			FConsoleCommandDelegate::CreateStatic(&FO3DSenderSerializer::DumpAllStats),
-			ECVF_Default);
-		return true;
-	}();
-	(void)bRegisteredCmd;
-
 	FScopeLock InstancesScopeLock(&GetSerializerInstancesLock());
 	GInstances.AddUnique(this);
 }

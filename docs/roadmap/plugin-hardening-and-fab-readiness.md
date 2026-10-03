@@ -695,7 +695,7 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
   - Use per-instance log-once flags.
   - Fix or remove the misleading "round-trip latency" metric (RCV-33).
   - Delete the dead helpers.
-- **Progress** (2026-10-03): SHR-19 (the WebRTC CVars in Shared) and SHR-22 (the Build.cs flag cache) were already fixed by earlier work. PR 1 (receiver logs): RCV-25, RCV-26, RCV-33. PR 2 (Shared): SHR-25, SHR-34, SND-32.
+- **Progress** (2026-10-03): SHR-19 (the WebRTC CVars in Shared) and SHR-22 (the Build.cs flag cache) were already fixed by earlier work. PR 1 (receiver logs): RCV-25, RCV-26, RCV-33. PR 2 (Shared): SHR-25 (reset, dead metrics removed, Display, CSV with transports), SHR-34 (dead URL helpers), SND-32 (DumpStats command lifetime). With both, WP-A6 is complete.
 
 #### WP-A7: Core public API and legacy code  ·  P2 · M · design then coding
 - **Findings:** CORE-17, CORE-24, CORE-25, CORE-27, CORE-28, CORE-30

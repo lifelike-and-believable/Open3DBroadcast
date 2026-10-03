@@ -110,15 +110,10 @@ void FO3DPerformanceMetrics::Reset()
 {
 	// Sender metrics
 	SenderMetrics.FramesCaptured.store(0);
-	SenderMetrics.FramesQueued.store(0);
 	SenderMetrics.FramesDropped.store(0);
 	SenderMetrics.BytesSerialized.store(0);
-	SenderMetrics.SerializationErrors.store(0);
-	SenderMetrics.AvgSerializationTimeMs.store(0.0);
 	SenderMetrics.BytesSent.store(0);
 	SenderMetrics.TransportFramesDropped.store(0);
-	SenderMetrics.AllocationCount.store(0);
-	SenderMetrics.AllocationBytes.store(0);
 	SenderMetrics.MetricsStartSeconds.store(FPlatformTime::Seconds());
 
 	// Receiver metrics
@@ -128,9 +123,13 @@ void FO3DPerformanceMetrics::Reset()
 	ReceiverMetrics.BytesDeserialized.store(0);
 	ReceiverMetrics.DeserializationErrors.store(0);
 	ReceiverMetrics.InvalidPosesDropped.store(0);
-	ReceiverMetrics.AvgDeserializationTimeMs.store(0.0);
+	ReceiverMetrics.AvgParseTimeMs.store(0.0);
+	ReceiverMetrics.AvgPoseExtractionTimeMs.store(0.0);
+	ReceiverMetrics.AvgLiveLinkPushTimeMs.store(0.0);
+	ReceiverMetrics.AvgTotalProcessingTimeMs.store(0.0);
 	ReceiverMetrics.SkeletonUpdates.store(0);
 	ReceiverMetrics.PoseUpdates.store(0);
+	ReceiverMetrics.ActiveSubjectCount.store(0);
 	ReceiverMetrics.AvgReceiveToApplyLatencyMs.store(0.0);
 	ReceiverMetrics.MaxLatencyMs.store(0.0);
 	ReceiverMetrics.GateDupDropped.store(0);
@@ -153,9 +152,6 @@ void FO3DPerformanceMetrics::Reset()
 
 	// Transport metrics
 	TransportRegistry.ResetCounters();
-
-	FScopeLock Lock(&MetricsMutex);
-	AllocationRecords.Empty();
 }
 
 // =====================================================================
@@ -207,46 +203,6 @@ void FO3DPerformanceMetrics::RecordTotalProcessingTimeMs(double TimeMs)
 }
 
 // =====================================================================
-// ALLOCATION TRACKING
-// =====================================================================
-
-void FO3DPerformanceMetrics::RecordAllocationsForContext(const FString& Context, uint64 Count, uint64 TotalBytes)
-{
-	FScopeLock Lock(&MetricsMutex);
-
-	// Find or create record for this context
-	FAllocationRecord* Record = nullptr;
-	for (FAllocationRecord& R : AllocationRecords)
-	{
-		if (R.Context == Context)
-		{
-			Record = &R;
-			break;
-		}
-	}
-
-	if (!Record)
-	{
-		Record = &AllocationRecords.Add_GetRef(FAllocationRecord());
-		Record->Context = Context;
-	}
-
-	Record->AllocationCount = Count;
-	Record->TotalBytes = TotalBytes;
-	if (Count > 0)
-	{
-		Record->AvgAllocationSizeBytes = static_cast<double>(TotalBytes) / static_cast<double>(Count);
-	}
-	Record->LastUpdated = FDateTime::Now();
-}
-
-TArray<FO3DPerformanceMetrics::FAllocationRecord> FO3DPerformanceMetrics::GetAllocationRecords() const
-{
-	FScopeLock Lock(&MetricsMutex);
-	return AllocationRecords;
-}
-
-// =====================================================================
 // METRICS DUMPING
 // =====================================================================
 
@@ -254,43 +210,33 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 {
 	// SHR-17: copy the shared state first and log without holding any lock.
 	const TArray<FO3DTransportMetricsSnapshot> TransportMetrics = GetTransportMetricsSnapshot();
-	const TArray<FAllocationRecord> AllocationRecordsCopy = GetAllocationRecords();
 
-	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
-	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("========================================"));
-	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  O3D PERFORMANCE METRICS REPORT"));
-	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("========================================"));
-	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+	UE_LOG(LogO3DPerformanceMetrics, Display, TEXT(""));
+	UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("========================================"));
+	UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  O3D PERFORMANCE METRICS REPORT"));
+	UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("========================================"));
+	UE_LOG(LogO3DPerformanceMetrics, Display, TEXT(""));
 
 	// Uptime
 	const double UptimeSeconds = FPlatformTime::Seconds() - SenderMetrics.MetricsStartSeconds.load();
-	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("Metrics Uptime: %.1f seconds"), UptimeSeconds);
-	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+	UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("Metrics Uptime: %.1f seconds"), UptimeSeconds);
+	UE_LOG(LogO3DPerformanceMetrics, Display, TEXT(""));
 
 	// ========== SENDER METRICS ==========
 	{
 		uint64 FramesCaptured = SenderMetrics.FramesCaptured.load();
-		uint64 FramesQueued = SenderMetrics.FramesQueued.load();
 		uint64 FramesDropped = SenderMetrics.FramesDropped.load();
 		uint64 BytesSerialized = SenderMetrics.BytesSerialized.load();
 		uint64 BytesSent = SenderMetrics.BytesSent.load();
-		uint64 AllocationCount = SenderMetrics.AllocationCount.load();
-		uint64 AllocationBytes = SenderMetrics.AllocationBytes.load();
-		int32 ActiveSubjects = SenderMetrics.ActiveSubjectCount.load();
 
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("[SENDER - BROADCAST]"));
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Frames Captured: %llu"), FramesCaptured);
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Frames Queued: %llu"), FramesQueued);
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Frames Dropped: %llu (%.2f%% drop rate)"),
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("[SENDER - BROADCAST]"));
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Frames Captured: %llu"), FramesCaptured);
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Frames Dropped: %llu (%.2f%% drop rate)"),
 			FramesDropped, FramesCaptured > 0 ? (100.0 * FramesDropped / FramesCaptured) : 0.0);
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Bytes Serialized: %.2f MB"), BytesSerialized / 1024.0 / 1024.0);
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Bytes Sent: %.2f MB"), BytesSent / 1024.0 / 1024.0);
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Active Subjects: %d"), ActiveSubjects);
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Allocations: %llu (%llu bytes, avg %.0f bytes/alloc)"),
-			AllocationCount, AllocationBytes,
-			AllocationCount > 0 ? (double)AllocationBytes / AllocationCount : 0.0);
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Serialization Errors: %llu"), SenderMetrics.SerializationErrors.load());
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Bytes Serialized: %.2f MB"), BytesSerialized / 1024.0 / 1024.0);
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Bytes Sent: %.2f MB"), BytesSent / 1024.0 / 1024.0);
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Transport Frames Dropped: %llu"), SenderMetrics.TransportFramesDropped.load());
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT(""));
 	}
 
 	// ========== RECEIVER METRICS ==========
@@ -303,20 +249,20 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 		double MaxLatency = ReceiverMetrics.MaxLatencyMs.load();
 		int32 ActiveSubjects = ReceiverMetrics.ActiveSubjectCount.load();
 
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("[RECEIVER - LIVELINK]"));
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Frames Received: %llu"), FramesReceived);
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Frames Applied: %llu"), FramesApplied);
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Frames Dropped: %llu (%.2f%% drop rate)"),
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("[RECEIVER - LIVELINK]"));
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Frames Received: %llu"), FramesReceived);
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Frames Applied: %llu"), FramesApplied);
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Frames Dropped: %llu (%.2f%% drop rate)"),
 			FramesDropped, FramesReceived > 0 ? (100.0 * FramesDropped / FramesReceived) : 0.0);
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Bytes Deserialized: %.2f MB"), BytesDeserialized / 1024.0 / 1024.0);
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg Receive-to-Apply Latency: %.2f ms"), AvgLatency);
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Max Receive-to-Apply Latency: %.2f ms"), MaxLatency);
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Active Subjects: %d"), ActiveSubjects);
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Skeleton Updates: %llu"), ReceiverMetrics.SkeletonUpdates.load());
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Pose Updates: %llu"), ReceiverMetrics.PoseUpdates.load());
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Deserialization Errors: %llu"), ReceiverMetrics.DeserializationErrors.load());
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Invalid Poses Dropped: %llu"), ReceiverMetrics.InvalidPosesDropped.load());
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Bytes Deserialized: %.2f MB"), BytesDeserialized / 1024.0 / 1024.0);
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Avg Receive-to-Apply Latency: %.2f ms"), AvgLatency);
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Max Receive-to-Apply Latency: %.2f ms"), MaxLatency);
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Active Subjects: %d"), ActiveSubjects);
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Skeleton Updates: %llu"), ReceiverMetrics.SkeletonUpdates.load());
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Pose Updates: %llu"), ReceiverMetrics.PoseUpdates.load());
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Deserialization Errors: %llu"), ReceiverMetrics.DeserializationErrors.load());
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Invalid Poses Dropped: %llu"), ReceiverMetrics.InvalidPosesDropped.load());
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT(""));
 
 		// Per-operation timing breakdown
 		double AvgParseTime = ReceiverMetrics.AvgParseTimeMs.load();
@@ -326,12 +272,12 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 
 		if (AvgParseTime > 0.0 || AvgPoseExtraction > 0.0 || AvgLiveLinkPush > 0.0 || AvgTotalProcessing > 0.0)
 		{
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("[RECEIVER - PER-OPERATION TIMING]"));
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg FlatBuffer Parse Time: %.3f ms"), AvgParseTime);
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg Pose Extraction Time: %.3f ms"), AvgPoseExtraction);
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg LiveLink Push Time: %.3f ms"), AvgLiveLinkPush);
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg Total Processing Time: %.3f ms"), AvgTotalProcessing);
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("[RECEIVER - PER-OPERATION TIMING]"));
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Avg FlatBuffer Parse Time: %.3f ms"), AvgParseTime);
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Avg Pose Extraction Time: %.3f ms"), AvgPoseExtraction);
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Avg LiveLink Push Time: %.3f ms"), AvgLiveLinkPush);
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Avg Total Processing Time: %.3f ms"), AvgTotalProcessing);
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT(""));
 		}
 
 		// A2: reorder gate / clock-offset diagnostics
@@ -344,13 +290,13 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 			double AvgOffset = ReceiverMetrics.AvgClockOffsetMs.load();
 			double AvgJitter = ReceiverMetrics.AvgJitterMs.load();
 
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("[RECEIVER - REORDER GATE / CLOCK MAPPING]"));
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Lost: %llu, Reordered: %llu, Duplicate: %llu, Stale: %llu"),
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("[RECEIVER - REORDER GATE / CLOCK MAPPING]"));
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Lost: %llu, Reordered: %llu, Duplicate: %llu, Stale: %llu"),
 				GateLost, GateReordered, GateDupDropped, GateStaleDropped);
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Gate Buffer Occupancy: %d"), GateOccupancy);
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg Clock Offset (relative unless clocks declared synced): %.2f ms"), AvgOffset);
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg Jitter (excess delay above rolling-min floor): %.2f ms"), AvgJitter);
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Gate Buffer Occupancy: %d"), GateOccupancy);
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Avg Clock Offset (relative unless clocks declared synced): %.2f ms"), AvgOffset);
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Avg Jitter (excess delay above rolling-min floor): %.2f ms"), AvgJitter);
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT(""));
 		}
 
 		// C1: receiver-side concealment diagnostics
@@ -363,15 +309,15 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 
 			if (ConcealedFrames > 0 || CorrectionFrames > 0 || Recoveries > 0 || RenderAheadFrames > 0)
 			{
-				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("[RECEIVER - CONCEALMENT]"));
-				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Concealed Frames: %llu (%llu held rather than predicted)"), ConcealedFrames, FallbackHolds);
-				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Correction Frames: %llu, Recoveries: %llu"), CorrectionFrames, Recoveries);
-				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg Prediction Error: %.3f units, %.2f deg"),
+				UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("[RECEIVER - CONCEALMENT]"));
+				UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Concealed Frames: %llu (%llu held rather than predicted)"), ConcealedFrames, FallbackHolds);
+				UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Correction Frames: %llu, Recoveries: %llu"), CorrectionFrames, Recoveries);
+				UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Avg Prediction Error: %.3f units, %.2f deg"),
 					ReceiverMetrics.AvgConcealmentPredictionTranslationError.load(), ReceiverMetrics.AvgConcealmentPredictionRotationErrorDeg.load());
-				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg Pop (discontinuity at recovery): %.3f units, %.2f deg"),
+				UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Avg Pop (discontinuity at recovery): %.3f units, %.2f deg"),
 					ReceiverMetrics.AvgConcealmentPopTranslation.load(), ReceiverMetrics.AvgConcealmentPopRotationDeg.load());
-				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Render-Ahead Frames (C1.c, opt-in): %llu"), RenderAheadFrames);
-				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+				UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  Render-Ahead Frames (C1.c, opt-in): %llu"), RenderAheadFrames);
+				UE_LOG(LogO3DPerformanceMetrics, Display, TEXT(""));
 			}
 		}
 	}
@@ -379,7 +325,7 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 	// ========== TRANSPORT METRICS ==========
 	if (TransportMetrics.Num() > 0)
 	{
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("[TRANSPORTS]"));
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("[TRANSPORTS]"));
 		for (const FO3DTransportMetricsSnapshot& TMetrics : TransportMetrics)
 		{
 			const uint64 FramesSent = TMetrics.FramesSent;
@@ -388,55 +334,41 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 			const int32 PendingFrames = TMetrics.PendingFrames;
 			const int32 MaxPending = TMetrics.MaxPendingFrames;
 
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  %s:"), *TMetrics.TransportName.ToString());
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("    Connected: %s"), bConnected ? TEXT("YES") : TEXT("NO"));
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("    Frames Sent: %llu"), FramesSent);
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("    Bytes Sent: %.2f MB"), BytesSent / 1024.0 / 1024.0);
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("    Pending Frames: %d (max: %d)"), PendingFrames, MaxPending);
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("    Connection Attempts: %d, Reconnects: %d"),
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  %s:"), *TMetrics.TransportName.ToString());
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("    Connected: %s"), bConnected ? TEXT("YES") : TEXT("NO"));
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("    Frames Sent: %llu"), FramesSent);
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("    Bytes Sent: %.2f MB"), BytesSent / 1024.0 / 1024.0);
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("    Pending Frames: %d (max: %d)"), PendingFrames, MaxPending);
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("    Connection Attempts: %d, Reconnects: %d"),
 				TMetrics.ConnectionAttempts, TMetrics.ReconnectCount);
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("    Send Errors: %llu, Receive Errors: %llu"),
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("    Send Errors: %llu, Receive Errors: %llu"),
 				TMetrics.SendErrors, TMetrics.ReceiveErrors);
 			if (TMetrics.PipeCount > 0)
 			{
-				UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("    Pipes Connected: %d"), TMetrics.PipeCount);
+				UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("    Pipes Connected: %d"), TMetrics.PipeCount);
 			}
 		}
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT(""));
 	}
 
-	// ========== ALLOCATION BREAKDOWN ==========
-	if (AllocationRecordsCopy.Num() > 0)
-	{
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("[ALLOCATION BREAKDOWN]"));
-		for (const FAllocationRecord& Record : AllocationRecordsCopy)
-		{
-			UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  %s: %llu allocations, %.2f MB (avg %.0f bytes/alloc)"),
-				*Record.Context, Record.AllocationCount,
-				Record.TotalBytes / 1024.0 / 1024.0,
-				Record.AvgAllocationSizeBytes);
-		}
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
-	}
-
-	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("========================================"));
-	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  End of Report"));
-	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("========================================"));
-	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
+	UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("========================================"));
+	UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  End of Report"));
+	UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("========================================"));
+	UE_LOG(LogO3DPerformanceMetrics, Display, TEXT(""));
 }
 
 FString FO3DPerformanceMetrics::GetMetricsAsCSV() const
 {
-	// Reads atomics only; no lock needed.
+	// Reads atomics, and the transports through their snapshot (taken under the registry lock).
 	FString CSV;
 	CSV += TEXT("Metric,Value\n");
 
 	// Sender metrics
 	CSV += FString::Printf(TEXT("FramesCaptured,%llu\n"), SenderMetrics.FramesCaptured.load());
-	CSV += FString::Printf(TEXT("FramesQueued,%llu\n"), SenderMetrics.FramesQueued.load());
 	CSV += FString::Printf(TEXT("FramesDropped,%llu\n"), SenderMetrics.FramesDropped.load());
 	CSV += FString::Printf(TEXT("BytesSerialized,%llu\n"), SenderMetrics.BytesSerialized.load());
 	CSV += FString::Printf(TEXT("BytesSent,%llu\n"), SenderMetrics.BytesSent.load());
+	CSV += FString::Printf(TEXT("TransportFramesDropped,%llu\n"), SenderMetrics.TransportFramesDropped.load());
 
 	// Receiver metrics
 	CSV += FString::Printf(TEXT("ReceiverFramesReceived,%llu\n"), ReceiverMetrics.FramesReceived.load());
@@ -444,7 +376,15 @@ FString FO3DPerformanceMetrics::GetMetricsAsCSV() const
 	CSV += FString::Printf(TEXT("ReceiverFramesDropped,%llu\n"), ReceiverMetrics.FramesDropped.load());
 	CSV += FString::Printf(TEXT("ReceiverBytesDeserialized,%llu\n"), ReceiverMetrics.BytesDeserialized.load());
 	CSV += FString::Printf(TEXT("ReceiverInvalidPosesDropped,%llu\n"), ReceiverMetrics.InvalidPosesDropped.load());
+	CSV += FString::Printf(TEXT("ReceiverDeserializationErrors,%llu\n"), ReceiverMetrics.DeserializationErrors.load());
+	CSV += FString::Printf(TEXT("ReceiverSkeletonUpdates,%llu\n"), ReceiverMetrics.SkeletonUpdates.load());
+	CSV += FString::Printf(TEXT("ReceiverPoseUpdates,%llu\n"), ReceiverMetrics.PoseUpdates.load());
 	CSV += FString::Printf(TEXT("AvgReceiveToApplyLatencyMs,%.2f\n"), ReceiverMetrics.AvgReceiveToApplyLatencyMs.load());
+	CSV += FString::Printf(TEXT("MaxReceiveToApplyLatencyMs,%.2f\n"), ReceiverMetrics.MaxLatencyMs.load());
+	CSV += FString::Printf(TEXT("AvgParseTimeMs,%.3f\n"), ReceiverMetrics.AvgParseTimeMs.load());
+	CSV += FString::Printf(TEXT("AvgPoseExtractionTimeMs,%.3f\n"), ReceiverMetrics.AvgPoseExtractionTimeMs.load());
+	CSV += FString::Printf(TEXT("AvgLiveLinkPushTimeMs,%.3f\n"), ReceiverMetrics.AvgLiveLinkPushTimeMs.load());
+	CSV += FString::Printf(TEXT("AvgTotalProcessingTimeMs,%.3f\n"), ReceiverMetrics.AvgTotalProcessingTimeMs.load());
 	CSV += FString::Printf(TEXT("GateLost,%llu\n"), ReceiverMetrics.GateLost.load());
 	CSV += FString::Printf(TEXT("GateReordered,%llu\n"), ReceiverMetrics.GateReordered.load());
 	CSV += FString::Printf(TEXT("GateDupDropped,%llu\n"), ReceiverMetrics.GateDupDropped.load());
@@ -461,6 +401,24 @@ FString FO3DPerformanceMetrics::GetMetricsAsCSV() const
 	CSV += FString::Printf(TEXT("AvgConcealmentPredictionRotationErrorDeg,%.2f\n"), ReceiverMetrics.AvgConcealmentPredictionRotationErrorDeg.load());
 	CSV += FString::Printf(TEXT("AvgConcealmentPopTranslation,%.4f\n"), ReceiverMetrics.AvgConcealmentPopTranslation.load());
 	CSV += FString::Printf(TEXT("AvgConcealmentPopRotationDeg,%.2f\n"), ReceiverMetrics.AvgConcealmentPopRotationDeg.load());
+
+	// Transports (SHR-25): one row per counter, prefixed with the transport name.
+	for (const FO3DTransportMetricsSnapshot& Transport : GetTransportMetricsSnapshot())
+	{
+		const FString Prefix = FString::Printf(TEXT("Transport.%s."), *Transport.TransportName.ToString());
+		CSV += FString::Printf(TEXT("%sConnected,%d\n"), *Prefix, Transport.bConnected ? 1 : 0);
+		CSV += FString::Printf(TEXT("%sFramesSent,%llu\n"), *Prefix, Transport.FramesSent);
+		CSV += FString::Printf(TEXT("%sBytesSent,%llu\n"), *Prefix, Transport.BytesSent);
+		CSV += FString::Printf(TEXT("%sFramesReceived,%llu\n"), *Prefix, Transport.FramesReceived);
+		CSV += FString::Printf(TEXT("%sBytesReceived,%llu\n"), *Prefix, Transport.BytesReceived);
+		CSV += FString::Printf(TEXT("%sPendingFrames,%d\n"), *Prefix, Transport.PendingFrames);
+		CSV += FString::Printf(TEXT("%sMaxPendingFrames,%d\n"), *Prefix, Transport.MaxPendingFrames);
+		CSV += FString::Printf(TEXT("%sConnectionAttempts,%d\n"), *Prefix, Transport.ConnectionAttempts);
+		CSV += FString::Printf(TEXT("%sReconnectCount,%d\n"), *Prefix, Transport.ReconnectCount);
+		CSV += FString::Printf(TEXT("%sSendErrors,%llu\n"), *Prefix, Transport.SendErrors);
+		CSV += FString::Printf(TEXT("%sReceiveErrors,%llu\n"), *Prefix, Transport.ReceiveErrors);
+		CSV += FString::Printf(TEXT("%sPipeCount,%d\n"), *Prefix, Transport.PipeCount);
+	}
 
 	return CSV;
 }
@@ -483,7 +441,7 @@ static FAutoConsoleCommand DumpMetricsCmd(
 void ResetO3DMetrics()
 {
 	FO3DPerformanceMetrics::Get().Reset();
-	UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("Performance metrics reset"));
+	UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("Performance metrics reset"));
 }
 
 static FAutoConsoleCommand ResetMetricsCmd(

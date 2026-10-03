@@ -13,6 +13,7 @@
 #include "HAL/Runnable.h"
 #include "HAL/RunnableThread.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/Guid.h"
 #include "O3DPerformanceMetrics.h"
 #include "Templates/UniquePtr.h"
 
@@ -212,6 +213,45 @@ bool FO3DMetricsAtomicUpdatesTest::RunTest(const FString& Parameters)
 
 	O3DMetrics::AtomicStoreMax(IntPeak, 3);
 	TestEqual(TEXT("A smaller value never lowers the peak"), IntPeak.load(), NumThreads * UpdatesPerThread - 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DMetricsResetAndCsvTest, "Open3DBroadcast.Shared.Metrics.ResetClearsEverythingAndCsvListsTransports", O3DB_TEST_FLAGS)
+bool FO3DMetricsResetAndCsvTest::RunTest(const FString& Parameters)
+{
+	// SHR-25: Reset left the per-operation timings and subject counts behind, and the CSV had no
+	// transport rows.
+	FO3DPerformanceMetrics& Metrics = FO3DPerformanceMetrics::Get();
+	const FName TransportName(*FString::Printf(TEXT("MetricsCsvTest_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	FO3DTransportMetricsRef Transport = Metrics.AcquireTransportMetrics(TransportName);
+	Transport->RecordFrameSent(100);
+
+	Metrics.RecordParseTimeMs(2.0);
+	Metrics.RecordPoseExtractionTimeMs(2.0);
+	Metrics.RecordLiveLinkPushTimeMs(2.0);
+	Metrics.RecordTotalProcessingTimeMs(2.0);
+	Metrics.SetReceiverActiveSubjectCount(3);
+	Metrics.RecordSkeletonUpdate();
+	Metrics.RecordFrameLatency(4.0);
+
+	const FString Csv = Metrics.GetMetricsAsCSV();
+	const FString Prefix = FString::Printf(TEXT("Transport.%s."), *TransportName.ToString());
+	TestTrue(TEXT("The CSV lists the transport's frames"), Csv.Contains(Prefix + TEXT("FramesSent,1")));
+	TestTrue(TEXT("And its bytes"), Csv.Contains(Prefix + TEXT("BytesSent,100")));
+	TestTrue(TEXT("The CSV has the per-operation timings"), Csv.Contains(TEXT("AvgParseTimeMs,")));
+	TestTrue(TEXT("And the skeleton updates"), Csv.Contains(TEXT("ReceiverSkeletonUpdates,")));
+	TestTrue(TEXT("Header row"), Csv.StartsWith(TEXT("Metric,Value")));
+
+	Metrics.Reset();
+	const FO3DPerformanceMetrics::FReceiverMetrics& Receiver = Metrics.GetReceiverMetrics();
+	TestEqual(TEXT("Parse time reset"), Receiver.AvgParseTimeMs.load(), 0.0);
+	TestEqual(TEXT("Pose extraction time reset"), Receiver.AvgPoseExtractionTimeMs.load(), 0.0);
+	TestEqual(TEXT("LiveLink push time reset"), Receiver.AvgLiveLinkPushTimeMs.load(), 0.0);
+	TestEqual(TEXT("Total processing time reset"), Receiver.AvgTotalProcessingTimeMs.load(), 0.0);
+	TestEqual(TEXT("Active subjects reset"), Receiver.ActiveSubjectCount.load(), 0);
+	TestEqual(TEXT("Skeleton updates reset"), Receiver.SkeletonUpdates.load(), 0ull);
+	TestEqual(TEXT("Receive-to-apply latency reset"), Receiver.AvgReceiveToApplyLatencyMs.load(), 0.0);
+	TestEqual(TEXT("Transport counters reset"), Transport->FramesSent.load(), 0ull);
 	return true;
 }
 
