@@ -2,6 +2,33 @@
 
 ### Schema/Protocol
 
+- **UDP fragment header v2** (ADR 0009 item 5, WP-A4 PR 2; TRB-17). Wire protocol stays 2; this
+  is a header layout change, so fragments carry their own magic and version.
+  - **Layout:** 24 bytes, little-endian: magic `O3DF`, version 2, flags 0, two reserved zero
+    bytes, then message id, fragment index, total size and fragment size (u32 each). It was 16
+    bytes (the four u32 without a magic).
+  - **Classification.** The UDP receiver treats a datagram as a fragment only when it starts
+    with `O3DF`; a fragment whose header is inconsistent is dropped and counted in the
+    transport's receive errors. Every other datagram is passed on whole, as before and as on
+    every other transport. Before, a datagram was a fragment if its first 16 bytes happened to
+    describe a consistent fragment. `udpClassifyDatagram` in `o3ds/udp_fragment.h` also names
+    envelopes (`O3DA`, `O3DU`) and frames (a frame word). **Deviation from ADR 0009 item 5,**
+    which asked the UDP receiver to drop and count any other datagram: the transports stay
+    byte-opaque (the conformance suite sends arbitrary payloads through all of them), and the
+    receiver's demux and frame check already reject and count what is not an envelope or a
+    frame.
+  - **Compatibility, old receiver and new sender:** only fragmented messages are affected (larger
+    than `udp.maxdatagram`). An old receiver does not recognise a v2 fragment, passes it on as a
+    frame, and the parser rejects it ("Invalid data structure"): the message is dropped, never
+    misassembled. Messages sent in one datagram are unchanged.
+  - **Compatibility, new receiver and old sender:** legacy fragments are rejected (ADR 0009 Q3,
+    accepted default); there is no option to accept them. Unfragmented datagrams are unchanged.
+  - **Migration:** update UDP receivers and senders together if messages exceed
+    `udp.maxdatagram` (large skeletons, low `udp.maxdatagram`).
+  - **Tests.** `core.udp_reassembly_hardening_tests` checks the v2 bytes, rejects a wrong magic,
+    version, flag or reserved byte and the legacy header, and checks the classification of every
+    kind. The UDP fuzz seeds are written with the real header writer.
+
 - **Wire protocol 2; core 1.1.0** (D8, [ADR 0009](docs/adr/0009-protocol-versioning.md), WP-A4
   PR 1; CORE-15, CORE-16, CORE-22).
   - **Frame header.** The first 4 bytes of a frame are now `min_reader_version` (byte 0) and

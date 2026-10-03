@@ -54,20 +54,42 @@ namespace
 
 void writeUdpFragmentHeader(const UdpFragmentHeader& header, char* out)
 {
-	writeLE32(out + 0, header.id);
-	writeLE32(out + 4, header.seq);
-	writeLE32(out + 8, header.totalSize);
-	writeLE32(out + 12, header.fragSize);
+	const unsigned char prefix[8] = {
+		kUdpFragmentMagic[0], kUdpFragmentMagic[1], kUdpFragmentMagic[2], kUdpFragmentMagic[3],
+		kUdpFragmentVersion, 0, 0, 0 };
+	memcpy(out, prefix, sizeof(prefix));
+	writeLE32(out + 8, header.id);
+	writeLE32(out + 12, header.seq);
+	writeLE32(out + 16, header.totalSize);
+	writeLE32(out + 20, header.fragSize);
 }
 
 bool readUdpFragmentHeader(const char* data, size_t sz, UdpFragmentHeader& out)
 {
 	if (data == nullptr || sz < kUdpFragmentHeaderSize) return false;
-	out.id        = readLE32(data + 0);
-	out.seq       = readLE32(data + 4);
-	out.totalSize = readLE32(data + 8);
-	out.fragSize  = readLE32(data + 12);
+	unsigned char prefix[8];
+	memcpy(prefix, data, sizeof(prefix));
+	if (memcmp(prefix, kUdpFragmentMagic, 4) != 0 || prefix[4] != kUdpFragmentVersion
+		|| prefix[5] != 0 || prefix[6] != 0 || prefix[7] != 0)
+	{
+		return false;
+	}
+	out.id        = readLE32(data + 8);
+	out.seq       = readLE32(data + 12);
+	out.totalSize = readLE32(data + 16);
+	out.fragSize  = readLE32(data + 20);
 	return true;
+}
+
+UdpDatagramKind udpClassifyDatagram(const char* data, size_t sz)
+{
+	if (data == nullptr || sz < 4) return UdpDatagramKind::Unknown;
+	unsigned char b[4];
+	memcpy(b, data, 4);
+	if (memcmp(b, kUdpFragmentMagic, 4) == 0) return UdpDatagramKind::Fragment;
+	if (b[0] == 'O' && b[1] == '3' && b[2] == 'D' && (b[3] == 'A' || b[3] == 'U')) return UdpDatagramKind::Envelope;
+	if (b[0] != 0 && b[1] == 0 && b[2] == 0 && b[3] == 0) return UdpDatagramKind::Frame;
+	return UdpDatagramKind::Unknown;
 }
 
 bool udpMessageIdLess(uint32_t a, uint32_t b)

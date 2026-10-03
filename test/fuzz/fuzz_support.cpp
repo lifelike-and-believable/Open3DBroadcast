@@ -6,6 +6,7 @@
 #include "o3ds/model.h"
 #include "o3ds/predict/quat_math.h"
 #include "o3ds/tcp_stream_parser.h"
+#include "o3ds/udp_fragment.h"
 
 #include "CRC.h"
 
@@ -208,15 +209,16 @@ namespace o3ds_fuzz
 			return seeds;
 		}
 
-		// One fuzz_udp_reassembly record per datagram: the real 16-byte
+		// One fuzz_udp_reassembly record per datagram: the real 24-byte
 		// fragment header, lenMode 0 ("honest" payload length, bytes copied
 		// from CanonicalKeyframe()) and the control byte (sender and clock
 		// step) - see fuzz_udp_reassembly.cpp.
 		void AppendUdpRecord(Bytes& out, uint32_t id, uint32_t seq, uint32_t bufSz, uint32_t fragSize, uint8_t ctl = 0)
 		{
-			const uint32_t header[4] = { id, seq, bufSz, fragSize };
-			const uint8_t* p = reinterpret_cast<const uint8_t*>(header);
-			out.insert(out.end(), p, p + sizeof(header));
+			UdpFragmentHeader header = { id, seq, bufSz, fragSize };
+			char wire[kUdpFragmentHeaderSize];
+			writeUdpFragmentHeader(header, wire);
+			out.insert(out.end(), reinterpret_cast<const uint8_t*>(wire), reinterpret_cast<const uint8_t*>(wire) + sizeof(wire));
 			out.push_back(0);
 			out.push_back(ctl);
 		}

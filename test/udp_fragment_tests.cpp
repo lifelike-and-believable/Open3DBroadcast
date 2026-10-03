@@ -13,7 +13,7 @@
 namespace
 {
 	// Builds a fragment for a given (id, seq, bufSz, fragSize, payload)
-	// using the 16-byte little-endian header addFragment() expects: four
+	// using the 24-byte v2 header addFragment() expects: four
 	// uint32's (id, seq, bufSz, fragSize) followed by the payload bytes.
 	std::vector<char> MakeFragment(uint32_t id, uint32_t seq, uint32_t bufSz, uint32_t fragSize, const char* payload, size_t payloadLen)
 	{

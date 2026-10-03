@@ -383,8 +383,18 @@ bool FO3DSocketsUdpReceiver::ProcessDatagram(const uint8* Data, int32 Bytes, TAr
 		return false;
 	}
 
-	if (IsFragmentPacket(Data, Bytes))
+	// A fragment is recognised by its magic ('O3DF', ADR 0009 item 5), never by whether its
+	// bytes happen to describe a consistent fragment. Every other datagram is passed on whole,
+	// as on every transport: the receiver's demux and frame check reject what is not an
+	// envelope or a frame, and count it.
+	if (udpClassifyDatagram(reinterpret_cast<const char*>(Data), static_cast<size_t>(Bytes)) == UdpDatagramKind::Fragment)
 	{
+		if (!IsFragmentPacket(Data, Bytes))
+		{
+			Stats.ReceiveErrors++;
+			UE_LOG(LogSocketsUdpReceiver, Verbose, TEXT("Discarded UDP fragment with an inconsistent header (size=%d)."), Bytes);
+			return false;
+		}
 		return HandleFragment(Data, Bytes, OutFrame, InState);
 	}
 

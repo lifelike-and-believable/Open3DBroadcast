@@ -28,8 +28,8 @@ namespace O3DSocketsUdpSenderPrivate
 	/** Idle wait of the worker; an Enqueue wakes it earlier. Short, so Stop() never waits long. */
 	constexpr uint32 IdleWaitMs = 50;
 	constexpr uint32 PausedWaitMs = 5;
-	/** Bytes in front of each fragment (core udp_fragment header). */
-	constexpr int32 FragmentHeaderSize = 16;
+	/** Bytes in front of each fragment (core udp_fragment header, v2 since ADR 0009 item 5). */
+	constexpr int32 FragmentHeaderSize = static_cast<int32>(kUdpFragmentHeaderSize);
 
 	/** "" and "*" send to the IPv4 broadcast address; "localhost" means 127.0.0.1 (as before WP-A1 PR 4c). */
 	FO3DHostPort ApplyHostRules(const FO3DHostPort& In, bool& bOutBroadcast)
