@@ -28,9 +28,28 @@
     `test/bench/serialize_bench.cpp` (`o3ds_core_bench`, CTest
     `core.bench.serialize`, label `bench`): it prints the timings and checks
     only correctness.
-  - Not in this change: Parse still re-creates every `Transform` on a full
-    sync (the Parse half of CORE-18); it changes receiver resync behaviour
-    and is a follow-up.
+- **Parse reuses its objects on a full sync (CORE-18, the Parse half; WP-A2
+  follow-up).** A full sync used to delete every subject (with
+  `clearInactive`, the plugin's setting) and every transform and allocate
+  them again. Now a subject of the same name takes its object back, reset to
+  the state of a new one, its transforms are reused in node order (each
+  assigned a freshly constructed `Transform`, so no old state survives) and
+  curve names are assigned in place. Subjects the buffer does not carry are
+  still dropped, the list is still in buffer order, and a rejected subject
+  still leaves the list as a fresh parse would. Parse of one 250-bone,
+  250-curve subject: about 160 µs to about 85 µs (MSVC Release), so
+  Serialize plus Parse is about 905 µs before WP-A2e and about 190 µs now.
+  Pointers to a resynced subject's `Subject` and to its first transforms now
+  stay valid across a full sync of the same subject.
+  - Tests: new suite `core.parse_reuse_tests`: a sequence of buffers through
+    one list (topology growing and shrinking, curves dropped and emptied,
+    nameless nodes, subjects reordered, dropped and duplicated, an update for
+    a dropped subject, a rejected subject, an empty list) must leave exactly
+    the state, result and touched-subject report of a fresh parse after every
+    buffer; state the parser never sets (`mReference`, `mJoints`, transform
+    tiers) does not survive a resync; objects are reused.
+  - Not changed: the second FlatBuffers verification when `PeekMeta` ran
+    first (CORE-18 suggests a `Parse` overload that skips it).
 - `SubjectList::Parse()` now rejects buffers it used to accept or crash on
   (WP-S1: CORE-1, CORE-8, CORE-9, CORE-23). It returns false with `mError`
   set when a buffer has:

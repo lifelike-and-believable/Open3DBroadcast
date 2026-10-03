@@ -48,6 +48,22 @@ namespace
 		builder.Clear();
 		return builder;
 	}
+
+	//! Puts a Subject that SubjectList::Parse() is about to reuse for a full
+	//! sync of the same name back into the state `new Subject(name)` gives,
+	//! except its transforms, which ParseSubject() reuses one by one
+	//! (CORE-18). ParseSubject() then overwrites the context and, when the
+	//! buffer carries them, the curves.
+	void ResetSubjectForReuse(O3DS::Subject& subject)
+	{
+		subject.mJoints.clear();
+		subject.mCurveNames.clear();
+		subject.mCurveValues.clear();
+		subject.mReference = nullptr;
+		subject.mError.clear();
+		subject.SetResidualEncoder(nullptr);
+		subject.SetResidualDecoder(nullptr);
+	}
 }
 
 void operator >>(const O3DS::TransformTranslation& src, O3DS::Data::Translation &dst)
@@ -1273,25 +1289,69 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			// subject instead of dropping it - delete them first, matching
 			// the pattern TransformList::clear()/Subject::clear() already
 			// use for their own owned pointers.
+			//
+			// CORE-18: the old subjects are not deleted up front but kept
+			// aside; a subject of the same name in this buffer takes its
+			// object back, reset to the state of a new one, and
+			// ParseSubject() reuses its transforms. Whatever is left aside
+			// after the loop is deleted, so the list ends up exactly as
+			// before: the buffer's subjects, in buffer order.
+			std::vector<Subject*> spare;
 			if (clearInactive) {
-				for (Subject* s : this->mItems)
+				spare.swap(this->mItems);
+			}
+			auto deleteSpare = [&spare]()
+			{
+				for (Subject* s : spare)
 				{
 					delete s;
 				}
-				this->mItems.clear();
-			}
+				spare.clear();
+			};
 			for (uint32_t i = 0; i < subjects_data->size(); i++)
 			{
 				// For each subject. ParseSubject reports a rejected subject
 				// through mError (its signature predates validation).
 				auto inSubject = subjects_data->Get(i);
+
+				Subject* reused = nullptr;
+				if (!spare.empty() && inSubject->name() != nullptr)
+				{
+					const std::string name = inSubject->name()->str();
+					if (this->findSubject(name) == nullptr)
+					{
+						for (auto it = spare.begin(); it != spare.end(); ++it)
+						{
+							if ((*it)->mName == name)
+							{
+								reused = *it;
+								spare.erase(it);
+								ResetSubjectForReuse(*reused);
+								this->mItems.push_back(reused);
+								break;
+							}
+						}
+					}
+				}
+
 				this->ParseSubject(inSubject, builder);
 				if (!mError.empty())
+				{
+					// A rejected subject is not in the list afterwards, as
+					// when it was deleted up front.
+					if (reused != nullptr)
+					{
+						this->mItems.erase(std::remove(this->mItems.begin(), this->mItems.end(), reused), this->mItems.end());
+						delete reused;
+					}
+					deleteSpare();
 					return false;
+				}
 				// ParseSubject skips a nameless subject without an error.
 				if (inSubject->name() != nullptr)
 					markTouched(inSubject->name()->str(), true);
 			}
+			deleteSpare();
 		}
 
 		if (updates_data)
@@ -1366,16 +1426,28 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		outSubject->mContext.mZ = dir(inSubject->z_axis());
 		outSubject->mContext.mFormat = (inSubject->format() != nullptr) ? inSubject->format()->str() : std::string();
 
-		// Parse curves if present
+		// Parse curves if present. The name strings are assigned in place,
+		// so a resync with the same curves allocates nothing (CORE-18).
 		if (inSubject->curves()) {
-			outSubject->mCurveNames.clear();
-			outSubject->mCurveValues.clear();
+			std::vector<std::string>& names = outSubject->mCurveNames;
+			std::vector<float>& values = outSubject->mCurveValues;
+			size_t count = 0;
 			for (auto each : *inSubject->curves()) {
 				if (each == nullptr || each->name() == nullptr)
 					continue;
-				outSubject->mCurveNames.push_back(each->name()->str());
-				outSubject->mCurveValues.push_back(each->value());
+				const flatbuffers::String* inCurveName = each->name();
+				if (count < names.size())
+					names[count].assign(inCurveName->c_str(), inCurveName->size());
+				else
+					names.emplace_back(inCurveName->c_str(), inCurveName->size());
+				if (count < values.size())
+					values[count] = each->value();
+				else
+					values.push_back(each->value());
+				++count;
 			}
+			names.resize(count);
+			values.resize(count);
 		}
 
 		// Get the nodes (transforms) for this subject
@@ -1386,8 +1458,22 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		// every full sync too (Subject::Serialize, ADR 0005 (vii)), so no
 		// anchor is carried over from the transforms deleted here.
 
-		// Clear the subject and add the transforms
-		outSubject->clear();
+		// Replace the subject's transforms with the buffer's nodes. The
+		// first ones are reused (CORE-18): each is assigned a freshly
+		// constructed Transform, so it holds exactly what a new one would,
+		// while its vectors and name keep their capacity. Transforms beyond
+		// the node count are deleted.
+		const size_t nodeCount = (ovNodes != nullptr) ? static_cast<size_t>(ovNodes->size()) : 0;
+		std::vector<Transform*>& outTransforms = outSubject->mTransforms.mItems;
+		for (size_t t = nodeCount; t < outTransforms.size(); ++t)
+		{
+			delete outTransforms[t];
+		}
+		if (outTransforms.size() > nodeCount)
+		{
+			outTransforms.resize(nodeCount);
+		}
+		const size_t reusableTransforms = outTransforms.size();
 
 		// C2 (roadmap doc §5/C2): a full subject (re)sync means the
 		// topology may have changed - a residual decoder's history is
@@ -1422,10 +1508,23 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			auto inMatrix = inNode->matrix();
 			auto inComponents = inNode->components();
 
-			std::string transformName = (inName != nullptr)
-				? inName->str()
-				: UnnamedTransformName(static_cast<size_t>(n));
-			Transform *outTransform = outSubject->addTransform(transformName, inNode->parent());
+			Transform *outTransform;
+			if (static_cast<size_t>(n) < reusableTransforms)
+			{
+				outTransform = outTransforms[static_cast<size_t>(n)];
+				*outTransform = Transform(inNode->parent());
+				if (inName != nullptr)
+					outTransform->mName.assign(inName->c_str(), inName->size());
+				else
+					outTransform->mName = UnnamedTransformName(static_cast<size_t>(n));
+			}
+			else
+			{
+				std::string transformName = (inName != nullptr)
+					? inName->str()
+					: UnnamedTransformName(static_cast<size_t>(n));
+				outTransform = outSubject->addTransform(transformName, inNode->parent());
+			}
 
 			// Add the components to the transform stack in the order they are defined.
 			if (inComponents != nullptr)
