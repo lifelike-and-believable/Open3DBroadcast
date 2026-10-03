@@ -66,7 +66,7 @@ EO3DDemuxResult FO3DUnifiedReceiveDemux::ProcessMessage(const uint8* Data, int32
 	{
 		// The envelope magic followed by a header that does not fit the buffer is a damaged
 		// envelope, not a legacy raw frame: never hand it to the O3DS parser (T1).
-		const bool bEnvelopeMagic = Size >= 4 && O3DS::FUnifiedHeader::ReadBE32(Data) == O3DS::FUnifiedHeader::MagicValueBE();
+		const bool bEnvelopeMagic = O3DS::HasUnifiedEnvelopeMagic(Data, Size);
 		if (bEnvelopeMagic || !Settings.bAcceptRawMocap)
 		{
 			++Stats.Malformed;

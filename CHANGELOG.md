@@ -2,6 +2,42 @@
 
 ### Schema/Protocol
 
+- **Unified envelope v2** (ADR 0009 item 4, WP-A4 PR 3; SHR-7, SHR-30). Wire protocol stays 2;
+  this is an envelope layout change, so the envelope carries its own magic and version.
+  - **Layout:** 24 bytes, little-endian: magic `O3DU`, version 2, kind, codec, flags 0, u64
+    timestamp in microseconds (sender clock), u32 payload size, u32 sequence number (per stream
+    and kind, wrapping). Envelope v1 was 20 bytes, big-endian (`O3DA`), with no sequence number.
+  - **Writers** emit v2 for audio and control. Audio frames are numbered by their stream's
+    encoder; control envelopes by the sender's control publisher. The timestamp is written from
+    finite, non-negative values only (a NaN or negative value is 0, an overflow saturates; the
+    old cast was undefined behaviour). **The TCP keepalive stays envelope v1** during the
+    compatibility window: a receiver from before envelope v2 would otherwise read every
+    keepalive as a malformed frame and log it.
+  - **Readers** accept v1 and v2 (`O3DS::ParseUnifiedMessage`, `TryGetControlPayload`, the
+    receive demux, the WebRTC add-on's control checks). The codec moved to the core
+    (`o3ds/wire_format.h`: `ReadEnvelopeHeader`, `WriteEnvelopeHeaderV2`, `HasEnvelopeMagic`);
+    the plugin functions keep their names and gain an optional sequence number.
+    `O3DS::UnifiedWireHeaderSize` is now 24 (the v2 header writers emit) and
+    `UnifiedWireHeaderSizeV1` is 20; code that found an envelope's end from the header size now
+    uses where the payload ends.
+  - **PCM16 samples are little-endian** on the wire, converted explicitly
+    (`O3DAudio::Pcm16HostToWire`); the same bytes as before on every shipped (little-endian)
+    platform.
+  - **Compatibility, old receiver and new sender:** audio and control are dropped: an old
+    receiver does not recognise `O3DU`, passes the message to the frame parser, and the parser
+    rejects it (ADR 0009 Q1, accepted). Mocap and the TCP keepalive are unaffected.
+  - **Compatibility, new receiver and old sender:** v1 envelopes are read as before.
+  - **Migration:** update receivers and senders together where audio or control is used.
+  - **Not done, deviation from ADR 0009 item 4:** audio payload v3 (dropping the codec and
+    timestamp the payload repeats from the envelope). Envelope-less audio channels, MoQ's audio
+    track (TRF-37), read the codec and timestamp from the payload itself, so the payload keeps
+    them.
+  - **Tests.** New `core.wire_format_tests` cases for the v2 bytes, v1 big-endian reading and
+    writing, rejection of a wrong version or flags, the payload-fit check, and the timestamp
+    clamp; new `Open3DBroadcast.Shared.Envelope.V2WrittenV1StillRead` and
+    `.AudioFramesAreNumbered` (sequence numbers, little-endian samples, the control envelope
+    still within the 1,100-byte budget).
+
 - **UDP fragment header v2** (ADR 0009 item 5, WP-A4 PR 2; TRB-17). Wire protocol stays 2; this
   is a header layout change, so fragments carry their own magic and version.
   - **Layout:** 24 bytes, little-endian: magic `O3DF`, version 2, flags 0, two reserved zero

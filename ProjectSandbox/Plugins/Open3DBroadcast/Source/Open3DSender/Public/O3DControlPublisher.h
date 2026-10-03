@@ -73,4 +73,6 @@ private:
 	FString SourceId;
 	TArray<FString> LastMocapSubjects;
 	TUniquePtr<O3DS::Control::ControlPublisher> Core;
+	/** Sequence number of the next control envelope (envelope v2, ADR 0009 item 4). */
+	uint32 NextEnvelopeSeq = 0;
 };

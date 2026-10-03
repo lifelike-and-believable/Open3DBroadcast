@@ -54,7 +54,7 @@ bool FO3DSharedUnifiedMessageRoundTripTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
-	TestEqual(TEXT("20-byte header plus payload"), Message.Num(), 20 + Payload.Num());
+	TestEqual(TEXT("Envelope v2 header (24 bytes) plus payload"), Message.Num(), O3DS::UnifiedWireHeaderSize + Payload.Num());
 
 	O3DS::FUnifiedHeader Header;
 	const uint8* ParsedPayload = nullptr;
@@ -67,7 +67,7 @@ bool FO3DSharedUnifiedMessageRoundTripTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Codec"), Header.GetCodec() == O3DS::EUnifiedCodec::Opus);
 	TestEqual(TEXT("Timestamp in microseconds"), Header.TimestampUs(), static_cast<uint64>(1500000));
 	TestEqual(TEXT("Payload size"), ParsedSize, Payload.Num());
-	TestTrue(TEXT("Payload points into the message after the header"), ParsedPayload == Message.GetData() + 20);
+	TestTrue(TEXT("Payload points into the message after the header"), ParsedPayload == Message.GetData() + O3DS::UnifiedWireHeaderSize);
 	TestTrue(TEXT("Payload bytes"), ParsedPayload != nullptr && FMemory::Memcmp(ParsedPayload, Payload.GetData(), Payload.Num()) == 0);
 
 	// A message followed by trailing bytes still parses; the payload size comes from the header.

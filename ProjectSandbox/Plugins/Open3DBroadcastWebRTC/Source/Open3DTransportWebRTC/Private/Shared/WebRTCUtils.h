@@ -62,13 +62,12 @@ namespace WebRTCUtils
      */
     inline bool IsControlKindEnvelope(const uint8* Bytes, size_t Len)
     {
-        if (!Bytes || Len < static_cast<size_t>(O3DS::UnifiedWireHeaderSize))
+        // Envelope v1 or v2 (ADR 0009 item 4): the kind is byte 5 in both.
+        if (!Bytes || Len < static_cast<size_t>(O3DS::UnifiedWireHeaderSizeV1))
         {
             return false;
         }
-        const uint32 Magic = (static_cast<uint32>(Bytes[0]) << 24) | (static_cast<uint32>(Bytes[1]) << 16)
-            | (static_cast<uint32>(Bytes[2]) << 8) | static_cast<uint32>(Bytes[3]);
-        return Magic == O3DS::FUnifiedHeader::MagicValueBE()
+        return O3DS::HasUnifiedEnvelopeMagic(Bytes, static_cast<int32>(FMath::Min<size_t>(Len, 4)))
             && Bytes[5] == static_cast<uint8>(O3DS::EUnifiedKind::Control);
     }
 

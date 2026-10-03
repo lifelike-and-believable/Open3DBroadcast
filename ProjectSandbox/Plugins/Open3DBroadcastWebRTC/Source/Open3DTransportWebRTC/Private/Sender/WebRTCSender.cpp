@@ -547,7 +547,7 @@ EO3DSendResult FO3DWebRTCSender::SendControl(const uint8* Envelope, int32 Len)
     TConstArrayView<uint8> Payload;
     if (!Envelope || Len <= 0 || Len > WebRTCUtils::MaxControlEnvelopeBytes
         || !O3DS::TryGetControlPayload(Envelope, Len, Payload)
-        || Len != O3DS::UnifiedWireHeaderSize + Payload.Num())
+        || Len != static_cast<int32>(Payload.GetData() - Envelope) + Payload.Num())
     {
         return EO3DSendResult::Invalid;
     }
