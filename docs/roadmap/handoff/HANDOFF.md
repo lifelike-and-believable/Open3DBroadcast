@@ -1,6 +1,20 @@
 # Open3DBroadcast: handoff to the next session
 
-Written 2026-09-30 by the cloud session that drove M1, M2 and the start of M3 of the plugin hardening roadmap. Updated 2026-10-01 with the control-channel work (ADR 0011, CTL-1..5) that landed afterwards; ADR 0011 accepted and WP-CTL added to the roadmap the same day. Read this first, then the files it points to.
+Written 2026-09-30 by the cloud session that drove M1, M2 and the start of M3 of the plugin hardening roadmap. Updated 2026-10-01 with the control-channel work (ADR 0011, CTL-1..5) that landed afterwards; ADR 0011 accepted and WP-CTL added to the roadmap the same day. Updated 2026-10-03 when the cloud session finished WP-A1 (#305–#314) and WP-A2a to A2c (#316–#318) and handed the work over to Claude on desktop (§0). Read this first, then the files it points to.
+
+## 0. Handover to Claude on desktop (2026-10-03)
+
+The cloud session stops after WP-A2c (#318). The next session runs on the maintainer's machine.
+
+- **State of `develop`:** WP-A1 complete; WP-A2a (#316), A2b (#317) and A2c (#318) merged. `O3D_TRANSPORT_API_VERSION` is **5**, unreleased (last tag v0.9.6); everything since c98c92c is under Unreleased in the CHANGELOG. No open PRs from the cloud session.
+- **Start here:** WP-A2d (§2a item 4): audio clock mapping onto the sender clock and cached audio device enumeration (ADR 0008 items 7 and 8). Then A2e (core CRC and builder reuse, `src/o3ds`), then removing `o3d.Sender.AsyncPipeline` one release later.
+- **What a local UE 5.7 build can now do that the cloud session could not** (pitfall 25: the cloud session reached neither the UE source mirror nor the Epic docs, so every engine API added in WP-A2 was first checked by the CI compile):
+  - Record the **Unreal Insights numbers** ADR 0008 Verification asks for (before/after with `o3d.Sender.AsyncPipeline` 0 and 1). The capture steps, timers (`O3D.Sender.Sample`, `O3D.Sender.Pipeline.Serialize`, `O3D.Sender.Pipeline.Send`), `o3d.Sender.DumpPipelineStats` and the budgets are in the ADR 0008 addendum "implementation notes (WP-A2c)". Record them on #318 or in a follow-up PR.
+  - Check the unverified engine APIs listed in the ADR 0008 addenda (WP-A2b tick APIs; WP-A2c `UE::Tasks::Launch`, `ETaskPriority::BackgroundHigh`, `TRACE_CPUPROFILER_EVENT_SCOPE_STR`) and ADR 0008 open questions 1 and 2 against the engine source.
+  - Add a small skeletal mesh test asset so the ADR 0008 root-bone pose-equality test can be written (§2a item 2).
+- **Follow-ups found on the way (not started):** the WebRTC add-on's `SendSerialized` should take the lifetime gate `SendControl` uses (§2 leftovers); MoQ's own backoff, the UDP pause hook not waiting (pitfall 15) and the unused schema features (§2 leftovers).
+- **How the cloud session worked each step:** branch from `develop`; local checks (§4); push; open the PR as a draft, then mark it ready, which starts the self-hosted UE job (build with `-FailOnWarnings`, automation tests with and without the WebRTC add-on, strict non-unity/no-PCH build, Fab zip) beside the core-tests workflow; squash-merge only when every check on the head commit is green. `Run-AutomationTests.ps1` reports only the first failed assertion per test (CI annotations show it); the full `Automation.log` is in the job artifacts. Runner-side failures seen so far (App Control 0x800711C7, the editor exiting at startup) cleared on one re-run.
+- **Worktrees:** the cloud session's agent worktrees under `.claude/worktrees/` are local to its container and are not in the repository.
 
 ## 1. Where things stand
 
@@ -16,7 +30,7 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
 | WP-CTL control channel (D11, ADR 0011) | CTL-1..7 done (#290–#295, CTL-6, CTL-7); live-server checks remain (see §2b) |
 
-Recent merges on `develop`: F7 editor split (#285, dc686e0), F11 WebRTC add-on (#286, 5c9af51), WP-A1 PR 1 transport registry (#289, d365c34), NNG unity-build fix and README rewrite (#287), ADR 0011 (#290), CTL-1..5 (#291–#295, last de02b8d).
+Recent merges on `develop`: WP-A1 PR 4a–4f (#305–#310), PR 5a–5c (#311–#313), step 6 (#314, 5ee5ac6), review-docs note (#315), WP-A2a (#316, fc147b7), WP-A2b (#317, aadc41f), WP-A2c (#318). Earlier: F7 editor split (#285), F11 WebRTC add-on (#286), WP-A1 PR 1 (#289), ADR 0011 (#290), CTL-1..5 (#291–#295).
 
 ## 2. The work in flight: WP-A1 (transport core consolidation)
 
@@ -129,7 +143,7 @@ After WP-A1, the M3 order in the roadmap is WP-A2 (async sender, ADR 0008) → W
 
 Design: `docs/adr/0008-sender-pipeline-threading.md`, "Implementation outline" items 2 to 7. One PR per sub-step (A2a to A2e); each must leave the WP-S3 sender tests passing unchanged.
 
-1. **WP-A2a: settings snapshot, serializer without component, frame pool, sampling clock. Done.** Details and deviations in the ADR 0008 addendum "implementation notes (WP-A2a)".
+1. **WP-A2a: settings snapshot, serializer without component, frame pool, sampling clock. Done (#316).** Details and deviations in the ADR 0008 addendum "implementation notes (WP-A2a)".
    - `FO3DSenderEncodingSettings` holds the encoding and the curve filtering settings (pattern lists as shared immutable arrays); the component refreshes it per sampled frame (`UpdateEncodingSnapshot`) and copies a list only when it changed. Frames carry it by value (deviation 1: the WP-S3 tests use value semantics).
    - `FO3DSenderSerializer` has no `Attach`/`Detach` and no component pointer; the component calls `SerializePoseFrame` after filtering. `SetStatsLabel` names it for `o3ds.Sender.DumpStats`.
    - Curve capture (`FO3DSenderCurveProcessor`, raw values against a shared `FO3DSCurveList`) and filtering (`FO3DSenderCurveFilter`, on the frame) are split. Filtering still runs before `OnPoseFrameReady` (deviation 3).
@@ -137,14 +151,14 @@ Design: `docs/adr/0008-sender-pipeline-threading.md`, "Implementation outline" i
    - The wire time is `FO3DSPoseFrame::CaptureTimeSec` (sampling time), not the serialization time.
    - Still synchronous on the game thread. `O3D_TRANSPORT_API_VERSION` stays **5** (no transport interface change).
    - Tests: `Open3DBroadcast.Sender.EncodingSnapshot.SerializerWorksWithoutComponent`, `.FramePool.ReusesFramesAndIsBounded`, `.CurveFilter.AfterSamplingMatchesBefore`, `.Wire.SerializedTimeIsSamplingTime`.
-2. **WP-A2b: tick group and prerequisite. Done.** Details and deviations in the ADR 0008 addendum "implementation notes (WP-A2b)".
+2. **WP-A2b: tick group and prerequisite. Done (#317).** Details and deviations in the ADR 0008 addendum "implementation notes (WP-A2b)".
    - The sender ticks in `TG_PostUpdateWork` (was the default `TG_PrePhysics`). `BindToTarget`/`UnbindFromTarget` add and remove the target mesh's tick as a prerequisite through `SetTickPrerequisiteMesh` (one mesh at a time, no double add). `CanCaptureThisFrame` moves the prerequisite when `TargetMesh` is written during capture and removes it when the mesh is destroyed (deviation 1); an entry left by a mesh that was already collected is pruned (deviation 2).
    - The transport `Tick` and `TickControl` moved to `TG_PostUpdateWork` with the rest of the tick.
    - `RegisterOnBoneTransformsFinalizedDelegate` is not used; the old "removed in 5.4" comments are gone. Open question 2 is answered only from knowledge of the engine's tick design (addendum); the UE 5.7 source and the Epic API pages were unreachable (pitfall 25, now also the docs sites), so every tick API used is unverified and first compiled by CI.
    - **ADR 0008's root-bone acceptance test is not written:** it needs a skeletal mesh asset and the plugin has none (the CI host project holds only the packaged plugin). `SamplesAfterTargetMeshEachFrame` checks the ordering it rests on in a ticking game world instead (deviation 3). Adding a small skeletal mesh asset to a test content folder would allow the pose-equality test.
    - Still synchronous. `O3D_TRANSPORT_API_VERSION` stays **5**.
-   - Tests: `Open3DBroadcast.Sender.TickOrder.TickGroupIsPostUpdateWork`, `.PrerequisiteFollowsTargetMesh`, `.SamplesAfterTargetMeshEachFrame` (the first test in the repo that creates and ticks a `UWorld`; if it fails on the runner for reasons unrelated to tick order, see pitfall 26).
-3. **WP-A2c: the pose pipeline. Done.** Details and deviations in the ADR 0008 addendum "implementation notes (WP-A2c)".
+   - Tests: `Open3DBroadcast.Sender.TickOrder.TickGroupIsPostUpdateWork`, `.PrerequisiteFollowsTargetMesh`, `.SamplesAfterTargetMeshEachFrame` (the first test in the repo that creates and ticks a `UWorld`; its first CI runs failed until the test advanced `GFrameCounter` before each world tick, pitfall 28).
+3. **WP-A2c: the pose pipeline. Done (#318).** Details and deviations in the ADR 0008 addendum "implementation notes (WP-A2c)".
    - `FO3DSenderPipeline` (`Open3DSender/Private/O3DSenderPipeline.h/.cpp`), one per component, shared-owned so a task in flight keeps it alive: frame pool, curve filter, serializer, one FIFO of frames and control items (`Start`, `Stop`, `RemoveSubject`), and the transport sender. The game thread samples and hands the frame over; a `UE::Tasks::Launch` task (`BackgroundHigh`) filters, serializes and calls `SendSerialized` with the serializer's buffer moved in. The ADR's "drain task scheduled" flag allows one task per sender at a time; `UE::Tasks::FPipe` is not used (deviation 1: pipe lifetime when the task holds the last reference).
    - Depth `o3d.Sender.PipelineDepth` (default 2, 1 to 8), drop oldest before serialization; control items never dropped. `o3d.Sender.AsyncPipeline 0` (read at `StartCapture`) keeps the WP-A2b synchronous order, for one release.
    - `StopCapture` discards waiting frames and does not wait for the network; removing the `OnSerializedFrame` listener and detaching the sender (the transport controller's `Stop`, before `IOpen3DSender::Stop`) wait for the one item the worker is processing (deviation 3). The component destructor detaches both. `ShutdownModule` waits up to 1 s for drain tasks.
@@ -154,7 +168,7 @@ Design: `docs/adr/0008-sender-pipeline-threading.md`, "Implementation outline" i
    - Every new engine API (`UE::Tasks::Launch`, `ETaskPriority::BackgroundHigh`, `TRACE_CPUPROFILER_EVENT_SCOPE_STR`, and in tests `CollectGarbage`, `IConsoleVariable::Set`) is unverified against 5.7 (pitfall 25) and first compiled by CI.
    - Still `O3D_TRANSPORT_API_VERSION` **5**: the interface did not change; the worker relies on the documented "any thread" contract of `SendSerialized`.
    - Tests: `Open3DBroadcast.Sender.Pipeline.SlowTransportDropsOldest`, `.RefusedFullSyncIsSentAgain`, `.StopDiscardsQueuedFrames`, `.StopStartAndRenameUnderLoad` and `.QuantizationChangeForcesOneFullSync` (both with the console variable at 0 and 1), `.OwnerReleasedWithTaskInFlight` (1,000 cycles), `.ComponentDestroyedWithTaskInFlight` (200 components, garbage-collected every 50). New hooks: `FO3DSenderPipelineProbe`, `FO3DSenderComponentTestAccess::SubmitSampledFrame`/`WaitForPipelineIdle`.
-4. **WP-A2d: next.** Audio clock mapping onto the sender clock and cached audio device enumeration (ADR 0008 items 7 and 8; `O3DSenderAudioCaptureComponent.cpp`, the component's audio device functions). Audio does not go through the pose pipeline. Then WP-A2e (core table CRC and builder reuse), then removing `o3d.Sender.AsyncPipeline` one release later (deletes `FO3DSenderPipeline::FilterFrameInline` and the synchronous branch of `Push`).
+4. **WP-A2d: next (not started; the desktop session's first task, §0).** Audio clock mapping onto the sender clock and cached audio device enumeration (ADR 0008 items 7 and 8; `O3DSenderAudioCaptureComponent.cpp`, the component's audio device functions). Audio does not go through the pose pipeline. Then WP-A2e (core table CRC and builder reuse), then removing `o3d.Sender.AsyncPipeline` one release later (deletes `FO3DSenderPipeline::FilterFrameInline` and the synchronous branch of `Push`).
 
 ## 2b. Control channel (WP-CTL, ADR 0011)
 
