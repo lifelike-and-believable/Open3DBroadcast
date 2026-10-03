@@ -40,6 +40,12 @@ import subprocess
 import sys
 
 TIMERS = ["O3D.Sender.Sample", "O3D.Sender.Pipeline.Serialize", "O3D.Sender.Pipeline.Send"]
+# The steps inside one frame's worker time, in order (the second table). Validate to Copy are the
+# default (legacy) encoding's steps; Filter runs on the worker only with the pipeline on.
+STEPS = ["O3D.Sender.Pipeline.Filter", "O3D.Sender.Serializer.Validate", "O3D.Sender.Serializer.Build",
+         "O3D.Sender.Serializer.CalcMatrices", "O3D.Sender.Serializer.Core", "O3D.Sender.Serializer.Copy",
+         "O3D.Sender.Pipeline.Send"]
+ALL_TIMERS = TIMERS + [step for step in STEPS if step not in TIMERS]
 RESULT_RE = re.compile(r"O3D_BENCH (.*)$")
 
 
@@ -99,7 +105,7 @@ def main():
     with open(rsp, "w", encoding="utf-8") as handle:
         handle.write(f'TimingInsights.ExportTimingEvents {os.path.join(out, "{region}.csv")} '
                      f'-columns=ThreadName,TimerName,StartTime,Duration '
-                     f'-timers={",".join(TIMERS)} -region=O3D.Bench.*\n')
+                     f'-timers={",".join(ALL_TIMERS)} -region=O3D.Bench.*\n')
     for stale in glob.glob(os.path.join(out, "O3D.Bench.*.csv")):
         os.remove(stale)
     run([insights, f"-OpenTraceFile={trace}", "-AutoQuit", "-NoUI",
@@ -115,11 +121,12 @@ def main():
                 results[fields["case"]] = fields
 
     rows = []
+    step_rows = []
     for case in sorted(results):
         fields = results[case]
         senders = int(fields["senders"])
         frames = int(fields["frames"])
-        durations = {timer: [] for timer in TIMERS}
+        durations = {timer: [] for timer in ALL_TIMERS}
         game_thread = []
         csv_path = os.path.join(out, f"O3D.Bench.{case}.csv")
         if os.path.exists(csv_path):
@@ -147,11 +154,15 @@ def main():
             fields["max_queued"],
             f'{fields["accepted"]}/{fields["refused"]}',
         ])
+        step_rows.append([case] + [fmt(statistics.median(durations[step]) if durations[step] else None) for step in STEPS])
 
     header = ["case", "samples", "GT median ms", "GT p99 ms", "worker median ms", "worker p99 ms",
               "c2s p50 ms", "c2s p99 ms", "c2s max ms", "dropped", "max queued", "accepted/refused"]
     lines = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
     lines += ["| " + " | ".join(row) + " |" for row in rows]
+    step_header = ["case (median ms per frame)"] + [step.split(".")[-1] for step in STEPS]
+    lines += ["", "| " + " | ".join(step_header) + " |", "|" + "---|" * len(step_header)]
+    lines += ["| " + " | ".join(row) + " |" for row in step_rows]
     table = "\n".join(lines)
     print(table)
     with open(os.path.join(out, "summary.md"), "w", encoding="utf-8") as summary:

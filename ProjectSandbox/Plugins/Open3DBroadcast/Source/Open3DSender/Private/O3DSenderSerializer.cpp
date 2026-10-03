@@ -9,6 +9,7 @@
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/ScopeLock.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
@@ -240,12 +241,15 @@ bool FO3DSenderSerializer::SerializePoseFrameTo(const FString& Subject, const FO
 		return false;
 	}
 
-	for (int32 Index = 0; Index < BoneCount; ++Index)
 	{
-		if (HasInvalidTransform(Frame.BoneLocalTransforms[Index]))
+		TRACE_CPUPROFILER_EVENT_SCOPE_STR("O3D.Sender.Serializer.Validate");
+		for (int32 Index = 0; Index < BoneCount; ++Index)
 		{
-			DropFrame(Subject, Cache, FString::Printf(TEXT("NaN/Inf at bone %d"), Index));
-			return false;
+			if (HasInvalidTransform(Frame.BoneLocalTransforms[Index]))
+			{
+				DropFrame(Subject, Cache, FString::Printf(TEXT("NaN/Inf at bone %d"), Index));
+				return false;
+			}
 		}
 	}
 
@@ -358,27 +362,41 @@ void FO3DSenderSerializer::SerializeFrameLegacy(const FString& Subject, const FO
 		Cache.SyncTracker.Reset();
 	}
 
-	TSharedPtr<SubjectList> SubjectListPtr = MakeShared<SubjectList>();
-	O3DS::Subject* SubjectObject = SubjectListPtr->addSubject(std::string(TCHAR_TO_UTF8(*Subject)));
-
-	BuildSubjectFromDescriptor(Subject, Descriptor, *SubjectObject);
-	FillFrameValues(Frame, *SubjectObject);
-	if (Frame.CurveNames.Num() > 0)
+	TSharedPtr<SubjectList> SubjectListPtr;
+	O3DS::Subject* SubjectObject = nullptr;
 	{
-		FillCurves(Frame, *SubjectObject);
+		TRACE_CPUPROFILER_EVENT_SCOPE_STR("O3D.Sender.Serializer.Build");
+		SubjectListPtr = MakeShared<SubjectList>();
+		SubjectObject = SubjectListPtr->addSubject(std::string(TCHAR_TO_UTF8(*Subject)));
+
+		BuildSubjectFromDescriptor(Subject, Descriptor, *SubjectObject);
+		FillFrameValues(Frame, *SubjectObject);
+		if (Frame.CurveNames.Num() > 0)
+		{
+			FillCurves(Frame, *SubjectObject);
+		}
 	}
 
-	SubjectObject->CalcMatrices();
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE_STR("O3D.Sender.Serializer.CalcMatrices");
+		SubjectObject->CalcMatrices();
+	}
 
 	// ADR 0008 item 7: the wire time is the sampling time, not the time of
 	// serialization (WP-A2a).
 	std::vector<char> Buffer;
 	const double Timestamp = Frame.CaptureTimeSec;
-	SubjectListPtr->Serialize(Buffer, Timestamp);
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE_STR("O3D.Sender.Serializer.Core");
+		SubjectListPtr->Serialize(Buffer, Timestamp);
+	}
 
 	// Transports receive frames only through the bytes below (the sender pipeline hands OutBytes
 	// to SendSerialized, WP-A2c).
-	BroadcastSerializedBuffer(Subject, Buffer, Timestamp, Cache, OutBytes);
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE_STR("O3D.Sender.Serializer.Copy");
+		BroadcastSerializedBuffer(Subject, Buffer, Timestamp, Cache, OutBytes);
+	}
 	Cache.FullSyncsSent++;
 
 	if (CVarO3DSenderDebugSerialize.GetValueOnAnyThread() != 0)

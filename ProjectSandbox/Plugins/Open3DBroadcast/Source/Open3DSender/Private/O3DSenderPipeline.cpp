@@ -337,6 +337,7 @@ void FO3DSenderPipeline::ProcessFrameLocked(FO3DSPoseFrame& Frame, bool bAlready
 	// The frame is owned here until it goes back to the pool; nobody else reads it.
 	if (!bAlreadyFiltered)
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE_STR("O3D.Sender.Pipeline.Filter");
 		CurveFilter->FilterFrame(Frame);
 	}
 
