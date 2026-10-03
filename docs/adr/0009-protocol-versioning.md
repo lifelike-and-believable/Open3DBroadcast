@@ -202,6 +202,34 @@ The D8 release is protocol **2** and `O3DS_VERSION_TAG` **1.1.0**: default strea
 - A fuzz target (WP-T1) over `wire_format` classification finds nothing in 60 s.
 - `CHANGELOG.md` has a 1.1.0 Schema/Protocol entry; `docs/CHANGELOG.md` is gone.
 
+## Implementation notes (WP-A4, 2026-10-03)
+
+Implemented in #335 (items 1-3, 9, 11), #336 (item 5), #337 (item 4), #338 (item 8)
+and #339 (item 10). Where the implementation departs from the decision above,
+and why:
+
+- **Item 5, unknown UDP datagrams are passed on, not dropped.** Fragments are recognised only by
+  their `O3DF` magic, as decided. Every other datagram is passed on whole, as on every other
+  transport: the transports stay byte-opaque (the conformance and shared-block tests send
+  arbitrary payloads through all of them), and the receiver's demux and frame checks already
+  reject and count what is not an envelope or a frame. A frame word of any non-zero version
+  classifies as a frame, so a newer protocol reaches the parser and is reported as such.
+- **Item 4, the TCP keepalive stays envelope v1.** A receiver from before envelope v2 would read
+  a v2 keepalive as a malformed frame and log it every few seconds. Readers accept both
+  versions, so the keepalive moves to v2 when v1 support is dropped.
+- **Item 4, audio payload v3 was not adopted.** MoQ's audio track carries the audio payload with
+  no envelope (TRF-37) and reads the codec and timestamp from the payload, so the payload keeps
+  them. PCM16 is little-endian, as decided (no bytes change on little-endian hosts).
+- **Item 4, kind and codec are not validated by the envelope reader.** Each consumer checks the
+  kind and codec pair it handles, and readers ignore a kind they do not know (ADR 0011, which
+  added kind Control after this ADR).
+- **Item 11, golden fixtures are raw frames**, not `.o3dscap` captures: `test/fixtures/wire/v1`
+  holds one frame per file, written by `test/compat/compat_tool.cpp` built against the baseline.
+- **Question 6** is confirmed: flatc 2.0.6 emits an identifier-checking `VerifySubjectListBuffer`
+  and `FinishSubjectListBuffer`, so version-1 frames are verified with a null identifier.
+- **Question 4** (packaging a plugin-root `CHANGELOG.md`) is still open: the Fab package does not
+  carry the changelog yet (WP-F8).
+
 ## Open questions for the maintainer
 
 1. Is it acceptable that audio from a new sender is dropped by old receivers (no dual-format writing)? **Default: yes**; D1 and C2 were never released and the plugin has no tagged release.
