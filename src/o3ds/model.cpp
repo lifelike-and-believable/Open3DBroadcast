@@ -24,6 +24,7 @@ SOFTWARE.
 
 #include "model.h"
 #include "crc32.h"
+#include "wire_format.h"
 #include "getTime.h"
 #include "parse_limits.h"
 #include <algorithm>
@@ -1011,11 +1012,9 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		auto ovSubjects = builder.CreateVector(subjects);
 
-		auto root = CreateSubjectList(builder, ovSubjects, 0, timestamp);
+		auto root = CreateSubjectList(builder, ovSubjects, 0, timestamp, 0, 0, 0, Wire::kProtocolVersion);
 
-		builder.Finish(root);
-
-		finalize(builder, outbuf, 1);
+		FinishSubjectListFrame(builder, root, outbuf);
 
 		return static_cast<int>(outbuf.size());
 	}
@@ -1034,11 +1033,9 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		auto ovSubjectUpdates = builder.CreateVector(outSubjectUpdates);
 
-		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp);
+		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, 0, 0, 0, Wire::kProtocolVersion);
 
-		builder.Finish(root);
-
-		finalize(builder, outbuf, 1);
+		FinishSubjectListFrame(builder, root, outbuf);
 
 		return static_cast<int>(outbuf.size());
 	}
@@ -1061,11 +1058,9 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		// just PoseSample::seq (fed to the predictor above) - a caller
 		// passing a real A1 tx_seq expects it on the wire for the
 		// receiver's ReorderGate, exactly like SubjectList::SerializeUpdateResidual
-		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, seq);
+		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, seq, 0, 0, Wire::kProtocolVersion);
 
-		builder.Finish(root);
-
-		finalize(builder, outbuf, 1);
+		FinishSubjectListFrame(builder, root, outbuf);
 
 		return static_cast<int>(outbuf.size());
 	}
@@ -1087,28 +1082,91 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		auto ovSubjects = builder.CreateVector(subjects);
 
-		auto root = CreateSubjectList(builder, ovSubjects, 0, timestamp, tx_seq, tx_wallclock_us, frame_epoch);
+		auto root = CreateSubjectList(builder, ovSubjects, 0, timestamp, tx_seq, tx_wallclock_us, frame_epoch, Wire::kProtocolVersion);
 
-		builder.Finish(root);
-
-		finalize(builder, outbuf, 1);
+		FinishSubjectListFrame(builder, root, outbuf);
 
 		return static_cast<int>(outbuf.size());
 	}
 
-	void finalize(flatbuffers::FlatBufferBuilder& builder, std::vector<char>& outbuf, std::uint32_t flags)
+	void finalize(flatbuffers::FlatBufferBuilder& builder, std::vector<char>& outbuf, std::uint32_t frameWord)
 	{
 		const uint8_t* buf = builder.GetBufferPointer();
 		const size_t size = builder.GetSize();
 
-		// Header (flags, then CRC-32 of the payload, both in host byte order
-		// as before), then the payload, written in place: one resize, which
-		// keeps outbuf's capacity when the caller reuses it (CORE-18).
+		// Header (frame word, then CRC-32 of the payload, both little-endian:
+		// the same bytes as before on every shipped host, ADR 0009 item 1),
+		// then the payload, written in place: one resize, which keeps
+		// outbuf's capacity when the caller reuses it (CORE-18).
 		const std::uint32_t crc = Crc32(buf, size);
-		outbuf.resize(8 + size);
-		std::memcpy(outbuf.data(), &flags, 4);
-		std::memcpy(outbuf.data() + 4, &crc, 4);
-		std::memcpy(outbuf.data() + 8, buf, size);
+		outbuf.resize(Wire::kFrameHeaderSize + size);
+		Wire::StoreLE32(outbuf.data(), frameWord);
+		Wire::StoreLE32(outbuf.data() + 4, crc);
+		std::memcpy(outbuf.data() + Wire::kFrameHeaderSize, buf, size);
+	}
+
+	uint8_t RequiredReaderVersion(const O3DS::Data::SubjectList& list)
+	{
+		const auto* updates = list.updates();
+		if (updates == nullptr)
+			return Wire::kMinReaderPlain;
+		for (const O3DS::Data::SubjectUpdate* update : *updates)
+		{
+			if (update == nullptr)
+				continue;
+			// Present at all, even empty: a conservative 2 only costs a
+			// pre-D8 reader a frame, a wrong 1 lets it misapply one.
+			if (update->predictor_id() != 0
+				|| update->translations_q8() != nullptr || update->translations_q16() != nullptr
+				|| update->rotations_q8() != nullptr || update->rotations_q16() != nullptr
+				|| update->curves_q8() != nullptr || update->curves_q16() != nullptr)
+			{
+				return Wire::kMinReaderResidualOrQuantized;
+			}
+		}
+		return Wire::kMinReaderPlain;
+	}
+
+	void FinishSubjectListFrame(flatbuffers::FlatBufferBuilder& builder,
+		flatbuffers::Offset<O3DS::Data::SubjectList> root, std::vector<char>& outbuf)
+	{
+		O3DS::Data::FinishSubjectListBuffer(builder, root);
+		// What this writer just built: no verification needed to read it back.
+		const O3DS::Data::SubjectList* list = O3DS::Data::GetSubjectList(builder.GetBufferPointer());
+		finalize(builder, outbuf, Wire::MakeFrameWord(RequiredReaderVersion(*list)));
+	}
+
+	Wire::FrameCheck CheckFrame(const char* data, size_t len, uint8_t& outMinReaderVersion)
+	{
+		uint32_t storedCrc = 0;
+		const Wire::FrameCheck header = Wire::ReadFrameHeader(data, len, outMinReaderVersion, storedCrc);
+		if (header != Wire::FrameCheck::Ok)
+			return header;
+
+		const char* payload = data + Wire::kFrameHeaderSize;
+		const size_t payloadLen = len - Wire::kFrameHeaderSize;
+		if (Crc32(payload, payloadLen) != storedCrc)
+			return Wire::FrameCheck::CrcMismatch;
+
+		// The CRC only proves the payload wasn't corrupted in transit, not that
+		// it is well-formed FlatBuffers data (this is untrusted network input).
+		// Version-2 frames must carry the "O3DS" identifier; version 1 is
+		// verified without one, so pre-D8 buffers (which have none) still parse.
+		flatbuffers::Verifier verifier(reinterpret_cast<const uint8_t*>(payload), payloadLen);
+		const char* identifier = outMinReaderVersion >= Wire::kMinReaderResidualOrQuantized
+			? O3DS::Data::SubjectListIdentifier() : nullptr;
+		if (!verifier.VerifyBuffer<O3DS::Data::SubjectList>(identifier))
+			return Wire::FrameCheck::VerifyFailed;
+
+		// A pre-D8 develop writer stamped 1 on residual and quantized frames
+		// whose anchor and resync semantics differ from ADR 0005: reject them
+		// (ADR 0009 item 2).
+		if (outMinReaderVersion < Wire::kMinReaderResidualOrQuantized
+			&& RequiredReaderVersion(*O3DS::Data::GetSubjectList(payload)) >= Wire::kMinReaderResidualOrQuantized)
+		{
+			return Wire::FrameCheck::UndeclaredNewContent;
+		}
+		return Wire::FrameCheck::Ok;
 	}
 
 
@@ -1135,11 +1193,9 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		auto ovSubjectUpdates = builder.CreateVector(outSubjectUpdates);
 
-		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, tx_seq, tx_wallclock_us, frame_epoch);
+		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, tx_seq, tx_wallclock_us, frame_epoch, Wire::kProtocolVersion);
 
-		builder.Finish(root);
-
-		finalize(builder, outbuf, 1);
+		FinishSubjectListFrame(builder, root, outbuf);
 
 		return static_cast<int>(outbuf.size());
 	}
@@ -1163,11 +1219,9 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		auto ovSubjectUpdates = builder.CreateVector(outSubjectUpdates);
 
-		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, tx_seq, tx_wallclock_us, frame_epoch);
+		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, tx_seq, tx_wallclock_us, frame_epoch, Wire::kProtocolVersion);
 
-		builder.Finish(root);
-
-		finalize(builder, outbuf, 1);
+		FinishSubjectListFrame(builder, root, outbuf);
 
 		return static_cast<int>(outbuf.size());
 	}
@@ -1179,15 +1233,8 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		outTxWallclockUs = 0;
 		outFrameEpoch = 0;
 
-		// Header is 8 bytes (flags + CRC) followed by the FlatBuffers payload;
-		// reject anything too short before doing arithmetic on len or
-		// dereferencing data (len - 8 would otherwise underflow).
-		if (data == nullptr || len < 8)
-			return false;
-
-		flatbuffers::Verifier verifier(
-			reinterpret_cast<const uint8_t*>(data + 8), len - 8);
-		if (!O3DS::Data::VerifySubjectListBuffer(verifier))
+		uint8_t minReaderVersion = 0;
+		if (CheckFrame(data, len, minReaderVersion) != Wire::FrameCheck::Ok)
 			return false;
 
 		auto root = GetSubjectList(data + 8);
@@ -1224,38 +1271,21 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			outTouched->push_back(ParsedSubjectInfo{ name, full });
 		};
 
-		// Header is 8 bytes (flags + CRC) followed by the FlatBuffers payload;
-		// reject anything too short before doing any arithmetic on len or
-		// dereferencing data, since len - 8 would otherwise underflow.
-		if (data == nullptr || len < 8)
+		// Frame word, CRC and FlatBuffers verification before trusting any
+		// offset in this untrusted buffer (D8, ADR 0009).
+		mLastFrameMinReaderVersion = 0;
+		mLastFrameCheck = CheckFrame(data, len, mLastFrameMinReaderVersion);
+		if (mLastFrameCheck != Wire::FrameCheck::Ok)
 		{
-			mError = "Buffer too short";
-			return false;
-		}
-
-		std::uint32_t crc = Crc32(data + 8, len - 8);
-
-		std::uint32_t flags = *(std::uint32_t*)data;
-		std::uint32_t check = *(std::uint32_t*)(data + 4);
-
-		if (flags != 0x0001) {
-			mError = "Invalid data structure";
-			return false;
-		}
-
-		if (crc != check) {
-			mError = "CRC Check failed";
-			return false;
-		}
-
-		// The CRC only proves the payload wasn't corrupted in transit, not that
-		// it is well-formed FlatBuffers data (this is untrusted network input).
-		// Verify the buffer before trusting any offsets in it.
-		flatbuffers::Verifier verifier(
-			reinterpret_cast<const uint8_t*>(data + 8), len - 8);
-		if (!O3DS::Data::VerifySubjectListBuffer(verifier))
-		{
-			mError = "FlatBuffers verification failed";
+			if (mLastFrameCheck == Wire::FrameCheck::VersionTooNew)
+			{
+				mError = "Sender requires protocol " + std::to_string(mLastFrameMinReaderVersion)
+					+ " (this receiver implements " + std::to_string(Wire::kProtocolVersion) + "); update this receiver";
+			}
+			else
+			{
+				mError = Wire::ToString(mLastFrameCheck);
+			}
 			return false;
 		}
 

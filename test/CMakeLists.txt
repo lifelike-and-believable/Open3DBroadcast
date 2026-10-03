@@ -29,6 +29,7 @@ set(O3DS_CORE_TEST_SOURCES
 	control_state_tests.cpp
 	crc32_tests.cpp
 	parse_reuse_tests.cpp
+	wire_format_tests.cpp
 )
 
 add_executable(o3ds_core_tests
@@ -38,12 +39,22 @@ add_executable(o3ds_core_tests
 )
 
 target_link_libraries(o3ds_core_tests PRIVATE open3dstreamstatic)
+# Golden wire frames (test/fixtures/wire/README.md).
+target_compile_definitions(o3ds_core_tests PRIVATE O3DS_WIRE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/wire")
 o3ds_enable_warnings(o3ds_core_tests)
 
 foreach(source ${O3DS_CORE_TEST_SOURCES})
 	get_filename_component(suite ${source} NAME_WE)
 	add_test(NAME core.${suite} COMMAND o3ds_core_tests --suite ${suite})
 endforeach()
+
+# Wire compatibility tool (D8, docs/adr/0009-protocol-versioning.md item 11):
+# writes and reads the four frame kinds. The same source builds against the
+# baseline core in core-tests.yml, so each writer's frames are read by the
+# other reader; test/fixtures/wire/v1 holds the baseline writer's frames.
+add_executable(o3ds_compat_tool compat/compat_tool.cpp)
+target_link_libraries(o3ds_compat_tool PRIVATE open3dstreamstatic)
+o3ds_enable_warnings(o3ds_compat_tool)
 
 # Serialize/Parse benchmark (ADR 0008 item 11, CORE-7, CORE-18). It checks
 # correctness only and prints the timings; CTest runs it with few iterations

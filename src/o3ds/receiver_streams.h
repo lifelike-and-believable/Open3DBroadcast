@@ -35,6 +35,7 @@ SOFTWARE.
 #include "model.h"
 #include "reorder_gate.h"
 #include "clock_offset.h"
+#include "wire_format.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -55,15 +56,18 @@ namespace O3DS
 		double time = 0.0;            //!< SubjectList.time, the sender's content clock
 		uint64_t stream_key = 0;      //!< StreamKeyForNames(subject_names)
 		std::vector<std::string> subject_names; //!< named subjects and updates, in wire order
+		//! Why the frame was rejected (Ok when accepted); with VersionTooNew,
+		//! min_reader_version is the protocol the sender requires (ADR 0009).
+		Wire::FrameCheck check = Wire::FrameCheck::Ok;
+		uint8_t min_reader_version = 0; //!< the frame word's min_reader_version, once read
 	};
 
-	//! Reads PacketMeta from a framed wire buffer (8-byte flags and CRC
-	//! header, then the FlatBuffer). Checks the length, runs the
-	//! FlatBuffers Verifier and rejects a non-finite time or more than
-	//! ParseLimits::kMaxSubjects subjects or updates. Like
-	//! SubjectList::PeekMeta it does not check the CRC; Parse() does.
-	//! Returns false, with `out` reset to defaults, when the buffer is
-	//! rejected.
+	//! Reads PacketMeta from a framed wire buffer (8-byte frame word and CRC
+	//! header, then the FlatBuffer). Runs CheckFrame (frame word, CRC,
+	//! FlatBuffers Verifier; ADR 0009) and rejects a non-finite time or more
+	//! than ParseLimits::kMaxSubjects subjects or updates. Returns false when
+	//! the buffer is rejected, with `out` reset to defaults except `check`
+	//! and `min_reader_version`, which say why.
 	O3DS_API bool PeekPacketMeta(const char* data, size_t len, PacketMeta& out);
 
 	//! A 64-bit FNV-1a hash of the sorted, de-duplicated subject names, used

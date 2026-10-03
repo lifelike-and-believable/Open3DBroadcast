@@ -112,6 +112,34 @@ jobs:
         # -LE fuzz: the fallback fuzz runners have their own step below.
         run: ctest -LE fuzz --output-on-failure
 
+      # D8 (docs/adr/0009-protocol-versioning.md item 11): frames from this
+      # build's writer, read by the baseline reader (develop@7aea235, the
+      # plan's baseline, built from a worktree with the same dependency pins).
+      # Plain frames must still parse there; quantized and residual frames
+      # (min_reader_version 2) must be rejected, never applied. The other
+      # direction is core.wire_format_tests on test/fixtures/wire/v1.
+      - name: Old-reader compatibility (baseline reader, this writer)
+        env:
+          BASELINE: 7aea2356ccb92c063340143c51dfec2e185568e5
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASELINE"
+          git worktree add --detach "$RUNNER_TEMP/baseline" "$BASELINE"
+          cmake -S "$RUNNER_TEMP/baseline/src" -B "$RUNNER_TEMP/baseline-build" -G Ninja             -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/usr"             -DO3DS_DISABLE_WEBRTC=ON -DO3DS_VERSION_TAG=1.0.4
+          cmake --build "$RUNNER_TEMP/baseline-build" --target open3dstreamstatic
+          g++ -std=c++17 -O2 -DCRCPP_USE_NAMESPACE -DNNG_STATIC_LIB             -I"$RUNNER_TEMP/baseline/src" -I"$RUNNER_TEMP/baseline-build/_generated" -I"$RUNNER_TEMP/usr/include"             test/compat/compat_tool.cpp "$RUNNER_TEMP/baseline-build/libopen3dstreamstatic.a"             -L"$RUNNER_TEMP/usr/lib" -lnng -lpthread -o "$RUNNER_TEMP/compat_tool_baseline"
+          mkdir -p "$RUNNER_TEMP/frames"
+          build/test/o3ds_compat_tool write "$RUNNER_TEMP/frames"
+          "$RUNNER_TEMP/compat_tool_baseline" read "$RUNNER_TEMP/frames" | tee "$RUNNER_TEMP/old-reader.txt"
+          printf 'full ok
+delta ok
+quantized rejected: Invalid data structure
+residual rejected: Invalid data structure
+' > "$RUNNER_TEMP/expected.txt"
+          if ! diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/old-reader.txt"; then
+            echo "::error::The baseline reader did not read this writer's frames as ADR 0009 item 11 requires (plain frames parsed, quantized and residual rejected)."
+            exit 1
+          fi
+
       # WP-T1: deterministic fallback fuzz runners (test/fuzz,
       # fuzz_replay_main.cpp) - each fuzz target fed 20,000 fixed-seed
       # mutations of its seed corpus, under the same ASan/UBSan build.

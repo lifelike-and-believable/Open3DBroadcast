@@ -355,7 +355,9 @@ public:
 	 *  dropped. There is no automatic transport-reliability gate yet (ADR 0005 (iii)). A full sync
 	 *  every FullSyncIntervalSeconds resets the encoder and bounds how long a divergence lasts.
 	 *  Per-frame curve epsilon/delta filtering is off in this mode. Does not compose with
-	 *  quantization below - if both are enabled, Residual takes precedence. */
+	 *  quantization below - if both are enabled, Residual takes precedence. Residual frames need
+	 *  receivers that implement wire protocol 2 (Open3DBroadcast core 1.1.0 or later); older
+	 *  receivers drop them (ADR 0009). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Residual")
 	bool bEnableResidualCoding = false;
 
@@ -378,7 +380,8 @@ public:
 	 *  that joins late or misses a full sync recovers at the next full sync (every
 	 *  FullSyncIntervalSeconds). Per-frame curve epsilon/delta filtering is off in this mode. Does
 	 *  not compose with Residual above yet - if both are enabled, Residual takes precedence and this
-	 *  is ignored. */
+	 *  is ignored. Quantized frames need receivers that implement wire protocol 2 (Open3DBroadcast
+	 *  core 1.1.0 or later); older receivers drop them (ADR 0009). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Quantization")
 	bool bEnableQuantization = false;
 

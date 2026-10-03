@@ -677,7 +677,18 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, TConstArr
         const double NowSeconds = FPlatformTime::Seconds();
         if (NowSeconds - LastMalformedWarningTime >= MalformedWarningIntervalSeconds)
         {
-            if (SuppressedMalformedWarnings > 0)
+            // D8 (ADR 0009): a frame this build may not apply says why, so the user knows which
+            // side to update.
+            if (Meta.check == O3DS::Wire::FrameCheck::VersionTooNew)
+            {
+                UE_LOG(LogO3DReceiverSource, Warning, TEXT("Sender on '%s' requires wire protocol %d; this receiver implements %d. Update this receiver."),
+                    *Subject, static_cast<int32>(Meta.min_reader_version), static_cast<int32>(O3DS::Wire::kProtocolVersion));
+            }
+            else if (Meta.check == O3DS::Wire::FrameCheck::UndeclaredNewContent)
+            {
+                UE_LOG(LogO3DReceiverSource, Warning, TEXT("Sender on '%s' sends residual or quantized frames from before wire protocol 2. Update the sender."), *Subject);
+            }
+            else if (SuppressedMalformedWarnings > 0)
             {
                 UE_LOG(LogO3DReceiverSource, Warning, TEXT("Rejected malformed packet for subject '%s' (%d bytes); %d similar rejected since the last warning"),
                     *Subject, Buffer.Num(), SuppressedMalformedWarnings);

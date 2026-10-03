@@ -17,7 +17,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_DEBUG_POSTFIX d)
 
 # Version 1.0.4  Remove unused subjects, add all matrixes
-set(O3DS_VERSION_TAG "1.0.4")
+# Version 1.1.0  Wire protocol 2: frame word is min_reader_version, file_identifier
+#                "O3DS", SubjectList.protocol_version (D8, docs/adr/0009-protocol-versioning.md)
+# Overridable with -DO3DS_VERSION_TAG=x.y.z (CI passes the release tag).
+if(NOT O3DS_VERSION_TAG)
+	set(O3DS_VERSION_TAG "1.1.0")
+endif()
 
 option(O3DS_BUILD_TESTS "Build the core library unit test suite (CTest)" ON)
 option(O3DS_ENABLE_SANITIZERS "Build with AddressSanitizer + UndefinedBehaviorSanitizer (GCC/Clang only)" OFF)

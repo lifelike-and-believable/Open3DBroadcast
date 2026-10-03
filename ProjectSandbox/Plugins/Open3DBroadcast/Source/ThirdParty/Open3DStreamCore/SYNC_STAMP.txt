@@ -4,11 +4,11 @@
 # core-tests.yml runs it with --check and fails when this folder, or the
 # generated translation units in Source/Open3DStreamCore/Private/Core, differ.
 # See docs/adr/0003-core-library-delivery-to-plugin.md.
-o3ds-version-tag: 1.0.4
+o3ds-version-tag: 1.1.0
 flatbuffers-version: 2.0.6
 flatbuffers-submodule: 615616cb5549a34bdf288c04bc1b94bd7a65c396
 crccpp-submodule: 71f2152b639f8fc0efa3d1fec01c7c0dbb96dc76
 manifest-sha256: b2126c1ec37ccc3d986c14d7407ff5a73600a54928c1328d399ce69fbbbcd5a1
-content-sha256: 6917cf4f0cc709c08bc08f4f3da66104719c9556cc01e99c5890df94b7ebcdc7
-core-files: 49 (22 .cpp)
-mirrored-files: 70
+content-sha256: ab8775aec00c8a9a23c60a12618e615b81890535e537932b14ab324491f68a21
+core-files: 51 (23 .cpp)
+mirrored-files: 72

@@ -673,6 +673,7 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
 - **Acceptance:**
   - The WP-T1 loss and mid-join tests show bounded error that recovers at the next keyframe.
   - An old-reader and new-writer compatibility test passes in both directions.
+- **Progress** (2026-10-03): PR 1, D8 core (ADR 0009 item 1-3, 9, 11): frame word as `min_reader_version`, `file_identifier`, `protocol_version`, `CheckFrame` in every reader, core 1.1.0, golden frames and the baseline-reader CI step. Next: UDP fragment header v2 (item 5), audio envelope v2 and LE PCM (item 4), length-prefixed name hash (item 8), changelog merge and `docs/wire-format.md` (item 10). ADR 0005 step 1 (`ref_seq`, stream writer) waits for the maintainer.
 
 #### WP-A5: Connection lifecycle and reconnect  ·  P1 · M · coding
 - **Findings:** TRF-6, TRF-7, TRF-26, TRB-4, TRB-5, TRB-6, TRB-7, TRF-17, TRF-18, RCV-19
