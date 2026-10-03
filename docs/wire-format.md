@@ -136,6 +136,9 @@ wire. A topology hash that ever goes on the wire must use this definition and bu
 | Envelope, fragment or audio header layout change | +1 | n/a (new magic or version byte) | minor |
 | Dropping support for an old frame or envelope version | no | n/a | major |
 
+- **Until a protocol version is first released, wire changes join it** instead of adding
+  another: protocol 2 is the release that ships ADR 0005 (ADR 0009 item 2), so
+  `SubjectUpdate.ref_seq` is part of protocol 2. The table applies once a version has shipped.
 - The schema is append-only: never reorder, remove or retype a field. Regenerate
   `src/o3ds_generated.h` with the pinned `flatc` (`flatc --cpp -o src src/o3ds.fbs`) and sync
   the plugin's core mirror (`python Build/Scripts/sync_o3ds_core.py`); CI checks both.

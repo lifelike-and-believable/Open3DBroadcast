@@ -174,8 +174,11 @@ private:
 	bool ProcessNextQueuedItemLocked();
 	void ProcessItemLocked(FItem&& Item);
 	void ProcessFrameLocked(FO3DSPoseFrame& Frame, bool bAlreadyFiltered);
-	/** A residual update that was serialized but not handed to a transport: the next frame of its subject is a full sync. */
-	void RequestFullSyncAfterLostResidual(const FO3DSPoseFrame& Frame);
+	/**
+	 * A full sync or residual update that was serialized but not delivered (refused, or no
+	 * transport): the next frame of its subject is a full sync.
+	 */
+	void RequestFullSyncAfterUndelivered(const FO3DSPoseFrame& Frame, bool bFullSync);
 	void SendLocked(const FO3DSPoseFrame& Frame, TArray<uint8>&& Bytes, bool bFullSync);
 
 	/** Worker-owned. Created in the constructor and never replaced. */

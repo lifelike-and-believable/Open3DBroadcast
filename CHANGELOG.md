@@ -493,15 +493,23 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
     cadence keyframe does not reset the predictor history on either end, so decoding from it
     after a loss would still diverge (a deviation from ADR 0005 (ix), recorded in its
     implementation notes).
-  - **The sender sends a full Subject on the next frame after a residual update it did not
-    deliver** (refused by the transport, or serialized with no transport attached), so the
-    receiver's hold lasts one frame instead of up to `FullSyncIntervalSeconds`. A refused
-    quantized update stays applicable across the gap and changes nothing.
+  - **The sender sends a full Subject on the next frame after a full Subject or residual update
+    it did not deliver** (refused by the transport for any reason, or serialized with no
+    transport attached; before, only a full Subject refused with `DroppedBackpressure` was
+    followed by one), so a hold caused by the sender lasts one frame instead of up to
+    `FullSyncIntervalSeconds`. A refused quantized update stays applicable across the gap and
+    changes nothing. Network loss and a receiver joining mid-stream still wait for the next
+    periodic full Subject (until the peer-joined trigger, ADR 0005 (vi)).
+  - Unsequenced residual streams (parsed without a context) have no safe resync point either
+    except a full Subject: the decoder refuses updates it has no history for, but rebuilds
+    history from later cadence keyframes, which does not match the sender. No current sender
+    writes unsequenced residual frames.
   - Tests: core `resync_contract_tests` (missed full Subject, residual gap with the pose
     matching the sender on every frame after the resync, new epoch, unset `ref_seq`, decoder
     without history, gap detection); `Open3DBroadcast.Receiver.Correctness.
     ResidualGapHoldsUntilFullSync` through the real receiver source;
-    `Open3DBroadcast.Sender.Pipeline.RefusedResidualUpdateForcesFullSync`. The decoder tests
+    `Open3DBroadcast.Sender.Pipeline.RefusedResidualUpdateForcesFullSync` and
+    `.UndeliveredFullSyncIsSentAgain`. The decoder tests
     that asserted the zero-reference fallback now assert the drop.
 
 - **The UE sender stamps its frames** (SND-15, CORE-29; ADR 0005 (iv)). `FO3DSenderSerializer`
