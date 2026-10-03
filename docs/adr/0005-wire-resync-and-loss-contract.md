@@ -205,7 +205,8 @@ Receiver, per subject within a stream (`frame_epoch`):
 Item (iv), stamping, is implemented in #341: `O3DS::StreamWriter` in core and the UE
 serializer writing every frame through it. Items (viii) and (ix), `ref_seq` and the receiver
 contract, are implemented in #342 (CORE-5, CORE-6). Item (iii), the residual fallback, is
-implemented in #343. Where the implementation departs from the
+implemented in #343. Item (vi), the new-peer trigger, is implemented in PR-PENDING for TCP and
+NNG. Where the implementation departs from the
 decision above, and why:
 
 - **One writer per subject, not one per serializer.** The receiver that shipped in the meantime
@@ -253,3 +254,10 @@ decision above, and why:
   attached the mode is quantized and nothing is logged, since nothing is sent. The warning is
   logged once per capture for each transport and guarantee, and shown under the Residual
   checkbox.
+- **Item (vi): NNG reports peers in every mode, and WebRTC does not yet.** `bPeerJoinSignal` is
+  a transport capability that the conformance suite expects the sender, the receiver and the
+  registry to agree on, so NNG reports it for every mode, not only the sending ones; it is
+  called for each added pipe, including a redial after a lost connection. WebRTC's participant
+  join is not wired: it needs the LiveKit FFI's participant events verified first (Q4). The
+  callback only sets a flag; the pipeline's worker consumes it before the next frame, so a
+  burst of joins costs one full sync.

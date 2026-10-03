@@ -334,6 +334,12 @@ void FO3DSenderPipeline::ProcessFrameLocked(FO3DSPoseFrame& Frame, bool bAlready
 	const double StartSeconds = FPlatformTime::Seconds();
 	FramesProcessed.fetch_add(1);
 
+	// ADR 0005 (vi): a peer joined since the last frame; it has no full Subject yet.
+	if (PeerJoined->exchange(false))
+	{
+		Serializer->RequestFullSyncAll();
+	}
+
 	// The frame is owned here until it goes back to the pool; nobody else reads it.
 	if (!bAlreadyFiltered)
 	{
@@ -408,6 +414,10 @@ void FO3DSenderPipeline::AttachSender(const TSharedPtr<IOpen3DSender>& InSender)
 {
 	FScopeLock WorkerGuard(&WorkerLock);
 	Sender = InSender;
+	if (Sender.IsValid())
+	{
+		Sender->SetPeerJoinedCallback([Flag = PeerJoined]() { Flag->store(true); });
+	}
 }
 
 void FO3DSenderPipeline::DetachSender()
@@ -418,6 +428,10 @@ void FO3DSenderPipeline::DetachSender()
 		FScopeLock WorkerGuard(&WorkerLock);
 		Released = MoveTemp(Sender);
 		Sender.Reset();
+		if (Released.IsValid())
+		{
+			Released->SetPeerJoinedCallback(FO3DPeerJoinedCallback());
+		}
 	}
 	// Released here, outside the lock, on the owner thread.
 }

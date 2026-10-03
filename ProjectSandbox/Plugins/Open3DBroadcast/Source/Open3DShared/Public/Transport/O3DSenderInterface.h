@@ -105,6 +105,16 @@ public:
     virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) { return nullptr; }
 
     /**
+     * ADR 0005 (vi): Callback is called when the sender gains a peer that has seen nothing yet (a
+     * receiver connects, a subscriber or pipe is added), so the next frame can be a full sync
+     * instead of waiting for the periodic one. It may run on any thread, during or after
+     * SendSerialized, and must only record the fact (the sender pipeline sets an atomic flag). A
+     * transport that calls it reports bPeerJoinSignal. An empty callback clears it. Default: not
+     * supported, nothing is stored.
+     */
+    virtual void SetPeerJoinedCallback(FO3DPeerJoinedCallback Callback) { (void)Callback; }
+
+    /**
      * Sends one control envelope (O3DS::WriteControlEnvelope output) to every receiver of this
      * stream (docs/adr/0011-control-channel.md, item 6). Game thread in v1; implementations are
      * thread-safe, never block, and copy the bytes. Not routed through SendSerialized or the pose

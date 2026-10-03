@@ -65,7 +65,7 @@ namespace O3DTransportResultsTests
 		TArray<FEntry> Entries;
 	};
 
-	FO3DTransportCapabilities MakeCaps(EO3DDeliveryGuarantee Delivery, bool bBidirectional, int32 MaxPayloadBytes)
+	FO3DTransportCapabilities MakeCaps(EO3DDeliveryGuarantee Delivery, bool bBidirectional, int32 MaxPayloadBytes, bool bPeerJoinSignal = false)
 	{
 		FO3DTransportCapabilities Caps;
 		Caps.bSend = true;
@@ -74,6 +74,7 @@ namespace O3DTransportResultsTests
 		Caps.bAudioReceive = true;
 		Caps.bControl = true;
 		Caps.bBidirectional = bBidirectional;
+		Caps.bPeerJoinSignal = bPeerJoinSignal;
 		Caps.Delivery = Delivery;
 		Caps.MaxPayloadBytes = MaxPayloadBytes;
 		return Caps;
@@ -276,7 +277,7 @@ bool FO3DTransportCapabilitiesBuiltInTest::RunTest(const FString& Parameters)
 	// ADR 0005 (iii): Loopback and TCP ReliableOrdered, UDP Unreliable, MoQ Unreliable in both
 	// delivery modes (Q5), NNG by mode. ADR 0011: every built-in transport carries control.
 	ExpectRegisteredCaps(*this, TEXT("Loopback"), Empty, MakeCaps(EO3DDeliveryGuarantee::ReliableOrdered, false, 0), TEXT("default"));
-	ExpectRegisteredCaps(*this, TEXT("TCP"), Empty, MakeCaps(EO3DDeliveryGuarantee::ReliableOrdered, true, 50 * 1024 * 1024), TEXT("default"));
+	ExpectRegisteredCaps(*this, TEXT("TCP"), Empty, MakeCaps(EO3DDeliveryGuarantee::ReliableOrdered, true, 50 * 1024 * 1024, /*bPeerJoinSignal*/ true), TEXT("default"));
 	ExpectRegisteredCaps(*this, TEXT("UDP"), Empty, MakeCaps(EO3DDeliveryGuarantee::Unreliable, false, 0), TEXT("default"));
 
 	FO3DTransportConfig Datagram;
@@ -284,11 +285,11 @@ bool FO3DTransportCapabilitiesBuiltInTest::RunTest(const FString& Parameters)
 	ExpectRegisteredCaps(*this, TEXT("MoQ"), Empty, MakeCaps(EO3DDeliveryGuarantee::Unreliable, false, 0), TEXT("stream mode"));
 	ExpectRegisteredCaps(*this, TEXT("MoQ"), Datagram, MakeCaps(EO3DDeliveryGuarantee::Unreliable, false, 0), TEXT("datagram mode"));
 
-	ExpectRegisteredCaps(*this, TEXT("NNG"), MakeNngConfig(TEXT("pub")), MakeCaps(EO3DDeliveryGuarantee::Unreliable, false, 0), TEXT("pub"));
-	ExpectRegisteredCaps(*this, TEXT("NNG"), MakeNngConfig(TEXT("sub")), MakeCaps(EO3DDeliveryGuarantee::Unreliable, false, 0), TEXT("sub"));
-	ExpectRegisteredCaps(*this, TEXT("NNG"), MakeNngConfig(TEXT("pair")), MakeCaps(EO3DDeliveryGuarantee::ReliableOrdered, true, 0), TEXT("pair"));
-	ExpectRegisteredCaps(*this, TEXT("NNG"), MakeNngConfig(TEXT("push")), MakeCaps(EO3DDeliveryGuarantee::ReliableOrdered, false, 0), TEXT("push"));
-	ExpectRegisteredCaps(*this, TEXT("NNG"), MakeNngConfig(TEXT("pull")), MakeCaps(EO3DDeliveryGuarantee::ReliableOrdered, false, 0), TEXT("pull"));
+	ExpectRegisteredCaps(*this, TEXT("NNG"), MakeNngConfig(TEXT("pub")), MakeCaps(EO3DDeliveryGuarantee::Unreliable, false, 0, /*bPeerJoinSignal*/ true), TEXT("pub"));
+	ExpectRegisteredCaps(*this, TEXT("NNG"), MakeNngConfig(TEXT("sub")), MakeCaps(EO3DDeliveryGuarantee::Unreliable, false, 0, /*bPeerJoinSignal*/ true), TEXT("sub"));
+	ExpectRegisteredCaps(*this, TEXT("NNG"), MakeNngConfig(TEXT("pair")), MakeCaps(EO3DDeliveryGuarantee::ReliableOrdered, true, 0, /*bPeerJoinSignal*/ true), TEXT("pair"));
+	ExpectRegisteredCaps(*this, TEXT("NNG"), MakeNngConfig(TEXT("push")), MakeCaps(EO3DDeliveryGuarantee::ReliableOrdered, false, 0, /*bPeerJoinSignal*/ true), TEXT("push"));
+	ExpectRegisteredCaps(*this, TEXT("NNG"), MakeNngConfig(TEXT("pull")), MakeCaps(EO3DDeliveryGuarantee::ReliableOrdered, false, 0, /*bPeerJoinSignal*/ true), TEXT("pull"));
 
 	// An NNG instance reports the mode it was initialized with.
 	if (const TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe> Sender = FO3DTransportRegistry::Get().CreateSender(TEXT("NNG")))

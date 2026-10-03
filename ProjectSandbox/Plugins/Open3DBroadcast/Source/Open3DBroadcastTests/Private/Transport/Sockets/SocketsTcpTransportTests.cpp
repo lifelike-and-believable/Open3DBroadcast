@@ -34,6 +34,8 @@
 #include "Transport/O3DTransportTypes.h"
 #include "Transport/O3DSerializedFrameConsumer.h"
 
+#include <atomic>
+
 namespace O3DSocketsTcpTests
 {
 	/** Records every frame. Called only from Receiver.Poll(), on the test thread. */
@@ -280,6 +282,28 @@ bool FO3DSocketsTcpSlowReaderTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Sender dropped nothing"), Pair.Sender.GetStats().DroppedFrames, static_cast<int64>(0));
 	TestEqual(TEXT("One connection throughout"), O3DSocketsTesting::TcpReceiverGetConnectCount(Pair.Receiver), 1);
 	TestTrue(TEXT("Client still connected"), O3DSocketsTesting::TcpSenderHasClient(Pair.Sender));
+	return true;
+}
+
+// ADR 0005 (vi): the sender reports each accepted receiver as a new peer, on its worker thread.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsTcpPeerJoinedTest, "Open3DBroadcast.Transport.Sockets.Tcp.PeerJoinedOnAccept", O3DB_TEST_FLAGS)
+bool FO3DSocketsTcpPeerJoinedTest::RunTest(const FString& Parameters)
+{
+	using namespace O3DSocketsTcpTests;
+
+	FPair Pair;
+	TestTrue(TEXT("TCP reports peer joins"), Pair.Sender.GetCapabilities().bPeerJoinSignal);
+	const TSharedRef<std::atomic<int32>, ESPMode::ThreadSafe> PeersJoined = MakeShared<std::atomic<int32>, ESPMode::ThreadSafe>(0);
+	Pair.Sender.SetPeerJoinedCallback([PeersJoined]() { PeersJoined->fetch_add(1); });
+	if (!Pair.Setup(*this, {}, {}))
+	{
+		return false;
+	}
+	TestTrue(TEXT("The accepted receiver was reported"), WaitUntil(5.0, [&PeersJoined]() { return PeersJoined->load() >= 1; }));
+	TestEqual(TEXT("Once"), PeersJoined->load(), 1);
+
+	// A cleared callback is not called again.
+	Pair.Sender.SetPeerJoinedCallback(FO3DPeerJoinedCallback());
 	return true;
 }
 

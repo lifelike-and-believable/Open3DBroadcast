@@ -70,6 +70,18 @@ namespace O3DNngSenderPrivate
             const int32 Count = Pipe->PipeCount.fetch_add(1) + 1;
             Pipe->bConnected.store(true);
             UE_LOG(LogO3DNngSender, Log, TEXT("NNG sender connection established (pipe count=%d)"), Count);
+
+            // ADR 0005 (vi): the new peer has no full Subject yet. Copied under the lock and
+            // called outside it.
+            FO3DPeerJoinedCallback Callback;
+            {
+                FScopeLock Guard(&Pipe->PeerJoinedLock);
+                Callback = Pipe->PeerJoined;
+            }
+            if (Callback)
+            {
+                Callback();
+            }
         }
         else if (Event == NNG_PIPE_EV_REM_POST)
         {
@@ -105,6 +117,12 @@ FO3DNngSender::FO3DNngSender()
     , TransportMetrics(FO3DPerformanceMetrics::Get().AcquireTransportMetrics(TEXT("NNG")))
 {
     PipeToken = O3DNngSenderPrivate::GetSenderPipeContextRegistry().Register(PipeContext);
+}
+
+void FO3DNngSender::SetPeerJoinedCallback(FO3DPeerJoinedCallback Callback)
+{
+    FScopeLock Guard(&PipeContext->PeerJoinedLock);
+    PipeContext->PeerJoined = MoveTemp(Callback);
 }
 
 FO3DTransportResult FO3DNngSender::Initialize(const FO3DTransportConfig& Config)

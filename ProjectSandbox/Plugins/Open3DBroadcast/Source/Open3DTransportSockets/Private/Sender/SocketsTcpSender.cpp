@@ -402,7 +402,25 @@ bool FO3DSocketsTcpSender::TryAcceptClient()
 	UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP sender accepted client %s (sendBuf=%d, TCP_NODELAY=true)"), *PeerAddr->ToString(true), AppliedSize);
 	ConnectionState.Set(EO3DConnectionState::Connected); // on the worker thread (ADR 0007 item 3)
 	PublishState->SetPeerReady(true); // Fast check in SendSerialized and the audio sinks
+
+	// ADR 0005 (vi): the new receiver has no full Subject yet. Copied under the lock and called
+	// outside it, so a callback being replaced is never called while it is destroyed.
+	FO3DPeerJoinedCallback Callback;
+	{
+		FScopeLock Guard(&PeerJoinedLock);
+		Callback = PeerJoinedCallback;
+	}
+	if (Callback)
+	{
+		Callback();
+	}
 	return true;
+}
+
+void FO3DSocketsTcpSender::SetPeerJoinedCallback(FO3DPeerJoinedCallback Callback)
+{
+	FScopeLock Guard(&PeerJoinedLock);
+	PeerJoinedCallback = MoveTemp(Callback);
 }
 
 void FO3DSocketsTcpSender::DropClient(const TCHAR* Reason)

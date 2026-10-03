@@ -403,6 +403,7 @@ namespace O3DTests
 			Profile.ExpectedCapabilities = MakeBaseCapabilities(EO3DDeliveryGuarantee::ReliableOrdered);
 			Profile.ExpectedCapabilities.bBidirectional = true;
 			Profile.ExpectedCapabilities.MaxPayloadBytes = 50 * 1024 * 1024; // the TCP frame header's limit
+			Profile.ExpectedCapabilities.bPeerJoinSignal = true; // ADR 0005 (vi)
 			Profile.bBackpressureNeedsPeer = true; // without a client every send is rejected before the queue
 			RegisterConformanceProfile(TcpName, Profile);
 		}
@@ -430,6 +431,7 @@ namespace O3DTests
 			// The fixture uses pub/sub, which ADR 0005 (iii) rates Unreliable (pair and push/pull are
 			// ReliableOrdered; Open3DBroadcast.Shared.TransportCapabilities covers those).
 			Profile.ExpectedCapabilities = MakeBaseCapabilities(EO3DDeliveryGuarantee::Unreliable);
+			Profile.ExpectedCapabilities.bPeerJoinSignal = true; // ADR 0005 (vi)
 			Profile.ControlStopCycles = 1; // a closed listener can linger (see above), so one sender per test
 			RegisterConformanceProfile(NngName, Profile);
 		}

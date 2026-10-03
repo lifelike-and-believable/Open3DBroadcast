@@ -120,6 +120,15 @@ void FO3DSenderSerializer::RequestFullSync(const FString& Subject)
 	}
 }
 
+void FO3DSenderSerializer::RequestFullSyncAll()
+{
+	FScopeLock StateGuard(&StateLock);
+	for (TPair<FString, FSubjectCache>& Entry : SubjectState)
+	{
+		Entry.Value.SyncTracker.RequestFullSync();
+	}
+}
+
 void FO3DSenderSerializer::RemoveSubjectCache(const FString& Subject)
 {
 	if (Subject.IsEmpty())

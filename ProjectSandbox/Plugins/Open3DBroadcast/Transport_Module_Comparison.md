@@ -42,6 +42,7 @@ All modules implement the same interfaces with identical method signatures
 - `GetCapabilities()` - `FO3DTransportCapabilities` (audio, control, delivery guarantee, payload limit)
 - `GetConnectionState()` / `SetStateChangedCallback()` - `Idle`, `Connecting`, `Connected`, `Reconnecting`, `Failed`
 - `CreateAudioSink(AudioConfig)` - Audio sink factory
+- `SetPeerJoinedCallback(Callback)` - Called, on any thread, when a receiver connects or a pipe or subscriber is added, so the next frame is a full sync (ADR 0005 (vi)). TCP and NNG implement it and report `bPeerJoinSignal`; the default does nothing
 
 **IOpen3DReceiver** (`Open3DShared/Public/Transport/O3DReceiverInterface.h`):
 - `Initialize(Config)` / `Start()` - return `FO3DTransportResult`; `Start()` without a consumer is `NoConsumer`

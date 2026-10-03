@@ -24,6 +24,10 @@ struct FNngSenderPipeContext
     std::atomic<bool> bConnected{false};
     /** True for listening/pub sockets, which stay "connected" with no pipes. */
     std::atomic<bool> bConnectedWithoutPipes{true};
+
+    /** IOpen3DSender::SetPeerJoinedCallback's callback, called for each added pipe (ADR 0005 (vi)). */
+    FCriticalSection PeerJoinedLock;
+    FO3DPeerJoinedCallback PeerJoined;
 };
 
 /**
@@ -69,6 +73,8 @@ public:
     virtual void SetStateChangedCallback(FO3DConnectionStateCallback Callback) override { ConnectionState.SetCallback(MoveTemp(Callback)); }
     virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
     virtual EO3DSendResult SendControl(const uint8* Envelope, int32 Len) override;
+    /** Called on an NNG thread for each added pipe (a subscriber, a peer, a pull socket; ADR 0005 (vi)). */
+    virtual void SetPeerJoinedCallback(FO3DPeerJoinedCallback Callback) override;
 
     bool IsConnected() const { return PipeContext->bConnected.load(); }
 

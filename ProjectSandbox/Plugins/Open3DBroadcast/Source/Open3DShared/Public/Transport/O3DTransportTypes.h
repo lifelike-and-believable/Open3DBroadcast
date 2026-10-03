@@ -144,6 +144,9 @@ enum class EO3DConnectionState : uint8
  */
 using FO3DConnectionStateCallback = TFunction<void(EO3DConnectionState /*NewState*/, const FO3DTransportResult& /*Reason*/)>;
 
+/** Called when a sender gains a new peer (ADR 0005 (vi)); see IOpen3DSender::SetPeerJoinedCallback. */
+using FO3DPeerJoinedCallback = TFunction<void()>;
+
 /**
  * What a transport can do with a given config (ADR 0007 item 4, WP-A1 PR 3). Returned by
  * FO3DTransportDescriptor::GetCapabilities and by GetCapabilities() on a sender or receiver,
@@ -164,7 +167,7 @@ struct FO3DTransportCapabilities
 	bool bControl = false;
 	/** The connection can carry data from receiver to sender (TCP, WebRTC, NNG pair). Nothing uses the back-channel in v1. */
 	bool bBidirectional = false;
-	/** The sender reports a newly joined peer (ADR 0005 (vi)). No transport does yet. */
+	/** The sender reports a newly joined peer through IOpen3DSender::SetPeerJoinedCallback (ADR 0005 (vi)): TCP and NNG. */
 	bool bPeerJoinSignal = false;
 	/** Delivery guarantee for mocap frames, with ADR 0005 (iii)'s values. */
 	EO3DDeliveryGuarantee Delivery = EO3DDeliveryGuarantee::Unknown;

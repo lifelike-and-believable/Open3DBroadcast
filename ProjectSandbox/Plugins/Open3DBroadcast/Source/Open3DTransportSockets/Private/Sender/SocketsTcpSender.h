@@ -50,6 +50,8 @@ public:
 	virtual void SetStateChangedCallback(FO3DConnectionStateCallback Callback) override { ConnectionState.SetCallback(MoveTemp(Callback)); }
 	virtual TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> CreateAudioSink(const FO3DTransportAudioConfig& AudioConfig) override;
 	virtual EO3DSendResult SendControl(const uint8* Envelope, int32 Len) override;
+	/** Called on the worker thread when a receiver is accepted (ADR 0005 (vi)). */
+	virtual void SetPeerJoinedCallback(FO3DPeerJoinedCallback Callback) override;
 
 	/** True while a receiver is connected. Any thread. */
 	bool HasClient() const { return PublishState->IsPeerReady(); }
@@ -141,4 +143,8 @@ private:
 	 * connected (set by the worker on accept), Reconnecting after it went away.
 	 */
 	FO3DConnectionStateTracker ConnectionState;
+
+	/** SetPeerJoinedCallback's callback; set on any thread, called on the worker. */
+	FCriticalSection PeerJoinedLock;
+	FO3DPeerJoinedCallback PeerJoinedCallback;
 };

@@ -27,6 +27,7 @@ THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
 THIRD_PARTY_INCLUDES_END
 
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -203,6 +204,11 @@ bool FO3DNngDataRoundTripTest::RunTest(const FString& Parameters)
 	TSharedPtr<FTestFrameConsumer, ESPMode::ThreadSafe> FrameConsumer = MakeShared<FTestFrameConsumer, ESPMode::ThreadSafe>();
 	Receiver.SetConsumer(FrameConsumer);
 
+	// ADR 0005 (vi): the sender reports the subscriber's pipe as a new peer, on an NNG thread.
+	TestTrue(TEXT("NNG reports peer joins"), Sender.GetCapabilities().bPeerJoinSignal);
+	const TSharedRef<std::atomic<int32>, ESPMode::ThreadSafe> PeersJoined = MakeShared<std::atomic<int32>, ESPMode::ThreadSafe>(0);
+	Sender.SetPeerJoinedCallback([PeersJoined]() { PeersJoined->fetch_add(1); });
+
 	const bool bReceiverStarted = Receiver.Start().IsOk();
 	TestTrue(TEXT("Receiver starts"), bReceiverStarted);
 	if (!bReceiverStarted)
@@ -241,6 +247,7 @@ bool FO3DNngDataRoundTripTest::RunTest(const FString& Parameters)
 	}
 
 	TestTrue(TEXT("Receiver consumed frame"), FrameConsumer->WasInvoked());
+	TestTrue(TEXT("The subscriber's pipe was reported as a new peer"), PeersJoined->load() >= 1);
 
 	if (FrameConsumer->WasInvoked())
 	{
