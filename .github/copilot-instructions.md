@@ -120,8 +120,8 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 
 ## 3) Versioning & Changelog
 
-- Update `O3DS_VERSION_TAG` on any protocol or user‑visible behavior change.
-- **CHANGELOG.md**: Add a “Schema/Protocol” subsection with: brief description, compatibility notes, and migration steps.
+- Update `O3DS_VERSION_TAG` on any protocol or user‑visible behavior change, per the bump table in `docs/wire-format.md` section 8 (ADR 0009).
+- **CHANGELOG.md** (the repository root; the only changelog): Add a “Schema/Protocol” entry with: brief description, the protocol version, the `min_reader_version` of affected frames, compatibility in both directions, and migration steps.
 - Tag releases with `o3ds-vX.Y.Z` and attach a short release note referencing CHANGELOG sections touched in the PR.
 
 ---

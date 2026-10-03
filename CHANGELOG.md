@@ -1,6 +1,22 @@
+# Changelog
+
+The one changelog for the core library, the plugins and the transports (ADR 0009 item 10).
+Each release gets a `## [x.y.z] - date` section; until then changes collect under
+`## Unreleased`. A **Schema/Protocol** entry is required for any wire change and states the
+protocol version, the `min_reader_version` of affected frames, compatibility in both
+directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) section 8).
+
 ## Unreleased
 
 ### Schema/Protocol
+
+- **Wire format documented; one changelog** (ADR 0009 item 10, WP-A4 PR 5; DOC-8). New
+  [`docs/wire-format.md`](docs/wire-format.md): the frame header and versions, envelope v1 and
+  v2, the UDP datagram kinds and fragment header, TCP framing, capture files, clock domains,
+  name hashes, and the rules for changing the wire format (bump table, append-only schema,
+  compatibility window, the changelog entry and the compatibility tests). `docs/CHANGELOG.md`,
+  which only said "Nothing yet", is deleted; this file is the changelog. ADR 0009 gains an
+  implementation-notes addendum recording where WP-A4 departed from it. No wire change.
 
 - **One name-hash definition, length-prefixed** (ADR 0009 item 8, WP-A4 PR 4; SHR-33). No wire
   change: the hashes are local (topology and curve-name change detection on the sender and the
