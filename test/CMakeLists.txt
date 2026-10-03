@@ -28,6 +28,7 @@ set(O3DS_CORE_TEST_SOURCES
 	control_codec_tests.cpp
 	control_state_tests.cpp
 	crc32_tests.cpp
+	parse_reuse_tests.cpp
 )
 
 add_executable(o3ds_core_tests
