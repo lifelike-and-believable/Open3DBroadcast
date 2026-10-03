@@ -32,24 +32,16 @@ struct FO3DSenderComponentTestAccess
 		return UO3DSenderComponent::ConsumeCaptureBudget(NowSeconds, InOutLastCaptureTime, CaptureRateHz);
 	}
 
-	static void BuildLocalBoneTransforms(const TArray<FTransform>& ComponentSpaceTransforms,
+	// The pose sampler is a private class (WP-A3 step 6): these are defined in the module.
+	static OPEN3DSENDER_API void BuildLocalBoneTransforms(const TArray<FTransform>& ComponentSpaceTransforms,
 		const TArray<int32>& CachedParentIndices,
 		int32 NumBones,
 		TFunctionRef<int32(int32)> ResolveFallbackParent,
 		TArray<FTransform>& OutLocalTransforms,
-		TArray<int32>* OutResolvedParents)
-	{
-		UO3DSenderComponent::BuildLocalBoneTransforms(ComponentSpaceTransforms, CachedParentIndices, NumBones, ResolveFallbackParent, OutLocalTransforms, OutResolvedParents);
-	}
-
-	static void SetDescriptor(UO3DSenderComponent& Component, const FO3DSSkeletonDescriptor& Descriptor)
-	{
-		Component.DescriptorCache = Descriptor;
-		Component.DescriptorSnapshot = MakeShared<FO3DSSkeletonDescriptor>(Descriptor);
-	}
-
-	static const FO3DSSkeletonDescriptor& GetDescriptorCache(const UO3DSenderComponent& Component) { return Component.DescriptorCache; }
-	static bool HasDescriptorSnapshot(const UO3DSenderComponent& Component) { return Component.DescriptorSnapshot.IsValid(); }
+		TArray<int32>* OutResolvedParents);
+	static OPEN3DSENDER_API void SetDescriptor(UO3DSenderComponent& Component, const FO3DSSkeletonDescriptor& Descriptor);
+	static OPEN3DSENDER_API const FO3DSSkeletonDescriptor& GetDescriptorCache(const UO3DSenderComponent& Component);
+	static OPEN3DSENDER_API bool HasDescriptorSnapshot(const UO3DSenderComponent& Component);
 	static void SetCapturing(UO3DSenderComponent& Component, bool bCapturing) { Component.bIsCapturing = bCapturing; }
 	/** The serializer lives in the pose pipeline since WP-A2c; created by the first successful StartCapture. */
 	static bool HasSerializer(const UO3DSenderComponent& Component) { return Component.Pipeline.IsValid(); }
@@ -63,7 +55,7 @@ struct FO3DSenderComponentTestAccess
 	static void SetAudioCaptureComponent(UO3DSenderComponent& Component, UO3DSenderAudioCaptureComponent* Capture) { Component.AudioCaptureComponent = Capture; }
 	/** The capture config StartCapture hands the audio capture component (device index resolved from the cache). */
 	static FO3DSenderAudioCaptureConfig BuildAudioCaptureConfig(const UO3DSenderComponent& Component) { return Component.BuildAudioCaptureConfig(); }
-	static FString GetCachedSubjectName(const UO3DSenderComponent& Component) { return Component.CachedSubjectName; }
+	static OPEN3DSENDER_API FString GetCachedSubjectName(const UO3DSenderComponent& Component);
 
 	// Tick order (WP-A2b).
 	static void UnbindFromTarget(UO3DSenderComponent& Component) { Component.UnbindFromTarget(); }
@@ -203,6 +195,37 @@ public:
 private:
 	TSharedPtr<FO3DSenderPipeline> Pipeline;
 	TWeakPtr<FO3DSenderPipeline> WeakPipeline;
+};
+
+class FO3DSenderPoseSampler;
+
+/** Owns one FO3DSenderPoseSampler (a private class of this module, WP-A3 step 6) and records its callbacks. */
+class OPEN3DSENDER_API FO3DSenderPoseSamplerProbe
+{
+public:
+	FO3DSenderPoseSamplerProbe();
+	~FO3DSenderPoseSamplerProbe();
+
+	FO3DSenderPoseSamplerProbe(const FO3DSenderPoseSamplerProbe&) = delete;
+	FO3DSenderPoseSamplerProbe& operator=(const FO3DSenderPoseSamplerProbe&) = delete;
+
+	bool EnsureSkeleton(const USkeletalMeshComponent* Mesh, const FString& SubjectOverride);
+	void ResetSkeleton();
+	FString ResolveSubjectName(const USkeletalMeshComponent* Mesh, const FString& SubjectOverride);
+	FString InvalidateSubjectName(const FString& SubjectOverride);
+	void ResetFrameCounter();
+	void FillShell(const USkeletalMeshComponent* Mesh, const FString& SubjectOverride, double CaptureTimeSec, FO3DSPoseFrame& Frame);
+	void SampleBones(const USkeletalMeshComponent* Mesh, FO3DSPoseFrame& Frame);
+	const FO3DSSkeletonDescriptor& GetDescriptor() const;
+	bool HasDescriptorSnapshot() const;
+
+	/** OnDescriptorChanged calls: the subject name each was given. */
+	TArray<FString> DescriptorChanges;
+	/** OnSubjectNameChanged calls: "Previous -> New". */
+	TArray<FString> NameChanges;
+
+private:
+	TUniquePtr<FO3DSenderPoseSampler> Sampler;
 };
 
 #endif // WITH_DEV_AUTOMATION_TESTS

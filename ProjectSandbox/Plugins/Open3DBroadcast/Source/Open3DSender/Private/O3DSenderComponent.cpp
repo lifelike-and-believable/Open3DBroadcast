@@ -7,6 +7,7 @@
 #include "O3DSenderSerializer.h"
 #include "O3DSenderCurveProcessor.h"
 #include "O3DSenderPipeline.h"
+#include "O3DSenderPoseSampler.h"
 #include "O3DSenderTransportController.h"
 #include "Transport/O3DTransportRegistry.h"
 #include "Engine/Engine.h"
@@ -51,6 +52,11 @@ static TAutoConsoleVariable<int32> CVarO3DSenderOnScreen(
 static const FName DefaultSenderTransportName(TEXT("loopback"));
 
 void FO3DSenderTransportControllerDeleter::operator()(FO3DSenderTransportController* Ptr) const
+{
+	delete Ptr;
+}
+
+void FO3DSenderPoseSamplerDeleter::operator()(FO3DSenderPoseSampler* Ptr) const
 {
 	delete Ptr;
 }
@@ -107,8 +113,12 @@ UO3DSenderComponent::UO3DSenderComponent()
 	EnsureValidTransportName();
 	TransportController.Reset(new FO3DSenderTransportController());
 	CurveProcessor.Reset(new FO3DSenderCurveProcessor());
+	PoseSampler.Reset(new FO3DSenderPoseSampler());
+	PoseSampler->SetCallbacks(
+		[this](const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor) { OnDescriptorReady.Broadcast(Subject, Descriptor); },
+		[this](const FString& PreviousName, const FString& NewName) { HandleSubjectNameChanged(PreviousName, NewName); });
 	SyncAudioConfigSource();
-	LastSubjectSourceValue = SubjectName;
+	PoseSampler->InvalidateSubjectName(SubjectName);
 }
 
 void UO3DSenderComponent::BeginPlay()
@@ -254,7 +264,7 @@ void UO3DSenderComponent::StartCapture()
 	const bool bHasValidMesh = TargetMesh.IsValid();
 	bIsCapturing = bHasValidMesh || bEnableAudio || bAllowControlOnly;
 	LastCaptureTime = 0.0;
-	FrameCounter = 0;
+	PoseSampler->ResetFrameCounter();
 
 	if (bIsCapturing)
 	{
@@ -290,7 +300,7 @@ void UO3DSenderComponent::StartCapture()
 			Pipeline->SetSerializedFrameListener(nullptr);
 		}
 		UnbindFromTarget();
-		ResetSkeletonCache();
+		PoseSampler->ResetSkeleton();
 		TeardownTransport();
 	}
 }
@@ -323,7 +333,7 @@ void UO3DSenderComponent::StopCapture()
 	// SND-1: forget the cached skeleton so the next StartCapture() rebuilds
 	// the descriptor (and re-broadcasts OnDescriptorReady) even for the same
 	// mesh.
-	ResetSkeletonCache();
+	PoseSampler->ResetSkeleton();
 
 	if (CurveProcessor.IsValid())
 	{
@@ -986,69 +996,35 @@ void UO3DSenderComponent::SetTickPrerequisiteMesh(USkeletalMeshComponent* Mesh)
 	}
 }
 
-FString UO3DSenderComponent::BuildSubjectName(const USkeletalMeshComponent* SkelComp) const
-{
-	if (!SubjectName.IsEmpty())
-	{
-		return SanitizeSubjectName(SubjectName);
-	}
-
-	const UWorld* World = SkelComp ? SkelComp->GetWorld() : nullptr;
-	const FString WorldName = World ? World->GetName() : TEXT("World");
-	const FString ActorName = SkelComp && SkelComp->GetOwner() ? SkelComp->GetOwner()->GetName() : TEXT("Actor");
-	const FString CompName = SkelComp ? SkelComp->GetName() : TEXT("SkeletalMeshComponent");
-	return SanitizeSubjectName(FString::Printf(TEXT("%s/%s/%s"), *WorldName, *ActorName, *CompName));
-}
-
-FString UO3DSenderComponent::SanitizeSubjectName(const FString& Raw) const
-{
-	return O3DHelpers::SanitizeSubjectName(Raw);
-}
-
 void UO3DSenderComponent::EnsureSubjectNameCached(const USkeletalMeshComponent* SkelComp)
 {
-	USkeletalMesh* Mesh = SkelComp ? SkelComp->GetSkeletalMeshAsset() : nullptr;
-	const bool bSubjectOverrideChanged = (LastSubjectSourceValue != SubjectName);
-	const bool bMeshChanged = CachedSubjectMeshForName.Get() != Mesh;
+	PoseSampler->ResolveSubjectName(SkelComp, SubjectName);
+}
 
-	if (!bSubjectOverrideChanged && !bMeshChanged && !CachedSubjectName.IsEmpty())
-	{
-		return;
-	}
-
-	const FString PreviousName = CachedSubjectName;
-	CachedSubjectName = BuildSubjectName(SkelComp);
-	CachedSubjectMeshForName = Mesh;
-	LastSubjectSourceValue = SubjectName;
-
+void UO3DSenderComponent::HandleSubjectNameChanged(const FString& PreviousName, const FString& NewName)
+{
 	// SND-16: keep the audio stream label equal to the pose subject name.
-	if (AudioCaptureComponent && bEnableAudio && !PreviousName.Equals(CachedSubjectName, ESearchCase::CaseSensitive))
+	if (AudioCaptureComponent && bEnableAudio)
 	{
-		AudioCaptureComponent->SetStreamLabel(CachedSubjectName);
+		AudioCaptureComponent->SetStreamLabel(NewName);
 	}
 
-	if (!PreviousName.IsEmpty() && !PreviousName.Equals(CachedSubjectName, ESearchCase::CaseSensitive))
+	if (!PreviousName.IsEmpty())
 	{
 		// Rename (SND-1): the serializer starts the new name with a full sync
 		// because it has no state for it; frames carry their own descriptor.
 		// Re-broadcast for any other OnDescriptorReady listener.
 		PurgeSerializerCacheForSubject(PreviousName);
-		if (DescriptorCache.IsValid())
+		if (PoseSampler->GetDescriptor().IsValid())
 		{
-			OnDescriptorReady.Broadcast(CachedSubjectName, DescriptorCache);
+			OnDescriptorReady.Broadcast(NewName, PoseSampler->GetDescriptor());
 		}
 	}
 }
 
 void UO3DSenderComponent::InvalidateSubjectNameCache()
 {
-	if (!CachedSubjectName.IsEmpty())
-	{
-		PurgeSerializerCacheForSubject(CachedSubjectName);
-	}
-	CachedSubjectName.Reset();
-	CachedSubjectMeshForName.Reset();
-	LastSubjectSourceValue = SubjectName;
+	PurgeSerializerCacheForSubject(PoseSampler->InvalidateSubjectName(SubjectName));
 }
 
 void UO3DSenderComponent::PurgeSerializerCacheForSubject(const FString& Subject)
@@ -1065,94 +1041,13 @@ void UO3DSenderComponent::PurgeSerializerCacheForSubject(const FString& Subject)
 	}
 }
 
-uint64 UO3DSenderComponent::ComputeDescriptorHash(const TArray<FName>& InNames, const TArray<int32>& InParents) const
-{
-	return O3DHelpers::HashNamesAndParents(InNames, InParents);
-}
-
 void UO3DSenderComponent::EnsureSkeletonCache(USkeletalMeshComponent* SkelComp)
 {
-	if (!SkelComp)
-	{
-		return;
-	}
-
-	USkeletalMesh* Mesh = SkelComp->GetSkeletalMeshAsset();
-	USkeleton* Skeleton = Mesh ? Mesh->GetSkeleton() : nullptr;
-	const FName CurrentMeshName = Mesh ? Mesh->GetFName() : NAME_None;
-
-	if (CachedSkeletalMesh.Get() != Mesh || CachedSkeleton.Get() != Skeleton || CachedSkeletalMeshName != CurrentMeshName)
-	{
-		RefreshSkeletonCache(SkelComp);
-		if (CurveProcessor.IsValid())
-		{
-			CurveProcessor->InvalidateCache();
-		}
-	}
-}
-
-void UO3DSenderComponent::RefreshSkeletonCache(USkeletalMeshComponent* SkelComp)
-{
-	USkeletalMesh* Mesh = SkelComp ? SkelComp->GetSkeletalMeshAsset() : nullptr;
-	USkeleton* Skeleton = Mesh ? Mesh->GetSkeleton() : nullptr;
-	CachedSkeletalMesh = Mesh;
-	CachedSkeleton = Skeleton;
-	CachedSkeletalMeshName = Mesh ? Mesh->GetFName() : NAME_None;
-
-	if (!Mesh)
-	{
-		DescriptorCache.Reset();
-		DescriptorSnapshot.Reset();
-		bDescriptorDirty = true;
-		return;
-	}
-
-	const uint64 PreviousHash = DescriptorCache.Hash;
-	const int32 PreviousCount = DescriptorCache.BoneNames.Num();
-
-	DescriptorCache.BoneNames.Reset();
-	DescriptorCache.ParentIndices.Reset();
-
-	const FReferenceSkeleton& RefSkel = Mesh->GetRefSkeleton();
-	const int32 NumBones = RefSkel.GetNum();
-	DescriptorCache.BoneNames.Reserve(NumBones);
-	DescriptorCache.ParentIndices.Reserve(NumBones);
-
-	for (int32 BoneIndex = 0; BoneIndex < NumBones; ++BoneIndex)
-	{
-		DescriptorCache.BoneNames.Add(RefSkel.GetBoneName(BoneIndex));
-		DescriptorCache.ParentIndices.Add(RefSkel.GetParentIndex(BoneIndex));
-	}
-
-	const uint64 NewHash = ComputeDescriptorHash(DescriptorCache.BoneNames, DescriptorCache.ParentIndices);
-	const bool bChanged = (PreviousHash != NewHash) || (PreviousCount != DescriptorCache.BoneNames.Num());
-	DescriptorCache.Hash = NewHash;
-	bDescriptorDirty = bChanged;
-	DescriptorSnapshot = MakeShared<FO3DSSkeletonDescriptor>(DescriptorCache);
-
 	const bool bDebug = (CVarO3DSenderDebugPose.GetValueOnAnyThread() != 0);
-	if (bDebug)
+	if (PoseSampler->EnsureSkeleton(SkelComp, SubjectName, bDebug) && CurveProcessor.IsValid())
 	{
-		UE_LOG(LogO3DSenderComponent, Log, TEXT("Cached skeleton for %s: %d bones, Hash=0x%llx%s"),
-			*GetNameSafe(SkelComp), NumBones, (unsigned long long)DescriptorCache.Hash, bDescriptorDirty ? TEXT(" [Changed]") : TEXT(""));
+		CurveProcessor->InvalidateCache();
 	}
-
-	if (bDescriptorDirty)
-	{
-		const FString Subject = BuildSubjectName(SkelComp);
-		OnDescriptorReady.Broadcast(Subject, DescriptorCache);
-		bDescriptorDirty = false;
-	}
-}
-
-void UO3DSenderComponent::ResetSkeletonCache()
-{
-	CachedSkeletalMesh.Reset();
-	CachedSkeleton.Reset();
-	CachedSkeletalMeshName = NAME_None;
-	DescriptorCache.Reset();
-	DescriptorSnapshot.Reset();
-	bDescriptorDirty = false;
 }
 
 namespace
@@ -1277,150 +1172,12 @@ bool UO3DSenderComponent::CanCaptureThisFrame(double NowSeconds, USkeletalMeshCo
 
 FString UO3DSenderComponent::ResolveSubjectName(const USkeletalMeshComponent* SkelComp)
 {
-	EnsureSubjectNameCached(SkelComp);
-	return CachedSubjectName;
+	return PoseSampler->ResolveSubjectName(SkelComp, SubjectName);
 }
 
 void UO3DSenderComponent::FillFrameShell(const USkeletalMeshComponent* SkelComp, double CaptureTimeSec, FO3DSPoseFrame& Frame)
 {
-	Frame.Subject = ResolveSubjectName(SkelComp);
-	Frame.FrameIndex = ++FrameCounter;
-	// ADR 0005 (i): the frame carries the descriptor it was sampled against,
-	// so the serializer never depends on having seen OnDescriptorReady.
-	Frame.Descriptor = DescriptorSnapshot;
-	// ADR 0008 item 7: the sampling time, which is also the wire time.
-	Frame.CaptureTimeSec = CaptureTimeSec;
-	Frame.Encoding = UpdateEncodingSnapshot();
-}
-
-void UO3DSenderComponent::BuildLocalBoneTransforms(const TArray<FTransform>& ComponentSpaceTransforms,
-	const TArray<int32>& CachedParentIndices,
-	int32 NumBones,
-	TFunctionRef<int32(int32)> ResolveFallbackParent,
-	TArray<FTransform>& OutLocalTransforms,
-	TArray<int32>* OutResolvedParents)
-{
-	if (NumBones <= 0)
-	{
-		OutLocalTransforms.Reset();
-		if (OutResolvedParents)
-		{
-			OutResolvedParents->Reset();
-		}
-		return;
-	}
-
-	OutLocalTransforms.SetNum(NumBones, EAllowShrinking::No);
-	if (OutResolvedParents)
-	{
-		OutResolvedParents->SetNum(NumBones, EAllowShrinking::No);
-	}
-
-	const int32 TransformCount = ComponentSpaceTransforms.Num();
-
-	for (int32 BoneIndex = 0; BoneIndex < NumBones; ++BoneIndex)
-	{
-		int32 ParentIndex = (BoneIndex >= 0 && BoneIndex < CachedParentIndices.Num()) ? CachedParentIndices[BoneIndex] : INDEX_NONE;
-		if (ParentIndex < 0 || ParentIndex >= TransformCount)
-		{
-			ParentIndex = ResolveFallbackParent(BoneIndex);
-		}
-		if (ParentIndex < 0 || ParentIndex >= TransformCount)
-		{
-			ParentIndex = INDEX_NONE;
-		}
-
-		if (OutResolvedParents)
-		{
-			(*OutResolvedParents)[BoneIndex] = ParentIndex;
-		}
-
-		const FTransform& ComponentTransform = ComponentSpaceTransforms[BoneIndex];
-		FTransform Relative = ComponentTransform;
-		if (ParentIndex != INDEX_NONE)
-		{
-			Relative = ComponentTransform.GetRelativeTransform(ComponentSpaceTransforms[ParentIndex]);
-		}
-
-		FQuat Rotation = Relative.GetRotation();
-		if (!Rotation.IsNormalized())
-		{
-			Rotation.Normalize();
-			Relative.SetRotation(Rotation);
-		}
-
-		OutLocalTransforms[BoneIndex] = Relative;
-	}
-}
-
-void UO3DSenderComponent::PopulatePoseFrameBones(const USkeletalMeshComponent* SkelComp, FO3DSPoseFrame& Frame, bool bDebugPose)
-{
-	if (!SkelComp)
-	{
-		Frame.BoneLocalTransforms.Reset();
-		return;
-	}
-
-	const TArray<FTransform>& ComponentSpace = SkelComp->GetComponentSpaceTransforms();
-	const TArray<FName>& CachedBoneNames = DescriptorCache.BoneNames;
-	const TArray<int32>& CachedParentIndices = DescriptorCache.ParentIndices;
-	const int32 NumBones = FMath::Min(ComponentSpace.Num(), CachedBoneNames.Num());
-	if (NumBones <= 0)
-	{
-		Frame.BoneLocalTransforms.Reset();
-		return;
-	}
-
-	TArray<int32> ResolvedParents;
-	TArray<int32>* ResolvedParentsPtr = nullptr;
-	if (bDebugPose)
-	{
-		ResolvedParentsPtr = &ResolvedParents;
-	}
-
-	const auto ResolveFallbackParent = [&](int32 BoneIndex) -> int32
-	{
-		if (!SkelComp)
-		{
-			return INDEX_NONE;
-		}
-		if (!CachedBoneNames.IsValidIndex(BoneIndex))
-		{
-			return INDEX_NONE;
-		}
-		const FName BoneName = CachedBoneNames[BoneIndex];
-		if (BoneName == NAME_None)
-		{
-			return INDEX_NONE;
-		}
-		const FName ParentBoneName = SkelComp->GetParentBone(BoneName);
-		if (ParentBoneName == NAME_None)
-		{
-			return INDEX_NONE;
-		}
-		return SkelComp->GetBoneIndex(ParentBoneName);
-	};
-
-	BuildLocalBoneTransforms(ComponentSpace, CachedParentIndices, NumBones, ResolveFallbackParent, Frame.BoneLocalTransforms, ResolvedParentsPtr);
-
-	if (bDebugPose)
-	{
-		const int32 DebugCount = FMath::Min(NumBones, 5);
-		for (int32 BoneIndex = 0; BoneIndex < DebugCount; ++BoneIndex)
-		{
-			const int32 ParentIndex = ResolvedParentsPtr ? (*ResolvedParentsPtr)[BoneIndex] : INDEX_NONE;
-			const FTransform& Relative = Frame.BoneLocalTransforms[BoneIndex];
-			const FVector Translation = Relative.GetTranslation();
-			const FVector Scale = Relative.GetScale3D();
-			const FName BoneName = CachedBoneNames.IsValidIndex(BoneIndex) ? CachedBoneNames[BoneIndex] : NAME_None;
-			UE_LOG(LogO3DSenderComponent, Verbose, TEXT("[%d] %s Parent=%d Pos(%.2f,%.2f,%.2f) Scale(%.2f,%.2f,%.2f)"),
-				BoneIndex,
-				*BoneName.ToString(),
-				ParentIndex,
-				Translation.X, Translation.Y, Translation.Z,
-				Scale.X, Scale.Y, Scale.Z);
-		}
-	}
+	PoseSampler->FillShell(SkelComp, SubjectName, CaptureTimeSec, UpdateEncodingSnapshot(), Frame);
 }
 
 void UO3DSenderComponent::PopulatePoseFrameCurves(USkeletalMeshComponent* SkelComp, FO3DSPoseFrame& Frame, bool bDebugCurves)
@@ -1504,7 +1261,7 @@ void UO3DSenderComponent::HandleBoneTransformsFinalized()
 	const bool bDebugCurves = (CVarO3DSenderDebugCurves.GetValueOnAnyThread() != 0);
 
 	FillFrameShell(SkelComp, NowSeconds, *Frame);
-	PopulatePoseFrameBones(SkelComp, *Frame, bDebugPose);
+	PoseSampler->SampleBones(SkelComp, *Frame, bDebugPose);
 	PopulatePoseFrameCurves(SkelComp, *Frame, bDebugCurves);
 
 	DispatchSampledFrame(MoveTemp(Frame));
@@ -1577,9 +1334,9 @@ void UO3DSenderComponent::TickControl()
 	// The subject this sender streams, exactly as it goes on the wire, so receivers can align
 	// control to its mocap. Empty for a control-only sender.
 	TArray<FString> Subjects;
-	if (!CachedSubjectName.IsEmpty())
+	if (!PoseSampler->GetSubjectName().IsEmpty())
 	{
-		Subjects.Add(CachedSubjectName);
+		Subjects.Add(PoseSampler->GetSubjectName());
 	}
 	ControlPublisher->SetMocapSubjects(Subjects);
 	ControlPublisher->SetConfig(ControlSnapshotIntervalSeconds, ControlEventRedundancy, ControlMaxValueRateHz);
