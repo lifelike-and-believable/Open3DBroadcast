@@ -29,8 +29,7 @@
  * Poll() (the game thread today).
  *
  * The unused FSerializedFrameConsumerRegistry that used to sit next to this interface was never
- * populated and is gone (SHR-24). The old header "SerializedFrameConsumerRegistry.h" forwards here
- * for one release.
+ * populated and is gone (SHR-24).
  */
 class OPEN3DSHARED_API ISerializedFrameConsumer : public TSharedFromThis<ISerializedFrameConsumer>
 {

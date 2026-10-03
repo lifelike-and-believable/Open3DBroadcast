@@ -13,11 +13,12 @@
 /*
  * The receiver side of the transport interface (ADR 0007 items 1 and 3). Moved here from
  * Open3DReceiver so transports and the Open3DBroadcastWebRTC add-on can depend on Open3DShared
- * alone; the old "O3DReceiverInterface.h" forwards here for one release. The control channel
+ * alone (WP-A1 step 6 removed the old Open3DReceiver forwarding header). The control channel
  * (ADR 0011) appended SupportsControl and SetControlSink (version 2). WP-A1 PR 3 (version 4)
  * replaced the bool results with FO3DTransportResult (Start without a consumer is NoConsumer) and
  * added capabilities and connection state; SupportsAudio and SupportsControl became non-virtual
- * forwarders to GetCapabilities().
+ * forwarders to GetCapabilities(), and WP-A1 step 6 removed them: use
+ * GetCapabilities().bAudioReceive and GetCapabilities().bControl.
  */
 
 /** Interface for audio sinks that transports can push PCM16 data into. */
@@ -128,12 +129,6 @@ public:
      * well-formed control envelopes to it and never passes control bytes to the frame consumer.
      */
     virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& /*Sink*/) {}
-
-    /** GetCapabilities().bAudioReceive. Kept for callers; deprecated, removed with the shims (ADR 0007 step 6). Any thread. */
-    bool SupportsAudio() const { return GetCapabilities().bAudioReceive; }
-
-    /** GetCapabilities().bControl (ADR 0011 item 6). Kept for callers; deprecated, removed with the shims (ADR 0007 step 6). Any thread. */
-    bool SupportsControl() const { return GetCapabilities().bControl; }
 };
 
 /** Creates one receiver instance. Called on the game thread, outside any registry lock. */

@@ -494,8 +494,8 @@ bool FWebRTCCtl6RoundTripTest::RunTest(const FString& Parameters)
 	{
 		FO3DWebRTCReceiver Receiver(FCtlFakeLiveKit::MakeApi());
 		FO3DWebRTCSender Sender(FCtlFakeLiveKit::MakeApi());
-		TestTrue(TEXT("Receiver supports control"), Receiver.SupportsControl());
-		TestTrue(TEXT("Sender supports control"), Sender.SupportsControl());
+		TestTrue(TEXT("Receiver supports control"), Receiver.GetCapabilities().bControl);
+		TestTrue(TEXT("Sender supports control"), Sender.GetCapabilities().bControl);
 
 		if (!CtlStartReceiver(*this, Fake, Receiver, Consumer, Sink))
 		{

@@ -97,8 +97,8 @@ namespace O3DControlTransportTests
 			Sender->Stop();
 		};
 
-		if (!Test.TestTrue(TEXT("Sender supports control"), Sender->SupportsControl())
-			|| !Test.TestTrue(TEXT("Receiver supports control"), Receiver->SupportsControl())
+		if (!Test.TestTrue(TEXT("Sender supports control"), Sender->GetCapabilities().bControl)
+			|| !Test.TestTrue(TEXT("Receiver supports control"), Receiver->GetCapabilities().bControl)
 			|| !Test.TestTrue(TEXT("Sender initializes"), Sender->Initialize(SenderConfig).IsOk())
 			|| !Test.TestTrue(TEXT("Receiver initializes"), Receiver->Initialize(ReceiverConfig).IsOk()))
 		{

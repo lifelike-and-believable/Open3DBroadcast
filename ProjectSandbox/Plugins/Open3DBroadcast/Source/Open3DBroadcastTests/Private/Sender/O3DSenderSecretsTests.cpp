@@ -27,7 +27,8 @@
 
 #include "O3DSecretStore.h"
 #include "O3DSenderComponent.h"
-#include "O3DSenderTransportCustomization.h"
+#include "O3DTestFakes.h"
+#include "Transport/O3DTransportRegistry.h"
 
 /** White-box access to UO3DSenderComponent for the WP-S9 tests (befriended in O3DSenderComponent.h). */
 struct FO3DSenderSecretsTestAccess
@@ -50,23 +51,37 @@ namespace O3DSenderSecretsTestUtil
 	static const TCHAR* const UrlKey = TEXT("o3dsecretstestsender.url");
 	static const TCHAR* const EnvVar = TEXT("O3DB_SECRETSTEST_SENDER_TOKEN");
 
-	/** Registers a sender customization declaring one secret key; unregisters and clears the store on exit. */
+	/**
+	 * Registers a sender transport whose schema declares one secret key (a Secret entry with its
+	 * environment variable); unregisters and clears the store on exit.
+	 */
 	struct FScopedSecretsTestTransport
 	{
 		FScopedSecretsTestTransport()
 		{
-			FO3DSenderTransportCustomization Customization;
-			Customization.SecretOptionKeys.Add(SecretKey);
-			Customization.SecretEnvVars.Add(SecretKey, EnvVar);
-			O3DSender::RegisterTransportCustomization(TransportName, MoveTemp(Customization));
+			FO3DTransportDescriptor Descriptor;
+			Descriptor.Name = TransportName;
+			Descriptor.OwningModule = TEXT("Open3DBroadcastTests");
+			Descriptor.CreateSender = []() -> TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe> { return MakeShared<FO3DFakeSender, ESPMode::ThreadSafe>(); };
+			FO3DTransportOptionField Secret;
+			Secret.Key = SecretKey;
+			Secret.Type = EO3DTransportOptionType::Secret;
+			Secret.SecretEnvVar = EnvVar;
+			Descriptor.SenderOptions.OptionSchema.Add(Secret);
+			Registration = FO3DTransportRegistry::Get().Register(MoveTemp(Descriptor));
 			ClearStore();
 		}
 
 		~FScopedSecretsTestTransport()
 		{
 			ClearStore();
-			O3DSender::UnregisterTransportCustomization(TransportName);
+			Registration.Reset();
 		}
+
+		FScopedSecretsTestTransport(const FScopedSecretsTestTransport&) = delete;
+		FScopedSecretsTestTransport& operator=(const FScopedSecretsTestTransport&) = delete;
+
+		FO3DTransportRegistration Registration;
 
 		static void ClearStore()
 		{

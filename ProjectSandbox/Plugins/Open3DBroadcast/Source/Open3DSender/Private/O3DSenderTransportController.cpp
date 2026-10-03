@@ -71,7 +71,7 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
     AudioSink.Reset();
     if (ActiveConfig.Audio.bEnableAudio)
     {
-        if (ActiveSender->SupportsAudio())
+        if (ActiveSender->GetCapabilities().bAudioSend)
         {
             AudioSink = ActiveSender->CreateAudioSink(ActiveConfig.Audio);
             if (!AudioSink.IsValid())

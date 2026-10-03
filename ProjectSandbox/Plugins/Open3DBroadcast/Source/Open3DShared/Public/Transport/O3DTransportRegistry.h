@@ -41,8 +41,8 @@
  * handles after.
  *
  * Threading: Find, GetNames, GetSecretDeclaration, GetOptionSchema, CreateSender, CreateReceiver
- * and GetNumLiveInstances are safe on any thread (read lock). Register, unregister (resetting a
- * registration) and EditLegacyDescriptor are game-thread only and check() it: they broadcast
+ * and GetNumLiveInstances are safe on any thread (read lock). Register and unregister (resetting a
+ * registration) are game-thread only and check() it: they broadcast
  * OnTransportsChanged and OnTransportUnregistering on the calling thread, and draining calls the
  * instances' Stop(), which is a game-thread call.
  *
@@ -78,30 +78,13 @@ using FO3DCapabilitiesFunction = TFunction<FO3DTransportCapabilities(const FO3DT
 /**
  * The options one role of a transport reads from its namespaced option map.
  *
- * Secrets (ADR 0004): a key is secret when the schema has a Secret entry for it (the typed form,
- * ADR 0007 item 8, WP-A1 PR 5c) or when it is listed in SecretOptionKeys. Its environment
- * variable is the entry's SecretEnvVar, else SecretEnvVars' value for it. GetSecretDeclaration
- * returns the union, which is what the hosts, the editor and the secret store use. A secret key
- * is never persisted, never logged, and reaches the transport only through
- * FO3DTransportConfig::Secrets.
+ * Secrets (ADR 0004): a key is secret when the schema has a Secret entry for it, and its
+ * environment variable is the entry's SecretEnvVar (ADR 0007 item 8). GetSecretDeclaration lists
+ * them; it is what the hosts, the editor and the secret store use. A secret key is never
+ * persisted, never logged, and reaches the transport only through FO3DTransportConfig::Secrets.
  */
 struct FO3DTransportRoleOptions
 {
-	/**
-	 * Deprecated input since WP-A1 PR 5c: declare a secret with a Secret entry in OptionSchema
-	 * instead. Still honoured, merged with the schema's entries (for transports with no schema
-	 * row for a secret, and for the deprecated transport customizations).
-	 */
-	TArray<FString> SecretOptionKeys;
-
-	/**
-	 * Deprecated input since WP-A1 PR 5c: put the name in the Secret entry's SecretEnvVar instead.
-	 * Still honoured for a key whose entry names none, e.g.
-	 * {"<transport>.token", "O3DB_<TRANSPORT>_TOKEN"}. A non-default credential profile first
-	 * tries "<NAME>__<PROFILE>".
-	 */
-	TMap<FString, FString> SecretEnvVars;
-
 	/**
 	 * The declared options, as data (ADR 0010 §4). The Open3DBroadcastEditor module builds the
 	 * Details and LiveLink panel rows from it. Its Secret entries declare the role's secrets.
@@ -110,14 +93,13 @@ struct FO3DTransportRoleOptions
 
 	bool IsEmpty() const
 	{
-		return SecretOptionKeys.Num() == 0 && SecretEnvVars.Num() == 0 && OptionSchema.Num() == 0;
+		return OptionSchema.Num() == 0;
 	}
 
 	/**
-	 * The secret keys and their environment variables: the schema's Secret entries (in schema
-	 * order, with SecretEnvVar), then the SecretOptionKeys they do not already name (keys compared
-	 * case-insensitively, as the option maps do). An entry's SecretEnvVar wins over SecretEnvVars;
-	 * a key with neither has no environment variable.
+	 * The secret keys and their environment variables: the schema's Secret entries, in schema
+	 * order, each key once (compared case-insensitively, as the option maps do), with its
+	 * SecretEnvVar when it names one.
 	 */
 	OPEN3DSHARED_API void GetSecretDeclaration(TArray<FString>& OutSecretKeys, TMap<FString, FString>& OutSecretEnvVars) const;
 };
@@ -243,8 +225,8 @@ public:
 
 	/**
 	 * Copies the secret declaration of Role for Name (FO3DTransportRoleOptions::
-	 * GetSecretDeclaration: the schema's Secret entries merged with SecretOptionKeys and
-	 * SecretEnvVars). Returns false, with empty outputs, when Name is not registered. Any thread.
+	 * GetSecretDeclaration: the schema's Secret entries and their environment variables). Returns
+	 * false, with empty outputs, when Name is not registered. Any thread.
 	 */
 	bool GetSecretDeclaration(FName Name, EO3DTransportRole Role, TArray<FString>& OutSecretKeys, TMap<FString, FString>& OutSecretEnvVars) const;
 
@@ -289,18 +271,6 @@ public:
 	 */
 	FO3DTransportUnregisteringDelegate& OnTransportUnregistering() { return TransportUnregistering; }
 
-	/**
-	 * Support for the deprecated register functions (O3DTransport::RegisterSender,
-	 * O3DSender::RegisterTransportCustomization and their receiver counterparts), which each set
-	 * one part of a transport. Under the write lock, copies the legacy descriptor registered under
-	 * Name (or starts an empty one), lets Edit change the copy, and publishes it; an edit that
-	 * leaves no factory, configure function or declared option removes the entry, and drains it
-	 * like an unregister. Instances created from the entry stay tracked across edits. Refused,
-	 * with a Warning, when Name belongs to a Register() registration. Edit must not call the
-	 * registry. Removed with the shims in the next minor release. Game thread.
-	 */
-	void EditLegacyDescriptor(FName Name, TFunctionRef<void(FO3DTransportDescriptor&)> Edit);
-
 	/** Number of registered names. Any thread. */
 	int32 Num() const;
 
@@ -314,9 +284,9 @@ private:
 	struct FEntry
 	{
 		FO3DTransportDescriptorPtr Descriptor;
-		/** Instances created from this entry; carried over when a legacy edit replaces the descriptor. */
+		/** Instances created from this entry. */
 		FLiveListPtr Live;
-		/** Identifies the Register() call that created the entry; 0 for a legacy entry. */
+		/** Identifies the Register() call that created the entry. */
 		uint64 RegistrationId = 0;
 	};
 

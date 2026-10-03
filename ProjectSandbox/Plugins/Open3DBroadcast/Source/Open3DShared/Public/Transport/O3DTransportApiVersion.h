@@ -11,10 +11,10 @@
  * minimal form of SHR-14).
  *
  * The interface is every exported type and function an add-on transport uses: IOpen3DSender and
- * IOpen3DReceiver (with their audio sinks), FO3DTransportRegistry and FO3DTransportDescriptor (and,
- * until they are removed, the deprecated sender and receiver registries and transport
- * customizations that forward to it), FO3DTransportConfig, FO3DTransportOptionSchema,
- * FO3DFfiLibrary, FO3DSecretStore and ISerializedFrameConsumer.
+ * IOpen3DReceiver (with their audio sinks), FO3DTransportRegistry and FO3DTransportDescriptor,
+ * FO3DTransportConfig, FO3DTransportOptionSchema, FO3DFfiLibrary, FO3DSecretStore and
+ * ISerializedFrameConsumer. (The deprecated registries and customizations that forwarded to the
+ * registry were removed in WP-A1 step 6.)
  *
  * Bump rule: increase the number in the same PR as any change to one of those types that alters
  * a class layout, a virtual function table, an exported function signature or a documented
@@ -76,7 +76,17 @@
  *      Max became doubles, and EO3DTransportOptionType gained Float (appended);
  *      FO3DTransportRoleOptions gained GetSecretDeclaration (the registry's merge of Secret
  *      entries with SecretOptionKeys and SecretEnvVars); O3DTransportOptions gained
- *      ValidateOptionValue and ValidateOptions. Removing the shims (step 6) takes 6.
+ *      ValidateOptionValue and ValidateOptions.
+ *      WP-A1 step 6 (ADR 0007 item 9) is part of 5 as well, by the maintainer's decision: no
+ *      release carried the shims (still no tag after v0.9.6; no tag contains 5a's merge c98c92c)
+ *      and no third-party add-on builds against them, so they are removed in this unreleased
+ *      cycle instead of one release later. Removed: O3DTransport::RegisterSender, UnregisterSender,
+ *      CreateSender, GetRegisteredSenders and the receiver counterparts; the sender and receiver
+ *      transport customizations (RegisterTransportCustomization, UnregisterTransportCustomization,
+ *      FindTransportCustomization, GetRegisteredTransportNames, GetTransportSecretDeclaration,
+ *      GetTransportOptionSchema); FO3DTransportRegistry::EditLegacyDescriptor; the forwarding
+ *      headers; and FO3DTransportRoleOptions::SecretOptionKeys and SecretEnvVars (a Secret schema
+ *      entry is the only secret declaration).
  */
 #define O3D_TRANSPORT_API_VERSION 5
 

@@ -94,7 +94,7 @@ bool FO3DControlFakeEndToEndTest::RunTest(const FString& Parameters)
 
 	FO3DTransportConfig Config;
 	Config.StreamId = TEXT("stage");
-	TestTrue(TEXT("Both advertise control"), Sender.SupportsControl() && Receiver.SupportsControl());
+	TestTrue(TEXT("Both advertise control"), Sender.GetCapabilities().bControl && Receiver.GetCapabilities().bControl);
 	TestTrue(TEXT("Sender initializes"), Sender.Initialize(Config).IsOk() && Sender.Start().IsOk());
 	Receiver.Initialize(Config);
 	Receiver.SetConsumer(Consumer);

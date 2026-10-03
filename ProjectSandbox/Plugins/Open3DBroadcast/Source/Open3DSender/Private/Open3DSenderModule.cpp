@@ -1,7 +1,6 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
 #include "Modules/ModuleManager.h"
-#include "O3DSenderLegacyTransportShims.h"
 #include "O3DSenderLogs.h"
 
 DEFINE_LOG_CATEGORY(LogO3DSender);
@@ -18,13 +17,11 @@ class FOpen3DSenderModule : public IModuleInterface
 public:
 	virtual void StartupModule() override
 	{
-		O3DSenderLegacyShims::StartCustomizationCache();
 		UE_LOG(LogO3DSender, Verbose, TEXT("Open3DSender module started"));
 	}
 
 	virtual void ShutdownModule() override
 	{
-		O3DSenderLegacyShims::StopCustomizationCache();
 		UE_LOG(LogO3DSender, Verbose, TEXT("Open3DSender module shutdown"));
 	}
 };

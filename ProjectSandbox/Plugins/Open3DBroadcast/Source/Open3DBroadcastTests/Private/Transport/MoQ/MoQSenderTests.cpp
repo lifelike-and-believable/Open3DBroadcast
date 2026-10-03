@@ -157,7 +157,7 @@ bool FMoQSenderSupportsAudioTest::RunTest(const FString& Parameters)
 {
 	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
 	const TSharedRef<IOpen3DSender> Sender = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
-	TestTrue(TEXT("The MoQ sender advertises audio"), Sender->SupportsAudio());
+	TestTrue(TEXT("The MoQ sender advertises audio"), Sender->GetCapabilities().bAudioSend);
 	return true;
 }
 

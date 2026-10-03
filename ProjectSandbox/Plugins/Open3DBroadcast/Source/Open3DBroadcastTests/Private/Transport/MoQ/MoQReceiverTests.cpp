@@ -184,7 +184,7 @@ bool FMoQReceiverSupportsAudioTest::RunTest(const FString& Parameters)
 {
 	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
 	const TSharedRef<IOpen3DReceiver> Receiver = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 1);
-	TestTrue(TEXT("The MoQ receiver advertises audio"), Receiver->SupportsAudio());
+	TestTrue(TEXT("The MoQ receiver advertises audio"), Receiver->GetCapabilities().bAudioReceive);
 	return true;
 }
 

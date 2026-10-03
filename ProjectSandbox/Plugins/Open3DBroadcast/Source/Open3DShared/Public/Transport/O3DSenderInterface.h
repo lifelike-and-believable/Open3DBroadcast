@@ -10,11 +10,12 @@
 /*
  * The sender side of the transport interface (ADR 0007 items 1 and 3). Moved here from
  * Open3DSender so transports and the Open3DBroadcastWebRTC add-on can depend on Open3DShared
- * alone; the old "O3DSenderInterface.h" forwards here for one release. The control channel
+ * alone (WP-A1 step 6 removed the old Open3DSender forwarding header). The control channel
  * (ADR 0011) appended SupportsControl and SendControl (version 2). WP-A1 PR 3 (version 4) replaced
  * the bool results with FO3DTransportResult and EO3DSendResult, made SendSerialized pure virtual
  * with an owned FO3DSendPayload, and added capabilities and connection state; SupportsAudio and
- * SupportsControl became non-virtual forwarders to GetCapabilities().
+ * SupportsControl became non-virtual forwarders to GetCapabilities(), and WP-A1 step 6 removed
+ * them: use GetCapabilities().bAudioSend and GetCapabilities().bControl.
  *
  * Threading contract (ADR 0007 item 3), written next to each method below. "Game thread" means
  * the thread that owns the instance; transports must not block it.
@@ -120,12 +121,6 @@ public:
         (void)Envelope; (void)Len;
         return EO3DSendResult::Unsupported;
     }
-
-    /** GetCapabilities().bAudioSend. Kept for callers; deprecated, removed with the shims (ADR 0007 step 6). Any thread. */
-    bool SupportsAudio() const { return GetCapabilities().bAudioSend; }
-
-    /** GetCapabilities().bControl (ADR 0011 item 6). Kept for callers; deprecated, removed with the shims (ADR 0007 step 6). Any thread. */
-    bool SupportsControl() const { return GetCapabilities().bControl; }
 };
 
 /** Creates one sender instance. Called on the game thread, outside any registry lock. */

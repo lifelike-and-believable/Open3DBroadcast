@@ -113,7 +113,7 @@ bool FMoQControlTrackAnnouncedTest::RunTest(const FString& Parameters)
 		}
 		{
 			const TSharedRef<IOpen3DSender> Sender = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
-			TestTrue(TEXT("Sender supports control"), Sender->SupportsControl());
+			TestTrue(TEXT("Sender supports control"), Sender->GetCapabilities().bControl);
 			TestTrue(TEXT("Initialize"), Sender->Initialize(Config).IsOk());
 
 			const TArray<uint8> Envelope = MakeEnvelope(0);
@@ -183,7 +183,7 @@ bool FMoQControlSubscribeOnlyWithSinkTest::RunTest(const FString& Parameters)
 	const TSharedRef<FMoQControlRecordingSink, ESPMode::ThreadSafe> Sink = MakeShared<FMoQControlRecordingSink, ESPMode::ThreadSafe>();
 	{
 		const TSharedRef<IOpen3DReceiver> Receiver = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 3);
-		TestTrue(TEXT("Receiver supports control"), Receiver->SupportsControl());
+		TestTrue(TEXT("Receiver supports control"), Receiver->GetCapabilities().bControl);
 		TestTrue(TEXT("Initialize"), Receiver->Initialize(MakeConfig()).IsOk());
 		// The receiver holds its consumer weakly (until ADR 0007 step 5), so the test keeps it alive.
 		const TSharedRef<FMoQControlFrameCounter> FrameConsumer = MakeShared<FMoQControlFrameCounter>();

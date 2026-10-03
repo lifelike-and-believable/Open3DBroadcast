@@ -18,7 +18,6 @@
 #include "O3DHelpers.h"
 #include "O3DRedact.h"
 #include "O3DReceiverTransportCustomization.h"
-#include "O3DReceiverLegacyTransportShims.h"
 #include "Transport/O3DTransportOptions.h"
 #include "Transport/O3DTransportRegistry.h"
 #include "O3DAudioBus.h"
@@ -457,7 +456,7 @@ bool FO3DReceiverSource::StartTransport()
     ActiveAudioSink.Reset();
     if (ActiveConfig.Audio.bEnableAudio)
     {
-        if (ActiveReceiver->SupportsAudio())
+        if (ActiveReceiver->GetCapabilities().bAudioReceive)
         {
             ActiveAudioSink = MakeAudioSink();
             ActiveReceiver->SetAudioSink(ActiveAudioSink, ActiveConfig.Audio);
@@ -477,7 +476,7 @@ bool FO3DReceiverSource::StartTransport()
     // whether a payload is accepted is decided per message (IsControlEnabled), so turning
     // control on at runtime needs no transport restart.
     ActiveControlSink.Reset();
-    if (ActiveReceiver->SupportsControl())
+    if (ActiveReceiver->GetCapabilities().bControl)
     {
         ActiveControlSink = MakeShared<FControlSink, ESPMode::ThreadSafe>(TWeakPtr<FO3DReceiverSource>(AsShared()));
         ActiveReceiver->SetControlSink(ActiveControlSink);
@@ -489,7 +488,7 @@ bool FO3DReceiverSource::StartTransport()
         UE_LOG(LogO3DReceiverSource, Warning, TEXT("Failed to start transport '%s': %s"), *ActiveConfig.Transport.ToString(), *LexToString(StartResult));
         ActiveReceiver->Stop();
         ActiveReceiver->SetConsumer(nullptr);
-        if (ActiveAudioSink.IsValid() && ActiveReceiver->SupportsAudio())
+        if (ActiveAudioSink.IsValid() && ActiveReceiver->GetCapabilities().bAudioReceive)
         {
             ActiveReceiver->SetAudioSink(nullptr, ActiveConfig.Audio);
         }
@@ -532,7 +531,7 @@ void FO3DReceiverSource::StopTransport()
 
     if (ActiveReceiver.IsValid())
     {
-        if (ActiveConfig.Audio.bEnableAudio && ActiveReceiver->SupportsAudio())
+        if (ActiveConfig.Audio.bEnableAudio && ActiveReceiver->GetCapabilities().bAudioReceive)
         {
             ActiveReceiver->SetAudioSink(nullptr, ActiveConfig.Audio);
         }
@@ -658,10 +657,7 @@ FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
         Config.OptionSchema = MakeShared<FO3DTransportOptionSchema>(Descriptor->ReceiverOptions.OptionSchema);
         if (Descriptor->ConfigureReceiver)
         {
-            // The view is over this function's own copy of the options (WP-A1 PR 5a); the scope
-            // hands a configure function registered through the deprecated customization these
-            // settings.
-            const O3DReceiverLegacyShims::FScopedConfiguringSettings LegacyScope(SourceSettings);
+            // The view is over this function's own copy of the options (WP-A1 PR 5a).
             Descriptor->ConfigureReceiver(FO3DTransportOptionsView(Options, Config.OptionSchema.Get()), Config);
         }
     }

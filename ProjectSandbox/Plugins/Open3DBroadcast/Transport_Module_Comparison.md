@@ -159,7 +159,7 @@ The registry answers the same capability question before an instance exists:
 - `nng.topic` - Topic filter for pub/sub (UTF-8 prefix matching)
 
 **Audio Support**:
-- ✅ Full support (`SupportsAudio() = true`)
+- ✅ Full support (`GetCapabilities().bAudioSend` and `bAudioReceive` are true)
 - Unified message format with type discrimination
 - Audio frames sent through same queue/socket as mocap
 - Configurable codec (PCM16, Opus)
@@ -480,7 +480,7 @@ static void OnConnectionState(void* user, LkConnectionState state,
 **Audio Support is universal.** Every transport reports `bAudioSend` and
 `bAudioReceive` in `GetCapabilities()` on **both** the sender and receiver side, no
 exceptions. Audio is a plugin-level capability, not a property of any one
-transport. (`SupportsAudio()` still exists and forwards to `GetCapabilities()`.)
+transport.
 
 **Delivery guarantee** (`FO3DTransportCapabilities::Delivery`, ADR 0005 (iii)):
 Loopback, TCP, NNG pair and push/pull, and WebRTC report `ReliableOrdered`; UDP,
@@ -488,7 +488,7 @@ NNG pub/sub, MoQ and WebRTC with `webrtc.prefer_lossy` report `Unreliable`.
 
 **Control** (ADR 0011; USER_GUIDE "Control Channel") is a one-way stream of
 events and values from a sender to its receivers. Every transport reports
-`bControl` in `GetCapabilities()` on both sides (`SupportsControl()` forwards to it);
+`bControl` in `GetCapabilities()` on both sides;
 `SendControl` returns `Unsupported` on a transport that does not override it. Every
 control message is a unified envelope of kind `Control` (2), at most 1,100
 bytes, so it is never fragmented. Control is never counted as a mocap frame.

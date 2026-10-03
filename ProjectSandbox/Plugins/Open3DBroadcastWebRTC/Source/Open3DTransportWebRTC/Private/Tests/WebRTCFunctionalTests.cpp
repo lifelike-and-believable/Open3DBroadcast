@@ -1219,8 +1219,6 @@ bool FWebRTCA1CapabilitiesTest::RunTest(const FString& Parameters)
 	Config.AdvancedParams.Add(WebRTCUtils::PreferLossyOptionKey, TEXT("true"));
 	TestTrue(TEXT("Initialize"), Sender.Initialize(Config).IsOk());
 	TestTrue(TEXT("The sender reports the descriptor's values for its config"), Sender.GetCapabilities() == LossyCaps);
-	TestTrue(TEXT("SupportsControl forwards to bControl"), Sender.SupportsControl());
-	TestTrue(TEXT("SupportsAudio forwards to bAudioSend"), Sender.SupportsAudio());
 	Sender.Stop();
 
 	FO3DWebRTCReceiver Receiver(FFakeLiveKit::MakeApi());

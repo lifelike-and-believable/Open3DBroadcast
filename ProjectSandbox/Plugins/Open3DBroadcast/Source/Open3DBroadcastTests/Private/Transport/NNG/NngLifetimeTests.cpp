@@ -14,7 +14,7 @@
 #if WITH_DEV_AUTOMATION_TESTS && O3D_WITH_TRANSPORT_NNG
 
 #include "Testing/NngTesting.h"
-#include "Testing/O3DLifetimeTestUtils.h"
+#include "Testing/O3DTransportLifetimeTestUtils.h"
 
 #include "Misc/AutomationTest.h"
 #include "SocketSubsystem.h"

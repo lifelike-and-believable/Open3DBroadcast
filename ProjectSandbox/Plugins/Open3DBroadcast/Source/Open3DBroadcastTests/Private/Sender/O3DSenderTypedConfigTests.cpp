@@ -4,7 +4,6 @@
 // - The options a component has saved reach the transport's configure function through an
 //   FO3DTransportOptionsView with the transport's schema; secrets never do (ADR 0004); the
 //   component's Subject Name arrives in FO3DTransportConfig::SubjectName.
-// - A configure function registered through the deprecated customization still gets the component.
 // - Switching the transport (SetTransportName and a Details-panel edit) keeps the other
 //   transport's options and restores them when switching back (SND-35).
 // Test-only transport names and keys under the process-wide registry; no transport module, no network.
@@ -18,7 +17,7 @@
 
 #include "O3DSecretStore.h"
 #include "O3DSenderComponent.h"
-#include "O3DSenderTransportCustomization.h"
+#include "O3DTestFakes.h"
 #include "Testing/O3DSenderTesting.h"
 #include "Transport/O3DTransportRegistry.h"
 
@@ -31,12 +30,11 @@ namespace O3DSenderTypedConfigTest
 		TMap<FString, FString> Values;
 		bool bHadSchema = false;
 		FString SubjectName;
-		bool bLegacyGotComponent = false;
 	};
 
 	/**
-	 * Registers a legacy-edited descriptor (no factory needed) for a unique name, with a schema,
-	 * one secret key and a new-signature ConfigureSender; removes it and the secret on exit.
+	 * Registers a descriptor for a unique name: a fake sender factory, a schema with a Secret
+	 * entry, and ConfigureSender. Unregisters it and clears the secret on exit.
 	 */
 	struct FScopedTypedTransport
 	{
@@ -45,6 +43,7 @@ namespace O3DSenderTypedConfigTest
 		FString CountKey;
 		FString SecretKey;
 		TSharedRef<FSeen> Seen = MakeShared<FSeen>();
+		FO3DTransportRegistration Registration;
 
 		FScopedTypedTransport()
 			: Name(*O3DTests::MakeUniqueName(TEXT("O3DTypedSender")))
@@ -71,30 +70,30 @@ namespace O3DSenderTypedConfigTest
 
 			const TSharedRef<FSeen> Record = Seen;
 			const FString Url_ = UrlKey;
-			FO3DTransportRegistry::Get().EditLegacyDescriptor(Name, [&](FO3DTransportDescriptor& Descriptor)
+			FO3DTransportDescriptor Descriptor;
+			Descriptor.Name = Name;
+			Descriptor.OwningModule = TEXT("Open3DBroadcastTests");
+			Descriptor.CreateSender = []() -> TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe> { return MakeShared<FO3DFakeSender, ESPMode::ThreadSafe>(); };
+			Descriptor.SenderOptions.OptionSchema = Schema;
+			Descriptor.ConfigureSender = [Record, Url_](const FO3DTransportOptionsView& Options, FO3DTransportConfig& Config)
 			{
-				Descriptor.SenderOptions.SecretOptionKeys.Add(SecretKey);
-				Descriptor.SenderOptions.OptionSchema = Schema;
-				Descriptor.ConfigureSender = [Record, Url_](const FO3DTransportOptionsView& Options, FO3DTransportConfig& Config)
-				{
-					++Record->Calls;
-					Record->Values = Options.GetValues();
-					Record->bHadSchema = Options.GetSchema() != nullptr;
-					Record->SubjectName = Config.SubjectName;
-					Config.Uri = Options.GetString(Url_);
-				};
-			});
+				++Record->Calls;
+				Record->Values = Options.GetValues();
+				Record->bHadSchema = Options.GetSchema() != nullptr;
+				Record->SubjectName = Config.SubjectName;
+				Config.Uri = Options.GetString(Url_);
+			};
+			Registration = FO3DTransportRegistry::Get().Register(MoveTemp(Descriptor));
 		}
 
 		~FScopedTypedTransport()
 		{
 			FO3DSecretStore::Get().Clear(Name.ToString(), TEXT("default"), SecretKey);
-			FO3DTransportRegistry::Get().EditLegacyDescriptor(Name, [](FO3DTransportDescriptor& Descriptor)
-			{
-				Descriptor.ConfigureSender = FO3DSenderConfigureFunction();
-				Descriptor.SenderOptions = FO3DTransportRoleOptions();
-			});
+			Registration.Reset();
 		}
+
+		FScopedTypedTransport(const FScopedTypedTransport&) = delete;
+		FScopedTypedTransport& operator=(const FScopedTypedTransport&) = delete;
 	};
 }
 
@@ -133,46 +132,6 @@ bool FO3DSenderTypedConfigSavedOptionsTest::RunTest(const FString& Parameters)
 	Component->TransportOptions.Remove(Transport.CountKey);
 	const FO3DTransportConfig Defaulted = FO3DSenderComponentTestAccess::BuildTransportConfig(*Component);
 	TestEqual(TEXT("Schema default through the config"), Defaulted.GetOptions().GetInt(Transport.CountKey), 12);
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderTypedConfigLegacyTest, "Open3DBroadcast.Sender.TypedConfig.DeprecatedConfigureGetsComponent", O3DB_TEST_FLAGS)
-bool FO3DSenderTypedConfigLegacyTest::RunTest(const FString& Parameters)
-{
-	// A transport built against the previous release registers a component-taking function
-	// through the deprecated customization; the shim adapts it and hands it the component.
-	const FName Name(*O3DTests::MakeUniqueName(TEXT("O3DTypedSenderLegacy")));
-	const TSharedRef<O3DSenderTypedConfigTest::FSeen> Seen = MakeShared<O3DSenderTypedConfigTest::FSeen>();
-	const UO3DSenderComponent* Expected = nullptr;
-
-	FO3DSenderTransportCustomization Customization;
-	Customization.ConfigureTransport = [Seen, &Expected](const UO3DSenderComponent* Component, FO3DTransportConfig& Config)
-	{
-		++Seen->Calls;
-		Seen->bLegacyGotComponent = Component != nullptr && Component == Expected;
-		Config.StreamId = Component ? Component->SubjectName : FString(TEXT("no-component"));
-	};
-	O3DSender::RegisterTransportCustomization(Name, MoveTemp(Customization));
-
-	UO3DSenderComponent* Component = NewObject<UO3DSenderComponent>(GetTransientPackage());
-	Expected = Component;
-	Component->SetTransportName(Name);
-	Component->SubjectName = TEXT("LegacySubject");
-	const FO3DTransportConfig Config = FO3DSenderComponentTestAccess::BuildTransportConfig(*Component);
-	TestEqual(TEXT("The legacy function ran once"), Seen->Calls, 1);
-	TestTrue(TEXT("It got the component being configured"), Seen->bLegacyGotComponent);
-	TestEqual(TEXT("It could read the component"), Config.StreamId, FString(TEXT("LegacySubject")));
-
-	// Called outside a component (as a caller of the descriptor might), it gets null, not a stale one.
-	const FO3DTransportDescriptorPtr Descriptor = FO3DTransportRegistry::Get().Find(Name);
-	if (TestTrue(TEXT("Descriptor has the adapted function"), Descriptor.IsValid() && static_cast<bool>(Descriptor->ConfigureSender)))
-	{
-		FO3DTransportConfig Direct;
-		Descriptor->ConfigureSender(FO3DTransportOptionsView(), Direct);
-		TestEqual(TEXT("No component outside BuildTransportConfig"), Direct.StreamId, FString(TEXT("no-component")));
-	}
-
-	O3DSender::UnregisterTransportCustomization(Name);
 	return true;
 }
 

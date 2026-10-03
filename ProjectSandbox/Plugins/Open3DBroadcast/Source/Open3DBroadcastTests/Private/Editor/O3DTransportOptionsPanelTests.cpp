@@ -23,7 +23,7 @@
 #include "O3DReceiverTransportCustomization.h"
 #include "O3DSecretStore.h"
 #include "O3DSenderComponent.h"
-#include "O3DSenderTransportCustomization.h"
+#include "O3DTestFakes.h"
 #include "O3DTransportOptionSchema.h"
 #include "O3DTransportOptionTarget.h"
 #include "SO3DTransportOptionsPanel.h"
@@ -107,20 +107,22 @@ namespace O3DPanelTestUtil
 		return Schema;
 	}
 
-	/** Registers the test transport on both sides (schema plus the secret key); undoes it on exit. */
+	/**
+	 * Registers the test transport on both sides (fake factories and the schema, whose Secret entry
+	 * declares the secret key); unregisters it on exit.
+	 */
 	struct FScopedPanelTestTransport
 	{
 		FScopedPanelTestTransport()
 		{
-			FO3DSenderTransportCustomization Sender;
-			Sender.SecretOptionKeys.Add(SecretKey);
-			Sender.OptionSchema = MakeSchema();
-			O3DSender::RegisterTransportCustomization(TransportName, MoveTemp(Sender));
-
-			FO3DReceiverTransportCustomization Receiver;
-			Receiver.SecretOptionKeys.Add(SecretKey);
-			Receiver.OptionSchema = MakeSchema();
-			O3DReceiver::RegisterTransportCustomization(TransportName, MoveTemp(Receiver));
+			FO3DTransportDescriptor Descriptor;
+			Descriptor.Name = TransportName;
+			Descriptor.OwningModule = TEXT("Open3DBroadcastTests");
+			Descriptor.CreateSender = []() -> TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe> { return MakeShared<FO3DFakeSender, ESPMode::ThreadSafe>(); };
+			Descriptor.CreateReceiver = []() -> TSharedPtr<IOpen3DReceiver, ESPMode::ThreadSafe> { return MakeShared<FO3DFakeReceiver, ESPMode::ThreadSafe>(); };
+			Descriptor.SenderOptions.OptionSchema = MakeSchema();
+			Descriptor.ReceiverOptions.OptionSchema = MakeSchema();
+			Registration = FO3DTransportRegistry::Get().Register(MoveTemp(Descriptor));
 
 			ClearStore();
 		}
@@ -128,9 +130,13 @@ namespace O3DPanelTestUtil
 		~FScopedPanelTestTransport()
 		{
 			ClearStore();
-			O3DSender::UnregisterTransportCustomization(TransportName);
-			O3DReceiver::UnregisterTransportCustomization(TransportName);
+			Registration.Reset();
 		}
+
+		FScopedPanelTestTransport(const FScopedPanelTestTransport&) = delete;
+		FScopedPanelTestTransport& operator=(const FScopedPanelTestTransport&) = delete;
+
+		FO3DTransportRegistration Registration;
 
 		static void ClearStore()
 		{
@@ -344,17 +350,16 @@ bool FO3DOptionsPanelRegisteredTransportsTest::RunTest(const FString& Parameters
 
 	// ADR 0010 §8: opening each registered transport's panel leaves the object unchanged, and every
 	// schema is well formed. Loopback is always registered; the others depend on the build flags.
-	TArray<FName> SenderTransports;
-	O3DSender::GetRegisteredTransportNames(SenderTransports);
+	const TArray<FName> SenderTransports = FO3DTransportRegistry::Get().GetNames(EO3DTransportRole::Sender);
 	TestTrue(TEXT("Loopback sender registered"), SenderTransports.Contains(FName(TEXT("Loopback"))));
 
 	for (const FName& Transport : SenderTransports)
 	{
 		FO3DTransportOptionSchema Schema;
-		O3DSender::GetTransportOptionSchema(Transport, Schema);
+		FO3DTransportRegistry::Get().GetOptionSchema(Transport, EO3DTransportRole::Sender, Schema);
 		TArray<FString> SecretKeys;
 		TMap<FString, FString> SecretEnvVars;
-		O3DSender::GetTransportSecretDeclaration(Transport, SecretKeys, SecretEnvVars);
+		FO3DTransportRegistry::Get().GetSecretDeclaration(Transport, EO3DTransportRole::Sender, SecretKeys, SecretEnvVars);
 
 		for (const FO3DTransportOptionField& Field : Schema)
 		{
@@ -363,7 +368,7 @@ bool FO3DOptionsPanelRegisteredTransportsTest::RunTest(const FString& Parameters
 			TestFalse(*(Where + TEXT(": display name set")), Field.DisplayName.IsEmpty());
 			if (Field.Type == EO3DTransportOptionType::Secret)
 			{
-				TestTrue(*(Where + TEXT(": Secret field declared in SecretOptionKeys")), SecretKeys.Contains(Field.Key));
+				TestTrue(*(Where + TEXT(": Secret field in the secret declaration")), SecretKeys.Contains(Field.Key));
 			}
 			if (Field.Type == EO3DTransportOptionType::Int)
 			{
@@ -383,19 +388,18 @@ bool FO3DOptionsPanelRegisteredTransportsTest::RunTest(const FString& Parameters
 		TestTrue(*FString::Printf(TEXT("sender %s: rows within the schema"), *Transport.ToString()), Panel->GetNumVisibleFields() <= Schema.Num());
 	}
 
-	TArray<FName> ReceiverTransports;
-	O3DReceiver::GetRegisteredTransportNames(ReceiverTransports);
+	const TArray<FName> ReceiverTransports = FO3DTransportRegistry::Get().GetNames(EO3DTransportRole::Receiver);
 	TestTrue(TEXT("Loopback receiver registered"), ReceiverTransports.Contains(FName(TEXT("Loopback"))));
 
 	for (const FName& Transport : ReceiverTransports)
 	{
 		FO3DTransportOptionSchema Schema;
-		O3DReceiver::GetTransportOptionSchema(Transport, Schema);
+		FO3DTransportRegistry::Get().GetOptionSchema(Transport, EO3DTransportRole::Receiver, Schema);
 		for (const FO3DTransportOptionField& Field : Schema)
 		{
 			if (Field.Type == EO3DTransportOptionType::Secret)
 			{
-				TestTrue(*FString::Printf(TEXT("receiver %s, field '%s': Secret field declared in SecretOptionKeys"), *Transport.ToString(), *Field.Key),
+				TestTrue(*FString::Printf(TEXT("receiver %s, field '%s': Secret field in the secret declaration"), *Transport.ToString(), *Field.Key),
 					O3DReceiver::IsSecretOptionKey(Transport, Field.Key));
 			}
 		}
