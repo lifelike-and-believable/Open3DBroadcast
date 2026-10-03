@@ -31,7 +31,7 @@ TArray<TArray<uint8>> FO3DFakeLink::Drain()
 	return Out;
 }
 
-FO3DTransportCapabilities GetFakeTransportCapabilities()
+FO3DTransportCapabilities GetFakeTransportCapabilities(const FO3DTransportConfig* Config)
 {
 	FO3DTransportCapabilities Caps;
 	Caps.bSend = true;
@@ -40,10 +40,24 @@ FO3DTransportCapabilities GetFakeTransportCapabilities()
 	Caps.bAudioReceive = true;
 	Caps.bControl = true;
 	Caps.Delivery = EO3DDeliveryGuarantee::ReliableOrdered;
+	if (Config != nullptr)
+	{
+		const FString* Delivery = Config->AdvancedParams.Find(TEXT("fake.delivery"));
+		if (Delivery != nullptr && *Delivery == TEXT("unreliable"))
+		{
+			Caps.Delivery = EO3DDeliveryGuarantee::Unreliable;
+		}
+	}
 	return Caps;
 }
 
 // ── FO3DFakeSender ───────────────────────────────────────────────────────────────────────
+
+FO3DTransportCapabilities FO3DFakeSender::GetCapabilities() const
+{
+	const FO3DTransportConfig Config = GetLastConfig();
+	return GetFakeTransportCapabilities(&Config);
+}
 
 FO3DFakeSender::FO3DFakeSender(TSharedPtr<FO3DFakeLink, ESPMode::ThreadSafe> InLink)
 	: Link(MoveTemp(InLink))
@@ -415,7 +429,7 @@ FO3DFakeTransportScope::FO3DFakeTransportScope()
 	FO3DTransportDescriptor Descriptor;
 	Descriptor.Name = Name;
 	Descriptor.OwningModule = TEXT("Open3DBroadcastTests");
-	Descriptor.GetCapabilities = [](const FO3DTransportConfig&) { return GetFakeTransportCapabilities(); };
+	Descriptor.GetCapabilities = [](const FO3DTransportConfig& Config) { return GetFakeTransportCapabilities(&Config); };
 	Descriptor.CreateSender = [LinkForFactories, CreatedForFactories]() -> TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe>
 	{
 		TSharedRef<FO3DFakeSender> Sender = MakeShared<FO3DFakeSender>(LinkForFactories);

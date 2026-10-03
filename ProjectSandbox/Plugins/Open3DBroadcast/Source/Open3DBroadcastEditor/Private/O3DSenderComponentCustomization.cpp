@@ -12,6 +12,7 @@
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/SNullWidget.h"
+#include "HAL/PlatformTime.h"
 
 #include "Algo/Sort.h"
 
@@ -339,10 +340,52 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
         }
     }
 
+    // ADR 0005 (iii): residual coding falls back to quantized on a transport that does not deliver
+    // reliably and in order; say so under the Residual checkbox (the properties stay in their own
+    // category, whose default name is the property's Category string).
+    {
+        const TWeakPtr<FO3DSenderComponentCustomization> CustomizationWeak = AsSharedCustomization();
+        IDetailCategoryBuilder& ResidualCategory = DetailBuilder.EditCategory(TEXT("Open3DBroadcast|Sender|Residual"));
+        ResidualCategory.AddCustomRow(LOCTEXT("ResidualDeliveryWarningFilter", "Residual transport warning"))
+        .Visibility(TAttribute<EVisibility>::CreateLambda([CustomizationWeak]()
+        {
+            const TSharedPtr<FO3DSenderComponentCustomization> Customization = CustomizationWeak.Pin();
+            return (Customization.IsValid() && !Customization->GetResidualDeliveryWarning().IsEmpty()) ? EVisibility::Visible : EVisibility::Collapsed;
+        }))
+        .WholeRowContent()
+        [
+            SNew(STextBlock)
+            .Text_Lambda([CustomizationWeak]()
+            {
+                const TSharedPtr<FO3DSenderComponentCustomization> Customization = CustomizationWeak.Pin();
+                return Customization.IsValid() ? Customization->GetResidualDeliveryWarning() : FText::GetEmpty();
+            })
+            .ColorAndOpacity(FLinearColor(1.f, 0.75f, 0.2f))
+            .AutoWrapText(true)
+            .Font(IDetailLayoutBuilder::GetDetailFont())
+        ];
+    }
+
     RefreshTransportCustomization();
     SyncTransportComboSelection();
 
     UE_LOG(LogO3DSenderDetails, Verbose, TEXT("CustomizeDetails completed"));
+}
+
+FText FO3DSenderComponentCustomization::GetResidualDeliveryWarning()
+{
+    const double Now = FPlatformTime::Seconds();
+    if (CachedResidualWarningTime >= 0.0 && Now - CachedResidualWarningTime < 0.5)
+    {
+        return CachedResidualWarning;
+    }
+    CachedResidualWarningTime = Now;
+    CachedResidualWarning = FText::GetEmpty();
+    if (const UO3DSenderComponent* Component = ResolveEditingComponent())
+    {
+        CachedResidualWarning = Component->GetConfiguredResidualFallbackWarning();
+    }
+    return CachedResidualWarning;
 }
 
 void FO3DSenderComponentCustomization::HandleTransportSelectionChanged(TSharedPtr<FName> NewSelection, ESelectInfo::Type /*SelectInfo*/)

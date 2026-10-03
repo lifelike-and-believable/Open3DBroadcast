@@ -689,6 +689,88 @@ bool FO3DSenderPipelineQuantizationChangeTest::RunTest(const FString& Parameters
 	return true;
 }
 
+// ADR 0005 (iii): residual coding is used only on a transport that delivers reliably and in order;
+// on any other the sender sends quantized frames and warns once. The details panel shows the same
+// warning from the configured transport, before anything starts.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderResidualFallbackTest, "Open3DBroadcast.Sender.Encoding.ResidualFallsBackOnUnreliableTransports", O3DB_TEST_FLAGS)
+bool FO3DSenderResidualFallbackTest::RunTest(const FString& Parameters)
+{
+	using namespace O3DSenderPipelineTests;
+
+	// The decision and the text.
+	using EMode = EO3DSenderEncodingMode;
+	TestTrue(TEXT("Residual on ReliableOrdered"), UO3DSenderComponent::ResolveEncodingMode(true, false, EO3DDeliveryGuarantee::ReliableOrdered) == EMode::Residual);
+	TestTrue(TEXT("Residual takes precedence over quantization"), UO3DSenderComponent::ResolveEncodingMode(true, true, EO3DDeliveryGuarantee::ReliableOrdered) == EMode::Residual);
+	TestTrue(TEXT("Quantized on Unreliable"), UO3DSenderComponent::ResolveEncodingMode(true, false, EO3DDeliveryGuarantee::Unreliable) == EMode::Quantized);
+	TestTrue(TEXT("Quantized on Unknown"), UO3DSenderComponent::ResolveEncodingMode(true, false, EO3DDeliveryGuarantee::Unknown) == EMode::Quantized);
+	TestTrue(TEXT("Quantization alone is unaffected"), UO3DSenderComponent::ResolveEncodingMode(false, true, EO3DDeliveryGuarantee::Unreliable) == EMode::Quantized);
+	TestTrue(TEXT("Legacy is unaffected"), UO3DSenderComponent::ResolveEncodingMode(false, false, EO3DDeliveryGuarantee::Unreliable) == EMode::Legacy);
+	TestTrue(TEXT("No warning on ReliableOrdered"), UO3DSenderComponent::GetResidualFallbackWarning(TEXT("TCP"), EO3DDeliveryGuarantee::ReliableOrdered).IsEmpty());
+	TestTrue(TEXT("The warning names the transport"), UO3DSenderComponent::GetResidualFallbackWarning(TEXT("UDP"), EO3DDeliveryGuarantee::Unreliable).ToString().Contains(TEXT("'UDP'")));
+
+	AddExpectedError(TEXT("No TargetMesh set"), EAutomationExpectedErrorFlags::Contains, 0);
+	// Logged once per capture for the unreliable run, not once per frame.
+	AddExpectedMessage(TEXT("Residual coding needs a transport that delivers reliably and in order"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1, false);
+
+	const TSharedPtr<const FO3DSSkeletonDescriptor> Descriptor = MakeThreeBoneDescriptor();
+	for (const bool bUnreliable : { false, true })
+	{
+		const FString Context = bUnreliable ? TEXT("unreliable") : TEXT("reliable");
+		FO3DFakeTransportScope Scope;
+		UO3DSenderComponent* Component = MakeCapturingComponent(Scope.GetName(), TEXT("Fallback"));
+		Component->bEnableQuantization = false;
+		Component->bEnableResidualCoding = true;
+		Component->ResidualDeltaThreshold = 0.0f;
+		if (bUnreliable)
+		{
+			Component->SetTransportOption(TEXT("fake.delivery"), TEXT("unreliable"));
+		}
+
+		// The details panel's view, from the registry and the configured options.
+		TestTrue(*FString::Printf(TEXT("%s: configured guarantee"), *Context),
+			Component->GetConfiguredDeliveryGuarantee() == (bUnreliable ? EO3DDeliveryGuarantee::Unreliable : EO3DDeliveryGuarantee::ReliableOrdered));
+		TestEqual(*FString::Printf(TEXT("%s: details panel warning"), *Context), !Component->GetConfiguredResidualFallbackWarning().IsEmpty(), bUnreliable);
+
+		TArray<TArray<uint8>> Payloads;
+		const FDelegateHandle Listener = Component->OnSerializedFrame.AddLambda([&Payloads](const FString&, const TArray<uint8>& Bytes, double)
+		{
+			Payloads.Add(Bytes);
+		});
+		Component->StartCapture();
+		if (!TestTrue(*FString::Printf(TEXT("%s: capturing"), *Context), Component->IsCapturing()))
+		{
+			Component->OnSerializedFrame.Remove(Listener);
+			continue;
+		}
+		FO3DSenderComponentTestAccess::SetDescriptor(*Component, *Descriptor);
+		double Time = 700.0;
+		for (int32 Index = 0; Index < 8; ++Index)
+		{
+			TestTrue(TEXT("Frame submitted"), FO3DSenderComponentTestAccess::SubmitSampledFrame(*Component, PoseAt(Time), Time));
+			TestTrue(TEXT("Drained"), FO3DSenderComponentTestAccess::WaitForPipelineIdle(*Component, WaitTimeoutSeconds));
+			Time += 1.0 / 60.0;
+		}
+		Component->StopCapture();
+		Component->OnSerializedFrame.Remove(Listener);
+
+		// Updates are residual (predictor_id != 0) only on the reliable transport.
+		int32 Updates = 0;
+		int32 ResidualUpdates = 0;
+		for (const TArray<uint8>& Payload : Payloads)
+		{
+			const O3DS::Data::SubjectList* List = O3DS::Data::GetSubjectList(Payload.GetData() + 8);
+			if (List->updates() != nullptr && List->updates()->size() > 0)
+			{
+				++Updates;
+				ResidualUpdates += (List->updates()->Get(0)->predictor_id() != 0) ? 1 : 0;
+			}
+		}
+		TestTrue(*FString::Printf(TEXT("%s: updates were sent"), *Context), Updates > 0);
+		TestEqual(*FString::Printf(TEXT("%s: residual updates"), *Context), ResidualUpdates, bUnreliable ? 0 : Updates);
+	}
+	return true;
+}
+
 // ADR 0008 item 3 and Verification ("destroying the component with a task in flight is clean"),
 // pipeline level: 1,000 owners let go of their pipeline right after handing it frames; every tenth
 // does it while the worker is held inside SendSerialized. Each task finishes on its own, the last

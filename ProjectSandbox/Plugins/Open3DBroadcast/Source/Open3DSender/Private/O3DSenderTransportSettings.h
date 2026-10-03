@@ -46,6 +46,9 @@ public:
 	/** The options a transport config carries (secret keys left out) and its secrets, resolved from the store. */
 	static void BuildConfigOptions(const FOptions& Options, FName Transport, FOptions& OutOptions, FOptions& OutSecrets);
 
+	/** The options a transport config carries, secret keys left out; the secret store is not read. */
+	static void BuildPublicOptions(const FOptions& Options, FName Transport, FOptions& OutOptions);
+
 	/** A sender property whose edit stops capture and starts it again (editor). */
 	static bool IsRestartProperty(FName Property);
 };
