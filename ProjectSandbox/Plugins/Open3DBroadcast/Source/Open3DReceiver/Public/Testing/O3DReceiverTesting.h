@@ -248,4 +248,74 @@ private:
 	TUniquePtr<FO3DLiveLinkPublisher> Publisher;
 };
 
+class FO3DReceiverStreamScheduler;
+class FO3DReceiverConcealment;
+class UO3DReceiverSourceSettings;
+
+/**
+ * Owns one FO3DReceiverStreamScheduler (a private class of this module, WP-A3) whose apply callback
+ * records the packets it releases.
+ */
+class OPEN3DRECEIVER_API FO3DReceiverStreamSchedulerProbe
+{
+public:
+	struct FReleased
+	{
+		FString Label;
+		int32 NumBytes = 0;
+		bool bGated = false;
+		uint64 Seq = 0;
+		double LegacyTimestampSeconds = 0.0;
+	};
+
+	FO3DReceiverStreamSchedulerProbe();
+	~FO3DReceiverStreamSchedulerProbe();
+
+	FO3DReceiverStreamSchedulerProbe(const FO3DReceiverStreamSchedulerProbe&) = delete;
+	FO3DReceiverStreamSchedulerProbe& operator=(const FO3DReceiverStreamSchedulerProbe&) = delete;
+
+	/** Peeks the packet's metadata and pushes it; false when the packet does not verify. */
+	bool Push(const FString& Subject, TConstArrayView<uint8> Buffer, double TimestampSeconds, double NowSeconds);
+	void Flush(double NowSeconds);
+	void PruneIdle(double NowSeconds, double IdleSeconds);
+	void Reset();
+	int32 GetNumStreams() const;
+
+	TArray<FReleased> Released;
+
+private:
+	TUniquePtr<FO3DReceiverStreamScheduler> Scheduler;
+};
+
+/** Owns one FO3DReceiverConcealment (a private class of this module, WP-A3) and records its synthesized frames. */
+class OPEN3DRECEIVER_API FO3DReceiverConcealmentProbe
+{
+public:
+	struct FSynthetic
+	{
+		FName Subject;
+		TArray<FTransform> Transforms;
+		double Time = 0.0;
+	};
+
+	FO3DReceiverConcealmentProbe();
+	~FO3DReceiverConcealmentProbe();
+
+	FO3DReceiverConcealmentProbe(const FO3DReceiverConcealmentProbe&) = delete;
+	FO3DReceiverConcealmentProbe& operator=(const FO3DReceiverConcealmentProbe&) = delete;
+
+	void ObserveRealFrame(const UO3DReceiverSourceSettings* Settings, FName Subject, double PresentationTimeSeconds, const TArray<FTransform>& Transforms, bool bTopologyChanged);
+	void NoteClockOffset(int64 OffsetEstimateUs);
+	void Tick(const UO3DReceiverSourceSettings* Settings, bool bCanPublish, double NowSeconds);
+	void ForgetSubject(FName Subject);
+	void Reset();
+	int32 GetNumEngines() const;
+	bool HasClockOffsetEstimate() const;
+
+	TArray<FSynthetic> Synthetic;
+
+private:
+	TUniquePtr<FO3DReceiverConcealment> Concealment;
+};
+
 #endif // WITH_DEV_AUTOMATION_TESTS
