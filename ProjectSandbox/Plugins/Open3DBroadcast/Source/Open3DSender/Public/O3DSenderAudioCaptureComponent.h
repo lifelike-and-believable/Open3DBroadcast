@@ -118,9 +118,15 @@ public:
      */
     void RefreshCaptureParams();
 
-    /** Forward PCM frames as if captured. Any thread; never touches this UObject's properties. */
+    /**
+     * Forward PCM frames as if captured. Any thread; never touches this UObject's properties.
+     * TimestampSec is passed through unchanged, so give it on the sender clock
+     * (FPlatformTime::Seconds(), ADR 0009 item 7); the submix tap and the microphone map their own
+     * clocks onto it.
+     */
     void PushFrames(const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec);
 
+    /** The cached capture device names (ADR 0008 item 8); never enumerates. */
     UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Audio")
     TArray<FName> GetAvailableInputDeviceOptions() const;
 
@@ -129,6 +135,9 @@ public:
 #endif
 
 private:
+    friend struct FO3DSenderAudioCaptureTestAccess;
+
+    /** The cached index of a device name (ADR 0008 item 8); never enumerates. */
     int32 ResolveDeviceIndexFromName(const FName& Name) const;
     void RebuildSubmixTap();
     void TeardownSubmixTap();
@@ -155,4 +164,6 @@ private:
 
     bool bMicStreamOpen = false;
     bool bMicStreamActive = false;
+    /** Times InitializeMicCapture tried to open the device (tests: once per start, SND-18). */
+    int32 NumMicOpenAttempts = 0;
 };

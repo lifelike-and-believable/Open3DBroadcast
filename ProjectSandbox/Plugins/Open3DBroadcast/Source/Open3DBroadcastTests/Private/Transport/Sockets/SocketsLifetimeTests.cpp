@@ -53,7 +53,7 @@ namespace
 		return Socket;
 	}
 
-	int32 FindFreeTcpPort()
+	int32 FindFreeLifetimeTcpPort()
 	{
 		int32 Port = 0;
 		if (FSocket* Probe = BindLoopbackSocket(NAME_Stream, Port))
@@ -83,7 +83,7 @@ namespace
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsTcpLifetimeStressTest, "Open3DBroadcast.Transport.Sockets.Lifetime.TcpStartStopWithAudio", O3DB_TEST_FLAGS)
 bool FO3DSocketsTcpLifetimeStressTest::RunTest(const FString& Parameters)
 {
-	const int32 Port = FindFreeTcpPort();
+	const int32 Port = FindFreeLifetimeTcpPort();
 	TestTrue(TEXT("Loopback TCP port allocated"), Port > 0);
 	if (Port <= 0)
 	{

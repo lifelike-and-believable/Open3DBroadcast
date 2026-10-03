@@ -9,6 +9,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "O3DSenderAudioCaptureComponent.h"
 #include "O3DSenderComponent.h"
 #include "O3DSenderCurveConfig.h"
 #include "O3DSenderPipelineStats.h"
@@ -60,6 +61,8 @@ struct FO3DSenderComponentTestAccess
 		return Frame;
 	}
 	static void SetAudioCaptureComponent(UO3DSenderComponent& Component, UO3DSenderAudioCaptureComponent* Capture) { Component.AudioCaptureComponent = Capture; }
+	/** The capture config StartCapture hands the audio capture component (device index resolved from the cache). */
+	static FO3DSenderAudioCaptureConfig BuildAudioCaptureConfig(const UO3DSenderComponent& Component) { return Component.BuildAudioCaptureConfig(); }
 	static FString GetCachedSubjectName(const UO3DSenderComponent& Component) { return Component.CachedSubjectName; }
 
 	// Tick order (WP-A2b).
@@ -105,6 +108,13 @@ struct FO3DSenderComponentTestAccess
 		Component.PostEditChangeProperty(Event);
 	}
 #endif
+};
+
+/** Befriended by UO3DSenderAudioCaptureComponent (WP-A2d). Header-only, like the accessor above. */
+struct FO3DSenderAudioCaptureTestAccess
+{
+	/** Times the component tried to open its capture device (ADR 0008 item 8: once per start). */
+	static int32 GetNumMicOpenAttempts(const UO3DSenderAudioCaptureComponent& Component) { return Component.NumMicOpenAttempts; }
 };
 
 /**

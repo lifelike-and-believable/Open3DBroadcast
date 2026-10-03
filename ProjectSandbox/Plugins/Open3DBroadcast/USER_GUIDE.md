@@ -543,6 +543,18 @@ Captures from microphone input. Useful for:
 - Commentary
 - Live narration
 
+The device list in the dropdown is cached: the editor reads it once at startup, and each
+capture start in Input mode reads it again before opening the device. After plugging in a
+microphone while the editor is open, call **Refresh Audio Input Devices** (Blueprint) or run
+the console command `o3d.Sender.Audio.RefreshDevices` (it also logs the list).
+
+#### Audio Timestamps
+
+Audio is stamped on the same clock as the pose frames (`FPlatformTime::Seconds()` on the
+sender), so a receiver can line the two up. The submix and microphone clocks are mapped onto
+it, and device clock drift is followed. If you feed audio yourself with
+`UO3DSenderAudioCaptureComponent::PushFrames`, pass the timestamp on that clock too.
+
 #### Audio Stream Label
 
 - The audio stream label is the sender's subject name: the sanitized **Subject Name**, or

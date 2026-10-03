@@ -617,8 +617,17 @@ public:
 	 */
 	void SwitchTransportOptions(FName From, FName To);
 
+	/** The cached capture device names (ADR 0008 item 8); never enumerates. */
 	UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Sender|Audio")
 	TArray<FName> GetAvailableAudioInputDeviceOptions() const;
+
+	/**
+	 * Enumerate the audio capture devices again (ADR 0008 item 8). StartCapture does this once
+	 * when it captures from an input device; call it after plugging in a device to update the
+	 * picker. Game thread.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Sender|Audio")
+	static void RefreshAudioInputDevices();
 
 	UFUNCTION()
 	TArray<FName> GetAvailableAudioCodecOptions() const;
@@ -649,6 +658,7 @@ private:
 	void ConfigureAudioCaptureComponent(const FO3DSenderAudioCaptureConfig& CaptureConfig, const FO3DTransportAudioConfig& TransportAudioConfig);
 	void TeardownAudioCapture();
 	void SyncAudioConfigSource();
+	/** The cached index of a device name (ADR 0008 item 8); never enumerates. */
 	int32 ResolveAudioDeviceIndex(const FName& DeviceName) const;
 	void EnsureSubjectNameCached(const USkeletalMeshComponent* SkelComp);
 	void InvalidateSubjectNameCache();

@@ -6,6 +6,8 @@
 #include "AudioMixerDevice.h"
 #include "AudioCaptureCore.h"
 #include "ISubmixBufferListener.h"
+#include "O3DAudioClockMapper.h"
+#include "O3DAudioInputDevices.h"
 #include "O3DAudioResampler.h"
 #include "Transport/O3DSenderInterface.h"
 #include "O3DSenderLogs.h"
@@ -68,6 +70,11 @@ struct FO3DSenderAudioProducerState
     /** Stateful per-stream resampler with anti-aliasing (SND-21). */
     FO3DAudioResampler Resampler;
     bool bResamplerInUse = false;
+    /**
+     * Maps the source clock (AudioClock, StreamTimeSec) onto the sender clock (ADR 0008 item 7,
+     * SND-17). Unused for PushFrames, whose callers pass sender-clock times.
+     */
+    FO3DAudioClockMapper ClockMapper;
     double LastRejectedLogTime = 0.0;
     double LastNoSinkLogTime = 0.0;
     double LastSubmitLogTime = 0.0;
@@ -238,8 +245,10 @@ namespace
             const int32 NumFrames = (NumChannels > 0) ? (NumSamples / NumChannels) : 0;
             if (NumFrames > 0)
             {
+                // AudioClock counts from the start of audio rendering; stamp on the sender clock.
+                const double TimestampSec = Producer.ClockMapper.Map(AudioClock, FPlatformTime::Seconds());
                 const FO3DSenderAudioCaptureRouter::FParamsPtr Params = Router->Snapshot();
-                ProcessAndSubmitAudio(Params.Get(), Producer, AudioData, NumFrames, NumChannels, SampleRate, AudioClock);
+                ProcessAndSubmitAudio(Params.Get(), Producer, AudioData, NumFrames, NumChannels, SampleRate, TimestampSec);
             }
         }
 
@@ -296,7 +305,10 @@ void UO3DSenderAudioCaptureComponent::BeginPlay()
     RefreshCaptureParams();
     // Idempotent (SND-7): a tap registered earlier by the sender component is torn down first.
     RebuildSubmixTap();
-    if (!MicCapture.IsValid())
+    // ADR 0008 item 8 (SND-18): the device is opened once per start. Without a sink there is
+    // nothing to capture for, and the sender component opens it in StartCaptureWithMode; a sink
+    // bound later opens it in SetAudioSink.
+    if (!MicCapture.IsValid() && AudioSink.IsValid())
     {
         InitializeMicCapture();
     }
@@ -356,6 +368,13 @@ void UO3DSenderAudioCaptureComponent::SetAudioSink(const TSharedPtr<IO3DSenderAu
     else if (!SubmixTap.IsValid() && HasBegunPlay())
     {
         RebuildSubmixTap();
+    }
+
+    // A sink bound after BeginPlay opens the device if no start has opened it (it starts the
+    // stream when it opens it).
+    if (CaptureMode == EO3DSenderCaptureMode::Input && AudioSink.IsValid() && !MicCapture.IsValid() && HasBegunPlay())
+    {
+        InitializeMicCapture();
     }
 
     Audio::FAudioCapture* MicCaptureRaw = MicCapture.Get();
@@ -459,17 +478,8 @@ void UO3DSenderAudioCaptureComponent::PushFrames(const float* Interleaved, int32
 
 TArray<FName> UO3DSenderAudioCaptureComponent::GetAvailableInputDeviceOptions() const
 {
-    TArray<FName> Options;
-    Audio::FAudioCapture Temp;
-    TArray<Audio::FCaptureDeviceInfo> Devices;
-    if (Temp.GetCaptureDevicesAvailable(Devices) > 0)
-    {
-        for (const Audio::FCaptureDeviceInfo& Info : Devices)
-        {
-            Options.Add(FName(*Info.DeviceName));
-        }
-    }
-    return Options;
+    // The cached list (ADR 0008 item 8): a GetOptions callback never enumerates.
+    return FO3DAudioInputDevices::Get().GetNames();
 }
 
 #if WITH_EDITOR
@@ -493,24 +503,7 @@ void UO3DSenderAudioCaptureComponent::PostEditChangeProperty(FPropertyChangedEve
 
 int32 UO3DSenderAudioCaptureComponent::ResolveDeviceIndexFromName(const FName& Name) const
 {
-    if (Name.IsNone())
-    {
-        return -1;
-    }
-
-    Audio::FAudioCapture Temp;
-    TArray<Audio::FCaptureDeviceInfo> Devices;
-    if (Temp.GetCaptureDevicesAvailable(Devices) > 0)
-    {
-        for (int32 Index = 0; Index < Devices.Num(); ++Index)
-        {
-            if (Devices[Index].DeviceName.Equals(Name.ToString(), ESearchCase::IgnoreCase))
-            {
-                return Index;
-            }
-        }
-    }
-    return -1;
+    return FO3DAudioInputDevices::Get().FindIndex(Name);
 }
 
 void UO3DSenderAudioCaptureComponent::RebuildSubmixTap()
@@ -580,6 +573,7 @@ void UO3DSenderAudioCaptureComponent::InitializeMicCapture()
         return;
     }
 
+    ++NumMicOpenAttempts;
     MicCapture.Reset(new Audio::FAudioCapture());
     Audio::FAudioCaptureDeviceParams Params;
     Params.DeviceIndex = Config.DeviceIndex;
@@ -595,8 +589,10 @@ void UO3DSenderAudioCaptureComponent::InitializeMicCapture()
             return;
         }
         const float* PCM = reinterpret_cast<const float*>(Buffer);
+        // StreamTimeSec is the device stream's own clock; stamp on the sender clock.
+        const double TimestampSec = MicProducer->ClockMapper.Map(StreamTimeSec, FPlatformTime::Seconds());
         const FO3DSenderAudioCaptureRouter::FParamsPtr CaptureParams = Router->Snapshot();
-        ProcessAndSubmitAudio(CaptureParams.Get(), *MicProducer, PCM, NumFrames, NumChannels, SampleRate, StreamTimeSec);
+        ProcessAndSubmitAudio(CaptureParams.Get(), *MicProducer, PCM, NumFrames, NumChannels, SampleRate, TimestampSec);
     };
 
     if (MicCapture.IsValid() && MicCapture->OpenAudioCaptureStream(Params, OnCapture, 0))
