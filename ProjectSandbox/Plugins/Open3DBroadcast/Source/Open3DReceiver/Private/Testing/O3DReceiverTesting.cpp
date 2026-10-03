@@ -133,6 +133,16 @@ int32 FO3DLiveLinkPublisherProbe::GetActiveSubjectCount() const
 	return Publisher->GetActiveSubjectCount();
 }
 
+void FO3DLiveLinkPublisherProbe::NoteSlowFramePush(FName Subject, double PushMs, double NowSeconds)
+{
+	Publisher->NoteSlowFramePush(Subject, PushMs, NowSeconds);
+}
+
+int32 FO3DLiveLinkPublisherProbe::GetSlowPushesNotLogged() const
+{
+	return Publisher->GetSlowPushesNotLogged();
+}
+
 void FO3DLiveLinkPublisherProbe::Reset()
 {
 	Publisher->Reset();

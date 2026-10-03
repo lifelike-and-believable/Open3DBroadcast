@@ -133,5 +133,10 @@ private:
 
     FDelegateHandle BusDelegateHandle;
 
+    // Log throttling, per component (RCV-25): every component logs its own first frame.
+    bool bLoggedFirstFrame = false;
+    int32 FilterDropLogCounter = 0;
+    int32 QueueLogCounter = 0;
+
     friend struct FO3DRemoteAudioComponentTestAccessor;
 };

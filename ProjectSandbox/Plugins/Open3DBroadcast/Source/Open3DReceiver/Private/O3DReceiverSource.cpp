@@ -48,7 +48,7 @@ THIRD_PARTY_INCLUDES_END
 // Receiver-side diagnostics
 static TAutoConsoleVariable<int32> CVarO3DReceiverDebugParse(
     TEXT("o3ds.Receiver.DebugParse"),
-    1,
+    0,
     TEXT("Enable debug logs when parsing incoming O3DS packets (0/1)."),
     ECVF_Default);
 
@@ -732,7 +732,8 @@ void FO3DReceiverSource::ApplyReleasedFrame(O3DS::ReceiverStream& Stream, const 
     double WorldTimeSecondsOverride = -1.0;
     if (GatedFrame == nullptr)
     {
-        // Round-trip latency from the transport's timestamp.
+        // Receive-to-apply latency (RCV-33): the transport stamps the packet with
+        // FPlatformTime::Seconds() when it receives it.
         const double LatencyMs = (FPlatformTime::Seconds() - LegacyTimestampSeconds) * 1000.0;
         if (LatencyMs >= 0.0 && LatencyMs < 10000.0)  // sanity check: latency should be < 10 seconds
         {
@@ -754,6 +755,17 @@ void FO3DReceiverSource::ApplyReleasedFrame(O3DS::ReceiverStream& Stream, const 
         const uint64 NowEpochUs = O3DS::NowUtcMicros();
         const double NowPlatformS = FPlatformTime::Seconds();
         WorldTimeSecondsOverride = NowPlatformS + (double)((int64)Sample.mapped_presentation_time_us - (int64)NowEpochUs) / 1.0e6;
+
+        // Receive-to-apply latency (RCV-33), gate wait included: both readings are this
+        // receiver's own UTC clock.
+        if (GatedFrame->local_recv_us != 0)
+        {
+            const double LatencyMs = (double)((int64)NowEpochUs - (int64)GatedFrame->local_recv_us) / 1000.0;
+            if (LatencyMs >= 0.0 && LatencyMs < 10000.0)
+            {
+                FO3DPerformanceMetrics::Get().RecordFrameLatency(LatencyMs);
+            }
+        }
 
         if (GatedFrame->wallclock_us != 0)
         {

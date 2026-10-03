@@ -255,8 +255,11 @@ public:
 		std::atomic<int32> ActiveSubjectCount{ 0 };        // Current number of subjects being received
 
 		// Latency tracking
-		std::atomic<double> AvgRoundTripLatencyMs{ 0.0 };  // Rolling average RTT (if timestamped)
-		std::atomic<double> MaxLatencyMs{ 0.0 };           // Peak latency in last collection period
+		// Receive-to-apply latency (RCV-33): from the transport receiving a packet to the receiver
+		// applying it, on this machine's clock; includes the reorder gate's wait on the gated path.
+		// Not network latency: that is in AvgClockOffsetMs / AvgJitterMs below.
+		std::atomic<double> AvgReceiveToApplyLatencyMs{ 0.0 };
+		std::atomic<double> MaxLatencyMs{ 0.0 };           // Peak receive-to-apply latency since the last reset
 
 		// A2: ReorderGate / ClockOffsetEstimator metrics (see O3DReceiverSource.cpp).
 		// Gate counters are cumulative deltas summed across all receiver sources sharing
@@ -274,7 +277,7 @@ public:
 		// Clock-offset estimate (caveated - see ClockOffsetEstimator's doc comment: only
 		// meaningful as an absolute latency figure if clocks are known to be synced;
 		// otherwise treat as relative/indicative) and jitter (excess delay above the
-		// rolling-min floor), both rolling EMAs alpha=0.2 like AvgRoundTripLatencyMs above.
+		// rolling-min floor), both rolling EMAs alpha=0.2 like AvgReceiveToApplyLatencyMs above.
 		std::atomic<double> AvgClockOffsetMs{ 0.0 };
 		std::atomic<double> AvgJitterMs{ 0.0 };
 
@@ -393,7 +396,7 @@ public:
 	void RecordLiveLinkPushTimeMs(double TimeMs);
 	void RecordTotalProcessingTimeMs(double TimeMs);
 
-	/** Record latency for a frame (timestamp-based) */
+	/** Records one frame's receive-to-apply latency (see AvgReceiveToApplyLatencyMs) */
 	void RecordFrameLatency(double LatencyMs);
 
 	// A2.d: ReorderGate / ClockOffsetEstimator metrics. Counters take a delta (not a

@@ -131,7 +131,7 @@ void FO3DPerformanceMetrics::Reset()
 	ReceiverMetrics.AvgDeserializationTimeMs.store(0.0);
 	ReceiverMetrics.SkeletonUpdates.store(0);
 	ReceiverMetrics.PoseUpdates.store(0);
-	ReceiverMetrics.AvgRoundTripLatencyMs.store(0.0);
+	ReceiverMetrics.AvgReceiveToApplyLatencyMs.store(0.0);
 	ReceiverMetrics.MaxLatencyMs.store(0.0);
 	ReceiverMetrics.GateDupDropped.store(0);
 	ReceiverMetrics.GateStaleDropped.store(0);
@@ -167,7 +167,7 @@ void FO3DPerformanceMetrics::RecordFrameLatency(double LatencyMs)
 	// Exponential moving average, alpha = 0.2 (weights recent values more heavily). SHR-26:
 	// compare-exchange loops, so concurrent receivers do not lose updates and the peak never
 	// moves down.
-	O3DMetrics::AtomicUpdateEma(ReceiverMetrics.AvgRoundTripLatencyMs, LatencyMs, 0.2);
+	O3DMetrics::AtomicUpdateEma(ReceiverMetrics.AvgReceiveToApplyLatencyMs, LatencyMs, 0.2);
 	O3DMetrics::AtomicStoreMax(ReceiverMetrics.MaxLatencyMs, LatencyMs);
 }
 
@@ -299,7 +299,7 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 		uint64 FramesApplied = ReceiverMetrics.FramesApplied.load();
 		uint64 FramesDropped = ReceiverMetrics.FramesDropped.load();
 		uint64 BytesDeserialized = ReceiverMetrics.BytesDeserialized.load();
-		double AvgLatency = ReceiverMetrics.AvgRoundTripLatencyMs.load();
+		double AvgLatency = ReceiverMetrics.AvgReceiveToApplyLatencyMs.load();
 		double MaxLatency = ReceiverMetrics.MaxLatencyMs.load();
 		int32 ActiveSubjects = ReceiverMetrics.ActiveSubjectCount.load();
 
@@ -309,8 +309,8 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Frames Dropped: %llu (%.2f%% drop rate)"),
 			FramesDropped, FramesReceived > 0 ? (100.0 * FramesDropped / FramesReceived) : 0.0);
 		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Bytes Deserialized: %.2f MB"), BytesDeserialized / 1024.0 / 1024.0);
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg Round-Trip Latency: %.2f ms"), AvgLatency);
-		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Max Latency: %.2f ms"), MaxLatency);
+		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Avg Receive-to-Apply Latency: %.2f ms"), AvgLatency);
+		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Max Receive-to-Apply Latency: %.2f ms"), MaxLatency);
 		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Active Subjects: %d"), ActiveSubjects);
 		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Skeleton Updates: %llu"), ReceiverMetrics.SkeletonUpdates.load());
 		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Pose Updates: %llu"), ReceiverMetrics.PoseUpdates.load());
@@ -444,7 +444,7 @@ FString FO3DPerformanceMetrics::GetMetricsAsCSV() const
 	CSV += FString::Printf(TEXT("ReceiverFramesDropped,%llu\n"), ReceiverMetrics.FramesDropped.load());
 	CSV += FString::Printf(TEXT("ReceiverBytesDeserialized,%llu\n"), ReceiverMetrics.BytesDeserialized.load());
 	CSV += FString::Printf(TEXT("ReceiverInvalidPosesDropped,%llu\n"), ReceiverMetrics.InvalidPosesDropped.load());
-	CSV += FString::Printf(TEXT("AvgRoundTripLatencyMs,%.2f\n"), ReceiverMetrics.AvgRoundTripLatencyMs.load());
+	CSV += FString::Printf(TEXT("AvgReceiveToApplyLatencyMs,%.2f\n"), ReceiverMetrics.AvgReceiveToApplyLatencyMs.load());
 	CSV += FString::Printf(TEXT("GateLost,%llu\n"), ReceiverMetrics.GateLost.load());
 	CSV += FString::Printf(TEXT("GateReordered,%llu\n"), ReceiverMetrics.GateReordered.load());
 	CSV += FString::Printf(TEXT("GateDupDropped,%llu\n"), ReceiverMetrics.GateDupDropped.load());
