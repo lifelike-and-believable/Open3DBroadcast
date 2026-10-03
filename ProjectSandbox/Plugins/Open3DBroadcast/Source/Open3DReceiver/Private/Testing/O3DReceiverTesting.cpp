@@ -5,11 +5,14 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "O3DLiveLinkPublisher.h"
+#include "O3DReceiverConcealment.h"
+#include "O3DReceiverStreamScheduler.h"
 #include "O3DReceiverFrameDecoder.h"
 #include "O3DHelpers.h"
 
 THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
+#include "o3ds/receiver_streams.h"
 THIRD_PARTY_INCLUDES_END
 
 FO3DReceiverFrameDecoderProbe::FO3DReceiverFrameDecoderProbe()
@@ -128,6 +131,100 @@ int32 FO3DLiveLinkPublisherProbe::GetActiveSubjectCount() const
 void FO3DLiveLinkPublisherProbe::Reset()
 {
 	Publisher->Reset();
+}
+
+FO3DReceiverStreamSchedulerProbe::FO3DReceiverStreamSchedulerProbe()
+	: Scheduler(MakeUnique<FO3DReceiverStreamScheduler>(
+		[this](O3DS::ReceiverStream&, const FString& Label, const char*, size_t Len, double LegacyTimestampSeconds, const O3DS::Frame* GatedFrame)
+		{
+			FReleased Entry;
+			Entry.Label = Label;
+			Entry.NumBytes = static_cast<int32>(Len);
+			Entry.bGated = GatedFrame != nullptr;
+			Entry.Seq = GatedFrame ? GatedFrame->seq : 0;
+			Entry.LegacyTimestampSeconds = LegacyTimestampSeconds;
+			Released.Add(MoveTemp(Entry));
+		}))
+{
+}
+
+FO3DReceiverStreamSchedulerProbe::~FO3DReceiverStreamSchedulerProbe() = default;
+
+bool FO3DReceiverStreamSchedulerProbe::Push(const FString& Subject, TConstArrayView<uint8> Buffer, double TimestampSeconds, double NowSeconds)
+{
+	O3DS::PacketMeta Meta;
+	if (!O3DS::PeekPacketMeta(reinterpret_cast<const char*>(Buffer.GetData()), static_cast<size_t>(Buffer.Num()), Meta))
+	{
+		return false;
+	}
+	Scheduler->Push(Subject, Buffer, TimestampSeconds, Meta, 1, NowSeconds, O3DS::LegacyOrderingConfig(), false);
+	return true;
+}
+
+void FO3DReceiverStreamSchedulerProbe::Flush(double NowSeconds)
+{
+	Scheduler->Flush(NowSeconds);
+}
+
+void FO3DReceiverStreamSchedulerProbe::PruneIdle(double NowSeconds, double IdleSeconds)
+{
+	Scheduler->PruneIdle(NowSeconds, IdleSeconds);
+}
+
+void FO3DReceiverStreamSchedulerProbe::Reset()
+{
+	Scheduler->Reset();
+}
+
+int32 FO3DReceiverStreamSchedulerProbe::GetNumStreams() const
+{
+	return static_cast<int32>(Scheduler->GetNumStreams());
+}
+
+FO3DReceiverConcealmentProbe::FO3DReceiverConcealmentProbe()
+	: Concealment(MakeUnique<FO3DReceiverConcealment>())
+{
+}
+
+FO3DReceiverConcealmentProbe::~FO3DReceiverConcealmentProbe() = default;
+
+void FO3DReceiverConcealmentProbe::ObserveRealFrame(const UO3DReceiverSourceSettings* Settings, FName Subject, double PresentationTimeSeconds, const TArray<FTransform>& Transforms, bool bTopologyChanged)
+{
+	Concealment->ObserveRealFrame(Settings, Subject, PresentationTimeSeconds, Transforms, TArray<float>(), bTopologyChanged);
+}
+
+void FO3DReceiverConcealmentProbe::NoteClockOffset(int64 OffsetEstimateUs)
+{
+	Concealment->NoteClockOffset(OffsetEstimateUs);
+}
+
+void FO3DReceiverConcealmentProbe::Tick(const UO3DReceiverSourceSettings* Settings, bool bCanPublish, double NowSeconds)
+{
+	Concealment->Tick(Settings, bCanPublish, NowSeconds,
+		[this](FName Subject, const TArray<FTransform>& Transforms, const TArray<float>&, double Time)
+		{
+			Synthetic.Add({ Subject, Transforms, Time });
+		});
+}
+
+void FO3DReceiverConcealmentProbe::ForgetSubject(FName Subject)
+{
+	Concealment->ForgetSubject(Subject);
+}
+
+void FO3DReceiverConcealmentProbe::Reset()
+{
+	Concealment->Reset();
+}
+
+int32 FO3DReceiverConcealmentProbe::GetNumEngines() const
+{
+	return Concealment->GetNumEngines();
+}
+
+bool FO3DReceiverConcealmentProbe::HasClockOffsetEstimate() const
+{
+	return Concealment->HasClockOffsetEstimate();
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

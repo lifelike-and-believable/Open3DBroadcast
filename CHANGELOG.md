@@ -732,6 +732,21 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Receiver stream scheduler and concealment split out (WP-A3 step 3, RCV-29)
+
+- `FO3DReceiverSource`'s packet ordering moved into `FO3DReceiverStreamScheduler` (private): the
+  per-sender stream table (RCV-5), the legacy timestamp ordering, the reorder gate's push and
+  flush, idle pruning and the gate metric deltas. Released packets come back to the source, which
+  parses them, maps the gated path's clock and publishes (`ApplyReleasedFrame`, which replaces the
+  two near-identical legacy and gated apply functions).
+- Receiver-side concealment moved into `FO3DReceiverConcealment` (private): one engine per subject,
+  the starvation poll and its metric deltas; its synthesized-frame arrays are reused across ticks.
+- Output is unchanged. The legacy ordering decision now reads the same "now" as the rest of the
+  packet's handling (it read the clock a few microseconds later before).
+- **Tests.** New `Open3DBroadcast.Receiver.StreamScheduler.LegacyOrderingDropsStaleFrames`,
+  `.GateReordersPerSender` and `Open3DBroadcast.Receiver.Concealment.SynthesizesOnlyWhenStarved`,
+  through exported probes. Existing tests are unchanged.
+
 ### Receiver LiveLink publisher split out (WP-A3 step 2, RCV-29)
 
 - `FO3DReceiverSource`'s LiveLink side moved into `FO3DLiveLinkPublisher` (private): creating a

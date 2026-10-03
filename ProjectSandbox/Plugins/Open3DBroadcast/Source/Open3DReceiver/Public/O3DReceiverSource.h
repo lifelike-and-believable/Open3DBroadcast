@@ -27,6 +27,8 @@ THIRD_PARTY_INCLUDES_END
 class ILiveLinkClient;
 class FO3DReceiverFrameDecoder;
 class FO3DLiveLinkPublisher;
+class FO3DReceiverConcealment;
+class FO3DReceiverStreamScheduler;
 
 /**
  * LiveLink source implementation that consumes serialized Open3DStream frames via registered transports.
@@ -103,9 +105,12 @@ private:
     // whenever the game thread got around to running the dispatched task.
     // Buffer is valid only for the call (the consumer's view form, WP-A1 PR 5b); a TArray converts.
     void HandleSerializedFrame(const FString& Subject, TConstArrayView<uint8> Buffer, double TimestampSeconds, uint64 ArrivalEpochUsOverride = 0);
-    void HandleLegacyFrame(const FString& Subject, TConstArrayView<uint8> Buffer, double TimestampSeconds, const O3DS::PacketMeta& Meta, O3DS::ReceiverStream& Stream);
-    void EmitGatedFrame(uint64 StreamKey, O3DS::Frame&& Frame);
-    void ReportGateMetricsDelta();
+    /**
+     * Parses and publishes one packet the stream scheduler released in order: from the legacy
+     * path (GatedFrame null; LegacyTimestampSeconds is the transport's timestamp) or from a
+     * sender stream's reorder gate, whose tx_wallclock is mapped onto local engine time.
+     */
+    void ApplyReleasedFrame(O3DS::ReceiverStream& Stream, const FString& Label, const char* Data, size_t Len, double LegacyTimestampSeconds, const O3DS::Frame* GatedFrame);
     bool StartTransport();
     void StopTransport();
     /**
@@ -134,20 +139,9 @@ private:
     O3DS::LegacyOrderingConfig GetLegacyOrderingConfig() const;
     void EnsureValidTransportName();
 
-    // C1: receiver-side concealment (roadmap doc §5/C1). One ConcealmentEngine
-    // per subject, matching the same per-subject-map convention as
-    // SubjectTransformCaches etc. Only active for the A2-gated path (a real
-    // sender-clock-mapped presentation time is required - see
-    // ObserveConcealmentRealFrame's WorldTimeSecondsOverride guard); the
-    // legacy/ungated path has no reliable clock domain to reason about gaps
-    // in, so it's left exactly as it behaves today (freeze-on-loss).
-    O3DS::ConcealmentEngine& GetOrCreateSubjectConcealment(FName SubjectName);
-    void ObserveConcealmentRealFrame(FName SubjectName, double PresentationTimeSeconds, const TArray<FTransform>& BoneTransforms, const TArray<float>& CurveValues, bool bTopologyChanged);
-    void TickConcealment();
     /** Casts Settings (populated by InitializeSettings(), always a UO3DReceiverSourceSettings -
      *  see GetSettingsClass()) to access concealment config; null before InitializeSettings() runs. */
     const class UO3DReceiverSourceSettings* GetConcealmentSettings() const;
-    void ReportConcealmentMetricsDelta();
 
     bool ParseSubjectListRaw(O3DS::SubjectList& List, const FString& Subject, const char* Data, size_t Len, std::vector<O3DS::ParsedSubjectInfo>& OutTouched);
 
@@ -225,11 +219,13 @@ private:
     /** OnTransportUnregistering subscription; valid while ActiveReceiver is set. */
     FDelegateHandle TransportUnregisteringHandle;
 
-    // Per-sender parse and ordering state (WP-S4, RCV-5). Several senders can share
-    // one transport channel; each gets its own SubjectList, ReorderGate, clock
-    // estimator and legacy ordering, found by the subject names its packets carry
-    // (see O3DS::ReceiverStreamTable). Game thread only, like the gate it holds.
-    O3DS::ReceiverStreamTable Streams;
+    // Per-sender parse and ordering state (WP-S4, RCV-5): one stream per sender with its own
+    // SubjectList, reorder gate, clock estimator and legacy ordering (WP-A3 moved it into the
+    // scheduler). Always set (created by the constructor). Game thread only.
+    TUniquePtr<FO3DReceiverStreamScheduler> Scheduler;
+
+    // C1: receiver-side concealment, fed by the gated path only (WP-A3). Always set.
+    TUniquePtr<FO3DReceiverConcealment> Concealment;
 
     // Activity tracking
     mutable FCriticalSection ConnectionLastActiveSection;
@@ -248,21 +244,4 @@ private:
     TUniquePtr<FO3DLiveLinkPublisher> Publisher;
 
     bool bLoggedActiveState = false;
-
-    FString LastGateSubjectLabel;     // diagnostic-only subject label for the gate's emit path
-
-    // C1: cached from the most recent stream clock Observe() (in
-    // EmitGatedFrame). Real frames' PresentationTimeSeconds is already
-    // MappedWorldTimeSeconds - a local-FPlatformTime::Seconds()-domain value,
-    // since EmitGatedFrame converts mapped_presentation_time_us via a
-    // NowEpochUs/NowPlatformS anchor taken at that same instant. So
-    // TickConcealment()'s "now" is just a fresh FPlatformTime::Seconds()
-    // reading, with no offset added - LastClockOffsetEstimateUs itself is
-    // only used as bHasClockOffsetEstimate's payload (i.e. "has the gated
-    // path observed at least one real frame"), not as a time-base correction.
-    int64 LastClockOffsetEstimateUs = 0;
-    bool bHasClockOffsetEstimate = false;
-
-    TMap<FName, TUniquePtr<O3DS::ConcealmentEngine>> SubjectConcealment;
-    TMap<FName, O3DS::ConcealmentMetrics> PrevConcealmentMetricsBySubject; // last-reported snapshot per subject, for delta metrics reporting
 };
