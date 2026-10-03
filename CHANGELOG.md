@@ -732,6 +732,21 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Root-bone pose test with a skeletal mesh built in code (WP-A2 follow-up, ADR 0008 Verification)
+
+- **Test mesh.** The test module builds a skeletal mesh in code
+  (`O3DTestSkeletalMesh.h`: a bone chain with curve metadata on its skeleton,
+  and render data with one LOD and no geometry), because the automation host
+  project carries no mesh asset. Its test anim instance moves the root bone to a
+  position derived from `GFrameCounter`, so every frame's evaluated pose is known.
+  The test module now also depends on RenderCore and RHI (editor-only module; the
+  runtime modules and the Fab package are unchanged).
+- **Test.** New `Open3DBroadcast.Sender.TickOrder.CapturedRootEqualsEvaluatedPose`:
+  in a ticking world, for 30 frames, the root bone the sender captures equals the
+  pose the mesh evaluated in the same frame (ADR 0008's acceptance test for the
+  tick-order change). With the sender ticking before the mesh it fails, capturing
+  the previous frame's pose every frame (checked).
+
 ### Sender audio on the sender clock; capture devices enumerated once per start (WP-A2d, ADR 0008 outline item 5)
 
 Fourth step of the asynchronous sender (WP-A2). Audio still does not go through the pose pipeline.

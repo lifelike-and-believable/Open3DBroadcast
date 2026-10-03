@@ -45,6 +45,9 @@ public class Open3DBroadcastTests : ModuleRules
             "Slate",
             "SlateCore",
             "UnrealEd",
+            // The code-built skeletal mesh (O3DTestSkeletalMesh.cpp) constructs LOD render data.
+            "RenderCore",
+            "RHI",
             "Open3DBroadcastEditor"
         };
         // Loopback has no Testing header: its tests create it through the registry by name.
