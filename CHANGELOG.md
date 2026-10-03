@@ -732,6 +732,24 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Receiver header without core headers; control routing split out (WP-A3 step 4, RCV-29)
+
+- **`O3DReceiverSource.h` includes no `o3ds/` header any more**, and `Open3DStreamCore` is a
+  private dependency of Open3DReceiver: modules that depend on the receiver (the editor module, a
+  game module) no longer get the Open3DStream core's include paths. The header forward-declares
+  the few core types its private member functions name. **Build note for C++ users:** a module
+  that included a core header (`o3ds/...`) only through `O3DReceiverSource.h`, or that relied on
+  the receiver's public dependency for the core's include path, must now depend on
+  `Open3DStreamCore` itself. Nothing in this repository did.
+- The receiver side of the control channel moved into `FO3DReceiverControlRouter` (private):
+  parsing control payloads, holding changes for alignment with the presented mocap pose,
+  publishing to `FO3DControlBus`, and forgetting sources when control is turned off. Behaviour is
+  unchanged.
+- `Public/Testing/O3DReceiverTesting.h` (test-only) includes `o3ds/control.h` for the aligner
+  stats its accessor returns.
+- **Tests.** New `Open3DBroadcast.Receiver.ControlRouter.RoutesAlignsAndDiscards`, through the
+  exported `FO3DReceiverControlRouterProbe`. Existing tests are unchanged.
+
 ### Receiver stream scheduler and concealment split out (WP-A3 step 3, RCV-29)
 
 - `FO3DReceiverSource`'s packet ordering moved into `FO3DReceiverStreamScheduler` (private): the

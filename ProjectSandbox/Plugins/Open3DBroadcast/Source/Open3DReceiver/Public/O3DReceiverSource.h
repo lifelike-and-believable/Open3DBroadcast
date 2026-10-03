@@ -12,23 +12,32 @@
 #include "O3DReceiverSourceSettings.h"
 #include "O3DUnifiedMessage.h"
 
-THIRD_PARTY_INCLUDES_START
-#include "o3ds/model.h"
-#include "o3ds/reorder_gate.h"
-#include "o3ds/clock_offset.h"
-#include "o3ds/receiver_streams.h"
-#include "o3ds/predict/concealment.h"
-#include "o3ds/control.h"
-THIRD_PARTY_INCLUDES_END
-
 #include <atomic>
+#include <string>
 #include <vector>
+
+// The Open3DStream core (Open3DStreamCore) is a private dependency of this module (WP-A3, RCV-29):
+// this header names a few core types in private member functions and includes no core header.
+namespace O3DS
+{
+    class Subject;
+    class SubjectList;
+    struct Frame;
+    struct LegacyOrderingConfig;
+    struct ParsedSubjectInfo;
+    struct ReceiverStream;
+    namespace Control
+    {
+        struct AlignerStats;
+    }
+}
 
 class ILiveLinkClient;
 class FO3DReceiverFrameDecoder;
 class FO3DLiveLinkPublisher;
 class FO3DReceiverConcealment;
 class FO3DReceiverStreamScheduler;
+class FO3DReceiverControlRouter;
 
 /**
  * LiveLink source implementation that consumes serialized Open3DStream frames via registered transports.
@@ -151,31 +160,21 @@ private:
 
     /** Effective "accept control" for this source: per-source setting, runtime override, project setting. */
     bool IsControlEnabled() const;
-    /** Applies UO3DControlSettings to the core receiver (limits, allowlist). */
-    void ApplyControlConfig();
-    /** One control payload from the transport. Dropped (and counted) while control is disabled. */
+    /** One control payload from the transport, handed to the control router. */
     void HandleControlPayload(const TArray<uint8>& Payload, const FString& StreamId, double ReceiveTimeSec);
-    /** Prunes, releases aligned changes, and discards state after control is turned off. */
-    void TickControl(double NowS);
-    /** Holds a change for alignment, or publishes it to FO3DControlBus at once. */
-    void RouteControlChange(O3DS::Control::Change&& Change, double NowS);
-    void PublishControlChange(const O3DS::Control::Change& Change) const;
-    /** Forgets every control source this receiver has seen, without broadcasting. */
-    void DiscardControlState();
     /**
-     * The sender time (sender clock, microseconds) of the pose LiveLink is presenting for the
-     * mocap stream of a control source, or false when that source has no live mocap stream on
-     * this receiver (its changes are then released at once).
+     * The sender time (sender clock, microseconds) of the pose LiveLink presents for the mocap
+     * stream carrying these subjects, or false when there is no live one on this receiver.
      */
-    bool GetPresentedSenderTimeUs(const std::string& SourceId, uint64_t& OutUs);
+    bool GetPresentedSenderTimeUs(const std::vector<std::string>& MocapSubjects, uint64_t& OutUs);
+    // Read by the test accessor.
+    uint64 GetControlPayloadsDroppedDisabled() const;
+    const O3DS::Control::AlignerStats& GetControlAlignerStats() const;
+    size_t GetNumHeldControlChanges() const;
 
-    O3DS::Control::ControlReceiver ControlReceiver;
-    O3DS::Control::ControlAligner ControlAligner;
     TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe> ActiveControlSink;
-    /** Source ids this receiver has published for, so they can be forgotten on the bus. */
-    TSet<FString> ControlSourcesSeen;
-    bool bControlWasEnabled = false;
-    uint64 ControlPayloadsDroppedDisabled = 0;
+    /** Control parsing, alignment and publishing (WP-A3). Always set (created by the constructor). */
+    TUniquePtr<FO3DReceiverControlRouter> ControlRouter;
     /** A mocap stream with no packet for this long counts as not live: control from its sender is not held. */
     static constexpr double AlignmentStreamLivenessSeconds = 0.2;
     /** Publishes only the subjects the packet touched (RCV-5). Returns how many were processed. */
