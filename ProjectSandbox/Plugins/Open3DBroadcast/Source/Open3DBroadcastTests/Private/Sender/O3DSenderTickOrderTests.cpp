@@ -21,6 +21,7 @@
 
 #include "Components/ActorComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "CoreGlobals.h"
 #include "Engine/Engine.h"
 #include "Engine/EngineBaseTypes.h"
 #include "Engine/World.h"
@@ -230,6 +231,10 @@ bool FO3DSenderTickOrderInWorldTest::RunTest(const FString& Parameters)
 	{
 		MeshTickedAt = 0;
 		SampledAt = 0;
+		// The engine loop advances GFrameCounter once per frame, and a tick function that already ran
+		// in the current GFrameCounter frame is not queued again. Ticking the world directly does not
+		// advance it, so without this only the first World->Tick runs the component ticks (#317).
+		++GFrameCounter;
 		World->Tick(LEVELTICK_All, 1.0f / 60.0f);
 
 		TestTrue(FString::Printf(TEXT("Frame %d: the mesh ticked"), FrameIndex), MeshTickedAt > 0);
