@@ -732,6 +732,20 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Sender pipeline benchmark and its first numbers (WP-A2 follow-up, ADR 0008 item 11)
+
+- **Benchmark.** `Open3DBroadcast.Bench.SenderPipeline` (test module; registers nothing unless
+  `O3DB_BENCH=1`, so CI never runs it) and `Build/Scripts/Run-SenderBenchmark.py`, which runs it
+  with Unreal Insights tracing and exports the sender timers per case: 1 and 10 senders of 250
+  bones and 250 curves (the code-built test mesh), Loopback and UDP, `o3d.Sender.AsyncPipeline` 0
+  and 1, 600 frames at 60 Hz.
+- **First numbers** (editor, `-NullRHI`, one workstation; full table in the ADR 0008 addendum
+  "Insights numbers"): game-thread time per sender went from about 0.22-0.27 ms median (pipeline
+  off, which includes serialization and the send) to about 0.025 ms (pipeline on); the worker
+  takes 0.24 ms per frame with one sender and 0.36-0.37 ms with ten (median); capture-to-send p99
+  0.6-2.2 ms; no pipeline drops. The worker misses ADR 0008's 0.2 ms budget; the others are met.
+  The Loopback cases have no receiver, so their sends are refusals; the UDP cases send.
+
 ### Root-bone pose test with a skeletal mesh built in code (WP-A2 follow-up, ADR 0008 Verification)
 
 - **Test mesh.** The test module builds a skeletal mesh in code
