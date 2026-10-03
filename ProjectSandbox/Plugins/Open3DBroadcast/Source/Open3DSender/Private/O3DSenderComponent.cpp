@@ -97,6 +97,10 @@ UO3DSenderComponent::~UO3DSenderComponent() = default;
 UO3DSenderComponent::UO3DSenderComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
+	// SND-12, ADR 0008 item 9 (WP-A2b): capture runs after animation evaluation and physics in the
+	// frame, so it samples the pose the target mesh ends the frame with. BindToTarget also makes the
+	// mesh's tick a prerequisite, which orders the two even if the mesh is moved to this group.
+	PrimaryComponentTick.TickGroup = TG_PostUpdateWork;
 	SetComponentTickEnabled(false);
 	EnsureValidTransportName();
 	TransportController.Reset(new FO3DSenderTransportController());
@@ -954,19 +958,57 @@ void UO3DSenderComponent::BindToTarget()
 {
 	if (!TargetMesh.IsValid())
 	{
+		SetTickPrerequisiteMesh(nullptr);
 		UE_LOG(LogO3DSenderComponent, Warning, TEXT("No TargetMesh set for sender component on %s"), *GetNameSafe(GetOwner()));
 		return;
 	}
 
 	EnsureSkeletonCache(TargetMesh.Get());
 
-	// Note: In UE 5.4+, RegisterOnBoneTransformsFinalizedDelegate was removed.
-	// Pose updates are now handled in TickComponent instead.
+	// Pose capture runs in TickComponent (TG_PostUpdateWork), after the mesh's own tick
+	// (ADR 0008 item 9). No bone-transforms-finalized delegate is used.
+	SetTickPrerequisiteMesh(TargetMesh.Get());
 }
 
 void UO3DSenderComponent::UnbindFromTarget()
 {
-	// Note: Delegate unbinding no longer needed in UE 5.4+
+	SetTickPrerequisiteMesh(nullptr);
+}
+
+void UO3DSenderComponent::SetTickPrerequisiteMesh(USkeletalMeshComponent* Mesh)
+{
+	// Get(true): a mesh that is being destroyed but has not been collected yet is still found, so its
+	// entry is removed the normal way.
+	USkeletalMeshComponent* const PreviousMesh = TickPrerequisiteMesh.Get(true);
+	if (Mesh != nullptr && PreviousMesh == Mesh)
+	{
+		return;
+	}
+
+	if (PreviousMesh != nullptr)
+	{
+		RemoveTickPrerequisiteComponent(PreviousMesh);
+	}
+	else if (TickPrerequisiteFunction != nullptr)
+	{
+		// The mesh was collected while bound. The tick system already skips a prerequisite whose
+		// object is gone, but the entry would stay in the list; remove it so rebinding never
+		// accumulates entries.
+		const FTickFunction* const StaleFunction = TickPrerequisiteFunction;
+		PrimaryComponentTick.GetPrerequisites().RemoveAll([StaleFunction](const FTickPrerequisite& Prerequisite)
+		{
+			return Prerequisite.PrerequisiteTickFunction == StaleFunction && Prerequisite.PrerequisiteObject.Get(true) == nullptr;
+		});
+	}
+	TickPrerequisiteMesh.Reset();
+	TickPrerequisiteFunction = nullptr;
+
+	if (Mesh != nullptr)
+	{
+		AddTickPrerequisiteComponent(Mesh);
+		TickPrerequisiteMesh = Mesh;
+		TickPrerequisiteFunction = &Mesh->PrimaryComponentTick;
+	}
 }
 
 FString UO3DSenderComponent::BuildSubjectName(const USkeletalMeshComponent* SkelComp) const
@@ -1232,6 +1274,15 @@ bool UO3DSenderComponent::CanCaptureThisFrame(double NowSeconds, USkeletalMeshCo
 	}
 
 	USkeletalMeshComponent* SkelComp = TargetMesh.Get();
+
+	// WP-A2b: TargetMesh is BlueprintReadWrite, so it can change, or its mesh be destroyed, without
+	// a restart. Keep the tick prerequisite on the mesh that is actually sampled; takes effect from
+	// the next frame.
+	if (TickPrerequisiteMesh.Get(true) != SkelComp || (SkelComp == nullptr && TickPrerequisiteFunction != nullptr))
+	{
+		SetTickPrerequisiteMesh(SkelComp);
+	}
+
 	if (!SkelComp)
 	{
 		return false;
@@ -1472,7 +1523,7 @@ void UO3DSenderComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	// In UE 5.4+, capture bone transforms in tick instead of via deprecated callback
+	// Samples the pose: this tick runs in TG_PostUpdateWork, after the target mesh's tick (WP-A2b).
 	HandleBoneTransformsFinalized();
 
 	if (TransportController.IsValid())

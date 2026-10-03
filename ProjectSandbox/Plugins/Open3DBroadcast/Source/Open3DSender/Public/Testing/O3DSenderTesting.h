@@ -57,6 +57,15 @@ struct FO3DSenderComponentTestAccess
 	static void SetAudioCaptureComponent(UO3DSenderComponent& Component, UO3DSenderAudioCaptureComponent* Capture) { Component.AudioCaptureComponent = Capture; }
 	static FString GetCachedSubjectName(const UO3DSenderComponent& Component) { return Component.CachedSubjectName; }
 
+	// Tick order (WP-A2b).
+	static void UnbindFromTarget(UO3DSenderComponent& Component) { Component.UnbindFromTarget(); }
+	/** The per-tick capture check, which also moves the tick prerequisite to the current TargetMesh. */
+	static bool CanCaptureThisFrame(UO3DSenderComponent& Component, double NowSeconds)
+	{
+		USkeletalMeshComponent* Mesh = nullptr;
+		return Component.CanCaptureThisFrame(NowSeconds, Mesh);
+	}
+
 	// Typed config and transport switching (WP-A1 PR 5a).
 	static FO3DTransportConfig BuildTransportConfig(const UO3DSenderComponent& Component) { return Component.BuildTransportConfig(); }
 #if WITH_EDITOR
