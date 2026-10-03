@@ -4,7 +4,8 @@
 // follow-up, ADR 0008 addendum "Insights numbers"). The wire must not change: after every frame of
 // a sequence that hits each reuse branch, the serializer's bytes must equal those of a Subject
 // built from scratch for that frame, exactly as the serializer did before (new SubjectList,
-// transforms from the descriptor, values, curves, CalcMatrices, Serialize).
+// transforms from the descriptor, values, curves, CalcMatrices, Serialize), with the same
+// tx_seq/tx_wallclock_us/frame_epoch stamp (ADR 0005 (iv), SND-15: one stream per subject).
 
 #include "O3DTestHarness.h"
 
@@ -17,6 +18,7 @@
 
 THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
+#include "o3ds/receiver_streams.h"
 THIRD_PARTY_INCLUDES_END
 
 #include <string>
@@ -58,7 +60,7 @@ namespace O3DSenderLegacyReuseTests
 	}
 
 	/** What SerializeFrameLegacy produced before the reuse change, rebuilt here step by step. */
-	TArray<uint8> BuildFromScratch(const FString& Subject, const FO3DSPoseFrame& Frame)
+	TArray<uint8> BuildFromScratch(const FString& Subject, const FO3DSPoseFrame& Frame, const O3DS::PacketMeta& Stamp)
 	{
 		O3DS::SubjectList List;
 		O3DS::Subject* SubjectObject = List.addSubject(std::string(TCHAR_TO_UTF8(*Subject)));
@@ -82,7 +84,7 @@ namespace O3DSenderLegacyReuseTests
 		}
 		SubjectObject->CalcMatrices();
 		std::vector<char> Buffer;
-		List.Serialize(Buffer, Frame.CaptureTimeSec);
+		List.Serialize(Buffer, Frame.CaptureTimeSec, Stamp.tx_seq, Stamp.tx_wallclock_us, Stamp.frame_epoch);
 		TArray<uint8> Bytes;
 		Bytes.Append(reinterpret_cast<const uint8*>(Buffer.data()), static_cast<int32>(Buffer.size()));
 		return Bytes;
@@ -133,6 +135,8 @@ bool FO3DSenderLegacyReuseTest::RunTest(const FString& Parameters)
 	};
 
 	FO3DSenderSerializer Serializer;
+	TMap<FString, uint64> LastSeq;
+	TMap<FString, uint32> Epoch;
 	for (int32 Index = 0; Index < Steps.Num(); ++Index)
 	{
 		const FStep& Step = Steps[Index];
@@ -144,7 +148,18 @@ bool FO3DSenderLegacyReuseTest::RunTest(const FString& Parameters)
 		TestTrue(FString::Printf(TEXT("%s: serialized"), Step.What), bSerialized);
 		TestTrue(FString::Printf(TEXT("%s: a legacy frame is a full sync"), Step.What), bFullSync);
 
-		const TArray<uint8> Expected = BuildFromScratch(Step.Subject, Frame);
+		// Each subject is its own stream: its tx_seq counts 1, 2, 3... and its epoch holds.
+		O3DS::PacketMeta Stamp;
+		TestTrue(FString::Printf(TEXT("%s: frame peeks"), Step.What), O3DS::PeekPacketMeta(reinterpret_cast<const char*>(Bytes.GetData()), (size_t)Bytes.Num(), Stamp));
+		uint64& Seq = LastSeq.FindOrAdd(Step.Subject, 0);
+		TestEqual(FString::Printf(TEXT("%s: tx_seq follows the subject's last"), Step.What), Stamp.tx_seq, Seq + 1);
+		Seq = Stamp.tx_seq;
+		TestTrue(FString::Printf(TEXT("%s: tx_wallclock_us is set"), Step.What), Stamp.tx_wallclock_us != 0);
+		const uint32 SubjectEpoch = Epoch.FindOrAdd(Step.Subject, Stamp.frame_epoch);
+		TestTrue(FString::Printf(TEXT("%s: frame_epoch is set"), Step.What), Stamp.frame_epoch != 0);
+		TestEqual(FString::Printf(TEXT("%s: frame_epoch holds within the subject's session"), Step.What), Stamp.frame_epoch, SubjectEpoch);
+
+		const TArray<uint8> Expected = BuildFromScratch(Step.Subject, Frame, Stamp);
 		TestEqual(FString::Printf(TEXT("%s: same size as a Subject built for the frame"), Step.What), Bytes.Num(), Expected.Num());
 		TestTrue(FString::Printf(TEXT("%s: same bytes as a Subject built for the frame"), Step.What), Bytes == Expected);
 	}

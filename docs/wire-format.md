@@ -109,6 +109,11 @@ holds the verbatim wire bytes of one frame and its receive time.
 Receivers map sender time to their own with the clock-offset estimator; frames are ordered by
 `tx_seq` only, never by a clock.
 
+Senders stamp `tx_seq`, `tx_wallclock_us` and `frame_epoch` through `O3DS::StreamWriter`
+(`src/o3ds/stream_writer.h`), one per stream. A receiver keys streams by the subject names a
+frame carries, so the UE sender, which writes one subject per frame, keeps one writer per
+subject. Epochs are strictly increasing within a process, across writers (ADR 0005 (iv)).
+
 ## 7. Name hashes
 
 Topology and curve-name hashes (`O3DS::Wire::HashNames`, `HashParents`) are 64-bit FNV-1a over

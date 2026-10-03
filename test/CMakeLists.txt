@@ -30,6 +30,7 @@ set(O3DS_CORE_TEST_SOURCES
 	crc32_tests.cpp
 	parse_reuse_tests.cpp
 	wire_format_tests.cpp
+	stream_writer_tests.cpp
 )
 
 add_executable(o3ds_core_tests

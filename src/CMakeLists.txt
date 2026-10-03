@@ -185,6 +185,7 @@ set(CORE_SOURCES
 	o3ds/quant/channel_quant.cpp
 	o3ds/crc32.cpp
 	o3ds/wire_format.cpp
+	o3ds/stream_writer.cpp
 	o3ds/model.cpp
 	o3ds/control.cpp
 	o3ds/context.cpp

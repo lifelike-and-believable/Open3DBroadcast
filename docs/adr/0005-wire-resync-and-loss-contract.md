@@ -199,3 +199,26 @@ Receiver, per subject within a stream (`frame_epoch`):
 - Files: `src/o3ds.fbs`; `src/o3ds/model.h`, `model.cpp`; `src/o3ds/sequencing.h`; `src/o3ds/reorder_gate.h`; `src/o3ds/predict/residual_codec.h/.cpp`; `Plugin/Source/Open3DSender/Private/O3DSenderSerializer.cpp`, `O3DSenderComponent.cpp`, `Public/O3DSenderComponent.h`, `Public/O3DSenderInterface.h`; `Plugin/Source/Open3DReceiver/Private/O3DReceiverSource.cpp`; `Plugin/Source/Open3DTransportWebRTC/Private/Sender/WebRTCSender.cpp`; `Plugin/Source/Open3DTransportMoQ/ThirdParty/moq-ffi/include/moq_ffi.h`; `Plugin/Source/Open3DTransportNNG/Private/Sender/NngSender.cpp`; `Plugin/Source/Open3DTransportSockets/Private/Sender/SocketsTcpSender.cpp`.
 - Plan: `docs/roadmap/resilient-streaming-and-motion-prediction.md` §2.1, §3 (A1.b, A1.c, A2.a), §5 (C1, C2), §6 (D1).
 - External: none fetched for this ADR.
+
+## Implementation notes (WP-A4, 2026-10-03)
+
+Item (iv), stamping, is implemented in PR-PENDING: `O3DS::StreamWriter` in core and the UE
+serializer writing every frame through it. `ref_seq` and the per-subject `last_full_seq` come
+with the needs-keyframe decoding in the next PR. Where the implementation departs from the
+decision above, and why:
+
+- **One writer per subject, not one per serializer.** The receiver that shipped in the meantime
+  (`ReceiverStreamTable`, `src/o3ds/receiver_streams.h`) keys streams by the subject names a
+  frame carries, and the UE serializer writes one subject per frame, so one counter shared by
+  several subjects would look like loss on every subject's stream. A sender component resolves
+  one subject, so in production this is the same wire as the decision's one writer per
+  serializer; it differs only for a serializer driven with several subjects (tests do), where
+  only per-subject counters are correct. Per-subject `last_full_seq` becomes a member of each
+  writer.
+- **The epoch floor is process-wide, and the epoch is taken on a writer's first frame, not at
+  `StartCapture`.** A subject's writer lives in the serializer's subject cache, which Stop clears
+  (with `o3d.Sender.AsyncPipeline` on or off), so the counter restarts at 1 after a Stop/Start.
+  `StartSession` takes `max(NewSessionEpoch(), last epoch issued in the process + 1)` across all
+  writers, so the restarted counter is always in a strictly larger epoch and the gate sees a
+  restart, which is what "the counter is not reset" was for. Within one writer the counter is
+  never reset.
