@@ -32,13 +32,23 @@ SOFTWARE.
 #include <map>
 #include <utility>
 
-// UDP fragment wire header (legacy, pre-ADR-0009 layout): four uint32 fields,
-// little-endian, in this order: message id, fragment index, total reassembled
-// size, fragment payload size. Byte-for-byte identical to what the previous
-// host-endian writer produced on little-endian hosts, so deployed senders and
-// receivers stay compatible. The magic/versioned v2 header (ADR 0009, TRB-17)
-// is a separate follow-up.
-static const size_t kUdpFragmentHeaderSize = 16;
+// UDP fragment wire header v2 (ADR 0009 item 5, TRB-17), 24 bytes,
+// little-endian:
+//   0-3   magic 'O','3','D','F' (a byte string)
+//   4     version, 2
+//   5     flags, 0
+//   6-7   reserved, 0
+//   8-11  message id
+//   12-15 fragment index
+//   16-19 total reassembled size
+//   20-23 fragment payload size
+// The magic makes a datagram's kind certain from its first 4 bytes
+// (udpClassifyDatagram). The legacy 16-byte header (the four u32 without a
+// magic) is not accepted: its first word, the message id, could look like a
+// frame word.
+static const size_t kUdpFragmentHeaderSize = 24;
+static const unsigned char kUdpFragmentMagic[4] = { 'O', '3', 'D', 'F' };
+static const unsigned char kUdpFragmentVersion = 2;
 
 // Largest UDP payload over IPv4 (65535 - 8 byte UDP header - 20 byte IP header).
 static const size_t kUdpMaxDatagramSize = 65507;
@@ -51,12 +61,25 @@ struct UdpFragmentHeader
 	uint32_t fragSize;
 };
 
-// Writes the 16-byte little-endian header to out (no alignment requirement).
+// Writes the 24-byte v2 header to out (no alignment requirement).
 O3DS_API void writeUdpFragmentHeader(const UdpFragmentHeader& header, char* out);
 
-// Reads the 16-byte little-endian header from data (no alignment
-// requirement). Returns false if sz < kUdpFragmentHeaderSize.
+// Reads the 24-byte v2 header from data (no alignment requirement). Returns
+// false if sz < kUdpFragmentHeaderSize, or the magic, version, flags or
+// reserved bytes are not those of a v2 header.
 O3DS_API bool readUdpFragmentHeader(const char* data, size_t sz, UdpFragmentHeader& out);
+
+// What a UDP datagram is, from its first 4 bytes (ADR 0009 item 5).
+enum class UdpDatagramKind
+{
+	Fragment, // 'O3DF': a fragment, reassembled before anything else sees it
+	Envelope, // 'O3DA' (envelope v1) or 'O3DU' (envelope v2): audio, control
+	Frame,    // a frame word: byte 0 non-zero, bytes 1-3 zero (any version, so a
+	          // newer one still reaches the parser and is reported as such)
+	Unknown,  // anything else, including a legacy magic-less fragment whose id
+	          // does not look like a frame word; drop it and count it
+};
+O3DS_API UdpDatagramKind udpClassifyDatagram(const char* data, size_t sz);
 
 // Serial-number comparison (RFC 1982 style) for wrapping 32-bit message ids:
 // true if a is "before" b, treating the id space as a circle.

@@ -22,7 +22,7 @@ class FInternetAddr;
 
 /**
  * UDP receiver. Poll() (game thread, bounded per call; TRB-18) reads datagrams, reassembles
- * fragments with the core's udp_fragment (unchanged wire format) and hands each complete message
+ * fragments with the core's udp_fragment (v2 header, ADR 0009 item 5) and hands each complete message
  * to the shared FO3DUnifiedReceiveDemux (ADR 0007 item 7, WP-A1 PR 4c), which calls the consumer,
  * the audio sink and the control sink. Receive-side threading stays on Poll (ADR 0007
  * "Not decided here"). The bind address must be an IP literal or a wildcard, so binding resolves

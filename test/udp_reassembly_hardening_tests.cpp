@@ -45,8 +45,12 @@ O3DS_TEST(UdpHeader_EncodeDecode_RoundTripIsLittleEndian)
 	char buf[kUdpFragmentHeaderSize + 1];
 	// Write at an odd offset to exercise unaligned access.
 	writeUdpFragmentHeader(in, buf + 1);
+	// v2 prefix (ADR 0009 item 5): magic 'O3DF', version 2, flags and reserved 0.
+	const unsigned char prefix[8] = { 'O', '3', 'D', 'F', 2, 0, 0, 0 };
+	for (int i = 0; i < 8; i++)
+		O3DS_CHECK_EQ((int)(unsigned char)buf[1 + i], (int)prefix[i]);
 	for (int i = 0; i < 16; i++)
-		O3DS_CHECK_EQ((int)(unsigned char)buf[1 + i], i + 1);
+		O3DS_CHECK_EQ((int)(unsigned char)buf[9 + i], i + 1);
 
 	UdpFragmentHeader out = {};
 	O3DS_CHECK(readUdpFragmentHeader(buf + 1, kUdpFragmentHeaderSize, out));
@@ -56,6 +60,58 @@ O3DS_TEST(UdpHeader_EncodeDecode_RoundTripIsLittleEndian)
 	O3DS_CHECK_EQ(out.fragSize, in.fragSize);
 
 	O3DS_CHECK(!readUdpFragmentHeader(buf, kUdpFragmentHeaderSize - 1, out));
+}
+
+O3DS_TEST(UdpHeader_RejectsAnythingButV2)
+{
+	UdpFragmentHeader in = { 7u, 0u, 100u, 100u };
+	char buf[kUdpFragmentHeaderSize];
+	UdpFragmentHeader out = {};
+
+	writeUdpFragmentHeader(in, buf);
+	O3DS_CHECK(readUdpFragmentHeader(buf, sizeof(buf), out));
+
+	// Wrong magic, version, flags or reserved byte: not a v2 fragment.
+	for (int offset : { 0, 3, 4, 5, 6, 7 })
+	{
+		writeUdpFragmentHeader(in, buf);
+		buf[offset] = (char)(buf[offset] ^ 0x40);
+		O3DS_CHECK(!readUdpFragmentHeader(buf, sizeof(buf), out));
+	}
+
+	// A legacy 16-byte header (four u32, no magic) is rejected (ADR 0009 Q3).
+	const unsigned char legacy[16] = { 7, 0, 0, 0, 0, 0, 0, 0, 100, 0, 0, 0, 100, 0, 0, 0 };
+	char legacyPadded[kUdpFragmentHeaderSize] = {};
+	memcpy(legacyPadded, legacy, sizeof(legacy));
+	O3DS_CHECK(!readUdpFragmentHeader(legacyPadded, sizeof(legacyPadded), out));
+}
+
+O3DS_TEST(UdpClassify_FirstFourBytesDecide)
+{
+	UdpFragmentHeader header = { 1u, 0u, 10u, 10u };
+	char frag[kUdpFragmentHeaderSize];
+	writeUdpFragmentHeader(header, frag);
+	O3DS_CHECK(udpClassifyDatagram(frag, sizeof(frag)) == UdpDatagramKind::Fragment);
+
+	const char envelopeV1[8] = { 'O', '3', 'D', 'A', 1, 1, 0, 0 };
+	const char envelopeV2[8] = { 'O', '3', 'D', 'U', 2, 1, 0, 0 };
+	O3DS_CHECK(udpClassifyDatagram(envelopeV1, sizeof(envelopeV1)) == UdpDatagramKind::Envelope);
+	O3DS_CHECK(udpClassifyDatagram(envelopeV2, sizeof(envelopeV2)) == UdpDatagramKind::Envelope);
+
+	const char frameV1[8] = { 1, 0, 0, 0, 0, 0, 0, 0 };
+	const char frameV2[8] = { 2, 0, 0, 0, 0, 0, 0, 0 };
+	const char frameV3[8] = { 3, 0, 0, 0, 0, 0, 0, 0 };
+	O3DS_CHECK(udpClassifyDatagram(frameV1, sizeof(frameV1)) == UdpDatagramKind::Frame);
+	O3DS_CHECK(udpClassifyDatagram(frameV2, sizeof(frameV2)) == UdpDatagramKind::Frame);
+	// A newer protocol still reaches the parser, which reports it.
+	O3DS_CHECK(udpClassifyDatagram(frameV3, sizeof(frameV3)) == UdpDatagramKind::Frame);
+
+	const char zeroWord[8] = { 0, 0, 0, 0, 1, 0, 0, 0 };
+	const char legacyFragment[8] = { 0x2A, 0x01, 0, 0, 0, 0, 0, 0 }; // message id 298
+	O3DS_CHECK(udpClassifyDatagram(zeroWord, sizeof(zeroWord)) == UdpDatagramKind::Unknown);
+	O3DS_CHECK(udpClassifyDatagram(legacyFragment, sizeof(legacyFragment)) == UdpDatagramKind::Unknown);
+	O3DS_CHECK(udpClassifyDatagram(frag, 3) == UdpDatagramKind::Unknown);
+	O3DS_CHECK(udpClassifyDatagram(nullptr, 8) == UdpDatagramKind::Unknown);
 }
 
 O3DS_TEST(UdpFragmenter_OutOfRangeSeqAndZeroFragSize_AreSafe)

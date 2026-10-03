@@ -23,7 +23,7 @@ class FInternetAddr;
  *
  * SendSerialized, SendControl and the audio sinks (FO3DQueuedSenderAudioSink) only enqueue on one
  * FO3DSendQueue; an FO3DTransportWorker owns the socket and sends every item: frames and audio as
- * one datagram, or fragmented with the core's udp_fragment above udp.maxdatagram (unchanged wire
+ * one datagram, or fragmented with the core's udp_fragment above udp.maxdatagram (v2 header, ADR 0009; unchanged wire
  * format), and control as exactly one datagram. No caller's thread ever calls SendTo (TRB-20).
  *
  * Queue policy: UDP is unreliable and live mocap is worth more fresh than complete (ADR 0008

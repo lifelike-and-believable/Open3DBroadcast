@@ -3,7 +3,7 @@
 // the same pipeline the UE UDP receiver runs on each datagram.
 //
 // Input: a sequence of datagram records, at most kMaxDatagrams:
-//   [16-byte fragment header, as on the wire: u32 id, seq, bufSz, fragSize]
+//   [24-byte v2 fragment header, as on the wire: magic, version, u32 id, seq, bufSz, fragSize]
 //   [u8 lenMode]
 //   [u8 ctl]
 //   [payload bytes, only when lenMode >= 0x80]
