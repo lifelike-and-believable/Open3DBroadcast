@@ -2,6 +2,10 @@
 
 #include "O3DHelpers.h"
 
+THIRD_PARTY_INCLUDES_START
+#include "o3ds/wire_format.h"
+THIRD_PARTY_INCLUDES_END
+
 namespace O3DHelpers
 {
     FString SanitizeSubjectName(const FString& Raw)
@@ -142,24 +146,22 @@ namespace O3DHelpers
         return H;
     }
 
+    // The core's length-prefixed UTF-8 definition (ADR 0009 item 8, SHR-33): the old hash fed each
+    // name's TCHAR bytes with no length or count, so different lists could collide.
     uint64 HashNames(const TArray<FName>& Names)
     {
-        uint64 H = 1469598103934665603ull;
+        uint64 H = O3DS::Wire::HashNamesBegin(static_cast<uint32>(Names.Num()));
         for (const FName& N : Names)
         {
             const FString S = N.ToString();
-            H = Fnv1a64(*S, S.Len() * sizeof(TCHAR), H);
+            const FTCHARToUTF8 Utf8(*S);
+            H = O3DS::Wire::HashNamesAdd(H, Utf8.Get(), static_cast<uint32>(Utf8.Length()));
         }
         return H;
     }
 
     uint64 HashNamesAndParents(const TArray<FName>& Names, const TArray<int32>& Parents)
     {
-        uint64 H = HashNames(Names);
-        if (Parents.Num() > 0)
-        {
-            H = Fnv1a64(Parents.GetData(), Parents.Num() * sizeof(int32), H);
-        }
-        return H;
+        return O3DS::Wire::HashParents(HashNames(Names), Parents.GetData(), static_cast<uint32>(Parents.Num()));
     }
 }

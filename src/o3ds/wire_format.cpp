@@ -153,5 +153,57 @@ namespace Wire
 			return UINT64_MAX;
 		return static_cast<uint64_t>(us);
 	}
+
+	namespace
+	{
+		uint64_t FnvBytes(uint64_t hash, const void* data, size_t len)
+		{
+			const uint8_t* p = static_cast<const uint8_t*>(data);
+			for (size_t i = 0; i < len; ++i)
+			{
+				hash ^= p[i];
+				hash *= 1099511628211ull;
+			}
+			return hash;
+		}
+
+		uint64_t FnvLE32(uint64_t hash, uint32_t v)
+		{
+			uint8_t b[4];
+			StoreLE32(b, v);
+			return FnvBytes(hash, b, 4);
+		}
+	}
+
+	uint64_t HashNamesBegin(uint32_t count)
+	{
+		return FnvLE32(kFnv64OffsetBasis, count);
+	}
+
+	uint64_t HashNamesAdd(uint64_t hash, const char* utf8, uint32_t len)
+	{
+		hash = FnvLE32(hash, len);
+		return len > 0 && utf8 != nullptr ? FnvBytes(hash, utf8, len) : hash;
+	}
+
+	uint64_t HashNames(const std::vector<std::string>& names)
+	{
+		uint64_t hash = HashNamesBegin(static_cast<uint32_t>(names.size()));
+		for (const std::string& name : names)
+		{
+			hash = HashNamesAdd(hash, name.data(), static_cast<uint32_t>(name.size()));
+		}
+		return hash;
+	}
+
+	uint64_t HashParents(uint64_t hash, const int32_t* parents, uint32_t count)
+	{
+		hash = FnvLE32(hash, count);
+		for (uint32_t i = 0; i < count; ++i)
+		{
+			hash = FnvLE32(hash, static_cast<uint32_t>(parents[i]));
+		}
+		return hash;
+	}
 }
 }
