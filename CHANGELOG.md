@@ -732,6 +732,20 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Sender pose sampler split out (WP-A3 step 6, SND-22)
+
+- `UO3DSenderComponent`'s pose sampling moved into `FO3DSenderPoseSampler` (private): the skeleton
+  descriptor cache, the subject name (override or World/Actor/Component), the frame index, and
+  filling a sampled frame's shell and bones. What reaches outside (the `OnDescriptorReady`
+  delegate, the audio stream label, forgetting a renamed subject in the pipeline) goes through two
+  callbacks the component sets, in the same order as before. Output is unchanged; no `UPROPERTY`
+  or `UFUNCTION` moved. The curve capture stays with the component.
+- The test accessor's descriptor, subject name and bone-transform functions are now defined in the
+  module (`FO3DSenderComponentTestAccess`, test-only), since they reach the private class.
+- **Tests.** New `Open3DBroadcast.Sender.PoseSampler.CachesDescriptorPerMesh` and
+  `.NamesSubjectsAndFillsFrames`, through the exported `FO3DSenderPoseSamplerProbe`, on a mesh
+  built in code. Existing tests are unchanged.
+
 ### Receiver transforms keep double precision; dropped poses are counted (WP-A3 step 5, RCV-13)
 
 - **Behaviour change.** The receiver's frame decoder now passes the core's translation, rotation

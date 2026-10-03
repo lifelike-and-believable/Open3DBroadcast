@@ -6,6 +6,7 @@
 
 #include "O3DSenderCurveProcessor.h"
 #include "O3DSenderPipeline.h"
+#include "O3DSenderPoseSampler.h"
 
 FO3DSenderCurveProcessorProbe::FO3DSenderCurveProcessorProbe()
 	: Filter(MakeUnique<FO3DSenderCurveFilter>())
@@ -173,6 +174,91 @@ int32 FO3DSenderPipelineProbe::GetNumActiveDrainTasks()
 int32 FO3DSenderPipelineProbe::GetMaxDepth()
 {
 	return FO3DSenderPipeline::MaxDepth;
+}
+
+void FO3DSenderComponentTestAccess::BuildLocalBoneTransforms(const TArray<FTransform>& ComponentSpaceTransforms,
+	const TArray<int32>& CachedParentIndices,
+	int32 NumBones,
+	TFunctionRef<int32(int32)> ResolveFallbackParent,
+	TArray<FTransform>& OutLocalTransforms,
+	TArray<int32>* OutResolvedParents)
+{
+	FO3DSenderPoseSampler::BuildLocalBoneTransforms(ComponentSpaceTransforms, CachedParentIndices, NumBones, ResolveFallbackParent, OutLocalTransforms, OutResolvedParents);
+}
+
+void FO3DSenderComponentTestAccess::SetDescriptor(UO3DSenderComponent& Component, const FO3DSSkeletonDescriptor& Descriptor)
+{
+	Component.PoseSampler->SetDescriptor(Descriptor);
+}
+
+const FO3DSSkeletonDescriptor& FO3DSenderComponentTestAccess::GetDescriptorCache(const UO3DSenderComponent& Component)
+{
+	return Component.PoseSampler->GetDescriptor();
+}
+
+bool FO3DSenderComponentTestAccess::HasDescriptorSnapshot(const UO3DSenderComponent& Component)
+{
+	return Component.PoseSampler->HasDescriptorSnapshot();
+}
+
+FString FO3DSenderComponentTestAccess::GetCachedSubjectName(const UO3DSenderComponent& Component)
+{
+	return Component.PoseSampler->GetSubjectName();
+}
+
+FO3DSenderPoseSamplerProbe::FO3DSenderPoseSamplerProbe()
+	: Sampler(MakeUnique<FO3DSenderPoseSampler>())
+{
+	Sampler->SetCallbacks(
+		[this](const FString& Subject, const FO3DSSkeletonDescriptor& /*Descriptor*/) { DescriptorChanges.Add(Subject); },
+		[this](const FString& PreviousName, const FString& NewName) { NameChanges.Add(PreviousName + TEXT(" -> ") + NewName); });
+}
+
+FO3DSenderPoseSamplerProbe::~FO3DSenderPoseSamplerProbe() = default;
+
+bool FO3DSenderPoseSamplerProbe::EnsureSkeleton(const USkeletalMeshComponent* Mesh, const FString& SubjectOverride)
+{
+	return Sampler->EnsureSkeleton(Mesh, SubjectOverride, false);
+}
+
+void FO3DSenderPoseSamplerProbe::ResetSkeleton()
+{
+	Sampler->ResetSkeleton();
+}
+
+FString FO3DSenderPoseSamplerProbe::ResolveSubjectName(const USkeletalMeshComponent* Mesh, const FString& SubjectOverride)
+{
+	return Sampler->ResolveSubjectName(Mesh, SubjectOverride);
+}
+
+FString FO3DSenderPoseSamplerProbe::InvalidateSubjectName(const FString& SubjectOverride)
+{
+	return Sampler->InvalidateSubjectName(SubjectOverride);
+}
+
+void FO3DSenderPoseSamplerProbe::ResetFrameCounter()
+{
+	Sampler->ResetFrameCounter();
+}
+
+void FO3DSenderPoseSamplerProbe::FillShell(const USkeletalMeshComponent* Mesh, const FString& SubjectOverride, double CaptureTimeSec, FO3DSPoseFrame& Frame)
+{
+	Sampler->FillShell(Mesh, SubjectOverride, CaptureTimeSec, FO3DSenderEncodingSettings(), Frame);
+}
+
+void FO3DSenderPoseSamplerProbe::SampleBones(const USkeletalMeshComponent* Mesh, FO3DSPoseFrame& Frame)
+{
+	Sampler->SampleBones(Mesh, Frame, false);
+}
+
+const FO3DSSkeletonDescriptor& FO3DSenderPoseSamplerProbe::GetDescriptor() const
+{
+	return Sampler->GetDescriptor();
+}
+
+bool FO3DSenderPoseSamplerProbe::HasDescriptorSnapshot() const
+{
+	return Sampler->HasDescriptorSnapshot();
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -27,6 +27,7 @@ class USoundSubmix;
 class FO3DSenderTransportController;
 class FO3DSenderCurveProcessor;
 class FO3DSenderPipeline;
+class FO3DSenderPoseSampler;
 
 /** Smart-pointer deleter that keeps FO3DSenderTransportController implementation details private. */
 struct FO3DSenderTransportControllerDeleter
@@ -38,6 +39,12 @@ struct FO3DSenderTransportControllerDeleter
 struct FO3DSenderCurveProcessorDeleter
 {
 	void operator()(FO3DSenderCurveProcessor* Ptr) const;
+};
+
+/** Smart-pointer deleter that keeps FO3DSenderPoseSampler private (WP-A3). */
+struct FO3DSenderPoseSamplerDeleter
+{
+	void operator()(FO3DSenderPoseSampler* Ptr) const;
 };
 
 /** Predictor for residual/delta coding (roadmap doc §5/C2). Maps to O3DS::ResidualPredictorId
@@ -503,36 +510,25 @@ private:
 	void HandleBoneTransformsFinalized();
 	void NotifyOnScreen(const FString& Message, const FColor& Color = FColor::Green, float DisplayTime = 2.0f) const;
 
+	/** Rebuilds the skeleton descriptor when the mesh changed (the pose sampler), and then the curve cache. */
 	void EnsureSkeletonCache(USkeletalMeshComponent* SkelComp);
-	void RefreshSkeletonCache(USkeletalMeshComponent* SkelComp);
-	FString BuildSubjectName(const USkeletalMeshComponent* SkelComp) const;
-	FString SanitizeSubjectName(const FString& Raw) const;
 	/**
 	 * Brings EncodingSnapshot up to date with the properties and returns it (SND-14, WP-A2a). Run
 	 * for every sampled frame, because Blueprint can write the properties without any notification;
 	 * a curve pattern list is copied into a new shared array only when its contents changed.
 	 */
 	const FO3DSenderEncodingSettings& UpdateEncodingSnapshot();
-	void ResetSkeletonCache();
 
-	uint64 ComputeDescriptorHash(const TArray<FName>& InNames, const TArray<int32>& InParents) const;
-	TWeakObjectPtr<USkeleton> CachedSkeleton;
-	TWeakObjectPtr<USkeletalMesh> CachedSkeletalMesh;
-	FName CachedSkeletalMeshName = NAME_None;
-
-	FO3DSSkeletonDescriptor DescriptorCache;
-	/** Immutable copy of DescriptorCache attached to every sampled frame (ADR 0005 (i)). */
-	TSharedPtr<const FO3DSSkeletonDescriptor> DescriptorSnapshot;
-	bool bDescriptorDirty = false;
+	/**
+	 * Skeleton descriptor, subject name, frame index and bone sampling (WP-A3 step 6). Always set
+	 * (created by the constructor); its callbacks reach this component's delegate, audio label and
+	 * pipeline.
+	 */
+	TUniquePtr<FO3DSenderPoseSampler, FO3DSenderPoseSamplerDeleter> PoseSampler;
 	FString LastStartCaptureError;
-
-	FString CachedSubjectName;
-	FString LastSubjectSourceValue;
-	TWeakObjectPtr<USkeletalMesh> CachedSubjectMeshForName;
 
 	bool bIsCapturing = false;
 	double LastCaptureTime = 0.0;
-	uint64 FrameCounter = 0;
 
 	/**
 	 * The pose pipeline (ADR 0008 item 3, WP-A2c): frame pool, queue, curve filter, serializer and
@@ -638,7 +634,8 @@ private:
 	FString ResolveSubjectName(const USkeletalMeshComponent* SkelComp);
 	/** Fills the frame's subject, index, descriptor, sampling time and settings snapshot. */
 	void FillFrameShell(const USkeletalMeshComponent* SkelComp, double CaptureTimeSec, FO3DSPoseFrame& Frame);
-	void PopulatePoseFrameBones(const USkeletalMeshComponent* SkelComp, FO3DSPoseFrame& Frame, bool bDebugPose);
+	/** The pose sampler's subject-name change: audio stream label (SND-16), then rename handling (SND-1). */
+	void HandleSubjectNameChanged(const FString& PreviousName, const FString& NewName);
 	/** Samples raw curve values (no filtering) into Frame.CurveList / Frame.RawCurveValues. */
 	void PopulatePoseFrameCurves(USkeletalMeshComponent* SkelComp, FO3DSPoseFrame& Frame, bool bDebugCurves);
 	/** A pooled frame from the pipeline; null without a pipeline or when every frame is out. */
@@ -665,12 +662,6 @@ private:
 	void PurgeSerializerCacheForSubject(const FString& Subject);
 
 	static bool ConsumeCaptureBudget(double NowSeconds, double& InOutLastCaptureTime, float CaptureRateHz);
-	static void BuildLocalBoneTransforms(const TArray<FTransform>& ComponentSpaceTransforms,
-		const TArray<int32>& CachedParentIndices,
-		int32 NumBones,
-		TFunctionRef<int32(int32)> ResolveFallbackParent,
-		TArray<FTransform>& OutLocalTransforms,
-		TArray<int32>* OutResolvedParents);
 
 	// Test-only white-box access, defined in Public/Testing/O3DSenderTesting.h (WP-T2) and in the
 	// Open3DBroadcastTests secrets tests (WP-S9). Unconditional: a friend declaration must not
