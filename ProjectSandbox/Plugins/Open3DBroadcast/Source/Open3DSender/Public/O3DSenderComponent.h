@@ -479,6 +479,12 @@ protected:
 private:
 	void BindToTarget();
 	void UnbindFromTarget();
+	/**
+	 * Makes Mesh (null: none) the one skeletal mesh this component's tick waits for (ADR 0008 item 9,
+	 * SND-12, WP-A2b). The prerequisite on the previously bound mesh is removed first; binding the
+	 * mesh that is already bound changes nothing. Game thread only.
+	 */
+	void SetTickPrerequisiteMesh(USkeletalMeshComponent* Mesh);
 	void HandleBoneTransformsFinalized();
 	void NotifyOnScreen(const FString& Message, const FColor& Color = FColor::Green, float DisplayTime = 2.0f) const;
 
@@ -523,6 +529,14 @@ private:
 
 	FDelegateHandle BoneTransformsFinalizedHandle;
 	FDelegateHandle SerializerRelayHandle;
+
+	/** The skeletal mesh this component's tick waits for (SetTickPrerequisiteMesh); unset when none. */
+	TWeakObjectPtr<USkeletalMeshComponent> TickPrerequisiteMesh;
+	/**
+	 * That mesh's tick function. Only compared, never dereferenced: it finds the entry to remove
+	 * when the mesh was garbage-collected before it could be unbound.
+	 */
+	const FTickFunction* TickPrerequisiteFunction = nullptr;
 
 	TUniquePtr<FO3DSenderTransportController, FO3DSenderTransportControllerDeleter> TransportController;
 

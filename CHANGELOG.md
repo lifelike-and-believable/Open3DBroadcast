@@ -684,6 +684,30 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Sender capture ticks after the target mesh (WP-A2b, ADR 0008 outline item 3)
+
+Second step of the asynchronous sender (WP-A2), still synchronous on the game thread. The interface
+version (`O3D_TRANSPORT_API_VERSION`) stays 5: the transport interface did not change.
+
+- **Tick group (SND-12).** `UO3DSenderComponent` now ticks in `TG_PostUpdateWork` (it used to tick
+  in the default group, `TG_PrePhysics`, the same group as a skeletal mesh by default, in no fixed
+  order), so it samples the target mesh after animation evaluation and physics for that frame.
+  Before, a captured pose could be the previous frame's. The transport's `Tick` and the control publisher run in the same tick,
+  so they also move later in the frame: control values and events set earlier in a frame now go
+  out in that frame.
+- **Tick prerequisite.** Starting capture makes the target skeletal mesh's tick a prerequisite of
+  the sender's tick (`AddTickPrerequisiteComponent`); stopping removes it. Exactly one mesh is a
+  prerequisite at a time. A `TargetMesh` written while capturing (Blueprint) or destroyed while
+  capturing moves or removes the prerequisite on the next tick. Prerequisites added by other code
+  are not touched.
+- **Tests.** New `Open3DBroadcast.Sender.TickOrder.TickGroupIsPostUpdateWork`,
+  `.PrerequisiteFollowsTargetMesh` (bind, unbind, unbind when not bound, rebind, a mesh written
+  while capturing, a destroyed mesh) and `.SamplesAfterTargetMeshEachFrame` (a ticking game world
+  in which the mesh and the sender share a tick group; every frame the sender samples after the
+  mesh's tick). ADR 0008's root-bone acceptance test needs a skeletal mesh asset, which the plugin
+  does not have; see the ADR 0008 addendum "implementation notes (WP-A2b)". Existing tests are
+  unchanged.
+
 ### Sender settings snapshot, frame pool and sampling clock (WP-A2a, ADR 0008 outline item 2)
 
 First step of the asynchronous sender (WP-A2). Capture is still synchronous: sampling, curve
