@@ -245,7 +245,8 @@ void FO3DSenderCurveFilter::Apply(const FO3DSenderCurveConfig& Config, const TSh
     for (int32 Index = 0; Index < Names.Num(); ++Index)
     {
         const FName& Name = Names[Index];
-        const FString NameString = Name.ToString();
+        // The name as text is needed only for verbose logs and uncached pattern matching; building
+        // it for every curve on every frame was a large part of this filter's cost.
         float Value = RawValues.IsValidIndex(Index) ? RawValues[Index] : 0.0f;
 
         if (Config.bDropNaNAndInfinity && !FMath::IsFinite(Value))
@@ -255,7 +256,7 @@ void FO3DSenderCurveFilter::Apply(const FO3DSenderCurveConfig& Config, const TSh
             // full sync (SND-3).
             if (Config.bLogFilteredCurves)
             {
-                UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Curve %s is NaN/Inf; sending 0"), *NameString);
+                UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Curve %s is NaN/Inf; sending 0"), *Name.ToString());
             }
             Value = 0.0f;
         }
@@ -276,14 +277,14 @@ void FO3DSenderCurveFilter::Apply(const FO3DSenderCurveConfig& Config, const TSh
             }
             else if (ShouldFilterByPatterns(Config.IncludeCurvePatterns) || ShouldFilterByPatterns(Config.ExcludeCurvePatterns))
             {
-                bPatternAllowed = EvaluatePatternForName(NameString, Config);
+                bPatternAllowed = EvaluatePatternForName(Name.ToString(), Config);
             }
 
             if (!bPatternAllowed)
             {
                 if (Config.bLogFilteredCurves)
                 {
-                    UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Filtered curve %s (pattern)"), *NameString);
+                    UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Filtered curve %s (pattern)"), *Name.ToString());
                 }
                 continue;
             }
@@ -297,7 +298,7 @@ void FO3DSenderCurveFilter::Apply(const FO3DSenderCurveConfig& Config, const TSh
                 {
                     if (Config.bLogFilteredCurves)
                     {
-                        UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Filtered curve %s (epsilon %.6f, delta %.6f) V=%.6f Last=%.6f"), *NameString, Config.CurveEpsilon, Config.CurveDeltaThreshold, Value, Last);
+                        UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Filtered curve %s (epsilon %.6f, delta %.6f) V=%.6f Last=%.6f"), *Name.ToString(), Config.CurveEpsilon, Config.CurveDeltaThreshold, Value, Last);
                     }
                     continue;
                 }

@@ -269,6 +269,46 @@ bool FO3DSenderSerializer::SerializePoseFrameTo(const FString& Subject, const FO
 	return OutBytes.Num() > 0;
 }
 
+/** True when Cached and Descriptor describe the same bones: the same snapshot, or equal names (case-sensitive) and parents. */
+bool FO3DSenderSerializer::IsSameDescriptor(const FO3DSSkeletonDescriptor* Cached, const FO3DSSkeletonDescriptor& Descriptor)
+{
+	if (Cached == &Descriptor)
+	{
+		return true;
+	}
+	if (Cached == nullptr
+		|| Cached->BoneNames.Num() != Descriptor.BoneNames.Num()
+		|| Cached->ParentIndices != Descriptor.ParentIndices)
+	{
+		return false;
+	}
+	for (int32 Index = 0; Index < Descriptor.BoneNames.Num(); ++Index)
+	{
+		if (!Cached->BoneNames[Index].IsEqual(Descriptor.BoneNames[Index], ENameCase::CaseSensitive))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+/** True when both lists hold the same names in the same order, compared case-sensitively (the wire carries the text). */
+bool FO3DSenderSerializer::AreSameCurveNames(const TArray<FName>& Cached, const TArray<FName>& Names)
+{
+	if (Cached.Num() != Names.Num())
+	{
+		return false;
+	}
+	for (int32 Index = 0; Index < Names.Num(); ++Index)
+	{
+		if (!Cached[Index].IsEqual(Names[Index], ENameCase::CaseSensitive))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
 /** Populate a FlatBuffer Subject's transforms (names, parents, component order) from a descriptor. */
 void FO3DSenderSerializer::BuildSubjectFromDescriptor(const FString& SubjectName, const FO3DSSkeletonDescriptor& Descriptor, O3DS::Subject& OutSubject)
 {
@@ -362,33 +402,55 @@ void FO3DSenderSerializer::SerializeFrameLegacy(const FString& Subject, const FO
 		Cache.SyncTracker.Reset();
 	}
 
-	TSharedPtr<SubjectList> SubjectListPtr;
+	// The Subject is kept in the cache and only its values change per frame (WP-A2 follow-up).
+	// It used to be built from scratch every frame (a SubjectList, a Transform per bone and every
+	// bone and curve name converted to UTF-8 again), which was the largest part of a legacy
+	// frame's cost. A Subject reused this way serializes to exactly the bytes of a new one: the
+	// core's Serialize writes the names, parents, component order, values, curves and context,
+	// all of which are either rebuilt on a change or rewritten below.
 	O3DS::Subject* SubjectObject = nullptr;
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE_STR("O3D.Sender.Serializer.Build");
-		SubjectListPtr = MakeShared<SubjectList>();
-		SubjectObject = SubjectListPtr->addSubject(std::string(TCHAR_TO_UTF8(*Subject)));
+		if (!Cache.LegacySubjects.IsValid() || !IsSameDescriptor(Cache.LegacyDescriptor.Get(), Descriptor))
+		{
+			Cache.LegacySubjects = MakeShared<SubjectList>();
+			O3DS::Subject* Built = Cache.LegacySubjects->addSubject(std::string(TCHAR_TO_UTF8(*Subject)));
+			BuildSubjectFromDescriptor(Subject, Descriptor, *Built);
+			Cache.LegacyDescriptor = Frame.Descriptor;
+			Cache.LegacyCurveNames.Reset();
+			Cache.bLegacyCurveNamesSet = false;
+		}
+		SubjectObject = Cache.LegacySubjects->mItems[0];
 
-		BuildSubjectFromDescriptor(Subject, Descriptor, *SubjectObject);
 		FillFrameValues(Frame, *SubjectObject);
-		if (Frame.CurveNames.Num() > 0)
+		if (!Cache.bLegacyCurveNamesSet || !AreSameCurveNames(Cache.LegacyCurveNames, Frame.CurveNames))
 		{
 			FillCurves(Frame, *SubjectObject);
+			Cache.LegacyCurveNames = Frame.CurveNames;
+			Cache.bLegacyCurveNamesSet = true;
+		}
+		else
+		{
+			// Same names in the same order: only the values change. The frame was checked to
+			// carry one value per name (SerializePoseFrameTo).
+			for (int32 Index = 0; Index < Frame.CurveValues.Num(); ++Index)
+			{
+				SubjectObject->mCurveValues[Index] = Frame.CurveValues[Index];
+			}
 		}
 	}
 
-	{
-		TRACE_CPUPROFILER_EVENT_SCOPE_STR("O3D.Sender.Serializer.CalcMatrices");
-		SubjectObject->CalcMatrices();
-	}
+	// No CalcMatrices: the core's Serialize writes each transform's translation, rotation, scale
+	// and matrix list, never the local or world matrices CalcMatrices computes, and this path
+	// ignored its result. Bone values were checked for NaN/Inf above (SerializePoseFrameTo).
 
 	// ADR 0008 item 7: the wire time is the sampling time, not the time of
 	// serialization (WP-A2a).
-	std::vector<char> Buffer;
+	std::vector<char>& Buffer = Cache.LegacyBuffer;
 	const double Timestamp = Frame.CaptureTimeSec;
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE_STR("O3D.Sender.Serializer.Core");
-		SubjectListPtr->Serialize(Buffer, Timestamp);
+		Cache.LegacySubjects->Serialize(Buffer, Timestamp);
 	}
 
 	// Transports receive frames only through the bytes below (the sender pipeline hands OutBytes

@@ -175,9 +175,11 @@ bool FO3DSenderTickOrderInWorldTest::RunTest(const FString& Parameters)
 	using namespace O3DSenderTickOrderTests;
 
 	// Expected by design: the probe mesh has no skeletal mesh asset, so frames carry no skeleton
-	// descriptor and the serializer drops them with a warning, rate-limited to one per 5 s.
-	// Occurrences 0: any number of times.
-	AddExpectedError(TEXT("no skeleton descriptor on the frame"), EAutomationExpectedMessageFlags::Contains, 0);
+	// descriptor and the serializer drops them with a warning, rate-limited to one per 5 s. The drop
+	// happens on the pipeline's worker, and StopCapture discards frames still queued, so a run may
+	// end before the worker has dropped (and warned about) any frame. Occurrences -1: any number of
+	// times, none included (0 would demand at least one, AutomationTest.h).
+	AddExpectedError(TEXT("no skeleton descriptor on the frame"), EAutomationExpectedMessageFlags::Contains, -1);
 
 	FTickOrderTestWorld TestWorld;
 	UWorld* World = TestWorld.Get();

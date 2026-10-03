@@ -121,6 +121,20 @@ private:
 		uint64 DroppedSinceLastWarning = 0;
 		double LastDropWarningTime = -1.0e9;
 		FString LastError;
+
+		/**
+		 * Legacy encoding (WP-A2 follow-up): the core Subject a full sync is written from, kept
+		 * across frames so a frame only copies its values. Rebuilt when the frame's skeleton
+		 * descriptor differs (the same snapshot, or equal names, case-sensitive, and parents);
+		 * its curve names are rewritten when the frame's curve names differ. The output bytes are
+		 * exactly those of a Subject built for the frame.
+		 */
+		TSharedPtr<O3DS::SubjectList> LegacySubjects;
+		TSharedPtr<const FO3DSSkeletonDescriptor> LegacyDescriptor;
+		TArray<FName> LegacyCurveNames;
+		bool bLegacyCurveNamesSet = false;
+		/** Reused output of the core serializer (its capacity survives across frames). */
+		std::vector<char> LegacyBuffer;
 	};
 
 	/**
@@ -153,6 +167,8 @@ private:
 	static void BuildSubjectFromDescriptor(const FString& SubjectName, const FO3DSSkeletonDescriptor& Descriptor, O3DS::Subject& OutSubject);
 	static void FillFrameValues(const FO3DSPoseFrame& Frame, O3DS::Subject& InOutSubject);
 	static void FillCurves(const FO3DSPoseFrame& Frame, O3DS::Subject& InOutSubject);
+	static bool IsSameDescriptor(const FO3DSSkeletonDescriptor* Cached, const FO3DSSkeletonDescriptor& Descriptor);
+	static bool AreSameCurveNames(const TArray<FName>& Cached, const TArray<FName>& Names);
 	static uint64 HashCurveNames(const TArray<FName>& Names);
 	void DumpStatsInstance() const;
 

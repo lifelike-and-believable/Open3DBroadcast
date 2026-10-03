@@ -732,6 +732,22 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Sender worker cost within ADR 0008's budget (WP-A2 follow-up)
+
+- **Legacy encoding keeps its core Subject.** The default encoding no longer builds a new
+  `SubjectList`, 250 transforms and every bone and curve name as UTF-8 for every frame: the Subject
+  is kept per subject and rebuilt only when the skeleton changes (compared by bone names,
+  case-sensitive, and parents), curve names are rewritten only when they change, and the core's
+  output buffer is reused. The unused `CalcMatrices` call is gone. The bytes on the wire are
+  unchanged (tested against a Subject built from scratch for every frame).
+- **Curve filter** builds a curve name's text only for a verbose log or an uncached pattern match,
+  not for every curve every frame.
+- **Result** (250 bones, 250 curves, median per frame on the worker): 0.25 to 0.12 ms with one UDP
+  sender, 0.37 to 0.16 ms with ten, within the 0.2 ms budget; the synchronous path's game-thread
+  time fell from 0.26 to 0.14 ms. New trace scopes (`O3D.Sender.Pipeline.Filter`,
+  `O3D.Sender.Serializer.*`) split a frame's worker time; `Run-SenderBenchmark.py` reports them.
+- **Tests.** New `Open3DBroadcast.Sender.Wire.LegacyReuseKeepsBytes`.
+
 ### Sender pipeline benchmark and its first numbers (WP-A2 follow-up, ADR 0008 item 11)
 
 - **Benchmark.** `Open3DBroadcast.Bench.SenderPipeline` (test module; registers nothing unless
