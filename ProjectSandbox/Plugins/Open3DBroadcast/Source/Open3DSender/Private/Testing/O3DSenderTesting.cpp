@@ -8,6 +8,7 @@
 #include "O3DSenderPipeline.h"
 #include "O3DSenderPoseSampler.h"
 #include "O3DSenderAudioBinding.h"
+#include "O3DSenderTransportSettings.h"
 
 FO3DSenderCurveProcessorProbe::FO3DSenderCurveProcessorProbe()
 	: Filter(MakeUnique<FO3DSenderCurveFilter>())
@@ -316,6 +317,48 @@ void FO3DSenderAudioBindingProbe::Detach(UO3DSenderAudioCaptureComponent* Captur
 double FO3DSenderAudioBindingProbe::GetLastSinkWarningTime() const
 {
 	return Binding->GetLastSinkWarningTime();
+}
+
+bool FO3DSenderTransportSettingsProbe::IsSecretKey(FName Transport, const FString& Key)
+{
+	return FO3DSenderTransportSettings::IsSecretKey(Transport, Key);
+}
+
+FString FO3DSenderTransportSettingsProbe::GetOption(const FOptions& Options, FName Transport, const FString& Key)
+{
+	return FO3DSenderTransportSettings::GetOption(Options, Transport, Key);
+}
+
+int32 FO3DSenderTransportSettingsProbe::SetOption(FOptions& Options, FName Transport, const FString& Key, const FString& Value)
+{
+	int32 NumRecorded = 0;
+	FO3DSenderTransportSettings::SetOption(Options, Transport, Key, Value, [&NumRecorded]() { ++NumRecorded; });
+	return NumRecorded;
+}
+
+FString FO3DSenderTransportSettingsProbe::GetCredentialProfile(const FOptions& Options, FName Transport)
+{
+	return FO3DSenderTransportSettings::GetCredentialProfile(Options, Transport);
+}
+
+TArray<FString> FO3DSenderTransportSettingsProbe::MigrateLegacySecrets(FOptions& Options, FName Transport)
+{
+	return FO3DSenderTransportSettings::MigrateLegacySecrets(Options, Transport);
+}
+
+void FO3DSenderTransportSettingsProbe::SwitchOptions(FOptions& Active, TMap<FName, FO3DTransportOptionSet>& Inactive, FName From, FName To)
+{
+	FO3DSenderTransportSettings::SwitchOptions(Active, Inactive, From, To);
+}
+
+void FO3DSenderTransportSettingsProbe::BuildConfigOptions(const FOptions& Options, FName Transport, FOptions& OutOptions, FOptions& OutSecrets)
+{
+	FO3DSenderTransportSettings::BuildConfigOptions(Options, Transport, OutOptions, OutSecrets);
+}
+
+bool FO3DSenderTransportSettingsProbe::IsRestartProperty(FName Property)
+{
+	return FO3DSenderTransportSettings::IsRestartProperty(Property);
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

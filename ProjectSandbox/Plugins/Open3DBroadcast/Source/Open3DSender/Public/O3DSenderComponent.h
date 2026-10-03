@@ -683,6 +683,9 @@ private:
 	 */
 	int32 MigrateLegacySecretOptions();
 
+	/** Records a change of this component for undo (Modify), except on the class default object. */
+	void RecordChangeForUndo();
+
 	/** Transport name the options and secrets belong to (TransportName, or the default when None). */
 	FName GetSelectedTransportName() const;
 

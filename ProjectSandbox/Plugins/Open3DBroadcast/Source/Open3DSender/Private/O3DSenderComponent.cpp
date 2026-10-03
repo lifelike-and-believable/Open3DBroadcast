@@ -9,6 +9,7 @@
 #include "O3DSenderPipeline.h"
 #include "O3DSenderPoseSampler.h"
 #include "O3DSenderAudioBinding.h"
+#include "O3DSenderTransportSettings.h"
 #include "O3DSenderTransportController.h"
 #include "Transport/O3DTransportRegistry.h"
 #include "Engine/Engine.h"
@@ -430,20 +431,10 @@ FO3DTransportConfig UO3DSenderComponent::BuildTransportConfig() const
 	Config.SubjectName = SubjectName;
 
 	// Declared secret keys are never copied into the options; they are resolved from the secret
-	// store (session, environment, per-user settings) into Config.Secrets (ADR 0004).
-	TArray<FString> SecretKeys;
-	TMap<FString, FString> SecretEnvVars;
-	FO3DTransportRegistry::Get().GetSecretDeclaration(SelectedTransport, EO3DTransportRole::Sender, SecretKeys, SecretEnvVars);
+	// store into Config.Secrets (ADR 0004).
 	TMap<FString, FString> Options;
-	for (const TPair<FString, FString>& Option : TransportOptions)
-	{
-		if (!SecretKeys.Contains(Option.Key))
-		{
-			Options.Add(Option.Key, Option.Value);
-		}
-	}
+	FO3DSenderTransportSettings::BuildConfigOptions(TransportOptions, SelectedTransport, Options, Config.Secrets);
 	Config.AdvancedParams = Options;
-	FO3DSecretStore::Get().ResolveAll(Config.Transport.ToString(), GetCredentialProfile(), SecretKeys, SecretEnvVars, Config.Secrets);
 
 	Config.Audio = FO3DSenderAudioBinding::BuildTransportConfig(GetAudioSettings(), CaptureConfig);
 
@@ -585,51 +576,20 @@ void UO3DSenderComponent::SyncAudioConfigSource()
 
 FString UO3DSenderComponent::GetTransportOption(const FString& Key) const
 {
-	if (Key.IsEmpty())
-	{
-		return FString();
-	}
-
 	// A secret is never returned (ADR 0004 item 4).
-	if (IsTransportSecretKey(Key))
-	{
-		return FString();
-	}
-
-	if (const FString* Value = TransportOptions.Find(Key))
-	{
-		return *Value;
-	}
-
-	return FString();
+	return FO3DSenderTransportSettings::GetOption(TransportOptions, GetSelectedTransportName(), Key);
 }
 
 void UO3DSenderComponent::SetTransportOption(const FString& Key, const FString& Value)
 {
-	if (Key.IsEmpty())
-	{
-		return;
-	}
+	FO3DSenderTransportSettings::SetOption(TransportOptions, GetSelectedTransportName(), Key, Value, [this]() { RecordChangeForUndo(); });
+}
 
-	// A declared secret goes to the session store, with no Modify(): it must not dirty or enter the asset.
-	if (IsTransportSecretKey(Key))
-	{
-		SetTransportSecret(Key, Value, EO3DSecretPersistence::Session);
-		return;
-	}
-
+void UO3DSenderComponent::RecordChangeForUndo()
+{
 	if (!HasAnyFlags(RF_ClassDefaultObject))
 	{
 		Modify();
-	}
-
-	if (Value.IsEmpty())
-	{
-		TransportOptions.Remove(Key);
-	}
-	else
-	{
-		TransportOptions.Add(Key, Value);
 	}
 }
 
@@ -645,92 +605,42 @@ FName UO3DSenderComponent::GetSelectedTransportName() const
 
 bool UO3DSenderComponent::IsTransportSecretKey(const FString& Key) const
 {
-	TArray<FString> SecretKeys;
-	TMap<FString, FString> SecretEnvVars;
-	FO3DTransportRegistry::Get().GetSecretDeclaration(GetSelectedTransportName(), EO3DTransportRole::Sender, SecretKeys, SecretEnvVars);
-	return SecretKeys.Contains(Key);
+	return FO3DSenderTransportSettings::IsSecretKey(GetSelectedTransportName(), Key);
 }
 
 FString UO3DSenderComponent::GetCredentialProfile() const
 {
-	const FString* Profile = TransportOptions.Find(FO3DSecretStore::MakeCredentialProfileOptionKey(GetSelectedTransportName().ToString()));
-	return FO3DSecretStore::NormalizeProfile(Profile ? *Profile : FString());
+	return FO3DSenderTransportSettings::GetCredentialProfile(TransportOptions, GetSelectedTransportName());
 }
 
 void UO3DSenderComponent::SetTransportSecret(const FString& Key, const FString& Value, EO3DSecretPersistence Persistence)
 {
-	if (Key.IsEmpty())
-	{
-		return;
-	}
-
-	FO3DSecretStore::Get().Set(GetSelectedTransportName().ToString(), GetCredentialProfile(), Key, Value, Persistence);
-
-	// A copy left in the map by older data must not be saved again.
-	if (TransportOptions.Contains(Key))
-	{
-		if (!HasAnyFlags(RF_ClassDefaultObject))
-		{
-			Modify();
-		}
-		TransportOptions.Remove(Key);
-	}
+	FO3DSenderTransportSettings::SetSecret(TransportOptions, GetSelectedTransportName(), Key, Value, Persistence, [this]() { RecordChangeForUndo(); });
 }
 
 bool UO3DSenderComponent::SetTransportSecretPersistence(const FString& Key, EO3DSecretPersistence Persistence)
 {
-	return FO3DSecretStore::Get().SetPersistence(GetSelectedTransportName().ToString(), GetCredentialProfile(), Key, Persistence);
+	return FO3DSenderTransportSettings::SetSecretPersistence(TransportOptions, GetSelectedTransportName(), Key, Persistence);
 }
 
 void UO3DSenderComponent::ClearTransportSecret(const FString& Key)
 {
-	FO3DSecretStore::Get().Clear(GetSelectedTransportName().ToString(), GetCredentialProfile(), Key);
+	FO3DSenderTransportSettings::ClearSecret(TransportOptions, GetSelectedTransportName(), Key);
 }
 
 FO3DSecretStatus UO3DSenderComponent::GetTransportSecretStatus(const FString& Key) const
 {
-	TArray<FString> SecretKeys;
-	TMap<FString, FString> SecretEnvVars;
-	FO3DTransportRegistry::Get().GetSecretDeclaration(GetSelectedTransportName(), EO3DTransportRole::Sender, SecretKeys, SecretEnvVars);
-	const FString* EnvVar = SecretEnvVars.Find(Key);
-	return FO3DSecretStore::Get().Describe(GetSelectedTransportName().ToString(), GetCredentialProfile(), Key, EnvVar ? *EnvVar : FString());
+	return FO3DSenderTransportSettings::GetSecretStatus(TransportOptions, GetSelectedTransportName(), Key);
 }
 
 int32 UO3DSenderComponent::MigrateLegacySecretOptions()
 {
-	if (HasAnyFlags(RF_ClassDefaultObject) || TransportOptions.Num() == 0)
+	if (HasAnyFlags(RF_ClassDefaultObject))
 	{
 		return 0;
 	}
 
-	TArray<FString> SecretKeys;
-	TMap<FString, FString> SecretEnvVars;
-	if (!FO3DTransportRegistry::Get().GetSecretDeclaration(GetSelectedTransportName(), EO3DTransportRole::Sender, SecretKeys, SecretEnvVars))
-	{
-		return 0;
-	}
-
-	const FString Transport = GetSelectedTransportName().ToString();
-	const FString Profile = GetCredentialProfile();
-	FO3DSecretStore& Store = FO3DSecretStore::Get();
-
-	TArray<FString> Moved;
-	for (const FString& Key : SecretKeys)
-	{
-		FString LegacyValue;
-		if (!TransportOptions.RemoveAndCopyValue(Key, LegacyValue))
-		{
-			continue;
-		}
-
-		Moved.Add(Key);
-		// A value the user already set in this session wins over one found in old data.
-		if (!LegacyValue.IsEmpty() && !Store.HasSessionValue(Transport, Profile, Key))
-		{
-			Store.Set(Transport, Profile, Key, LegacyValue, EO3DSecretPersistence::Session);
-		}
-	}
-
+	const TArray<FString> Moved = FO3DSenderTransportSettings::MigrateLegacySecrets(TransportOptions, GetSelectedTransportName());
 	if (Moved.Num() > 0)
 	{
 		// Names the asset and the keys, never a value. Not saved automatically (ADR 0004 item 4).
@@ -740,16 +650,12 @@ int32 UO3DSenderComponent::MigrateLegacySecretOptions()
 			TEXT("Resave '%s' so the credential is removed from the asset on disk; it is not saved automatically."),
 			*FString::Join(Moved, TEXT(", ")), *GetPathName(), Package ? *Package->GetName() : TEXT("<unknown>"));
 	}
-
 	return Moved.Num();
 }
 
 void UO3DSenderComponent::ClearTransportOptions()
 {
-	if (!HasAnyFlags(RF_ClassDefaultObject))
-	{
-		Modify();
-	}
+	RecordChangeForUndo();
 	TransportOptions.Empty();
 }
 
@@ -759,15 +665,8 @@ void UO3DSenderComponent::SwitchTransportOptions(FName From, FName To)
 	{
 		return;
 	}
-	if (!HasAnyFlags(RF_ClassDefaultObject))
-	{
-		Modify();
-	}
-
-	TArray<FString> FromSecretKeys;
-	TMap<FString, FString> FromSecretEnvVars;
-	const bool bFromRegistered = FO3DTransportRegistry::Get().GetSecretDeclaration(From, EO3DTransportRole::Sender, FromSecretKeys, FromSecretEnvVars);
-	O3DTransportOptions::SwitchTransportOptions(TransportOptions, InactiveTransportOptions, From, To, FromSecretKeys, bFromRegistered);
+	RecordChangeForUndo();
+	FO3DSenderTransportSettings::SwitchOptions(TransportOptions, InactiveTransportOptions, From, To);
 }
 
 void UO3DSenderComponent::SetTransportName(FName InName)
@@ -778,10 +677,7 @@ void UO3DSenderComponent::SetTransportName(FName InName)
 		return;
 	}
 
-	if (!HasAnyFlags(RF_ClassDefaultObject))
-	{
-		Modify();
-	}
+	RecordChangeForUndo();
 
 	// SND-35: the outgoing transport's options are kept, and the incoming one's come back.
 	const FName Previous = GetSelectedTransportName();
@@ -1276,18 +1172,6 @@ void UO3DSenderComponent::PostEditChangeProperty(FPropertyChangedEvent& Property
 
 	const FName Prop = PropertyChangedEvent.MemberProperty ? PropertyChangedEvent.MemberProperty->GetFName() : NAME_None;
 
-	static const TSet<FName> RestartProps = {
-		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, CaptureRateHz),
-		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, SubjectName),
-		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TargetMesh),
-		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TransportName),
-		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bAutoCreateTransport),
-		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bEnableAudio),
-		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioCaptureMode),
-		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioInputDevice),
-		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, AudioCaptureConfig)
-	};
-
 	const bool bInGameWorld = (GetWorld() && GetWorld()->IsGameWorld());
 	const bool bWasCapturing = bIsCapturing;
 
@@ -1320,7 +1204,7 @@ void UO3DSenderComponent::PostEditChangeProperty(FPropertyChangedEvent& Property
 		InvalidateSubjectNameCache();
 	}
 
-	if (RestartProps.Contains(Prop))
+	if (FO3DSenderTransportSettings::IsRestartProperty(Prop))
 	{
 		StopCapture();
 		if (bInGameWorld && (bAutoStartCapture || bWasCapturing))
