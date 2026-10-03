@@ -187,6 +187,8 @@ public:
 
 	/** Decodes the first subject of an O3DS buffer (parsed into a SubjectList kept by the probe). */
 	bool Decode(TConstArrayView<uint8> Buffer, bool bFullDescriptor);
+	/** Decodes a subject built in memory, so values the wire's floats cannot carry can be tested. */
+	bool DecodeSubject(const O3DS::Subject& Subject, bool bFullDescriptor);
 	void ForgetSubject(FName SubjectName);
 	void Reset();
 	uint64 GetSkeletonBuilds() const;

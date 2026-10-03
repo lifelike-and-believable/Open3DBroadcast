@@ -732,6 +732,24 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Receiver transforms keep double precision; dropped poses are counted (WP-A3 step 5, RCV-13)
+
+- **Behaviour change.** The receiver's frame decoder now passes the core's translation, rotation
+  and scale to LiveLink as doubles, instead of casting each component to float first (UE's
+  `FVector` and `FQuat` are double). The wire carries floats, so a full-sync value comes through
+  exactly as before; what changes is a quantized update, which the core rebuilds in double (a
+  translation as anchor plus delta, a rotation dequantized and normalized) and which the float
+  cast used to round (a translation by up to about 0.004 units at 100,000 units from the origin). A value that is finite in double but too large for float is
+  no longer turned into infinity and rejected; the wire cannot carry one.
+- **New metric `InvalidPosesDropped`** (`FO3DPerformanceMetrics::FReceiverMetrics`,
+  `RecordInvalidPoseDropped()`, in the metrics dump and CSV as `ReceiverInvalidPosesDropped`): a
+  subject whose pose is skipped because a transform is not finite, has a zero rotation or is
+  missing. Such a pose used to be dropped without a trace. A subject without transforms is still
+  skipped and is not counted.
+- **Tests.** New `Open3DBroadcast.Receiver.FrameDecoder.KeepsDoublePrecision` (fails with the old
+  float casts) and `.CountsDroppedPoses`; `FO3DReceiverFrameDecoderProbe` gained `DecodeSubject` to
+  decode a subject built in memory. Existing tests are unchanged.
+
 ### Receiver header without core headers; control routing split out (WP-A3 step 4, RCV-29)
 
 - **`O3DReceiverSource.h` includes no `o3ds/` header any more**, and `Open3DStreamCore` is a
