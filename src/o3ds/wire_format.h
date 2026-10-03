@@ -67,7 +67,6 @@ namespace Wire
 		VersionTooNew,        //!< min_reader_version above O3DS_PROTOCOL_VERSION
 		CrcMismatch,          //!< payload CRC-32 differs from the header
 		VerifyFailed,         //!< not a well-formed SubjectList (or no identifier on a version-2 frame)
-		UndeclaredNewContent, //!< min_reader_version 1 but residual or quantized content (pre-D8 develop writer)
 	};
 
 	//! A short English description, for logs.
@@ -93,7 +92,7 @@ namespace Wire
 
 	// ---- Unified envelope (audio, control; ADR 0009 item 4) -----------------
 	//
-	// v2, written by every D8 writer, 24 bytes, little-endian:
+	// Envelope v2, 24 bytes, little-endian:
 	//   0-3   magic 'O','3','D','U' (a byte string)
 	//   4     envelope version, 2
 	//   5     kind (EnvelopeKind)
@@ -102,16 +101,13 @@ namespace Wire
 	//   8-15  timestamp_us, sender clock (ADR 0009 item 7)
 	//   16-19 payload size
 	//   20-23 seq, per stream and kind, wraps
-	// v1, read during the compatibility window, 20 bytes, BIG-endian: magic
-	// 'O','3','D','A', version 1, kind, codec, flags, u64 timestamp_us, u32
-	// payload size, no seq.
+	// Envelope v1 ('O3DA', big-endian) is not accepted: no deployed reader or
+	// writer uses it (the maintainer confirmed there are no old receivers).
 	//
 	// Kind and codec are passed through as read: each consumer checks the
 	// pair it handles, and a reader ignores a kind it does not know (ADR 0011).
 
-	constexpr size_t kEnvelopeV1HeaderSize = 20;
 	constexpr size_t kEnvelopeV2HeaderSize = 24;
-	constexpr uint8_t kEnvelopeVersion1 = 1;
 	constexpr uint8_t kEnvelopeVersion2 = 2;
 
 	enum class EnvelopeKind : uint8_t { Mocap = 0, Audio = 1, Control = 2 };
@@ -119,33 +115,27 @@ namespace Wire
 
 	struct EnvelopeHeader
 	{
-		uint8_t version = 0;        //!< 1 or 2
+		uint8_t version = 0;        //!< 2
 		uint8_t kind = 0;
 		uint8_t codec = 0;
 		uint8_t flags = 0;
 		uint64_t timestamp_us = 0;
 		uint32_t payload_size = 0;
-		uint32_t seq = 0;           //!< 0 for v1, which has none
-		size_t header_size = 0;     //!< where the payload starts: 20 (v1) or 24 (v2)
+		uint32_t seq = 0;
+		size_t header_size = 0;     //!< where the payload starts (kEnvelopeV2HeaderSize)
 	};
 
-	//! True when data starts with an envelope magic, v1 ('O3DA') or v2 ('O3DU').
+	//! True when data starts with the envelope magic 'O3DU'.
 	O3DS_API bool HasEnvelopeMagic(const void* data, size_t len);
 
-	//! Reads a v1 or v2 envelope header and checks that its payload fits in
-	//! len (trailing bytes are allowed). A v2 header must have version 2 and
-	//! flags 0. False for anything else.
+	//! Reads an envelope header and checks that its payload fits in len
+	//! (trailing bytes are allowed). It must have version 2 and flags 0.
+	//! False for anything else.
 	O3DS_API bool ReadEnvelopeHeader(const void* data, size_t len, EnvelopeHeader& out);
 
 	//! Writes a v2 header into the first kEnvelopeV2HeaderSize bytes of out.
 	O3DS_API void WriteEnvelopeHeaderV2(void* out, EnvelopeKind kind, EnvelopeCodec codec,
 		uint64_t timestampUs, uint32_t payloadSize, uint32_t seq);
-
-	//! Writes a v1 header (big-endian) into the first kEnvelopeV1HeaderSize
-	//! bytes of out. Only for messages old readers must still recognise during
-	//! the compatibility window (the TCP keepalive).
-	O3DS_API void WriteEnvelopeHeaderV1(void* out, EnvelopeKind kind, EnvelopeCodec codec,
-		uint64_t timestampUs, uint32_t payloadSize);
 
 	//! Seconds on the sender clock as envelope microseconds: NaN, infinite or
 	//! negative values become 0, values past the u64 range saturate (the

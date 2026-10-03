@@ -8,9 +8,9 @@ live in the core, in `src/o3ds/wire_format.h`, `src/o3ds/udp_fragment.h` and
 
 **Wire protocol: 2. Core version (`O3DS_VERSION_TAG`): 1.1.0.**
 
-Everything on the wire is **little-endian**, except the envelope v1 header, which readers still
-accept during the compatibility window. Every read and write goes through explicit byte helpers,
-never a type-punned pointer (CORE-22).
+Everything on the wire is **little-endian**. Every read and write goes through explicit byte
+helpers, never a type-punned pointer (CORE-22). Nothing from before protocol 2 is accepted except
+plain version-1 frames: there are no old receivers or senders to stay compatible with.
 
 ## 1. Mocap frame
 
@@ -32,17 +32,16 @@ A mocap frame is an 8-byte header followed by a FlatBuffer (`src/o3ds.fbs`, root
   before protocol 2). That field is for diagnostics and captures only.
 - **Readers** (`O3DS::CheckFrame`, used by `SubjectList::Parse`, `PeekMeta` and
   `PeekPacketMeta`) accept `min_reader_version` 1 to `O3DS_PROTOCOL_VERSION` with bytes 1-3
-  zero, check the CRC, verify the FlatBuffer (with the `"O3DS"` identifier on version-2
-  frames, without it on version 1, so buffers from before protocol 2, which have none, still
-  parse), and reject a version-1 frame that carries residual or quantized content. A frame
-  that needs a newer protocol is rejected with "sender requires protocol N; update this
-  receiver". Every rejection has a reason (`O3DS::Wire::FrameCheck`).
+  zero, check the CRC, and verify the FlatBuffer (the `"O3DS"` identifier is required on
+  version-2 frames and optional on version 1). A frame that needs a newer protocol is rejected
+  with "sender requires protocol N; update this receiver". Every rejection has a reason
+  (`O3DS::Wire::FrameCheck`).
 
 ## 2. Unified envelope (audio, control)
 
 Audio and control travel in an envelope; mocap travels as a raw frame (section 1).
 
-**Envelope v2**, written by every writer, 24 bytes:
+**Envelope v2**, 24 bytes:
 
 | Bytes | Field |
 |---|---|
@@ -55,9 +54,7 @@ Audio and control travel in an envelope; mocap travels as a raw frame (section 1
 | 16-19 | payload size (u32) |
 | 20-23 | `seq` (u32): per stream and kind, wraps |
 
-**Envelope v1**, read during the compatibility window and still written for the TCP keepalive
-(section 4), 20 bytes, **big-endian**: magic `'O','3','D','A'`, version 1, kind, codec, flags,
-u64 `timestamp_us`, u32 payload size; no sequence number.
+Envelope v1 (big-endian, magic `'O','3','D','A'`, 20 bytes) is not accepted.
 
 - A reader passes kind and codec through; each consumer checks the pair it handles (control:
   kind Control with codec O3DControl and a payload of 1 to 1,076 bytes), and a reader ignores
@@ -77,7 +74,7 @@ A datagram's first 4 bytes say what it is (`udpClassifyDatagram`):
 | First bytes | Kind |
 |---|---|
 | `'O','3','D','F'` | a fragment (below) |
-| `'O','3','D','U'` or `'O','3','D','A'` | an envelope (section 2) |
+| `'O','3','D','U'` | an envelope (section 2) |
 | byte 0 non-zero, bytes 1-3 zero | a mocap frame (section 1) |
 
 The UDP receiver reassembles fragments and passes every other datagram on whole; the receiver's
@@ -92,9 +89,8 @@ before protocol 2 (no magic) is not accepted.
 
 Each message is framed as a 14-byte magic (`00 FF 03 FE "O3DS-START"`), a u32 payload length,
 then the payload (a frame or an envelope). Unchanged by protocol 2: everything it carries has
-its own version. When the sender is idle it sends a keepalive: an envelope v1 header of kind
-Audio with a zero payload size. It stays v1 so receivers from before envelope v2 keep
-recognising it.
+its own version. When the sender is idle it sends a keepalive: an envelope header of kind Audio
+with a zero payload size.
 
 ## 5. Capture files
 
@@ -133,14 +129,14 @@ wire. A topology hash that ever goes on the wire must use this definition and bu
 - The schema is append-only: never reorder, remove or retype a field. Regenerate
   `src/o3ds_generated.h` with the pinned `flatc` (`flatc --cpp -o src src/o3ds.fbs`) and sync
   the plugin's core mirror (`python Build/Scripts/sync_o3ds_core.py`); CI checks both.
-- **Compatibility window:** readers accept frame version 1 and envelope v1 for at least two
-  minor releases after 1.1.0; dropping them after that is a major bump.
+- **Compatibility window:** none for the formats before protocol 2, which nothing deployed
+  uses. From the first release on, readers keep accepting an older frame or envelope version
+  for at least two minor releases after a newer one ships; dropping one after that is a major
+  bump.
 - Every wire change adds an entry to the `### Schema/Protocol` section of the root
   [`CHANGELOG.md`](../CHANGELOG.md) stating the protocol version, the `min_reader_version` of
   affected frames, compatibility in both directions (old reader and new writer, new reader and
   old writer), and the migration steps. The review checklist blocks a wire change without one
   (roadmap §7 item 8).
-- **Compatibility tests:** `core.wire_format_tests` reads the golden frames a baseline writer
-  produced (`test/fixtures/wire/v1`), and the "Old-reader compatibility" step in
-  `core-tests.yml` builds the baseline reader (`develop@7aea235`) and reads this build's frames
-  (`test/compat/compat_tool.cpp`).
+- **Tests:** `core.wire_format_tests` covers the stamp of every serialize path, reader
+  acceptance and rejection, and the envelope and hash codecs; a wire change adds cases there.

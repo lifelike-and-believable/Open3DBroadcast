@@ -105,7 +105,7 @@ bool FO3DSharedUnifiedMessageRejectsTest::RunTest(const FString& Parameters)
 
 	// A header that claims more payload than the buffer holds.
 	TArray<uint8> Oversize = Message;
-	O3DS::WriteBE32(Oversize.GetData() + 16, 0x7FFFFFFFu);
+	O3DS::WriteBE32(Oversize.GetData() + 16, 0x7FFFFFFFu); // read little-endian: 0xFFFFFF7F
 	TestFalse(TEXT("A payload size past the end is rejected"), O3DS::ParseUnifiedMessage(Oversize.GetData(), Oversize.Num(), Header, ParsedPayload, ParsedSize));
 
 	TArray<uint8> Unused;

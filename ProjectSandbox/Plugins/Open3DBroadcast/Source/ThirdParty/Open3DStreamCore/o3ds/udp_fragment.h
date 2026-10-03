@@ -73,7 +73,7 @@ O3DS_API bool readUdpFragmentHeader(const char* data, size_t sz, UdpFragmentHead
 enum class UdpDatagramKind
 {
 	Fragment, // 'O3DF': a fragment, reassembled before anything else sees it
-	Envelope, // 'O3DA' (envelope v1) or 'O3DU' (envelope v2): audio, control
+	Envelope, // 'O3DU' (the unified envelope): audio, control
 	Frame,    // a frame word: byte 0 non-zero, bytes 1-3 zero (any version, so a
 	          // newer one still reaches the parser and is reported as such)
 	Unknown,  // anything else, including a legacy magic-less fragment whose id

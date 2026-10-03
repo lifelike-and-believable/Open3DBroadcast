@@ -62,8 +62,7 @@ namespace WebRTCUtils
      */
     inline bool IsControlKindEnvelope(const uint8* Bytes, size_t Len)
     {
-        // Envelope v1 or v2 (ADR 0009 item 4): the kind is byte 5 in both.
-        if (!Bytes || Len < static_cast<size_t>(O3DS::UnifiedWireHeaderSizeV1))
+        if (!Bytes || Len < static_cast<size_t>(O3DS::UnifiedWireHeaderSize))
         {
             return false;
         }

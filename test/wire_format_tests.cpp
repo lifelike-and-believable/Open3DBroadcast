@@ -272,17 +272,6 @@ O3DS_TEST(Wire_VersionTwoFramesNeedTheIdentifier)
 	O3DS_CHECK(Check(HandBuiltFullFrame(1, true), minReader) == Wire::FrameCheck::Ok);
 }
 
-O3DS_TEST(Wire_ReaderRejectsUndeclaredResidualOrQuantizedContent)
-{
-	// Pre-D8 develop writers stamped 1 on quantized frames (ADR 0009 item 2).
-	const std::vector<char> legacyQuantized = HandBuiltQuantizedFrame(1, false);
-	uint8_t minReader = 0;
-	O3DS_CHECK(Check(legacyQuantized, minReader) == Wire::FrameCheck::UndeclaredNewContent);
-	SubjectList list;
-	O3DS_CHECK(!list.Parse(legacyQuantized.data(), legacyQuantized.size()));
-	O3DS_CHECK(list.mLastFrameCheck == Wire::FrameCheck::UndeclaredNewContent);
-}
-
 O3DS_TEST(Wire_PeekChecksTheCrc)
 {
 	// CORE-15: PeekMeta and PeekPacketMeta used to skip the CRC.
@@ -298,42 +287,6 @@ O3DS_TEST(Wire_PeekChecksTheCrc)
 	PacketMeta meta;
 	O3DS_CHECK(!PeekPacketMeta(frame.data(), frame.size(), meta));
 	O3DS_CHECK(meta.check == Wire::FrameCheck::CrcMismatch);
-}
-
-namespace
-{
-	std::vector<char> ReadFixture(const char* name)
-	{
-		std::ifstream in(std::string(O3DS_WIRE_FIXTURE_DIR) + "/v1/" + name, std::ios::binary);
-		return std::vector<char>(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-	}
-}
-
-O3DS_TEST(Wire_BaselineWriterFramesStillParse)
-{
-	// ADR 0009 item 11, "baseline, new": plain frames parse as before; the
-	// baseline's quantized and residual frames (stamped 1) are rejected.
-	const std::vector<char> full = ReadFixture("full.o3ds");
-	const std::vector<char> delta = ReadFixture("delta.o3ds");
-	O3DS_CHECK(full.size() > Wire::kFrameHeaderSize && delta.size() > Wire::kFrameHeaderSize);
-	O3DS_CHECK(!HasIdentifier(full));
-
-	SubjectList list;
-	O3DS_CHECK(list.Parse(full.data(), full.size()));
-	Subject* actor = list.findSubject("Actor");
-	O3DS_CHECK(actor != nullptr && actor->mTransforms.size() == 2);
-	O3DS_CHECK(list.Parse(delta.data(), delta.size()));
-	O3DS_CHECK(actor != nullptr && actor->mTransforms[0]->translation.value.v[0] == 0.25);
-
-	for (const char* name : { "quantized.o3ds", "residual.o3ds" })
-	{
-		const std::vector<char> frame = ReadFixture(name);
-		O3DS_CHECK(frame.size() > Wire::kFrameHeaderSize);
-		SubjectList reader;
-		O3DS_CHECK(reader.Parse(full.data(), full.size()));
-		O3DS_CHECK(!reader.Parse(frame.data(), frame.size()));
-		O3DS_CHECK(reader.mLastFrameCheck == Wire::FrameCheck::UndeclaredNewContent);
-	}
 }
 
 O3DS_TEST(Envelope_V2LayoutIsLittleEndianWithSeq)
@@ -361,19 +314,14 @@ O3DS_TEST(Envelope_V2LayoutIsLittleEndianWithSeq)
 	O3DS_CHECK(!Wire::ReadEnvelopeHeader(b, sizeof(b), h));
 }
 
-O3DS_TEST(Envelope_V1IsStillReadBigEndian)
+O3DS_TEST(Envelope_OnlyV2IsAccepted)
 {
-	// The pre-D8 layout, as deployed writers send it.
+	// Envelope v1 (big-endian 'O3DA') is not accepted: there are no old receivers or senders.
 	const unsigned char v1[20 + 2] = { 'O', '3', 'D', 'A', 1, 2, 3, 0,
 		0, 0, 0, 0, 0, 0x0F, 0x42, 0x40,  0, 0, 0, 2,  0xAA, 0xBB };
 	Wire::EnvelopeHeader h;
-	O3DS_CHECK(Wire::ReadEnvelopeHeader(v1, sizeof(v1), h));
-	O3DS_CHECK(h.version == 1 && h.kind == 2 && h.codec == 3);
-	O3DS_CHECK(h.timestamp_us == 1000000ull && h.payload_size == 2 && h.seq == 0 && h.header_size == 20);
-
-	unsigned char written[20] = {};
-	Wire::WriteEnvelopeHeaderV1(written, Wire::EnvelopeKind::Control, Wire::EnvelopeCodec::O3DControl, 1000000ull, 2);
-	O3DS_CHECK(std::memcmp(written, v1, 20) == 0);
+	O3DS_CHECK(!Wire::HasEnvelopeMagic(v1, sizeof(v1)));
+	O3DS_CHECK(!Wire::ReadEnvelopeHeader(v1, sizeof(v1), h));
 
 	const unsigned char other[24] = { 'O', '3', 'D', 'X' };
 	O3DS_CHECK(!Wire::HasEnvelopeMagic(other, sizeof(other)));

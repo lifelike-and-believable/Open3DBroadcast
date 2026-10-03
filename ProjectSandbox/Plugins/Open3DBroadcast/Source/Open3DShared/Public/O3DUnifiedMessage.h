@@ -28,14 +28,13 @@ namespace O3DS
     };
 
     /**
-     * A unified envelope header as read (ADR 0009 item 4). Writers emit envelope v2: magic
-     * "O3DU", 24 bytes, little-endian, with a per-stream sequence number. Readers also accept
-     * envelope v1 (magic "O3DA", 20 bytes, big-endian, no sequence number) during the
-     * compatibility window. The codec lives in the core (o3ds/wire_format.h).
+     * A unified envelope header as read (ADR 0009 item 4): magic "O3DU", 24 bytes,
+     * little-endian, with a per-stream sequence number. The codec lives in the core
+     * (o3ds/wire_format.h, docs/wire-format.md).
      */
     struct OPEN3DSHARED_API FUnifiedHeader
     {
-        /** The first 4 bytes as a big-endian number: MagicValueBE() (v1) or MagicValueV2BE() (v2). */
+        /** The first 4 bytes as a big-endian number: MagicValueBE() for an envelope. */
         uint32 MagicBE = 0;
         uint8 Version = 1;
         uint8 Kind = 0;
@@ -43,16 +42,14 @@ namespace O3DS
         uint8 Flags = 0;
         uint64 TimestampUsHost = 0;
         uint32 PayloadSizeHost = 0;
-        /** Per stream and kind, wraps; 0 for envelope v1, which has none. */
+        /** Per stream and kind, wraps. */
         uint32 Seq = 0;
-        /** Bytes before the payload: UnifiedWireHeaderSizeV1 or UnifiedWireHeaderSize. */
+        /** Bytes before the payload (UnifiedWireHeaderSize). */
         int32 HeaderSize = 0;
 
-        /** Envelope v1 magic "O3DA". */
-        static constexpr uint32 MagicValueBE() { return 0x4F334441u; }
-        /** Envelope v2 magic "O3DU". */
-        static constexpr uint32 MagicValueV2BE() { return 0x4F334455u; }
-        bool IsValidMagic() const { return MagicBE == MagicValueBE() || MagicBE == MagicValueV2BE(); }
+        /** The envelope magic "O3DU" as a big-endian number. */
+        static constexpr uint32 MagicValueBE() { return 0x4F334455u; }
+        bool IsValidMagic() const { return MagicBE == MagicValueBE(); }
         uint32 PayloadSize() const { return PayloadSizeHost; }
         uint64 TimestampUs() const { return TimestampUsHost; }
         EUnifiedKind GetKind() const { return static_cast<EUnifiedKind>(Kind); }
@@ -101,7 +98,7 @@ namespace O3DS
     }
 
     /**
-     * Parse a unified envelope (v1 or v2) without copying: OutPayloadPtr views the payload inside
+     * Parse a unified envelope without copying: OutPayloadPtr views the payload inside
      * Data. False for anything else, or when the payload does not fit in Size (trailing bytes are
      * allowed).
      */
@@ -110,14 +107,11 @@ namespace O3DS
                                               const uint8*& OutPayloadPtr,
                                               int32& OutPayloadSize);
 
-    /** True when Data starts with an envelope magic, v1 or v2: never a raw frame, whatever follows. */
+    /** True when Data starts with the envelope magic: never a raw frame, whatever follows. */
     OPEN3DSHARED_API bool HasUnifiedEnvelopeMagic(const uint8* Data, int32 Size);
 
-    /** Size of the envelope header writers emit (envelope v2). */
+    /** Size of the envelope header. */
     constexpr int32 UnifiedWireHeaderSize = 24;
-
-    /** Size of the envelope v1 header, still read during the compatibility window. */
-    constexpr int32 UnifiedWireHeaderSizeV1 = 20;
 
     /** Largest payload the unified envelope wraps (safety limit). */
     constexpr int32 UnifiedMaxPayloadSize = 50 * 1024 * 1024;
@@ -154,7 +148,7 @@ namespace O3DS
 
     /**
      * The one classifier every receive path uses for control (CTL-3, CTL-6). True when Data is a
-     * well-formed control envelope (v1 or v2): kind Control, codec O3DControl, and a payload of 1
+     * well-formed control envelope: kind Control, codec O3DControl, and a payload of 1
      * to UnifiedMaxControlPayloadSize bytes. OutPayload then views the bytes inside the envelope,
      * valid as long as Data is; the envelope itself ends at OutPayload's end. A buffer with kind
      * Control that fails any other check is malformed and must be dropped, never treated as mocap.

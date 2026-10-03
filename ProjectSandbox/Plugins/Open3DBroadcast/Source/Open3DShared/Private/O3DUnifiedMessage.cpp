@@ -8,7 +8,6 @@ THIRD_PARTY_INCLUDES_END
 
 // The envelope codec is the core's (ADR 0009 item 4); these wrap it for UE types.
 static_assert(O3DS::UnifiedWireHeaderSize == static_cast<int32>(O3DS::Wire::kEnvelopeV2HeaderSize), "Envelope v2 header size");
-static_assert(O3DS::UnifiedWireHeaderSizeV1 == static_cast<int32>(O3DS::Wire::kEnvelopeV1HeaderSize), "Envelope v1 header size");
 
 namespace O3DS
 {
