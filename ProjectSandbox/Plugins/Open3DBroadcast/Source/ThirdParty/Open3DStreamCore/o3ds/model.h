@@ -526,9 +526,8 @@ namespace O3DS
 	//! Checks a framed wire buffer before anything trusts it (ADR 0009):
 	//! the frame word (min_reader_version 1..O3DS_PROTOCOL_VERSION, zero
 	//! flag and reserved bytes), the payload CRC-32, the FlatBuffers
-	//! Verifier (with the "O3DS" identifier on version-2 frames, without it
-	//! on version 1 so pre-D8 buffers parse), and that a version-1 frame
-	//! carries no residual or quantized content. outMinReaderVersion is set
+	//! Verifier (with the "O3DS" identifier on version-2 frames; optional on
+	//! version 1). outMinReaderVersion is set
 	//! once the frame word has been read, also when the version is too new.
 	O3DS_API Wire::FrameCheck CheckFrame(const char* data, size_t len, uint8_t& outMinReaderVersion);
 

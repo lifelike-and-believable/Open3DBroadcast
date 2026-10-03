@@ -1157,15 +1157,6 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			? O3DS::Data::SubjectListIdentifier() : nullptr;
 		if (!verifier.VerifyBuffer<O3DS::Data::SubjectList>(identifier))
 			return Wire::FrameCheck::VerifyFailed;
-
-		// A pre-D8 develop writer stamped 1 on residual and quantized frames
-		// whose anchor and resync semantics differ from ADR 0005: reject them
-		// (ADR 0009 item 2).
-		if (outMinReaderVersion < Wire::kMinReaderResidualOrQuantized
-			&& RequiredReaderVersion(*O3DS::Data::GetSubjectList(payload)) >= Wire::kMinReaderResidualOrQuantized)
-		{
-			return Wire::FrameCheck::UndeclaredNewContent;
-		}
 		return Wire::FrameCheck::Ok;
 	}
 

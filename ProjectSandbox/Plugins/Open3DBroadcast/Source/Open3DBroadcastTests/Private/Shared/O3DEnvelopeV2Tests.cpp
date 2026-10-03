@@ -1,8 +1,8 @@
 // Copyright Lifelike & Believable. All Rights Reserved.
 
-// Envelope v2 (ADR 0009 item 4, WP-A4): writers emit "O3DU", little-endian, with a sequence
-// number; readers still accept envelope v1 ("O3DA", big-endian). The codec is the core's
-// (o3ds/wire_format.h); these check the plugin's wrappers and writers.
+// Envelope v2 (ADR 0009 item 4, WP-A4): "O3DU", little-endian, with a sequence number; envelope
+// v1 ("O3DA", big-endian) is not accepted. The codec is the core's (o3ds/wire_format.h); these
+// check the plugin's wrappers and writers.
 
 #include "O3DTestHarness.h"
 
@@ -13,7 +13,7 @@
 #include "O3DUnifiedMessage.h"
 #include "Transport/O3DTransportTypes.h"
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DEnvelopeV2WrittenAndV1ReadTest, "Open3DBroadcast.Shared.Envelope.V2WrittenV1StillRead", O3DB_TEST_FLAGS)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DEnvelopeV2WrittenAndV1ReadTest, "Open3DBroadcast.Shared.Envelope.V2WrittenV1Rejected", O3DB_TEST_FLAGS)
 bool FO3DEnvelopeV2WrittenAndV1ReadTest::RunTest(const FString& Parameters)
 {
 	const TArray<uint8> Payload = { 10, 20, 30 };
@@ -39,21 +39,16 @@ bool FO3DEnvelopeV2WrittenAndV1ReadTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Timestamp"), Header.TimestampUs(), static_cast<uint64>(1500000));
 	TestTrue(TEXT("Payload view"), PayloadPtr == Message.GetData() + O3DS::UnifiedWireHeaderSize && PayloadSize == Payload.Num());
 
-	// Envelope v1, as a pre-D8 sender wrote it: still read.
+	// Envelope v1 ("O3DA", big-endian) is not accepted.
 	TArray<uint8> V1;
-	V1.SetNumZeroed(O3DS::UnifiedWireHeaderSizeV1 + Payload.Num());
-	O3DS::WriteBE32(V1.GetData(), O3DS::FUnifiedHeader::MagicValueBE());
+	V1.SetNumZeroed(20 + Payload.Num());
+	O3DS::WriteBE32(V1.GetData(), 0x4F334441u);
 	V1[4] = 1;
 	V1[5] = static_cast<uint8>(O3DS::EUnifiedKind::Audio);
 	V1[6] = static_cast<uint8>(O3DS::EUnifiedCodec::PCM16);
-	O3DS::WriteBE64(V1.GetData() + 8, 2000000);
 	O3DS::WriteBE32(V1.GetData() + 16, static_cast<uint32>(Payload.Num()));
-	FMemory::Memcpy(V1.GetData() + O3DS::UnifiedWireHeaderSizeV1, Payload.GetData(), Payload.Num());
-	TestTrue(TEXT("v1 parses"), O3DS::ParseUnifiedMessage(V1.GetData(), V1.Num(), Header, PayloadPtr, PayloadSize));
-	TestEqual(TEXT("v1 version"), static_cast<int32>(Header.Version), 1);
-	TestEqual(TEXT("v1 header size"), Header.HeaderSize, O3DS::UnifiedWireHeaderSizeV1);
-	TestEqual(TEXT("v1 timestamp"), Header.TimestampUs(), static_cast<uint64>(2000000));
-	TestTrue(TEXT("v1 payload view"), PayloadPtr == V1.GetData() + O3DS::UnifiedWireHeaderSizeV1 && PayloadSize == Payload.Num());
+	TestFalse(TEXT("v1 is not an envelope"), O3DS::HasUnifiedEnvelopeMagic(V1.GetData(), V1.Num()));
+	TestFalse(TEXT("v1 does not parse"), O3DS::ParseUnifiedMessage(V1.GetData(), V1.Num(), Header, PayloadPtr, PayloadSize));
 
 	// Control: a v2 envelope at the budget's limit is still 1,100 bytes (ADR 0011 item 4).
 	TArray<uint8> MaxControl;

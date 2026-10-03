@@ -10,6 +10,26 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Schema/Protocol
 
+- **No compatibility with what came before protocol 2** (WP-A4 follow-up). There are no users of
+  old receivers or senders, so what existed only for them is gone:
+  - **Envelope v1 is not accepted.** Readers accept only envelope v2 (`O3DU`); the core's v1
+    reader and writer, `UnifiedWireHeaderSizeV1` and `FUnifiedHeader::MagicValueV2BE` are
+    removed, and `FUnifiedHeader::MagicValueBE()` is now the `O3DU` magic. The UDP classifier no
+    longer treats `O3DA` as an envelope.
+  - **The TCP keepalive is an envelope v2** (24 bytes; it had stayed v1 for old receivers).
+  - **A version-1 frame is no longer checked for residual or quantized content**
+    (`FrameCheck::UndeclaredNewContent` is removed); writers stamp version 2 on such frames.
+  - **The golden baseline frames (`test/fixtures/wire`), the compat tool (`test/compat`) and the
+    old-reader CI step are removed.**
+  - Kept: `min_reader_version` stamping and the version check (a frame needing a newer protocol
+    is still rejected), and the compatibility-window rule for future releases
+    ([docs/wire-format.md](docs/wire-format.md) section 8).
+  - Version: still 1.1.0 (unreleased): no release ever accepted the removed formats.
+  - Compatibility, old reader and new writer, new reader and old writer: not supported for
+    builds from before protocol 2; there are none in use.
+  - Tests: envelope and UDP tests now check that v1 is rejected; `Open3DBroadcast.Shared.
+    Envelope.V2WrittenV1StillRead` is now `.V2WrittenV1Rejected`.
+
 - **Wire format documented; one changelog** (ADR 0009 item 10, WP-A4 PR 5; DOC-8). New
   [`docs/wire-format.md`](docs/wire-format.md): the frame header and versions, envelope v1 and
   v2, the UDP datagram kinds and fragment header, TCP framing, capture files, clock domains,

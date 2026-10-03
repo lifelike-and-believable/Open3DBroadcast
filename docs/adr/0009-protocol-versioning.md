@@ -214,17 +214,21 @@ and why:
   arbitrary payloads through all of them), and the receiver's demux and frame checks already
   reject and count what is not an envelope or a frame. A frame word of any non-zero version
   classifies as a frame, so a newer protocol reaches the parser and is reported as such.
-- **Item 4, the TCP keepalive stays envelope v1.** A receiver from before envelope v2 would read
-  a v2 keepalive as a malformed frame and log it every few seconds. Readers accept both
-  versions, so the keepalive moves to v2 when v1 support is dropped.
+- **No compatibility with what came before protocol 2** (maintainer, 2026-10-03: there are no
+  users of old receivers). Following that, the WP-A4 follow-up PR removed what existed only for
+  them: readers no longer accept envelope v1, the TCP keepalive is an envelope v2 (it had been
+  kept at v1 for old receivers), a version-1 frame with residual or quantized content is no
+  longer rejected as a pre-D8 frame, and the golden baseline frames, the compat tool and the
+  old-reader CI step are gone. The `min_reader_version` mechanism, the version check and the
+  compatibility-window rule for future releases stay.
 - **Item 4, audio payload v3 was not adopted.** MoQ's audio track carries the audio payload with
   no envelope (TRF-37) and reads the codec and timestamp from the payload, so the payload keeps
   them. PCM16 is little-endian, as decided (no bytes change on little-endian hosts).
 - **Item 4, kind and codec are not validated by the envelope reader.** Each consumer checks the
   kind and codec pair it handles, and readers ignore a kind they do not know (ADR 0011, which
   added kind Control after this ADR).
-- **Item 11, golden fixtures are raw frames**, not `.o3dscap` captures: `test/fixtures/wire/v1`
-  holds one frame per file, written by `test/compat/compat_tool.cpp` built against the baseline.
+- **Item 11's old/new matrix was run** (#335: golden frames and an old-reader CI step) and then
+  removed with the rest of the pre-protocol-2 compatibility (above).
 - **Question 6** is confirmed: flatc 2.0.6 emits an identifier-checking `VerifySubjectListBuffer`
   and `FinishSubjectListBuffer`, so version-1 frames are verified with a null identifier.
 - **Question 4** (packaging a plugin-root `CHANGELOG.md`) is still open: the Fab package does not

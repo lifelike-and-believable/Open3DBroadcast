@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "O3DUnifiedMessage.h"
 
 THIRD_PARTY_INCLUDES_START
 #include "o3ds/tcp_stream_parser.h"
@@ -26,22 +27,15 @@ namespace O3DSockets::Tcp
 	}
 
 	/** Size of the unified-envelope keepalive payload (see MakeKeepalivePayload). */
-	inline constexpr int32 KeepalivePayloadSize = 20;
+	inline constexpr int32 KeepalivePayloadSize = O3DS::UnifiedWireHeaderSize;
 
 	/**
 	 * The payload of the keepalive the sender writes when it has had nothing to send for
-	 * tcp.keepalive milliseconds (TRB-6), framed like any other payload. It is a 20-byte
-	 * unified-envelope header (magic "O3DA", version 1) with kind Audio and a zero payload size.
-	 *
-	 * No new wire format: receivers built before WP-S6 parse it as an audio message, reject the
-	 * empty audio payload without logging, and still count it as received data, so their idle
-	 * timer is reset and they stop reconnecting while the sender is idle. The sender never
+	 * tcp.keepalive milliseconds (TRB-6), framed like any other payload: an envelope header
+	 * (magic "O3DU", version 2) with kind Audio and a zero payload size, so the receiver's idle
+	 * timer is reset and it does not reconnect while the sender is idle. The sender never
 	 * produces an audio envelope with an empty payload otherwise (CreateUnifiedMessage rejects
-	 * one), so current receivers recognise it unambiguously.
-	 *
-	 * It stays envelope v1 while every other envelope is v2 (ADR 0009 item 4): a receiver from
-	 * before envelope v2 would otherwise take every keepalive for a malformed frame and log it.
-	 * Current receivers read both versions.
+	 * one), so receivers recognise it unambiguously (FO3DUnifiedReceiveDemux: Keepalive).
 	 */
 	inline TArray<uint8> MakeKeepalivePayload()
 	{
@@ -51,10 +45,10 @@ namespace O3DSockets::Tcp
 		Envelope[0] = 'O';
 		Envelope[1] = '3';
 		Envelope[2] = 'D';
-		Envelope[3] = 'A';
-		Envelope[4] = 1; // envelope version
-		Envelope[5] = 1; // kind: Audio (O3DS::EUnifiedKind::Audio)
-		// codec, flags, timestamp and payload size stay zero.
+		Envelope[3] = 'U';
+		Envelope[4] = 2; // envelope version
+		Envelope[5] = static_cast<uint8>(O3DS::EUnifiedKind::Audio);
+		// codec, flags, timestamp, payload size and sequence stay zero.
 		return Payload;
 	}
 

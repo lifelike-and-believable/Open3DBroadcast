@@ -93,10 +93,11 @@ O3DS_TEST(UdpClassify_FirstFourBytesDecide)
 	writeUdpFragmentHeader(header, frag);
 	O3DS_CHECK(udpClassifyDatagram(frag, sizeof(frag)) == UdpDatagramKind::Fragment);
 
+	const char envelope[8] = { 'O', '3', 'D', 'U', 2, 1, 0, 0 };
 	const char envelopeV1[8] = { 'O', '3', 'D', 'A', 1, 1, 0, 0 };
-	const char envelopeV2[8] = { 'O', '3', 'D', 'U', 2, 1, 0, 0 };
-	O3DS_CHECK(udpClassifyDatagram(envelopeV1, sizeof(envelopeV1)) == UdpDatagramKind::Envelope);
-	O3DS_CHECK(udpClassifyDatagram(envelopeV2, sizeof(envelopeV2)) == UdpDatagramKind::Envelope);
+	O3DS_CHECK(udpClassifyDatagram(envelope, sizeof(envelope)) == UdpDatagramKind::Envelope);
+	// Envelope v1 is not accepted any more.
+	O3DS_CHECK(udpClassifyDatagram(envelopeV1, sizeof(envelopeV1)) == UdpDatagramKind::Unknown);
 
 	const char frameV1[8] = { 1, 0, 0, 0, 0, 0, 0, 0 };
 	const char frameV2[8] = { 2, 0, 0, 0, 0, 0, 0, 0 };

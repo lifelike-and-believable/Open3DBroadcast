@@ -53,16 +53,19 @@ namespace O3DReceiveDemuxTests
 		return Bytes;
 	}
 
-	/** A 20-byte envelope header with any kind, codec and declared payload size, followed by Body. */
+	/** An envelope header (24 bytes, little-endian) with any kind, codec and declared payload size, followed by Body. */
 	TArray<uint8> MakeRawEnvelope(uint8 Kind, uint8 Codec, uint32 DeclaredPayload, const TArray<uint8>& Body)
 	{
 		TArray<uint8> Out;
 		Out.SetNumZeroed(O3DS::UnifiedWireHeaderSize);
 		O3DS::WriteBE32(Out.GetData(), O3DS::FUnifiedHeader::MagicValueBE());
-		Out[4] = 1;
+		Out[4] = 2;
 		Out[5] = Kind;
 		Out[6] = Codec;
-		O3DS::WriteBE32(Out.GetData() + 16, DeclaredPayload);
+		Out[16] = static_cast<uint8>(DeclaredPayload);
+		Out[17] = static_cast<uint8>(DeclaredPayload >> 8);
+		Out[18] = static_cast<uint8>(DeclaredPayload >> 16);
+		Out[19] = static_cast<uint8>(DeclaredPayload >> 24);
 		Out.Append(Body);
 		return Out;
 	}

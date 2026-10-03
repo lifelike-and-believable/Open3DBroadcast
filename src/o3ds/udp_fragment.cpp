@@ -87,7 +87,7 @@ UdpDatagramKind udpClassifyDatagram(const char* data, size_t sz)
 	unsigned char b[4];
 	memcpy(b, data, 4);
 	if (memcmp(b, kUdpFragmentMagic, 4) == 0) return UdpDatagramKind::Fragment;
-	if (b[0] == 'O' && b[1] == '3' && b[2] == 'D' && (b[3] == 'A' || b[3] == 'U')) return UdpDatagramKind::Envelope;
+	if (b[0] == 'O' && b[1] == '3' && b[2] == 'D' && b[3] == 'U') return UdpDatagramKind::Envelope;
 	if (b[0] != 0 && b[1] == 0 && b[2] == 0 && b[3] == 0) return UdpDatagramKind::Frame;
 	return UdpDatagramKind::Unknown;
 }

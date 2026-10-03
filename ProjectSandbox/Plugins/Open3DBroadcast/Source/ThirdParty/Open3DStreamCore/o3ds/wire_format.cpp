@@ -17,7 +17,6 @@ namespace Wire
 		case FrameCheck::VersionTooNew: return "sender requires a newer protocol; update this receiver";
 		case FrameCheck::CrcMismatch: return "CRC check failed";
 		case FrameCheck::VerifyFailed: return "FlatBuffers verification failed";
-		case FrameCheck::UndeclaredNewContent: return "residual or quantized content in a protocol-1 frame (pre-D8 sender)";
 		}
 		return "unknown";
 	}
@@ -48,67 +47,31 @@ namespace Wire
 
 	namespace
 	{
-		const uint8_t kMagicV1[4] = { 'O', '3', 'D', 'A' };
-		const uint8_t kMagicV2[4] = { 'O', '3', 'D', 'U' };
-
-		uint32_t LoadBE32(const uint8_t* b)
-		{
-			return (static_cast<uint32_t>(b[0]) << 24) | (static_cast<uint32_t>(b[1]) << 16)
-				| (static_cast<uint32_t>(b[2]) << 8) | static_cast<uint32_t>(b[3]);
-		}
-
-		void StoreBE32(uint8_t* b, uint32_t v)
-		{
-			b[0] = static_cast<uint8_t>(v >> 24);
-			b[1] = static_cast<uint8_t>(v >> 16);
-			b[2] = static_cast<uint8_t>(v >> 8);
-			b[3] = static_cast<uint8_t>(v);
-		}
+		const uint8_t kEnvelopeMagic[4] = { 'O', '3', 'D', 'U' };
 	}
 
 	bool HasEnvelopeMagic(const void* data, size_t len)
 	{
-		if (data == nullptr || len < 4)
-			return false;
-		return std::memcmp(data, kMagicV1, 4) == 0 || std::memcmp(data, kMagicV2, 4) == 0;
+		return data != nullptr && len >= 4 && std::memcmp(data, kEnvelopeMagic, 4) == 0;
 	}
 
 	bool ReadEnvelopeHeader(const void* data, size_t len, EnvelopeHeader& out)
 	{
 		out = EnvelopeHeader();
-		if (data == nullptr || len < 4)
+		if (!HasEnvelopeMagic(data, len) || len < kEnvelopeV2HeaderSize)
 			return false;
 		const uint8_t* b = static_cast<const uint8_t*>(data);
-		EnvelopeHeader h;
-		if (std::memcmp(b, kMagicV2, 4) == 0)
-		{
-			if (len < kEnvelopeV2HeaderSize || b[4] != kEnvelopeVersion2 || b[7] != 0)
-				return false;
-			h.version = b[4];
-			h.kind = b[5];
-			h.codec = b[6];
-			h.flags = b[7];
-			h.timestamp_us = LoadLE64(b + 8);
-			h.payload_size = LoadLE32(b + 16);
-			h.seq = LoadLE32(b + 20);
-			h.header_size = kEnvelopeV2HeaderSize;
-		}
-		else if (std::memcmp(b, kMagicV1, 4) == 0)
-		{
-			if (len < kEnvelopeV1HeaderSize)
-				return false;
-			h.version = b[4];
-			h.kind = b[5];
-			h.codec = b[6];
-			h.flags = b[7];
-			h.timestamp_us = (static_cast<uint64_t>(LoadBE32(b + 8)) << 32) | LoadBE32(b + 12);
-			h.payload_size = LoadBE32(b + 16);
-			h.header_size = kEnvelopeV1HeaderSize;
-		}
-		else
-		{
+		if (b[4] != kEnvelopeVersion2 || b[7] != 0)
 			return false;
-		}
+		EnvelopeHeader h;
+		h.version = b[4];
+		h.kind = b[5];
+		h.codec = b[6];
+		h.flags = b[7];
+		h.timestamp_us = LoadLE64(b + 8);
+		h.payload_size = LoadLE32(b + 16);
+		h.seq = LoadLE32(b + 20);
+		h.header_size = kEnvelopeV2HeaderSize;
 		if (static_cast<uint64_t>(h.header_size) + h.payload_size > len)
 			return false;
 		out = h;
@@ -119,7 +82,7 @@ namespace Wire
 		uint64_t timestampUs, uint32_t payloadSize, uint32_t seq)
 	{
 		uint8_t* b = static_cast<uint8_t*>(out);
-		std::memcpy(b, kMagicV2, 4);
+		std::memcpy(b, kEnvelopeMagic, 4);
 		b[4] = kEnvelopeVersion2;
 		b[5] = static_cast<uint8_t>(kind);
 		b[6] = static_cast<uint8_t>(codec);
@@ -127,20 +90,6 @@ namespace Wire
 		StoreLE64(b + 8, timestampUs);
 		StoreLE32(b + 16, payloadSize);
 		StoreLE32(b + 20, seq);
-	}
-
-	void WriteEnvelopeHeaderV1(void* out, EnvelopeKind kind, EnvelopeCodec codec,
-		uint64_t timestampUs, uint32_t payloadSize)
-	{
-		uint8_t* b = static_cast<uint8_t*>(out);
-		std::memcpy(b, kMagicV1, 4);
-		b[4] = kEnvelopeVersion1;
-		b[5] = static_cast<uint8_t>(kind);
-		b[6] = static_cast<uint8_t>(codec);
-		b[7] = 0;
-		StoreBE32(b + 8, static_cast<uint32_t>(timestampUs >> 32));
-		StoreBE32(b + 12, static_cast<uint32_t>(timestampUs));
-		StoreBE32(b + 16, payloadSize);
 	}
 
 	uint64_t EnvelopeTimestampUs(double seconds)
