@@ -25,6 +25,7 @@ THIRD_PARTY_INCLUDES_END
 #include <vector>
 
 class ILiveLinkClient;
+class FO3DReceiverFrameDecoder;
 
 /**
  * LiveLink source implementation that consumes serialized Open3DStream frames via registered transports.
@@ -183,14 +184,12 @@ private:
     static constexpr double AlignmentStreamLivenessSeconds = 0.2;
     /** Publishes only the subjects the packet touched (RCV-5). Returns how many were processed. */
     int32 PublishTouchedSubjects(O3DS::SubjectList& List, const std::vector<O3DS::ParsedSubjectInfo>& Touched, double WorldTimeSecondsOverride);
-    bool BuildSubjectPose(O3DS::Subject* SubjectPtr, TArray<FName>& OutBoneNames, TArray<int32>& OutBoneParents, TArray<FTransform>& OutBoneTransforms) const;
-    void BuildSubjectCurves(O3DS::Subject* SubjectPtr, TArray<FName>& OutCurveNames, TArray<float>& OutCurveValues) const;
     // WorldTimeSecondsOverride < 0.0 means "unset" - PushSubjectFrameData falls back to
     // FPlatformTime::Seconds() (today's behavior, used by the legacy/ungated path); the
     // gated path (A2.a/A2.c) always passes a real mapped presentation time.
     // bFullDescriptor: the packet carried a full Subject for it, which invalidates the
     // cached bone names and parents (RCV-4).
-    void ProcessParsedSubject(O3DS::Subject* SubjectPtr, double SubjectListTime, double WorldTimeSecondsOverride, bool bFullDescriptor, TArray<FName>& BoneNames, TArray<int32>& BoneParents, TArray<FTransform>& BoneTransforms, TArray<FName>& CurveNames, TArray<float>& CurveValues);
+    void ProcessParsedSubject(O3DS::Subject* SubjectPtr, double SubjectListTime, double WorldTimeSecondsOverride, bool bFullDescriptor);
     void FinalizeAudioMeta(O3DS::FAudioFrameMeta& Meta) const;
 
 private:
@@ -243,17 +242,10 @@ private:
     TMap<FName, uint64> SubjectSkeletonHashes;
     TMap<FName, uint64> SubjectCurveHashes;
 
-    // Per-subject bone structure cache, so FName construction for bone names only runs
-    // when the skeleton changes. Reused only while the fingerprint (bone count, names
-    // and parent ids, O3DS::SkeletonFingerprint) is unchanged and the packet did not
-    // carry a full descriptor for the subject (RCV-4).
-    struct FSubjectTransformCache
-    {
-        TArray<FName> BoneNames;
-        TArray<int32> BoneParents;
-        uint64 SkeletonFingerprint = 0;
-    };
-    TMap<FName, FSubjectTransformCache> SubjectTransformCaches;
+    // Converts parsed subjects for LiveLink and caches what only changes with the topology:
+    // bone names and parents (RCV-4), curve FNames and the subject FName (RCV-12), plus
+    // per-frame scratch (RCV-11). WP-A3; always set (created by the constructor).
+    TUniquePtr<FO3DReceiverFrameDecoder> FrameDecoder;
 
     uint64 FrameCounter = 0;
     bool bLoggedActiveState = false;

@@ -2,6 +2,8 @@
 
 #include "O3DReceiverSource.h"
 
+#include "O3DReceiverFrameDecoder.h"
+
 #include "ILiveLinkClient.h"
 #include "LiveLinkTypes.h"
 #include "LiveLinkPreset.h"
@@ -235,16 +237,6 @@ private:
 
 namespace
 {
-    uint64 HashArray(const TArray<FName>& Names, const TArray<int32>* Parents = nullptr)
-    {
-        return Parents ? O3DHelpers::HashNamesAndParents(Names, *Parents) : O3DHelpers::HashNames(Names);
-    }
-
-    uint64 HashCurveNames(const TArray<FName>& Names)
-    {
-        return O3DHelpers::HashNames(Names);
-    }
-
     // C1: PoseSample <-> LiveLink transform/curve conversion. PoseSample
     // stores rotations as (x,y,z,w) doubles (O3DS::Quat = Vector4d), matching
     // FQuat's own component order, so no component reshuffling is needed.
@@ -324,6 +316,7 @@ FO3DReceiverSource::FO3DReceiverSource(const FO3DReceiverSourceConfig& InSetting
     , SourceMachineName(LOCTEXT("SourceMachineName", "-"))
     , SourceStatus(LOCTEXT("SourceStatus", "Inactive"))
     , SourceSettings(InSettings)
+    , FrameDecoder(MakeUnique<FO3DReceiverFrameDecoder>())
 {
     EnsureValidTransportName();
 }
@@ -562,7 +555,7 @@ void FO3DReceiverSource::StopTransport()
     SubjectLastUpdateTime.Empty();
     // RCV-5/RCV-34: cached bone names from the previous session must not survive a
     // restart, like the other per-subject maps above.
-    SubjectTransformCaches.Empty();
+    FrameDecoder->Reset();
     bLoggedActiveState = false;
     FrameCounter = 0;
     ResetStreamState();
@@ -693,7 +686,7 @@ void FO3DReceiverSource::RemoveInactiveSubjects()
                 Client->RemoveSubject_AnyThread(SubjectKey);
             }
             UE_LOG(LogO3DReceiverSource, Verbose, TEXT("Removed inactive subject %s"), *It.Key().ToString());
-            SubjectTransformCaches.Remove(It.Key());  // PHASE 7 FIX: Clean up transform cache
+            FrameDecoder->ForgetSubject(It.Key());
             SubjectSkeletonHashes.Remove(It.Key());
             SubjectCurveHashes.Remove(It.Key());
             InitializedSubjects.Remove(It.Key());
@@ -1188,18 +1181,12 @@ bool FO3DReceiverSource::ParseSubjectListRaw(O3DS::SubjectList& List, const FStr
  *  retire them. */
 int32 FO3DReceiverSource::PublishTouchedSubjects(O3DS::SubjectList& List, const std::vector<O3DS::ParsedSubjectInfo>& Touched, double WorldTimeSecondsOverride)
 {
-    TArray<FName> BoneNames;
-    TArray<int32> BoneParents;
-    TArray<FTransform> BoneTransforms;
-    TArray<FName> CurveNames;
-    TArray<float> CurveValues;
-
     int32 Count = 0;
     for (const O3DS::ParsedSubjectInfo& Info : Touched)
     {
         if (O3DS::Subject* SubjectPtr = List.findSubject(Info.name))
         {
-            ProcessParsedSubject(SubjectPtr, List.mTime, WorldTimeSecondsOverride, Info.fullDescriptor, BoneNames, BoneParents, BoneTransforms, CurveNames, CurveValues);
+            ProcessParsedSubject(SubjectPtr, List.mTime, WorldTimeSecondsOverride, Info.fullDescriptor);
             ++Count;
         }
     }
@@ -1220,211 +1207,34 @@ bool FO3DReceiverSource::CanPublish() const
     return Client != nullptr || (TestStaticPushHook && TestFramePushHook);
 }
 
-/** Convert SubjectList transform data into LiveLink-friendly arrays. */
-bool FO3DReceiverSource::BuildSubjectPose(O3DS::Subject* SubjectPtr, TArray<FName>& OutBoneNames, TArray<int32>& OutBoneParents, TArray<FTransform>& OutBoneTransforms) const
-{
-    OutBoneNames.Reset();
-    OutBoneParents.Reset();
-    OutBoneTransforms.Reset();
-
-    if (!SubjectPtr)
-    {
-        return false;
-    }
-
-    const size_t TransformCount = SubjectPtr->mTransforms.mItems.size();
-    if (TransformCount == 0)
-    {
-        return false;
-    }
-
-    OutBoneNames.Reserve(static_cast<int32>(TransformCount));
-    OutBoneParents.Reserve(static_cast<int32>(TransformCount));
-    OutBoneTransforms.Reserve(static_cast<int32>(TransformCount));
-
-    for (O3DS::Transform* TransformPtr : SubjectPtr->mTransforms.mItems)
-    {
-        // RCV-14: parent ids index this list, so skipping an entry would shift every
-        // later parent. The core parser never leaves a null entry (a nameless node
-        // gets a placeholder name), so treat one as a malformed frame.
-        if (!TransformPtr)
-        {
-            return false;
-        }
-
-        const O3DS::Vector3d Translation = TransformPtr->translation.value;
-        const O3DS::Vector4d Rotation = TransformPtr->rotation.value;
-        const O3DS::Vector3d Scale = TransformPtr->scale.value;
-
-        FQuat Quat(
-            static_cast<float>(Rotation.v[0]),
-            static_cast<float>(Rotation.v[1]),
-            static_cast<float>(Rotation.v[2]),
-            static_cast<float>(Rotation.v[3]));
-        FVector Location(
-            static_cast<float>(Translation.v[0]),
-            static_cast<float>(Translation.v[1]),
-            static_cast<float>(Translation.v[2]));
-        FVector ScaleVec(
-            static_cast<float>(Scale.v[0]),
-            static_cast<float>(Scale.v[1]),
-            static_cast<float>(Scale.v[2]));
-
-        if (!FMath::IsFinite(Location.X) || !FMath::IsFinite(Location.Y) || !FMath::IsFinite(Location.Z) ||
-            !FMath::IsFinite(ScaleVec.X) || !FMath::IsFinite(ScaleVec.Y) || !FMath::IsFinite(ScaleVec.Z) ||
-            !FMath::IsFinite(Quat.X) || !FMath::IsFinite(Quat.Y) || !FMath::IsFinite(Quat.Z) || !FMath::IsFinite(Quat.W))
-        {
-            return false;
-        }
-
-        if (Quat.SizeSquared() <= KINDA_SMALL_NUMBER)
-        {
-            return false;
-        }
-
-        Quat.Normalize();
-        if (Quat.ContainsNaN())
-        {
-            return false;
-        }
-
-        std::string BoneNameUtf8 = TransformPtr->mName;
-        const size_t ColonIndex = BoneNameUtf8.rfind(':');
-        if (ColonIndex != std::string::npos)
-        {
-            BoneNameUtf8.erase(0, ColonIndex + 1);
-        }
-
-        const FName BoneName(UTF8_TO_TCHAR(BoneNameUtf8.c_str()));
-        OutBoneNames.Add(BoneName);
-        OutBoneParents.Add(TransformPtr->mParentId);
-        OutBoneTransforms.Emplace(Quat, Location, ScaleVec);
-    }
-
-    return OutBoneTransforms.Num() > 0;
-}
-
-/** Extract animation curve names/values while filtering out invalid data. */
-void FO3DReceiverSource::BuildSubjectCurves(O3DS::Subject* SubjectPtr, TArray<FName>& OutCurveNames, TArray<float>& OutCurveValues) const
-{
-    OutCurveNames.Reset();
-    OutCurveValues.Reset();
-
-    if (!SubjectPtr)
-    {
-        return;
-    }
-
-    const size_t CurveCount = SubjectPtr->mCurveNames.size();
-    OutCurveNames.Reserve(static_cast<int32>(CurveCount));
-    OutCurveValues.Reserve(static_cast<int32>(CurveCount));
-
-    for (size_t CurveIndex = 0; CurveIndex < CurveCount; ++CurveIndex)
-    {
-        const std::string& CurveNameUtf8 = SubjectPtr->mCurveNames[CurveIndex];
-        const FName CurveName(UTF8_TO_TCHAR(CurveNameUtf8.c_str()));
-        OutCurveNames.Add(CurveName);
-
-        float Value = 0.0f;
-        if (CurveIndex < SubjectPtr->mCurveValues.size())
-        {
-            Value = SubjectPtr->mCurveValues[CurveIndex];
-        }
-        OutCurveValues.Add(Value);
-    }
-}
-
 /** Build LiveLink static/frame data and push it to the client for a single parsed subject. */
-void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double SubjectListTime, double WorldTimeSecondsOverride, bool bFullDescriptor, TArray<FName>& BoneNames, TArray<int32>& BoneParents, TArray<FTransform>& BoneTransforms, TArray<FName>& CurveNames, TArray<float>& CurveValues)
+void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double SubjectListTime, double WorldTimeSecondsOverride, bool bFullDescriptor)
 {
     if (!SubjectPtr)
     {
         return;
     }
 
-    const FString SubjectNameUtf8 = UTF8_TO_TCHAR(SubjectPtr->mName.c_str());
-    const FName SubjectFName(*SubjectNameUtf8);
-
-    // RCV-4: the cached bone names and parents are reused only when the skeleton
-    // fingerprint (bone count, names and parent ids) is unchanged and this packet did
-    // not carry a full descriptor for the subject. Hashing the name bytes is cheap
-    // next to building FNames, which is what the cache saves.
-    FSubjectTransformCache* ExistingCache = SubjectTransformCaches.Find(SubjectFName);
-    const uint64 Fingerprint = O3DS::SkeletonFingerprint(*SubjectPtr);
-
-    if (!bFullDescriptor && ExistingCache && ExistingCache->SkeletonFingerprint == Fingerprint)
+    // Names, parents, transforms and curves for LiveLink, with the topology cached per subject
+    // (FO3DReceiverFrameDecoder, WP-A3). A subject without a usable pose is skipped.
+    FO3DDecodedSubject Decoded;
+    if (!FrameDecoder->Decode(*SubjectPtr, bFullDescriptor, Decoded))
     {
-        // Skeleton structure didn't change, reuse cached bone names/parents
-        // BUT we still need to extract the transform VALUES from this frame!
-        BoneNames = ExistingCache->BoneNames;
-        BoneParents = ExistingCache->BoneParents;
-
-        // Extract only the transform values for this frame
-        BoneTransforms.Reset();
-        BoneTransforms.Reserve(static_cast<int32>(SubjectPtr->mTransforms.mItems.size()));
-        for (O3DS::Transform* TransformPtr : SubjectPtr->mTransforms.mItems)
-        {
-            // RCV-14: see BuildSubjectPose; a null entry would misalign parents.
-            if (!TransformPtr)
-                return;
-
-            const O3DS::Vector3d Translation = TransformPtr->translation.value;
-            const O3DS::Vector4d Rotation = TransformPtr->rotation.value;
-            const O3DS::Vector3d Scale = TransformPtr->scale.value;
-
-            FQuat Quat(static_cast<float>(Rotation.v[0]), static_cast<float>(Rotation.v[1]),
-                       static_cast<float>(Rotation.v[2]), static_cast<float>(Rotation.v[3]));
-            FVector Location(static_cast<float>(Translation.v[0]), static_cast<float>(Translation.v[1]),
-                            static_cast<float>(Translation.v[2]));
-            FVector ScaleVec(static_cast<float>(Scale.v[0]), static_cast<float>(Scale.v[1]),
-                            static_cast<float>(Scale.v[2]));
-
-            // Validation checks
-            if (!FMath::IsFinite(Location.X) || !FMath::IsFinite(Location.Y) || !FMath::IsFinite(Location.Z) ||
-                !FMath::IsFinite(ScaleVec.X) || !FMath::IsFinite(ScaleVec.Y) || !FMath::IsFinite(ScaleVec.Z) ||
-                !FMath::IsFinite(Quat.X) || !FMath::IsFinite(Quat.Y) || !FMath::IsFinite(Quat.Z) || !FMath::IsFinite(Quat.W))
-            {
-                return;
-            }
-
-            if (Quat.SizeSquared() <= KINDA_SMALL_NUMBER)
-                return;
-
-            Quat.Normalize();
-            if (Quat.ContainsNaN())
-                return;
-
-            BoneTransforms.Add(FTransform(Quat, Location, ScaleVec));
-        }
-
-        if (BoneTransforms.Num() == 0)
-            return;
-
-        BuildSubjectCurves(SubjectPtr, CurveNames, CurveValues);
+        return;
     }
-    else
-    {
-        // Skeleton structure changed or first time - rebuild everything
-        if (!BuildSubjectPose(SubjectPtr, BoneNames, BoneParents, BoneTransforms))
-        {
-            return;
-        }
-
-        BuildSubjectCurves(SubjectPtr, CurveNames, CurveValues);
-
-        // Cache the new skeleton structure
-        FSubjectTransformCache& Cache = SubjectTransformCaches.FindOrAdd(SubjectFName);
-        Cache.BoneNames = BoneNames;
-        Cache.BoneParents = BoneParents;
-        Cache.SkeletonFingerprint = Fingerprint;
-    }
+    const FName SubjectFName = Decoded.SubjectName;
+    const TArray<FName>& BoneNames = *Decoded.BoneNames;
+    const TArray<int32>& BoneParents = *Decoded.BoneParents;
+    const TArray<FTransform>& BoneTransforms = *Decoded.BoneTransforms;
+    const TArray<FName>& CurveNames = *Decoded.CurveNames;
+    const TArray<float>& CurveValues = *Decoded.CurveValues;
 
     const FLiveLinkSubjectName SubjectName(SubjectFName);
     const FLiveLinkSubjectKey SubjectKey(SourceGuid, SubjectName);
 
-    // Compute hashes for LiveLink update check
-    const uint64 SkeletonHash = HashArray(BoneNames, &BoneParents);
-    const uint64 CurveHash = HashCurveNames(CurveNames);
+    // Hashes for the LiveLink update check, computed by the decoder when the names changed.
+    const uint64 SkeletonHash = Decoded.SkeletonHash;
+    const uint64 CurveHash = Decoded.CurveHash;
 
     const uint64* ExistingSkeletonHash = SubjectSkeletonHashes.Find(SubjectFName);
     const uint64* ExistingCurveHash = SubjectCurveHashes.Find(SubjectFName);

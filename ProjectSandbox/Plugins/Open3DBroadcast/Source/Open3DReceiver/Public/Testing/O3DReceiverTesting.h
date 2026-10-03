@@ -159,4 +159,46 @@ struct FO3DReceiverCorrectnessTestAccessor
 	}
 };
 
+class FO3DReceiverFrameDecoder;
+namespace O3DS
+{
+	class SubjectList;
+}
+
+/**
+ * Owns one FO3DReceiverFrameDecoder (a private class of this module, WP-A3) for its unit tests,
+ * and copies out what one Decode produced.
+ */
+class OPEN3DRECEIVER_API FO3DReceiverFrameDecoderProbe
+{
+public:
+	FO3DReceiverFrameDecoderProbe();
+	~FO3DReceiverFrameDecoderProbe();
+
+	FO3DReceiverFrameDecoderProbe(const FO3DReceiverFrameDecoderProbe&) = delete;
+	FO3DReceiverFrameDecoderProbe& operator=(const FO3DReceiverFrameDecoderProbe&) = delete;
+
+	/** Decodes the first subject of an O3DS buffer (parsed into a SubjectList kept by the probe). */
+	bool Decode(TConstArrayView<uint8> Buffer, bool bFullDescriptor);
+	void ForgetSubject(FName SubjectName);
+	void Reset();
+	uint64 GetSkeletonBuilds() const;
+	uint64 GetCurveNameBuilds() const;
+
+	// The last successful Decode, copied.
+	FName SubjectName;
+	TArray<FName> BoneNames;
+	TArray<int32> BoneParents;
+	TArray<FTransform> BoneTransforms;
+	TArray<FName> CurveNames;
+	TArray<float> CurveValues;
+	uint64 SkeletonHash = 0;
+	uint64 CurveHash = 0;
+
+private:
+	TUniquePtr<FO3DReceiverFrameDecoder> Decoder;
+	/** Kept so parsed subjects persist across Decode calls, like a receiver stream's list. */
+	TUniquePtr<O3DS::SubjectList> List;
+};
+
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -641,6 +641,17 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
   - Fix the hot-path allocations and FName construction during the split (RCV-11, RCV-12, RCV-13).
   - This is a pure refactor with no behaviour change. Tests from WP-S3 and WP-S4 must pass unchanged.
 - **Acceptance:** each new class is under 400 lines and has its own unit test. The public headers include no `o3ds/` headers.
+  - **Plan** (2026-10-03, one PR per step, each a refactor with output identical to before except step 5):
+    1. Receiver `FO3DReceiverFrameDecoder`: parse result to LiveLink names, parents, transforms and curves, with the topology caches and the RCV-11/RCV-12 reuse.
+    2. Receiver `FO3DLiveLinkPublisher`: static and frame pushes, initialized subjects, inactivity removal, the test push hooks.
+    3. Receiver stream scheduler: the stream table, reorder gate, clock mapping, legacy ordering, concealment and their metric deltas.
+    4. Receiver control routing and audio metadata in small classes; `FO3DReceiverSource` holds the pieces through forward-declared pointers, its header drops every `o3ds/` include, and `Open3DStreamCore` becomes a private dependency of Open3DReceiver.
+    5. RCV-13 (one transform conversion keeping doubles, a counter for dropped poses): a behaviour change, with a CHANGELOG note.
+    6. Sender pose sampler: skeleton and descriptor cache, subject naming, frame filling.
+    7. Sender audio binding.
+    8. Sender transport options and secrets, and the editor restart policy.
+  - **Rules:** no `UPROPERTY` or `UFUNCTION` on `UO3DSenderComponent` moves or is renamed (saved assets and Blueprints bind to them); work stays on the thread it runs on today; existing tests are not edited (test accessor bodies may adapt); a new private class is reached by its unit test through an exported probe (`FO3DSenderPipelineProbe` pattern); "under 400 lines" counts the class's `.h` and `.cpp` together; headers under `Public/Testing/` are test-only and outside the "no `o3ds/` in public headers" rule, but no other public header includes them. SHR-38 (global singletons) needs a design decision and is not part of this series.
+  - **Progress:** step 1, `FO3DReceiverFrameDecoder` (about 290 lines) with `Open3DBroadcast.Receiver.FrameDecoder.*`.
 
 #### WP-A4: Protocol robustness and versioning  ·  P1 · L · design (D7, D8) then coding
 - **Findings:** CORE-5, CORE-6, CORE-10, CORE-11, CORE-12, CORE-13, CORE-14, CORE-15, CORE-16, CORE-29, SND-15, SHR-7, SHR-30, SHR-33, RCV-8, RCV-9
