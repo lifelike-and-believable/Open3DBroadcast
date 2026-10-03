@@ -1,11 +1,13 @@
 // Fuzz target: SubjectList::PeekMeta(), the sequencing-metadata fast path
 // ReorderGate callers run on every datagram before paying for a full
-// Parse(). PeekMeta() skips the CRC, so it sees raw, unchecked bytes.
+// Parse(). It sees the raw bytes first, and rejects them unless they pass
+// the same frame checks as Parse() (CheckFrame: frame word, CRC, verifier;
+// CORE-15, ADR 0009).
 //
 // Input: a whole wire buffer, header included.
 //
-// Invariant: PeekMeta() and Parse() run the same FlatBuffers verifier, so
-// any buffer Parse() accepts (checked with the CRC fixed up) must also be
+// Invariant: PeekMeta() and Parse() run the same checks, so any buffer
+// Parse() accepts (the input's payload with a valid header) must also be
 // accepted by PeekMeta(), with the same metadata.
 //
 // The same holds for PeekPacketMeta() (WP-S4), which the UE receiver runs
@@ -47,7 +49,18 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
 	std::vector<O3DS::ParsedSubjectInfo> touched;
 	if (list.Parse(wire.data(), wire.size(), nullptr, true, &touched))
 	{
-		O3DS_FUZZ_ASSERT(peeked);
+		// The raw input peeks only if its own header was already valid.
+		uint64_t wireTxSeq = 0;
+		uint64_t wireWallclockUs = 0;
+		uint32_t wireEpoch = 0;
+		O3DS_FUZZ_ASSERT(O3DS::SubjectList::PeekMeta(wire.data(), wire.size(), wireTxSeq, wireWallclockUs, wireEpoch));
+		if (peeked)
+		{
+			O3DS_FUZZ_ASSERT(wireTxSeq == txSeq && wireWallclockUs == wallclockUs && wireEpoch == epoch);
+		}
+		txSeq = wireTxSeq;
+		wallclockUs = wireWallclockUs;
+		epoch = wireEpoch;
 
 		O3DS::PacketMeta wireMeta;
 		O3DS_FUZZ_ASSERT(O3DS::PeekPacketMeta(wire.data(), wire.size(), wireMeta));

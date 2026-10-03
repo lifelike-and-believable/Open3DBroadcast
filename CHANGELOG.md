@@ -1,5 +1,53 @@
 ## Unreleased
 
+### Schema/Protocol
+
+- **Wire protocol 2; core 1.1.0** (D8, [ADR 0009](docs/adr/0009-protocol-versioning.md), WP-A4
+  PR 1; CORE-15, CORE-16, CORE-22).
+  - **Frame header.** The first 4 bytes of a frame are now `min_reader_version` (byte 0) and
+    three zero bytes, little-endian, followed by the little-endian CRC-32 as before. Version 1
+    has exactly the bytes of the old flags word.
+  - **Which frames are version 2.** Writers stamp 2 on a frame that carries residual content
+    (`predictor_id != 0`) or a quantized vector (`*_q8`, `*_q16`), decided from what the frame
+    contains, and 1 on everything else: full snapshots and plain deltas, which is what default
+    settings send.
+  - **Schema.** `file_identifier "O3DS"` is written by every writer, and `SubjectList` gets the
+    appended field `protocol_version:ushort` (the writer's protocol, 2; 0 = before D8). Both are
+    append-only; `src/o3ds_generated.h` is regenerated.
+  - **Readers** (`Parse`, `PeekMeta`, `PeekPacketMeta`, through the new `O3DS::CheckFrame`)
+    accept `min_reader_version` 1 or 2 with the reserved bytes zero, check the CRC (`PeekMeta`
+    and `PeekPacketMeta` did not, CORE-15), require the identifier only on version-2 frames, and
+    reject anything else with a reason (`O3DS::Wire::FrameCheck`). A frame stamped 3 or higher is
+    rejected as "sender requires protocol N; update this receiver", so the next breaking change
+    is safe too. Reads go through explicit little-endian helpers (`o3ds/wire_format.h`), not
+    type-punned pointers (CORE-22).
+  - **Compatibility, old reader and new writer:** full snapshots and plain deltas are read as
+    before (pre-D8 readers ignore the identifier and the new field). Residual and quantized
+    frames are dropped with "Invalid data structure"; they are never misapplied. Checked in CI
+    against the baseline reader (`develop@7aea235`).
+  - **Compatibility, new reader and old writer:** full snapshots and plain deltas from any
+    pre-D8 writer parse as before (golden frames in `test/fixtures/wire/v1`). Residual and
+    quantized frames from pre-D8 `develop` builds, which stamped 1, are rejected: their anchor
+    and resync semantics differ from ADR 0005. D1 and C2 were never released.
+  - **Migration:** update receivers before turning on residual coding or quantization on a
+    sender; default senders need nothing. The UE receiver logs which side to update.
+  - `O3DS_VERSION_TAG` is 1.1.0 and can be set with `-DO3DS_VERSION_TAG=` (the release
+    workflows passed `-DVERSION_TAG`, which CMake never read; an empty value falls back to the
+    default). The plugin's core mirror records it in `SYNC_STAMP.txt`.
+  - Not in this change (later WP-A4 PRs, ADR 0009 items 4, 5, 8 and 10): the audio envelope v2
+    and little-endian PCM, the UDP fragment header v2, the length-prefixed name hash, and the
+    merged changelog and `docs/wire-format.md`. ADR 0005's `ref_seq` and stream writer are
+    separate.
+- **Tests.** New `core.wire_format_tests` (frame word helpers, the stamp of every serialize path,
+  reader acceptance and rejection, the CRC in the peeks, the baseline golden frames); a new
+  CI step builds the baseline reader from a worktree and reads this writer's frames;
+  `test/compat/compat_tool.cpp` writes and reads the four frame kinds for both. The `peek_meta`
+  fuzz target's invariant now accounts for the peeks checking the CRC.
+- **UE plugin.** The receiver logs "Sender on '...' requires wire protocol N; this receiver
+  implements 2. Update this receiver." (or that a pre-D8 sender should be updated) instead of
+  the generic malformed-packet warning, with the same throttle. The sender's residual and
+  quantization tooltips say these streams need protocol-2 receivers.
+
 ### Core library (`src/o3ds`)
 
 - **Faster Serialize and Parse (WP-A2e, ADR 0008 outline item 6; CORE-7,

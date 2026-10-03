@@ -67,12 +67,15 @@ namespace O3DS
 	{
 		out = PacketMeta();
 
-		if (data == nullptr || len < 8)
+		uint8_t minReaderVersion = 0;
+		const Wire::FrameCheck check = CheckFrame(data, len, minReaderVersion);
+		if (check != Wire::FrameCheck::Ok)
+		{
+			out.check = check;
+			out.min_reader_version = minReaderVersion;
 			return false;
-
-		flatbuffers::Verifier verifier(reinterpret_cast<const uint8_t*>(data + 8), len - 8);
-		if (!O3DS::Data::VerifySubjectListBuffer(verifier))
-			return false;
+		}
+		out.min_reader_version = minReaderVersion;
 
 		auto root = O3DS::Data::GetSubjectList(data + 8);
 		if (root == nullptr || !std::isfinite(root->time()))

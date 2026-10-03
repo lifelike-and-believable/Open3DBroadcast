@@ -26,6 +26,7 @@ SOFTWARE.
 #define OPEN3D_STREAM_MODEL_H
 
 #include "o3ds_export.h"
+#include "wire_format.h"
 #include <vector>
 #include <string>
 #include <utility>
@@ -413,6 +414,11 @@ namespace O3DS
 		double mTime;
 		double mDeltaThreshold;
 		std::string mError;
+		//! Why the last Parse() rejected its frame header (D8, ADR 0009), or
+		//! Ok; with VersionTooNew, mLastFrameMinReaderVersion is the
+		//! protocol the sender requires.
+		Wire::FrameCheck mLastFrameCheck = Wire::FrameCheck::Ok;
+		uint8_t mLastFrameMinReaderVersion = 0;
 
 		// D1 (roadmap doc §6/D1): opt-in adaptive channel quantization for
 		// SerializeUpdate() below, mirroring mDeltaThreshold's own
@@ -468,12 +474,10 @@ namespace O3DS
 		//! tx_wallclock_us/frame_epoch) from a wire buffer, without doing a
 		//! full parse of its subjects/updates. Used by ReorderGate to make
 		//! ordering decisions before paying the cost of a full Parse().
-		//! Validates buffer length and runs the FlatBuffers Verifier (this
-		//! reads untrusted network bytes) but does NOT check the CRC - a
-		//! corrupt-but-well-formed-enough buffer that fails CRC is still
-		//! caught later, when it's actually delivered and Parse()'d.
-		//! Returns false (outputs left at 0, their "unset" value) if the
-		//! buffer is too short or fails FlatBuffers verification.
+		//! Runs the same frame checks as Parse() (CheckFrame: frame word,
+		//! CRC, FlatBuffers Verifier; CORE-15, ADR 0009) on these untrusted
+		//! network bytes. Returns false (outputs left at 0, their "unset"
+		//! value) if any check fails.
 		static bool PeekMeta(const char* data, size_t len,
 			uint64_t& outTxSeq, uint64_t& outTxWallclockUs, uint32_t& outFrameEpoch);
 
@@ -502,7 +506,31 @@ namespace O3DS
 
 	};
 
-	O3DS_API void finalize(flatbuffers::FlatBufferBuilder& builder, std::vector<char>& outbuf, std::uint32_t flags);
+	//! Writes the 8-byte frame header (frameWord, then the CRC-32 of the
+	//! payload, both little-endian) and the finished FlatBuffer to outbuf.
+	//! Low level: the serializers use FinishSubjectListFrame, which picks
+	//! the frame word; tests use this to build frames with a chosen word.
+	O3DS_API void finalize(flatbuffers::FlatBufferBuilder& builder, std::vector<char>& outbuf, std::uint32_t frameWord);
+
+	//! Finishes a SubjectList with the "O3DS" file identifier and writes the
+	//! frame, stamping min_reader_version from what it contains (D8, ADR
+	//! 0009 item 2): 2 when any update is residual or quantized, else 1.
+	O3DS_API void FinishSubjectListFrame(flatbuffers::FlatBufferBuilder& builder,
+		flatbuffers::Offset<O3DS::Data::SubjectList> root, std::vector<char>& outbuf);
+
+	//! The lowest protocol a reader needs to apply this SubjectList:
+	//! kMinReaderResidualOrQuantized when an update has predictor_id != 0
+	//! or any *_q8 / *_q16 vector, kMinReaderPlain otherwise.
+	O3DS_API uint8_t RequiredReaderVersion(const O3DS::Data::SubjectList& list);
+
+	//! Checks a framed wire buffer before anything trusts it (ADR 0009):
+	//! the frame word (min_reader_version 1..O3DS_PROTOCOL_VERSION, zero
+	//! flag and reserved bytes), the payload CRC-32, the FlatBuffers
+	//! Verifier (with the "O3DS" identifier on version-2 frames, without it
+	//! on version 1 so pre-D8 buffers parse), and that a version-1 frame
+	//! carries no residual or quantized content. outMinReaderVersion is set
+	//! once the frame word has been read, also when the version is too new.
+	O3DS_API Wire::FrameCheck CheckFrame(const char* data, size_t len, uint8_t& outMinReaderVersion);
 
 
 } // O3DS

@@ -1199,7 +1199,8 @@ struct SubjectList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     VT_TIME = 8,
     VT_TX_SEQ = 10,
     VT_TX_WALLCLOCK_US = 12,
-    VT_FRAME_EPOCH = 14
+    VT_FRAME_EPOCH = 14,
+    VT_PROTOCOL_VERSION = 16
   };
   const flatbuffers::Vector<flatbuffers::Offset<O3DS::Data::Subject>> *subjects() const {
     return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<O3DS::Data::Subject>> *>(VT_SUBJECTS);
@@ -1219,6 +1220,9 @@ struct SubjectList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   uint32_t frame_epoch() const {
     return GetField<uint32_t>(VT_FRAME_EPOCH, 0);
   }
+  uint16_t protocol_version() const {
+    return GetField<uint16_t>(VT_PROTOCOL_VERSION, 0);
+  }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_SUBJECTS) &&
@@ -1231,6 +1235,7 @@ struct SubjectList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            VerifyField<uint64_t>(verifier, VT_TX_SEQ, 8) &&
            VerifyField<uint64_t>(verifier, VT_TX_WALLCLOCK_US, 8) &&
            VerifyField<uint32_t>(verifier, VT_FRAME_EPOCH, 4) &&
+           VerifyField<uint16_t>(verifier, VT_PROTOCOL_VERSION, 2) &&
            verifier.EndTable();
   }
 };
@@ -1257,6 +1262,9 @@ struct SubjectListBuilder {
   void add_frame_epoch(uint32_t frame_epoch) {
     fbb_.AddElement<uint32_t>(SubjectList::VT_FRAME_EPOCH, frame_epoch, 0);
   }
+  void add_protocol_version(uint16_t protocol_version) {
+    fbb_.AddElement<uint16_t>(SubjectList::VT_PROTOCOL_VERSION, protocol_version, 0);
+  }
   explicit SubjectListBuilder(flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -1275,7 +1283,8 @@ inline flatbuffers::Offset<SubjectList> CreateSubjectList(
     double time = 0.0,
     uint64_t tx_seq = 0,
     uint64_t tx_wallclock_us = 0,
-    uint32_t frame_epoch = 0) {
+    uint32_t frame_epoch = 0,
+    uint16_t protocol_version = 0) {
   SubjectListBuilder builder_(_fbb);
   builder_.add_tx_wallclock_us(tx_wallclock_us);
   builder_.add_tx_seq(tx_seq);
@@ -1283,6 +1292,7 @@ inline flatbuffers::Offset<SubjectList> CreateSubjectList(
   builder_.add_frame_epoch(frame_epoch);
   builder_.add_updates(updates);
   builder_.add_subjects(subjects);
+  builder_.add_protocol_version(protocol_version);
   return builder_.Finish();
 }
 
@@ -1293,7 +1303,8 @@ inline flatbuffers::Offset<SubjectList> CreateSubjectListDirect(
     double time = 0.0,
     uint64_t tx_seq = 0,
     uint64_t tx_wallclock_us = 0,
-    uint32_t frame_epoch = 0) {
+    uint32_t frame_epoch = 0,
+    uint16_t protocol_version = 0) {
   auto subjects__ = subjects ? _fbb.CreateVector<flatbuffers::Offset<O3DS::Data::Subject>>(*subjects) : 0;
   auto updates__ = updates ? _fbb.CreateVector<flatbuffers::Offset<O3DS::Data::SubjectUpdate>>(*updates) : 0;
   return O3DS::Data::CreateSubjectList(
@@ -1303,7 +1314,8 @@ inline flatbuffers::Offset<SubjectList> CreateSubjectListDirect(
       time,
       tx_seq,
       tx_wallclock_us,
-      frame_epoch);
+      frame_epoch,
+      protocol_version);
 }
 
 struct Curve FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
@@ -1377,26 +1389,40 @@ inline const O3DS::Data::SubjectList *GetSizePrefixedSubjectList(const void *buf
   return flatbuffers::GetSizePrefixedRoot<O3DS::Data::SubjectList>(buf);
 }
 
+inline const char *SubjectListIdentifier() {
+  return "O3DS";
+}
+
+inline bool SubjectListBufferHasIdentifier(const void *buf) {
+  return flatbuffers::BufferHasIdentifier(
+      buf, SubjectListIdentifier());
+}
+
+inline bool SizePrefixedSubjectListBufferHasIdentifier(const void *buf) {
+  return flatbuffers::BufferHasIdentifier(
+      buf, SubjectListIdentifier(), true);
+}
+
 inline bool VerifySubjectListBuffer(
     flatbuffers::Verifier &verifier) {
-  return verifier.VerifyBuffer<O3DS::Data::SubjectList>(nullptr);
+  return verifier.VerifyBuffer<O3DS::Data::SubjectList>(SubjectListIdentifier());
 }
 
 inline bool VerifySizePrefixedSubjectListBuffer(
     flatbuffers::Verifier &verifier) {
-  return verifier.VerifySizePrefixedBuffer<O3DS::Data::SubjectList>(nullptr);
+  return verifier.VerifySizePrefixedBuffer<O3DS::Data::SubjectList>(SubjectListIdentifier());
 }
 
 inline void FinishSubjectListBuffer(
     flatbuffers::FlatBufferBuilder &fbb,
     flatbuffers::Offset<O3DS::Data::SubjectList> root) {
-  fbb.Finish(root);
+  fbb.Finish(root, SubjectListIdentifier());
 }
 
 inline void FinishSizePrefixedSubjectListBuffer(
     flatbuffers::FlatBufferBuilder &fbb,
     flatbuffers::Offset<O3DS::Data::SubjectList> root) {
-  fbb.FinishSizePrefixed(root);
+  fbb.FinishSizePrefixed(root, SubjectListIdentifier());
 }
 
 }  // namespace Data
