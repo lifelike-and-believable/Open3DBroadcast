@@ -17,9 +17,10 @@ What it writes (everything is generated; never edit these files by hand):
       o3ds_control_generated.h  src/o3ds_control_generated.h (GENERATED_HEADERS)
       flatbuffers/...       the FlatBuffers runtime headers that
                             o3ds_generated.h needs, from thirdparty/flatbuffers
-      crccpp/CRC.h          from thirdparty/crccpp
+      crccpp/CRC.h          from thirdparty/crccpp, only while a core file
+                            includes it (none does since WP-A2e)
       LICENSES/             Open3DStream (MIT), FlatBuffers (Apache-2.0),
-                            CRCpp (BSD-3-Clause)
+                            CRCpp (BSD-3-Clause, only with CRC.h)
       SYNC_STAMP.txt        manifest and content hashes, submodule pins,
                             FlatBuffers version and O3DS_VERSION_TAG
   <plugin>/Source/Open3DStreamCore/Private/Core/O3DSCore_*.cpp
@@ -87,10 +88,13 @@ INCLUDE_ROOTS = [
     (os.path.join(CRCPP_DIR, "inc"), "crccpp/"),
 ]
 
+# (source, mirror path, mirror prefix that must hold a file for the licence to
+# be copied; None means always). Since WP-A2e no core file includes CRC.h
+# (o3ds/crc32.cpp computes the CRC), so the CRCpp licence goes with it.
 LICENSES = [
-    (os.path.join(REPO_ROOT, "LICENSE"), "LICENSES/Open3DStream-LICENSE.txt"),
-    (os.path.join(FLATBUFFERS_DIR, "LICENSE.txt"), "LICENSES/FlatBuffers-LICENSE.txt"),
-    (os.path.join(CRCPP_DIR, "LICENSE"), "LICENSES/CRCpp-LICENSE.txt"),
+    (os.path.join(REPO_ROOT, "LICENSE"), "LICENSES/Open3DStream-LICENSE.txt", None),
+    (os.path.join(FLATBUFFERS_DIR, "LICENSE.txt"), "LICENSES/FlatBuffers-LICENSE.txt", None),
+    (os.path.join(CRCPP_DIR, "LICENSE"), "LICENSES/CRCpp-LICENSE.txt", "crccpp/"),
 ]
 
 # C headers a core file may include with angle brackets. C++ standard headers
@@ -302,8 +306,9 @@ def build_outputs(manifest_path, errors):
     mirror = {}
     for source in closure:
         mirror[mirror_path_for(source)] = read_bytes(source)
-    for source, dest in LICENSES:
-        mirror[dest] = read_bytes(source)
+    for source, dest, needs_prefix in LICENSES:
+        if needs_prefix is None or any(rel.startswith(needs_prefix) for rel in mirror):
+            mirror[dest] = read_bytes(source)
 
     wrappers = {}
     for rel in sorted(mirror):

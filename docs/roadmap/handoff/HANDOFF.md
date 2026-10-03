@@ -1,13 +1,14 @@
 # Open3DBroadcast: handoff to the next session
 
-Written 2026-09-30 by the cloud session that drove M1, M2 and the start of M3 of the plugin hardening roadmap. Updated 2026-10-01 with the control-channel work (ADR 0011, CTL-1..5) that landed afterwards; ADR 0011 accepted and WP-CTL added to the roadmap the same day. Updated 2026-10-03 when the cloud session finished WP-A1 (#305–#314) and WP-A2a to A2c (#316–#318) and handed the work over to Claude on desktop (§0); updated the same day when Claude on desktop finished WP-A2d. Read this first, then the files it points to.
+Written 2026-09-30 by the cloud session that drove M1, M2 and the start of M3 of the plugin hardening roadmap. Updated 2026-10-01 with the control-channel work (ADR 0011, CTL-1..5) that landed afterwards; ADR 0011 accepted and WP-CTL added to the roadmap the same day. Updated 2026-10-03 when the cloud session finished WP-A1 (#305–#314) and WP-A2a to A2c (#316–#318) and handed the work over to Claude on desktop (§0); updated the same day when Claude on desktop finished WP-A2d (#319) and WP-A2e. Read this first, then the files it points to.
 
 ## 0. Handover to Claude on desktop (2026-10-03)
 
 The cloud session stops after WP-A2c (#318). The next session runs on the maintainer's machine.
 
-- **State of `develop`:** WP-A1 complete; WP-A2a (#316), A2b (#317) and A2c (#318) merged. WP-A2d (audio clock, cached device enumeration) done on desktop as #319, built and tested locally with UE 5.7. `O3D_TRANSPORT_API_VERSION` is **5**, unreleased (last tag v0.9.6); everything since c98c92c is under Unreleased in the CHANGELOG. No open PRs from the cloud session.
-- **Start here:** WP-A2e (§2a item 5): core table CRC and builder reuse (`src/o3ds`, CORE-7, CORE-18). Then removing `o3d.Sender.AsyncPipeline` one release later.
+- **State of `develop`:** WP-A1 complete; WP-A2a (#316), A2b (#317) and A2c (#318) merged. WP-A2d (audio clock, cached device enumeration) merged as #319. WP-A2e (core CRC and builder reuse) done on desktop as #320, built and tested locally (UE 5.7 and the core with MSVC). `O3D_TRANSPORT_API_VERSION` is **5**, unreleased (last tag v0.9.6); everything since c98c92c is under Unreleased in the CHANGELOG. No open PRs from the cloud session.
+- **Start here:** WP-A2 is complete except removing `o3d.Sender.AsyncPipeline`, which waits one release (§2a item 6). Next in M3 is WP-A3 (god classes); WP-A4 to WP-A7 can go in parallel where files do not overlap (§2). Open WP-A2 follow-ups: the Insights numbers (below), the root-bone test asset, and the Parse half of CORE-18 (reuse `Transform`s on a full sync).
+- **Local core build:** the core and its CTest suite build with MSVC like core-tests.yml's Windows job (vcvars64, Ninja, NNG/CRCpp/FlatBuffers installed to a prefix, `-DO3DS_BUILD_TESTS=ON`). `sync_o3ds_core.py` needs git to trust the submodule checkouts on this machine ("dubious ownership"); pass it for one process with `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*` rather than changing the global git config.
 - **What a local UE 5.7 build can now do that the cloud session could not** (pitfall 25: the cloud session reached neither the UE source mirror nor the Epic docs, so every engine API added in WP-A2 was first checked by the CI compile):
   - Record the **Unreal Insights numbers** ADR 0008 Verification asks for (before/after with `o3d.Sender.AsyncPipeline` 0 and 1). The capture steps, timers (`O3D.Sender.Sample`, `O3D.Sender.Pipeline.Serialize`, `O3D.Sender.Pipeline.Send`), `o3d.Sender.DumpPipelineStats` and the budgets are in the ADR 0008 addendum "implementation notes (WP-A2c)". Record them on #318 or in a follow-up PR.
   - Check the unverified engine APIs listed in the ADR 0008 addenda (WP-A2b tick APIs; WP-A2c `UE::Tasks::Launch`, `ETaskPriority::BackgroundHigh`, `TRACE_CPUPROFILER_EVENT_SCOPE_STR`) and ADR 0008 open questions 1 and 2 against the engine source.
@@ -25,7 +26,7 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M0 Decisions (ADRs 0001–0010) | Done (#261–#263) |
 | M1 Safety and correctness: WP-S1..S11, WP-T1, WP-T2 | Done (#264–#279) |
 | M2 Fab-buildable package: WP-F1..F4, F6..F9, F11 | Done (#274–#286). **F0 and F5 wait on the maintainer** (see §5) |
-| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime), PR 3 (results, state, capabilities), PR 4a (building blocks + Loopback), PR 4b (TCP), PR 4c (UDP), PR 4d (NNG), PR 4e (MoQ), PR 4f (WebRTC add-on), PR 5a (typed config), PR 5b (consumer API), PR 5c (rest of item 8) and step 6 (shims removed) done: WP-A1 is complete. WP-A2 (async sender, ADR 0008) in progress: A2a (settings snapshot, serializer without component, frame pool, sampling clock), A2b (tick group and prerequisite) and A2c (the pose pipeline: serialization and sends on a worker) and A2d (audio on the sender clock, cached device enumeration) done; next is A2e (core CRC and builder reuse)** (see §2 and §2a) |
+| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime), PR 3 (results, state, capabilities), PR 4a (building blocks + Loopback), PR 4b (TCP), PR 4c (UDP), PR 4d (NNG), PR 4e (MoQ), PR 4f (WebRTC add-on), PR 5a (typed config), PR 5b (consumer API), PR 5c (rest of item 8) and step 6 (shims removed) done: WP-A1 is complete. WP-A2 (async sender, ADR 0008) in progress: A2a (settings snapshot, serializer without component, frame pool, sampling clock), A2b (tick group and prerequisite) and A2c (the pose pipeline: serialization and sends on a worker) A2d (audio on the sender clock, cached device enumeration) and A2e (core CRC and builder reuse) done; WP-A2 is complete except removing `o3d.Sender.AsyncPipeline` one release later** (see §2 and §2a) |
 | M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | Not started |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
 | WP-CTL control channel (D11, ADR 0011) | CTL-1..7 done (#290–#295, CTL-6, CTL-7); live-server checks remain (see §2b) |
@@ -174,7 +175,13 @@ Design: `docs/adr/0008-sender-pipeline-threading.md`, "Implementation outline" i
    - The device is opened once per start: `InitializeTransport` no longer calls `UpdateAudioCaptureBinding` (it ran twice per start, reopening the microphone), and the capture component's `BeginPlay` opens the device only with a sink bound.
    - `O3D_TRANSPORT_API_VERSION` stays **5**. Every engine API used was checked against the local UE 5.7 headers (addendum).
    - Tests: `Open3DBroadcast.Sender.AudioClock.*` (4), `Open3DBroadcast.Sender.AudioDevices.LookupsReadTheCache`, `.StartEnumeratesAndOpensOnce`, `.SinkBindOpensAtMostOnce`; new hook `FO3DSenderAudioCaptureTestAccess`.
-5. **WP-A2e: next.** Core table CRC and builder reuse (CORE-7, CORE-18; `src/o3ds/model.cpp`, CTest benchmark; run `sync_o3ds_core.py` after). Then removing `o3d.Sender.AsyncPipeline` one release later (deletes `FO3DSenderPipeline::FilterFrameInline` and the synchronous branch of `Push`).
+5. **WP-A2e: core CRC and builder reuse. Done (#320).** Details and numbers in the ADR 0008 addendum "implementation notes (WP-A2e)".
+   - `O3DS::Crc32` (`src/o3ds/crc32.h/.cpp`): slicing-by-8 CRC-32 with CRCpp's `CRC_32()` parameters, so the value and the wire format are unchanged. `finalize()` and `Parse()` use it; the core no longer includes `CRC.h`, so the plugin mirror drops it and the CRC++ licence (`sync_o3ds_core.py` copies that licence only while a `crccpp/` file is mirrored), and `Open3DStreamCore.Build.cs` drops the include path.
+   - The six whole-buffer `Serialize*` functions reuse a `thread_local` `FlatBufferBuilder`; `finalize()` writes in place.
+   - MSVC Release, one 250-bone, 250-curve subject: Serialize 499 to 96 µs, Parse 406 to 162 µs, Serialize + Parse 3.5x (the acceptance asks for 3x).
+   - Tests: `core.crc32_tests`; benchmark `o3ds_core_bench` (`core.bench.serialize`, label `bench`).
+   - Not done: Parse still re-creates every `Transform` on a full sync (Parse half of CORE-18; changes receiver resync, its own change).
+6. **Next: remove `o3d.Sender.AsyncPipeline` one release after WP-A2c ships** (deletes `FO3DSenderPipeline::FilterFrameInline` and the synchronous branch of `Push`).
 
 ## 2b. Control channel (WP-CTL, ADR 0011)
 

@@ -7,8 +7,8 @@ using UnrealBuildTool;
 // library and builds with RunUAT BuildPlugin alone (docs/adr/0003, WP-F1).
 //
 // Layout:
-//   Source/ThirdParty/Open3DStreamCore/   generated mirror of the core, o3ds_generated.h, the
-//                                          FlatBuffers runtime headers and CRCpp's CRC.h
+//   Source/ThirdParty/Open3DStreamCore/   generated mirror of the core, o3ds_generated.h and the
+//                                          FlatBuffers runtime headers
 //                                          (Build/Scripts/sync_o3ds_core.py; see SYNC_STAMP.txt)
 //   Private/Core/O3DSCore_*.cpp            generated: one translation unit per mirrored .cpp,
 //                                          compiled with the core's warnings switched off
@@ -43,10 +43,6 @@ public class Open3DStreamCore : ModuleRules
         // this module and every module that depends on it. Third-party headers: system include
         // (BUILD-3). CoreDir/o3ds itself is never an include path: o3ds/math.h would shadow <math.h>.
         PublicSystemIncludePaths.Add(CoreDir);
-
-        // CRC.h is used by o3ds/model.cpp only.
-        PrivateIncludePaths.Add(Path.Combine(CoreDir, "crccpp"));
-        PrivateDefinitions.Add("CRCPP_USE_NAMESPACE");
 
         // O3DS_API (src/o3ds/o3ds_export.h) exports the core's classes and functions from this
         // module in modular builds and imports them in the modules that depend on it.

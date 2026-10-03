@@ -51,10 +51,11 @@ binaries. License texts are in
 | Component | Version | License | Text |
 | --- | --- | --- | --- |
 | Google FlatBuffers (runtime headers) | 2.0.6, submodule `615616c` | Apache-2.0 | [`FlatBuffers-LICENSE.txt`](Source/ThirdParty/Open3DStreamCore/LICENSES/FlatBuffers-LICENSE.txt) |
-| CRC++ (`CRC.h`) | submodule `71f2152` | BSD-3-Clause | [`CRCpp-LICENSE.txt`](Source/ThirdParty/Open3DStreamCore/LICENSES/CRCpp-LICENSE.txt) |
 
 No FlatBuffers library is linked: the core uses only its header-only runtime.
-CML is no longer listed: nothing in the plugin uses it.
+CML is no longer listed: nothing in the plugin uses it. CRC++ is no longer listed
+either: since WP-A2e the core computes its CRC-32 itself (`o3ds/crc32.cpp`), so
+no CRC++ code ships.
 
 ---
 

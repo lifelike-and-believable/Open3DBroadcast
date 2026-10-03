@@ -23,17 +23,32 @@ SOFTWARE.
 */
 
 #include "model.h"
+#include "crc32.h"
 #include "getTime.h"
 #include "parse_limits.h"
-#include "CRC.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <iterator>
+#include <cstring>
 #include <map>
 #include <sstream>
 
 using namespace O3DS::Data;
+
+namespace
+{
+	//! One FlatBufferBuilder per thread, cleared and reused by every
+	//! Serialize* call that writes a whole buffer (CORE-18). Clear() keeps the
+	//! builder's allocation, so a steady stream of frames stops allocating
+	//! once the largest frame has been built. The calls never nest, and each
+	//! finishes with the builder before it returns.
+	flatbuffers::FlatBufferBuilder& ReusableBuilder()
+	{
+		thread_local flatbuffers::FlatBufferBuilder builder(16 * 1024);
+		builder.Clear();
+		return builder;
+	}
+}
 
 void operator >>(const O3DS::TransformTranslation& src, O3DS::Data::Translation &dst)
 {
@@ -971,7 +986,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 	int Subject::Serialize(std::vector<char> &outbuf, double timestamp)
 	{
 		if (timestamp == 0.0) timestamp = GetTime();
-		flatbuffers::FlatBufferBuilder builder;
+		flatbuffers::FlatBufferBuilder& builder = ReusableBuilder();
 
 		std::vector<flatbuffers::Offset<O3DS::Data::Subject> > subjects;
 		
@@ -996,7 +1011,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			timestamp = GetTime();
 		}
 
-		flatbuffers::FlatBufferBuilder builder;
+		flatbuffers::FlatBufferBuilder& builder = ReusableBuilder();
 
 		std::vector<flatbuffers::Offset<O3DS::Data::SubjectUpdate>> outSubjectUpdates;
 		outSubjectUpdates.push_back(this->SerializeUpdate(builder, count, deltaThreshold, quantRanges));
@@ -1019,7 +1034,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			timestamp = GetTime();
 		}
 
-		flatbuffers::FlatBufferBuilder builder;
+		flatbuffers::FlatBufferBuilder& builder = ReusableBuilder();
 
 		std::vector<flatbuffers::Offset<O3DS::Data::SubjectUpdate>> outSubjectUpdates;
 		outSubjectUpdates.push_back(this->SerializeUpdateResidual(builder, count, deltaThreshold, timestamp, seq));
@@ -1044,7 +1059,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 	{
 		if(timestamp == 0.0) timestamp = GetTime();
 
-		flatbuffers::FlatBufferBuilder builder;
+		flatbuffers::FlatBufferBuilder& builder = ReusableBuilder();
 
 		std::vector<flatbuffers::Offset<O3DS::Data::Subject> > subjects;
 
@@ -1067,23 +1082,17 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 	void finalize(flatbuffers::FlatBufferBuilder& builder, std::vector<char>& outbuf, std::uint32_t flags)
 	{
-		outbuf.resize(0);
+		const uint8_t* buf = builder.GetBufferPointer();
+		const size_t size = builder.GetSize();
 
-		uint8_t* buf = builder.GetBufferPointer();
-		int size = builder.GetSize();
-
-		// Flags
-		//std::uint32_t flags = 0x0001;
-		const char* flagptr = (const char*)&flags;
-		std::copy(flagptr, flagptr + 4, back_inserter(outbuf));
-
-		// Checksum
-		std::uint32_t crc = CRCPP::CRC::Calculate(buf, size, CRCPP::CRC::CRC_32());
-		const char* crcptr = (const char*)&crc;
-		std::copy(crcptr, crcptr + 4, back_inserter(outbuf));
-
-		// Data
-		std::copy(buf, buf + size, back_inserter(outbuf));
+		// Header (flags, then CRC-32 of the payload, both in host byte order
+		// as before), then the payload, written in place: one resize, which
+		// keeps outbuf's capacity when the caller reuses it (CORE-18).
+		const std::uint32_t crc = Crc32(buf, size);
+		outbuf.resize(8 + size);
+		std::memcpy(outbuf.data(), &flags, 4);
+		std::memcpy(outbuf.data() + 4, &crc, 4);
+		std::memcpy(outbuf.data() + 8, buf, size);
 	}
 
 
@@ -1098,7 +1107,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			timestamp = GetTime();
 		}
 
-		flatbuffers::FlatBufferBuilder builder;
+		flatbuffers::FlatBufferBuilder& builder = ReusableBuilder();
 
 		std::vector<flatbuffers::Offset<O3DS::Data::SubjectUpdate>> outSubjectUpdates;
 
@@ -1127,7 +1136,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			timestamp = GetTime();
 		}
 
-		flatbuffers::FlatBufferBuilder builder;
+		flatbuffers::FlatBufferBuilder& builder = ReusableBuilder();
 
 		std::vector<flatbuffers::Offset<O3DS::Data::SubjectUpdate>> outSubjectUpdates;
 
@@ -1208,7 +1217,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			return false;
 		}
 
-		std::uint32_t crc = CRCPP::CRC::Calculate(data + 8, len - 8, CRCPP::CRC::CRC_32());
+		std::uint32_t crc = Crc32(data + 8, len - 8);
 
 		std::uint32_t flags = *(std::uint32_t*)data;
 		std::uint32_t check = *(std::uint32_t*)(data + 4);
