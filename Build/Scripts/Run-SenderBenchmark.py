@@ -14,6 +14,10 @@ timers for each case's region, and prints one table:
   capture-to-send          the pipeline's LastCaptureToSendSeconds sampled once per frame per
                            sender: p50, p99 and the largest seen (ms)
   dropped                  frames the pipeline dropped (queue full), out of submitted
+  accepted/refused         payloads the transport accepted and refused. Loopback has no receiver
+                           in the benchmark, so it refuses almost everything: its rows time the
+                           refusal path, not a delivered send. UDP sends to a port nobody binds,
+                           which still counts as sent.
 
 Budgets (ADR 0008 item 11): game thread <= 0.1 ms median per sender; worker serialize <= 0.2 ms
 per frame; capture-to-send p99 <= 2 frames at 60 Hz (33.3 ms); no pipeline drops.
@@ -141,10 +145,11 @@ def main():
             fmt(float(fields["latency_ms_max"]), 2),
             f'{fields["dropped"]}/{fields["submitted"]}',
             fields["max_queued"],
+            f'{fields["accepted"]}/{fields["refused"]}',
         ])
 
     header = ["case", "samples", "GT median ms", "GT p99 ms", "worker median ms", "worker p99 ms",
-              "c2s p50 ms", "c2s p99 ms", "c2s max ms", "dropped", "max queued"]
+              "c2s p50 ms", "c2s p99 ms", "c2s max ms", "dropped", "max queued", "accepted/refused"]
     lines = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
     lines += ["| " + " | ".join(row) + " |" for row in rows]
     table = "\n".join(lines)

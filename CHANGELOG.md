@@ -744,6 +744,7 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   off, which includes serialization and the send) to about 0.025 ms (pipeline on); the worker
   takes 0.24 ms per frame with one sender and 0.36-0.37 ms with ten (median); capture-to-send p99
   0.6-2.2 ms; no pipeline drops. The worker misses ADR 0008's 0.2 ms budget; the others are met.
+  The Loopback cases have no receiver, so their sends are refusals; the UDP cases send.
 
 ### Root-bone pose test with a skeletal mesh built in code (WP-A2 follow-up, ADR 0008 Verification)
 
