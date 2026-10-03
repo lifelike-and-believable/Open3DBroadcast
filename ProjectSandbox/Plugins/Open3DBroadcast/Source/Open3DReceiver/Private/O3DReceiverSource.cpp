@@ -895,6 +895,10 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
 
     // Static data when the subject is new this session or its names changed (FO3DLiveLinkPublisher).
     const bool bNeedStaticUpdate = Publisher->PublishStatic(Decoded);
+    if (bNeedStaticUpdate)
+    {
+        FO3DPerformanceMetrics::Get().RecordSkeletonUpdate();
+    }
 
     // C1: feed the real frame into this subject's concealment engine before
     // pushing it - only for the gated (A2) path, where WorldTimeSecondsOverride

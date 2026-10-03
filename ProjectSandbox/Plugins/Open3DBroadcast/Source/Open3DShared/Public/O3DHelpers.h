@@ -6,18 +6,15 @@
 
 namespace O3DHelpers
 {
-    // Replace whitespace with '_' and keep only [-._A-Za-z0-9/]
+    // Replace each space with '_', then keep only [-._A-Za-z0-9/]: any other character, tabs and
+    // newlines included, is dropped.
     OPEN3DSHARED_API FString SanitizeSubjectName(const FString& Raw);
 
     // Simple wildcard match supporting '*' and '?' (case-sensitive)
     OPEN3DSHARED_API bool NameMatchesPattern(const FString& Text, const FString& Pattern);
 
-    // URL helpers
-    // Split base and query string into key/value (lowercased keys/values)
-    OPEN3DSHARED_API void UrlSplitQuery(const FString& InUrl, FString& OutBase, TMap<FString, FString>& OutQuery);
-
-    // Return URL without its query
-    OPEN3DSHARED_API FString StripQuery(const FString& InUrl);
+    // UrlSplitQuery and StripQuery were deleted (SHR-34): unused, and UrlSplitQuery lowercased
+    // the values. Parse URLs with FURL, FParse or FGenericPlatformHttp::UrlDecode.
 
     // NormalizeTcpUrlHostPort was deleted (SHR-9: it rewrote tcp://192.168.1.10 to
     // tcp://192.168.1:10). Parse endpoints with O3DTransportOptions::ParseHostPort.
@@ -31,10 +28,4 @@ namespace O3DHelpers
     OPEN3DSHARED_API uint64 Fnv1a64(const void* Data, SIZE_T Bytes, uint64 Seed = 1469598103934665603ull);
     OPEN3DSHARED_API uint64 HashNames(const TArray<FName>& Names);
     OPEN3DSHARED_API uint64 HashNamesAndParents(const TArray<FName>& Names, const TArray<int32>& Parents);
-}
-
-// Temporary compatibility namespace to ease migration from legacy O3DS* helpers.
-namespace O3DSHelpers
-{
-    using namespace O3DHelpers;
 }
