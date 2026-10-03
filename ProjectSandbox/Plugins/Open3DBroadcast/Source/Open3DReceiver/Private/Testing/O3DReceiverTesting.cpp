@@ -6,6 +6,7 @@
 
 #include "O3DLiveLinkPublisher.h"
 #include "O3DReceiverConcealment.h"
+#include "O3DReceiverControlRouter.h"
 #include "O3DReceiverStreamScheduler.h"
 #include "O3DReceiverFrameDecoder.h"
 #include "O3DHelpers.h"
@@ -225,6 +226,56 @@ int32 FO3DReceiverConcealmentProbe::GetNumEngines() const
 bool FO3DReceiverConcealmentProbe::HasClockOffsetEstimate() const
 {
 	return Concealment->HasClockOffsetEstimate();
+}
+
+FO3DReceiverControlRouterProbe::FO3DReceiverControlRouterProbe()
+	: Router(MakeUnique<FO3DReceiverControlRouter>())
+{
+}
+
+FO3DReceiverControlRouterProbe::~FO3DReceiverControlRouterProbe() = default;
+
+void FO3DReceiverControlRouterProbe::ApplyConfig()
+{
+	Router->ApplyConfig();
+}
+
+void FO3DReceiverControlRouterProbe::HandlePayload(bool bEnabled, TConstArrayView<uint8> Payload, double NowSeconds, const FString& StreamId)
+{
+	Router->HandlePayload(bEnabled, Payload.GetData(), Payload.Num(), NowSeconds, StreamId);
+}
+
+void FO3DReceiverControlRouterProbe::Tick(bool bEnabled, double NowSeconds, const FString& StreamId, int64 PresentedSenderTimeUs)
+{
+	Router->Tick(bEnabled, NowSeconds, StreamId, [this, PresentedSenderTimeUs](const std::vector<std::string>& MocapSubjects, uint64_t& OutUs)
+	{
+		LastAskedSubjects.Reset();
+		for (const std::string& Subject : MocapSubjects)
+		{
+			LastAskedSubjects.Add(UTF8_TO_TCHAR(Subject.c_str()));
+		}
+		if (PresentedSenderTimeUs < 0)
+		{
+			return false;
+		}
+		OutUs = static_cast<uint64_t>(PresentedSenderTimeUs);
+		return true;
+	});
+}
+
+void FO3DReceiverControlRouterProbe::FlushHeld(const FString& StreamId)
+{
+	Router->FlushHeld(StreamId);
+}
+
+uint64 FO3DReceiverControlRouterProbe::GetPayloadsDroppedDisabled() const
+{
+	return Router->GetPayloadsDroppedDisabled();
+}
+
+int32 FO3DReceiverControlRouterProbe::GetNumHeld() const
+{
+	return static_cast<int32>(Router->GetNumHeld());
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

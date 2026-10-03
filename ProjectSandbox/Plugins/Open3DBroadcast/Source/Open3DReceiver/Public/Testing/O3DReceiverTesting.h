@@ -18,6 +18,12 @@
 #include "Transport/O3DSerializedFrameConsumer.h"
 #include "Sound/SoundWaveProcedural.h"
 
+// Test-only header: O3DS::Control::AlignerStats below needs the core type (Open3DStreamCore, which
+// the test module depends on). No other public header of this module includes the core.
+THIRD_PARTY_INCLUDES_START
+#include "o3ds/control.h"
+THIRD_PARTY_INCLUDES_END
+
 struct FO3DRemoteAudioComponentTestAccessor
 {
 	static void CallEnsureSoundWave(UO3DRemoteAudioComponent* Component, int32 NumChannels, int32 SampleRate)
@@ -76,9 +82,9 @@ struct FO3DReceiverSourceTestAccessor
 	// Control channel (ADR 0011, CTL-4).
 	static bool StartTransport(FO3DReceiverSource& Source) { return Source.StartTransport(); }
 	static void StopTransport(FO3DReceiverSource& Source) { Source.StopTransport(); }
-	static uint64 GetControlPayloadsDroppedDisabled(const FO3DReceiverSource& Source) { return Source.ControlPayloadsDroppedDisabled; }
-	static const O3DS::Control::AlignerStats& GetAlignerStats(const FO3DReceiverSource& Source) { return Source.ControlAligner.GetStats(); }
-	static size_t GetHeldControlChanges(const FO3DReceiverSource& Source) { return Source.ControlAligner.NumHeld(); }
+	static uint64 GetControlPayloadsDroppedDisabled(const FO3DReceiverSource& Source) { return Source.GetControlPayloadsDroppedDisabled(); }
+	static const O3DS::Control::AlignerStats& GetAlignerStats(const FO3DReceiverSource& Source) { return Source.GetControlAlignerStats(); }
+	static size_t GetHeldControlChanges(const FO3DReceiverSource& Source) { return Source.GetNumHeldControlChanges(); }
 
 	// Typed config (WP-A1 PR 5a): the config the source would start its transport with.
 	static FO3DTransportConfig BuildTransportConfig(const FO3DReceiverSource& Source) { return Source.BuildTransportConfig(); }
@@ -316,6 +322,32 @@ public:
 
 private:
 	TUniquePtr<FO3DReceiverConcealment> Concealment;
+};
+
+class FO3DReceiverControlRouter;
+
+/** Owns one FO3DReceiverControlRouter (a private class of this module, WP-A3). */
+class OPEN3DRECEIVER_API FO3DReceiverControlRouterProbe
+{
+public:
+	FO3DReceiverControlRouterProbe();
+	~FO3DReceiverControlRouterProbe();
+
+	FO3DReceiverControlRouterProbe(const FO3DReceiverControlRouterProbe&) = delete;
+	FO3DReceiverControlRouterProbe& operator=(const FO3DReceiverControlRouterProbe&) = delete;
+
+	void ApplyConfig();
+	void HandlePayload(bool bEnabled, TConstArrayView<uint8> Payload, double NowSeconds, const FString& StreamId);
+	/** PresentedSenderTimeUs < 0: no live mocap stream for the source. Records the subjects asked about. */
+	void Tick(bool bEnabled, double NowSeconds, const FString& StreamId, int64 PresentedSenderTimeUs);
+	void FlushHeld(const FString& StreamId);
+	uint64 GetPayloadsDroppedDisabled() const;
+	int32 GetNumHeld() const;
+
+	TArray<FString> LastAskedSubjects;
+
+private:
+	TUniquePtr<FO3DReceiverControlRouter> Router;
 };
 
 #endif // WITH_DEV_AUTOMATION_TESTS

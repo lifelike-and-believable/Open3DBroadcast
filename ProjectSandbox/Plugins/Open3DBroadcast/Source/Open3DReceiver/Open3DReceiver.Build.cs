@@ -19,9 +19,10 @@ public class Open3DReceiver : ModuleRules
         bEnableExceptions = true;
 
         // The o3ds core, FlatBuffers and o3ds_generated.h come from the Open3DStreamCore module,
-        // compiled from source in this plugin (docs/adr/0003, WP-F1). Public: O3DReceiverSource.h
-        // includes core headers and has core types as members.
-        PublicDependencyModuleNames.Add("Open3DStreamCore");
+        // compiled from source in this plugin (docs/adr/0003, WP-F1). Private since WP-A3 (RCV-29):
+        // no public header of this module includes a core header, so modules that depend on this
+        // one no longer get the core's include paths.
+        PrivateDependencyModuleNames.Add("Open3DStreamCore");
 
         // Public, checked against Public/ (SHR-20): UObject types (CoreUObject, Engine), the LiveLink
         // source, factory and settings base classes (LiveLinkInterface), and Shared's transport types.
