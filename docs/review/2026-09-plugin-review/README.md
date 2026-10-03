@@ -2,6 +2,8 @@
 
 **Baseline:** `develop` @ `7aea235` · **Date:** 2026-09-29
 
+> **Note (2026-10-03):** WP-A1 step 6 (#314, 5ee5ac6) removed the deprecated transport shims. Findings in [sender.md](sender.md), [receiver.md](receiver.md), [shared.md](shared.md) and [transports-sockets-loopback-nng.md](transports-sockets-loopback-nng.md) still name APIs that no longer exist, such as `O3DTransport::RegisterSender`, `RegisterTransportCustomization`, the `FScopedConfiguring*` scopes, `EditLegacyDescriptor`, `SecretOptionKeys` and `SupportsAudio()`/`SupportsControl()`. The findings are kept as written against the baseline above; the replacements are listed in the CHANGELOG entry for step 6 and in the ADR 0007 addendum "implementation notes (WP-A1 step 6)".
+
 This folder holds the detailed findings from a full review of the Open3DBroadcast Unreal plugin, the `src/o3ds` core library, and the build, CI, packaging and documentation around them. The implementation plan built from these findings is [`docs/roadmap/plugin-hardening-and-fab-readiness.md`](../../roadmap/plugin-hardening-and-fab-readiness.md). Its §8 assigns every finding ID below to exactly one work package.
 
 | File | Scope | ID prefix | Findings |
