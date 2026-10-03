@@ -230,6 +230,7 @@ void UO3DSenderComponent::StartCapture()
 	// starting a transport (which may open sockets), so a failed start leaves
 	// nothing running.
 	LastStartCaptureError.Reset();
+	ResidualFallbackWarnedFor.Reset();
 	if (!TargetMesh.IsValid() && !bEnableAudio && !bAllowControlOnly)
 	{
 		LastStartCaptureError = TEXT("No valid TargetMesh, audio is disabled and control-only is off.");
@@ -419,7 +420,77 @@ void UO3DSenderComponent::InitializeTransport()
 	UE_LOG(LogO3DSenderComponent, Log, TEXT("Auto transport '%s' initialized."), *TransportController->GetConfig().Transport.ToString());
 }
 
+EO3DSenderEncodingMode UO3DSenderComponent::ResolveEncodingMode(bool bResidual, bool bQuantization, EO3DDeliveryGuarantee Delivery)
+{
+	if (bResidual)
+	{
+		return (Delivery == EO3DDeliveryGuarantee::ReliableOrdered) ? EO3DSenderEncodingMode::Residual : EO3DSenderEncodingMode::Quantized;
+	}
+	return bQuantization ? EO3DSenderEncodingMode::Quantized : EO3DSenderEncodingMode::Legacy;
+}
+
+FText UO3DSenderComponent::GetResidualFallbackWarning(FName InTransportName, EO3DDeliveryGuarantee Delivery)
+{
+	if (Delivery == EO3DDeliveryGuarantee::ReliableOrdered)
+	{
+		return FText::GetEmpty();
+	}
+	return FText::Format(NSLOCTEXT("O3DSenderComponent", "ResidualFallbackWarning",
+		"Residual coding needs a transport that delivers reliably and in order; '{0}' is {1}. Quantized frames are sent instead."),
+		FText::FromName(InTransportName),
+		FText::FromString(Delivery == EO3DDeliveryGuarantee::Unreliable ? TEXT("unreliable") : TEXT("of unknown reliability")));
+}
+
+EO3DDeliveryGuarantee UO3DSenderComponent::GetConfiguredDeliveryGuarantee() const
+{
+	const FName SelectedTransport = GetSelectedTransportName();
+	if (SelectedTransport.IsNone())
+	{
+		return EO3DDeliveryGuarantee::Unknown;
+	}
+	FO3DTransportCapabilities Capabilities;
+	if (!FO3DTransportRegistry::Get().GetCapabilities(SelectedTransport, BuildTransportConfigImpl(false), Capabilities))
+	{
+		return EO3DDeliveryGuarantee::Unknown;
+	}
+	return Capabilities.Delivery;
+}
+
+FText UO3DSenderComponent::GetConfiguredResidualFallbackWarning() const
+{
+	return bEnableResidualCoding ? GetResidualFallbackWarning(GetSelectedTransportName(), GetConfiguredDeliveryGuarantee()) : FText::GetEmpty();
+}
+
+EO3DDeliveryGuarantee UO3DSenderComponent::GetActiveDeliveryGuarantee() const
+{
+	const TSharedPtr<IOpen3DSender> SenderInstance = TransportController.IsValid() ? TransportController->GetSender() : TSharedPtr<IOpen3DSender>();
+	return SenderInstance.IsValid() ? SenderInstance->GetCapabilities().Delivery : EO3DDeliveryGuarantee::Unknown;
+}
+
+void UO3DSenderComponent::WarnResidualFallback(EO3DDeliveryGuarantee Delivery)
+{
+	// Without a sender nothing is sent, so there is nothing to warn about yet.
+	const TSharedPtr<IOpen3DSender> SenderInstance = TransportController.IsValid() ? TransportController->GetSender() : TSharedPtr<IOpen3DSender>();
+	if (!SenderInstance.IsValid())
+	{
+		return;
+	}
+	const FName Transport = TransportController->GetConfig().Transport;
+	const FString Key = FString::Printf(TEXT("%s/%s"), *Transport.ToString(), LexToString(Delivery));
+	if (Key == ResidualFallbackWarnedFor)
+	{
+		return;
+	}
+	ResidualFallbackWarnedFor = Key;
+	UE_LOG(LogO3DSenderComponent, Warning, TEXT("%s: %s"), *GetPathName(), *GetResidualFallbackWarning(Transport, Delivery).ToString());
+}
+
 FO3DTransportConfig UO3DSenderComponent::BuildTransportConfig() const
+{
+	return BuildTransportConfigImpl(true);
+}
+
+FO3DTransportConfig UO3DSenderComponent::BuildTransportConfigImpl(bool bResolveSecrets) const
 {
 	const FO3DSenderAudioCaptureConfig CaptureConfig = BuildAudioCaptureConfig();
 
@@ -433,7 +504,14 @@ FO3DTransportConfig UO3DSenderComponent::BuildTransportConfig() const
 	// Declared secret keys are never copied into the options; they are resolved from the secret
 	// store into Config.Secrets (ADR 0004).
 	TMap<FString, FString> Options;
-	FO3DSenderTransportSettings::BuildConfigOptions(TransportOptions, SelectedTransport, Options, Config.Secrets);
+	if (bResolveSecrets)
+	{
+		FO3DSenderTransportSettings::BuildConfigOptions(TransportOptions, SelectedTransport, Options, Config.Secrets);
+	}
+	else
+	{
+		FO3DSenderTransportSettings::BuildPublicOptions(TransportOptions, SelectedTransport, Options);
+	}
 	Config.AdvancedParams = Options;
 
 	Config.Audio = FO3DSenderAudioBinding::BuildTransportConfig(GetAudioSettings(), CaptureConfig);
@@ -851,18 +929,14 @@ namespace
 const FO3DSenderEncodingSettings& UO3DSenderComponent::UpdateEncodingSnapshot()
 {
 	FO3DSenderEncodingSettings& Settings = EncodingSnapshot;
-	// Residual takes precedence when both are enabled (see bEnableQuantization).
-	if (bEnableResidualCoding)
+	// Residual takes precedence when both are enabled (see bEnableQuantization), and only on a
+	// transport that delivers reliably and in order (ADR 0005 (iii)). A change of the effective
+	// mode changes the encoding fingerprint, so the next frame is a full sync (SND-14).
+	const EO3DDeliveryGuarantee Delivery = bEnableResidualCoding ? GetActiveDeliveryGuarantee() : EO3DDeliveryGuarantee::Unknown;
+	Settings.Mode = ResolveEncodingMode(bEnableResidualCoding, bEnableQuantization, Delivery);
+	if (bEnableResidualCoding && Settings.Mode != EO3DSenderEncodingMode::Residual)
 	{
-		Settings.Mode = EO3DSenderEncodingMode::Residual;
-	}
-	else if (bEnableQuantization)
-	{
-		Settings.Mode = EO3DSenderEncodingMode::Quantized;
-	}
-	else
-	{
-		Settings.Mode = EO3DSenderEncodingMode::Legacy;
+		WarnResidualFallback(Delivery);
 	}
 	Settings.ResidualPredictor = ResidualPredictor;
 	Settings.ResidualKeyframeIntervalFrames = ResidualKeyframeIntervalFrames;

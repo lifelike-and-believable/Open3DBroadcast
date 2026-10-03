@@ -36,6 +36,15 @@ private:
     FText GetSelectedTransportText() const;
     FName GetSelectedTransportName() const;
     EVisibility GetTransportCustomizationVisibility() const;
+
+    /**
+     * The residual fallback warning for the edited component (ADR 0005 (iii)): empty unless
+     * residual coding is enabled on a transport that does not deliver reliably and in order.
+     * Recomputed at most every half second, since it builds a transport config.
+     */
+    FText GetResidualDeliveryWarning();
+    FText CachedResidualWarning;
+    double CachedResidualWarningTime = -1.0;
     bool IsTransportSelectionEnabled() const;
 
     bool GetAutoCreateTransportValue(bool& bOutAutoCreate) const;

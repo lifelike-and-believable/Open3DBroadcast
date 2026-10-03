@@ -204,7 +204,8 @@ Receiver, per subject within a stream (`frame_epoch`):
 
 Item (iv), stamping, is implemented in #341: `O3DS::StreamWriter` in core and the UE
 serializer writing every frame through it. Items (viii) and (ix), `ref_seq` and the receiver
-contract, are implemented in #342 (CORE-5, CORE-6). Where the implementation departs from the
+contract, are implemented in #342 (CORE-5, CORE-6). Item (iii), the residual fallback, is
+implemented in PR-PENDING. Where the implementation departs from the
 decision above, and why:
 
 - **One writer per subject, not one per serializer.** The receiver that shipped in the meantime
@@ -245,3 +246,10 @@ decision above, and why:
   residual stream (parsed without a context) still has no safe resync point except a full
   Subject: the decoder rebuilds history from later cadence keyframes, which does not match the
   sender's. No current sender writes unsequenced residual frames.
+- **Item (iii) reads the transport capabilities, not a customization function.** WP-A1 added
+  `FO3DTransportCapabilities::Delivery` (ADR 0007 item 4) with the values decided here, so the
+  sender asks the running sender's `GetCapabilities()` each frame, and the details panel asks
+  the registry for the selected transport and options (secrets not read). With no sender
+  attached the mode is quantized and nothing is logged, since nothing is sent. The warning is
+  logged once per capture for each transport and guarantee, and shown under the Residual
+  checkbox.

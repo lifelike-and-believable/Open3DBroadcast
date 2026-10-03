@@ -481,6 +481,25 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- **Residual coding is used only on transports that deliver reliably and in order** (ADR 0005
+  (iii)). With `bEnableResidualCoding` on a transport whose capabilities report `Unreliable`
+  or `Unknown` (UDP, NNG pub, MoQ, WebRTC with `webrtc.prefer_lossy`), the sender sends
+  quantized frames instead, with the component's quantization settings, and logs one Warning
+  per capture and transport. The decision uses the running sender's `GetCapabilities()`, so a
+  transport attached or switched mid-capture changes the mode, and the encoding fingerprint
+  makes the next frame a full sync. Loopback, TCP, NNG pair or push, and WebRTC's reliable
+  channel keep residual coding.
+  - **Details panel:** the Residual category shows the same warning while residual coding is
+    on and the selected transport, with its current options, is not `ReliableOrdered`
+    (`UO3DSenderComponent::GetConfiguredResidualFallbackWarning`, from the transport
+    registry's capabilities; no secrets are read). The Residual and quantization tooltips now
+    describe this and the receivers' hold until the next full sync.
+  - API: `UO3DSenderComponent::ResolveEncodingMode`, `GetResidualFallbackWarning`,
+    `GetConfiguredDeliveryGuarantee`, `GetConfiguredResidualFallbackWarning`.
+  - Tests: `Open3DBroadcast.Sender.Encoding.ResidualFallsBackOnUnreliableTransports` (the
+    decision table, the configured warning, and a capture on the fake transport made
+    unreliable by the new `fake.delivery` option: quantized updates and one warning).
+
 - **Receivers hold a subject instead of applying an update they cannot decode correctly**
   (ADR 0005 (ix); CORE-5, CORE-6). For sequenced frames (every UE sender since #341), an update
   relative to a full Subject the receiver missed, or a residual update after a lost frame, is

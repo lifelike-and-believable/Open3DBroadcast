@@ -41,8 +41,11 @@ private:
 
 using FO3DFakeLinkRef = TSharedRef<FO3DFakeLink, ESPMode::ThreadSafe>;
 
-/** Capabilities of the fake transport (ADR 0007 item 4): in-order link, control, receiver audio. */
-OPEN3DBROADCASTTESTS_API FO3DTransportCapabilities GetFakeTransportCapabilities();
+/**
+ * Capabilities of the fake transport (ADR 0007 item 4): in-order link, control, receiver audio.
+ * Delivery is ReliableOrdered unless Config has the option fake.delivery=unreliable (ADR 0005 (iii) tests).
+ */
+OPEN3DBROADCASTTESTS_API FO3DTransportCapabilities GetFakeTransportCapabilities(const FO3DTransportConfig* Config = nullptr);
 
 /**
  * IOpen3DSender that follows the transport contract the conformance suite checks: sends are
@@ -65,7 +68,7 @@ public:
 	virtual EO3DSendResult SendSerialized(FO3DSendPayload&& Payload) override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual FO3DTransportStats GetStats() const override;
-	virtual FO3DTransportCapabilities GetCapabilities() const override { return GetFakeTransportCapabilities(); }
+	virtual FO3DTransportCapabilities GetCapabilities() const override;
 	virtual EO3DConnectionState GetConnectionState() const override { return ConnectionState.Get(); }
 	virtual void SetStateChangedCallback(FO3DConnectionStateCallback Callback) override { ConnectionState.SetCallback(MoveTemp(Callback)); }
 	/** Same running and backpressure rules as SendSerialized (Invalid for bytes that are not a control envelope); not counted as a frame. */

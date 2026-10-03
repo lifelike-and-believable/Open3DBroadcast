@@ -145,6 +145,15 @@ void FO3DSenderTransportSettings::BuildConfigOptions(const FOptions& Options, FN
 	TArray<FString> SecretKeys;
 	TMap<FString, FString> SecretEnvVars;
 	O3DSenderTransportSettingsPrivate::GetSecretDeclaration(Transport, SecretKeys, SecretEnvVars);
+	BuildPublicOptions(Options, Transport, OutOptions);
+	FO3DSecretStore::Get().ResolveAll(Transport.ToString(), GetCredentialProfile(Options, Transport), SecretKeys, SecretEnvVars, OutSecrets);
+}
+
+void FO3DSenderTransportSettings::BuildPublicOptions(const FOptions& Options, FName Transport, FOptions& OutOptions)
+{
+	TArray<FString> SecretKeys;
+	TMap<FString, FString> SecretEnvVars;
+	O3DSenderTransportSettingsPrivate::GetSecretDeclaration(Transport, SecretKeys, SecretEnvVars);
 	OutOptions.Reset();
 	for (const TPair<FString, FString>& Option : Options)
 	{
@@ -153,7 +162,6 @@ void FO3DSenderTransportSettings::BuildConfigOptions(const FOptions& Options, FN
 			OutOptions.Add(Option.Key, Option.Value);
 		}
 	}
-	FO3DSecretStore::Get().ResolveAll(Transport.ToString(), GetCredentialProfile(Options, Transport), SecretKeys, SecretEnvVars, OutSecrets);
 }
 
 bool FO3DSenderTransportSettings::IsRestartProperty(FName Property)

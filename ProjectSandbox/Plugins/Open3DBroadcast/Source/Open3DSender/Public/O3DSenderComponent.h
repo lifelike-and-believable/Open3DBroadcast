@@ -350,11 +350,13 @@ public:
 	bool bLogFilteredCurves = false;
 
 	/** Enable delta/residual transmission (roadmap doc §5/C2) instead of a full snapshot every
-	 *  frame. Only safe on reliable, ordered transports (TCP, NNG pair or push, WebRTC reliable
-	 *  channel): residual coding's predictor history diverges from the receiver's if a packet is
-	 *  dropped. There is no automatic transport-reliability gate yet (ADR 0005 (iii)). A full sync
-	 *  every FullSyncIntervalSeconds resets the encoder and bounds how long a divergence lasts.
-	 *  Per-frame curve epsilon/delta filtering is off in this mode. Does not compose with
+	 *  frame. Used only on transports that deliver reliably and in order (Loopback, TCP, NNG pair
+	 *  or push, WebRTC's reliable channel): a lost residual frame breaks the predictor history, and
+	 *  receivers then hold the subject until the next full sync. On any other transport (UDP, NNG
+	 *  pub, MoQ, WebRTC with webrtc.prefer_lossy) the sender logs one warning and sends quantized
+	 *  frames instead, with the quantization settings below (ADR 0005 (iii)). A full sync every
+	 *  FullSyncIntervalSeconds resets the encoder. Per-frame curve epsilon/delta filtering is off
+	 *  in this mode. Does not compose with
 	 *  quantization below - if both are enabled, Residual takes precedence. Residual frames need
 	 *  receivers that implement wire protocol 2 (Open3DBroadcast core 1.1.0 or later); older
 	 *  receivers drop them (ADR 0009). */
@@ -376,9 +378,10 @@ public:
 
 	/** Enable adaptive variable-bit channel quantization (roadmap doc §6/D1) on the legacy
 	 *  delta-threshold path instead of a full snapshot every frame. Translations are quantized
-	 *  relative to the last full sync, which both ends re-anchor to. On a lossy transport a receiver
-	 *  that joins late or misses a full sync recovers at the next full sync (every
-	 *  FullSyncIntervalSeconds). Per-frame curve epsilon/delta filtering is off in this mode. Does
+	 *  relative to the last full sync, which both ends re-anchor to. Safe on lossy transports: a
+	 *  receiver that joins late or misses a full sync holds the subject until the next full sync
+	 *  (every FullSyncIntervalSeconds), and a lost update only delays a channel's change until it
+	 *  changes again or the next full sync. Per-frame curve epsilon/delta filtering is off in this mode. Does
 	 *  not compose with Residual above yet - if both are enabled, Residual takes precedence and this
 	 *  is ignored. Quantized frames need receivers that implement wire protocol 2 (Open3DBroadcast
 	 *  core 1.1.0 or later); older receivers drop them (ADR 0009). */
@@ -580,11 +583,42 @@ private:
 	void TeardownTransport();
 	void InitializeTransport();
 	FO3DTransportConfig BuildTransportConfig() const;
+	/** BuildTransportConfig; without bResolveSecrets the secret store is not read (Config.Secrets stays empty). */
+	FO3DTransportConfig BuildTransportConfigImpl(bool bResolveSecrets) const;
+	/** The running sender's delivery guarantee; Unknown when no sender is attached. */
+	EO3DDeliveryGuarantee GetActiveDeliveryGuarantee() const;
+	/** Logs the residual fallback once per transport and guarantee within a capture (ADR 0005 (iii)). */
+	void WarnResidualFallback(EO3DDeliveryGuarantee Delivery);
+	/** What WarnResidualFallback last warned about ("<transport>/<guarantee>"); cleared by StartCapture. */
+	FString ResidualFallbackWarnedFor;
 	void UpdateAudioCaptureBinding();
 	/** Stops the pipeline from calling into this component (listener) and from sending (sender). Waits for a frame being processed. */
 	void DetachPipeline();
 
 public:
+	/**
+	 * The encoding a frame is sent with (ADR 0005 (iii)): residual only when the transport
+	 * delivers reliably and in order; otherwise quantized, which is safe on lossy transports.
+	 * Residual takes precedence over quantization when both are enabled.
+	 */
+	static EO3DSenderEncodingMode ResolveEncodingMode(bool bResidual, bool bQuantization, EO3DDeliveryGuarantee Delivery);
+
+	/**
+	 * The warning shown and logged when residual coding is enabled on a transport that does not
+	 * deliver reliably and in order; empty when it does (ADR 0005 (iii)).
+	 */
+	static FText GetResidualFallbackWarning(FName InTransportName, EO3DDeliveryGuarantee Delivery);
+
+	/**
+	 * The delivery guarantee of the selected transport with the current options, from the
+	 * transport registry, without starting it or reading secrets (Unknown when the transport is
+	 * not registered). For the details panel.
+	 */
+	EO3DDeliveryGuarantee GetConfiguredDeliveryGuarantee() const;
+
+	/** GetResidualFallbackWarning for the selected transport and options; empty when residual coding is off. */
+	FText GetConfiguredResidualFallbackWarning() const;
+
 	/**
 	 * Retrieve a transport option by key (case-sensitive). Returns empty string if missing.
 	 * Always empty for a key the active transport declares secret (ADR 0004).
