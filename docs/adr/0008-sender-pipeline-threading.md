@@ -377,3 +377,25 @@ What `SendSerialized` costs depends on the transport: UDP calls `SendTo` under a
   - capture-to-send p99 at most two frames at 60 Hz (33.3 ms): **met** (at most 2.2 ms; largest single value 8 ms);
   - no pipeline drops in steady state: **met** (none; at most one frame queued).
 - **Not measured:** a packaged game, real meshes with physics, non-zero curve values (they change update sizes, not full syncs), and the core's per-frame cost apart from the trace scopes.
+
+## Addendum: worker cost within budget (WP-A2 follow-up, 2026-10-03)
+
+- **Status:** the worker budget the "Insights numbers" addendum missed (at most 0.2 ms per frame) is met, with the same benchmark and setup, for one and ten senders. The wire format is unchanged (byte-for-byte, tested).
+- **Profile first.** Trace scopes for each step of a legacy frame on the worker (`O3D.Sender.Pipeline.Filter`, `O3D.Sender.Serializer.Validate`, `.Build`, `.CalcMatrices`, `.Core`, `.Copy`, and the existing `O3D.Sender.Pipeline.Send`; `Run-SenderBenchmark.py` prints their medians) showed, for one UDP sender (median ms): Build 0.091, Core 0.068, Filter 0.030, CalcMatrices 0.023, Send 0.008, Validate 0.003, Copy 0.002.
+- **Changes (legacy encoding, the default):**
+  1. **Build:** the core `Subject` is kept per subject (`FSubjectCache::LegacySubjects`) and rebuilt only when the frame's skeleton descriptor differs (the same snapshot is reused; another snapshot is compared by bone names, case-sensitive, and parents, never by hash alone); curve names are rewritten only when they differ (case-sensitive, because the wire carries the text), otherwise only values are copied. It used to allocate a `SubjectList`, 250 transforms and every bone and curve name as UTF-8 per frame.
+  2. **CalcMatrices** is no longer called: the core's `Subject::Serialize` reads each transform's translation, rotation, scale and matrix list, never the local or world matrices it computes, and the legacy path ignored its result. NaN/Inf bone values are still rejected before (`SerializePoseFrameTo`).
+  3. **Core output buffer** is kept per subject (`LegacyBuffer`), so `finalize()` (WP-A2e) reuses its capacity.
+  4. **Filter:** `FO3DSenderCurveFilter::Apply` built an `FString` of every curve name every frame; it now builds one only for a verbose log or an uncached pattern match. Filtering results are unchanged (the curve filter tests pass unchanged).
+- **Results** (median ms per frame on the worker, pipeline on; first numbers from the "Insights numbers" addendum, then this change; two runs of the change agreed within 0.01 ms):
+
+  | case | worker before | worker after | Build | Core | Filter |
+  |---|---|---|---|---|---|
+  | UDP, 1 sender | 0.248 | 0.118 | 0.091 → 0.013 | 0.068 → 0.086 | 0.030 → 0.003 |
+  | UDP, 10 senders | 0.371 | 0.160 | 0.155 → 0.014 | 0.115 → 0.124 | 0.039 → 0.004 |
+  | Loopback, 1 sender (refused sends) | 0.238 | 0.111 | | | |
+  | Loopback, 10 senders (refused sends) | 0.361 | 0.141 | | | |
+
+  Worker p99: 0.23 ms (1 UDP sender), 0.42 ms (10). The synchronous path (pipeline off) on the game thread also fell, from 0.26 to 0.14 ms median per sender. Capture-to-send p99 at most 0.62 ms; no pipeline drops (one of 6,000 frames was dropped in one run of Loopback with ten senders, with a single 25 ms capture-to-send outlier, and not in the repeat run; treated as an OS scheduling stall).
+- **What is left** is mostly the core serializer itself (0.08-0.12 ms, more with ten senders running at once). Delta encodings (residual, quantized) send updates of about 14 µs core cost (WP-A2e addendum) instead of full syncs and are the next lever if more headroom is needed.
+- **Tests:** `Open3DBroadcast.Sender.Wire.LegacyReuseKeepsBytes`: after every frame of a sequence that hits each reuse branch (values moving, curve names differing only in case, curves removed and added back, an equal descriptor in a new snapshot, another subject interleaved, the skeleton growing, a bone name differing only in case, a parent changing, the first skeleton again), the serializer's bytes equal those of a `Subject` built from scratch for the frame the way the serializer did before, `CalcMatrices` included. With the curve-name comparison made case-insensitive the test fails at the case-only step (checked). The sender suite (46 tests) passes.
