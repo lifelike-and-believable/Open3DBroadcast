@@ -716,13 +716,16 @@ change.
   capture component twice (once after the transport started, once more after), closing and opening
   the microphone each time, and a capture component created during play opened the default device
   in its `BeginPlay` as well. It now opens the device once per start; the capture component's
-  `BeginPlay` opens it only when a sink is already bound, and binding a sink later opens it if no
-  start has.
+  `BeginPlay` opens it only when a sink is already bound, and binding a sink later opens it if
+  nothing has tried to since the capture last started (a failed open is not retried until the next
+  start).
 - **Tests.** New `Open3DBroadcast.Sender.AudioClock.MapsOntoSenderClock`, `.DriftDoesNotAccumulate`,
   `.JitterBarelyMovesStamps`, `.DiscontinuitiesReset` (a hitch, a restarted and a leaping source
   clock, a lasting offset change; stamps never go backwards), and
-  `Open3DBroadcast.Sender.AudioDevices.LookupsReadTheCache` and `.StartEnumeratesAndOpensOnce` (a
-  fake device list; one enumeration and one device open per Input start, none in Mix). Existing
+  `Open3DBroadcast.Sender.AudioDevices.LookupsReadTheCache`, `.StartEnumeratesAndOpensOnce` (a
+  fake device list; one enumeration and one device open per Input start, none in Mix) and
+  `.SinkBindOpensAtMostOnce` (in a game world: binding and rebinding a sink after a start, or on a
+  standalone capture component, opens the device at most once). Existing
   tests are unchanged, except that a port helper in `SocketsLifetimeTests.cpp` was renamed: the
   new files regrouped the unity build and its name collided with another file's.
 

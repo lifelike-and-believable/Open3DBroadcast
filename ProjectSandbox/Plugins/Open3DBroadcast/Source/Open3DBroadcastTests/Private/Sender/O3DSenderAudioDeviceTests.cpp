@@ -3,19 +3,26 @@
 // WP-A2d (ADR 0008 item 8, SND-18): audio capture devices are enumerated once per StartCapture
 // that captures from an input device, into a cache that the device pickers and the name-to-index
 // lookups read; the device is opened once per start. A fake enumeration stands in for the platform
-// (the CI runners may have no capture device). Opening the device is real: on a host without one it
-// fails with a warning, which these tests allow; the open attempts are what they count.
+// (the CI runners may have no capture device). Opening the device goes through the engine, but
+// Run-AutomationTests.ps1 starts the editor with -NoSound, so FApp::CanEverRenderAudio() is false
+// and Audio::FAudioCapture uses its null device, whose open fails without logging; the component
+// then logs "Failed to open mic stream", which these tests allow. Same on every host. The open
+// attempts are what they count.
 
 #include "O3DTestHarness.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
 #include "O3DAudioInputDevices.h"
 #include "O3DSenderAudioCaptureComponent.h"
 #include "O3DSenderComponent.h"
 #include "Testing/O3DSenderTesting.h"
+#include "Transport/O3DSenderInterface.h"
 #include "UObject/Package.h"
 
 namespace O3DSenderAudioDeviceTests
@@ -47,6 +54,52 @@ namespace O3DSenderAudioDeviceTests
 
 	private:
 		TSharedRef<TArray<FString>> Names;
+	};
+
+	/** Accepts and drops everything. */
+	class FDiscardingSenderAudioSink final : public IO3DSenderAudioSink
+	{
+	public:
+		virtual bool SubmitPcm(const FString&, const float*, int32, int32, int32, double) override { return true; }
+	};
+
+	/** A standalone game world with its own world context, destroyed when the scope ends (pitfall 26). */
+	class FAudioDeviceTestWorld
+	{
+	public:
+		FAudioDeviceTestWorld()
+		{
+			if (GEngine == nullptr)
+			{
+				return;
+			}
+			World = UWorld::CreateWorld(EWorldType::Game, false);
+			if (World == nullptr)
+			{
+				return;
+			}
+			FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
+			WorldContext.SetCurrentWorld(World);
+			World->InitializeActorsForPlay(FURL());
+		}
+
+		~FAudioDeviceTestWorld()
+		{
+			if (World != nullptr)
+			{
+				GEngine->DestroyWorldContext(World);
+				World->DestroyWorld(false);
+				World->RemoveFromRoot();
+			}
+		}
+
+		FAudioDeviceTestWorld(const FAudioDeviceTestWorld&) = delete;
+		FAudioDeviceTestWorld& operator=(const FAudioDeviceTestWorld&) = delete;
+
+		UWorld* Get() const { return World; }
+
+	private:
+		UWorld* World = nullptr;
 	};
 }
 
@@ -148,6 +201,69 @@ bool FO3DSenderAudioDeviceStartTest::RunTest(const FString& Parameters)
 	Sender->StartCapture();
 	TestEqual(TEXT("A Mix start does not enumerate"), Devices.GetEnumerationCount(), Enumerations + 2);
 	TestEqual(TEXT("Nor open a device"), FO3DSenderAudioCaptureTestAccess::GetNumMicOpenAttempts(*Capture), 2);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderAudioDeviceSinkBindTest, "Open3DBroadcast.Sender.AudioDevices.SinkBindOpensAtMostOnce", O3DB_TEST_FLAGS)
+bool FO3DSenderAudioDeviceSinkBindTest::RunTest(const FString& Parameters)
+{
+	using namespace O3DSenderAudioDeviceTests;
+
+	// Every open fails here (-NoSound: the engine's null capture device), the worst case for
+	// retries: a failed open must not be tried again until the capture restarts.
+	AddExpectedMessage(TEXT("Failed to (open|start) mic stream"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, -1);
+
+	FAudioDeviceTestWorld TestWorld;
+	UWorld* World = TestWorld.Get();
+	if (!TestNotNull(TEXT("A standalone game world"), World))
+	{
+		return false;
+	}
+	AActor* Actor = World->SpawnActor<AActor>();
+	if (!TestNotNull(TEXT("An actor"), Actor))
+	{
+		return false;
+	}
+
+	UO3DSenderAudioCaptureComponent* Capture = NewObject<UO3DSenderAudioCaptureComponent>(Actor);
+	Capture->CaptureMode = EO3DSenderCaptureMode::Input;
+	Capture->RegisterComponent();
+	// No game mode: dispatch BeginPlay here (pitfall 26).
+	Actor->DispatchBeginPlay();
+	if (!TestTrue(TEXT("The capture component has begun play"), Capture->HasBegunPlay()))
+	{
+		return false;
+	}
+	TestEqual(TEXT("BeginPlay without a sink does not open the device"), FO3DSenderAudioCaptureTestAccess::GetNumMicOpenAttempts(*Capture), 0);
+
+	// What the sender component does on a start with a transport: configure (opens), then bind.
+	TSharedRef<FDiscardingSenderAudioSink, ESPMode::ThreadSafe> Sink = MakeShared<FDiscardingSenderAudioSink, ESPMode::ThreadSafe>();
+	Capture->StartCaptureWithMode(EO3DSenderCaptureMode::Input);
+	TestEqual(TEXT("The start opens the device once"), FO3DSenderAudioCaptureTestAccess::GetNumMicOpenAttempts(*Capture), 1);
+	Capture->SetAudioSink(Sink, TEXT("hero"));
+	TestEqual(TEXT("Binding the sink after the start does not open it again"), FO3DSenderAudioCaptureTestAccess::GetNumMicOpenAttempts(*Capture), 1);
+	Capture->SetAudioSink(nullptr, FString());
+	Capture->SetAudioSink(Sink, TEXT("hero"));
+	TestEqual(TEXT("Nor does rebinding it"), FO3DSenderAudioCaptureTestAccess::GetNumMicOpenAttempts(*Capture), 1);
+
+	// A restart may try again, once.
+	Capture->StartCaptureWithMode(EO3DSenderCaptureMode::Input);
+	TestEqual(TEXT("The next start opens once more"), FO3DSenderAudioCaptureTestAccess::GetNumMicOpenAttempts(*Capture), 2);
+
+	// Standalone use: no start, a sink bound after BeginPlay opens the device, once.
+	UO3DSenderAudioCaptureComponent* Standalone = NewObject<UO3DSenderAudioCaptureComponent>(Actor);
+	Standalone->CaptureMode = EO3DSenderCaptureMode::Input;
+	Standalone->RegisterComponent(); // the actor has begun play, so this runs BeginPlay
+	TestTrue(TEXT("The standalone component has begun play"), Standalone->HasBegunPlay());
+	TestEqual(TEXT("Standalone: nothing opened without a sink"), FO3DSenderAudioCaptureTestAccess::GetNumMicOpenAttempts(*Standalone), 0);
+	Standalone->SetAudioSink(Sink, TEXT("solo"));
+	TestEqual(TEXT("Standalone: binding a sink opens the device"), FO3DSenderAudioCaptureTestAccess::GetNumMicOpenAttempts(*Standalone), 1);
+	Standalone->SetAudioSink(nullptr, FString());
+	Standalone->SetAudioSink(Sink, TEXT("solo"));
+	TestEqual(TEXT("Standalone: a failed open is not retried on rebind"), FO3DSenderAudioCaptureTestAccess::GetNumMicOpenAttempts(*Standalone), 1);
+
+	Capture->SetAudioSink(nullptr, FString());
+	Standalone->SetAudioSink(nullptr, FString());
 	return true;
 }
 

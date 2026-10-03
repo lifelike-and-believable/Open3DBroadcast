@@ -370,9 +370,10 @@ void UO3DSenderAudioCaptureComponent::SetAudioSink(const TSharedPtr<IO3DSenderAu
         RebuildSubmixTap();
     }
 
-    // A sink bound after BeginPlay opens the device if no start has opened it (it starts the
-    // stream when it opens it).
-    if (CaptureMode == EO3DSenderCaptureMode::Input && AudioSink.IsValid() && !MicCapture.IsValid() && HasBegunPlay())
+    // A sink bound after BeginPlay opens the device if nothing has tried to since the capture was
+    // last (re)started; a start whose open failed is not retried here (once per start, SND-18).
+    // Opening starts the stream when a sink is bound.
+    if (CaptureMode == EO3DSenderCaptureMode::Input && AudioSink.IsValid() && !MicCapture.IsValid() && !bMicOpenAttempted && HasBegunPlay())
     {
         InitializeMicCapture();
     }
@@ -574,6 +575,7 @@ void UO3DSenderAudioCaptureComponent::InitializeMicCapture()
     }
 
     ++NumMicOpenAttempts;
+    bMicOpenAttempted = true;
     MicCapture.Reset(new Audio::FAudioCapture());
     Audio::FAudioCaptureDeviceParams Params;
     Params.DeviceIndex = Config.DeviceIndex;
@@ -627,6 +629,7 @@ void UO3DSenderAudioCaptureComponent::ShutdownMicCapture()
     }
     bMicStreamOpen = false;
     bMicStreamActive = false;
+    bMicOpenAttempted = false;
 }
 
 void UO3DSenderAudioCaptureComponent::StartMicCaptureIfReady()

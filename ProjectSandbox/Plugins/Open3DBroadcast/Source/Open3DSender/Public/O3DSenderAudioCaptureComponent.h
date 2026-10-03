@@ -164,6 +164,8 @@ private:
 
     bool bMicStreamOpen = false;
     bool bMicStreamActive = false;
+    /** InitializeMicCapture ran since the last ShutdownMicCapture, whether or not the open succeeded. */
+    bool bMicOpenAttempted = false;
     /** Times InitializeMicCapture tried to open the device (tests: once per start, SND-18). */
     int32 NumMicOpenAttempts = 0;
 };

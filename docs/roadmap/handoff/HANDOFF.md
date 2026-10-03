@@ -173,7 +173,7 @@ Design: `docs/adr/0008-sender-pipeline-threading.md`, "Implementation outline" i
    - `FO3DAudioInputDevices` (public, exported): one cached device list, enumerated once per Input `StartCapture`, once in the editor after engine init, and on request (`UO3DSenderComponent::RefreshAudioInputDevices`, `o3d.Sender.Audio.RefreshDevices`). Pickers and name lookups read the cache.
    - The device is opened once per start: `InitializeTransport` no longer calls `UpdateAudioCaptureBinding` (it ran twice per start, reopening the microphone), and the capture component's `BeginPlay` opens the device only with a sink bound.
    - `O3D_TRANSPORT_API_VERSION` stays **5**. Every engine API used was checked against the local UE 5.7 headers (addendum).
-   - Tests: `Open3DBroadcast.Sender.AudioClock.*` (4), `Open3DBroadcast.Sender.AudioDevices.LookupsReadTheCache`, `.StartEnumeratesAndOpensOnce`; new hook `FO3DSenderAudioCaptureTestAccess`.
+   - Tests: `Open3DBroadcast.Sender.AudioClock.*` (4), `Open3DBroadcast.Sender.AudioDevices.LookupsReadTheCache`, `.StartEnumeratesAndOpensOnce`, `.SinkBindOpensAtMostOnce`; new hook `FO3DSenderAudioCaptureTestAccess`.
 5. **WP-A2e: next.** Core table CRC and builder reuse (CORE-7, CORE-18; `src/o3ds/model.cpp`, CTest benchmark; run `sync_o3ds_core.py` after). Then removing `o3d.Sender.AsyncPipeline` one release later (deletes `FO3DSenderPipeline::FilterFrameInline` and the synchronous branch of `Push`).
 
 ## 2b. Control channel (WP-CTL, ADR 0011)
