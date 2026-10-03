@@ -732,6 +732,17 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Receiver LiveLink publisher split out (WP-A3 step 2, RCV-29)
+
+- `FO3DReceiverSource`'s LiveLink side moved into `FO3DLiveLinkPublisher` (private): creating a
+  subject once per session (RCV-7), re-pushing static data when bone or curve names change,
+  pushing real and concealed frames, and removing subjects that stopped sending. Output and the
+  order of pushes are unchanged; the WP-S4 test hooks now live in the publisher (the test
+  accessor sets them through the source).
+- **Tests.** New `Open3DBroadcast.Receiver.LiveLinkPublisher.StaticDataOncePerSessionAndOnChange`
+  and `.FramesAndInactiveSubjects`, through the exported `FO3DLiveLinkPublisherProbe`. Existing
+  tests are unchanged.
+
 ### Receiver frame decoder split out (WP-A3 step 1, RCV-29, RCV-11, RCV-12)
 
 - `FO3DReceiverSource`'s conversion of parsed subjects into LiveLink bone names, parents,

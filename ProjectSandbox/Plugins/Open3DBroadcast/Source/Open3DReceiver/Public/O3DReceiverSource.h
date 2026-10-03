@@ -26,6 +26,7 @@ THIRD_PARTY_INCLUDES_END
 
 class ILiveLinkClient;
 class FO3DReceiverFrameDecoder;
+class FO3DLiveLinkPublisher;
 
 /**
  * LiveLink source implementation that consumes serialized Open3DStream frames via registered transports.
@@ -117,11 +118,12 @@ private:
     void UpdateConnectionLastActive();
     void RemoveInactiveSubjects();
 
-    // bFirstPushThisSession: the subject is not in InitializedSubjects yet. Only then
-    // may the LiveLink subject be created (RCV-7); later static changes re-push
-    // static data only, so per-subject settings are never replaced.
-    void PushSubjectStaticData(const FLiveLinkSubjectKey& SubjectKey, const TArray<FName>& BoneNames, const TArray<int32>& BoneParents, const TArray<FName>& CurveNames, uint64 DescriptorHash, bool bFirstPushThisSession);
-    void PushSubjectFrameData(const FLiveLinkSubjectKey& SubjectKey, const TArray<FTransform>& BoneTransforms, const TArray<FName>& CurveNames, const TArray<float>& CurveValues, double TimestampSeconds, double WorldTimeSecondsOverride, uint64 CurveHash);
+    /** Sets the source GUID here and in the publisher's subject keys. */
+    void SetSourceGuid(const FGuid& InSourceGuid);
+    /** Test seam (WP-S4): routes the publisher's static and frame pushes to these instead of LiveLink. */
+    void SetTestPushHooks(
+        TFunction<void(const FLiveLinkSubjectKey&, const TArray<FName>& BoneNames, const TArray<int32>& BoneParents, const TArray<FName>& CurveNames, bool bFirstPushThisSession)> StaticHook,
+        TFunction<void(const FLiveLinkSubjectKey&, const TArray<FTransform>& BoneTransforms, const TArray<float>& CurveValues, double WorldTime)> FrameHook);
 
     /** Drops every per-sender stream (reorder gate, clock estimator, legacy ordering,
      *  parse state) and all concealment state. Called on transport start and stop only;
@@ -203,7 +205,6 @@ private:
     ILiveLinkClient* Client = nullptr;
     FGuid SourceGuid;
     ULiveLinkSourceSettings* Settings = nullptr;
-    TSet<FName> InitializedSubjects;
 
     std::atomic<bool> bIsValid{true};
 
@@ -233,21 +234,19 @@ private:
     // Activity tracking
     mutable FCriticalSection ConnectionLastActiveSection;
     double ConnectionLastActive = 0.0;
-    TMap<FName, double> SubjectLastUpdateTime;
     static constexpr double InactivityThresholdSeconds = 5.0;
     float TimeSinceLastActivityCheck = 0.0f;
     static constexpr float ActivityCheckIntervalSeconds = 5.0f;
-
-    // Descriptor caches
-    TMap<FName, uint64> SubjectSkeletonHashes;
-    TMap<FName, uint64> SubjectCurveHashes;
 
     // Converts parsed subjects for LiveLink and caches what only changes with the topology:
     // bone names and parents (RCV-4), curve FNames and the subject FName (RCV-12), plus
     // per-frame scratch (RCV-11). WP-A3; always set (created by the constructor).
     TUniquePtr<FO3DReceiverFrameDecoder> FrameDecoder;
 
-    uint64 FrameCounter = 0;
+    // Creates LiveLink subjects, pushes static data and frames, removes inactive subjects, and
+    // holds the WP-S4 test push hooks (WP-A3). Always set (created by the constructor).
+    TUniquePtr<FO3DLiveLinkPublisher> Publisher;
+
     bool bLoggedActiveState = false;
 
     FString LastGateSubjectLabel;     // diagnostic-only subject label for the gate's emit path
@@ -266,10 +265,4 @@ private:
 
     TMap<FName, TUniquePtr<O3DS::ConcealmentEngine>> SubjectConcealment;
     TMap<FName, O3DS::ConcealmentMetrics> PrevConcealmentMetricsBySubject; // last-reported snapshot per subject, for delta metrics reporting
-
-    // Test seam (WP-S4): when bound, static and frame pushes go to these instead of
-    // the LiveLink client, and CanPublish() is true without a client. Unbound in
-    // production. Bound only by FO3DReceiverCorrectnessTestAccessor.
-    TFunction<void(const FLiveLinkSubjectKey&, const TArray<FName>& BoneNames, const TArray<int32>& BoneParents, const TArray<FName>& CurveNames, bool bFirstPushThisSession)> TestStaticPushHook;
-    TFunction<void(const FLiveLinkSubjectKey&, const TArray<FTransform>& BoneTransforms, const TArray<float>& CurveValues, double WorldTime)> TestFramePushHook;
 };
