@@ -352,3 +352,27 @@ What `SendSerialized` costs depends on the transport: UDP calls `SendTo` under a
 - **The mesh is built in code** (`Open3DBroadcastTests/Private/Sender/O3DTestSkeletalMesh.h/.cpp`): `FReferenceSkeletonModifier` on the mesh's reference skeleton, `USkeleton::MergeAllBonesToBoneTree`, `CalculateInvRefMatrices`, `AddLODInfo`, curve metadata with `USkeleton::AddCurveMetaData`, and render data from `AllocateResourceForRendering` with one `FSkeletalMeshLODRenderData` whose `RequiredBones` and `ActiveBoneIndices` list every bone and which has no vertices, so `USkinnedMeshComponent::CreateRenderState_Concurrent` creates no mesh object. `UO3DRootMoverAnimInstance` creates an `FAnimInstanceProxy` whose `Evaluate` writes the reference pose with the root at X = `GFrameCounter % 100000`. All of these were read in the local UE 5.7 source first. The test module gained RenderCore and RHI (link dependencies of the LOD render data).
 - **Open question 2, evidence.** In the editor test run (default evaluation path, `-NullRHI`), with the WP-A2b tick group and prerequisite, the sender captured that frame's evaluated root in 30 of 30 frames; moving the sender before the mesh (`TG_PrePhysics`, mesh `TG_PostPhysics`, prerequisite removed) captured the previous frame's pose in 30 of 30. This supports the default (tick group plus prerequisite) for a pose evaluated by an anim instance; it does not cover physics blending (no physics asset) or a packaged game's parallel evaluation settings.
 - **Also usable for the Insights capture:** `CreateChainMesh(Outer, 250, 250)` gives the 250-bone, 250-curve subject item 11 specifies.
+
+## Addendum: Insights numbers (WP-A2 follow-up, 2026-10-03)
+
+- **Status:** the Verification item "the Insights numbers in Decision §11 are recorded" is done for the scene item 11 describes, with `Build/Scripts/Run-SenderBenchmark.py` and `Open3DBroadcast.Bench.SenderPipeline` (registered only with `O3DB_BENCH=1`). The subject is the code-built 250-bone, 250-curve mesh (`O3DTestSkeletalMesh.h`) evaluated by an anim instance that moves its root every frame; curve values are zero. The world is paced at 60 Hz of wall time, every frame is sampled, and each case runs inside an Insights region; 60 warm-up frames, then 600 measured.
+- **Setup:** UE 5.7 Development editor (`UnrealEditor-Cmd`, `-NullRHI -NoSound`), `-trace=cpu,frame,region`, the maintainer's workstation, `develop` at the WP-A2e and Parse-reuse changes (#320, #321). Tracing adds its own cost to every scope; absolute numbers are for comparison between the cases.
+- **Results** (ms; GT = `O3D.Sender.Sample` on the game thread per sender and frame, which with the pipeline off also contains filtering, serialization and the send; worker = `O3D.Sender.Pipeline.Serialize`, one frame including the send, on the worker with the pipeline on and inline on the game thread with it off; c2s = capture-to-`SendSerialized` latency sampled once per frame per sender):
+
+  | case | GT median | GT p99 | worker median | worker p99 | c2s p50 | c2s p99 | c2s max | dropped | max queued |
+  |---|---|---|---|---|---|---|---|---|---|
+  | Loopback, 1, pipeline off | 0.271 | 0.557 | 0.224 | 0.480 | 0.27 | 0.55 | 0.65 | 0/600 | 0 |
+  | Loopback, 1, pipeline on | 0.027 | 0.063 | 0.238 | 0.514 | 0.32 | 0.61 | 0.73 | 0/600 | 1 |
+  | Loopback, 10, pipeline off | 0.220 | 0.464 | 0.186 | 0.386 | 0.22 | 0.46 | 0.82 | 0/6000 | 0 |
+  | Loopback, 10, pipeline on | 0.023 | 0.056 | 0.361 | 0.837 | 0.59 | 1.55 | 4.89 | 0/6000 | 1 |
+  | UDP, 1, pipeline off | 0.262 | 0.558 | 0.217 | 0.469 | 0.25 | 0.55 | 0.76 | 0/600 | 0 |
+  | UDP, 1, pipeline on | 0.027 | 0.064 | 0.248 | 0.597 | 0.32 | 0.65 | 2.25 | 0/600 | 1 |
+  | UDP, 10, pipeline off | 0.233 | 0.475 | 0.194 | 0.405 | 0.23 | 0.47 | 0.88 | 0/6000 | 0 |
+  | UDP, 10, pipeline on | 0.023 | 0.055 | 0.371 | 0.894 | 0.61 | 2.17 | 7.95 | 0/6000 | 1 |
+
+- **Against the budgets:**
+  - game thread at most 0.1 ms median per sender: **met** (0.023-0.027 ms, about a tenth of the synchronous path);
+  - worker serialize at most 0.2 ms per frame: **missed** (0.24-0.25 ms with one sender, 0.36-0.37 ms with ten). The same work inline on the game thread takes 0.19-0.22 ms, so with ten senders the worker tasks appear to slow each other down (ten `BackgroundHigh` tasks per frame on shared workers). Open question 1's fallback (W2, a thread per sender) or fewer, larger tasks are the options; neither is tried here;
+  - capture-to-send p99 at most two frames at 60 Hz (33.3 ms): **met** (at most 2.2 ms; largest single value 8 ms);
+  - no pipeline drops in steady state: **met** (none; at most one frame queued).
+- **Not measured:** a packaged game, real meshes with physics, non-zero curve values (they change update sizes, not full syncs), and the core's per-frame cost apart from the trace scopes.

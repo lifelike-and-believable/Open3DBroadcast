@@ -189,6 +189,18 @@ Tests that need the internet register only when `O3DB_NETWORK_TESTS=1` is set in
 - `Automation.log` - The editor log
 - Failed tests and their first error are printed as GitHub error annotations and added to the job summary
 
+#### `Run-SenderBenchmark.py`
+Records the ADR 0008 sender pipeline measurement (Decision item 11) with Unreal Insights and summarizes it. Python 3.8+, standard library only; Windows; needs the project's editor binaries built.
+
+```powershell
+python Build/Scripts/Run-SenderBenchmark.py --ue "C:/Program Files/Epic Games/UE_5.7" `
+  --project ProjectSandbox/ProjectSandbox.uproject --out U:/o3dbench
+```
+
+- Runs `Open3DBroadcast.Bench.SenderPipeline` in the editor with `O3DB_BENCH=1` (the benchmark registers no instances otherwise, so CI and default runs never see it) and `-trace=cpu,frame,region`: one, then ten, 250-bone, 250-curve senders built in code, on Loopback and on UDP, with `o3d.Sender.AsyncPipeline` 0 and 1, 600 frames each at 60 Hz of wall time, each case in an Insights region `O3D.Bench.<case>`.
+- Then runs `UnrealInsights.exe -NoUI` with a response file that exports the `O3D.Sender.Sample`, `O3D.Sender.Pipeline.Serialize` and `O3D.Sender.Pipeline.Send` events per region, and prints a table (also `summary.md`): game-thread time per sender, worker time per frame (median, p99), capture-to-send latency (p50, p99, largest; sampled once per frame per sender), dropped frames.
+- `--skip-run` re-exports and re-summarizes an existing `bench.utrace`. Keep `--out` short (long paths break the editor).
+
 ---
 
 ## Common Workflows
