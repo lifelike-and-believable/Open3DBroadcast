@@ -737,9 +737,11 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
 - **Behaviour change.** The receiver's frame decoder now passes the core's translation, rotation
   and scale to LiveLink as doubles, instead of casting each component to float first (UE's
   `FVector` and `FQuat` are double). The wire carries floats, so a full-sync value comes through
-  exactly as before; what changes is a quantized update, which the core rebuilds in double (a
-  translation as anchor plus delta, a rotation dequantized and normalized) and which the float
-  cast used to round (a translation by up to about 0.004 units at 100,000 units from the origin). A value that is finite in double but too large for float is
+  exactly as before; what changes is a quantized or residual-coded update, which the core
+  rebuilds in double (a quantized translation as anchor plus delta, a quantized rotation
+  dequantized, a residual as reference plus residual) and which the float cast used to round (a
+  translation by up to about 0.004 units at 100,000 units from the origin). Concealment predicts
+  from the decoded transforms, so its synthesized frames carry the same precision. A value that is finite in double but too large for float is
   no longer turned into infinity and rejected; the wire cannot carry one.
 - **New metric `InvalidPosesDropped`** (`FO3DPerformanceMetrics::FReceiverMetrics`,
   `RecordInvalidPoseDropped()`, in the metrics dump and CSV as `ReceiverInvalidPosesDropped`): a
