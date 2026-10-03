@@ -134,7 +134,8 @@ bool FWebRTCReceiverLink::ConsumeControl(const uint8* Bytes, size_t Len)
         LogControlDrop(TEXT("malformed control envelope"));
         return true;
     }
-    const int32 EnvelopeBytes = O3DS::UnifiedWireHeaderSize + Payload.Num();
+    // The envelope ends where its payload does (v1 and v2 headers differ in size).
+    const int32 EnvelopeBytes = static_cast<int32>(Payload.GetData() - Bytes) + Payload.Num();
 
     if (ControlQueue.Enqueue(FO3DSendItem::MakeControl(TArray<uint8>(Bytes, EnvelopeBytes))) != EO3DSendResult::Queued)
     {

@@ -25,7 +25,10 @@ namespace O3DAudio
 	{
 		O3DS::EUnifiedCodec Codec = O3DS::EUnifiedCodec::PCM16;
 		O3DS::FAudioFrameMeta Meta;
+		/** PCM16 samples are little-endian (ADR 0009 item 4). */
 		TArray<uint8> Encoded;
+		/** Counts this stream's frames (FFrameEncoder), wraps; the envelope v2 sequence number. */
+		uint32 Sequence = 0;
 	};
 
 	/**
@@ -125,6 +128,9 @@ namespace O3DAudio
 		int32 PendingSampleRate = 0;
 		double PendingStartTimestampSec = 0.0;
 
+		/** Sequence number of the next frame emitted (FEncodedFrame::Sequence). */
+		uint32 NextSequence = 0;
+
 		FStats Stats;
 	};
 
@@ -205,5 +211,12 @@ namespace O3DAudio
 	 * payload is serialized straight after the envelope header in one buffer (SHR-18).
 	 */
 	OPEN3DSHARED_API bool CreateUnifiedAudioMessage(const FEncodedFrame& Frame, double TimestampSec, TArray<uint8>& OutMessage);
+
+	/**
+	 * PCM16 on the wire is little-endian (ADR 0009 item 4): converts NumBytes of host-order
+	 * samples in place, and back. A no-op on little-endian hosts, which is every shipped platform.
+	 */
+	OPEN3DSHARED_API void Pcm16HostToWire(uint8* Bytes, int32 NumBytes);
+	OPEN3DSHARED_API void Pcm16WireToHost(uint8* Bytes, int32 NumBytes);
 }
 

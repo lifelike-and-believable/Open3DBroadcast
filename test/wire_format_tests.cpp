@@ -16,6 +16,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <memory>
 #include <vector>
@@ -334,3 +335,62 @@ O3DS_TEST(Wire_BaselineWriterFramesStillParse)
 		O3DS_CHECK(reader.mLastFrameCheck == Wire::FrameCheck::UndeclaredNewContent);
 	}
 }
+
+O3DS_TEST(Envelope_V2LayoutIsLittleEndianWithSeq)
+{
+	unsigned char b[Wire::kEnvelopeV2HeaderSize + 3] = {};
+	Wire::WriteEnvelopeHeaderV2(b, Wire::EnvelopeKind::Audio, Wire::EnvelopeCodec::PCM16, 0x0807060504030201ull, 3, 0x0D0C0B0Au);
+	const unsigned char expected[24] = { 'O', '3', 'D', 'U', 2, 1, 2, 0,
+		1, 2, 3, 4, 5, 6, 7, 8,  3, 0, 0, 0,  0x0A, 0x0B, 0x0C, 0x0D };
+	O3DS_CHECK(std::memcmp(b, expected, sizeof(expected)) == 0);
+
+	Wire::EnvelopeHeader h;
+	O3DS_CHECK(Wire::ReadEnvelopeHeader(b, sizeof(b), h));
+	O3DS_CHECK(h.version == 2 && h.kind == 1 && h.codec == 2 && h.flags == 0);
+	O3DS_CHECK(h.timestamp_us == 0x0807060504030201ull);
+	O3DS_CHECK(h.payload_size == 3 && h.seq == 0x0D0C0B0Au && h.header_size == 24);
+	O3DS_CHECK(Wire::HasEnvelopeMagic(b, sizeof(b)));
+
+	// The payload must fit; trailing bytes are allowed.
+	O3DS_CHECK(!Wire::ReadEnvelopeHeader(b, Wire::kEnvelopeV2HeaderSize + 2, h));
+	// Version 2 only, flags 0.
+	b[4] = 3;
+	O3DS_CHECK(!Wire::ReadEnvelopeHeader(b, sizeof(b), h));
+	b[4] = 2;
+	b[7] = 1;
+	O3DS_CHECK(!Wire::ReadEnvelopeHeader(b, sizeof(b), h));
+}
+
+O3DS_TEST(Envelope_V1IsStillReadBigEndian)
+{
+	// The pre-D8 layout, as deployed writers send it.
+	const unsigned char v1[20 + 2] = { 'O', '3', 'D', 'A', 1, 2, 3, 0,
+		0, 0, 0, 0, 0, 0x0F, 0x42, 0x40,  0, 0, 0, 2,  0xAA, 0xBB };
+	Wire::EnvelopeHeader h;
+	O3DS_CHECK(Wire::ReadEnvelopeHeader(v1, sizeof(v1), h));
+	O3DS_CHECK(h.version == 1 && h.kind == 2 && h.codec == 3);
+	O3DS_CHECK(h.timestamp_us == 1000000ull && h.payload_size == 2 && h.seq == 0 && h.header_size == 20);
+
+	unsigned char written[20] = {};
+	Wire::WriteEnvelopeHeaderV1(written, Wire::EnvelopeKind::Control, Wire::EnvelopeCodec::O3DControl, 1000000ull, 2);
+	O3DS_CHECK(std::memcmp(written, v1, 20) == 0);
+
+	const unsigned char other[24] = { 'O', '3', 'D', 'X' };
+	O3DS_CHECK(!Wire::HasEnvelopeMagic(other, sizeof(other)));
+	O3DS_CHECK(!Wire::ReadEnvelopeHeader(other, sizeof(other), h));
+	O3DS_CHECK(!Wire::ReadEnvelopeHeader(nullptr, 24, h));
+	// A frame word is never an envelope.
+	const unsigned char frame[24] = { 1, 0, 0, 0 };
+	O3DS_CHECK(!Wire::HasEnvelopeMagic(frame, sizeof(frame)));
+}
+
+O3DS_TEST(Envelope_TimestampIsClampedNotUndefined)
+{
+	O3DS_CHECK(Wire::EnvelopeTimestampUs(1.5) == 1500000ull);
+	O3DS_CHECK(Wire::EnvelopeTimestampUs(0.0) == 0);
+	O3DS_CHECK(Wire::EnvelopeTimestampUs(-3.0) == 0);
+	O3DS_CHECK(Wire::EnvelopeTimestampUs(std::numeric_limits<double>::quiet_NaN()) == 0);
+	O3DS_CHECK(Wire::EnvelopeTimestampUs(std::numeric_limits<double>::infinity()) == 0);
+	O3DS_CHECK(Wire::EnvelopeTimestampUs(1.0e300) == UINT64_MAX);
+}
+

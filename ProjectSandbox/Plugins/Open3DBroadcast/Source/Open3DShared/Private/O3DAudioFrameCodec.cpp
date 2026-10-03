@@ -178,6 +178,8 @@ namespace O3DAudio
 		// SHR-18: convert straight into the frame's payload, no intermediate scratch.
 		Frame.Encoded.SetNumUninitialized(NumSamples * static_cast<int32>(sizeof(int16)));
 		ConvertFloatToPcm16(Interleaved, NumSamples, reinterpret_cast<int16*>(Frame.Encoded.GetData()));
+		Pcm16HostToWire(Frame.Encoded.GetData(), Frame.Encoded.Num());
+		Frame.Sequence = NextSequence++;
 		++Stats.Pcm16Frames;
 	}
 
@@ -204,6 +206,7 @@ namespace O3DAudio
 			// One exact-size allocation for the payload that leaves with the frame.
 			Frame.Encoded.Append(OpusPacketScratch.GetData(), OpusPacketScratch.Num());
 			Frame.Codec = O3DS::EUnifiedCodec::Opus;
+			Frame.Sequence = NextSequence++;
 			PendingFrames = 0;
 			ConsecutiveOpusFailures = 0;
 			++Stats.OpusPackets;
@@ -356,6 +359,7 @@ namespace O3DAudio
 			const int32 NumSamples = PayloadSize / static_cast<int32>(sizeof(int16));
 			OutPcm16.SetNumUninitialized(NumSamples, EAllowShrinking::No);
 			FMemory::Memcpy(OutPcm16.GetData(), Payload, PayloadSize);
+			Pcm16WireToHost(reinterpret_cast<uint8*>(OutPcm16.GetData()), PayloadSize);
 			return true;
 		}
 
@@ -455,6 +459,25 @@ namespace O3DAudio
 			return false;
 		}
 
-		return O3DS::WriteUnifiedHeaderInPlace(O3DS::EUnifiedKind::Audio, Frame.Codec, TimestampSec, OutMessage);
+		return O3DS::WriteUnifiedHeaderInPlace(O3DS::EUnifiedKind::Audio, Frame.Codec, TimestampSec, OutMessage, Frame.Sequence);
+	}
+
+	void Pcm16HostToWire(uint8* Bytes, int32 NumBytes)
+	{
+#if PLATFORM_LITTLE_ENDIAN
+		(void)Bytes;
+		(void)NumBytes;
+#else
+		for (int32 Index = 0; Index + 1 < NumBytes; Index += 2)
+		{
+			Swap(Bytes[Index], Bytes[Index + 1]);
+		}
+#endif
+	}
+
+	void Pcm16WireToHost(uint8* Bytes, int32 NumBytes)
+	{
+		// A byte swap is its own inverse.
+		Pcm16HostToWire(Bytes, NumBytes);
 	}
 }

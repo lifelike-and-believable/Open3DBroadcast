@@ -20,9 +20,9 @@ public class Open3DShared : ModuleRules
         // No bEnableExceptions: this module has no try/catch and includes no C++ third-party
         // headers (opus.h is C). See BUILD-5.
 
-        // Open3DShared does not use the Open3DStream core (the Open3DStreamCore module). The core
-        // include paths and libraries that used to be here existed only for tests, which now live
-        // in Open3DBroadcastTests (WP-T2, SHR-4, SHR-20).
+        // The Open3DStream core (Open3DStreamCore) is a private dependency, included only by .cpp
+        // files (below); the test-only include paths that used to be here moved to
+        // Open3DBroadcastTests (WP-T2, SHR-4, SHR-20).
 
         // Opus library and headers, under Source/ThirdParty/opus so that BuildPlugin and the Fab
         // zip carry them without a FilterPlugin.ini entry (WP-F1, FAB-2).
@@ -59,8 +59,9 @@ public class Open3DShared : ModuleRules
         {
             "Projects", // IPluginManager: FO3DFfiLibrary finds FFI DLLs relative to the owning plugin (TRF-28)
             "Sockets", // O3DTransportOptions::ResolveHostPort resolves host names (TRB-26, WP-A1 step 4)
-            // Private: only O3DControlConvert.cpp includes the core (o3ds/control.h); Open3DShared's
-            // public headers stay free of it (docs/adr/0011-control-channel.md).
+            // Private: O3DControlConvert.cpp (o3ds/control.h) and O3DUnifiedMessage.cpp (the envelope
+            // codec, o3ds/wire_format.h) include the core; Open3DShared's public headers stay free
+            // of it (docs/adr/0011-control-channel.md, docs/adr/0009-protocol-versioning.md).
             "Open3DStreamCore"
         });
     }

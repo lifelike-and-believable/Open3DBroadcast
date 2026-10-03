@@ -38,6 +38,10 @@ namespace O3DSockets::Tcp
 	 * timer is reset and they stop reconnecting while the sender is idle. The sender never
 	 * produces an audio envelope with an empty payload otherwise (CreateUnifiedMessage rejects
 	 * one), so current receivers recognise it unambiguously.
+	 *
+	 * It stays envelope v1 while every other envelope is v2 (ADR 0009 item 4): a receiver from
+	 * before envelope v2 would otherwise take every keepalive for a malformed frame and log it.
+	 * Current receivers read both versions.
 	 */
 	inline TArray<uint8> MakeKeepalivePayload()
 	{

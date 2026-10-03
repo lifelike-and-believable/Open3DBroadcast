@@ -27,9 +27,15 @@ namespace O3DS
         O3DControl = 3
     };
 
-    /** Wire header shared by all Open3DStream unified messages (big-endian as laid out on the wire). */
+    /**
+     * A unified envelope header as read (ADR 0009 item 4). Writers emit envelope v2: magic
+     * "O3DU", 24 bytes, little-endian, with a per-stream sequence number. Readers also accept
+     * envelope v1 (magic "O3DA", 20 bytes, big-endian, no sequence number) during the
+     * compatibility window. The codec lives in the core (o3ds/wire_format.h).
+     */
     struct OPEN3DSHARED_API FUnifiedHeader
     {
+        /** The first 4 bytes as a big-endian number: MagicValueBE() (v1) or MagicValueV2BE() (v2). */
         uint32 MagicBE = 0;
         uint8 Version = 1;
         uint8 Kind = 0;
@@ -37,9 +43,16 @@ namespace O3DS
         uint8 Flags = 0;
         uint64 TimestampUsHost = 0;
         uint32 PayloadSizeHost = 0;
+        /** Per stream and kind, wraps; 0 for envelope v1, which has none. */
+        uint32 Seq = 0;
+        /** Bytes before the payload: UnifiedWireHeaderSizeV1 or UnifiedWireHeaderSize. */
+        int32 HeaderSize = 0;
 
+        /** Envelope v1 magic "O3DA". */
         static constexpr uint32 MagicValueBE() { return 0x4F334441u; }
-        bool IsValidMagic() const { return MagicBE == MagicValueBE(); }
+        /** Envelope v2 magic "O3DU". */
+        static constexpr uint32 MagicValueV2BE() { return 0x4F334455u; }
+        bool IsValidMagic() const { return MagicBE == MagicValueBE() || MagicBE == MagicValueV2BE(); }
         uint32 PayloadSize() const { return PayloadSizeHost; }
         uint64 TimestampUs() const { return TimestampUsHost; }
         EUnifiedKind GetKind() const { return static_cast<EUnifiedKind>(Kind); }
@@ -87,82 +100,36 @@ namespace O3DS
         Dest[7] = static_cast<uint8>(Value & 0xFF);
     }
 
-    /** Parse the unified message header/payload without copying, performing sanity checks along the way. */
-    inline bool ParseUnifiedMessage(const uint8* Data, int32 Size,
-                                    FUnifiedHeader& OutHeader,
-                                    const uint8*& OutPayloadPtr,
-                                    int32& OutPayloadSize)
-    {
-        constexpr int32 WireHeaderSize = 20;
-        if (!Data || Size < WireHeaderSize)
-        {
-            return false;
-        }
+    /**
+     * Parse a unified envelope (v1 or v2) without copying: OutPayloadPtr views the payload inside
+     * Data. False for anything else, or when the payload does not fit in Size (trailing bytes are
+     * allowed).
+     */
+    OPEN3DSHARED_API bool ParseUnifiedMessage(const uint8* Data, int32 Size,
+                                              FUnifiedHeader& OutHeader,
+                                              const uint8*& OutPayloadPtr,
+                                              int32& OutPayloadSize);
 
-        FUnifiedHeader H;
-        H.MagicBE = FUnifiedHeader::ReadBE32(Data + 0);
-        if (!H.IsValidMagic())
-        {
-            return false;
-        }
-        H.Version = Data[4];
-        H.Kind = Data[5];
-        H.Codec = Data[6];
-        H.Flags = Data[7];
-        H.TimestampUsHost = FUnifiedHeader::ReadBE64(Data + 8);
-        H.PayloadSizeHost = FUnifiedHeader::ReadBE32(Data + 16);
+    /** True when Data starts with an envelope magic, v1 or v2: never a raw frame, whatever follows. */
+    OPEN3DSHARED_API bool HasUnifiedEnvelopeMagic(const uint8* Data, int32 Size);
 
-        const int64 Total = (int64)WireHeaderSize + (int64)H.PayloadSizeHost;
-        if (Total > Size)
-        {
-            return false;
-        }
-        OutHeader = H;
-        OutPayloadPtr = Data + WireHeaderSize;
-        OutPayloadSize = (int32)H.PayloadSizeHost;
-        return true;
-    }
+    /** Size of the envelope header writers emit (envelope v2). */
+    constexpr int32 UnifiedWireHeaderSize = 24;
 
-    /** Size of the unified envelope header on the wire. */
-    constexpr int32 UnifiedWireHeaderSize = 20;
+    /** Size of the envelope v1 header, still read during the compatibility window. */
+    constexpr int32 UnifiedWireHeaderSizeV1 = 20;
 
     /** Largest payload the unified envelope wraps (safety limit). */
     constexpr int32 UnifiedMaxPayloadSize = 50 * 1024 * 1024;
 
     /**
-     * Write the unified envelope header into the first UnifiedWireHeaderSize bytes of a message
-     * whose payload has already been written after them. The payload size is taken from the
-     * buffer, so callers can serialize the payload in place without a second copy (SHR-18).
+     * Write an envelope v2 header into the first UnifiedWireHeaderSize bytes of a message whose
+     * payload has already been written after them. The payload size is taken from the buffer, so
+     * callers can serialize the payload in place without a second copy (SHR-18). TimestampSec is
+     * the sender clock; a negative or non-finite value is written as 0. Seq counts the messages
+     * of one stream and kind.
      */
-    inline bool WriteUnifiedHeaderInPlace(EUnifiedKind Kind, EUnifiedCodec Codec, double TimestampSec, TArray<uint8>& InOutMessage)
-    {
-        const int32 PayloadSize = InOutMessage.Num() - UnifiedWireHeaderSize;
-        if (PayloadSize <= 0 || PayloadSize > UnifiedMaxPayloadSize)
-        {
-            return false;
-        }
-
-        // Convert timestamp to microseconds
-        const uint64 TimestampUs = static_cast<uint64>(TimestampSec * 1000000.0);
-
-        uint8* WritePtr = InOutMessage.GetData();
-
-        // Write magic number (big-endian)
-        WriteBE32(WritePtr + 0, FUnifiedHeader::MagicValueBE());
-
-        // Write version, kind, codec, flags
-        WritePtr[4] = 1; // Version
-        WritePtr[5] = static_cast<uint8>(Kind);
-        WritePtr[6] = static_cast<uint8>(Codec);
-        WritePtr[7] = 0; // Flags
-
-        // Write timestamp (big-endian)
-        WriteBE64(WritePtr + 8, TimestampUs);
-
-        // Write payload size (big-endian)
-        WriteBE32(WritePtr + 16, static_cast<uint32>(PayloadSize));
-        return true;
-    }
+    OPEN3DSHARED_API bool WriteUnifiedHeaderInPlace(EUnifiedKind Kind, EUnifiedCodec Codec, double TimestampSec, TArray<uint8>& InOutMessage, uint32 Seq = 0);
 
     /**
      * Largest control payload (the ControlMessage inside the envelope). Equal to
@@ -173,18 +140,8 @@ namespace O3DS
      */
     constexpr int32 UnifiedMaxControlPayloadSize = 1076;
 
-    /** Create a unified message by wrapping a payload with the proper header. */
-    inline bool CreateUnifiedMessage(EUnifiedKind Kind, EUnifiedCodec Codec, const uint8* PayloadData, int32 PayloadSize, double TimestampSec, TArray<uint8>& OutMessage)
-    {
-        if (!PayloadData || PayloadSize <= 0 || PayloadSize > UnifiedMaxPayloadSize)
-        {
-            return false;
-        }
-
-        OutMessage.SetNumUninitialized(UnifiedWireHeaderSize + PayloadSize);
-        FMemory::Memcpy(OutMessage.GetData() + UnifiedWireHeaderSize, PayloadData, PayloadSize);
-        return WriteUnifiedHeaderInPlace(Kind, Codec, TimestampSec, OutMessage);
-    }
+    /** Create a unified message (envelope v2) by wrapping a payload with the proper header. */
+    OPEN3DSHARED_API bool CreateUnifiedMessage(EUnifiedKind Kind, EUnifiedCodec Codec, const uint8* PayloadData, int32 PayloadSize, double TimestampSec, TArray<uint8>& OutMessage, uint32 Seq = 0);
 
     /**
      * Wrap one control payload (ControlPublisher output) in a control envelope for
@@ -193,40 +150,14 @@ namespace O3DS
      * TimestampSec is the sender clock (ADR 0009 item 7); a negative or non-finite value is
      * written as 0.
      */
-    inline bool WriteControlEnvelope(TConstArrayView<uint8> Payload, double TimestampSec, TArray<uint8>& OutMessage)
-    {
-        OutMessage.Reset();
-        if (Payload.Num() <= 0 || Payload.Num() > UnifiedMaxControlPayloadSize)
-        {
-            return false;
-        }
-        const double SafeTimestampSec = (FMath::IsFinite(TimestampSec) && TimestampSec > 0.0) ? TimestampSec : 0.0;
-        return CreateUnifiedMessage(EUnifiedKind::Control, EUnifiedCodec::O3DControl, Payload.GetData(), Payload.Num(), SafeTimestampSec, OutMessage);
-    }
+    OPEN3DSHARED_API bool WriteControlEnvelope(TConstArrayView<uint8> Payload, double TimestampSec, TArray<uint8>& OutMessage, uint32 Seq = 0);
 
     /**
      * The one classifier every receive path uses for control (CTL-3, CTL-6). True when Data is a
-     * well-formed control envelope: kind Control, codec O3DControl, and a payload of 1 to
-     * UnifiedMaxControlPayloadSize bytes. OutPayload then views the bytes inside the envelope,
-     * valid as long as Data is. A buffer with kind Control that fails any other check is
-     * malformed and must be dropped, never treated as mocap.
+     * well-formed control envelope (v1 or v2): kind Control, codec O3DControl, and a payload of 1
+     * to UnifiedMaxControlPayloadSize bytes. OutPayload then views the bytes inside the envelope,
+     * valid as long as Data is; the envelope itself ends at OutPayload's end. A buffer with kind
+     * Control that fails any other check is malformed and must be dropped, never treated as mocap.
      */
-    inline bool TryGetControlPayload(const uint8* Data, int32 Size, TConstArrayView<uint8>& OutPayload)
-    {
-        OutPayload = TConstArrayView<uint8>();
-        FUnifiedHeader Header;
-        const uint8* PayloadPtr = nullptr;
-        int32 PayloadSize = 0;
-        if (!ParseUnifiedMessage(Data, Size, Header, PayloadPtr, PayloadSize))
-        {
-            return false;
-        }
-        if (Header.GetKind() != EUnifiedKind::Control || Header.GetCodec() != EUnifiedCodec::O3DControl
-            || PayloadSize <= 0 || PayloadSize > UnifiedMaxControlPayloadSize)
-        {
-            return false;
-        }
-        OutPayload = TConstArrayView<uint8>(PayloadPtr, PayloadSize);
-        return true;
-    }
+    OPEN3DSHARED_API bool TryGetControlPayload(const uint8* Data, int32 Size, TConstArrayView<uint8>& OutPayload);
 }
