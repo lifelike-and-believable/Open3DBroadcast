@@ -202,7 +202,7 @@ Receiver, per subject within a stream (`frame_epoch`):
 
 ## Implementation notes (WP-A4, 2026-10-03)
 
-Item (iv), stamping, is implemented in PR-PENDING: `O3DS::StreamWriter` in core and the UE
+Item (iv), stamping, is implemented in #341: `O3DS::StreamWriter` in core and the UE
 serializer writing every frame through it. `ref_seq` and the per-subject `last_full_seq` come
 with the needs-keyframe decoding in the next PR. Where the implementation departs from the
 decision above, and why:
