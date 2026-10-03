@@ -247,6 +247,9 @@ public:
 	/** Subjects removed, in the order the publisher reported them. */
 	TArray<FName> RemoveInactiveSubjects(double NowSeconds, double ThresholdSeconds);
 	int32 GetActiveSubjectCount() const;
+	/** What PublishFrame does after a slow push (RCV-26). */
+	void NoteSlowFramePush(FName Subject, double PushMs, double NowSeconds);
+	int32 GetSlowPushesNotLogged() const;
 	void Reset();
 
 	TArray<FStaticPush> Statics;

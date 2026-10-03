@@ -17,6 +17,8 @@ namespace O3DLiveLinkPublisherPrivate
 {
 	/** A push slower than this is logged as a likely LiveLink client stall. */
 	constexpr double SlowPushWarningMs = 5.0;
+	/** Slow frame pushes are logged at most this often: a sustained stall would flood the log (RCV-26). */
+	constexpr double SlowPushWarningIntervalSeconds = 5.0;
 }
 
 void FO3DLiveLinkPublisher::SetClient(ILiveLinkClient* InClient, const FGuid& InSourceGuid)
@@ -95,9 +97,7 @@ void FO3DLiveLinkPublisher::PublishFrame(FName Subject, const TArray<FTransform>
 	const double FrameTimeMs = (FPlatformTime::Seconds() - FrameStartTime) * 1000.0;
 	if (FrameTimeMs > O3DLiveLinkPublisherPrivate::SlowPushWarningMs)
 	{
-		UE_LOG(LogO3DReceiverSource, Warning,
-			TEXT("PushSubjectFrameData took %.2f ms (subject='%s', PRIMARY SUSPECT for latency)"),
-			FrameTimeMs, *Subject.ToString());
+		NoteSlowFramePush(Subject, FrameTimeMs, FPlatformTime::Seconds());
 	}
 
 	SubjectLastUpdateTime.Add(Subject, FPlatformTime::Seconds());
@@ -138,6 +138,22 @@ void FO3DLiveLinkPublisher::Reset()
 	SubjectCurveHashes.Empty();
 	SubjectLastUpdateTime.Empty();
 	FrameCounter = 0;
+	LastSlowPushWarningTime = -1.0e9;
+	SlowPushesNotLogged = 0;
+}
+
+void FO3DLiveLinkPublisher::NoteSlowFramePush(FName Subject, double PushMs, double NowSeconds)
+{
+	if (NowSeconds - LastSlowPushWarningTime < O3DLiveLinkPublisherPrivate::SlowPushWarningIntervalSeconds)
+	{
+		++SlowPushesNotLogged;
+		return;
+	}
+	UE_LOG(LogO3DReceiverSource, Warning,
+		TEXT("PushSubjectFrameData took %.2f ms (subject='%s'): the LiveLink client may be blocking. %d more slow push(es) since the last warning."),
+		PushMs, *Subject.ToString(), SlowPushesNotLogged);
+	LastSlowPushWarningTime = NowSeconds;
+	SlowPushesNotLogged = 0;
 }
 
 void FO3DLiveLinkPublisher::PushStaticData(const FLiveLinkSubjectKey& SubjectKey, const TArray<FName>& BoneNames, const TArray<int32>& BoneParents, const TArray<FName>& CurveNames, bool bFirstPushThisSession)

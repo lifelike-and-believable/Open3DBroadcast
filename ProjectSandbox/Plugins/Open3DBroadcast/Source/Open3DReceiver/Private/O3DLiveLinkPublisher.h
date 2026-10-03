@@ -54,6 +54,13 @@ public:
 	/** Forgets every subject and restarts frame ids (the transport stopped). */
 	void Reset();
 
+	/**
+	 * Logs a slow frame push at most once per 5 s, with the count of those not logged since (RCV-26).
+	 * PublishFrame calls it; public for its test.
+	 */
+	void NoteSlowFramePush(FName Subject, double PushMs, double NowSeconds);
+	int32 GetSlowPushesNotLogged() const { return SlowPushesNotLogged; }
+
 private:
 	FLiveLinkSubjectKey MakeKey(FName Subject) const;
 	void PushStaticData(const FLiveLinkSubjectKey& SubjectKey, const TArray<FName>& BoneNames, const TArray<int32>& BoneParents, const TArray<FName>& CurveNames, bool bFirstPushThisSession);
@@ -68,6 +75,8 @@ private:
 	TMap<FName, uint64> SubjectCurveHashes;
 	TMap<FName, double> SubjectLastUpdateTime;
 	uint64 FrameCounter = 0;
+	double LastSlowPushWarningTime = -1.0e9;
+	int32 SlowPushesNotLogged = 0;
 
 	FStaticPushHook TestStaticPushHook;
 	FFramePushHook TestFramePushHook;

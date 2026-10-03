@@ -732,6 +732,24 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Quieter receiver logs; receive-to-apply latency (WP-A6 PR 1: RCV-25, RCV-26, RCV-33)
+
+- **`o3ds.Receiver.DebugParse` defaults to 0** (was 1), so the receiver's per-packet parse logs
+  are off unless asked for (RCV-26).
+- **Slow LiveLink pushes are logged at most once per 5 s per receiver source**, with the number of
+  slow pushes not logged since, instead of a `Warning` on every slow frame; the "PRIMARY SUSPECT"
+  wording is gone (RCV-26).
+- **`UO3DRemoteAudioComponent` logs per component** (RCV-25): the "Subscribed" line (now naming
+  the owner) on every BeginPlay and the first PCM frame of every component, instead of only the
+  first component in the process; the debug log counters are per component too.
+- **The receiver's "round-trip latency" metric is now named for what it measures** (RCV-33):
+  receive-to-apply latency on this machine. It is now recorded on the gated path as well (from the
+  packet's local receive time, so the reorder gate's wait is included), not only the legacy path.
+  **Rename for C++ and CSV users:** `FReceiverMetrics::AvgRoundTripLatencyMs` is now
+  `AvgReceiveToApplyLatencyMs`, and the CSV row `AvgRoundTripLatencyMs` is now
+  `AvgReceiveToApplyLatencyMs`; the dump says "Receive-to-Apply Latency".
+- **Tests.** New `Open3DBroadcast.Receiver.LiveLinkPublisher.ThrottlesSlowPushWarnings`.
+
 ### Sender transport options and secrets split out (WP-A3 step 8, SND-22)
 
 - `UO3DSenderComponent`'s transport option and credential handling moved into

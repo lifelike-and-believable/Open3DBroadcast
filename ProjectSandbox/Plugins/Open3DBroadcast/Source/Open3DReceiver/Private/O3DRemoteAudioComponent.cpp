@@ -75,15 +75,12 @@ void UO3DRemoteAudioComponent::BeginPlay()
 
     BusDelegateHandle = FO3DAudioBus::OnPcm16().AddUObject(this, &UO3DRemoteAudioComponent::OnAudioPcm16);
 
-    static bool bOnce = false;
-    if (!bOnce)
+    // Per component (RCV-25): a function-static flag logged only for the first component in the process.
+    bLoggedFirstFrame = false;
+    UE_LOG(LogO3DReceiverAudio, Log, TEXT("Subscribed to FO3DAudioBus (Gain=%.2f, owner '%s')"), Gain, *GetNameSafe(GetOwner()));
+    if (!AudioComp)
     {
-        bOnce = true;
-        UE_LOG(LogO3DReceiverAudio, Log, TEXT("Subscribed to FO3DAudioBus (Gain=%.2f)"), Gain);
-        if (!AudioComp)
-        {
-            UE_LOG(LogO3DReceiverAudio, Warning, TEXT("No UAudioComponent present/created on owner '%s'"), *GetNameSafe(GetOwner()));
-        }
+        UE_LOG(LogO3DReceiverAudio, Warning, TEXT("No UAudioComponent present/created on owner '%s'"), *GetNameSafe(GetOwner()));
     }
 
     if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
@@ -193,8 +190,7 @@ void UO3DRemoteAudioComponent::OnAudioFrame(const FString& StreamLabel, const FS
     {
         if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
         {
-            static int32 DropEvery = 0;
-            if ((DropEvery++ % 100) == 0)
+            if ((FilterDropLogCounter++ % 100) == 0)
             {
                 UE_LOG(LogO3DReceiverAudio, Verbose, TEXT("Dropped frame by filter subject='%s' stream='%s'"), *SubjectName, *StreamLabel);
             }
@@ -222,8 +218,7 @@ void UO3DRemoteAudioComponent::OnAudioFrame(const FString& StreamLabel, const FS
 
     if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
     {
-        static int32 LogEvery = 0;
-        if ((LogEvery++ % 50) == 0)
+        if ((QueueLogCounter++ % 50) == 0)
         {
             UE_LOG(LogO3DReceiverAudio, Verbose, TEXT("Queued frames=%d ch=%d sr=%d stream='%s' subject='%s'"),
                 NumFrames,
@@ -258,10 +253,9 @@ void UO3DRemoteAudioComponent::OnAudioPcm16(const O3DS::FAudioFrameMeta& Meta, T
         return;
     }
 
-    static bool bFirstFrame = false;
-    if (!bFirstFrame)
+    if (!bLoggedFirstFrame)
     {
-        bFirstFrame = true;
+        bLoggedFirstFrame = true;
         UE_LOG(LogO3DReceiverAudio, Log, TEXT("First PCM16 frame received (%d samples) stream='%s' subject='%s'"), NumSamples, *StreamLabel, *SubjectName);
     }
 

@@ -90,4 +90,22 @@ bool FO3DLiveLinkPublisherFramesTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLiveLinkPublisherSlowPushTest, "Open3DBroadcast.Receiver.LiveLinkPublisher.ThrottlesSlowPushWarnings", O3DB_TEST_FLAGS)
+bool FO3DLiveLinkPublisherSlowPushTest::RunTest(const FString& Parameters)
+{
+	// RCV-26: a sustained LiveLink stall logged a warning on every frame. Now at most one per 5 s,
+	// with the count of the slow pushes not logged.
+	AddExpectedError(TEXT("PushSubjectFrameData took"), EAutomationExpectedMessageFlags::Contains, 2);
+	FO3DLiveLinkPublisherProbe Probe;
+	const FName Subject(TEXT("Hero"));
+	Probe.NoteSlowFramePush(Subject, 8.0, 100.0);
+	TestEqual(TEXT("The first slow push is logged"), Probe.GetSlowPushesNotLogged(), 0);
+	Probe.NoteSlowFramePush(Subject, 9.0, 101.0);
+	Probe.NoteSlowFramePush(Subject, 9.0, 104.9);
+	TestEqual(TEXT("Those within 5 s are counted, not logged"), Probe.GetSlowPushesNotLogged(), 2);
+	Probe.NoteSlowFramePush(Subject, 7.0, 105.0);
+	TestEqual(TEXT("After 5 s the next is logged, with the count"), Probe.GetSlowPushesNotLogged(), 0);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
