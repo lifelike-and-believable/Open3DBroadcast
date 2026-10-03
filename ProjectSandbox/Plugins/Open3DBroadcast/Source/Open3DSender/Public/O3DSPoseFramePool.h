@@ -15,11 +15,12 @@ struct FO3DSPoseFrame;
  *
  * Bounded: at most Capacity frames ever exist at once, counting the frames handed out and the ones
  * waiting in the pool. Acquire() returns null when all of them are out; the caller then skips that
- * sample. In WP-A2a capture is synchronous and holds one frame at a time, so this never happens;
- * the WP-A2c pipeline sizes the pool as its queue depth plus 2 (ADR 0008 item 4).
+ * sample. The WP-A2c pipeline (FO3DSenderPipeline) sizes its pool as the largest queue depth plus
+ * 2 (ADR 0008 item 4); frames are created on demand, so a capture at the default depth of 2 never
+ * holds more than four, and the queue drops its oldest frame before the pool can run out.
  *
- * Acquire() and Release() may be called from different threads (the WP-A2c worker returns frames);
- * the lock is held only to move a pointer.
+ * Acquire() and Release() may be called from different threads (the pipeline worker returns
+ * frames); the lock is held only to move a pointer.
  */
 class OPEN3DSENDER_API FO3DSPoseFramePool
 {

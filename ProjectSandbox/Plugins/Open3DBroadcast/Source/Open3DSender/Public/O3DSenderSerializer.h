@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/CriticalSection.h"
 
 THIRD_PARTY_INCLUDES_START
 #include "o3ds/sender_sync.h"
@@ -42,12 +43,15 @@ public:
 	 * Name shown for this instance by o3ds.Sender.DumpStats (the owning component sets its path).
 	 * Replaces the component pointer the serializer used to hold (SND-22, WP-A2a).
 	 */
-	void SetStatsLabel(const FString& InLabel) { StatsLabel = InLabel; }
+	void SetStatsLabel(const FString& InLabel);
 
 	/**
 	 * Emitted after a SubjectList buffer is produced for a frame. The timestamp is the frame's
 	 * sampling time (FO3DSPoseFrame::CaptureTimeSec, ADR 0008 item 7). Fires on the thread that
-	 * calls SerializePoseFrame: the game thread until the WP-A2c pipeline.
+	 * calls SerializePoseFrame: since WP-A2c that is the sender pipeline's worker thread while
+	 * o3d.Sender.AsyncPipeline is on (the default), and the game thread when it is off. It fires
+	 * with this serializer's state lock held, so a listener must not block on another thread that
+	 * may call into this serializer, and must not create or destroy a serializer.
 	 */
 	FOnO3DSerializedFrame OnSerializedFrame;
 
@@ -64,7 +68,14 @@ public:
 	void ClearAllCaches();
 
 	/** Returns the number of cached subjects (primarily for diagnostics/tests). */
-	int32 GetCacheCount() const { return SubjectState.Num(); }
+	int32 GetCacheCount() const;
+
+	/**
+	 * Makes the next frame of Subject a full sync in the persistent encodings (ADR 0007 item 3:
+	 * a full sync the transport refused with DroppedBackpressure). No effect on the legacy
+	 * encoding, which sends a full Subject every frame, or for a subject without state.
+	 */
+	void RequestFullSync(const FString& Subject);
 
 	/**
 	 * Serialize one sampled frame and broadcast the bytes through OnSerializedFrame. Names, parents,
@@ -76,6 +87,15 @@ public:
 	 * by the component after sampling and curve filtering; public so tests can drive it directly.
 	 */
 	void SerializePoseFrame(const FString& Subject, const FO3DSPoseFrame& Frame);
+
+	/**
+	 * SerializePoseFrame that also hands the bytes to the caller (WP-A2c): OutBytes receives the
+	 * payload OnSerializedFrame was broadcast with (emptied first), so the sender pipeline can move
+	 * it into the transport without a copy, and bOutFullSync says whether it is a full Subject
+	 * (ADR 0005 (ii); every legacy frame is one). Returns false when the frame was dropped or
+	 * produced no bytes.
+	 */
+	bool SerializePoseFrameTo(const FString& Subject, const FO3DSPoseFrame& Frame, TArray<uint8>& OutBytes, bool& bOutFullSync);
 
 	/** Per-subject counters (primarily for diagnostics/tests). */
 	struct FSubjectStats
@@ -103,6 +123,15 @@ private:
 		FString LastError;
 	};
 
+	/**
+	 * Guards SubjectState, StatsLabel and PersistentSubjects (WP-A2c). Serialization runs on the
+	 * pipeline worker while o3ds.Sender.DumpStats reads every instance from the game thread, so
+	 * every member function takes it. Recursive (FCriticalSection), so a listener of
+	 * OnSerializedFrame may read the stats. Held only by the serializing thread outside a dump, so
+	 * it is uncontended in steady state.
+	 */
+	mutable FCriticalSection StateLock;
+
 	TMap<FString, FSubjectCache> SubjectState;
 	FString StatsLabel;
 
@@ -117,15 +146,20 @@ private:
 	TSharedPtr<O3DS::SubjectList> PersistentSubjects;
 
 	void DropFrame(const FString& Subject, FSubjectCache& Cache, const FString& Reason);
-	void SerializeFrameLegacy(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache);
-	void SerializeFramePersistent(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache);
-	void BroadcastSerializedBuffer(const FString& Subject, const std::vector<char>& Buffer, double Timestamp, FSubjectCache& Cache);
+	void SerializeFrameLegacy(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache, TArray<uint8>& OutBytes);
+	/** Returns true when the frame went out as a full Subject. */
+	bool SerializeFramePersistent(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache, TArray<uint8>& OutBytes);
+	void BroadcastSerializedBuffer(const FString& Subject, const std::vector<char>& Buffer, double Timestamp, FSubjectCache& Cache, TArray<uint8>& OutBytes);
 	static void BuildSubjectFromDescriptor(const FString& SubjectName, const FO3DSSkeletonDescriptor& Descriptor, O3DS::Subject& OutSubject);
 	static void FillFrameValues(const FO3DSPoseFrame& Frame, O3DS::Subject& InOutSubject);
 	static void FillCurves(const FO3DSPoseFrame& Frame, O3DS::Subject& InOutSubject);
 	static uint64 HashCurveNames(const TArray<FName>& Names);
 	void DumpStatsInstance() const;
 
-	/** Every live serializer, for DumpAllStats. Guarded by a lock in the .cpp (instances may be destroyed off the game thread from WP-A2c on). */
+	/**
+	 * Every live serializer, for DumpAllStats. Guarded by a lock in the .cpp (instances may be
+	 * destroyed off the game thread from WP-A2c on). DumpAllStats holds that lock and then each
+	 * instance's StateLock, so an instance cannot be destroyed while it is read.
+	 */
 	static TArray<FO3DSenderSerializer*> GInstances;
 };

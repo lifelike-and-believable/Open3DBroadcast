@@ -104,6 +104,27 @@ FO3DSenderSerializer::~FO3DSenderSerializer()
 	GInstances.Remove(this);
 }
 
+void FO3DSenderSerializer::SetStatsLabel(const FString& InLabel)
+{
+	FScopeLock StateGuard(&StateLock);
+	StatsLabel = InLabel;
+}
+
+int32 FO3DSenderSerializer::GetCacheCount() const
+{
+	FScopeLock StateGuard(&StateLock);
+	return SubjectState.Num();
+}
+
+void FO3DSenderSerializer::RequestFullSync(const FString& Subject)
+{
+	FScopeLock StateGuard(&StateLock);
+	if (FSubjectCache* Cache = SubjectState.Find(Subject))
+	{
+		Cache->SyncTracker.RequestFullSync();
+	}
+}
+
 void FO3DSenderSerializer::RemoveSubjectCache(const FString& Subject)
 {
 	if (Subject.IsEmpty())
@@ -111,6 +132,7 @@ void FO3DSenderSerializer::RemoveSubjectCache(const FString& Subject)
 		return;
 	}
 
+	FScopeLock StateGuard(&StateLock);
 	if (SubjectState.Remove(Subject) > 0)
 	{
 		UE_LOG(LogO3DSenderSerializer, Verbose, TEXT("Removed serializer cache for subject '%s'"), *Subject);
@@ -138,6 +160,7 @@ void FO3DSenderSerializer::RemoveSubjectCache(const FString& Subject)
 
 void FO3DSenderSerializer::ClearAllCaches()
 {
+	FScopeLock StateGuard(&StateLock);
 	if (SubjectState.Num() > 0)
 	{
 		SubjectState.Empty();
@@ -151,6 +174,7 @@ void FO3DSenderSerializer::ClearAllCaches()
 FO3DSenderSerializer::FSubjectStats FO3DSenderSerializer::GetSubjectStats(const FString& Subject) const
 {
 	FSubjectStats Stats;
+	FScopeLock StateGuard(&StateLock);
 	if (const FSubjectCache* Cache = SubjectState.Find(Subject))
 	{
 		Stats.FramesSerialized = Cache->FramesSerialized;
@@ -178,9 +202,20 @@ void FO3DSenderSerializer::DropFrame(const FString& Subject, FSubjectCache& Cach
 	}
 }
 
-/** Validate a captured pose frame and serialise it with the encoding the frame carries. */
 void FO3DSenderSerializer::SerializePoseFrame(const FString& Subject, const FO3DSPoseFrame& Frame)
 {
+	TArray<uint8> Bytes;
+	bool bFullSync = false;
+	SerializePoseFrameTo(Subject, Frame, Bytes, bFullSync);
+}
+
+/** Validate a captured pose frame and serialise it with the encoding the frame carries. */
+bool FO3DSenderSerializer::SerializePoseFrameTo(const FString& Subject, const FO3DSPoseFrame& Frame, TArray<uint8>& OutBytes, bool& bOutFullSync)
+{
+	OutBytes.Reset();
+	bOutFullSync = false;
+
+	FScopeLock StateGuard(&StateLock);
 	FSubjectCache& Cache = SubjectState.FindOrAdd(Subject);
 
 	// ADR 0005 (i) / SND-1: never pad a frame to fit a descriptor. A frame
@@ -189,20 +224,20 @@ void FO3DSenderSerializer::SerializePoseFrame(const FString& Subject, const FO3D
 	if (Descriptor == nullptr || !Descriptor->IsValid())
 	{
 		DropFrame(Subject, Cache, TEXT("no skeleton descriptor on the frame"));
-		return;
+		return false;
 	}
 
 	const int32 BoneCount = Frame.BoneLocalTransforms.Num();
 	if (BoneCount != Descriptor->BoneNames.Num())
 	{
 		DropFrame(Subject, Cache, FString::Printf(TEXT("frame has %d bones but its skeleton descriptor has %d"), BoneCount, Descriptor->BoneNames.Num()));
-		return;
+		return false;
 	}
 
 	if (Frame.CurveValues.Num() != Frame.CurveNames.Num())
 	{
 		DropFrame(Subject, Cache, FString::Printf(TEXT("frame has %d curve names but %d curve values"), Frame.CurveNames.Num(), Frame.CurveValues.Num()));
-		return;
+		return false;
 	}
 
 	for (int32 Index = 0; Index < BoneCount; ++Index)
@@ -210,7 +245,7 @@ void FO3DSenderSerializer::SerializePoseFrame(const FString& Subject, const FO3D
 		if (HasInvalidTransform(Frame.BoneLocalTransforms[Index]))
 		{
 			DropFrame(Subject, Cache, FString::Printf(TEXT("NaN/Inf at bone %d"), Index));
-			return;
+			return false;
 		}
 	}
 
@@ -218,13 +253,16 @@ void FO3DSenderSerializer::SerializePoseFrame(const FString& Subject, const FO3D
 	{
 	case EO3DSenderEncodingMode::Residual:
 	case EO3DSenderEncodingMode::Quantized:
-		SerializeFramePersistent(Subject, *Descriptor, Frame, Cache);
+		bOutFullSync = SerializeFramePersistent(Subject, *Descriptor, Frame, Cache, OutBytes);
 		break;
 	case EO3DSenderEncodingMode::Legacy:
 	default:
-		SerializeFrameLegacy(Subject, *Descriptor, Frame, Cache);
+		// Every legacy frame is a full Subject.
+		SerializeFrameLegacy(Subject, *Descriptor, Frame, Cache, OutBytes);
+		bOutFullSync = true;
 		break;
 	}
+	return OutBytes.Num() > 0;
 }
 
 /** Populate a FlatBuffer Subject's transforms (names, parents, component order) from a descriptor. */
@@ -308,7 +346,7 @@ uint64 FO3DSenderSerializer::HashCurveNames(const TArray<FName>& Names)
 }
 
 /** Legacy encoding: a fresh SubjectList/Subject every frame, a full topology and value snapshot. */
-void FO3DSenderSerializer::SerializeFrameLegacy(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache)
+void FO3DSenderSerializer::SerializeFrameLegacy(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache, TArray<uint8>& OutBytes)
 {
 	using namespace O3DS;
 
@@ -338,9 +376,9 @@ void FO3DSenderSerializer::SerializeFrameLegacy(const FString& Subject, const FO
 	const double Timestamp = Frame.CaptureTimeSec;
 	SubjectListPtr->Serialize(Buffer, Timestamp);
 
-	// Transports receive frames only through the bytes below (see
-	// UO3DSenderComponent::HandleSerializedFrameForward).
-	BroadcastSerializedBuffer(Subject, Buffer, Timestamp, Cache);
+	// Transports receive frames only through the bytes below (the sender pipeline hands OutBytes
+	// to SendSerialized, WP-A2c).
+	BroadcastSerializedBuffer(Subject, Buffer, Timestamp, Cache, OutBytes);
 	Cache.FullSyncsSent++;
 
 	if (CVarO3DSenderDebugSerialize.GetValueOnAnyThread() != 0)
@@ -357,7 +395,7 @@ void FO3DSenderSerializer::SerializeFrameLegacy(const FString& Subject, const FO
  * Residual (C2, roadmap doc §5) and quantized (D1, roadmap doc §6) encodings: one persistent Subject
  * per subject name, a full Subject when ADR 0005 (ii) says one is due, updates otherwise.
  */
-void FO3DSenderSerializer::SerializeFramePersistent(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache)
+bool FO3DSenderSerializer::SerializeFramePersistent(const FString& Subject, const FO3DSSkeletonDescriptor& Descriptor, const FO3DSPoseFrame& Frame, FSubjectCache& Cache, TArray<uint8>& OutBytes)
 {
 	using namespace O3DS;
 
@@ -472,7 +510,7 @@ void FO3DSenderSerializer::SerializeFramePersistent(const FString& Subject, cons
 		}
 	}
 
-	BroadcastSerializedBuffer(Subject, Buffer, Timestamp, Cache);
+	BroadcastSerializedBuffer(Subject, Buffer, Timestamp, Cache, OutBytes);
 
 	if (CVarO3DSenderDebugSerialize.GetValueOnAnyThread() != 0)
 	{
@@ -485,25 +523,25 @@ void FO3DSenderSerializer::SerializeFramePersistent(const FString& Subject, cons
 			bNeedFullSync ? TEXT("true") : TEXT("false"),
 			SyncReasons);
 	}
+	return bNeedFullSync;
 }
 
 
 /** Shared broadcast + stats tail for the legacy, residual, and quantized serialization paths. */
-void FO3DSenderSerializer::BroadcastSerializedBuffer(const FString& Subject, const std::vector<char>& Buffer, double Timestamp, FSubjectCache& Cache)
+void FO3DSenderSerializer::BroadcastSerializedBuffer(const FString& Subject, const std::vector<char>& Buffer, double Timestamp, FSubjectCache& Cache, TArray<uint8>& OutBytes)
 {
 	if (Buffer.empty())
 	{
 		return;
 	}
 
-	TArray<uint8> Payload;
-	Payload.SetNumUninitialized((int32)Buffer.size());
-	FMemory::Memcpy(Payload.GetData(), Buffer.data(), Buffer.size());
+	OutBytes.SetNumUninitialized((int32)Buffer.size());
+	FMemory::Memcpy(OutBytes.GetData(), Buffer.data(), Buffer.size());
 
-	OnSerializedFrame.Broadcast(Subject, Payload, Timestamp);
+	OnSerializedFrame.Broadcast(Subject, OutBytes, Timestamp);
 
 	Cache.FramesSerialized++;
-	Cache.BytesSerialized += (uint64)Payload.Num();
+	Cache.BytesSerialized += (uint64)OutBytes.Num();
 
 	if (CVarO3DSenderDebugStats.GetValueOnAnyThread() != 0)
 	{
@@ -518,6 +556,9 @@ void FO3DSenderSerializer::BroadcastSerializedBuffer(const FString& Subject, con
 /** Emit per-subject stats for this serializer instance (invoked via console command). */
 void FO3DSenderSerializer::DumpStatsInstance() const
 {
+	// WP-A2c (A2a deviation 6): the owning pipeline serializes on its worker; reading under the
+	// instance's lock gives a consistent view and never races with the worker's writes.
+	FScopeLock StateGuard(&StateLock);
 	for (const TPair<FString, FSubjectCache>& Pair : SubjectState)
 	{
 		const FString& Subject = Pair.Key;

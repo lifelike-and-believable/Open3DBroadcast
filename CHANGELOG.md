@@ -684,6 +684,52 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Sender pose pipeline: serialization and sends leave the game thread (WP-A2c, ADR 0008 outline item 4)
+
+Third step of the asynchronous sender (WP-A2). The interface version (`O3D_TRANSPORT_API_VERSION`)
+stays 5: the transport interface did not change. `IOpen3DSender::SendSerialized` was already
+documented as callable from any thread (ADR 0007); it is now called from a worker.
+
+- **Pipeline (SND-8, TRB-20).** Each `UO3DSenderComponent` owns a pose pipeline
+  (`FO3DSenderPipeline`, private). The game thread only samples the pose into a pooled frame and
+  hands it over; a `UE::Tasks` task (`ETaskPriority::BackgroundHigh`) filters the curves,
+  serializes the frame and calls `SendSerialized`, moving the serializer's buffer into the payload
+  instead of copying it. One task runs per sender at a time, so frames and control items are
+  processed in order. The worker never touches a UObject.
+- **Bounded queue, drop oldest.** At most `o3d.Sender.PipelineDepth` frames (default 2, 1 to 8) wait
+  for the worker. When another arrives, the oldest waiting frame goes back to the pool before it is
+  serialized, so no full sync is lost and the payloads that are sent are numbered without a gap.
+  Stop, start and rename reach the worker through the same queue and are never dropped.
+- **Stop and destruction.** `StopCapture` discards frames still waiting and does not wait for the
+  network. It waits only for a frame the worker is processing at that moment (one serialize and one
+  non-blocking send), so `OnSerializedFrame` never fires after it returns and the transport is never
+  stopped during a send. A component destroyed with a task in flight is safe: the task holds the
+  pipeline, not the component. `Open3DSender`'s module shutdown waits up to 1 s for running tasks
+  and logs an error if any remain.
+- **A refused full sync is sent again.** When a transport refuses a full sync with
+  `DroppedBackpressure`, the next frame of that subject is a full sync (ADR 0007 item 3).
+  `FO3DSendPayload::bFullSync` is now set.
+- **Behaviour changes for C++ listeners.** `OnSerializedFrame` now fires on the worker thread (kept
+  for one release, then removed if unused; bind it only while capture is stopped).
+  `OnPoseFrameReady` still fires on the game thread, but with the sampled frame: raw curves in
+  `CurveList`/`RawCurveValues`, and `CurveNames`/`CurveValues` empty, because filtering now runs on
+  the worker.
+- **Fallback.** `o3d.Sender.AsyncPipeline 0` (read at `StartCapture`) keeps everything on the game
+  thread in the WP-A2b order, for one release, so a regression can be isolated.
+- **Stats.** `UO3DSenderComponent::GetPipelineStats()` and the console command
+  `o3d.Sender.DumpPipelineStats` report submitted, dropped and sent frames, queue high-water mark,
+  worker time per frame and capture-to-send latency. Trace scopes `O3D.Sender.Sample`,
+  `O3D.Sender.Pipeline.Serialize` and `O3D.Sender.Pipeline.Send` show up in Unreal Insights.
+  `o3ds.Sender.DumpStats` now reads each serializer under its lock, so it no longer races with a
+  worker.
+- **Tests.** New `Open3DBroadcast.Sender.Pipeline.SlowTransportDropsOldest`,
+  `.RefusedFullSyncIsSentAgain`, `.StopDiscardsQueuedFrames`, `.StopStartAndRenameUnderLoad`,
+  `.QuantizationChangeForcesOneFullSync`, `.OwnerReleasedWithTaskInFlight` (1,000 cycles) and
+  `.ComponentDestroyedWithTaskInFlight` (200 components, garbage-collected). The component tests
+  run with the console variable on and off. Existing tests are unchanged. The Unreal Insights
+  numbers ADR 0008 asks for are not recorded yet; see the ADR 0008 addendum "implementation notes
+  (WP-A2c)".
+
 ### Sender capture ticks after the target mesh (WP-A2b, ADR 0008 outline item 3)
 
 Second step of the asynchronous sender (WP-A2), still synchronous on the game thread. The interface

@@ -11,10 +11,14 @@
 
 #include "O3DSenderComponent.h"
 #include "O3DSenderCurveConfig.h"
+#include "O3DSenderPipelineStats.h"
+#include "Templates/SharedPointer.h"
 #include "Templates/UniquePtr.h"
+#include "Transport/O3DSenderInterface.h"
 #include "UObject/UnrealType.h"
 
 class FO3DSenderCurveFilter;
+class FO3DSenderPipeline;
 
 /**
  * Befriended by UO3DSenderComponent. Header-only: the component class is exported, so these
@@ -46,7 +50,8 @@ struct FO3DSenderComponentTestAccess
 	static const FO3DSSkeletonDescriptor& GetDescriptorCache(const UO3DSenderComponent& Component) { return Component.DescriptorCache; }
 	static bool HasDescriptorSnapshot(const UO3DSenderComponent& Component) { return Component.DescriptorSnapshot.IsValid(); }
 	static void SetCapturing(UO3DSenderComponent& Component, bool bCapturing) { Component.bIsCapturing = bCapturing; }
-	static bool HasSerializer(const UO3DSenderComponent& Component) { return Component.Serializer.IsValid(); }
+	/** The serializer lives in the pose pipeline since WP-A2c; created by the first successful StartCapture. */
+	static bool HasSerializer(const UO3DSenderComponent& Component) { return Component.Pipeline.IsValid(); }
 	static void EnsureSubjectNameCached(UO3DSenderComponent& Component) { Component.EnsureSubjectNameCached(nullptr); }
 	static FO3DSPoseFrame CreateFrameShell(UO3DSenderComponent& Component, double CaptureTimeSec)
 	{
@@ -65,6 +70,27 @@ struct FO3DSenderComponentTestAccess
 		USkeletalMeshComponent* Mesh = nullptr;
 		return Component.CanCaptureThisFrame(NowSeconds, Mesh);
 	}
+
+	// Pose pipeline (WP-A2c).
+	/**
+	 * What a sampled tick does after sampling, without a mesh: a pooled frame with this component's
+	 * subject, frame index, descriptor snapshot (SetDescriptor), settings snapshot and Bones, handed
+	 * to the pipeline. False when there is no pipeline or no free frame.
+	 */
+	static bool SubmitSampledFrame(UO3DSenderComponent& Component, const TArray<FTransform>& Bones, double CaptureTimeSec)
+	{
+		TUniquePtr<FO3DSPoseFrame> Frame = Component.AcquirePoseFrame();
+		if (!Frame.IsValid())
+		{
+			return false;
+		}
+		Component.FillFrameShell(nullptr, CaptureTimeSec, *Frame);
+		Frame->BoneLocalTransforms = Bones;
+		Component.DispatchSampledFrame(MoveTemp(Frame));
+		return true;
+	}
+	/** Waits (event with a timeout, never a bare sleep) until the pipeline's worker has nothing left. */
+	static bool WaitForPipelineIdle(const UO3DSenderComponent& Component, double TimeoutSeconds) { return Component.WaitForPipelineIdle(TimeoutSeconds); }
 
 	// Typed config and transport switching (WP-A1 PR 5a).
 	static FO3DTransportConfig BuildTransportConfig(const UO3DSenderComponent& Component) { return Component.BuildTransportConfig(); }
@@ -110,6 +136,63 @@ private:
 	TUniquePtr<FO3DSenderCurveFilter> Filter;
 	TSharedPtr<const FO3DSCurveList> CurveList;
 	TArray<float> CurveValues;
+};
+
+/**
+ * Owns one FO3DSenderPipeline (a private class of this module) for the pipeline tests (WP-A2c,
+ * ADR 0008 Verification). Same calls as the component makes; SubmitFrame filters on the calling
+ * thread first in synchronous mode, as the component does.
+ */
+class OPEN3DSENDER_API FO3DSenderPipelineProbe
+{
+public:
+	FO3DSenderPipelineProbe();
+	~FO3DSenderPipelineProbe();
+
+	FO3DSenderPipelineProbe(const FO3DSenderPipelineProbe&) = delete;
+	FO3DSenderPipelineProbe& operator=(const FO3DSenderPipelineProbe&) = delete;
+	FO3DSenderPipelineProbe(FO3DSenderPipelineProbe&&) = delete;
+	FO3DSenderPipelineProbe& operator=(FO3DSenderPipelineProbe&&) = delete;
+
+	void Start(bool bAsync);
+	void Stop();
+	void RemoveSubject(const FString& Subject);
+	/** A fixed queue depth instead of o3d.Sender.PipelineDepth (0 restores the console variable). */
+	void SetDepth(int32 Depth);
+	int32 GetDepth() const;
+
+	TUniquePtr<FO3DSPoseFrame> AcquireFrame();
+	void SubmitFrame(TUniquePtr<FO3DSPoseFrame>&& Frame);
+
+	void AttachSender(const TSharedPtr<IOpen3DSender>& Sender);
+	/** Waits for a frame being processed, as the transport controller's Stop does. */
+	void DetachSender();
+	/** The component's OnSerializedFrame role: broadcast after each serialized frame. Null removes it (waits). */
+	void SetSerializedFrameListener(FOnO3DSerializedFrame* Listener);
+
+	/** The worker owns it: call anything but the stats getters only after WaitForIdle. */
+	FO3DSenderSerializer& GetSerializer() const;
+	FO3DSenderPipelineStats GetStats() const;
+	bool IsIdle() const;
+	bool WaitForIdle(double TimeoutSeconds) const;
+
+	/**
+	 * Drops the probe's reference without detaching anything, as an owner destroyed with a task
+	 * in flight does. The pipeline lives on while a task holds it. Every other call is a no-op
+	 * afterwards.
+	 */
+	void Release();
+	/** True while the pipeline object exists (the probe or a task still holds it). */
+	bool IsPipelineAlive() const;
+
+	/** No drain task of any pipeline scheduled or running. */
+	static bool WaitForAllIdle(double TimeoutSeconds);
+	static int32 GetNumActiveDrainTasks();
+	static int32 GetMaxDepth();
+
+private:
+	TSharedPtr<FO3DSenderPipeline> Pipeline;
+	TWeakPtr<FO3DSenderPipeline> WeakPipeline;
 };
 
 #endif // WITH_DEV_AUTOMATION_TESTS

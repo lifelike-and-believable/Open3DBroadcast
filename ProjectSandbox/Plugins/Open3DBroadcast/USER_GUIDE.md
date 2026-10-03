@@ -267,8 +267,8 @@ Subscribe to capture events:
 
 **Available Events:**
 - `OnDescriptorReady`: Fired when skeleton descriptor is sent
-- `OnPoseFrameReady`: Fired before each frame is serialized
-- `OnSerializedFrame`: Fired after frame serialization with raw data
+- `OnPoseFrameReady`: Fired on the game thread with each sampled frame, before it is serialized. With the asynchronous pipeline (the default, `o3d.Sender.AsyncPipeline 1`) the frame carries the raw curves (`CurveList`, `RawCurveValues`); curve filtering runs afterwards on a worker thread.
+- `OnSerializedFrame`: Fired after frame serialization with raw data. It fires on the sender's worker thread while `o3d.Sender.AsyncPipeline` is 1, so a listener must be thread-safe and must not touch UObjects; bind and unbind it only while capture is stopped. Kept for one release.
 
 **Blueprint Example:**
 1. Select your Sender Component

@@ -2,6 +2,7 @@
 
 #include "Modules/ModuleManager.h"
 #include "O3DSenderLogs.h"
+#include "O3DSenderPipeline.h"
 
 DEFINE_LOG_CATEGORY(LogO3DSender);
 DEFINE_LOG_CATEGORY(LogO3DSenderComponent);
@@ -22,6 +23,13 @@ public:
 
 	virtual void ShutdownModule() override
 	{
+		// ADR 0008 item 10: a pose pipeline task still running holds its pipeline and transport;
+		// give it a moment (1 s at most) so none runs this module's code after it shuts down.
+		if (!FO3DSenderPipeline::WaitForAllIdle(1.0))
+		{
+			UE_LOG(LogO3DSender, Error, TEXT("%d sender pipeline task(s) still running after 1 s at module shutdown."), FO3DSenderPipeline::GetNumActiveDrainTasks());
+		}
+
 		UE_LOG(LogO3DSender, Verbose, TEXT("Open3DSender module shutdown"));
 	}
 };
