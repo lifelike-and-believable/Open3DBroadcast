@@ -6,7 +6,7 @@
 # and mirrors the whole closure into
 #   ProjectSandbox/Plugins/Open3DBroadcast/Source/ThirdParty/Open3DStreamCore/
 # together with src/o3ds_generated.h, the FlatBuffers runtime headers and
-# CRCpp's CRC.h from the pinned submodules.
+# CRCpp's CRC.h (only while a core file includes it) from the pinned submodules.
 #
 # One path per line, relative to src/. Blank lines and '#' comments are
 # ignored. List every core header that a plugin source file includes

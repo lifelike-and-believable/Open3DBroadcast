@@ -8,7 +8,7 @@ o3ds-version-tag: 1.0.4
 flatbuffers-version: 2.0.6
 flatbuffers-submodule: 615616cb5549a34bdf288c04bc1b94bd7a65c396
 crccpp-submodule: 71f2152b639f8fc0efa3d1fec01c7c0dbb96dc76
-manifest-sha256: 3003eee0d9c1d070bcff74f4cbce4604edbc6483ad5871d2e6d230056d92cfe5
-content-sha256: 0a9a45553d3804adf290bfb5e7dd839a4989cc7dd56028da324ea6302ff1bec2
-core-files: 47 (21 .cpp)
+manifest-sha256: b2126c1ec37ccc3d986c14d7407ff5a73600a54928c1328d399ce69fbbbcd5a1
+content-sha256: 5cf43c4a8998c918c0dbbab40be669cc637bd03c20f82f98d558debd9010d90e
+core-files: 49 (22 .cpp)
 mirrored-files: 70

@@ -6,8 +6,8 @@ Everything the plugin compiles or links lives under `Source/`, so `RunUAT BuildP
 
 The Open3DStream core (`src/o3ds` in the repository), compiled by the `Open3DStreamCore` module (`Source/Open3DStreamCore/`). See [ADR 0003](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/docs/adr/0003-core-library-delivery-to-plugin.md).
 
-- **Generated; do not edit.** `Build/Scripts/sync_o3ds_core.py` copies the include closure of the headers listed in `Build/o3ds-core-manifest.txt`, the committed `src/o3ds_generated.h`, the FlatBuffers runtime headers (`thirdparty/flatbuffers` pin) and CRCpp's `CRC.h` (`thirdparty/crccpp` pin). `SYNC_STAMP.txt` records the pins and hashes. CI runs the script with `--check` and fails when this folder differs from `src/`.
-- **Licenses:** `LICENSES/` holds the Open3DStream (MIT), FlatBuffers (Apache-2.0) and CRC++ (BSD-3-Clause) texts.
+- **Generated; do not edit.** `Build/Scripts/sync_o3ds_core.py` copies the include closure of the headers listed in `Build/o3ds-core-manifest.txt`, the committed `src/o3ds_generated.h`, and the FlatBuffers runtime headers (`thirdparty/flatbuffers` pin). CRCpp's `CRC.h` (`thirdparty/crccpp` pin) is copied only while a core file includes it; none has since WP-A2e. `SYNC_STAMP.txt` records the pins and hashes. CI runs the script with `--check` and fails when this folder differs from `src/`.
+- **Licenses:** `LICENSES/` holds the Open3DStream (MIT) and FlatBuffers (Apache-2.0) texts (and CRC++'s BSD-3-Clause text whenever `CRC.h` is copied).
 - **Used by:** every module that includes an `o3ds/...` header, through a dependency on `Open3DStreamCore`.
 
 ## opus/

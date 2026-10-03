@@ -49,7 +49,7 @@ Everything the plugin compiles or links is under `Source/`, so `RunUAT BuildPlug
 
 ### Shared (`Source/ThirdParty/`)
 
-- **Open3DStreamCore** (source): the part of the Open3DStream core (`src/o3ds` in the repository) that the plugin uses, the generated `o3ds_generated.h`, the FlatBuffers 2.0.6 runtime headers and CRC++'s `CRC.h`. The `Open3DStreamCore` module compiles it. It is a generated copy: see "Open3DStreamCore: the core compiled from source" below.
+- **Open3DStreamCore** (source): the part of the Open3DStream core (`src/o3ds` in the repository) that the plugin uses, the generated `o3ds_generated.h` and the FlatBuffers 2.0.6 runtime headers. The `Open3DStreamCore` module compiles it. It is a generated copy: see "Open3DStreamCore: the core compiled from source" below.
 - **opus** (prebuilt Win64 library): audio codec used by `Open3DShared`. Version and provenance are in `THIRD_PARTY_LICENSES.md`.
 
 ### Module-Level Dependencies

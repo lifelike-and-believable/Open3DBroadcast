@@ -2,6 +2,35 @@
 
 ### Core library (`src/o3ds`)
 
+- **Faster Serialize and Parse (WP-A2e, ADR 0008 outline item 6; CORE-7,
+  CORE-18).** For one 250-bone, 250-curve subject (MSVC Release, the new
+  `o3ds_core_bench`), a full Serialize went from about 500 µs to 96 µs, Parse
+  from about 405 µs to 162 µs, and SerializeUpdate from 81 µs to 14 µs:
+  Serialize plus Parse is about 3.5 times faster.
+  - The buffer header's CRC-32 is computed by `O3DS::Crc32` (new
+    `src/o3ds/crc32.h`), slicing-by-8 with tables built once, instead of
+    CRCpp's bit-by-bit loop (16 µs instead of 278 µs for 34.7 KB). Same
+    polynomial and parameters, so the value, and the wire format, are
+    unchanged; old and new readers and writers interoperate.
+  - Every `Serialize*` call that writes a whole buffer reuses one
+    `FlatBufferBuilder` per thread (cleared, keeping its memory) instead of
+    building a new one, and `finalize()` writes the header and payload in
+    place with one `resize` instead of appending byte by byte, so a reused
+    output vector keeps its capacity.
+  - The core no longer includes CRCpp's `CRC.h`; it is still used by the
+    tests to check `Crc32` against the bitwise result. The plugin's core
+    mirror no longer carries `CRC.h` or the CRC++ licence, and
+    `Open3DStreamCore` no longer adds its include path or
+    `CRCPP_USE_NAMESPACE`; `THIRD_PARTY_LICENSES.md` drops the CRC++ row.
+  - Tests: new suite `core.crc32_tests` (the CRC-32 check value; every length
+    0 to 100 at every alignment, large and constant buffers, all against the
+    bitwise CRC; the serialized header). New benchmark
+    `test/bench/serialize_bench.cpp` (`o3ds_core_bench`, CTest
+    `core.bench.serialize`, label `bench`): it prints the timings and checks
+    only correctness.
+  - Not in this change: Parse still re-creates every `Transform` on a full
+    sync (the Parse half of CORE-18); it changes receiver resync behaviour
+    and is a follow-up.
 - `SubjectList::Parse()` now rejects buffers it used to accept or crash on
   (WP-S1: CORE-1, CORE-8, CORE-9, CORE-23). It returns false with `mError`
   set when a buffer has:

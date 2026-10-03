@@ -27,6 +27,7 @@ set(O3DS_CORE_TEST_SOURCES
 	tcp_stream_parser_tests.cpp
 	control_codec_tests.cpp
 	control_state_tests.cpp
+	crc32_tests.cpp
 )
 
 add_executable(o3ds_core_tests
@@ -42,3 +43,12 @@ foreach(source ${O3DS_CORE_TEST_SOURCES})
 	get_filename_component(suite ${source} NAME_WE)
 	add_test(NAME core.${suite} COMMAND o3ds_core_tests --suite ${suite})
 endforeach()
+
+# Serialize/Parse benchmark (ADR 0008 item 11, CORE-7, CORE-18). It checks
+# correctness only and prints the timings; CTest runs it with few iterations
+# under the "bench" label. Run build/test/o3ds_core_bench by hand for numbers.
+add_executable(o3ds_core_bench bench/serialize_bench.cpp)
+target_link_libraries(o3ds_core_bench PRIVATE open3dstreamstatic)
+o3ds_enable_warnings(o3ds_core_bench)
+add_test(NAME core.bench.serialize COMMAND o3ds_core_bench --iterations 50)
+set_tests_properties(core.bench.serialize PROPERTIES LABELS bench)
