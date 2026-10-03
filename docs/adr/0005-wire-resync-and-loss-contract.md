@@ -204,7 +204,7 @@ Receiver, per subject within a stream (`frame_epoch`):
 
 Item (iv), stamping, is implemented in #341: `O3DS::StreamWriter` in core and the UE
 serializer writing every frame through it. Items (viii) and (ix), `ref_seq` and the receiver
-contract, are implemented in PR-PENDING (CORE-5, CORE-6). Where the implementation departs from the
+contract, are implemented in #342 (CORE-5, CORE-6). Where the implementation departs from the
 decision above, and why:
 
 - **One writer per subject, not one per serializer.** The receiver that shipped in the meantime
