@@ -204,7 +204,7 @@ The D8 release is protocol **2** and `O3DS_VERSION_TAG` **1.1.0**: default strea
 
 ## Implementation notes (WP-A4, 2026-10-03)
 
-Implemented in #335 (items 1-3, 9, 11), #336 (item 5), #337 (item 4), the name-hash PR (item 8)
+Implemented in #335 (items 1-3, 9, 11), #336 (item 5), #337 (item 4), #338 (item 8)
 and the wire-format docs PR (item 10). Where the implementation departs from the decision above,
 and why:
 
