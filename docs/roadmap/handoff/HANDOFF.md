@@ -11,7 +11,7 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M0 Decisions (ADRs 0001–0010) | Done (#261–#263) |
 | M1 Safety and correctness: WP-S1..S11, WP-T1, WP-T2 | Done (#264–#279) |
 | M2 Fab-buildable package: WP-F1..F4, F6..F9, F11 | Done (#274–#286). **F0 and F5 wait on the maintainer** (see §5) |
-| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime), PR 3 (results, state, capabilities), PR 4a (building blocks + Loopback), PR 4b (TCP), PR 4c (UDP), PR 4d (NNG), PR 4e (MoQ), PR 4f (WebRTC add-on), PR 5a (typed config), PR 5b (consumer API), PR 5c (rest of item 8) and step 6 (shims removed) done: WP-A1 is complete; next is WP-A2 (async sender, ADR 0008)** (see §2) |
+| M3 Architecture: WP-A1..A7 | **In progress: WP-A1 PR 1 (#289), PR 2 (lifetime), PR 3 (results, state, capabilities), PR 4a (building blocks + Loopback), PR 4b (TCP), PR 4c (UDP), PR 4d (NNG), PR 4e (MoQ), PR 4f (WebRTC add-on), PR 5a (typed config), PR 5b (consumer API), PR 5c (rest of item 8) and step 6 (shims removed) done: WP-A1 is complete. WP-A2 (async sender, ADR 0008) in progress: A2a (settings snapshot, serializer without component, frame pool, sampling clock) done; next is A2b (tick group)** (see §2 and §2a) |
 | M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | Not started |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
 | WP-CTL control channel (D11, ADR 0011) | CTL-1..7 done (#290–#295, CTL-6, CTL-7); live-server checks remain (see §2b) |
@@ -119,11 +119,27 @@ Design: `docs/adr/0007-transport-abstraction-and-registry.md`, section "Implemen
      - Schema features no built-in transport uses yet: `Validate` for host/port fields (`ParseHostPort`), `Float` for `webrtc.reconnect_timeout`, `bRestartOnChange` where a running transport ignores a change.
      - `docs/review/2026-09-plugin-review/*` still names the removed APIs; they are dated review findings with file:line evidence and are left as written.
 
-**Start here next: WP-A2 (async sender, ADR 0008)**, the next item in the roadmap's M3 order.
+**WP-A2 (async sender, ADR 0008) is in progress; see §2a.**
 
 WP-A1 acceptance (roadmap): conformance suite green after each migration, net transport LOC goes down, no transport keeps its own queue/demux/sink. ADR 0007 "Verification / acceptance" lists the extra test cases.
 
 After WP-A1, the M3 order in the roadmap is WP-A2 (async sender, ADR 0008) → WP-A3 (god classes); WP-A4 (protocol, ADR 0009), WP-A5, WP-A6, WP-A7 can go in parallel where files don't overlap.
+
+## 2a. The work in flight: WP-A2 (asynchronous sender pipeline)
+
+Design: `docs/adr/0008-sender-pipeline-threading.md`, "Implementation outline" items 2 to 7. One PR per sub-step (A2a to A2e); each must leave the WP-S3 sender tests passing unchanged.
+
+1. **WP-A2a: settings snapshot, serializer without component, frame pool, sampling clock. Done.** Details and deviations in the ADR 0008 addendum "implementation notes (WP-A2a)".
+   - `FO3DSenderEncodingSettings` holds the encoding and the curve filtering settings (pattern lists as shared immutable arrays); the component refreshes it per sampled frame (`UpdateEncodingSnapshot`) and copies a list only when it changed. Frames carry it by value (deviation 1: the WP-S3 tests use value semantics).
+   - `FO3DSenderSerializer` has no `Attach`/`Detach` and no component pointer; the component calls `SerializePoseFrame` after filtering. `SetStatsLabel` names it for `o3ds.Sender.DumpStats`.
+   - Curve capture (`FO3DSenderCurveProcessor`, raw values against a shared `FO3DSCurveList`) and filtering (`FO3DSenderCurveFilter`, on the frame) are split. Filtering still runs before `OnPoseFrameReady` (deviation 3).
+   - `FO3DSPoseFramePool` (public header): bounded (default 4), reuses allocations, lock only around pointer moves.
+   - The wire time is `FO3DSPoseFrame::CaptureTimeSec` (sampling time), not the serialization time.
+   - Still synchronous on the game thread. `O3D_TRANSPORT_API_VERSION` stays **5** (no transport interface change).
+   - Tests: `Open3DBroadcast.Sender.EncodingSnapshot.SerializerWorksWithoutComponent`, `.FramePool.ReusesFramesAndIsBounded`, `.CurveFilter.AfterSamplingMatchesBefore`, `.Wire.SerializedTimeIsSamplingTime`.
+2. **WP-A2b: tick group and prerequisite. Next.** `PrimaryComponentTick.TickGroup = TG_PostUpdateWork`; `AddTickPrerequisiteComponent(TargetMesh)` in `BindToTarget`, removed in `UnbindFromTarget` (ADR 0008 item 9; open question 2: verify both APIs, and whether `RegisterOnBoneTransformsFinalizedDelegate` exists in 5.7, first).
+3. WP-A2c: `FO3DSenderPipeline` (pipe, bounded queue with drop-oldest, control items); filtering and serialization move to the worker; Insights numbers. Open items from A2a: decide what `OnPoseFrameReady` listeners see (raw or filtered curves), and make `o3ds.Sender.DumpStats` safe against a serializer running on the worker (A2a deviation 6).
+4. WP-A2d (audio clock, cached device enumeration), WP-A2e (core table CRC and builder reuse), then removing `o3d.Sender.AsyncPipeline` one release later.
 
 ## 2b. Control channel (WP-CTL, ADR 0011)
 
@@ -211,6 +227,9 @@ With UE 5.7 installed locally you can also run the real build and tests: `Build/
 20. When an interface gains a second form of a virtual, give it its own name (`SubmitFrameOwned`, not a second `SubmitFrame` overload). A derived class that overrides one overload hides the others, so a call through the derived type silently picks the wrong one or fails to compile (WP-A1 PR 5b).
 21. A local must not reuse the name of a parameter or of a local in an enclosing scope. MSVC reports C4457 ("declaration hides function parameter") or C4456, and CI builds with `-FailOnWarnings`, so it fails the build. The 5c options panel declared `double Value` inside a function whose parameter was `Value` (fixed in c5fb457). Check every new local against the enclosing function's parameters.
 22. A sender-component test that expects its transport to start must set `bAutoCreateTransport = true`: it defaults to false, and `StartCapture` then never reaches the transport controller. It must also declare every warning the path logs with `AddExpectedError` (log warnings fail a test): a control-only `StartCapture` without a mesh logs "No TargetMesh set" once per call. `ValidateGivesInvalidConfig` needed both (fixed in 9bb6b3f); `O3DTransportLifetimeTests` shows the pattern.
+23. Several Open3DSender sources (`O3DSenderComponent.h/.cpp`, `O3DSenderSerializer.h/.cpp`, `O3DSenderCurveProcessor.h/.cpp`) are CRLF while newer files are LF (`git ls-files --eol`). Keep each file's line endings when editing (convert to LF, edit, convert back), or the diff becomes a whole-file rewrite that hides the real change (WP-A2a).
+24. `FO3DSenderCurveConfig` holds raw pointers to the include/exclude pattern arrays. Build it only from a frame's settings snapshot (`FO3DSenderEncodingSettings`, whose lists are shared and immutable), as `FO3DSenderCurveFilter::FilterFrame` does, never from the component's `IncludeCurvePatterns`/`ExcludeCurvePatterns`: once filtering runs on the WP-A2c worker those would be read while the game thread edits them (WP-A2a).
+25. The GitHub connector in a cloud session may refuse the UE 5.7 source mirror (`lifelike-and-believable/UnrealEngine`). If it does, use only UE APIs this plugin already compiles in CI, in the same call form, and say so in the ADR addendum; a new engine API then needs a session that can reach the mirror (WP-A2a).
 
 ## 5. Waiting on the maintainer
 

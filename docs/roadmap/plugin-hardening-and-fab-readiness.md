@@ -627,6 +627,7 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
   - Use one clock domain for pose and audio (SND-17).
   - Do audio device enumeration asynchronously and cache it (SND-18).
   - Move UDP sends off the game and audio threads (TRB-20).
+  - **Progress:** split into A2a to A2e per ADR 0008's implementation outline. A2a landed the settings snapshot (encoding and curve filtering settings in `FO3DSenderEncodingSettings`), the serializer without a component pointer (SND-22), curve filtering after sampling, the bounded `FO3DSPoseFramePool` (SND-9) and the sampling-time clock, still synchronous on the game thread (ADR 0008 addendum "WP-A2a"). Next is A2b (tick group and prerequisite, SND-12).
 - **Acceptance:**
   - A profiling capture (Unreal Insights) shows the game-thread cost per sender under a defined budget, for example 0.1 ms for a 250-bone, 250-curve subject. Record the before and after numbers in the PR.
   - The core Serialize and Parse benchmark improves by at least 3x (CORE-7 measured about 4x possible).

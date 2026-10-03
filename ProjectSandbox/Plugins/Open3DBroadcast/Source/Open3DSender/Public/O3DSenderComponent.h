@@ -4,7 +4,9 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Containers/BitArray.h"
 #include "O3DSenderSerializer.h"
+#include "O3DSPoseFramePool.h"
 #include "Transport/O3DSenderInterface.h"
 #include "O3DSenderLogs.h"
 #include "Transport/O3DTransportTypes.h"
@@ -23,7 +25,7 @@ class USkeletalMesh;
 class USoundSubmix;
 class FO3DSenderTransportController;
 class FO3DSenderCurveProcessor;
-struct FO3DSenderCurveConfig;
+class FO3DSenderCurveFilter;
 
 /** Smart-pointer deleter that keeps FO3DSenderTransportController implementation details private. */
 struct FO3DSenderTransportControllerDeleter
@@ -35,6 +37,12 @@ struct FO3DSenderTransportControllerDeleter
 struct FO3DSenderCurveProcessorDeleter
 {
 	void operator()(FO3DSenderCurveProcessor* Ptr) const;
+};
+
+/** Smart-pointer deleter for the curve filter (private to this module). */
+struct FO3DSenderCurveFilterDeleter
+{
+	void operator()(FO3DSenderCurveFilter* Ptr) const;
 };
 
 /** Predictor for residual/delta coding (roadmap doc §5/C2). Maps to O3DS::ResidualPredictorId
@@ -82,9 +90,14 @@ enum class EO3DSenderEncodingMode : uint8
 };
 
 /**
- * Immutable snapshot of the encoding settings a frame is serialized with (SND-14). The component
- * copies its properties into this on the game thread for every sampled frame, so one frame is always
- * encoded with one consistent set of settings, and the serializer never reads component properties.
+ * Immutable snapshot of everything the curve filter and the serializer need from the component
+ * (SND-14, ADR 0008 item 6): the encoding and the curve filtering settings. The component copies
+ * its properties into this on the game thread for every sampled frame, so one frame is always
+ * filtered and encoded with one consistent set of settings, and neither stage reads a UObject.
+ * The subject name is not here: it is sampled onto the frame (FO3DSPoseFrame::Subject).
+ *
+ * Copying it allocates nothing: the only heap data, the curve pattern lists, are shared and
+ * immutable, and the component replaces them (never edits them) when the properties change.
  */
 struct OPEN3DSENDER_API FO3DSenderEncodingSettings
 {
@@ -97,12 +110,40 @@ struct OPEN3DSENDER_API FO3DSenderEncodingSettings
 	float QuantizationDeltaThreshold = 0.0001f;
 	float FullSyncIntervalSeconds = 1.0f;
 
+	// Curve filtering (WP-A2a: filtering runs on the sampled frame, after sampling). Defaults match
+	// the component's property defaults.
+	bool bClampMorphCurvesToUnit = true;
+	bool bDropNaNAndInfinity = true;
+	bool bEnableCurveFiltering = false;
+	/** Epsilon/delta value filters; the component turns them off for the persistent encodings. */
+	bool bApplyCurveValueFilters = false;
+	float CurveEpsilon = 0.0005f;
+	float CurveDeltaThreshold = 0.001f;
+	bool bLogFilteredCurves = false;
+	/** Shared and immutable; null means no patterns. */
+	TSharedPtr<const TArray<FString>> IncludeCurvePatterns;
+	TSharedPtr<const TArray<FString>> ExcludeCurvePatterns;
+
 	/**
 	 * Fingerprint of the settings that need a fresh full sync (and, in residual mode, a fresh
 	 * encoder) when they change: mode, residual predictor and keyframe interval, quantization
 	 * ranges. Delta thresholds and the full-sync interval apply from the next frame without one.
+	 * Curve settings are not part of it: a change that alters the curve list already forces a
+	 * full sync through the curve name hash (SND-3).
 	 */
 	uint64 GetFullSyncFingerprint() const;
+};
+
+/**
+ * The curves a mesh exposes, in capture order (WP-A2a). Built on the game thread when the curve
+ * cache is refreshed and shared, immutable, by every frame sampled against it, so frames carry the
+ * names without copying them and the curve filter detects a new list by pointer.
+ */
+struct FO3DSCurveList
+{
+	TArray<FName> Names;
+	/** Bit per entry of Names: true for a morph target curve (clamped to [0,1] when enabled). */
+	TBitArray<> MorphMask;
 };
 
 /** Per-frame pose payload containing bone transforms and curve values for a single subject. */
@@ -120,11 +161,21 @@ struct OPEN3DSENDER_API FO3DSPoseFrame
 	UPROPERTY()
 	TArray<FTransform> BoneLocalTransforms;
 
+	/** The curves the serializer sends: the result of curve filtering (see CurveList). */
 	UPROPERTY()
 	TArray<FName> CurveNames;
 
 	UPROPERTY()
 	TArray<float> CurveValues;
+
+	/**
+	 * Raw sampled curves (WP-A2a): the list they were sampled against and one value per entry, in
+	 * the same order, before clamping, NaN handling and filtering. The curve filter turns these into
+	 * CurveNames/CurveValues. A frame without a CurveList (built by hand, or sampled without a mesh)
+	 * is left as it is by the filter.
+	 */
+	TSharedPtr<const FO3DSCurveList> CurveList;
+	TArray<float> RawCurveValues;
 
 	/**
 	 * Skeleton descriptor the bones were sampled against (ADR 0005 (i), pull-based descriptor
@@ -133,12 +184,16 @@ struct OPEN3DSENDER_API FO3DSPoseFrame
 	 */
 	TSharedPtr<const FO3DSSkeletonDescriptor> Descriptor;
 
-	/** Sampling time on the sender clock (FPlatformTime::Seconds()); drives the periodic full sync. */
+	/**
+	 * Sampling time on the sender clock (FPlatformTime::Seconds(), ADR 0008 item 7). It drives the
+	 * periodic full sync and is the time the serializer writes on the wire (WP-A2a).
+	 */
 	double CaptureTimeSec = 0.0;
 
-	/** Encoding settings this frame is serialized with. */
+	/** Encoding and curve filtering settings this frame is filtered and serialized with. */
 	FO3DSenderEncodingSettings Encoding;
 
+	/** Empties the frame for reuse. Arrays and strings keep their allocation (FO3DSPoseFramePool). */
 	void Reset()
 	{
 		Subject.Reset();
@@ -146,6 +201,8 @@ struct OPEN3DSENDER_API FO3DSPoseFrame
 		BoneLocalTransforms.Reset();
 		CurveNames.Reset();
 		CurveValues.Reset();
+		CurveList.Reset();
+		RawCurveValues.Reset();
 		Descriptor.Reset();
 		CaptureTimeSec = 0.0;
 		Encoding = FO3DSenderEncodingSettings();
@@ -429,8 +486,12 @@ private:
 	void RefreshSkeletonCache(USkeletalMeshComponent* SkelComp);
 	FString BuildSubjectName(const USkeletalMeshComponent* SkelComp) const;
 	FString SanitizeSubjectName(const FString& Raw) const;
-	FO3DSenderCurveConfig BuildCurveConfig() const;
-	FO3DSenderEncodingSettings BuildEncodingSettings() const;
+	/**
+	 * Brings EncodingSnapshot up to date with the properties and returns it (SND-14, WP-A2a). Run
+	 * for every sampled frame, because Blueprint can write the properties without any notification;
+	 * a curve pattern list is copied into a new shared array only when its contents changed.
+	 */
+	const FO3DSenderEncodingSettings& UpdateEncodingSnapshot();
 	void ResetSkeletonCache();
 
 	uint64 ComputeDescriptorHash(const TArray<FName>& InNames, const TArray<int32>& InParents) const;
@@ -454,6 +515,12 @@ private:
 
 	TUniquePtr<FO3DSenderSerializer> Serializer;
 
+	/** Settings snapshot copied onto every sampled frame (see UpdateEncodingSnapshot). */
+	FO3DSenderEncodingSettings EncodingSnapshot;
+
+	/** Sampled frames are taken from and returned to this pool (ADR 0008 item 4, SND-9). */
+	FO3DSPoseFramePool FramePool;
+
 	FDelegateHandle BoneTransformsFinalizedHandle;
 	FDelegateHandle SerializerRelayHandle;
 
@@ -465,7 +532,10 @@ private:
 	/** Starts control on the running transport when it carries control. */
 	void StartControl();
 	void TickControl();
+	/** Curve capture (game thread: reads the mesh). */
 	TUniquePtr<FO3DSenderCurveProcessor, FO3DSenderCurveProcessorDeleter> CurveProcessor;
+	/** Curve filtering, applied to the sampled frame after sampling (WP-A2a); never reads a UObject. */
+	TUniquePtr<FO3DSenderCurveFilter, FO3DSenderCurveFilterDeleter> CurveFilter;
 	UPROPERTY(Transient)
 	UO3DSenderAudioCaptureComponent* AudioCaptureComponent = nullptr;
 	double LastAudioSinkWarningTime = 0.0;
@@ -528,9 +598,11 @@ public:
 private:
 	bool CanCaptureThisFrame(double NowSeconds, USkeletalMeshComponent*& OutMesh);
 	FString ResolveSubjectName(const USkeletalMeshComponent* SkelComp);
-	FO3DSPoseFrame CreateFrameShell(const USkeletalMeshComponent* SkelComp, double CaptureTimeSec);
+	/** Fills the frame's subject, index, descriptor, sampling time and settings snapshot. */
+	void FillFrameShell(const USkeletalMeshComponent* SkelComp, double CaptureTimeSec, FO3DSPoseFrame& Frame);
 	void PopulatePoseFrameBones(const USkeletalMeshComponent* SkelComp, FO3DSPoseFrame& Frame, bool bDebugPose);
-	void PopulatePoseFrameCurves(USkeletalMeshComponent* SkelComp, const FO3DSenderCurveConfig& CurveConfig, FO3DSPoseFrame& Frame, bool bDebugCurves);
+	/** Samples raw curve values (no filtering) into Frame.CurveList / Frame.RawCurveValues. */
+	void PopulatePoseFrameCurves(USkeletalMeshComponent* SkelComp, FO3DSPoseFrame& Frame, bool bDebugCurves);
 	FO3DSenderAudioCaptureConfig BuildAudioCaptureConfig() const;
 	FO3DTransportAudioConfig BuildTransportAudioConfig(const FO3DSenderAudioCaptureConfig& CaptureConfig) const;
 	void EnsureAudioCaptureComponent();

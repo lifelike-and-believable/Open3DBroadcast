@@ -684,6 +684,41 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Sender settings snapshot, frame pool and sampling clock (WP-A2a, ADR 0008 outline item 2)
+
+First step of the asynchronous sender (WP-A2). Capture is still synchronous: sampling, curve
+filtering, serialization and `SendSerialized` all run on the game thread, in the component's tick,
+as before. The interface version (`O3D_TRANSPORT_API_VERSION`) stays 5: the transport interface did
+not change.
+
+- **The serializer holds no component (SND-22).** `FO3DSenderSerializer::Attach` and `Detach` are
+  gone, with the raw `UO3DSenderComponent*` they kept and the `OnPoseFrameReady` subscription. The
+  component now calls `SerializePoseFrame` itself after sampling. The serializer works from the
+  frame and its settings snapshot only, so it can be constructed and used without any UObject.
+  `SetStatsLabel` names an instance for `o3ds.Sender.DumpStats`, which now lists every live
+  serializer.
+- **Settings snapshot.** `FO3DSenderEncodingSettings` (carried by every frame as
+  `FO3DSPoseFrame::Encoding`) now also holds the curve filtering settings: morph clamp, NaN
+  handling, the filtering switch, epsilon and delta, and the include and exclude patterns as shared,
+  immutable arrays. The component refreshes it for each sampled frame and copies a pattern list only
+  when it changed, so copying the snapshot onto a frame allocates nothing.
+- **Curve filtering after sampling.** Sampling now stores raw curve values
+  (`FO3DSPoseFrame::RawCurveValues`) against a shared, immutable curve list
+  (`FO3DSPoseFrame::CurveList`, type `FO3DSCurveList`). A new `FO3DSenderCurveFilter` (private)
+  turns them into `CurveNames`/`CurveValues` with the frame's own settings. The rules and their
+  results are unchanged; `OnPoseFrameReady` still fires after filtering, on the game thread.
+- **Frame pool (SND-9).** New `FO3DSPoseFramePool` (`Open3DSender/Public/O3DSPoseFramePool.h`):
+  frames are reused with their arrays' capacity, and at most `Capacity` frames (default 4) ever
+  exist. The component no longer builds a new `FO3DSPoseFrame` and new curve arrays per capture.
+- **Sampling-time clock (ADR 0008 item 7).** The time written on the wire, and passed to
+  `OnSerializedFrame` and `SendSerialized`, is now the frame's sampling time
+  (`FPlatformTime::Seconds()` when the pose was sampled), not the time the serializer ran. The two
+  differ by the serialization cost (well under a millisecond). Engine timecode is not used.
+- **Tests.** New `Open3DBroadcast.Sender.EncodingSnapshot.SerializerWorksWithoutComponent`,
+  `Open3DBroadcast.Sender.FramePool.ReusesFramesAndIsBounded`,
+  `Open3DBroadcast.Sender.CurveFilter.AfterSamplingMatchesBefore` and
+  `Open3DBroadcast.Sender.Wire.SerializedTimeIsSamplingTime`. The WP-S3 sender tests are unchanged.
+
 ### Deprecated transport shims removed (WP-A1 step 6, ADR 0007 item 9)
 
 This completes WP-A1. Runtime behaviour is unchanged. Saved data needs nothing: no property or

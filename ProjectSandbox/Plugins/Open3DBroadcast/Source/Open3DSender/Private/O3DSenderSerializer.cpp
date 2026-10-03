@@ -5,6 +5,7 @@
 #include "O3DSenderComponent.h"
 #include "O3DSenderLogs.h"
 
+#include "HAL/CriticalSection.h"
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/ScopeLock.h"
@@ -30,8 +31,15 @@ namespace
 	// Residual coding (C2, roadmap doc §5) and quantization (D1, roadmap doc
 	// §6) are configured through UPROPERTYs on UO3DSenderComponent, which the
 	// component snapshots into FO3DSenderEncodingSettings on every sampled
-	// frame (FO3DSPoseFrame::Encoding). The serializer never reads the
-	// component's properties directly (SND-14, ADR 0008 item 6).
+	// frame (FO3DSPoseFrame::Encoding). The serializer holds no component and
+	// never reads a UObject (SND-14, SND-22, ADR 0008 item 6, WP-A2a).
+
+	/** Guards FO3DSenderSerializer::GInstances. */
+	FCriticalSection& GetSerializerInstancesLock()
+	{
+		static FCriticalSection InstancesLock;
+		return InstancesLock;
+	}
 
 	/** At most one dropped-frame warning per subject per this many seconds. */
 	constexpr double DropWarningIntervalSeconds = 5.0;
@@ -65,52 +73,35 @@ namespace
 
 TArray<FO3DSenderSerializer*> FO3DSenderSerializer::GInstances;
 
-FO3DSenderSerializer::FO3DSenderSerializer() = default;
-FO3DSenderSerializer::~FO3DSenderSerializer() = default;
-
-/** Register for frame events emitted by the capture component. */
-void FO3DSenderSerializer::Attach(UO3DSenderComponent* InComponent)
+/**
+ * Registers the instance for o3ds.Sender.DumpStats. The serializer used to do this, and subscribe to
+ * the component's OnPoseFrameReady, in Attach(UO3DSenderComponent*); it now holds no component
+ * (SND-22, WP-A2a): the component calls SerializePoseFrame itself. Descriptors travel on every frame
+ * (FO3DSPoseFrame::Descriptor, ADR 0005 (i)), so it does not listen to OnDescriptorReady either.
+ */
+FO3DSenderSerializer::FO3DSenderSerializer()
 {
-	if (!InComponent)
-	{
-		return;
-	}
-	if (Component == InComponent)
-	{
-		return;
-	}
-
-	Component = InComponent;
-	GInstances.AddUnique(this);
-
-	static bool bRegisteredCmd = false;
-	if (!bRegisteredCmd)
+	// Registered once, the first time a serializer is created, as Attach() did. A function-local
+	// static, so two first constructions cannot register it twice.
+	static const bool bRegisteredCmd = []()
 	{
 		IConsoleManager::Get().RegisterConsoleCommand(
 			TEXT("o3ds.Sender.DumpStats"),
 			TEXT("Dump per-subject serialization stats to the log"),
 			FConsoleCommandDelegate::CreateStatic(&FO3DSenderSerializer::DumpAllStats),
 			ECVF_Default);
-		bRegisteredCmd = true;
-	}
+		return true;
+	}();
+	(void)bRegisteredCmd;
 
-	// Descriptors travel on every frame (FO3DSPoseFrame::Descriptor, ADR
-	// 0005 (i)), so the serializer does not listen to OnDescriptorReady:
-	// a descriptor broadcast it missed (Stop/Start, rename) can no longer
-	// leave it building bones with empty names and parent 0 (SND-1).
-	Component->OnPoseFrameReady.AddRaw(this, &FO3DSenderSerializer::OnPoseFrameReady);
+	FScopeLock InstancesScopeLock(&GetSerializerInstancesLock());
+	GInstances.AddUnique(this);
 }
 
-/** Remove previously registered delegates and release the owning component reference. */
-void FO3DSenderSerializer::Detach(UO3DSenderComponent* InComponent)
+FO3DSenderSerializer::~FO3DSenderSerializer()
 {
-	if (Component && Component == InComponent)
-	{
-		Component->OnPoseFrameReady.RemoveAll(this);
-		Component = nullptr;
-	}
+	FScopeLock InstancesScopeLock(&GetSerializerInstancesLock());
 	GInstances.Remove(this);
-	ClearAllCaches();
 }
 
 void FO3DSenderSerializer::RemoveSubjectCache(const FString& Subject)
@@ -167,15 +158,6 @@ FO3DSenderSerializer::FSubjectStats FO3DSenderSerializer::GetSubjectStats(const 
 		Stats.DroppedFrames = Cache->DroppedFrames;
 	}
 	return Stats;
-}
-
-void FO3DSenderSerializer::OnPoseFrameReady(const FString& Subject, const FO3DSPoseFrame& Frame)
-{
-	if (!Component)
-	{
-		return;
-	}
-	SerializePoseFrame(Subject, Frame);
 }
 
 void FO3DSenderSerializer::DropFrame(const FString& Subject, FSubjectCache& Cache, const FString& Reason)
@@ -350,13 +332,15 @@ void FO3DSenderSerializer::SerializeFrameLegacy(const FString& Subject, const FO
 
 	SubjectObject->CalcMatrices();
 
+	// ADR 0008 item 7: the wire time is the sampling time, not the time of
+	// serialization (WP-A2a).
 	std::vector<char> Buffer;
-	const double Now = FPlatformTime::Seconds();
-	SubjectListPtr->Serialize(Buffer, Now);
+	const double Timestamp = Frame.CaptureTimeSec;
+	SubjectListPtr->Serialize(Buffer, Timestamp);
 
 	// Transports receive frames only through the bytes below (see
 	// UO3DSenderComponent::HandleSerializedFrameForward).
-	BroadcastSerializedBuffer(Subject, Buffer, Now, Cache);
+	BroadcastSerializedBuffer(Subject, Buffer, Timestamp, Cache);
 	Cache.FullSyncsSent++;
 
 	if (CVarO3DSenderDebugSerialize.GetValueOnAnyThread() != 0)
@@ -412,7 +396,8 @@ void FO3DSenderSerializer::SerializeFramePersistent(const FString& Subject, cons
 	}
 	const bool bNeedFullSync = (SyncReasons != FullSyncTracker::None);
 
-	const double Now = FPlatformTime::Seconds();
+	// ADR 0008 item 7: the wire time is the sampling time (WP-A2a).
+	const double Timestamp = Frame.CaptureTimeSec;
 	std::vector<char> Buffer;
 
 	if (bNeedFullSync)
@@ -454,7 +439,7 @@ void FO3DSenderSerializer::SerializeFramePersistent(const FString& Subject, cons
 			SubjectObject->SetResidualEncoder(nullptr);
 		}
 
-		SubjectObject->Serialize(Buffer, Now);
+		SubjectObject->Serialize(Buffer, Timestamp);
 		Cache.SyncTracker.MarkFullSent(SyncInputs);
 		Cache.FullSyncsSent++;
 	}
@@ -475,7 +460,7 @@ void FO3DSenderSerializer::SerializeFramePersistent(const FString& Subject, cons
 		if (bResidual)
 		{
 			const double DeltaThreshold = (double)FMath::Max(0.0f, Settings.ResidualDeltaThreshold);
-			SubjectObject->SerializeUpdateResidual(Buffer, Count, DeltaThreshold, Now);
+			SubjectObject->SerializeUpdateResidual(Buffer, Count, DeltaThreshold, Timestamp);
 		}
 		else
 		{
@@ -483,11 +468,11 @@ void FO3DSenderSerializer::SerializeFramePersistent(const FString& Subject, cons
 			Ranges.byteRange = (double)FMath::Max(0.0f, Settings.QuantizationByteRange);
 			Ranges.halfRange = (double)FMath::Max(0.0f, Settings.QuantizationHalfRange);
 			const double DeltaThreshold = (double)FMath::Max(0.0f, Settings.QuantizationDeltaThreshold);
-			SubjectObject->SerializeUpdate(Buffer, Count, DeltaThreshold, Now, &Ranges);
+			SubjectObject->SerializeUpdate(Buffer, Count, DeltaThreshold, Timestamp, &Ranges);
 		}
 	}
 
-	BroadcastSerializedBuffer(Subject, Buffer, Now, Cache);
+	BroadcastSerializedBuffer(Subject, Buffer, Timestamp, Cache);
 
 	if (CVarO3DSenderDebugSerialize.GetValueOnAnyThread() != 0)
 	{
@@ -504,7 +489,7 @@ void FO3DSenderSerializer::SerializeFramePersistent(const FString& Subject, cons
 
 
 /** Shared broadcast + stats tail for the legacy, residual, and quantized serialization paths. */
-void FO3DSenderSerializer::BroadcastSerializedBuffer(const FString& Subject, const std::vector<char>& Buffer, double Now, FSubjectCache& Cache)
+void FO3DSenderSerializer::BroadcastSerializedBuffer(const FString& Subject, const std::vector<char>& Buffer, double Timestamp, FSubjectCache& Cache)
 {
 	if (Buffer.empty())
 	{
@@ -515,7 +500,7 @@ void FO3DSenderSerializer::BroadcastSerializedBuffer(const FString& Subject, con
 	Payload.SetNumUninitialized((int32)Buffer.size());
 	FMemory::Memcpy(Payload.GetData(), Buffer.data(), Buffer.size());
 
-	OnSerializedFrame.Broadcast(Subject, Payload, Now);
+	OnSerializedFrame.Broadcast(Subject, Payload, Timestamp);
 
 	Cache.FramesSerialized++;
 	Cache.BytesSerialized += (uint64)Payload.Num();
@@ -544,13 +529,14 @@ void FO3DSenderSerializer::DumpStatsInstance() const
 			(unsigned long long)Cache.DroppedFrames,
 			Cache.LastError.IsEmpty() ? TEXT("<none>") : *Cache.LastError);
 	}
-	UE_LOG(LogO3DSenderSerializer, Display, TEXT("Serializer(Component=%s) subjects=%d"), *GetNameSafe(Component), SubjectState.Num());
+	UE_LOG(LogO3DSenderSerializer, Display, TEXT("Serializer(%s) subjects=%d"), StatsLabel.IsEmpty() ? TEXT("<unnamed>") : *StatsLabel, SubjectState.Num());
 }
 
 /** Console command handler that walks all live serializer instances and logs aggregate stats. */
 void FO3DSenderSerializer::DumpAllStats()
 {
 	UE_LOG(LogO3DSenderSerializer, Display, TEXT("---- O3DS Sender Serializer Stats ----"));
+	FScopeLock InstancesScopeLock(&GetSerializerInstancesLock());
 	if (GInstances.Num() == 0)
 	{
 		UE_LOG(LogO3DSenderSerializer, Display, TEXT("(no active serializer instances)"));
