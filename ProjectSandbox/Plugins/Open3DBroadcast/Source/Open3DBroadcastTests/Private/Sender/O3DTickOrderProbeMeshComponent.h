@@ -26,15 +26,17 @@ public:
 		PrimaryComponentTick.TickGroup = TG_PostUpdateWork;
 	}
 
+	// Super::TickComponent is not called: with no skeletal mesh asset the base tick stopped the
+	// component ticking after the first frame in CI (#317). The test checks how the tick
+	// prerequisite orders the two tick functions, which does not depend on the mesh's own tick work.
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override
 	{
-		Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 		if (OnTicked)
 		{
 			OnTicked();
 		}
 	}
 
-	/** Called at the end of each tick, after the mesh's own tick work. */
+	/** Called on each tick of the probe. */
 	TFunction<void()> OnTicked;
 };
