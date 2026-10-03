@@ -14,7 +14,7 @@
 #include "Templates/UniquePtr.h"
 #include "UObject/UnrealType.h"
 
-class FO3DSenderCurveProcessor;
+class FO3DSenderCurveFilter;
 
 /**
  * Befriended by UO3DSenderComponent. Header-only: the component class is exported, so these
@@ -48,7 +48,12 @@ struct FO3DSenderComponentTestAccess
 	static void SetCapturing(UO3DSenderComponent& Component, bool bCapturing) { Component.bIsCapturing = bCapturing; }
 	static bool HasSerializer(const UO3DSenderComponent& Component) { return Component.Serializer.IsValid(); }
 	static void EnsureSubjectNameCached(UO3DSenderComponent& Component) { Component.EnsureSubjectNameCached(nullptr); }
-	static FO3DSPoseFrame CreateFrameShell(UO3DSenderComponent& Component, double CaptureTimeSec) { return Component.CreateFrameShell(nullptr, CaptureTimeSec); }
+	static FO3DSPoseFrame CreateFrameShell(UO3DSenderComponent& Component, double CaptureTimeSec)
+	{
+		FO3DSPoseFrame Frame;
+		Component.FillFrameShell(nullptr, CaptureTimeSec, Frame);
+		return Frame;
+	}
 	static void SetAudioCaptureComponent(UO3DSenderComponent& Component, UO3DSenderAudioCaptureComponent* Capture) { Component.AudioCaptureComponent = Capture; }
 	static FString GetCachedSubjectName(const UO3DSenderComponent& Component) { return Component.CachedSubjectName; }
 
@@ -68,8 +73,9 @@ struct FO3DSenderComponentTestAccess
 };
 
 /**
- * Owns one FO3DSenderCurveProcessor (a private class of this module) and exposes what the
- * curve filter tests need (SND-4, SND-20). Befriended by the processor.
+ * Owns one FO3DSenderCurveFilter (a private class of this module) and exposes what the curve filter
+ * tests need (SND-4, SND-20). Since WP-A2a the filter works on the sampled frame: SetCurves builds
+ * the shared curve list a sampled frame carries, and BuildFilteredCurves filters it.
  */
 class OPEN3DSENDER_API FO3DSenderCurveProcessorProbe
 {
@@ -88,8 +94,13 @@ public:
 	void SetCurveValues(const TArray<float>& Values);
 	void BuildFilteredCurves(const FO3DSenderCurveConfig& Config, TArray<FName>& OutNames, TArray<float>& OutValues);
 
+	/** Filters a sampled frame in place, as the component does after sampling (WP-A2a). Same state as BuildFilteredCurves. */
+	void FilterFrame(FO3DSPoseFrame& Frame);
+
 private:
-	TUniquePtr<FO3DSenderCurveProcessor> Processor;
+	TUniquePtr<FO3DSenderCurveFilter> Filter;
+	TSharedPtr<const FO3DSCurveList> CurveList;
+	TArray<float> CurveValues;
 };
 
 #endif // WITH_DEV_AUTOMATION_TESTS

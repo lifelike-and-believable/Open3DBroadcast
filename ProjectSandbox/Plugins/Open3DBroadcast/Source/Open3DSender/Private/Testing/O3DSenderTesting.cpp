@@ -7,7 +7,7 @@
 #include "O3DSenderCurveProcessor.h"
 
 FO3DSenderCurveProcessorProbe::FO3DSenderCurveProcessorProbe()
-	: Processor(MakeUnique<FO3DSenderCurveProcessor>())
+	: Filter(MakeUnique<FO3DSenderCurveFilter>())
 {
 }
 
@@ -15,28 +15,28 @@ FO3DSenderCurveProcessorProbe::~FO3DSenderCurveProcessorProbe() = default;
 
 void FO3DSenderCurveProcessorProbe::SetCurves(const TArray<FName>& Names, const TArray<float>& Values)
 {
-	FO3DSenderCurveProcessor& P = *Processor;
-	P.CurveNames = Names;
-	P.CurveValues = Values;
-	P.LastSentCurveValues.SetNumZeroed(Names.Num());
-	P.LastSentHasValue.SetNumZeroed(Names.Num());
-	P.CurveNameSet.Reset();
-	for (const FName& Name : Names)
-	{
-		P.CurveNameSet.Add(Name);
-	}
-	P.bCurveCacheInitialized = true;
-	++P.CurveRevision;
+	// A new list, as a curve cache refresh makes; the filter resets its last-sent state for it.
+	// No morph curves, as before (the probe never marked any).
+	TSharedRef<FO3DSCurveList> List = MakeShared<FO3DSCurveList>();
+	List->Names = Names;
+	List->MorphMask.Init(false, Names.Num());
+	CurveList = List;
+	CurveValues = Values;
 }
 
 void FO3DSenderCurveProcessorProbe::SetCurveValues(const TArray<float>& Values)
 {
-	Processor->CurveValues = Values;
+	CurveValues = Values;
 }
 
 void FO3DSenderCurveProcessorProbe::BuildFilteredCurves(const FO3DSenderCurveConfig& Config, TArray<FName>& OutNames, TArray<float>& OutValues)
 {
-	Processor->BuildFilteredCurves(Config, OutNames, OutValues);
+	Filter->Apply(Config, CurveList, CurveValues, OutNames, OutValues);
+}
+
+void FO3DSenderCurveProcessorProbe::FilterFrame(FO3DSPoseFrame& Frame)
+{
+	Filter->FilterFrame(Frame);
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

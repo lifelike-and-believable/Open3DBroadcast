@@ -4,7 +4,10 @@
 
 #include "CoreMinimal.h"
 
-/** Tunable curve filtering parameters shared between the sender component and processor. */
+/**
+ * Curve filtering parameters for FO3DSenderCurveFilter. Built from a frame's settings snapshot
+ * (FO3DSenderEncodingSettings) since WP-A2a; the pattern pointers point into that snapshot.
+ */
 struct FO3DSenderCurveConfig
 {
     bool bClampMorphCurvesToUnit = true;

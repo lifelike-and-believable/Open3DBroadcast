@@ -58,6 +58,11 @@ void FO3DSenderCurveProcessorDeleter::operator()(FO3DSenderCurveProcessor* Ptr) 
 	delete Ptr;
 }
 
+void FO3DSenderCurveFilterDeleter::operator()(FO3DSenderCurveFilter* Ptr) const
+{
+	delete Ptr;
+}
+
 uint64 FO3DSenderEncodingSettings::GetFullSyncFingerprint() const
 {
 	uint64 Hash = 1469598103934665603ull;
@@ -96,6 +101,7 @@ UO3DSenderComponent::UO3DSenderComponent()
 	EnsureValidTransportName();
 	TransportController.Reset(new FO3DSenderTransportController());
 	CurveProcessor.Reset(new FO3DSenderCurveProcessor());
+	CurveFilter.Reset(new FO3DSenderCurveFilter());
 	SyncAudioConfigSource();
 	LastSubjectSourceValue = SubjectName;
 }
@@ -127,7 +133,6 @@ void UO3DSenderComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 	if (Serializer)
 	{
-		Serializer->Detach(this);
 		if (SerializerRelayHandle.IsValid())
 		{
 			Serializer->OnSerializedFrame.Remove(SerializerRelayHandle);
@@ -218,7 +223,9 @@ void UO3DSenderComponent::StartCapture()
 
 	if (Serializer)
 	{
-		Serializer->Attach(this);
+		// The serializer holds no pointer back to this component (SND-22, WP-A2a): sampled frames
+		// reach it through HandleBoneTransformsFinalized, and only while capturing.
+		Serializer->SetStatsLabel(GetPathName());
 		if (!SerializerRelayHandle.IsValid())
 		{
 			SerializerRelayHandle = Serializer->OnSerializedFrame.AddUObject(this, &UO3DSenderComponent::HandleSerializedFrameForward);
@@ -228,6 +235,10 @@ void UO3DSenderComponent::StartCapture()
 	if (CurveProcessor.IsValid())
 	{
 		CurveProcessor->Reset();
+	}
+	if (CurveFilter.IsValid())
+	{
+		CurveFilter->Reset();
 	}
 
 	InitializeTransport();
@@ -269,7 +280,7 @@ void UO3DSenderComponent::StartCapture()
 		NotifyOnScreen(FString::Printf(TEXT("O3D Sender: not started (%s)"), *LastStartCaptureError), FColor::Red, 4.0f);
 		if (Serializer)
 		{
-			Serializer->Detach(this);
+			Serializer->ClearAllCaches();
 		}
 		UnbindFromTarget();
 		ResetSkeletonCache();
@@ -295,7 +306,6 @@ void UO3DSenderComponent::StopCapture()
 
 	if (Serializer)
 	{
-		Serializer->Detach(this);
 		Serializer->ClearAllCaches();
 	}
 
@@ -307,6 +317,10 @@ void UO3DSenderComponent::StopCapture()
 	if (CurveProcessor.IsValid())
 	{
 		CurveProcessor->Reset();
+	}
+	if (CurveFilter.IsValid())
+	{
+		CurveFilter->Reset();
 	}
 
 	TeardownTransport();
@@ -1123,10 +1137,43 @@ void UO3DSenderComponent::ResetSkeletonCache()
 	bDescriptorDirty = false;
 }
 
-/** Snapshot the encoding properties for one frame (SND-14). */
-FO3DSenderEncodingSettings UO3DSenderComponent::BuildEncodingSettings() const
+namespace
 {
-	FO3DSenderEncodingSettings Settings;
+	/** Case-sensitive, like the pattern matching itself (O3DHelpers::NameMatchesPattern). */
+	bool SameCurvePatterns(const TArray<FString>& A, const TArray<FString>& B)
+	{
+		if (A.Num() != B.Num())
+		{
+			return false;
+		}
+		for (int32 Index = 0; Index < A.Num(); ++Index)
+		{
+			if (!A[Index].Equals(B[Index], ESearchCase::CaseSensitive))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/** Replaces Snapshot with a new shared copy of Current only when the contents differ. */
+	void UpdateSharedCurvePatterns(TSharedPtr<const TArray<FString>>& Snapshot, const TArray<FString>& Current)
+	{
+		if (!Snapshot.IsValid() || !SameCurvePatterns(*Snapshot, Current))
+		{
+			Snapshot = MakeShared<TArray<FString>>(Current);
+		}
+	}
+}
+
+/**
+ * Snapshot the encoding and curve filtering properties for one frame (SND-14, WP-A2a). The scalar
+ * fields are copied every time; a pattern list gets a new shared array only when it changed, so the
+ * frames already sampled keep the lists they were sampled with.
+ */
+const FO3DSenderEncodingSettings& UO3DSenderComponent::UpdateEncodingSnapshot()
+{
+	FO3DSenderEncodingSettings& Settings = EncodingSnapshot;
 	// Residual takes precedence when both are enabled (see bEnableQuantization).
 	if (bEnableResidualCoding)
 	{
@@ -1147,28 +1194,22 @@ FO3DSenderEncodingSettings UO3DSenderComponent::BuildEncodingSettings() const
 	Settings.QuantizationHalfRange = QuantizationHalfRange;
 	Settings.QuantizationDeltaThreshold = QuantizationDeltaThreshold;
 	Settings.FullSyncIntervalSeconds = FullSyncIntervalSeconds;
-	return Settings;
-}
 
-/** Build the runtime curve processing configuration from component-level settings. */
-FO3DSenderCurveConfig UO3DSenderComponent::BuildCurveConfig() const
-{
-	FO3DSenderCurveConfig Config;
-	Config.bClampMorphCurvesToUnit = bClampMorphCurvesToUnit;
-	Config.bDropNaNAndInfinity = bDropNaNAndInfinity;
-	Config.bEnableCurveFiltering = bEnableCurveFiltering;
+	Settings.bClampMorphCurvesToUnit = bClampMorphCurvesToUnit;
+	Settings.bDropNaNAndInfinity = bDropNaNAndInfinity;
+	Settings.bEnableCurveFiltering = bEnableCurveFiltering;
 	// ADR 0005 (ii), SND-3: per-frame epsilon/delta filtering changes which
 	// curves a frame carries, which the residual and quantized encodings
 	// would have to answer with a full sync every time. Those encodings send
 	// every curve value on each update, so the filter is off there; include
 	// and exclude patterns still apply.
-	Config.bApplyValueFilters = bEnableCurveFiltering && !bEnableResidualCoding && !bEnableQuantization;
-	Config.CurveEpsilon = CurveEpsilon;
-	Config.CurveDeltaThreshold = CurveDeltaThreshold;
-	Config.IncludeCurvePatterns = &IncludeCurvePatterns;
-	Config.ExcludeCurvePatterns = &ExcludeCurvePatterns;
-	Config.bLogFilteredCurves = bLogFilteredCurves;
-	return Config;
+	Settings.bApplyCurveValueFilters = bEnableCurveFiltering && !bEnableResidualCoding && !bEnableQuantization;
+	Settings.CurveEpsilon = CurveEpsilon;
+	Settings.CurveDeltaThreshold = CurveDeltaThreshold;
+	Settings.bLogFilteredCurves = bLogFilteredCurves;
+	UpdateSharedCurvePatterns(Settings.IncludeCurvePatterns, IncludeCurvePatterns);
+	UpdateSharedCurvePatterns(Settings.ExcludeCurvePatterns, ExcludeCurvePatterns);
+	return Settings;
 }
 
 /**
@@ -1213,17 +1254,16 @@ FString UO3DSenderComponent::ResolveSubjectName(const USkeletalMeshComponent* Sk
 	return CachedSubjectName;
 }
 
-FO3DSPoseFrame UO3DSenderComponent::CreateFrameShell(const USkeletalMeshComponent* SkelComp, double CaptureTimeSec)
+void UO3DSenderComponent::FillFrameShell(const USkeletalMeshComponent* SkelComp, double CaptureTimeSec, FO3DSPoseFrame& Frame)
 {
-	FO3DSPoseFrame Frame;
 	Frame.Subject = ResolveSubjectName(SkelComp);
 	Frame.FrameIndex = ++FrameCounter;
 	// ADR 0005 (i): the frame carries the descriptor it was sampled against,
 	// so the serializer never depends on having seen OnDescriptorReady.
 	Frame.Descriptor = DescriptorSnapshot;
+	// ADR 0008 item 7: the sampling time, which is also the wire time.
 	Frame.CaptureTimeSec = CaptureTimeSec;
-	Frame.Encoding = BuildEncodingSettings();
-	return Frame;
+	Frame.Encoding = UpdateEncodingSnapshot();
 }
 
 void UO3DSenderComponent::BuildLocalBoneTransforms(const TArray<FTransform>& ComponentSpaceTransforms,
@@ -1356,12 +1396,14 @@ void UO3DSenderComponent::PopulatePoseFrameBones(const USkeletalMeshComponent* S
 	}
 }
 
-void UO3DSenderComponent::PopulatePoseFrameCurves(USkeletalMeshComponent* SkelComp, const FO3DSenderCurveConfig& CurveConfig, FO3DSPoseFrame& Frame, bool bDebugCurves)
+void UO3DSenderComponent::PopulatePoseFrameCurves(USkeletalMeshComponent* SkelComp, FO3DSPoseFrame& Frame, bool bDebugCurves)
 {
+	Frame.CurveList.Reset();
+	Frame.RawCurveValues.Reset();
+	Frame.CurveNames.Reset();
+	Frame.CurveValues.Reset();
 	if (!SkelComp)
 	{
-		Frame.CurveNames.Reset();
-		Frame.CurveValues.Reset();
 		return;
 	}
 
@@ -1370,18 +1412,19 @@ void UO3DSenderComponent::PopulatePoseFrameCurves(USkeletalMeshComponent* SkelCo
 		CurveProcessor.Reset(new FO3DSenderCurveProcessor());
 	}
 
-	CurveProcessor->EnsureCurveCache(SkelComp, CurveConfig);
-	CurveProcessor->CaptureCurves(SkelComp, bDebugCurves);
-
-	TArray<FName> FilteredCurveNames;
-	TArray<float> FilteredCurveValues;
-	CurveProcessor->BuildFilteredCurves(CurveConfig, FilteredCurveNames, FilteredCurveValues);
-
-	Frame.CurveNames = MoveTemp(FilteredCurveNames);
-	Frame.CurveValues = MoveTemp(FilteredCurveValues);
+	// Capture only: raw values against the shared curve list. Filtering runs on the sampled frame
+	// afterwards (FO3DSenderCurveFilter, WP-A2a).
+	CurveProcessor->EnsureCurveCache(SkelComp);
+	CurveProcessor->CaptureCurves(SkelComp, bDebugCurves, Frame.RawCurveValues);
+	Frame.CurveList = CurveProcessor->GetCurveList();
 }
 
-/** Callback after animation updates; samples the skeletal mesh and pushes serializer events. */
+/**
+ * Samples the skeletal mesh into a pooled frame, filters its curves, then serializes it (ADR 0008
+ * item 1). WP-A2a keeps every step on the game thread, in this call; the WP-A2c pipeline moves the
+ * filtering and serialization to a worker. Nothing after sampling reads this component: the
+ * filter and the serializer work only from the frame and its settings snapshot.
+ */
 void UO3DSenderComponent::HandleBoneTransformsFinalized()
 {
 	USkeletalMeshComponent* SkelComp = nullptr;
@@ -1391,16 +1434,37 @@ void UO3DSenderComponent::HandleBoneTransformsFinalized()
 		return;
 	}
 
+	TUniquePtr<FO3DSPoseFrame> Frame = FramePool.Acquire();
+	if (!Frame.IsValid())
+	{
+		// Every pooled frame is out. Not reachable while capture is synchronous (one frame at a
+		// time); the sample is skipped rather than allocating past the pool's bound.
+		UE_LOG(LogO3DSenderComponent, Verbose, TEXT("No free pose frame; sample skipped on %s"), *GetNameSafe(GetOwner()));
+		return;
+	}
+
 	const bool bDebugPose = (CVarO3DSenderDebugPose.GetValueOnAnyThread() != 0);
 	const bool bDebugCurves = (CVarO3DSenderDebugCurves.GetValueOnAnyThread() != 0);
 
-	FO3DSPoseFrame Frame = CreateFrameShell(SkelComp, NowSeconds);
-	PopulatePoseFrameBones(SkelComp, Frame, bDebugPose);
+	FillFrameShell(SkelComp, NowSeconds, *Frame);
+	PopulatePoseFrameBones(SkelComp, *Frame, bDebugPose);
+	PopulatePoseFrameCurves(SkelComp, *Frame, bDebugCurves);
 
-	const FO3DSenderCurveConfig CurveConfig = BuildCurveConfig();
-	PopulatePoseFrameCurves(SkelComp, CurveConfig, Frame, bDebugCurves);
+	if (!CurveFilter.IsValid())
+	{
+		CurveFilter.Reset(new FO3DSenderCurveFilter());
+	}
+	CurveFilter->FilterFrame(*Frame);
 
-	OnPoseFrameReady.Broadcast(Frame.Subject, Frame);
+	// Listeners still get the filtered curves, as before WP-A2a.
+	OnPoseFrameReady.Broadcast(Frame->Subject, *Frame);
+
+	if (Serializer)
+	{
+		Serializer->SerializePoseFrame(Frame->Subject, *Frame);
+	}
+
+	FramePool.Release(MoveTemp(Frame));
 }
 
 /** Called every frame; forwards upkeep ticks to the live transport instance. */
