@@ -3,6 +3,7 @@
 #include "O3DReceiverFrameDecoder.h"
 
 #include "O3DHelpers.h"
+#include "O3DPerformanceMetrics.h"
 
 THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
@@ -16,27 +17,19 @@ namespace O3DReceiverFrameDecoderPrivate
 
 	/**
 	 * One O3DS transform as an FTransform, or false when a value is not finite or the rotation is
-	 * zero. Components go through float, as the receiver always did (RCV-13 keeps doubles later).
+	 * zero. The core's doubles are kept (RCV-13): FVector and FQuat are double, and a quantized
+	 * update is rebuilt in double (a translation as anchor plus delta, a rotation dequantized), so a
+	 * float cast would lose precision.
 	 */
 	bool TryConvertTransform(const O3DS::Transform& Transform, FTransform& Out)
 	{
-		const O3DS::Vector3d Translation = Transform.translation.value;
-		const O3DS::Vector4d Rotation = Transform.rotation.value;
-		const O3DS::Vector3d Scale = Transform.scale.value;
+		const O3DS::Vector3d& Translation = Transform.translation.value;
+		const O3DS::Vector4d& Rotation = Transform.rotation.value;
+		const O3DS::Vector3d& Scale = Transform.scale.value;
 
-		FQuat Quat(
-			static_cast<float>(Rotation.v[0]),
-			static_cast<float>(Rotation.v[1]),
-			static_cast<float>(Rotation.v[2]),
-			static_cast<float>(Rotation.v[3]));
-		const FVector Location(
-			static_cast<float>(Translation.v[0]),
-			static_cast<float>(Translation.v[1]),
-			static_cast<float>(Translation.v[2]));
-		const FVector ScaleVec(
-			static_cast<float>(Scale.v[0]),
-			static_cast<float>(Scale.v[1]),
-			static_cast<float>(Scale.v[2]));
+		FQuat Quat(Rotation.v[0], Rotation.v[1], Rotation.v[2], Rotation.v[3]);
+		const FVector Location(Translation.v[0], Translation.v[1], Translation.v[2]);
+		const FVector ScaleVec(Scale.v[0], Scale.v[1], Scale.v[2]);
 
 		if (!FMath::IsFinite(Location.X) || !FMath::IsFinite(Location.Y) || !FMath::IsFinite(Location.Z) ||
 			!FMath::IsFinite(ScaleVec.X) || !FMath::IsFinite(ScaleVec.Y) || !FMath::IsFinite(ScaleVec.Z) ||
@@ -103,11 +96,12 @@ bool FO3DReceiverFrameDecoder::ConvertTransforms(const O3DS::Subject& Subject)
 	{
 		// RCV-14: parent ids index this list, so skipping an entry would shift every later
 		// parent. The core parser never leaves a null entry (a nameless node gets a placeholder
-		// name), so treat one as a malformed frame.
+		// name), so treat one as a malformed frame. RCV-13: the dropped pose is counted.
 		if (Items[Index] == nullptr
 			|| !O3DReceiverFrameDecoderPrivate::TryConvertTransform(*Items[Index], Transforms[static_cast<int32>(Index)]))
 		{
 			Transforms.Reset();
+			FO3DPerformanceMetrics::Get().RecordInvalidPoseDropped();
 			return false;
 		}
 	}

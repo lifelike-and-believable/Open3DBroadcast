@@ -127,6 +127,7 @@ void FO3DPerformanceMetrics::Reset()
 	ReceiverMetrics.FramesDropped.store(0);
 	ReceiverMetrics.BytesDeserialized.store(0);
 	ReceiverMetrics.DeserializationErrors.store(0);
+	ReceiverMetrics.InvalidPosesDropped.store(0);
 	ReceiverMetrics.AvgDeserializationTimeMs.store(0.0);
 	ReceiverMetrics.SkeletonUpdates.store(0);
 	ReceiverMetrics.PoseUpdates.store(0);
@@ -314,6 +315,7 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Skeleton Updates: %llu"), ReceiverMetrics.SkeletonUpdates.load());
 		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Pose Updates: %llu"), ReceiverMetrics.PoseUpdates.load());
 		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Deserialization Errors: %llu"), ReceiverMetrics.DeserializationErrors.load());
+		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT("  Invalid Poses Dropped: %llu"), ReceiverMetrics.InvalidPosesDropped.load());
 		UE_LOG(LogO3DPerformanceMetrics, Warning, TEXT(""));
 
 		// Per-operation timing breakdown
@@ -441,6 +443,7 @@ FString FO3DPerformanceMetrics::GetMetricsAsCSV() const
 	CSV += FString::Printf(TEXT("ReceiverFramesApplied,%llu\n"), ReceiverMetrics.FramesApplied.load());
 	CSV += FString::Printf(TEXT("ReceiverFramesDropped,%llu\n"), ReceiverMetrics.FramesDropped.load());
 	CSV += FString::Printf(TEXT("ReceiverBytesDeserialized,%llu\n"), ReceiverMetrics.BytesDeserialized.load());
+	CSV += FString::Printf(TEXT("ReceiverInvalidPosesDropped,%llu\n"), ReceiverMetrics.InvalidPosesDropped.load());
 	CSV += FString::Printf(TEXT("AvgRoundTripLatencyMs,%.2f\n"), ReceiverMetrics.AvgRoundTripLatencyMs.load());
 	CSV += FString::Printf(TEXT("GateLost,%llu\n"), ReceiverMetrics.GateLost.load());
 	CSV += FString::Printf(TEXT("GateReordered,%llu\n"), ReceiverMetrics.GateReordered.load());

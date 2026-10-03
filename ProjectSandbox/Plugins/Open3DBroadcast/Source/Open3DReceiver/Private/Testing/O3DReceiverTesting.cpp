@@ -30,9 +30,13 @@ bool FO3DReceiverFrameDecoderProbe::Decode(TConstArrayView<uint8> Buffer, bool b
 	{
 		return false;
 	}
+	return DecodeSubject(*List->mItems[0], bFullDescriptor);
+}
 
+bool FO3DReceiverFrameDecoderProbe::DecodeSubject(const O3DS::Subject& Subject, bool bFullDescriptor)
+{
 	FO3DDecodedSubject Decoded;
-	if (!Decoder->Decode(*List->mItems[0], bFullDescriptor, Decoded))
+	if (!Decoder->Decode(Subject, bFullDescriptor, Decoded))
 	{
 		return false;
 	}
