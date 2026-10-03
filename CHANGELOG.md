@@ -732,6 +732,19 @@ Transport credentials are no longer saved with levels, Blueprints, `GameUserSett
   `TcpReceiverGetFailedConnectAttempts`. The existing TCP, sockets and conformance tests are
   unchanged.
 
+### Receiver frame decoder split out (WP-A3 step 1, RCV-29, RCV-11, RCV-12)
+
+- `FO3DReceiverSource`'s conversion of parsed subjects into LiveLink bone names, parents,
+  transforms and curves moved into `FO3DReceiverFrameDecoder` (private). Output is unchanged.
+- **Fewer allocations per frame (RCV-11, RCV-12).** Curve `FName`s are built only when a subject's
+  curve name strings change (they were built for every curve on every frame), the subject `FName`
+  is cached, the skeleton and curve hashes are computed only when the names change, and the
+  transform and curve value arrays are reused across frames instead of being copied from the
+  cache or allocated per packet.
+- **Tests.** New `Open3DBroadcast.Receiver.FrameDecoder.ConvertsPoseAndCurves`,
+  `.ReusesTopologyUntilItChanges`, `.RejectsUnusablePoses`, through the exported
+  `FO3DReceiverFrameDecoderProbe`. Existing tests are unchanged.
+
 ### Sender worker cost within ADR 0008's budget (WP-A2 follow-up)
 
 - **Legacy encoding keeps its core Subject.** The default encoding no longer builds a new
