@@ -875,7 +875,8 @@ int32 FO3DReceiverSource::PublishTouchedSubjects(O3DS::SubjectList& List, const 
     {
         if (O3DS::Subject* SubjectPtr = List.findSubject(Info.name))
         {
-            ProcessParsedSubject(SubjectPtr, List.mTime, WorldTimeSecondsOverride, Info.fullDescriptor);
+            // The frame just parsed into List (RCV-8): its timecode, read now, never later.
+            ProcessParsedSubject(SubjectPtr, WorldTimeSecondsOverride, Info.fullDescriptor, List.mHasSceneTime ? &List.mSceneTime : nullptr);
             ++Count;
         }
     }
@@ -904,13 +905,13 @@ void FO3DReceiverSource::SetSourceGuid(const FGuid& InSourceGuid)
 
 void FO3DReceiverSource::SetTestPushHooks(
     TFunction<void(const FLiveLinkSubjectKey&, const TArray<FName>&, const TArray<int32>&, const TArray<FName>&, bool)> StaticHook,
-    TFunction<void(const FLiveLinkSubjectKey&, const TArray<FTransform>&, const TArray<float>&, double)> FrameHook)
+    TFunction<void(const FLiveLinkSubjectKey&, const TArray<FTransform>&, const TArray<float>&, double, const TOptional<FQualifiedFrameTime>&)> FrameHook)
 {
     Publisher->SetTestHooks(MoveTemp(StaticHook), MoveTemp(FrameHook));
 }
 
 /** Build LiveLink static/frame data and push it to the client for a single parsed subject. */
-void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double SubjectListTime, double WorldTimeSecondsOverride, bool bFullDescriptor)
+void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double WorldTimeSecondsOverride, bool bFullDescriptor, const O3DS::SceneTime* SenderSceneTime)
 {
     if (!SubjectPtr)
     {
@@ -948,7 +949,7 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
         Concealment->ObserveRealFrame(GetConcealmentSettings(), SubjectFName, WorldTimeSecondsOverride, BoneTransforms, CurveValues, bNeedStaticUpdate);
     }
 
-    Publisher->PublishFrame(SubjectFName, BoneTransforms, CurveNames, CurveValues, SubjectListTime, WorldTimeSecondsOverride, Decoded.CurveHash);
+    Publisher->PublishFrame(SubjectFName, BoneTransforms, CurveNames, CurveValues, WorldTimeSecondsOverride, SenderSceneTime);
 
     const double LiveLinkPushTimeMs = (FPlatformTime::Seconds() - LiveLinkStartTime) * 1000.0;
     MetricsHandle->RecordLiveLinkPushTimeMs(LiveLinkPushTimeMs);

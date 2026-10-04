@@ -8,6 +8,8 @@
 // depends on Open3DReceiver. Compiled out without dev automation tests.
 
 #include "CoreMinimal.h"
+#include "Misc/Optional.h"
+#include "Misc/QualifiedFrameTime.h"
 #include "Containers/ArrayView.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -130,6 +132,9 @@ struct FO3DReceiverCorrectnessTestAccessor
 		FName Subject;
 		TArray<FTransform> Transforms;
 		TArray<float> Curves;
+		double WorldTime = 0.0;
+		/** The frame's LiveLink SceneTime; unset when it was left at LiveLink's default (RCV-8). */
+		TOptional<FQualifiedFrameTime> SceneTime;
 	};
 
 	struct FRecorder
@@ -160,12 +165,15 @@ struct FO3DReceiverCorrectnessTestAccessor
 			Push.bFirstPushThisSession = bFirstPush;
 			Recorder->Statics.Add(MoveTemp(Push));
 		};
-		auto FrameHook = [Recorder](const FLiveLinkSubjectKey& Key, const TArray<FTransform>& Transforms, const TArray<float>& Curves, double)
+		auto FrameHook = [Recorder](const FLiveLinkSubjectKey& Key, const TArray<FTransform>& Transforms, const TArray<float>& Curves, double WorldTime,
+			const TOptional<FQualifiedFrameTime>& SceneTime)
 		{
 			FFramePush Push;
 			Push.Subject = Key.SubjectName.Name;
 			Push.Transforms = Transforms;
 			Push.Curves = Curves;
+			Push.WorldTime = WorldTime;
+			Push.SceneTime = SceneTime;
 			Recorder->Frames.Add(MoveTemp(Push));
 		};
 		Source.SetTestPushHooks(MoveTemp(StaticHook), MoveTemp(FrameHook));
@@ -243,6 +251,7 @@ public:
 		FName Subject;
 		int32 NumTransforms = 0;
 		double WorldTime = 0.0;
+		TOptional<FQualifiedFrameTime> SceneTime;
 	};
 
 	explicit FO3DLiveLinkPublisherProbe(bool bBindHooks = true);
@@ -255,6 +264,8 @@ public:
 	/** PublishStatic for a subject with these names; returns whether the topology changed. */
 	bool PublishStatic(FName Subject, const TArray<FName>& BoneNames, const TArray<int32>& BoneParents, const TArray<FName>& CurveNames);
 	void PublishFrame(FName Subject, int32 NumTransforms, double WorldTime);
+	/** PublishFrame with a sender timecode (SubjectList.scene_time; RCV-8). */
+	void PublishFrameWithSenderTime(FName Subject, int32 NumTransforms, double WorldTime, int32 Frame, float SubFrame, int32 RateNumerator, int32 RateDenominator);
 	void PublishSyntheticFrame(FName Subject, int32 NumTransforms, double Time);
 	/** Subjects removed, in the order the publisher reported them. */
 	TArray<FName> RemoveInactiveSubjects(double NowSeconds, double ThresholdSeconds);
@@ -269,6 +280,30 @@ public:
 
 private:
 	TUniquePtr<FO3DLiveLinkPublisher> Publisher;
+};
+
+class FO3DSceneTimeMapper;
+
+/** Owns one FO3DSceneTimeMapper (a private class of this module, RCV-8) for its unit tests. */
+class OPEN3DRECEIVER_API FO3DSceneTimeMapperProbe
+{
+public:
+	FO3DSceneTimeMapperProbe();
+	~FO3DSceneTimeMapperProbe();
+
+	FO3DSceneTimeMapperProbe(const FO3DSceneTimeMapperProbe&) = delete;
+	FO3DSceneTimeMapperProbe& operator=(const FO3DSceneTimeMapperProbe&) = delete;
+
+	/** FO3DSceneTimeMapper::Map with a sender timecode (frame, sub-frame, rate). */
+	TOptional<FQualifiedFrameTime> MapSender(FName Subject, int32 Frame, float SubFrame, int32 RateNumerator, int32 RateDenominator,
+		double WorldTime, double NowSeconds, const TOptional<FQualifiedFrameTime>& EngineTime);
+	/** FO3DSceneTimeMapper::Map without one. */
+	TOptional<FQualifiedFrameTime> MapWithout(FName Subject, double WorldTime, double NowSeconds, const TOptional<FQualifiedFrameTime>& EngineTime);
+	void ForgetSubject(FName Subject);
+	void Reset();
+
+private:
+	TUniquePtr<FO3DSceneTimeMapper> Mapper;
 };
 
 class FO3DReceiverStreamScheduler;
