@@ -19,6 +19,9 @@
  * unloads moq-ffi. After Shutdown(), EnqueueGameThreadTask() drops new work and nothing
  * restarts the dispatcher lazily, so no module code runs on the game thread after
  * ShutdownModule returns.
+ *
+ * Process-wide by nature, so not part of FO3DRuntimeContext (docs/adr/0012-runtime-services-and-global-state.md,
+ * item 1): the process has one moq-ffi runtime. See docs/dev/runtime-services.md.
  */
 class FMoQAsyncDispatcher
 {

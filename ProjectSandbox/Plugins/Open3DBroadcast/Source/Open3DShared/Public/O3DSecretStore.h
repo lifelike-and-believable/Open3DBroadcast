@@ -83,6 +83,10 @@ public:
 /**
  * Thread-safe secret store. Reads happen when a transport starts, not per frame.
  * The user-settings store (R3) is only consulted on the game thread.
+ *
+ * Process-wide by nature, so not part of FO3DRuntimeContext (docs/adr/0012-runtime-services-and-global-state.md,
+ * item 1): it holds the credentials of the one user session the process runs for.
+ * See docs/dev/runtime-services.md.
  */
 class OPEN3DSHARED_API FO3DSecretStore
 {

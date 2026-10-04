@@ -558,6 +558,12 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- **Runtime services documented** (SHR-38, ADR 0012 PR 5): `docs/dev/runtime-services.md`
+  lists what each runtime context owns and which services stay process-wide and why (transport
+  registry, secret store, audio input devices, MoQ dispatcher, console variables, control receive
+  override); the headers of the first four say so too. ADR 0012 is implemented, except the
+  names-in-use picker for `ContextName` in the editor panels (a follow-up).
+
 - **Sender runtime context** (SHR-38, ADR 0012 PR 4b): `UO3DSenderComponent::ContextName`
   (advanced; empty is the default context) is resolved at each transport start. The component
   passes that context to its transport (`FO3DTransportConfig::Context`) with a sender metrics
