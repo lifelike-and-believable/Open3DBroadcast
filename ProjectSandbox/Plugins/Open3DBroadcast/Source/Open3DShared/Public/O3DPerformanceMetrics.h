@@ -187,6 +187,9 @@ private:
  * concurrent updates are not lost (SHR-26). The overhead has not been measured.
  * Data is accumulated in real-time and can be queried via console command:
  *   o3d.DumpMetrics
+ *
+ * Each FO3DRuntimeContext owns one instance (docs/adr/0012-runtime-services-and-global-state.md);
+ * Get() returns the default context's, and the console commands and the HUD read that one.
  */
 class OPEN3DSHARED_API FO3DPerformanceMetrics
 {
@@ -299,7 +302,10 @@ public:
 	// PUBLIC API
 	// =====================================================================
 
-	/** Get global metrics singleton */
+	FO3DPerformanceMetrics() = default;
+	~FO3DPerformanceMetrics() = default;
+
+	/** The default runtime context's metrics (FO3DRuntimeContext::Default()). */
 	static FO3DPerformanceMetrics& Get();
 
 	/** Reset all metrics to zero */
@@ -422,15 +428,10 @@ public:
 	/** Record pipe count (for NNG) */
 	void SetTransportPipeCount(FName TransportName, int32 PipeCount) { AcquireTransportMetrics(TransportName)->SetPipeCount(PipeCount); }
 
-private:
-	FO3DPerformanceMetrics() = default;
-	~FO3DPerformanceMetrics() = default;
-
-	// Prevent copying
 	FO3DPerformanceMetrics(const FO3DPerformanceMetrics&) = delete;
 	FO3DPerformanceMetrics& operator=(const FO3DPerformanceMetrics&) = delete;
 
-	// Global metrics state
+private:
 	FSenderMetrics SenderMetrics;
 	FReceiverMetrics ReceiverMetrics;
 	FO3DTransportMetricsRegistry TransportRegistry;
