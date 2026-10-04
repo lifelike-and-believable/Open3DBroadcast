@@ -10,11 +10,20 @@ name: Core library tests
 # GitHub-hosted runners, with no external dependencies beyond what's
 # already vendored as submodules.
 
+# Documentation-only changes (Markdown anywhere, or anything under docs/) do not run it: the core
+# build and tests read neither. A change that also touches code runs it as usual. develop and
+# main have no required status checks, so a skipped run blocks nothing.
 on:
   pull_request:
     branches: [ develop, main ]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
   push:
     branches: [ develop, main ]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
   workflow_dispatch:
 
 concurrency:

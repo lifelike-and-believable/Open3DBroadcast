@@ -58,15 +58,14 @@ jobs:
           # Source/ThirdParty/Open3DStreamCore. A change to src/o3ds reaches
           # the plugin only together with the re-synced mirror, which
           # core-tests.yml checks (sync_o3ds_core.py --check).
+          # 'every': a file counts only if it matches both rules, so Markdown
+          # in those folders (USER_GUIDE.md, README.md) does not start a UE
+          # build. The Fab zip still carries it from the next code change.
+          predicate-quantifier: 'every'
           filters: |
             code:
-              - 'Build/**'
-              - 'ProjectSandbox/ProjectSandbox.uproject'
-              - 'ProjectSandbox/Source/**'
-              - 'ProjectSandbox/Plugins/Open3DBroadcast/**'
-              - 'ProjectSandbox/Plugins/Open3DBroadcastWebRTC/**'
-              - '.github/workflows/open3dbroadcast-plugin-ci.yml'
-              - '.github/workflows/open3dbroadcast-fab-package.yml'
+              - '{Build/**,ProjectSandbox/ProjectSandbox.uproject,ProjectSandbox/Source/**,ProjectSandbox/Plugins/Open3DBroadcast/**,ProjectSandbox/Plugins/Open3DBroadcastWebRTC/**,.github/workflows/open3dbroadcast-plugin-ci.yml,.github/workflows/open3dbroadcast-fab-package.yml}'
+              - '!**/*.md'
 
   fab-package:
     name: Fab source zip
