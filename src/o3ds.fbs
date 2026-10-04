@@ -202,6 +202,16 @@ table SubjectUpdate {
   ref_seq:ulong = 0;
 }
 
+// The sender's engine timecode for one frame (RCV-8, ADR 0013): frame number
+// and sub-frame at frame rate rate_numerator / rate_denominator, as UE's
+// FQualifiedFrameTime. Only in SubjectList.scene_time.
+struct SceneTime {
+   frame:int;
+   subframe:float;
+   rate_numerator:int;
+   rate_denominator:int;
+}
+
 table SubjectList {
    subjects:[Subject];
    updates:[SubjectUpdate];
@@ -220,6 +230,13 @@ table SubjectList {
    // diagnostics and captures only: whether a reader may apply a frame is the
    // frame header's min_reader_version, not this field.
    protocol_version:ushort = 0;
+
+   // Appended (RCV-8, ADR 0013): the sender's engine timecode when the frame
+   // was sampled, the fields of UE's FQualifiedFrameTime. Absent when the
+   // sender had no synchronized timecode provider. A reader treats an invalid
+   // value (rate numerator or denominator <= 0, subframe outside [0, 1) or not
+   // finite) as absent; the frame itself is still applied.
+   scene_time:SceneTime;
 }
 
 

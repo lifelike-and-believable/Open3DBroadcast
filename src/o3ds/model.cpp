@@ -1065,8 +1065,44 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			/*curves_q8*/0, /*curves_q16*/0, refSeq);
 	}
 
+	namespace
+	{
+		// SubjectList.scene_time for one frame (RCV-8, ADR 0013): ptr is null
+		// when the caller gave none, or an invalid one.
+		struct WireSceneTime
+		{
+			O3DS::Data::SceneTime value;
+			const O3DS::Data::SceneTime* ptr = nullptr;
+
+			explicit WireSceneTime(const SceneTime* time)
+			{
+				if (time != nullptr && IsValidSceneTime(*time))
+				{
+					value = O3DS::Data::SceneTime(time->frame, time->subframe, time->rate_numerator, time->rate_denominator);
+					ptr = &value;
+				}
+			}
+		};
+	}
+
+	bool ReadSceneTime(const O3DS::Data::SubjectList& root, SceneTime& out)
+	{
+		const O3DS::Data::SceneTime* wire = root.scene_time();
+		if (wire == nullptr)
+			return false;
+		SceneTime time;
+		time.frame = wire->frame();
+		time.subframe = wire->subframe();
+		time.rate_numerator = wire->rate_numerator();
+		time.rate_denominator = wire->rate_denominator();
+		if (!IsValidSceneTime(time))
+			return false;
+		out = time;
+		return true;
+	}
+
 	int Subject::Serialize(std::vector<char> &outbuf, double timestamp,
-		uint64_t tx_seq, uint64_t tx_wallclock_us, uint32_t frame_epoch)
+		uint64_t tx_seq, uint64_t tx_wallclock_us, uint32_t frame_epoch, const SceneTime* sceneTime)
 	{
 		if (timestamp == 0.0) timestamp = GetTime();
 		flatbuffers::FlatBufferBuilder& builder = ReusableBuilder();
@@ -1078,7 +1114,8 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		auto ovSubjects = builder.CreateVector(subjects);
 
-		auto root = CreateSubjectList(builder, ovSubjects, 0, timestamp, tx_seq, tx_wallclock_us, frame_epoch, Wire::kProtocolVersion);
+		const WireSceneTime wireSceneTime(sceneTime);
+		auto root = CreateSubjectList(builder, ovSubjects, 0, timestamp, tx_seq, tx_wallclock_us, frame_epoch, Wire::kProtocolVersion, wireSceneTime.ptr);
 
 		FinishSubjectListFrame(builder, root, outbuf);
 
@@ -1086,7 +1123,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 	}
 
 	int Subject::SerializeUpdate(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp, const QuantRanges* quantRanges,
-		uint64_t tx_seq, uint64_t tx_wallclock_us, uint32_t frame_epoch, uint64_t ref_seq)
+		uint64_t tx_seq, uint64_t tx_wallclock_us, uint32_t frame_epoch, uint64_t ref_seq, const SceneTime* sceneTime)
 	{
 		if (timestamp == 0.0)
 		{
@@ -1100,7 +1137,8 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		auto ovSubjectUpdates = builder.CreateVector(outSubjectUpdates);
 
-		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, tx_seq, tx_wallclock_us, frame_epoch, Wire::kProtocolVersion);
+		const WireSceneTime wireSceneTime(sceneTime);
+		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, tx_seq, tx_wallclock_us, frame_epoch, Wire::kProtocolVersion, wireSceneTime.ptr);
 
 		FinishSubjectListFrame(builder, root, outbuf);
 
@@ -1108,7 +1146,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 	}
 
 	int Subject::SerializeUpdateResidual(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp, uint64_t seq,
-		uint64_t tx_wallclock_us, uint32_t frame_epoch, uint64_t ref_seq)
+		uint64_t tx_wallclock_us, uint32_t frame_epoch, uint64_t ref_seq, const SceneTime* sceneTime)
 	{
 		if (timestamp == 0.0)
 		{
@@ -1126,7 +1164,8 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		// just PoseSample::seq (fed to the predictor above) - a caller
 		// passing a real A1 tx_seq expects it on the wire for the
 		// receiver's ReorderGate, exactly like SubjectList::SerializeUpdateResidual
-		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, seq, tx_wallclock_us, frame_epoch, Wire::kProtocolVersion);
+		const WireSceneTime wireSceneTime(sceneTime);
+		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, seq, tx_wallclock_us, frame_epoch, Wire::kProtocolVersion, wireSceneTime.ptr);
 
 		FinishSubjectListFrame(builder, root, outbuf);
 
@@ -1134,7 +1173,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 	}
 
 	int SubjectList::Serialize(std::vector<char> &outbuf, double timestamp,
-		uint64_t tx_seq, uint64_t tx_wallclock_us, uint32_t frame_epoch)
+		uint64_t tx_seq, uint64_t tx_wallclock_us, uint32_t frame_epoch, const SceneTime* sceneTime)
 	{
 		if(timestamp == 0.0) timestamp = GetTime();
 
@@ -1150,7 +1189,8 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		auto ovSubjects = builder.CreateVector(subjects);
 
-		auto root = CreateSubjectList(builder, ovSubjects, 0, timestamp, tx_seq, tx_wallclock_us, frame_epoch, Wire::kProtocolVersion);
+		const WireSceneTime wireSceneTime(sceneTime);
+		auto root = CreateSubjectList(builder, ovSubjects, 0, timestamp, tx_seq, tx_wallclock_us, frame_epoch, Wire::kProtocolVersion, wireSceneTime.ptr);
 
 		FinishSubjectListFrame(builder, root, outbuf);
 
@@ -1233,7 +1273,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 	// Subject List
 
 	int SubjectList::SerializeUpdate(std::vector<char> &outbuf, size_t& count, double timestamp,
-		uint64_t tx_seq, uint64_t tx_wallclock_us, uint32_t frame_epoch)
+		uint64_t tx_seq, uint64_t tx_wallclock_us, uint32_t frame_epoch, const SceneTime* sceneTime)
 	{
 		if (timestamp == 0.0)
 		{
@@ -1252,7 +1292,8 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		auto ovSubjectUpdates = builder.CreateVector(outSubjectUpdates);
 
-		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, tx_seq, tx_wallclock_us, frame_epoch, Wire::kProtocolVersion);
+		const WireSceneTime wireSceneTime(sceneTime);
+		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, tx_seq, tx_wallclock_us, frame_epoch, Wire::kProtocolVersion, wireSceneTime.ptr);
 
 		FinishSubjectListFrame(builder, root, outbuf);
 
@@ -1260,7 +1301,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 	}
 
 	int SubjectList::SerializeUpdateResidual(std::vector<char> &outbuf, size_t& count, double timestamp,
-		uint64_t tx_seq, uint64_t tx_wallclock_us, uint32_t frame_epoch)
+		uint64_t tx_seq, uint64_t tx_wallclock_us, uint32_t frame_epoch, const SceneTime* sceneTime)
 	{
 		if (timestamp == 0.0)
 		{
@@ -1278,7 +1319,8 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		auto ovSubjectUpdates = builder.CreateVector(outSubjectUpdates);
 
-		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, tx_seq, tx_wallclock_us, frame_epoch, Wire::kProtocolVersion);
+		const WireSceneTime wireSceneTime(sceneTime);
+		auto root = CreateSubjectList(builder, 0, ovSubjectUpdates, timestamp, tx_seq, tx_wallclock_us, frame_epoch, Wire::kProtocolVersion, wireSceneTime.ptr);
 
 		FinishSubjectListFrame(builder, root, outbuf);
 
@@ -1310,6 +1352,7 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		std::vector<ParsedSubjectInfo>* outTouched, const ParseContext* context)
 	{
 		mError = "";
+		mHasSceneTime = false; // a frame never inherits the previous frame's timecode
 		if (outTouched)
 			outTouched->clear();
 
@@ -1357,6 +1400,9 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			mError = "Non-finite time";
 			return false;
 		}
+
+		// RCV-8 (ADR 0013): an invalid timecode is dropped, not the frame.
+		mHasSceneTime = ReadSceneTime(*root, mSceneTime);
 
 		auto subjects_data = root->subjects();
 		auto updates_data = root->updates();

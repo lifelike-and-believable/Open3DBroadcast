@@ -54,6 +54,10 @@ namespace O3DS
 		uint64_t tx_wallclock_us = 0; //!< SubjectList.tx_wallclock_us
 		uint32_t frame_epoch = 0;     //!< SubjectList.frame_epoch
 		double time = 0.0;            //!< SubjectList.time, the sender's content clock
+		//! SubjectList.scene_time, the sender's engine timecode (RCV-8, ADR
+		//! 0013); has_scene_time is false when absent or invalid.
+		bool has_scene_time = false;
+		SceneTime scene_time;
 		uint64_t stream_key = 0;      //!< StreamKeyForNames(subject_names)
 		std::vector<std::string> subject_names; //!< named subjects and updates, in wire order
 		//! Why the frame was rejected (Ok when accepted); with VersionTooNew,

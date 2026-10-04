@@ -39,10 +39,10 @@ namespace O3DS
 		return stamp;
 	}
 
-	int StreamWriter::WriteFull(Subject& subject, std::vector<char>& out, double timestamp)
+	int StreamWriter::WriteFull(Subject& subject, std::vector<char>& out, double timestamp, const SceneTime* sceneTime)
 	{
 		const TxStamp stamp = Next();
-		const int size = subject.Serialize(out, timestamp, stamp.tx_seq, stamp.tx_wallclock_us, stamp.frame_epoch);
+		const int size = subject.Serialize(out, timestamp, stamp.tx_seq, stamp.tx_wallclock_us, stamp.frame_epoch, sceneTime);
 		if (size > 0)
 		{
 			mLastFullSeq[subject.mName] = stamp.tx_seq;
@@ -50,10 +50,10 @@ namespace O3DS
 		return size;
 	}
 
-	int StreamWriter::WriteFull(SubjectList& list, std::vector<char>& out, double timestamp)
+	int StreamWriter::WriteFull(SubjectList& list, std::vector<char>& out, double timestamp, const SceneTime* sceneTime)
 	{
 		const TxStamp stamp = Next();
-		const int size = list.Serialize(out, timestamp, stamp.tx_seq, stamp.tx_wallclock_us, stamp.frame_epoch);
+		const int size = list.Serialize(out, timestamp, stamp.tx_seq, stamp.tx_wallclock_us, stamp.frame_epoch, sceneTime);
 		if (size > 0)
 		{
 			for (Subject* subject : list.mItems)
@@ -68,18 +68,19 @@ namespace O3DS
 	}
 
 	int StreamWriter::WriteUpdate(Subject& subject, std::vector<char>& out, size_t& count, double deltaThreshold,
-		double timestamp, const QuantRanges* quantRanges)
+		double timestamp, const QuantRanges* quantRanges, const SceneTime* sceneTime)
 	{
 		const TxStamp stamp = Next();
 		return subject.SerializeUpdate(out, count, deltaThreshold, timestamp, quantRanges,
-			stamp.tx_seq, stamp.tx_wallclock_us, stamp.frame_epoch, LastFullSeq(subject.mName));
+			stamp.tx_seq, stamp.tx_wallclock_us, stamp.frame_epoch, LastFullSeq(subject.mName), sceneTime);
 	}
 
-	int StreamWriter::WriteResidual(Subject& subject, std::vector<char>& out, size_t& count, double deltaThreshold, double timestamp)
+	int StreamWriter::WriteResidual(Subject& subject, std::vector<char>& out, size_t& count, double deltaThreshold, double timestamp,
+		const SceneTime* sceneTime)
 	{
 		const TxStamp stamp = Next();
 		return subject.SerializeUpdateResidual(out, count, deltaThreshold, timestamp,
-			stamp.tx_seq, stamp.tx_wallclock_us, stamp.frame_epoch, LastFullSeq(subject.mName));
+			stamp.tx_seq, stamp.tx_wallclock_us, stamp.frame_epoch, LastFullSeq(subject.mName), sceneTime);
 	}
 
 	uint64_t StreamWriter::LastFullSeq(const std::string& subjectName) const
