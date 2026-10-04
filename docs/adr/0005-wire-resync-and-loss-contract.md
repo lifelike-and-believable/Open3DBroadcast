@@ -262,3 +262,8 @@ decision above, and why:
   join is not wired: it needs the LiveKit FFI's participant events verified first (Q4). The
   callback only sets a flag; the pipeline's worker consumes it before the next frame, so a
   burst of joins costs one full sync.
+- **Item (iii): the fallback is "residual off", not quantized.** The decision says the sender
+  "uses quantized mode instead". It now sends what the settings give without residual coding:
+  full snapshots, or quantized updates only when quantization was enabled itself. Quantized
+  rotation has known artifacts on slow and idle bones (CORE-12; the jitter reported in #247),
+  so it is never switched on implicitly. Full snapshots are loss-safe on every transport.

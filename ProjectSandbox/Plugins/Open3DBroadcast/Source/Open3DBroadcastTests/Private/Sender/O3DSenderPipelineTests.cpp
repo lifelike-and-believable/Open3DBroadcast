@@ -760,7 +760,8 @@ bool FO3DSenderPipelineQuantizationChangeTest::RunTest(const FString& Parameters
 }
 
 // ADR 0005 (iii): residual coding is used only on a transport that delivers reliably and in order;
-// on any other the sender sends quantized frames and warns once. The details panel shows the same
+// on any other the sender sends what it would with residual coding off (full snapshots, or
+// quantized updates only when quantization was enabled itself; CORE-12) and warns once. The details panel shows the same
 // warning from the configured transport, before anything starts.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderResidualFallbackTest, "Open3DBroadcast.Sender.Encoding.ResidualFallsBackOnUnreliableTransports", O3DB_TEST_FLAGS)
 bool FO3DSenderResidualFallbackTest::RunTest(const FString& Parameters)
@@ -771,24 +772,27 @@ bool FO3DSenderResidualFallbackTest::RunTest(const FString& Parameters)
 	using EMode = EO3DSenderEncodingMode;
 	TestTrue(TEXT("Residual on ReliableOrdered"), UO3DSenderComponent::ResolveEncodingMode(true, false, EO3DDeliveryGuarantee::ReliableOrdered) == EMode::Residual);
 	TestTrue(TEXT("Residual takes precedence over quantization"), UO3DSenderComponent::ResolveEncodingMode(true, true, EO3DDeliveryGuarantee::ReliableOrdered) == EMode::Residual);
-	TestTrue(TEXT("Quantized on Unreliable"), UO3DSenderComponent::ResolveEncodingMode(true, false, EO3DDeliveryGuarantee::Unreliable) == EMode::Quantized);
-	TestTrue(TEXT("Quantized on Unknown"), UO3DSenderComponent::ResolveEncodingMode(true, false, EO3DDeliveryGuarantee::Unknown) == EMode::Quantized);
+	TestTrue(TEXT("Full snapshots on Unreliable"), UO3DSenderComponent::ResolveEncodingMode(true, false, EO3DDeliveryGuarantee::Unreliable) == EMode::Legacy);
+	TestTrue(TEXT("Full snapshots on Unknown"), UO3DSenderComponent::ResolveEncodingMode(true, false, EO3DDeliveryGuarantee::Unknown) == EMode::Legacy);
+	TestTrue(TEXT("Quantized on Unreliable only when quantization is enabled"), UO3DSenderComponent::ResolveEncodingMode(true, true, EO3DDeliveryGuarantee::Unreliable) == EMode::Quantized);
 	TestTrue(TEXT("Quantization alone is unaffected"), UO3DSenderComponent::ResolveEncodingMode(false, true, EO3DDeliveryGuarantee::Unreliable) == EMode::Quantized);
 	TestTrue(TEXT("Legacy is unaffected"), UO3DSenderComponent::ResolveEncodingMode(false, false, EO3DDeliveryGuarantee::Unreliable) == EMode::Legacy);
 	TestTrue(TEXT("No warning on ReliableOrdered"), UO3DSenderComponent::GetResidualFallbackWarning(TEXT("TCP"), EO3DDeliveryGuarantee::ReliableOrdered).IsEmpty());
 	TestTrue(TEXT("The warning names the transport"), UO3DSenderComponent::GetResidualFallbackWarning(TEXT("UDP"), EO3DDeliveryGuarantee::Unreliable).ToString().Contains(TEXT("'UDP'")));
 
 	AddExpectedError(TEXT("No TargetMesh set"), EAutomationExpectedErrorFlags::Contains, 0);
-	// Logged once per capture for the unreliable run, not once per frame.
-	AddExpectedMessage(TEXT("Residual coding needs a transport that delivers reliably and in order"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1, false);
+	// Logged once per capture for each unreliable run, not once per frame.
+	AddExpectedMessage(TEXT("Residual coding needs a transport that delivers reliably and in order"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 2, false);
 
 	const TSharedPtr<const FO3DSSkeletonDescriptor> Descriptor = MakeThreeBoneDescriptor();
-	for (const bool bUnreliable : { false, true })
+	struct FRun { bool bUnreliable; bool bQuantization; const TCHAR* Name; };
+	for (const FRun& Run : { FRun{ false, false, TEXT("reliable") }, FRun{ true, false, TEXT("unreliable") }, FRun{ true, true, TEXT("unreliable, quantization on") } })
 	{
-		const FString Context = bUnreliable ? TEXT("unreliable") : TEXT("reliable");
+		const bool bUnreliable = Run.bUnreliable;
+		const FString Context = Run.Name;
 		FO3DFakeTransportScope Scope;
 		UO3DSenderComponent* Component = MakeCapturingComponent(Scope.GetName(), TEXT("Fallback"));
-		Component->bEnableQuantization = false;
+		Component->bEnableQuantization = Run.bQuantization;
 		Component->bEnableResidualCoding = true;
 		Component->ResidualDeltaThreshold = 0.0f;
 		if (bUnreliable)
@@ -823,7 +827,8 @@ bool FO3DSenderResidualFallbackTest::RunTest(const FString& Parameters)
 		Component->StopCapture();
 		Component->OnSerializedFrame.Remove(Listener);
 
-		// Updates are residual (predictor_id != 0) only on the reliable transport.
+		// Reliable: residual updates (predictor_id != 0). Unreliable: full snapshots only, or
+		// quantized (non-residual) updates when quantization was enabled itself.
 		int32 Updates = 0;
 		int32 ResidualUpdates = 0;
 		for (const TArray<uint8>& Payload : Payloads)
@@ -835,7 +840,8 @@ bool FO3DSenderResidualFallbackTest::RunTest(const FString& Parameters)
 				ResidualUpdates += (List->updates()->Get(0)->predictor_id() != 0) ? 1 : 0;
 			}
 		}
-		TestTrue(*FString::Printf(TEXT("%s: updates were sent"), *Context), Updates > 0);
+		TestEqual(*FString::Printf(TEXT("%s: payloads"), *Context), Payloads.Num(), 8);
+		TestEqual(*FString::Printf(TEXT("%s: updates were sent"), *Context), Updates > 0, !bUnreliable || Run.bQuantization);
 		TestEqual(*FString::Printf(TEXT("%s: residual updates"), *Context), ResidualUpdates, bUnreliable ? 0 : Updates);
 	}
 	return true;
