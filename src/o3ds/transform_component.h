@@ -27,6 +27,8 @@ SOFTWARE.
 
 #include "o3ds/math.h"
 
+#include <algorithm>
+
 namespace O3DS
 {
 	enum ComponentType { TTranslation, TRotation, TOrientation, TScale, TMatrix };
@@ -96,7 +98,13 @@ namespace O3DS
 
 		enum ComponentType transformType() override { return TRotation; }
 
-		double delta() { return dist(value, lastSentValue); }
+		//! Distance to the last sent value, sign-aware: q and -q are the same
+		//! rotation, so a hemisphere flip alone is not a change (CORE-13).
+		double delta()
+		{
+			const Vector4d negated(-value.v[0], -value.v[1], -value.v[2], -value.v[3]);
+			return std::min(dist(value, lastSentValue), dist(negated, lastSentValue));
+		}
 
 		void sent() { lastSentValue = value; }
 
