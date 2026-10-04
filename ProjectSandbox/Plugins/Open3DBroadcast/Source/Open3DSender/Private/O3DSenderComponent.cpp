@@ -422,10 +422,12 @@ void UO3DSenderComponent::InitializeTransport()
 
 EO3DSenderEncodingMode UO3DSenderComponent::ResolveEncodingMode(bool bResidual, bool bQuantization, EO3DDeliveryGuarantee Delivery)
 {
-	if (bResidual)
+	if (bResidual && Delivery == EO3DDeliveryGuarantee::ReliableOrdered)
 	{
-		return (Delivery == EO3DDeliveryGuarantee::ReliableOrdered) ? EO3DSenderEncodingMode::Residual : EO3DSenderEncodingMode::Quantized;
+		return EO3DSenderEncodingMode::Residual;
 	}
+	// Residual is off, or the transport cannot carry it: what the settings give without it.
+	// Quantization is used only when it was enabled itself (CORE-12: never switched on implicitly).
 	return bQuantization ? EO3DSenderEncodingMode::Quantized : EO3DSenderEncodingMode::Legacy;
 }
 
@@ -436,7 +438,7 @@ FText UO3DSenderComponent::GetResidualFallbackWarning(FName InTransportName, EO3
 		return FText::GetEmpty();
 	}
 	return FText::Format(NSLOCTEXT("O3DSenderComponent", "ResidualFallbackWarning",
-		"Residual coding needs a transport that delivers reliably and in order; '{0}' is {1}. Quantized frames are sent instead."),
+		"Residual coding needs a transport that delivers reliably and in order; '{0}' is {1}. Frames are sent without residual coding (full snapshots, or quantized updates when quantization is enabled)."),
 		FText::FromName(InTransportName),
 		FText::FromString(Delivery == EO3DDeliveryGuarantee::Unreliable ? TEXT("unreliable") : TEXT("of unknown reliability")));
 }
