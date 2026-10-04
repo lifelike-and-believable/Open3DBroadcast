@@ -10,14 +10,24 @@
 #include "O3DReceiverStreamScheduler.h"
 #include "O3DReceiverFrameDecoder.h"
 #include "O3DHelpers.h"
+#include "O3DRuntimeContext.h"
 
 THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
 #include "o3ds/receiver_streams.h"
 THIRD_PARTY_INCLUDES_END
 
+namespace
+{
+	/** The probes record into a handle of the default context, as a receiver source does today (ADR 0012). */
+	FO3DReceiverMetricsHandleRef MakeProbeMetrics(const TCHAR* ProbeName)
+	{
+		return FO3DRuntimeContext::Default()->GetMetrics().AcquireReceiverMetrics(ProbeName);
+	}
+}
+
 FO3DReceiverFrameDecoderProbe::FO3DReceiverFrameDecoderProbe()
-	: Decoder(MakeUnique<FO3DReceiverFrameDecoder>())
+	: Decoder(MakeUnique<FO3DReceiverFrameDecoder>(MakeProbeMetrics(TEXT("Frame decoder probe"))))
 	, List(MakeUnique<O3DS::SubjectList>())
 {
 }
@@ -159,7 +169,7 @@ FO3DReceiverStreamSchedulerProbe::FO3DReceiverStreamSchedulerProbe()
 			Entry.Seq = GatedFrame ? GatedFrame->seq : 0;
 			Entry.LegacyTimestampSeconds = LegacyTimestampSeconds;
 			Released.Add(MoveTemp(Entry));
-		}))
+		}, MakeProbeMetrics(TEXT("Stream scheduler probe"))))
 {
 }
 
@@ -197,7 +207,7 @@ int32 FO3DReceiverStreamSchedulerProbe::GetNumStreams() const
 }
 
 FO3DReceiverConcealmentProbe::FO3DReceiverConcealmentProbe()
-	: Concealment(MakeUnique<FO3DReceiverConcealment>())
+	: Concealment(MakeUnique<FO3DReceiverConcealment>(MakeProbeMetrics(TEXT("Concealment probe"))))
 {
 }
 

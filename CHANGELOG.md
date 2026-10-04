@@ -558,6 +558,19 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- **Per-receiver metrics** (SHR-38, ADR 0012 PR 3a): each receiver source records through its
+  own `FO3DReceiverMetricsHandle` (`FO3DPerformanceMetrics::AcquireReceiverMetrics`), which adds
+  to its counters and to the context's aggregate, so the aggregate equals the sum of every handle,
+  released ones included, and the HUD and CSV output are unchanged. The decoder, scheduler and
+  concealment get the handle from their source. Rolling averages and peaks stay aggregate only;
+  the subject count and gate occupancy are also kept per source. `o3d.DumpMetrics` gains a
+  `[RECEIVER SOURCES]` section with each live source, named by its transport and redacted
+  endpoint, and `Reset()` (`o3d.ResetMetrics`) also zeroes the handles.
+  `FO3DReceiverSource::GetMetricsHandle()` is new. Receiver sources use the default context
+  until ADR 0012 PR 4. Tests: `Open3DBroadcast.Shared.Metrics.ReceiverHandles.AggregateIsTheSum`,
+  `Open3DBroadcast.Receiver.Metrics.EachSourceCountsItsOwn`; the residual-gap test reads its
+  source's handle.
+
 - **Transports record into their runtime context** (SHR-38, ADR 0012 PR 2):
   `FO3DTransportConfig` gained `Context` (an `FO3DRuntimeContext`; empty means the default
   context), and the NNG, MoQ and WebRTC senders resolve it in `Initialize` with

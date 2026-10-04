@@ -74,7 +74,8 @@ bool FO3DReceiverResidualGapTest::RunTest(const FString& Parameters)
 			Consumer->SubmitFrame(TEXT("fake"), Bytes, FPlatformTime::Seconds());
 		}
 	};
-	const auto AwaitingFullSync = []() { return FO3DPerformanceMetrics::Get().GetReceiverMetrics().UpdatesAwaitingFullSync.load(); };
+	// This source's own counter (ADR 0012 item 4), not the process-wide aggregate.
+	const auto AwaitingFullSync = [&Source]() { return Source->GetMetricsHandle()->GetCounters().UpdatesAwaitingFullSync.load(); };
 
 	// A full Subject, then residual updates: every frame is pushed.
 	constexpr int32 GapIndex = 5;

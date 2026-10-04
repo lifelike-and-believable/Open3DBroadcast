@@ -103,6 +103,77 @@ int32 FO3DTransportMetricsRegistry::Num() const
 }
 
 // =====================================================================
+// RECEIVER HANDLES (ADR 0012 item 4)
+// =====================================================================
+
+void FO3DReceiverCounters::Reset()
+{
+	FramesReceived.store(0);
+	FramesApplied.store(0);
+	FramesDropped.store(0);
+	BytesDeserialized.store(0);
+	DeserializationErrors.store(0);
+	UpdatesAwaitingFullSync.store(0);
+	InvalidPosesDropped.store(0);
+	SkeletonUpdates.store(0);
+	PoseUpdates.store(0);
+	GateDupDropped.store(0);
+	GateStaleDropped.store(0);
+	GateLost.store(0);
+	GateReordered.store(0);
+	ConcealedFrames.store(0);
+	ConcealmentFallbackHolds.store(0);
+	ConcealmentCorrectionFrames.store(0);
+	ConcealmentRecoveries.store(0);
+	ConcealmentRenderAheadFrames.store(0);
+	ActiveSubjectCount.store(0);
+	GateBufferOccupancy.store(0);
+}
+
+FO3DReceiverMetricsHandle::FO3DReceiverMetricsHandle(FO3DPerformanceMetrics& InAggregate, const FString& InOwnerName)
+	: Aggregate(InAggregate)
+	, OwnerName(InOwnerName)
+{
+}
+
+FString FO3DReceiverMetricsHandle::GetOwnerName() const
+{
+	FScopeLock Lock(&NameMutex);
+	return OwnerName;
+}
+
+void FO3DReceiverMetricsHandle::SetOwnerName(const FString& InOwnerName)
+{
+	FScopeLock Lock(&NameMutex);
+	OwnerName = InOwnerName;
+}
+
+FO3DReceiverMetricsHandleRef FO3DPerformanceMetrics::AcquireReceiverMetrics(const FString& OwnerName)
+{
+	FO3DReceiverMetricsHandleRef Handle = MakeShared<FO3DReceiverMetricsHandle, ESPMode::ThreadSafe>(*this, OwnerName);
+	FScopeLock Lock(&HandlesMutex);
+	ReceiverHandles.RemoveAll([](const TWeakPtr<FO3DReceiverMetricsHandle, ESPMode::ThreadSafe>& Weak) { return !Weak.IsValid(); });
+	ReceiverHandles.Add(Handle);
+	return Handle;
+}
+
+TArray<FO3DReceiverMetricsHandleRef> FO3DPerformanceMetrics::GetReceiverHandles() const
+{
+	TArray<FO3DReceiverMetricsHandleRef> Result;
+	FScopeLock Lock(&HandlesMutex);
+	ReceiverHandles.RemoveAll([](const TWeakPtr<FO3DReceiverMetricsHandle, ESPMode::ThreadSafe>& Weak) { return !Weak.IsValid(); });
+	Result.Reserve(ReceiverHandles.Num());
+	for (const TWeakPtr<FO3DReceiverMetricsHandle, ESPMode::ThreadSafe>& Weak : ReceiverHandles)
+	{
+		if (TSharedPtr<FO3DReceiverMetricsHandle, ESPMode::ThreadSafe> Pinned = Weak.Pin())
+		{
+			Result.Add(Pinned.ToSharedRef());
+		}
+	}
+	return Result;
+}
+
+// =====================================================================
 // CORE API IMPLEMENTATION
 // =====================================================================
 
@@ -153,6 +224,12 @@ void FO3DPerformanceMetrics::Reset()
 
 	// Transport metrics
 	TransportRegistry.ResetCounters();
+
+	// Receiver handles, so the aggregate keeps equalling their sum (ADR 0012 item 4).
+	for (const FO3DReceiverMetricsHandleRef& Handle : GetReceiverHandles())
+	{
+		Handle->ResetCounters();
+	}
 }
 
 // =====================================================================
@@ -211,6 +288,7 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 {
 	// SHR-17: copy the shared state first and log without holding any lock.
 	const TArray<FO3DTransportMetricsSnapshot> TransportMetrics = GetTransportMetricsSnapshot();
+	const TArray<FO3DReceiverMetricsHandleRef> ReceiverSources = GetReceiverHandles();
 
 	UE_LOG(LogO3DPerformanceMetrics, Display, TEXT(""));
 	UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("========================================"));
@@ -322,6 +400,24 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 				UE_LOG(LogO3DPerformanceMetrics, Display, TEXT(""));
 			}
 		}
+	}
+
+	// ========== PER RECEIVER SOURCE (ADR 0012 item 4) ==========
+	if (ReceiverSources.Num() > 0)
+	{
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("[RECEIVER SOURCES]"));
+		for (const FO3DReceiverMetricsHandleRef& Handle : ReceiverSources)
+		{
+			const FO3DReceiverCounters& C = Handle->GetCounters();
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  %s:"), *Handle->GetOwnerName());
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("    Frames Received: %llu, Applied: %llu, Dropped: %llu"),
+				C.FramesReceived.load(), C.FramesApplied.load(), C.FramesDropped.load());
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("    Bytes Deserialized: %.2f MB, Errors: %llu, Invalid Poses: %llu, Awaiting Full Sync: %llu"),
+				C.BytesDeserialized.load() / 1024.0 / 1024.0, C.DeserializationErrors.load(), C.InvalidPosesDropped.load(), C.UpdatesAwaitingFullSync.load());
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("    Active Subjects: %d, Gate Lost: %llu, Concealed Frames: %llu"),
+				C.ActiveSubjectCount.load(), C.GateLost.load(), C.ConcealedFrames.load());
+		}
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT(""));
 	}
 
 	// ========== TRANSPORT METRICS ==========

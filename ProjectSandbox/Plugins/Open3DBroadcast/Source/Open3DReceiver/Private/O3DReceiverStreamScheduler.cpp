@@ -5,8 +5,9 @@
 #include "O3DPerformanceMetrics.h"
 #include "O3DReceiverLogs.h"
 
-FO3DReceiverStreamScheduler::FO3DReceiverStreamScheduler(FApplyFrame InApply)
+FO3DReceiverStreamScheduler::FO3DReceiverStreamScheduler(FApplyFrame InApply, FO3DReceiverMetricsHandleRef InMetrics)
 	: Apply(MoveTemp(InApply))
+	, Metrics(MoveTemp(InMetrics))
 {
 }
 
@@ -36,7 +37,7 @@ void FO3DReceiverStreamScheduler::Push(const FString& Subject, TConstArrayView<u
 				UE_LOG(LogO3DReceiverSource, Verbose, TEXT("Dropping %s frame t=%.6f"),
 					Decision == O3DS::LegacyOrdering::Decision::Duplicate ? TEXT("duplicate") : TEXT("out-of-order"), Meta.time);
 			}
-			FO3DPerformanceMetrics::Get().RecordReceiverFrameDropped();
+			Metrics->RecordReceiverFrameDropped();
 			return;
 		}
 
@@ -101,12 +102,11 @@ void FO3DReceiverStreamScheduler::ReportGateMetricsDelta()
 		Stream.reportedGateStats = Stats;
 	});
 
-	FO3DPerformanceMetrics& Metrics = FO3DPerformanceMetrics::Get();
-	if (DeltaDup) Metrics.RecordGateDupDropped(DeltaDup);
-	if (DeltaStale) Metrics.RecordGateStaleDropped(DeltaStale);
-	if (DeltaLost) Metrics.RecordGateLost(DeltaLost);
-	if (DeltaReordered) Metrics.RecordGateReordered(DeltaReordered);
-	if (DeltaDup || DeltaStale) Metrics.RecordReceiverFrameDropped(DeltaDup + DeltaStale);
+	if (DeltaDup) Metrics->RecordGateDupDropped(DeltaDup);
+	if (DeltaStale) Metrics->RecordGateStaleDropped(DeltaStale);
+	if (DeltaLost) Metrics->RecordGateLost(DeltaLost);
+	if (DeltaReordered) Metrics->RecordGateReordered(DeltaReordered);
+	if (DeltaDup || DeltaStale) Metrics->RecordReceiverFrameDropped(DeltaDup + DeltaStale);
 
-	Metrics.SetGateBufferOccupancy(Pending);
+	Metrics->SetGateBufferOccupancy(Pending);
 }

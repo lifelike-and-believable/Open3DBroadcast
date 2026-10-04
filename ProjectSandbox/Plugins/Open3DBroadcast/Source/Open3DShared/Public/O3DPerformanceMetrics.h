@@ -180,6 +180,9 @@ private:
 	TMap<FName, FO3DTransportMetricsRef> Entries;
 };
 
+class FO3DReceiverMetricsHandle;
+using FO3DReceiverMetricsHandleRef = TSharedRef<FO3DReceiverMetricsHandle, ESPMode::ThreadSafe>;
+
 /**
  * Real-time performance metrics collection for Open3DBroadcast plugin
  *
@@ -190,6 +193,11 @@ private:
  *
  * Each FO3DRuntimeContext owns one instance (docs/adr/0012-runtime-services-and-global-state.md);
  * Get() returns the default context's, and the console commands and the HUD read that one.
+ *
+ * The receiver counters below are the context's aggregate. Each receiver source records through
+ * its own FO3DReceiverMetricsHandle (AcquireReceiverMetrics), which adds to its counters and to
+ * this aggregate, so the aggregate always equals the sum of every handle ever acquired, including
+ * released ones (ADR 0012 item 4).
  */
 class OPEN3DSHARED_API FO3DPerformanceMetrics
 {
@@ -330,6 +338,16 @@ public:
 	/** Copy of every transport's counters, sorted by name (replaces the unlocked array reference). */
 	TArray<FO3DTransportMetricsSnapshot> GetTransportMetricsSnapshot() const { return TransportRegistry.Snapshot(); }
 
+	/**
+	 * Counters for one receiver source, named OwnerName in DumpMetrics (ADR 0012 item 4). The
+	 * owner records through the handle and releases it by dropping it; the handle refers to this
+	 * object, so the owner keeps its runtime context alive while it holds one. Thread-safe.
+	 */
+	FO3DReceiverMetricsHandleRef AcquireReceiverMetrics(const FString& OwnerName);
+
+	/** The receiver handles still held by their owners, oldest first. Thread-safe. */
+	TArray<FO3DReceiverMetricsHandleRef> GetReceiverHandles() const;
+
 	/** Dump all metrics to log/console */
 	void DumpMetrics() const;
 
@@ -435,4 +453,106 @@ private:
 	FSenderMetrics SenderMetrics;
 	FReceiverMetrics ReceiverMetrics;
 	FO3DTransportMetricsRegistry TransportRegistry;
+
+	/** Guards ReceiverHandles; never held while recording. */
+	mutable FCriticalSection HandlesMutex;
+	/** Weak: an owner releases its handle by dropping it. Pruned when listed. */
+	mutable TArray<TWeakPtr<FO3DReceiverMetricsHandle, ESPMode::ThreadSafe>> ReceiverHandles;
+};
+
+/**
+ * One receiver source's counters (ADR 0012 item 4): the cumulative counters of
+ * FO3DPerformanceMetrics::FReceiverMetrics, plus that source's own gauges. Rolling averages and
+ * peaks are kept in the aggregate only, since they cannot be summed.
+ */
+struct FO3DReceiverCounters
+{
+	std::atomic<uint64> FramesReceived{ 0 };
+	std::atomic<uint64> FramesApplied{ 0 };
+	std::atomic<uint64> FramesDropped{ 0 };
+	std::atomic<uint64> BytesDeserialized{ 0 };
+	std::atomic<uint64> DeserializationErrors{ 0 };
+	std::atomic<uint64> UpdatesAwaitingFullSync{ 0 };
+	std::atomic<uint64> InvalidPosesDropped{ 0 };
+	std::atomic<uint64> SkeletonUpdates{ 0 };
+	std::atomic<uint64> PoseUpdates{ 0 };
+	std::atomic<uint64> GateDupDropped{ 0 };
+	std::atomic<uint64> GateStaleDropped{ 0 };
+	std::atomic<uint64> GateLost{ 0 };
+	std::atomic<uint64> GateReordered{ 0 };
+	std::atomic<uint64> ConcealedFrames{ 0 };
+	std::atomic<uint64> ConcealmentFallbackHolds{ 0 };
+	std::atomic<uint64> ConcealmentCorrectionFrames{ 0 };
+	std::atomic<uint64> ConcealmentRecoveries{ 0 };
+	std::atomic<uint64> ConcealmentRenderAheadFrames{ 0 };
+
+	// Gauges of this source alone (the aggregate's are last-writer-wins across sources).
+	std::atomic<int32> ActiveSubjectCount{ 0 };
+	std::atomic<int32> GateBufferOccupancy{ 0 };
+
+	OPEN3DSHARED_API void Reset();
+};
+
+/**
+ * A receiver source's metrics handle (ADR 0012 item 4), from
+ * FO3DPerformanceMetrics::AcquireReceiverMetrics. Its Record and Set functions have the names of
+ * the aggregate's receiver functions: counters go to this handle and to the aggregate, gauges to
+ * both, rolling averages and peaks to the aggregate only. The receiver source hands it to the
+ * classes it owns (decoder, scheduler, concealment); they never reach the context. Thread-safe.
+ */
+class OPEN3DSHARED_API FO3DReceiverMetricsHandle
+{
+public:
+	FO3DReceiverMetricsHandle(FO3DPerformanceMetrics& InAggregate, const FString& InOwnerName);
+
+	FO3DReceiverMetricsHandle(const FO3DReceiverMetricsHandle&) = delete;
+	FO3DReceiverMetricsHandle& operator=(const FO3DReceiverMetricsHandle&) = delete;
+
+	const FO3DReceiverCounters& GetCounters() const { return Counters; }
+	FO3DPerformanceMetrics& GetAggregate() const { return Aggregate; }
+
+	/** For DumpMetrics; the owner may rename it, for example once its endpoint is known. */
+	FString GetOwnerName() const;
+	void SetOwnerName(const FString& InOwnerName);
+
+	/** Zeroes this handle's counters, not the aggregate's (FO3DPerformanceMetrics::Reset does both). */
+	void ResetCounters() { Counters.Reset(); }
+
+	void RecordFrameReceived() { ++Counters.FramesReceived; Aggregate.RecordFrameReceived(); }
+	void RecordFrameApplied() { ++Counters.FramesApplied; Aggregate.RecordFrameApplied(); }
+	void RecordReceiverFrameDropped(uint64 Delta = 1) { Counters.FramesDropped += Delta; Aggregate.RecordReceiverFrameDropped(Delta); }
+	void RecordBytesDeserialized(uint64 ByteCount) { Counters.BytesDeserialized += ByteCount; Aggregate.RecordBytesDeserialized(ByteCount); }
+	void RecordDeserializationError() { ++Counters.DeserializationErrors; Aggregate.RecordDeserializationError(); }
+	void RecordInvalidPoseDropped() { ++Counters.InvalidPosesDropped; Aggregate.RecordInvalidPoseDropped(); }
+	void RecordUpdatesAwaitingFullSync(uint64 Count) { Counters.UpdatesAwaitingFullSync += Count; Aggregate.RecordUpdatesAwaitingFullSync(Count); }
+	void RecordSkeletonUpdate() { ++Counters.SkeletonUpdates; Aggregate.RecordSkeletonUpdate(); }
+	void RecordPoseUpdate() { ++Counters.PoseUpdates; Aggregate.RecordPoseUpdate(); }
+	void SetReceiverActiveSubjectCount(int32 Count) { Counters.ActiveSubjectCount.store(Count); Aggregate.SetReceiverActiveSubjectCount(Count); }
+
+	void RecordParseTimeMs(double TimeMs) { Aggregate.RecordParseTimeMs(TimeMs); }
+	void RecordPoseExtractionTimeMs(double TimeMs) { Aggregate.RecordPoseExtractionTimeMs(TimeMs); }
+	void RecordLiveLinkPushTimeMs(double TimeMs) { Aggregate.RecordLiveLinkPushTimeMs(TimeMs); }
+	void RecordTotalProcessingTimeMs(double TimeMs) { Aggregate.RecordTotalProcessingTimeMs(TimeMs); }
+	void RecordFrameLatency(double LatencyMs) { Aggregate.RecordFrameLatency(LatencyMs); }
+	void RecordClockOffsetSampleMs(double OffsetMs, double JitterMs) { Aggregate.RecordClockOffsetSampleMs(OffsetMs, JitterMs); }
+
+	void RecordGateDupDropped(uint64 Delta) { Counters.GateDupDropped += Delta; Aggregate.RecordGateDupDropped(Delta); }
+	void RecordGateStaleDropped(uint64 Delta) { Counters.GateStaleDropped += Delta; Aggregate.RecordGateStaleDropped(Delta); }
+	void RecordGateLost(uint64 Delta) { Counters.GateLost += Delta; Aggregate.RecordGateLost(Delta); }
+	void RecordGateReordered(uint64 Delta) { Counters.GateReordered += Delta; Aggregate.RecordGateReordered(Delta); }
+	void SetGateBufferOccupancy(int32 Count) { Counters.GateBufferOccupancy.store(Count); Aggregate.SetGateBufferOccupancy(Count); }
+
+	void RecordConcealedFrames(uint64 Delta) { Counters.ConcealedFrames += Delta; Aggregate.RecordConcealedFrames(Delta); }
+	void RecordConcealmentFallbackHolds(uint64 Delta) { Counters.ConcealmentFallbackHolds += Delta; Aggregate.RecordConcealmentFallbackHolds(Delta); }
+	void RecordConcealmentCorrectionFrames(uint64 Delta) { Counters.ConcealmentCorrectionFrames += Delta; Aggregate.RecordConcealmentCorrectionFrames(Delta); }
+	void RecordConcealmentRecoveries(uint64 Delta) { Counters.ConcealmentRecoveries += Delta; Aggregate.RecordConcealmentRecoveries(Delta); }
+	void RecordConcealmentRenderAheadFrames(uint64 Delta) { Counters.ConcealmentRenderAheadFrames += Delta; Aggregate.RecordConcealmentRenderAheadFrames(Delta); }
+	void SetConcealmentPredictionError(double TranslationUnits, double RotationDegrees) { Aggregate.SetConcealmentPredictionError(TranslationUnits, RotationDegrees); }
+	void SetConcealmentPop(double TranslationUnits, double RotationDegrees) { Aggregate.SetConcealmentPop(TranslationUnits, RotationDegrees); }
+
+private:
+	FO3DPerformanceMetrics& Aggregate;
+	FO3DReceiverCounters Counters;
+	mutable FCriticalSection NameMutex;
+	FString OwnerName;
 };

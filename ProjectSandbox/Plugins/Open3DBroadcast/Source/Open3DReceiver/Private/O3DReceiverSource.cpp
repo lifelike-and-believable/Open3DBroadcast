@@ -22,6 +22,7 @@
 #include "Misc/QualifiedFrameTime.h"
 
 #include "O3DHelpers.h"
+#include "O3DRuntimeContext.h"
 #include "O3DRedact.h"
 #include "O3DReceiverTransportCustomization.h"
 #include "Transport/O3DTransportOptions.h"
@@ -255,18 +256,19 @@ FO3DReceiverSource::FO3DReceiverSource(const FO3DReceiverSourceConfig& InSetting
     : SourceType(LOCTEXT("SourceType", "Open3D Stream"))
     , SourceMachineName(LOCTEXT("SourceMachineName", "-"))
     , SourceStatus(LOCTEXT("SourceStatus", "Inactive"))
+    , MetricsHandle(FO3DRuntimeContext::Default()->GetMetrics().AcquireReceiverMetrics(FString::Printf(TEXT("Receiver (%s)"), *InSettings.TransportName.ToString())))
     , SourceSettings(InSettings)
-    , FrameDecoder(MakeUnique<FO3DReceiverFrameDecoder>())
+    , FrameDecoder(MakeUnique<FO3DReceiverFrameDecoder>(MetricsHandle))
     , Publisher(MakeUnique<FO3DLiveLinkPublisher>())
 {
     // Declared before the decoder and publisher, so created here rather than in the list (C5038).
-    Concealment = MakeUnique<FO3DReceiverConcealment>();
+    Concealment = MakeUnique<FO3DReceiverConcealment>(MetricsHandle);
     ControlRouter = MakeUnique<FO3DReceiverControlRouter>();
     Scheduler = MakeUnique<FO3DReceiverStreamScheduler>(
         [this](O3DS::ReceiverStream& Stream, const FString& Label, const char* Data, size_t Len, double LegacyTimestampSeconds, const O3DS::Frame* GatedFrame)
         {
             ApplyReleasedFrame(Stream, Label, Data, Len, LegacyTimestampSeconds, GatedFrame);
-        });
+        }, MetricsHandle);
     EnsureValidTransportName();
 }
 
@@ -448,6 +450,8 @@ bool FO3DReceiverSource::StartTransport()
     {
         SourceMachineName = FText::FromString(O3DRedact::Url(ActiveConfig.StreamId));
     }
+    // DumpMetrics names this source by its transport and redacted endpoint (ADR 0012 item 4).
+    MetricsHandle->SetOwnerName(FString::Printf(TEXT("Receiver (%s %s)"), *ActiveConfig.Transport.ToString(), *SourceMachineName.ToString()));
 
     UE_LOG(LogO3DReceiverSource, Log, TEXT("Receiver transport '%s' started (Uri=%s, StreamId=%s)."),
         *ActiveConfig.Transport.ToString(),
@@ -641,8 +645,8 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, TConstArr
     }
 
     // Record frame received
-    FO3DPerformanceMetrics::Get().RecordFrameReceived();
-    FO3DPerformanceMetrics::Get().RecordBytesDeserialized(Buffer.Num());
+    MetricsHandle->RecordFrameReceived();
+    MetricsHandle->RecordBytesDeserialized(Buffer.Num());
 
     if (!IsInGameThread())
     {
@@ -700,7 +704,7 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, TConstArr
         {
             ++SuppressedMalformedWarnings;
         }
-        FO3DPerformanceMetrics::Get().RecordDeserializationError();
+        MetricsHandle->RecordDeserializationError();
         return;
     }
 
@@ -739,7 +743,7 @@ void FO3DReceiverSource::ApplyReleasedFrame(O3DS::ReceiverStream& Stream, const 
     std::vector<O3DS::ParsedSubjectInfo> Touched;
     if (!ParseSubjectListRaw(Stream.subjects, Label, Data, Len, Touched, GatedFrame != nullptr ? &Context : nullptr))
     {
-        FO3DPerformanceMetrics::Get().RecordDeserializationError();
+        MetricsHandle->RecordDeserializationError();
         return;
     }
     if (GatedFrame != nullptr)
@@ -748,12 +752,12 @@ void FO3DReceiverSource::ApplyReleasedFrame(O3DS::ReceiverStream& Stream, const 
     }
     if (Stream.subjects.mUpdatesDroppedUnsynced > DroppedBefore)
     {
-        FO3DPerformanceMetrics::Get().RecordUpdatesAwaitingFullSync(Stream.subjects.mUpdatesDroppedUnsynced - DroppedBefore);
+        MetricsHandle->RecordUpdatesAwaitingFullSync(Stream.subjects.mUpdatesDroppedUnsynced - DroppedBefore);
     }
     const double ParseTimeMs = (FPlatformTime::Seconds() - ParseStartWall) * 1000.0;
-    FO3DPerformanceMetrics::Get().RecordParseTimeMs(ParseTimeMs);
+    MetricsHandle->RecordParseTimeMs(ParseTimeMs);
 
-    FO3DPerformanceMetrics::Get().RecordFrameApplied();
+    MetricsHandle->RecordFrameApplied();
 
     double WorldTimeSecondsOverride = -1.0;
     if (GatedFrame == nullptr)
@@ -763,7 +767,7 @@ void FO3DReceiverSource::ApplyReleasedFrame(O3DS::ReceiverStream& Stream, const 
         const double LatencyMs = (FPlatformTime::Seconds() - LegacyTimestampSeconds) * 1000.0;
         if (LatencyMs >= 0.0 && LatencyMs < 10000.0)  // sanity check: latency should be < 10 seconds
         {
-            FO3DPerformanceMetrics::Get().RecordFrameLatency(LatencyMs);
+            MetricsHandle->RecordFrameLatency(LatencyMs);
         }
     }
     else
@@ -789,7 +793,7 @@ void FO3DReceiverSource::ApplyReleasedFrame(O3DS::ReceiverStream& Stream, const 
             const double LatencyMs = (double)((int64)NowEpochUs - (int64)GatedFrame->local_recv_us) / 1000.0;
             if (LatencyMs >= 0.0 && LatencyMs < 10000.0)
             {
-                FO3DPerformanceMetrics::Get().RecordFrameLatency(LatencyMs);
+                MetricsHandle->RecordFrameLatency(LatencyMs);
             }
         }
 
@@ -800,7 +804,7 @@ void FO3DReceiverSource::ApplyReleasedFrame(O3DS::ReceiverStream& Stream, const 
             // like the metrics below.
             Concealment->NoteClockOffset(Sample.offset_estimate_us);
 
-            FO3DPerformanceMetrics::Get().RecordClockOffsetSampleMs(
+            MetricsHandle->RecordClockOffsetSampleMs(
                 (double)Sample.offset_estimate_us / 1000.0,
                 (double)Sample.excess_delay_us / 1000.0);
         }
@@ -810,17 +814,17 @@ void FO3DReceiverSource::ApplyReleasedFrame(O3DS::ReceiverStream& Stream, const 
     const double PoseExtractionStartTime = FPlatformTime::Seconds();
     const int32 PoseUpdateCount = PublishTouchedSubjects(Stream.subjects, Touched, WorldTimeSecondsOverride);
     const double PoseExtractionTimeMs = (FPlatformTime::Seconds() - PoseExtractionStartTime) * 1000.0;
-    FO3DPerformanceMetrics::Get().RecordPoseExtractionTimeMs(PoseExtractionTimeMs);
+    MetricsHandle->RecordPoseExtractionTimeMs(PoseExtractionTimeMs);
 
     if (PoseUpdateCount > 0)
     {
-        FO3DPerformanceMetrics::Get().RecordPoseUpdate();
+        MetricsHandle->RecordPoseUpdate();
     }
 
-    FO3DPerformanceMetrics::Get().SetReceiverActiveSubjectCount(Publisher->GetActiveSubjectCount());
+    MetricsHandle->SetReceiverActiveSubjectCount(Publisher->GetActiveSubjectCount());
 
     const double TotalProcessingTimeMs = (FPlatformTime::Seconds() - ParseStartWall) * 1000.0;
-    FO3DPerformanceMetrics::Get().RecordTotalProcessingTimeMs(TotalProcessingTimeMs);
+    MetricsHandle->RecordTotalProcessingTimeMs(TotalProcessingTimeMs);
 
     if (CVarO3DReceiverDebugParse.GetValueOnAnyThread() != 0)
     {
@@ -924,7 +928,7 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
     const bool bNeedStaticUpdate = Publisher->PublishStatic(Decoded);
     if (bNeedStaticUpdate)
     {
-        FO3DPerformanceMetrics::Get().RecordSkeletonUpdate();
+        MetricsHandle->RecordSkeletonUpdate();
     }
 
     // C1: feed the real frame into this subject's concealment engine before
@@ -940,7 +944,7 @@ void FO3DReceiverSource::ProcessParsedSubject(O3DS::Subject* SubjectPtr, double 
     Publisher->PublishFrame(SubjectFName, BoneTransforms, CurveNames, CurveValues, SubjectListTime, WorldTimeSecondsOverride, Decoded.CurveHash);
 
     const double LiveLinkPushTimeMs = (FPlatformTime::Seconds() - LiveLinkStartTime) * 1000.0;
-    FO3DPerformanceMetrics::Get().RecordLiveLinkPushTimeMs(LiveLinkPushTimeMs);
+    MetricsHandle->RecordLiveLinkPushTimeMs(LiveLinkPushTimeMs);
 }
 
 /** Fill in missing audio metadata (subject name, defaults) before publishing to the bus. */

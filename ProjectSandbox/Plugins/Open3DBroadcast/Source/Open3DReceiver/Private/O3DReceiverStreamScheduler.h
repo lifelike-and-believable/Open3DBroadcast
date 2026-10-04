@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "O3DPerformanceMetrics.h"
 #include "Containers/ArrayView.h"
 #include "Templates/Function.h"
 
@@ -31,7 +32,8 @@ public:
 	using FApplyFrame = TFunction<void(O3DS::ReceiverStream& Stream, const FString& Label, const char* Data, size_t Len,
 		double LegacyTimestampSeconds, const O3DS::Frame* GatedFrame)>;
 
-	explicit FO3DReceiverStreamScheduler(FApplyFrame InApply);
+	/** Metrics: the owning receiver source's handle (ADR 0012 item 4). */
+	FO3DReceiverStreamScheduler(FApplyFrame InApply, FO3DReceiverMetricsHandleRef InMetrics);
 
 	/**
 	 * One verified packet (Meta from O3DS::PeekPacketMeta). ArrivalEpochUs is the packet's true
@@ -43,7 +45,7 @@ public:
 	/** Releases gap-buffered frames whose wait timed out, for every stream. */
 	void Flush(double NowSeconds);
 
-	/** Reports the gates' stats as deltas against the last report, into the shared metrics. */
+	/** Reports the gates' stats as deltas against the last report, into the metrics handle. */
 	void ReportGateMetricsDelta();
 
 	/** Drops streams that sent nothing for IdleSeconds, so a restarted sender starts clean. */
@@ -61,6 +63,7 @@ private:
 	void Emit(uint64 StreamKey, O3DS::Frame&& Frame);
 
 	FApplyFrame Apply;
+	FO3DReceiverMetricsHandleRef Metrics;
 	O3DS::ReceiverStreamTable Streams;
 	/** Diagnostic label for the gate's emit path: the subject of the latest gated packet. */
 	FString LastGateSubjectLabel;
