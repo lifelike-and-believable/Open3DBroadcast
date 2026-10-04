@@ -192,6 +192,14 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Core library (`src/o3ds`)
 
+- **`apps/QuantEval`** (CORE-12): plays a take through the real quantized encoder and
+  decoder and reports per-bone rotation error, frame-to-frame jitter (all bones and idle bones),
+  stale error on stopped bones, and bytes per frame, for the full-float reference, the sender's
+  defaults and the defaults without the Byte tier. Runs PredictorEval's synthetic suite or a
+  recorded `.o3dscap` take. First synthetic numbers: the Byte tier puts about 0.4 degrees (p95)
+  to 0.86 degrees (max) of jitter on idle bones; without it, about 0.01 to 0.02 degrees, for 5
+  to 10% more bytes. See `apps/QuantEval/README.md`.
+
 - **Resync contract on the receiver** (ADR 0005 (ix); CORE-5, CORE-6). `SubjectList::Parse`
   takes an appended, defaulted `const ParseContext*` (`tx_seq`, `frame_epoch`, `gap_before`).
   With a context for a sequenced frame:
@@ -311,6 +319,14 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
   `test/tcp_stream_parser_tests.cpp` and a `tcp_stream` fuzz target.
 
 ### Fixed
+
+- **A full sync now counts as sent for later updates** (found by `apps/QuantEval`, CORE-12).
+  `Subject::Serialize` did not mark translation, rotation and scale as sent, so the next
+  updates were measured against the values sent before the full sync. A value that returned
+  near one of those was skipped as unchanged, and the receiver kept the full sync's value: up
+  to 1.03 degrees of rotation error on the synthetic sharp-turn take, in every delta encoding
+  (plain, quantized, full precision). Test: `core.model_tests`
+  `FullSyncMarksValuesSent_SoAReturnToAnEarlierValueIsResent`.
 
 - **One forged or corrupted `tx_seq` no longer blackholes a sequenced stream** (CORE-15).
   `ReorderGate` holds a frame more than `Config::max_forward_jump` (default 4096) ahead of the
