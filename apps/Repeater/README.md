@@ -26,5 +26,21 @@ default (legacy) encoding that is the next frame; with delta or residual encodin
 periodic full sync (`FullSyncIntervalSeconds`). The sender's peer-joined full sync (ADR 0005 (vi))
 does not reach receivers behind the Repeater.
 
+## Docker
+
+`docker/Dockerfile.repeater` builds only the Repeater, against the pinned submodules (check them
+out first), and ships NNG's `nngcat` next to it for testing:
+
+```
+docker build -f docker/Dockerfile.repeater -t open3dstream-repeater .
+docker run -p 7000:7000 -p 7001:7001 -e REPEATER_OPTIONS="--stats-seconds 60" open3dstream-repeater
+```
+
+`LISTEN_ADDR`, `BROADCAST_ADDR` and `REPEATER_OPTIONS` set the arguments; `docker stop` stops it
+cleanly. `compose/docker-compose.yml` and `cloud-init/cloud-init-repeater.yaml` run the published
+image (`ghcr.io/lifelike-and-believable/open3dstream-repeater`), which the
+`Build and publish Repeater image` workflow builds; that workflow is disabled until the image is
+wanted.
+
 The relay is `relay.h` and `relay.cpp`; the core tests run it with real sockets
 (`test/repeater_tests.cpp`).
