@@ -35,6 +35,7 @@ set(O3DS_CORE_TEST_SOURCES
 	scale_update_tests.cpp
 	residual_rotation_tests.cpp
 	scene_time_tests.cpp
+	repeater_tests.cpp
 )
 
 add_executable(o3ds_core_tests
@@ -43,7 +44,7 @@ add_executable(o3ds_core_tests
 	${O3DS_CORE_TEST_SOURCES}
 )
 
-target_link_libraries(o3ds_core_tests PRIVATE open3dstreamstatic)
+target_link_libraries(o3ds_core_tests PRIVATE open3dstreamstatic repeater_relay)
 o3ds_enable_warnings(o3ds_core_tests)
 
 foreach(source ${O3DS_CORE_TEST_SOURCES})

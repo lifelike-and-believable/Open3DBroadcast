@@ -568,6 +568,18 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- **Repeater rebuilt on raw NNG** (`apps/Repeater`). The relay (`relay.h`/`relay.cpp`, a library
+  the core tests link) moves each message from the pull socket to the pub socket unchanged, as an
+  NNG message (no copy into a fixed 8 MB buffer). New: a receive size limit (`--max-message-mb`,
+  default 64; a larger message closes that sender's connection), a per-subscriber send buffer
+  (`--send-buffer`, default 256), a receive timeout so the loop checks for shutdown, backoff
+  (10 ms doubling to 1 s) on receive errors instead of a busy loop, a stats line every
+  `--stats-seconds` (messages and bytes by kind, errors, connected senders and subscribers)
+  instead of a line per message, and a clean stop on SIGINT or SIGTERM. The command line is
+  unchanged (`listen-addr broadcast-addr`), so the Docker image and cloud-init still start it.
+  Tests: `core.repeater_tests` (real sockets: in order per sender and byte for byte, counts by
+  kind with unknown messages still relayed, oversize closes only that sender, stop mid-traffic).
+
 - **Control alignment in LiveLink Timecode mode** (RCV-8, ADR 0013 PR 3b): when the sender's
   mocap carries its timecode and the engine has one, control changes are held until the pose
   LiveLink shows reaches them, as in EngineTime mode. The shown pose's sender time is the newest
