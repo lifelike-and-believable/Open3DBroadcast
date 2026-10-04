@@ -78,6 +78,9 @@ public:
 	 */
 	void RequestFullSync(const FString& Subject);
 
+	/** RequestFullSync for every subject with state (ADR 0005 (vi): a transport reported a new peer). */
+	void RequestFullSyncAll();
+
 	/**
 	 * Serialize one sampled frame and broadcast the bytes through OnSerializedFrame. Names, parents,
 	 * curves, settings and the wire timestamp all come from the frame itself (FO3DSPoseFrame::

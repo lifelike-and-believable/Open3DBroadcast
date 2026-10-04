@@ -481,6 +481,24 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- **A new receiver gets a full Subject on the next frame** (ADR 0005 (vi)). `IOpen3DSender`
+  gained `SetPeerJoinedCallback(FO3DPeerJoinedCallback)` (default: no-op), called on any thread
+  when the sender gains a peer that has seen nothing yet. The sender pipeline sets the callback
+  when it attaches a sender; it only sets an atomic flag, which the worker consumes before the
+  next frame and answers with a full sync of every subject
+  (`FO3DSenderSerializer::RequestFullSyncAll`). A receiver joining mid-stream no longer holds
+  the subject until the periodic full sync (`FullSyncIntervalSeconds`).
+  - **TCP** calls it when it accepts a receiver; **NNG** for each added pipe (a subscriber, the
+    pair peer, a pull socket). Both now report `bPeerJoinSignal`. UDP and MoQ have no join
+    event; WebRTC (participant join) waits for verification against the LiveKit FFI (ADR 0005
+    Q4).
+  - Transport API: stays `O3D_TRANSPORT_API_VERSION` 5 (no release since v0.9.6 carried it).
+    A third-party sender needs no change; one that can detect peers overrides the new method
+    and sets `bPeerJoinSignal`.
+  - Tests: `Open3DBroadcast.Sender.Pipeline.PeerJoinedForcesFullSync`,
+    `Open3DBroadcast.Transport.Sockets.Tcp.PeerJoinedOnAccept`, the NNG data round trip (the
+    subscriber's pipe is reported), and the capability expectations for TCP and NNG.
+
 - **Residual coding is used only on transports that deliver reliably and in order** (ADR 0005
   (iii)). With `bEnableResidualCoding` on a transport whose capabilities report `Unreliable`
   or `Unknown` (UDP, NNG pub, MoQ, WebRTC with `webrtc.prefer_lossy`), the sender sends

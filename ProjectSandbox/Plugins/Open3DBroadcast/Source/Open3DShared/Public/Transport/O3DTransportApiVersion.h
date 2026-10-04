@@ -87,6 +87,9 @@
  *      GetTransportOptionSchema); FO3DTransportRegistry::EditLegacyDescriptor; the forwarding
  *      headers; and FO3DTransportRoleOptions::SecretOptionKeys and SecretEnvVars (a Secret schema
  *      entry is the only secret declaration).
+ *      ADR 0005 (vi) is part of 5 as well (still no tag after v0.9.6): IOpen3DSender gained
+ *      SetPeerJoinedCallback (default no-op) and FO3DPeerJoinedCallback; TCP and NNG set
+ *      bPeerJoinSignal.
  */
 #define O3D_TRANSPORT_API_VERSION 5
 

@@ -174,6 +174,28 @@ namespace O3DSenderPipelineTests
 			RefuseNext = Count;
 		}
 
+		virtual void SetPeerJoinedCallback(FO3DPeerJoinedCallback Callback) override
+		{
+			FScopeLock Guard(&Mutex);
+			PeerJoined = MoveTemp(Callback);
+		}
+
+		/** What a transport does when a receiver connects (ADR 0005 (vi)). False when no callback is set. */
+		bool FirePeerJoined()
+		{
+			FO3DPeerJoinedCallback Callback;
+			{
+				FScopeLock Guard(&Mutex);
+				Callback = PeerJoined;
+			}
+			if (!Callback)
+			{
+				return false;
+			}
+			Callback();
+			return true;
+		}
+
 		TArray<FRecordedPayload> GetRecorded() const
 		{
 			FScopeLock Guard(&Mutex);
@@ -184,6 +206,7 @@ namespace O3DSenderPipelineTests
 		mutable FCriticalSection Mutex;
 		TArray<FRecordedPayload> Recorded;
 		int32 RefuseNext = 0;
+		FO3DPeerJoinedCallback PeerJoined;
 		std::atomic<bool> bBlockNext{ false };
 		FEventRef Entered{ EEventMode::ManualReset };
 		FEventRef ReleaseEvent{ EEventMode::ManualReset };
@@ -449,6 +472,53 @@ bool FO3DSenderPipelineUndeliveredFullSyncTest::RunTest(const FString& Parameter
 		TestTrue(TEXT("The first one is a full sync, then an update"), Sent[0].bFullSync && !Sent[1].bFullSync);
 	}
 	Probe.DetachSender();
+	return true;
+}
+
+// ADR 0005 (vi): when the transport reports a new peer, the next frame of every subject is a full
+// sync, so the new receiver does not wait for the periodic one. Detaching clears the callback.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderPipelinePeerJoinedTest, "Open3DBroadcast.Sender.Pipeline.PeerJoinedForcesFullSync", O3DB_TEST_FLAGS)
+bool FO3DSenderPipelinePeerJoinedTest::RunTest(const FString& Parameters)
+{
+	using namespace O3DSenderPipelineTests;
+	const TSharedPtr<const FO3DSSkeletonDescriptor> Descriptor = MakeThreeBoneDescriptor();
+
+	for (bool bAsync : { false, true })
+	{
+		FO3DSenderPipelineProbe Probe;
+		Probe.Start(bAsync);
+		const TSharedRef<FScriptedSender> Transport = MakeShared<FScriptedSender>();
+		Probe.AttachSender(Transport);
+
+		auto Send = [this, &Probe, &Descriptor](const FString& Subject, int32 Index)
+		{
+			Probe.SubmitFrame(MakeProbeFrame(Probe, Subject, Descriptor, 10.0 + Index / 60.0));
+			TestTrue(TEXT("Drained"), Probe.WaitForIdle(WaitTimeoutSeconds));
+		};
+		// Two subjects, each a full sync and then an update.
+		Send(TEXT("A"), 0);
+		Send(TEXT("B"), 0);
+		Send(TEXT("A"), 1);
+		Send(TEXT("B"), 1);
+		// A receiver joins (on any thread; here the test's).
+		TestTrue(*FString::Printf(TEXT("%s: the pipeline set a callback"), ModeLabel(bAsync)), Transport->FirePeerJoined());
+		Send(TEXT("A"), 2);
+		Send(TEXT("B"), 2);
+		Send(TEXT("A"), 3);
+		Send(TEXT("B"), 3);
+
+		const TArray<FRecordedPayload> Sent = Transport->GetRecorded();
+		if (TestEqual(*FString::Printf(TEXT("%s: eight payloads"), ModeLabel(bAsync)), Sent.Num(), 8))
+		{
+			for (int32 Index = 0; Index < 8; ++Index)
+			{
+				const bool bExpectFull = (Index < 2) || (Index == 4 || Index == 5);
+				TestEqual(*FString::Printf(TEXT("%s: payload %d (%s) full sync"), ModeLabel(bAsync), Index, *Sent[Index].Subject), Sent[Index].bFullSync, bExpectFull);
+			}
+		}
+		Probe.DetachSender();
+		TestFalse(*FString::Printf(TEXT("%s: detaching clears the callback"), ModeLabel(bAsync)), Transport->FirePeerJoined());
+	}
 	return true;
 }
 

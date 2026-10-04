@@ -692,6 +692,9 @@ namespace O3DNNG
         const bool bPubSub = Mode == ENngMode::Pub || Mode == ENngMode::Sub;
         Caps.Delivery = bPubSub ? EO3DDeliveryGuarantee::Unreliable : EO3DDeliveryGuarantee::ReliableOrdered;
         Caps.bBidirectional = Mode == ENngMode::Pair;
+        // ADR 0005 (vi): the sender reports each added pipe (a subscriber, the pair peer, a pull
+        // socket). A property of the transport, so the receiver modes report it too.
+        Caps.bPeerJoinSignal = true;
         return Caps;
     }
 

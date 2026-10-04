@@ -85,6 +85,7 @@ namespace O3DSockets
 		Caps.bAudioReceive = true;
 		Caps.bControl = true;
 		Caps.bBidirectional = true; // one stream socket per receiver; nothing reads the back direction in v1
+		Caps.bPeerJoinSignal = true; // the sender reports each accepted receiver (ADR 0005 (vi))
 		Caps.Delivery = EO3DDeliveryGuarantee::ReliableOrdered; // ADR 0005 (iii)
 		Caps.MaxPayloadBytes = O3DSockets::Tcp::MaxFrameBytesLimit; // the frame header's hard limit
 		return Caps;
