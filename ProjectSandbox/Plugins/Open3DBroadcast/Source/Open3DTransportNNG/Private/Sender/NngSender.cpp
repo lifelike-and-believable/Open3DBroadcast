@@ -114,7 +114,8 @@ FO3DNngSender::FO3DNngSender()
     , PublishState(MakeShared<FO3DAudioPublishState, ESPMode::ThreadSafe>(Queue, EO3DAudioWireFormat::UnifiedEnvelope))
     , ReopenPolicy(O3DNngSenderPrivate::MakeReopenSettings())
     , PipeContext(MakeShared<FNngSenderPipeContext, ESPMode::ThreadSafe>())
-    , TransportMetrics(FO3DPerformanceMetrics::Get().AcquireTransportMetrics(TEXT("NNG")))
+    , Context(FO3DRuntimeContext::Default())
+    , TransportMetrics(Context->GetMetrics().AcquireTransportMetrics(TEXT("NNG")))
 {
     PipeToken = O3DNngSenderPrivate::GetSenderPipeContextRegistry().Register(PipeContext);
 }
@@ -154,6 +155,8 @@ FO3DTransportResult FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
 
     ActiveConfig = Config;
     ActiveAudioConfig = Config.Audio;
+    Context = FO3DRuntimeContext::OrDefault(Config.Context);
+    TransportMetrics = Context->GetMetrics().AcquireTransportMetrics(TEXT("NNG"));
     // Note: Audio stream label is now automatically derived from StreamId
     AudioSourceGuid = FGuid::NewGuid();
 
@@ -279,7 +282,7 @@ EO3DSendResult FO3DNngSender::SendSerialized(FO3DSendPayload&& Payload)
 {
     if (!bInitialized.load() || !bRunning.load())
     {
-        FO3DPerformanceMetrics::Get().RecordFrameDropped();
+        Context->GetMetrics().RecordFrameDropped();
         return EO3DSendResult::NotRunning;
     }
 
@@ -291,8 +294,8 @@ EO3DSendResult FO3DNngSender::SendSerialized(FO3DSendPayload&& Payload)
     // The caller (FO3DSenderSerializer) already serialized these bytes. This is the only place
     // that records capture and serialization metrics for this frame (Send(SubjectList) was
     // deleted in WP-A1 PR 5b), so recording them here is not a double count.
-    FO3DPerformanceMetrics::Get().RecordFrameCaptured();
-    FO3DPerformanceMetrics::Get().RecordBytesSerialized(Payload.Bytes.Num());
+    Context->GetMetrics().RecordFrameCaptured();
+    Context->GetMetrics().RecordBytesSerialized(Payload.Bytes.Num());
 
     // No NotConnected: a frame queued before a peer exists is dropped and counted by the worker,
     // as NNG itself would. The queue takes Payload.Bytes without a copy.
@@ -312,7 +315,7 @@ EO3DSendResult FO3DNngSender::EnqueueFrame(TArray<uint8>&& Bytes, FString Subjec
     if (Result != EO3DSendResult::Queued)
     {
         DroppedFrames.fetch_add(1);
-        FO3DPerformanceMetrics::Get().RecordTransportFrameDropped();
+        Context->GetMetrics().RecordTransportFrameDropped();
 
         // Any sending thread may get here; the compare-exchange lets one of them log (TRB-43).
         const double Now = FPlatformTime::Seconds();
@@ -326,7 +329,7 @@ EO3DSendResult FO3DNngSender::EnqueueFrame(TArray<uint8>&& Bytes, FString Subjec
     }
 
     // Record successful send metrics
-    FO3DPerformanceMetrics::Get().RecordBytesSent(Len);
+    Context->GetMetrics().RecordBytesSent(Len);
     TransportMetrics->RecordFrameSent(static_cast<uint64>(Len));
     return EO3DSendResult::Queued;
 }

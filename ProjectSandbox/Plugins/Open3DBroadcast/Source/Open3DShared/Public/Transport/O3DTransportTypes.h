@@ -7,6 +7,8 @@
 #include "O3DRedact.h"
 #include "Transport/O3DTransportOptionsView.h"
 
+class FO3DRuntimeContext;
+
 /**
  * Plain transport types shared by IOpen3DSender, IOpen3DReceiver and the transport registry
  * (ADR 0007 item 1). The old path "O3DTransportTypes.h" forwards here for one release.
@@ -422,6 +424,14 @@ struct FO3DTransportConfig
 
     /** Optional audio configuration shared with transports that support audio. */
     FO3DTransportAudioConfig Audio;
+
+    /**
+     * The runtime context the transport records its metrics into
+     * (docs/adr/0012-runtime-services-and-global-state.md, item 3); empty means
+     * FO3DRuntimeContext::Default(). A transport resolves it with FO3DRuntimeContext::OrDefault
+     * in Initialize and never calls FO3DPerformanceMetrics::Get(). Not part of ToDebugString.
+     */
+    TSharedPtr<FO3DRuntimeContext, ESPMode::ThreadSafe> Context;
 
     /**
      * Build a concise debug string summarising the configuration. Secrets print as key and

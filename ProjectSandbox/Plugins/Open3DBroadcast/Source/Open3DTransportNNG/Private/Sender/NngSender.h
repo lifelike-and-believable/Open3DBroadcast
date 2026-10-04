@@ -11,6 +11,7 @@
 #include "Transport/O3DTransportWorker.h"
 #include "Shared/NngHelpers.h"
 #include "O3DPerformanceMetrics.h"
+#include "O3DRuntimeContext.h"
 
 #include <atomic>
 
@@ -133,8 +134,13 @@ private:
     /** Opaque nng_pipe_notify user data; resolves to PipeContext until the destructor. */
     void* PipeToken = nullptr;
 
-    /** This transport's counters, resolved once (SHR-3, SHR-17): no lock or lookup per frame. */
-    const FO3DTransportMetricsRef TransportMetrics;
+    /**
+     * The runtime context from the config (ADR 0012 item 3), and this transport's counters in
+     * it, resolved in Initialize (SHR-3, SHR-17): no lock or lookup per frame. The default
+     * context until then.
+     */
+    FO3DRuntimeContextRef Context;
+    FO3DTransportMetricsRef TransportMetrics;
 
     std::atomic<int64> FramesSent{ 0 };
     std::atomic<int64> BytesSent{ 0 };

@@ -7,6 +7,7 @@
 #include "Transport/O3DTransportTypes.h"
 #include "O3DLifetimeGate.h"
 #include "O3DPerformanceMetrics.h"
+#include "O3DRuntimeContext.h"
 #include "HAL/CriticalSection.h"
 #include "Templates/Atomic.h"
 #include <atomic>
@@ -64,6 +65,12 @@ struct FWebRTCSenderLink
     std::atomic<int32> LkState{ -1 };
     /** reason_code of that callback. */
     std::atomic<int32> LkReasonCode{ 0 };
+
+    /**
+     * The sender's transport counters, for the connection callback (ADR 0012 item 3). Set by
+     * Initialize before it registers the callback, and not changed while one can run.
+     */
+    TSharedPtr<FO3DTransportMetrics, ESPMode::ThreadSafe> TransportMetrics;
 };
 
 /**
@@ -156,8 +163,13 @@ private:
     /** Opaque user data for lk_set_connection_callback; resolves to Link until the destructor. */
     void* LinkToken = nullptr;
 
-    /** This transport's counters, resolved once (SHR-3, SHR-17): no lock or lookup per frame. */
-    const FO3DTransportMetricsRef TransportMetrics;
+    /**
+     * The runtime context from the config (ADR 0012 item 3), and this transport's counters in
+     * it, resolved in Initialize (SHR-3, SHR-17): no lock or lookup per frame. The default
+     * context until then.
+     */
+    FO3DRuntimeContextRef Context;
+    FO3DTransportMetricsRef TransportMetrics;
 
     // State
     mutable FCriticalSection StateMutex;
