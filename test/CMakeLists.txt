@@ -34,6 +34,7 @@ set(O3DS_CORE_TEST_SOURCES
 	resync_contract_tests.cpp
 	scale_update_tests.cpp
 	residual_rotation_tests.cpp
+	scene_time_tests.cpp
 )
 
 add_executable(o3ds_core_tests

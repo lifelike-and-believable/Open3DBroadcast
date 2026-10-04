@@ -44,6 +44,8 @@ struct SubjectBuilder;
 struct SubjectUpdate;
 struct SubjectUpdateBuilder;
 
+struct SceneTime;
+
 struct SubjectList;
 struct SubjectListBuilder;
 
@@ -671,6 +673,41 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) RotationUpdateQ16 FLATBUFFERS_FINAL_CLASS
 };
 FLATBUFFERS_STRUCT_END(RotationUpdateQ16, 12);
 
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) SceneTime FLATBUFFERS_FINAL_CLASS {
+ private:
+  int32_t frame_;
+  float subframe_;
+  int32_t rate_numerator_;
+  int32_t rate_denominator_;
+
+ public:
+  SceneTime()
+      : frame_(0),
+        subframe_(0),
+        rate_numerator_(0),
+        rate_denominator_(0) {
+  }
+  SceneTime(int32_t _frame, float _subframe, int32_t _rate_numerator, int32_t _rate_denominator)
+      : frame_(flatbuffers::EndianScalar(_frame)),
+        subframe_(flatbuffers::EndianScalar(_subframe)),
+        rate_numerator_(flatbuffers::EndianScalar(_rate_numerator)),
+        rate_denominator_(flatbuffers::EndianScalar(_rate_denominator)) {
+  }
+  int32_t frame() const {
+    return flatbuffers::EndianScalar(frame_);
+  }
+  float subframe() const {
+    return flatbuffers::EndianScalar(subframe_);
+  }
+  int32_t rate_numerator() const {
+    return flatbuffers::EndianScalar(rate_numerator_);
+  }
+  int32_t rate_denominator() const {
+    return flatbuffers::EndianScalar(rate_denominator_);
+  }
+};
+FLATBUFFERS_STRUCT_END(SceneTime, 16);
+
 FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) CurveUpdate FLATBUFFERS_FINAL_CLASS {
  private:
   float value_;
@@ -1212,7 +1249,8 @@ struct SubjectList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     VT_TX_SEQ = 10,
     VT_TX_WALLCLOCK_US = 12,
     VT_FRAME_EPOCH = 14,
-    VT_PROTOCOL_VERSION = 16
+    VT_PROTOCOL_VERSION = 16,
+    VT_SCENE_TIME = 18
   };
   const flatbuffers::Vector<flatbuffers::Offset<O3DS::Data::Subject>> *subjects() const {
     return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<O3DS::Data::Subject>> *>(VT_SUBJECTS);
@@ -1235,6 +1273,9 @@ struct SubjectList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   uint16_t protocol_version() const {
     return GetField<uint16_t>(VT_PROTOCOL_VERSION, 0);
   }
+  const O3DS::Data::SceneTime *scene_time() const {
+    return GetStruct<const O3DS::Data::SceneTime *>(VT_SCENE_TIME);
+  }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_SUBJECTS) &&
@@ -1248,6 +1289,7 @@ struct SubjectList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            VerifyField<uint64_t>(verifier, VT_TX_WALLCLOCK_US, 8) &&
            VerifyField<uint32_t>(verifier, VT_FRAME_EPOCH, 4) &&
            VerifyField<uint16_t>(verifier, VT_PROTOCOL_VERSION, 2) &&
+           VerifyField<O3DS::Data::SceneTime>(verifier, VT_SCENE_TIME, 4) &&
            verifier.EndTable();
   }
 };
@@ -1277,6 +1319,9 @@ struct SubjectListBuilder {
   void add_protocol_version(uint16_t protocol_version) {
     fbb_.AddElement<uint16_t>(SubjectList::VT_PROTOCOL_VERSION, protocol_version, 0);
   }
+  void add_scene_time(const O3DS::Data::SceneTime *scene_time) {
+    fbb_.AddStruct(SubjectList::VT_SCENE_TIME, scene_time);
+  }
   explicit SubjectListBuilder(flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -1296,11 +1341,13 @@ inline flatbuffers::Offset<SubjectList> CreateSubjectList(
     uint64_t tx_seq = 0,
     uint64_t tx_wallclock_us = 0,
     uint32_t frame_epoch = 0,
-    uint16_t protocol_version = 0) {
+    uint16_t protocol_version = 0,
+    const O3DS::Data::SceneTime *scene_time = nullptr) {
   SubjectListBuilder builder_(_fbb);
   builder_.add_tx_wallclock_us(tx_wallclock_us);
   builder_.add_tx_seq(tx_seq);
   builder_.add_time(time);
+  builder_.add_scene_time(scene_time);
   builder_.add_frame_epoch(frame_epoch);
   builder_.add_updates(updates);
   builder_.add_subjects(subjects);
@@ -1316,7 +1363,8 @@ inline flatbuffers::Offset<SubjectList> CreateSubjectListDirect(
     uint64_t tx_seq = 0,
     uint64_t tx_wallclock_us = 0,
     uint32_t frame_epoch = 0,
-    uint16_t protocol_version = 0) {
+    uint16_t protocol_version = 0,
+    const O3DS::Data::SceneTime *scene_time = nullptr) {
   auto subjects__ = subjects ? _fbb.CreateVector<flatbuffers::Offset<O3DS::Data::Subject>>(*subjects) : 0;
   auto updates__ = updates ? _fbb.CreateVector<flatbuffers::Offset<O3DS::Data::SubjectUpdate>>(*updates) : 0;
   return O3DS::Data::CreateSubjectList(
@@ -1327,7 +1375,8 @@ inline flatbuffers::Offset<SubjectList> CreateSubjectListDirect(
       tx_seq,
       tx_wallclock_us,
       frame_epoch,
-      protocol_version);
+      protocol_version,
+      scene_time);
 }
 
 struct Curve FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {

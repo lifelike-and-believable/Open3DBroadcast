@@ -110,6 +110,7 @@ namespace O3DS
 		out.tx_wallclock_us = root->tx_wallclock_us();
 		out.frame_epoch = root->frame_epoch();
 		out.time = root->time();
+		out.has_scene_time = ReadSceneTime(*root, out.scene_time);
 		out.stream_key = StreamKeyForNames(names);
 		out.subject_names = std::move(names);
 		return true;

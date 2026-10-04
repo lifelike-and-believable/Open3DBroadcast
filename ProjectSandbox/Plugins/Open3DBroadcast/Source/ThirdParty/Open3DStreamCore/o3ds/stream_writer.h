@@ -27,6 +27,7 @@
 
 #include "o3ds_export.h"
 #include "quant/channel_quant.h"
+#include "wire_format.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -64,16 +65,21 @@ namespace O3DS
 		//! session first when none was started.
 		TxStamp Next();
 
+		//! sceneTime on every Write: the sender's engine timecode for this frame,
+		//! written as SubjectList.scene_time when set and valid (RCV-8, ADR
+		//! 0013). Per call, never kept: a frame without one carries none.
+
 		//! A full Subject (descriptor and values). Its tx_seq becomes the
 		//! subject's ref_seq for later updates.
-		int WriteFull(Subject& subject, std::vector<char>& out, double timestamp);
+		int WriteFull(Subject& subject, std::vector<char>& out, double timestamp, const SceneTime* sceneTime = nullptr);
 		//! Every subject of a list, in full.
-		int WriteFull(SubjectList& list, std::vector<char>& out, double timestamp);
+		int WriteFull(SubjectList& list, std::vector<char>& out, double timestamp, const SceneTime* sceneTime = nullptr);
 		//! A delta update (quantized when quantRanges is given), with ref_seq.
 		int WriteUpdate(Subject& subject, std::vector<char>& out, size_t& count, double deltaThreshold,
-			double timestamp, const QuantRanges* quantRanges = nullptr);
+			double timestamp, const QuantRanges* quantRanges = nullptr, const SceneTime* sceneTime = nullptr);
 		//! A residual update (the subject has a ResidualEncoder), with ref_seq.
-		int WriteResidual(Subject& subject, std::vector<char>& out, size_t& count, double deltaThreshold, double timestamp);
+		int WriteResidual(Subject& subject, std::vector<char>& out, size_t& count, double deltaThreshold, double timestamp,
+			const SceneTime* sceneTime = nullptr);
 
 		//! The tx_seq of the last full Subject written for this subject name;
 		//! 0 when none was (its updates then carry ref_seq 0, unset).

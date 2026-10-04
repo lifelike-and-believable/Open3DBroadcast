@@ -306,11 +306,13 @@ namespace O3DS
 		//! A sender stamps through O3DS::StreamWriter (ADR 0005 (iv)); calling
 		//! these without a stamp is deprecated (CORE-29): the frame goes out
 		//! unsequenced and a receiver cannot gate, order or conceal it.
+		//! sceneTime, when set and valid, is written as SubjectList.scene_time
+		//! (RCV-8, ADR 0013).
 		int Serialize(std::vector<char>& outbuf, double timestamp,
-			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0);
+			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0, const SceneTime* sceneTime = nullptr);
 
 		int SerializeUpdate(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp, const QuantRanges* quantRanges = nullptr,
-			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0, uint64_t ref_seq = 0);
+			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0, uint64_t ref_seq = 0, const SceneTime* sceneTime = nullptr);
 
 		//! Self-contained residual-coded variant of the vector<char> overload
 		//! above, mirroring it exactly (builds its own FlatBufferBuilder and
@@ -323,7 +325,7 @@ namespace O3DS
 		//! stamps through O3DS::StreamWriter (ADR 0005 (iv)); calling this
 		//! without a stamp is deprecated (CORE-29).
 		int SerializeUpdateResidual(std::vector<char>& outbuf, size_t& count, double deltaThreshold, double timestamp, uint64_t seq = 0,
-			uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0, uint64_t ref_seq = 0);
+			uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0, uint64_t ref_seq = 0, const SceneTime* sceneTime = nullptr);
 
 	private:
 		std::unique_ptr<ResidualEncoder> mResidualEncoder;
@@ -446,6 +448,11 @@ namespace O3DS
 		double mTime;
 		double mDeltaThreshold;
 		std::string mError;
+		//! The scene_time of the frame the last Parse() read (RCV-8, ADR 0013).
+		//! mHasSceneTime is false when that frame had none, or an invalid one;
+		//! every Parse() resets it first, so a frame never inherits another's.
+		bool mHasSceneTime = false;
+		SceneTime mSceneTime;
 		//! Why the last Parse() rejected its frame header (D8, ADR 0009), or
 		//! Ok; with VersionTooNew, mLastFrameMinReaderVersion is the
 		//! protocol the sender requires.
@@ -485,11 +492,13 @@ namespace O3DS
 		//! predates these fields. This function only writes what it is given;
 		//! a sender stamps through O3DS::StreamWriter (ADR 0005 (iv)), and
 		//! calling it without a stamp is deprecated (CORE-29).
+		//! sceneTime, when set and valid, is written as SubjectList.scene_time
+		//! (RCV-8, ADR 0013).
 		int Serialize(std::vector<char> &outbuf, double timestamp = 0.0,
-			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0);
+			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0, const SceneTime* sceneTime = nullptr);
 
 		int SerializeUpdate(std::vector<char>& outbuf, size_t& count, double timestamp = 0.0,
-			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0);
+			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0, const SceneTime* sceneTime = nullptr);
 
 		//! Residual-coded variant of SerializeUpdate() (roadmap doc §5/C2).
 		//! Subjects with a residual encoder configured (Subject::
@@ -498,7 +507,7 @@ namespace O3DS
 		//! back to the legacy Subject::SerializeUpdate() path unchanged -
 		//! safe to mix residual-coded and legacy subjects in the same list.
 		int SerializeUpdateResidual(std::vector<char>& outbuf, size_t& count, double timestamp = 0.0,
-			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0);
+			uint64_t tx_seq = 0, uint64_t tx_wallclock_us = 0, uint32_t frame_epoch = 0, const SceneTime* sceneTime = nullptr);
 
 		//! Populate or update the subject list with the binary data provided (created by Serialize)
 		//!
@@ -579,6 +588,10 @@ namespace O3DS
 	//! version 1). outMinReaderVersion is set
 	//! once the frame word has been read, also when the version is too new.
 	O3DS_API Wire::FrameCheck CheckFrame(const char* data, size_t len, uint8_t& outMinReaderVersion);
+
+	//! Reads root's scene_time (RCV-8, ADR 0013) into out. False, with out
+	//! unchanged, when it is absent or invalid (IsValidSceneTime).
+	O3DS_API bool ReadSceneTime(const O3DS::Data::SubjectList& root, SceneTime& out);
 
 
 } // O3DS

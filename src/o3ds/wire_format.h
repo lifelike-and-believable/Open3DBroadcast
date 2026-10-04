@@ -7,6 +7,7 @@
 
 #include "o3ds_export.h"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -161,4 +162,26 @@ namespace Wire
 	//! Continues a hash with parent indices: their count (u32 LE), then each as i32 LE.
 	O3DS_API uint64_t HashParents(uint64_t hash, const int32_t* parents, uint32_t count);
 }
+
+	//! The sender's engine timecode for one frame (SubjectList.scene_time;
+	//! RCV-8, ADR 0013): frame number and sub-frame at rate_numerator /
+	//! rate_denominator frames per second, the fields of UE's
+	//! FQualifiedFrameTime.
+	struct SceneTime
+	{
+		int32_t frame = 0;
+		float subframe = 0.0f;
+		int32_t rate_numerator = 0;
+		int32_t rate_denominator = 0;
+	};
+
+	//! Whether a SceneTime can be used: a positive rate, and a finite
+	//! sub-frame in [0, 1) (UE's FFrameTime invariant). A writer does not
+	//! write an invalid one; a reader treats one as absent and still applies
+	//! the frame.
+	inline bool IsValidSceneTime(const SceneTime& time)
+	{
+		return time.rate_numerator > 0 && time.rate_denominator > 0
+			&& std::isfinite(time.subframe) && time.subframe >= 0.0f && time.subframe < 1.0f;
+	}
 }

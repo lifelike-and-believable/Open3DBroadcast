@@ -39,6 +39,14 @@ A mocap frame is an 8-byte header followed by a FlatBuffer (`src/o3ds.fbs`, root
   parsing sequenced frames with a `ParseContext` drops an update whose `ref_seq` names a full
   Subject it did not apply, and residual updates after a sequence gap, until the subject's
   next full Subject (ADR 0005 (ix)). It does not change `min_reader_version`.
+- **`SubjectList.scene_time`** (RCV-8, ADR 0013): the sender's engine timecode when the pose
+  was sampled, a `SceneTime` struct with the fields of UE's `FQualifiedFrameTime` (`frame`,
+  `subframe`, `rate_numerator`, `rate_denominator`). Absent when the sender had no
+  synchronized timecode provider. Valid means a positive rate and a finite `subframe` in
+  [0, 1) (`O3DS::IsValidSceneTime`): writers do not write an invalid one, and readers treat
+  one as absent and still apply the frame. Read by `PeekPacketMeta` (`PacketMeta::scene_time`)
+  and `SubjectList::Parse` (`mSceneTime`, reset on every parse). Part of protocol 2 (section 8:
+  joined before 2 was released); it does not change `min_reader_version`.
 - **Readers** (`O3DS::CheckFrame`, used by `SubjectList::Parse`, `PeekMeta` and
   `PeekPacketMeta`) accept `min_reader_version` 1 to `O3DS_PROTOCOL_VERSION` with bytes 1-3
   zero, check the CRC, and verify the FlatBuffer (the `"O3DS"` identifier is required on
@@ -113,6 +121,7 @@ holds the verbatim wire bytes of one frame and its receive time.
 | `SubjectList.time` (seconds) | sender clock: `FPlatformTime::Seconds()` when the pose was sampled (ADR 0008) | no |
 | envelope `timestamp_us` | the same sender clock, in microseconds | no |
 | `SubjectList.tx_wallclock_us` | UTC at transmit (`O3DS::NowUtcMicros`); can step under NTP | roughly: latency and clock-offset estimates only |
+| `SubjectList.scene_time` (frames at a rate) | the sender engine's timecode (`FApp::GetCurrentFrameTime()`), when a timecode provider is synchronized | yes, when both machines' timecode sources agree (genlock, LTC) |
 | capture `recv_wallclock_us` | UTC at receive | roughly |
 
 Receivers map sender time to their own with the clock-offset estimator; frames are ordered by

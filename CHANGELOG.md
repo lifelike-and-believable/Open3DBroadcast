@@ -10,6 +10,16 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Schema/Protocol
 
+- **`SubjectList.scene_time`** (RCV-8, ADR 0013 PR 1): an optional `SceneTime` struct (frame,
+  sub-frame, rate numerator and denominator, as UE's `FQualifiedFrameTime`) carries the sender's
+  engine timecode. Appended; part of protocol 2 (unreleased); `min_reader_version` unchanged.
+  Core API: `O3DS::SceneTime` and `IsValidSceneTime` (`wire_format.h`); a trailing
+  `const SceneTime*` on the `Subject` and `SubjectList` serializers and every `StreamWriter`
+  write (per call, never kept); `PacketMeta::has_scene_time`/`scene_time`;
+  `SubjectList::mHasSceneTime`/`mSceneTime`, reset on every `Parse`; `ReadSceneTime`. Writers
+  drop an invalid value, readers treat one as absent and still apply the frame. The UE sender
+  and receiver use it in ADR 0013 PRs 2 and 3. Tests: `core.scene_time_tests`.
+
 - **Updates carry scale** (CORE-11, ADR 0005 (v)). The delta and quantized path sends a
   transform's absolute scale in `SubjectUpdate.scale` when it moved more than the delta
   threshold since it was last sent (the block had been commented out); residual updates send
