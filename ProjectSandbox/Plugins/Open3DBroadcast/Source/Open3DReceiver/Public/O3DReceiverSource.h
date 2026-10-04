@@ -27,6 +27,7 @@ namespace O3DS
     struct Frame;
     struct LegacyOrderingConfig;
     struct ParseContext;
+    struct SceneTime;
     struct ParsedSubjectInfo;
     struct ReceiverStream;
     namespace Control
@@ -140,7 +141,8 @@ private:
     /** Test seam (WP-S4): routes the publisher's static and frame pushes to these instead of LiveLink. */
     void SetTestPushHooks(
         TFunction<void(const FLiveLinkSubjectKey&, const TArray<FName>& BoneNames, const TArray<int32>& BoneParents, const TArray<FName>& CurveNames, bool bFirstPushThisSession)> StaticHook,
-        TFunction<void(const FLiveLinkSubjectKey&, const TArray<FTransform>& BoneTransforms, const TArray<float>& CurveValues, double WorldTime)> FrameHook);
+        TFunction<void(const FLiveLinkSubjectKey&, const TArray<FTransform>& BoneTransforms, const TArray<float>& CurveValues, double WorldTime,
+            const TOptional<FQualifiedFrameTime>& SceneTime)> FrameHook);
 
     /** Drops every per-sender stream (reorder gate, clock estimator, legacy ordering,
      *  parse state) and all concealment state. Called on transport start and stop only;
@@ -188,7 +190,8 @@ private:
     // gated path (A2.a/A2.c) always passes a real mapped presentation time.
     // bFullDescriptor: the packet carried a full Subject for it, which invalidates the
     // cached bone names and parents (RCV-4).
-    void ProcessParsedSubject(O3DS::Subject* SubjectPtr, double SubjectListTime, double WorldTimeSecondsOverride, bool bFullDescriptor);
+    // SenderSceneTime: the frame's SubjectList.scene_time, or null (RCV-8, ADR 0013).
+    void ProcessParsedSubject(O3DS::Subject* SubjectPtr, double WorldTimeSecondsOverride, bool bFullDescriptor, const O3DS::SceneTime* SenderSceneTime);
     void FinalizeAudioMeta(O3DS::FAudioFrameMeta& Meta) const;
 
 public:

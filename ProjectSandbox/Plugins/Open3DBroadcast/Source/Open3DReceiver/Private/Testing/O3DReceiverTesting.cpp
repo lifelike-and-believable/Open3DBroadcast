@@ -9,6 +9,7 @@
 #include "O3DReceiverControlRouter.h"
 #include "O3DReceiverStreamScheduler.h"
 #include "O3DReceiverFrameDecoder.h"
+#include "O3DSceneTimeMapper.h"
 #include "O3DHelpers.h"
 #include "O3DRuntimeContext.h"
 
@@ -91,9 +92,10 @@ FO3DLiveLinkPublisherProbe::FO3DLiveLinkPublisherProbe(bool bBindHooks)
 			{
 				Statics.Add({ Key.SubjectName.Name, CurveNames, bFirstPush });
 			},
-			[this](const FLiveLinkSubjectKey& Key, const TArray<FTransform>& Transforms, const TArray<float>&, double WorldTime)
+			[this](const FLiveLinkSubjectKey& Key, const TArray<FTransform>& Transforms, const TArray<float>&, double WorldTime,
+				const TOptional<FQualifiedFrameTime>& SceneTime)
 			{
-				Frames.Add({ Key.SubjectName.Name, Transforms.Num(), WorldTime });
+				Frames.Add({ Key.SubjectName.Name, Transforms.Num(), WorldTime, SceneTime });
 			});
 	}
 }
@@ -121,7 +123,53 @@ void FO3DLiveLinkPublisherProbe::PublishFrame(FName Subject, int32 NumTransforms
 {
 	TArray<FTransform> Transforms;
 	Transforms.SetNum(NumTransforms);
-	Publisher->PublishFrame(Subject, Transforms, TArray<FName>(), TArray<float>(), WorldTime, WorldTime, 0);
+	Publisher->PublishFrame(Subject, Transforms, TArray<FName>(), TArray<float>(), WorldTime, nullptr);
+}
+
+void FO3DLiveLinkPublisherProbe::PublishFrameWithSenderTime(FName Subject, int32 NumTransforms, double WorldTime, int32 Frame, float SubFrame,
+	int32 RateNumerator, int32 RateDenominator)
+{
+	TArray<FTransform> Transforms;
+	Transforms.SetNum(NumTransforms);
+	O3DS::SceneTime SenderTime;
+	SenderTime.frame = Frame;
+	SenderTime.subframe = SubFrame;
+	SenderTime.rate_numerator = RateNumerator;
+	SenderTime.rate_denominator = RateDenominator;
+	Publisher->PublishFrame(Subject, Transforms, TArray<FName>(), TArray<float>(), WorldTime, &SenderTime);
+}
+
+FO3DSceneTimeMapperProbe::FO3DSceneTimeMapperProbe()
+	: Mapper(MakeUnique<FO3DSceneTimeMapper>())
+{
+}
+
+FO3DSceneTimeMapperProbe::~FO3DSceneTimeMapperProbe() = default;
+
+TOptional<FQualifiedFrameTime> FO3DSceneTimeMapperProbe::MapSender(FName Subject, int32 Frame, float SubFrame, int32 RateNumerator, int32 RateDenominator,
+	double WorldTime, double NowSeconds, const TOptional<FQualifiedFrameTime>& EngineTime)
+{
+	O3DS::SceneTime SenderTime;
+	SenderTime.frame = Frame;
+	SenderTime.subframe = SubFrame;
+	SenderTime.rate_numerator = RateNumerator;
+	SenderTime.rate_denominator = RateDenominator;
+	return Mapper->Map(Subject, &SenderTime, WorldTime, NowSeconds, EngineTime);
+}
+
+TOptional<FQualifiedFrameTime> FO3DSceneTimeMapperProbe::MapWithout(FName Subject, double WorldTime, double NowSeconds, const TOptional<FQualifiedFrameTime>& EngineTime)
+{
+	return Mapper->Map(Subject, nullptr, WorldTime, NowSeconds, EngineTime);
+}
+
+void FO3DSceneTimeMapperProbe::ForgetSubject(FName Subject)
+{
+	Mapper->ForgetSubject(Subject);
+}
+
+void FO3DSceneTimeMapperProbe::Reset()
+{
+	Mapper->Reset();
 }
 
 void FO3DLiveLinkPublisherProbe::PublishSyntheticFrame(FName Subject, int32 NumTransforms, double Time)

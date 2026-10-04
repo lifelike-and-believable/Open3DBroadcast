@@ -954,6 +954,34 @@ Useful for:
 - Team sharing of configurations
 - Quick setup for common scenarios
 
+### Timecode Mode
+
+The receiver sets each LiveLink frame's **SceneTime**, so a LiveLink source in **Timecode** mode
+selects frames by timecode, and Take Recorder and Sequencer can line received motion up with
+other timecoded sources (cameras, audio, other machines):
+
+- **The sender has a synchronized timecode provider** (Project Settings > Engine > General
+  Settings > Timecode Provider: genlock, LTC, or `SystemTimeTimecodeProvider`): every frame
+  carries the sender's timecode from when it was sampled, and the receiver uses it as the
+  frame's SceneTime. Frames line up with other sources only when both machines' timecode
+  sources agree (the same genlock or LTC, or system clocks kept in sync).
+- **The sender has none:** the receiver derives a SceneTime from when it presents the frame, on
+  its own engine timecode. Frames are ordered and evenly spaced, but this is the receiver's
+  time, not the performance's.
+- **Neither engine has a timecode:** SceneTime is left at its default, as before, and LiveLink
+  warns that the engine has no timecode in Timecode mode. Use EngineTime mode instead.
+
+A subject keeps the frame rate of its first timecode; later timecodes at another rate are
+converted to it, because a rate change empties LiveLink's buffer for the subject. Concealed
+frames continue the subject's timeline.
+
+**Whole-frame timecode.** A provider that reports whole frames (`SystemTimeTimecodeProvider`
+does by default: *Generate Full Frame*) gives every sender tick within one timecode frame the
+same timecode, so a 60 Hz sender on 24 fps timecode stamps two or three frames alike. LiveLink
+keeps them all, in arrival order, and warns once. For smooth playback either turn off
+*Generate Full Frame* on the sender's provider, or turn on *Generate Sub Frame* in the LiveLink
+source's buffer settings and set *Source Timecode Frame Rate* to the sender's capture rate.
+
 ### Multiple Subjects
 
 You can stream multiple subjects simultaneously:

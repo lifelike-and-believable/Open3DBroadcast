@@ -2,6 +2,8 @@
 
 #include "O3DLiveLinkPublisher.h"
 
+#include "Misc/App.h"
+
 #include "O3DReceiverFrameDecoder.h"
 #include "O3DReceiverLogs.h"
 
@@ -88,12 +90,12 @@ bool FO3DLiveLinkPublisher::PublishStatic(const FO3DDecodedSubject& Decoded)
 }
 
 void FO3DLiveLinkPublisher::PublishFrame(FName Subject, const TArray<FTransform>& BoneTransforms, const TArray<FName>& CurveNames, const TArray<float>& CurveValues,
-	double SubjectListTime, double WorldTimeSecondsOverride, uint64 CurveHash)
+	double WorldTimeSecondsOverride, const O3DS::SceneTime* SenderSceneTime)
 {
 	(void)CurveNames; // the static data carries the names; a frame carries values only
 
 	const double FrameStartTime = FPlatformTime::Seconds();
-	PushFrameData(MakeKey(Subject), BoneTransforms, CurveValues, SubjectListTime, WorldTimeSecondsOverride, CurveHash);
+	PushFrameData(MakeKey(Subject), BoneTransforms, CurveValues, WorldTimeSecondsOverride, SenderSceneTime);
 	const double FrameTimeMs = (FPlatformTime::Seconds() - FrameStartTime) * 1000.0;
 	if (FrameTimeMs > O3DLiveLinkPublisherPrivate::SlowPushWarningMs)
 	{
@@ -107,8 +109,7 @@ void FO3DLiveLinkPublisher::PublishSyntheticFrame(FName Subject, const TArray<FT
 {
 	// No static data: a synthesized frame never changes the topology, so the registered bone and
 	// curve names apply.
-	const uint64* CurveHashPtr = SubjectCurveHashes.Find(Subject);
-	PushFrameData(MakeKey(Subject), BoneTransforms, CurveValues, Time, Time, CurveHashPtr ? *CurveHashPtr : 0);
+	PushFrameData(MakeKey(Subject), BoneTransforms, CurveValues, Time, nullptr);
 }
 
 void FO3DLiveLinkPublisher::RemoveInactiveSubjects(double NowSeconds, double ThresholdSeconds, TFunctionRef<void(FName)> OnRemoved)
@@ -123,6 +124,7 @@ void FO3DLiveLinkPublisher::RemoveInactiveSubjects(double NowSeconds, double Thr
 			}
 			UE_LOG(LogO3DReceiverSource, Verbose, TEXT("Removed inactive subject %s"), *It.Key().ToString());
 			OnRemoved(It.Key());
+			SceneTimeMapper.ForgetSubject(It.Key());
 			SubjectSkeletonHashes.Remove(It.Key());
 			SubjectCurveHashes.Remove(It.Key());
 			InitializedSubjects.Remove(It.Key());
@@ -137,6 +139,7 @@ void FO3DLiveLinkPublisher::Reset()
 	SubjectSkeletonHashes.Empty();
 	SubjectCurveHashes.Empty();
 	SubjectLastUpdateTime.Empty();
+	SceneTimeMapper.Reset();
 	FrameCounter = 0;
 	LastSlowPushWarningTime = -1.0e9;
 	SlowPushesNotLogged = 0;
@@ -205,11 +208,20 @@ void FO3DLiveLinkPublisher::PushStaticData(const FLiveLinkSubjectKey& SubjectKey
 }
 
 void FO3DLiveLinkPublisher::PushFrameData(const FLiveLinkSubjectKey& SubjectKey, const TArray<FTransform>& BoneTransforms, const TArray<float>& CurveValues,
-	double TimestampSeconds, double WorldTimeSecondsOverride, uint64 CurveHash)
+	double WorldTimeSecondsOverride, const O3DS::SceneTime* SenderSceneTime)
 {
+	// A2.c: the sender-clock-mapped presentation time when available (gated path), otherwise the
+	// apply time (legacy, ungated frames).
+	const double NowSeconds = FPlatformTime::Seconds();
+	const double WorldTime = (WorldTimeSecondsOverride >= 0.0) ? WorldTimeSecondsOverride : NowSeconds;
+	// RCV-8 (ADR 0013): the sender's timecode, the sender's timeline continued, or WorldTime on
+	// this engine's timecode (FO3DSceneTimeMapper). Unset leaves LiveLink's default.
+	const TOptional<FQualifiedFrameTime> SceneTime = SceneTimeMapper.Map(SubjectKey.SubjectName.Name, SenderSceneTime, WorldTime, NowSeconds,
+		FApp::GetCurrentFrameTime());
+
 	if (TestFramePushHook)
 	{
-		TestFramePushHook(SubjectKey, BoneTransforms, CurveValues, (WorldTimeSecondsOverride >= 0.0) ? WorldTimeSecondsOverride : FPlatformTime::Seconds());
+		TestFramePushHook(SubjectKey, BoneTransforms, CurveValues, WorldTime, SceneTime);
 		return;
 	}
 
@@ -224,12 +236,9 @@ void FO3DLiveLinkPublisher::PushFrameData(const FLiveLinkSubjectKey& SubjectKey,
 
 	FrameData.Transforms = BoneTransforms;
 	BaseFrameData.PropertyValues = CurveValues;
-	// A2.c: the sender-clock-mapped presentation time when available (gated path), otherwise the
-	// apply time (legacy, ungated frames).
-	BaseFrameData.WorldTime = (WorldTimeSecondsOverride >= 0.0) ? WorldTimeSecondsOverride : FPlatformTime::Seconds();
-	BaseFrameData.MetaData.SceneTime = FQualifiedFrameTime();
-	BaseFrameData.MetaData.StringMetaData.Add(TEXT("CurveHash"), FString::Printf(TEXT("0x%016llx"), static_cast<unsigned long long>(CurveHash)));
-	BaseFrameData.MetaData.StringMetaData.Add(TEXT("SubjectListTime"), FString::Printf(TEXT("%.6f"), TimestampSeconds));
+	BaseFrameData.WorldTime = WorldTime;
+	// No per-frame string metadata (RCV-11): the curve hash stays internal.
+	BaseFrameData.MetaData.SceneTime = SceneTime.Get(FQualifiedFrameTime());
 
 	FrameData.FrameId = FrameCounter++;
 
