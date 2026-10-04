@@ -1,0 +1,22 @@
+# The only image built from this repository is docker/Dockerfile.repeater, which needs the core
+# (src/, apps/, test/ for the CMake configure step, the root CMakeLists.txt and cmake/) and the
+# submodules thirdparty/nng, flatbuffers and crccpp. Everything else stays out of the build context.
+.git
+ProjectSandbox
+docs
+Artifacts
+Build
+compose
+cloud-init
+plugins
+thirdparty/mbedtls
+thirdparty/cml
+thirdparty/libdatachannel
+**/build
+**/build-*
+**/out
+**/.vs
+**/Binaries
+**/Intermediate
+**/Saved
+**/DerivedDataCache

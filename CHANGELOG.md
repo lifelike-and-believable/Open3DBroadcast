@@ -568,6 +568,17 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- **Repeater image** (`docker/Dockerfile.repeater`): builds only the Repeater, on Ubuntu 24.04,
+  against the pinned submodules (NNG, FlatBuffers, CRCpp) as `core-tests.yml` does instead of
+  Ubuntu's packages; NNG is linked statically, so the runtime image needs no NNG package; NNG's
+  `nngcat` ships beside it. A new `.dockerignore` keeps the UE project and docs out of the build
+  context (it used to send the whole repository). `REPEATER_OPTIONS` passes the Repeater's flags,
+  and `exec` lets `docker stop` stop it cleanly. The `Build and publish Repeater image` workflow
+  (still disabled) runs only for files the image uses, and its smoke test pushes a message
+  through the relay with `nngcat` and checks a subscriber receives it, instead of `echo ok`.
+  A new `Repeater image test` workflow runs that build and smoke test on pull requests that touch
+  the image, plus a check that `docker stop` exits the Repeater with code 0; it never pushes.
+
 - **Repeater rebuilt on raw NNG** (`apps/Repeater`). The relay (`relay.h`/`relay.cpp`, a library
   the core tests link) moves each message from the pull socket to the pub socket unchanged, as an
   NNG message (no copy into a fixed 8 MB buffer). New: a receive size limit (`--max-message-mb`,

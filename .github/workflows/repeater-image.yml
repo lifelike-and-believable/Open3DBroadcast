@@ -1,21 +1,32 @@
 name: Build and publish Repeater image
+# Disabled in the repository settings (manually); it pushes to GHCR on main and develop pushes and
+# nightly when enabled. The smoke test below runs the image and checks that a message pushed into
+# the relay reaches a subscriber (NNG's nngcat, built into the image), not only that it starts.
 on:
   push:
     branches: [ main, develop ]
     paths:
       - "docker/Dockerfile.repeater"
-      - "**/*.cpp"
-      - "**/*.h"
+      - ".dockerignore"
+      - "apps/Repeater/**"
+      - "src/**"
       - "CMakeLists.txt"
-      - "thirdparty/**"
+      - "thirdparty/nng"
+      - "thirdparty/flatbuffers"
+      - "thirdparty/crccpp"
+      - ".github/workflows/repeater-image.yml"
   pull_request:
     branches: [ develop, main ]
     paths:
       - "docker/Dockerfile.repeater"
-      - "**/*.cpp"
-      - "**/*.h"
+      - ".dockerignore"
+      - "apps/Repeater/**"
+      - "src/**"
       - "CMakeLists.txt"
-      - "thirdparty/**"
+      - "thirdparty/nng"
+      - "thirdparty/flatbuffers"
+      - "thirdparty/crccpp"
+      - ".github/workflows/repeater-image.yml"
   schedule:
     - cron: '0 6 * * *' # daily 06:00 UTC nightly build
   workflow_dispatch:
@@ -59,9 +70,18 @@ jobs:
       - name: Smoke test (PR)
         if: github.event_name == 'pull_request' && (github.event.pull_request.draft == false)
         run: |
-          docker run --rm --entrypoint /bin/sh $IMAGE -c "echo ok"
-          # Optional usage check; don't fail on exit code
-          docker run --rm $IMAGE || true
+          set -e
+          docker run -d --name o3ds-repeater --network host $IMAGE
+          docker run -d --name o3ds-sub --network host --entrypoint /app/nngcat $IMAGE \
+            --sub0 --dial tcp://127.0.0.1:7001 --subscribe "" --quoted --count 1 --recv-timeout 30
+          # Pub/sub has a slow-joiner window, so push the same message a few times.
+          docker run --rm --network host --entrypoint /app/nngcat $IMAGE \
+            --push0 --dial tcp://127.0.0.1:7000 --data o3ds-repeater-smoke --count 10 --interval 1
+          timeout 40 docker wait o3ds-sub
+          docker logs o3ds-sub | tee sub.log
+          docker logs o3ds-repeater
+          docker stop o3ds-repeater o3ds-sub
+          grep -q o3ds-repeater-smoke sub.log
         env:
           IMAGE: ${{ env.IMAGE_NAME }}:pr-${{ github.sha }}
 
@@ -79,7 +99,18 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           docker pull $IMAGE
-          docker run --rm --entrypoint /bin/sh $IMAGE -c "echo ok"
+          set -e
+          docker run -d --name o3ds-repeater --network host $IMAGE
+          docker run -d --name o3ds-sub --network host --entrypoint /app/nngcat $IMAGE \
+            --sub0 --dial tcp://127.0.0.1:7001 --subscribe "" --quoted --count 1 --recv-timeout 30
+          # Pub/sub has a slow-joiner window, so push the same message a few times.
+          docker run --rm --network host --entrypoint /app/nngcat $IMAGE \
+            --push0 --dial tcp://127.0.0.1:7000 --data o3ds-repeater-smoke --count 10 --interval 1
+          timeout 40 docker wait o3ds-sub
+          docker logs o3ds-sub | tee sub.log
+          docker logs o3ds-repeater
+          docker stop o3ds-repeater o3ds-sub
+          grep -q o3ds-repeater-smoke sub.log
         env:
           IMAGE: ${{ env.IMAGE_NAME }}:latest
 
@@ -97,7 +128,18 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
         run: |
           docker pull $IMAGE
-          docker run --rm --entrypoint /bin/sh $IMAGE -c "echo ok"
+          set -e
+          docker run -d --name o3ds-repeater --network host $IMAGE
+          docker run -d --name o3ds-sub --network host --entrypoint /app/nngcat $IMAGE \
+            --sub0 --dial tcp://127.0.0.1:7001 --subscribe "" --quoted --count 1 --recv-timeout 30
+          # Pub/sub has a slow-joiner window, so push the same message a few times.
+          docker run --rm --network host --entrypoint /app/nngcat $IMAGE \
+            --push0 --dial tcp://127.0.0.1:7000 --data o3ds-repeater-smoke --count 10 --interval 1
+          timeout 40 docker wait o3ds-sub
+          docker logs o3ds-sub | tee sub.log
+          docker logs o3ds-repeater
+          docker stop o3ds-repeater o3ds-sub
+          grep -q o3ds-repeater-smoke sub.log
         env:
           IMAGE: ${{ env.IMAGE_NAME }}:edge
 
@@ -115,6 +157,17 @@ jobs:
         if: github.event_name == 'schedule'
         run: |
           docker pull $IMAGE
-          docker run --rm --entrypoint /bin/sh $IMAGE -c "echo ok"
+          set -e
+          docker run -d --name o3ds-repeater --network host $IMAGE
+          docker run -d --name o3ds-sub --network host --entrypoint /app/nngcat $IMAGE \
+            --sub0 --dial tcp://127.0.0.1:7001 --subscribe "" --quoted --count 1 --recv-timeout 30
+          # Pub/sub has a slow-joiner window, so push the same message a few times.
+          docker run --rm --network host --entrypoint /app/nngcat $IMAGE \
+            --push0 --dial tcp://127.0.0.1:7000 --data o3ds-repeater-smoke --count 10 --interval 1
+          timeout 40 docker wait o3ds-sub
+          docker logs o3ds-sub | tee sub.log
+          docker logs o3ds-repeater
+          docker stop o3ds-repeater o3ds-sub
+          grep -q o3ds-repeater-smoke sub.log
         env:
           IMAGE: ${{ env.IMAGE_NAME }}:nightly

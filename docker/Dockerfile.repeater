@@ -1,38 +1,49 @@
-# Multi-stage build for the Repeater app - insignificant edit
+# The Open3DStream Repeater (apps/Repeater). Builds only the Repeater, against the pinned
+# submodules (thirdparty/nng, flatbuffers, crccpp) exactly as core-tests.yml does, not the
+# distribution's packages. The build context is the repository root with .dockerignore applied,
+# so the submodules must be checked out.
+#
+#   docker build -f docker/Dockerfile.repeater -t open3dstream-repeater .
+#   docker run -p 7000:7000 -p 7001:7001 open3dstream-repeater
 
-FROM ubuntu:22.04 AS build
+FROM ubuntu:24.04 AS build
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y \
-  build-essential cmake git pkg-config \
-  libflatbuffers-dev libnng-dev \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake ninja-build ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 COPY . .
 
-# Configure and build
-# Disable WebRTC to keep dependencies minimal for this image
-# Add CRC header path directly for this build only
-RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DO3DS_DISABLE_WEBRTC=ON \
-    -DCMAKE_CXX_FLAGS="-I/src/thirdparty/crccpp/inc" \
- && cmake --build build -j"$(nproc)"
+# Dependencies into /opt/o3ds. NNG builds its nngcat tool too: the image's smoke test uses it to
+# push through the relay and subscribe.
+RUN cmake -S thirdparty/nng -B /tmp/nng -G Ninja -DCMAKE_INSTALL_PREFIX=/opt/o3ds \
+      -DCMAKE_BUILD_TYPE=Release -DNNG_TESTS=OFF -DNNG_ENABLE_TLS=OFF -DNNG_ENABLE_NNGCAT=ON \
+ && cmake --build /tmp/nng && cmake --install /tmp/nng \
+ && cmake -S thirdparty/crccpp -B /tmp/crccpp -G Ninja -DCMAKE_INSTALL_PREFIX=/opt/o3ds \
+ && cmake --build /tmp/crccpp && cmake --install /tmp/crccpp \
+ && cmake -S thirdparty/flatbuffers -B /tmp/flatbuffers -G Ninja -DCMAKE_INSTALL_PREFIX=/opt/o3ds \
+      -DCMAKE_BUILD_TYPE=Release -DFLATBUFFERS_BUILD_TESTS=OFF \
+      -DCMAKE_CXX_FLAGS="-Wno-stringop-overflow -Wno-stringop-overread -Wno-array-bounds -Wno-restrict" \
+ && cmake --build /tmp/flatbuffers && cmake --install /tmp/flatbuffers
 
-FROM ubuntu:22.04 AS runtime
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y \
-  ca-certificates libnng1 \
-  && rm -rf /var/lib/apt/lists/*
+# Only the Repeater target; no tests, no WebRTC.
+RUN cmake -S . -B /tmp/o3ds -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/o3ds \
+      -DO3DS_DISABLE_WEBRTC=ON -DO3DS_BUILD_TESTS=OFF \
+ && cmake --build /tmp/o3ds --target Repeater
+
+FROM ubuntu:24.04 AS runtime
 WORKDIR /app
+# NNG is linked statically, so the runtime needs no NNG package.
+COPY --from=build /tmp/o3ds/apps/Repeater/Repeater /app/repeater
+COPY --from=build /opt/o3ds/bin/nngcat /app/nngcat
 
-# Adjust if your CMake target outputs elsewhere
-COPY --from=build /src/build/apps/Repeater/Repeater /app/repeater
-
-# Defaults use NNG URL scheme (tcp://)
+# Senders push to LISTEN_ADDR; receivers subscribe to BROADCAST_ADDR. REPEATER_OPTIONS takes the
+# optional flags (see apps/Repeater/README.md), e.g. "--stats-seconds 60 --max-message-mb 128".
 ENV LISTEN_ADDR=tcp://0.0.0.0:7000
 ENV BROADCAST_ADDR=tcp://0.0.0.0:7001
+ENV REPEATER_OPTIONS=""
+EXPOSE 7000 7001
 
-# Optional: document ports
-# EXPOSE 7000 7001
-
-# Use shell form to allow environment variable expansion
-CMD ["/bin/sh", "-c", "/app/repeater ${LISTEN_ADDR} ${BROADCAST_ADDR}"]
+# exec, so the repeater is PID 1's child-free process and gets SIGTERM from docker stop.
+CMD ["/bin/sh", "-c", "exec /app/repeater ${LISTEN_ADDR} ${BROADCAST_ADDR} ${REPEATER_OPTIONS}"]
