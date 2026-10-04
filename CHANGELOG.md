@@ -568,6 +568,15 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- **The sender stamps its engine timecode** (RCV-8, ADR 0013 PR 2): `UO3DSenderComponent` reads
+  `FApp::GetCurrentFrameTime()` with each frame's sampling time into the new
+  `FO3DSPoseFrame::SceneTime` (set only while a `UTimecodeProvider` is synchronized; not
+  `FApp::GetTimecode()`, which returns a default otherwise), and the serializer writes it as
+  `SubjectList.scene_time` in every encoding, full syncs and updates alike. A sender without a
+  synchronized provider writes nothing: no setting, no warning. The receiver uses it in ADR 0013
+  PR 3. Tests: `Open3DBroadcast.Sender.Timecode.SampledWithTheFrame`,
+  `Open3DBroadcast.Sender.Timecode.OnTheWireInEveryEncoding`.
+
 - **Runtime services documented** (SHR-38, ADR 0012 PR 5): `docs/dev/runtime-services.md`
   lists what each runtime context owns and which services stay process-wide and why (transport
   registry, secret store, audio input devices, MoQ dispatcher, console variables, control receive
