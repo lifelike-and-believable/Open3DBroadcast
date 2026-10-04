@@ -81,6 +81,11 @@ namespace O3DReceiverConcealmentPrivate
 	}
 }
 
+FO3DReceiverConcealment::FO3DReceiverConcealment(FO3DReceiverMetricsHandleRef InMetrics)
+	: Metrics(MoveTemp(InMetrics))
+{
+}
+
 /** Lazily creates a per-subject ConcealmentEngine on first use (roadmap doc §5/C1.a).
  *  LinearPredictor is the roadmap's recommended C1 default ("almost certainly" - see
  *  §5/C1's "Open decisions"); Quadratic may overshoot on longer horizons. */
@@ -209,16 +214,15 @@ void FO3DReceiverConcealment::ReportMetricsDelta()
 		Prev = Current;
 	}
 
-	FO3DPerformanceMetrics& Metrics = FO3DPerformanceMetrics::Get();
-	if (DeltaConcealed) Metrics.RecordConcealedFrames(DeltaConcealed);
-	if (DeltaFallback) Metrics.RecordConcealmentFallbackHolds(DeltaFallback);
-	if (DeltaCorrection) Metrics.RecordConcealmentCorrectionFrames(DeltaCorrection);
-	if (DeltaRecovery) Metrics.RecordConcealmentRecoveries(DeltaRecovery);
-	if (DeltaRenderAhead) Metrics.RecordConcealmentRenderAheadFrames(DeltaRenderAhead);
+	if (DeltaConcealed) Metrics->RecordConcealedFrames(DeltaConcealed);
+	if (DeltaFallback) Metrics->RecordConcealmentFallbackHolds(DeltaFallback);
+	if (DeltaCorrection) Metrics->RecordConcealmentCorrectionFrames(DeltaCorrection);
+	if (DeltaRecovery) Metrics->RecordConcealmentRecoveries(DeltaRecovery);
+	if (DeltaRenderAhead) Metrics->RecordConcealmentRenderAheadFrames(DeltaRenderAhead);
 	if (bHasAnyRecovery)
 	{
-		Metrics.SetConcealmentPredictionError(LastTransErr, LastRotErrDeg);
-		Metrics.SetConcealmentPop(LastPopTrans, LastPopRotDeg);
+		Metrics->SetConcealmentPredictionError(LastTransErr, LastRotErrDeg);
+		Metrics->SetConcealmentPop(LastPopTrans, LastPopRotDeg);
 	}
 }
 

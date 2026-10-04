@@ -66,6 +66,11 @@ namespace O3DReceiverFrameDecoderPrivate
 	}
 }
 
+FO3DReceiverFrameDecoder::FO3DReceiverFrameDecoder(FO3DReceiverMetricsHandleRef InMetrics)
+	: Metrics(MoveTemp(InMetrics))
+{
+}
+
 FName FO3DReceiverFrameDecoder::ResolveSubjectName(const std::string& RawName)
 {
 	const auto Found = SubjectNames.find(RawName);
@@ -101,7 +106,7 @@ bool FO3DReceiverFrameDecoder::ConvertTransforms(const O3DS::Subject& Subject)
 			|| !O3DReceiverFrameDecoderPrivate::TryConvertTransform(*Items[Index], Transforms[static_cast<int32>(Index)]))
 		{
 			Transforms.Reset();
-			FO3DPerformanceMetrics::Get().RecordInvalidPoseDropped();
+			Metrics->RecordInvalidPoseDropped();
 			return false;
 		}
 	}

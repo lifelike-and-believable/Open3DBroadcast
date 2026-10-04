@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "O3DPerformanceMetrics.h"
 #include "Templates/Function.h"
 
 THIRD_PARTY_INCLUDES_START
@@ -23,6 +24,9 @@ class FO3DReceiverConcealment
 public:
 	/** Pushes one synthesized frame for a subject (no static data: the topology did not change). */
 	using FPushSyntheticFrame = TFunctionRef<void(FName Subject, const TArray<FTransform>& BoneTransforms, const TArray<float>& CurveValues, double Time)>;
+
+	/** Metrics: the owning receiver source's handle (ADR 0012 item 4). */
+	explicit FO3DReceiverConcealment(FO3DReceiverMetricsHandleRef InMetrics);
 
 	/**
 	 * Feeds one real gated frame to the subject's engine, created on first use from Settings (null:
@@ -56,6 +60,7 @@ private:
 	O3DS::ConcealmentEngine& GetOrCreateEngine(const UO3DReceiverSourceSettings* Settings, FName Subject);
 	void ReportMetricsDelta();
 
+	FO3DReceiverMetricsHandleRef Metrics;
 	TMap<FName, TUniquePtr<O3DS::ConcealmentEngine>> Engines;
 	/** Last-reported metrics per subject, for delta reporting into the shared metrics. */
 	TMap<FName, O3DS::ConcealmentMetrics> PrevMetricsBySubject;

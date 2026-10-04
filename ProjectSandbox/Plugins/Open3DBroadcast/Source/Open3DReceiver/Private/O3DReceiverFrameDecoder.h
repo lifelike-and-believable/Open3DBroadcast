@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "O3DPerformanceMetrics.h"
 
 #include <string>
 #include <unordered_map>
@@ -42,6 +43,8 @@ struct FO3DDecodedSubject
 class FO3DReceiverFrameDecoder
 {
 public:
+	/** Metrics: the owning receiver source's handle (ADR 0012 item 4). */
+	explicit FO3DReceiverFrameDecoder(FO3DReceiverMetricsHandleRef InMetrics);
 	/**
 	 * Converts one subject. False when it has no usable pose: no transforms, a missing transform
 	 * (RCV-14), a non-finite value or a zero rotation. The caller then skips the subject, as the
@@ -61,6 +64,8 @@ public:
 	uint64 GetCurveNameBuilds() const { return CurveNameBuilds; }
 
 private:
+	FO3DReceiverMetricsHandleRef Metrics;
+
 	struct FSubjectCache
 	{
 		TArray<FName> BoneNames;
