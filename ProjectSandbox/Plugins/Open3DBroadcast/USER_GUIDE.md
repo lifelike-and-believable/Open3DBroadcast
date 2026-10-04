@@ -989,6 +989,8 @@ give them **Context Names**:
 
 - **Receiver source**: *Context Name* (advanced, in the source's connection settings).
 - **O3D Remote Audio Component** and **O3D Remote Control Component**: *Context Name*.
+- **O3D Sender Component**: *Context Name* (advanced). For a sender it selects only where its
+  performance metrics are counted; what it sends is unchanged.
 
 A component hears only receiver sources with the same Context Name; an empty name is the default
 context, which is what every source and component uses unless you set one. Names are not case
@@ -996,8 +998,8 @@ sensitive. Each context also has its own performance metrics: `o3d.DumpMetrics` 
 default context, then each named one, and `o3d.ResetMetrics` resets them all. The HUD and the
 CSV export show the default context only.
 
-Context Names are read when a source is created and when a component begins play; changing one
-later takes effect the next time. They separate audio, control and metrics only: LiveLink
+Context Names are read when a source is created, when a remote component begins play and when a
+sender starts its transport; changing one later takes effect the next time. They separate audio, control and metrics only: LiveLink
 subject names are shared by the whole process, because Unreal Engine 5.7 has one LiveLink
 client per process (PIE clients included), so keep subject names distinct across receivers.
 
@@ -1010,6 +1012,7 @@ client per process (PIE clients included), so keep subject names distinct across
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | **SubjectName** | String | "" | Unique identifier for this stream |
+| **ContextName** | Name | (empty) | Runtime context for this sender's metrics; see [Separate Receivers](#separate-receivers-runtime-contexts) |
 | **CaptureRateHz** | Float | 60.0 | Target capture frame rate |
 | **bAutoStartCapture** | Bool | false | Start capturing on BeginPlay |
 | **TargetMesh** | Object | null | Skeletal mesh to capture (auto-detect if empty) |
