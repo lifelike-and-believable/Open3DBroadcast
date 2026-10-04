@@ -16,7 +16,7 @@ This section supersedes the "Start here" line in §0 and the M3 row in §1 where
 **Open at hand-over:**
 - #353 (CORE-14): `Open3DStreamCore` builds with `FPSemantics = Precise`; both ends round the predicted reference to float32. Merge when green.
 - #351: ADR 0013, timecode on LiveLink frames (RCV-8), **Proposed**; waits for maintainer sign-off and its three open questions.
-- Branch `wp-a4-sender-capture` (local; to push now that #352 has merged): `o3d.Sender.Capture.Start/Stop` record every serialized sender payload to `.o3dscap`, the input for `QuantEval --capture`. Built, 460/460 UE tests, strict build passed. Stacked on #352: merge `develop` into it, regenerate the sync stamp, push, open the PR.
+- #355: `o3d.Sender.Capture.Start/Stop` record every serialized sender payload to `.o3dscap`, the input for `QuantEval --capture`. Built, 460/460 UE tests, strict build passed. Merge when green.
 
 **Maintainer decisions (2026-10-03):**
 - No users run old receivers; compatibility with formats before protocol 2 is not kept.
@@ -27,7 +27,7 @@ This section supersedes the "Start here" line in §0 and the M3 row in §1 where
 - WP-A7: archive Maya, MotionBuilder, `python/`, `sphinx/` (done). The Repeater image is not deployed; an updated NNG Repeater is wanted.
 
 **Next, in order:**
-1. Merge #353; push the capture branch as a PR and merge it.
+1. Merge #353 and #355.
 2. **At the desk (maintainer):** record takes with `o3d.Sender.Capture.Start` on the default (legacy) encoding, above all the idle animation that jittered in July, and run `QuantEval --capture <take>`; the RCV-9 live check (narrowed: LiveLink evaluates on the pushed `WorldTime` after a source-wide offset estimate; what remains is how `FApp::GetCurrentTime()` relates to `FPlatformTime::Seconds()` under a fixed timestep); WP-A5 (reconnect, needs live servers); sign off ADR 0013.
 3. **CORE-12 follow-up, after real numbers:** rotations use the 16-bit tier only (QuantEval's synthetic suite: idle-bone jitter 0.40/0.86 degrees p95/max at the UE defaults, 0.0096/0.020 without the Byte tier, for 5 to 10% more bytes), normalize before quantizing, record the dequantized value as last sent. Quantization stays off by default until the maintainer's live test passes.
 4. **ADR 0012 implementation:** five PRs as outlined in the ADR (context, transport seam, metrics handles, subsystem and `ContextName`, docs).
