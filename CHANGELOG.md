@@ -558,6 +558,18 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- **Runtime context** (SHR-38, ADR 0012 PR 1): `FO3DRuntimeContext` owns one set of the
+  data-path services: performance metrics (with their transport metrics registry), an audio bus
+  and a control bus. Two contexts never see each other's audio, control or metrics.
+  `FO3DRuntimeContext::Default()` is the process default, created when Open3DShared starts, and
+  `FO3DAudioBus::OnPcm16()`/`PublishPcm16()`, the `FO3DControlBus` statics and
+  `FO3DPerformanceMetrics::Get()` forward to it, so nothing changes for code that uses them. The
+  buses gain instantiable `FO3DAudioBus::FInstance` and `FO3DControlBus::FInstance`, and
+  `FO3DPerformanceMetrics` can be constructed. The control receive override stays process-wide.
+  Nothing uses a non-default context yet; transports, receiver sources, sender components and
+  the gameplay components follow in ADR 0012 PRs 2 to 4. Tests:
+  `Open3DBroadcast.Shared.RuntimeContext.ContextsAreIsolated` and `.StaticsUseDefault`.
+
 - **Sender capture console commands** (CORE-12): `o3d.Sender.Capture.Start [file]` records
   every payload the senders in the process serialize, verbatim, to a `.o3dscap` file (relative
   paths go under `Saved/O3DCaptures`), and `o3d.Sender.Capture.Stop` closes it. The input for

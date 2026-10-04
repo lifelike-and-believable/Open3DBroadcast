@@ -4,18 +4,18 @@
 #include "HAL/IConsoleManager.h"
 #include "Logging/LogMacros.h"
 #include "Misc/ScopeLock.h"
+#include "O3DRuntimeContext.h"
 
 // Define log category for metrics
 DEFINE_LOG_CATEGORY(LogO3DPerformanceMetrics);
 
 // =====================================================================
-// SINGLETON IMPLEMENTATION
+// DEFAULT CONTEXT
 // =====================================================================
 
 FO3DPerformanceMetrics& FO3DPerformanceMetrics::Get()
 {
-	static FO3DPerformanceMetrics Instance;
-	return Instance;
+	return FO3DRuntimeContext::Default()->GetMetrics();
 }
 
 // =====================================================================

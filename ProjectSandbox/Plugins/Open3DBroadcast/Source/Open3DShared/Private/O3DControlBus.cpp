@@ -3,6 +3,7 @@
 #include "O3DControlBus.h"
 
 #include "Misc/Crc.h"
+#include "O3DRuntimeContext.h"
 
 namespace
 {
@@ -47,8 +48,7 @@ namespace
 		TArray<int64> SeenOrder;
 	};
 
-	FO3DOnControlChange GOnChange;
-	TCaseSensitiveStringMap<FSourceState> GSources;
+	/** Process-wide, not per context (see SetReceiveOverride). */
 	TOptional<bool> GReceiveOverride;
 
 	FString SlotKey(const FString& Key, const FString& Target)
@@ -63,17 +63,30 @@ namespace
 	}
 }
 
-FO3DOnControlChange& FO3DControlBus::OnChange()
+struct FO3DControlBus::FInstance::FImpl
 {
-	check(IsInGameThread());
-	return GOnChange;
+	FO3DOnControlChange OnChange;
+	TCaseSensitiveStringMap<FSourceState> Sources;
+};
+
+FO3DControlBus::FInstance::FInstance()
+	: Impl(MakeUnique<FImpl>())
+{
 }
 
-bool FO3DControlBus::Publish(const FO3DControlChange& Change)
+FO3DControlBus::FInstance::~FInstance() = default;
+
+FO3DOnControlChange& FO3DControlBus::FInstance::OnChange()
+{
+	check(IsInGameThread());
+	return Impl->OnChange;
+}
+
+bool FO3DControlBus::FInstance::Publish(const FO3DControlChange& Change)
 {
 	check(IsInGameThread());
 	const FO3DControlMeta& Meta = Change.Meta;
-	FSourceState& Source = GSources.FindOrAdd(Meta.SourceId);
+	FSourceState& Source = Impl->Sources.FindOrAdd(Meta.SourceId);
 
 	switch (Change.Kind)
 	{
@@ -143,14 +156,14 @@ bool FO3DControlBus::Publish(const FO3DControlChange& Change)
 	}
 	}
 
-	GOnChange.Broadcast(Change);
+	Impl->OnChange.Broadcast(Change);
 	return true;
 }
 
-const FO3DControlValue* FO3DControlBus::FindValue(const FString& SourceId, const FString& Key, const FString& Target)
+const FO3DControlValue* FO3DControlBus::FInstance::FindValue(const FString& SourceId, const FString& Key, const FString& Target) const
 {
 	check(IsInGameThread());
-	const FSourceState* Source = GSources.Find(SourceId);
+	const FSourceState* Source = Impl->Sources.Find(SourceId);
 	if (Source == nullptr)
 	{
 		return nullptr;
@@ -159,11 +172,11 @@ const FO3DControlValue* FO3DControlBus::FindValue(const FString& SourceId, const
 	return Entry ? &Entry->Value.Value : nullptr;
 }
 
-TArray<TTuple<FString, FString, FO3DControlValue>> FO3DControlBus::GetValues(const FString& SourceId)
+TArray<TTuple<FString, FString, FO3DControlValue>> FO3DControlBus::FInstance::GetValues(const FString& SourceId) const
 {
 	check(IsInGameThread());
 	TArray<TTuple<FString, FString, FO3DControlValue>> Result;
-	if (const FSourceState* Source = GSources.Find(SourceId))
+	if (const FSourceState* Source = Impl->Sources.Find(SourceId))
 	{
 		for (const auto& Pair : Source->Values)
 		{
@@ -178,14 +191,14 @@ TArray<TTuple<FString, FString, FO3DControlValue>> FO3DControlBus::GetValues(con
 	return Result;
 }
 
-TArray<FString> FO3DControlBus::GetSources()
+TArray<FString> FO3DControlBus::FInstance::GetSources() const
 {
 	check(IsInGameThread());
 	// Not GetKeys(): it de-duplicates through a default TSet<FString>, which is case-insensitive
 	// and would merge source ids that differ only in case.
 	TArray<FString> Result;
-	Result.Reserve(GSources.Num());
-	for (const auto& Pair : GSources)
+	Result.Reserve(Impl->Sources.Num());
+	for (const auto& Pair : Impl->Sources)
 	{
 		Result.Add(Pair.Key);
 	}
@@ -193,10 +206,47 @@ TArray<FString> FO3DControlBus::GetSources()
 	return Result;
 }
 
-void FO3DControlBus::ForgetSource(const FString& SourceId)
+void FO3DControlBus::FInstance::ForgetSource(const FString& SourceId)
 {
 	check(IsInGameThread());
-	GSources.Remove(SourceId);
+	Impl->Sources.Remove(SourceId);
+}
+
+void FO3DControlBus::FInstance::ResetForTesting()
+{
+	check(IsInGameThread());
+	Impl->OnChange.Clear();
+	Impl->Sources.Reset();
+}
+
+FO3DOnControlChange& FO3DControlBus::OnChange()
+{
+	return FO3DRuntimeContext::Default()->GetControlBus().OnChange();
+}
+
+bool FO3DControlBus::Publish(const FO3DControlChange& Change)
+{
+	return FO3DRuntimeContext::Default()->GetControlBus().Publish(Change);
+}
+
+const FO3DControlValue* FO3DControlBus::FindValue(const FString& SourceId, const FString& Key, const FString& Target)
+{
+	return FO3DRuntimeContext::Default()->GetControlBus().FindValue(SourceId, Key, Target);
+}
+
+TArray<TTuple<FString, FString, FO3DControlValue>> FO3DControlBus::GetValues(const FString& SourceId)
+{
+	return FO3DRuntimeContext::Default()->GetControlBus().GetValues(SourceId);
+}
+
+TArray<FString> FO3DControlBus::GetSources()
+{
+	return FO3DRuntimeContext::Default()->GetControlBus().GetSources();
+}
+
+void FO3DControlBus::ForgetSource(const FString& SourceId)
+{
+	FO3DRuntimeContext::Default()->GetControlBus().ForgetSource(SourceId);
 }
 
 void FO3DControlBus::SetReceiveOverride(TOptional<bool> bEnabled)
@@ -214,7 +264,6 @@ TOptional<bool> FO3DControlBus::GetReceiveOverride()
 void FO3DControlBus::ResetForTesting()
 {
 	check(IsInGameThread());
-	GOnChange.Clear();
-	GSources.Reset();
+	FO3DRuntimeContext::Default()->GetControlBus().ResetForTesting();
 	GReceiveOverride.Reset();
 }
