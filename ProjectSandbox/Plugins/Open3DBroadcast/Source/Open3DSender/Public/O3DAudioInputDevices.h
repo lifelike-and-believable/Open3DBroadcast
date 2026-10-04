@@ -15,6 +15,9 @@
  *   o3d.Sender.Audio.RefreshDevices).
  * Lookups (the device pickers' GetOptions functions, name-to-index resolution) read the cache and
  * never enumerate. Any thread; the lock is held only to copy or swap the list.
+ *
+ * Process-wide by nature, so not part of FO3DRuntimeContext (docs/adr/0012-runtime-services-and-global-state.md,
+ * item 1): it describes the machine's hardware. See docs/dev/runtime-services.md.
  */
 class OPEN3DSENDER_API FO3DAudioInputDevices
 {
