@@ -353,8 +353,9 @@ public:
 	 *  frame. Used only on transports that deliver reliably and in order (Loopback, TCP, NNG pair
 	 *  or push, WebRTC's reliable channel): a lost residual frame breaks the predictor history, and
 	 *  receivers then hold the subject until the next full sync. On any other transport (UDP, NNG
-	 *  pub, MoQ, WebRTC with webrtc.prefer_lossy) the sender logs one warning and sends quantized
-	 *  frames instead, with the quantization settings below (ADR 0005 (iii)). A full sync every
+	 *  pub, MoQ, WebRTC with webrtc.prefer_lossy) the sender logs one warning and sends what it would
+	 *  with residual coding off: full snapshots, or quantized updates if quantization below is
+	 *  enabled (ADR 0005 (iii)). A full sync every
 	 *  FullSyncIntervalSeconds resets the encoder. Per-frame curve epsilon/delta filtering is off
 	 *  in this mode. Does not compose with
 	 *  quantization below - if both are enabled, Residual takes precedence. Residual frames need
@@ -598,8 +599,9 @@ private:
 public:
 	/**
 	 * The encoding a frame is sent with (ADR 0005 (iii)): residual only when the transport
-	 * delivers reliably and in order; otherwise quantized, which is safe on lossy transports.
-	 * Residual takes precedence over quantization when both are enabled.
+	 * delivers reliably and in order; otherwise what the settings give without it (quantized when
+	 * quantization is enabled, else full snapshots). Residual takes precedence over quantization
+	 * when both are enabled.
 	 */
 	static EO3DSenderEncodingMode ResolveEncodingMode(bool bResidual, bool bQuantization, EO3DDeliveryGuarantee Delivery);
 
