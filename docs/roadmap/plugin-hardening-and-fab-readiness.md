@@ -703,7 +703,7 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
 - **Approach:**
   - Define the small stable surface the plugin uses (CORE-30): `model`, `udp_fragment`, `reorder_gate`, `sequencing`, `clock_offset` and `predict/*`.
   - Move the legacy connectors into a separate CMake target that is off by default (CORE-27).
-  - Archive `apps/FbxStream`, `Test1`, `SubscribeTest`, `XSensTest`, `plugins/maya`, `plugins/mobu`, `python/` and `sphinx/` in an archive branch or tag, after confirming with the maintainer. Keep `DeterminismProbe`, `PredictorEval`, and `Repeater` if its image is still deployed (CORE-28). **Progress (2026-10-03):** the maintainer confirmed archiving `plugins/maya`, `plugins/mobu`, `python/` and `sphinx/`; they are removed and kept at the tag `archive/dcc-plugins-python-sphinx` (PR-PENDING). The other apps stay until confirmed. The Repeater image is not deployed; the maintainer wants an updated NNG Repeater.
+  - Archive `apps/FbxStream`, `Test1`, `SubscribeTest`, `XSensTest`, `plugins/maya`, `plugins/mobu`, `python/` and `sphinx/` in an archive branch or tag, after confirming with the maintainer. Keep `DeterminismProbe`, `PredictorEval`, and `Repeater` if its image is still deployed (CORE-28). **Progress (2026-10-03):** the maintainer confirmed archiving `plugins/maya`, `plugins/mobu`, `python/` and `sphinx/`; they are removed and kept at the tag `archive/dcc-plugins-python-sphinx` (#348). The other apps stay until confirmed. The Repeater image is not deployed; the maintainer wants an updated NNG Repeater.
   - Use owning types in the model layer (CORE-17).
   - Fix the `Context` copy constructor (CORE-24).
   - Remove dead code (CORE-25).
