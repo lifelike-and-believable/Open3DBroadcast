@@ -27,7 +27,7 @@ This file defines strict, testable rules so coding agents deliver high‑quality
 - **Protocol:** FlatBuffers schema (`src/o3ds.fbs`) defines serialization format for skeletal animation + curves.
 - **Data model:** `O3DS::Subject` (skeletal hierarchy + curves) ↔ `O3DS::SubjectList` (multiple subjects + timestamp).
 - **Serialization:** `Subject::Serialize()` creates full descriptors; `Subject::SerializeUpdate()` generates delta updates with threshold-based compression.
-- **Connectors:** Inherit from `Connector` (blocking) or `AsyncConnector` (non-blocking). Implementations: TCP (`tcp.h`), UDP, NNG (pub/sub/pair), WebRTC (`webrtc_connector.h`).
+- **Legacy connectors:** `Connector`/`AsyncConnector` (TCP, UDP, NNG, `webrtc_connector`) are in the separate `open3dstream_legacy` library, off by default (`O3DS_BUILD_LEGACY`, CORE-27). Nothing uses them; the UE plugin has its own transports.
 - **Namespace:** All core types live in `namespace O3DS`.
 
 
