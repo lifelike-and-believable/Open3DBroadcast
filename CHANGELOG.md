@@ -542,6 +542,13 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- **Archived: the MotionBuilder and Maya plugins, `python/` and the Sphinx site** (WP-A7,
+  CORE-28; maintainer, 2026-10-03). `plugins/mobu`, `plugins/maya`, `python/` (two stale
+  scripts, not bindings) and `sphinx/` are removed from the tree, `plugins/mobu` from the root
+  CMake build, and the manual `Documentation` workflow (`doc.yml`, which only built and
+  published `sphinx/`) is gone. They are kept, unchanged, at the git tag
+  `archive/dcc-plugins-python-sphinx`. The apps in `apps/` are unchanged.
+
 - **A new receiver gets a full Subject on the next frame** (ADR 0005 (vi)). `IOpen3DSender`
   gained `SetPeerJoinedCallback(FO3DPeerJoinedCallback)` (default: no-op), called on any thread
   when the sender gains a peer that has seen nothing yet. The sender pipeline sets the callback
