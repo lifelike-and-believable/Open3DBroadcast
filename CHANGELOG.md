@@ -568,6 +568,23 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- **LiveLink frames carry a SceneTime** (RCV-8, ADR 0013 PR 3a). `FO3DSceneTimeMapper` sets each
+  pushed frame's `MetaData.SceneTime`: the sender's timecode (`SubjectList.scene_time`) when the
+  frame has one; otherwise, for a subject that had one, the sender's timeline continued by the
+  elapsed WorldTime (concealed frames too); otherwise (option A') WorldTime on this engine's
+  timecode, through one engine-to-platform offset taken again only when it drifts by more than a
+  frame, strictly increasing per subject and never negative; and without an engine timecode,
+  LiveLink's default as before. A subject keeps the rate of its first timecode; later ones are
+  converted. Before, every frame was frame 0 at 24 fps, so Timecode mode silently acted as
+  Latest. User guide: "Timecode Mode", including whole-frame providers. Tests:
+  `Open3DBroadcast.Receiver.SceneTime.SenderTimecodeAndRate`, `.FallbackOnEngineTimecode`,
+  `.PublisherFramesCarryIt`.
+
+- **Removed: per-frame string metadata on LiveLink frames** (RCV-11, ADR 0013 PR 3a): the `CurveHash` and
+  `SubjectListTime` entries of `MetaData.StringMetaData`, two `FString::Printf` allocations per
+  frame. The curve hash stays internal; the sender time is in SceneTime when the sender has a
+  timecode.
+
 - **Runtime services documented** (SHR-38, ADR 0012 PR 5): `docs/dev/runtime-services.md`
   lists what each runtime context owns and which services stay process-wide and why (transport
   registry, secret store, audio input devices, MoQ dispatcher, console variables, control receive

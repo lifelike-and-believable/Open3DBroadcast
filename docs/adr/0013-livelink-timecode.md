@@ -90,7 +90,7 @@ RCV-8's recommendation as written.
 
 1. **Do you use Take Recorder or Sequencer with timecode today, and with which provider** (genlock card, LTC, `USystemTimeTimecodeProvider`)? It decides the manual test setup. **Accepted default:** test with `USystemTimeTimecodeProvider` on both machines.
 2. **Fallback when the receiving engine has no timecode:** leave `SceneTime` unset (as today), or synthesize one at a fixed rate so Timecode mode still orders frames? **Accepted default:** leave it unset; Timecode mode without an engine timecode is already flagged by LiveLink's own warning.
-3. **needs-verification:** how `FApp::GetCurrentTime()` relates to `FPlatformTime::Seconds()` under a fixed timestep, which affects the A' conversion; checked in PR 3.
+3. **needs-verification:** how `FApp::GetCurrentTime()` relates to `FPlatformTime::Seconds()` under a fixed timestep, which affects the A' conversion; checked in PR 3. **Resolved (PR 3a):** normally `FApp::GetCurrentTime()` is `FPlatformTime::Seconds()` at the start of the frame (`Engine/Source/Runtime/Engine/Private/UnrealEngine.cpp:2725-2726`); under a fixed timestep or `t.OverrideFPS` it advances by the fixed delta instead and drifts from the platform clock (`:2713-2720`, `:2902-2907`). The A' conversion therefore uses only the platform clock (WorldTime is in that domain) and one offset to the engine timecode, taken once and again only when it drifts by more than a frame. Whole-frame providers (`USystemTimeTimecodeProvider`'s default, `bGenerateFullFrame`) give equal timecodes within a frame; LiveLink keeps such frames in arrival order and warns once (`LiveLinkSubject.cpp:640-690`), and the user guide says how to get sub-frames.
 
 ## References
 
