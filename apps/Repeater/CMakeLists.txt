@@ -4,19 +4,16 @@ cmake_minimum_required(VERSION ${CMAKE_MIN_REQ_VERSION})
 project(Repeater)
 
 find_package(nng CONFIG REQUIRED)
+find_package(Threads REQUIRED)
+
+# The relay is a library so the core tests can run it (test/repeater_tests.cpp).
+add_library(repeater_relay STATIC relay.cpp relay.h)
+target_include_directories(repeater_relay PUBLIC ${CMAKE_CURRENT_LIST_DIR})
+target_link_libraries(repeater_relay PUBLIC open3dstreamstatic nng::nng Threads::Threads)
+o3ds_enable_warnings(repeater_relay)
 
 add_executable(Repeater main.cpp)
-target_link_libraries(Repeater open3dstreamstatic ${NNG_LIBRARY})
+target_link_libraries(Repeater PRIVATE repeater_relay)
+o3ds_enable_warnings(Repeater)
 
 install(TARGETS Repeater DESTINATION bin)
-
-if(WIN32)
-if (CMAKE_BUILD_TYPE EQUAL "DEBUG")
-add_custom_command(TARGET Repeater POST_BUILD       
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different  
-        ${fbxroot}/lib/vs2017/x64/$<CONFIGURATION>/libfbxsdk.dll     
-        $<TARGET_FILE_DIR:Repeater>)   
-endif()
-endif()
-
-

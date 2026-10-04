@@ -1,64 +1,109 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
+// Open3DStream Repeater: relays what senders push to listen-addr to every receiver subscribed at
+// broadcast-addr (relay.h). Usage and options: run it without arguments.
+#include "relay.h"
 
-//#include "o3ds/websocket.h"
-//O3DS::WebsocketBroadcastServer server1;
-//O3DS::WebsocketBroadcastServer server2;
-
-#include "o3ds/async_publisher.h"
-#include "o3ds/pipeline.h"
 #include "o3ds/o3ds_version.h"
 
+#include <atomic>
+#include <chrono>
+#include <csignal>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+#include <thread>
 
-namespace O3DS
+namespace
 {
-    PipelinePull listener;
-    AsyncPublisher broadcast;
+	std::atomic<bool> gStopRequested{false};
+
+	void OnSignal(int)
+	{
+		gStopRequested.store(true); // a lock-free atomic store is signal-safe
+	}
+
+	void PrintUsage(const char* program)
+	{
+		std::printf("O3DS Repeater - %s\n", O3DS::getVersion());
+		std::printf("Usage: %s listen-addr broadcast-addr [options]\n", program);
+		std::printf("  listen-addr      NNG URL senders push to (pull), e.g. tcp://0.0.0.0:7000\n");
+		std::printf("  broadcast-addr   NNG URL receivers subscribe to (pub), e.g. tcp://0.0.0.0:7001\n");
+		std::printf("Options:\n");
+		std::printf("  --max-message-mb N   largest message a sender may push (default 64; 0 = unlimited)\n");
+		std::printf("  --send-buffer N      messages queued per subscriber (default 256)\n");
+		std::printf("  --stats-seconds N    seconds between stats lines (default 10; 0 = none)\n");
+	}
+
+	bool ParseInt(const char* text, long& out)
+	{
+		char* end = nullptr;
+		out = std::strtol(text, &end, 10);
+		return end != text && *end == '\0' && out >= 0;
+	}
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
-    if (argc < 3)
-    {
-        printf("O3DS Repeater - %s\n", O3DS::getVersion());
-        printf("Usage: %s listen-addr broadcast-addr\n", argv[0]);
-        return 1;
-    }
+	if (argc < 3)
+	{
+		PrintUsage(argv[0]);
+		return 1;
+	}
 
+	O3DS::Repeater::RelayOptions options;
+	options.listenUrl = argv[1];
+	options.publishUrl = argv[2];
+	long statsSeconds = 10;
+	for (int i = 3; i < argc; ++i)
+	{
+		long value = 0;
+		const bool hasValue = i + 1 < argc && ParseInt(argv[i + 1], value);
+		if (std::strcmp(argv[i], "--max-message-mb") == 0 && hasValue)
+			options.maxMessageBytes = static_cast<size_t>(value) * 1024u * 1024u;
+		else if (std::strcmp(argv[i], "--send-buffer") == 0 && hasValue && value > 0)
+			options.sendBufferMessages = static_cast<int>(value);
+		else if (std::strcmp(argv[i], "--stats-seconds") == 0 && hasValue)
+			statsSeconds = value;
+		else
+		{
+			std::printf("Unknown or invalid option: %s\n", argv[i]);
+			PrintUsage(argv[0]);
+			return 1;
+		}
+		++i;
+	}
 
-    printf("Listening on %s\n", argv[1]);
-    if (!O3DS::listener.start(argv[1]))
-    {
-        printf("Could not start listener on %s: %s\n", argv[1], O3DS::listener.getError().c_str());
-        return 2;
-    }
+	std::signal(SIGINT, OnSignal);
+	std::signal(SIGTERM, OnSignal);
 
-    printf("Publishing to %s\n", argv[2]);
-    if (!O3DS::broadcast.start(argv[2]))
-    {
-        printf("Could not start publisher on %s: %s\n", argv[2], O3DS::broadcast.getError().c_str());
-        return 3;
-    }
-    
-    // Increase buffer to handle larger frames (mocap + audio can be several MB)
-    // Use 8MB to match typical sender queue sizes
-    size_t bufsz = 1024 * 1024 * 8;
-    char* data = (char*)malloc(bufsz);
+	O3DS::Repeater::Relay relay;
+	std::string error;
+	if (!relay.Start(options, error))
+	{
+		std::printf("Could not start: %s\n", error.c_str());
+		return 2;
+	}
+	std::printf("O3DS Repeater %s: senders push to %s, receivers subscribe to %s\n",
+		O3DS::getVersion(), options.listenUrl.c_str(), options.publishUrl.c_str());
+	std::fflush(stdout);
 
-    size_t sz;
+	// The relay runs on its own thread; this one watches for a signal and prints stats.
+	std::thread relayThread([&relay]() { relay.Run(); });
+	auto nextStats = std::chrono::steady_clock::now() + std::chrono::seconds(statsSeconds);
+	while (!gStopRequested.load())
+	{
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		if (statsSeconds > 0 && std::chrono::steady_clock::now() >= nextStats)
+		{
+			std::printf("%s\n", relay.StatsLine().c_str());
+			std::fflush(stdout);
+			nextStats += std::chrono::seconds(statsSeconds);
+		}
+	}
 
-    while (1)
-    {
-        sz = O3DS::listener.read(&data, &bufsz);
-        if (sz > 0)
-        {
-            printf("%ld bytes\n", sz);
-            O3DS::broadcast.write(data, sz);
-        }
-    }
-
-    free(data);
-    return 0;
+	std::printf("Stopping\n");
+	relay.Stop();
+	relayThread.join();
+	std::printf("%s\n", relay.StatsLine().c_str());
+	return 0;
 }
