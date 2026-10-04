@@ -88,6 +88,16 @@ namespace O3DS
 	//! Config::reset_backjump is used only as a fallback for streams that
 	//! never set frame_epoch (legacy senders): once a stream has shown a
 	//! non-zero epoch, the backjump heuristic is not consulted again for it.
+	//!
+	//! A forward jump of more than Config::max_forward_jump (CORE-15) is not
+	//! trusted on its own: one forged or corrupted tx_seq far ahead would
+	//! otherwise become the baseline and every later legitimate frame would
+	//! be dropped as stale. Such a frame is held as a candidate and applied
+	//! only when the next frame confirms it (same epoch, seq + 1); the gate
+	//! then re-baselines there, releasing what it buffered and counting the
+	//! skipped range as lost. A legitimate stream resuming after a long
+	//! outage therefore loses at most one frame of latency. An unconfirmed
+	//! candidate replaced by another one is counted as stale_dropped.
 	class O3DS_API ReorderGate
 	{
 	public:
@@ -96,6 +106,7 @@ namespace O3DS
 			uint32_t max_window = 16;       // max frames buffered waiting on one gap
 			double max_delay_s = 0.05;      // max time to wait on one gap, in the caller's `now_s` clock
 			uint64_t reset_backjump = 256;  // legacy-only (no frame_epoch) restart heuristic threshold
+			uint64_t max_forward_jump = 4096; // larger forward jumps need a confirming next frame (CORE-15); 0 disables
 		};
 
 		ReorderGate();
@@ -139,6 +150,8 @@ namespace O3DS
 		// never actually reordered.
 		void DeliverAndDrain(Frame&& frame, const std::function<void(Frame&&)>& emit, bool countDrainAsReordered);
 		void CheckTimeouts(double now_s, const std::function<void(Frame&&)>& emit);
+		//! Releases every buffered frame in seq order, counting the holes as lost.
+		void ReleaseAllPending(const std::function<void(Frame&&)>& emit);
 		void PruneRecentlyDelivered();
 
 		Config mConfig;
@@ -149,6 +162,9 @@ namespace O3DS
 
 		bool mHaveEpoch = false;
 		uint32_t mLastEpoch = 0;
+
+		bool mHaveJumpCandidate = false;
+		Frame mJumpCandidate;                         // a frame beyond max_forward_jump awaiting confirmation (CORE-15)
 
 		std::map<uint64_t, PendingEntry> mPending;    // seq -> buffered frame, ordered by seq
 		std::set<uint64_t> mRecentlyDelivered;        // bounded window, for dup-vs-stale classification

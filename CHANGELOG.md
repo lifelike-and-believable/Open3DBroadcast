@@ -297,6 +297,19 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Fixed
 
+- **One forged or corrupted `tx_seq` no longer blackholes a sequenced stream** (CORE-15).
+  `ReorderGate` holds a frame more than `Config::max_forward_jump` (default 4096) ahead of the
+  last applied seq as an unconfirmed candidate; it is applied only when the next frame
+  confirms it (same epoch, seq + 1). The gate then releases what it buffered, re-baselines and
+  counts the skipped range as lost, so a legitimate stream resuming after a long outage loses
+  at most one frame of latency. Before, such a frame became the baseline at its gap timeout
+  and every later legitimate frame was dropped as stale (0 of 90 delivered in the review's
+  PoC); the UE sender has stamped `tx_seq` since #341, so this was live. An unconfirmed
+  candidate that is replaced counts as `stale_dropped`. The CRC half of CORE-15 (`PeekMeta`
+  checks the CRC) was done in #335. Tests: `core.reorder_gate_tests`
+  `ReorderGate_ForgedForwardJump_DoesNotBlackholeTheStream`, `_ConfirmedForwardJump_Rebaselines`,
+  `_UnconfirmedJumpCandidates_AreReplacedAndCounted`.
+
 - UDP fragment reassembly (`src/o3ds/udp_fragment.*`, WP-S2) is hardened against hostile or malformed datagrams: fragments that disagree with a message's first fragment are rejected (previously a heap overflow), in-flight state is bounded (8 messages, 16 MiB by default) with age-based expiry, message ids use wrapping comparison, messages are keyed per sender, rejected fragments no longer yield empty frames, and a use-after-free in `UdpMapper::getFrame` is gone.
 - UE UDP receiver: `Poll()` is bounded per call (1024 datagrams / 8 MiB), the receive buffer is always 65,507 bytes regardless of `udp.maxdatagram`, and receive scratch buffers are reused.
 - Receiver: renamed bones are republished. The skeleton cache now keys on bone names as well as parents, and a full descriptor always rebuilds it, so a rig swap with the same hierarchy no longer keeps the old names (WP-S4, RCV-4).
