@@ -525,6 +525,13 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- **Sender capture console commands** (CORE-12): `o3d.Sender.Capture.Start [file]` records
+  every payload the senders in the process serialize, verbatim, to a `.o3dscap` file (relative
+  paths go under `Saved/O3DCaptures`), and `o3d.Sender.Capture.Stop` closes it. The input for
+  `apps/QuantEval` and replay; record takes with the default (legacy) encoding so every payload
+  is a full frame. One atomic load per payload while off. Test:
+  `Open3DBroadcast.Sender.Capture.RecordsEveryPayload`.
+
 - **Archived: the MotionBuilder and Maya plugins, `python/` and the Sphinx site** (WP-A7,
   CORE-28; maintainer, 2026-10-03). `plugins/mobu`, `plugins/maya`, `python/` (two stale
   scripts, not bindings) and `sphinx/` are removed from the tree, `plugins/mobu` from the root

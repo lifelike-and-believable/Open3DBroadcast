@@ -2,6 +2,7 @@
 
 #include "O3DSenderPipeline.h"
 
+#include "O3DSenderCapture.h"
 #include "O3DSenderCurveProcessor.h"
 #include "O3DSenderLogs.h"
 #include "Transport/O3DSenderInterface.h"
@@ -351,6 +352,8 @@ void FO3DSenderPipeline::ProcessFrameLocked(FO3DSPoseFrame& Frame, bool bAlready
 	bool bFullSync = false;
 	if (Serializer->SerializePoseFrameTo(Frame.Subject, Frame, Bytes, bFullSync))
 	{
+		// o3d.Sender.Capture.Start (CORE-12): every serialized payload, verbatim. One atomic load while off.
+		FO3DSenderCapture::Record(Bytes);
 		if (Listener != nullptr)
 		{
 			Listener->Broadcast(Frame.Subject, Bytes, Frame.CaptureTimeSec);

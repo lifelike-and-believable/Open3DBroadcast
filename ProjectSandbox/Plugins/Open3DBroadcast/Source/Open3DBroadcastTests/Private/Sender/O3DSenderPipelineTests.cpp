@@ -12,6 +12,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "O3DHelpers.h"
+#include "O3DSenderCapture.h"
 #include "O3DSenderComponent.h"
 #include "O3DSenderPipelineStats.h"
 #include "O3DSenderSerializer.h"
@@ -24,16 +25,22 @@
 #include "CoreGlobals.h"
 #include "HAL/CriticalSection.h"
 #include "HAL/Event.h"
+#include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/Guid.h"
+#include "Misc/Paths.h"
 #include "Misc/ScopeLock.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/WeakObjectPtrTemplates.h"
 
 THIRD_PARTY_INCLUDES_START
+#include "o3ds/capture.h"
 #include "o3ds/model.h"
 THIRD_PARTY_INCLUDES_END
+
+#include <fstream>
 
 #include <atomic>
 #include <string>
@@ -519,6 +526,59 @@ bool FO3DSenderPipelinePeerJoinedTest::RunTest(const FString& Parameters)
 		Probe.DetachSender();
 		TestFalse(*FString::Printf(TEXT("%s: detaching clears the callback"), ModeLabel(bAsync)), Transport->FirePeerJoined());
 	}
+	return true;
+}
+
+// CORE-12: o3d.Sender.Capture.Start records every serialized payload, verbatim, in the core
+// capture format that apps/QuantEval reads; nothing is recorded once it stops.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderCaptureTest, "Open3DBroadcast.Sender.Capture.RecordsEveryPayload", O3DB_TEST_FLAGS)
+bool FO3DSenderCaptureTest::RunTest(const FString& Parameters)
+{
+	using namespace O3DSenderPipelineTests;
+	const TSharedPtr<const FO3DSSkeletonDescriptor> Descriptor = MakeThreeBoneDescriptor();
+	const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("O3DCaptures"), FString::Printf(TEXT("Test-%s.o3dscap"), *FGuid::NewGuid().ToString()));
+
+	FO3DSenderPipelineProbe Probe;
+	Probe.Start(false);
+	const TSharedRef<FScriptedSender> Transport = MakeShared<FScriptedSender>();
+	Probe.AttachSender(Transport);
+
+	if (!TestTrue(TEXT("Capture starts"), FO3DSenderCapture::Start(Path)))
+	{
+		return false;
+	}
+	TestTrue(TEXT("Active"), FO3DSenderCapture::IsActive());
+	for (int32 Index = 0; Index < 5; ++Index)
+	{
+		Probe.SubmitFrame(MakeProbeFrame(Probe, TEXT("Captured"), Descriptor, 30.0 + Index / 60.0));
+		TestTrue(TEXT("Drained"), Probe.WaitForIdle(WaitTimeoutSeconds));
+	}
+	TestEqual(TEXT("Five payloads written"), FO3DSenderCapture::Stop(), (int64)5);
+	TestFalse(TEXT("Stopped"), FO3DSenderCapture::IsActive());
+	Probe.SubmitFrame(MakeProbeFrame(Probe, TEXT("Captured"), Descriptor, 31.0));
+	TestTrue(TEXT("Drained"), Probe.WaitForIdle(WaitTimeoutSeconds));
+	Probe.DetachSender();
+
+	// The file holds exactly what the transport was given, in order.
+	const TArray<FRecordedPayload> Sent = Transport->GetRecorded();
+	std::ifstream In(TCHAR_TO_UTF8(*Path), std::ios::binary);
+	O3DS::CaptureHeaderInfo Header;
+	TestTrue(TEXT("Header reads"), (bool)In && O3DS::ReadCaptureHeader(In, Header));
+	int32 Index = 0;
+	O3DS::CaptureRecord Record;
+	while (O3DS::ReadCaptureRecord(In, Record))
+	{
+		if (Index < 5 && Index < Sent.Num())
+		{
+			TestTrue(*FString::Printf(TEXT("Record %d matches the payload"), Index),
+				Record.wire_bytes.size() == (size_t)Sent[Index].Bytes.Num()
+				&& FMemory::Memcmp(Record.wire_bytes.data(), Sent[Index].Bytes.GetData(), Sent[Index].Bytes.Num()) == 0);
+		}
+		++Index;
+	}
+	TestEqual(TEXT("Five records, none after Stop"), Index, 5);
+	In.close();
+	IFileManager::Get().Delete(*Path);
 	return true;
 }
 
