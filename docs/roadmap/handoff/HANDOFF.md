@@ -20,6 +20,7 @@ This section supersedes the "Start here" line in §0 and the M3 row in §1 where
 - **ADR 0013 (RCV-8) implemented, 2026-10-04:** #366 (PR 1: optional `SubjectList.scene_time`, protocol 2, `O3DS::SceneTime` and `IsValidSceneTime`, reset on every parse), #367 (PR 2: the sender stamps `FApp::GetCurrentFrameTime()`), #368 (PR 3a: `FO3DSceneTimeMapper` sets every LiveLink frame's SceneTime from the sender's timecode, the sender's timeline continued, or WorldTime on the engine timecode; the per-frame `CurveHash` and `SubjectListTime` string metadata are removed, RCV-11), #369 (PR 3b: control alignment in Timecode mode). ADR Q3 resolved from engine source. Not done yet: the manual test at the desk.
 - **CI:** #363, documentation-only changes (Markdown, `docs/`) start no builds: `core-tests.yml` ignores them and the plugin CI's change filter excludes Markdown.
 - **HANDOFF:** #362 recorded the ADR 0012 progress and the names-in-use follow-up.
+- **Updated NNG Repeater (WP-A7), 2026-10-04:** #371 (rebuilt on raw NNG, pull to pub: `apps/Repeater/relay.h`/`.cpp` as a library, a receive size limit (`--max-message-mb`, default 64), send buffering (`--send-buffer`), backoff on receive errors, a stats line every `--stats-seconds` instead of a log line per message, clean stop on SIGINT/SIGTERM; `test/repeater_tests.cpp`), #372 (`docker/Dockerfile.repeater` builds only the Repeater from the pinned submodules and ships `nngcat`; `.dockerignore`; the disabled publish workflow `repeater-image.yml` has narrowed paths and a real relay smoke test; the new **Repeater image test** workflow builds the image and runs that smoke test plus a clean `docker stop` check on PRs touching the image, never pushing). The image is verified only by that CI workflow (no Docker on the dev machine). It is still not published: enabling `repeater-image.yml` (GHCR pushes) is the maintainer's call (§5).
 
 **Maintainer decisions (2026-10-03):**
 - No users run old receivers; compatibility with formats before protocol 2 is not kept.
@@ -27,7 +28,8 @@ This section supersedes the "Start here" line in §0 and the M3 row in §1 where
 - CORE-13 and CORE-14: the recommended approaches (done in #350, #353).
 - ADR 0012: accepted, both stages now.
 - RCV-8: sender timecode on the wire with a receiver-derived fallback (ADR 0013, accepted 2026-10-04).
-- WP-A7: archive Maya, MotionBuilder, `python/`, `sphinx/` (done). The Repeater image is not deployed; an updated NNG Repeater is wanted.
+- WP-A7: archive Maya, MotionBuilder, `python/`, `sphinx/` (done). The Repeater image is not deployed; an updated NNG Repeater is wanted (done, #371, #372).
+- Repeater late joiners (2026-10-04): no cache. A receiver that joins behind the Repeater waits for the sender's next full frame, because the sender's peer-joined trigger cannot reach it; `apps/Repeater/README.md` says so.
 
 **Next, in order:**
 1. **At the desk (maintainer):**
@@ -40,7 +42,7 @@ This section supersedes the "Start here" line in §0 and the M3 row in §1 where
    - **Names-in-use picker (gap against ADR 0012 accepted default Q3, "the panels show the names in use"):** `ContextName` is a plain text field. UE 5.7's `GetOptions` meta uses `SPropertyEditorCombo`, which only picks from a list (no free text), so showing names in use needs a small details customization in Open3DBroadcastEditor: a text field plus a list of the names in use (`UO3DRuntimeSubsystem::GetNamedContexts`). Maintainer, 2026-10-04: record it here; not yet scheduled.
    - Q4 is resolved: UE 5.7 has one `FLiveLinkClient` per process (`LiveLinkModule.h:60`, registered in `LiveLinkModule.cpp:57-61`), so LiveLink subject names stay process-wide; the user guide says so (#361).
 4. **ADR 0013:** implemented (#366 to #369); only the manual test at the desk remains (item 1).
-5. **Updated NNG Repeater** (`apps/Repeater`; deployment files in `docker/`, `compose/`, `cloud-init/`): rebuilt on raw NNG (pull to pub), receive size limit for large frames, send buffering, backoff on receive errors instead of a busy loop, stats instead of one log line per message, clean shutdown, a Docker image that builds only the Repeater, a real relay test in CI (the smoke test is `echo ok`), and late joiners: cache the last full frame per stream and re-publish it when a subscriber pipe is added (the sender's peer-joined trigger cannot reach receivers behind the Repeater). Not deployed, so no migration.
+5. **Updated NNG Repeater:** done (#371, #372). Late joiners: no cache (maintainer decision above). Open: whether to publish the image (§5).
 6. **Later:** WebRTC peer join (ADR 0005 Q4); archiving `apps/FbxStream`, `Test1`, `SubscribeTest`, `XSensTest` (not yet confirmed); the legacy connectors as an optional CMake target (CORE-27); the rest of WP-A7; M4; Fab F0 and F5.
 
 **Working notes from this session:**
@@ -50,6 +52,8 @@ This section supersedes the "Start here" line in §0 and the M3 row in §1 where
 - `core.autocrlf` is true: a file whose committed blob has CRLF (for example `O3DSenderComponent.h`) must be staged with `git -c core.autocrlf=false add`, or the commit rewrites every line.
 - The self-hosted UE runner once failed with `FileLoadException` loading its compiled build-rules assembly; it is not a code failure, and a new run passes.
 - Docs-only PRs skip the plugin jobs and get no bot comment, so check their checks directly before merging.
+- The maintainer's Pushover notification when Claude stops is a user-level Claude Code hook (`~/.claude/settings.json`), not part of this repository; `.claude/settings.local.json` is tracked here, so don't put personal hooks in it.
+- `nngcat --ascii` prints messages without a newline, and `docker logs` holds back a partial line while the container runs; use `--quoted` in container tests (#372).
 - `sed -i` in Git Bash converts CRLF files to LF (it rewrote `O3DReceiverSource.cpp` in #361; fixed in a follow-up commit). Edit CRLF files with a script that keeps the file's line endings, and check `git diff --cached --numstat` for whole-file rewrites before committing.
 - `Build/Scripts/Run-AutomationTests.ps1` writes its report under the current directory's `Artifacts/`; run it from the repo root, or delete a stray `Artifacts/` inside the source tree before committing.
 - One-shot local check for a plugin change: build, WebRTC add-on build, then all tests on the add-on host project (469 tests with both plugins as of #361).
@@ -294,6 +298,7 @@ With UE 5.7 installed locally you can also run the real build and tests: `Build/
   6. BuildPlugin on the Fab zip.
 - **Draft PRs skip the UE job**; mark the PR ready to get it.
 - `core-tests.yml`: Linux ASan/UBSan, MSVC, libFuzzer, warning ratchet (baseline 8), core mirror sync check.
+- `repeater-image-test.yml` (PRs touching the Repeater image's files): builds `docker/Dockerfile.repeater`, pushes through the relay with `nngcat`, checks `docker stop` exits 0; never pushes to a registry. `repeater-image.yml` (publish to GHCR) is disabled.
 - Nightly (`open3dbroadcast-plugin-nightly.yml`): flag-combination builds, Linux exclusion check, Shipping game build. **These nightly additions (WP-F2, WP-F7, WP-F11) had not yet reported a run at handoff; check the first results.**
 - When a test fails, `Run-AutomationTests.ps1` prints the last 150 lines of `Automation.log` into the job log.
 - Known runner infrastructure failures (re-run once, only if the job died before any test ran): Windows Application Control blocking a UBT rules DLL (`0x800711C7`), and an occasional editor exit at startup with no report. A second failure is real.
@@ -334,6 +339,7 @@ With UE 5.7 installed locally you can also run the real build and tests: `Build/
 ## 5. Waiting on the maintainer
 
 - **WP-F0:** check the live Fab technical requirements page against ADR 0001/0002 assumptions.
+- **Repeater image publishing:** enable `.github/workflows/repeater-image.yml` (disabled manually; pushes `ghcr.io/lifelike-and-believable/open3dstream-repeater` on `main`/`develop` pushes and nightly), which `compose/` and `cloud-init/` pull. The image builds and passes its relay test (#372).
 - **WP-F5:** counsel questions L1–L5 (ADR 0002). L1 gates publishing the WebRTC add-on before the codec-free `livekit_ffi` rebuild.
 - **Listing details:** `CreatedByURL` (still `https://open3dstream.com/` in both `.uplugin` files); real `SupportURL` and `DocsURL` (stand-ins today); `MarketplaceURL` once the Fab listing exists; the WebRTC add-on download link (a marked placeholder in the user guides). Decided 2026-10-01: `CreatedBy` is "Lifelike & Believable and Open3DStream Contributors" in both descriptors.
 - **Naming:** decided 2026-10-01: editor categories (`Category = "Open3DBroadcast|..."`, the Sender details customization) and `ClassGroup = (Open3DBroadcast)` use Open3DBroadcast. Still open: the LiveLink source name (factory display name "Open3DStream Receiver" and tooltip in `O3DReceiverSourceFactory.cpp`, source type "Open3D Stream" in `O3DReceiverSource.cpp`), and whether anything saved in assets, presets or config (property names, config section names, ini keys) should ever be renamed. None of those contain "Open3DStream" today; renaming them would need redirects.
