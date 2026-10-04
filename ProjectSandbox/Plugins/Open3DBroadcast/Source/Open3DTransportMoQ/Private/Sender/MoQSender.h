@@ -14,6 +14,7 @@
 #include "Transport/O3DTransportWorker.h"
 #include "Shared/MoQHelpers.h"
 #include "O3DPerformanceMetrics.h"
+#include "O3DRuntimeContext.h"
 #include "MoQFfiApi.h"
 THIRD_PARTY_INCLUDES_START
 #include "moq_ffi.h"
@@ -218,8 +219,13 @@ private:
 	/** Set once an audio sink has been handed out; creates the audio publisher on connect. Game thread only. */
 	bool bAudioRequested = false;
 
-	/** This transport's counters, resolved once (SHR-3, SHR-17): no lock or lookup per frame. */
-	const FO3DTransportMetricsRef TransportMetrics;
+	/**
+	 * The runtime context from the config (ADR 0012 item 3), and this transport's counters in
+	 * it, resolved in Initialize (SHR-3, SHR-17): no lock or lookup per frame. The default
+	 * context until then.
+	 */
+	FO3DRuntimeContextRef Context;
+	FO3DTransportMetricsRef TransportMetrics;
 
 	/** ADR 0007 item 3. */
 	FO3DConnectionStateTracker ConnectionState;

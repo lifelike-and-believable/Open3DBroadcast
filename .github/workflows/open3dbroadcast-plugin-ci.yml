@@ -104,6 +104,12 @@ jobs:
         run: python3 Build/Scripts/check-runtime-editor-deps.py --self-test
       - name: Check runtime modules
         run: python3 Build/Scripts/check-runtime-editor-deps.py
+      # ADR 0012 item 3 (SHR-38): transports record into the runtime context their config names,
+      # never into FO3DPerformanceMetrics::Get(). Same job: both are quick source scans.
+      - name: Self-test the transport metrics check
+        run: python3 Build/Scripts/check-transport-metrics.py --self-test
+      - name: Check transports use their runtime context
+        run: python3 Build/Scripts/check-transport-metrics.py
 
   build-and-test:
     name: UE build and tests

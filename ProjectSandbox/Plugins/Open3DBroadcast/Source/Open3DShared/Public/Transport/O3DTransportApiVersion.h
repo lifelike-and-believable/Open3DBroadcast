@@ -90,6 +90,10 @@
  *      ADR 0005 (vi) is part of 5 as well (still no tag after v0.9.6): IOpen3DSender gained
  *      SetPeerJoinedCallback (default no-op) and FO3DPeerJoinedCallback; TCP and NNG set
  *      bPeerJoinSignal.
+ *      ADR 0012 PR 2 (SHR-38) is part of 5 as well (still no tag after v0.9.6):
+ *      FO3DTransportConfig gained Context (the FO3DRuntimeContext the transport records its
+ *      metrics into; empty means the default context), and IOpen3DSender::Initialize documents
+ *      that no send may be in flight while it runs.
  */
 #define O3D_TRANSPORT_API_VERSION 5
 

@@ -53,6 +53,12 @@ public:
 	 */
 	static const FO3DRuntimeContextRef& Default();
 
+	/** Context when it is set, otherwise Default(). FO3DTransportConfig::Context is resolved with this. Thread-safe. */
+	static FO3DRuntimeContextRef OrDefault(const FO3DRuntimeContextPtr& Context)
+	{
+		return Context.IsValid() ? Context.ToSharedRef() : Default();
+	}
+
 	FName GetName() const { return Name; }
 
 	FO3DPerformanceMetrics& GetMetrics() { return Metrics; }

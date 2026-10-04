@@ -43,7 +43,9 @@ public:
     /**
      * Validates Config and allocates what Start needs. Game thread; non-blocking. Leaves the
      * connection state as it is (Idle for a new instance). InvalidConfig when Config is unusable,
-     * ResourceUnavailable when a library or subsystem is missing.
+     * ResourceUnavailable when a library or subsystem is missing. No SendSerialized, SendControl
+     * or audio sink call may be in flight: Initialize reconfigures the instance. Metrics go to
+     * FO3DRuntimeContext::OrDefault(Config.Context) from here on (ADR 0012 item 3).
      */
     virtual FO3DTransportResult Initialize(const FO3DTransportConfig& Config) = 0;
 

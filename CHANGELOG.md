@@ -558,6 +558,18 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- **Transports record into their runtime context** (SHR-38, ADR 0012 PR 2):
+  `FO3DTransportConfig` gained `Context` (an `FO3DRuntimeContext`; empty means the default
+  context), and the NNG, MoQ and WebRTC senders resolve it in `Initialize` with
+  `FO3DRuntimeContext::OrDefault` and record their sender and transport metrics there instead of
+  into `FO3DPerformanceMetrics::Get()`. The WebRTC connection callback sets its own transport
+  counters instead of looking them up by name. `IOpen3DSender::Initialize` now documents that no
+  send may be in flight while it runs. Part of transport API version 5 (unreleased). Nothing
+  sets `Context` yet, so every transport still records into the default context; the sender
+  component passes one in ADR 0012 PR 4. CI: `Build/Scripts/check-transport-metrics.py` (with a
+  self-test) fails when a transport module calls `FO3DPerformanceMetrics::Get()`. Test:
+  `Open3DBroadcast.Transport.NNG.RecordsIntoConfigContext`.
+
 - **Runtime context** (SHR-38, ADR 0012 PR 1): `FO3DRuntimeContext` owns one set of the
   data-path services: performance metrics (with their transport metrics registry), an audio bus
   and a control bus. Two contexts never see each other's audio, control or metrics.
