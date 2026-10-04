@@ -600,6 +600,15 @@ namespace O3DS
 				(double)(float)t->translation.value.v[2]);
 			t->mQuantAnchorSet = true;
 
+			// The receiver now holds these values, so later updates are
+			// measured against them. Without this, a value that returns
+			// near what was last sent BEFORE this full sync was not resent
+			// and the receiver kept the full sync's value (up to 1 degree
+			// off in QuantEval's sharp-turn take, any encoding).
+			t->translation.sent();
+			t->rotation.sent();
+			t->scale.sent();
+
 			for (const auto component : t->transformOrder) {
 				if (component == O3DS::TTranslation) {
 					components.push_back(O3DS::Data::Component::Component_Translation);
