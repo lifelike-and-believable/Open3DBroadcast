@@ -15,21 +15,21 @@ This section supersedes the "Start here" line in §0 and the M3 row in §1 where
 
 **Open at hand-over:**
 - **Also merged:** #353 (CORE-14: `Open3DStreamCore` builds with `FPSemantics = Precise`; both ends round the predicted reference to float32), #354 (this section), #355 (`o3d.Sender.Capture.Start/Stop`). #353's first CI runs failed because the self-hosted runner had stopped; it passed after the runner machine was restarted.
-- #351: ADR 0013, timecode on LiveLink frames (RCV-8), **Proposed**; waits for maintainer sign-off and its three open questions.
+- #351: ADR 0013, timecode on LiveLink frames (RCV-8), **Accepted** 2026-10-04 with its open questions' defaults; not implemented yet.
 
 **Maintainer decisions (2026-10-03):**
 - No users run old receivers; compatibility with formats before protocol 2 is not kept.
 - Quantization: go carefully, because the July 2026 attempt showed idle-animation jitter (#247). Measure first (QuantEval), change defaults only after real takes and a live test at the desk. Quantization is never switched on implicitly.
 - CORE-13 and CORE-14: the recommended approaches (done in #350, #353).
 - ADR 0012: accepted, both stages now.
-- RCV-8: sender timecode on the wire with a receiver-derived fallback (ADR 0013, Proposed).
+- RCV-8: sender timecode on the wire with a receiver-derived fallback (ADR 0013, accepted 2026-10-04).
 - WP-A7: archive Maya, MotionBuilder, `python/`, `sphinx/` (done). The Repeater image is not deployed; an updated NNG Repeater is wanted.
 
 **Next, in order:**
-1. **At the desk (maintainer):** record takes with `o3d.Sender.Capture.Start` on the default (legacy) encoding, above all the idle animation that jittered in July, and run `QuantEval --capture <take>`; the RCV-9 live check (narrowed: LiveLink evaluates on the pushed `WorldTime` after a source-wide offset estimate; what remains is how `FApp::GetCurrentTime()` relates to `FPlatformTime::Seconds()` under a fixed timestep); WP-A5 (reconnect, needs live servers); sign off ADR 0013.
+1. **At the desk (maintainer):** record takes with `o3d.Sender.Capture.Start` on the default (legacy) encoding, above all the idle animation that jittered in July, and run `QuantEval --capture <take>`; the RCV-9 live check (narrowed: LiveLink evaluates on the pushed `WorldTime` after a source-wide offset estimate; what remains is how `FApp::GetCurrentTime()` relates to `FPlatformTime::Seconds()` under a fixed timestep); WP-A5 (reconnect, needs live servers);.
 2. **CORE-12 follow-up, after real numbers:** rotations use the 16-bit tier only (QuantEval's synthetic suite: idle-bone jitter 0.40/0.86 degrees p95/max at the UE defaults, 0.0096/0.020 without the Byte tier, for 5 to 10% more bytes), normalize before quantizing, record the dequantized value as last sent. Quantization stays off by default until the maintainer's live test passes.
 3. **ADR 0012 implementation:** five PRs as outlined in the ADR (context, transport seam, metrics handles, subsystem and `ContextName`, docs).
-4. **ADR 0013 implementation,** after sign-off: three PRs (core field, sender, receiver).
+4. **ADR 0013 implementation:** three PRs (core field, sender, receiver), as outlined in the ADR; the manual test uses `USystemTimeTimecodeProvider` on both machines.
 5. **Updated NNG Repeater** (`apps/Repeater`; deployment files in `docker/`, `compose/`, `cloud-init/`): rebuilt on raw NNG (pull to pub), receive size limit for large frames, send buffering, backoff on receive errors instead of a busy loop, stats instead of one log line per message, clean shutdown, a Docker image that builds only the Repeater, a real relay test in CI (the smoke test is `echo ok`), and late joiners: cache the last full frame per stream and re-publish it when a subscriber pipe is added (the sender's peer-joined trigger cannot reach receivers behind the Repeater). Not deployed, so no migration.
 6. **Later:** WebRTC peer join (ADR 0005 Q4); archiving `apps/FbxStream`, `Test1`, `SubscribeTest`, `XSensTest` (not yet confirmed); the legacy connectors as an optional CMake target (CORE-27); the rest of WP-A7; M4; Fab F0 and F5.
 
@@ -58,14 +58,14 @@ The cloud session stops after WP-A2c (#318). The next session runs on the mainta
 
 ## 1. Where things stand
 
-The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisions are in `docs/adr/0001`–`0013`: 0001–0012 **Accepted** (their open questions accepted with the recommended defaults), 0013 (LiveLink timecode) **Proposed**. Work is organised as work packages (WPs), one PR each (or a PR series for large ones), squash-merged into `develop`.
+The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisions are in `docs/adr/0001`–`0013`, all **Accepted**; their open questions were accepted with the recommended defaults. Work is organised as work packages (WPs), one PR each (or a PR series for large ones), squash-merged into `develop`.
 
 | Milestone | Status |
 |---|---|
 | M0 Decisions (ADRs 0001–0010) | Done (#261–#263) |
 | M1 Safety and correctness: WP-S1..S11, WP-T1, WP-T2 | Done (#264–#279) |
 | M2 Fab-buildable package: WP-F1..F4, F6..F9, F11 | Done (#274–#286). **F0 and F5 wait on the maintainer** (see §5) |
-| M3 Architecture: WP-A1..A7 | **In progress.** WP-A1, A2 (except removing `o3d.Sender.AsyncPipeline` one release later), A3 and A6 done; WP-A4 nearly done (ADR 0009 and ADR 0005 implemented, CORE-11/13/15 fixed, CORE-12 harness merged, CORE-14 in #353, RCV-8 in ADR 0013); WP-A5 waits for the maintainer at the desk; WP-A7 partly done (#348). SHR-38: ADR 0012 accepted, not started. See §0a. |
+| M3 Architecture: WP-A1..A7 | **In progress.** WP-A1, A2 (except removing `o3d.Sender.AsyncPipeline` one release later), A3 and A6 done; WP-A4 nearly done (ADR 0009 and ADR 0005 implemented, CORE-11/13/15 fixed, CORE-12 harness merged, CORE-14 in #353, RCV-8 in ADR 0013, accepted); WP-A5 waits for the maintainer at the desk; WP-A7 partly done (#348). SHR-38: ADR 0012 accepted, not started. See §0a. |
 | M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | Not started |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
 | WP-CTL control channel (D11, ADR 0011) | CTL-1..7 done (#290–#295, CTL-6, CTL-7); live-server checks remain (see §2b) |
