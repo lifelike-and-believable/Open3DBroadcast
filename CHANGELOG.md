@@ -530,8 +530,11 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 - **Residual coding is used only on transports that deliver reliably and in order** (ADR 0005
   (iii)). With `bEnableResidualCoding` on a transport whose capabilities report `Unreliable`
   or `Unknown` (UDP, NNG pub, MoQ, WebRTC with `webrtc.prefer_lossy`), the sender sends
-  quantized frames instead, with the component's quantization settings, and logs one Warning
-  per capture and transport. The decision uses the running sender's `GetCapabilities()`, so a
+  what it would with residual coding off (full snapshots, or quantized updates only when
+  `bEnableQuantization` is set itself) and logs one Warning per capture and transport. An
+  earlier version of this change fell back to quantized frames, which switched quantization on
+  without the user enabling it; that was changed before release because quantization has known
+  rotation artifacts (CORE-12, #247). The decision uses the running sender's `GetCapabilities()`, so a
   transport attached or switched mid-capture changes the mode, and the encoding fingerprint
   makes the next frame a full sync. Loopback, TCP, NNG pair or push, and WebRTC's reliable
   channel keep residual coding.
