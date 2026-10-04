@@ -312,6 +312,21 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Fixed
 
+- **Residual rotations stay unit quaternions, and both ends' histories agree** (CORE-13).
+  Rotation residuals were added component-wise and never normalized, so the decoded quaternion
+  drifted from unit length, and with it the predictor history on both ends. The encoder and
+  the decoder now share one reconstruction (reference plus the float residual, normalized),
+  which the encoder commits and the decoder applies.
+  - The encoder encodes the actual rotation in the reference's hemisphere, so q and -q (the
+    same rotation) are neither a large residual nor a forced resend. The plain delta path's
+    `TransformRotation::delta()` is sign-aware for the same reason.
+  - Curves: the encoder commits `refCurve + residual` in float, the value the decoder
+    computes, instead of the exact value (in float, `(a - r) + r` is not always `a`).
+  - Residual frames are not changed on the wire; a decoder from before this change does not
+    normalize, which no released build depends on (protocol 2 is unreleased).
+  - Tests: `core.residual_rotation_tests` (3000 frames without keyframes: unit norm, bounded
+    error, curves; a sign flip is not resent on either path), mutation-checked.
+
 - **One forged or corrupted `tx_seq` no longer blackholes a sequenced stream** (CORE-15).
   `ReorderGate` holds a frame more than `Config::max_forward_jump` (default 4096) ahead of the
   last applied seq as an unconfirmed candidate; it is applied only when the next frame
