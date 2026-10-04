@@ -41,6 +41,17 @@ QuantEval --capture take.o3dscap [--subject Name] [--csv]
 
 The capture must hold full frames (the sender's legacy encoding), so the input is the exact pose.
 
+To record one in Unreal, with the sender component on its default encoding (residual and
+quantization off), run the console commands:
+
+```text
+o3d.Sender.Capture.Start idle-take.o3dscap
+o3d.Sender.Capture.Stop
+```
+
+Relative paths go under `Saved/O3DCaptures` of the project. Every sender in the process is
+recorded; pick one subject with `--subject`.
+
 ## First results (synthetic suite, 2026-10-03)
 
 | Take | Config | B/frame | idle jitter p95 / max | err max |
