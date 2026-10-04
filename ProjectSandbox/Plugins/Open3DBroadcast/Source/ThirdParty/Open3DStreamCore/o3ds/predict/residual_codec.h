@@ -56,6 +56,14 @@ namespace O3DS
 	//! ResidualEncoder's own constructor comment).
 	O3DS_API std::unique_ptr<IPosePredictor> MakePredictorForId(ResidualPredictorId id);
 
+	//! Rounds every channel of a prediction to float32 (CORE-14). The encoder
+	//! and the decoder both round the predicted reference before using it, so a
+	//! difference of a few ulps between their predictions (another compiler,
+	//! FP mode or libm on the receiver) almost always rounds to the same
+	//! reference; the rare prediction that lands next to a float boundary is
+	//! off by one float step, and a full Subject resets both ends.
+	O3DS_API void RoundPoseToFloat(PoseSample& pose);
+
 	//! Sender-side residual coding on top of any IPosePredictor (roadmap
 	//! doc §5/C2). One instance per subject, mirroring the per-subject
 	//! convention already used for C1's ConcealmentEngine. With a

@@ -43,6 +43,17 @@ namespace O3DS
 		}
 	}
 
+	void RoundPoseToFloat(PoseSample& pose)
+	{
+		for (Vector3d& v : pose.translations)
+			for (double& c : v.v) c = (double)(float)c;
+		for (Quat& q : pose.rotations)
+			for (double& c : q.v) c = (double)(float)c;
+		for (Vector3d& v : pose.scales)
+			for (double& c : v.v) c = (double)(float)c;
+		// Curves are float already.
+	}
+
 	ResidualEncoder::ResidualEncoder(ResidualPredictorId id, uint32_t keyframeIntervalFrames)
 		: mId(id)
 		, mPredictor(MakePredictorForId(id))
@@ -70,6 +81,7 @@ namespace O3DS
 
 		PoseSample predicted;
 		const bool hasPrediction = !topologyChanged && mPredictor->Predict(actual.t, predicted);
+		RoundPoseToFloat(predicted); // CORE-14: the decoder rounds its prediction the same way
 		const bool cadenceElapsed = (mKeyframeIntervalFrames > 0) && (mFramesSinceKeyframe >= mKeyframeIntervalFrames);
 
 		mIsKeyframe = !hasPrediction || cadenceElapsed;
@@ -123,6 +135,7 @@ namespace O3DS
 			return false;
 		}
 
+		RoundPoseToFloat(predicted); // CORE-14: as the encoder does
 		mIsKeyframe = false;
 		mReference = predicted;
 		return true;

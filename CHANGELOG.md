@@ -320,6 +320,24 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Fixed
 
+- **Residual decoding tolerates small prediction differences between builds** (CORE-14).
+  Residual coding needs the sender's and the receiver's predictions to agree, but the
+  predictors use `acos`, `sin` and `cos`, and UE builds the core with `/fp:fast` by default.
+  - **`Open3DStreamCore` is built with precise floating point** (`FPSemantics = Precise` in its
+    `Build.cs`), as the CMake build of the core already is. UE's default on MSVC is `/fp:fast`,
+    which lets each build reorder and contract FP math differently.
+  - **Both ends round the predicted reference to float32** (`O3DS::RoundPoseToFloat`) before
+    using it, so predictions a few double ulps apart almost always give the same reference;
+    one next to a float rounding boundary is one float step off, and a full Subject (every
+    `FullSyncIntervalSeconds`) resets both ends.
+  - Not done: rewriting the predictors without transcendental functions, or a CI gate comparing
+    MSVC and GCC output of `DeterminismProbe`. The plugin is Win64-only, both ends normally run
+    the same build, and the full sync bounds any divergence; the probe stays a diagnostic,
+    since MSVC and glibc may legitimately differ in the last bits of `sin`, `cos` and `acos`.
+  - No wire change. Tests: `core.residual_codec_tests`
+    `ResidualReference_RoundingAbsorbsUlpDifferences` (one-ulp differences give the same
+    reference in at least 99.9% of channels).
+
 - **A full sync now counts as sent for later updates** (found by `apps/QuantEval`, CORE-12).
   `Subject::Serialize` did not mark translation, rotation and scale as sent, so the next
   updates were measured against the values sent before the full sync. A value that returned

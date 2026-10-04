@@ -9,6 +9,6 @@ flatbuffers-version: 2.0.6
 flatbuffers-submodule: 615616cb5549a34bdf288c04bc1b94bd7a65c396
 crccpp-submodule: 71f2152b639f8fc0efa3d1fec01c7c0dbb96dc76
 manifest-sha256: c4de5ee99f5f2cd8b9e3d4db77be348c065dd5edec8a4f28f84782f01b31be0b
-content-sha256: e18c48557641e7c1cb488dc8c677760cae995517a90cdaf65d17695eb5aff44f
+content-sha256: b5d2b6de6825f41798a1ba2ccd7df72fd72f5ac30324bc09ff450ddc7ce657ab
 core-files: 53 (24 .cpp)
 mirrored-files: 74
