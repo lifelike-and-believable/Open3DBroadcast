@@ -33,6 +33,7 @@ set(O3DS_CORE_TEST_SOURCES
 	stream_writer_tests.cpp
 	resync_contract_tests.cpp
 	scale_update_tests.cpp
+	residual_rotation_tests.cpp
 )
 
 add_executable(o3ds_core_tests

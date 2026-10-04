@@ -301,3 +301,35 @@ O3DS_TEST(ResidualEncoder_TopologyChange_ForcesFreshKeyframeInsteadOfMisalignedR
 	O3DS_CHECK(encoder.IsKeyframe()); // still only 1 prior sample on the new topology
 	encoder.Commit(grown2);
 }
+
+O3DS_TEST(ResidualReference_RoundingAbsorbsUlpDifferences)
+{
+	// CORE-14: an encoder and a decoder built differently (compiler, FP mode,
+	// libm) can predict values a few double ulps apart. Both round the
+	// reference to float, so nearly every such pair becomes the same
+	// reference; only a value next to a float rounding boundary differs, by
+	// one float step.
+	uint64_t state = 0x9E3779B97F4A7C15ull;
+	auto next = [&state]() {
+		state = state * 6364136223846793005ull + 1442695040888963407ull;
+		return (double)(state >> 11) / (double)(1ull << 53); // [0, 1)
+	};
+	int same = 0;
+	int total = 0;
+	for (int i = 0; i < 20000; ++i)
+	{
+		PoseSample a;
+		a.translations.push_back(Vector3d(400.0 * next() - 200.0, 400.0 * next() - 200.0, 400.0 * next() - 200.0));
+		a.rotations.push_back(Quat(2.0 * next() - 1.0, 2.0 * next() - 1.0, 2.0 * next() - 1.0, 2.0 * next() - 1.0));
+		PoseSample b = a;
+		for (double& c : b.translations[0].v) c = std::nextafter(c, c + 1.0);
+		for (double& c : b.rotations[0].v) c = std::nextafter(c, c - 1.0);
+		RoundPoseToFloat(a);
+		RoundPoseToFloat(b);
+		for (int k = 0; k < 3; ++k) { ++total; same += (a.translations[0].v[k] == b.translations[0].v[k]) ? 1 : 0; }
+		for (int k = 0; k < 4; ++k) { ++total; same += (a.rotations[0].v[k] == b.rotations[0].v[k]) ? 1 : 0; }
+		// Every rounded channel is exactly representable as float.
+		for (int k = 0; k < 4; ++k) O3DS_CHECK((double)(float)a.rotations[0].v[k] == a.rotations[0].v[k]);
+	}
+	O3DS_CHECK(same >= total - total / 1000); // at least 99.9% identical
+}

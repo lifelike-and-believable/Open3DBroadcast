@@ -35,6 +35,13 @@ public class Open3DStreamCore : ModuleRules
         bEnableExceptions = false;
         bUseRTTI = false;
 
+        // CORE-14: residual coding needs the sender's and the receiver's predictions to agree, and
+        // UE's default FP semantics on MSVC is /fp:fast (VCToolChain: FPSemanticsMode.Default),
+        // which lets the compiler reorder and contract FP math differently per build. Precise
+        // matches the CMake build of the core (MSVC's default /fp:precise). Overriding FPSemantics
+        // needs a private PCH or none; this module has none (PCHUsage above).
+        FPSemantics = FPSemanticsMode.Precise;
+
         O3DBuildFlags.Apply(Target, this);
 
         string CoreDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "ThirdParty", "Open3DStreamCore"));

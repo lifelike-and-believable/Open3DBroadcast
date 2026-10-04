@@ -27,6 +27,7 @@ SOFTWARE.
 #include "wire_format.h"
 #include "getTime.h"
 #include "parse_limits.h"
+#include "predict/quat_math.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -48,6 +49,25 @@ namespace
 		thread_local flatbuffers::FlatBufferBuilder builder(16 * 1024);
 		builder.Clear();
 		return builder;
+	}
+
+	//! Residual rotation reconstruction (CORE-13), shared by the encoder's
+	//! committed pose and the decoder, so both compute the same bits: the
+	//! reference plus the float residual, normalized. Component-wise
+	//! residuals of unit quaternions do not add up to a unit quaternion, and
+	//! without this the norm drifts in both predictor histories.
+	O3DS::Quat ReconstructResidualRotation(const O3DS::Quat& ref, float x, float y, float z, float w)
+	{
+		return O3DS::QuatNormalize(O3DS::Quat(ref.v[0] + (double)x, ref.v[1] + (double)y, ref.v[2] + (double)z, ref.v[3] + (double)w));
+	}
+
+	//! The rotation to encode against `ref`: `actual` or its negation,
+	//! whichever is in ref's hemisphere (q and -q are the same rotation, CORE-13).
+	//! A zero reference (keyframe) keeps `actual` as it is.
+	O3DS::Quat AlignToHemisphere(const O3DS::Quat& actual, const O3DS::Quat& ref)
+	{
+		const double dot = actual.v[0] * ref.v[0] + actual.v[1] * ref.v[1] + actual.v[2] * ref.v[2] + actual.v[3] * ref.v[3];
+		return (dot < 0.0) ? O3DS::Quat(-actual.v[0], -actual.v[1], -actual.v[2], -actual.v[3]) : actual;
 	}
 
 	//! Puts a Subject that SubjectList::Parse() is about to reuse for a full
@@ -600,6 +620,15 @@ namespace O3DS
 				(double)(float)t->translation.value.v[2]);
 			t->mQuantAnchorSet = true;
 
+			// The receiver now holds these values, so later updates are
+			// measured against them. Without this, a value that returns
+			// near what was last sent BEFORE this full sync was not resent
+			// and the receiver kept the full sync's value (up to 1 degree
+			// off in QuantEval's sharp-turn take, any encoding).
+			t->translation.sent();
+			t->rotation.sent();
+			t->scale.sent();
+
 			for (const auto component : t->transformOrder) {
 				if (component == O3DS::TTranslation) {
 					components.push_back(O3DS::Data::Component::Component_Translation);
@@ -972,19 +1001,19 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 				reconstructed.translations[transformId] = refTrans;
 			}
 
-			if (isKeyframe || dist(tform->rotation.value, refRot) > deltaThreshold)
+			// CORE-13: encode the actual rotation in the reference's hemisphere,
+			// so a sign flip is neither a large residual nor a forced resend,
+			// and commit the normalized reconstruction the decoder computes.
+			const Quat actualRot = AlignToHemisphere(tform->rotation.value, refRot);
+			if (isKeyframe || dist(actualRot, refRot) > deltaThreshold)
 			{
-				const float residualX = (float)(tform->rotation.value.v[0] - refRot.v[0]);
-				const float residualY = (float)(tform->rotation.value.v[1] - refRot.v[1]);
-				const float residualZ = (float)(tform->rotation.value.v[2] - refRot.v[2]);
-				const float residualW = (float)(tform->rotation.value.v[3] - refRot.v[3]);
+				const float residualX = (float)(actualRot.v[0] - refRot.v[0]);
+				const float residualY = (float)(actualRot.v[1] - refRot.v[1]);
+				const float residualZ = (float)(actualRot.v[2] - refRot.v[2]);
+				const float residualW = (float)(actualRot.v[3] - refRot.v[3]);
 				rotations.push_back(O3DS::Data::RotationUpdate(residualX, residualY, residualZ, residualW, transformId));
 				count++;
-				reconstructed.rotations[transformId] = Quat(
-					refRot.v[0] + (double)residualX,
-					refRot.v[1] + (double)residualY,
-					refRot.v[2] + (double)residualZ,
-					refRot.v[3] + (double)residualW);
+				reconstructed.rotations[transformId] = ReconstructResidualRotation(refRot, residualX, residualY, residualZ, residualW);
 			}
 			else
 			{
@@ -1006,16 +1035,20 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			transformId++;
 		}
 
-		// Curves: always sent unconditionally today (see
-		// SerializeCurveUpdates) - never omitted, so `reconstructed.curves`
-		// (== `actual.curves`, copied above) needs no adjustment here.
+		// Curves: always sent. The committed value is what the decoder
+		// reconstructs, refCurve + residual in float (CORE-13): in float,
+		// (a - r) + r is not always a, so committing `actual` would let the
+		// two predictor histories drift apart.
 		std::vector<O3DS::Data::CurveUpdate> curveUpdates;
 		const size_t refCurveCount = reference.curves.size();
 		for (size_t i = 0; i < mCurveValues.size(); ++i)
 		{
 			const float refCurve = (i < refCurveCount) ? reference.curves[i] : 0.0f;
-			curveUpdates.push_back(O3DS::Data::CurveUpdate(mCurveValues[i] - refCurve, (int)i));
+			const float residual = mCurveValues[i] - refCurve;
+			curveUpdates.push_back(O3DS::Data::CurveUpdate(residual, (int)i));
 			count++;
+			if (i < reconstructed.curves.size())
+				reconstructed.curves[i] = refCurve + residual;
 		}
 
 		mResidualEncoder->Commit(reconstructed);
@@ -1942,11 +1975,9 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 				if (id < 0 || (size_t)id >= outSubject->mTransforms.size())
 					continue;
 				const Quat refRot = ((size_t)id < refRotCount) ? reference.rotations[id] : Quat(0.0, 0.0, 0.0, 0.0);
+				// The same reconstruction the encoder commits (CORE-13).
 				outSubject->mTransforms[id]->rotation = O3DS::TransformRotation(
-					refRot.v[0] + inRotation->x(),
-					refRot.v[1] + inRotation->y(),
-					refRot.v[2] + inRotation->z(),
-					refRot.v[3] + inRotation->w());
+					ReconstructResidualRotation(refRot, inRotation->x(), inRotation->y(), inRotation->z(), inRotation->w()));
 			}
 		}
 

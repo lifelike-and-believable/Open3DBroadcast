@@ -192,6 +192,14 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Core library (`src/o3ds`)
 
+- **`apps/QuantEval`** (CORE-12): plays a take through the real quantized encoder and
+  decoder and reports per-bone rotation error, frame-to-frame jitter (all bones and idle bones),
+  stale error on stopped bones, and bytes per frame, for the full-float reference, the sender's
+  defaults and the defaults without the Byte tier. Runs PredictorEval's synthetic suite or a
+  recorded `.o3dscap` take. First synthetic numbers: the Byte tier puts about 0.4 degrees (p95)
+  to 0.86 degrees (max) of jitter on idle bones; without it, about 0.01 to 0.02 degrees, for 5
+  to 10% more bytes. See `apps/QuantEval/README.md`.
+
 - **Resync contract on the receiver** (ADR 0005 (ix); CORE-5, CORE-6). `SubjectList::Parse`
   takes an appended, defaulted `const ParseContext*` (`tx_seq`, `frame_epoch`, `gap_before`).
   With a context for a sequenced frame:
@@ -311,6 +319,47 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
   `test/tcp_stream_parser_tests.cpp` and a `tcp_stream` fuzz target.
 
 ### Fixed
+
+- **Residual decoding tolerates small prediction differences between builds** (CORE-14).
+  Residual coding needs the sender's and the receiver's predictions to agree, but the
+  predictors use `acos`, `sin` and `cos`, and UE builds the core with `/fp:fast` by default.
+  - **`Open3DStreamCore` is built with precise floating point** (`FPSemantics = Precise` in its
+    `Build.cs`), as the CMake build of the core already is. UE's default on MSVC is `/fp:fast`,
+    which lets each build reorder and contract FP math differently.
+  - **Both ends round the predicted reference to float32** (`O3DS::RoundPoseToFloat`) before
+    using it, so predictions a few double ulps apart almost always give the same reference;
+    one next to a float rounding boundary is one float step off, and a full Subject (every
+    `FullSyncIntervalSeconds`) resets both ends.
+  - Not done: rewriting the predictors without transcendental functions, or a CI gate comparing
+    MSVC and GCC output of `DeterminismProbe`. The plugin is Win64-only, both ends normally run
+    the same build, and the full sync bounds any divergence; the probe stays a diagnostic,
+    since MSVC and glibc may legitimately differ in the last bits of `sin`, `cos` and `acos`.
+  - No wire change. Tests: `core.residual_codec_tests`
+    `ResidualReference_RoundingAbsorbsUlpDifferences` (one-ulp differences give the same
+    reference in at least 99.9% of channels).
+
+- **A full sync now counts as sent for later updates** (found by `apps/QuantEval`, CORE-12).
+  `Subject::Serialize` did not mark translation, rotation and scale as sent, so the next
+  updates were measured against the values sent before the full sync. A value that returned
+  near one of those was skipped as unchanged, and the receiver kept the full sync's value: up
+  to 1.03 degrees of rotation error on the synthetic sharp-turn take, in every delta encoding
+  (plain, quantized, full precision). Test: `core.model_tests`
+  `FullSyncMarksValuesSent_SoAReturnToAnEarlierValueIsResent`.
+
+- **Residual rotations stay unit quaternions, and both ends' histories agree** (CORE-13).
+  Rotation residuals were added component-wise and never normalized, so the decoded quaternion
+  drifted from unit length, and with it the predictor history on both ends. The encoder and
+  the decoder now share one reconstruction (reference plus the float residual, normalized),
+  which the encoder commits and the decoder applies.
+  - The encoder encodes the actual rotation in the reference's hemisphere, so q and -q (the
+    same rotation) are neither a large residual nor a forced resend. The plain delta path's
+    `TransformRotation::delta()` is sign-aware for the same reason.
+  - Curves: the encoder commits `refCurve + residual` in float, the value the decoder
+    computes, instead of the exact value (in float, `(a - r) + r` is not always `a`).
+  - Residual frames are not changed on the wire; a decoder from before this change does not
+    normalize, which no released build depends on (protocol 2 is unreleased).
+  - Tests: `core.residual_rotation_tests` (3000 frames without keyframes: unit norm, bounded
+    error, curves; a sign flip is not resent on either path), mutation-checked.
 
 - **One forged or corrupted `tx_seq` no longer blackholes a sequenced stream** (CORE-15).
   `ReorderGate` holds a frame more than `Config::max_forward_jump` (default 4096) ahead of the
@@ -508,6 +557,13 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
   frame (SHR-18).
 
 ### Changed
+
+- **Sender capture console commands** (CORE-12): `o3d.Sender.Capture.Start [file]` records
+  every payload the senders in the process serialize, verbatim, to a `.o3dscap` file (relative
+  paths go under `Saved/O3DCaptures`), and `o3d.Sender.Capture.Stop` closes it. The input for
+  `apps/QuantEval` and replay; record takes with the default (legacy) encoding so every payload
+  is a full frame. One atomic load per payload while off. Test:
+  `Open3DBroadcast.Sender.Capture.RecordsEveryPayload`.
 
 - **Archived: the MotionBuilder and Maya plugins, `python/` and the Sphinx site** (WP-A7,
   CORE-28; maintainer, 2026-10-03). `plugins/mobu`, `plugins/maya`, `python/` (two stale
