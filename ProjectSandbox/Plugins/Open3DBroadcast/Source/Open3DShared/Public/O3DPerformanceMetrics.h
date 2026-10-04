@@ -182,6 +182,8 @@ private:
 
 class FO3DReceiverMetricsHandle;
 using FO3DReceiverMetricsHandleRef = TSharedRef<FO3DReceiverMetricsHandle, ESPMode::ThreadSafe>;
+class FO3DSenderMetricsHandle;
+using FO3DSenderMetricsHandleRef = TSharedRef<FO3DSenderMetricsHandle, ESPMode::ThreadSafe>;
 
 /**
  * Real-time performance metrics collection for Open3DBroadcast plugin
@@ -194,9 +196,11 @@ using FO3DReceiverMetricsHandleRef = TSharedRef<FO3DReceiverMetricsHandle, ESPMo
  * Each FO3DRuntimeContext owns one instance (docs/adr/0012-runtime-services-and-global-state.md);
  * Get() returns the default context's, and the console commands and the HUD read that one.
  *
- * The receiver counters below are the context's aggregate. Each receiver source records through
- * its own FO3DReceiverMetricsHandle (AcquireReceiverMetrics), which adds to its counters and to
- * this aggregate, so the aggregate always equals the sum of every handle ever acquired, including
+ * The receiver and sender counters below are the context's aggregate. Each receiver source
+ * records through its own FO3DReceiverMetricsHandle (AcquireReceiverMetrics), and each sender
+ * transport through an FO3DSenderMetricsHandle (AcquireSenderMetrics; the sender component's,
+ * passed in FO3DTransportConfig::SenderMetrics). A handle adds to its counters and to this
+ * aggregate, so the aggregate always equals the sum of every handle ever acquired, including
  * released ones (ADR 0012 item 4).
  */
 class OPEN3DSHARED_API FO3DPerformanceMetrics
@@ -348,6 +352,16 @@ public:
 	/** The receiver handles still held by their owners, oldest first. Thread-safe. */
 	TArray<FO3DReceiverMetricsHandleRef> GetReceiverHandles() const;
 
+	/**
+	 * Counters for one sender, named OwnerName in DumpMetrics (ADR 0012 item 4). The sender
+	 * component acquires one and passes it to its transport in FO3DTransportConfig::SenderMetrics;
+	 * a transport given none acquires its own. Lifetime as AcquireReceiverMetrics. Thread-safe.
+	 */
+	FO3DSenderMetricsHandleRef AcquireSenderMetrics(const FString& OwnerName);
+
+	/** The sender handles still held by their owners, oldest first. Thread-safe. */
+	TArray<FO3DSenderMetricsHandleRef> GetSenderHandles() const;
+
 	/** Dump all metrics to log/console */
 	void DumpMetrics() const;
 
@@ -454,10 +468,58 @@ private:
 	FReceiverMetrics ReceiverMetrics;
 	FO3DTransportMetricsRegistry TransportRegistry;
 
-	/** Guards ReceiverHandles; never held while recording. */
+	/** Guards ReceiverHandles and SenderHandles; never held while recording. */
 	mutable FCriticalSection HandlesMutex;
 	/** Weak: an owner releases its handle by dropping it. Pruned when listed. */
 	mutable TArray<TWeakPtr<FO3DReceiverMetricsHandle, ESPMode::ThreadSafe>> ReceiverHandles;
+	mutable TArray<TWeakPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe>> SenderHandles;
+};
+
+/** One sender's counters (ADR 0012 item 4): the counters of FO3DPerformanceMetrics::FSenderMetrics. */
+struct FO3DSenderCounters
+{
+	std::atomic<uint64> FramesCaptured{ 0 };
+	std::atomic<uint64> FramesDropped{ 0 };
+	std::atomic<uint64> BytesSerialized{ 0 };
+	std::atomic<uint64> BytesSent{ 0 };
+	std::atomic<uint64> TransportFramesDropped{ 0 };
+
+	OPEN3DSHARED_API void Reset();
+};
+
+/**
+ * A sender's metrics handle (ADR 0012 item 4), from FO3DPerformanceMetrics::AcquireSenderMetrics.
+ * Its Record functions have the names of the aggregate's sender functions and add to this handle
+ * and to the aggregate. Transports record sender metrics only through one. Thread-safe.
+ */
+class OPEN3DSHARED_API FO3DSenderMetricsHandle
+{
+public:
+	FO3DSenderMetricsHandle(FO3DPerformanceMetrics& InAggregate, const FString& InOwnerName);
+
+	FO3DSenderMetricsHandle(const FO3DSenderMetricsHandle&) = delete;
+	FO3DSenderMetricsHandle& operator=(const FO3DSenderMetricsHandle&) = delete;
+
+	const FO3DSenderCounters& GetCounters() const { return Counters; }
+	FO3DPerformanceMetrics& GetAggregate() const { return Aggregate; }
+
+	FString GetOwnerName() const;
+	void SetOwnerName(const FString& InOwnerName);
+
+	/** Zeroes this handle's counters, not the aggregate's (FO3DPerformanceMetrics::Reset does both). */
+	void ResetCounters() { Counters.Reset(); }
+
+	void RecordFrameCaptured() { ++Counters.FramesCaptured; Aggregate.RecordFrameCaptured(); }
+	void RecordFrameDropped() { ++Counters.FramesDropped; Aggregate.RecordFrameDropped(); }
+	void RecordBytesSerialized(uint64 ByteCount) { Counters.BytesSerialized += ByteCount; Aggregate.RecordBytesSerialized(ByteCount); }
+	void RecordBytesSent(uint64 ByteCount) { Counters.BytesSent += ByteCount; Aggregate.RecordBytesSent(ByteCount); }
+	void RecordTransportFrameDropped() { ++Counters.TransportFramesDropped; Aggregate.RecordTransportFrameDropped(); }
+
+private:
+	FO3DPerformanceMetrics& Aggregate;
+	FO3DSenderCounters Counters;
+	mutable FCriticalSection NameMutex;
+	FString OwnerName;
 };
 
 /**

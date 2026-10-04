@@ -148,29 +148,87 @@ void FO3DReceiverMetricsHandle::SetOwnerName(const FString& InOwnerName)
 	OwnerName = InOwnerName;
 }
 
+void FO3DSenderCounters::Reset()
+{
+	FramesCaptured.store(0);
+	FramesDropped.store(0);
+	BytesSerialized.store(0);
+	BytesSent.store(0);
+	TransportFramesDropped.store(0);
+}
+
+FO3DSenderMetricsHandle::FO3DSenderMetricsHandle(FO3DPerformanceMetrics& InAggregate, const FString& InOwnerName)
+	: Aggregate(InAggregate)
+	, OwnerName(InOwnerName)
+{
+}
+
+FString FO3DSenderMetricsHandle::GetOwnerName() const
+{
+	FScopeLock Lock(&NameMutex);
+	return OwnerName;
+}
+
+void FO3DSenderMetricsHandle::SetOwnerName(const FString& InOwnerName)
+{
+	FScopeLock Lock(&NameMutex);
+	OwnerName = InOwnerName;
+}
+
+namespace O3DMetricsHandles
+{
+	/** Adds Handle to Handles, pruning released entries. Caller holds the lock. */
+	template <typename HandleType>
+	void Add(TArray<TWeakPtr<HandleType, ESPMode::ThreadSafe>>& Handles, const TSharedRef<HandleType, ESPMode::ThreadSafe>& Handle)
+	{
+		Handles.RemoveAll([](const TWeakPtr<HandleType, ESPMode::ThreadSafe>& Weak) { return !Weak.IsValid(); });
+		Handles.Add(Handle);
+	}
+
+	/** The live entries of Handles, oldest first, pruning released ones. Caller holds the lock. */
+	template <typename HandleType>
+	TArray<TSharedRef<HandleType, ESPMode::ThreadSafe>> List(TArray<TWeakPtr<HandleType, ESPMode::ThreadSafe>>& Handles)
+	{
+		Handles.RemoveAll([](const TWeakPtr<HandleType, ESPMode::ThreadSafe>& Weak) { return !Weak.IsValid(); });
+		TArray<TSharedRef<HandleType, ESPMode::ThreadSafe>> Result;
+		Result.Reserve(Handles.Num());
+		for (const TWeakPtr<HandleType, ESPMode::ThreadSafe>& Weak : Handles)
+		{
+			if (TSharedPtr<HandleType, ESPMode::ThreadSafe> Pinned = Weak.Pin())
+			{
+				Result.Add(Pinned.ToSharedRef());
+			}
+		}
+		return Result;
+	}
+}
+
 FO3DReceiverMetricsHandleRef FO3DPerformanceMetrics::AcquireReceiverMetrics(const FString& OwnerName)
 {
 	FO3DReceiverMetricsHandleRef Handle = MakeShared<FO3DReceiverMetricsHandle, ESPMode::ThreadSafe>(*this, OwnerName);
 	FScopeLock Lock(&HandlesMutex);
-	ReceiverHandles.RemoveAll([](const TWeakPtr<FO3DReceiverMetricsHandle, ESPMode::ThreadSafe>& Weak) { return !Weak.IsValid(); });
-	ReceiverHandles.Add(Handle);
+	O3DMetricsHandles::Add(ReceiverHandles, Handle);
 	return Handle;
 }
 
 TArray<FO3DReceiverMetricsHandleRef> FO3DPerformanceMetrics::GetReceiverHandles() const
 {
-	TArray<FO3DReceiverMetricsHandleRef> Result;
 	FScopeLock Lock(&HandlesMutex);
-	ReceiverHandles.RemoveAll([](const TWeakPtr<FO3DReceiverMetricsHandle, ESPMode::ThreadSafe>& Weak) { return !Weak.IsValid(); });
-	Result.Reserve(ReceiverHandles.Num());
-	for (const TWeakPtr<FO3DReceiverMetricsHandle, ESPMode::ThreadSafe>& Weak : ReceiverHandles)
-	{
-		if (TSharedPtr<FO3DReceiverMetricsHandle, ESPMode::ThreadSafe> Pinned = Weak.Pin())
-		{
-			Result.Add(Pinned.ToSharedRef());
-		}
-	}
-	return Result;
+	return O3DMetricsHandles::List(ReceiverHandles);
+}
+
+FO3DSenderMetricsHandleRef FO3DPerformanceMetrics::AcquireSenderMetrics(const FString& OwnerName)
+{
+	FO3DSenderMetricsHandleRef Handle = MakeShared<FO3DSenderMetricsHandle, ESPMode::ThreadSafe>(*this, OwnerName);
+	FScopeLock Lock(&HandlesMutex);
+	O3DMetricsHandles::Add(SenderHandles, Handle);
+	return Handle;
+}
+
+TArray<FO3DSenderMetricsHandleRef> FO3DPerformanceMetrics::GetSenderHandles() const
+{
+	FScopeLock Lock(&HandlesMutex);
+	return O3DMetricsHandles::List(SenderHandles);
 }
 
 // =====================================================================
@@ -225,8 +283,12 @@ void FO3DPerformanceMetrics::Reset()
 	// Transport metrics
 	TransportRegistry.ResetCounters();
 
-	// Receiver handles, so the aggregate keeps equalling their sum (ADR 0012 item 4).
+	// The handles, so the aggregate keeps equalling their sum (ADR 0012 item 4).
 	for (const FO3DReceiverMetricsHandleRef& Handle : GetReceiverHandles())
+	{
+		Handle->ResetCounters();
+	}
+	for (const FO3DSenderMetricsHandleRef& Handle : GetSenderHandles())
 	{
 		Handle->ResetCounters();
 	}
@@ -289,6 +351,7 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 	// SHR-17: copy the shared state first and log without holding any lock.
 	const TArray<FO3DTransportMetricsSnapshot> TransportMetrics = GetTransportMetricsSnapshot();
 	const TArray<FO3DReceiverMetricsHandleRef> ReceiverSources = GetReceiverHandles();
+	const TArray<FO3DSenderMetricsHandleRef> Senders = GetSenderHandles();
 
 	UE_LOG(LogO3DPerformanceMetrics, Display, TEXT(""));
 	UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("========================================"));
@@ -400,6 +463,22 @@ void FO3DPerformanceMetrics::DumpMetrics() const
 				UE_LOG(LogO3DPerformanceMetrics, Display, TEXT(""));
 			}
 		}
+	}
+
+	// ========== PER SENDER (ADR 0012 item 4) ==========
+	if (Senders.Num() > 0)
+	{
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("[SENDERS]"));
+		for (const FO3DSenderMetricsHandleRef& Handle : Senders)
+		{
+			const FO3DSenderCounters& C = Handle->GetCounters();
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("  %s:"), *Handle->GetOwnerName());
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("    Frames Captured: %llu, Dropped: %llu, Transport Dropped: %llu"),
+				C.FramesCaptured.load(), C.FramesDropped.load(), C.TransportFramesDropped.load());
+			UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("    Bytes Serialized: %.2f MB, Sent: %.2f MB"),
+				C.BytesSerialized.load() / 1024.0 / 1024.0, C.BytesSent.load() / 1024.0 / 1024.0);
+		}
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT(""));
 	}
 
 	// ========== PER RECEIVER SOURCE (ADR 0012 item 4) ==========

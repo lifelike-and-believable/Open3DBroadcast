@@ -119,4 +119,39 @@ bool FO3DNngRuntimeContextTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DNngSenderMetricsHandleTest, "Open3DBroadcast.Transport.NNG.RecordsIntoConfigSenderMetrics", O3DB_TEST_FLAGS)
+bool FO3DNngSenderMetricsHandleTest::RunTest(const FString& Parameters)
+{
+	using namespace O3DNngRuntimeContextTests;
+	const int32 Port = O3DTests::FindFreeLoopbackPort(/*bTcp=*/true);
+	if (!TestTrue(TEXT("Loopback TCP port allocated"), Port > 0))
+	{
+		return false;
+	}
+	const FO3DRuntimeContextRef Context = MakeShared<FO3DRuntimeContext, ESPMode::ThreadSafe>(TEXT("O3DTest.NngSenderMetrics"));
+	const FO3DSenderMetricsHandleRef Handle = Context->GetMetrics().AcquireSenderMetrics(TEXT("Test sender component"));
+
+	// A handle from another context is refused before anything starts.
+	{
+		const FO3DRuntimeContextRef Other = MakeShared<FO3DRuntimeContext, ESPMode::ThreadSafe>(TEXT("O3DTest.NngOther"));
+		FO3DTransportConfig Foreign = MakeConfig(Port, Other);
+		Foreign.SenderMetrics = Handle;
+		const TSharedRef<IOpen3DSender> Sender = O3DNngTesting::CreateSender();
+		const FO3DTransportResult Result = Sender->Initialize(Foreign);
+		TestTrue(TEXT("A foreign sender metrics handle is InvalidConfig"), !Result.IsOk() && Result.Code == EO3DTransportError::InvalidConfig);
+	}
+
+	FO3DTransportConfig Config = MakeConfig(Port, Context);
+	Config.SenderMetrics = Handle;
+	if (!SendFrames(*this, Config))
+	{
+		return false;
+	}
+	TestEqual(TEXT("The provided handle counts the frames"), Handle->GetCounters().FramesCaptured.load(), static_cast<uint64>(NumFrames));
+	TestEqual(TEXT("And the bytes sent"), Handle->GetCounters().BytesSent.load(), static_cast<uint64>(NumFrames * FrameBytes));
+	TestEqual(TEXT("The context's aggregate equals the handle"), Context->GetMetrics().GetSenderMetrics().FramesCaptured.load(), static_cast<uint64>(NumFrames));
+	TestEqual(TEXT("The transport made no handle of its own"), Context->GetMetrics().GetSenderHandles().Num(), 1);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS && O3D_WITH_TRANSPORT_NNG

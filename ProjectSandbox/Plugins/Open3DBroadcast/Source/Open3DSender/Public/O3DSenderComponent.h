@@ -25,6 +25,7 @@ class USkeleton;
 class USkeletalMesh;
 class USoundSubmix;
 class FO3DSenderTransportController;
+class FO3DSenderMetricsHandle;
 class FO3DSenderCurveProcessor;
 class FO3DSenderPipeline;
 class FO3DSenderPoseSampler;
@@ -566,6 +567,19 @@ private:
 	const FTickFunction* TickPrerequisiteFunction = nullptr;
 
 	TUniquePtr<FO3DSenderTransportController, FO3DSenderTransportControllerDeleter> TransportController;
+
+	/**
+	 * This component's sender metrics (ADR 0012 item 4), from the default runtime context until
+	 * PR 4. Acquired on the first transport start and kept across restarts; passed to the
+	 * transport in FO3DTransportConfig::SenderMetrics. Game thread.
+	 */
+	TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe> SenderMetricsHandle;
+
+public:
+	/** This component's sender metrics handle, or null before its first transport start. Game thread. */
+	TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe> GetSenderMetricsHandle() const { return SenderMetricsHandle; }
+
+private:
 
 	/** Control publisher (ADR 0011); created on first use. Not a UPROPERTY: a duplicated component gets its own. */
 	TUniquePtr<FO3DControlPublisher> ControlPublisher;

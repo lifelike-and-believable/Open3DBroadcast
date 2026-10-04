@@ -3,6 +3,7 @@
 #include "O3DSenderComponent.h"
 
 #include "O3DHelpers.h"
+#include "O3DRuntimeContext.h"
 #include "O3DSenderLogs.h"
 #include "O3DSenderSerializer.h"
 #include "O3DSenderCurveProcessor.h"
@@ -406,6 +407,15 @@ void UO3DSenderComponent::InitializeTransport()
 	});
 
 	FO3DTransportConfig Config = BuildTransportConfig();
+	// One handle for this component's life, so its counts survive transport restarts and
+	// DumpMetrics names the component, not the transport instance (ADR 0012 item 4).
+	if (!SenderMetricsHandle.IsValid())
+	{
+		const AActor* OwnerActor = GetOwner();
+		SenderMetricsHandle = FO3DRuntimeContext::Default()->GetMetrics().AcquireSenderMetrics(
+			FString::Printf(TEXT("Sender (%s, subject %s)"), OwnerActor ? *OwnerActor->GetName() : TEXT("no owner"), *SubjectName));
+	}
+	Config.SenderMetrics = SenderMetricsHandle;
 	if (!TransportController->Start(Config))
 	{
 		return;
