@@ -16,6 +16,7 @@ This section supersedes the "Start here" line in §0 and the M3 row in §1 where
 **Open at hand-over:**
 - **Also merged:** #353 (CORE-14: `Open3DStreamCore` builds with `FPSemantics = Precise`; both ends round the predicted reference to float32), #354 (this section), #355 (`o3d.Sender.Capture.Start/Stop`). #353's first CI runs failed because the self-hosted runner had stopped; it passed after the runner machine was restarted.
 - #351: ADR 0013, timecode on LiveLink frames (RCV-8), **Accepted** 2026-10-04 with its open questions' defaults; not implemented yet.
+- **ADR 0012 (SHR-38), 2026-10-04:** merged #357 (PR 1: `FO3DRuntimeContext`, default context behind the statics), #358 (PR 2: `FO3DTransportConfig::Context`; NNG, MoQ and WebRTC record into it; CI `Build/Scripts/check-transport-metrics.py`), #359 (PR 3a: per-receiver metrics handles), #360 (PR 3b: per-sender metrics handles through `FO3DTransportConfig::SenderMetrics`; only transports record sender metrics, so the component passes its handle down). **Open: #361** (PR 4a: `UO3DRuntimeSubsystem`, `ContextName` on the receiver source config and the remote audio and control components, `o3d.DumpMetrics` per context; built, 469/469 UE tests locally; merge when green).
 
 **Maintainer decisions (2026-10-03):**
 - No users run old receivers; compatibility with formats before protocol 2 is not kept.
@@ -28,7 +29,12 @@ This section supersedes the "Start here" line in §0 and the M3 row in §1 where
 **Next, in order:**
 1. **At the desk (maintainer):** record takes with `o3d.Sender.Capture.Start` on the default (legacy) encoding, above all the idle animation that jittered in July, and run `QuantEval --capture <take>`; the RCV-9 live check (narrowed: LiveLink evaluates on the pushed `WorldTime` after a source-wide offset estimate; what remains is how `FApp::GetCurrentTime()` relates to `FPlatformTime::Seconds()` under a fixed timestep); WP-A5 (reconnect, needs live servers);.
 2. **CORE-12 follow-up, after real numbers:** rotations use the 16-bit tier only (QuantEval's synthetic suite: idle-bone jitter 0.40/0.86 degrees p95/max at the UE defaults, 0.0096/0.020 without the Byte tier, for 5 to 10% more bytes), normalize before quantizing, record the dequantized value as last sent. Quantization stays off by default until the maintainer's live test passes.
-3. **ADR 0012 implementation:** five PRs as outlined in the ADR (context, transport seam, metrics handles, subsystem and `ContextName`, docs).
+3. **ADR 0012, the rest:**
+   - Merge #361 (PR 4a).
+   - **PR 4b:** `ContextName` on `UO3DSenderComponent`. The component resolves it at transport start, takes its sender metrics handle from that context and passes the context in `Config.Context`. Keep the resolved context next to the handle and re-acquire the handle when the context changes between starts: today's single lifetime handle plus a new context would make the transport refuse the config (`InvalidConfig`). Test a name change between starts. User guide: add the sender to "Separate Receivers: Runtime Contexts" and the sender property table.
+   - **Follow-up (gap against ADR 0012 accepted default Q3, "the panels show the names in use"):** `ContextName` is a plain text field. UE 5.7's `GetOptions` meta uses `SPropertyEditorCombo`, which only picks from a list (no free text), so showing names in use needs a small details customization in Open3DBroadcastEditor: a text field plus a list of the names in use (`UO3DRuntimeSubsystem::GetNamedContexts`). Maintainer, 2026-10-04: record it here; not yet scheduled.
+   - **PR 5:** documentation of the process-wide services and why (ADR 0012 item 1): transport registry, secret store, audio input devices, MoQ dispatcher, console variables, control receive override.
+   - Q4 is resolved: UE 5.7 has one `FLiveLinkClient` per process (`LiveLinkModule.h:60`, registered in `LiveLinkModule.cpp:57-61`), so LiveLink subject names stay process-wide; the user guide says so (#361).
 4. **ADR 0013 implementation:** three PRs (core field, sender, receiver), as outlined in the ADR; the manual test uses `USystemTimeTimecodeProvider` on both machines.
 5. **Updated NNG Repeater** (`apps/Repeater`; deployment files in `docker/`, `compose/`, `cloud-init/`): rebuilt on raw NNG (pull to pub), receive size limit for large frames, send buffering, backoff on receive errors instead of a busy loop, stats instead of one log line per message, clean shutdown, a Docker image that builds only the Repeater, a real relay test in CI (the smoke test is `echo ok`), and late joiners: cache the last full frame per stream and re-publish it when a subscriber pipe is added (the sender's peer-joined trigger cannot reach receivers behind the Repeater). Not deployed, so no migration.
 6. **Later:** WebRTC peer join (ADR 0005 Q4); archiving `apps/FbxStream`, `Test1`, `SubscribeTest`, `XSensTest` (not yet confirmed); the legacy connectors as an optional CMake target (CORE-27); the rest of WP-A7; M4; Fab F0 and F5.
@@ -40,6 +46,9 @@ This section supersedes the "Start here" line in §0 and the M3 row in §1 where
 - `core.autocrlf` is true: a file whose committed blob has CRLF (for example `O3DSenderComponent.h`) must be staged with `git -c core.autocrlf=false add`, or the commit rewrites every line.
 - The self-hosted UE runner once failed with `FileLoadException` loading its compiled build-rules assembly; it is not a code failure, and a new run passes.
 - Docs-only PRs skip the plugin jobs and get no bot comment, so check their checks directly before merging.
+- `sed -i` in Git Bash converts CRLF files to LF (it rewrote `O3DReceiverSource.cpp` in #361; fixed in a follow-up commit). Edit CRLF files with a script that keeps the file's line endings, and check `git diff --cached --numstat` for whole-file rewrites before committing.
+- `Build/Scripts/Run-AutomationTests.ps1` writes its report under the current directory's `Artifacts/`; run it from the repo root, or delete a stray `Artifacts/` inside the source tree before committing.
+- One-shot local check for a plugin change: build, WebRTC add-on build, then all tests on the add-on host project (469 tests with both plugins as of #361).
 
 ## 0. Handover to Claude on desktop (2026-10-03)
 
