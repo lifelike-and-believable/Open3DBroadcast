@@ -1,6 +1,7 @@
 # 0013: Timecode on LiveLink frames
 
 - **Status:** Accepted (maintainer sign-off 2026-10-04)
+- **Implemented:** #366 (PR 1, core), #367 (PR 2, sender), #368 (PR 3a, receiver frames), #369 (PR 3b, control alignment in Timecode mode). The manual test at the desk (Verification) remains.
 - **Accepted with defaults:** the open questions below are accepted with the default given next to each. The needs-verification item stays open and is resolved in PR 3; a result that invalidates the decision is handled by a superseding ADR.
 - **Date:** 2026-10-03
 - **Plan decision:** RCV-8 in WP-A4 of [`plugin-hardening-and-fab-readiness.md`](../roadmap/plugin-hardening-and-fab-readiness.md)
