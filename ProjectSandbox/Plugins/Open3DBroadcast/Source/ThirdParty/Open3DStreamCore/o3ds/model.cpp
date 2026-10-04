@@ -818,15 +818,18 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 				count++;
 			}
 
-			/*
-		if (t->scale.delta() > 0.001)
-		{
-			scales.push_back(O3DS::Data::ScaleUpdate(
-				(float)t->scale.value.v[0],
-				(float)t->scale.value.v[1],
-				(float)t->scale.value.v[2], transformId));
-			t->scale.sent();
-		}*/
+			// Scale (CORE-11, ADR 0005 (v)): absolute values behind the same
+			// delta threshold as translation, never quantized. Readers have
+			// always applied scale updates (ParseUpdate).
+			if (t->scale.delta() > deltaThreshold)
+			{
+				scales.push_back(O3DS::Data::ScaleUpdate(
+					(float)t->scale.value.v[0],
+					(float)t->scale.value.v[1],
+					(float)t->scale.value.v[2], transformId));
+				t->scale.sent();
+				count++;
+			}
 
 			transformId++;
 		}
@@ -885,7 +888,10 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 		std::vector<O3DS::Data::TranslationUpdate> translations;
 		std::vector<O3DS::Data::RotationUpdate> rotations;
-		std::vector<O3DS::Data::ScaleUpdate> scales; // scale updates are unsent today (see legacy SerializeUpdate's commented-out block) - residual mode preserves that, nothing to generalize here
+		// Scale (CORE-11, ADR 0005 (v)) is sent as ABSOLUTE values, not
+		// residuals: on a keyframe, and otherwise when it moved more than
+		// deltaThreshold since it was last sent.
+		std::vector<O3DS::Data::ScaleUpdate> scales;
 
 		// The exact pose a receiver will end up with, built alongside the
 		// wire entries below: `actual`'s value for every channel this
@@ -905,6 +911,13 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		const size_t refTransCount = reference.translations.size();
 		const size_t refRotCount = reference.rotations.size();
 
+		// The scale a receiver holds: the float value last sent. Committed
+		// into `reconstructed` so both predictor histories see the same scale.
+		auto receiverScale = [](const TransformScale& scale)
+		{
+			return Vector3d((double)(float)scale.lastSentValue.v[0], (double)(float)scale.lastSentValue.v[1], (double)(float)scale.lastSentValue.v[2]);
+		};
+
 		int transformId = 0;
 		for (const auto& tform : this->mTransforms)
 		{
@@ -923,6 +936,8 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 				// omitted (unsent) channel.
 				reconstructed.translations[transformId] = refTrans;
 				reconstructed.rotations[transformId] = refRot;
+				if ((size_t)transformId < reconstructed.scales.size())
+					reconstructed.scales[transformId] = receiverScale(tform->scale);
 				transformId++;
 				continue;
 			}
@@ -975,6 +990,18 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			{
 				reconstructed.rotations[transformId] = refRot;
 			}
+
+			if (isKeyframe || tform->scale.delta() > deltaThreshold)
+			{
+				scales.push_back(O3DS::Data::ScaleUpdate(
+					(float)tform->scale.value.v[0],
+					(float)tform->scale.value.v[1],
+					(float)tform->scale.value.v[2], transformId));
+				tform->scale.sent();
+				count++;
+			}
+			if ((size_t)transformId < reconstructed.scales.size())
+				reconstructed.scales[transformId] = receiverScale(tform->scale);
 
 			transformId++;
 		}
@@ -1923,9 +1950,16 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 			}
 		}
 
-		// Scale: the legacy path doesn't send scale updates at all today
-		// (see Subject::SerializeUpdate's commented-out block) - residual
-		// mode preserves that, nothing to reconstruct here.
+		// Scale (CORE-11, ADR 0005 (v)): absolute values, not residuals.
+		if (inUpdate->scale()) {
+			for (auto inScale : *inUpdate->scale())
+			{
+				id = inScale->i();
+				if (id < 0 || (size_t)id >= outSubject->mTransforms.size())
+					continue;
+				*inScale >> outSubject->mTransforms[(size_t)id]->scale;
+			}
+		}
 
 		if (inUpdate->curves()) {
 			for (auto inCurve : *inUpdate->curves()) {

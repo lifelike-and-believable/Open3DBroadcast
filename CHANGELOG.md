@@ -10,6 +10,21 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Schema/Protocol
 
+- **Updates carry scale** (CORE-11, ADR 0005 (v)). The delta and quantized path sends a
+  transform's absolute scale in `SubjectUpdate.scale` when it moved more than the delta
+  threshold since it was last sent (the block had been commented out); residual updates send
+  absolute scale (not a residual) on every keyframe and when it moved past the threshold, and
+  `ParseUpdateResidual` applies it. Before, scale froze at the last full Subject in the
+  residual and quantized encodings, so squash-and-stretch and curve-driven scale were lost
+  between full syncs.
+  - Version: protocol 2, unreleased (`docs/wire-format.md` section 8); no schema change.
+  - `min_reader_version`: unchanged (a plain delta with scale stays 1; readers have always
+    applied `scale` in plain updates).
+  - Compatibility: a reader from before this change ignores `scale` in residual updates and
+    keeps the last full Subject's scale, as before. A new reader of an old writer's frames sees
+    no scale entries.
+  - Tests: `core.scale_update_tests`.
+
 - **`SubjectUpdate.ref_seq`** (ADR 0005 (viii), CORE-5): appended `ulong`, default 0. The
   `tx_seq` of the full Subject an update is relative to; `O3DS::StreamWriter` sets it on every
   update. A receiver that parses with a `ParseContext` drops an update whose `ref_seq` is set
