@@ -2,7 +2,7 @@
 
 Written 2026-09-30 by the cloud session that drove M1, M2 and the start of M3 of the plugin hardening roadmap. Updated 2026-10-01 with the control-channel work (ADR 0011, CTL-1..5) that landed afterwards; ADR 0011 accepted and WP-CTL added to the roadmap the same day. Updated 2026-10-03 when the cloud session finished WP-A1 (#305–#314) and WP-A2a to A2c (#316–#318) and handed the work over to Claude on desktop (§0); updated the same day when Claude on desktop finished WP-A2d (#319) and WP-A2e. Read this first, then the files it points to.
 
-## 0a. State at the end of the desktop session (2026-10-03, newest; read this first)
+## 0a. State at the end of the desktop session (2026-10-04, newest; read this first)
 
 This section supersedes the "Start here" line in §0 and the M3 row in §1 where they disagree.
 
@@ -16,7 +16,10 @@ This section supersedes the "Start here" line in §0 and the M3 row in §1 where
 **Open at hand-over:**
 - **Also merged:** #353 (CORE-14: `Open3DStreamCore` builds with `FPSemantics = Precise`; both ends round the predicted reference to float32), #354 (this section), #355 (`o3d.Sender.Capture.Start/Stop`). #353's first CI runs failed because the self-hosted runner had stopped; it passed after the runner machine was restarted.
 - #351: ADR 0013, timecode on LiveLink frames (RCV-8), **Accepted** 2026-10-04 with its open questions' defaults; not implemented yet.
-- **ADR 0012 (SHR-38), 2026-10-04:** merged #357 (PR 1: `FO3DRuntimeContext`, default context behind the statics), #358 (PR 2: `FO3DTransportConfig::Context`; NNG, MoQ and WebRTC record into it; CI `Build/Scripts/check-transport-metrics.py`), #359 (PR 3a: per-receiver metrics handles), #360 (PR 3b: per-sender metrics handles through `FO3DTransportConfig::SenderMetrics`; only transports record sender metrics, so the component passes its handle down). **Open: #361** (PR 4a: `UO3DRuntimeSubsystem`, `ContextName` on the receiver source config and the remote audio and control components, `o3d.DumpMetrics` per context; built, 469/469 UE tests locally; merge when green).
+- **ADR 0012 (SHR-38) implemented, 2026-10-04:** #357 (PR 1: `FO3DRuntimeContext`, default context behind the statics), #358 (PR 2: `FO3DTransportConfig::Context`; NNG, MoQ and WebRTC record into it; CI `Build/Scripts/check-transport-metrics.py`), #359 (PR 3a: per-receiver metrics handles), #360 (PR 3b: per-sender metrics handles through `FO3DTransportConfig::SenderMetrics`; only transports record sender metrics, so the component passes its handle down), #361 (PR 4a: `UO3DRuntimeSubsystem`, `ContextName` on the receiver source config and the remote audio and control components, `o3d.DumpMetrics` per context), #364 (PR 4b: `ContextName` on the sender component), #365 (PR 5: `docs/dev/runtime-services.md`). Open follow-up: the names-in-use picker (Next, item 3).
+- **ADR 0013 (RCV-8) implemented, 2026-10-04:** #366 (PR 1: optional `SubjectList.scene_time`, protocol 2, `O3DS::SceneTime` and `IsValidSceneTime`, reset on every parse), #367 (PR 2: the sender stamps `FApp::GetCurrentFrameTime()`), #368 (PR 3a: `FO3DSceneTimeMapper` sets every LiveLink frame's SceneTime from the sender's timecode, the sender's timeline continued, or WorldTime on the engine timecode; the per-frame `CurveHash` and `SubjectListTime` string metadata are removed, RCV-11), #369 (PR 3b: control alignment in Timecode mode). ADR Q3 resolved from engine source. Not done yet: the manual test at the desk.
+- **CI:** #363, documentation-only changes (Markdown, `docs/`) start no builds: `core-tests.yml` ignores them and the plugin CI's change filter excludes Markdown.
+- **HANDOFF:** #362 recorded the ADR 0012 progress and the names-in-use follow-up.
 
 **Maintainer decisions (2026-10-03):**
 - No users run old receivers; compatibility with formats before protocol 2 is not kept.
@@ -27,15 +30,16 @@ This section supersedes the "Start here" line in §0 and the M3 row in §1 where
 - WP-A7: archive Maya, MotionBuilder, `python/`, `sphinx/` (done). The Repeater image is not deployed; an updated NNG Repeater is wanted.
 
 **Next, in order:**
-1. **At the desk (maintainer):** record takes with `o3d.Sender.Capture.Start` on the default (legacy) encoding, above all the idle animation that jittered in July, and run `QuantEval --capture <take>`; the RCV-9 live check (narrowed: LiveLink evaluates on the pushed `WorldTime` after a source-wide offset estimate; what remains is how `FApp::GetCurrentTime()` relates to `FPlatformTime::Seconds()` under a fixed timestep); WP-A5 (reconnect, needs live servers);.
+1. **At the desk (maintainer):**
+   - record takes with `o3d.Sender.Capture.Start` on the default (legacy) encoding, above all the idle animation that jittered in July, and run `QuantEval --capture <take>`;
+   - the RCV-9 live check (narrowed: LiveLink evaluates on the pushed `WorldTime` after a source-wide offset estimate; the fixed-timestep question is answered in ADR 0013 Q3);
+   - the ADR 0013 manual test: `USystemTimeTimecodeProvider` on both machines (turn off *Generate Full Frame*, or turn on the LiveLink source's *Generate Sub Frame*), a LiveLink source in Timecode mode, and check that frames are selected by the sender's timecode (user guide, "Timecode Mode");
+   - WP-A5 (reconnect, needs live servers).
 2. **CORE-12 follow-up, after real numbers:** rotations use the 16-bit tier only (QuantEval's synthetic suite: idle-bone jitter 0.40/0.86 degrees p95/max at the UE defaults, 0.0096/0.020 without the Byte tier, for 5 to 10% more bytes), normalize before quantizing, record the dequantized value as last sent. Quantization stays off by default until the maintainer's live test passes.
-3. **ADR 0012, the rest:**
-   - Merge #361 (PR 4a).
-   - **PR 4b:** `ContextName` on `UO3DSenderComponent`. The component resolves it at transport start, takes its sender metrics handle from that context and passes the context in `Config.Context`. Keep the resolved context next to the handle and re-acquire the handle when the context changes between starts: today's single lifetime handle plus a new context would make the transport refuse the config (`InvalidConfig`). Test a name change between starts. User guide: add the sender to "Separate Receivers: Runtime Contexts" and the sender property table.
-   - **Follow-up (gap against ADR 0012 accepted default Q3, "the panels show the names in use"):** `ContextName` is a plain text field. UE 5.7's `GetOptions` meta uses `SPropertyEditorCombo`, which only picks from a list (no free text), so showing names in use needs a small details customization in Open3DBroadcastEditor: a text field plus a list of the names in use (`UO3DRuntimeSubsystem::GetNamedContexts`). Maintainer, 2026-10-04: record it here; not yet scheduled.
-   - **PR 5:** documentation of the process-wide services and why (ADR 0012 item 1): transport registry, secret store, audio input devices, MoQ dispatcher, console variables, control receive override.
+3. **ADR 0012 follow-up:**
+   - **Names-in-use picker (gap against ADR 0012 accepted default Q3, "the panels show the names in use"):** `ContextName` is a plain text field. UE 5.7's `GetOptions` meta uses `SPropertyEditorCombo`, which only picks from a list (no free text), so showing names in use needs a small details customization in Open3DBroadcastEditor: a text field plus a list of the names in use (`UO3DRuntimeSubsystem::GetNamedContexts`). Maintainer, 2026-10-04: record it here; not yet scheduled.
    - Q4 is resolved: UE 5.7 has one `FLiveLinkClient` per process (`LiveLinkModule.h:60`, registered in `LiveLinkModule.cpp:57-61`), so LiveLink subject names stay process-wide; the user guide says so (#361).
-4. **ADR 0013 implementation:** three PRs (core field, sender, receiver), as outlined in the ADR; the manual test uses `USystemTimeTimecodeProvider` on both machines.
+4. **ADR 0013:** implemented (#366 to #369); only the manual test at the desk remains (item 1).
 5. **Updated NNG Repeater** (`apps/Repeater`; deployment files in `docker/`, `compose/`, `cloud-init/`): rebuilt on raw NNG (pull to pub), receive size limit for large frames, send buffering, backoff on receive errors instead of a busy loop, stats instead of one log line per message, clean shutdown, a Docker image that builds only the Repeater, a real relay test in CI (the smoke test is `echo ok`), and late joiners: cache the last full frame per stream and re-publish it when a subscriber pipe is added (the sender's peer-joined trigger cannot reach receivers behind the Repeater). Not deployed, so no migration.
 6. **Later:** WebRTC peer join (ADR 0005 Q4); archiving `apps/FbxStream`, `Test1`, `SubscribeTest`, `XSensTest` (not yet confirmed); the legacy connectors as an optional CMake target (CORE-27); the rest of WP-A7; M4; Fab F0 and F5.
 
