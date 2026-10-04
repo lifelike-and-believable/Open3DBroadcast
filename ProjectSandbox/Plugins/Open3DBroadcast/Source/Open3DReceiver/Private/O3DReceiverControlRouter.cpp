@@ -6,6 +6,17 @@
 #include "O3DControlConvert.h"
 #include "O3DControlSettings.h"
 #include "O3DReceiverLogs.h"
+#include "O3DRuntimeContext.h"
+
+FO3DReceiverControlRouter::FO3DReceiverControlRouter(FO3DControlBus::FInstance& InBus)
+	: Bus(InBus)
+{
+}
+
+FO3DReceiverControlRouter::FO3DReceiverControlRouter()
+	: FO3DReceiverControlRouter(FO3DRuntimeContext::Default()->GetControlBus())
+{
+}
 
 void FO3DReceiverControlRouter::ApplyConfig()
 {
@@ -64,7 +75,7 @@ void FO3DReceiverControlRouter::Route(O3DS::Control::Change&& Change, double Now
 
 void FO3DReceiverControlRouter::Publish(const O3DS::Control::Change& Change, const FString& StreamId) const
 {
-	FO3DControlBus::Publish(O3DControl::FromCore(Change, StreamId));
+	Bus.Publish(O3DControl::FromCore(Change, StreamId));
 }
 
 void FO3DReceiverControlRouter::Discard()
@@ -74,7 +85,7 @@ void FO3DReceiverControlRouter::Discard()
 	Aligner.Flush(Held); // dropped, not published
 	for (const FString& SourceId : SourcesSeen)
 	{
-		FO3DControlBus::ForgetSource(SourceId);
+		Bus.ForgetSource(SourceId);
 	}
 	SourcesSeen.Reset();
 	bWasEnabled = false;

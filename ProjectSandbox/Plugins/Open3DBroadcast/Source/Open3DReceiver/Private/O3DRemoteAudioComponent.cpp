@@ -2,6 +2,8 @@
 
 #include "O3DRemoteAudioComponent.h"
 
+#include "O3DRuntimeSubsystem.h"
+
 #include "O3DAudioBus.h"
 #include "O3DReceiverLogs.h"
 #include "O3DUnifiedMessage.h"
@@ -73,11 +75,11 @@ void UO3DRemoteAudioComponent::BeginPlay()
         bOwnsAudioComponent = true;
     }
 
-    BusDelegateHandle = FO3DAudioBus::OnPcm16().AddUObject(this, &UO3DRemoteAudioComponent::OnAudioPcm16);
+    BindBus();
 
     // Per component (RCV-25): a function-static flag logged only for the first component in the process.
     bLoggedFirstFrame = false;
-    UE_LOG(LogO3DReceiverAudio, Log, TEXT("Subscribed to FO3DAudioBus (Gain=%.2f, owner '%s')"), Gain, *GetNameSafe(GetOwner()));
+    UE_LOG(LogO3DReceiverAudio, Log, TEXT("Subscribed to the audio bus of context '%s' (Gain=%.2f, owner '%s')"), *ContextName.ToString(), Gain, *GetNameSafe(GetOwner()));
     if (!AudioComp)
     {
         UE_LOG(LogO3DReceiverAudio, Warning, TEXT("No UAudioComponent present/created on owner '%s'"), *GetNameSafe(GetOwner()));
@@ -91,13 +93,28 @@ void UO3DRemoteAudioComponent::BeginPlay()
 
 void UO3DRemoteAudioComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    if (BusDelegateHandle.IsValid())
-    {
-        FO3DAudioBus::OnPcm16().Remove(BusDelegateHandle);
-        BusDelegateHandle.Reset();
-    }
+    UnbindBus();
 
     Super::EndPlay(EndPlayReason);
+}
+
+void UO3DRemoteAudioComponent::BindBus()
+{
+    if (!BusDelegateHandle.IsValid())
+    {
+        BoundContext = UO3DRuntimeSubsystem::Resolve(ContextName);
+        BusDelegateHandle = BoundContext->GetAudioBus().OnPcm16().AddUObject(this, &UO3DRemoteAudioComponent::OnAudioPcm16);
+    }
+}
+
+void UO3DRemoteAudioComponent::UnbindBus()
+{
+    if (BusDelegateHandle.IsValid() && BoundContext.IsValid())
+    {
+        BoundContext->GetAudioBus().OnPcm16().Remove(BusDelegateHandle);
+    }
+    BusDelegateHandle.Reset();
+    BoundContext.Reset();
 }
 
 bool UO3DRemoteAudioComponent::MatchesFilter(const FString& InSubject, const FString& InStream) const

@@ -26,6 +26,9 @@ THIRD_PARTY_INCLUDES_END
 
 struct FO3DRemoteAudioComponentTestAccessor
 {
+	static void BindBus(UO3DRemoteAudioComponent& Component) { Component.BindBus(); }
+	static void UnbindBus(UO3DRemoteAudioComponent& Component) { Component.UnbindBus(); }
+
 	static void CallEnsureSoundWave(UO3DRemoteAudioComponent* Component, int32 NumChannels, int32 SampleRate)
 	{
 		Component->EnsureSoundWave(NumChannels, SampleRate);

@@ -23,6 +23,7 @@
 
 #include "O3DHelpers.h"
 #include "O3DRuntimeContext.h"
+#include "O3DRuntimeSubsystem.h"
 #include "O3DRedact.h"
 #include "O3DReceiverTransportCustomization.h"
 #include "Transport/O3DTransportOptions.h"
@@ -202,8 +203,10 @@ private:
 class FO3DReceiverSource::FAudioSink : public IO3DReceiverAudioSink
 {
 public:
-    explicit FAudioSink(FAudioMetaDefaults InDefaults)
+    /** Publishes to InContext's audio bus (ADR 0012); the sink keeps the context alive. */
+    FAudioSink(FAudioMetaDefaults InDefaults, FO3DRuntimeContextRef InContext)
         : Defaults(MoveTemp(InDefaults))
+        , Context(MoveTemp(InContext))
     {
     }
 
@@ -222,9 +225,9 @@ public:
             TArray<uint8> Payload;
             Payload.Append(Data, NumBytes);
 
-            AsyncTask(ENamedThreads::GameThread, [MetaCopy, Payload = MoveTemp(Payload), bDebug]() mutable
+            AsyncTask(ENamedThreads::GameThread, [MetaCopy, Payload = MoveTemp(Payload), bDebug, Context = Context]() mutable
             {
-                FO3DAudioBus::PublishPcm16(MetaCopy, Payload.GetData(), Payload.Num());
+                Context->GetAudioBus().PublishPcm16(MetaCopy, Payload.GetData(), Payload.Num());
                 if (bDebug)
                 {
                     UE_LOG(LogO3DReceiverAudio, Verbose, TEXT("Published audio frame label='%s' subject='%s' bytes=%d sr=%d ch=%d"),
@@ -240,6 +243,7 @@ public:
 
 private:
     const FAudioMetaDefaults Defaults;
+    const FO3DRuntimeContextRef Context;
 };
 
 namespace
@@ -256,14 +260,15 @@ FO3DReceiverSource::FO3DReceiverSource(const FO3DReceiverSourceConfig& InSetting
     : SourceType(LOCTEXT("SourceType", "Open3D Stream"))
     , SourceMachineName(LOCTEXT("SourceMachineName", "-"))
     , SourceStatus(LOCTEXT("SourceStatus", "Inactive"))
-    , MetricsHandle(FO3DRuntimeContext::Default()->GetMetrics().AcquireReceiverMetrics(FString::Printf(TEXT("Receiver (%s)"), *InSettings.TransportName.ToString())))
+    , RuntimeContext(UO3DRuntimeSubsystem::Resolve(InSettings.ContextName))
+    , MetricsHandle(RuntimeContext->GetMetrics().AcquireReceiverMetrics(FString::Printf(TEXT("Receiver (%s)"), *InSettings.TransportName.ToString())))
     , SourceSettings(InSettings)
     , FrameDecoder(MakeUnique<FO3DReceiverFrameDecoder>(MetricsHandle))
     , Publisher(MakeUnique<FO3DLiveLinkPublisher>())
 {
     // Declared before the decoder and publisher, so created here rather than in the list (C5038).
     Concealment = MakeUnique<FO3DReceiverConcealment>(MetricsHandle);
-    ControlRouter = MakeUnique<FO3DReceiverControlRouter>();
+    ControlRouter = MakeUnique<FO3DReceiverControlRouter>(RuntimeContext->GetControlBus());
     Scheduler = MakeUnique<FO3DReceiverStreamScheduler>(
         [this](O3DS::ReceiverStream& Stream, const FString& Label, const char* Data, size_t Len, double LegacyTimestampSeconds, const O3DS::Frame* GatedFrame)
         {
@@ -359,6 +364,7 @@ bool FO3DReceiverSource::StartTransport()
 
     EnsureValidTransportName();
     ActiveConfig = BuildTransportConfig();
+    ActiveConfig.Context = RuntimeContext;
     if (ActiveConfig.Transport.IsNone())
     {
         UE_LOG(LogO3DReceiverSource, Warning, TEXT("No transport selected for receiver source."));
@@ -955,7 +961,7 @@ void FO3DReceiverSource::FinalizeAudioMeta(O3DS::FAudioFrameMeta& Meta) const
 
 TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe> FO3DReceiverSource::MakeAudioSink() const
 {
-    return MakeShared<FAudioSink, ESPMode::ThreadSafe>(BuildAudioMetaDefaults());
+    return MakeShared<FAudioSink, ESPMode::ThreadSafe>(BuildAudioMetaDefaults(), RuntimeContext);
 }
 
 FO3DReceiverSource::FAudioMetaDefaults FO3DReceiverSource::BuildAudioMetaDefaults() const

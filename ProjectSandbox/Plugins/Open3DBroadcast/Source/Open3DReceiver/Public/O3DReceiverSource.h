@@ -10,6 +10,7 @@
 #include "Transport/O3DReceiverInterface.h"
 #include "O3DReceiverLogs.h"
 #include "O3DPerformanceMetrics.h"
+#include "O3DRuntimeContext.h"
 #include "O3DReceiverSourceSettings.h"
 #include "O3DUnifiedMessage.h"
 
@@ -194,6 +195,9 @@ public:
     /** This source's metrics handle (ADR 0012 item 4). Any thread. */
     const FO3DReceiverMetricsHandleRef& GetMetricsHandle() const { return MetricsHandle; }
 
+    /** This source's runtime context (ADR 0012 item 5). Any thread. */
+    const FO3DRuntimeContextRef& GetContext() const { return RuntimeContext; }
+
 private:
     // LiveLink bookkeeping
     FText SourceType;
@@ -208,9 +212,13 @@ private:
 
     std::atomic<bool> bIsValid{true};
 
-    // This source's metrics (ADR 0012 item 4), from the default runtime context. Counters also
-    // add to the context's aggregate. Handed to the decoder, scheduler and concealment, never the
-    // context. Declared before them, so it is created first.
+    // The runtime context named by the settings' ContextName (ADR 0012 item 5): this source's
+    // audio and control go to its buses. Declared before everything that refers into it, so it is
+    // created first and destroyed last.
+    FO3DRuntimeContextRef RuntimeContext;
+
+    // This source's metrics (ADR 0012 item 4), from RuntimeContext. Counters also add to the context's
+    // aggregate. Handed to the decoder, scheduler and concealment, never the context.
     FO3DReceiverMetricsHandleRef MetricsHandle;
 
     // Throttles "Rejected malformed packet" to one line per MalformedWarningIntervalSeconds,

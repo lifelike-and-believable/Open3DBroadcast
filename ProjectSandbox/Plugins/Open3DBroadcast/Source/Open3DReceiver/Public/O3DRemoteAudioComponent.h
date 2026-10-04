@@ -3,11 +3,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Templates/SharedPointer.h"
 #include "Components/SceneComponent.h"
 #include "Containers/ArrayView.h"
 #include "LiveLinkTypes.h"
 #include "Engine/EngineTypes.h"
 #include "O3DRemoteAudioComponent.generated.h"
+
+class FO3DRuntimeContext;
 
 class UAudioComponent;
 class USoundWaveProcedural;
@@ -39,6 +42,14 @@ class OPEN3DRECEIVER_API UO3DRemoteAudioComponent : public USceneComponent
 
 public:
     UO3DRemoteAudioComponent();
+
+    /**
+     * The runtime context whose audio this component plays (docs/adr/0012-runtime-services-and-global-state.md):
+     * receiver sources with the same Context Name. Empty: the default context. Case-insensitive.
+     * Read when play begins.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Open3DBroadcast")
+    FName ContextName;
 
     /** Select which remote audio stream to play. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
@@ -117,6 +128,9 @@ private:
     void OnAudioFrame(const FString& StreamLabel, const FString& SubjectName, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate);
     void OnAudioPcm16(const O3DS::FAudioFrameMeta& Meta, TConstArrayView<uint8> PCM16Bytes);
     bool MatchesFilter(const FString& InSubject, const FString& InStream) const;
+    /** Subscribes to the audio bus of ContextName's context, once; UnbindBus leaves that same bus. */
+    void BindBus();
+    void UnbindBus();
     void EnsureSoundWave(int32 NumChannels, int32 SampleRate);
 
     void AttachToConfiguredParent();
@@ -132,6 +146,8 @@ private:
     bool bOwnsAudioComponent = false;
 
     FDelegateHandle BusDelegateHandle;
+    /** The context BusDelegateHandle is bound in, so EndPlay unbinds from the same bus. */
+    TSharedPtr<FO3DRuntimeContext, ESPMode::ThreadSafe> BoundContext;
 
     // Log throttling, per component (RCV-25): every component logs its own first frame.
     bool bLoggedFirstFrame = false;

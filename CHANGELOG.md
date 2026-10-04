@@ -558,6 +558,21 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- **Named runtime contexts** (SHR-38, ADR 0012 PR 4a): `UO3DRuntimeSubsystem` (engine
+  subsystem) owns named `FO3DRuntimeContext`s, created on first use; the empty name is the default
+  context. New `ContextName` on `FO3DReceiverSourceConfig` (advanced; saved in the LiveLink
+  connection string), `UO3DRemoteAudioComponent` and `UO3DRemoteControlComponent`: a receiver
+  source publishes its audio (through its audio sink) and control (through its control router) to
+  its context's buses, takes its metrics handle from that context and passes the context to its
+  transport; a component listens to, and queries, the context it bound to at play. With every
+  name empty nothing changes. Names are case-insensitive FNames; the control receive override
+  stays process-wide. `o3d.DumpMetrics` prints each named context after the default one, and
+  `o3d.ResetMetrics` resets them all; the HUD and CSV show the default context. User guide:
+  "Separate Receivers: Runtime Contexts" (LiveLink subject names stay process-wide: UE 5.7 has one
+  LiveLink client per process). Not yet: the sender component's `ContextName` (PR 4b) and a
+  names-in-use picker in the editor panels. Test:
+  `Open3DBroadcast.Receiver.RuntimeContext.SelectionByName`.
+
 - **Per-sender metrics** (SHR-38, ADR 0012 PR 3b): `FO3DSenderMetricsHandle`
   (`FO3DPerformanceMetrics::AcquireSenderMetrics`) adds to its counters and to the context's
   aggregate. The sender component acquires one on its first transport start, keeps it across

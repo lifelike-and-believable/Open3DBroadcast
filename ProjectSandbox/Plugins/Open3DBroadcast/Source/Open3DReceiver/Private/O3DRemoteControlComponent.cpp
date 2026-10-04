@@ -2,6 +2,8 @@
 
 #include "O3DRemoteControlComponent.h"
 
+#include "O3DRuntimeSubsystem.h"
+
 #include "O3DControlBus.h"
 
 UO3DRemoteControlComponent::UO3DRemoteControlComponent()
@@ -25,17 +27,24 @@ void UO3DRemoteControlComponent::Bind()
 {
 	if (!BusHandle.IsValid())
 	{
-		BusHandle = FO3DControlBus::OnChange().AddUObject(this, &UO3DRemoteControlComponent::HandleChange);
+		BoundContext = UO3DRuntimeSubsystem::Resolve(ContextName);
+		BusHandle = BoundContext->GetControlBus().OnChange().AddUObject(this, &UO3DRemoteControlComponent::HandleChange);
 	}
+}
+
+FO3DControlBus::FInstance& UO3DRemoteControlComponent::GetBus() const
+{
+	return BoundContext.IsValid() ? BoundContext->GetControlBus() : UO3DRuntimeSubsystem::Resolve(ContextName)->GetControlBus();
 }
 
 void UO3DRemoteControlComponent::Unbind()
 {
-	if (BusHandle.IsValid())
+	if (BusHandle.IsValid() && BoundContext.IsValid())
 	{
-		FO3DControlBus::OnChange().Remove(BusHandle);
-		BusHandle.Reset();
+		BoundContext->GetControlBus().OnChange().Remove(BusHandle);
 	}
+	BusHandle.Reset();
+	BoundContext.Reset();
 }
 
 bool UO3DRemoteControlComponent::PassesSourceFilter(const FString& SourceId) const
@@ -92,13 +101,14 @@ void UO3DRemoteControlComponent::HandleChange(const FO3DControlChange& Change)
 
 bool UO3DRemoteControlComponent::GetControlValue(const FString& Key, const FString& TargetSubject, FO3DControlValue& OutValue) const
 {
-	for (const FString& SourceId : FO3DControlBus::GetSources())
+	FO3DControlBus::FInstance& Bus = GetBus();
+	for (const FString& SourceId : Bus.GetSources())
 	{
 		if (!PassesSourceFilter(SourceId))
 		{
 			continue;
 		}
-		if (const FO3DControlValue* Value = FO3DControlBus::FindValue(SourceId, Key, TargetSubject))
+		if (const FO3DControlValue* Value = Bus.FindValue(SourceId, Key, TargetSubject))
 		{
 			OutValue = *Value;
 			return true;
@@ -111,13 +121,14 @@ bool UO3DRemoteControlComponent::GetControlValue(const FString& Key, const FStri
 TArray<FO3DControlEntry> UO3DRemoteControlComponent::GetAllControlValues() const
 {
 	TArray<FO3DControlEntry> Entries;
-	for (const FString& SourceId : FO3DControlBus::GetSources())
+	FO3DControlBus::FInstance& Bus = GetBus();
+	for (const FString& SourceId : Bus.GetSources())
 	{
 		if (!PassesSourceFilter(SourceId))
 		{
 			continue;
 		}
-		for (const TTuple<FString, FString, FO3DControlValue>& Value : FO3DControlBus::GetValues(SourceId))
+		for (const TTuple<FString, FString, FO3DControlValue>& Value : Bus.GetValues(SourceId))
 		{
 			// The stream filter is not applied here: the bus caches values per sender, not per stream.
 			if (!NamePrefixFilter.IsEmpty() && !Value.Get<0>().StartsWith(NamePrefixFilter, ESearchCase::CaseSensitive))

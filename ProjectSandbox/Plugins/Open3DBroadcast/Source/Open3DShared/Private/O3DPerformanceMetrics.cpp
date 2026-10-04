@@ -5,6 +5,8 @@
 #include "Logging/LogMacros.h"
 #include "Misc/ScopeLock.h"
 #include "O3DRuntimeContext.h"
+#include "O3DRuntimeSubsystem.h"
+#include "Engine/Engine.h"
 
 // Define log category for metrics
 DEFINE_LOG_CATEGORY(LogO3DPerformanceMetrics);
@@ -605,25 +607,52 @@ FString FO3DPerformanceMetrics::GetMetricsAsCSV() const
 // CONSOLE COMMAND REGISTRATION
 // =====================================================================
 
+namespace O3DMetricsCommands
+{
+	/** The named runtime contexts (ADR 0012 item 5), or none before the engine starts. */
+	TArray<FO3DRuntimeContextRef> NamedContexts()
+	{
+		if (GEngine != nullptr)
+		{
+			if (UO3DRuntimeSubsystem* Subsystem = GEngine->GetEngineSubsystem<UO3DRuntimeSubsystem>())
+			{
+				return Subsystem->GetNamedContexts();
+			}
+		}
+		return {};
+	}
+}
+
 void DumpO3DMetrics()
 {
+	// The default context first (the HUD and CSV show only it), then each named context.
 	FO3DPerformanceMetrics::Get().DumpMetrics();
+	for (const FO3DRuntimeContextRef& Context : O3DMetricsCommands::NamedContexts())
+	{
+		UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("Runtime context '%s':"), *Context->GetName().ToString());
+		Context->GetMetrics().DumpMetrics();
+	}
 }
 
 static FAutoConsoleCommand DumpMetricsCmd(
 	TEXT("o3d.DumpMetrics"),
-	TEXT("Dump all Open3DBroadcast performance metrics"),
+	TEXT("Dump all Open3DBroadcast performance metrics: the default runtime context, then each named one"),
 	FConsoleCommandDelegate::CreateStatic(&DumpO3DMetrics)
 );
 
 void ResetO3DMetrics()
 {
+	// Every context, default and named.
 	FO3DPerformanceMetrics::Get().Reset();
+	for (const FO3DRuntimeContextRef& Context : O3DMetricsCommands::NamedContexts())
+	{
+		Context->GetMetrics().Reset();
+	}
 	UE_LOG(LogO3DPerformanceMetrics, Display, TEXT("Performance metrics reset"));
 }
 
 static FAutoConsoleCommand ResetMetricsCmd(
 	TEXT("o3d.ResetMetrics"),
-	TEXT("Reset all Open3DBroadcast performance metrics"),
+	TEXT("Reset all Open3DBroadcast performance metrics, in every runtime context"),
 	FConsoleCommandDelegate::CreateStatic(&ResetO3DMetrics)
 );
