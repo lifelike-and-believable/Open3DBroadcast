@@ -8,7 +8,7 @@ Open3DStream is a protocol and C++ library for real-time streaming of skeletal a
 - **Open3DBroadcast**, the Unreal Engine plugin (`ProjectSandbox/Plugins/Open3DBroadcast`): sends and receives Open3DStream data between Unreal instances over pluggable transports, with LiveLink on the receiving side.
 - **Open3DBroadcastWebRTC**, a free add-on plugin (`ProjectSandbox/Plugins/Open3DBroadcastWebRTC`) that adds a WebRTC (LiveKit) transport.
 - **ProjectSandbox**, the Unreal project used to develop and test both plugins.
-- Command-line apps (`apps/`) and MotionBuilder and Maya plugins (`plugins/`).
+- Command-line apps (`apps/`).
 
 ## Unreal Engine plugins
 
@@ -126,7 +126,7 @@ with socket.create_connection(("127.0.0.1", 5555)) as s:
     print(f"Received {len(payload)} bytes of O3DS data")
 ```
 
-## Apps and DCC plugins
+## Apps
 
 - `apps/Repeater`: relays a stream from one address to another. A Docker image is built from `docker/Dockerfile.repeater`:
 
@@ -136,7 +136,7 @@ with socket.create_connection(("127.0.0.1", 5555)) as s:
   ```
 
 - `apps/SubscribeTest`, `apps/Test1`, `apps/DeterminismProbe` and `apps/PredictorEval` are built by the root `CMakeLists.txt`. `apps/FbxStream` and `apps/XSensTest` are not in the root build.
-- `plugins/mobu` (MotionBuilder) is part of the root CMake build. `plugins/maya` has its own `CMakeLists.txt` and is commented out of the root build.
+- The MotionBuilder and Maya plugins (`plugins/`), the Python scripts (`python/`) and the Sphinx documentation site (`sphinx/`) were archived in 2026-10 (WP-A7). They are kept, unchanged, at the git tag `archive/dcc-plugins-python-sphinx`.
 
 ## Documentation
 
