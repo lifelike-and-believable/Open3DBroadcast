@@ -1,11 +1,12 @@
 # 0013: Timecode on LiveLink frames
 
-- **Status:** Proposed (pending maintainer sign-off)
+- **Status:** Accepted (maintainer sign-off 2026-10-04)
+- **Accepted with defaults:** the open questions below are accepted with the default given next to each. The needs-verification item stays open and is resolved in PR 3; a result that invalidates the decision is handled by a superseding ADR.
 - **Date:** 2026-10-03
 - **Plan decision:** RCV-8 in WP-A4 of [`plugin-hardening-and-fab-readiness.md`](../roadmap/plugin-hardening-and-fab-readiness.md)
 - **Related:** [ADR 0008](0008-sender-pipeline-threading.md) (sampling clock; its open question 4 said "no engine timecode in v1", which this ADR replaces for the wire and LiveLink), [ADR 0009](0009-protocol-versioning.md) (appended wire fields), [ADR 0005](0005-wire-resync-and-loss-contract.md) (mapped presentation time, A2.c)
 
-**Recommendation in one line:** the sender stamps its engine timecode, when it has one, on every frame in a new optional `SubjectList` field; the receiver sets LiveLink's `SceneTime` from it, and when a frame has none, derives one from the frame's mapped presentation time at the engine's timecode rate.
+**Decision in one line:** the sender stamps its engine timecode, when it has one, on every frame in a new optional `SubjectList` field; the receiver sets LiveLink's `SceneTime` from it, and when a frame has none, derives one from the frame's mapped presentation time at the engine's timecode rate.
 
 ## Context
 
@@ -87,8 +88,8 @@ RCV-8's recommendation as written.
 
 ## Open questions for the maintainer
 
-1. **Do you use Take Recorder or Sequencer with timecode today, and with which provider** (genlock card, LTC, `USystemTimeTimecodeProvider`)? It decides the manual test setup. Default: test with `USystemTimeTimecodeProvider` on both machines.
-2. **Fallback when the receiving engine has no timecode:** leave `SceneTime` unset (as today), or synthesize one at a fixed rate so Timecode mode still orders frames? Default: leave it unset; Timecode mode without an engine timecode is already flagged by LiveLink's own warning.
+1. **Do you use Take Recorder or Sequencer with timecode today, and with which provider** (genlock card, LTC, `USystemTimeTimecodeProvider`)? It decides the manual test setup. **Accepted default:** test with `USystemTimeTimecodeProvider` on both machines.
+2. **Fallback when the receiving engine has no timecode:** leave `SceneTime` unset (as today), or synthesize one at a fixed rate so Timecode mode still orders frames? **Accepted default:** leave it unset; Timecode mode without an engine timecode is already flagged by LiveLink's own warning.
 3. **needs-verification:** how `FApp::GetCurrentTime()` relates to `FPlatformTime::Seconds()` under a fixed timestep, which affects the A' conversion; checked in PR 3.
 
 ## References
