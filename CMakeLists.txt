@@ -68,8 +68,6 @@ endif()
 add_subdirectory(src)
 add_subdirectory(apps/Repeater)
 add_subdirectory(apps/SubscribeTest)
-add_subdirectory(plugins/mobu)
-#add_subdirectory(plugins/maya)
 
 add_subdirectory(apps/Test1)
 add_subdirectory(apps/DeterminismProbe)
