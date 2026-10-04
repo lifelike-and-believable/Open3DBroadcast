@@ -23,6 +23,7 @@
 #include "Components/SkinnedMeshComponent.h"
 #include "GameFramework/Actor.h"
 #include "HAL/IConsoleManager.h"
+#include "Misc/App.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "UObject/Package.h"
 #include "UObject/WeakObjectPtrTemplates.h"
@@ -1034,6 +1035,9 @@ FString UO3DSenderComponent::ResolveSubjectName(const USkeletalMeshComponent* Sk
 void UO3DSenderComponent::FillFrameShell(const USkeletalMeshComponent* SkelComp, double CaptureTimeSec, FO3DSPoseFrame& Frame)
 {
 	PoseSampler->FillShell(SkelComp, SubjectName, CaptureTimeSec, UpdateEncodingSnapshot(), Frame);
+	// RCV-8 (ADR 0013): the engine timecode of this tick, read with the sampling time. Not
+	// FApp::GetTimecode(), which returns a default when no timecode provider is synchronized.
+	Frame.SceneTime = FApp::GetCurrentFrameTime();
 }
 
 void UO3DSenderComponent::PopulatePoseFrameCurves(USkeletalMeshComponent* SkelComp, FO3DSPoseFrame& Frame, bool bDebugCurves)

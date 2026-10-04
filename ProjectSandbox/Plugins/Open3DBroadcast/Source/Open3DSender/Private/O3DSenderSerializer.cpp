@@ -15,6 +15,27 @@ THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
 THIRD_PARTY_INCLUDES_END
 
+namespace O3DSenderSerializerPrivate
+{
+	/**
+	 * The frame's engine timecode as the core's SceneTime (RCV-8, ADR 0013), written to Out, or
+	 * null when the frame has none. The core drops an invalid one rather than send it.
+	 */
+	const O3DS::SceneTime* ToCoreSceneTime(const FO3DSPoseFrame& Frame, O3DS::SceneTime& Out)
+	{
+		if (!Frame.SceneTime.IsSet())
+		{
+			return nullptr;
+		}
+		const FQualifiedFrameTime& Time = Frame.SceneTime.GetValue();
+		Out.frame = Time.Time.GetFrame().Value;
+		Out.subframe = Time.Time.GetSubFrame();
+		Out.rate_numerator = Time.Rate.Numerator;
+		Out.rate_denominator = Time.Rate.Denominator;
+		return &Out;
+	}
+}
+
 namespace
 {
 	static TAutoConsoleVariable<int32> CVarO3DSenderDebugSerialize(
@@ -451,9 +472,11 @@ void FO3DSenderSerializer::SerializeFrameLegacy(const FString& Subject, const FO
 	// serialization (WP-A2a).
 	std::vector<char>& Buffer = Cache.LegacyBuffer;
 	const double Timestamp = Frame.CaptureTimeSec;
+	O3DS::SceneTime SceneTime;
+	const O3DS::SceneTime* SceneTimePtr = O3DSenderSerializerPrivate::ToCoreSceneTime(Frame, SceneTime);
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE_STR("O3D.Sender.Serializer.Core");
-		Cache.Writer.WriteFull(*Cache.LegacySubjects, Buffer, Timestamp);
+		Cache.Writer.WriteFull(*Cache.LegacySubjects, Buffer, Timestamp, SceneTimePtr);
 	}
 
 	// Transports receive frames only through the bytes below (the sender pipeline hands OutBytes
@@ -519,6 +542,8 @@ bool FO3DSenderSerializer::SerializeFramePersistent(const FString& Subject, cons
 
 	// ADR 0008 item 7: the wire time is the sampling time (WP-A2a).
 	const double Timestamp = Frame.CaptureTimeSec;
+	O3DS::SceneTime SceneTime;
+	const O3DS::SceneTime* SceneTimePtr = O3DSenderSerializerPrivate::ToCoreSceneTime(Frame, SceneTime);
 	std::vector<char> Buffer;
 
 	if (bNeedFullSync)
@@ -560,7 +585,7 @@ bool FO3DSenderSerializer::SerializeFramePersistent(const FString& Subject, cons
 			SubjectObject->SetResidualEncoder(nullptr);
 		}
 
-		Cache.Writer.WriteFull(*SubjectObject, Buffer, Timestamp);
+		Cache.Writer.WriteFull(*SubjectObject, Buffer, Timestamp, SceneTimePtr);
 		Cache.SyncTracker.MarkFullSent(SyncInputs);
 		Cache.FullSyncsSent++;
 	}
@@ -581,7 +606,7 @@ bool FO3DSenderSerializer::SerializeFramePersistent(const FString& Subject, cons
 		if (bResidual)
 		{
 			const double DeltaThreshold = (double)FMath::Max(0.0f, Settings.ResidualDeltaThreshold);
-			Cache.Writer.WriteResidual(*SubjectObject, Buffer, Count, DeltaThreshold, Timestamp);
+			Cache.Writer.WriteResidual(*SubjectObject, Buffer, Count, DeltaThreshold, Timestamp, SceneTimePtr);
 		}
 		else
 		{
@@ -589,7 +614,7 @@ bool FO3DSenderSerializer::SerializeFramePersistent(const FString& Subject, cons
 			Ranges.byteRange = (double)FMath::Max(0.0f, Settings.QuantizationByteRange);
 			Ranges.halfRange = (double)FMath::Max(0.0f, Settings.QuantizationHalfRange);
 			const double DeltaThreshold = (double)FMath::Max(0.0f, Settings.QuantizationDeltaThreshold);
-			Cache.Writer.WriteUpdate(*SubjectObject, Buffer, Count, DeltaThreshold, Timestamp, &Ranges);
+			Cache.Writer.WriteUpdate(*SubjectObject, Buffer, Count, DeltaThreshold, Timestamp, &Ranges, SceneTimePtr);
 		}
 	}
 
