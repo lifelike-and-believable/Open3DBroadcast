@@ -73,11 +73,11 @@ jobs:
           set -e
           docker run -d --name o3ds-repeater --network host $IMAGE
           docker run -d --name o3ds-sub --network host --entrypoint /app/nngcat $IMAGE \
-            --sub0 --dial tcp://127.0.0.1:7001 --subscribe "" --ascii --recv-timeout 15
+            --sub0 --dial tcp://127.0.0.1:7001 --subscribe "" --quoted --count 1 --recv-timeout 30
           # Pub/sub has a slow-joiner window, so push the same message a few times.
           docker run --rm --network host --entrypoint /app/nngcat $IMAGE \
             --push0 --dial tcp://127.0.0.1:7000 --data o3ds-repeater-smoke --count 10 --interval 1
-          sleep 2
+          timeout 40 docker wait o3ds-sub
           docker logs o3ds-sub | tee sub.log
           docker logs o3ds-repeater
           docker stop o3ds-repeater o3ds-sub
@@ -102,11 +102,11 @@ jobs:
           set -e
           docker run -d --name o3ds-repeater --network host $IMAGE
           docker run -d --name o3ds-sub --network host --entrypoint /app/nngcat $IMAGE \
-            --sub0 --dial tcp://127.0.0.1:7001 --subscribe "" --ascii --recv-timeout 15
+            --sub0 --dial tcp://127.0.0.1:7001 --subscribe "" --quoted --count 1 --recv-timeout 30
           # Pub/sub has a slow-joiner window, so push the same message a few times.
           docker run --rm --network host --entrypoint /app/nngcat $IMAGE \
             --push0 --dial tcp://127.0.0.1:7000 --data o3ds-repeater-smoke --count 10 --interval 1
-          sleep 2
+          timeout 40 docker wait o3ds-sub
           docker logs o3ds-sub | tee sub.log
           docker logs o3ds-repeater
           docker stop o3ds-repeater o3ds-sub
@@ -131,11 +131,11 @@ jobs:
           set -e
           docker run -d --name o3ds-repeater --network host $IMAGE
           docker run -d --name o3ds-sub --network host --entrypoint /app/nngcat $IMAGE \
-            --sub0 --dial tcp://127.0.0.1:7001 --subscribe "" --ascii --recv-timeout 15
+            --sub0 --dial tcp://127.0.0.1:7001 --subscribe "" --quoted --count 1 --recv-timeout 30
           # Pub/sub has a slow-joiner window, so push the same message a few times.
           docker run --rm --network host --entrypoint /app/nngcat $IMAGE \
             --push0 --dial tcp://127.0.0.1:7000 --data o3ds-repeater-smoke --count 10 --interval 1
-          sleep 2
+          timeout 40 docker wait o3ds-sub
           docker logs o3ds-sub | tee sub.log
           docker logs o3ds-repeater
           docker stop o3ds-repeater o3ds-sub
@@ -160,11 +160,11 @@ jobs:
           set -e
           docker run -d --name o3ds-repeater --network host $IMAGE
           docker run -d --name o3ds-sub --network host --entrypoint /app/nngcat $IMAGE \
-            --sub0 --dial tcp://127.0.0.1:7001 --subscribe "" --ascii --recv-timeout 15
+            --sub0 --dial tcp://127.0.0.1:7001 --subscribe "" --quoted --count 1 --recv-timeout 30
           # Pub/sub has a slow-joiner window, so push the same message a few times.
           docker run --rm --network host --entrypoint /app/nngcat $IMAGE \
             --push0 --dial tcp://127.0.0.1:7000 --data o3ds-repeater-smoke --count 10 --interval 1
-          sleep 2
+          timeout 40 docker wait o3ds-sub
           docker logs o3ds-sub | tee sub.log
           docker logs o3ds-repeater
           docker stop o3ds-repeater o3ds-sub

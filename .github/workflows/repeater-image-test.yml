@@ -40,16 +40,18 @@ jobs:
         run: docker build -f docker/Dockerfile.repeater -t "$IMAGE" .
 
       # Senders push into the relay; a subscriber must receive what they push. Pub/sub drops
-      # messages sent before the subscriber connects, so the same message is pushed ten times.
+      # messages sent before the subscriber connects, so the same message is pushed ten times; the
+      # subscriber exits after the first. --quoted, not --ascii: --ascii prints no newline, and
+      # docker logs holds back a partial line while the container runs.
       - name: Smoke test the relay
         run: |
           set -e
           docker run -d --name o3ds-repeater --network host "$IMAGE"
           docker run -d --name o3ds-sub --network host --entrypoint /app/nngcat "$IMAGE" \
-            --sub0 --dial tcp://127.0.0.1:7001 --subscribe "" --ascii --recv-timeout 15
+            --sub0 --dial tcp://127.0.0.1:7001 --subscribe "" --quoted --count 1 --recv-timeout 30
           docker run --rm --network host --entrypoint /app/nngcat "$IMAGE" \
             --push0 --dial tcp://127.0.0.1:7000 --data o3ds-repeater-smoke --count 10 --interval 1
-          sleep 2
+          timeout 40 docker wait o3ds-sub
           docker logs o3ds-sub | tee sub.log
           grep -q o3ds-repeater-smoke sub.log
 
