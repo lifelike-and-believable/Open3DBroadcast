@@ -576,6 +576,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
   and `exec` lets `docker stop` stop it cleanly. The `Build and publish Repeater image` workflow
   (still disabled) runs only for files the image uses, and its smoke test pushes a message
   through the relay with `nngcat` and checks a subscriber receives it, instead of `echo ok`.
+  A new `Repeater image test` workflow runs that build and smoke test on pull requests that touch
+  the image, plus a check that `docker stop` exits the Repeater with code 0; it never pushes.
 
 - **Repeater rebuilt on raw NNG** (`apps/Repeater`). The relay (`relay.h`/`relay.cpp`, a library
   the core tests link) moves each message from the pull socket to the pub socket unchanged, as an

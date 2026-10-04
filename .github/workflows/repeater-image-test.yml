@@ -1,0 +1,70 @@
+name: Repeater image test
+# Builds docker/Dockerfile.repeater and checks the relay works, on every PR that touches the files
+# the image uses. It never logs in to or pushes to a registry; publishing stays with the disabled
+# "Build and publish Repeater image" workflow (repeater-image.yml).
+on:
+  pull_request:
+    branches: [ develop, main ]
+    paths:
+      - "docker/Dockerfile.repeater"
+      - ".dockerignore"
+      - "apps/Repeater/**"
+      - "src/**"
+      - "CMakeLists.txt"
+      - "thirdparty/nng"
+      - "thirdparty/flatbuffers"
+      - "thirdparty/crccpp"
+      - ".github/workflows/repeater-image-test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repeater-image-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      IMAGE: o3ds-repeater-test:${{ github.sha }}
+    steps:
+      # Only the submodules the image builds, as core-tests.yml does.
+      - uses: actions/checkout@v4
+      - name: Check out the image's submodules
+        run: git submodule update --init thirdparty/nng thirdparty/flatbuffers thirdparty/crccpp
+
+      - name: Build the image
+        run: docker build -f docker/Dockerfile.repeater -t "$IMAGE" .
+
+      # Senders push into the relay; a subscriber must receive what they push. Pub/sub drops
+      # messages sent before the subscriber connects, so the same message is pushed ten times.
+      - name: Smoke test the relay
+        run: |
+          set -e
+          docker run -d --name o3ds-repeater --network host "$IMAGE"
+          docker run -d --name o3ds-sub --network host --entrypoint /app/nngcat "$IMAGE" \
+            --sub0 --dial tcp://127.0.0.1:7001 --subscribe "" --ascii --recv-timeout 15
+          docker run --rm --network host --entrypoint /app/nngcat "$IMAGE" \
+            --push0 --dial tcp://127.0.0.1:7000 --data o3ds-repeater-smoke --count 10 --interval 1
+          sleep 2
+          docker logs o3ds-sub | tee sub.log
+          grep -q o3ds-repeater-smoke sub.log
+
+      # docker stop sends SIGTERM; the Repeater must exit cleanly (code 0) within the grace period.
+      - name: Check the Repeater stops cleanly
+        run: |
+          set -e
+          docker stop o3ds-repeater
+          docker logs o3ds-repeater
+          code=$(docker inspect -f '{{.State.ExitCode}}' o3ds-repeater)
+          echo "Repeater exit code: $code"
+          test "$code" = "0"
+
+      - name: Logs on failure
+        if: failure()
+        run: |
+          docker logs o3ds-repeater || true
+          docker logs o3ds-sub || true
