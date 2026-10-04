@@ -578,7 +578,7 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
   converted. Before, every frame was frame 0 at 24 fps, so Timecode mode silently acted as
   Latest. User guide: "Timecode Mode", including whole-frame providers. Tests:
   `Open3DBroadcast.Receiver.SceneTime.SenderTimecodeAndRate`, `.FallbackOnEngineTimecode`,
-  `.PublisherFramesCarryIt`.
+  `.PublisherFramesCarryIt`, `.SenderTimecodeThroughTheReceiver`, `.FallbackThroughTheReceiver`.
 
 - **Removed: per-frame string metadata on LiveLink frames** (RCV-11, ADR 0013 PR 3a): the `CurveHash` and
   `SubjectListTime` entries of `MetaData.StringMetaData`, two `FString::Printf` allocations per
