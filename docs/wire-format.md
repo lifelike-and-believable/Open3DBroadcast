@@ -30,6 +30,10 @@ A mocap frame is an 8-byte header followed by a FlatBuffer (`src/o3ds.fbs`, root
   version 1, so readers from before protocol 2 still apply them. Writers also set
   `SubjectList.protocol_version` to the protocol they implement (2; 0 means a writer from
   before protocol 2). That field is for diagnostics and captures only.
+- **Scale in updates** (CORE-11, ADR 0005 (v)): `SubjectUpdate.scale` carries absolute
+  values in every update, including residual ones (`predictor_id != 0`), where translations,
+  rotations and curves are residuals. A writer sends a transform's scale when it moved more
+  than the delta threshold since it was last sent, and on every residual keyframe.
 - **`SubjectUpdate.ref_seq`** is the `tx_seq` of the full Subject the update is relative to
   (topology, curve list, quantization anchors, residual history); 0 is unset. A receiver
   parsing sequenced frames with a `ParseContext` drops an update whose `ref_seq` names a full

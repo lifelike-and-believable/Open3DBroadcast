@@ -206,7 +206,8 @@ Item (iv), stamping, is implemented in #341: `O3DS::StreamWriter` in core and th
 serializer writing every frame through it. Items (viii) and (ix), `ref_seq` and the receiver
 contract, are implemented in #342 (CORE-5, CORE-6). Item (iii), the residual fallback, is
 implemented in #343. Item (vi), the new-peer trigger, is implemented in #344 for TCP and
-NNG. Where the implementation departs from the
+NNG. Item (v), scale in updates, is implemented in #346 as decided (absolute values,
+also in residual updates, behind the delta threshold). Where the implementation departs from the
 decision above, and why:
 
 - **One writer per subject, not one per serializer.** The receiver that shipped in the meantime
