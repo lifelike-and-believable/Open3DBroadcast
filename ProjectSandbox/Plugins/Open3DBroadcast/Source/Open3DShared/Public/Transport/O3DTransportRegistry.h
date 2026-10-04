@@ -187,6 +187,10 @@ using FO3DTransportDescriptorRef = TSharedRef<const FO3DTransportDescriptor, ESP
  * The registry. FO3DTransportRegistry::Get() is the process-wide instance every module uses. Tests
  * may create their own with MakeShared<FO3DTransportRegistry, ESPMode::ThreadSafe>(); a registry must
  * always be owned by a shared pointer, because registrations refer back to it weakly.
+ *
+ * Process-wide by nature, so not part of FO3DRuntimeContext (docs/adr/0012-runtime-services-and-global-state.md,
+ * item 1): it lists the transports the loaded modules registered, which every context uses.
+ * See docs/dev/runtime-services.md.
  */
 class OPEN3DSHARED_API FO3DTransportRegistry : public TSharedFromThis<FO3DTransportRegistry, ESPMode::ThreadSafe>
 {

@@ -558,6 +558,12 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- **Runtime services documented** (SHR-38, ADR 0012 PR 5): `docs/dev/runtime-services.md`
+  lists what each runtime context owns and which services stay process-wide and why (transport
+  registry, secret store, audio input devices, MoQ dispatcher, console variables, control receive
+  override); the headers of the first four say so too. ADR 0012 is implemented, except the
+  names-in-use picker for `ContextName` in the editor panels (a follow-up).
+
 - **Named runtime contexts** (SHR-38, ADR 0012 PR 4a): `UO3DRuntimeSubsystem` (engine
   subsystem) owns named `FO3DRuntimeContext`s, created on first use; the empty name is the default
   context. New `ContextName` on `FO3DReceiverSourceConfig` (advanced; saved in the LiveLink

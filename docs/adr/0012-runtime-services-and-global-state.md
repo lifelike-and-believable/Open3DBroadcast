@@ -4,6 +4,7 @@
 - **Accepted with defaults:** the open questions below are accepted with the default given next to each. The needs-verification item stays open and is resolved in the implementing PR; a result that invalidates the decision is handled by a superseding ADR.
 - **Revised before acceptance (2026-10-03):** the first draft deferred the runtime context (stage 2) until a multi-world trigger. The maintainer asked what argued against doing it now. Deferring it would turn a free transport API change into a breaking one after the first release, rewrite the stage 1 call sites, and ship two overlapping ways to scope audio, so both stages are done in one series.
 - **Date:** 2026-10-03
+- **Implemented:** #357 (PR 1), #358 (PR 2), #359 and #360 (PR 3), #361 and #364 (PR 4), PR 5 (`docs/dev/runtime-services.md`). Open: the names-in-use picker for `ContextName` in the editor panels (Q3's accepted default; a details customization, since UE 5.7's `GetOptions` combo has no free text). Q4 resolved: one LiveLink client per process in UE 5.7.
 - **Plan decision:** SHR-38 in [`plugin-hardening-and-fab-readiness.md`](../roadmap/plugin-hardening-and-fab-readiness.md) (WP-A3 left it for a design decision)
 - **Related:** [ADR 0007](0007-transport-abstraction-and-registry.md) (registry, `FO3DTransportConfig`, transport metrics handles), [ADR 0011](0011-control-channel.md) (control bus), [ADR 0006](0006-test-module-layout-and-fakes.md) (test isolation)
 
