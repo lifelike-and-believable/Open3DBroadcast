@@ -163,6 +163,29 @@ Requests:
 - Keep existing functions/behavior intact.
 - All new APIs are optional; defaults leave current behavior unchanged.
 
+### 11) Participant Events (requested 2026-10)
+Goal: let a sender react when a receiver joins the room. Open3DBroadcast sends a full pose descriptor ("full sync") immediately when a new peer appears, so a late joiner does not wait up to a second for the periodic one (ADR 0005, item (vi)). The TCP and NNG transports already do this; WebRTC cannot, because `livekit_ffi.h` exposes connection-state, data and audio callbacks but no participant events.
+
+Proposed API:
+```c
+typedef enum { LkParticipantJoined = 0, LkParticipantLeft = 1 } LkParticipantEvent;
+
+typedef void (*LkParticipantCallback)(void* user, LkParticipantEvent event,
+                                      const char* identity, const char* name);
+
+LkResult lk_set_participant_callback(LkClientHandle*, LkParticipantCallback cb, void* user);
+```
+Notes:
+- Map the room's remote participant connected and disconnected events. The local participant is not reported.
+- Participants already in the room when the client connects: report each as `LkParticipantJoined` once the connection is established, so both orders (sender first, receiver first) behave the same. Please document which you choose.
+- `identity` and `name` are valid only during the callback (the caller copies them); `name` may be empty.
+- Same threading rules as the other callbacks (section 9): may fire on a background thread, never blocks, and does not fire after `lk_disconnect()` returns.
+
+### 12) Data Ordering Guarantee (documentation)
+Goal: confirm the delivery contract our residual (delta) coding relies on. We only send frames that depend on earlier frames over a channel that is reliable *and* ordered.
+
+Request: document that `lk_send_data_ex(..., LkReliable, ordered = 1, ...)` (and `lk_send_data(..., LkReliable)`) delivers messages from one sender to each receiver in send order with no loss while the connection stays up, and what happens across a reconnect (are messages queued during `LkConnReconnecting` delivered, dropped, or reported as errors?).
+
 ## Acceptance Criteria
 We can:
 - Configure audio publish to meet bandwidth/quality targets (bitrate/DTX/stereo).
@@ -171,6 +194,7 @@ We can:
 - Tag data sends with label/ordering and observe payload limits via errors.
 - Query lightweight metrics for audio/data to aid tuning.
 - Optionally refresh token or set backoff, per SDK feasibility.
+- Be told when a remote participant joins or leaves the room (section 11), and rely on a documented order and loss contract for reliable data (section 12).
 
 No regressions: current publisher/subscriber flows remain functional.
 
