@@ -4,6 +4,7 @@
 
 #include "O3DHelpers.h"
 #include "O3DRuntimeContext.h"
+#include "O3DRuntimeSubsystem.h"
 #include "O3DSenderLogs.h"
 #include "O3DSenderSerializer.h"
 #include "O3DSenderCurveProcessor.h"
@@ -407,14 +408,19 @@ void UO3DSenderComponent::InitializeTransport()
 	});
 
 	FO3DTransportConfig Config = BuildTransportConfig();
-	// One handle for this component's life, so its counts survive transport restarts and
-	// DumpMetrics names the component, not the transport instance (ADR 0012 item 4).
-	if (!SenderMetricsHandle.IsValid())
+	// The context ContextName names (ADR 0012 item 5). One handle per context for this component's
+	// life, so its counts survive transport restarts and DumpMetrics names the component, not the
+	// transport instance (item 4); a new context needs a new handle, since a transport refuses a
+	// handle from another context.
+	const FO3DRuntimeContextRef Context = UO3DRuntimeSubsystem::Resolve(ContextName);
+	if (!SenderMetricsHandle.IsValid() || &SenderMetricsHandle->GetAggregate() != &Context->GetMetrics())
 	{
 		const AActor* OwnerActor = GetOwner();
-		SenderMetricsHandle = FO3DRuntimeContext::Default()->GetMetrics().AcquireSenderMetrics(
+		SenderMetricsHandle = Context->GetMetrics().AcquireSenderMetrics(
 			FString::Printf(TEXT("Sender (%s, subject %s)"), OwnerActor ? *OwnerActor->GetName() : TEXT("no owner"), *SubjectName));
 	}
+	SenderContext = Context;
+	Config.Context = Context;
 	Config.SenderMetrics = SenderMetricsHandle;
 	if (!TransportController->Start(Config))
 	{

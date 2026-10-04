@@ -26,6 +26,7 @@ class USkeletalMesh;
 class USoundSubmix;
 class FO3DSenderTransportController;
 class FO3DSenderMetricsHandle;
+class FO3DRuntimeContext;
 class FO3DSenderCurveProcessor;
 class FO3DSenderPipeline;
 class FO3DSenderPoseSampler;
@@ -264,6 +265,13 @@ public:
 	/** Subject identifier embedded in serialized frames for downstream routing. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender", meta = (DisplayName = "Subject Name"))
 	FString SubjectName;
+
+	/**
+	 * The runtime context this sender's metrics go to (docs/adr/0012-runtime-services-and-global-state.md).
+	 * Empty: the default context. Case-insensitive. Read at each transport start.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Open3DBroadcast|Sender", AdvancedDisplay)
+	FName ContextName;
 
 	/** Desired pose capture rate in Hz (final rate clamped by world tick). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender")
@@ -569,11 +577,15 @@ private:
 	TUniquePtr<FO3DSenderTransportController, FO3DSenderTransportControllerDeleter> TransportController;
 
 	/**
-	 * This component's sender metrics (ADR 0012 item 4), from the default runtime context until
-	 * PR 4. Acquired on the first transport start and kept across restarts; passed to the
-	 * transport in FO3DTransportConfig::SenderMetrics. Game thread.
+	 * This component's sender metrics (ADR 0012 item 4), from the context ContextName names.
+	 * Acquired on the first transport start and kept across restarts while the context stays the
+	 * same, so the counts span the component's life; acquired again when ContextName changes,
+	 * because a transport refuses a handle from another context. Passed to the transport in
+	 * FO3DTransportConfig::SenderMetrics. Game thread.
 	 */
 	TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe> SenderMetricsHandle;
+	/** The context SenderMetricsHandle belongs to; held so the handle's metrics outlive it. */
+	TSharedPtr<FO3DRuntimeContext, ESPMode::ThreadSafe> SenderContext;
 
 public:
 	/** This component's sender metrics handle, or null before its first transport start. Game thread. */
