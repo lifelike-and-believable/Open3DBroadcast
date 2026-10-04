@@ -20,6 +20,7 @@
 #include "Async/Async.h"
 #include "Misc/ScopeLock.h"
 #include "Misc/QualifiedFrameTime.h"
+#include "Misc/App.h"
 
 #include "O3DHelpers.h"
 #include "O3DRuntimeContext.h"
@@ -1060,17 +1061,41 @@ size_t FO3DReceiverSource::GetNumHeldControlChanges() const
 
 bool FO3DReceiverSource::GetPresentedSenderTimeUs(const std::vector<std::string>& MocapSubjects, uint64_t& OutUs)
 {
-    // Timecode mode presents frames by timecode, which this channel does not carry: no alignment.
     const ELiveLinkSourceMode Mode = Settings ? Settings->Mode : ELiveLinkSourceMode::EngineTime;
-    if (Mode == ELiveLinkSourceMode::Timecode)
-    {
-        return false;
-    }
 
     O3DS::ReceiverStream* Stream = Scheduler->FindBySubjects(MocapSubjects);
     if (Stream == nullptr || FPlatformTime::Seconds() - Stream->lastSeenS > AlignmentStreamLivenessSeconds)
     {
         return false; // no mocap from that sender here, or it paused: never hold cues for a stream that is not moving
+    }
+
+    if (Mode == ELiveLinkSourceMode::Timecode)
+    {
+        // RCV-8 (ADR 0013): LiveLink shows the frame whose SceneTime is the engine timecode minus
+        // its clock and frame offsets (LiveLinkSubject.cpp:162-187). The newest frame's
+        // SubjectList.time and scene_time were sampled together on the sender, so the shown pose's
+        // sender time is the newest frame's less how far its timecode is ahead of the read time.
+        // Without the sender's timecode, or an engine timecode, nothing is held.
+        const TOptional<FQualifiedFrameTime> EngineTime = FApp::GetCurrentFrameTime();
+        if (!EngineTime.IsSet() || !Stream->subjects.mHasSceneTime)
+        {
+            return false;
+        }
+        const O3DS::SceneTime& Latest = Stream->subjects.mSceneTime;
+        const FFrameRate SenderRate(Latest.rate_numerator, Latest.rate_denominator);
+        const double LatestSceneS = FQualifiedFrameTime(FFrameTime(FFrameNumber(Latest.frame), Latest.subframe), SenderRate).AsSeconds();
+        double ReadS = EngineTime->AsSeconds();
+        if (Settings != nullptr)
+        {
+            if (Settings->BufferSettings.bUseTimecodeSmoothLatest)
+            {
+                ReadS -= Settings->BufferSettings.TimecodeClockOffset;
+            }
+            ReadS -= static_cast<double>(Settings->BufferSettings.TimecodeFrameOffset) * SenderRate.AsInterval();
+        }
+        const double PresentedS = Stream->subjects.mTime - FMath::Max(0.0, LatestSceneS - ReadS);
+        OutUs = PresentedS > 0.0 ? static_cast<uint64_t>(PresentedS * 1.0e6) : 0;
+        return true;
     }
 
     // SubjectList.time of the newest frame handed to LiveLink, on the sender's clock - the same

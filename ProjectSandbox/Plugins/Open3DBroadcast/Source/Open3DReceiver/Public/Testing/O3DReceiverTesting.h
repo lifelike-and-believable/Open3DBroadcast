@@ -24,6 +24,9 @@ THIRD_PARTY_INCLUDES_START
 #include "o3ds/control.h"
 THIRD_PARTY_INCLUDES_END
 
+#include <string>
+#include <vector>
+
 struct FO3DRemoteAudioComponentTestAccessor
 {
 	static void BindBus(UO3DRemoteAudioComponent& Component) { Component.BindBus(); }
@@ -62,6 +65,12 @@ struct FO3DRemoteAudioComponentTestAccessor
 
 struct FO3DReceiverSourceTestAccessor
 {
+	/** The sender time of the pose LiveLink presents for the stream carrying these subjects (control alignment, ADR 0011 item 9; RCV-8). */
+	static bool GetPresentedSenderTimeUs(FO3DReceiverSource& Source, const std::vector<std::string>& MocapSubjects, uint64_t& OutUs)
+	{
+		return Source.GetPresentedSenderTimeUs(MocapSubjects, OutUs);
+	}
+
 	static void SetActiveConfig(FO3DReceiverSource& Source, const FO3DTransportConfig& Config)
 	{
 		Source.ActiveConfig = Config;

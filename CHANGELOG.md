@@ -568,6 +568,15 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- **Control alignment in LiveLink Timecode mode** (RCV-8, ADR 0013 PR 3b): when the sender's
+  mocap carries its timecode and the engine has one, control changes are held until the pose
+  LiveLink shows reaches them, as in EngineTime mode. The shown pose's sender time is the newest
+  frame's `SubjectList.time` less how far its `scene_time` is ahead of LiveLink's read time (the
+  engine timecode less `TimecodeFrameOffset` frames, and less `TimecodeClockOffset` with
+  `bUseTimecodeSmoothLatest`; `LiveLinkSubject.cpp:162-187`), never later than the newest frame.
+  Without either timecode nothing is held, as before. Test:
+  `Open3DBroadcast.Receiver.Control.AlignedInTimecodeMode`.
+
 - **The sender stamps its engine timecode** (RCV-8, ADR 0013 PR 2): `UO3DSenderComponent` reads
   `FApp::GetCurrentFrameTime()` with each frame's sampling time into the new
   `FO3DSPoseFrame::SceneTime` (set only while a `UTimecodeProvider` is synchronized; not
