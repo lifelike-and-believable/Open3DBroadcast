@@ -72,6 +72,7 @@ add_subdirectory(apps/SubscribeTest)
 add_subdirectory(apps/Test1)
 add_subdirectory(apps/DeterminismProbe)
 add_subdirectory(apps/PredictorEval)
+add_subdirectory(apps/QuantEval)
 
 if(O3DS_BUILD_TESTS OR O3DS_BUILD_FUZZERS)
 	enable_testing()

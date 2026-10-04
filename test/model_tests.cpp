@@ -106,3 +106,36 @@ O3DS_TEST(MultipleSubjectsRoundTrip)
 	O3DS_CHECK_EQ(parsed.findSubject("Performer1")->mCurveValues[0], 1.0f);
 	O3DS_CHECK_EQ(parsed.findSubject("Performer2")->mCurveValues[0], 0.25f);
 }
+
+O3DS_TEST(FullSyncMarksValuesSent_SoAReturnToAnEarlierValueIsResent)
+{
+	// A full Subject is what the receiver holds afterwards, so later updates
+	// must be measured against it. Before, a value returning near what was
+	// last sent BEFORE the full sync was skipped as unchanged, and the
+	// receiver kept the full sync's value (found by apps/QuantEval).
+	SubjectList sender;
+	Subject* subject = sender.addSubject("Actor");
+	Transform* root = subject->addTransform("Root", -1);
+	root->transformOrder.push_back(O3DS::TTranslation);
+	root->transformOrder.push_back(O3DS::TRotation);
+
+	std::vector<char> frame;
+	size_t count = 0;
+	root->translation.value = Vector3d(1.0, 0.0, 0.0);
+	O3DS_CHECK(subject->Serialize(frame, 0.0) > 0);
+	SubjectList receiver;
+	O3DS_CHECK(receiver.Parse(frame.data(), frame.size()));
+	O3DS_CHECK(subject->SerializeUpdate(frame, count, 1.0e-4, 0.02) > 0); // marks (1,0,0) sent
+	O3DS_CHECK(receiver.Parse(frame.data(), frame.size()));
+
+	root->translation.value = Vector3d(5.0, 0.0, 0.0);
+	O3DS_CHECK(subject->Serialize(frame, 0.04) > 0); // full sync at 5
+	O3DS_CHECK(receiver.Parse(frame.data(), frame.size()));
+
+	root->translation.value = Vector3d(1.0, 0.0, 0.0); // back to the value sent before the full sync
+	count = 0;
+	O3DS_CHECK(subject->SerializeUpdate(frame, count, 1.0e-4, 0.06) > 0);
+	O3DS_CHECK(receiver.Parse(frame.data(), frame.size()));
+	O3DS_CHECK(count > 0);
+	O3DS_CHECK(receiver.findSubject("Actor")->mTransforms[0]->translation.value.v[0] == 1.0);
+}
