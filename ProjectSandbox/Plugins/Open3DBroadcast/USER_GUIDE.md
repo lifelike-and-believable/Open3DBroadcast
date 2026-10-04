@@ -834,7 +834,11 @@ Alignment never stalls control:
 - A change whose mocap stream has had no packet for 200 ms (the performer's stream paused) is delivered at once.
 - A change held longer than `MaxAlignmentHoldMs` (500 ms by default) is delivered late, never dropped.
 - Changes from one sender are delivered in the order they were sent.
-- In LiveLink **Timecode** mode nothing is held, because control carries no timecode.
+- In LiveLink **Timecode** mode a change is held only while the sender's mocap carries its
+  timecode and this engine has one (see [Timecode Mode](#timecode-mode)): the receiver then works
+  out which sender time the shown pose has from LiveLink's read time (the engine timecode less
+  *Timecode Frame Offset*, and less the clock offset when *Use Timecode Smooth Latest* is on).
+  Otherwise nothing is held.
 
 Turn `bAlignControlToMocap` off to deliver changes as they arrive. That suits environment changes that need no lip-sync accuracy and should not wait.
 
