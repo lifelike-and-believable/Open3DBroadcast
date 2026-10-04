@@ -166,6 +166,11 @@ Requests:
 ### 11) Participant Events (requested 2026-10)
 Goal: let a sender react when a receiver joins the room. Open3DBroadcast sends a full pose descriptor ("full sync") immediately when a new peer appears, so a late joiner does not wait up to a second for the periodic one (ADR 0005, item (vi)). The TCP and NNG transports already do this; WebRTC cannot, because `livekit_ffi.h` exposes connection-state, data and audio callbacks but no participant events.
 
+Checked against `livekit_ffi` `main` (50e6663, 0.3.0) and the pinned SDK `livekit` 0.7.24:
+- The SDK has the events: `RoomEvent::ParticipantConnected(RemoteParticipant)` and `RoomEvent::ParticipantDisconnected(RemoteParticipant)` (`livekit/src/room/mod.rs:89-90`, dispatched at `:1009` and `:1715`).
+- Both event loops in `backend_livekit.rs` (sync connect `:632`, async connect `:816`) drop them in their catch-all arm (`other =>`, `:738`, `:885`).
+- Participants already in the room at connect are **not** announced: `Room::connect` creates them from `join_response.other_participants` without dispatching an event (`livekit/src/room/mod.rs:637-649`). They are available from `room.remote_participants()` (`:732`).
+
 Proposed API:
 ```c
 typedef enum { LkParticipantJoined = 0, LkParticipantLeft = 1 } LkParticipantEvent;
@@ -175,16 +180,30 @@ typedef void (*LkParticipantCallback)(void* user, LkParticipantEvent event,
 
 LkResult lk_set_participant_callback(LkClientHandle*, LkParticipantCallback cb, void* user);
 ```
+Implementation sketch: in both event loops, map `ParticipantConnected`/`ParticipantDisconnected` to the callback (identity from `participant.identity()`, name from `participant.name()`). Right after `Room::connect` succeeds, before the loop starts, report every entry of `room.remote_participants()` as `LkParticipantJoined`, so a sender that connects after its receivers behaves the same as one that connects first.
+
 Notes:
-- Map the room's remote participant connected and disconnected events. The local participant is not reported.
-- Participants already in the room when the client connects: report each as `LkParticipantJoined` once the connection is established, so both orders (sender first, receiver first) behave the same. Please document which you choose.
+- Remote participants only; the local participant is not reported.
 - `identity` and `name` are valid only during the callback (the caller copies them); `name` may be empty.
 - Same threading rules as the other callbacks (section 9): may fire on a background thread, never blocks, and does not fire after `lk_disconnect()` returns.
 
-### 12) Data Ordering Guarantee (documentation)
+### 12) Data Delivery Contract (documentation, and two fixes)
 Goal: confirm the delivery contract our residual (delta) coding relies on. We only send frames that depend on earlier frames over a channel that is reliable *and* ordered.
 
-Request: document that `lk_send_data_ex(..., LkReliable, ordered = 1, ...)` (and `lk_send_data(..., LkReliable)`) delivers messages from one sender to each receiver in send order with no loss while the connection stays up, and what happens across a reconnect (are messages queued during `LkConnReconnecting` delivered, dropped, or reported as errors?).
+What the source shows (`livekit_ffi` 50e6663, `livekit` 0.7.24):
+- Every `lk_send_data`/`lk_send_data_ex` call, `LkReliable` or `LkLossy`, is sent as a byte stream (`stream_bytes`, `backend_livekit.rs:1335-1342`), and byte streams always use `Reliable` data packets (`livekit/src/room/data_stream/outgoing.rs:199-230`) on the publisher's reliable data channel, which is created `ordered: true` (`livekit/src/rtc_engine/rtc_session.rs:455-457`). So **`LkLossy` is in fact reliable**, and the `ordered` parameter of `lk_send_data_ex` is ignored (`_ordered`, `:1271`).
+- A send runs synchronously (`block_on`) while holding the client lock, and a failed attempt is retried once after 100 ms (`:1328-1357`). While the room is reconnecting, the SDK's `publish_data` waits for the reconnection (`livekit/src/rtc_engine/mod.rs:249-259`), so the caller's thread blocks for the whole reconnect.
+- The receiving loop reads each stream to the end before handling the next event (`read_all().await` inside the loop, `:634-658`, `:818-826`), so callbacks arrive in the order the streams were opened.
+
+Requests:
+1. **Document** that reliable data from one sender reaches each receiver in send order without loss while the session stays up, and what happens to data in flight when the SDK replaces the session during a full reconnect (delivered, lost, or reported).
+2. **Honor `LkLossy`** (send unreliable data packets with `publish_data` instead of a byte stream) or document that it is reliable. Today a "lossy" sender pays reliable-channel latency under loss.
+3. **Don't block the caller during reconnects:** return an error (for example a new 2xx code, "reconnecting") instead of waiting inside `lk_send_data_ex` while holding the client lock. A game-thread caller freezes for the length of the reconnect, and every other FFI call on that client waits for the lock.
+
+### 13) Bug: the async connect path never calls the extended data callback
+`lk_connect_async`/`lk_connect_with_role_async` start an event loop that delivers data only to the plain `data_cb` (`backend_livekit.rs:818-826`); the sync loop prefers `data_cb_ex` and falls back to `data_cb` (`:642-655`). The async loop has done this since it was added (3a0a610, 2025-11-05); `data_cb_ex` was added to the sync loop only (da50d08, 2025-11-19). A client that connects asynchronously and registers only `lk_client_set_data_callback_ex` receives no data at all. Open3DBroadcast's receiver does exactly that (it connects with `lk_connect_with_role_async`).
+
+Request: make the async loop identical to the sync one (extended callback with the topic as the label, falling back to the plain callback), ideally by sharing one event-loop function between both connect paths so they cannot drift again; the async loop also lacks the sync loop's topic label and logging.
 
 ## Acceptance Criteria
 We can:
@@ -194,7 +213,7 @@ We can:
 - Tag data sends with label/ordering and observe payload limits via errors.
 - Query lightweight metrics for audio/data to aid tuning.
 - Optionally refresh token or set backoff, per SDK feasibility.
-- Be told when a remote participant joins or leaves the room (section 11), and rely on a documented order and loss contract for reliable data (section 12).
+- Be told when a remote participant joins or leaves the room, including those present at connect (section 11); rely on a documented order and loss contract for reliable data, send lossy data unreliably, and not block during reconnects (section 12); receive labeled data on the async connect path (section 13).
 
 No regressions: current publisher/subscriber flows remain functional.
 
