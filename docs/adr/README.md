@@ -19,6 +19,7 @@ ADRs are written by the design agent (see [`docs/roadmap/plugin-hardening-and-fa
 | [0009](0009-protocol-versioning.md) | Protocol versioning, byte order and wire compatibility | D8 | Accepted |
 | [0010](0010-editor-module-split.md) | Editor module split | D9 | Accepted |
 | [0011](0011-control-channel.md) | Control channel for events and values | D11 | Accepted |
+| [0012](0012-runtime-services-and-global-state.md) | Runtime services and global state | SHR-38 | Proposed |
 
 ## Conventions
 
