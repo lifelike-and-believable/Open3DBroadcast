@@ -558,6 +558,13 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- **Sender runtime context** (SHR-38, ADR 0012 PR 4b): `UO3DSenderComponent::ContextName`
+  (advanced; empty is the default context) is resolved at each transport start. The component
+  passes that context to its transport (`FO3DTransportConfig::Context`) with a sender metrics
+  handle from it, kept across restarts while the context stays the same and acquired again when
+  the name changes (a transport refuses a handle from another context). What the sender sends is
+  unchanged. Test: `Open3DBroadcast.Sender.Metrics.ContextNameSelectsContext`.
+
 - **Named runtime contexts** (SHR-38, ADR 0012 PR 4a): `UO3DRuntimeSubsystem` (engine
   subsystem) owns named `FO3DRuntimeContext`s, created on first use; the empty name is the default
   context. New `ContextName` on `FO3DReceiverSourceConfig` (advanced; saved in the LiveLink
