@@ -5,6 +5,8 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Containers/BitArray.h"
+#include "Misc/Optional.h"
+#include "Misc/QualifiedFrameTime.h"
 #include "O3DSenderSerializer.h"
 #include "O3DSPoseFramePool.h"
 #include "O3DSenderPipelineStats.h"
@@ -202,6 +204,13 @@ struct OPEN3DSENDER_API FO3DSPoseFrame
 	 */
 	double CaptureTimeSec = 0.0;
 
+	/**
+	 * The engine timecode when the frame was sampled (RCV-8, ADR 0013): FApp::GetCurrentFrameTime(),
+	 * set only while a UTimecodeProvider is synchronized. The serializer writes it as
+	 * SubjectList.scene_time; unset, the frame carries none.
+	 */
+	TOptional<FQualifiedFrameTime> SceneTime;
+
 	/** Encoding and curve filtering settings this frame is filtered and serialized with. */
 	FO3DSenderEncodingSettings Encoding;
 
@@ -217,6 +226,7 @@ struct OPEN3DSENDER_API FO3DSPoseFrame
 		RawCurveValues.Reset();
 		Descriptor.Reset();
 		CaptureTimeSec = 0.0;
+		SceneTime.Reset();
 		Encoding = FO3DSenderEncodingSettings();
 	}
 };
