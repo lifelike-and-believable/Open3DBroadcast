@@ -95,6 +95,7 @@ namespace O3DS
 			mPending.clear();
 			mRecentlyDelivered.clear();
 			mInitialized = false;
+			mHaveJumpCandidate = false;
 		}
 
 		if (!mInitialized)
@@ -109,6 +110,34 @@ namespace O3DS
 			else
 				mStats.stale_dropped++;
 
+			CheckTimeouts(now_s, emit);
+			return;
+		}
+		else if (mConfig.max_forward_jump != 0 && frame.seq - mLastApplied > mConfig.max_forward_jump)
+		{
+			// CORE-15: a jump this far is applied only when the next frame
+			// confirms it, so one forged or corrupted tx_seq cannot become
+			// the baseline and blackhole the stream.
+			if (mHaveJumpCandidate && frame.seq == mJumpCandidate.seq + 1)
+			{
+				mHaveJumpCandidate = false;
+				// Everything buffered is older than the candidate: release it
+				// first, in order, then re-baseline just before the candidate.
+				ReleaseAllPending(emit);
+				mStats.lost += mJumpCandidate.seq - (mLastApplied + 1);
+				mLastApplied = mJumpCandidate.seq - 1;
+				DeliverAndDrain(std::move(mJumpCandidate), emit, /*countDrainAsReordered*/ false);
+				DeliverAndDrain(std::move(frame), emit, /*countDrainAsReordered*/ false);
+			}
+			else
+			{
+				if (mHaveJumpCandidate)
+				{
+					mStats.stale_dropped++; // the previous candidate was never confirmed
+				}
+				mJumpCandidate = std::move(frame);
+				mHaveJumpCandidate = true;
+			}
 			CheckTimeouts(now_s, emit);
 			return;
 		}
@@ -194,6 +223,20 @@ namespace O3DS
 			// These frames were simply waiting behind a hole we're giving up
 			// on, not reordered relative to each other - don't inflate the
 			// reordered stat for frames that arrived in perfectly good order.
+			DeliverAndDrain(std::move(frame), emit, /*countDrainAsReordered*/ false);
+		}
+	}
+
+	void ReorderGate::ReleaseAllPending(const std::function<void(Frame&&)>& emit)
+	{
+		while (!mPending.empty())
+		{
+			auto first = mPending.begin();
+			const uint64_t seq = first->first;
+			mStats.lost += seq - (mLastApplied + 1);
+			Frame frame = std::move(first->second.frame);
+			mPending.erase(first);
+			mLastApplied = seq - 1;
 			DeliverAndDrain(std::move(frame), emit, /*countDrainAsReordered*/ false);
 		}
 	}

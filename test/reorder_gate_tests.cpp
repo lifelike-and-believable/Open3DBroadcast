@@ -336,3 +336,75 @@ O3DS_TEST(ReorderGate_MalformedInputsAreSafe)
 
 	O3DS_CHECK_EQ(out.seqs.size(), (size_t)1);
 }
+
+O3DS_TEST(ReorderGate_ForgedForwardJump_DoesNotBlackholeTheStream)
+{
+	// CORE-15: one frame far ahead in the same epoch used to become the
+	// baseline once its gap timed out, and every legitimate frame after it
+	// was dropped as stale. It is now held unconfirmed and the stream goes on.
+	ReorderGate gate;
+	Delivered out;
+
+	gate.Push(MakeFrame(1, 7), 0.0, out.Sink());
+	gate.Push(MakeFrame(2, 7), 0.0, out.Sink());
+	gate.Push(MakeFrame(2 + (1ull << 40), 7), 0.0, out.Sink());
+	for (uint64_t seq = 3; seq <= 90; ++seq)
+	{
+		gate.Push(MakeFrame(seq, 7), 1.0 + seq, out.Sink()); // long past any gap timeout
+	}
+	gate.Flush(1000.0, out.Sink());
+
+	O3DS_CHECK_EQ(out.seqs.size(), (size_t)90);
+	O3DS_CHECK_EQ(out.seqs.back(), (uint64_t)90);
+	O3DS_CHECK_EQ(gate.Stats().lost, (uint64_t)0);
+	O3DS_CHECK_EQ(gate.Stats().stale_dropped, (uint64_t)0);
+}
+
+O3DS_TEST(ReorderGate_ConfirmedForwardJump_Rebaselines)
+{
+	// A legitimate stream resuming after a long outage: the first frame past
+	// max_forward_jump waits for the next one, then both are delivered and
+	// the skipped range counts as lost. Frames buffered before the jump are
+	// released first, in order.
+	ReorderGate::Config config;
+	config.max_forward_jump = 100;
+	config.max_delay_s = 10.0;
+	ReorderGate gate(config);
+	Delivered out;
+
+	gate.Push(MakeFrame(1, 7), 0.0, out.Sink());
+	gate.Push(MakeFrame(3, 7), 0.0, out.Sink());   // buffered behind the hole at 2
+	gate.Push(MakeFrame(500, 7), 0.0, out.Sink()); // past the jump limit: held
+	O3DS_CHECK_EQ(out.seqs.size(), (size_t)1);
+	gate.Push(MakeFrame(501, 7), 0.0, out.Sink()); // confirms it
+	O3DS_CHECK_EQ(out.seqs.size(), (size_t)4);
+	O3DS_CHECK_EQ(out.seqs[1], (uint64_t)3);
+	O3DS_CHECK_EQ(out.seqs[2], (uint64_t)500);
+	O3DS_CHECK_EQ(out.seqs[3], (uint64_t)501);
+	O3DS_CHECK_EQ(gate.Stats().lost, (uint64_t)(1 + (500 - 4)));
+	gate.Push(MakeFrame(502, 7), 0.0, out.Sink());
+	O3DS_CHECK_EQ(out.seqs.back(), (uint64_t)502);
+}
+
+O3DS_TEST(ReorderGate_UnconfirmedJumpCandidates_AreReplacedAndCounted)
+{
+	ReorderGate::Config config;
+	config.max_forward_jump = 100;
+	ReorderGate gate(config);
+	Delivered out;
+
+	gate.Push(MakeFrame(1, 7), 0.0, out.Sink());
+	gate.Push(MakeFrame(1000, 7), 0.0, out.Sink());
+	gate.Push(MakeFrame(5000, 7), 0.0, out.Sink()); // not 1001: replaces the candidate
+	O3DS_CHECK_EQ(gate.Stats().stale_dropped, (uint64_t)1);
+	gate.Push(MakeFrame(1001, 7), 0.0, out.Sink()); // the old candidate is gone; this is a new one
+	O3DS_CHECK_EQ(out.seqs.size(), (size_t)1);
+	O3DS_CHECK_EQ(gate.Stats().stale_dropped, (uint64_t)2);
+	gate.Push(MakeFrame(2, 7), 0.0, out.Sink());   // the stream itself is unaffected
+	O3DS_CHECK_EQ(out.seqs.back(), (uint64_t)2);
+
+	// A restart forgets the candidate.
+	gate.Push(MakeFrame(1, 8), 0.0, out.Sink());
+	gate.Push(MakeFrame(1002, 8), 0.0, out.Sink());
+	O3DS_CHECK_EQ(out.seqs.back(), (uint64_t)1);
+}
