@@ -4,8 +4,12 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "O3DControlBus.h"
 #include "O3DControlTypes.h"
+#include "Templates/SharedPointer.h"
 #include "O3DRemoteControlComponent.generated.h"
+
+class FO3DRuntimeContext;
 
 struct FO3DControlChange;
 
@@ -52,6 +56,15 @@ class OPEN3DRECEIVER_API UO3DRemoteControlComponent : public UActorComponent
 
 public:
 	UO3DRemoteControlComponent();
+
+	/**
+	 * The runtime context whose control changes this component hears
+	 * (docs/adr/0012-runtime-services-and-global-state.md): receiver sources with the same Context
+	 * Name. Empty: the default context. Case-insensitive. Read when play begins; the value queries
+	 * use the same context.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Open3DBroadcast|Control")
+	FName ContextName;
 
 	/** Only changes received on this transport stream (the receiver source's stream id). Empty accepts every stream. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Control|Filter")
@@ -107,7 +120,12 @@ private:
 	bool PassesFilters(const FString& Name, const FString& Target, const FO3DControlMeta& Meta) const;
 	bool PassesSourceFilter(const FString& SourceId) const;
 
+	/** The bus this component listens to and queries: BoundContext's, or ContextName's before play. */
+	FO3DControlBus::FInstance& GetBus() const;
+
 	FDelegateHandle BusHandle;
+	/** The context BusHandle is bound in, so Unbind removes it from the same bus. */
+	TSharedPtr<FO3DRuntimeContext, ESPMode::ThreadSafe> BoundContext;
 	/** Source id -> display name, learned from changes, for SourceNameFilter in the value queries. */
 	TMap<FString, FString> SourceNames;
 

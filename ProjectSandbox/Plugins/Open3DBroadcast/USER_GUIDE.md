@@ -980,6 +980,27 @@ Actor3 → O3DSender(Subject: "Prop1")      ┘
                                           - Prop1
 ```
 
+### Separate Receivers: Runtime Contexts
+
+By default every receiver source publishes its audio and control to the same place, and every
+O3D Remote Audio and Remote Control component listens there. When two receivers carry the same
+stream labels or control keys (a monitor receiver next to a live one, or several PIE clients),
+give them **Context Names**:
+
+- **Receiver source**: *Context Name* (advanced, in the source's connection settings).
+- **O3D Remote Audio Component** and **O3D Remote Control Component**: *Context Name*.
+
+A component hears only receiver sources with the same Context Name; an empty name is the default
+context, which is what every source and component uses unless you set one. Names are not case
+sensitive. Each context also has its own performance metrics: `o3d.DumpMetrics` prints the
+default context, then each named one, and `o3d.ResetMetrics` resets them all. The HUD and the
+CSV export show the default context only.
+
+Context Names are read when a source is created and when a component begins play; changing one
+later takes effect the next time. They separate audio, control and metrics only: LiveLink
+subject names are shared by the whole process, because Unreal Engine 5.7 has one LiveLink
+client per process (PIE clients included), so keep subject names distinct across receivers.
+
 ---
 
 ## Configuration Reference
@@ -1034,6 +1055,7 @@ Actor3 → O3DSender(Subject: "Prop1")      ┘
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | **TransportName** | Name | "loopback" | Transport module to use |
+| **ContextName** | Name | (empty) | Runtime context for audio, control and metrics; see [Separate Receivers](#separate-receivers-runtime-contexts) |
 | **bEnableAudio** | Bool | false | Enable audio playback |
 | **AudioStreamLabel** | String | "" | Filter by label (empty = all) |
 | **AudioCodec** | Name | "Opus" | Preferred audio decoder |
@@ -1043,6 +1065,7 @@ Actor3 → O3DSender(Subject: "Prop1")      ┘
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
+| **ContextName** | Name | (empty) | Plays audio from receiver sources with this Context Name only |
 | **ReceiveMode** | Enum | Mix | Mix or Subject mode |
 | **StreamLabel** | String | "" | Filter by label (empty = all) |
 | **SubjectName** | String | "" | Subject for Subject mode |

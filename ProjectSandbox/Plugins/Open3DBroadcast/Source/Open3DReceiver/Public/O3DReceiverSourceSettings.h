@@ -30,6 +30,16 @@ public:
     UPROPERTY(EditAnywhere, Category = "Open3DBroadcast")
     FName TransportName = TEXT("loopback");
 
+    /**
+     * The runtime context this source publishes its audio, control and metrics to
+     * (docs/adr/0012-runtime-services-and-global-state.md). Empty: the default context, which
+     * every component with an empty Context Name listens to. Remote audio and control components
+     * with the same name hear this source; others do not. Case-insensitive. Applies when the source
+     * is created.
+     */
+    UPROPERTY(EditAnywhere, Category = "Open3DBroadcast", AdvancedDisplay)
+    FName ContextName;
+
     /** Enable audio playback for transports that support it. */
     UPROPERTY(EditAnywhere, Category = "Open3DBroadcast|Audio")
     bool bEnableAudio = false;

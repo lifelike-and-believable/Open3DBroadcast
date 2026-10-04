@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "O3DControlBus.h"
 #include "Templates/Function.h"
 
 THIRD_PARTY_INCLUDES_START
@@ -16,11 +17,17 @@ THIRD_PARTY_INCLUDES_END
  * The receiver side of the control channel for one receiver source (docs/adr/0011-control-channel.md
  * item 8; WP-A3 split it out of FO3DReceiverSource): parses control payloads into changes, holds
  * them for alignment with the mocap pose LiveLink presents when the project setting asks for it,
- * and publishes them to FO3DControlBus. Game thread.
+ * and publishes them to its control bus. Game thread.
  */
 class FO3DReceiverControlRouter
 {
 public:
+	/** Publishes to InBus: the receiver source's context's bus (ADR 0012 item 6). It must outlive the router. */
+	explicit FO3DReceiverControlRouter(FO3DControlBus::FInstance& InBus);
+
+	/** Publishes to the default context's bus. */
+	FO3DReceiverControlRouter();
+
 	/**
 	 * The sender time (sender clock, microseconds) of the pose LiveLink presents for the mocap stream
 	 * carrying these subjects, or false when there is none (changes are then released at once).
@@ -52,6 +59,7 @@ private:
 	/** Forgets every control source this receiver has seen, without broadcasting. */
 	void Discard();
 
+	FO3DControlBus::FInstance& Bus;
 	O3DS::Control::ControlReceiver Receiver;
 	O3DS::Control::ControlAligner Aligner;
 	/** Source ids this receiver has published for, so they can be forgotten on the bus. */
