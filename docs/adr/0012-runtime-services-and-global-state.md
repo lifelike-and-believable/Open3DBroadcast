@@ -1,11 +1,13 @@
 # 0012: Runtime services and global state
 
-- **Status:** Proposed (pending maintainer sign-off)
+- **Status:** Accepted (maintainer sign-off 2026-10-03)
+- **Accepted with defaults:** the open questions below are accepted with the default given next to each. The needs-verification item stays open and is resolved in the implementing PR; a result that invalidates the decision is handled by a superseding ADR.
+- **Revised before acceptance (2026-10-03):** the first draft deferred the runtime context (stage 2) until a multi-world trigger. The maintainer asked what argued against doing it now. Deferring it would turn a free transport API change into a breaking one after the first release, rewrite the stage 1 call sites, and ship two overlapping ways to scope audio, so both stages are done in one series.
 - **Date:** 2026-10-03
 - **Plan decision:** SHR-38 in [`plugin-hardening-and-fab-readiness.md`](../roadmap/plugin-hardening-and-fab-readiness.md) (WP-A3 left it for a design decision)
 - **Related:** [ADR 0007](0007-transport-abstraction-and-registry.md) (registry, `FO3DTransportConfig`, transport metrics handles), [ADR 0011](0011-control-channel.md) (control bus), [ADR 0006](0006-test-module-layout-and-fakes.md) (test isolation)
 
-**Recommendation in one line:** keep the process-wide services that are process-wide by nature, and fix the data-path globals in two stages. **Stage 1, now:** metrics become per-instance handles that also feed the existing global counters, and the remote audio component can filter on the receiver source that produced a frame (frames already carry its GUID). Both changes are additive; every static accessor keeps working. **Stage 2, only when a real multi-world or multi-receiver isolation case appears:** an `FO3DRuntimeContext` (metrics, audio bus, control bus), hosted by an engine subsystem and passed to transports through `FO3DTransportConfig`, with the statics forwarding to a default context.
+**Decision in one line:** keep the process-wide services that are process-wide by nature, and move the data-path services (metrics, audio bus, control bus) into an `FO3DRuntimeContext` now, while the transport API it touches is still unreleased. A process default context keeps every static accessor working; transports get their context through `FO3DTransportConfig`; receivers and senders hold per-instance metrics handles from their context; and an engine subsystem hosts named contexts that receiver sources, sender components and the remote audio and control components select by name.
 
 ## Context
 
@@ -45,7 +47,7 @@
 2. Make tests independent of run order without workarounds.
 3. Per-instance metrics, so two receivers can be told apart.
 4. Isolation for multi-world and multi-receiver setups, proportionate to how rare they are.
-5. Keep the transport API stable unless isolation actually requires a change.
+5. Change the transport API at most once, and while the current version is unreleased if it must change at all.
 
 ## Options considered
 
@@ -74,53 +76,57 @@ SHR-38's recommendation.
 
 ## Decision
 
-**A staged hybrid: option 2 now, options 3 and 4 together later, only on a trigger.**
+**Options 2, 3 and 4 together, in one PR series now.** The transport API version this changes (`O3D_TRANSPORT_API_VERSION` 5) has not shipped in a release (the last tag is v0.9.6), so the transport seam is free now and would be a breaking change after the first Fab release. Doing per-instance handles first and the context later would rewrite the same call sites twice and ship a stop-gap audio filter that the context then duplicates.
 
-1. **Keep as process-wide, and document it** in `Plugin/Source/Open3DShared/Public` headers and the developer docs: the transport registry, the secret store, the audio input devices, the MoQ dispatcher and the console variables. Each is process-wide because what it represents is (registered modules, one user session, the machine's hardware, one FFI runtime, the console).
+1. **Keep as process-wide, and document it** in their headers and the developer docs: the transport registry, the secret store, the audio input devices, the MoQ dispatcher and the console variables. Each is process-wide because what it represents is (registered modules, one user session, the machine's hardware, one FFI runtime, the console).
 
-2. **Stage 1, metrics handles.**
-   - New `FO3DReceiverMetrics` and `FO3DSenderMetrics` hold the counters now in `FO3DPerformanceMetrics::FReceiverMetrics` and `FSenderMetrics`. A receiver source and a sender component each acquire one handle from a registry in `FO3DPerformanceMetrics`, the same pattern as `FO3DTransportMetricsRegistry` (`O3DPerformanceMetrics.h:155`), and release it when destroyed; the registry keeps the totals of released handles.
-   - A handle's `Record*` adds to its own counters and to the singleton's, so `FO3DPerformanceMetrics::Get().GetReceiverMetrics()` and `GetSenderMetrics()` keep returning the same structs by reference (`O3DPerformanceMetrics.h:309,312`), and the HUD, `o3d.DumpMetrics`, the CSV and every existing caller see what they see today. The `Record*` methods on the singleton stay, for callers that have no handle. Rolling averages and peaks stay global only, since they cannot be summed.
-   - The receiver source and its private classes (scheduler, decoder, concealment) record into the source's handle; tests read that handle directly.
+2. **`FO3DRuntimeContext`** (Open3DShared, `TSharedRef<..., ESPMode::ThreadSafe>`) owns one instance of each data-path service: performance metrics (including its transport metrics registry), an audio bus and a control bus. `FO3DRuntimeContext::Default()` is the process default, created when Open3DShared starts.
+   - The static accessors keep their signatures and forward to the default context: `FO3DAudioBus::OnPcm16()` and `PublishPcm16()`, every `FO3DControlBus` static, and `FO3DPerformanceMetrics::Get()`. Code that uses them today, including third-party code, behaves as before.
+   - `FO3DPerformanceMetrics`, the audio bus and the control bus become instantiable classes (the metrics singleton's private destructor goes).
+   - A test builds its own context and reads its own numbers, with no deltas and no `ResetForTesting`.
+
+3. **Transport seam.** `FO3DTransportConfig` gains `Context` (a shared pointer; empty means the default context). Transports take their metrics handles from the config's context instead of `FO3DPerformanceMetrics::Get()`. Today that is three senders: NNG, MoQ and the WebRTC add-on. This joins transport API version 5, recorded in its history comment like the other unreleased changes.
+
+4. **Per-instance metrics handles.** A receiver source and a sender component acquire a receiver or sender metrics handle from their context, the same pattern as `FO3DTransportMetricsRegistry` (`O3DPerformanceMetrics.h:155`), and release it when destroyed; the registry keeps the totals of released handles.
+   - A handle's `Record*` adds to its own counters and to the context's aggregate, so `GetReceiverMetrics()` and `GetSenderMetrics()` keep returning the same structs by reference (`O3DPerformanceMetrics.h:309,312`), and the HUD, `o3d.DumpMetrics` and the CSV show what they show today. Rolling averages and peaks stay aggregate only, since they cannot be summed.
+   - The receiver source's private classes (scheduler, decoder, concealment) get the handle from the source, never the context.
    - `o3d.DumpMetrics` also lists each live handle with its owner's name.
 
-3. **Stage 1, audio source filter.**
-   - `UO3DRemoteAudioComponent` gains an optional source filter matched against `FAudioFrameMeta::SourceGuid`, which the receiver source already sets (empty: every source, as today). A Blueprint-callable setter takes the GUID of a receiver source; how a user finds that GUID in the editor (for example from the LiveLink source list) is settled in the PR.
-   - `FO3DAudioBus::OnPcm16()` and `PublishPcm16()` keep their signatures. `FO3DAudioBus::ResetForTesting()` is added, like the control bus's.
+5. **Hosting and selection.** `UO3DRuntimeSubsystem` (`UEngineSubsystem`) owns named contexts, created on first use; the empty name is `FO3DRuntimeContext::Default()`.
+   - New `ContextName` properties (default empty) on the receiver source settings, `UO3DSenderComponent`, `UO3DRemoteAudioComponent` and `UO3DRemoteControlComponent`. A receiver source publishes audio and control to its context's buses; a component listens to its context's buses; a sender component passes its context to its transport.
+   - With every name left empty, nothing changes. Two receivers given different names are separated: their audio, control and metrics never meet.
+   - Selection is by name, not by world, so it works whether or not the LiveLink client is shared across worlds (Q4).
+   - The GUID filter on the audio component that the first draft proposed is not added; contexts replace it.
 
-4. **Stage 2, a runtime context, on a trigger.** Built when a real case needs separation rather than filtering: multi-client PIE with distinct audio or control per client, nDisplay, or running automation tests in parallel. Its shape, decided now so stage 1 does not block it:
-   - `FO3DRuntimeContext` owns a metrics registry, an audio bus and a control bus. A `UO3DRuntimeSubsystem` (`UEngineSubsystem`) owns a default context and named contexts.
-   - `FO3DTransportConfig` gains a context pointer; empty means the default. Transports take metrics handles from it instead of `FO3DPerformanceMetrics::Get()`.
-   - Receiver source settings and the remote audio and control components select a context by name (empty: default).
-   - The static accessors forward to the default context, so stage 1 code and third-party callers keep working.
-   - The transport API version changes (`O3D_TRANSPORT_API_VERSION`), unless no release has carried the current number, as before.
+6. **Boundary.** The context stops at transports, receiver sources, sender components and the gameplay components. Decoder, publisher, scheduler, pipeline and serializer classes receive the specific handle or bus they need from their owner.
 
 ## Consequences
 
-- **Easier:** per-receiver and per-sender numbers; tests that read their own handles; a component that listens to one receiver; stage 2 becomes a change of owner, not a rewrite, because the handle and source-id seams exist.
-- **Harder:** each counter is incremented twice (handle and global), a small cost on atomics that are already per frame; the global must stay equal to the old numbers, which a test checks.
-- **Unchanged:** the transport API, third-party code that binds the buses or reads the global metrics, the wire.
-- **Not solved by stage 1:** two receivers in one process still share the audio and control delegates; isolation is by filter. Stage 2 is the fix if that is ever not enough.
+- **Easier:** per-receiver and per-sender numbers; tests that build their own context instead of computing deltas or resetting globals, and could later run in parallel; real separation of two receivers, or of PIE clients, by giving them context names; one seam for third-party transports, versioned with the transport API.
+- **Harder:** a larger series than handles alone (three transports and four user-facing classes); each counter is incremented twice (handle and aggregate); `ContextName` is one more property to explain in the docs.
+- **Unchanged:** the wire; code that uses the static accessors; every setup that leaves the context names empty.
+- **Not covered:** LiveLink subject names are owned by the LiveLink client and stay distinct per receiver as today.
 
 ## Implementation outline
 
-1. **PR 1, metrics handles** (stage 1 item 2): registry, handles, receiver source and its classes on the handle, `DumpMetrics` per handle. Test: two receiver sources record into separate handles, and the global counters equal the sum.
-2. **PR 2, audio source filter** (item 3): component filter, `ResetForTesting`. Test: two sources, one component filtering on one of them.
-3. **PR 3, documentation** (item 1): the process-wide services and why, in headers and the developer guide.
-4. **Stage 2:** its own work package, when triggered, with an implementing PR series and a conformance check that every transport takes its metrics from the config's context.
+1. **PR 1, the context** (items 2, 6): `FO3DRuntimeContext`, the default context, instantiable metrics and buses, statics forwarding. No behaviour change. Test: two contexts do not see each other's audio, control or metrics; the statics reach the default.
+2. **PR 2, the transport seam** (item 3): `FO3DTransportConfig::Context`, the NNG, MoQ and WebRTC senders, the transport API history note. Test: a transport given a context records into it; a CI check that no transport calls `FO3DPerformanceMetrics::Get()`.
+3. **PR 3, metrics handles** (item 4): handles, the receiver source and sender component on them, `DumpMetrics` per handle. Test: two receiver sources record into separate handles, and the aggregate equals the sum.
+4. **PR 4, hosting and selection** (item 5): the subsystem, the `ContextName` properties, docs. Test: two receiver sources with different names deliver audio and control only to components with the same name.
+5. **PR 5, documentation** (item 1): the process-wide services and why.
 
 ## Verification / acceptance
 
-- Existing metrics tests and the HUD, `o3d.DumpMetrics` and CSV output are unchanged with one receiver and one sender.
-- New tests read per-instance handles without computing deltas.
-- No transport source file changes in stage 1.
+- With all context names empty, the HUD, `o3d.DumpMetrics` and CSV output, and every existing test, are unchanged.
+- New tests read per-instance handles and per-context buses without deltas or resets.
+- No transport calls `FO3DPerformanceMetrics::Get()` (checked in CI).
 
 ## Open questions for the maintainer
 
-1. **Stage 2 trigger.** Is "a concrete multi-world or parallel-test need" the right trigger, or should stage 2 be scheduled outright? Default: the trigger.
-2. **Direct bus users.** Does any project outside this repository bind `FO3DAudioBus::OnPcm16()` or `FO3DControlBus::OnChange()`? Stage 1 keeps them working either way; the answer only matters for how long the stage 2 forwarding statics must stay. Default: keep them for at least two releases after stage 2.
-3. **Per-receiver metrics in the UI.** Should the HUD show per-source rows, or is `o3d.DumpMetrics` enough? Default: `DumpMetrics` only.
-4. **needs-verification:** whether the LiveLink client is shared across PIE worlds in UE 5.7, which bounds what any context can isolate for mocap.
+1. **Direct bus users.** Does any project outside this repository bind `FO3DAudioBus::OnPcm16()` or `FO3DControlBus::OnChange()`? **Accepted default:** the forwarding statics stay for at least two releases after this series, then are reviewed.
+2. **Per-receiver metrics in the UI.** **Accepted default:** `o3d.DumpMetrics` lists them; the HUD shows the aggregate as today.
+3. **Context names in the editor.** **Accepted default:** free-text names; the LiveLink source panel and the component details show the names in use.
+4. **needs-verification:** whether the LiveLink client is shared across PIE worlds in UE 5.7. Selection by name does not depend on it; the answer goes into the user docs for multi-client PIE.
 
 ## References
 
