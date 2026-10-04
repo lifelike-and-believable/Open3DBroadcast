@@ -558,6 +558,20 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- **Per-sender metrics** (SHR-38, ADR 0012 PR 3b): `FO3DSenderMetricsHandle`
+  (`FO3DPerformanceMetrics::AcquireSenderMetrics`) adds to its counters and to the context's
+  aggregate. The sender component acquires one on its first transport start, keeps it across
+  restarts and passes it to its transport in the new `FO3DTransportConfig::SenderMetrics`; the
+  NNG, MoQ and WebRTC senders record sender metrics only through it (or a handle of their own
+  when the config has none, resolved with `FO3DRuntimeContext::ResolveSenderMetrics`), and refuse
+  a handle from another context with `InvalidConfig`. `o3d.DumpMetrics` gains a `[SENDERS]`
+  section; `Reset()` zeroes the sender handles too; the HUD and CSV output are unchanged. TCP,
+  UDP and Loopback still record no sender metrics. Part of transport API version 5 (unreleased).
+  `UO3DSenderComponent::GetSenderMetricsHandle()` is new. Tests:
+  `Open3DBroadcast.Shared.Metrics.SenderHandles.AggregateIsTheSum`,
+  `Open3DBroadcast.Transport.NNG.RecordsIntoConfigSenderMetrics`,
+  `Open3DBroadcast.Sender.Metrics.ComponentPassesItsHandle`.
+
 - **Per-receiver metrics** (SHR-38, ADR 0012 PR 3a): each receiver source records through its
   own `FO3DReceiverMetricsHandle` (`FO3DPerformanceMetrics::AcquireReceiverMetrics`), which adds
   to its counters and to the context's aggregate, so the aggregate equals the sum of every handle,

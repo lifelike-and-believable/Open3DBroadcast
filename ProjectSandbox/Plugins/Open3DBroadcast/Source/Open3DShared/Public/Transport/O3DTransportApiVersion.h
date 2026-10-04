@@ -94,6 +94,8 @@
  *      FO3DTransportConfig gained Context (the FO3DRuntimeContext the transport records its
  *      metrics into; empty means the default context), and IOpen3DSender::Initialize documents
  *      that no send may be in flight while it runs.
+ *      ADR 0012 PR 3b (SHR-38) is part of 5 as well: FO3DTransportConfig gained SenderMetrics
+ *      (an FO3DSenderMetricsHandle), through which sender transports record sender metrics.
  */
 #define O3D_TRANSPORT_API_VERSION 5
 

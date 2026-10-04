@@ -88,4 +88,53 @@ bool FO3DReceiverMetricsHandleSumTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderMetricsHandleSumTest, "Open3DBroadcast.Shared.Metrics.SenderHandles.AggregateIsTheSum", O3DB_TEST_FLAGS)
+bool FO3DSenderMetricsHandleSumTest::RunTest(const FString& Parameters)
+{
+	const FO3DRuntimeContextRef Context = MakeShared<FO3DRuntimeContext, ESPMode::ThreadSafe>(TEXT("O3DTest.SenderHandles"));
+	FO3DPerformanceMetrics& Metrics = Context->GetMetrics();
+	const FO3DPerformanceMetrics::FSenderMetrics& Aggregate = Metrics.GetSenderMetrics();
+
+	const FO3DSenderMetricsHandleRef A = Metrics.AcquireSenderMetrics(TEXT("Sender A"));
+	TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe> B = Metrics.AcquireSenderMetrics(TEXT("Sender B"));
+	TestEqual(TEXT("Two live sender handles"), Metrics.GetSenderHandles().Num(), 2);
+	TestEqual(TEXT("No receiver handles"), Metrics.GetReceiverHandles().Num(), 0);
+
+	A->RecordFrameCaptured();
+	A->RecordFrameCaptured();
+	A->RecordBytesSerialized(40);
+	A->RecordBytesSent(40);
+	B->RecordFrameCaptured();
+	B->RecordFrameDropped();
+	B->RecordTransportFrameDropped();
+	TestEqual(TEXT("A: captured"), A->GetCounters().FramesCaptured.load(), (uint64)2);
+	TestEqual(TEXT("B: captured"), B->GetCounters().FramesCaptured.load(), (uint64)1);
+	TestEqual(TEXT("A: no drops"), A->GetCounters().FramesDropped.load(), (uint64)0);
+	TestEqual(TEXT("Aggregate captured is the sum"), Aggregate.FramesCaptured.load(), (uint64)3);
+	TestEqual(TEXT("Aggregate serialized"), Aggregate.BytesSerialized.load(), (uint64)40);
+	TestEqual(TEXT("Aggregate sent"), Aggregate.BytesSent.load(), (uint64)40);
+	TestEqual(TEXT("Aggregate dropped"), Aggregate.FramesDropped.load(), (uint64)1);
+	TestEqual(TEXT("Aggregate transport dropped"), Aggregate.TransportFramesDropped.load(), (uint64)1);
+
+	B.Reset();
+	TestEqual(TEXT("One live sender handle"), Metrics.GetSenderHandles().Num(), 1);
+	TestEqual(TEXT("Released counts kept"), Aggregate.FramesCaptured.load(), (uint64)3);
+
+	Metrics.Reset();
+	TestEqual(TEXT("Aggregate reset"), Aggregate.FramesCaptured.load(), (uint64)0);
+	TestEqual(TEXT("Handle reset"), A->GetCounters().FramesCaptured.load(), (uint64)0);
+
+	// A transport given no handle gets its own; given one from another context, it is refused.
+	FO3DSenderMetricsHandleRef Resolved = A;
+	TestTrue(TEXT("Own handle resolves"), Context->ResolveSenderMetrics(A, TEXT("unused"), Resolved));
+	TestTrue(TEXT("The provided handle is used"), Resolved == A);
+	TestTrue(TEXT("No handle: a new one"), Context->ResolveSenderMetrics(nullptr, TEXT("NNG sender"), Resolved));
+	TestTrue(TEXT("New handle is listed"), Resolved != A && Resolved->GetOwnerName() == TEXT("NNG sender") && Metrics.GetSenderHandles().Num() == 2);
+	const FO3DRuntimeContextRef Other = MakeShared<FO3DRuntimeContext, ESPMode::ThreadSafe>(TEXT("O3DTest.OtherSender"));
+	FO3DSenderMetricsHandleRef Untouched = A;
+	TestFalse(TEXT("A handle from another context is refused"), Other->ResolveSenderMetrics(A, TEXT("unused"), Untouched));
+	TestTrue(TEXT("The out handle is untouched"), Untouched == A);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

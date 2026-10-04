@@ -217,6 +217,7 @@ FO3DWebRTCSender::FO3DWebRTCSender(const FLkFfiApi& InFfi, FO3DTokenFetcherFacto
     , Link(MakeShared<FWebRTCSenderLink, ESPMode::ThreadSafe>(InFfi))
     , Context(FO3DRuntimeContext::Default())
     , TransportMetrics(Context->GetMetrics().AcquireTransportMetrics(TEXT("WebRTC")))
+    , SenderMetrics(Context->GetMetrics().AcquireSenderMetrics(TEXT("WebRTC sender")))
 {
     LinkToken = GetSenderLinkRegistry().Register(Link);
 }
@@ -270,6 +271,10 @@ FO3DTransportResult FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Conf
 
     Context = FO3DRuntimeContext::OrDefault(Config.Context);
     TransportMetrics = Context->GetMetrics().AcquireTransportMetrics(TEXT("WebRTC"));
+    if (!Context->ResolveSenderMetrics(Config.SenderMetrics, TEXT("WebRTC sender"), SenderMetrics))
+    {
+        return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("WebRTC sender: the sender metrics handle belongs to another runtime context."));
+    }
     Link->TransportMetrics = TransportMetrics; // before the connection callback is registered below
 
     // Create LiveKit client handle
@@ -427,7 +432,7 @@ void FO3DWebRTCSender::Stop()
 
 void FO3DWebRTCSender::RecordDroppedFrame()
 {
-    Context->GetMetrics().RecordFrameDropped();
+    SenderMetrics->RecordFrameDropped();
     FScopeLock Lock(&StatsMutex);
     Stats.DroppedFrames++;
 }
@@ -448,8 +453,8 @@ EO3DSendResult FO3DWebRTCSender::SendSerialized(FO3DSendPayload&& Payload)
         return EO3DSendResult::Invalid;
     }
 
-    Context->GetMetrics().RecordFrameCaptured();
-    Context->GetMetrics().RecordBytesSerialized(Len);
+    SenderMetrics->RecordFrameCaptured();
+    SenderMetrics->RecordBytesSerialized(Len);
 
     // Handed to LiveKit on the caller's thread (TRF-5). LiveKit buffers the message in the data
     // channel and refuses it when it cannot take it, and that refusal is the backpressure the
@@ -513,7 +518,7 @@ EO3DSendResult FO3DWebRTCSender::SendBytes(const uint8* Data, int32 Len, const F
     {
         UE_LOG(LogO3DWebRTCSender, Verbose, TEXT("Failed to send subject '%s' (code=%d): %s"),
             *SubjectLabel, Result.code, *Ffi.TakeMessage(Result));
-        Context->GetMetrics().RecordTransportFrameDropped();
+        SenderMetrics->RecordTransportFrameDropped();
         {
             FScopeLock Lock(&StatsMutex);
             Stats.SendErrors++;
@@ -522,7 +527,7 @@ EO3DSendResult FO3DWebRTCSender::SendBytes(const uint8* Data, int32 Len, const F
         return EO3DSendResult::DroppedBackpressure;
     }
 
-    Context->GetMetrics().RecordBytesSent(Len);
+    SenderMetrics->RecordBytesSent(Len);
     TransportMetrics->RecordFrameSent(static_cast<uint64>(Len));
 
     {

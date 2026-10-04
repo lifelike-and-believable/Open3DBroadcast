@@ -59,6 +59,26 @@ public:
 		return Context.IsValid() ? Context.ToSharedRef() : Default();
 	}
 
+	/**
+	 * A sender transport's metrics handle (ADR 0012 item 4): Provided when set, otherwise a new
+	 * handle named FallbackOwnerName from this context. False, with OutHandle untouched, when
+	 * Provided belongs to another context's metrics. Thread-safe.
+	 */
+	bool ResolveSenderMetrics(const TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe>& Provided, const FString& FallbackOwnerName, FO3DSenderMetricsHandleRef& OutHandle)
+	{
+		if (!Provided.IsValid())
+		{
+			OutHandle = Metrics.AcquireSenderMetrics(FallbackOwnerName);
+			return true;
+		}
+		if (&Provided->GetAggregate() != &Metrics)
+		{
+			return false;
+		}
+		OutHandle = Provided.ToSharedRef();
+		return true;
+	}
+
 	FName GetName() const { return Name; }
 
 	FO3DPerformanceMetrics& GetMetrics() { return Metrics; }

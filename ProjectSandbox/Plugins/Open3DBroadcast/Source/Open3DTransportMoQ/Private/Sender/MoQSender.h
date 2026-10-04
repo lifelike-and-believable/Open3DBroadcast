@@ -226,6 +226,8 @@ private:
 	 */
 	FO3DRuntimeContextRef Context;
 	FO3DTransportMetricsRef TransportMetrics;
+	/** Sender metrics: the config's handle, or this transport's own (ADR 0012 item 4). */
+	FO3DSenderMetricsHandleRef SenderMetrics;
 
 	/** ADR 0007 item 3. */
 	FO3DConnectionStateTracker ConnectionState;

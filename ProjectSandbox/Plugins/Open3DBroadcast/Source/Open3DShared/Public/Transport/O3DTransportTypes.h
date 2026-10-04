@@ -8,6 +8,7 @@
 #include "Transport/O3DTransportOptionsView.h"
 
 class FO3DRuntimeContext;
+class FO3DSenderMetricsHandle;
 
 /**
  * Plain transport types shared by IOpen3DSender, IOpen3DReceiver and the transport registry
@@ -432,6 +433,13 @@ struct FO3DTransportConfig
      * in Initialize and never calls FO3DPerformanceMetrics::Get(). Not part of ToDebugString.
      */
     TSharedPtr<FO3DRuntimeContext, ESPMode::ThreadSafe> Context;
+
+    /**
+     * The sender's metrics handle (ADR 0012 item 4), acquired from Context's metrics by the sender
+     * component; a sender transport records its sender metrics through it. Empty: the transport
+     * acquires its own. A handle from another context's metrics is InvalidConfig. Senders only.
+     */
+    TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe> SenderMetrics;
 
     /**
      * Build a concise debug string summarising the configuration. Secrets print as key and

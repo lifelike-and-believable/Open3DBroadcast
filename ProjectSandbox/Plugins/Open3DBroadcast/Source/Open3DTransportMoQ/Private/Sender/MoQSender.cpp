@@ -64,6 +64,7 @@ FO3DMoQSender::FO3DMoQSender(FMoQFfiApiRef InApi, TFunction<double()> InClock, u
 	, PublishState(MakeShared<FO3DAudioPublishState, ESPMode::ThreadSafe>(Queue, EO3DAudioWireFormat::AudioPayload))
 	, Context(FO3DRuntimeContext::Default())
 	, TransportMetrics(Context->GetMetrics().AcquireTransportMetrics(TEXT("MoQ")))
+	, SenderMetrics(Context->GetMetrics().AcquireSenderMetrics(TEXT("MoQ sender")))
 {
 	CachedState = MOQ_STATE_DISCONNECTED;
 }
@@ -159,6 +160,10 @@ FO3DTransportResult FO3DMoQSender::Initialize(const FO3DTransportConfig& Config)
 	ActiveAudioConfig = Config.Audio;
 	Context = FO3DRuntimeContext::OrDefault(Config.Context);
 	TransportMetrics = Context->GetMetrics().AcquireTransportMetrics(TEXT("MoQ"));
+	if (!Context->ResolveSenderMetrics(Config.SenderMetrics, TEXT("MoQ sender"), SenderMetrics))
+	{
+		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("MoQ sender: the sender metrics handle belongs to another runtime context."));
+	}
 	AudioSourceGuid = FGuid::NewGuid();
 	bAudioRequested = false;
 
@@ -387,7 +392,7 @@ EO3DSendResult FO3DMoQSender::SendSerialized(FO3DSendPayload&& Payload)
 {
 	if (!bInitialized || !bRunning)
 	{
-		Context->GetMetrics().RecordFrameDropped();
+		SenderMetrics->RecordFrameDropped();
 		return EO3DSendResult::NotRunning;
 	}
 
@@ -397,8 +402,8 @@ EO3DSendResult FO3DMoQSender::SendSerialized(FO3DSendPayload&& Payload)
 		return EO3DSendResult::Invalid;
 	}
 
-	Context->GetMetrics().RecordFrameCaptured();
-	Context->GetMetrics().RecordBytesSerialized(Len);
+	SenderMetrics->RecordFrameCaptured();
+	SenderMetrics->RecordBytesSerialized(Len);
 
 	// No NotConnected: frames queue while the session (re)connects and the worker publishes or
 	// drops them. The payload's bytes move into the queue without a copy.
@@ -420,7 +425,7 @@ EO3DSendResult FO3DMoQSender::EnqueueFrame(TArray<uint8>&& Bytes, FString Subjec
 	const EO3DSendResult Result = Queue->Enqueue(FO3DSendItem::MakeMocap(MoveTemp(Bytes), MoveTemp(SubjectName), CaptureTimestampSec, bFullSync));
 	if (Result != EO3DSendResult::Queued)
 	{
-		Context->GetMetrics().RecordTransportFrameDropped();
+		SenderMetrics->RecordTransportFrameDropped();
 		DroppedFrames.fetch_add(1);
 		if (O3DMoQSenderPrivate::ClaimLogSlot(LastDropLogTimeSeconds, kDropLogIntervalSeconds))
 		{
@@ -429,7 +434,7 @@ EO3DSendResult FO3DMoQSender::EnqueueFrame(TArray<uint8>&& Bytes, FString Subjec
 		return Result;
 	}
 
-	Context->GetMetrics().RecordBytesSent(Len);
+	SenderMetrics->RecordBytesSent(Len);
 	TransportMetrics->RecordFrameSent(static_cast<uint64>(Len));
 	return EO3DSendResult::Queued;
 }
