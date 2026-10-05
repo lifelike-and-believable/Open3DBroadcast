@@ -330,6 +330,14 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Fixed
 
+- WebRTC receiver: data arrives again. It registers both the labeled and the unlabeled data
+  callback; livekit_ffi's async-connect loop, which the receiver uses, calls only the unlabeled
+  one, so with only the labeled callback (TRF-16) no frame reached the receiver. No livekit_ffi
+  version calls both for one packet, so frames are not doubled. Frames from the unlabeled
+  callback carry the `default` label, which only logs use; streams are keyed by the subject
+  names in each packet (RCV-5). Found by reading the livekit_ffi source
+  (`docs/livekit_ffi_feature_request.md` section 13); not yet checked live.
+
 - **Residual decoding tolerates small prediction differences between builds** (CORE-14).
   Residual coding needs the sender's and the receiver's predictions to agree, but the
   predictors use `acos`, `sin` and `cos`, and UE builds the core with `/fp:fast` by default.

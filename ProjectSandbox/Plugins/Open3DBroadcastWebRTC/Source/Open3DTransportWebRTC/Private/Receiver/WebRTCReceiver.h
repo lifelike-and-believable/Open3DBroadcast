@@ -235,7 +235,8 @@ private:
     // LiveKit FFI callbacks (static). `user` is the opaque LinkToken.
     static void OnConnectionState(void* user, LkConnectionState state, int32_t reason_code, const char* message);
     static void OnDataReceivedEx(void* user, const char* label, LkReliability reliability, const uint8_t* bytes, size_t len);
-    // Fallback: unlabeled data callback, registered only if the labeled one cannot be (TRF-16).
+    // Unlabeled data callback, registered with the labeled one: livekit_ffi's async-connect loop
+    // calls only this one.
     static void OnDataReceived(void* user, const uint8_t* bytes, size_t len);
     // Per-subject audio callback with participant and track names from LiveKit FFI
     static void OnAudioReceivedEx(void* user, const int16_t* pcm_interleaved, size_t frames_per_channel, int32_t channels, int32_t sample_rate, const char* participant_name, const char* track_name);

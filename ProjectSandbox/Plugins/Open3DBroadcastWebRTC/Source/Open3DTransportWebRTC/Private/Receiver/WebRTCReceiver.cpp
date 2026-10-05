@@ -234,7 +234,8 @@ void FO3DWebRTCReceiver::OnDataReceivedEx(void* user, const char* label, LkRelia
     Self->EnqueueFrame(SubjectLabel, bytes, static_cast<int32>(len));
 }
 
-// FALLBACK: unlabeled data callback, registered only when lk_client_set_data_callback_ex fails.
+// Unlabeled data callback: the only one livekit_ffi's async-connect loop calls. Frames take the
+// 'default' label, which only logs see.
 void FO3DWebRTCReceiver::OnDataReceived(void* user, const uint8_t* bytes, size_t len)
 {
     const TSharedPtr<FWebRTCReceiverLink, ESPMode::ThreadSafe> Self = GetReceiverLinkRegistry().Resolve(user);
@@ -738,16 +739,16 @@ bool FO3DWebRTCReceiver::SetupClientHandle()
     LogIfFailed(Ffi, Ffi.lk_set_connection_callback(ClientHandle, FO3DWebRTCReceiver::OnConnectionState, LinkToken),
         TEXT("LiveKit set connection callback"));
 
-    // Register exactly one data callback (TRF-16). The unlabeled callback is only a fallback for
-    // an FFI build without the labeled one; registering both could deliver each packet twice.
-    const LkResult DataCallbackResult = Ffi.lk_client_set_data_callback_ex(ClientHandle, FO3DWebRTCReceiver::OnDataReceivedEx, LinkToken);
-    if (DataCallbackResult.code != 0)
-    {
-        LogIfFailed(Ffi, DataCallbackResult, TEXT("LiveKit set extended data callback"));
-        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("Falling back to the unlabeled data callback; all frames use the '%s' label"), DefaultSubjectLabel);
-        LogIfFailed(Ffi, Ffi.lk_client_set_data_callback(ClientHandle, FO3DWebRTCReceiver::OnDataReceived, LinkToken),
-            TEXT("LiveKit set data callback"));
-    }
+    // Register both data callbacks. livekit_ffi's event loops never call both for one packet: the
+    // sync-connect loop calls the labeled callback when set and the unlabeled one otherwise, and
+    // the async-connect loop (lk_connect_with_role_async, used below) calls only the unlabeled
+    // one (backend_livekit.rs, docs/livekit_ffi_feature_request.md section 13). With only the
+    // labeled callback, as TRF-16 had it, this receiver got no data. The label is used for logs
+    // only; streams are keyed by the subject names in each packet (RCV-5).
+    LogIfFailed(Ffi, Ffi.lk_client_set_data_callback_ex(ClientHandle, FO3DWebRTCReceiver::OnDataReceivedEx, LinkToken),
+        TEXT("LiveKit set extended data callback"));
+    LogIfFailed(Ffi, Ffi.lk_client_set_data_callback(ClientHandle, FO3DWebRTCReceiver::OnDataReceived, LinkToken),
+        TEXT("LiveKit set data callback"));
 
     LogIfFailed(Ffi, Ffi.lk_client_set_audio_callback_ex(ClientHandle, FO3DWebRTCReceiver::OnAudioReceivedEx, LinkToken),
         TEXT("LiveKit set extended audio callback"));
