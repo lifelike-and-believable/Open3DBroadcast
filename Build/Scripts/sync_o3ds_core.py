@@ -92,9 +92,9 @@ INCLUDE_ROOTS = [
 # be copied; None means always). Since WP-A2e no core file includes CRC.h
 # (o3ds/crc32.cpp computes the CRC), so the CRCpp licence goes with it.
 LICENSES = [
-    (os.path.join(REPO_ROOT, "LICENSE"), "LICENSES/Open3DStream-LICENSE.txt", None),
-    (os.path.join(FLATBUFFERS_DIR, "LICENSE.txt"), "LICENSES/FlatBuffers-LICENSE.txt", None),
-    (os.path.join(CRCPP_DIR, "LICENSE"), "LICENSES/CRCpp-LICENSE.txt", "crccpp/"),
+    (os.path.join(REPO_ROOT, "LICENSE"), "LICENSES/Open3DStream_LICENSE.txt", None),
+    (os.path.join(FLATBUFFERS_DIR, "LICENSE.txt"), "LICENSES/FlatBuffers_LICENSE.txt", None),
+    (os.path.join(CRCPP_DIR, "LICENSE"), "LICENSES/CRCpp_LICENSE.txt", "crccpp/"),
 ]
 
 # C headers a core file may include with angle brackets. C++ standard headers

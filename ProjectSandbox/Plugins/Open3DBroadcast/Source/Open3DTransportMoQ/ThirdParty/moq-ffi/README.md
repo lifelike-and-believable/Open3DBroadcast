@@ -9,7 +9,8 @@ This directory contains the prebuilt **moq-ffi** package used by the `Open3DTran
 | Item | Value |
 | --- | --- |
 | Repository | https://github.com/lifelike-and-believable/moq-ffi |
-| Commit | `567933e82c780b157705b64fb84729ae46b534ca` |
+| Release tag | `v0.1.7` |
+| Commit | `f0f250148be450cad1d37bf18207e920b534e472` (the same commit `ProjectSandbox/External/moq-ffi` pins) |
 | Branch | `draft-ietf-moq-transport-07` (MoQ draft-07 compatibility) |
 | Build Profile | `cargo build --release --features with_moq_draft07` on Win64/MSVC |
 | Drop Date | 2025-11-24 |
@@ -20,10 +21,12 @@ Only Win64 artifacts are shipped, and the module is Win64-only (`PlatformAllowLi
 
 | Relative Path | Description | SHA256 |
 | --- | --- | --- |
-| `bin/Win64/Release/moq_ffi.dll` | Runtime DLL loaded by the module through `FO3DFfiLibrary` (Open3DShared) | `EF248AABDD4F9329C6F874261E6BF2CC9DCF62170CD95CD2F3C79BEC4B1237EF` |
-| `moq_ffi.pdb` (not in the tree; release asset, see `Build/README.md`, "Debug symbols") | Debug symbols for crash triage | `66F612E8344037D10D0F2D8107F3AF0C4F9F426D0903578DAE4C3DF39E06A318` |
+| `bin/Win64/Release/moq_ffi.dll` | Runtime DLL loaded by the module through `FO3DFfiLibrary` (Open3DShared) | `BB722F4475C814C4764CC97A126379D2DAF37285487B0810B4FA293CB8BF46FF` |
+| `moq_ffi.pdb` (not in the tree; release asset, see `Build/README.md`, "Debug symbols") | Debug symbols for crash triage | `B51E58C9361680E3FAC05826006299CB2AA9A76005A6BF5643C5B1021BBD8B32` |
 | `lib/Win64/Release/moq_ffi.dll.lib` | Import library linked at build time | `B3377B79C3DB3D3047C2FA352C1B10D3C87AA548378407A01299CB4A4A277B1A` |
 | `include/moq_ffi.h` | C API header emitted by `cbindgen` | (text file, not hashed—see upstream repo) |
+
+> **Provenance verified 2026-10-05.** The tracked `moq_ffi.dll` and `moq_ffi.dll.lib` and `include/moq_ffi.h` are byte-identical (header modulo line endings) to the contents of `moq-ffi-plugin-windows-x64.zip` in release `v0.1.7` (zip SHA256 `1E94E0D7C1194C7452DD17693183F68571AA7358FF64EEB6DE365CD7058FA77C`), built by the repository's `build-ffi.yml` on `windows-latest` (Rust 1.87.0). Commit `f0f2501...` is dated 2025-11-24, the drop date above. The commit (`567933e...`), DLL hash (`EF248AAB...37EF`) and PDB hash (`66F612E8...A318`) this README listed before were replaced: the DLL hash matches neither the tracked DLL nor the `v0.1.5`, `v0.1.7`, `v0.1.8` or `v0.1.9` release DLLs (`v0.1.6` has no asset), and the PDB hash differs from the `v0.1.7` PDB. Newer releases exist (`v0.1.8`, `v0.1.9`); this tree has not moved to them.
 
 ## Refresh Workflow
 

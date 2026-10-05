@@ -17,7 +17,7 @@ reads it directly). Rules for Claude Code are in `.claude/rules/` (rules-for-rob
 
 - UE build (UE 5.7 only): `"C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat" ProjectSandboxEditor Win64 Development "-Project=<repo>\ProjectSandbox\ProjectSandbox.uproject" -WaitMutex`
 - UE automation tests: `Build/Scripts/Run-AutomationTests.ps1 -UEPath "C:\Program Files\Epic Games\UE_5.7" -ProjectFile <repo>\ProjectSandbox\ProjectSandbox.uproject -TestFilter Open3DBroadcast` (decide pass or fail from its report, not the editor's exit code).
-- Checks run by CI, all cheap: `python3 Build/Scripts/check-copyright-headers.py`, `python3 Build/Scripts/check-runtime-editor-deps.py`, `python3 Build/Scripts/fab-package.py --out-dir <scratch>`, `bash Build/Scripts/check-no-video-codecs.sh`, `python3 Build/Scripts/sync_o3ds_core.py --check` (needs the submodules).
+- Checks run by CI, all cheap: `python3 Build/Scripts/check-copyright-headers.py`, `python3 Build/Scripts/check-runtime-editor-deps.py`, `python3 Build/Scripts/check-third-party-binaries.py`, `python3 Build/Scripts/fab-package.py --out-dir <scratch>`, `bash Build/Scripts/check-no-video-codecs.sh`, `python3 Build/Scripts/sync_o3ds_core.py --check` (needs the submodules).
 - Core library: build and test as `.github/workflows/core-tests.yml` does (CMake with `-DO3DS_BUILD_TESTS=ON`, then `ctest`).
 - Verify before reporting a change as done: the UE build and the automation tests for plugin changes, the core tests for `src/` changes, and the checks above. Include their output. A plugin change that only CI can build says so.
 

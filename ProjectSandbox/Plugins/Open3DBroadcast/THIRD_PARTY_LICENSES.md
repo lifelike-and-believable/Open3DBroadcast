@@ -30,7 +30,7 @@ every binary here for them (`Build/Scripts/check-no-video-codecs.sh`).
 | Component | License | Text |
 | --- | --- | --- |
 | Open3DBroadcast (all `Source/` modules) | MIT | [`LICENSE`](LICENSE) |
-| Open3DStream core (`o3ds`) | MIT | [`Source/ThirdParty/Open3DStreamCore/LICENSES/Open3DStream-LICENSE.txt`](Source/ThirdParty/Open3DStreamCore/LICENSES/Open3DStream-LICENSE.txt) |
+| Open3DStream core (`o3ds`) | MIT | [`Source/ThirdParty/Open3DStreamCore/LICENSES/Open3DStream_LICENSE.txt`](Source/ThirdParty/Open3DStreamCore/LICENSES/Open3DStream_LICENSE.txt) |
 
 Both are MIT, © 2020–2024 Alastair Macleod.
 
@@ -50,7 +50,7 @@ binaries. License texts are in
 
 | Component | Version | License | Text |
 | --- | --- | --- | --- |
-| Google FlatBuffers (runtime headers) | 2.0.6, submodule `615616c` | Apache-2.0 | [`FlatBuffers-LICENSE.txt`](Source/ThirdParty/Open3DStreamCore/LICENSES/FlatBuffers-LICENSE.txt) |
+| Google FlatBuffers (runtime headers) | 2.0.6, submodule `615616c` | Apache-2.0 | [`FlatBuffers_LICENSE.txt`](Source/ThirdParty/Open3DStreamCore/LICENSES/FlatBuffers_LICENSE.txt) |
 
 No FlatBuffers library is linked: the core uses only its header-only runtime.
 CML is no longer listed: nothing in the plugin uses it. CRC++ is no longer listed
@@ -65,15 +65,17 @@ no CRC++ code ships.
 | --- | --- | --- | --- | --- |
 | Opus | see note | BSD-3-Clause + royalty-free patent grants | [`Source/ThirdParty/opus/COPYING`](Source/ThirdParty/opus/COPYING) | `Open3DShared` |
 | NNG (nanomsg-next-gen) | 1.3.0 | MIT | [`Source/Open3DTransportNNG/ThirdParty/nng/LICENSE.txt`](Source/Open3DTransportNNG/ThirdParty/nng/LICENSE.txt) | `Open3DTransportNNG` |
-| moq-ffi | commit `567933e` | MIT | [`Source/Open3DTransportMoQ/ThirdParty/moq-ffi/LICENSE`](Source/Open3DTransportMoQ/ThirdParty/moq-ffi/LICENSE) | `Open3DTransportMoQ` |
+| moq-ffi | `v0.1.7`, commit `f0f2501` | MIT | [`Source/Open3DTransportMoQ/ThirdParty/moq-ffi/LICENSE`](Source/Open3DTransportMoQ/ThirdParty/moq-ffi/LICENSE) | `Open3DTransportMoQ` |
 
 ### Opus
 
-The shipped `opus.lib` reports its version string as `libopus unknown`, meaning
-it was built from a git checkout with no version metadata. The API surface
-present in the vendored headers (`OPUS_SET_PHASE_INVERSION_DISABLED`) puts it at
-**Opus 1.2 or later**, but the exact version and build provenance are not
-recorded anywhere in this repository. The `COPYING` text shipped here is the
+The shipped `opus.lib` reports its version string as `libopus unknown`: it was
+built from a development snapshot of [xiph/opus](https://github.com/xiph/opus)
+(the fork `lifelike-and-believable/opus`, tag `opus-win-v.1.0.0`, commit
+`697c670`, whose last upstream commit is from 2025-10-07) with no version
+metadata. The library is byte-identical to that release's asset; the vendored
+headers are older than the library. Details and open items are in
+[`Source/ThirdParty/opus/README.md`](Source/ThirdParty/opus/README.md). The `COPYING` text shipped here is the
 canonical upstream one from [xiph/opus](https://github.com/xiph/opus).
 
 Note that Opus carries **royalty-free patent licenses** (Xiph.Org, Microsoft,

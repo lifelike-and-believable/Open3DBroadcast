@@ -42,7 +42,7 @@ jobs:
         run: pip install jsonschema jinja2
 
       - name: Setup CMake
-        uses: lukka/get-cmake@latest
+        uses: lukka/get-cmake@a89e43e22a96abafcd7a62db652a65ecd33052c9 # v4.4.4
 
       - name: Install OpenSSL
         run: |
@@ -204,7 +204,7 @@ jobs:
         run: pip install jsonschema jinja2
 
       - name: Setup CMake
-        uses: lukka/get-cmake@latest
+        uses: lukka/get-cmake@a89e43e22a96abafcd7a62db652a65ecd33052c9 # v4.4.4
 
       - name: Install OpenSSL
         run: |

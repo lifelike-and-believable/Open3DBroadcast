@@ -12,6 +12,7 @@ Artifacts
 /Build/.cmake
 /Build/CMakeFiles
 /Build/CMakeCache.txt
+CMakeFiles/
 ThirdParty
 Binaries
 Intermediate

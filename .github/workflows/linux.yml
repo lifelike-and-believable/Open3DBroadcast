@@ -17,7 +17,7 @@ jobs:
 
     steps:
     - id: get_version
-      uses: dhkatz/get-version-action@v3.0.0
+      uses: dhkatz/get-version-action@9166b8a614609209809cdef096d62b39287139cb # v3.0.0
 
     - name: Checkout code
       uses: actions/checkout@v4
@@ -70,24 +70,15 @@ jobs:
         patchelf --set-rpath '$ORIGIN/lib' ./out/bin/Repeater
         tar -czvf o3ds.tgz -C out .
 
+    - name: Name release asset
+      run: cp o3ds.tgz "o3ds_${{ steps.get_version.outputs.version-without-v }}.tgz"
+
     - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
       with:
         tag_name: ${{ steps.get_version.outputs.version }}-linux
-        release_name: Release ${{ steps.get_version.outputs.version }}-linux
+        name: Release ${{ steps.get_version.outputs.version }}-linux
+        target_commitish: ${{ github.sha }}
+        files: o3ds_${{ steps.get_version.outputs.version-without-v }}.tgz
         draft: false
-        prerelease: false       
-
-    - name: Upload Release Asset
-      id: upload-release-asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: o3ds.tgz
-        asset_name: o3ds_${{ steps.get_version.outputs.version-without-v }}.tgz
-        asset_content_type: application/gzip        
+        prerelease: false        
