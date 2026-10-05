@@ -23,7 +23,7 @@ reads it directly). Rules for Claude Code are in `.claude/rules/` (rules-for-rob
 
 ## Project decisions
 
-- Unreal Engine 5.7 only, Win64 only (ADR 0001). Target.cs files use `BuildSettingsVersion.V6` and `EngineIncludeOrderVersion.Unreal5_7` (rule O3D-001).
+- Unreal Engine 5.7 only, Win64 only (ADR 0001). The main plugin is published on Fab; the WebRTC add-on is distributed from the Open3DBroadcast website to registered plugin users, not through Fab, so Fab's rules (no dependency on user-made plugins) do not apply to it (maintainer, 2026-10-05). Target.cs files use `BuildSettingsVersion.V6` and `EngineIncludeOrderVersion.Unreal5_7` (rule O3D-001).
 - Copyright: new plugin source files under `Source/` (outside `ThirdParty/`, not generated) start with `// Copyright Lifelike & Believable. All Rights Reserved.` and a blank line; files that already start with `// Copyright (c) Open3DStream Contributors` keep it (rule O3D-002).
 - Schema: `src/o3ds.fbs` and `src/o3ds_control.fbs` are authoritative. Never reorder or delete fields. After a change, regenerate with `flatc --cpp -o src src/o3ds.fbs` and `flatc --cpp -o src src/o3ds_control.fbs` using flatc from the `thirdparty/flatbuffers` pin, then run `python3 Build/Scripts/sync_o3ds_core.py`.
 - Core mirror (ADR 0003): the plugin compiles a generated copy of the core in `Source/ThirdParty/Open3DStreamCore/`. After changing `src/o3ds`, the generated headers or the flatbuffers/crccpp pins, run `sync_o3ds_core.py` and commit the result in the same PR; never edit the copy. A new core header the plugin includes goes in `Build/o3ds-core-manifest.txt`. The copy builds without exceptions or RTTI; an out-of-line class or function the plugin uses needs `O3DS_API`.
@@ -47,6 +47,8 @@ reads it directly). Rules for Claude Code are in `.claude/rules/` (rules-for-rob
 
 - Branch from `develop`; one work package (WP) per PR. Titles start with the WP id and list finding ids, for example `WP-F7: editor module split (ADR 0010; FAB-7, SND-34)`. Update `CHANGELOG.md` and the affected docs in the same PR.
 - Never rebase or force-push a pushed branch. To update one, merge `develop` into it.
+- Merge pull requests into `develop` by squash (`gh pr merge <n> --squash`), only when every check on the head commit has passed or been skipped.
+- Release tags are `open3dbroadcast-vX.Y.Z` (the plugin release workflow runs on them).
 - Line endings: `core.autocrlf` is true and many files are CRLF. Edit them with tools that keep the file's line endings (not `sed -i` in Git Bash), and check `git diff --numstat` for whole-file rewrites before committing. A file whose committed blob is CRLF is staged with `git -c core.autocrlf=false add`.
 - If git reports "dubious ownership", pass `safe.directory` for that one command (`GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*`); never change the global git config.
 - Never run two Unreal builds at once on one machine; wait for any running build (including other projects') to finish.
