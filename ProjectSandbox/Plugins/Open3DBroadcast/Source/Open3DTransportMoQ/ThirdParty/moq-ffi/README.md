@@ -20,10 +20,12 @@ Only Win64 artifacts are shipped, and the module is Win64-only (`PlatformAllowLi
 
 | Relative Path | Description | SHA256 |
 | --- | --- | --- |
-| `bin/Win64/Release/moq_ffi.dll` | Runtime DLL loaded by the module through `FO3DFfiLibrary` (Open3DShared) | `EF248AABDD4F9329C6F874261E6BF2CC9DCF62170CD95CD2F3C79BEC4B1237EF` |
+| `bin/Win64/Release/moq_ffi.dll` | Runtime DLL loaded by the module through `FO3DFfiLibrary` (Open3DShared) | `BB722F4475C814C4764CC97A126379D2DAF37285487B0810B4FA293CB8BF46FF` |
 | `moq_ffi.pdb` (not in the tree; release asset, see `Build/README.md`, "Debug symbols") | Debug symbols for crash triage | `66F612E8344037D10D0F2D8107F3AF0C4F9F426D0903578DAE4C3DF39E06A318` |
 | `lib/Win64/Release/moq_ffi.dll.lib` | Import library linked at build time | `B3377B79C3DB3D3047C2FA352C1B10D3C87AA548378407A01299CB4A4A277B1A` |
 | `include/moq_ffi.h` | C API header emitted by `cbindgen` | (text file, not hashed—see upstream repo) |
+
+> **Hash corrected 2026-10-05.** The DLL's recorded SHA256 was `EF248AAB...37EF` and did not match the tracked file, which is `BB722F44...46FF` (found by `Build/Scripts/check-third-party-binaries.py`). The table now records the file that ships. Which `moq-ffi` commit produced it is unconfirmed: the `Commit` row above (`567933e`, drop date 2025-11-24) may describe an earlier DLL. Confirm against the build that produced the file, or rebuild from the recorded commit.
 
 ## Refresh Workflow
 

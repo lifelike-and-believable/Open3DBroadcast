@@ -321,6 +321,18 @@ python3 Build/Scripts/check-runtime-editor-deps.py --self-test
 python3 Build/Scripts/check-runtime-editor-deps.py
 ```
 
+## Prebuilt third-party binaries
+
+The plugins track a few prebuilt libraries (`moq_ffi.dll`, `nng.lib`, `opus.lib`, and in the WebRTC add-on `livekit_ffi.dll`) under their `ThirdParty/<library>/` folders. Each folder has a `README.md` with an inventory table: the binary's path relative to the README in backticks, and its SHA256 in backticks. The README also records the upstream source, version or commit and build flags where they are known; a value nobody recorded says "Not recorded" instead of guessing.
+
+- **Check:** `Build/Scripts/check-third-party-binaries.py` (Python 3.8+, standard library) lists the tracked `.dll`, `.lib`, `.so`, `.dylib` and `.a` files under `ProjectSandbox/Plugins/*/Source/**/ThirdParty/` with `git ls-files` and fails when one has no README, no row, or a row whose SHA256 differs from the file. It also fails on a row that names a binary missing from the tree (rows that say "not in the tree", the `.pdb` release assets, are skipped). The plugin CI runs it as "Third-party binaries match their READMEs"; Markdown-only changes do not start that job, so run it after editing a README by hand.
+- **Replacing a binary:** update the README row (hash, and the provenance rows) in the same commit.
+
+```bash
+python3 Build/Scripts/check-third-party-binaries.py --self-test
+python3 Build/Scripts/check-third-party-binaries.py
+```
+
 ## Shipping game build
 
 `Build-ShippingGame.ps1` (see [Scripts](#build-shippinggameps1)) packages ProjectSandbox as a Win64 Shipping game. It takes as long as a full cook, so it runs in the nightly workflow and by hand, not on pull requests: PR CI has one shared self-hosted UE runner. The manual command, on a machine with UE 5.7 and the o3ds core built:
@@ -422,7 +434,7 @@ Record the result in the PR. The check has not been run yet.
 
 - **Windows**: PowerShell 5.1+ (or PowerShell Core 7+)
 - **Unreal Engine**: 5.7 (the plugin's `EngineVersion`)
-- **Python**: 3.8+ for `fab-package.py`, `check-copyright-headers.py` and `check-runtime-editor-deps.py`
+- **Python**: 3.8+ for `fab-package.py`, `check-copyright-headers.py`, `check-runtime-editor-deps.py` and `check-third-party-binaries.py`
 - **Visual Studio**: 2022 (for building)
 - **Git**: For repository operations
 

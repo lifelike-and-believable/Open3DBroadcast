@@ -110,6 +110,22 @@ jobs:
       - name: Check transports use their runtime context
         run: python3 Build/Scripts/check-transport-metrics.py
 
+  # Issue #204: every tracked prebuilt binary under a ThirdParty/ folder has its SHA256 in the
+  # library's README.md, so a replaced binary cannot go in without its provenance being updated.
+  third-party-binaries:
+    name: Third-party binaries match their READMEs
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Self-test the check
+        run: python3 Build/Scripts/check-third-party-binaries.py --self-test
+      - name: Check binary inventories
+        run: python3 Build/Scripts/check-third-party-binaries.py
+
   build-and-test:
     name: UE build and tests
     needs: [ changes, fab-package ]
