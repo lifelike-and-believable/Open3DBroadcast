@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "extraKnownMarketplaces": {
+    "rules-for-robots": {
+      "source": {
+        "source": "github",
+        "repo": "lifelike-and-believable/rules-for-robots"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "rfr-core@rules-for-robots": true
+  }
+}
