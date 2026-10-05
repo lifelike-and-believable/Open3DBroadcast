@@ -1,5 +1,7 @@
 # Product Management Reference Documentation
 
+> **Archived 2026-10-05.** This material predates the plugin hardening work and the Fab release plan and is out of date. It is kept for reference (market and competitive research, frameworks, templates); do not treat it as current product direction. Moved from `docs/product-management/`.
+
 This directory contains detailed reference materials for the Product Manager Agent. These documents support the agent descriptor located at `.github/agents/product-manager-agent.md`.
 
 ## Documents

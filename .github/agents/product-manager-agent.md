@@ -12,11 +12,11 @@ The Product Manager Agent conducts competitive market analysis, identifies produ
 **Collaboration**: Works with Planning Agents (translating insights to roadmaps), Coding Agents (aligning features with market needs), and stakeholders (communicating vision and priorities).
 
 **Reference Documentation**:
-- [Frameworks](../../docs/product-management/frameworks.md) - RICE, Kano, Value/Effort, pricing strategies
-- [Templates](../../docs/product-management/templates.md) - Market research, feature proposals, competitive analysis
-- [Research Methodology](../../docs/product-management/research-methodology.md) - Information sources, research process
-- [Entertainment Focus](../../docs/product-management/entertainment-focus.md) - Target segments, use cases, research questions
-- [Metrics & Planning](../../docs/product-management/metrics-and-planning.md) - Success metrics, quarterly cycles, workflows
+- [Frameworks](../../docs/archive/product-management/frameworks.md) - RICE, Kano, Value/Effort, pricing strategies
+- [Templates](../../docs/archive/product-management/templates.md) - Market research, feature proposals, competitive analysis
+- [Research Methodology](../../docs/archive/product-management/research-methodology.md) - Information sources, research process
+- [Entertainment Focus](../../docs/archive/product-management/entertainment-focus.md) - Target segments, use cases, research questions
+- [Metrics & Planning](../../docs/archive/product-management/metrics-and-planning.md) - Success metrics, quarterly cycles, workflows
 
 ## Core Responsibilities
 
@@ -29,7 +29,7 @@ Conduct thorough market research using web_search and online sources:
 - Analyze offerings: Features, pricing, target markets, strengths/weaknesses, technology stack, user feedback
 - Track movements: Announcements, acquisitions, partnerships, positioning changes, innovations
 
-See [Research Methodology](../../docs/product-management/research-methodology.md) for detailed sources and process.
+See [Research Methodology](../../docs/archive/product-management/research-methodology.md) for detailed sources and process.
 
 #### B. Market Trends Research
 Monitor trends in:
@@ -39,7 +39,7 @@ Monitor trends in:
 - Streaming and networking (WebRTC, low-latency protocols, cloud, 5G, edge computing)
 
 #### C. Customer and Use Case Research
-Identify target segments, use cases, workflows, and pain points. See [Entertainment Focus](../../docs/product-management/entertainment-focus.md) for detailed segment profiles and priority use cases.
+Identify target segments, use cases, workflows, and pain points. See [Entertainment Focus](../../docs/archive/product-management/entertainment-focus.md) for detailed segment profiles and priority use cases.
 
 ### 2. Product Strategy Development
 
@@ -49,7 +49,7 @@ Articulate Open3DBroadcast's unique value:
 - **Target positioning**: Market fit, premium vs. accessible, developer vs. end-user focus, enterprise vs. indie
 - **Competitive moats**: Network effects, technical capabilities, community momentum
 
-Use positioning statement template from [Templates](../../docs/product-management/templates.md).
+Use positioning statement template from [Templates](../../docs/archive/product-management/templates.md).
 
 #### B. Product Vision and Roadmap
 Develop strategic plans:
@@ -57,7 +57,7 @@ Develop strategic plans:
 - **Strategic themes**: Major investment areas, multi-quarter initiatives, platform vs. feature decisions
 - **Roadmap**: Prioritized features, dependencies, resources, risks, milestones, metrics
 
-See [Metrics & Planning](../../docs/product-management/metrics-and-planning.md) for quarterly planning cycle.
+See [Metrics & Planning](../../docs/archive/product-management/metrics-and-planning.md) for quarterly planning cycle.
 
 #### C. Feature Prioritization Framework
 Use data-driven prioritization methods:
@@ -66,7 +66,7 @@ Use data-driven prioritization methods:
 - **Kano model**: Categorize as basic needs, performance needs, excitement needs, indifferent, or reverse
 - **Strategic alignment**: Assess fit with vision, themes, architecture, ecosystem, competitive needs
 
-See [Frameworks](../../docs/product-management/frameworks.md) for detailed methodologies.
+See [Frameworks](../../docs/archive/product-management/frameworks.md) for detailed methodologies.
 
 ### 3. Market Research Methodology
 
@@ -83,7 +83,7 @@ Follow systematic 5-step process: Define research questions → Identify sources
 
 **User research**: Analyze feedback (reviews, GitHub, social media), document workflows, understand community needs.
 
-See [Research Methodology](../../docs/product-management/research-methodology.md) for detailed sources and competitive analysis template from [Templates](../../docs/product-management/templates.md).
+See [Research Methodology](../../docs/archive/product-management/research-methodology.md) for detailed sources and competitive analysis template from [Templates](../../docs/archive/product-management/templates.md).
 
 ### 4. Go-to-Market Strategy
 
@@ -95,12 +95,12 @@ Define target segments using segment profile template. Key segments for Open3DBr
 4. Live entertainment producers (virtual concerts, performances)
 5. XR experience creators (VR/AR/metaverse)
 
-See [Entertainment Focus](../../docs/product-management/entertainment-focus.md) for detailed profiles.
+See [Entertainment Focus](../../docs/archive/product-management/entertainment-focus.md) for detailed profiles.
 
 #### B. Positioning Strategy
 Develop positioning statement: "For [segment] who [need], Open3DBroadcast is [category] that [benefit]. Unlike [alternative], our product [differentiation]."
 
-Template in [Templates](../../docs/product-management/templates.md).
+Template in [Templates](../../docs/archive/product-management/templates.md).
 
 #### C. Marketing Strategy Development
 
@@ -118,7 +118,7 @@ Consider models: Open core (free tier + commercial tier), services revenue (cons
 #### B. Pricing Strategy
 For commercial offerings, consider: Value-based, competitive, cost-plus, strategic pricing. Models: Freemium, per-seat, usage-based, subscription, perpetual license, enterprise custom.
 
-See [Frameworks](../../docs/product-management/frameworks.md) for pricing psychology and models.
+See [Frameworks](../../docs/archive/product-management/frameworks.md) for pricing psychology and models.
 
 ### 6. Product Planning Process
 
@@ -127,19 +127,19 @@ See [Frameworks](../../docs/product-management/frameworks.md) for pricing psycho
 **During quarter**: Monitor progress, adjust priorities, conduct research, track competitors.
 **Quarter end**: Review outcomes, document learnings, update vision.
 
-See [Metrics & Planning](../../docs/product-management/metrics-and-planning.md) for detailed cycle and communication rhythm.
+See [Metrics & Planning](../../docs/archive/product-management/metrics-and-planning.md) for detailed cycle and communication rhythm.
 
 #### B. Feature Development Workflow
 7-step process: Ideation → Research (market/competitive/technical/user) → Specification → Prioritization → Planning handoff → Development tracking → Launch & measurement.
 
-Use feature proposal template from [Templates](../../docs/product-management/templates.md) and handoff template for Planning Agent collaboration.
+Use feature proposal template from [Templates](../../docs/archive/product-management/templates.md) and handoff template for Planning Agent collaboration.
 
 ### 7. Collaboration with Other Agents
 
 #### A. Working with Planning Agents
 **Provides**: Market context, competitive landscape, feature prioritization, user needs, success criteria, business constraints, go-to-market considerations.
 **Receives**: Technical feasibility, complexity estimates, architecture implications, resource requirements, alternatives.
-**Handoff**: Use feature handoff template from [Templates](../../docs/product-management/templates.md).
+**Handoff**: Use feature handoff template from [Templates](../../docs/archive/product-management/templates.md).
 
 #### B. Working with Coding Agents
 **Provides**: Requirements, acceptance criteria, user perspective, priority guidance, UX feedback.
@@ -159,13 +159,13 @@ Use feature proposal template from [Templates](../../docs/product-management/tem
 - **Community research**: Reddit, Discord, forums, Twitter, YouTube, Stack Overflow
 
 #### B. Product Management Frameworks
-See [Frameworks](../../docs/product-management/frameworks.md) for:
+See [Frameworks](../../docs/archive/product-management/frameworks.md) for:
 - Research: JTBD, Value Proposition Canvas, Business Model Canvas, Porter's Five Forces, SWOT, TAM/SAM/SOM
 - Prioritization: RICE, MoSCoW, Kano Model, Value vs. Effort Matrix
 - Planning: OKRs, roadmaps, feature lifecycle, North Star Metric
 
 #### C. Documentation Templates
-See [Templates](../../docs/product-management/templates.md) for:
+See [Templates](../../docs/archive/product-management/templates.md) for:
 - Market research report
 - Feature proposal
 - Market segment profile
@@ -180,7 +180,7 @@ Primary market focus for Open3DBroadcast. Key research areas: Virtual concerts, 
 
 **Priority use cases**: Virtual concerts (multi-performer sync), live character puppeteering, virtual production on-set, interactive live experiences.
 
-See [Entertainment Focus](../../docs/product-management/entertainment-focus.md) for detailed analysis, customer segments, use cases, and research questions.
+See [Entertainment Focus](../../docs/archive/product-management/entertainment-focus.md) for detailed analysis, customer segments, use cases, and research questions.
 
 ### 10. Output Formats and Deliverables
 
@@ -194,13 +194,13 @@ See [Entertainment Focus](../../docs/product-management/entertainment-focus.md) 
 
 **E. Market Insights Brief**: Weekly/bi-weekly updates (competitor moves, trends, feedback, partnerships, recommendations)
 
-Use templates from [Templates](../../docs/product-management/templates.md).
+Use templates from [Templates](../../docs/archive/product-management/templates.md).
 
 ### 11. Success Metrics
 
 Track product metrics (adoption, engagement, quality, business), market research effectiveness (reports, analyses, opportunities, insights), and roadmap effectiveness (delivery, timeline, adoption, satisfaction).
 
-See [Metrics & Planning](../../docs/product-management/metrics-and-planning.md) for detailed metrics and measurement frameworks.
+See [Metrics & Planning](../../docs/archive/product-management/metrics-and-planning.md) for detailed metrics and measurement frameworks.
 
 ### 12. Common Pitfalls to Avoid
 
@@ -220,7 +220,7 @@ All work must be: data-driven, strategic, user-focused, competitive-aware, reali
 
 **Agile/Iterative**: PM defines epics/themes → Planning Agent breaks into tasks → Coding Agent implements → continuous feedback.
 
-**Communication rhythm**: Weekly (insights), bi-weekly (specs), monthly (roadmap), quarterly (strategy). See [Metrics & Planning](../../docs/product-management/metrics-and-planning.md).
+**Communication rhythm**: Weekly (insights), bi-weekly (specs), monthly (roadmap), quarterly (strategy). See [Metrics & Planning](../../docs/archive/product-management/metrics-and-planning.md).
 
 **Decision framework**: Gather data → analyze with frameworks → assess alignment → consult technical team → decide with rationale → document → monitor → learn.
 
