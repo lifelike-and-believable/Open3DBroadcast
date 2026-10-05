@@ -17,8 +17,8 @@ without pulling a WebRTC stack into the Unreal build.
 | Item | Value |
 | --- | --- |
 | Repository | https://github.com/lifelike-and-believable/livekit-ffi (crate directory `livekit_ffi/`) — **renamed from `livekit-ffi-ue`**, see below |
-| Release tag | **TBD — see "Provenance gap" below** |
-| Commit | **TBD — see "Provenance gap" below** |
+| Release tag | `v0.2.7` (see "Provenance" below) |
+| Commit | `da50d08886ea9a89acfa71da29d415ed26ac6ee7` (2025-11-19) |
 | Build host | GitHub Actions `windows-latest`, via `.github/workflows/build-ffi.yml` |
 | Build profile | `cargo build --release --features with_livekit`, target `x86_64-pc-windows-msvc`, `lto = true` |
 | Toolchain | rustc 1.87.0 (pinned by the workflow) |
@@ -63,22 +63,14 @@ repository = "https://github.com/lifelike-and-believable/livekit-ffi-ue"
 
 Worth correcting upstream so the crate metadata matches reality.
 
-### Provenance gap
+### Provenance (resolved 2026-10-05)
 
-The upstream repository is identified, but the **exact release/commit these
-specific binaries came from is still unrecorded**, so the artifact cannot yet be
-reproduced from source. `livekit-ffi` publishes per-release Windows assets
-named `livekit-ffi-plugin-windows-x64-v*.zip` whose internal layout matches this
-directory, so the DLL here was most likely taken from one of those rather than
-built locally. To close the gap:
+The binaries are release `v0.2.7` of `livekit-ffi` (commit `da50d08886ea9a89acfa71da29d415ed26ac6ee7`, 2025-11-19). Downloading `livekit-ffi-plugin-windows-x64.zip` from that release (zip SHA256 `5356852C128E4008028078446EA7CCCE88EE14BA846DE38A0A4EAA16D0FCC1F2`) and comparing: `livekit_ffi.dll`, `livekit_ffi.dll.lib`, `livekit_ffi.h` (modulo line endings) and `livekit_ffi.pdb` are byte-identical to the values below. The newest release is `v0.3.0` (2026-07-25); its DLL differs (SHA256 `3F6B273DEEE3C3B36B95E4B8EAEFD979F9155FB1F1D1078DFEE84CFBAAA83990`), and this tree has not moved to it. The workflow run URL is not recorded.
 
-1. Download the candidate release assets and compare against the SHA256 values
-   in the inventory below — a byte match identifies the release outright.
-2. Record the release tag, commit SHA, and workflow run URL in the table above.
-3. Add `livekit-ffi` as a git submodule (as `ProjectSandbox/External/moq-ffi`
-   already is for the MoQ transport), so the source is pinned alongside the
-   binary rather than only referenced by name.
-4. Copy the upstream `LICENSE` into this directory once it exists (see below).
+Still open:
+
+1. Add `livekit-ffi` as a git submodule (as `ProjectSandbox/External/moq-ffi` already is for the MoQ transport), so the source is pinned alongside the binary rather than only referenced by name.
+2. Copy the upstream `LICENSE` into this directory once it exists (see below).
 
 ## Artifact Inventory (Win64)
 
