@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // WP-A1 PR 1 (ADR 0007 item 4; SHR-12, SND-23, RCV-27, RCV-28): the one transport registry.
 // - Register and unregister through the move-only registration handle.

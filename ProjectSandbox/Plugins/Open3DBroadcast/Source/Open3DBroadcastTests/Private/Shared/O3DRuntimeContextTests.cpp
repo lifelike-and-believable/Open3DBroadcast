@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 //
 // ADR 0012 (SHR-38): FO3DRuntimeContext. Two contexts never see each other's audio, control or

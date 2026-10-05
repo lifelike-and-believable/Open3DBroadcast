@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // ADR 0011 (CTL-5): control on MoQ. The sender announces a control track on every connect and
 // publishes control envelopes on it with stream delivery; the receiver subscribes to it only

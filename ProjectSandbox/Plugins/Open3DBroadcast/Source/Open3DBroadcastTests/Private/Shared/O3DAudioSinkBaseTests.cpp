@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // FO3DQueuedSenderAudioSink and FO3DAudioPublishState (ADR 0007 item 7 and the WP-S5 addendum;
 // TRB-10, TRB-11, TRB-30, TRF-1): the sink enqueues audio items on the transport's send queue,

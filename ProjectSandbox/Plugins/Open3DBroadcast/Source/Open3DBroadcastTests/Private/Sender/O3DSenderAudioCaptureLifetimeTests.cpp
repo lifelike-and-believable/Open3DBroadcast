@@ -1,4 +1,5 @@
-// Copyright (c) Open3DStream Contributors
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
+// Portions Copyright (c) Open3DStream Contributors
 //
 // WP-S5 (SND-6): the audio capture component publishes an immutable parameter snapshot that
 // capture threads read; they never touch the UObject. This test swaps sinks, labels and gain on

@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 //
 // ADR 0011 (CTL-2): the control envelope (O3DUnifiedMessage.h): WriteControlEnvelope and the

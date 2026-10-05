@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // FO3DTransportWorker and FO3DReconnectPolicy (ADR 0007 item 7, WP-A1 step 4; TRB-4, TRF-6, TRF-20).
 

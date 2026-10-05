@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // RCV-8, ADR 0013 PR 3: FO3DSceneTimeMapper, the LiveLink SceneTime of each pushed frame, with
 // its clocks passed in. The sender's timecode is used exactly; a subject keeps the rate of its

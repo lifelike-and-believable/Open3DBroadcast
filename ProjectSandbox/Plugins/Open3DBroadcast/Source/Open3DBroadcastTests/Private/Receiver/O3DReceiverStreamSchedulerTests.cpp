@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // FO3DReceiverStreamScheduler and FO3DReceiverConcealment (WP-A3 step 3, RCV-29), reached through
 // their exported probes. The scheduler orders each sender's packets (legacy timestamp ordering, or

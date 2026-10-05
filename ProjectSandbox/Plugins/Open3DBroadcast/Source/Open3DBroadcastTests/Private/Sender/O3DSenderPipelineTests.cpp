@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // WP-A2c (ADR 0008 implementation outline item 4, "Verification / acceptance"): the sender pose
 // pipeline. A scripted transport that can hold the worker inside SendSerialized makes the queue

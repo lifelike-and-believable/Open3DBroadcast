@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // FO3DSenderTransportSettings (WP-A3 step 8, SND-22, ADR 0004): option reads and writes with
 // secret keys routed to the secret store, migration of secrets out of old data, switching options

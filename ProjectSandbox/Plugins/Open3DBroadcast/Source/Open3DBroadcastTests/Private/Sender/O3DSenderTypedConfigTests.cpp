@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // WP-A1 PR 5a (ADR 0007 items 4 and 8; SHR-36, SND-35): the sender component and typed config.
 // - The options a component has saved reach the transport's configure function through an

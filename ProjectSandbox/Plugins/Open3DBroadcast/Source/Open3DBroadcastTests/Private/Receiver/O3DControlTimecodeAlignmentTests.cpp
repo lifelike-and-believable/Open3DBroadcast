@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // RCV-8, ADR 0013 PR 3b: control alignment in LiveLink Timecode mode. With the sender's timecode
 // on the mocap frames and an engine timecode, the sender time of the pose LiveLink presents is

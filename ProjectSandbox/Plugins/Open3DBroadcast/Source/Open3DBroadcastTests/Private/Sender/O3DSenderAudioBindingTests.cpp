@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // FO3DSenderAudioBinding (WP-A3 step 7, SND-22): the audio configs built from the sender's
 // properties, finding the capture component and handing it the transport's sink, reached through

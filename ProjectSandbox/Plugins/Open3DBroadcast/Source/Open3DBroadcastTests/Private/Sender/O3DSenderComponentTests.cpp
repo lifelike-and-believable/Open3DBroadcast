@@ -1,4 +1,5 @@
-// Copyright (c) Open3DStream Contributors
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
+// Portions Copyright (c) Open3DStream Contributors
 //
 // Sender component helpers (SND-5 rate limiter, bone-space conversion). White-box access through
 // Open3DSender/Public/Testing/O3DSenderTesting.h (WP-T2).

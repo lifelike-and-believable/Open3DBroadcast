@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // WP-A1 PR 5c (ADR 0007 item 8, the rest of step 5; TRB-27, ADR 0004):
 // - FO3DTransportConfig carries the registered transport name (FName) and the side

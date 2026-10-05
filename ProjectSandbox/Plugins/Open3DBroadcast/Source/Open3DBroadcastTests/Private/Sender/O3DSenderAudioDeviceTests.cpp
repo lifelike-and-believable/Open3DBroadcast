@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // WP-A2d (ADR 0008 item 8, SND-18): audio capture devices are enumerated once per StartCapture
 // that captures from an input device, into a cache that the device pickers and the name-to-index

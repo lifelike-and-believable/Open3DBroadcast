@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // ADR 0011 (CTL-4): control on the sending side. FO3DControlPublisher against the fake transport
 // (so every envelope it sends can be inspected), and the UO3DSenderComponent Blueprint API.

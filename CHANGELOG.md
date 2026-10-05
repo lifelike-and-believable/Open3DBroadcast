@@ -576,6 +576,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Copyright headers name the year, as Fab TR 4.3.6.1.b asks: plugin source files start with `// Copyright 2026 Lifelike & Believable. All Rights Reserved.` Files that came from Open3DStream, which began `// Copyright (c) Open3DStream Contributors`, now start with that line followed by `// Portions Copyright (c) Open3DStream Contributors` (maintainer, 2026-10-05). `check-copyright-headers.py` accepts any four-digit year and the Portions line; `sync_o3ds_core.py` writes the dated line into the generated core units.
+
 - Agent instructions: `AGENTS.md` is the one instruction file (Claude Code reads it through a root `CLAUDE.md`; `.github/copilot-instructions.md` points to it), replacing `.claude/claude.md` and the long Copilot file. `.claude/rules/` holds the rules-for-robots core and `unreal-plugin` packs, waivers for UE-006, UE-007, FAB-001, FAB-002 and FAB-003, and project rules O3D-001 to O3D-004. `.claude/settings.json` declares the rules-for-robots marketplace and enables its `rfr-core` plugin (hooks that ask before destructive commands and edits to existing tests).
 
 - CI: `core-tests.yml` starts on every PR, and a "Detect core-relevant changes" job skips its core jobs for Markdown or `docs/`-only changes (before, a workflow-level `paths-ignore` kept it from starting). Every core check now reports on every PR, so the checks can be required on `develop`; `Build/README.md` lists which.

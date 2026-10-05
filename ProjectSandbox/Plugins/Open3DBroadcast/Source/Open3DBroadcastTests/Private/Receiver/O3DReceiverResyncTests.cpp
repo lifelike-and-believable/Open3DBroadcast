@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // ADR 0005 (ix) through the real receiver (CORE-5, CORE-6): residual frames from the UE serializer
 // are delivered to FO3DReceiverSource's serialized-frame consumer with one frame withheld. The

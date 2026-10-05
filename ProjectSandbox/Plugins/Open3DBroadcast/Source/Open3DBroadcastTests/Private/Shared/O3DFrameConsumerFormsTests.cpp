@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // WP-A1 PR 5b (ADR 0007 items 3 and 5, step 5; SHR-16, TRF-38): the two forms of
 // ISerializedFrameConsumer.

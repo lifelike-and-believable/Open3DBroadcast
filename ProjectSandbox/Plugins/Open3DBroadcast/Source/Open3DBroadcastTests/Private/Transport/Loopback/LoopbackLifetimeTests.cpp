@@ -1,4 +1,5 @@
-// Copyright (c) Open3DStream Contributors
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
+// Portions Copyright (c) Open3DStream Contributors
 //
 // WP-S5 acceptance (TRB-30): start/stop the loopback sender 1,000 times while a fake audio
 // thread submits PCM, including cycles where the sender is destroyed while the audio thread

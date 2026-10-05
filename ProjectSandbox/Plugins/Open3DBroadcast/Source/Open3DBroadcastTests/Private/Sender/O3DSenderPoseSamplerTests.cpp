@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // FO3DSenderPoseSampler (WP-A3 step 6, SND-22): the sender's skeleton descriptor cache, subject
 // name and frame shell, reached through FO3DSenderPoseSamplerProbe. The mesh is built in code

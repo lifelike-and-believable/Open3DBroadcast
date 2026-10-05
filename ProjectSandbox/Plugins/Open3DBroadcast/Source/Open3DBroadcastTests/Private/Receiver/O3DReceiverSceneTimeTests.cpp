@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // RCV-8, ADR 0013 PR 3 through the real receiver: frames from the UE serializer, delivered to
 // FO3DReceiverSource's serialized-frame consumer, reach LiveLink (the test push hook) with a

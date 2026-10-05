@@ -1,4 +1,5 @@
-// Copyright (c) Open3DStream Contributors
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
+// Portions Copyright (c) Open3DStream Contributors
 //
 // WP-S5 acceptance (TRB-10, TRB-11, TRB-12): start/stop the TCP and UDP senders 1,000 times
 // on 127.0.0.1 while a fake audio thread submits PCM, including cycles where the sender is

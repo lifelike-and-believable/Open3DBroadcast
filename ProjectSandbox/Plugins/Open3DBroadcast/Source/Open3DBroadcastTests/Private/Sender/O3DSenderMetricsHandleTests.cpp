@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // ADR 0012 item 4 (SHR-38): the sender component acquires one sender metrics handle from its
 // runtime context (the default until ADR 0012 PR 4), passes it to its transport in

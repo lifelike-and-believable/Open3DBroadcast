@@ -285,19 +285,24 @@ Debug symbols (`.pdb`) for the prebuilt third-party DLLs (`moq_ffi.dll`; `liveki
 
 ## Copyright headers
 
-Every `.h`, `.cpp` and `.cs` file under `Source/` of both plugins (Open3DBroadcast and the Open3DBroadcastWebRTC add-on) starts with a copyright line (FAB-5, FAB-9, WP-F4). New files, and files that had no notice, use this one, followed by a blank line:
+Every `.h`, `.cpp` and `.cs` file under `Source/` of both plugins (Open3DBroadcast and the Open3DBroadcastWebRTC add-on) starts with a copyright line (FAB-5, FAB-9, WP-F4) naming the publisher and the year, as Fab TR 4.3.6.1.b asks. New files use this one, with the current year, followed by a blank line:
 
 ```cpp
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 ```
 
-No year, as in Epic's own headers. In headers, `#pragma once` comes after the blank line.
+In headers, `#pragma once` comes after the blank line.
 
-Files that already carried `// Copyright (c) Open3DStream Contributors` keep that line unchanged; the maintainer decided not to replace it. Don't add it to new files.
+Files that came from Open3DStream keep its notice as the second line (maintainer, 2026-10-05). Don't add it to new files:
+
+```cpp
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
+// Portions Copyright (c) Open3DStream Contributors
+```
 
 - **Not covered:** anything under a `ThirdParty/` directory (vendored nng, moq-ffi, livekit_ffi headers keep their own notices) and generated files (`*.generated.h`, `*_generated.h`, `*.gen.cpp`, or a file whose first ten lines say `@generated`, `automatically generated`, `auto-generated` or `DO NOT EDIT`).
 - **Third-party code outside `ThirdParty/`:** keep its original notice and add the file to `Build/Fab/copyright-allowlist.txt`, one line per file: the path relative to the plugin root, then the reason (licence and origin). The list is empty today.
-- **Check:** `Build/Scripts/check-copyright-headers.py` (Python 3.8+, standard library) reads the files git tracks under each plugin's `Source/` (both plugins by default; `--plugin-dir` is repeatable), ignores a leading UTF-8 BOM and accepts LF or CRLF. It exits `0` when every checked file starts with one of the two lines, `1` when a file does not (it lists each file and its first line) or an allowlist entry names a file git does not track, and `2` for bad input. `-v` also lists the skipped ThirdParty files.
+- **Check:** `Build/Scripts/check-copyright-headers.py` (Python 3.8+, standard library) reads the files git tracks under each plugin's `Source/` (both plugins by default; `--plugin-dir` is repeatable), ignores a leading UTF-8 BOM and accepts LF or CRLF. It exits `0` when every checked file starts with the line (any four-digit year) followed by a blank line or the Open3DStream line, `1` when a file does not (it lists each file and its first line) or an allowlist entry names a file git does not track, and `2` for bad input. `-v` also lists the skipped ThirdParty files.
 
 ```bash
 python3 Build/Scripts/check-copyright-headers.py

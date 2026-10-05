@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // Sender stamping (ADR 0005 (iv), SND-15, CORE-29): every frame the UE serializer writes carries
 // tx_seq, tx_wallclock_us and frame_epoch, so the receiver orders it through the reorder gate

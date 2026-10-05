@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // ADR 0012 item 4 (SHR-38) through the real receiver: two receiver sources fed different numbers
 // of frames each count their own in their metrics handle, both are listed by the default

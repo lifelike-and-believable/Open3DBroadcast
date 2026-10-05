@@ -1,4 +1,5 @@
-// Copyright (c) Open3DStream Contributors
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
+// Portions Copyright (c) Open3DStream Contributors
 //
 // Open3DBroadcast.Core.*: the core library compiled into the editor serializes and parses back
 // (ADR 0006 §7: a UE build of the core, not a re-test of its arithmetic, which CTest covers).

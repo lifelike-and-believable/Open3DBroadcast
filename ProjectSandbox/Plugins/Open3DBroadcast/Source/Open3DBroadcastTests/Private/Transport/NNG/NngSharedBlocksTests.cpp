@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // NNG on the shared transport blocks (ADR 0007 item 7, WP-A1 PR 4d), on 127.0.0.1 with real NNG
 // sockets and ephemeral ports:
