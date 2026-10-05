@@ -2408,6 +2408,7 @@ option key or value changed, and nothing needs migrating.
 
 ### Build and CI
 
+- Workflows pin their non-GitHub actions to commit SHAs (the version stays in a trailing comment), including `lukka/get-cmake`, which followed `@latest` and is now pinned to v4.4.4 (issue #205). `windows.yml` and `linux.yml` publish their release asset with `softprops/action-gh-release` instead of the deprecated `actions/create-release` and `actions/upload-release-asset`; the asset names are unchanged. These two legacy core release flows have not been run since the change.
 - `Build/Scripts/Build-Plugin.ps1` now fails when `RunUAT BuildPlugin` fails, with UAT's exit code (CI-1).
   It used to fall back to a ProjectSandbox UBT build and exit 0, so plugin CI
   could report success for a plugin that does not build. The fallback is still

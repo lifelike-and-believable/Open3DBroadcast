@@ -26,7 +26,7 @@ jobs:
 
     steps:
       - id: get_version
-        uses: dhkatz/get-version-action@v3.0.0
+        uses: dhkatz/get-version-action@9166b8a614609209809cdef096d62b39287139cb # v3.0.0
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -54,7 +54,7 @@ jobs:
       # explicit CC/CXX needs no such discovery and is the standard
       # combination for this.
       - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
         with:
           arch: x64
 
@@ -128,24 +128,16 @@ jobs:
           name: o3ds-windows-build
           path: o3ds.zip
 
+      - name: Name release asset
+        run: Copy-Item o3ds.zip "o3ds_${{ steps.get_version.outputs.version-without-v }}.zip"
+        shell: powershell
+
       - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ steps.get_version.outputs.version-without-v }}-win-${{ github.run_number }}
-          release_name: Release ${{ github.ref }}-win (run ${{ github.run_number }})
+          name: Release ${{ github.ref }}-win (run ${{ github.run_number }})
+          target_commitish: ${{ github.sha }}
+          files: o3ds_${{ steps.get_version.outputs.version-without-v }}.zip
           draft: false
-          prerelease: false
-
-      - name: Upload Release Asset
-        id: upload-release-asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: o3ds.zip
-          asset_name: o3ds_${{ steps.get_version.outputs.version-without-v }}.zip
-          asset_content_type: application/zip            
+          prerelease: false            

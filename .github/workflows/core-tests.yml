@@ -48,7 +48,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Filter paths
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           # 'every': a file counts only if it matches all three rules, so Markdown anywhere and
@@ -387,7 +387,7 @@ jobs:
       # windows-latest has Strawberry Perl's MinGW gcc on PATH, which CMake
       # would otherwise pick (see the comment in windows.yml).
       - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
         with:
           arch: x64
 
