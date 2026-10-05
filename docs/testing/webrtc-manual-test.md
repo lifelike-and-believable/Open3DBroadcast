@@ -106,11 +106,12 @@ Record pass or fail and paste the relevant log lines for each case into the PR.
   subject reaches the same subject (the LiveKit track name is the same UTF-8 string; check it in
   the LiveKit server log or with `lk room participants list` if available).
 
-### 9. One data callback (TRF-16)
+### 9. Data callbacks (TRF-16, FFI request section 13)
 
-- With case 2 running, check the receiver log after connect.
-- Expect: no `Falling back to the unlabeled data callback` warning, and no LiveLink subject named
-  `default`. Frame counts in the receiver stats match the sender's `FramesSent` (no doubling).
+- With case 2 running, check the receiver stats and LiveLink subjects after connect.
+- Expect: frames arrive (the receiver registers both data callbacks, because livekit_ffi's
+  async-connect loop calls only the unlabeled one), no LiveLink subject named `default`, and frame
+  counts in the receiver stats match the sender's `FramesSent` (no doubling).
 
 ### 10. Sending under load (TRF-5)
 
