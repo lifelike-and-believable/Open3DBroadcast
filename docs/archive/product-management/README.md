@@ -2,7 +2,7 @@
 
 > **Archived 2026-10-05.** This material predates the plugin hardening work and the Fab release plan and is out of date. It is kept for reference (market and competitive research, frameworks, templates); do not treat it as current product direction. Moved from `docs/product-management/`.
 
-This directory contains detailed reference materials for the Product Manager Agent. These documents support the agent descriptor located at `.github/agents/product-manager-agent.md`.
+This directory contains detailed reference materials for the Product Manager Agent. These documents support the agent descriptor in [product-manager-agent.md](product-manager-agent.md). It was moved here from `.github/agents/` on 2026-10-05, so it is no longer a live agent.
 
 ## Documents
 
@@ -66,4 +66,4 @@ Product Manager Agents should reference these documents when:
 - Planning quarterly cycles (see metrics-and-planning.md)
 - Focusing on entertainment opportunities (see entertainment-focus.md)
 
-The main agent descriptor (`.github/agents/product-manager-agent.md`) provides links to these documents in context.
+The archived agent descriptor ([product-manager-agent.md](product-manager-agent.md)) provides links to these documents in context.

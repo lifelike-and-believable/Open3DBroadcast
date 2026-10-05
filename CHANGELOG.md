@@ -2408,7 +2408,7 @@ option key or value changed, and nothing needs migrating.
 
 ### Build and CI
 
-- `docs/product-management/` (market research, frameworks and templates, out of date) moved to `docs/archive/product-management/` with an archive note; the links in `.github/agents/product-manager-agent.md` follow (issue #206).
+- `docs/product-management/` (market research, frameworks and templates, out of date) moved to `docs/archive/product-management/` with an archive note, and the product manager agent descriptor moved there from `.github/agents/` (issue #206).
 - The generated licence texts in `Source/ThirdParty/Open3DStreamCore/LICENSES/` are named `Open3DStream_LICENSE.txt`, `FlatBuffers_LICENSE.txt` and `CRCpp_LICENSE.txt` (underscores instead of hyphens, Fab TR 4.3.7.1.c; issue #381). `sync_o3ds_core.py` writes the new names and the mirror and `SYNC_STAMP.txt` were regenerated. The `moq-ffi` folder keeps its name until Fab review objects.
 - `.gitignore` ignores `CMakeFiles/` in any directory, not only `/Build/CMakeFiles` (issue #204).
 - The root `README.md` is titled Open3DBroadcast and says Open3DStream names the protocol and core library; the bare legacy `README` file is removed (issue #206).
