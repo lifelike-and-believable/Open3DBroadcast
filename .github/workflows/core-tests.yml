@@ -10,15 +10,15 @@ name: Core library tests
 # GitHub-hosted runners, with no external dependencies beyond what's
 # already vendored as submodules.
 
-# Documentation-only changes (Markdown anywhere, or anything under docs/) do not run it: the core
-# build and tests read neither. A change that also touches code runs it as usual. develop and
-# main have no required status checks, so a skipped run blocks nothing.
+# Documentation-only changes (Markdown anywhere, or anything under docs/) do not run the core
+# jobs: the core build and tests read neither. A change that also touches code runs them as
+# usual. On pull requests the workflow always starts and the "changes" job decides, so every job
+# reports a check (skipped counts as passed) and the jobs can be required status checks; a
+# workflow-level paths-ignore would leave required checks waiting forever on a docs-only PR.
+# Pushes keep paths-ignore: nothing waits on their checks.
 on:
   pull_request:
     branches: [ develop, main ]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
   push:
     branches: [ develop, main ]
     paths-ignore:
@@ -26,13 +26,44 @@ on:
       - 'docs/**'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pull-requests: read # dorny/paths-filter lists a PR's files through the API
+
 concurrency:
   group: core-tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    # Require this check along with the others: if it fails, the jobs that need it are skipped,
+    # and a skipped required check counts as passed.
+    name: Detect core-relevant changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Filter paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # 'every': a file counts only if it matches all three rules, so Markdown anywhere and
+          # anything under docs/ are not code.
+          predicate-quantifier: 'every'
+          filters: |
+            code:
+              - '**'
+              - '!**/*.md'
+              - '!docs/**'
+
   test:
     name: Build & test (Linux, ASan/UBSan)
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     # Normal runs take about 3 minutes. The cap turns a hung step (seen on
     # apt-get) into a failure instead of a check that stays in progress.
@@ -159,6 +190,8 @@ jobs:
     # from what Build/Scripts/sync_o3ds_core.py makes of src/ and the submodule
     # pins: a core change without a re-sync, or a hand edit of the copy.
     name: Plugin core mirror in sync
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -178,6 +211,8 @@ jobs:
     # ReorderGate) for 60 s each, with ASan/UBSan. Pinned to ubuntu-24.04
     # so the clang-18 / libclang-rt-18-dev package names stay valid.
     name: Fuzz (Clang libFuzzer, 60 s per target)
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     # About 8 minutes today (60 s per target plus the build); raise this
     # when targets are added.
@@ -272,6 +307,8 @@ jobs:
     # fixed. Pinned to ubuntu-24.04 so a runner-image GCC upgrade can't
     # move the count on its own.
     name: Warning ratchet (GCC -Wall -Wextra)
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
 
@@ -333,6 +370,8 @@ jobs:
     # there as well), but only for release tags on the self-hosted UE
     # runner, so it can't be the PR gate.
     name: Build & test (Windows, MSVC Release)
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     runs-on: windows-latest
     timeout-minutes: 20
 

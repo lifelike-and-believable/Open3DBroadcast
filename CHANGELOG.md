@@ -576,6 +576,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- CI: `core-tests.yml` starts on every PR, and a "Detect core-relevant changes" job skips its core jobs for Markdown or `docs/`-only changes (before, a workflow-level `paths-ignore` kept it from starting). Every core check now reports on every PR, so the checks can be required on `develop`; `Build/README.md` lists which.
+
 - **Legacy connectors in their own library, off by default** (CORE-27): `Connector`/`AsyncConnector`,
   TCP, UDP, the NNG pub/sub/pair/pipeline/request connectors, the libdatachannel WebRTC connector,
   the socket helpers, `binary_stream` and the XSens parser moved out of `open3dstreamstatic` into
