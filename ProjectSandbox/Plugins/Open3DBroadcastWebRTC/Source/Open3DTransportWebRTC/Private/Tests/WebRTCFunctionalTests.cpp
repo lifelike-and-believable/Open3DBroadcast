@@ -795,39 +795,57 @@ bool FWebRTCS7SendFailureNoDoubleFreeTest::RunTest(const FString& Parameters)
 }
 
 // ---------------------------------------------------------------------------------------------
-// TRF-16: exactly one data callback
+// Both data callbacks (FFI request section 13; reverses TRF-16)
 // ---------------------------------------------------------------------------------------------
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCS7OneDataCallbackTest,
-	"Open3DBroadcast.Transport.WebRTC.Receiver.OneDataCallbackRegistered",
+// livekit_ffi's async-connect loop calls only the unlabeled data callback, and no FFI loop calls
+// both for one packet, so the receiver registers both and takes frames from either.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCBothDataCallbacksTest,
+	"Open3DBroadcast.Transport.WebRTC.Receiver.BothDataCallbacksRegistered",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-bool FWebRTCS7OneDataCallbackTest::RunTest(const FString& Parameters)
+bool FWebRTCBothDataCallbacksTest::RunTest(const FString& Parameters)
 {
 #if PLATFORM_WINDOWS && PLATFORM_64BITS
 	using namespace WebRTCS7Test;
 	FFakeLiveKit Fake;
 	{
 		FO3DWebRTCReceiver Receiver(FFakeLiveKit::MakeApi());
-		TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeManualConfig()).IsOk());
+		if (!TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeManualConfig()).IsOk()))
+		{
+			return false;
+		}
+		const TSharedPtr<FRecordingConsumer> Consumer = MakeShared<FRecordingConsumer>();
+		Receiver.SetConsumer(Consumer);
+		TestTrue(TEXT("Start"), Receiver.Start().IsOk());
+
 		FFakeClient* Client = Fake.LastClient();
 		if (TestNotNull(TEXT("Client created"), Client))
 		{
 			TestEqual(TEXT("Labeled data callback registered once"), Client->DataExRegistrations, 1);
-			TestEqual(TEXT("Unlabeled data callback not registered"), Client->DataRegistrations, 0);
+			TestEqual(TEXT("Unlabeled data callback registered once"), Client->DataRegistrations, 1);
+			if (Client->DataCallback)
+			{
+				// The async-connect path: an unlabeled packet reaches the consumer.
+				Client->FireConnection(LkConnConnected);
+				const uint8 Bytes[3] = { 9, 8, 7 };
+				Client->DataCallback(Client->DataUser, Bytes, 3);
+				Receiver.Poll();
+				TestEqual(TEXT("Unlabeled packet delivered once"), Consumer->StreamIds.Num(), 1);
+			}
 		}
 		Receiver.Stop();
 	}
 
-	// Fallback: the unlabeled callback is used only when the labeled registration fails.
+	// A failed labeled registration still leaves the unlabeled callback registered.
 	Fake.DataCallbackExResult = 401;
 	{
 		FO3DWebRTCReceiver Receiver(FFakeLiveKit::MakeApi());
-		TestTrue(TEXT("Initialize with fallback"), Receiver.Initialize(MakeManualConfig()).IsOk());
+		TestTrue(TEXT("Initialize with labeled registration failing"), Receiver.Initialize(MakeManualConfig()).IsOk());
 		FFakeClient* Client = Fake.LastClient();
 		if (TestNotNull(TEXT("Client created"), Client))
 		{
 			TestEqual(TEXT("Labeled registration failed"), Client->DataExRegistrations, 0);
-			TestEqual(TEXT("Unlabeled fallback registered once"), Client->DataRegistrations, 1);
+			TestEqual(TEXT("Unlabeled callback registered once"), Client->DataRegistrations, 1);
 		}
 		Receiver.Stop();
 	}
