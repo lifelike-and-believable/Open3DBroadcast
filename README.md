@@ -1,8 +1,8 @@
-# Open3DStream / Open3DBroadcast
+# Open3DBroadcast
 
 > Lightweight, standardized live streaming of 3D animation
 
-Open3DStream is a protocol and C++ library for real-time streaming of skeletal animation and animation curves (morph targets). This repository holds:
+Open3DBroadcast streams skeletal animation and animation curves (morph targets) between engines and tools in real time. Open3DStream is the name of the wire protocol and of the C++ core library that implement it. This repository holds:
 
 - **The Open3DStream core library** (`src/o3ds`): the FlatBuffers data model, serialization with delta updates, sequencing, reordering and prediction, and TCP, UDP and NNG connectors.
 - **Open3DBroadcast**, the Unreal Engine plugin (`ProjectSandbox/Plugins/Open3DBroadcast`): sends and receives Open3DStream data between Unreal instances over pluggable transports, with LiveLink on the receiving side.
