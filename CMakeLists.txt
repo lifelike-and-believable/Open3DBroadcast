@@ -27,6 +27,10 @@ endif()
 option(O3DS_BUILD_TESTS "Build the core library unit test suite (CTest)" ON)
 option(O3DS_ENABLE_SANITIZERS "Build with AddressSanitizer + UndefinedBehaviorSanitizer (GCC/Clang only)" OFF)
 option(O3DS_BUILD_FUZZERS "Build the libFuzzer targets under test/fuzz (Clang only; instruments the whole build)" OFF)
+# CORE-27: the legacy connectors (TCP, UDP, NNG pub/sub/pair, WebRTC over libdatachannel, the
+# XSens parser) in their own library, open3dstream_legacy. Nothing in this repository uses them:
+# the UE plugin has its own transports and the Repeater uses NNG directly.
+option(O3DS_BUILD_LEGACY "Build the legacy connectors library open3dstream_legacy (src/CMakeLists.txt)" OFF)
 
 # CORE-20: warnings for O3DS's own code only - the core library's non-legacy
 # sources (src/CMakeLists.txt), the tests and the fuzz targets. Not applied
@@ -64,12 +68,8 @@ if(O3DS_BUILD_FUZZERS)
 	add_link_options(-fsanitize=address,undefined)
 endif()
 
-#add_subdirectory(apps/FbxStream)
 add_subdirectory(src)
 add_subdirectory(apps/Repeater)
-add_subdirectory(apps/SubscribeTest)
-
-add_subdirectory(apps/Test1)
 add_subdirectory(apps/DeterminismProbe)
 add_subdirectory(apps/PredictorEval)
 add_subdirectory(apps/QuantEval)

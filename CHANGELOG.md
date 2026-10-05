@@ -568,6 +568,17 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- **Legacy connectors in their own library, off by default** (CORE-27): `Connector`/`AsyncConnector`,
+  TCP, UDP, the NNG pub/sub/pair/pipeline/request connectors, the libdatachannel WebRTC connector,
+  the socket helpers, `binary_stream` and the XSens parser moved out of `open3dstreamstatic` into
+  `open3dstream_legacy`, built only with `-DO3DS_BUILD_LEGACY=ON` (the MSVC job in
+  `core-tests.yml` builds it so it keeps compiling). Their headers are installed only with it. The
+  core no longer needs NNG or libdatachannel to build: the WebRTC options apply only to the legacy
+  library, and the FlatBuffers headers come from its package's target (they used to be found
+  through NNG's include directory).
+- **Legacy apps archived** (CORE-28): `apps/FbxStream`, `apps/Test1`, `apps/SubscribeTest` and
+  `apps/XSensTest`, the last users of the legacy connectors, are removed and kept at the git tag
+  `archive/legacy-apps`.
 - **Repeater image** (`docker/Dockerfile.repeater`): builds only the Repeater, on Ubuntu 24.04,
   against the pinned submodules (NNG, FlatBuffers, CRCpp) as `core-tests.yml` does instead of
   Ubuntu's packages; NNG is linked statically, so the runtime image needs no NNG package; NNG's

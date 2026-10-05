@@ -376,9 +376,11 @@ jobs:
           cmake --build build || exit /b 1
           cmake --install build || exit /b 1
 
+      # O3DS_BUILD_LEGACY: the only build of the legacy connectors (open3dstream_legacy, CORE-27),
+      # so they keep compiling although nothing in the repository links them.
       - name: Configure core library + tests
         shell: cmd
-        run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=%RUNNER_TEMP%/usr -DO3DS_DISABLE_WEBRTC=ON -DO3DS_BUILD_TESTS=ON
+        run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=%RUNNER_TEMP%/usr -DO3DS_DISABLE_WEBRTC=ON -DO3DS_BUILD_TESTS=ON -DO3DS_BUILD_LEGACY=ON
 
       - name: Build
         shell: cmd

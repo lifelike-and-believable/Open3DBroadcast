@@ -3,9 +3,11 @@ cmake_minimum_required(VERSION  3.13)
 project(Open3DStreamLib)
 
 find_package(Flatbuffers CONFIG REQUIRED flatbuffers flatc HINTS ${CMAKE_CURRENT_LIST_DIR}/../usr)
-find_package(nng CONFIG REQUIRED HINTS ${CMAKE_CURRENT_LIST_DIR}/../usr)
+if(O3DS_BUILD_LEGACY)
+	find_package(nng CONFIG REQUIRED HINTS ${CMAKE_CURRENT_LIST_DIR}/../usr)
+endif()
 
-# WebRTC support
+# WebRTC support (the legacy webrtc_connector only; ignored unless O3DS_BUILD_LEGACY is on)
 # - O3DS_ENABLE_WEBRTC (default: ON) keeps backward compatibility with existing builds/docs
 # - O3DS_DISABLE_WEBRTC (default: OFF) is an explicit opt-out that overrides the enable flag
 # - O3DS_LIBDATACHANNEL_ROOT: Optional path to a directory containing prebuilt libdatachannel
@@ -17,7 +19,7 @@ set(O3DS_LIBDATACHANNEL_ROOT "" CACHE PATH "Root folder with prebuilt libdatacha
 
 # Compute effective switch used by the build
 set(O3DS_WITH_WEBRTC ${O3DS_ENABLE_WEBRTC})
-if(O3DS_DISABLE_WEBRTC)
+if(O3DS_DISABLE_WEBRTC OR NOT O3DS_BUILD_LEGACY)
 	set(O3DS_WITH_WEBRTC OFF)
 endif()
 
@@ -86,7 +88,6 @@ if(O3DS_WITH_WEBRTC)
 		message(STATUS "WebRTC: using LibDataChannel CMake package")
 	endif()
 
-	add_compile_definitions(O3DS_ENABLE_WEBRTC)
 	message(STATUS "WebRTC support enabled")
 else()
 	message(STATUS "WebRTC support disabled")
@@ -130,6 +131,16 @@ set(pub_headers
 	o3ds/model.h
 	o3ds/parse_limits.h
 	o3ds/control.h
+	o3ds/transform_component.h
+	o3ds/context.h
+	o3ds/math.h
+	o3ds/udp_fragment.h
+	o3ds/tcp_stream_parser.h
+	o3ds/o3ds_version.h
+	o3ds/o3ds_export.h
+)
+
+set(legacy_headers
 	o3ds/base_connector.h
 	o3ds/nng_connector.h
 	o3ds/subscriber.h
@@ -139,28 +150,21 @@ set(pub_headers
 	o3ds/async_pair.h
 	o3ds/publisher.h
 	o3ds/async_request.h
-	o3ds/transform_component.h
 	o3ds/request.h
 	o3ds/pipeline.h
 	o3ds/async_pipeline.h
-	o3ds/context.h
-	o3ds/math.h
 	o3ds/tcp.h
-	o3ds/udp_fragment.h
-	o3ds/tcp_stream_parser.h
 	o3ds/socket_exception.h
 	o3ds/socket_util.h
 	o3ds/udp.h
 	o3ds/socket_address.h
 	o3ds/binary_stream.h
 	o3ds/xsens_parser.h
-	o3ds/o3ds_version.h
-	o3ds/o3ds_export.h
 )
 
 if(O3DS_WITH_WEBRTC)
-    list(APPEND pub_headers o3ds/webrtc_connector.h)
-endif()	
+    list(APPEND legacy_headers o3ds/webrtc_connector.h)
+endif()
 
 # Model, wire format and the pure-logic modules the UE plugin vendors.
 # Compiled with warnings enabled (CORE-20, see o3ds_enable_warnings in the
@@ -195,9 +199,9 @@ set(CORE_SOURCES
 	o3ds/o3ds_version.cpp
 )
 
-# Legacy connectors and parsers the UE plugin doesn't use (CORE-27). Same
-# target for now; left at the default warning level until they move to
-# their own target.
+# Legacy connectors and parsers nothing in this repository uses (CORE-27):
+# the open3dstream_legacy library, built only with O3DS_BUILD_LEGACY, at the
+# default warning level.
 set(LEGACY_SOURCES
 	o3ds/base_connector.cpp
 	o3ds/nng_connector.cpp
@@ -224,13 +228,7 @@ if(O3DS_WITH_WEBRTC)
     list(APPEND LEGACY_SOURCES o3ds/webrtc_connector.cpp)
 endif()
 
-set(SOURCES ${CORE_SOURCES} ${LEGACY_SOURCES})
-
 set_source_files_properties(${CORE_SOURCES} PROPERTIES COMPILE_OPTIONS "${O3DS_WARNING_FLAGS}")
-	
-if(WIN32)
-set(xtralibs wsock32 ws2_32)
-endif()
 
 # Shared library
 # add_library(open3dstream SHARED ${SOURCES})
@@ -238,28 +236,45 @@ endif()
 # add_dependencies(open3dstream protocol)
 
 # Static linkable library
-add_library(open3dstreamstatic STATIC ${SOURCES} ${pub_headers})
+add_library(open3dstreamstatic STATIC ${CORE_SOURCES} ${pub_headers})
 
+# The FlatBuffers headers only (the core uses its header-only runtime). Its package defines no
+# FLATBUFFERS_INCLUDE_DIRS; before CORE-27 the headers were found through NNG's include directory.
+get_target_property(_flatbuffers_include flatbuffers::flatbuffers INTERFACE_INCLUDE_DIRECTORIES)
 target_include_directories(open3dstreamstatic PUBLIC 
 	${CMAKE_CURRENT_BINARY_DIR}/_generated ${CMAKE_CURRENT_LIST_DIR}
-	${FLATBUFFERS_INCLUDE_DIRS} 
-	${NNG_INCLUDE_DIRS}/..)
+	${_flatbuffers_include})
+
+if(O3DS_BUILD_LEGACY)
+	add_library(open3dstream_legacy STATIC ${LEGACY_SOURCES} ${legacy_headers})
+	target_link_libraries(open3dstream_legacy PUBLIC open3dstreamstatic nng::nng)
+	if(WIN32)
+		target_link_libraries(open3dstream_legacy PUBLIC wsock32 ws2_32)
+	endif()
+	add_dependencies(open3dstream_legacy protocol)
+	list(JOIN legacy_headers ";" legacy_headers_str)
+	set_target_properties(open3dstream_legacy PROPERTIES PUBLIC_HEADER "${legacy_headers_str}")
+	install(TARGETS open3dstream_legacy
+		LIBRARY DESTINATION lib
+		PUBLIC_HEADER DESTINATION include/o3ds
+		CONFIGURATIONS RelWithDebInfo)
+endif()
 
 if(O3DS_WITH_WEBRTC)
-    target_link_libraries(open3dstreamstatic PUBLIC LibDataChannel::LibDataChannel)
+    target_compile_definitions(open3dstream_legacy PRIVATE O3DS_ENABLE_WEBRTC)
+    target_link_libraries(open3dstream_legacy PUBLIC LibDataChannel::LibDataChannel)
 	# Ensure header-only nlohmann/json is available for webrtc connector
 	# Prefer vendored single-header from libdatachannel submodule; fall back to prebuilt include, if present
 	set(_JSON_SINGLE_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/../thirdparty/libdatachannel/deps/json/single_include")
 	if(EXISTS "${_JSON_SINGLE_INCLUDE}/nlohmann/json.hpp")
-		target_include_directories(open3dstreamstatic PUBLIC "${_JSON_SINGLE_INCLUDE}")
+		target_include_directories(open3dstream_legacy PUBLIC "${_JSON_SINGLE_INCLUDE}")
 	elseif(O3DS_LIBDATACHANNEL_ROOT AND EXISTS "${O3DS_LIBDATACHANNEL_ROOT}/include/nlohmann/json.hpp")
-		target_include_directories(open3dstreamstatic PUBLIC "${O3DS_LIBDATACHANNEL_ROOT}/include")
+		target_include_directories(open3dstream_legacy PUBLIC "${O3DS_LIBDATACHANNEL_ROOT}/include")
 	else()
 		message(WARNING "nlohmann/json.hpp not found; if build fails, ensure nlohmann/json single-header is available under thirdparty/libdatachannel/deps/json/single_include or provide it via O3DS_LIBDATACHANNEL_ROOT/include")
 	endif()
 endif()
 
-# target_link_libraries(open3dstreamstatic PRIVATE ${NNG_LIBRARIES} ${FLATBUFFERS_LIBRARIES} ${xtralibs})        
 add_dependencies(open3dstreamstatic protocol)
 
 list(JOIN pub_headers ";" pub_headers_str)

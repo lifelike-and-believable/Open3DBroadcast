@@ -82,7 +82,8 @@ cmake -S . -B build -DCMAKE_PREFIX_PATH=$PREFIX -DO3DS_DISABLE_WEBRTC=ON
 cmake --build build --config Release
 ```
 
-- The core's own WebRTC connector (`src/o3ds/webrtc_connector.*`, option `O3DS_ENABLE_WEBRTC`, on by default) needs libdatachannel, which is no longer in the tree. Turn it off with `-DO3DS_DISABLE_WEBRTC=ON`, or point `O3DS_LIBDATACHANNEL_ROOT` at a prebuilt libdatachannel. The Unreal WebRTC transport doesn't use it.
+- The core library is `open3dstreamstatic`: the model, wire format, sequencing, prediction and the other modules the Unreal plugin compiles. It needs only FlatBuffers.
+- The legacy connectors (`Connector`/`AsyncConnector`: TCP, UDP, NNG pub/sub/pair/pipeline/request, the libdatachannel WebRTC connector, the XSens parser) are a separate library, `open3dstream_legacy`, built only with `-DO3DS_BUILD_LEGACY=ON` (CORE-27). Nothing in this repository uses them; the Unreal plugin has its own transports. Its WebRTC connector (option `O3DS_ENABLE_WEBRTC`) needs libdatachannel, which is no longer in the tree: add `-DO3DS_DISABLE_WEBRTC=ON`, or point `O3DS_LIBDATACHANNEL_ROOT` at a prebuilt libdatachannel. `-DO3DS_DISABLE_WEBRTC=ON` in the command above only matters with the legacy library.
 - `O3DS_BUILD_TESTS` (on by default) builds the CTest suite. `O3DS_ENABLE_SANITIZERS` (GCC/Clang) and `O3DS_BUILD_FUZZERS` (Clang) enable ASan/UBSan and the libFuzzer targets. `core-tests.yml` runs all three.
 
 ### Example: building a frame
@@ -132,10 +133,11 @@ with socket.create_connection(("127.0.0.1", 5555)) as s:
 
   ```bash
   docker build -f docker/Dockerfile.repeater -t open3dstream-repeater:local .
-  docker run --rm open3dstream-repeater:local tcp://0.0.0.0:7000 tcp://0.0.0.0:7001
+  docker run --rm -p 7000:7000 -p 7001:7001 open3dstream-repeater:local
   ```
 
-- `apps/SubscribeTest`, `apps/Test1`, `apps/DeterminismProbe` and `apps/PredictorEval` are built by the root `CMakeLists.txt`. `apps/FbxStream` and `apps/XSensTest` are not in the root build.
+- `apps/DeterminismProbe`, `apps/PredictorEval` and `apps/QuantEval` are measurement tools for the roadmap's prediction and quantization work, built by the root `CMakeLists.txt`.
+- `apps/FbxStream`, `apps/Test1`, `apps/SubscribeTest` and `apps/XSensTest` were archived in 2026-10 (WP-A7, CORE-28). They are kept, unchanged, at the git tag `archive/legacy-apps`; they used the legacy connectors.
 - The MotionBuilder and Maya plugins (`plugins/`), the Python scripts (`python/`) and the Sphinx documentation site (`sphinx/`) were archived in 2026-10 (WP-A7). They are kept, unchanged, at the git tag `archive/dcc-plugins-python-sphinx`.
 
 ## Documentation
