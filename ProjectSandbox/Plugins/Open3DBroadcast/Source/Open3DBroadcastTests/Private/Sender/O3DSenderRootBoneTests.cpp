@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // ADR 0008 Verification (WP-A2b, item 9): "a test that moves the root bone each frame shows the
 // captured transform equals the same frame's evaluated pose". The mesh is built in code

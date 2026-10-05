@@ -1,4 +1,5 @@
-// Copyright (c) Open3DStream Contributors
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
+// Portions Copyright (c) Open3DStream Contributors
 //
 // NNG pub/sub on 127.0.0.1 and the receive demux. The transport is reached through
 // Testing/NngTesting.h (WP-T2).

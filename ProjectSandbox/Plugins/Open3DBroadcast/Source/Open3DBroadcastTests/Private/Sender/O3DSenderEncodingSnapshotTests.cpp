@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // WP-A2a (ADR 0008 implementation outline item 2): the settings snapshot, the serializer without a
 // component, the pose frame pool, curve filtering after sampling and the sampling-time clock. No

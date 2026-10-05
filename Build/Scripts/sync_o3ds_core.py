@@ -284,7 +284,7 @@ def wrapper_name(mirror_rel):
 
 def wrapper_text(mirror_rel):
     return (
-        "// Copyright Lifelike & Believable. All Rights Reserved.\n"
+        "// Copyright 2026 Lifelike & Believable. All Rights Reserved.\n"
         "\n"
         f"// {GENERATED_NOTE}\n"
         f"// Compiles src/{mirror_rel} from the mirror in {MIRROR_REL}\n"

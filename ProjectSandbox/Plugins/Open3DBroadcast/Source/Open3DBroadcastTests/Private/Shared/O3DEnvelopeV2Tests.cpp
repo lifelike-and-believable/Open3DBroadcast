@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // Envelope v2 (ADR 0009 item 4, WP-A4): "O3DU", little-endian, with a sequence number; envelope
 // v1 ("O3DA", big-endian) is not accepted. The codec is the core's (o3ds/wire_format.h); these

@@ -1,4 +1,5 @@
-// Copyright (c) Open3DStream Contributors
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
+// Portions Copyright (c) Open3DStream Contributors
 //
 // Offline conformance profiles for the transports in this plugin (ADR 0006 §4, WP-T2).
 // Every fixture uses 127.0.0.1 and an ephemeral port, a unique loopback channel, or the fake

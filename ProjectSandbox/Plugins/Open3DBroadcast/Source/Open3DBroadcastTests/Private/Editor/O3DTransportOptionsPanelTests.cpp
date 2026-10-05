@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // WP-F7 (ADR 0010 §5 and §8; TRB-45, SND-35): the generic transport options panel of the
 // Open3DBroadcastEditor module.

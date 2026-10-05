@@ -1,4 +1,5 @@
-// Copyright (c) Open3DStream Contributors
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
+// Portions Copyright (c) Open3DStream Contributors
 //
 // WP-S5 tests for MoQ (TRF-1, TRF-10, TRF-12).
 //

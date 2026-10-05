@@ -1,4 +1,5 @@
-// Copyright (c) Open3DStream Contributors
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
+// Portions Copyright (c) Open3DStream Contributors
 //
 // WP-S9 (ADR 0004): secret store resolution order, redaction helpers and the token endpoint URL
 // policy. No network, no disk: the store under test gets a fake environment and a fake per-user

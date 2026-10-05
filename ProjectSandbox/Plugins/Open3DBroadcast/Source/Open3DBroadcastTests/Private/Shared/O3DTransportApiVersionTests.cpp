@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // WP-F11 (ADR 0002, ADR 0007 item 2; minimal SHR-14): the transport-interface version an add-on
 // transport such as Open3DBroadcastWebRTC checks in StartupModule before it registers anything.

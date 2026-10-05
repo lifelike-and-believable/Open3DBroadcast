@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 //
 // ADR 0011 (CTL-2): the control path end to end through the fake transports, with the real core

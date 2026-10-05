@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 //
 // ADR 0011 (CTL-2): FO3DControlBus. Changes reach listeners and the value cache; a change heard

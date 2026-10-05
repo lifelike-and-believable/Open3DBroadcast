@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // MoQ on the shared transport blocks (ADR 0007 item 7, WP-A1 PR 4e). Everything runs on the fake
 // moq-ffi table (MoQFakeFfi.h, ADR 0006 F2): no relay and no network, so none of these needs

@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """Check that every first-party plugin source file starts with a copyright header.
 
-The rule (FAB-5, FAB-9, WP-F4): every git-tracked .h, .cpp and .cs file under
-the Source/ folder of each plugin in this repository starts with one of
+The rule (FAB-5, FAB-9, WP-F4; Fab TR 4.3.6.1.b asks for the publisher's
+name and the year): every git-tracked .h, .cpp and .cs file under the Source/
+folder of each plugin in this repository starts with
 
-    // Copyright Lifelike & Believable. All Rights Reserved.
-    // Copyright (c) Open3DStream Contributors
+    // Copyright <year> Lifelike & Believable. All Rights Reserved.
 
-New files use the first, followed by a blank line (or the end of the file).
-Files that already carried the Open3DStream Contributors notice keep it, as
-the maintainer decided; what follows that line is not checked. A leading
-UTF-8 BOM is ignored. Line endings may be LF or CRLF.
+where <year> is four digits, followed by a blank line (or the end of the
+file). Files that came from Open3DStream carry its notice on the second line,
+
+    // Portions Copyright (c) Open3DStream Contributors
+
+and what follows that line is not checked (maintainer, 2026-10-05). A
+leading UTF-8 BOM is ignored. Line endings may be LF or CRLF.
 
 Not checked:
   - anything under a ThirdParty/ directory (vendored libraries keep their own
@@ -37,9 +40,10 @@ import re
 import subprocess
 import sys
 
-HEADER = "// Copyright Lifelike & Believable. All Rights Reserved."
-# Kept on files that already carried it (maintainer decision, WP-F4). Don't use it for new files.
-OPEN3DSTREAM_HEADER = "// Copyright (c) Open3DStream Contributors"
+HEADER_RE = re.compile(r"// Copyright \d{4} Lifelike & Believable\. All Rights Reserved\.")
+HEADER_EXAMPLE = "// Copyright 2026 Lifelike & Believable. All Rights Reserved."
+# Second line of files that came from Open3DStream (maintainer, 2026-10-05). Not for new files.
+PORTIONS_LINE = "// Portions Copyright (c) Open3DStream Contributors"
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 DEFAULT_PLUGIN_DIRS = [
@@ -111,11 +115,12 @@ def header_problem(data):
     text = data.decode("utf-8", errors="replace")
     lines = text.split("\n", 2)
     first = lines[0].rstrip("\r")
-    if first == OPEN3DSTREAM_HEADER:
-        return None
-    if first != HEADER:
+    if not HEADER_RE.fullmatch(first):
         return "first line is {!r}".format(first[:80]) if first else "first line is empty"
-    if len(lines) > 1 and lines[1].rstrip("\r").strip():
+    second = lines[1].rstrip("\r") if len(lines) > 1 else ""
+    if second == PORTIONS_LINE:
+        return None
+    if second.strip():
         return "no blank line after the header"
     return None
 
@@ -191,8 +196,8 @@ def check_plugin(plugin_dir, files, allowlist, verbose, in_actions):
     if offenders:
         print("")
         print("{} file(s) do not start with the header line".format(len(offenders)))
-        print("  {}".format(HEADER))
-        print("followed by a blank line (or, on files that already had it, {!r}):".format(OPEN3DSTREAM_HEADER))
+        print("  {}".format(HEADER_EXAMPLE))
+        print("(any four-digit year) followed by a blank line (or, on files from Open3DStream, {!r}):".format(PORTIONS_LINE))
         for rel, problem in offenders:
             print("  {}/{}: {}".format(plugin_rel, rel, problem))
             if in_actions:

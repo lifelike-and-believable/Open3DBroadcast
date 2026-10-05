@@ -1,4 +1,5 @@
-// Copyright (c) Open3DStream Contributors
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
+// Portions Copyright (c) Open3DStream Contributors
 //
 // Open3DBroadcast.Network.MoQ.*: the MoQ transport against a real relay (ADR 0006 §6, UX-4,
 // TRF-34). Formerly MoQCloudflareRelayTests.cpp, whose Cloudflare.Basic test sat in the default

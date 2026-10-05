@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // WP-A1 PR 5c (ADR 0007 item 8, ADR 0010 §4): the schema additions in the editor's options panel.
 // - bRestartOnChange: the field's tooltip says so, and a commit that changes it, and only such a

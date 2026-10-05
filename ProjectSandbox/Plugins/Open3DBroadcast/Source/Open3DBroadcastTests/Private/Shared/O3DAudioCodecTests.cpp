@@ -1,4 +1,5 @@
-// Copyright (c) Open3DStream Contributors
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
+// Portions Copyright (c) Open3DStream Contributors
 //
 // WP-S10: audio codec correctness.
 // - SHR-1: a frame's codec label always matches its payload; Opus that is unavailable (compiled

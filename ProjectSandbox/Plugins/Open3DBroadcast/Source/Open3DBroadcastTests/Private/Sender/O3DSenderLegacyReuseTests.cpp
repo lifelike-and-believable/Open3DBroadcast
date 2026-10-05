@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // The legacy encoding keeps its core Subject across frames and copies only the values in (WP-A2
 // follow-up, ADR 0008 addendum "Insights numbers"). The wire must not change: after every frame of

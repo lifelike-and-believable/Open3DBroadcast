@@ -1,4 +1,5 @@
-// Copyright (c) Open3DStream Contributors
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
+// Portions Copyright (c) Open3DStream Contributors
 //
 // WP-S8 tests for MoQ (TRF-8, TRF-9, TRF-11, TRF-13, TRF-20, TRF-29, TRF-37, TRF-39).
 //

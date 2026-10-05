@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // ADR 0011 (CTL-4): control on the receiving side, end to end over the real Loopback transport:
 // FO3DControlPublisher -> Loopback -> FO3DReceiverSource -> FO3DControlBus ->

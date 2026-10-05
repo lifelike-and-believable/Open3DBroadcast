@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 //
 // ADR 0011 item 10 (CTL-2): the receiver source rejects bytes it cannot read (for example

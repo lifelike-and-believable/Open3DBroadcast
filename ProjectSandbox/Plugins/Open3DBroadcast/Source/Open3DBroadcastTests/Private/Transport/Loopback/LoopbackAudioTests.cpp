@@ -1,4 +1,5 @@
-// Copyright (c) Open3DStream Contributors
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
+// Portions Copyright (c) Open3DStream Contributors
 //
 // Loopback audio path. The transport is created through the registry by its registered name,
 // so these tests need no access to the module's private classes (WP-T2).

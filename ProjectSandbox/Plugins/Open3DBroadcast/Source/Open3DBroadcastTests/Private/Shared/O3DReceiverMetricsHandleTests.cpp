@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // ADR 0012 item 4 (SHR-38): receiver metrics handles. On a fresh runtime context, so no deltas:
 // each handle counts its own records; the aggregate equals the sum of every handle, released ones

@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // The ADR 0008 measurement scene (Decision item 11, WP-A2c addendum "Insights numbers"): one, then
 // ten, 250-bone, 250-curve senders at 60 Hz, on Loopback and on UDP, with o3d.Sender.AsyncPipeline

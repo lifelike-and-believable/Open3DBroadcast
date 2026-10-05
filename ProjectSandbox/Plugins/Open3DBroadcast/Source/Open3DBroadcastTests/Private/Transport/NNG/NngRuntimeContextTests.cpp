@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // ADR 0012 item 3 (SHR-38): a transport records its metrics into the runtime context its config
 // names, and into the default context only when the config names none. NNG on 127.0.0.1 with a

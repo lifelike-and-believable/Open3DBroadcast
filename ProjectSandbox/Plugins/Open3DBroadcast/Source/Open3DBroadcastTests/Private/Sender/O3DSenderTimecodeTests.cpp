@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // RCV-8, ADR 0013 PR 2: the sender stamps its engine timecode. The component reads
 // FApp::GetCurrentFrameTime() into each frame it samples (set only while a timecode provider is

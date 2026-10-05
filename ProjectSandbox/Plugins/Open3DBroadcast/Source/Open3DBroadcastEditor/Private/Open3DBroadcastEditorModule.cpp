@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 #include "LiveLinkSourceFactory.h"
 #include "Modules/ModuleManager.h"

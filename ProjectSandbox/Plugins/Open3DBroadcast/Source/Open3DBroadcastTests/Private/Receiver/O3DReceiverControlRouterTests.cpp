@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // FO3DReceiverControlRouter (WP-A3 step 4, RCV-29): the receiver side of the control channel
 // (docs/adr/0011-control-channel.md item 8), reached through FO3DReceiverControlRouterProbe. Payloads

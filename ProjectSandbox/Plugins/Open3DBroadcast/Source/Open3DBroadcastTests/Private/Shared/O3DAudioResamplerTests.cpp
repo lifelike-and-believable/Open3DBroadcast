@@ -1,4 +1,5 @@
-// Copyright (c) Open3DStream Contributors
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
+// Portions Copyright (c) Open3DStream Contributors
 //
 // SND-21 (WP-S10): the sender's resampler keeps its state across capture buffers (no drift, no
 // seam at buffer boundaries) and low-pass filters before downsampling.

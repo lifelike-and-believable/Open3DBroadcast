@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // WP-A1 PR 5a (ADR 0007 item 8, step 5; SHR-36, SND-35): typed config.
 // - FO3DTransportOptionsView: typed getters with the schema's defaults, strict parsing, the

@@ -1,4 +1,5 @@
-// Copyright (c) Open3DStream Contributors
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
+// Portions Copyright (c) Open3DStream Contributors
 //
 // TCP audio path on 127.0.0.1. The transport is reached through Testing/SocketsTesting.h (WP-T2).
 // Option keys are spelled out: they are the user-facing names persisted in settings

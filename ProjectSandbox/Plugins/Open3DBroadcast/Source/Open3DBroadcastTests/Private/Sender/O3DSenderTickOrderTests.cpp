@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // WP-A2b (ADR 0008 implementation outline item 3, SND-12): the sender's capture tick runs in
 // TG_PostUpdateWork and waits for the target skeletal mesh's tick, so it samples the pose the mesh

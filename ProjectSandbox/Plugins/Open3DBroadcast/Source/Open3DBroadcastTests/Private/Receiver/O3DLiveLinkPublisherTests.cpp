@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // FO3DLiveLinkPublisher (WP-A3, RCV-29): creates a LiveLink subject once per session (RCV-7),
 // re-pushes static data only when bone or curve names change, pushes real and synthesized frames,

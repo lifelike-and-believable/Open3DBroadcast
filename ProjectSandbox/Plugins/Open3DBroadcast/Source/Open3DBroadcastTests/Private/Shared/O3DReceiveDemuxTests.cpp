@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // FO3DUnifiedReceiveDemux (ADR 0007 item 7, WP-A1 step 4; TRB-37, TRB-38, SHR-8, ADR 0011):
 // classification of raw and enveloped mocap, audio, control and keepalives; malformed, oversize

@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // FO3DReceiverFrameDecoder (WP-A3, RCV-29): converts parsed O3DS subjects for LiveLink and caches
 // what only changes with the topology (RCV-4, RCV-11, RCV-12). Reached through the exported

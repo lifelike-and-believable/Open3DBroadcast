@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // This file also includes (through the registry header) the OPEN3DSHARED_API interface classes
 // IOpen3DSender, IOpen3DReceiver, their audio sinks and ISerializedFrameConsumer, which have only

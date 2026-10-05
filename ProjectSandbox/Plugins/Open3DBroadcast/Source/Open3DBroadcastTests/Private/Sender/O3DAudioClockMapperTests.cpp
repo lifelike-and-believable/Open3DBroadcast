@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // WP-A2d (ADR 0008 item 7, SND-17): the submix tap and the microphone map their source clocks
 // (AudioClock, StreamTimeSec) onto the sender clock with FO3DAudioClockMapper. These tests drive

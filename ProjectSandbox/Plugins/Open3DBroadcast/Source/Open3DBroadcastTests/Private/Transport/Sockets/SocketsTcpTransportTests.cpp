@@ -1,4 +1,5 @@
-// Copyright (c) Open3DStream Contributors
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
+// Portions Copyright (c) Open3DStream Contributors
 //
 // WP-S6 integration tests for the TCP transport on 127.0.0.1 with real sockets and an
 // ephemeral port (ADR 0006 S2). The framing parser itself is unit-tested and fuzzed in the

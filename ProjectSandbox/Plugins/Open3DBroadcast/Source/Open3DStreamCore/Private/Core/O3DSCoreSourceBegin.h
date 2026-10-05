@@ -1,4 +1,4 @@
-// Copyright Lifelike & Believable. All Rights Reserved.
+// Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 // Included first by every generated O3DSCore_*.cpp in this folder, before the
 // mirrored o3ds core source it compiles; O3DSCoreSourceEnd.h closes what this
