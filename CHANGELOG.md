@@ -2408,6 +2408,7 @@ option key or value changed, and nothing needs migrating.
 
 ### Build and CI
 
+- `.gitignore` ignores `CMakeFiles/` in any directory, not only `/Build/CMakeFiles` (issue #204).
 - The root `README.md` is titled Open3DBroadcast and says Open3DStream names the protocol and core library; the bare legacy `README` file is removed (issue #206).
 - Workflows pin their non-GitHub actions to commit SHAs (the version stays in a trailing comment), including `lukka/get-cmake`, which followed `@latest` and is now pinned to v4.4.4 (issue #205). `windows.yml` and `linux.yml` publish their release asset with `softprops/action-gh-release` instead of the deprecated `actions/create-release` and `actions/upload-release-asset`; the asset names are unchanged. These two legacy core release flows have not been run since the change.
 - `Build/Scripts/Build-Plugin.ps1` now fails when `RunUAT BuildPlugin` fails, with UAT's exit code (CI-1).
