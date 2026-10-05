@@ -2408,6 +2408,7 @@ option key or value changed, and nothing needs migrating.
 
 ### Build and CI
 
+- The generated licence texts in `Source/ThirdParty/Open3DStreamCore/LICENSES/` are named `Open3DStream_LICENSE.txt`, `FlatBuffers_LICENSE.txt` and `CRCpp_LICENSE.txt` (underscores instead of hyphens, Fab TR 4.3.7.1.c; issue #381). `sync_o3ds_core.py` writes the new names and the mirror and `SYNC_STAMP.txt` were regenerated. The `moq-ffi` folder keeps its name until Fab review objects.
 - `.gitignore` ignores `CMakeFiles/` in any directory, not only `/Build/CMakeFiles` (issue #204).
 - The root `README.md` is titled Open3DBroadcast and says Open3DStream names the protocol and core library; the bare legacy `README` file is removed (issue #206).
 - Workflows pin their non-GitHub actions to commit SHAs (the version stays in a trailing comment), including `lukka/get-cmake`, which followed `@latest` and is now pinned to v4.4.4 (issue #205). `windows.yml` and `linux.yml` publish their release asset with `softprops/action-gh-release` instead of the deprecated `actions/create-release` and `actions/upload-release-asset`; the asset names are unchanged. These two legacy core release flows have not been run since the change.

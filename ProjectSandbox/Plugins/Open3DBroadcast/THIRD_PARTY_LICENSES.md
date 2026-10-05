@@ -30,7 +30,7 @@ every binary here for them (`Build/Scripts/check-no-video-codecs.sh`).
 | Component | License | Text |
 | --- | --- | --- |
 | Open3DBroadcast (all `Source/` modules) | MIT | [`LICENSE`](LICENSE) |
-| Open3DStream core (`o3ds`) | MIT | [`Source/ThirdParty/Open3DStreamCore/LICENSES/Open3DStream-LICENSE.txt`](Source/ThirdParty/Open3DStreamCore/LICENSES/Open3DStream-LICENSE.txt) |
+| Open3DStream core (`o3ds`) | MIT | [`Source/ThirdParty/Open3DStreamCore/LICENSES/Open3DStream_LICENSE.txt`](Source/ThirdParty/Open3DStreamCore/LICENSES/Open3DStream_LICENSE.txt) |
 
 Both are MIT, © 2020–2024 Alastair Macleod.
 
@@ -50,7 +50,7 @@ binaries. License texts are in
 
 | Component | Version | License | Text |
 | --- | --- | --- | --- |
-| Google FlatBuffers (runtime headers) | 2.0.6, submodule `615616c` | Apache-2.0 | [`FlatBuffers-LICENSE.txt`](Source/ThirdParty/Open3DStreamCore/LICENSES/FlatBuffers-LICENSE.txt) |
+| Google FlatBuffers (runtime headers) | 2.0.6, submodule `615616c` | Apache-2.0 | [`FlatBuffers_LICENSE.txt`](Source/ThirdParty/Open3DStreamCore/LICENSES/FlatBuffers_LICENSE.txt) |
 
 No FlatBuffers library is linked: the core uses only its header-only runtime.
 CML is no longer listed: nothing in the plugin uses it. CRC++ is no longer listed
