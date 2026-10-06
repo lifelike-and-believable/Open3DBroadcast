@@ -374,6 +374,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Fix the sample (`AddUObject` with a two-parameter handler). Either add `BlueprintAssignable` dynamic delegates (see UX-3) or remove the Blueprint instructions.
 - Effort: S
 - Owner: docs
+- Status: closed in #386
 
 ### DOC-5: USER_GUIDE omits the MoQ transport and contradicts the transport comparison on audio
 - Category: docs
