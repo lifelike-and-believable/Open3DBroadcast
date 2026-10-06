@@ -578,6 +578,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- TCP and UDP: no silent port sharing (WP-U6; TRB-22). The TCP sender's listen socket and the UDP receiver's socket set `SO_REUSEADDR`. On Windows that lets a second socket bind a port already in use, so a second sender or receiver on the same port started without error and shared or took over the port. A second listener on a port in use now fails to start with `AddressInUse`, and the log says the bind failed. The UDP sender, which binds nothing, no longer sets the option either.
+
 - USER_GUIDE reference sections and the transport comparison (WP-D2; mid-project review DOC-10, RCV-32, DOC-4 residue, DOC-5 rest).
   - **Receiver Setup** uses the real panel (**Open3DStream Receiver**, **Transport**, **Audio Codec** with **Transport Default**, **Create Source**); the `role`/`uri`/`protocol` examples, the "Audio Stream Label" field and the unverified Live Link Component and Control Rig routes for applying a subject are gone. A new **Receiver Source Settings** table covers Inactive Subject Timeout Seconds, concealment and Control Accept.
   - **Configuration Reference**: Curve Epsilon defaults to 0.0005; Audio Input Device is a name; Bitrate Kbps 0 lets the encoder choose; new **Encoding Properties** (residual coding, quantization, full sync interval), both off by default.
