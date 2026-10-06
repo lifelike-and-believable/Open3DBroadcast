@@ -482,6 +482,9 @@ void UO3DSenderComponent::InitializeTransport()
 		if (UO3DSenderComponent* Self = WeakThis.Get())
 		{
 			const FName Unloaded = Self->TransportController.IsValid() ? Self->TransportController->GetConfig().Transport : NAME_None;
+			// WP-R1 (SR-3): stop the capture, not only the transport, so Is Capturing reports it and
+			// Start Capture works again (it returned early while the flag stayed set).
+			Self->StopCapture();
 			Self->TeardownTransport();
 			// Teardown also stops the tick, which drains the mailbox, so announce it here (WP-U2).
 			Self->StateMailbox->Post(EO3DConnectionState::Failed, FO3DTransportResult::Error(EO3DTransportError::Internal,

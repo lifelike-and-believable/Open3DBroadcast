@@ -51,7 +51,11 @@ struct FO3DSenderAudioCaptureConfig
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
     USoundSubmix* SubmixToTap = nullptr;
 
-    /** Sample rate sent, in Hz. The Opus codec takes 8000, 12000, 16000, 24000 or 48000 only (SND-27). */
+    /**
+     * Sample rate sent, in Hz. Receivers play 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100 or
+     * 48000; the Opus codec takes 8000, 12000, 16000, 24000 or 48000 only (SND-27). Another rate is
+     * sent at the nearest of those, with a warning.
+     */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio", meta = (ClampMin = "8000", ClampMax = "48000", Units = "Hz"))
     int32 SampleRate = 48000;
 

@@ -5,13 +5,52 @@
 #include "GameFramework/Actor.h"
 #include "O3DAudioFrameCodec.h"
 #include "O3DAudioInputDevices.h"
+#include "O3DAudioOpus.h"
+#include "O3DAudioSerialization.h"
 #include "O3DSenderLogs.h"
 #include "Sound/SoundSubmix.h"
 #include "Transport/O3DSenderInterface.h"
 
+namespace O3DSenderAudioBindingPrivate
+{
+	/**
+	 * WP-R1 (SR-2): receivers drop audio at a rate O3DAudio::IsSupportedSampleRate refuses, and
+	 * Opus encodes only some of those, so an unsupported rate is replaced by the nearest one that
+	 * plays (the higher on a tie).
+	 */
+	int32 PlayableSampleRate(int32 Requested, bool bOpus)
+	{
+		static constexpr int32 Candidates[] = { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 };
+		const auto Plays = [bOpus](int32 Rate)
+		{
+			return O3DAudio::IsSupportedSampleRate(Rate) && (!bOpus || FO3DAudioOpusEncoder::IsSupportedSampleRate(Rate));
+		};
+		if (Plays(Requested))
+		{
+			return Requested;
+		}
+		int32 Best = 48000;
+		int32 BestDistance = MAX_int32;
+		for (const int32 Candidate : Candidates)
+		{
+			const int32 Distance = FMath::Abs(Candidate - Requested);
+			if (Plays(Candidate) && Distance <= BestDistance)
+			{
+				Best = Candidate;
+				BestDistance = Distance;
+			}
+		}
+		UE_LOG(LogO3DSenderComponent, Warning, TEXT("Audio sample rate %d Hz is not a rate receivers play%s; sending at %d Hz."),
+			Requested, bOpus ? TEXT(" with Opus") : TEXT(""), Best);
+		return Best;
+	}
+}
+
 FO3DSenderAudioCaptureConfig FO3DSenderAudioBinding::BuildCaptureConfig(const FO3DSenderAudioSettings& Settings)
 {
 	FO3DSenderAudioCaptureConfig ConfigCopy = Settings.CaptureConfig;
+	const bool bOpus = O3DAudio::SanitizeCodecString(Settings.Codec.IsNone() ? FString() : Settings.Codec.ToString()) == TEXT("opus");
+	ConfigCopy.SampleRate = O3DSenderAudioBindingPrivate::PlayableSampleRate(ConfigCopy.SampleRate, bOpus);
 	ConfigCopy.Source = (Settings.Mode == EO3DSenderCaptureMode::Mix)
 		? EO3DSenderAudioSource::GameSubmix
 		: EO3DSenderAudioSource::Microphone;

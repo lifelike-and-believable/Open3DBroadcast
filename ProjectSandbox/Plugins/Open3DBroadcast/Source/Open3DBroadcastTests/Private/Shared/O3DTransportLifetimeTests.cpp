@@ -362,6 +362,8 @@ bool FO3DTransportLifetimeSenderComponentTest::RunTest(const FString& Parameters
 
 	TestFalse(TEXT("The component released its sender"), WeakSender.IsValid());
 	TestEqual(TEXT("Nothing of the transport is live"), FO3DTransportRegistry::Get().GetNumLiveInstances(Name), 0);
+	// WP-R1 (SR-3): the capture stopped with it, so Is Capturing says so and Start Capture works again.
+	TestFalse(TEXT("The component no longer reports capturing"), Component->IsCapturing());
 
 	Component->StopCapture();
 	return true;

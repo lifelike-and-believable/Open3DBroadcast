@@ -122,4 +122,30 @@ bool FO3DSenderAudioBindingSinkTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// WP-R1 (mid-project review SR-2): receivers drop audio at a rate they do not accept, so the
+// sender sends at the nearest rate they do (and, with Opus, one Opus can encode), and says so.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderAudioBindingSampleRateTest, "Open3DBroadcast.Sender.AudioBinding.SendsOnlyRatesReceiversPlay", O3DB_TEST_FLAGS)
+bool FO3DSenderAudioBindingSampleRateTest::RunTest(const FString& Parameters)
+{
+	AddExpectedError(TEXT("not a rate receivers play"), EAutomationExpectedMessageFlags::Contains, 0);
+
+	FO3DSenderAudioBindingProbe Binding;
+	Binding.Mode = EO3DSenderCaptureMode::Mix;
+	Binding.Codec = FName(TEXT("PCM16"));
+
+	Binding.CaptureConfig.SampleRate = 44100;
+	TestEqual(TEXT("A supported rate is kept"), Binding.BuildTransportConfig().SampleRate, 44100);
+
+	Binding.CaptureConfig.SampleRate = 30000;
+	TestEqual(TEXT("An unsupported rate is captured at the nearest supported one"), Binding.BuildCaptureConfig().SampleRate, 32000);
+	TestEqual(TEXT("And sent at it"), Binding.BuildTransportConfig().SampleRate, 32000);
+
+	Binding.Codec = FName(TEXT("Opus"));
+	Binding.CaptureConfig.SampleRate = 44100;
+	TestEqual(TEXT("With Opus, the nearest rate Opus encodes"), Binding.BuildTransportConfig().SampleRate, 48000);
+	Binding.CaptureConfig.SampleRate = 22050;
+	TestEqual(TEXT("Below 24 kHz too"), Binding.BuildTransportConfig().SampleRate, 24000);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
