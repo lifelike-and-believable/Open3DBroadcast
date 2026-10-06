@@ -73,12 +73,21 @@ namespace SocketsSchema
 			LOCTEXT("PortTooltip", "TCP or UDP port. The audio stream uses the next port unless audio.port is set."), InDefault, 1, 65535);
 	}
 
-	static void AddUdpSizeFields(FO3DTransportOptionSchema& Schema)
+	/** The MTU is a sender setting: only the sender splits frames into fragments (TRB-21). */
+	static void AddUdpSizeFields(FO3DTransportOptionSchema& Schema, EO3DTransportRole Role)
 	{
-		Schema.Add(MakeInt(O3DSockets::MtuOptionKey, LOCTEXT("UdpMtuLabel", "MTU"),
-			LOCTEXT("UdpMtuTooltip", "Largest datagram payload sent before a frame is split into fragments."), 1200, 256, 65507));
-		Schema.Add(MakeInt(O3DSockets::MaxDatagramOptionKey, LOCTEXT("UdpMaxDatagramLabel", "Max Datagram Bytes"),
-			LOCTEXT("UdpMaxDatagramTooltip", "Largest datagram accepted. Keep it at least as large as the MTU."), 64000, 512, 65507));
+		if (Role == EO3DTransportRole::Sender)
+		{
+			Schema.Add(MakeInt(O3DSockets::MtuOptionKey, LOCTEXT("UdpMtuLabel", "MTU"),
+				LOCTEXT("UdpMtuTooltip", "Largest datagram payload sent before a frame is split into fragments."), 1200, 256, 65507));
+			Schema.Add(MakeInt(O3DSockets::MaxDatagramOptionKey, LOCTEXT("UdpMaxDatagramLabel", "Max Datagram Bytes"),
+				LOCTEXT("UdpMaxDatagramTooltip", "Largest datagram sent. Keep it at least as large as the MTU."), 64000, 512, 65507));
+		}
+		else
+		{
+			Schema.Add(MakeInt(O3DSockets::MaxDatagramOptionKey, LOCTEXT("UdpMaxDatagramLabel", "Max Datagram Bytes"),
+				LOCTEXT("UdpReceiverMaxDatagramTooltip", "Largest datagram accepted. Keep it at least as large as the sender's MTU."), 64000, 512, 65507));
+		}
 	}
 
 	static FO3DTransportOptionSchema MakeTcpSender()
@@ -98,7 +107,7 @@ namespace SocketsSchema
 		Schema.Add(MakePort(O3DSocketsConfig::DefaultUdpPort));
 		Schema.Add(MakeBool(O3DSockets::BroadcastOptionKey, LOCTEXT("UdpSenderBroadcastLabel", "Enable UDP Broadcast"),
 			LOCTEXT("UdpSenderBroadcastTooltip", "Allow sending to a broadcast address.")));
-		AddUdpSizeFields(Schema);
+		AddUdpSizeFields(Schema, EO3DTransportRole::Sender);
 		return Schema;
 	}
 
@@ -121,7 +130,7 @@ namespace SocketsSchema
 		Schema.Add(MakePort(O3DSocketsConfig::DefaultUdpPort));
 		Schema.Add(MakeBool(O3DSockets::BroadcastOptionKey, LOCTEXT("UdpReceiverBroadcastLabel", "Accept Broadcast Packets"),
 			LOCTEXT("UdpReceiverBroadcastTooltip", "Receive datagrams sent to a broadcast address.")));
-		AddUdpSizeFields(Schema);
+		AddUdpSizeFields(Schema, EO3DTransportRole::Receiver);
 		return Schema;
 	}
 }

@@ -307,6 +307,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Downgrade to Verbose, rate-limit, and remove the `[DIAG]`/`[ARCH]` scaffolding.
 - Effort: S
 - Owner: coding
+- Status: closed in #391
 
 ### TRF-31: Inconsistent UTF-8 handling for subject and track labels; label cache keyed only by CRC32
 - Category: bug
