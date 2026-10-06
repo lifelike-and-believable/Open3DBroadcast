@@ -23,6 +23,15 @@ name: Open3DBroadcast Fab package
 
 on:
   workflow_call:
+    inputs:
+      version:
+        description: 'Release version X.Y.Z, or empty (CI). When set, uplugin-artifact replaces the .uplugin files first.'
+        type: string
+        default: ''
+      uplugin-artifact:
+        description: 'Artifact holding the .uplugin files the release gate stamped with version (WP-R2, BC-5).'
+        type: string
+        default: ''
   workflow_dispatch:
 
 permissions:
@@ -36,6 +45,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download the version-stamped .uplugin files
+        if: inputs.version != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.uplugin-artifact }}
+          path: ProjectSandbox/Plugins
 
       - name: Build and check the Fab source zip
         run: |

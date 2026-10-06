@@ -1,5 +1,24 @@
-
 name: Open3DBroadcast Plugin Release
+
+# A release of Open3DBroadcast from a tag open3dbroadcast-vX.Y.Z (WP-R2; mid-project review BC-4,
+# BC-5; maintainer decision 2026-10-06). Details in Build/README.md, "Releases".
+#   1. Release gate (GitHub-hosted, a minute): Build/Scripts/release-version.py takes X.Y.Z from
+#      the tag and requires CHANGELOG.md's "## [X.Y.Z]" section, which names the protocol,
+#      transport API and core versions the release carries. It then stamps VersionName X.Y.Z and
+#      Version X*10000 + Y*100 + Z into both .uplugin files and uploads them for the next jobs.
+#   2. Fab source zip and UE build and tests: the workflows PR CI runs
+#      (open3dbroadcast-fab-package.yml, open3dbroadcast-ue-build-test.yml), on the stamped
+#      files: build with warnings as errors, the automation tests alone and with the WebRTC
+#      add-on (each at its floor), the strict build, and BuildPlugin on the Fab zip.
+#   3. Publish (GitHub-hosted, tag pushes only, after 1 and 2 passed): the GitHub release, with the
+#      package the tests ran against, as UE_<engine>/Plugins/Open3DBroadcast, and the CHANGELOG
+#      section as notes. The WebRTC add-on is attached only when the repository variable
+#      O3D_PUBLISH_WEBRTC_ADDON is 'true' (WP-F11, ADR 0002: it waits on counsel question L1).
+#      The Fab zip is kept as a 90-day run artifact, to upload to Fab by hand; it is not attached.
+#
+# Run by hand (Actions > Run workflow) for a dry run: every job but Publish, on the chosen
+# branch, with a missing CHANGELOG section reported as a warning. A dry run cannot create a tag
+# or a release.
 
 on:
   push:
@@ -7,262 +26,179 @@ on:
       - "open3dbroadcast-v*.*.*"
   workflow_dispatch:
     inputs:
-      version_tag:
-        description: 'Version tag (e.g., open3dbroadcast-v1.0.0)'
+      version:
+        description: 'Dry run: the version X.Y.Z to build and test as (nothing is published)'
         required: true
         type: string
 
 permissions:
-  contents: write
-  checks: write
+  contents: read
 
 concurrency:
   group: open3dbroadcast-plugin-release-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  UE_ROOT: 'C:\Program Files\Epic Games\UE_5.7'
-  PLUGIN_NAME: 'Open3DBroadcast'
-  PLUGIN_PATH: 'ProjectSandbox/Plugins/Open3DBroadcast'
-  ADDON_NAME: 'Open3DBroadcastWebRTC'
-  ADDON_PATH: 'ProjectSandbox/Plugins/Open3DBroadcastWebRTC'
-  # WP-F11 / ADR 0002: the WebRTC add-on is built for every release, but attached to the GitHub
-  # release only when the repository variable O3D_PUBLISH_WEBRTC_ADDON is 'true'. Publishing it
-  # before the codec-free livekit_ffi rebuild waits on counsel question L1; until then it is a
-  # workflow artifact only.
-  PUBLISH_WEBRTC_ADDON: ${{ vars.O3D_PUBLISH_WEBRTC_ADDON == 'true' && 'true' || 'false' }}
+  cancel-in-progress: false
 
 jobs:
-  build-release:
-    runs-on: [ self-hosted, ue5, windows ]
-
+  gate:
+    name: Release gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.check.outputs.version }}
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Version from the tag and the CHANGELOG section
+        id: check
+        env:
+          TAG: ${{ github.ref_name }}
+          DRY_RUN_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            python3 Build/Scripts/release-version.py check --tag "$TAG" \
+              --notes-out "$RUNNER_TEMP/notes.md" --github-output "$GITHUB_OUTPUT"
+          else
+            python3 Build/Scripts/release-version.py check --version "$DRY_RUN_VERSION" --allow-missing-section \
+              --notes-out "$RUNNER_TEMP/notes.md" --github-output "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stamp the version into both .uplugin files
+        run: |
+          python3 Build/Scripts/release-version.py stamp --version "${{ steps.check.outputs.version }}" \
+            ProjectSandbox/Plugins/Open3DBroadcast/Open3DBroadcast.uplugin \
+            ProjectSandbox/Plugins/Open3DBroadcastWebRTC/Open3DBroadcastWebRTC.uplugin
+
+      - name: Upload the stamped .uplugin files
+        uses: actions/upload-artifact@v4
         with:
-          fetch-depth: 0
-          lfs: true
-          submodules: 'recursive'
+          name: Open3DBroadcast-Release-Descriptors-${{ github.sha }}
+          path: |
+            ProjectSandbox/Plugins/Open3DBroadcast/Open3DBroadcast.uplugin
+            ProjectSandbox/Plugins/Open3DBroadcastWebRTC/Open3DBroadcastWebRTC.uplugin
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
+      - name: Upload the release notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: Open3DBroadcast-Release-Notes-${{ github.sha }}
+          path: ${{ runner.temp }}/notes.md
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: Setup UE
-        shell: pwsh
+  fab-package:
+    needs: gate
+    uses: ./.github/workflows/open3dbroadcast-fab-package.yml
+    with:
+      version: ${{ needs.gate.outputs.version }}
+      uplugin-artifact: Open3DBroadcast-Release-Descriptors-${{ github.sha }}
+
+  build-and-test:
+    name: UE build and tests
+    needs: [ gate, fab-package ]
+    # Runs when the Fab zip failed too, so one run reports both; Publish needs both to pass.
+    if: ${{ !cancelled() && needs.gate.result == 'success' }}
+    uses: ./.github/workflows/open3dbroadcast-ue-build-test.yml
+    with:
+      fab-package-result: ${{ needs.fab-package.result }}
+      version: ${{ needs.gate.outputs.version }}
+      uplugin-artifact: Open3DBroadcast-Release-Descriptors-${{ github.sha }}
+
+  publish:
+    name: Publish the GitHub release
+    needs: [ gate, fab-package, build-and-test ]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/open3dbroadcast-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.gate.outputs.version }}
+      PUBLISH_WEBRTC_ADDON: ${{ vars.O3D_PUBLISH_WEBRTC_ADDON == 'true' && 'true' || 'false' }}
+    steps:
+      - name: Download the tested plugin package
+        uses: actions/download-artifact@v4
+        with:
+          name: Open3DBroadcast-Win64-${{ github.sha }}
+          path: ${{ runner.temp }}/PluginPackage
+
+      - name: Download the WebRTC add-on
+        uses: actions/download-artifact@v4
+        with:
+          name: Open3DBroadcastWebRTC-Win64-${{ github.sha }}
+          path: ${{ runner.temp }}/AddOnPackage
+
+      - name: Download the Fab source zip
+        uses: actions/download-artifact@v4
+        with:
+          name: Open3DBroadcast-Fab-Source-${{ github.sha }}
+          path: ${{ runner.temp }}/FabZip
+
+      - name: Download the release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: Open3DBroadcast-Release-Notes-${{ github.sha }}
+          path: ${{ runner.temp }}/Notes
+
+      - name: Archives and notes
+        id: archives
         run: |
-          & .\Build\Scripts\Setup-UE.ps1 -UEPath "${{ env.UE_ROOT }}"
-
-      - name: Resolve plugin paths
-        id: paths
-        shell: powershell
-        run: |
-          $pluginDir = Join-Path $PWD "${{ env.PLUGIN_PATH }}"
-          $upluginPath = Join-Path $pluginDir "${{ env.PLUGIN_NAME }}.uplugin"
-          
-          if (!(Test-Path -LiteralPath $pluginDir)) {
-            throw "Plugin directory not found: $pluginDir"
-          }
-          if (!(Test-Path -LiteralPath $upluginPath)) {
-            throw "Plugin .uplugin file not found: $upluginPath"
-          }
-          
-          "plugin_dir=$pluginDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "uplugin_path=$upluginPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Plugin directory: $pluginDir"
-          Write-Host "Plugin file: $upluginPath"
-
-      - name: Determine version
-        id: version
-        shell: powershell
-        run: |
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $version = "${{ inputs.version_tag }}"
-          } else {
-            $version = "${{ github.ref_name }}"
-          }
-          $normalized = $version -replace '^open3dbroadcast-v', ''
-          "tag=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "number=$normalized" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Version tag: $version"
-          Write-Host "Version number: $normalized"
-
-      - name: Verify required libraries
-        shell: powershell
-        run: |
-          $pluginDir = "${{ steps.paths.outputs.plugin_dir }}"
-          
-          # The o3ds core is compiled from source (Open3DStreamCore, WP-F1), so
-          # its mirror must be present; Opus and NNG are prebuilt libraries.
-          $requiredLibs = @(
-            @{ Path = "Source/ThirdParty/Open3DStreamCore/SYNC_STAMP.txt"; Name = "o3ds core mirror" },
-            @{ Path = "Source/ThirdParty/opus/lib/Win64/opus.lib"; Name = "opus" },
-            @{ Path = "Source/Open3DTransportNNG/ThirdParty/nng/lib/Win64/nng.lib"; Name = "nng" }
-          )
-          
-          $missing = @()
-          foreach ($lib in $requiredLibs) {
-            $fullPath = Join-Path $pluginDir $lib.Path
-            if (-not (Test-Path $fullPath)) {
-              $missing += "$($lib.Name): $fullPath"
-            } else {
-              Write-Host "[OK] Found $($lib.Name): $fullPath"
-            }
-          }
-          
-          if ($missing.Count -gt 0) {
-            Write-Error "Missing required third-party libraries:"
-            $missing | ForEach-Object { Write-Error "  - $_" }
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          # The engine version comes from the package's own descriptor, and the package must carry
+          # the release's version: it is what the tests ran against.
+          read -r ue packaged < <(python3 -c 'import json,sys; d=json.load(open(sys.argv[1],encoding="utf-8-sig")); print(".".join(d["EngineVersion"].split(".")[:2]), d["VersionName"])' PluginPackage/Open3DBroadcast.uplugin)
+          if [ "$packaged" != "$VERSION" ]; then
+            echo "::error::The tested package has VersionName '$packaged', not '$VERSION'."
             exit 1
-          }
-          Write-Host "[OK] All required libraries present in plugin"
+          fi
+          plugin_zip="Open3DBroadcast-Plugin-$VERSION-Win64.zip"
+          addon_zip="Open3DBroadcastWebRTC-Plugin-$VERSION-Win64.zip"
+          mkdir -p "Stage/UE_$ue/Plugins" "AddOnStage/UE_$ue/Plugins"
+          cp -r PluginPackage "Stage/UE_$ue/Plugins/Open3DBroadcast"
+          cp -r AddOnPackage/Open3DBroadcastWebRTC "AddOnStage/UE_$ue/Plugins/Open3DBroadcastWebRTC"
+          (cd Stage && zip -qr "$RUNNER_TEMP/$plugin_zip" .)
+          (cd AddOnStage && zip -qr "$RUNNER_TEMP/$addon_zip" .)
+          {
+            cat Notes/notes.md
+            echo
+            echo "### Installation"
+            echo
+            echo "1. Download $plugin_zip."
+            echo "2. Copy its \`UE_$ue/Plugins/Open3DBroadcast\` folder into your project's \`Plugins\` folder."
+            echo "3. Restart Unreal Editor and enable **Open3DBroadcast**."
+            echo
+            echo "Unreal Engine $ue only, Windows (Win64) only. This is the GitHub build, not the Fab package."
+            if [ "$PUBLISH_WEBRTC_ADDON" = "true" ]; then
+              echo
+              echo "WebRTC (LiveKit) is the separate add-on $addon_zip. Copy its \`UE_$ue/Plugins/Open3DBroadcastWebRTC\` folder next to Open3DBroadcast."
+            fi
+          } > release_notes.md
+          echo "plugin_zip=$RUNNER_TEMP/$plugin_zip" >> "$GITHUB_OUTPUT"
+          echo "addon_zip=$RUNNER_TEMP/$addon_zip" >> "$GITHUB_OUTPUT"
 
-      - name: Update plugin descriptor version
-        shell: powershell
-        run: |
-          $versionNumber = "${{ steps.version.outputs.number }}"
-          # The WebRTC add-on carries the same version: it only works with the matching
-          # Open3DBroadcast release (ADR 0002).
-          $descriptors = @(
-            "${{ steps.paths.outputs.uplugin_path }}",
-            (Join-Path $PWD "${{ env.ADDON_PATH }}/${{ env.ADDON_NAME }}.uplugin")
-          )
-          foreach ($uplugin in $descriptors) {
-            $content = Get-Content -Path $uplugin -Raw | ConvertFrom-Json
-            $content.VersionName = $versionNumber
-            if ($content.Version) {
-              $content.Version = [int]$content.Version + 1
-            }
-            $content | ConvertTo-Json -Depth 10 | Set-Content -Path $uplugin -Encoding UTF8
-            Write-Host "Updated $uplugin to version $versionNumber"
-          }
+      - name: Keep the release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: Open3DBroadcast-Release-${{ needs.gate.outputs.version }}
+          path: |
+            ${{ steps.archives.outputs.plugin_zip }}
+            ${{ steps.archives.outputs.addon_zip }}
+            ${{ runner.temp }}/FabZip/*
+          if-no-files-found: error
+          retention-days: 90
 
-      - name: Build Open3DBroadcast plugin (Win64, Shipping)
-        shell: powershell
-        run: |
-          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
-          & .\Build\Scripts\Build-Plugin.ps1 `
-            -UEPath "$env:UE_ROOT" `
-            -PluginUPluginPath "${{ steps.paths.outputs.uplugin_path }}" `
-            -OutDir "$pkg" `
-            -TargetPlatforms @("Win64") `
-            -Configuration "Shipping"
-
-      - name: Restructure package for archive
-        id: restructure
-        shell: powershell
-        run: |
-          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
-          $restructured = Join-Path $env:RUNNER_TEMP 'PluginArchive'
-
-          # The engine version comes from UE_ROOT; there is no fallback, so the
-          # archive and notes cannot name a version the build did not use.
-          $ueVersionMatch = [regex]::Match($env:UE_ROOT, 'UE_(\d+\.\d+)')
-          if (-not $ueVersionMatch.Success) {
-            throw "Cannot read the engine version from UE_ROOT '$env:UE_ROOT'."
-          }
-          $ueVersion = $ueVersionMatch.Groups[1].Value
-
-          $targetPath = Join-Path $restructured "UE_$ueVersion/Plugins/Open3DBroadcast"
-          New-Item -ItemType Directory -Force -Path $targetPath | Out-Null
-          Copy-Item -Path "$pkg/*" -Destination $targetPath -Recurse -Force
-          "archive_root=$restructured" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "ue_version=$ueVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-      - name: Create archive
-        id: archive
-        shell: powershell
-        run: |
-          $restructured = "${{ steps.restructure.outputs.archive_root }}"
-          $archiveName = "Open3DBroadcast-Plugin-${{ steps.version.outputs.number }}-Win64.zip"
-          $archivePath = Join-Path $env:RUNNER_TEMP $archiveName
-          Compress-Archive -Path "$restructured/*" -DestinationPath $archivePath -CompressionLevel Optimal
-          "path=$archivePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "name=$archiveName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Created archive $archiveName"
-
-      # WP-F11: the WebRTC add-on, built against the package above (editor binaries plus source;
-      # a project that packages a game with it compiles the add-on's game module from source).
-      - name: Build WebRTC add-on (Win64)
-        shell: powershell
-        run: |
-          & .\Build\Scripts\Build-WebRTCAddOn.ps1 `
-            -UEPath "$env:UE_ROOT" `
-            -HostPluginPackageDir (Join-Path $env:RUNNER_TEMP 'PluginPackage') `
-            -HostProjectDir (Join-Path $env:RUNNER_TEMP 'AddOnHost') `
-            -OutDir (Join-Path $env:RUNNER_TEMP "AddOnArchive/UE_${{ steps.restructure.outputs.ue_version }}/Plugins/${{ env.ADDON_NAME }}")
-
-      - name: Create WebRTC add-on archive
-        id: addon_archive
-        shell: powershell
-        run: |
-          $root = Join-Path $env:RUNNER_TEMP 'AddOnArchive'
-          $archiveName = "${{ env.ADDON_NAME }}-Plugin-${{ steps.version.outputs.number }}-Win64.zip"
-          $archivePath = Join-Path $env:RUNNER_TEMP $archiveName
-          Compress-Archive -Path "$root/*" -DestinationPath $archivePath -CompressionLevel Optimal
-          "path=$archivePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "name=$archiveName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Created archive $archiveName (attached to the release: $env:PUBLISH_WEBRTC_ADDON)"
-
-      - name: Generate release notes
-        id: notes
-        shell: powershell
-        run: |
-          $notes = @"
-          ## Open3DBroadcast ${{ steps.version.outputs.tag }}
-
-          ### Installation
-
-          1. Download the attached archive.
-          2. Extract the `UE_${{ steps.restructure.outputs.ue_version }}/Plugins/Open3DBroadcast` folder.
-          3. Copy the folder into your project's `Plugins` directory.
-          4. Restart Unreal Editor and enable **Open3DBroadcast**.
-
-          ### Compatibility
-
-          - **Unreal Engine**: ${{ steps.restructure.outputs.ue_version }} only. The binaries are built for this engine version and do not load in other versions.
-          - **Platform**: Windows (Win64) only.
-
-          ### Contents
-
-          - Open3DBroadcast plugin modules (Sender, Receiver, Shared, Transport implementations), compiled for Win64
-          - Required Open3DStream core libraries and third-party dependencies
-
-          This is the GitHub build. It is not the Fab package.
-
-          ### WebRTC (LiveKit) transport
-
-          WebRTC is a separate, free add-on plugin, Open3DBroadcastWebRTC, built for this release
-          only. When it is attached to this release, extract its
-          `UE_${{ steps.restructure.outputs.ue_version }}/Plugins/Open3DBroadcastWebRTC` folder into the
-          same project's `Plugins` directory, next to Open3DBroadcast.
-          "@
-          $notes | Out-File -FilePath "$env:RUNNER_TEMP\release_notes.md" -Encoding UTF8
-
-      - name: Create GitHub release
+      - name: Create the GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: Open3DBroadcast ${{ steps.version.outputs.number }}
+          tag_name: ${{ github.ref_name }}
+          name: Open3DBroadcast ${{ needs.gate.outputs.version }}
           body_path: ${{ runner.temp }}/release_notes.md
           files: |
-            ${{ steps.archive.outputs.path }}
-            ${{ env.PUBLISH_WEBRTC_ADDON == 'true' && steps.addon_archive.outputs.path || '' }}
+            ${{ steps.archives.outputs.plugin_zip }}
+            ${{ env.PUBLISH_WEBRTC_ADDON == 'true' && steps.archives.outputs.addon_zip || '' }}
           draft: false
           prerelease: false
-          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload plugin artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Open3DBroadcast-Release-${{ steps.version.outputs.number }}
-          path: ${{ runner.temp }}/PluginPackage
-          retention-days: 90
-
-      - name: Upload WebRTC add-on artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Open3DBroadcastWebRTC-Release-${{ steps.version.outputs.number }}
-          path: ${{ steps.addon_archive.outputs.path }}
-          retention-days: 90
