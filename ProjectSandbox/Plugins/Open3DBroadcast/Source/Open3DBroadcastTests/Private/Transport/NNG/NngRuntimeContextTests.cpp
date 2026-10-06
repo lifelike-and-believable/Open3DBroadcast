@@ -2,9 +2,12 @@
 
 // ADR 0012 item 3 (SHR-38): a transport records its metrics into the runtime context its config
 // names, and into the default context only when the config names none. NNG on 127.0.0.1 with a
-// real socket and an ephemeral port; the sender's worker is paused, so every accepted frame
-// stays queued and the counts are exact. MoQ and WebRTC follow the same pattern; the CI check
-// Build/Scripts/check-transport-metrics.py keeps every transport off FO3DPerformanceMetrics::Get().
+// real socket and an ephemeral port and no peer. Since WP-R3 a transport records what reaches the
+// wire (BytesSent) and what it drops after accepting (TransportFramesDropped); the sender pipeline
+// records frames captured. Without a peer NNG's pair socket buffers a message or refuses it, so
+// each frame is counted as one or the other, and the queue is drained before Stop to make the
+// counts exact. MoQ and WebRTC follow the same pattern; the CI
+// check Build/Scripts/check-transport-metrics.py keeps every transport off FO3DPerformanceMetrics::Get().
 
 #include "O3DTestHarness.h"
 
@@ -33,13 +36,20 @@ namespace O3DNngRuntimeContextTests
 		return Config;
 	}
 
+	/** Frames the transport accounted for in Counters: sent (by bytes, FrameBytes each) or dropped after acceptance. */
+	template <typename TCounters>
+	uint64 FramesAccountedFor(const TCounters& Counters)
+	{
+		return Counters.BytesSent.load() / FrameBytes + Counters.TransportFramesDropped.load();
+	}
+
 	uint64 TransportFramesSent(FO3DRuntimeContext& Context)
 	{
 		const TSharedPtr<FO3DTransportMetrics, ESPMode::ThreadSafe> Metrics = Context.GetMetrics().FindTransportMetrics(TEXT("NNG"));
 		return Metrics.IsValid() ? Metrics->FramesSent.load() : 0;
 	}
 
-	/** Starts a listening sender with Config, sends NumFrames frames with its worker paused, and stops it. */
+	/** Starts a listening sender with Config, sends NumFrames frames, waits until the worker took them all, and stops it. */
 	bool SendFrames(FAutomationTestBase& Test, const FO3DTransportConfig& Config)
 	{
 		const TSharedRef<IOpen3DSender> Sender = O3DNngTesting::CreateSender();
@@ -58,8 +68,9 @@ namespace O3DNngRuntimeContextTests
 			Queued += Sender->SendSerialized(FO3DSendPayload::MakeCopy(Frame.GetData(), Frame.Num(), TEXT("Ctx"), 0.0)) == EO3DSendResult::Queued ? 1 : 0;
 		}
 		O3DNngTesting::SenderSetWorkerPaused(*Sender, false);
+		const bool bDrained = O3DTests::PollUntil(5.0, [&Sender]() { const FO3DTransportStats Stats = Sender->GetStats(); return Stats.PendingFrames == 0 && Stats.FramesSent + Stats.DroppedFrames >= NumFrames; });
 		Sender->Stop();
-		return Test.TestEqual(TEXT("Every frame queued"), Queued, NumFrames);
+		return Test.TestEqual(TEXT("Every frame queued"), Queued, NumFrames) && Test.TestTrue(TEXT("The worker took every frame"), bDrained);
 	}
 }
 
@@ -78,9 +89,7 @@ bool FO3DNngRuntimeContextTest::RunTest(const FString& Parameters)
 			return false;
 		}
 		const FO3DRuntimeContextRef Context = MakeShared<FO3DRuntimeContext, ESPMode::ThreadSafe>(TEXT("O3DTest.Nng"));
-		const uint64 DefaultCapturedBefore = DefaultSender.FramesCaptured.load();
-		const uint64 DefaultBytesSentBefore = DefaultSender.BytesSent.load();
-		const uint64 DefaultTransportBefore = TransportFramesSent(Default);
+		const uint64 DefaultAccountedBefore = FramesAccountedFor(DefaultSender);
 
 		if (!SendFrames(*this, MakeConfig(Port, Context)))
 		{
@@ -88,14 +97,11 @@ bool FO3DNngRuntimeContextTest::RunTest(const FString& Parameters)
 		}
 
 		const FO3DPerformanceMetrics::FSenderMetrics& Sender = Context->GetMetrics().GetSenderMetrics();
-		TestEqual(TEXT("Context: frames captured"), Sender.FramesCaptured.load(), static_cast<uint64>(NumFrames));
-		TestEqual(TEXT("Context: bytes serialized"), Sender.BytesSerialized.load(), static_cast<uint64>(NumFrames * FrameBytes));
-		TestEqual(TEXT("Context: bytes sent"), Sender.BytesSent.load(), static_cast<uint64>(NumFrames * FrameBytes));
-		TestEqual(TEXT("Context: NNG transport frames"), TransportFramesSent(*Context), static_cast<uint64>(NumFrames));
+		TestEqual(TEXT("Context: every frame sent or dropped after acceptance"), FramesAccountedFor(Sender), static_cast<uint64>(NumFrames));
+		TestEqual(TEXT("Context: the transport records no captured frames (the pipeline does)"), Sender.FramesCaptured.load(), static_cast<uint64>(0));
+		TestEqual(TEXT("Context: NNG transport frames match the bytes sent"), TransportFramesSent(*Context), Sender.BytesSent.load() / FrameBytes);
 
-		TestEqual(TEXT("Default: frames captured unchanged"), DefaultSender.FramesCaptured.load(), DefaultCapturedBefore);
-		TestEqual(TEXT("Default: bytes sent unchanged"), DefaultSender.BytesSent.load(), DefaultBytesSentBefore);
-		TestEqual(TEXT("Default: NNG transport frames unchanged"), TransportFramesSent(Default), DefaultTransportBefore);
+		TestEqual(TEXT("Default: unchanged"), FramesAccountedFor(DefaultSender), DefaultAccountedBefore);
 	}
 
 	// No context in the config: the default context, as before ADR 0012.
@@ -105,16 +111,14 @@ bool FO3DNngRuntimeContextTest::RunTest(const FString& Parameters)
 		{
 			return false;
 		}
-		const uint64 DefaultCapturedBefore = DefaultSender.FramesCaptured.load();
-		const uint64 DefaultTransportBefore = TransportFramesSent(Default);
+		const uint64 DefaultAccountedBefore = FramesAccountedFor(DefaultSender);
 
 		if (!SendFrames(*this, MakeConfig(Port, nullptr)))
 		{
 			return false;
 		}
 
-		TestEqual(TEXT("Default: frames captured"), DefaultSender.FramesCaptured.load() - DefaultCapturedBefore, static_cast<uint64>(NumFrames));
-		TestEqual(TEXT("Default: NNG transport frames"), TransportFramesSent(Default) - DefaultTransportBefore, static_cast<uint64>(NumFrames));
+		TestEqual(TEXT("Default: every frame sent or dropped after acceptance"), FramesAccountedFor(DefaultSender) - DefaultAccountedBefore, static_cast<uint64>(NumFrames));
 	}
 	return true;
 }
@@ -147,9 +151,8 @@ bool FO3DNngSenderMetricsHandleTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
-	TestEqual(TEXT("The provided handle counts the frames"), Handle->GetCounters().FramesCaptured.load(), static_cast<uint64>(NumFrames));
-	TestEqual(TEXT("And the bytes sent"), Handle->GetCounters().BytesSent.load(), static_cast<uint64>(NumFrames * FrameBytes));
-	TestEqual(TEXT("The context's aggregate equals the handle"), Context->GetMetrics().GetSenderMetrics().FramesCaptured.load(), static_cast<uint64>(NumFrames));
+	TestEqual(TEXT("The provided handle accounts for every frame (sent or dropped after acceptance)"), FramesAccountedFor(Handle->GetCounters()), static_cast<uint64>(NumFrames));
+	TestEqual(TEXT("The context's aggregate equals the handle"), FramesAccountedFor(Context->GetMetrics().GetSenderMetrics()), static_cast<uint64>(NumFrames));
 	TestEqual(TEXT("The transport made no handle of its own"), Context->GetMetrics().GetSenderHandles().Num(), 1);
 	return true;
 }

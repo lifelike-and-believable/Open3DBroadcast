@@ -1,6 +1,7 @@
 // Copyright 2026 Lifelike & Believable. All Rights Reserved.
 
 #include "LoopbackSender.h"
+#include "O3DPerformanceMetrics.h"
 
 #include "HAL/PlatformTime.h"
 #include "Logging/LogMacros.h"
@@ -37,6 +38,7 @@ FO3DTransportResult FO3DLoopbackSender::Initialize(const FO3DTransportConfig& Co
 	PublishState->Open();
 	bInitialized = true;
 
+	SenderMetrics = Config.SenderMetrics;
 	FramesSent.store(0);
 	BytesSent.store(0);
 	DroppedFrames.store(0);
@@ -87,6 +89,10 @@ EO3DSendResult FO3DLoopbackSender::EnqueueFrame(TArray<uint8>&& Bytes, FString S
 		PublishState->GetSubjectSlot().Set(Subject);
 		FramesSent.fetch_add(1);
 		BytesSent.fetch_add(Len);
+		if (SenderMetrics.IsValid())
+		{
+			SenderMetrics->RecordBytesSent(static_cast<uint64>(Len)); // WP-R3
+		}
 	}
 	else if (Result == EO3DSendResult::DroppedBackpressure)
 	{

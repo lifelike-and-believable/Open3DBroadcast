@@ -439,7 +439,9 @@ struct FO3DTransportConfig
 
     /**
      * The sender's metrics handle (ADR 0012 item 4), acquired from Context's metrics by the sender
-     * component; a sender transport records its sender metrics through it. Empty: the transport
+     * component. The sender pipeline records frames captured, bytes serialized and frames the
+     * transport refused (FramesDropped); the transport records bytes sent and accepted frames it
+     * dropped later (TransportFramesDropped), on every transport (WP-R3). Empty: the transport
      * acquires its own. A handle from another context's metrics is InvalidConfig. Senders only.
      */
     TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe> SenderMetrics;
@@ -499,6 +501,11 @@ struct FO3DTransportConfig
 /** Lightweight stats aggregated by transports for diagnostics. */
 struct FO3DTransportStats
 {
+    /**
+     * Frames the transport put on the wire (or, for Loopback, into the receiver's channel): counted
+     * once sent, not when queued, so a frame dropped after it was accepted is never counted as sent
+     * and dropped both (WP-R3). BytesSent counts the bytes of those frames and of sent audio.
+     */
     int64 FramesSent = 0;
     int64 FramesReceived = 0;
     int64 BytesSent = 0;

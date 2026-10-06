@@ -375,7 +375,7 @@ namespace O3DTests
 			FO3DConformanceProfile Profile;
 			Profile.MakeFixture = []() -> TUniquePtr<FO3DConformanceFixture> { return MakeUnique<FFakeFixture>(MakeUnique<FO3DFakeTransportScope>()); };
 			Profile.Cases = SenderAndReceiverCases | EO3DConformanceCase::SendBackpressure | EO3DConformanceCase::RoundTripByteExact | ControlCases
-				| EO3DConformanceCase::ConnectionStateConnected;
+				| EO3DConformanceCase::ConnectionStateConnected | EO3DConformanceCase::MetricsCountWhatWasSent;
 			Profile.BackpressurePayloadBytes = 64;
 			Profile.BackpressureSendCount = 3;
 			Profile.ExpectedCapabilities = GetFakeTransportCapabilities();
@@ -387,7 +387,7 @@ namespace O3DTests
 			FO3DConformanceProfile Profile;
 			Profile.MakeFixture = []() -> TUniquePtr<FO3DConformanceFixture> { return MakeUnique<FLoopbackFixture>(); };
 			Profile.Cases = SenderAndReceiverCases | EO3DConformanceCase::SendBackpressure | EO3DConformanceCase::RoundTripByteExact | ControlCases
-				| EO3DConformanceCase::ConnectionStateConnected;
+				| EO3DConformanceCase::ConnectionStateConnected | EO3DConformanceCase::MetricsCountWhatWasSent;
 			Profile.BackpressurePayloadBytes = 64;
 			Profile.BackpressureSendCount = 3;
 			Profile.ExpectedCapabilities = MakeBaseCapabilities(EO3DDeliveryGuarantee::ReliableOrdered);
@@ -399,7 +399,7 @@ namespace O3DTests
 			FO3DConformanceProfile Profile;
 			Profile.MakeFixture = []() -> TUniquePtr<FO3DConformanceFixture> { return MakeUnique<FTcpFixture>(); };
 			Profile.Cases = SenderAndReceiverCases | EO3DConformanceCase::SendBackpressure | EO3DConformanceCase::RoundTripByteExact | ControlCases
-				| EO3DConformanceCase::ConnectionStateConnected;
+				| EO3DConformanceCase::ConnectionStateConnected | EO3DConformanceCase::MetricsCountWhatWasSent;
 			Profile.BackpressurePayloadBytes = 128 * 1024;
 			Profile.ExpectedCapabilities = MakeBaseCapabilities(EO3DDeliveryGuarantee::ReliableOrdered);
 			Profile.ExpectedCapabilities.bBidirectional = true;
@@ -425,7 +425,7 @@ namespace O3DTests
 			Profile.MakeFixture = []() -> TUniquePtr<FO3DConformanceFixture> { return MakeUnique<FNngFixture>(); };
 			Profile.Cases = SenderAndReceiverCases
 				| EO3DConformanceCase::SendBackpressure | EO3DConformanceCase::RoundTripByteExact | ControlCases
-				| EO3DConformanceCase::ConnectionStateConnected;
+				| EO3DConformanceCase::ConnectionStateConnected | EO3DConformanceCase::MetricsCountWhatWasSent;
 			Profile.BackpressurePayloadBytes = 128 * 1024;
 			// The fixture uses pub/sub, which ADR 0005 (iii) rates Unreliable (pair and push/pull are
 			// ReliableOrdered; Open3DBroadcast.Shared.TransportCapabilities covers those).
@@ -441,7 +441,8 @@ namespace O3DTests
 			FO3DConformanceProfile Profile;
 			Profile.MakeFixture = []() -> TUniquePtr<FO3DConformanceFixture> { return MakeUnique<FMoQFixture>(); };
 			Profile.Cases = SenderAndReceiverCases | EO3DConformanceCase::SendBackpressure | EO3DConformanceCase::RoundTripByteExact
-				| EO3DConformanceCase::LifetimeDestroyWithCallbacksInFlight | ControlCases | EO3DConformanceCase::ConnectionStateConnected;
+				| EO3DConformanceCase::LifetimeDestroyWithCallbacksInFlight | ControlCases | EO3DConformanceCase::ConnectionStateConnected
+				| EO3DConformanceCase::MetricsCountWhatWasSent;
 			Profile.BackpressurePayloadBytes = 300 * 1024;
 			// Unreliable in both delivery modes until ADR 0005 Q5 is answered.
 			Profile.ExpectedCapabilities = MakeBaseCapabilities(EO3DDeliveryGuarantee::Unreliable);

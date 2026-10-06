@@ -432,7 +432,6 @@ void FO3DWebRTCSender::Stop()
 
 void FO3DWebRTCSender::RecordDroppedFrame()
 {
-    SenderMetrics->RecordFrameDropped();
     FScopeLock Lock(&StatsMutex);
     Stats.DroppedFrames++;
 }
@@ -452,9 +451,6 @@ EO3DSendResult FO3DWebRTCSender::SendSerialized(FO3DSendPayload&& Payload)
     {
         return EO3DSendResult::Invalid;
     }
-
-    SenderMetrics->RecordFrameCaptured();
-    SenderMetrics->RecordBytesSerialized(Len);
 
     // Handed to LiveKit on the caller's thread (TRF-5). LiveKit buffers the message in the data
     // channel and refuses it when it cannot take it, and that refusal is the backpressure the
@@ -518,7 +514,6 @@ EO3DSendResult FO3DWebRTCSender::SendBytes(const uint8* Data, int32 Len, const F
     {
         UE_LOG(LogO3DWebRTCSender, Verbose, TEXT("Failed to send subject '%s' (code=%d): %s"),
             *SubjectLabel, Result.code, *Ffi.TakeMessage(Result));
-        SenderMetrics->RecordTransportFrameDropped();
         {
             FScopeLock Lock(&StatsMutex);
             Stats.SendErrors++;
