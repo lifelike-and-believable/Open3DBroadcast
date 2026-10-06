@@ -11,7 +11,6 @@ THIRD_PARTY_INCLUDES_START
 #include "o3ds/model.h"
 THIRD_PARTY_INCLUDES_END
 
-#include <vector>
 
 FO3DLoopbackSender::~FO3DLoopbackSender()
 {
@@ -31,7 +30,7 @@ FO3DTransportResult FO3DLoopbackSender::Initialize(const FO3DTransportConfig& Co
 
 	ChannelKey = O3DLoopback::ResolveChannelKey(Config);
 	const FO3DSendQueueLimits Limits = O3DLoopback::ResolveQueueLimits(Config);
-	const TSharedRef<FO3DSendQueue, ESPMode::ThreadSafe> Queue = O3DLoopback::AcquireChannel(ChannelKey, Limits);
+	const TSharedRef<FO3DSendQueue, ESPMode::ThreadSafe> Queue = O3DLoopback::AcquireChannel(ChannelKey, &Limits);
 	Channel = Queue;
 	PublishState = MakeShared<FO3DAudioPublishState, ESPMode::ThreadSafe>(Queue, EO3DAudioWireFormat::UnifiedEnvelope);
 	// Open now, so a sink created between Initialize and Start is bound to this session.
@@ -97,7 +96,12 @@ EO3DSendResult FO3DLoopbackSender::EnqueueFrame(TArray<uint8>&& Bytes, FString S
 	else if (Result == EO3DSendResult::DroppedBackpressure)
 	{
 		DroppedFrames.fetch_add(1);
-		UE_LOG(LogO3DLoopbackTransport, Verbose, TEXT("Loopback queue full for '%s'; dropping frame."), *ChannelKey);
+		// WP-U6 (TRB-32): a full channel usually means nothing reads it, so users should see it.
+		int64 Suppressed = 0;
+		if (QueueFullLog.ShouldLog(Suppressed))
+		{
+			UE_LOG(LogO3DLoopbackTransport, Warning, TEXT("Loopback queue full for '%s': no receiver is reading it fast enough, so frames are dropped (%lld more since the last warning)."), *ChannelKey, Suppressed);
+		}
 	}
 	return Result;
 }

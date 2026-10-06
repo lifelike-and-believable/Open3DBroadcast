@@ -128,6 +128,15 @@ namespace O3DConformanceProfiles
 		/** One queued frame fills the channel: nobody polls it, so the next sends are dropped. */
 		virtual FO3DTransportConfig MakeBackpressureSenderConfig() override { return MakeConfig(true, 1); }
 
+		virtual void AddExpectedMessages(FAutomationTestBase& Test, EO3DConformanceCase Case) override
+		{
+			if (Case == EO3DConformanceCase::SendBackpressure)
+			{
+				// WP-U6 (TRB-32): a full channel is a warning, at most once per 2 s per sender.
+				Test.AddExpectedError(TEXT("Loopback queue full"), EAutomationExpectedMessageFlags::Contains, 1);
+			}
+		}
+
 	private:
 		FO3DTransportConfig MakeConfig(bool bSender, int32 QueueCapacity) const
 		{
@@ -137,7 +146,11 @@ namespace O3DConformanceProfiles
 			Config.StreamId = Channel;
 			Config.Uri = FString::Printf(TEXT("loopback://%s?role=%s"), *Channel, bSender ? TEXT("pub") : TEXT("sub"));
 			Config.AdvancedParams.Add(TEXT("channel"), Channel);
-			Config.AdvancedParams.Add(TEXT("loopback.maxqueue"), FString::FromInt(QueueCapacity));
+			if (bSender)
+			{
+				// Only a sender sets the channel's limits (WP-U6, TRB-31).
+				Config.AdvancedParams.Add(TEXT("loopback.maxqueue"), FString::FromInt(QueueCapacity));
+			}
 			return Config;
 		}
 
