@@ -62,7 +62,13 @@ public:
     TMap<FName, FO3DTransportOptionSet> InactiveTransportOptions;
 };
 
-/** Global config object that exposes default receiver settings via the Project Settings UI. */
+/**
+ * The settings of one new receiver source while the LiveLink Create Source panel edits them.
+ * Not a defaults object: project-wide defaults are in Project Settings > Plugins > Open3DBroadcast
+ * (UOpen3DBroadcastSettings), and nothing saves this class any more (RCV-18). It stays
+ * Config = GameUserSettings only so CreateSource can move secrets an older version saved to that
+ * file into the secret store and rewrite the file without them (ADR 0004 item 4).
+ */
 UCLASS(Config = GameUserSettings)
 class OPEN3DRECEIVER_API UO3DReceiverSettingsObject : public UObject
 {

@@ -211,7 +211,7 @@ UO3DSenderComponent* Sender = CreateDefaultSubobject<UO3DSenderComponent>(TEXT("
 
 The **Transport** group of the Details panel (and the LiveLink **Add Source** panel on the receiver side) shows one row per option the selected transport declares. How the rows behave:
 
-- An empty row uses the transport's default, which the row shows as grey hint text. Opening the panel never writes a default into the component or the source settings, so selecting an actor does not mark the level as changed.
+- An empty row uses the project default for that option if one is set (see [Project-wide transport defaults](#project-wide-transport-defaults)), otherwise the transport's default; the row shows that value as grey hint text. Opening the panel never writes a default into the component or the source settings, so selecting an actor does not mark the level as changed.
 - A value is written when you commit it: Enter, moving focus away, or releasing a number box after dragging. Dragging a number does not write on every step.
 - Each committed value is one undo step (**Ctrl+Z**). Changing the transport is one undo step too; the options of the previous transport are cleared with it, and undo brings them back.
 - Credential rows (for example the WebRTC access token) open empty, show where the current value comes from, and never store the value in the level, the Blueprint or a LiveLink preset. They are not undo steps.
@@ -220,6 +220,15 @@ The **Transport** group of the Details panel (and the LiveLink **Add Source** pa
 The panels are part of the `Open3DBroadcastEditor` module, which loads only in the editor.
 
 Switching a sender's or a LiveLink source's transport keeps the options you set for the previous one: switching back brings them back (TCP's `port` and UDP's `port` are kept apart). Credentials are never kept this way; they stay in the credential store. A LiveLink preset saves only the options of the transport its source uses.
+
+#### Project-wide transport defaults
+
+**Project Settings > Plugins > Open3DBroadcast** holds default transport options for the whole project, so a server URL, a relay URL, a port or the WebRTC token endpoint is set once instead of in every sender component and LiveLink source. They are saved in the project's `Config/DefaultGame.ini` and ship with packaged builds.
+
+- **Sender Defaults** apply to sender components and **Receiver Defaults** to LiveLink receiver sources. Each is a list of transports (the registered name, for example `udp`, `nng` or `webrtc`) with the options to default, using the same keys as the **Transport Options Reference** below (for example `port`, `host`, `webrtc.url` or `webrtc.tokenEndpointUrl`).
+- A component's or source's own value wins. An option it leaves empty takes the project default, and an option with neither takes the transport's built-in default.
+- Credentials (for example `webrtc.token` or `webrtc.tokenEndpointAuth`) are never taken from here: `DefaultGame.ini` is committed and shipped, so such an entry is ignored with a warning in the log. Use the credential store or the credential's environment variable.
+- A new LiveLink source starts with no options of its own, so the project defaults apply to it. Creating a source no longer changes the defaults for the next one.
 
 Configure transports using **Transport Options** (key-value pairs):
 

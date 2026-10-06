@@ -36,6 +36,7 @@
 #include "O3DControlBus.h"
 #include "O3DControlConvert.h"
 #include "O3DControlSettings.h"
+#include "Open3DBroadcastSettings.h"
 
 THIRD_PARTY_INCLUDES_START
 #include "o3ds_generated.h"
@@ -253,8 +254,9 @@ namespace
     static const FName DefaultReceiverTransportName(TEXT("loopback"));
 }
 
+// A new source starts with no options of its own, so the project's defaults apply (RCV-18, WP-U1).
 FO3DReceiverSource::FO3DReceiverSource()
-    : FO3DReceiverSource(GetDefault<UO3DReceiverSettingsObject>()->Settings)
+    : FO3DReceiverSource(FO3DReceiverSourceConfig())
 {
 }
 
@@ -581,8 +583,12 @@ FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
     TArray<FString> SecretKeys;
     TMap<FString, FString> SecretEnvVars;
     FO3DTransportRegistry::Get().GetSecretDeclaration(TransportName, EO3DTransportRole::Receiver, SecretKeys, SecretEnvVars);
+    // Options this source leaves empty take the project's defaults (WP-U1), before secrets are
+    // resolved, so a project-wide credential profile applies too.
+    FO3DReceiverSourceConfig EffectiveSettings = SourceSettings;
+    UOpen3DBroadcastSettings::ApplyTransportDefaults(TransportName, EO3DTransportRole::Receiver, EffectiveSettings.TransportOptions);
     TMap<FString, FString> Options;
-    for (const TPair<FString, FString>& Option : SourceSettings.TransportOptions)
+    for (const TPair<FString, FString>& Option : EffectiveSettings.TransportOptions)
     {
         if (!SecretKeys.Contains(Option.Key))
         {
@@ -590,7 +596,7 @@ FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
         }
     }
     Config.AdvancedParams = Options;
-    O3DReceiver::ResolveSecrets(SourceSettings, Config.Secrets);
+    O3DReceiver::ResolveSecrets(EffectiveSettings, Config.Secrets);
 
     // The descriptor is a shared, immutable snapshot, so the function stays valid while it runs
     // even if the transport unregisters meanwhile (RCV-27).

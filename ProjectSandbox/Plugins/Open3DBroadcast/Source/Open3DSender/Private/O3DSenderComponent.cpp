@@ -14,6 +14,7 @@
 #include "O3DSenderAudioBinding.h"
 #include "O3DSenderTransportSettings.h"
 #include "O3DSenderTransportController.h"
+#include "Open3DBroadcastSettings.h"
 #include "Transport/O3DTransportRegistry.h"
 #include "Engine/Engine.h"
 #include "Engine/SkeletalMesh.h"
@@ -521,16 +522,21 @@ FO3DTransportConfig UO3DSenderComponent::BuildTransportConfigImpl(bool bResolveS
 	// (WP-A1 PR 5a).
 	Config.SubjectName = SubjectName;
 
+	// Options this component leaves empty take the project's defaults (WP-U1), before secrets are
+	// resolved, so a project-wide credential profile applies too.
+	TMap<FString, FString> EffectiveOptions = TransportOptions;
+	UOpen3DBroadcastSettings::ApplyTransportDefaults(SelectedTransport, EO3DTransportRole::Sender, EffectiveOptions);
+
 	// Declared secret keys are never copied into the options; they are resolved from the secret
 	// store into Config.Secrets (ADR 0004).
 	TMap<FString, FString> Options;
 	if (bResolveSecrets)
 	{
-		FO3DSenderTransportSettings::BuildConfigOptions(TransportOptions, SelectedTransport, Options, Config.Secrets);
+		FO3DSenderTransportSettings::BuildConfigOptions(EffectiveOptions, SelectedTransport, Options, Config.Secrets);
 	}
 	else
 	{
-		FO3DSenderTransportSettings::BuildPublicOptions(TransportOptions, SelectedTransport, Options);
+		FO3DSenderTransportSettings::BuildPublicOptions(EffectiveOptions, SelectedTransport, Options);
 	}
 	Config.AdvancedParams = Options;
 
