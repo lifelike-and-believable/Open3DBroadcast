@@ -189,6 +189,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Either register it as a real Developer Settings entry (`UDeveloperSettings`, `Config=EditorPerProjectUserSettings`) or remember the last-used values explicitly (a "Remember as default" checkbox). Fix the comment.
 - Effort: S
 - Owner: design
+- Status: closed in #385
 
 ### RCV-19: Audio frames make two copies and a game-thread hop per packet, so playback depends on game frame rate
 - Category: performance

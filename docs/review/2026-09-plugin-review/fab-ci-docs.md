@@ -455,6 +455,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Add a `UOpen3DBroadcastSettings : UDeveloperSettings` (Project Settings → Plugins → Open3D Broadcast) with per-transport defaults and a token-endpoint URL. Add Blueprint setters (`SetTransport(Name, Options)`). Mark token fields `PasswordField` / `Transient`, or resolve them from settings or environment variables so they aren't saved into levels.
 - Effort: M
 - Owner: design
+- Status: closed in #385
 
 ### UX-3: The Blueprint API is minimal; the receiver has no runtime Blueprint control
 - Category: usability
