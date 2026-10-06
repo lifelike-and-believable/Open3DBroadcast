@@ -3,6 +3,7 @@
 #if O3D_WITH_TRANSPORT_WEBRTC // Whole file: without the transport the module is a stub (O3DWebRtcBuildFlags).
 
 #include "WebRTCReceiver.h"
+#include "O3DLogThrottle.h"
 #include "O3DRedact.h"
 #include "../Shared/WebRTCUtils.h"
 #include "HAL/PlatformTime.h"
@@ -11,6 +12,13 @@
 #include "Containers/StringConv.h"
 #include "O3DFfiContextRegistry.h"
 #include "O3DUnifiedMessage.h"
+
+namespace
+{
+	// WP-R3 (TR-6): one throttle per hot-path log site (the peer or the frame rate decides how often these fire).
+	FO3DLogThrottle WebRTCOversizePayloadLog;
+}
+
 
 namespace
 {
@@ -72,9 +80,13 @@ namespace
         // cast used for TArray allocation (or are simply unreasonably large).
         if (Len > MaxIncomingDataPayloadBytes || Len > static_cast<size_t>(TNumericLimits<int32>::Max()))
         {
-            UE_LOG(LogO3DWebRTCReceiver, Error,
-                TEXT("Rejecting oversized WebRTC data payload len=%zu (max=%zu)"),
-                Len, MaxIncomingDataPayloadBytes);
+            int64 Suppressed = 0;
+            if (WebRTCOversizePayloadLog.ShouldLog(Suppressed))
+            {
+                UE_LOG(LogO3DWebRTCReceiver, Error,
+                    TEXT("Rejecting oversized WebRTC data payload len=%zu (max=%zu); %lld similar since the last error"),
+                    Len, MaxIncomingDataPayloadBytes, Suppressed);
+            }
             return false;
         }
         return true;

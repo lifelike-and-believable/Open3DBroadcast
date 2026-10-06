@@ -3,6 +3,7 @@
 #if O3D_WITH_TRANSPORT_WEBRTC // Whole file: without the transport the module is a stub (O3DWebRtcBuildFlags).
 
 #include "WebRTCSender.h"
+#include "O3DLogThrottle.h"
 #include "O3DRedact.h"
 #include "../Shared/WebRTCUtils.h"
 #include "HAL/PlatformTime.h"
@@ -15,6 +16,8 @@
 #include "O3DLifetimeGate.h"
 #include "O3DUnifiedMessage.h"
 #include <vector>
+
+
 
 namespace
 {
@@ -98,9 +101,14 @@ public:
 
         if (Result.code != 0)
         {
-            UE_LOG(LogO3DWebRTCSender, Warning,
-                TEXT("Failed to publish audio to track '%s' (frames=%d, ch=%d, sr=%d): %s"),
-                *StreamLabel, NumFrames, NumChannels, SampleRate, *Link->Ffi.TakeMessage(Result));
+            const FString Message = Link->Ffi.TakeMessage(Result);
+            int64 Suppressed = 0;
+            if (WebRTCAudioPublishLog.ShouldLog(Suppressed))
+            {
+                UE_LOG(LogO3DWebRTCSender, Warning,
+                    TEXT("Failed to publish audio to track '%s' (frames=%d, ch=%d, sr=%d): %s; %lld similar since the last warning"),
+                    *StreamLabel, NumFrames, NumChannels, SampleRate, *Message, Suppressed);
+            }
             return false;
         }
 
@@ -115,6 +123,9 @@ public:
 private:
     TSharedRef<FWebRTCSenderLink, ESPMode::ThreadSafe> Link;
     const uint64 BoundEpoch;
+    // WP-R3 (TR-6): retried or failing per audio buffer, so throttled, per sink.
+    FO3DLogThrottle WebRTCAudioPublishLog;
+    FO3DLogThrottle WebRTCAudioTrackLog;
 
     /**
      * Gets existing audio track for StreamLabel, or creates one if it doesn't exist.
@@ -148,9 +159,15 @@ private:
 
         if (Result.code != 0 || !NewTrack)
         {
-            UE_LOG(LogO3DWebRTCSender, Error,
-                TEXT("Failed to create audio track for '%s' (ch=%d, sr=%d): %s"),
-                *StreamLabel, NumChannels, SampleRate, *Link->Ffi.TakeMessage(Result));
+            // Retried with every audio buffer, so throttled (WP-R3, TR-6).
+            const FString Message = Link->Ffi.TakeMessage(Result);
+            int64 Suppressed = 0;
+            if (WebRTCAudioTrackLog.ShouldLog(Suppressed))
+            {
+                UE_LOG(LogO3DWebRTCSender, Error,
+                    TEXT("Failed to create audio track for '%s' (ch=%d, sr=%d): %s; %lld similar since the last error"),
+                    *StreamLabel, NumChannels, SampleRate, *Message, Suppressed);
+            }
             return nullptr;
         }
 
@@ -483,17 +500,25 @@ EO3DSendResult FO3DWebRTCSender::SendBytes(const uint8* Data, int32 Len, const F
         }
         else
         {
-            UE_LOG(LogO3DWebRTCSender, Error,
-                TEXT("Subject '%s' payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton"),
-                *SubjectName, Len, ReliableMaxBytes);
+            int64 Suppressed = 0;
+            if (WebRTCTooLargeLog.ShouldLog(Suppressed))
+            {
+                UE_LOG(LogO3DWebRTCSender, Error,
+                    TEXT("Subject '%s' payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton; %lld similar since the last error"),
+                    *SubjectName, Len, ReliableMaxBytes, Suppressed);
+            }
             return EO3DSendResult::TooLarge;
         }
     }
     else if (!bAllowLossy && Len > ReliableMaxBytes)
     {
-        UE_LOG(LogO3DWebRTCSender, Error,
-            TEXT("Subject '%s' payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton"),
-            *SubjectName, Len, ReliableMaxBytes);
+        int64 Suppressed = 0;
+        if (WebRTCTooLargeLog.ShouldLog(Suppressed))
+        {
+            UE_LOG(LogO3DWebRTCSender, Error,
+                TEXT("Subject '%s' payload size (%d bytes) exceeds maximum (%d bytes), consider simplifying skeleton; %lld similar since the last error"),
+                *SubjectName, Len, ReliableMaxBytes, Suppressed);
+        }
         return EO3DSendResult::TooLarge;
     }
 
