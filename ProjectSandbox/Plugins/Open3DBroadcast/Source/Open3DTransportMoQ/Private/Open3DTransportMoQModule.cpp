@@ -83,8 +83,12 @@ namespace MoQSchema
 		Schema.Add(MoveTemp(Relay));
 		Schema.Add(MoveTemp(Namespace));
 		Schema.Add(MoveTemp(Track));
-		Schema.Add(MoveTemp(Delivery));
-		Schema.Add(MoveTemp(Queue));
+		// Only the sender reads these: the publisher picks the delivery, and a receiver has no send queue (WP-R3, TR-8).
+		if (bSender)
+		{
+			Schema.Add(MoveTemp(Delivery));
+			Schema.Add(MoveTemp(Queue));
+		}
 		return Schema;
 	}
 }
