@@ -585,6 +585,18 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
   - **WebRTC add-on user guide:** a `webrtc.*` options table, `ws://` for local servers, audio settings on the sender component (64 kbps default, sent to LiveKit at 16 to 128), reliable sends by default with `webrtc.prefer_lossy` and the 15,000-byte limit, **Get Transport Stats** and receive-to-apply latency, **Capture Rate Hz**, runtime transport switching, and the `lk token create` command. Claims the code does not support are removed.
   - **Historical developer docs** under `docs/dev/Open3DTransportWebRTC/` and `docs/dev/Open3DTransportMoQ/` get a dated note naming what is no longer true.
 
+- USER_GUIDE quick start and transport setup (WP-D2; mid-project review DOC-5, DOC-10 part).
+  - **Quick Start** works on a clean machine: it starts from the Third Person template (no sample map ships), turns on **Auto Create Transport**, uses the real panel names (**Open3DStream Receiver**, **Transport**, **Create Source**) and drives a second mannequin with a **Live Link Pose** node. The Transport Options key/value rows it asked for do not exist, and Loopback has no `role` key.
+  - **Transport Modules** cover TCP, UDP, NNG and the new MoQ section (relay, tracks, delivery modes) with their real options, plus delivery guarantees and a ports and firewalls table. The **Transport Options Reference** follows each transport's option schema, with the names the panel shows.
+  - Every transport carries audio; the "No (V1)" statements are gone. The message format section describes the raw mocap frame and the 24-byte `O3DU` envelope instead of a 20-byte header.
+
+- Plugin README for users (WP-D2; DOC-1, DOC-2, DOC-6). The README ships in the Fab package.
+  - **Removed:** the "Marketplace Ready" and "easy distribution via Unreal Marketplace" claims, and the developer-only "MoQ Draft-07 Hotfix" section, which pointed at a file outside this repository.
+  - **Fixed:** the licence text, which now points at the plugin's own MIT `LICENSE`; dead links to a workflows README and to `Build/README.md`; the "part of the Open3DStream project" line.
+  - **Added:** a documentation index; installation from Fab and from a release zip; updating and removing; a network ports table for the firewall; known limitations, including when microphone audio is captured.
+  - **Moved:** build, CI and third-party details go under "For developers".
+  - **Also fixed:** the UE 5.4 references in `ProjectSandbox/README.md` and the 5.4 documentation links in `Build/README.md`.
+
 - Transport counters mean the same on every transport (WP-R3; mid-project review TR-5, SR-4).
   - **Sender metrics (`o3d.DumpMetrics`, the sender component's metrics handle):** frames captured, bytes serialized and frames a transport refused are recorded once, by the sender pipeline, for every transport. Before, only NNG, MoQ and WebRTC recorded them, so they read zero on TCP, UDP and Loopback. Every transport now records bytes sent and frames it dropped after accepting them.
   - **`FramesSent` and bytes sent are counted when a frame is sent, not when it is queued.** TCP counted a frame as sent and then as dropped when it aged out of the queue; NNG and MoQ recorded their sender and transport metrics at enqueue.

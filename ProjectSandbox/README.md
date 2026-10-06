@@ -104,7 +104,7 @@ See `.github/workflows/` for workflow configurations.
 ## Notes
 
 - **Minimal Content**: This project contains minimal content to keep repository size small
-- **Engine Version**: Configured for UE 5.4 (update in .uproject if needed)
+- **Engine Version**: UE 5.7 (`EngineAssociation` in `ProjectSandbox.uproject`); other versions are not supported
 - **Debugging CVars**:
   - `o3ds.Broadcast.DebugPose` (0/1) logs a few parent-relative bone transforms
   - `o3ds.Broadcast.DebugCurves` (0/1) logs a few curve names and values per frame
@@ -132,7 +132,4 @@ If you get build errors:
 
 ### Version Mismatch
 
-If UE complains about version:
-
-1. Update `EngineAssociation` in `ProjectSandbox.uproject`
-2. Match it to your installed UE version (e.g., "5.4", "5.5")
+The project and the plugin support only Unreal Engine 5.7 (`"EngineAssociation": "5.7"`). Open the project with UE 5.7; other engine versions are not supported.
