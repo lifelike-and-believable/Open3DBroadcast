@@ -36,6 +36,25 @@ This section supersedes the "Start here" line in §0 where they disagree.
       - TR-1/SR-1: frames dropped after acceptance lead to a full sync, through the new `IOpen3DSender::SetFramesDroppedCallback`, and the send queue never discards a full sync;
       - TR-2: NNG subscription topics removed (maintainer, 2026-10-06);
       - TR-3: NNG `Poll` is bounded for every kind of message.
+  - **Docs:** #404, WP-R1 done; #405, BC-1 resolved (the fork-PR approval setting).
+  - **WP-R2** (CI and release; everything but BC-11):
+    - #406: each CI workflow ends in one aggregator check, "Plugin CI result" and "Core tests result", the two to require on `develop`. Pushes to `develop` are no longer cancelled by the next merge.
+    - #407: the fuzz job reads its targets from `test/fuzz/CMakeLists.txt`, so all 8 run. `Build/automation-test-floors.json` sets the minimum number of UE tests per run (`Run-AutomationTests.ps1 -MinTestsKey`). Raise a floor in the PR that adds tests.
+    - #408: a red scheduled nightly opens or comments on a "Nightly build failing" issue labelled `nightly-failure`; the next green one closes it. The Linux exclusion check runs only when the runner has the toolchain, and shows as skipped otherwise.
+    - #415: gated release.
+      - A tag `open3dbroadcast-vX.Y.Z` needs a `## [X.Y.Z]` CHANGELOG section naming the protocol, transport API and core versions.
+      - The tag's version goes into both `.uplugin` files: VersionName X.Y.Z and Version X×10000 + Y×100 + Z (`Build/Scripts/release-version.py`).
+      - The release runs PR CI's Fab zip and UE jobs; the UE job moved into the reusable `open3dbroadcast-ue-build-test.yml`.
+      - It publishes the package the tests ran against. The Fab zip is a 90-day artifact, uploaded to Fab by hand.
+      - A manual run is a dry run. One on #415's branch passed (run 37513123559); the publish job has not run yet (Build/README.md, "Releases").
+  - **WP-R3, complete** (transport consistency):
+    - #409, TR-5/SR-4: the sender pipeline records frames captured, bytes serialized and refused frames once, for every transport; transports record bytes sent and frames dropped after acceptance, and count `FramesSent` when a frame is sent, not queued.
+    - #410, TR-6: `FO3DLogThrottle` (`Open3DShared/Public/O3DLogThrottle.h`) gives one line per 2 s, with a count of the lines it held back, for the UDP, NNG and WebRTC log sites a peer or a failing socket can repeat per packet.
+    - #411, TR-9: the UDP and Loopback receivers guard their stats with a lock; conformance case `Stats.ReceiverReadFromAnyThread`.
+    - #412, TR-8: the MoQ receiver no longer shows Delivery Mode and Queue Capacity.
+    - #413, TR-10: the MoQ receiver drops what a lost session had queued.
+    - #414, TR-4: not reproduced. NNG runs `Lifecycle.RestartAfterStop` and five control stop cycles on one port, and both pass repeatedly.
+    - #416, TR-7: an item larger than the send queue's byte hard cap is `TooLarge`, not backpressure, and the pipeline requests no full sync after it. The conformance backpressure case now fills the queue, with the sender's worker held: new `HoldSenderWorker`, and a TCP pause hook.
 - **Maintainer decisions:**
   - **WP-U2 (2026-10-05):**
     - `bAutoCreateTransport` stays false, with a warning;
@@ -59,10 +78,11 @@ This section supersedes the "Start here" line in §0 where they disagree.
     - still include a deleted file, so the build fails;
     - and after a failed build, the automation run uses the old binaries and can report green.
 
-    Check that the build succeeded and compare the test count: 516 on `develop` as of #403.
+    Check that the build succeeded and compare the test count: 534 with the WebRTC add-on (479 without) on `develop` as of #416. CI fails below the floors in `Build/automation-test-floors.json`. When several PRs add tests, each raises the floors by its own tests; after one merges, merge `develop` into the others and add their tests to `develop`'s floors.
   - The test editor runs with `-NoSound`, so audible playback can't be tested automatically. Audio tests cover the component's state and the jitter buffer; listening is a desk check.
   - `close_findings.py`-style helpers must put the Status line after a finding's last top-level bullet, not inside nested bullets.
 - **Next, after the maintainer's go-ahead:**
+  0. WP-R2's BC-11: `.gitattributes` and one renormalizing PR. It rewrites the line endings of many files, so it needs a time when no PR is open, and the go-ahead.
   1. WP-U5: sample content, which also carries WP-U2's acceptance.
   2. WP-U6.
   3. WP-D1 to WP-D4.
@@ -75,7 +95,9 @@ This section supersedes the "Start here" line in §0 where they disagree.
   - listen to a received audio stream at the default 60 ms Target Latency (#396), pause the sender, and check that playback resumes;
   - set a translator on a LiveLink subject, stop the sender for longer than the Inactive Subject Timeout, restart it, and check the translator is still there (#395). During the pause, also check that the subject shows no data rather than a frozen pose; the mid-project review's RR-2 expects a frozen pose while concealment is on;
   - over TCP with a slow receiver, or NNG with its buffer full, check that a residual-coded subject recovers at once rather than after the periodic full sync (#403);
-  - with two receiver sources sending audio, check that a component in Any Stream mode plays one of them cleanly and switches to the other about a second after that sender stops (#398).
+  - with two receiver sources sending audio, check that a component in Any Stream mode plays one of them cleanly and switches to the other about a second after that sender stops (#398);
+  - drop a live MoQ relay session while receiving, and check that no stale frames play after the reconnect (#413; tested only against the fake moq-ffi);
+  - the first real release: add the `## [X.Y.Z] - date` CHANGELOG section in a PR, merge it, then tag that merge commit. The `.uplugin` files still say 1.0, and the last release was 0.9.6, so the version number is the maintainer's call. That first tag is also the first run of the release's publish job (#415).
 
 **Merged this session (#335–#355; later PRs under "Open at hand-over"):**
 - **WP-A4 protocol versioning (ADR 0009):** #335 (frame word, identifier, protocol 2, core 1.1.0), #336 (UDP fragment header v2), #337 (envelope v2, LE PCM), #338 (length-prefixed name hash), #339 (`docs/wire-format.md`, one changelog), #340 (no compatibility with formats before protocol 2; maintainer: there are no users of old receivers).
