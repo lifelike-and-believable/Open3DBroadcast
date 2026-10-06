@@ -578,6 +578,13 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- UDP fragments at the MTU (WP-U6; TRB-16).
+  - **The problem:** the sender split a message only above **Max Datagram Bytes** (64000), so the **MTU** setting did nothing for most frames. A large frame went out as one datagram that IP had to fragment, which some networks, NATs and VPNs drop.
+  - **Now:** a frame or audio packet larger than the MTU (1200 bytes, header included) is sent as fragments no larger than the MTU. Control messages are still sent whole.
+  - **Panel:** the MTU's minimum rises to 280, room for the 24-byte fragment header plus 256 bytes. **Max Datagram Bytes** leaves the sender's panel; the sender still reads it as the ceiling for control messages.
+  - **No wire change:** receivers already reassemble v2 fragments of any size, so old and new versions work together both ways.
+  - **Limit:** a receiver reassembles at most 4096 fragments, so at the default MTU a frame can be up to about 4.8 MB.
+
 - Loopback channel limits and receiver lifecycle (WP-U6; TRB-31, TRB-32).
   - **Queue limits:** a receiver that started after its sender reset the channel's queue capacity to the defaults (64 frames, 32 audio items), because the receiver has no queue options. Now only a sender sets a channel's limits.
   - **Stopped receiver:** a stopped receiver kept delivering frames when polled. `Poll` now delivers only between Start and Stop.

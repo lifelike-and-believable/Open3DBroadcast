@@ -233,7 +233,7 @@ While idle for `tcp.keepalive` ms the sender writes a keepalive frame whose payl
   - Complete messages go to `FO3DUnifiedReceiveDemux`
 
 **Fragmentation**:
-- A message larger than `udp.maxdatagram` (64000 bytes by default) is split into fragments of `udp.mtu` bytes (1200 by default, fragment header included)
+- A message larger than `udp.mtu` (1200 bytes by default, fragment header included) is split into fragments of that size; control messages are never split
 - **Fragment header**: message id, fragment index, fragment count
 - **Reassembly**: tracks in-flight fragment sets per (sender address, message id); at most 8 in flight and 4 × `udp.maxframe` bytes in total, oldest evicted first
 - **Timeout**: Incomplete fragment sets are discarded after 500 ms, or as soon as a newer message from the same sender completes
@@ -243,8 +243,8 @@ While idle for `tcp.keepalive` ms the sender writes a keepalive frame whose payl
 - `host` - Sender (**Destination Host**): the receiver's address, or a broadcast address (default `127.0.0.1`). Receiver (**Bind Address**): the local address to listen on (default `0.0.0.0`); it must be an IP address, `*`, empty or `localhost`
 - `port` (**Port**) - 1 to 65535 (default 17800)
 - `udp.broadcast` - Sender (**Enable UDP Broadcast**): allow sending to a broadcast address. Receiver (**Accept Broadcast Packets**): receive broadcast datagrams (default false)
-- `udp.mtu` (**MTU**) - Sender only: fragment size in bytes, header included, when a message is split (default 1200, 256 to 65507)
-- `udp.maxdatagram` (**Max Datagram Bytes**) - Sender: largest message sent as one datagram. Receiver: largest datagram accepted (default 64000, 512 to 65507)
+- `udp.mtu` (**MTU**) - Sender only: largest datagram sent, header included; larger messages are split into fragments of this size (default 1200, 280 to 65507)
+- `udp.maxdatagram` (**Max Datagram Bytes**) - Receiver: largest datagram accepted (default 64000, 512 to 65507). The sender reads it as the ceiling for control messages but does not show it
 - `udp.maxframe` - Receiver: largest reassembled message accepted, in bytes (default 4194304, max 52428800)
 
 **Broadcast**:

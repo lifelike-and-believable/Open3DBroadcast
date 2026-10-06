@@ -99,7 +99,8 @@ demux and frame checks reject what is not an envelope or a frame.
 
 **Fragment header v2**, 24 bytes: magic `'O','3','D','F'`, version 2, flags 0, two reserved zero
 bytes, then message id, fragment index, total reassembled size and fragment payload size (u32
-each). A message larger than `udp.maxdatagram` is fragmented. The 16-byte fragment header from
+each). A message larger than the sender's `udp.mtu` is fragmented, and every fragment datagram,
+header included, fits the MTU; control is never fragmented. The 16-byte fragment header from
 before protocol 2 (no magic) is not accepted.
 
 ## 4. TCP stream
