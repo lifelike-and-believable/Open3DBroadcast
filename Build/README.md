@@ -179,6 +179,7 @@ Runs Unreal's automation tests for the plugin and decides pass or fail from the 
 - `-HostProjectDir` - Where the throwaway host project is created with `-PluginPackageDir` (default: a temp folder; deleted and recreated each run)
 - `-TestFilter` - Name prefix passed to `Automation RunTests` (default: `Open3DBroadcast`). Use a plain prefix: a trailing `.*` is not a wildcard there, so the script strips it with a warning.
 - `-ResultsDir` - Output directory for test results (default: `"Artifacts\Tests"`)
+- `-MinTestsKey` - A key of `Build/automation-test-floors.json` (`plugin`, `plugin-with-webrtc`); the run fails when fewer tests ran than that floor. CI passes it; local runs normally don't. Raise the floor in the PR that adds tests.
 
 Tests that need the internet register only when `O3DB_NETWORK_TESTS=1` is set in the environment (ADR 0006). CI sets it to `0` on pull requests.
 

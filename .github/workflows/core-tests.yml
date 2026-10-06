@@ -207,17 +207,18 @@ jobs:
         run: python3 Build/Scripts/sync_o3ds_core.py --check
 
   fuzz:
-    # WP-T1: coverage-guided libFuzzer run of every target in test/fuzz
-    # (Parse, the update and residual paths, PeekMeta, UDP reassembly,
-    # ReorderGate) for 60 s each, with ASan/UBSan. Pinned to ubuntu-24.04
+    # WP-T1: coverage-guided libFuzzer run of every target in test/fuzz for 60 s
+    # each, with ASan/UBSan. The list is read from O3DS_FUZZ_TARGETS in
+    # test/fuzz/CMakeLists.txt, so a new target is fuzzed here too (WP-R2, BC-8:
+    # tcp_stream and control were built but never run). Pinned to ubuntu-24.04
     # so the clang-18 / libclang-rt-18-dev package names stay valid.
     name: Fuzz (Clang libFuzzer, 60 s per target)
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
-    # About 8 minutes today (60 s per target plus the build); raise this
+    # About 10 minutes today (60 s per target plus the build); raise this
     # when targets are added.
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -277,7 +278,13 @@ jobs:
         run: |
           mkdir -p fuzz-artifacts
           failed=""
-          for target in parse parse_update residual peek_meta udp_reassembly reorder_gate; do
+          targets=$(sed -n '/^set(O3DS_FUZZ_TARGETS/,/^)/p' test/fuzz/CMakeLists.txt | sed '1d;$d' | tr -d ' \t\r')
+          if [ -z "$targets" ]; then
+            echo "::error::no fuzz targets found in test/fuzz/CMakeLists.txt (O3DS_FUZZ_TARGETS)"
+            exit 1
+          fi
+          echo "Fuzz targets:" $targets
+          for target in $targets; do
             echo "::group::o3ds_fuzz_$target"
             if ! build-fuzz/test/fuzz/o3ds_fuzz_$target "build-fuzz/test/fuzz/corpus/$target" \
                 -max_total_time=60 -print_final_stats=1 \
