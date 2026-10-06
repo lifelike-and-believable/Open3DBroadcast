@@ -4,6 +4,7 @@
 #if O3D_WITH_TRANSPORT_NNG // Whole file: without the transport the module is a stub (O3DBuildFlags).
 
 #include "Receiver/NngReceiver.h"
+#include "O3DLogThrottle.h"
 #include "O3DRedact.h"
 
 #include "Logging/LogMacros.h"
@@ -20,6 +21,8 @@ THIRD_PARTY_INCLUDES_START
 #include <nng/protocol/pipeline0/pull.h>
 #include <nng/protocol/pubsub0/sub.h>
 THIRD_PARTY_INCLUDES_END
+
+
 
 DEFINE_LOG_CATEGORY_STATIC(LogO3DNngReceiver, Log, All);
 
@@ -267,7 +270,11 @@ int32 FO3DNngReceiver::Poll()
 
         if (Size > O3DNngReceiverPrivate::MaxPayloadBytes)
         {
-            UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver payload %llu bytes exceeds safety cap; dropping."), static_cast<unsigned long long>(Size));
+            int64 Suppressed = 0;
+            if (NngOversizeLog.ShouldLog(Suppressed))
+            {
+                UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver payload %llu bytes exceeds safety cap; dropping. %lld oversized since the last warning."), static_cast<unsigned long long>(Size), Suppressed);
+            }
             nng_free(Buffer, Size);
             ReceiveErrors.fetch_add(1);
             continue;

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Transport/O3DSenderInterface.h"
+#include "O3DLogThrottle.h"
 #include "Transport/O3DConnectionState.h"
 #include "Transport/O3DTransportTypes.h"
 #include "O3DLifetimeGate.h"
@@ -172,6 +173,8 @@ private:
     FO3DTransportMetricsRef TransportMetrics;
     /** Sender metrics: the config's handle, or this transport's own (ADR 0012 item 4). */
     FO3DSenderMetricsHandleRef SenderMetrics;
+    // WP-R3 (TR-6): hot-path log site, per instance.
+    FO3DLogThrottle WebRTCTooLargeLog;
 
     // State
     mutable FCriticalSection StateMutex;

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "O3DLogThrottle.h"
 #include "Transport/O3DSenderInterface.h"
 #include "Transport/O3DConnectionState.h"
 #include "Transport/O3DSendQueue.h"
@@ -111,6 +112,9 @@ private:
 	std::atomic<bool> bRunning{ false };
 	std::atomic<bool> bWorkerPausedForTesting{ false };
 	std::atomic<int64> FramesSent{ 0 };
+	// WP-R3 (TR-6): hot-path log sites, one throttle each, per instance.
+	FO3DLogThrottle UdpSendFailureLog;
+
 	std::atomic<int64> BytesSent{ 0 };
 	/** Frames refused at the hard cap and frames whose send failed. */
 	std::atomic<int64> DroppedFrames{ 0 };

@@ -3,6 +3,7 @@
 #if O3D_WITH_TRANSPORT_SOCKETS // Whole file: without the transport the module is a stub (O3DBuildFlags).
 
 #include "SocketsUdpSender.h"
+#include "O3DLogThrottle.h"
 
 #include "O3DSinkAudioEncoder.h"
 #include "O3DUnifiedMessage.h"
@@ -20,6 +21,8 @@ THIRD_PARTY_INCLUDES_START
 THIRD_PARTY_INCLUDES_END
 
 #include <vector>
+
+
 
 DEFINE_LOG_CATEGORY_STATIC(LogSocketsUdpSender, Log, All);
 
@@ -450,12 +453,20 @@ bool FO3DSocketsUdpSender::SendDatagram(const uint8* Data, int32 Size, const TCH
 	if (!Socket->SendTo(Data, Size, BytesSentNow, *RemoteAddr))
 	{
 		const ESocketErrors Error = SocketSubsystem ? SocketSubsystem->GetLastErrorCode() : SE_NO_ERROR;
-		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP %s send failed (size=%d, error=%d)."), Context, Size, static_cast<int32>(Error));
+		int64 Suppressed = 0;
+		if (UdpSendFailureLog.ShouldLog(Suppressed))
+		{
+			UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP %s send failed (size=%d, error=%d); %lld send failures since the last warning."), Context, Size, static_cast<int32>(Error), Suppressed);
+		}
 		return false;
 	}
 	if (BytesSentNow != Size)
 	{
-		UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP %s partial send (requested=%d, sent=%d)."), Context, Size, BytesSentNow);
+		int64 Suppressed = 0;
+		if (UdpSendFailureLog.ShouldLog(Suppressed))
+		{
+			UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP %s partial send (requested=%d, sent=%d); %lld send failures since the last warning."), Context, Size, BytesSentNow, Suppressed);
+		}
 		return false;
 	}
 	return true;
@@ -479,7 +490,8 @@ bool FO3DSocketsUdpSender::SendFragmented(const uint8* Data, int32 Size, const T
 		Fragmenter.makeFragment(MessageId, Seq, FragmentScratch);
 		if (!SendDatagram(reinterpret_cast<const uint8*>(FragmentScratch.data()), static_cast<int32>(FragmentScratch.size()), Context))
 		{
-			UE_LOG(LogSocketsUdpSender, Warning, TEXT("UDP %s fragment send failed (seq=%u/%llu)."), Context, Seq, static_cast<unsigned long long>(Fragmenter.mFrames));
+			// The datagram failure was just logged (or throttled) by SendDatagram.
+			UE_LOG(LogSocketsUdpSender, Verbose, TEXT("UDP %s fragment send failed (seq=%u/%llu)."), Context, Seq, static_cast<unsigned long long>(Fragmenter.mFrames));
 			return false;
 		}
 	}
