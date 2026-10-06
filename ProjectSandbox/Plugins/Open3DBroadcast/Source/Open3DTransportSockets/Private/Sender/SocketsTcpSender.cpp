@@ -555,6 +555,11 @@ uint32 FO3DSocketsTcpSender::RunWorkerIteration()
 		return 0;
 	}
 
+	if (bWorkerPausedForTesting.load())
+	{
+		return AcceptPollMs;
+	}
+
 	if (PendingTotal == 0)
 	{
 		FO3DSendItem Item;

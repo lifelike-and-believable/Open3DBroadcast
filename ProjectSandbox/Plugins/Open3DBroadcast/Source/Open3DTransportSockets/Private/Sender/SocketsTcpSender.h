@@ -62,6 +62,8 @@ public:
 
 	/** Times a send could not complete at once (partial send or EWOULDBLOCK). For tests and diagnostics. */
 	int64 GetSendWaitCount() const { return SendWaitCount.load(); }
+	/** Testing: while paused the worker still accepts a client but sends nothing, so a test can fill the queue. */
+	void SetWorkerPausedForTesting(bool bPaused) { bWorkerPausedForTesting.store(bPaused); Queue->Wake(); }
 
 private:
 	FO3DTransportResult CreateListenSocket();
@@ -140,6 +142,7 @@ private:
 
 	/** Set by a successful Start(), cleared by Stop(); sends outside a session return NotRunning. */
 	std::atomic<bool> bRunning{ false };
+	std::atomic<bool> bWorkerPausedForTesting{ false };
 
 	/**
 	 * ADR 0007 item 3: Connecting while listening without a receiver, Connected while one is

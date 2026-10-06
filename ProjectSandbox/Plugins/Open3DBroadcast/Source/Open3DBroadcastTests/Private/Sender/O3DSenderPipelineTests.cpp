@@ -152,7 +152,7 @@ namespace O3DSenderPipelineTests
 			if (RefuseNext > 0)
 			{
 				--RefuseNext;
-				return EO3DSendResult::DroppedBackpressure;
+				return RefuseResult;
 			}
 			return EO3DSendResult::Queued;
 		}
@@ -176,10 +176,11 @@ namespace O3DSenderPipelineTests
 			ReleaseEvent->Trigger();
 		}
 
-		void SetRefuseNext(int32 Count)
+		void SetRefuseNext(int32 Count, EO3DSendResult Result = EO3DSendResult::DroppedBackpressure)
 		{
 			FScopeLock Guard(&Mutex);
 			RefuseNext = Count;
+			RefuseResult = Result;
 		}
 
 		virtual void SetPeerJoinedCallback(FO3DPeerJoinedCallback Callback) override
@@ -236,6 +237,7 @@ namespace O3DSenderPipelineTests
 		mutable FCriticalSection Mutex;
 		TArray<FRecordedPayload> Recorded;
 		int32 RefuseNext = 0;
+		EO3DSendResult RefuseResult = EO3DSendResult::DroppedBackpressure;
 		FO3DPeerJoinedCallback PeerJoined;
 		FO3DFramesDroppedCallback FramesDropped;
 		std::atomic<bool> bBlockNext{ false };
@@ -471,6 +473,46 @@ bool FO3DSenderPipelineRefusedResidualTest::RunTest(const FString& Parameters)
 		}
 		Probe.DetachSender();
 	}
+	return true;
+}
+
+// WP-R3 (mid-project review TR-7): a payload the transport can never take (TooLarge) is not
+// answered with a full sync. The full sync is as large, so the pipeline used to send one on every
+// frame; the frame still counts as refused.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderPipelineTooLargeTest, "Open3DBroadcast.Sender.Pipeline.TooLargeRequestsNoFullSync", O3DB_TEST_FLAGS)
+bool FO3DSenderPipelineTooLargeTest::RunTest(const FString& Parameters)
+{
+	using namespace O3DSenderPipelineTests;
+	AddExpectedError(TEXT("larger than the transport accepts"), EAutomationExpectedMessageFlags::Contains, 1);
+	const TSharedPtr<const FO3DSSkeletonDescriptor> Descriptor = MakeThreeBoneDescriptor();
+	const FString Subject = TEXT("TooLarge");
+
+	FO3DSenderPipelineProbe Probe;
+	Probe.Start(false);
+	const TSharedRef<FScriptedSender> Transport = MakeShared<FScriptedSender>();
+	Probe.AttachSender(Transport);
+	for (int32 Index = 0; Index < 4; ++Index)
+	{
+		// The full sync (frame 0) and the first residual update (frame 1) are TooLarge.
+		Transport->SetRefuseNext(Index < 2 ? 1 : 0, EO3DSendResult::TooLarge);
+		TUniquePtr<FO3DSPoseFrame> Frame = MakeProbeFrame(Probe, Subject, Descriptor, 10.0 + Index / 60.0);
+		if (Frame.IsValid())
+		{
+			Frame->Encoding.Mode = EO3DSenderEncodingMode::Residual;
+		}
+		Probe.SubmitFrame(MoveTemp(Frame));
+		TestTrue(TEXT("Drained"), Probe.WaitForIdle(WaitTimeoutSeconds));
+	}
+
+	const TArray<FRecordedPayload> Sent = Transport->GetRecorded();
+	if (TestEqual(TEXT("Four payloads"), Sent.Num(), 4))
+	{
+		TestTrue(TEXT("The first is the full sync"), Sent[0].bFullSync);
+		TestFalse(TEXT("No full sync after a TooLarge full sync or update"), Sent[1].bFullSync || Sent[2].bFullSync || Sent[3].bFullSync);
+	}
+	TestEqual(TEXT("One full sync serialized"), Probe.GetSerializer().GetSubjectStats(Subject).FullSyncsSent, (uint64)1);
+	TestEqual(TEXT("Both TooLarge payloads count as refused"), Probe.GetStats().PayloadsRefused, (uint64)2);
+	Probe.DetachSender();
 	return true;
 }
 

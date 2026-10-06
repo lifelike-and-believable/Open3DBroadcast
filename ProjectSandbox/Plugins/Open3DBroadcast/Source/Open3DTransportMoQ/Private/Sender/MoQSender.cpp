@@ -419,6 +419,10 @@ EO3DSendResult FO3DMoQSender::EnqueueFrame(TArray<uint8>&& Bytes, FString Subjec
 
 	const int32 Len = Bytes.Num();
 	const EO3DSendResult Result = Queue->Enqueue(FO3DSendItem::MakeMocap(MoveTemp(Bytes), MoveTemp(SubjectName), CaptureTimestampSec, bFullSync));
+	if (Result == EO3DSendResult::TooLarge)
+	{
+		return Result; // WP-R3 (TR-7): the caller reports it; only a full queue is a drop.
+	}
 	if (Result != EO3DSendResult::Queued)
 	{
 		DroppedFrames.fetch_add(1);

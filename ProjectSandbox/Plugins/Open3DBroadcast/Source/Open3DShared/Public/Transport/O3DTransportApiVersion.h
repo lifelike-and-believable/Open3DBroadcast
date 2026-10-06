@@ -104,6 +104,8 @@
 // WP-R3 (TR-5, SR-4) is part of 5 as well: the sender pipeline records FramesCaptured,
 // BytesSerialized and FramesDropped; transports record only BytesSent and TransportFramesDropped
 // into FO3DTransportConfig::SenderMetrics, and count FramesSent when a frame is sent, not queued.
+// WP-R3 (TR-7) is part of 5 as well: FO3DSendQueue::Enqueue returns TooLarge for an item above its
+// kind's byte hard cap, so SendSerialized does too; the sender pipeline requests no full sync after it.
 
 namespace O3DTransport
 {

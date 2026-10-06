@@ -33,7 +33,11 @@ enum class EO3DConformanceCase : uint32
 	ReceiverLifecycle = 1 << 2,
 	/** SendSerialized before Initialize and before Start returns NotRunning and counts no frame. */
 	SendRejectedWhenNotRunning = 1 << 3,
-	/** A full queue drops the frame (DroppedBackpressure), increments Stats.DroppedFrames and never blocks. */
+	/**
+	 * A full queue drops the frame (DroppedBackpressure), increments Stats.DroppedFrames and never
+	 * blocks. Frames below the queue's size fill it while the fixture holds the sender's worker
+	 * (WP-R3, TR-7: one payload larger than the queue is TooLarge, not backpressure).
+	 */
 	SendBackpressure = 1 << 4,
 	/** Four threads call SendSerialized at once; every call returns. */
 	SendConcurrent = 1 << 5,
@@ -113,6 +117,13 @@ public:
 	/** Delivers deferred work, for example FFI callbacks queued for the game thread. Game thread. */
 	virtual void Pump() {}
 
+	/**
+	 * SendBackpressure: stops (true) or resumes (false) the sender's worker, so the case's sends
+	 * fill the queue instead of racing the worker that drains it. Default: nothing, for transports
+	 * whose queue nobody drains during the case (the fake transport, Loopback).
+	 */
+	virtual void HoldSenderWorker(IOpen3DSender& Sender, bool bHold) {}
+
 	/** LifetimeDestroyWithCallbacksInFlight. Only fixtures with a fake FFI implement it. */
 	virtual bool RunDestroyWithCallbacksInFlight(FAutomationTestBase& Test);
 
@@ -133,7 +144,7 @@ struct FO3DConformanceProfile
 	TFunction<TUniquePtr<FO3DConformanceFixture>()> MakeFixture;
 	EO3DConformanceCase Cases = EO3DConformanceCase::None;
 
-	/** SendBackpressure: payload size and number of sends that overflow the backpressure config. */
+	/** SendBackpressure: payload size (at most the backpressure queue's size) and number of sends that overflow it. */
 	int32 BackpressurePayloadBytes = 0;
 	int32 BackpressureSendCount = 1;
 	/** SendBackpressure: the queue only fills while a receiver is connected (TCP). */

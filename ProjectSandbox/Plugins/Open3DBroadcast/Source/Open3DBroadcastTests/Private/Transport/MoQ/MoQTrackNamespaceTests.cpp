@@ -178,9 +178,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQBackpressureTest, "Open3DBroadcast.Transpor
 bool FMoQBackpressureTest::RunTest(const FString& Parameters)
 {
 	using namespace MoQTrackNamespaceTestHelpers;
-	// The first drop is logged as a warning (rate limited to one per 2 s).
-	AddExpectedError(TEXT("MoQ sender queue overflow"), EAutomationExpectedMessageFlags::Contains, 1);
-
+	// A frame no queue of this size could hold is TooLarge, not a drop (WP-R3, TR-7): the sender
+	// pipeline reports it, and the transport neither counts nor logs it. Filling the queue is
+	// Conformance.MoQ.Send.BackpressureDropsWithoutBlocking.
 	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
 	Fake->bHoldBlockingWork = true;
 
@@ -192,6 +192,8 @@ bool FMoQBackpressureTest::RunTest(const FString& Parameters)
 		const TSharedRef<IOpen3DSender> Sender = MoQTesting::CreateSenderForTest(Fake->MakeApi(), nullptr, 1);
 		TestTrue(TEXT("Initialize sender"), Sender->Initialize(Config).IsOk());
 		TestTrue(TEXT("Start sender (connect held)"), Sender->Start().IsOk());
+		// Without a session the worker drops queued frames, which would race the counts below.
+		MoQTesting::SenderSetWorkerPaused(*Sender, true);
 
 		TArray<uint8> Small;
 		Small.Init(0x5A, 1024);
@@ -200,10 +202,11 @@ bool FMoQBackpressureTest::RunTest(const FString& Parameters)
 
 		TArray<uint8> Oversize;
 		Oversize.Init(0xA5, static_cast<int32>(QueueBytes) + 1);
-		TestTrue(TEXT("A frame over the byte cap is dropped with DroppedBackpressure"),
-			Sender->SendSerialized(FO3DSendPayload::MakeCopy(Oversize.GetData(), Oversize.Num(), TEXT("Subject"), 0.0)) == EO3DSendResult::DroppedBackpressure);
-		TestTrue(TEXT("The drop is counted in Stats.DroppedFrames"), Sender->GetStats().DroppedFrames >= DroppedBefore + 1);
+		TestTrue(TEXT("A frame over the byte cap is TooLarge"),
+			Sender->SendSerialized(FO3DSendPayload::MakeCopy(Oversize.GetData(), Oversize.Num(), TEXT("Subject"), 0.0)) == EO3DSendResult::TooLarge);
+		TestEqual(TEXT("TooLarge is not counted in Stats.DroppedFrames"), Sender->GetStats().DroppedFrames, DroppedBefore);
 
+		MoQTesting::SenderSetWorkerPaused(*Sender, false);
 		Sender->Stop();
 	}
 	Fake->DiscardHeldWork();

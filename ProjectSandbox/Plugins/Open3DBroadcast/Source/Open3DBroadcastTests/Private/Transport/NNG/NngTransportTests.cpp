@@ -328,14 +328,13 @@ bool FO3DNngQueueLimitTest::RunTest(const FString& Parameters)
 	O3DS::SubjectList LargeList;
 	PopulateSubjectList(LargeList, TEXT("LargeSubject"), NumCurves);
 
-	// The drop is logged as a warning (TRB-43).
-	AddExpectedError(TEXT("NNG sender queue full"), EAutomationExpectedMessageFlags::Contains, 1);
-
+	// Larger than the whole queue: TooLarge, which the sender pipeline reports; the transport
+	// neither counts it as dropped nor logs a full queue (WP-R3, TR-7).
 	const bool bSendQueued = O3DTests::SendSubjectList(Sender, LargeList);
 	TestFalse(TEXT("Large payload rejected due to queue limit"), bSendQueued);
 
 	const FO3DTransportStats SenderStats = Sender.GetStats();
-	TestEqual(TEXT("Dropped frame recorded"), static_cast<int64>(SenderStats.DroppedFrames), static_cast<int64>(1));
+	TestEqual(TEXT("TooLarge is not a dropped frame"), static_cast<int64>(SenderStats.DroppedFrames), static_cast<int64>(0));
 
 	return true;
 }

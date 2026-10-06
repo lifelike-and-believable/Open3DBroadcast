@@ -8,6 +8,7 @@
 #include "Templates/SharedPointer.h"
 #include "Templates/UniquePtr.h"
 
+#include "O3DLogThrottle.h"
 #include "O3DSPoseFramePool.h"
 #include "O3DSenderComponent.h"
 #include "O3DSenderPipelineStats.h"
@@ -217,6 +218,8 @@ private:
 	 * to the flag.
 	 */
 	TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe> Metrics;
+	/** WP-R3 (TR-7): a TooLarge payload would otherwise warn on every frame. */
+	FO3DLogThrottle TooLargeLog;
 	const TSharedRef<std::atomic<bool>, ESPMode::ThreadSafe> FullSyncAllRequested = MakeShared<std::atomic<bool>, ESPMode::ThreadSafe>(false);
 	std::atomic<bool> bAsync{ true };
 	std::atomic<int32> DepthOverride{ 0 };
