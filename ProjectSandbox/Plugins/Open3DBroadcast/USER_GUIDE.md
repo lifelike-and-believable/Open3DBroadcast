@@ -1145,6 +1145,7 @@ client per process (PIE clients included), so keep subject names distinct across
 | **StreamLabel** | String | "" | Filter by label (empty = all) |
 | **SubjectName** | String | "" | Subject for Subject mode |
 | **Gain** | Float | 1.0 | Output volume multiplier |
+| **Target Latency (ms)** | Float | 60 | Audio held before playback starts, to absorb network jitter. Playback waits for this much again after the audio runs out; when more than this plus 60 ms builds up, the oldest audio is dropped back to it, so latency cannot grow |
 | **bEnableAttenuation** | Bool | false | Enable spatial audio |
 | **AttenuationSettings** | Object | null | Attenuation configuration |
 | **Attach Parent** | Component | (unset) | Attach the component to this component. Unset: it stays where it is placed; one with no parent attaches to the actor's root |

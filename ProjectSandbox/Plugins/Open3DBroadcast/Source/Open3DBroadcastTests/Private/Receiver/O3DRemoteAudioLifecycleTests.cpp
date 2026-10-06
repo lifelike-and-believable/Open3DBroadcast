@@ -9,6 +9,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "O3DAudioJitterBuffer.h"
 #include "O3DRemoteAudioComponent.h"
 #include "Testing/O3DReceiverTesting.h"
 
@@ -190,10 +191,23 @@ bool FO3DRemoteAudioAutoActivateTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Audio is queued"), FO3DRemoteAudioComponentTestAccessor::GetSoundWave(Component));
 	TestFalse(TEXT("Not played without Play"), FO3DRemoteAudioComponentTestAccessor::IsPlaybackWanted(Component));
 
+	// RCV-20: while nothing plays, arriving audio stays bounded (target + 60 ms), the oldest dropped.
+	for (int32 Packet = 0; Packet < 50; ++Packet)
+	{
+		QueueOneFrame(Component);
+	}
+	const FO3DAudioJitterBuffer* Buffer = FO3DRemoteAudioComponentTestAccessor::GetJitterBuffer(Component);
+	if (TestNotNull(TEXT("A jitter buffer"), Buffer))
+	{
+		TestTrue(TEXT("Queued audio stays within target + margin"), Buffer->GetQueuedSamples() <= (60 + 60) * 48);
+		TestTrue(TEXT("The excess was dropped"), Buffer->GetDroppedSamples() > 0);
+	}
+
 	Component->Play();
 	TestTrue(TEXT("Play starts playback"), FO3DRemoteAudioComponentTestAccessor::IsPlaybackWanted(Component));
 	Component->Stop();
 	TestFalse(TEXT("Stop stops it"), FO3DRemoteAudioComponentTestAccessor::IsPlaybackWanted(Component));
+	TestTrue(TEXT("Stop empties the buffer"), Buffer && Buffer->GetQueuedSamples() == 0);
 
 	Actor->RouteEndPlay(EEndPlayReason::RemovedFromWorld);
 	return true;

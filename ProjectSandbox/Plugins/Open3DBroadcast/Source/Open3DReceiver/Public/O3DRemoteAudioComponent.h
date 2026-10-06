@@ -11,6 +11,7 @@
 #include "Engine/EngineTypes.h"
 #include "O3DRemoteAudioComponent.generated.h"
 
+class FO3DAudioJitterBuffer;
 class FO3DRuntimeContext;
 
 class UAudioComponent;
@@ -59,6 +60,14 @@ public:
     /** LiveLink Subject selector (visible only when ReceiveMode=Subject). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio", meta = (EditCondition = "ReceiveMode == EO3DRemoteAudioMode::Subject", EditConditionHides))
     FLiveLinkSubjectName LiveLinkSubjectName;
+
+    /**
+     * Received audio held before playback starts, in ms (RCV-20). Absorbs network jitter; when more
+     * than this plus 60 ms has built up (a sender clock running fast, a burst after a hitch), the
+     * oldest audio is dropped back to it. Read when the first audio of a format arrives.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio", meta = (ClampMin = "0.0", UIMax = "500.0", Units = "ms"))
+    float TargetLatencyMs = 60.0f;
 
     /** Output gain applied to incoming samples prior to playback. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
@@ -153,6 +162,9 @@ private:
 
     int32 CurrentChannels = 0;
     int32 CurrentSampleRate = 0;
+    /** Between OnAudioPcm16 (game thread) and the sound wave (audio thread); one per wave. */
+    TSharedPtr<FO3DAudioJitterBuffer, ESPMode::ThreadSafe> JitterBuffer;
+
     /** Set from bAC_AutoActivate at BeginPlay, then by Play and Stop. */
     bool bPlaybackWanted = false;
 

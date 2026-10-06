@@ -49,7 +49,10 @@ public class Open3DReceiver : ModuleRules
         {
             "Projects",
             "LiveLink",
-            "LiveLinkAnimationCore"
+            "LiveLinkAnimationCore",
+            // UO3DJitterSoundWave subclasses USoundWaveProcedural, whose IAudioProxyDataFactory
+            // base is implemented in AudioExtensions (RCV-20).
+            "AudioExtensions"
         });
 
         if (Target.Platform == UnrealTargetPlatform.Win64)
