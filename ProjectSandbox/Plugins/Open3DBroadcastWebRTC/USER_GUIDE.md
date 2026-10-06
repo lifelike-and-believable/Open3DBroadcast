@@ -1,14 +1,15 @@
 # Open3DBroadcast WebRTC add-on - User Guide
 
-A comprehensive guide to installing, configuring, using, and troubleshooting the WebRTC (LiveKit) transport for Open3DBroadcast. The transport is the free **Open3DBroadcastWebRTC** add-on plugin; it is not part of Open3DBroadcast itself.
+How to install, configure, use and troubleshoot the WebRTC (LiveKit) transport for Open3DBroadcast. The transport is the free **Open3DBroadcastWebRTC** add-on plugin; it is not part of Open3DBroadcast itself.
 
 ## Table of Contents
 
 1. [Requirements and Installation](#requirements-and-installation)
 2. [Quick Start](#quick-start)
 3. [Configuration Guide](#configuration-guide)
+   - [Transport Options](#transport-options)
    - [Credentials](#credentials)
-   - [Automatic Token Fetch](#automatic-token-fetch-recommended)
+   - [Automatic Token Fetch](#automatic-token-fetch)
 4. [Audio Configuration](#audio-configuration)
 5. [Control Channel](#control-channel)
 6. [Platform Support](#platform-support)
@@ -30,7 +31,7 @@ A comprehensive guide to installing, configuring, using, and troubleshooting the
 1. Install Open3DBroadcast first (from Fab, or by copying it into your project's `Plugins/` folder).
 2. Copy the `Open3DBroadcastWebRTC` folder into your **project's** `Plugins/` folder. Do not copy anything into the Open3DBroadcast folder: the add-on is a plugin of its own, so a Fab update of Open3DBroadcast leaves it in place.
 3. Open the project, go to **Edit → Plugins**, enable **Open3DBroadcast WebRTC** (Beta) and restart the editor.
-4. "WebRTC" now appears in the transport list of the Open3D sender component and of the Open3DBroadcast LiveLink source.
+4. "WebRTC" now appears in the transport list of the Open3D sender component and of the **Open3DStream Receiver** LiveLink source.
 
 The add-on contains the WebRTC transport module (`Open3DTransportWebRTC`) and its LiveKit client library (`livekit_ffi.dll`). Its settings panel is drawn by Open3DBroadcast's editor module from the options the transport declares, so it looks and behaves like every other transport panel.
 
@@ -52,68 +53,69 @@ Disable **Open3DBroadcast WebRTC** in **Edit → Plugins** (or delete its folder
 
 ## Quick Start
 
-The WebRTC transport allows you to stream motion capture data and audio to/from a LiveKit server, enabling multi-participant setups across networks.
+The WebRTC transport streams motion capture data, audio and control through a LiveKit server, so senders and receivers on different networks can share one room.
 
 ### Basic Setup
 
-1. **Obtain a LiveKit Server**
-   - Use a cloud service (e.g., LiveKit Cloud, Liveblox)
-   - Or self-host using Docker
-   - Server URL will be in format: `wss://your-server.com`
+1. **Get a LiveKit server.** Use a hosted service or run your own. Its URL looks like `wss://your-server.com`; a local development server is usually `ws://127.0.0.1:7880`.
 
-2. **Generate Access Token**
-   - Create a JWT token with Publisher or Subscriber role
-   - Token includes: room name, identity, and permissions
-   - Tokens typically expire in 24 hours (configurable on server)
+2. **Get access tokens.** A token is a JWT that names the room, the participant identity and the participant's permissions. Create one for the sender and one for the receiver (see [Access Token](#access-token-jwt)), or let the plugin fetch them ([Automatic Token Fetch](#automatic-token-fetch)).
 
-3. **Configure Transport**
+3. **Configure the transport** on the sender component and on the LiveLink source:
    ```
-   URL: wss://your-server.com
-   Token: <JWT token from step 2>
+   LiveKit Host: wss://your-server.com
+   Access Token: <token from step 2>
    ```
    The token is a credential. It is kept out of the level, the Blueprint, the ini files and LiveLink presets; see [Credentials](#credentials).
 
-4. **Enable Audio (Optional)**
-   - Check "Enable Audio" in transport settings
-   - Select sample rate (48kHz recommended)
-   - Choose bitrate based on bandwidth (see Audio section)
+4. **Audio (optional).** On the sender component, tick **Enable Audio** and set the audio options (see [Audio Configuration](#audio-configuration)). On the LiveLink source, tick **Enable Audio** to play what arrives.
 
 ---
 
 ## Configuration Guide
 
-### Server URL Format
+### Server URL
 
-**Required:** WebSocket Secure (WSS) protocol
-- ✅ Correct: `wss://livekit.example.com`
-- ❌ Wrong: `ws://livekit.example.com` (insecure, won't work)
-- ❌ Wrong: `https://livekit.example.com` (wrong protocol)
+**LiveKit Host** (`webrtc.url`) is the server's WebSocket URL:
+- `wss://livekit.example.com` or `wss://livekit.example.com:7880`: an encrypted connection.
+- `ws://127.0.0.1:7880`: an unencrypted connection, for a local development server.
+- Without a scheme, the transport adds one: `ws://` for `127.0.0.1`, `0.0.0.0`, `localhost` and `[::1]` (with or without a port), and `wss://` for every other host.
+- An explicit `ws://` or `wss://` is kept as written. Do not use `https://`: the transport would add `wss://` in front of it.
 
-**Port:** Usually 443 (default WSS), sometimes 7880 or other custom ports
-- With port: `wss://livekit.example.com:7880`
+### Transport Options
+
+The panel of the sender component and of the LiveLink source shows the same options for WebRTC. Options without a **Shown as** entry are not in the panel. Set them with **Set Transport Option** on the sender component, or in the options map of **Create Open3DStream LiveLink Source**.
+
+| Key | Shown as | Default | Notes |
+|---|---|---|---|
+| `webrtc.url` | **LiveKit Host** | none | Required. See [Server URL](#server-url). |
+| `webrtc.useAutoTokenFetch` | **Use Auto Token Fetch** | false | Fetch tokens from your token endpoint instead of using **Access Token**. |
+| `webrtc.credentialProfile` | **Credential Profile** | `default` | Which stored credentials to use. Saved with the component or source. |
+| `webrtc.token` | **Access Token** | none | Secret. Shown when Auto Token Fetch is off. Environment variable `O3DB_WEBRTC_TOKEN`. |
+| `webrtc.tokenEndpointUrl` | **Token Endpoint URL** | none | Shown when Auto Token Fetch is on. Plain `http://` only for `localhost`, `127.0.0.1` and `::1`. |
+| `webrtc.tokenEndpointAuth` | **Token Endpoint Credential** | none | Secret. Shown when Auto Token Fetch is on. Sent as `Authorization: Bearer <value>`. Environment variable `O3DB_WEBRTC_TOKEN_ENDPOINT_AUTH`. |
+| `webrtc.room` | **Room** | none | Shown when Auto Token Fetch is on, and required then. Use the same room on the sender and the receiver. |
+| `webrtc.tokenRefreshLeadTimeSec` | **Token Refresh Lead Time (seconds)** | 300 | Shown when Auto Token Fetch is on. Seconds before expiry to fetch the next token. The panel takes 60 to 3600. |
+| `webrtc.prefer_lossy` | | false | Sender only. Send frames of up to 1300 bytes on LiveKit's lossy data channel. See [Frames Being Dropped](#frames-being-dropped). |
+| `webrtc.reconnect_timeout` | | 2 | Receiver only. Seconds without data before the receiver reconnects; 0 turns it off. Clamped to 0 to 300. |
+
+Secrets are never saved with the component or source; see [Credentials](#credentials).
 
 ### Access Token (JWT)
 
-**What is it?**
-- JSON Web Token (JWT) that authenticates you to the LiveKit server
-- Grants permissions (Publisher/Subscriber) for specific rooms
+A LiveKit access token authenticates a participant to the server. It names the room and the identity, and grants permissions such as publishing and subscribing.
 
-**Generating Tokens**
-- Use LiveKit CLI, SDK, or control panel
-- Typical workflow:
+**Creating tokens**
+- Use the LiveKit CLI, a LiveKit server SDK, or your LiveKit provider's console. See the LiveKit documentation: https://docs.livekit.io
+- With the LiveKit CLI (`lk`), for example:
   ```bash
-  # Using LiveKit CLI
-  livekit generate-token <api-key> <api-secret> \
-    --room "MyRoom" \
-    --identity "Sender1" \
-    --grant-publisher \
-    --ttl 3600  # 1 hour
+  lk token create --api-key <api-key> --api-secret <api-secret> --join --room MyRoom --identity Sender1 --valid-for 1h
   ```
+  Give the sender and the receiver different identities.
 
-**Token Expiration**
-- ⚠️ Tokens have lifetimes (typically 24 hours default)
-- When expired: Connection fails with authentication error
-- **Solution:** Use automatic token fetch (recommended) or manually refresh tokens
+**Token expiration**
+- A token stops working when it expires; the server sets or accepts its lifetime.
+- With a manual token, create a new one and set it before the old one expires. Automatic token fetch refreshes tokens for you.
 
 ### Credentials
 
@@ -130,40 +132,32 @@ The access token (`webrtc.token`) and the token endpoint credential (`webrtc.tok
 
 **Upgrading older projects:** a level, Blueprint, `GameUserSettings.ini` or LiveLink preset saved by an older version may still contain a token. When it is loaded, the token is moved into this session's store and removed from the loaded data, and one warning names the asset or source (never the value). Resave the asset, or recreate the LiveLink source, so the token is removed from disk.
 
-### Automatic Token Fetch (Recommended)
+### Automatic Token Fetch
 
-**New in v1.0.5:** Automatically fetch JWT tokens from your token server instead of manual entry.
-
-**Benefits:**
-- No manual token copying during development
-- Tokens automatically refresh before expiration
-- Supports multiple concurrent users with unique credentials
-- LiveKit credentials stay secure on the server
+The plugin can fetch LiveKit tokens from your own token endpoint instead of using a token you paste in. It fetches a new token before the current one expires, and your LiveKit API secret stays on your server.
 
 **Setup:**
 
-1. **Deploy a Token Generator Server**
-   - Your backend service that generates LiveKit JWTs
-   - Endpoint should accept POST requests to `/token`
-   - Example: `https://your-server.com/token`
-   - See `docs/dev/Open3DTransportWebRTC/Tests/mock-token-server.py` in the Open3DBroadcast repository for a reference implementation
+1. **Deploy a token endpoint**
+   - A service of yours that creates and signs LiveKit tokens.
+   - It accepts POST requests, for example at `https://your-server.com/token`.
+   - `docs/dev/Open3DTransportWebRTC/Tests/mock-token-server.py` in the Open3DBroadcast repository is a reference implementation for local testing.
 
-2. **Configure in Unreal Editor**
-   - Select your O3DSenderComponent or open LiveLink source settings
-   - Choose "WebRTC" as transport
-   - Check "Use Auto Token Fetch"
-   - Enter "Token Endpoint URL": `https://your-server.com/token`, or set it once for the whole project as `webrtc.tokenEndpointUrl` in **Project Settings > Plugins > Open3DBroadcast** (Sender Defaults and Receiver Defaults, transport `webrtc`); a component or source that leaves it empty uses that value. The endpoint credential is never set there.
-   - Enter the "Token Endpoint Credential" your endpoint expects, or set `O3DB_WEBRTC_TOKEN_ENDPOINT_AUTH` (see [Credentials](#credentials))
-   - Set "Room" to the same value on the sender and the receiver
-   - Set "Token Refresh Lead Time": 300 seconds (5 minutes recommended)
+2. **Configure in the Unreal Editor**
+   - Select your Open3D sender component, or open the LiveLink source settings.
+   - Choose "WebRTC" as the transport.
+   - Tick **Use Auto Token Fetch**.
+   - Enter the **Token Endpoint URL**: `https://your-server.com/token`, or set it once for the whole project as `webrtc.tokenEndpointUrl` in **Project Settings > Plugins > Open3DBroadcast** (Sender Defaults and Receiver Defaults, transport `webrtc`); a component or source that leaves it empty uses that value. The endpoint credential is never set there.
+   - Enter the **Token Endpoint Credential** your endpoint expects, or set `O3DB_WEBRTC_TOKEN_ENDPOINT_AUTH` (see [Credentials](#credentials)).
+   - Set **Room** to the same value on the sender and the receiver.
+   - **Token Refresh Lead Time (seconds)** defaults to 300.
 
-3. **How It Works**
-   - On startup: Unreal fetches token from your endpoint
-   - Request includes: room name, identity, role (publisher/subscriber), and `Authorization: Bearer <endpoint credential>` when one is set
-   - The request carries no grants; your server decides them
-   - Your server generates and signs JWT using stored LiveKit credentials
-   - Token automatically refreshes before expiration
-   - No manual token management required
+3. **How it works**
+   - On start, the transport requests a token from your endpoint.
+   - The request carries the room, the identity, the role (`publisher` for a sender, `subscriber` for a receiver), and `Authorization: Bearer <endpoint credential>` when one is set.
+   - The request carries no grants; your endpoint decides them.
+   - Your endpoint creates and signs the token with your LiveKit API key and secret.
+   - The transport fetches the next token the lead time before the current one expires.
 
 **Token endpoint requirements:**
 
@@ -175,7 +169,7 @@ The endpoint described here is a reference contract. `docs/dev/Open3DTransportWe
 - Accept POST with JSON: `{room, identity, role}`
 - Return JSON: `{token, expiresAt}` or `{token, ttl}`
 
-**Example Token Server Request/Response:**
+**Example token endpoint request and response:**
 ```json
 // Request
 POST https://your-server.com/token
@@ -196,78 +190,52 @@ Authorization: Bearer <endpoint credential>
 ```
 
 **Troubleshooting Auto Fetch:**
-- Check logs: `LogO3DWebRTCTokenManager` for fetch status. Logs show the endpoint without its query string and never show the response body or the token
-- "refused: use https://": the endpoint is plain `http://` on a host other than localhost
-- HTTP 401 or 403: the endpoint rejected the credential; check the Token Endpoint Credential or `O3DB_WEBRTC_TOKEN_ENDPOINT_AUTH`
-- Verify endpoint URL is correct and accessible
-- Ensure server returns valid JSON with "token" field
-- Check network firewall allows HTTPS to your server
-- Review retry attempts in logs (automatic retry on failures)
+- Check the log category `LogO3DWebRTCTokenManager` for the fetch status. Logs show the endpoint without its query string and never show the response body or the token.
+- "refused: use https://": the endpoint is plain `http://` on a host other than localhost.
+- HTTP 401 or 403: the endpoint rejected the credential; check the **Token Endpoint Credential** or `O3DB_WEBRTC_TOKEN_ENDPOINT_AUTH`.
+- "Token fetch timed out after 30.0 seconds": no token arrived in time. Check the endpoint URL and that the endpoint is reachable.
+- Make sure the endpoint returns JSON with a `token` field.
+- Failed fetches are retried; the retries show in the log.
 
 ### Room Configuration
 
-**Room Name**
-- Manual token mode: encoded in the JWT token
-- Auto Token Fetch: set the **Room** field (transport option `webrtc.room`) to the same value on the sender and the receiver. It is required; the transport does not start without it
-- Multiple senders/receivers can join same room
-- Different rooms are isolated (no crosstalk)
+**Room name**
+- Manual token mode: the room is part of the token.
+- Auto Token Fetch: set the **Room** field (transport option `webrtc.room`) to the same value on the sender and the receiver. It is required; the transport does not start without it.
+- Several senders and receivers can join the same room.
 
 **Identity**
-- Unique identifier for this participant in the room
-- Auto Token Fetch generates one per sender or receiver instance (`sender-<pid>-<id>`, `receiver-<pid>-<id>`), so several in one editor do not replace each other
+- Each participant in a room needs its own identity.
+- Auto Token Fetch generates one per sender or receiver instance (`sender-<pid>-<id>`, `receiver-<pid>-<id>`), so several in one editor do not replace each other.
 
 ---
 
 ## Audio Configuration
 
-### Sample Rate
+Audio is set on the sender component, under **Audio**: tick **Enable Audio**, then set the capture options. The WebRTC transport publishes the audio as a LiveKit audio track.
 
-**Recommended:** 48 kHz
-- Standard for audio production
-- Supported by LiveKit
-- No resampling needed
+| Setting | Default | Notes |
+|---|---|---|
+| **Sample Rate** | 48000 Hz | 8000 to 48000 Hz. |
+| **Num Channels** | 1 | 1 for mono, 2 for stereo. |
+| **Bitrate Kbps** | 64 | The WebRTC transport passes it to LiveKit clamped to 16 to 128 kbps; 0 becomes 16. |
 
-**Other Options:** 44.1 kHz, 48 kHz, 96 kHz
-- Higher rates require more bandwidth
-- Most real-time audio uses 48 kHz
-
-### Bitrate Selection
-
-| Use Case | Bitrate | Quality | Bandwidth | Devices |
-|----------|---------|---------|-----------|---------|
-| **Voice Only** | 16 kbps | Acceptable | Very Low | Many |
-| **Music/Effects** | 32 kbps | Good | Low | Good |
-| **High Quality Audio** | 96 kbps | Excellent | Medium | Few |
-| **Stereo Music** | 128 kbps | Excellent | Medium-High | Few |
-
-**Default:** 24 kbps (good for voice + motion capture)
-
-### Mono vs Stereo
-
-| Mode | Channels | Use Case | Bitrate Impact |
-|------|----------|----------|----------------|
-| **Mono** | 1 | Voice, director cues, click track | Standard |
-| **Stereo** | 2 | Music, ambience, spatial audio | ~1.5x bitrate |
-
-**Recommendation:** Mono for motion capture, Stereo for music
+The receiver plays the audio when **Enable Audio** is ticked on the LiveLink source.
 
 ### Audio Quality Troubleshooting
 
-**Symptom: Audio Too Quiet**
-- Increase input gain at microphone/capture
-- Verify LiveKit audio levels in dashboard
-- Check speaker volume
+**Audio too quiet**
+- Raise the gain at the microphone or capture device, or the sender's **Game Gain** or **Mic Gain**.
+- Check the speaker volume.
 
-**Symptom: Audio Distorted/Clipping**
-- Reduce microphone input gain
-- Check for clipping indicators in audio software
-- Note: The transport clamps float samples at ±1.0 (no automatic gain reduction)
+**Audio distorted or clipping**
+- Lower the input gain.
+- The transport clamps float samples at ±1.0; it does not reduce gain automatically.
 
-**Symptom: Audio Dropout/Silence**
-- Check bitrate vs available bandwidth
-- Reduce skeleton complexity if data channel is saturated
-- Monitor network latency
-- Verify no audio sink configured (logs will show "frame discarded")
+**Audio drops out or is silent**
+- Check the bitrate against the available bandwidth.
+- Check that **Enable Audio** is ticked on the receiving LiveLink source. Without it, the receiver discards audio frames; with `LogO3DWebRTCReceiver` set to Verbose it logs "WebRTC audio frame discarded (no sink)".
+- Audio is sent only while the sender is connected.
 
 ---
 
@@ -286,15 +254,15 @@ Control events and values (`Fire Control Event`, `Set Control Value` on the send
 ## Platform Support
 
 ### Current Status
-- ✅ **Windows 64-bit** (supported)
+- **Windows 64-bit:** supported.
 - Linux and macOS: not supported. `livekit_ffi` exists for Win64 only, and the plugin's module is limited to Win64 (`PlatformAllowList`), so targets for other platforms leave it out.
 
 ### Alternative Transports
-These are part of Open3DBroadcast itself. If WebRTC is not available for your platform:
-- **NNG:** Flexible topology, good latency, LAN-ready
-- **TCP:** Low-latency 1:1 streaming
-- **UDP:** Ultra-low latency for LAN only
-- **Loopback:** In-process testing and validation
+These are part of Open3DBroadcast itself:
+- **NNG:** publish/subscribe, pair or push/pull over TCP; works with the Repeater.
+- **TCP:** one sender to one receiver, reliable and ordered.
+- **UDP:** unreliable datagrams, with optional broadcast on a LAN.
+- **Loopback:** sender and receiver in the same process, for testing.
 
 ---
 
@@ -307,86 +275,67 @@ Search the Output Log for `WebRTC transport not registered`:
 - **"LiveKit FFI: library not found at ..."** or **"failed to load ..."**: `livekit_ffi.dll` is missing from `Open3DBroadcastWebRTC/Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/bin/Win64/`. Reinstall the add-on folder unchanged.
 - **No such line**: check that **Open3DBroadcast WebRTC** is enabled in **Edit → Plugins**. A developer build made with `O3D_WITH_TRANSPORT_WEBRTC=0` logs `Open3D WebRTC transport is not available in this build` instead.
 
-Log categories for this add-on: `LogO3DWebRTCSender` and `LogO3DWebRTCReceiver` (for example `log LogO3DWebRTCSender Verbose`).
+Log categories for this add-on: `LogO3DWebRTCSender`, `LogO3DWebRTCReceiver` and `LogO3DWebRTCTokenManager` (for example `log LogO3DWebRTCSender Verbose`).
 
 ### Connection Failures
 
-#### Error: "Connection failed (code=1)"
-**Cause:** Invalid URL or server unreachable
-**Solution:**
-1. Verify URL format: `wss://server.com` (not `ws://` or `https://`)
-2. Test connectivity: Ping server domain
-3. Check firewall: Ensure port 443 (or custom WSS port) is open
-4. Verify server is running
+#### "WebRTC connection failed (code=N): ..."
 
-#### Error: "Connection failed (code=401)"
-**Cause:** Invalid token, expired token, or permission mismatch
-**Solution:**
-1. Verify token format (should be valid JWT)
-2. Check token expiration: Tokens have TTL (default 24 hours)
-3. Verify token grants correct permissions (Publisher/Subscriber)
-4. Generate new token from server control panel
+LiveKit refused or lost the connection. The text after the code is LiveKit's own message. Check:
+1. The **LiveKit Host**: see [Server URL](#server-url).
+2. That the server is running and reachable from this machine, and that a firewall lets the port through (443 for `wss://` without a port).
+3. The token: not expired, for the right room, and with the right permissions (publish for a sender, subscribe for a receiver).
+4. That the sender and the receiver use different identities.
 
-#### Error: "Connection timeout"
-**Cause:** Network latency, firewall blocking, or server overload
-**Solution:**
-1. Check network latency: Should be <200ms typically
-2. Verify firewall allows WebSocket (WSS) outbound
-3. Check server load and capacity
-4. Try connecting to different server region
+#### "Failed to connect (code=N): ..."
+
+The connect call itself failed before LiveKit reported a state. Check the same points as above.
 
 ### Data Transfer Issues
 
 #### Frames Being Dropped
-**Symptoms:** frames are not sent (the transport's `SendSerialized` does not return `Queued`), DroppedFrames counter increases
 
-**Cause 1: Not Connected**
-- Verify `GetStats().bConnected` is true
-- Wait for connection to complete (async)
+**Symptoms:** the sender's `DroppedFrames` counter rises (**Get Transport Stats** on the sender component).
 
-**Cause 2: Payload Too Large**
-- Complex skeletons can exceed 1300 bytes (lossy limit)
-- Check warning: "Payload size exceeds lossy limit"
-- **Solutions:**
-  1. Simplify skeleton (remove unused bones)
-  2. Reduce bone precision
-  3. Transport automatically switches to reliable channel for 1300-15000 byte payloads
-  4. If payload > 15KB, frame is rejected (ERROR log)
+**Cause 1: not connected**
+- While the sender is connecting or reconnecting, frames are dropped and counted.
+- **Get Connection State** on the sender component returns **Connected** once frames can be sent.
 
-**Cause 3: Receiver Falling Behind**
-- On the receiver, frames wait for the next LiveLink update. When more than 16 MiB is waiting, new frames are refused and counted in the receiver's `DroppedFrames`
-- **Solutions:** keep the receiving editor or game ticking (a stalled game thread stops LiveLink updates), or lower the send rate
+**Cause 2: payload too large**
+- Frames go on LiveKit's reliable data channel, which takes up to 15,000 bytes per frame.
+- A larger frame is refused, and the log shows "Subject '...' payload size (N bytes) exceeds maximum (15000 bytes), consider simplifying skeleton". The message is throttled and reports how many similar ones it skipped.
+- With `webrtc.prefer_lossy=true`, frames of up to 1,300 bytes go on the lossy data channel and larger ones on the reliable channel; the 15,000-byte limit still applies.
+- **Solution:** send fewer bones or curves for that subject.
+
+**Cause 3: LiveKit is full**
+- When LiveKit's data channel cannot take a frame, the frame is dropped and counted in `SendErrors` and `DroppedFrames`. Lower the frame rate (see [Data Send Rate](#data-send-rate)).
+
+**Cause 4: receiver falling behind**
+- On the receiver, frames wait for the next LiveLink update. When more than 16 MiB is waiting, new frames are refused and counted in the receiver's `DroppedFrames`.
+- **Solutions:** keep the receiving editor or game ticking (a stalled game thread stops LiveLink updates), or lower the send rate.
 
 #### Latency Higher Than Expected
-**Expected Range:** 20-100ms (mostly network RTT)
-- SFU adds ~5-10ms overhead
-- Network round-trip time dominates
+
+Latency is mostly network time to and from the LiveKit server.
 
 **Solutions:**
-1. Use lower-latency network (wired > WiFi)
-2. Choose closer server region
-3. Reduce frame rate if not needed
-4. Monitor network conditions
+1. Use a wired network rather than Wi-Fi.
+2. Use a LiveKit server close to both ends.
+3. Lower the frame rate if you do not need it.
+
+#### The Receiver Reconnects While the Sender Is Idle
+
+The receiver reconnects when no data arrived for `webrtc.reconnect_timeout` seconds (default 2). Raise it, or set 0 to turn it off.
 
 ### Audio Issues
 
-#### "Failed to publish audio" Warning
-**Cause 1:** Not connected to server
-- Wait for connection callback before submitting audio
-
-**Cause 2:** Invalid audio parameters
-- NumChannels: Must be 1 or 2
-- SampleRate: Must be valid (typically 48000)
-- NumFrames: Must be > 0
-
-**Cause 3:** Audio bitrate out of range
-- Valid range: 16-128 kbps
-- If outside range: Clamped silently (check logs)
+#### "Failed to publish audio to track ..." Warning
+LiveKit refused an audio frame. The message after the frame details is LiveKit's own reason. The warning is throttled. Audio submitted while the sender is not connected is dropped without a warning.
 
 #### Audio Frame Discarded (No Sink)
-**Message:** "WebRTC audio frame discarded (no sink)"
-**Cause:** No audio sink registered
-**Solution:** Call `SetAudioSink()` before starting receiver
+**Message:** "WebRTC audio frame discarded (no sink)" (Verbose, `LogO3DWebRTCReceiver`)
+**Cause:** the receiver has no audio output.
+**Solution:** tick **Enable Audio** on the LiveLink source.
 
 ---
 
@@ -394,134 +343,67 @@ Log categories for this add-on: `LogO3DWebRTCSender` and `LogO3DWebRTCReceiver` 
 
 ### Data Send Rate
 
-**Default:** 60 frames/second
+The sender component's **Capture Rate Hz** sets how often it captures and sends a pose (default 60). At most one capture happens per tick, so the frame rate also limits it.
 
-**For Heavy Scenes (Many Bones):**
-- Reduce to 30 fps
-- Reduces data throughput by 50%
-- May require skeleton optimization
-
-```
-TargetDataSendHz = 30  // Instead of 60
-```
+**For heavy scenes (many bones):**
+- Lower **Capture Rate Hz** to 30. That halves the frame data rate.
+- Send fewer bones or curves.
 
 ### Bandwidth Estimation
 
-**Per Second Data Rate:**
+**Frame data per second:**
 ```
-Data Rate = (Payload Size in bytes) × (Send Rate in Hz)
+Data rate = payload size in bytes × capture rate in Hz
 
 Example:
-  Payload = 5 KB (5000 bytes)
-  Send Rate = 60 Hz
-  Data Rate = 5000 × 60 = 300,000 bytes/sec = 2.4 Mbps
+  Payload = 5,000 bytes
+  Capture rate = 60 Hz
+  Data rate = 5,000 × 60 = 300,000 bytes/s = 2.4 Mbit/s
 ```
 
-**Plus Audio:**
+**Plus audio:**
 ```
-Audio Rate = (Bitrate in kbps) / 8
-Example: 96 kbps = 12 KB/s = 96 Kbps
+Audio rate = bitrate in kbit/s ÷ 8, in kB/s
+Example: 64 kbit/s = 8 kB/s
 
-Total = Data Rate + Audio Rate
-```
-
-### CPU Optimization
-
-**Sender CPU Usage:**
-- ~3-5% on modern CPU (Intel i7+, AMD Ryzen 5+)
-- Primarily WebRTC encoding and network I/O
-- Audio conversion: <0.1% (negligible)
-
-**Receiver CPU Usage:**
-- ~2-3% per receiver (less than sender)
-- Mostly network I/O and deserialization
-
-**If CPU is High:**
-1. Reduce skeleton complexity
-2. Reduce send/receive frame rate
-3. Check for CPU-intensive consumer (application side)
-
-### Network Optimization
-
-**Test Your Network:**
-```bash
-# Quick latency test to server
-ping your-server.com
-
-# Bandwidth test (if available)
-iperf -c your-server.com
+Total = data rate + audio rate
 ```
 
-**Optimize for Bandwidth:**
-- Reduce skeleton bone count
-- Reduce send frequency (60 fps → 30 fps)
-- Reduce audio bitrate (96 kbps → 32 kbps)
-- Simplify animation (LOD)
-
-**Optimize for Latency:**
-- Use wired network (vs WiFi)
-- Choose nearest LiveKit server
-- Reduce frame rate (30 fps may feel smoother with lower latency)
-- Monitor round-trip time (RTT)
+**To use less bandwidth:**
+- Send fewer bones.
+- Lower **Capture Rate Hz** (for example 60 to 30).
+- Lower **Bitrate Kbps** (for example 64 to 32).
 
 ---
 
 ## FAQ
 
 ### Q: Can I use WebRTC on Linux?
-**A:** Currently No (Windows 64-bit only). LibKit FFI binaries for Linux are on the roadmap. Use TCP, UDP, or NNG transports as alternatives.
+**A:** No. The add-on supports Windows 64-bit only, because the LiveKit FFI library exists for Win64 only. Use the NNG, TCP or UDP transports instead.
 
 ### Q: How long are tokens valid?
-**A:** Depends on server configuration, typically 24 hours. Check your LiveKit admin panel. Tokens can be refreshed before expiration.
+**A:** As long as the server or token issuer allows; each token carries its expiry. With Automatic Token Fetch, the plugin fetches a new token before the current one expires.
 
-### Q: Can multiple senders use same room?
-**A:** Yes. All senders with same room name and Publisher role can send simultaneously. Receivers subscribe to all publishers in the room.
+### Q: Can several senders use the same room?
+**A:** Yes. Senders with publish permission in the same room send at the same time, and receivers subscribe to all of them.
 
 ### Q: What if I can't reach the server?
 **A:**
-1. Check server is running
-2. Verify URL format (WSS, not WS)
-3. Check firewall allows WebSocket
-4. Ping server domain to verify DNS
-5. Try different LiveKit server (may be down)
-
-### Q: How much bandwidth do I need?
-**A:** Depends on skeleton complexity and audio:
-- Minimal (simple rig, no audio): 0.5-2 Mbps
-- Typical (complex rig, voice): 2-5 Mbps
-- High quality (music): 5-10 Mbps
+1. Check that the server is running.
+2. Check the **LiveKit Host** (see [Server URL](#server-url)).
+3. Check that a firewall lets WebSocket connections through.
+4. Check that the host name resolves.
 
 ### Q: Can I switch transports at runtime?
-**A:** No. Choose transport at application startup. To switch, stop current transport and initialize new one.
+**A:** Yes. Call **Set Transport Name** on the sender component (for example `webrtc` or `udp`). The change applies the next time capture starts, so call **Stop Capture** and **Start Capture** after it. Each transport keeps its own options.
 
-### Q: Does WebRTC work through corporate firewalls?
-**A:** Usually yes. WebRTC uses STUN/TURN for NAT traversal. If direct connection fails, TURN relay provides fallback. However, some very restrictive firewalls may block all P2P. Consult your network administrator.
+### Q: How do I monitor the sender?
+**A:** Call **Get Transport Stats** on the Open3D sender component. It returns the connection state and the counters `FramesSent`, `BytesSent`, `DroppedFrames`, `SendErrors` and `PendingFrames`. **Get Connection State** returns the state alone.
 
-### Q: What is the latency range?
-**A:** 20-100ms is typical:
-- 5-10ms: Application processing
-- 10-50ms: Network transit to SFU
-- 5-10ms: SFU relay
-- 10-50ms: Network transit to receiver
-- Plus occasional buffering/jitter
-
-### Q: Can I use self-signed certificates?
-**A:** Not recommended. Use proper SSL certificates from trusted CA. Self-signed may work in development but will fail in production due to browser/client security restrictions.
-
-### Q: How do I monitor performance?
-**A:** Call `GetStats()` to retrieve:
-```
-Stats.FramesSent         // Total frames sent
-Stats.FramesReceived     // Total frames received
-Stats.BytesSent          // Total bytes sent
-Stats.BytesReceived      // Total bytes received
-Stats.DroppedFrames      // Frames rejected (too large, not connected)
-Stats.AverageLatencyMs   // Average round-trip latency
-Stats.MaxLatencyMs       // Peak latency observed
-```
+The WebRTC receiver also measures `AverageLatencyMs` and `MaxLatencyMs`: the time from a frame's arrival at the receiver until the receiver hands it to LiveLink. It is not network round-trip time, and the sender does not fill these fields. The receiver has no Blueprint node for its counters.
 
 ### Q: Can I rate-limit data sending?
-**A:** Yes, reduce `TargetDataSendHz` from 60 to 30 (or lower). The transport framework handles pacing.
+**A:** Yes. Lower the sender component's **Capture Rate Hz** (for example from 60 to 30).
 
 ---
 
@@ -530,4 +412,3 @@ Stats.MaxLatencyMs       // Peak latency observed
 - **LiveKit Documentation:** https://docs.livekit.io
 - **Open3DBroadcast User Guide:** `USER_GUIDE.md` in the Open3DBroadcast plugin folder
 - **Report Issues:** [GitHub Issues](https://github.com/lifelike-and-believable/Open3DBroadcast/issues)
-
