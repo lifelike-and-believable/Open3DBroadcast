@@ -324,7 +324,6 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Severity: medium
 - Location: Public/O3DSenderComponent.h:48-106, :124-129, :155-157, :259-266, :326-340
 - Evidence:
-- Status: closed in #386
   - `OnDescriptorReady`, `OnPoseFrameReady` and `OnSerializedFrame` are native multicast delegates, and `FO3DSSkeletonDescriptor`/`FO3DSPoseFrame` are not `BlueprintType`, so Blueprint cannot observe frames or state.
   - `Get/SetTransportOption`, `ClearTransportOptions` and `SetTransportName` are not UFUNCTIONs, so runtime configuration (for example a server URL typed in a UI) is impossible from Blueprint.
   - `TransportName` is BlueprintReadWrite, which bypasses the normalization and option-clearing done in `SetTransportName`.
@@ -333,13 +332,13 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Add dynamic delegates for capture state and transport errors. Expose the option accessors and the transport setter as BlueprintCallable, make `TransportName` BlueprintReadOnly with a setter, and remove `CallInEditor` (or make it work in the editor).
 - Effort: M
 - Owner: coding
+- Status: closed in #386
 
 ### SND-27: Missing clamps, tooltips and validation on properties
 - Category: usability
 - Severity: low
 - Location: Public/O3DSenderComponent.h:143-149, :245-257; Public/O3DSenderAudioCaptureComponent.h:42-64
 - Evidence:
-- Status: closed in #389
   - `CaptureRateHz` has no `ClampMin`/`UIMin`/`Units`. A value of 0 or below silently means "unlimited", which is undocumented.
   - `QuantizationHalfRange` is not validated to be at least `QuantizationByteRange`.
   - `FO3DSenderAudioCaptureConfig` fields have no tooltips and no clamps (`SampleRate`, `NumChannels` (1-2?), `BitrateKbps`, the gains).
@@ -347,6 +346,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Add `ClampMin`/`UIMin`/`Units="Hz"`/`ForceUnits`, document the meaning of 0, validate ranges in PostEditChangeProperty, add tooltips to the struct fields, and fix the doc text.
 - Effort: S
 - Owner: coding
+- Status: closed in #389
 
 ### SND-28: The auto-created audio component keeps capturing after audio is disabled
 - Category: performance

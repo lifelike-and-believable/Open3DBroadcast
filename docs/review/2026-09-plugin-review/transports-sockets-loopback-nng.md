@@ -460,7 +460,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Log Warning or Error for open, bind and parse failures, and rate-limited Warning for drops. Keep Verbose for per-frame detail.
 - Effort: S
 - Owner: coding
-- Status: closed in #391
+- Status: closed in #277
 
 ### TRB-44: NNG README is inaccurate and leaks an infrastructure IP
 - Category: docs
