@@ -206,12 +206,22 @@ jobs:
 
       # WP-F2 acceptance: a Linux game target with the plugin enabled builds, and the plugin's
       # modules are left out. Needs the Linux cross-compile toolchain (LINUX_MULTIARCH_ROOT) on
-      # the runner; without it the script prints a notice and the step passes.
-      - name: Linux target excludes the plugin
+      # the runner. Without it the check step shows as skipped, not passed (WP-R2, BC-9); with it,
+      # -Require makes a missing toolchain a failure.
+      - name: Linux toolchain present
+        id: linux-toolchain
         if: ${{ !cancelled() }}
         shell: powershell
         run: |
-          & .\Build\Scripts\Test-LinuxExclusion.ps1 -UEPath "$env:UE_ROOT"
+          $present = -not [string]::IsNullOrWhiteSpace($env:LINUX_MULTIARCH_ROOT)
+          "present=$($present.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if (-not $present) { Write-Host "::notice::LINUX_MULTIARCH_ROOT is not set on this runner; the Linux exclusion check is skipped." }
+
+      - name: Linux target excludes the plugin
+        if: ${{ !cancelled() && steps.linux-toolchain.outputs.present == 'true' }}
+        shell: powershell
+        run: |
+          & .\Build\Scripts\Test-LinuxExclusion.ps1 -UEPath "$env:UE_ROOT" -Require
 
       # WP-F7 acceptance (ADR 0010): a packaged Win64 Shipping game with the plugin enabled builds,
       # with no Open3DBroadcast editor module in it. A full cook of ProjectSandbox, so nightly and
@@ -254,10 +264,48 @@ jobs:
           if-no-files-found: ignore
           retention-days: 21
 
-      - name: Report failure
-        if: failure()
+  notify:
+    # WP-R2 (mid-project review BC-9): a red scheduled nightly opens an issue labelled
+    # nightly-failure (or comments on the open one), so GitHub notifies the repository's watchers;
+    # the next green scheduled nightly closes it. Manual runs never open or close the issue.
+    name: Report the nightly result
+    needs: [fab-package, nightly-build]
+    if: ${{ always() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open, update or close the nightly-failure issue
         uses: actions/github-script@v7
+        env:
+          NEEDS: ${{ toJSON(needs) }}
         with:
           script: |
-            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            console.log(`❌ Nightly Open3DBroadcast build failed. See: ${runUrl}`);
+            const needs = JSON.parse(process.env.NEEDS);
+            const failed = Object.entries(needs).filter(([, job]) => job.result === 'failure' || job.result === 'cancelled').map(([name, job]) => `${name}: ${job.result}`);
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const label = 'nightly-failure';
+            const { owner, repo } = context.repo;
+            const open = await github.paginate(github.rest.issues.listForRepo, { owner, repo, state: 'open', labels: label, per_page: 100 });
+            if (failed.length === 0) {
+              for (const issue of open) {
+                await github.rest.issues.createComment({ owner, repo, issue_number: issue.number, body: `The nightly passed again: ${runUrl}` });
+                await github.rest.issues.update({ owner, repo, issue_number: issue.number, state: 'closed' });
+              }
+              core.info(`Nightly green; closed ${open.length} open ${label} issue(s).`);
+              return;
+            }
+            const body = `❌ The nightly failed on ${context.sha.substring(0, 8)} (${new Date().toISOString().substring(0, 10)}).\n\n${failed.map((line) => `- ${line}`).join('\n')}\n\n[Run →](${runUrl})`;
+            if (open.length > 0) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: open[0].number, body });
+              core.info(`Commented on #${open[0].number}.`);
+              return;
+            }
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name: label });
+            } catch (error) {
+              await github.rest.issues.createLabel({ owner, repo, name: label, color: 'b60205', description: 'The scheduled nightly build failed' });
+            }
+            const created = await github.rest.issues.create({ owner, repo, title: 'Nightly build failing', labels: [label], body });
+            core.info(`Opened #${created.data.number}.`);
