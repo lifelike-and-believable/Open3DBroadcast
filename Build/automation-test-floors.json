@@ -1,5 +1,5 @@
 {
   "_comment": "Minimum number of UE automation tests each CI run must execute (Run-AutomationTests.ps1 -MinTestsKey). A run below its floor fails, so a test file that was not compiled or registered cannot drop out silently. Raise a floor in the PR that adds tests; lower it only in a PR that removes tests on purpose, and say why.",
-  "plugin": 476,
-  "plugin-with-webrtc": 531
+  "plugin": 477,
+  "plugin-with-webrtc": 532
 }
