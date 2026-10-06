@@ -294,7 +294,6 @@ void FO3DReceiverSource::ReceiveClient(ILiveLinkClient* InClient, FGuid InSource
     bIsValid = true;
 
     SourceMachineName = LOCTEXT("SourceHostUnknown", "-");
-    bLoggedActiveState = false;
 
     // StartTransport sets the status: waiting for data, or why it failed (RCV-16).
     if (StartTransport())
@@ -322,6 +321,11 @@ TSubclassOf<ULiveLinkSourceSettings> FO3DReceiverSource::GetSettingsClass() cons
 
 void FO3DReceiverSource::Tick(float DeltaTime)
 {
+    TickAt(DeltaTime, FPlatformTime::Seconds());
+}
+
+void FO3DReceiverSource::TickAt(float DeltaTime, double NowSeconds)
+{
     TimeSinceLastActivityCheck += DeltaTime;
 
     if (ActiveReceiver.IsValid())
@@ -330,16 +334,25 @@ void FO3DReceiverSource::Tick(float DeltaTime)
     }
 
     DrainConnectionState();
-    UpdateStalledStatus(FPlatformTime::Seconds());
+    UpdateStalledStatus(NowSeconds);
 
     // A2.a: release any gap-buffered frames whose wait has timed out even when no
     // new frame arrives to trigger it via Push. Game thread, like HandleSerializedFrame.
-    const double NowS = FPlatformTime::Seconds();
+    const double NowS = NowSeconds;
     Scheduler->Flush(NowS);
+
+    // Before concealment (WP-R1, RR-2): clearing forgets a subject's concealment state, so nothing
+    // is synthesized for it. LiveLink queues pushed frames but clears at once, so a held pose
+    // pushed earlier in this tick would make the cleared subject valid again, frozen.
+    if (TimeSinceLastActivityCheck >= ActivityCheckIntervalSeconds)
+    {
+        ClearInactiveSubjects(NowSeconds);
+        TimeSinceLastActivityCheck = 0.0f;
+    }
 
     // C1: synthesize a frame for any subject whose real data has starved
     // beyond LiveLink's own interpolation (FO3DReceiverConcealment::Tick).
-    Concealment->Tick(GetConcealmentSettings(), CanPublish(), FPlatformTime::Seconds(),
+    Concealment->Tick(GetConcealmentSettings(), CanPublish(), NowSeconds,
         [this](FName Subject, const TArray<FTransform>& BoneTransforms, const TArray<float>& CurveValues, double Time)
         {
             Publisher->PublishSyntheticFrame(Subject, BoneTransforms, CurveValues, Time);
@@ -348,11 +361,6 @@ void FO3DReceiverSource::Tick(float DeltaTime)
     ControlRouter->Tick(IsControlEnabled(), NowS, ActiveConfig.StreamId,
         [this](const std::vector<std::string>& MocapSubjects, uint64_t& OutUs) { return GetPresentedSenderTimeUs(MocapSubjects, OutUs); });
 
-    if (TimeSinceLastActivityCheck >= ActivityCheckIntervalSeconds)
-    {
-        ClearInactiveSubjects(FPlatformTime::Seconds());
-        TimeSinceLastActivityCheck = 0.0f;
-    }
 }
 
 void FO3DReceiverSource::Update()
@@ -365,7 +373,6 @@ bool FO3DReceiverSource::StartTransport()
 {
     StopTransport();
     StateMailbox->Reset();
-    bStalled = false;
 
     EnsureValidTransportName();
     ActiveConfig = BuildTransportConfig();
@@ -520,7 +527,6 @@ void FO3DReceiverSource::StopTransport()
     // RCV-5/RCV-34: cached bone names from the previous session must not survive a
     // restart, like the other per-subject maps above.
     FrameDecoder->Reset();
-    bLoggedActiveState = false;
     ResetStreamState();
 }
 
@@ -635,6 +641,7 @@ void FO3DReceiverSource::SetStatus(const FText& Status, bool bReceiving)
 {
     SourceStatus = Status;
     bStatusIsReceiving = bReceiving;
+    bStatusIsUnreadable = false;
 }
 
 void FO3DReceiverSource::FailStart(const FO3DTransportResult& Result)
@@ -689,7 +696,6 @@ void FO3DReceiverSource::UpdateStalledStatus(double NowSeconds)
     }
     if (NowSeconds - LastActive > StalledAfterSeconds)
     {
-        bStalled = true;
         SetStatus(FText::Format(LOCTEXT("StatusStalledFmt", "No data received (via {0})"), FText::FromName(ActiveConfig.Transport)), false);
     }
 }
@@ -756,13 +762,6 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, TConstArr
         return;
     }
 
-    if (!bStatusIsReceiving)
-    {
-        SetStatus(FText::Format(LOCTEXT("StatusReceivingFmt", "Receiving via {0}"), FText::FromName(ActiveConfig.Transport)), true);
-        bLoggedActiveState = true;
-        bStalled = false;
-    }
-
     // A2.a: peek tx_seq/tx_wallclock_us/frame_epoch, the content time and the sender
     // stream key without a full FlatBuffer parse (PeekPacketMeta verifies the buffer
     // first, so this is safe on malformed input). Reorder, dedup and stale-drop then
@@ -799,10 +798,27 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, TConstArr
             ++SuppressedMalformedWarnings;
         }
         MetricsHandle->RecordDeserializationError();
+
+        // RR-3: say why nothing is received, once, instead of "Receiving" (the status then
+        // flapped with "No data received", since unreadable packets are not activity). Not while
+        // readable frames arrive too: a few unreadable ones among them only log.
+        if (!bStatusIsReceiving && !bStatusIsUnreadable)
+        {
+            const FText Transport = FText::FromName(ActiveConfig.Transport);
+            SetStatus(Meta.check == O3DS::Wire::FrameCheck::VersionTooNew
+                ? FText::Format(LOCTEXT("StatusSenderTooNewFmt", "Error: the sender on {0} needs wire protocol {1}; update this receiver"),
+                    Transport, FText::AsNumber(static_cast<int32>(Meta.min_reader_version)))
+                : FText::Format(LOCTEXT("StatusUnreadableFmt", "Unreadable data via {0}"), Transport), false);
+            bStatusIsUnreadable = true;
+        }
         return;
     }
 
     UpdateConnectionLastActive();
+    if (!bStatusIsReceiving)
+    {
+        SetStatus(FText::Format(LOCTEXT("StatusReceivingFmt", "Receiving via {0}"), FText::FromName(ActiveConfig.Transport)), true);
+    }
 
     // Ordering per sender stream (RCV-5): legacy timestamp ordering or the reorder gate. Released
     // packets come back through ApplyReleasedFrame.
@@ -938,7 +954,7 @@ void FO3DReceiverSource::ApplyReleasedFrame(O3DS::ReceiverStream& Stream, const 
 /** Casts Settings to access concealment config - see the header's own doc comment. */
 const UO3DReceiverSourceSettings* FO3DReceiverSource::GetConcealmentSettings() const
 {
-    return Cast<UO3DReceiverSourceSettings>(Settings);
+    return Cast<UO3DReceiverSourceSettings>(Settings.Get());
 }
 
 bool FO3DReceiverSource::ParseSubjectListRaw(O3DS::SubjectList& List, const FString& Subject, const char* Data, size_t Len, std::vector<O3DS::ParsedSubjectInfo>& OutTouched,
@@ -946,7 +962,20 @@ bool FO3DReceiverSource::ParseSubjectListRaw(O3DS::SubjectList& List, const FStr
 {
     if (!List.Parse(Data, Len, nullptr, true, &OutTouched, Context))
     {
-        UE_LOG(LogO3DReceiverSource, Warning, TEXT("Parse failed for subject '%s' (%d bytes): %s"), *Subject, (int32)Len, UTF8_TO_TCHAR(List.mError.c_str()));
+        // Throttled like a malformed packet (WP-R1): one broken rig, or a hostile peer, sends this
+        // at frame rate.
+        const double NowSeconds = FPlatformTime::Seconds();
+        if (NowSeconds - LastParseFailedWarningTime >= MalformedWarningIntervalSeconds)
+        {
+            UE_LOG(LogO3DReceiverSource, Warning, TEXT("Parse failed for subject '%s' (%d bytes): %s; %d similar since the last warning"),
+                *Subject, (int32)Len, UTF8_TO_TCHAR(List.mError.c_str()), SuppressedParseFailedWarnings);
+            LastParseFailedWarningTime = NowSeconds;
+            SuppressedParseFailedWarnings = 0;
+        }
+        else
+        {
+            ++SuppressedParseFailedWarnings;
+        }
         return false;
     }
     return true;
@@ -1149,7 +1178,8 @@ size_t FO3DReceiverSource::GetNumHeldControlChanges() const
 
 bool FO3DReceiverSource::GetPresentedSenderTimeUs(const std::vector<std::string>& MocapSubjects, uint64_t& OutUs)
 {
-    const ELiveLinkSourceMode Mode = Settings ? Settings->Mode : ELiveLinkSourceMode::EngineTime;
+    const ULiveLinkSourceSettings* SourceSettingsObject = Settings.Get();
+    const ELiveLinkSourceMode Mode = SourceSettingsObject ? SourceSettingsObject->Mode : ELiveLinkSourceMode::EngineTime;
 
     O3DS::ReceiverStream* Stream = Scheduler->FindBySubjects(MocapSubjects);
     if (Stream == nullptr || FPlatformTime::Seconds() - Stream->lastSeenS > AlignmentStreamLivenessSeconds)
@@ -1173,13 +1203,13 @@ bool FO3DReceiverSource::GetPresentedSenderTimeUs(const std::vector<std::string>
         const FFrameRate SenderRate(Latest.rate_numerator, Latest.rate_denominator);
         const double LatestSceneS = FQualifiedFrameTime(FFrameTime(FFrameNumber(Latest.frame), Latest.subframe), SenderRate).AsSeconds();
         double ReadS = EngineTime->AsSeconds();
-        if (Settings != nullptr)
+        if (SourceSettingsObject != nullptr)
         {
-            if (Settings->BufferSettings.bUseTimecodeSmoothLatest)
+            if (SourceSettingsObject->BufferSettings.bUseTimecodeSmoothLatest)
             {
-                ReadS -= Settings->BufferSettings.TimecodeClockOffset;
+                ReadS -= SourceSettingsObject->BufferSettings.TimecodeClockOffset;
             }
-            ReadS -= static_cast<double>(Settings->BufferSettings.TimecodeFrameOffset) * SenderRate.AsInterval();
+            ReadS -= static_cast<double>(SourceSettingsObject->BufferSettings.TimecodeFrameOffset) * SenderRate.AsInterval();
         }
         const double PresentedS = Stream->subjects.mTime - FMath::Max(0.0, LatestSceneS - ReadS);
         OutUs = PresentedS > 0.0 ? static_cast<uint64_t>(PresentedS * 1.0e6) : 0;
@@ -1190,9 +1220,9 @@ bool FO3DReceiverSource::GetPresentedSenderTimeUs(const std::vector<std::string>
     // clock the control publisher stamps (ADR 0011 item 9). In EngineTime mode LiveLink shows the
     // buffer EngineTimeOffset seconds behind, so the pose on screen is that much older.
     double PresentedS = Stream->subjects.mTime;
-    if (Mode == ELiveLinkSourceMode::EngineTime && Settings)
+    if (Mode == ELiveLinkSourceMode::EngineTime && SourceSettingsObject != nullptr)
     {
-        PresentedS -= static_cast<double>(Settings->BufferSettings.EngineTimeOffset);
+        PresentedS -= static_cast<double>(SourceSettingsObject->BufferSettings.EngineTimeOffset);
     }
     OutUs = PresentedS > 0.0 ? static_cast<uint64_t>(PresentedS * 1.0e6) : 0;
     return true;

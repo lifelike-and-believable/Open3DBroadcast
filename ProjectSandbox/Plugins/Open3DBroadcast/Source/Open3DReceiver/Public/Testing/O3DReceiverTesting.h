@@ -135,6 +135,8 @@ struct FO3DReceiverSourceTestAccessor
 	static void UpdateStalledStatus(FO3DReceiverSource& Source, double NowSeconds) { Source.UpdateStalledStatus(NowSeconds); }
 	static bool HasStartFailed(const FO3DReceiverSource& Source) { return Source.bStartFailed.load(); }
 	static void Poll(FO3DReceiverSource& Source) { if (Source.ActiveReceiver.IsValid()) { Source.ActiveReceiver->Poll(); } }
+	static void TickAt(FO3DReceiverSource& Source, float DeltaTime, double NowSeconds) { Source.TickAt(DeltaTime, NowSeconds); }
+	static const UO3DReceiverSourceSettings* GetSettings(const FO3DReceiverSource& Source) { return Source.GetConcealmentSettings(); }
 };
 
 /** Binds a remote control component to the bus without a world (BeginPlay needs one). */
