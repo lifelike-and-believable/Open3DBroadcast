@@ -95,6 +95,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Either move `ThirdParty/` under `Source/ThirdParty/` (preferred; wrap each lib in its own `Type=External` module), or add `Config/FilterPlugin.ini` with `[FilterPlugin]` entries: `/ThirdParty/...`, `/README.md`, `/USER_GUIDE.md`, `/LICENSE`, `/THIRD_PARTY_LICENSES.md`. Then assert on the package contents in CI.
 - Effort: S
 - Owner: coding
+- Status: closed in #284
 
 ### FAB-3: No PlatformAllowList on any module, and non-Win64 targets hard-fail the whole build
 - Category: fab-readiness
@@ -104,6 +105,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Add `"PlatformAllowList": ["Win64"]` to every module, and `"SupportedTargetPlatforms": ["Win64"]` at plugin level. Replace each `throw` with a no-op or a clean `bBuildModule`-style exclusion. List only Win64 on Fab.
 - Effort: S
 - Owner: coding
+- Status: closed in #283
 
 ### FAB-4: .pdb files ship in Source/, and moq_ffi.pdb is staged into every packaged game
 - Category: fab-readiness
@@ -113,6 +115,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Delete both pdbs from the plugin tree; keep them in a symbol store or a GitHub release asset. Remove Build.cs lines 92-97. Add a CI check that fails on `*.pdb` in the package.
 - Effort: S
 - Owner: coding
+- Status: closed in #278
 
 ### FAB-5: 104 of 147 source files have no copyright header
 - Category: fab-readiness
@@ -122,6 +125,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Add a uniform header naming the actual rights holder or seller (see FAB-9) to all files, and add a CI lint for it.
 - Effort: S
 - Owner: coding
+- Status: closed in #280
 
 ### FAB-6: open3dstream core headers and lib are gitignored build outputs, and Fab cannot run Sync-O3DSCore.ps1
 - Category: build
@@ -131,6 +135,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Compile the o3ds core (MIT, in-repo `src/o3ds`) directly as a UE module (for example an `Open3DStreamCore` module with the sources copied into `Source/`), so no prebuilt `open3dstreamstatic.lib` is needed. Do the same for flatbuffers (header-only use is possible) and consider NNG. Failing that, commit the generated headers and lib into the Fab source zip, built without `/GL` using Fab's documented toolset.
 - Effort: M
 - Owner: design
+- Status: closed in #284
 
 ### CI-1: Build-Plugin.ps1 hides BuildPlugin failure behind a fallback that exits 0
 - Category: ci
@@ -140,6 +145,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Remove the fallback, or put it behind an explicit `-AllowFallback` switch that CI never passes. Fail the job on BuildPlugin failure. Add a package-content assertion step (expected Binaries DLLs, ThirdParty libs, license files, and no pdb/md/py).
 - Effort: S
 - Owner: coding
+- Status: closed in #270
 
 ### CI-2: The Test workflow never runs automation tests (boolean input compared to a string)
 - Category: ci
@@ -149,6 +155,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Use `if: ${{ inputs.run_editor_tests }}` (or `github.event.inputs.run_editor_tests == 'true'`). Better, run the automation tests in PR CI after the build, on the self-hosted runner.
 - Effort: S
 - Owner: coding
+- Status: closed in #274
 
 ### CI-3: The automation test runner doesn't reliably detect failures, and the nightly may test stale binaries
 - Category: ci
@@ -158,6 +165,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Build `ProjectSandboxEditor Win64 Development` via UBT before the tests. Parse `index.json` and fail on `failed > 0` or a missing report. Use `-TestExit="Automation Test Queue Empty"`. Use the filter `Open3DBroadcast`.
 - Effort: S
 - Owner: coding
+- Status: closed in #274
 
 ### CI-4: CI builds only UE 5.7 Win64, with no strict or warnings-as-errors variants
 - Category: ci
@@ -167,6 +175,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Add a matrix over the engine versions the listing will support (at least 5.7; also 5.6 if you want back-compat, which needs `EngineVersion` per package). Add a job that runs BuildPlugin with `-StrictIncludes` and `bUseUnity=false`, and fail on `warning C` / `warning:` lines from plugin sources.
 - Effort: M
 - Owner: coding
+- Status: closed in #274
 
 ### CI-5: There is no Fab source-zip packaging job; the release ships compiled output with a misleading compatibility claim
 - Category: ci
@@ -176,6 +185,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Add a `fab-package` job that produces a source-only zip (the uplugin plus Source/Resources/Config/Content/ThirdParty/docs, no Binaries/Intermediate/pdb/md-dev/py), runs BuildPlugin against *that zip's* contents, and uploads it. Fix the release notes to say "UE 5.7, Win64 only". Commit version bumps via a PR, or derive them from the tag.
 - Effort: M
 - Owner: coding
+- Status: closed in #274
 
 ### CI-6: A 6-hour Google WebRTC build runs on every develop push/PR, and its output is unused
 - Category: ci
@@ -185,6 +195,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Switch it to `workflow_dispatch` only, or delete it. That frees the self-hosted runner for plugin CI.
 - Effort: S
 - Owner: coding
+- Status: closed in #274
 
 ### CI-7: Stale workflows and scripts reference removed code or files
 - Category: ci
@@ -194,6 +205,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Delete `package.py`, `scripts/test_package_layout.py`, `usr/`, `build*.bat`, `o3ds.nsi` (if the installer is dead), and `create-webrtc-audio-issues.yml`. Fix the Gauntlet filter and the `Setup-UE.ps1` default. Fix or remove `doc.yml`.
 - Effort: S
 - Owner: coding
+- Status: closed in #282
 
 ### CI-8: What check-no-video-codecs.sh and render-icon.py do, and where they're wired
 - Category: ci
@@ -203,6 +215,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Once FAB-1 is fixed, add `check-no-video-codecs.sh` as a required step in plugin CI (it needs `binutils`; run it in the `changes` ubuntu job). Add a CI check that the PNG matches the SVG render.
 - Effort: S
 - Owner: coding
+- Status: closed in #274
 
 ### FAB-7: Editor-only detail customizations live inside Runtime modules
 - Category: fab-readiness
@@ -212,6 +225,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Create an `Open3DBroadcastEditor` module (`Type: Editor`, `LoadingPhase: PostEngineInit`) that registers the Sender/Receiver/transport customizations, and strip the `WITH_EDITOR` UI blocks from the runtime modules. Drop the `EditorStyle` dependency.
 - Effort: M
 - Owner: design
+- Status: closed in #285
 
 ### FAB-8: [SupportedTargetTypes(Game, Editor)] excludes Server, Client and Program, with nothing matching in the uplugin
 - Category: build
@@ -221,6 +235,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Either support Server/Client (the receiver is useful headless), or declare `"TargetAllowList": ["Game","Editor"]` in each uplugin module entry so the exclusion is explicit and consistent.
 - Effort: S
 - Owner: coding
+- Status: closed in #283
 
 ### FAB-9: Rights holder and author identity are inconsistent
 - Category: licensing
@@ -230,6 +245,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Decide the seller entity. Update CreatedBy, CreatedByURL and the header text. Add a proper SupportURL (an issue tracker or support email page). Fill `MarketplaceURL` with the Fab listing URL after approval. Keep the original author's MIT notice for the o3ds core.
 - Effort: S
 - Owner: design
+- Status: closed in #280
 
 ### FAB-10: Duplicate, divergent Opus headers; unknown Opus provenance; possible symbol clash with the engine's libOpus
 - Category: licensing
@@ -257,6 +273,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Ship MoQ as a separate optional plugin or module marked Experimental, or flag it Beta in the listing and the UI.
 - Effort: S
 - Owner: design
+- Status: closed in #281
 
 ### BUILD-1: Wrong path to plugin ThirdParty in the WebRTC and MoQ Build.cs, silently ignored
 - Category: build
@@ -266,6 +283,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Use `Path.Combine(PluginDirectory, "ThirdParty", "open3dstream", "include")`, or rely on the Open3DShared dependency and delete the block.
 - Effort: S
 - Owner: coding
+- Status: closed in #286
 
 ### BUILD-2: Dead Linux/Mac branches in MoQ Build.cs contradict the Open3DShared gate
 - Category: build
@@ -275,6 +293,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Remove them until binaries exist, or keep them behind the same PlatformAllowList.
 - Effort: S
 - Owner: coding
+- Status: closed in #283
 
 ### BUILD-3: Third-party headers are not wrapped, and the o3ds include is not a system include
 - Category: build
@@ -284,6 +303,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Add the o3ds include as `PublicSystemIncludePaths`, and wrap every third-party include in `THIRD_PARTY_INCLUDES_START/END`.
 - Effort: S
 - Owner: coding
+- Status: closed in #278
 
 ### BUILD-4: Build-time environment-variable feature flags are cached statically and default to a removed backend
 - Category: build
@@ -293,6 +313,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Remove the LIBDC flag. Document the flags as developer-only, or remove them for the Fab build.
 - Effort: S
 - Owner: coding
+- Status: closed in #283
 
 ### BUILD-5: Every module sets bEnableExceptions; RTTI isn't set anywhere
 - Category: build
@@ -302,6 +323,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Enable exceptions only in the modules that include flatbuffers or o3ds with try/catch.
 - Effort: S
 - Owner: coding
+- Status: closed in #283
 
 ### HYG-1: Dev and planning docs, a Python test server and absolute paths inside the shipped Source/ tree
 - Category: repo-hygiene
@@ -311,6 +333,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Move these to `docs/dev/` outside the plugin. Keep only user-facing docs (the module READMEs, the WebRTC USER_GUIDE) and license files. Add a CI rule rejecting `*.py` and planning-document names under `Plugin/Source`.
 - Effort: S
 - Owner: docs
+- Status: closed in #282
 
 ### HYG-2: CanContainContent is true, but the plugin has no Content/ and no Config/
 - Category: repo-hygiene
@@ -320,6 +343,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Either add sample content (UX-1) or set `false`. Add `Config/FilterPlugin.ini` (FAB-2).
 - Effort: S
 - Owner: coding
+- Status: closed in #284
 
 ### HYG-3: The sandbox project points at a nonexistent startup map, and its .gitignore contradicts the committed Content
 - Category: repo-hygiene
@@ -329,6 +353,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Point the startup map at an existing demo map, fix the .gitignore, remove the trailing comma, and drop the stale ignore entries.
 - Effort: S
 - Owner: coding
+- Status: closed in #282
 
 ### HYG-4: Root-level planning files and internal business docs
 - Category: repo-hygiene
@@ -338,6 +363,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Move them to `docs/archive/` or an internal wiki. Keep the root to README, LICENSE, CHANGELOG and CONTRIBUTING.
 - Effort: S
 - Owner: docs
+- Status: closed in #282
 
 ### DOC-1: The plugin README claims "Marketplace Ready / no pre-build steps", which is false
 - Category: docs
@@ -476,6 +502,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Mark the network tests `EAutomationTestFlags::StressFilter`, or skip them unless `O3D_MOQ_RELAY_URL` is set. Consider moving tests to a separate `Open3DBroadcastTests` module (`Type: DeveloperTool` or `UncookedOnly`).
 - Effort: S
 - Owner: coding
+- Status: closed in #276
 
 ### UX-5: The plugin description and naming are confusing across surfaces
 - Category: usability
@@ -494,6 +521,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Move it out of the plugin (HYG-1) and require the environment variable with no default.
 - Effort: S
 - Owner: coding
+- Status: closed in #275
 
 ### CI-9: Plugin CI skips draft PRs and runs only on self-hosted runners; docs-only changes skip the build
 - Category: ci
@@ -503,6 +531,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Add a cheap GitHub-hosted job on every PR: validate the uplugin JSON and PlatformAllowList, the copyright-header lint, a check for forbidden files (pdb/py/planning md) under `Plugin/`, and a link check on the docs.
 - Effort: S
 - Owner: coding
+- Status: closed in #274
 
 ### FAB-13: MarketplaceURL is empty and SupportURL is a generic website
 - Category: fab-readiness

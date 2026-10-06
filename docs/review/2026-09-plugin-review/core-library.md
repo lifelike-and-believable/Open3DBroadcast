@@ -31,6 +31,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Add a regression test that builds this buffer.
 - Effort: S
 - Owner: coding
+- Status: closed in #265
 
 ### CORE-2: Heap buffer overflow in `UdpCombiner::addFragment` when fragments of one message disagree on `fragSize`
 - Category: security
@@ -47,6 +48,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Add a unit test for mixed-fragSize input.
 - Effort: S
 - Owner: coding
+- Status: closed in #264
 
 ### CORE-3: Unbounded UDP reassembly state enables memory exhaustion (and `UdpCombiner` is an unsafe copyable owner)
 - Category: security
@@ -65,6 +67,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Replace the raw buffers with `std::vector<char>` so the classes follow the rule of zero.
 - Effort: M
 - Owner: coding
+- Status: closed in #264
 
 ### CORE-4: `UdpMapper` emits empty frames and discards in-progress messages after a rejected fragment
 - Category: bug
@@ -82,6 +85,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Make `isComplete()` return false when `mBufferSize == 0`.
 - Effort: S
 - Owner: coding
+- Status: closed in #264
 
 ### CORE-5: Residual coding (C2) is not loss-tolerant: one lost update drifts until the next keyframe
 - Category: architecture
@@ -101,6 +105,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Until this is done, document residual mode as reliable-ordered-transport-only (TCP/NNG), and have the UE settings block it on UDP/WebRTC-unreliable.
 - Effort: M
 - Owner: design
+- Status: closed in #342
 
 ### CORE-6: `ResidualDecoder` fallback applies residuals as absolute values and poisons history; residual keyframes cannot bootstrap a late joiner
 - Category: bug
@@ -120,6 +125,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Normalize or skip NaN channels identically on both sides.
 - Effort: M
 - Owner: design
+- Status: closed in #342
 
 ### CORE-7: CRC-32 computed bit-by-bit dominates Serialize/Parse cost
 - Category: performance
@@ -134,6 +140,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Since FlatBuffers is already verified and transports have their own checksums, consider making the CRC optional through a flags bit.
 - Effort: S
 - Owner: coding
+- Status: closed in #320
 
 ### CORE-8: `CalcMatrices` is O(N²), silently accepts parent cycles, and has a dead NaN check
 - Category: security
@@ -153,6 +160,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Make world-matrix computation opt-in, since the UE receiver consumes local TRS.
 - Effort: M
 - Owner: coding
+- Status: closed in #265
 
 ### CORE-9: No validation of non-finite floats or sizes from the wire
 - Category: security
@@ -168,6 +176,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Use `std::isfinite` in `nan()` and rename it `nonFinite()`.
 - Effort: S
 - Owner: coding
+- Status: closed in #265
 
 ### CORE-10: Legacy and quantized delta paths are not loss-safe: `sent()` marks delivery at serialize time and there is no periodic resync
 - Category: bug
@@ -197,6 +206,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Add scale to the residual codec, or document it as unsupported and have the sender force a full sync on scale change.
 - Effort: S
 - Owner: coding
+- Status: closed in #346
 
 ### CORE-12: Rotation quantization picks precision from delta size, but encodes the absolute value
 - Category: bug
@@ -230,6 +240,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Normalize inside `Matrix::Quaternion`, or assert unit length.
 - Effort: M
 - Owner: design
+- Status: closed in #350
 
 ### CORE-14: Lockstep predictors depend on cross-compiler floating-point determinism that is not guaranteed
 - Category: architecture
@@ -245,6 +256,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Make the probe a CI gate comparing MSVC and GCC outputs.
 - Effort: M
 - Owner: design
+- Status: closed in #353
 
 ### CORE-15: A single forged or corrupted `tx_seq` blackholes a ReorderGate stream; `PeekMeta` skips the CRC
 - Category: security
@@ -260,6 +272,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Check flags and CRC in `PeekMeta`, which is cheap once the CRC is table-based (CORE-7).
 - Effort: S
 - Owner: coding
+- Status: closed in #345
 
 ### CORE-16: Schema versioning: new semantics are invisible to old readers, and there is no wire version or file identifier
 - Category: architecture
@@ -279,6 +292,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Populate the CHANGELOG "Schema/Protocol" section.
 - Effort: M
 - Owner: design
+- Status: closed in #335
 
 ### CORE-17: Ownership and API hazards in the model layer
 - Category: architecture
@@ -334,6 +348,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Register each `O3DS_TEST` as its own ctest entry.
 - Effort: M
 - Owner: coding
+- Status: closed in #266
 
 ### CORE-20: Build hygiene: header install restricted to one config, warnings off, legacy targets always built
 - Category: build
@@ -372,6 +387,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Add Linux/Mac lib outputs when those platforms are needed.
 - Effort: S
 - Owner: coding
+- Status: closed in #284
 
 ### CORE-22: Unaligned, type-punned, host-endian header reads and writes
 - Category: code-quality
@@ -381,6 +397,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
 - Recommendation: Use `memcpy` into a local variable plus explicit little-endian conversion (`flatbuffers::ReadScalar`/`WriteScalar`).
 - Effort: S
 - Owner: coding
+- Status: closed in #335
 
 ### CORE-23: Legacy `ParseUpdate` stops at the first out-of-range index and mixes signed and unsigned comparisons
 - Category: bug
@@ -393,6 +410,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
 - Recommendation: Use the same `if (id < 0 || (size_t)id >= n) continue;` pattern everywhere.
 - Effort: S
 - Owner: coding
+- Status: closed in #265
 
 ### CORE-24: `Context` copy constructor drops `mFormat`
 - Category: bug
@@ -426,6 +444,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
 - Recommendation: Reject `tx_wallclock_us` more than ±1 day from `local_recv_us`, and keep `mLastTxWallclockUs = max(...)`.
 - Effort: S
 - Owner: coding
+- Status: closed in #265
 
 ### CORE-27: Legacy connectors are dead relative to the UE plugin, and have their own defects
 - Category: architecture
@@ -440,6 +459,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Keep them building for Repeater and MotionBuilder until those are archived (CORE-28).
 - Effort: M
 - Owner: design
+- Status: closed in #375
 
 ### CORE-28: Archive the legacy apps, DCC plugins, python and sphinx trees
 - Category: architecture
@@ -454,6 +474,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Replace sphinx with docs for the stable surface.
 - Effort: S
 - Owner: design
+- Status: closed in #375
 
 ### CORE-29: Sequencing (A1) is dormant in production because the UE sender never sets `tx_seq`/`frame_epoch`
 - Category: architecture
@@ -468,6 +489,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
   - Deprecate the raw default-zero overloads.
 - Effort: S
 - Owner: design
+- Status: closed in #341
 
 ### CORE-30: Define a small, stable public surface for the plugin
 - Category: architecture

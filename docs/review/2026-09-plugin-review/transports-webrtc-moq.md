@@ -23,6 +23,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Give the sink a `TWeakPtr` to shared "audio publish state" (or a ref-counted core object) instead of `Owner&`. Hold `AudioTracksMutex` (or a read lock) across publish, or remove tracks from the map under the lock and destroy them only after in-flight publishes finish (for example with an `FRWLock`, or an atomic "closing" flag plus a drain). `Stop()` should mark the sink invalid before it destroys any handle.
 - Effort: M
 - Owner: coding
+- Status: closed in #269
 
 ### TRF-2: Dangling UTF-8 pointer stored in LkAudioTrackConfig.track_name
 - Category: bug
@@ -32,6 +33,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: `FTCHARToUTF8 TrackNameUtf8(*StreamLabel); TrackConfig.track_name = TrackNameUtf8.Get();` so the converter lives across the FFI call. Grep the codebase for other stored `TCHAR_TO_UTF8` results.
 - Effort: S
 - Owner: coding
+- Status: closed in #271
 
 ### TRF-3: WebRTC token auto-fetch mode never connects
 - Category: bug
@@ -41,6 +43,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Track "connect pending" separately from the token value, for example `bConnectRequested && !bConnectInFlight && TokenAvailable`, and let `Tick`/`Poll` start the connect. Do not assign `Token` inside the HTTP callback; read it from `TokenManager` on the game thread. Add a test that uses a stub fetcher.
 - Effort: S
 - Owner: coding
+- Status: closed in #271
 
 ### TRF-4: Double free of borrowed transforms on the serialize-failure path in Send(SubjectList)
 - Category: bug
@@ -50,6 +53,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Detach the borrowed transforms right after serialization, before any early-out (or use a scope guard). Better: delete this path and have `Send()` delegate to `SendSerialized` using the shared serializer. Also see TRF-19.
 - Effort: S
 - Owner: coding
+- Status: closed in #271
 
 ### TRF-5: Heuristic "FFI backpressure" estimator drops frames on healthy links and spams warnings
 - Category: bug
@@ -59,6 +63,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Remove the estimator, or base it on `lk_get_data_stats` deltas (dropped and sent bytes) or on a wall-clock drain rate. Make any thresholds CVars. Throttle the warnings.
 - Effort: M
 - Owner: design
+- Status: closed in #271
 
 ### TRF-6: WebRTC receiver no-data watchdog forces full teardown and reconnect every 2 s, on the game thread, with no backoff
 - Category: bug
@@ -86,6 +91,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Clear `AnnouncedNamespaces` (and bindings) on every transition to DISCONNECTED or FAILED. Preferably destroy and recreate the `MoqClient` on reconnect.
 - Effort: S
 - Owner: coding
+- Status: closed in #273
 
 ### TRF-9: Data race on the MoQ publisher TSharedPtr members between the worker and game threads
 - Category: thread-safety
@@ -95,6 +101,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Guard the handles with a mutex and snapshot them under the lock in the worker, or keep the publisher lifecycle on the worker thread (post connect-state changes to it).
 - Effort: S
 - Owner: coding
+- Status: closed in #273
 
 ### TRF-10: MoQ audio encoder is shared across threads and streams without synchronization
 - Category: thread-safety
@@ -104,6 +111,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Give each sink or stream label its own encoder, owned by the sink, or protect the encoder with a lock and reinitialize only when no sink is active.
 - Effort: M
 - Owner: coding
+- Status: closed in #269
 
 ### TRF-11: MoQ bConnectInFlight can stay set, so reconnect never retries; there is no connect timeout
 - Category: bug
@@ -113,6 +121,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Have the background task publish a terminal result (state FAILED) through the dispatcher whenever `moq_connect` returns non-OK. Add a connect-timeout watchdog that clears `bConnectInFlight` and bumps `ConsecutiveFailures`.
 - Effort: S
 - Owner: coding
+- Status: closed in #273
 
 ### TRF-12: MoQ callback user_data lifetime relies on undocumented FFI quiescence
 - Category: security
@@ -122,6 +131,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Pass a heap-allocated, ref-counted context (for example a `TSharedPtr` raw pointer plus a registry lookup by id, or an "alive" generation counter) instead of raw object pointers. Never free a binding before its subscriber. Get the quiescence contract documented and tested in moq-ffi.
 - Effort: M
 - Owner: design
+- Status: closed in #269
 
 ### TRF-13: MoQ async dispatcher: redundant thread hop, event race, lazy restart after Shutdown, tasks outliving the module
 - Category: thread-safety
@@ -131,6 +141,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Delete the dispatcher and call `AsyncTask(GameThread, ...)` (or a TS ticker queue drained in `Tick`/`Poll`) directly with weak-pointer guards. Make shutdown ordering explicit: stop instances, flush, unregister, then unload.
 - Effort: S
 - Owner: coding
+- Status: closed in #273
 
 ### TRF-14: FFI libraries are unloaded while instances may still be alive; WebRTC registers factories even if the DLL failed to load
 - Category: bug
@@ -140,6 +151,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Register factories only after a successful load. Keep the DLL loaded until process exit, or refuse to unload while instance count > 0.
 - Effort: S
 - Owner: coding
+- Status: closed in #303
 
 ### TRF-15: WebRTC receiver shares state across the FFI, HTTP and game threads without synchronization
 - Category: thread-safety
@@ -149,6 +161,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Snapshot the sink or consumer under a small lock (or with an atomic shared ptr), make the log timestamp atomic, and marshal token results to the game thread.
 - Effort: S
 - Owner: coding
+- Status: closed in #271
 
 ### TRF-16: Receiver registers both labeled and unlabeled data callbacks, which can double-enqueue frames
 - Category: bug
@@ -185,6 +198,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Implement `Send()` as serialize-once plus `SendBytes`, or remove the pool and delete the misleading comments.
 - Effort: S
 - Owner: coding
+- Status: closed in #271
 
 ### TRF-20: MoQ receiver retries subscribe every Poll with no backoff
 - Category: bug
@@ -194,6 +208,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Gate subscribe retries with backoff, using `LastSubscribeAttemptTimeSeconds` and `ComputeReconnectDelaySeconds`.
 - Effort: S
 - Owner: coding
+- Status: closed in #273
 
 ### TRF-21: LiveKit JWTs are persisted in plain text and copied into AdvancedParams; bPersistToken is ignored
 - Category: security
@@ -203,6 +218,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Keep tokens out of serialized properties: mark them `Transient`, or store them in per-user config / an OS credential store keyed by id, and honor `bPersistToken`. Do not mirror the token into `AdvancedParams`. Redact keys matching `*token*|*secret*|*key*` in `ToDebugString`.
 - Effort: M
 - Owner: design
+- Status: closed in #275
 
 ### TRF-22: Token endpoint is unauthenticated, the client requests its own grants, and no auth or TLS policy is enforced
 - Category: security
@@ -212,6 +228,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Add an optional auth header sourced from env or per-user config. Do not send grants; the server decides them from an authenticated identity. Warn or refuse on non-HTTPS unless the host is localhost. Stop logging token fragments and response bodies.
 - Effort: M
 - Owner: design
+- Status: closed in #275
 
 ### TRF-23: Token refresh is fetched but never applied; an expired manual token spams warnings
 - Category: bug
@@ -221,6 +238,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Call `lk_refresh_token(handle, newToken)` when refresh succeeds, and fall back to a controlled reconnect. Log the expiry once, per state transition.
 - Effort: S
 - Owner: coding
+- Status: closed in #271
 
 ### TRF-24: Token fetcher lifetime and retry rely on raw `this` and GWorld's timer manager
 - Category: bug
@@ -230,6 +248,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Unbind the delegates before cancelling. Capture `TWeakPtr`/shared state. Use `FTSTicker` (not world timers) for backoff. Enforce the fetch timeout in `Tick`/`Poll`.
 - Effort: M
 - Owner: coding
+- Status: closed in #271
 
 ### TRF-25: LiveKit identity collisions and room mismatch between sender and receiver in auto-fetch mode
 - Category: bug
@@ -239,6 +258,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Add a per-instance GUID suffix to the identity. Expose an explicit `webrtc.room` option used by both sides, and fail fast when it is empty in auto-fetch mode.
 - Effort: S
 - Owner: coding
+- Status: closed in #271
 
 ### TRF-26: WebRTC sender never reconnects; SDK reconnect settings are unused
 - Category: bug
@@ -257,6 +277,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Add `PlatformAllowList: ["Win64"]` to both modules in `.uplugin` (the simplest fix for Fab). Alternatively, always add dependencies and include paths, and wrap every TU in `#if O3D_WITH_TRANSPORT_*`, with stub modules as MoQ already has. Make the WebRTC flag auto-disable on non-Win64 like MoQ, and remove the dead platform branches.
 - Effort: S
 - Owner: coding
+- Status: closed in #283
 
 ### TRF-28: Duplicated and inconsistent DLL loading paths
 - Category: fab-readiness
@@ -266,6 +287,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Stage the DLLs to `$(PluginDir)/Binaries/ThirdParty/<Lib>/Win64/` via `RuntimeDependencies.Add(target, source)`. Load them through one shared `FO3DFfiLibraryLoader` in Open3DShared, and delete the receiver loader.
 - Effort: S
 - Owner: coding
+- Status: closed in #286
 
 ### TRF-29: MoQ library validation contradicts itself and misses symbols that are actually used
 - Category: bug
@@ -275,6 +297,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Validate the full set of symbols used, and compare against a structured ABI version (for example an exported `moq_abi_version()`).
 - Effort: S
 - Owner: coding
+- Status: closed in #273
 
 ### TRF-30: Diagnostic logging noise at Warning level
 - Category: code-quality
@@ -294,6 +317,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Use `UTF8_TO_TCHAR` / `FUTF8ToTCHAR` everywhere. Key the cache by the string itself (or drop the cache).
 - Effort: S
 - Owner: coding
+- Status: closed in #271
 
 ### TRF-32: Transport plumbing is duplicated instead of shared through Open3DShared
 - Category: architecture
@@ -303,6 +327,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Move into Open3DShared: `FO3DReconnectPolicy` (backoff with jitter), `FO3DFfiLibraryLoader`, `FO3DTransportOptionStore` helpers, `FO3DLatencyAccumulator`, and a bounded per-subject receive queue. Move the token lifecycle into a single `FO3DWebRTCConnection` used by both WebRTC roles. Make the WebRTC sink derive from `FO3DSenderAudioSinkBase`.
 - Effort: L
 - Owner: design
+- Status: closed in #310
 
 ### TRF-33: Dead or unused code and unused FFI capabilities
 - Category: code-quality
@@ -321,6 +346,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Put an injectable FFI facade (function table) in front of `lk_*` / `moq_*` so tests can script callbacks and states deterministically. Fix or delete the backpressure test. Move network tests to a separately tagged, opt-in filter controlled by an env var.
 - Effort: L
 - Owner: design
+- Status: closed in #276
 
 ### TRF-35: Mock token server bugs make local testing misleading
 - Category: tests
@@ -330,6 +356,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Use `datetime.now(timezone.utc)`. Document that the mock server does not produce LiveKit-valid tokens, or accept `LIVEKIT_API_KEY`/`SECRET` via env and set `iss` accordingly.
 - Effort: S
 - Owner: coding
+- Status: closed in #275
 
 ### TRF-36: Module docs are inaccurate or stale in several places
 - Category: docs
@@ -348,6 +375,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Carry the codec in the serialized frame header (or in the track name) and decode according to it.
 - Effort: S
 - Owner: coding
+- Status: closed in #273
 
 ### TRF-38: WebRTC and MoQ receivers own their consumer differently
 - Category: usability
@@ -357,6 +385,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Define the ownership in `IOpen3DReceiver::SetConsumer` docs and apply it in both transports, preferably with a shared base.
 - Effort: S
 - Owner: design
+- Status: closed in #312
 
 ### TRF-39: Ineffective catch(...) around Rust FFI and misuse of thread-local moq_last_error
 - Category: code-quality
@@ -366,6 +395,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Remove the try/catch and rely on moq-ffi's `catch_unwind`. Put error details in `MoqResult.message` or in the callback payload.
 - Effort: S
 - Owner: coding
+- Status: closed in #273
 
 ### TRF-40: WebRTC audio sink scratch buffer is not thread-safe; PCM conversion truncates
 - Category: performance
@@ -375,6 +405,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Use a thread-local or per-label scratch buffer and round-to-nearest (for example via the shared O3DAudio PCM16 helpers), or lock around conversion and publish.
 - Effort: S
 - Owner: coding
+- Status: closed in #269
 
 ---
 
