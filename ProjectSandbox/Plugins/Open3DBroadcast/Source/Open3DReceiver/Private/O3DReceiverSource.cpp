@@ -1072,7 +1072,7 @@ void FO3DReceiverSource::FAudioMetaDefaults::Apply(O3DS::FAudioFrameMeta& Meta) 
     // which receives explicit subject labels from LiveKit FFI. No fallback logic needed.
     if (bEnableAudio && Meta.StreamLabel.IsEmpty())
     {
-        Meta.StreamLabel = StreamId.IsEmpty() ? TEXT("o3ds:mix") : StreamId;
+        Meta.StreamLabel = StreamId.IsEmpty() ? FString(O3DS::MixAudioStreamLabel) : StreamId;
     }
 
     // With per-subject audio labels from the callback, audio is explicitly routed to the correct subject

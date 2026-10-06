@@ -46,6 +46,12 @@ struct FO3DRemoteAudioComponentTestAccessor
 		Component->OnAudioPcm16(Meta, PCM16Bytes);
 	}
 
+	/** OnAudioPcm16 at a given time, for the one-stream-at-a-time idle release (RCV-21). */
+	static void CallOnAudioPcm16At(UO3DRemoteAudioComponent* Component, const O3DS::FAudioFrameMeta& Meta, TConstArrayView<uint8> PCM16Bytes, double NowSeconds)
+	{
+		Component->HandleAudioPcm16(Meta, PCM16Bytes, NowSeconds);
+	}
+
 	static bool CallMatchesFilter(const UO3DRemoteAudioComponent* Component, const FString& Subject, const FString& Stream)
 	{
 		return Component->MatchesFilter(Subject, Stream);

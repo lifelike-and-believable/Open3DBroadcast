@@ -67,6 +67,12 @@ namespace O3DS
         }
     };
 
+    /**
+     * Stream label the receiver gives audio whose transport set no label and whose source has no
+     * stream id. The remote audio component's Mix mode plays labels that start with it (RCV-21).
+     */
+    inline constexpr const TCHAR* MixAudioStreamLabel = TEXT("o3ds:mix");
+
     /** Metadata accompanying audio frames when surfaced to gameplay systems. */
     struct OPEN3DSHARED_API FAudioFrameMeta
     {

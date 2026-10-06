@@ -113,6 +113,7 @@ void UO3DRemoteAudioComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
     }
     SoundWave = nullptr;
     JitterBuffer.Reset();
+    bStreamLocked = false;
     CurrentChannels = 0;
     CurrentSampleRate = 0;
 
@@ -163,11 +164,19 @@ void UO3DRemoteAudioComponent::UnbindBus()
 
 bool UO3DRemoteAudioComponent::MatchesFilter(const FString& InSubject, const FString& InStream) const
 {
-    const bool bIsMix = InStream.StartsWith(TEXT("o3ds:mix"));
-    bool bSubjectMatch = false;
-    if (ReceiveMode == EO3DRemoteAudioMode::Mix)
+    if (!StreamLabelFilter.IsEmpty() && !InStream.Equals(StreamLabelFilter, ESearchCase::IgnoreCase))
     {
-        bSubjectMatch = bIsMix;
+        return false;
+    }
+
+    bool bSubjectMatch = false;
+    if (ReceiveMode == EO3DRemoteAudioMode::AnyStream)
+    {
+        bSubjectMatch = true;
+    }
+    else if (ReceiveMode == EO3DRemoteAudioMode::Mix)
+    {
+        bSubjectMatch = InStream.StartsWith(O3DS::MixAudioStreamLabel);
     }
     else
     {
@@ -188,7 +197,6 @@ bool UO3DRemoteAudioComponent::MatchesFilter(const FString& InSubject, const FSt
         return false;
     }
 
-    // Note: Audio stream label is now automatically derived from SubjectName, no additional filtering needed
     if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
     {
         UE_LOG(LogO3DReceiverAudio, Verbose, TEXT("Filter pass subject='%s' stream='%s'"), *InSubject, *InStream);
@@ -250,11 +258,42 @@ void UO3DRemoteAudioComponent::EnsureSoundWave(int32 NumChannels, int32 SampleRa
     }
 }
 
+bool UO3DRemoteAudioComponent::AcceptStream(const O3DS::FAudioFrameMeta& Meta, double NowSeconds)
+{
+    const bool bLockedStream = bStreamLocked && Meta.SourceGuid == LockedSource && Meta.StreamLabel.Equals(LockedLabel, ESearchCase::CaseSensitive);
+    if (bStreamLocked && !bLockedStream)
+    {
+        if (NowSeconds - LockedLastPacketSeconds <= StreamIdleReleaseSeconds)
+        {
+            return false;
+        }
+        UE_LOG(LogO3DReceiverAudio, Log, TEXT("Stream '%s' went idle; now playing '%s'"), *LockedLabel, *Meta.StreamLabel);
+    }
+    if (!bLockedStream)
+    {
+        bStreamLocked = true;
+        LockedSource = Meta.SourceGuid;
+        LockedLabel = Meta.StreamLabel;
+        // A different stream: start from its audio, after a pre-roll.
+        if (JitterBuffer)
+        {
+            JitterBuffer->Reset();
+        }
+    }
+    LockedLastPacketSeconds = NowSeconds;
+    return true;
+}
+
 void UO3DRemoteAudioComponent::OnAudioPcm16(const O3DS::FAudioFrameMeta& Meta, TConstArrayView<uint8> PCM16Bytes)
+{
+    HandleAudioPcm16(Meta, PCM16Bytes, FPlatformTime::Seconds());
+}
+
+void UO3DRemoteAudioComponent::HandleAudioPcm16(const O3DS::FAudioFrameMeta& Meta, TConstArrayView<uint8> PCM16Bytes, double NowSeconds)
 {
     const FString& StreamLabel = Meta.StreamLabel;
     const FString& SubjectName = Meta.SubjectName;
-    if (!MatchesFilter(SubjectName, StreamLabel))
+    if (!MatchesFilter(SubjectName, StreamLabel) || !AcceptStream(Meta, NowSeconds))
     {
         return;
     }
