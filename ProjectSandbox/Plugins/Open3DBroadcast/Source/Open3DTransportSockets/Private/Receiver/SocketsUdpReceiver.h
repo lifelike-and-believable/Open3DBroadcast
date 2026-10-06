@@ -70,7 +70,6 @@ private:
 
 	bool bAllowBroadcast = false;
 	int32 MaxDatagramBytes = 64000;
-	int32 MtuBytes = 1200;
 	int32 MaxFrameBytes = 0;
 
 	/** Holds the consumer, audio sink and control sink strongly; Stop() releases them (TRF-38, ADR 0011). */
