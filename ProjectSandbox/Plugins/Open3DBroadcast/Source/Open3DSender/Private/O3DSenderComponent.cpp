@@ -140,19 +140,65 @@ void UO3DSenderComponent::BeginPlay()
 	Super::BeginPlay();
 	SyncAudioConfigSource();
 
-	if (!TargetMesh.IsValid())
-	{
-		if (AActor* Owner = GetOwner())
-		{
-			TargetMesh = Owner->FindComponentByClass<USkeletalMeshComponent>();
-		}
-	}
+	ResolveTargetMesh();
 
 	UE_LOG(LogO3DSenderComponent, Log, TEXT("Sender component BeginPlay on %s"), *GetNameSafe(GetOwner()));
 
 	if (bAutoStartCapture)
 	{
 		StartCapture();
+	}
+}
+
+void UO3DSenderComponent::ResolveTargetMesh()
+{
+	AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return;
+	}
+
+	// An unset FComponentReference resolves to the actor's root component, so check that the picker
+	// names something before using it.
+	const bool bPickerSet = TargetMeshComponent.OverrideComponent.IsValid() || TargetMeshComponent.ComponentProperty != NAME_None
+		|| !TargetMeshComponent.PathToComponent.IsEmpty() || TargetMeshComponent.OtherActor.IsValid();
+	if (bPickerSet)
+	{
+		if (USkeletalMeshComponent* Picked = Cast<USkeletalMeshComponent>(TargetMeshComponent.GetComponent(Owner)))
+		{
+			TargetMesh = Picked;
+			return;
+		}
+		UE_LOG(LogO3DSenderComponent, Warning, TEXT("Sender on %s: Target Mesh does not name a skeletal mesh component of the actor; using the automatic choice."), *Owner->GetName());
+	}
+
+	if (TargetMesh.IsValid())
+	{
+		return;
+	}
+
+	// A follower of a leader pose component takes its pose from the leader and may not evaluate its
+	// own bone transforms (USkinnedMeshComponent::LeaderPoseComponent), so prefer a mesh without one.
+	TArray<USkeletalMeshComponent*> Meshes;
+	Owner->GetComponents(Meshes);
+	USkeletalMeshComponent* Chosen = nullptr;
+	for (USkeletalMeshComponent* Mesh : Meshes)
+	{
+		if (Mesh && !Mesh->LeaderPoseComponent.IsValid())
+		{
+			Chosen = Mesh;
+			break;
+		}
+	}
+	if (!Chosen && Meshes.Num() > 0)
+	{
+		Chosen = Meshes[0];
+	}
+	TargetMesh = Chosen;
+	if (Chosen && Meshes.Num() > 1)
+	{
+		UE_LOG(LogO3DSenderComponent, Log, TEXT("Sender on %s captures %s, one of %d skeletal meshes (the first that drives its own pose). Set Target Mesh to choose another."),
+			*Owner->GetName(), *Chosen->GetName(), Meshes.Num());
 	}
 }
 
@@ -1396,7 +1442,21 @@ void UO3DSenderComponent::PostEditChangeProperty(FPropertyChangedEvent& Property
 		AudioCaptureConfig.DeviceIndex = FO3DSenderAudioBinding::ResolveDeviceIndex(AudioInputDevice);
 	}
 
-	if (Prop == GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, SubjectName) ||
+	// SND-27: the 16-bit tier covers at least what the 8-bit tier does.
+	if ((Prop == GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, QuantizationHalfRange) || Prop == GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, QuantizationByteRange))
+		&& QuantizationHalfRange < QuantizationByteRange)
+	{
+		QuantizationHalfRange = QuantizationByteRange;
+	}
+
+	if (Prop == GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TargetMeshComponent) && GetWorld() && GetWorld()->IsGameWorld())
+	{
+		TargetMesh.Reset();
+		ResolveTargetMesh();
+	}
+
+	if (Prop == GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TargetMeshComponent) ||
+		Prop == GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, SubjectName) ||
 		Prop == GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TargetMesh))
 	{
 		InvalidateSubjectNameCache();

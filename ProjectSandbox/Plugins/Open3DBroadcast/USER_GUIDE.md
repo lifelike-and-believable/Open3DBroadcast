@@ -205,7 +205,7 @@ UO3DSenderComponent* Sender = CreateDefaultSubobject<UO3DSenderComponent>(TEXT("
   - Higher = smoother but more bandwidth
   - Actual rate limited by tick rate
 - **Auto Start Capture**: Start streaming automatically on BeginPlay
-- **Target Mesh**: Skeletal mesh to capture (auto-detected if empty)
+- **Target Mesh**: the skeletal mesh to capture, picked from the actor's components; it works on Blueprint defaults too. Empty: the actor's skeletal mesh that drives its own pose (a mesh following a leader pose component is skipped); the log names the one chosen when the actor has several. **Resolved Target Mesh** (advanced, read-only) shows the mesh in use, which Blueprint can also set at runtime.
 
 #### Transport Configuration
 
@@ -1084,9 +1084,10 @@ client per process (PIE clients included), so keep subject names distinct across
 |----------|------|---------|-------------|
 | **SubjectName** | String | "" | Unique identifier for this stream |
 | **ContextName** | Name | (empty) | Runtime context for this sender's metrics; see [Separate Receivers](#separate-receivers-runtime-contexts) |
-| **CaptureRateHz** | Float | 60.0 | Target capture frame rate |
+| **CaptureRateHz** | Float | 60.0 | Capture rate in Hz, at most one capture per tick; 0 captures every tick |
 | **bAutoStartCapture** | Bool | true | Start capturing on BeginPlay |
-| **TargetMesh** | Object | null | Skeletal mesh to capture (auto-detect if empty) |
+| **TargetMeshComponent** (Target Mesh) | Component picker | (empty) | Skeletal mesh to capture; empty picks the actor's skeletal mesh that drives its own pose |
+| **TargetMesh** (Resolved Target Mesh) | Object | null | The mesh in use; read-only in the Details panel, settable from Blueprint at runtime |
 | **TransportName** | Name | "loopback" | Transport module to use (read-only in Blueprint; use Set Transport Name) |
 | **bAutoCreateTransport** | Bool | false | Create and run the selected transport. Off: nothing is sent unless C++ code consumes the frames |
 | **TransportOptions** | Map | {} | Key-value transport configuration |
