@@ -1,83 +1,76 @@
 # Open3DTransportMoQ
 
-MoQ (Media over QUIC) transport implementation for Open3DBroadcast.
+The **MoQ** transport sends Open3D frames, audio and control through a MoQ (Media over QUIC)
+relay, using the `moq-ffi` library. The relay must speak draft-ietf-moq-transport-07.
 
-## Overview
+To use it in the editor, pick **MoQ** in the transport list of the Open3D sender component or of
+the **Open3DStream Receiver** LiveLink source and fill in the options below. The plugin's
+`USER_GUIDE.md` describes the sender component and the LiveLink source.
 
-Open3DTransportMoQ provides real-time motion capture and audio streaming over QUIC/WebTransport using the MoQ (Media over QUIC) protocol. It leverages the `moq-ffi` Rust library for reliable, low-latency transport.
+- Separate tracks for mocap, audio and control (see [Track naming](#track-naming)).
+- Audio as PCM16 or Opus, with the codec read from each audio frame.
+- Reconnects with capped exponential backoff (see [Error Handling](#error-handling)).
 
-### Key Features
+## Options
 
-- **Dual-Track Architecture**: Separate tracks for mocap and audio data
-  - Mocap: `mocap/<session>/<track>`
-  - Audio: `audio/<session>/<track>`
-- **Opus/PCM16 Audio**: Configurable audio encoding via O3DAudio framework
-- **WebTransport/QUIC**: Modern transport with built-in congestion control
-- **Automatic Reconnection**: Exponential backoff for resilient connectivity
+Options without a **Shown as** entry are not in the settings panel. Set them with
+**Set Transport Option** on the sender component, or in the options map of
+**Create Open3DStream LiveLink Source**. Each key has the alternate names in the second column;
+the first one set wins.
 
-## Quick Start
+| Key | Also read as | Side | Shown as | Default | Notes |
+|---|---|---|---|---|---|
+| `relay_url` | `moq.relay` | both | **Relay URL** | none | Required, for example `https://relay.example.com:443`. |
+| `track_namespace` | `moq.namespace` | both | **Track Namespace (optional)** | `mocap/<session>` | A namespace that starts with `mocap/` or `audio/` gets the matching prefix for each track. |
+| `track_name` | `moq.track` | both | **Track Name (optional)** | the stream id's last part; `primary` when there is none | The sender's stream id is its **Subject Name**. |
+| `moq.session` | | both | | the stream id's first part; `default` when there is none | Used only when no namespace is set. |
+| `delivery_mode` | `moq.delivery` | sender | **Delivery Mode** | `stream` | `stream` delivers every frame in order; `datagram` drops late frames. |
+| `queue_bytes` | `moq.queue_bytes`, `moq.qbytes` | sender | **Queue Capacity (MiB)** | 8 MiB | Stored in bytes. Clamped to 256 KiB to 256 MiB. |
+| `connect_timeout` | `moq.connect_timeout` | both | | 15 | Seconds before an unfinished connect attempt is abandoned and retried on a new client. Clamped to 1 to 120. |
 
-### Sender Configuration
+The receiver has no delivery or queue options: the publisher picks the delivery.
+
+## Track naming
+
+Each track is `<type>/<session>/<track>`:
+
+```
+mocap/session1/character1     frames
+audio/session1/character1     audio
+control/session1/character1   control events and values
+```
+
+## Using the transport from C++
+
+Code that drives the transport directly, without the sender component or the LiveLink source,
+creates it from the transport registry and passes the options in `AdvancedParams`.
+`Config.Uri` is used as the relay URL when `relay_url` is not set.
 
 ```cpp
 FO3DTransportConfig Config;
 Config.Uri = TEXT("https://relay.example.com:443");
 Config.StreamId = TEXT("session1/character1");
-
-// Optional advanced parameters
 Config.AdvancedParams.Add(TEXT("delivery_mode"), TEXT("stream"));  // or "datagram"
-Config.AdvancedParams.Add(TEXT("queue_bytes"), TEXT("8388608"));   // 8MB queue
+Config.AdvancedParams.Add(TEXT("queue_bytes"), TEXT("8388608"));   // 8 MiB
 
-TSharedPtr<IOpen3DSender> Sender = /* create via factory */;
+TSharedPtr<IOpen3DSender, ESPMode::ThreadSafe> Sender = FO3DTransportRegistry::Get().CreateSender(TEXT("MoQ"));
 Sender->Initialize(Config);
 Sender->Start();
 
-// For audio
-TSharedPtr<IO3DSenderAudioSink> AudioSink = Sender->CreateAudioSink(AudioConfig);
+// Audio
+TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> AudioSink = Sender->CreateAudioSink(AudioConfig);
 AudioSink->SubmitPcm(...);
 ```
 
-### Receiver Configuration
-
 ```cpp
-FO3DTransportConfig Config;
-Config.Uri = TEXT("https://relay.example.com:443");
-Config.StreamId = TEXT("session1/character1");
-
-TSharedPtr<IOpen3DReceiver> Receiver = /* create via factory */;
+TSharedPtr<IOpen3DReceiver, ESPMode::ThreadSafe> Receiver = FO3DTransportRegistry::Get().CreateReceiver(TEXT("MoQ"));
 Receiver->SetConsumer(FrameConsumer);
 Receiver->Initialize(Config);
+Receiver->SetAudioSink(ReceiverAudioSink, AudioConfig);  // an IO3DReceiverAudioSink
 Receiver->Start();
 
-// For audio
-Receiver->SetAudioSink(AudioSink, AudioConfig);
-
-// Poll for data in game loop
+// Every game-thread tick
 Receiver->Poll();
-```
-
-## Configuration Options
-
-| Key | Alt Keys | Description | Default |
-|-----|----------|-------------|---------|
-| `relay_url` | `moq.relay` | MoQ relay server URL | (from Uri) |
-| `track_namespace` | `moq.namespace` | Track namespace | `mocap/<session>` |
-| `track_name` | `moq.track` | Track name | (from StreamId) |
-| `moq.session` | - | Session identifier | (from StreamId) |
-| `delivery_mode` | `moq.delivery` | `stream` or `datagram` | `stream` |
-| `queue_bytes` | `moq.queue_bytes`, `moq.qbytes` | Send queue size | 8MB |
-| `connect_timeout` | `moq.connect_timeout` | Seconds before an unfinished connect attempt is abandoned and retried on a new client (clamped to 1-120) | 15 |
-
-## Track Naming Convention
-
-Tracks are automatically named based on configuration:
-
-```
-<type>/<session>/<track>
-
-Examples:
-  mocap/session1/character1   - Motion capture data
-  audio/session1/character1   - Audio data
 ```
 
 ## Architecture
@@ -148,6 +141,6 @@ All moq-ffi calls go through `FMoQFfiApi` (`Public/MoQFfiApi.h`), a per-instance
 
 ## See Also
 
-- [MoQ Transport Implementation Plan](../../../../../docs/dev/Open3DTransportMoQ/MOQ_TRANSPORT_IMPLEMENTATION_PLAN.md) (developer planning notes, in the repository only)
+- Developer planning and review notes: `docs/dev/Open3DTransportMoQ/` in the Open3DBroadcast repository (historical; not part of the plugin package)
 - [moq-ffi README](ThirdParty/moq-ffi/README.md)
 - [O3DAudio Framework](../Open3DShared/Public/O3DAudioFrameCodec.h)

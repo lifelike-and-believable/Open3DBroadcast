@@ -1,5 +1,7 @@
 # Open3DTransportWebRTC Module - Deep Dive Analysis & Post-Refactor Status
 
+> **Historical document (2026-10-06, WP-D2; TRF-36).** It records the state of 2025-11-15. The scores ("EXCELLENT (9/10)" and the others) are the author's self-assessment, not a review result. The 2026-09 plugin review (`docs/review/2026-09-plugin-review/transports-webrtc-moq.md`) is the later assessment.
+
 **Date:** 2025-11-15 (Post-Implementation Update)
 **Analysis Scope:** Open3DTransportWebRTC module (Complete architecture & implementation review)
 **Codebase:** develop branch

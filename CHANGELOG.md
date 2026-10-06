@@ -578,6 +578,13 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Transport module docs (WP-D2; TRB-44, TRF-36). Docs only; no behaviour changes.
+  - **NNG README rewritten from the code:** the options (`host`, `port`, `nng.mode`, `nng.role`, `nng.qmax`) instead of a URI, the default ports 6000, 7000 and 8000, no subscription topics, the Repeater example per side, and the log lines as the code writes them. The ThirdParty README shows the real `nng/lib/Win64` layout.
+  - **New READMEs for Sockets (TCP, UDP) and Loopback:** options and defaults, the TCP framing and the UDP fragment header, fragmenting, broadcast, delivery, and how the Loopback channel's limits are set. Module READMEs stay out of the Fab package (`Source/*/*.md` in `Build/Fab/exclude-files.txt`).
+  - **MoQ README:** an options table with the panel names and the sender-only options, the control track, and the C++ example under "Using the transport from C++".
+  - **WebRTC add-on user guide:** a `webrtc.*` options table, `ws://` for local servers, audio settings on the sender component (64 kbps default, sent to LiveKit at 16 to 128), reliable sends by default with `webrtc.prefer_lossy` and the 15,000-byte limit, **Get Transport Stats** and receive-to-apply latency, **Capture Rate Hz**, runtime transport switching, and the `lk token create` command. Claims the code does not support are removed.
+  - **Historical developer docs** under `docs/dev/Open3DTransportWebRTC/` and `docs/dev/Open3DTransportMoQ/` get a dated note naming what is no longer true.
+
 - Transport counters mean the same on every transport (WP-R3; mid-project review TR-5, SR-4).
   - **Sender metrics (`o3d.DumpMetrics`, the sender component's metrics handle):** frames captured, bytes serialized and frames a transport refused are recorded once, by the sender pipeline, for every transport. Before, only NNG, MoQ and WebRTC recorded them, so they read zero on TCP, UDP and Loopback. Every transport now records bytes sent and frames it dropped after accepting them.
   - **`FramesSent` and bytes sent are counted when a frame is sent, not when it is queued.** TCP counted a frame as sent and then as dropped when it aged out of the queue; NNG and MoQ recorded their sender and transport metrics at enqueue.

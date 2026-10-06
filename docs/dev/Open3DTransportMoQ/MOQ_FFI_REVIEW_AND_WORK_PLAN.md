@@ -1,5 +1,10 @@
 # MoQ FFI Review and Open3DTransportMoQ Work Plan
 
+> **Historical document (2026-10-06, WP-D2; TRF-36).** It records the plan of December 2025. No longer true:
+> - "Implement FO3DMoQReceiver" (Priority 1.1) is done: the receiver is `Open3DTransportMoQ/Private/Receiver/MoQReceiver.cpp`. The rest of the work list is not kept up to date either.
+>
+> Current behaviour: `Open3DTransportMoQ/README.md`.
+
 **Review Date:** December 2025  
 **moq-ffi Commit:** `f0f250148be450cad1d37bf18207e920b534e472` (in External submodule)  
 **Vendored Commit:** `567933e82c780b157705b64fb84729ae46b534ca` (in ThirdParty)
