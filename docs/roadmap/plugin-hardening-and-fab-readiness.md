@@ -790,6 +790,22 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
   - Keep default ports in one place, from project settings (TRB-28).
   - Bind to localhost by default, and document exposure (TRB-29).
   - Stop the Loopback receiver overwriting the sender's queue capacity, and fix its lifecycle and diagnostics (TRB-31, TRB-32).
+- **Maintainer decisions (2026-10-06):**
+  - **TRB-29:** listening ends default to 127.0.0.1: the TCP sender, the UDP receiver and NNG listeners. Binding a non-loopback address warns once per Start. The docs gain a "Network exposure" section. Cross-machine setups set 0.0.0.0, or set it once per project in Project Settings.
+  - **TRB-21:**
+    - UDP multicast: the receiver joins an IPv4 group; the sender gets TTL and loopback options;
+    - an optional source IP allow-list, off by default;
+    - the no-op receiver **Accept Broadcast Packets** option is removed;
+    - an opt-in address-reuse option for several multicast receivers on one host.
+  - **TRB-16:** the UDP sender splits every message above the MTU. The MTU counts the header, and its minimum rises to 280. Control messages stay one datagram. The sender's Max Datagram Bytes leaves the panel and stays as a hard ceiling. No wire change.
+- **PR order:**
+  1. Loopback limits and lifecycle (TRB-31, TRB-32);
+  2. dead audio-port options (TRB-25);
+  3. no silent SO_REUSEADDR (TRB-22);
+  4. fragment at the MTU (TRB-16);
+  5. defaults in one header (TRB-28);
+  6. localhost by default (TRB-29);
+  7. multicast and the allow-list (TRB-21).
 
 #### WP-D1: Rewrite the root README  ·  P1 · S · docs
 - **Findings:** DOC-3
