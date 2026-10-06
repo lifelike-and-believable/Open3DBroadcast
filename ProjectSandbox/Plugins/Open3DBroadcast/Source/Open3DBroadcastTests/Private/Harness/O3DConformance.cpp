@@ -141,6 +141,7 @@ namespace O3DTests
 		case EO3DConformanceCase::ConnectionStateLifecycle: return TEXT("State.StartStopReportOnCallingThread");
 		case EO3DConformanceCase::ConnectionStateConnected: return TEXT("State.ConnectedAfterExchange");
 		case EO3DConformanceCase::MetricsCountWhatWasSent: return TEXT("Stats.SenderMetricsCountWhatWasSent");
+		case EO3DConformanceCase::ReceiverStatsFromAnyThread: return TEXT("Stats.ReceiverReadFromAnyThread");
 		default: return FString();
 		}
 	}
@@ -166,6 +167,7 @@ namespace O3DTests
 			EO3DConformanceCase::ConnectionStateLifecycle,
 			EO3DConformanceCase::ConnectionStateConnected,
 			EO3DConformanceCase::MetricsCountWhatWasSent,
+			EO3DConformanceCase::ReceiverStatsFromAnyThread,
 		};
 	}
 }
