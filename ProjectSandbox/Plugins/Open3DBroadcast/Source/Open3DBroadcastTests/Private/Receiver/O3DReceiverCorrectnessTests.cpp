@@ -18,6 +18,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "O3DReceiverSource.h"
+#include "O3DReceiverSourceSettings.h"
 #include "Testing/O3DReceiverTesting.h"
 
 #include "Misc/AutomationTest.h"
@@ -335,6 +336,60 @@ bool FO3DReceiverNullTransformParentsTest::RunTest(const FString& Parameters)
     {
         TestEqual(TEXT("One transform per bone"), Rec.Frames[0].Transforms.Num(), 5);
     }
+    return true;
+}
+
+// WP-R1 (mid-project review RR-2): a subject cleared for inactivity (RCV-6) must stay cleared.
+// Concealment kept synthesizing a held pose for the starving subject in the same tick, before the
+// clear, and LiveLink applied that queued frame after it, so the subject came back frozen.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverClearedStaysClearedTest, "Open3DBroadcast.Receiver.Correctness.ClearedSubjectIsNotConcealed", O3DB_TEST_FLAGS)
+bool FO3DReceiverClearedStaysClearedTest::RunTest(const FString& Parameters)
+{
+    using namespace O3DReceiverCorrectnessTests;
+    FHarness Harness;
+    UO3DReceiverSourceSettings* Settings = NewObject<UO3DReceiverSourceSettings>();
+    Harness.Source->InitializeSettings(Settings);
+    TestTrue(TEXT("Concealment is on by default"), Settings->bEnableConcealment);
+
+    O3DS::SubjectList Rig;
+    BuildChain(Rig, "Actor", { "Hips", "Spine" });
+    std::vector<std::vector<char>> Packets = { SerializeFull(Rig, 1.0, 1, 7), SerializeDelta(Rig, 1.02, 2, 7), SerializeDelta(Rig, 1.04, 3, 7) };
+    TestTrue(TEXT("Gated frames replayed"), Harness.Transport.Replay(Packets));
+    const int32 RealFrames = Harness.Recorder->CountFrames(FName(TEXT("Actor")));
+    TestTrue(TEXT("The real frames were pushed"), RealFrames >= 3);
+
+    // Long past the Inactive Subject Timeout (5 s): the subject is cleared, and nothing is
+    // synthesized for it.
+    FO3DReceiverSourceTestAccessor::TickAt(*Harness.Source, 2.0f, FPlatformTime::Seconds() + 30.0);
+    TestEqual(TEXT("No concealed frame for a subject being cleared"), Harness.Recorder->CountFrames(FName(TEXT("Actor"))), RealFrames);
+    FO3DReceiverSourceTestAccessor::TickAt(*Harness.Source, 2.0f, FPlatformTime::Seconds() + 31.0);
+    TestEqual(TEXT("Nor on later ticks"), Harness.Recorder->CountFrames(FName(TEXT("Actor"))), RealFrames);
+    return true;
+}
+
+// WP-R1 (RR-4): a frame that passes the packet check but fails the full parse (here a parent index
+// out of range) logged a Warning every time. It is throttled like a malformed packet.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DReceiverParseFailureThrottleTest, "Open3DBroadcast.Receiver.Correctness.ParseFailureWarningIsThrottled", O3DB_TEST_FLAGS)
+bool FO3DReceiverParseFailureThrottleTest::RunTest(const FString& Parameters)
+{
+    using namespace O3DReceiverCorrectnessTests;
+    AddExpectedError(TEXT("Parse failed"), EAutomationExpectedMessageFlags::Contains, 1);
+
+    FHarness Harness;
+    O3DS::SubjectList Broken;
+    O3DS::Subject* Subject = Broken.addSubject("Actor");
+    O3DS::Transform* Root = Subject->addTransform("root", -1);
+    Root->transformOrder.push_back(O3DS::TTranslation);
+    O3DS::Transform* Child = Subject->addTransform("child", 9);
+    Child->transformOrder.push_back(O3DS::TTranslation);
+
+    std::vector<std::vector<char>> Packets;
+    for (int Index = 0; Index < 5; ++Index)
+    {
+        Packets.push_back(SerializeFull(Broken, 1.0 + Index * 0.02));
+    }
+    TestTrue(TEXT("Frames replayed"), Harness.Transport.Replay(Packets));
+    TestEqual(TEXT("Nothing pushed for an unparsable subject"), Harness.Recorder->CountFrames(FName(TEXT("Actor"))), 0);
     return true;
 }
 
