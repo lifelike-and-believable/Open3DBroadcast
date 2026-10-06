@@ -578,6 +578,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Public header docs (WP-D2; SND-37). `IO3DSenderAudioSink::SubmitPcm` and `OnCaptureStopped` say which threads call them. The sender component's `OnDescriptorReady`, `OnPoseFrameReady` and `GetTransportName` have doc comments. The `HideInDetailPanel` meta on `TransportName` and `TransportOptions` is removed: UE 5.7 uses it only for events, and the editor's Details customization hides both properties. `Open3DSender/ThirdParty/README.md` no longer describes a `Lib/` layout the build never used. No behaviour change.
+
 - Transport module docs (WP-D2; TRB-44, TRF-36). Docs only; no behaviour changes.
   - **NNG README rewritten from the code:** the options (`host`, `port`, `nng.mode`, `nng.role`, `nng.qmax`) instead of a URI, the default ports 6000, 7000 and 8000, no subscription topics, the Repeater example per side, and the log lines as the code writes them. The ThirdParty README shows the real `nng/lib/Win64` layout.
   - **New READMEs for Sockets (TCP, UDP) and Loopback:** options and defaults, the TCP framing and the UDP fragment header, fragmenting, broadcast, delivery, and how the Loopback channel's limits are set. Module READMEs stay out of the Fab package (`Source/*/*.md` in `Build/Fab/exclude-files.txt`).

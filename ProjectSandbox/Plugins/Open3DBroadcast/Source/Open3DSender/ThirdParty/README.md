@@ -1,10 +1,9 @@
 # Open3DSender Module Third-Party Assets
 
-Module-specific static libraries that are only consumed by `Open3DSender`
-should live in this folder. At present the sender module does not require
-any dedicated third-party binaries; keep this directory reserved for future
-sender-only dependencies.
+The sender module has no third-party dependencies of its own. The libraries it uses come from the
+plugin-level `Source/ThirdParty/` folder (the Open3DStream core and Opus) through the modules it
+depends on.
 
-If additional platforms are introduced, create the corresponding subfolder
-under `Lib/` (for example `Lib/Linux`), and update `Open3DSender.Build.cs`
-accordingly.
+If the sender ever needs a library of its own, put it in a folder named after the library here
+(for example `ThirdParty/<library>/lib/Win64/`), add it to `Open3DSender.Build.cs`, and record it
+in `THIRD_PARTY_LICENSES.md`.

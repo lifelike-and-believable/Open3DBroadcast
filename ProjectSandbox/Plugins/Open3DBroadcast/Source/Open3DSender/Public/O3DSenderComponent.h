@@ -358,15 +358,15 @@ public:
 	 * Read-only in Blueprint: change it with Set Transport Name, which keeps each transport's
 	 * options apart (SND-26).
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Open3DBroadcast|Sender|Transport", meta = (HideInDetailPanel))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Open3DBroadcast|Sender|Transport")
 	FName TransportName = TEXT("loopback");
 
 	/**
-	 * Transport-provided key/value overrides populated by modular transport UIs. Hidden from the generic details panel.
+	 * Transport-provided key/value overrides populated by modular transport UIs. The editor's sender Details customization hides it (and Transport Name) and shows one row per declared option instead.
 	 * Saved with the asset, so it never holds a secret: keys the transport declares secret go to FO3DSecretStore
 	 * instead (ADR 0004). "<transport>.credentialProfile" selects which stored secret applies.
 	 */
-	UPROPERTY(VisibleAnywhere, Category = "Open3DBroadcast|Sender|Transport", meta = (HideInDetailPanel))
+	UPROPERTY(VisibleAnywhere, Category = "Open3DBroadcast|Sender|Transport")
 	TMap<FString, FString> TransportOptions;
 
 	/**
@@ -560,7 +560,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Control", meta = (ClampMin = "1.0", ClampMax = "120.0"))
 	float ControlMaxValueRateHz = 30.0f;
 
+	/** Fires on the game thread when the skeletal descriptor changes: on the first sampled frame, a mesh swap or a subject rename. */
 	FOnO3DDescriptorReady OnDescriptorReady;
+	/** Fires on the game thread for every captured frame, before it is serialized (see FOnO3DPoseFrameReady for the curves it carries). */
 	FOnO3DPoseFrameReady OnPoseFrameReady;
 
 	/**
@@ -581,6 +583,7 @@ public:
 	/** Counters of the pose pipeline (queue, drops, worker time, capture-to-send latency); zero before the first StartCapture. Any thread. */
 	FO3DSenderPipelineStats GetPipelineStats() const;
 
+	/** The transport this component uses (see Set Transport Name). */
 	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Sender|Transport")
 	FName GetTransportName() const { return TransportName; }
 
