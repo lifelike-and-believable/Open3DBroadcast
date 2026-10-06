@@ -52,69 +52,64 @@ The **Open3DBroadcast Plugin** is a comprehensive Unreal Engine plugin for strea
 
 ### Installation
 
-1. Copy the `Open3DBroadcast` plugin folder to your project's `Plugins/` directory
-2. Open your Unreal Engine project
-3. Go to **Edit → Plugins** and search for "Open3D"
-4. Enable the **Open3DBroadcast** plugin (it is marked Beta)
-5. Restart the editor when prompted
+1. Install the plugin: from Fab, install it to your engine with the Epic Games Launcher; from a download, copy the `Open3DBroadcast` folder into your project's `Plugins/` folder.
+2. Open your project, go to **Edit → Plugins** and search for "Open3D".
+3. Enable **Open3DBroadcast** (it is marked Beta). Unreal's **Live Link** plugin is enabled with it, because Open3DBroadcast depends on it.
+4. Restart the editor when prompted.
 
-### Your First Stream (5 Minutes)
+### Your First Stream
 
-This example uses **Loopback transport** for local testing (no network required).
+This example streams the Third Person template's mannequin to a second mannequin in the same level, over the **Loopback** transport (in-process, no network). No sample map ships with the plugin, so it starts from a new project.
 
-#### Step 1: Add a Sender Component
+#### Step 1: Create a Project with a Mannequin
 
-1. Open your level with a character that has a skeletal mesh
-2. Select the character actor in the **Outliner**
-3. In the **Details** panel, click **Add Component**
-4. Search for and add **O3D Sender Component**
-5. Configure the sender:
-   - **Subject Name**: `MyCharacter`
-   - **Capture Rate Hz**: `60`
-   - **Transport Name**: `loopback`
-   - **Auto Start Capture**: ✓ (checked)
+1. Create a new project from the **Third Person** template (**Games** category), Blueprint or C++.
+2. Enable the plugin as in [Installation](#installation) and restart the editor.
 
-#### Step 2: Add Transport Options
+#### Step 2: Add a Sender to the Character
 
-In the **O3D Sender Component** details:
-1. Expand **Transport Options**
-2. Add a new element:
-   - **Key**: `role`
-   - **Value**: `sender`
-3. Add another element:
-   - **Key**: `channel`
-   - **Value**: `test_channel`
+1. In the **Content Browser**, open the template's character Blueprint, `BP_ThirdPersonCharacter` (in `Content/ThirdPerson/Blueprints`).
+2. In the **Components** panel, click **Add** and add an **O3D Sender** component (search for "O3D Sender").
+3. Select the new component. In the **Details** panel, under **Open3DBroadcast**:
+   - **Sender** group: set **Subject Name** to `Mannequin`. Leave **Auto Start Capture** ticked (the default) and **Target Mesh** empty: the component captures the character's skeletal mesh.
+   - **Transport** group: tick **Auto Create Transport**. The warning "Auto Create Transport is off ..." disappears and **Transport Name** becomes editable.
+   - **Transport Name**: **Loopback** (the default). Leave **Channel Name** empty: both ends then use the channel `default`.
+4. **Compile** and **Save** the Blueprint.
 
-#### Step 3: Create a LiveLink Source (Receiver)
+#### Step 3: Create the LiveLink Source (Receiver)
 
-1. Open **Window → Live Link** to show the LiveLink panel
-2. Click **+ Source** button
-3. Select **Open3D Receiver Source**
-4. In the dialog:
-   - **Transport Name**: `loopback`
-   - **Enable Audio**: unchecked (for now)
-5. Expand **Transport Options** and add:
-   - **Key**: `role`, **Value**: `receiver`
-   - **Key**: `channel`, **Value**: `test_channel`
-6. Click **Create**
+1. Open **Window → Virtual Production → Live Link**.
+2. Click **Add Source** and choose **Open3DStream Receiver**.
+3. In the panel that opens, set **Transport** to **Loopback** (the default) and leave **Channel Name** empty.
+4. Click **Create Source**. The source appears in the Live Link panel and waits for data.
 
-#### Step 4: Test the Stream
+#### Step 4: Make an Animation Blueprint that Reads the Subject
 
-1. Click **Play** in the editor
-2. Open the **LiveLink** panel
-3. You should see a subject named `MyCharacter` appear with a green status
-4. The skeletal animation from your character is now streaming through the loopback transport!
+1. In the **Content Browser**, right-click and choose **Animation → Animation Blueprint**. Pick the mannequin's skeleton (`SK_Mannequin` in the template) and name the asset, for example `ABP_O3DMannequin`.
+2. Open it. In the **AnimGraph**, right-click, add a **Live Link Pose** node and connect its output to **Output Pose**.
+3. On the node, set **Live Link Subject Name** to `Mannequin`: type it, or pick it from the list once the subject exists.
+4. **Compile** and **Save**.
 
-#### Step 5: Apply to Another Character (Optional)
+The sender and the receiving mesh use the same skeleton, so no retargeting is needed.
 
-1. Add a second skeletal mesh actor to your level
-2. Select it and add a **Live Link Component**
-3. In the component settings:
-   - **Subject Representation**: Select your skeleton asset
-   - **LiveLink Subject Name**: `MyCharacter`
-4. The second character will now mirror the first character's animation
+#### Step 5: Place the Mannequin that Follows
 
-**Congratulations!** You've set up your first animation stream.
+1. Drag the mannequin's skeletal mesh (in the template, a mesh in `Content/Characters/Mannequins/Meshes`) from the **Content Browser** into the level, a few metres away from the player start.
+2. With the new actor selected, in the **Details** panel under **Animation**, set **Animation Mode** to **Use Animation Blueprint** and **Anim Class** to `ABP_O3DMannequin`.
+
+#### Step 6: Play
+
+1. Click **Play**. Capture starts only in Play In Editor or a game, not in the editor viewport.
+2. In the **Live Link** panel, the subject `Mannequin` appears under the source, and the source reports that it is receiving.
+3. Move the character. The placed mannequin plays the same animation in place: its pose comes from the character over the Loopback transport.
+
+**If nothing moves:**
+- **Auto Create Transport** must be ticked on the sender. Without it, capture runs but nothing is sent, and the Output Log shows a warning when capture starts.
+- Both ends must use **Loopback** and the same **Channel Name** (empty on both is fine).
+- The **Live Link Subject Name** on the **Live Link Pose** node must match the sender's **Subject Name**.
+- The [source status](#source-status) in the Live Link panel says what the receiver sees. The sender logs under `LogO3DSenderComponent`.
+
+To stream between two machines, keep this setup and change the transport on both ends; see [Transport Modules](#transport-modules).
 
 ---
 
@@ -148,31 +143,22 @@ Each sender broadcasts data for a **subject** - a named stream of animation data
 
 ### Transport Modules
 
-The plugin provides these transport modules. WebRTC comes from the free Open3DBroadcastWebRTC add-on plugin:
+The plugin provides these transports. WebRTC comes from the free Open3DBroadcastWebRTC add-on plugin. Every transport carries mocap, audio and control.
 
-| Transport | Best For | Network | Audio | Latency | Available in |
-|-----------|----------|---------|-------|---------|--------------|
-| **Loopback** | Testing, local development | None (in-process) | Yes | Ultra-low | Open3DBroadcast |
-| **Sockets** | LAN, direct P2P | TCP/UDP | No (V1) | Low | Open3DBroadcast |
-| **NNG** | Advanced messaging patterns | TCP/IPC/WebSocket | No (V1) | Low-Medium | Open3DBroadcast |
-| **MoQ** (Experimental) | Relay-based streaming (draft-07) | QUIC | Yes | Medium | Open3DBroadcast |
-| **WebRTC** | Internet, NAT traversal, cloud | WebRTC/TURN | Yes | Medium | Open3DBroadcastWebRTC add-on |
+| Transport | Best for | Network | Mocap delivery | Available in |
+|-----------|----------|---------|----------------|--------------|
+| **Loopback** | Testing, sender and receiver in one process | None (in-process) | Reliable, ordered | Open3DBroadcast |
+| **TCP** | One receiver on a LAN | TCP, sender listens | Reliable, ordered | Open3DBroadcast |
+| **UDP** | Lowest latency on a LAN; broadcast to a subnet | UDP, receiver listens | Unreliable | Open3DBroadcast |
+| **NNG** | Several receivers on a LAN (Pub/Sub) | TCP | Pub/Sub unreliable; Pair, Push/Pull reliable, ordered | Open3DBroadcast |
+| **MoQ** (Experimental) | Streaming through a relay (draft-07) | QUIC, outbound to the relay | Unreliable | Open3DBroadcast |
+| **WebRTC** | Internet, NAT traversal, LiveKit rooms | WebRTC through a LiveKit server | Reliable, ordered | Open3DBroadcastWebRTC add-on |
 
-### Unified Message Format
+See [Transport Modules](#transport-modules) for setup, ports and firewalls.
 
-All transports use a unified message format with a 20-byte header:
+### Message Format
 
-```
-┌──────────┬─────────┬────────┬───────────┬──────────┬─────────────┐
-│  Magic   │ Version │  Kind  │   Codec   │Timestamp │Payload Size │
-│ (4 bytes)│(2 bytes)│(2 byte)│ (2 bytes) │(8 bytes) │  (4 bytes)  │
-└──────────┴─────────┴────────┴───────────┴──────────┴─────────────┘
-                             Followed by payload data
-```
-
-- **Magic**: `0x4F334441` (identifies Open3D frames)
-- **Kind**: Mocap (skeletal data), Audio, or Control (events and values; see [Control Channel](#control-channel))
-- **Codec**: O3DS (FlatBuffers), PCM16, Opus, or O3DControl (the control FlatBuffer, used only with kind Control)
+A mocap frame travels as an 8-byte header (with a CRC-32) followed by a FlatBuffer (`SubjectList`). Audio and control travel in a 24-byte envelope that starts with the magic `O3DU` and names the kind (Audio or Control) and codec (PCM16, Opus or O3DControl). UDP adds a fragment header when a message is split, and TCP a length prefix. Everything is little-endian. The byte layout is in [docs/wire-format.md](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/docs/wire-format.md).
 
 ---
 
@@ -197,7 +183,7 @@ UO3DSenderComponent* Sender = CreateDefaultSubobject<UO3DSenderComponent>(TEXT("
 #### Required Settings
 
 - **Subject Name**: Unique identifier for this animation stream (e.g., "MainCharacter", "Player1")
-- **Transport Name**: Which transport to use (`loopback`, `sockets`, `nng`, or `webrtc`)
+- **Transport Name**: Which transport to use: **Loopback**, **TCP**, **UDP**, **NNG**, **MoQ**, or **WebRTC** with the add-on. It is greyed out until **Auto Create Transport** is ticked (see [Transport Configuration](#transport-configuration))
 
 #### Capture Settings
 
@@ -208,6 +194,8 @@ UO3DSenderComponent* Sender = CreateDefaultSubobject<UO3DSenderComponent>(TEXT("
 - **Target Mesh**: the skeletal mesh to capture, picked from the actor's components; it works on Blueprint defaults too. Empty: the actor's skeletal mesh that drives its own pose (a mesh following a leader pose component is skipped); the log names the one chosen when the actor has several. **Resolved Target Mesh** (advanced, read-only) shows the mesh in use, which Blueprint can also set at runtime.
 
 #### Transport Configuration
+
+Tick **Auto Create Transport** in the **Transport** group first. While it is off (the default), **Transport Name** is greyed out, a warning says the component captures but sends nothing, and nothing is sent.
 
 The **Transport** group of the Details panel (and the LiveLink **Add Source** panel on the receiver side) shows one row per option the selected transport declares. How the rows behave:
 
@@ -230,14 +218,7 @@ Switching a sender's or a LiveLink source's transport keeps the options you set 
 - Credentials (for example `webrtc.token` or `webrtc.tokenEndpointAuth`) are never taken from here: `DefaultGame.ini` is committed and shipped, so such an entry is ignored with a warning in the log. Use the credential store or the credential's environment variable.
 - A new LiveLink source starts with no options of its own, so the project defaults apply to it. Creating a source no longer changes the defaults for the next one.
 
-Configure transports using **Transport Options** (key-value pairs):
-
-**Common Options:**
-- `role`: `sender` or `receiver`
-- `uri`: Connection endpoint (IP:port or WebSocket URL)
-- `stream_id`: Room/channel identifier
-
-See [Transport Modules](#transport-modules) for transport-specific options.
+There are no options common to every transport, and no `role`, `uri` or `stream_id` option: the sender component is always the sending end, and each transport declares its own options. The [Transport Options Reference](#transport-options-reference) lists each transport's keys with the names the panel shows. [Transport Modules](#transport-modules) says what to set on each end.
 
 ### Curve Filtering
 
@@ -412,110 +393,129 @@ Once the LiveLink source is receiving data, subjects will appear automatically.
 
 ## Transport Modules
 
+A transport moves frames, audio and control between a sender component and a LiveLink source. Each transport registers under a name, and that name is what **Transport Name** (sender) and **Transport** (LiveLink source) list:
+
+| Name | Module | Plugin |
+|------|--------|--------|
+| **Loopback** | `Open3DTransportLoopback` | Open3DBroadcast |
+| **TCP**, **UDP** | `Open3DTransportSockets` | Open3DBroadcast |
+| **NNG** | `Open3DTransportNNG` | Open3DBroadcast |
+| **MoQ** (Experimental) | `Open3DTransportMoQ` | Open3DBroadcast |
+| **WebRTC** | `Open3DTransportWebRTC` | Open3DBroadcastWebRTC add-on |
+
+The sender and the receiver must use the same transport, and their options must point at each other. Every transport carries mocap, audio and control. The option keys, their panel names and defaults are in the [Transport Options Reference](#transport-options-reference).
+
+### Delivery Guarantees
+
+| Transport | Mocap delivery |
+|-----------|----------------|
+| Loopback | Reliable and ordered |
+| TCP | Reliable and ordered |
+| UDP | Unreliable |
+| NNG | Pub/Sub: unreliable. Pair and Push/Pull: reliable and ordered |
+| MoQ | Unreliable, in both delivery modes |
+| WebRTC | Reliable and ordered; unreliable with `webrtc.prefer_lossy` |
+
+Residual coding needs a reliable, ordered transport. On any other transport the sender sends frames without it and says so in a warning.
+
+### Ports and Firewalls
+
+| Transport | What must be reachable | Default |
+|-----------|------------------------|---------|
+| Loopback | Nothing: it never leaves the process | n/a |
+| TCP | Inbound TCP on the sender's machine; the receiver connects to it | port 17700 |
+| UDP | Inbound UDP on the receiver's machine; the sender sends to it | port 17800 |
+| NNG | Inbound TCP on the end that listens: the sender for Pub/Sub and Pair, the receiver for Push/Pull (with the default roles) | 6000 Pub/Sub, 7000 Pair, 8000 Push/Pull |
+| MoQ | Outbound UDP from both machines to the relay's host and port (QUIC). Nothing listens locally | the port in **Relay URL** |
+| WebRTC | Outbound to the LiveKit server URL (`wss://`, usually port 443, sometimes a custom port such as 7880), and HTTPS to the token endpoint if you use one | see the add-on's USER_GUIDE |
+
+TCP, UDP and NNG use the one port shown: audio and control travel on the same socket as the frames.
+
 ### Loopback Transport
 
-**Purpose:** In-process streaming for testing and development
+**Purpose:** in-process streaming, for testing and for setups where the sender and the receiver run in the same editor or game.
 
-**Configuration:**
-```
-Transport Name: loopback
-Transport Options:
-  - role: sender (or receiver)
-  - channel: my_channel_name    # Both sender/receiver must match
-  - loopback.queue: 64          # Optional: queue size
-```
+**Setup:** select **Loopback** on both ends. That is all: both ends use the channel `default` unless you set **Channel Name**. Give several streams in one process different channel names to keep them apart.
 
 **Characteristics:**
-- No network involved
-- Ultra-low latency
-- Both sender and receiver in same process
-- Supports audio
-- Perfect for development and testing
+- No network. The sender and the receiver must run in one process, for example the editor and its Play In Editor session.
+- Reliable and ordered. While the channel is full (**Queue Capacity**, 64 frames by default), new frames are refused rather than old ones dropped.
+- Carries audio and control.
 
-**Use When:**
-- Testing animation capture pipeline
-- Developing new features
-- Debugging serialization issues
-- Demo setups on single machine
+**Use when:** testing a capture pipeline, checking a character's setup, or debugging without network effects. The [Quick Start](#quick-start) uses it.
 
-### Sockets Transport
+### TCP and UDP Transports
 
-**Purpose:** Direct peer-to-peer streaming over TCP or UDP
+**Purpose:** direct streaming between two machines on a local network, without a server.
 
-**Sender Configuration:**
-```
-Transport Name: sockets
-Transport Options:
-  - role: sender
-  - uri: 192.168.1.100:9000     # Receiver's IP:port
-  - protocol: tcp                # or udp
-```
+**TCP setup:**
+1. On the sender, select **TCP**. The sender listens on **Port** (17700) on every interface (**Bind Address** `0.0.0.0`).
+2. On the receiver, select **TCP**, set **Remote Host** to the sender's IP address and **Port** to the sender's port.
+3. Allow inbound TCP on that port on the sender's machine.
 
-**Receiver Configuration:**
-```
-Transport Name: sockets
-Transport Options:
-  - role: receiver
-  - uri: 0.0.0.0:9000           # Listen on all interfaces
-  - protocol: tcp                # Must match sender
-```
+**UDP setup:**
+1. On the receiver, select **UDP**. It listens on **Port** (17800) on every interface (**Bind Address** `0.0.0.0`).
+2. On the sender, select **UDP**, set **Destination Host** to the receiver's IP address and **Port** to the receiver's port.
+3. Allow inbound UDP on that port on the receiver's machine.
+
+Both default to `127.0.0.1`, so a sender and a receiver on one machine connect without changes.
 
 **Characteristics:**
-- Low latency on LAN
-- Reliable (TCP) or fast (UDP)
-- Direct connection required
-- No audio support in V1
-- Firewall rules may be needed
+- **TCP** is reliable and ordered. The sender listens and accepts one receiver at a time. The receiver reconnects on its own when the connection drops or goes quiet for **Connection Timeout (seconds)**.
+- **UDP** is unreliable: a lost datagram is a lost frame. A message larger than **Max Datagram Bytes** (64000) is split into fragments of **MTU** size (1200 bytes) and reassembled by the receiver; losing one fragment loses the frame. UDP sends to one address, or to a broadcast address when **Enable UDP Broadcast** is on at the sender and **Accept Broadcast Packets** at the receiver. There is no multicast.
+- Both carry audio and control on the same socket as the frames.
+- No encryption and no authentication. Use them on networks you trust.
 
-**TCP vs UDP:**
-- **TCP**: Reliable, ordered delivery. Best for critical animation data
-- **UDP**: Lower latency, may drop packets. Good for high-frequency updates
-
-**Use When:**
-- Local network (LAN/studio)
-- Direct machine-to-machine
-- Low latency is critical
-- No NAT traversal needed
+**Use when:** two machines on one LAN or studio network, with no NAT between them. Pick TCP for one receiver and every frame; pick UDP for the lowest latency, or broadcast to several receivers on one subnet.
 
 ### NNG Transport
 
-**Purpose:** Advanced messaging patterns (pub/sub, push/pull, etc.)
+**Purpose:** streaming over [NNG](https://nng.nanomsg.org/) sockets, with one sender feeding several receivers (Pub/Sub) or a reliable link to one receiver (Pair, Push/Pull).
 
-**Publisher (Sender) Configuration:**
-```
-Transport Name: nng
-Transport Options:
-  - role: sender
-  - uri: tcp://0.0.0.0:9000     # Bind address
-  - pattern: pub                # Publishing pattern
-```
-
-**Subscriber (Receiver) Configuration:**
-```
-Transport Name: nng
-Transport Options:
-  - role: receiver
-  - uri: tcp://192.168.1.100:9000  # Publisher address
-  - pattern: sub                   # Subscribing pattern
-```
+**Setup:**
+1. Pick matching modes: **Publisher** on the sender with **Subscriber** on the receiver, **Pair** with **Pair**, or **Push** with **Pull**.
+2. Leave **Role** at its default. With default roles exactly one end listens: the sender for Pub/Sub and Pair, the receiver for Push/Pull.
+3. On the end that dials, set **Host** to the listening machine's IP address. The listening end listens on `0.0.0.0`.
+4. Leave **Port** empty on both ends to use the mode's default (6000, 7000 or 8000), or set the same port on both.
+5. Allow inbound TCP on that port on the listening machine.
 
 **Characteristics:**
-- Scalable messaging patterns
-- Multiple subscribers per publisher
-- Cross-platform (IPC, TCP, WebSocket)
-- No audio support in V1
-- More complex configuration
+- TCP only (`tcp://` addresses). There are no IPC or WebSocket addresses.
+- Pub/Sub is rated unreliable. Pair and Push/Pull are reliable and ordered.
+- A subscriber receives every message the publisher sends. There are no subscription topics; a topic left in an old configuration is ignored with a warning.
+- Carries audio and control. No encryption and no authentication.
 
-**Patterns:**
-- **pub/sub**: One publisher, many subscribers (broadcast)
-- **push/pull**: Load balancing across receivers
-- **req/rep**: Request-response pattern
+**Use when:** several receivers on a LAN need the same stream (Pub/Sub), or one receiver needs a reliable link that either end can open (Pair, Push/Pull).
 
-**Use When:**
-- Multiple receivers needed
-- Advanced routing required
-- Cross-platform IPC needed
-- Scalability is important
+### MoQ Transport (Experimental)
+
+**Purpose:** streaming through a Media over QUIC relay, so the sender and the receivers only make outbound connections.
+
+The MoQ transport is Experimental. It implements draft-ietf-moq-transport-07, the relay must speak draft-07, and its options and behaviour can change between releases.
+
+**What you need:** a MoQ relay that speaks draft-07 and that both machines can reach over UDP (QUIC). The plugin does not include a relay.
+
+**Setup:**
+1. On the sender, select **MoQ** and set **Relay URL**, for example `https://relay.example.com:443`.
+2. Set **Track Namespace (optional)** and **Track Name (optional)** on the sender, for example `mocap/stage1` and `performer1`.
+3. On the receiver, select **MoQ** and set the same **Relay URL**, **Track Namespace (optional)** and **Track Name (optional)**.
+
+Set the namespace and track name on both ends. Left empty, they do not match: the sender uses `mocap/<Subject Name>` and `<Subject Name>`, the receiver `mocap/default` and `primary`. Start the namespace with `mocap/`: the transport then puts audio on `audio/...` and control on `control/...` with the same rest of the namespace.
+
+**Tracks:** a sender publishes three tracks under one track name: mocap in the namespace you set (`mocap/<session>`), audio in `audio/<session>`, and control in `control/<session>`. A receiver subscribes to the mocap track, and to the audio and control tracks when it uses them.
+
+**Delivery Mode** (sender only):
+- **Stream** (default): every frame is delivered, in order.
+- **Datagram**: late frames are dropped instead of waited for.
+
+Both are rated unreliable, so residual coding is not used over MoQ.
+
+**Characteristics:**
+- Connections are outbound only: no port to open on either machine.
+- The transport reconnects on its own, with a growing delay between attempts (0.5 to 10 seconds). An attempt that has not connected after 15 seconds (`connect_timeout`) is abandoned and retried.
+- Carries audio and control.
+
+**Use when:** senders and receivers are on different networks and you run, or have access to, a draft-07 MoQ relay.
 
 ### WebRTC Transport (free add-on)
 
@@ -529,6 +529,8 @@ WebRTC is **not included in Open3DBroadcast**. It is a separate, free add-on plu
 - **Removing it:** disable the add-on (or delete its folder) and restart. Every other transport keeps working. Components and LiveLink sources set to WebRTC keep their settings and report that the transport is not registered.
 
 The add-on's own [USER_GUIDE](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcastWebRTC/USER_GUIDE.md) (also in the add-on's folder) covers LiveKit setup, credentials and automatic token fetch, audio, and WebRTC troubleshooting.
+
+**Characteristics:** reliable and ordered (unreliable with `webrtc.prefer_lossy`). Carries audio and control. Both ends connect out to the LiveKit server.
 
 **Use When:**
 - Remote collaboration over internet
@@ -663,7 +665,7 @@ Audio is routed through a centralized **Audio Bus** singleton:
 
 **No audio output:**
 1. Check **Enable Audio** on sender and receiver
-2. Verify transport supports audio (Loopback, WebRTC)
+2. Check that animation arrives over the same transport. Every transport carries audio
 3. Check the component's **Receive Mode** and **Stream Label Filter** match the stream's label (Mix plays only `o3ds:mix`)
 4. Verify codec compatibility
 5. Check Windows audio mixer for Unreal Engine volume
@@ -1162,28 +1164,83 @@ Blueprint: **Play** starts playback (now if audio has arrived, otherwise when it
 
 ### Transport Options Reference
 
-#### Loopback
-| Key | Value | Description |
-|-----|-------|-------------|
-| `role` | `sender`/`receiver` | Required: endpoint role |
-| `channel` | string | Required: shared channel name |
-| `loopback.queue` | number | Optional: queue size (default 64) |
+Each transport declares its options, separately for the sender and the receiver. The **Transport** group of the sender's Details panel and the LiveLink source panel show one row per declared option, labelled with the name in the **Shown as** column. Blueprint (**Set Transport Option**, **Create Open3DStream LiveLink Source**), C++ and the [project-wide defaults](#project-wide-transport-defaults) use the key.
 
-#### Sockets
-| Key | Value | Description |
-|-----|-------|-------------|
-| `role` | `sender`/`receiver` | Required: endpoint role |
-| `uri` | `host:port` | Required: IP and port |
-| `protocol` | `tcp`/`udp` | Optional: protocol (default tcp) |
-| `sockets.buffer` | number | Optional: buffer size (bytes) |
+- An option you leave empty takes the project default, then the default below.
+- Keys are case-insensitive. A key the selected transport does not read has no effect.
+- The keys listed under "Not shown in the panel" are read by the transport, but have no row. Set them with **Set Transport Option** or in the project-wide defaults.
+
+There is no `role` option: the sender component is always the sending end and the LiveLink source the receiving end.
+
+#### Loopback
+
+| Key | Shown as | Side | Default | Description |
+|-----|----------|------|---------|-------------|
+| `channel` | **Channel Name** | Sender, receiver | `default` | In-process channel. A receiver hears the senders on the same channel. Leading and trailing spaces and letter case are ignored |
+| `loopback.maxqueue` | **Queue Capacity** | Sender | 64 | Frames the channel buffers (1 to 4096). While it is full, new frames are refused |
+
+Not shown in the panel: `loopback.maxaudioqueue` (sender; audio buffers the channel holds, default 32).
+
+#### TCP
+
+| Key | Shown as | Side | Default | Description |
+|-----|----------|------|---------|-------------|
+| `bind` | **Bind Address** | Sender | `0.0.0.0` | Local address the sender listens on. `0.0.0.0` listens on every interface. Must be an IP address, not a host name |
+| `port` | **Port** | Sender, receiver | 17700 | TCP port the sender listens on and the receiver connects to (1 to 65535) |
+| `host` | **Remote Host** | Receiver | `127.0.0.1` | Address of the sender |
+| `tcp.timeout` | **Connection Timeout (seconds)** | Receiver | 5 | The receiver reconnects when nothing (frames or keepalives) arrives for this long (1 to 60) |
+
+Not shown in the panel:
+
+| Key | Side | Default | Description |
+|-----|------|---------|-------------|
+| `tcp.maxqueue` | Sender | 4194304 | Bytes of frames queued for the receiver; frames beyond it are dropped |
+| `tcp.maxqueueage` | Sender | 1000 | Queued frames older than this many milliseconds are dropped; 0 turns it off |
+| `tcp.stalltimeout` | Sender | 2000 | Milliseconds a frame may make no progress before the sender drops the receiver |
+| `tcp.keepalive` | Sender | 1000 | Milliseconds of silence after which the sender sends a keepalive; 0 turns it off |
+| `tcp.connecttimeout` | Receiver | 5 | Seconds a connect may take before it is retried |
+| `tcp.maxframe` | Receiver | 4194304 | Largest frame accepted, in bytes |
+| `tcp.backoff` | Receiver | 500 | First reconnect delay in milliseconds; it doubles after each failed attempt |
+| `tcp.maxbackoff` | Receiver | 5000 | Longest reconnect delay in milliseconds |
+
+#### UDP
+
+| Key | Shown as | Side | Default | Description |
+|-----|----------|------|---------|-------------|
+| `host` | **Destination Host** | Sender | `127.0.0.1` | Address the datagrams are sent to: the receiver's address, or a broadcast address |
+| `host` | **Bind Address** | Receiver | `0.0.0.0` | Local address the receiver listens on. `0.0.0.0` listens on every interface |
+| `port` | **Port** | Sender, receiver | 17800 | UDP port (1 to 65535) |
+| `udp.broadcast` | **Enable UDP Broadcast** | Sender | false | Allow sending to a broadcast address |
+| `udp.broadcast` | **Accept Broadcast Packets** | Receiver | false | Receive datagrams sent to a broadcast address |
+| `udp.mtu` | **MTU** | Sender | 1200 | Size of each fragment, header included, when a message is split (256 to 65507) |
+| `udp.maxdatagram` | **Max Datagram Bytes** | Sender, receiver | 64000 | Sender: largest message sent as one datagram; a larger one is split into fragments. Receiver: largest datagram accepted. 512 to 65507; keep it at least as large as the MTU |
+
+Not shown in the panel: `udp.maxframe` (receiver; largest frame reassembled from fragments, default 4194304 bytes).
+
+TCP and UDP keep their options apart, so switching between them keeps each one's `port`.
 
 #### NNG
-| Key | Value | Description |
-|-----|-------|-------------|
-| `role` | `sender`/`receiver` | Required: endpoint role |
-| `uri` | `protocol://host:port` | Required: NNG URL |
-| `pattern` | `pub`/`sub`/`push`/`pull` | Optional: messaging pattern |
-| `nng.timeout` | number | Optional: timeout (ms) |
+
+| Key | Shown as | Side | Default | Description |
+|-----|----------|------|---------|-------------|
+| `host` | **Host** | Sender, receiver | `0.0.0.0` when this end listens, `127.0.0.1` when it dials | Address to listen on, or the address of the end to dial |
+| `port` | **Port** | Sender, receiver | 6000 (Pub/Sub), 7000 (Pair), 8000 (Push/Pull) | TCP port (1 to 65535) |
+| `nng.mode` | **Mode** | Sender | `pub` | `pub` (**Publisher**), `pair` (**Pair**) or `push` (**Push**) |
+| `nng.mode` | **Mode** | Receiver | `sub` | `sub` (**Subscriber**), `pair` (**Pair**) or `pull` (**Pull**) |
+| `nng.role` | **Role** | Sender, receiver | the usual role for the mode | `server` (**Listen (server)**) or `client` (**Dial (client)**). Shown only for Pair, Push and Pull |
+| `nng.qmax` | **Queue Capacity (MiB)** | Sender | 4 MiB | Bytes queued for a slow receiver before frames are dropped (1 to 512 MiB in the panel; the key holds bytes) |
+
+#### MoQ (Experimental)
+
+| Key | Shown as | Side | Default | Description |
+|-----|----------|------|---------|-------------|
+| `relay_url` | **Relay URL** | Sender, receiver | none (required) | The relay, for example `https://relay.example.com:443`. The relay must speak draft-ietf-moq-transport-07 |
+| `track_namespace` | **Track Namespace (optional)** | Sender, receiver | `mocap/<session>` | Namespace of the mocap track. The sender's session is its **Subject Name**; the receiver's is `default` |
+| `track_name` | **Track Name (optional)** | Sender, receiver | sender: the **Subject Name**; receiver: `primary` | Name of the track |
+| `delivery_mode` | **Delivery Mode** | Sender | `stream` | `stream` (**Stream**) delivers every frame in order. `datagram` (**Datagram**) drops late frames instead of waiting for them |
+| `queue_bytes` | **Queue Capacity (MiB)** | Sender | 8 MiB | Bytes queued for the relay before frames are dropped (1 to 256 MiB in the panel; the key holds bytes) |
+
+Not shown in the panel: `connect_timeout` (sender and receiver; seconds before an unfinished connection attempt is abandoned and retried, 1 to 120, default 15) and `moq.session` (sender and receiver; the `<session>` part of the default namespace).
 
 #### WebRTC
 
@@ -1335,11 +1392,7 @@ UE_LOG(LogTemp, Log, TEXT("Sent %lld frames, %lld bytes, avg latency %.2f ms"),
 **Symptoms:** Animation works but no audio output
 
 **Solutions:**
-1. **Verify transport support:**
-   - Loopback: ✓ Supported
-   - Sockets: ✗ Not supported in V1
-   - NNG: ✗ Not supported in V1
-   - WebRTC: ✓ Supported
+1. **Transport:** every transport carries audio (Loopback, TCP, UDP, NNG, MoQ and WebRTC). Check that the sender and the LiveLink source use the same transport and matching options, and that animation arrives.
 
 2. **Check audio settings:**
    - Sender: `Enable Audio` checked
@@ -1561,7 +1614,7 @@ Before deploying to production:
 
 - [ ] Test with loopback transport first
 - [ ] Verify all subjects appear in LiveLink
-- [ ] Test audio if using WebRTC or Loopback
+- [ ] Test audio on the transport you deploy with
 - [ ] Measure bandwidth usage
 - [ ] Test network disconnection handling
 - [ ] Verify retargeting works on target characters

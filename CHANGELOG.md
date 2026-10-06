@@ -578,6 +578,11 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- USER_GUIDE quick start and transport setup (WP-D2; mid-project review DOC-5, DOC-10 part).
+  - **Quick Start** works on a clean machine: it starts from the Third Person template (no sample map ships), turns on **Auto Create Transport**, uses the real panel names (**Open3DStream Receiver**, **Transport**, **Create Source**) and drives a second mannequin with a **Live Link Pose** node. The `role` and `channel` key/value rows it asked for do not exist.
+  - **Transport Modules** cover TCP, UDP, NNG and the new MoQ section (relay, tracks, delivery modes) with their real options, plus delivery guarantees and a ports and firewalls table. The **Transport Options Reference** follows each transport's option schema, with the names the panel shows.
+  - Every transport carries audio; the "No (V1)" statements are gone. The message format section describes the raw mocap frame and the 24-byte `O3DU` envelope instead of a 20-byte header.
+
 - Transport counters mean the same on every transport (WP-R3; mid-project review TR-5, SR-4).
   - **Sender metrics (`o3d.DumpMetrics`, the sender component's metrics handle):** frames captured, bytes serialized and frames a transport refused are recorded once, by the sender pipeline, for every transport. Before, only NNG, MoQ and WebRTC recorded them, so they read zero on TCP, UDP and Loopback. Every transport now records bytes sent and frames it dropped after accepting them.
   - **`FramesSent` and bytes sent are counted when a frame is sent, not when it is queued.** TCP counted a frame as sent and then as dropped when it aged out of the queue; NNG and MoQ recorded their sender and transport metrics at enqueue.
