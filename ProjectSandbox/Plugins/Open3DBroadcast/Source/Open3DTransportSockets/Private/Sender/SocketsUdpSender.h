@@ -96,8 +96,8 @@ private:
 	FString StreamId;
 
 	bool bAllowBroadcast = false;
-	int32 MaxDatagramBytes = 64000;
-	int32 MtuBytes = 1200;
+	int32 MaxDatagramBytes = O3DSockets::DefaultUdpMaxDatagramBytes;
+	int32 MtuBytes = O3DSockets::DefaultUdpMtuBytes;
 	FGuid AudioSourceGuid;
 
 	/** Fragment message ids (worker thread). */

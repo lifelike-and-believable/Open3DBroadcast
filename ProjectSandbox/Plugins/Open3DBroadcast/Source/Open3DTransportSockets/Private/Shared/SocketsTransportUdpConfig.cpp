@@ -31,7 +31,7 @@ namespace O3DSocketsUdpConfigPrivate
 		const FString Host = StoredHost.IsEmpty() ? FString(DefaultHost) : O3DSockets::NormaliseHostname(StoredHost);
 		const int32 Port = O3DSockets::ReadPortOption(Config, O3DSockets::PortOptionKey, O3DSocketsConfig::DefaultUdpPort);
 		const bool bBroadcast = O3DTransportOptions::GetBool(Config.AdvancedParams, O3DSockets::BroadcastOptionKey, false);
-		const int32 MaxDatagram = ReadPositiveInt(Config, O3DSockets::MaxDatagramOptionKey, 64000);
+		const int32 MaxDatagram = ReadPositiveInt(Config, O3DSockets::MaxDatagramOptionKey, O3DSockets::DefaultUdpMaxDatagramBytes);
 
 		Config.Uri = O3DSockets::MakeUri(TEXT("udp"), Host, Port);
 		Config.StreamId = O3DSockets::ComposeStreamId(Host, Port);
@@ -46,10 +46,10 @@ namespace O3DSocketsConfig
 {
 	void ConfigureUdpSender(FO3DTransportConfig& Config)
 	{
-		O3DSocketsUdpConfigPrivate::ConfigureUdp(Config, TEXT("127.0.0.1"));
+		O3DSocketsUdpConfigPrivate::ConfigureUdp(Config, O3DSockets::DefaultRemoteHost);
 		Config.Role = EO3DTransportRole::Sender;
 		// Only the sender fragments frames, so only it has an MTU (TRB-21).
-		const int32 Mtu = O3DSocketsUdpConfigPrivate::ReadPositiveInt(Config, O3DSockets::MtuOptionKey, 1200);
+		const int32 Mtu = O3DSocketsUdpConfigPrivate::ReadPositiveInt(Config, O3DSockets::MtuOptionKey, O3DSockets::DefaultUdpMtuBytes);
 		Config.AdvancedParams.Add(O3DSockets::MtuOptionKey, FString::FromInt(Mtu));
 
 		if (Config.Audio.bEnableAudio)
@@ -69,7 +69,7 @@ namespace O3DSocketsConfig
 
 	void ConfigureUdpReceiver(FO3DTransportConfig& Config)
 	{
-		O3DSocketsUdpConfigPrivate::ConfigureUdp(Config, TEXT("0.0.0.0"));
+		O3DSocketsUdpConfigPrivate::ConfigureUdp(Config, O3DSockets::DefaultListenHost);
 		Config.Role = EO3DTransportRole::Receiver;
 
 		if (Config.Audio.bEnableAudio)

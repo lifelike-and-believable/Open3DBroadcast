@@ -117,8 +117,8 @@ FO3DTransportResult FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& 
 	bool bBroadcastHost = false;
 	Endpoint = O3DSocketsUdpSenderPrivate::ApplyHostRules(Parsed, bBroadcastHost);
 	bAllowBroadcast = bBroadcastHost || O3DTransportOptions::GetBool(Options, O3DSockets::BroadcastOptionKey, false);
-	MaxDatagramBytes = O3DTransportOptions::GetInt(Options, O3DSockets::MaxDatagramOptionKey, 64000, 512, 65507);
-	MtuBytes = FMath::Clamp(O3DTransportOptions::GetInt(Options, O3DSockets::MtuOptionKey, 1200), O3DSockets::MinUdpMtuBytes, FMath::Max(MaxDatagramBytes, O3DSockets::MinUdpMtuBytes));
+	MaxDatagramBytes = O3DTransportOptions::GetInt(Options, O3DSockets::MaxDatagramOptionKey, O3DSockets::DefaultUdpMaxDatagramBytes, 512, 65507);
+	MtuBytes = FMath::Clamp(O3DTransportOptions::GetInt(Options, O3DSockets::MtuOptionKey, O3DSockets::DefaultUdpMtuBytes), O3DSockets::MinUdpMtuBytes, FMath::Max(MaxDatagramBytes, O3DSockets::MinUdpMtuBytes));
 	FragmentScratch.clear();
 	FragmentScratch.reserve(MaxDatagramBytes);
 

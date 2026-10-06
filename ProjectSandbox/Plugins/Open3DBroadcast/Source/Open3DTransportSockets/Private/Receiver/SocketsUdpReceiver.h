@@ -72,7 +72,7 @@ private:
 	FString StreamId;
 
 	bool bAllowBroadcast = false;
-	int32 MaxDatagramBytes = 64000;
+	int32 MaxDatagramBytes = O3DSockets::DefaultUdpMaxDatagramBytes;
 	int32 MaxFrameBytes = 0;
 	// WP-R3 (TR-6): hot-path log sites, one throttle each, per instance.
 	FO3DLogThrottle UdpRecvFailedLog;

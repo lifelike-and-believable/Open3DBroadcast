@@ -102,7 +102,7 @@ FO3DTransportResult FO3DSocketsUdpReceiver::Initialize(const FO3DTransportConfig
 	ActiveAudioConfig = Config.Audio;
 	const TMap<FString, FString>& Options = Config.AdvancedParams;
 	bAllowBroadcast = O3DTransportOptions::GetBool(Options, O3DSockets::BroadcastOptionKey, false);
-	MaxDatagramBytes = O3DTransportOptions::GetInt(Options, O3DSockets::MaxDatagramOptionKey, 64000, 512, 65507);
+	MaxDatagramBytes = O3DTransportOptions::GetInt(Options, O3DSockets::MaxDatagramOptionKey, O3DSockets::DefaultUdpMaxDatagramBytes, 512, 65507);
 	MaxFrameBytes = O3DTransportOptions::GetInt(Options, O3DSockets::MaxFrameOptionKey, FReceiverConstants::DefaultMaxFrameBytes,
 		FReceiverConstants::MaxUdpDatagramBytes, FReceiverConstants::MaxFrameBytesLimit);
 
