@@ -229,6 +229,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Guard with `ParentToAttach != this` and skip auto-attach when the component already has an attach parent that the user chose. Only apply `AC_AttachParent` when it is explicitly set.
 - Effort: S
 - Owner: coding
+- Status: closed in #393
 
 ### RCV-23: The internal UAudioComponent is held by a raw pointer, never cleaned up, and ignores AutoActivate
 - Category: code-quality
@@ -238,6 +239,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Use `UPROPERTY(Transient) TObjectPtr<UAudioComponent> AudioComp`. Set properties before `RegisterComponent`. Only auto-play when `bAC_AutoActivate` is true, and expose Play/Stop as BlueprintCallable functions. In `EndPlay`, stop and destroy the owned component and reset `SoundWave`.
 - Effort: S
 - Owner: coding
+- Status: closed in #393
 
 ### RCV-24: OnAudioFrame is dead code with a double-gain bug
 - Category: code-quality
@@ -247,6 +249,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Delete `OnAudioFrame`, or fix the gain handling and add a test.
 - Effort: S
 - Owner: coding
+- Status: closed in #393
 
 ### RCV-25: Function-static log-once flags are shared across all component instances
 - Category: code-quality
