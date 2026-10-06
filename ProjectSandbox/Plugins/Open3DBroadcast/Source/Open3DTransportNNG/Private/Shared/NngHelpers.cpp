@@ -512,7 +512,7 @@ namespace O3DNNG
         }
     }
 
-    FString BuildCanonicalUri(ENngMode Mode, const FString& Host, int32 Port, ENngRole Role, const FString& Topic)
+    FString BuildCanonicalUri(ENngMode Mode, const FString& Host, int32 Port, ENngRole Role)
     {
         const FString ModeSegment = ModeToString(Mode);
         FString Uri = FString::Printf(TEXT("nng+%s://%s:%d"), *ModeSegment, *FormatHostForUri(Host), Port);
@@ -523,11 +523,6 @@ namespace O3DNNG
             QueryParts.Add(FString::Printf(TEXT("role=%s"), *RoleToString(Role)));
         }
 
-        if (!Topic.IsEmpty())
-        {
-            QueryParts.Add(FString::Printf(TEXT("topic=%s"), *FGenericPlatformHttp::UrlEncode(Topic)));
-        }
-
         if (QueryParts.Num() > 0)
         {
             Uri += TEXT("?") + FString::Join(QueryParts, TEXT("&"));
@@ -536,20 +531,21 @@ namespace O3DNNG
         return Uri;
     }
 
-    FString MakeStreamId(const FString& Host, int32 Port, const FString& Topic)
+    FString MakeStreamId(const FString& Host, int32 Port)
     {
-        FString StreamId = FString::Printf(TEXT("%s:%d"), *FormatHostForUri(Host), Port);
-        if (!Topic.IsEmpty())
-        {
-            StreamId += FString::Printf(TEXT("/%s"), *Topic);
-        }
-        return StreamId;
+        return FString::Printf(TEXT("%s:%d"), *FormatHostForUri(Host), Port);
     }
 
     /** Option, then the Uri path ("nng+sub://host:port/topic"), then its ?topic=, then the StreamId. */
-    FString ReadTopic(const FO3DTransportConfig& Config, const FString& UriPath, const TMap<FString, FString>& UriQuery)
+    FString FindIgnoredTopic(const FO3DTransportConfig& Config)
     {
-        FString Topic = O3DTransportOptions::GetString(Config.AdvancedParams, TopicOptionKey);
+        FString UriHost;
+        int32 UriPort = 0;
+        FString UriPath;
+        TMap<FString, FString> UriQuery;
+        ExtractHostPortFromUri(Config.Uri, UriHost, UriPort, UriPath, UriQuery);
+
+        FString Topic = O3DTransportOptions::GetString(Config.AdvancedParams, TopicOptionKey).TrimStartAndEnd();
         if (Topic.IsEmpty())
         {
             Topic = ExtractTopicFromUriParts(UriPath, UriQuery);
@@ -559,17 +555,6 @@ namespace O3DNNG
             Topic = ExtractTopicFromStreamId(Config.StreamId);
         }
         return Topic;
-    }
-
-    void SetTopic(const FString& Topic, FString& OutTopic, TArray<uint8>& OutTopicUtf8)
-    {
-        OutTopic = Topic;
-        OutTopicUtf8.Reset();
-        if (!Topic.IsEmpty())
-        {
-            const FTCHARToUTF8 TopicUtf8(*Topic);
-            OutTopicUtf8.Append(reinterpret_cast<const uint8*>(TopicUtf8.Get()), TopicUtf8.Length());
-        }
     }
 
     bool ParseSenderOptions(const FO3DTransportConfig& Config, FNngSenderOptions& OutOptions, FString& OutError)
@@ -605,8 +590,7 @@ namespace O3DNNG
         OutOptions.Host = Host;
         OutOptions.Port = Port;
         OutOptions.TcpAddress = BuildTcpAddress(Host, Port);
-        SetTopic(ReadTopic(Config, UriPath, UriQuery), OutOptions.Topic, OutOptions.TopicUtf8);
-        OutOptions.StreamId = MakeStreamId(Host, Port, OutOptions.Topic);
+        OutOptions.StreamId = MakeStreamId(Host, Port);
 
         // nng.qmax: bytes, digits only. Absent or 0 means the default (as before WP-A1 PR 4d).
         uint64 QueueBytes = kDefaultQueueBytes;
@@ -623,7 +607,7 @@ namespace O3DNNG
         }
         OutOptions.MaxQueueBytes = QueueBytes;
 
-        OutOptions.CanonicalUri = BuildCanonicalUri(OutOptions.Mode, OutOptions.Host, OutOptions.Port, OutOptions.Role, OutOptions.Topic);
+        OutOptions.CanonicalUri = BuildCanonicalUri(OutOptions.Mode, OutOptions.Host, OutOptions.Port, OutOptions.Role);
         return true;
     }
 
@@ -648,8 +632,6 @@ namespace O3DNNG
         OutOptions.Role = ResolveRole(OutOptions.Mode, RoleFromString(ReadRoleString(Config, UriQuery), ENngRole::None), /*bSender=*/false);
         OutOptions.bListen = IsListenRole(OutOptions.Role);
 
-        SetTopic(ReadTopic(Config, UriPath, UriQuery), OutOptions.Topic, OutOptions.TopicUtf8);
-
         FString Host;
         int32 Port = 0;
         FString HostPortError;
@@ -662,9 +644,9 @@ namespace O3DNNG
         OutOptions.Host = Host;
         OutOptions.Port = Port;
         OutOptions.TcpAddress = BuildTcpAddress(Host, Port);
-        OutOptions.StreamId = MakeStreamId(Host, Port, OutOptions.Topic);
+        OutOptions.StreamId = MakeStreamId(Host, Port);
 
-        OutOptions.CanonicalUri = BuildCanonicalUri(OutOptions.Mode, OutOptions.Host, OutOptions.Port, OutOptions.Role, OutOptions.Topic);
+        OutOptions.CanonicalUri = BuildCanonicalUri(OutOptions.Mode, OutOptions.Host, OutOptions.Port, OutOptions.Role);
         return true;
     }
 

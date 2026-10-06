@@ -98,6 +98,9 @@
  *      (an FO3DSenderMetricsHandle), through which sender transports record sender metrics.
  */
 #define O3D_TRANSPORT_API_VERSION 5
+// WP-R1 (mid-project review TR-1) is part of 5 as well (still no tag after v0.9.6):
+// IOpen3DSender gained SetFramesDroppedCallback (default no-op) and FO3DFramesDroppedCallback;
+// TCP and NNG call it. FO3DSendQueue gained ConsumeMocapDiscarded and never discards a full sync.
 
 namespace O3DTransport
 {

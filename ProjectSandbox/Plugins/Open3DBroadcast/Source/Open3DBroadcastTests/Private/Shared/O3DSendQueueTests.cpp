@@ -390,4 +390,49 @@ bool FO3DSendQueueConcurrentAccountingTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// WP-R1 (mid-project review TR-1): a full sync is what a receiver resyncs from (ADR 0005), and the
+// sender already counts it as sent once Enqueue says Queued. The age limit and the oldest-first
+// eviction must not discard it, or receivers hold the subject until the next periodic one.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSendQueueKeepsFullSyncTest, "Open3DBroadcast.Shared.SendQueue.NeverDiscardsAFullSync", O3DB_TEST_FLAGS)
+bool FO3DSendQueueKeepsFullSyncTest::RunTest(const FString& Parameters)
+{
+	using namespace O3DSendQueueTests;
+	{
+		FO3DSendQueueLimits Limits;
+		Limits.MaxAgeSeconds = 0.5;
+		FO3DSendQueue Queue(Limits);
+		Queue.Enqueue(FO3DSendItem::MakeMocap(MakeBytes(4, 1), TEXT("Subject"), 0.0, true));
+		Queue.Enqueue(MocapItem(4, 2));
+
+		FO3DSendItem Out;
+		const double Later = FPlatformTime::Seconds() + 10.0;
+		TestTrue(TEXT("An old full sync is still sent"), Queue.Dequeue(Out, Later) && Out.bFullSync && Out.Bytes[0] == 1);
+		TestFalse(TEXT("An old update is not"), Queue.Dequeue(Out, Later));
+	}
+	{
+		FO3DSendQueueLimits Limits;
+		Limits.Mocap.MaxItems = 1; // soft cap; DropOldest
+		FO3DSendQueue Queue(Limits);
+		Queue.Enqueue(FO3DSendItem::MakeMocap(MakeBytes(4, 1), TEXT("Subject"), 0.0, true));
+		Queue.Enqueue(MocapItem(4, 2));
+
+		FO3DSendItem Out;
+		TestTrue(TEXT("The oldest frame over the soft cap is kept when it is a full sync"), Queue.Dequeue(Out) && Out.bFullSync && Out.Bytes[0] == 1);
+		TestTrue(TEXT("And the update after it follows"), Queue.Dequeue(Out) && Out.Bytes[0] == 2);
+	}
+	{
+		// A discarded update is reported once, so the sender can ask for a full sync.
+		FO3DSendQueueLimits Limits;
+		Limits.MaxAgeSeconds = 0.5;
+		FO3DSendQueue Queue(Limits);
+		Queue.Enqueue(MocapItem(4, 1));
+		TestFalse(TEXT("Nothing discarded yet"), Queue.ConsumeMocapDiscarded());
+		FO3DSendItem Out;
+		Queue.Dequeue(Out, FPlatformTime::Seconds() + 10.0);
+		TestTrue(TEXT("The expired update is reported"), Queue.ConsumeMocapDiscarded());
+		TestFalse(TEXT("Once"), Queue.ConsumeMocapDiscarded());
+	}
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

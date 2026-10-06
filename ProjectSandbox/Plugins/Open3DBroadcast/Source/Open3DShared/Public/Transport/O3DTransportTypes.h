@@ -150,6 +150,9 @@ using FO3DConnectionStateCallback = TFunction<void(EO3DConnectionState /*NewStat
 /** Called when a sender gains a new peer (ADR 0005 (vi)); see IOpen3DSender::SetPeerJoinedCallback. */
 using FO3DPeerJoinedCallback = TFunction<void()>;
 
+/** Called when a sender drops a frame it had accepted (WP-R1); see IOpen3DSender::SetFramesDroppedCallback. */
+using FO3DFramesDroppedCallback = TFunction<void()>;
+
 /**
  * What a transport can do with a given config (ADR 0007 item 4, WP-A1 PR 3). Returned by
  * FO3DTransportDescriptor::GetCapabilities and by GetCapabilities() on a sender or receiver,

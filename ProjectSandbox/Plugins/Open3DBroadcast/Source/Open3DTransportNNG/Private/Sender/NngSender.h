@@ -77,6 +77,8 @@ public:
     virtual EO3DSendResult SendControl(const uint8* Envelope, int32 Len) override;
     /** Called on an NNG thread for each added pipe (a subscriber, a peer, a pull socket; ADR 0005 (vi)). */
     virtual void SetPeerJoinedCallback(FO3DPeerJoinedCallback Callback) override;
+    /** Called on the worker when an accepted frame is dropped (WP-R1). */
+    virtual void SetFramesDroppedCallback(FO3DFramesDroppedCallback Callback) override;
 
     bool IsConnected() const { return PipeContext->bConnected.load(); }
 
@@ -109,6 +111,9 @@ private:
     /** Counts and logs a failed nng_send; closes the socket if NNG reports it closed. */
     void HandleSendError(int ErrorCode, bool bFrame);
     void RecordSendDrop();
+    void NotifyFramesDropped();
+    FCriticalSection FramesDroppedLock;
+    FO3DFramesDroppedCallback FramesDroppedCallback;
     FString ResolveAudioSubjectFallback() const;
 
     O3DNNG::FNngSenderOptions Options;

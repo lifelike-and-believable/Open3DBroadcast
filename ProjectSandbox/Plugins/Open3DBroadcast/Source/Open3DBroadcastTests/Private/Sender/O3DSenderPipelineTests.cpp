@@ -203,6 +203,28 @@ namespace O3DSenderPipelineTests
 			return true;
 		}
 
+		virtual void SetFramesDroppedCallback(FO3DFramesDroppedCallback Callback) override
+		{
+			FScopeLock Guard(&Mutex);
+			FramesDropped = MoveTemp(Callback);
+		}
+
+		/** What a transport does when it drops a frame it had accepted (WP-R1). False when no callback is set. */
+		bool FireFramesDropped()
+		{
+			FO3DFramesDroppedCallback Callback;
+			{
+				FScopeLock Guard(&Mutex);
+				Callback = FramesDropped;
+			}
+			if (!Callback)
+			{
+				return false;
+			}
+			Callback();
+			return true;
+		}
+
 		TArray<FRecordedPayload> GetRecorded() const
 		{
 			FScopeLock Guard(&Mutex);
@@ -214,6 +236,7 @@ namespace O3DSenderPipelineTests
 		TArray<FRecordedPayload> Recorded;
 		int32 RefuseNext = 0;
 		FO3DPeerJoinedCallback PeerJoined;
+		FO3DFramesDroppedCallback FramesDropped;
 		std::atomic<bool> bBlockNext{ false };
 		FEventRef Entered{ EEventMode::ManualReset };
 		FEventRef ReleaseEvent{ EEventMode::ManualReset };
@@ -526,6 +549,46 @@ bool FO3DSenderPipelinePeerJoinedTest::RunTest(const FString& Parameters)
 		Probe.DetachSender();
 		TestFalse(*FString::Printf(TEXT("%s: detaching clears the callback"), ModeLabel(bAsync)), Transport->FirePeerJoined());
 	}
+	return true;
+}
+
+// WP-R1 (mid-project review TR-1): a transport that drops a frame after accepting it (TCP's age
+// limit, NNG's full buffer) reports it, and the next frame of every subject is a full sync, as
+// after a peer join; before, residual receivers waited for the periodic one.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderPipelineFramesDroppedTest, "Open3DBroadcast.Sender.Pipeline.FramesDroppedForcesFullSync", O3DB_TEST_FLAGS)
+bool FO3DSenderPipelineFramesDroppedTest::RunTest(const FString& Parameters)
+{
+	using namespace O3DSenderPipelineTests;
+	const TSharedPtr<const FO3DSSkeletonDescriptor> Descriptor = MakeThreeBoneDescriptor();
+
+	FO3DSenderPipelineProbe Probe;
+	Probe.Start(false);
+	const TSharedRef<FScriptedSender> Transport = MakeShared<FScriptedSender>();
+	Probe.AttachSender(Transport);
+	auto Send = [this, &Probe, &Descriptor](const FString& Subject, int32 Index)
+	{
+		Probe.SubmitFrame(MakeProbeFrame(Probe, Subject, Descriptor, 10.0 + Index / 60.0));
+		TestTrue(TEXT("Drained"), Probe.WaitForIdle(WaitTimeoutSeconds));
+	};
+	Send(TEXT("A"), 0);
+	Send(TEXT("B"), 0);
+	Send(TEXT("A"), 1);
+	TestTrue(TEXT("The pipeline set a callback"), Transport->FireFramesDropped());
+	Send(TEXT("A"), 2);
+	Send(TEXT("B"), 2);
+	Send(TEXT("A"), 3);
+
+	const TArray<FRecordedPayload> Sent = Transport->GetRecorded();
+	if (TestEqual(TEXT("Six payloads"), Sent.Num(), 6))
+	{
+		const bool Expected[] = { true, true, false, true, true, false };
+		for (int32 Index = 0; Index < 6; ++Index)
+		{
+			TestEqual(*FString::Printf(TEXT("Payload %d (%s) full sync"), Index, *Sent[Index].Subject), Sent[Index].bFullSync, Expected[Index]);
+		}
+	}
+	Probe.DetachSender();
+	TestFalse(TEXT("Detaching clears the callback"), Transport->FireFramesDropped());
 	return true;
 }
 

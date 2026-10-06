@@ -20,6 +20,7 @@
 #include "SocketSubsystem.h"
 #include "Sockets.h"
 
+#include "Transport/O3DReceiverInterface.h"
 #include "Transport/O3DTransportTypes.h"
 #include "O3DUnifiedMessage.h"
 #include "Transport/O3DSerializedFrameConsumer.h"
@@ -370,6 +371,121 @@ bool FO3DNngReceiverUnifiedMocapTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Raw mocap accepted"), O3DNngTesting::ProcessReceivedPayload(*Receiver, Raw));
 	TestTrue(TEXT("Raw payload passed through unchanged"), FrameConsumer->GetPayload() == Raw);
 
+	return true;
+}
+
+namespace
+{
+	/** Counts control payloads. */
+	class FCountingControlSink final : public IO3DReceiverControlSink
+	{
+	public:
+		virtual void SubmitControl(TConstArrayView<uint8> Payload, const FString& StreamId, double ReceiveTimeSec) override { Count.fetch_add(1); }
+		std::atomic<int32> Count{ 0 };
+	};
+
+	/**
+	 * Starts a pub sender and a sub receiver and waits for the subscription. The consumer and the
+	 * control sink are set after Initialize, which releases them (TRF-38).
+	 */
+	bool StartNngPair(FAutomationTestBase& Test, IOpen3DSender& Sender, IOpen3DReceiver& Receiver, const FO3DTransportConfig& SenderConfig, const FO3DTransportConfig& ReceiverConfig,
+		const TSharedPtr<ISerializedFrameConsumer, ESPMode::ThreadSafe>& Consumer, const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& ControlSink = nullptr)
+	{
+		if (!Test.TestTrue(TEXT("Sender initializes"), Sender.Initialize(SenderConfig).IsOk())
+			|| !Test.TestTrue(TEXT("Receiver initializes"), Receiver.Initialize(ReceiverConfig).IsOk()))
+		{
+			return false;
+		}
+		Receiver.SetConsumer(Consumer);
+		if (ControlSink.IsValid())
+		{
+			Receiver.SetControlSink(ControlSink);
+		}
+		if (!Test.TestTrue(TEXT("Receiver starts"), Receiver.Start().IsOk())
+			|| !Test.TestTrue(TEXT("Sender starts"), Sender.Start().IsOk()))
+		{
+			return false;
+		}
+		PumpNngTransports(Sender, Receiver, 2.0);
+		return true;
+	}
+}
+
+// WP-R1 (mid-project review TR-2): the subscriber subscribed with a topic prefix taken from the
+// StreamId's path (or the Subscription Topic option), but no sender writes a topic, so every
+// message was filtered out. Subscribers now take every message (the option is removed).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DNngStreamIdPathTest, "Open3DBroadcast.Transport.NNG.Data.StreamIdPathDoesNotFilter", O3DB_TEST_FLAGS)
+bool FO3DNngStreamIdPathTest::RunTest(const FString& Parameters)
+{
+	const int32 Port = FindAvailableNngPort();
+	if (!TestTrue(TEXT("Data port allocated"), Port > 0))
+	{
+		return false;
+	}
+	FO3DTransportConfig ReceiverConfig = BuildNngReceiverConfig(Port);
+	ReceiverConfig.StreamId = FString::Printf(TEXT("127.0.0.1:%d/mocap"), Port);
+
+	const TSharedRef<IOpen3DSender> SenderRef = O3DNngTesting::CreateSender();
+	const TSharedRef<IOpen3DReceiver> ReceiverRef = O3DNngTesting::CreateReceiver();
+	ON_SCOPE_EXIT { SenderRef->Stop(); ReceiverRef->Stop(); };
+	TSharedPtr<FTestFrameConsumer, ESPMode::ThreadSafe> FrameConsumer = MakeShared<FTestFrameConsumer, ESPMode::ThreadSafe>();
+	if (!StartNngPair(*this, *SenderRef, *ReceiverRef, BuildNngSenderConfig(Port), ReceiverConfig, FrameConsumer))
+	{
+		return false;
+	}
+
+	O3DS::SubjectList SubjectList;
+	PopulateSubjectList(SubjectList, TEXT("NNGSubject"), 2);
+	TestTrue(TEXT("Sender queued frame"), O3DTests::SendSubjectList(*SenderRef, SubjectList));
+	const double StartTime = FPlatformTime::Seconds();
+	while (!FrameConsumer->WasInvoked() && (FPlatformTime::Seconds() - StartTime) < 5.0)
+	{
+		PumpNngTransports(*SenderRef, *ReceiverRef, 0.05);
+	}
+	TestTrue(TEXT("A StreamId with a path still receives the stream"), FrameConsumer->WasInvoked());
+	return true;
+}
+
+// WP-R1 (TR-3): Poll counted only mocap and audio towards its per-call bound, so a flood of other
+// messages (control, keepalives, empty or malformed ones) kept the game thread in one Poll.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DNngPollBoundTest, "Open3DBroadcast.Transport.NNG.Receiver.PollIsBoundedForAnyMessage", O3DB_TEST_FLAGS)
+bool FO3DNngPollBoundTest::RunTest(const FString& Parameters)
+{
+	const int32 Port = FindAvailableNngPort();
+	if (!TestTrue(TEXT("Data port allocated"), Port > 0))
+	{
+		return false;
+	}
+	const TSharedRef<IOpen3DSender> SenderRef = O3DNngTesting::CreateSender();
+	const TSharedRef<IOpen3DReceiver> ReceiverRef = O3DNngTesting::CreateReceiver();
+	ON_SCOPE_EXIT { SenderRef->Stop(); ReceiverRef->Stop(); };
+	const TSharedRef<FCountingControlSink, ESPMode::ThreadSafe> Sink = MakeShared<FCountingControlSink, ESPMode::ThreadSafe>();
+	if (!StartNngPair(*this, *SenderRef, *ReceiverRef, BuildNngSenderConfig(Port), BuildNngReceiverConfig(Port), MakeShared<FTestFrameConsumer, ESPMode::ThreadSafe>(), Sink))
+	{
+		return false;
+	}
+
+	constexpr int32 Messages = 100;
+	TArray<uint8> Payload;
+	Payload.SetNumZeroed(16);
+	TArray<uint8> Envelope;
+	O3DS::WriteControlEnvelope(Payload, 1.0, Envelope);
+	for (int32 Index = 0; Index < Messages; ++Index)
+	{
+		SenderRef->SendControl(Envelope.GetData(), Envelope.Num());
+	}
+	// Let them all reach the receiver's socket without polling it.
+	const double Deadline = FPlatformTime::Seconds() + 1.0;
+	while (FPlatformTime::Seconds() < Deadline)
+	{
+		SenderRef->Tick(0.0f);
+		FPlatformProcess::YieldThread();
+	}
+
+	ReceiverRef->Poll();
+	const int32 FirstPoll = Sink->Count.load();
+	TestTrue(*FString::Printf(TEXT("One Poll handled some messages (%d)"), FirstPoll), FirstPoll > 0);
+	TestTrue(*FString::Printf(TEXT("But not the whole flood (%d of %d)"), FirstPoll, Messages), FirstPoll < Messages);
 	return true;
 }
 

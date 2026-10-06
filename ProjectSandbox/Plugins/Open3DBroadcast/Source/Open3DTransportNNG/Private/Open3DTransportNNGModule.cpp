@@ -175,19 +175,11 @@ namespace NNGSchema
 		Mode.EnumValues.Add(MakeChoice(TEXT("pair"), LOCTEXT("NNGModePair", "Pair")));
 		Mode.EnumValues.Add(MakeChoice(TEXT("pull"), LOCTEXT("NNGModePull", "Pull")));
 
-		FO3DTransportOptionField Topic;
-		Topic.Key = O3DNNG::TopicOptionKey;
-		Topic.DisplayName = LOCTEXT("NNGReceiverTopicLabel", "Subscription Topic");
-		Topic.Tooltip = LOCTEXT("NNGReceiverTopicTooltip", "Subscriber mode only. Empty subscribes to everything.");
-		Topic.Type = EO3DTransportOptionType::String;
-		Topic.VisibleWhen = O3DTransportOptions::VisibleWhenEquals(O3DNNG::ModeOptionKey, TEXT("sub"), TEXT("sub"));
-
 		FO3DTransportOptionSchema Schema;
 		Schema.Add(MakeHost());
 		Schema.Add(MakePort());
 		Schema.Add(MoveTemp(Mode));
 		Schema.Add(MakeRole(TEXT("sub"), TEXT("pair"), TEXT("pull")));
-		Schema.Add(MoveTemp(Topic));
 		return Schema;
 	}
 }
@@ -245,8 +237,8 @@ public:
 			else
 			{
 				UE_LOG(LogOpen3DTransportNNGModule, Warning, TEXT("NNG sender configuration parse failed: %s"), *ErrorMessage);
-				Config.Uri = O3DNNG::BuildCanonicalUri(Mode, Host, Port, Role, FString());
-				Config.StreamId = O3DNNG::MakeStreamId(Host, Port, FString());
+				Config.Uri = O3DNNG::BuildCanonicalUri(Mode, Host, Port, Role);
+				Config.StreamId = O3DNNG::MakeStreamId(Host, Port);
 				// The NNG socket role (listen or dial side) is the "nng.role" option; Role is the side (TRB-27).
 				Config.Role = EO3DTransportRole::Sender;
 			}
@@ -260,7 +252,6 @@ public:
 			const FString ModeString = NNGTransportCommon::GetOption(Config, O3DNNG::ModeOptionKey);
 			const FString RoleString = NNGTransportCommon::GetOption(Config, O3DNNG::RoleOptionKey);
 			const FString HostValue = NNGTransportCommon::GetOption(Config, O3DNNG::HostOptionKey);
-			const FString TopicString = NNGTransportCommon::GetOption(Config, O3DNNG::TopicOptionKey);
 
 			const O3DNNG::ENngMode Mode = O3DNNG::ModeFromString(ModeString, O3DNNG::ENngMode::Sub);
 			// TRB-40: Pair defaults to dial here and to listen on the sender, so default ends connect.
@@ -280,16 +271,6 @@ public:
 			Config.AdvancedParams.Add(O3DNNG::ModeOptionKey, O3DNNG::ModeToString(Mode));
 			Config.AdvancedParams.Add(O3DNNG::RoleOptionKey, O3DNNG::RoleToString(Role));
 
-			const FString TrimmedTopic = TopicString.TrimStartAndEnd();
-			if (Mode == O3DNNG::ENngMode::Sub && !TrimmedTopic.IsEmpty())
-			{
-				Config.AdvancedParams.Add(O3DNNG::TopicOptionKey, TrimmedTopic);
-			}
-			else
-			{
-				Config.AdvancedParams.Remove(O3DNNG::TopicOptionKey);
-			}
-
 			// Config.Audio.bEnableAudio was set by the receiver source from its settings.
 
 			O3DNNG::FNngReceiverOptions ParsedOptions;
@@ -302,20 +283,12 @@ public:
 				Config.Role = EO3DTransportRole::Receiver;
 				Config.AdvancedParams.Add(O3DNNG::ModeOptionKey, O3DNNG::ModeToString(ParsedOptions.Mode));
 				Config.AdvancedParams.Add(O3DNNG::RoleOptionKey, O3DNNG::RoleToString(ParsedOptions.Role));
-				if (Mode == O3DNNG::ENngMode::Sub && !ParsedOptions.Topic.IsEmpty())
-				{
-					Config.AdvancedParams.Add(O3DNNG::TopicOptionKey, ParsedOptions.Topic);
-				}
-				else
-				{
-					Config.AdvancedParams.Remove(O3DNNG::TopicOptionKey);
-				}
 			}
 			else
 			{
 				UE_LOG(LogOpen3DTransportNNGModule, Warning, TEXT("NNG receiver configuration parse failed: %s"), *ErrorMessage);
-				Config.Uri = O3DNNG::BuildCanonicalUri(Mode, Host, Port, Role, TrimmedTopic);
-				Config.StreamId = O3DNNG::MakeStreamId(Host, Port, TrimmedTopic);
+				Config.Uri = O3DNNG::BuildCanonicalUri(Mode, Host, Port, Role);
+				Config.StreamId = O3DNNG::MakeStreamId(Host, Port);
 				// The NNG socket role (listen or dial side) is the "nng.role" option; Role is the side (TRB-27).
 				Config.Role = EO3DTransportRole::Receiver;
 			}
