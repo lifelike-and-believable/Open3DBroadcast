@@ -146,6 +146,18 @@ void SO3DReceiverSourceFactoryPanel::Construct(const FArguments& InArgs)
 		[
 			SAssignNew(TransportCustomizationContainer, SBox)
 		]
+		// RCV-17: why Create is disabled, if it is.
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.0f, 0.0f, 0.0f, 8.0f)
+		[
+			SNew(STextBlock)
+			.Text_Lambda([this]() { return GetCreateError(); })
+			.Visibility_Lambda([this]() { return GetCreateError().IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+			.ColorAndOpacity(FLinearColor(1.f, 0.35f, 0.35f))
+			.AutoWrapText(true)
+			.Font(IDetailLayoutBuilder::GetDetailFont())
+		]
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		.HAlign(HAlign_Right)
@@ -156,6 +168,7 @@ void SO3DReceiverSourceFactoryPanel::Construct(const FArguments& InArgs)
 				SNew(SButton)
 				.HAlign(HAlign_Center)
 				.Text(LOCTEXT("ReceiverCreateSource", "Create Source"))
+				.IsEnabled_Lambda([this]() { return GetCreateError().IsEmpty(); })
 				.OnClicked(this, &SO3DReceiverSourceFactoryPanel::OnCreateClicked)
 			]
 		]
@@ -171,7 +184,8 @@ void SO3DReceiverSourceFactoryPanel::Construct(const FArguments& InArgs)
 
 FReply SO3DReceiverSourceFactoryPanel::OnCreateClicked()
 {
-	if (!OnSourceCreated.IsBound() || !SourceSettingsObject.IsValid())
+	// Enter and the options panel's submit reach here too, so check again (RCV-17).
+	if (!OnSourceCreated.IsBound() || !SourceSettingsObject.IsValid() || !GetCreateError().IsEmpty())
 	{
 		return FReply::Handled();
 	}
@@ -189,6 +203,11 @@ FReply SO3DReceiverSourceFactoryPanel::OnCreateClicked()
 	OnSourceCreated.ExecuteIfBound(StaticCastSharedPtr<ILiveLinkSource>(NewSource), MoveTemp(ConnectionString));
 
 	return FReply::Handled();
+}
+
+FText SO3DReceiverSourceFactoryPanel::GetCreateError() const
+{
+	return SourceSettingsObject.IsValid() ? O3DReceiver::ValidateNewSource(SourceSettingsObject->Settings) : FText::GetEmpty();
 }
 
 FReply SO3DReceiverSourceFactoryPanel::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)

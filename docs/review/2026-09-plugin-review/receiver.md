@@ -162,6 +162,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Track a settings revision (compare against cached values on each Tick, or override `PostEditChangeProperty` on `UO3DReceiverSourceSettings` to bump a counter) and rebuild or reconfigure engines when it changes. Empty `SubjectConcealment` when concealment is disabled.
 - Effort: S
 - Owner: coding
+- Status: closed in #390
 
 ### RCV-16: Source status does not reflect data flow or error causes
 - Category: usability
@@ -171,6 +172,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Keep an enum state (Starting, Waiting for data, Receiving, Stalled, Error: <reason>). Update the last-activity time on both paths and derive a "Stalled" state in Tick. Put the failure reason in `SourceStatus`. Consider returning false from `IsSourceStillValid` after an unrecoverable start failure.
 - Effort: S
 - Owner: coding
+- Status: closed in #390
 
 ### RCV-17: The factory panel and CreateSource do no validation and fall back silently
 - Category: usability
@@ -180,6 +182,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Disable the Create button (`IsEnabled`) until the selected transport is registered in both registries, and let customizations expose `bool Validate(const FO3DReceiverSourceConfig&, FText& OutError)`. Log a warning and set an error status when `ImportText` fails. Don't default to a transport that is not registered.
 - Effort: M
 - Owner: design
+- Status: closed in #390
 
 ### RCV-18: Creating a source silently overwrites the global defaults, and those settings are not actually in Project Settings
 - Category: usability

@@ -296,14 +296,10 @@ void FO3DReceiverSource::ReceiveClient(ILiveLinkClient* InClient, FGuid InSource
     SourceMachineName = LOCTEXT("SourceHostUnknown", "-");
     bLoggedActiveState = false;
 
+    // StartTransport sets the status: waiting for data, or why it failed (RCV-16).
     if (StartTransport())
     {
-        SourceStatus = LOCTEXT("StatusActive", "Receiving");
         UpdateConnectionLastActive();
-    }
-    else
-    {
-        SourceStatus = LOCTEXT("StatusError", "Inactive");
     }
 }
 
@@ -332,6 +328,9 @@ void FO3DReceiverSource::Tick(float DeltaTime)
     {
         ActiveReceiver->Poll();
     }
+
+    DrainConnectionState();
+    UpdateStalledStatus(FPlatformTime::Seconds());
 
     // A2.a: release any gap-buffered frames whose wait has timed out even when no
     // new frame arrives to trigger it via Push. Game thread, like HandleSerializedFrame.
@@ -365,6 +364,8 @@ void FO3DReceiverSource::Update()
 bool FO3DReceiverSource::StartTransport()
 {
     StopTransport();
+    StateMailbox->Reset();
+    bStalled = false;
 
     EnsureValidTransportName();
     ActiveConfig = BuildTransportConfig();
@@ -372,6 +373,7 @@ bool FO3DReceiverSource::StartTransport()
     if (ActiveConfig.Transport.IsNone())
     {
         UE_LOG(LogO3DReceiverSource, Warning, TEXT("No transport selected for receiver source."));
+        FailStart(FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("No transport selected.")));
         return false;
     }
 
@@ -380,7 +382,8 @@ bool FO3DReceiverSource::StartTransport()
     if (!LastTransportResult.IsOk())
     {
         UE_LOG(LogO3DReceiverSource, Warning, TEXT("Receiver transport '%s' not started: %s"), *ActiveConfig.Transport.ToString(), *LexToString(LastTransportResult));
-        SourceStatus = FText::Format(LOCTEXT("StatusInvalidOptionsFmt", "Invalid options: {0}"), FText::FromString(LastTransportResult.Message));
+        bStartFailed = true;
+        SetStatus(FText::Format(LOCTEXT("StatusInvalidOptionsFmt", "Invalid options: {0}"), FText::FromString(LastTransportResult.Message)), false);
         return false;
     }
 
@@ -389,8 +392,13 @@ bool FO3DReceiverSource::StartTransport()
     if (!ActiveReceiver.IsValid())
     {
         UE_LOG(LogO3DReceiverSource, Warning, TEXT("No receiver registered for transport '%s'."), *ActiveConfig.Transport.ToString());
+        FailStart(FO3DTransportResult::Error(EO3DTransportError::Unsupported, FString::Printf(TEXT("No receiver is registered for transport '%s'."), *ActiveConfig.Transport.ToString())));
         return false;
     }
+
+    // Before Initialize and Start (IOpen3DReceiver): the transport posts its state changes from any
+    // thread; Tick shows them (RCV-16).
+    ActiveReceiver->SetStateChangedCallback(FO3DConnectionStateMailbox::MakeCallback(StateMailbox));
 
     // The receiver is registry-tracked: release it when its transport unregisters (ADR 0007 item 5).
     // StopTransport removes the subscription, on every path that drops ActiveReceiver.
@@ -402,6 +410,7 @@ bool FO3DReceiverSource::StartTransport()
         UE_LOG(LogO3DReceiverSource, Warning, TEXT("Failed to initialize transport '%s': %s"), *ActiveConfig.Transport.ToString(), *LexToString(InitResult));
         ActiveReceiver.Reset();
         StopTransport();
+        FailStart(InitResult);
         return false;
     }
 
@@ -449,6 +458,7 @@ bool FO3DReceiverSource::StartTransport()
         ActiveAudioSink.Reset();
         ActiveControlSink.Reset();
         StopTransport();
+        FailStart(StartResult);
         return false;
     }
 
@@ -468,7 +478,8 @@ bool FO3DReceiverSource::StartTransport()
         *O3DRedact::Url(ActiveConfig.Uri),
         *O3DRedact::Url(ActiveConfig.StreamId));
 
-    SourceStatus = FText::Format(LOCTEXT("StatusReceivingFmt", "Receiving via {0}"), FText::FromName(ActiveConfig.Transport));
+    bStartFailed = false;
+    SetStatus(FText::Format(LOCTEXT("StatusWaitingFmt", "Waiting for data via {0}"), FText::FromName(ActiveConfig.Transport)), false);
     ResetStreamState();
     return true;
 }
@@ -522,7 +533,7 @@ void FO3DReceiverSource::HandleTransportUnregistering(FName TransportName)
 
     UE_LOG(LogO3DReceiverSource, Warning, TEXT("Receiver transport '%s' is being unregistered (its module is shutting down); stopping and releasing the receiver."), *ActiveConfig.Transport.ToString());
     StopTransport();
-    SourceStatus = FText::Format(LOCTEXT("StatusTransportUnregisteredFmt", "Transport {0} unloaded"), FText::FromName(ActiveConfig.Transport));
+    SetStatus(FText::Format(LOCTEXT("StatusTransportUnregisteredFmt", "Transport {0} unloaded"), FText::FromName(ActiveConfig.Transport)), false);
 }
 
 /** Ensure we always have a transport name for details panels that expose the source settings. */
@@ -620,6 +631,69 @@ FO3DTransportConfig FO3DReceiverSource::BuildTransportConfig() const
 }
 
 /** Record the wall-clock time that the last packet was processed for connection health checks. */
+void FO3DReceiverSource::SetStatus(const FText& Status, bool bReceiving)
+{
+    SourceStatus = Status;
+    bStatusIsReceiving = bReceiving;
+}
+
+void FO3DReceiverSource::FailStart(const FO3DTransportResult& Result)
+{
+    LastTransportResult = Result;
+    bStartFailed = true;
+    SetStatus(FText::Format(LOCTEXT("StatusErrorFmt", "Error: {0}"), FText::FromString(Result.Message.IsEmpty() ? FString(LexToString(Result.Code)) : Result.Message)), false);
+}
+
+void FO3DReceiverSource::DrainConnectionState()
+{
+    for (const FO3DConnectionStateMailbox::FChange& Change : StateMailbox->Drain())
+    {
+        if (!ActiveReceiver.IsValid())
+        {
+            continue;
+        }
+        const FText Transport = FText::FromName(ActiveConfig.Transport);
+        switch (Change.State)
+        {
+        case EO3DConnectionState::Failed:
+            SetStatus(FText::Format(LOCTEXT("StatusTransportFailedFmt", "Error: {0}"),
+                FText::FromString(Change.Reason.IsOk() ? FString::Printf(TEXT("transport '%s' failed"), *ActiveConfig.Transport.ToString()) : LexToString(Change.Reason))), false);
+            break;
+        case EO3DConnectionState::Reconnecting:
+            SetStatus(FText::Format(LOCTEXT("StatusReconnectingFmt", "Reconnecting via {0}"), Transport), false);
+            break;
+        case EO3DConnectionState::Connecting:
+        case EO3DConnectionState::Connected:
+            // The next frame shows "Receiving"; until then the source waits.
+            if (!bStatusIsReceiving)
+            {
+                SetStatus(FText::Format(LOCTEXT("StatusWaitingFmt", "Waiting for data via {0}"), Transport), false);
+            }
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+void FO3DReceiverSource::UpdateStalledStatus(double NowSeconds)
+{
+    if (!ActiveReceiver.IsValid() || !bStatusIsReceiving)
+    {
+        return;
+    }
+    double LastActive = 0.0;
+    {
+        FScopeLock Lock(&ConnectionLastActiveSection);
+        LastActive = ConnectionLastActive;
+    }
+    if (NowSeconds - LastActive > StalledAfterSeconds)
+    {
+        bStalled = true;
+        SetStatus(FText::Format(LOCTEXT("StatusStalledFmt", "No data received (via {0})"), FText::FromName(ActiveConfig.Transport)), false);
+    }
+}
+
 void FO3DReceiverSource::UpdateConnectionLastActive()
 {
     const double Now = FPlatformTime::Seconds();
@@ -677,10 +751,11 @@ void FO3DReceiverSource::HandleSerializedFrame(const FString& Subject, TConstArr
         return;
     }
 
-    if (!bLoggedActiveState)
+    if (!bStatusIsReceiving)
     {
-        SourceStatus = FText::Format(LOCTEXT("StatusReceivingFmt", "Receiving via {0}"), FText::FromName(ActiveConfig.Transport));
+        SetStatus(FText::Format(LOCTEXT("StatusReceivingFmt", "Receiving via {0}"), FText::FromName(ActiveConfig.Transport)), true);
         bLoggedActiveState = true;
+        bStalled = false;
     }
 
     // A2.a: peek tx_seq/tx_wallclock_us/frame_epoch, the content time and the sender

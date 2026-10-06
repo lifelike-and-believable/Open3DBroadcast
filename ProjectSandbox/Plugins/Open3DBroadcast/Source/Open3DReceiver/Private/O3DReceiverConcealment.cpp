@@ -79,6 +79,22 @@ namespace O3DReceiverConcealmentPrivate
 	{
 		return Settings != nullptr && !Settings->bEnableConcealment;
 	}
+
+	O3DS::ConcealmentConfig MakeConfig(const UO3DReceiverSourceSettings* Settings)
+	{
+		O3DS::ConcealmentConfig Config;
+		Config.starvationThresholdSeconds = FMath::Max(0.0, (double)(Settings ? Settings->StarvationThresholdMs : 50.0f) / 1000.0);
+		Config.maxConcealHorizonSeconds = FMath::Max(0.0, (double)(Settings ? Settings->MaxHorizonMs : 150.0f) / 1000.0);
+		Config.correctionWindowSeconds = FMath::Max(0.0, (double)(Settings ? Settings->CorrectionWindowMs : 100.0f) / 1000.0);
+		Config.renderAheadSeconds = FMath::Max(0.0, (double)(Settings ? Settings->RenderAheadMs : 0.0f) / 1000.0);
+		return Config;
+	}
+
+	bool IsSameConfig(const O3DS::ConcealmentConfig& A, const O3DS::ConcealmentConfig& B)
+	{
+		return A.starvationThresholdSeconds == B.starvationThresholdSeconds && A.maxConcealHorizonSeconds == B.maxConcealHorizonSeconds
+			&& A.correctionWindowSeconds == B.correctionWindowSeconds && A.renderAheadSeconds == B.renderAheadSeconds;
+	}
 }
 
 FO3DReceiverConcealment::FO3DReceiverConcealment(FO3DReceiverMetricsHandleRef InMetrics)
@@ -89,20 +105,43 @@ FO3DReceiverConcealment::FO3DReceiverConcealment(FO3DReceiverMetricsHandleRef In
 /** Lazily creates a per-subject ConcealmentEngine on first use (roadmap doc §5/C1.a).
  *  LinearPredictor is the roadmap's recommended C1 default ("almost certainly" - see
  *  §5/C1's "Open decisions"); Quadratic may overshoot on longer horizons. */
-O3DS::ConcealmentEngine& FO3DReceiverConcealment::GetOrCreateEngine(const UO3DReceiverSourceSettings* Settings, FName Subject)
+bool FO3DReceiverConcealment::ApplySettings(const UO3DReceiverSourceSettings* Settings)
+{
+	if (O3DReceiverConcealmentPrivate::IsDisabled(Settings))
+	{
+		if (Engines.Num() > 0)
+		{
+			DropEngines();
+		}
+		bHasCurrentConfig = false;
+		return false;
+	}
+
+	const O3DS::ConcealmentConfig Config = O3DReceiverConcealmentPrivate::MakeConfig(Settings);
+	if (bHasCurrentConfig && !O3DReceiverConcealmentPrivate::IsSameConfig(Config, CurrentConfig) && Engines.Num() > 0)
+	{
+		DropEngines();
+	}
+	CurrentConfig = Config;
+	bHasCurrentConfig = true;
+	return true;
+}
+
+void FO3DReceiverConcealment::DropEngines()
+{
+	ReportMetricsDelta();
+	Engines.Reset();
+	PrevMetricsBySubject.Reset();
+}
+
+O3DS::ConcealmentEngine& FO3DReceiverConcealment::GetOrCreateEngine(FName Subject)
 {
 	if (TUniquePtr<O3DS::ConcealmentEngine>* Existing = Engines.Find(Subject))
 	{
 		return **Existing;
 	}
 
-	O3DS::ConcealmentConfig Config;
-	Config.starvationThresholdSeconds = FMath::Max(0.0, (double)(Settings ? Settings->StarvationThresholdMs : 50.0f) / 1000.0);
-	Config.maxConcealHorizonSeconds = FMath::Max(0.0, (double)(Settings ? Settings->MaxHorizonMs : 150.0f) / 1000.0);
-	Config.correctionWindowSeconds = FMath::Max(0.0, (double)(Settings ? Settings->CorrectionWindowMs : 100.0f) / 1000.0);
-	Config.renderAheadSeconds = FMath::Max(0.0, (double)(Settings ? Settings->RenderAheadMs : 0.0f) / 1000.0);
-
-	TUniquePtr<O3DS::ConcealmentEngine> NewEngine = MakeUnique<O3DS::ConcealmentEngine>(std::make_unique<O3DS::LinearPredictor>(), Config);
+	TUniquePtr<O3DS::ConcealmentEngine> NewEngine = MakeUnique<O3DS::ConcealmentEngine>(std::make_unique<O3DS::LinearPredictor>(), CurrentConfig);
 	O3DS::ConcealmentEngine& Ref = *NewEngine;
 	Engines.Add(Subject, MoveTemp(NewEngine));
 	return Ref;
@@ -111,12 +150,12 @@ O3DS::ConcealmentEngine& FO3DReceiverConcealment::GetOrCreateEngine(const UO3DRe
 void FO3DReceiverConcealment::ObserveRealFrame(const UO3DReceiverSourceSettings* Settings, FName Subject, double PresentationTimeSeconds,
 	const TArray<FTransform>& BoneTransforms, const TArray<float>& CurveValues, bool bTopologyChanged)
 {
-	if (O3DReceiverConcealmentPrivate::IsDisabled(Settings))
+	if (!ApplySettings(Settings))
 	{
 		return;
 	}
 
-	O3DS::ConcealmentEngine& Engine = GetOrCreateEngine(Settings, Subject);
+	O3DS::ConcealmentEngine& Engine = GetOrCreateEngine(Subject);
 	if (bTopologyChanged)
 	{
 		Engine.Reset();
@@ -133,11 +172,12 @@ void FO3DReceiverConcealment::NoteClockOffset(int64 OffsetEstimateUs)
 
 void FO3DReceiverConcealment::Tick(const UO3DReceiverSourceSettings* Settings, bool bCanPublish, double NowSeconds, FPushSyntheticFrame PushSyntheticFrame)
 {
-	if (!bCanPublish || !bHasClockOffsetEstimate || Engines.Num() == 0)
+	// Every tick, so an edit in the LiveLink Settings panel applies without new frames (RCV-15).
+	if (!ApplySettings(Settings))
 	{
 		return;
 	}
-	if (O3DReceiverConcealmentPrivate::IsDisabled(Settings))
+	if (!bCanPublish || !bHasClockOffsetEstimate || Engines.Num() == 0)
 	{
 		return;
 	}

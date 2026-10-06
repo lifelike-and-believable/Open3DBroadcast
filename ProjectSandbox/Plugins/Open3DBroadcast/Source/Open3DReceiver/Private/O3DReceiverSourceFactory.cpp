@@ -66,7 +66,12 @@ TSharedPtr<ILiveLinkSource> UO3DReceiverSourceFactory::CreateSource(const FStrin
 
     if (!ConnectionString.IsEmpty())
     {
-        FO3DReceiverSourceConfig::StaticStruct()->ImportText(*ConnectionString, &Settings, nullptr, PPF_None, GLog, ReceiverConnectionImportName);
+        // RCV-17: a connection string this version cannot read (a corrupt or foreign preset) is
+        // reported, not silently replaced by defaults.
+        if (FO3DReceiverSourceConfig::StaticStruct()->ImportText(*ConnectionString, &Settings, nullptr, PPF_None, GLog, ReceiverConnectionImportName) == nullptr)
+        {
+            UE_LOG(LogO3DReceiverSource, Warning, TEXT("Open3DStream receiver: the LiveLink connection string could not be read; the source starts with default settings. Check or recreate the source."));
+        }
         O3DReceiver::MigrateLegacySecretOptions(Settings, TEXT("a LiveLink connection string (for example a saved LiveLink preset)"));
     }
 

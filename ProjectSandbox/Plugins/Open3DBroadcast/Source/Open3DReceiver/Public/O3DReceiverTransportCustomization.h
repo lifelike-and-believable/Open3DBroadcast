@@ -42,6 +42,13 @@ namespace O3DReceiver
      */
     OPEN3DRECEIVER_API FString ExportConnectionString(const FO3DReceiverSourceConfig& Settings);
 
+    /**
+     * Why a source with Settings could not start, or empty when it could (RCV-17): the transport
+     * has no receiver registered, or its options (with the project defaults applied) fail the
+     * transport's validation. The LiveLink Create Source panel shows it and disables Create.
+     */
+    OPEN3DRECEIVER_API FText ValidateNewSource(const FO3DReceiverSourceConfig& Settings);
+
     /** Resolves Settings' declared secrets from FO3DSecretStore into OutSecrets (key -> value). */
     OPEN3DRECEIVER_API void ResolveSecrets(const FO3DReceiverSourceConfig& Settings, TMap<FString, FString>& OutSecrets);
 
