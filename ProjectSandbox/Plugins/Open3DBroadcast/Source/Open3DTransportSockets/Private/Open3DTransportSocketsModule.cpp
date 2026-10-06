@@ -73,20 +73,23 @@ namespace SocketsSchema
 			LOCTEXT("PortTooltip", "TCP or UDP port. Audio and control travel on the same socket as the frames."), InDefault, 1, 65535);
 	}
 
-	/** The MTU is a sender setting: only the sender splits frames into fragments (TRB-21). */
+	/**
+	 * The MTU is a sender setting: only the sender splits frames into fragments (TRB-21). The sender's
+	 * udp.maxdatagram (the ceiling for control, which is never split) is still read but not shown
+	 * (WP-U6, TRB-16).
+	 */
 	static void AddUdpSizeFields(FO3DTransportOptionSchema& Schema, EO3DTransportRole Role)
 	{
 		if (Role == EO3DTransportRole::Sender)
 		{
 			Schema.Add(MakeInt(O3DSockets::MtuOptionKey, LOCTEXT("UdpMtuLabel", "MTU"),
-				LOCTEXT("UdpMtuTooltip", "Largest datagram payload sent before a frame is split into fragments."), 1200, 256, 65507));
-			Schema.Add(MakeInt(O3DSockets::MaxDatagramOptionKey, LOCTEXT("UdpMaxDatagramLabel", "Max Datagram Bytes"),
-				LOCTEXT("UdpMaxDatagramTooltip", "Largest datagram sent. Keep it at least as large as the MTU."), 64000, 512, 65507));
+				LOCTEXT("UdpMtuTooltip", "Largest datagram sent, fragment header included. A larger frame or audio packet is split into fragments of this size; control messages are always sent whole."),
+				1200, O3DSockets::MinUdpMtuBytes, 65507));
 		}
 		else
 		{
 			Schema.Add(MakeInt(O3DSockets::MaxDatagramOptionKey, LOCTEXT("UdpMaxDatagramLabel", "Max Datagram Bytes"),
-				LOCTEXT("UdpReceiverMaxDatagramTooltip", "Largest datagram accepted. Keep it at least as large as the sender's MTU."), 64000, 512, 65507));
+				LOCTEXT("UdpReceiverMaxDatagramTooltip", "Largest datagram accepted. Keep it at least as large as the sender's MTU and its control messages (up to 1,100 bytes)."), 64000, 512, 65507));
 		}
 	}
 

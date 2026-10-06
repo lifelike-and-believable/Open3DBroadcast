@@ -437,7 +437,7 @@ Both default to `127.0.0.1`, so a sender and a receiver on one machine connect w
 
 **Characteristics:**
 - **TCP** is reliable and ordered. The sender listens and accepts one receiver at a time. The receiver reconnects on its own when the connection drops or goes quiet for **Connection Timeout (seconds)**.
-- **UDP** is unreliable: a lost datagram is a lost frame. A message larger than **Max Datagram Bytes** (64000) is split into fragments of **MTU** size (1200 bytes) and reassembled by the receiver; losing one fragment loses the frame. UDP sends to one address, or to a broadcast address when **Enable UDP Broadcast** is on at the sender and **Accept Broadcast Packets** at the receiver. There is no multicast.
+- **UDP** is unreliable: a lost datagram is a lost frame. A message larger than the sender's **MTU** (1200 bytes, header included) is split into fragments of that size and reassembled by the receiver; losing one fragment loses the frame. Control messages are always sent whole. UDP sends to one address, or to a broadcast address when **Enable UDP Broadcast** is on at the sender and **Accept Broadcast Packets** at the receiver. There is no multicast.
 - Both carry audio and control on the same socket as the frames.
 - No encryption and no authentication. Use them on networks you trust.
 
@@ -1219,8 +1219,8 @@ Not shown in the panel:
 | `port` | **Port** | Sender, receiver | 17800 | UDP port (1 to 65535) |
 | `udp.broadcast` | **Enable UDP Broadcast** | Sender | false | Allow sending to a broadcast address |
 | `udp.broadcast` | **Accept Broadcast Packets** | Receiver | false | Receive datagrams sent to a broadcast address |
-| `udp.mtu` | **MTU** | Sender | 1200 | Size of each fragment, header included, when a message is split (256 to 65507) |
-| `udp.maxdatagram` | **Max Datagram Bytes** | Sender, receiver | 64000 | Sender: largest message sent as one datagram; a larger one is split into fragments. Receiver: largest datagram accepted. 512 to 65507; keep it at least as large as the MTU |
+| `udp.mtu` | **MTU** | Sender | 1200 | Largest datagram sent, header included; a larger frame or audio packet is split into fragments of this size (280 to 65507) |
+| `udp.maxdatagram` | **Max Datagram Bytes** | Receiver | 64000 | Largest datagram accepted (512 to 65507); keep it at least as large as the sender's MTU and its control messages. The sender still reads the key as the ceiling for control messages, but its panel no longer shows it |
 
 Not shown in the panel: `udp.maxframe` (receiver; largest frame reassembled from fragments, default 4194304 bytes).
 

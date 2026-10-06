@@ -67,11 +67,11 @@ sender reaches every receiver on the subnet. Multicast is not supported.
 | `port` | both | **Port** | 17800 | 1 to 65535. |
 | `udp.broadcast` | sender | **Enable UDP Broadcast** | false | Allow sending to a broadcast address. |
 | `udp.broadcast` | receiver | **Accept Broadcast Packets** | false | Receive datagrams sent to a broadcast address. |
-| `udp.maxdatagram` | both | **Max Datagram Bytes** | 64000 | 512 to 65507. Sender: a message up to this size goes out as one datagram; a larger one is split into fragments. Receiver: a datagram larger than this plus the 24-byte fragment header is dropped, so set it at least as large as the sender's. |
-| `udp.mtu` | sender | **MTU** | 1200 | Size of each fragment, header included, when a message is split. 256 up to `udp.maxdatagram`. |
+| `udp.maxdatagram` | receiver | **Max Datagram Bytes** | 64000 | 512 to 65507. A datagram larger than this plus the 24-byte fragment header is dropped, so keep it at least as large as the sender's MTU and its control messages. The sender reads the key too, as the ceiling for control messages (never split), but does not show it. |
+| `udp.mtu` | sender | **MTU** | 1200 | Largest datagram sent, header included. A larger frame or audio packet is split into fragments of this size. 280 to 65507. |
 | `udp.maxframe` | receiver | | 4194304 | Largest reassembled message, in bytes (65507 to 50 MiB). Not in the panel. |
 
-With the defaults, a message is split only above 64000 bytes.
+With the defaults, a message above 1200 bytes is split. A receiver reassembles at most 4096 fragments per message, so at an MTU of 1200 the largest frame is about 4.8 MB.
 
 ### Fragments
 
