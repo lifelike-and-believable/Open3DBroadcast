@@ -26,6 +26,7 @@
 #include "GameFramework/Actor.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/App.h"
+#include "CoreGlobals.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "UObject/Package.h"
 #include "UObject/WeakObjectPtrTemplates.h"
@@ -236,11 +237,14 @@ void UO3DSenderComponent::StartCapture()
 	// nothing running.
 	LastStartCaptureError.Reset();
 	ResidualFallbackWarnedFor.Reset();
+	// Changes left from the previous run (a transport stopped after it was unloaded) are stale.
+	StateMailbox->Reset();
 	if (!TargetMesh.IsValid() && !bEnableAudio && !bAllowControlOnly)
 	{
 		LastStartCaptureError = TEXT("No valid TargetMesh, audio is disabled and control-only is off.");
 		UE_LOG(LogO3DSenderComponent, Warning, TEXT("Sender capture not started on %s: %s"), *GetNameSafe(GetOwner()), *LastStartCaptureError);
 		NotifyOnScreen(FString::Printf(TEXT("O3D Sender: not started (%s)"), *LastStartCaptureError), FColor::Red, 4.0f);
+		DrainConnectionState({ LastStartCaptureError });
 		return;
 	}
 
@@ -274,6 +278,13 @@ void UO3DSenderComponent::StartCapture()
 	// the started transport's sink, if any.
 	UpdateAudioCaptureBinding();
 
+	// UX-3: without a transport nothing leaves this component unless C++ code takes the frames.
+	if (!bAutoCreateTransport && !OnSerializedFrame.IsBound() && !OnPoseFrameReady.IsBound())
+	{
+		UE_LOG(LogO3DSenderComponent, Warning, TEXT("Sender on %s captures, but Auto Create Transport is off and nothing consumes the frames: no transport is started, so nothing is sent. Turn on Auto Create Transport in the Transport section."),
+			*GetNameSafe(GetOwner()));
+	}
+
 	BindToTarget();
 	const bool bHasValidMesh = TargetMesh.IsValid();
 	bIsCapturing = bHasValidMesh || bEnableAudio || bAllowControlOnly;
@@ -298,6 +309,13 @@ void UO3DSenderComponent::StartCapture()
 			UE_LOG(LogO3DSenderComponent, Log, TEXT("Sender audio capture started without a skeletal mesh."));
 			NotifyOnScreen(TEXT("O3D Sender: Audio capture active"), FColor::Green, 2.0f);
 		}
+
+		// Last: a Blueprint handler may stop capture or destroy the component.
+		DrainConnectionState();
+		if (bIsCapturing && CanBroadcastEvents())
+		{
+			OnCaptureStarted.Broadcast();
+		}
 	}
 	else
 	{
@@ -316,6 +334,7 @@ void UO3DSenderComponent::StartCapture()
 		UnbindFromTarget();
 		PoseSampler->ResetSkeleton();
 		TeardownTransport();
+		DrainConnectionState({ LastStartCaptureError });
 	}
 }
 
@@ -359,6 +378,15 @@ void UO3DSenderComponent::StopCapture()
 
 	UE_LOG(LogO3DSenderComponent, Log, TEXT("Sender capture stopped on %s"), *GetNameSafe(TargetMesh.Get()));
 	NotifyOnScreen(FString::Printf(TEXT("O3D Sender: Stopped on %s"), *GetNameSafe(TargetMesh.Get())), FColor::Yellow, 2.0f);
+
+	// Stopped means Idle, also after a transport that never started (Failed until now). Last: a
+	// Blueprint handler may start capture again or destroy the component.
+	StateMailbox->Post(EO3DConnectionState::Idle, FO3DTransportResult::Ok());
+	DrainConnectionState();
+	if (CanBroadcastEvents())
+	{
+		OnCaptureStopped.Broadcast();
+	}
 }
 
 /** Stop ticking the active transport and release audio capture bindings. */
@@ -398,6 +426,7 @@ void UO3DSenderComponent::InitializeTransport()
 	}
 	// The started sender is handed to the pipeline, whose worker sends the pose frames (WP-A2c).
 	TransportController->SetPipeline(Pipeline);
+	TransportController->SetStateMailbox(StateMailbox);
 
 	// If the transport unregisters while active (its module shuts down), drop everything that
 	// references the sender or its sinks before the controller releases the sender, so the
@@ -406,7 +435,12 @@ void UO3DSenderComponent::InitializeTransport()
 	{
 		if (UO3DSenderComponent* Self = WeakThis.Get())
 		{
+			const FName Unloaded = Self->TransportController.IsValid() ? Self->TransportController->GetConfig().Transport : NAME_None;
 			Self->TeardownTransport();
+			// Teardown also stops the tick, which drains the mailbox, so announce it here (WP-U2).
+			Self->StateMailbox->Post(EO3DConnectionState::Failed, FO3DTransportResult::Error(EO3DTransportError::Internal,
+				FString::Printf(TEXT("Transport '%s' was unloaded."), *Unloaded.ToString())));
+			Self->DrainConnectionState();
 		}
 	});
 
@@ -427,6 +461,8 @@ void UO3DSenderComponent::InitializeTransport()
 	Config.SenderMetrics = SenderMetricsHandle;
 	if (!TransportController->Start(Config))
 	{
+		// Failed stays the reported state until the next StartCapture (WP-U2).
+		StateMailbox->Post(EO3DConnectionState::Failed, TransportController->GetLastResult());
 		return;
 	}
 
@@ -1152,6 +1188,65 @@ void UO3DSenderComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 	}
 
 	TickControl();
+
+	// Last: a Blueprint handler may stop capture or destroy the component.
+	DrainConnectionState();
+}
+
+FO3DBroadcastTransportStats UO3DSenderComponent::GetTransportStats() const
+{
+	FO3DBroadcastTransportStats Stats;
+	if (TransportController.IsValid())
+	{
+		if (const TSharedPtr<IOpen3DSender> SenderInstance = TransportController->GetSender())
+		{
+			Stats = O3DBlueprintTypes::ToBlueprint(SenderInstance->GetStats());
+		}
+	}
+	Stats.State = ReportedConnectionState;
+	return Stats;
+}
+
+bool UO3DSenderComponent::CanBroadcastEvents() const
+{
+	return !HasAnyFlags(RF_BeginDestroyed | RF_FinishDestroyed) && !IsUnreachable() && !IsEngineExitRequested();
+}
+
+void UO3DSenderComponent::DrainConnectionState(const TArray<FString>& Errors)
+{
+	// Work out everything to announce before any Blueprint runs, so this component's state is
+	// final when a handler calls back into it.
+	TArray<FString> Messages = Errors;
+	TArray<EO3DBroadcastConnectionState> States;
+	EO3DBroadcastConnectionState State = ReportedConnectionState;
+	for (const FO3DConnectionStateMailbox::FChange& Change : StateMailbox->Drain())
+	{
+		const EO3DBroadcastConnectionState NewState = O3DBlueprintTypes::ToBlueprint(Change.State);
+		if (NewState == State)
+		{
+			continue;
+		}
+		State = NewState;
+		States.Add(NewState);
+		if (NewState == EO3DBroadcastConnectionState::Failed)
+		{
+			Messages.Add(Change.Reason.IsOk() ? FString::Printf(TEXT("Transport '%s' failed."), *TransportName.ToString()) : LexToString(Change.Reason));
+		}
+	}
+	ReportedConnectionState = State;
+
+	if (!CanBroadcastEvents())
+	{
+		return;
+	}
+	for (const FString& Message : Messages)
+	{
+		OnSenderError.Broadcast(Message);
+	}
+	for (const EO3DBroadcastConnectionState Changed : States)
+	{
+		OnConnectionStateChanged.Broadcast(Changed);
+	}
 }
 
 // ── Control channel (docs/adr/0011-control-channel.md, item 8) ───────────────────────────

@@ -3,6 +3,7 @@
 #include "O3DSenderTransportController.h"
 
 #include "Transport/O3DSenderInterface.h"
+#include "O3DBlueprintTransportTypes.h"
 #include "O3DSenderLogs.h"
 #include "O3DSenderPipeline.h"
 #include "Transport/O3DTransportOptions.h"
@@ -51,6 +52,13 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
     // unregisters (ADR 0007 item 5).
     ActiveTransportName = SelectedTransportName;
     UnregisteringHandle = FO3DTransportRegistry::Get().OnTransportUnregistering().AddRaw(this, &FO3DSenderTransportController::HandleTransportUnregistering);
+
+    // The callback must be set before Initialize and Start (IOpen3DSender). It posts into a mailbox
+    // the owner drains on the game thread, never into the owner itself.
+    if (StateMailbox.IsValid())
+    {
+        ActiveSender->SetStateChangedCallback(FO3DConnectionStateMailbox::MakeCallback(StateMailbox.ToSharedRef()));
+    }
 
     LastResult = ActiveSender->Initialize(ActiveConfig);
     if (!LastResult.IsOk())

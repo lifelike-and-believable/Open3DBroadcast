@@ -768,6 +768,7 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
   - Add `Content/Demo/` with a loopback demo map: a sender on the mannequin, a LiveLink receiver preset, and a LiveLink-driven animation Blueprint.
   - Add a second map for sockets between two PIE instances.
   - Reference only engine or template content. Keep the assets small.
+  - Carries WP-U2's acceptance "every Blueprint node in the USER_GUIDE is used in the sample map" (maintainer, 2026-10-05: sample assets are WP-U5's). The sender Blueprint nodes are Start Capture, Stop Capture, Is Capturing, Get Connection State, Get Transport Stats, Set Transport Name, Set Transport Option, Get Transport Option, Clear Transport Options, and the events On Connection State Changed, On Capture Started, On Capture Stopped and On Sender Error; add the receiver library's nodes when WP-U2's receiver PR lands.
 
 #### WP-U6: UDP features and network defaults  ·  P2 · M · coding
 - **Findings:** TRB-16, TRB-21, TRB-22, TRB-25, TRB-28, TRB-29, TRB-31, TRB-32
