@@ -576,6 +576,10 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Sender fixes from the mid-project review (WP-R1, sender part).
+  - **Capture stops when its transport is unloaded.** When the transport's module shut down mid-capture, the sender stopped sampling, but Is Capturing stayed true and Start Capture did nothing until Stop Capture was called. The capture now stops with the transport. The component still reports the Failed connection state, with the reason.
+  - **Audio is sent only at rates receivers play** (completes SND-27). A rate receivers reject, for example 30000 Hz, was streamed and dropped by every receiver. With Opus, the same happened at 11025, 22050, 32000 and 44100 Hz. The sender now uses the nearest rate that plays, and warns.
+
 - Receiver source fixes from the mid-project review (WP-R1, receiver part).
   - **A removed source no longer reads freed settings.** A receiver source kept alive after LiveLink removed it (for example by the handle Create Open3DStream LiveLink Source returns to Blueprint) kept ticking with a pointer to LiveLink's freed settings object. It now holds the settings weakly and stops ticking once LiveLink shuts it down.
   - **Cleared subjects stay cleared** (completes RCV-6, #395). With concealment on, a subject cleared for inactivity came straight back with a frozen pose: concealment pushed a held frame in the same tick, and LiveLink applied it after the clear. Inactive subjects are now cleared before concealment runs.
