@@ -198,12 +198,13 @@ public:
 	int32 Empty();
 
 	/**
-	 * Consumer thread. True when Dequeue discarded an accepted mocap item (the age limit or the
-	 * oldest-first eviction) since the last call; clears it. A sender reports it through
+	 * Consumer thread. The number of accepted mocap items Dequeue discarded (the age limit or the
+	 * oldest-first eviction) since the last call; resets it. Senders count them as transport
+	 * frame drops (WP-R3). A sender reports it through
 	 * IOpen3DSender::SetFramesDroppedCallback, because a lost update leaves residual receivers
 	 * waiting for a full sync (WP-R1). Full syncs are never discarded.
 	 */
-	bool ConsumeMocapDiscarded();
+	int32 ConsumeMocapDiscarded();
 
 	/** Any thread. */
 	FO3DSendQueueStats GetStats() const;
@@ -238,7 +239,7 @@ private:
 	FKindState Kinds[O3DSendItemKindCount];
 	std::atomic<uint8> MocapOverflow{ static_cast<uint8>(EO3DMocapOverflow::DropOldest) };
 	std::atomic<double> MaxAgeSeconds{ 0.0 };
-	std::atomic<bool> bMocapDiscarded{ false };
+	std::atomic<int32> MocapDiscardedSinceConsume{ 0 };
 	TQueue<FO3DSendItem, EQueueMode::Mpsc> Queue;
 	FEventRef WakeEvent{ EEventMode::AutoReset };
 };

@@ -23,6 +23,7 @@
 #include "Misc/ScopeLock.h"
 #include "O3DTestFakes.h"
 #include "O3DTestHarness.h"
+#include "O3DPerformanceMetrics.h"
 #include "O3DUnifiedMessage.h"
 #include "Transport/O3DConnectionState.h"
 #include "Transport/O3DTransportRegistry.h"
@@ -742,6 +743,53 @@ namespace O3DConformanceSuite
 		return true;
 	}
 
+	bool RunMetricsCountWhatWasSent(FAutomationTestBase& Test, const FO3DConformanceProfile& Profile, FO3DConformanceFixture& Fixture)
+	{
+		const TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe> Metrics = FO3DPerformanceMetrics::Get().AcquireSenderMetrics(TEXT("Conformance sender"));
+		FO3DTransportConfig SenderConfig = Fixture.MakeSenderConfig();
+		SenderConfig.SenderMetrics = Metrics;
+		FConnectedPair Pair;
+		if (!Connect(Test, Profile, Fixture, SenderConfig, Pair))
+		{
+			return false;
+		}
+
+		const TArray<TArray<uint8>> Recorded = O3DTests::MakeRecordedFrames(TEXT("ConformanceActor"), RoundTripFrames);
+		const int64 FramesSentBefore = Pair.Sender->GetStats().FramesSent;
+		const uint64 BytesSentBefore = Metrics->GetCounters().BytesSent.load();
+		uint64 RecordedBytes = 0;
+		for (int32 Index = 0; Index < Recorded.Num(); ++Index)
+		{
+			const TArray<uint8>& Frame = Recorded[Index];
+			RecordedBytes += static_cast<uint64>(Frame.Num());
+			const bool bQueued = O3DTests::PollUntil(Profile.ConnectTimeoutSeconds,
+				[&Pair, &Frame, Index]() { return Pair.Sender->SendSerialized(FO3DSendPayload::MakeCopy(Frame.GetData(), Frame.Num(), TEXT("ConformanceActor"), static_cast<double>(Index))) == EO3DSendResult::Queued; },
+				[&Pair]() { Pair.Pump(); });
+			if (!Test.TestTrue(*FString::Printf(TEXT("Frame %d accepted"), Index), bQueued))
+			{
+				return false;
+			}
+		}
+		auto Delivered = [&Pair]()
+		{
+			int32 Count = 0;
+			for (const TArray<uint8>& Frame : Pair.Consumer->GetFrames())
+			{
+				Count += Frame != Pair.Probe ? 1 : 0;
+			}
+			return Count;
+		};
+		O3DTests::PollUntil(Profile.ConnectTimeoutSeconds, [&Delivered]() { return Delivered() >= RoundTripFrames; }, [&Pair]() { Pair.Pump(); });
+		Test.TestEqual(TEXT("Every frame arrived"), Delivered(), RoundTripFrames);
+
+		// Probes still in flight from Connect may be counted too, so these are lower bounds.
+		Test.TestTrue(*FString::Printf(TEXT("Stats.FramesSent counts the delivered frames (%lld)"), Pair.Sender->GetStats().FramesSent - FramesSentBefore),
+			Pair.Sender->GetStats().FramesSent - FramesSentBefore >= RoundTripFrames);
+		const uint64 BytesSent = Metrics->GetCounters().BytesSent.load() - BytesSentBefore;
+		Test.TestTrue(*FString::Printf(TEXT("The sender metrics handle counts their bytes (%llu of %llu)"), BytesSent, RecordedBytes), BytesSent >= RecordedBytes);
+		return true;
+	}
+
 	bool RunControlRoundTrip(FAutomationTestBase& Test, const FO3DConformanceProfile& Profile, FO3DConformanceFixture& Fixture)
 	{
 		const TSharedRef<FRecordingControlSink, ESPMode::ThreadSafe> Sink = MakeShared<FRecordingControlSink, ESPMode::ThreadSafe>();
@@ -1137,6 +1185,7 @@ namespace O3DConformanceSuite
 		case EO3DConformanceCase::CapabilitiesMatch: return RunCapabilitiesMatch(Test, Profile, Fixture);
 		case EO3DConformanceCase::ConnectionStateLifecycle: return RunConnectionStateLifecycle(Test, Profile, Fixture);
 		case EO3DConformanceCase::ConnectionStateConnected: return RunConnectionStateConnected(Test, Profile, Fixture);
+		case EO3DConformanceCase::MetricsCountWhatWasSent: return RunMetricsCountWhatWasSent(Test, Profile, Fixture);
 		case EO3DConformanceCase::ReceiverStatsFromAnyThread: return RunReceiverStatsFromAnyThread(Test, Profile, Fixture);
 		default:
 			Test.AddError(TEXT("Unknown conformance case"));

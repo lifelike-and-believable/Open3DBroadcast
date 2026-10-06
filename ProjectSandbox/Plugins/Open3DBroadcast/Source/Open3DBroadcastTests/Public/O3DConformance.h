@@ -73,6 +73,12 @@ enum class EO3DConformanceCase : uint32
 	ConnectionStateLifecycle = 1 << 15,
 	/** Connection state: a sender and receiver that exchanged a frame both reach Connected. */
 	ConnectionStateConnected = 1 << 16,
+	/**
+	 * WP-R3 (mid-project review TR-5, SR-4): frames that reached the receiver are counted in
+	 * Stats.FramesSent, and their bytes in the sender metrics handle the config passes
+	 * (FO3DTransportConfig::SenderMetrics), which o3d.DumpMetrics and the sender component read.
+	 */
+	MetricsCountWhatWasSent = 1 << 17,
 	/** Receiver GetStats, read from another thread while the game thread polls, never goes backwards (WP-R3, TR-9). */
 	ReceiverStatsFromAnyThread = 1 << 18,
 };

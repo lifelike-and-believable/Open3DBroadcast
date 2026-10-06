@@ -308,7 +308,6 @@ EO3DSendResult FO3DNngSender::SendSerialized(FO3DSendPayload&& Payload)
 {
     if (!bInitialized.load() || !bRunning.load())
     {
-        SenderMetrics->RecordFrameDropped();
         return EO3DSendResult::NotRunning;
     }
 
@@ -316,12 +315,6 @@ EO3DSendResult FO3DNngSender::SendSerialized(FO3DSendPayload&& Payload)
     {
         return EO3DSendResult::Invalid;
     }
-
-    // The caller (FO3DSenderSerializer) already serialized these bytes. This is the only place
-    // that records capture and serialization metrics for this frame (Send(SubjectList) was
-    // deleted in WP-A1 PR 5b), so recording them here is not a double count.
-    SenderMetrics->RecordFrameCaptured();
-    SenderMetrics->RecordBytesSerialized(Payload.Bytes.Num());
 
     // No NotConnected: a frame queued before a peer exists is dropped and counted by the worker,
     // as NNG itself would. The queue takes Payload.Bytes without a copy.
@@ -341,7 +334,6 @@ EO3DSendResult FO3DNngSender::EnqueueFrame(TArray<uint8>&& Bytes, FString Subjec
     if (Result != EO3DSendResult::Queued)
     {
         DroppedFrames.fetch_add(1);
-        SenderMetrics->RecordTransportFrameDropped();
 
         // Any sending thread may get here; the compare-exchange lets one of them log (TRB-43).
         const double Now = FPlatformTime::Seconds();
@@ -354,9 +346,6 @@ EO3DSendResult FO3DNngSender::EnqueueFrame(TArray<uint8>&& Bytes, FString Subjec
         return Result;
     }
 
-    // Record successful send metrics
-    SenderMetrics->RecordBytesSent(Len);
-    TransportMetrics->RecordFrameSent(static_cast<uint64>(Len));
     return EO3DSendResult::Queued;
 }
 
@@ -545,8 +534,12 @@ uint32 FO3DNngSender::RunWorkerIteration()
 
     FO3DSendItem Item;
     const bool bDequeued = Queue->Dequeue(Item);
-    if (Queue->ConsumeMocapDiscarded())
+    if (const int32 Discarded = Queue->ConsumeMocapDiscarded())
     {
+        for (int32 Index = 0; Index < Discarded; ++Index)
+        {
+            SenderMetrics->RecordTransportFrameDropped(); // WP-R3
+        }
         NotifyFramesDropped(); // WP-R1 (TR-1): evicted after it was accepted
     }
     if (!bDequeued)
@@ -588,6 +581,9 @@ uint32 FO3DNngSender::RunWorkerIteration()
     {
         FramesSent.fetch_add(1);
         BytesSent.fetch_add(PayloadSize);
+        // WP-R3: sent, not queued.
+        SenderMetrics->RecordBytesSent(static_cast<uint64>(PayloadSize));
+        TransportMetrics->RecordFrameSent(static_cast<uint64>(PayloadSize));
     }
     else if (Item.Kind == EO3DSendItemKind::Audio)
     {
@@ -638,6 +634,7 @@ void FO3DNngSender::SetWorkerPausedForTesting(bool bPaused)
 void FO3DNngSender::RecordSendDrop()
 {
     DroppedFrames.fetch_add(1);
+    SenderMetrics->RecordTransportFrameDropped();
     // WP-R1 (TR-1): the frame was accepted by SendSerialized; pair and push are ReliableOrdered,
     // so residual receivers need a full sync after the gap.
     NotifyFramesDropped();

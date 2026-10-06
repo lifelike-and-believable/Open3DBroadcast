@@ -576,6 +576,11 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Transport counters mean the same on every transport (WP-R3; mid-project review TR-5, SR-4).
+  - **Sender metrics (`o3d.DumpMetrics`, the sender component's metrics handle):** frames captured, bytes serialized and frames a transport refused are recorded once, by the sender pipeline, for every transport. Before, only NNG, MoQ and WebRTC recorded them, so they read zero on TCP, UDP and Loopback. Every transport now records bytes sent and frames it dropped after accepting them.
+  - **`FramesSent` and bytes sent are counted when a frame is sent, not when it is queued.** TCP counted a frame as sent and then as dropped when it aged out of the queue; NNG and MoQ recorded their sender and transport metrics at enqueue.
+  - **New conformance case:** `Stats.SenderMetricsCountWhatWasSent`, for the fake, Loopback, TCP, NNG and MoQ.
+
 - Transport fixes from the mid-project review (WP-R1, transport part).
   - **Frames dropped after they were accepted lead to a full sync.**
     - TCP discards queued frames older than `tcp.maxqueueage`, and NNG drops the oldest when no peer is ready or its buffer is full. Both happen after `SendSerialized` has returned Queued.
