@@ -2,6 +2,7 @@
 // Portions Copyright (c) Open3DStream Contributors
 
 #include "O3DTestFakes.h"
+#include "O3DPerformanceMetrics.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -127,6 +128,10 @@ EO3DSendResult FO3DFakeSender::SendSerialized(FO3DSendPayload&& Payload)
 		++Stats.FramesSent;
 		Stats.BytesSent += Len;
 		Recorded.Add(Payload.Bytes);
+		if (LastConfig.SenderMetrics.IsValid())
+		{
+			LastConfig.SenderMetrics->RecordBytesSent(static_cast<uint64>(Len)); // as a transport does (WP-R3)
+		}
 	}
 
 	if (Link.IsValid())

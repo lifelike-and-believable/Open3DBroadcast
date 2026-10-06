@@ -392,7 +392,6 @@ EO3DSendResult FO3DMoQSender::SendSerialized(FO3DSendPayload&& Payload)
 {
 	if (!bInitialized || !bRunning)
 	{
-		SenderMetrics->RecordFrameDropped();
 		return EO3DSendResult::NotRunning;
 	}
 
@@ -401,9 +400,6 @@ EO3DSendResult FO3DMoQSender::SendSerialized(FO3DSendPayload&& Payload)
 	{
 		return EO3DSendResult::Invalid;
 	}
-
-	SenderMetrics->RecordFrameCaptured();
-	SenderMetrics->RecordBytesSerialized(Len);
 
 	// No NotConnected: frames queue while the session (re)connects and the worker publishes or
 	// drops them. The payload's bytes move into the queue without a copy.
@@ -425,7 +421,6 @@ EO3DSendResult FO3DMoQSender::EnqueueFrame(TArray<uint8>&& Bytes, FString Subjec
 	const EO3DSendResult Result = Queue->Enqueue(FO3DSendItem::MakeMocap(MoveTemp(Bytes), MoveTemp(SubjectName), CaptureTimestampSec, bFullSync));
 	if (Result != EO3DSendResult::Queued)
 	{
-		SenderMetrics->RecordTransportFrameDropped();
 		DroppedFrames.fetch_add(1);
 		if (O3DMoQSenderPrivate::ClaimLogSlot(LastDropLogTimeSeconds, kDropLogIntervalSeconds))
 		{
@@ -434,8 +429,6 @@ EO3DSendResult FO3DMoQSender::EnqueueFrame(TArray<uint8>&& Bytes, FString Subjec
 		return Result;
 	}
 
-	SenderMetrics->RecordBytesSent(Len);
-	TransportMetrics->RecordFrameSent(static_cast<uint64>(Len));
 	return EO3DSendResult::Queued;
 }
 
@@ -748,6 +741,9 @@ bool FO3DMoQSender::PublishItem(const FO3DSendItem& Item)
 
 	FramesSent.fetch_add(1);
 	BytesSent.fetch_add(Item.Bytes.Num());
+	// WP-R3: published, not queued.
+	SenderMetrics->RecordBytesSent(static_cast<uint64>(Item.Bytes.Num()));
+	TransportMetrics->RecordFrameSent(static_cast<uint64>(Item.Bytes.Num()));
 	const double LatencyMs = (FPlatformTime::Seconds() - Item.CaptureTimeSec) * 1000.0;
 	FScopeLock Lock(&LatencyMutex);
 	LatencyStats.TotalLatencyMs += LatencyMs;
@@ -767,7 +763,12 @@ uint32 FO3DMoQSender::RunWorkerIteration()
 	}
 
 	FO3DSendItem Item;
-	if (!Queue->Dequeue(Item))
+	const bool bDequeued = Queue->Dequeue(Item);
+	for (int32 Discarded = Queue->ConsumeMocapDiscarded(); Discarded > 0; --Discarded)
+	{
+		SenderMetrics->RecordTransportFrameDropped(); // WP-R3: evicted after it was accepted
+	}
+	if (!bDequeued)
 	{
 		return IdleWaitMs;
 	}
@@ -779,6 +780,7 @@ uint32 FO3DMoQSender::RunWorkerIteration()
 		if (Item.Kind == EO3DSendItemKind::Mocap)
 		{
 			DroppedFrames.fetch_add(1);
+			SenderMetrics->RecordTransportFrameDropped();
 		}
 		return 0;
 	}

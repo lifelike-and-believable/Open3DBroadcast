@@ -111,6 +111,8 @@ private:
 	std::atomic<bool> bRunning{ false };
 	std::atomic<bool> bWorkerPausedForTesting{ false };
 	std::atomic<int64> FramesSent{ 0 };
+	/** FO3DTransportConfig::SenderMetrics: bytes sent and accepted frames dropped (WP-R3). May be empty. */
+	TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe> SenderMetrics;
 	std::atomic<int64> BytesSent{ 0 };
 	/** Frames refused at the hard cap and frames whose send failed. */
 	std::atomic<int64> DroppedFrames{ 0 };

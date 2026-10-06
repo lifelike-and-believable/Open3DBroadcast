@@ -508,6 +508,10 @@ void UO3DSenderComponent::InitializeTransport()
 	SenderContext = Context;
 	Config.Context = Context;
 	Config.SenderMetrics = SenderMetricsHandle;
+	if (Pipeline.IsValid())
+	{
+		Pipeline->SetMetrics(SenderMetricsHandle);
+	}
 	if (!TransportController->Start(Config))
 	{
 		// Failed stays the reported state until the next StartCapture (WP-U2).
