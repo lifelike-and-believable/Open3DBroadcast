@@ -2,6 +2,12 @@
 
 > **WP-A1 PR 5a note (2026-10-02):** `FO3DTransportConfig` no longer has `Token`, `bUseAutoTokenFetch`, `TokenEndpointUrl` or `TokenRefreshLeadTimeSec`. They are the options `webrtc.useAutoTokenFetch`, `webrtc.tokenEndpointUrl` and `webrtc.tokenRefreshLeadTimeSec` (in `Config.AdvancedParams`) and the secret `webrtc.token` (in `Config.Secrets`), read by `WebRTCUtils::ReadTokenSettings`. The code samples below show the earlier fields; this document is kept as the design record.
 
+> **Historical document (2026-10-06, WP-D2; TRF-36).** No longer true, or never true, of the plugin:
+> - There is no `TokenApiKey` or `ApiSecret` config field (Overview list, component diagram). The plugin authenticates to the token endpoint with the `webrtc.tokenEndpointAuth` secret, sent as `Authorization: Bearer <value>`. The "Optional API key authentication" of the mock token server (`Tests/mock-token-server.py`, `API_KEY`) is that check on the server side.
+> - "Callbacks execute on HTTP module's thread": the completion delegate may run on the game thread or the HTTP thread, depending on the HTTP module's configuration (`Private/Shared/WebRTCTokenFetcher.h`).
+>
+> Current behaviour: the add-on's `USER_GUIDE.md` (Automatic Token Fetch, Credentials).
+
 
 **Status:** ✅ Core Implementation Complete  
 **Date:** 2024-11-23  

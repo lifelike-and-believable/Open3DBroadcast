@@ -1,5 +1,7 @@
 # Open3DTransportMoQ — Comprehensive Implementation Review
 
+> **Historical document (2026-10-06, WP-D2; TRF-36).** It records the state of 2025-12-04. The assessment and scores ("GOOD", "9/10" and the others) are the authoring agent's self-assessment, not a review result. The 2026-09 plugin review (`docs/review/2026-09-plugin-review/transports-webrtc-moq.md`) is the later assessment.
+
 **Review Date:** 2025-12-04  
 **Reviewer:** Code Review Agent  
 **Implementation Phase:** Phase 3 (Receiver) Complete  

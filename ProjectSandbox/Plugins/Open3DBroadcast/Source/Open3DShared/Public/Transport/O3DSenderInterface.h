@@ -27,10 +27,19 @@ class OPEN3DSHARED_API IO3DSenderAudioSink
 public:
     virtual ~IO3DSenderAudioSink() = default;
 
-    /** Submit interleaved floating point PCM samples. Returns false if the frame was dropped. */
+    /**
+     * Submit interleaved floating point PCM samples. Returns false if the frame was dropped.
+     * Any thread, and possibly several at once: the audio render thread (submix capture), the
+     * microphone capture thread, or a thread that pushes frames itself. Must not block; the
+     * samples are only valid for the duration of the call.
+     */
     virtual bool SubmitPcm(const FString& StreamLabel, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate, double TimestampSec) = 0;
 
-    /** Notification that the capture path has stopped producing frames. */
+    /**
+     * Notification that the capture path has stopped producing frames. Game thread, when the
+     * sender's transport stops; a SubmitPcm already running on another thread may still return
+     * after it.
+     */
     virtual void OnCaptureStopped() {}
 };
 
