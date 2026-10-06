@@ -143,6 +143,8 @@ public:
 	virtual FO3DTransportCapabilities GetCapabilities() const override { return GetFakeTransportCapabilities(); }
 	virtual EO3DConnectionState GetConnectionState() const override { return ConnectionState.Get(); }
 	virtual void SetStateChangedCallback(FO3DConnectionStateCallback Callback) override { ConnectionState.SetCallback(MoveTemp(Callback)); }
+	/** As FO3DFakeSender::SimulateConnectionState: moves the state on the calling thread (ignored outside Start..Stop). */
+	void SimulateConnectionState(EO3DConnectionState State, const FO3DTransportResult& Reason = FO3DTransportResult()) { ConnectionState.Set(State, Reason); }
 	virtual void SetAudioSink(const TSharedPtr<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& Sink, const FO3DTransportAudioConfig& AudioConfig) override;
 	virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink) override;
 

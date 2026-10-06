@@ -107,6 +107,12 @@ struct FO3DReceiverSourceTestAccessor
 	// Schema validation (WP-A1 PR 5c): what the last StartTransport() refused, and the status line.
 	static FO3DTransportResult GetLastTransportResult(const FO3DReceiverSource& Source) { return Source.LastTransportResult; }
 	static FText GetSourceStatus(const FO3DReceiverSource& Source) { return Source.SourceStatus; }
+
+	// Source status (WP-U3, RCV-16): what Tick does for the status, with a chosen "now".
+	static void DrainConnectionState(FO3DReceiverSource& Source) { Source.DrainConnectionState(); }
+	static void UpdateStalledStatus(FO3DReceiverSource& Source, double NowSeconds) { Source.UpdateStalledStatus(NowSeconds); }
+	static bool HasStartFailed(const FO3DReceiverSource& Source) { return Source.bStartFailed.load(); }
+	static void Poll(FO3DReceiverSource& Source) { if (Source.ActiveReceiver.IsValid()) { Source.ActiveReceiver->Poll(); } }
 };
 
 /** Binds a remote control component to the bus without a world (BeginPlay needs one). */

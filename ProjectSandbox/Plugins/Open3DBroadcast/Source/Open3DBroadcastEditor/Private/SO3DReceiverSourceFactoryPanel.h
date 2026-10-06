@@ -40,6 +40,8 @@ private:
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 
 	FReply OnCreateClicked();
+	/** Why the source could not start (RCV-17), or empty; Create is disabled while it is not. */
+	FText GetCreateError() const;
 
 	void HandleSettingsPropertyChanged(const FPropertyChangedEvent& PropertyChangedEvent);
 	bool HandleIsPropertyVisible(const FPropertyAndParent& PropertyAndParent) const;

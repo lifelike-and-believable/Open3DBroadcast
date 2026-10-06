@@ -327,9 +327,24 @@ The receiver is implemented as a **LiveLink Source** and configured through Unre
    - Add entries matching your transport (see examples below)
 
 5. **Create Source**
-   - Click **Create**
-   - Source should appear in LiveLink list
-   - Status will be green when receiving data
+   - Click **Create Source**. It is disabled, with the reason shown above it, while the selected transport has no receiver or the transport refuses an option.
+   - The source appears in the LiveLink list.
+
+#### Source Status
+
+The LiveLink list shows the source's status:
+
+| Status | Meaning |
+|---|---|
+| Waiting for data via *transport* | The transport started; no frame has arrived yet. |
+| Receiving via *transport* | Frames are arriving. |
+| No data received (via *transport*) | No frame for 2 seconds. It returns to Receiving when frames resume. |
+| Reconnecting via *transport* | The transport lost its connection and is retrying. |
+| Error: *reason* | The transport could not start or failed, with the reason (for example, no receiver registered for the transport, or the server refused the connection). After a failed start, LiveLink shows the source as invalid. |
+| Invalid options: *reason* | The transport refused an option. |
+| Transport *name* unloaded | The transport's module shut down. |
+
+Concealment settings in the source's LiveLink **Settings** panel apply as soon as you edit them; turning concealment off frees its per-subject state.
 
 ### Creating a Source at Runtime (Blueprint or C++)
 
