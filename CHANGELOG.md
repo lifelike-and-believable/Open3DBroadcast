@@ -576,6 +576,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Inactive LiveLink subjects (WP-U4, RCV-6). A subject that stops receiving frames was removed after a fixed 5 s, which deleted its LiveLink settings (preprocessors, interpolation, translators). Now its frames are cleared after the source's new **Inactive Subject Timeout** setting (default 5 s, 0 = never): LiveLink shows it with no data and keeps the subject and its settings, and its next frame makes it valid again. The check runs every second instead of every 5 s.
+
 - Remote audio component lifecycle (WP-U4; RCV-22, RCV-23, RCV-24). A component placed under another component keeps that parent: only an **Attach Parent** set by the user moves it, and a component that is its actor's root no longer tries to attach to itself. **Auto Activate** off now works: audio is queued and plays after the new Blueprint function **Play** (and **Stop**). The internal audio component is held as a property, set up before it is registered, and stopped and destroyed at End Play together with the procedural wave. The unused `OnAudioFrame`, which would have applied the gain twice, is removed.
 
 - Transport options and logs (WP-U3; TRB-21 UI part, TRF-30, TRB-43). The UDP receiver no longer shows an MTU option: only the sender fragments frames, so `udp.mtu` is a sender option (the receiver parsed it and never used it); the receiver keeps Max Datagram Bytes. The WebRTC receiver logs "scheduling reconnect" at Log, since the connection loss before it is already a Warning. TRF-30 and TRB-43 were otherwise fixed by earlier work (no [DIAG] scaffolding, the per-tick drop message at Verbose; NNG open, listen, parse and send failures at Warning, queue-full warnings rate-limited).

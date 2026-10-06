@@ -20,7 +20,7 @@ namespace O3DS
 /**
  * Publishes decoded subjects to LiveLink for one receiver source (WP-A3, RCV-29): creates a
  * subject once per session (RCV-7), re-pushes static data when its bone or curve names change,
- * pushes frames, and removes subjects that stopped sending. Game thread.
+ * pushes frames, and clears the frames of subjects that stopped sending. Game thread.
  */
 class FO3DLiveLinkPublisher
 {
@@ -59,12 +59,14 @@ public:
 	void PublishSyntheticFrame(FName Subject, const TArray<FTransform>& BoneTransforms, const TArray<float>& CurveValues, double Time);
 
 	/**
-	 * Removes every subject that published nothing for longer than ThresholdSeconds, from LiveLink
-	 * and from this publisher; OnRemoved runs for each so the caller can drop its own state.
+	 * Clears the LiveLink frames of every subject that published nothing for longer than
+	 * ThresholdSeconds, and forgets it here; OnCleared runs for each so the caller can drop its own
+	 * state. The LiveLink subject and its settings stay; its next frame pushes static data again
+	 * (RCV-6). A threshold of 0 or less: never.
 	 */
-	void RemoveInactiveSubjects(double NowSeconds, double ThresholdSeconds, TFunctionRef<void(FName)> OnRemoved);
+	void ClearInactiveSubjects(double NowSeconds, double ThresholdSeconds, TFunctionRef<void(FName)> OnCleared);
 
-	/** Subjects that published a frame and were not removed since. */
+	/** Subjects that published a frame and were not cleared since. */
 	int32 GetActiveSubjectCount() const { return SubjectLastUpdateTime.Num(); }
 
 	/** Forgets every subject and restarts frame ids (the transport stopped). */

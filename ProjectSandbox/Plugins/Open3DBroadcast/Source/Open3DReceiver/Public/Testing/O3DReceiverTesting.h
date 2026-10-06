@@ -284,8 +284,8 @@ public:
 	/** PublishFrame with a sender timecode (SubjectList.scene_time; RCV-8). */
 	void PublishFrameWithSenderTime(FName Subject, int32 NumTransforms, double WorldTime, int32 Frame, float SubFrame, int32 RateNumerator, int32 RateDenominator);
 	void PublishSyntheticFrame(FName Subject, int32 NumTransforms, double Time);
-	/** Subjects removed, in the order the publisher reported them. */
-	TArray<FName> RemoveInactiveSubjects(double NowSeconds, double ThresholdSeconds);
+	/** Subjects cleared, in the order the publisher reported them. */
+	TArray<FName> ClearInactiveSubjects(double NowSeconds, double ThresholdSeconds);
 	int32 GetActiveSubjectCount() const;
 	/** What PublishFrame does after a slow push (RCV-26). */
 	void NoteSlowFramePush(FName Subject, double PushMs, double NowSeconds);
