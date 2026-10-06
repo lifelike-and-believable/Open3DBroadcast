@@ -72,7 +72,7 @@ This section supersedes the "Start here" line in §0 where they disagree.
   - The LiveKit FFI request (`docs/livekit_ffi_feature_request.md`) is filed as `lifelike-and-believable/livekit-ffi` issues #13 to #17; the maintainer's agent is implementing them.
   - The rules-for-robots adoption findings are rules-for-robots issues #23 to #38.
 - **Working practice:**
-  - Every PR gets Auto-fix in the desktop app.
+  - Every PR gets Auto-fix in the desktop app. Auto-merge (`gh pr merge <n> --auto --squash`) is approved as well (maintainer, 2026-10-06). Still check a PR when its success comment arrives; the first auto-merged PR checks whether that comment still arrives after GitHub merged it.
   - A workflow's success comment is the cue that CI is green; check the checks before merging.
   - Delete `ProjectSandbox/Intermediate/Build/Win64/x64/ProjectSandboxEditor/Development/Makefile.bin` before building whenever files were added, removed, merged in from `develop`, or changed by a branch switch. UBT otherwise reuses its makefile, which can:
     - skip new or merged-in files, so a local run lacks their tests;
@@ -90,7 +90,7 @@ This section supersedes the "Start here" line in §0 where they disagree.
   5. The names-in-use picker.
 
   The desk items below are unchanged. Also for the maintainer:
-  - turn on branch protection for `develop`, requiring the two checks "Plugin CI result" and "Core tests result" (`Build/README.md`, WP-R2);
+  - (done 2026-10-06) branch protection: a `develop` ruleset requires "Plugin CI result" and "Core tests result", allows only squash merges, blocks deletion and force pushes, and has no bypass (`Build/README.md`);
   - (done 2026-10-06) the fork-PR approval policy is `all_external_contributors`, so fork PRs can't run code on the self-hosted runner unapproved. Read a fork PR's workflow, Build.cs and script changes before approving its run (mid-project review BC-1);
   - listen to a received audio stream at the default 60 ms Target Latency (#396), pause the sender, and check that playback resumes;
   - set a translator on a LiveLink subject, stop the sender for longer than the Inactive Subject Timeout, restart it, and check the translator is still there (#395). During the pause, also check that the subject shows no data rather than a frozen pose; the mid-project review's RR-2 expects a frozen pose while concealment is on;
