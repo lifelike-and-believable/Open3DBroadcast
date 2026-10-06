@@ -601,6 +601,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 - NNG listener restart checked (WP-R3, TR-4). The NNG conformance profile skipped `Lifecycle.RestartAfterStop` and ran the control stop case with one sender, on the belief that a closed listener lingers on its port. Both run now, and pass repeatedly: restart after Stop on the same port works, so no code change was needed.
 
+- MoQ receiver options (WP-R3, TR-8). The receiver's options showed **Delivery Mode** and **Queue Capacity (MiB)**, which only the sender reads: the publisher picks the delivery mode, and a receiver has no send queue. The receiver no longer lists them; a value already saved in a receiver config is ignored, as before.
+
 - Hot-path transport logs throttled (WP-R3, TR-6). A peer sending oversized datagrams or messages, or a failing socket, produced one warning per datagram or frame. These log sites now write at most one line per 2 s, with the number of similar lines left out since the last one:
   - **UDP receiver:** recv failures; a datagram, payload or reassembled payload over the size cap.
   - **UDP sender:** send failures and partial sends. The per-fragment failure line is now Verbose, since the datagram failure behind it is already logged.
