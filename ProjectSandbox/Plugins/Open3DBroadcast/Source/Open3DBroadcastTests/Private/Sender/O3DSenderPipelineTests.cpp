@@ -11,6 +11,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "O3DPerformanceMetrics.h"
 #include "O3DHelpers.h"
 #include "O3DSenderCapture.h"
 #include "O3DSenderComponent.h"
@@ -589,6 +590,40 @@ bool FO3DSenderPipelineFramesDroppedTest::RunTest(const FString& Parameters)
 	}
 	Probe.DetachSender();
 	TestFalse(TEXT("Detaching clears the callback"), Transport->FireFramesDropped());
+	return true;
+}
+
+// WP-R3 (mid-project review SR-4): the pipeline records the sender metrics every transport
+// shares (frames captured, bytes serialized, frames the transport refused), so they are not zero
+// on transports that never recorded them (TCP, UDP, Loopback) and not counted twice on others.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSenderPipelineMetricsTest, "Open3DBroadcast.Sender.Pipeline.RecordsSenderMetrics", O3DB_TEST_FLAGS)
+bool FO3DSenderPipelineMetricsTest::RunTest(const FString& Parameters)
+{
+	using namespace O3DSenderPipelineTests;
+	const TSharedPtr<const FO3DSSkeletonDescriptor> Descriptor = MakeThreeBoneDescriptor();
+	const TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe> Metrics = FO3DPerformanceMetrics::Get().AcquireSenderMetrics(TEXT("Pipeline metrics test"));
+
+	FO3DSenderPipelineProbe Probe;
+	Probe.Start(false);
+	Probe.SetMetrics(Metrics);
+	const TSharedRef<FScriptedSender> Transport = MakeShared<FScriptedSender>();
+	Probe.AttachSender(Transport);
+	for (int32 Index = 0; Index < 3; ++Index)
+	{
+		if (Index == 2)
+		{
+			Transport->SetRefuseNext(1);
+		}
+		Probe.SubmitFrame(MakeProbeFrame(Probe, TEXT("A"), Descriptor, 10.0 + Index / 60.0));
+		TestTrue(TEXT("Drained"), Probe.WaitForIdle(WaitTimeoutSeconds));
+	}
+
+	const FO3DSenderCounters& Counters = Metrics->GetCounters();
+	TestEqual(TEXT("Every frame handed to the transport is captured"), Counters.FramesCaptured.load(), static_cast<uint64>(3));
+	TestTrue(TEXT("Their bytes are serialized"), Counters.BytesSerialized.load() > 0);
+	TestEqual(TEXT("The refused one is dropped"), Counters.FramesDropped.load(), static_cast<uint64>(1));
+	TestEqual(TEXT("Nothing is counted as sent by the pipeline"), Counters.BytesSent.load(), static_cast<uint64>(0));
+	Probe.DetachSender();
 	return true;
 }
 

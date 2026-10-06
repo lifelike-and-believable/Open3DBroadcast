@@ -112,6 +112,8 @@ private:
 	std::atomic<bool> bRunning{ false };
 	std::atomic<bool> bWorkerPausedForTesting{ false };
 	std::atomic<int64> FramesSent{ 0 };
+	/** FO3DTransportConfig::SenderMetrics: bytes sent and accepted frames dropped (WP-R3). May be empty. */
+	TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe> SenderMetrics;
 	// WP-R3 (TR-6): hot-path log sites, one throttle each, per instance.
 	FO3DLogThrottle UdpSendFailureLog;
 

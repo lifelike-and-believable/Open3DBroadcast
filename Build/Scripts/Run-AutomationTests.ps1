@@ -15,7 +15,10 @@ param(
   # "Open3DBroadcast." (ADR 0006).
   [string]$TestFilter = "Open3DBroadcast",
   [string]$ResultsDir = "Artifacts\Tests",
-  [string]$RunLabel
+  [string]$RunLabel,
+  # A key of Build/automation-test-floors.json: fail when fewer tests ran than its floor
+  # (WP-R2, BC-7). Empty: no floor.
+  [string]$MinTestsKey
 )
 
 # Exit codes: 0 every test ran and passed; 1 a test failed, no test ran, the report is
@@ -183,6 +186,19 @@ if ($report) {
 
   if (($tests.Count - $skipped.Count) -eq 0) {
     $problems += "No test ran for filter '$TestFilter'. A filter that matches nothing is a failure, not a pass."
+  }
+  if (-not [string]::IsNullOrWhiteSpace($MinTestsKey)) {
+    $floorsPath = Join-Path -Path $PSScriptRoot -ChildPath "..\automation-test-floors.json"
+    $floors = Get-Content -LiteralPath $floorsPath -Raw | ConvertFrom-Json
+    $floor = $floors.$MinTestsKey
+    $ran = $tests.Count - $skipped.Count
+    if ($null -eq $floor) {
+      $problems += "No floor named '$MinTestsKey' in Build/automation-test-floors.json."
+    } elseif ($ran -lt [int]$floor) {
+      $problems += "Only $ran test(s) ran; the floor '$MinTestsKey' in Build/automation-test-floors.json is $floor. A test file that was not compiled or registered (for example a stale UBT makefile) drops out silently otherwise."
+    } else {
+      Write-Host "Test floor '$MinTestsKey': $ran ran, floor $floor."
+    }
   }
   if ($report.failed -and [int]$report.failed -gt 0 -and $bad.Count -eq 0) {
     $problems += "The report header counts $($report.failed) failed test(s)."

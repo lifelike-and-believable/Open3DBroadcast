@@ -3,6 +3,7 @@
 #if O3D_WITH_TRANSPORT_SOCKETS // Whole file: without the transport the module is a stub (O3DBuildFlags).
 
 #include "SocketsUdpSender.h"
+#include "O3DPerformanceMetrics.h"
 #include "O3DLogThrottle.h"
 
 #include "O3DSinkAudioEncoder.h"
@@ -84,6 +85,7 @@ FO3DTransportResult FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& 
 	Stop();
 
 	ActiveConfig = Config;
+	SenderMetrics = Config.SenderMetrics;
 	FramesSent.store(0);
 	BytesSent.store(0);
 	DroppedFrames.store(0);
@@ -392,7 +394,12 @@ uint32 FO3DSocketsUdpSender::RunWorkerIteration()
 
 	FO3DSendItem Item;
 	// DropOldest: while more than FrameQueueSoftCap frames wait, Dequeue discards the oldest.
-	if (!Queue->Dequeue(Item))
+	const bool bDequeued = Queue->Dequeue(Item);
+	for (int32 Discarded = Queue->ConsumeMocapDiscarded(); Discarded > 0 && SenderMetrics.IsValid(); --Discarded)
+	{
+		SenderMetrics->RecordTransportFrameDropped(); // WP-R3
+	}
+	if (!bDequeued)
 	{
 		return IdleWaitMs;
 	}
@@ -404,12 +411,20 @@ uint32 FO3DSocketsUdpSender::RunWorkerIteration()
 		{
 			FramesSent.fetch_add(1);
 			BytesSent.fetch_add(Item.Bytes.Num());
+			if (SenderMetrics.IsValid())
+			{
+				SenderMetrics->RecordBytesSent(static_cast<uint64>(Item.Bytes.Num())); // WP-R3
+			}
 		}
 		else
 		{
 			// The socket refused the datagram (send buffer full or a network error).
 			DroppedFrames.fetch_add(1);
 			SendErrors.fetch_add(1);
+			if (SenderMetrics.IsValid())
+			{
+				SenderMetrics->RecordTransportFrameDropped(); // WP-R3
+			}
 		}
 		break;
 	case EO3DSendItemKind::Audio:

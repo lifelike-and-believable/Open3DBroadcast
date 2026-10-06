@@ -109,6 +109,14 @@ void FO3DSenderPipelineProbe::SubmitFrame(TUniquePtr<FO3DSPoseFrame>&& Frame)
 	Pipeline->SubmitFrame(MoveTemp(Frame), true);
 }
 
+void FO3DSenderPipelineProbe::SetMetrics(const TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe>& Metrics)
+{
+	if (Pipeline.IsValid())
+	{
+		Pipeline->SetMetrics(Metrics);
+	}
+}
+
 void FO3DSenderPipelineProbe::AttachSender(const TSharedPtr<IOpen3DSender>& Sender)
 {
 	if (Pipeline.IsValid())

@@ -172,6 +172,8 @@ public:
 	void SubmitFrame(TUniquePtr<FO3DSPoseFrame>&& Frame);
 
 	void AttachSender(const TSharedPtr<IOpen3DSender>& Sender);
+	/** The sender metrics handle, as the component sets it (WP-R3). */
+	void SetMetrics(const TSharedPtr<class FO3DSenderMetricsHandle, ESPMode::ThreadSafe>& Metrics);
 	/** Waits for a frame being processed, as the transport controller's Stop does. */
 	void DetachSender();
 	/** The component's OnSerializedFrame role: broadcast after each serialized frame. Null removes it (waits). */

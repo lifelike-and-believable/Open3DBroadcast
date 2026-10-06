@@ -101,6 +101,9 @@
 // WP-R1 (mid-project review TR-1) is part of 5 as well (still no tag after v0.9.6):
 // IOpen3DSender gained SetFramesDroppedCallback (default no-op) and FO3DFramesDroppedCallback;
 // TCP and NNG call it. FO3DSendQueue gained ConsumeMocapDiscarded and never discards a full sync.
+// WP-R3 (TR-5, SR-4) is part of 5 as well: the sender pipeline records FramesCaptured,
+// BytesSerialized and FramesDropped; transports record only BytesSent and TransportFramesDropped
+// into FO3DTransportConfig::SenderMetrics, and count FramesSent when a frame is sent, not queued.
 
 namespace O3DTransport
 {
