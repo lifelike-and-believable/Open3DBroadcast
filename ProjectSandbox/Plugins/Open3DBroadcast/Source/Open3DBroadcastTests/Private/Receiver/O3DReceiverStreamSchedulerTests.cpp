@@ -134,7 +134,10 @@ bool FO3DReceiverConcealmentTest::RunTest(const FString& Parameters)
 	Probe.Tick(Disabled, true, LastTime + 0.12);
 	TestEqual(TEXT("Nothing while concealment is disabled"), Probe.Synthetic.Num(), Before);
 	Probe.ObserveRealFrame(Disabled, FName(TEXT("Other")), LastTime, { FTransform::Identity }, true);
-	TestEqual(TEXT("No engine created while disabled"), Probe.GetNumEngines(), 1);
+	// RCV-15 (WP-U3): turning concealment off frees the engines, and none is created while it is off.
+	TestEqual(TEXT("Disabled: engines freed, none created"), Probe.GetNumEngines(), 0);
+	Probe.ObserveRealFrame(nullptr, Hero, LastTime, { FTransform::Identity }, false);
+	TestEqual(TEXT("Enabled again: the next real frame creates the engine"), Probe.GetNumEngines(), 1);
 
 	Probe.ForgetSubject(Hero);
 	TestEqual(TEXT("ForgetSubject drops the engine"), Probe.GetNumEngines(), 0);

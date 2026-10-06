@@ -6,6 +6,9 @@
 #include "O3DReceiverLogs.h"
 #include "O3DReceiverSourceSettings.h"
 #include "O3DSecretStore.h"
+#include "Open3DBroadcastSettings.h"
+#include "Transport/O3DTransportOptions.h"
+#include "Transport/O3DTransportOptionsView.h"
 
 #include "UObject/Class.h"
 
@@ -96,6 +99,22 @@ FString O3DReceiver::ExportConnectionString(const FO3DReceiverSourceConfig& Sett
     FString ConnectionString;
     FO3DReceiverSourceConfig::StaticStruct()->ExportText(ConnectionString, &Persistable, nullptr, nullptr, PPF_None, nullptr);
     return ConnectionString;
+}
+
+FText O3DReceiver::ValidateNewSource(const FO3DReceiverSourceConfig& Settings)
+{
+    if (!FO3DTransportRegistry::Get().GetNames(EO3DTransportRole::Receiver).Contains(Settings.TransportName))
+    {
+        return FText::Format(NSLOCTEXT("O3DReceiver", "NoReceiverForTransport", "No receiver is registered for transport '{0}'."), FText::FromName(Settings.TransportName));
+    }
+
+    // The options the source would start with: its own, then the project defaults (WP-U1).
+    TMap<FString, FString> Options = Settings.TransportOptions;
+    UOpen3DBroadcastSettings::ApplyTransportDefaults(Settings.TransportName, EO3DTransportRole::Receiver, Options);
+    FO3DTransportOptionSchema Schema;
+    FO3DTransportRegistry::Get().GetOptionSchema(Settings.TransportName, EO3DTransportRole::Receiver, Schema);
+    const FO3DTransportResult Result = O3DTransportOptions::ValidateOptions(FO3DTransportOptionsView(Options, &Schema));
+    return Result.IsOk() ? FText::GetEmpty() : FText::FromString(Result.Message.IsEmpty() ? FString(LexToString(Result.Code)) : Result.Message);
 }
 
 void O3DReceiver::ResolveSecrets(const FO3DReceiverSourceConfig& Settings, TMap<FString, FString>& OutSecrets)

@@ -10,6 +10,7 @@
 
 #include "Transport/O3DReceiverInterface.h"
 #include "O3DReceiverLogs.h"
+#include "O3DBlueprintTransportTypes.h"
 #include "O3DPerformanceMetrics.h"
 #include "O3DRuntimeContext.h"
 #include "O3DReceiverSourceSettings.h"
@@ -60,7 +61,8 @@ public:
     virtual FText GetSourceType() const override { return SourceType; }
     virtual FText GetSourceMachineName() const override { return SourceMachineName; }
     virtual FText GetSourceStatus() const override { return SourceStatus; }
-    virtual bool IsSourceStillValid() const override { return Client != nullptr && bIsValid.load(); }
+    /** False after a transport that could not start, so LiveLink shows the source as broken (RCV-16). */
+    virtual bool IsSourceStillValid() const override { return Client != nullptr && bIsValid.load() && !bStartFailed; }
     virtual void Update() override;
 
     // Tickable interface
@@ -135,6 +137,20 @@ private:
     void HandleTransportUnregistering(FName TransportName);
     FO3DTransportConfig BuildTransportConfig() const;
     void UpdateConnectionLastActive();
+
+    /**
+     * Source status (RCV-16), game thread. A start that fails says why ("Error: ..."); a started
+     * source shows "Waiting for data via X" until its first frame, "Receiving via X" while frames
+     * arrive, "No data received (via X)" after StalledAfterSeconds without one, and the transport's
+     * Reconnecting and Failed states (with the reason) as it reports them.
+     */
+    void SetStatus(const FText& Status, bool bReceiving);
+    /** Records Result as the reason the transport did not start and shows it. */
+    void FailStart(const FO3DTransportResult& Result);
+    /** Applies the connection-state changes the transport posted since the last tick. */
+    void DrainConnectionState();
+    /** Shows "No data received" once no frame has arrived for StalledAfterSeconds. */
+    void UpdateStalledStatus(double NowSeconds);
     void RemoveInactiveSubjects();
 
     /** Sets the source GUID here and in the publisher's subject keys. */
@@ -215,6 +231,15 @@ private:
     ULiveLinkSourceSettings* Settings = nullptr;
 
     std::atomic<bool> bIsValid{true};
+    /** The last start failed (RCV-16); IsSourceStillValid is false until a start succeeds. */
+    std::atomic<bool> bStartFailed{false};
+    /** The status currently says "Receiving via X". */
+    bool bStatusIsReceiving = false;
+    /** The status says no data arrived lately; the next frame restores "Receiving via X". */
+    bool bStalled = false;
+    static constexpr double StalledAfterSeconds = 2.0;
+    /** The transport's connection-state changes, posted from any thread, drained in Tick (RCV-16). */
+    TSharedRef<FO3DConnectionStateMailbox, ESPMode::ThreadSafe> StateMailbox = MakeShared<FO3DConnectionStateMailbox, ESPMode::ThreadSafe>();
 
     // The runtime context named by the settings' ContextName (ADR 0012 item 5): this source's
     // audio and control go to its buses. Declared before everything that refers into it, so it is

@@ -57,7 +57,15 @@ public:
 	bool HasClockOffsetEstimate() const { return bHasClockOffsetEstimate; }
 
 private:
-	O3DS::ConcealmentEngine& GetOrCreateEngine(const UO3DReceiverSourceSettings* Settings, FName Subject);
+	/**
+	 * Applies the current LiveLink settings (RCV-15): disabled drops every engine; changed values
+	 * drop them too, and the next real frame creates each from the new values (an engine cannot be
+	 * reconfigured). Returns false while concealment is disabled.
+	 */
+	bool ApplySettings(const UO3DReceiverSourceSettings* Settings);
+	/** Reports what the engines counted so far, then drops them. */
+	void DropEngines();
+	O3DS::ConcealmentEngine& GetOrCreateEngine(FName Subject);
 	void ReportMetricsDelta();
 
 	FO3DReceiverMetricsHandleRef Metrics;
@@ -71,6 +79,9 @@ private:
 	 * kept only as the payload of bHasClockOffsetEstimate ("the gated path has observed a frame").
 	 */
 	int64 LastClockOffsetEstimateUs = 0;
+	/** The settings the engines were created from (ApplySettings). */
+	O3DS::ConcealmentConfig CurrentConfig;
+	bool bHasCurrentConfig = false;
 	bool bHasClockOffsetEstimate = false;
 
 	// Scratch for a synthesized frame, reused across subjects and ticks (RCV-11).
