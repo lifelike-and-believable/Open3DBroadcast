@@ -6,6 +6,8 @@ Written 2026-09-30 by the cloud session that drove M1, M2 and the start of M3 of
 
 This section supersedes the "Start here" line in §0 where they disagree.
 
+**Mid-project review (2026-10-06):** `docs/roadmap/mid-project-review-2026-10-06.md` records how the plan evolved, learnings, plan-document drift and code defects no finding or WP covers, with suggested work packages WP-R1 to R3. Read it before planning the next batch; its §1 lists the most important items (a CI security setting reported to the maintainer directly, a use-after-free in the receiver source, an incomplete RCV-6 fix).
+
 **2026-10-05 and 2026-10-06 (newest):**
 - **Merged:**
   - #383 (HANDOFF) and #384 (issue cleanup).
@@ -57,7 +59,7 @@ This section supersedes the "Start here" line in §0 where they disagree.
   The desk items below are unchanged. Also for the maintainer:
   - turn on branch protection for `develop` with the ten checks in `Build/README.md`;
   - listen to a received audio stream at the default 60 ms Target Latency (#396), pause the sender, and check that playback resumes;
-  - set a translator on a LiveLink subject, stop the sender for longer than the Inactive Subject Timeout, restart it, and check the translator is still there (#395);
+  - set a translator on a LiveLink subject, stop the sender for longer than the Inactive Subject Timeout, restart it, and check the translator is still there (#395). During the pause, also check that the subject shows no data rather than a frozen pose; the mid-project review's RR-2 expects a frozen pose while concealment is on;
   - with two receiver sources sending audio, check that a component in Any Stream mode plays one of them cleanly and switches to the other about a second after that sender stops (#398).
 
 **Merged this session (#335–#355; later PRs under "Open at hand-over"):**
