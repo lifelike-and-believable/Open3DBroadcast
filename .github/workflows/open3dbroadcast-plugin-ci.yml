@@ -230,7 +230,8 @@ jobs:
             -PluginPackageDir (Join-Path $env:RUNNER_TEMP 'PluginPackage') `
             -HostProjectDir (Join-Path $env:RUNNER_TEMP 'TestHost') `
             -ResultsDir "$PWD\Artifacts\AutomationTests" `
-            -TestFilter "Open3DBroadcast"
+            -TestFilter "Open3DBroadcast" `
+            -MinTestsKey "plugin"
 
       - name: Upload automation test report
         if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
@@ -280,7 +281,8 @@ jobs:
             -UEPath "$env:UE_ROOT" `
             -ProjectFile (Join-Path $env:RUNNER_TEMP 'AddOnHost\O3DWebRTCHost.uproject') `
             -ResultsDir "$PWD\Artifacts\AutomationTestsWithAddOn" `
-            -TestFilter "Open3DBroadcast"
+            -TestFilter "Open3DBroadcast" `
+            -MinTestsKey "plugin-with-webrtc"
 
       - name: Upload automation test report (with add-on)
         if: ${{ !cancelled() && steps.addon-tests.outcome != 'skipped' }}
