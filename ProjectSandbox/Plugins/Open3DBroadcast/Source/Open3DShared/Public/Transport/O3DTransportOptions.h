@@ -66,6 +66,13 @@ namespace O3DTransportOptions
 	/** true/false, 1/0, yes/no, on/off (any case); Default when absent or anything else. */
 	OPEN3DSHARED_API bool GetBool(const FO3DTransportOptionsView& Options, const FString& Key, bool Default);
 
+	/**
+	 * True for a host only this machine can reach: an IPv4 literal in 127.0.0.0/8, ::1, or
+	 * "localhost" (any case). False for 0.0.0.0, other addresses, names and an empty host. Listeners
+	 * warn when they bind anything else (WP-U6, TRB-29).
+	 */
+	OPEN3DSHARED_API bool IsLoopbackHost(const FString& Host);
+
 	/** Strict port: decimal digits only, 1 to 65535. */
 	OPEN3DSHARED_API bool TryParsePort(const FString& Text, int32& OutPort);
 

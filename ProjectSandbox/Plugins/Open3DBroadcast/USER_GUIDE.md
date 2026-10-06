@@ -348,7 +348,7 @@ What to set in the source panel for each transport. The sender's side is in [Tra
 |-----------|---------------------|----------------------|
 | **Loopback** | Nothing, or the sender's **Channel Name** | Everything |
 | **TCP** | **Remote Host**: the sender's IP address. **Port**: the sender's port if it is not 17700 | **Connection Timeout (seconds)** |
-| **UDP** | **Port**: the port the sender sends to if it is not 17800. **Accept Broadcast Packets** if the sender broadcasts | **Bind Address** (`0.0.0.0`, every interface) |
+| **UDP** | **Port**: the port the sender sends to if it is not 17800. **Accept Broadcast Packets** if the sender broadcasts. **Bind Address** `0.0.0.0` when the sender is on another machine | **Bind Address** (`127.0.0.1`, this machine only) |
 | **NNG** | **Mode**: **Subscriber**, **Pair** or **Pull**, matching the sender. **Host**: the sender's IP address when this end dials | **Role**, **Port** |
 | **MoQ** | **Relay URL**, **Track Namespace (optional)** and **Track Name (optional)**, the same as on the sender | |
 | **WebRTC** | See the Open3DBroadcastWebRTC add-on's USER_GUIDE | |
@@ -406,6 +406,20 @@ Residual coding needs a reliable, ordered transport. On any other transport the 
 
 TCP, UDP and NNG use the one port shown: audio and control travel on the same socket as the frames.
 
+### Network Exposure
+
+TCP, UDP and NNG carry no authentication and no encryption: anyone who can reach a listening port can receive the stream (TCP, NNG) or inject frames into it (UDP, NNG). So the end that listens accepts only this machine by default:
+
+| Transport | The end that listens | Default | To accept other machines |
+|---|---|---|---|
+| TCP | The sender | **Bind Address** `127.0.0.1` | Set the sender's **Bind Address** to `0.0.0.0`, or to the address of one network interface |
+| UDP | The receiver | **Bind Address** `127.0.0.1` | Set the receiver's **Bind Address** to `0.0.0.0`, or to one interface's address |
+| NNG | The sender for Pub/Sub and Pair, the receiver for Push/Pull (default roles) | **Host** `127.0.0.1` | Set the listening end's **Host** to `0.0.0.0`, or to one interface's address |
+
+A listener bound to any other address logs a warning when it starts: "... reachable from other machines. The stream has no authentication or encryption ...". To change the default for a whole project, set the option once in **Project Settings > Open3DBroadcast** for that transport and role.
+
+On a shared network, prefer one interface's address over `0.0.0.0`, let the firewall admit only the machines that need the stream, and use MoQ or WebRTC, which run over encrypted connections, across untrusted networks.
+
 ### Loopback Transport
 
 **Purpose:** in-process streaming, for testing and for setups where the sender and the receiver run in the same editor or game.
@@ -424,16 +438,16 @@ TCP, UDP and NNG use the one port shown: audio and control travel on the same so
 **Purpose:** direct streaming between two machines on a local network, without a server.
 
 **TCP setup:**
-1. On the sender, select **TCP**. The sender listens on **Port** (17700) on every interface (**Bind Address** `0.0.0.0`).
+1. On the sender, select **TCP** and set **Bind Address** to `0.0.0.0` (it listens on **Port** 17700). The default, `127.0.0.1`, accepts only this machine; see [Network Exposure](#network-exposure).
 2. On the receiver, select **TCP**, set **Remote Host** to the sender's IP address and **Port** to the sender's port.
 3. Allow inbound TCP on that port on the sender's machine.
 
 **UDP setup:**
-1. On the receiver, select **UDP**. It listens on **Port** (17800) on every interface (**Bind Address** `0.0.0.0`).
+1. On the receiver, select **UDP** and set **Bind Address** to `0.0.0.0` (it listens on **Port** 17800). The default, `127.0.0.1`, accepts only this machine.
 2. On the sender, select **UDP**, set **Destination Host** to the receiver's IP address and **Port** to the receiver's port.
 3. Allow inbound UDP on that port on the receiver's machine.
 
-Both default to `127.0.0.1`, so a sender and a receiver on one machine connect without changes.
+Every address defaults to `127.0.0.1`, so a sender and a receiver on one machine connect without changes, and nothing is reachable from other machines until you set it.
 
 **Characteristics:**
 - **TCP** is reliable and ordered. The sender listens and accepts one receiver at a time. The receiver reconnects on its own when the connection drops or goes quiet for **Connection Timeout (seconds)**.
@@ -450,7 +464,7 @@ Both default to `127.0.0.1`, so a sender and a receiver on one machine connect w
 **Setup:**
 1. Pick matching modes: **Publisher** on the sender with **Subscriber** on the receiver, **Pair** with **Pair**, or **Push** with **Pull**.
 2. Leave **Role** at its default. With default roles exactly one end listens: the sender for Pub/Sub and Pair, the receiver for Push/Pull.
-3. On the end that dials, set **Host** to the listening machine's IP address. The listening end listens on `0.0.0.0`.
+3. On the end that listens, set **Host** to `0.0.0.0` (the default, `127.0.0.1`, accepts only this machine). On the end that dials, set **Host** to the listening machine's IP address.
 4. Leave **Port** empty on both ends to use the mode's default (6000, 7000 or 8000), or set the same port on both.
 5. Allow inbound TCP on that port on the listening machine.
 
@@ -1192,7 +1206,7 @@ Not shown in the panel: `loopback.maxaudioqueue` (sender; audio buffers the chan
 
 | Key | Shown as | Side | Default | Description |
 |-----|----------|------|---------|-------------|
-| `bind` | **Bind Address** | Sender | `0.0.0.0` | Local address the sender listens on. `0.0.0.0` listens on every interface. Must be an IP address, not a host name |
+| `bind` | **Bind Address** | Sender | `127.0.0.1` | Local address the sender listens on. `127.0.0.1` accepts only this machine; `0.0.0.0` listens on every interface ([Network Exposure](#network-exposure)). Must be an IP address, not a host name |
 | `port` | **Port** | Sender, receiver | 17700 | TCP port the sender listens on and the receiver connects to (1 to 65535) |
 | `host` | **Remote Host** | Receiver | `127.0.0.1` | Address of the sender |
 | `tcp.timeout` | **Connection Timeout (seconds)** | Receiver | 5 | The receiver reconnects when nothing (frames or keepalives) arrives for this long (1 to 60) |
@@ -1215,7 +1229,7 @@ Not shown in the panel:
 | Key | Shown as | Side | Default | Description |
 |-----|----------|------|---------|-------------|
 | `host` | **Destination Host** | Sender | `127.0.0.1` | Address the datagrams are sent to: the receiver's address, or a broadcast address |
-| `host` | **Bind Address** | Receiver | `0.0.0.0` | Local address the receiver listens on. `0.0.0.0` listens on every interface |
+| `host` | **Bind Address** | Receiver | `127.0.0.1` | Local address the receiver listens on. `127.0.0.1` accepts only this machine; `0.0.0.0` listens on every interface |
 | `port` | **Port** | Sender, receiver | 17800 | UDP port (1 to 65535) |
 | `udp.broadcast` | **Enable UDP Broadcast** | Sender | false | Allow sending to a broadcast address |
 | `udp.broadcast` | **Accept Broadcast Packets** | Receiver | false | Receive datagrams sent to a broadcast address |
@@ -1230,7 +1244,7 @@ TCP and UDP keep their options apart, so switching between them keeps each one's
 
 | Key | Shown as | Side | Default | Description |
 |-----|----------|------|---------|-------------|
-| `host` | **Host** | Sender, receiver | `0.0.0.0` when this end listens, `127.0.0.1` when it dials | Address to listen on, or the address of the end to dial |
+| `host` | **Host** | Sender, receiver | `127.0.0.1` | Address to listen on (`0.0.0.0` for every interface), or the address of the end to dial |
 | `port` | **Port** | Sender, receiver | 6000 (Pub/Sub), 7000 (Pair), 8000 (Push/Pull) | TCP port (1 to 65535) |
 | `nng.mode` | **Mode** | Sender | `pub` | `pub` (**Publisher**), `pair` (**Pair**) or `push` (**Push**) |
 | `nng.mode` | **Mode** | Receiver | `sub` | `sub` (**Subscriber**), `pair` (**Pair**) or `pull` (**Pull**) |

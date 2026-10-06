@@ -578,6 +578,13 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Listening ends default to localhost (WP-U6; TRB-29; maintainer decision 2026-10-06).
+  - **Before:** the TCP sender, the UDP receiver and NNG listeners bound `0.0.0.0` by default, so anyone on the network could connect, receive or inject frames, with no authentication or encryption.
+  - **Now:** they default to `127.0.0.1`. A listener bound to any non-loopback address logs a warning when it starts.
+  - **Breaking:** a setup between machines that relied on the default must now set **Bind Address** (TCP sender, UDP receiver) or **Host** (an NNG listener) to `0.0.0.0` on the listening end, or once per project in **Project Settings > Open3DBroadcast**. The dialing or sending end already defaulted to `127.0.0.1`.
+  - **Docs:** a new USER_GUIDE section, "Network Exposure".
+  - **New helper:** `O3DTransportOptions::IsLoopbackHost`.
+
 - TCP and UDP defaults in one place (WP-U6; TRB-28). The UDP MTU and Max Datagram Bytes, and the default listen and remote hosts, were written out in the option schemas (what the panels show), the configure functions and the sender and receiver classes. They are now constants next to the option keys (`SocketsTransportCommon.h`), so a panel and its transport cannot disagree. The ports were already in one place. Per-project overrides stay in **Project Settings > Open3DBroadcast** (#385). No behaviour change; a new test checks that each panel default is what the configure function uses.
 
 - UDP fragments at the MTU (WP-U6; TRB-16).

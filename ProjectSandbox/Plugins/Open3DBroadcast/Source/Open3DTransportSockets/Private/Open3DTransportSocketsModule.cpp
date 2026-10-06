@@ -97,7 +97,7 @@ namespace SocketsSchema
 	{
 		FO3DTransportOptionSchema Schema;
 		Schema.Add(MakeText(O3DSockets::BindOptionKey, LOCTEXT("TcpSenderBindLabel", "Bind Address"),
-			LOCTEXT("TcpSenderBindTooltip", "Local address the sender listens on for receivers. 0.0.0.0 listens on every interface."), O3DSockets::DefaultListenHost));
+			LOCTEXT("TcpSenderBindTooltip", "Local address the sender listens on for receivers. 127.0.0.1 accepts only this machine; 0.0.0.0 accepts any machine on the network, without authentication or encryption."), O3DSockets::DefaultListenHost));
 		Schema.Add(MakePort(O3DSocketsConfig::DefaultTcpPort));
 		return Schema;
 	}
@@ -129,7 +129,7 @@ namespace SocketsSchema
 	{
 		FO3DTransportOptionSchema Schema;
 		Schema.Add(MakeText(O3DSockets::HostOptionKey, LOCTEXT("UdpReceiverBindLabel", "Bind Address"),
-			LOCTEXT("UdpReceiverBindTooltip", "Local address the receiver listens on. 0.0.0.0 listens on every interface."), O3DSockets::DefaultListenHost));
+			LOCTEXT("UdpReceiverBindTooltip", "Local address the receiver listens on. 127.0.0.1 accepts only this machine; 0.0.0.0 accepts datagrams from any machine on the network, without authentication or encryption."), O3DSockets::DefaultListenHost));
 		Schema.Add(MakePort(O3DSocketsConfig::DefaultUdpPort));
 		Schema.Add(MakeBool(O3DSockets::BroadcastOptionKey, LOCTEXT("UdpReceiverBroadcastLabel", "Accept Broadcast Packets"),
 			LOCTEXT("UdpReceiverBroadcastTooltip", "Receive datagrams sent to a broadcast address.")));

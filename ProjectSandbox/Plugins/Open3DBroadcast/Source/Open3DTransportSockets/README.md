@@ -26,7 +26,7 @@ Options without a **Shown as** entry are not in the settings panel. Set them wit
 
 | Key | Side | Shown as | Default | Notes |
 |---|---|---|---|---|
-| `bind` | sender | **Bind Address** | `0.0.0.0` | Local address to listen on. An IP literal or `0.0.0.0`. |
+| `bind` | sender | **Bind Address** | `127.0.0.1` | Local address to listen on. An IP literal, or `0.0.0.0` for every interface. Anything but loopback logs a warning at Start. |
 | `host` | receiver | **Remote Host** | `127.0.0.1` | The sender's address. |
 | `port` | both | **Port** | 17700 | 1 to 65535. |
 | `tcp.timeout` | receiver | **Connection Timeout (seconds)** | 5 | Reconnect when no data arrived for this long. The panel takes 1 to 60. |
@@ -63,7 +63,7 @@ sender reaches every receiver on the subnet. Multicast is not supported.
 | Key | Side | Shown as | Default | Notes |
 |---|---|---|---|---|
 | `host` | sender | **Destination Host** | `127.0.0.1` | Address the datagrams go to. `*` sends to `255.255.255.255` and turns broadcast on. Another broadcast address needs **Enable UDP Broadcast**. A host name is resolved on the worker thread. |
-| `host` | receiver | **Bind Address** | `0.0.0.0` | Local address to listen on. An IP literal or `0.0.0.0`. |
+| `host` | receiver | **Bind Address** | `127.0.0.1` | Local address to listen on. An IP literal, or `0.0.0.0` for every interface. Anything but loopback logs a warning at Start. |
 | `port` | both | **Port** | 17800 | 1 to 65535. |
 | `udp.broadcast` | sender | **Enable UDP Broadcast** | false | Allow sending to a broadcast address. |
 | `udp.broadcast` | receiver | **Accept Broadcast Packets** | false | Receive datagrams sent to a broadcast address. |

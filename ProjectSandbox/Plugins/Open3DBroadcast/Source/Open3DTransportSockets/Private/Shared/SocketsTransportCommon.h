@@ -29,8 +29,11 @@ namespace O3DSockets
 	 */
 	static constexpr int32 DefaultUdpMtuBytes = 1200;
 	static constexpr int32 DefaultUdpMaxDatagramBytes = 64000;
-	/** Where a listening end binds: the TCP sender and the UDP receiver. */
-	static constexpr TCHAR DefaultListenHost[] = TEXT("0.0.0.0");
+	/**
+	 * Where a listening end binds: the TCP sender and the UDP receiver. Loopback, so nothing is
+	 * reachable from other machines until a user chooses so (WP-U6, TRB-29; maintainer 2026-10-06).
+	 */
+	static constexpr TCHAR DefaultListenHost[] = TEXT("127.0.0.1");
 	/** Where a connecting or sending end points: the TCP receiver and the UDP sender. */
 	static constexpr TCHAR DefaultRemoteHost[] = TEXT("127.0.0.1");
 	/** Receiver: largest reassembled UDP message accepted, in bytes. */

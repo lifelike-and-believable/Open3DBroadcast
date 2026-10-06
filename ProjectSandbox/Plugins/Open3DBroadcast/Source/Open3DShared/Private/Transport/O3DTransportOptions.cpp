@@ -239,6 +239,30 @@ namespace O3DTransportOptions
 		return false;
 	}
 
+	bool IsLoopbackHost(const FString& Host)
+	{
+		const FString Trimmed = Host.TrimStartAndEnd();
+		if (Trimmed.Equals(TEXT("localhost"), ESearchCase::IgnoreCase) || Trimmed == TEXT("::1") || Trimmed == TEXT("[::1]"))
+		{
+			return true;
+		}
+		TArray<FString> Octets;
+		Trimmed.ParseIntoArray(Octets, TEXT("."), /*CullEmpty=*/false);
+		if (Octets.Num() != 4 || Octets[0] != TEXT("127"))
+		{
+			return false;
+		}
+		for (const FString& Octet : Octets)
+		{
+			int64 Value = 0;
+			if (Octet.IsEmpty() || Octet.Len() > 3 || !TryParseInt(Octet, Value) || Value < 0 || Value > 255)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 	bool GetBool(const FO3DTransportOptionsView& Options, const FString& Key, bool Default)
 	{
 		const FString* Value = Find(Options, Key);

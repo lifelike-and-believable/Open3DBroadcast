@@ -491,9 +491,10 @@ namespace O3DNNG
         return IsRoleSupported(Mode, Requested, bSender) ? Requested : GetDefaultRole(Mode, bSender);
     }
 
-    FString GetDefaultHost(bool bListen)
+    FString GetDefaultHost(bool /*bListen*/)
     {
-        return bListen ? FString(TEXT("0.0.0.0")) : FString(TEXT("127.0.0.1"));
+        // Listeners too (WP-U6, TRB-29): nothing is reachable from other machines by default.
+        return FString(TEXT("127.0.0.1"));
     }
 
     int32 GetDefaultPort(ENngMode Mode)

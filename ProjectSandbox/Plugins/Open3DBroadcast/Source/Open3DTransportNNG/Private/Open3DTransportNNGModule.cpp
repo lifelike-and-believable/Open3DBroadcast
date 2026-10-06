@@ -82,7 +82,7 @@ namespace NNGSchema
 		FO3DTransportOptionField Field;
 		Field.Key = O3DNNG::HostOptionKey;
 		Field.DisplayName = LOCTEXT("NNGHostLabel", "Host");
-		Field.Tooltip = LOCTEXT("NNGHostTooltip", "Address to listen on or dial. Empty: 0.0.0.0 when the mode listens, 127.0.0.1 when it dials.");
+		Field.Tooltip = LOCTEXT("NNGHostTooltip", "Address to listen on or dial. Empty: 127.0.0.1. A listener on 0.0.0.0 accepts any machine on the network, without authentication or encryption.");
 		Field.Type = EO3DTransportOptionType::String;
 		Field.Hint = LOCTEXT("NNGHostHint", "auto: from the mode");
 		return Field;

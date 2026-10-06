@@ -6,6 +6,7 @@
 #include "Receiver/NngReceiver.h"
 #include "O3DLogThrottle.h"
 #include "O3DRedact.h"
+#include "Transport/O3DTransportOptions.h"
 
 #include "Logging/LogMacros.h"
 #include "HAL/PlatformTime.h"
@@ -193,6 +194,10 @@ FO3DTransportResult FO3DNngReceiver::Start()
     if (!bOpened)
     {
         ReopenPolicy.OnFailure(FPlatformTime::Seconds());
+    }
+    if (Options.bListen && !O3DTransportOptions::IsLoopbackHost(Options.Host))
+    {
+        UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG receiver listens on %s:%d, reachable from other machines. The stream has no authentication or encryption; set 127.0.0.1 to accept only this machine (USER_GUIDE, Network Exposure)."), *Options.Host, Options.Port);
     }
     bRunning = true;
     bSawPeer = false;
