@@ -12,8 +12,11 @@ Each channel is one in-process queue, keyed by its name. Senders put items on it
 use the same **Channel Name**. Names are trimmed and compared without regard to case.
 
 - Delivery is ReliableOrdered: nothing is lost or reordered.
-- When the frame queue is full, the sender refuses the new frame (`DroppedBackpressure`) and keeps
-  the queued ones.
+- When the frame queue is full, the sender refuses the new frame (`DroppedBackpressure`), keeps
+  the queued ones, and warns at most once every 2 seconds ("Loopback queue full"). A full queue
+  usually means no receiver is polling the channel.
+- The receiver takes frames off the channel only between Start and Stop. Frames sent while it is
+  stopped wait in the channel, up to its capacity.
 - Audio and control have limits of their own, so neither waits behind frames. Control keeps the
   shared queue's cap of 1,024 envelopes.
 - A channel exists while a sender or receiver holds it.
@@ -32,9 +35,9 @@ Options without a **Shown as** entry are not in the settings panel. Set them wit
 
 The older keys `maxqueue` and `maxaudioqueue` are still read when the new ones are absent.
 
-The last sender or receiver to start on a channel sets its limits. The receiver panel has no
-queue options, so a receiver that starts after the sender sets the channel back to the defaults
-unless its options carry the same `loopback.*` values.
+The sender sets the channel's limits, whichever end starts first. A receiver never changes them;
+a channel that a receiver creates before any sender starts uses the defaults until a sender sets
+its own.
 
 ## Debugging
 

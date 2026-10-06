@@ -33,10 +33,13 @@ namespace O3DLoopback
 	FO3DSendQueueLimits ResolveQueueLimits(const FO3DTransportConfig& Config);
 
 	/**
-	 * The queue of ChannelKey, created on first use. The latest caller's limits apply to an
-	 * existing channel. A channel lives as long as a sender or receiver holds it.
+	 * The queue of ChannelKey, created on first use. A sender passes its limits, which apply to the
+	 * channel; a receiver passes nullptr and leaves them alone, so the sender's queue capacity holds
+	 * whichever end starts first (WP-U6, TRB-31). A channel a receiver creates starts with the
+	 * default limits until a sender sets its own. A channel lives as long as a sender or receiver
+	 * holds it; channels nobody holds are pruned here.
 	 */
-	TSharedRef<FO3DSendQueue, ESPMode::ThreadSafe> AcquireChannel(const FString& ChannelKey, const FO3DSendQueueLimits& Limits);
+	TSharedRef<FO3DSendQueue, ESPMode::ThreadSafe> AcquireChannel(const FString& ChannelKey, const FO3DSendQueueLimits* SenderLimits);
 
 	/** The o3ds.Loopback.Audio.Debug console variable (0 off, 1 basic, 2 verbose). */
 	int32 GetAudioDebugLevel();

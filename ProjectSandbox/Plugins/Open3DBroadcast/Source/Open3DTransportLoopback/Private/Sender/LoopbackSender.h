@@ -7,6 +7,7 @@
 #include "Transport/O3DSendQueue.h"
 #include "Transport/O3DSenderAudioSinkBase.h"
 #include "../Shared/LoopbackChannel.h"
+#include "O3DLogThrottle.h"
 
 #include <atomic>
 
@@ -58,6 +59,7 @@ private:
 	TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe> SenderMetrics;
 	std::atomic<int64> BytesSent{ 0 };
 	std::atomic<int64> DroppedFrames{ 0 };
+	FO3DLogThrottle QueueFullLog;
 	/** ADR 0007 item 3: Connected from Start to Stop (the channel needs no peer). */
 	FO3DConnectionStateTracker ConnectionState;
 };
