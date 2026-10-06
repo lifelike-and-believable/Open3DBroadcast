@@ -28,8 +28,25 @@
 #include "Testing/O3DReceiverTesting.h"
 #include "Transport/O3DTransportRegistry.h"
 
+THIRD_PARTY_INCLUDES_START
+#include "o3ds/model.h"
+THIRD_PARTY_INCLUDES_END
+
 namespace O3DReceiverStatusTest
 {
+	/** A frame this receiver can read: one subject with one bone. */
+	TArray<uint8> ValidPacket(double Time)
+	{
+		O3DS::SubjectList List;
+		O3DS::Transform* Root = List.addSubject("Actor")->addTransform("root", -1);
+		Root->transformOrder.push_back(O3DS::TTranslation);
+		std::vector<char> Buffer;
+		List.Serialize(Buffer, Time);
+		TArray<uint8> Bytes;
+		Bytes.Append(reinterpret_cast<const uint8*>(Buffer.data()), static_cast<int32>(Buffer.size()));
+		return Bytes;
+	}
+
 	/** A receiver-only fake transport under a unique name; keeps the instance it creates. */
 	struct FScopedFakeReceiverTransport
 	{
@@ -160,15 +177,22 @@ bool FO3DReceiverStatusLifecycleTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Waiting for data: ") + Status(), Status().StartsWith(TEXT("Waiting for data via")));
 		TestTrue(TEXT("LiveLink sees the source as valid"), Source.IsSourceStillValid());
 
-		// Any bytes count as data arriving (they are rejected later as malformed, which only logs).
+		// WP-R1 (RR-3): bytes this receiver cannot read are not "Receiving", and the status says so
+		// instead of flapping between Receiving and No data received.
 		(*Transport.Created)->Enqueue({ 1, 2, 3 });
+		FO3DReceiverSourceTestAccessor::Poll(Source);
+		TestTrue(TEXT("Unreadable data: ") + Status(), Status().StartsWith(TEXT("Unreadable data via")));
+		FO3DReceiverSourceTestAccessor::UpdateStalledStatus(Source, FPlatformTime::Seconds() + 5.0);
+		TestTrue(TEXT("Still unreadable, not a stall: ") + Status(), Status().StartsWith(TEXT("Unreadable data via")));
+
+		(*Transport.Created)->Enqueue(ValidPacket(1.0));
 		FO3DReceiverSourceTestAccessor::Poll(Source);
 		TestTrue(TEXT("First frame: ") + Status(), Status().StartsWith(TEXT("Receiving via")));
 
 		FO3DReceiverSourceTestAccessor::UpdateStalledStatus(Source, FPlatformTime::Seconds() + 5.0);
 		TestTrue(TEXT("Frames stopped: ") + Status(), Status().StartsWith(TEXT("No data received")));
 
-		(*Transport.Created)->Enqueue({ 4, 5, 6 });
+		(*Transport.Created)->Enqueue(ValidPacket(2.0));
 		FO3DReceiverSourceTestAccessor::Poll(Source);
 		TestTrue(TEXT("Frames resumed: ") + Status(), Status().StartsWith(TEXT("Receiving via")));
 

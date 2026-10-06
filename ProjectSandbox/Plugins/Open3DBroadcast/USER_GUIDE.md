@@ -338,6 +338,8 @@ The LiveLink list shows the source's status:
 |---|---|
 | Waiting for data via *transport* | The transport started; no frame has arrived yet. |
 | Receiving via *transport* | Frames are arriving. |
+| Unreadable data via *transport* | Packets arrive, but none this receiver can read (not Open3DStream data, or damaged). The log says more. |
+| Error: the sender on *transport* needs wire protocol *N*; update this receiver | The sender is a newer version that this receiver cannot read. |
 | No data received (via *transport*) | No frame for 2 seconds. It returns to Receiving when frames resume. |
 | Reconnecting via *transport* | The transport lost its connection and is retrying. |
 | Error: *reason* | The transport could not start or failed, with the reason (for example, no receiver registered for the transport, or the server refused the connection). After a failed start, LiveLink shows the source as invalid. |
