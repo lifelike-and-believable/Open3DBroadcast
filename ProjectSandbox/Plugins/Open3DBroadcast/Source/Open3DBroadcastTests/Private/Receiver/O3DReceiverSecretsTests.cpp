@@ -170,8 +170,9 @@ bool FO3DReceiverSecretsPersistenceTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Token absent from the connection string"), ConnectionString.Contains(Token));
 	TestTrue(TEXT("Input settings are not modified by the export"), Settings.TransportOptions.Contains(SecretKey));
 
-	// What the factory saves to GameUserSettings.ini: the settings after the same strip/migration
-	// step, exported as the Settings property text. No ini file is written by this test.
+	// What CreateSource writes back to GameUserSettings.ini after moving a secret out of it (RCV-18):
+	// the settings after the same strip/migration step, exported as the Settings property text. No
+	// ini file is written by this test.
 	FO3DReceiverSourceConfig Persisted = Settings;
 	AddExpectedError(TEXT("Moved credential option"), EAutomationExpectedMessageFlags::Contains, 1);
 	{

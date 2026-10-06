@@ -11,6 +11,7 @@
 #include "O3DReceiverSourceSettings.h"
 #include "O3DReceiverTransportCustomization.h"
 #include "O3DTransportOptionTarget.h"
+#include "Open3DBroadcastSettings.h"
 #include "PropertyEditorModule.h"
 #include "SO3DTransportOptionsPanel.h"
 #include "ScopedTransaction.h"
@@ -38,16 +39,13 @@ void SO3DReceiverSourceFactoryPanel::Construct(const FArguments& InArgs)
 {
 	OnSourceCreated = InArgs._OnSourceCreated;
 
-	// The panel's own copy of the defaults. RF_Transactional so transport and option edits in the
-	// panel can be undone. Nothing is saved until Create Source.
-	UO3DReceiverSettingsObject* Copy = DuplicateObject<UO3DReceiverSettingsObject>(GetMutableDefault<UO3DReceiverSettingsObject>(), GetTransientPackage());
-	if (!Copy)
-	{
-		Copy = NewObject<UO3DReceiverSettingsObject>(GetTransientPackage());
-	}
+	// The panel's working copy of the new source's settings. It starts with no options, so the
+	// project defaults apply to every option left empty (RCV-18, WP-U1). RF_Transactional so
+	// transport and option edits in the panel can be undone. Nothing is saved.
+	UO3DReceiverSettingsObject* Copy = NewObject<UO3DReceiverSettingsObject>(GetTransientPackage());
 	Copy->SetFlags(RF_Transactional);
 
-	// An ini with no transport gets the first registered one. This changes only the panel's copy.
+	// No transport set: the first registered one.
 	if (Copy->Settings.TransportName.IsNone())
 	{
 		const TArray<FName> RegisteredTransports = FO3DTransportRegistry::Get().GetNames(EO3DTransportRole::Receiver);
@@ -185,10 +183,8 @@ FReply SO3DReceiverSourceFactoryPanel::OnCreateClicked()
 
 	FString ConnectionString = O3DReceiver::ExportConnectionString(Settings);
 
-	UO3DReceiverSettingsObject* MutableDefaults = GetMutableDefault<UO3DReceiverSettingsObject>();
-	MutableDefaults->Settings = Settings;
-	MutableDefaults->SaveConfig();
-
+	// The new source's settings are not saved as defaults for the next one (RCV-18): project-wide
+	// defaults are in Project Settings > Plugins > Open3DBroadcast (UOpen3DBroadcastSettings).
 	TSharedPtr<FO3DReceiverSource> NewSource = MakeShared<FO3DReceiverSource>(Settings);
 	OnSourceCreated.ExecuteIfBound(StaticCastSharedPtr<ILiveLinkSource>(NewSource), MoveTemp(ConnectionString));
 
@@ -264,6 +260,8 @@ void SO3DReceiverSourceFactoryPanel::RefreshTransportCustomization()
 	FO3DTransportOptionSchema Schema;
 	if (FO3DTransportRegistry::Get().GetOptionSchema(TransportName, EO3DTransportRole::Receiver, Schema) && Schema.Num() > 0)
 	{
+		// An empty field shows the value it will get: the project default, if one is set (WP-U1).
+		UOpen3DBroadcastSettings::ApplyToSchemaDefaults(TransportName, EO3DTransportRole::Receiver, Schema);
 		TransportCustomizationContainer->SetContent(
 			SNew(SO3DTransportOptionsPanel)
 			.Target(MakeShared<FO3DReceiverOptionTarget>(SourceSettingsObject.Get()))

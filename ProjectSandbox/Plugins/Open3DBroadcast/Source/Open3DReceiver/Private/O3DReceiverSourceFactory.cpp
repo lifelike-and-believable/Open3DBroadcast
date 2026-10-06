@@ -52,10 +52,17 @@ TSharedPtr<SWidget> UO3DReceiverSourceFactory::BuildCreationPanel(FOnLiveLinkSou
 TSharedPtr<ILiveLinkSource> UO3DReceiverSourceFactory::CreateSource(const FString& ConnectionString) const
 {
     // Migration (ADR 0004 item 4): an older GameUserSettings.ini or LiveLink connection string
-    // may still carry a secret option. Move it to the session store and drop it here.
-    UO3DReceiverSettingsObject* MutableDefaults = GetMutableDefault<UO3DReceiverSettingsObject>();
-    O3DReceiver::MigrateLegacySecretOptions(MutableDefaults->Settings, TEXT("GameUserSettings.ini ([/Script/Open3DReceiver.O3DReceiverSettingsObject])"));
-    FO3DReceiverSourceConfig Settings = MutableDefaults->Settings;
+    // may still carry a secret option. Move it to the session store and drop it here. The ini is
+    // saved only when a secret was moved: nothing else writes it any more (RCV-18).
+    UO3DReceiverSettingsObject* Legacy = GetMutableDefault<UO3DReceiverSettingsObject>();
+    if (O3DReceiver::MigrateLegacySecretOptions(Legacy->Settings, TEXT("GameUserSettings.ini ([/Script/Open3DReceiver.O3DReceiverSettingsObject])")) > 0)
+    {
+        Legacy->SaveConfig();
+    }
+
+    // A new source has no options of its own, so the project defaults apply to every option it
+    // leaves empty (RCV-18, WP-U1). The old GameUserSettings.ini values are not defaults.
+    FO3DReceiverSourceConfig Settings;
 
     if (!ConnectionString.IsEmpty())
     {

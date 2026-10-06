@@ -152,7 +152,7 @@ The access token (`webrtc.token`) and the token endpoint credential (`webrtc.tok
    - Select your O3DSenderComponent or open LiveLink source settings
    - Choose "WebRTC" as transport
    - Check "Use Auto Token Fetch"
-   - Enter "Token Endpoint URL": `https://your-server.com/token`
+   - Enter "Token Endpoint URL": `https://your-server.com/token`, or set it once for the whole project as `webrtc.tokenEndpointUrl` in **Project Settings > Plugins > Open3DBroadcast** (Sender Defaults and Receiver Defaults, transport `webrtc`); a component or source that leaves it empty uses that value. The endpoint credential is never set there.
    - Enter the "Token Endpoint Credential" your endpoint expects, or set `O3DB_WEBRTC_TOKEN_ENDPOINT_AUTH` (see [Credentials](#credentials))
    - Set "Room" to the same value on the sender and the receiver
    - Set "Token Refresh Lead Time": 300 seconds (5 minutes recommended)

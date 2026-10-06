@@ -47,12 +47,15 @@ public class Open3DShared : ModuleRules
         PublicDefinitions.Add($"O3D_WITH_OPUS={(bWithOpus ? 1 : 0)}");
 
         // Public, checked against Public/ (SHR-20): O3DCredentialLibrary.h declares a
-        // UBlueprintFunctionLibrary, which needs CoreUObject and Engine.
+        // UBlueprintFunctionLibrary, which needs CoreUObject and Engine. Open3DBroadcastSettings.h
+        // declares a UDeveloperSettings (WP-U1); DeveloperSettings is a runtime module, so
+        // Shipping builds have it.
         PublicDependencyModuleNames.AddRange(new string[]
         {
             "Core",
             "CoreUObject",
-            "Engine"
+            "Engine",
+            "DeveloperSettings"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]

@@ -19,6 +19,7 @@
 
 #include "O3DSenderComponent.h"
 #include "O3DTransportOptionTarget.h"
+#include "Open3DBroadcastSettings.h"
 #include "SO3DTransportOptionsPanel.h"
 #include "Transport/O3DTransportRegistry.h"
 
@@ -512,6 +513,8 @@ void FO3DSenderComponentCustomization::RefreshTransportCustomization()
     FO3DTransportOptionSchema Schema;
     if (FO3DTransportRegistry::Get().GetOptionSchema(TransportName, EO3DTransportRole::Sender, Schema) && Schema.Num() > 0)
     {
+        // An empty field shows the value it will get: the project default, if one is set (WP-U1).
+        UOpen3DBroadcastSettings::ApplyToSchemaDefaults(TransportName, EO3DTransportRole::Sender, Schema);
         TransportCustomizationContainer->SetContent(
             SNew(SO3DTransportOptionsPanel)
             .Target(MakeShared<FO3DSenderOptionTarget>(Component))
