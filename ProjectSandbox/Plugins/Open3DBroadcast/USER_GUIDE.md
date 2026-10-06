@@ -1578,7 +1578,7 @@ The frame does not fit the transport's send queue, or is larger than the largest
 - Raise the queue capacity: `tcp.maxqueue` (TCP), **Queue Capacity (MiB)** (NNG, MoQ). See [Memory Optimization](#memory-optimization).
 - Make frames smaller: capture a mesh with fewer bones, or leave curves out with **Exclude Curve Patterns**.
 - On the receiver, TCP accepts frames up to `tcp.maxframe` (4194304 bytes) and UDP reassembles messages up to `udp.maxframe` (4194304 bytes).
-- WebRTC limits the size of one message; see the add-on's USER_GUIDE.
+- WebRTC sends a frame of at most 15,000 bytes, and its own log says `payload size (N bytes) exceeds maximum (15000 bytes)`. See "Payload Too Large" in the add-on's USER_GUIDE.
 
 #### "Invalid options" or InvalidConfig
 

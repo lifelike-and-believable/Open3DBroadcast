@@ -286,7 +286,7 @@ While idle for `tcp.keepalive` ms the sender writes a keepalive frame whose payl
 **Connection Model**:
 - **Room-based**: senders and receivers are participants of one room
 - **Token-based auth**: a LiveKit access token, set as a credential or fetched from a token endpoint
-- **Delivery**: reliable and ordered by default; unreliable with `webrtc.prefer_lossy`. A reliable message has a size limit, and a larger frame is refused (`TooLarge`)
+- **Delivery**: reliable and ordered by default; unreliable with `webrtc.prefer_lossy`. A frame of more than 15,000 bytes is refused (`TooLarge`). With `webrtc.prefer_lossy`, frames above 1,300 bytes are sent reliably
 
 **Configuration** (keys; the add-on's USER_GUIDE has the details):
 - `webrtc.url` - LiveKit server URL (for example `wss://myserver.livekit.cloud`)
@@ -484,7 +484,7 @@ it applies equally to every transport in this document.
 ### WebRTC
 - **Connection failures**: LiveKit reconnects
 - **Send refused by LiveKit**: `DroppedBackpressure`, counted in `DroppedFrames` and `SendErrors`
-- **Frame too large for a reliable message**: refused (`TooLarge`); the sender component logs a warning
+- **Frame larger than 15,000 bytes**: refused (`TooLarge`); the add-on logs an error and the sender component a warning
 - **Receiver backlog**: frames beyond 16 MiB waiting for `Poll` are refused and counted in `DroppedFrames`
 - **Token expiry**: with automatic token fetch the token is refreshed before it expires; a manual token must be replaced by you
 
