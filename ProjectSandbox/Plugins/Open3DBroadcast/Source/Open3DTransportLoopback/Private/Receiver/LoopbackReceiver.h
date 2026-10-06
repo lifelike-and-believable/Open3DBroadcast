@@ -39,6 +39,8 @@ private:
 	/** Holds the consumer and sinks strongly; Stop() releases them (TRF-38, ADR 0011). */
 	FO3DUnifiedReceiveDemux Demux;
 	bool bInitialized = false;
+	/** Between Start and Stop (game thread); Poll delivers nothing outside it. */
+	bool bRunning = false;
 	/** Written by Poll (game thread); GetStats may read it from any thread (WP-R3, TR-9). */
 	FO3DTransportStats Stats;
 	mutable FCriticalSection StatsMutex;
