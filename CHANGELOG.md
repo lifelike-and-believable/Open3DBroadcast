@@ -601,6 +601,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 - MoQ receiver: no stale frames after a reconnect (WP-R3, TR-10). Frames queued when the relay session dropped were delivered once a new session connected, seconds late. The receiver now discards them when the session is lost or a connect attempt times out, and counts them as dropped, as Stop does.
 
+- MoQ receiver options (WP-R3, TR-8). The receiver's options showed **Delivery Mode** and **Queue Capacity (MiB)**, which only the sender reads: the publisher picks the delivery mode, and a receiver has no send queue. The receiver no longer lists them; a value already saved in a receiver config is ignored, as before.
+
 - Hot-path transport logs throttled (WP-R3, TR-6). A peer sending oversized datagrams or messages, or a failing socket, produced one warning per datagram or frame. These log sites now write at most one line per 2 s, with the number of similar lines left out since the last one:
   - **UDP receiver:** recv failures; a datagram, payload or reassembled payload over the size cap.
   - **UDP sender:** send failures and partial sends. The per-fragment failure line is now Verbose, since the datagram failure behind it is already logged.
