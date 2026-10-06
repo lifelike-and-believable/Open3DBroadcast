@@ -765,7 +765,12 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
   - Fix self-attach when the component is the root (RCV-22).
   - Give the internal `UAudioComponent` a UPROPERTY-held lifetime (RCV-23).
   - Delete the dead `OnAudioFrame` (RCV-24).
-- **Progress** (2026-10-06): PR 1 (#393): RCV-22, RCV-23, RCV-24. Maintainer decisions for the rest are in HANDOFF §0a (RCV-6 timeout that keeps the subject; RCV-20 60 ms target with trimming; RCV-21 filters and one stream at a time). SND-20 is cited here but owned by WP-S3 and closed in #267.
+- **Progress** (2026-10-06):
+  - PR 1, #393: RCV-22, RCV-23, RCV-24.
+  - PR 2, #395: RCV-6, a timeout that clears the subject's frames and keeps the subject.
+  - PR 3, #396: RCV-20, the jitter buffer: a 60 ms target, trimming, no resampling.
+  - PR 4, RCV-21: ready on branch `wp-u4-audio-routing`, waiting for the maintainer's go-ahead. One stream at a time, an Any Stream mode, a label filter; Mix stays strict.
+  - The maintainer's decisions are in HANDOFF §0a. SND-20 is cited here, but it belongs to WP-S3 and was closed in #267.
 
 #### WP-U5: Sample content  ·  P1 · M · coding
 - **Findings:** UX-1
