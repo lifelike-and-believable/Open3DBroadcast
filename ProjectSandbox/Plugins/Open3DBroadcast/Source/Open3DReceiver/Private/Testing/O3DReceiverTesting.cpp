@@ -179,11 +179,11 @@ void FO3DLiveLinkPublisherProbe::PublishSyntheticFrame(FName Subject, int32 NumT
 	Publisher->PublishSyntheticFrame(Subject, Transforms, TArray<float>(), Time);
 }
 
-TArray<FName> FO3DLiveLinkPublisherProbe::RemoveInactiveSubjects(double NowSeconds, double ThresholdSeconds)
+TArray<FName> FO3DLiveLinkPublisherProbe::ClearInactiveSubjects(double NowSeconds, double ThresholdSeconds)
 {
-	TArray<FName> Removed;
-	Publisher->RemoveInactiveSubjects(NowSeconds, ThresholdSeconds, [&Removed](FName Subject) { Removed.Add(Subject); });
-	return Removed;
+	TArray<FName> Cleared;
+	Publisher->ClearInactiveSubjects(NowSeconds, ThresholdSeconds, [&Cleared](FName Subject) { Cleared.Add(Subject); });
+	return Cleared;
 }
 
 int32 FO3DLiveLinkPublisherProbe::GetActiveSubjectCount() const

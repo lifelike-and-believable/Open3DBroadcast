@@ -89,6 +89,14 @@ class OPEN3DRECEIVER_API UO3DReceiverSourceSettings : public ULiveLinkSourceSett
     GENERATED_BODY()
 
 public:
+    /**
+     * Seconds without a frame after which a subject's frames are cleared, so LiveLink shows it as
+     * having no data. The subject and its LiveLink settings (preprocessors, interpolation,
+     * translators) are kept, and its next frame makes it valid again. 0: never.
+     */
+    UPROPERTY(EditAnywhere, Category = "Open3DBroadcast", meta = (ClampMin = "0.0", Units = "s"))
+    float InactiveSubjectTimeoutSeconds = 5.0f;
+
     /** Enable receiver-side concealment (predict/hold synthetic frames on a gap) for gated (A2) frames. */
     UPROPERTY(EditAnywhere, Category = "Open3DBroadcast|Concealment")
     bool bEnableConcealment = true;

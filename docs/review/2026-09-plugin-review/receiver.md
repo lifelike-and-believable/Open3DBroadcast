@@ -86,6 +86,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Add `InactiveSubjectTimeoutSeconds` to `UO3DReceiverSourceSettings` with 0 meaning never remove. Prefer marking the subject stale via source status over removing it. Keep `ULiveLinkSubjectSettings` when a subject is re-created.
 - Effort: S
 - Owner: design
+- Status: closed in #395
 
 ### RCV-7: CreateSubject is called with a fresh ULiveLinkSubjectSettings on every static-data change
 - Category: bug

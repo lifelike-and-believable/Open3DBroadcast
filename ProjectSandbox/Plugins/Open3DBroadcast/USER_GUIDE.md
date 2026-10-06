@@ -947,7 +947,7 @@ LiveLink is Unreal's system for receiving real-time animation data from external
 **Automatic Subject Creation:**
 - Subjects appear automatically when sender starts
 - Subject name matches sender's `Subject Name`
-- Inactive subjects removed after 5 seconds
+- A subject that stops receiving frames is cleared after the source's **Inactive Subject Timeout** (default 5 s, 0 = never): LiveLink shows it with no data, but keeps the subject and its settings (preprocessors, interpolation, translators), and its next frame makes it valid again
 
 **Subject Data Includes:**
 - Bone transforms (local space)
@@ -1255,8 +1255,8 @@ loopback.queue: 32     # Smaller queue
 - May drop frames if consumer is slow
 
 **Subject Cleanup:**
-- Inactive subjects auto-removed after 5 seconds
-- Stops memory leaks from disconnected senders
+- Subjects idle for longer than **Inactive Subject Timeout** (default 5 s) are cleared, not removed, so their LiveLink settings survive a pause
+- The receiver forgets the stream state of senders idle that long
 
 ### CPU Optimization
 

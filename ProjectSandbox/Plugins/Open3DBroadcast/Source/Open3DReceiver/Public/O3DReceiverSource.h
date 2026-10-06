@@ -151,7 +151,8 @@ private:
     void DrainConnectionState();
     /** Shows "No data received" once no frame has arrived for StalledAfterSeconds. */
     void UpdateStalledStatus(double NowSeconds);
-    void RemoveInactiveSubjects();
+    /** Clears subjects idle for longer than the source's Inactive Subject Timeout (RCV-6). */
+    void ClearInactiveSubjects(double NowSeconds);
 
     /** Sets the source GUID here and in the publisher's subject keys. */
     void SetSourceGuid(const FGuid& InSourceGuid);
@@ -278,9 +279,8 @@ private:
     // Activity tracking
     mutable FCriticalSection ConnectionLastActiveSection;
     double ConnectionLastActive = 0.0;
-    static constexpr double InactivityThresholdSeconds = 5.0;
     float TimeSinceLastActivityCheck = 0.0f;
-    static constexpr float ActivityCheckIntervalSeconds = 5.0f;
+    static constexpr float ActivityCheckIntervalSeconds = 1.0f;
 
     // Converts parsed subjects for LiveLink and caches what only changes with the topology:
     // bone names and parents (RCV-4), curve FNames and the subject FName (RCV-12), plus

@@ -112,18 +112,26 @@ void FO3DLiveLinkPublisher::PublishSyntheticFrame(FName Subject, const TArray<FT
 	PushFrameData(MakeKey(Subject), BoneTransforms, CurveValues, Time, nullptr);
 }
 
-void FO3DLiveLinkPublisher::RemoveInactiveSubjects(double NowSeconds, double ThresholdSeconds, TFunctionRef<void(FName)> OnRemoved)
+void FO3DLiveLinkPublisher::ClearInactiveSubjects(double NowSeconds, double ThresholdSeconds, TFunctionRef<void(FName)> OnCleared)
 {
+	if (ThresholdSeconds <= 0.0)
+	{
+		return;
+	}
 	for (auto It = SubjectLastUpdateTime.CreateIterator(); It; ++It)
 	{
 		if ((NowSeconds - It.Value()) > ThresholdSeconds)
 		{
+			// RCV-6: clear, not remove. Removing deleted the user's subject settings (preprocessors,
+			// interpolation, translators). ClearFrames drops the static data too, so the subject is
+			// invalid until its next frame, which pushes static data again into the same subject
+			// (FLiveLinkClient::PushSubjectStaticData_Internal keeps an existing subject of the role).
 			if (Client)
 			{
-				Client->RemoveSubject_AnyThread(MakeKey(It.Key()));
+				Client->ClearSubjectsFrames_AnyThread(MakeKey(It.Key()));
 			}
-			UE_LOG(LogO3DReceiverSource, Verbose, TEXT("Removed inactive subject %s"), *It.Key().ToString());
-			OnRemoved(It.Key());
+			UE_LOG(LogO3DReceiverSource, Verbose, TEXT("Cleared inactive subject %s"), *It.Key().ToString());
+			OnCleared(It.Key());
 			SceneTimeMapper.ForgetSubject(It.Key());
 			SubjectSkeletonHashes.Remove(It.Key());
 			SubjectCurveHashes.Remove(It.Key());
