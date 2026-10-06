@@ -3,6 +3,7 @@
 #if O3D_WITH_TRANSPORT_SOCKETS // Whole file: without the transport the module is a stub (O3DBuildFlags).
 
 #include "SocketsUdpReceiver.h"
+#include "O3DLogThrottle.h"
 
 #include "Transport/O3DTransportTypes.h"
 #include "O3DUnifiedMessage.h"
@@ -18,6 +19,8 @@ THIRD_PARTY_INCLUDES_START
 THIRD_PARTY_INCLUDES_END
 
 #include <vector>
+
+
 
 DEFINE_LOG_CATEGORY_STATIC(LogSocketsUdpReceiver, Log, All);
 
@@ -199,7 +202,11 @@ int32 FO3DSocketsUdpReceiver::Poll()
 				break;
 			}
 
-			UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP recv failed (error=%d)."), static_cast<int32>(Error));
+			int64 Suppressed = 0;
+			if (UdpRecvFailedLog.ShouldLog(Suppressed))
+			{
+				UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP recv failed (error=%d); %lld similar since the last warning."), static_cast<int32>(Error), Suppressed);
+			}
 			break;
 		}
 
@@ -224,7 +231,11 @@ int32 FO3DSocketsUdpReceiver::Poll()
 
 		if (Frame.Num() > MaxFrameBytes)
 		{
-			UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP payload exceeds safety cap (%d bytes). Dropping."), Frame.Num());
+			int64 Suppressed = 0;
+			if (UdpOversizeLog.ShouldLog(Suppressed))
+			{
+				UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP payload exceeds safety cap (%d bytes). Dropping; %lld oversized since the last warning."), Frame.Num(), Suppressed);
+			}
 			continue;
 		}
 
@@ -378,7 +389,11 @@ bool FO3DSocketsUdpReceiver::ProcessDatagram(const uint8* Data, int32 Bytes, TAr
 	// for any UDP datagram, so nothing is silently truncated (TRB-23).
 	if (Bytes > MaxDatagramBytes + FReceiverConstants::FragmentHeaderSize)
 	{
-		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP datagram too large (%d bytes)."), Bytes);
+		int64 Suppressed = 0;
+		if (UdpOversizeLog.ShouldLog(Suppressed))
+		{
+			UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP datagram too large (%d bytes); %lld oversized since the last warning."), Bytes, Suppressed);
+		}
 		return false;
 	}
 
@@ -429,7 +444,11 @@ bool FO3DSocketsUdpReceiver::HandleFragment(const uint8* Data, int32 Bytes, TArr
 	{
 		if (Combined.size() > static_cast<size_t>(MaxFrameBytes))
 		{
-			UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("Reassembled UDP payload exceeds safety cap (%llu bytes). Dropping."), static_cast<unsigned long long>(Combined.size()));
+			int64 Suppressed = 0;
+			if (UdpOversizeLog.ShouldLog(Suppressed))
+			{
+				UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("Reassembled UDP payload exceeds safety cap (%llu bytes). Dropping; %lld oversized since the last warning."), static_cast<unsigned long long>(Combined.size()), Suppressed);
+			}
 			return false;
 		}
 
