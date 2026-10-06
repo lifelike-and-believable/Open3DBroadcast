@@ -2,9 +2,47 @@
 
 Written 2026-09-30 by the cloud session that drove M1, M2 and the start of M3 of the plugin hardening roadmap. Updated 2026-10-01 with the control-channel work (ADR 0011, CTL-1..5) that landed afterwards; ADR 0011 accepted and WP-CTL added to the roadmap the same day. Updated 2026-10-03 when the cloud session finished WP-A1 (#305–#314) and WP-A2a to A2c (#316–#318) and handed the work over to Claude on desktop (§0); updated the same day when Claude on desktop finished WP-A2d (#319) and WP-A2e. Read this first, then the files it points to.
 
-## 0a. State at the end of the desktop session (2026-10-04, newest; read this first)
+## 0a. State at the end of the desktop session (2026-10-04, updated 2026-10-06; read this first)
 
-This section supersedes the "Start here" line in §0 and the M3 row in §1 where they disagree.
+This section supersedes the "Start here" line in §0 where they disagree.
+
+**2026-10-05 and 2026-10-06 (newest):**
+- **Merged:**
+  - #383 (HANDOFF) and #384 (issue cleanup).
+  - **WP-U1:** #385, project settings (UX-2, RCV-18).
+  - **WP-U2:** #386, the sender Blueprint API (SND-26, UX-3, DOC-4); #387, the receiver Blueprint library (UX-3).
+  - **CI:** #388, every PR workflow posts "✅ … completed successfully!" on the PR.
+  - **WP-U3, complete:** #389, the sender Details panel (SND-24, SND-25, SND-27, SND-30, SND-35); #390, receiver status, Create Source validation and live concealment settings (RCV-15, RCV-16, RCV-17); #391, transport options and logs (TRF-30, TRB-43 and TRB-21's UI part; the rest of TRB-21 is WP-U6's).
+  - **Findings:** #392, `Status: closed in #N` markers for the 193 findings M1 to M3 fixed. Before it, only the M4 PRs had added any. Its description lists 66 findings left open, 16 of them for the maintainer to decide.
+- **Open at hand-over:**
+  - #393: WP-U4 PR 1, the remote audio component lifecycle (RCV-22, RCV-23, RCV-24).
+- **Maintainer decisions:**
+  - **WP-U2 (2026-10-05):**
+    - `bAutoCreateTransport` stays false, with a warning;
+    - Blueprint gets state events only, not per-frame ones;
+    - the receiver library is a separate PR;
+    - the sample map is WP-U5's.
+  - **WP-U4 (2026-10-06):**
+    - **RCV-6:** a source setting for the inactive-subject timeout, default 5 s, 0 meaning never. On timeout, clear the subject's frames but keep the subject and its LiveLink settings.
+    - **RCV-20:** a Target Latency property, default 60 ms. Pre-roll before playback, and trim the oldest audio above target + 60 ms. No drift resampling.
+    - **RCV-21:** optional stream-label and source filters. Lock to the first matching stream until it goes idle. `o3ds:mix` becomes a shared constant with the same value, so the wire format is unchanged.
+- **External:**
+  - The LiveKit FFI request (`docs/livekit_ffi_feature_request.md`) is filed as `lifelike-and-believable/livekit-ffi` issues #13 to #17; the maintainer's agent is implementing them.
+  - The rules-for-robots adoption findings are rules-for-robots issues #23 to #38.
+- **Working practice:**
+  - Every PR gets Auto-fix in the desktop app.
+  - A workflow's success comment is the cue that CI is green; check the checks before merging.
+  - After merging `develop` into a worktree that was already built, delete `ProjectSandbox/Intermediate/Build/Win64/x64/ProjectSandboxEditor/Development/Makefile.bin` before building. UBT otherwise reuses its makefile and skips the merged-in files; a local run then lacks their tests. Check the test count: 497 with both plugins as of #393.
+  - `close_findings.py`-style helpers must put the Status line after a finding's last top-level bullet, not inside nested bullets.
+- **Next, after #393:**
+  1. WP-U4 PR 2 (RCV-6), then PR 3 (RCV-20 and RCV-21).
+  2. WP-U5: sample content, which also carries WP-U2's acceptance.
+  3. WP-U6.
+  4. WP-D1 to WP-D4.
+  5. WP-Q1.
+  6. The names-in-use picker.
+
+  The desk items below are unchanged. Also for the maintainer: turn on branch protection for `develop` with the ten checks in `Build/README.md`.
 
 **Merged this session (#335–#355; later PRs under "Open at hand-over"):**
 - **WP-A4 protocol versioning (ADR 0009):** #335 (frame word, identifier, protocol 2, core 1.1.0), #336 (UDP fragment header v2), #337 (envelope v2, LE PCM), #338 (length-prefixed name hash), #339 (`docs/wire-format.md`, one changelog), #340 (no compatibility with formats before protocol 2; maintainer: there are no users of old receivers).
@@ -91,8 +129,8 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M0 Decisions (ADRs 0001–0010) | Done (#261–#263) |
 | M1 Safety and correctness: WP-S1..S11, WP-T1, WP-T2 | Done (#264–#279) |
 | M2 Fab-buildable package: WP-F1..F4, F6..F9, F11 | Done (#274–#286). **F0 and F5 wait on the maintainer** (see §5) |
-| M3 Architecture: WP-A1..A7 | **In progress.** WP-A1, A2 (except removing `o3d.Sender.AsyncPipeline` one release later), A3 and A6 done; WP-A4 nearly done (ADR 0009 and ADR 0005 implemented, CORE-11/13/15 fixed, CORE-12 harness merged, CORE-14 in #353, RCV-8 in ADR 0013, accepted); WP-A5 waits for the maintainer at the desk; WP-A7 partly done (#348). SHR-38: ADR 0012 accepted, not started. See §0a. |
-| M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | Not started |
+| M3 Architecture: WP-A1..A7 | **In progress.** WP-A1, A2 (except removing `o3d.Sender.AsyncPipeline` one release later), A3 and A6 done; WP-A4 nearly done (ADR 0009 and ADR 0005 implemented, CORE-11/13/15 fixed, CORE-12 harness merged, CORE-14 in #353, RCV-8 in ADR 0013, accepted); WP-A5 waits for the maintainer at the desk; WP-A7 partly done (#348). SHR-38: ADR 0012 implemented (#357–#365). See §0a. |
+| M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | **In progress.** WP-U1, U2 and U3 done (#385–#391); WP-U4 PR 1 in #393. See §0a. |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
 | WP-CTL control channel (D11, ADR 0011) | CTL-1..7 done (#290–#295, CTL-6, CTL-7); live-server checks remain (see §2b) |
 

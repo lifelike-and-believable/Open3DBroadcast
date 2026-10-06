@@ -707,6 +707,7 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
   - Use owning types in the model layer (CORE-17).
   - Fix the `Context` copy constructor (CORE-24).
   - Remove dead code (CORE-25).
+- **Progress** (2026-10-04): archived the DCC plugins, `python/` and `sphinx/` (#348); the NNG Repeater rebuilt with its image tested in CI (#371, #372); the legacy apps archived and the legacy connectors behind `O3DS_BUILD_LEGACY` (#375; CORE-27, CORE-28). Open: CORE-17 (partial), CORE-24, CORE-25, CORE-30.
 
 #### WP-CTL: Control channel for events and values  ·  P1 · L · design (D11) then coding (7 PRs)
 - **Decision:** [ADR 0011](../adr/0011-control-channel.md), Implementation outline and Verification / acceptance. No owned findings (new feature).
@@ -730,6 +731,7 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
 - **Approach:**
   - Add `UOpen3DBroadcastSettings : UDeveloperSettings` with per-transport defaults, the token endpoint (with no secrets, per D6) and default ports.
   - Stop the receiver factory from silently overwriting global defaults.
+- **Done** (#385).
 
 #### WP-U2: Blueprint API  ·  P1 · M · coding
 - **Findings:** SND-26, UX-3, DOC-4
@@ -738,6 +740,7 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
   - Add runtime Blueprint control of the receiver.
   - Make the USER_GUIDE events real, as the repo's docs-first rule requires (copilot-instructions §5).
 - **Acceptance:** every Blueprint node in the USER_GUIDE exists and is used in the sample map.
+- **Done:** #386 (sender) and #387 (receiver Blueprint library). The sample-map acceptance moved to WP-U5.
 
 #### WP-U3: Details panel and feedback  ·  P1 · M · coding
 - **Findings:** SND-24, SND-25, SND-27, SND-30, SND-35, RCV-15, RCV-16, RCV-17, TRB-43, TRF-30, TRB-21 (the UI part)
@@ -751,6 +754,7 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
   - Validate in the factory panel.
   - Raise NNG error logs from Verbose to Warning, and reduce Warning-level noise in WebRTC.
   - Hide options that do nothing, or implement them (TRB-21, TRB-25).
+- **Done:** #389 (sender Details panel), #390 (receiver status, validation, live concealment), #391 (transport options and logs). The rest of TRB-21 (multicast, source filter) is WP-U6's.
 
 #### WP-U4: Receiver and audio behaviour  ·  P1 · M · coding
 - **Findings:** RCV-6, RCV-20, RCV-21, RCV-22, RCV-23, RCV-24, SND-20
@@ -761,6 +765,7 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
   - Fix self-attach when the component is the root (RCV-22).
   - Give the internal `UAudioComponent` a UPROPERTY-held lifetime (RCV-23).
   - Delete the dead `OnAudioFrame` (RCV-24).
+- **Progress** (2026-10-06): PR 1 (#393): RCV-22, RCV-23, RCV-24. Maintainer decisions for the rest are in HANDOFF §0a (RCV-6 timeout that keeps the subject; RCV-20 60 ms target with trimming; RCV-21 filters and one stream at a time). SND-20 is cited here but owned by WP-S3 and closed in #267.
 
 #### WP-U5: Sample content  ·  P1 · M · coding
 - **Findings:** UX-1
