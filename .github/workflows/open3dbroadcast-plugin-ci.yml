@@ -30,7 +30,9 @@ permissions:
 
 concurrency:
   group: open3dbroadcast-plugin-ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseded PR runs are cancelled; pushes to develop are not, so every merge gets its own
+  # post-merge run (WP-R2, BC-12: a docs merge used to cancel the previous code merge's run).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   UE_ROOT: 'C:\\Program Files\\Epic Games\\UE_5.7'
@@ -385,3 +387,25 @@ jobs:
               issue_number: context.issue.number,
               body,
             });
+
+  result:
+    # The one check of this workflow to require on develop (WP-R2; mid-project review BC-2, BC-3).
+    # It always runs and fails when any job of the plugin CI failed or was cancelled; a job skipped by its
+    # `if:` counts as passed. Requiring only this check lets jobs inside the workflow be renamed
+    # or split without touching branch protection, and a failure no other required check sees
+    # (for example the Fab zip, whose result the UE job only reads) still blocks the merge.
+    name: Plugin CI result
+    needs: [changes, fab-package, copyright-headers, runtime-editor-deps, third-party-binaries, build-and-test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail if a job failed or was cancelled
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          if echo "$NEEDS" | jq -e 'to_entries | any(.value.result == "failure" or .value.result == "cancelled")' > /dev/null; then
+            echo "::error::A job of this workflow failed or was cancelled; see the list above."
+            exit 1
+          fi

@@ -70,7 +70,7 @@ This section supersedes the "Start here" line in §0 where they disagree.
   5. The names-in-use picker.
 
   The desk items below are unchanged. Also for the maintainer:
-  - turn on branch protection for `develop` with the ten checks in `Build/README.md`;
+  - turn on branch protection for `develop`, requiring the two checks "Plugin CI result" and "Core tests result" (`Build/README.md`, WP-R2);
   - (done 2026-10-06) the fork-PR approval policy is `all_external_contributors`, so fork PRs can't run code on the self-hosted runner unapproved. Read a fork PR's workflow, Build.cs and script changes before approving its run (mid-project review BC-1);
   - listen to a received audio stream at the default 60 ms Target Latency (#396), pause the sender, and check that playback resumes;
   - set a translator on a LiveLink subject, stop the sender for longer than the Inactive Subject Timeout, restart it, and check the translator is still there (#395). During the pause, also check that the subject shows no data rather than a frozen pose; the mid-project review's RR-2 expects a frozen pose while concealment is on;
