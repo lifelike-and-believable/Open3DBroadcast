@@ -233,6 +233,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Add an optional source or stream filter (StreamLabel or SourceGuid) to the component. Lock the component to the first matching stream until it goes idle. Replace the `"o3ds:mix"` magic string with a shared constant in Open3DShared, and document the labelling contract (RCV-32).
 - Effort: M
 - Owner: design
+- Status: closed in #398
 
 ### RCV-22: The remote audio component tries to attach to itself when it is the root component
 - Category: bug
