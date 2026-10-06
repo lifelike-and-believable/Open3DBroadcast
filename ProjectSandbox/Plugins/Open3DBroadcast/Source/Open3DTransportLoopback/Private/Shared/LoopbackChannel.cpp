@@ -86,22 +86,34 @@ namespace O3DLoopback
 		return NormaliseChannelKey(TEXT("loopback"));
 	}
 
-	TSharedRef<FO3DSendQueue, ESPMode::ThreadSafe> AcquireChannel(const FString& ChannelKey, const FO3DSendQueueLimits& Limits)
+	TSharedRef<FO3DSendQueue, ESPMode::ThreadSafe> AcquireChannel(const FString& ChannelKey, const FO3DSendQueueLimits* SenderLimits)
 	{
 		using namespace O3DLoopbackChannelPrivate;
 		const FString Key = NormaliseChannelKey(ChannelKey);
 		FScopeLock Guard(&GChannelMutex);
 
+		for (auto It = GChannels.CreateIterator(); It; ++It)
+		{
+			if (!It.Value().IsValid())
+			{
+				It.RemoveCurrent();
+			}
+		}
+
 		if (const TWeakPtr<FO3DSendQueue, ESPMode::ThreadSafe>* Existing = GChannels.Find(Key))
 		{
 			if (const TSharedPtr<FO3DSendQueue, ESPMode::ThreadSafe> Pinned = Existing->Pin())
 			{
-				Pinned->SetLimits(Limits);
+				if (SenderLimits)
+				{
+					Pinned->SetLimits(*SenderLimits);
+				}
 				return Pinned.ToSharedRef();
 			}
 		}
 
-		const TSharedRef<FO3DSendQueue, ESPMode::ThreadSafe> Queue = MakeShared<FO3DSendQueue, ESPMode::ThreadSafe>(Limits);
+		const TSharedRef<FO3DSendQueue, ESPMode::ThreadSafe> Queue = MakeShared<FO3DSendQueue, ESPMode::ThreadSafe>(
+			SenderLimits ? *SenderLimits : ResolveQueueLimits(FO3DTransportConfig()));
 		GChannels.Add(Key, Queue);
 		return Queue;
 	}

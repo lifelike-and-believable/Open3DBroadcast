@@ -9,7 +9,7 @@
 FO3DTransportResult FO3DLoopbackReceiver::Initialize(const FO3DTransportConfig& Config)
 {
 	ChannelKey = O3DLoopback::ResolveChannelKey(Config);
-	Channel = O3DLoopback::AcquireChannel(ChannelKey, O3DLoopback::ResolveQueueLimits(Config));
+	Channel = O3DLoopback::AcquireChannel(ChannelKey, nullptr);
 	bInitialized = true;
 
 	FO3DReceiveDemuxSettings Settings = Demux.GetSettings();
@@ -37,18 +37,21 @@ FO3DTransportResult FO3DLoopbackReceiver::Start()
 		return FO3DTransportResult::Error(EO3DTransportError::NoConsumer, TEXT("Loopback receiver Start() without a frame consumer (SetConsumer)."));
 	}
 	ConnectionState.Begin(EO3DConnectionState::Connected);
+	bRunning = true;
 	return FO3DTransportResult::Ok();
 }
 
 void FO3DLoopbackReceiver::Stop()
 {
+	bRunning = false;
 	Demux.ReleaseSinks();
 	ConnectionState.End(EO3DConnectionState::Idle);
 }
 
 int32 FO3DLoopbackReceiver::Poll()
 {
-	if (!bInitialized || !Channel.IsValid())
+	// WP-U6 (TRB-32): only between Start and Stop; what arrives meanwhile waits in the channel.
+	if (!bRunning || !Channel.IsValid())
 	{
 		return 0;
 	}
