@@ -163,7 +163,7 @@ bool FO3DSendQueue::Dequeue(FO3DSendItem& OutItem, double NowSec)
 			State.Dropped.fetch_add(1, std::memory_order_relaxed);
 			if (OutItem.Kind == EO3DSendItemKind::Mocap)
 			{
-				bMocapDiscarded.store(true, std::memory_order_relaxed);
+				MocapDiscardedSinceConsume.fetch_add(1, std::memory_order_relaxed);
 			}
 			continue;
 		}
@@ -179,9 +179,9 @@ bool FO3DSendQueue::Dequeue(FO3DSendItem& OutItem)
 	return Dequeue(OutItem, FPlatformTime::Seconds());
 }
 
-bool FO3DSendQueue::ConsumeMocapDiscarded()
+int32 FO3DSendQueue::ConsumeMocapDiscarded()
 {
-	return bMocapDiscarded.exchange(false, std::memory_order_relaxed);
+	return MocapDiscardedSinceConsume.exchange(0, std::memory_order_relaxed);
 }
 
 int32 FO3DSendQueue::Empty()

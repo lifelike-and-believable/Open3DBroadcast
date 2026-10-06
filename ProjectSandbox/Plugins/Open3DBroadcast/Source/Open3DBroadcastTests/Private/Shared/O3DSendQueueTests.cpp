@@ -426,11 +426,11 @@ bool FO3DSendQueueKeepsFullSyncTest::RunTest(const FString& Parameters)
 		Limits.MaxAgeSeconds = 0.5;
 		FO3DSendQueue Queue(Limits);
 		Queue.Enqueue(MocapItem(4, 1));
-		TestFalse(TEXT("Nothing discarded yet"), Queue.ConsumeMocapDiscarded());
+		TestEqual(TEXT("Nothing discarded yet"), Queue.ConsumeMocapDiscarded(), 0);
 		FO3DSendItem Out;
 		Queue.Dequeue(Out, FPlatformTime::Seconds() + 10.0);
-		TestTrue(TEXT("The expired update is reported"), Queue.ConsumeMocapDiscarded());
-		TestFalse(TEXT("Once"), Queue.ConsumeMocapDiscarded());
+		TestEqual(TEXT("The expired update is reported"), Queue.ConsumeMocapDiscarded(), 1);
+		TestEqual(TEXT("Once"), Queue.ConsumeMocapDiscarded(), 0);
 	}
 	return true;
 }
