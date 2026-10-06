@@ -73,6 +73,8 @@ enum class EO3DConformanceCase : uint32
 	ConnectionStateLifecycle = 1 << 15,
 	/** Connection state: a sender and receiver that exchanged a frame both reach Connected. */
 	ConnectionStateConnected = 1 << 16,
+	/** Receiver GetStats, read from another thread while the game thread polls, never goes backwards (WP-R3, TR-9). */
+	ReceiverStatsFromAnyThread = 1 << 18,
 };
 ENUM_CLASS_FLAGS(EO3DConformanceCase)
 

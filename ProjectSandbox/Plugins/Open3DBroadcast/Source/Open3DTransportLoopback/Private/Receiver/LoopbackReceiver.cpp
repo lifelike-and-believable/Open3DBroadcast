@@ -3,6 +3,7 @@
 #include "LoopbackReceiver.h"
 
 #include "HAL/PlatformTime.h"
+#include "Misc/ScopeLock.h"
 #include "Logging/LogMacros.h"
 
 FO3DTransportResult FO3DLoopbackReceiver::Initialize(const FO3DTransportConfig& Config)
@@ -16,8 +17,11 @@ FO3DTransportResult FO3DLoopbackReceiver::Initialize(const FO3DTransportConfig& 
 	Demux.SetSettings(Settings);
 	Demux.ResetStats();
 
-	Stats.Reset();
-	LatencySamples = 0;
+	{
+		FScopeLock Lock(&StatsMutex);
+		Stats.Reset();
+		LatencySamples = 0;
+	}
 	return FO3DTransportResult::Ok();
 }
 
@@ -60,9 +64,12 @@ int32 FO3DLoopbackReceiver::Poll()
 		{
 		case EO3DSendItemKind::Mocap:
 			++Processed;
-			Stats.FramesReceived++;
-			Stats.BytesReceived += Item.Bytes.Num();
-			AccumulateLatency((NowSeconds - Item.CaptureTimeSec) * 1000.0);
+			{
+				FScopeLock Lock(&StatsMutex);
+				Stats.FramesReceived++;
+				Stats.BytesReceived += Item.Bytes.Num();
+				AccumulateLatency((NowSeconds - Item.CaptureTimeSec) * 1000.0);
+			}
 			// The channel item owns the frame, so the consumer gets it without a copy (WP-A1 PR 5b).
 			Demux.DeliverMocapOwned(Item.Subject, MoveTemp(Item.Bytes), NowSeconds);
 			break;
@@ -70,11 +77,17 @@ int32 FO3DLoopbackReceiver::Poll()
 		case EO3DSendItemKind::Audio:
 		{
 			++Processed;
-			Stats.BytesReceived += Item.Bytes.Num();
 			const EO3DDemuxResult Result = Demux.ProcessMessage(Item.Bytes.GetData(), Item.Bytes.Num(), NowSeconds);
+			{
+				FScopeLock Lock(&StatsMutex);
+				Stats.BytesReceived += Item.Bytes.Num();
+				if (Result == EO3DDemuxResult::AudioRejected)
+				{
+					Stats.ReceiveErrors++;
+				}
+			}
 			if (Result == EO3DDemuxResult::AudioRejected)
 			{
-				Stats.ReceiveErrors++;
 				UE_LOG(LogO3DLoopbackTransport, Verbose, TEXT("Loopback audio frame rejected on '%s'."), *ChannelKey);
 			}
 			else if (DebugLevel > 0 && (DebugLevel > 1 || NowSeconds - LastAudioLogTime > 0.25))
@@ -97,7 +110,11 @@ int32 FO3DLoopbackReceiver::Poll()
 
 FO3DTransportStats FO3DLoopbackReceiver::GetStats() const
 {
-	FO3DTransportStats Copy = Stats;
+	FO3DTransportStats Copy;
+	{
+		FScopeLock Lock(&StatsMutex);
+		Copy = Stats;
+	}
 	Copy.State = ConnectionState.Get();
 	return Copy;
 }

@@ -58,7 +58,9 @@ private:
 
 private:
 	FO3DTransportConfig ActiveConfig;
+	/** Written by Poll; GetStats may read it from any thread (WP-R3, TR-9). */
 	FO3DTransportStats Stats;
+	mutable FCriticalSection StatsMutex;
 	FO3DTransportAudioConfig ActiveAudioConfig;
 
 	ISocketSubsystem* SocketSubsystem = nullptr;
