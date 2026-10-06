@@ -585,6 +585,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
   - **No wire change:** receivers already reassemble v2 fragments of any size, so old and new versions work together both ways.
   - **Limit:** a receiver reassembles at most 4096 fragments, so at the default MTU a frame can be up to about 4.8 MB.
 
+- TCP and UDP: the audio-port options are removed (WP-U6; TRB-25). With audio on, the configure functions wrote `audio.port`, `audio.host` and `audio.bind` (the data port + 1 by default), but nothing read them: audio and control travel on the data socket, in the unified envelope. The **Port** tooltip no longer says that audio uses the next port. Saved configs that still carry these keys are unaffected; the keys are ignored, as before.
+
 - Loopback channel limits and receiver lifecycle (WP-U6; TRB-31, TRB-32).
   - **Queue limits:** a receiver that started after its sender reset the channel's queue capacity to the defaults (64 frames, 32 audio items), because the receiver has no queue options. Now only a sender sets a channel's limits.
   - **Stopped receiver:** a stopped receiver kept delivering frames when polled. `Poll` now delivers only between Start and Stop.
