@@ -4,6 +4,7 @@
 
 #include "SocketsTcpSender.h"
 #include "../Shared/SocketsTcpTransport.h"
+#include "O3DPerformanceMetrics.h"
 #include "O3DSinkAudioEncoder.h"
 #include "O3DUnifiedMessage.h"
 #include "Transport/O3DTransportTypes.h"
@@ -76,6 +77,7 @@ FO3DTransportResult FO3DSocketsTcpSender::Initialize(const FO3DTransportConfig& 
 	Stop();
 
 	ActiveConfig = Config;
+	SenderMetrics = Config.SenderMetrics;
 	FramesSent.store(0);
 	BytesSent.store(0);
 	DroppedFrames.store(0);
@@ -200,13 +202,10 @@ void FO3DSocketsTcpSender::Stop()
 
 EO3DSendResult FO3DSocketsTcpSender::EnqueueFrame(FO3DSendItem&& Item, int32 Len)
 {
+	// Counted as sent by the worker once written (WP-R3), not here.
+	(void)Len;
 	const EO3DSendResult Result = Queue->Enqueue(MoveTemp(Item));
-	if (Result == EO3DSendResult::Queued)
-	{
-		FramesSent.fetch_add(1);
-		BytesSent.fetch_add(Len);
-	}
-	else if (Result == EO3DSendResult::DroppedBackpressure)
+	if (Result == EO3DSendResult::DroppedBackpressure)
 	{
 		DroppedFrames.fetch_add(1);
 	}
@@ -511,6 +510,10 @@ void FO3DSocketsTcpSender::DropClientAndPending(const TCHAR* Reason)
 	if (PendingTotal > 0 && bPendingIsFrame)
 	{
 		DroppedFrames.fetch_add(1);
+		if (SenderMetrics.IsValid())
+		{
+			SenderMetrics->RecordTransportFrameDropped();
+		}
 	}
 	ResetPending();
 	DropClient(Reason);
@@ -559,8 +562,12 @@ uint32 FO3DSocketsTcpSender::RunWorkerIteration()
 		const bool bDequeued = Queue->Dequeue(Item, Now);
 		// WP-R1 (TR-1): frames past tcp.maxqueueage were accepted, then discarded; a residual
 		// stream needs a full sync after that.
-		if (Queue->ConsumeMocapDiscarded())
+		if (const int32 Discarded = Queue->ConsumeMocapDiscarded())
 		{
+			for (int32 Index = 0; Index < Discarded && SenderMetrics.IsValid(); ++Index)
+			{
+				SenderMetrics->RecordTransportFrameDropped(); // WP-R3
+			}
 			NotifyFramesDropped();
 		}
 		if (bDequeued)
@@ -606,6 +613,16 @@ uint32 FO3DSocketsTcpSender::RunWorkerIteration()
 		LastProgressTime = Now;
 		if (PendingOffset >= PendingTotal)
 		{
+			// WP-R3: a frame counts as sent once all of it is written.
+			if (bPendingIsFrame)
+			{
+				FramesSent.fetch_add(1);
+				BytesSent.fetch_add(PendingTotal);
+				if (SenderMetrics.IsValid())
+				{
+					SenderMetrics->RecordBytesSent(static_cast<uint64>(PendingTotal));
+				}
+			}
 			ResetPending();
 			LastSendTime = Now;
 		}
