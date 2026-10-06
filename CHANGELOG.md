@@ -580,6 +580,13 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 - TCP and UDP: no silent port sharing (WP-U6; TRB-22). The TCP sender's listen socket and the UDP receiver's socket set `SO_REUSEADDR`. On Windows that lets a second socket bind a port already in use, so a second sender or receiver on the same port started without error and shared or took over the port. A second listener on a port in use now fails to start with `AddressInUse`, and the log says the bind failed. The UDP sender, which binds nothing, no longer sets the option either.
 
+- UDP fragments at the MTU (WP-U6; TRB-16).
+  - **The problem:** the sender split a message only above **Max Datagram Bytes** (64000), so the **MTU** setting did nothing for most frames. A large frame went out as one datagram that IP had to fragment, which some networks, NATs and VPNs drop.
+  - **Now:** a frame or audio packet larger than the MTU (1200 bytes, header included) is sent as fragments no larger than the MTU. Control messages are still sent whole.
+  - **Panel:** the MTU's minimum rises to 280, room for the 24-byte fragment header plus 256 bytes. **Max Datagram Bytes** leaves the sender's panel; the sender still reads it as the ceiling for control messages.
+  - **No wire change:** receivers already reassemble v2 fragments of any size, so old and new versions work together both ways.
+  - **Limit:** a receiver reassembles at most 4096 fragments, so at the default MTU a frame can be up to about 4.8 MB.
+
 - TCP and UDP: the audio-port options are removed (WP-U6; TRB-25). With audio on, the configure functions wrote `audio.port`, `audio.host` and `audio.bind` (the data port + 1 by default), but nothing read them: audio and control travel on the data socket, in the unified envelope. The **Port** tooltip no longer says that audio uses the next port. Saved configs that still carry these keys are unaffected; the keys are ignored, as before.
 
 - Loopback channel limits and receiver lifecycle (WP-U6; TRB-31, TRB-32).

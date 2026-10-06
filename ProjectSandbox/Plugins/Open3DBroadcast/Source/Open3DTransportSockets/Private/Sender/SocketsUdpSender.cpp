@@ -118,7 +118,7 @@ FO3DTransportResult FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& 
 	Endpoint = O3DSocketsUdpSenderPrivate::ApplyHostRules(Parsed, bBroadcastHost);
 	bAllowBroadcast = bBroadcastHost || O3DTransportOptions::GetBool(Options, O3DSockets::BroadcastOptionKey, false);
 	MaxDatagramBytes = O3DTransportOptions::GetInt(Options, O3DSockets::MaxDatagramOptionKey, 64000, 512, 65507);
-	MtuBytes = FMath::Clamp(O3DTransportOptions::GetInt(Options, O3DSockets::MtuOptionKey, 1200), 256, MaxDatagramBytes);
+	MtuBytes = FMath::Clamp(O3DTransportOptions::GetInt(Options, O3DSockets::MtuOptionKey, 1200), O3DSockets::MinUdpMtuBytes, FMath::Max(MaxDatagramBytes, O3DSockets::MinUdpMtuBytes));
 	FragmentScratch.clear();
 	FragmentScratch.reserve(MaxDatagramBytes);
 
@@ -449,7 +449,8 @@ uint32 FO3DSocketsUdpSender::RunWorkerIteration()
 
 bool FO3DSocketsUdpSender::SendPayload(const uint8* Data, int32 Size, const TCHAR* Context)
 {
-	if (Size <= MaxDatagramBytes)
+	// WP-U6 (TRB-16): split at the MTU, so no datagram needs IP fragmentation. Control never comes here.
+	if (Size <= MtuBytes)
 	{
 		return SendDatagram(Data, Size, Context);
 	}
@@ -494,7 +495,8 @@ bool FO3DSocketsUdpSender::SendFragmented(const uint8* Data, int32 Size, const T
 		return false;
 	}
 
-	const int32 FragmentPayload = FMath::Clamp(MtuBytes - FragmentHeaderSize, 256, MaxDatagramBytes);
+	// The MTU counts the header, so every fragment datagram is at most MtuBytes.
+	const int32 FragmentPayload = MtuBytes - FragmentHeaderSize;
 	UdpFragmenter Fragmenter(reinterpret_cast<const char*>(Data), static_cast<size_t>(Size), static_cast<size_t>(FragmentPayload));
 	const uint32 MessageId = ++MessageCounter;
 
