@@ -38,6 +38,11 @@ namespace O3DSocketsTesting
 	 * can fill the send queue and observe its drop policy (WP-A1 PR 4c).
 	 */
 	OPEN3DTRANSPORTSOCKETS_API void UdpSenderSetWorkerPaused(IOpen3DSender& Sender, bool bPaused);
+	/**
+	 * Requires CreateTcpSender(). While paused, the TCP sender's worker still accepts a client but
+	 * sends nothing, so a test can fill the send queue (WP-R3, TR-7).
+	 */
+	OPEN3DTRANSPORTSOCKETS_API void TcpSenderSetWorkerPaused(IOpen3DSender& Sender, bool bPaused);
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

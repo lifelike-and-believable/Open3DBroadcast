@@ -331,7 +331,8 @@ EO3DSendResult FO3DNngSender::EnqueueFrame(TArray<uint8>&& Bytes, FString Subjec
 
     const int32 Len = Bytes.Num();
     const EO3DSendResult Result = Queue->Enqueue(FO3DSendItem::MakeMocap(MoveTemp(Bytes), MoveTemp(Subject), CaptureTimeSec, bFullSync));
-    if (Result != EO3DSendResult::Queued)
+    // TooLarge (WP-R3, TR-7) is the caller's to report; only a full queue is a drop.
+    if (Result == EO3DSendResult::DroppedBackpressure)
     {
         DroppedFrames.fetch_add(1);
 
@@ -346,7 +347,7 @@ EO3DSendResult FO3DNngSender::EnqueueFrame(TArray<uint8>&& Bytes, FString Subjec
         return Result;
     }
 
-    return EO3DSendResult::Queued;
+    return Result; // Queued, or TooLarge
 }
 
 /**

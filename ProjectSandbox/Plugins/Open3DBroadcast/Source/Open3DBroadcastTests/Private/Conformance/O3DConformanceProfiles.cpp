@@ -17,6 +17,12 @@
 #include "O3DTestFakes.h"
 #include "O3DTestHarness.h"
 
+#if O3D_WITH_TRANSPORT_SOCKETS
+#include "Testing/SocketsTesting.h"
+#endif
+#if O3D_WITH_TRANSPORT_NNG
+#include "Testing/NngTesting.h"
+#endif
 #if O3D_WITH_TRANSPORT_MOQ
 #include "Testing/MoQTesting.h"
 #include "Transport/MoQ/MoQFakeFfi.h"
@@ -154,6 +160,7 @@ namespace O3DConformanceProfiles
 		virtual FO3DTransportConfig MakeReceiverConfig() override { return MakeConfig(false, 0); }
 		/** 64 KiB is the smallest send queue the TCP sender accepts (Tcp::MinQueueBytes). */
 		virtual FO3DTransportConfig MakeBackpressureSenderConfig() override { return MakeConfig(true, 64 * 1024); }
+		virtual void HoldSenderWorker(IOpen3DSender& Sender, bool bHold) override { O3DSocketsTesting::TcpSenderSetWorkerPaused(Sender, bHold); }
 
 	private:
 		FO3DTransportConfig MakeConfig(bool bSender, int32 MaxQueueBytes) const
@@ -223,6 +230,7 @@ namespace O3DConformanceProfiles
 		virtual FO3DTransportConfig MakeReceiverConfig() override { return MakeConfig(false, 0); }
 		/** 64 KiB is the smallest queue the NNG sender accepts (kMinQueueBytes). */
 		virtual FO3DTransportConfig MakeBackpressureSenderConfig() override { return MakeConfig(true, 64 * 1024); }
+		virtual void HoldSenderWorker(IOpen3DSender& Sender, bool bHold) override { O3DNngTesting::SenderSetWorkerPaused(Sender, bHold); }
 
 		virtual void AddExpectedMessages(FAutomationTestBase& Test, EO3DConformanceCase Case) override
 		{
@@ -289,6 +297,7 @@ namespace O3DConformanceProfiles
 		virtual FO3DTransportConfig MakeReceiverConfig() override { return MakeConfig(0); }
 		/** 256 KiB is the smallest MoQ send queue (MoQHelpers::kMinQueueBytes). */
 		virtual FO3DTransportConfig MakeBackpressureSenderConfig() override { return MakeConfig(MoQTesting::GetBackoffLimits().MinQueueBytes); }
+		virtual void HoldSenderWorker(IOpen3DSender& Sender, bool bHold) override { MoQTesting::SenderSetWorkerPaused(Sender, bHold); }
 
 		virtual void Pump() override
 		{
@@ -400,7 +409,9 @@ namespace O3DTests
 			Profile.MakeFixture = []() -> TUniquePtr<FO3DConformanceFixture> { return MakeUnique<FTcpFixture>(); };
 			Profile.Cases = SenderAndReceiverCases | EO3DConformanceCase::SendBackpressure | EO3DConformanceCase::RoundTripByteExact | ControlCases
 				| EO3DConformanceCase::ConnectionStateConnected | EO3DConformanceCase::MetricsCountWhatWasSent;
-			Profile.BackpressurePayloadBytes = 128 * 1024;
+			// 16 KiB frames into the 64 KiB queue, with the worker held (WP-R3, TR-7).
+			Profile.BackpressurePayloadBytes = 16 * 1024;
+			Profile.BackpressureSendCount = 10;
 			Profile.ExpectedCapabilities = MakeBaseCapabilities(EO3DDeliveryGuarantee::ReliableOrdered);
 			Profile.ExpectedCapabilities.bBidirectional = true;
 			Profile.ExpectedCapabilities.MaxPayloadBytes = 50 * 1024 * 1024; // the TCP frame header's limit
@@ -428,7 +439,9 @@ namespace O3DTests
 			Profile.Cases = (SenderAndReceiverCases & ~EO3DConformanceCase::LifecycleRestartAfterStop)
 				| EO3DConformanceCase::SendBackpressure | EO3DConformanceCase::RoundTripByteExact | ControlCases
 				| EO3DConformanceCase::ConnectionStateConnected | EO3DConformanceCase::MetricsCountWhatWasSent;
-			Profile.BackpressurePayloadBytes = 128 * 1024;
+			// 16 KiB frames into the 64 KiB queue, with the worker held (WP-R3, TR-7).
+			Profile.BackpressurePayloadBytes = 16 * 1024;
+			Profile.BackpressureSendCount = 10;
 			// The fixture uses pub/sub, which ADR 0005 (iii) rates Unreliable (pair and push/pull are
 			// ReliableOrdered; Open3DBroadcast.Shared.TransportCapabilities covers those).
 			Profile.ExpectedCapabilities = MakeBaseCapabilities(EO3DDeliveryGuarantee::Unreliable);
@@ -445,7 +458,9 @@ namespace O3DTests
 			Profile.Cases = SenderAndReceiverCases | EO3DConformanceCase::SendBackpressure | EO3DConformanceCase::RoundTripByteExact
 				| EO3DConformanceCase::LifetimeDestroyWithCallbacksInFlight | ControlCases | EO3DConformanceCase::ConnectionStateConnected
 				| EO3DConformanceCase::MetricsCountWhatWasSent;
-			Profile.BackpressurePayloadBytes = 300 * 1024;
+			// 64 KiB frames into the 256 KiB queue, with the worker held (WP-R3, TR-7).
+			Profile.BackpressurePayloadBytes = 64 * 1024;
+			Profile.BackpressureSendCount = 10;
 			// Unreliable in both delivery modes until ADR 0005 Q5 is answered.
 			Profile.ExpectedCapabilities = MakeBaseCapabilities(EO3DDeliveryGuarantee::Unreliable);
 			RegisterConformanceProfile(MoQName, Profile);

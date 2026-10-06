@@ -392,6 +392,7 @@ void FO3DSenderPipeline::SendLocked(const FO3DSPoseFrame& Frame, TArray<uint8>&&
 
 	// The serializer's buffer moves into the transport (FO3DSendPayload owns its bytes, ADR 0007
 	// item 3); no copy.
+	const int32 PayloadBytes = Bytes.Num();
 	const EO3DSendResult Result = Sender->SendSerialized(FO3DSendPayload(MoveTemp(Bytes), Frame.Subject, Frame.CaptureTimeSec, bFullSync));
 	if (Result == EO3DSendResult::Queued)
 	{
@@ -403,6 +404,17 @@ void FO3DSenderPipeline::SendLocked(const FO3DSPoseFrame& Frame, TArray<uint8>&&
 	if (Metrics.IsValid())
 	{
 		Metrics->RecordFrameDropped();
+	}
+	if (Result == EO3DSendResult::TooLarge)
+	{
+		// WP-R3 (TR-7): no full sync, which would be at least as large; the next frame tries again.
+		int64 Suppressed = 0;
+		if (TooLargeLog.ShouldLog(Suppressed))
+		{
+			UE_LOG(LogO3DSenderComponent, Warning, TEXT("Subject '%s': the %d-byte frame is larger than the transport accepts and was not sent (%lld more since the last warning). Reduce the skeleton or raise the transport's queue capacity."),
+				*Frame.Subject, PayloadBytes, Suppressed);
+		}
+		return;
 	}
 	RequestFullSyncAfterUndelivered(Frame, bFullSync);
 	// Not retried: the next frame supersedes this one. DroppedBackpressure is counted in the

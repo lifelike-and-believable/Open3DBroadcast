@@ -180,7 +180,9 @@ public:
 	/**
 	 * Any thread; never blocks. Queued (the item is moved in and the consumer woken),
 	 * DroppedBackpressure (the item's kind is at its limit; Item is left untouched, so the caller
-	 * may retry it) or Invalid (empty bytes).
+	 * may retry it), TooLarge (the item is larger than its kind's byte hard cap, so it could not
+	 * fit even an empty queue; Item is left untouched and nothing is counted) or Invalid (empty
+	 * bytes).
 	 */
 	EO3DSendResult Enqueue(FO3DSendItem&& Item);
 
