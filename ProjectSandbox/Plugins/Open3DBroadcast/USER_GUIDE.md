@@ -218,7 +218,7 @@ Switching a sender's or a LiveLink source's transport keeps the options you set 
 - Credentials (for example `webrtc.token` or `webrtc.tokenEndpointAuth`) are never taken from here: `DefaultGame.ini` is committed and shipped, so such an entry is ignored with a warning in the log. Use the credential store or the credential's environment variable.
 - A new LiveLink source starts with no options of its own, so the project defaults apply to it. Creating a source no longer changes the defaults for the next one.
 
-There are no options common to every transport, and no `role`, `uri` or `stream_id` option: the sender component is always the sending end, and each transport declares its own options. The [Transport Options Reference](#transport-options-reference) lists each transport's keys with the names the panel shows. [Transport Modules](#transport-modules) says what to set on each end.
+There are no options common to every transport, and no `role`, `uri` or `stream_id` option: the sender component is always the sending end, and each transport declares its own options (NNG's `nng.role` only chooses whether an end listens or dials). The [Transport Options Reference](#transport-options-reference) lists each transport's keys with the names the panel shows. [Transport Modules](#transport-modules) says what to set on each end.
 
 ### Curve Filtering
 
@@ -427,7 +427,7 @@ Residual coding needs a reliable, ordered transport. On any other transport the 
 | UDP | Inbound UDP on the receiver's machine; the sender sends to it | port 17800 |
 | NNG | Inbound TCP on the end that listens: the sender for Pub/Sub and Pair, the receiver for Push/Pull (with the default roles) | 6000 Pub/Sub, 7000 Pair, 8000 Push/Pull |
 | MoQ | Outbound UDP from both machines to the relay's host and port (QUIC). Nothing listens locally | the port in **Relay URL** |
-| WebRTC | Outbound to the LiveKit server URL (`wss://`, usually port 443, sometimes a custom port such as 7880), and HTTPS to the token endpoint if you use one | see the add-on's USER_GUIDE |
+| WebRTC | Outbound to the LiveKit server URL (`wss://`, usually port 443, sometimes a custom port such as 7880), the ports your LiveKit server uses for WebRTC media (see its configuration), and HTTPS to the token endpoint if you use one | see the add-on's USER_GUIDE |
 
 TCP, UDP and NNG use the one port shown: audio and control travel on the same socket as the frames.
 
@@ -1170,7 +1170,7 @@ Each transport declares its options, separately for the sender and the receiver.
 - Keys are case-insensitive. A key the selected transport does not read has no effect.
 - The keys listed under "Not shown in the panel" are read by the transport, but have no row. Set them with **Set Transport Option** or in the project-wide defaults.
 
-There is no `role` option: the sender component is always the sending end and the LiveLink source the receiving end.
+There is no `role` option that makes an end a sender or a receiver: the sender component is always the sending end and the LiveLink source the receiving end. NNG's `nng.role` only chooses whether that end listens or dials.
 
 #### Loopback
 
