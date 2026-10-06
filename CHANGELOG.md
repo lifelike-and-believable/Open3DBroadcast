@@ -601,6 +601,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 - Receiver stats readable from any thread (WP-R3, TR-9). `IOpen3DReceiver::GetStats` may be called from any thread, but the UDP and Loopback receivers copied counters that `Poll` was writing, without a lock. Both now guard their stats with a lock, as the MoQ and WebRTC receivers do. New conformance case `Stats.ReceiverReadFromAnyThread`, for every profile with a receiver: another thread samples `GetStats` while the game thread polls, and the counters never go backwards.
 
+- MoQ receiver options (WP-R3, TR-8). The receiver's options showed **Delivery Mode** and **Queue Capacity (MiB)**, which only the sender reads: the publisher picks the delivery mode, and a receiver has no send queue. The receiver no longer lists them; a value already saved in a receiver config is ignored, as before.
+
 - Hot-path transport logs throttled (WP-R3, TR-6). A peer sending oversized datagrams or messages, or a failing socket, produced one warning per datagram or frame. These log sites now write at most one line per 2 s, with the number of similar lines left out since the last one:
   - **UDP receiver:** recv failures; a datagram, payload or reassembled payload over the size cap.
   - **UDP sender:** send failures and partial sends. The per-fragment failure line is now Verbose, since the datagram failure behind it is already logged.
