@@ -629,22 +629,26 @@ Audio is played back using the **O3D Remote Audio Component**.
 
 1. Add **O3D Remote Audio Component** to an actor
 2. Configure:
-   - **Receive Mode**: `Mix` or `Subject`
-   - **Stream Label**: Filter by label (or empty for all)
+   - **Receive Mode**: `Mix`, `Subject` or `Any Stream`
+   - **Stream Label Filter**: play only streams with this label (empty: any)
    - **Gain**: Output volume multiplier
    - **Attenuation Settings**: Spatial audio (optional)
 
 #### Receive Modes
 
-**Mix Mode:**
-- Receives audio tagged with stream label
-- Global/ambient audio
-- No spatial positioning
+**Mix Mode** (the default):
+- Plays streams labelled `o3ds:mix`: the label the receiver gives audio when the transport sets none and the receiver source has no stream ID
+- Most transports label audio with the sender's subject or stream name, so use **Any Stream** or **Subject** for those
 
 **Subject Mode:**
-- Receives audio associated with LiveLink subject
+- Plays the audio of the LiveLink subject named in **LiveLink Subject Name**
 - Can be positioned in 3D space
 - Follows subject's position
+
+**Any Stream Mode:**
+- Plays any stream (narrow it with **Stream Label Filter**)
+
+In every mode the component plays one stream at a time: the first that matches, until it has sent nothing for a second. Audio from other matching streams is dropped meanwhile, not mixed in. To play several streams, add one component per stream with a **Stream Label Filter** each, or separate the receiver sources with **Context Name**.
 
 #### Audio Bus
 
@@ -658,7 +662,7 @@ Audio is routed through a centralized **Audio Bus** singleton:
 **No audio output:**
 1. Check **Enable Audio** on sender and receiver
 2. Verify transport supports audio (Loopback, WebRTC)
-3. Check **Audio Stream Label** matches
+3. Check the component's **Receive Mode** and **Stream Label Filter** match the stream's label (Mix plays only `o3ds:mix`)
 4. Verify codec compatibility
 5. Check Windows audio mixer for Unreal Engine volume
 
@@ -1141,13 +1145,14 @@ client per process (PIE clients included), so keep subject names distinct across
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | **ContextName** | Name | (empty) | Plays audio from receiver sources with this Context Name only |
-| **ReceiveMode** | Enum | Mix | Mix or Subject mode |
-| **StreamLabel** | String | "" | Filter by label (empty = all) |
-| **SubjectName** | String | "" | Subject for Subject mode |
+| **ReceiveMode** | Enum | Mix | Mix (`o3ds:mix` only), Subject, or Any Stream |
+| **StreamLabelFilter** | String | "" | Play only streams with this label, case-insensitive (empty = any) |
+| **LiveLinkSubjectName** | Subject | (none) | Subject for Subject mode |
 | **Gain** | Float | 1.0 | Output volume multiplier |
 | **Target Latency (ms)** | Float | 60 | Audio held before playback starts, to absorb network jitter. Playback waits for this much again after the audio runs out; when more than this plus 60 ms builds up, the oldest audio is dropped back to it, so latency cannot grow |
-| **bEnableAttenuation** | Bool | false | Enable spatial audio |
-| **AttenuationSettings** | Object | null | Attenuation configuration |
+| **Allow Spatialization** | Bool | false | Spatialize the sound in 3D |
+| **Override Attenuation** | Bool | false | Use per-instance attenuation instead of Attenuation Settings |
+| **AttenuationSettings** | Object | null | Attenuation asset, used when Override Attenuation is off |
 | **Attach Parent** | Component | (unset) | Attach the component to this component. Unset: it stays where it is placed; one with no parent attaches to the actor's root |
 | **Auto Activate** | Bool | true | Start playback when audio first arrives. Off: audio is queued and plays after **Play** |
 

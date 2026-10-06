@@ -33,8 +33,12 @@ namespace O3DS
 UENUM(BlueprintType)
 enum class EO3DRemoteAudioMode : uint8
 {
+    /** Streams labelled "o3ds:mix": audio whose source set no stream id and whose transport no label. */
     Mix UMETA(DisplayName = "Mix (o3ds:mix)"),
-    Subject UMETA(DisplayName = "Subject (LiveLink)")
+    /** The stream of the LiveLink subject named in LiveLink Subject Name. */
+    Subject UMETA(DisplayName = "Subject (LiveLink)"),
+    /** Any stream (RCV-21). */
+    AnyStream UMETA(DisplayName = "Any Stream")
 };
 
 UCLASS(ClassGroup = (Open3DBroadcast), meta = (BlueprintSpawnableComponent))
@@ -68,6 +72,13 @@ public:
      */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio", meta = (ClampMin = "0.0", UIMax = "500.0", Units = "ms"))
     float TargetLatencyMs = 60.0f;
+
+    /**
+     * Plays only streams with this label (case-insensitive), in every mode. Empty: any label.
+     * The component plays one stream at a time either way (RCV-21).
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
+    FString StreamLabelFilter;
 
     /** Output gain applied to incoming samples prior to playback. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
@@ -144,6 +155,12 @@ protected:
 
 private:
     void OnAudioPcm16(const O3DS::FAudioFrameMeta& Meta, TConstArrayView<uint8> PCM16Bytes);
+    void HandleAudioPcm16(const O3DS::FAudioFrameMeta& Meta, TConstArrayView<uint8> PCM16Bytes, double NowSeconds);
+    /**
+     * One stream at a time (RCV-21): the first matching stream (its source and label) is played
+     * until it has sent nothing for StreamIdleReleaseSeconds; other streams are dropped meanwhile.
+     */
+    bool AcceptStream(const O3DS::FAudioFrameMeta& Meta, double NowSeconds);
     bool MatchesFilter(const FString& InSubject, const FString& InStream) const;
     /** Subscribes to the audio bus of ContextName's context, once; UnbindBus leaves that same bus. */
     void BindBus();
@@ -164,6 +181,12 @@ private:
     int32 CurrentSampleRate = 0;
     /** Between OnAudioPcm16 (game thread) and the sound wave (audio thread); one per wave. */
     TSharedPtr<FO3DAudioJitterBuffer, ESPMode::ThreadSafe> JitterBuffer;
+
+    static constexpr double StreamIdleReleaseSeconds = 1.0;
+    bool bStreamLocked = false;
+    FGuid LockedSource;
+    FString LockedLabel;
+    double LockedLastPacketSeconds = 0.0;
 
     /** Set from bAC_AutoActivate at BeginPlay, then by Play and Stop. */
     bool bPlaybackWanted = false;
