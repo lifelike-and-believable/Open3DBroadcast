@@ -601,6 +601,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
   - **Status for unreadable data** (completes RCV-16, #390). The status said "Receiving" for bytes the receiver could not read, then flapped with "No data received". It now says "Unreadable data via X", or "Error: the sender … needs wire protocol N; update this receiver" for a newer sender, and "Receiving" only once a packet passes the check.
   - **"Parse failed" warnings are throttled** like malformed packets: one line per 10 s, with a count.
 
+- Line endings (WP-R2; mid-project review BC-11). New `.gitattributes`: git stores every text file with LF, and a checkout gets the platform's endings. 127 files that were stored with CRLF or mixed endings are renormalized in one commit, with their content otherwise unchanged. Shell scripts are LF in every checkout, so bash runs them from a Windows checkout. Patch files keep their bytes, and binaries are named so detection never decides. AGENTS.md drops the CRLF staging rules.
+
 - Gated release (WP-R2; mid-project review BC-4, BC-5). A tag `open3dbroadcast-vX.Y.Z` now releases only what PR CI would pass.
   - **Gate:** the version comes from the tag, and `CHANGELOG.md` needs a `## [X.Y.Z]` section naming the protocol, transport API and core versions (`Build/Scripts/release-version.py`, self-tested in PR CI).
   - **Version:** both `.uplugin` files get VersionName X.Y.Z and Version X×10000 + Y×100 + Z. Before, the release added 1 to the committed Version on every run and never wrote it back.
