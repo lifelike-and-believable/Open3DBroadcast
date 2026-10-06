@@ -1,7 +1,9 @@
 # Changelog
 
 The one changelog for the core library, the plugins and the transports (ADR 0009 item 10).
-Each release gets a `## [x.y.z] - date` section; until then changes collect under
+Each release gets a `## [x.y.z] - date` section that names the wire protocol, transport API
+and core library versions it carries (for example "protocol 2, transport API 5, core 1.1.0");
+the release workflow refuses a tag without one. Until then changes collect under
 `## Unreleased`. A **Schema/Protocol** entry is required for any wire change and states the
 protocol version, the `min_reader_version` of affected frames, compatibility in both
 directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) section 8).
@@ -598,6 +600,14 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
   - **Cleared subjects stay cleared** (completes RCV-6, #395). With concealment on, a subject cleared for inactivity came straight back with a frozen pose: concealment pushed a held frame in the same tick, and LiveLink applied it after the clear. Inactive subjects are now cleared before concealment runs.
   - **Status for unreadable data** (completes RCV-16, #390). The status said "Receiving" for bytes the receiver could not read, then flapped with "No data received". It now says "Unreadable data via X", or "Error: the sender … needs wire protocol N; update this receiver" for a newer sender, and "Receiving" only once a packet passes the check.
   - **"Parse failed" warnings are throttled** like malformed packets: one line per 10 s, with a count.
+
+- Gated release (WP-R2; mid-project review BC-4, BC-5). A tag `open3dbroadcast-vX.Y.Z` now releases only what PR CI would pass.
+  - **Gate:** the version comes from the tag, and `CHANGELOG.md` needs a `## [X.Y.Z]` section naming the protocol, transport API and core versions (`Build/Scripts/release-version.py`, self-tested in PR CI).
+  - **Version:** both `.uplugin` files get VersionName X.Y.Z and Version X×10000 + Y×100 + Z. Before, the release added 1 to the committed Version on every run and never wrote it back.
+  - **Build and tests:** the same Fab zip and UE jobs as PR CI, with warnings as errors and the automation tests. The UE job moved into `open3dbroadcast-ue-build-test.yml`, which PR CI and the release both call. Before, the release made a separate untested Shipping build.
+  - **Publish:** the release attaches the package the tests ran against, with the CHANGELOG section as notes. The Fab zip is a 90-day run artifact.
+  - **Dry run:** a manual run is always a dry run and cannot publish.
+  - Build/README.md, "Releases".
 
 - MoQ receiver: no stale frames after a reconnect (WP-R3, TR-10). Frames queued when the relay session dropped were delivered once a new session connected, seconds late. The receiver now discards them when the session is lost or a connect attempt times out, and counts them as dropped, as Stop does.
 

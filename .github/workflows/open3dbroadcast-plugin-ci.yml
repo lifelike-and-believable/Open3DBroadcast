@@ -9,7 +9,8 @@ name: Open3DBroadcast Plugin CI
 #     tests" on the single self-hosted UE runner. Drafts skip it so work in
 #     progress does not queue the runner; mark the PR ready for review, or
 #     run this workflow by hand on the branch (Actions > Run workflow), to
-#     get the UE result for a draft. That job builds Open3DBroadcast,
+#     get the UE result for a draft. That job (steps in
+#     open3dbroadcast-ue-build-test.yml, which the release reuses) builds Open3DBroadcast,
 #     tests it alone, then builds the Open3DBroadcastWebRTC add-on against
 #     that package and tests both plugins together (WP-F11).
 #   All jobs are skipped when a change touches nothing the plugin build
@@ -33,11 +34,6 @@ concurrency:
   # Superseded PR runs are cancelled; pushes to develop are not, so every merge gets its own
   # post-merge run (WP-R2, BC-12: a docs merge used to cancel the previous code merge's run).
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
-env:
-  UE_ROOT: 'C:\\Program Files\\Epic Games\\UE_5.7'
-  PLUGIN_NAME: 'Open3DBroadcast'
-  PLUGIN_PATH: 'ProjectSandbox/Plugins/Open3DBroadcast'
 
 jobs:
   changes:
@@ -66,7 +62,7 @@ jobs:
           predicate-quantifier: 'every'
           filters: |
             code:
-              - '{Build/**,ProjectSandbox/ProjectSandbox.uproject,ProjectSandbox/Source/**,ProjectSandbox/Plugins/Open3DBroadcast/**,ProjectSandbox/Plugins/Open3DBroadcastWebRTC/**,.github/workflows/open3dbroadcast-plugin-ci.yml,.github/workflows/open3dbroadcast-fab-package.yml}'
+              - '{Build/**,ProjectSandbox/ProjectSandbox.uproject,ProjectSandbox/Source/**,ProjectSandbox/Plugins/Open3DBroadcast/**,ProjectSandbox/Plugins/Open3DBroadcastWebRTC/**,.github/workflows/open3dbroadcast-plugin-ci.yml,.github/workflows/open3dbroadcast-ue-build-test.yml,.github/workflows/open3dbroadcast-fab-package.yml}'
               - '!**/*.md'
 
   fab-package:
@@ -127,231 +123,25 @@ jobs:
         run: python3 Build/Scripts/check-third-party-binaries.py --self-test
       - name: Check binary inventories
         run: python3 Build/Scripts/check-third-party-binaries.py
+      # WP-R2 (BC-4, BC-5): the release gate's tag, CHANGELOG and .uplugin logic has no other
+      # test before a release tag is pushed.
+      - name: Self-test the release version script
+        run: python3 Build/Scripts/release-version.py --self-test
 
   build-and-test:
     name: UE build and tests
     needs: [ changes, fab-package ]
     # !cancelled() lets this job run when fab-package failed or was skipped;
-    # the Fab steps below check its result themselves.
+    # the Fab steps check its result themselves (passed in as fab-package-result).
     if: >-
       !cancelled() && needs.changes.result == 'success' && (
         github.event_name == 'workflow_dispatch' ||
         (needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false))
       )
-    runs-on: [ self-hosted, ue5, windows ]
-    # 90 minutes plus the WebRTC add-on build and its test run (WP-F11).
-    timeout-minutes: 120
-
-    steps:
-      # No submodules and no pre-build step: BuildPlugin runs on the checkout
-      # as a clean clone has it, which is WP-F1's acceptance test. The o3ds
-      # core is compiled from source by the Open3DStreamCore module.
-      - name: Checkout (full)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          lfs: true
-          submodules: false
-
-      - name: Post build started comment
-        if: github.event_name == 'pull_request' && github.event.pull_request.number != null
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: `🚀 **Open3DBroadcast Plugin CI build started** for this PR!\n\n[View build logs →](${runUrl})`
-            });
-
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
-
-      - name: Setup UE
-        shell: powershell
-        run: |
-          & .\Build\Scripts\Setup-UE.ps1 -UEPath "${{ env.UE_ROOT }}"
-
-      - name: Resolve plugin paths
-        id: paths
-        shell: powershell
-        run: |
-          $pluginDir = Join-Path $PWD "${{ env.PLUGIN_PATH }}"
-          $upluginPath = Join-Path $pluginDir "${{ env.PLUGIN_NAME }}.uplugin"
-
-          if (!(Test-Path -LiteralPath $pluginDir)) {
-            throw "Plugin directory not found: $pluginDir"
-          }
-          if (!(Test-Path -LiteralPath $upluginPath)) {
-            throw "Plugin .uplugin file not found: $upluginPath"
-          }
-
-          "plugin_dir=$pluginDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "uplugin_path=$upluginPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Plugin directory: $pluginDir"
-          Write-Host "Plugin file: $upluginPath"
-
-      # The default BuildPlugin configuration (unity build, PCHs), which is
-      # what Fab's build farm runs. Warnings in plugin sources fail it (CI-4).
-      - name: Build Open3DBroadcast plugin (Win64)
-        shell: powershell
-        run: |
-          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackage'
-          & .\Build\Scripts\Build-Plugin.ps1 `
-            -UEPath "$env:UE_ROOT" `
-            -PluginUPluginPath "${{ steps.paths.outputs.uplugin_path }}" `
-            -OutDir "$pkg" `
-            -TargetPlatforms @("Win64") `
-            -Configuration "Development" `
-            -FailOnWarnings
-
-      - name: Package artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Open3DBroadcast-Win64-${{ github.sha }}
-          path: ${{ runner.temp }}/PluginPackage
-          retention-days: 30
-
-      # CI-2/CI-3: UE automation tests against the package built above, in a
-      # throwaway host project (no ProjectSandbox compile, no stale
-      # binaries). Filter is the plain prefix from ADR 0006; tests that need
-      # the internet stay off (O3DB_NETWORK_TESTS=0).
-      - name: Run UE automation tests
-        id: tests
-        timeout-minutes: 20
-        shell: powershell
-        env:
-          O3DB_NETWORK_TESTS: '0'
-        run: |
-          & .\Build\Scripts\Run-AutomationTests.ps1 `
-            -UEPath "$env:UE_ROOT" `
-            -PluginPackageDir (Join-Path $env:RUNNER_TEMP 'PluginPackage') `
-            -HostProjectDir (Join-Path $env:RUNNER_TEMP 'TestHost') `
-            -ResultsDir "$PWD\Artifacts\AutomationTests" `
-            -TestFilter "Open3DBroadcast" `
-            -MinTestsKey "plugin"
-
-      - name: Upload automation test report
-        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: Open3DBroadcast-AutomationTests-${{ github.sha }}
-          path: Artifacts/AutomationTests
-          if-no-files-found: ignore
-          retention-days: 14
-
-      # WP-F11 (ADR 0002): the Open3DBroadcastWebRTC add-on, built against the package above in a
-      # throwaway host project that has both plugins in Plugins/, the way a user installs them.
-      # Strict (no PCH, no unity build) and warnings as errors (CI-4). The run above, with the
-      # main plugin alone, is the "works without the add-on" check.
-      - name: Build WebRTC add-on against the package
-        id: addon
-        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
-        shell: powershell
-        run: |
-          & .\Build\Scripts\Build-WebRTCAddOn.ps1 `
-            -UEPath "$env:UE_ROOT" `
-            -HostPluginPackageDir (Join-Path $env:RUNNER_TEMP 'PluginPackage') `
-            -HostProjectDir (Join-Path $env:RUNNER_TEMP 'AddOnHost') `
-            -OutDir (Join-Path $env:RUNNER_TEMP 'AddOnPackage\Open3DBroadcastWebRTC') `
-            -StrictIncludes `
-            -FailOnWarnings
-
-      - name: Upload WebRTC add-on artifact
-        if: ${{ !cancelled() && steps.addon.outcome == 'success' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: Open3DBroadcastWebRTC-Win64-${{ github.sha }}
-          path: ${{ runner.temp }}/AddOnPackage
-          retention-days: 30
-
-      # Every Open3DBroadcast test again, plus the add-on's own, with both plugins enabled
-      # (WP-F11 acceptance; the conformance suite then also lists WebRTC).
-      - name: Run UE automation tests with the WebRTC add-on
-        id: addon-tests
-        if: ${{ !cancelled() && steps.addon.outcome == 'success' }}
-        timeout-minutes: 20
-        shell: powershell
-        env:
-          O3DB_NETWORK_TESTS: '0'
-        run: |
-          & .\Build\Scripts\Run-AutomationTests.ps1 `
-            -UEPath "$env:UE_ROOT" `
-            -ProjectFile (Join-Path $env:RUNNER_TEMP 'AddOnHost\O3DWebRTCHost.uproject') `
-            -ResultsDir "$PWD\Artifacts\AutomationTestsWithAddOn" `
-            -TestFilter "Open3DBroadcast" `
-            -MinTestsKey "plugin-with-webrtc"
-
-      - name: Upload automation test report (with add-on)
-        if: ${{ !cancelled() && steps.addon-tests.outcome != 'skipped' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: Open3DBroadcast-AutomationTestsWithAddOn-${{ github.sha }}
-          path: Artifacts/AutomationTestsWithAddOn
-          if-no-files-found: ignore
-          retention-days: 14
-
-      # CI-4: one extra configuration that combines the strict checks:
-      # BuildPlugin -StrictIncludes (no PCH, no unity build) with warnings in
-      # plugin sources treated as errors. Its output is discarded.
-      - name: Strict build (non-unity, no PCH, warnings as errors)
-        shell: powershell
-        run: |
-          $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackageStrict'
-          & .\Build\Scripts\Build-Plugin.ps1 `
-            -UEPath "$env:UE_ROOT" `
-            -PluginUPluginPath "${{ steps.paths.outputs.uplugin_path }}" `
-            -OutDir "$pkg" `
-            -TargetPlatforms @("Win64") `
-            -Configuration "Development" `
-            -StrictIncludes `
-            -FailOnWarnings
-
-      # CI-5: BuildPlugin on the contents of the Fab source zip made by the
-      # fab-package job, with nothing added to it (-RequireStandalone, WP-F1).
-      - name: Download Fab source zip
-        if: needs.fab-package.result == 'success'
-        uses: actions/download-artifact@v4
-        with:
-          name: Open3DBroadcast-Fab-Source-${{ github.sha }}
-          path: ${{ runner.temp }}/FabZip
-
-      - name: Build the Fab source zip
-        if: needs.fab-package.result == 'success'
-        shell: powershell
-        run: |
-          & .\Build\Scripts\Build-FabZip.ps1 `
-            -UEPath "$env:UE_ROOT" `
-            -Zip (Join-Path $env:RUNNER_TEMP 'FabZip') `
-            -WorkDir (Join-Path $env:RUNNER_TEMP 'FabBuild') `
-            -RequireStandalone
-
-      - name: Upload BuildPlugin logs
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Open3DBroadcast-BuildPluginLogs-${{ github.sha }}
-          path: |
-            ${{ runner.temp }}/*-BuildPlugin.log
-            ${{ runner.temp }}/FabBuild/*-BuildPlugin.log
-            ${{ runner.temp }}/AddOnHost-UBT.log
-          if-no-files-found: ignore
-          retention-days: 14
-
-      - name: Post build failed comment
-        if: github.event_name == 'pull_request' && github.event.pull_request.number != null && failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: `❌ **Open3DBroadcast Plugin CI build failed.**\n\n[View build logs →](${runUrl})\n\nPlease check the logs for details.`
-            });
+    # The steps live in a reusable workflow so the release runs the same ones (WP-R2, BC-4).
+    uses: ./.github/workflows/open3dbroadcast-ue-build-test.yml
+    with:
+      fab-package-result: ${{ needs.fab-package.result }}
 
   report:
     # Posts one comment on the PR when this workflow passed (jobs skipped by their `if:` count as
