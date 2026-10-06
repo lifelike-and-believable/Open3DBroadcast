@@ -54,6 +54,8 @@ private:
 	FGuid AudioSourceGuid;
 	/** Lock-free counters; GetStats() reads them (WP-T2 conformance Stats.MonotonicUnderLoad). */
 	std::atomic<int64> FramesSent{ 0 };
+	/** FO3DTransportConfig::SenderMetrics: bytes sent (WP-R3). May be empty. */
+	TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe> SenderMetrics;
 	std::atomic<int64> BytesSent{ 0 };
 	std::atomic<int64> DroppedFrames{ 0 };
 	/** ADR 0007 item 3: Connected from Start to Stop (the channel needs no peer). */

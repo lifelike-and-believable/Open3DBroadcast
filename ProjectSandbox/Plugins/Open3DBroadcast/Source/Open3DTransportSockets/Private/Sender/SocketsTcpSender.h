@@ -128,6 +128,8 @@ private:
 	std::atomic<int64> SendWaitCount{ 0 };
 	std::atomic<int64> FramesSent{ 0 };
 	std::atomic<int64> BytesSent{ 0 };
+	/** FO3DTransportConfig::SenderMetrics: bytes sent and accepted frames dropped (WP-R3). May be empty. */
+	TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe> SenderMetrics;
 	/** Refused frames, frames dropped with a client, and frames lost to a stall. */
 	std::atomic<int64> DroppedFrames{ 0 };
 	/** Queue counters at Initialize, so GetStats reports this session only. */

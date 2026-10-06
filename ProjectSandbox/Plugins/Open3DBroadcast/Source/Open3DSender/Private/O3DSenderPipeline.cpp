@@ -2,6 +2,7 @@
 
 #include "O3DSenderPipeline.h"
 
+#include "O3DPerformanceMetrics.h"
 #include "O3DSenderCapture.h"
 #include "O3DSenderCurveProcessor.h"
 #include "O3DSenderLogs.h"
@@ -380,6 +381,11 @@ void FO3DSenderPipeline::SendLocked(const FO3DSPoseFrame& Frame, TArray<uint8>&&
 	// Stamped at send time on the worker, so a frame dropped from the queue never leaves a gap.
 	LastSendSequence.fetch_add(1);
 	PayloadsHandedToTransport.fetch_add(1);
+	if (Metrics.IsValid())
+	{
+		Metrics->RecordFrameCaptured();
+		Metrics->RecordBytesSerialized(static_cast<uint64>(Bytes.Num()));
+	}
 	const double CaptureToSendSeconds = FPlatformTime::Seconds() - Frame.CaptureTimeSec;
 	LastCaptureToSendSeconds.store(CaptureToSendSeconds);
 	UpdatePipelineMaxSeconds(MaxCaptureToSendSeconds, CaptureToSendSeconds);
@@ -394,6 +400,10 @@ void FO3DSenderPipeline::SendLocked(const FO3DSPoseFrame& Frame, TArray<uint8>&&
 	}
 
 	PayloadsRefused.fetch_add(1);
+	if (Metrics.IsValid())
+	{
+		Metrics->RecordFrameDropped();
+	}
 	RequestFullSyncAfterUndelivered(Frame, bFullSync);
 	// Not retried: the next frame supersedes this one. DroppedBackpressure is counted in the
 	// transport's DroppedFrames; NotConnected is expected while a peer or session is missing.
@@ -423,6 +433,12 @@ void FO3DSenderPipeline::AttachSender(const TSharedPtr<IOpen3DSender>& InSender)
 		Sender->SetPeerJoinedCallback([Flag = FullSyncAllRequested]() { Flag->store(true); });
 		Sender->SetFramesDroppedCallback([Flag = FullSyncAllRequested]() { Flag->store(true); });
 	}
+}
+
+void FO3DSenderPipeline::SetMetrics(const TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe>& InMetrics)
+{
+	FScopeLock WorkerGuard(&WorkerLock);
+	Metrics = InMetrics;
 }
 
 void FO3DSenderPipeline::DetachSender()

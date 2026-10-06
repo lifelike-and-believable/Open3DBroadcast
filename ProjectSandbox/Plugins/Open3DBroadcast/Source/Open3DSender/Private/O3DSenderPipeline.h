@@ -15,6 +15,7 @@
 
 #include <atomic>
 
+class FO3DSenderMetricsHandle;
 class IOpen3DSender;
 class FO3DSenderCurveFilter;
 
@@ -106,6 +107,11 @@ public:
 	/** The transport the worker sends to (the sender transport controller calls these). Wait for a frame being processed. */
 	void AttachSender(const TSharedPtr<IOpen3DSender>& InSender);
 	void DetachSender();
+	/**
+	 * The sender's metrics handle (ADR 0012 item 4): frames captured, bytes serialized and frames
+	 * the transport refused are recorded here, once, for every transport (WP-R3). Owner thread.
+	 */
+	void SetMetrics(const TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe>& InMetrics);
 
 	/**
 	 * Broadcast on the worker (or, in synchronous mode, the owner thread) after each serialized
@@ -210,6 +216,7 @@ private:
 	 * a full sync of every subject. Shared, so a sender that outlives this pipeline only writes
 	 * to the flag.
 	 */
+	TSharedPtr<FO3DSenderMetricsHandle, ESPMode::ThreadSafe> Metrics;
 	const TSharedRef<std::atomic<bool>, ESPMode::ThreadSafe> FullSyncAllRequested = MakeShared<std::atomic<bool>, ESPMode::ThreadSafe>(false);
 	std::atomic<bool> bAsync{ true };
 	std::atomic<int32> DepthOverride{ 0 };
