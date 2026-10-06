@@ -609,6 +609,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
   - **Dry run:** a manual run is always a dry run and cannot publish.
   - Build/README.md, "Releases".
 
+- NNG listener restart checked (WP-R3, TR-4). The NNG conformance profile skipped `Lifecycle.RestartAfterStop` and ran the control stop case with one sender, on the belief that a closed listener lingers on its port. Both run now, and pass repeatedly: restart after Stop on the same port works, so no code change was needed.
+
 - Receiver stats readable from any thread (WP-R3, TR-9). `IOpen3DReceiver::GetStats` may be called from any thread, but the UDP and Loopback receivers copied counters that `Poll` was writing, without a lock. Both now guard their stats with a lock, as the MoQ and WebRTC receivers do. New conformance case `Stats.ReceiverReadFromAnyThread`, for every profile with a receiver: another thread samples `GetStats` while the game thread polls, and the counters never go backwards.
 
 - MoQ receiver options (WP-R3, TR-8). The receiver's options showed **Delivery Mode** and **Queue Capacity (MiB)**, which only the sender reads: the publisher picks the delivery mode, and a receiver has no send queue. The receiver no longer lists them; a value already saved in a receiver config is ignored, as before.
