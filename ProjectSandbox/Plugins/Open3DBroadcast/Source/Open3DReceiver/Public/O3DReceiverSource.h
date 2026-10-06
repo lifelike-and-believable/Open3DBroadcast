@@ -67,7 +67,8 @@ public:
 
     // Tickable interface
     virtual void Tick(float DeltaTime) override;
-    virtual bool IsTickable() const override { return true; }
+    /** Not after RequestSourceShutdown: a Blueprint handle can keep the source alive after LiveLink removed it. */
+    virtual bool IsTickable() const override { return bIsValid.load(); }
     virtual bool IsTickableWhenPaused() const override { return true; }
     virtual bool IsTickableInEditor() const override { return true; }
     virtual TStatId GetStatId() const override { RETURN_QUICK_DECLARE_CYCLE_STAT(FO3DReceiverSource, STATGROUP_Tickables); }
@@ -175,6 +176,9 @@ private:
      *  see GetSettingsClass()) to access concealment config; null before InitializeSettings() runs. */
     const class UO3DReceiverSourceSettings* GetConcealmentSettings() const;
 
+    /** Tick with the clock passed in, for tests (Tick passes FPlatformTime::Seconds()). */
+    void TickAt(float DeltaTime, double NowSeconds);
+
     bool ParseSubjectListRaw(O3DS::SubjectList& List, const FString& Subject, const char* Data, size_t Len, std::vector<O3DS::ParsedSubjectInfo>& OutTouched,
         const O3DS::ParseContext* Context = nullptr);
 
@@ -229,15 +233,16 @@ private:
 
     ILiveLinkClient* Client = nullptr;
     FGuid SourceGuid;
-    ULiveLinkSourceSettings* Settings = nullptr;
+    /** Owned by LiveLink's entry for this source, which can go while the source lives on (WP-R1). */
+    TWeakObjectPtr<ULiveLinkSourceSettings> Settings;
 
     std::atomic<bool> bIsValid{true};
     /** The last start failed (RCV-16); IsSourceStillValid is false until a start succeeds. */
     std::atomic<bool> bStartFailed{false};
     /** The status currently says "Receiving via X". */
     bool bStatusIsReceiving = false;
-    /** The status says no data arrived lately; the next frame restores "Receiving via X". */
-    bool bStalled = false;
+    /** The status says the last packet could not be read (RR-3); set once, not per packet. */
+    bool bStatusIsUnreadable = false;
     static constexpr double StalledAfterSeconds = 2.0;
     /** The transport's connection-state changes, posted from any thread, drained in Tick (RCV-16). */
     TSharedRef<FO3DConnectionStateMailbox, ESPMode::ThreadSafe> StateMailbox = MakeShared<FO3DConnectionStateMailbox, ESPMode::ThreadSafe>();
@@ -258,6 +263,9 @@ private:
     static constexpr double MalformedWarningIntervalSeconds = 10.0;
     double LastMalformedWarningTime = -1.0e300;
     int32 SuppressedMalformedWarnings = 0;
+    // The same for "Parse failed": a packet that passes the check but not the full parse (WP-R1).
+    double LastParseFailedWarningTime = -1.0e300;
+    int32 SuppressedParseFailedWarnings = 0;
 
     // Transport state
     FO3DReceiverSourceConfig SourceSettings;
@@ -291,5 +299,4 @@ private:
     // holds the WP-S4 test push hooks (WP-A3). Always set (created by the constructor).
     TUniquePtr<FO3DLiveLinkPublisher> Publisher;
 
-    bool bLoggedActiveState = false;
 };

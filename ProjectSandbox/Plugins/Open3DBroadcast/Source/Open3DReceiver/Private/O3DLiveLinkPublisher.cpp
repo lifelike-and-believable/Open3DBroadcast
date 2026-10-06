@@ -123,9 +123,11 @@ void FO3DLiveLinkPublisher::ClearInactiveSubjects(double NowSeconds, double Thre
 		if ((NowSeconds - It.Value()) > ThresholdSeconds)
 		{
 			// RCV-6: clear, not remove. Removing deleted the user's subject settings (preprocessors,
-			// interpolation, translators). ClearFrames drops the static data too, so the subject is
-			// invalid until its next frame, which pushes static data again into the same subject
-			// (FLiveLinkClient::PushSubjectStaticData_Internal keeps an existing subject of the role).
+			// interpolation, translators). ClearFrames empties the frames and the snapshot (the
+			// subject's own static data stays), so the subject reads as having no data; its next
+			// frame comes with static data again, which keeps an existing subject of the same role
+			// (FLiveLinkClient::PushSubjectStaticData_Internal). The caller clears before
+			// concealment runs, so no synthesized frame revives it (WP-R1).
 			if (Client)
 			{
 				Client->ClearSubjectsFrames_AnyThread(MakeKey(It.Key()));
