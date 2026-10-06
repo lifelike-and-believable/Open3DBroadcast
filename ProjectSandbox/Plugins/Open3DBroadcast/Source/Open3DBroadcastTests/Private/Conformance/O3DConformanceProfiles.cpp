@@ -433,11 +433,9 @@ namespace O3DTests
 
 #if O3D_WITH_TRANSPORT_NNG
 		{
-			// RestartAfterStop is left out: the NNG lifetime test notes that a closed listener can
-			// linger and make an immediate re-listen on the same port fail. Follow-up for WP-A1.
 			FO3DConformanceProfile Profile;
 			Profile.MakeFixture = []() -> TUniquePtr<FO3DConformanceFixture> { return MakeUnique<FNngFixture>(); };
-			Profile.Cases = (SenderAndReceiverCases & ~EO3DConformanceCase::LifecycleRestartAfterStop)
+			Profile.Cases = SenderAndReceiverCases
 				| EO3DConformanceCase::SendBackpressure | EO3DConformanceCase::RoundTripByteExact | ControlCases
 				| EO3DConformanceCase::ConnectionStateConnected | EO3DConformanceCase::MetricsCountWhatWasSent;
 			// 16 KiB frames into the 64 KiB queue, with the worker held (WP-R3, TR-7).
@@ -447,7 +445,6 @@ namespace O3DTests
 			// ReliableOrdered; Open3DBroadcast.Shared.TransportCapabilities covers those).
 			Profile.ExpectedCapabilities = MakeBaseCapabilities(EO3DDeliveryGuarantee::Unreliable);
 			Profile.ExpectedCapabilities.bPeerJoinSignal = true; // ADR 0005 (vi)
-			Profile.ControlStopCycles = 1; // a closed listener can linger (see above), so one sender per test
 			RegisterConformanceProfile(NngName, Profile);
 		}
 #endif
