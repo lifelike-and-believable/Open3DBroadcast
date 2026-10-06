@@ -350,7 +350,7 @@ void FO3DReceiverSource::Tick(float DeltaTime)
 
     if (TimeSinceLastActivityCheck >= ActivityCheckIntervalSeconds)
     {
-        RemoveInactiveSubjects();
+        ClearInactiveSubjects(FPlatformTime::Seconds());
         TimeSinceLastActivityCheck = 0.0f;
     }
 }
@@ -701,11 +701,16 @@ void FO3DReceiverSource::UpdateConnectionLastActive()
     ConnectionLastActive = Now;
 }
 
-/** Drop LiveLink subjects that have not produced frames within the inactivity window. */
-void FO3DReceiverSource::RemoveInactiveSubjects()
+void FO3DReceiverSource::ClearInactiveSubjects(double NowSeconds)
 {
-    const double Now = FPlatformTime::Seconds();
-    Publisher->RemoveInactiveSubjects(Now, InactivityThresholdSeconds, [this](FName Subject)
+    const UO3DReceiverSourceSettings* SettingsObject = GetConcealmentSettings();
+    const double TimeoutSeconds = SettingsObject ? SettingsObject->InactiveSubjectTimeoutSeconds : 5.0;
+    if (TimeoutSeconds <= 0.0)
+    {
+        return;
+    }
+
+    Publisher->ClearInactiveSubjects(NowSeconds, TimeoutSeconds, [this](FName Subject)
     {
         FrameDecoder->ForgetSubject(Subject);
         Concealment->ForgetSubject(Subject);  // C1: drop the per-subject predictor/state too
@@ -713,7 +718,7 @@ void FO3DReceiverSource::RemoveInactiveSubjects()
 
     // Senders that went quiet: drop their parse and ordering state too, so a
     // restarted sender starts clean and the table does not keep dead streams.
-    Scheduler->PruneIdle(Now, InactivityThresholdSeconds);
+    Scheduler->PruneIdle(NowSeconds, TimeoutSeconds);
 }
 
 /** Entry point from the serialized consumer; peeks sequencing metadata, then either
@@ -948,8 +953,8 @@ bool FO3DReceiverSource::ParseSubjectListRaw(O3DS::SubjectList& List, const FStr
 }
 
 /** Publish only the subjects this packet touched (RCV-5). Subjects the stream knows
- *  but the packet did not mention are left alone, so RemoveInactiveSubjects can
- *  retire them. */
+ *  but the packet did not mention are left alone, so ClearInactiveSubjects can
+ *  clear them. */
 int32 FO3DReceiverSource::PublishTouchedSubjects(O3DS::SubjectList& List, const std::vector<O3DS::ParsedSubjectInfo>& Touched, double WorldTimeSecondsOverride)
 {
     int32 Count = 0;

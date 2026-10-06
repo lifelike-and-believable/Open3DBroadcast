@@ -2,7 +2,7 @@
 
 // FO3DLiveLinkPublisher (WP-A3, RCV-29): creates a LiveLink subject once per session (RCV-7),
 // re-pushes static data only when bone or curve names change, pushes real and synthesized frames,
-// and removes subjects that stopped sending. Reached through the exported FO3DLiveLinkPublisherProbe,
+// and clears subjects that stopped sending. Reached through the exported FO3DLiveLinkPublisherProbe,
 // whose test hooks record the pushes instead of a LiveLink client.
 
 #include "O3DTestHarness.h"
@@ -76,17 +76,35 @@ bool FO3DLiveLinkPublisherFramesTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Without static data"), Probe.Statics.Num(), 2);
 
 	// Nothing is inactive yet.
-	TestEqual(TEXT("Nothing removed within the threshold"), Probe.RemoveInactiveSubjects(FPlatformTime::Seconds(), 5.0).Num(), 0);
+	TestEqual(TEXT("Nothing cleared within the threshold"), Probe.ClearInactiveSubjects(FPlatformTime::Seconds(), 5.0).Num(), 0);
 
 	// Ten seconds later both are inactive.
-	const TArray<FName> Removed = Probe.RemoveInactiveSubjects(FPlatformTime::Seconds() + 10.0, 5.0);
-	TestEqual(TEXT("Both removed"), Removed.Num(), 2);
-	TestTrue(TEXT("Each reported"), Removed.Contains(Hero) && Removed.Contains(Villain));
+	const TArray<FName> Cleared = Probe.ClearInactiveSubjects(FPlatformTime::Seconds() + 10.0, 5.0);
+	TestEqual(TEXT("Both cleared"), Cleared.Num(), 2);
+	TestTrue(TEXT("Each reported"), Cleared.Contains(Hero) && Cleared.Contains(Villain));
 	TestEqual(TEXT("No active subjects left"), Probe.GetActiveSubjectCount(), 0);
 
-	// A removed subject is created again when it returns.
-	TestTrue(TEXT("A returning subject is new"), Probe.PublishStatic(Hero, Bones, Parents, NoCurves));
-	TestTrue(TEXT("And created again"), Probe.Statics.Num() == 3 && Probe.Statics[2].bFirstPushThisSession);
+	// A cleared subject gets its static data again when it returns. As a first push of the
+	// session, which reuses a subject LiveLink still has (RCV-7), so its settings stay (RCV-6).
+	TestTrue(TEXT("A returning subject is a topology change"), Probe.PublishStatic(Hero, Bones, Parents, NoCurves));
+	TestTrue(TEXT("Its static data is pushed again"), Probe.Statics.Num() == 3 && Probe.Statics[2].bFirstPushThisSession);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLiveLinkPublisherZeroTimeoutTest, "Open3DBroadcast.Receiver.LiveLinkPublisher.ZeroTimeoutNeverExpires", O3DB_TEST_FLAGS)
+bool FO3DLiveLinkPublisherZeroTimeoutTest::RunTest(const FString& Parameters)
+{
+	// RCV-6: an Inactive Subject Timeout of 0 means subjects never expire.
+	const FName Hero(TEXT("Hero"));
+	const TArray<FName> Bones = { FName(TEXT("root")) };
+	const TArray<int32> Parents = { -1 };
+
+	FO3DLiveLinkPublisherProbe Probe;
+	Probe.PublishStatic(Hero, Bones, Parents, TArray<FName>());
+	Probe.PublishFrame(Hero, 1, 1.0);
+
+	TestEqual(TEXT("Nothing expires with a timeout of 0"), Probe.ClearInactiveSubjects(FPlatformTime::Seconds() + 3600.0, 0.0).Num(), 0);
+	TestEqual(TEXT("The subject stays active"), Probe.GetActiveSubjectCount(), 1);
 	return true;
 }
 
