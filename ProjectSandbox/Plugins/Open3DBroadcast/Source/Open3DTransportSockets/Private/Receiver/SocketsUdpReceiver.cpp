@@ -12,6 +12,7 @@
 #include "SocketSubsystem.h"
 #include "IPAddress.h"
 #include "HAL/PlatformTime.h"
+#include "Misc/ScopeLock.h"
 #include "Logging/LogMacros.h"
 
 THIRD_PARTY_INCLUDES_START
@@ -91,7 +92,10 @@ FO3DTransportResult FO3DSocketsUdpReceiver::Initialize(const FO3DTransportConfig
 	Stop();
 
 	ActiveConfig = Config;
-	Stats.Reset();
+	{
+		FScopeLock Lock(&StatsMutex);
+		Stats.Reset();
+	}
 	BindEndpoint = FO3DHostPort();
 	BindPort = 0;
 	StreamId = ActiveConfig.StreamId;
@@ -244,18 +248,24 @@ int32 FO3DSocketsUdpReceiver::Poll()
 		switch (Demux.ProcessMessage(Frame.GetData(), Frame.Num(), FPlatformTime::Seconds()))
 		{
 		case EO3DDemuxResult::Mocap:
+		{
+			FScopeLock Lock(&StatsMutex);
 			Stats.FramesReceived++;
 			Stats.BytesReceived += Frame.Num();
 			++FramesProcessed;
 			break;
+		}
 		case EO3DDemuxResult::Audio:
 			++FramesProcessed;
 			break;
 		case EO3DDemuxResult::AudioRejected:
 		case EO3DDemuxResult::Malformed:
 		case EO3DDemuxResult::Oversize:
+		{
+			FScopeLock Lock(&StatsMutex);
 			Stats.ReceiveErrors++;
 			break;
+		}
 		default:
 			break; // control (not a frame), keepalives, unknown kinds
 		}
@@ -270,7 +280,11 @@ int32 FO3DSocketsUdpReceiver::Poll()
 
 FO3DTransportStats FO3DSocketsUdpReceiver::GetStats() const
 {
-	FO3DTransportStats Copy = Stats;
+	FO3DTransportStats Copy;
+	{
+		FScopeLock Lock(&StatsMutex);
+		Copy = Stats;
+	}
 	Copy.State = ConnectionState.Get();
 	return Copy;
 }
@@ -405,7 +419,10 @@ bool FO3DSocketsUdpReceiver::ProcessDatagram(const uint8* Data, int32 Bytes, TAr
 	{
 		if (!IsFragmentPacket(Data, Bytes))
 		{
-			Stats.ReceiveErrors++;
+			{
+				FScopeLock Lock(&StatsMutex);
+				Stats.ReceiveErrors++;
+			}
 			UE_LOG(LogSocketsUdpReceiver, Verbose, TEXT("Discarded UDP fragment with an inconsistent header (size=%d)."), Bytes);
 			return false;
 		}

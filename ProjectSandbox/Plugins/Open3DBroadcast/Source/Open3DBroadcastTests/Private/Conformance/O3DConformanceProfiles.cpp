@@ -39,6 +39,7 @@ namespace O3DConformanceProfiles
 		| EO3DConformanceCase::SendRejectedWhenNotRunning
 		| EO3DConformanceCase::SendConcurrent
 		| EO3DConformanceCase::StatsMonotonic
+		| EO3DConformanceCase::ReceiverStatsFromAnyThread
 		// ADR 0007 item 3 and 4 (WP-A1 PR 3): result codes, capabilities and connection state.
 		| EO3DConformanceCase::ReceiverStartWithoutConsumer
 		| EO3DConformanceCase::SendEmptyPayloadInvalid
