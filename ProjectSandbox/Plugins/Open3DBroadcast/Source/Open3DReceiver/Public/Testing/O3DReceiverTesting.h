@@ -64,6 +64,16 @@ struct FO3DRemoteAudioComponentTestAccessor
 	{
 		return Component->CurrentSampleRate;
 	}
+
+	static UAudioComponent* GetAudioComponent(const UO3DRemoteAudioComponent* Component)
+	{
+		return Component->AudioComp;
+	}
+
+	static bool IsPlaybackWanted(const UO3DRemoteAudioComponent* Component)
+	{
+		return Component->bPlaybackWanted;
+	}
 };
 
 struct FO3DReceiverSourceTestAccessor
