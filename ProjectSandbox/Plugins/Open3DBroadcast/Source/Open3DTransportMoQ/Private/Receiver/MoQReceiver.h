@@ -117,6 +117,8 @@ private:
 	void HandleConnectTimeout(double Now);
 	/** Reports a lost session: Reconnecting when it had been connected (game thread). */
 	void ReportSessionLost(const FString& Reason);
+	/** Game thread (the queue's consumer): discards everything queued and counts the frames as dropped. */
+	void DropQueued();
 	/** Game thread: schedules the next connect attempt using capped, jittered backoff. */
 	void ScheduleReconnect(double Now);
 	/** Game thread: records a failed subscribe and schedules the next try. */

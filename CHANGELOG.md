@@ -599,6 +599,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
   - **Status for unreadable data** (completes RCV-16, #390). The status said "Receiving" for bytes the receiver could not read, then flapped with "No data received". It now says "Unreadable data via X", or "Error: the sender … needs wire protocol N; update this receiver" for a newer sender, and "Receiving" only once a packet passes the check.
   - **"Parse failed" warnings are throttled** like malformed packets: one line per 10 s, with a count.
 
+- MoQ receiver: no stale frames after a reconnect (WP-R3, TR-10). Frames queued when the relay session dropped were delivered once a new session connected, seconds late. The receiver now discards them when the session is lost or a connect attempt times out, and counts them as dropped, as Stop does.
+
 - NNG listener restart checked (WP-R3, TR-4). The NNG conformance profile skipped `Lifecycle.RestartAfterStop` and ran the control stop case with one sender, on the belief that a closed listener lingers on its port. Both run now, and pass repeatedly: restart after Stop on the same port works, so no code change was needed.
 
 - Receiver stats readable from any thread (WP-R3, TR-9). `IOpen3DReceiver::GetStats` may be called from any thread, but the UDP and Loopback receivers copied counters that `Poll` was writing, without a lock. Both now guard their stats with a lock, as the MoQ and WebRTC receivers do. New conformance case `Stats.ReceiverReadFromAnyThread`, for every profile with a receiver: another thread samples `GetStats` while the game thread polls, and the counters never go backwards.
