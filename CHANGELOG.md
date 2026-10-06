@@ -599,6 +599,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
   - **Status for unreadable data** (completes RCV-16, #390). The status said "Receiving" for bytes the receiver could not read, then flapped with "No data received". It now says "Unreadable data via X", or "Error: the sender … needs wire protocol N; update this receiver" for a newer sender, and "Receiving" only once a packet passes the check.
   - **"Parse failed" warnings are throttled** like malformed packets: one line per 10 s, with a count.
 
+- MoQ receiver options (WP-R3, TR-8). The receiver's options showed **Delivery Mode** and **Queue Capacity (MiB)**, which only the sender reads: the publisher picks the delivery mode, and a receiver has no send queue. The receiver no longer lists them; a value already saved in a receiver config is ignored, as before.
+
 - Hot-path transport logs throttled (WP-R3, TR-6). A peer sending oversized datagrams or messages, or a failing socket, produced one warning per datagram or frame. These log sites now write at most one line per 2 s, with the number of similar lines left out since the last one:
   - **UDP receiver:** recv failures; a datagram, payload or reassembled payload over the size cap.
   - **UDP sender:** send failures and partial sends. The per-fragment failure line is now Verbose, since the datagram failure behind it is already logged.
