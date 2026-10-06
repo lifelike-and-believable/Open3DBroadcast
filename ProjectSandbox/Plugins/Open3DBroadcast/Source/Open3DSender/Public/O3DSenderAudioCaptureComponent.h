@@ -47,25 +47,32 @@ struct FO3DSenderAudioCaptureConfig
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio", meta = (EditCondition = "false", EditConditionHides))
     EO3DSenderAudioSource Source = EO3DSenderAudioSource::GameSubmix;
 
+    /** Submix whose output is captured in Game Submix mode. Empty: the main submix. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
     USoundSubmix* SubmixToTap = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
+    /** Sample rate sent, in Hz. The Opus codec takes 8000, 12000, 16000, 24000 or 48000 only (SND-27). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio", meta = (ClampMin = "8000", ClampMax = "48000", Units = "Hz"))
     int32 SampleRate = 48000;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
+    /** Channels sent: 1 or 2 with the Opus codec, up to 8 with PCM. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio", meta = (ClampMin = "1", ClampMax = "8"))
     int32 NumChannels = 1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
+    /** Opus bitrate in kbit/s; 0 lets the encoder choose. PCM ignores it. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio", meta = (ClampMin = "0", UIMax = "256"))
     int32 BitrateKbps = 64;
 
+    /** Microphone device index in Input mode; -1 uses the default device. Set by Audio Input Device. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio", meta = (ClampMin = "-1"))
     int32 DeviceIndex = -1;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
+    /** Gain applied to captured game (submix) audio. 1 leaves it unchanged. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio", meta = (ClampMin = "0", UIMax = "4"))
     float GameGain = 1.0f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio")
+    /** Gain applied to captured microphone audio. 1 leaves it unchanged. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Audio", meta = (ClampMin = "0", UIMax = "4"))
     float MicGain = 1.0f;
 };
 

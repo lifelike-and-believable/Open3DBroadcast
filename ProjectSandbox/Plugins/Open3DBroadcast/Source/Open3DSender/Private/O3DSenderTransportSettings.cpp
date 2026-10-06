@@ -170,6 +170,7 @@ bool FO3DSenderTransportSettings::IsRestartProperty(FName Property)
 		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, CaptureRateHz),
 		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, SubjectName),
 		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TargetMesh),
+		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TargetMeshComponent),
 		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TransportName),
 		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bAutoCreateTransport),
 		GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bEnableAudio),
