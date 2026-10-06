@@ -832,6 +832,15 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
 - **Approach:** one PR per area, each with a test that fails first. TR-2: remove NNG's Subscription Topic option (maintainer, 2026-10-06), so subscribers take every message.
 - **Done** (2026-10-06): PR 1, #401 (receiver): RR-1 to RR-4. PR 2, #402 (sender): SR-3, SR-2. PR 3, #403 (transports): TR-1/SR-1, TR-2, TR-3.
 
+#### WP-R2: CI and release from the mid-project review  ·  P1 · M · coding (added 2026-10-06)
+- **Items:** mid-project review BC-2, BC-3 (one required check per workflow), BC-12 (develop runs not cancelled), BC-7 (minimum test count), BC-8 (every fuzz target runs), BC-9 (a red nightly opens an issue), BC-4, BC-5 (gated release), BC-11 (`.gitattributes` and renormalize, last).
+- **Maintainer decisions (2026-10-06):** renormalize line endings in one PR; a red nightly opens or updates an issue labelled `nightly-failure`; a release on an `open3dbroadcast-vX.Y.Z` tag builds and tests like PR CI, packages the Fab zip and the GitHub package from that build, takes the version from the tag and requires a `## [X.Y.Z]` CHANGELOG section.
+- **Progress:** PR 1: aggregator checks and the concurrency fix.
+
+#### WP-R3: Transport consistency from the mid-project review  ·  P2 · M · coding (added 2026-10-06)
+- **Items:** mid-project review TR-5/SR-4 (counter semantics, sender metrics recorded once), TR-6 (one log throttle), TR-7 (`TooLarge` above the hard cap; a backpressure case that fills a queue), TR-8 (MoQ receiver options), TR-9 (thread-safe receiver stats), TR-10 (MoQ stale frames after reconnect), TR-4 (NNG listener restart). TR-11 goes to WP-T2e.
+- **WP-T2e (defined here):** the WebRTC add-on's conformance profile, deferred by WP-T2 and WP-CTL; it also covers TR-11 (Start after Stop, re-Initialize).
+
 ---
 
 ## 6. Suggested first two weeks (parallel lanes)
