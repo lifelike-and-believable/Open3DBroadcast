@@ -40,6 +40,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Add a unit test for "Opus requested, Opus unavailable" that asserts `OutFrame.Codec == PCM16`.
 - Effort: S
 - Owner: coding
+- Status: closed in #279
 
 ### SHR-2: Opus encoder is fed arbitrary buffer sizes, so Opus is effectively never used (silent permanent fallback)
 - Category: bug
@@ -58,6 +59,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Add a test that feeds 512- and 1024-frame buffers.
 - Effort: M
 - Owner: coding
+- Status: closed in #279
 
 ### SHR-3: `FO3DPerformanceMetrics` hands out raw pointers into a reallocatable `TArray` (use-after-free race)
 - Category: thread-safety
@@ -75,6 +77,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Replace `GetAllTransportMetrics()` with a function that returns a locked snapshot copy.
 - Effort: M
 - Owner: coding
+- Status: closed in #279
 
 ### SHR-4: Shared's test file hard-includes a Sender header, which breaks the build when `O3D_BUILD_SENDER=0` and inverts module layering
 - Category: bug
@@ -89,6 +92,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Remove the `PublicIncludePathModuleNames` line from Shared.
 - Effort: S
 - Owner: coding
+- Status: closed in #283
 
 ### SHR-5: Four of the "generic transport" tests are placeholders that always pass
 - Category: tests
@@ -103,6 +107,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Delete the placeholders, or turn them into a real parameterized conformance suite. It would iterate `O3DTransport::GetRegisteredSenders()` and `GetRegisteredReceivers()`, pair each with Loopback-style local config, and assert the Initialize→Start→Send→Stop idempotency, the backpressure `DroppedFrames` contract, concurrent `SendSerialized`, and `GetStats` monotonicity.
 - Effort: L
 - Owner: design
+- Status: closed in #276
 
 ### SHR-6: No unit tests for wire parsing, audio (de)serialization, the encoder/decoder, helpers or metrics
 - Category: tests
@@ -122,6 +127,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Consider a libFuzzer harness outside UE for the two parsers.
 - Effort: M
 - Owner: coding
+- Status: closed in #276
 
 ### SHR-7: Wire format has no enforced versioning, mixed endianness, duplicated fields, and native-endian PCM samples
 - Category: architecture
@@ -159,6 +165,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Return a typed error enum so callers can count errors instead of logging a Warning per packet (as SocketsTcpReceiver.cpp:467 does today, which floods the log from untrusted peers).
 - Effort: S
 - Owner: coding
+- Status: closed in #279
 
 ### SHR-9: `NormalizeTcpUrlHostPort` corrupts IPv4 URLs that have no port
 - Category: bug
@@ -173,6 +180,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - If it must be kept, only rewrite when the host part before the last dot is a valid hostname or IPv4 address with exactly 4 dotted parts plus a port, and add a test table.
 - Effort: S
 - Owner: coding
+- Status: closed in #305
 
 ### SHR-10: `FO3DAudioBus` is a global non-thread-safe multicast delegate that documents itself as thread-safe
 - Category: thread-safety
@@ -191,6 +199,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Longer term, replace the singleton with a per-receiver-source delegate or a `UWorldSubsystem` so PIE instances are isolated.
 - Effort: S
 - Owner: coding
+- Status: closed in #269
 
 ### SHR-11: `FO3DTransportConfig::ToDebugString` claims "secrets redacted" but prints AdvancedParams, which contain the WebRTC token
 - Category: security
@@ -207,6 +216,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Add a test that asserts the token substring never appears in the output.
 - Effort: S
 - Owner: coding
+- Status: closed in #275
 
 ### SHR-12: The transport abstraction is split across modules, duplicated, unversioned and inconsistent between sender and receiver
 - Category: architecture
@@ -226,6 +236,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Delete `O3DTransportRegistry.h`.
 - Effort: M
 - Owner: design
+- Status: closed in #289
 
 ### SHR-13: No lifetime contract between registered factories and module unload
 - Category: architecture
@@ -241,6 +252,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - On `UnregisterSender` / `UnregisterReceiver`, call `Stop()` on the live instances and broadcast an `OnTransportUnregistered(FName)` delegate, so components can drop them before the DLL unloads.
 - Effort: M
 - Owner: design
+- Status: closed in #303
 
 ### SHR-14: Error reporting is `bool` plus log only, and stats are not specified for concurrency
 - Category: usability
@@ -258,6 +270,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Document that `GetStats()` is any-thread and lock-free.
 - Effort: M
 - Owner: design
+- Status: closed in #304
 
 ### SHR-15: One `FFrameDecoder` per receiver is shared across all incoming audio streams
 - Category: bug
@@ -272,6 +285,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Document that `FFrameDecoder` is single-stream.
 - Effort: S
 - Owner: coding
+- Status: closed in #269
 
 ### SHR-16: The `ISerializedFrameConsumer` API forces a payload copy, and its threading and ownership are unspecified
 - Category: performance
@@ -285,6 +299,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Document "called on the transport worker thread; must be thread-safe; the receiver holds a weak reference".
 - Effort: M
 - Owner: design
+- Status: closed in #312
 
 ### SHR-17: A global lock and a linear string search run on every transport frame sent
 - Category: performance
@@ -300,6 +315,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - In `DumpMetrics`, copy a snapshot under the lock and log outside it.
 - Effort: S
 - Owner: coding
+- Status: closed in #279
 
 ### SHR-18: The audio encode/send path allocates and copies several times per frame
 - Category: performance
@@ -320,6 +336,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Pass `TConstArrayView` through the bus.
 - Effort: M
 - Owner: coding
+- Status: closed in #279
 
 ### SHR-19: Ten WebRTC CVars in Shared: dead, not exported, duplicated header, and one verbose logger on by default
 - Category: code-quality
@@ -339,6 +356,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Default debug logging to 0.
 - Effort: S
 - Owner: coding
+- Status: closed in #286
 
 ### SHR-20: Build.cs exposes unnecessary public dependencies and links third-party libs "for tests"
 - Category: fab-readiness
@@ -357,6 +375,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Gate the tests with `#if WITH_O3DS_CORE`, or restrict the plugin's platforms (see SHR-21).
 - Effort: S
 - Owner: coding
+- Status: closed in #283
 
 ### SHR-21: Platform support is undeclared. Opus is Win64-only, Sender throws on other platforms, and the uplugin has no allow-list
 - Category: fab-readiness
@@ -373,6 +392,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Emit a build-time Warning when Opus is unavailable.
 - Effort: S
 - Owner: design
+- Status: closed in #283
 
 ### SHR-22: `O3DBuildFlags` caches platform-dependent flags process-wide and lives inside Shared's Build.cs
 - Category: code-quality
@@ -389,6 +409,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Enable exceptions only where third-party code needs them.
 - Effort: S
 - Owner: coding
+- Status: closed in #283
 
 ### SHR-23: `ThirdParty/Include` is an orphan Opus header set at a different API version, and the docs disagree about the Opus version
 - Category: fab-readiness
@@ -425,6 +446,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - If a fallback is needed, copy the factory under the lock and invoke it outside, as the Sender registry already does (O3DSenderRegistry.cpp:74-89).
 - Effort: S
 - Owner: design
+- Status: closed in #289
 
 ### SHR-25: Metrics `Reset()` misses fields, many fields are dead, and the dump verbosity is wrong
 - Category: code-quality
@@ -447,6 +469,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Use `FPlatformTime::Seconds()` for uptime.
 - Effort: S
 - Owner: coding
+- Status: closed in #334
 
 ### SHR-26: Metric EMA and max updates are non-atomic read-modify-write races
 - Category: thread-safety
@@ -462,6 +485,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Consider `std::atomic`, since UE is moving away from `TAtomic` (needs-UE-verification for 5.7 deprecation status).
 - Effort: S
 - Owner: coding
+- Status: closed in #279
 
 ### SHR-27: Development-diary console command shipped in a runtime module
 - Category: fab-readiness
@@ -476,6 +500,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Wrap the commands in `#if !UE_BUILD_SHIPPING` if they are dev-only.
 - Effort: S
 - Owner: coding
+- Status: closed in #282
 
 ### SHR-28: Public log categories are declared without the export macro
 - Category: code-quality
@@ -526,6 +551,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Allow empty payloads for a future control kind.
 - Effort: S
 - Owner: coding
+- Status: closed in #339
 
 ### SHR-31: The Opus decoder buffer is capped at 60 ms, the encoder buffer is sized ad hoc, and ctl return values are ignored
 - Category: bug
@@ -545,6 +571,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Expose `DecodeLost(int32 Frames)`.
 - Effort: S
 - Owner: coding
+- Status: closed in #279
 
 ### SHR-32: The Opus round-trip test ignores codec delay and uses a very loose tolerance
 - Category: tests
@@ -563,6 +590,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Add PCM16 codec-path tests that run on every platform.
 - Effort: S
 - Owner: coding
+- Status: closed in #279
 
 ### SHR-33: `HashNames` concatenates names without separators or length, so collisions go undetected
 - Category: bug
@@ -578,6 +606,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Consider `CityHash64` or `FXxHash64` from Core (needs-UE-verification for availability in 5.7).
 - Effort: S
 - Owner: coding
+- Status: closed in #338
 
 ### SHR-34: Dead and misleading helper APIs remain exported
 - Category: code-quality
@@ -593,6 +622,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - If URL parsing is needed later, use UE's `FGenericPlatformHttp::UrlDecode` together with `FURL` or `FParse` (needs-UE-verification).
 - Effort: S
 - Owner: coding
+- Status: closed in #334
 
 ### SHR-35: Audio serializers and deserializers are about 90% copy-paste
 - Category: code-quality
@@ -626,6 +656,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Define `Role` as an enum.
 - Effort: M
 - Owner: design
+- Status: closed in #311
 
 ### SHR-37: Module docs do not describe the Shared APIs, the threading contracts or the wire format
 - Category: docs

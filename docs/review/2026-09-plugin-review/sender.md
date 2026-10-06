@@ -33,6 +33,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
   - Add an automation test that runs Stop and Start and asserts that the bone names and parents in the serialized output are correct.
 - Effort: S
 - Owner: coding
+- Status: closed in #267
 
 ### SND-2: A D1 quantized full resync re-anchors translations on the sender while the receiver keeps the old anchors, corrupting every later quantized delta
 - Category: bug
@@ -46,6 +47,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: In the quantized path (and ideally the residual path), keep existing `Transform` objects when the names and parents are unchanged: update the values in place and only rebuild when the descriptor hash changes. Alternatively, copy `mQuantAnchorTranslation`/`mQuantAnchorSet` by name before `clear()`, mirroring model.cpp:1125. Add a round-trip test: sender full sync, delta, resync, delta, receiver parse, assert translations within tolerance.
 - Effort: M
 - Owner: coding
+- Status: closed in #267
 
 ### SND-3: With curve filtering on, the curve set changes every frame, which misaligns curves in residual/quantized mode and triggers constant resyncs
 - Category: bug
@@ -59,6 +61,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Decouple "which curves exist" from "which values changed". Keep a stable curve list per subject (from the curve cache revision) and let the core `SerializeUpdate`/`SerializeCurveUpdates` delta logic do the change suppression. Alternatively, disable epsilon/delta curve filtering whenever residual or quantized coding is on and document that. Also compare curve name identity (hash), not just count, before the steady-state write.
 - Effort: M
 - Owner: design
+- Status: closed in #267
 
 ### SND-4: The curve epsilon filter never sends a curve's return to zero, so receivers can hold stale non-zero values
 - Category: bug
@@ -68,6 +71,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Apply epsilon only to suppress curves that were already at about 0 when last sent: `if (|Value|<eps && (!bHasLast || |Last|<eps)) continue;`. Otherwise send the zero once and record it as last-sent. Add a unit test for a 0.8 to 0 to 0 sequence.
 - Effort: S
 - Owner: coding
+- Status: closed in #267
 
 ### SND-5: The capture rate limiter drops about half the frames when CaptureRateHz is close to the tick rate (default 60 Hz)
 - Category: bug
@@ -77,6 +81,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Use an accumulator: `Last += MinDelta`, re-anchoring to `Now` if it falls more than one interval behind, and add a small tolerance (for example 0.5 ms). Consider world or app time (`FApp::GetCurrentTime()` / `World->GetTimeSeconds()`, needs-UE-verification) for the cadence. Extend the test with a jittered 60 Hz sequence and assert about 60 accepted frames per second.
 - Effort: S
 - Owner: coding
+- Status: closed in #267
 
 ### SND-6: Audio capture callbacks read and write UObject state from audio threads without synchronization
 - Category: thread-safety
@@ -90,6 +95,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Take an immutable snapshot of the capture parameters (gain, channels, rate, label) into a thread-safe shared state object (`TSharedPtr<FAudioState, ThreadSafe>`) that the tap and mic lambda hold instead of the UObject. Swap it atomically on the game thread. Give each producer its own scratch buffer. Never touch the `UObject` from the audio or capture threads.
 - Effort: M
 - Owner: coding
+- Status: closed in #269
 
 ### SND-7: The submix listener is unregistered from the new submix instead of the one it was registered on, which leaks a listener
 - Category: bug
@@ -102,6 +108,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Store the `USoundSubmix*` (as a weak pointer) that the listener was registered on, and always unregister from that. Make `RebuildSubmixTap` idempotent: tear down if already registered.
 - Effort: S
 - Owner: coding
+- Status: closed in #269
 
 ### SND-8: Serialization and transport dispatch run synchronously on the game thread every tick
 - Category: architecture
@@ -111,6 +118,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Keep only the sampling on the game thread: copy local transforms and curves into a pooled, immutable frame. Hand that to a per-sender worker (a `UE::Tasks` pipe or an `FRunnable` with an SPSC queue) that owns the serializer state and calls `SendSerialized`, and bound the queue with a drop-oldest policy. Document on `IOpen3DSender` which thread each method is called from.
 - Effort: L
 - Owner: design
+- Status: closed in #318
 
 ### SND-9: Heavy per-frame allocation in capture and serialization
 - Category: performance
@@ -126,6 +134,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Reuse a member frame and member arrays (`Reset()` rather than reconstruct). Keep a persistent `O3DS::Subject` per subject in legacy mode too, and only rebuild it on a descriptor change. Cache UTF-8 names per descriptor or curve revision. Serialize straight into a reusable buffer and pass a `TArrayView`/`TConstArrayView<uint8>` to the delegate. Build `NameString` only when logging. Consider making delta updates with a periodic full sync the default.
 - Effort: M
 - Owner: coding
+- Status: closed in #316
 
 ### SND-10: Transport credentials (the WebRTC access token) are stored in a serialized UPROPERTY and saved into level and Blueprint assets
 - Category: fab-readiness
@@ -135,6 +144,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Split options into a persisted `TransportOptions` and a `Transient` secret store (or read secrets from config or environment through the customization, respecting `bPersistToken`). Mark secret keys through the customization API and have `SetTransportOption` route them to the transient store. Redact them in `ToDebugString` and logs.
 - Effort: M
 - Owner: design
+- Status: closed in #275
 
 ### SND-11: The build hard-fails on every platform except Win64, and the plugin does not declare a platform allow-list
 - Category: fab-readiness
@@ -144,6 +154,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Add `"PlatformAllowList": ["Win64"]` to every module of the plugin until other binaries exist, or ship Mac and Linux libraries. Include the Client and Server target types, or document why they are excluded. Replace the throw with a clear message once the allow-list protects the build.
 - Effort: S
 - Owner: coding
+- Status: closed in #283
 
 ### SND-12: Capture tick is not ordered after the target mesh's animation evaluation
 - Category: bug
@@ -153,6 +164,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Verify against UE 5.7 whether `USkeletalMeshComponent::RegisterOnBoneTransformsFinalizedDelegate` (or an equivalent) exists and bind to it if it does. Otherwise set `PrimaryComponentTick.TickGroup = TG_PostUpdateWork` (or TG_PostPhysics) and call `AddTickPrerequisiteComponent(TargetMesh)` in `BindToTarget`, removing it in `UnbindFromTarget`.
 - Effort: S
 - Owner: coding
+- Status: closed in #317
 
 ### SND-13: Residual and quantized modes never re-send a full descriptor, so late joiners or a lost first packet leave receivers without topology
 - Category: bug
@@ -162,6 +174,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Add `FullSyncIntervalSeconds` (or frames) and force `bNeedFullSync` periodically (with the anchor preservation from SND-2). Optionally, let transports request a resync, for example on a new peer connection, through an `IOpen3DSender` callback.
 - Effort: M
 - Owner: design
+- Status: closed in #267
 
 ### SND-14: Changing encoding settings at runtime is not applied consistently
 - Category: bug
@@ -174,6 +187,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Fingerprint the encoding settings per subject and force a full sync plus a fresh encoder when they change. Alternatively, add these properties to the restart set. Document which settings are live.
 - Effort: S
 - Owner: coding
+- Status: closed in #267
 
 ### SND-15: The UE sender never writes tx_seq, tx_wallclock_us or frame_epoch, so the receiver's reorder gate can never engage
 - Category: architecture
@@ -183,6 +197,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Keep an `O3DS::SequenceCounter` (src/o3ds/sequencing.h) per outbound stream in the serializer and pass `tx_seq`, `tx_wallclock_us` and `frame_epoch` to every Serialize, SerializeUpdate or SerializeUpdateResidual call. Bump the epoch on Stop/Start. Add a test.
 - Effort: S
 - Owner: coding
+- Status: closed in #341
 
 ### SND-16: The audio stream label does not match the pose subject name
 - Category: bug
@@ -192,6 +207,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Pass `ResolveSubjectName(TargetMesh.Get())` (or `CachedSubjectName`) to `SetAudioSink`, and refresh the label whenever the subject name cache changes.
 - Effort: S
 - Owner: coding
+- Status: closed in #279
 
 ### SND-17: Pose and audio timestamps use unrelated clock domains
 - Category: architecture
@@ -201,6 +217,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Define one sender clock: capture `FPlatformTime` (or engine timecode through `FApp::GetTimecode()`, needs-UE-verification) at sampling and carry it in `FO3DSPoseFrame`. Map audio clocks to that domain with an offset measured when the stream starts. Document the timestamp semantics on `SendSerialized` and `SubmitPcm`.
 - Effort: M
 - Owner: design
+- Status: closed in #319
 
 ### SND-18: Audio device enumeration and open/close run synchronously on the game thread, repeatedly
 - Category: performance
@@ -213,6 +230,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Cache the device list, refresh it on demand or on a device-change notification, and resolve the index only when capture starts. Remove the duplicate `UpdateAudioCaptureBinding` call. Only restart capture when the audio config actually changed (compare with the previous config). Consider opening devices off the game thread.
 - Effort: M
 - Owner: coding
+- Status: closed in #319
 
 ### SND-19: If StartCapture fails partway, the transport and serializer stay running
 - Category: bug
@@ -222,6 +240,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Validate the preconditions (mesh or audio) before creating the serializer and transport, or call `TeardownTransport()` and `Serializer->Detach()` on the failure branch. Surface the failure to users (on-screen or message log, plus a Blueprint-visible result or delegate).
 - Effort: S
 - Owner: coding
+- Status: closed in #267
 
 ### SND-20: Include/Exclude curve patterns apply even when filtering is disabled, and pattern edits are not picked up at runtime
 - Category: bug
@@ -231,6 +250,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Do not filter in `RefreshCurveCache`. Rely only on the mask in `UpdatePatternCacheIfNeeded` (gated by `bEnableCurveFiltering`). Invalidate the cache when patterns change.
 - Effort: S
 - Owner: coding
+- Status: closed in #267
 
 ### SND-21: The audio resampler is stateless per buffer, has no anti-aliasing and drifts over time; one audio source option is not implemented
 - Category: bug
@@ -240,6 +260,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Use UE's `Audio::FResampler` or a stateful polyphase resampler per stream with a fractional-position carry (needs-UE-verification for the API). Remove or implement `GameAndMic`. Delete the dead branch.
 - Effort: M
 - Owner: coding
+- Status: closed in #279
 
 ### SND-22: UO3DSenderComponent is a god class, and the serializer is tightly coupled to it
 - Category: architecture
@@ -263,6 +284,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
   - Drop the unused friend.
 - Effort: L
 - Owner: design
+- Status: closed in #332
 
 ### SND-23: Two parallel transport registries; the picker lists customizations rather than factories, and the customization lookup returns an unlocked pointer
 - Category: architecture
@@ -275,6 +297,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Keep one registry entry per transport: `{Factory, ConfigureTransport, BuildTransportWidget, DisplayName, Capabilities}`. Return copies (`TOptional`/`TSharedPtr`) rather than raw pointers. Remove the Shared umbrella header.
 - Effort: M
 - Owner: design
+- Status: closed in #289
 
 ### SND-24: Residual and Quantization settings are not integrated into the custom details layout
 - Category: usability
@@ -333,6 +356,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Stop the submix tap and mic when the sink is null, or when audio is disabled or capture stops, and restart them on bind. Do not tap in the audio component's BeginPlay unless a sink is bound.
 - Effort: S
 - Owner: coding
+- Status: closed in #279
 
 ### SND-29: Local transforms are recomputed from component space instead of read from the bone-space pose
 - Category: performance
@@ -375,6 +399,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Use `FAutoConsoleCommand` at file scope, or register and unregister in `StartupModule`/`ShutdownModule`. Document game-thread-only use, or protect the list with a lock.
 - Effort: S
 - Owner: coding
+- Status: closed in #334
 
 ### SND-33: Hot-path logging and log category hygiene
 - Category: code-quality
@@ -393,6 +418,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Move the customization into an `Open3DSenderEditor` module (Type Editor). Keep the transport-widget registration in an editor-only registry. Replace EditorStyle with AppStyle.
 - Effort: M
 - Owner: coding
+- Status: closed in #285
 
 ### SND-35: Editing transport options is not undoable, and switching transports silently wipes options
 - Category: usability

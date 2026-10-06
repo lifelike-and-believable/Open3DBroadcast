@@ -26,6 +26,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Rewrite as a proper stream parser. Append received bytes to a ring or compacting buffer. Loop "parse header → if `Buffered >= Header+Payload` emit → `Memmove` the remainder (or advance a read offset)" without calling `Recv` again. Call `Recv` only when no complete frame is buffered. Add a unit test that writes 3 frames in one `Send` plus a split header across two sends.
 - Effort: M
 - Owner: coding
+- Status: closed in #272
 
 ### TRB-2: TCP sender treats a partial or EWOULDBLOCK non-blocking send as a fatal error and drops the client
 - Category: bug
@@ -35,6 +36,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Loop on partial sends in the worker. On `SE_EWOULDBLOCK`, wait with `Socket->Wait(ESocketWaitConditions::WaitForWrite, timeout)` or retry after the `WakeEvent` timeout, keeping the remaining offset. Disconnect only on a real error or after a configurable stall timeout. Drop whole queued frames, never partial ones.
 - Effort: M
 - Owner: coding
+- Status: closed in #272
 
 ### TRB-3: Queue byte accounting uses non-atomic read-modify-write across producers and consumer (TCP and NNG senders)
 - Category: thread-safety
@@ -44,6 +46,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Use `fetch_add` before enqueueing and roll back with `fetch_sub` on failure, and use `fetch_sub` on dequeue. Better, move the "bounded MPSC byte queue + worker" into one shared class in `Open3DShared` (see TRB-38) and fix it once.
 - Effort: S
 - Owner: coding
+- Status: closed in #272
 
 ### TRB-4: TCP receiver reconnect backoff never grows
 - Category: bug
@@ -53,6 +56,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Reset the attempt counter only on reaching `SCS_Connected` (as line 270 already does), and remove the reset in `ConnectToServer`.
 - Effort: S
 - Owner: coding
+- Status: closed in #272
 
 ### TRB-5: TCP receiver can stay stuck in the Connecting state forever
 - Category: bug
@@ -62,6 +66,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Record the connect start time and treat `Now - ConnectStart > ConnectionTimeoutSeconds` in the Connecting state as an error. Tear down and back off.
 - Effort: S
 - Owner: coding
+- Status: closed in #272
 
 ### TRB-6: Idle sender makes the TCP receiver flap every 5 s, and the sender detects dead clients late
 - Category: bug
@@ -71,6 +76,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Add a small keep-alive frame (for example a zero-length or unified "ping" kind) sent by the worker when idle for about 1 s. Detect peer close on the sender with a periodic zero-byte `Recv` or `Wait(WaitForRead)` check. Consider accepting new clients and replacing the stale one.
 - Effort: M
 - Owner: design
+- Status: closed in #272
 
 ### TRB-7: TCP sender serves one client only; extra receivers hang connected but receive nothing
 - Category: usability
@@ -89,6 +95,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: When no magic is found, keep only the last `FrameMagicSize-1` bytes. On an invalid length, skip to the next magic occurrence. Keep scanning within the same `Poll`, bounded by work per tick.
 - Effort: S
 - Owner: coding
+- Status: closed in #272
 
 ### TRB-9: The TCP length field is trusted up to 50 MiB, with a grow-only buffer
 - Category: security
@@ -98,6 +105,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Make the cap configurable (for example `tcp.maxframe`, default 4 MiB). Shrink the buffer after large frames. Grow incrementally as bytes arrive rather than allocating up front.
 - Effort: S
 - Owner: coding
+- Status: closed in #272
 
 ### TRB-10: The audio thread takes the socket lock and contends with the network worker and the game thread
 - Category: thread-safety
@@ -107,6 +115,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Split the concerns. Use a tiny lock or atomic shared pointer only for the "owner alive" check, do encoding lock-free on the audio thread into its own scratch, and hand bytes to an MPSC queue drained by a network worker (the same worker as mocap). Never hold a lock across a syscall that the game or audio thread also needs.
 - Effort: M
 - Owner: design
+- Status: closed in #269
 
 ### TRB-11: Audio encoder state is reconfigured on the game thread while the audio thread uses it
 - Category: thread-safety
@@ -116,6 +125,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Take the same lock used by the sink path, or give each sink its own encoder instance (preferred, since the sink already carries its config).
 - Effort: S
 - Owner: coding
+- Status: closed in #269
 
 ### TRB-12: TCP sender Stop() returns the WakeEvent to the pool while the audio thread may still trigger it
 - Category: thread-safety
@@ -125,6 +135,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Set a "stopping" atomic first, take the owner lock to null the socket, drain the audio path, and only then return the event. Alternatively own the `FEvent` for the lifetime of the object.
 - Effort: S
 - Owner: coding
+- Status: closed in #269
 
 ### TRB-13: TCP sender Start() leaks a running worker when bind or listen fails, and restart without Initialize fails silently
 - Category: bug
@@ -134,6 +145,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Create the listen socket first and start the worker only on success. Do not null `SocketSubsystem` in `Stop()`, or re-fetch it in `Start()`.
 - Effort: S
 - Owner: coding
+- Status: closed in #272
 
 ### TRB-14: TCP sender's 4 MB queue cap is hard-coded and the queue has no age limit, so latency builds up
 - Category: performance
@@ -143,6 +155,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Expose `tcp.maxqueue` (bytes and/or frames). For realtime use prefer drop-oldest for mocap (or "latest value wins" per subject), and keep audio in a separate small queue.
 - Effort: S
 - Owner: design
+- Status: closed in #272
 
 ## Sockets: UDP
 
@@ -154,6 +167,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Bound the in-flight reassemblies (for example 8 messages) and the total bytes (for example 2x maxdatagram x fragments). Evict by age (for example 100 ms) and by LRU. Allocate lazily and cap `TotalSize` with a configurable `udp.maxframe` (default about 1-4 MiB). Key reassembly by (source addr, message id). Add a magic and version to the fragment header so fragments cannot be confused with raw payloads (TRB-17).
 - Effort: M
 - Owner: coding
+- Status: closed in #264
 
 ### TRB-16: `udp.mtu` has no effect for payloads under 64000 bytes, so IP fragmentation is relied on
 - Category: bug
@@ -172,6 +186,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Version the UDP framing. Prefix every datagram with a magic, version and flags byte (fragmented or whole), use explicit little- or big-endian `memcpy` reads, and put it behind a protocol version bump (per the CHANGELOG rules).
 - Effort: M
 - Owner: design
+- Status: closed in #336
 
 ### TRB-18: UDP receiver Poll() is an unbounded loop on the game thread
 - Category: security
@@ -181,6 +196,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Cap datagrams and bytes per `Poll`. Better, move the receive loop to a dedicated socket thread (FRunnable with `Socket->Wait`) that pushes complete frames into a bounded SPSC queue drained by `Poll()`.
 - Effort: M
 - Owner: coding
+- Status: closed in #264
 
 ### TRB-19: UDP receive path allocates and copies per datagram
 - Category: performance
@@ -190,6 +206,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Reuse a member `FInternetAddr` and scratch arrays. Have the demux accept a `TArrayView` and build the consumer array once, or add a `SubmitFrame(TArray<uint8>&&)` overload on `ISerializedFrameConsumer` so the buffer can be moved in.
 - Effort: S
 - Owner: coding
+- Status: closed in #264
 
 ### TRB-20: UDP sender does blocking-path work and syscalls on the game and audio threads
 - Category: performance
@@ -199,6 +216,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Use the same queued worker model as TCP/NNG (a shared implementation). Fragment directly from the source buffer without the intermediate `UdpFragmenter` copy (use a scatter-gather header + slice, or a reused scratch).
 - Effort: M
 - Owner: coding
+- Status: closed in #318
 
 ### TRB-21: UDP has no multicast support, no source filtering, and receiver options that do nothing
 - Category: usability
@@ -226,6 +244,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Always size the receive buffer at 65535 (the maximum UDP payload), and use `udp.maxdatagram` only as a policy check.
 - Effort: S
 - Owner: coding
+- Status: closed in #264
 
 ## Sockets: config, common, module
 
@@ -237,6 +256,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Either wrap each module's sources in the matching `#if` defines (and keep `Core` deps), or drive module inclusion from the .uplugin or target instead of an early return. Add CI jobs for each flag combination.
 - Effort: M
 - Owner: coding
+- Status: closed in #283
 
 ### TRB-25: Configured audio ports are dead config
 - Category: code-quality
@@ -255,6 +275,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Validate the port range 1-65535 with strict parsing (as `O3DNNG::ParseInt` does). Resolve hostnames asynchronously (`ISocketSubsystem::GetAddressInfoAsync`) during `Start`. Pick the protocol family from the resolved address.
 - Effort: M
 - Owner: coding
+- Status: closed in #306
 
 ### TRB-27: Inconsistent transport identity and role fields
 - Category: code-quality
@@ -264,6 +285,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Pass the registered name everywhere, set Role on the receiver, and align the tests with the registry names.
 - Effort: S
 - Owner: coding
+- Status: closed in #313
 
 ### TRB-28: Default ports and addresses are hard-coded in several places
 - Category: code-quality
@@ -293,6 +315,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Move the encoder into the sink (it only needs the config and channel), or reuse a shared "owner guard" helper from `Open3DShared`.
 - Effort: S
 - Owner: coding
+- Status: closed in #269
 
 ### TRB-31: Receiver silently overwrites the sender's queue capacity on the shared channel
 - Category: bug
@@ -329,6 +352,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Keep socket lifetime on one thread (the worker owns open, close and reconnect). Alternatively guard `Socket` with `StateMutex` and use `TSharedPtr<FNngSocketWrapper, ThreadSafe>` snapshots. Note that NNG dialers already auto-reconnect (`nng_dial` with NONBLOCK), so the manual reconnect for push/pair-dial is probably unnecessary (needs NNG-doc verification: reconnect-time-min/max semantics in 1.3.0).
 - Effort: M
 - Owner: coding
+- Status: closed in #277
 
 ### TRB-34: NNG sender requeues on EAGAIN, which reorders frames, busy-spins, and delivers stale backlog
 - Category: bug
@@ -338,6 +362,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: For realtime data, drop the oldest data (or keep only the latest per subject) on EAGAIN and count it. Never re-enqueue at the tail. If retry is desired, hold a single "pending" payload in the worker and retry it first. Update the README.
 - Effort: S
 - Owner: design
+- Status: closed in #277
 
 ### TRB-35: NNG audio sink holds a raw reference to the sender (use-after-free)
 - Category: thread-safety
@@ -347,6 +372,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Extract the Sockets `OwnerGuard` pattern into a reusable `TO3DSinkOwnerGuard<T>` in `Open3DShared` or `Open3DSender`, and use it for NNG, Loopback and MoQ (MoQSenderAudioSink.h:31 has the same "must outlive" contract).
 - Effort: S
 - Owner: coding
+- Status: closed in #269
 
 ### TRB-36: `NNG_OPT_SENDBUF` is set with the wrong type and units; `SENDTIMEO` has no effect
 - Category: bug
@@ -356,6 +382,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Use `nng_socket_set_int(NNG_OPT_SENDBUF, N messages)` and check its return value. Drop SENDTIMEO or document that sends are non-blocking. Fix the README.
 - Effort: S
 - Owner: coding
+- Status: closed in #277
 
 ### TRB-37: NNG receiver passes the whole unified message (header included) to the consumer for mocap
 - Category: bug
@@ -365,6 +392,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Use `PayloadPtr/PayloadSize`, and move the demux into a single shared helper with a unit test that covers unified-mocap, unified-audio and legacy raw input.
 - Effort: S
 - Owner: coding
+- Status: closed in #268
 
 ### TRB-38: Receiver demux and sender audio/queue code is copy-pasted across transports
 - Category: architecture
@@ -374,6 +402,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Add to `Open3DShared`: an `FO3DUnifiedDemux` (a parse → mocap/audio callback helper with decoder scratch), an `FO3DBoundedSendQueue` plus worker (atomic byte accounting, drop policy, wake event), an `FO3DSenderAudioPipeline` (encoder + owner guard + unified wrap), and `O3DTransportOptions::{ParseHostPort, GetInt/Bool/String}`. Add a shared test-utility header (port probe, pump loop).
 - Effort: L
 - Owner: design
+- Status: closed in #310
 
 ### TRB-39: NNG URI host is never used because "explicit host" is always true
 - Category: bug
@@ -383,6 +412,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Compute `bHostExplicit` from the option before applying the default, and apply DefaultHost only at the end (line 409 already does that). Add a unit test for URI-only configs.
 - Effort: S
 - Owner: coding
+- Status: closed in #277
 
 ### TRB-40: NNG Pair defaults make both ends listen; "Pull (client dial)" is forced to listen
 - Category: bug
@@ -395,6 +425,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Keep a single source of truth for mode/role defaults and allowed combinations (in NngHelpers). Make the widgets list only valid combinations. Either support pull-dial and push-listen (valid NNG topologies, for example a push-listen sender with pull-dial receivers) or remove the option from the UI.
 - Effort: S
 - Owner: design
+- Status: closed in #277
 
 ### TRB-41: NNG is Win64-only but enabled by default and throws on other platforms
 - Category: fab-readiness
@@ -404,6 +435,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Add `"PlatformAllowList": ["Win64"]` to the module in the .uplugin, and/or auto-disable NNG off Win64 in `O3DBuildFlags` as is done for MoQ. Longer term, build NNG from source through CMake for all platforms and upgrade from 1.3.0 (check upstream security advisories for later releases).
 - Effort: M
 - Owner: coding
+- Status: closed in #283
 
 ### TRB-42: NNG receiver limits, stats and callback lifetime
 - Category: code-quality
@@ -418,6 +450,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Set `NNG_OPT_RECVMAXSZ` to the configured cap. Count each frame exactly once, in one place. Document or verify the callback shutdown ordering, or route callbacks through a shared weak context. Derive "connected" only from pipe events.
 - Effort: S
 - Owner: coding
+- Status: closed in #277
 
 ### TRB-43: NNG errors are logged only at Verbose
 - Category: usability
@@ -458,6 +491,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Use `TWeakObjectPtr`. Do not write defaults on construct (show defaults as hints). Wrap edits in an `FScopedTransaction` and call `Modify()`. Notify on `OnValueCommitted` only. Put a reusable "key/value option row" helper in the shared panel base, because 7 panels repeat the same GetOption/SetOption/Clamp code.
 - Effort: M
 - Owner: coding
+- Status: closed in #285
 
 ### TRB-46: Editor-only Slate code lives in Runtime modules
 - Category: architecture
@@ -467,6 +501,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Move the panels into an `Open3DBroadcastEditor` (Type: Editor) module that registers the `BuildTransportWidget` callbacks, and keep the runtime modules headless. Prune the unused dependencies.
 - Effort: M
 - Owner: design
+- Status: closed in #285
 
 ### TRB-47: Tests cover only the localhost happy path; framing, UDP and robustness are untested
 - Category: tests

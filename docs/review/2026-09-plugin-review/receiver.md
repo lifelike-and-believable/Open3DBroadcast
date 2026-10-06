@@ -34,6 +34,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: (1) Snapshot the immutable audio metadata the sink needs (SourceGuid, StreamId, default rate and channels) into the `FAudioSink` when it is constructed in `StartTransport`, and remove the back-reference to the owner. `FinalizeAudioMeta` then no longer touches source state. (2) If an owner reference is still required, never let a worker thread hold the last strong reference: hop to the game thread with a `TWeakPtr` before pinning. (3) In `FO3DWebRTCReceiver`, pin `AudioSink` under `StateMutex` (or hold a TWeakPtr and pin it) inside `OnAudioReceivedEx`, and make `Stop()` wait for in-flight callbacks. (4) Document on `IOpen3DReceiver` that after `Stop()` returns, no consumer or sink callback may be running or start.
 - Effort: M
 - Owner: coding
+- Status: closed in #271
 
 ### RCV-2: FinalizeAudioMeta automation test asserts behavior the code no longer has
 - Category: tests
@@ -43,6 +44,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Decide the intended behavior, then either restore the "last observed subject" fallback or update the test to assert the StreamId/StreamLabel fallback. Remove `LastObservedSubjectName` if it stays unused. Run the test in CI so this kind of drift fails a build.
 - Effort: S
 - Owner: design
+- Status: closed in #276
 
 ### RCV-3: Transport credentials are persisted in GameUserSettings.ini and in the LiveLink connection string
 - Category: fab-readiness
@@ -52,6 +54,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Mark secret keys as transient or secret in the customization contract (for example a `TSet<FString> SecretOptionKeys` on `FO3DReceiverTransportCustomization`). Strip those keys before `ExportText` and `SaveConfig`, and load them at runtime from an env var or a per-user credential store. At minimum, never persist `TransportOptions` values whose keys match token, secret or key.
 - Effort: M
 - Owner: design
+- Status: closed in #275
 
 ### RCV-4: The skeleton fast path caches bone names by parent topology only, so renamed bones are never re-published
 - Category: bug
@@ -61,6 +64,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Key the cache on a descriptor-level signal instead of topology. One option is to invalidate when the parsed `SubjectList` contained a full `subjects` descriptor for this subject rather than only `updates`. Another is to hash `mName` together with `mParentId` (hash the std::string bytes directly, without constructing FNames). Rebuild names only when that hash changes.
 - Effort: S
 - Owner: coding
+- Status: closed in #268
 
 ### RCV-5: One SubjectList scratch shared by all packets: absent subjects are re-pushed, stale state survives restart, and multi-sender channels break
 - Category: bug
@@ -72,6 +76,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Track which subjects a packet actually touched (for example, have `Parse` return the set of touched names, or compare against the flatbuffer's `subjects()`/`updates()` names) and push only those. Reset `SubjectScratch = O3DS::SubjectList()` and `SubjectTransformCaches.Empty()` in `StopTransport`. For multi-sender support, keep one `SubjectList` and one `ReorderGate` per sender or stream id.
 - Effort: M
 - Owner: design
+- Status: closed in #268
 
 ### RCV-6: LiveLink subjects are removed after a hard-coded 5 s of silence, which discards user subject settings
 - Category: usability
@@ -90,6 +95,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Call `CreateSubject` only when the subject is not yet in `InitializedSubjects`, and only for the first push. For hierarchy or curve changes, re-push static data alone via `PushSubjectStaticData_AnyThread`. Verify the 5.7 `CreateSubject` semantics against the UE source before changing this.
 - Effort: S
 - Owner: coding
+- Status: closed in #268
 
 ### RCV-8: No timecode is ever set, and the sender time is carried as a per-frame string
 - Category: bug
@@ -117,6 +123,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Push a render-ahead frame only once per new real frame (track the last `Predicted.t` pushed per subject), and confirm LiveLink's buffer ordering (see RCV-9).
 - Effort: S
 - Owner: coding
+- Status: closed in #268
 
 ### RCV-11: Several heap allocations per subject per frame on the decode and push path
 - Category: performance
@@ -126,6 +133,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Make the scratch arrays members and `Reset()` them. Pass cached names by const reference instead of copying. `MoveTemp` into `FrameData.Transforms`. Drop the string metadata (RCV-8). Reuse a `PoseSample` scratch per subject. Store the payload as `TArray<uint8>` moved into the gate, or let `Frame` own the transport buffer.
 - Effort: M
 - Owner: coding
+- Status: closed in #368
 
 ### RCV-12: FName construction and name hashing run every frame for the subject and all curves
 - Category: performance
@@ -135,6 +143,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Cache curve FNames per subject, keyed on a cheap hash of the raw `mCurveNames` strings, and rebuild only when that hash changes. Cache the subject FName keyed on the `Subject*` or `mName`. Compute the skeleton and curve hashes only when the cache is rebuilt.
 - Effort: S
 - Owner: coding
+- Status: closed in #325
 
 ### RCV-13: Transform extraction code is duplicated and truncates doubles to float
 - Category: code-quality
@@ -144,6 +153,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Extract a single `bool TryConvertTransform(const O3DS::Transform&, FTransform&)`, keep double precision, and call `RecordDeserializationError` (or a dedicated "invalid pose" counter) when a frame is dropped.
 - Effort: S
 - Owner: coding
+- Status: closed in #329
 
 ### RCV-14: Skipping null transforms misaligns LiveLink parent indices
 - Category: bug
@@ -153,6 +163,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Treat a null transform as a malformed frame and reject it, or insert an identity placeholder so indices stay aligned.
 - Effort: S
 - Owner: coding
+- Status: closed in #268
 
 ### RCV-15: Concealment settings are captured once per subject, so edits in the LiveLink Settings panel do nothing
 - Category: usability
@@ -256,6 +267,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Make them member variables, or use `UE_LOG` with the `LogO3DReceiverAudio` verbosity instead of manual throttling.
 - Effort: S
 - Owner: coding
+- Status: closed in #333
 
 ### RCV-26: Hot-path logging and a debug cvar that is on by default
 - Category: code-quality
@@ -265,6 +277,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Default DebugParse to 0. Throttle the slow-push warnings (once per N seconds per subject) or move them to Verbose and record them as metrics instead. Remove the diagnostic "PRIMARY SUSPECT" wording.
 - Effort: S
 - Owner: coding
+- Status: closed in #333
 
 ### RCV-27: FindTransportCustomization returns a pointer into a TMap after releasing its lock
 - Category: thread-safety
@@ -274,6 +287,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Return the customization by value (`TOptional<FO3DReceiverTransportCustomization>`) or as a `TSharedPtr<const ...>` held in the map, so callers keep it alive. Document that registration happens in StartupModule/ShutdownModule on the game thread only.
 - Effort: S
 - Owner: coding
+- Status: closed in #289
 
 ### RCV-28: Two parallel registries decide what can be selected versus what can run
 - Category: architecture
@@ -283,6 +297,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Merge them into one `FO3DReceiverTransportDescriptor { Factory; ConfigureTransport; BuildWidget; DisplayName; }` registry, list only entries that have a factory, and broadcast an `OnTransportsChanged` event so the panel can refresh and live sources can stop before a module unloads.
 - Effort: M
 - Owner: design
+- Status: closed in #289
 
 ### RCV-29: FO3DReceiverSource is a god object, and its public header exposes core third-party headers
 - Category: architecture
@@ -292,6 +307,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Split it into (a) `FO3DFrameDecoder` (parse, then build pose and curves, with caches), (b) `FO3DFrameScheduler` (gate, clock mapping, concealment), (c) `FO3DLiveLinkPublisher` (static and frame push, subject lifetime), and (d) a thin `FO3DReceiverSource` that composes them. Move the core includes to Private using a pimpl, and make the Build.cs include paths private.
 - Effort: L
 - Owner: design
+- Status: closed in #328
 
 ### RCV-30: Build.cs rejects every platform except Win64
 - Category: fab-readiness
@@ -301,6 +317,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Add Mac and Linux binaries, or restrict the module via `PlatformAllowList` in the .uplugin so unsupported platforms skip it instead of throwing. Remove unused dependencies.
 - Effort: M
 - Owner: design
+- Status: closed in #283
 
 ### RCV-31: The core receiver path has no test coverage
 - Category: tests
@@ -328,6 +345,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Rename the metric to "receive-to-apply latency", record it on both paths, and document the metric semantics in O3DPerformanceMetrics.
 - Effort: S
 - Owner: coding
+- Status: closed in #333
 
 ### RCV-34: A legacy-path silence reset wipes the gate, clock estimator and concealment state
 - Category: bug
@@ -337,3 +355,4 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Split this into `ResetLegacyOrdering()` and `ResetGatedSession()`, calling only the relevant one from each path, and clear `SubjectTransformCaches` in `StopTransport`.
 - Effort: S
 - Owner: coding
+- Status: closed in #268
