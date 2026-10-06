@@ -72,7 +72,7 @@ public:
     float AC_PitchMultiplier = 1.0f;
 
     /** Attachment for the internally-created UAudioComponent (SceneComponent). */
-    UPROPERTY(EditAnywhere, Category = "Open3DBroadcast|Audio|Attachment", meta = (DisplayName = "Attach Parent", ToolTip = "Optional parent scene component to attach the internal UAudioComponent to. If unset, attaches to the Actor's RootComponent."))
+    UPROPERTY(EditAnywhere, Category = "Open3DBroadcast|Audio|Attachment", meta = (DisplayName = "Attach Parent", ToolTip = "Optional parent scene component to attach this component (and the audio it plays) to. If unset, the component stays where it is placed; one with no parent attaches to the Actor's RootComponent."))
     FComponentReference AC_AttachParent;
 
     UPROPERTY(EditAnywhere, Category = "Open3DBroadcast|Audio|Attachment", meta = (DisplayName = "Attach Socket Name", ToolTip = "Optional socket to use when attaching to the parent component."))
@@ -117,8 +117,16 @@ public:
     // This provides consistent behavior across UE 5.6+ and avoids per-instance struct initialization issues in UE 5.7+.
 
     /** Auto-activate the internal audio component. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Activation", meta = (DisplayName = "Auto Activate", ToolTip = "If true, the internal audio component auto-starts when the procedural sound is ready."))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Activation", meta = (DisplayName = "Auto Activate", ToolTip = "If true, playback starts when the first audio arrives. If false, call Play."))
     bool bAC_AutoActivate = true;
+
+    /** Starts playing received audio (now if some has arrived, otherwise when it does). */
+    UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Audio")
+    void Play();
+
+    /** Stops playback. Audio that arrives afterwards is not played until Play is called. */
+    UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Audio")
+    void Stop();
 
 protected:
     virtual void OnRegister() override;
@@ -126,7 +134,6 @@ protected:
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
-    void OnAudioFrame(const FString& StreamLabel, const FString& SubjectName, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate);
     void OnAudioPcm16(const O3DS::FAudioFrameMeta& Meta, TConstArrayView<uint8> PCM16Bytes);
     bool MatchesFilter(const FString& InSubject, const FString& InStream) const;
     /** Subscribes to the audio bus of ContextName's context, once; UnbindBus leaves that same bus. */
@@ -137,14 +144,17 @@ private:
     void AttachToConfiguredParent();
 
 private:
-    UAudioComponent* AudioComp = nullptr;
+    /** Created in BeginPlay, destroyed in EndPlay (RCV-23). */
+    UPROPERTY(Transient)
+    TObjectPtr<UAudioComponent> AudioComp = nullptr;
 
     UPROPERTY(Transient)
-    USoundWaveProcedural* SoundWave = nullptr;
+    TObjectPtr<USoundWaveProcedural> SoundWave = nullptr;
 
     int32 CurrentChannels = 0;
     int32 CurrentSampleRate = 0;
-    bool bOwnsAudioComponent = false;
+    /** Set from bAC_AutoActivate at BeginPlay, then by Play and Stop. */
+    bool bPlaybackWanted = false;
 
     FDelegateHandle BusDelegateHandle;
     /** The context BusDelegateHandle is bound in, so EndPlay unbinds from the same bus. */
@@ -152,8 +162,6 @@ private:
 
     // Log throttling, per component (RCV-25): every component logs its own first frame.
     bool bLoggedFirstFrame = false;
-    int32 FilterDropLogCounter = 0;
-    int32 QueueLogCounter = 0;
 
     friend struct FO3DRemoteAudioComponentTestAccessor;
 };
