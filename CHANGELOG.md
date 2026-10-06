@@ -578,6 +578,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- TCP and UDP: the audio-port options are removed (WP-U6; TRB-25). With audio on, the configure functions wrote `audio.port`, `audio.host` and `audio.bind` (the data port + 1 by default), but nothing read them: audio and control travel on the data socket, in the unified envelope. The **Port** tooltip no longer says that audio uses the next port. Saved configs that still carry these keys are unaffected; the keys are ignored, as before.
+
 - USER_GUIDE reference sections and the transport comparison (WP-D2; mid-project review DOC-10, RCV-32, DOC-4 residue, DOC-5 rest).
   - **Receiver Setup** uses the real panel (**Open3DStream Receiver**, **Transport**, **Audio Codec** with **Transport Default**, **Create Source**); the `role`/`uri`/`protocol` examples, the "Audio Stream Label" field and the unverified Live Link Component and Control Rig routes for applying a subject are gone. A new **Receiver Source Settings** table covers Inactive Subject Timeout Seconds, concealment and Control Accept.
   - **Configuration Reference**: Curve Epsilon defaults to 0.0005; Audio Input Device is a name; Bitrate Kbps 0 lets the encoder choose; new **Encoding Properties** (residual coding, quantization, full sync interval), both off by default.
