@@ -29,18 +29,6 @@ namespace O3DSocketsConfig
 		Config.StreamId = O3DSockets::ComposeStreamId(BindHost, Port);
 		Config.AdvancedParams.Add(O3DSockets::BindOptionKey, BindHost);
 		Config.AdvancedParams.Add(O3DSockets::PortOptionKey, FString::FromInt(Port));
-
-		if (Config.Audio.bEnableAudio)
-		{
-			const FString StoredAudioBind = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::AudioBindOptionKey);
-			const FString AudioBind = StoredAudioBind.IsEmpty() ? BindHost : O3DSockets::NormaliseHostname(StoredAudioBind);
-			const int32 AudioPort = O3DSockets::ReadPortOption(Config, O3DSockets::AudioPortOptionKey, Port < 65535 ? Port + 1 : 0);
-			if (AudioPort > 0)
-			{
-				Config.AdvancedParams.Add(O3DSockets::AudioBindOptionKey, AudioBind);
-				Config.AdvancedParams.Add(O3DSockets::AudioPortOptionKey, FString::FromInt(AudioPort));
-			}
-		}
 	}
 
 	void ConfigureTcpReceiver(FO3DTransportConfig& Config, const TCHAR* TransportName)
@@ -56,18 +44,6 @@ namespace O3DSocketsConfig
 		Config.StreamId = O3DSockets::ComposeStreamId(Host, Port);
 		Config.AdvancedParams.Add(O3DSockets::HostOptionKey, Host);
 		Config.AdvancedParams.Add(O3DSockets::PortOptionKey, FString::FromInt(Port));
-
-		if (Config.Audio.bEnableAudio)
-		{
-			const FString StoredAudioHost = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::AudioHostOptionKey);
-			const FString AudioHost = StoredAudioHost.IsEmpty() ? Host : O3DSockets::NormaliseHostname(StoredAudioHost);
-			const int32 AudioPort = O3DSockets::ReadPortOption(Config, O3DSockets::AudioPortOptionKey, Port < 65535 ? Port + 1 : 0);
-			if (AudioPort > 0)
-			{
-				Config.AdvancedParams.Add(O3DSockets::AudioHostOptionKey, AudioHost);
-				Config.AdvancedParams.Add(O3DSockets::AudioPortOptionKey, FString::FromInt(AudioPort));
-			}
-		}
 	}
 }
 

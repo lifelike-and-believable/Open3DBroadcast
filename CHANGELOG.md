@@ -580,6 +580,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 - TCP and UDP: no silent port sharing (WP-U6; TRB-22). The TCP sender's listen socket and the UDP receiver's socket set `SO_REUSEADDR`. On Windows that lets a second socket bind a port already in use, so a second sender or receiver on the same port started without error and shared or took over the port. A second listener on a port in use now fails to start with `AddressInUse`, and the log says the bind failed. The UDP sender, which binds nothing, no longer sets the option either.
 
+- TCP and UDP: the audio-port options are removed (WP-U6; TRB-25). With audio on, the configure functions wrote `audio.port`, `audio.host` and `audio.bind` (the data port + 1 by default), but nothing read them: audio and control travel on the data socket, in the unified envelope. The **Port** tooltip no longer says that audio uses the next port. Saved configs that still carry these keys are unaffected; the keys are ignored, as before.
+
 - Loopback channel limits and receiver lifecycle (WP-U6; TRB-31, TRB-32).
   - **Queue limits:** a receiver that started after its sender reset the channel's queue capacity to the defaults (64 frames, 32 audio items), because the receiver has no queue options. Now only a sender sets a channel's limits.
   - **Stopped receiver:** a stopped receiver kept delivering frames when polled. `Poll` now delivers only between Start and Stop.
