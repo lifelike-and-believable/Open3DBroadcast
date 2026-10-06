@@ -578,6 +578,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Public header docs (WP-D2; SND-37). `IO3DSenderAudioSink::SubmitPcm` and `OnCaptureStopped` say which threads call them. The sender component's `OnDescriptorReady`, `OnPoseFrameReady` and `GetTransportName` have doc comments. The `HideInDetailPanel` meta on `TransportName` and `TransportOptions` is removed: UE 5.7 uses it only for events, and the editor's Details customization hides both properties. `Open3DSender/ThirdParty/README.md` no longer describes a `Lib/` layout the build never used. No behaviour change.
+
 - USER_GUIDE quick start and transport setup (WP-D2; mid-project review DOC-5, DOC-10 part).
   - **Quick Start** works on a clean machine: it starts from the Third Person template (no sample map ships), turns on **Auto Create Transport**, uses the real panel names (**Open3DStream Receiver**, **Transport**, **Create Source**) and drives a second mannequin with a **Live Link Pose** node. The Transport Options key/value rows it asked for do not exist, and Loopback has no `role` key.
   - **Transport Modules** cover TCP, UDP, NNG and the new MoQ section (relay, tracks, delivery modes) with their real options, plus delivery guarantees and a ports and firewalls table. The **Transport Options Reference** follows each transport's option schema, with the names the panel shows.
