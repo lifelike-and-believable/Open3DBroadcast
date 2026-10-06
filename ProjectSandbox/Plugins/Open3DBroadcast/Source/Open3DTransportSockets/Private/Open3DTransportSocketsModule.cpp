@@ -70,7 +70,7 @@ namespace SocketsSchema
 	static FO3DTransportOptionField MakePort(int32 InDefault)
 	{
 		return MakeInt(O3DSockets::PortOptionKey, LOCTEXT("PortLabel", "Port"),
-			LOCTEXT("PortTooltip", "TCP or UDP port. The audio stream uses the next port unless audio.port is set."), InDefault, 1, 65535);
+			LOCTEXT("PortTooltip", "TCP or UDP port. Audio and control travel on the same socket as the frames."), InDefault, 1, 65535);
 	}
 
 	/**

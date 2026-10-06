@@ -51,40 +51,12 @@ namespace O3DSocketsConfig
 		// Only the sender fragments frames, so only it has an MTU (TRB-21).
 		const int32 Mtu = O3DSocketsUdpConfigPrivate::ReadPositiveInt(Config, O3DSockets::MtuOptionKey, O3DSockets::DefaultUdpMtuBytes);
 		Config.AdvancedParams.Add(O3DSockets::MtuOptionKey, FString::FromInt(Mtu));
-
-		if (Config.Audio.bEnableAudio)
-		{
-			const FString Host = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::HostOptionKey);
-			const int32 Port = O3DSockets::ReadPortOption(Config, O3DSockets::PortOptionKey, DefaultUdpPort);
-			const FString StoredAudioHost = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::AudioHostOptionKey);
-			const FString AudioHost = StoredAudioHost.IsEmpty() ? Host : O3DSockets::NormaliseHostname(StoredAudioHost);
-			const int32 AudioPort = O3DSockets::ReadPortOption(Config, O3DSockets::AudioPortOptionKey, Port < 65535 ? Port + 1 : 0);
-			if (AudioPort > 0)
-			{
-				Config.AdvancedParams.Add(O3DSockets::AudioHostOptionKey, AudioHost);
-				Config.AdvancedParams.Add(O3DSockets::AudioPortOptionKey, FString::FromInt(AudioPort));
-			}
-		}
 	}
 
 	void ConfigureUdpReceiver(FO3DTransportConfig& Config)
 	{
 		O3DSocketsUdpConfigPrivate::ConfigureUdp(Config, O3DSockets::DefaultListenHost);
 		Config.Role = EO3DTransportRole::Receiver;
-
-		if (Config.Audio.bEnableAudio)
-		{
-			const FString Host = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::HostOptionKey);
-			const int32 Port = O3DSockets::ReadPortOption(Config, O3DSockets::PortOptionKey, DefaultUdpPort);
-			const FString StoredAudioBind = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::AudioBindOptionKey);
-			const FString AudioBind = StoredAudioBind.IsEmpty() ? Host : O3DSockets::NormaliseHostname(StoredAudioBind);
-			const int32 AudioPort = O3DSockets::ReadPortOption(Config, O3DSockets::AudioPortOptionKey, Port < 65535 ? Port + 1 : 0);
-			if (AudioPort > 0)
-			{
-				Config.AdvancedParams.Add(O3DSockets::AudioBindOptionKey, AudioBind);
-				Config.AdvancedParams.Add(O3DSockets::AudioPortOptionKey, FString::FromInt(AudioPort));
-			}
-		}
 	}
 }
 

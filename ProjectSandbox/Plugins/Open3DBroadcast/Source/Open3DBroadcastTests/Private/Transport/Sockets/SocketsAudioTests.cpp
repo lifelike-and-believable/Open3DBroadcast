@@ -58,42 +58,6 @@ namespace
 		virtual void SubmitFrame(const FString&, TConstArrayView<uint8>, double) override {}
 	};
 
-	int32 FindAvailableAudioTestPort()
-	{
-		ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
-		if (!SocketSubsystem)
-		{
-			return 0;
-		}
-
-		TSharedRef<FInternetAddr> Addr = SocketSubsystem->CreateInternetAddr();
-		bool bIsValid = false;
-		Addr->SetIp(TEXT("127.0.0.1"), bIsValid);
-		if (!bIsValid)
-		{
-			return 0;
-		}
-		Addr->SetPort(0);
-
-		FSocket* TempSocket = SocketSubsystem->CreateSocket(NAME_Stream, TEXT("SocketsTransportTestPortProbe"), false);
-		if (!TempSocket)
-		{
-			return 0;
-		}
-
-		TempSocket->SetReuseAddr(true);
-		int32 Port = 0;
-		if (TempSocket->Bind(*Addr))
-		{
-			TempSocket->Listen(1);
-			TempSocket->GetAddress(*Addr);
-			Port = Addr->GetPort();
-		}
-
-		SocketSubsystem->DestroySocket(TempSocket);
-		return Port;
-	}
-
 	/** Polls and ticks both sides for DurationSeconds of wall time. Yields; never sleeps. */
 	void PumpTcpTransports(IOpen3DSender& Sender, IOpen3DReceiver& Receiver, double DurationSeconds)
 	{
@@ -106,7 +70,7 @@ namespace
 		}
 	}
 
-	FO3DTransportConfig BuildTcpAudioSenderConfig(int32 DataPort, int32 AudioPort)
+	FO3DTransportConfig BuildTcpAudioSenderConfig(int32 DataPort)
 	{
 		FO3DTransportConfig Config;
 		Config.Transport = TEXT("TCP");
@@ -115,8 +79,6 @@ namespace
 		Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), DataPort);
 		Config.AdvancedParams.Add(TEXT("bind"), TEXT("127.0.0.1"));
 		Config.AdvancedParams.Add(TEXT("port"), FString::FromInt(DataPort));
-		Config.AdvancedParams.Add(TEXT("audio.bind"), TEXT("127.0.0.1"));
-		Config.AdvancedParams.Add(TEXT("audio.port"), FString::FromInt(AudioPort));
 
 		Config.Audio.bEnableAudio = true;
 		Config.Audio.SampleRate = 48000;
@@ -124,7 +86,7 @@ namespace
 		return Config;
 	}
 
-	FO3DTransportConfig BuildTcpAudioReceiverConfig(int32 DataPort, int32 AudioPort)
+	FO3DTransportConfig BuildTcpAudioReceiverConfig(int32 DataPort)
 	{
 		FO3DTransportConfig Config;
 		Config.Transport = TEXT("TCP");
@@ -133,8 +95,6 @@ namespace
 		Config.StreamId = FString::Printf(TEXT("127.0.0.1:%d"), DataPort);
 		Config.AdvancedParams.Add(TEXT("host"), TEXT("127.0.0.1"));
 		Config.AdvancedParams.Add(TEXT("port"), FString::FromInt(DataPort));
-		Config.AdvancedParams.Add(TEXT("audio.host"), TEXT("127.0.0.1"));
-		Config.AdvancedParams.Add(TEXT("audio.port"), FString::FromInt(AudioPort));
 
 		Config.Audio.bEnableAudio = true;
 		Config.Audio.SampleRate = 48000;
@@ -146,19 +106,12 @@ namespace
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsAudioRoundTripTest, "Open3DBroadcast.Transport.Sockets.Tcp.AudioRoundTrip", O3DB_TEST_FLAGS)
 bool FO3DSocketsAudioRoundTripTest::RunTest(const FString& Parameters)
 {
-	const int32 DataPort = FindAvailableAudioTestPort();
+	const int32 DataPort = O3DTests::FindFreeLoopbackPort(/*bTcp=*/true);
 	TestTrue(TEXT("Data port allocated"), DataPort > 0);
 
-	int32 AudioPort = 0;
-	for (int32 Attempt = 0; Attempt < 5 && (AudioPort == 0 || AudioPort == DataPort); ++Attempt)
-	{
-		AudioPort = FindAvailableAudioTestPort();
-	}
-	TestTrue(TEXT("Audio port allocated"), AudioPort > 0);
-	TestNotEqual(TEXT("Distinct ports"), DataPort, AudioPort);
 
-	FO3DTransportConfig SenderConfig = BuildTcpAudioSenderConfig(DataPort, AudioPort);
-	FO3DTransportConfig ReceiverConfig = BuildTcpAudioReceiverConfig(DataPort, AudioPort);
+	FO3DTransportConfig SenderConfig = BuildTcpAudioSenderConfig(DataPort);
+	FO3DTransportConfig ReceiverConfig = BuildTcpAudioReceiverConfig(DataPort);
 
 	const TSharedRef<IOpen3DSender> SenderRef = O3DSocketsTesting::CreateTcpSender();
 	const TSharedRef<IOpen3DReceiver> ReceiverRef = O3DSocketsTesting::CreateTcpReceiver();
@@ -232,18 +185,11 @@ bool FO3DSocketsAudioRoundTripTest::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSocketsAudioQueueOverflowTest, "Open3DBroadcast.Transport.Sockets.Tcp.AudioRejectedWithoutClient", O3DB_TEST_FLAGS)
 bool FO3DSocketsAudioQueueOverflowTest::RunTest(const FString& Parameters)
 {
-	const int32 DataPort = FindAvailableAudioTestPort();
+	const int32 DataPort = O3DTests::FindFreeLoopbackPort(/*bTcp=*/true);
 	TestTrue(TEXT("Data port allocated"), DataPort > 0);
 
-	int32 AudioPort = 0;
-	for (int32 Attempt = 0; Attempt < 5 && (AudioPort == 0 || AudioPort == DataPort); ++Attempt)
-	{
-		AudioPort = FindAvailableAudioTestPort();
-	}
-	TestTrue(TEXT("Audio port allocated"), AudioPort > 0);
-	TestNotEqual(TEXT("Ports differ"), DataPort, AudioPort);
 
-	FO3DTransportConfig SenderConfig = BuildTcpAudioSenderConfig(DataPort, AudioPort);
+	FO3DTransportConfig SenderConfig = BuildTcpAudioSenderConfig(DataPort);
 	const TSharedRef<IOpen3DSender> SenderRef = O3DSocketsTesting::CreateTcpSender();
 	IOpen3DSender& Sender = *SenderRef;
 
