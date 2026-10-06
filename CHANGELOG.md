@@ -578,6 +578,13 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Plugin README for users (WP-D2; DOC-1, DOC-2, DOC-6). The README ships in the Fab package.
+  - **Removed:** the "Marketplace Ready" and "easy distribution via Unreal Marketplace" claims, and the developer-only "MoQ Draft-07 Hotfix" section, which pointed at a file outside this repository.
+  - **Fixed:** the licence text, which now points at the plugin's own MIT `LICENSE`; dead links to a workflows README and to `Build/README.md`; the "part of the Open3DStream project" line.
+  - **Added:** a documentation index; installation from Fab and from a release zip; updating and removing; a network ports table for the firewall; known limitations, including when microphone audio is captured.
+  - **Moved:** build, CI and third-party details go under "For developers".
+  - **Also fixed:** the UE 5.4 references in `ProjectSandbox/README.md` and the 5.4 documentation links in `Build/README.md`.
+
 - Transport counters mean the same on every transport (WP-R3; mid-project review TR-5, SR-4).
   - **Sender metrics (`o3d.DumpMetrics`, the sender component's metrics handle):** frames captured, bytes serialized and frames a transport refused are recorded once, by the sender pipeline, for every transport. Before, only NNG, MoQ and WebRTC recorded them, so they read zero on TCP, UDP and Loopback. Every transport now records bytes sent and frames it dropped after accepting them.
   - **`FramesSent` and bytes sent are counted when a frame is sent, not when it is queued.** TCP counted a frame as sent and then as dropped when it aged out of the queue; NNG and MoQ recorded their sender and transport metrics at enqueue.

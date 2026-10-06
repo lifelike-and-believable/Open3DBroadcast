@@ -481,6 +481,6 @@ When adding new scripts:
 
 ## Resources
 
-- [Unreal Automation Tool (UAT)](https://docs.unrealengine.com/5.4/en-US/unreal-automation-tool-in-unreal-engine/)
-- [BuildPlugin Command](https://docs.unrealengine.com/5.4/en-US/using-the-buildplugin-command-in-unreal-engine/)
-- [Automation Testing](https://docs.unrealengine.com/5.4/en-US/automation-system-overview-in-unreal-engine/)
+- [Unreal Automation Tool (UAT)](https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-automation-tool-for-unreal-engine); `RunUAT BuildPlugin -help` lists the BuildPlugin options
+- [Automation System Overview](https://dev.epicgames.com/documentation/en-us/unreal-engine/automation-system-overview-in-unreal-engine)
+- [Automation Test Framework](https://dev.epicgames.com/documentation/en-us/unreal-engine/automation-test-framework-in-unreal-engine)
