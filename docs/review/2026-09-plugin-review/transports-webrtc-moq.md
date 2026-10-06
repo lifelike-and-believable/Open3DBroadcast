@@ -366,6 +366,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Move historical review and plan docs out of the plugin (to `/docs/archive`). Per project rule §5, fix the code to match the intended auto-fetch and API-key design, or correct the docs with justification. Fix the broken link.
 - Effort: M
 - Owner: review
+- Status: closed in #422
 
 ### TRF-37: MoQ receiver picks the audio codec from local config instead of the frame
 - Category: bug

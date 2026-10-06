@@ -476,6 +476,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Rewrite the README from the code: URI grammar, option keys, defaults, valid mode/role table and security notes. Remove the IP. Fix the path case. Add short READMEs for Sockets and Loopback, including the wire framing spec (magic, LE length, UDP fragment header).
 - Effort: S
 - Owner: coding
+- Status: closed in #422
 
 ## Editor widgets and tests
 

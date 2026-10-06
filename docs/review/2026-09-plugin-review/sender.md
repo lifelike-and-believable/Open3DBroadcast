@@ -466,3 +466,4 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Add threading and lifetime contracts to every public interface method and delegate, remove the stale references, document the timestamp semantics (see SND-17), and fix the README and the meta tag.
 - Effort: S
 - Owner: coding
+- Status: closed in #423
