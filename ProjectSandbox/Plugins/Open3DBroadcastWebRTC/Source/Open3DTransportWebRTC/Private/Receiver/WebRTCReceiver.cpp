@@ -158,7 +158,8 @@ void FWebRTCReceiverLink::RequestReconnect()
 {
     if (!bReconnectPending.Exchange(true))
     {
-        UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("WebRTC receiver scheduling reconnect"));
+        // Log, not Warning: the connection loss that leads here is already a Warning (TRF-30).
+        UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver scheduling reconnect"));
     }
 }
 
