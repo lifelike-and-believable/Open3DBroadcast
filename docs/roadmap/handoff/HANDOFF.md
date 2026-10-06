@@ -56,6 +56,20 @@ This section supersedes the "Start here" line in §0 where they disagree.
     - #413, TR-10: the MoQ receiver drops what a lost session had queued.
     - #414, TR-4: not reproduced. NNG runs `Lifecycle.RestartAfterStop` and five control stop cycles on one port, and both pass repeatedly.
     - #416, TR-7: an item larger than the send queue's byte hard cap is `TooLarge`, not backpressure, and the pipeline requests no full sync after it. The conformance backpressure case now fills the queue, with the sender's worker held: new `HoldSenderWorker`, and a TCP pause hook.
+  - **Branch protection and auto-merge (2026-10-06):** #419. `develop` has a ruleset: it requires the two result checks, allows squash merges only, and has no bypass. PRs use `gh pr merge --auto --squash`. The success comment still reaches the session after GitHub merges, which was checked on #419.
+  - **WP-D2, complete** (the end-user docs, P0 for Fab):
+    - #420: plugin README (DOC-1, DOC-2, DOC-6);
+    - #421: USER_GUIDE quick start and transport setup (DOC-5, part of DOC-10);
+    - #422: transport READMEs (new for Sockets and Loopback) and the WebRTC add-on guide (TRB-44, TRF-36);
+    - #423: public header docs (SND-37);
+    - #424: USER_GUIDE Blueprint API and receiver references, troubleshooting, console variables, FAQ, limitations and privacy, and the transport comparison (DOC-10, RCV-32, DOC-5).
+  - **Found while writing WP-D2, not fixed yet:**
+    - The MoQ defaults never match. The sender uses `mocap/<Subject Name>` with track `<Subject Name>`; the receiver uses `mocap/default` with track `primary`. The guide tells users to set both ends.
+    - The Sockets **Port** tooltip says audio uses the next port. Audio shares the data socket, and nothing reads `audio.port`, `audio.host` or `audio.bind`.
+    - The UDP **MTU** tooltip calls it the split threshold, but the threshold is **Max Datagram Bytes**. The receiver's Max Datagram tooltip names the sender's MTU.
+    - A Loopback receiver that starts after its sender resets the channel's queue limits to 64 and 32.
+    - A custom MoQ `track_namespace` without the `mocap/` or `audio/` prefix gives mocap and audio the same namespace and track.
+    - `WebRTCReceiver.h` initialises `NoDataReconnectTimeoutSec = 5.0`, which is never used.
 - **Maintainer decisions:**
   - **WP-U2 (2026-10-05):**
     - `bAutoCreateTransport` stays false, with a warning;
@@ -83,11 +97,13 @@ This section supersedes the "Start here" line in §0 where they disagree.
   - The test editor runs with `-NoSound`, so audible playback can't be tested automatically. Audio tests cover the component's state and the jitter buffer; listening is a desk check.
   - `close_findings.py`-style helpers must put the Status line after a finding's last top-level bullet, not inside nested bullets.
 - **Next, after the maintainer's go-ahead:**
-  1. WP-U5: sample content, which also carries WP-U2's acceptance.
-  2. WP-U6.
-  3. WP-D1 to WP-D4.
+  1. WP-U6.
+  2. The code issues found while writing WP-D2 (above), in one small PR.
+  3. WP-D1, WP-D3, WP-D4 (WP-D2 is done).
   4. WP-Q1.
   5. The names-in-use picker.
+  6. WP-U5: sample content. It also carries WP-U2's acceptance, and it needs the maintainer at the editor.
+  7. UE 5.6 and 5.8 support: a plan was requested on 2026-10-06.
 
   The desk items below are unchanged. Also for the maintainer:
   - (done 2026-10-06) branch protection: a `develop` ruleset requires "Plugin CI result" and "Core tests result", allows only squash merges, blocks deletion and force pushes, and has no bypass (`Build/README.md`);
@@ -97,7 +113,13 @@ This section supersedes the "Start here" line in §0 where they disagree.
   - over TCP with a slow receiver, or NNG with its buffer full, check that a residual-coded subject recovers at once rather than after the periodic full sync (#403);
   - with two receiver sources sending audio, check that a component in Any Stream mode plays one of them cleanly and switches to the other about a second after that sender stops (#398);
   - drop a live MoQ relay session while receiving, and check that no stale frames play after the reconnect (#413; tested only against the fake moq-ffi);
-  - the first real release: add the `## [X.Y.Z] - date` CHANGELOG section in a PR, merge it, then tag that merge commit. The `.uplugin` files still say 1.0, and the last release was 0.9.6, so the version number is the maintainer's call. That first tag is also the first run of the release's publish job (#415).
+  - the first real release: add the `## [X.Y.Z] - date` CHANGELOG section in a PR, merge it, then tag that merge commit. The `.uplugin` files still say 1.0, and the last release was 0.9.6, so the version number is the maintainer's call. That first tag is also the first run of the release's publish job (#415);
+  - follow the USER_GUIDE quick start on a clean machine with UE 5.7 (WP-D2's acceptance, #421). Check these too:
+    - the UI names it uses: the **O3D Sender** Add-menu entry, **Window → Virtual Production → Live Link**, **Add Source**;
+    - the Third Person template paths;
+    - typing a subject name into **Live Link Pose** before the subject exists;
+    - that an editor-created LiveLink source receives Loopback frames from Play In Editor;
+  - also check: several UDP senders feeding one LiveLink source; UDP broadcast to a subnet address; the Retargeting section's Control Rig options (#424).
 
 **Merged this session (#335–#355; later PRs under "Open at hand-over"):**
 - **WP-A4 protocol versioning (ADR 0009):** #335 (frame word, identifier, protocol 2, core 1.1.0), #336 (UDP fragment header v2), #337 (envelope v2, LE PCM), #338 (length-prefixed name hash), #339 (`docs/wire-format.md`, one changelog), #340 (no compatibility with formats before protocol 2; maintainer: there are no users of old receivers).

@@ -342,6 +342,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Add a "Receiver reference" section covering cvars, source settings (concealment, inactivity), status meanings and the audio routing rules, and align the names with the code.
 - Effort: S
 - Owner: coding
+- Status: closed in #424
 
 ### RCV-33: The "round-trip latency" metric measures only local queueing
 - Category: code-quality

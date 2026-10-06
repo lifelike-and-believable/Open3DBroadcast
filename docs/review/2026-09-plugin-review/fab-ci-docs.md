@@ -373,6 +373,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Rewrite the Building section: prerequisites, run `Sync-O3DSCore.ps1`, then BuildPlugin. Remove the marketing claims until FAB-1 to FAB-6 are closed.
 - Effort: S
 - Owner: docs
+- Status: closed in #420
 
 ### DOC-2: The plugin README is inaccurate on modules, versions, engine and links
 - Category: docs
@@ -382,6 +383,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Update the module list, versions, engine version and links. Point Support at the right issue tracker.
 - Effort: S
 - Owner: docs
+- Status: closed in #420
 
 ### DOC-3: The root README is largely stale (removed plugin, removed backend, nonexistent QUIC transport, 11 dead links)
 - Category: docs
@@ -410,6 +412,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Add a MoQ section (relay setup, URL format, delivery modes, limitations) and correct the audio support matrix.
 - Effort: M
 - Owner: docs
+- Status: closed in #421, #424
 
 ### DOC-6: No supported engine-version or platform statement for end users, and install steps don't match Fab
 - Category: docs
@@ -419,6 +422,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Add a "Requirements" box at the top of USER_GUIDE and README (UE 5.7, Win64 editor and packaged games, network ports/firewall notes). Add Fab install steps (Fab → Install to Engine → enable plugin). Fix the 5.4 references.
 - Effort: S
 - Owner: docs
+- Status: closed in #420
 
 ### DOC-7: Agent and assistant instruction files carry stale references and absolute paths
 - Category: docs
@@ -464,6 +468,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Add these sections. For Fab, host a docs page (GitHub Pages or README anchors) at a stable, public DocsURL.
 - Effort: M
 - Owner: docs
+- Status: closed in #420, #421, #424
 
 ### UX-1: No sample map or demo content ships with the plugin
 - Category: usability

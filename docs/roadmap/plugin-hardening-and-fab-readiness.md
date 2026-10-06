@@ -805,6 +805,13 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
   - Fix the WebRTC docs (API-key auth, the thread-safety claims).
   - Fix the public-header doc comments.
 - **Acceptance:** a reviewer follows the quick start on a clean machine without help.
+- **Done (2026-10-06):**
+  - #420: README (DOC-1, DOC-2, DOC-6);
+  - #421: USER_GUIDE quick start and transport setup (DOC-5, DOC-10 part);
+  - #422: transport READMEs and the WebRTC guide (TRB-44, TRF-36);
+  - #423: public header docs (SND-37);
+  - #424: USER_GUIDE references, troubleshooting, FAQ and the transport comparison (DOC-10, RCV-32, DOC-5).
+  - The acceptance test, a reviewer on a clean machine, has not been done (HANDOFF desk items).
 
 #### WP-D3: Developer docs and agent instructions  ·  P2 · S · docs
 - **Findings:** DOC-7, DOC-8, DOC-9, SHR-37
