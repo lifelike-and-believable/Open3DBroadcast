@@ -14,7 +14,7 @@ An Unreal Engine plugin that streams skeletal animation, curves, audio and contr
 
 - [USER_GUIDE.md](USER_GUIDE.md): setup, the quick start, sending, receiving, audio, control, transports and troubleshooting.
 - [Transport_Module_Comparison.md](Transport_Module_Comparison.md): how the transports differ (delivery, backpressure, audio, configuration).
-- The transport READMEs under `Source/Open3DTransport*/README.md`: options and details for each transport.
+- The transport READMEs (`Source/Open3DTransport*/README.md` in the [repository](https://github.com/lifelike-and-believable/Open3DBroadcast); not in the Fab package): options and details for each transport.
 - [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) and [LICENSE](LICENSE).
 
 ## Installation
@@ -53,7 +53,7 @@ Open these in the firewall of the machine that listens. A receiver and sender on
 - No sample map or assets ship with the plugin. The USER_GUIDE quick start builds a working setup in a few steps.
 - MoQ is Experimental, and the WebRTC transport is a separate add-on.
 - Residual coding needs a transport that delivers every frame in order (Loopback, TCP, NNG pair or push/pull, WebRTC by default). The sender warns when the selected transport does not.
-- Microphone audio is captured only when the sender component's **Enable Audio** is on (off by default). The captured audio is sent to every receiver of the stream.
+- The sender captures audio only when its **Enable Audio** is on (off by default). In the default **Mix (Main Submix or Custom)** capture mode it sends the game's mixed audio; the microphone is used only with **Audio Capture Mode** set to **Input (Microphone)**. The captured audio is sent to every receiver of the stream.
 
 ## Features
 

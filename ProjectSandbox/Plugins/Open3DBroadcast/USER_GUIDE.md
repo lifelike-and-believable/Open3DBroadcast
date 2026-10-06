@@ -1870,7 +1870,7 @@ The stream uses the Open3DStream protocol; its byte layout is in [docs/wire-form
 
 - **Plugin README**: [README.md](README.md) - requirements, installation, ports and known limitations
 - **Transport Comparison**: [Transport_Module_Comparison.md](Transport_Module_Comparison.md) - how the transports differ, for integrators
-- **Transport READMEs** (in the GitHub repository): [NNG](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportNNG/README.md), [MoQ](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportMoQ/README.md)
+- **Transport READMEs** (in the GitHub repository, not in the Fab package): [Loopback](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportLoopback/README.md), [TCP and UDP](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportSockets/README.md), [NNG](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportNNG/README.md), [MoQ](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportMoQ/README.md)
 - **WebRTC Guide**: [Open3DBroadcastWebRTC USER_GUIDE](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcastWebRTC/USER_GUIDE.md) - setup of the free WebRTC add-on
 - **Wire format**: [docs/wire-format.md](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/docs/wire-format.md)
 
