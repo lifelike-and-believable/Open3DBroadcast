@@ -2,7 +2,7 @@
 
 > **Historical document (2026-10-06, WP-D2; TRF-36).** It records the state of 2025-11-15 and is not a current assessment. No longer true:
 > - "PRODUCTION READY" and "Thread safety validated (no race conditions found)": the 2026-09 plugin review found threading and lifetime defects in this transport (TRF-1 and TRF-15 in `docs/review/2026-09-plugin-review/transports-webrtc-moq.md`).
-> - "Payload handling implemented (size validation + channel fallback)": frames are sent on the reliable data channel unless `webrtc.prefer_lossy` is true, and a frame above 15,000 bytes is refused (the add-on's `USER_GUIDE.md`, Frames Being Dropped).
+> - "Payload handling implemented (size validation + channel fallback)": frames go on the reliable data channel by default. The fallback from the lossy to the reliable channel (1,301 to 15,000 bytes) applies only with `webrtc.prefer_lossy` true; a frame above 15,000 bytes is refused (the add-on's `USER_GUIDE.md`, Frames Being Dropped).
 
 **Date:** 2025-11-15 (Final Implementation)
 **Status:** ✅ **PRODUCTION READY** - All recommendations implemented

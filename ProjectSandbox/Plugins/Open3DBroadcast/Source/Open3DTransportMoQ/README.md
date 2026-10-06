@@ -11,7 +11,7 @@ the **Open3DStream Receiver** LiveLink source and fill in the options below. The
 - Audio as PCM16 or Opus, with the codec read from each audio frame.
 - Reconnects with capped exponential backoff (see [Error Handling](#error-handling)).
 
-## Options
+## Configuration Options
 
 Options without a **Shown as** entry are not in the settings panel. Set them with
 **Set Transport Option** on the sender component, or in the options map of
@@ -21,7 +21,7 @@ the first one set wins.
 | Key | Also read as | Side | Shown as | Default | Notes |
 |---|---|---|---|---|---|
 | `relay_url` | `moq.relay` | both | **Relay URL** | none | Required, for example `https://relay.example.com:443`. |
-| `track_namespace` | `moq.namespace` | both | **Track Namespace (optional)** | `mocap/<session>` | A namespace that starts with `mocap/` or `audio/` gets the matching prefix for each track. |
+| `track_namespace` | `moq.namespace` | both | **Track Namespace (optional)** | `mocap/<session>` | A namespace that starts with `mocap/` or `audio/` gets the matching prefix for each track. Any other namespace is used as it is for mocap and audio alike; control gets `control/` in front of it. |
 | `track_name` | `moq.track` | both | **Track Name (optional)** | the stream id's last part; `primary` when there is none | The sender's stream id is its **Subject Name**. |
 | `moq.session` | | both | | the stream id's first part; `default` when there is none | Used only when no namespace is set. |
 | `delivery_mode` | `moq.delivery` | sender | **Delivery Mode** | `stream` | `stream` delivers every frame in order; `datagram` drops late frames. |

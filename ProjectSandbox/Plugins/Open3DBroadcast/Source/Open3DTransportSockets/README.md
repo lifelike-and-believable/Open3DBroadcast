@@ -62,7 +62,7 @@ sender reaches every receiver on the subnet. Multicast is not supported.
 
 | Key | Side | Shown as | Default | Notes |
 |---|---|---|---|---|
-| `host` | sender | **Destination Host** | `127.0.0.1` | Address the datagrams go to. Empty or `*` sends to `255.255.255.255` and turns broadcast on. A host name is resolved on the worker thread. |
+| `host` | sender | **Destination Host** | `127.0.0.1` | Address the datagrams go to. `*` sends to `255.255.255.255` and turns broadcast on. Another broadcast address needs **Enable UDP Broadcast**. A host name is resolved on the worker thread. |
 | `host` | receiver | **Bind Address** | `0.0.0.0` | Local address to listen on. An IP literal or `0.0.0.0`. |
 | `port` | both | **Port** | 17800 | 1 to 65535. |
 | `udp.broadcast` | sender | **Enable UDP Broadcast** | false | Allow sending to a broadcast address. |
