@@ -287,7 +287,7 @@ While idle for `tcp.keepalive` ms the sender writes a keepalive frame whose payl
 - `port` - Port number, 1 to 65535 (digits only)
 - `bind` - Bind address for receiver
 - `udp.broadcast` - Enable broadcast mode (default: false)
-- `udp.mtu` - MTU size in bytes (default: 1200)
+- `udp.mtu` - Sender only: MTU size in bytes (default: 1200); the receiver has no MTU option
 - `udp.maxdatagram` - Max datagram size before fragmentation (default: 64000)
 - `udp.maxframe` - Receiver: largest reassembled message accepted, in bytes (default: 4194304, max 52428800)
 

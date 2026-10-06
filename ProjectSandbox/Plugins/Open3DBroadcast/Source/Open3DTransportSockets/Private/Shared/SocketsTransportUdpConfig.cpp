@@ -22,7 +22,7 @@ namespace O3DSocketsUdpConfigPrivate
 		return Value > 0 ? Value : Default;
 	}
 
-	/** Host, port, broadcast and datagram sizes, normalised and written back (both roles). */
+	/** Host, port, broadcast and the largest datagram, normalised and written back (both roles). */
 	void ConfigureUdp(FO3DTransportConfig& Config, const TCHAR* DefaultHost)
 	{
 		Config.Transport = TEXT("UDP");
@@ -31,7 +31,6 @@ namespace O3DSocketsUdpConfigPrivate
 		const FString Host = StoredHost.IsEmpty() ? FString(DefaultHost) : O3DSockets::NormaliseHostname(StoredHost);
 		const int32 Port = O3DSockets::ReadPortOption(Config, O3DSockets::PortOptionKey, O3DSocketsConfig::DefaultUdpPort);
 		const bool bBroadcast = O3DTransportOptions::GetBool(Config.AdvancedParams, O3DSockets::BroadcastOptionKey, false);
-		const int32 Mtu = ReadPositiveInt(Config, O3DSockets::MtuOptionKey, 1200);
 		const int32 MaxDatagram = ReadPositiveInt(Config, O3DSockets::MaxDatagramOptionKey, 64000);
 
 		Config.Uri = O3DSockets::MakeUri(TEXT("udp"), Host, Port);
@@ -39,7 +38,6 @@ namespace O3DSocketsUdpConfigPrivate
 		Config.AdvancedParams.Add(O3DSockets::HostOptionKey, Host);
 		Config.AdvancedParams.Add(O3DSockets::PortOptionKey, FString::FromInt(Port));
 		Config.AdvancedParams.Add(O3DSockets::BroadcastOptionKey, bBroadcast ? TEXT("true") : TEXT("false"));
-		Config.AdvancedParams.Add(O3DSockets::MtuOptionKey, FString::FromInt(Mtu));
 		Config.AdvancedParams.Add(O3DSockets::MaxDatagramOptionKey, FString::FromInt(MaxDatagram));
 	}
 }
@@ -50,6 +48,9 @@ namespace O3DSocketsConfig
 	{
 		O3DSocketsUdpConfigPrivate::ConfigureUdp(Config, TEXT("127.0.0.1"));
 		Config.Role = EO3DTransportRole::Sender;
+		// Only the sender fragments frames, so only it has an MTU (TRB-21).
+		const int32 Mtu = O3DSocketsUdpConfigPrivate::ReadPositiveInt(Config, O3DSockets::MtuOptionKey, 1200);
+		Config.AdvancedParams.Add(O3DSockets::MtuOptionKey, FString::FromInt(Mtu));
 
 		if (Config.Audio.bEnableAudio)
 		{
