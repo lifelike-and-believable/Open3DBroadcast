@@ -1,0 +1,29 @@
+# Line endings (WP-R2; mid-project review BC-11). Text files are stored with LF; a checkout gets
+# the platform's line endings (core.autocrlf), except where eol= below fixes them. Before this
+# file, git stored whatever each editor wrote, so the repository held both LF and CRLF files.
+
+* text=auto
+
+# Shell scripts run under bash, also from a Windows checkout (Git Bash, CI), so always LF.
+*.sh text eol=lf
+
+# Patches apply to exact bytes, line endings included.
+*.patch -text
+*.diff -text
+
+# Binaries, named so that git's content detection never decides.
+*.uasset binary
+*.umap binary
+*.fbx binary
+*.dll binary
+*.lib binary
+*.pdb binary
+*.exe binary
+*.so binary
+*.dylib binary
+*.a binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.wav binary
+*.zip binary
