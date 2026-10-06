@@ -20,7 +20,12 @@ HANDOFF.md stays the source for current status and next steps. Read this documen
 
 ## 1. Most important, in order
 
-1. **BC-1, a CI security setting (verified).** It was reported to the maintainer directly. The details stay out of this public repository until the setting is changed; the fix is tracked under WP-R2.
+1. **BC-1, fork PRs could run code on the self-hosted build machine (verified; resolved 2026-10-06).**
+   - The repository is public. Its fork-PR approval policy was `first_time_contributors_new_to_github`.
+   - The "UE build and tests" job in `open3dbroadcast-plugin-ci.yml` runs on `pull_request` on `[self-hosted, ue5, windows]`. On `pull_request`, GitHub runs the workflow from the PR's merge commit, so a fork could rewrite that job and run its code on the build machine, which other projects share.
+   - The maintainer set the policy to `all_external_contributors` (checked with `gh api repos/lifelike-and-believable/Open3DBroadcast/actions/permissions/fork-pr-contributor-approval`). Outside contributors' workflows now wait for approval.
+   - **Rule for whoever approves a fork PR's workflows:** read its changes to `.github/workflows/`, Build.cs files and scripts first. Approving runs them on the build machine.
+   - **Don't add a guard that skips the job for fork PRs.** A skipped job counts as passing a required check, so the PR would look green without a build.
 2. **RR-1, use-after-free (verified).** `FO3DReceiverSource` holds LiveLink's settings object as a raw `ULiveLinkSourceSettings*` (`O3DReceiverSource.h:232`), and `IsTickable()` always returns true.
    - LiveLink owns that object.
    - A Blueprint that keeps the handle from Create Open3DStream LiveLink Source (#387) after Remove Source keeps the source alive and ticking after GC frees the settings.
@@ -265,7 +270,7 @@ Each is to be scheduled by the maintainer. None of them is in the roadmap yet.
    - RR-1, RR-2, SR-3, TR-1/SR-1, TR-2, RR-3, RR-4, TR-3, SR-2;
    - each with a test, using a real LiveLink client where the bug involves one.
 2. **WP-R2, CI and release:**
-   - BC-1. The fix is the maintainer's repository setting. A workflow guard that skips the job for some PRs would make those PRs look green, because a skipped job counts as passing a required check. Any guard must fail or flag them instead;
+   - BC-1 is resolved by the repository setting (see §1); no workflow change is needed.
    - BC-2 and BC-3: an always-running aggregator job to require;
    - BC-4 and BC-5: release from the tested Fab zip, version taken from the tag, a CHANGELOG version section;
    - BC-7: minimum test count;
@@ -280,7 +285,6 @@ Each is to be scheduled by the maintainer. None of them is in the roadmap yet.
    - trim `.github/agents`.
 5. **Small cleanups into WP-Q1:** RR-6, RR-7, RR-8, RR-9, RR-11, SR-6 to SR-12, TR-12, TR-13, BC-13 to BC-15.
 6. **Decisions for the maintainer:**
-   - the BC-1 setting, reported directly;
    - **RR-5, Mix as the default mode.** On 2026-10-06 the maintainer kept Mix strict and accepted that "existing components behave as today (silent for labelled streams) until users switch mode". The reviewer's evidence:
      - senders label audio with the subject name, or `o3ds:audio` when there is none (`O3DSenderAudioCaptureComponent.cpp:347`);
      - `o3ds:mix` appears only when the receiver source has no StreamId, but `BuildTransportConfig` copies the URI into StreamId;
