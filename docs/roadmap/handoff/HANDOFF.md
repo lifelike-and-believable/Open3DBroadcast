@@ -15,18 +15,12 @@ This section supersedes the "Start here" line in §0 where they disagree.
   - **WP-U3, complete:** #389, the sender Details panel (SND-24, SND-25, SND-27, SND-30, SND-35); #390, receiver status, Create Source validation and live concealment settings (RCV-15, RCV-16, RCV-17); #391, transport options and logs (TRF-30, TRB-43 and TRB-21's UI part; the rest of TRB-21 is WP-U6's).
   - **Findings:** #392, `Status: closed in #N` markers for the 193 findings M1 to M3 fixed. Before it, only the M4 PRs had added any. Its description lists 66 findings left open, 16 of them for the maintainer to decide.
   - **Docs:** #394, this section and the roadmap's progress lines.
-  - **WP-U4, three of four PRs:**
+  - **WP-U4, complete:**
     - #393, the remote audio component lifecycle (RCV-22, RCV-23, RCV-24): it keeps the parent the user chose, Auto Activate off works with new Play and Stop functions, and EndPlay destroys the internal audio component;
     - #395, inactive LiveLink subjects (RCV-6): a per-source Inactive Subject Timeout (default 5 s, 0 = never); on timeout the subject's frames are cleared, and the subject and its settings are kept;
     - #396, the remote audio jitter buffer (RCV-20): `FO3DAudioJitterBuffer`, pulled on the audio thread by `UO3DJitterSoundWave`; a Target Latency property (default 60 ms), trimming above target + 60 ms. Open3DReceiver now depends on AudioExtensions.
-- **Done, not yet a PR (waiting for the maintainer's go-ahead, 2026-10-06):**
-  - **WP-U4 PR 4, RCV-21 (remote audio stream routing)** on branch `wp-u4-audio-routing` (3ff01ad8, based on #396's branch, so merge `develop` into it first).
-    - The component plays one stream at a time (source and label), the first that matches, until it has been idle for 1 s.
-    - A new **Any Stream** mode and a **Stream Label Filter**.
-    - Mix stays strict on `o3ds:mix`, now `O3DS::MixAudioStreamLabel`.
-    - The USER_GUIDE corrects the audio property table.
-    - Local run: 507 tests, 507 passed. TDD red run: the two routing tests failed as expected.
-    - Open the PR, close RCV-21 in the finding file, and merge on green.
+    - #398, remote audio stream routing (RCV-21): one stream at a time (source and label) until it is idle for 1 s, a new Any Stream mode and a Stream Label Filter; Mix stays strict on `o3ds:mix`, now `O3DS::MixAudioStreamLabel`. The USER_GUIDE audio property table is corrected.
+  - **Docs:** #397, this section at the pause before RCV-21.
 - **Maintainer decisions:**
   - **WP-U2 (2026-10-05):**
     - `bAutoCreateTransport` stays false, with a warning;
@@ -50,21 +44,21 @@ This section supersedes the "Start here" line in §0 where they disagree.
     - still include a deleted file, so the build fails;
     - and after a failed build, the automation run uses the old binaries and can report green.
 
-    Check that the build succeeded and compare the test count: 503 on `develop` as of #396.
+    Check that the build succeeded and compare the test count: 507 on `develop` as of #398.
   - The test editor runs with `-NoSound`, so audible playback can't be tested automatically. Audio tests cover the component's state and the jitter buffer; listening is a desk check.
   - `close_findings.py`-style helpers must put the Status line after a finding's last top-level bullet, not inside nested bullets.
 - **Next, after the maintainer's go-ahead:**
-  1. WP-U4 PR 4 (RCV-21), from the branch above. It completes WP-U4.
-  2. WP-U5: sample content, which also carries WP-U2's acceptance.
-  3. WP-U6.
-  4. WP-D1 to WP-D4.
-  5. WP-Q1.
-  6. The names-in-use picker.
+  1. WP-U5: sample content, which also carries WP-U2's acceptance.
+  2. WP-U6.
+  3. WP-D1 to WP-D4.
+  4. WP-Q1.
+  5. The names-in-use picker.
 
   The desk items below are unchanged. Also for the maintainer:
   - turn on branch protection for `develop` with the ten checks in `Build/README.md`;
   - listen to a received audio stream at the default 60 ms Target Latency (#396), pause the sender, and check that playback resumes;
-  - set a translator on a LiveLink subject, stop the sender for longer than the Inactive Subject Timeout, restart it, and check the translator is still there (#395).
+  - set a translator on a LiveLink subject, stop the sender for longer than the Inactive Subject Timeout, restart it, and check the translator is still there (#395);
+  - with two receiver sources sending audio, check that a component in Any Stream mode plays one of them cleanly and switches to the other about a second after that sender stops (#398).
 
 **Merged this session (#335–#355; later PRs under "Open at hand-over"):**
 - **WP-A4 protocol versioning (ADR 0009):** #335 (frame word, identifier, protocol 2, core 1.1.0), #336 (UDP fragment header v2), #337 (envelope v2, LE PCM), #338 (length-prefixed name hash), #339 (`docs/wire-format.md`, one changelog), #340 (no compatibility with formats before protocol 2; maintainer: there are no users of old receivers).
@@ -152,7 +146,7 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M1 Safety and correctness: WP-S1..S11, WP-T1, WP-T2 | Done (#264–#279) |
 | M2 Fab-buildable package: WP-F1..F4, F6..F9, F11 | Done (#274–#286). **F0 and F5 wait on the maintainer** (see §5) |
 | M3 Architecture: WP-A1..A7 | **In progress.** WP-A1, A2 (except removing `o3d.Sender.AsyncPipeline` one release later), A3 and A6 done; WP-A4 nearly done (ADR 0009 and ADR 0005 implemented, CORE-11/13/15 fixed, CORE-12 harness merged, CORE-14 in #353, RCV-8 in ADR 0013, accepted); WP-A5 waits for the maintainer at the desk; WP-A7 partly done (#348). SHR-38: ADR 0012 implemented (#357–#365). See §0a. |
-| M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | **In progress.** WP-U1, U2 and U3 done (#385–#391); WP-U4 three of four PRs merged (#393, #395, #396), RCV-21 ready on a branch. See §0a. |
+| M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | **In progress.** WP-U1, U2 and U3 done (#385–#391); WP-U4 done (#393, #395, #396, #398). See §0a. |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
 | WP-CTL control channel (D11, ADR 0011) | CTL-1..7 done (#290–#295, CTL-6, CTL-7); live-server checks remain (see §2b) |
 
