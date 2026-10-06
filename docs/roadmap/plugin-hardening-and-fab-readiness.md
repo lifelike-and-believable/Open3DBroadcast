@@ -840,7 +840,7 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
   - #407: every fuzz target runs (BC-8) and a floor on the UE test count (BC-7);
   - #408: a red nightly opens or updates a `nightly-failure` issue (BC-9);
   - #415: gated release from the tag (BC-4, BC-5), with a dry run that passed.
-  - Left: BC-11 (`.gitattributes` and renormalize). It touches every file, so it waits for the maintainer's go-ahead and for no PR to be open.
+  - BC-11: `.gitattributes`, and every text file renormalized to LF in one PR (maintainer go-ahead, 2026-10-06). WP-R2 is complete.
 
 #### WP-R3: Transport consistency from the mid-project review  ·  P2 · M · coding (added 2026-10-06)
 - **Items:** mid-project review TR-5/SR-4 (counter semantics, sender metrics recorded once), TR-6 (one log throttle), TR-7 (`TooLarge` above the hard cap; a backpressure case that fills a queue), TR-8 (MoQ receiver options), TR-9 (thread-safe receiver stats), TR-10 (MoQ stale frames after reconnect), TR-4 (NNG listener restart). TR-11 goes to WP-T2e.

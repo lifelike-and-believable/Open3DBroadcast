@@ -37,7 +37,7 @@ This section supersedes the "Start here" line in §0 where they disagree.
       - TR-2: NNG subscription topics removed (maintainer, 2026-10-06);
       - TR-3: NNG `Poll` is bounded for every kind of message.
   - **Docs:** #404, WP-R1 done; #405, BC-1 resolved (the fork-PR approval setting).
-  - **WP-R2** (CI and release; everything but BC-11):
+  - **WP-R2, complete** (CI and release):
     - #406: each CI workflow ends in one aggregator check, "Plugin CI result" and "Core tests result", the two to require on `develop`. Pushes to `develop` are no longer cancelled by the next merge.
     - #407: the fuzz job reads its targets from `test/fuzz/CMakeLists.txt`, so all 8 run. `Build/automation-test-floors.json` sets the minimum number of UE tests per run (`Run-AutomationTests.ps1 -MinTestsKey`). Raise a floor in the PR that adds tests.
     - #408: a red scheduled nightly opens or comments on a "Nightly build failing" issue labelled `nightly-failure`; the next green one closes it. The Linux exclusion check runs only when the runner has the toolchain, and shows as skipped otherwise.
@@ -47,6 +47,7 @@ This section supersedes the "Start here" line in §0 where they disagree.
       - The release runs PR CI's Fab zip and UE jobs; the UE job moved into the reusable `open3dbroadcast-ue-build-test.yml`.
       - It publishes the package the tests ran against. The Fab zip is a 90-day artifact, uploaded to Fab by hand.
       - A manual run is a dry run. One on #415's branch passed (run 37513123559); the publish job has not run yet (Build/README.md, "Releases").
+    - BC-11: `.gitattributes` stores every text file with LF, and 127 CRLF or mixed files were renormalized, with content otherwise unchanged. `.sh` files are LF in every checkout, `.patch` files keep their bytes, and binaries are marked. A branch from before it may show line-ending conflicts when it merges `develop`; merge, then run `git add --renormalize .`.
   - **WP-R3, complete** (transport consistency):
     - #409, TR-5/SR-4: the sender pipeline records frames captured, bytes serialized and refused frames once, for every transport; transports record bytes sent and frames dropped after acceptance, and count `FramesSent` when a frame is sent, not queued.
     - #410, TR-6: `FO3DLogThrottle` (`Open3DShared/Public/O3DLogThrottle.h`) gives one line per 2 s, with a count of the lines it held back, for the UDP, NNG and WebRTC log sites a peer or a failing socket can repeat per packet.
@@ -82,7 +83,6 @@ This section supersedes the "Start here" line in §0 where they disagree.
   - The test editor runs with `-NoSound`, so audible playback can't be tested automatically. Audio tests cover the component's state and the jitter buffer; listening is a desk check.
   - `close_findings.py`-style helpers must put the Status line after a finding's last top-level bullet, not inside nested bullets.
 - **Next, after the maintainer's go-ahead:**
-  0. WP-R2's BC-11: `.gitattributes` and one renormalizing PR. It rewrites the line endings of many files, so it needs a time when no PR is open, and the go-ahead.
   1. WP-U5: sample content, which also carries WP-U2's acceptance.
   2. WP-U6.
   3. WP-D1 to WP-D4.
@@ -151,12 +151,11 @@ This section supersedes the "Start here" line in §0 where they disagree.
 - Never run two UBT builds at once. While a strict build uses the main checkout, do other branches in git worktrees under `U:\o3dwt\` (`git worktree add`), and build the core there with `U:\o3dcore\build-core-at.cmd <repo dir> <build dir>`, one build dir per checkout path (CMake refuses a build dir made for another source path).
 - `sync_o3ds_core.py` needs the submodules, which only the main checkout has. After merging `develop` into a branch elsewhere, take `develop`'s `SYNC_STAMP.txt` and regenerate it in the main checkout before pushing.
 - Every PR that edited the long "Start here" line of §0 conflicted with the others; edit this section, not that line, and keep status changes to one docs PR at the end of a batch.
-- `core.autocrlf` is true: a file whose committed blob has CRLF (for example `O3DSenderComponent.h`) must be staged with `git -c core.autocrlf=false add`, or the commit rewrites every line.
+- Line endings: since WP-R2's BC-11, `.gitattributes` stores every text file with LF. The CRLF staging rules of earlier sessions no longer apply.
 - The self-hosted UE runner once failed with `FileLoadException` loading its compiled build-rules assembly; it is not a code failure, and a new run passes.
 - Docs-only PRs skip the plugin jobs and get no bot comment, so check their checks directly before merging.
 - The maintainer's Pushover notification when Claude stops is a user-level Claude Code hook (`~/.claude/settings.json`), not part of this repository. `.claude/settings.local.json` is ignored (personal settings); shared settings are in `.claude/settings.json` (#380).
 - `nngcat --ascii` prints messages without a newline, and `docker logs` holds back a partial line while the container runs; use `--quoted` in container tests (#372).
-- `sed -i` in Git Bash converts CRLF files to LF (it rewrote `O3DReceiverSource.cpp` in #361; fixed in a follow-up commit). Edit CRLF files with a script that keeps the file's line endings, and check `git diff --cached --numstat` for whole-file rewrites before committing.
 - `Build/Scripts/Run-AutomationTests.ps1` writes its report under the current directory's `Artifacts/`; run it from the repo root, or delete a stray `Artifacts/` inside the source tree before committing.
 - One-shot local check for a plugin change: build, WebRTC add-on build, then all tests on the add-on host project (469 tests with both plugins as of #361).
 
@@ -428,7 +427,7 @@ With UE 5.7 installed locally you can also run the real build and tests: `Build/
 20. When an interface gains a second form of a virtual, give it its own name (`SubmitFrameOwned`, not a second `SubmitFrame` overload). A derived class that overrides one overload hides the others, so a call through the derived type silently picks the wrong one or fails to compile (WP-A1 PR 5b).
 21. A local must not reuse the name of a parameter or of a local in an enclosing scope. MSVC reports C4457 ("declaration hides function parameter") or C4456, and CI builds with `-FailOnWarnings`, so it fails the build. The 5c options panel declared `double Value` inside a function whose parameter was `Value` (fixed in c5fb457). Check every new local against the enclosing function's parameters.
 22. A sender-component test that expects its transport to start must set `bAutoCreateTransport = true`: it defaults to false, and `StartCapture` then never reaches the transport controller. It must also declare every warning the path logs with `AddExpectedError` (log warnings fail a test): a control-only `StartCapture` without a mesh logs "No TargetMesh set" once per call. `ValidateGivesInvalidConfig` needed both (fixed in 9bb6b3f); `O3DTransportLifetimeTests` shows the pattern.
-23. Several Open3DSender sources (`O3DSenderComponent.h/.cpp`, `O3DSenderSerializer.h/.cpp`, `O3DSenderCurveProcessor.h/.cpp`) are CRLF while newer files are LF (`git ls-files --eol`). Keep each file's line endings when editing (convert to LF, edit, convert back), or the diff becomes a whole-file rewrite that hides the real change (WP-A2a).
+23. Mixed line endings in the sources (WP-A2a): resolved by `.gitattributes` (WP-R2, BC-11), which stores every text file with LF.
 24. `FO3DSenderCurveConfig` holds raw pointers to the include/exclude pattern arrays. Build it only from a frame's settings snapshot (`FO3DSenderEncodingSettings`, whose lists are shared and immutable), as `FO3DSenderCurveFilter::FilterFrame` does, never from the component's `IncludeCurvePatterns`/`ExcludeCurvePatterns`: once filtering runs on the WP-A2c worker those would be read while the game thread edits them (WP-A2a).
 25. The GitHub connector in a cloud session may refuse the UE 5.7 source mirror (`lifelike-and-believable/UnrealEngine`). If it does, use only UE APIs this plugin already compiles in CI, in the same call form, and say so in the ADR addendum; a new engine API then needs a session that can reach the mirror (WP-A2a).
 26. A test that needs real engine ticking creates its own world: `UWorld::CreateWorld(EWorldType::Game, false)` plus a world context, `InitializeActorsForPlay(FURL())`, then `World->Tick(LEVELTICK_All, Dt)`. Such a world has no game mode, so actors never begin play by themselves and component ticks are not registered: call `Actor->DispatchBeginPlay()` after registering the components. Destroy the world in a scope guard (`DestroyWorldContext`, `DestroyWorld(false)`) so a failed check does not leak it. `O3DSenderTickOrderTests.cpp` (WP-A2b) shows the pattern; it was written without a local UE build, so check its first CI run.

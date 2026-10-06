@@ -50,7 +50,7 @@ reads it directly). Rules for Claude Code are in `.claude/rules/` (rules-for-rob
 - Never rebase or force-push a pushed branch. To update one, merge `develop` into it.
 - Merge pull requests into `develop` by squash (`gh pr merge <n> --squash`), only when every check on the head commit has passed or been skipped.
 - Release tags are `open3dbroadcast-vX.Y.Z` (the plugin release workflow runs on them). Before tagging, merge a `## [X.Y.Z] - date` CHANGELOG section naming the protocol, transport API and core versions; the release refuses a tag without one (Build/README.md, "Releases").
-- Line endings: `core.autocrlf` is true and many files are CRLF. Edit them with tools that keep the file's line endings (not `sed -i` in Git Bash), and check `git diff --numstat` for whole-file rewrites before committing. A file whose committed blob is CRLF is staged with `git -c core.autocrlf=false add`.
+- Line endings: `.gitattributes` stores every text file with LF; a checkout gets the platform's endings. `.sh` files are LF everywhere, `.patch` files keep their bytes, and binaries are marked `binary`. A new binary type goes in `.gitattributes`.
 - If git reports "dubious ownership", pass `safe.directory` for that one command (`GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*`); never change the global git config.
 - Never run two Unreal builds at once on one machine; wait for any running build (including other projects') to finish.
 - `HANDOFF.md` status changes go in one docs PR at the end of a batch. Don't edit the long "Start here" line in its §0.
