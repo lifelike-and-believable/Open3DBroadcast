@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "O3DLogThrottle.h"
 #include "Transport/O3DReceiverInterface.h"
 #include "Transport/O3DConnectionState.h"
 #include "Transport/O3DTransportOptions.h"
@@ -71,6 +72,10 @@ private:
 	bool bAllowBroadcast = false;
 	int32 MaxDatagramBytes = 64000;
 	int32 MaxFrameBytes = 0;
+	// WP-R3 (TR-6): hot-path log sites, one throttle each, per instance.
+	FO3DLogThrottle UdpRecvFailedLog;
+	FO3DLogThrottle UdpOversizeLog;
+
 
 	/** Holds the consumer, audio sink and control sink strongly; Stop() releases them (TRF-38, ADR 0011). */
 	FO3DUnifiedReceiveDemux Demux;

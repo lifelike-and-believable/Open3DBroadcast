@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "O3DLogThrottle.h"
 
 #include "Transport/O3DReceiverInterface.h"
 #include "Transport/O3DConnectionState.h"
@@ -104,6 +105,8 @@ private:
     std::atomic<int64> FramesReceived{ 0 };
     std::atomic<int64> BytesReceived{ 0 };
     std::atomic<int64> ReceiveErrors{ 0 };
+    // WP-R3 (TR-6): hot-path log site, per instance.
+    FO3DLogThrottle NngOversizeLog;
 
     /** Mode the capabilities are reported for: Options.Mode as of the last Initialize. */
     std::atomic<O3DNNG::ENngMode> CapabilityMode{ O3DNNG::ENngMode::Sub };
