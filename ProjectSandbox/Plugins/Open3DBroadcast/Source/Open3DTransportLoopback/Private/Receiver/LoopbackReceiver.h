@@ -31,6 +31,7 @@ public:
 	virtual void SetControlSink(const TSharedPtr<IO3DReceiverControlSink, ESPMode::ThreadSafe>& Sink) override { Demux.SetControlSink(Sink); }
 
 private:
+	/** Caller holds StatsMutex. */
 	void AccumulateLatency(double LatencyMs);
 
 	FString ChannelKey;
@@ -38,8 +39,9 @@ private:
 	/** Holds the consumer and sinks strongly; Stop() releases them (TRF-38, ADR 0011). */
 	FO3DUnifiedReceiveDemux Demux;
 	bool bInitialized = false;
-	/** Written by Poll (game thread); GetStats copies it on the same thread in practice. */
+	/** Written by Poll (game thread); GetStats may read it from any thread (WP-R3, TR-9). */
 	FO3DTransportStats Stats;
+	mutable FCriticalSection StatsMutex;
 	int64 LatencySamples = 0;
 	double LastAudioLogTime = 0.0;
 	/** ADR 0007 item 3: Connected from Start to Stop (the channel needs no peer). */
