@@ -12,9 +12,15 @@
 8. [Control Channel](#control-channel)
 9. [LiveLink Integration](#livelink-integration)
 10. [Configuration Reference](#configuration-reference)
-11. [Performance Tuning](#performance-tuning)
-12. [Troubleshooting](#troubleshooting)
-13. [Advanced Topics](#advanced-topics)
+11. [Blueprint API Reference](#blueprint-api-reference)
+12. [Performance Tuning](#performance-tuning)
+13. [Troubleshooting](#troubleshooting)
+14. [Known Limitations](#known-limitations)
+15. [Privacy](#privacy)
+16. [Updating and Removing the Plugin](#updating-and-removing-the-plugin)
+17. [Advanced Topics](#advanced-topics)
+18. [FAQ](#faq)
+19. [Additional Resources](#additional-resources)
 
 ---
 
@@ -34,10 +40,11 @@ The **Open3DBroadcast Plugin** is a comprehensive Unreal Engine plugin for strea
 
 - **Real-time skeletal animation streaming** at configurable frame rates
 - **Audio capture and streaming** from game audio or microphone
-- **Multiple transport options**: Loopback (testing), Sockets (TCP/UDP), NNG (pub/sub), MoQ (Experimental); WebRTC (cloud-ready) with the free Open3DBroadcastWebRTC add-on
-- **LiveLink integration** for seamless animation retargeting
+- **Several transports**: Loopback (in-process), TCP, UDP, NNG and MoQ (Experimental); WebRTC with the free Open3DBroadcastWebRTC add-on
+- **LiveLink integration**: received subjects drive animation through LiveLink
 - **Curve and morph target support** for facial animation
-- **Production-ready** with comprehensive error handling and statistics
+- **Control channel** for cues and parameters sent with the animation
+- **Status and statistics**: connection state, transport counters and error events, also in Blueprint
 
 ### Use Cases
 
@@ -141,7 +148,7 @@ To stream between two machines, keep this setup and change the transport on both
 
 Each sender broadcasts data for a **subject** - a named stream of animation data. Multiple subjects can share the same transport channel. Receivers subscribe to all subjects on a channel and expose them as LiveLink subjects.
 
-### Transport Modules
+### Transports at a Glance
 
 The plugin provides these transports. WebRTC comes from the free Open3DBroadcastWebRTC add-on plugin. Every transport carries mocap, audio and control.
 
@@ -168,7 +175,7 @@ A mocap frame travels as an 8-byte header (with a CRC-32) followed by a FlatBuff
 
 **In Blueprint:**
 1. Select your actor
-2. Add Component → **O3D Sender Component**
+2. In the **Components** panel, click **Add** and choose **O3D Sender** (search for "O3D Sender")
 
 **In C++:**
 ```cpp
@@ -225,12 +232,14 @@ There are no options common to every transport, and no `role`, `uri` or `stream_
 Reduce bandwidth by filtering animation curves:
 
 - **Enable Curve Filtering**: Enable delta-based filtering
-- **Curve Epsilon**: Ignore changes smaller than this value (default: 0.0001)
+- **Curve Epsilon**: Ignore changes smaller than this value (default: 0.0005)
 - **Curve Delta Threshold**: Only send if change exceeds threshold (default: 0.001)
 - **Include Curve Patterns**: Wildcards for curves to include (e.g., `face_*`)
 - **Exclude Curve Patterns**: Wildcards for curves to exclude (e.g., `*_unused`)
 - **Clamp Morph Curves to Unit**: Clamp morph targets to [0, 1] range
 - **Drop NaN and Infinity**: Sanitize curve values (recommended: enabled)
+
+Curve Epsilon and Curve Delta Threshold do not apply while residual coding or quantization is on (see [Encoding Properties](#encoding-properties)).
 
 ### Controlling Capture
 
@@ -290,26 +299,17 @@ The receiver is implemented as a **LiveLink Source** and configured through Unre
 
 #### Step-by-Step Setup
 
-1. **Open LiveLink Panel**
-   - **Window → Live Link**
+1. Open **Window → Virtual Production → Live Link**.
+2. Click **Add Source** and choose **Open3DStream Receiver**.
+3. In the panel that opens:
+   - **Transport**: the same transport as the sender, for example **UDP**.
+   - **Enable Audio**: tick it to play the audio the stream carries (see [Audio Playback](#audio-playback-receiver)).
+   - **Audio Codec**: available while **Enable Audio** is ticked. **Transport Default** (the default), **PCM16** or **Opus** (Opus only in builds with Opus). Leave it at **Transport Default** unless you have a reason.
+   - **Context Name** (advanced): see [Separate Receivers](#separate-receivers-runtime-contexts).
+   - Below these, one row per option the transport declares, for example **Remote Host** and **Port** for TCP. Empty rows use the project default or the transport's default, shown as grey hint text. The rows behave as on the sender; see [Transport Configuration](#transport-configuration).
+4. Click **Create Source**. It is disabled, with the reason shown above it, while the selected transport has no receiver or the transport refuses an option.
 
-2. **Add Source**
-   - Click **+ Source**
-   - Select **Open3D Receiver Source**
-
-3. **Configure Source**
-   - **Transport Name**: Must match sender (e.g., `webrtc`)
-   - **Enable Audio**: Check to enable audio playback
-   - **Audio Stream Label**: Filter by label (optional, leave empty for all)
-   - **Audio Codec**: Preferred decoder (`PCM16` or `Opus`)
-
-4. **Add Transport Options**
-   - Expand **Transport Options**
-   - Add entries matching your transport (see examples below)
-
-5. **Create Source**
-   - Click **Create Source**. It is disabled, with the reason shown above it, while the selected transport has no receiver or the transport refuses an option.
-   - The source appears in the LiveLink list.
+The source appears in the Live Link panel and shows its [status](#source-status). Its subjects appear under it as frames arrive. The settings available after creation, in the source's **Settings** panel, are listed in [Receiver Source Settings](#receiver-source-settings).
 
 #### Source Status
 
@@ -342,52 +342,27 @@ In C++, `UO3DReceiverBlueprintLibrary::CreateLiveLinkSource` does the same (modu
 
 ### LiveLink Source Configuration Examples
 
-#### Loopback (Testing)
-```
-Transport Name: loopback
-Transport Options:
-  - role: receiver
-  - channel: test_channel
-```
+What to set in the source panel for each transport. The sender's side is in [Transport Modules](#transport-modules).
 
-#### Sockets (TCP)
-```
-Transport Name: sockets
-Transport Options:
-  - role: receiver
-  - uri: 0.0.0.0:9000
-  - protocol: tcp
-```
-
-#### WebRTC (LiveKit)
-
-Needs the free Open3DBroadcastWebRTC add-on; its USER_GUIDE covers the source settings. See [WebRTC Transport (free add-on)](#webrtc-transport-free-add-on).
+| Transport | Set on the receiver | Leave at the default |
+|-----------|---------------------|----------------------|
+| **Loopback** | Nothing, or the sender's **Channel Name** | Everything |
+| **TCP** | **Remote Host**: the sender's IP address. **Port**: the sender's port if it is not 17700 | **Connection Timeout (seconds)** |
+| **UDP** | **Port**: the port the sender sends to if it is not 17800. **Accept Broadcast Packets** if the sender broadcasts | **Bind Address** (`0.0.0.0`, every interface) |
+| **NNG** | **Mode**: **Subscriber**, **Pair** or **Pull**, matching the sender. **Host**: the sender's IP address when this end dials | **Role**, **Port** |
+| **MoQ** | **Relay URL**, **Track Namespace (optional)** and **Track Name (optional)**, the same as on the sender | |
+| **WebRTC** | See the Open3DBroadcastWebRTC add-on's USER_GUIDE | |
 
 ### Applying Animation to Characters
 
-Once the LiveLink source is receiving data, subjects will appear automatically.
+Once the source receives data, its subjects appear in the Live Link panel. To drive a skeletal mesh with one, use an Animation Blueprint, as in the [Quick Start](#step-4-make-an-animation-blueprint-that-reads-the-subject):
 
-#### Method 1: Live Link Component
+1. Create or open an Animation Blueprint for the mesh's skeleton.
+2. In the **AnimGraph**, add a **Live Link Pose** node and connect it to **Output Pose**.
+3. Set **Live Link Subject Name** on the node to the sender's **Subject Name**.
+4. Set the mesh's **Anim Class** to this Animation Blueprint.
 
-1. Add a **Live Link Component** to your target actor
-2. Configure:
-   - **Subject Representation**: Your skeleton asset
-   - **LiveLink Subject Name**: Name from sender (e.g., `MyCharacter`)
-
-#### Method 2: Animation Blueprint
-
-1. Open your Animation Blueprint
-2. Add a **Live Link Pose** node
-3. Connect to your output pose
-4. Set **Live Link Subject Name** to your subject
-5. Configure retargeting as needed
-
-#### Method 3: Control Rig
-
-1. Create a Control Rig asset
-2. Add **Live Link** input
-3. Map to your skeleton
-4. Apply Control Rig to your character
+When the sender's and the receiver's skeletons differ, see [Retargeting Animation](#retargeting-animation).
 
 ---
 
@@ -551,20 +526,20 @@ The sender can capture audio from two sources:
 
 #### Enabling Audio
 
-In **O3D Sender Component**:
-1. Check **Enable Audio**
-2. Configure **Audio Capture Config**:
-   - **Audio Capture Mode**: `Mix` or `Input`
-   - **Audio Codec**: `PCM16` (uncompressed) or `Opus` (compressed)
-   - **Sample Rate**: 48000 recommended
-   - **Num Channels**: 1 (mono) or 2 (stereo)
-   - **Bitrate Kbps**: 64 recommended for Opus
+In the **O3D Sender** component's **Audio** group:
+1. Tick **Enable Audio** (off by default).
+2. Set:
+   - **Audio Capture Mode**: **Mix (Main Submix or Custom)** for game audio, or **Input (Microphone)**.
+   - **Audio Codec**: **PCM16** (uncompressed, the default) or **Opus** (compressed).
+   - **Sample Rate**: 48000 (the default).
+   - **Num Channels**: 1 (mono, the default) or 2 (stereo). PCM16 takes up to 8; Opus 1 or 2.
+   - **Bitrate Kbps**: the Opus bitrate, 64 by default; 0 lets the encoder choose. PCM16 ignores it.
 
 #### Audio Capture Modes
 
 **Mix Mode (Game Audio):**
 ```
-Audio Capture Mode: Mix
+Audio Capture Mode: Mix (Main Submix or Custom)
 Submix to Tap: [leave empty for main submix]
 Game Gain: 1.0        # Volume multiplier
 ```
@@ -576,8 +551,8 @@ Captures audio from the game's audio output. Useful for:
 
 **Input Mode (Microphone):**
 ```
-Audio Capture Mode: Input
-Audio Input Device: [select from dropdown]
+Audio Capture Mode: Input (Microphone)
+Audio Input Device: [select from dropdown; empty uses the default device]
 Mic Gain: 1.0         # Volume multiplier
 ```
 
@@ -604,23 +579,19 @@ it, and device clock drift is followed. If you feed audio yourself with
   the generated `World/Actor/Component` name when that is empty. It is the same name the
   pose frames carry, and it follows renames. A sender with no skeletal mesh and no
   Subject Name uses `o3ds:audio`.
-- Receivers can filter by label
+- On the receiver, the O3D Remote Audio Component picks streams by label with **Receive Mode** and **Stream Label Filter**; see [Receive Modes](#receive-modes).
 
 #### Audio Codec Selection
 
 **PCM16:**
 - Uncompressed 16-bit audio
-- High quality, high bandwidth
-- ~1.5 Mbps for stereo 48kHz
-- Zero latency encoding
+- About 1.5 Mbit/s for stereo at 48 kHz (48000 × 2 channels × 16 bits)
 - Use for: LAN, testing
 
 **Opus:**
-- Compressed, high-quality codec
-- Configurable bitrate (16-128 kbps)
-- Low latency (~20ms)
-- Excellent quality at 64 kbps
-- Use for: Internet, WebRTC
+- Compressed
+- **Bitrate Kbps** sets the bitrate (64 by default; 0 lets the encoder choose)
+- Use for: limited bandwidth, the internet
 - Needs a sample rate of 8, 12, 16, 24 or 48 kHz and 1 or 2 channels, and a build with
   Opus (Win64 with `opus.lib`). Otherwise the sender sends PCM16, labelled PCM16, and logs
   a warning.
@@ -633,7 +604,7 @@ Audio is played back using the **O3D Remote Audio Component**.
 
 1. Add **O3D Remote Audio Component** to an actor
 2. Configure:
-   - **Receive Mode**: `Mix`, `Subject` or `Any Stream`
+   - **Receive Mode**: **Mix (o3ds:mix)**, **Subject (LiveLink)** or **Any Stream**
    - **Stream Label Filter**: play only streams with this label (empty: any)
    - **Gain**: Output volume multiplier
    - **Attenuation Settings**: Spatial audio (optional)
@@ -671,15 +642,14 @@ Audio is routed through a centralized **Audio Bus** singleton:
 5. Check Windows audio mixer for Unreal Engine volume
 
 **Audio dropouts/crackling:**
-1. Increase Opus bitrate
-2. Check network bandwidth
-3. Reduce capture rate or resolution
+1. Raise **Target Latency (ms)** on the O3D Remote Audio Component (60 by default), so it absorbs more network jitter
+2. Check network bandwidth; on a limited link use Opus
+3. Increase the Opus bitrate
 4. Use PCM16 for testing (eliminates codec issues)
 
 **High latency:**
-1. Use Opus instead of PCM16 (for network streams)
-2. Reduce audio buffer sizes (advanced)
-3. Use lower sample rate (32000 instead of 48000)
+1. Lower **Target Latency (ms)** on the O3D Remote Audio Component. Too low a value causes dropouts on a jittery network
+2. On a limited link, use Opus instead of PCM16
 
 ---
 
@@ -705,7 +675,7 @@ The target subject is optional. Leave it empty to aim at the whole stream. Set i
 
 Keys, event names and target subjects are case-sensitive strings (`FString`). `env.Fog` and `env.fog` are different keys.
 
-**Value types** (`EO3DControlValueType`): `None`, `Bool`, `Int` (64-bit), `Float` (double), `String`, `Name`, `Vector`, `Quat`, `Transform`, `Color` (`FLinearColor`) and `Bytes`. A value is an `FO3DControlValue`. In Blueprint, build one with the **Make Control Value (...)** nodes (Bool, Integer64, Float, String, Name, Vector, Rotator, Quat, Transform, Color, Bytes) and read one with **Control As Bool**, **Control As Int**, **Control As Float**, **Control As String**, **Control As Vector**, **Control As Rotator**, **Control As Quat**, **Control As Transform**, **Control As Color** and **Control As Bytes**. Each `As` node has a `Success` output. Rotations are stored as quaternions; the Rotator nodes convert.
+**Value types** (`EO3DControlValueType`): `None`, `Bool`, `Int` (64-bit), `Float` (double), `String`, `Name`, `Vector`, `Quat`, `Transform`, `Color` (`FLinearColor`) and `Bytes`. A value is an `FO3DControlValue`. In Blueprint, build one with the **Make Control Value (...)** nodes (Bool, Integer64, Float, String, Name, Vector, Rotator, Quat, Transform, Color, Bytes) and read one with **Control as Bool**, **Control as Int**, **Control as Float**, **Control as String**, **Control as Vector**, **Control as Rotator**, **Control as Quat**, **Control as Transform**, **Control as Color** and **Control as Bytes**. Each `as` node has a `Success` output. Rotations are stored as quaternions; the Rotator nodes convert.
 
 ### Sending from the Sender Component
 
@@ -773,7 +743,7 @@ A stage, lighting or environment controller has no skeletal mesh. Add an **O3D S
 
 Receiving control is **off by default**. Control triggers gameplay, and UDP and NNG carry no authentication, so each client project decides whether to accept it. There are three ways to turn it on. The most specific one that is set wins:
 
-1. **Per receiver source:** **Control Accept** on the Open3D Receiver Source's settings (`UO3DReceiverSourceSettings::ControlAccept`): `Project Default` (the default), `Enabled` or `Disabled`. Use this when you run several receiver sources and want control on only some of them.
+1. **Per receiver source:** **Control Accept** in the Open3DStream Receiver source's **Settings** panel (`UO3DReceiverSourceSettings::ControlAccept`): `Project Default` (the default), `Enabled` or `Disabled`. Use this when you run several receiver sources and want control on only some of them.
 2. **Runtime override:** `UO3DControlLibrary::SetControlReceiveEnabled(bool)` from Blueprint or C++. It overrides the project setting for the whole process until `ClearControlReceiveOverride()`. `IsControlReceiveEnabled()` reports the current state for sources set to Project Default. Use it from a menu, a login flow or your own config, at any time after startup, with no restart.
 3. **Project setting (the shipping default):** **Project Settings > Plugins > Open3DBroadcast Control > Accept Control**. It is saved to your project's `Config/DefaultGame.ini`, which is staged into packaged builds, so ticking it is all a project does to ship a client (including a Shipping build) with control on:
 
@@ -834,7 +804,7 @@ Add **O3D Remote Control Component** (`UO3DRemoteControlComponent`) to any actor
 
 `FO3DControlMeta` tells you where a change came from: `SourceId`, `SourceName`, `StreamId`, `TargetSubject`, `SenderTimeSec` (sender clock), `Epoch`, `Version` (values) and `EventId` (events).
 
-**Blueprint example.** On a light actor, add an O3D Remote Control Component with `NamePrefixFilter` = `light.`. Bind **On Control Event**, compare *Event Name* with `light.cue`, read the cue number with **Control As Int**, and play your cue.
+**Blueprint example.** On a light actor, add an O3D Remote Control Component with `NamePrefixFilter` = `light.`. Bind **On Control Event**, compare *Event Name* with `light.cue`, read the cue number with **Control as Int**, and play your cue.
 
 ### C++: FO3DControlBus
 
@@ -870,7 +840,7 @@ void UMyWeatherSubsystem::Stop()
 
 `FO3DControlChange` has `Kind` (`ValueChanged`, `ValueCleared` or `Event`), `Name` (the key or event name), `Value` and `Meta`. To read the current table, use `FO3DControlBus::GetSources()`, `GetValues(SourceId)` and `FindValue(SourceId, Key, Target)`. `FO3DControlBus::SetReceiveOverride` and `GetReceiveOverride` back the runtime enable functions above.
 
-Two receiver sources can hear the same sender (UDP multicast, one MoQ track, or a duplicated LiveLink source). The bus drops an event it has already published and ignores a value change that is not newer than the one it holds, so each change reaches listeners once.
+Two receiver sources can hear the same sender (UDP broadcast, one MoQ track, or a duplicated LiveLink source). The bus drops an event it has already published and ignores a value change that is not newer than the one it holds, so each change reaches listeners once.
 
 ### Alignment with Mocap
 
@@ -924,11 +894,11 @@ See the Control row in [Transport_Module_Comparison.md](Transport_Module_Compari
 1. Check that control is enabled on the client: **Accept Control** in Project Settings, a `SetControlReceiveEnabled(true)` call, or **Control Accept** = `Enabled` on the receiver source. `IsControlReceiveEnabled()` tells you the process-wide state. A per-source `Disabled` beats everything else.
 2. Check the allowlist. A key or event name that matches no prefix in `ControlAllowlist` is dropped. The match is case-sensitive.
 3. Check the component's filters (`StreamIdFilter`, `SourceNameFilter`, `TargetSubjectFilter`, `NamePrefixFilter`). They are case-sensitive.
-4. Check that the transport carries control. WebRTC does not yet.
+4. Check that the sender's transport is running and the receiver source is connected to it (see its [status](#source-status)). Control travels on the same transport as the mocap, and every transport carries it (see [Transport Support](#transport-support)).
 5. On the sender, check the Output Log for `FireControlEvent(...) was not sent` or `SetControlValue(...) was refused`, with the reason.
 6. For a sender with no mesh and no audio, tick `bAllowControlOnly`, or `StartCapture` does not start the transport.
 
-**`FireControlEvent` returns false:** the transport is not running yet (events need a running transport; values do not), the transport does not carry control, or the name is empty, too long or the payload too large.
+**`FireControlEvent` returns false:** the transport is not running yet (events need a running transport; values do not), or the name is empty, too long or the payload too large.
 
 **Values arrive but events don't:** events are not stored. An event fired before the client enabled control, connected or joined is never delivered; an event older than 2 s is dropped. Use a value for anything a late joiner must see.
 
@@ -955,7 +925,7 @@ LiveLink is Unreal's system for receiving real-time animation data from external
 **Automatic Subject Creation:**
 - Subjects appear automatically when sender starts
 - Subject name matches sender's `Subject Name`
-- A subject that stops receiving frames is cleared after the source's **Inactive Subject Timeout** (default 5 s, 0 = never): LiveLink shows it with no data, but keeps the subject and its settings (preprocessors, interpolation, translators), and its next frame makes it valid again
+- A subject that stops receiving frames is cleared after the source's **Inactive Subject Timeout Seconds** (default 5 s, 0 = never): LiveLink shows it with no data, but keeps the subject and its settings (preprocessors, interpolation, translators), and its next frame makes it valid again
 
 **Subject Data Includes:**
 - Bone transforms (local space)
@@ -1038,25 +1008,24 @@ source's buffer settings and set *Source Timecode Frame Rate* to the sender's ca
 You can stream multiple subjects simultaneously:
 
 **Sender Side:**
-- Add O3D Sender Component to multiple actors
-- Give each a unique **Subject Name**
-- All can share the same transport
+- Add an O3D Sender component to each actor. Each component sends one subject and runs its own transport.
+- Give each a unique **Subject Name**.
 
 **Receiver Side:**
-- Single LiveLink source receives all subjects
-- Each subject appears separately in LiveLink
-- Apply to different characters as needed
+- **Loopback** and **UDP**: one LiveLink source receives every sender on its channel, or every sender that sends to its address and port.
+- **TCP**, **NNG** and **MoQ**: a source connects to one sender (one host and port, or one track). Give each sender its own **Port** (TCP, NNG) or **Track Name** (MoQ), and add one source per sender.
+- Each subject appears separately in LiveLink. Apply each to a different character.
 
-**Example:**
+**Example (UDP, three senders in one game, one receiver):**
 ```
-Actor1 → O3DSender(Subject: "Character1") ┐
-Actor2 → O3DSender(Subject: "Character2") ├→ WebRTC Transport → LiveLink Source
-Actor3 → O3DSender(Subject: "Prop1")      ┘
-                                              ↓
-                                          LiveLink Subjects:
-                                          - Character1
-                                          - Character2
-                                          - Prop1
+Actor1 → O3D Sender (Subject: "Character1") ┐
+Actor2 → O3D Sender (Subject: "Character2") ├→ UDP to 192.168.1.20:17800 → LiveLink Source
+Actor3 → O3D Sender (Subject: "Prop1")      ┘
+                                                ↓
+                                            LiveLink Subjects:
+                                            - Character1
+                                            - Character2
+                                            - Prop1
 ```
 
 ### Separate Receivers: Runtime Contexts
@@ -1098,51 +1067,89 @@ client per process (PIE clients included), so keep subject names distinct across
 | **TargetMesh** (Resolved Target Mesh) | Object | null | The mesh in use; read-only in the Details panel, settable from Blueprint at runtime |
 | **TransportName** | Name | "loopback" | Transport module to use (read-only in Blueprint; use Set Transport Name) |
 | **bAutoCreateTransport** | Bool | false | Create and run the selected transport. Off: nothing is sent unless C++ code consumes the frames |
-| **TransportOptions** | Map | {} | Key-value transport configuration |
+| **TransportOptions** | Map | {} | The selected transport's options. Not shown as a property: the **Transport** group shows one row per option, and Blueprint uses **Set Transport Option**. Keys are in the [Transport Options Reference](#transport-options-reference) |
+
+The control properties (`bAllowControlOnly`, `ControlSnapshotIntervalSeconds`, `ControlEventRedundancy`, `ControlMaxValueRateHz`) are in [Sending from the Sender Component](#sending-from-the-sender-component).
 
 #### Curve Filtering Properties
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | **bEnableCurveFiltering** | Bool | false | Enable curve filtering |
-| **CurveEpsilon** | Float | 0.0001 | Minimum significant change |
-| **CurveDeltaThreshold** | Float | 0.001 | Change threshold for emission |
+| **CurveEpsilon** | Float | 0.0005 | Ignore curve changes smaller than this |
+| **CurveDeltaThreshold** | Float | 0.001 | Send a new value only when it changes by more than this |
 | **IncludeCurvePatterns** | Array | [] | Wildcard patterns to include |
 | **ExcludeCurvePatterns** | Array | [] | Wildcard patterns to exclude |
+| **bLogFilteredCurves** | Bool | false | Log the curves the filter drops (verbose) |
 | **bClampMorphCurvesToUnit** | Bool | true | Clamp morphs to [0,1] |
-| **bDropNaNAndInfinity** | Bool | true | Sanitize invalid values |
+| **bDropNaNAndInfinity** | Bool | true | Send NaN and infinite curve values as 0 |
+
+#### Encoding Properties
+
+By default every frame carries the full pose. Residual coding and quantization make frames smaller; both are **off by default**, and the plugin never turns either on for you. Both need receivers that read wire protocol 2, as this release does; older receivers drop such frames.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| **bEnableResidualCoding** | Bool | false | Send the difference from a predicted pose instead of the full pose. Used only on a reliable, ordered transport (see [Delivery Guarantees](#delivery-guarantees)); on any other the sender logs one warning and sends without it. Wins over quantization when both are on |
+| **ResidualPredictor** | Enum | Linear | **Hold (reduces to legacy last-sent delta)**, **Linear (recommended default)** or **Quadratic** |
+| **ResidualKeyframeIntervalFrames** | Int | 300 | Send a residual keyframe (absolute values) every this many frames; 0: only when needed |
+| **ResidualDeltaThreshold** | Float | 0.0001 | A channel whose residual is smaller than this is left out of the frame |
+| **bEnableQuantization** | Bool | false | Send changed channels with 8 or 16 bits instead of 32 where they fit. Works on lossy transports too: a lost frame only delays a change until the next one or the next full sync |
+| **QuantizationByteRange** | Float | 0.01 | Largest change from the last full sync sent with 8 bits |
+| **QuantizationHalfRange** | Float | 1.0 | Largest change sent with 16 bits; larger ones use full precision. Never below Quantization Byte Range |
+| **QuantizationDeltaThreshold** | Float | 0.0001 | A channel that changed less than this is left out of the frame |
+| **FullSyncIntervalSeconds** | Float | 1.0 | With residual coding or quantization on, send the full skeleton and pose at least this often (0.25 to 10 s), so a receiver that joins late or lost a frame recovers. Ignored when both are off |
+
+While residual coding or quantization is on, Curve Epsilon and Curve Delta Threshold do not apply.
 
 #### Audio Properties
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| **bEnableAudio** | Bool | false | Enable audio streaming |
-| **AudioCaptureMode** | Enum | Mix | Mix (game) or Input (mic) |
-| **AudioInputDevice** | String | "" | Microphone device name |
+| **bEnableAudio** | Bool | false | Capture and send audio. Off: no audio is captured |
+| **AudioCaptureMode** | Enum | Mix | **Mix (Main Submix or Custom)**: game audio. **Input (Microphone)**: a microphone |
+| **AudioInputDevice** | Name | None | Microphone, picked from the device list. None, or a name not in the list, uses the default device |
 | (audio stream label) | - | subject name | Not a property: the resolved subject name (see Audio Stream Label) |
-| **AudioCodec** | Name | "PCM16" | Audio codec (PCM16/Opus) |
+| **AudioCodec** | Name | PCM16 | **PCM16** or **Opus** |
 
 #### Audio Capture Config
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| **SampleRate** | Int | 48000 | Audio sample rate (Hz) |
-| **NumChannels** | Int | 1 | 1=mono, 2=stereo |
-| **BitrateKbps** | Int | 64 | Opus bitrate (16-128) |
-| **GameGain** | Float | 1.0 | Game audio volume multiplier |
-| **MicGain** | Float | 1.0 | Microphone volume multiplier |
-| **SubmixToTap** | Object | null | Custom submix (or null for main) |
+| **SampleRate** | Int | 48000 | Sample rate sent (8000 to 48000 Hz). Receivers play 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100 or 48000; Opus takes 8000, 12000, 16000, 24000 or 48000. Another rate is sent at the nearest of those, with a warning |
+| **NumChannels** | Int | 1 | 1 or 2 with Opus, up to 8 with PCM16 |
+| **BitrateKbps** | Int | 64 | Opus bitrate in kbit/s (0 or more; the slider goes to 256). 0 lets the encoder choose. PCM16 ignores it |
+| **GameGain** | Float | 1.0 | Gain on captured game audio; 1 leaves it unchanged |
+| **MicGain** | Float | 1.0 | Gain on captured microphone audio; 1 leaves it unchanged |
+| **SubmixToTap** | Object | null | Submix captured in Mix mode; empty: the main submix |
 
 ### Receiver Source Properties
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| **TransportName** | Name | "loopback" | Transport module to use |
-| **ContextName** | Name | (empty) | Runtime context for audio, control and metrics; see [Separate Receivers](#separate-receivers-runtime-contexts) |
-| **bEnableAudio** | Bool | false | Enable audio playback |
-| **AudioStreamLabel** | String | "" | Filter by label (empty = all) |
-| **AudioCodec** | Name | "Opus" | Preferred audio decoder |
-| **TransportOptions** | Map | {} | Key-value transport configuration |
+Set in the **Open3DStream Receiver** panel when you create the source (or as the arguments of **Create Open3DStream LiveLink Source**). They apply when the source is created.
+
+| Panel name | Property | Default | Description |
+|------------|----------|---------|-------------|
+| **Transport** | `TransportName` | **Loopback** | Transport to receive with |
+| One row per option | `TransportOptions` | empty | The transport's options; see the [Transport Options Reference](#transport-options-reference). Not edited as a map |
+| **Enable Audio** | `bEnableAudio` | false | Play the audio the stream carries |
+| **Audio Codec** | `AudioCodec` | **Transport Default** (None) | Codec to decode with: **Transport Default**, **PCM16** or **Opus**. Available while **Enable Audio** is ticked |
+| **Context Name** (advanced) | `ContextName` | empty | Runtime context for audio, control and metrics; see [Separate Receivers](#separate-receivers-runtime-contexts) |
+
+There is no audio stream label on the source: the receiver labels each audio stream itself, and the [O3D Remote Audio Component](#remote-audio-component-properties) chooses which stream it plays.
+
+### Receiver Source Settings
+
+After the source is created, select it in the Live Link panel. Its **Settings** panel shows LiveLink's own settings and these. They apply as soon as you edit them.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| **Inactive Subject Timeout Seconds** | 5 | Seconds without a frame after which a subject's frames are cleared, so LiveLink shows it with no data. The subject and its LiveLink settings are kept; its next frame makes it valid again. 0: never |
+| **Enable Concealment** | true | When frames stop arriving, predict or hold the pose instead of leaving the gap to LiveLink's interpolation |
+| **Starvation Threshold Ms** | 50 | Gap since the last real frame, in ms, after which concealment starts |
+| **Max Horizon Ms** | 150 | After this many ms of concealment with no real frame, stop predicting and hold the last pose |
+| **Correction Window Ms** | 100 | When frames resume, blend from the concealed pose to the real one over this many ms instead of snapping. 0: snap |
+| **Render Ahead Ms** | 0 | Predict this many ms beyond the newest real frame even without a gap, to hide latency at the cost of accuracy. 0: off |
+| **Control Accept** | **Project Default** | **Project Default**, **Enabled** or **Disabled**. See [Enabling Control on a Client](#enabling-control-on-a-client) |
 
 ### Remote Audio Component Properties
 
@@ -1248,6 +1255,112 @@ Provided by the Open3DBroadcastWebRTC add-on; its USER_GUIDE lists the `webrtc.*
 
 ---
 
+## Blueprint API Reference
+
+The nodes and events the plugin adds, by class, with the names the Blueprint editor shows. Call them on the game thread; the events fire there. Most properties in the [Configuration Reference](#configuration-reference) can also be read and set from Blueprint (Get and Set nodes). On the sender, **Transport Name** and **Context Name** are read-only in Blueprint (use **Set Transport Name**), and **Target Mesh** is not exposed (set **Resolved Target Mesh** instead).
+
+### O3D Sender Component
+
+`UO3DSenderComponent` (module `Open3DSender`). Category **Open3DBroadcast | Sender**.
+
+| Node | What it does | Notes |
+|------|--------------|-------|
+| **Start Capture** | Starts capturing and, with **Auto Create Transport**, starts the transport | Safe to call while capturing. Does nothing in the editor outside Play In Editor. Fires **On Capture Started**, or **On Sender Error** when capture cannot start |
+| **Stop Capture** | Stops capturing and the transport | Fires **On Capture Stopped** |
+| **Is Capturing** | True while capturing | Pure |
+| **Get Last Start Capture Error** | Why the last **Start Capture** did not start capture; empty if it did | Pure |
+| **Get Connection State** | The transport's [connection state](#connection-state-and-transport-stats) | Pure. Idle when no transport runs; Failed after a transport that could not start, until the next **Start Capture** |
+| **Get Transport Stats** | The running transport's [counters](#connection-state-and-transport-stats) | Pure. Zero, with the current state, when no transport runs |
+| **Get Transport Name** | The selected transport | Pure |
+| **Set Transport Name** | Selects the transport, for example `UDP` | None selects Loopback. The previous transport's options are put away and come back when you select it again. Applies the next time capture starts |
+| **Get Transport Option** | Reads one option of the selected transport by key | Pure. Always empty for a credential |
+| **Set Transport Option** | Sets one option by key; an empty value removes it | A credential key goes to the credential store for this session, never into the level. Applies the next time capture starts |
+| **Clear Transport Options** | Removes every option of the selected transport | Applies the next time capture starts |
+| **Fire Control Event** | Sends a control event | See [Sending from the Sender Component](#sending-from-the-sender-component) |
+| **Set Control Value** | Sets a control value | As above |
+| **Clear Control Value** | Removes a control value | As above |
+| **Clear All Control Values** | Removes every value this sender set | As above |
+| **Get Control Value** | The value this sender holds for a key | Pure |
+| **Get Available Audio Input Device Options** | The cached list of microphone names | Never enumerates the devices; see **Refresh Audio Input Devices** |
+| **Refresh Audio Input Devices** | Enumerates the audio capture devices again | Static. Call it after plugging in a microphone. **Start Capture** in Input mode does it too |
+
+Events (bind them in the Details panel's **Events** section, or with **Assign** nodes in the Event Graph):
+
+| Event | Fires when | Parameters |
+|-------|------------|------------|
+| **On Connection State Changed** | The transport's connection state changed | New State |
+| **On Capture Started** | **Start Capture** succeeded | |
+| **On Capture Stopped** | Capture stopped (**Stop Capture**, or end of play) | |
+| **On Sender Error** | Capture could not start, the transport could not start, or it failed | Message (never contains a credential) |
+
+### O3D Sender Audio Capture Component
+
+`UO3DSenderAudioCaptureComponent`. The sender component creates and drives one itself when **Enable Audio** is on.
+
+| Node | What it does | Notes |
+|------|--------------|-------|
+| **Get Available Input Device Options** | The cached list of microphone names | Same list as the sender's **Get Available Audio Input Device Options** |
+
+### Receiver: Create Open3DStream LiveLink Source
+
+`UO3DReceiverBlueprintLibrary` (module `Open3DReceiver`). Category **Open3DBroadcast | Receiver**.
+
+| Node | What it does | Notes |
+|------|--------------|-------|
+| **Create Open3DStream LiveLink Source** | Creates a receiver source and adds it to LiveLink, in a game or in the editor | Inputs: Transport Name, Options (a map with the keys of the [Transport Options Reference](#transport-options-reference)), Context Name, Enable Audio. Outputs: a LiveLink Source Handle and a Return Value that is false when the transport has no receiver or LiveLink is not available. See [Creating a Source at Runtime](#creating-a-source-at-runtime-blueprint-or-c) |
+
+### Credentials
+
+`UO3DCredentialLibrary` (module `Open3DShared`). Category **Open3DBroadcast | Credentials**. Write-only: there is no node that reads a credential back.
+
+| Node | What it does | Notes |
+|------|--------------|-------|
+| **Set Transport Secret** | Stores a credential for this session | Inputs: Transport Name, Profile (empty: `default`), Key (a credential key the transport declares, for example `webrtc.token`), Value. Never written to disk. An empty Value clears it |
+| **Clear Transport Secret** | Clears a credential, the session value and any copy remembered on this machine | An environment variable for the key still applies |
+
+### O3D Remote Audio Component
+
+`UO3DRemoteAudioComponent` (module `Open3DReceiver`). Category **Open3DBroadcast | Audio**.
+
+| Node | What it does | Notes |
+|------|--------------|-------|
+| **Play** | Starts playing received audio, now if some has arrived, otherwise when it does | Needed when **Auto Activate** is off |
+| **Stop** | Stops playback | Audio that arrives afterwards is not played until **Play** |
+
+### Control
+
+| Class | Nodes | Where they are described |
+|-------|-------|--------------------------|
+| `UO3DControlLibrary` | **Set Control Receive Enabled**, **Clear Control Receive Override**, **Is Control Receive Enabled** | [Enabling Control on a Client](#enabling-control-on-a-client) |
+| `UO3DControlValueLibrary` | **Make Control Value (...)**, **Control as ...**, **Control Value to String** (a readable form of a value, for logs) | [Values and Events](#values-and-events) |
+| `UO3DRemoteControlComponent` | **Get Control Value**, **Get All Control Values**; events **On Control Event**, **On Control Value Changed**, **On Control Value Cleared** | [Receiving: O3D Remote Control Component](#receiving-o3d-remote-control-component) |
+
+### Connection State and Transport Stats
+
+**EO3DBroadcastConnectionState** (returned by **Get Connection State**, passed by **On Connection State Changed**):
+
+| Value | Meaning |
+|-------|---------|
+| **Idle** | Not started, or stopped |
+| **Connecting** | Started and waiting for a first peer, session or connection |
+| **Connected** | Able to deliver |
+| **Reconnecting** | Was connected, lost it, and is retrying |
+| **Failed** | The transport could not start or gave up. Stop and start capture again to retry |
+
+**FO3DBroadcastTransportStats** (returned by **Get Transport Stats**; break the struct to read the fields):
+
+| Field | Meaning |
+|-------|---------|
+| **State** | The connection state, as above |
+| **Frames Sent**, **Bytes Sent** | Frames and bytes the transport sent |
+| **Frames Received**, **Bytes Received** | Frames and bytes received (receiving transports) |
+| **Dropped Frames** | Frames dropped because the transport could not take them |
+| **Send Errors**, **Receive Errors** | Errors the transport counted |
+| **Pending Frames** | Items waiting in the transport's send queue |
+| **Average Latency Ms**, **Max Latency Ms** | Latency the transport measured, if it measures any |
+
+---
+
 ## Performance Tuning
 
 ### Optimizing Bandwidth
@@ -1261,7 +1374,7 @@ Capture Rate Hz: 30    # Instead of 60
 
 **Enable Curve Filtering:**
 ```
-Enable Curve Filtering: ✓
+Enable Curve Filtering: ticked
 Curve Delta Threshold: 0.01
 Exclude Curve Patterns: ["*_unused", "*_debug"]
 ```
@@ -1290,36 +1403,34 @@ Capture Rate Hz: 90    # Higher refresh
 - More responsive animation
 - Increases bandwidth
 
-**Use UDP for Sockets:**
-```
-Transport Options:
-  - protocol: udp
-```
-- Lower latency than TCP
-- May drop frames under packet loss
+**Use UDP instead of TCP:**
+- Select **UDP** on both ends (see [TCP and UDP Transports](#tcp-and-udp-transports))
+- A lost datagram is a lost frame, but a frame is never held back behind a lost one
 
 **Optimize Network:**
 - Use wired connections
 - Minimize network hops
 - QoS prioritization for animation traffic
 
-**WebRTC Tuning (Open3DBroadcastWebRTC add-on):**
-```
-webrtc.max_bitrate: 5000000    # 5 Mbps cap
-webrtc.min_bitrate: 500000     # 500 Kbps floor
-```
+**Receiver smoothing:** concealment and LiveLink's own buffering add some delay in exchange for smooth motion. See [Receiver Source Settings](#receiver-source-settings) and LiveLink's buffer settings on the source.
 
 ### Memory Optimization
 
 **Limit Queue Sizes:**
-```
-loopback.queue: 32     # Smaller queue
-```
-- Reduces memory footprint
-- May drop frames if consumer is slow
+
+The sender-side queues hold frames while the network or the receiver is slower than the sender. Smaller queues use less memory and drop or refuse frames sooner:
+
+| Transport | Option | Default |
+|-----------|--------|---------|
+| Loopback | `loopback.maxqueue` (**Queue Capacity**) | 64 frames |
+| TCP | `tcp.maxqueue` | 4194304 bytes |
+| NNG | `nng.qmax` (**Queue Capacity (MiB)**) | 4 MiB |
+| MoQ | `queue_bytes` (**Queue Capacity (MiB)**) | 8 MiB |
+
+A byte queue smaller than one frame refuses every frame; see [Frames are larger than the transport accepts](#frames-are-larger-than-the-transport-accepts).
 
 **Subject Cleanup:**
-- Subjects idle for longer than **Inactive Subject Timeout** (default 5 s) are cleared, not removed, so their LiveLink settings survive a pause
+- Subjects idle for longer than **Inactive Subject Timeout Seconds** (default 5 s) are cleared, not removed, so their LiveLink settings survive a pause
 - The receiver forgets the stream state of senders idle that long
 
 ### CPU Optimization
@@ -1329,32 +1440,24 @@ loopback.queue: 32     # Smaller queue
 - Fewer curves
 - Simpler skeletons
 
-**Multi-Threading:**
-- Sender serialization is async-safe
-- Transport I/O typically on separate threads
-- Audio encoding threaded (Opus)
+**Threads:**
+- With `o3d.Sender.AsyncPipeline` at 1 (the default), the sender filters, serializes and sends pose frames on a worker task, not on the game thread
+- The TCP, UDP, NNG and MoQ senders write to the network from a worker thread of their own
 
 ### Monitoring Performance
 
 **Transport Statistics:**
 
-Access via C++:
+In Blueprint, **Get Transport Stats** on the sender component returns the counters listed in [Connection State and Transport Stats](#connection-state-and-transport-stats). In C++:
 ```cpp
-FO3DTransportStats Stats = Sender->GetTransportStats();
-UE_LOG(LogTemp, Log, TEXT("Sent %lld frames, %lld bytes, avg latency %.2f ms"),
-       Stats.FramesSent, Stats.BytesSent, Stats.AverageLatencyMs);
+const FO3DBroadcastTransportStats Stats = Sender->GetTransportStats();
+UE_LOG(LogTemp, Log, TEXT("Sent %lld frames, %lld bytes, dropped %lld"),
+       Stats.FramesSent, Stats.BytesSent, Stats.DroppedFrames);
 ```
 
-**Available Metrics:**
-- `FramesSent` / `FramesReceived`
-- `BytesSent` / `BytesReceived`
-- `DroppedFrames`
-- `AverageLatencyMs` / `MaxLatencyMs`
+**Console commands:** `o3d.DumpMetrics` prints the plugin's performance metrics, `o3ds.Sender.DumpStats` the serializer's per-subject statistics, and `o3d.Sender.DumpPipelineStats` each sender's pipeline (queue, drops, worker time, capture-to-send latency). See [Console Variables and Commands](#console-variables-and-commands).
 
-**LiveLink Status:**
-- Green: Receiving recent data
-- Yellow: Stale data (1-5 seconds old)
-- Red: No data (>5 seconds)
+**Receiver status:** the LiveLink panel shows each Open3DStream source's status line, for example "Receiving via UDP" or "No data received". The [Source Status](#source-status) table lists them.
 
 ---
 
@@ -1367,25 +1470,28 @@ UE_LOG(LogTemp, Log, TEXT("Sent %lld frames, %lld bytes, avg latency %.2f ms"),
 **Symptoms:** Sender is capturing but receiver shows no subjects
 
 **Solutions:**
-1. **Check transport configuration:**
-   - Verify `Transport Name` matches on both sides
-   - Verify transport options match (especially `channel` or `stream_id`)
-   - Check `role` is set correctly (sender vs receiver)
+1. **Check the sender:**
+   - **Auto Create Transport** is ticked, and capture runs (Play In Editor or a game, not the editor viewport)
+   - **On Sender Error** or the Output Log (`LogO3DSenderComponent`) says why the transport did not start
 
-2. **Check network connectivity:**
-   - For Sockets: Verify IP and port accessibility
-   - For WebRTC: Verify server URL and token validity
+2. **Check transport configuration:**
+   - The sender's **Transport Name** and the source's **Transport** are the same
+   - The options point at each other: the same **Channel Name** (Loopback), host and port (TCP, UDP, NNG), mode (NNG), or relay URL, track namespace and track name (MoQ). See [Transport Modules](#transport-modules)
+
+3. **Check network connectivity:**
+   - TCP, UDP, NNG: the listening machine's firewall allows the port; see [Ports and Firewalls](#ports-and-firewalls)
+   - WebRTC: the server URL and the token; see the add-on's USER_GUIDE
    - Test with Loopback first to isolate network issues
 
-3. **Check LiveLink source status:**
-   - Open LiveLink panel
-   - Look for error messages
-   - Try removing and re-creating source
+4. **Check the LiveLink source status:**
+   - The [status line](#source-status) in the Live Link panel says what the receiver sees
+   - Try removing and re-creating the source
 
-4. **Enable debug logging:**
+5. **Enable debug logging:**
    ```
-   Console: "log LogO3DReceiver Verbose"
+   log LogO3DReceiverSource Verbose
    ```
+   See [Debug Logging](#debug-logging) for the transport's own category.
 
 #### "Audio not working"
 
@@ -1401,13 +1507,16 @@ UE_LOG(LogTemp, Log, TEXT("Sent %lld frames, %lld bytes, avg latency %.2f ms"),
 
 3. **Check audio component:**
    - Add `O3D Remote Audio Component` to scene
-   - Verify `Receive Mode` and `Stream Label`
-   - Check `Gain` is not zero
+   - Verify **Receive Mode** and **Stream Label Filter** (**Mix (o3ds:mix)** plays only streams labelled `o3ds:mix`; use **Any Stream** or **Subject (LiveLink)** for a sender's audio)
+   - Check **Gain** is not zero
+   - With **Auto Activate** off, call **Play**
 
 4. **Check audio device:**
    - Windows Sound Settings → Unreal Engine not muted
-   - For Input mode: Microphone permissions granted
+   - For Input mode: Windows allows desktop apps to use the microphone (Windows privacy settings)
    - For Mix mode: Game actually producing audio
+
+5. **Debug logging:** set `o3ds.Sender.Audio.Debug 1` on the sender, and `o3ds.Receiver.Audio.Debug 1` and `o3ds.RemoteAudio.Debug 1` on the receiver.
 
 #### "High latency / lag"
 
@@ -1428,8 +1537,8 @@ UE_LOG(LogTemp, Log, TEXT("Sent %lld frames, %lld bytes, avg latency %.2f ms"),
    - Lower Opus bitrate if needed
 
 4. **Transport selection:**
-   - LAN: Use Sockets (lowest latency)
-   - Internet: WebRTC required, latency expected
+   - LAN: TCP or UDP (UDP has the lowest latency)
+   - Internet: WebRTC (add-on) or MoQ (Experimental, needs a relay); expect more latency than on a LAN
 
 #### "Frames dropping / choppy animation"
 
@@ -1448,14 +1557,40 @@ UE_LOG(LogTemp, Log, TEXT("Sent %lld frames, %lld bytes, avg latency %.2f ms"),
    - Use Opus for audio
 
 3. **Queue overflow:**
-   - Receiver not processing fast enough
-   - Increase queue size (Loopback only)
-   - Reduce data rate
+   - The network or the receiver is slower than the sender
+   - Raise the transport's queue capacity (`loopback.maxqueue`, `tcp.maxqueue`, `nng.qmax` or `queue_bytes`; see [Memory Optimization](#memory-optimization)), or reduce the data rate
 
 4. **Check transport stats:**
-   ```cpp
-   UE_LOG(LogTemp, Warning, TEXT("Dropped %lld frames"), Stats.DroppedFrames);
-   ```
+   - **Get Transport Stats** on the sender: a growing **Dropped Frames** count means the transport could not take frames
+   - `o3d.Sender.DumpPipelineStats` shows frames the sender's own pipeline dropped before the transport (`o3d.Sender.PipelineDepth`)
+
+#### Frames are larger than the transport accepts
+
+**Symptom:** the Output Log on the sender shows
+
+```
+Subject '<name>': the <N>-byte frame is larger than the transport accepts and was not sent (<M> more since the last warning). Reduce the skeleton or raise the transport's queue capacity.
+```
+
+The frame does not fit the transport's send queue, or is larger than the largest message the transport carries. Nothing of that subject reaches the receiver while its frames stay that large.
+
+**Solutions:**
+- Raise the queue capacity: `tcp.maxqueue` (TCP), **Queue Capacity (MiB)** (NNG, MoQ). See [Memory Optimization](#memory-optimization).
+- Make frames smaller: capture a mesh with fewer bones, or leave curves out with **Exclude Curve Patterns**.
+- On the receiver, TCP accepts frames up to `tcp.maxframe` (4194304 bytes) and UDP reassembles messages up to `udp.maxframe` (4194304 bytes).
+- WebRTC sends a frame of at most 15,000 bytes, and its own log says `payload size (N bytes) exceeds maximum (15000 bytes)`. See "Payload Too Large" in the add-on's USER_GUIDE.
+
+#### "Invalid options" or InvalidConfig
+
+**Symptom:** the source status is **Invalid options: *reason***, **Create Source** is disabled with a reason, or the sender logs `Sender transport '<name>' not started: InvalidConfig: <reason>` (and fires **On Sender Error**).
+
+A transport option is out of range or malformed, for example a port above 65535. The reason says which option. Fix it in the panel, in the [project-wide defaults](#project-wide-transport-defaults), or in the options you pass from Blueprint or C++. The ranges are in the [Transport Options Reference](#transport-options-reference).
+
+#### Firewall and ports
+
+**Symptom:** Loopback works, and the same setup across two machines does not; the receiver stays at "Waiting for data" or "Reconnecting".
+
+Open the port on the machine that listens: the sender for TCP (17700), the receiver for UDP (17800), and the listening end for NNG (6000, 7000 or 8000 by mode). MoQ and WebRTC need outbound access only. The [Ports and Firewalls](#ports-and-firewalls) table has the details.
 
 #### "WebRTC is not in the transport list" or "WebRTC connection fails"
 
@@ -1465,27 +1600,100 @@ UE_LOG(LogTemp, Log, TEXT("Sent %lld frames, %lld bytes, avg latency %.2f ms"),
 
 ### Debug Logging
 
-Enable verbose logging for troubleshooting:
+Enable verbose logging for troubleshooting with the `log` console command, for example `log LogO3DReceiverSource Verbose`. The useful categories:
 
-**Console Commands:**
-```
-log LogO3DSender Verbose
-log LogO3DReceiver Verbose
-log LogO3DTransportSockets Verbose
-log LogO3DWebRTCSender Verbose
-log LogO3DWebRTCReceiver Verbose
-```
+| Area | Categories |
+|------|------------|
+| Sender component | `LogO3DSenderComponent`, `LogO3DSenderAudio`, `LogO3DSenderSerializer` |
+| Receiver source | `LogO3DReceiverSource`, `LogO3DReceiverAudio` |
+| Loopback | `LogO3DLoopbackTransport` |
+| TCP and UDP | `LogSocketsTcpSender`, `LogSocketsTcpReceiver`, `LogSocketsUdpSender`, `LogSocketsUdpReceiver`, `LogOpen3DTransportSocketsModule` |
+| NNG | `LogO3DNngSender`, `LogO3DNngReceiver`, `LogOpen3DTransportNNGModule` |
+| MoQ | `LogO3DMoQSender`, `LogO3DMoQReceiver`, `LogOpen3DTransportMoQModule` |
+| WebRTC (add-on) | `LogO3DWebRTCSender`, `LogO3DWebRTCReceiver`, `LogO3DWebRTCTokenManager`, `LogOpen3DTransportWebRTCModule` |
+| Metrics | `LogO3DPerformanceMetrics` |
 
-The two `LogO3DWebRTC*` categories exist only when the Open3DBroadcastWebRTC add-on is installed.
+The WebRTC categories exist only when the Open3DBroadcastWebRTC add-on is installed.
 
 **In DefaultEngine.ini:**
 ```ini
 [Core.Log]
-LogO3DSender=Verbose
-LogO3DReceiver=Verbose
-LogO3DWebRTCSender=Verbose
-LogO3DWebRTCReceiver=Verbose
+LogO3DSenderComponent=Verbose
+LogO3DReceiverSource=Verbose
 ```
+
+### Console Variables and Commands
+
+Set a variable in the console (for example `o3ds.Receiver.DebugParse 1`), or in the `[SystemSettings]` section of `DefaultEngine.ini`. The debug variables log a lot; turn them off again when you are done.
+
+**Receiver**
+
+| Name | Default | What it does |
+|------|---------|--------------|
+| `o3ds.Receiver.DebugParse` | 0 | 1: log when incoming packets are parsed |
+| `o3ds.Receiver.DropOutOfOrder` | 1 | 1: drop frames whose time is older than the last applied frame's |
+| `o3ds.Receiver.SilenceResetSeconds` | 2.0 | After this many seconds without packets, reset the frame-ordering state. 0: never |
+| `o3ds.Receiver.TimestampJumpResetSeconds` | 1.0 | When a frame's time goes back by more than this many seconds, reset the frame-ordering state. 0: never |
+| `o3ds.Receiver.Audio.Debug` | 0 | 1: log the audio frames the receiver publishes |
+| `o3ds.RemoteAudio.Debug` | 0 | 1: log what the O3D Remote Audio Component receives and plays |
+
+**Sender**
+
+| Name | Default | What it does |
+|------|---------|--------------|
+| `o3ds.Sender.DebugPose` | 0 | 1: log every pose frame |
+| `o3ds.Sender.DebugCurves` | 0 | 1: log the curves of every frame |
+| `o3ds.Sender.DebugSerialize` | 0 | 1: log serialization |
+| `o3ds.Sender.DebugStats` | 0 | 1: log serializer statistics for every frame |
+| `o3ds.Sender.OnScreen` | 0 | 1: show on-screen messages when a sender component's state changes |
+| `o3ds.Sender.Audio.Debug` | 0 | 1: log audio capture |
+| `o3ds.Sender.Audio.WarnFailures` | 1 | 1: warn when the transport refuses audio frames |
+| `o3d.Sender.AsyncPipeline` | 1 | 1: filter, serialize and send pose frames on a worker task. 0: on the game thread. Read when capture starts |
+| `o3d.Sender.PipelineDepth` | 2 | Pose frames that may wait for a sender's worker (1 to 8). When another arrives, the oldest waiting one is dropped |
+| `o3ds.Loopback.Audio.Debug` | 0 | Loopback audio logging: 0 off, 1 basic, 2 verbose |
+
+**Commands**
+
+| Command | What it does |
+|---------|--------------|
+| `o3ds.Sender.DumpStats` | Logs each subject's serialization statistics |
+| `o3d.Sender.DumpPipelineStats` | Logs each sender's pipeline statistics: queue, drops, worker time, capture-to-send latency. Available once a sender has started capture |
+| `o3d.Sender.Capture.Start [file]` | Records every serialized pose frame the senders send to a `.o3dscap` file. A relative path goes under `Saved/O3DCaptures` |
+| `o3d.Sender.Capture.Stop` | Stops that recording |
+| `o3d.Sender.Audio.RefreshDevices` | Enumerates the audio capture devices again and logs them |
+| `o3d.DumpMetrics` | Logs the plugin's performance metrics: the default runtime context, then each named one |
+| `o3d.ResetMetrics` | Resets the performance metrics in every runtime context |
+
+---
+
+## Known Limitations
+
+- **Unreal Engine 5.7 and Win64 only**, for editor and game targets. Server and Program targets are not supported.
+- **No sample content.** No map or assets ship with the plugin; the [Quick Start](#quick-start) builds a working setup from the Third Person template.
+- **MoQ is Experimental.** It implements draft-ietf-moq-transport-07 and needs a relay that speaks draft-07. Its options and behaviour can change between releases.
+- **MoQ defaults do not match between the ends.** Left empty, the sender uses the namespace `mocap/<Subject Name>` and the track `<Subject Name>`, the receiver `mocap/default` and `primary`. Set **Track Namespace (optional)** and **Track Name (optional)** on both ends.
+- **WebRTC is a separate add-on**, and each add-on build works only with the Open3DBroadcast release it was built for.
+- **Residual coding needs a reliable, ordered transport** (Loopback, TCP, NNG Pair or Push/Pull, WebRTC by default). On UDP, NNG Pub/Sub, MoQ, or WebRTC with `webrtc.prefer_lossy`, the sender sends without it and logs a warning.
+- **UDP has no multicast.** It sends to one address, or to a broadcast address on one subnet.
+- **TCP serves one receiver at a time** per sender.
+- **No encryption or authentication on TCP, UDP and NNG.** Use them on networks you trust.
+- **One LiveLink client per process.** Subject names are shared by every receiver source in a process, PIE clients included; keep them distinct (see [Separate Receivers](#separate-receivers-runtime-contexts)).
+
+## Privacy
+
+- **Microphone:** the sender opens a microphone only when **Enable Audio** is ticked and **Audio Capture Mode** is **Input (Microphone)**. **Enable Audio** is off by default. In Mix mode it captures the game's own audio, not a microphone.
+- **Who hears it:** captured audio, like the animation, goes to every receiver of the stream: every receiver on the Loopback channel, the receiver connected to a TCP sender, every machine that receives the UDP datagrams (with broadcast, every machine on the subnet that listens on the port), every NNG subscriber, every subscriber of the MoQ track on the relay, and the participants of the WebRTC room.
+- **Transport security:** TCP, UDP and NNG are neither encrypted nor authenticated, so anyone on the network path can read the stream. Use them on networks you trust.
+- **Control** is off by default on receivers: a client accepts control only when its project turns it on (see [Enabling Control on a Client](#enabling-control-on-a-client)).
+- **Credentials** (for example a WebRTC token) are never saved in a level, a Blueprint or a LiveLink preset; see [Transport Configuration](#transport-configuration).
+
+If your project captures players' or performers' voices, tell them, and follow the privacy rules that apply to you.
+
+## Updating and Removing the Plugin
+
+- **Updating:** close the editor and replace the plugin: through the launcher for an engine install, or by replacing the `Plugins/Open3DBroadcast` folder. If you use the WebRTC add-on, update it to the same version; it only works with the matching Open3DBroadcast release, and logs `WebRTC transport not registered: ...` otherwise.
+- **Removing:** remove Open3DBroadcast components and LiveLink sources from your assets first, or they load as missing. Then disable the plugin in **Edit → Plugins**, close the editor, and delete the folder (or uninstall it from the engine in the launcher). Remove the WebRTC add-on too: it depends on Open3DBroadcast.
+- **Project settings** you set under **Project Settings > Plugins** (**Open3DBroadcast**, **Open3DBroadcast Control**) stay in your project's `Config/DefaultGame.ini` until you delete those sections.
 
 ---
 
@@ -1493,27 +1701,37 @@ LogO3DWebRTCReceiver=Verbose
 
 ### Custom Transport Implementation
 
-You can implement custom transports by extending the transport interfaces.
+A transport is a module that implements the transport interfaces and registers itself. The interfaces and the registry are in the `Open3DShared` module, under `Public/Transport/`.
 
-**Required Interfaces:**
-- `IOpen3DSender`: For sending data
-- `IOpen3DReceiver`: For receiving data
+**Interfaces:**
+- `IOpen3DSender` (`O3DSenderInterface.h`): takes serialized frames, audio and control from a sender component.
+- `IOpen3DReceiver` (`O3DReceiverInterface.h`): hands received frames, audio and control to a receiver source.
 
-**Registration:**
+**Registration:** fill one `FO3DTransportDescriptor` per transport name and register it with `FO3DTransportRegistry` when the module starts. Keep the returned `FO3DTransportRegistration`: resetting it in `ShutdownModule` unregisters the transport and stops every instance still running.
+
 ```cpp
-// In your transport module's Startup
-FO3DSenderRegistry::Get().RegisterFactory(
-    FName("mycustom"),
-    []() -> IOpen3DSender* { return new FMyCustomSender(); }
-);
+#include "Transport/O3DTransportRegistry.h"
 
-FO3DReceiverRegistry::Get().RegisterFactory(
-    FName("mycustom"),
-    []() -> IOpen3DReceiver* { return new FMyCustomReceiver(); }
-);
+void FMyTransportModule::StartupModule()
+{
+    FO3DTransportDescriptor Descriptor;
+    Descriptor.Name = TEXT("MyTransport");          // shown in the transport pickers
+    Descriptor.OwningModule = TEXT("MyTransport");
+    Descriptor.CreateSender = []() { return MakeShared<FMySender, ESPMode::ThreadSafe>(); };
+    Descriptor.CreateReceiver = []() { return MakeShared<FMyReceiver, ESPMode::ThreadSafe>(); };
+    // Optional: ConfigureSender / ConfigureReceiver (options to config), GetCapabilities,
+    // and SenderOptions / ReceiverOptions (the option schema the panels show).
+
+    Registration = FO3DTransportRegistry::Get().Register(MoveTemp(Descriptor));
+}
+
+void FMyTransportModule::ShutdownModule()
+{
+    Registration.Reset();
+}
 ```
 
-**See:** Existing transport implementations in `Source/Open3DTransport*/` for examples.
+A descriptor carries the transport API version it was compiled with (`O3D_TRANSPORT_API_VERSION`); the registry refuses one built against another version, so rebuild a custom transport for each Open3DBroadcast release. The plugin's own transports (`Source/Open3DTransport*/`) are complete examples; the Loopback module is the smallest.
 
 ### Multi-Subject Workflows
 
@@ -1533,7 +1751,7 @@ Prop->Sender->CaptureRateHz = 15.0f;
 Prop->Sender->SubjectName = "MovingProp";
 ```
 
-All share the same transport, each identified by subject name.
+Each component runs its own transport and is identified by its subject name. Which receiver setups hear them all is in [Multiple Subjects](#multiple-subjects).
 
 ### Runtime Transport Switching
 
@@ -1553,31 +1771,13 @@ Sender->SetTransportOption(TEXT("webrtc.token"), ProductionToken);
 Sender->StartCapture();
 ```
 
-### Custom Audio Processing
+### Processing Audio Before Sending
 
-**Scenario:** Process audio before sending
-
-1. Subclass `UO3DSenderAudioCaptureComponent`
-2. Override `ProcessAudioBuffer` to apply effects
-3. Use custom component instead of standard one
-
-**Example:**
-```cpp
-void UMyAudioCapture::ProcessAudioBuffer(float* Buffer, int32 NumFrames)
-{
-    // Apply noise gate
-    for (int32 i = 0; i < NumFrames * NumChannels; ++i)
-    {
-        if (FMath::Abs(Buffer[i]) < NoiseThreshold)
-            Buffer[i] = 0.0f;
-    }
-
-    // Call base implementation
-    Super::ProcessAudioBuffer(Buffer, NumFrames);
-}
-```
+The sender has no hook for processing captured audio. To send processed game audio, route it into a submix (with the submix's effects) and set that submix as **Submix to Tap** in Mix mode.
 
 ### Bandwidth Estimation
+
+A rough estimate, without message headers. Measure the real figure with **Get Transport Stats** (**Bytes Sent**) or `o3ds.Sender.DumpStats`.
 
 **Uncompressed (no filtering):**
 ```
@@ -1588,9 +1788,9 @@ Frame size: ~3 KB
 At 60 Hz: 3 KB × 60 = 180 KB/s = 1.44 Mbps
 ```
 
-**With curve filtering (50% reduction):**
+**With curve filtering (half the curve values left out):**
 ```
-Frame size: ~2.9 KB
+Frame size: 2.8 KB + 0.1 KB = ~2.9 KB
 At 60 Hz: ~1.39 Mbps
 ```
 
@@ -1622,8 +1822,45 @@ Before deploying to production:
 - [ ] Enable curve filtering if needed
 - [ ] Set up monitoring/logging
 - [ ] Document transport configuration for team
-- [ ] Test firewall/NAT scenarios (for WebRTC)
+- [ ] Test firewall and NAT scenarios (ports for TCP, UDP and NNG; outbound access for MoQ and WebRTC)
 - [ ] Prepare fallback configurations
+
+---
+
+## FAQ
+
+**Does the plugin include sample content or a demo map?**
+No. Follow the [Quick Start](#quick-start); it needs only the Third Person template.
+
+**Which transport should I use?**
+Loopback to test in one editor. TCP for one receiver on a LAN, UDP for the lowest latency or a broadcast to one subnet, NNG Pub/Sub for several receivers on a LAN. Across networks, WebRTC (free add-on) or MoQ (Experimental, needs a relay). See [Transports at a Glance](#transports-at-a-glance).
+
+**Can the sender and the receiver run in the same editor?**
+Yes. Use Loopback, as in the Quick Start, or TCP or UDP with the default host `127.0.0.1`.
+
+**Does it work on Mac, Linux, consoles or dedicated servers?**
+No. Win64 and Unreal Engine 5.7 only, editor and game targets.
+
+**Does it stream audio?**
+Yes, on every transport. Tick **Enable Audio** on the sender and on the LiveLink source, and add an O3D Remote Audio Component on the receiving side. See [Audio Streaming](#audio-streaming).
+
+**Is the microphone recorded?**
+Only when **Enable Audio** is ticked and **Audio Capture Mode** is **Input (Microphone)**. See [Privacy](#privacy).
+
+**Can I set everything up from Blueprint at runtime?**
+Yes: the sender's transport nodes, **Create Open3DStream LiveLink Source** for the receiver, and **Set Transport Secret** for credentials. See the [Blueprint API Reference](#blueprint-api-reference).
+
+**Why does my sender capture but nothing arrives?**
+**Auto Create Transport** is off by default; tick it. Then see [Subject not appearing in LiveLink](#subject-not-appearing-in-livelink).
+
+**The sender and the receiver use different skeletons. What do I do?**
+Retarget on the receiver; see [Retargeting Animation](#retargeting-animation).
+
+**Can other tools read the stream?**
+The stream uses the Open3DStream protocol; its byte layout is in [docs/wire-format.md](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/docs/wire-format.md).
+
+**Where do I report a bug?**
+[GitHub Issues](https://github.com/lifelike-and-believable/Open3DBroadcast/issues).
 
 ---
 
@@ -1631,22 +1868,23 @@ Before deploying to production:
 
 ### Documentation
 
-- **Plugin README**: [README.md](README.md) - Installation and build info
-- **Transport Comparison**: [Transport_Module_Comparison.md](Transport_Module_Comparison.md) - Detailed transport comparison
+- **Plugin README**: [README.md](README.md) - requirements, installation, ports and known limitations
+- **Transport Comparison**: [Transport_Module_Comparison.md](Transport_Module_Comparison.md) - how the transports differ, for integrators
+- **Transport READMEs** (in the GitHub repository, not in the Fab package): [Loopback](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportLoopback/README.md), [TCP and UDP](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportSockets/README.md), [NNG](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportNNG/README.md), [MoQ](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3DTransportMoQ/README.md)
 - **WebRTC Guide**: [Open3DBroadcastWebRTC USER_GUIDE](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/ProjectSandbox/Plugins/Open3DBroadcastWebRTC/USER_GUIDE.md) - setup of the free WebRTC add-on
+- **Wire format**: [docs/wire-format.md](https://github.com/lifelike-and-believable/Open3DBroadcast/blob/develop/docs/wire-format.md)
 
 ### Support
 
-- **GitHub Issues**: Report bugs and feature requests
-- **Documentation**: This guide and module-specific docs
-- **Code Examples**: See `Source/*/Private/` for implementation examples
+- **GitHub Issues**: [report bugs and request features](https://github.com/lifelike-and-believable/Open3DBroadcast/issues)
+- **Code Examples**: the plugin's source, in `Source/` of the plugin folder; the transports in `Source/Open3DTransport*/` show how a transport is built
 
 ### Next Steps
 
 1. **Start simple**: Use Loopback transport for learning
 2. **Experiment**: Try different transports and settings
 3. **Optimize**: Tune for your specific use case
-4. **Scale**: Move to WebRTC for remote/multi-user
+4. **Scale**: Move to WebRTC (add-on) or MoQ (Experimental) for streams between networks
 5. **Customize**: Implement custom transports if needed
 
 ---

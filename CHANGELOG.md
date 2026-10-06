@@ -578,6 +578,13 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- USER_GUIDE reference sections and the transport comparison (WP-D2; mid-project review DOC-10, RCV-32, DOC-4 residue, DOC-5 rest).
+  - **Receiver Setup** uses the real panel (**Open3DStream Receiver**, **Transport**, **Audio Codec** with **Transport Default**, **Create Source**); the `role`/`uri`/`protocol` examples, the "Audio Stream Label" field and the unverified Live Link Component and Control Rig routes for applying a subject are gone. A new **Receiver Source Settings** table covers Inactive Subject Timeout Seconds, concealment and Control Accept.
+  - **Configuration Reference**: Curve Epsilon defaults to 0.0005; Audio Input Device is a name; Bitrate Kbps 0 lets the encoder choose; new **Encoding Properties** (residual coding, quantization, full sync interval), both off by default.
+  - New **Blueprint API Reference** (sender component, Create Open3DStream LiveLink Source, credentials, remote audio, control, connection state and transport stats), **Console Variables and Commands**, **Known Limitations**, **Privacy**, **Updating and Removing the Plugin** and **FAQ** sections; troubleshooting for oversized frames, invalid options and firewalls.
+  - Fixes: WebRTC carries control; UDP broadcasts and has no multicast; `GetTransportStats()` returns `FO3DBroadcastTransportStats`; `loopback.maxqueue` instead of `loopback.queue`; no `webrtc.max_bitrate`; the real log categories; custom transports register an `FO3DTransportDescriptor` with `FO3DTransportRegistry` (there is no `FO3DSenderRegistry` or `ProcessAudioBuffer`). Core Concepts' "Transport Modules" is now "Transports at a Glance", so links to `#transport-modules` reach the full section.
+  - **Transport_Module_Comparison.md** matches the guide: registered names, delivery guarantees (MoQ, NNG Pub/Sub and lossy WebRTC are unreliable), UDP drop-oldest backpressure, Win64-only for every module, the 24-byte keepalive, the UDP receiver's `host` and `udp.mtu` as fragment size, option-map examples with the real keys and ports, and no repository file:line references.
+
 - Public header docs (WP-D2; SND-37). `IO3DSenderAudioSink::SubmitPcm` and `OnCaptureStopped` say which threads call them. The sender component's `OnDescriptorReady`, `OnPoseFrameReady` and `GetTransportName` have doc comments. The `HideInDetailPanel` meta on `TransportName` and `TransportOptions` is removed: UE 5.7 uses it only for events, and the editor's Details customization hides both properties. `Open3DSender/ThirdParty/README.md` no longer describes a `Lib/` layout the build never used. No behaviour change.
 
 - Transport module docs (WP-D2; TRB-44, TRF-36). Docs only; no behaviour changes.
