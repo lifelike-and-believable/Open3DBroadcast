@@ -431,7 +431,6 @@ namespace O3DTests
 			// ReliableOrdered; Open3DBroadcast.Shared.TransportCapabilities covers those).
 			Profile.ExpectedCapabilities = MakeBaseCapabilities(EO3DDeliveryGuarantee::Unreliable);
 			Profile.ExpectedCapabilities.bPeerJoinSignal = true; // ADR 0005 (vi)
-			Profile.ControlStopCycles = 1; // a closed listener can linger (see above), so one sender per test
 			RegisterConformanceProfile(NngName, Profile);
 		}
 #endif
