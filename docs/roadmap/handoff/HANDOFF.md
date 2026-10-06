@@ -13,8 +13,8 @@ This section supersedes the "Start here" line in §0 where they disagree.
   - **WP-U2:** #386, the sender Blueprint API (SND-26, UX-3, DOC-4); #387, the receiver Blueprint library (UX-3).
   - **CI:** #388, every PR workflow posts "✅ … completed successfully!" on the PR.
   - **WP-U3, complete:** #389, the sender Details panel (SND-24, SND-25, SND-27, SND-30, SND-35); #390, receiver status, Create Source validation and live concealment settings (RCV-15, RCV-16, RCV-17); #391, transport options and logs (TRF-30, TRB-43 and TRB-21's UI part; the rest of TRB-21 is WP-U6's).
+  - **Findings:** #392, `Status: closed in #N` markers for the 193 findings M1 to M3 fixed. Before it, only the M4 PRs had added any. Its description lists 66 findings left open, 16 of them for the maintainer to decide.
 - **Open at hand-over:**
-  - #392: `Status: closed in #N` markers for the 193 findings M1 to M3 fixed. Before it, only the M4 PRs had added any. Its description lists 66 findings left open, 16 of them for the maintainer to decide.
   - #393: WP-U4 PR 1, the remote audio component lifecycle (RCV-22, RCV-23, RCV-24).
 - **Maintainer decisions:**
   - **WP-U2 (2026-10-05):**
@@ -34,7 +34,7 @@ This section supersedes the "Start here" line in §0 where they disagree.
   - A workflow's success comment is the cue that CI is green; check the checks before merging.
   - After merging `develop` into a worktree that was already built, delete `ProjectSandbox/Intermediate/Build/Win64/x64/ProjectSandboxEditor/Development/Makefile.bin` before building. UBT otherwise reuses its makefile and skips the merged-in files; a local run then lacks their tests. Check the test count: 497 with both plugins as of #393.
   - `close_findings.py`-style helpers must put the Status line after a finding's last top-level bullet, not inside nested bullets.
-- **Next, after #392 and #393:**
+- **Next, after #393:**
   1. WP-U4 PR 2 (RCV-6), then PR 3 (RCV-20 and RCV-21).
   2. WP-U5: sample content, which also carries WP-U2's acceptance.
   3. WP-U6.
