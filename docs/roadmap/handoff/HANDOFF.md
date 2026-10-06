@@ -22,7 +22,20 @@ This section supersedes the "Start here" line in §0 where they disagree.
     - #395, inactive LiveLink subjects (RCV-6): a per-source Inactive Subject Timeout (default 5 s, 0 = never); on timeout the subject's frames are cleared, and the subject and its settings are kept;
     - #396, the remote audio jitter buffer (RCV-20): `FO3DAudioJitterBuffer`, pulled on the audio thread by `UO3DJitterSoundWave`; a Target Latency property (default 60 ms), trimming above target + 60 ms. Open3DReceiver now depends on AudioExtensions.
     - #398, remote audio stream routing (RCV-21): one stream at a time (source and label) until it is idle for 1 s, a new Any Stream mode and a Stream Label Filter; Mix stays strict on `o3ds:mix`, now `O3DS::MixAudioStreamLabel`. The USER_GUIDE audio property table is corrected.
-  - **Docs:** #397, this section at the pause before RCV-21.
+  - **Docs:** #397, this section at the pause before RCV-21; #399, WP-U4 done; #400, the mid-project review.
+  - **WP-R1, complete** (correctness follow-ups from the mid-project review; maintainer, 2026-10-06):
+    - #401, receiver:
+      - RR-1: the source holds LiveLink's settings weakly and stops ticking after shutdown (a use-after-free);
+      - RR-2: inactive subjects are cleared before concealment runs (#395 was wrong that `ClearFrames` drops the static data, so cleared subjects came back frozen);
+      - RR-3: an "Unreadable data" or "update this receiver" status;
+      - RR-4: "Parse failed" is throttled.
+    - #402, sender:
+      - SR-3: capture stops when its transport unloads;
+      - SR-2: audio is sent only at rates receivers play.
+    - #403, transports:
+      - TR-1/SR-1: frames dropped after acceptance lead to a full sync, through the new `IOpen3DSender::SetFramesDroppedCallback`, and the send queue never discards a full sync;
+      - TR-2: NNG subscription topics removed (maintainer, 2026-10-06);
+      - TR-3: NNG `Poll` is bounded for every kind of message.
 - **Maintainer decisions:**
   - **WP-U2 (2026-10-05):**
     - `bAutoCreateTransport` stays false, with a warning;
@@ -46,7 +59,7 @@ This section supersedes the "Start here" line in §0 where they disagree.
     - still include a deleted file, so the build fails;
     - and after a failed build, the automation run uses the old binaries and can report green.
 
-    Check that the build succeeded and compare the test count: 507 on `develop` as of #398.
+    Check that the build succeeded and compare the test count: 516 on `develop` as of #403.
   - The test editor runs with `-NoSound`, so audible playback can't be tested automatically. Audio tests cover the component's state and the jitter buffer; listening is a desk check.
   - `close_findings.py`-style helpers must put the Status line after a finding's last top-level bullet, not inside nested bullets.
 - **Next, after the maintainer's go-ahead:**
@@ -60,6 +73,7 @@ This section supersedes the "Start here" line in §0 where they disagree.
   - turn on branch protection for `develop` with the ten checks in `Build/README.md`;
   - listen to a received audio stream at the default 60 ms Target Latency (#396), pause the sender, and check that playback resumes;
   - set a translator on a LiveLink subject, stop the sender for longer than the Inactive Subject Timeout, restart it, and check the translator is still there (#395). During the pause, also check that the subject shows no data rather than a frozen pose; the mid-project review's RR-2 expects a frozen pose while concealment is on;
+  - over TCP with a slow receiver, or NNG with its buffer full, check that a residual-coded subject recovers at once rather than after the periodic full sync (#403);
   - with two receiver sources sending audio, check that a component in Any Stream mode plays one of them cleanly and switches to the other about a second after that sender stops (#398).
 
 **Merged this session (#335–#355; later PRs under "Open at hand-over"):**
