@@ -306,8 +306,21 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Open3DBroadcast|Sender|Events")
 	FO3DSenderError OnSenderError;
 
-	/** Skeletal mesh that supplies bone transforms; auto-located from the owner if unset. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender")
+	/**
+	 * The skeletal mesh this component captures, picked from the owner's components (SND-30). Works
+	 * on Blueprint defaults as well as on placed actors. Unset: Target Mesh if set (by Blueprint or
+	 * a level saved before the picker existed), otherwise the owner's skeletal mesh, preferring one
+	 * that drives its own pose over a follower of a leader pose component.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Open3DBroadcast|Sender", meta = (DisplayName = "Target Mesh", UseComponentPicker, AllowedClasses = "/Script/Engine.SkeletalMeshComponent"))
+	FComponentReference TargetMeshComponent;
+
+	/**
+	 * The skeletal mesh capture uses. Set from Target Mesh (the picker) at BeginPlay, or directly
+	 * from Blueprint or C++ at runtime. Shown read-only in the Details panel: levels saved before the
+	 * picker existed keep their mesh here.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender", AdvancedDisplay, meta = (DisplayName = "Resolved Target Mesh"))
 	TWeakObjectPtr<USkeletalMeshComponent> TargetMesh;
 
 	/** Subject identifier embedded in serialized frames for downstream routing. */
@@ -321,11 +334,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Open3DBroadcast|Sender", AdvancedDisplay)
 	FName ContextName;
 
-	/** Desired pose capture rate in Hz (final rate clamped by world tick). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender")
+	/**
+	 * Pose capture rate in Hz. The frame rate also limits it: at most one capture per tick.
+	 * 0 captures every tick (SND-27).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender", meta = (ClampMin = "0", UIMin = "1", UIMax = "240", Units = "Hz"))
 	float CaptureRateHz = 60.0f;
 
-	/** Start capture automatically as soon as the component is registered / BeginPlay runs. */
+	/** Start capture automatically at BeginPlay. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender")
 	bool bAutoStartCapture = true;
 
@@ -460,7 +476,7 @@ public:
 	float QuantizationByteRange = 0.01f;
 
 	/** Max |delta| representable at the 16-bit quantization tier; beyond this a channel falls back
-	 *  to full float32 precision. */
+	 *  to full float32 precision. Never below Quantization Byte Range (raised to it when edited, SND-27). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Quantization", meta = (EditCondition = "bEnableQuantization", ClampMin = "0.0"))
 	float QuantizationHalfRange = 1.0f;
 
@@ -587,6 +603,13 @@ protected:
 	virtual void PostInitProperties() override;
 
 private:
+	/**
+	 * Sets TargetMesh at BeginPlay (SND-30): the mesh the Target Mesh picker names, else the one
+	 * already set (Blueprint, or a level saved before the picker), else the owner's skeletal mesh,
+	 * preferring one without a leader pose component. Logs which mesh it chose when the owner has
+	 * several. Game thread.
+	 */
+	void ResolveTargetMesh();
 	void BindToTarget();
 	void UnbindFromTarget();
 	/**

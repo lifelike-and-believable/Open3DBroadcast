@@ -94,8 +94,17 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
     DetailBuilder.HideCategory(TEXT("Open3DBroadcast|Sender|Curves"));
     DetailBuilder.HideCategory(TEXT("Open3DBroadcast|Sender|Curves|Filtering"));
     DetailBuilder.HideCategory(TEXT("Audio"));
+    // SND-24: these categories showed as stray, uncustomized categories; their properties are
+    // re-added in the Encoding and Control groups below.
+    DetailBuilder.HideCategory(TEXT("Open3DBroadcast|Sender|Residual"));
+    DetailBuilder.HideCategory(TEXT("Open3DBroadcast|Sender|Quantization"));
+    DetailBuilder.HideCategory(TEXT("Open3DBroadcast|Sender|Encoding"));
+    DetailBuilder.HideCategory(TEXT("Open3DBroadcast|Sender|Control"));
 
+    // SND-30: the picker is the editable Target Mesh; the resolved pointer is shown read-only.
+    TSharedPtr<IPropertyHandle> TargetMeshComponentHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TargetMeshComponent));
     TSharedPtr<IPropertyHandle> TargetMeshHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, TargetMesh));
+    TSharedPtr<IPropertyHandle> ContextNameHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, ContextName));
     TSharedPtr<IPropertyHandle> SubjectNameHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, SubjectName));
     TSharedPtr<IPropertyHandle> CaptureRateHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, CaptureRateHz));
     TSharedPtr<IPropertyHandle> AutoStartHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bAutoStartCapture));
@@ -116,7 +125,9 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
         TSharedPtr<IPropertyHandle> LogFilteredCurvesHandle = DetailBuilder.GetProperty(GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bLogFilteredCurves));
 
         TArray<TSharedPtr<IPropertyHandle>> CommonHandles = {
+            TargetMeshComponentHandle,
             TargetMeshHandle,
+            ContextNameHandle,
             SubjectNameHandle,
             CaptureRateHandle,
             AutoStartHandle,
@@ -187,21 +198,12 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
 
     IDetailGroup& SenderGroup = RootCategory.AddGroup(TEXT("Sender"), LOCTEXT("SenderGroupLabel", "Sender"), false, true);
 
-    if (TargetMeshHandle.IsValid())
+    for (const TSharedPtr<IPropertyHandle>& Handle : { TargetMeshComponentHandle, SubjectNameHandle, CaptureRateHandle, AutoStartHandle, ContextNameHandle, TargetMeshHandle })
     {
-        SenderGroup.AddPropertyRow(TargetMeshHandle.ToSharedRef());
-    }
-    if (SubjectNameHandle.IsValid())
-    {
-        SenderGroup.AddPropertyRow(SubjectNameHandle.ToSharedRef());
-    }
-    if (CaptureRateHandle.IsValid())
-    {
-        SenderGroup.AddPropertyRow(CaptureRateHandle.ToSharedRef());
-    }
-    if (AutoStartHandle.IsValid())
-    {
-        SenderGroup.AddPropertyRow(AutoStartHandle.ToSharedRef());
+        if (Handle.IsValid())
+        {
+            SenderGroup.AddPropertyRow(Handle.ToSharedRef());
+        }
     }
 
     IDetailGroup& TransportGroup = RootCategory.AddGroup(TEXT("Transport"), LOCTEXT("TransportGroupLabel", "Transport"), false, true);
@@ -209,6 +211,26 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
     if (AutoCreateTransportHandle.IsValid())
     {
         TransportGroup.AddPropertyRow(AutoCreateTransportHandle.ToSharedRef());
+    }
+
+    // SND-25: with Auto Create Transport off (the default) the component captures but sends nothing.
+    {
+        const TWeakPtr<FO3DSenderComponentCustomization> CustomizationWeak = AsSharedCustomization();
+        TransportGroup.AddWidgetRow()
+        .Visibility(TAttribute<EVisibility>::CreateLambda([CustomizationWeak]()
+        {
+            const TSharedPtr<FO3DSenderComponentCustomization> Customization = CustomizationWeak.Pin();
+            const UO3DSenderComponent* Component = Customization.IsValid() ? Customization->ResolveEditingComponent() : nullptr;
+            return (Component && !Component->bAutoCreateTransport) ? EVisibility::Visible : EVisibility::Collapsed;
+        }))
+        .WholeRowContent()
+        [
+            SNew(STextBlock)
+            .Text(LOCTEXT("NoTransportWarning", "Auto Create Transport is off: this component captures but sends nothing (only C++ code that binds OnSerializedFrame gets the frames). Turn it on to stream."))
+            .ColorAndOpacity(FLinearColor(1.f, 0.75f, 0.2f))
+            .AutoWrapText(true)
+            .Font(IDetailLayoutBuilder::GetDetailFont())
+        ];
     }
 
     if (TransportNameHandle.IsValid())
@@ -342,13 +364,34 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
         }
     }
 
-    // ADR 0005 (iii): residual coding falls back to quantized on a transport that does not deliver
-    // reliably and in order; say so under the Residual checkbox (the properties stay in their own
-    // category, whose default name is the property's Category string).
+    // SND-24: encoding (full sync, residual coding, quantization) and control in groups of their own.
+    const auto AddRows = [&DetailBuilder](IDetailGroup& Group, std::initializer_list<FName> Names)
+    {
+        for (const FName Name : Names)
+        {
+            if (TSharedPtr<IPropertyHandle> Handle = DetailBuilder.GetProperty(Name))
+            {
+                DetailBuilder.HideProperty(Handle);
+                Group.AddPropertyRow(Handle.ToSharedRef());
+            }
+        }
+    };
+
+    IDetailGroup& EncodingGroup = RootCategory.AddGroup(TEXT("Encoding"), LOCTEXT("EncodingGroupLabel", "Encoding"), false, false);
+    AddRows(EncodingGroup, { GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, FullSyncIntervalSeconds) });
+
+    IDetailGroup& ResidualGroup = EncodingGroup.AddGroup(TEXT("Residual"), LOCTEXT("ResidualGroupLabel", "Residual Coding"), false);
+    AddRows(ResidualGroup, {
+        GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bEnableResidualCoding),
+        GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, ResidualPredictor),
+        GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, ResidualKeyframeIntervalFrames),
+        GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, ResidualDeltaThreshold) });
+
+    // ADR 0005 (iii): residual coding falls back on a transport that does not deliver reliably and
+    // in order; say so under the residual settings.
     {
         const TWeakPtr<FO3DSenderComponentCustomization> CustomizationWeak = AsSharedCustomization();
-        IDetailCategoryBuilder& ResidualCategory = DetailBuilder.EditCategory(TEXT("Open3DBroadcast|Sender|Residual"));
-        ResidualCategory.AddCustomRow(LOCTEXT("ResidualDeliveryWarningFilter", "Residual transport warning"))
+        ResidualGroup.AddWidgetRow()
         .Visibility(TAttribute<EVisibility>::CreateLambda([CustomizationWeak]()
         {
             const TSharedPtr<FO3DSenderComponentCustomization> Customization = CustomizationWeak.Pin();
@@ -367,6 +410,20 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
             .Font(IDetailLayoutBuilder::GetDetailFont())
         ];
     }
+
+    IDetailGroup& QuantizationGroup = EncodingGroup.AddGroup(TEXT("Quantization"), LOCTEXT("QuantizationGroupLabel", "Quantization"), false);
+    AddRows(QuantizationGroup, {
+        GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bEnableQuantization),
+        GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, QuantizationByteRange),
+        GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, QuantizationHalfRange),
+        GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, QuantizationDeltaThreshold) });
+
+    IDetailGroup& ControlGroup = RootCategory.AddGroup(TEXT("Control"), LOCTEXT("ControlGroupLabel", "Control"), false, false);
+    AddRows(ControlGroup, {
+        GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, bAllowControlOnly),
+        GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, ControlSnapshotIntervalSeconds),
+        GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, ControlEventRedundancy),
+        GET_MEMBER_NAME_CHECKED(UO3DSenderComponent, ControlMaxValueRateHz) });
 
     RefreshTransportCustomization();
     SyncTransportComboSelection();
