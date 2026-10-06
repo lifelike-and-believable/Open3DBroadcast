@@ -8,6 +8,7 @@
 #include "Containers/BitArray.h"
 #include "Misc/Optional.h"
 #include "Misc/QualifiedFrameTime.h"
+#include "O3DBlueprintTransportTypes.h"
 #include "O3DSenderSerializer.h"
 #include "O3DSPoseFramePool.h"
 #include "O3DSenderPipelineStats.h"
@@ -242,6 +243,11 @@ DECLARE_MULTICAST_DELEGATE_TwoParams(FOnO3DDescriptorReady, const FString& /*Sub
  */
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnO3DPoseFrameReady, const FString& /*Subject*/, const FO3DSPoseFrame& /*Frame*/);
 
+/** Blueprint events of a sender component (WP-U2; SND-26, UX-3). All fire on the game thread. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FO3DSenderConnectionStateChanged, EO3DBroadcastConnectionState, NewState);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FO3DSenderCaptureEvent);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FO3DSenderError, const FString&, Message);
+
 /**
  * Captures skeletal pose data (and optionally audio) from an actor, serialises it into the
  * Open3DStream wire format, and forwards frames to a user-selectable transport implementation.
@@ -257,17 +263,48 @@ public:
 	UO3DSenderComponent();
 	virtual ~UO3DSenderComponent();
 
-	/** Start gathering pose/audio frames. Safe to call when already capturing. */
-	UFUNCTION(BlueprintCallable, meta = (CallInEditor), Category = "Open3DBroadcast|Sender")
+	/**
+	 * Start gathering pose/audio frames and, with Auto Create Transport, start the transport. Safe
+	 * to call when already capturing. Does nothing outside a game world (in the editor). Fires On
+	 * Capture Started, or On Sender Error when capture cannot start.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Sender")
 	void StartCapture();
 
-	/** Halt capture and detach from the active transport/audio sinks. */
-	UFUNCTION(BlueprintCallable, meta = (CallInEditor), Category = "Open3DBroadcast|Sender")
+	/** Halt capture and detach from the active transport/audio sinks. Fires On Capture Stopped. */
+	UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Sender")
 	void StopCapture();
 
 	/** Convenience accessor mirroring internal capture state. */
 	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Sender")
 	bool IsCapturing() const { return bIsCapturing; }
+
+	/**
+	 * The transport's connection state as last reported on the game thread (WP-U2). Idle when no
+	 * transport runs; Failed after a transport that could not start, until the next Start Capture.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Sender|Transport")
+	EO3DBroadcastConnectionState GetConnectionState() const { return ReportedConnectionState; }
+
+	/** The running transport's counters; zero, with the current state, when no transport runs. */
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Sender|Transport")
+	FO3DBroadcastTransportStats GetTransportStats() const;
+
+	/** The transport's connection state changed (Connecting, Connected, Reconnecting, Failed, Idle). */
+	UPROPERTY(BlueprintAssignable, Category = "Open3DBroadcast|Sender|Events")
+	FO3DSenderConnectionStateChanged OnConnectionStateChanged;
+
+	/** Capture started (Start Capture succeeded). */
+	UPROPERTY(BlueprintAssignable, Category = "Open3DBroadcast|Sender|Events")
+	FO3DSenderCaptureEvent OnCaptureStarted;
+
+	/** Capture stopped (Stop Capture, or end of play). */
+	UPROPERTY(BlueprintAssignable, Category = "Open3DBroadcast|Sender|Events")
+	FO3DSenderCaptureEvent OnCaptureStopped;
+
+	/** Capture could not start, the transport could not start, or the transport failed. Message says why; it never holds a secret. */
+	UPROPERTY(BlueprintAssignable, Category = "Open3DBroadcast|Sender|Events")
+	FO3DSenderError OnSenderError;
 
 	/** Skeletal mesh that supplies bone transforms; auto-located from the owner if unset. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender")
@@ -292,12 +329,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender")
 	bool bAutoStartCapture = true;
 
-	/** When true, the component will spawn and manage a transport instance automatically. */
+	/**
+	 * When true, the component creates and runs the selected transport. When false nothing is sent
+	 * unless C++ code consumes the frames (OnSerializedFrame or OnPoseFrameReady); Start Capture
+	 * warns in that case.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Transport")
 	bool bAutoCreateTransport = false;
 
-	/** Name of the registered transport factory to use (loopback, sockets, webrtc, ...). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Open3DBroadcast|Sender|Transport", meta = (HideInDetailPanel))
+	/**
+	 * Name of the registered transport factory to use (loopback, udp, tcp, nng, moq, webrtc).
+	 * Read-only in Blueprint: change it with Set Transport Name, which keeps each transport's
+	 * options apart (SND-26).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Open3DBroadcast|Sender|Transport", meta = (HideInDetailPanel))
 	FName TransportName = TEXT("loopback");
 
 	/**
@@ -520,7 +565,15 @@ public:
 	/** Counters of the pose pipeline (queue, drops, worker time, capture-to-send latency); zero before the first StartCapture. Any thread. */
 	FO3DSenderPipelineStats GetPipelineStats() const;
 
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Sender|Transport")
 	FName GetTransportName() const { return TransportName; }
+
+	/**
+	 * Selects the transport (for example "udp" or "webrtc"); None selects loopback. The options of
+	 * the previous transport are put away and come back when it is selected again. Applies the next
+	 * time capture starts.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Sender|Transport")
 	void SetTransportName(FName InName);
 
 protected:
@@ -586,6 +639,24 @@ private:
 	const FTickFunction* TickPrerequisiteFunction = nullptr;
 
 	TUniquePtr<FO3DSenderTransportController, FO3DSenderTransportControllerDeleter> TransportController;
+
+	/**
+	 * Connection-state changes of the running transport (WP-U2). Its state callback posts here from
+	 * any thread; DrainConnectionState broadcasts them on the game thread.
+	 */
+	TSharedRef<FO3DConnectionStateMailbox, ESPMode::ThreadSafe> StateMailbox = MakeShared<FO3DConnectionStateMailbox, ESPMode::ThreadSafe>();
+	/** The state GetConnectionState returns and OnConnectionStateChanged last announced. */
+	EO3DBroadcastConnectionState ReportedConnectionState = EO3DBroadcastConnectionState::Idle;
+
+	/**
+	 * Announces the changes posted since the last call, and Errors (start failures), on the game
+	 * thread: OnSenderError for each error and for each Failed change, then OnConnectionStateChanged
+	 * for each change of state. Called from tick, Start/StopCapture and the transport-unloaded
+	 * handler. Broadcasts nothing while the component is being destroyed or the engine exits.
+	 */
+	void DrainConnectionState(const TArray<FString>& Errors = TArray<FString>());
+	/** False while destroyed, unreachable or during engine exit: Blueprint must not run then. */
+	bool CanBroadcastEvents() const;
 
 	/**
 	 * This component's sender metrics (ADR 0012 item 4), from the context ContextName names.
@@ -662,13 +733,16 @@ public:
 	 * Retrieve a transport option by key (case-sensitive). Returns empty string if missing.
 	 * Always empty for a key the active transport declares secret (ADR 0004).
 	 */
+	UFUNCTION(BlueprintPure, Category = "Open3DBroadcast|Sender|Transport")
 	FString GetTransportOption(const FString& Key) const;
 
 	/**
-	 * Set or update a transport option. Passing an empty value removes the key.
-	 * A key the active transport declares secret is routed to FO3DSecretStore for this session
-	 * (no Modify(), never stored in TransportOptions); an empty value then clears it.
+	 * Set or update a transport option (keys as in the user guide's Transport Options Reference).
+	 * Passing an empty value removes the key. A key the active transport declares secret is routed
+	 * to FO3DSecretStore for this session (no Modify(), never stored in TransportOptions); an empty
+	 * value then clears it. Applies the next time capture starts.
 	 */
+	UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Sender|Transport")
 	void SetTransportOption(const FString& Key, const FString& Value);
 
 	/** True when the active transport's customization declares Key as a secret option. */
@@ -689,7 +763,8 @@ public:
 	/** Where a secret for the active transport and profile would resolve from. Never returns the value. */
 	FO3DSecretStatus GetTransportSecretStatus(const FString& Key) const;
 
-	/** Remove all transport options of the selected transport. */
+	/** Remove all transport options of the selected transport. Applies the next time capture starts. */
+	UFUNCTION(BlueprintCallable, Category = "Open3DBroadcast|Sender|Transport")
 	void ClearTransportOptions();
 
 	/**

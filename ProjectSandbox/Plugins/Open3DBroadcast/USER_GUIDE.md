@@ -254,9 +254,13 @@ Reduce bandwidth by filtering animation curves:
 ### Controlling Capture
 
 **In Blueprint:**
-- Call `Start Capture` to begin streaming
+- Call `Start Capture` to begin streaming. It does nothing in the editor outside Play In Editor.
 - Call `Stop Capture` to stop streaming
 - Use `Is Capturing` to check current state
+- Use `Get Connection State` (Idle, Connecting, Connected, Reconnecting, Failed) and `Get Transport Stats` (frames, bytes, drops, errors, queue) to show the link's health
+- Use `Set Transport Name`, `Set Transport Option`, `Get Transport Option` and `Clear Transport Options` to configure the transport at runtime, for example from a server URL typed into your UI. They apply the next time capture starts, so call `Stop Capture` and `Start Capture` after changing them. `Transport Name` is read-only in Blueprint; use `Set Transport Name`, which keeps each transport's options apart.
+
+Nothing is sent unless **Auto Create Transport** is on (it is off by default). Start Capture logs a warning when it is off and no C++ code consumes the frames.
 
 **In C++:**
 ```cpp
@@ -272,28 +276,28 @@ bool bIsActive = Sender->IsCapturing();
 
 ### Events and Delegates
 
-Subscribe to capture events:
+**Blueprint events** (all on the game thread). Select the Sender Component, then in the Details panel's **Events** section click **+** next to the event, or in the Event Graph use **Assign On ...** on the component:
+- `On Connection State Changed (New State)`: the transport's connection state changed (Connecting, Connected, Reconnecting, Failed, Idle). A change that happens between two frames is still announced.
+- `On Capture Started` / `On Capture Stopped`: a capture run began or ended (Stop Capture or end of play).
+- `On Sender Error (Message)`: capture could not start, the transport could not start, or it failed. The message says why and never contains a credential. After a transport that could not start, the state stays Failed until the next Start Capture.
 
-**Available Events:**
-- `OnDescriptorReady`: Fired when skeleton descriptor is sent
-- `OnPoseFrameReady`: Fired on the game thread with each sampled frame, before it is serialized. With the asynchronous pipeline (the default, `o3d.Sender.AsyncPipeline 1`) the frame carries the raw curves (`CurveList`, `RawCurveValues`); curve filtering runs afterwards on a worker thread.
-- `OnSerializedFrame`: Fired after frame serialization with raw data. It fires on the sender's worker thread while `o3d.Sender.AsyncPipeline` is 1, so a listener must be thread-safe and must not touch UObjects; bind and unbind it only while capture is stopped. Kept for one release.
+**C++ delegates** (not available in Blueprint, because they fire for every frame):
+- `OnDescriptorReady (Subject, Descriptor)`: the skeleton descriptor was built or changed.
+- `OnPoseFrameReady (Subject, Frame)`: fired on the game thread with each sampled frame, before it is serialized. With the asynchronous pipeline (the default, `o3d.Sender.AsyncPipeline 1`) the frame carries the raw curves (`CurveList`, `RawCurveValues`); curve filtering runs afterwards on a worker thread.
+- `OnSerializedFrame (Subject, Bytes, CaptureTime)`: fired after serialization with the wire bytes. It fires on the sender's worker thread while `o3d.Sender.AsyncPipeline` is 1, so a listener must be thread-safe and must not touch UObjects; bind and unbind it only while capture is stopped. Kept for one release.
 
-**Blueprint Example:**
-1. Select your Sender Component
-2. In Event Graph, find the event under "O3D Sender Component"
-3. Bind to the event
-
-**C++ Example:**
+**C++ Example** (the frame delegates are native multicast delegates, so bind with `AddUObject`, not `AddDynamic`):
 ```cpp
-Sender->OnPoseFrameReady.AddDynamic(this, &AMyActor::OnPoseReady);
+Sender->OnPoseFrameReady.AddUObject(this, &AMyActor::OnPoseReady);
 
-void AMyActor::OnPoseReady(const FO3DSPoseFrame& PoseFrame)
+void AMyActor::OnPoseReady(const FString& Subject, const FO3DSPoseFrame& PoseFrame)
 {
-    UE_LOG(LogTemp, Log, TEXT("Frame %llu with %d bones"),
-           PoseFrame.FrameIndex, PoseFrame.BoneLocalTransforms.Num());
+    UE_LOG(LogTemp, Log, TEXT("%s: frame %llu with %d bones"),
+           *Subject, PoseFrame.FrameIndex, PoseFrame.BoneLocalTransforms.Num());
 }
 ```
+
+Bind the Blueprint events from C++ with `AddDynamic` and a `UFUNCTION` handler, for example `Sender->OnSenderError.AddDynamic(this, &AMyActor::HandleSenderError)` with `void HandleSenderError(const FString& Message)`.
 
 ---
 
@@ -1055,10 +1059,10 @@ client per process (PIE clients included), so keep subject names distinct across
 | **SubjectName** | String | "" | Unique identifier for this stream |
 | **ContextName** | Name | (empty) | Runtime context for this sender's metrics; see [Separate Receivers](#separate-receivers-runtime-contexts) |
 | **CaptureRateHz** | Float | 60.0 | Target capture frame rate |
-| **bAutoStartCapture** | Bool | false | Start capturing on BeginPlay |
+| **bAutoStartCapture** | Bool | true | Start capturing on BeginPlay |
 | **TargetMesh** | Object | null | Skeletal mesh to capture (auto-detect if empty) |
-| **TransportName** | Name | "loopback" | Transport module to use |
-| **bAutoCreateTransport** | Bool | true | Automatically create transport |
+| **TransportName** | Name | "loopback" | Transport module to use (read-only in Blueprint; use Set Transport Name) |
+| **bAutoCreateTransport** | Bool | false | Create and run the selected transport. Off: nothing is sent unless C++ code consumes the frames |
 | **TransportOptions** | Map | {} | Key-value transport configuration |
 
 #### Curve Filtering Properties
@@ -1447,10 +1451,11 @@ All share the same transport, each identified by subject name.
 // Stop current capture
 Sender->StopCapture();
 
-// Change transport
-Sender->TransportName = FName("webrtc");
-Sender->SetTransportOption("uri", "wss://production.server.com");
-Sender->SetTransportOption("token", ProductionToken);
+// Change transport (SetTransportName keeps loopback's options for when you switch back)
+Sender->SetTransportName(FName("webrtc"));
+Sender->SetTransportOption(TEXT("webrtc.url"), TEXT("wss://production.server.com"));
+// A credential option goes to the credential store for this session, never into the level
+Sender->SetTransportOption(TEXT("webrtc.token"), ProductionToken);
 
 // Restart
 Sender->StartCapture();

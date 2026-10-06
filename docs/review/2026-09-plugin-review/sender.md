@@ -299,6 +299,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Severity: medium
 - Location: Public/O3DSenderComponent.h:48-106, :124-129, :155-157, :259-266, :326-340
 - Evidence:
+- Status: closed in #386
   - `OnDescriptorReady`, `OnPoseFrameReady` and `OnSerializedFrame` are native multicast delegates, and `FO3DSSkeletonDescriptor`/`FO3DSPoseFrame` are not `BlueprintType`, so Blueprint cannot observe frames or state.
   - `Get/SetTransportOption`, `ClearTransportOptions` and `SetTransportName` are not UFUNCTIONs, so runtime configuration (for example a server URL typed in a UI) is impossible from Blueprint.
   - `TransportName` is BlueprintReadWrite, which bypasses the normalization and option-clearing done in `SetTransportName`.

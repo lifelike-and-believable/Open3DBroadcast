@@ -10,6 +10,7 @@
 
 class IOpen3DSender;
 class IO3DSenderAudioSink;
+class FO3DConnectionStateMailbox;
 class FO3DSenderPipeline;
 
 /**
@@ -58,6 +59,12 @@ public:
     /** The pose pipeline a started sender is attached to (null: none). Game thread, while stopped. */
     void SetPipeline(const TSharedPtr<FO3DSenderPipeline>& InPipeline) { Pipeline = InPipeline; }
 
+    /**
+     * Where a created sender posts its connection-state changes (WP-U2): Start sets the sender's
+     * state callback to post into it before Initialize. Null: none. Game thread, while stopped.
+     */
+    void SetStateMailbox(const TSharedPtr<FO3DConnectionStateMailbox, ESPMode::ThreadSafe>& InMailbox) { StateMailbox = InMailbox; }
+
 private:
     void HandleTransportUnregistering(FName TransportName);
     void Unsubscribe();
@@ -72,4 +79,5 @@ private:
     FO3DTransportResult LastResult;
     /** Receives ActiveSender after a successful Start; detached in Stop before the sender stops. */
     TSharedPtr<FO3DSenderPipeline> Pipeline;
+    TSharedPtr<FO3DConnectionStateMailbox, ESPMode::ThreadSafe> StateMailbox;
 };

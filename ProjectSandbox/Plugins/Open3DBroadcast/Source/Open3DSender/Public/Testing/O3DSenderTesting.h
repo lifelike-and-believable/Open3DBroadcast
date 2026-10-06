@@ -44,6 +44,8 @@ struct FO3DSenderComponentTestAccess
 	static OPEN3DSENDER_API const FO3DSSkeletonDescriptor& GetDescriptorCache(const UO3DSenderComponent& Component);
 	static OPEN3DSENDER_API bool HasDescriptorSnapshot(const UO3DSenderComponent& Component);
 	static void SetCapturing(UO3DSenderComponent& Component, bool bCapturing) { Component.bIsCapturing = bCapturing; }
+	/** What one tick does for the Blueprint events (WP-U2): announces the connection-state changes posted since the last drain. */
+	static void DrainConnectionState(UO3DSenderComponent& Component) { Component.DrainConnectionState(); }
 	/** The serializer lives in the pose pipeline since WP-A2c; created by the first successful StartCapture. */
 	static bool HasSerializer(const UO3DSenderComponent& Component) { return Component.Pipeline.IsValid(); }
 	static void EnsureSubjectNameCached(UO3DSenderComponent& Component) { Component.EnsureSubjectNameCached(nullptr); }
