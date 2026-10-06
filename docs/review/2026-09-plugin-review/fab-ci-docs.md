@@ -466,6 +466,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Add BlueprintAssignable `OnConnected`/`OnDisconnected`/`OnError`, `GetStats()`, and a `UO3DReceiverBlueprintLibrary::CreateLiveLinkSource(Transport, Options)`. Default `bAutoCreateTransport = true` with loopback, or warn in the details panel when no transport is configured.
 - Effort: M
 - Owner: design
+- Status: closed in #387
 
 ### UX-4: The MoQ relay test depends on a public Cloudflare relay; the tests ship in runtime modules
 - Category: usability

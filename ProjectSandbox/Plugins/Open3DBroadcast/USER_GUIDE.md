@@ -331,6 +331,17 @@ The receiver is implemented as a **LiveLink Source** and configured through Unre
    - Source should appear in LiveLink list
    - Status will be green when receiving data
 
+### Creating a Source at Runtime (Blueprint or C++)
+
+A game, or a tool that sets up its connection in code, can add a receiver source without the LiveLink panel:
+
+- **Create Open3DStream LiveLink Source** (Open3DBroadcast | Receiver) takes the transport name (for example `udp` or `webrtc`), a map of transport options with the keys in the [Transport Options Reference](#transport-options-reference), a Context Name and Enable Audio. It returns true and a **LiveLink Source Handle** when the source was added. Options you leave out take the [project defaults](#project-wide-transport-defaults).
+- Use LiveLink's own nodes on the handle: **Remove Source** to remove it, **Get Source Status** for its status line ("Receiving via ...", or why it is not), and **Is Source Still Valid**.
+- Set credentials (for example a WebRTC token) with **Set Transport Secret** before creating the source, not in the options map: a credential found in the map is moved to the credential store for this session, with a warning.
+- The source saves into a LiveLink preset like one made in the LiveLink panel.
+
+In C++, `UO3DReceiverBlueprintLibrary::CreateLiveLinkSource` does the same (module `Open3DReceiver`).
+
 ### LiveLink Source Configuration Examples
 
 #### Loopback (Testing)
