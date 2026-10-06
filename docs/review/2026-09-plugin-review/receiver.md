@@ -223,6 +223,7 @@ Severity counts: critical 0, high 4, medium 20, low 10 (34 findings).
 - Recommendation: Add a target latency (for example 60 ms) with pre-roll before `Play()`. Trim when queued bytes exceed the target plus a margin, and optionally insert or drop samples for drift. Expose the target latency as a UPROPERTY.
 - Effort: M
 - Owner: coding
+- Status: closed in #396
 
 ### RCV-21: Audio routing mixes streams and sources into one SoundWave and relies on magic labels
 - Category: bug

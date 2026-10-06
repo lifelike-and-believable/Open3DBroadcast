@@ -6,6 +6,8 @@
 #include "O3DRuntimeSubsystem.h"
 
 #include "O3DAudioBus.h"
+#include "O3DAudioJitterBuffer.h"
+#include "O3DJitterSoundWave.h"
 #include "O3DReceiverLogs.h"
 #include "O3DUnifiedMessage.h"
 
@@ -110,6 +112,7 @@ void UO3DRemoteAudioComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
         AudioComp = nullptr;
     }
     SoundWave = nullptr;
+    JitterBuffer.Reset();
     CurrentChannels = 0;
     CurrentSampleRate = 0;
 
@@ -131,6 +134,11 @@ void UO3DRemoteAudioComponent::Stop()
     if (AudioComp)
     {
         AudioComp->Stop();
+    }
+    // The next Play starts from fresh audio, after a pre-roll.
+    if (JitterBuffer)
+    {
+        JitterBuffer->Reset();
     }
 }
 
@@ -194,7 +202,12 @@ void UO3DRemoteAudioComponent::EnsureSoundWave(int32 NumChannels, int32 SampleRa
     const bool bNeedNew = (SoundWave == nullptr) || (CurrentChannels != NumChannels) || (CurrentSampleRate != SampleRate);
     if (bNeedNew)
     {
-        SoundWave = NewObject<USoundWaveProcedural>(this);
+        // RCV-20: a new buffer per wave, so audio of the old format never reaches the new one.
+        JitterBuffer = MakeShared<FO3DAudioJitterBuffer, ESPMode::ThreadSafe>();
+        JitterBuffer->Configure(SampleRate, NumChannels, TargetLatencyMs);
+        UO3DJitterSoundWave* JitterWave = NewObject<UO3DJitterSoundWave>(this);
+        JitterWave->SetJitterBuffer(JitterBuffer);
+        SoundWave = JitterWave;
         if (SoundWave)
         {
             SoundWave->bLooping = false;
@@ -275,5 +288,5 @@ void UO3DRemoteAudioComponent::OnAudioPcm16(const O3DS::FAudioFrameMeta& Meta, T
         AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, AC_VolumeMultiplier * Gain));
     }
 
-    SoundWave->QueueAudio(const_cast<uint8*>(PCM16Bytes.GetData()), PCM16Bytes.Num());
+    JitterBuffer->Push(PCM16Bytes);
 }

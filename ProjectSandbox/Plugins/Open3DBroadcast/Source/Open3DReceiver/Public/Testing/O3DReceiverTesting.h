@@ -16,6 +16,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "O3DReceiverSource.h"
+#include "O3DAudioJitterBuffer.h"
 #include "O3DRemoteAudioComponent.h"
 #include "O3DRemoteControlComponent.h"
 #include "Transport/O3DSerializedFrameConsumer.h"
@@ -73,6 +74,11 @@ struct FO3DRemoteAudioComponentTestAccessor
 	static bool IsPlaybackWanted(const UO3DRemoteAudioComponent* Component)
 	{
 		return Component->bPlaybackWanted;
+	}
+
+	static const FO3DAudioJitterBuffer* GetJitterBuffer(const UO3DRemoteAudioComponent* Component)
+	{
+		return Component->JitterBuffer.Get();
 	}
 };
 

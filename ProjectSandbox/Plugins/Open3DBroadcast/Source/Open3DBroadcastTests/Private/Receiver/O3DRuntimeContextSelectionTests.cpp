@@ -93,8 +93,9 @@ namespace O3DRuntimeContextSelectionTests
 
 	int32 QueuedAudioBytes(UO3DRemoteAudioComponent* Component)
 	{
-		USoundWaveProcedural* Wave = FO3DRemoteAudioComponentTestAccessor::GetSoundWave(Component);
-		return Wave ? Wave->GetAvailableAudioByteCount() : 0;
+		// RCV-20: received audio waits in the component's jitter buffer until the audio thread pulls it.
+		const FO3DAudioJitterBuffer* Buffer = FO3DRemoteAudioComponentTestAccessor::GetJitterBuffer(Component);
+		return Buffer ? Buffer->GetQueuedSamples() * static_cast<int32>(sizeof(int16)) : 0;
 	}
 
 	/** Submits one PCM16 frame through Source's real audio sink and runs the game-thread hop. */

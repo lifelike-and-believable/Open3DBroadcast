@@ -75,7 +75,9 @@ bool FO3DRemoteAudioComponentAudioQueueTest::RunTest(const FString& Parameters)
     TestNotNull(TEXT("SoundWave still valid after PCM16"), Wave);
     if (Wave)
     {
-        TestTrue(TEXT("Queued audio bytes available"), Wave->GetAvailableAudioByteCount() >= PCM16.Num());
+        // RCV-20: audio waits in the component's jitter buffer; the wave pulls it on the audio thread.
+        const FO3DAudioJitterBuffer* Buffer = FO3DRemoteAudioComponentTestAccessor::GetJitterBuffer(Component);
+        TestTrue(TEXT("Queued audio samples available"), Buffer && Buffer->GetQueuedSamples() == PCM16.Num() / 2);
         TestEqual(TEXT("Wave channel count reflects metadata"), Wave->NumChannels, 1);
     }
     TestEqual(TEXT("Runtime channels follow metadata"), FO3DRemoteAudioComponentTestAccessor::GetCurrentChannels(Component), 1);
