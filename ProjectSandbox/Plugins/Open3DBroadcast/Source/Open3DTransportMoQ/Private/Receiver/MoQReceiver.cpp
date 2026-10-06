@@ -253,12 +253,7 @@ void FO3DMoQReceiver::Stop()
 		Session->Disconnect();
 	}
 
-	// Drain the receive queue; frames left unread count as dropped (control is never a frame).
-	const int32 DrainedFrames = ReceiveQueue.Empty();
-	{
-		FScopeLock Lock(&StatsMutex);
-		Stats.DroppedFrames += DrainedFrames;
-	}
+	DropQueued();
 
 	CachedState = MOQ_STATE_DISCONNECTED;
 	bConnectInFlight = false;
@@ -266,6 +261,14 @@ void FO3DMoQReceiver::Stop()
 	bAudioSubscribed = false;
 	bControlSubscribed = false;
 	ConnectionState.End(EO3DConnectionState::Idle);
+}
+
+void FO3DMoQReceiver::DropQueued()
+{
+	// Frames left unread count as dropped (control is never a frame).
+	const int32 DrainedFrames = ReceiveQueue.Empty();
+	FScopeLock Lock(&StatsMutex);
+	Stats.DroppedFrames += DrainedFrames;
 }
 
 void FO3DMoQReceiver::ReportSessionLost(const FString& Reason)
@@ -334,6 +337,7 @@ void FO3DMoQReceiver::HandleConnectTimeout(double Now)
 	DestroySubscriber();
 	DestroyAudioSubscriber();
 	DestroyControlSubscriber();
+	DropQueued();
 	ScheduleReconnect(Now);
 	ReportSessionLost(TEXT("The MoQ connect attempt timed out."));
 }
@@ -381,6 +385,8 @@ void FO3DMoQReceiver::HandleConnectionStateChanged(MoqConnectionState NewState)
 		DestroySubscriber();
 		DestroyAudioSubscriber();
 		DestroyControlSubscriber();
+		// WP-R3 (TR-10): what the lost session queued is stale by the time a new one connects.
+		DropQueued();
 		bMocapSubscribed = false;
 		bAudioSubscribed = false;
 		ScheduleReconnect(NowSeconds());

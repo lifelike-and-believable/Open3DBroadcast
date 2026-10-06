@@ -635,6 +635,73 @@ bool FMoQLifetimeStartStressTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-R3 (mid-project review TR-10): frames queued before a lost session are not delivered after
+// the reconnect; they are counted as dropped, as Stop counts them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQReceiverSessionLossDropsQueuedTest, "Open3DBroadcast.Transport.MoQ.Receiver.SessionLossDropsQueuedFrames", O3DB_TEST_FLAGS)
+bool FMoQReceiverSessionLossDropsQueuedTest::RunTest(const FString& Parameters)
+{
+	// The unexpected disconnect below is logged once as a warning.
+	AddExpectedError(TEXT("MoQ session state"), EAutomationExpectedMessageFlags::Contains, 1);
+
+	TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	MoQFakeTest::FManualClock Clock;
+	const TArray<TArray<uint8>> Frames = O3DTests::MakeRecordedFrames(TEXT("actor"), 4);
+	if (!TestEqual(TEXT("Recorded frames built"), Frames.Num(), 4))
+	{
+		return false;
+	}
+
+	{
+		const TSharedRef<IOpen3DReceiver> ReceiverRef = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), Clock.AsFunction(), /*JitterSeed=*/7);
+		IOpen3DReceiver& Receiver = *ReceiverRef;
+		TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeFakeConfig()).IsOk());
+		const TSharedRef<FO3DRecordingFrameConsumer> FrameConsumer = MakeShared<FO3DRecordingFrameConsumer>();
+		Receiver.SetConsumer(FrameConsumer);
+		TestTrue(TEXT("Start"), Receiver.Start().IsOk());
+		MoQFakeTest::Pump(); // CONNECTED -> mocap subscription
+
+		TestTrue(TEXT("A frame reaches the subscription"), Fake->DeliverData(MocapNamespace, Frames[0]));
+		MoQFakeTest::Pump(); // data callback -> receive queue
+		Receiver.Poll();
+		TestEqual(TEXT("A frame received while connected is delivered"), FrameConsumer->Num(), 1);
+
+		// Three frames are queued, then the session drops before the game thread polls them.
+		for (int32 Index = 1; Index < Frames.Num(); ++Index)
+		{
+			Fake->DeliverData(MocapNamespace, Frames[Index]);
+		}
+		MoQFakeTest::Pump(); // data callbacks -> receive queue
+		const int64 DroppedBefore = Receiver.GetStats().DroppedFrames;
+		TestTrue(TEXT("Fake fired DISCONNECTED"), Fake->FireConnectionState(1, MOQ_STATE_DISCONNECTED));
+		MoQFakeTest::Pump();
+
+		// Base delay for zero failures is 0.5 s, jittered down to at least 0.375 s.
+		Clock.Advance(1.0);
+		Receiver.Poll();
+		MoQFakeTest::Pump(); // CONNECTED on client 2 -> subscribe again
+		TestEqual(TEXT("Reconnect used a new client"), Fake->GetClientsCreated(), 2);
+		for (int32 Index = 0; Index < 5; ++Index)
+		{
+			Receiver.Poll();
+		}
+
+		TestEqual(TEXT("No frame from the lost session is delivered after the reconnect"), FrameConsumer->Num(), 1);
+		TestEqual(TEXT("The three queued frames count as dropped"), Receiver.GetStats().DroppedFrames - DroppedBefore, static_cast<int64>(3));
+
+		TestTrue(TEXT("A frame on the new session reaches the subscription"), Fake->DeliverData(MocapNamespace, Frames[0]));
+		MoQFakeTest::Pump();
+		Receiver.Poll();
+		TestEqual(TEXT("Frames on the new session are delivered"), FrameConsumer->Num(), 2);
+
+		Receiver.Stop();
+	}
+	MoQFakeTest::Pump();
+	return true;
+}
+
 #endif // O3D_WITH_TRANSPORT_MOQ
 
 #endif // WITH_DEV_AUTOMATION_TESTS
