@@ -1147,6 +1147,10 @@ client per process (PIE clients included), so keep subject names distinct across
 | **Gain** | Float | 1.0 | Output volume multiplier |
 | **bEnableAttenuation** | Bool | false | Enable spatial audio |
 | **AttenuationSettings** | Object | null | Attenuation configuration |
+| **Attach Parent** | Component | (unset) | Attach the component to this component. Unset: it stays where it is placed; one with no parent attaches to the actor's root |
+| **Auto Activate** | Bool | true | Start playback when audio first arrives. Off: audio is queued and plays after **Play** |
+
+Blueprint: **Play** starts playback (now if audio has arrived, otherwise when it does); **Stop** stops it until the next **Play**. The component creates its internal audio component at Begin Play and destroys it at End Play.
 
 ### Transport Options Reference
 

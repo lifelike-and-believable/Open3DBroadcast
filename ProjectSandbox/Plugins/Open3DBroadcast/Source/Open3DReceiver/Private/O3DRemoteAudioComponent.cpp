@@ -37,20 +37,25 @@ void UO3DRemoteAudioComponent::OnRegister()
 
 void UO3DRemoteAudioComponent::AttachToConfiguredParent()
 {
-    USceneComponent* ParentToAttach = nullptr;
-    if (AActor* Owner = GetOwner())
+    AActor* Owner = GetOwner();
+    if (!Owner)
     {
-        if (UActorComponent* RefComp = AC_AttachParent.GetComponent(Owner))
-        {
-            ParentToAttach = Cast<USceneComponent>(RefComp);
-        }
-        if (!ParentToAttach)
-        {
-            ParentToAttach = Owner->GetRootComponent();
-        }
+        return;
     }
 
-    if (ParentToAttach && ParentToAttach != GetAttachParent())
+    // RCV-22: an unset reference resolves to the root, so only a reference the user set may move a
+    // component they placed; otherwise only a component with no parent attaches, and never to itself.
+    USceneComponent* ParentToAttach = nullptr;
+    if (!(AC_AttachParent == FComponentReference()))
+    {
+        ParentToAttach = Cast<USceneComponent>(AC_AttachParent.GetComponent(Owner));
+    }
+    else if (GetAttachParent() == nullptr)
+    {
+        ParentToAttach = Owner->GetRootComponent();
+    }
+
+    if (ParentToAttach && ParentToAttach != this && ParentToAttach != GetAttachParent())
     {
         AttachToComponent(ParentToAttach, FAttachmentTransformRules::KeepRelativeTransform, AC_AttachSocketName);
     }
@@ -60,12 +65,13 @@ void UO3DRemoteAudioComponent::BeginPlay()
 {
     Super::BeginPlay();
 
+    bPlaybackWanted = bAC_AutoActivate;
     AudioComp = NewObject<UAudioComponent>(GetOwner());
     if (AudioComp)
     {
-        AudioComp->RegisterComponent();
-        AudioComp->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
-        AudioComp->bAutoActivate = bAC_AutoActivate;
+        // Set before RegisterComponent, which activates (plays) an auto-activating component. This
+        // component starts playback itself once a sound exists (RCV-23).
+        AudioComp->bAutoActivate = false;
         AudioComp->bAllowSpatialization = bAC_AllowSpatialization;
         AudioComp->bIsUISound = bAC_IsUISound;
         AudioComp->bOverrideAttenuation = bAC_OverrideAttenuation;
@@ -73,7 +79,8 @@ void UO3DRemoteAudioComponent::BeginPlay()
         //AudioComp->AttenuationOverrides = AC_AttenuationOverrides;
         AudioComp->SetPitchMultiplier(AC_PitchMultiplier);
         AudioComp->SetVolumeMultiplier(FMath::Max(0.0f, AC_VolumeMultiplier * Gain));
-        bOwnsAudioComponent = true;
+        AudioComp->SetupAttachment(this);
+        AudioComp->RegisterComponent();
     }
 
     BindBus();
@@ -96,7 +103,35 @@ void UO3DRemoteAudioComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     UnbindBus();
 
+    if (AudioComp)
+    {
+        AudioComp->Stop();
+        AudioComp->DestroyComponent();
+        AudioComp = nullptr;
+    }
+    SoundWave = nullptr;
+    CurrentChannels = 0;
+    CurrentSampleRate = 0;
+
     Super::EndPlay(EndPlayReason);
+}
+
+void UO3DRemoteAudioComponent::Play()
+{
+    bPlaybackWanted = true;
+    if (AudioComp && SoundWave && !AudioComp->IsPlaying())
+    {
+        AudioComp->Play();
+    }
+}
+
+void UO3DRemoteAudioComponent::Stop()
+{
+    bPlaybackWanted = false;
+    if (AudioComp)
+    {
+        AudioComp->Stop();
+    }
 }
 
 void UO3DRemoteAudioComponent::BindBus()
@@ -185,7 +220,7 @@ void UO3DRemoteAudioComponent::EnsureSoundWave(int32 NumChannels, int32 SampleRa
         if (AudioComp)
         {
             AudioComp->SetSound(SoundWave);
-            if (bAC_AutoActivate && !AudioComp->IsPlaying())
+            if (bPlaybackWanted && !AudioComp->IsPlaying())
             {
                 AudioComp->Play();
             }
@@ -198,52 +233,6 @@ void UO3DRemoteAudioComponent::EnsureSoundWave(int32 NumChannels, int32 SampleRa
                     SampleRate,
                     AudioComp->IsPlaying() ? 1 : 0);
             }
-        }
-    }
-}
-
-void UO3DRemoteAudioComponent::OnAudioFrame(const FString& StreamLabel, const FString& SubjectName, const float* Interleaved, int32 NumFrames, int32 NumChannels, int32 SampleRate)
-{
-    if (!MatchesFilter(SubjectName, StreamLabel))
-    {
-        if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
-        {
-            if ((FilterDropLogCounter++ % 100) == 0)
-            {
-                UE_LOG(LogO3DReceiverAudio, Verbose, TEXT("Dropped frame by filter subject='%s' stream='%s'"), *SubjectName, *StreamLabel);
-            }
-        }
-        return;
-    }
-
-    EnsureSoundWave(NumChannels, SampleRate);
-    if (!SoundWave || NumFrames <= 0 || NumChannels <= 0)
-    {
-        return;
-    }
-
-    const int32 NumSamples = NumFrames * NumChannels;
-    TArray<int16> PCM16;
-    PCM16.AddUninitialized(NumSamples);
-    for (int32 i = 0; i < NumSamples; ++i)
-    {
-        float Value = Interleaved[i] * Gain;
-        Value = FMath::Clamp(Value, -1.0f, 1.0f);
-        PCM16[i] = static_cast<int16>(FMath::RoundToInt(Value * 32767.0f));
-    }
-
-    SoundWave->QueueAudio(reinterpret_cast<uint8*>(PCM16.GetData()), PCM16.Num() * sizeof(int16));
-
-    if (CVarO3DSRemoteAudioDebug->GetInt() != 0)
-    {
-        if ((QueueLogCounter++ % 50) == 0)
-        {
-            UE_LOG(LogO3DReceiverAudio, Verbose, TEXT("Queued frames=%d ch=%d sr=%d stream='%s' subject='%s'"),
-                NumFrames,
-                NumChannels,
-                SampleRate,
-                *StreamLabel,
-                *SubjectName);
         }
     }
 }
@@ -279,7 +268,7 @@ void UO3DRemoteAudioComponent::OnAudioPcm16(const O3DS::FAudioFrameMeta& Meta, T
 
     if (AudioComp)
     {
-        if (!AudioComp->IsPlaying())
+        if (bPlaybackWanted && !AudioComp->IsPlaying())
         {
             AudioComp->Play();
         }
