@@ -29,7 +29,7 @@ struct FNngReceiverPipeContext
 /**
  * NNG receiver on the shared transport blocks (ADR 0007 item 7, WP-A1 PR 4d).
  *
- * Poll() (game thread, at most FramesPerPoll messages per call) takes what NNG's own I/O threads
+ * Poll() (game thread, at most FramesPerPoll messages of any kind per call) takes what NNG's own I/O threads
  * already received (nng_recv with NNG_FLAG_NONBLOCK) and hands each message to the shared
  * FO3DUnifiedReceiveDemux, which calls the consumer, the audio sink and the control sink. NNG does
  * the socket I/O and the reconnecting of a dropped dialer on its own threads, so a transport

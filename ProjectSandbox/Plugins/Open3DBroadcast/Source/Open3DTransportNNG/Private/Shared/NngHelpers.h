@@ -13,6 +13,7 @@ namespace O3DNNG
     static constexpr TCHAR ModeOptionKey[] = TEXT("nng.mode");
     static constexpr TCHAR RoleOptionKey[] = TEXT("nng.role");
     static constexpr TCHAR QueueOptionKey[] = TEXT("nng.qmax");
+    /** No longer supported (WP-R1): read only to warn that it is ignored. */
     static constexpr TCHAR TopicOptionKey[] = TEXT("nng.topic");
 
     enum class ENngMode : uint8
@@ -40,8 +41,6 @@ namespace O3DNNG
         FString TcpAddress;
         FString CanonicalUri;
         FString StreamId;
-        FString Topic;
-        TArray<uint8> TopicUtf8;
         uint64 MaxQueueBytes = 4ull * 1024ull * 1024ull;
 
         bool bListen = true;
@@ -56,8 +55,6 @@ namespace O3DNNG
         FString TcpAddress;
         FString CanonicalUri;
         FString StreamId;
-        FString Topic;
-        TArray<uint8> TopicUtf8;
 
         bool bListen = false;
     };
@@ -91,8 +88,13 @@ namespace O3DNNG
     /** 6000 pub/sub, 7000 pair, 8000 push/pull. */
     OPEN3DTRANSPORTNNG_API int32 GetDefaultPort(ENngMode Mode);
 
-    OPEN3DTRANSPORTNNG_API FString BuildCanonicalUri(ENngMode Mode, const FString& Host, int32 Port, ENngRole Role, const FString& Topic);
-    OPEN3DTRANSPORTNNG_API FString MakeStreamId(const FString& Host, int32 Port, const FString& Topic);
+    OPEN3DTRANSPORTNNG_API FString BuildCanonicalUri(ENngMode Mode, const FString& Host, int32 Port, ENngRole Role);
+    OPEN3DTRANSPORTNNG_API FString MakeStreamId(const FString& Host, int32 Port);
+    /**
+     * A subscription topic Config still names (the nng.topic option, the Uri's path or ?topic=,
+     * or the StreamId's path), or empty. Topics are not supported (WP-R1): the receiver warns.
+     */
+    OPEN3DTRANSPORTNNG_API FString FindIgnoredTopic(const FO3DTransportConfig& Config);
 
     OPEN3DTRANSPORTNNG_API bool ParseSenderOptions(const FO3DTransportConfig& Config, FNngSenderOptions& OutOptions, FString& OutError);
     OPEN3DTRANSPORTNNG_API bool ParseReceiverOptions(const FO3DTransportConfig& Config, FNngReceiverOptions& OutOptions, FString& OutError);

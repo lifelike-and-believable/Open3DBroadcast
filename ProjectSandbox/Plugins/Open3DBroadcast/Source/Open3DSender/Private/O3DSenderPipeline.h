@@ -205,11 +205,12 @@ private:
 	/** One drain task at a time (ADR 0008 item 3, "drain task scheduled" flag). */
 	std::atomic<bool> bDrainScheduled{ false };
 	/**
-	 * Set by the attached sender's peer-joined callback, on any thread; the worker consumes it
-	 * before the next frame and requests a full sync of every subject (ADR 0005 (vi)). Shared, so
-	 * a sender that outlives this pipeline only writes to the flag.
+	 * Set by the attached sender's peer-joined callback (ADR 0005 (vi)) and frames-dropped
+	 * callback (WP-R1), on any thread; the worker consumes it before the next frame and requests
+	 * a full sync of every subject. Shared, so a sender that outlives this pipeline only writes
+	 * to the flag.
 	 */
-	const TSharedRef<std::atomic<bool>, ESPMode::ThreadSafe> PeerJoined = MakeShared<std::atomic<bool>, ESPMode::ThreadSafe>(false);
+	const TSharedRef<std::atomic<bool>, ESPMode::ThreadSafe> FullSyncAllRequested = MakeShared<std::atomic<bool>, ESPMode::ThreadSafe>(false);
 	std::atomic<bool> bAsync{ true };
 	std::atomic<int32> DepthOverride{ 0 };
 

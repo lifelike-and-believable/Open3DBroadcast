@@ -335,8 +335,9 @@ void FO3DSenderPipeline::ProcessFrameLocked(FO3DSPoseFrame& Frame, bool bAlready
 	const double StartSeconds = FPlatformTime::Seconds();
 	FramesProcessed.fetch_add(1);
 
-	// ADR 0005 (vi): a peer joined since the last frame; it has no full Subject yet.
-	if (PeerJoined->exchange(false))
+	// ADR 0005 (vi): a peer joined since the last frame, so it has no full Subject yet; or the
+	// sender dropped a frame it had accepted, which may have been one receivers needed (WP-R1).
+	if (FullSyncAllRequested->exchange(false))
 	{
 		Serializer->RequestFullSyncAll();
 	}
@@ -419,7 +420,8 @@ void FO3DSenderPipeline::AttachSender(const TSharedPtr<IOpen3DSender>& InSender)
 	Sender = InSender;
 	if (Sender.IsValid())
 	{
-		Sender->SetPeerJoinedCallback([Flag = PeerJoined]() { Flag->store(true); });
+		Sender->SetPeerJoinedCallback([Flag = FullSyncAllRequested]() { Flag->store(true); });
+		Sender->SetFramesDroppedCallback([Flag = FullSyncAllRequested]() { Flag->store(true); });
 	}
 }
 
@@ -434,6 +436,7 @@ void FO3DSenderPipeline::DetachSender()
 		if (Released.IsValid())
 		{
 			Released->SetPeerJoinedCallback(FO3DPeerJoinedCallback());
+			Released->SetFramesDroppedCallback(FO3DFramesDroppedCallback());
 		}
 	}
 	// Released here, outside the lock, on the owner thread.

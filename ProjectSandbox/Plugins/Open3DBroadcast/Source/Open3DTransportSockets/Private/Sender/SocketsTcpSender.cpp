@@ -423,6 +423,25 @@ void FO3DSocketsTcpSender::SetPeerJoinedCallback(FO3DPeerJoinedCallback Callback
 	PeerJoinedCallback = MoveTemp(Callback);
 }
 
+void FO3DSocketsTcpSender::SetFramesDroppedCallback(FO3DFramesDroppedCallback Callback)
+{
+	FScopeLock Guard(&PeerJoinedLock);
+	FramesDroppedCallback = MoveTemp(Callback);
+}
+
+void FO3DSocketsTcpSender::NotifyFramesDropped()
+{
+	FO3DFramesDroppedCallback Callback;
+	{
+		FScopeLock Guard(&PeerJoinedLock);
+		Callback = FramesDroppedCallback;
+	}
+	if (Callback)
+	{
+		Callback();
+	}
+}
+
 void FO3DSocketsTcpSender::DropClient(const TCHAR* Reason)
 {
 	UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP sender dropping client: %s"), Reason);
@@ -537,7 +556,14 @@ uint32 FO3DSocketsTcpSender::RunWorkerIteration()
 	{
 		FO3DSendItem Item;
 		// TRB-14: Dequeue discards frames and audio older than tcp.maxqueueage before any byte of them is sent.
-		if (Queue->Dequeue(Item, Now))
+		const bool bDequeued = Queue->Dequeue(Item, Now);
+		// WP-R1 (TR-1): frames past tcp.maxqueueage were accepted, then discarded; a residual
+		// stream needs a full sync after that.
+		if (Queue->ConsumeMocapDiscarded())
+		{
+			NotifyFramesDropped();
+		}
+		if (bDequeued)
 		{
 			bPendingIsFrame = Item.Kind == EO3DSendItemKind::Mocap;
 			SetPending(MoveTemp(Item.Bytes), false);

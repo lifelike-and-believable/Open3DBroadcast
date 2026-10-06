@@ -52,6 +52,7 @@ public:
 	virtual EO3DSendResult SendControl(const uint8* Envelope, int32 Len) override;
 	/** Called on the worker thread when a receiver is accepted (ADR 0005 (vi)). */
 	virtual void SetPeerJoinedCallback(FO3DPeerJoinedCallback Callback) override;
+	virtual void SetFramesDroppedCallback(FO3DFramesDroppedCallback Callback) override;
 
 	/** True while a receiver is connected. Any thread. */
 	bool HasClient() const { return PublishState->IsPeerReady(); }
@@ -147,4 +148,7 @@ private:
 	/** SetPeerJoinedCallback's callback; set on any thread, called on the worker. */
 	FCriticalSection PeerJoinedLock;
 	FO3DPeerJoinedCallback PeerJoinedCallback;
+	/** SetFramesDroppedCallback's callback; set on any thread, called on the worker (WP-R1). */
+	FO3DFramesDroppedCallback FramesDroppedCallback;
+	void NotifyFramesDropped();
 };

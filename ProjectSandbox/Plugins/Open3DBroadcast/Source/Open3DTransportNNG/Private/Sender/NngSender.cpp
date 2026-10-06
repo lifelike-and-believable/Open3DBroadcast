@@ -128,6 +128,25 @@ void FO3DNngSender::SetPeerJoinedCallback(FO3DPeerJoinedCallback Callback)
     PipeContext->PeerJoined = MoveTemp(Callback);
 }
 
+void FO3DNngSender::SetFramesDroppedCallback(FO3DFramesDroppedCallback Callback)
+{
+    FScopeLock Guard(&FramesDroppedLock);
+    FramesDroppedCallback = MoveTemp(Callback);
+}
+
+void FO3DNngSender::NotifyFramesDropped()
+{
+    FO3DFramesDroppedCallback Callback;
+    {
+        FScopeLock Guard(&FramesDroppedLock);
+        Callback = FramesDroppedCallback;
+    }
+    if (Callback)
+    {
+        Callback();
+    }
+}
+
 FO3DTransportResult FO3DNngSender::Initialize(const FO3DTransportConfig& Config)
 {
     // The worker reads Options and owns the socket; neither may change under it (TRB-33).
@@ -525,7 +544,12 @@ uint32 FO3DNngSender::RunWorkerIteration()
     UpdateConnectionStateOnWorker();
 
     FO3DSendItem Item;
-    if (!Queue->Dequeue(Item))
+    const bool bDequeued = Queue->Dequeue(Item);
+    if (Queue->ConsumeMocapDiscarded())
+    {
+        NotifyFramesDropped(); // WP-R1 (TR-1): evicted after it was accepted
+    }
+    if (!bDequeued)
     {
         return IdleWaitMs;
     }
@@ -614,6 +638,9 @@ void FO3DNngSender::SetWorkerPausedForTesting(bool bPaused)
 void FO3DNngSender::RecordSendDrop()
 {
     DroppedFrames.fetch_add(1);
+    // WP-R1 (TR-1): the frame was accepted by SendSerialized; pair and push are ReliableOrdered,
+    // so residual receivers need a full sync after the gap.
+    NotifyFramesDropped();
 
     // Dropping while no peer is connected is expected (a dialer before its first connection),
     // so this is a rate-limited Log line, not a warning.

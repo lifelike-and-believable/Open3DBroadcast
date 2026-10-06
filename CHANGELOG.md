@@ -576,6 +576,14 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Transport fixes from the mid-project review (WP-R1, transport part).
+  - **Frames dropped after they were accepted lead to a full sync.**
+    - TCP discards queued frames older than `tcp.maxqueueage`, and NNG drops the oldest when no peer is ready or its buffer is full. Both happen after `SendSerialized` has returned Queued.
+    - A lost residual update or full sync left receivers holding the subject until the periodic full sync (ADR 0005), although both transports are ReliableOrdered.
+    - Now the shared send queue never discards a full sync. TCP and NNG report the other drops through the new `IOpen3DSender::SetFramesDroppedCallback` (transport API 5, unreleased). The sender pipeline answers as it does a peer join: every subject's next frame is a full sync.
+  - **NNG: subscription topics removed** (maintainer, 2026-10-06). The receiver subscribed with a topic prefix taken from the Subscription Topic option, the Uri, or any path in the StreamId, but no sender writes a topic, so every message was filtered out. The option is gone, subscribers receive every message, and a topic still in a config is ignored with a warning.
+  - **NNG: `Poll` is bounded for every kind of message.** Only mocap and audio counted towards the 16 messages per `Poll`, so a peer sending control, keepalive, empty or malformed messages could keep the game thread in one call.
+
 - Sender fixes from the mid-project review (WP-R1, sender part).
   - **Capture stops when its transport is unloaded.** When the transport's module shut down mid-capture, the sender stopped sampling, but Is Capturing stayed true and Start Capture did nothing until Stop Capture was called. The capture now stops with the transport. The component still reports the Failed connection state, with the reason.
   - **Audio is sent only at rates receivers play** (completes SND-27). A rate receivers reject, for example 30000 Hz, was streamed and dropped by every receiver. With Opus, the same happened at 11025, 22050, 32000 and 44100 Hz. The sender now uses the nearest rate that plays, and warns.

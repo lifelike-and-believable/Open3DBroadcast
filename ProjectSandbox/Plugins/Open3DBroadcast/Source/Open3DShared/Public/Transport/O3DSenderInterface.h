@@ -117,6 +117,15 @@ public:
     virtual void SetPeerJoinedCallback(FO3DPeerJoinedCallback Callback) { (void)Callback; }
 
     /**
+     * WP-R1 (mid-project review TR-1): Callback is called when the sender drops a mocap frame
+     * after SendSerialized returned Queued (an age limit, an eviction, a full send buffer). The
+     * frame may have been a full sync or a residual update receivers needed, so the next frame
+     * should be a full sync. Same threading rules as SetPeerJoinedCallback. An empty callback
+     * clears it. Default: not supported, nothing is stored.
+     */
+    virtual void SetFramesDroppedCallback(FO3DFramesDroppedCallback Callback) { (void)Callback; }
+
+    /**
      * Sends one control envelope (O3DS::WriteControlEnvelope output) to every receiver of this
      * stream (docs/adr/0011-control-channel.md, item 6). Game thread in v1; implementations are
      * thread-safe, never block, and copy the bytes. Not routed through SendSerialized or the pose

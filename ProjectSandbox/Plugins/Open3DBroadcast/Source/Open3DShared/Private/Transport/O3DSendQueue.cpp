@@ -124,6 +124,12 @@ bool FO3DSendQueue::ShouldDiscard(const FO3DSendItem& Item, double NowSec) const
 	{
 		return false;
 	}
+	// WP-R1 (TR-1): a full sync is what receivers resync from, and the sender counted it as sent
+	// when Enqueue took it; neither the age limit nor the eviction may lose it.
+	if (Item.Kind == EO3DSendItemKind::Mocap && Item.bFullSync)
+	{
+		return false;
+	}
 
 	if (Item.Kind == EO3DSendItemKind::Mocap
 		&& static_cast<EO3DMocapOverflow>(MocapOverflow.load(std::memory_order_relaxed)) == EO3DMocapOverflow::DropOldest)
@@ -155,6 +161,10 @@ bool FO3DSendQueue::Dequeue(FO3DSendItem& OutItem, double NowSec)
 		if (bDiscard)
 		{
 			State.Dropped.fetch_add(1, std::memory_order_relaxed);
+			if (OutItem.Kind == EO3DSendItemKind::Mocap)
+			{
+				bMocapDiscarded.store(true, std::memory_order_relaxed);
+			}
 			continue;
 		}
 		State.Dequeued.fetch_add(1, std::memory_order_relaxed);
@@ -167,6 +177,11 @@ bool FO3DSendQueue::Dequeue(FO3DSendItem& OutItem, double NowSec)
 bool FO3DSendQueue::Dequeue(FO3DSendItem& OutItem)
 {
 	return Dequeue(OutItem, FPlatformTime::Seconds());
+}
+
+bool FO3DSendQueue::ConsumeMocapDiscarded()
+{
+	return bMocapDiscarded.exchange(false, std::memory_order_relaxed);
 }
 
 int32 FO3DSendQueue::Empty()

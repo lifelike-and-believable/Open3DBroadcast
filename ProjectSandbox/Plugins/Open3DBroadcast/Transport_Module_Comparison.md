@@ -134,7 +134,7 @@ The registry answers the same capability question before an instance exists:
 **Supported Messaging Patterns** (`NngHelpers.h`):
 | Pattern | Sender Mode | Receiver Mode | Topology |
 |---------|------------|---------------|----------|
-| **Pub/Sub** | Pub (Publisher) | Sub (Subscriber) | 1:N broadcast with topic filtering |
+| **Pub/Sub** | Pub (Publisher) | Sub (Subscriber) | 1:N broadcast; subscribers receive every message |
 | **Pair** | Pair | Pair | 1:1 exclusive connection |
 | **Push/Pull** | Push | Pull | N:M load balancing |
 
@@ -157,7 +157,6 @@ The registry answers the same capability question before an instance exists:
 - `host` - Hostname or IP (IPv6 in brackets in URIs: `tcp://[::1]:17700`)
 - `port` - Port number, 1 to 65535 (digits only)
 - `nng.qmax` - Max queue bytes (default: 4MB, range: 64KB-512MB)
-- `nng.topic` - Topic filter for pub/sub (UTF-8 prefix matching)
 
 **Audio Support**:
 - ✅ Full support (`GetCapabilities().bAudioSend` and `bAudioReceive` are true)
@@ -167,7 +166,6 @@ The registry answers the same capability question before an instance exists:
 
 **Unique Characteristics**:
 - ✨ **Multiple messaging patterns** - Flexible topology options
-- ✨ **Topic-based filtering** - Pub/Sub with subscriber-side filtering
 - ✨ **Automatic pipe management** - Connection tracking via NNG callbacks
 - ✨ **Load balancing** - Push/Pull pattern distributes across receivers
 - ✨ **Queue-based backpressure** - Byte-based limits prevent memory exhaustion
@@ -671,7 +669,6 @@ ReceiverConfig.Transport = "nng";
 ReceiverConfig.Uri = "tcp://localhost:9000";
 ReceiverConfig.AdvancedParams.Add("nng.mode", "sub");
 ReceiverConfig.AdvancedParams.Add("nng.role", "client");
-ReceiverConfig.AdvancedParams.Add("nng.topic", "mocap/");
 ```
 
 ### TCP

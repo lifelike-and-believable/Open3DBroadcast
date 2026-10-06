@@ -104,6 +104,13 @@ FO3DTransportResult FO3DNngReceiver::Initialize(const FO3DTransportConfig& Confi
         return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("NNG receiver config: %s"), *Error));
     }
 
+    // WP-R1 (TR-2): no sender writes a topic, so a subscription topic filtered out every message.
+    const FString IgnoredTopic = O3DNNG::FindIgnoredTopic(Config);
+    if (!IgnoredTopic.IsEmpty())
+    {
+        UE_LOG(LogO3DNngReceiver, Warning, TEXT("NNG subscription topics are not supported; ignoring '%s' and receiving every message."), *IgnoredTopic);
+    }
+
     CapabilityMode.store(Options.Mode);
     ActiveConfig = Config;
     ActiveConfig.Uri = Options.CanonicalUri;
@@ -231,9 +238,13 @@ int32 FO3DNngReceiver::Poll()
     }
 
     int32 FramesProcessed = 0;
+    // WP-R1 (TR-3): every message counts towards the bound, not only frames, so control,
+    // keepalive, empty or malformed messages cannot keep the game thread in one Poll.
+    int32 MessagesTaken = 0;
 
-    while (FramesProcessed < FO3DNngReceiver::FramesPerPoll && Socket)
+    while (MessagesTaken < FO3DNngReceiver::FramesPerPoll && Socket)
     {
+        ++MessagesTaken;
         void* Buffer = nullptr;
         size_t Size = 0;
         const int Ret = nng_recv(Socket->Socket, &Buffer, &Size, NNG_FLAG_NONBLOCK | NNG_FLAG_ALLOC);
@@ -321,8 +332,8 @@ void FO3DNngReceiver::UpdateConnectionState()
 }
 
 /**
- * Opens the socket for Options.Mode (sub subscribes to Options.Topic, or to everything when it is
- * empty), registers the pipe notifications and NNG_OPT_RECVMAXSZ before listen or dial, then
+ * Opens the socket for Options.Mode (sub subscribes to everything: senders write no topic, WP-R1),
+ * registers the pipe notifications and NNG_OPT_RECVMAXSZ before listen or dial, then
  * listens, or dials with NNG_FLAG_NONBLOCK. A listening socket counts as ready once it listens; a
  * dialing one only after its first pipe event (TRB-42).
  */
@@ -343,15 +354,7 @@ bool FO3DNngReceiver::OpenSocket(int32* OutNngError)
         Ret = nng_sub0_open(&NewSocket->Socket);
         if (Ret == 0)
         {
-            if (Options.Topic.IsEmpty())
-            {
-                Ret = nng_setopt(NewSocket->Socket, NNG_OPT_SUB_SUBSCRIBE, "", 0);
-            }
-            else
-            {
-                const FTCHARToUTF8 TopicUtf8(*Options.Topic);
-                Ret = nng_setopt(NewSocket->Socket, NNG_OPT_SUB_SUBSCRIBE, TopicUtf8.Get(), static_cast<size_t>(TopicUtf8.Length()));
-            }
+            Ret = nng_setopt(NewSocket->Socket, NNG_OPT_SUB_SUBSCRIBE, "", 0);
         }
         if (Ret == 0)
         {
