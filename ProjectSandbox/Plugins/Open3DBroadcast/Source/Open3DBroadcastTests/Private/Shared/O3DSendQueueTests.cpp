@@ -115,9 +115,53 @@ bool FO3DSendQueueByteLimitTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("60 bytes fit"), Queue.Enqueue(AudioItem(60)) == EO3DSendResult::Queued);
 	TestTrue(TEXT("41 more would exceed 100"), Queue.Enqueue(AudioItem(41)) == EO3DSendResult::DroppedBackpressure);
 	TestTrue(TEXT("40 more reach exactly 100"), Queue.Enqueue(AudioItem(40)) == EO3DSendResult::Queued);
-	TestTrue(TEXT("An item larger than the cap is always refused"), Queue.Enqueue(AudioItem(101)) == EO3DSendResult::DroppedBackpressure);
+	TestTrue(TEXT("An item larger than the cap is TooLarge, not backpressure"), Queue.Enqueue(AudioItem(101)) == EO3DSendResult::TooLarge);
 	TestEqual(TEXT("Pending bytes never pass the cap"), Queue.GetStats().Audio.PendingBytes, static_cast<int64>(100));
-	TestEqual(TEXT("Refused audio"), Queue.GetStats().Audio.Refused, static_cast<int64>(2));
+	TestEqual(TEXT("Refused audio (backpressure only)"), Queue.GetStats().Audio.Refused, static_cast<int64>(1));
+	return true;
+}
+
+// WP-R3 (mid-project review TR-7): an item that could never fit, even in an empty queue, is
+// TooLarge. DroppedBackpressure made the sender pipeline request a full sync after it, which was
+// just as large, on every frame.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DSendQueueTooLargeTest, "Open3DBroadcast.Shared.SendQueue.LargerThanHardCapIsTooLarge", O3DB_TEST_FLAGS)
+bool FO3DSendQueueTooLargeTest::RunTest(const FString& Parameters)
+{
+	using namespace O3DSendQueueTests;
+	{
+		FO3DSendQueueLimits Limits;
+		Limits.Mocap.MaxBytes = 100; // soft cap; DropOldest admits up to the hard cap, 200
+		Limits.MocapOverflow = EO3DMocapOverflow::DropOldest;
+		FO3DSendQueue Queue(Limits);
+		FO3DSendItem Huge = MocapItem(201);
+		TestTrue(TEXT("DropOldest: one byte over the hard cap is TooLarge in an empty queue"), Queue.Enqueue(MoveTemp(Huge)) == EO3DSendResult::TooLarge);
+		TestEqual(TEXT("A TooLarge item is left untouched"), Huge.Bytes.Num(), 201);
+		const FO3DSendQueueStats Stats = Queue.GetStats();
+		TestEqual(TEXT("TooLarge is not counted as refused"), Stats.Mocap.Refused, static_cast<int64>(0));
+		TestEqual(TEXT("Nothing pending after TooLarge"), Stats.Mocap.PendingBytes, static_cast<int64>(0));
+		TestTrue(TEXT("DropOldest: exactly the hard cap is queued"), Queue.Enqueue(MocapItem(200)) == EO3DSendResult::Queued);
+	}
+	{
+		FO3DSendQueueLimits Limits;
+		Limits.Mocap.MaxBytes = 100; // RefuseNewest: the limit is the hard cap
+		Limits.MocapOverflow = EO3DMocapOverflow::RefuseNewest;
+		FO3DSendQueue Queue(Limits);
+		TestTrue(TEXT("RefuseNewest: over the limit is TooLarge"), Queue.Enqueue(MocapItem(101)) == EO3DSendResult::TooLarge);
+		TestTrue(TEXT("RefuseNewest: exactly the limit is queued"), Queue.Enqueue(MocapItem(100)) == EO3DSendResult::Queued);
+		TestTrue(TEXT("RefuseNewest: a full queue is still backpressure"), Queue.Enqueue(MocapItem(1)) == EO3DSendResult::DroppedBackpressure);
+	}
+	{
+		FO3DSendQueueLimits Limits;
+		Limits.Audio.MaxBytes = 100;
+		Limits.Control.MaxBytes = 100;
+		FO3DSendQueue Queue(Limits);
+		TestTrue(TEXT("Audio over its limit is TooLarge"), Queue.Enqueue(AudioItem(101)) == EO3DSendResult::TooLarge);
+		TestTrue(TEXT("Control over its limit is TooLarge"), Queue.Enqueue(ControlItem(101)) == EO3DSendResult::TooLarge);
+	}
+	{
+		FO3DSendQueue Queue((FO3DSendQueueLimits()));
+		TestTrue(TEXT("Without a byte limit nothing is TooLarge"), Queue.Enqueue(MocapItem(1 << 20)) == EO3DSendResult::Queued);
+	}
 	return true;
 }
 

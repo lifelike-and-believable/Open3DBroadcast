@@ -483,6 +483,7 @@ namespace O3DConformanceSuite
 		}
 
 		const TArray<uint8> Payload = MakePayloadOfSize(Profile.BackpressurePayloadBytes);
+		Fixture.HoldSenderWorker(*Sender, true);
 		const FO3DTransportStats Before = Sender->GetStats();
 		int32 Rejected = 0;
 		int32 RejectedOther = 0;
@@ -503,6 +504,7 @@ namespace O3DConformanceSuite
 			SlowestSend = FMath::Max(SlowestSend, FPlatformTime::Seconds() - Start);
 		}
 		const FO3DTransportStats After = Sender->GetStats();
+		Fixture.HoldSenderWorker(*Sender, false);
 
 		Test.TestTrue(TEXT("At least one send was dropped with DroppedBackpressure"), Rejected > 0);
 		Test.TestEqual(*FString::Printf(TEXT("Every refused send returned DroppedBackpressure (first other result: %s)"), LexToString(FirstOther)), RejectedOther, 0);

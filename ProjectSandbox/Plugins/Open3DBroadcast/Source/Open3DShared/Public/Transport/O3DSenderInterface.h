@@ -74,7 +74,8 @@ public:
      *
      * Returns Queued when accepted, NotRunning before Start or after Stop, NotConnected while
      * there is no peer or session, Invalid for an empty payload, TooLarge above
-     * FO3DTransportCapabilities::MaxPayloadBytes, and DroppedBackpressure when the transport's
+     * FO3DTransportCapabilities::MaxPayloadBytes or above what the transport's send queue can hold
+     * when empty (WP-R3, TR-7), and DroppedBackpressure when the transport's
      * queue is full (the frame is counted in FO3DTransportStats::DroppedFrames). A refused frame is
      * not retried by the caller.
      */

@@ -97,6 +97,12 @@ EO3DSendResult FO3DSendQueue::Enqueue(FO3DSendItem&& Item)
 		&& static_cast<EO3DMocapOverflow>(MocapOverflow.load(std::memory_order_relaxed)) == EO3DMocapOverflow::DropOldest;
 	const int32 MaxItems = O3DSendQueuePrivate::HardCap(State.MaxItems.load(std::memory_order_relaxed), bDoubles);
 	const int64 MaxBytes = O3DSendQueuePrivate::HardCap(State.MaxBytes.load(std::memory_order_relaxed), bDoubles);
+	// WP-R3 (TR-7): an item even an empty queue could not hold is TooLarge, not backpressure: no
+	// retry and no full sync after it could ever be accepted. Nothing is reserved or counted.
+	if (MaxBytes > 0 && Size > MaxBytes)
+	{
+		return EO3DSendResult::TooLarge;
+	}
 
 	// Reserve only what fits: concurrent producers can neither overshoot nor lose a count, and the
 	// pending counters never read above a limit, not even for a moment (TRB-3).
