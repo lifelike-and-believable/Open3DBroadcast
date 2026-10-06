@@ -606,6 +606,85 @@ namespace O3DConformanceSuite
 		return true;
 	}
 
+	/** Samples a receiver's GetStats from its own thread until stopped and counts samples that went backwards. */
+	class FReceiverStatsSampler final : public FRunnable
+	{
+	public:
+		explicit FReceiverStatsSampler(const IOpen3DReceiver& InReceiver)
+			: Receiver(InReceiver)
+		{
+		}
+
+		virtual uint32 Run() override
+		{
+			FO3DTransportStats Previous = Receiver.GetStats();
+			while (!bStop.load())
+			{
+				const FO3DTransportStats Current = Receiver.GetStats();
+				++Samples;
+				if (!IsMonotonic(Previous, Current) && Regressions++ == 0)
+				{
+					FirstRegression = FString::Printf(TEXT("%s -> %s"), *DescribeStats(Previous), *DescribeStats(Current));
+				}
+				Previous = Current;
+				FPlatformProcess::YieldThread();
+			}
+			return 0;
+		}
+
+		const IOpen3DReceiver& Receiver;
+		std::atomic<bool> bStop{false};
+		// Read by the test only after the thread completed.
+		int32 Samples = 0;
+		int32 Regressions = 0;
+		FString FirstRegression;
+	};
+
+	/**
+	 * WP-R3 (TR-9): IOpen3DReceiver allows GetStats from any thread while Poll runs on the game
+	 * thread. A torn or unsynchronised read rarely shows on x64 without a thread sanitizer, so
+	 * this mainly guards the contract: counters read elsewhere never go backwards.
+	 */
+	bool RunReceiverStatsFromAnyThread(FAutomationTestBase& Test, const FO3DConformanceProfile& Profile, FO3DConformanceFixture& Fixture)
+	{
+		FConnectedPair Pair;
+		if (!Connect(Test, Profile, Fixture, Fixture.MakeSenderConfig(), Pair))
+		{
+			return false;
+		}
+		const TArray<TArray<uint8>> Recorded = O3DTests::MakeRecordedFrames(TEXT("ConformanceActor"), RoundTripFrames);
+		if (!Test.TestEqual(TEXT("Recorded frames built"), Recorded.Num(), RoundTripFrames))
+		{
+			return false;
+		}
+
+		const int64 ReceivedBefore = Pair.Receiver->GetStats().FramesReceived;
+		FReceiverStatsSampler Sampler(*Pair.Receiver);
+		FRunnableThread* Thread = FRunnableThread::Create(&Sampler, TEXT("O3DConformanceReceiverStats"));
+		if (!Test.TestNotNull(TEXT("Sampler thread created"), Thread))
+		{
+			return false;
+		}
+		for (const TArray<uint8>& Frame : Recorded)
+		{
+			Pair.Sender->SendSerialized(FO3DSendPayload::MakeCopy(Frame.GetData(), Frame.Num(), TEXT("ConformanceActor"), FPlatformTime::Seconds()));
+			Pair.Pump();
+		}
+		// Unreliable transports may lose some frames; the check needs frames arriving, not all of them.
+		O3DTests::PollUntil(Profile.ConnectTimeoutSeconds,
+			[&Pair, ReceivedBefore]() { return Pair.Receiver->GetStats().FramesReceived - ReceivedBefore >= RoundTripFrames; },
+			[&Pair]() { Pair.Pump(); });
+		Sampler.bStop.store(true);
+		Thread->WaitForCompletion();
+		delete Thread;
+
+		const int64 Received = Pair.Receiver->GetStats().FramesReceived - ReceivedBefore;
+		Test.TestTrue(*FString::Printf(TEXT("Frames arrived while the sampler ran (%lld)"), Received), Received > 0);
+		Test.TestTrue(TEXT("The sampler read the stats"), Sampler.Samples > 0);
+		Test.TestEqual(*FString::Printf(TEXT("Receiver stats never went backwards over %d samples (first: %s)"), Sampler.Samples, *Sampler.FirstRegression), Sampler.Regressions, 0);
+		return true;
+	}
+
 	bool RunRoundTrip(FAutomationTestBase& Test, const FO3DConformanceProfile& Profile, FO3DConformanceFixture& Fixture)
 	{
 		FConnectedPair Pair;
@@ -1107,6 +1186,7 @@ namespace O3DConformanceSuite
 		case EO3DConformanceCase::ConnectionStateLifecycle: return RunConnectionStateLifecycle(Test, Profile, Fixture);
 		case EO3DConformanceCase::ConnectionStateConnected: return RunConnectionStateConnected(Test, Profile, Fixture);
 		case EO3DConformanceCase::MetricsCountWhatWasSent: return RunMetricsCountWhatWasSent(Test, Profile, Fixture);
+		case EO3DConformanceCase::ReceiverStatsFromAnyThread: return RunReceiverStatsFromAnyThread(Test, Profile, Fixture);
 		default:
 			Test.AddError(TEXT("Unknown conformance case"));
 			return false;

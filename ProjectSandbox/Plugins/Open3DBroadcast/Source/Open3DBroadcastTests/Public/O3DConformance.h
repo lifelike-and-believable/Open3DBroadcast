@@ -79,6 +79,8 @@ enum class EO3DConformanceCase : uint32
 	 * (FO3DTransportConfig::SenderMetrics), which o3d.DumpMetrics and the sender component read.
 	 */
 	MetricsCountWhatWasSent = 1 << 17,
+	/** Receiver GetStats, read from another thread while the game thread polls, never goes backwards (WP-R3, TR-9). */
+	ReceiverStatsFromAnyThread = 1 << 18,
 };
 ENUM_CLASS_FLAGS(EO3DConformanceCase)
 
