@@ -103,7 +103,7 @@ This section supersedes the "Start here" line in §0 where they disagree.
   4. WP-Q1.
   5. The names-in-use picker.
   6. WP-U5: sample content. It also carries WP-U2's acceptance, and it needs the maintainer at the editor.
-  7. UE 5.6 and 5.8 support: a plan was requested on 2026-10-06.
+  7. UE 5.6 and 5.8 support: the draft plan is `docs/roadmap/engine-versions-5.6-5.8-plan.md`. Its seven decisions are open.
 
   The desk items below are unchanged. Also for the maintainer:
   - (done 2026-10-06) branch protection: a `develop` ruleset requires "Plugin CI result" and "Core tests result", allows only squash merges, blocks deletion and force pushes, and has no bypass (`Build/README.md`);
