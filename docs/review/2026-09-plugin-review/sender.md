@@ -284,6 +284,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Add an "Encoding" group containing a mode enum (Legacy, Residual, Quantized) that replaces the two booleans, and show each mode's settings with EditCondition. Warn in the UI when the selected transport is unreliable and Residual is chosen.
 - Effort: S
 - Owner: coding
+- Status: closed in #389
 
 ### SND-25: The default configuration captures and encodes but sends nowhere, with no warning
 - Category: usability
@@ -293,6 +294,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Default `bAutoCreateTransport=true` (with Loopback), or log a one-time warning or message-log entry ("no transport, frames only available via OnSerializedFrame"). Skip serialization entirely when there is neither a transport nor an `OnSerializedFrame` listener.
 - Effort: S
 - Owner: design
+- Status: closed in #389
 
 ### SND-26: Large gaps in the Blueprint API
 - Category: usability
@@ -314,6 +316,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Severity: low
 - Location: Public/O3DSenderComponent.h:143-149, :245-257; Public/O3DSenderAudioCaptureComponent.h:42-64
 - Evidence:
+- Status: closed in #389
   - `CaptureRateHz` has no `ClampMin`/`UIMin`/`Units`. A value of 0 or below silently means "unlimited", which is undocumented.
   - `QuantizationHalfRange` is not validated to be at least `QuantizationByteRange`.
   - `FO3DSenderAudioCaptureConfig` fields have no tooltips and no clamps (`SampleRate`, `NumChannels` (1-2?), `BitrateKbps`, the gains).
@@ -348,6 +351,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Use `FComponentReference` with `meta=(UseComponentPicker, AllowedClasses="/Script/Engine.SkeletalMeshComponent")`. Prefer the leader-pose component when resolving the target, and log which mesh was chosen.
 - Effort: S
 - Owner: coding
+- Status: closed in #389
 
 ### SND-31: Dead code, stale paths and triplicated logic
 - Category: code-quality
@@ -398,6 +402,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Wrap option edits in `FScopedTransaction`. Keep options namespaced per transport (the keys already carry prefixes like `webrtc.`) instead of clearing them, or confirm before clearing.
 - Effort: S
 - Owner: coding
+- Status: closed in #389
 
 ### SND-36: Test coverage covers two pure helpers and none of the risky logic
 - Category: tests
