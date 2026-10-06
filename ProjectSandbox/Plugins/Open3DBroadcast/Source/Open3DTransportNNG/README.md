@@ -1,26 +1,40 @@
-# Open3D Transport NNG Module
+# Open3DTransportNNG
 
-High-performance transport for Open3D mocap data using NNG (nanomsg-next-gen).
+The **NNG** transport sends Open3D frames, audio and control over TCP with NNG
+(nanomsg-next-gen). Pick it in the transport list of the Open3D sender component or of the
+**Open3DStream Receiver** LiveLink source. Win64 only.
 
-## Protocols Supported
+## Modes
 
-- **Pub/Sub**: Publisher/Subscriber (one-to-many broadcast)
-- **Push/Pull**: Pipeline (one-to-one with built-in load balancing)
-- **Pair**: Bidirectional (one-to-one)
+Set the same pairing on both ends:
 
-## Configuration
+| Sender mode | Receiver mode | Shape | Delivery |
+|---|---|---|---|
+| `pub` (**Publisher**, default) | `sub` (**Subscriber**, default) | one sender, many receivers | Unreliable: a slow subscriber can miss messages |
+| `pair` (**Pair**) | `pair` (**Pair**) | one sender, one receiver | ReliableOrdered |
+| `push` (**Push**) | `pull` (**Pull**) | many senders, one receiver | ReliableOrdered |
 
-### URI Format
+A subscriber receives every message. Subscription topics are not supported; a topic left in a
+config is ignored with the warning "NNG subscription topics are not supported; ignoring '...'
+and receiving every message."
 
-```
-nng://<host>:<port>?mode=<mode>&role=<role>
-```
+## Options
 
-Where:
-- `host`: IP address or hostname
-- `port`: TCP port number
-- `mode`: `pub`, `sub`, `push`, `pull`, `pair` (default: `pub`)
-- `role`: `server` (listen) or `client` (dial). Supported roles, with the default first:
+| Key | Shown as | Default | Notes |
+|---|---|---|---|
+| `host` | **Host** | `0.0.0.0` when this end listens, `127.0.0.1` when it dials | Address to listen on or dial. |
+| `port` | **Port** | 6000 for pub/sub, 7000 for pair, 8000 for push/pull | TCP port, 1 to 65535. |
+| `nng.mode` | **Mode** | sender `pub`, receiver `sub` | Sender: `pub`, `pair`, `push`. Receiver: `sub`, `pair`, `pull`. |
+| `nng.role` | **Role** | **Default for the mode** | `server` (**Listen (server)**) or `client` (**Dial (client)**). Shown only for the modes that can do both; see [Roles](#roles). |
+| `nng.qmax` | **Queue Capacity (MiB)** | 4 MiB | Sender only. Stored in bytes; the panel takes 1 to 512 MiB. The sender clamps the value to 64 KiB to 512 MiB; 0 means the default. |
+
+You set options, not a URI. The transport builds `nng+<mode>://<host>:<port>` (with `?role=`
+when the role is not the mode's default) for its logs and stream id, and opens a plain
+`tcp://<host>:<port>` socket.
+
+### Roles
+
+One end listens and the other dials. Supported roles, the default first:
 
 | Side | Mode | Roles |
 |---|---|---|
@@ -31,61 +45,53 @@ Where:
 | Receiver | `pair` | `client`, `server` |
 | Receiver | `pull` | `server`, `client` |
 
-With default roles, one side of every pair listens and the other dials. A role a mode does
-not support falls back to the default. With no `host` option, the host comes from the URI,
-then its `?host=` query, then the stream id; the last resort is `0.0.0.0` for a listening
-socket and `127.0.0.1` for a dialing one.
+With default roles, one end of every pairing listens and the other dials. A role the mode does
+not support falls back to the default.
 
-### Example Configurations
+## Example: through the Repeater
 
-**Localhost Pub/Sub (default):**
-```
-nng://127.0.0.1:5555
-```
+The Repeater (`apps/Repeater` in the Open3DBroadcast repository) relays what senders push on one
+port to every subscriber on another. Run it as `Repeater tcp://0.0.0.0:7000 tcp://0.0.0.0:7001`,
+then set:
 
-**Cloud Push/Pull via Repeater:**
-- Sender (Push): `tcp://<repeater-host>:7000`
-- Repeater Listen: `tcp://0.0.0.0:7000` (receives Push from sender)
-- Repeater Broadcast: `tcp://0.0.0.0:7001` (publishes to receivers)
-- Receiver (Subscribe): `tcp://<repeater-host>:7001`
+| End | Mode | Role | Host | Port |
+|---|---|---|---|---|
+| Sender | `push` | default (`client`) | the Repeater's address | 7000 |
+| Receiver | `sub` | default (`client`) | the Repeater's address | 7001 |
+
+`apps/Repeater/README.md` describes its options and its Docker image.
+
+## Behaviour
+
+- **Sending never blocks the caller.** Frames, audio and control go into one send queue; a worker
+  thread owns the socket and sends with `NNG_FLAG_NONBLOCK`. There is no send timeout.
+- **Queue limits.** The queue refuses a new frame once the waiting frames reach `nng.qmax` bytes,
+  and never discards a frame it accepted. Audio has a budget of the same size of its own; control
+  has a cap of 1,024 envelopes.
+- **No peer, or NNG's buffer full.** NNG's send buffer holds 1,024 messages. When no peer is ready
+  or that buffer is full, the worker drops the oldest queued frame and counts it in
+  `DroppedFrames`. Frames are not re-queued, so a receiver that reconnects gets current data.
+- **Reconnecting.** NNG redials a dialing socket in the background. The sender and receiver reopen
+  only a socket that failed to listen or dial, after 0.1 s, doubling up to 5 s.
+- **Largest message.** The receiver accepts messages up to 50 MiB.
+- **Security.** The connection is plain TCP, without encryption or authentication. Anyone who
+  can reach the port can connect.
 
 ## Troubleshooting
 
-### No Connection / Queue Full Warnings
+### "NNG sender queue full" and nothing arrives
 
-If you see "NNG sender queue full" warnings and no animation on the receiver:
+1. Check that the modes pair up (Publisher with Subscriber, Pair with Pair, Push with Pull) and
+   that the ports match. Through the Repeater, the sender uses the listen port (7000 above) and
+   receivers the broadcast port (7001).
+2. Check that the host is reachable and that a firewall lets the port through.
+3. Watch the Output Log for the connection lines:
+   - Sender: "NNG sender connection established (pipe count=N)" and "NNG sender connection lost
+     (pipe count=N)".
+   - Receiver: "NNG receiver pipe added (count=N)" and "NNG receiver pipe removed (count=N)".
+   - A dialing sender that cannot connect yet logs "NNG sender could not dial ... yet; retrying
+     with backoff (check host/port)".
 
-1. **Verify ports match**: Check that sender/receiver ports match the repeater configuration
-   - Sender should connect to repeater's listen port (e.g., 7000)
-   - Receivers should connect to repeater's broadcast port (e.g., 7001)
+### Frames dropped on a slow link
 
-2. **Check network connectivity**: Ping the remote host and verify firewall rules allow the ports
-
-3. **Enable verbose logging**: Monitor the logs for connection establishment messages
-   - Look for "NNG sender pipe added" = connection successful
-   - Look for "NNG sender pipe removed" = connection lost
-
-### High Latency / Cloud Connections
-
-The sender never blocks on network I/O. Frames, audio and control go into one send queue, and a
-worker thread owns the socket and sends with `NNG_FLAG_NONBLOCK`:
-- The queue refuses a new frame once the waiting frames reach `nng.qmax` bytes; queued frames are
-  never discarded. Audio has a budget of the same size of its own, and control a cap of 1,024
-  envelopes, so neither is refused because frames are waiting.
-- When no peer is ready or NNG's send buffer (1024 messages) is full, the oldest queued frame
-  is dropped and counted in `DroppedFrames`. Frames are never re-queued, so a receiver that
-  reconnects gets current data, not a stale backlog.
-- There is no send timeout, because a non-blocking send never waits.
-- A dialing socket is reconnected by NNG in the background. The sender and receiver only reopen
-  a socket that failed to listen or dial, with a backoff of 0.1 s doubling to 5 s.
-
-If you see frame drops with high latency:
-- Increase the sender's "Queue Capacity (MiB)" (option `nng.qmax`, in bytes; default 4 MiB)
-
-## Performance Notes
-
-- Single subject mocap: ~4 KB per frame at 30 FPS = ~120 KB/sec
-- Audio (PCM16, 48kHz stereo): ~4 KB per frame at 50 FPS = ~200 KB/sec
-- Combined with Opus compression: ~240 bytes per audio frame
-
-Even slow cloud connections (10+ Mbps) can easily handle this bandwidth.
+Raise the sender's **Queue Capacity (MiB)** (`nng.qmax`).

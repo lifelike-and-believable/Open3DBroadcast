@@ -1,14 +1,21 @@
 # Open3DTransportNNG Third-Party Assets
 
-Static libraries specific to the NNG transport live here.
+Third-party code of the NNG transport lives here.
 
 ```
 ThirdParty/
   README.md
-  Lib/
-    Win64/
-      nng.lib
+  nng/
+    LICENSE.txt
+    README.md
+    include/
+      nng/
+    lib/
+      Win64/
+        nng.lib
 ```
 
-Add platform-specific subfolders (e.g. `Lib/Linux`) as additional targets are supported. Update
-`Open3DTransportNNG.Build.cs` accordingly.
+`Open3DTransportNNG.Build.cs` links `nng/lib/Win64/nng.lib` and adds `nng/include` to the
+include path. `nng/README.md` records the library's version, provenance and hash, and how to
+refresh it. Another platform would get its own folder next to `lib/Win64` and a matching change
+in `Open3DTransportNNG.Build.cs`.
