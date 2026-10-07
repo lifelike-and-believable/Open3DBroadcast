@@ -646,10 +646,8 @@ ProjectSandbox/Plugins/Open3DBroadcast/Source/
 
 ### Internal Documentation
 
-- [LiveKit README](../../../../../LIVEKIT_README.md)
-- [LiveKit Quickstart](../../../../../LIVEKIT_QUICKSTART.md)
-- [WebRTC User Guide](../USER_GUIDE.md)
-- [Agent Instructions](../.github/copilot-instructions.md)
+- [WebRTC User Guide](../../../ProjectSandbox/Plugins/Open3DBroadcastWebRTC/USER_GUIDE.md)
+- [Agent Instructions](../../../AGENTS.md)
 
 ### External Resources
 
