@@ -4,7 +4,8 @@ name: Open3DBroadcast Plugin CI
 #   - Every PR commit, drafts included: "Detect plugin-relevant changes",
 #     "Fab source zip", "Copyright headers" and "Runtime modules free of
 #     editor code" (GitHub-hosted, a minute or two). core-tests.yml also
-#     runs on every PR.
+#     runs on every PR. "Markdown links resolve" runs on every PR and push,
+#     whatever the change touches.
 #   - Non-draft PRs, pushes to develop/main and manual runs: "UE build and
 #     tests" on the single self-hosted UE runner. Drafts skip it so work in
 #     progress does not queue the runner; mark the PR ready for review, or
@@ -143,12 +144,26 @@ jobs:
     with:
       fab-package-result: ${{ needs.fab-package.result }}
 
+  # WP-D4: relative links, links into this repository's own GitHub tree and #anchors in every
+  # tracked Markdown file resolve. Not behind the path filter: it is for docs-only changes too.
+  doc-links:
+    name: Markdown links resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Self-test the check
+        run: python3 Build/Scripts/check-markdown-links.py --self-test
+      - name: Check Markdown links
+        run: python3 Build/Scripts/check-markdown-links.py
+
   report:
     # Posts one comment on the PR when this workflow passed (jobs skipped by their `if:` count as
     # passed and are listed), so whoever watches the PR learns of a green run without polling.
     # A failure is reported by the failing job's check.
     name: Report success on the PR
-    needs: [changes, fab-package, copyright-headers, runtime-editor-deps, third-party-binaries, build-and-test]
+    needs: [changes, fab-package, copyright-headers, runtime-editor-deps, third-party-binaries, doc-links, build-and-test]
     if: ${{ github.event_name == 'pull_request' && !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -187,7 +202,7 @@ jobs:
     # or split without touching branch protection, and a failure no other required check sees
     # (for example the Fab zip, whose result the UE job only reads) still blocks the merge.
     name: Plugin CI result
-    needs: [changes, fab-package, copyright-headers, runtime-editor-deps, third-party-binaries, build-and-test]
+    needs: [changes, fab-package, copyright-headers, runtime-editor-deps, third-party-binaries, doc-links, build-and-test]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

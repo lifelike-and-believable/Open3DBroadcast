@@ -791,10 +791,9 @@ All items completed:
 
 ## APPENDIX: Related Documentation
 
-- [USER_GUIDE.md](./USER_GUIDE.md) - Comprehensive user documentation
-- [LIVEKIT_README.md](../../LIVEKIT_README.md) - Original LiveKit integration guide
-- [Transport_Module_Comparison.md](../Transport_Module_Comparison.md) - Comparison with other transports
-- [livekit_ffi.h](./ThirdParty/livekit_ffi/include/livekit_ffi.h) - FFI API documentation
+- [USER_GUIDE.md](../../../ProjectSandbox/Plugins/Open3DBroadcastWebRTC/USER_GUIDE.md) - the WebRTC add-on's user documentation
+- [Transport_Module_Comparison.md](../../../ProjectSandbox/Plugins/Open3DBroadcast/Transport_Module_Comparison.md) - Comparison with other transports
+- [livekit_ffi.h](../../../ProjectSandbox/Plugins/Open3DBroadcastWebRTC/Source/Open3DTransportWebRTC/ThirdParty/livekit_ffi/include/livekit_ffi.h) - FFI API documentation
 
 ---
 

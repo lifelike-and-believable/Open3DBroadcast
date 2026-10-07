@@ -578,6 +578,7 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Docs stay honest (WP-D4). `Build/Scripts/check-markdown-links.py` checks the relative links, the links into this repository's GitHub tree and the `#anchors` of every tracked Markdown file; the plugin CI runs it as "Markdown links resolve" on every PR, docs-only ones included, and "Plugin CI result" includes it. The 9 links it found broken (developer notes moved to `docs/dev/`) are fixed. `.github/pull_request_template.md` carries the roadmap's review checklist (section 7).
 - Root README checked against the code (WP-D1; DOC-3). The receiver source is **Open3DStream Receiver**; the first-stream steps tick **Auto Create Transport**, as the USER_GUIDE quick start does; the core's TCP, UDP and NNG connectors are no longer listed as part of the core (they are the opt-in legacy library); both schemas and the sync step are named; the TCP example uses the default port 17700 and describes the payload as a frame or an envelope; the docs list links the wire format and AGENTS.md.
 
 - Follow-ups found while writing WP-D2 (maintainer decision 2026-10-07 for MoQ defaults).
