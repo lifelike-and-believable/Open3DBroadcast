@@ -24,10 +24,9 @@ When analyzing an issue or feature request, the agent MUST:
 - **Document assumptions** explicitly when information is incomplete
 - **Review related issues and PRs** using GitHub search to understand prior work and dependencies
 - **Check project documentation**:
-  - `.github/copilot-instructions.md` - core operating rules
-  - `AGENTS.md` - agent-specific guidelines
+  - `AGENTS.md` - the project's instruction file, and the rules in `.claude/rules/`
   - `README.md` and docs in `docs/` directory
-  - Architecture and design documents (e.g., `TRANSPORT_DESIGN_COMPARISON.md`)
+  - Decisions in `docs/adr/`, the plan in `docs/roadmap/`, the wire format in `docs/wire-format.md`, and `ProjectSandbox/Plugins/Open3DBroadcast/Transport_Module_Comparison.md`
 
 ### 2. Research and Resource Identification
 Before creating a plan, the agent MUST research:
@@ -65,7 +64,7 @@ Before creating a plan, the agent MUST research:
 #### C. Testing Infrastructure
 - **Identify relevant test frameworks**:
   - Unreal automation tests (`Build/Scripts/Run-AutomationTests.ps1`)
-  - C++ unit tests (e.g., `test_curves.cpp`)
+  - Core library tests (CTest, `test/*_tests.cpp`)
 - **Understand test requirements**:
   - What test coverage is expected for this type of change
   - Which existing tests might be affected
@@ -249,7 +248,7 @@ All plans must:
 - **Reference authoritative sources** - links to docs, APIs, prior art
 - **Consider edge cases** - error handling, boundary conditions
 - **Respect project constraints** - no blocking on game thread, schema versioning rules, etc.
-- **Align with repository guidelines** - follow `.github/copilot-instructions.md`
+- **Align with repository guidelines** - follow `AGENTS.md` and `.claude/rules/`
 
 ## Example Plan Structure
 
