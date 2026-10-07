@@ -23,6 +23,7 @@ THIRD_PARTY_INCLUDES_END
 
 // Token management
 #include "../Shared/WebRTCTokenManager.h"
+#include "../Shared/WebRTCUtils.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogO3DWebRTCSender, Log, All);
 

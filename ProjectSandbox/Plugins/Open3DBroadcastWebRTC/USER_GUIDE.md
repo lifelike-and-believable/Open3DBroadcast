@@ -97,7 +97,7 @@ The panel of the sender component and of the LiveLink source shows the same opti
 | `webrtc.room` | **Room** | none | Shown when Auto Token Fetch is on, and required then. Use the same room on the sender and the receiver. |
 | `webrtc.tokenRefreshLeadTimeSec` | **Token Refresh Lead Time (seconds)** | 300 | Shown when Auto Token Fetch is on. Seconds before expiry to fetch the next token. The panel takes 60 to 3600. |
 | `webrtc.prefer_lossy` | | false | Sender only. Send frames of up to 1300 bytes on LiveKit's lossy data channel. See [Frames Being Dropped](#frames-being-dropped). |
-| `webrtc.reconnect_timeout` | | 2 | Receiver only. Seconds without data before the receiver reconnects; 0 turns it off. Clamped to 0 to 300. |
+| `webrtc.reconnect_timeout` | | 0 (off) | Receiver only. Seconds without data, while LiveKit reports the room connected, before the receiver reconnects. 0 turns it off. Clamped to 0 to 300. |
 
 Secrets are never saved with the component or source; see [Credentials](#credentials).
 
@@ -323,9 +323,11 @@ Latency is mostly network time to and from the LiveKit server.
 2. Use a LiveKit server close to both ends.
 3. Lower the frame rate if you do not need it.
 
-#### The Receiver Reconnects While the Sender Is Idle
+#### Reconnecting
 
-The receiver reconnects when no data arrived for `webrtc.reconnect_timeout` seconds (default 2). Raise it, or set 0 to turn it off.
+LiveKit recovers from a network drop on its own: both ends show **Reconnecting** and then **Connected**, and the sender's audio continues. If LiveKit gives up (after about 45 seconds), or a connect fails, the sender and the receiver connect again themselves, waiting 1 second, then 2, 4 and so on up to 30 seconds between attempts, for as long as they run. A manual token that has expired keeps failing; use auto token fetch, or set a new token.
+
+The receiver does not reconnect a room that is merely quiet, such as one whose sender is idle. To make it reconnect after some seconds without data while the room looks connected, set `webrtc.reconnect_timeout`.
 
 ### Audio Issues
 

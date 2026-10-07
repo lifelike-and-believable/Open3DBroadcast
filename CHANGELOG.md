@@ -582,6 +582,13 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- WebRTC reconnect (ADR 0015; TRF-6, TRF-26; maintainer decision 2026-10-07).
+  - **Sender:** after LiveKit gives up on the room (`LkConnDisconnected`) or a connect fails (`LkConnFailed`), it connects again with backoff (1 s doubling to 30 s, jitter, no limit) instead of staying `Failed` until Stop and Start. It closes the room livekit_ffi still holds first, and audio after the reconnect goes to fresh tracks; the old ones are destroyed at Stop.
+  - **Receiver:** reconnects after LiveKit gives up with the same backoff, not on the next Poll. The no-data watchdog (`webrtc.reconnect_timeout`) is off by default (was 2 s) and, when set, counts only while LiveKit reports the room connected, so it no longer cuts a slow join, fights LiveKit's own reconnect or tears down an idle room. A token-refresh fallback still reconnects at once.
+  - **State:** both report `Reconnecting` while they retry; the sender no longer reports `Failed` for a dropped room.
+  - `lk_set_reconnect_backoff` (a no-op in livekit_ffi) and `lk_client_is_ready` (not a health signal) are not used; `docs/livekit_ffi_feature_request.md` says why.
+  - Tests: `WebRTC.Reconnect.*` (4), on a fake LiveKit that now models livekit_ffi's room (104 while it is held, cleared by `lk_disconnect`); `State.SenderTransitions` updated.
+
 - Low-severity cleanup (WP-Q1; SND-31, SND-33, TRF-33, SHR-28; SHR-29 part). No behaviour change.
   - **Sender:** the unused `BoneTransformsFinalizedHandle` and the empty `UpdateEditConditionHelpers` are gone; the curve-value copy shared by two serializer paths is `FO3DSenderSerializer::CopyCurveValues`.
   - **Logs:** the curve processor logs under the new `LogO3DSenderCurves` and the transport controller under `LogO3DSenderTransport` (both were `LogO3DSenderComponent`); the sender Details panel no longer logs from its Slate getters, which run on every paint; the Open3DShared start and shutdown lines are Verbose instead of Display; `LogO3DAudioCodec` and `LogO3DPerformanceMetrics` are exported.
