@@ -161,6 +161,7 @@ namespace O3DConformanceProfiles
 	// Option keys are the user-facing names persisted in settings (SocketsTransportCommon.h,
 	// SocketsTcpTransport.h); spelling them out here also pins them.
 
+#if O3D_WITH_TRANSPORT_SOCKETS
 	class FTcpFixture final : public FO3DConformanceFixture
 	{
 	public:
@@ -228,9 +229,11 @@ namespace O3DConformanceProfiles
 
 		const int32 Port;
 	};
+#endif // O3D_WITH_TRANSPORT_SOCKETS
 
 	// ── NNG ──────────────────────────────────────────────────────────────────────────────
 
+#if O3D_WITH_TRANSPORT_NNG
 	class FNngFixture final : public FO3DConformanceFixture
 	{
 	public:
@@ -276,6 +279,7 @@ namespace O3DConformanceProfiles
 
 		const int32 Port;
 	};
+#endif // O3D_WITH_TRANSPORT_NNG
 
 	// ── MoQ (fake moq-ffi) ───────────────────────────────────────────────────────────────
 

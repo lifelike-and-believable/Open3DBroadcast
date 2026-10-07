@@ -336,6 +336,10 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Fixed
 
+- Flag-combination builds compile again (nightly of 2026-10-07, issue #443): the conformance test
+  fixtures for TCP, UDP and NNG are compiled only with their transport, like the MoQ fixture; the
+  TCP and NNG fixtures called `O3DSocketsTesting`/`O3DNngTesting`, which do not exist when
+  `O3D_WITH_TRANSPORT_SOCKETS` or `O3D_WITH_TRANSPORT_NNG` is 0.
 - WebRTC receiver: data arrives again. It registers both the labeled and the unlabeled data
   callback; livekit_ffi's async-connect loop, which the receiver uses, calls only the unlabeled
   one, so with only the labeled callback (TRF-16) no frame reached the receiver. No livekit_ffi
