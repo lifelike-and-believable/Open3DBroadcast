@@ -578,6 +578,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Shared module docs (WP-D3; SHR-37). New `Source/Open3DShared/README.md`: what each public header holds, the threading contract of each class (from its header), and where the wire layouts are. `docs/wire-format.md` section 2 gives the audio payload byte by byte (versions 1 and 2); it was described only in prose. `FFrameDecoder` and the libOpus wrappers now say they are not thread-safe. The plugin README describes the module. Documentation only; the wire format is unchanged.
+
 - Root README checked against the code (WP-D1; DOC-3). The receiver source is **Open3DStream Receiver**; the first-stream steps tick **Auto Create Transport**, as the USER_GUIDE quick start does; the core's TCP, UDP and NNG connectors are no longer listed as part of the core (they are the opt-in legacy library); both schemas and the sync step are named; the TCP example uses the default port 17700 and describes the payload as a frame or an envelope; the docs list links the wire format and AGENTS.md.
 
 - Follow-ups found while writing WP-D2 (maintainer decision 2026-10-07 for MoQ defaults).
