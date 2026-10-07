@@ -1,7 +1,7 @@
 # UE 5.8 compile spike (WP-V1)
 
 Date: 2026-10-07. Scope: UE 5.7 and 5.8 (maintainer decision 2026-10-07; 5.6 is not supported).
-Plan: [engine-versions-5.6-5.8-plan.md](engine-versions-5.6-5.8-plan.md).
+Plan: [engine-version-5.8-plan.md](engine-version-5.8-plan.md); decision: [ADR 0014](../adr/0014-supported-engine-versions.md).
 
 ## What ran
 

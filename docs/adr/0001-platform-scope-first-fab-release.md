@@ -1,6 +1,6 @@
 # 0001: Platform scope for the first Fab release
 
-- **Status:** Accepted (maintainer sign-off 2026-09-29)
+- **Status:** Accepted (maintainer sign-off 2026-09-29); engine scope amended by [ADR 0014](0014-supported-engine-versions.md) (UE 5.7 and 5.8)
 - **Date:** 2026-09-29
 - **Plan decision:** D1 in [`plugin-hardening-and-fab-readiness.md`](../roadmap/plugin-hardening-and-fab-readiness.md) §3
 - **Related:** [ADR 0002](0002-webrtc-and-moq-in-first-fab-release.md) (D2), [ADR 0003](0003-core-library-delivery-to-plugin.md) (D3); feeds WP-F2, WP-F8, WP-F9, WP-D2
