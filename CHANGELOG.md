@@ -578,6 +578,11 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Follow-ups found while writing WP-D2 (maintainer decision 2026-10-07 for MoQ defaults).
+  - **MoQ defaults match:** with no naming options, the sender now publishes `mocap/default`, track `primary`, as the receiver subscribes. Before, the sender used its Subject Name for both, so a default sender and receiver never connected. **Breaking** for a receiver that was set to a sender's Subject Name: set the namespace and track on the sender too, or clear them on the receiver. Two default senders on one relay now share a track; give each its own namespace.
+  - **MoQ audio namespace:** a custom namespace without a `mocap/` or `audio/` prefix put mocap and audio on the same namespace and track. Audio now gets `audio/<namespace>`, as control gets `control/<namespace>`; mocap is unchanged.
+  - **WebRTC:** the receiver's no-data reconnect timeout started at 5 s in code, though Initialize always sets it from `webrtc.reconnect_timeout` (default 2 s). One constant now holds the default; behaviour is unchanged.
+
 - UDP multicast and an allow-list of senders (WP-U6; TRB-21; maintainer decision 2026-10-06).
   - **Receiver:** **Multicast Group** (`udp.multicast`) joins an IPv4 group after binding and leaves it on Stop; **Allowed Senders** (`udp.allowsource`) drops datagrams from unlisted addresses and counts them in `ReceiveErrors`; **Share Port** (`udp.reuseaddr`, off) sets SO_REUSEADDR so several receivers on one machine can join the group.
   - **Sender:** **Multicast TTL** (`udp.multicastttl`, 1) and **Multicast Loopback** (`udp.multicastloop`, on) apply when **Destination Host** is a multicast group.

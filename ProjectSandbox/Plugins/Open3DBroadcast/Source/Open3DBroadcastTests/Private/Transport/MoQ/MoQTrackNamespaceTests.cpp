@@ -14,6 +14,7 @@
 
 #if O3D_WITH_TRANSPORT_MOQ
 
+#include "Transport/O3DTransportRegistry.h"
 #include "Transport/O3DTransportTypes.h"
 #include "Testing/MoQTesting.h"
 #include "Transport/MoQ/MoQFakeFfi.h"
@@ -284,6 +285,116 @@ bool FMoQRelayUrlVariationsTest::RunTest(const FString& Parameters)
 		TestTrue(*FString::Printf(TEXT("Relay URL %s is accepted"), Url), Sender->Initialize(CreateTestConfig(Url, TEXT("session/test"))).IsOk());
 		Sender->Stop();
 	}
+	return true;
+}
+
+namespace MoQTrackNamespaceTestHelpers
+{
+	class FNullReceiverAudioSink final : public IO3DReceiverAudioSink
+	{
+	public:
+		virtual void SubmitPcm16(const O3DS::FAudioFrameMeta&, const uint8*, int32) override {}
+	};
+
+	class FNullReceiverControlSink final : public IO3DReceiverControlSink
+	{
+	public:
+		virtual void SubmitControl(TConstArrayView<uint8>, const FString&, double) override {}
+	};
+
+	/** Starts a fake-FFI receiver with audio and control sinks, so it subscribes to all three tracks. */
+	TSharedRef<IOpen3DReceiver> StartReceiver(FAutomationTestBase& Test, const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe>& Fake, const FO3DTransportConfig& Config,
+		const TSharedRef<FO3DRecordingFrameConsumer>& Consumer, const TSharedRef<IO3DReceiverAudioSink, ESPMode::ThreadSafe>& AudioSink)
+	{
+		const TSharedRef<IOpen3DReceiver> Receiver = MoQTesting::CreateReceiverForTest(Fake->MakeApi(), nullptr, 2);
+		Test.TestTrue(TEXT("Initialize receiver"), Receiver->Initialize(Config).IsOk());
+		Receiver->SetAudioSink(AudioSink, Config.Audio);
+		Receiver->SetControlSink(MakeShared<FNullReceiverControlSink, ESPMode::ThreadSafe>()); // before Start, as the interface asks
+		Receiver->SetConsumer(Consumer);
+		Test.TestTrue(TEXT("Start receiver"), Receiver->Start().IsOk());
+		MoQTesting::PumpDispatcher();
+		return Receiver;
+	}
+
+}
+
+// WP-D2 follow-up (maintainer decision 2026-10-07): with no naming options, the sender and the
+// receiver name the same tracks, so a default sender and receiver on one relay connect. The
+// sender used its Subject Name (mocap/<Subject>, track <Subject>) and the receiver mocap/default,
+// track primary. Configs are built by the descriptors, as the sender component and the source do.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQDefaultNamesMatchTest, "Open3DBroadcast.Transport.MoQ.TrackNamespaces.DefaultsMatchReceiver", O3DB_TEST_FLAGS)
+bool FMoQDefaultNamesMatchTest::RunTest(const FString& Parameters)
+{
+	using namespace MoQTrackNamespaceTestHelpers;
+	const FO3DTransportDescriptorPtr Descriptor = FO3DTransportRegistry::Get().Find(TEXT("MoQ"));
+	if (!TestTrue(TEXT("MoQ is registered"), Descriptor.IsValid()))
+	{
+		return false;
+	}
+	const TMap<FString, FString> Options = { { TEXT("relay_url"), TEXT("https://fake.relay.invalid:443") } };
+
+	FO3DTransportConfig SenderConfig(TEXT("MoQ"), EO3DTransportRole::Sender);
+	SenderConfig.AdvancedParams = Options;
+	SenderConfig.SubjectName = TEXT("Hero");
+	Descriptor->ConfigureSender(FO3DTransportOptionsView(Options, &Descriptor->SenderOptions.OptionSchema), SenderConfig);
+
+	FO3DTransportConfig ReceiverConfig(TEXT("MoQ"), EO3DTransportRole::Receiver);
+	ReceiverConfig.AdvancedParams = Options;
+	Descriptor->ConfigureReceiver(FO3DTransportOptionsView(Options, &Descriptor->ReceiverOptions.OptionSchema), ReceiverConfig);
+
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<FO3DRecordingFrameConsumer> Consumer = MakeShared<FO3DRecordingFrameConsumer>();
+	const TSharedRef<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink = MakeShared<FNullReceiverAudioSink, ESPMode::ThreadSafe>();
+	TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> SenderAudio;
+	{
+		const TSharedRef<IOpen3DSender> Sender = StartSender(Fake, SenderConfig, SenderAudio);
+		const TSharedRef<IOpen3DReceiver> Receiver = StartReceiver(*this, Fake, ReceiverConfig, Consumer, AudioSink);
+
+		const TArray<FString> Subscriptions = Fake->GetLiveSubscriptions();
+		for (const FMoQFakeFfi::FPublisher& Publisher : Fake->GetPublishers())
+		{
+			const FString Name = Publisher.Namespace + TEXT("|") + Publisher.Track;
+			TestTrue(*FString::Printf(TEXT("The default receiver subscribes to the default sender's %s (it subscribes to %s)"), *Name, *FString::Join(Subscriptions, TEXT(", "))),
+				Subscriptions.Contains(Name));
+		}
+		TestEqual(TEXT("Mocap, audio and control publishers"), Fake->GetPublishers().Num(), 3);
+		Receiver->Stop();
+		Sender->Stop();
+	}
+	MoQTesting::PumpDispatcher();
+	return true;
+}
+
+// WP-D2 follow-up: a custom namespace without a mocap/ or audio/ prefix gave mocap and audio the
+// same namespace and track. Mocap keeps the namespace as given; audio gets audio/<namespace>, as
+// control gets control/<namespace>. Both ends derive it the same way.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMoQUnprefixedNamespaceTest, "Open3DBroadcast.Transport.MoQ.TrackNamespaces.UnprefixedCustomNamespace", O3DB_TEST_FLAGS)
+bool FMoQUnprefixedNamespaceTest::RunTest(const FString& Parameters)
+{
+	using namespace MoQTrackNamespaceTestHelpers;
+	FO3DTransportConfig Config = CreateTestConfig(TEXT("https://fake.relay.invalid:443"), FString());
+	Config.AdvancedParams.Add(TEXT("track_namespace"), TEXT("studioA"));
+	Config.AdvancedParams.Add(TEXT("track_name"), TEXT("hero"));
+
+	const TSharedRef<FMoQFakeFfi, ESPMode::ThreadSafe> Fake = FMoQFakeFfi::Create();
+	const TSharedRef<FO3DRecordingFrameConsumer> Consumer = MakeShared<FO3DRecordingFrameConsumer>();
+	const TSharedRef<IO3DReceiverAudioSink, ESPMode::ThreadSafe> AudioSink = MakeShared<FNullReceiverAudioSink, ESPMode::ThreadSafe>();
+	TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> SenderAudio;
+	{
+		const TSharedRef<IOpen3DSender> Sender = StartSender(Fake, Config, SenderAudio);
+		const TArray<FMoQFakeFfi::FPublisher> Publishers = Fake->GetPublishers();
+		TestNotNull(TEXT("Mocap publishes on the namespace as given"), FindPublisher(Publishers, TEXT("studioA")));
+		TestNotNull(TEXT("Audio publishes on audio/studioA, apart from mocap"), FindPublisher(Publishers, TEXT("audio/studioA")));
+
+		const TSharedRef<IOpen3DReceiver> Receiver = StartReceiver(*this, Fake, Config, Consumer, AudioSink);
+		const TArray<FString> Subscriptions = Fake->GetLiveSubscriptions();
+		TestTrue(TEXT("The receiver subscribes to studioA|hero"), Subscriptions.Contains(TEXT("studioA|hero")));
+		TestTrue(TEXT("The receiver subscribes to audio/studioA|hero"), Subscriptions.Contains(TEXT("audio/studioA|hero")));
+		TestTrue(TEXT("The receiver subscribes to control/studioA|hero"), Subscriptions.Contains(TEXT("control/studioA|hero")));
+		Receiver->Stop();
+		Sender->Stop();
+	}
+	MoQTesting::PumpDispatcher();
 	return true;
 }
 

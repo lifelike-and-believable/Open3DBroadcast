@@ -335,8 +335,8 @@ While idle for `tcp.keepalive` ms the sender writes a keepalive frame whose payl
 
 **Configuration**:
 - `relay_url` (**Relay URL**) - The relay, for example `https://relay.example.com:443` (required)
-- `track_namespace` (**Track Namespace (optional)**) - Namespace of the mocap track. Default: `mocap/<Subject Name>` on the sender, `mocap/default` on the receiver
-- `track_name` (**Track Name (optional)**) - Default: the **Subject Name** on the sender, `primary` on the receiver
+- `track_namespace` (**Track Namespace (optional)**) - Namespace of the mocap track. Default: `mocap/default` on both ends
+- `track_name` (**Track Name (optional)**) - Default: `primary` on both ends
 - `delivery_mode` (**Delivery Mode**) - Sender: `stream` (default) or `datagram`
 - `queue_bytes` (**Queue Capacity (MiB)**) - Sender queue in bytes (default 8 MiB)
 - `connect_timeout` - Seconds before an unfinished connection attempt is abandoned and retried (1 to 120, default 15)
