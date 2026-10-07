@@ -811,6 +811,7 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
 #### WP-D1: Rewrite the root README  ·  P1 · S · docs
 - **Findings:** DOC-3
 - A short landing page: what the repo contains, links to the plugin guide, and the build steps via `Build/README.md`. Fix the 11 dead links. Move the history to the CHANGELOG.
+- **Done (2026-10-07):** #436.
 
 #### WP-D2: Plugin README and USER_GUIDE  ·  P0 (for Fab) · M · docs
 - **Findings:** DOC-1, DOC-2, DOC-4, DOC-5, DOC-6, DOC-10, TRF-36, TRB-44, SND-37, RCV-32
@@ -837,10 +838,12 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
   - Merge the two CHANGELOGs.
   - Replace or remove Sphinx and Doxygen (DOC-9).
   - Document the Shared APIs, the threading contracts and the wire format (SHR-37). This becomes the D4 and D8 ADRs' public summary.
+- **Done (2026-10-07):** #437 (DOC-7, DOC-9; DOC-8 was #339), #439 (SHR-37).
 
 #### WP-D4: Keep the docs honest  ·  P2 · S · coding
 - A CI link checker for the Markdown docs.
 - A PR template with the checklist from §7, since the repo has none today.
+- **Done (2026-10-07):** #438.
 
 #### WP-Q1: Low-severity cleanup batch  ·  P3 · M · coding (bundle into 2–3 PRs)
 - **Findings:** SND-31, SND-33, TRF-33, SHR-28, SHR-29, CORE-25 (anything not already in WP-A7)
@@ -850,6 +853,7 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
   - Export macros on public log categories.
   - Header-level `static` functions and IWYU fixes.
 - Pick up only the items not already closed by an earlier WP. The code review agent confirms this against the coverage table in §8.
+- **Done (2026-10-07):** #440 (core), #441 (plugin). Left for a maintainer decision: TRF-6/TRF-26 wiring, the CORE-25 null-predictor guard and `o3ds.h`, the SHR-29 field renames.
 
 #### WP-R1: Correctness follow-ups from the mid-project review  ·  P1 · M · coding (added 2026-10-06)
 - **Items:** `docs/roadmap/mid-project-review-2026-10-06.md` RR-1, RR-2, RR-3, RR-4 (receiver); SR-3, SR-2 (sender); TR-1/SR-1, TR-2, TR-3 (transports). They are review items, not findings in `docs/review/`.

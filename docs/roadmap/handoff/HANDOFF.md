@@ -72,10 +72,17 @@ This section supersedes the "Start here" line in §0 where they disagree.
     - #432, TRB-29: listening ends (TCP sender, UDP receiver, NNG listeners) default to `127.0.0.1` and warn once per Start on a non-loopback bind; USER_GUIDE "Network Exposure". **Breaking** for setups between machines that relied on `0.0.0.0`;
     - #433, TRB-21: UDP multicast (receiver **Multicast Group**, sender **Multicast TTL** and **Multicast Loopback**), **Allowed Senders**, and an opt-in **Share Port**; the receiver's **Accept Broadcast Packets** is removed.
     - Not verified: TCP, UDP and NNG between two machines with `0.0.0.0`, and multicast through a real switch or Wi-Fi (desk checks).
-  - **Found while writing WP-D2:** the Port tooltip and the dead audio options (fixed in #428), the MTU tooltips (#430), and the Loopback queue-limit reset (#427) are fixed. Still open:
-    - The MoQ defaults never match. The sender uses `mocap/<Subject Name>` with track `<Subject Name>`; the receiver uses `mocap/default` with track `primary`. The guide tells users to set both ends.
-    - A custom MoQ `track_namespace` without the `mocap/` or `audio/` prefix gives mocap and audio the same namespace and track.
-    - `WebRTCReceiver.h` initialises `NoDataReconnectTimeoutSec = 5.0`, which is never used.
+  - **Found while writing WP-D2:** all fixed: the Port tooltip and the dead audio options (#428), the MTU tooltips (#430), the Loopback queue-limit reset (#427), and in #435 the MoQ defaults (both ends now use `mocap/default`, track `primary`; maintainer decision 2026-10-07; **breaking** for a receiver set to a sender's Subject Name), the MoQ audio namespace for an unprefixed custom namespace, and the WebRTC reconnect default (the 5.0 initializer was overwritten; one constant now).
+  - **Docs and cleanup batch (2026-10-07):**
+    - #436, WP-D1: the root README checked against the code (DOC-3).
+    - #437, WP-D3: the Copilot agent files point to `AGENTS.md` and `.claude/rules/`; the unused `Doxyfile` is removed (DOC-7, DOC-9; DOC-8 marked closed by #339).
+    - #438, WP-D4: `Build/Scripts/check-markdown-links.py` and the CI job "Markdown links resolve" on every PR (it found and fixed 9 broken links); `.github/pull_request_template.md` with the section 7 checklist.
+    - #439, WP-D3: `Source/Open3DShared/README.md` with each class's threading contract; the audio payload byte by byte in `docs/wire-format.md` (SHR-37).
+    - #440, WP-Q1 core: `Matrix::Transpose` compiles; dead code and `o3ds.cpp` removed (CORE-25, partly).
+    - #441, WP-Q1 plugin: dead code, `LogO3DSenderCurves` and `LogO3DSenderTransport`, no logs in Slate getters, exported log categories, header hygiene (SND-31, SND-33, TRF-33, SHR-28; SHR-29 partly).
+    - WP-Q1's survey found 19 of its 37 sub-items already fixed by earlier work packages.
+    - Flaky test: `core.repeater_tests` `Repeater_OversizeMessageClosesOnlyThatSender` failed once in CI (#440): the NNG push socket reconnects between the test's polls. Offered as a separate task; not fixed yet.
+  - **UE 5.8 (2026-10-07):** the maintainer chose UE 5.7 and 5.8, without 5.6. The compile spike (WP-V1) is in `docs/roadmap/engine-version-5.8-spike.md`: the main plugin builds on 5.8 with 2 deprecation warnings (`OnPostEngineInit`) and passes 493 of 494 tests (a test bug: a relative path read with `std::ifstream`); the add-on stops on `PLATFORM_64BITS` deprecation warnings.
 - **Maintainer decisions:**
   - **WP-U2 (2026-10-05):**
     - `bAutoCreateTransport` stays false, with a warning;
@@ -92,24 +99,22 @@ This section supersedes the "Start here" line in §0 where they disagree.
   - The LiveKit FFI request (`docs/livekit_ffi_feature_request.md`) is filed as `lifelike-and-believable/livekit-ffi` issues #13 to #17; the maintainer's agent is implementing them.
   - The rules-for-robots adoption findings are rules-for-robots issues #23 to #38.
 - **Working practice:**
-  - Every PR gets Auto-fix in the desktop app. Merge by hand when the success comment arrives (`gh pr merge <n> --squash`, after checking the checks). Auto-merge is allowed (maintainer, 2026-10-06) but hides the green signal: on #431 and #432 GitHub merged within seconds to a minute or so of the success comments, and the app, which reads a PR only every few minutes, then saw a merged PR and relayed nothing. With auto-merge, set one fallback wakeup of about 30 minutes.
+  - Every PR gets Auto-fix in the desktop app. Merge by hand when the success comment arrives (`gh pr merge <n> --squash`, after checking the checks). Auto-merge is allowed (maintainer, 2026-10-06) but hides the green signal: the app relays nothing for a PR that is already merged when it reads it. Events also arrive late during a long turn: the app holds them until the turn ends, so check a PR yourself before relying on its event. Parallel PRs that each add a CHANGELOG entry at the top of a section conflict after every merge; merge `develop` into the next one at once.
   - A workflow's success comment is the cue that CI is green; check the checks before merging.
   - Delete `ProjectSandbox/Intermediate/Build/Win64/x64/ProjectSandboxEditor/Development/Makefile.bin` before building whenever files were added, removed, merged in from `develop`, or changed by a branch switch. UBT otherwise reuses its makefile, which can:
     - skip new or merged-in files, so a local run lacks their tests;
     - still include a deleted file, so the build fails;
     - and after a failed build, the automation run uses the old binaries and can report green.
 
-    Check that the build succeeded and compare the test count: 547 with the WebRTC add-on (492 without) on `develop` as of #433. CI fails below the floors in `Build/automation-test-floors.json`. When several PRs add tests, each raises the floors by its own tests; after one merges, merge `develop` into the others and add their tests to `develop`'s floors.
+    Check that the build succeeded and compare the test count: 549 with the WebRTC add-on (494 without) on `develop` as of #435. CI fails below the floors in `Build/automation-test-floors.json`. When several PRs add tests, each raises the floors by its own tests; after one merges, merge `develop` into the others and add their tests to `develop`'s floors.
   - The test editor runs with `-NoSound`, so audible playback can't be tested automatically. Audio tests cover the component's state and the jitter buffer; listening is a desk check.
   - `close_findings.py`-style helpers must put the Status line after a finding's last top-level bullet, not inside nested bullets.
 - **Next, after the maintainer's go-ahead:**
-  1. The three code issues still open from WP-D2 (above: the MoQ defaults, the MoQ namespace, the unused WebRTC timeout), in one small PR.
-  2. Desk checks for WP-U6 (above).
-  3. WP-D1, WP-D3, WP-D4 (WP-D2 is done).
-  4. WP-Q1.
-  5. The names-in-use picker.
+  1. UE 5.8: decisions 2 to 7 of the plan (support policy, one tree, the add-on, `EngineVersion` stamping, PR CI, Fab), then ADR 0014 and WP-V2/V3 (the three spike findings are small).
+  2. WP-Q1 leftovers that need a decision: wire `lk_client_is_ready` and `lk_set_reconnect_backoff` (TRF-6, TRF-26); a guard for a null predictor in `ConcealmentEngine` and deleting the unused `o3ds.h` (CORE-25); renaming the exported `FUnifiedHeader` fields (SHR-29).
+  3. Desk checks: WP-U6 between two machines and multicast on real network gear; MoQ against a real relay (the new defaults).
+  4. The names-in-use picker: not specified yet; ask the maintainer what it should do.
   6. WP-U5: sample content. It also carries WP-U2's acceptance, and it needs the maintainer at the editor.
-  7. UE 5.6 and 5.8 support: the draft plan is `docs/roadmap/engine-versions-5.6-5.8-plan.md`. Its seven decisions are open.
 
   The desk items below are unchanged. Also for the maintainer:
   - (done 2026-10-06) branch protection: a `develop` ruleset requires "Plugin CI result" and "Core tests result", allows only squash merges, blocks deletion and force pushes, and has no bypass (`Build/README.md`);
@@ -212,7 +217,7 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M1 Safety and correctness: WP-S1..S11, WP-T1, WP-T2 | Done (#264–#279) |
 | M2 Fab-buildable package: WP-F1..F4, F6..F9, F11 | Done (#274–#286). **F0 and F5 wait on the maintainer** (see §5) |
 | M3 Architecture: WP-A1..A7 | **In progress.** WP-A1, A2 (except removing `o3d.Sender.AsyncPipeline` one release later), A3 and A6 done; WP-A4 nearly done (ADR 0009 and ADR 0005 implemented, CORE-11/13/15 fixed, CORE-12 harness merged, CORE-14 in #353, RCV-8 in ADR 0013, accepted); WP-A5 waits for the maintainer at the desk; WP-A7 partly done (#348). SHR-38: ADR 0012 implemented (#357–#365). See §0a. |
-| M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | **In progress.** WP-U1, U2 and U3 done (#385–#391); WP-U4 done (#393, #395, #396, #398). See §0a. |
+| M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | **In progress.** WP-U1, U2 and U3 done (#385–#391); WP-U4 done (#393, #395, #396, #398); WP-U6 done (#427–#433); WP-D1 to D4 done (#420–#424, #436–#439); WP-Q1 done (#440, #441; three leftovers need a decision). Open: WP-U5 (needs the maintainer at the editor). See §0a. |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
 | WP-CTL control channel (D11, ADR 0011) | CTL-1..7 done (#290–#295, CTL-6, CTL-7); live-server checks remain (see §2b) |
 

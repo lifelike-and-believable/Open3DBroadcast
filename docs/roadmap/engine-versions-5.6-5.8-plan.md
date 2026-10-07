@@ -1,6 +1,6 @@
 # Plan: Unreal Engine 5.6 and 5.8 support
 
-Status: draft, 2026-10-06. Nothing here is decided yet: the decisions in section 2 are the maintainer's. Today both plugins support UE 5.7 only (ADR 0001).
+Status: draft, 2026-10-06. **Decision 1 is made (maintainer, 2026-10-07): support UE 5.7 and 5.8; 5.6 is dropped.** Decisions 2 to 7 are still open; until they are answered, read them for two engines (for example, the reduced CI job runs on 5.8 only). Everything about 5.6 below is kept for the record. The 5.8 compile spike (WP-V1) is done: [engine-version-5.8-spike.md](engine-version-5.8-spike.md). Today both plugins support UE 5.7 only (ADR 0001).
 
 The facts below were read from develop at 29a4b861 and from the engines installed on the development machine. The C++ evidence comes from comparing engine headers; nothing was compiled. Statements marked "unverified" need a build, a test, or a person at the desk.
 
