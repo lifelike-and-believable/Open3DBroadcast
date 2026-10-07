@@ -578,6 +578,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Root README checked against the code (WP-D1; DOC-3). The receiver source is **Open3DStream Receiver**; the first-stream steps tick **Auto Create Transport**, as the USER_GUIDE quick start does; the core's TCP, UDP and NNG connectors are no longer listed as part of the core (they are the opt-in legacy library); both schemas and the sync step are named; the TCP example uses the default port 17700 and describes the payload as a frame or an envelope; the docs list links the wire format and AGENTS.md.
+
 - Follow-ups found while writing WP-D2 (maintainer decision 2026-10-07 for MoQ defaults).
   - **MoQ defaults match:** with no naming options, the sender now publishes `mocap/default`, track `primary`, as the receiver subscribes. Before, the sender used its Subject Name for both, so a default sender and receiver never connected. **Breaking** for a receiver that was set to a sender's Subject Name: set the namespace and track on the sender too, or clear them on the receiver. Two default senders on one relay now share a track; give each its own namespace.
   - **MoQ audio namespace:** a custom namespace without a `mocap/` or `audio/` prefix put mocap and audio on the same namespace and track. Audio now gets `audio/<namespace>`, as control gets `control/<namespace>`; mocap is unchanged.
