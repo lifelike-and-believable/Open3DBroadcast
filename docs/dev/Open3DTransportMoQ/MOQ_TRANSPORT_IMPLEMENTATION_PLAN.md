@@ -97,7 +97,7 @@ Implement a complete MoQ transport module (`Open3DTransportMoQ`) for the Open3DB
 1. [Prerequisites & Dependencies](#prerequisites--dependencies)
 2. [Architecture Overview](#architecture-overview)
 3. [Implementation Phases](#implementation-phases)
-4. [Detailed Task Breakdown](#detailed-task-breakdown)
+4. [Migration Strategy](#migration-strategy-from-custom-protocol-to-moq-ffi-backed-transport)
 5. [File Structure](#file-structure)
 6. [Testing Strategy](#testing-strategy)
 7. [Documentation Requirements](#documentation-requirements)

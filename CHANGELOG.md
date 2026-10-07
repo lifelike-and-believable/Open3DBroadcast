@@ -578,6 +578,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Docs stay honest (WP-D4). `Build/Scripts/check-markdown-links.py` checks the relative links, the links into this repository's GitHub tree and the `#anchors` of every tracked Markdown file; the plugin CI runs it as "Markdown links resolve" on every PR, docs-only ones included, and "Plugin CI result" includes it. The 9 links it found broken (developer notes moved to `docs/dev/`) are fixed. `.github/pull_request_template.md` carries the roadmap's review checklist (section 7).
+
 - Follow-ups found while writing WP-D2 (maintainer decision 2026-10-07 for MoQ defaults).
   - **MoQ defaults match:** with no naming options, the sender now publishes `mocap/default`, track `primary`, as the receiver subscribes. Before, the sender used its Subject Name for both, so a default sender and receiver never connected. **Breaking** for a receiver that was set to a sender's Subject Name: set the namespace and track on the sender too, or clear them on the receiver. Two default senders on one relay now share a track; give each its own namespace.
   - **MoQ audio namespace:** a custom namespace without a `mocap/` or `audio/` prefix put mocap and audio on the same namespace and track. Audio now gets `audio/<namespace>`, as control gets `control/<namespace>`; mocap is unchanged.

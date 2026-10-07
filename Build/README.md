@@ -322,6 +322,18 @@ python3 Build/Scripts/check-runtime-editor-deps.py --self-test
 python3 Build/Scripts/check-runtime-editor-deps.py
 ```
 
+## Markdown links
+
+The docs link to each other and into the plugins' folders, and files move. The check keeps those links from rotting (WP-D4).
+
+- **Check:** `Build/Scripts/check-markdown-links.py` (Python 3.8+, standard library) reads every Markdown file git tracks, except under `ThirdParty/` and `thirdparty/`. A relative link, or a GitHub link into this repository's tree (`https://github.com/lifelike-and-believable/Open3DBroadcast/blob/<branch>/<path>`), fails when the path is not in the checkout. A `#fragment` into a Markdown file fails when no heading (slugged as GitHub does) or explicit anchor matches. Other web links are not fetched. Links in code are ignored. It exits `0` with no broken link, `1` with one or more (each printed as `file:line: target -> reason`), and `2` outside a git checkout. `--self-test` runs it against generated fixtures.
+- **CI:** the plugin CI runs it as "Markdown links resolve" on every PR and push, outside the path filter, so a docs-only change is checked too.
+
+```bash
+python3 Build/Scripts/check-markdown-links.py --self-test
+python3 Build/Scripts/check-markdown-links.py
+```
+
 ## Prebuilt third-party binaries
 
 The plugins track a few prebuilt libraries (`moq_ffi.dll`, `nng.lib`, `opus.lib`, and in the WebRTC add-on `livekit_ffi.dll`) under their `ThirdParty/<library>/` folders. Each folder has a `README.md` with an inventory table: the binary's path relative to the README in backticks, and its SHA256 in backticks. The README also records the upstream source, version or commit and build flags where they are known; a value nobody recorded says "Not recorded" instead of guessing.
@@ -382,7 +394,7 @@ No UE job has a pre-build step: the plugin compiles the o3ds core from source (W
 4. The strict build (`-StrictIncludes`, no PCH, no unity) fails or warns.
 5. BuildPlugin on the Fab zip fails or warns, or an editor DLL is missing from its output.
 
-The Fab zip job is red when a package check or the codec gate fails. The "Copyright headers" job is red when `check-copyright-headers.py` fails, and the "Runtime modules free of editor code" job when `check-runtime-editor-deps.py` or its self-test fails; they are separate jobs, so they do not stop the Fab zip from being built.
+The Fab zip job is red when a package check or the codec gate fails. The "Copyright headers" job is red when `check-copyright-headers.py` fails, and the "Runtime modules free of editor code" job when `check-runtime-editor-deps.py` or its self-test fails; they are separate jobs, so they do not stop the Fab zip from being built. "Markdown links resolve" is red when `check-markdown-links.py` or its self-test fails.
 
 ### Releases
 
@@ -449,7 +461,7 @@ Record the result in the PR. The check has not been run yet.
 
 - **Windows**: PowerShell 5.1+ (or PowerShell Core 7+)
 - **Unreal Engine**: 5.7 (the plugin's `EngineVersion`)
-- **Python**: 3.8+ for `fab-package.py`, `check-copyright-headers.py`, `check-runtime-editor-deps.py` and `check-third-party-binaries.py`
+- **Python**: 3.8+ for `fab-package.py`, `check-copyright-headers.py`, `check-runtime-editor-deps.py`, `check-third-party-binaries.py` and `check-markdown-links.py`
 - **Visual Studio**: 2022 (for building)
 - **Git**: For repository operations
 
