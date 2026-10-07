@@ -30,23 +30,50 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  UE_ROOT: 'C:\\Program Files\\Epic Games\\UE_5.7'
   PLUGIN_NAME: 'Open3DBroadcast'
   PLUGIN_PATH: 'ProjectSandbox/Plugins/Open3DBroadcast'
 
+# ADR 0014 (WP-V5): every supported engine gets the Shipping BuildPlugin, the tests alone and with
+# the WebRTC add-on, the strict build and the Fab zip build. The flag-combination builds, the Linux
+# check and the Shipping game run on UE 5.7 only (extras), as engine-independent checks of the
+# source. The two engines queue on the one runner.
 jobs:
   fab-package:
     name: Fab source zip
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ue-version: '5.7'
+            artifact-suffix: ''
+          - ue-version: '5.8'
+            artifact-suffix: '-UE5.8'
     uses: ./.github/workflows/open3dbroadcast-fab-package.yml
+    with:
+      engine-version: ${{ matrix.ue-version }}
+      artifact-suffix: ${{ matrix.artifact-suffix }}
 
   nightly-build:
+    name: nightly-build (UE ${{ matrix.ue-version }})
     needs: fab-package
     # Run even if the Fab zip job failed; the Fab steps check its result.
     if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ue-version: '5.7'
+            artifact-suffix: ''
+            extras: true
+          - ue-version: '5.8'
+            artifact-suffix: '-UE5.8'
+            extras: false
     runs-on: [ self-hosted, ue5, windows ]
     # 120 minutes plus the flag-combination builds (WP-F2), the Shipping game package (WP-F7) and
     # the WebRTC add-on build and tests (WP-F11).
     timeout-minutes: 300
+    env:
+      UE_ROOT: 'C:\Program Files\Epic Games\UE_${{ matrix.ue-version }}'
 
     steps:
       - name: Checkout repository
@@ -62,7 +89,8 @@ jobs:
       - name: Setup UE
         shell: pwsh
         run: |
-          & .\Build\Scripts\Setup-UE.ps1 -UEPath "${{ env.UE_ROOT }}"
+          & .\Build\Scripts\Setup-UE.ps1 -UEPath "${{ env.UE_ROOT }}" -EngineVersion "${{ matrix.ue-version }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Resolve plugin paths
         id: paths
@@ -98,7 +126,7 @@ jobs:
       - name: Upload plugin package
         uses: actions/upload-artifact@v4
         with:
-          name: Open3DBroadcast-Nightly-${{ github.sha }}
+          name: Open3DBroadcast-Nightly-${{ github.sha }}${{ matrix.artifact-suffix }}
           path: ${{ runner.temp }}/PluginPackage
           retention-days: 21
 
@@ -129,7 +157,7 @@ jobs:
         if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
         uses: actions/upload-artifact@v4
         with:
-          name: Open3DBroadcast-NightlyTests-${{ github.sha }}
+          name: Open3DBroadcast-NightlyTests-${{ github.sha }}${{ matrix.artifact-suffix }}
           path: Artifacts/NightlyAutomation
           if-no-files-found: ignore
           retention-days: 21
@@ -169,7 +197,7 @@ jobs:
         if: ${{ !cancelled() && steps.addon-tests.outcome != 'skipped' }}
         uses: actions/upload-artifact@v4
         with:
-          name: Open3DBroadcast-NightlyTestsWithAddOn-${{ github.sha }}
+          name: Open3DBroadcast-NightlyTestsWithAddOn-${{ github.sha }}${{ matrix.artifact-suffix }}
           path: Artifacts/NightlyAutomationWithAddOn
           if-no-files-found: ignore
           retention-days: 21
@@ -195,7 +223,7 @@ jobs:
       # and with warnings as errors. Nightly only: each run takes as long as the PR build and
       # there is one UE runner.
       - name: Flag-combination builds
-        if: ${{ !cancelled() && (github.event_name == 'schedule' || inputs.run_flag_builds) }}
+        if: ${{ !cancelled() && matrix.extras && (github.event_name == 'schedule' || inputs.run_flag_builds) }}
         shell: powershell
         run: |
           & .\Build\Scripts\Build-FlagCombinations.ps1 `
@@ -212,7 +240,7 @@ jobs:
       # -Require makes a missing toolchain a failure.
       - name: Linux toolchain present
         id: linux-toolchain
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && matrix.extras }}
         shell: powershell
         run: |
           $present = -not [string]::IsNullOrWhiteSpace($env:LINUX_MULTIARCH_ROOT)
@@ -229,7 +257,7 @@ jobs:
       # with no Open3DBroadcast editor module in it. A full cook of ProjectSandbox, so nightly and
       # manual runs only, never pull requests (one shared UE runner).
       - name: Shipping game build
-        if: ${{ !cancelled() && (github.event_name == 'schedule' || inputs.run_shipping_game) }}
+        if: ${{ !cancelled() && matrix.extras && (github.event_name == 'schedule' || inputs.run_shipping_game) }}
         timeout-minutes: 60
         shell: powershell
         run: |
@@ -241,7 +269,7 @@ jobs:
         if: ${{ !cancelled() && needs.fab-package.result == 'success' }}
         uses: actions/download-artifact@v4
         with:
-          name: Open3DBroadcast-Fab-Source-${{ github.sha }}
+          name: Open3DBroadcast-Fab-Source-${{ github.sha }}${{ matrix.artifact-suffix }}
           path: ${{ runner.temp }}/FabZip
 
       - name: Build the Fab source zip
@@ -258,7 +286,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: Open3DBroadcast-NightlyBuildPluginLogs-${{ github.sha }}
+          name: Open3DBroadcast-NightlyBuildPluginLogs-${{ github.sha }}${{ matrix.artifact-suffix }}
           path: |
             ${{ runner.temp }}/*-BuildPlugin.log
             ${{ runner.temp }}/FabBuild/*-BuildPlugin.log

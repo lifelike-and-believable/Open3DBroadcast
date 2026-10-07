@@ -582,6 +582,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Releases and the nightly build on UE 5.7 and UE 5.8 (WP-V5; ADR 0014). The release builds and tests both engines in full and publishes one zip per engine for each plugin, `Open3DBroadcast-Plugin-X.Y.Z-UE<engine>-Win64.zip` and `Open3DBroadcastWebRTC-Plugin-X.Y.Z-UE<engine>-Win64.zip` (they were `...-X.Y.Z-Win64.zip`), made and checked by the new `release-version.py archives`; the release notes name each engine's zip. The Fab zip is built per engine (`Open3DBroadcast-Fab-Source-UE<engine>-<sha>.zip`; `open3dbroadcast-fab-package.yml` takes `engine-version` and `artifact-suffix`). The nightly runs both engines (the flag-combination builds, the Linux check and the Shipping game on UE 5.7 only), and the manual test workflow takes `ue-version`.
+
 - PR CI builds and tests on UE 5.8 as well (WP-V4; ADR 0014). The plugin CI runs the UE job as a matrix: the full job on UE 5.7, and a reduced one on UE 5.8 (BuildPlugin with warnings as errors, the tests, the WebRTC add-on and the tests with both plugins; no strict build, no Fab zip build). `open3dbroadcast-ue-build-test.yml` takes `ue-version`, `profile` and `artifact-suffix` (5.8 artifacts end in `-UE5.8`), and `Setup-UE.ps1 -EngineVersion` fails the job when the engine at the path is another version. The release, nightly and manual workflows still use UE 5.7.
 
 - WebRTC reconnect (ADR 0015; TRF-6, TRF-26; maintainer decision 2026-10-07).

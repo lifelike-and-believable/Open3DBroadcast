@@ -15,8 +15,11 @@ name: Open3DBroadcast Fab package
 #      ffmpeg/OpenH264 (CI-8). WebRTC's livekit_ffi.dll is not in the plugin
 #      (it ships in the Open3DBroadcastWebRTC add-on, WP-F11), so this is a
 #      required gate.
-#   3. The zip and its manifest are uploaded as
-#      Open3DBroadcast-Fab-Source-<sha>.
+#   3. The zip (Open3DBroadcast-Fab-Source-UE<engine>-<sha12>.zip) and its
+#      manifest are uploaded as Open3DBroadcast-Fab-Source-<sha><artifact-suffix>.
+#
+# ADR 0014: the zip is stamped for one engine (engine-version, default 5.7);
+# the release and the nightly call it once per engine.
 #
 # BuildPlugin on the zip's contents runs on the self-hosted UE runner, in the
 # calling workflow ("Build the Fab source zip" step), because it needs UE.
@@ -30,6 +33,14 @@ on:
         default: ''
       uplugin-artifact:
         description: 'Artifact holding the .uplugin files the release gate stamped with version (WP-R2, BC-5).'
+        type: string
+        default: ''
+      engine-version:
+        description: 'Engine X.Y the zip is stamped for (ADR 0014).'
+        type: string
+        default: '5.7'
+      artifact-suffix:
+        description: 'Appended to the artifact name, so two engines in one run do not collide (empty for UE 5.7).'
         type: string
         default: ''
   workflow_dispatch:
@@ -54,13 +65,15 @@ jobs:
           path: ProjectSandbox/Plugins
 
       - name: Build and check the Fab source zip
+        env:
+          # A manual run has no inputs.
+          ENGINE: ${{ inputs.engine-version || '5.7' }}
         run: |
           # The source descriptor has no EngineVersion; the zip is stamped for one engine (ADR 0014).
-          # UE 5.7 until the CI matrix (WP-V4) builds a zip per engine.
           python3 Build/Scripts/fab-package.py \
             --out-dir "$RUNNER_TEMP/fab" \
-            --engine-version 5.7 \
-            --zip-name "Open3DBroadcast-Fab-Source-${GITHUB_SHA::12}.zip"
+            --engine-version "$ENGINE" \
+            --zip-name "Open3DBroadcast-Fab-Source-UE$ENGINE-${GITHUB_SHA::12}.zip"
 
       - name: Video codec gate on the packaged binaries
         run: |
@@ -79,7 +92,7 @@ jobs:
       - name: Upload Fab source zip
         uses: actions/upload-artifact@v4
         with:
-          name: Open3DBroadcast-Fab-Source-${{ github.sha }}
+          name: Open3DBroadcast-Fab-Source-${{ github.sha }}${{ inputs.artifact-suffix }}
           path: |
             ${{ runner.temp }}/fab/*.zip
             ${{ runner.temp }}/fab/*.manifest.txt
