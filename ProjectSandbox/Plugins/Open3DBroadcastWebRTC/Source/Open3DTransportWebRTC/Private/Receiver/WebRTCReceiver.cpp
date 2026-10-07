@@ -341,8 +341,9 @@ FO3DTransportResult FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Co
         return FO3DTransportResult::Error(EO3DTransportError::Internal, TEXT("WebRTC receiver is already initialized; Stop() it first."));
     }
 
-    // Platform validation: WebRTC module currently supports Windows 64-bit only
-#if !PLATFORM_WINDOWS || !PLATFORM_64BITS
+    // Platform validation: WebRTC module currently supports Windows 64-bit only. UE builds 64-bit
+    // only, and UE 5.8 deprecates PLATFORM_64BITS, so the platform check is enough.
+#if !PLATFORM_WINDOWS
     UE_LOG(LogO3DWebRTCReceiver, Error,
         TEXT("Open3DTransportWebRTC requires Windows 64-bit. Current platform: %s %d-bit. "
              "Please use alternative transport (TCP, UDP, NNG, or Loopback) or compile LiveKit FFI for your platform."),

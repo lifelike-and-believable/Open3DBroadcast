@@ -438,7 +438,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCS7SenderAutoFetchConnectsTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCS7SenderAutoFetchConnectsTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCS7Test;
 	FFakeLiveKit Fake;
 	const FFakeFetcherRef Fetcher = MakeShared<FFakeTokenFetcher, ESPMode::ThreadSafe>();
@@ -495,7 +495,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCS7ReceiverAutoFetchConnectsTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCS7ReceiverAutoFetchConnectsTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCS7Test;
 	FFakeLiveKit Fake;
 	const FFakeFetcherRef Fetcher = MakeShared<FFakeTokenFetcher, ESPMode::ThreadSafe>();
@@ -546,7 +546,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCS7IdentityUniqueTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCS7IdentityUniqueTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCS7Test;
 	FFakeLiveKit Fake;
 	const FFakeFetcherRef FetcherA = MakeShared<FFakeTokenFetcher, ESPMode::ThreadSafe>();
@@ -590,7 +590,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCS7SenderRefreshTokenTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCS7SenderRefreshTokenTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCS7Test;
 	FFakeLiveKit Fake;
 	const FFakeFetcherRef Fetcher = MakeShared<FFakeTokenFetcher, ESPMode::ThreadSafe>();
@@ -637,7 +637,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCS7ReceiverRefreshTokenTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCS7ReceiverRefreshTokenTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCS7Test;
 	FFakeLiveKit Fake;
 	const FFakeFetcherRef Fetcher = MakeShared<FFakeTokenFetcher, ESPMode::ThreadSafe>();
@@ -680,7 +680,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCS7ReceiverRefreshFallbackTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCS7ReceiverRefreshFallbackTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCS7Test;
 	FFakeLiveKit Fake;
 	Fake.RefreshTokenResult = 101; // lk_refresh_token unsupported
@@ -731,7 +731,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCS7SendFailureNoDoubleFreeTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCS7SendFailureNoDoubleFreeTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCS7Test;
 	// The old path borrowed the caller's Transform pointers into a pooled Subject and deleted
 	// them when serialization failed. SubjectList::Serialize cannot currently fail, so this test
@@ -806,7 +806,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCBothDataCallbacksTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCBothDataCallbacksTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCS7Test;
 	FFakeLiveKit Fake;
 	{
@@ -865,7 +865,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCS7Utf8LabelRoundTripTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCS7Utf8LabelRoundTripTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCS7Test;
 	FFakeLiveKit Fake;
 	const FString Name = MakeNonAsciiName();
@@ -974,7 +974,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCS7LateCallbackAfterDestroyTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCS7LateCallbackAfterDestroyTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCS7Test;
 	FFakeLiveKit Fake;
 	LkDataCallbackEx DataCallback = nullptr;
@@ -1044,7 +1044,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCA1SendResultCodesTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCA1SendResultCodesTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCS7Test;
 	FFakeLiveKit Fake;
 	FO3DWebRTCSender Sender(FFakeLiveKit::MakeApi());
@@ -1093,7 +1093,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCA1SenderStateTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCA1SenderStateTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCS7Test;
 	using namespace WebRTCA1Pr3Test;
 	// The test fires LkConnFailed once; the sender logs that real failure at Error.
@@ -1162,7 +1162,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCA1ReceiverStateTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCA1ReceiverStateTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCS7Test;
 	using namespace WebRTCA1Pr3Test;
 	FFakeLiveKit Fake;
@@ -1230,7 +1230,7 @@ bool FWebRTCA1CapabilitiesTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("The registered descriptor reports the same values"), Registered == LossyCaps);
 	}
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCS7Test;
 	FFakeLiveKit Fake;
 	FO3DWebRTCSender Sender(FFakeLiveKit::MakeApi());

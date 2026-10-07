@@ -676,7 +676,9 @@ bool FO3DSenderCaptureTest::RunTest(const FString& Parameters)
 {
 	using namespace O3DSenderPipelineTests;
 	const TSharedPtr<const FO3DSSkeletonDescriptor> Descriptor = MakeThreeBoneDescriptor();
-	const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("O3DCaptures"), FString::Printf(TEXT("Test-%s.o3dscap"), *FGuid::NewGuid().ToString()));
+	// Full path: the file is read back with std::ifstream, which resolves a relative path against the
+	// process's working directory, not as UE's file manager does (it differed on UE 5.8).
+	const FString Path = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("O3DCaptures"), FString::Printf(TEXT("Test-%s.o3dscap"), *FGuid::NewGuid().ToString())));
 
 	FO3DSenderPipelineProbe Probe;
 	Probe.Start(false);

@@ -484,7 +484,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCCtl6RoundTripTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCCtl6RoundTripTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCCtl6Test;
 	FCtlFakeLiveKit Fake;
 	Fake.bRelay = true;
@@ -602,7 +602,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCCtl6ClassificationTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCCtl6ClassificationTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCCtl6Test;
 	FCtlFakeLiveKit Fake;
 
@@ -713,7 +713,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCCtl6SenderRefusalsTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCCtl6SenderRefusalsTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCCtl6Test;
 	FCtlFakeLiveKit Fake;
 
@@ -793,7 +793,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCCtl6SinkReleasedOnStopTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCCtl6SinkReleasedOnStopTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCCtl6Test;
 	FCtlFakeLiveKit Fake;
 	const TArray<uint8> ControlEnvelope = CtlMakeEnvelope(CtlMakePayload(4, 64));
@@ -851,7 +851,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCCtl6StopWhileSendingTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCCtl6StopWhileSendingTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCCtl6Test;
 	constexpr int32 NumThreads = 4;
 	constexpr int32 MaxCallsPerThread = 20000;

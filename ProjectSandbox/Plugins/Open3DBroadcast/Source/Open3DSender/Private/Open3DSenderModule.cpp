@@ -2,6 +2,7 @@
 
 #include "Misc/CoreDelegates.h"
 #include "Modules/ModuleManager.h"
+#include "O3DEngineCompat.h"
 #include "O3DAudioInputDevices.h"
 #include "O3DSenderLogs.h"
 #include "O3DSenderPipeline.h"
@@ -30,7 +31,7 @@ public:
 		// as a modular feature from another module that may load after this one.
 		if (GIsEditor && !IsRunningCommandlet())
 		{
-			PostEngineInitHandle = FCoreDelegates::OnPostEngineInit.AddLambda([]()
+			PostEngineInitHandle = O3DEngineCompat::OnPostEngineInit().AddLambda([]()
 			{
 				FO3DAudioInputDevices::Get().Refresh();
 			});
@@ -40,7 +41,7 @@ public:
 
 	virtual void ShutdownModule() override
 	{
-		FCoreDelegates::OnPostEngineInit.Remove(PostEngineInitHandle);
+		O3DEngineCompat::OnPostEngineInit().Remove(PostEngineInitHandle);
 
 		// ADR 0008 item 10: a pose pipeline task still running holds its pipeline and transport;
 		// give it a moment (1 s at most) so none runs this module's code after it shuts down.
