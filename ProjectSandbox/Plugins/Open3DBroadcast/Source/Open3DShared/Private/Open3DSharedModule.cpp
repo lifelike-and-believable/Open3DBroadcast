@@ -19,11 +19,11 @@ public:
         // metrics singleton it replaces, it lives until static destruction: transports may still
         // reach it from their own threads.
         FO3DRuntimeContext::Default();
-        UE_LOG(LogO3DShared, Display, TEXT("Open3DShared module started"));
+        UE_LOG(LogO3DShared, Verbose, TEXT("Open3DShared module started"));
     }
     virtual void ShutdownModule() override
     {
-        UE_LOG(LogO3DShared, Display, TEXT("Open3DShared module shutdown"));
+        UE_LOG(LogO3DShared, Verbose, TEXT("Open3DShared module shutdown"));
     }
 };
 

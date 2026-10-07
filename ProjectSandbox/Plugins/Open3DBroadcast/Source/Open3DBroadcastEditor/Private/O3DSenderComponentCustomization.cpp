@@ -329,15 +329,9 @@ void FO3DSenderComponentCustomization::CustomizeDetails(IDetailLayoutBuilder& De
             {
                 const bool bEnableAudioValue = Component->bEnableAudio;
                 const bool bMicMode = (Component->AudioCaptureMode == EO3DSenderCaptureMode::Input);
-                UE_LOG(LogO3DSenderDetails, VeryVerbose, TEXT("AudioInputDevice visibility (component state): Enable=%d Mode=%d -> %s"),
-                    bEnableAudioValue,
-                    static_cast<int32>(Component->AudioCaptureMode),
-                    (bEnableAudioValue && bMicMode) ? TEXT("Visible") : TEXT("Collapsed"));
-
                 return (bEnableAudioValue && bMicMode) ? EVisibility::Visible : EVisibility::Collapsed;
             }
 
-            UE_LOG(LogO3DSenderDetails, VeryVerbose, TEXT("AudioInputDevice visibility: component unavailable"));
             return EVisibility::Collapsed;
         }));
     }
@@ -649,7 +643,6 @@ FText FO3DSenderComponentCustomization::GetSelectedTransportText() const
 
 FName FO3DSenderComponentCustomization::GetSelectedTransportName() const
 {
-    UE_LOG(LogO3DSenderDetails, VeryVerbose, TEXT("GetSelectedTransportName invoked"));
     if (TransportNameHandle.IsValid())
     {
         FName PropertyValue = NAME_None;
@@ -669,7 +662,6 @@ FName FO3DSenderComponentCustomization::GetSelectedTransportName() const
 
 bool FO3DSenderComponentCustomization::IsTransportSelectionEnabled() const
 {
-    UE_LOG(LogO3DSenderDetails, VeryVerbose, TEXT("IsTransportSelectionEnabled invoked"));
     bool bAutoCreate = false;
     if (GetAutoCreateTransportValue(bAutoCreate))
     {
@@ -681,7 +673,6 @@ bool FO3DSenderComponentCustomization::IsTransportSelectionEnabled() const
 
 bool FO3DSenderComponentCustomization::GetAutoCreateTransportValue(bool& bOutAutoCreate) const
 {
-    UE_LOG(LogO3DSenderDetails, VeryVerbose, TEXT("GetAutoCreateTransportValue invoked"));
     if (AutoCreateTransportHandle.IsValid())
     {
         bool bValue = false;
@@ -709,7 +700,6 @@ bool FO3DSenderComponentCustomization::GetAutoCreateTransportValue(bool& bOutAut
 
 EVisibility FO3DSenderComponentCustomization::GetTransportCustomizationVisibility() const
 {
-    UE_LOG(LogO3DSenderDetails, VeryVerbose, TEXT("GetTransportCustomizationVisibility invoked"));
     bool bAutoCreate = true;
     if (GetAutoCreateTransportValue(bAutoCreate))
     {

@@ -179,7 +179,6 @@ private:
 	double LastConnectAttemptTimeSeconds = 0.0;
 	/** Earliest time (NowSeconds) for the next connect attempt. */
 	double NextConnectAttemptTimeSeconds = 0.0;
-	double LastSubscribeAttemptTimeSeconds = 0.0;
 	FSubscribeRetryState MocapSubscribeRetry;
 	FSubscribeRetryState AudioSubscribeRetry;
 	FSubscribeRetryState ControlSubscribeRetry;
@@ -193,7 +192,6 @@ private:
 	// This prevents use-after-free when callbacks are pending on the game thread
 	TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> AliveFlag;
 
-	static constexpr double kErrorLogIntervalSeconds = 5.0;
 	static constexpr int32 kMaxFramesPerPoll = 16;
 	/** Control payloads handled per Poll, on top of the frames, so a burst cannot stall it. */
 	static constexpr int32 kMaxControlPerPoll = 64;

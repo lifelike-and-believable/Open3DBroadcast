@@ -226,7 +226,6 @@ void UO3DSenderComponent::OnRegister()
 	Super::OnRegister();
 	EnsureValidTransportName();
 	SyncAudioConfigSource();
-	UpdateEditConditionHelpers();
 }
 
 void UO3DSenderComponent::PostInitProperties()
@@ -234,7 +233,6 @@ void UO3DSenderComponent::PostInitProperties()
 	Super::PostInitProperties();
 	EnsureValidTransportName();
 	SyncAudioConfigSource();
-	UpdateEditConditionHelpers();
 }
 
 #if WITH_EDITORONLY_DATA
@@ -244,7 +242,6 @@ void UO3DSenderComponent::PostLoad()
 	EnsureValidTransportName();
 	MigrateLegacySecretOptions();
 	SyncAudioConfigSource();
-	UpdateEditConditionHelpers();
 }
 #endif
 
@@ -1400,11 +1397,6 @@ bool UO3DSenderComponent::GetControlValue(const FString& Key, const FString& Tar
 	return ControlPublisher->FindValue(Key, TargetSubject, OutValue);
 }
 
-void UO3DSenderComponent::UpdateEditConditionHelpers()
-{
-	// Reserved for future per-transport edit condition logic.
-}
-
 #if WITH_EDITOR
 void UO3DSenderComponent::PreEditChange(FProperty* PropertyAboutToChange)
 {
@@ -1419,7 +1411,6 @@ void UO3DSenderComponent::PreEditChange(FProperty* PropertyAboutToChange)
 void UO3DSenderComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
-	UpdateEditConditionHelpers();
 
 	const FName Prop = PropertyChangedEvent.MemberProperty ? PropertyChangedEvent.MemberProperty->GetFName() : NAME_None;
 

@@ -390,6 +390,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Delete the dead members and paths. Extract `WriteCurvesToSubject()` and a shared persistent-subject full-sync helper. Replace the fake-hierarchy fallback with drop plus warning.
 - Effort: S
 - Owner: coding
+- Status: closed in #441
 
 ### SND-32: Console command and global instance list lifetimes
 - Category: code-quality
@@ -409,6 +410,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/Open3
 - Recommendation: Rate-limit the per-frame warnings (log once on transition, then count them in stats). Add `LogO3DSenderCurves` and `LogO3DSenderTransport` categories. Drop the getter logs.
 - Effort: S
 - Owner: coding
+- Status: closed in #441
 
 ### SND-34: Editor code and dependencies live in the runtime module
 - Category: fab-readiness

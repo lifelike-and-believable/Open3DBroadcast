@@ -337,6 +337,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Delete the dead code. Either wire in the useful FFI APIs or document why they are unused. Drop the LibDC flag or implement the backend.
 - Effort: S
 - Owner: coding
+- Status: closed in #441
 
 ### TRF-34: Tests rarely exercise real behavior; one MoQ test cannot pass; one EngineFilter test needs the internet
 - Category: tests

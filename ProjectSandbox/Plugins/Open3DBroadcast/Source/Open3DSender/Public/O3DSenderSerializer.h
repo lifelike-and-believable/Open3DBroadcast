@@ -179,6 +179,8 @@ private:
 	static void BuildSubjectFromDescriptor(const FString& SubjectName, const FO3DSSkeletonDescriptor& Descriptor, O3DS::Subject& OutSubject);
 	static void FillFrameValues(const FO3DSPoseFrame& Frame, O3DS::Subject& InOutSubject);
 	static void FillCurves(const FO3DSPoseFrame& Frame, O3DS::Subject& InOutSubject);
+	/** Copies the frame's curve values by index; the Subject already holds the same names in the same order. */
+	static void CopyCurveValues(const FO3DSPoseFrame& Frame, O3DS::Subject& InOutSubject);
 	static bool IsSameDescriptor(const FO3DSSkeletonDescriptor* Cached, const FO3DSSkeletonDescriptor& Descriptor);
 	static bool AreSameCurveNames(const TArray<FName>& Cached, const TArray<FName>& Names);
 	static uint64 HashCurveNames(const TArray<FName>& Names);

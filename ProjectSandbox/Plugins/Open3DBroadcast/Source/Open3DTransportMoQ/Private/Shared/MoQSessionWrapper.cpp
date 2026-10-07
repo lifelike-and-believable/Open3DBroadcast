@@ -504,51 +504,6 @@ FMoQResult FMoQSessionWrapper::Subscribe(const FMoQSubscriptionConfig& Config, T
     return FMoQResult::Ok();
 }
 
-FMoQResult FMoQSessionWrapper::SubscribeAsync(const FMoQSubscriptionConfig& Config, FSubscribeAsyncCallback&& Completion)
-{
-    if (!Completion)
-    {
-        return FMoQResult::FromCode(EMoQErrorCode::InvalidArgument, TEXT("Completion callback must be provided"));
-    }
-
-    if (!Api->LaunchBlocking)
-    {
-        return FMoQResult::FromCode(EMoQErrorCode::Internal, TEXT("No executor for the blocking subscribe call"));
-    }
-
-    if (!SelfWeak.IsValid())
-    {
-        SelfWeak = AsShared();
-    }
-
-    const FMoQSubscriptionConfig ConfigCopy = Config;
-    TWeakPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> WeakSelf = SelfWeak;
-
-    Api->LaunchBlocking([WeakSelf, ConfigCopy, Completion = MoveTemp(Completion)]() mutable
-    {
-        TSharedPtr<FMoQSessionWrapper, ESPMode::ThreadSafe> StrongThis = WeakSelf.Pin();
-        if (!StrongThis.IsValid())
-        {
-            FMoQAsyncDispatcher::Get().EnqueueGameThreadTask([Completion = MoveTemp(Completion)]() mutable
-            {
-                Completion(FMoQResult::FromCode(EMoQErrorCode::Internal, TEXT("Session destroyed before subscribe executed")), nullptr);
-            });
-            return;
-        }
-
-        TSharedPtr<FMoQSubscriberHandle> Subscriber;
-        FMoQResult Result = StrongThis->Subscribe(ConfigCopy, Subscriber);
-
-        // The session is released on the game thread along with the completion.
-        FMoQAsyncDispatcher::Get().EnqueueGameThreadTask([Completion = MoveTemp(Completion), Result = MoveTemp(Result), Subscriber, StrongThis]() mutable
-        {
-            Completion(Result, Subscriber);
-        });
-    });
-
-    return FMoQResult::FromCode(EMoQErrorCode::Ok, TEXT("Subscribe enqueued (async)"));
-}
-
 void FMoQSessionWrapper::Unsubscribe(const TSharedPtr<FMoQSubscriberHandle>& SubscriberHandle)
 {
     if (!SubscriberHandle.IsValid())

@@ -151,7 +151,6 @@ FO3DTransportResult FO3DMoQReceiver::Initialize(const FO3DTransportConfig& Confi
 	ConsecutiveFailures = 0;
 	LastConnectAttemptTimeSeconds = 0.0;
 	NextConnectAttemptTimeSeconds = 0.0;
-	LastSubscribeAttemptTimeSeconds = 0.0;
 	MocapSubscribeRetry.Reset();
 	AudioSubscribeRetry.Reset();
 	ControlSubscribeRetry.Reset();
@@ -410,7 +409,6 @@ bool FO3DMoQReceiver::AttemptSubscribe()
 		return true;
 	}
 
-	LastSubscribeAttemptTimeSeconds = NowSeconds();
 
 	FMoQSubscriptionConfig SubscriptionConfig;
 	SubscriptionConfig.Namespace = Options.MocapNamespace;

@@ -578,6 +578,13 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Low-severity cleanup (WP-Q1; SND-31, SND-33, TRF-33, SHR-28; SHR-29 part). No behaviour change.
+  - **Sender:** the unused `BoneTransformsFinalizedHandle` and the empty `UpdateEditConditionHelpers` are gone; the curve-value copy shared by two serializer paths is `FO3DSenderSerializer::CopyCurveValues`.
+  - **Logs:** the curve processor logs under the new `LogO3DSenderCurves` and the transport controller under `LogO3DSenderTransport` (both were `LogO3DSenderComponent`); the sender Details panel no longer logs from its Slate getters, which run on every paint; the Open3DShared start and shutdown lines are Verbose instead of Display; `LogO3DAudioCodec` and `LogO3DPerformanceMetrics` are exported.
+  - **MoQ:** the unused `FMoQSessionWrapper::SubscribeAsync`, the write-only `LastSubscribeAttemptTimeSeconds`, and the receiver's copy of `kErrorLogIntervalSeconds` (the shared `MoQHelpers` value is the same, 5 s) are gone.
+  - **WebRTC:** `LiveKitFfiApi.h` says which livekit_ffi functions are not bound and why.
+  - **Open3DShared headers:** `WriteBE64` (unused) is gone and `WriteBE32` is `inline`, not a header `static`; `O3DAudioOpus.h` and `.cpp` drop includes they do not use.
+
 - Docs stay honest (WP-D4). `Build/Scripts/check-markdown-links.py` checks the relative links, the links into this repository's GitHub tree and the `#anchors` of every tracked Markdown file; the plugin CI runs it as "Markdown links resolve" on every PR, docs-only ones included, and "Plugin CI result" includes it. The 9 links it found broken (developer notes moved to `docs/dev/`) are fixed. `.github/pull_request_template.md` carries the roadmap's review checklist (section 7).
 - Root README checked against the code (WP-D1; DOC-3). The receiver source is **Open3DStream Receiver**; the first-stream steps tick **Auto Create Transport**, as the USER_GUIDE quick start does; the core's TCP, UDP and NNG connectors are no longer listed as part of the core (they are the opt-in legacy library); both schemas and the sync step are named; the TCP example uses the default port 17700 and describes the payload as a frame or an envelope; the docs list links the wire format and AGENTS.md.
 

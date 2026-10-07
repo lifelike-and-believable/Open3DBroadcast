@@ -109,8 +109,6 @@ public:
     FMoQResult CreatePublisher(const FMoQPublisherConfig& Config, TSharedPtr<FMoQPublisherHandle>& OutPublisher);
 
     FMoQResult Subscribe(const FMoQSubscriptionConfig& Config, TSharedPtr<FMoQSubscriberHandle>& OutSubscriber);
-    using FSubscribeAsyncCallback = TFunction<void(FMoQResult, TSharedPtr<FMoQSubscriberHandle>)>;
-    FMoQResult SubscribeAsync(const FMoQSubscriptionConfig& Config, FSubscribeAsyncCallback&& Completion);
     void Unsubscribe(const TSharedPtr<FMoQSubscriberHandle>& SubscriberHandle);
 
 private:

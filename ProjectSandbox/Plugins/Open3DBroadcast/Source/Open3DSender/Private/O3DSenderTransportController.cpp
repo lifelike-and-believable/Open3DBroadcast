@@ -25,7 +25,7 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
     ActiveConfig = InConfig;
     if (ActiveConfig.Transport.IsNone())
     {
-        UE_LOG(LogO3DSenderComponent, Warning, TEXT("No transport specified; skipping auto transport setup."));
+        UE_LOG(LogO3DSenderTransport, Warning, TEXT("No transport specified; skipping auto transport setup."));
         LastResult = FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("No transport selected."));
         return false;
     }
@@ -34,7 +34,7 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
     const FO3DTransportResult OptionsResult = O3DTransportOptions::ValidateOptions(ActiveConfig.GetOptions());
     if (!OptionsResult.IsOk())
     {
-        UE_LOG(LogO3DSenderComponent, Warning, TEXT("Sender transport '%s' not started: %s"), *ActiveConfig.Transport.ToString(), *LexToString(OptionsResult));
+        UE_LOG(LogO3DSenderTransport, Warning, TEXT("Sender transport '%s' not started: %s"), *ActiveConfig.Transport.ToString(), *LexToString(OptionsResult));
         LastResult = OptionsResult;
         return false;
     }
@@ -43,7 +43,7 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
     ActiveSender = FO3DTransportRegistry::Get().CreateSender(SelectedTransportName);
     if (!ActiveSender.IsValid())
     {
-        UE_LOG(LogO3DSenderComponent, Warning, TEXT("No sender registered for transport '%s'."), *ActiveConfig.Transport.ToString());
+        UE_LOG(LogO3DSenderTransport, Warning, TEXT("No sender registered for transport '%s'."), *ActiveConfig.Transport.ToString());
         LastResult = FO3DTransportResult::Error(EO3DTransportError::Unsupported, FString::Printf(TEXT("No sender is registered for transport '%s'."), *ActiveConfig.Transport.ToString()));
         return false;
     }
@@ -63,7 +63,7 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
     LastResult = ActiveSender->Initialize(ActiveConfig);
     if (!LastResult.IsOk())
     {
-        UE_LOG(LogO3DSenderComponent, Warning, TEXT("Failed to initialize sender transport '%s': %s"), *ActiveConfig.Transport.ToString(), *LexToString(LastResult));
+        UE_LOG(LogO3DSenderTransport, Warning, TEXT("Failed to initialize sender transport '%s': %s"), *ActiveConfig.Transport.ToString(), *LexToString(LastResult));
         Unsubscribe();
         ActiveSender.Reset();
         return false;
@@ -72,7 +72,7 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
     LastResult = ActiveSender->Start();
     if (!LastResult.IsOk())
     {
-        UE_LOG(LogO3DSenderComponent, Warning, TEXT("Failed to start sender transport '%s': %s"), *ActiveConfig.Transport.ToString(), *LexToString(LastResult));
+        UE_LOG(LogO3DSenderTransport, Warning, TEXT("Failed to start sender transport '%s': %s"), *ActiveConfig.Transport.ToString(), *LexToString(LastResult));
         Stop();
         return false;
     }
@@ -85,12 +85,12 @@ bool FO3DSenderTransportController::Start(const FO3DTransportConfig& InConfig)
             AudioSink = ActiveSender->CreateAudioSink(ActiveConfig.Audio);
             if (!AudioSink.IsValid())
             {
-                UE_LOG(LogO3DSenderComponent, Warning, TEXT("Transport '%s' reported audio support but failed to provide a sink."), *ActiveConfig.Transport.ToString());
+                UE_LOG(LogO3DSenderTransport, Warning, TEXT("Transport '%s' reported audio support but failed to provide a sink."), *ActiveConfig.Transport.ToString());
             }
         }
         else
         {
-            UE_LOG(LogO3DSenderComponent, Warning, TEXT("Transport '%s' does not support audio; ignoring audio configuration."), *ActiveConfig.Transport.ToString());
+            UE_LOG(LogO3DSenderTransport, Warning, TEXT("Transport '%s' does not support audio; ignoring audio configuration."), *ActiveConfig.Transport.ToString());
         }
     }
 
@@ -139,7 +139,7 @@ void FO3DSenderTransportController::HandleTransportUnregistering(FName Transport
         return;
     }
 
-    UE_LOG(LogO3DSenderComponent, Warning, TEXT("Sender transport '%s' is being unregistered (its module is shutting down); stopping and releasing the sender."), *TransportName.ToString());
+    UE_LOG(LogO3DSenderTransport, Warning, TEXT("Sender transport '%s' is being unregistered (its module is shutting down); stopping and releasing the sender."), *TransportName.ToString());
 
     // The owner first drops what it holds (the audio capture's sink, the control publisher); it
     // may call Stop() itself. Copied, because the handler may replace itself.
