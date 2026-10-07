@@ -853,7 +853,7 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
   - Export macros on public log categories.
   - Header-level `static` functions and IWYU fixes.
 - Pick up only the items not already closed by an earlier WP. The code review agent confirms this against the coverage table in §8.
-- **Done (2026-10-07):** #440 (core), #441 (plugin). Left for a maintainer decision: TRF-6/TRF-26 wiring, the CORE-25 null-predictor guard and `o3ds.h`, the SHR-29 field renames.
+- **Done (2026-10-07):** #440 (core), #441 (plugin), #445 (CORE-25: null-predictor fallback, `o3ds.h`), #449 (TRF-6, TRF-26: WebRTC reconnect, ADR 0015). SHR-29's field renames were declined (maintainer, 2026-10-07).
 
 #### WP-R1: Correctness follow-ups from the mid-project review  ·  P1 · M · coding (added 2026-10-06)
 - **Items:** `docs/roadmap/mid-project-review-2026-10-06.md` RR-1, RR-2, RR-3, RR-4 (receiver); SR-3, SR-2 (sender); TR-1/SR-1, TR-2, TR-3 (transports). They are review items, not findings in `docs/review/`.

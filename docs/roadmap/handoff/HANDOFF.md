@@ -83,6 +83,13 @@ This section supersedes the "Start here" line in §0 where they disagree.
     - WP-Q1's survey found 19 of its 37 sub-items already fixed by earlier work packages.
     - Flaky test: `core.repeater_tests` `Repeater_OversizeMessageClosesOnlyThatSender` failed once in CI (#440): the NNG push socket reconnects between the test's polls. Offered as a separate task; not fixed yet.
   - **UE 5.8 (2026-10-07):** the maintainer chose UE 5.7 and 5.8, without 5.6. The compile spike (WP-V1) is in `docs/roadmap/engine-version-5.8-spike.md`: the main plugin builds on 5.8 with 2 deprecation warnings (`OnPostEngineInit`) and passes 493 of 494 tests (a test bug: a relative path read with `std::ifstream`); the add-on stops on `PLATFORM_64BITS` deprecation warnings.
+  - **UE 5.8 support, decided and built (2026-10-07):**
+    - #444, ADR 0014 (supported engines: UE 5.7 and 5.8, Win64; two at a time; one source tree; `EngineVersion` stamped at packaging; a reduced 5.8 CI job; one Fab listing with a zip per engine). The plan is `docs/roadmap/engine-version-5.8-plan.md`.
+    - #446, WP-V3: builds cleanly on 5.8 (`O3DEngineCompat.h` for `OnPostEngineInit`; `PLATFORM_WINDOWS` instead of the deprecated `PLATFORM_64BITS`; the capture test reads its full path).
+    - #448, WP-V2: Target.cs pick V7/`Unreal5_8` on 5.8 and V6/`Unreal5_7` on 5.7; no `EngineVersion` in the source descriptors (5.8 skipped the add-on because of it); `fab-package.py --engine-version`; `Run-AutomationTests.ps1` fails on a plugin that names another engine. Verified locally: 5.8 and 5.7 each 549/549, every build without warnings.
+    - Not done: the 5.8 CI leg (WP-V4) needs UE 5.8 on the runner; LiveLink EngineTime on 5.8 and a live take (WP-V6) need the maintainer.
+  - **WP-Q1 leftovers (maintainer took the recommendations, 2026-10-07):** #445, CORE-25: `ConcealmentEngine` without a predictor falls back to `HoldPredictor`; `o3ds.h` removed. SHR-29's exported `FUnifiedHeader` field names stay as they are.
+  - **WebRTC reconnect (ADR 0015, 2026-10-07):** #447 (the ADR) and #449 (TRF-6, TRF-26). The FFI's `lk_set_reconnect_backoff` is a no-op and `lk_client_is_ready` is not a health signal, so both ends use LiveKit's connection state and `FO3DReconnectPolicy` (1 s to 30 s, no limit) after LiveKit gives up or a connect fails. The receiver's no-data watchdog is off by default and counts only while connected; the sender reconnects instead of staying `Failed`, closing the room livekit_ffi still holds and using fresh audio tracks. Not verified against a real LiveKit server.
 - **Maintainer decisions:**
   - **WP-U2 (2026-10-05):**
     - `bAutoCreateTransport` stays false, with a warning;
@@ -106,15 +113,15 @@ This section supersedes the "Start here" line in §0 where they disagree.
     - still include a deleted file, so the build fails;
     - and after a failed build, the automation run uses the old binaries and can report green.
 
-    Check that the build succeeded and compare the test count: 549 with the WebRTC add-on (494 without) on `develop` as of #435. CI fails below the floors in `Build/automation-test-floors.json`. When several PRs add tests, each raises the floors by its own tests; after one merges, merge `develop` into the others and add their tests to `develop`'s floors.
+    Check that the build succeeded and compare the test count: 553 with the WebRTC add-on (494 without) on `develop` as of #449. CI fails below the floors in `Build/automation-test-floors.json`. When several PRs add tests, each raises the floors by its own tests; after one merges, merge `develop` into the others and add their tests to `develop`'s floors.
   - The test editor runs with `-NoSound`, so audible playback can't be tested automatically. Audio tests cover the component's state and the jitter buffer; listening is a desk check.
   - `close_findings.py`-style helpers must put the Status line after a finding's last top-level bullet, not inside nested bullets.
 - **Next, after the maintainer's go-ahead:**
-  1. UE 5.8 (ADR 0014, accepted 2026-10-07; plan `docs/roadmap/engine-version-5.8-plan.md`): WP-V3 (the three spike fixes), WP-V2 (build system and descriptors), then WP-V4 (CI matrix) once UE 5.8 is installed on the runner (WP-V8a, desk).
-  2. WP-Q1 leftovers that need a decision: wire `lk_client_is_ready` and `lk_set_reconnect_backoff` (TRF-6, TRF-26); a guard for a null predictor in `ConcealmentEngine` and deleting the unused `o3ds.h` (CORE-25); renaming the exported `FUnifiedHeader` fields (SHR-29).
-  3. Desk checks: WP-U6 between two machines and multicast on real network gear; MoQ against a real relay (the new defaults).
+  1. UE 5.8 (ADR 0014; plan `docs/roadmap/engine-version-5.8-plan.md`): WP-V8a (desk: install UE 5.8, Win64 only, on the CI runner), then WP-V4 (the CI matrix), WP-V5 (release per engine), WP-V6 (LiveLink EngineTime and Timecode on 5.8, a live take), WP-V7 (docs), WP-V8b (Fab, desk).
+  2. Desk checks: WP-U6 between two machines and multicast on real network gear; MoQ against a real relay (the new defaults); WebRTC through a network drop of more than 45 s (#449).
+  3. The flaky core test `Repeater_OversizeMessageClosesOnlyThatSender` (the NNG push socket reconnects between the test's polls; it failed once in CI on #440): offered as a separate task.
   4. The names-in-use picker: not specified yet; ask the maintainer what it should do.
-  6. WP-U5: sample content. It also carries WP-U2's acceptance, and it needs the maintainer at the editor.
+  5. WP-U5: sample content. It also carries WP-U2's acceptance, and it needs the maintainer at the editor.
 
   The desk items below are unchanged. Also for the maintainer:
   - (done 2026-10-06) branch protection: a `develop` ruleset requires "Plugin CI result" and "Core tests result", allows only squash merges, blocks deletion and force pushes, and has no bypass (`Build/README.md`);
@@ -217,7 +224,7 @@ The plan is `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Design decisio
 | M1 Safety and correctness: WP-S1..S11, WP-T1, WP-T2 | Done (#264–#279) |
 | M2 Fab-buildable package: WP-F1..F4, F6..F9, F11 | Done (#274–#286). **F0 and F5 wait on the maintainer** (see §5) |
 | M3 Architecture: WP-A1..A7 | **In progress.** WP-A1, A2 (except removing `o3d.Sender.AsyncPipeline` one release later), A3 and A6 done; WP-A4 nearly done (ADR 0009 and ADR 0005 implemented, CORE-11/13/15 fixed, CORE-12 harness merged, CORE-14 in #353, RCV-8 in ADR 0013, accepted); WP-A5 waits for the maintainer at the desk; WP-A7 partly done (#348). SHR-38: ADR 0012 implemented (#357–#365). See §0a. |
-| M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | **In progress.** WP-U1, U2 and U3 done (#385–#391); WP-U4 done (#393, #395, #396, #398); WP-U6 done (#427–#433); WP-D1 to D4 done (#420–#424, #436–#439); WP-Q1 done (#440, #441; three leftovers need a decision). Open: WP-U5 (needs the maintainer at the editor). See §0a. |
+| M4 Usability and docs: WP-U1..U6, WP-D1..D4, WP-Q1 | **In progress.** WP-U1, U2 and U3 done (#385–#391); WP-U4 done (#393, #395, #396, #398); WP-U6 done (#427–#433); WP-D1 to D4 done (#420–#424, #436–#439); WP-Q1 done (#440, #441, #445, #449). UE 5.8: ADR 0014, WP-V2 and V3 done (#444, #446, #448). Open: WP-U5 (needs the maintainer at the editor). See §0a. |
 | M5 Fab submission: WP-F10 | Not started; needs F0, F5 and the listing details in §5 |
 | WP-CTL control channel (D11, ADR 0011) | CTL-1..7 done (#290–#295, CTL-6, CTL-7); live-server checks remain (see §2b) |
 
