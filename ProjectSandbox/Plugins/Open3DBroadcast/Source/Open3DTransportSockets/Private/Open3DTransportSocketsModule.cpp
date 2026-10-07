@@ -84,12 +84,12 @@ namespace SocketsSchema
 		{
 			Schema.Add(MakeInt(O3DSockets::MtuOptionKey, LOCTEXT("UdpMtuLabel", "MTU"),
 				LOCTEXT("UdpMtuTooltip", "Largest datagram sent, fragment header included. A larger frame or audio packet is split into fragments of this size; control messages are always sent whole."),
-				1200, O3DSockets::MinUdpMtuBytes, 65507));
+				O3DSockets::DefaultUdpMtuBytes, O3DSockets::MinUdpMtuBytes, 65507));
 		}
 		else
 		{
 			Schema.Add(MakeInt(O3DSockets::MaxDatagramOptionKey, LOCTEXT("UdpMaxDatagramLabel", "Max Datagram Bytes"),
-				LOCTEXT("UdpReceiverMaxDatagramTooltip", "Largest datagram accepted. Keep it at least as large as the sender's MTU and its control messages (up to 1,100 bytes)."), 64000, 512, 65507));
+				LOCTEXT("UdpReceiverMaxDatagramTooltip", "Largest datagram accepted. Keep it at least as large as the sender's MTU and its control messages (up to 1,100 bytes)."), O3DSockets::DefaultUdpMaxDatagramBytes, 512, 65507));
 		}
 	}
 
@@ -97,7 +97,7 @@ namespace SocketsSchema
 	{
 		FO3DTransportOptionSchema Schema;
 		Schema.Add(MakeText(O3DSockets::BindOptionKey, LOCTEXT("TcpSenderBindLabel", "Bind Address"),
-			LOCTEXT("TcpSenderBindTooltip", "Local address the sender listens on for receivers. 0.0.0.0 listens on every interface."), TEXT("0.0.0.0")));
+			LOCTEXT("TcpSenderBindTooltip", "Local address the sender listens on for receivers. 0.0.0.0 listens on every interface."), O3DSockets::DefaultListenHost));
 		Schema.Add(MakePort(O3DSocketsConfig::DefaultTcpPort));
 		return Schema;
 	}
@@ -106,7 +106,7 @@ namespace SocketsSchema
 	{
 		FO3DTransportOptionSchema Schema;
 		Schema.Add(MakeText(O3DSockets::HostOptionKey, LOCTEXT("UdpSenderHostLabel", "Destination Host"),
-			LOCTEXT("UdpSenderHostTooltip", "Address the datagrams are sent to."), TEXT("127.0.0.1")));
+			LOCTEXT("UdpSenderHostTooltip", "Address the datagrams are sent to."), O3DSockets::DefaultRemoteHost));
 		Schema.Add(MakePort(O3DSocketsConfig::DefaultUdpPort));
 		Schema.Add(MakeBool(O3DSockets::BroadcastOptionKey, LOCTEXT("UdpSenderBroadcastLabel", "Enable UDP Broadcast"),
 			LOCTEXT("UdpSenderBroadcastTooltip", "Allow sending to a broadcast address.")));
@@ -118,7 +118,7 @@ namespace SocketsSchema
 	{
 		FO3DTransportOptionSchema Schema;
 		Schema.Add(MakeText(O3DSockets::HostOptionKey, LOCTEXT("TcpReceiverHostLabel", "Remote Host"),
-			LOCTEXT("TcpReceiverHostTooltip", "Address of the TCP sender to connect to."), TEXT("127.0.0.1")));
+			LOCTEXT("TcpReceiverHostTooltip", "Address of the TCP sender to connect to."), O3DSockets::DefaultRemoteHost));
 		Schema.Add(MakePort(O3DSocketsConfig::DefaultTcpPort));
 		Schema.Add(MakeInt(O3DSockets::TimeoutOptionKey, LOCTEXT("TcpReceiverTimeoutLabel", "Connection Timeout (seconds)"),
 			LOCTEXT("TcpReceiverTimeoutTooltip", "Reconnect if no data received for this many seconds (1-60)"), 5, 1, 60));
@@ -129,7 +129,7 @@ namespace SocketsSchema
 	{
 		FO3DTransportOptionSchema Schema;
 		Schema.Add(MakeText(O3DSockets::HostOptionKey, LOCTEXT("UdpReceiverBindLabel", "Bind Address"),
-			LOCTEXT("UdpReceiverBindTooltip", "Local address the receiver listens on. 0.0.0.0 listens on every interface."), TEXT("0.0.0.0")));
+			LOCTEXT("UdpReceiverBindTooltip", "Local address the receiver listens on. 0.0.0.0 listens on every interface."), O3DSockets::DefaultListenHost));
 		Schema.Add(MakePort(O3DSocketsConfig::DefaultUdpPort));
 		Schema.Add(MakeBool(O3DSockets::BroadcastOptionKey, LOCTEXT("UdpReceiverBroadcastLabel", "Accept Broadcast Packets"),
 			LOCTEXT("UdpReceiverBroadcastTooltip", "Receive datagrams sent to a broadcast address.")));

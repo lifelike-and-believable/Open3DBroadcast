@@ -22,7 +22,7 @@ namespace O3DSocketsConfig
 		Config.Role = EO3DTransportRole::Sender;
 
 		const FString StoredBindHost = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::BindOptionKey);
-		const FString BindHost = StoredBindHost.IsEmpty() ? FString(TEXT("0.0.0.0")) : O3DSockets::NormaliseHostname(StoredBindHost);
+		const FString BindHost = StoredBindHost.IsEmpty() ? FString(O3DSockets::DefaultListenHost) : O3DSockets::NormaliseHostname(StoredBindHost);
 		const int32 Port = O3DSockets::ReadPortOption(Config, O3DSockets::PortOptionKey, DefaultTcpPort);
 
 		Config.Uri = O3DSockets::MakeUri(TEXT("tcp"), BindHost, Port);
@@ -37,7 +37,7 @@ namespace O3DSocketsConfig
 		Config.Role = EO3DTransportRole::Receiver;
 
 		const FString StoredHost = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::HostOptionKey);
-		const FString Host = StoredHost.IsEmpty() ? FString(TEXT("127.0.0.1")) : O3DSockets::NormaliseHostname(StoredHost);
+		const FString Host = StoredHost.IsEmpty() ? FString(O3DSockets::DefaultRemoteHost) : O3DSockets::NormaliseHostname(StoredHost);
 		const int32 Port = O3DSockets::ReadPortOption(Config, O3DSockets::PortOptionKey, DefaultTcpPort);
 
 		Config.Uri = O3DSockets::MakeUri(TEXT("tcp"), Host, Port);

@@ -19,6 +19,17 @@ namespace O3DSockets
 	static constexpr TCHAR MaxDatagramOptionKey[] = TEXT("udp.maxdatagram");
 	/** Smallest UDP MTU: the 24-byte fragment header plus 256 bytes of payload (WP-U6, TRB-16). */
 	static constexpr int32 MinUdpMtuBytes = 280;
+	/**
+	 * Defaults shared by the option schemas (what the panels show) and the configure functions
+	 * (what a transport gets when an option is empty), so the two cannot drift (WP-U6, TRB-28).
+	 * The ports are O3DSocketsConfig::DefaultTcpPort and DefaultUdpPort.
+	 */
+	static constexpr int32 DefaultUdpMtuBytes = 1200;
+	static constexpr int32 DefaultUdpMaxDatagramBytes = 64000;
+	/** Where a listening end binds: the TCP sender and the UDP receiver. */
+	static constexpr TCHAR DefaultListenHost[] = TEXT("0.0.0.0");
+	/** Where a connecting or sending end points: the TCP receiver and the UDP sender. */
+	static constexpr TCHAR DefaultRemoteHost[] = TEXT("127.0.0.1");
 	/** Receiver: largest reassembled UDP message accepted, in bytes. */
 	static constexpr TCHAR MaxFrameOptionKey[] = TEXT("udp.maxframe");
 
