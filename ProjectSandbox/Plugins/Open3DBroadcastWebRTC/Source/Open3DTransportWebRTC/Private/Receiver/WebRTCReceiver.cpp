@@ -316,9 +316,10 @@ FO3DWebRTCReceiver::FO3DWebRTCReceiver()
 {
 }
 
-FO3DWebRTCReceiver::FO3DWebRTCReceiver(const FLkFfiApi& InFfi, FO3DTokenFetcherFactory InTokenFetcherFactory)
+FO3DWebRTCReceiver::FO3DWebRTCReceiver(const FLkFfiApi& InFfi, FO3DTokenFetcherFactory InTokenFetcherFactory, TFunction<double()> InClock)
     : Ffi(InFfi)
     , TokenFetcherFactory(MoveTemp(InTokenFetcherFactory))
+    , Clock(MoveTemp(InClock))
     , Link(MakeShared<FWebRTCReceiverLink, ESPMode::ThreadSafe>())
 {
     LinkToken = GetReceiverLinkRegistry().Register(Link);

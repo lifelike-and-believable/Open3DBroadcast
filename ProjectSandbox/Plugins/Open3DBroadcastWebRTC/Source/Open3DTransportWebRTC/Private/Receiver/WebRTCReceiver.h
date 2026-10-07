@@ -133,9 +133,10 @@ public:
 
     /**
      * Constructs a receiver that calls LiveKit through InFfi, and fetches tokens with fetchers
-     * from InTokenFetcherFactory (null uses the HTTP fetcher). Used by tests.
+     * from InTokenFetcherFactory (null uses the HTTP fetcher). InClock replaces
+     * FPlatformTime::Seconds() for the reconnect timing, so tests need no sleeps. Used by tests.
      */
-    explicit FO3DWebRTCReceiver(const FLkFfiApi& InFfi, FO3DTokenFetcherFactory InTokenFetcherFactory = nullptr);
+    explicit FO3DWebRTCReceiver(const FLkFfiApi& InFfi, FO3DTokenFetcherFactory InTokenFetcherFactory = nullptr, TFunction<double()> InClock = nullptr);
 
     virtual ~FO3DWebRTCReceiver() override;
 
@@ -166,6 +167,9 @@ private:
     /** Immutable after construction. */
     const FLkFfiApi Ffi;
     FO3DTokenFetcherFactory TokenFetcherFactory;
+    TFunction<double()> Clock;
+    /** FPlatformTime::Seconds(), or the test's clock. */
+    double Now() const { return Clock ? Clock() : FPlatformTime::Seconds(); }
 
     // Configuration
     FO3DTransportConfig ActiveConfig;

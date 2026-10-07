@@ -228,9 +228,10 @@ FO3DWebRTCSender::FO3DWebRTCSender()
 {
 }
 
-FO3DWebRTCSender::FO3DWebRTCSender(const FLkFfiApi& InFfi, FO3DTokenFetcherFactory InTokenFetcherFactory)
+FO3DWebRTCSender::FO3DWebRTCSender(const FLkFfiApi& InFfi, FO3DTokenFetcherFactory InTokenFetcherFactory, TFunction<double()> InClock)
     : Ffi(InFfi)
     , TokenFetcherFactory(MoveTemp(InTokenFetcherFactory))
+    , Clock(MoveTemp(InClock))
     , Link(MakeShared<FWebRTCSenderLink, ESPMode::ThreadSafe>(InFfi))
     , Context(FO3DRuntimeContext::Default())
     , TransportMetrics(Context->GetMetrics().AcquireTransportMetrics(TEXT("WebRTC")))
