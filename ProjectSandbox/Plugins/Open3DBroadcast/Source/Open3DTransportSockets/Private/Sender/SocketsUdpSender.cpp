@@ -326,7 +326,6 @@ FO3DTransportResult FO3DSocketsUdpSender::OpenSocket(const TSharedPtr<FInternetA
 		return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("Failed to create the UDP socket."));
 	}
 
-	Socket->SetReuseAddr(true);
 	Socket->SetNonBlocking(true);
 	if (bAllowBroadcast)
 	{

@@ -329,7 +329,8 @@ FO3DTransportResult FO3DSocketsTcpSender::CreateListenSocket()
 		return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("Failed to create the TCP listen socket."));
 	}
 
-	ListenSocket->SetReuseAddr(true);
+	// No SO_REUSEADDR (WP-U6, TRB-22): on Windows it lets a second socket bind a port in use, so a
+	// second listener, or another process, would share or take over this one silently.
 	ListenSocket->SetNonBlocking(true);
 
 	if (!ListenSocket->Bind(*BindAddr))
