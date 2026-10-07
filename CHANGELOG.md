@@ -580,6 +580,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 - TCP and UDP defaults in one place (WP-U6; TRB-28). The UDP MTU and Max Datagram Bytes, and the default listen and remote hosts, were written out in the option schemas (what the panels show), the configure functions and the sender and receiver classes. They are now constants next to the option keys (`SocketsTransportCommon.h`), so a panel and its transport cannot disagree. The ports were already in one place. Per-project overrides stay in **Project Settings > Open3DBroadcast** (#385). No behaviour change; a new test checks that each panel default is what the configure function uses.
 
+- TCP and UDP: no silent port sharing (WP-U6; TRB-22). The TCP sender's listen socket and the UDP receiver's socket set `SO_REUSEADDR`. On Windows that lets a second socket bind a port already in use, so a second sender or receiver on the same port started without error and shared or took over the port. A second listener on a port in use now fails to start with `AddressInUse`, and the log says the bind failed. The UDP sender, which binds nothing, no longer sets the option either.
+
 - UDP fragments at the MTU (WP-U6; TRB-16).
   - **The problem:** the sender split a message only above **Max Datagram Bytes** (64000), so the **MTU** setting did nothing for most frames. A large frame went out as one datagram that IP had to fragment, which some networks, NATs and VPNs drop.
   - **Now:** a frame or audio packet larger than the MTU (1200 bytes, header included) is sent as fragments no larger than the MTU. Control messages are still sent whole.
