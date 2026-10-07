@@ -1,6 +1,6 @@
 # 0007: Transport abstraction, registry and shared transport building blocks
 
-- **Status:** Accepted (maintainer sign-off 2026-09-29)
+- **Status:** Accepted (maintainer sign-off 2026-09-29); the WebRTC "Reconnect" bullet of the PR 4f addendum is superseded by [ADR 0015](0015-webrtc-reconnect.md)
 - **Accepted with defaults:** every open question below was accepted with the recommended default given next to it. Needs-verification items stay open and are resolved in the implementing WPs; a result that invalidates a default is handled by a superseding ADR.
 - **Date:** 2026-09-29
 - **Plan decision:** D4 in [`plugin-hardening-and-fab-readiness.md`](../roadmap/plugin-hardening-and-fab-readiness.md) §3
