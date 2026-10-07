@@ -56,18 +56,24 @@ This section supersedes the "Start here" line in §0 where they disagree.
     - #413, TR-10: the MoQ receiver drops what a lost session had queued.
     - #414, TR-4: not reproduced. NNG runs `Lifecycle.RestartAfterStop` and five control stop cycles on one port, and both pass repeatedly.
     - #416, TR-7: an item larger than the send queue's byte hard cap is `TooLarge`, not backpressure, and the pipeline requests no full sync after it. The conformance backpressure case now fills the queue, with the sender's worker held: new `HoldSenderWorker`, and a TCP pause hook.
-  - **Branch protection and auto-merge (2026-10-06):** #419. `develop` has a ruleset: it requires the two result checks, allows squash merges only, and has no bypass. PRs use `gh pr merge --auto --squash`. The success comment still reaches the session after GitHub merges, which was checked on #419.
+  - **Branch protection and auto-merge (2026-10-06):** #419. `develop` has a ruleset: it requires the two result checks, allows squash merges only, and has no bypass. Auto-merge was tried on #419, #431 and #432 and dropped from #433 on: see Working practice.
   - **WP-D2, complete** (the end-user docs, P0 for Fab):
     - #420: plugin README (DOC-1, DOC-2, DOC-6);
     - #421: USER_GUIDE quick start and transport setup (DOC-5, part of DOC-10);
     - #422: transport READMEs (new for Sockets and Loopback) and the WebRTC add-on guide (TRB-44, TRF-36);
     - #423: public header docs (SND-37);
     - #424: USER_GUIDE Blueprint API and receiver references, troubleshooting, console variables, FAQ, limitations and privacy, and the transport comparison (DOC-10, RCV-32, DOC-5).
-  - **Found while writing WP-D2, not fixed yet:**
+  - **WP-U6, complete** (UDP features and network defaults; maintainer decisions 2026-10-06):
+    - #427, Loopback (TRB-31, TRB-32): a receiver no longer resets the channel's queue limits, a stopped receiver stops consuming, and a full queue warns (throttled);
+    - #428, TRB-25: the dead `audio.port`, `audio.host` and `audio.bind` options are gone; audio and control share the data socket;
+    - #429, TRB-22: no SO_REUSEADDR on the UDP receiver, the UDP sender or the TCP listener;
+    - #430, TRB-16: the UDP sender splits every message above the MTU (header included, minimum 280). Control stays one datagram, and the sender's Max Datagram Bytes is a hidden ceiling. No wire change;
+    - #431, TRB-28: the socket defaults live in `SocketsTransportCommon.h`;
+    - #432, TRB-29: listening ends (TCP sender, UDP receiver, NNG listeners) default to `127.0.0.1` and warn once per Start on a non-loopback bind; USER_GUIDE "Network Exposure". **Breaking** for setups between machines that relied on `0.0.0.0`;
+    - #433, TRB-21: UDP multicast (receiver **Multicast Group**, sender **Multicast TTL** and **Multicast Loopback**), **Allowed Senders**, and an opt-in **Share Port**; the receiver's **Accept Broadcast Packets** is removed.
+    - Not verified: TCP, UDP and NNG between two machines with `0.0.0.0`, and multicast through a real switch or Wi-Fi (desk checks).
+  - **Found while writing WP-D2:** the Port tooltip and the dead audio options (fixed in #428), the MTU tooltips (#430), and the Loopback queue-limit reset (#427) are fixed. Still open:
     - The MoQ defaults never match. The sender uses `mocap/<Subject Name>` with track `<Subject Name>`; the receiver uses `mocap/default` with track `primary`. The guide tells users to set both ends.
-    - The Sockets **Port** tooltip says audio uses the next port. Audio shares the data socket, and nothing reads `audio.port`, `audio.host` or `audio.bind`.
-    - The UDP **MTU** tooltip calls it the split threshold, but the threshold is **Max Datagram Bytes**. The receiver's Max Datagram tooltip names the sender's MTU.
-    - A Loopback receiver that starts after its sender resets the channel's queue limits to 64 and 32.
     - A custom MoQ `track_namespace` without the `mocap/` or `audio/` prefix gives mocap and audio the same namespace and track.
     - `WebRTCReceiver.h` initialises `NoDataReconnectTimeoutSec = 5.0`, which is never used.
 - **Maintainer decisions:**
@@ -86,19 +92,19 @@ This section supersedes the "Start here" line in §0 where they disagree.
   - The LiveKit FFI request (`docs/livekit_ffi_feature_request.md`) is filed as `lifelike-and-believable/livekit-ffi` issues #13 to #17; the maintainer's agent is implementing them.
   - The rules-for-robots adoption findings are rules-for-robots issues #23 to #38.
 - **Working practice:**
-  - Every PR gets Auto-fix in the desktop app. Auto-merge (`gh pr merge <n> --auto --squash`) is approved as well (maintainer, 2026-10-06). Still check a PR when its success comment arrives; the first auto-merged PR checks whether that comment still arrives after GitHub merged it.
+  - Every PR gets Auto-fix in the desktop app. Merge by hand when the success comment arrives (`gh pr merge <n> --squash`, after checking the checks). Auto-merge is allowed (maintainer, 2026-10-06) but hides the green signal: on #431 and #432 GitHub merged within seconds to a minute or so of the success comments, and the app, which reads a PR only every few minutes, then saw a merged PR and relayed nothing. With auto-merge, set one fallback wakeup of about 30 minutes.
   - A workflow's success comment is the cue that CI is green; check the checks before merging.
   - Delete `ProjectSandbox/Intermediate/Build/Win64/x64/ProjectSandboxEditor/Development/Makefile.bin` before building whenever files were added, removed, merged in from `develop`, or changed by a branch switch. UBT otherwise reuses its makefile, which can:
     - skip new or merged-in files, so a local run lacks their tests;
     - still include a deleted file, so the build fails;
     - and after a failed build, the automation run uses the old binaries and can report green.
 
-    Check that the build succeeded and compare the test count: 534 with the WebRTC add-on (479 without) on `develop` as of #416. CI fails below the floors in `Build/automation-test-floors.json`. When several PRs add tests, each raises the floors by its own tests; after one merges, merge `develop` into the others and add their tests to `develop`'s floors.
+    Check that the build succeeded and compare the test count: 547 with the WebRTC add-on (492 without) on `develop` as of #433. CI fails below the floors in `Build/automation-test-floors.json`. When several PRs add tests, each raises the floors by its own tests; after one merges, merge `develop` into the others and add their tests to `develop`'s floors.
   - The test editor runs with `-NoSound`, so audible playback can't be tested automatically. Audio tests cover the component's state and the jitter buffer; listening is a desk check.
   - `close_findings.py`-style helpers must put the Status line after a finding's last top-level bullet, not inside nested bullets.
 - **Next, after the maintainer's go-ahead:**
-  1. WP-U6.
-  2. The code issues found while writing WP-D2 (above), in one small PR.
+  1. The three code issues still open from WP-D2 (above: the MoQ defaults, the MoQ namespace, the unused WebRTC timeout), in one small PR.
+  2. Desk checks for WP-U6 (above).
   3. WP-D1, WP-D3, WP-D4 (WP-D2 is done).
   4. WP-Q1.
   5. The names-in-use picker.
