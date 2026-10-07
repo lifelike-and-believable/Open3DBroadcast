@@ -27,8 +27,8 @@ Before writing any code, the agent MUST:
 - **Read the assigned issue completely** including all comments and discussion
 - **Review the implementation plan** if provided by Planning Agent
 - **Read linked documentation**:
-  - `.github/copilot-instructions.md` - project coding standards and rules
-  - `AGENTS.md` - agent coordination guidelines
+  - `AGENTS.md` - the project's instruction file: commands, decisions, git and PR conventions
+  - `.claude/rules/` - the coding, testing and Unreal rules, which apply to every agent
   - Related design documents (e.g., architecture diagrams, protocol specs)
 - **Understand the "why"** - what problem is being solved and for whom
 - **Identify success criteria** - what does "done" look like
@@ -65,7 +65,7 @@ Before writing any code, the agent MUST:
 ### 2. Implementation Standards
 
 #### A. Code Quality Rules
-Follow these rules from `.github/copilot-instructions.md`:
+Follow `AGENTS.md` and the rules in `.claude/rules/`; in short:
 
 **MUST DO:**
 - Make minimal, surgical changes - change only what's necessary
@@ -139,11 +139,10 @@ Follow these rules from `.github/copilot-instructions.md`:
 
 2. **Run existing tests** to establish baseline:
    ```bash
-   # C++ unit tests
-   ./build/test_curves
-   ./build/test_curve_comprehensive
+   # Core library tests (CTest; configure with -DO3DS_BUILD_TESTS=ON, see README.md "Core library")
+   ctest --test-dir build -LE fuzz --output-on-failure
    
-   # Unreal automation tests
+   # Unreal automation tests (decide pass or fail from the report, not the exit code)
    Build/Scripts/Run-AutomationTests.ps1 -TestFilter Open3DBroadcast
    ```
 
@@ -270,19 +269,19 @@ Special process for schema modifications (`src/o3ds.fbs`):
 - **Document the change** in CHANGELOG.md with migration notes
 
 #### B. Regeneration Process
-After modifying `src/o3ds.fbs`:
+After modifying `src/o3ds.fbs` or `src/o3ds_control.fbs` (never reorder or delete fields):
 ```bash
-# Regenerate C++ headers
-flatc --cpp src/o3ds.fbs
+# Regenerate with flatc from the thirdparty/flatbuffers pin
+flatc --cpp -o src src/o3ds.fbs
+flatc --cpp -o src src/o3ds_control.fbs
 
-# Verify generated files
-git diff src/o3ds_generated.h
+# Update the plugin's copy of the core, and commit it in the same PR
+python3 Build/Scripts/sync_o3ds_core.py
 
-# Update serialization code if needed
 # Test round-trip serialization
-./build/test_curves
-./build/test_curve_comprehensive
+ctest --test-dir build -LE fuzz --output-on-failure
 ```
+A wire change also needs the `O3DS_VERSION_TAG` bump and the CHANGELOG "Schema/Protocol" entry described in `docs/wire-format.md` section 8.
 
 #### C. Backward Compatibility
 - **Test with old clients** - ensure old data still deserializes
@@ -637,7 +636,7 @@ perf report
 - **FlatBuffers**: https://google.github.io/flatbuffers/
 - **WebRTC**: https://webrtc.org/
 - **CMake**: https://cmake.org/documentation/
-- **Project docs**: `.github/copilot-instructions.md`, `AGENTS.md`
+- **Project docs**: `AGENTS.md`, `docs/adr/`, `docs/wire-format.md`
 
 #### C. Tools
 - **GitHub MCP Server**: For repository operations

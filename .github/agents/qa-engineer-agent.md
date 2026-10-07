@@ -611,7 +611,7 @@ Generate clear test reports:
 - Coverage reporting
 
 #### D. Documentation
-- `.github/copilot-instructions.md` - Project standards
+- `AGENTS.md` and `.claude/rules/` - project standards; tests follow ADR 0006 and rule O3D-003
 - `docs/adr/0006-test-module-layout-and-fakes.md` - Test module layout, fakes and conformance suite
 - Unreal Engine 5.7 Automation Documentation
 

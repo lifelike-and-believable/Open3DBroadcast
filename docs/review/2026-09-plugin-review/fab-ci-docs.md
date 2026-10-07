@@ -432,6 +432,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Replace absolute paths with repo-relative ones. Remove or rename the missing-file references. Stop committing `.claude/settings.local.json` (add it to .gitignore). Add `.github/pull_request_template.md` or drop the reference.
 - Effort: S
 - Owner: docs
+- Status: closed in #437
 
 ### DOC-8: The two CHANGELOGs are duplicated and empty
 - Category: docs
@@ -441,6 +442,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Keep one CHANGELOG (ideally at `Plugin/CHANGELOG.md`, included via FilterPlugin), and fill in 1.0.0 with modules, transports and known limitations.
 - Effort: S
 - Owner: docs
+- Status: closed in #339
 
 ### DOC-9: The Sphinx and Doxygen docs cover only the legacy core and are broken
 - Category: docs
@@ -450,6 +452,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Either retire Sphinx, or add a Doxygen pass over `Plugin/Source/*/Public` and publish a Blueprint/C++ API reference page linked from DocsURL.
 - Effort: M
 - Owner: docs
+- Status: closed in #437
 
 ### DOC-10: Key end-user documentation is missing
 - Category: docs

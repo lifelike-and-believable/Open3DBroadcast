@@ -578,6 +578,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Developer docs (WP-D3; DOC-7, DOC-9; DOC-8 was closed by #339). The Copilot agent files in `.github/agents/` point to `AGENTS.md` and `.claude/rules/` instead of rules `.github/copilot-instructions.md` no longer holds, use CTest instead of the `test_curves` binaries that do not exist, give the schema steps from AGENTS.md (both schemas, `sync_o3ds_core.py`), and name existing design docs. The unused `Doxyfile` (legacy core only; no workflow ran it) is removed; Sphinx went with WP-A7.
+
 - Follow-ups found while writing WP-D2 (maintainer decision 2026-10-07 for MoQ defaults).
   - **MoQ defaults match:** with no naming options, the sender now publishes `mocap/default`, track `primary`, as the receiver subscribes. Before, the sender used its Subject Name for both, so a default sender and receiver never connected. **Breaking** for a receiver that was set to a sender's Subject Name: set the namespace and track on the sender too, or clear them on the receiver. Two default senders on one relay now share a track; give each its own namespace.
   - **MoQ audio namespace:** a custom namespace without a `mocap/` or `audio/` prefix put mocap and audio on the same namespace and track. Audio now gets `audio/<namespace>`, as control gets `control/<namespace>`; mocap is unchanged.
