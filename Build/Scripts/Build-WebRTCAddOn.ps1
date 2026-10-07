@@ -176,6 +176,24 @@ foreach ($item in Get-ChildItem -LiteralPath $addOnCopy) {
 # Debug symbols are release assets, not part of the plugin (FAB-4).
 Get-ChildItem -LiteralPath $OutDir -Recurse -File -Filter "*.pdb" | Remove-Item -Force
 
+# ADR 0014: the source descriptor has no EngineVersion, so the staged one gets the engine that built
+# it, "X.Y.0" as BuildPlugin writes for Open3DBroadcast (fab-package.py stamps the same way).
+$engine = Get-Content -LiteralPath (Join-Path $UEPath "Engine\Build\Build.version") -Raw | ConvertFrom-Json
+$engineVersion = "$($engine.MajorVersion).$($engine.MinorVersion).0"
+$stagedDescriptor = Join-Path $OutDir "$AddOnName.uplugin"
+$text = [IO.File]::ReadAllText($stagedDescriptor)
+if ($text -match '"EngineVersion"') {
+  $stamped = ([regex]'("EngineVersion"\s*:\s*)"[^"]*"').Replace($text, "`${1}`"$engineVersion`"", 1)
+} else {
+  $stamped = ([regex]'("FileVersion"\s*:\s*\d+\s*,)(\r?\n[ \t]*)').Replace($text, "`${1}`${2}`"EngineVersion`": `"$engineVersion`",`${2}", 1)
+}
+if ((ConvertFrom-Json $stamped).EngineVersion -ne $engineVersion) {
+  Write-Failure "Could not set EngineVersion in $stagedDescriptor (expected a top-level `"FileVersion`": N, entry)."
+  exit 1
+}
+[IO.File]::WriteAllText($stagedDescriptor, $stamped, (New-Object System.Text.UTF8Encoding $false))
+Write-Host "[OK] $AddOnName.uplugin stamped with EngineVersion $engineVersion"
+
 Write-Host "[OK] $AddOnName built against $HostPluginName and staged at $OutDir"
 Write-Host "     Host project for tests: $ProjectFile"
 exit 0
