@@ -18,6 +18,10 @@ THIRD_PARTY_INCLUDES_END
  *
  * Each member has the same name and signature as the livekit_ffi.h function it stands for, so
  * a call reads `Ffi.lk_send_data_ex(...)`. Only the symbols this module uses are listed.
+ * Not bound (TRF-33): lk_set_role (the role goes to lk_connect_with_role_async),
+ * lk_get_audio_stats and lk_get_data_stats (the transports count their own traffic, TRF-5),
+ * and lk_client_is_ready and lk_set_reconnect_backoff (candidates for TRF-6 and TRF-26, not
+ * wired yet).
  * WP-T2 is expected to generalise this seam; keep it a plain struct of function pointers.
  */
 struct FLkFfiApi

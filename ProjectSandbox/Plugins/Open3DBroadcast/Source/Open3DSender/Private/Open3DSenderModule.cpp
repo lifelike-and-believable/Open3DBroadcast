@@ -10,6 +10,8 @@ DEFINE_LOG_CATEGORY(LogO3DSender);
 DEFINE_LOG_CATEGORY(LogO3DSenderComponent);
 DEFINE_LOG_CATEGORY(LogO3DSenderSerializer);
 DEFINE_LOG_CATEGORY(LogO3DSenderAudio);
+DEFINE_LOG_CATEGORY(LogO3DSenderCurves);
+DEFINE_LOG_CATEGORY(LogO3DSenderTransport);
 
 /**
  * Module entry point for the Open3DStream sender runtime. The Details panel customization lives in

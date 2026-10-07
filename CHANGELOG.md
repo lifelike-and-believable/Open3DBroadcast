@@ -578,6 +578,12 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Low-severity cleanup (WP-Q1; SND-31, SND-33, TRF-33, SHR-28; SHR-29 part). No behaviour change.
+  - **Sender:** the unused `BoneTransformsFinalizedHandle` and the empty `UpdateEditConditionHelpers` are gone; the curve-value copy shared by two serializer paths is `FO3DSenderSerializer::CopyCurveValues`.
+  - **Logs:** the curve processor logs under the new `LogO3DSenderCurves` and the transport controller under `LogO3DSenderTransport` (both were `LogO3DSenderComponent`); the sender Details panel no longer logs from its Slate getters, which run on every paint; the Open3DShared start and shutdown lines are Verbose instead of Display; `LogO3DAudioCodec` and `LogO3DPerformanceMetrics` are exported.
+  - **MoQ:** the unused `FMoQSessionWrapper::SubscribeAsync`, the write-only `LastSubscribeAttemptTimeSeconds`, and the receiver's copy of `kErrorLogIntervalSeconds` (the shared `MoQHelpers` value is the same, 5 s) are gone.
+  - **WebRTC:** `LiveKitFfiApi.h` says which livekit_ffi functions are not bound and why.
+  - **Open3DShared headers:** `WriteBE64` (unused) is gone and `WriteBE32` is `inline`, not a header `static`; `O3DAudioOpus.h` and `.cpp` drop includes they do not use.
 - Shared module docs (WP-D3; SHR-37). New `Source/Open3DShared/README.md`: what each public header holds, the threading contract of each class (from its header), and where the wire layouts are. `docs/wire-format.md` section 2 gives the audio payload byte by byte (versions 1 and 2); it was described only in prose. `FFrameDecoder` and the libOpus wrappers now say they are not thread-safe. The plugin README describes the module. Documentation only; the wire format is unchanged.
 
 - Developer docs (WP-D3; DOC-7, DOC-9; DOC-8 was closed by #339). The Copilot agent files in `.github/agents/` point to `AGENTS.md` and `.claude/rules/` instead of rules `.github/copilot-instructions.md` no longer holds, use CTest instead of the `test_curves` binaries that do not exist, give the schema steps from AGENTS.md (both schemas, `sync_o3ds_core.py`), and name existing design docs. The unused `Doxyfile` (legacy core only; no workflow ran it) is removed; Sphinx went with WP-A7.

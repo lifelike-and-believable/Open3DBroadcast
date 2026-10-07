@@ -97,7 +97,7 @@ void FO3DSenderCurveProcessor::CaptureCurves(USkeletalMeshComponent* SkelComp, b
 
         if (bDebugCurves && Index < 5)
         {
-            UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Curve[%d] %s = %.4f"), Index, *Name.ToString(), Value);
+            UE_LOG(LogO3DSenderCurves, Verbose, TEXT("Curve[%d] %s = %.4f"), Index, *Name.ToString(), Value);
         }
     }
 }
@@ -256,7 +256,7 @@ void FO3DSenderCurveFilter::Apply(const FO3DSenderCurveConfig& Config, const TSh
             // full sync (SND-3).
             if (Config.bLogFilteredCurves)
             {
-                UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Curve %s is NaN/Inf; sending 0"), *Name.ToString());
+                UE_LOG(LogO3DSenderCurves, Verbose, TEXT("Curve %s is NaN/Inf; sending 0"), *Name.ToString());
             }
             Value = 0.0f;
         }
@@ -284,7 +284,7 @@ void FO3DSenderCurveFilter::Apply(const FO3DSenderCurveConfig& Config, const TSh
             {
                 if (Config.bLogFilteredCurves)
                 {
-                    UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Filtered curve %s (pattern)"), *Name.ToString());
+                    UE_LOG(LogO3DSenderCurves, Verbose, TEXT("Filtered curve %s (pattern)"), *Name.ToString());
                 }
                 continue;
             }
@@ -298,7 +298,7 @@ void FO3DSenderCurveFilter::Apply(const FO3DSenderCurveConfig& Config, const TSh
                 {
                     if (Config.bLogFilteredCurves)
                     {
-                        UE_LOG(LogO3DSenderComponent, Verbose, TEXT("Filtered curve %s (epsilon %.6f, delta %.6f) V=%.6f Last=%.6f"), *Name.ToString(), Config.CurveEpsilon, Config.CurveDeltaThreshold, Value, Last);
+                        UE_LOG(LogO3DSenderCurves, Verbose, TEXT("Filtered curve %s (epsilon %.6f, delta %.6f) V=%.6f Last=%.6f"), *Name.ToString(), Config.CurveEpsilon, Config.CurveDeltaThreshold, Value, Last);
                     }
                     continue;
                 }

@@ -397,6 +397,14 @@ void FO3DSenderSerializer::FillCurves(const FO3DSPoseFrame& Frame, O3DS::Subject
 	}
 }
 
+void FO3DSenderSerializer::CopyCurveValues(const FO3DSPoseFrame& Frame, O3DS::Subject& InOutSubject)
+{
+	for (int32 Index = 0; Index < Frame.CurveValues.Num(); ++Index)
+	{
+		InOutSubject.mCurveValues[Index] = Frame.CurveValues[Index];
+	}
+}
+
 /** Identity of the ordered curve name list (SND-3: compare names, not just the count). */
 uint64 FO3DSenderSerializer::HashCurveNames(const TArray<FName>& Names)
 {
@@ -458,10 +466,7 @@ void FO3DSenderSerializer::SerializeFrameLegacy(const FString& Subject, const FO
 		{
 			// Same names in the same order: only the values change. The frame was checked to
 			// carry one value per name (SerializePoseFrameTo).
-			for (int32 Index = 0; Index < Frame.CurveValues.Num(); ++Index)
-			{
-				SubjectObject->mCurveValues[Index] = Frame.CurveValues[Index];
-			}
+			CopyCurveValues(Frame, *SubjectObject);
 		}
 	}
 
@@ -596,10 +601,7 @@ bool FO3DSenderSerializer::SerializeFramePersistent(const FString& Subject, cons
 
 		// Same curve names in the same order as the last full sync (the
 		// name-list hash matched), so values map by index.
-		for (int32 Index = 0; Index < Frame.CurveValues.Num(); ++Index)
-		{
-			SubjectObject->mCurveValues[Index] = Frame.CurveValues[Index];
-		}
+		CopyCurveValues(Frame, *SubjectObject);
 
 		SubjectObject->CalcMatrices();
 

@@ -12,7 +12,7 @@
 
 #include <atomic>
 
-DECLARE_LOG_CATEGORY_EXTERN(LogO3DPerformanceMetrics, Log, All);
+OPEN3DSHARED_API DECLARE_LOG_CATEGORY_EXTERN(LogO3DPerformanceMetrics, Log, All);
 
 namespace O3DMetrics
 {

@@ -654,8 +654,6 @@ private:
 	/** Settings snapshot copied onto every sampled frame (see UpdateEncodingSnapshot). */
 	FO3DSenderEncodingSettings EncodingSnapshot;
 
-	FDelegateHandle BoneTransformsFinalizedHandle;
-
 	/** The skeletal mesh this component's tick waits for (SetTickPrerequisiteMesh); unset when none. */
 	TWeakObjectPtr<USkeletalMeshComponent> TickPrerequisiteMesh;
 	/**
@@ -714,7 +712,6 @@ private:
 	/** Audio capture to transport binding (WP-A3 step 7). Always set (created by the constructor). */
 	TUniquePtr<FO3DSenderAudioBinding, FO3DSenderAudioBindingDeleter> AudioBinding;
 
-	void UpdateEditConditionHelpers();
 	void TeardownTransport();
 	void InitializeTransport();
 	FO3DTransportConfig BuildTransportConfig() const;

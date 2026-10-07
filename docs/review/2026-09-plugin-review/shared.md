@@ -516,6 +516,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Drop the Display-level startup and shutdown logs.
 - Effort: S
 - Owner: coding
+- Status: closed in #441
 
 ### SHR-29: Header-level `static` functions and IWYU issues in `O3DUnifiedMessage.h` and `O3DAudioOpus.h`
 - Category: code-quality
@@ -536,6 +537,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Rename the fields.
 - Effort: S
 - Owner: coding
+- Status: partly fixed in #441 (WriteBE64 removed, WriteBE32 inline, unused includes); open: renaming the exported FUnifiedHeader fields (MagicBE, ...Host) and its Version = 1 default (maintainer decision)
 
 ### SHR-30: `CreateUnifiedMessage` truncates the timestamp with undefined behaviour for negative or NaN input, and the clock domain is undocumented
 - Category: bug

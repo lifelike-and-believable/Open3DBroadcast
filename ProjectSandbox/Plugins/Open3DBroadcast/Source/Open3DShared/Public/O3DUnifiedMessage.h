@@ -84,24 +84,12 @@ namespace O3DS
         double TimestampSec = 0.0;
     };
 
-    static void WriteBE32(uint8* Dest, uint32 Value)
+    inline void WriteBE32(uint8* Dest, uint32 Value)
     {
         Dest[0] = static_cast<uint8>((Value >> 24) & 0xFF);
         Dest[1] = static_cast<uint8>((Value >> 16) & 0xFF);
         Dest[2] = static_cast<uint8>((Value >> 8) & 0xFF);
         Dest[3] = static_cast<uint8>(Value & 0xFF);
-    }
-
-    static void WriteBE64(uint8* Dest, uint64 Value)
-    {
-        Dest[0] = static_cast<uint8>((Value >> 56) & 0xFF);
-        Dest[1] = static_cast<uint8>((Value >> 48) & 0xFF);
-        Dest[2] = static_cast<uint8>((Value >> 40) & 0xFF);
-        Dest[3] = static_cast<uint8>((Value >> 32) & 0xFF);
-        Dest[4] = static_cast<uint8>((Value >> 24) & 0xFF);
-        Dest[5] = static_cast<uint8>((Value >> 16) & 0xFF);
-        Dest[6] = static_cast<uint8>((Value >> 8) & 0xFF);
-        Dest[7] = static_cast<uint8>(Value & 0xFF);
     }
 
     /**

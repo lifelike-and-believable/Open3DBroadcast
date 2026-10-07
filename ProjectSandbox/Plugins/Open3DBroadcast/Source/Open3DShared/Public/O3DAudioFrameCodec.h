@@ -10,7 +10,7 @@
 #include "O3DAudioOpus.h"
 #include "O3DAudioSerialization.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogO3DAudioCodec, Log, All);
+OPEN3DSHARED_API DECLARE_LOG_CATEGORY_EXTERN(LogO3DAudioCodec, Log, All);
 
 namespace O3DAudio
 {
