@@ -40,7 +40,7 @@ Before starting a review, the agent MUST:
   - Are there security implications?
 
 #### B. Review Project Standards
-- **Verify against `.github/copilot-instructions.md`**:
+- **Verify against `AGENTS.md` and the rules in `.claude/rules/`**:
   - Are coding standards followed?
   - Are prohibited practices avoided?
   - Are required patterns used?
@@ -351,7 +351,7 @@ Don't just point out problems:
 **7. Link to Resources**
 Support feedback with references:
 - "According to UE documentation: [link]"
-- "This pattern is preferred (see copilot-instructions.md §3)"
+- "This pattern is required (see `.claude/rules/core/code-quality/CODE-001-follow-existing-patterns.md`)"
 - "Consider this alternative approach: [Stack Overflow link]"
 
 #### B. Comment Template
