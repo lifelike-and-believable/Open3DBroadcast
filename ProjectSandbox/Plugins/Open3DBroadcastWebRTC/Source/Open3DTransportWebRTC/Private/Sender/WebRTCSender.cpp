@@ -339,7 +339,8 @@ FO3DTransportResult FO3DWebRTCSender::Initialize(const FO3DTransportConfig& Conf
     AppliedTokenGeneration = 0;
     ObservedTokenGeneration = 0;
     NextTokenFetchTime = 0.0;
-    NextConnectAttemptTime = 0.0;
+    ReconnectPolicy.Reset();
+    bRoomHeld = false;
 
     bInitialized.Store(true);
 
@@ -425,9 +426,15 @@ void FO3DWebRTCSender::Stop()
             }
         }
         Link->AudioTracks.Reset();
+        for (LkAudioTrackHandle* Retired : Link->RetiredAudioTracks)
+        {
+            Ffi.TakeMessage(Ffi.lk_audio_track_destroy(Retired));
+        }
+        Link->RetiredAudioTracks.Reset();
     }
 
-    if (Link->bConnected.Load())
+    // After the SDK gave up, livekit_ffi still holds the room although LiveKit is not connected.
+    if (Link->bConnected.Load() || bRoomHeld)
     {
         const LkResult Result = Ffi.lk_disconnect(ClientHandle);
         if (Result.code != 0)
@@ -631,7 +638,7 @@ bool FO3DWebRTCSender::UpdateConnection()
         return true;
     }
 
-    const double Now = FPlatformTime::Seconds();
+    const double NowSec = Now();
 
     FString CurrentToken;
     uint64 Generation = 0;
@@ -647,19 +654,23 @@ bool FO3DWebRTCSender::UpdateConnection()
     {
         if (bHaveToken)
         {
-            if (Now < NextConnectAttemptTime)
+            if (!ReconnectPolicy.IsDue(NowSec))
             {
                 return true;
             }
-            return TryConnect(CurrentToken, Generation, Now);
+            if (bRoomHeld)
+            {
+                CloseHeldRoom();
+            }
+            return TryConnect(CurrentToken, Generation, NowSec);
         }
 
-        MaybeFetchToken(Now);
+        MaybeFetchToken(NowSec);
         return true;
     }
 
     // Connected or connecting: keep the token fresh and hand new tokens to LiveKit (TRF-23).
-    MaybeFetchToken(Now);
+    MaybeFetchToken(NowSec);
     if (bHaveToken && Generation != AppliedTokenGeneration)
     {
         ApplyRefreshedToken(CurrentToken, Generation);
@@ -708,15 +719,46 @@ bool FO3DWebRTCSender::TryConnect(const FString& InToken, uint64 TokenGeneration
     const LkResult Result = Ffi.lk_connect_with_role_async(ClientHandle, UrlUtf8.Get(), TokenUtf8.Get(), LkRolePublisher);
     if (Result.code != 0)
     {
-        UE_LOG(LogO3DWebRTCSender, Error, TEXT("Failed to connect (code=%d): %s"), Result.code, *Ffi.TakeMessage(Result));
-        NextConnectAttemptTime = NowSeconds + ConnectRetryIntervalSec;
+        const double Delay = ReconnectPolicy.OnFailure(NowSeconds);
+        UE_LOG(LogO3DWebRTCSender, Error, TEXT("Failed to connect (code=%d): %s. Retrying in %.1f s."), Result.code, *Ffi.TakeMessage(Result), Delay);
         return false;
     }
 
     bConnectIssued = true;
     AppliedTokenGeneration = TokenGeneration;
+    // livekit_ffi reports Connecting from inside the connect call (backend_livekit.rs:786-794); the
+    // sender records it too, so a later Disconnected or Failed is seen as a change even when the
+    // previous attempt ended in the same state.
+    int32 Previous = Link->LkState.load();
+    if (Previous != static_cast<int32>(LkConnConnected) && Previous != static_cast<int32>(LkConnReconnecting))
+    {
+        Link->LkState.compare_exchange_strong(Previous, static_cast<int32>(LkConnConnecting));
+    }
     UE_LOG(LogO3DWebRTCSender, Log, TEXT("WebRTC sender connecting..."));
     return true;
+}
+
+void FO3DWebRTCSender::CloseHeldRoom()
+{
+    // ADR 0015: after the SDK gave up, livekit_ffi keeps the room, and a connect returns 104 until
+    // lk_disconnect (fast now: the room is already closed). The room's audio tracks went with it;
+    // they are retired, not destroyed, because a sink may still hold one (see RetiredAudioTracks).
+    const LkResult Result = Ffi.lk_disconnect(ClientHandle);
+    if (Result.code != 0)
+    {
+        UE_LOG(LogO3DWebRTCSender, Warning, TEXT("Disconnect before reconnecting: %s"), *Ffi.TakeMessage(Result));
+    }
+    bRoomHeld = false;
+
+    FScopeLock AudioLock(&Link->AudioTracksMutex);
+    for (const TPair<FString, LkAudioTrackHandle*>& TrackEntry : Link->AudioTracks)
+    {
+        if (TrackEntry.Value)
+        {
+            Link->RetiredAudioTracks.Add(TrackEntry.Value);
+        }
+    }
+    Link->AudioTracks.Reset();
 }
 
 void FO3DWebRTCSender::ApplyRefreshedToken(const FString& InToken, uint64 TokenGeneration)
@@ -733,7 +775,7 @@ void FO3DWebRTCSender::ApplyRefreshedToken(const FString& InToken, uint64 TokenG
 
     // The header says the fallback is disconnect + reconnect. Tearing down the sender's
     // session would also destroy its audio tracks, so the sender keeps the session and the
-    // new token is used on the next connect (see WP-S7 notes).
+    // new token is used on the next connect (after a drop, ADR 0015).
     UE_LOG(LogO3DWebRTCSender, Warning,
         TEXT("lk_refresh_token failed (code=%d): %s. The new token will be used on the next connect."),
         Result.code, *Ffi.TakeMessage(Result));
@@ -778,6 +820,8 @@ void FO3DWebRTCSender::UpdateConnectionState()
         break;
     case static_cast<int32>(LkConnConnected):
         bEverConnected = true;
+        bRoomHeld = true;
+        ReconnectPolicy.OnSuccess();
         ConnectionState.Set(EO3DConnectionState::Connected);
         break;
     case static_cast<int32>(LkConnReconnecting):
@@ -785,15 +829,22 @@ void FO3DWebRTCSender::UpdateConnectionState()
             FO3DTransportResult::Error(EO3DTransportError::ConnectFailed, TEXT("LiveKit is reconnecting.")));
         break;
     case static_cast<int32>(LkConnDisconnected):
-        // The sender does not reconnect a closed room by itself: Stop and Start to retry.
-        ConnectionState.Set(EO3DConnectionState::Failed,
-            FO3DTransportResult::Error(EO3DTransportError::ConnectFailed, TEXT("LiveKit disconnected.")));
-        break;
     case static_cast<int32>(LkConnFailed):
-        ConnectionState.Set(EO3DConnectionState::Failed,
-            FO3DTransportResult::Error(EO3DTransportError::ConnectFailed,
-                FString::Printf(TEXT("LiveKit connection failed (code=%d)."), Link->LkReasonCode.load())));
+    {
+        // ADR 0015: LiveKit gave up on the room (Disconnected; livekit_ffi still holds it) or the
+        // connect failed (Failed; no room). Retry with the shared backoff; UpdateConnection connects
+        // when it is due. The second Disconnected livekit_ffi reports for one drop is no change here.
+        const bool bDisconnected = (LkState == static_cast<int32>(LkConnDisconnected));
+        bRoomHeld = bDisconnected;
+        bConnectIssued = false;
+        const double Delay = ReconnectPolicy.OnFailure(Now());
+        const FString Why = bDisconnected
+            ? FString(TEXT("LiveKit disconnected"))
+            : FString::Printf(TEXT("LiveKit connection failed (code=%d)"), Link->LkReasonCode.load());
+        ConnectionState.Set(EO3DConnectionState::Reconnecting,
+            FO3DTransportResult::Error(EO3DTransportError::ConnectFailed, FString::Printf(TEXT("%s; reconnecting in %.1f s."), *Why, Delay)));
         break;
+    }
     default:
         break;
     }
