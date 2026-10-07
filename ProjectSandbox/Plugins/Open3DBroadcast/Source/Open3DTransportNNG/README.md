@@ -22,7 +22,7 @@ and receiving every message."
 
 | Key | Shown as | Default | Notes |
 |---|---|---|---|
-| `host` | **Host** | `0.0.0.0` when this end listens, `127.0.0.1` when it dials | Address to listen on or dial. |
+| `host` | **Host** | `127.0.0.1` | Address to listen on or dial. A listener needs `0.0.0.0` (or one interface's address) to accept other machines, and then logs a warning at Start. |
 | `port` | **Port** | 6000 for pub/sub, 7000 for pair, 8000 for push/pull | TCP port, 1 to 65535. |
 | `nng.mode` | **Mode** | sender `pub`, receiver `sub` | Sender: `pub`, `pair`, `push`. Receiver: `sub`, `pair`, `pull`. |
 | `nng.role` | **Role** | **Default for the mode** | `server` (**Listen (server)**) or `client` (**Dial (client)**). Shown only for the modes that can do both; see [Roles](#roles). |

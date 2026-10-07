@@ -140,7 +140,7 @@ There are no subscription topics: a subscriber receives everything the publisher
 **Configuration**:
 - `nng.mode` (**Mode**) - `pub`, `pair` or `push` on the sender (default `pub`); `sub`, `pair` or `pull` on the receiver (default `sub`)
 - `nng.role` (**Role**) - `server` or `client`; empty uses the usual role for the mode
-- `host` (**Host**) - Address to listen on (default `0.0.0.0`) or to dial (default `127.0.0.1`); IPv6 in brackets
+- `host` (**Host**) - Address to listen on or to dial (default `127.0.0.1` for both; a listener needs `0.0.0.0` to accept other machines); IPv6 in brackets
 - `port` (**Port**) - 1 to 65535; default 6000 (Pub/Sub), 7000 (Pair), 8000 (Push/Pull)
 - `nng.qmax` (**Queue Capacity (MiB)**) - Sender queue in bytes (default 4 MiB)
 
@@ -196,7 +196,7 @@ There are no subscription topics: a subscriber receives everything the publisher
 While idle for `tcp.keepalive` ms the sender writes a keepalive frame whose payload is a 24-byte envelope header (`O3DU`, kind Audio, payload size 0). Receivers ignore it as data, but it resets their idle timer.
 
 **Configuration**:
-- `bind` (**Bind Address**) - Sender: local address to listen on (default `0.0.0.0`)
+- `bind` (**Bind Address**) - Sender: local address to listen on (default `127.0.0.1`; `0.0.0.0` for every interface)
 - `port` (**Port**) - 1 to 65535 (default 17700)
 - `host` (**Remote Host**) - Receiver: the sender's address (default `127.0.0.1`); IPv6 in brackets
 - `tcp.timeout` (**Connection Timeout (seconds)**) - Receiver: seconds without any data (frames or keepalives) before it reconnects (default 5)
@@ -537,14 +537,14 @@ Options are key-value pairs. The same keys work in the editor panels (by their p
 ### TCP
 | End | Transport | Options |
 |-----|-----------|---------|
-| Sender (listens) | `TCP` | none (listens on `0.0.0.0`, port 17700) |
+| Sender (listens) | `TCP` | `bind` = `0.0.0.0` (port 17700; the default `127.0.0.1` accepts only this machine) |
 | Receiver | `TCP` | `host` = `192.168.1.10` (the sender's address) |
 
 ### UDP (one receiver)
 | End | Transport | Options |
 |-----|-----------|---------|
 | Sender | `UDP` | `host` = `192.168.1.20` (the receiver's address) |
-| Receiver (listens) | `UDP` | none (listens on `0.0.0.0`, port 17800) |
+| Receiver (listens) | `UDP` | `host` = `0.0.0.0` (port 17800; the default `127.0.0.1` accepts only this machine) |
 
 ### UDP (broadcast to a subnet)
 | End | Transport | Options |
@@ -555,14 +555,14 @@ Options are key-value pairs. The same keys work in the editor panels (by their p
 ### NNG (Pub/Sub)
 | End | Transport | Options |
 |-----|-----------|---------|
-| Sender (listens) | `NNG` | none (`nng.mode` `pub`, listens on `0.0.0.0`, port 6000) |
+| Sender (listens) | `NNG` | `host` = `0.0.0.0` (`nng.mode` `pub`, port 6000) |
 | Each receiver | `NNG` | `host` = `192.168.1.10` (the sender's address); `nng.mode` stays `sub` |
 
 ### NNG (Push/Pull)
 | End | Transport | Options |
 |-----|-----------|---------|
 | Sender | `NNG` | `nng.mode` = `push`, `host` = `192.168.1.20` (the receiver's address) |
-| Receiver (listens) | `NNG` | `nng.mode` = `pull` (listens on `0.0.0.0`, port 8000) |
+| Receiver (listens) | `NNG` | `nng.mode` = `pull`, `host` = `0.0.0.0` (port 8000) |
 
 ### MoQ
 | End | Transport | Options |

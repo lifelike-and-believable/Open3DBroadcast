@@ -378,6 +378,10 @@ FO3DTransportResult FO3DSocketsUdpReceiver::CreateSocket()
 
 	UE_LOG(LogSocketsUdpReceiver, Log, TEXT("UDP receiver listening on %s:%d (broadcast=%d, recvBuf=%d)."),
 		*BindAddr.ToString(false), BindAddr.GetPort(), bAllowBroadcast ? 1 : 0, AppliedSize);
+	if (!O3DTransportOptions::IsLoopbackHost(BindTarget.Host))
+	{
+		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP receiver listens on %s:%d, reachable from other machines. The stream has no authentication or encryption; set 127.0.0.1 to accept only this machine (USER_GUIDE, Network Exposure)."), *BindAddr.ToString(false), BindAddr.GetPort());
+	}
 
 	return FO3DTransportResult::Ok();
 }

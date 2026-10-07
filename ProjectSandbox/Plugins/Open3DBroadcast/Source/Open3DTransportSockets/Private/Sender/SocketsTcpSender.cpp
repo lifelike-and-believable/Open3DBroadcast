@@ -351,6 +351,10 @@ FO3DTransportResult FO3DSocketsTcpSender::CreateListenSocket()
 	}
 
 	UE_LOG(LogSocketsTcpSender, Log, TEXT("TCP sender listening on %s"), *BindAddr->ToString(true));
+	if (!O3DTransportOptions::IsLoopbackHost(BindEndpoint.Host))
+	{
+		UE_LOG(LogSocketsTcpSender, Warning, TEXT("TCP sender listens on %s, reachable from other machines. The stream has no authentication or encryption; set 127.0.0.1 to accept only this machine (USER_GUIDE, Network Exposure)."), *BindAddr->ToString(true));
+	}
 	return FO3DTransportResult::Ok();
 }
 

@@ -329,7 +329,7 @@ bool FO3DNngOptionsRolesTest::RunTest(const FString& Parameters)
 		TestEqual(*FString::Printf(TEXT("%s: role"), *Label), Endpoint.Role, FString(Case.ExpectedRole));
 		TestTrue(*FString::Printf(TEXT("%s: listens"), *Label), Endpoint.bListen == Case.bExpectListen);
 		TestEqual(*FString::Printf(TEXT("%s: default host"), *Label), Endpoint.Host,
-			FString(Case.bExpectListen ? TEXT("0.0.0.0") : TEXT("127.0.0.1")));
+			FString(TEXT("127.0.0.1"))); // WP-U6 (TRB-29): listeners default to loopback too
 	}
 
 	{
