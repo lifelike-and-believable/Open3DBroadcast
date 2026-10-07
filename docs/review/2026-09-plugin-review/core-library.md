@@ -433,6 +433,7 @@ The proof-of-concept harnesses are in `poc/{poc.cpp,chain.cpp,perf.cpp}` (next t
 - Recommendation: Delete the dead code, fix `Transpose`, use `1e-9`, and assert or throw on a null predictor.
 - Effort: S
 - Owner: coding
+- Status: partly fixed in #440 (Transpose, dead code, o3ds.cpp); open: the null-predictor guard in ConcealmentEngine and the unused o3ds.h (maintainer decision)
 
 ### CORE-26: `ClockOffsetEstimator` has signed-overflow UB on hostile timestamps
 - Category: code-quality

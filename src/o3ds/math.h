@@ -141,7 +141,7 @@ namespace O3DS
 
 		const Matrix Transpose() const
 		{
-			return CMatrix4x4(
+			return Matrix(
 				m[0][0], m[1][0], m[2][0], m[3][0],
 				m[0][1], m[1][1], m[2][1], m[3][1],
 				m[0][2], m[1][2], m[2][2], m[3][2],
