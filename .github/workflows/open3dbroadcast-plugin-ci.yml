@@ -13,7 +13,8 @@ name: Open3DBroadcast Plugin CI
 #     get the UE result for a draft. That job (steps in
 #     open3dbroadcast-ue-build-test.yml, which the release reuses) builds Open3DBroadcast,
 #     tests it alone, then builds the Open3DBroadcastWebRTC add-on against
-#     that package and tests both plugins together (WP-F11).
+#     that package and tests both plugins together (WP-F11). It runs on UE 5.7
+#     (full) and UE 5.8 (reduced: no strict or Fab zip build), ADR 0014.
 #   All jobs are skipped when a change touches nothing the plugin build
 #   depends on (see the path filter below).
 
@@ -139,10 +140,25 @@ jobs:
         github.event_name == 'workflow_dispatch' ||
         (needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false))
       )
+    # ADR 0014 (WP-V4): the full job on UE 5.7, and a reduced one (build, tests, add-on and its
+    # tests) on UE 5.8; they queue on the one runner. "Plugin CI result" fails if either fails.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ue-version: '5.7'
+            profile: full
+            artifact-suffix: ''
+          - ue-version: '5.8'
+            profile: reduced
+            artifact-suffix: '-UE5.8'
     # The steps live in a reusable workflow so the release runs the same ones (WP-R2, BC-4).
     uses: ./.github/workflows/open3dbroadcast-ue-build-test.yml
     with:
       fab-package-result: ${{ needs.fab-package.result }}
+      ue-version: ${{ matrix.ue-version }}
+      profile: ${{ matrix.profile }}
+      artifact-suffix: ${{ matrix.artifact-suffix }}
 
   # WP-D4: relative links, links into this repository's own GitHub tree and #anchors in every
   # tracked Markdown file resolve. Not behind the path filter: it is for docs-only changes too.

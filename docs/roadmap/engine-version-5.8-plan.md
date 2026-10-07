@@ -115,7 +115,7 @@ flag-combination builds, the Shipping game and the Linux check stay on 5.7.
 4. **WP-V2, build system and descriptors** (M): Target.cs guards, rules O3D-001 and O3D-005,
    `EngineVersion` removal and stamping, the script parameters and checks.
 5. **WP-V8a, runner preparation** (desk): install UE 5.8 (Win64 only) on the runner; check disk space.
-6. **WP-V4, CI matrix** (M), after WP-V8a, V2 and V3.
+6. **WP-V4, CI matrix** (M), after WP-V8a, V2 and V3. PR CI part done: the full 5.7 job and a reduced 5.8 job (UE 5.8 is on the runner, maintainer 2026-10-07). The nightly, manual and Fab-package workflows stay on 5.7 until WP-V5.
 7. **WP-V5, release** (M): the matrix release, per-engine zips and notes, a dry run on both engines.
 8. **WP-V6, behaviour on 5.8** (M, partly desk): LiveLink EngineTime and Timecode against ADR 0013,
    one LiveLink client per process, and a live take by the maintainer.

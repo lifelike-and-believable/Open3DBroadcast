@@ -8,8 +8,12 @@ name: Open3DBroadcast UE build and tests
 # then a strict build and BuildPlugin on the Fab source zip. Each test run must reach its floor
 # in Build/automation-test-floors.json.
 #
-# Artifacts (named with the commit): Open3DBroadcast-Win64-<sha> (the tested package),
-# Open3DBroadcastWebRTC-Win64-<sha>, and the automation test reports.
+# Artifacts (named with the commit and artifact-suffix): Open3DBroadcast-Win64-<sha> (the tested
+# package), Open3DBroadcastWebRTC-Win64-<sha>, and the automation test reports.
+#
+# ADR 0014: ue-version picks the engine (C:\Program Files\Epic Games\UE_<ue-version>), and
+# profile 'reduced' (the UE 5.8 leg of PR CI) keeps the build with warnings as errors, both test
+# runs and the add-on, and leaves out the strict build and the Fab zip build.
 
 on:
   workflow_call:
@@ -26,9 +30,20 @@ on:
         description: 'Artifact holding Open3DBroadcast/ and Open3DBroadcastWebRTC/ .uplugin files stamped with version.'
         type: string
         default: ''
+      ue-version:
+        description: 'Engine minor version X.Y (ADR 0014); the engine is C:\Program Files\Epic Games\UE_<ue-version>.'
+        type: string
+        default: '5.7'
+      profile:
+        description: "'full', or 'reduced': no strict build and no Fab zip build (the UE 5.8 leg of PR CI)."
+        type: string
+        default: 'full'
+      artifact-suffix:
+        description: 'Appended to every artifact name, so two engines in one run do not collide (empty for UE 5.7).'
+        type: string
+        default: ''
 
 env:
-  UE_ROOT: 'C:\\Program Files\\Epic Games\\UE_5.7'
   PLUGIN_NAME: 'Open3DBroadcast'
   PLUGIN_PATH: 'ProjectSandbox/Plugins/Open3DBroadcast'
 
@@ -38,6 +53,8 @@ jobs:
     runs-on: [ self-hosted, ue5, windows ]
     # 90 minutes plus the WebRTC add-on build and its test run (WP-F11).
     timeout-minutes: 120
+    env:
+      UE_ROOT: 'C:\Program Files\Epic Games\UE_${{ inputs.ue-version }}'
 
     steps:
       # No submodules and no pre-build step: BuildPlugin runs on the checkout
@@ -72,7 +89,7 @@ jobs:
           }
 
       - name: Post build started comment
-        if: github.event_name == 'pull_request' && github.event.pull_request.number != null
+        if: github.event_name == 'pull_request' && github.event.pull_request.number != null && inputs.profile == 'full'
         uses: actions/github-script@v7
         with:
           script: |
@@ -90,7 +107,8 @@ jobs:
       - name: Setup UE
         shell: powershell
         run: |
-          & .\Build\Scripts\Setup-UE.ps1 -UEPath "${{ env.UE_ROOT }}"
+          & .\Build\Scripts\Setup-UE.ps1 -UEPath "${{ env.UE_ROOT }}" -EngineVersion "${{ inputs.ue-version }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Resolve plugin paths
         id: paths
@@ -128,7 +146,7 @@ jobs:
       - name: Package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Open3DBroadcast-Win64-${{ github.sha }}
+          name: Open3DBroadcast-Win64-${{ github.sha }}${{ inputs.artifact-suffix }}
           path: ${{ runner.temp }}/PluginPackage
           retention-days: 30
 
@@ -155,7 +173,7 @@ jobs:
         if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
         uses: actions/upload-artifact@v4
         with:
-          name: Open3DBroadcast-AutomationTests-${{ github.sha }}
+          name: Open3DBroadcast-AutomationTests-${{ github.sha }}${{ inputs.artifact-suffix }}
           path: Artifacts/AutomationTests
           if-no-files-found: ignore
           retention-days: 14
@@ -181,7 +199,7 @@ jobs:
         if: ${{ !cancelled() && steps.addon.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
-          name: Open3DBroadcastWebRTC-Win64-${{ github.sha }}
+          name: Open3DBroadcastWebRTC-Win64-${{ github.sha }}${{ inputs.artifact-suffix }}
           path: ${{ runner.temp }}/AddOnPackage
           retention-days: 30
 
@@ -206,7 +224,7 @@ jobs:
         if: ${{ !cancelled() && steps.addon-tests.outcome != 'skipped' }}
         uses: actions/upload-artifact@v4
         with:
-          name: Open3DBroadcast-AutomationTestsWithAddOn-${{ github.sha }}
+          name: Open3DBroadcast-AutomationTestsWithAddOn-${{ github.sha }}${{ inputs.artifact-suffix }}
           path: Artifacts/AutomationTestsWithAddOn
           if-no-files-found: ignore
           retention-days: 14
@@ -215,6 +233,7 @@ jobs:
       # BuildPlugin -StrictIncludes (no PCH, no unity build) with warnings in
       # plugin sources treated as errors. Its output is discarded.
       - name: Strict build (non-unity, no PCH, warnings as errors)
+        if: inputs.profile == 'full'
         shell: powershell
         run: |
           $pkg = Join-Path $env:RUNNER_TEMP 'PluginPackageStrict'
@@ -230,14 +249,14 @@ jobs:
       # CI-5: BuildPlugin on the contents of the Fab source zip made by the
       # fab-package job, with nothing added to it (-RequireStandalone, WP-F1).
       - name: Download Fab source zip
-        if: inputs.fab-package-result == 'success'
+        if: inputs.fab-package-result == 'success' && inputs.profile == 'full'
         uses: actions/download-artifact@v4
         with:
           name: Open3DBroadcast-Fab-Source-${{ github.sha }}
           path: ${{ runner.temp }}/FabZip
 
       - name: Build the Fab source zip
-        if: inputs.fab-package-result == 'success'
+        if: inputs.fab-package-result == 'success' && inputs.profile == 'full'
         shell: powershell
         run: |
           & .\Build\Scripts\Build-FabZip.ps1 `
@@ -250,7 +269,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: Open3DBroadcast-BuildPluginLogs-${{ github.sha }}
+          name: Open3DBroadcast-BuildPluginLogs-${{ github.sha }}${{ inputs.artifact-suffix }}
           path: |
             ${{ runner.temp }}/*-BuildPlugin.log
             ${{ runner.temp }}/FabBuild/*-BuildPlugin.log
@@ -268,6 +287,6 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `❌ **Open3DBroadcast Plugin CI build failed.**\n\n[View build logs →](${runUrl})\n\nPlease check the logs for details.`
+              body: `❌ **Open3DBroadcast Plugin CI build failed** (UE ${{ inputs.ue-version }}).\n\n[View build logs →](${runUrl})\n\nPlease check the logs for details.`
             });
 

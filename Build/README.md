@@ -50,6 +50,7 @@ Verifies Unreal Engine installation.
 
 **Parameters:**
 - `-UEPath` - Path to Unreal Engine installation (default: `C:\Program Files\Epic Games\UE_5.7`)
+- `-EngineVersion` - Optional `X.Y` (for example `5.8`); fails unless the engine's `Engine\Build\Build.version` says that version (ADR 0014)
 
 ---
 
@@ -368,7 +369,7 @@ The same without the script:
 | Workflow | Runs on | What it does |
 |---|---|---|
 | `open3dbroadcast-plugin-ci.yml` | PRs to develop/main, pushes to develop/main, manual | Path filter, Fab source zip, copyright header check, runtime-modules-without-editor-code check, the release script's self-test, and on the UE runner (`open3dbroadcast-ue-build-test.yml`): BuildPlugin (fails on plugin warnings), UE automation tests against that package, the WebRTC add-on built against that package (strict, warnings as errors; uploaded as `Open3DBroadcastWebRTC-Win64-<sha>`) and the tests again with both plugins, strict build, BuildPlugin on the Fab zip |
-| `open3dbroadcast-ue-build-test.yml` | Called by CI and the release | The UE runner job: BuildPlugin, the tests, the WebRTC add-on and the tests with both plugins, strict build, BuildPlugin on the Fab zip. Uploads the tested package as `Open3DBroadcast-Win64-<sha>`. With a `version` input it first replaces both `.uplugin` files with the release gate's stamped ones |
+| `open3dbroadcast-ue-build-test.yml` | Called by CI and the release | The UE runner job: BuildPlugin, the tests, the WebRTC add-on and the tests with both plugins, strict build, BuildPlugin on the Fab zip. Uploads the tested package as `Open3DBroadcast-Win64-<sha>`. With a `version` input it first replaces both `.uplugin` files with the release gate's stamped ones. `ue-version` (default `5.7`) picks `C:\Program Files\Epic Games\UE_<ue-version>` and checks it with `Setup-UE.ps1 -EngineVersion`; `profile: reduced` leaves out the strict build and the Fab zip build; `artifact-suffix` keeps two engines' artifacts apart (ADR 0014) |
 | `open3dbroadcast-fab-package.yml` | Called by CI, nightly and the release, or manual | `fab-package.py`, then `check-no-video-codecs.sh` on every packaged binary and on the plugin tree (required), then uploads `Open3DBroadcast-Fab-Source-<sha>` |
 | `open3dbroadcast-plugin-nightly.yml` | 03:00 UTC daily, manual | Same checks as CI with a Shipping `-Configuration` (including the WebRTC add-on build and both-plugin test run), plus network tests when the `O3D_MOQ_RELAY_URL` secret is set, the transport flag-combination builds (`Build-FlagCombinations.ps1`; the manual run can skip them with `run_flag_builds`), the Linux exclusion check (`Test-LinuxExclusion.ps1 -Require`; the step shows as skipped while the runner has no Linux toolchain), and the Win64 Shipping game package (`Build-ShippingGame.ps1`; the manual run can skip it with `run_shipping_game`). A red scheduled run opens or comments on an issue labelled `nightly-failure`, and the next green scheduled run closes it (WP-R2) |
 | `open3dbroadcast-plugin-test.yml` | Manual only | Build any branch and optionally run the tests (with or without network tests) |
@@ -388,6 +389,8 @@ No UE job has a pre-build step: the plugin compiles the o3ds core from source (W
 - **Path filter:** all plugin CI jobs are skipped when a PR touches nothing the plugin build depends on. The filter covers `Build/**`, both plugins (`Open3DBroadcast` and `Open3DBroadcastWebRTC`), `ProjectSandbox/` project files and the workflow files. The plugin build reads nothing else: a `src/o3ds` change reaches it only with the re-synced core copy inside the plugin, which `core-tests.yml` checks.
 
 ### What turns the UE job red
+
+PR CI runs the job twice on the one runner (ADR 0014, WP-V4): the full job on UE 5.7, and a reduced one on UE 5.8 (items 1 to 3 below; its artifacts end in `-UE5.8`). Either one red makes "Plugin CI result" red. The nightly, the manual test workflow and the release still build on UE 5.7 only (WP-V5).
 
 1. BuildPlugin fails, or the compiler reports a warning in a plugin source file (`-FailOnWarnings`).
 2. Any automation test fails, no test runs, or no report is written (`Run-AutomationTests.ps1`). The step has a 20-minute timeout; ADR 0006 sets a 15-minute test budget per PR.
