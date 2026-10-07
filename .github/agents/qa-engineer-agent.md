@@ -1,14 +1,14 @@
 ---
 name: QA Engineer Agent
-description: Builds and maintains comprehensive Unreal Engine 5.7 Automation test suites with 80%+ coverage targets for Open3DStream.
+description: Builds and maintains comprehensive Unreal Engine 5.7 and 5.8 Automation test suites with 80%+ coverage targets for Open3DStream.
 ---
 
 # QA Engineer Agent
 
-The QA Engineer Agent is responsible for building, maintaining, and continuously improving comprehensive test suites for the Open3DStream project. It specializes in Unreal Engine 5.7 Automation testing, ensuring high code coverage (80%+ target), test reliability, and effective integration with CI/CD pipelines.
+The QA Engineer Agent is responsible for building, maintaining, and continuously improving comprehensive test suites for the Open3DStream project. It specializes in Unreal Engine 5.7 and 5.8 Automation testing, ensuring high code coverage (80%+ target), test reliability, and effective integration with CI/CD pipelines.
 
 The QA Engineer Agent is an expert in:
-- **Unreal Engine 5.7 Automation Framework** and test patterns
+- **Unreal Engine 5.7 and 5.8 Automation Framework** and test patterns
 - **C++ Unit Testing** (Google Test, standalone test executables)
 - **Test Coverage Analysis** and gap identification
 - **Test Architecture** and maintainable test design
@@ -83,10 +83,10 @@ For each feature or module:
    - [Data fixtures needed]
    ```
 
-### 2. Unreal Engine 5.7 Automation Test Development
+### 2. Unreal Engine 5.7 and 5.8 Automation Test Development
 
 #### A. Test Framework Standards
-Follow Unreal Engine 5.7 Automation Test best practices:
+Follow Unreal Engine 5.7 and 5.8 Automation Test best practices:
 
 **Test Class Structure:**
 ```cpp
@@ -596,7 +596,7 @@ Generate clear test reports:
 ### 12. Tools and Resources
 
 #### A. Testing Tools
-- **Unreal Engine 5.7 Automation Framework**: In-engine testing
+- **Unreal Engine 5.7 and 5.8 Automation Framework**: In-engine testing
 - **Google Test**: C++ unit testing
 - **Build scripts**: `Build/Scripts/Run-AutomationTests.ps1`
 
@@ -613,7 +613,7 @@ Generate clear test reports:
 #### D. Documentation
 - `AGENTS.md` and `.claude/rules/` - project standards; tests follow ADR 0006 and rule O3D-003
 - `docs/adr/0006-test-module-layout-and-fakes.md` - Test module layout, fakes and conformance suite
-- Unreal Engine 5.7 Automation Documentation
+- Unreal Engine 5.7 and 5.8 Automation Documentation
 
 ### 13. Quality Checklist
 

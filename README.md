@@ -14,7 +14,7 @@ Open3DBroadcast streams skeletal animation and animation curves (morph targets) 
 
 | | Open3DBroadcast | Open3DBroadcastWebRTC |
 |---|---|---|
-| Engine | Unreal Engine 5.7 only | Unreal Engine 5.7 only |
+| Engine | Unreal Engine 5.7 and 5.8 | Unreal Engine 5.7 and 5.8 |
 | Platform | Win64 (Editor, Game and Client targets) | Win64 |
 | Status | Beta; the MoQ transport is Experimental | Beta |
 | Transports | Loopback, Sockets (TCP/UDP), NNG, MoQ (draft-ietf-moq-transport-07) | WebRTC through LiveKit |
@@ -45,7 +45,7 @@ The [User Guide quick start](ProjectSandbox/Plugins/Open3DBroadcast/USER_GUIDE.m
 
 ## Building and running ProjectSandbox locally
 
-ProjectSandbox contains both plugins in-tree and enables them. On Windows with UE 5.7, from the repository root and with the editor closed:
+ProjectSandbox contains both plugins in-tree and enables them. On Windows with UE 5.7 (for UE 5.8, use `UE_5.8` in the paths, in a worktree of its own; see `Build/README.md`), from the repository root and with the editor closed:
 
 ```powershell
 & "C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat" ProjectSandboxEditor Win64 Development "-Project=$PWD\ProjectSandbox\ProjectSandbox.uproject" -WaitMutex

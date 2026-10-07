@@ -119,7 +119,7 @@ flag-combination builds, the Shipping game and the Linux check stay on 5.7.
 7. **WP-V5, release** (M): the matrix release, per-engine zips and notes, a dry run on both engines. Done in the workflows: the release and the nightly run both engines in full (the nightly's flag builds, Linux check and Shipping game on 5.7 only), Fab zips per engine, the manual test workflow takes `ue-version`.
 8. **WP-V6, behaviour on 5.8** (M, partly desk): LiveLink EngineTime and Timecode against ADR 0013,
    one LiveLink client per process, and a live take by the maintainer.
-9. **WP-V7, docs** (S): requirements in every README and guide, AGENTS.md, the rules, Build/README.
+9. **WP-V7, docs** (S): requirements in every README and guide, AGENTS.md, the rules, Build/README. Done: AGENTS.md, rule O3D-001 and Build/README in WP-V2 to V5; the READMEs, user guides, `.uplugin` descriptions, ProjectSandbox README, PR template and Copilot agent files in WP-V7. The two sentences that say UE 5.7 has one LiveLink client per process (USER_GUIDE, `docs/dev/runtime-services.md`) wait for WP-V6, which checks that on 5.8.
 10. **WP-V8b, Fab** (desk): confirm the multi-version rules, upload one source zip per engine.
 
 ## 5. Risks
