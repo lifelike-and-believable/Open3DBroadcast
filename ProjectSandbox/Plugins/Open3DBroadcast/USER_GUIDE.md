@@ -496,7 +496,7 @@ The MoQ transport is Experimental. It implements draft-ietf-moq-transport-07, th
 2. Set **Track Namespace (optional)** and **Track Name (optional)** on the sender, for example `mocap/stage1` and `performer1`.
 3. On the receiver, select **MoQ** and set the same **Relay URL**, **Track Namespace (optional)** and **Track Name (optional)**.
 
-Set the namespace and track name on both ends. Left empty, they do not match: the sender uses `mocap/<Subject Name>` and `<Subject Name>`, the receiver `mocap/default` and `primary`. Start the namespace with `mocap/`: the transport then puts audio on `audio/...` and control on `control/...` with the same rest of the namespace.
+Left empty on both ends, the namespace is `mocap/default` and the track `primary`, so one sender and one receiver on a relay connect without them. Set them, the same on both ends, to run several streams on one relay. Start the namespace with `mocap/`: the transport then puts audio on `audio/...` and control on `control/...` with the same rest of the namespace. Any other namespace is used as it is for mocap, and audio and control get `audio/` and `control/` in front of it.
 
 **Tracks:** a sender publishes three tracks under one track name: mocap in the namespace you set (`mocap/<session>`), audio in `audio/<session>`, and control in `control/<session>`. A receiver subscribes to the mocap track, and to the audio and control tracks when it uses them.
 
@@ -1267,8 +1267,8 @@ TCP and UDP keep their options apart, so switching between them keeps each one's
 | Key | Shown as | Side | Default | Description |
 |-----|----------|------|---------|-------------|
 | `relay_url` | **Relay URL** | Sender, receiver | none (required) | The relay, for example `https://relay.example.com:443`. The relay must speak draft-ietf-moq-transport-07 |
-| `track_namespace` | **Track Namespace (optional)** | Sender, receiver | `mocap/<session>` | Namespace of the mocap track. The sender's session is its **Subject Name**; the receiver's is `default` |
-| `track_name` | **Track Name (optional)** | Sender, receiver | sender: the **Subject Name**; receiver: `primary` | Name of the track |
+| `track_namespace` | **Track Namespace (optional)** | Sender, receiver | `mocap/default` | Namespace of the mocap track |
+| `track_name` | **Track Name (optional)** | Sender, receiver | `primary` | Name of the track |
 | `delivery_mode` | **Delivery Mode** | Sender | `stream` | `stream` (**Stream**) delivers every frame in order. `datagram` (**Datagram**) drops late frames instead of waiting for them |
 | `queue_bytes` | **Queue Capacity (MiB)** | Sender | 8 MiB | Bytes queued for the relay before frames are dropped (1 to 256 MiB in the panel; the key holds bytes) |
 
@@ -1696,7 +1696,6 @@ Set a variable in the console (for example `o3ds.Receiver.DebugParse 1`), or in 
 - **Unreal Engine 5.7 and Win64 only**, for editor and game targets. Server and Program targets are not supported.
 - **No sample content.** No map or assets ship with the plugin; the [Quick Start](#quick-start) builds a working setup from the Third Person template.
 - **MoQ is Experimental.** It implements draft-ietf-moq-transport-07 and needs a relay that speaks draft-07. Its options and behaviour can change between releases.
-- **MoQ defaults do not match between the ends.** Left empty, the sender uses the namespace `mocap/<Subject Name>` and the track `<Subject Name>`, the receiver `mocap/default` and `primary`. Set **Track Namespace (optional)** and **Track Name (optional)** on both ends.
 - **WebRTC is a separate add-on**, and each add-on build works only with the Open3DBroadcast release it was built for.
 - **Residual coding needs a reliable, ordered transport** (Loopback, TCP, NNG Pair or Push/Pull, WebRTC by default). On UDP, NNG Pub/Sub, MoQ, or WebRTC with `webrtc.prefer_lossy`, the sender sends without it and logs a warning.
 - **UDP multicast is IPv4 only**, and crosses routers only where they forward multicast. Many Wi-Fi networks and managed switches drop or rate-limit it.

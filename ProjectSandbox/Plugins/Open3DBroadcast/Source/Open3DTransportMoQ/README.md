@@ -21,8 +21,8 @@ the first one set wins.
 | Key | Also read as | Side | Shown as | Default | Notes |
 |---|---|---|---|---|---|
 | `relay_url` | `moq.relay` | both | **Relay URL** | none | Required, for example `https://relay.example.com:443`. |
-| `track_namespace` | `moq.namespace` | both | **Track Namespace (optional)** | `mocap/<session>` | A namespace that starts with `mocap/` or `audio/` gets the matching prefix for each track. Any other namespace is used as it is for mocap and audio alike; control gets `control/` in front of it. |
-| `track_name` | `moq.track` | both | **Track Name (optional)** | the stream id's last part; `primary` when there is none | The sender's stream id is its **Subject Name**. |
+| `track_namespace` | `moq.namespace` | both | **Track Namespace (optional)** | `mocap/<session>` | A namespace that starts with `mocap/` or `audio/` gets the matching prefix for each track. Any other namespace is used as it is for mocap; audio and control get `audio/` and `control/` in front of it. |
+| `track_name` | `moq.track` | both | **Track Name (optional)** | the stream id's last part; `primary` when there is none | The sender has no stream id, so with no options both ends use `mocap/default` and `primary`. |
 | `moq.session` | | both | | the stream id's first part; `default` when there is none | Used only when no namespace is set. |
 | `delivery_mode` | `moq.delivery` | sender | **Delivery Mode** | `stream` | `stream` delivers every frame in order; `datagram` drops late frames. |
 | `queue_bytes` | `moq.queue_bytes`, `moq.qbytes` | sender | **Queue Capacity (MiB)** | 8 MiB | Stored in bytes. Clamped to 256 KiB to 256 MiB. |

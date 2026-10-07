@@ -199,13 +199,9 @@ private:
 			// Options are the component's options (secrets excluded), so this is what
 			// SenderComponent->GetTransportOption(relay_url) returned before WP-A1 PR 4e.
 			Config.Uri = O3DTransportOptions::GetString(Options, MoQHelpers::kKeyRelayUrl);
-			// The default stream id (and so the default track name) is the sender's Subject Name,
-			// which the host now puts in the config (WP-A1 PR 5a), so MoQ no longer needs the
-			// component or Open3DSender. Empty when the component has none, as before.
-			if (Config.StreamId.IsEmpty())
-			{
-				Config.StreamId = Config.SubjectName;
-			}
+			// StreamId stays empty, so with no naming options the sender publishes mocap/default,
+			// track primary: the receiver's defaults (maintainer decision 2026-10-07). It used to
+			// be the Subject Name, which no receiver could know.
 		};
 		Descriptor.SenderOptions.OptionSchema = MoQSchema::Make(/*bSender=*/true);
 

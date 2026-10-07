@@ -197,7 +197,9 @@ private:
     mutable FO3DTransportStats Stats;  // Mutable to allow updates in const GetStats() method
     int64 LatencySamples = 0;
 
-    double NoDataReconnectTimeoutSec = 5.0;
+    /** webrtc.reconnect_timeout; Initialize sets it, default 2 s (the add-on's USER_GUIDE). */
+    static constexpr double DefaultNoDataReconnectTimeoutSec = 2.0;
+    double NoDataReconnectTimeoutSec = DefaultNoDataReconnectTimeoutSec;
 
     // Connection and token state (game thread only, TRF-3/TRF-15/TRF-23).
     TUniquePtr<FO3DTokenManager> TokenManager;

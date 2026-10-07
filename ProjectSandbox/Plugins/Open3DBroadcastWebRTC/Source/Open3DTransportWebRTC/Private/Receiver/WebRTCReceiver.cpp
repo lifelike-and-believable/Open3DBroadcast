@@ -725,8 +725,8 @@ FO3DTransportResult FO3DWebRTCReceiver::ParseConfig(const FO3DTransportConfig& C
         return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, TEXT("WebRTC receiver: the token settings were refused."));
     }
 
-    // Strict number (O3DTransportOptions, WP-A1 PR 4f); anything else is the default, 2 s.
-    const double TimeoutSeconds = O3DTransportOptions::GetDouble(Config.AdvancedParams, ReconnectTimeoutOptionKey, 2.0, 0.0, 300.0);
+    // Strict number (O3DTransportOptions, WP-A1 PR 4f); anything else is the default.
+    const double TimeoutSeconds = O3DTransportOptions::GetDouble(Config.AdvancedParams, ReconnectTimeoutOptionKey, DefaultNoDataReconnectTimeoutSec, 0.0, 300.0);
     NoDataReconnectTimeoutSec = TimeoutSeconds;
 
     return FO3DTransportResult::Ok();
