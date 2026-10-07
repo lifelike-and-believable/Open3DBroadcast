@@ -110,6 +110,12 @@ namespace SocketsSchema
 		Schema.Add(MakePort(O3DSocketsConfig::DefaultUdpPort));
 		Schema.Add(MakeBool(O3DSockets::BroadcastOptionKey, LOCTEXT("UdpSenderBroadcastLabel", "Enable UDP Broadcast"),
 			LOCTEXT("UdpSenderBroadcastTooltip", "Allow sending to a broadcast address.")));
+		Schema.Add(MakeInt(O3DSockets::MulticastTtlOptionKey, LOCTEXT("UdpSenderMulticastTtlLabel", "Multicast TTL"),
+			LOCTEXT("UdpSenderMulticastTtlTooltip", "When Destination Host is a multicast group: how many routers the datagrams may cross. 1 keeps them on the local network."), 1, 1, 255));
+		FO3DTransportOptionField MulticastLoop = MakeBool(O3DSockets::MulticastLoopOptionKey, LOCTEXT("UdpSenderMulticastLoopLabel", "Multicast Loopback"),
+			LOCTEXT("UdpSenderMulticastLoopTooltip", "When Destination Host is a multicast group: receivers on this machine get the datagrams too."));
+		MulticastLoop.Default = TEXT("true");
+		Schema.Add(MoveTemp(MulticastLoop));
 		AddUdpSizeFields(Schema, EO3DTransportRole::Sender);
 		return Schema;
 	}
@@ -131,8 +137,12 @@ namespace SocketsSchema
 		Schema.Add(MakeText(O3DSockets::HostOptionKey, LOCTEXT("UdpReceiverBindLabel", "Bind Address"),
 			LOCTEXT("UdpReceiverBindTooltip", "Local address the receiver listens on. 127.0.0.1 accepts only this machine; 0.0.0.0 accepts datagrams from any machine on the network, without authentication or encryption."), O3DSockets::DefaultListenHost));
 		Schema.Add(MakePort(O3DSocketsConfig::DefaultUdpPort));
-		Schema.Add(MakeBool(O3DSockets::BroadcastOptionKey, LOCTEXT("UdpReceiverBroadcastLabel", "Accept Broadcast Packets"),
-			LOCTEXT("UdpReceiverBroadcastTooltip", "Receive datagrams sent to a broadcast address.")));
+		Schema.Add(MakeText(O3DSockets::MulticastGroupOptionKey, LOCTEXT("UdpReceiverMulticastLabel", "Multicast Group"),
+			LOCTEXT("UdpReceiverMulticastTooltip", "IPv4 multicast group to join (224.0.0.0 to 239.255.255.255; 239.x.x.x stays on your site). Every receiver that joins gets the sender's datagrams. Set Bind Address to 0.0.0.0 or the interface's address."), TEXT("")));
+		Schema.Add(MakeText(O3DSockets::AllowSourceOptionKey, LOCTEXT("UdpReceiverAllowSourceLabel", "Allowed Senders"),
+			LOCTEXT("UdpReceiverAllowSourceTooltip", "Comma-separated IP addresses. Datagrams from any other address are dropped. Empty accepts every sender."), TEXT("")));
+		Schema.Add(MakeBool(O3DSockets::ReuseAddrOptionKey, LOCTEXT("UdpReceiverReuseAddrLabel", "Share Port"),
+			LOCTEXT("UdpReceiverReuseAddrTooltip", "Let other receivers on this machine listen on the same port, for several multicast receivers. Off, a second receiver on the port fails to start.")));
 		AddUdpSizeFields(Schema, EO3DTransportRole::Receiver);
 		return Schema;
 	}

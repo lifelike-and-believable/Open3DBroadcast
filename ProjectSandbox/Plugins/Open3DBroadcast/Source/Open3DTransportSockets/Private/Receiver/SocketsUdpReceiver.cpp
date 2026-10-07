@@ -101,7 +101,33 @@ FO3DTransportResult FO3DSocketsUdpReceiver::Initialize(const FO3DTransportConfig
 	StreamId = ActiveConfig.StreamId;
 	ActiveAudioConfig = Config.Audio;
 	const TMap<FString, FString>& Options = Config.AdvancedParams;
-	bAllowBroadcast = O3DTransportOptions::GetBool(Options, O3DSockets::BroadcastOptionKey, false);
+	bReuseAddr = O3DTransportOptions::GetBool(Options, O3DSockets::ReuseAddrOptionKey, false);
+	MulticastGroup = O3DTransportOptions::GetString(Options, O3DSockets::MulticastGroupOptionKey).TrimStartAndEnd();
+	if (!MulticastGroup.IsEmpty() && !O3DSockets::IsIPv4Multicast(MulticastGroup))
+	{
+		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP receiver: '%s' is not an IPv4 multicast group (224.0.0.0 to 239.255.255.255)."), *MulticastGroup);
+		return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("'%s' is not an IPv4 multicast group."), *MulticastGroup));
+	}
+	AllowedSources.Reset();
+	TArray<FString> Sources;
+	O3DTransportOptions::GetString(Options, O3DSockets::AllowSourceOptionKey).ParseIntoArray(Sources, TEXT(","), /*CullEmpty=*/true);
+	for (FString& Source : Sources)
+	{
+		Source.TrimStartAndEndInline();
+		FO3DHostPort Candidate;
+		Candidate.Host = Source;
+		Candidate.Port = 1;
+		if (Source.IsEmpty())
+		{
+			continue;
+		}
+		if (!O3DTransportOptions::IsIpLiteral(Candidate))
+		{
+			UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP receiver: allowed sender '%s' is not an IP address."), *Source);
+			return FO3DTransportResult::Error(EO3DTransportError::InvalidConfig, FString::Printf(TEXT("Allowed sender '%s' is not an IP address."), *Source));
+		}
+		AllowedSources.Add(Source);
+	}
 	MaxDatagramBytes = O3DTransportOptions::GetInt(Options, O3DSockets::MaxDatagramOptionKey, O3DSockets::DefaultUdpMaxDatagramBytes, 512, 65507);
 	MaxFrameBytes = O3DTransportOptions::GetInt(Options, O3DSockets::MaxFrameOptionKey, FReceiverConstants::DefaultMaxFrameBytes,
 		FReceiverConstants::MaxUdpDatagramBytes, FReceiverConstants::MaxFrameBytesLimit);
@@ -220,6 +246,14 @@ int32 FO3DSocketsUdpReceiver::Poll()
 		}
 
 		BytesThisPoll += BytesRead;
+
+		// WP-U6 (TRB-21): with an allow-list, anything from another address is dropped and counted.
+		if (AllowedSources.Num() > 0 && !AllowedSources.Contains(RecvAddr->ToString(false)))
+		{
+			FScopeLock Lock(&StatsMutex);
+			Stats.ReceiveErrors++;
+			continue;
+		}
 
 		TArray<uint8>& Frame = FrameScratch;
 		if (!ProcessDatagram(ReceiveBuffer.GetData(), BytesRead, Frame, FragmentState))
@@ -349,14 +383,14 @@ FO3DTransportResult FO3DSocketsUdpReceiver::CreateSocket()
 		return FO3DTransportResult::Error(EO3DTransportError::ResourceUnavailable, TEXT("Failed to create the UDP socket."));
 	}
 
-	// No SO_REUSEADDR (WP-U6, TRB-22): on Windows it lets a second socket bind a port in use, so a
-	// second listener, or another process, would share or take over this one silently.
-	Socket->SetNonBlocking(true);
-
-	if (bAllowBroadcast)
+	// No SO_REUSEADDR unless asked for (WP-U6, TRB-22): on Windows it lets a second socket bind a
+	// port in use, so a second listener, or another process, would share or take over this one
+	// silently. Several multicast receivers on one machine need it, so udp.reuseaddr opts in.
+	if (bReuseAddr)
 	{
-		Socket->SetBroadcast(true);
+		Socket->SetReuseAddr(true);
 	}
+	Socket->SetNonBlocking(true);
 
 	if (!Socket->Bind(BindAddr))
 	{
@@ -376,8 +410,23 @@ FO3DTransportResult FO3DSocketsUdpReceiver::CreateSocket()
 	TSharedPtr<FInternetAddr> SenderAddrScratch = SocketSubsystem->CreateInternetAddr(BindAddr.GetProtocolType());
 	RecvAddr = SenderAddrScratch;
 
-	UE_LOG(LogSocketsUdpReceiver, Log, TEXT("UDP receiver listening on %s:%d (broadcast=%d, recvBuf=%d)."),
-		*BindAddr.ToString(false), BindAddr.GetPort(), bAllowBroadcast ? 1 : 0, AppliedSize);
+	if (!MulticastGroup.IsEmpty())
+	{
+		TSharedRef<FInternetAddr> GroupAddr = SocketSubsystem->CreateInternetAddr();
+		bool bGroupValid = false;
+		GroupAddr->SetIp(*MulticastGroup, bGroupValid);
+		if (!bGroupValid || !Socket->JoinMulticastGroup(*GroupAddr))
+		{
+			const ESocketErrors Error = SocketSubsystem->GetLastErrorCode();
+			UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP receiver could not join multicast group %s (socket error %d)."), *MulticastGroup, static_cast<int32>(Error));
+			DestroySocket();
+			return FO3DTransportResult::Error(EO3DTransportError::ConnectFailed, FString::Printf(TEXT("Could not join multicast group %s (socket error %d)."), *MulticastGroup, static_cast<int32>(Error)));
+		}
+		JoinedGroupAddr = GroupAddr;
+	}
+
+	UE_LOG(LogSocketsUdpReceiver, Log, TEXT("UDP receiver listening on %s:%d (multicast=%s, allowed senders=%d, recvBuf=%d)."),
+		*BindAddr.ToString(false), BindAddr.GetPort(), MulticastGroup.IsEmpty() ? TEXT("none") : *MulticastGroup, AllowedSources.Num(), AppliedSize);
 	if (!O3DTransportOptions::IsLoopbackHost(BindTarget.Host))
 	{
 		UE_LOG(LogSocketsUdpReceiver, Warning, TEXT("UDP receiver listens on %s:%d, reachable from other machines. The stream has no authentication or encryption; set 127.0.0.1 to accept only this machine (USER_GUIDE, Network Exposure)."), *BindAddr.ToString(false), BindAddr.GetPort());
@@ -388,6 +437,11 @@ FO3DTransportResult FO3DSocketsUdpReceiver::CreateSocket()
 
 void FO3DSocketsUdpReceiver::DestroySocket()
 {
+	if (Socket && JoinedGroupAddr.IsValid())
+	{
+		Socket->LeaveMulticastGroup(*JoinedGroupAddr);
+	}
+	JoinedGroupAddr.Reset();
 	if (Socket && SocketSubsystem)
 	{
 		SocketSubsystem->DestroySocket(Socket);

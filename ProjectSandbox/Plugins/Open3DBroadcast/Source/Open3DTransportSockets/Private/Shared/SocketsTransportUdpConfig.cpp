@@ -22,7 +22,7 @@ namespace O3DSocketsUdpConfigPrivate
 		return Value > 0 ? Value : Default;
 	}
 
-	/** Host, port, broadcast and the largest datagram, normalised and written back (both roles). */
+	/** Host, port and the largest datagram, normalised and written back (both roles). */
 	void ConfigureUdp(FO3DTransportConfig& Config, const TCHAR* DefaultHost)
 	{
 		Config.Transport = TEXT("UDP");
@@ -30,14 +30,12 @@ namespace O3DSocketsUdpConfigPrivate
 		const FString StoredHost = O3DTransportOptions::GetString(Config.AdvancedParams, O3DSockets::HostOptionKey);
 		const FString Host = StoredHost.IsEmpty() ? FString(DefaultHost) : O3DSockets::NormaliseHostname(StoredHost);
 		const int32 Port = O3DSockets::ReadPortOption(Config, O3DSockets::PortOptionKey, O3DSocketsConfig::DefaultUdpPort);
-		const bool bBroadcast = O3DTransportOptions::GetBool(Config.AdvancedParams, O3DSockets::BroadcastOptionKey, false);
 		const int32 MaxDatagram = ReadPositiveInt(Config, O3DSockets::MaxDatagramOptionKey, O3DSockets::DefaultUdpMaxDatagramBytes);
 
 		Config.Uri = O3DSockets::MakeUri(TEXT("udp"), Host, Port);
 		Config.StreamId = O3DSockets::ComposeStreamId(Host, Port);
 		Config.AdvancedParams.Add(O3DSockets::HostOptionKey, Host);
 		Config.AdvancedParams.Add(O3DSockets::PortOptionKey, FString::FromInt(Port));
-		Config.AdvancedParams.Add(O3DSockets::BroadcastOptionKey, bBroadcast ? TEXT("true") : TEXT("false"));
 		Config.AdvancedParams.Add(O3DSockets::MaxDatagramOptionKey, FString::FromInt(MaxDatagram));
 	}
 }
@@ -51,6 +49,9 @@ namespace O3DSocketsConfig
 		// Only the sender fragments frames, so only it has an MTU (TRB-21).
 		const int32 Mtu = O3DSocketsUdpConfigPrivate::ReadPositiveInt(Config, O3DSockets::MtuOptionKey, O3DSockets::DefaultUdpMtuBytes);
 		Config.AdvancedParams.Add(O3DSockets::MtuOptionKey, FString::FromInt(Mtu));
+		// Only the sender broadcasts; the receiver joins multicast groups instead (WP-U6, TRB-21).
+		const bool bBroadcast = O3DTransportOptions::GetBool(Config.AdvancedParams, O3DSockets::BroadcastOptionKey, false);
+		Config.AdvancedParams.Add(O3DSockets::BroadcastOptionKey, bBroadcast ? TEXT("true") : TEXT("false"));
 	}
 
 	void ConfigureUdpReceiver(FO3DTransportConfig& Config)

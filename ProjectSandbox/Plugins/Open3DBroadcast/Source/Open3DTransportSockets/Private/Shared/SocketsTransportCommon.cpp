@@ -10,6 +10,27 @@
 
 namespace O3DSockets
 {
+	bool IsIPv4Multicast(const FString& Host)
+	{
+		TArray<FString> Octets;
+		Host.TrimStartAndEnd().ParseIntoArray(Octets, TEXT("."), /*CullEmpty=*/false);
+		if (Octets.Num() != 4)
+		{
+			return false;
+		}
+		int32 Values[4] = {};
+		for (int32 Index = 0; Index < 4; ++Index)
+		{
+			int64 Value = 0;
+			if (Octets[Index].IsEmpty() || Octets[Index].Len() > 3 || !O3DTransportOptions::TryParseInt(Octets[Index], Value) || Value < 0 || Value > 255)
+			{
+				return false;
+			}
+			Values[Index] = static_cast<int32>(Value);
+		}
+		return Values[0] >= 224 && Values[0] <= 239;
+	}
+
 	FString NormaliseHostname(const FString& Host)
 	{
 		FString Result = Host;

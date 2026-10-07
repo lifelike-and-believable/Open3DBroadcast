@@ -96,6 +96,9 @@ private:
 	FString StreamId;
 
 	bool bAllowBroadcast = false;
+	/** WP-U6 (TRB-21): applied when the destination is a multicast group. */
+	int32 MulticastTtl = 1;
+	bool bMulticastLoopback = true;
 	int32 MaxDatagramBytes = O3DSockets::DefaultUdpMaxDatagramBytes;
 	int32 MtuBytes = O3DSockets::DefaultUdpMtuBytes;
 	FGuid AudioSourceGuid;

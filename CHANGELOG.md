@@ -578,6 +578,12 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- UDP multicast and an allow-list of senders (WP-U6; TRB-21; maintainer decision 2026-10-06).
+  - **Receiver:** **Multicast Group** (`udp.multicast`) joins an IPv4 group after binding and leaves it on Stop; **Allowed Senders** (`udp.allowsource`) drops datagrams from unlisted addresses and counts them in `ReceiveErrors`; **Share Port** (`udp.reuseaddr`, off) sets SO_REUSEADDR so several receivers on one machine can join the group.
+  - **Sender:** **Multicast TTL** (`udp.multicastttl`, 1) and **Multicast Loopback** (`udp.multicastloop`, on) apply when **Destination Host** is a multicast group.
+  - **Removed:** the receiver's **Accept Broadcast Packets** (`udp.broadcast` on the receiver). Receiving a broadcast datagram never needed it; the key is ignored on a receiver.
+  - **Docs:** USER_GUIDE "UDP multicast setup", option tables; the Sockets README; the transport comparison (which also had the receiver's old `0.0.0.0` default).
+
 - Listening ends default to localhost (WP-U6; TRB-29; maintainer decision 2026-10-06).
   - **Before:** the TCP sender, the UDP receiver and NNG listeners bound `0.0.0.0` by default, so anyone on the network could connect, receive or inject frames, with no authentication or encryption.
   - **Now:** they default to `127.0.0.1`. A listener bound to any non-loopback address logs a warning when it starts.
