@@ -79,10 +79,31 @@ Envelope v1 (big-endian, magic `'O','3','D','A'`, 20 bytes) is not accepted.
 - A control envelope, header included, is at most 1,100 bytes, so it is never fragmented
   (ADR 0011 item 4).
 - **Audio payload** (inside an audio envelope, and alone on envelope-less channels such as
-  MoQ's audio track): a little-endian header with channels, sample rate, source GUID, stream
-  label and subject, then the samples. Version 1 is PCM16; version 2 names its codec (Opus).
-  **PCM16 samples are little-endian.** The payload keeps its codec and timestamp because
-  envelope-less channels read them from it (ADR 0009 item 4's payload v3 was not adopted).
+  MoQ's audio track): a little-endian header, the stream label and subject name, then the
+  samples. Version 1 is PCM16; version 2 names its codec (Opus). **PCM16 samples are
+  little-endian.** The payload keeps its codec and timestamp because envelope-less channels
+  read them from it (ADR 0009 item 4's payload v3 was not adopted).
+
+**Audio payload**, version 1 (PCM16, 40-byte header) and version 2 (encoded, 42-byte header);
+every field little-endian (`Open3DShared/Private/O3DAudioSerialization.cpp`):
+
+| v1 bytes | v2 bytes | Field |
+|---|---|---|
+| 0 | 0 | version: 1 or 2 |
+| 1 | 1 | flags: 0 in v1; bit 0 (encoded) set in v2 |
+| | 2 | codec, as the envelope's codec byte (1 Opus) |
+| | 3 | reserved, 0 |
+| 2-3 | 4-5 | channels (u16), 1 to 8 |
+| 4-7 | 6-9 | sample rate (u32): 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000, 88200 or 96000 |
+| 8-15 | 10-17 | timestamp in seconds (f64), sender clock |
+| 16-31 | 18-33 | source GUID, four u32 |
+| 32-33 | 34-35 | stream label size L (u16), at most 256 |
+| 34-35 | 36-37 | subject name size S (u16), at most 256 |
+| 36-39 | 38-41 | sample bytes N (u32); in v1 a multiple of 2 |
+| 40 | 42 | L bytes of UTF-8 stream label, then S bytes of UTF-8 subject name, then N bytes of samples (v1: interleaved PCM16; v2: one codec packet) |
+
+A reader rejects a payload whose sizes overrun the buffer, whose names are longer than 256
+bytes, or whose channel count or sample rate is outside these values.
 
 ## 3. UDP datagram
 

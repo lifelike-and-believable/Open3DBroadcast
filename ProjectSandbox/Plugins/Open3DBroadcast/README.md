@@ -69,7 +69,7 @@ Open these in the firewall of the machine that listens. A receiver and sender on
 ### Core Modules
 
 - **Open3DStreamCore**: The Open3DStream core library (serialization, sequencing, reordering, prediction), compiled from source. See "Third-Party Dependencies" below.
-- **Open3DShared**: Shared utilities and base classes used by all modules
+- **Open3DShared**: the transport interfaces and registry, the send queue and receive demux transports share, the audio codec, the control bus, credentials and metrics ([its README](Source/Open3DShared/README.md) lists them with their threading rules)
 - **Open3DSender**: Captures and streams skeletal animation data
 - **Open3DReceiver**: Receives and applies animation data to characters
 
