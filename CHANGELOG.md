@@ -582,6 +582,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- PR CI builds and tests on UE 5.8 as well (WP-V4; ADR 0014). The plugin CI runs the UE job as a matrix: the full job on UE 5.7, and a reduced one on UE 5.8 (BuildPlugin with warnings as errors, the tests, the WebRTC add-on and the tests with both plugins; no strict build, no Fab zip build). `open3dbroadcast-ue-build-test.yml` takes `ue-version`, `profile` and `artifact-suffix` (5.8 artifacts end in `-UE5.8`), and `Setup-UE.ps1 -EngineVersion` fails the job when the engine at the path is another version. The release, nightly and manual workflows still use UE 5.7.
+
 - WebRTC reconnect (ADR 0015; TRF-6, TRF-26; maintainer decision 2026-10-07).
   - **Sender:** after LiveKit gives up on the room (`LkConnDisconnected`) or a connect fails (`LkConnFailed`), it connects again with backoff (1 s doubling to 30 s, jitter, no limit) instead of staying `Failed` until Stop and Start. It closes the room livekit_ffi still holds first, and audio after the reconnect goes to fresh tracks; the old ones are destroyed at Stop.
   - **Receiver:** reconnects after LiveKit gives up with the same backoff, not on the next Poll. The no-data watchdog (`webrtc.reconnect_timeout`) is off by default (was 2 s) and, when set, counts only while LiveKit reports the room connected, so it no longer cuts a slow join, fights LiveKit's own reconnect or tears down an idle room. A token-refresh fallback still reconnects at once.
