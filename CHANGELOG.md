@@ -582,6 +582,7 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Builds cleanly on UE 5.8 (WP-V3, #446; ADR 0014). `FCoreDelegates::OnPostEngineInit` (deprecated in 5.8) goes through the new `Open3DShared/Public/O3DEngineCompat.h`, which picks `GetOnPostEngineInit()` on 5.8; the WebRTC add-on tests `PLATFORM_WINDOWS` instead of the deprecated `PLATFORM_64BITS`; the capture test reads its file through the full path. No behaviour change on 5.7.
 - Build system for UE 5.7 and 5.8 (WP-V2; ADR 0014).
   - **Target.cs:** `ProjectSandbox` and `ProjectSandboxEditor` use V7 and `Unreal5_8` on UE 5.8, V6 and `Unreal5_7` on 5.7 (`#if UE_5_8_OR_LATER`). Rules O3D-001 and O3D-005 are updated.
   - **Descriptors:** both source `.uplugin` files drop `"EngineVersion": "5.7.0"`, which made UE 5.8 skip the plugin in unattended runs. BuildPlugin stamps each package with the engine that built it, as before.
