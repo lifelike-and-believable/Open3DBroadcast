@@ -393,6 +393,7 @@ Live fetches of `support.fab.com`, `dev.epicgames.com` and `unrealengine.com` we
 - Recommendation: Rewrite it as a short landing page: what the repo contains (core lib, Unreal plugin, DCC plugins), links to the plugin USER_GUIDE, build instructions via `Build/README.md`, and supported engine versions and platforms. Delete the "Recent Updates" changelog prose and move anything worth keeping to CHANGELOG.md.
 - Effort: M
 - Owner: docs
+- Status: closed in #436
 
 ### DOC-4: USER_GUIDE documents Blueprint events that don't exist, and the C++ sample doesn't compile
 - Category: docs

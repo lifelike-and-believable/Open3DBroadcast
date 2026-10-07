@@ -4,7 +4,7 @@
 
 Open3DBroadcast streams skeletal animation and animation curves (morph targets) between engines and tools in real time. Open3DStream is the name of the wire protocol and of the C++ core library that implement it. This repository holds:
 
-- **The Open3DStream core library** (`src/o3ds`): the FlatBuffers data model, serialization with delta updates, sequencing, reordering and prediction, and TCP, UDP and NNG connectors.
+- **The Open3DStream core library** (`src/o3ds`): the FlatBuffers data model, serialization with delta updates, the frame and envelope wire format, sequencing, reordering and prediction. The Unreal plugin compiles a copy of it.
 - **Open3DBroadcast**, the Unreal Engine plugin (`ProjectSandbox/Plugins/Open3DBroadcast`): sends and receives Open3DStream data between Unreal instances over pluggable transports, with LiveLink on the receiving side.
 - **Open3DBroadcastWebRTC**, a free add-on plugin (`ProjectSandbox/Plugins/Open3DBroadcastWebRTC`) that adds a WebRTC (LiveKit) transport.
 - **ProjectSandbox**, the Unreal project used to develop and test both plugins.
@@ -25,7 +25,7 @@ The add-on depends on Open3DBroadcast and is installed next to it (ADR 0002).
 What the plugins provide:
 
 - **Sender:** `UO3DSenderComponent` captures a skeletal mesh's pose and animation curves and streams them under a subject name. `UO3DSenderAudioCaptureComponent` sends audio with it.
-- **Receiver:** a LiveLink source, **Open3D Receiver Source**, that exposes each received subject as a LiveLink subject. `UO3DRemoteAudioComponent` plays received audio.
+- **Receiver:** a LiveLink source, **Open3DStream Receiver**, that exposes each received subject as a LiveLink subject. `UO3DRemoteAudioComponent` plays received audio.
 - **Editor:** Details panels for the sender and the transport settings, and the LiveLink "Add Source" panel.
 
 ### Install from source
@@ -39,9 +39,9 @@ No CMake or pre-build step is needed. The plugin compiles the o3ds core from a c
 
 The [User Guide quick start](ProjectSandbox/Plugins/Open3DBroadcast/USER_GUIDE.md#quick-start) walks through a Loopback stream in one editor:
 
-1. Add an **O3D Sender Component** to an actor with a skeletal mesh, set a **Subject Name** and set **Transport Name** to `loopback`.
-2. In **Window → Live Link**, click **+ Source → Open3D Receiver Source** with the same transport, then **Create**.
-3. Press Play. The subject appears in the LiveLink panel, ready for a Live Link Component on another character.
+1. Add an **O3D Sender** component to a character with a skeletal mesh. Set **Subject Name**, tick **Auto Create Transport** and leave **Transport Name** on **Loopback**.
+2. In **Window → Virtual Production → Live Link**, click **Add Source → Open3DStream Receiver**, leave **Transport** on **Loopback**, and click **Create Source**.
+3. Press Play. The subject appears in the Live Link panel; a **Live Link Pose** node in an Animation Blueprint plays it on another mesh.
 
 ## Building and running ProjectSandbox locally
 
@@ -58,7 +58,7 @@ For packaging (`RunUAT BuildPlugin`, the Fab source zip), automation tests, buil
 
 ## Core library (C++)
 
-The core's source of truth for the data model is the FlatBuffers schema `src/o3ds.fbs`. `src/o3ds_generated.h` is generated from it with `flatc --cpp -o src src/o3ds.fbs` and checked in.
+The FlatBuffers schemas are the source of truth: `src/o3ds.fbs` for the data and `src/o3ds_control.fbs` for the control channel. The generated headers are checked in; regenerate them with `flatc --cpp -o src src/o3ds.fbs` and `flatc --cpp -o src src/o3ds_control.fbs`, using flatc from the `thirdparty/flatbuffers` pin, then run `python3 Build/Scripts/sync_o3ds_core.py` to update the plugin's copy. The byte layout is in [docs/wire-format.md](docs/wire-format.md).
 
 ### Building
 
@@ -111,20 +111,20 @@ subjects.Serialize(buffer, /*timestamp*/ 0.0);
 
 ### TCP framing
 
-Each TCP message is an 18-byte header followed by the FlatBuffers payload: the 14-byte magic `00 FF 03 FE "O3DS-START"`, then the payload length as a little-endian `uint32` (`src/o3ds/tcp_stream_parser.*`).
+The plugin's TCP transport sends each message as an 18-byte header followed by the payload: the 14-byte magic `00 FF 03 FE "O3DS-START"`, then the payload length as a little-endian `uint32` (`src/o3ds/tcp_stream_parser.*`). A payload is an Open3D frame (an 8-byte header, then the FlatBuffers `SubjectList`) or an `O3DU` envelope for audio and control ([docs/wire-format.md](docs/wire-format.md)). This reads one message from a TCP sender on this machine (default port 17700):
 
 ```python
 import socket, struct
 
 MAGIC = b"\x00\xff\x03\xfeO3DS-START"
 
-with socket.create_connection(("127.0.0.1", 5555)) as s:
+with socket.create_connection(("127.0.0.1", 17700)) as s:
     header = s.recv(18, socket.MSG_WAITALL)
     if header[:14] != MAGIC:
         raise SystemExit("Invalid stream header")
     (size,) = struct.unpack("<I", header[14:18])
     payload = s.recv(size, socket.MSG_WAITALL)
-    print(f"Received {len(payload)} bytes of O3DS data")
+    print(f"Received a {len(payload)}-byte message")
 ```
 
 ## Apps
@@ -143,6 +143,8 @@ with socket.create_connection(("127.0.0.1", 5555)) as s:
 ## Documentation
 
 - [Build/README.md](Build/README.md): build scripts, packaging, tests and CI
+- [docs/wire-format.md](docs/wire-format.md): the wire format and protocol versions
+- [AGENTS.md](AGENTS.md): instructions for coding agents, and the project's rules
 - [docs/adr/](docs/adr/README.md): architecture decision records
 - [docs/roadmap/](docs/roadmap/): roadmaps
 - [docs/testing/webrtc-manual-test.md](docs/testing/webrtc-manual-test.md): manual WebRTC test
