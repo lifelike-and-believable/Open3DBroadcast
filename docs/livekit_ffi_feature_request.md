@@ -133,6 +133,13 @@ Notes:
 - If token refresh is unsupported, document best practice (disconnect + reconnect).
 - Connection callback should signal transitions (Reconnecting, Disconnected, Connected).
 
+Status in `livekit_ffi` v0.2.7 (unchanged up to 50e6663), from the source:
+- `lk_set_reconnect_backoff` ignores its arguments and returns ok (`backend_livekit.rs:522-538`). The `livekit` 0.7.24 SDK hard-codes its reconnect (10 attempts, 5 s apart: `rtc_engine/mod.rs:52-53`), so this may need an SDK change. Request: honour attempts and interval, or remove the function and document the SDK's fixed policy.
+- `lk_refresh_token` returns 501 (`:541-548`).
+- When the SDK gives up, `LkConnDisconnected` fires twice (`:828-847`) and the client keeps its `room`, so `lk_client_is_ready` stays 1 and a new connect on the same client returns 104 until `lk_disconnect`. Requests: fire it once per drop; clear `room` (or report the real state) when the SDK disconnects.
+- `lk_client_is_ready` returns 1 from connect until `lk_disconnect`, including while reconnecting, and takes the client mutex, which a send holds for a whole reconnect (section 12). Request: document what "ready" means and that it locks, or report the connection state without the lock.
+- Open3DBroadcast does not call either function; it reconnects with its own backoff after `LkConnDisconnected` (ADR 0015).
+
 ### 7) Role Management (Optional)
 Goal: Allow role changes without full reconnect (if SDK supports).
 
