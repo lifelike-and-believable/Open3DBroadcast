@@ -23,6 +23,7 @@ THIRD_PARTY_INCLUDES_END
 
 // Token management
 #include "../Shared/WebRTCTokenManager.h"
+#include "../Shared/WebRTCUtils.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogO3DWebRTCSender, Log, All);
 
@@ -55,6 +56,12 @@ struct FWebRTCSenderLink
     // Per-subject audio tracks (labeled audio publishing), keyed by StreamLabel.
     FCriticalSection AudioTracksMutex;
     TMap<FString, LkAudioTrackHandle*> AudioTracks;
+    /**
+     * Tracks of a room the sender closed to reconnect (ADR 0015): livekit_ffi dropped their
+     * pipelines, so a publish on one fails, but a sink may still hold one, so they are destroyed
+     * only in Stop, after the gate closes. Guarded by AudioTracksMutex.
+     */
+    TArray<LkAudioTrackHandle*> RetiredAudioTracks;
 
     TAtomic<bool> bConnected{ false };
 
@@ -102,9 +109,10 @@ public:
 
     /**
      * Constructs a sender that calls LiveKit through InFfi, and fetches tokens with fetchers
-     * from InTokenFetcherFactory (null uses the HTTP fetcher). Used by tests.
+     * from InTokenFetcherFactory (null uses the HTTP fetcher). InClock replaces
+     * FPlatformTime::Seconds() for the reconnect timing, so tests need no sleeps. Used by tests.
      */
-    explicit FO3DWebRTCSender(const FLkFfiApi& InFfi, FO3DTokenFetcherFactory InTokenFetcherFactory = nullptr);
+    explicit FO3DWebRTCSender(const FLkFfiApi& InFfi, FO3DTokenFetcherFactory InTokenFetcherFactory = nullptr, TFunction<double()> InClock = nullptr);
 
     virtual ~FO3DWebRTCSender() override;
 
@@ -126,9 +134,10 @@ public:
     /** WebRTCUtils::GetCapabilities for the initialized config (Unreliable with webrtc.prefer_lossy). */
     virtual FO3DTransportCapabilities GetCapabilities() const override;
     /**
-     * Connecting until LiveKit connects, Connected, Reconnecting while LiveKit reconnects, Failed
-     * when the room disconnects or the connect fails. LiveKit reports on its own threads; Tick
-     * (game thread) applies the change, so callbacks run on the game thread.
+     * Connecting until LiveKit connects, Connected, Reconnecting while LiveKit reconnects and while
+     * the sender retries, with backoff, after LiveKit gave up or a connect failed (ADR 0015).
+     * LiveKit reports on its own threads; Tick (game thread) applies the change, so callbacks run
+     * on the game thread.
      */
     virtual EO3DConnectionState GetConnectionState() const override { return ConnectionState.Get(); }
     virtual void SetStateChangedCallback(FO3DConnectionStateCallback Callback) override { ConnectionState.SetCallback(MoveTemp(Callback)); }
@@ -148,6 +157,9 @@ private:
     /** Immutable after construction. */
     const FLkFfiApi Ffi;
     FO3DTokenFetcherFactory TokenFetcherFactory;
+    TFunction<double()> Clock;
+    /** FPlatformTime::Seconds(), or the test's clock. */
+    double Now() const { return Clock ? Clock() : FPlatformTime::Seconds(); }
 
     // Configuration
     FO3DTransportConfig ActiveConfig;
@@ -214,16 +226,23 @@ private:
     uint64 ObservedTokenGeneration = 0;
     double TokenFetchStartTime = 0.0;
     double NextTokenFetchTime = 0.0;
-    double NextConnectAttemptTime = 0.0;
     static constexpr double TokenFetchTimeoutSec = 30.0;
     static constexpr double TokenFetchRetryIntervalSec = 5.0;
-    static constexpr double ConnectRetryIntervalSec = 5.0;
+    /** ADR 0015: delay before reconnecting after LiveKit gave up or a connect failed; reset when it connects. */
+    FO3DReconnectPolicy ReconnectPolicy{ WebRTCUtils::MakeReconnectPolicySettings() };
+    /**
+     * livekit_ffi still holds the room: from Connected until lk_disconnect, also after the SDK gave
+     * up (Disconnected). A connect returns 104 "already connected" while it does.
+     */
+    bool bRoomHeld = false;
 
     // Helper methods
     FO3DTransportResult ParseConfig(const FO3DTransportConfig& Config);
     /** Drives token fetch, connect and token refresh. Game thread. Returns false if a connect call failed. */
     bool UpdateConnection();
     void MaybeFetchToken(double NowSeconds);
+    /** Game thread: lk_disconnect on a room livekit_ffi still holds, and retires its audio tracks (ADR 0015). */
+    void CloseHeldRoom();
     bool TryConnect(const FString& InToken, uint64 TokenGeneration, double NowSeconds);
     void ApplyRefreshedToken(const FString& InToken, uint64 TokenGeneration);
 

@@ -582,6 +582,12 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- WebRTC reconnect (ADR 0015; TRF-6, TRF-26; maintainer decision 2026-10-07).
+  - **Sender:** after LiveKit gives up on the room (`LkConnDisconnected`) or a connect fails (`LkConnFailed`), it connects again with backoff (1 s doubling to 30 s, jitter, no limit) instead of staying `Failed` until Stop and Start. It closes the room livekit_ffi still holds first, and audio after the reconnect goes to fresh tracks; the old ones are destroyed at Stop.
+  - **Receiver:** reconnects after LiveKit gives up with the same backoff, not on the next Poll. The no-data watchdog (`webrtc.reconnect_timeout`) is off by default (was 2 s) and, when set, counts only while LiveKit reports the room connected, so it no longer cuts a slow join, fights LiveKit's own reconnect or tears down an idle room. A token-refresh fallback still reconnects at once.
+  - **State:** both report `Reconnecting` while they retry; the sender no longer reports `Failed` for a dropped room.
+  - `lk_set_reconnect_backoff` (a no-op in livekit_ffi) and `lk_client_is_ready` (not a health signal) are not used; `docs/livekit_ffi_feature_request.md` says why.
+  - Tests: `WebRTC.Reconnect.*` (4), on a fake LiveKit that now models livekit_ffi's room (104 while it is held, cleared by `lk_disconnect`); `State.SenderTransitions` updated.
 - Builds cleanly on UE 5.8 (WP-V3, #446; ADR 0014). `FCoreDelegates::OnPostEngineInit` (deprecated in 5.8) goes through the new `Open3DShared/Public/O3DEngineCompat.h`, which picks `GetOnPostEngineInit()` on 5.8; the WebRTC add-on tests `PLATFORM_WINDOWS` instead of the deprecated `PLATFORM_64BITS`; the capture test reads its file through the full path. No behaviour change on 5.7.
 - Build system for UE 5.7 and 5.8 (WP-V2; ADR 0014).
   - **Target.cs:** `ProjectSandbox` and `ProjectSandboxEditor` use V7 and `Unreal5_8` on UE 5.8, V6 and `Unreal5_7` on 5.7 (`#if UE_5_8_OR_LATER`). Rules O3D-001 and O3D-005 are updated.

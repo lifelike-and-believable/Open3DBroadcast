@@ -9,6 +9,7 @@
 #include "O3DUnifiedMessage.h"
 #include "Transport/O3DTransportOptions.h"
 #include "Transport/O3DTransportTypes.h"
+#include "Transport/O3DTransportWorker.h"
 
 namespace WebRTCUtils
 {
@@ -76,6 +77,21 @@ namespace WebRTCUtils
     /** LiveKit data channel size guidance (livekit_ffi.h, lk_send_data_ex). */
     static constexpr int32 LossyMaxDataBytes = 1300;
     static constexpr int32 ReliableMaxDataBytes = 15000;
+
+    /**
+     * ADR 0015: the backoff both sides use once LiveKit's own reconnect (10 tries, 5 s apart) has
+     * given up, or a connect failed. No attempt limit, as NNG.
+     */
+    inline FO3DReconnectPolicySettings MakeReconnectPolicySettings()
+    {
+        FO3DReconnectPolicySettings Settings;
+        Settings.InitialDelaySeconds = 1.0;
+        Settings.MaxDelaySeconds = 30.0;
+        Settings.Multiplier = 2.0;
+        Settings.JitterFraction = 0.2;
+        Settings.MaxAttempts = 0;
+        return Settings;
+    }
 
     // Options are read with O3DTransportOptions (Open3DShared, exported at O3D_TRANSPORT_API_VERSION
     // 4): keys case-insensitive, values trimmed, booleans true/false, 1/0, yes/no, on/off (WP-A1 PR 4f).

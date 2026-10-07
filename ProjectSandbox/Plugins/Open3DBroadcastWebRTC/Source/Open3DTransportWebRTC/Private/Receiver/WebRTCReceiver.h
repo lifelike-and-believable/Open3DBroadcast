@@ -50,8 +50,14 @@ struct FWebRTCReceiverLink
     TAtomic<bool> bPendingAudioFormatApply{ false };
     TAtomic<bool> bReconnectPending{ false };
 
-    /** FPlatformTime::Seconds() of the last data message (or connect). */
+    /** Now() of the last data message (or connect). */
     std::atomic<double> LastDataReceiveTime{ 0.0 };
+    /**
+     * The receiver's clock: FPlatformTime::Seconds() unless a test passes one. Set by the receiver's
+     * constructor, before any callback can run, and not changed after.
+     */
+    TFunction<double()> Clock;
+    double Now() const { return Clock ? Clock() : FPlatformTime::Seconds(); }
     /** Rate limit for the "no audio sink" log; written from FFI threads. */
     std::atomic<double> LastAudioDropLogTime{ 0.0 };
 
@@ -133,9 +139,10 @@ public:
 
     /**
      * Constructs a receiver that calls LiveKit through InFfi, and fetches tokens with fetchers
-     * from InTokenFetcherFactory (null uses the HTTP fetcher). Used by tests.
+     * from InTokenFetcherFactory (null uses the HTTP fetcher). InClock replaces
+     * FPlatformTime::Seconds() for the reconnect timing, so tests need no sleeps. Used by tests.
      */
-    explicit FO3DWebRTCReceiver(const FLkFfiApi& InFfi, FO3DTokenFetcherFactory InTokenFetcherFactory = nullptr);
+    explicit FO3DWebRTCReceiver(const FLkFfiApi& InFfi, FO3DTokenFetcherFactory InTokenFetcherFactory = nullptr, TFunction<double()> InClock = nullptr);
 
     virtual ~FO3DWebRTCReceiver() override;
 
@@ -166,6 +173,9 @@ private:
     /** Immutable after construction. */
     const FLkFfiApi Ffi;
     FO3DTokenFetcherFactory TokenFetcherFactory;
+    TFunction<double()> Clock;
+    /** FPlatformTime::Seconds(), or the test's clock. */
+    double Now() const { return Clock ? Clock() : FPlatformTime::Seconds(); }
 
     // Configuration
     FO3DTransportConfig ActiveConfig;
@@ -197,8 +207,12 @@ private:
     mutable FO3DTransportStats Stats;  // Mutable to allow updates in const GetStats() method
     int64 LatencySamples = 0;
 
-    /** webrtc.reconnect_timeout; Initialize sets it, default 2 s (the add-on's USER_GUIDE). */
-    static constexpr double DefaultNoDataReconnectTimeoutSec = 2.0;
+    /**
+     * webrtc.reconnect_timeout; Initialize sets it. Off (0) by default (ADR 0015): LiveKit detects a
+     * lost link itself, and an idle room must not be torn down. When set, it counts only while
+     * LiveKit reports the room connected.
+     */
+    static constexpr double DefaultNoDataReconnectTimeoutSec = 0.0;
     double NoDataReconnectTimeoutSec = DefaultNoDataReconnectTimeoutSec;
 
     // Connection and token state (game thread only, TRF-3/TRF-15/TRF-23).
@@ -209,10 +223,12 @@ private:
     uint64 ObservedTokenGeneration = 0;
     double TokenFetchStartTime = 0.0;
     double NextTokenFetchTime = 0.0;
-    double NextConnectAttemptTime = 0.0;
     static constexpr double TokenFetchTimeoutSec = 30.0;
     static constexpr double TokenFetchRetryIntervalSec = 5.0;
-    static constexpr double ConnectRetryIntervalSec = 5.0;
+    /** ADR 0015: delay before reconnecting after LiveKit gave up or a connect failed; reset when it connects. */
+    FO3DReconnectPolicy ReconnectPolicy{ WebRTCUtils::MakeReconnectPolicySettings() };
+    /** The pending reconnect already has its delay (a failure was counted), or needs none (a token change). */
+    bool bReconnectScheduled = false;
 
     // Helper methods
     FO3DTransportResult ParseConfig(const FO3DTransportConfig& Config);

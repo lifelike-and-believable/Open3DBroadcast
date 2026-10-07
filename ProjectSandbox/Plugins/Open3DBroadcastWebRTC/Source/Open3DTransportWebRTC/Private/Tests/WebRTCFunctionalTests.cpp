@@ -71,9 +71,24 @@ namespace WebRTCS7Test
 		TArray<int32> SentSizes;
 		TArray<TUniquePtr<FFakeTrack>> Tracks;
 		bool bDestroyed = false;
+		/**
+		 * livekit_ffi's `room` (backend_livekit.rs): set when the connect succeeds, kept when the SDK
+		 * disconnects on its own, cleared only by lk_disconnect. A connect while it is set returns
+		 * 104 "already connected" (:786-789). A failed connect leaves none (:890-896).
+		 */
+		bool bRoom = false;
+		int32 DisconnectCalls = 0;
 
 		void FireConnection(LkConnectionState State)
 		{
+			if (State == LkConnConnected)
+			{
+				bRoom = true;
+			}
+			else if (State == LkConnFailed)
+			{
+				bRoom = false;
+			}
 			if (ConnectionCallback)
 			{
 				ConnectionCallback(ConnectionUser, State, 0, nullptr);
@@ -196,14 +211,21 @@ namespace WebRTCS7Test
 	static LkResult Fake_connect_with_role_async(LkClientHandle* Handle, const char* Url, const char* Token, LkRole Role)
 	{
 		FFakeClient* Client = AsClient(Handle);
+		if (Client->bRoom)
+		{
+			return MakeResult(104); // "already connected" until lk_disconnect
+		}
 		Client->ConnectUrl = UTF8_TO_TCHAR(Url);
 		Client->ConnectTokens.Add(UTF8_TO_TCHAR(Token));
 		Client->ConnectRoles.Add(Role);
 		return MakeResult(0);
 	}
 
-	static LkResult Fake_disconnect(LkClientHandle*)
+	static LkResult Fake_disconnect(LkClientHandle* Handle)
 	{
+		FFakeClient* Client = AsClient(Handle);
+		Client->DisconnectCalls++;
+		Client->bRoom = false;
 		return MakeResult(0);
 	}
 
@@ -1132,7 +1154,7 @@ bool FWebRTCA1SenderStateTest::RunTest(const FString& Parameters)
 
 		Client->FireConnection(LkConnFailed);
 		Sender.Tick(0.0f);
-		TestTrue(TEXT("Failed when LiveKit gives up"), Sender.GetConnectionState() == EO3DConnectionState::Failed);
+		TestTrue(TEXT("Reconnecting, with backoff, when a connect fails (ADR 0015)"), Sender.GetConnectionState() == EO3DConnectionState::Reconnecting);
 
 		Sender.Stop();
 		TestTrue(TEXT("Idle after Stop"), Sender.GetConnectionState() == EO3DConnectionState::Idle);
@@ -1143,12 +1165,12 @@ bool FWebRTCA1SenderStateTest::RunTest(const FString& Parameters)
 
 	const TArray<EO3DConnectionState> Expected = {
 		EO3DConnectionState::Connecting, EO3DConnectionState::Connected, EO3DConnectionState::Reconnecting,
-		EO3DConnectionState::Connected, EO3DConnectionState::Failed, EO3DConnectionState::Idle };
+		EO3DConnectionState::Connected, EO3DConnectionState::Reconnecting, EO3DConnectionState::Idle };
 	TestTrue(TEXT("Every change reported once, in order"), Log.States == Expected);
 	TestTrue(TEXT("Every callback ran on the game thread"), Log.bAllOnGameThread);
 	if (Log.Codes.Num() == Expected.Num())
 	{
-		TestTrue(TEXT("The Failed change carries ConnectFailed"), Log.Codes[4] == EO3DTransportError::ConnectFailed);
+		TestTrue(TEXT("The change after the failed connect carries ConnectFailed"), Log.Codes[4] == EO3DTransportError::ConnectFailed);
 		TestTrue(TEXT("Connected carries no error"), Log.Codes[1] == EO3DTransportError::None);
 	}
 #else
@@ -1242,6 +1264,278 @@ bool FWebRTCA1CapabilitiesTest::RunTest(const FString& Parameters)
 
 	FO3DWebRTCReceiver Receiver(FFakeLiveKit::MakeApi());
 	TestTrue(TEXT("The receiver reports ReliableOrdered"), Receiver.GetCapabilities() == ReliableCaps);
+#endif
+	return true;
+}
+
+// ---------------------------------------------------------------------------------------------
+// ADR 0015 (TRF-6, TRF-26): reconnect with the shared backoff once LiveKit has given up, never
+// while it reconnects on its own or while a room is merely idle. The clock is the real one plus an
+// offset the test moves, so the no-data time the callbacks record stays comparable.
+namespace WebRTCReconnectTest
+{
+	struct FTestClock
+	{
+		double Offset = 0.0;
+		TFunction<double()> Make() { return [this]() { return FPlatformTime::Seconds() + Offset; }; }
+	};
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCReconnectReceiverBackoffTest,
+	"Open3DBroadcast.Transport.WebRTC.Reconnect.ReceiverBacksOffAfterLiveKitGivesUp",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FWebRTCReconnectReceiverBackoffTest::RunTest(const FString& Parameters)
+{
+#if PLATFORM_WINDOWS
+	using namespace WebRTCS7Test;
+	using namespace WebRTCReconnectTest;
+	FFakeLiveKit Fake;
+	FTestClock Clock;
+	{
+		FO3DWebRTCReceiver Receiver(FFakeLiveKit::MakeApi(), nullptr, Clock.Make());
+		if (!TestTrue(TEXT("Initialize"), Receiver.Initialize(MakeManualConfig()).IsOk()))
+		{
+			return false;
+		}
+		Receiver.SetConsumer(MakeShared<FRecordingConsumer>());
+		TestTrue(TEXT("Start"), Receiver.Start().IsOk());
+		Receiver.Poll();
+		FFakeClient* First = Fake.LastClient();
+		if (!TestNotNull(TEXT("Client"), First))
+		{
+			return false;
+		}
+		First->FireConnection(LkConnConnected);
+		Receiver.Poll();
+
+		// LiveKit gave up: livekit_ffi reports Disconnected twice for one drop (backend_livekit.rs:828-847).
+		First->FireConnection(LkConnDisconnected);
+		First->FireConnection(LkConnDisconnected);
+		Receiver.Poll();
+		TestEqual(TEXT("No reconnect at once"), Fake.Clients.Num(), 1);
+		TestTrue(TEXT("Reconnecting while it waits"), Receiver.GetConnectionState() == EO3DConnectionState::Reconnecting);
+		Clock.Offset += 0.7;
+		Receiver.Poll();
+		TestEqual(TEXT("No reconnect before the first delay (1 s, -20% jitter)"), Fake.Clients.Num(), 1);
+		Clock.Offset += 0.6;
+		Receiver.Poll();
+		TestEqual(TEXT("One reconnect after the first delay (+20% jitter): the double Disconnected counts once"), Fake.Clients.Num(), 2);
+		TestTrue(TEXT("The old client was destroyed"), First->bDestroyed);
+		FFakeClient* Second = Fake.LastClient();
+		if (Second && Second != First)
+		{
+			TestEqual(TEXT("The new client connects"), Second->ConnectTokens.Num(), 1);
+
+			// A second failure without a success in between doubles the delay (2 s +-20%).
+			Second->FireConnection(LkConnDisconnected);
+			Receiver.Poll();
+			Clock.Offset += 1.5;
+			Receiver.Poll();
+			TestEqual(TEXT("No reconnect before the second delay"), Fake.Clients.Num(), 2);
+			Clock.Offset += 1.0;
+			Receiver.Poll();
+			TestEqual(TEXT("Reconnects after the second delay"), Fake.Clients.Num(), 3);
+		}
+		Receiver.Stop();
+	}
+#else
+	AddInfo(TEXT("WebRTC transport is Win64-only; skipped."));
+#endif
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCReconnectReceiverIdleTest,
+	"Open3DBroadcast.Transport.WebRTC.Reconnect.ReceiverLeavesIdleRoomsAndLiveKitReconnectsAlone",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FWebRTCReconnectReceiverIdleTest::RunTest(const FString& Parameters)
+{
+#if PLATFORM_WINDOWS
+	using namespace WebRTCS7Test;
+	using namespace WebRTCReconnectTest;
+	FFakeLiveKit Fake;
+	FTestClock Clock;
+
+	// Default config: the no-data watchdog is off (ADR 0015).
+	{
+		FO3DTransportConfig Config = MakeManualConfig();
+		Config.AdvancedParams.Remove(TEXT("webrtc.reconnect_timeout"));
+		FO3DWebRTCReceiver Receiver(FFakeLiveKit::MakeApi(), nullptr, Clock.Make());
+		TestTrue(TEXT("Initialize"), Receiver.Initialize(Config).IsOk());
+		Receiver.SetConsumer(MakeShared<FRecordingConsumer>());
+		Receiver.Start();
+		Receiver.Poll();
+		FFakeClient* Client = Fake.LastClient();
+		if (!TestNotNull(TEXT("Client"), Client))
+		{
+			return false;
+		}
+		Client->FireConnection(LkConnConnected);
+		Receiver.Poll();
+		Clock.Offset += 60.0;
+		Receiver.Poll();
+		TestEqual(TEXT("A connected room without data is left alone by default"), Fake.Clients.Num(), 1);
+
+		Client->FireConnection(LkConnReconnecting);
+		Receiver.Poll();
+		Clock.Offset += 60.0;
+		Receiver.Poll();
+		TestEqual(TEXT("No reconnect of our own while LiveKit reconnects"), Fake.Clients.Num(), 1);
+		Receiver.Stop();
+	}
+
+	// Watchdog set by the user: it counts only while connected, and goes through the backoff.
+	{
+		const int32 Before = Fake.Clients.Num();
+		FO3DTransportConfig Config = MakeManualConfig();
+		Config.AdvancedParams.Add(TEXT("webrtc.reconnect_timeout"), TEXT("2"));
+		FO3DWebRTCReceiver Receiver(FFakeLiveKit::MakeApi(), nullptr, Clock.Make());
+		TestTrue(TEXT("Initialize with the watchdog"), Receiver.Initialize(Config).IsOk());
+		Receiver.SetConsumer(MakeShared<FRecordingConsumer>());
+		Receiver.Start();
+		Receiver.Poll();
+		FFakeClient* Client = Fake.LastClient();
+		if (!TestNotNull(TEXT("Client"), Client))
+		{
+			return false;
+		}
+		Clock.Offset += 10.0;
+		Receiver.Poll();
+		TestEqual(TEXT("The watchdog does not cut a join in progress"), Fake.Clients.Num(), Before + 1);
+
+		Client->FireConnection(LkConnConnected);
+		Receiver.Poll();
+		Client->FireConnection(LkConnReconnecting);
+		Receiver.Poll();
+		Clock.Offset += 10.0;
+		Receiver.Poll();
+		TestEqual(TEXT("The watchdog waits while LiveKit reconnects"), Fake.Clients.Num(), Before + 1);
+
+		Client->FireConnection(LkConnConnected);
+		Receiver.Poll();
+		Clock.Offset += 3.0;
+		Receiver.Poll();
+		TestEqual(TEXT("A watchdog trip waits for the backoff"), Fake.Clients.Num(), Before + 1);
+		Clock.Offset += 1.3;
+		Receiver.Poll();
+		TestEqual(TEXT("Then reconnects"), Fake.Clients.Num(), Before + 2);
+		Receiver.Stop();
+	}
+#else
+	AddInfo(TEXT("WebRTC transport is Win64-only; skipped."));
+#endif
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCReconnectSenderTest,
+	"Open3DBroadcast.Transport.WebRTC.Reconnect.SenderReconnectsWithBackoffAndFreshAudioTracks",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FWebRTCReconnectSenderTest::RunTest(const FString& Parameters)
+{
+#if PLATFORM_WINDOWS
+	using namespace WebRTCS7Test;
+	using namespace WebRTCReconnectTest;
+	FFakeLiveKit Fake;
+	FTestClock Clock;
+	{
+		FO3DWebRTCSender Sender(FFakeLiveKit::MakeApi(), nullptr, Clock.Make());
+		if (!TestTrue(TEXT("Initialize"), Sender.Initialize(MakeManualConfig()).IsOk()))
+		{
+			return false;
+		}
+		FFakeClient* Client = Fake.LastClient();
+		TestTrue(TEXT("Start"), Sender.Start().IsOk());
+		Sender.Tick(0.0f);
+		if (!TestNotNull(TEXT("Client"), Client))
+		{
+			return false;
+		}
+		TestEqual(TEXT("Connected once"), Client->ConnectTokens.Num(), 1);
+		Client->FireConnection(LkConnConnected);
+		Sender.Tick(0.0f);
+
+		FO3DTransportAudioConfig AudioConfig;
+		AudioConfig.bEnableAudio = true;
+		AudioConfig.NumChannels = 1;
+		AudioConfig.SampleRate = 48000;
+		const TSharedPtr<IO3DSenderAudioSink, ESPMode::ThreadSafe> Sink = Sender.CreateAudioSink(AudioConfig);
+		TArray<float> Pcm;
+		Pcm.SetNumZeroed(480);
+		TestTrue(TEXT("Audio publishes"), Sink.IsValid() && Sink->SubmitPcm(TEXT("Hero"), Pcm.GetData(), 480, 1, 48000, 0.0));
+		TestEqual(TEXT("One audio track"), Client->Tracks.Num(), 1);
+
+		// LiveKit gave up on the room (twice, as livekit_ffi reports it).
+		Client->FireConnection(LkConnDisconnected);
+		Client->FireConnection(LkConnDisconnected);
+		Sender.Tick(0.0f);
+		TestTrue(TEXT("Reconnecting, not Failed"), Sender.GetConnectionState() == EO3DConnectionState::Reconnecting);
+		Clock.Offset += 0.7;
+		Sender.Tick(0.0f);
+		TestEqual(TEXT("No reconnect before the first delay"), Client->ConnectTokens.Num(), 1);
+		Clock.Offset += 0.6;
+		Sender.Tick(0.0f);
+		TestEqual(TEXT("The held room is closed first (else connect returns 104)"), Client->DisconnectCalls, 1);
+		TestEqual(TEXT("Then it connects again on the same client"), Client->ConnectTokens.Num(), 2);
+		TestEqual(TEXT("Same client"), Fake.Clients.Num(), 1);
+
+		Client->FireConnection(LkConnConnected);
+		Sender.Tick(0.0f);
+		TestTrue(TEXT("Connected again"), Sender.GetConnectionState() == EO3DConnectionState::Connected);
+		TestTrue(TEXT("Audio publishes after the reconnect"), Sink.IsValid() && Sink->SubmitPcm(TEXT("Hero"), Pcm.GetData(), 480, 1, 48000, 0.0));
+		TestEqual(TEXT("On a fresh track: the old one belonged to the closed room"), Client->Tracks.Num(), 2);
+		if (Client->Tracks.Num() == 2)
+		{
+			TestFalse(TEXT("The old track is kept until Stop (a late publish may still hold it)"), Client->Tracks[0]->bDestroyed);
+			TestEqual(TEXT("The new track got the audio"), Client->Tracks[1]->PublishCalls, 1);
+		}
+
+		Sender.Stop();
+		if (Client->Tracks.Num() == 2)
+		{
+			TestTrue(TEXT("Stop destroys the retired track"), Client->Tracks[0]->bDestroyed);
+			TestTrue(TEXT("Stop destroys the live track"), Client->Tracks[1]->bDestroyed);
+		}
+	}
+#else
+	AddInfo(TEXT("WebRTC transport is Win64-only; skipped."));
+#endif
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCReconnectSenderFailedConnectTest,
+	"Open3DBroadcast.Transport.WebRTC.Reconnect.SenderRetriesAFailedConnect",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FWebRTCReconnectSenderFailedConnectTest::RunTest(const FString& Parameters)
+{
+#if PLATFORM_WINDOWS
+	using namespace WebRTCS7Test;
+	using namespace WebRTCReconnectTest;
+	AddExpectedError(TEXT("WebRTC connection failed"), EAutomationExpectedMessageFlags::Contains, 1);
+	FFakeLiveKit Fake;
+	FTestClock Clock;
+	{
+		FO3DWebRTCSender Sender(FFakeLiveKit::MakeApi(), nullptr, Clock.Make());
+		if (!TestTrue(TEXT("Initialize"), Sender.Initialize(MakeManualConfig()).IsOk()))
+		{
+			return false;
+		}
+		FFakeClient* Client = Fake.LastClient();
+		Sender.Start();
+		Sender.Tick(0.0f);
+		if (!TestNotNull(TEXT("Client"), Client))
+		{
+			return false;
+		}
+		Client->FireConnection(LkConnFailed);
+		Sender.Tick(0.0f);
+		TestTrue(TEXT("Reconnecting after a failed connect"), Sender.GetConnectionState() == EO3DConnectionState::Reconnecting);
+		Clock.Offset += 1.3;
+		Sender.Tick(0.0f);
+		TestEqual(TEXT("Connects again after the delay"), Client->ConnectTokens.Num(), 2);
+		TestEqual(TEXT("No disconnect: a failed connect leaves no room"), Client->DisconnectCalls, 0);
+		Sender.Stop();
+	}
+#else
+	AddInfo(TEXT("WebRTC transport is Win64-only; skipped."));
 #endif
 	return true;
 }

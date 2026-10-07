@@ -109,14 +109,13 @@ FWebRTCReceiverLink::FWebRTCReceiverLink()
 
 void FWebRTCReceiverLink::EnqueueFrame(const FString& SubjectLabel, const uint8* Bytes, int32 Len)
 {
-    const double Now = FPlatformTime::Seconds();
     // The receive time rides in CaptureTimeSec; Poll measures the hand-off latency from it.
-    if (FrameQueue.Enqueue(FO3DSendItem::MakeMocap(TArray<uint8>(Bytes, Len), SubjectLabel, Now)) != EO3DSendResult::Queued)
+    if (FrameQueue.Enqueue(FO3DSendItem::MakeMocap(TArray<uint8>(Bytes, Len), SubjectLabel, FPlatformTime::Seconds())) != EO3DSendResult::Queued)
     {
         FramesRefused.fetch_add(1);
     }
 
-    LastDataReceiveTime.store(Now);
+    LastDataReceiveTime.store(Now());
     bReconnectPending.Store(false);
 }
 
@@ -129,7 +128,7 @@ bool FWebRTCReceiverLink::ConsumeControl(const uint8* Bytes, size_t Len)
 
     // Control traffic shows the link is alive (a control-only sender has no mocap), but it is not
     // a frame: no frame or byte counter moves.
-    LastDataReceiveTime.store(FPlatformTime::Seconds());
+    LastDataReceiveTime.store(Now());
     bReconnectPending.Store(false);
 
     if (!bControlWanted.Load())
@@ -196,7 +195,7 @@ void FO3DWebRTCReceiver::OnConnectionState(void* user, LkConnectionState state, 
         Self->bConnected.Store(true);
         Self->bPendingAudioFormatApply.Store(true);
         Self->bReconnectPending.Store(false);
-        Self->LastDataReceiveTime.store(FPlatformTime::Seconds());
+        Self->LastDataReceiveTime.store(Self->Now());
         break;
 
     case LkConnReconnecting:
@@ -316,11 +315,13 @@ FO3DWebRTCReceiver::FO3DWebRTCReceiver()
 {
 }
 
-FO3DWebRTCReceiver::FO3DWebRTCReceiver(const FLkFfiApi& InFfi, FO3DTokenFetcherFactory InTokenFetcherFactory)
+FO3DWebRTCReceiver::FO3DWebRTCReceiver(const FLkFfiApi& InFfi, FO3DTokenFetcherFactory InTokenFetcherFactory, TFunction<double()> InClock)
     : Ffi(InFfi)
     , TokenFetcherFactory(MoveTemp(InTokenFetcherFactory))
+    , Clock(MoveTemp(InClock))
     , Link(MakeShared<FWebRTCReceiverLink, ESPMode::ThreadSafe>())
 {
+    Link->Clock = Clock;
     LinkToken = GetReceiverLinkRegistry().Register(Link);
 }
 
@@ -397,14 +398,15 @@ FO3DTransportResult FO3DWebRTCReceiver::Initialize(const FO3DTransportConfig& Co
     Link->FramesReceived.Store(0);
     Link->BytesReceived.Store(0);
     Link->LastAudioDropLogTime.store(0.0);
-    Link->LastDataReceiveTime.store(FPlatformTime::Seconds());
+    Link->LastDataReceiveTime.store(Now());
 
     bConnectRequested = false;
     bConnectIssued = false;
     AppliedTokenGeneration = 0;
     ObservedTokenGeneration = 0;
     NextTokenFetchTime = 0.0;
-    NextConnectAttemptTime = 0.0;
+    ReconnectPolicy.Reset();
+    bReconnectScheduled = false;
 
     bInitialized.Store(true);
 
@@ -563,10 +565,11 @@ int32 FO3DWebRTCReceiver::Poll()
             UpdateConnectionState();
         }
 
-        // The no-data watchdog only applies once a connect has been issued; while waiting for a
-        // token there is nothing to reconnect.
+        // The no-data watchdog (off by default) counts only while LiveKit reports the room connected
+        // (ADR 0015): not while it joins or reconnects on its own, and not before a connect.
         if (bConnectIssued && NoDataReconnectTimeoutSec > 0.0 &&
-            (NowSeconds - Link->LastDataReceiveTime.load()) > NoDataReconnectTimeoutSec)
+            Link->LkState.load() == static_cast<int32>(LkConnConnected) &&
+            (Now() - Link->LastDataReceiveTime.load()) > NoDataReconnectTimeoutSec)
         {
             Link->RequestReconnect();
         }
@@ -610,6 +613,8 @@ void FO3DWebRTCReceiver::UpdateConnectionState()
         break;
     case static_cast<int32>(LkConnConnected):
         bEverConnected = true;
+        ReconnectPolicy.OnSuccess();
+        bReconnectScheduled = false;
         ConnectionState.Set(EO3DConnectionState::Connected);
         break;
     case static_cast<int32>(LkConnReconnecting):
@@ -811,14 +816,14 @@ bool FO3DWebRTCReceiver::BeginConnect(const FString& InToken, uint64 TokenGenera
 
     if (Result.code != 0)
     {
-        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Failed to connect (code=%d): %s"), Result.code, *Ffi.TakeMessage(Result));
-        NextConnectAttemptTime = FPlatformTime::Seconds() + ConnectRetryIntervalSec;
+        const double Delay = ReconnectPolicy.OnFailure(Now());
+        UE_LOG(LogO3DWebRTCReceiver, Error, TEXT("Failed to connect (code=%d): %s. Retrying in %.1f s."), Result.code, *Ffi.TakeMessage(Result), Delay);
         return false;
     }
 
     bConnectIssued = true;
     AppliedTokenGeneration = TokenGeneration;
-    Link->LastDataReceiveTime.store(FPlatformTime::Seconds());
+    Link->LastDataReceiveTime.store(Now());
     Link->bReconnectPending.Store(false);
 
     UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver connecting..."));
@@ -833,7 +838,7 @@ bool FO3DWebRTCReceiver::UpdateConnection()
         return true;
     }
 
-    const double Now = FPlatformTime::Seconds();
+    const double NowSec = Now();
 
     FString CurrentToken;
     uint64 Generation = 0;
@@ -848,18 +853,18 @@ bool FO3DWebRTCReceiver::UpdateConnection()
     {
         if (bHaveToken)
         {
-            if (Now < NextConnectAttemptTime)
+            if (!ReconnectPolicy.IsDue(NowSec))
             {
                 return true;
             }
             return BeginConnect(CurrentToken, Generation);
         }
 
-        MaybeFetchToken(Now);
+        MaybeFetchToken(NowSec);
         return true;
     }
 
-    MaybeFetchToken(Now);
+    MaybeFetchToken(NowSec);
     if (bHaveToken && Generation != AppliedTokenGeneration)
     {
         ApplyRefreshedToken(CurrentToken, Generation);
@@ -910,9 +915,11 @@ void FO3DWebRTCReceiver::ApplyRefreshedToken(const FString& InToken, uint64 Toke
     }
 
     // livekit_ffi.h: "If not supported, returns error; fallback is disconnect + reconnect."
-    // The reconnect path recreates the client and connects with the current token.
+    // The reconnect path recreates the client and connects with the current token. A token change
+    // is not a failure, so it does not wait for the backoff.
     UE_LOG(LogO3DWebRTCReceiver, Warning, TEXT("lk_refresh_token failed (code=%d): %s. Reconnecting with the new token."),
         Result.code, *Ffi.TakeMessage(Result));
+    bReconnectScheduled = true;
     Link->RequestReconnect();
 }
 
@@ -924,14 +931,31 @@ void FO3DWebRTCReceiver::ProcessReconnectIfNeeded()
     }
 
     FScopeLock Lock(&StateMutex);
-    if (!Link->bReconnectPending.Exchange(false))
+    if (!bInitialized.Load() || !bConnectRequested)
     {
+        Link->bReconnectPending.Store(false);
+        bReconnectScheduled = false;
         return;
     }
 
-    if (!bInitialized.Load() || !bConnectRequested)
+    // ADR 0015: LiveKit gave up on the room, a connect failed, or the watchdog tripped: wait for the
+    // shared backoff. livekit_ffi reports one drop as two Disconnected callbacks; they set the one
+    // pending flag, so they count as one failure.
+    const double NowSec = Now();
+    if (!bReconnectScheduled)
+    {
+        const double Delay = ReconnectPolicy.OnFailure(NowSec);
+        bReconnectScheduled = true;
+        UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver reconnecting in %.1f s (attempt %d)"), Delay, ReconnectPolicy.GetFailedAttempts());
+    }
+    if (!ReconnectPolicy.IsDue(NowSec))
     {
         return;
+    }
+    bReconnectScheduled = false;
+    if (!Link->bReconnectPending.Exchange(false))
+    {
+        return; // LiveKit recovered meanwhile
     }
 
     DestroyClientHandle(TEXT("LiveKit reconnect disconnect"));
@@ -948,7 +972,6 @@ void FO3DWebRTCReceiver::ProcessReconnectIfNeeded()
     }
 
     // Connect now if a token is available; otherwise UpdateConnection() connects once one is.
-    NextConnectAttemptTime = 0.0;
     UpdateConnection();
 
     UE_LOG(LogO3DWebRTCReceiver, Log, TEXT("WebRTC receiver reconnect initiated"));

@@ -73,6 +73,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Default the watchdog to off, or to a large value with exponential backoff (reuse the MoQ `ComputeReconnectDelaySeconds` idea from a shared helper). Do not reconnect while the state is `Reconnecting`. Configure `lk_set_reconnect_backoff`. Move disconnect and destroy to a background task (see TRF-7).
 - Effort: M
 - Owner: design
+- Status: closed in #449
 
 ### TRF-7: Blocking FFI calls on the game thread
 - Category: performance
@@ -268,6 +269,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/Source/` unl
 - Recommendation: Use one shared reconnect policy (see TRF-32) for both sides: backoff, jitter, max attempts, and fresh token acquisition.
 - Effort: M
 - Owner: design
+- Status: closed in #449
 
 ### TRF-27: Non-Win64 builds break: WebRTC throws in Build.cs, and a disabled MoQ or WebRTC module still compiles FFI-dependent sources
 - Category: fab-readiness
