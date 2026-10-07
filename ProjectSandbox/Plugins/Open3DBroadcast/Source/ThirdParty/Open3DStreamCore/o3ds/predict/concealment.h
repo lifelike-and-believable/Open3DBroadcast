@@ -138,6 +138,7 @@ namespace O3DS
 	class O3DS_API ConcealmentEngine
 	{
 	public:
+		//! A null predictor falls back to HoldPredictor (freeze on loss).
 		explicit ConcealmentEngine(std::unique_ptr<IPosePredictor> predictor, const ConcealmentConfig& config = ConcealmentConfig());
 
 		//! Feed one confirmed real frame. Scores any in-flight

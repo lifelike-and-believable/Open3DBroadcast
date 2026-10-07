@@ -23,6 +23,7 @@ SOFTWARE.
 */
 
 #include "concealment.h"
+#include "hold_predictor.h"
 
 #include <algorithm>
 
@@ -101,7 +102,8 @@ namespace O3DS
 	}
 
 	ConcealmentEngine::ConcealmentEngine(std::unique_ptr<IPosePredictor> predictor, const ConcealmentConfig& config)
-		: mPredictor(std::move(predictor))
+		// CORE-25: no predictor means freeze on loss, the fallback every predictor degrades to.
+		: mPredictor(predictor ? std::move(predictor) : std::make_unique<HoldPredictor>())
 		, mConfig(config)
 	{
 	}
