@@ -55,8 +55,11 @@ jobs:
 
       - name: Build and check the Fab source zip
         run: |
+          # The source descriptor has no EngineVersion; the zip is stamped for one engine (ADR 0014).
+          # UE 5.7 until the CI matrix (WP-V4) builds a zip per engine.
           python3 Build/Scripts/fab-package.py \
             --out-dir "$RUNNER_TEMP/fab" \
+            --engine-version 5.7 \
             --zip-name "Open3DBroadcast-Fab-Source-${GITHUB_SHA::12}.zip"
 
       - name: Video codec gate on the packaged binaries

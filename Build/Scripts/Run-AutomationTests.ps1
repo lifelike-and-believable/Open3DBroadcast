@@ -114,6 +114,31 @@ if (!(Test-Path -LiteralPath $ProjectFile)) {
   exit 2
 }
 
+# A project plugin whose EngineVersion names another engine is skipped without a word in an
+# unattended run (the incompatible-plugin prompt defaults to No), so its tests silently drop out
+# (ADR 0014). Source descriptors carry no EngineVersion; BuildPlugin stamps a package with its
+# engine's.
+$buildVersionFile = Join-Path $UEPath "Engine\Build\Build.version"
+if (Test-Path -LiteralPath $buildVersionFile) {
+  $engine = Get-Content -LiteralPath $buildVersionFile -Raw | ConvertFrom-Json
+  $engineMinor = "$($engine.MajorVersion).$($engine.MinorVersion)"
+  $projectPlugins = Join-Path (Split-Path -Parent $ProjectFile) "Plugins"
+  if (Test-Path -LiteralPath $projectPlugins) {
+    $mismatched = @()
+    foreach ($desc in Get-ChildItem -LiteralPath $projectPlugins -Filter *.uplugin -File -Recurse -Depth 2) {
+      if ($desc.FullName -match '\\(HostProject|Intermediate|Binaries)\\') { continue }
+      $declared = (Get-Content -LiteralPath $desc.FullName -Raw -Encoding UTF8 | ConvertFrom-Json).EngineVersion
+      if ($declared -and (($declared -split '\.')[0..1] -join '.') -ne $engineMinor) {
+        $mismatched += "$($desc.Name) says EngineVersion $declared"
+      }
+    }
+    if ($mismatched.Count -gt 0) {
+      Write-Failure "The engine is $engineMinor, but $($mismatched -join '; '). The editor would skip those plugins and their tests."
+      exit 2
+    }
+  }
+}
+
 if ([string]::IsNullOrWhiteSpace($RunLabel)) {
   $RunLabel = $TestFilter -replace "[^a-zA-Z0-9_.-]", "_"
   if ([string]::IsNullOrWhiteSpace($RunLabel)) {

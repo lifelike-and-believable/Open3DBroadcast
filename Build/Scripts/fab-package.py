@@ -16,9 +16,12 @@ job, so no exclusion rule is needed or accepted for it.
    staged .uplugin. The .uplugin edit is textual, so the rest of the file
    keeps its formatting (ADR 0002 asks for this; ConvertTo-Json rewrites it).
 2. Files matching Build/Fab/exclude-files.txt are dropped.
-3. The zip is written with a single top-level folder named after the plugin
+3. The staged .uplugin gets "EngineVersion": "<X.Y>.0" from --engine-version
+   (ADR 0014): the source descriptors carry none, and each Fab zip is for one
+   engine. The edit is textual too, and the check below confirms the value.
+4. The zip is written with a single top-level folder named after the plugin
    and fixed timestamps, so the same input gives the same bytes.
-4. The zip is opened again and checked (see check_package). The tracked
+5. The zip is opened again and checked (see check_package). The tracked
    tree is also checked before any exclusion (see check_tree), so a
    committed .pdb, a Python script, or a developer note under Source/
    fails even where a rule would leave it out of the zip.
@@ -197,6 +200,31 @@ def _scan_value_end(text, i):
     return i
 
 
+def parse_engine_version(value):
+    """'5.8' or '5.8.2' -> '5.8.0', the form Fab expects in a descriptor."""
+    m = re.match(r"^(\d+)\.(\d+)(?:\.\d+)?$", (value or "").strip())
+    if not m:
+        raise InputError(f"--engine-version must look like 5.8 or 5.8.0, not '{value}'")
+    return f"{m.group(1)}.{m.group(2)}.0"
+
+
+def stamp_engine_version(text, version):
+    """Set "EngineVersion" in a .uplugin text, keeping all other text as is."""
+    data = json.loads(text)
+    if "EngineVersion" in data:
+        result, n = re.subn(r'("EngineVersion"\s*:\s*)"[^"]*"', lambda m: m.group(1) + json.dumps(version), text, count=1)
+    else:
+        # Insert after "FileVersion", reusing the whitespace that follows it (newline and indent).
+        result, n = re.subn(r'("FileVersion"\s*:\s*\d+\s*,)(\s*)',
+                            lambda m: m.group(1) + m.group(2) + '"EngineVersion": ' + json.dumps(version) + "," + m.group(2),
+                            text, count=1)
+    expected = dict(data)
+    expected["EngineVersion"] = version
+    if n != 1 or json.loads(result) != expected:
+        raise InputError(".uplugin: could not set EngineVersion (expected a top-level \"FileVersion\": N, entry)")
+    return result
+
+
 def remove_modules_from_uplugin(text, names):
     """Remove Modules[] entries whose Name is in names, keeping all other text as is."""
     data = json.loads(text)
@@ -255,7 +283,7 @@ def remove_modules_from_uplugin(text, names):
     return result
 
 
-def stage(plugin_dir, stage_root, excluded_modules, exclude_globs):
+def stage(plugin_dir, stage_root, excluded_modules, exclude_globs, engine_version):
     plugin_name = None
     for f in os.listdir(plugin_dir):
         if f.endswith(".uplugin"):
@@ -296,7 +324,7 @@ def stage(plugin_dir, stage_root, excluded_modules, exclude_globs):
         text = f.read()
     try:
         report["tree_errors"].extend(check_addon_modules(json.loads(text), f"{uplugin_rel} (source tree)"))
-        edited = remove_modules_from_uplugin(text, set(excluded_modules))
+        edited = stamp_engine_version(remove_modules_from_uplugin(text, set(excluded_modules)), engine_version)
     except json.JSONDecodeError as e:
         raise InputError(f"{uplugin_rel} is not valid JSON: {e}")
     with open(os.path.join(dest, uplugin_rel), "w", encoding="utf-8", newline="") as f:
@@ -444,7 +472,7 @@ def check_platforms(desc, uplugin_rel):
     return errors
 
 
-def check_package(zip_path, plugin_name, excluded_modules):
+def check_package(zip_path, plugin_name, excluded_modules, engine_version):
     """Return a list of problems found in the zip. Empty means it passes."""
     errors = []
     with zipfile.ZipFile(zip_path) as z:
@@ -466,6 +494,8 @@ def check_package(zip_path, plugin_name, excluded_modules):
                 modules = [m.get("Name") for m in desc.get("Modules", [])]
                 errors.extend(check_platforms(desc, uplugin_rel))
                 errors.extend(check_addon_modules(desc, f"{uplugin_rel} (package)"))
+                if desc.get("EngineVersion") != engine_version:
+                    errors.append(f"{uplugin_rel} has EngineVersion {desc.get('EngineVersion')!r}, not {engine_version!r} (ADR 0014)")
             except (ValueError, UnicodeDecodeError) as e:
                 errors.append(f"{uplugin_rel} is not valid JSON: {e}")
         if uplugin_rel in relset and not modules:
@@ -520,16 +550,19 @@ def main(argv=None):
     ap.add_argument("--exclude-modules", default=DEFAULT_EXCLUDE_MODULES)
     ap.add_argument("--exclude-files", default=DEFAULT_EXCLUDE_FILES)
     ap.add_argument("--out-dir", required=True)
+    ap.add_argument("--engine-version", required=True,
+                    help="engine the zip is for, as X.Y or X.Y.Z (ADR 0014); stamped into the staged .uplugin as X.Y.0")
     ap.add_argument("--zip-name", default=None, help="default: <Plugin>-Fab-Source.zip")
     args = ap.parse_args(argv)
 
     try:
+        engine_version = parse_engine_version(args.engine_version)
         excluded_modules = read_list(args.exclude_modules)
         exclude_globs = read_list(args.exclude_files)
         os.makedirs(args.out_dir, exist_ok=True)
         stage_root = os.path.join(args.out_dir, "stage")
         plugin_name, stage_dir, files, report = stage(
-            os.path.abspath(args.plugin_dir), stage_root, excluded_modules, exclude_globs)
+            os.path.abspath(args.plugin_dir), stage_root, excluded_modules, exclude_globs, engine_version)
     except InputError as e:
         print(f"::error::fab-package: {e}")
         return 2
@@ -549,6 +582,7 @@ def main(argv=None):
                 bf.write(full + "\n")
 
     print(f"Plugin:           {plugin_name}")
+    print(f"Engine version:   {engine_version}")
     print(f"Files packaged:   {len(files)}")
     print(f"Modules removed:  {', '.join(report['removed_modules']) or '(none)'}")
     for m in report["absent_modules"]:
@@ -558,7 +592,7 @@ def main(argv=None):
         print(f"  - {rel}")
     print(f"Zip:              {zip_path} ({os.path.getsize(zip_path)} bytes)")
 
-    errors = report["tree_errors"] + check_package(zip_path, plugin_name, excluded_modules)
+    errors = report["tree_errors"] + check_package(zip_path, plugin_name, excluded_modules, engine_version)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as s:
