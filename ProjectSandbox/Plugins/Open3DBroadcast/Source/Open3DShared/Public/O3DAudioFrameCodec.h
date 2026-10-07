@@ -137,7 +137,7 @@ namespace O3DAudio
 	/**
 	 * Helper that converts encoded payloads back to PCM16 for playback/processing.
 	 * Holds one stateful Opus decoder, so it serves a single stream only; receivers use
-	 * FMultiStreamFrameDecoder below.
+	 * FMultiStreamFrameDecoder below. Not thread-safe: one thread uses an instance.
 	 */
 	class OPEN3DSHARED_API FFrameDecoder
 	{

@@ -12,7 +12,8 @@ struct OpusDecoder;
  *
  * Opus only accepts whole Opus frames: Encode() must be given exactly GetFrameSizeSamples()
  * frames per call. O3DAudio::FFrameEncoder accumulates arbitrary capture buffers into packets
- * of that size (SHR-2). Not copyable: it owns the libOpus state.
+ * of that size (SHR-2). Not copyable: it owns the libOpus state. Not thread-safe: one thread
+ * uses an instance.
  */
 class OPEN3DSHARED_API FO3DAudioOpusEncoder
 {
@@ -81,7 +82,7 @@ private:
 
 /**
  * Lightweight wrapper around libOpus decoder state used by transports. Not copyable: it owns
- * the libOpus state.
+ * the libOpus state. Not thread-safe: one thread uses an instance.
  */
 class OPEN3DSHARED_API FO3DAudioOpusDecoder
 {

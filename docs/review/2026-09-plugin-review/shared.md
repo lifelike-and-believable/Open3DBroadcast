@@ -674,6 +674,7 @@ Paths below are relative to `ProjectSandbox/Plugins/Open3DBroadcast/` unless the
   - Reference it from the plugin README and from CHANGELOG "Schema/Protocol" entries, as the project rules require.
 - Effort: S
 - Owner: design
+- Status: closed in #439
 
 ### SHR-38: Global singletons are used throughout instead of injectable services
 - Category: architecture
