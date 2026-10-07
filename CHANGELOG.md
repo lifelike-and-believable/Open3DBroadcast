@@ -582,6 +582,13 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Changed
 
+- Builds cleanly on UE 5.8 (WP-V3, #446; ADR 0014). `FCoreDelegates::OnPostEngineInit` (deprecated in 5.8) goes through the new `Open3DShared/Public/O3DEngineCompat.h`, which picks `GetOnPostEngineInit()` on 5.8; the WebRTC add-on tests `PLATFORM_WINDOWS` instead of the deprecated `PLATFORM_64BITS`; the capture test reads its file through the full path. No behaviour change on 5.7.
+- Build system for UE 5.7 and 5.8 (WP-V2; ADR 0014).
+  - **Target.cs:** `ProjectSandbox` and `ProjectSandboxEditor` use V7 and `Unreal5_8` on UE 5.8, V6 and `Unreal5_7` on 5.7 (`#if UE_5_8_OR_LATER`). Rules O3D-001 and O3D-005 are updated.
+  - **Descriptors:** both source `.uplugin` files drop `"EngineVersion": "5.7.0"`, which made UE 5.8 skip the plugin in unattended runs. BuildPlugin stamps each package with the engine that built it, as before.
+  - **Fab zip:** `fab-package.py` takes a required `--engine-version` and stamps the staged `.uplugin` (`X.Y.0`), and the package check confirms it. The Fab-zip workflow passes 5.7 until the CI matrix (WP-V4).
+  - **Tests:** `Run-AutomationTests.ps1` fails before the editor starts when a project plugin's `EngineVersion` names another engine, since the editor would skip that plugin and its tests silently.
+
 - Low-severity cleanup (WP-Q1; SND-31, SND-33, TRF-33, SHR-28; SHR-29 part). No behaviour change.
   - **Sender:** the unused `BoneTransformsFinalizedHandle` and the empty `UpdateEditConditionHelpers` are gone; the curve-value copy shared by two serializer paths is `FO3DSenderSerializer::CopyCurveValues`.
   - **Logs:** the curve processor logs under the new `LogO3DSenderCurves` and the transport controller under `LogO3DSenderTransport` (both were `LogO3DSenderComponent`); the sender Details panel no longer logs from its Slate getters, which run on every paint; the Open3DShared start and shutdown lines are Verbose instead of Display; `LogO3DAudioCodec` and `LogO3DPerformanceMetrics` are exported.
