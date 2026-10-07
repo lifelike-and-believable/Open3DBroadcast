@@ -806,6 +806,7 @@ Each WP lists: **Priority · Size · Owner**, **Findings**, **Goal**, **Approach
   5. defaults in one header (TRB-28);
   6. localhost by default (TRB-29);
   7. multicast and the allow-list (TRB-21).
+- **Done (2026-10-06):** #427 (TRB-31, TRB-32), #428 (TRB-25), #429 (TRB-22), #430 (TRB-16), #431 (TRB-28), #432 (TRB-29), #433 (TRB-21). Not verified between machines.
 
 #### WP-D1: Rewrite the root README  ·  P1 · S · docs
 - **Findings:** DOC-3

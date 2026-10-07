@@ -177,6 +177,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Fragment whenever `Size + header > MtuBytes`. Keep `MaxDatagramBytes` only as a hard ceiling. Rename or remove one of the two knobs to avoid confusion.
 - Effort: S
 - Owner: coding
+- Status: closed in #430
 
 ### TRB-17: The fragment header has no magic or version, so non-fragment datagrams can be misclassified
 - Category: bug
@@ -226,6 +227,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Add an optional `udp.multicast` group with TTL/loopback settings (needs-UE-verification: `FSocket::JoinMulticastGroup` signature in 5.7) and an optional allowed-source filter. Remove the MTU and broadcast controls from the receiver UI, or make them meaningful.
 - Effort: M
 - Owner: design
+- Status: closed in #433
 
 ### TRB-22: SO_REUSEADDR on UDP receive and TCP listen sockets allows silent port sharing or hijack
 - Category: security
@@ -235,6 +237,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Default to off, and expose it as an explicit opt-in (needed only for multicast or multiple listeners).
 - Effort: S
 - Owner: review
+- Status: closed in #429
 
 ### TRB-23: UDP receive buffer is sized from the receiver's own `udp.maxdatagram`, so config mismatch truncates
 - Category: bug
@@ -266,6 +269,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Delete the audio port options, config code and test scaffolding, or implement a separate audio channel if that was the intent (a design decision).
 - Effort: S
 - Owner: design
+- Status: closed in #428
 
 ### TRB-26: Port and host parsing is lax and does not resolve hostnames
 - Category: bug
@@ -295,6 +299,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Put the defaults in a `UDeveloperSettings` (Project Settings > Open3DBroadcast > Transports) with a single constants header as fallback, and have the widgets read from it.
 - Effort: M
 - Owner: design
+- Status: closed in #431
 
 ### TRB-29: TCP/UDP bind to 0.0.0.0 by default with no authentication
 - Category: security
@@ -304,6 +309,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Default the listen address to 127.0.0.1, or to a user-chosen interface shown in the UI with a warning. Document the security posture. Consider an optional shared-secret HMAC in the unified header, or NNG TLS.
 - Effort: M
 - Owner: design
+- Status: closed in #432
 
 ## Loopback
 
@@ -325,6 +331,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Make capacity sender-owned (set only when the role is sender, or take the max), and store it as `std::atomic<int32>`.
 - Effort: S
 - Owner: coding
+- Status: closed in #427
 
 ### TRB-32: Loopback lifecycle and diagnostics issues
 - Category: code-quality
@@ -341,6 +348,7 @@ Severity counts: critical 2, high 12, medium 23, low 10 (total 47).
 - Recommendation: Implement Stop (release the channel and reject sends). Use `fetch_add` with rollback for capacity. Use a member scratch buffer and member log timestamps. Gate the log with a CVar instead of the test macro. Prune expired channels in `AcquireChannel`. Make consumer ownership consistent across transports.
 - Effort: S
 - Owner: coding
+- Status: closed in #427
 
 ## NNG
 
