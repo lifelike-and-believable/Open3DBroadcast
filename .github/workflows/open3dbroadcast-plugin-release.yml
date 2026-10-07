@@ -8,13 +8,15 @@ name: Open3DBroadcast Plugin Release
 #      Version X*10000 + Y*100 + Z into both .uplugin files and uploads them for the next jobs.
 #   2. Fab source zip and UE build and tests: the workflows PR CI runs
 #      (open3dbroadcast-fab-package.yml, open3dbroadcast-ue-build-test.yml), on the stamped
-#      files: build with warnings as errors, the automation tests alone and with the WebRTC
-#      add-on (each at its floor), the strict build, and BuildPlugin on the Fab zip.
-#   3. Publish (GitHub-hosted, tag pushes only, after 1 and 2 passed): the GitHub release, with the
-#      package the tests ran against, as UE_<engine>/Plugins/Open3DBroadcast, and the CHANGELOG
-#      section as notes. The WebRTC add-on is attached only when the repository variable
-#      O3D_PUBLISH_WEBRTC_ADDON is 'true' (WP-F11, ADR 0002: it waits on counsel question L1).
-#      The Fab zip is kept as a 90-day run artifact, to upload to Fab by hand; it is not attached.
+#      files, once per supported engine (ADR 0014, WP-V5): build with warnings as errors, the
+#      automation tests alone and with the WebRTC add-on (each at its floor), the strict build,
+#      and BuildPlugin on that engine's Fab zip. Every engine runs the full job.
+#   3. Publish (GitHub-hosted, tag pushes only, after 1 and 2 passed): the GitHub release, with one
+#      zip per engine holding the package the tests ran against, as
+#      UE_<engine>/Plugins/Open3DBroadcast, and the CHANGELOG section as notes. The WebRTC add-on
+#      zips are attached only when the repository variable O3D_PUBLISH_WEBRTC_ADDON is 'true'
+#      (WP-F11, ADR 0002: it waits on counsel question L1). The Fab zips (one per engine) are kept
+#      as a 90-day run artifact, to upload to Fab by hand; they are not attached.
 #
 # Run by hand (Actions > Run workflow) for a dry run: every job but Publish, on the chosen
 # branch, with a missing CHANGELOG section reported as a warning. A dry run cannot create a tag
@@ -87,23 +89,46 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # The engines a release supports (ADR 0014). The artifact suffixes match PR CI's, and Publish
+  # checks it got a package for each engine in RELEASE_ENGINES.
   fab-package:
     needs: gate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ue-version: '5.7'
+            artifact-suffix: ''
+          - ue-version: '5.8'
+            artifact-suffix: '-UE5.8'
     uses: ./.github/workflows/open3dbroadcast-fab-package.yml
     with:
       version: ${{ needs.gate.outputs.version }}
       uplugin-artifact: Open3DBroadcast-Release-Descriptors-${{ github.sha }}
+      engine-version: ${{ matrix.ue-version }}
+      artifact-suffix: ${{ matrix.artifact-suffix }}
 
   build-and-test:
     name: UE build and tests
     needs: [ gate, fab-package ]
     # Runs when the Fab zip failed too, so one run reports both; Publish needs both to pass.
     if: ${{ !cancelled() && needs.gate.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ue-version: '5.7'
+            artifact-suffix: ''
+          - ue-version: '5.8'
+            artifact-suffix: '-UE5.8'
     uses: ./.github/workflows/open3dbroadcast-ue-build-test.yml
     with:
       fab-package-result: ${{ needs.fab-package.result }}
       version: ${{ needs.gate.outputs.version }}
       uplugin-artifact: Open3DBroadcast-Release-Descriptors-${{ github.sha }}
+      ue-version: ${{ matrix.ue-version }}
+      profile: full
+      artifact-suffix: ${{ matrix.artifact-suffix }}
 
   publish:
     name: Publish the GitHub release
@@ -116,23 +141,29 @@ jobs:
     env:
       VERSION: ${{ needs.gate.outputs.version }}
       PUBLISH_WEBRTC_ADDON: ${{ vars.O3D_PUBLISH_WEBRTC_ADDON == 'true' && 'true' || 'false' }}
+      # The engines of the build-and-test matrix, oldest first.
+      RELEASE_ENGINES: '5.7 5.8'
     steps:
-      - name: Download the tested plugin package
-        uses: actions/download-artifact@v4
-        with:
-          name: Open3DBroadcast-Win64-${{ github.sha }}
-          path: ${{ runner.temp }}/PluginPackage
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Download the WebRTC add-on
+      # A pattern download puts each artifact in a folder named after it, one per engine.
+      - name: Download the tested plugin packages
         uses: actions/download-artifact@v4
         with:
-          name: Open3DBroadcastWebRTC-Win64-${{ github.sha }}
-          path: ${{ runner.temp }}/AddOnPackage
+          pattern: Open3DBroadcast-Win64-${{ github.sha }}*
+          path: ${{ runner.temp }}/PluginPackages
 
-      - name: Download the Fab source zip
+      - name: Download the WebRTC add-ons
         uses: actions/download-artifact@v4
         with:
-          name: Open3DBroadcast-Fab-Source-${{ github.sha }}
+          pattern: Open3DBroadcastWebRTC-Win64-${{ github.sha }}*
+          path: ${{ runner.temp }}/AddOnPackages
+
+      - name: Download the Fab source zips
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Open3DBroadcast-Fab-Source-${{ github.sha }}*
           path: ${{ runner.temp }}/FabZip
 
       - name: Download the release notes
@@ -141,51 +172,23 @@ jobs:
           name: Open3DBroadcast-Release-Notes-${{ github.sha }}
           path: ${{ runner.temp }}/Notes
 
+      # One zip per engine for each plugin (ADR 0014). The script checks that every package carries
+      # the release's version and that there is exactly one per engine.
       - name: Archives and notes
-        id: archives
         run: |
-          set -euo pipefail
-          cd "$RUNNER_TEMP"
-          # The engine version comes from the package's own descriptor, and the package must carry
-          # the release's version: it is what the tests ran against.
-          read -r ue packaged < <(python3 -c 'import json,sys; d=json.load(open(sys.argv[1],encoding="utf-8-sig")); print(".".join(d["EngineVersion"].split(".")[:2]), d["VersionName"])' PluginPackage/Open3DBroadcast.uplugin)
-          if [ "$packaged" != "$VERSION" ]; then
-            echo "::error::The tested package has VersionName '$packaged', not '$VERSION'."
-            exit 1
-          fi
-          plugin_zip="Open3DBroadcast-Plugin-$VERSION-Win64.zip"
-          addon_zip="Open3DBroadcastWebRTC-Plugin-$VERSION-Win64.zip"
-          mkdir -p "Stage/UE_$ue/Plugins" "AddOnStage/UE_$ue/Plugins"
-          cp -r PluginPackage "Stage/UE_$ue/Plugins/Open3DBroadcast"
-          cp -r AddOnPackage/Open3DBroadcastWebRTC "AddOnStage/UE_$ue/Plugins/Open3DBroadcastWebRTC"
-          (cd Stage && zip -qr "$RUNNER_TEMP/$plugin_zip" .)
-          (cd AddOnStage && zip -qr "$RUNNER_TEMP/$addon_zip" .)
-          {
-            cat Notes/notes.md
-            echo
-            echo "### Installation"
-            echo
-            echo "1. Download $plugin_zip."
-            echo "2. Copy its \`UE_$ue/Plugins/Open3DBroadcast\` folder into your project's \`Plugins\` folder."
-            echo "3. Restart Unreal Editor and enable **Open3DBroadcast**."
-            echo
-            echo "Unreal Engine $ue only, Windows (Win64) only. This is the GitHub build, not the Fab package."
-            if [ "$PUBLISH_WEBRTC_ADDON" = "true" ]; then
-              echo
-              echo "WebRTC (LiveKit) is the separate add-on $addon_zip. Copy its \`UE_$ue/Plugins/Open3DBroadcastWebRTC\` folder next to Open3DBroadcast."
-            fi
-          } > release_notes.md
-          echo "plugin_zip=$RUNNER_TEMP/$plugin_zip" >> "$GITHUB_OUTPUT"
-          echo "addon_zip=$RUNNER_TEMP/$addon_zip" >> "$GITHUB_OUTPUT"
+          python3 Build/Scripts/release-version.py archives \
+            --version "$VERSION" --engines "$RELEASE_ENGINES" --sha "$GITHUB_SHA" \
+            --plugin-packages "$RUNNER_TEMP/PluginPackages" --addon-packages "$RUNNER_TEMP/AddOnPackages" \
+            --notes "$RUNNER_TEMP/Notes/notes.md" --publish-addon "$PUBLISH_WEBRTC_ADDON" \
+            --out-dir "$RUNNER_TEMP/Release"
 
       - name: Keep the release files
         uses: actions/upload-artifact@v4
         with:
           name: Open3DBroadcast-Release-${{ needs.gate.outputs.version }}
           path: |
-            ${{ steps.archives.outputs.plugin_zip }}
-            ${{ steps.archives.outputs.addon_zip }}
-            ${{ runner.temp }}/FabZip/*
+            ${{ runner.temp }}/Release/*.zip
+            ${{ runner.temp }}/FabZip/*/*
           if-no-files-found: error
           retention-days: 90
 
@@ -194,10 +197,10 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: Open3DBroadcast ${{ needs.gate.outputs.version }}
-          body_path: ${{ runner.temp }}/release_notes.md
+          body_path: ${{ runner.temp }}/Release/release_notes.md
           files: |
-            ${{ steps.archives.outputs.plugin_zip }}
-            ${{ env.PUBLISH_WEBRTC_ADDON == 'true' && steps.archives.outputs.addon_zip || '' }}
+            ${{ runner.temp }}/Release/Open3DBroadcast-Plugin-*.zip
+            ${{ env.PUBLISH_WEBRTC_ADDON == 'true' && format('{0}/Release/Open3DBroadcastWebRTC-Plugin-*.zip', runner.temp) || '' }}
           draft: false
           prerelease: false
         env:

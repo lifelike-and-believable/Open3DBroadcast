@@ -252,7 +252,7 @@ jobs:
         if: inputs.fab-package-result == 'success' && inputs.profile == 'full'
         uses: actions/download-artifact@v4
         with:
-          name: Open3DBroadcast-Fab-Source-${{ github.sha }}
+          name: Open3DBroadcast-Fab-Source-${{ github.sha }}${{ inputs.artifact-suffix }}
           path: ${{ runner.temp }}/FabZip
 
       - name: Build the Fab source zip

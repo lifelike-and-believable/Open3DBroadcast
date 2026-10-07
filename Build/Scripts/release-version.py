@@ -19,6 +19,15 @@ checks what the release needs before the UE runner is used.
          given. The edit is textual: only the two values change, so the file
          keeps its layout, encoding and line endings. Each key must appear
          exactly once.
+  archives
+         The Publish job's files (ADR 0014: one zip per engine for each
+         plugin). Reads the tested packages the release's build-and-test
+         matrix uploaded, one folder per engine, and checks that each carries
+         --version, that the add-on was built for the same engine, and that
+         there is exactly one package for each engine in --engines. Writes
+         Open3DBroadcast-Plugin-X.Y.Z-UE<engine>-Win64.zip (laid out as
+         UE_<engine>/Plugins/Open3DBroadcast), the add-on's zip the same way,
+         and release_notes.md (the CHANGELOG section and install steps).
 
 Y and Z must be 0..99 so the integer is unique and grows with the version.
 
@@ -28,10 +37,12 @@ commands against generated files and exits 0 only if every case behaves.
 """
 
 import argparse
+import json
 import os
 import re
 import sys
 import tempfile
+import zipfile
 
 TAG_PREFIX = "open3dbroadcast-v"
 NUMBER = r"(0|[1-9][0-9]*)"
@@ -150,6 +161,76 @@ def cmd_stamp(args):
     return 0
 
 
+def read_descriptor(path):
+    """Returns (engine X.Y, VersionName) from a packaged .uplugin."""
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            d = json.load(f)
+        return ".".join(str(d["EngineVersion"]).split(".")[:2]), d["VersionName"]
+    except (OSError, ValueError, KeyError) as e:
+        raise InputError(f"cannot read the engine and version from {path}: {e!r}")
+
+
+def zip_tree(source, zip_path, prefix):
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        for root, _, files in os.walk(source):
+            for name in sorted(files):
+                full = os.path.join(root, name)
+                z.write(full, prefix + "/" + os.path.relpath(full, source).replace(os.sep, "/"))
+
+
+def cmd_archives(args):
+    engines = args.engines.split()
+    prefix = f"Open3DBroadcast-Win64-{args.sha}"
+    errors, found = [], {}
+    for artifact in sorted(os.listdir(args.plugin_packages)):
+        if not artifact.startswith(prefix):
+            continue
+        suffix = artifact[len(prefix):]
+        plugin = os.path.join(args.plugin_packages, artifact)
+        addon = os.path.join(args.addon_packages, f"Open3DBroadcastWebRTC-Win64-{args.sha}{suffix}", "Open3DBroadcastWebRTC")
+        engine, version = read_descriptor(os.path.join(plugin, "Open3DBroadcast.uplugin"))
+        addon_engine, addon_version = read_descriptor(os.path.join(addon, "Open3DBroadcastWebRTC.uplugin"))
+        # The packages are what the tests ran against, so they must carry the release's version.
+        if version != args.version or addon_version != args.version:
+            errors.append(f"{artifact}: the packages have VersionName '{version}' and '{addon_version}', not '{args.version}'")
+        if addon_engine != engine:
+            errors.append(f"{artifact}: the add-on was built for UE {addon_engine}, the plugin for UE {engine}")
+        if engine not in engines:
+            errors.append(f"{artifact}: UE {engine} is not one of the released engines ({args.engines})")
+        elif engine in found:
+            errors.append(f"{artifact}: a second package for UE {engine}")
+        found[engine] = (plugin, addon)
+    errors += [f"no tested package for UE {engine}" for engine in engines if engine not in found]
+    if errors:
+        for error in errors:
+            print(f"::error::{error}")
+        return 1
+
+    os.makedirs(args.out_dir, exist_ok=True)
+    plugin_zips, addon_zips = [], []
+    for engine in engines:
+        plugin, addon = found[engine]
+        plugin_zips.append(f"Open3DBroadcast-Plugin-{args.version}-UE{engine}-Win64.zip")
+        addon_zips.append(f"Open3DBroadcastWebRTC-Plugin-{args.version}-UE{engine}-Win64.zip")
+        zip_tree(plugin, os.path.join(args.out_dir, plugin_zips[-1]), f"UE_{engine}/Plugins/Open3DBroadcast")
+        zip_tree(addon, os.path.join(args.out_dir, addon_zips[-1]), f"UE_{engine}/Plugins/Open3DBroadcastWebRTC")
+        print(f"UE {engine}: {plugin_zips[-1]}, {addon_zips[-1]}")
+
+    listed = " and ".join(f"Unreal Engine {engine}" for engine in engines)
+    notes = [read_text(args.notes).rstrip("\n"), "", "### Installation", "",
+             "1. Download the zip for your engine:"]
+    notes += [f"   - Unreal Engine {engine}: {name}" for engine, name in zip(engines, plugin_zips)]
+    notes += ["2. Copy its `UE_<engine>/Plugins/Open3DBroadcast` folder into your project's `Plugins` folder.",
+              "3. Restart Unreal Editor and enable **Open3DBroadcast**.", "",
+              f"{listed}, Windows (Win64) only. This is the GitHub build, not the Fab package."]
+    if args.publish_addon == "true":
+        notes += ["", "WebRTC (LiveKit) is the separate add-on, one zip per engine: " + ", ".join(addon_zips) + ". "
+                  "Copy its `UE_<engine>/Plugins/Open3DBroadcastWebRTC` folder next to Open3DBroadcast."]
+    write_text(os.path.join(args.out_dir, "release_notes.md"), "\n".join(notes) + "\n")
+    return 0
+
+
 def self_test():
     failures = []
 
@@ -208,6 +289,61 @@ def self_test():
         expect("stamp writes the file", cmd_stamp(parser.parse_args(["stamp", "--version", "1.2.3", path])) == 0
                and read_text(path) == stamped)
 
+    # archives: the layout the release's download steps produce, one artifact folder per engine.
+    sha = "abc123"
+
+    def package(root, artifact, plugin, engine, version):
+        folder = os.path.join(root, artifact, *([plugin] if plugin.endswith("WebRTC") else []))
+        os.makedirs(os.path.join(folder, "Binaries", "Win64"))
+        write_text(os.path.join(folder, f"{plugin}.uplugin"),
+                   json.dumps({"EngineVersion": f"{engine}.0", "VersionName": version}))
+        write_text(os.path.join(folder, "Binaries", "Win64", "a.dll"), engine)
+
+    def archives(tmp, engines="5.7 5.8", plugin_versions=None, addon_engines=None, publish_addon="false"):
+        plugins, addons = os.path.join(tmp, "Plugins"), os.path.join(tmp, "AddOns")
+        for i, (engine, suffix) in enumerate((("5.7", ""), ("5.8", "-UE5.8"))):
+            package(plugins, f"Open3DBroadcast-Win64-{sha}{suffix}", "Open3DBroadcast", engine,
+                    (plugin_versions or ["1.2.3", "1.2.3"])[i])
+            package(addons, f"Open3DBroadcastWebRTC-Win64-{sha}{suffix}", "Open3DBroadcastWebRTC",
+                    (addon_engines or ["5.7", "5.8"])[i], "1.2.3")
+        notes = os.path.join(tmp, "notes.md")
+        write_text(notes, "- thing\n")
+        out = os.path.join(tmp, "Release")
+        rc = cmd_archives(build_parser().parse_args(
+            ["archives", "--version", "1.2.3", "--engines", engines, "--sha", sha, "--plugin-packages", plugins,
+             "--addon-packages", addons, "--notes", notes, "--publish-addon", publish_addon, "--out-dir", out]))
+        return rc, out
+
+    with tempfile.TemporaryDirectory() as tmp:
+        rc, out = archives(tmp)
+        names = sorted(os.listdir(out)) if os.path.isdir(out) else []
+        expect("archives: a zip per engine for each plugin, and the notes", rc == 0 and names == [
+            "Open3DBroadcast-Plugin-1.2.3-UE5.7-Win64.zip", "Open3DBroadcast-Plugin-1.2.3-UE5.8-Win64.zip",
+            "Open3DBroadcastWebRTC-Plugin-1.2.3-UE5.7-Win64.zip", "Open3DBroadcastWebRTC-Plugin-1.2.3-UE5.8-Win64.zip",
+            "release_notes.md"])
+        if rc == 0 and len(names) == 5:
+            with zipfile.ZipFile(os.path.join(out, names[1])) as z:
+                expect("archives: the 5.8 zip holds the 5.8 package under UE_5.8/Plugins",
+                       z.read("UE_5.8/Plugins/Open3DBroadcast/Binaries/Win64/a.dll") == b"5.8")
+            with zipfile.ZipFile(os.path.join(out, names[2])) as z:
+                expect("archives: the add-on zip is laid out the same way",
+                       "UE_5.7/Plugins/Open3DBroadcastWebRTC/Open3DBroadcastWebRTC.uplugin" in z.namelist())
+            notes = read_text(os.path.join(out, "release_notes.md"))
+            expect("archives: the notes keep the section and name each engine's zip",
+                   notes.startswith("- thing") and "Open3DBroadcast-Plugin-1.2.3-UE5.7-Win64.zip" in notes
+                   and "Open3DBroadcast-Plugin-1.2.3-UE5.8-Win64.zip" in notes and "WebRTC" not in notes)
+    with tempfile.TemporaryDirectory() as tmp:
+        rc, out = archives(tmp, publish_addon="true")
+        notes = os.path.join(out, "release_notes.md")
+        expect("archives: the notes name the add-on when it is published", rc == 0 and os.path.isfile(notes)
+               and "Open3DBroadcastWebRTC-Plugin-1.2.3-UE5.8-Win64.zip" in read_text(notes))
+    for name, kwargs in (("a package with another version", {"plugin_versions": ["1.2.3", "1.2.2"]}),
+                         ("an add-on built for another engine", {"addon_engines": ["5.7", "5.7"]}),
+                         ("an engine with no package", {"engines": "5.7 5.8 5.9"}),
+                         ("a package for an engine not released", {"engines": "5.7"})):
+        with tempfile.TemporaryDirectory() as tmp:
+            expect(f"archives refuses {name}", archives(tmp, **kwargs)[0] == 1)
+
     for name in failures:
         print(f"self-test FAILED: {name}")
     print("self-test passed" if not failures else f"self-test: {len(failures)} failure(s)")
@@ -229,6 +365,15 @@ def build_parser():
     stamp = sub.add_parser("stamp", help="write the version into .uplugin files")
     stamp.add_argument("--version", required=True, help="X.Y.Z")
     stamp.add_argument("uplugin", nargs="+")
+    arch = sub.add_parser("archives", help="the release's per-engine zips and notes")
+    arch.add_argument("--version", required=True, help="X.Y.Z")
+    arch.add_argument("--engines", required=True, help="the released engines, space-separated, e.g. '5.7 5.8'")
+    arch.add_argument("--sha", required=True, help="the commit the artifact names carry")
+    arch.add_argument("--plugin-packages", required=True, help="folder of Open3DBroadcast-Win64-<sha>* artifacts")
+    arch.add_argument("--addon-packages", required=True, help="folder of Open3DBroadcastWebRTC-Win64-<sha>* artifacts")
+    arch.add_argument("--notes", required=True, help="the CHANGELOG section (check --notes-out)")
+    arch.add_argument("--publish-addon", choices=("true", "false"), default="false")
+    arch.add_argument("--out-dir", required=True)
     return parser
 
 
@@ -238,9 +383,9 @@ def main():
     if args.self_test:
         return self_test()
     if args.command is None:
-        parser.error("a command is required (check or stamp), or --self-test")
+        parser.error("a command is required (check, stamp or archives), or --self-test")
     try:
-        return cmd_check(args) if args.command == "check" else cmd_stamp(args)
+        return {"check": cmd_check, "stamp": cmd_stamp, "archives": cmd_archives}[args.command](args)
     except InputError as e:
         print(f"::error::{e}")
         return 2
