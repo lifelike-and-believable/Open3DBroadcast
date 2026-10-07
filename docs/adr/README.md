@@ -21,6 +21,7 @@ ADRs are written by the design agent (see [`docs/roadmap/plugin-hardening-and-fa
 | [0011](0011-control-channel.md) | Control channel for events and values | D11 | Accepted |
 | [0012](0012-runtime-services-and-global-state.md) | Runtime services and global state | SHR-38 | Accepted |
 | [0013](0013-livelink-timecode.md) | Timecode on LiveLink frames | RCV-8 | Accepted |
+| [0014](0014-supported-engine-versions.md) | Supported engine versions (UE 5.7 and 5.8) | engine plan | Accepted |
 
 ## Conventions
 
