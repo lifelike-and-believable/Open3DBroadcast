@@ -1693,7 +1693,7 @@ Set a variable in the console (for example `o3ds.Receiver.DebugParse 1`), or in 
 
 ## Known Limitations
 
-- **Unreal Engine 5.7 and Win64 only**, for editor and game targets. Server and Program targets are not supported.
+- **Unreal Engine 5.7 and 5.8, Win64 only**, for editor and game targets. Server and Program targets are not supported.
 - **No sample content.** No map or assets ship with the plugin; the [Quick Start](#quick-start) builds a working setup from the Third Person template.
 - **MoQ is Experimental.** It implements draft-ietf-moq-transport-07 and needs a relay that speaks draft-07. Its options and behaviour can change between releases.
 - **WebRTC is a separate add-on**, and each add-on build works only with the Open3DBroadcast release it was built for.
@@ -1863,7 +1863,7 @@ Loopback to test in one editor. TCP for one receiver on a LAN, UDP for the lowes
 Yes. Use Loopback, as in the Quick Start, or TCP or UDP with the default host `127.0.0.1`.
 
 **Does it work on Mac, Linux, consoles or dedicated servers?**
-No. Win64 and Unreal Engine 5.7 only, editor and game targets.
+No. Win64 and Unreal Engine 5.7 and 5.8 only, editor and game targets.
 
 **Does it stream audio?**
 Yes, on every transport. Tick **Enable Audio** on the sender and on the LiveLink source, and add an O3D Remote Audio Component on the receiving side. See [Audio Streaming](#audio-streaming).

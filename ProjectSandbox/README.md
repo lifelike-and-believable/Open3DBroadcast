@@ -104,7 +104,7 @@ See `.github/workflows/` for workflow configurations.
 ## Notes
 
 - **Minimal Content**: This project contains minimal content to keep repository size small
-- **Engine Version**: UE 5.7 (`EngineAssociation` in `ProjectSandbox.uproject`); other versions are not supported
+- **Engine Version**: UE 5.7 (`EngineAssociation` in `ProjectSandbox.uproject`); the plugins also support UE 5.8 (ADR 0014), built from a worktree of its own with UE 5.8's `Build.bat`
 - **Debugging CVars**:
   - `o3ds.Broadcast.DebugPose` (0/1) logs a few parent-relative bone transforms
   - `o3ds.Broadcast.DebugCurves` (0/1) logs a few curve names and values per frame
@@ -132,4 +132,4 @@ If you get build errors:
 
 ### Version Mismatch
 
-The project and the plugin support only Unreal Engine 5.7 (`"EngineAssociation": "5.7"`). Open the project with UE 5.7; other engine versions are not supported.
+The project is associated with Unreal Engine 5.7 (`"EngineAssociation": "5.7"`); the plugins support UE 5.7 and 5.8 (ADR 0014). Open the project with UE 5.7. To build or test on UE 5.8, use a separate git worktree (`Binaries/` and `Intermediate/` are per engine) and UE 5.8's `Build.bat` with `-Project=`, as `Build/README.md` describes; don't let the editor convert the project in the 5.7 worktree. Other engine versions are not supported.

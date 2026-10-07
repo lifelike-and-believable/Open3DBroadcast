@@ -48,7 +48,7 @@ Before creating a plan, the agent MUST research:
 
 #### B. API and Documentation Research
 - **Verify Unreal Engine APIs**:
-  - For ANY Unreal Engine API usage, check UE 5.7 documentation first
+  - For ANY Unreal Engine API usage, check the UE 5.7 and 5.8 sources first
   - Use web search: "Unreal Engine C++ API Reference" + class name
   - Access official Unreal Engine source (GitHub or local installation) when available
   - Note: @lifelike-and-believable/UnrealEngine repository may be accessible via GitHub MCP Server

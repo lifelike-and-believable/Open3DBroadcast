@@ -24,7 +24,7 @@ Blocking items (docs/roadmap/plugin-hardening-and-fab-readiness.md, section 7):
 - [ ] **Threads:** no callback that can run off the game thread holds a raw `this`, owner reference or UObject pointer; `Stop()` and destructors quiesce in-flight callbacks first.
 - [ ] **Game thread:** no new blocking call (connect, join, wait, sleep, synchronous HTTP, file I/O) on the game thread.
 - [ ] **Untrusted input:** lengths, counts, indices, enums and floats from the wire are range-checked, with a malformed-input test.
-- [ ] **UE APIs:** new engine API use cites its UE 5.7 source location.
+- [ ] **UE APIs:** new engine API use cites its UE 5.7 and 5.8 source locations (ADR 0014: the code compiles on both).
 - [ ] **Tests:** they fail without the change and pass with it; no placeholder assertions, no network tests in the default filter; `Build/automation-test-floors.json` raised by the tests added.
 - [ ] **Secrets:** nothing token-like is persisted, logged or committed.
 - [ ] **Wire format:** schemas are append-only, generated headers regenerated (not edited) and the core mirror re-synced; version and CHANGELOG "Schema/Protocol" entry per `docs/wire-format.md` section 8.

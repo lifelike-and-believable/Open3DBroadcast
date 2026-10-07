@@ -5,7 +5,7 @@ The WebRTC (LiveKit) transport for Open3DBroadcast, as a separate, free plugin. 
 ## Requirements and status
 
 - **Open3DBroadcast:** required, and it must be the release this add-on was built for (see "Transport API version" below).
-- **Unreal Engine:** 5.7. **Platform:** Win64 only, for editor and game targets; Server and Program targets are excluded (ADR 0001).
+- **Unreal Engine:** 5.7 and 5.8, the same engine as the Open3DBroadcast package it is built against. **Platform:** Win64 only, for editor and game targets; Server and Program targets are excluded (ADR 0001).
 - **Status:** Beta.
 - **Download:** **[DOWNLOAD LINK PLACEHOLDER: support-site URL for Open3DBroadcastWebRTC, to be added before release]**
 - **Support:** [GitHub Issues](https://github.com/lifelike-and-believable/Open3DBroadcast/issues)

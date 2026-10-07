@@ -22,7 +22,7 @@ How to install, configure, use and troubleshoot the WebRTC (LiveKit) transport f
 ## Requirements and Installation
 
 - **Open3DBroadcast:** required, installed from Fab or from a GitHub release. The add-on must be the build made for your Open3DBroadcast release (see [Version matching](#version-matching)).
-- **Unreal Engine:** 5.7. **Platform:** Win64 only, for editor and game targets. Server and Program targets are not supported.
+- **Unreal Engine:** 5.7 and 5.8; use the add-on zip for the same engine as your Open3DBroadcast. **Platform:** Win64 only, for editor and game targets. Server and Program targets are not supported.
 - **Status:** Beta, like Open3DBroadcast.
 - **Download:** **[DOWNLOAD LINK PLACEHOLDER: support-site URL for Open3DBroadcastWebRTC, to be added before release]**
 

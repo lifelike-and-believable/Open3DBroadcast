@@ -21,7 +21,7 @@ An Unreal Engine plugin that streams skeletal animation, curves, audio and contr
 
 ### From Fab
 
-1. In the Epic Games Launcher, open **Fab Library**, find Open3DBroadcast and choose **Install to Engine** for Unreal Engine 5.7.
+1. In the Epic Games Launcher, open **Fab Library**, find Open3DBroadcast and choose **Install to Engine** for Unreal Engine 5.7 or 5.8.
 2. Open your project, enable **Open3DBroadcast** in **Edit → Plugins**, and restart the editor.
 
 ### From a GitHub release or a package you built
@@ -49,7 +49,7 @@ Open these in the firewall of the machine that listens. A receiver and sender on
 
 ## Known limitations
 
-- Win64 and Unreal Engine 5.7 only; no Server targets (see "Platforms and target types" below).
+- Win64 and Unreal Engine 5.7 and 5.8 only; no Server targets (see "Platforms and target types" below).
 - No sample map or assets ship with the plugin. The USER_GUIDE quick start builds a working setup in a few steps.
 - MoQ is Experimental, and the WebRTC transport is a separate add-on.
 - Residual coding needs a transport that delivers every frame in order (Loopback, TCP, NNG pair or push/pull, WebRTC by default). The sender warns when the selected transport does not.
