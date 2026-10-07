@@ -729,7 +729,6 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 		std::vector<O3DS::Data::RotationUpdateQ8> rotationsQ8;
 		std::vector<O3DS::Data::RotationUpdateQ16> rotationsQ16;
 		std::vector<O3DS::Data::ScaleUpdate> scales;
-		std::vector<flatbuffers::Offset<O3DS::Data::CurveUpdate>> curveUpdates;
 
 		int transformId = 0;
 
@@ -2059,39 +2058,3 @@ flatbuffers::Offset<flatbuffers::Vector<const O3DS::Data::CurveUpdate *>> Subjec
 
 
 } // namespace O3DS
-
-/*
-void O3DS::Subject::update(bool useWorldMatrix)
-{
-	for (auto transform : mTransforms)
-	{
-		transform->update();
-	}
-
-	if (useWorldMatrix)
-	{
-		for (auto transform : mTransforms)
-		{
-			if (transform->mParentId >= 0)
-			{
-				transform->mParentInverseMatrix = mTransforms.mItems[transform->mParentId]->mMatrix.Inverse();
-			}
-		}
-
-		for (auto i : mTransforms)
-		{
-			O3DS::Matrix<double> transformMatrix;
-			if (i->mParentId >= 0)
-			{
-				transformMatrix = i->mMatrix * i->mParentInverseMatrix;
-			}
-			else
-			{
-				transformMatrix = i->mMatrix;
-			}
-			i->mTranslation = transformMatrix.GetTranslation();
-			i->mOrientation = transformMatrix.GetQuaternion();
-		}
-	}
-}*/
-

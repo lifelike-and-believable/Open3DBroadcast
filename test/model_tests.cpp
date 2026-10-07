@@ -139,3 +139,21 @@ O3DS_TEST(FullSyncMarksValuesSent_SoAReturnToAnEarlierValueIsResent)
 	O3DS_CHECK(count > 0);
 	O3DS_CHECK(receiver.findSubject("Actor")->mTransforms[0]->translation.value.v[0] == 1.0);
 }
+
+// CORE-25: Transpose() returned an undeclared CMatrix4x4, so any use failed to compile.
+O3DS_TEST(MatrixTransposeSwapsRowsAndColumns)
+{
+	const Matrix<double> m(
+		1, 2, 3, 4,
+		5, 6, 7, 8,
+		9, 10, 11, 12,
+		13, 14, 15, 16);
+	const Matrix<double> t = m.Transpose();
+	for (int u = 0; u < 4; u++)
+	{
+		for (int v = 0; v < 4; v++)
+		{
+			O3DS_CHECK(t.m[u][v] == m.m[v][u]);
+		}
+	}
+}

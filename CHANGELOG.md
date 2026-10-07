@@ -204,6 +204,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Core library (`src/o3ds`)
 
+- Dead and broken code (WP-Q1; CORE-25, part). `Matrix::Transpose()` returned the undeclared `CMatrix4x4`, so any use failed to compile; it now returns `Matrix` (test `core.model_tests` MatrixTransposeSwapsRowsAndColumns). Removed: an unused `curveUpdates` vector in `SubjectList::SerializeUpdate`, the commented-out `Subject::update`, and `src/o3ds/o3ds.cpp`, which was entirely commented out (`getVersion` lives in `o3ds_version.cpp`). The plugin's core copy is re-synced. No behaviour change. Still open: a guard for a null predictor in `ConcealmentEngine`, and the now unused `o3ds.h`.
+
 - **`apps/QuantEval`** (CORE-12): plays a take through the real quantized encoder and
   decoder and reports per-bone rotation error, frame-to-frame jitter (all bones and idle bones),
   stale error on stopped bones, and bytes per frame, for the full-float reference, the sender's

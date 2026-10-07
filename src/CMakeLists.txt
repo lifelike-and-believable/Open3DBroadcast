@@ -170,7 +170,6 @@ endif()
 # Compiled with warnings enabled (CORE-20, see o3ds_enable_warnings in the
 # top-level CMakeLists.txt).
 set(CORE_SOURCES
-	o3ds/o3ds.cpp
 	o3ds/getTime.cpp
 	o3ds/sequencing.cpp
 	o3ds/sender_sync.cpp
