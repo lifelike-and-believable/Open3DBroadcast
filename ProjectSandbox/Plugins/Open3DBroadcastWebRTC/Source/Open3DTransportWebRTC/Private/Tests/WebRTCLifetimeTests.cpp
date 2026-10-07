@@ -23,7 +23,7 @@
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCLifetimeStressTest, "Open3DBroadcast.Transport.WebRTC.Lifetime.InitStopWithAudio", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCLifetimeStressTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	const O3DLifetimeTest::FStressResult Result = O3DLifetimeTest::RunSenderStress<FO3DWebRTCSender>([](int32)
 	{
 		FO3DTransportConfig Config;

@@ -175,7 +175,7 @@ bool FWebRTCConnectionInitializeTest::RunTest(const FString& Parameters)
 	// Note: On Windows 64-bit this should return true or fail with clear error
 	// On other platforms it should return false with clear message
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	TestTrue(TEXT("Sender should initialize on Win64"), bResult);
 	//AddWarning(TEXT("FWebRTCConnectionInitializeTest: This test uses a hardcoded example server (wss://test-server.livekit.example.com) which is not a real LiveKit server. Full validation requires an active remote server with proper authentication token. For complete testing, configure WEBRTC_TEST_SERVER_URL and WEBRTC_TEST_TOKEN environment variables or modify this test with actual server credentials."));
 #else
@@ -204,7 +204,7 @@ bool FWebRTCConnectionDubleInitializeTest::RunTest(const FString& Parameters)
 		TEXT("test-token")
 	);
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	bool bFirstInit = Sender.Initialize(Config).IsOk();
 	TestTrue(TEXT("First initialize should succeed"), bFirstInit);
 
@@ -235,7 +235,7 @@ bool FWebRTCConnectionInvalidUrlTest::RunTest(const FString& Parameters)
 	Config.Uri = TEXT("");  // Empty URL
 	Config.Secrets.Add(WebRTCUtils::TokenOptionKey, TEXT("test-token"));
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	bool bResult = Sender.Initialize(Config).IsOk();
 	// Initialization should fail when URL is empty - if it does, test passes
 	if (bResult)
@@ -272,7 +272,7 @@ bool FWebRTCConnectionEmptyTokenTest::RunTest(const FString& Parameters)
 	Config.Uri = TEXT("wss://test.livekit.example.com");
 	Config.Secrets.Add(WebRTCUtils::TokenOptionKey, TEXT(""));  // Empty token
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	bool bResult = Sender.Initialize(Config).IsOk();
 	// Initialization should fail when token is empty - if it does, test passes
 	if (bResult)
@@ -310,7 +310,7 @@ bool FWebRTCReceiverInitializeTest::RunTest(const FString& Parameters)
 		TEXT("test-token")
 	);
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	bool bResult = Receiver.Initialize(Config).IsOk();
 	TestTrue(TEXT("Receiver should initialize on Win64"), bResult);
 
@@ -338,7 +338,7 @@ bool FWebRTCSendBeforeConnectedTest::RunTest(const FString& Parameters)
 		TEXT("test-token")
 	);
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	Sender.Initialize(Config);
 
 	// Create a dummy subject list
@@ -383,7 +383,7 @@ bool FWebRTCPayloadSizeValidationSmallTest::RunTest(const FString& Parameters)
 		TEXT("test-token")
 	);
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	Sender.Initialize(Config);
 	// Attempting to send without connection returns false (as tested above)
 	Sender.Stop();
@@ -411,7 +411,7 @@ bool FWebRTCAudioSinkCreationTest::RunTest(const FString& Parameters)
 		true  // Enable audio
 	);
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	Sender.Initialize(Config);
 
 	FO3DTransportAudioConfig AudioConfig;
@@ -445,7 +445,7 @@ bool FWebRTCAudioBitrateClampTest::RunTest(const FString& Parameters)
 	// Try to set invalid bitrate (should be clamped)
 	Config.Audio.BitrateKbps = 256;  // Too high
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	Sender.Initialize(Config);
 	// Initialization should succeed; clamping happens internally
 	TestTrue(TEXT("Initialize should succeed with out-of-range bitrate (will be clamped)"), true);
@@ -470,7 +470,7 @@ bool FWebRTCAudioSubmitWithoutConnectionTest::RunTest(const FString& Parameters)
 		true  // Enable audio
 	);
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	Sender.Initialize(Config);
 
 	FO3DTransportAudioConfig AudioConfig;
@@ -517,7 +517,7 @@ bool FWebRTCAudioClippingTest::RunTest(const FString& Parameters)
 		true  // Enable audio
 	);
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	Sender.Initialize(Config);
 
 	FO3DTransportAudioConfig AudioConfig;
@@ -566,7 +566,7 @@ bool FWebRTCStatsResetTest::RunTest(const FString& Parameters)
 		TEXT("test-token")
 	);
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	Sender.Initialize(Config);
 
 	FO3DTransportStats Stats = Sender.GetStats();
@@ -592,7 +592,7 @@ bool FWebRTCMultipleStopCallsTest::RunTest(const FString& Parameters)
 		TEXT("test-token")
 	);
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	Sender.Initialize(Config);
 
 	// Should not crash
@@ -619,7 +619,7 @@ bool FWebRTCReceiverSetConsumerTest::RunTest(const FString& Parameters)
 		TEXT("test-token")
 	);
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	Receiver.Initialize(Config);
 
 	auto TestConsumer = MakeShared<FTestFrameConsumer>();
@@ -647,7 +647,7 @@ bool FWebRTCReceiverSetAudioSinkTest::RunTest(const FString& Parameters)
 		true  // Enable audio
 	);
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	Receiver.Initialize(Config);
 
 	FO3DTransportAudioConfig AudioConfig;

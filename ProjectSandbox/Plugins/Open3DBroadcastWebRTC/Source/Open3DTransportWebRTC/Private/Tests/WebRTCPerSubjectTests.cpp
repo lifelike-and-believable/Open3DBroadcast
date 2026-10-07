@@ -144,7 +144,7 @@ bool FWebRTCPerSubjectDataChannelsTest::RunTest(const FString& Parameters)
 		TEXT("test-token")
 	);
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	TestTrue(TEXT("Initialize sender"), Sender.Initialize(Config).IsOk());
 
 	// Create multi-subject list
@@ -233,7 +233,7 @@ bool FWebRTCPerSubjectAudioTracksTest::RunTest(const FString& Parameters)
 		true  // Enable audio
 	);
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	TestTrue(TEXT("Initialize sender with audio"), Sender.Initialize(Config).IsOk());
 
 	// Create audio sink
@@ -298,7 +298,7 @@ bool FWebRTCConcurrentPerSubjectAudioTest::RunTest(const FString& Parameters)
 		true  // Enable audio
 	);
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	TestTrue(TEXT("Initialize sender with audio"), Sender.Initialize(Config).IsOk());
 
 	FO3DTransportAudioConfig AudioConfig;
@@ -374,7 +374,7 @@ bool FWebRTCAudioTrackCleanupTest::RunTest(const FString& Parameters)
 		true
 	);
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	TestTrue(TEXT("Initialize sender"), Sender.Initialize(Config).IsOk());
 
 	FO3DTransportAudioConfig AudioConfig;
@@ -472,7 +472,7 @@ bool FWebRTCConcurrentSendTest::RunTest(const FString& Parameters)
 		TEXT("test-token")
 	);
 
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	TestTrue(TEXT("Initialize sender"), Sender.Initialize(Config).IsOk());
 
 	// Create multiple threads sending concurrently

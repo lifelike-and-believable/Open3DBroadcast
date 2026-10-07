@@ -204,6 +204,8 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Core library (`src/o3ds`)
 
+- `ConcealmentEngine` with a null predictor falls back to `HoldPredictor` (freeze on loss) instead of crashing on the first frame (WP-Q1; CORE-25, maintainer decision 2026-10-07). Every caller passes a predictor today. `src/o3ds/o3ds.h`, included by nothing since `o3ds.cpp` went in #440 and duplicating `o3ds_version.h`, is removed. Test: `core.concealment_tests` ConcealmentEngine_NullPredictor_HoldsLastRealPose.
+
 - Dead and broken code (WP-Q1; CORE-25, part). `Matrix::Transpose()` returned the undeclared `CMatrix4x4`, so any use failed to compile; it now returns `Matrix` (test `core.model_tests` MatrixTransposeSwapsRowsAndColumns). Removed: an unused `curveUpdates` vector in `SubjectList::SerializeUpdate`, the commented-out `Subject::update`, and `src/o3ds/o3ds.cpp`, which was entirely commented out (`getVersion` lives in `o3ds_version.cpp`). The plugin's core copy is re-synced. No behaviour change. Still open: a guard for a null predictor in `ConcealmentEngine`, and the now unused `o3ds.h`.
 
 - **`apps/QuantEval`** (CORE-12): plays a take through the real quantized encoder and

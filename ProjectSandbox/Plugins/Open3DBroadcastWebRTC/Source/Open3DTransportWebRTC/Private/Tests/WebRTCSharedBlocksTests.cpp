@@ -488,7 +488,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCSharedBlocksReceiverQueuePolicyTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCSharedBlocksReceiverQueuePolicyTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCSharedBlocksTest;
 	// The queue's only consumer is Poll, which runs on this thread, so nothing can drain it until
 	// the test calls Poll: the deterministic stand-in for a pause hook (pitfalls 14 and 15) needs
@@ -557,7 +557,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCSharedBlocksReceiverAudioIndependentTest
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCSharedBlocksReceiverAudioIndependentTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCSharedBlocksTest;
 	constexpr int32 FrameBytes = 1024 * 1024;
 	constexpr int32 FramesToFill = static_cast<int32>(FWebRTCReceiverLink::MaxPendingFrameBytes / FrameBytes) + 2;
@@ -610,7 +610,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCSharedBlocksSenderAudioIndependentTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCSharedBlocksSenderAudioIndependentTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCSharedBlocksTest;
 	FSbtFakeLiveKit Fake;
 	{
@@ -664,7 +664,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCSharedBlocksSenderStopWhileSendingTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCSharedBlocksSenderStopWhileSendingTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCSharedBlocksTest;
 	constexpr int32 MaxCallsPerThread = 5000;
 
@@ -768,7 +768,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebRTCSharedBlocksReceiverStopWhileReceivingTe
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FWebRTCSharedBlocksReceiverStopWhileReceivingTest::RunTest(const FString& Parameters)
 {
-#if PLATFORM_WINDOWS && PLATFORM_64BITS
+#if PLATFORM_WINDOWS
 	using namespace WebRTCSharedBlocksTest;
 	constexpr int32 MaxCallsPerThread = 5000;
 

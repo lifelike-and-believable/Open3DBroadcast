@@ -168,6 +168,19 @@ O3DS_TEST(ConcealmentEngine_Starvation_PredictsExtrapolatedPose)
 	O3DS_CHECK_EQ(engine.Metrics().fallbackHoldCount, (uint64_t)0);
 }
 
+// CORE-25: a null predictor used to be dereferenced on the first frame. The engine falls back to
+// HoldPredictor (freeze on loss), the behaviour every predictor degrades to.
+O3DS_TEST(ConcealmentEngine_NullPredictor_HoldsLastRealPose)
+{
+	ConcealmentEngine engine(nullptr);
+	engine.ObserveRealFrame(MakeSample(0.0, 1, 10.0, 2.0));
+	engine.ObserveRealFrame(MakeSample(0.02, 2, 10.0, 2.0));
+
+	PoseSample out;
+	O3DS_CHECK(engine.TryConceal(0.09, out));
+	O3DS_CHECK(std::abs(out.translations[0].v[0] - 10.0 * 0.02) < 1.0e-9);
+}
+
 O3DS_TEST(ConcealmentEngine_SmallGap_DoesNotConceal)
 {
 	ConcealmentEngine engine(std::make_unique<LinearPredictor>());

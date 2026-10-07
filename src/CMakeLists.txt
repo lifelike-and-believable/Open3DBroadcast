@@ -109,7 +109,6 @@ add_custom_target(protocol DEPENDS
 	${CMAKE_CURRENT_BINARY_DIR}/_generated/o3ds_control_generated.h)
 
 set(pub_headers			
-	o3ds/o3ds.h
 	o3ds/getTime.h
 	o3ds/sequencing.h
 	o3ds/sender_sync.h

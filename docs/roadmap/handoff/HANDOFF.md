@@ -110,7 +110,7 @@ This section supersedes the "Start here" line in §0 where they disagree.
   - The test editor runs with `-NoSound`, so audible playback can't be tested automatically. Audio tests cover the component's state and the jitter buffer; listening is a desk check.
   - `close_findings.py`-style helpers must put the Status line after a finding's last top-level bullet, not inside nested bullets.
 - **Next, after the maintainer's go-ahead:**
-  1. UE 5.8: decisions 2 to 7 of the plan (support policy, one tree, the add-on, `EngineVersion` stamping, PR CI, Fab), then ADR 0014 and WP-V2/V3 (the three spike findings are small).
+  1. UE 5.8 (ADR 0014, accepted 2026-10-07; plan `docs/roadmap/engine-version-5.8-plan.md`): WP-V3 (the three spike fixes), WP-V2 (build system and descriptors), then WP-V4 (CI matrix) once UE 5.8 is installed on the runner (WP-V8a, desk).
   2. WP-Q1 leftovers that need a decision: wire `lk_client_is_ready` and `lk_set_reconnect_backoff` (TRF-6, TRF-26); a guard for a null predictor in `ConcealmentEngine` and deleting the unused `o3ds.h` (CORE-25); renaming the exported `FUnifiedHeader` fields (SHR-29).
   3. Desk checks: WP-U6 between two machines and multicast on real network gear; MoQ against a real relay (the new defaults).
   4. The names-in-use picker: not specified yet; ask the maintainer what it should do.
