@@ -156,7 +156,7 @@ The plugin provides these transports. WebRTC comes from the free Open3DBroadcast
 |-----------|----------|---------|----------------|--------------|
 | **Loopback** | Testing, sender and receiver in one process | None (in-process) | Reliable, ordered | Open3DBroadcast |
 | **TCP** | One receiver on a LAN | TCP, sender listens | Reliable, ordered | Open3DBroadcast |
-| **UDP** | Lowest latency on a LAN; broadcast to a subnet | UDP, receiver listens | Unreliable | Open3DBroadcast |
+| **UDP** | Lowest latency on a LAN; several receivers by multicast or broadcast | UDP, receiver listens | Unreliable | Open3DBroadcast |
 | **NNG** | Several receivers on a LAN (Pub/Sub) | TCP | Pub/Sub unreliable; Pair, Push/Pull reliable, ordered | Open3DBroadcast |
 | **MoQ** (Experimental) | Streaming through a relay (draft-07) | QUIC, outbound to the relay | Unreliable | Open3DBroadcast |
 | **WebRTC** | Internet, NAT traversal, LiveKit rooms | WebRTC through a LiveKit server | Reliable, ordered | Open3DBroadcastWebRTC add-on |
@@ -348,7 +348,7 @@ What to set in the source panel for each transport. The sender's side is in [Tra
 |-----------|---------------------|----------------------|
 | **Loopback** | Nothing, or the sender's **Channel Name** | Everything |
 | **TCP** | **Remote Host**: the sender's IP address. **Port**: the sender's port if it is not 17700 | **Connection Timeout (seconds)** |
-| **UDP** | **Port**: the port the sender sends to if it is not 17800. **Accept Broadcast Packets** if the sender broadcasts. **Bind Address** `0.0.0.0` when the sender is on another machine | **Bind Address** (`127.0.0.1`, this machine only) |
+| **UDP** | **Port**: the port the sender sends to if it is not 17800. **Multicast Group** if the sender sends to one. **Bind Address** `0.0.0.0` when the sender is on another machine | **Bind Address** (`127.0.0.1`, this machine only) |
 | **NNG** | **Mode**: **Subscriber**, **Pair** or **Pull**, matching the sender. **Host**: the sender's IP address when this end dials | **Role**, **Port** |
 | **MoQ** | **Relay URL**, **Track Namespace (optional)** and **Track Name (optional)**, the same as on the sender | |
 | **WebRTC** | See the Open3DBroadcastWebRTC add-on's USER_GUIDE | |
@@ -447,15 +447,22 @@ On a shared network, prefer one interface's address over `0.0.0.0`, let the fire
 2. On the sender, select **UDP**, set **Destination Host** to the receiver's IP address and **Port** to the receiver's port.
 3. Allow inbound UDP on that port on the receiver's machine.
 
+**UDP multicast setup** (one sender, any number of receivers, on networks whose switches pass multicast):
+1. Pick a group in `239.0.0.0/8` (addresses for your own site), for example `239.255.79.51`.
+2. On each receiver, select **UDP**, set **Multicast Group** to the group and **Bind Address** to `0.0.0.0`. To run several receivers on one machine, turn on **Share Port** on each of them.
+3. On the sender, select **UDP** and set **Destination Host** to the group. **Multicast TTL** (1) keeps the datagrams on the local network; raise it only to cross routers that forward multicast. **Multicast Loopback** (on) lets receivers on the sender's machine hear it.
+
+On a receiver, **Allowed Senders** (a comma-separated list of IP addresses) drops datagrams from every other address. A UDP receiver otherwise accepts frames from anyone who can reach its port, so set it whenever the receiver listens beyond `127.0.0.1`. It filters by source address, which an attacker on the same network can forge; it keeps out stray senders, not a determined one.
+
 Every address defaults to `127.0.0.1`, so a sender and a receiver on one machine connect without changes, and nothing is reachable from other machines until you set it.
 
 **Characteristics:**
 - **TCP** is reliable and ordered. The sender listens and accepts one receiver at a time. The receiver reconnects on its own when the connection drops or goes quiet for **Connection Timeout (seconds)**.
-- **UDP** is unreliable: a lost datagram is a lost frame. A message larger than the sender's **MTU** (1200 bytes, header included) is split into fragments of that size and reassembled by the receiver; losing one fragment loses the frame. Control messages are always sent whole. UDP sends to one address, or to a broadcast address when **Enable UDP Broadcast** is on at the sender and **Accept Broadcast Packets** at the receiver. There is no multicast.
+- **UDP** is unreliable: a lost datagram is a lost frame. A message larger than the sender's **MTU** (1200 bytes, header included) is split into fragments of that size and reassembled by the receiver; losing one fragment loses the frame. Control messages are always sent whole. UDP sends to one address, to a multicast group that any number of receivers join, or to a broadcast address when **Enable UDP Broadcast** is on at the sender.
 - Both carry audio and control on the same socket as the frames.
 - No encryption and no authentication. Use them on networks you trust.
 
-**Use when:** two machines on one LAN or studio network, with no NAT between them. Pick TCP for one receiver and every frame; pick UDP for the lowest latency, or broadcast to several receivers on one subnet.
+**Use when:** two machines on one LAN or studio network, with no NAT between them. Pick TCP for one receiver and every frame; pick UDP for the lowest latency, or multicast to several receivers.
 
 ### NNG Transport
 
@@ -854,7 +861,7 @@ void UMyWeatherSubsystem::Stop()
 
 `FO3DControlChange` has `Kind` (`ValueChanged`, `ValueCleared` or `Event`), `Name` (the key or event name), `Value` and `Meta`. To read the current table, use `FO3DControlBus::GetSources()`, `GetValues(SourceId)` and `FindValue(SourceId, Key, Target)`. `FO3DControlBus::SetReceiveOverride` and `GetReceiveOverride` back the runtime enable functions above.
 
-Two receiver sources can hear the same sender (UDP broadcast, one MoQ track, or a duplicated LiveLink source). The bus drops an event it has already published and ignores a value change that is not newer than the one it holds, so each change reaches listeners once.
+Two receiver sources can hear the same sender (UDP multicast or broadcast, one MoQ track, or a duplicated LiveLink source). The bus drops an event it has already published and ignores a value change that is not newer than the one it holds, so each change reaches listeners once.
 
 ### Alignment with Mocap
 
@@ -1228,11 +1235,15 @@ Not shown in the panel:
 
 | Key | Shown as | Side | Default | Description |
 |-----|----------|------|---------|-------------|
-| `host` | **Destination Host** | Sender | `127.0.0.1` | Address the datagrams are sent to: the receiver's address, or a broadcast address |
+| `host` | **Destination Host** | Sender | `127.0.0.1` | Address the datagrams are sent to: the receiver's address, a multicast group, or a broadcast address |
 | `host` | **Bind Address** | Receiver | `127.0.0.1` | Local address the receiver listens on. `127.0.0.1` accepts only this machine; `0.0.0.0` listens on every interface |
 | `port` | **Port** | Sender, receiver | 17800 | UDP port (1 to 65535) |
 | `udp.broadcast` | **Enable UDP Broadcast** | Sender | false | Allow sending to a broadcast address |
-| `udp.broadcast` | **Accept Broadcast Packets** | Receiver | false | Receive datagrams sent to a broadcast address |
+| `udp.multicastttl` | **Multicast TTL** | Sender | 1 | When **Destination Host** is a multicast group: how many routers the datagrams may cross (1 to 255). 1 keeps them on the local network |
+| `udp.multicastloop` | **Multicast Loopback** | Sender | true | When **Destination Host** is a multicast group: receivers on the sender's machine get the datagrams too |
+| `udp.multicast` | **Multicast Group** | Receiver | empty | IPv4 multicast group to join (224.0.0.0 to 239.255.255.255). Empty joins none |
+| `udp.allowsource` | **Allowed Senders** | Receiver | empty | Comma-separated IP addresses; datagrams from any other address are dropped and counted as receive errors. Empty accepts every sender |
+| `udp.reuseaddr` | **Share Port** | Receiver | false | Let other receivers on this machine bind the same port, for several multicast receivers on one machine. Off, a second receiver on the port fails to start |
 | `udp.mtu` | **MTU** | Sender | 1200 | Largest datagram sent, header included; a larger frame or audio packet is split into fragments of this size (280 to 65507) |
 | `udp.maxdatagram` | **Max Datagram Bytes** | Receiver | 64000 | Largest datagram accepted (512 to 65507); keep it at least as large as the sender's MTU and its control messages. The sender still reads the key as the ceiling for control messages, but its panel no longer shows it |
 
@@ -1688,7 +1699,7 @@ Set a variable in the console (for example `o3ds.Receiver.DebugParse 1`), or in 
 - **MoQ defaults do not match between the ends.** Left empty, the sender uses the namespace `mocap/<Subject Name>` and the track `<Subject Name>`, the receiver `mocap/default` and `primary`. Set **Track Namespace (optional)** and **Track Name (optional)** on both ends.
 - **WebRTC is a separate add-on**, and each add-on build works only with the Open3DBroadcast release it was built for.
 - **Residual coding needs a reliable, ordered transport** (Loopback, TCP, NNG Pair or Push/Pull, WebRTC by default). On UDP, NNG Pub/Sub, MoQ, or WebRTC with `webrtc.prefer_lossy`, the sender sends without it and logs a warning.
-- **UDP has no multicast.** It sends to one address, or to a broadcast address on one subnet.
+- **UDP multicast is IPv4 only**, and crosses routers only where they forward multicast. Many Wi-Fi networks and managed switches drop or rate-limit it.
 - **TCP serves one receiver at a time** per sender.
 - **No encryption or authentication on TCP, UDP and NNG.** Use them on networks you trust.
 - **One LiveLink client per process.** Subject names are shared by every receiver source in a process, PIE clients included; keep them distinct (see [Separate Receivers](#separate-receivers-runtime-contexts)).
@@ -1847,7 +1858,7 @@ Before deploying to production:
 No. Follow the [Quick Start](#quick-start); it needs only the Third Person template.
 
 **Which transport should I use?**
-Loopback to test in one editor. TCP for one receiver on a LAN, UDP for the lowest latency or a broadcast to one subnet, NNG Pub/Sub for several receivers on a LAN. Across networks, WebRTC (free add-on) or MoQ (Experimental, needs a relay). See [Transports at a Glance](#transports-at-a-glance).
+Loopback to test in one editor. TCP for one receiver on a LAN, UDP for the lowest latency or multicast to several receivers, NNG Pub/Sub for several receivers on a LAN. Across networks, WebRTC (free add-on) or MoQ (Experimental, needs a relay). See [Transports at a Glance](#transports-at-a-glance).
 
 **Can the sender and the receiver run in the same editor?**
 Yes. Use Loopback, as in the Quick Start, or TCP or UDP with the default host `127.0.0.1`.

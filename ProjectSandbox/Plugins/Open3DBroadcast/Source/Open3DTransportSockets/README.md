@@ -8,7 +8,7 @@ audio and control share one socket.
 |---|---|---|
 | Default port | 17700 | 17800 |
 | Who listens | the sender | the receiver |
-| Receivers | one at a time | any number (with broadcast) |
+| Receivers | one at a time | any number (with multicast or broadcast) |
 | Delivery | ReliableOrdered | Unreliable |
 | Encryption, authentication | none | none |
 
@@ -54,19 +54,27 @@ holds the layout and the parser.
 
 ## UDP
 
-The sender sends datagrams to one address; the receiver binds a local port. With
-**Enable UDP Broadcast** on the sender and **Accept Broadcast Packets** on the receiver, one
-sender reaches every receiver on the subnet. Multicast is not supported.
+The sender sends datagrams to one address; the receiver binds a local port. To reach several
+receivers, the sender sends to an IPv4 multicast group that each receiver joins (**Multicast
+Group**), or, with **Enable UDP Broadcast**, to a broadcast address on one subnet. Several
+receivers on one machine need **Share Port** (SO_REUSEADDR), which is off by default so that a
+second socket cannot take over a port in use silently. **Allowed Senders** drops datagrams from
+any address not listed (counted in `ReceiveErrors`); it filters by source address, which can be
+forged on the same network.
 
 ### Options
 
 | Key | Side | Shown as | Default | Notes |
 |---|---|---|---|---|
-| `host` | sender | **Destination Host** | `127.0.0.1` | Address the datagrams go to. `*` sends to `255.255.255.255` and turns broadcast on. Another broadcast address needs **Enable UDP Broadcast**. A host name is resolved on the worker thread. |
+| `host` | sender | **Destination Host** | `127.0.0.1` | Address the datagrams go to: a receiver, a multicast group or a broadcast address. `*` sends to `255.255.255.255` and turns broadcast on. Another broadcast address needs **Enable UDP Broadcast**. A host name is resolved on the worker thread. |
 | `host` | receiver | **Bind Address** | `127.0.0.1` | Local address to listen on. An IP literal, or `0.0.0.0` for every interface. Anything but loopback logs a warning at Start. |
 | `port` | both | **Port** | 17800 | 1 to 65535. |
 | `udp.broadcast` | sender | **Enable UDP Broadcast** | false | Allow sending to a broadcast address. |
-| `udp.broadcast` | receiver | **Accept Broadcast Packets** | false | Receive datagrams sent to a broadcast address. |
+| `udp.multicastttl` | sender | **Multicast TTL** | 1 | 1 to 255. Router hops for a multicast destination; 1 stays on the local network. |
+| `udp.multicastloop` | sender | **Multicast Loopback** | true | For a multicast destination, receivers on the sender's machine get the datagrams. |
+| `udp.multicast` | receiver | **Multicast Group** | empty | IPv4 group to join after binding (224.0.0.0/4; anything else fails Initialize). Left on Stop. |
+| `udp.allowsource` | receiver | **Allowed Senders** | empty | Comma-separated IP literals (a host name fails Initialize). Empty accepts every sender. |
+| `udp.reuseaddr` | receiver | **Share Port** | false | Sets SO_REUSEADDR before binding. |
 | `udp.maxdatagram` | receiver | **Max Datagram Bytes** | 64000 | 512 to 65507. A datagram larger than this plus the 24-byte fragment header is dropped, so keep it at least as large as the sender's MTU and its control messages. The sender reads the key too, as the ceiling for control messages (never split), but does not show it. |
 | `udp.mtu` | sender | **MTU** | 1200 | Largest datagram sent, header included. A larger frame or audio packet is split into fragments of this size. 280 to 65507. |
 | `udp.maxframe` | receiver | | 4194304 | Largest reassembled message, in bytes (65507 to 50 MiB). Not in the panel. |

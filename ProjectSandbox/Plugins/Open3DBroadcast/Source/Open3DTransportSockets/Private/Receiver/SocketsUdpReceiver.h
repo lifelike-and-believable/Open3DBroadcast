@@ -71,7 +71,11 @@ private:
 	int32 BindPort = 0;
 	FString StreamId;
 
-	bool bAllowBroadcast = false;
+	/** WP-U6 (TRB-21): the joined IPv4 group (empty: none), allowed sender addresses (empty: any), port sharing. */
+	FString MulticastGroup;
+	TSharedPtr<FInternetAddr> JoinedGroupAddr;
+	TSet<FString> AllowedSources;
+	bool bReuseAddr = false;
 	int32 MaxDatagramBytes = O3DSockets::DefaultUdpMaxDatagramBytes;
 	int32 MaxFrameBytes = 0;
 	// WP-R3 (TR-6): hot-path log sites, one throttle each, per instance.

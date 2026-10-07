@@ -240,16 +240,20 @@ While idle for `tcp.keepalive` ms the sender writes a keepalive frame whose payl
 - **Poll bound**: each `Poll()` reads at most 1024 datagrams or 8 MiB; the rest stays in the socket buffer for the next poll
 
 **Configuration**:
-- `host` - Sender (**Destination Host**): the receiver's address, or a broadcast address (default `127.0.0.1`). Receiver (**Bind Address**): the local address to listen on (default `0.0.0.0`); it must be an IP address, `*`, empty or `localhost`
+- `host` - Sender (**Destination Host**): the receiver's address, a multicast group, or a broadcast address (default `127.0.0.1`). Receiver (**Bind Address**): the local address to listen on (default `127.0.0.1`; `0.0.0.0` for every interface); it must be an IP address, `*`, empty or `localhost`
 - `port` (**Port**) - 1 to 65535 (default 17800)
-- `udp.broadcast` - Sender (**Enable UDP Broadcast**): allow sending to a broadcast address. Receiver (**Accept Broadcast Packets**): receive broadcast datagrams (default false)
+- `udp.broadcast` - Sender (**Enable UDP Broadcast**): allow sending to a broadcast address (default false)
+- `udp.multicastttl`, `udp.multicastloop` - Sender (**Multicast TTL**, **Multicast Loopback**): for a multicast destination, router hops (default 1) and whether this machine's receivers hear it (default true)
+- `udp.multicast` - Receiver (**Multicast Group**): IPv4 group to join (default empty)
+- `udp.allowsource` - Receiver (**Allowed Senders**): comma-separated IP addresses; datagrams from others are dropped (default empty, every sender)
+- `udp.reuseaddr` - Receiver (**Share Port**): let several receivers on one machine share the port (default false)
 - `udp.mtu` (**MTU**) - Sender only: largest datagram sent, header included; larger messages are split into fragments of this size (default 1200, 280 to 65507)
 - `udp.maxdatagram` (**Max Datagram Bytes**) - Receiver: largest datagram accepted (default 64000, 512 to 65507). The sender reads it as the ceiling for control messages but does not show it
 - `udp.maxframe` - Receiver: largest reassembled message accepted, in bytes (default 4194304, max 52428800)
 
-**Broadcast**:
-- A `host` of `*` sends to `255.255.255.255` and turns broadcast on; any other broadcast address needs `udp.broadcast` on the sender
-- One-to-many on one subnet without listing receivers. There is no multicast
+**Multicast and broadcast**:
+- A `host` that is a multicast group sends to every receiver that joined it (`udp.multicast`); IPv4 only
+- A `host` of `*` sends to `255.255.255.255` and turns broadcast on; any other broadcast address needs `udp.broadcast` on the sender. Broadcast stays on one subnet
 
 **Audio Support**:
 - Same envelope format as the other transports, fragmented when needed
@@ -258,12 +262,12 @@ While idle for `tcp.keepalive` ms the sender writes a keepalive frame whose payl
 **Characteristics**:
 - Connectionless: no handshake
 - Lowest latency of the network transports: nothing waits for a lost datagram
-- Broadcast to one subnet
+- Multicast to any number of receivers, or broadcast to one subnet
 - Unreliable and unordered: a lost datagram, or one lost fragment, is a lost frame
 
 **Use Cases**:
 - **TCP**: Reliable streaming to one receiver on a LAN
-- **UDP**: Lowest latency on a LAN; broadcast to several receivers on one subnet
+- **UDP**: Lowest latency on a LAN; multicast to several receivers
 
 ---
 
@@ -370,7 +374,7 @@ The defaults differ between the ends, so set the namespace and the track name on
 | **Stats Reporting** | Yes | Yes | Yes | Yes | Yes | Yes |
 | **Backpressure Handling** | Queue, refuses new frames | Queue, refuses new frames | Queue, refuses new frames | Queue, drops oldest frames | LiveKit refuses | Queue, refuses new frames |
 | **Reconnection** | N/A | Automatic | Automatic (receiver) | N/A | Automatic | Automatic |
-| **Multiple Receivers** | Yes, per channel | Pub/Sub: yes | No, one at a time | Yes, by broadcast | Yes, room | Yes, relay fan-out |
+| **Multiple Receivers** | Yes, per channel | Pub/Sub: yes | No, one at a time | Yes, by multicast or broadcast | Yes, room | Yes, relay fan-out |
 | **Reliable, Ordered Delivery** | Yes | Pair, Push/Pull: yes. Pub/Sub: no | Yes | No | Yes; no with `webrtc.prefer_lossy` | No |
 | **NAT Traversal** | N/A | No | No | No | Yes | Yes |
 | **Cross-Process** | No | Yes | Yes | Yes | Yes | Yes |
@@ -546,11 +550,17 @@ Options are key-value pairs. The same keys work in the editor panels (by their p
 | Sender | `UDP` | `host` = `192.168.1.20` (the receiver's address) |
 | Receiver (listens) | `UDP` | `host` = `0.0.0.0` (port 17800; the default `127.0.0.1` accepts only this machine) |
 
+### UDP (multicast to several receivers)
+| End | Transport | Options |
+|-----|-----------|---------|
+| Sender | `UDP` | `host` = `239.255.79.51` (a group for your own site) |
+| Each receiver | `UDP` | `udp.multicast` = `239.255.79.51`, `host` = `0.0.0.0`; `udp.reuseaddr` = `true` when several receivers share one machine |
+
 ### UDP (broadcast to a subnet)
 | End | Transport | Options |
 |-----|-----------|---------|
 | Sender | `UDP` | `host` = `192.168.1.255` (the subnet's broadcast address), `udp.broadcast` = `true` |
-| Each receiver | `UDP` | `udp.broadcast` = `true` |
+| Each receiver | `UDP` | `host` = `0.0.0.0` |
 
 ### NNG (Pub/Sub)
 | End | Transport | Options |
@@ -603,7 +613,7 @@ Sender->StartCapture();
 - **Loopback**: In-process only
 - **NNG**: 1:1 (Pair), 1:N (Pub/Sub), or distributed across pullers (Push/Pull)
 - **TCP**: 1:1 (the sender accepts one receiver at a time)
-- **UDP**: 1:1, or 1:N by broadcast on one subnet
+- **UDP**: 1:1, or 1:N by multicast, or by broadcast on one subnet
 - **WebRTC**: N:M (room)
 - **MoQ**: N:M (relay fan-out, addressed by track namespace and name)
 
@@ -627,7 +637,7 @@ Sender->StartCapture();
 | **Local testing** | Loopback | No network, nothing to configure |
 | **LAN, one receiver** | TCP | Reliable, simple to set up, no external dependency |
 | **Low-latency LAN** | UDP | No waiting for lost datagrams; loss is acceptable |
-| **One-to-many LAN** | NNG (Pub/Sub) or UDP (broadcast) | One stream to several receivers |
+| **One-to-many LAN** | NNG (Pub/Sub) or UDP (multicast) | One stream to several receivers |
 | **Across networks** | WebRTC (add-on) | NAT traversal through a LiveKit server |
 | **Across networks without a LiveKit server** | MoQ (Experimental) | Outbound QUIC to a draft-07 relay; no signalling service to run |
 | **Development and debugging** | Loopback or TCP | Loopback in one process, TCP between two |
@@ -651,7 +661,7 @@ All transports implement the same interfaces, so a sender component or a LiveLin
 
 - **Loopback** for testing in one process
 - **TCP** for reliable streaming to one receiver on a LAN
-- **UDP** for the lowest latency on a LAN, and broadcast to a subnet
+- **UDP** for the lowest latency on a LAN, and multicast to several receivers
 - **NNG** for several receivers (Pub/Sub) or a reliable link opened from either end
 - **WebRTC** (add-on) for streaming across networks through a LiveKit server
 - **MoQ** (Experimental) for streaming across networks through a relay, without a signalling service

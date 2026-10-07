@@ -35,6 +35,18 @@ namespace O3DSockets
 	static constexpr TCHAR DefaultRemoteHost[] = TEXT("127.0.0.1");
 	/** Receiver: largest reassembled UDP message accepted, in bytes. */
 	static constexpr TCHAR MaxFrameOptionKey[] = TEXT("udp.maxframe");
+	/** Receiver: IPv4 multicast group to join; empty joins none (WP-U6, TRB-21). */
+	static constexpr TCHAR MulticastGroupOptionKey[] = TEXT("udp.multicast");
+	/** Receiver: comma-separated IP literals; datagrams from any other address are dropped. Empty accepts every sender. */
+	static constexpr TCHAR AllowSourceOptionKey[] = TEXT("udp.allowsource");
+	/** Receiver: share the port with other receivers on this machine (SO_REUSEADDR), for several multicast receivers. */
+	static constexpr TCHAR ReuseAddrOptionKey[] = TEXT("udp.reuseaddr");
+	/** Sender, multicast destinations only: router hops (1 stays on the local network) and whether this machine hears its own datagrams. */
+	static constexpr TCHAR MulticastTtlOptionKey[] = TEXT("udp.multicastttl");
+	static constexpr TCHAR MulticastLoopOptionKey[] = TEXT("udp.multicastloop");
+
+	/** True for an IPv4 literal in 224.0.0.0/4. */
+	bool IsIPv4Multicast(const FString& Host);
 
 	/** Trim and normalise a hostname for logging / URI generation. */
 	FString NormaliseHostname(const FString& Host);

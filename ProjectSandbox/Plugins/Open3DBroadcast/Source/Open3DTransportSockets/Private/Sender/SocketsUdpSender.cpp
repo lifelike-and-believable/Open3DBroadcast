@@ -117,6 +117,8 @@ FO3DTransportResult FO3DSocketsUdpSender::Initialize(const FO3DTransportConfig& 
 	bool bBroadcastHost = false;
 	Endpoint = O3DSocketsUdpSenderPrivate::ApplyHostRules(Parsed, bBroadcastHost);
 	bAllowBroadcast = bBroadcastHost || O3DTransportOptions::GetBool(Options, O3DSockets::BroadcastOptionKey, false);
+	MulticastTtl = O3DTransportOptions::GetInt(Options, O3DSockets::MulticastTtlOptionKey, 1, 1, 255);
+	bMulticastLoopback = O3DTransportOptions::GetBool(Options, O3DSockets::MulticastLoopOptionKey, true);
 	MaxDatagramBytes = O3DTransportOptions::GetInt(Options, O3DSockets::MaxDatagramOptionKey, O3DSockets::DefaultUdpMaxDatagramBytes, 512, 65507);
 	MtuBytes = FMath::Clamp(O3DTransportOptions::GetInt(Options, O3DSockets::MtuOptionKey, O3DSockets::DefaultUdpMtuBytes), O3DSockets::MinUdpMtuBytes, FMath::Max(MaxDatagramBytes, O3DSockets::MinUdpMtuBytes));
 	FragmentScratch.clear();
@@ -330,6 +332,11 @@ FO3DTransportResult FO3DSocketsUdpSender::OpenSocket(const TSharedPtr<FInternetA
 	if (bAllowBroadcast)
 	{
 		Socket->SetBroadcast(true);
+	}
+	if (O3DSockets::IsIPv4Multicast(Endpoint.Host))
+	{
+		Socket->SetMulticastTtl(static_cast<uint8>(MulticastTtl));
+		Socket->SetMulticastLoopback(bMulticastLoopback);
 	}
 
 	int32 RequestedSize = 2 * 1024 * 1024;
