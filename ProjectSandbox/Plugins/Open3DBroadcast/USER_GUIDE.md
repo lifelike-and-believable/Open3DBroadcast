@@ -946,6 +946,7 @@ LiveLink is Unreal's system for receiving real-time animation data from external
 **Automatic Subject Creation:**
 - Subjects appear automatically when sender starts
 - Subject name matches sender's `Subject Name`
+- A new subject gets the project's LiveLink defaults for the Animation role (**Project Settings > Live Link > Default Role Settings**), as subjects LiveLink creates itself do: by default the Animation interpolation processor, so LiveLink blends between frames instead of showing the closest one. Change it per subject in the LiveLink window
 - A subject that stops receiving frames is cleared after the source's **Inactive Subject Timeout Seconds** (default 5 s, 0 = never): LiveLink shows it with no data, but keeps the subject and its settings (preprocessors, interpolation, translators), and its next frame makes it valid again
 
 **Subject Data Includes:**
