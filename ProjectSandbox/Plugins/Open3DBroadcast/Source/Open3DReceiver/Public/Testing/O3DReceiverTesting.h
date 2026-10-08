@@ -262,6 +262,7 @@ private:
 };
 
 class FO3DLiveLinkPublisher;
+class ULiveLinkSubjectSettings;
 
 /**
  * Owns one FO3DLiveLinkPublisher (a private class of this module, WP-A3) with recording test hooks
@@ -305,6 +306,8 @@ public:
 	void NoteSlowFramePush(FName Subject, double PushMs, double NowSeconds);
 	int32 GetSlowPushesNotLogged() const;
 	void Reset();
+	/** The settings the publisher creates a subject with (FO3DLiveLinkPublisher::MakeSubjectSettings). */
+	static ULiveLinkSubjectSettings* MakeSubjectSettings(FName Subject);
 
 	TArray<FStaticPush> Statics;
 	TArray<FFramePush> Frames;

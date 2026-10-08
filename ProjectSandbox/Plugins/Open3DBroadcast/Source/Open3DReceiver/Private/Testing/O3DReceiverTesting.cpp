@@ -102,6 +102,11 @@ FO3DLiveLinkPublisherProbe::FO3DLiveLinkPublisherProbe(bool bBindHooks)
 
 FO3DLiveLinkPublisherProbe::~FO3DLiveLinkPublisherProbe() = default;
 
+ULiveLinkSubjectSettings* FO3DLiveLinkPublisherProbe::MakeSubjectSettings(FName Subject)
+{
+	return FO3DLiveLinkPublisher::MakeSubjectSettings(FLiveLinkSubjectKey(FGuid::NewGuid(), Subject));
+}
+
 bool FO3DLiveLinkPublisherProbe::CanPublish() const
 {
 	return Publisher->CanPublish();

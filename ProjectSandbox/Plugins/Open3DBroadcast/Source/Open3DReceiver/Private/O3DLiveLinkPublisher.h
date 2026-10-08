@@ -10,6 +10,7 @@
 #include "Templates/Function.h"
 
 class ILiveLinkClient;
+class ULiveLinkSubjectSettings;
 struct FO3DDecodedSubject;
 
 namespace O3DS
@@ -25,6 +26,9 @@ namespace O3DS
 class FO3DLiveLinkPublisher
 {
 public:
+	/** The settings an animation subject is created with, built as LiveLink builds them for subjects it creates itself. */
+	static ULiveLinkSubjectSettings* MakeSubjectSettings(const FLiveLinkSubjectKey& SubjectKey);
+
 	/** Test seam (WP-S4): when both are bound, pushes go here instead of the client. */
 	using FStaticPushHook = TFunction<void(const FLiveLinkSubjectKey&, const TArray<FName>& BoneNames, const TArray<int32>& BoneParents, const TArray<FName>& CurveNames, bool bFirstPushThisSession)>;
 	using FFramePushHook = TFunction<void(const FLiveLinkSubjectKey&, const TArray<FTransform>& BoneTransforms, const TArray<float>& CurveValues, double WorldTime,

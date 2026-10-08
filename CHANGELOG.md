@@ -336,6 +336,14 @@ directions, and the migration steps ([docs/wire-format.md](docs/wire-format.md) 
 
 ### Fixed
 
+- Receiver: LiveLink subjects interpolate. The receiver created its subjects with settings that
+  named only the Animation role, and `FLiveLinkClient::CreateSubject` keeps the settings it is given,
+  so the subjects had no interpolation processor and LiveLink showed the closest frame: motion
+  stepped at the sender's frame rate. The settings are now built as LiveLink builds them for
+  subjects it creates itself: the settings class, interpolation processor and preprocessors from
+  the project's default role settings, then the project's fallback interpolation processor, then
+  LiveLink's Animation interpolation. Subjects that already exist (from a preset, or edited by the
+  user) keep their settings. Found by the VMCLiveLink plugin, which had the same problem.
 - Flag-combination builds compile again (nightly of 2026-10-07, issue #443): the conformance test
   fixtures for TCP, UDP and NNG are compiled only with their transport, like the MoQ fixture; the
   TCP and NNG fixtures called `O3DSocketsTesting`/`O3DNngTesting`, which do not exist when

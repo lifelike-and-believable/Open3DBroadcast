@@ -9,8 +9,12 @@
 
 #include "HAL/PlatformTime.h"
 #include "ILiveLinkClient.h"
+#include "InterpolationProcessor/LiveLinkAnimationFrameInterpolateProcessor.h"
+#include "LiveLinkFramePreProcessor.h"
 #include "LiveLinkPresetTypes.h"
+#include "LiveLinkSettings.h"
 #include "LiveLinkSubjectSettings.h"
+#include "UObject/Package.h"
 #include "Misc/QualifiedFrameTime.h"
 #include "Roles/LiveLinkAnimationRole.h"
 #include "Roles/LiveLinkAnimationTypes.h"
@@ -21,6 +25,46 @@ namespace O3DLiveLinkPublisherPrivate
 	constexpr double SlowPushWarningMs = 5.0;
 	/** Slow frame pushes are logged at most this often: a sustained stall would flood the log (RCV-26). */
 	constexpr double SlowPushWarningIntervalSeconds = 5.0;
+}
+
+ULiveLinkSubjectSettings* FO3DLiveLinkPublisher::MakeSubjectSettings(const FLiveLinkSubjectKey& SubjectKey)
+{
+	// FLiveLinkClient::CreateSubject keeps the settings it is given; only subjects LiveLink creates
+	// itself get the role's project defaults (PushSubjectStaticData_Internal). Without an
+	// interpolation processor LiveLink evaluates the closest frame, so motion steps at the sender's
+	// frame rate. Build the settings the way LiveLink does. Processors are outered to the settings
+	// so that CreateSubject's DuplicateObject copies them.
+	const TSubclassOf<ULiveLinkRole> Role = ULiveLinkAnimationRole::StaticClass();
+	const ULiveLinkSettings* LiveLinkSettings = GetDefault<ULiveLinkSettings>();
+	const FLiveLinkRoleProjectSetting Defaults = LiveLinkSettings->GetDefaultSettingForRole(Role);
+
+	UClass* SettingsClass = Defaults.SettingClass.Get();
+	ULiveLinkSubjectSettings* SubjectSettings = NewObject<ULiveLinkSubjectSettings>(GetTransientPackage(), SettingsClass ? SettingsClass : ULiveLinkSubjectSettings::StaticClass());
+	SubjectSettings->Initialize(SubjectKey);
+	// The role on the settings object keeps ValidateProcessors() from clearing preprocessors, interpolation and translators.
+	SubjectSettings->Role = Role;
+
+	// The role's processor, else the project's fallback (both as LiveLink picks them), else the
+	// engine's animation interpolation, for projects whose role entry does not resolve.
+	const TSubclassOf<ULiveLinkFrameInterpolationProcessor> Candidates[] = {
+		Defaults.FrameInterpolationProcessor, LiveLinkSettings->FrameInterpolationProcessor, ULiveLinkAnimationFrameInterpolationProcessor::StaticClass() };
+	for (const TSubclassOf<ULiveLinkFrameInterpolationProcessor>& Candidate : Candidates)
+	{
+		if (Candidate && Role->IsChildOf(Candidate->GetDefaultObject<ULiveLinkFrameInterpolationProcessor>()->GetRole()))
+		{
+			SubjectSettings->InterpolationProcessor = NewObject<ULiveLinkFrameInterpolationProcessor>(SubjectSettings, Candidate);
+			break;
+		}
+	}
+
+	for (const TSubclassOf<ULiveLinkFramePreProcessor>& PreProcessor : Defaults.FramePreProcessors)
+	{
+		if (PreProcessor && Role->IsChildOf(PreProcessor->GetDefaultObject<ULiveLinkFramePreProcessor>()->GetRole()))
+		{
+			SubjectSettings->PreProcessors.Add(NewObject<ULiveLinkFramePreProcessor>(SubjectSettings, PreProcessor));
+		}
+	}
+	return SubjectSettings;
 }
 
 void FO3DLiveLinkPublisher::SetClient(ILiveLinkClient* InClient, const FGuid& InSourceGuid)
@@ -189,19 +233,10 @@ void FO3DLiveLinkPublisher::PushStaticData(const FLiveLinkSubjectKey& SubjectKey
 	// translators). Later hierarchy or curve changes re-push static data only.
 	if (bFirstPushThisSession && Client->GetSubjectSettings(SubjectKey) == nullptr)
 	{
-		// A settings object allows subject-level configuration of preprocessors, interpolation and translators.
-		ULiveLinkSubjectSettings* SubjectSettings = NewObject<ULiveLinkSubjectSettings>();
-		if (SubjectSettings)
-		{
-			SubjectSettings->Initialize(SubjectKey);
-			// The role on the settings object keeps ValidateProcessors() from clearing preprocessors, interpolation and translators.
-			SubjectSettings->Role = ULiveLinkAnimationRole::StaticClass();
-		}
-
 		FLiveLinkSubjectPreset Preset;
 		Preset.Key = SubjectKey;
 		Preset.Role = ULiveLinkAnimationRole::StaticClass();
-		Preset.Settings = SubjectSettings;
+		Preset.Settings = MakeSubjectSettings(SubjectKey);
 		Preset.bEnabled = true;
 		Client->CreateSubject(Preset);
 	}

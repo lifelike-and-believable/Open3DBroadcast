@@ -10,8 +10,12 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "HAL/PlatformTime.h"
+#include "LiveLinkFrameInterpolationProcessor.h"
+#include "LiveLinkSubjectSettings.h"
 #include "Misc/AutomationTest.h"
+#include "Roles/LiveLinkAnimationRole.h"
 #include "Testing/O3DReceiverTesting.h"
+#include "UObject/Package.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLiveLinkPublisherStaticTest, "Open3DBroadcast.Receiver.LiveLinkPublisher.StaticDataOncePerSessionAndOnChange", O3DB_TEST_FLAGS)
 bool FO3DLiveLinkPublisherStaticTest::RunTest(const FString& Parameters)
@@ -123,6 +127,35 @@ bool FO3DLiveLinkPublisherSlowPushTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Those within 5 s are counted, not logged"), Probe.GetSlowPushesNotLogged(), 2);
 	Probe.NoteSlowFramePush(Subject, 7.0, 105.0);
 	TestEqual(TEXT("After 5 s the next is logged, with the count"), Probe.GetSlowPushesNotLogged(), 0);
+	return true;
+}
+
+// A subject created through CreateSubject keeps the settings it is given: FLiveLinkClient::CreateSubject
+// duplicates them (UE 5.7 LiveLinkClient.cpp:1336), and only subjects LiveLink creates itself get the
+// role's defaults (PushSubjectStaticData_Internal). Without an interpolation processor FLiveLinkSubject
+// evaluates the closest frame (LiveLinkSubject.cpp:767-773), so motion steps at the sender's rate.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FO3DLiveLinkPublisherSubjectSettingsTest, "Open3DBroadcast.Receiver.LiveLinkPublisher.SubjectSettingsInterpolate", O3DB_TEST_FLAGS)
+bool FO3DLiveLinkPublisherSubjectSettingsTest::RunTest(const FString& Parameters)
+{
+	ULiveLinkSubjectSettings* Settings = FO3DLiveLinkPublisherProbe::MakeSubjectSettings(FName(TEXT("Hero")));
+	if (!TestNotNull(TEXT("Settings are made"), Settings))
+	{
+		return false;
+	}
+	TestTrue(TEXT("The role is Animation"), Settings->Role == ULiveLinkAnimationRole::StaticClass());
+
+	ULiveLinkFrameInterpolationProcessor* Interpolation = Settings->InterpolationProcessor;
+	if (!TestNotNull(TEXT("An interpolation processor is set"), Interpolation))
+	{
+		return false;
+	}
+	TestTrue(TEXT("It handles the Animation role"), ULiveLinkAnimationRole::StaticClass()->IsChildOf(Interpolation->GetRole()));
+	TestTrue(TEXT("It is outered to the settings, so duplicating the settings copies it"), Interpolation->GetOuter() == Settings);
+
+	// What CreateSubject does with the preset's settings.
+	ULiveLinkSubjectSettings* Copy = DuplicateObject<ULiveLinkSubjectSettings>(Settings, GetTransientPackage());
+	TestTrue(TEXT("The copy has its own interpolation processor"),
+		Copy && Copy->InterpolationProcessor && Copy->InterpolationProcessor != Interpolation && Copy->InterpolationProcessor->GetOuter() == Copy);
 	return true;
 }
 
