@@ -163,4 +163,4 @@ MIT. See [LICENSE](LICENSE). Third-party licences for the plugin are in [THIRD_P
 
 ## Credits
 
-Created by Alastair Macleod (<http://mocap.ca/>).
+Created by Athomas Goldberg based on Open3DStream project by Alastair Macleod (<http://mocap.ca/>).
