@@ -12,6 +12,7 @@ reads it directly). Rules for Claude Code are in `.claude/rules/` (rules-for-rob
 - Plugins: `ProjectSandbox/Plugins/Open3DBroadcast/`, `ProjectSandbox/Plugins/Open3DBroadcastWebRTC/`. Host project: `ProjectSandbox/ProjectSandbox.uproject`.
 - Core library: `src/o3ds/`, schema `src/o3ds.fbs` (data) and `src/o3ds_control.fbs` (control channel), tests in `test/`.
 - Decisions: `docs/adr/`. Plan: `docs/roadmap/plugin-hardening-and-fab-readiness.md`. Current state and the next steps: `docs/roadmap/handoff/HANDOFF.md` (read §0a first). Wire format: `docs/wire-format.md`. Build and CI: `Build/README.md`.
+- Across components (Open3DBroadcast, VMCLiveLink, Open3DPuppet): the contracts between them (Live Link roles, subject, bone and curve names), the engine versions that work together, cross-repository decisions and show milestones are in [`lifelike-and-believable/live-virtual-performance`](https://github.com/lifelike-and-believable/live-virtual-performance) (private). A change to a contract another component relies on is written there first. Issues use the shared labels `desk`, `needs-decision`, `interface` and `show:<name>` (its `docs/process.md`).
 
 ## Commands
 
